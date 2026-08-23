@@ -452,6 +452,261 @@ RSpec.describe 'cascade invalidation' do
     expect(got).to eq([50, 200])
   end
 
+  # A dynamic rule's subject need not carry a class / id / tag for its effect to be SCOPED: the
+  # query is the whole selector with the state taken out (`.dd>*`), so the focus flip dirties the
+  # elements it can reach and the layout epoch — every box memo on the page — stays put. Redmine's
+  # `.drdn-items>*:focus` was the one rule that used to push the entire page into the epoch
+  # fallback, relaying out ~400 elements per focus change.
+  it 'scopes a keyless universal subject instead of moving the layout epoch' do
+    css = '.dd>*:focus { border: 10px solid red }'
+    s = simulated_session(gated_page('<div class="dd"><input id="i"></div><p id="after">after</p>', css: css))
+    s.visit '/'
+    got = s.evaluate_script(<<~JS)
+      (() => {
+        const after = document.getElementById('after');
+        const before = after.getBoundingClientRect().y;
+        const epoch = globalThis.__csimLayoutEpoch(), marks = globalThis.__csimSubtreeMarks();
+        document.getElementById('i').focus();
+        const moved = after.getBoundingClientRect().y > before;
+        // One subject dirtied — the hinted sweep, not a fallback over every dynamic rule.
+        return [moved, globalThis.__csimLayoutEpoch() === epoch, globalThis.__csimSubtreeMarks() - marks];
+      })()
+    JS
+    expect(got).to eq([true, true, 1])
+  end
+
+  # …and an attribute-only subject the same way (Discourse's `[contenteditable=true]:focus-within`).
+  it 'scopes an attribute-only subject instead of moving the layout epoch' do
+    css = '[contenteditable=true]:focus-within { padding: 30px }'
+    body = '<div contenteditable="true"><span id="in" tabindex="0">x</span></div><p id="after">after</p>'
+    s = simulated_session(gated_page(body, css: css))
+    s.visit '/'
+    got = s.evaluate_script(<<~JS)
+      (() => {
+        const after = document.getElementById('after');
+        const before = after.getBoundingClientRect().y;
+        const epoch = globalThis.__csimLayoutEpoch();
+        document.getElementById('in').focus();
+        return [after.getBoundingClientRect().y > before, globalThis.__csimLayoutEpoch() === epoch];
+      })()
+    JS
+    expect(got).to eq([true, true])
+  end
+
+  # A dynamic pseudo INSIDE a logical pseudo: the scoped query drops the whole qualifier (a
+  # superset), so the flip still reaches the box it restyles.
+  it 'relays out for a dynamic pseudo nested in :not()' do
+    css = '#t { width: 200px } #t:not(:focus) { width: 50px }'
+    s = simulated_session(gated_page('<div id="t" tabindex="0">x</div>', css: css))
+    s.visit '/'
+    got = s.evaluate_script(<<~JS)
+      (() => {
+        const t = document.getElementById('t');
+        const before = t.getBoundingClientRect().width;
+        t.focus();
+        return [before, t.getBoundingClientRect().width];
+      })()
+    JS
+    expect(got).to eq([50, 200])
+  end
+
+  # A rule that writes only a custom property is scoped to its SUBJECT once an inline var()
+  # consumer exists (a custom property can only reach the subject's subtree), not folded into
+  # the epoch — the old escape valve relaid out the whole page per flip (Discourse: seven
+  # `:hover { --text-color }` rules plus one inline `--composer-height: var(…)`).
+  it 'scopes a custom-property-only rule to its subject, off the layout epoch' do
+    css = '#t:focus { --w: 200px }'
+    s = simulated_session(gated_page('<div id="t" tabindex="0" style="width: var(--w, 50px)">x</div>', css: css))
+    s.visit '/'
+    got = s.evaluate_script(<<~JS)
+      (() => {
+        const t = document.getElementById('t');
+        const before = t.getBoundingClientRect().width;
+        const epoch = globalThis.__csimLayoutEpoch();
+        t.focus();
+        return [before, t.getBoundingClientRect().width, globalThis.__csimLayoutEpoch() === epoch];
+      })()
+    JS
+    expect(got).to eq([50, 200, true])
+  end
+
+  # …and such a rule whose subject is ABSENT arms nothing: no epoch move and no dirtying sweep.
+  it 'does not arm for a custom-property-only rule whose subject is absent' do
+    css = '.absent:focus { --w: 200px }'
+    s = simulated_session(gated_page('<div id="t" tabindex="0" style="width: var(--w, 50px)">x</div>', css: css))
+    s.visit '/'
+    got = s.evaluate_script(<<~JS)
+      (() => {
+        const t = document.getElementById('t');
+        t.getBoundingClientRect();
+        const epoch = globalThis.__csimLayoutEpoch(), marks = globalThis.__csimSubtreeMarks();
+        t.focus();
+        t.getBoundingClientRect();
+        return [globalThis.__csimLayoutEpoch() === epoch, globalThis.__csimSubtreeMarks() === marks];
+      })()
+    JS
+    expect(got).to eq([true, true])
+  end
+
+  # The hinted sweep's two non-subject shapes: the state sits on an ANCESTOR compound (hover is
+  # ancestor-matching, so the hovered element's chain is walked up to the one matching `.a`) and
+  # on a preceding SIBLING (the subjects are queried under the parent). Both must still move the
+  # box — and without moving the layout epoch.
+  it 'reaches a subject below the compound that carries the state (hover on an ancestor)' do
+    css = '.b { height: 20px } .a:hover .b { height: 200px }'
+    s = simulated_session(gated_page('<div class="a"><div class="b" id="b">z</div></div><p id="after">after</p>', css: css))
+    s.visit '/'
+    before = s.evaluate_script("[document.getElementById('b').getBoundingClientRect().height, globalThis.__csimLayoutEpoch()]")
+    s.find('#b').hover
+    after = s.evaluate_script("[document.getElementById('b').getBoundingClientRect().height, globalThis.__csimLayoutEpoch()]")
+    expect([before[0], after[0]]).to eq([20, 200])
+    expect(after[1]).to eq(before[1])
+  end
+
+  it 'reaches a subject that follows the state-carrying compound as a sibling' do
+    css = '#b { width: 20px } #a:focus ~ #b { width: 200px }'
+    s = simulated_session(gated_page('<div><div id="a" tabindex="0">x</div><div id="b">y</div></div>', css: css))
+    s.visit '/'
+    got = s.evaluate_script(<<~JS)
+      (() => {
+        const b = document.getElementById('b');
+        const before = b.getBoundingClientRect().width;
+        const epoch = globalThis.__csimLayoutEpoch();
+        document.getElementById('a').focus();
+        return [before, b.getBoundingClientRect().width, globalThis.__csimLayoutEpoch() === epoch];
+      })()
+    JS
+    expect(got).to eq([20, 200, true])
+  end
+
+  # State read RELATIONALLY — inside `:has()` — flips on an element the prefix cannot be asked
+  # of (`.a:has(.b:focus)`: focus lands on `.b`, the compound is `.a`); the hinted sweep must
+  # fall back to the whole selector for that kind.
+  it 'reaches a subject whose state sits inside :has()' do
+    css = '.c { height: 20px } .a:has(.b:focus) .c { height: 200px }'
+    body = '<div class="a"><div class="b" tabindex="0">x</div><div class="c" id="c">y</div></div>'
+    s = simulated_session(gated_page(body, css: css))
+    s.visit '/'
+    got = s.evaluate_script(<<~JS)
+      (() => {
+        const c = document.getElementById('c');
+        const before = c.getBoundingClientRect().height;
+        document.querySelector('.b').focus();
+        return [before, c.getBoundingClientRect().height];
+      })()
+    JS
+    expect(got).to eq([20, 200])
+  end
+
+  # Tailwind v4 compiles `group-hover:` into `:is(:where(.group):hover *)`: the state sits on an
+  # ANCESTOR named inside the logical pseudo, so the flipping element cannot be asked to match a
+  # prefix — the kind is relational, and the hinted sweep queries the whole selector for it.
+  it 'reaches a subject whose state sits on an ancestor inside :is()' do
+    css = '.x { height: 20px } .x:is(:where(.group):hover *) { height: 200px }'
+    s = simulated_session(gated_page('<div class="group"><span>title</span><div class="x" id="x">z</div></div>', css: css))
+    s.visit '/'
+    before = s.evaluate_script("document.getElementById('x').getBoundingClientRect().height")
+    s.find('.group span').hover
+    after = s.evaluate_script("document.getElementById('x').getBoundingClientRect().height")
+    expect([before, after]).to eq([20, 200])
+  end
+
+  # The focused element leaving the tree is a flip the lazy diff cannot place (its ancestors and
+  # siblings are gone from under it by the time it looks), so removal announces it with the
+  # parent it left as the hint's root — a `:focus-within` sibling rule must un-apply.
+  it 'un-applies a :focus-within rule when the focused element is removed' do
+    css = '.s { height: 20px } .panel:focus-within .s { height: 200px }'
+    s = simulated_session(gated_page('<div class="panel"><input id="i"><div class="s" id="s">y</div></div>', css: css))
+    s.visit '/'
+    got = s.evaluate_script(<<~JS)
+      (() => {
+        const sEl = document.getElementById('s');
+        document.getElementById('i').focus();
+        const focused = sEl.getBoundingClientRect().height;
+        document.getElementById('i').remove();
+        return [focused, sEl.getBoundingClientRect().height];
+      })()
+    JS
+    expect(got).to eq([200, 20])
+  end
+
+  # The hinted sweep touches only the rules that read the kind that flipped: with a hover rule and
+  # a focus rule both armed, a focus flip dirties exactly the focus rule's subject — one subtree
+  # mark — where a full sweep over every dynamic rule would mark both.
+  it 'sweeps only the rules that read the kind that flipped' do
+    css = '.h:hover { padding: 10px } .f:focus { padding: 10px }'
+    body = '<div class="h">hover me</div><div class="f" id="f" tabindex="0">focus me</div>'
+    s = simulated_session(gated_page(body, css: css))
+    s.visit '/'
+    got = s.evaluate_script(<<~JS)
+      (() => {
+        const f = document.getElementById('f');
+        f.getBoundingClientRect();
+        const marks = globalThis.__csimSubtreeMarks();
+        f.focus();
+        f.getBoundingClientRect();
+        return globalThis.__csimSubtreeMarks() - marks;
+      })()
+    JS
+    expect(got).to eq(1)
+  end
+
+  # Checkedness feeds validity too: a required checkbox becomes `:valid` when checked, so a
+  # `:invalid` layout rule on it (and on its form) must un-apply on the checkedness hint.
+  it 'relays out an :invalid rule when a required checkbox is checked' do
+    css = '#c { height: 20px } #c:invalid { height: 60px } form:invalid { padding-bottom: 100px }'
+    body = '<form id="fm"><input type="checkbox" id="c" required></form><p id="after">after</p>'
+    s = simulated_session(gated_page(body, css: css))
+    s.visit '/'
+    got = s.evaluate_script(<<~JS)
+      (() => {
+        const c = document.getElementById('c'), after = document.getElementById('after');
+        const before = [c.getBoundingClientRect().height, after.getBoundingClientRect().y];
+        c.checked = true;
+        return [before, [c.getBoundingClientRect().height, after.getBoundingClientRect().y]];
+      })()
+    JS
+    expect(got[0][0]).to eq(60)
+    expect(got[1][0]).to eq(20)
+    expect(got[1][1]).to be < got[0][1]
+  end
+
+  # …and so does an option's selectedness for a required `<select>`.
+  it 'relays out a select:invalid rule when a required select gains a value' do
+    css = '#sel { height: 20px } #sel:invalid { height: 60px }'
+    body = '<form><select id="sel" required><option value="">pick</option><option id="o" value="a">a</option></select></form>'
+    s = simulated_session(gated_page(body, css: css))
+    s.visit '/'
+    got = s.evaluate_script(<<~JS)
+      (() => {
+        const sel = document.getElementById('sel');
+        const before = sel.getBoundingClientRect().height;
+        document.getElementById('o').selected = true;
+        return [before, sel.getBoundingClientRect().height];
+      })()
+    JS
+    expect(got).to eq([60, 20])
+  end
+
+  # An `animation` declaration moves no box in this engine, so a dynamic rule that only animates
+  # is paint-only: no epoch move, no dirtying.
+  it 'does not relay out for a dynamic rule that only animates' do
+    css = '#t:focus { animation: spin 1s linear infinite }'
+    s = simulated_session(gated_page('<div id="t" tabindex="0">x</div><p id="after">after</p>', css: css))
+    s.visit '/'
+    got = s.evaluate_script(<<~JS)
+      (() => {
+        const t = document.getElementById('t');
+        t.getBoundingClientRect();
+        const epoch = globalThis.__csimLayoutEpoch(), marks = globalThis.__csimSubtreeMarks();
+        t.focus();
+        t.getBoundingClientRect();
+        return [globalThis.__csimLayoutEpoch() === epoch, globalThis.__csimSubtreeMarks() === marks];
+      })()
+    JS
+    expect(got).to eq([true, true])
+  end
+
   it 'hit-tests fresh z-index after focus, without a relayout in between' do
     # z-index is PAINT_ONLY, so a `:focus { z-index }` rule no longer forces a pass — the paint
     # order must come out right anyway. `stackChain` bakes an ANCESTOR stacking context's
