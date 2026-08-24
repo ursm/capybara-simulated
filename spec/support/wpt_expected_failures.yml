@@ -2897,7 +2897,7 @@ css/css-flexbox/flex-minimum-size-003.html:
 - img 2
 css/css-flexbox/flex-minimum-size-single-axis-scroll-container.html:
 - ".item 2"
-- ".item 3"
+- ".item 4"
 css/css-flexbox/flex-minimum-width-flex-items-014.html:
 - body > div 2
 - body > div 3
@@ -3592,12 +3592,6 @@ css/css-flexbox/relayout-align-items.html:
 - ".flexbox 2"
 css/css-flexbox/relayout-input.html:
 - "#target 1"
-css/css-flexbox/shrinking-column-flexbox.html:
-- body 1
-css/css-flexbox/stretched-child-shrink-on-relayout.html:
-- ".flexbox 1"
-- ".flexbox 3"
-- ".flexbox 5"
 css/css-flexbox/table-as-item-cross-size.html:
 - ".test 1"
 css/css-flexbox/text-as-flexitem-size-001.html:

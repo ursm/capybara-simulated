@@ -167,4 +167,90 @@ RSpec.describe 'layout reuse across dynamic style state' do
     s.evaluate_script("document.getElementById('t').focus()")
     expect(s.evaluate_script(read)).to eq(before)
   end
+
+  # The two REFUSALS a reuse makes (`reuseSubtree`) are what keeps a reused subtree agreeing with a
+  # freshly laid-out one. Each case below drives one of them through the mutation that actually
+  # reaches them: REMOVING a child marks its parent alone (`recordChildList` — a subtree mark would
+  # invalidate the sibling being reused, and there would be nothing to get wrong), so this is the
+  # everyday app shape, not a corner. `__csimReuseStats` says WHICH refusal fired, and the control
+  # case says the neighbour it does not concern still got its reuse — refusing categorically
+  # instead measured 2-7 % slower across Discourse / Redmine / Avo.
+  describe 'the reuse refusals' do
+    def stats_around(session, script)
+      session.evaluate_script(<<~JS)
+        (() => {
+          const before = globalThis.__csimReuseStats();
+          const value = (() => { #{script} })();
+          const after = globalThis.__csimReuseStats();
+          const diff = {};
+          for (const k in after) diff[k] = after[k] - before[k];
+          return [value, diff];
+        })()
+      JS
+    end
+
+    it 'measures a stretched flex item again when its line shrinks' do
+      # `align-items: stretch` lays an item out twice: once with an auto height to measure it,
+      # once at the line's cross size. Once the tall sibling holding the line open is gone, the
+      # measure call has to be answered from the item's own content — handing back the stretched
+      # height kept the line as tall as it was, and a flexbox that should shrink never shrank
+      # (css-flexbox/stretched-child-shrink-on-relayout, css-flexbox/shrinking-column-flexbox).
+      css  = '.box { display: flex; align-items: stretch } .big { height: 200px }'
+      body = '<div class="box" id="b"><div id="i">item</div><div class="big" id="big"></div></div>'
+      read = "document.getElementById('i').getBoundingClientRect().height"
+      # …and what it has to come to is what a layout that really ran comes to, which is the whole
+      # contract — asked of a second page that never had the tall sibling, so the assertion says
+      # "equals a fresh layout" rather than pinning whatever this font measures a line at.
+      fresh = session_for(css, '<div class="box"><div id="i">item</div></div>').evaluate_script(read)
+      s = session_for(css, body)
+      value, diff = stats_around(s, <<~JS)
+        const before = #{read};
+        document.getElementById('big').remove();
+        return [before, #{read}, document.getElementById('b').getBoundingClientRect().height];
+      JS
+      expect(value).to eq([200, fresh, fresh])
+      expect(diff['remeasured']).to be > 0
+    end
+
+    it 'lays out a subtree again when it holds an out-of-flow box anchored above it' do
+      # The anchor is placed against `.box`, not against the auto-height wrapper it sits in, so
+      # the wrapper's subtree cannot simply be moved — `placeAbsolute` runs only inside an
+      # ancestor that is really laid out, and a shift would take the anchor along with it.
+      css  = '.box { position: relative } .big { height: 200px }'
+      body = '<div class="box" id="b"><div id="w"><div id="a" style="position: absolute; bottom: 0; height: 10px">x</div></div><div class="big" id="big"></div></div>'
+      s = session_for(css, body)
+      value, diff = stats_around(s, <<~JS)
+        const a = document.getElementById('a'), b = document.getElementById('b');
+        const gap = () => a.getBoundingClientRect().bottom - b.getBoundingClientRect().bottom;
+        const before = [gap(), b.getBoundingClientRect().height];
+        document.getElementById('big').remove();
+        return before.concat([gap(), b.getBoundingClientRect().height]);
+      JS
+      # `bottom: 0` means the anchor's bottom edge IS its containing block's, before and after —
+      # and the containing block really did shrink, so neither reading is vacuous.
+      expect(value).to eq([0, 200, 0, 0])
+      expect(diff['escapingAbs']).to be > 0
+    end
+
+    it 'still reuses the subtree the change does not reach' do
+      # The control: a sibling with no imposed height and no escaping out-of-flow box hands its
+      # boxes back whole when a node is removed beside it. ONE hit is the whole assertion —
+      # `reuseSubtree` does not recurse, so a `#keep` that was really laid out again would grant
+      # its two paragraphs a hit each instead.
+      css  = '.big { height: 200px }'
+      body = '<div id="keep"><p><span>a</span></p><p><span>b</span></p></div><div class="big" id="big"></div>'
+      s = session_for(css, body)
+      value, diff = stats_around(s, <<~JS)
+        const k = document.getElementById('keep');
+        const rect = () => JSON.stringify(k.getBoundingClientRect());
+        const before = [rect(), document.body.getBoundingClientRect().height];
+        document.getElementById('big').remove();
+        return before.concat([rect(), document.body.getBoundingClientRect().height]);
+      JS
+      expect(value[2]).to eq(value[0])                   # …and its boxes did not move
+      expect(value[3]).to eq(value[1] - 200)             # …while the removal really did land
+      expect(diff['hit']).to eq(1)
+      expect(diff.values_at('escapingAbs', 'remeasured')).to eq([0, 0])
+    end
+  end
 end
