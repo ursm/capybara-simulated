@@ -68,6 +68,23 @@ RSpec.describe 'structural-context invalidation' do
     expect(got).to eq(['rgb(0, 128, 0)', 'rgb(255, 0, 0)', true, true])
   end
 
+  it "sweeps an ancestor rule's subjects instead of re-keying the subtree" do
+    # The mechanism, not just the outcome: `.on .x` names a subject, so the write re-keys the
+    # elements matching `.x` under the writer (one sweep) and leaves every other descendant's
+    # context — and therefore its memo — where it was.
+    css  = '.on .x { color: rgb(0, 128, 0) }'
+    body = '<div id="a"><p id="x" class="x">x</p><p id="y">y</p></div>'
+    got = colors(css, body, <<~JS)
+      const y = document.getElementById('y');
+      color('x'); color('y');
+      const sweeps = globalThis.__csimCtxSweeps(), yCtx = globalThis.__csimCtxEpoch(y);
+      document.getElementById('a').className = 'on';
+      const after = color('x');                                    // the read runs the pending sweep
+      return [after, globalThis.__csimCtxSweeps() - sweeps, globalThis.__csimCtxEpoch(y) === yCtx];
+    JS
+    expect(got).to eq(['rgb(0, 128, 0)', 1, true])
+  end
+
   it 'leaves a descendant alone when an ancestor gains a class no rule reads in an ancestor position' do
     got = colors('.zzz { color: rgb(0, 128, 0) } .x { color: rgb(0, 0, 255) }', '<div id="a"><p id="x" class="x">x</p></div>', <<~JS)
       const x = document.getElementById('x');
