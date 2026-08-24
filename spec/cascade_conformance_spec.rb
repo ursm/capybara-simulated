@@ -53,6 +53,13 @@ RSpec.describe 'CSS cascade visibility conformance' do
       body: '<div class="c" id="t" style="display: block">x</div>',
       expect: { 't' => false } },
 
+    # CSSOM "set a CSS declaration": within ONE block an `!important` declaration is never
+    # clobbered by a later normal one. Chrome keeps the element hidden.
+    { name: 'later normal declaration loses to an earlier !important in the same block',
+      css:  '.c { display: none !important; display: block }',
+      body: '<div class="c" id="t">x</div>',
+      expect: { 't' => false } },
+
     { name: 'inline beats rule at equal importance',
       css:  '.c { display: none }',
       body: '<div class="c" id="t" style="display: block">x</div>',
