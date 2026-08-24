@@ -17,6 +17,67 @@ RSpec.describe 'layout reuse across dynamic style state' do
     s
   end
 
+  # `isLaidOutNode` — "is this element rendered at all", the guard every geometry read runs before
+  # laying out — is memoised per element on the layout gate's key. Each case below makes the answer
+  # flip through a DIFFERENT input of that key, and reads geometry first so a cold cache can't pass.
+  it 'stops reporting a rect when an ancestor is hidden between reads' do
+    s = session_for('.x { width: 40px; height: 10px }', '<div id="a"><p id="x" class="x">x</p></div>')
+    got = s.evaluate_script(<<~JS)
+      (() => {
+        const w = () => document.getElementById('x').getBoundingClientRect().width;
+        const before = w();
+        document.getElementById('a').style.display = 'none';       // an attribute write: settleGen
+        const hidden = w();
+        document.getElementById('a').style.display = '';
+        return [before, hidden, w()];
+      })()
+    JS
+    expect(got).to eq([40, 0, 40])
+  end
+
+  it 'stops reporting a rect when a stylesheet arrives that hides an ancestor' do
+    s = session_for('.x { width: 40px; height: 10px }', '<div id="a" class="wrap"><p id="x" class="x">x</p></div>')
+    got = s.evaluate_script(<<~JS)
+      (() => {
+        const w = () => document.getElementById('x').getBoundingClientRect().width;
+        const before = w();
+        const style = document.createElement('style');
+        style.textContent = '.wrap { display: none }';             // a rule change: the layout epoch
+        document.head.appendChild(style);
+        return [before, w()];
+      })()
+    JS
+    expect(got).to eq([40, 0])
+  end
+
+  it 'stops reporting a rect when focus hides an ancestor' do
+    css  = '.x { width: 40px; height: 10px } .wrap:focus-within { display: none }'
+    body = '<div id="a" class="wrap"><input id="i"><p id="x" class="x">x</p></div>'
+    s = session_for(css, body)
+    got = s.evaluate_script(<<~JS)
+      (() => {
+        const w = () => document.getElementById('x').getBoundingClientRect().width;
+        const before = w();
+        document.getElementById('i').focus();                      // dynamic state
+        return [before, w()];
+      })()
+    JS
+    expect(got).to eq([40, 0])
+  end
+
+  it 'stops reporting a rect once the element is detached' do
+    s = session_for('.x { width: 40px; height: 10px }', '<div id="a"><p id="x" class="x">x</p></div>')
+    got = s.evaluate_script(<<~JS)
+      (() => {
+        const x = document.getElementById('x');
+        const before = x.getBoundingClientRect().width;
+        x.remove();
+        return [before, x.getBoundingClientRect().width];
+      })()
+    JS
+    expect(got).to eq([40, 0])
+  end
+
   it 'resizes the focused element itself' do
     s = session_for(
       '#t { width: 100px } #t:focus { width: 300px }',
