@@ -47,6 +47,11 @@ const REF = process.env.WPT_REF || PINNED;
 // (just the harness) below — the rest of resources/ is large and unneeded.
 const TREES = [
   'dom', 'domparsing', 'url', 'encoding', 'shadow-dom',
+  'css/css-shadow/part',               // `::part()` + `exportparts` — the one way an outer tree's
+                                       // rule reaches INTO a shadow tree. Vendored with the
+                                       // implementation: the feature was entirely unmatched until
+                                       // then, and nothing in the gate said so (one shadow-dom
+                                       // test used it incidentally, and passed by accident).
   'hr-time',                           // DOMHighResTimeStamp: performance.now() resolution +
                                        // monotonicity + timeOrigin — the gate for the sub-ms clock
   'FileAPI',                           // Blob / File / FileReader / createObjectURL — data API, no layout
