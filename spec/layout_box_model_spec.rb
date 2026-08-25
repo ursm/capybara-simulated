@@ -197,6 +197,49 @@ RSpec.describe 'layout box model' do
       # `visible` becomes `auto` beside a scrolling value; beside `clip` it stays `visible`.
       expect(got).to eq([%w[hidden auto], %w[visible clip]])
     end
+
+    it 'pairs an axis whose value is a CSS-wide keyword' do
+      # `inherit` takes the parent's computed value — and the pairing rule then applies to THAT, so
+      # the read has to go through the same resolution the layout engine uses rather than short-
+      # circuiting on "this declares a CSS-wide keyword". Chrome: auto / hidden.
+      s = page('<div style="overflow: visible"><div id="c" style="overflow-x: inherit; overflow-y: hidden"></div></div>')
+      got = s.evaluate_script("(() => { const cs = getComputedStyle(document.getElementById('c')); return [cs.overflowX, cs.overflowY] })()")
+      expect(got).to eq(%w[auto hidden])
+    end
+
+    it 'does not clip for a CSS-wide keyword or an invalid value' do
+      # The keyword set is a WHITELIST: `initial` / `unset` / `revert` all compute to `visible`, and
+      # an invalid declaration produces no used value at all. Treating "not the string `visible`"
+      # as clipping made every one of them swallow a child that hangs outside the box.
+      got = %w[initial unset revert bogus].map {|v|
+        s = page(%(<div style="width: 100px; height: 100px; overflow: #{v}"><div id="side" style="position: relative; left: 300px; width: 60px; height: 20px">x</div></div>))
+        s.evaluate_script("(() => { const e = document.elementFromPoint(330, 10); return (e && e.id) || (e && e.tagName) })()")
+      }
+      expect(got).to eq(['side'] * 4)
+    end
+
+    it 'does not scroll an overflow: clip box' do
+      # `clip` clips AND forbids all scrolling, script included (CSS Overflow 3) — it is not a
+      # scroll container, so neither a stored offset nor `scrollIntoView` moves what is inside it.
+      s = page('<div id="p" style="width: 100px; height: 100px; overflow: clip"><div id="t" style="margin-top: 400px; height: 20px">t</div></div>')
+      got = s.evaluate_script(<<~JS)
+        (() => {
+          const t = document.getElementById('t');
+          const before = t.getBoundingClientRect().y;
+          document.getElementById('p').scrollTop = 300;
+          t.scrollIntoView();
+          return [before, t.getBoundingClientRect().y];
+        })()
+      JS
+      expect(got).to eq([400, 400])
+    end
+
+    it 'keeps a sideways overflow in the document scroll range' do
+      # The extent union clips per axis too, or the page refuses to scroll to a box the hit test
+      # says is visible. Chrome: scrollWidth 1260.
+      s = page('<div style="width: 100px; height: 100px; overflow-y: clip"><div style="position: relative; left: 1200px; width: 60px; height: 20px">x</div></div>')
+      expect(s.evaluate_script('document.documentElement.scrollWidth')).to eq(1260)
+    end
   end
 
 end
