@@ -8,9 +8,21 @@ require_relative 'support/session_teardown'
 # is no second geometry: the painter reads the same boxes every geometry query reads, so these
 # assert that what the driver BELIEVES about a box is what lands in the pixels.
 RSpec.describe 'save_screenshot' do
+  # A small viewport on purpose. Every assertion here is about a handful of pixels at known
+  # coordinates, so the raster's SIZE proves nothing — but it costs: a typed array crosses to the
+  # host as an ASCII-8BIT string under rusty_racer and as a Hash of index => byte under quickjs,
+  # and at 1024x768 that Hash is 3.1M entries, which took this file from 0.6 s to 37 s there.
+  #
+  # A METHOD, not a constant: a constant assigned inside an `RSpec.describe` block lands at TOP
+  # LEVEL, so `VIEWPORT` here collided with the one in scroll_into_view_spec.rb — and did it
+  # invisibly, because the size assertion compares the raster against the same constant it was
+  # rendered from. The suite failed only on the example that actually depends on the number.
+  def viewport = [320, 240]
+
   def page_with(body, css: '')
     html = %(<!DOCTYPE html><html><head><style>body{margin:0;background:#fff;font:16px sans-serif}#{css}</style></head><body>#{body}</body></html>)
-    s = simulated_session(->(_env) { [200, {'content-type' => 'text/html'}, [html]] })
+    Capybara.register_driver(:sim_shot) {|app| Capybara::Simulated::Driver.new(app, viewport: viewport) }
+    s = simulated_session(->(_env) { [200, {'content-type' => 'text/html'}, [html]] }, mode: :sim_shot)
     s.visit '/'
     s
   end
@@ -21,7 +33,22 @@ RSpec.describe 'save_screenshot' do
     path = File.join(Dir.tmpdir, "csim-shot-#{Process.pid}-#{rand(1 << 32)}.png")
     session.driver.save_screenshot(path, **opts)
     img = Vips::Image.new_from_file(path)
-    yield img, ->(x, y) { img.getpoint(x, y).map(&:to_i)[0, 3] }, path
+    # The whole raster once, then plain string indexing. `getpoint` is a full Vips operation per
+    # call — fine for a handful, but the ink scan below asks thousands, which took this file past
+    # its 60s budget on CI while passing locally.
+    raw   = img.write_to_memory
+    bands = img.bands
+    px = lambda do |x, y|
+      # Bounds-checked: the offset arithmetic would otherwise wrap an out-of-range x onto the NEXT
+      # ROW and answer with a real pixel from the wrong place — which is exactly how a stale
+      # coordinate passed here once, reading red where the assertion wanted white.
+      raise ArgumentError, "(#{x}, #{y}) is outside the #{img.width}x#{img.height} raster" \
+        unless x.between?(0, img.width - 1) && y.between?(0, img.height - 1)
+
+      off = ((y * img.width) + x) * bands
+      raw.byteslice(off, 3).bytes
+    end
+    yield img, px, path
   ensure
     File.delete(path) if path && File.exist?(path)
   end
@@ -30,7 +57,7 @@ RSpec.describe 'save_screenshot' do
     s = page_with('<div></div>')
     shot(s) do |img, _px, path|
       expect(File.binread(path, 8)).to eq(PNG_MAGIC)
-      expect([img.width, img.height]).to eq([1024, 768])
+      expect([img.width, img.height]).to eq([320, 240])
     end
   end
 
@@ -40,8 +67,8 @@ RSpec.describe 'save_screenshot' do
     shot(s) do |_img, px, _path|
       expect(px.call(2, 40)).to   eq([0, 0, 255])       # inside the 4px border
       expect(px.call(100, 40)).to eq([255, 0, 0])       # the background
-      expect(px.call(400, 40)).to eq([255, 255, 255])   # past the box: the page
-      expect(px.call(100, 200)).to eq([255, 255, 255])  # below it
+      expect(px.call(250, 40)).to eq([255, 255, 255])   # past the box: the page
+      expect(px.call(100, 150)).to eq([255, 255, 255])  # below it
     end
   end
 
@@ -50,16 +77,16 @@ RSpec.describe 'save_screenshot' do
     # the paragraph's own box — which is what a painter that re-derived line breaking would miss.
     s = page_with('<p>Hello painter</p>', css: 'p{color:rgb(0,128,0);margin:0;height:20px}')
     shot(s) do |_img, px, _path|
-      inked = (0...300).select {|x| (0...20).any? {|y| c = px.call(x, y); c[1] > 90 && c[0] < 120 && c[2] < 120 } }
+      inked = (0...320).select {|x| (0...20).any? {|y| c = px.call(x, y); c[1] > 90 && c[0] < 120 && c[2] < 120 } }
       expect(inked).not_to be_empty
-      expect(inked.max).to be < 300                     # a 12-character run, not the whole width
-      expect(px.call(600, 10)).to eq([255, 255, 255])   # nothing painted past the text
+      expect(inked.max).to be < 200                     # a 12-character run, not the whole width
+      expect(px.call(300, 10)).to eq([255, 255, 255])   # nothing painted past the text
     end
   end
 
   it 'paints the whole document with full: true' do
     s = page_with('<div class="tall"></div>', css: '.tall{height:2000px;background:rgb(0,0,255)}')
-    shot(s) {|img, _px, _path| expect(img.height).to eq(768) }
+    shot(s) {|img, _px, _path| expect(img.height).to eq(240) }
     shot(s, full: true) do |img, px, _path|
       expect(img.height).to be >= 2000
       expect(px.call(10, 1900)).to eq([0, 0, 255])      # past the viewport, still painted
@@ -68,8 +95,8 @@ RSpec.describe 'save_screenshot' do
 
   it 'follows a scroll offset' do
     s = page_with('<div class="a"></div><div class="b"></div>',
-                  css: '.a{height:900px;background:rgb(255,0,0)}.b{height:900px;background:rgb(0,0,255)}')
-    s.execute_script('window.scrollTo(0, 900)')
+                  css: '.a{height:300px;background:rgb(255,0,0)}.b{height:300px;background:rgb(0,0,255)}')
+    s.execute_script('window.scrollTo(0, 300)')
     shot(s) {|_img, px, _path| expect(px.call(10, 10)).to eq([0, 0, 255]) }
   end
 
