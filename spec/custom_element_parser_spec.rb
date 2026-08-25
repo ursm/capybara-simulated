@@ -88,4 +88,46 @@ RSpec.describe 'HTML parser custom-element construction' do
     expect(s.evaluate_script("document.getElementById('u') instanceof HTMLElement")).to be true
     expect(s.evaluate_script("document.getElementById('f') instanceof HTMLUnknownElement")).to be true
   end
+
+  # A custom element's constructor runs at its START TAG, which is where `attachShadow` usually
+  # happens — so a shadow tree built during parsing is populated before its host is connected, and
+  # nothing inside it has been connected yet. The parser's incremental connect cursor visited each
+  # queued LIGHT node and stopped there, so that shadow tree was never connected at all: a nested
+  # custom element inside it stayed un-upgraded for the life of the page. `fireCEConnect` has
+  # always used the shadow-including walk; this pins the parser cursor agreeing with it.
+  it 'connects a shadow tree the parser built, and upgrades the custom elements inside it' do
+    html = <<~HTML
+      <html><body>
+      <script>
+        function install(name, tid) {
+          customElements.define(name, class extends HTMLElement {
+            constructor() {
+              super();
+              this.attachShadow({mode: 'open'}).appendChild(document.getElementById(tid).content.cloneNode(true));
+            }
+            connectedCallback() { this.setAttribute('connected', '1'); }
+          });
+        }
+        install('x-inner', 'ti');
+      </script>
+      <template id="ti"><i>inner</i></template>
+      <script>install('x-outer', 'to');</script>
+      <template id="to"><x-inner id="i"></x-inner></template>
+      <x-outer id="o"></x-outer>
+      </body></html>
+    HTML
+    s = simulated_session(->(_env) { [200, {'content-type' => 'text/html'}, [html]] })
+    s.visit '/'
+    got = s.evaluate_script(<<~JS)
+      (() => {
+        const outer = document.getElementById('o');
+        const inner = outer.shadowRoot && outer.shadowRoot.getElementById('i');
+        return [outer.getAttribute('connected'),
+                !!inner,
+                !!(inner && inner.shadowRoot),          // its constructor ran → it upgraded
+                inner && inner.getAttribute('connected')];
+      })()
+    JS
+    expect(got).to eq(['1', true, true, '1'])
+  end
 end
