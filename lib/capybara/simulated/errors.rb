@@ -24,5 +24,9 @@ module Capybara
     # QuickJS the frame stays a same-realm fallback we can't route DOM ops
     # into, so `within_frame` is unsupported there.
     class FrameNotSupported < Capybara::NotSupportedByDriverError; end
+
+    # Raised by `save_screenshot` when the page could not be rastered — most often because
+    # `ruby-vips` (the rasteriser behind the whole canvas stack) isn't in the bundle.
+    class ScreenshotFailed < Capybara::CapybaraError; end
   end
 end
