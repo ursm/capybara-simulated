@@ -2041,11 +2041,12 @@ module Capybara
       # inside a `within_frame` block shows that frame.
       def screenshot_png(full: false)
         tick_real_time
-        url = dom_call('__csimScreenshot', full)
-        return nil unless url.is_a?(String) && url.start_with?('data:image/png;base64,')
+        out = dom_call('__csimScreenshot', full)
+        return nil unless out.is_a?(Hash) && out['refId']
 
-        require 'base64'
-        Base64.decode64(url.delete_prefix('data:image/png;base64,'))
+        # The bytes never entered JS: the painter handed the pixel buffer to `encode_image`, which
+        # stashed the PNG here and returned an id for it.
+        transfer_buffer_fetch(out['refId'])
       end
 
       def status_code      = (@last_response_status || 200)

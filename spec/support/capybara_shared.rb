@@ -40,7 +40,6 @@ module CapybaraShared
   # so skip the `frames` capability there (same gate frame_realm_spec uses).
   SKIPPED_TESTS = (%i[
     about_scheme
-    screenshot
     server
     windows
   ] + (CsimEngine.v8? ? [] : %i[frames])).freeze
