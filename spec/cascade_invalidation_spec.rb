@@ -241,7 +241,8 @@ RSpec.describe 'cascade invalidation' do
   # …and the same state change has to reach the BOXES, not just the CSSOM. Layout keyed its memos on
   # the rule-set version, which no state change moves, so an element styled by a dynamic selector
   # kept the box it was first laid out with — `getBoundingClientRect` served the placeholder-shown
-  # 300px after the field was filled. Chrome 151, same page: 300 then 100.
+  # 300px after the field was filled. Chrome 137, same page: 308 then 108 — a text `<input>` is
+  # `content-box`, so its UA border and padding sit outside the declared width.
   it 'relays out an element a dynamic selector restyles' do
     app = lambda {|_env|
       [200, {'content-type' => 'text/html'}, ['<!DOCTYPE html><html><head><style>' \
@@ -253,7 +254,7 @@ RSpec.describe 'cascade invalidation' do
     read = "document.getElementById('t').getBoundingClientRect().width"
     before = s.evaluate_script(read)
     s.evaluate_script("document.getElementById('t').setRangeText('abc', 0, 0)")
-    expect([before, s.evaluate_script(read)]).to eq([300, 100])
+    expect([before, s.evaluate_script(read)]).to eq([308, 108])
   end
 
   # …and CLEARING the live value counts as changing it. `<form>.reset()` and a `type` change drop
@@ -271,7 +272,7 @@ RSpec.describe 'cascade invalidation' do
     s.evaluate_script("document.getElementById('t').value = 'abc'")
     filled = s.evaluate_script(read)
     s.evaluate_script("document.getElementById('f').reset()")
-    expect([filled, s.evaluate_script(read)]).to eq([100, 300])
+    expect([filled, s.evaluate_script(read)]).to eq([108, 308])
   end
 
   # The other half of the same contract, and the one rule 3 cares about: a dynamic rule that only
