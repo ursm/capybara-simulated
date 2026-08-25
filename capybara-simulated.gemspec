@@ -37,6 +37,10 @@ Gem::Specification.new do |spec|
   # processing — the JS tr46 stub delegates non-ASCII / xn-- hosts here so the V8
   # snapshot doesn't carry the ~600KB Unicode IDNA mapping table.
   spec.add_dependency 'uri-idna', '~> 0.3'
+  # The rasteriser: image decoding (an `<img>`'s intrinsic size, which LAYOUT sizes the box from),
+  # the canvas surface, and `save_screenshot`. Binds to the libvips SYSTEM library — Debian/Ubuntu
+  # `libvips42`, Homebrew `vips`, Gentoo `media-libs/vips`.
+  spec.add_dependency 'ruby-vips', '~> 2.2'
 
   # JS engine is a soft dependency — add exactly one to your Gemfile.
   # The engine is auto-selected based on which is loadable; `:v8` wins when

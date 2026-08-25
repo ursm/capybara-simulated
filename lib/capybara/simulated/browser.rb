@@ -7291,7 +7291,6 @@ module Capybara
       # gap). Any other profiled non-RGB source (grayscale / Lab) is colour-converted to
       # sRGB so it lands as packed RGB, never kept raw.
       private def decode_rgba(bytes, max_w = nil, max_h = nil)
-        require 'vips' unless defined?(Vips)
         img = Vips::Image.new_from_buffer(bytes, '', access: :sequential)
         # RGB (incl. 16-bit `rgb16`); a non-RGB profiled source is colour-converted below.
         rgb = %i[srgb rgb rgb16].include?(img.interpretation)
@@ -7367,7 +7366,6 @@ module Capybara
       # the 300×150 CSS default — a bounded, documented divergence, still a net
       # improvement over the old nil→broken→InvalidStateError.
       private def decode_or_nil(bytes, max_w = nil, max_h = nil)
-        require 'vips' unless defined?(Vips)
         decode_rgba(bytes, max_w, max_h)
       rescue Vips::Error => e
         e.message.include?('bad dimensions') ? :zero_size : nil
@@ -7630,7 +7628,6 @@ module Capybara
       # dimensions) — the cheap path for `measureText`.
       def render_text(text, font, measure_only = false, font_url = nil, kerning = nil)
         host_image_op('render_text') {
-          require 'vips' unless defined?(Vips)
           pango = font.to_s.empty? ? 'Sans 10' : font.to_s
           fontfile = font_url && !font_url.to_s.empty? ? font_file_for(font_url) : nil
           # Ascent/descent are properties of the FONT, not the variant: probe them with a
@@ -8390,7 +8387,6 @@ module Capybara
 
       def encode_image(pixels_ref, width, height, mime_type = 'image/png', quality = 90)
         host_image_op('encode_image') {
-          require 'vips' unless defined?(Vips)
           raw = transfer_buffer_fetch(pixels_ref).to_s
           w   = width.to_i
           h   = height.to_i

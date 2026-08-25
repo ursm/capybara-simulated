@@ -35,6 +35,17 @@ gem 'rusty_racer', group: :test  # JS engine — pick one
 
 `bundle install`. Requires Ruby ≥ 3.3. The gem ships its JS bridge under `lib/capybara/simulated/js/` and the vendored JS deps under `vendor/js/`, so there's no Node toolchain at consume time.
 
+### System libraries
+
+**libvips** — Debian/Ubuntu `libvips42`, Homebrew `vips`, Gentoo `media-libs/vips`. The `ruby-vips`
+gem comes with the driver and binds to it; the driver names the package it wants if the library is
+missing.
+
+**fontconfig** — text is MEASURED from the font file fontconfig resolves each CSS family to (the
+same face a browser gets on the same machine), so a box's height and a line's wrapping depend on
+the fonts installed. A machine with no fonts falls back to an estimate and measures text wider or
+narrower than a real browser would.
+
 ### JS engine
 
 The gem treats the JS engine as a soft dependency. Pick one of:

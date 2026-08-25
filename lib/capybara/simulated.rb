@@ -1,6 +1,16 @@
 # frozen_string_literal: true
 
 require 'capybara'
+# The rasteriser behind image decoding and the canvas surface — required HERE rather than lazily at
+# each use, because a bundle without it does not merely lose canvas: an image's intrinsic size feeds
+# LAYOUT, so pages with images would be laid out wrong while only warning. The gem is a hard
+# dependency; what can still be missing is the libvips SYSTEM library it binds to, so name it.
+begin
+  require 'vips'
+rescue LoadError => e
+  raise LoadError, "capybara-simulated needs the libvips system library (Debian/Ubuntu " \
+                   "`libvips42`, Homebrew `vips`, Gentoo `media-libs/vips`): #{e.message}"
+end
 require 'capybara/simulated/version'
 require 'capybara/simulated/driver'
 
