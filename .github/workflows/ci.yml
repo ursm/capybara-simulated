@@ -29,11 +29,14 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
-      # `canvas_image_spec` decodes images through ruby-vips, which `dlopen`s
-      # `libvips.so.42` at runtime; the `<video>` / createImageBitmap-from-video
-      # path shells out to `ffprobe` + `ffmpeg` for first-frame decode (the WPT
-      # imagebitmap video subtests need it, else their factory rejects). Install
-      # both before the spec run.
+      # ruby-vips `dlopen`s `libvips.so.42` at load, and the gem requires it at load,
+      # so WITHOUT this step nothing runs — not just the canvas specs. (It backs
+      # image decoding, and an image's intrinsic size is what LAYOUT sizes an `<img>`
+      # box from, which is why it stopped being optional.) The `<video>` /
+      # createImageBitmap-from-video path shells out to `ffprobe` + `ffmpeg` for
+      # first-frame decode (the WPT imagebitmap video subtests need it, else their
+      # factory rejects). Install both before the spec run — and keep this step
+      # failing loudly: made best-effort, every job would fail later and less clearly.
       - name: Install libvips + ffmpeg
         # `--no-install-recommends` because most of the 102 MB apt otherwise fetches
         # is ffmpeg's recommends — a pocketsphinx speech model, OpenAL, JACK, the
