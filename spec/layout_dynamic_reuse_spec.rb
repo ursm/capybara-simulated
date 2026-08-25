@@ -232,6 +232,27 @@ RSpec.describe 'layout reuse across dynamic style state' do
       expect(diff['escapingAbs']).to be > 0
     end
 
+    it 'dirties the SHADOW boxes that lay out slotted light DOM' do
+      # The dirty walk goes up the FLAT tree, because that is the chain of boxes that lays a node
+      # out: `#pad`'s parent box is the `<slot>`, then `#wrap`, then the host. Walking the node
+      # tree instead jumped straight from `#pad` to the host and left `#wrap` clean, so it handed
+      # its stale box back on every pass — the write moved nothing at all, for good.
+      s = session_for('', '<div id="host"><div id="pad" style="height: 20px"></div></div>')
+      got = s.evaluate_script(<<~JS)
+        (() => {
+          const host = document.getElementById('host');
+          host.attachShadow({mode: 'open'}).innerHTML = '<div id="wrap"><slot></slot></div>';
+          const wrap = host.shadowRoot.getElementById('wrap');
+          const pad = document.getElementById('pad');
+          const h = () => [wrap.getBoundingClientRect().height, pad.getBoundingClientRect().height];
+          const before = h();
+          pad.style.height = '200px';
+          return before.concat(h());
+        })()
+      JS
+      expect(got).to eq([20, 20, 200, 200])
+    end
+
     it 'still reuses the subtree the change does not reach' do
       # The control: a sibling with no imposed height and no escaping out-of-flow box hands its
       # boxes back whole when a node is removed beside it. ONE hit is the whole assertion —
