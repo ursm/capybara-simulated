@@ -160,4 +160,43 @@ RSpec.describe 'layout box model' do
     end
   end
 
+  # `overflow` clips per AXIS. After the CSS Overflow 3 computed-value rule the only box that clips
+  # one axis and not the other is `clip` beside `visible` — but that one is real, and asking "does
+  # this box clip at all" made a child hanging off the SIDE of an `overflow-y: clip` box invisible
+  # to the hit test, i.e. unclickable. Chrome 137-measured.
+  describe 'single-axis overflow' do
+    def page(body)
+      html = %(<html><body style="margin:0">#{body}</body></html>)
+      session = simulated_session(->(_env) { [200, {'content-type' => 'text/html'}, [html]] })
+      session.visit '/'
+      session
+    end
+
+    it 'hit-tests a child beside an overflow-y: clip box, but not one below it' do
+      s = page(<<~HTML)
+        <div id="p" style="width: 100px; height: 100px; overflow-y: clip">
+          <div id="side" style="position: relative; left: 200px; width: 60px; height: 20px">x</div>
+          <div id="under" style="position: relative; top: 200px; width: 60px; height: 20px">y</div>
+        </div>
+      HTML
+      got = s.evaluate_script(<<~JS)
+        [document.elementFromPoint(230, 10), document.elementFromPoint(10, 300)]
+          .map(e => (e && e.id) || (e && e.tagName) || null)
+      JS
+      expect(got).to eq(['side', 'HTML'])
+    end
+
+    it 'reports the computed overflow the paired axis forces' do
+      s = page('<div id="a" style="overflow-x: hidden"></div><div id="b" style="overflow-y: clip"></div>')
+      got = s.evaluate_script(<<~JS)
+        ['a', 'b'].map(id => {
+          const cs = getComputedStyle(document.getElementById(id));
+          return [cs.overflowX, cs.overflowY];
+        })
+      JS
+      # `visible` becomes `auto` beside a scrolling value; beside `clip` it stays `visible`.
+      expect(got).to eq([%w[hidden auto], %w[visible clip]])
+    end
+  end
+
 end
