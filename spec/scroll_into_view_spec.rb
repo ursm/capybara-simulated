@@ -106,4 +106,115 @@ RSpec.describe 'scroll into view' do
     s.find('#t').click
     expect(s.evaluate_script('window.scrollY')).to eq(1549)
   end
+
+  # A scroll OFFSET lives only where a browser keeps one: on the document scroller, and on a
+  # rendered scroll container. Everything else refuses the write and goes on reporting 0 — before
+  # this the driver remembered whatever it was handed, on any element at all, so an
+  # `overflow: clip` box reported an offset while its content (correctly) never moved.
+  # Every figure is Chrome 137-measured on the same page.
+  describe 'where a scroll offset can live' do
+    def body_page(head, body)
+      session_with("<!DOCTYPE html><html><head><style>body{margin:0}#{head}</style></head><body>#{body}</body></html>")
+    end
+
+    it 'keeps one only on a rendered scroll container, and on the document scroller' do
+      body = <<~HTML
+        <div id="vis"    style="width: 100px; height: 100px; overflow: visible"><div style="height: 400px"></div></div>
+        <div id="clip"   style="width: 100px; height: 100px; overflow: clip"><div style="height: 400px"></div></div>
+        <div id="hid"    style="width: 100px; height: 100px; overflow: hidden"><div style="height: 400px"></div></div>
+        <div id="auto"   style="width: 100px; height: 100px; overflow: auto"><div style="height: 400px"></div></div>
+        <div id="none"   style="display: none; overflow: auto"><div style="height: 400px"></div></div>
+        <span id="inline" style="display: inline; overflow: auto"><div style="height: 400px"></div></span>
+        <div style="height: 3000px"></div>
+      HTML
+      got = body_page('', body).evaluate_script(<<~JS)
+        (() => {
+          const out = ['vis', 'clip', 'hid', 'auto', 'none', 'inline'].map(id => {
+            const e = document.getElementById(id);
+            e.scrollTop = 100;
+            return e.scrollTop;
+          });
+          document.body.scrollTop = 100;
+          document.documentElement.scrollTop = 100;
+          return out.concat([document.body.scrollTop, document.documentElement.scrollTop]);
+        })()
+      JS
+      #      visible clip hidden auto  none  inline  body  root
+      expect(got).to eq([0, 0, 100, 100, 0, 0, 0, 100])
+    end
+
+    it 'refuses scrollTo / scrollBy on the same elements' do
+      body = '<div id="vis" style="width: 100px; height: 100px; overflow: visible"><div style="height: 400px"></div></div>' \
+             '<div id="auto" style="width: 100px; height: 100px; overflow: auto"><div style="height: 400px"></div></div>'
+      got = body_page('', body).evaluate_script(<<~JS)
+        (() => {
+          const vis = document.getElementById('vis'), auto = document.getElementById('auto');
+          vis.scrollTo(0, 50); auto.scrollTo(0, 50);
+          vis.scrollBy(0, 10); auto.scrollBy(0, 10);
+          return [vis.scrollTop, auto.scrollTop];
+        })()
+      JS
+      expect(got).to eq([0, 60])
+    end
+
+    it 'refuses the BODY when its overflow propagates, and accepts it when it does not' do
+      # `body { overflow: auto }` propagates to the viewport (CSS Overflow 3.3), so the body is not
+      # a scroller — but under `html { overflow: hidden }` the root took an overflow of its own and
+      # the body becomes one in its own right. Chrome: 0, then 100.
+      propagating = body_page('body{overflow:auto}', '<div style="height: 3000px"></div>')
+      own         = body_page('html{overflow:hidden} body{overflow:auto;height:200px}', '<div style="height: 3000px"></div>')
+      read = '(() => { document.body.scrollTop = 100; return document.body.scrollTop })()'
+      expect([propagating.evaluate_script(read), own.evaluate_script(read)]).to eq([0, 100])
+    end
+
+    it 'keeps one on a LISTBOX select, not on a dropdown' do
+      # Chrome computes `overflow-x: hidden; overflow-y: scroll` on a `size`d / `multiple` select
+      # and honours `select.scrollTop = 40`; a dropdown select gets neither.
+      body = '<select id="list" size="3"><option>1</option><option>2</option><option>3</option><option>4</option></select>' \
+             '<select id="multi" multiple><option>1</option><option>2</option></select>' \
+             '<select id="drop"><option>1</option></select>'
+      got = body_page('', body).evaluate_script(<<~JS)
+        (() => ['list', 'multi', 'drop'].map(id => {
+          const e = document.getElementById(id);
+          e.scrollTop = 40;
+          return [e.scrollTop, getComputedStyle(e).overflowY];
+        }))()
+      JS
+      expect(got).to eq([[40, 'scroll'], [40, 'scroll'], [0, 'visible']])
+    end
+
+    it 'takes a write to a box made scrollable in the same tick' do
+      # The gate asks the CASCADE, not the layout pass's memo: that memo only advances when a pass
+      # runs, so a panel that gains `overflow: auto` and restores its saved offset before anything
+      # reads geometry would have been answered from before the change — and dropped.
+      s = body_page('', '<div id="a" style="width: 100px; height: 100px"><div style="height: 400px"></div></div>')
+      got = s.evaluate_script(<<~JS)
+        (() => {
+          const a = document.getElementById('a');
+          a.getBoundingClientRect();               // stamp the pass memo while it is NOT scrollable
+          a.style.overflow = 'auto';
+          a.scrollTop = 40;
+          return a.scrollTop;
+        })()
+      JS
+      expect(got).to eq(40)
+    end
+
+    it 'puts the document offset on the BODY in quirks mode' do
+      # `scrollingElement` is the body there, and Chrome measures the exact inverse of standards
+      # mode: the body takes the write and the root ignores it.
+      s = session_with('<html><body><div style="height: 3000px"></div></body></html>')
+      got = s.evaluate_script(<<~JS)
+        (() => {
+          document.body.scrollTop = 100;
+          document.documentElement.scrollTop = 100;
+          return [document.compatMode,
+                  document.scrollingElement === document.body,
+                  document.body.scrollTop,
+                  document.documentElement.scrollTop];
+        })()
+      JS
+      expect(got).to eq(['BackCompat', true, 100, 0])
+    end
+  end
 end
