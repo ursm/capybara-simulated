@@ -253,6 +253,27 @@ RSpec.describe 'layout reuse across dynamic style state' do
       expect(got).to eq([20, 20, 200, 200])
     end
 
+    it 'does the same through a CLOSED shadow root' do
+      # Which boxes lay a node out cannot depend on the root's MODE. The public `assignedSlot` is
+      # open-only, so taking the flat-tree parent from it left a closed root's boxes stale — the
+      # exact bug above, hidden behind `mode: 'closed'`.
+      s = session_for('', '<div id="host"><div id="pad" style="height: 20px"></div></div>')
+      got = s.evaluate_script(<<~JS)
+        (() => {
+          const host = document.getElementById('host');
+          const root = host.attachShadow({mode: 'closed'});
+          root.innerHTML = '<div id="wrap"><slot></slot></div>';
+          const wrap = root.getElementById('wrap');
+          const pad = document.getElementById('pad');
+          const h = () => [wrap.getBoundingClientRect().height, pad.getBoundingClientRect().height];
+          const before = h();
+          pad.style.height = '200px';
+          return before.concat(h());
+        })()
+      JS
+      expect(got).to eq([20, 20, 200, 200])
+    end
+
     it 'still reuses the subtree the change does not reach' do
       # The control: a sibling with no imposed height and no escaping out-of-flow box hands its
       # boxes back whole when a node is removed beside it. ONE hit is the whole assertion —
