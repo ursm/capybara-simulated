@@ -6154,6 +6154,8 @@ shadow-dom/offsetParent-across-shadow-boundaries.html:
 - offsetParent must return the fixed position containing block of a fixed element
   when the context object is assigned to a slot within a fixed containing block in
   shadow tree of open mode
+shadow-dom/scroll-restore-shadow.html:
+- Scroll position restore on shadow tree
 shadow-dom/untriaged/html-elements-in-shadow-trees/inert-html-elements/test-001.html:
 - A_08_01_01_T01
 webmessaging/Channel_postMessage_transfer_xsite_incoming_messages.window.js:
