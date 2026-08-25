@@ -323,9 +323,10 @@ RSpec.describe 'layout: inline / flex / grid / table rows' do
     s = simulated_session(app)
     s.visit '/'
     # A control in a flex row keeps its intrinsic size instead of being measured as text
-    # (Chrome: input 185, button 34 — ours uses the same measured control sizes).
+    # (Chrome: input 185, button 34 — the label plus its UA border and padding).
     expect(box(s, 'inp')[2]).to eq(185)
     expect(box(s, 'btnf')[0]).to eq(185)
+    expect(box(s, 'btnf')[2]).to eq(34)
     # `flex: 2` sets `flex-basis: 0`, which OUTRANKS the declared width — Chrome: 400/200.
     expect(box(s, 'fa')[2]).to eq(400)
     expect(box(s, 'fb')[2]).to eq(200)

@@ -42899,10 +42899,6 @@ html/semantics/forms/the-input-element/checkable-active-onblur.html:
     spacebar.
   reason: Pointer automation (test_driver.Actions pointer sequences, :active/:hover
     interaction state, touch, click-drag, pointer-event metadata) — not modeled.
-html/semantics/forms/the-input-element/input-type-button.html:
-- name: label value
-  reason: Layout geometry (getBoundingClientRect / offsetWidth / intrinsic size /
-    scroll position / popover positioning) — no layout engine.
 html/semantics/forms/the-input-element/input-type-checkbox-switch.tentative.window.js:
 - name: Cloning a switch control
   reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux

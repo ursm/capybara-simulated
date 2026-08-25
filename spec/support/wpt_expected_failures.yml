@@ -2831,8 +2831,6 @@ css/css-flexbox/flex-basis-intrinsics-001.html:
 - ".flex-item 7"
 - ".flex-item 8"
 - ".flex-item 9"
-css/css-flexbox/flex-column-relayout-assert.html:
-- ".flexbox 1"
 css/css-flexbox/flex-factor-less-than-one.html:
 - ".flexbox 13"
 - ".flexbox 14"
@@ -2974,8 +2972,6 @@ css/css-flexbox/flexitem-no-margin-collapsing.html:
 - ".flexbox 1"
 css/css-flexbox/flexitem-stretch-image.html:
 - ".flexbox 1"
-css/css-flexbox/gap-017.html:
-- ".button 1"
 css/css-flexbox/gap-018.html:
 - ".button 1"
 css/css-flexbox/getcomputedstyle/flexbox_computedstyle_align-items-invalid.html:
@@ -3587,13 +3583,8 @@ css/css-flexbox/position-relative-percentage-top-005.html:
 css/css-flexbox/position-relative-stretch-height-001.html:
 - 'height: stretch against definite parent, top: 50%'
 - 'height: stretch inside stretched flex item, top: 50%'
-css/css-flexbox/relayout-align-items.html:
-- ".flexbox 1"
-- ".flexbox 2"
 css/css-flexbox/relayout-input.html:
 - "#target 1"
-css/css-flexbox/table-as-item-cross-size.html:
-- ".test 1"
 css/css-flexbox/text-as-flexitem-size-001.html:
 - ".flexbox > div 1"
 - ".flexbox > div 11"

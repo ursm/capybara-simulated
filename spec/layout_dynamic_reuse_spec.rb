@@ -84,9 +84,10 @@ RSpec.describe 'layout reuse across dynamic style state' do
       '<input id="t">'
     )
     read = "document.getElementById('t').getBoundingClientRect().width"
-    expect(s.evaluate_script(read)).to eq(100)
+    # …plus the UA border and padding a text `<input>` puts outside its `content-box` width.
+    expect(s.evaluate_script(read)).to eq(108)
     s.evaluate_script("document.getElementById('t').focus()")
-    expect(s.evaluate_script(read)).to eq(300)
+    expect(s.evaluate_script(read)).to eq(308)
   end
 
   it 'resizes a child that inherits from an ancestor whose rule is dynamic' do
