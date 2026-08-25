@@ -2036,6 +2036,18 @@ module Capybara
         dom_call('__csimDocumentHtml').to_s
       end
 
+      # PNG bytes for the current page, painted from the layout the driver already holds
+      # (js/src/paint.js). Routed through the active realm like `html`, so a screenshot taken
+      # inside a `within_frame` block shows that frame.
+      def screenshot_png(full: false)
+        tick_real_time
+        url = dom_call('__csimScreenshot', full)
+        return nil unless url.is_a?(String) && url.start_with?('data:image/png;base64,')
+
+        require 'base64'
+        Base64.decode64(url.delete_prefix('data:image/png;base64,'))
+      end
+
       def status_code      = (@last_response_status || 200)
       # Rack 3 lowercases header names; Capybara tests do `['Content-Type']`.
       def response_headers

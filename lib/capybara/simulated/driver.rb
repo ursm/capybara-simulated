@@ -861,8 +861,15 @@ module Capybara
       def invalid_element_errors = [Capybara::Simulated::StaleElement, Capybara::Simulated::ClickIntercepted]
       def no_such_window_error   = Capybara::WindowError
 
-      def save_screenshot(path, **_opts)
-        File.write(path, current_browser.html.to_s)
+      # A real raster of the laid-out page (see js/src/paint.js), not a serialization of it: the
+      # painter reads the same boxes every geometry query reads, so a screenshot can only show
+      # what the driver already believes. `full: true` paints the whole document rather than the
+      # viewport.
+      def save_screenshot(path, full: false, **_opts)
+        data = current_browser.screenshot_png(full: full)
+        raise Capybara::Simulated::ScreenshotFailed, 'screenshot: the page painted nothing' if data.nil?
+
+        File.binwrite(path, data)
         path
       end
 
