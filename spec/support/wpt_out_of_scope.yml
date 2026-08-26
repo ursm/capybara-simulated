@@ -29205,6 +29205,21 @@ css/cssom/CSSStyleSheet-constructable-disallow-import.tentative.html:
   reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
     specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
     path/suffix. CLAUDE.md rule 1.
+css/cssom/adoptedstylesheets-adopt-link.tentative.html:
+- name: "== css/reference/ref-filled-green-100px-square-only.html"
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+css/cssom/adoptedstylesheets-adopt-style-subresource.tentative.html:
+- name: "== css/reference/ref-filled-green-100px-square-only.html"
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+css/cssom/adoptedstylesheets-adopt-style.tentative.html:
+- name: "== css/reference/ref-filled-green-100px-square-only.html"
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
 css/cssom/caretPositionFromPoint-audioVideo.html:
 - name: document.caretPositionFromPoint() should return a CaretPosition over audio
     elements
@@ -29850,19 +29865,19 @@ dom/events/scrolling/scrollend-event-fired-for-mandatory-snap-point-after-load.h
     is activated; previously vacuous.
 dom/events/scrolling/scrollend-event-fired-for-scrollIntoView.html:
 - name: Tests scrollend event for nested scrollIntoView.
-  reason: Asserts the exact CLAMPED offsets of an overflow:scroll ELEMENT scroller (max_element_x/y
-    read back from a scrollTo(10000,10000) probe). Element-scroller offsets are deliberately
-    unclamped here — their content extents are the coarse ones, and clamping against an
-    under-measured extent turns real scrolls into silent no-ops (see the scrollTop setter) —
-    so the read-back can never equal the probe's clamped value. The root-scroller variants of
-    this file pass.
+  reason: Asserts the exact CLAMPED offsets of an overflow:scroll ELEMENT scroller
+    (max_element_x/y read back from a scrollTo(10000,10000) probe). Element-scroller
+    offsets are deliberately unclamped here — their content extents are the coarse
+    ones, and clamping against an under-measured extent turns real scrolls into silent
+    no-ops (see the scrollTop setter) — so the read-back can never equal the probe's
+    clamped value. The root-scroller variants of this file pass.
 - name: Tests scrollend event for scrollIntoView with behavior 'auto' on subframe.
-  reason: Asserts the exact CLAMPED offsets of an overflow:scroll ELEMENT scroller (max_element_x/y
-    read back from a scrollTo(10000,10000) probe). Element-scroller offsets are deliberately
-    unclamped here — their content extents are the coarse ones, and clamping against an
-    under-measured extent turns real scrolls into silent no-ops (see the scrollTop setter) —
-    so the read-back can never equal the probe's clamped value. The root-scroller variants of
-    this file pass.
+  reason: Asserts the exact CLAMPED offsets of an overflow:scroll ELEMENT scroller
+    (max_element_x/y read back from a scrollTo(10000,10000) probe). Element-scroller
+    offsets are deliberately unclamped here — their content extents are the coarse
+    ones, and clamping against an under-measured extent turns real scrolls into silent
+    no-ops (see the scrollTop setter) — so the read-back can never equal the probe's
+    clamped value. The root-scroller variants of this file pass.
 dom/events/scrolling/scrollend-event-fired-to-document.html:
 - name: testing, horizontal
   reason: Scroll/scrollend + wheel-transaction behavior driven by test_driver scroll/wheel/key/touch
@@ -36879,6 +36894,31 @@ html/canvas/element/filters/2d.filter.canvasFilterObject.colorMatrix.tentative.h
   reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
     specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
     path/suffix. CLAUDE.md rule 1.
+html/canvas/element/filters/2d.filter.canvasFilterObject.componentTransfer.discrete.tentative.html:
+- name: "== html/canvas/element/filters/2d.filter.canvasFilterObject.componentTransfer.discrete.tentative-expected.html"
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+html/canvas/element/filters/2d.filter.canvasFilterObject.componentTransfer.gamma.tentative.html:
+- name: "== html/canvas/element/filters/2d.filter.canvasFilterObject.componentTransfer.gamma.tentative-expected.html"
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+html/canvas/element/filters/2d.filter.canvasFilterObject.componentTransfer.identity.tentative.html:
+- name: "== html/canvas/element/filters/2d.filter.canvasFilterObject.componentTransfer.identity.tentative-expected.html"
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+html/canvas/element/filters/2d.filter.canvasFilterObject.componentTransfer.linear.tentative.html:
+- name: "== html/canvas/element/filters/2d.filter.canvasFilterObject.componentTransfer.linear.tentative-expected.html"
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+html/canvas/element/filters/2d.filter.canvasFilterObject.componentTransfer.table.tentative.html:
+- name: "== html/canvas/element/filters/2d.filter.canvasFilterObject.componentTransfer.table.tentative-expected.html"
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
 html/canvas/element/filters/2d.filter.canvasFilterObject.convolveMatrix.exceptions.tentative.html:
 - name: Test exceptions on CanvasFilter() convolveMatrix
   reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
@@ -36886,6 +36926,11 @@ html/canvas/element/filters/2d.filter.canvasFilterObject.convolveMatrix.exceptio
     path/suffix. CLAUDE.md rule 1.
 html/canvas/element/filters/2d.filter.canvasFilterObject.dropShadow.exceptions.tentative.html:
 - name: Test exceptions on CanvasFilter() dropShadow object
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+html/canvas/element/filters/2d.filter.canvasFilterObject.dropShadow.tentative.html:
+- name: "== html/canvas/element/filters/2d.filter.canvasFilterObject.dropShadow.tentative-expected.html"
   reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
     specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
     path/suffix. CLAUDE.md rule 1.
@@ -36904,6 +36949,31 @@ html/canvas/element/filters/2d.filter.layers.colorMatrix.tentative.html:
   reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
     specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
     path/suffix. CLAUDE.md rule 1.
+html/canvas/element/filters/2d.filter.layers.componentTransfer.discrete.tentative.html:
+- name: "== html/canvas/element/filters/2d.filter.layers.componentTransfer.discrete.tentative-expected.html"
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+html/canvas/element/filters/2d.filter.layers.componentTransfer.gamma.tentative.html:
+- name: "== html/canvas/element/filters/2d.filter.layers.componentTransfer.gamma.tentative-expected.html"
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+html/canvas/element/filters/2d.filter.layers.componentTransfer.identity.tentative.html:
+- name: "== html/canvas/element/filters/2d.filter.layers.componentTransfer.identity.tentative-expected.html"
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+html/canvas/element/filters/2d.filter.layers.componentTransfer.linear.tentative.html:
+- name: "== html/canvas/element/filters/2d.filter.layers.componentTransfer.linear.tentative-expected.html"
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+html/canvas/element/filters/2d.filter.layers.componentTransfer.table.tentative.html:
+- name: "== html/canvas/element/filters/2d.filter.layers.componentTransfer.table.tentative-expected.html"
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
 html/canvas/element/filters/2d.filter.layers.convolveMatrix.exceptions.tentative.html:
 - name: Test exceptions on CanvasFilter() convolveMatrix
   reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
@@ -36911,6 +36981,11 @@ html/canvas/element/filters/2d.filter.layers.convolveMatrix.exceptions.tentative
     path/suffix. CLAUDE.md rule 1.
 html/canvas/element/filters/2d.filter.layers.dropShadow.exceptions.tentative.html:
 - name: Test exceptions on CanvasFilter() dropShadow object
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+html/canvas/element/filters/2d.filter.layers.dropShadow.tentative.html:
+- name: "== html/canvas/element/filters/2d.filter.layers.dropShadow.tentative-expected.html"
   reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
     specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
     path/suffix. CLAUDE.md rule 1.
@@ -36935,6 +37010,32 @@ html/canvas/element/layers/2d.layer.ctm.getTransform.html:
     (rule 1). No shipping library or app uses it.
 html/canvas/element/layers/2d.layer.exceptions-are-no-op.tentative.html:
 - name: Checks that the context state is left unchanged if beginLayer throws.
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+html/canvas/element/layers/2d.layer.flush-on-frame-presentation.filtered_layer.tentative.html:
+- name: "== html/canvas/element/layers/2d.layer.flush-on-frame-presentation.filtered_layer.tentative-expected.html
+    (never ready to capture)"
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+html/canvas/element/layers/2d.layer.global-states.filter.ctx-filter.no-transform.tentative.html:
+- name: "== html/canvas/element/layers/2d.layer.global-states.filter.ctx-filter.no-transform.tentative-expected.html"
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+html/canvas/element/layers/2d.layer.global-states.filter.ctx-filter.rotation.tentative.html:
+- name: "== html/canvas/element/layers/2d.layer.global-states.filter.ctx-filter.rotation.tentative-expected.html"
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+html/canvas/element/layers/2d.layer.global-states.filter.no-cxt-filter.no-transform.tentative.html:
+- name: "== html/canvas/element/layers/2d.layer.global-states.filter.no-cxt-filter.no-transform.tentative-expected.html"
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+html/canvas/element/layers/2d.layer.global-states.filter.no-cxt-filter.rotation.tentative.html:
+- name: "== html/canvas/element/layers/2d.layer.global-states.filter.no-cxt-filter.rotation.tentative-expected.html"
   reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
     specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
     path/suffix. CLAUDE.md rule 1.
@@ -37003,6 +37104,41 @@ html/canvas/element/layers/2d.layer.malformed-operations.html:
   reason: Canvas Layers (beginLayer/endLayer) — an unshipped WICG proposal and a nested
     compositing-layer subsystem (layer-scoped filter/shadow/alpha) we don't model
     (rule 1). No shipping library or app uses it.
+html/canvas/element/layers/2d.layer.nested-filters.tentative.html:
+- name: "== html/canvas/element/layers/2d.layer.nested-filters.tentative-expected.html"
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+html/canvas/element/layers/2d.layer.opaque-canvas.layer-filter.tentative.html:
+- name: "== html/canvas/element/layers/2d.layer.opaque-canvas.layer-filter.tentative-expected.html"
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+html/canvas/element/layers/2d.layer.reset.filtered_layer.tentative.html:
+- name: "== html/canvas/element/layers/2d.layer.reset.filtered_layer.tentative-expected.html"
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+html/canvas/element/layers/2d.layer.shadow-from-outside-canvas.long-distance-with-clipping.layer-filter.tentative.html:
+- name: "== html/canvas/element/layers/2d.layer.shadow-from-outside-canvas.long-distance-with-clipping.layer-filter.tentative-expected.html"
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+html/canvas/element/layers/2d.layer.shadow-from-outside-canvas.long-distance.layer-filter.tentative.html:
+- name: "== html/canvas/element/layers/2d.layer.shadow-from-outside-canvas.long-distance.layer-filter.tentative-expected.html"
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+html/canvas/element/layers/2d.layer.shadow-from-outside-canvas.short-distance-with-clipping.layer-filter.tentative.html:
+- name: "== html/canvas/element/layers/2d.layer.shadow-from-outside-canvas.short-distance-with-clipping.layer-filter.tentative-expected.html"
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+html/canvas/element/layers/2d.layer.shadow-from-outside-canvas.short-distance.layer-filter.tentative.html:
+- name: "== html/canvas/element/layers/2d.layer.shadow-from-outside-canvas.short-distance.layer-filter.tentative-expected.html"
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
 html/canvas/element/layers/2d.layer.valid-calls.beginLayer-endLayer.html:
 - name: No exception raised on beginLayer() + endLayer().
   reason: Canvas Layers (beginLayer/endLayer) — an unshipped WICG proposal and a nested
@@ -37023,6 +37159,12 @@ html/canvas/element/layers/2d.layer.valid-calls.save-beginLayer.html:
   reason: Canvas Layers (beginLayer/endLayer) — an unshipped WICG proposal and a nested
     compositing-layer subsystem (layer-scoped filter/shadow/alpha) we don't model
     (rule 1). No shipping library or app uses it.
+html/canvas/element/manual/draw-element-image/anchor-positioning.tentative.html:
+- name: "== html/canvas/element/manual/draw-element-image/anchor-positioning-ref.html
+    (never ready to capture)"
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
 html/canvas/element/manual/draw-element-image/animated-gif-pinned-to-element-image.tentative.html:
 - name: 'Canvas.drawElementImage: animated gif advances and repaints the canvas'
   reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
@@ -37035,6 +37177,24 @@ html/canvas/element/manual/draw-element-image/animated-gif.tentative.html:
     path/suffix. CLAUDE.md rule 1.
 html/canvas/element/manual/draw-element-image/backdrop-filter-bounds-expansion.tentative.html:
 - name: drawElementImage applies backdrop-filter bounds beyond child drawable bounds
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+html/canvas/element/manual/draw-element-image/basic-rect-zoom.tentative.html:
+- name: "== html/canvas/element/manual/draw-element-image/basic-rect-ref.html (never
+    ready to capture)"
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+html/canvas/element/manual/draw-element-image/basic-rect.tentative.html:
+- name: "== html/canvas/element/manual/draw-element-image/basic-rect-ref.html (never
+    ready to capture)"
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+html/canvas/element/manual/draw-element-image/broken-image.tentative.html:
+- name: "== html/canvas/element/manual/draw-element-image/broken-image-ref.html (never
+    ready to capture)"
   reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
     specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
     path/suffix. CLAUDE.md rule 1.
@@ -37055,8 +37215,139 @@ html/canvas/element/manual/draw-element-image/captureElementImage.tentative.html
   reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
     specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
     path/suffix. CLAUDE.md rule 1.
+html/canvas/element/manual/draw-element-image/changes-in-paint-event.tentative.html:
+- name: "== html/canvas/element/manual/draw-element-image/changes-in-paint-event-ref.html
+    (never ready to capture)"
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+html/canvas/element/manual/draw-element-image/changing-size-in-paint-event.tentative.html:
+- name: "== html/canvas/element/manual/draw-element-image/changing-size-in-paint-event-ref.html
+    (never ready to capture)"
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+html/canvas/element/manual/draw-element-image/clips-overflow.tentative.html:
+- name: "== html/canvas/element/manual/draw-element-image/clips-overflow-ref.html
+    (never ready to capture)"
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+html/canvas/element/manual/draw-element-image/compositing-op-basic.tentative.html:
+- name: "== html/canvas/element/manual/draw-element-image/compositing-op-basic-ref.html
+    (never ready to capture)"
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+html/canvas/element/manual/draw-element-image/compositing-op-non-opaque-element.tentative.html:
+- name: "== html/canvas/element/manual/draw-element-image/compositing-op-non-opaque-element-ref.html
+    (never ready to capture)"
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
 html/canvas/element/manual/draw-element-image/containment.tentative.html:
 - name: canvas child containment
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+html/canvas/element/manual/draw-element-image/css-backdrop-filter-and-mask.tentative.html:
+- name: "== html/canvas/element/manual/draw-element-image/css-backdrop-filter-and-mask-ref.html
+    (never ready to capture)"
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+html/canvas/element/manual/draw-element-image/css-backdrop-filter-image.tentative.html:
+- name: "== html/canvas/element/manual/draw-element-image/css-filter-image-ref.html
+    (never ready to capture)"
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+html/canvas/element/manual/draw-element-image/css-backdrop-filter-on-div.tentative.html:
+- name: "== html/canvas/element/manual/draw-element-image/css-backdrop-filter-on-div-ref.html
+    (never ready to capture)"
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+html/canvas/element/manual/draw-element-image/css-backdrop-filter-with-sibling.tentative.html:
+- name: "== html/canvas/element/manual/draw-element-image/css-backdrop-filter-with-sibling-ref.html
+    (never ready to capture)"
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+html/canvas/element/manual/draw-element-image/css-backdrop-filter.tentative.html:
+- name: "== html/canvas/element/manual/draw-element-image/css-backdrop-filter-ref.html
+    (never ready to capture)"
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+html/canvas/element/manual/draw-element-image/css-blend-mode-over-both.tentative.html:
+- name: "== html/canvas/element/manual/draw-element-image/css-blend-mode-over-both-ref.html
+    (never ready to capture)"
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+html/canvas/element/manual/draw-element-image/css-blend-mode-over-content.tentative.html:
+- name: "== html/canvas/element/manual/draw-element-image/css-blend-mode-ref.html
+    (never ready to capture)"
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+html/canvas/element/manual/draw-element-image/css-blend-mode.tentative.html:
+- name: "== html/canvas/element/manual/draw-element-image/css-blend-mode-ref.html
+    (never ready to capture)"
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+html/canvas/element/manual/draw-element-image/css-blur-filter-on-div.tentative.html:
+- name: "== html/canvas/element/manual/draw-element-image/css-blur-filter-on-div-ref.html
+    (never ready to capture)"
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+html/canvas/element/manual/draw-element-image/css-clip-path-on-div.tentative.html:
+- name: "== html/canvas/element/manual/draw-element-image/css-clip-path-on-div-ref.html
+    (never ready to capture)"
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+html/canvas/element/manual/draw-element-image/css-filter-image.tentative.html:
+- name: "== html/canvas/element/manual/draw-element-image/css-filter-image-ref.html
+    (never ready to capture)"
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+html/canvas/element/manual/draw-element-image/css-filter-on-div.tentative.html:
+- name: "== html/canvas/element/manual/draw-element-image/css-filter-on-div-ref.html
+    (never ready to capture)"
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+html/canvas/element/manual/draw-element-image/css-filter-reference-on-div.tentative.html:
+- name: "== html/canvas/element/manual/draw-element-image/css-filter-reference-on-div-ref.html
+    (never ready to capture)"
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+html/canvas/element/manual/draw-element-image/css-mask-on-div.tentative.html:
+- name: "== html/canvas/element/manual/draw-element-image/css-mask-on-div-ref.html
+    (never ready to capture)"
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+html/canvas/element/manual/draw-element-image/css-opacity-on-div.tentative.html:
+- name: "== html/canvas/element/manual/draw-element-image/css-opacity-on-div-ref.html
+    (never ready to capture)"
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+html/canvas/element/manual/draw-element-image/css-transform-on-div.tentative.html:
+- name: "== html/canvas/element/manual/draw-element-image/css-transform-on-div-ref.html
+    (never ready to capture)"
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+html/canvas/element/manual/draw-element-image/dialog-paints-in-top-layer.tentative.html:
+- name: "== html/canvas/element/manual/draw-element-image/dialog-paints-in-top-layer-ref.html"
   reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
     specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
     path/suffix. CLAUDE.md rule 1.
@@ -37136,6 +37427,12 @@ html/canvas/element/manual/draw-element-image/draw-element-image-returned-matrix
   reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
     specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
     path/suffix. CLAUDE.md rule 1.
+html/canvas/element/manual/draw-element-image/draw-element-image-scale-variant.tentative.html:
+- name: "== html/canvas/element/manual/draw-element-image/draw-element-image-scale-variant-ref.html
+    (never ready to capture)"
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
 html/canvas/element/manual/draw-element-image/drawElementImage-zero-size.tentative.html:
 - name: drawElementImage with zero size does nothing
   reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
@@ -37151,8 +37448,26 @@ html/canvas/element/manual/draw-element-image/element-image-fractional-size.tent
   reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
     specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
     path/suffix. CLAUDE.md rule 1.
+html/canvas/element/manual/draw-element-image/element-shadow.tentative.html:
+- name: "== html/canvas/element/manual/draw-element-image/element-shadow-ref.html
+    (never ready to capture)"
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
 html/canvas/element/manual/draw-element-image/error-conditions.tentative.html:
 - name: Tests that error conditions cause exceptions
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+html/canvas/element/manual/draw-element-image/filtered-basic.tentative.html:
+- name: "== html/canvas/element/manual/draw-element-image/filtered-basic-ref.html
+    (never ready to capture)"
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+html/canvas/element/manual/draw-element-image/fullscreen-canvas.tentative.html:
+- name: "== html/canvas/element/manual/draw-element-image/fullscreen-canvas-ref.html
+    (never ready to capture)"
   reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
     specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
     path/suffix. CLAUDE.md rule 1.
@@ -37207,8 +37522,9 @@ html/canvas/element/manual/draw-element-image/get-element-transform.tentative.ht
   reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
     specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
     path/suffix. CLAUDE.md rule 1.
-html/canvas/element/manual/draw-element-image/hit-test/elementsFromPoint-no-layoutsubtree.tentative.html:
-- name: Child elements should be excluded from elementsFromPoint
+html/canvas/element/manual/draw-element-image/global-alpha-basic.tentative.html:
+- name: "== html/canvas/element/manual/draw-element-image/global-alpha-basic-ref.html
+    (never ready to capture)"
   reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
     specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
     path/suffix. CLAUDE.md rule 1.
@@ -37239,8 +37555,41 @@ html/canvas/element/manual/draw-element-image/hit-test/selection.tentative.html:
   reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
     specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
     path/suffix. CLAUDE.md rule 1.
+html/canvas/element/manual/draw-element-image/hit-test/z-index.tentative.html:
+- name: elementFromPoint should hit the highest z-index element.
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: elementFromPoint should hit the last element in dom order.
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+html/canvas/element/manual/draw-element-image/iframe-local.tentative.html:
+- name: "== html/canvas/element/manual/draw-element-image/basic-rect-ref.html (never
+    ready to capture)"
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+html/canvas/element/manual/draw-element-image/iframe.tentative.html:
+- name: "== html/canvas/element/manual/draw-element-image/iframe-ref.html (never ready
+    to capture)"
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+html/canvas/element/manual/draw-element-image/ink-overflow.tentative.html:
+- name: "== html/canvas/element/manual/draw-element-image/ink-overflow-ref.html (never
+    ready to capture)"
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
 html/canvas/element/manual/draw-element-image/intersection-observer-visibility.tentative.html:
 - name: Elements under canvas should report intersections, but not visibility
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+html/canvas/element/manual/draw-element-image/invalidation-during-onpaint.tentative.html:
+- name: "== html/canvas/element/manual/draw-element-image/invalidation-during-onpaint-ref.html
+    (never ready to capture)"
   reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
     specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
     path/suffix. CLAUDE.md rule 1.
@@ -37249,13 +37598,14 @@ html/canvas/element/manual/draw-element-image/layout-canvas-children.tentative.h
   reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
     specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
     path/suffix. CLAUDE.md rule 1.
-html/canvas/element/manual/draw-element-image/layoutsubtree-no-hit-test.tentative.html:
-- name: canvas elementFromPoint
+html/canvas/element/manual/draw-element-image/moved-nested-layoutsubtree-canvas.tentative.html:
+- name: drawElementImage should throw if a canvas is moved to be nested
   reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
     specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
     path/suffix. CLAUDE.md rule 1.
-html/canvas/element/manual/draw-element-image/moved-nested-layoutsubtree-canvas.tentative.html:
-- name: drawElementImage should throw if a canvas is moved to be nested
+html/canvas/element/manual/draw-element-image/nested-canvas-invalidation.tentative.html:
+- name: "== html/canvas/element/manual/draw-element-image/nested-canvas-invalidation-ref.html
+    (never ready to capture)"
   reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
     specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
     path/suffix. CLAUDE.md rule 1.
@@ -37266,6 +37616,12 @@ html/canvas/element/manual/draw-element-image/nested-div-layoutsubtree-canvas.te
     path/suffix. CLAUDE.md rule 1.
 html/canvas/element/manual/draw-element-image/nested-layoutsubtree-canvas.tentative.html:
 - name: drawElementImage should throw if called on a nested canvas
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+html/canvas/element/manual/draw-element-image/non-opaque-element.tentative.html:
+- name: "== html/canvas/element/manual/draw-element-image/non-opaque-element-ref.html
+    (never ready to capture)"
   reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
     specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
     path/suffix. CLAUDE.md rule 1.
@@ -37334,6 +37690,18 @@ html/canvas/element/manual/draw-element-image/onpaint.tentative.html:
   reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
     specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
     path/suffix. CLAUDE.md rule 1.
+html/canvas/element/manual/draw-element-image/opacity-animation.tentative.html:
+- name: "== html/canvas/element/manual/draw-element-image/opacity-animation-ref.html
+    (never ready to capture)"
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+html/canvas/element/manual/draw-element-image/percent-sizing.tentative.html:
+- name: "== html/canvas/element/manual/draw-element-image/basic-rect-ref.html (never
+    ready to capture)"
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
 html/canvas/element/manual/draw-element-image/privacy/backdrop-filter-png-images-ignored.tentative.https.sub.html:
 - name: drawElementImage does not use cross-origin feimage content via CSS backdrop-filter
   reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
@@ -37389,37 +37757,6 @@ html/canvas/element/manual/draw-element-image/privacy/filtered-div-multi-filters
   reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
     specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
     path/suffix. CLAUDE.md rule 1.
-html/canvas/element/manual/draw-element-image/privacy/filtered-div-ref-external-svg-ignored.tentative.https.sub.html:
-- name: drawElementImage does not use external cross-origin SVG via CSS
-  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
-    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
-    path/suffix. CLAUDE.md rule 1.
-html/canvas/element/manual/draw-element-image/privacy/filtered-div-ref-svg-feimage-ignored.tentative.https.sub.html:
-- name: drawElementImage does not use cross-origin feimage content via CSS
-  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
-    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
-    path/suffix. CLAUDE.md rule 1.
-html/canvas/element/manual/draw-element-image/privacy/filtered-div-ref-svg-feimage-svg-ignored.tentative.https.sub.html:
-- name: drawElementImage does not use cross-origin feimage using SVG-as-Image via
-    CSS
-  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
-    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
-    path/suffix. CLAUDE.md rule 1.
-html/canvas/element/manual/draw-element-image/privacy/filtered-div-ref-svg-mixed-ignored.tentative.https.sub.html:
-- name: drawElementImage does not use cross-origin SVG filter content via CSS
-  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
-    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
-    path/suffix. CLAUDE.md rule 1.
-html/canvas/element/manual/draw-element-image/privacy/filtered-svg-ref-svg-feimage-ignored.tentative.https.sub.html:
-- name: drawElementImage does not use cross-origin feimage content in SVG
-  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
-    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
-    path/suffix. CLAUDE.md rule 1.
-html/canvas/element/manual/draw-element-image/privacy/filtered-svg-ref-svg-feimage-svg-ignored.tentative.https.sub.html:
-- name: drawElementImage does not use cross-origin feimage SVG-as-Image in SVG
-  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
-    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
-    path/suffix. CLAUDE.md rule 1.
 html/canvas/element/manual/draw-element-image/privacy/fragment-mask-png-ignored.tentative.https.sub.html:
 - name: drawElementImage does not use cross-origin mask images
   reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
@@ -37467,6 +37804,24 @@ html/canvas/element/manual/draw-element-image/privacy/picture-images-ignored.ten
     path/suffix. CLAUDE.md rule 1.
 html/canvas/element/manual/draw-element-image/privacy/scrollbar-thumb-images-ignored.tentative.https.sub.html:
 - name: drawElementImage does not draw cross-origin scrollbar thumb images
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+html/canvas/element/manual/draw-element-image/privacy/selection-alone-with-decorations-painted.tentative.html:
+- name: "== html/canvas/element/manual/draw-element-image/privacy/selection-alone-with-decorations-painted-ref.html
+    (never ready to capture)"
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+html/canvas/element/manual/draw-element-image/privacy/selection-colors-default.tentative.html:
+- name: "== html/canvas/element/manual/draw-element-image/privacy/selection-colors-default-ref.html
+    (never ready to capture)"
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+html/canvas/element/manual/draw-element-image/privacy/selection-painted-overlay-path.tentative.html:
+- name: "== html/canvas/element/manual/draw-element-image/privacy/selection-painted-overlay-path-ref.html
+    (never ready to capture)"
   reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
     specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
     path/suffix. CLAUDE.md rule 1.
@@ -37521,6 +37876,12 @@ html/canvas/element/manual/draw-element-image/privacy/svg-use-ignored.tentative.
   reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
     specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
     path/suffix. CLAUDE.md rule 1.
+html/canvas/element/manual/draw-element-image/privacy/target-text-ignored-overlay-path.tentative.html:
+- name: "== html/canvas/element/manual/draw-element-image/privacy/target-text-ignored-overlay-path-ref.html
+    (never ready to capture)"
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
 html/canvas/element/manual/draw-element-image/privacy/video-ignored.tentative.https.sub.html:
 - name: drawElementImage does not draw cross-origin images
   reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
@@ -37559,8 +37920,136 @@ html/canvas/element/manual/draw-element-image/requestPaint.tentative.html:
   reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
     specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
     path/suffix. CLAUDE.md rule 1.
+html/canvas/element/manual/draw-element-image/scale.tentative.html:
+- name: "== html/canvas/element/manual/draw-element-image/scale-ref.html (never ready
+    to capture)"
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+html/canvas/element/manual/draw-element-image/shadow-basic.tentative.html:
+- name: "== html/canvas/element/manual/draw-element-image/shadow-basic-ref.html (never
+    ready to capture)"
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+html/canvas/element/manual/draw-element-image/shadow-non-opaque-element.tentative.html:
+- name: "== html/canvas/element/manual/draw-element-image/shadow-non-opaque-element-ref.html
+    (never ready to capture)"
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+html/canvas/element/manual/draw-element-image/svg-foreign-object.tentative.html:
+- name: "== html/canvas/element/manual/draw-element-image/basic-rect-ref.html (never
+    ready to capture)"
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+html/canvas/element/manual/draw-element-image/svg-rect.tentative.html:
+- name: "== html/canvas/element/manual/draw-element-image/basic-rect-ref.html (never
+    ready to capture)"
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+html/canvas/element/manual/draw-element-image/top-layer-not-painted-in-canvas.tentative.html:
+- name: "== html/canvas/element/manual/draw-element-image/top-layer-not-painted-in-canvas-ref.html
+    (never ready to capture)"
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
 html/canvas/element/manual/draw-element-image/video.tentative.html:
 - name: drawElementImage repaints video frames
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+html/canvas/element/manual/drawing-images-to-the-canvas/image-orientation/drawImage-from-bitmap-orientation-none.tentative.html:
+- name: "== html/canvas/element/manual/drawing-images-to-the-canvas/image-orientation/drawImage-from-bitmap-orientation-none-ref.html
+    (both renderings blank)"
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+? html/canvas/element/manual/drawing-images-to-the-canvas/image-orientation/drawImage-from-bitmap-swap-width-height-orientation-none.tentative.html
+: - name: "== html/canvas/element/manual/drawing-images-to-the-canvas/image-orientation/drawImage-from-bitmap-swap-width-height-orientation-none-ref.html
+      (both renderings blank)"
+    reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+      specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+      path/suffix. CLAUDE.md rule 1.
+html/canvas/element/manual/drawing-images-to-the-canvas/image-orientation/drawImage-from-bitmap-swap-width-height.tentative.html:
+- name: "== html/canvas/element/manual/drawing-images-to-the-canvas/image-orientation/drawImage-from-bitmap-swap-width-height-ref.html
+    (both renderings blank)"
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+html/canvas/element/manual/drawing-images-to-the-canvas/image-orientation/drawImage-from-bitmap.tentative.html:
+- name: "== html/canvas/element/manual/drawing-images-to-the-canvas/image-orientation/drawImage-from-bitmap-ref.html
+    (both renderings blank)"
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+html/canvas/element/manual/drawing-images-to-the-canvas/image-orientation/drawImage-from-blob.tentative.html:
+- name: "== html/canvas/element/manual/drawing-images-to-the-canvas/image-orientation/drawImage-from-blob-ref.html
+    (never ready to capture)"
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+html/canvas/element/manual/drawing-images-to-the-canvas/image-orientation/drawImage-from-element-orientation-none.tentative.html:
+- name: "== html/canvas/element/manual/drawing-images-to-the-canvas/image-orientation/drawImage-from-element-orientation-none-ref.html
+    (both renderings blank)"
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+? html/canvas/element/manual/drawing-images-to-the-canvas/image-orientation/drawImage-from-element-swap-width-height-orientation-none.tentative.html
+: - name: "== html/canvas/element/manual/drawing-images-to-the-canvas/image-orientation/drawImage-from-element-swap-width-height-orientation-none-ref.html
+      (both renderings blank)"
+    reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+      specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+      path/suffix. CLAUDE.md rule 1.
+? html/canvas/element/manual/drawing-images-to-the-canvas/image-orientation/drawImage-from-element-swap-width-height.tentative.html
+: - name: "== html/canvas/element/manual/drawing-images-to-the-canvas/image-orientation/drawImage-from-element-swap-width-height-ref.html
+      (both renderings blank)"
+    reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+      specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+      path/suffix. CLAUDE.md rule 1.
+html/canvas/element/manual/drawing-images-to-the-canvas/image-orientation/drawImage-from-element.tentative.html:
+- name: "== html/canvas/element/manual/drawing-images-to-the-canvas/image-orientation/drawImage-from-element-ref.html
+    (both renderings blank)"
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+html/canvas/element/manual/drawing-images-to-the-canvas/image-orientation/drawImage-with-src-rect.tentative.html:
+- name: "== html/canvas/element/manual/drawing-images-to-the-canvas/image-orientation/drawImage-with-src-rect-ref.html
+    (both renderings blank)"
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+html/canvas/element/manual/filters/tentative/canvas-filter-object-blur.html:
+- name: "== html/canvas/element/manual/filters/tentative/canvas-filter-object-blur-expected.html"
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+html/canvas/element/manual/filters/tentative/canvas-filter-object-component-transfer.html:
+- name: "== html/canvas/element/manual/filters/tentative/canvas-filter-object-component-transfer-expected.html"
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+html/canvas/element/manual/filters/tentative/canvas-filter-object-convolve-matrix.html:
+- name: "== html/canvas/element/manual/filters/tentative/canvas-filter-object-convolve-matrix-expected.html"
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+html/canvas/element/manual/filters/tentative/canvas-filter-object-turbulence.html:
+- name: "== html/canvas/element/manual/filters/tentative/canvas-filter-object-turbulence-expected.html"
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+html/canvas/element/manual/filters/tentative/idl-conversions/canvas-filter-boolean-conversion.html:
+- name: "== html/canvas/element/manual/filters/tentative/idl-conversions/canvas-filter-boolean-conversion-expected.html
+    (both renderings blank)"
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+html/canvas/element/manual/filters/tentative/idl-conversions/canvas-filter-long-conversion.html:
+- name: "== html/canvas/element/manual/filters/tentative/idl-conversions/canvas-filter-long-conversion-expected.html
+    (both renderings blank)"
   reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
     specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
     path/suffix. CLAUDE.md rule 1.
@@ -37717,6 +38206,21 @@ html/canvas/element/pixel-manipulation/2d.imageData.put.basic.rgba.float16.html:
   reason: The rgba-float16 ImageData pixel format is a high-bit-depth / half-float
     pixel buffer (Float16Array-backed), part of the wide-gamut / HDR colour subsystem
     we deliberately do not model (rule 1); no library or app uses it.
+html/canvas/element/text/2d.text.measure.fillTextCluster-align.tentative.html:
+- name: "== html/canvas/element/text/2d.text.measure.fillTextCluster-align.tentative-expected.html"
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+html/canvas/element/text/2d.text.measure.fillTextCluster-baseline.tentative.html:
+- name: "== html/canvas/element/text/2d.text.measure.fillTextCluster-baseline.tentative-expected.html"
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+html/canvas/element/text/2d.text.measure.fillTextCluster-drawing-styles-change.tentative.html:
+- name: "== html/canvas/element/text/2d.text.measure.fillTextCluster-drawing-styles-change.tentative-expected.html"
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
 html/canvas/element/text/2d.text.measure.fillTextCluster-options.tentative.html:
 - name: Test that fillTextCluster() correctly applies the options passed as a dictionary.
   reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
@@ -38174,6 +38678,21 @@ html/canvas/element/text/2d.text.measure.selection-rects.tentative.html:
   reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
     specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
     path/suffix. CLAUDE.md rule 1.
+html/canvas/element/text/2d.text.measure.strokeTextCluster-align.tentative.html:
+- name: "== html/canvas/element/text/2d.text.measure.strokeTextCluster-align.tentative-expected.html"
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+html/canvas/element/text/2d.text.measure.strokeTextCluster-baseline.tentative.html:
+- name: "== html/canvas/element/text/2d.text.measure.strokeTextCluster-baseline.tentative-expected.html"
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+html/canvas/element/text/2d.text.measure.strokeTextCluster-drawing-styles-change.tentative.html:
+- name: "== html/canvas/element/text/2d.text.measure.strokeTextCluster-drawing-styles-change.tentative-expected.html"
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
 html/canvas/element/text/2d.text.measure.strokeTextCluster-options.tentative.html:
 - name: Test that strokeTextCluster() correctly applies the options passed as a dictionary.
   reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
@@ -38313,27 +38832,11 @@ html/dom/elements/the-innertext-and-outertext-properties/getter.html:
   reason: innerText/outerText getter values depend on the RENDERING/layout tree (white-space
     collapsing across laid-out boxes, line-box breaking) — a layout engine we deliberately
     do not model (rule 1). The IDL surface exists; these assert rendered text geometry.
-- name: <audio> contents ignored ("<audio style='display:block'>abc")
-  reason: innerText/outerText getter values depend on the RENDERING/layout tree (white-space
-    collapsing across laid-out boxes, line-box breaking) — a layout engine we deliberately
-    do not model (rule 1). The IDL surface exists; these assert rendered text geometry.
-- name: <audio> contents ignored ("<div><audio>abc")
-  reason: innerText/outerText getter values depend on the RENDERING/layout tree (white-space
-    collapsing across laid-out boxes, line-box breaking) — a layout engine we deliberately
-    do not model (rule 1). The IDL surface exists; these assert rendered text geometry.
 - name: <br> content ignored ("<div><br class='poke'>")
   reason: innerText/outerText getter values depend on the RENDERING/layout tree (white-space
     collapsing across laid-out boxes, line-box breaking) — a layout engine we deliberately
     do not model (rule 1). The IDL surface exists; these assert rendered text geometry.
 - name: <br> induces line break even at end of block ("<div>abc<br>")
-  reason: innerText/outerText getter values depend on the RENDERING/layout tree (white-space
-    collapsing across laid-out boxes, line-box breaking) — a layout engine we deliberately
-    do not model (rule 1). The IDL surface exists; these assert rendered text geometry.
-- name: <canvas> contents ignored ("<canvas>abc")
-  reason: innerText/outerText getter values depend on the RENDERING/layout tree (white-space
-    collapsing across laid-out boxes, line-box breaking) — a layout engine we deliberately
-    do not model (rule 1). The IDL surface exists; these assert rendered text geometry.
-- name: <canvas> contents ignored ("<div><canvas>abc")
   reason: innerText/outerText getter values depend on the RENDERING/layout tree (white-space
     collapsing across laid-out boxes, line-box breaking) — a layout engine we deliberately
     do not model (rule 1). The IDL surface exists; these assert rendered text geometry.
@@ -38350,18 +38853,6 @@ html/dom/elements/the-innertext-and-outertext-properties/getter.html:
     collapsing across laid-out boxes, line-box breaking) — a layout engine we deliberately
     do not model (rule 1). The IDL surface exists; these assert rendered text geometry.
 - name: <hr><hr><hr> induces just one line break ("<div>abc<hr><hr><hr>def")
-  reason: innerText/outerText getter values depend on the RENDERING/layout tree (white-space
-    collapsing across laid-out boxes, line-box breaking) — a layout engine we deliberately
-    do not model (rule 1). The IDL surface exists; these assert rendered text geometry.
-- name: <iframe> contents ignored ("<div><iframe>abc")
-  reason: innerText/outerText getter values depend on the RENDERING/layout tree (white-space
-    collapsing across laid-out boxes, line-box breaking) — a layout engine we deliberately
-    do not model (rule 1). The IDL surface exists; these assert rendered text geometry.
-- name: <iframe> contents ignored ("<iframe><div id='target'>abc")
-  reason: innerText/outerText getter values depend on the RENDERING/layout tree (white-space
-    collapsing across laid-out boxes, line-box breaking) — a layout engine we deliberately
-    do not model (rule 1). The IDL surface exists; these assert rendered text geometry.
-- name: <iframe> contents ignored ("<iframe>abc")
   reason: innerText/outerText getter values depend on the RENDERING/layout tree (white-space
     collapsing across laid-out boxes, line-box breaking) — a layout engine we deliberately
     do not model (rule 1). The IDL surface exists; these assert rendered text geometry.
@@ -38430,14 +38921,6 @@ html/dom/elements/the-innertext-and-outertext-properties/getter.html:
     collapsing across laid-out boxes, line-box breaking) — a layout engine we deliberately
     do not model (rule 1). The IDL surface exists; these assert rendered text geometry.
 - name: <textarea> contents ignored ("<textarea>abc")
-  reason: innerText/outerText getter values depend on the RENDERING/layout tree (white-space
-    collapsing across laid-out boxes, line-box breaking) — a layout engine we deliberately
-    do not model (rule 1). The IDL surface exists; these assert rendered text geometry.
-- name: <video> contents ignored ("<div><video>abc")
-  reason: innerText/outerText getter values depend on the RENDERING/layout tree (white-space
-    collapsing across laid-out boxes, line-box breaking) — a layout engine we deliberately
-    do not model (rule 1). The IDL surface exists; these assert rendered text geometry.
-- name: <video> contents ignored ("<video>abc")
   reason: innerText/outerText getter values depend on the RENDERING/layout tree (white-space
     collapsing across laid-out boxes, line-box breaking) — a layout engine we deliberately
     do not model (rule 1). The IDL surface exists; these assert rendered text geometry.
@@ -43040,6 +43523,11 @@ html/semantics/forms/the-select-element/customizable-select-listbox/select-listb
 - name: "<select>: Typeahead should focus options without checking them."
   reason: 'Customizable <select> base-appearance listbox: option focus model + in-listbox
     keyboard navigation/scroll are rendering we do not model.'
+html/semantics/forms/the-select-element/customizable-select-multiple-popup/select-multiple-popup-appearance.tentative.html:
+- name: "== html/semantics/forms/the-select-element/customizable-select-multiple-popup/select-multiple-popup-appearance-ref.html"
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
 ? html/semantics/forms/the-select-element/customizable-select-multiple-popup/select-multiple-popup-keyboard-behavior.tentative.html
 : - name: Keyboard behavior for base appearance <select multiple size=1>
     reason: 'Customizable <select> picker (appearance:base-select): popover open/close,
@@ -43155,6 +43643,11 @@ html/semantics/forms/the-select-element/customizable-select/select-disabled.html
     appearance:base-select.'
   reason: Pointer automation (test_driver.Actions pointer sequences, :active/:hover
     interaction state, touch, click-drag, pointer-event metadata) — not modeled.
+html/semantics/forms/the-select-element/customizable-select/select-display-block.tentative.html:
+- name: "== html/semantics/forms/the-select-element/customizable-select/select-display-block-ref.html"
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
 html/semantics/forms/the-select-element/customizable-select/select-events-2.optional.html:
 - name: "<select> should fire input and change events when new option is selected."
   reason: 'Customizable <select> picker (appearance:base-select): popover open/close,
@@ -43531,6 +44024,11 @@ html/semantics/forms/the-select-element/customizable-select/switch-picker-appear
     while the picker is open
   reason: appearance:base-select UA stylesheet + ::picker/::checkmark/::picker-icon
     pseudo-element computed style — base-select rendering not modeled.
+html/semantics/forms/the-select-element/filterable-select/filterable-select-appearance.tentative.html:
+- name: "== html/semantics/forms/the-select-element/filterable-select/filterable-select-appearance-ref.html"
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
 html/semantics/forms/the-select-element/filterable-select/filterable-select-filtered-pseudo.tentative.html:
 - name: Sibling input and select pattern should not support dropdown select elements.
   reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
@@ -43568,6 +44066,12 @@ html/semantics/forms/the-select-element/select-many-options.tentative.html:
 - name: The popover should be bottom left positioned
   reason: Layout geometry (getBoundingClientRect / offsetWidth / intrinsic size /
     scroll position / popover positioning) — no layout engine.
+html/semantics/forms/the-select-element/select-marker-end-aligned.tentative.html:
+- name: "== html/semantics/forms/the-select-element/select-marker-end-aligned-ref.tentative.html
+    (both renderings blank)"
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
 html/semantics/forms/the-select-element/select-multiple-resize-does-not-autoscroll.html:
 - name: Resizing <select multiple> should not autoscroll the listbox.
   reason: Layout geometry (getBoundingClientRect / offsetWidth / intrinsic size /
@@ -43608,6 +44112,11 @@ html/semantics/forms/the-select-element/show-picker-being-rendered.html:
 - name: select showPicker() throws when not being rendered
   reason: showPicker() gating on render state (being-rendered / content-visibility:hidden)
     — needs visibility/render state we do not model.
+html/semantics/forms/the-textarea-element/placeholder-white-space.tentative.html:
+- name: "!= html/semantics/forms/the-textarea-element/placeholder-white-space-notref.html"
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
 html/semantics/forms/the-textarea-element/textarea-placeholder-lineheight.html:
 - name: Bounding rect height for textarea must be the same as line-height
   reason: Layout geometry (getBoundingClientRect / offsetWidth / intrinsic size /

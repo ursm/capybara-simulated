@@ -2,6 +2,6 @@
 
 require_relative '../support/wpt_gate'
 
-RSpec.describe 'WPT conformance (dom/) 7/8', :wpt do
+RSpec.describe 'WPT conformance 7/8', :wpt do
   WptGate.install(self, shard: 7, shards: 8)
 end

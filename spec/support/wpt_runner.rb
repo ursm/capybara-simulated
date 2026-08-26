@@ -18,6 +18,12 @@ require 'digest'
 # virtual clock so the harness completion + any async-test timers run, and
 # reads the results our reporter (spec/wpt/resources/testharnessreport.js)
 # stashed on `globalThis.__wptResults`.
+#
+# A REFTEST has no harness: it names a reference with `<link rel="match">` and is
+# judged by rendering both through the painter and comparing the images (see
+# `run_reftest`). It reports in the same shape as a harness file — one
+# pseudo-subtest per reference — so the gate, the allowlists and wpt_diag treat
+# the two kinds identically.
 module WptRunner
   ROOT              = File.expand_path('../wpt', __dir__)
   # The generic WPT `.py` request-handler executor (a minimal wptserve shim).
@@ -901,21 +907,61 @@ module WptRunner
   JS_TREES = '{dom,hr-time,url,encoding,FileAPI,html/webappapis/timers,html/webappapis/microtask-queuing,html/webappapis/scripting/events,xhr,html/dom,html/semantics/forms,custom-elements,html/webappapis/atob,html/webappapis/structured-clone,webmessaging,input-events,fetch/api,fetch/data-urls,fetch/h1-parsing,service-workers/cache-storage,webstorage,websockets,WebCryptoAPI}'
 
   def test_files
-    @test_files ||= begin
-      html = Dir.glob("#{TREES}/**/*.{html,htm,xhtml,xht}", base: ROOT).reject {|rel|
-        rel.end_with?('-ref.html', '-manual.html', '-notref.html', '-ref.xhtml', '-manual.xhtml') ||
-          (rel.split('/') & %w[support resources reftest]).any? ||
-          skipped?(rel)
-      }.select {|rel|
-        File.read(File.join(ROOT, rel)).include?('/resources/testharness.js')
-      }
-      # `.any.js` / `.window.js` multi-global tests (run via the synthesized
-      # window-variant wrapper, see `app` / `any_js_wrapper`); scope = JS_TREES.
-      js = Dir.glob("#{JS_TREES}/**/*.{any,window}.js", base: ROOT).reject {|rel|
-        (rel.split('/') & %w[support resources]).any? || skipped?(rel)
-      }
-      (html + js).sort
-    end
+    @test_files ||= (harness_files + js_files + reftest_files).sort
+  end
+
+  # Every vendored document that could be a test: reference / manual / support
+  # files and listed driver crashers are not. Split below by HOW each is judged —
+  # a harness file reports its own subtests, a reftest is judged by its rendering.
+  def candidate_files
+    @candidate_files ||= Dir.glob("#{TREES}/**/*.{html,htm,xhtml,xht}", base: ROOT).reject {|rel|
+      reference_or_manual?(rel) ||
+        (rel.split('/') & %w[support resources reftest reference]).any? ||
+        skipped?(rel)
+    }
+  end
+
+  # WPT's own rule for "this document is not a test" (tools/manifest/sourcefile.py): a basename
+  # holding a `ref` / `notref` component, or ending in `-manual`. Hand-listing the suffixes instead
+  # missed 20 reference files — six of which then ran as harness tests — and let four `*-manual.htm`
+  # files into the gate, which WPT never runs (they need a human).
+  REFERENCE_NAME = /(\A|[-_])(not)?ref[0-9]*([-_]|\z)/
+
+  def reference_or_manual?(rel)
+    base = File.basename(rel, '.*')
+    base.end_with?('-manual') || base.match?(REFERENCE_NAME)
+  end
+
+  # Harness tests: they pull in testharness.js and report subtests of their own.
+  def harness_files
+    @harness_files ||= candidate_files.select {|rel|
+      File.read(File.join(ROOT, rel)).include?('/resources/testharness.js')
+    }
+  end
+
+  # `.any.js` / `.window.js` multi-global tests (run via the synthesized
+  # window-variant wrapper, see `app` / `any_js_wrapper`); scope = JS_TREES.
+  def js_files
+    @js_files ||= Dir.glob("#{JS_TREES}/**/*.{any,window}.js", base: ROOT).reject {|rel|
+      (rel.split('/') & %w[support resources]).any? || skipped?(rel)
+    }
+  end
+
+  # Reference tests: a file that names a reference with `<link rel="match">` /
+  # `<link rel="mismatch">` and is judged by RENDERING both and comparing the two
+  # images — the way Chromium and Firefox run them, and what the painter (plus
+  # libvips) made possible here. The comparison is between two renderings by the
+  # SAME painter, so this painter's coarseness (no gradients, no border-radius,
+  # no glyph shaping) largely CANCELS and what survives is the difference the
+  # test isolates. A file carrying both a reference and testharness.js reports
+  # subtests, so it stays a harness test and is not run twice.
+  def reftest_files
+    @reftest_files ||= (candidate_files - harness_files).select {|rel| reftest_refs(rel).any? }
+  end
+
+  def reftest?(rel)
+    @reftest_set ||= reftest_files.to_set
+    @reftest_set.include?(rel)
   end
 
   # Synthesize the window-variant HTML wrapper for a `.any.js` / `.window.js`
@@ -982,7 +1028,12 @@ module WptRunner
   # union equals the no-query run) or SELECTS a mode (?mode=open) the no-query run
   # would otherwise miss. A file with no variants runs once (the no-query URL).
   # If any variant fails to complete, the whole file is reported not-completed.
+  #
+  # A REFTEST has no harness to report subtests, so it is judged by rendering (see
+  # `run_reftest`) and reports its reference comparisons in the same shape — which
+  # is what lets the gate, the allowlists and wpt_diag treat it like any other file.
   def run(rel)
+    return run_reftest(rel) if reftest?(rel)
     variants = variant_queries(rel)
     return run_one(rel) if variants.empty?
     merged       = []
@@ -996,12 +1047,25 @@ module WptRunner
     {completed: true, failing: merged, tests: merged_tests}
   end
 
+  # A test file's source, for the `<meta>` / `<link>` declarations the runner reads out of it.
+  # Read WHOLE, not a head window: 29 vendored documents carry more than 64 KB before their
+  # `<link rel=match>`, and a window that cut one off would drop it from `reftest_files` — no test,
+  # no allowlist entry, no red. `test_files` already reads every candidate file in full anyway.
+  def source_of(rel)
+    path = File.join(ROOT, rel)
+    return '' unless File.file?(path) && File.size(path).positive?
+    # `.scrub`: the encoding/ tree ships files that are deliberately not valid UTF-8, and a
+    # metadata scan over one would otherwise raise mid-discovery.
+    File.read(path).to_s.scrub
+  rescue StandardError
+    ''
+  end
+
   # A file's declared variant query strings: `<meta name=variant content="?…">`
   # (HTML) or `// META: variant=?…` (`.any.js` / `.window.js`). Empty → no variants.
   def variant_queries(rel)
-    path = File.join(ROOT, rel)
-    return [] unless File.file?(path) && File.size(path).positive?
-    head = File.read(path, 65536).to_s
+    head = source_of(rel)
+    return [] if head.empty?
     qs = if rel.end_with?('.any.js', '.window.js')
       head.scan(%r{^\s*//\s*META:\s*variant=(\S+)}).flatten
     else
@@ -1012,43 +1076,43 @@ module WptRunner
     []
   end
 
-  # Run a SINGLE (rel, variant-query) pair. `query` is '' for a no-variant file.
-  def run_one(rel, query = '')
-    # `.sub.` files are served with wptserve `{{…}}` substitution and visited at
-    # the canonical wptserve origin so their substituted host:port matches the
-    # document origin (resolved-URL assertions depend on it). Crossing origins on
-    # the shared session leaves the *next* file's harness unable to complete, so
-    # isolate `.sub.` runs behind a fresh session on both sides — cheap (a handful
-    # of files) and keeps every other file on the stable www.example.com path.
-    base    = File.basename(rel)
-    sub     = base.include?('.sub.')
-    # `.https.` files are served at the canonical HTTPS origin (see SUB_HTTPS_ORIGIN);
-    # `.sub.` files at the canonical HTTP origin. Both cross origin off the default
-    # www.example.com, so isolate them behind a fresh session on each side.
-    # A `?wpt_flags=https` (or h2 — TLS-only) VARIANT asks for the https origin the
-    # same way the filename suffix does: websockets/cookies/006's wss variant sets a
-    # Secure cookie via document.cookie, which a non-secure page may not store.
-    https   = base.include?('.https.') || query.include?('wpt_flags=https') || query.include?('wpt_flags=h2')
-    cross   = sub || https
-    drop_session! if cross
-    s = session
-    # Full per-file reset — what Capybara runs between tests, which this long-lived
-    # WPT session bypasses (it memoizes ONE session for the whole suite). It gives each
-    # file the fresh browsing context real WPT's per-file isolation provides, two parts
-    # of which are load-bearing here:
-    #   - History clearing — otherwise a test that calls `history.back()`
-    #     (select-restore-invalid-option's bfcache round-trip, the selectedcontent-
-    #     restore files, …) traverses the SHARED history back into the PREVIOUS file's
-    #     document, re-runs its testharness, and reports THAT file's results, making the
-    #     gate depend on visit order.
-    #   - Thread teardown — browser.reset! KILLS the web worker / SSE / websocket
-    #     threads a file spawned, and reset_windows! disposes its aux windows. Left
-    #     running, each file's background V8 isolates pile into V8Runtime's process-wide
-    #     @@live and are only reclaimed by the at_exit hook; on a 1900-file suite that
-    #     means disposing hundreds of thread-confined isolates at once and deadlocking,
-    #     so the process takes MINUTES to exit after the last example.
-    # The immediately-following visit rebuilds the page either way.
-    s.driver.reset!
+  # The origin a file has to be served at, or nil for the default www.example.com.
+  # `.sub.` files are served with wptserve `{{…}}` substitution and visited at the
+  # canonical wptserve origin so their substituted host:port matches the document
+  # origin (resolved-URL assertions depend on it); `.https.` files at the canonical
+  # HTTPS origin (see SUB_HTTPS_ORIGIN). A `?wpt_flags=https` (or h2 — TLS-only)
+  # VARIANT asks for the https origin the same way the filename suffix does:
+  # websockets/cookies/006's wss variant sets a Secure cookie via document.cookie,
+  # which a non-secure page may not store.
+  #
+  # Both cross origin off the default, and crossing origins on the shared session
+  # leaves the NEXT file unable to complete — so a run at one of these origins is
+  # isolated behind a fresh session on each side. Cheap: a handful of files.
+  def origin_for(rel, query = '')
+    base = File.basename(rel)
+    return SUB_ORIGIN if base.include?('.sub.')
+    return SUB_HTTPS_ORIGIN if base.include?('.https.') || query.include?('wpt_flags=https') || query.include?('wpt_flags=h2')
+    nil
+  end
+
+  # Full per-file reset — what Capybara runs between tests, which this long-lived
+  # WPT session bypasses (it memoizes ONE session for the whole suite). It gives each
+  # file the fresh browsing context real WPT's per-file isolation provides, two parts
+  # of which are load-bearing here:
+  #   - History clearing — otherwise a test that calls `history.back()`
+  #     (select-restore-invalid-option's bfcache round-trip, the selectedcontent-
+  #     restore files, …) traverses the SHARED history back into the PREVIOUS file's
+  #     document, re-runs its testharness, and reports THAT file's results, making the
+  #     gate depend on visit order.
+  #   - Thread teardown — browser.reset! KILLS the web worker / SSE / websocket
+  #     threads a file spawned, and reset_windows! disposes its aux windows. Left
+  #     running, each file's background V8 isolates pile into V8Runtime's process-wide
+  #     @@live and are only reclaimed by the at_exit hook; on a 1900-file suite that
+  #     means disposing hundreds of thread-confined isolates at once and deadlocking,
+  #     so the process takes MINUTES to exit after the last example.
+  # The visit that follows rebuilds the page either way.
+  def prepare_session!
+    session.driver.reset!
     # The dispatcher message bus is the one cross-file channel; clear it per file so a
     # message left queued by a prior file's contexts can't leak into this one (uuids
     # are random so a collision is unreachable today, but this keeps the same
@@ -1056,20 +1120,33 @@ module WptRunner
     DISPATCHER_LOCK.synchronize { DISPATCHER_STASH.clear }
     # Per-file reset of the file-backed server.stash (same run-order independence).
     FileUtils.rm_f(Dir.glob(File.join(STASH_DIR, '*')))
+  end
+
+  # The driver doesn't auto-fire window 'load'; testharness completes its
+  # sync tests off that event (then a setTimeout(0) sets `all_loaded`), and a
+  # reftest does its rendering work there. Prefer the bridge's
+  # `__csimFireWindowLoad`, which uses a module-captured `Event` constructor — a
+  # test that does `delete window.Event` (interface-objects.html) would otherwise
+  # make `new Event('load')` throw and the harness never finish.
+  def fire_window_load(s)
+    s.evaluate_script(
+      "typeof __csimFireWindowLoad === 'function' ? __csimFireWindowLoad() : window.dispatchEvent(new Event('load'))"
+    )
+  end
+
+  # Run a SINGLE (rel, variant-query) pair. `query` is '' for a no-variant file.
+  def run_one(rel, query = '')
+    origin  = origin_for(rel, query)
+    cross   = !origin.nil?
+    drop_session! if cross
+    prepare_session!
+    s = session
     # `.any.js` / `.window.js` tests run through their synthesized HTML wrapper;
     # a variant query (if any) is appended to the visited URL.
     visit = rel.end_with?('.any.js', '.window.js') ? rel.sub(/\.js\z/, '.html') : rel
     visit = "#{visit}#{query}"
-    origin = sub ? SUB_ORIGIN : (https ? SUB_HTTPS_ORIGIN : nil)
     s.visit(origin ? "#{origin}/#{visit}" : "/#{visit}")
-    # The driver doesn't auto-fire window 'load'; testharness completes its
-    # sync tests off that event (then a setTimeout(0) sets `all_loaded`). Prefer
-    # the bridge's `__csimFireWindowLoad`, which uses a module-captured `Event`
-    # constructor — a test that does `delete window.Event` (interface-objects.html)
-    # would otherwise make `new Event('load')` throw and the harness never finish.
-    s.evaluate_script(
-      "typeof __csimFireWindowLoad === 'function' ? __csimFireWindowLoad() : window.dispatchEvent(new Event('load'))"
-    )
+    fire_window_load(s)
 
     res = nil
     idle = 0
@@ -1236,6 +1313,290 @@ module WptRunner
   def drop_session!
     (@session.driver.dispose rescue nil) if @session
     @session = nil
+  end
+
+  # --- Reference tests -------------------------------------------------------
+
+  # Frames a `class="reftest-wait"` page gets to clear the class before it is
+  # captured anyway (the class is a reftest saying "not ready to capture yet").
+  # ~2 s of virtual time — far above any legitimate in-page wait, and a page that
+  # never clears it is a driver gap the comparison should then expose, not hang on.
+  REFTEST_WAIT_FRAMES = 120
+
+  # A `==` comparison whose two renderings are both the BLANK page PROVES NOTHING: two empty pages
+  # match whatever the test was about, so the painter passes it by drawing neither side. That is not
+  # hypothetical — a third of the form-widget reftests (range tick marks, the customizable
+  # `<select>` fallback popovers, `<meter>`) sat in exactly that state, and every canvas reftest did
+  # until the painter learned to draw a canvas. Such a comparison is reported as a FAILURE carrying
+  # this suffix, so it lands in the allowlist as the gap it is instead of inflating the pass count.
+  # It self-heals: once the painter draws the thing, the test either passes for real (the line goes)
+  # or fails for real (the name changes, the gate reds, someone looks).
+  #
+  # "Blank" is deliberately the narrow reading — every pixel white, i.e. the page a painter that
+  # drew NOTHING leaves behind. A flat non-white page is a real rendering (`css/cssom/
+  # insertRule-from-script` correctly paints solid black on both sides) and must not be flagged.
+  # The one case this can't separate is a test whose correct rendering really is a blank white page;
+  # that belongs in wpt_out_of_scope.yml, with "the correct rendering IS blank" as its reason.
+  REFTEST_BLANK_SUFFIX  = '(both renderings blank)'
+  REFTEST_BLANK_MESSAGE = 'both renderings are a blank white page, so the comparison holds ' \
+                          'whatever the test was about — nothing it depends on was painted'
+  # The blank check catches the case where NEITHER side was painted at all. It cannot catch the
+  # other vacuity class, which is per-FEATURE: both sides render real content, and render it
+  # identically, because the one property under test is something the painter ignores. Two measured
+  # examples — `dom/nodes/moveBefore/focus-preserve-render` is `:focus-visible { outline: 2px solid
+  # green }` on both sides and the painter draws no `outline` at all, so it passes with zero green
+  # pixels and would pass just as well if moveBefore destroyed focus; and the `dir_auto*` family
+  # compares `dir=auto` against `dir=rtl` over the same string, where `direction` has no effect on
+  # paint (no reordering, no RTL alignment), so 44 of those 51 pass without measuring anything.
+  #
+  # These are left passing deliberately. The pass is INERT — it hides no regression in anything we
+  # do model — and the day the painter learns `outline`, or any part of `direction`, those greens go
+  # red and get re-audited, which is this project's standard tripwire (the same one the WICG-drift
+  # check provides). What it does mean is that a reftest pass count is an upper bound: quote it with
+  # this caveat, and don't read a green reftest as proof the feature works.
+  #
+  # A reference the vendor manifest doesn't ship can't be compared against. It rides in the NAME,
+  # not just the message, so it can't hide in the allowlist looking like an ordinary rendering gap.
+  REFTEST_MISSING_SUFFIX = '(reference not vendored)'
+  # A page that never clears `reftest-wait` was never READY to be captured, so whatever it looks
+  # like says nothing about the property under test. wptrunner reports that as TIMEOUT and compares
+  # nothing; so does this. Capturing anyway and reporting a pixel verdict is worse than useless — it
+  # was measured at six tests PASSING off a never-ready capture and sixty-two failing with a message
+  # blaming the painter for a promise chain that never resolved.
+  REFTEST_TIMEOUT_SUFFIX  = '(never ready to capture)'
+  REFTEST_TIMEOUT_MESSAGE = 'the page still had `class=reftest-wait` after the frame budget, so it ' \
+                            'was never ready to be captured — the rendering says nothing'
+  # The frame every reftest is authored against — WPT's own runners screenshot at 800x600, so a
+  # test's wrap points, percentage widths and "is it below the fold" all assume it. The driver's
+  # default viewport is wider, which would make these verdicts incomparable with Chromium's.
+  REFTEST_VIEWPORT = [800, 600].freeze
+
+  # Run a reference test: render the test and each reference it names, and compare
+  # the images. Reported in the SAME shape as a harness file, with one pseudo-subtest
+  # per reference named the way WPT itself writes a reftest — `== ref` / `!= ref` —
+  # so the allowlists, the gate's multiset diff and wpt_diag need to know nothing
+  # about reftests. The pixel magnitude rides on the subtest MESSAGE (which wpt_diag
+  # prints), never on the name, so a rendering change that shifts the magnitude
+  # can't churn the allowlist.
+  #
+  # Several references are an OR (WPT's own rule): the test passes if any one of them
+  # holds, and reports the first one's comparison when none does.
+  def run_reftest(rel)
+    refs = reftest_refs(rel)
+    raise "#{rel} names no <link rel=match|mismatch>, so it is not a reftest" if refs.empty?
+
+    fuzzy = reftest_fuzzy(rel)
+    test  = render_page(rel)
+    # Reported against the first reference, since a never-ready TEST page is judged against none.
+    return reftest_result("#{refs.first.join(' ')} #{REFTEST_TIMEOUT_SUFFIX}", REFTEST_TIMEOUT_MESSAGE) unless test[:ready]
+
+    attempts = []
+    refs.each do |op, ref_rel|
+      name = "#{op} #{ref_rel}"
+      unless File.file?(File.join(ROOT, ref_rel))
+        attempts << ["#{name} #{REFTEST_MISSING_SUFFIX}",
+                     'the reference is not vendored — extend the manifest in script/vendor_wpt.mjs']
+        next
+      end
+      ref = render_page(ref_rel)
+      unless ref[:ready]
+        attempts << ["#{name} #{REFTEST_TIMEOUT_SUFFIX}", REFTEST_TIMEOUT_MESSAGE]
+        next
+      end
+      message = reftest_mismatch(test[:png], ref[:png], op, fuzzy)
+      blank   = message.nil? && op == '==' && blank_render?(test[:png])
+      return reftest_result(name, nil) if message.nil? && !blank
+
+      reftest_dump(rel, ref_rel, test[:png], ref[:png])
+      attempts << (blank ? ["#{name} #{REFTEST_BLANK_SUFFIX}", REFTEST_BLANK_MESSAGE] : [name, message])
+    end
+    reftest_result(*attempts.first)
+  rescue StandardError => e
+    # Same contract as run_one: a file that errored may have left the shared
+    # session in a bad state, so rebuild it rather than let the next file inherit it.
+    drop_session!
+    {completed: false, error: e.message}
+  end
+
+  # One reference comparison, in the harness result shape the gate consumes.
+  def reftest_result(name, message)
+    {
+      completed: true,
+      failing:   message ? [name] : [],
+      tests:     [{'name' => name, 'status' => message ? 1 : 0, 'message' => message}]
+    }
+  end
+
+  # nil when the comparison HOLDS, else why it doesn't. `==` asks for the two
+  # renderings to be the same within the test's own fuzz; `!=` asks for them to differ.
+  def reftest_mismatch(test_png, ref_png, op, fuzzy)
+    diff = image_difference(test_png, ref_png)
+    if diff[:sizes]
+      # Two different-sized renderings ARE different, which is all a `!=` asks for.
+      return nil if op == '!='
+      return "the renderings differ in SIZE: #{diff[:sizes].join(' vs ')}"
+    end
+
+    return nil if fuzzy_equal?(diff, fuzzy) == (op == '==')
+
+    if op == '=='
+      "the renderings differ beyond the test's own fuzz (allowed " \
+      "maxDifference=#{fuzzy[:max_difference].join('-')}, totalPixels=#{fuzzy[:total_pixels].join('-')}): " \
+      "maxDifference=#{diff[:max_difference]}, totalPixels=#{diff[:differing_pixels]}"
+    else
+      'the renderings are the same, but the test requires them to DIFFER'
+    end
+  end
+
+  # wptrunner's own equality test (tools/wptrunner/wptrunner/executors/base.py), reproduced rather
+  # than approximated: each count must fall INSIDE its declared range — a rendering closer to the
+  # reference than the floor is not automatically a pass — plus the two escapes that keep an exactly
+  # identical rendering passing whatever the floors say. Both ranges default to 0-0, so a test
+  # declaring no fuzz demands pixel identity, as it does upstream.
+  def fuzzy_equal?(diff, fuzzy)
+    difference, pixels = fuzzy[:max_difference], fuzzy[:total_pixels]
+    return true if diff[:differing_pixels].zero? && pixels.first.zero?
+    return true if diff[:max_difference].zero?  && difference.first.zero?
+
+    diff[:max_difference].between?(*difference) && diff[:differing_pixels].between?(*pixels)
+  end
+
+  # How two renderings differ: the largest per-channel difference and how many pixels differ at all
+  # — exactly the pair a `fuzzy` annotation is written against. `max` is over bands AND pixels, so
+  # it is WPT's maxDifference; the pixel count needs the bands OR-ed together first, since a pixel
+  # differing in any one channel is a differing pixel.
+  def image_difference(test_png, ref_png)
+    a = raster(test_png)
+    b = raster(ref_png)
+    return {sizes: [a, b].map {|img| "#{img.width}x#{img.height}" }} if a.width != b.width || a.height != b.height
+
+    delta = (a - b).abs
+    # Count from the histogram rather than materialising every pixel in Ruby: bin 0
+    # holds the pixels that match, so the rest differ.
+    matching = delta.cast(:uchar).bandor.hist_find.getpoint(0, 0).first.to_i
+    {max_difference: delta.max.to_i, differing_pixels: a.width * a.height - matching}
+  end
+
+  # Whether a rendering is the BLANK page: every pixel white, which is what a painter that drew
+  # nothing leaves behind. See REFTEST_BLANK_SUFFIX for why that makes a `==` comparison
+  # meaningless — and why a flat NON-white page is a real rendering, not a blank one.
+  def blank_render?(png)
+    raster(png).min.to_i == 255
+  end
+
+  # A PNG as a plain 3-band sRGB image. Alpha is dropped: these are opaque page
+  # rasters, so a band-count difference between two of them is not a rendering one.
+  def raster(png)
+    Vips::Image.new_from_buffer(png, '').colourspace(:srgb).extract_band(0, n: 3)
+  end
+
+  # Render one document the way a reftest is captured: a fresh browsing context,
+  # the page's own load handlers run, then one event-loop frame so the work they
+  # queue (a microtask, a rAF) lands in the image — and, for a page that declares
+  # `class="reftest-wait"`, frames until it clears the class. Returns the PNG and whether the page
+  # ever became READY: one still holding reftest-wait when the budget runs out is captured (the
+  # bytes still help a dump) but its rendering means nothing — see REFTEST_TIMEOUT_SUFFIX.
+  def render_page(rel)
+    origin = origin_for(rel)
+    drop_session! if origin
+    prepare_session!
+    s = session
+    s.current_window.resize_to(*REFTEST_VIEWPORT)
+    s.visit(origin ? "#{origin}/#{rel}" : "/#{rel}")
+    fire_window_load(s)
+    ready = false
+    REFTEST_WAIT_FRAMES.times do
+      s.driver.run_event_loop_frame(FRAME_MS)
+      ready = !s.driver.peek_script("document.documentElement.classList.contains('reftest-wait')")
+      break if ready
+    end
+    png = s.driver.browser.screenshot_png(full: false)
+    raise "the painter produced no rendering for #{rel}" unless png
+    {png: png, ready: ready}
+  ensure
+    drop_session! if origin
+  end
+
+  # Set CSIM_REFTEST_DUMP=<dir> to write the two renderings of every failing
+  # comparison, plus their pixel difference — the reftest counterpart of the
+  # assertion message a harness test prints, and the only way to SEE what the gate
+  # saw. Off by default, so an ordinary run writes nothing.
+  def reftest_dump(rel, ref_rel, test_png, ref_png)
+    dir = ENV['CSIM_REFTEST_DUMP'].to_s
+    return if dir.empty?
+    FileUtils.mkdir_p(dir)
+    base = File.join(dir, "#{rel.tr('/', '_').sub(/\.\w+\z/, '')}--#{File.basename(ref_rel, '.*')}")
+    File.binwrite("#{base}.test.png", test_png)
+    File.binwrite("#{base}.ref.png", ref_png)
+    a = raster(test_png)
+    b = raster(ref_png)
+    return unless a.width == b.width && a.height == b.height
+    File.binwrite("#{base}.diff.png", (a - b).abs.cast(:uchar).write_to_buffer('.png'))
+  end
+
+  # `<link rel="match|mismatch" href>` — the references this test is judged against,
+  # as (operator, root-relative path) pairs in document order.
+  def reftest_refs(rel)
+    parse_reftest_refs(source_of(rel), File.dirname(rel))
+  end
+
+  # The `<link>` grammar itself, over the head text and the test's directory (hrefs
+  # are relative to it). Kept separate from the file read so spec/wpt_reftest_spec.rb
+  # can pin the parse without a vendored file standing behind every case.
+  def parse_reftest_refs(head, dir)
+    head.scan(/<link\b([^>]*\brel\s*=\s*["']?(?:match|mismatch)\b[^>]*)>/i).flatten.filter_map {|attrs|
+      href = attr_value(attrs, 'href')
+      next if href.nil?
+      op = attrs.match?(/\brel\s*=\s*["']?mismatch\b/i) ? '!=' : '=='
+      [op, File.expand_path(href, File.join('/', dir)).delete_prefix('/')]
+    }
+  end
+
+  # One HTML attribute's value, written the way tests actually write it —
+  # double-quoted, single-quoted, or bare. Bare is common in a reftest head
+  # (`<link rel=match href=foo-ref.html>`), and reading it as absent would leave
+  # the test silently unmeasured.
+  def attr_value(text, name)
+    m = text.match(/\b#{name}\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s"'>]+))/i)
+    m && (m[1] || m[2] || m[3])
+  end
+
+  # `<meta name="fuzzy" content="maxDifference=0-2;totalPixels=0-100">` — the anti-aliasing-level
+  # noise the test itself declares acceptable, as an inclusive RANGE per bound. Parsed the way
+  # WPT parses it (tools/manifest/sourcefile.py): a bound may be NAMED or positional
+  # (`content="0-5;0-245"` is maxDifference then totalPixels — six vendored files write it that
+  # way), and a bare number is the degenerate range N-N, not 0-N.
+  #
+  # A `ref.html:` prefix scopes the fuzz to one reference. We take the bounds and drop the scope,
+  # which is exact for the whole corpus: no vendored file carries more than one `<meta name=fuzzy>`
+  # and none of them scopes it. With two scoped annotations it would be wrong in both directions,
+  # so revisit here if one ever appears.
+  def reftest_fuzzy(rel)
+    parse_reftest_fuzzy(source_of(rel))
+  end
+
+  def parse_reftest_fuzzy(head)
+    meta = head[/<meta\b[^>]*\bname\s*=\s*["']?fuzzy\b[^>]*>/i]
+    raw  = meta && attr_value(meta, 'content')
+    # `rpartition`, like WPT's `rsplit(":", 1)`: everything before the last colon is the reference
+    # the annotation is scoped to.
+    spec       = raw.to_s.rpartition(':').last
+    positional = %w[maxDifference totalPixels]
+    bounds     = {'maxDifference' => [0, 0], 'totalPixels' => [0, 0]}
+    spec.split(';').each do |part|
+      name, sep, value = part.partition('=')
+      if sep.empty?
+        value = name
+        name  = positional.shift
+      else
+        name = name.strip
+        positional.delete(name)
+      end
+      next unless bounds.key?(name)
+      low, dash, high = value.strip.partition('-')
+      bounds[name] = dash.empty? ? [low.to_i, low.to_i] : [low.to_i, high.to_i]
+    end
+    {max_difference: bounds['maxDifference'], total_pixels: bounds['totalPixels']}
   end
 
   # The behavioural-conformance allowlist is split across two files: the in-scope

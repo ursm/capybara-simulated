@@ -3,13 +3,17 @@
 require_relative 'wpt_runner'
 
 # Behavioural-conformance gate: runs a pinned subset of web-platform-tests
-# (vendored under spec/wpt/, currently the dom/ suite) through the :simulated
-# driver and holds each file to its recorded result.
+# (vendored under spec/wpt/) through the :simulated driver and holds each file to
+# its recorded result.
 #
 # This is the behavioural counterpart to idl_coverage_spec: that gate asserts
 # an API *exists*; this one asserts it *behaves* per the WHATWG DOM spec, using
-# the same tests Chromium and Firefox hold themselves to. Each file's expected
-# non-PASS subtests are split across two allowlists:
+# the same tests Chromium and Firefox hold themselves to. Both kinds of WPT test
+# run here: a harness file reports its own subtests, and a REFTEST is judged by
+# rendering it and its reference through the painter and comparing the two images
+# (WptRunner#run_reftest), reported as one pseudo-subtest per reference so
+# everything below applies to it unchanged. Each file's expected non-PASS
+# subtests are split across two allowlists:
 #
 #   - spec/support/wpt_expected_failures.yml — IN-SCOPE backlog (real driver gaps
 #     we intend to fix; shrinking this is the roadmap)
@@ -136,8 +140,14 @@ module WptGate
       WptRunner.test_files.each_with_index do |rel, i|
         next unless i % shards == shard - 1
         it rel do
+          # A REFTEST renders the same bytes every time (verified: repeated renders are
+          # byte-identical), so a retry can never rescue one — it would only triple the cost of a
+          # genuine red, and would quietly extend a flake allowance written for a cross-isolate
+          # service-worker race to a category where a flake means a NONDETERMINISTIC PAINTER, which
+          # is exactly what should red on the first attempt.
+          attempts   = WptRunner.reftest?(rel) ? 1 : WptGate::FILE_ATTEMPTS
           mismatches = []
-          WptGate::FILE_ATTEMPTS.times do
+          attempts.times do
             mismatches = wpt_file_mismatches(rel)
             break if mismatches.empty?
           end
