@@ -193,7 +193,9 @@ capybara-simulated trace tmp/csim-traces/checkout_flow.json
 # wrote /tmp/checkout_flow.html   (then opens it in your browser)
 ```
 
-By default the HTML is written to a temp file and opened in your browser. The viewer works straight from `file://` — the trace JSON is embedded inline, so no server is needed — and shows a step-by-step UI: a timeline of actions, and per step the URL before/after, console output, network requests, the error, the screenshot, and the post-action DOM snapshot as HTML. Its **Load JSON…** button / drag-and-drop swaps in any other trace file.
+By default the HTML is written to a temp file and opened in your browser. The viewer works straight from `file://` — the trace JSON is embedded inline, and there is no webfont or CDN to reach for, so it opens offline from a CI download.
+
+It opens **on the step that failed** (that is what you came for, and on a long trace it is nowhere near the top), keeps that failure in a banner while you read any other step, and marks the step list: `!` where an action failed, `·` where one only logged a warning or error. Per step you get the URL before / after, console output, network requests — click a row for its headers and bodies — the error, and the post-action DOM snapshot as HTML. Screenshots sit in a side rail, which distinguishes the state the example ENDED in from the state at one step. `j` / `k` move, `f` jumps to the failure, and **Load JSON…** / drag-and-drop swaps in any other trace file.
 
 `-o PATH` writes the HTML somewhere specific (`-o -` to stdout); `--no-open` skips launching the browser. Browser launching uses [launchy](https://rubygems.org/gems/launchy) when it's installed (`gem 'launchy'`, recommended for reliable cross-platform / WSL opening) and falls back to the platform opener (`xdg-open` / `open` / `start`) otherwise.
 
