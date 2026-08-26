@@ -136,6 +136,14 @@ const TREES = [
                                        // API, no layout. `.tentative` algorithms (Argon2 / cSHAKE / SHA-3 / Ed448
                                        // curve448 / AES-OCB / ML-KEM) auto-route out; getPublicKey / encap_decap /
                                        // supports are .tentative too.
+  'html/rendering',                    // THE UA stylesheet, normatively: what a browser's own
+                                       // default sheet must compute for every element, how a
+                                       // REPLACED element is sized, and what a form WIDGET looks
+                                       // like. Three quarters of it is reftests, which is why it
+                                       // was not worth vendoring until the gate could run one; the
+                                       // driver's own `uaDefault` / `DEFAULT_DISPLAY` / control
+                                       // chrome tables were written against Chrome measurements
+                                       // taken by hand, and this is the objective bar for them.
   'css/css-flexbox',                   // CSS Flexbox — the objective bar for the flex layout the driver
                                        // resolves on both axes (§9.7 bases / grow / shrink / the automatic
                                        // minimum / gaps / auto margins / justify / align). Vendored
@@ -222,7 +230,14 @@ const SUPPORT_FILES = [
   // WptRunner#run_reftest.
   'css/reference/blank.html',
   'css/reference/ref-filled-green-100px-square-only.html',
-  'css/reference/ref-filled-green-100px-square.xht'
+  'css/reference/ref-filled-green-100px-square.xht',
+  'css/reference/ref-filled-green-200px-square.html',
+  'css/reference/pass_if_square_96px_black.html',
+  'css/support/60x60-green.png',
+  // html/rendering pulls these two by absolute path: an image one of its replaced-element
+  // reftests renders, and the cross-document stash the details/text-fragment test posts through.
+  'css/css-sizing/aspect-ratio/support/100x100-green.png',
+  'scroll-to-text-fragment/stash.js'
   // NOTE: service-workers/service-worker (vendored above) ships the FULL upstream
   // test-helpers.sub.js — `service_worker_test` and friends run against the real SW runtime.
   // The hand-written minimal helper that used to live at that path (with_iframe only, while SW

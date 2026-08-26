@@ -6144,6 +6144,3574 @@ html/dom/elements/requirements-relating-to-bidirectional-algorithm-formatting-ch
 - "== html/dom/elements/requirements-relating-to-bidirectional-algorithm-formatting-characters/reference/dir-isolation-009b-ref.html"
 html/dom/elements/requirements-relating-to-bidirectional-algorithm-formatting-characters/dir-isolation-009c.html:
 - "== html/dom/elements/requirements-relating-to-bidirectional-algorithm-formatting-characters/reference/dir-isolation-009b-ref.html"
+html/rendering/bidi-rendering/slot-no-isolate-001.html:
+- "== html/rendering/bidi-rendering/slot-no-isolate-001-ref.html"
+html/rendering/bidi-rendering/unicode-bidi-ua-rules.html:
+- UA stylesheet rule for unicode-bidi, for <a>
+- UA stylesheet rule for unicode-bidi, for <abbr>
+- UA stylesheet rule for unicode-bidi, for <address>
+- UA stylesheet rule for unicode-bidi, for <area>
+- UA stylesheet rule for unicode-bidi, for <article>
+- UA stylesheet rule for unicode-bidi, for <aside>
+- UA stylesheet rule for unicode-bidi, for <audio>
+- UA stylesheet rule for unicode-bidi, for <b>
+- UA stylesheet rule for unicode-bidi, for <base>
+- UA stylesheet rule for unicode-bidi, for <bdi>
+- UA stylesheet rule for unicode-bidi, for <bdo>
+- UA stylesheet rule for unicode-bidi, for <blockquote>
+- UA stylesheet rule for unicode-bidi, for <body>
+- UA stylesheet rule for unicode-bidi, for <br>
+- UA stylesheet rule for unicode-bidi, for <button>
+- UA stylesheet rule for unicode-bidi, for <canvas>
+- UA stylesheet rule for unicode-bidi, for <caption>
+- UA stylesheet rule for unicode-bidi, for <cite>
+- UA stylesheet rule for unicode-bidi, for <code>
+- UA stylesheet rule for unicode-bidi, for <col>
+- UA stylesheet rule for unicode-bidi, for <colgroup>
+- UA stylesheet rule for unicode-bidi, for <data>
+- UA stylesheet rule for unicode-bidi, for <datalist>
+- UA stylesheet rule for unicode-bidi, for <dd>
+- UA stylesheet rule for unicode-bidi, for <del>
+- UA stylesheet rule for unicode-bidi, for <details>
+- UA stylesheet rule for unicode-bidi, for <dfn>
+- UA stylesheet rule for unicode-bidi, for <dialog>
+- UA stylesheet rule for unicode-bidi, for <div>
+- UA stylesheet rule for unicode-bidi, for <dl>
+- UA stylesheet rule for unicode-bidi, for <dt>
+- UA stylesheet rule for unicode-bidi, for <em>
+- UA stylesheet rule for unicode-bidi, for <embed>
+- UA stylesheet rule for unicode-bidi, for <fieldset>
+- UA stylesheet rule for unicode-bidi, for <figcaption>
+- UA stylesheet rule for unicode-bidi, for <figure>
+- UA stylesheet rule for unicode-bidi, for <footer>
+- UA stylesheet rule for unicode-bidi, for <form>
+- UA stylesheet rule for unicode-bidi, for <h1>
+- UA stylesheet rule for unicode-bidi, for <h2>
+- UA stylesheet rule for unicode-bidi, for <h3>
+- UA stylesheet rule for unicode-bidi, for <h4>
+- UA stylesheet rule for unicode-bidi, for <h5>
+- UA stylesheet rule for unicode-bidi, for <h6>
+- UA stylesheet rule for unicode-bidi, for <head>
+- UA stylesheet rule for unicode-bidi, for <header>
+- UA stylesheet rule for unicode-bidi, for <hr>
+- UA stylesheet rule for unicode-bidi, for <html>
+- UA stylesheet rule for unicode-bidi, for <i>
+- UA stylesheet rule for unicode-bidi, for <iframe>
+- UA stylesheet rule for unicode-bidi, for <img>
+- UA stylesheet rule for unicode-bidi, for <input type=button>
+- UA stylesheet rule for unicode-bidi, for <input type=checkbox>
+- UA stylesheet rule for unicode-bidi, for <input type=color>
+- UA stylesheet rule for unicode-bidi, for <input type=date>
+- UA stylesheet rule for unicode-bidi, for <input type=datetime-local>
+- UA stylesheet rule for unicode-bidi, for <input type=email>
+- UA stylesheet rule for unicode-bidi, for <input type=file>
+- UA stylesheet rule for unicode-bidi, for <input type=hidden>
+- UA stylesheet rule for unicode-bidi, for <input type=image>
+- UA stylesheet rule for unicode-bidi, for <input type=number>
+- UA stylesheet rule for unicode-bidi, for <input type=password>
+- UA stylesheet rule for unicode-bidi, for <input type=radio>
+- UA stylesheet rule for unicode-bidi, for <input type=range>
+- UA stylesheet rule for unicode-bidi, for <input type=reset>
+- UA stylesheet rule for unicode-bidi, for <input type=search>
+- UA stylesheet rule for unicode-bidi, for <input type=submit>
+- UA stylesheet rule for unicode-bidi, for <input type=tel>
+- UA stylesheet rule for unicode-bidi, for <input type=text>
+- UA stylesheet rule for unicode-bidi, for <input type=time>
+- UA stylesheet rule for unicode-bidi, for <input type=url>
+- UA stylesheet rule for unicode-bidi, for <ins>
+- UA stylesheet rule for unicode-bidi, for <kbd>
+- UA stylesheet rule for unicode-bidi, for <label>
+- UA stylesheet rule for unicode-bidi, for <legend>
+- UA stylesheet rule for unicode-bidi, for <li>
+- UA stylesheet rule for unicode-bidi, for <link>
+- UA stylesheet rule for unicode-bidi, for <main>
+- UA stylesheet rule for unicode-bidi, for <map>
+- UA stylesheet rule for unicode-bidi, for <mark>
+- UA stylesheet rule for unicode-bidi, for <menu>
+- UA stylesheet rule for unicode-bidi, for <meta>
+- UA stylesheet rule for unicode-bidi, for <meter>
+- UA stylesheet rule for unicode-bidi, for <nav>
+- UA stylesheet rule for unicode-bidi, for <noscript>
+- UA stylesheet rule for unicode-bidi, for <object>
+- UA stylesheet rule for unicode-bidi, for <ol>
+- UA stylesheet rule for unicode-bidi, for <optgroup>
+- UA stylesheet rule for unicode-bidi, for <option>
+- UA stylesheet rule for unicode-bidi, for <output>
+- UA stylesheet rule for unicode-bidi, for <p>
+- UA stylesheet rule for unicode-bidi, for <param>
+- UA stylesheet rule for unicode-bidi, for <pre>
+- UA stylesheet rule for unicode-bidi, for <progress>
+- UA stylesheet rule for unicode-bidi, for <q>
+- UA stylesheet rule for unicode-bidi, for <rp>
+- UA stylesheet rule for unicode-bidi, for <rt>
+- UA stylesheet rule for unicode-bidi, for <ruby>
+- UA stylesheet rule for unicode-bidi, for <s>
+- UA stylesheet rule for unicode-bidi, for <samp>
+- UA stylesheet rule for unicode-bidi, for <script>
+- UA stylesheet rule for unicode-bidi, for <search>
+- UA stylesheet rule for unicode-bidi, for <section>
+- UA stylesheet rule for unicode-bidi, for <select>
+- UA stylesheet rule for unicode-bidi, for <slot>
+- UA stylesheet rule for unicode-bidi, for <small>
+- UA stylesheet rule for unicode-bidi, for <source>
+- UA stylesheet rule for unicode-bidi, for <span>
+- UA stylesheet rule for unicode-bidi, for <strong>
+- UA stylesheet rule for unicode-bidi, for <style>
+- UA stylesheet rule for unicode-bidi, for <sub>
+- UA stylesheet rule for unicode-bidi, for <summary>
+- UA stylesheet rule for unicode-bidi, for <sup>
+- UA stylesheet rule for unicode-bidi, for <table>
+- UA stylesheet rule for unicode-bidi, for <tbody>
+- UA stylesheet rule for unicode-bidi, for <td>
+- UA stylesheet rule for unicode-bidi, for <template>
+- UA stylesheet rule for unicode-bidi, for <textarea>
+- UA stylesheet rule for unicode-bidi, for <tfoot>
+- UA stylesheet rule for unicode-bidi, for <th>
+- UA stylesheet rule for unicode-bidi, for <thead>
+- UA stylesheet rule for unicode-bidi, for <time>
+- UA stylesheet rule for unicode-bidi, for <title>
+- UA stylesheet rule for unicode-bidi, for <tr>
+- UA stylesheet rule for unicode-bidi, for <track>
+- UA stylesheet rule for unicode-bidi, for <u>
+- UA stylesheet rule for unicode-bidi, for <ul>
+- UA stylesheet rule for unicode-bidi, for <var>
+- UA stylesheet rule for unicode-bidi, for <video>
+- UA stylesheet rule for unicode-bidi, for <wbr>
+html/rendering/bindings/the-select-element-0/option-label.html:
+- "== html/rendering/bindings/the-select-element-0/option-label-ref.html"
+html/rendering/cdata-001.xhtml:
+- "== css/reference/ref-filled-green-100px-square.xht"
+html/rendering/cdata-002.xhtml:
+- "== css/reference/ref-filled-green-100px-square.xht"
+html/rendering/dimension-attributes.html:
+- <col width="   00523   "> mapping to <col> width property
+- <col width="0"> mapping to <col> width property
+- <col width="0%"> mapping to <col> width property
+- <col width="0px"> mapping to <col> width property
+- <col width="1007"> mapping to <col> width property
+- <col width="20.25E2"> mapping to <col> width property
+- <col width="20.25e2"> mapping to <col> width property
+- <col width="200 %"> mapping to <col> width property
+- <col width="200 abc"> mapping to <col> width property
+- <col width="200"> mapping to <col> width property
+- <col width="200%"> mapping to <col> width property
+- <col width="200%abc"> mapping to <col> width property
+- <col width="200."> mapping to <col> width property
+- <col width="200.%"> mapping to <col> width property
+- <col width="200.25"> mapping to <col> width property
+- <col width="200.25%"> mapping to <col> width property
+- <col width="200.25in"> mapping to <col> width property
+- <col width="200.7"> mapping to <col> width property
+- <col width="200in"> mapping to <col> width property
+- <embed height="   00523   "> mapping to <embed> height property
+- <embed height="-200px"> mapping to <embed> height property
+- <embed height="200 %"> mapping to <embed> height property
+- <embed height="200.%"> mapping to <embed> height property
+- <embed hspace="   00523   "> mapping to <embed> marginLeft property
+- <embed hspace="   00523   "> mapping to <embed> marginRight property
+- <embed hspace="0%"> mapping to <embed> marginLeft property
+- <embed hspace="0%"> mapping to <embed> marginRight property
+- <embed hspace="1007"> mapping to <embed> marginLeft property
+- <embed hspace="1007"> mapping to <embed> marginRight property
+- <embed hspace="20.25E2"> mapping to <embed> marginLeft property
+- <embed hspace="20.25E2"> mapping to <embed> marginRight property
+- <embed hspace="20.25e2"> mapping to <embed> marginLeft property
+- <embed hspace="20.25e2"> mapping to <embed> marginRight property
+- <embed hspace="200 %"> mapping to <embed> marginLeft property
+- <embed hspace="200 %"> mapping to <embed> marginRight property
+- <embed hspace="200 abc"> mapping to <embed> marginLeft property
+- <embed hspace="200 abc"> mapping to <embed> marginRight property
+- <embed hspace="200"> mapping to <embed> marginLeft property
+- <embed hspace="200"> mapping to <embed> marginRight property
+- <embed hspace="200%"> mapping to <embed> marginLeft property
+- <embed hspace="200%"> mapping to <embed> marginRight property
+- <embed hspace="200%abc"> mapping to <embed> marginLeft property
+- <embed hspace="200%abc"> mapping to <embed> marginRight property
+- <embed hspace="200."> mapping to <embed> marginLeft property
+- <embed hspace="200."> mapping to <embed> marginRight property
+- <embed hspace="200.%"> mapping to <embed> marginLeft property
+- <embed hspace="200.%"> mapping to <embed> marginRight property
+- <embed hspace="200.25"> mapping to <embed> marginLeft property
+- <embed hspace="200.25"> mapping to <embed> marginRight property
+- <embed hspace="200.25%"> mapping to <embed> marginLeft property
+- <embed hspace="200.25%"> mapping to <embed> marginRight property
+- <embed hspace="200.25in"> mapping to <embed> marginLeft property
+- <embed hspace="200.25in"> mapping to <embed> marginRight property
+- <embed hspace="200.7"> mapping to <embed> marginLeft property
+- <embed hspace="200.7"> mapping to <embed> marginRight property
+- <embed hspace="200in"> mapping to <embed> marginLeft property
+- <embed hspace="200in"> mapping to <embed> marginRight property
+- <embed vspace="   00523   "> mapping to <embed> marginBottom property
+- <embed vspace="   00523   "> mapping to <embed> marginTop property
+- <embed vspace="0%"> mapping to <embed> marginBottom property
+- <embed vspace="0%"> mapping to <embed> marginTop property
+- <embed vspace="1007"> mapping to <embed> marginBottom property
+- <embed vspace="1007"> mapping to <embed> marginTop property
+- <embed vspace="20.25E2"> mapping to <embed> marginBottom property
+- <embed vspace="20.25E2"> mapping to <embed> marginTop property
+- <embed vspace="20.25e2"> mapping to <embed> marginBottom property
+- <embed vspace="20.25e2"> mapping to <embed> marginTop property
+- <embed vspace="200 %"> mapping to <embed> marginBottom property
+- <embed vspace="200 %"> mapping to <embed> marginTop property
+- <embed vspace="200 abc"> mapping to <embed> marginBottom property
+- <embed vspace="200 abc"> mapping to <embed> marginTop property
+- <embed vspace="200"> mapping to <embed> marginBottom property
+- <embed vspace="200"> mapping to <embed> marginTop property
+- <embed vspace="200%"> mapping to <embed> marginBottom property
+- <embed vspace="200%"> mapping to <embed> marginTop property
+- <embed vspace="200%abc"> mapping to <embed> marginBottom property
+- <embed vspace="200%abc"> mapping to <embed> marginTop property
+- <embed vspace="200."> mapping to <embed> marginBottom property
+- <embed vspace="200."> mapping to <embed> marginTop property
+- <embed vspace="200.%"> mapping to <embed> marginBottom property
+- <embed vspace="200.%"> mapping to <embed> marginTop property
+- <embed vspace="200.25"> mapping to <embed> marginBottom property
+- <embed vspace="200.25"> mapping to <embed> marginTop property
+- <embed vspace="200.25%"> mapping to <embed> marginBottom property
+- <embed vspace="200.25%"> mapping to <embed> marginTop property
+- <embed vspace="200.25in"> mapping to <embed> marginBottom property
+- <embed vspace="200.25in"> mapping to <embed> marginTop property
+- <embed vspace="200.7"> mapping to <embed> marginBottom property
+- <embed vspace="200.7"> mapping to <embed> marginTop property
+- <embed vspace="200in"> mapping to <embed> marginBottom property
+- <embed vspace="200in"> mapping to <embed> marginTop property
+- <embed width="   00523   "> mapping to <embed> width property
+- <embed width="-200px"> mapping to <embed> width property
+- <embed width="200 %"> mapping to <embed> width property
+- <embed width="200.%"> mapping to <embed> width property
+- <hr width="   00523   "> mapping to <hr> width property
+- <hr width="0"> mapping to <hr> width property
+- <hr width="0%"> mapping to <hr> width property
+- <hr width="0px"> mapping to <hr> width property
+- <hr width="1007"> mapping to <hr> width property
+- <hr width="20.25E2"> mapping to <hr> width property
+- <hr width="20.25e2"> mapping to <hr> width property
+- <hr width="200 %"> mapping to <hr> width property
+- <hr width="200 abc"> mapping to <hr> width property
+- <hr width="200"> mapping to <hr> width property
+- <hr width="200%"> mapping to <hr> width property
+- <hr width="200%abc"> mapping to <hr> width property
+- <hr width="200."> mapping to <hr> width property
+- <hr width="200.%"> mapping to <hr> width property
+- <hr width="200.25"> mapping to <hr> width property
+- <hr width="200.25%"> mapping to <hr> width property
+- <hr width="200.25in"> mapping to <hr> width property
+- <hr width="200.7"> mapping to <hr> width property
+- <hr width="200in"> mapping to <hr> width property
+- <iframe height="   00523   "> mapping to <iframe> height property
+- <iframe height="-200px"> mapping to <iframe> height property
+- <iframe height="200 %"> mapping to <iframe> height property
+- <iframe height="200.%"> mapping to <iframe> height property
+- <iframe width="   00523   "> mapping to <iframe> width property
+- <iframe width="-200px"> mapping to <iframe> width property
+- <iframe width="200 %"> mapping to <iframe> width property
+- <iframe width="200.%"> mapping to <iframe> width property
+- <img height="   00523   "> mapping to <img> height property
+- <img height="-200px"> mapping to <img> height property
+- <img height="200 %"> mapping to <img> height property
+- <img height="200.%"> mapping to <img> height property
+- <img hspace="   00523   "> mapping to <img> marginLeft property
+- <img hspace="   00523   "> mapping to <img> marginRight property
+- <img hspace="0%"> mapping to <img> marginLeft property
+- <img hspace="0%"> mapping to <img> marginRight property
+- <img hspace="1007"> mapping to <img> marginLeft property
+- <img hspace="1007"> mapping to <img> marginRight property
+- <img hspace="20.25E2"> mapping to <img> marginLeft property
+- <img hspace="20.25E2"> mapping to <img> marginRight property
+- <img hspace="20.25e2"> mapping to <img> marginLeft property
+- <img hspace="20.25e2"> mapping to <img> marginRight property
+- <img hspace="200 %"> mapping to <img> marginLeft property
+- <img hspace="200 %"> mapping to <img> marginRight property
+- <img hspace="200 abc"> mapping to <img> marginLeft property
+- <img hspace="200 abc"> mapping to <img> marginRight property
+- <img hspace="200"> mapping to <img> marginLeft property
+- <img hspace="200"> mapping to <img> marginRight property
+- <img hspace="200%"> mapping to <img> marginLeft property
+- <img hspace="200%"> mapping to <img> marginRight property
+- <img hspace="200%abc"> mapping to <img> marginLeft property
+- <img hspace="200%abc"> mapping to <img> marginRight property
+- <img hspace="200."> mapping to <img> marginLeft property
+- <img hspace="200."> mapping to <img> marginRight property
+- <img hspace="200.%"> mapping to <img> marginLeft property
+- <img hspace="200.%"> mapping to <img> marginRight property
+- <img hspace="200.25"> mapping to <img> marginLeft property
+- <img hspace="200.25"> mapping to <img> marginRight property
+- <img hspace="200.25%"> mapping to <img> marginLeft property
+- <img hspace="200.25%"> mapping to <img> marginRight property
+- <img hspace="200.25in"> mapping to <img> marginLeft property
+- <img hspace="200.25in"> mapping to <img> marginRight property
+- <img hspace="200.7"> mapping to <img> marginLeft property
+- <img hspace="200.7"> mapping to <img> marginRight property
+- <img hspace="200in"> mapping to <img> marginLeft property
+- <img hspace="200in"> mapping to <img> marginRight property
+- <img vspace="   00523   "> mapping to <img> marginBottom property
+- <img vspace="   00523   "> mapping to <img> marginTop property
+- <img vspace="0%"> mapping to <img> marginBottom property
+- <img vspace="0%"> mapping to <img> marginTop property
+- <img vspace="1007"> mapping to <img> marginBottom property
+- <img vspace="1007"> mapping to <img> marginTop property
+- <img vspace="20.25E2"> mapping to <img> marginBottom property
+- <img vspace="20.25E2"> mapping to <img> marginTop property
+- <img vspace="20.25e2"> mapping to <img> marginBottom property
+- <img vspace="20.25e2"> mapping to <img> marginTop property
+- <img vspace="200 %"> mapping to <img> marginBottom property
+- <img vspace="200 %"> mapping to <img> marginTop property
+- <img vspace="200 abc"> mapping to <img> marginBottom property
+- <img vspace="200 abc"> mapping to <img> marginTop property
+- <img vspace="200"> mapping to <img> marginBottom property
+- <img vspace="200"> mapping to <img> marginTop property
+- <img vspace="200%"> mapping to <img> marginBottom property
+- <img vspace="200%"> mapping to <img> marginTop property
+- <img vspace="200%abc"> mapping to <img> marginBottom property
+- <img vspace="200%abc"> mapping to <img> marginTop property
+- <img vspace="200."> mapping to <img> marginBottom property
+- <img vspace="200."> mapping to <img> marginTop property
+- <img vspace="200.%"> mapping to <img> marginBottom property
+- <img vspace="200.%"> mapping to <img> marginTop property
+- <img vspace="200.25"> mapping to <img> marginBottom property
+- <img vspace="200.25"> mapping to <img> marginTop property
+- <img vspace="200.25%"> mapping to <img> marginBottom property
+- <img vspace="200.25%"> mapping to <img> marginTop property
+- <img vspace="200.25in"> mapping to <img> marginBottom property
+- <img vspace="200.25in"> mapping to <img> marginTop property
+- <img vspace="200.7"> mapping to <img> marginBottom property
+- <img vspace="200.7"> mapping to <img> marginTop property
+- <img vspace="200in"> mapping to <img> marginBottom property
+- <img vspace="200in"> mapping to <img> marginTop property
+- <img width="   00523   "> mapping to <img> width property
+- <img width="-200px"> mapping to <img> width property
+- <img width="200 %"> mapping to <img> width property
+- <img width="200.%"> mapping to <img> width property
+- <input height="   00523   "> mapping to <input> height property
+- <input height="-200px"> mapping to <input> height property
+- <input height="0%"> mapping to <input> height property
+- <input height="20.25E2"> mapping to <input> height property
+- <input height="20.25e2"> mapping to <input> height property
+- <input height="200 %"> mapping to <input> height property
+- <input height="200 abc"> mapping to <input> height property
+- <input height="200%"> mapping to <input> height property
+- <input height="200%abc"> mapping to <input> height property
+- <input height="200."> mapping to <input> height property
+- <input height="200.%"> mapping to <input> height property
+- <input height="200.25%"> mapping to <input> height property
+- <input height="200.25in"> mapping to <input> height property
+- <input height="200in"> mapping to <input> height property
+- <input hspace="   00523   "> mapping to <input> marginLeft property
+- <input hspace="   00523   "> mapping to <input> marginRight property
+- <input hspace="0%"> mapping to <input> marginLeft property
+- <input hspace="0%"> mapping to <input> marginRight property
+- <input hspace="1007"> mapping to <input> marginLeft property
+- <input hspace="1007"> mapping to <input> marginRight property
+- <input hspace="20.25E2"> mapping to <input> marginLeft property
+- <input hspace="20.25E2"> mapping to <input> marginRight property
+- <input hspace="20.25e2"> mapping to <input> marginLeft property
+- <input hspace="20.25e2"> mapping to <input> marginRight property
+- <input hspace="200 %"> mapping to <input> marginLeft property
+- <input hspace="200 %"> mapping to <input> marginRight property
+- <input hspace="200 abc"> mapping to <input> marginLeft property
+- <input hspace="200 abc"> mapping to <input> marginRight property
+- <input hspace="200"> mapping to <input> marginLeft property
+- <input hspace="200"> mapping to <input> marginRight property
+- <input hspace="200%"> mapping to <input> marginLeft property
+- <input hspace="200%"> mapping to <input> marginRight property
+- <input hspace="200%abc"> mapping to <input> marginLeft property
+- <input hspace="200%abc"> mapping to <input> marginRight property
+- <input hspace="200."> mapping to <input> marginLeft property
+- <input hspace="200."> mapping to <input> marginRight property
+- <input hspace="200.%"> mapping to <input> marginLeft property
+- <input hspace="200.%"> mapping to <input> marginRight property
+- <input hspace="200.25"> mapping to <input> marginLeft property
+- <input hspace="200.25"> mapping to <input> marginRight property
+- <input hspace="200.25%"> mapping to <input> marginLeft property
+- <input hspace="200.25%"> mapping to <input> marginRight property
+- <input hspace="200.25in"> mapping to <input> marginLeft property
+- <input hspace="200.25in"> mapping to <input> marginRight property
+- <input hspace="200.7"> mapping to <input> marginLeft property
+- <input hspace="200.7"> mapping to <input> marginRight property
+- <input hspace="200in"> mapping to <input> marginLeft property
+- <input hspace="200in"> mapping to <input> marginRight property
+- <input vspace="   00523   "> mapping to <input> marginBottom property
+- <input vspace="   00523   "> mapping to <input> marginTop property
+- <input vspace="0%"> mapping to <input> marginBottom property
+- <input vspace="0%"> mapping to <input> marginTop property
+- <input vspace="1007"> mapping to <input> marginBottom property
+- <input vspace="1007"> mapping to <input> marginTop property
+- <input vspace="20.25E2"> mapping to <input> marginBottom property
+- <input vspace="20.25E2"> mapping to <input> marginTop property
+- <input vspace="20.25e2"> mapping to <input> marginBottom property
+- <input vspace="20.25e2"> mapping to <input> marginTop property
+- <input vspace="200 %"> mapping to <input> marginBottom property
+- <input vspace="200 %"> mapping to <input> marginTop property
+- <input vspace="200 abc"> mapping to <input> marginBottom property
+- <input vspace="200 abc"> mapping to <input> marginTop property
+- <input vspace="200"> mapping to <input> marginBottom property
+- <input vspace="200"> mapping to <input> marginTop property
+- <input vspace="200%"> mapping to <input> marginBottom property
+- <input vspace="200%"> mapping to <input> marginTop property
+- <input vspace="200%abc"> mapping to <input> marginBottom property
+- <input vspace="200%abc"> mapping to <input> marginTop property
+- <input vspace="200."> mapping to <input> marginBottom property
+- <input vspace="200."> mapping to <input> marginTop property
+- <input vspace="200.%"> mapping to <input> marginBottom property
+- <input vspace="200.%"> mapping to <input> marginTop property
+- <input vspace="200.25"> mapping to <input> marginBottom property
+- <input vspace="200.25"> mapping to <input> marginTop property
+- <input vspace="200.25%"> mapping to <input> marginBottom property
+- <input vspace="200.25%"> mapping to <input> marginTop property
+- <input vspace="200.25in"> mapping to <input> marginBottom property
+- <input vspace="200.25in"> mapping to <input> marginTop property
+- <input vspace="200.7"> mapping to <input> marginBottom property
+- <input vspace="200.7"> mapping to <input> marginTop property
+- <input vspace="200in"> mapping to <input> marginBottom property
+- <input vspace="200in"> mapping to <input> marginTop property
+- <input width="   00523   "> mapping to <input> width property
+- <input width="-200px"> mapping to <input> width property
+- <input width="0%"> mapping to <input> width property
+- <input width="20.25E2"> mapping to <input> width property
+- <input width="20.25e2"> mapping to <input> width property
+- <input width="200 %"> mapping to <input> width property
+- <input width="200 abc"> mapping to <input> width property
+- <input width="200%"> mapping to <input> width property
+- <input width="200%abc"> mapping to <input> width property
+- <input width="200."> mapping to <input> width property
+- <input width="200.%"> mapping to <input> width property
+- <input width="200.25%"> mapping to <input> width property
+- <input width="200.25in"> mapping to <input> width property
+- <input width="200in"> mapping to <input> width property
+- <marquee height="   00523   "> mapping to <marquee> height property
+- <marquee height="0"> mapping to <marquee> height property
+- <marquee height="0%"> mapping to <marquee> height property
+- <marquee height="0px"> mapping to <marquee> height property
+- <marquee height="1007"> mapping to <marquee> height property
+- <marquee height="20.25E2"> mapping to <marquee> height property
+- <marquee height="20.25e2"> mapping to <marquee> height property
+- <marquee height="200 %"> mapping to <marquee> height property
+- <marquee height="200 abc"> mapping to <marquee> height property
+- <marquee height="200"> mapping to <marquee> height property
+- <marquee height="200%"> mapping to <marquee> height property
+- <marquee height="200%abc"> mapping to <marquee> height property
+- <marquee height="200."> mapping to <marquee> height property
+- <marquee height="200.%"> mapping to <marquee> height property
+- <marquee height="200.25"> mapping to <marquee> height property
+- <marquee height="200.25%"> mapping to <marquee> height property
+- <marquee height="200.25in"> mapping to <marquee> height property
+- <marquee height="200.7"> mapping to <marquee> height property
+- <marquee height="200in"> mapping to <marquee> height property
+- <marquee hspace="   00523   "> mapping to <marquee> marginLeft property
+- <marquee hspace="   00523   "> mapping to <marquee> marginRight property
+- <marquee hspace="0%"> mapping to <marquee> marginLeft property
+- <marquee hspace="0%"> mapping to <marquee> marginRight property
+- <marquee hspace="1007"> mapping to <marquee> marginLeft property
+- <marquee hspace="1007"> mapping to <marquee> marginRight property
+- <marquee hspace="20.25E2"> mapping to <marquee> marginLeft property
+- <marquee hspace="20.25E2"> mapping to <marquee> marginRight property
+- <marquee hspace="20.25e2"> mapping to <marquee> marginLeft property
+- <marquee hspace="20.25e2"> mapping to <marquee> marginRight property
+- <marquee hspace="200 %"> mapping to <marquee> marginLeft property
+- <marquee hspace="200 %"> mapping to <marquee> marginRight property
+- <marquee hspace="200 abc"> mapping to <marquee> marginLeft property
+- <marquee hspace="200 abc"> mapping to <marquee> marginRight property
+- <marquee hspace="200"> mapping to <marquee> marginLeft property
+- <marquee hspace="200"> mapping to <marquee> marginRight property
+- <marquee hspace="200%"> mapping to <marquee> marginLeft property
+- <marquee hspace="200%"> mapping to <marquee> marginRight property
+- <marquee hspace="200%abc"> mapping to <marquee> marginLeft property
+- <marquee hspace="200%abc"> mapping to <marquee> marginRight property
+- <marquee hspace="200."> mapping to <marquee> marginLeft property
+- <marquee hspace="200."> mapping to <marquee> marginRight property
+- <marquee hspace="200.%"> mapping to <marquee> marginLeft property
+- <marquee hspace="200.%"> mapping to <marquee> marginRight property
+- <marquee hspace="200.25"> mapping to <marquee> marginLeft property
+- <marquee hspace="200.25"> mapping to <marquee> marginRight property
+- <marquee hspace="200.25%"> mapping to <marquee> marginLeft property
+- <marquee hspace="200.25%"> mapping to <marquee> marginRight property
+- <marquee hspace="200.25in"> mapping to <marquee> marginLeft property
+- <marquee hspace="200.25in"> mapping to <marquee> marginRight property
+- <marquee hspace="200.7"> mapping to <marquee> marginLeft property
+- <marquee hspace="200.7"> mapping to <marquee> marginRight property
+- <marquee hspace="200in"> mapping to <marquee> marginLeft property
+- <marquee hspace="200in"> mapping to <marquee> marginRight property
+- <marquee vspace="   00523   "> mapping to <marquee> marginBottom property
+- <marquee vspace="   00523   "> mapping to <marquee> marginTop property
+- <marquee vspace="0%"> mapping to <marquee> marginBottom property
+- <marquee vspace="0%"> mapping to <marquee> marginTop property
+- <marquee vspace="1007"> mapping to <marquee> marginBottom property
+- <marquee vspace="1007"> mapping to <marquee> marginTop property
+- <marquee vspace="20.25E2"> mapping to <marquee> marginBottom property
+- <marquee vspace="20.25E2"> mapping to <marquee> marginTop property
+- <marquee vspace="20.25e2"> mapping to <marquee> marginBottom property
+- <marquee vspace="20.25e2"> mapping to <marquee> marginTop property
+- <marquee vspace="200 %"> mapping to <marquee> marginBottom property
+- <marquee vspace="200 %"> mapping to <marquee> marginTop property
+- <marquee vspace="200 abc"> mapping to <marquee> marginBottom property
+- <marquee vspace="200 abc"> mapping to <marquee> marginTop property
+- <marquee vspace="200"> mapping to <marquee> marginBottom property
+- <marquee vspace="200"> mapping to <marquee> marginTop property
+- <marquee vspace="200%"> mapping to <marquee> marginBottom property
+- <marquee vspace="200%"> mapping to <marquee> marginTop property
+- <marquee vspace="200%abc"> mapping to <marquee> marginBottom property
+- <marquee vspace="200%abc"> mapping to <marquee> marginTop property
+- <marquee vspace="200."> mapping to <marquee> marginBottom property
+- <marquee vspace="200."> mapping to <marquee> marginTop property
+- <marquee vspace="200.%"> mapping to <marquee> marginBottom property
+- <marquee vspace="200.%"> mapping to <marquee> marginTop property
+- <marquee vspace="200.25"> mapping to <marquee> marginBottom property
+- <marquee vspace="200.25"> mapping to <marquee> marginTop property
+- <marquee vspace="200.25%"> mapping to <marquee> marginBottom property
+- <marquee vspace="200.25%"> mapping to <marquee> marginTop property
+- <marquee vspace="200.25in"> mapping to <marquee> marginBottom property
+- <marquee vspace="200.25in"> mapping to <marquee> marginTop property
+- <marquee vspace="200.7"> mapping to <marquee> marginBottom property
+- <marquee vspace="200.7"> mapping to <marquee> marginTop property
+- <marquee vspace="200in"> mapping to <marquee> marginBottom property
+- <marquee vspace="200in"> mapping to <marquee> marginTop property
+- <marquee width="   00523   "> mapping to <marquee> width property
+- <marquee width="0"> mapping to <marquee> width property
+- <marquee width="0%"> mapping to <marquee> width property
+- <marquee width="0px"> mapping to <marquee> width property
+- <marquee width="1007"> mapping to <marquee> width property
+- <marquee width="20.25E2"> mapping to <marquee> width property
+- <marquee width="20.25e2"> mapping to <marquee> width property
+- <marquee width="200 %"> mapping to <marquee> width property
+- <marquee width="200 abc"> mapping to <marquee> width property
+- <marquee width="200"> mapping to <marquee> width property
+- <marquee width="200%"> mapping to <marquee> width property
+- <marquee width="200%abc"> mapping to <marquee> width property
+- <marquee width="200."> mapping to <marquee> width property
+- <marquee width="200.%"> mapping to <marquee> width property
+- <marquee width="200.25"> mapping to <marquee> width property
+- <marquee width="200.25%"> mapping to <marquee> width property
+- <marquee width="200.25in"> mapping to <marquee> width property
+- <marquee width="200.7"> mapping to <marquee> width property
+- <marquee width="200in"> mapping to <marquee> width property
+- <object height="   00523   "> mapping to <object> height property
+- <object height="-200px"> mapping to <object> height property
+- <object height="200 %"> mapping to <object> height property
+- <object height="200.%"> mapping to <object> height property
+- <object hspace="   00523   "> mapping to <object> marginLeft property
+- <object hspace="   00523   "> mapping to <object> marginRight property
+- <object hspace="0%"> mapping to <object> marginLeft property
+- <object hspace="0%"> mapping to <object> marginRight property
+- <object hspace="1007"> mapping to <object> marginLeft property
+- <object hspace="1007"> mapping to <object> marginRight property
+- <object hspace="20.25E2"> mapping to <object> marginLeft property
+- <object hspace="20.25E2"> mapping to <object> marginRight property
+- <object hspace="20.25e2"> mapping to <object> marginLeft property
+- <object hspace="20.25e2"> mapping to <object> marginRight property
+- <object hspace="200 %"> mapping to <object> marginLeft property
+- <object hspace="200 %"> mapping to <object> marginRight property
+- <object hspace="200 abc"> mapping to <object> marginLeft property
+- <object hspace="200 abc"> mapping to <object> marginRight property
+- <object hspace="200"> mapping to <object> marginLeft property
+- <object hspace="200"> mapping to <object> marginRight property
+- <object hspace="200%"> mapping to <object> marginLeft property
+- <object hspace="200%"> mapping to <object> marginRight property
+- <object hspace="200%abc"> mapping to <object> marginLeft property
+- <object hspace="200%abc"> mapping to <object> marginRight property
+- <object hspace="200."> mapping to <object> marginLeft property
+- <object hspace="200."> mapping to <object> marginRight property
+- <object hspace="200.%"> mapping to <object> marginLeft property
+- <object hspace="200.%"> mapping to <object> marginRight property
+- <object hspace="200.25"> mapping to <object> marginLeft property
+- <object hspace="200.25"> mapping to <object> marginRight property
+- <object hspace="200.25%"> mapping to <object> marginLeft property
+- <object hspace="200.25%"> mapping to <object> marginRight property
+- <object hspace="200.25in"> mapping to <object> marginLeft property
+- <object hspace="200.25in"> mapping to <object> marginRight property
+- <object hspace="200.7"> mapping to <object> marginLeft property
+- <object hspace="200.7"> mapping to <object> marginRight property
+- <object hspace="200in"> mapping to <object> marginLeft property
+- <object hspace="200in"> mapping to <object> marginRight property
+- <object vspace="   00523   "> mapping to <object> marginBottom property
+- <object vspace="   00523   "> mapping to <object> marginTop property
+- <object vspace="0%"> mapping to <object> marginBottom property
+- <object vspace="0%"> mapping to <object> marginTop property
+- <object vspace="1007"> mapping to <object> marginBottom property
+- <object vspace="1007"> mapping to <object> marginTop property
+- <object vspace="20.25E2"> mapping to <object> marginBottom property
+- <object vspace="20.25E2"> mapping to <object> marginTop property
+- <object vspace="20.25e2"> mapping to <object> marginBottom property
+- <object vspace="20.25e2"> mapping to <object> marginTop property
+- <object vspace="200 %"> mapping to <object> marginBottom property
+- <object vspace="200 %"> mapping to <object> marginTop property
+- <object vspace="200 abc"> mapping to <object> marginBottom property
+- <object vspace="200 abc"> mapping to <object> marginTop property
+- <object vspace="200"> mapping to <object> marginBottom property
+- <object vspace="200"> mapping to <object> marginTop property
+- <object vspace="200%"> mapping to <object> marginBottom property
+- <object vspace="200%"> mapping to <object> marginTop property
+- <object vspace="200%abc"> mapping to <object> marginBottom property
+- <object vspace="200%abc"> mapping to <object> marginTop property
+- <object vspace="200."> mapping to <object> marginBottom property
+- <object vspace="200."> mapping to <object> marginTop property
+- <object vspace="200.%"> mapping to <object> marginBottom property
+- <object vspace="200.%"> mapping to <object> marginTop property
+- <object vspace="200.25"> mapping to <object> marginBottom property
+- <object vspace="200.25"> mapping to <object> marginTop property
+- <object vspace="200.25%"> mapping to <object> marginBottom property
+- <object vspace="200.25%"> mapping to <object> marginTop property
+- <object vspace="200.25in"> mapping to <object> marginBottom property
+- <object vspace="200.25in"> mapping to <object> marginTop property
+- <object vspace="200.7"> mapping to <object> marginBottom property
+- <object vspace="200.7"> mapping to <object> marginTop property
+- <object vspace="200in"> mapping to <object> marginBottom property
+- <object vspace="200in"> mapping to <object> marginTop property
+- <object width="   00523   "> mapping to <object> width property
+- <object width="-200px"> mapping to <object> width property
+- <object width="200 %"> mapping to <object> width property
+- <object width="200.%"> mapping to <object> width property
+- <source height="   00523   "> mapping to <img> height property
+- <source height="0"> mapping to <img> height property
+- <source height="0%"> mapping to <img> height property
+- <source height="0px"> mapping to <img> height property
+- <source height="1007"> mapping to <img> height property
+- <source height="20.25E2"> mapping to <img> height property
+- <source height="20.25e2"> mapping to <img> height property
+- <source height="200 %"> mapping to <img> height property
+- <source height="200 abc"> mapping to <img> height property
+- <source height="200"> mapping to <img> height property
+- <source height="200%"> mapping to <img> height property
+- <source height="200%abc"> mapping to <img> height property
+- <source height="200."> mapping to <img> height property
+- <source height="200.%"> mapping to <img> height property
+- <source height="200.25"> mapping to <img> height property
+- <source height="200.25%"> mapping to <img> height property
+- <source height="200.25in"> mapping to <img> height property
+- <source height="200.7"> mapping to <img> height property
+- <source height="200in"> mapping to <img> height property
+- <source width="   00523   "> mapping to <img> width property
+- <source width="0"> mapping to <img> width property
+- <source width="0%"> mapping to <img> width property
+- <source width="0px"> mapping to <img> width property
+- <source width="1007"> mapping to <img> width property
+- <source width="20.25E2"> mapping to <img> width property
+- <source width="20.25e2"> mapping to <img> width property
+- <source width="200 %"> mapping to <img> width property
+- <source width="200 abc"> mapping to <img> width property
+- <source width="200"> mapping to <img> width property
+- <source width="200%"> mapping to <img> width property
+- <source width="200%abc"> mapping to <img> width property
+- <source width="200."> mapping to <img> width property
+- <source width="200.%"> mapping to <img> width property
+- <source width="200.25"> mapping to <img> width property
+- <source width="200.25%"> mapping to <img> width property
+- <source width="200.25in"> mapping to <img> width property
+- <source width="200.7"> mapping to <img> width property
+- <source width="200in"> mapping to <img> width property
+- <table height="   00523   "> mapping to <table> height property
+- <table height="0"> mapping to <table> height property
+- <table height="0%"> mapping to <table> height property
+- <table height="0px"> mapping to <table> height property
+- <table height="1007"> mapping to <table> height property
+- <table height="20.25E2"> mapping to <table> height property
+- <table height="20.25e2"> mapping to <table> height property
+- <table height="200 %"> mapping to <table> height property
+- <table height="200 abc"> mapping to <table> height property
+- <table height="200"> mapping to <table> height property
+- <table height="200%"> mapping to <table> height property
+- <table height="200%abc"> mapping to <table> height property
+- <table height="200."> mapping to <table> height property
+- <table height="200.%"> mapping to <table> height property
+- <table height="200.25"> mapping to <table> height property
+- <table height="200.25%"> mapping to <table> height property
+- <table height="200.25in"> mapping to <table> height property
+- <table height="200.7"> mapping to <table> height property
+- <table height="200in"> mapping to <table> height property
+- <table width="   00523   "> mapping to <table> width property
+- <table width="1007"> mapping to <table> width property
+- <table width="20.25E2"> mapping to <table> width property
+- <table width="20.25e2"> mapping to <table> width property
+- <table width="200 %"> mapping to <table> width property
+- <table width="200 abc"> mapping to <table> width property
+- <table width="200"> mapping to <table> width property
+- <table width="200%"> mapping to <table> width property
+- <table width="200%abc"> mapping to <table> width property
+- <table width="200."> mapping to <table> width property
+- <table width="200.%"> mapping to <table> width property
+- <table width="200.25"> mapping to <table> width property
+- <table width="200.25%"> mapping to <table> width property
+- <table width="200.25in"> mapping to <table> width property
+- <table width="200.7"> mapping to <table> width property
+- <table width="200in"> mapping to <table> width property
+- <td height="   00523   "> mapping to <td> height property
+- <td height="1007"> mapping to <td> height property
+- <td height="20.25E2"> mapping to <td> height property
+- <td height="20.25e2"> mapping to <td> height property
+- <td height="200 %"> mapping to <td> height property
+- <td height="200 abc"> mapping to <td> height property
+- <td height="200"> mapping to <td> height property
+- <td height="200%"> mapping to <td> height property
+- <td height="200%abc"> mapping to <td> height property
+- <td height="200."> mapping to <td> height property
+- <td height="200.%"> mapping to <td> height property
+- <td height="200.25"> mapping to <td> height property
+- <td height="200.25%"> mapping to <td> height property
+- <td height="200.25in"> mapping to <td> height property
+- <td height="200.7"> mapping to <td> height property
+- <td height="200in"> mapping to <td> height property
+- <td width="   00523   "> mapping to <td> width property
+- <td width="1007"> mapping to <td> width property
+- <td width="20.25E2"> mapping to <td> width property
+- <td width="20.25e2"> mapping to <td> width property
+- <td width="200 %"> mapping to <td> width property
+- <td width="200 abc"> mapping to <td> width property
+- <td width="200"> mapping to <td> width property
+- <td width="200%"> mapping to <td> width property
+- <td width="200%abc"> mapping to <td> width property
+- <td width="200."> mapping to <td> width property
+- <td width="200.%"> mapping to <td> width property
+- <td width="200.25"> mapping to <td> width property
+- <td width="200.25%"> mapping to <td> width property
+- <td width="200.25in"> mapping to <td> width property
+- <td width="200.7"> mapping to <td> width property
+- <td width="200in"> mapping to <td> width property
+- <tr height="   00523   "> mapping to <tr> height property
+- <tr height="0"> mapping to <tr> height property
+- <tr height="0%"> mapping to <tr> height property
+- <tr height="0px"> mapping to <tr> height property
+- <tr height="1007"> mapping to <tr> height property
+- <tr height="20.25E2"> mapping to <tr> height property
+- <tr height="20.25e2"> mapping to <tr> height property
+- <tr height="200 %"> mapping to <tr> height property
+- <tr height="200 abc"> mapping to <tr> height property
+- <tr height="200"> mapping to <tr> height property
+- <tr height="200%"> mapping to <tr> height property
+- <tr height="200%abc"> mapping to <tr> height property
+- <tr height="200."> mapping to <tr> height property
+- <tr height="200.%"> mapping to <tr> height property
+- <tr height="200.25"> mapping to <tr> height property
+- <tr height="200.25%"> mapping to <tr> height property
+- <tr height="200.25in"> mapping to <tr> height property
+- <tr height="200.7"> mapping to <tr> height property
+- <tr height="200in"> mapping to <tr> height property
+- <video height="   00523   "> mapping to <video> height property
+- <video height="-200px"> mapping to <video> height property
+- <video height="200 %"> mapping to <video> height property
+- <video height="200.%"> mapping to <video> height property
+- <video width="   00523   "> mapping to <video> width property
+- <video width="-200px"> mapping to <video> width property
+- <video width="200 %"> mapping to <video> width property
+- <video width="200.%"> mapping to <video> width property
+html/rendering/non-replaced-elements/flow-content-0/dialog.html:
+- 'Closed dialog in width: 538px iframe'
+- 'Closed dialog in width: 540px iframe'
+- 'Modal dialog in width: 538px iframe'
+- 'Modal dialog in width: 540px iframe'
+- 'Open dialog in width: 538px iframe'
+- 'Open dialog in width: 540px iframe'
+html/rendering/non-replaced-elements/flow-content-0/div-align.html:
+- "== html/rendering/non-replaced-elements/flow-content-0/div-align-ref.html"
+html/rendering/non-replaced-elements/flow-content-0/figure.html:
+- "== html/rendering/non-replaced-elements/flow-content-0/figure-ref.html"
+html/rendering/non-replaced-elements/flow-content-0/form-margin-quirk.html:
+- form margin quirk
+html/rendering/non-replaced-elements/flow-content-0/search-styles-iso-8859-8.html:
+- "<search> - unicode-bidi"
+html/rendering/non-replaced-elements/flow-content-0/search-styles.html:
+- "<search> - unicode-bidi"
+html/rendering/non-replaced-elements/flow-content-0/slot-element-default-display.html:
+- slot element with default display should be contents
+html/rendering/non-replaced-elements/form-controls/input-line-height-computed.html:
+- "<input type=email>.computedStyleMap().get('line-height') should not be affected
+  by the used value clamping"
+- "<input type=password>.computedStyleMap().get('line-height') should not be affected
+  by the used value clamping"
+- "<input type=search>.computedStyleMap().get('line-height') should not be affected
+  by the used value clamping"
+- "<input type=tel>.computedStyleMap().get('line-height') should not be affected by
+  the used value clamping"
+- "<input type=text>.computedStyleMap().get('line-height') should not be affected
+  by the used value clamping"
+- "<input type=url>.computedStyleMap().get('line-height') should not be affected by
+  the used value clamping"
+- getComputedStyle(<input type=email>).lineHeight should return a used value that
+  is no smaller than 'normal' (but should not literally be 'normal')
+- getComputedStyle(<input type=password>).lineHeight should return a used value that
+  is no smaller than 'normal' (but should not literally be 'normal')
+- getComputedStyle(<input type=search>).lineHeight should return a used value that
+  is no smaller than 'normal' (but should not literally be 'normal')
+- getComputedStyle(<input type=tel>).lineHeight should return a used value that is
+  no smaller than 'normal' (but should not literally be 'normal')
+- getComputedStyle(<input type=text>).lineHeight should return a used value that is
+  no smaller than 'normal' (but should not literally be 'normal')
+- getComputedStyle(<input type=url>).lineHeight should return a used value that is
+  no smaller than 'normal' (but should not literally be 'normal')
+html/rendering/non-replaced-elements/form-controls/resets.html:
+- "<button> - text-indent"
+- "<button> - text-shadow"
+- "<button> - text-transform"
+- "<button> - word-spacing"
+- <input type="button"> - overflow-clip-margin
+- <input type="button"> - text-indent
+- <input type="button"> - text-shadow
+- <input type="button"> - text-transform
+- <input type="button"> - word-spacing
+- <input type="checkbox"> - text-indent
+- <input type="checkbox"> - text-shadow
+- <input type="checkbox"> - text-transform
+- <input type="checkbox"> - word-spacing
+- <input type="color"> - overflow
+- <input type="color"> - overflow-clip-margin
+- <input type="color"> - text-indent
+- <input type="color"> - text-shadow
+- <input type="color"> - text-transform
+- <input type="color"> - word-spacing
+- <input type="date"> - overflow-clip-margin
+- <input type="date"> - text-indent
+- <input type="date"> - text-shadow
+- <input type="date"> - text-transform
+- <input type="date"> - word-spacing
+- <input type="datetime-local"> - overflow-clip-margin
+- <input type="datetime-local"> - text-indent
+- <input type="datetime-local"> - text-shadow
+- <input type="datetime-local"> - text-transform
+- <input type="datetime-local"> - word-spacing
+- <input type="email"> - overflow-clip-margin
+- <input type="email"> - text-indent
+- <input type="email"> - text-shadow
+- <input type="email"> - text-transform
+- <input type="email"> - word-spacing
+- <input type="file"> - overflow-clip-margin
+- <input type="file"> - text-indent
+- <input type="file"> - text-shadow
+- <input type="file"> - text-transform
+- <input type="file"> - word-spacing
+- <input type="hidden"> - overflow
+- <input type="hidden"> - overflow-clip-margin
+- <input type="hidden"> - text-indent
+- <input type="hidden"> - text-shadow
+- <input type="hidden"> - text-transform
+- <input type="hidden"> - word-spacing
+- <input type="image"> - overflow-clip-margin
+- <input type="image"> - text-indent
+- <input type="image"> - text-shadow
+- <input type="image"> - text-transform
+- <input type="image"> - word-spacing
+- <input type="month"> - overflow-clip-margin
+- <input type="month"> - text-indent
+- <input type="month"> - text-shadow
+- <input type="month"> - text-transform
+- <input type="month"> - word-spacing
+- <input type="number"> - overflow-clip-margin
+- <input type="number"> - text-indent
+- <input type="number"> - text-shadow
+- <input type="number"> - text-transform
+- <input type="number"> - word-spacing
+- <input type="password"> - overflow-clip-margin
+- <input type="password"> - text-indent
+- <input type="password"> - text-shadow
+- <input type="password"> - text-transform
+- <input type="password"> - word-spacing
+- <input type="radio"> - text-indent
+- <input type="radio"> - text-shadow
+- <input type="radio"> - text-transform
+- <input type="radio"> - word-spacing
+- <input type="range"> - text-indent
+- <input type="range"> - text-shadow
+- <input type="range"> - text-transform
+- <input type="range"> - word-spacing
+- <input type="reset"> - overflow-clip-margin
+- <input type="reset"> - text-indent
+- <input type="reset"> - text-shadow
+- <input type="reset"> - text-transform
+- <input type="reset"> - word-spacing
+- <input type="search"> - box-sizing
+- <input type="search"> - overflow-clip-margin
+- <input type="search"> - text-indent
+- <input type="search"> - text-shadow
+- <input type="search"> - text-transform
+- <input type="search"> - word-spacing
+- <input type="submit"> - overflow-clip-margin
+- <input type="submit"> - text-indent
+- <input type="submit"> - text-shadow
+- <input type="submit"> - text-transform
+- <input type="submit"> - word-spacing
+- <input type="tel"> - overflow-clip-margin
+- <input type="tel"> - text-indent
+- <input type="tel"> - text-shadow
+- <input type="tel"> - text-transform
+- <input type="tel"> - word-spacing
+- <input type="text"> - overflow-clip-margin
+- <input type="text"> - text-indent
+- <input type="text"> - text-shadow
+- <input type="text"> - text-transform
+- <input type="text"> - word-spacing
+- <input type="time"> - overflow-clip-margin
+- <input type="time"> - text-indent
+- <input type="time"> - text-shadow
+- <input type="time"> - text-transform
+- <input type="time"> - word-spacing
+- <input type="url"> - overflow-clip-margin
+- <input type="url"> - text-indent
+- <input type="url"> - text-shadow
+- <input type="url"> - text-transform
+- <input type="url"> - word-spacing
+- <input type="week"> - overflow-clip-margin
+- <input type="week"> - text-indent
+- <input type="week"> - text-shadow
+- <input type="week"> - text-transform
+- <input type="week"> - word-spacing
+- "<marquee> - overflow"
+- "<marquee> - text-align"
+- "<optgroup><option> (in <select>) - text-indent"
+- "<optgroup><option> (in <select>) - text-shadow"
+- "<optgroup><option> (in <select>) - text-transform"
+- "<optgroup><option> (in <select>) - word-spacing"
+- "<option> (in <select><optgroup>) - text-indent"
+- "<option> (in <select><optgroup>) - text-shadow"
+- "<option> (in <select><optgroup>) - text-transform"
+- "<option> (in <select><optgroup>) - word-spacing"
+- <select multiple=""> - text-indent
+- <select multiple=""> - text-shadow
+- <select multiple=""> - text-transform
+- <select multiple=""> - word-spacing
+- "<select><optgroup><option> - text-indent"
+- "<select><optgroup><option> - text-shadow"
+- "<select><optgroup><option> - text-transform"
+- "<select><optgroup><option> - word-spacing"
+- "<table><tbody><tr><td> - box-sizing"
+- "<table><tbody><tr><td> - text-indent"
+- "<tbody><tr><td> (in <table>) - text-indent"
+- "<td> (in <table><tbody><tr>) - text-indent"
+- "<textarea> - text-indent"
+- "<textarea> - text-shadow"
+- "<textarea> - text-transform"
+- "<textarea> - word-spacing"
+- "<tr><td> (in <table><tbody>) - text-indent"
+html/rendering/non-replaced-elements/form-controls/text-transform.html:
+- "== html/rendering/non-replaced-elements/form-controls/text-transform-ref.html"
+html/rendering/non-replaced-elements/hidden-elements.html:
+- area should be hidden
+- base should be hidden
+- basefont should be hidden
+- datalist should be hidden
+- embed[hidden=''] element should be inline 0x0
+- embed[hidden='until-found'] element should be inline 0x0
+- noembed should be hidden
+- noframes should be hidden
+- param should be hidden
+- rp should be hidden
+- source should not be hidden
+- track should not be hidden
+html/rendering/non-replaced-elements/lists/li-text-align.html:
+- "<ul dir=ltr><li dir=rtl>"
+- "<ul dir=rtl><li dir=ltr>"
+html/rendering/non-replaced-elements/lists/lists-presentational-hints-ascii-case-insensitive.html:
+- keyword disc
+- keyword square
+html/rendering/non-replaced-elements/lists/lists-styles-quirks.html:
+- "<dd> (in <dl>) - margin-left"
+- "<dd> - margin-left"
+- |-
+  <dir>
+     <li> - margin-bottom
+- |-
+  <dir>
+     <li> - margin-top
+- |-
+  <dir>
+     <li> - padding-left
+- "<dir> (in <dir>) - list-style-type"
+- "<dir> (in <dir>) - padding-left"
+- "<dir> (in <dir><dir>) - list-style-type"
+- "<dir> (in <dir><dir>) - padding-left"
+- "<dir> (in <dir><menu>) - list-style-type"
+- "<dir> (in <dir><menu>) - padding-left"
+- "<dir> (in <dir><ol>) - list-style-type"
+- "<dir> (in <dir><ol>) - padding-left"
+- "<dir> (in <dir><ul>) - list-style-type"
+- "<dir> (in <dir><ul>) - padding-left"
+- "<dir> (in <menu>) - list-style-type"
+- "<dir> (in <menu>) - padding-left"
+- "<dir> (in <menu><dir>) - list-style-type"
+- "<dir> (in <menu><dir>) - padding-left"
+- "<dir> (in <menu><menu>) - list-style-type"
+- "<dir> (in <menu><menu>) - padding-left"
+- "<dir> (in <menu><ol>) - list-style-type"
+- "<dir> (in <menu><ol>) - padding-left"
+- "<dir> (in <menu><ul>) - list-style-type"
+- "<dir> (in <menu><ul>) - padding-left"
+- "<dir> (in <ol>) - list-style-type"
+- "<dir> (in <ol>) - padding-left"
+- "<dir> (in <ol><dir>) - list-style-type"
+- "<dir> (in <ol><dir>) - padding-left"
+- "<dir> (in <ol><menu>) - list-style-type"
+- "<dir> (in <ol><menu>) - padding-left"
+- "<dir> (in <ol><ol>) - list-style-type"
+- "<dir> (in <ol><ol>) - padding-left"
+- "<dir> (in <ol><ul>) - list-style-type"
+- "<dir> (in <ol><ul>) - padding-left"
+- "<dir> (in <ul>) - list-style-type"
+- "<dir> (in <ul>) - padding-left"
+- "<dir> (in <ul><dir>) - list-style-type"
+- "<dir> (in <ul><dir>) - padding-left"
+- "<dir> (in <ul><menu>) - list-style-type"
+- "<dir> (in <ul><menu>) - padding-left"
+- "<dir> (in <ul><ol>) - list-style-type"
+- "<dir> (in <ul><ol>) - padding-left"
+- "<dir> (in <ul><ul>) - list-style-type"
+- "<dir> (in <ul><ul>) - padding-left"
+- |-
+  <dl>
+     <dt> - margin-bottom
+- |-
+  <dl>
+     <dt> - margin-top
+- <li dir="ltr"> (in <ul dir="rtl">) - text-align
+- <li dir="rtl"> (in <ul dir="ltr">) - text-align
+- <li type="1"> - list-style-position
+- <li type="1"> - list-style-type
+- <li type="1"> - text-align
+- <li type="A" class="type-A"> - list-style-position
+- <li type="A" class="type-A"> - list-style-type
+- <li type="A" class="type-A"> - text-align
+- <li type="CIRCLE"> - list-style-position
+- <li type="CIRCLE"> - list-style-type
+- <li type="CIRCLE"> - text-align
+- <li type="DISC"> - list-style-position
+- <li type="DISC"> - text-align
+- <li type="I" class="type-I"> - list-style-position
+- <li type="I" class="type-I"> - list-style-type
+- <li type="I" class="type-I"> - text-align
+- <li type="NONE"> - list-style-position
+- <li type="NONE"> - list-style-type
+- <li type="NONE"> - text-align
+- <li type="SQUARE"> - list-style-position
+- <li type="SQUARE"> - list-style-type
+- <li type="SQUARE"> - text-align
+- <li type="a" class="type-a"> - list-style-position
+- <li type="a" class="type-a"> - list-style-type
+- <li type="a" class="type-a"> - text-align
+- <li type="circle"> - list-style-position
+- <li type="circle"> - list-style-type
+- <li type="circle"> - text-align
+- <li type="disc"> - list-style-position
+- <li type="disc"> - text-align
+- <li type="i" class="type-i"> - list-style-position
+- <li type="i" class="type-i"> - list-style-type
+- <li type="i" class="type-i"> - text-align
+- <li type="none"> - list-style-position
+- <li type="none"> - list-style-type
+- <li type="none"> - text-align
+- <li type="square"> - list-style-position
+- <li type="square"> - list-style-type
+- <li type="square"> - text-align
+- <li value="10"> (in <ol>) - counter-set
+- <li value="10"> (in <ol>) - text-align
+- <li value="10e10"> (in <ol>) - counter-set
+- <li value="10e10"> (in <ol>) - text-align
+- <li value="10xyz"> (in <ol>) - counter-set
+- <li value="10xyz"> (in <ol>) - text-align
+- <li value="xyz"> (in <ol>) - text-align
+- "<li> (in <dir>) - text-align"
+- "<li> (in <menu>) - text-align"
+- <li> (in <ol reversed="" start="20">) - text-align
+- <li> (in <ol reversed="" start="20e10">) - text-align
+- <li> (in <ol reversed="" start="20xyz">) - text-align
+- <li> (in <ol reversed="" start="xyz">) - text-align
+- <li> (in <ol reversed="">) - text-align
+- <li> (in <ol start="10">) - text-align
+- <li> (in <ol start="10e10">) - text-align
+- <li> (in <ol start="10xyz">) - text-align
+- <li> (in <ol start="xyz">) - text-align
+- "<li> (in <ol>) - text-align"
+- "<li> (in <ul>) - text-align"
+- "<li> - list-style-position"
+- "<li> - text-align"
+- |-
+  <menu>
+     <li> - counter-reset
+- |-
+  <menu>
+     <li> - margin-bottom
+- |-
+  <menu>
+     <li> - margin-top
+- |-
+  <menu>
+     <li> - padding-left
+- "<menu> (in <dir>) - counter-reset"
+- "<menu> (in <dir>) - list-style-type"
+- "<menu> (in <dir>) - padding-left"
+- "<menu> (in <dir><dir>) - counter-reset"
+- "<menu> (in <dir><dir>) - list-style-type"
+- "<menu> (in <dir><dir>) - padding-left"
+- "<menu> (in <dir><menu>) - counter-reset"
+- "<menu> (in <dir><menu>) - list-style-type"
+- "<menu> (in <dir><menu>) - padding-left"
+- "<menu> (in <dir><ol>) - counter-reset"
+- "<menu> (in <dir><ol>) - list-style-type"
+- "<menu> (in <dir><ol>) - padding-left"
+- "<menu> (in <dir><ul>) - counter-reset"
+- "<menu> (in <dir><ul>) - list-style-type"
+- "<menu> (in <dir><ul>) - padding-left"
+- "<menu> (in <menu>) - counter-reset"
+- "<menu> (in <menu>) - list-style-type"
+- "<menu> (in <menu>) - padding-left"
+- "<menu> (in <menu><dir>) - counter-reset"
+- "<menu> (in <menu><dir>) - list-style-type"
+- "<menu> (in <menu><dir>) - padding-left"
+- "<menu> (in <menu><menu>) - counter-reset"
+- "<menu> (in <menu><menu>) - list-style-type"
+- "<menu> (in <menu><menu>) - padding-left"
+- "<menu> (in <menu><ol>) - counter-reset"
+- "<menu> (in <menu><ol>) - list-style-type"
+- "<menu> (in <menu><ol>) - padding-left"
+- "<menu> (in <menu><ul>) - counter-reset"
+- "<menu> (in <menu><ul>) - list-style-type"
+- "<menu> (in <menu><ul>) - padding-left"
+- "<menu> (in <ol>) - counter-reset"
+- "<menu> (in <ol>) - list-style-type"
+- "<menu> (in <ol>) - padding-left"
+- "<menu> (in <ol><dir>) - counter-reset"
+- "<menu> (in <ol><dir>) - list-style-type"
+- "<menu> (in <ol><dir>) - padding-left"
+- "<menu> (in <ol><menu>) - counter-reset"
+- "<menu> (in <ol><menu>) - list-style-type"
+- "<menu> (in <ol><menu>) - padding-left"
+- "<menu> (in <ol><ol>) - counter-reset"
+- "<menu> (in <ol><ol>) - list-style-type"
+- "<menu> (in <ol><ol>) - padding-left"
+- "<menu> (in <ol><ul>) - counter-reset"
+- "<menu> (in <ol><ul>) - list-style-type"
+- "<menu> (in <ol><ul>) - padding-left"
+- "<menu> (in <ul>) - counter-reset"
+- "<menu> (in <ul>) - list-style-type"
+- "<menu> (in <ul>) - padding-left"
+- "<menu> (in <ul><dir>) - counter-reset"
+- "<menu> (in <ul><dir>) - list-style-type"
+- "<menu> (in <ul><dir>) - padding-left"
+- "<menu> (in <ul><menu>) - counter-reset"
+- "<menu> (in <ul><menu>) - list-style-type"
+- "<menu> (in <ul><menu>) - padding-left"
+- "<menu> (in <ul><ol>) - counter-reset"
+- "<menu> (in <ul><ol>) - list-style-type"
+- "<menu> (in <ul><ol>) - padding-left"
+- "<menu> (in <ul><ul>) - counter-reset"
+- "<menu> (in <ul><ul>) - list-style-type"
+- "<menu> (in <ul><ul>) - padding-left"
+- <ol reversed="" start="20"><li> - counter-reset
+- <ol reversed="" start="20"><li> - margin-bottom
+- <ol reversed="" start="20"><li> - margin-top
+- <ol reversed="" start="20"><li> - padding-left
+- <ol reversed="" start="20e10"><li> - counter-reset
+- <ol reversed="" start="20e10"><li> - margin-bottom
+- <ol reversed="" start="20e10"><li> - margin-top
+- <ol reversed="" start="20e10"><li> - padding-left
+- <ol reversed="" start="20xyz"><li> - counter-reset
+- <ol reversed="" start="20xyz"><li> - margin-bottom
+- <ol reversed="" start="20xyz"><li> - margin-top
+- <ol reversed="" start="20xyz"><li> - padding-left
+- <ol reversed="" start="xyz"><li> - counter-reset
+- <ol reversed="" start="xyz"><li> - margin-bottom
+- <ol reversed="" start="xyz"><li> - margin-top
+- <ol reversed="" start="xyz"><li> - padding-left
+- <ol reversed=""><li> - counter-reset
+- <ol reversed=""><li> - margin-bottom
+- <ol reversed=""><li> - margin-top
+- <ol reversed=""><li> - padding-left
+- <ol start="10"><li> - counter-reset
+- <ol start="10"><li> - margin-bottom
+- <ol start="10"><li> - margin-top
+- <ol start="10"><li> - padding-left
+- <ol start="10e10"><li> - counter-reset
+- <ol start="10e10"><li> - margin-bottom
+- <ol start="10e10"><li> - margin-top
+- <ol start="10e10"><li> - padding-left
+- <ol start="10xyz"><li> - counter-reset
+- <ol start="10xyz"><li> - margin-bottom
+- <ol start="10xyz"><li> - margin-top
+- <ol start="10xyz"><li> - padding-left
+- <ol start="xyz"><li> - counter-reset
+- <ol start="xyz"><li> - margin-bottom
+- <ol start="xyz"><li> - margin-top
+- <ol start="xyz"><li> - padding-left
+- <ol type="1"> - counter-reset
+- <ol type="1"> - margin-bottom
+- <ol type="1"> - margin-top
+- <ol type="1"> - padding-left
+- <ol type="A" class="type-A"> - counter-reset
+- <ol type="A" class="type-A"> - list-style-type
+- <ol type="A" class="type-A"> - margin-bottom
+- <ol type="A" class="type-A"> - margin-top
+- <ol type="A" class="type-A"> - padding-left
+- <ol type="CIRCLE"> - counter-reset
+- <ol type="CIRCLE"> - margin-bottom
+- <ol type="CIRCLE"> - margin-top
+- <ol type="CIRCLE"> - padding-left
+- <ol type="DISC"> - counter-reset
+- <ol type="DISC"> - margin-bottom
+- <ol type="DISC"> - margin-top
+- <ol type="DISC"> - padding-left
+- <ol type="I" class="type-I"> - counter-reset
+- <ol type="I" class="type-I"> - list-style-type
+- <ol type="I" class="type-I"> - margin-bottom
+- <ol type="I" class="type-I"> - margin-top
+- <ol type="I" class="type-I"> - padding-left
+- <ol type="NONE"> - counter-reset
+- <ol type="NONE"> - margin-bottom
+- <ol type="NONE"> - margin-top
+- <ol type="NONE"> - padding-left
+- <ol type="SQUARE"> - counter-reset
+- <ol type="SQUARE"> - margin-bottom
+- <ol type="SQUARE"> - margin-top
+- <ol type="SQUARE"> - padding-left
+- <ol type="a" class="type-a"> - counter-reset
+- <ol type="a" class="type-a"> - list-style-type
+- <ol type="a" class="type-a"> - margin-bottom
+- <ol type="a" class="type-a"> - margin-top
+- <ol type="a" class="type-a"> - padding-left
+- <ol type="circle"> - counter-reset
+- <ol type="circle"> - margin-bottom
+- <ol type="circle"> - margin-top
+- <ol type="circle"> - padding-left
+- <ol type="disc"> - counter-reset
+- <ol type="disc"> - margin-bottom
+- <ol type="disc"> - margin-top
+- <ol type="disc"> - padding-left
+- <ol type="i" class="type-i"> - counter-reset
+- <ol type="i" class="type-i"> - list-style-type
+- <ol type="i" class="type-i"> - margin-bottom
+- <ol type="i" class="type-i"> - margin-top
+- <ol type="i" class="type-i"> - padding-left
+- <ol type="none"> - counter-reset
+- <ol type="none"> - margin-bottom
+- <ol type="none"> - margin-top
+- <ol type="none"> - padding-left
+- <ol type="square"> - counter-reset
+- <ol type="square"> - margin-bottom
+- <ol type="square"> - margin-top
+- <ol type="square"> - padding-left
+- |-
+  <ol>
+      <li value="10"> - counter-reset
+- |-
+  <ol>
+      <li value="10"> - margin-bottom
+- |-
+  <ol>
+      <li value="10"> - margin-top
+- |-
+  <ol>
+      <li value="10"> - padding-left
+- |-
+  <ol>
+     <li> - counter-reset
+- |-
+  <ol>
+     <li> - margin-bottom
+- |-
+  <ol>
+     <li> - margin-top
+- |-
+  <ol>
+     <li> - padding-left
+- <ul type="1"> - counter-reset
+- <ul type="1"> - margin-bottom
+- <ul type="1"> - margin-top
+- <ul type="1"> - padding-left
+- <ul type="A" class="type-A"> - counter-reset
+- <ul type="A" class="type-A"> - margin-bottom
+- <ul type="A" class="type-A"> - margin-top
+- <ul type="A" class="type-A"> - padding-left
+- <ul type="CIRCLE"> - counter-reset
+- <ul type="CIRCLE"> - list-style-type
+- <ul type="CIRCLE"> - margin-bottom
+- <ul type="CIRCLE"> - margin-top
+- <ul type="CIRCLE"> - padding-left
+- <ul type="DISC"> - counter-reset
+- <ul type="DISC"> - margin-bottom
+- <ul type="DISC"> - margin-top
+- <ul type="DISC"> - padding-left
+- <ul type="I" class="type-I"> - counter-reset
+- <ul type="I" class="type-I"> - margin-bottom
+- <ul type="I" class="type-I"> - margin-top
+- <ul type="I" class="type-I"> - padding-left
+- <ul type="NONE"> - counter-reset
+- <ul type="NONE"> - list-style-type
+- <ul type="NONE"> - margin-bottom
+- <ul type="NONE"> - margin-top
+- <ul type="NONE"> - padding-left
+- <ul type="SQUARE"> - counter-reset
+- <ul type="SQUARE"> - list-style-type
+- <ul type="SQUARE"> - margin-bottom
+- <ul type="SQUARE"> - margin-top
+- <ul type="SQUARE"> - padding-left
+- <ul type="a" class="type-a"> - counter-reset
+- <ul type="a" class="type-a"> - margin-bottom
+- <ul type="a" class="type-a"> - margin-top
+- <ul type="a" class="type-a"> - padding-left
+- <ul type="circle"> - counter-reset
+- <ul type="circle"> - list-style-type
+- <ul type="circle"> - margin-bottom
+- <ul type="circle"> - margin-top
+- <ul type="circle"> - padding-left
+- <ul type="disc"> - counter-reset
+- <ul type="disc"> - margin-bottom
+- <ul type="disc"> - margin-top
+- <ul type="disc"> - padding-left
+- <ul type="i" class="type-i"> - counter-reset
+- <ul type="i" class="type-i"> - margin-bottom
+- <ul type="i" class="type-i"> - margin-top
+- <ul type="i" class="type-i"> - padding-left
+- <ul type="none"> - counter-reset
+- <ul type="none"> - list-style-type
+- <ul type="none"> - margin-bottom
+- <ul type="none"> - margin-top
+- <ul type="none"> - padding-left
+- <ul type="square"> - counter-reset
+- <ul type="square"> - list-style-type
+- <ul type="square"> - margin-bottom
+- <ul type="square"> - margin-top
+- <ul type="square"> - padding-left
+- |-
+  <ul>
+     <li> - counter-reset
+- |-
+  <ul>
+     <li> - margin-bottom
+- |-
+  <ul>
+     <li> - margin-top
+- |-
+  <ul>
+     <li> - padding-left
+- "<ul> (in <dir>) - counter-reset"
+- "<ul> (in <dir>) - list-style-type"
+- "<ul> (in <dir>) - padding-left"
+- "<ul> (in <dir><dir>) - counter-reset"
+- "<ul> (in <dir><dir>) - list-style-type"
+- "<ul> (in <dir><dir>) - padding-left"
+- "<ul> (in <dir><menu>) - counter-reset"
+- "<ul> (in <dir><menu>) - list-style-type"
+- "<ul> (in <dir><menu>) - padding-left"
+- "<ul> (in <dir><ol>) - counter-reset"
+- "<ul> (in <dir><ol>) - list-style-type"
+- "<ul> (in <dir><ol>) - padding-left"
+- "<ul> (in <dir><ul>) - counter-reset"
+- "<ul> (in <dir><ul>) - list-style-type"
+- "<ul> (in <dir><ul>) - padding-left"
+- "<ul> (in <menu>) - counter-reset"
+- "<ul> (in <menu>) - list-style-type"
+- "<ul> (in <menu>) - padding-left"
+- "<ul> (in <menu><dir>) - counter-reset"
+- "<ul> (in <menu><dir>) - list-style-type"
+- "<ul> (in <menu><dir>) - padding-left"
+- "<ul> (in <menu><menu>) - counter-reset"
+- "<ul> (in <menu><menu>) - list-style-type"
+- "<ul> (in <menu><menu>) - padding-left"
+- "<ul> (in <menu><ol>) - counter-reset"
+- "<ul> (in <menu><ol>) - list-style-type"
+- "<ul> (in <menu><ol>) - padding-left"
+- "<ul> (in <menu><ul>) - counter-reset"
+- "<ul> (in <menu><ul>) - list-style-type"
+- "<ul> (in <menu><ul>) - padding-left"
+- "<ul> (in <ol>) - counter-reset"
+- "<ul> (in <ol>) - list-style-type"
+- "<ul> (in <ol>) - padding-left"
+- "<ul> (in <ol><dir>) - counter-reset"
+- "<ul> (in <ol><dir>) - list-style-type"
+- "<ul> (in <ol><dir>) - padding-left"
+- "<ul> (in <ol><menu>) - counter-reset"
+- "<ul> (in <ol><menu>) - list-style-type"
+- "<ul> (in <ol><menu>) - padding-left"
+- "<ul> (in <ol><ol>) - counter-reset"
+- "<ul> (in <ol><ol>) - list-style-type"
+- "<ul> (in <ol><ol>) - padding-left"
+- "<ul> (in <ol><ul>) - counter-reset"
+- "<ul> (in <ol><ul>) - list-style-type"
+- "<ul> (in <ol><ul>) - padding-left"
+- "<ul> (in <ul>) - counter-reset"
+- "<ul> (in <ul>) - list-style-type"
+- "<ul> (in <ul>) - padding-left"
+- "<ul> (in <ul><dir>) - counter-reset"
+- "<ul> (in <ul><dir>) - list-style-type"
+- "<ul> (in <ul><dir>) - padding-left"
+- "<ul> (in <ul><menu>) - counter-reset"
+- "<ul> (in <ul><menu>) - list-style-type"
+- "<ul> (in <ul><menu>) - padding-left"
+- "<ul> (in <ul><ol>) - counter-reset"
+- "<ul> (in <ul><ol>) - list-style-type"
+- "<ul> (in <ul><ol>) - padding-left"
+- "<ul> (in <ul><ul>) - counter-reset"
+- "<ul> (in <ul><ul>) - list-style-type"
+- "<ul> (in <ul><ul>) - padding-left"
+html/rendering/non-replaced-elements/lists/lists-styles.html:
+- "<dd> (in <dl>) - margin-left"
+- "<dd> - margin-left"
+- |-
+  <dir>
+     <li> - margin-bottom
+- |-
+  <dir>
+     <li> - margin-top
+- |-
+  <dir>
+     <li> - padding-left
+- "<dir> (in <dir>) - list-style-type"
+- "<dir> (in <dir>) - padding-left"
+- "<dir> (in <dir><dir>) - list-style-type"
+- "<dir> (in <dir><dir>) - padding-left"
+- "<dir> (in <dir><menu>) - list-style-type"
+- "<dir> (in <dir><menu>) - padding-left"
+- "<dir> (in <dir><ol>) - list-style-type"
+- "<dir> (in <dir><ol>) - padding-left"
+- "<dir> (in <dir><ul>) - list-style-type"
+- "<dir> (in <dir><ul>) - padding-left"
+- "<dir> (in <menu>) - list-style-type"
+- "<dir> (in <menu>) - padding-left"
+- "<dir> (in <menu><dir>) - list-style-type"
+- "<dir> (in <menu><dir>) - padding-left"
+- "<dir> (in <menu><menu>) - list-style-type"
+- "<dir> (in <menu><menu>) - padding-left"
+- "<dir> (in <menu><ol>) - list-style-type"
+- "<dir> (in <menu><ol>) - padding-left"
+- "<dir> (in <menu><ul>) - list-style-type"
+- "<dir> (in <menu><ul>) - padding-left"
+- "<dir> (in <ol>) - list-style-type"
+- "<dir> (in <ol>) - padding-left"
+- "<dir> (in <ol><dir>) - list-style-type"
+- "<dir> (in <ol><dir>) - padding-left"
+- "<dir> (in <ol><menu>) - list-style-type"
+- "<dir> (in <ol><menu>) - padding-left"
+- "<dir> (in <ol><ol>) - list-style-type"
+- "<dir> (in <ol><ol>) - padding-left"
+- "<dir> (in <ol><ul>) - list-style-type"
+- "<dir> (in <ol><ul>) - padding-left"
+- "<dir> (in <ul>) - list-style-type"
+- "<dir> (in <ul>) - padding-left"
+- "<dir> (in <ul><dir>) - list-style-type"
+- "<dir> (in <ul><dir>) - padding-left"
+- "<dir> (in <ul><menu>) - list-style-type"
+- "<dir> (in <ul><menu>) - padding-left"
+- "<dir> (in <ul><ol>) - list-style-type"
+- "<dir> (in <ul><ol>) - padding-left"
+- "<dir> (in <ul><ul>) - list-style-type"
+- "<dir> (in <ul><ul>) - padding-left"
+- |-
+  <dl>
+     <dt> - margin-bottom
+- |-
+  <dl>
+     <dt> - margin-top
+- <li dir="ltr"> (in <ul dir="rtl">) - text-align
+- <li dir="rtl"> (in <ul dir="ltr">) - text-align
+- <li type="1"> - list-style-type
+- <li type="1"> - text-align
+- <li type="A" class="type-A"> - list-style-type
+- <li type="A" class="type-A"> - text-align
+- <li type="CIRCLE"> - list-style-type
+- <li type="CIRCLE"> - text-align
+- <li type="DISC"> - text-align
+- <li type="I" class="type-I"> - list-style-type
+- <li type="I" class="type-I"> - text-align
+- <li type="NONE"> - list-style-type
+- <li type="NONE"> - text-align
+- <li type="SQUARE"> - list-style-type
+- <li type="SQUARE"> - text-align
+- <li type="a" class="type-a"> - list-style-type
+- <li type="a" class="type-a"> - text-align
+- <li type="circle"> - list-style-type
+- <li type="circle"> - text-align
+- <li type="disc"> - text-align
+- <li type="i" class="type-i"> - list-style-type
+- <li type="i" class="type-i"> - text-align
+- <li type="none"> - list-style-type
+- <li type="none"> - text-align
+- <li type="square"> - list-style-type
+- <li type="square"> - text-align
+- <li value="10"> (in <ol>) - counter-set
+- <li value="10"> (in <ol>) - text-align
+- <li value="10e10"> (in <ol>) - counter-set
+- <li value="10e10"> (in <ol>) - text-align
+- <li value="10xyz"> (in <ol>) - counter-set
+- <li value="10xyz"> (in <ol>) - text-align
+- <li value="xyz"> (in <ol>) - text-align
+- "<li> (in <dir>) - text-align"
+- "<li> (in <menu>) - text-align"
+- <li> (in <ol reversed="" start="20">) - text-align
+- <li> (in <ol reversed="" start="20e10">) - text-align
+- <li> (in <ol reversed="" start="20xyz">) - text-align
+- <li> (in <ol reversed="" start="xyz">) - text-align
+- <li> (in <ol reversed="">) - text-align
+- <li> (in <ol start="10">) - text-align
+- <li> (in <ol start="10e10">) - text-align
+- <li> (in <ol start="10xyz">) - text-align
+- <li> (in <ol start="xyz">) - text-align
+- "<li> (in <ol>) - text-align"
+- "<li> (in <ul>) - text-align"
+- "<li> - text-align"
+- |-
+  <menu>
+     <li> - counter-reset
+- |-
+  <menu>
+     <li> - margin-bottom
+- |-
+  <menu>
+     <li> - margin-top
+- |-
+  <menu>
+     <li> - padding-left
+- "<menu> (in <dir>) - counter-reset"
+- "<menu> (in <dir>) - list-style-type"
+- "<menu> (in <dir>) - padding-left"
+- "<menu> (in <dir><dir>) - counter-reset"
+- "<menu> (in <dir><dir>) - list-style-type"
+- "<menu> (in <dir><dir>) - padding-left"
+- "<menu> (in <dir><menu>) - counter-reset"
+- "<menu> (in <dir><menu>) - list-style-type"
+- "<menu> (in <dir><menu>) - padding-left"
+- "<menu> (in <dir><ol>) - counter-reset"
+- "<menu> (in <dir><ol>) - list-style-type"
+- "<menu> (in <dir><ol>) - padding-left"
+- "<menu> (in <dir><ul>) - counter-reset"
+- "<menu> (in <dir><ul>) - list-style-type"
+- "<menu> (in <dir><ul>) - padding-left"
+- "<menu> (in <menu>) - counter-reset"
+- "<menu> (in <menu>) - list-style-type"
+- "<menu> (in <menu>) - padding-left"
+- "<menu> (in <menu><dir>) - counter-reset"
+- "<menu> (in <menu><dir>) - list-style-type"
+- "<menu> (in <menu><dir>) - padding-left"
+- "<menu> (in <menu><menu>) - counter-reset"
+- "<menu> (in <menu><menu>) - list-style-type"
+- "<menu> (in <menu><menu>) - padding-left"
+- "<menu> (in <menu><ol>) - counter-reset"
+- "<menu> (in <menu><ol>) - list-style-type"
+- "<menu> (in <menu><ol>) - padding-left"
+- "<menu> (in <menu><ul>) - counter-reset"
+- "<menu> (in <menu><ul>) - list-style-type"
+- "<menu> (in <menu><ul>) - padding-left"
+- "<menu> (in <ol>) - counter-reset"
+- "<menu> (in <ol>) - list-style-type"
+- "<menu> (in <ol>) - padding-left"
+- "<menu> (in <ol><dir>) - counter-reset"
+- "<menu> (in <ol><dir>) - list-style-type"
+- "<menu> (in <ol><dir>) - padding-left"
+- "<menu> (in <ol><menu>) - counter-reset"
+- "<menu> (in <ol><menu>) - list-style-type"
+- "<menu> (in <ol><menu>) - padding-left"
+- "<menu> (in <ol><ol>) - counter-reset"
+- "<menu> (in <ol><ol>) - list-style-type"
+- "<menu> (in <ol><ol>) - padding-left"
+- "<menu> (in <ol><ul>) - counter-reset"
+- "<menu> (in <ol><ul>) - list-style-type"
+- "<menu> (in <ol><ul>) - padding-left"
+- "<menu> (in <ul>) - counter-reset"
+- "<menu> (in <ul>) - list-style-type"
+- "<menu> (in <ul>) - padding-left"
+- "<menu> (in <ul><dir>) - counter-reset"
+- "<menu> (in <ul><dir>) - list-style-type"
+- "<menu> (in <ul><dir>) - padding-left"
+- "<menu> (in <ul><menu>) - counter-reset"
+- "<menu> (in <ul><menu>) - list-style-type"
+- "<menu> (in <ul><menu>) - padding-left"
+- "<menu> (in <ul><ol>) - counter-reset"
+- "<menu> (in <ul><ol>) - list-style-type"
+- "<menu> (in <ul><ol>) - padding-left"
+- "<menu> (in <ul><ul>) - counter-reset"
+- "<menu> (in <ul><ul>) - list-style-type"
+- "<menu> (in <ul><ul>) - padding-left"
+- <ol reversed="" start="20"><li> - counter-reset
+- <ol reversed="" start="20"><li> - margin-bottom
+- <ol reversed="" start="20"><li> - margin-top
+- <ol reversed="" start="20"><li> - padding-left
+- <ol reversed="" start="20e10"><li> - counter-reset
+- <ol reversed="" start="20e10"><li> - margin-bottom
+- <ol reversed="" start="20e10"><li> - margin-top
+- <ol reversed="" start="20e10"><li> - padding-left
+- <ol reversed="" start="20xyz"><li> - counter-reset
+- <ol reversed="" start="20xyz"><li> - margin-bottom
+- <ol reversed="" start="20xyz"><li> - margin-top
+- <ol reversed="" start="20xyz"><li> - padding-left
+- <ol reversed="" start="xyz"><li> - counter-reset
+- <ol reversed="" start="xyz"><li> - margin-bottom
+- <ol reversed="" start="xyz"><li> - margin-top
+- <ol reversed="" start="xyz"><li> - padding-left
+- <ol reversed=""><li> - counter-reset
+- <ol reversed=""><li> - margin-bottom
+- <ol reversed=""><li> - margin-top
+- <ol reversed=""><li> - padding-left
+- <ol start="10"><li> - counter-reset
+- <ol start="10"><li> - margin-bottom
+- <ol start="10"><li> - margin-top
+- <ol start="10"><li> - padding-left
+- <ol start="10e10"><li> - counter-reset
+- <ol start="10e10"><li> - margin-bottom
+- <ol start="10e10"><li> - margin-top
+- <ol start="10e10"><li> - padding-left
+- <ol start="10xyz"><li> - counter-reset
+- <ol start="10xyz"><li> - margin-bottom
+- <ol start="10xyz"><li> - margin-top
+- <ol start="10xyz"><li> - padding-left
+- <ol start="xyz"><li> - counter-reset
+- <ol start="xyz"><li> - margin-bottom
+- <ol start="xyz"><li> - margin-top
+- <ol start="xyz"><li> - padding-left
+- <ol type="1"> - counter-reset
+- <ol type="1"> - margin-bottom
+- <ol type="1"> - margin-top
+- <ol type="1"> - padding-left
+- <ol type="A" class="type-A"> - counter-reset
+- <ol type="A" class="type-A"> - list-style-type
+- <ol type="A" class="type-A"> - margin-bottom
+- <ol type="A" class="type-A"> - margin-top
+- <ol type="A" class="type-A"> - padding-left
+- <ol type="CIRCLE"> - counter-reset
+- <ol type="CIRCLE"> - margin-bottom
+- <ol type="CIRCLE"> - margin-top
+- <ol type="CIRCLE"> - padding-left
+- <ol type="DISC"> - counter-reset
+- <ol type="DISC"> - margin-bottom
+- <ol type="DISC"> - margin-top
+- <ol type="DISC"> - padding-left
+- <ol type="I" class="type-I"> - counter-reset
+- <ol type="I" class="type-I"> - list-style-type
+- <ol type="I" class="type-I"> - margin-bottom
+- <ol type="I" class="type-I"> - margin-top
+- <ol type="I" class="type-I"> - padding-left
+- <ol type="NONE"> - counter-reset
+- <ol type="NONE"> - margin-bottom
+- <ol type="NONE"> - margin-top
+- <ol type="NONE"> - padding-left
+- <ol type="SQUARE"> - counter-reset
+- <ol type="SQUARE"> - margin-bottom
+- <ol type="SQUARE"> - margin-top
+- <ol type="SQUARE"> - padding-left
+- <ol type="a" class="type-a"> - counter-reset
+- <ol type="a" class="type-a"> - list-style-type
+- <ol type="a" class="type-a"> - margin-bottom
+- <ol type="a" class="type-a"> - margin-top
+- <ol type="a" class="type-a"> - padding-left
+- <ol type="circle"> - counter-reset
+- <ol type="circle"> - margin-bottom
+- <ol type="circle"> - margin-top
+- <ol type="circle"> - padding-left
+- <ol type="disc"> - counter-reset
+- <ol type="disc"> - margin-bottom
+- <ol type="disc"> - margin-top
+- <ol type="disc"> - padding-left
+- <ol type="i" class="type-i"> - counter-reset
+- <ol type="i" class="type-i"> - list-style-type
+- <ol type="i" class="type-i"> - margin-bottom
+- <ol type="i" class="type-i"> - margin-top
+- <ol type="i" class="type-i"> - padding-left
+- <ol type="none"> - counter-reset
+- <ol type="none"> - margin-bottom
+- <ol type="none"> - margin-top
+- <ol type="none"> - padding-left
+- <ol type="square"> - counter-reset
+- <ol type="square"> - margin-bottom
+- <ol type="square"> - margin-top
+- <ol type="square"> - padding-left
+- |-
+  <ol>
+      <li value="10"> - counter-reset
+- |-
+  <ol>
+      <li value="10"> - margin-bottom
+- |-
+  <ol>
+      <li value="10"> - margin-top
+- |-
+  <ol>
+      <li value="10"> - padding-left
+- |-
+  <ol>
+     <li> - counter-reset
+- |-
+  <ol>
+     <li> - margin-bottom
+- |-
+  <ol>
+     <li> - margin-top
+- |-
+  <ol>
+     <li> - padding-left
+- <ul type="1"> - counter-reset
+- <ul type="1"> - margin-bottom
+- <ul type="1"> - margin-top
+- <ul type="1"> - padding-left
+- <ul type="A" class="type-A"> - counter-reset
+- <ul type="A" class="type-A"> - margin-bottom
+- <ul type="A" class="type-A"> - margin-top
+- <ul type="A" class="type-A"> - padding-left
+- <ul type="CIRCLE"> - counter-reset
+- <ul type="CIRCLE"> - list-style-type
+- <ul type="CIRCLE"> - margin-bottom
+- <ul type="CIRCLE"> - margin-top
+- <ul type="CIRCLE"> - padding-left
+- <ul type="DISC"> - counter-reset
+- <ul type="DISC"> - margin-bottom
+- <ul type="DISC"> - margin-top
+- <ul type="DISC"> - padding-left
+- <ul type="I" class="type-I"> - counter-reset
+- <ul type="I" class="type-I"> - margin-bottom
+- <ul type="I" class="type-I"> - margin-top
+- <ul type="I" class="type-I"> - padding-left
+- <ul type="NONE"> - counter-reset
+- <ul type="NONE"> - list-style-type
+- <ul type="NONE"> - margin-bottom
+- <ul type="NONE"> - margin-top
+- <ul type="NONE"> - padding-left
+- <ul type="SQUARE"> - counter-reset
+- <ul type="SQUARE"> - list-style-type
+- <ul type="SQUARE"> - margin-bottom
+- <ul type="SQUARE"> - margin-top
+- <ul type="SQUARE"> - padding-left
+- <ul type="a" class="type-a"> - counter-reset
+- <ul type="a" class="type-a"> - margin-bottom
+- <ul type="a" class="type-a"> - margin-top
+- <ul type="a" class="type-a"> - padding-left
+- <ul type="circle"> - counter-reset
+- <ul type="circle"> - list-style-type
+- <ul type="circle"> - margin-bottom
+- <ul type="circle"> - margin-top
+- <ul type="circle"> - padding-left
+- <ul type="disc"> - counter-reset
+- <ul type="disc"> - margin-bottom
+- <ul type="disc"> - margin-top
+- <ul type="disc"> - padding-left
+- <ul type="i" class="type-i"> - counter-reset
+- <ul type="i" class="type-i"> - margin-bottom
+- <ul type="i" class="type-i"> - margin-top
+- <ul type="i" class="type-i"> - padding-left
+- <ul type="none"> - counter-reset
+- <ul type="none"> - list-style-type
+- <ul type="none"> - margin-bottom
+- <ul type="none"> - margin-top
+- <ul type="none"> - padding-left
+- <ul type="square"> - counter-reset
+- <ul type="square"> - list-style-type
+- <ul type="square"> - margin-bottom
+- <ul type="square"> - margin-top
+- <ul type="square"> - padding-left
+- |-
+  <ul>
+     <li> - counter-reset
+- |-
+  <ul>
+     <li> - margin-bottom
+- |-
+  <ul>
+     <li> - margin-top
+- |-
+  <ul>
+     <li> - padding-left
+- "<ul> (in <dir>) - counter-reset"
+- "<ul> (in <dir>) - list-style-type"
+- "<ul> (in <dir>) - padding-left"
+- "<ul> (in <dir><dir>) - counter-reset"
+- "<ul> (in <dir><dir>) - list-style-type"
+- "<ul> (in <dir><dir>) - padding-left"
+- "<ul> (in <dir><menu>) - counter-reset"
+- "<ul> (in <dir><menu>) - list-style-type"
+- "<ul> (in <dir><menu>) - padding-left"
+- "<ul> (in <dir><ol>) - counter-reset"
+- "<ul> (in <dir><ol>) - list-style-type"
+- "<ul> (in <dir><ol>) - padding-left"
+- "<ul> (in <dir><ul>) - counter-reset"
+- "<ul> (in <dir><ul>) - list-style-type"
+- "<ul> (in <dir><ul>) - padding-left"
+- "<ul> (in <menu>) - counter-reset"
+- "<ul> (in <menu>) - list-style-type"
+- "<ul> (in <menu>) - padding-left"
+- "<ul> (in <menu><dir>) - counter-reset"
+- "<ul> (in <menu><dir>) - list-style-type"
+- "<ul> (in <menu><dir>) - padding-left"
+- "<ul> (in <menu><menu>) - counter-reset"
+- "<ul> (in <menu><menu>) - list-style-type"
+- "<ul> (in <menu><menu>) - padding-left"
+- "<ul> (in <menu><ol>) - counter-reset"
+- "<ul> (in <menu><ol>) - list-style-type"
+- "<ul> (in <menu><ol>) - padding-left"
+- "<ul> (in <menu><ul>) - counter-reset"
+- "<ul> (in <menu><ul>) - list-style-type"
+- "<ul> (in <menu><ul>) - padding-left"
+- "<ul> (in <ol>) - counter-reset"
+- "<ul> (in <ol>) - list-style-type"
+- "<ul> (in <ol>) - padding-left"
+- "<ul> (in <ol><dir>) - counter-reset"
+- "<ul> (in <ol><dir>) - list-style-type"
+- "<ul> (in <ol><dir>) - padding-left"
+- "<ul> (in <ol><menu>) - counter-reset"
+- "<ul> (in <ol><menu>) - list-style-type"
+- "<ul> (in <ol><menu>) - padding-left"
+- "<ul> (in <ol><ol>) - counter-reset"
+- "<ul> (in <ol><ol>) - list-style-type"
+- "<ul> (in <ol><ol>) - padding-left"
+- "<ul> (in <ol><ul>) - counter-reset"
+- "<ul> (in <ol><ul>) - list-style-type"
+- "<ul> (in <ol><ul>) - padding-left"
+- "<ul> (in <ul>) - counter-reset"
+- "<ul> (in <ul>) - list-style-type"
+- "<ul> (in <ul>) - padding-left"
+- "<ul> (in <ul><dir>) - counter-reset"
+- "<ul> (in <ul><dir>) - list-style-type"
+- "<ul> (in <ul><dir>) - padding-left"
+- "<ul> (in <ul><menu>) - counter-reset"
+- "<ul> (in <ul><menu>) - list-style-type"
+- "<ul> (in <ul><menu>) - padding-left"
+- "<ul> (in <ul><ol>) - counter-reset"
+- "<ul> (in <ul><ol>) - list-style-type"
+- "<ul> (in <ul><ol>) - padding-left"
+- "<ul> (in <ul><ul>) - counter-reset"
+- "<ul> (in <ul><ul>) - list-style-type"
+- "<ul> (in <ul><ul>) - padding-left"
+html/rendering/non-replaced-elements/phrasing-content-0/b-strong-styles.html:
+- "== html/rendering/non-replaced-elements/phrasing-content-0/b-strong-styles-ref.html"
+html/rendering/non-replaced-elements/phrasing-content-0/font-element-text-decoration-color/001-a.html:
+- "== html/rendering/non-replaced-elements/phrasing-content-0/font-element-text-decoration-color/001-ref.html"
+html/rendering/non-replaced-elements/phrasing-content-0/font-element-text-decoration-color/001-q.html:
+- "== html/rendering/non-replaced-elements/phrasing-content-0/font-element-text-decoration-color/001-ref.html"
+html/rendering/non-replaced-elements/phrasing-content-0/font-element-text-decoration-color/001-s.html:
+- "== html/rendering/non-replaced-elements/phrasing-content-0/font-element-text-decoration-color/001-ref.html"
+html/rendering/non-replaced-elements/phrasing-content-0/font-element-text-decoration-color/001-x.xhtml:
+- "== html/rendering/non-replaced-elements/phrasing-content-0/font-element-text-decoration-color/001-ref.html"
+html/rendering/non-replaced-elements/phrasing-content-0/font-element-text-decoration-color/font-face.html:
+- font face attribute cursive is correct
+- font face attribute fantasy is correct
+- font face attribute monospace is correct
+- font face attribute sans-serif is correct
+- font face attribute serif is correct
+html/rendering/non-replaced-elements/phrasing-content-0/font-element-text-decoration-color/font-size.html:
+- font size attribute +1 is correct
+- font size attribute +2 is correct
+- font size attribute +3 is correct
+- font size attribute +4 is correct
+- font size attribute +5 is correct
+- font size attribute +6 is correct
+- font size attribute +7 is correct
+- font size attribute +8 is correct
+- font size attribute -1 is correct
+- font size attribute -2 is correct
+- font size attribute -3 is correct
+- font size attribute -4 is correct
+- font size attribute -5 is correct
+- font size attribute -6 is correct
+- font size attribute -7 is correct
+- font size attribute -8 is correct
+- font size attribute 0 is correct
+- font size attribute 1 is correct
+- font size attribute 2 is correct
+- font size attribute 4 is correct
+- font size attribute 5 is correct
+- font size attribute 6 is correct
+- font size attribute 7 is correct
+- font size attribute 8 is correct
+html/rendering/non-replaced-elements/sections-and-headings/headings-styles.html:
+- "<h1> (in <article>) - margin-bottom"
+- "<h1> (in <article>) - margin-top"
+- "<h1> (in <article><article>) - margin-bottom"
+- "<h1> (in <article><article>) - margin-top"
+- "<h1> (in <article><article><article>) - margin-bottom"
+- "<h1> (in <article><article><article>) - margin-top"
+- "<h1> (in <article><article><article><article>) - margin-bottom"
+- "<h1> (in <article><article><article><article>) - margin-top"
+- "<h1> (in <article><article><article><article><article>) - margin-bottom"
+- "<h1> (in <article><article><article><article><article>) - margin-top"
+- "<h1> (in <article><article><article><article><article><hgroup>) - margin-bottom"
+- "<h1> (in <article><article><article><article><article><hgroup>) - margin-top"
+- "<h1> (in <aside>) - margin-bottom"
+- "<h1> (in <aside>) - margin-top"
+- "<h1> (in <aside><aside>) - margin-bottom"
+- "<h1> (in <aside><aside>) - margin-top"
+- "<h1> (in <aside><aside><aside>) - margin-bottom"
+- "<h1> (in <aside><aside><aside>) - margin-top"
+- "<h1> (in <aside><aside><aside><aside>) - margin-bottom"
+- "<h1> (in <aside><aside><aside><aside>) - margin-top"
+- "<h1> (in <aside><aside><aside><aside><aside>) - margin-bottom"
+- "<h1> (in <aside><aside><aside><aside><aside>) - margin-top"
+- "<h1> (in <aside><aside><aside><aside><aside><hgroup>) - margin-bottom"
+- "<h1> (in <aside><aside><aside><aside><aside><hgroup>) - margin-top"
+- "<h1> (in <nav>) - margin-bottom"
+- "<h1> (in <nav>) - margin-top"
+- "<h1> (in <nav><nav>) - margin-bottom"
+- "<h1> (in <nav><nav>) - margin-top"
+- "<h1> (in <nav><nav><nav>) - margin-bottom"
+- "<h1> (in <nav><nav><nav>) - margin-top"
+- "<h1> (in <nav><nav><nav><nav>) - margin-bottom"
+- "<h1> (in <nav><nav><nav><nav>) - margin-top"
+- "<h1> (in <nav><nav><nav><nav><nav>) - margin-bottom"
+- "<h1> (in <nav><nav><nav><nav><nav>) - margin-top"
+- "<h1> (in <nav><nav><nav><nav><nav><hgroup>) - margin-bottom"
+- "<h1> (in <nav><nav><nav><nav><nav><hgroup>) - margin-top"
+- "<h1> (in <section>) - margin-bottom"
+- "<h1> (in <section>) - margin-top"
+- "<h1> (in <section><section>) - margin-bottom"
+- "<h1> (in <section><section>) - margin-top"
+- "<h1> (in <section><section><section>) - margin-bottom"
+- "<h1> (in <section><section><section>) - margin-top"
+- "<h1> (in <section><section><section><section>) - margin-bottom"
+- "<h1> (in <section><section><section><section>) - margin-top"
+- "<h1> (in <section><section><section><section><section>) - margin-bottom"
+- "<h1> (in <section><section><section><section><section>) - margin-top"
+- "<h1> (in <section><section><section><section><section><hgroup>) - margin-bottom"
+- "<h1> (in <section><section><section><section><section><hgroup>) - margin-top"
+- "<h1> - margin-bottom"
+- "<h1> - margin-top"
+- "<h2> (in <article><article><article><article><article><hgroup>) - margin-bottom"
+- "<h2> (in <article><article><article><article><article><hgroup>) - margin-top"
+- "<h2> (in <aside><aside><aside><aside><aside><hgroup>) - margin-bottom"
+- "<h2> (in <aside><aside><aside><aside><aside><hgroup>) - margin-top"
+- "<h2> (in <nav><nav><nav><nav><nav><hgroup>) - margin-bottom"
+- "<h2> (in <nav><nav><nav><nav><nav><hgroup>) - margin-top"
+- "<h2> (in <section><section><section><section><section><hgroup>) - margin-bottom"
+- "<h2> (in <section><section><section><section><section><hgroup>) - margin-top"
+- "<h2> - margin-bottom"
+- "<h2> - margin-top"
+- "<h3> (in <article><article><article><article><article><hgroup>) - margin-bottom"
+- "<h3> (in <article><article><article><article><article><hgroup>) - margin-top"
+- "<h3> (in <aside><aside><aside><aside><aside><hgroup>) - margin-bottom"
+- "<h3> (in <aside><aside><aside><aside><aside><hgroup>) - margin-top"
+- "<h3> (in <nav><nav><nav><nav><nav><hgroup>) - margin-bottom"
+- "<h3> (in <nav><nav><nav><nav><nav><hgroup>) - margin-top"
+- "<h3> (in <section><section><section><section><section><hgroup>) - margin-bottom"
+- "<h3> (in <section><section><section><section><section><hgroup>) - margin-top"
+- "<h3> - margin-bottom"
+- "<h3> - margin-top"
+- "<h4> (in <article><article><article><article><article><hgroup>) - margin-bottom"
+- "<h4> (in <article><article><article><article><article><hgroup>) - margin-top"
+- "<h4> (in <aside><aside><aside><aside><aside><hgroup>) - margin-bottom"
+- "<h4> (in <aside><aside><aside><aside><aside><hgroup>) - margin-top"
+- "<h4> (in <nav><nav><nav><nav><nav><hgroup>) - margin-bottom"
+- "<h4> (in <nav><nav><nav><nav><nav><hgroup>) - margin-top"
+- "<h4> (in <section><section><section><section><section><hgroup>) - margin-bottom"
+- "<h4> (in <section><section><section><section><section><hgroup>) - margin-top"
+- "<h4> - margin-bottom"
+- "<h4> - margin-top"
+- "<h5> (in <article><article><article><article><article><hgroup>) - margin-bottom"
+- "<h5> (in <article><article><article><article><article><hgroup>) - margin-top"
+- "<h5> (in <aside><aside><aside><aside><aside><hgroup>) - margin-bottom"
+- "<h5> (in <aside><aside><aside><aside><aside><hgroup>) - margin-top"
+- "<h5> (in <nav><nav><nav><nav><nav><hgroup>) - margin-bottom"
+- "<h5> (in <nav><nav><nav><nav><nav><hgroup>) - margin-top"
+- "<h5> (in <section><section><section><section><section><hgroup>) - margin-bottom"
+- "<h5> (in <section><section><section><section><section><hgroup>) - margin-top"
+- "<h5> - margin-bottom"
+- "<h5> - margin-top"
+- "<h6> - margin-bottom"
+- "<h6> - margin-top"
+html/rendering/non-replaced-elements/tables/form-in-tables.html:
+- Computed display of form inside TABLE should be 'none'
+- Computed display of form inside TABLE should be 'none' (!important UA style))
+- Computed display of form inside TBODY should be 'none'
+- Computed display of form inside TBODY should be 'none' (!important UA style))
+- Computed display of form inside TFOOT should be 'none'
+- Computed display of form inside TFOOT should be 'none' (!important UA style))
+- Computed display of form inside THEAD should be 'none'
+- Computed display of form inside THEAD should be 'none' (!important UA style))
+- Computed display of form inside TR should be 'none'
+- Computed display of form inside TR should be 'none' (!important UA style))
+html/rendering/non-replaced-elements/tables/hidden-attr.html:
+- Computed display and visibility of col
+- Computed display and visibility of colgroup
+- Computed display and visibility of tbody
+- Computed display and visibility of tfoot
+- Computed display and visibility of thead
+- Computed display and visibility of tr
+html/rendering/non-replaced-elements/tables/table-align-float.xhtml:
+- "== html/rendering/non-replaced-elements/tables/table-align-float-ref.xhtml"
+html/rendering/non-replaced-elements/tables/table-attribute.html:
+- table background attribute is correct
+- table bgcolor attribute is correct
+- table bordercolor attribute is correct
+- table cellpadding attribute is correct
+- table cellspacing attribute is correct
+- table col width attribute is correct
+- table height attribute 110% is correct
+- table height attribute 90% is correct
+- table height attribute pixel is correct
+- table tbody align attribute center is correct
+- table tbody align attribute justify is correct
+- table tbody align attribute left is correct
+- table tbody align attribute middle is correct
+- table tbody align attribute right is correct
+- table td align attribute center is correct
+- table td align attribute justify is correct
+- table td align attribute left is correct
+- table td align attribute middle is correct
+- table td align attribute right is correct
+- table tfoot align attribute center is correct
+- table tfoot align attribute justify is correct
+- table tfoot align attribute left is correct
+- table tfoot align attribute middle is correct
+- table tfoot align attribute right is correct
+- table th align attribute justify is correct
+- table th align attribute left is correct
+- table th align attribute right is correct
+- table thead align attribute center is correct
+- table thead align attribute justify is correct
+- table thead align attribute left is correct
+- table thead align attribute middle is correct
+- table thead align attribute right is correct
+- table tr align attribute center is correct
+- table tr align attribute justify is correct
+- table tr align attribute left is correct
+- table tr align attribute middle is correct
+- table tr align attribute right is correct
+- table_td height attribute percentage is correct
+- table_th height attribute percentage is correct
+- table_tr height attribute percentage is correct
+- tbody background attribute is correct
+- tbody bgcolor attribute is correct
+- td background attribute is correct
+- td bgcolor attribute is correct
+- td height attribute pixel is correct
+- tfoot background attribute is correct
+- tfoot bgcolor attribute is correct
+- th background attribute is correct
+- th bgcolor attribute is correct
+- th height attribute pixel is correct
+- thead background attribute is correct
+- thead bgcolor attribute is correct
+- tr background attribute is correct
+- tr bgcolor attribute is correct
+- tr height attribute pixel is correct
+html/rendering/non-replaced-elements/tables/table-border-1.html:
+- "== html/rendering/non-replaced-elements/tables/table-border-1-ref.html"
+html/rendering/non-replaced-elements/tables/table-cell-nowrap-with-fixed-width.html:
+- "== html/rendering/non-replaced-elements/tables/table-cell-nowrap-with-fixed-width-ref.html"
+html/rendering/non-replaced-elements/tables/table-cell-width-s.html:
+- "== html/rendering/non-replaced-elements/tables/table-cell-width-ref.html"
+html/rendering/non-replaced-elements/tables/table-cell-width.html:
+- "== html/rendering/non-replaced-elements/tables/table-cell-width-ref.html"
+html/rendering/non-replaced-elements/tables/table-column-width.html:
+- "== html/rendering/non-replaced-elements/tables/table-column-width-ref.html"
+html/rendering/non-replaced-elements/tables/table-direction.html:
+- "== html/rendering/non-replaced-elements/tables/table-direction-ref.html"
+html/rendering/non-replaced-elements/tables/table-row-direction.html:
+- "== html/rendering/non-replaced-elements/tables/table-row-direction-ref.html"
+html/rendering/non-replaced-elements/tables/table-row-group-direction.html:
+- "== html/rendering/non-replaced-elements/tables/table-row-group-direction-ref.html"
+html/rendering/non-replaced-elements/tables/table-row-group-height.html:
+- "== html/rendering/non-replaced-elements/tables/table-row-group-height-ref.html"
+html/rendering/non-replaced-elements/tables/table-row-height.html:
+- "== html/rendering/non-replaced-elements/tables/table-row-height-ref.html"
+html/rendering/non-replaced-elements/tables/table-row-pagination-001-print.html:
+- "== html/rendering/non-replaced-elements/tables/table-row-pagination-001-print-ref.html"
+html/rendering/non-replaced-elements/tables/table-row-pagination-002-print.html:
+- "== html/rendering/non-replaced-elements/tables/table-row-pagination-002-print-ref.html"
+html/rendering/non-replaced-elements/tables/table-ua-stylesheet.html:
+- Computed 'box-sizing' on table should match html spec
+- Computed 'text-indent' on table should match html spec
+html/rendering/non-replaced-elements/tables/table-valign-baseline-ascii-case-insensitive.html:
+- keyword baseline
+html/rendering/non-replaced-elements/tables/table-width-150percent.html:
+- "== html/rendering/non-replaced-elements/tables/table-width-150percent-ref.html"
+html/rendering/non-replaced-elements/tables/table-width-s.html:
+- "== html/rendering/non-replaced-elements/tables/table-width-ref.html"
+html/rendering/non-replaced-elements/tables/table-width.html:
+- "== html/rendering/non-replaced-elements/tables/table-width-ref.html"
+html/rendering/non-replaced-elements/tables/tr-transform-and-will-change.html:
+- "== html/rendering/non-replaced-elements/tables/tr-transform-and-will-change-ref.html"
+html/rendering/non-replaced-elements/the-fieldset-and-legend-elements/absolute-fixed-in-legend.html:
+- "== html/rendering/non-replaced-elements/the-fieldset-and-legend-elements/absolute-fixed-in-legend-ref.html"
+html/rendering/non-replaced-elements/the-fieldset-and-legend-elements/fieldset-block-formatting-context.html:
+- 'The fieldset element: block formatting context'
+html/rendering/non-replaced-elements/the-fieldset-and-legend-elements/fieldset-block-size.html:
+- Test content's block-size
+html/rendering/non-replaced-elements/the-fieldset-and-legend-elements/fieldset-border-gap-negative-margin.html:
+- "== html/rendering/non-replaced-elements/the-fieldset-and-legend-elements/no-red-ref.html"
+html/rendering/non-replaced-elements/the-fieldset-and-legend-elements/fieldset-border-gap-position-relative.html:
+- "== html/rendering/non-replaced-elements/the-fieldset-and-legend-elements/fieldset-border-gap-position-relative-ref.html"
+html/rendering/non-replaced-elements/the-fieldset-and-legend-elements/fieldset-border-radius-hittest.html:
+- fieldset, border-radius and hit testing
+html/rendering/non-replaced-elements/the-fieldset-and-legend-elements/fieldset-border-radius-with-alpha.html:
+- "== html/rendering/non-replaced-elements/the-fieldset-and-legend-elements/fieldset-border-radius-with-alpha-ref.html"
+html/rendering/non-replaced-elements/the-fieldset-and-legend-elements/fieldset-calculating-min-max-content.html:
+- min-content
+html/rendering/non-replaced-elements/the-fieldset-and-legend-elements/fieldset-containing-block.html:
+- "== html/rendering/non-replaced-elements/the-fieldset-and-legend-elements/fieldset-containing-block-ref.html"
+html/rendering/non-replaced-elements/the-fieldset-and-legend-elements/fieldset-content-before-legend.html:
+- fieldset content before legend
+html/rendering/non-replaced-elements/the-fieldset-and-legend-elements/fieldset-default-style.html:
+- border-bottom-style
+- border-bottom-width
+- border-left-style
+- border-left-width
+- border-right-style
+- border-right-width
+- border-top-style
+- border-top-width
+- margin-left
+- margin-right
+- min-width
+- padding-bottom
+- padding-left
+- padding-right
+- padding-top
+html/rendering/non-replaced-elements/the-fieldset-and-legend-elements/fieldset-display-ruby.html:
+- 'fieldset with display: ruby'
+- 'fieldset with display: ruby-base'
+- 'fieldset with display: ruby-base-container'
+- 'fieldset with display: ruby-text'
+- 'fieldset with display: ruby-text-container'
+html/rendering/non-replaced-elements/the-fieldset-and-legend-elements/fieldset-display.html:
+- 'fieldset with display: inline'
+- 'fieldset with display: table'
+html/rendering/non-replaced-elements/the-fieldset-and-legend-elements/fieldset-generated-content.html:
+- fieldset generated content
+html/rendering/non-replaced-elements/the-fieldset-and-legend-elements/fieldset-overflow-cssomview.html:
+- Test cssom-view API for FIELDSET
+html/rendering/non-replaced-elements/the-fieldset-and-legend-elements/fieldset-overflow-hidden.html:
+- "== html/rendering/non-replaced-elements/the-fieldset-and-legend-elements/fieldset-overflow-hidden-ref.html"
+html/rendering/non-replaced-elements/the-fieldset-and-legend-elements/fieldset-overflow.html:
+- "== html/rendering/non-replaced-elements/the-fieldset-and-legend-elements/fieldset-overflow-ref.html"
+html/rendering/non-replaced-elements/the-fieldset-and-legend-elements/fieldset-painting-order.html:
+- "== html/rendering/non-replaced-elements/the-fieldset-and-legend-elements/fieldset-painting-order-ref.html"
+html/rendering/non-replaced-elements/the-fieldset-and-legend-elements/fieldset-percentage-block-size.html:
+- 'div (writing-mode: horizontal-tb)'
+- 'div (writing-mode: vertical-lr)'
+- 'div (writing-mode: vertical-rl)'
+- 'second legend (writing-mode: horizontal-tb)'
+- 'second legend (writing-mode: vertical-lr)'
+- 'second legend (writing-mode: vertical-rl)'
+html/rendering/non-replaced-elements/the-fieldset-and-legend-elements/fieldset-vertical.html:
+- "== html/rendering/non-replaced-elements/the-fieldset-and-legend-elements/fieldset-vertical-ref.html"
+html/rendering/non-replaced-elements/the-fieldset-and-legend-elements/flex-legend-float-abspos.html:
+- dynamic changes to float
+- dynamic changes to position
+- inserting a new legend and removing it again
+- no dynamic changes
+html/rendering/non-replaced-elements/the-fieldset-and-legend-elements/grid-template-propagation.html:
+- "== html/rendering/non-replaced-elements/the-fieldset-and-legend-elements/grid-template-propagation-ref.html"
+html/rendering/non-replaced-elements/the-fieldset-and-legend-elements/legend-align-justify-self.html:
+- <fieldset><legend align="cEnTeR">x</legend></fieldset>
+- <fieldset><legend align="center">x</legend></fieldset>
+- <fieldset><legend align="lEfT">x</legend></fieldset>
+- <fieldset><legend align="left">x</legend></fieldset>
+- <fieldset><legend align="rIgHt">x</legend></fieldset>
+- <fieldset><legend align="right">x</legend></fieldset>
+html/rendering/non-replaced-elements/the-fieldset-and-legend-elements/legend-auto-margins.html:
+- "== html/rendering/non-replaced-elements/the-fieldset-and-legend-elements/legend-auto-margins-ref.html"
+html/rendering/non-replaced-elements/the-fieldset-and-legend-elements/legend-block-formatting-context.html:
+- in-body
+- in-fieldset-descendant
+- in-fieldset-second-child
+- rendered-legend
+html/rendering/non-replaced-elements/the-fieldset-and-legend-elements/legend-block-margins-2.html:
+- "== html/rendering/non-replaced-elements/the-fieldset-and-legend-elements/legend-block-margins-2-ref.html"
+html/rendering/non-replaced-elements/the-fieldset-and-legend-elements/legend-block-margins.html:
+- "== html/rendering/non-replaced-elements/the-fieldset-and-legend-elements/legend-block-margins-ref.html"
+html/rendering/non-replaced-elements/the-fieldset-and-legend-elements/legend-block-position-centering.html:
+- Legend's border-box should be centere on the fieldset border
+html/rendering/non-replaced-elements/the-fieldset-and-legend-elements/legend-display-rendering.html:
+- "== html/rendering/non-replaced-elements/the-fieldset-and-legend-elements/legend-display-rendering-ref.html"
+html/rendering/non-replaced-elements/the-fieldset-and-legend-elements/legend-display.html:
+- 'rendered legend with display: flow'
+- 'rendered legend with display: flow; columns:1'
+- 'rendered legend with display: flow; overflow:hidden'
+- 'rendered legend with display: flow; overflow:hidden;columns:1'
+html/rendering/non-replaced-elements/the-fieldset-and-legend-elements/legend-float-abspos.html:
+- dynamic changes to float
+- dynamic changes to position
+- inserting a new legend and removing it again
+- no dynamic changes
+html/rendering/non-replaced-elements/the-fieldset-and-legend-elements/legend-grid-flex-multicol.html:
+- multicol
+html/rendering/non-replaced-elements/the-fieldset-and-legend-elements/legend-list-item-numbering.html:
+- "== html/rendering/non-replaced-elements/the-fieldset-and-legend-elements/legend-list-item-numbering-ref.html"
+html/rendering/non-replaced-elements/the-fieldset-and-legend-elements/legend-position-relative.html:
+- "== html/rendering/non-replaced-elements/the-fieldset-and-legend-elements/legend-position-relative-ref.html"
+html/rendering/non-replaced-elements/the-fieldset-and-legend-elements/legend-sans-fieldset-display-ruby.html:
+- ".rt"
+- ".ruby"
+html/rendering/non-replaced-elements/the-fieldset-and-legend-elements/legend-sans-fieldset-display.html:
+- ".td"
+html/rendering/non-replaced-elements/the-fieldset-and-legend-elements/legend-tall.html:
+- "== html/rendering/non-replaced-elements/the-fieldset-and-legend-elements/legend-tall-ref.html"
+html/rendering/non-replaced-elements/the-fieldset-and-legend-elements/legend.html:
+- 'in-body: paddingLeft'
+- 'in-body: paddingRight'
+- 'in-body: unicodeBidi'
+- 'in-fieldset-descendant: paddingLeft'
+- 'in-fieldset-descendant: paddingRight'
+- 'in-fieldset-descendant: unicodeBidi'
+- 'in-fieldset-second-child: paddingLeft'
+- 'in-fieldset-second-child: paddingRight'
+- 'in-fieldset-second-child: unicodeBidi'
+- 'rendered-legend: paddingLeft'
+- 'rendered-legend: paddingRight'
+- 'rendered-legend: unicodeBidi'
+- 'rendered-legend: width'
+html/rendering/non-replaced-elements/the-fieldset-and-legend-elements/min-inline-size.html:
+- 'horizontal-tb '
+- 'vertical-lr '
+- 'vertical-rl '
+html/rendering/non-replaced-elements/the-fieldset-and-legend-elements/sticky-content.html:
+- "== html/rendering/non-replaced-elements/the-fieldset-and-legend-elements/sticky-content-ref.html
+  (both renderings blank)"
+html/rendering/non-replaced-elements/the-frameset-and-frame-elements/different-writing-modes.html:
+- "== html/rendering/non-replaced-elements/the-frameset-and-frame-elements/reference/different-writing-modes-ref.html
+  (both renderings blank)"
+html/rendering/non-replaced-elements/the-frameset-and-frame-elements/frameset-visibility-hidden.html:
+- "== html/rendering/non-replaced-elements/the-frameset-and-frame-elements/reference/empty-ref.html
+  (both renderings blank)"
+html/rendering/non-replaced-elements/the-frameset-and-frame-elements/large-cols-abssize.html:
+- "== html/rendering/non-replaced-elements/the-frameset-and-frame-elements/reference/green-ref.html"
+html/rendering/non-replaced-elements/the-frameset-and-frame-elements/large-cols-percentage.html:
+- "== html/rendering/non-replaced-elements/the-frameset-and-frame-elements/reference/green-ref.html"
+html/rendering/non-replaced-elements/the-frameset-and-frame-elements/large-cols-relsize.html:
+- A large relative value should not produce weird sizes.
+html/rendering/non-replaced-elements/the-frameset-and-frame-elements/large-rows-abssize.html:
+- "== html/rendering/non-replaced-elements/the-frameset-and-frame-elements/reference/green-ref.html"
+html/rendering/non-replaced-elements/the-frameset-and-frame-elements/large-rows-percentage.html:
+- "== html/rendering/non-replaced-elements/the-frameset-and-frame-elements/reference/green-ref.html"
+html/rendering/non-replaced-elements/the-frameset-and-frame-elements/large-rows-relsize.html:
+- A large relative value should not produce weird sizes.
+html/rendering/non-replaced-elements/the-hr-element-0/align.html:
+- "== html/rendering/non-replaced-elements/the-hr-element-0/align-ref.html"
+html/rendering/non-replaced-elements/the-hr-element-0/color.html:
+- "== html/rendering/non-replaced-elements/the-hr-element-0/color-ref.html"
+html/rendering/non-replaced-elements/the-hr-element-0/hr.html:
+- borderBottomStyle
+- borderBottomWidth
+- borderLeftStyle
+- borderLeftWidth
+- borderRightStyle
+- borderRightWidth
+- borderTopStyle
+- borderTopWidth
+- color
+- marginBottom
+- marginTop
+- overflow
+- unicodeBidi
+html/rendering/non-replaced-elements/the-hr-element-0/setting-overflow-visible.html:
+- control
+- 'overflow: visible'
+html/rendering/non-replaced-elements/the-hr-element-0/size-with-color-or-noshade.html:
+- "== html/rendering/non-replaced-elements/the-hr-element-0/size-with-color-or-noshade-ref.html
+  (both renderings blank)"
+html/rendering/non-replaced-elements/the-hr-element-0/size.html:
+- "== html/rendering/non-replaced-elements/the-hr-element-0/size-ref.html (both renderings
+  blank)"
+html/rendering/non-replaced-elements/the-hr-element-0/width.html:
+- "== html/rendering/non-replaced-elements/the-hr-element-0/width-ref.html"
+html/rendering/non-replaced-elements/the-page/Document-documentElement-remove-clears-content.html:
+- "== css/reference/blank.html (both renderings blank)"
+html/rendering/non-replaced-elements/the-page/body-margin-1a.html:
+- "== html/rendering/non-replaced-elements/the-page/body-margin-1-ref.html (both renderings
+  blank)"
+html/rendering/non-replaced-elements/the-page/body-margin-1b.html:
+- "== html/rendering/non-replaced-elements/the-page/body-margin-1-ref.html (both renderings
+  blank)"
+html/rendering/non-replaced-elements/the-page/body-margin-1c.html:
+- "== html/rendering/non-replaced-elements/the-page/body-margin-1-ref.html (both renderings
+  blank)"
+html/rendering/non-replaced-elements/the-page/body-margin-1d.html:
+- "== html/rendering/non-replaced-elements/the-page/body-margin-1-ref.html (both renderings
+  blank)"
+html/rendering/non-replaced-elements/the-page/body-margin-1e.html:
+- "== html/rendering/non-replaced-elements/the-page/body-margin-1-ref.html (both renderings
+  blank)"
+html/rendering/non-replaced-elements/the-page/body-margin-1f.html:
+- "== html/rendering/non-replaced-elements/the-page/body-margin-1-ref.html (both renderings
+  blank)"
+html/rendering/non-replaced-elements/the-page/body-margin-1g.html:
+- "== html/rendering/non-replaced-elements/the-page/body-margin-1-ref.html (both renderings
+  blank)"
+html/rendering/non-replaced-elements/the-page/body-margin-1h.html:
+- "== html/rendering/non-replaced-elements/the-page/body-margin-1-ref.html (both renderings
+  blank)"
+html/rendering/non-replaced-elements/the-page/body-margin-1i.html:
+- "== html/rendering/non-replaced-elements/the-page/body-margin-1-ref.html (both renderings
+  blank)"
+html/rendering/non-replaced-elements/the-page/body-margin-1j.html:
+- "== html/rendering/non-replaced-elements/the-page/body-margin-1-ref.html (both renderings
+  blank)"
+html/rendering/non-replaced-elements/the-page/body-margin-1k.html:
+- "== html/rendering/non-replaced-elements/the-page/body-margin-1-ref.html (both renderings
+  blank)"
+html/rendering/non-replaced-elements/the-page/body-margin-1l.html:
+- "== html/rendering/non-replaced-elements/the-page/body-margin-1-ref.html (both renderings
+  blank)"
+html/rendering/non-replaced-elements/the-page/body-margin-2a.html:
+- "== html/rendering/non-replaced-elements/the-page/body-margin-2-ref.html (both renderings
+  blank)"
+html/rendering/non-replaced-elements/the-page/body-margin-2b.html:
+- "== html/rendering/non-replaced-elements/the-page/body-margin-2-ref.html (both renderings
+  blank)"
+html/rendering/non-replaced-elements/the-page/body-margin-2c.html:
+- "== html/rendering/non-replaced-elements/the-page/body-margin-2-ref.html (both renderings
+  blank)"
+html/rendering/non-replaced-elements/the-page/body-margin-2d.html:
+- "== html/rendering/non-replaced-elements/the-page/body-margin-2-ref.html (both renderings
+  blank)"
+html/rendering/non-replaced-elements/the-page/body-margin-2e.html:
+- "== html/rendering/non-replaced-elements/the-page/body-margin-2-ref.html (both renderings
+  blank)"
+html/rendering/non-replaced-elements/the-page/body-margin-2f.html:
+- "== html/rendering/non-replaced-elements/the-page/body-margin-2-ref.html (both renderings
+  blank)"
+html/rendering/non-replaced-elements/the-page/body-margin-2g.html:
+- "== html/rendering/non-replaced-elements/the-page/body-margin-2-ref.html (both renderings
+  blank)"
+html/rendering/non-replaced-elements/the-page/body-margin-2h.html:
+- "== html/rendering/non-replaced-elements/the-page/body-margin-2-ref.html (both renderings
+  blank)"
+html/rendering/non-replaced-elements/the-page/body-margin-2i.html:
+- "== html/rendering/non-replaced-elements/the-page/body-margin-2-ref.html (both renderings
+  blank)"
+html/rendering/non-replaced-elements/the-page/body-margin-2j.html:
+- "== html/rendering/non-replaced-elements/the-page/body-margin-2-ref.html (both renderings
+  blank)"
+html/rendering/non-replaced-elements/the-page/body-margin-2k.html:
+- "== html/rendering/non-replaced-elements/the-page/body-margin-2-ref.html (both renderings
+  blank)"
+html/rendering/non-replaced-elements/the-page/body-margin-2l.html:
+- "== html/rendering/non-replaced-elements/the-page/body-margin-2-ref.html (both renderings
+  blank)"
+html/rendering/non-replaced-elements/the-page/body-margin-3a.html:
+- Test that body's rightmargin and bottommargin attributes are ignored in standards
+  mode
+html/rendering/non-replaced-elements/the-page/body-margin-3b.html:
+- Test that body's rightmargin and bottommargin attributes are ignored in quirks mode
+html/rendering/non-replaced-elements/the-page/body_text_00ffff.xhtml:
+- "== html/rendering/non-replaced-elements/the-page/body_text_00ffff-ref.html"
+html/rendering/non-replaced-elements/the-page/iframe-body-margin-attributes.html:
+- body marginwidth vs body leftmargin
+- iframe marginwidth vs child body leftmargin
+- iframe marginwidth vs child body marginwidth
+html/rendering/pixel-length-attributes.html:
+- <body leftmargin="   +200in    "> mapping to marginLeft
+- <body leftmargin="   00523   "> mapping to marginLeft
+- <body leftmargin="+200"> mapping to marginLeft
+- <body leftmargin="1007"> mapping to marginLeft
+- <body leftmargin="200"> mapping to marginLeft
+- <body leftmargin="200%"> mapping to marginLeft
+- <body leftmargin="200."> mapping to marginLeft
+- <body leftmargin="200.%"> mapping to marginLeft
+- <body leftmargin="200.25"> mapping to marginLeft
+- <body leftmargin="200.25%"> mapping to marginLeft
+- <body leftmargin="200.25in"> mapping to marginLeft
+- <body leftmargin="200.7"> mapping to marginLeft
+- <body leftmargin="200in"> mapping to marginLeft
+- <body marginheight="   +200in    "> mapping to marginBottom
+- <body marginheight="   +200in    "> mapping to marginTop
+- <body marginheight="   00523   "> mapping to marginBottom
+- <body marginheight="   00523   "> mapping to marginTop
+- <body marginheight="+200"> mapping to marginBottom
+- <body marginheight="+200"> mapping to marginTop
+- <body marginheight="1007"> mapping to marginBottom
+- <body marginheight="1007"> mapping to marginTop
+- <body marginheight="200"> mapping to marginBottom
+- <body marginheight="200"> mapping to marginTop
+- <body marginheight="200%"> mapping to marginBottom
+- <body marginheight="200%"> mapping to marginTop
+- <body marginheight="200."> mapping to marginBottom
+- <body marginheight="200."> mapping to marginTop
+- <body marginheight="200.%"> mapping to marginBottom
+- <body marginheight="200.%"> mapping to marginTop
+- <body marginheight="200.25"> mapping to marginBottom
+- <body marginheight="200.25"> mapping to marginTop
+- <body marginheight="200.25%"> mapping to marginBottom
+- <body marginheight="200.25%"> mapping to marginTop
+- <body marginheight="200.25in"> mapping to marginBottom
+- <body marginheight="200.25in"> mapping to marginTop
+- <body marginheight="200.7"> mapping to marginBottom
+- <body marginheight="200.7"> mapping to marginTop
+- <body marginheight="200in"> mapping to marginBottom
+- <body marginheight="200in"> mapping to marginTop
+- <body marginwidth="   +200in    "> mapping to marginLeft
+- <body marginwidth="   +200in    "> mapping to marginRight
+- <body marginwidth="   00523   "> mapping to marginLeft
+- <body marginwidth="   00523   "> mapping to marginRight
+- <body marginwidth="+200"> mapping to marginLeft
+- <body marginwidth="+200"> mapping to marginRight
+- <body marginwidth="1007"> mapping to marginLeft
+- <body marginwidth="1007"> mapping to marginRight
+- <body marginwidth="200"> mapping to marginLeft
+- <body marginwidth="200"> mapping to marginRight
+- <body marginwidth="200%"> mapping to marginLeft
+- <body marginwidth="200%"> mapping to marginRight
+- <body marginwidth="200."> mapping to marginLeft
+- <body marginwidth="200."> mapping to marginRight
+- <body marginwidth="200.%"> mapping to marginLeft
+- <body marginwidth="200.%"> mapping to marginRight
+- <body marginwidth="200.25"> mapping to marginLeft
+- <body marginwidth="200.25"> mapping to marginRight
+- <body marginwidth="200.25%"> mapping to marginLeft
+- <body marginwidth="200.25%"> mapping to marginRight
+- <body marginwidth="200.25in"> mapping to marginLeft
+- <body marginwidth="200.25in"> mapping to marginRight
+- <body marginwidth="200.7"> mapping to marginLeft
+- <body marginwidth="200.7"> mapping to marginRight
+- <body marginwidth="200in"> mapping to marginLeft
+- <body marginwidth="200in"> mapping to marginRight
+- <body topmargin="   +200in    "> mapping to marginTop
+- <body topmargin="   00523   "> mapping to marginTop
+- <body topmargin="+200"> mapping to marginTop
+- <body topmargin="1007"> mapping to marginTop
+- <body topmargin="200"> mapping to marginTop
+- <body topmargin="200%"> mapping to marginTop
+- <body topmargin="200."> mapping to marginTop
+- <body topmargin="200.%"> mapping to marginTop
+- <body topmargin="200.25"> mapping to marginTop
+- <body topmargin="200.25%"> mapping to marginTop
+- <body topmargin="200.25in"> mapping to marginTop
+- <body topmargin="200.7"> mapping to marginTop
+- <body topmargin="200in"> mapping to marginTop
+- <frame marginheight="   +200in    "> mapping to marginBottom
+- <frame marginheight="   +200in    "> mapping to marginTop
+- <frame marginheight="   00523   "> mapping to marginBottom
+- <frame marginheight="   00523   "> mapping to marginTop
+- <frame marginheight="+200"> mapping to marginBottom
+- <frame marginheight="+200"> mapping to marginTop
+- <frame marginheight="1007"> mapping to marginBottom
+- <frame marginheight="1007"> mapping to marginTop
+- <frame marginheight="200"> mapping to marginBottom
+- <frame marginheight="200"> mapping to marginTop
+- <frame marginheight="200%"> mapping to marginBottom
+- <frame marginheight="200%"> mapping to marginTop
+- <frame marginheight="200."> mapping to marginBottom
+- <frame marginheight="200."> mapping to marginTop
+- <frame marginheight="200.%"> mapping to marginBottom
+- <frame marginheight="200.%"> mapping to marginTop
+- <frame marginheight="200.25"> mapping to marginBottom
+- <frame marginheight="200.25"> mapping to marginTop
+- <frame marginheight="200.25%"> mapping to marginBottom
+- <frame marginheight="200.25%"> mapping to marginTop
+- <frame marginheight="200.25in"> mapping to marginBottom
+- <frame marginheight="200.25in"> mapping to marginTop
+- <frame marginheight="200.7"> mapping to marginBottom
+- <frame marginheight="200.7"> mapping to marginTop
+- <frame marginheight="200in"> mapping to marginBottom
+- <frame marginheight="200in"> mapping to marginTop
+- <frame marginwidth="   +200in    "> mapping to marginLeft
+- <frame marginwidth="   +200in    "> mapping to marginRight
+- <frame marginwidth="   00523   "> mapping to marginLeft
+- <frame marginwidth="   00523   "> mapping to marginRight
+- <frame marginwidth="+200"> mapping to marginLeft
+- <frame marginwidth="+200"> mapping to marginRight
+- <frame marginwidth="1007"> mapping to marginLeft
+- <frame marginwidth="1007"> mapping to marginRight
+- <frame marginwidth="200"> mapping to marginLeft
+- <frame marginwidth="200"> mapping to marginRight
+- <frame marginwidth="200%"> mapping to marginLeft
+- <frame marginwidth="200%"> mapping to marginRight
+- <frame marginwidth="200."> mapping to marginLeft
+- <frame marginwidth="200."> mapping to marginRight
+- <frame marginwidth="200.%"> mapping to marginLeft
+- <frame marginwidth="200.%"> mapping to marginRight
+- <frame marginwidth="200.25"> mapping to marginLeft
+- <frame marginwidth="200.25"> mapping to marginRight
+- <frame marginwidth="200.25%"> mapping to marginLeft
+- <frame marginwidth="200.25%"> mapping to marginRight
+- <frame marginwidth="200.25in"> mapping to marginLeft
+- <frame marginwidth="200.25in"> mapping to marginRight
+- <frame marginwidth="200.7"> mapping to marginLeft
+- <frame marginwidth="200.7"> mapping to marginRight
+- <frame marginwidth="200in"> mapping to marginLeft
+- <frame marginwidth="200in"> mapping to marginRight
+- <iframe marginheight="   +200in    "> mapping to marginBottom
+- <iframe marginheight="   +200in    "> mapping to marginTop
+- <iframe marginheight="   00523   "> mapping to marginBottom
+- <iframe marginheight="   00523   "> mapping to marginTop
+- <iframe marginheight="+200"> mapping to marginBottom
+- <iframe marginheight="+200"> mapping to marginTop
+- <iframe marginheight="1007"> mapping to marginBottom
+- <iframe marginheight="1007"> mapping to marginTop
+- <iframe marginheight="200"> mapping to marginBottom
+- <iframe marginheight="200"> mapping to marginTop
+- <iframe marginheight="200%"> mapping to marginBottom
+- <iframe marginheight="200%"> mapping to marginTop
+- <iframe marginheight="200."> mapping to marginBottom
+- <iframe marginheight="200."> mapping to marginTop
+- <iframe marginheight="200.%"> mapping to marginBottom
+- <iframe marginheight="200.%"> mapping to marginTop
+- <iframe marginheight="200.25"> mapping to marginBottom
+- <iframe marginheight="200.25"> mapping to marginTop
+- <iframe marginheight="200.25%"> mapping to marginBottom
+- <iframe marginheight="200.25%"> mapping to marginTop
+- <iframe marginheight="200.25in"> mapping to marginBottom
+- <iframe marginheight="200.25in"> mapping to marginTop
+- <iframe marginheight="200.7"> mapping to marginBottom
+- <iframe marginheight="200.7"> mapping to marginTop
+- <iframe marginheight="200in"> mapping to marginBottom
+- <iframe marginheight="200in"> mapping to marginTop
+- <iframe marginwidth="   +200in    "> mapping to marginLeft
+- <iframe marginwidth="   +200in    "> mapping to marginRight
+- <iframe marginwidth="   00523   "> mapping to marginLeft
+- <iframe marginwidth="   00523   "> mapping to marginRight
+- <iframe marginwidth="+200"> mapping to marginLeft
+- <iframe marginwidth="+200"> mapping to marginRight
+- <iframe marginwidth="1007"> mapping to marginLeft
+- <iframe marginwidth="1007"> mapping to marginRight
+- <iframe marginwidth="200"> mapping to marginLeft
+- <iframe marginwidth="200"> mapping to marginRight
+- <iframe marginwidth="200%"> mapping to marginLeft
+- <iframe marginwidth="200%"> mapping to marginRight
+- <iframe marginwidth="200."> mapping to marginLeft
+- <iframe marginwidth="200."> mapping to marginRight
+- <iframe marginwidth="200.%"> mapping to marginLeft
+- <iframe marginwidth="200.%"> mapping to marginRight
+- <iframe marginwidth="200.25"> mapping to marginLeft
+- <iframe marginwidth="200.25"> mapping to marginRight
+- <iframe marginwidth="200.25%"> mapping to marginLeft
+- <iframe marginwidth="200.25%"> mapping to marginRight
+- <iframe marginwidth="200.25in"> mapping to marginLeft
+- <iframe marginwidth="200.25in"> mapping to marginRight
+- <iframe marginwidth="200.7"> mapping to marginLeft
+- <iframe marginwidth="200.7"> mapping to marginRight
+- <iframe marginwidth="200in"> mapping to marginLeft
+- <iframe marginwidth="200in"> mapping to marginRight
+- <img border="   +200in    "> mapping to borderBottomWidth
+- <img border="   +200in    "> mapping to borderLeftWidth
+- <img border="   +200in    "> mapping to borderRightWidth
+- <img border="   +200in    "> mapping to borderTopWidth
+- <img border="   00523   "> mapping to borderBottomWidth
+- <img border="   00523   "> mapping to borderLeftWidth
+- <img border="   00523   "> mapping to borderRightWidth
+- <img border="   00523   "> mapping to borderTopWidth
+- <img border="+200"> mapping to borderBottomWidth
+- <img border="+200"> mapping to borderLeftWidth
+- <img border="+200"> mapping to borderRightWidth
+- <img border="+200"> mapping to borderTopWidth
+- <img border="1007"> mapping to borderBottomWidth
+- <img border="1007"> mapping to borderLeftWidth
+- <img border="1007"> mapping to borderRightWidth
+- <img border="1007"> mapping to borderTopWidth
+- <img border="200"> mapping to borderBottomWidth
+- <img border="200"> mapping to borderLeftWidth
+- <img border="200"> mapping to borderRightWidth
+- <img border="200"> mapping to borderTopWidth
+- <img border="200%"> mapping to borderBottomWidth
+- <img border="200%"> mapping to borderLeftWidth
+- <img border="200%"> mapping to borderRightWidth
+- <img border="200%"> mapping to borderTopWidth
+- <img border="200."> mapping to borderBottomWidth
+- <img border="200."> mapping to borderLeftWidth
+- <img border="200."> mapping to borderRightWidth
+- <img border="200."> mapping to borderTopWidth
+- <img border="200.%"> mapping to borderBottomWidth
+- <img border="200.%"> mapping to borderLeftWidth
+- <img border="200.%"> mapping to borderRightWidth
+- <img border="200.%"> mapping to borderTopWidth
+- <img border="200.25"> mapping to borderBottomWidth
+- <img border="200.25"> mapping to borderLeftWidth
+- <img border="200.25"> mapping to borderRightWidth
+- <img border="200.25"> mapping to borderTopWidth
+- <img border="200.25%"> mapping to borderBottomWidth
+- <img border="200.25%"> mapping to borderLeftWidth
+- <img border="200.25%"> mapping to borderRightWidth
+- <img border="200.25%"> mapping to borderTopWidth
+- <img border="200.25in"> mapping to borderBottomWidth
+- <img border="200.25in"> mapping to borderLeftWidth
+- <img border="200.25in"> mapping to borderRightWidth
+- <img border="200.25in"> mapping to borderTopWidth
+- <img border="200.7"> mapping to borderBottomWidth
+- <img border="200.7"> mapping to borderLeftWidth
+- <img border="200.7"> mapping to borderRightWidth
+- <img border="200.7"> mapping to borderTopWidth
+- <img border="200in"> mapping to borderBottomWidth
+- <img border="200in"> mapping to borderLeftWidth
+- <img border="200in"> mapping to borderRightWidth
+- <img border="200in"> mapping to borderTopWidth
+- <input border="   +200in    "> mapping to borderBottomWidth
+- <input border="   +200in    "> mapping to borderLeftWidth
+- <input border="   +200in    "> mapping to borderRightWidth
+- <input border="   +200in    "> mapping to borderTopWidth
+- <input border="   00523   "> mapping to borderBottomWidth
+- <input border="   00523   "> mapping to borderLeftWidth
+- <input border="   00523   "> mapping to borderRightWidth
+- <input border="   00523   "> mapping to borderTopWidth
+- <input border="+200"> mapping to borderBottomWidth
+- <input border="+200"> mapping to borderLeftWidth
+- <input border="+200"> mapping to borderRightWidth
+- <input border="+200"> mapping to borderTopWidth
+- <input border="1007"> mapping to borderBottomWidth
+- <input border="1007"> mapping to borderLeftWidth
+- <input border="1007"> mapping to borderRightWidth
+- <input border="1007"> mapping to borderTopWidth
+- <input border="200"> mapping to borderBottomWidth
+- <input border="200"> mapping to borderLeftWidth
+- <input border="200"> mapping to borderRightWidth
+- <input border="200"> mapping to borderTopWidth
+- <input border="200%"> mapping to borderBottomWidth
+- <input border="200%"> mapping to borderLeftWidth
+- <input border="200%"> mapping to borderRightWidth
+- <input border="200%"> mapping to borderTopWidth
+- <input border="200."> mapping to borderBottomWidth
+- <input border="200."> mapping to borderLeftWidth
+- <input border="200."> mapping to borderRightWidth
+- <input border="200."> mapping to borderTopWidth
+- <input border="200.%"> mapping to borderBottomWidth
+- <input border="200.%"> mapping to borderLeftWidth
+- <input border="200.%"> mapping to borderRightWidth
+- <input border="200.%"> mapping to borderTopWidth
+- <input border="200.25"> mapping to borderBottomWidth
+- <input border="200.25"> mapping to borderLeftWidth
+- <input border="200.25"> mapping to borderRightWidth
+- <input border="200.25"> mapping to borderTopWidth
+- <input border="200.25%"> mapping to borderBottomWidth
+- <input border="200.25%"> mapping to borderLeftWidth
+- <input border="200.25%"> mapping to borderRightWidth
+- <input border="200.25%"> mapping to borderTopWidth
+- <input border="200.25in"> mapping to borderBottomWidth
+- <input border="200.25in"> mapping to borderLeftWidth
+- <input border="200.25in"> mapping to borderRightWidth
+- <input border="200.25in"> mapping to borderTopWidth
+- <input border="200.7"> mapping to borderBottomWidth
+- <input border="200.7"> mapping to borderLeftWidth
+- <input border="200.7"> mapping to borderRightWidth
+- <input border="200.7"> mapping to borderTopWidth
+- <input border="200in"> mapping to borderBottomWidth
+- <input border="200in"> mapping to borderLeftWidth
+- <input border="200in"> mapping to borderRightWidth
+- <input border="200in"> mapping to borderTopWidth
+- <object border="   +200in    "> mapping to borderBottomWidth
+- <object border="   +200in    "> mapping to borderLeftWidth
+- <object border="   +200in    "> mapping to borderRightWidth
+- <object border="   +200in    "> mapping to borderTopWidth
+- <object border="   00523   "> mapping to borderBottomWidth
+- <object border="   00523   "> mapping to borderLeftWidth
+- <object border="   00523   "> mapping to borderRightWidth
+- <object border="   00523   "> mapping to borderTopWidth
+- <object border="+200"> mapping to borderBottomWidth
+- <object border="+200"> mapping to borderLeftWidth
+- <object border="+200"> mapping to borderRightWidth
+- <object border="+200"> mapping to borderTopWidth
+- <object border="1007"> mapping to borderBottomWidth
+- <object border="1007"> mapping to borderLeftWidth
+- <object border="1007"> mapping to borderRightWidth
+- <object border="1007"> mapping to borderTopWidth
+- <object border="200"> mapping to borderBottomWidth
+- <object border="200"> mapping to borderLeftWidth
+- <object border="200"> mapping to borderRightWidth
+- <object border="200"> mapping to borderTopWidth
+- <object border="200%"> mapping to borderBottomWidth
+- <object border="200%"> mapping to borderLeftWidth
+- <object border="200%"> mapping to borderRightWidth
+- <object border="200%"> mapping to borderTopWidth
+- <object border="200."> mapping to borderBottomWidth
+- <object border="200."> mapping to borderLeftWidth
+- <object border="200."> mapping to borderRightWidth
+- <object border="200."> mapping to borderTopWidth
+- <object border="200.%"> mapping to borderBottomWidth
+- <object border="200.%"> mapping to borderLeftWidth
+- <object border="200.%"> mapping to borderRightWidth
+- <object border="200.%"> mapping to borderTopWidth
+- <object border="200.25"> mapping to borderBottomWidth
+- <object border="200.25"> mapping to borderLeftWidth
+- <object border="200.25"> mapping to borderRightWidth
+- <object border="200.25"> mapping to borderTopWidth
+- <object border="200.25%"> mapping to borderBottomWidth
+- <object border="200.25%"> mapping to borderLeftWidth
+- <object border="200.25%"> mapping to borderRightWidth
+- <object border="200.25%"> mapping to borderTopWidth
+- <object border="200.25in"> mapping to borderBottomWidth
+- <object border="200.25in"> mapping to borderLeftWidth
+- <object border="200.25in"> mapping to borderRightWidth
+- <object border="200.25in"> mapping to borderTopWidth
+- <object border="200.7"> mapping to borderBottomWidth
+- <object border="200.7"> mapping to borderLeftWidth
+- <object border="200.7"> mapping to borderRightWidth
+- <object border="200.7"> mapping to borderTopWidth
+- <object border="200in"> mapping to borderBottomWidth
+- <object border="200in"> mapping to borderLeftWidth
+- <object border="200in"> mapping to borderRightWidth
+- <object border="200in"> mapping to borderTopWidth
+html/rendering/replaced-elements/attributes-for-embedded-content-and-images/align.html:
+- align=absbottom on replaced elements
+- align=abscenter on replaced elements
+- align=absmiddle on replaced elements
+- align=center on replaced elements
+- align=left on replaced elements
+- align=middle on replaced elements
+- align=right on replaced elements
+- align=texttop on replaced elements
+- align=top on replaced elements
+html/rendering/replaced-elements/attributes-for-embedded-content-and-images/canvas-aspect-ratio.html:
+- Canvas width and height attributes are used as the surface size
+- Canvas width and height attributes are used as the surface size with contain:size
+- 'Computed style test: canvas with {"width":"0","height":"0"}'
+- 'Computed style test: canvas with {"width":"0","height":"1"}'
+- 'Computed style test: canvas with {"width":"0.5","height":"1.5"}'
+- 'Computed style test: canvas with {"width":"1","height":"0"}'
+- 'Computed style test: canvas with {"width":"10","height":"20"}'
+- 'Computed style test: canvas with {"width":"10%","height":"20"}'
+html/rendering/replaced-elements/attributes-for-embedded-content-and-images/canvas-dimension-attributes.html:
+- "== css/reference/ref-filled-green-200px-square.html"
+? html/rendering/replaced-elements/attributes-for-embedded-content-and-images/embedded-and-images-presentational-hints-ascii-case-insensitive.html
+: - keyword absbottom
+  - keyword abscenter
+  - keyword absmiddle
+html/rendering/replaced-elements/attributes-for-embedded-content-and-images/img-aspect-ratio-lazy.html:
+- Image width and height attributes are used to infer aspect-ratio for lazy-loaded
+  images
+html/rendering/replaced-elements/attributes-for-embedded-content-and-images/img-aspect-ratio.html:
+- 'Computed style test: img with {"width":"0","height":"0"}'
+- 'Computed style test: img with {"width":"0","height":"1"}'
+- 'Computed style test: img with {"width":"0.5","height":"1.5"}'
+- 'Computed style test: img with {"width":"1","height":"0"}'
+- 'Computed style test: img with {"width":"10","height":"20"}'
+- 'Computed style test: input with {"type":"image","width":"0","height":"0"}'
+- 'Computed style test: input with {"type":"image","width":"0","height":"1"}'
+- 'Computed style test: input with {"type":"image","width":"0.5","height":"1.5"}'
+- 'Computed style test: input with {"type":"image","width":"1","height":"0"}'
+- 'Computed style test: input with {"type":"image","width":"10","height":"20"}'
+- 'Create, append and test immediately: <img> with attributes width=0.8, height=0.2'
+- 'Create, append and test immediately: <img> with attributes width=250, height=100'
+- 'Create, append and test immediately: <img> with attributes width=50% height=25%'
+- 'Create, append and test immediately: <img> with invalid trailing attributes width=50pp
+  height=25xx'
+- 'Loaded images test: <img> with width and height attributes, but conflicting to
+  the original aspect ratio'
+- 'Loaded images test: <img> with width and height attributes, but not equal to the
+  original aspect ratio'
+- 'Loaded images test: <img> with width, height and empty src attributes'
+- 'Loaded images test: <img> without width height attributes'
+- 'Loaded images test: Error image with width and height attributes'
+- 'Loaded images test: Error image with width, height and alt attributes'
+html/rendering/replaced-elements/attributes-for-embedded-content-and-images/img-empty-alt-replaced.html:
+- Images with an empty alt attribute have an intrinsic size of zero
+html/rendering/replaced-elements/attributes-for-embedded-content-and-images/img_border_percent.xhtml:
+- "== html/rendering/replaced-elements/attributes-for-embedded-content-and-images/img_border-ref.xhtml"
+html/rendering/replaced-elements/attributes-for-embedded-content-and-images/input-align-right-1.html:
+- "== html/rendering/replaced-elements/attributes-for-embedded-content-and-images/input-align-right-ref.html
+  (both renderings blank)"
+html/rendering/replaced-elements/attributes-for-embedded-content-and-images/input-align-right-2.html:
+- "== html/rendering/replaced-elements/attributes-for-embedded-content-and-images/input-align-right-ref.html
+  (both renderings blank)"
+html/rendering/replaced-elements/attributes-for-embedded-content-and-images/input-border-radius.html:
+- "!= html/rendering/replaced-elements/attributes-for-embedded-content-and-images/input-border-radius-notref.html"
+html/rendering/replaced-elements/attributes-for-embedded-content-and-images/input-image-inline-alt.html:
+- "== html/rendering/replaced-elements/attributes-for-embedded-content-and-images/input-image-inline-alt-ref.html"
+html/rendering/replaced-elements/attributes-for-embedded-content-and-images/object_border_perc.xhtml:
+- "== html/rendering/replaced-elements/attributes-for-embedded-content-and-images/object_border-ref.xhtml"
+html/rendering/replaced-elements/attributes-for-embedded-content-and-images/object_border_pixel.xhtml:
+- "== html/rendering/replaced-elements/attributes-for-embedded-content-and-images/object_border-ref.xhtml"
+html/rendering/replaced-elements/attributes-for-embedded-content-and-images/picture-aspect-ratio.html:
+- Changing which <source> matches should change computed style
+- Computed style for width/height/aspect-ratio
+- Dynamically changing width/height should change computed style
+- If the <source> has only one of width/height, we don't get an aspect ratio, even
+  if the <img> has both.
+- If we don't have width/height on the source, we fall back to width/height on the
+  <img>.
+- If we only have height attribute, we should get height mapped but no aspect ratio,
+  even if <img> has attributes.
+- If we only have one width attribute, we should get width mapped but no aspect ratio,
+  even if <img> has attributes.
+- 'Loaded picture test: <source> with width and height attributes, <img> without width
+  and height attributes'
+- 'Loaded picture test: Both <source> and <img> are with width and height attributes'
+- 'Loaded picture test: Both <source> and <img> are without width and height attributes'
+- Make sure style gets invalidated correctly when the source gets removed.
+- Percentages on source should be ignored for aspect-ratio but used for width/height.
+- Source width/height should take precedence over img attributes.
+- Trailing garbage should be ignored but not make the attribute invalid
+html/rendering/replaced-elements/attributes-for-embedded-content-and-images/textarea-placeholder-scroll.html:
+- Overflowing textarea placeholder should be scrollable
+html/rendering/replaced-elements/attributes-for-embedded-content-and-images/textarea-scrollheight-empty.html:
+- Textarea scrollHeight shouldn't collapse under a line height
+html/rendering/replaced-elements/attributes-for-embedded-content-and-images/video-aspect-ratio.html:
+- Aspect ratio for regular video
+- Aspect ratio for regular video with aspect-ratio:auto
+- Aspect ratio for regular video with width:auto
+- Aspect ratio for video with contain:size
+- 'Computed style test: video with {"width":"0","height":"0"}'
+- 'Computed style test: video with {"width":"0","height":"1"}'
+- 'Computed style test: video with {"width":"0.5","height":"1.5"}'
+- 'Computed style test: video with {"width":"1","height":"0"}'
+- 'Computed style test: video with {"width":"10","height":"20"}'
+? html/rendering/replaced-elements/attributes-for-embedded-content-and-images/video-default-object-height-constrained-by-max-width.html
+: - "== css/reference/ref-filled-green-100px-square.xht"
+? html/rendering/replaced-elements/attributes-for-embedded-content-and-images/video-default-object-width-constrained-by-max-height.html
+: - "== css/reference/ref-filled-green-100px-square.xht"
+html/rendering/replaced-elements/attributes-for-embedded-content-and-images/video-intrinsic-width-height.html:
+- both width/height attributes and style keeping aspect-ratio
+html/rendering/replaced-elements/embedded-content-rendering-rules/audio-controls-001.html:
+- "!= common/blank.html"
+html/rendering/replaced-elements/embedded-content-rendering-rules/audio-controls-002.html:
+- "!= common/blank.html"
+html/rendering/replaced-elements/embedded-content-rendering-rules/audio-without-controls.html:
+- "== css/reference/ref-filled-green-100px-square.xht"
+html/rendering/replaced-elements/embedded-content-rendering-rules/canvas-update-with-border-object-fit.html:
+- "== html/rendering/replaced-elements/embedded-content-rendering-rules/canvas-update-with-border-object-fit-ref.html"
+html/rendering/replaced-elements/embedded-content-rendering-rules/canvas_scale.html:
+- "== html/rendering/replaced-elements/embedded-content-rendering-rules/canvas_scale_ref.html"
+html/rendering/replaced-elements/embedded-content/change-src-while-not-displayed.html:
+- "== html/rendering/replaced-elements/embedded-content/change-src-while-not-displayed-ref.html
+  (both renderings blank)"
+html/rendering/replaced-elements/embedded-content/cross-domain-iframe-in-multicol.sub.html:
+- "== html/rendering/replaced-elements/embedded-content/cross-domain-iframe-in-multicol.sub-ref.html
+  (both renderings blank)"
+html/rendering/replaced-elements/embedded-content/cross-domain-iframe.sub.html:
+- "== html/rendering/replaced-elements/embedded-content/cross-domain-iframe.sub-ref.html
+  (both renderings blank)"
+html/rendering/replaced-elements/embedded-content/iframe-frameborder.html:
+- <iframe frameborder=""></iframe>
+- <iframe frameborder="-0"></iframe>
+- <iframe frameborder="-1"></iframe>
+- <iframe frameborder="-10"></iframe>
+- <iframe frameborder="0"></iframe>
+- <iframe frameborder="0.5"></iframe>
+- <iframe frameborder="0.5e1"></iframe>
+- <iframe frameborder="1"></iframe>
+- <iframe frameborder="10"></iframe>
+- <iframe frameborder="error"></iframe>
+- <iframe frameborder="no"></iframe>
+- <iframe frameborder="none"></iframe>
+- "<iframe></iframe>"
+html/rendering/replaced-elements/embedded-content/tall-cross-domain-iframe-in-scrolled.sub.html:
+- "== html/rendering/replaced-elements/embedded-content/tall-cross-domain-iframe-in-scrolled.sub-ref.html
+  (both renderings blank)"
+html/rendering/replaced-elements/embedded-content/video-controls-vertical-writing-mode.html:
+- "== html/rendering/replaced-elements/embedded-content/video-controls-vertical-writing-mode-ref.html
+  (both renderings blank)"
+? html/rendering/replaced-elements/images/abs-pos-transferred-max-width-from-percentage-max-height-in-auto-height-containing-block.html
+: - "== css/support/60x60-green.png"
+html/rendering/replaced-elements/images/image-fallback-respect-max-width.html:
+- "== html/rendering/replaced-elements/images/image-fallback-respect-max-width-ref.html
+  (both renderings blank)"
+html/rendering/replaced-elements/images/img-fallback-baseline-alignment.html:
+- Image fallback baseline alignment
+html/rendering/replaced-elements/images/img-represents-image-size-before-partially-available.html:
+- "<img> representing image: Natural size before partially available"
+html/rendering/replaced-elements/images/img-represents-nothing-style-mutation.html:
+- "<img> representing nothing and image related style mutation"
+html/rendering/replaced-elements/images/img-sizes-auto.html:
+- <img sizes="AuTo"> - contain
+- <img sizes="AuTo"> - contain-intrinsic-size
+- <img sizes="AuTo,xyz"> - contain
+- <img sizes="AuTo,xyz"> - contain-intrinsic-size
+- <img sizes="auto" class="test-important"> - contain
+- <img sizes="auto" width="10" height="20"> - contain
+- <img sizes="auto" width="10" height="20"> - contain-intrinsic-size
+- <img sizes="auto"> - contain
+- <img sizes="auto"> - contain-intrinsic-size
+- <img sizes="auto,xyz"> - contain
+- <img sizes="auto,xyz"> - contain-intrinsic-size
+html/rendering/replaced-elements/images/revoked-blob-print.html:
+- "== html/rendering/replaced-elements/images/revoked-blob-print-ref.html"
+html/rendering/replaced-elements/svg-embedded-sizing/svg-in-img-auto.html:
+- 'placeholder: ''img'', '
+- 'placeholder: ''img'', containerHeightStyle: ''400px'', '
+- 'placeholder: ''img'', containerHeightStyle: ''400px'', placeholderWidthAttr: ''100'', '
+- 'placeholder: ''img'', containerHeightStyle: ''400px'', placeholderWidthAttr: ''100'',
+  svgHeightAttr: ''200'', '
+- 'placeholder: ''img'', containerHeightStyle: ''400px'', placeholderWidthAttr: ''100'',
+  svgHeightAttr: ''25%'', '
+- 'placeholder: ''img'', containerHeightStyle: ''400px'', placeholderWidthAttr: ''100'',
+  svgWidthAttr: ''200'', '
+- 'placeholder: ''img'', containerHeightStyle: ''400px'', placeholderWidthAttr: ''100'',
+  svgWidthAttr: ''200'', svgHeightAttr: ''25%'', '
+- 'placeholder: ''img'', containerHeightStyle: ''400px'', placeholderWidthAttr: ''100'',
+  svgWidthAttr: ''25%'', '
+- 'placeholder: ''img'', containerHeightStyle: ''400px'', placeholderWidthAttr: ''100'',
+  svgWidthAttr: ''25%'', svgHeightAttr: ''200'', '
+- 'placeholder: ''img'', containerHeightStyle: ''400px'', placeholderWidthAttr: ''100'',
+  svgWidthAttr: ''25%'', svgHeightAttr: ''25%'', '
+- 'placeholder: ''img'', containerHeightStyle: ''400px'', placeholderWidthAttr: ''50%'', '
+- 'placeholder: ''img'', containerHeightStyle: ''400px'', placeholderWidthAttr: ''50%'',
+  svgHeightAttr: ''200'', '
+- 'placeholder: ''img'', containerHeightStyle: ''400px'', placeholderWidthAttr: ''50%'',
+  svgHeightAttr: ''25%'', '
+- 'placeholder: ''img'', containerHeightStyle: ''400px'', placeholderWidthAttr: ''50%'',
+  svgWidthAttr: ''200'', '
+- 'placeholder: ''img'', containerHeightStyle: ''400px'', placeholderWidthAttr: ''50%'',
+  svgWidthAttr: ''200'', svgHeightAttr: ''25%'', '
+- 'placeholder: ''img'', containerHeightStyle: ''400px'', placeholderWidthAttr: ''50%'',
+  svgWidthAttr: ''25%'', '
+- 'placeholder: ''img'', containerHeightStyle: ''400px'', placeholderWidthAttr: ''50%'',
+  svgWidthAttr: ''25%'', svgHeightAttr: ''200'', '
+- 'placeholder: ''img'', containerHeightStyle: ''400px'', placeholderWidthAttr: ''50%'',
+  svgWidthAttr: ''25%'', svgHeightAttr: ''25%'', '
+- 'placeholder: ''img'', containerHeightStyle: ''400px'', svgHeightAttr: ''200'', '
+- 'placeholder: ''img'', containerHeightStyle: ''400px'', svgHeightAttr: ''25%'', '
+- 'placeholder: ''img'', containerHeightStyle: ''400px'', svgViewBoxAttr: ''0 0 100
+  200'', '
+- 'placeholder: ''img'', containerHeightStyle: ''400px'', svgViewBoxAttr: ''0 0 100
+  200'', svgHeightAttr: ''25%'', '
+- 'placeholder: ''img'', containerHeightStyle: ''400px'', svgViewBoxAttr: ''0 0 100
+  200'', svgWidthAttr: ''25%'', '
+- 'placeholder: ''img'', containerHeightStyle: ''400px'', svgViewBoxAttr: ''0 0 100
+  200'', svgWidthAttr: ''25%'', svgHeightAttr: ''25%'', '
+- 'placeholder: ''img'', containerHeightStyle: ''400px'', svgWidthAttr: ''200'', '
+- 'placeholder: ''img'', containerHeightStyle: ''400px'', svgWidthAttr: ''200'', svgHeightAttr:
+  ''25%'', '
+- 'placeholder: ''img'', containerHeightStyle: ''400px'', svgWidthAttr: ''25%'', '
+- 'placeholder: ''img'', containerHeightStyle: ''400px'', svgWidthAttr: ''25%'', svgHeightAttr:
+  ''200'', '
+- 'placeholder: ''img'', containerHeightStyle: ''400px'', svgWidthAttr: ''25%'', svgHeightAttr:
+  ''25%'', '
+- 'placeholder: ''img'', containerWidthStyle: ''400px'', '
+- 'placeholder: ''img'', containerWidthStyle: ''400px'', containerHeightStyle: ''400px'', '
+- 'placeholder: ''img'', containerWidthStyle: ''400px'', containerHeightStyle: ''400px'',
+  placeholderWidthAttr: ''100'', '
+- 'placeholder: ''img'', containerWidthStyle: ''400px'', containerHeightStyle: ''400px'',
+  placeholderWidthAttr: ''100'', svgHeightAttr: ''200'', '
+- 'placeholder: ''img'', containerWidthStyle: ''400px'', containerHeightStyle: ''400px'',
+  placeholderWidthAttr: ''100'', svgHeightAttr: ''25%'', '
+- 'placeholder: ''img'', containerWidthStyle: ''400px'', containerHeightStyle: ''400px'',
+  placeholderWidthAttr: ''100'', svgWidthAttr: ''200'', '
+- 'placeholder: ''img'', containerWidthStyle: ''400px'', containerHeightStyle: ''400px'',
+  placeholderWidthAttr: ''100'', svgWidthAttr: ''200'', svgHeightAttr: ''25%'', '
+- 'placeholder: ''img'', containerWidthStyle: ''400px'', containerHeightStyle: ''400px'',
+  placeholderWidthAttr: ''100'', svgWidthAttr: ''25%'', '
+- 'placeholder: ''img'', containerWidthStyle: ''400px'', containerHeightStyle: ''400px'',
+  placeholderWidthAttr: ''100'', svgWidthAttr: ''25%'', svgHeightAttr: ''200'', '
+- 'placeholder: ''img'', containerWidthStyle: ''400px'', containerHeightStyle: ''400px'',
+  placeholderWidthAttr: ''100'', svgWidthAttr: ''25%'', svgHeightAttr: ''25%'', '
+- 'placeholder: ''img'', containerWidthStyle: ''400px'', containerHeightStyle: ''400px'',
+  placeholderWidthAttr: ''50%'', '
+- 'placeholder: ''img'', containerWidthStyle: ''400px'', containerHeightStyle: ''400px'',
+  placeholderWidthAttr: ''50%'', svgHeightAttr: ''200'', '
+- 'placeholder: ''img'', containerWidthStyle: ''400px'', containerHeightStyle: ''400px'',
+  placeholderWidthAttr: ''50%'', svgHeightAttr: ''25%'', '
+- 'placeholder: ''img'', containerWidthStyle: ''400px'', containerHeightStyle: ''400px'',
+  placeholderWidthAttr: ''50%'', svgWidthAttr: ''200'', '
+- 'placeholder: ''img'', containerWidthStyle: ''400px'', containerHeightStyle: ''400px'',
+  placeholderWidthAttr: ''50%'', svgWidthAttr: ''200'', svgHeightAttr: ''25%'', '
+- 'placeholder: ''img'', containerWidthStyle: ''400px'', containerHeightStyle: ''400px'',
+  placeholderWidthAttr: ''50%'', svgWidthAttr: ''25%'', '
+- 'placeholder: ''img'', containerWidthStyle: ''400px'', containerHeightStyle: ''400px'',
+  placeholderWidthAttr: ''50%'', svgWidthAttr: ''25%'', svgHeightAttr: ''200'', '
+- 'placeholder: ''img'', containerWidthStyle: ''400px'', containerHeightStyle: ''400px'',
+  placeholderWidthAttr: ''50%'', svgWidthAttr: ''25%'', svgHeightAttr: ''25%'', '
+- 'placeholder: ''img'', containerWidthStyle: ''400px'', containerHeightStyle: ''400px'',
+  svgHeightAttr: ''200'', '
+- 'placeholder: ''img'', containerWidthStyle: ''400px'', containerHeightStyle: ''400px'',
+  svgHeightAttr: ''25%'', '
+- 'placeholder: ''img'', containerWidthStyle: ''400px'', containerHeightStyle: ''400px'',
+  svgViewBoxAttr: ''0 0 100 200'', '
+- 'placeholder: ''img'', containerWidthStyle: ''400px'', containerHeightStyle: ''400px'',
+  svgViewBoxAttr: ''0 0 100 200'', svgHeightAttr: ''25%'', '
+- 'placeholder: ''img'', containerWidthStyle: ''400px'', containerHeightStyle: ''400px'',
+  svgViewBoxAttr: ''0 0 100 200'', svgWidthAttr: ''25%'', '
+- 'placeholder: ''img'', containerWidthStyle: ''400px'', containerHeightStyle: ''400px'',
+  svgViewBoxAttr: ''0 0 100 200'', svgWidthAttr: ''25%'', svgHeightAttr: ''25%'', '
+- 'placeholder: ''img'', containerWidthStyle: ''400px'', containerHeightStyle: ''400px'',
+  svgWidthAttr: ''200'', '
+- 'placeholder: ''img'', containerWidthStyle: ''400px'', containerHeightStyle: ''400px'',
+  svgWidthAttr: ''200'', svgHeightAttr: ''25%'', '
+- 'placeholder: ''img'', containerWidthStyle: ''400px'', containerHeightStyle: ''400px'',
+  svgWidthAttr: ''25%'', '
+- 'placeholder: ''img'', containerWidthStyle: ''400px'', containerHeightStyle: ''400px'',
+  svgWidthAttr: ''25%'', svgHeightAttr: ''200'', '
+- 'placeholder: ''img'', containerWidthStyle: ''400px'', containerHeightStyle: ''400px'',
+  svgWidthAttr: ''25%'', svgHeightAttr: ''25%'', '
+- 'placeholder: ''img'', containerWidthStyle: ''400px'', placeholderWidthAttr: ''100'', '
+- 'placeholder: ''img'', containerWidthStyle: ''400px'', placeholderWidthAttr: ''100'',
+  svgHeightAttr: ''200'', '
+- 'placeholder: ''img'', containerWidthStyle: ''400px'', placeholderWidthAttr: ''100'',
+  svgHeightAttr: ''25%'', '
+- 'placeholder: ''img'', containerWidthStyle: ''400px'', placeholderWidthAttr: ''100'',
+  svgWidthAttr: ''200'', '
+- 'placeholder: ''img'', containerWidthStyle: ''400px'', placeholderWidthAttr: ''100'',
+  svgWidthAttr: ''200'', svgHeightAttr: ''25%'', '
+- 'placeholder: ''img'', containerWidthStyle: ''400px'', placeholderWidthAttr: ''100'',
+  svgWidthAttr: ''25%'', '
+- 'placeholder: ''img'', containerWidthStyle: ''400px'', placeholderWidthAttr: ''100'',
+  svgWidthAttr: ''25%'', svgHeightAttr: ''200'', '
+- 'placeholder: ''img'', containerWidthStyle: ''400px'', placeholderWidthAttr: ''100'',
+  svgWidthAttr: ''25%'', svgHeightAttr: ''25%'', '
+- 'placeholder: ''img'', containerWidthStyle: ''400px'', placeholderWidthAttr: ''50%'', '
+- 'placeholder: ''img'', containerWidthStyle: ''400px'', placeholderWidthAttr: ''50%'',
+  svgHeightAttr: ''200'', '
+- 'placeholder: ''img'', containerWidthStyle: ''400px'', placeholderWidthAttr: ''50%'',
+  svgHeightAttr: ''25%'', '
+- 'placeholder: ''img'', containerWidthStyle: ''400px'', placeholderWidthAttr: ''50%'',
+  svgWidthAttr: ''200'', '
+- 'placeholder: ''img'', containerWidthStyle: ''400px'', placeholderWidthAttr: ''50%'',
+  svgWidthAttr: ''200'', svgHeightAttr: ''25%'', '
+- 'placeholder: ''img'', containerWidthStyle: ''400px'', placeholderWidthAttr: ''50%'',
+  svgWidthAttr: ''25%'', '
+- 'placeholder: ''img'', containerWidthStyle: ''400px'', placeholderWidthAttr: ''50%'',
+  svgWidthAttr: ''25%'', svgHeightAttr: ''200'', '
+- 'placeholder: ''img'', containerWidthStyle: ''400px'', placeholderWidthAttr: ''50%'',
+  svgWidthAttr: ''25%'', svgHeightAttr: ''25%'', '
+- 'placeholder: ''img'', containerWidthStyle: ''400px'', svgHeightAttr: ''200'', '
+- 'placeholder: ''img'', containerWidthStyle: ''400px'', svgHeightAttr: ''25%'', '
+- 'placeholder: ''img'', containerWidthStyle: ''400px'', svgViewBoxAttr: ''0 0 100
+  200'', '
+- 'placeholder: ''img'', containerWidthStyle: ''400px'', svgViewBoxAttr: ''0 0 100
+  200'', svgHeightAttr: ''25%'', '
+- 'placeholder: ''img'', containerWidthStyle: ''400px'', svgViewBoxAttr: ''0 0 100
+  200'', svgWidthAttr: ''25%'', '
+- 'placeholder: ''img'', containerWidthStyle: ''400px'', svgViewBoxAttr: ''0 0 100
+  200'', svgWidthAttr: ''25%'', svgHeightAttr: ''25%'', '
+- 'placeholder: ''img'', containerWidthStyle: ''400px'', svgWidthAttr: ''200'', '
+- 'placeholder: ''img'', containerWidthStyle: ''400px'', svgWidthAttr: ''200'', svgHeightAttr:
+  ''25%'', '
+- 'placeholder: ''img'', containerWidthStyle: ''400px'', svgWidthAttr: ''25%'', '
+- 'placeholder: ''img'', containerWidthStyle: ''400px'', svgWidthAttr: ''25%'', svgHeightAttr:
+  ''200'', '
+- 'placeholder: ''img'', containerWidthStyle: ''400px'', svgWidthAttr: ''25%'', svgHeightAttr:
+  ''25%'', '
+- 'placeholder: ''img'', placeholderWidthAttr: ''100'', '
+- 'placeholder: ''img'', placeholderWidthAttr: ''100'', svgHeightAttr: ''200'', '
+- 'placeholder: ''img'', placeholderWidthAttr: ''100'', svgHeightAttr: ''25%'', '
+- 'placeholder: ''img'', placeholderWidthAttr: ''100'', svgWidthAttr: ''200'', '
+- 'placeholder: ''img'', placeholderWidthAttr: ''100'', svgWidthAttr: ''200'', svgHeightAttr:
+  ''25%'', '
+- 'placeholder: ''img'', placeholderWidthAttr: ''100'', svgWidthAttr: ''25%'', '
+- 'placeholder: ''img'', placeholderWidthAttr: ''100'', svgWidthAttr: ''25%'', svgHeightAttr:
+  ''200'', '
+- 'placeholder: ''img'', placeholderWidthAttr: ''100'', svgWidthAttr: ''25%'', svgHeightAttr:
+  ''25%'', '
+- 'placeholder: ''img'', placeholderWidthAttr: ''50%'', '
+- 'placeholder: ''img'', placeholderWidthAttr: ''50%'', svgHeightAttr: ''200'', '
+- 'placeholder: ''img'', placeholderWidthAttr: ''50%'', svgHeightAttr: ''25%'', '
+- 'placeholder: ''img'', placeholderWidthAttr: ''50%'', svgWidthAttr: ''200'', '
+- 'placeholder: ''img'', placeholderWidthAttr: ''50%'', svgWidthAttr: ''200'', svgHeightAttr:
+  ''25%'', '
+- 'placeholder: ''img'', placeholderWidthAttr: ''50%'', svgWidthAttr: ''25%'', '
+- 'placeholder: ''img'', placeholderWidthAttr: ''50%'', svgWidthAttr: ''25%'', svgHeightAttr:
+  ''200'', '
+- 'placeholder: ''img'', placeholderWidthAttr: ''50%'', svgWidthAttr: ''25%'', svgHeightAttr:
+  ''25%'', '
+- 'placeholder: ''img'', svgHeightAttr: ''200'', '
+- 'placeholder: ''img'', svgHeightAttr: ''25%'', '
+- 'placeholder: ''img'', svgViewBoxAttr: ''0 0 100 200'', '
+- 'placeholder: ''img'', svgViewBoxAttr: ''0 0 100 200'', svgHeightAttr: ''25%'', '
+- 'placeholder: ''img'', svgViewBoxAttr: ''0 0 100 200'', svgWidthAttr: ''25%'', '
+- 'placeholder: ''img'', svgViewBoxAttr: ''0 0 100 200'', svgWidthAttr: ''25%'', svgHeightAttr:
+  ''25%'', '
+- 'placeholder: ''img'', svgWidthAttr: ''200'', '
+- 'placeholder: ''img'', svgWidthAttr: ''200'', svgHeightAttr: ''25%'', '
+- 'placeholder: ''img'', svgWidthAttr: ''25%'', '
+- 'placeholder: ''img'', svgWidthAttr: ''25%'', svgHeightAttr: ''200'', '
+- 'placeholder: ''img'', svgWidthAttr: ''25%'', svgHeightAttr: ''25%'', '
+html/rendering/replaced-elements/svg-embedded-sizing/svg-in-img-fixed.html:
+- 'placeholder: ''img'', containerHeightStyle: ''400px'', placeholderHeightAttr: ''100px'', '
+- 'placeholder: ''img'', containerHeightStyle: ''400px'', placeholderHeightAttr: ''100px'',
+  svgHeightAttr: ''200'', '
+- 'placeholder: ''img'', containerHeightStyle: ''400px'', placeholderHeightAttr: ''100px'',
+  svgHeightAttr: ''25%'', '
+- 'placeholder: ''img'', containerHeightStyle: ''400px'', placeholderHeightAttr: ''100px'',
+  svgWidthAttr: ''200'', '
+- 'placeholder: ''img'', containerHeightStyle: ''400px'', placeholderHeightAttr: ''100px'',
+  svgWidthAttr: ''200'', svgHeightAttr: ''25%'', '
+- 'placeholder: ''img'', containerHeightStyle: ''400px'', placeholderHeightAttr: ''100px'',
+  svgWidthAttr: ''25%'', '
+- 'placeholder: ''img'', containerHeightStyle: ''400px'', placeholderHeightAttr: ''100px'',
+  svgWidthAttr: ''25%'', svgHeightAttr: ''200'', '
+- 'placeholder: ''img'', containerHeightStyle: ''400px'', placeholderHeightAttr: ''100px'',
+  svgWidthAttr: ''25%'', svgHeightAttr: ''25%'', '
+- 'placeholder: ''img'', containerWidthStyle: ''400px'', containerHeightStyle: ''400px'',
+  placeholderHeightAttr: ''100px'', '
+- 'placeholder: ''img'', containerWidthStyle: ''400px'', containerHeightStyle: ''400px'',
+  placeholderHeightAttr: ''100px'', svgHeightAttr: ''200'', '
+- 'placeholder: ''img'', containerWidthStyle: ''400px'', containerHeightStyle: ''400px'',
+  placeholderHeightAttr: ''100px'', svgHeightAttr: ''25%'', '
+- 'placeholder: ''img'', containerWidthStyle: ''400px'', containerHeightStyle: ''400px'',
+  placeholderHeightAttr: ''100px'', svgWidthAttr: ''200'', '
+- 'placeholder: ''img'', containerWidthStyle: ''400px'', containerHeightStyle: ''400px'',
+  placeholderHeightAttr: ''100px'', svgWidthAttr: ''200'', svgHeightAttr: ''25%'', '
+- 'placeholder: ''img'', containerWidthStyle: ''400px'', containerHeightStyle: ''400px'',
+  placeholderHeightAttr: ''100px'', svgWidthAttr: ''25%'', '
+- 'placeholder: ''img'', containerWidthStyle: ''400px'', containerHeightStyle: ''400px'',
+  placeholderHeightAttr: ''100px'', svgWidthAttr: ''25%'', svgHeightAttr: ''200'', '
+- 'placeholder: ''img'', containerWidthStyle: ''400px'', containerHeightStyle: ''400px'',
+  placeholderHeightAttr: ''100px'', svgWidthAttr: ''25%'', svgHeightAttr: ''25%'', '
+- 'placeholder: ''img'', containerWidthStyle: ''400px'', placeholderHeightAttr: ''100px'', '
+- 'placeholder: ''img'', containerWidthStyle: ''400px'', placeholderHeightAttr: ''100px'',
+  svgHeightAttr: ''200'', '
+- 'placeholder: ''img'', containerWidthStyle: ''400px'', placeholderHeightAttr: ''100px'',
+  svgHeightAttr: ''25%'', '
+- 'placeholder: ''img'', containerWidthStyle: ''400px'', placeholderHeightAttr: ''100px'',
+  svgWidthAttr: ''200'', '
+- 'placeholder: ''img'', containerWidthStyle: ''400px'', placeholderHeightAttr: ''100px'',
+  svgWidthAttr: ''200'', svgHeightAttr: ''25%'', '
+- 'placeholder: ''img'', containerWidthStyle: ''400px'', placeholderHeightAttr: ''100px'',
+  svgWidthAttr: ''25%'', '
+- 'placeholder: ''img'', containerWidthStyle: ''400px'', placeholderHeightAttr: ''100px'',
+  svgWidthAttr: ''25%'', svgHeightAttr: ''200'', '
+- 'placeholder: ''img'', containerWidthStyle: ''400px'', placeholderHeightAttr: ''100px'',
+  svgWidthAttr: ''25%'', svgHeightAttr: ''25%'', '
+- 'placeholder: ''img'', placeholderHeightAttr: ''100px'', '
+- 'placeholder: ''img'', placeholderHeightAttr: ''100px'', svgHeightAttr: ''200'', '
+- 'placeholder: ''img'', placeholderHeightAttr: ''100px'', svgHeightAttr: ''25%'', '
+- 'placeholder: ''img'', placeholderHeightAttr: ''100px'', svgWidthAttr: ''200'', '
+- 'placeholder: ''img'', placeholderHeightAttr: ''100px'', svgWidthAttr: ''200'',
+  svgHeightAttr: ''25%'', '
+- 'placeholder: ''img'', placeholderHeightAttr: ''100px'', svgWidthAttr: ''25%'', '
+- 'placeholder: ''img'', placeholderHeightAttr: ''100px'', svgWidthAttr: ''25%'',
+  svgHeightAttr: ''200'', '
+- 'placeholder: ''img'', placeholderHeightAttr: ''100px'', svgWidthAttr: ''25%'',
+  svgHeightAttr: ''25%'', '
+html/rendering/replaced-elements/svg-embedded-sizing/svg-in-img-percentage.html:
+- 'placeholder: ''img'', containerHeightStyle: ''400px'', placeholderHeightAttr: ''100%'', '
+- 'placeholder: ''img'', containerHeightStyle: ''400px'', placeholderHeightAttr: ''100%'',
+  svgHeightAttr: ''200'', '
+- 'placeholder: ''img'', containerHeightStyle: ''400px'', placeholderHeightAttr: ''100%'',
+  svgHeightAttr: ''25%'', '
+- 'placeholder: ''img'', containerHeightStyle: ''400px'', placeholderHeightAttr: ''100%'',
+  svgWidthAttr: ''200'', '
+- 'placeholder: ''img'', containerHeightStyle: ''400px'', placeholderHeightAttr: ''100%'',
+  svgWidthAttr: ''200'', svgHeightAttr: ''25%'', '
+- 'placeholder: ''img'', containerHeightStyle: ''400px'', placeholderHeightAttr: ''100%'',
+  svgWidthAttr: ''25%'', '
+- 'placeholder: ''img'', containerHeightStyle: ''400px'', placeholderHeightAttr: ''100%'',
+  svgWidthAttr: ''25%'', svgHeightAttr: ''200'', '
+- 'placeholder: ''img'', containerHeightStyle: ''400px'', placeholderHeightAttr: ''100%'',
+  svgWidthAttr: ''25%'', svgHeightAttr: ''25%'', '
+- 'placeholder: ''img'', containerWidthStyle: ''400px'', containerHeightStyle: ''400px'',
+  placeholderHeightAttr: ''100%'', '
+- 'placeholder: ''img'', containerWidthStyle: ''400px'', containerHeightStyle: ''400px'',
+  placeholderHeightAttr: ''100%'', svgHeightAttr: ''200'', '
+- 'placeholder: ''img'', containerWidthStyle: ''400px'', containerHeightStyle: ''400px'',
+  placeholderHeightAttr: ''100%'', svgHeightAttr: ''25%'', '
+- 'placeholder: ''img'', containerWidthStyle: ''400px'', containerHeightStyle: ''400px'',
+  placeholderHeightAttr: ''100%'', svgWidthAttr: ''200'', '
+- 'placeholder: ''img'', containerWidthStyle: ''400px'', containerHeightStyle: ''400px'',
+  placeholderHeightAttr: ''100%'', svgWidthAttr: ''200'', svgHeightAttr: ''25%'', '
+- 'placeholder: ''img'', containerWidthStyle: ''400px'', containerHeightStyle: ''400px'',
+  placeholderHeightAttr: ''100%'', svgWidthAttr: ''25%'', '
+- 'placeholder: ''img'', containerWidthStyle: ''400px'', containerHeightStyle: ''400px'',
+  placeholderHeightAttr: ''100%'', svgWidthAttr: ''25%'', svgHeightAttr: ''200'', '
+- 'placeholder: ''img'', containerWidthStyle: ''400px'', containerHeightStyle: ''400px'',
+  placeholderHeightAttr: ''100%'', svgWidthAttr: ''25%'', svgHeightAttr: ''25%'', '
+- 'placeholder: ''img'', containerWidthStyle: ''400px'', placeholderHeightAttr: ''100%'', '
+- 'placeholder: ''img'', containerWidthStyle: ''400px'', placeholderHeightAttr: ''100%'',
+  svgHeightAttr: ''200'', '
+- 'placeholder: ''img'', containerWidthStyle: ''400px'', placeholderHeightAttr: ''100%'',
+  svgHeightAttr: ''25%'', '
+- 'placeholder: ''img'', containerWidthStyle: ''400px'', placeholderHeightAttr: ''100%'',
+  svgViewBoxAttr: ''0 0 100 200'', '
+- 'placeholder: ''img'', containerWidthStyle: ''400px'', placeholderHeightAttr: ''100%'',
+  svgViewBoxAttr: ''0 0 100 200'', svgHeightAttr: ''25%'', '
+- 'placeholder: ''img'', containerWidthStyle: ''400px'', placeholderHeightAttr: ''100%'',
+  svgViewBoxAttr: ''0 0 100 200'', svgWidthAttr: ''25%'', '
+- 'placeholder: ''img'', containerWidthStyle: ''400px'', placeholderHeightAttr: ''100%'',
+  svgViewBoxAttr: ''0 0 100 200'', svgWidthAttr: ''25%'', svgHeightAttr: ''25%'', '
+- 'placeholder: ''img'', containerWidthStyle: ''400px'', placeholderHeightAttr: ''100%'',
+  svgWidthAttr: ''200'', '
+- 'placeholder: ''img'', containerWidthStyle: ''400px'', placeholderHeightAttr: ''100%'',
+  svgWidthAttr: ''200'', svgHeightAttr: ''25%'', '
+- 'placeholder: ''img'', containerWidthStyle: ''400px'', placeholderHeightAttr: ''100%'',
+  svgWidthAttr: ''25%'', '
+- 'placeholder: ''img'', containerWidthStyle: ''400px'', placeholderHeightAttr: ''100%'',
+  svgWidthAttr: ''25%'', svgHeightAttr: ''200'', '
+- 'placeholder: ''img'', containerWidthStyle: ''400px'', placeholderHeightAttr: ''100%'',
+  svgWidthAttr: ''25%'', svgHeightAttr: ''25%'', '
+- 'placeholder: ''img'', containerWidthStyle: ''400px'', placeholderWidthAttr: ''100'',
+  placeholderHeightAttr: ''100%'', '
+- 'placeholder: ''img'', containerWidthStyle: ''400px'', placeholderWidthAttr: ''100'',
+  placeholderHeightAttr: ''100%'', svgHeightAttr: ''200'', '
+- 'placeholder: ''img'', containerWidthStyle: ''400px'', placeholderWidthAttr: ''100'',
+  placeholderHeightAttr: ''100%'', svgHeightAttr: ''25%'', '
+- 'placeholder: ''img'', containerWidthStyle: ''400px'', placeholderWidthAttr: ''100'',
+  placeholderHeightAttr: ''100%'', svgWidthAttr: ''200'', '
+- 'placeholder: ''img'', containerWidthStyle: ''400px'', placeholderWidthAttr: ''100'',
+  placeholderHeightAttr: ''100%'', svgWidthAttr: ''200'', svgHeightAttr: ''25%'', '
+- 'placeholder: ''img'', containerWidthStyle: ''400px'', placeholderWidthAttr: ''100'',
+  placeholderHeightAttr: ''100%'', svgWidthAttr: ''25%'', '
+- 'placeholder: ''img'', containerWidthStyle: ''400px'', placeholderWidthAttr: ''100'',
+  placeholderHeightAttr: ''100%'', svgWidthAttr: ''25%'', svgHeightAttr: ''200'', '
+- 'placeholder: ''img'', containerWidthStyle: ''400px'', placeholderWidthAttr: ''100'',
+  placeholderHeightAttr: ''100%'', svgWidthAttr: ''25%'', svgHeightAttr: ''25%'', '
+- 'placeholder: ''img'', containerWidthStyle: ''400px'', placeholderWidthAttr: ''50%'',
+  placeholderHeightAttr: ''100%'', '
+- 'placeholder: ''img'', containerWidthStyle: ''400px'', placeholderWidthAttr: ''50%'',
+  placeholderHeightAttr: ''100%'', svgHeightAttr: ''200'', '
+- 'placeholder: ''img'', containerWidthStyle: ''400px'', placeholderWidthAttr: ''50%'',
+  placeholderHeightAttr: ''100%'', svgHeightAttr: ''25%'', '
+- 'placeholder: ''img'', containerWidthStyle: ''400px'', placeholderWidthAttr: ''50%'',
+  placeholderHeightAttr: ''100%'', svgWidthAttr: ''200'', '
+- 'placeholder: ''img'', containerWidthStyle: ''400px'', placeholderWidthAttr: ''50%'',
+  placeholderHeightAttr: ''100%'', svgWidthAttr: ''200'', svgHeightAttr: ''25%'', '
+- 'placeholder: ''img'', containerWidthStyle: ''400px'', placeholderWidthAttr: ''50%'',
+  placeholderHeightAttr: ''100%'', svgWidthAttr: ''25%'', '
+- 'placeholder: ''img'', containerWidthStyle: ''400px'', placeholderWidthAttr: ''50%'',
+  placeholderHeightAttr: ''100%'', svgWidthAttr: ''25%'', svgHeightAttr: ''200'', '
+- 'placeholder: ''img'', containerWidthStyle: ''400px'', placeholderWidthAttr: ''50%'',
+  placeholderHeightAttr: ''100%'', svgWidthAttr: ''25%'', svgHeightAttr: ''25%'', '
+- 'placeholder: ''img'', placeholderHeightAttr: ''100%'', '
+- 'placeholder: ''img'', placeholderHeightAttr: ''100%'', svgHeightAttr: ''200'', '
+- 'placeholder: ''img'', placeholderHeightAttr: ''100%'', svgHeightAttr: ''25%'', '
+- 'placeholder: ''img'', placeholderHeightAttr: ''100%'', svgViewBoxAttr: ''0 0 100
+  200'', '
+- 'placeholder: ''img'', placeholderHeightAttr: ''100%'', svgViewBoxAttr: ''0 0 100
+  200'', svgHeightAttr: ''25%'', '
+- 'placeholder: ''img'', placeholderHeightAttr: ''100%'', svgViewBoxAttr: ''0 0 100
+  200'', svgWidthAttr: ''25%'', '
+- 'placeholder: ''img'', placeholderHeightAttr: ''100%'', svgViewBoxAttr: ''0 0 100
+  200'', svgWidthAttr: ''25%'', svgHeightAttr: ''25%'', '
+- 'placeholder: ''img'', placeholderHeightAttr: ''100%'', svgWidthAttr: ''200'', '
+- 'placeholder: ''img'', placeholderHeightAttr: ''100%'', svgWidthAttr: ''200'', svgHeightAttr:
+  ''25%'', '
+- 'placeholder: ''img'', placeholderHeightAttr: ''100%'', svgWidthAttr: ''25%'', '
+- 'placeholder: ''img'', placeholderHeightAttr: ''100%'', svgWidthAttr: ''25%'', svgHeightAttr:
+  ''200'', '
+- 'placeholder: ''img'', placeholderHeightAttr: ''100%'', svgWidthAttr: ''25%'', svgHeightAttr:
+  ''25%'', '
+- 'placeholder: ''img'', placeholderWidthAttr: ''100'', placeholderHeightAttr: ''100%'', '
+- 'placeholder: ''img'', placeholderWidthAttr: ''100'', placeholderHeightAttr: ''100%'',
+  svgHeightAttr: ''200'', '
+- 'placeholder: ''img'', placeholderWidthAttr: ''100'', placeholderHeightAttr: ''100%'',
+  svgHeightAttr: ''25%'', '
+- 'placeholder: ''img'', placeholderWidthAttr: ''100'', placeholderHeightAttr: ''100%'',
+  svgWidthAttr: ''200'', '
+- 'placeholder: ''img'', placeholderWidthAttr: ''100'', placeholderHeightAttr: ''100%'',
+  svgWidthAttr: ''200'', svgHeightAttr: ''25%'', '
+- 'placeholder: ''img'', placeholderWidthAttr: ''100'', placeholderHeightAttr: ''100%'',
+  svgWidthAttr: ''25%'', '
+- 'placeholder: ''img'', placeholderWidthAttr: ''100'', placeholderHeightAttr: ''100%'',
+  svgWidthAttr: ''25%'', svgHeightAttr: ''200'', '
+- 'placeholder: ''img'', placeholderWidthAttr: ''100'', placeholderHeightAttr: ''100%'',
+  svgWidthAttr: ''25%'', svgHeightAttr: ''25%'', '
+- 'placeholder: ''img'', placeholderWidthAttr: ''50%'', placeholderHeightAttr: ''100%'', '
+- 'placeholder: ''img'', placeholderWidthAttr: ''50%'', placeholderHeightAttr: ''100%'',
+  svgHeightAttr: ''200'', '
+- 'placeholder: ''img'', placeholderWidthAttr: ''50%'', placeholderHeightAttr: ''100%'',
+  svgHeightAttr: ''25%'', '
+- 'placeholder: ''img'', placeholderWidthAttr: ''50%'', placeholderHeightAttr: ''100%'',
+  svgWidthAttr: ''200'', '
+- 'placeholder: ''img'', placeholderWidthAttr: ''50%'', placeholderHeightAttr: ''100%'',
+  svgWidthAttr: ''200'', svgHeightAttr: ''25%'', '
+- 'placeholder: ''img'', placeholderWidthAttr: ''50%'', placeholderHeightAttr: ''100%'',
+  svgWidthAttr: ''25%'', '
+- 'placeholder: ''img'', placeholderWidthAttr: ''50%'', placeholderHeightAttr: ''100%'',
+  svgWidthAttr: ''25%'', svgHeightAttr: ''200'', '
+- 'placeholder: ''img'', placeholderWidthAttr: ''50%'', placeholderHeightAttr: ''100%'',
+  svgWidthAttr: ''25%'', svgHeightAttr: ''25%'', '
+html/rendering/replaced-elements/svg-embedded-sizing/svg-in-object-auto.html:
+- 'placeholder: ''object'', '
+html/rendering/replaced-elements/svg-embedded-sizing/svg-in-object-fixed.html:
+- 'placeholder: ''object'', placeholderHeightAttr: ''100px'', '
+html/rendering/replaced-elements/svg-embedded-sizing/svg-in-object-percentage.html:
+- 'placeholder: ''object'', placeholderHeightAttr: ''100%'', '
+html/rendering/replaced-elements/svg-inline-sizing/svg-inline.html:
+- 'containerWidthStyle: ''400px'', svgHeightStyle: ''50%'', svgHeightAttr: ''200'', '
+- 'containerWidthStyle: ''400px'', svgHeightStyle: ''50%'', svgWidthAttr: ''200'',
+  svgHeightAttr: ''200'', '
+- 'containerWidthStyle: ''400px'', svgHeightStyle: ''50%'', svgWidthAttr: ''25%'',
+  svgHeightAttr: ''200'', '
+- 'containerWidthStyle: ''400px'', svgViewBoxAttr: ''0 0 100 200'', svgHeightStyle:
+  ''50%'', svgHeightAttr: ''200'', '
+- 'containerWidthStyle: ''400px'', svgViewBoxAttr: ''0 0 100 200'', svgHeightStyle:
+  ''50%'', svgWidthAttr: ''200'', svgHeightAttr: ''200'', '
+- 'containerWidthStyle: ''400px'', svgViewBoxAttr: ''0 0 100 200'', svgWidthStyle:
+  ''100px'', svgHeightStyle: ''50%'', svgWidthAttr: ''200'', svgHeightAttr: ''200'', '
+- 'containerWidthStyle: ''400px'', svgViewBoxAttr: ''0 0 100 200'', svgWidthStyle:
+  ''50%'', svgHeightStyle: ''50%'', svgWidthAttr: ''200'', svgHeightAttr: ''200'', '
+- 'containerWidthStyle: ''400px'', svgWidthStyle: ''100px'', svgHeightStyle: ''50%'',
+  svgHeightAttr: ''200'', '
+- 'containerWidthStyle: ''400px'', svgWidthStyle: ''100px'', svgHeightStyle: ''50%'',
+  svgWidthAttr: ''200'', svgHeightAttr: ''200'', '
+- 'containerWidthStyle: ''400px'', svgWidthStyle: ''100px'', svgHeightStyle: ''50%'',
+  svgWidthAttr: ''25%'', svgHeightAttr: ''200'', '
+- 'containerWidthStyle: ''400px'', svgWidthStyle: ''50%'', svgHeightStyle: ''50%'',
+  svgHeightAttr: ''200'', '
+- 'containerWidthStyle: ''400px'', svgWidthStyle: ''50%'', svgHeightStyle: ''50%'',
+  svgWidthAttr: ''200'', svgHeightAttr: ''200'', '
+- 'containerWidthStyle: ''400px'', svgWidthStyle: ''50%'', svgHeightStyle: ''50%'',
+  svgWidthAttr: ''25%'', svgHeightAttr: ''200'', '
+- 'svgHeightStyle: ''50%'', svgHeightAttr: ''200'', '
+- 'svgHeightStyle: ''50%'', svgWidthAttr: ''200'', svgHeightAttr: ''200'', '
+- 'svgHeightStyle: ''50%'', svgWidthAttr: ''25%'', svgHeightAttr: ''200'', '
+- 'svgViewBoxAttr: ''0 0 100 200'', svgHeightStyle: ''50%'', svgHeightAttr: ''200'', '
+- 'svgViewBoxAttr: ''0 0 100 200'', svgHeightStyle: ''50%'', svgWidthAttr: ''200'',
+  svgHeightAttr: ''200'', '
+- 'svgViewBoxAttr: ''0 0 100 200'', svgWidthStyle: ''100px'', svgHeightStyle: ''50%'',
+  svgWidthAttr: ''200'', svgHeightAttr: ''200'', '
+- 'svgViewBoxAttr: ''0 0 100 200'', svgWidthStyle: ''50%'', svgHeightStyle: ''50%'',
+  svgWidthAttr: ''200'', svgHeightAttr: ''200'', '
+- 'svgWidthStyle: ''100px'', svgHeightStyle: ''50%'', svgHeightAttr: ''200'', '
+- 'svgWidthStyle: ''100px'', svgHeightStyle: ''50%'', svgWidthAttr: ''200'', svgHeightAttr:
+  ''200'', '
+- 'svgWidthStyle: ''100px'', svgHeightStyle: ''50%'', svgWidthAttr: ''25%'', svgHeightAttr:
+  ''200'', '
+- 'svgWidthStyle: ''50%'', svgHeightStyle: ''50%'', svgHeightAttr: ''200'', '
+- 'svgWidthStyle: ''50%'', svgHeightStyle: ''50%'', svgWidthAttr: ''200'', svgHeightAttr:
+  ''200'', '
+- 'svgWidthStyle: ''50%'', svgHeightStyle: ''50%'', svgWidthAttr: ''25%'', svgHeightAttr:
+  ''200'', '
+html/rendering/replaced-elements/the-option-element/option-label-whitespace-2.html:
+- "!= html/rendering/replaced-elements/the-option-element/option-label-whitespace-2-ref.html"
+html/rendering/replaced-elements/the-option-element/option-label-whitespace.html:
+- "== html/rendering/replaced-elements/the-option-element/option-label-whitespace-ref.html"
+html/rendering/replaced-elements/the-option-element/option-with-br.html:
+- "== html/rendering/replaced-elements/the-option-element/option-with-br-ref.html"
+html/rendering/replaced-elements/the-option-element/select-multiple-covered-by-abspos.html:
+- "== html/rendering/replaced-elements/the-option-element/select-multiple-covered-by-abspos-ref.html"
+html/rendering/replaced-elements/the-select-element/customizable-select/min-height-in-flex.html:
+- "== html/rendering/replaced-elements/the-select-element/customizable-select/min-height-in-flex-ref.html"
+html/rendering/replaced-elements/the-select-element/customizable-select/min-size-empty-001.html:
+- "== html/rendering/replaced-elements/the-select-element/customizable-select/min-size-empty-001-ref.html"
+html/rendering/replaced-elements/the-select-element/customizable-select/min-size-empty-002.html:
+- "== html/rendering/replaced-elements/the-select-element/customizable-select/min-size-empty-002-ref.html"
+html/rendering/replaced-elements/the-select-element/customizable-select/min-width-in-flex.html:
+- "== html/rendering/replaced-elements/the-select-element/customizable-select/min-width-in-flex-ref.html"
+html/rendering/replaced-elements/the-select-element/select-1-block-size-001.html:
+- "== html/rendering/replaced-elements/the-select-element/select-1-block-size-001-ref.html"
+html/rendering/replaced-elements/the-select-element/select-1-block-size.html:
+- "== html/rendering/replaced-elements/the-select-element/select-1-block-size-ref.html"
+html/rendering/replaced-elements/the-select-element/select-1-line-height.html:
+- "== html/rendering/replaced-elements/the-select-element/select-1-line-height-ref.html"
+html/rendering/replaced-elements/the-select-element/select-adopted.html:
+- "== html/rendering/replaced-elements/the-select-element/select-adopted-ref.html
+  (both renderings blank)"
+html/rendering/replaced-elements/the-select-element/select-empty.html:
+- "== html/rendering/replaced-elements/the-select-element/select-empty-ref.html"
+html/rendering/replaced-elements/the-select-element/select-intrinsic-option-font-size.html:
+- "== html/rendering/replaced-elements/the-select-element/select-intrinsic-option-font-size-ref.html"
+html/rendering/sections/headingoffset-and-headingreset.html:
+- "== html/rendering/sections/headingoffset-and-headingreset-ref.html"
+html/rendering/the-css-user-agent-style-sheet-and-presentational-hints/mouse-cursor-imagemap.html:
+- Only clickable areas should show the link cursor.
+html/rendering/the-css-user-agent-style-sheet-and-presentational-hints/pre-margin-block.html:
+- "== html/rendering/the-css-user-agent-style-sheet-and-presentational-hints/pre-margin-block-ref.html"
+html/rendering/the-details-element/auto-expand-details-text-fragment.html:
+- Verifies that the target page has scrolled as a result of a ScrollToTextFragment
+  navigation.
+html/rendering/the-details-element/details-after.html:
+- "!= html/rendering/the-details-element/single-summary.html"
+html/rendering/the-details-element/details-before.html:
+- "!= html/rendering/the-details-element/single-summary.html"
+html/rendering/the-details-element/details-blockification.html:
+- Summary and content should have display:block computed value
+html/rendering/the-details-element/details-content-pseudo-attr.html:
+- "== html/rendering/the-details-element/details-content-pseudo-attr-ref.html"
+html/rendering/the-details-element/details-display-type-001.html:
+- "== html/rendering/the-details-element/details-display-type-001-ref.html"
+html/rendering/the-details-element/details-display-type-002.html:
+- "== html/rendering/the-details-element/details-display-type-002-ref.html"
+html/rendering/the-details-element/details-display.html:
+- default display of other summary element in details is block
+- default display of summary element outside details is block
+html/rendering/the-details-element/details-focus-steps.html:
+- Focus flows into third when details is closed
+html/rendering/the-details-element/details-pseudo-elements-001.html:
+- "== html/rendering/the-details-element/details-pseudo-elements-001-ref.html"
+html/rendering/the-details-element/details-pseudo-elements-002.html:
+- "== html/rendering/the-details-element/details-pseudo-elements-002-ref.html"
+html/rendering/the-details-element/details-pseudo-elements-004.html:
+- "== html/rendering/the-details-element/details-pseudo-elements-004-ref.html"
+html/rendering/the-details-element/details-pseudo-elements-005.html:
+- "== html/rendering/the-details-element/details-pseudo-elements-005-ref.html"
+html/rendering/the-details-element/details-pseudo-elements-006.html:
+- "::details-content matches :hover when mouse pointer is over it"
+html/rendering/the-details-element/details-summary-display-inline-002.html:
+- "== html/rendering/the-details-element/details-summary-display-inline-002-ref.html"
+html/rendering/the-details-element/summary-display-flex.html:
+- "== html/rendering/the-details-element/summary-display-flex-ref.html"
+html/rendering/the-details-element/summary-display-inline-flex.html:
+- "== html/rendering/the-details-element/summary-display-inline-flex-ref.html"
+html/rendering/widgets/appearance/appearance-animation-001.html:
+- "== html/rendering/widgets/appearance/appearance-transition-001-ref.html"
+html/rendering/widgets/appearance/appearance-transition-001.html:
+- "== html/rendering/widgets/appearance/appearance-transition-001-ref.html"
+html/rendering/widgets/appearance/appearance-transition-002.html:
+- "== html/rendering/widgets/appearance/appearance-transition-002-ref.html"
+html/rendering/widgets/appearance/default-styles.html:
+- "<button>"
+- "<details>"
+- "<div>"
+- <input type="HIDDEN">
+- <input type="TEXT">
+- <input type="button">
+- <input type="checkbox">
+- <input type="color">
+- <input type="date">
+- <input type="datetime-local">
+- <input type="email">
+- <input type="file">
+- <input type="hidden">
+- <input type="image">
+- <input type="month">
+- <input type="number">
+- <input type="password">
+- <input type="radio">
+- <input type="range">
+- <input type="reset">
+- <input type="search">
+- <input type="submit">
+- <input type="tel">
+- <input type="text">
+- <input type="time">
+- <input type="unknowntype">
+- <input type="url">
+- <input type="week">
+- "<input>"
+- "<input> (namespace: http://www.w3.org/2000/svg)"
+- "<input> (namespace: null)"
+- "<keygen>"
+- "<marquee>"
+- "<menuitem>"
+- "<meter>"
+- "<progress>"
+- <select multiple="">
+- <select size="2">
+- "<select>"
+- "<summary>"
+- "<textarea>"
+- <video controls="">
+- "<video>"
+- The body element
+- The html element
+html/rendering/widgets/button-layout/anonymous-button-content-box.html:
+- "== html/rendering/widgets/button-layout/anonymous-button-content-box-ref.html"
+html/rendering/widgets/button-layout/block-in-inline.html:
+- "== html/rendering/widgets/button-layout/block-in-inline-ref.html"
+html/rendering/widgets/button-layout/computed-style.html:
+- "<input type=button> overflow/overflow-clip-margin"
+- "<input type=color> overflow/overflow-clip-margin"
+- "<input type=image> overflow/overflow-clip-margin"
+- "<input type=reset> overflow/overflow-clip-margin"
+- "<input type=submit> overflow/overflow-clip-margin"
+- 'computed display of <button type=submit> with display: flow'
+- 'computed display of <input type=button> with display: contents'
+- 'computed display of <input type=button> with display: flow'
+- 'computed display of <input type=color> with display: contents'
+- 'computed display of <input type=color> with display: flow'
+- 'computed display of <input type=image> with display: contents'
+- 'computed display of <input type=image> with display: flow'
+- 'computed display of <input type=reset> with display: contents'
+- 'computed display of <input type=reset> with display: flow'
+- 'computed display of <input type=submit> with display: contents'
+- 'computed display of <input type=submit> with display: flow'
+html/rendering/widgets/button-layout/display-none-or-contents.html:
+- "== html/rendering/widgets/button-layout/display-none-or-contents-ref.html"
+html/rendering/widgets/button-layout/display-other.html:
+- 'display: block'
+- 'display: table'
+html/rendering/widgets/button-layout/flex.html:
+- flex
+html/rendering/widgets/button-layout/grid.html:
+- grid
+html/rendering/widgets/button-layout/inline-level.html:
+- "== html/rendering/widgets/button-layout/inline-level-ref.html"
+html/rendering/widgets/button-layout/input-type-button-clip.html:
+- "== html/rendering/widgets/button-layout/input-type-button-clip-ref.html"
+html/rendering/widgets/button-layout/propagate-text-decoration.html:
+- "== html/rendering/widgets/button-layout/propagate-text-decoration-ref.html"
+html/rendering/widgets/button-layout/shrink-wrap.html:
+- 'display: block - available width: 300px'
+- 'display: block - available width: 50px'
+- 'display: inline-block - available width: 200px'
+- 'display: inline-block - available width: 300px'
+- 'display: list-item - available width: 300px'
+- 'display: list-item - available width: 50px'
+- 'display: table - available width: 200px'
+- 'display: table - available width: 50px'
+- 'display: table-cell - available width: 300px'
+- 'display: table-cell - available width: 50px'
+- 'display: table-row - available width: 300px'
+- 'display: table-row - available width: 50px'
+- 'float: left - available width: 200px'
+- 'float: left - available width: 300px'
+html/rendering/widgets/field-sizing-input-number.html:
+- 'number: Auto width and auto height with a long text'
+- 'number: Empty value'
+- 'number: Explicit height and auto width'
+- 'number: Text caret is shorter than the placeholder'
+- 'number: Text caret is taller than the placeholder'
+- 'number: Update field-sizing property dynamically'
+html/rendering/widgets/field-sizing-input-text.html:
+- 'email: Auto width and auto height with a long text'
+- 'email: Empty value'
+- 'email: Empty value with a size atttribute'
+- 'email: Explicit height and auto width'
+- 'email: Text caret is shorter than the placeholder'
+- 'email: Text caret is taller than the placeholder'
+- 'email: Update field-sizing property dynamically'
+- 'password: Auto width and auto height with a long text'
+- 'password: Empty value'
+- 'password: Empty value with a size atttribute'
+- 'password: Explicit height and auto width'
+- 'password: Text caret is shorter than the placeholder'
+- 'password: Text caret is taller than the placeholder'
+- 'password: Update field-sizing property dynamically'
+- 'search: Auto width and auto height with a long text'
+- 'search: Empty value'
+- 'search: Empty value with a size atttribute'
+- 'search: Explicit height and auto width'
+- 'search: Text caret is shorter than the placeholder'
+- 'search: Text caret is taller than the placeholder'
+- 'search: Update field-sizing property dynamically'
+- 'tel: Auto width and auto height with a long text'
+- 'tel: Empty value'
+- 'tel: Empty value with a size atttribute'
+- 'tel: Explicit height and auto width'
+- 'tel: Text caret is shorter than the placeholder'
+- 'tel: Text caret is taller than the placeholder'
+- 'tel: Update field-sizing property dynamically'
+- 'text: Auto width and auto height with a long text'
+- 'text: Empty value'
+- 'text: Empty value with a size atttribute'
+- 'text: Explicit height and auto width'
+- 'text: Text caret is shorter than the placeholder'
+- 'text: Text caret is taller than the placeholder'
+- 'text: Update field-sizing property dynamically'
+- 'url: Auto width and auto height with a long text'
+- 'url: Empty value'
+- 'url: Empty value with a size atttribute'
+- 'url: Explicit height and auto width'
+- 'url: Text caret is shorter than the placeholder'
+- 'url: Text caret is taller than the placeholder'
+- 'url: Update field-sizing property dynamically'
+html/rendering/widgets/field-sizing-placeholder-stretch.html:
+- "== html/rendering/widgets/field-sizing-placeholder-stretch-ref.html (both renderings
+  blank)"
+html/rendering/widgets/field-sizing-select-contain-size.html:
+- 'listbox: The width should not depend on content when contain:size is set'
+html/rendering/widgets/field-sizing-select.html:
+- 'dropdown: Change the field-sizing value dynamically'
+- 'dropdown: The width should depend on the selected OPTION'
+- 'listbox: Change the field-sizing value dynamically'
+- 'listbox: The size attribute value is ignored'
+- 'listbox: The size depend on the content'
+html/rendering/widgets/field-sizing-textarea-relayout.html:
+- "== html/rendering/widgets/field-sizing-textarea-relayout-ref.html"
+html/rendering/widgets/field-sizing-textarea.html:
+- Auto width and auto height with a long text
+- Empty value
+- Empty value with cols/rows
+- Explicit height and auto width
+- Explicit width and auto height
+- Text caret is shorter than the placeholder
+- Text caret is taller than the placeholder
+- Update field-sizing property dynamically
+html/rendering/widgets/input-checkbox-disabled-checked.html:
+- "!= html/rendering/widgets/input-checkbox-disabled-checked-notref.html"
+html/rendering/widgets/input-checkbox-no-centering.html:
+- "== html/rendering/widgets/input-no-centering-ref.html"
+html/rendering/widgets/input-checkbox-zero-size.html:
+- "== css/reference/blank.html (both renderings blank)"
+html/rendering/widgets/input-date-baseline-print.html:
+- "== html/rendering/widgets/input-date-baseline-ref.html"
+html/rendering/widgets/input-date-baseline.html:
+- "== html/rendering/widgets/input-date-baseline-ref.html"
+html/rendering/widgets/input-radio-disabled-checked.html:
+- "!= html/rendering/widgets/input-radio-disabled-checked-notref.html"
+html/rendering/widgets/input-radio-no-centering.html:
+- "== html/rendering/widgets/input-no-centering-ref.html"
+html/rendering/widgets/input-text-size.html:
+- The width depends on a size attribute
+html/rendering/widgets/placeholder-scroll.html:
+- Placeholder causes overflow on textarea
+html/rendering/widgets/placeholder-text-overflow-ellipsis.html:
+- "!= html/rendering/widgets/placeholder-text-overflow-ellipsis-notref.html"
+html/rendering/widgets/shadow-dom.html:
+- <audio controls=""></audio> has a shadow tree with no slots
+- "<audio></audio> has a shadow tree with no slots"
+- <details open=""></details> has a shadow tree with slot
+- "<details></details> has a shadow tree with slot"
+- <select multiple=""></select> has a shadow tree with slot
+- <select size="4"></select> has a shadow tree with slot
+- "<select></select> has a shadow tree with slot"
+- <video controls=""></video> has a shadow tree with no slots
+- "<video></video> has a shadow tree with no slots"
+html/rendering/widgets/textarea-cols-rows.html:
+- The height depends on a rows attribute
+- The width depends on a cols attribute
+html/rendering/widgets/the-select-element/option-add-label-quirks.html:
+- "== html/rendering/widgets/the-select-element/option-label-ref.html"
+html/rendering/widgets/the-select-element/option-add-label.html:
+- "== html/rendering/widgets/the-select-element/option-label-ref.html"
+html/rendering/widgets/the-select-element/option-label-and-text.html:
+- "== html/rendering/widgets/the-select-element/option-label-ref.html"
+html/rendering/widgets/the-select-element/option-only-label.html:
+- "== html/rendering/widgets/the-select-element/option-label-ref.html"
+html/rendering/widgets/the-select-element/select-label-appearance.html:
+- "== html/rendering/widgets/the-select-element/select-label-appearance-ref.html"
 html/semantics/forms/customizable-combobox/customizable-combobox-appearance.html:
 - "== html/semantics/forms/customizable-combobox/customizable-combobox-appearance-ref.html"
 html/semantics/forms/the-datalist-element/input-text-datalist-removal.html:

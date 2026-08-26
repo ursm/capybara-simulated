@@ -886,12 +886,15 @@ module WptRunner
   # lifecycle — define / upgrade / reactions / form-associated — that Turbo and Web
   # Component apps ride on), plus css/cssom (the pure-API
   # CSSOM object model, backed by our css-tree cascade engine — css/cssom-view is
-  # the layout-dependent tree and is deliberately not vendored). service-workers holds
+  # the layout-dependent tree and is deliberately not vendored). html/rendering is the UA
+  # STYLESHEET section — default display, replaced-element sizing, widget rendering — three
+  # quarters reftests, which is why it could only arrive once the gate could run one.
+  # service-workers holds
   # the vendored service-worker tree (registration / lifecycle / messaging / fetch
   # interception against the real SW runtime) plus committed local `csim-*` fixtures
   # (vendor_wpt.mjs's cleanTree preserves the prefix). Keep this list in sync with the
   # vendor manifest in script/vendor_wpt.mjs.
-  TREES = '{dom,domparsing,hr-time,url,encoding,shadow-dom,css/css-shadow/part,FileAPI,html/dom,html/webappapis/timers,html/webappapis/microtask-queuing,html/webappapis/scripting/events,html/semantics/forms,custom-elements,html/webappapis/atob,html/webappapis/structured-clone,webmessaging,input-events,xhr,fetch/api,fetch/data-urls,fetch/h1-parsing,css/cssom,html/canvas/element,css/css-flexbox,service-workers,websockets,webstorage,WebCryptoAPI}'
+  TREES = '{dom,domparsing,hr-time,url,encoding,shadow-dom,css/css-shadow/part,FileAPI,html/dom,html/webappapis/timers,html/webappapis/microtask-queuing,html/webappapis/scripting/events,html/semantics/forms,custom-elements,html/webappapis/atob,html/webappapis/structured-clone,webmessaging,input-events,xhr,fetch/api,fetch/data-urls,fetch/h1-parsing,css/cssom,html/canvas/element,html/rendering,css/css-flexbox,service-workers,websockets,webstorage,WebCryptoAPI}'
 
   # `.any.js` / `.window.js` trees safe to scan: url/ + encoding/ + the html/
   # event-loop oracle + xhr/ + html/dom/ + html/semantics/forms/ + atob/
@@ -1507,7 +1510,11 @@ module WptRunner
     ready = false
     REFTEST_WAIT_FRAMES.times do
       s.driver.run_event_loop_frame(FRAME_MS)
-      ready = !s.driver.peek_script("document.documentElement.classList.contains('reftest-wait')")
+      # A test may REMOVE documentElement (Document-documentElement-remove-clears-content), so the
+      # probe has to survive a document with no root: no root, nothing to wait for.
+      ready = !s.driver.peek_script(
+        "!!(document.documentElement && document.documentElement.classList.contains('reftest-wait'))"
+      )
       break if ready
     end
     png = s.driver.browser.screenshot_png(full: false)
