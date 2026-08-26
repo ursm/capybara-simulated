@@ -16,6 +16,8 @@ FileAPI/BlobURL/cross-partition.https.html:
 - Blob URL shouldn't be fetched from a cross-partition iframe
 - Blob URL shouldn't be fetched from a cross-partition service worker
 - Blob URL shouldn't be fetched from a cross-partition shared worker
+FileAPI/url/url_xmlhttprequest_img.html:
+- "== FileAPI/url/url_xmlhttprequest_img-ref.html (never ready to capture)"
 WebCryptoAPI/derive_bits_keys/derive_key_and_encrypt.https.any.js:
 - HKDF derivation of a ECDH key 1
 - HKDF derivation of a ECDH key 2
@@ -3591,6 +3593,10 @@ css/css-flexbox/text-as-flexitem-size-001.html:
 - ".flexbox > div 2"
 - ".flexbox > div 5"
 - ".flexbox > div 8"
+css/css-shadow/part/animation-part.html:
+- "== css/css-shadow/part/animation-part-ref.html"
+css/css-shadow/part/exportparts-layered.html:
+- "== css/css-shadow/part/exportparts-layered.ref.html"
 css/css-shadow/part/interaction-with-pseudo-elements.html:
 - "::after in selected host is styled"
 - "::before in selected host is styled"
@@ -3759,6 +3765,8 @@ css/css-shadow/part/pseudo-elements-after-part.html:
 css/css-shadow/part/serialization.html:
 - Collapse spaces in ::part names list.
 - Escape start space in ::part name.
+css/cssom/CSSStyleSheet-constructable-insertRule-base-uri.html:
+- "== css/cssom/CSSStyleSheet-constructable-insertRule-base-uri-ref.html"
 css/cssom/CSSStyleSheet-constructable.html:
 - CSSStyleSheet.replaceSync should not trigger any loads from @import rules
 - Stylesheet constructed on iframe cannot be used in the main Document
@@ -5006,6 +5014,8 @@ css/cssom/getComputedStyle-sticky-pos-percent.html:
   div with overflow: hidden'
 css/cssom/invalid-pseudo-elements.html:
 - 'CSSOM: Test that rules with invalid pseudo elements are not found'
+css/cssom/medialist-dynamic-001.html:
+- "== css/cssom/medialist-dynamic-001-ref.html"
 css/cssom/page-descriptors.html:
 - CSSPageDescriptors properties tests
 css/cssom/preferred-stylesheet-reversed-order.html:
@@ -5124,6 +5134,10 @@ custom-elements/enqueue-custom-element-callback-reactions-inside-another-callbac
 custom-elements/form-associated/ElementInternals-labels.html:
 - LABEL association
 - LABEL click
+custom-elements/form-associated/ElementInternals-reportValidity-bubble.html:
+- "!= custom-elements/form-associated/ElementInternals-reportValidity-bubble-notref.html"
+custom-elements/form-associated/ElementInternals-reportValidity-delegatesFocus.html:
+- "!= custom-elements/form-associated/ElementInternals-reportValidity-delegatesFocus-notref.html"
 custom-elements/form-associated/ElementInternals-validation.html:
 - '"anchor" argument of setValidity()'
 - Custom control affects :valid :invalid for FORM and FIELDSET
@@ -5376,6 +5390,10 @@ dom/nodes/insertion-removing-steps/insertion-removing-steps-iframe.window.js:
   destruction'
 dom/nodes/moveBefore/iframe-document-preserve.window.js:
 - window.frames ordering does not change due to moveBefore()
+dom/nodes/moveBefore/moveBefore-as-flex-item.html:
+- "== css/reference/ref-filled-green-100px-square-only.html"
+dom/nodes/remove-from-shadow-host-and-adopt-into-iframe.html:
+- "== dom/nodes/remove-from-shadow-host-and-adopt-into-iframe-ref.html"
 fetch/api/abort/keepalive.html:
 - aborting a keepalive fetch should work
 fetch/api/abort/serviceworker-intercepted.https.html:
@@ -5642,25 +5660,136 @@ html/canvas/element/color-type/2d.color.type.u8p3.to.f16srgb.to.u8p3.html:
 - test srgb float16 canvas storing 8-bit display-p3 data accurately
 html/canvas/element/color-type/2d.color.type.u8srgb.to.f16p3.to.u8srgb.html:
 - test display-p3 float16 canvas storing 8-bit srgb data accurately
+html/canvas/element/compositing/2d.composite.grid.filter.no_shadow.drawImage.html:
+- "== html/canvas/element/compositing/2d.composite.grid.filter.no_shadow.drawImage-expected.html"
+html/canvas/element/compositing/2d.composite.grid.filter.no_shadow.fillRect.html:
+- "== html/canvas/element/compositing/2d.composite.grid.filter.no_shadow.fillRect-expected.html"
+html/canvas/element/compositing/2d.composite.grid.filter.no_shadow.pattern.html:
+- "== html/canvas/element/compositing/2d.composite.grid.filter.no_shadow.pattern-expected.html"
+html/canvas/element/compositing/2d.composite.grid.filter.shadow.drawImage.html:
+- "== html/canvas/element/compositing/2d.composite.grid.filter.shadow.drawImage-expected.html"
+html/canvas/element/compositing/2d.composite.grid.filter.shadow.fillRect.html:
+- "== html/canvas/element/compositing/2d.composite.grid.filter.shadow.fillRect-expected.html"
+html/canvas/element/compositing/2d.composite.grid.filter.shadow.pattern.html:
+- "== html/canvas/element/compositing/2d.composite.grid.filter.shadow.pattern-expected.html"
+html/canvas/element/compositing/2d.composite.grid.no_filter.no_shadow.drawImage.html:
+- "== html/canvas/element/compositing/2d.composite.grid.no_filter.no_shadow.drawImage-expected.html"
+html/canvas/element/compositing/2d.composite.grid.no_filter.no_shadow.fillRect.html:
+- "== html/canvas/element/compositing/2d.composite.grid.no_filter.no_shadow.fillRect-expected.html"
+html/canvas/element/compositing/2d.composite.grid.no_filter.no_shadow.pattern.html:
+- "== html/canvas/element/compositing/2d.composite.grid.no_filter.no_shadow.pattern-expected.html"
+html/canvas/element/compositing/2d.composite.grid.no_filter.shadow.drawImage.html:
+- "== html/canvas/element/compositing/2d.composite.grid.no_filter.shadow.drawImage-expected.html"
+html/canvas/element/compositing/2d.composite.grid.no_filter.shadow.fillRect.html:
+- "== html/canvas/element/compositing/2d.composite.grid.no_filter.shadow.fillRect-expected.html"
+html/canvas/element/compositing/2d.composite.grid.no_filter.shadow.pattern.html:
+- "== html/canvas/element/compositing/2d.composite.grid.no_filter.shadow.pattern-expected.html"
 html/canvas/element/drawing-images-to-the-canvas/2d.drawImage.negativedir.html:
 - Negative dimensions do not affect the direction of the image
 html/canvas/element/drawing-images-to-the-canvas/2d.drawImage.nonexistent.html:
 - 'Canvas test: 2d.drawImage.nonexistent'
+html/canvas/element/fill-and-stroke-styles/2d.gradient.colorInterpolationMethod.html:
+- "== html/canvas/element/fill-and-stroke-styles/2d.gradient.colorInterpolationMethod-expected.html"
 html/canvas/element/fill-and-stroke-styles/2d.gradient.colormix.html:
 - color-mix works as CanvasGradient color input
+html/canvas/element/fill-and-stroke-styles/2d.gradient.hueInterpolationMethod.html:
+- "== html/canvas/element/fill-and-stroke-styles/2d.gradient.hueInterpolationMethod-expected.html"
 html/canvas/element/fill-and-stroke-styles/2d.gradient.relativecolor.html:
 - Relative color works as CanvasGradient color input
+html/canvas/element/filters/2d.filter.drop-shadow-globalAlpha.html:
+- "== html/canvas/element/filters/2d.filter.drop-shadow-globalAlpha-expected.html"
+html/canvas/element/layers/2d.layer.clearRect.partial.html:
+- "== html/canvas/element/layers/2d.layer.clearRect.partial-expected.html"
+html/canvas/element/layers/2d.layer.cross-layer-paths.html:
+- "== html/canvas/element/layers/2d.layer.cross-layer-paths-expected.html"
+html/canvas/element/layers/2d.layer.ctm.ctx-filter.html:
+- "== html/canvas/element/layers/2d.layer.ctm.ctx-filter-expected.html"
+html/canvas/element/layers/2d.layer.ctm.resetTransform.html:
+- "== html/canvas/element/layers/2d.layer.ctm.resetTransform-expected.html"
+html/canvas/element/layers/2d.layer.ctm.setTransform.html:
+- "== html/canvas/element/layers/2d.layer.ctm.setTransform-expected.html"
+html/canvas/element/layers/2d.layer.ctm.shadow-in-transformed-layer.html:
+- "== html/canvas/element/layers/2d.layer.ctm.shadow-in-transformed-layer-expected.html"
+html/canvas/element/layers/2d.layer.draw-in-filter.html:
+- "== html/canvas/element/layers/2d.layer.draw-in-filter-expected.html"
+html/canvas/element/layers/2d.layer.flush-on-frame-presentation.plain_layer.html:
+- "== html/canvas/element/layers/2d.layer.flush-on-frame-presentation.plain_layer-expected.html
+  (never ready to capture)"
+html/canvas/element/layers/2d.layer.global-states.ctx-filter.no-transform.html:
+- "== html/canvas/element/layers/2d.layer.global-states.ctx-filter.no-transform-expected.html"
+html/canvas/element/layers/2d.layer.global-states.ctx-filter.rotation.html:
+- "== html/canvas/element/layers/2d.layer.global-states.ctx-filter.rotation-expected.html"
+html/canvas/element/layers/2d.layer.global-states.no-cxt-filter.no-transform.html:
+- "== html/canvas/element/layers/2d.layer.global-states.no-cxt-filter.no-transform-expected.html"
+html/canvas/element/layers/2d.layer.global-states.no-cxt-filter.rotation.html:
+- "== html/canvas/element/layers/2d.layer.global-states.no-cxt-filter.rotation-expected.html"
+html/canvas/element/layers/2d.layer.globalCompositeOperation.html:
+- "== html/canvas/element/layers/2d.layer.globalCompositeOperation-expected.html"
+html/canvas/element/layers/2d.layer.nested-ctx-filter.html:
+- "== html/canvas/element/layers/2d.layer.nested-ctx-filter-expected.html"
+html/canvas/element/layers/2d.layer.nested.html:
+- "== html/canvas/element/layers/2d.layer.nested-expected.html"
+html/canvas/element/layers/2d.layer.opaque-canvas.ctx-filter.html:
+- "== html/canvas/element/layers/2d.layer.opaque-canvas.ctx-filter-expected.html"
+html/canvas/element/layers/2d.layer.reset.plain_layer.html:
+- "== html/canvas/element/layers/2d.layer.reset.plain_layer-expected.html"
+html/canvas/element/layers/2d.layer.restore-style.html:
+- "== html/canvas/element/layers/2d.layer.restore-style-expected.html"
+html/canvas/element/layers/2d.layer.several-complex.html:
+- "== html/canvas/element/layers/2d.layer.several-complex-expected.html"
+html/canvas/element/layers/2d.layer.shadow-from-outside-canvas.long-distance-with-clipping.ctx-filter.html:
+- "== html/canvas/element/layers/2d.layer.shadow-from-outside-canvas.long-distance-with-clipping.ctx-filter-expected.html"
+html/canvas/element/layers/2d.layer.shadow-from-outside-canvas.long-distance.ctx-filter.html:
+- "== html/canvas/element/layers/2d.layer.shadow-from-outside-canvas.long-distance.ctx-filter-expected.html"
+html/canvas/element/layers/2d.layer.shadow-from-outside-canvas.short-distance-with-clipping.ctx-filter.html:
+- "== html/canvas/element/layers/2d.layer.shadow-from-outside-canvas.short-distance-with-clipping.ctx-filter-expected.html"
+html/canvas/element/layers/2d.layer.shadow-from-outside-canvas.short-distance.ctx-filter.html:
+- "== html/canvas/element/layers/2d.layer.shadow-from-outside-canvas.short-distance.ctx-filter-expected.html"
+html/canvas/element/manual/compositing/colr-glyph-composition.html:
+- "== html/canvas/element/manual/compositing/colr-glyph-composition-ref.html"
+html/canvas/element/manual/context-attributes/clearRect_alpha_false.html:
+- "== html/canvas/element/manual/context-attributes/clearRect_alpha_false-ref.html"
+html/canvas/element/manual/context-attributes/drawImage_alpha_false.html:
+- "== html/canvas/element/manual/context-attributes/drawImage_alpha_false-ref.html"
+html/canvas/element/manual/context-attributes/fillRect_alpha_false.html:
+- "== html/canvas/element/manual/context-attributes/fillRect_alpha_false-ref.html"
+html/canvas/element/manual/context-attributes/fill_alpha_false.html:
+- "== html/canvas/element/manual/context-attributes/fill_alpha_false-ref.html"
+html/canvas/element/manual/context-attributes/initial_color_alpha_false.html:
+- "== html/canvas/element/manual/context-attributes/initial_color_alpha_false-ref.html"
+html/canvas/element/manual/context-attributes/reset_color_alpha_false.html:
+- "== html/canvas/element/manual/context-attributes/reset_color_alpha_false-ref.html"
 html/canvas/element/manual/drawing-images-to-the-canvas/drawimage_canvas.html:
 - 'Test scenario 12: sx = -20, sy = -20, sw = 50, sh = 50, dx = 20, dy = 20, dw =
   125, dh = 125 --- Pixel 82,82 should be blue.'
+html/canvas/element/manual/fill-and-stroke-styles/conic-gradient-rotation.html:
+- "== html/canvas/element/manual/fill-and-stroke-styles/conic-gradient-rotation-expected.html"
+html/canvas/element/manual/fill-and-stroke-styles/conic-gradient.html:
+- "== html/canvas/element/manual/fill-and-stroke-styles/conic-gradient-expected.html"
 html/canvas/element/manual/fill-and-stroke-styles/pattern-from-video-cross-origin-taint.https.sub.html:
 - Tainting check for cross origin video in canvas pattern
+html/canvas/element/manual/filters/canvas-fillStyle-opacity.html:
+- "== html/canvas/element/manual/filters/canvas-opacity-expected.html"
+html/canvas/element/manual/filters/canvas-filter-opacity-alpha-and-fillStyle.html:
+- "== html/canvas/element/manual/filters/canvas-filter-opacity-alpha-and-fillStyle-expected.html"
+html/canvas/element/manual/filters/canvas-filter-shadow-and-properties-blur.html:
+- "== html/canvas/element/manual/filters/canvas-filter-shadow-and-properties-blur-expected.html"
+html/canvas/element/manual/filters/canvas-filter-shadow-and-properties.html:
+- "== html/canvas/element/manual/filters/canvas-filter-shadow-and-properties-expected.html"
+html/canvas/element/manual/filters/canvas-filter-shadow.html:
+- "== html/canvas/element/manual/filters/canvas-filter-shadow-expected.html"
+html/canvas/element/manual/filters/canvas-globalAlpha.html:
+- "== html/canvas/element/manual/filters/canvas-opacity-expected.html"
+html/canvas/element/manual/filters/canvas-opacity-blend-modes.html:
+- "== html/canvas/element/manual/filters/canvas-opacity-blend-modes-expected.html"
 html/canvas/element/manual/filters/svg-diffuse-filter-visited-color-taints.html:
 - Tainting check for visited link in SVG diffuse lighting filter
 html/canvas/element/manual/filters/svg-drop-shadow-filter-visited-color-taints.html:
 - Tainting check for visited link in SVG drop shadowfilter
 html/canvas/element/manual/filters/svg-filter-feImage-cross-origin-taint.https.sub.html:
 - Tainting check for cross origin image in SVG feImage filter
+html/canvas/element/manual/filters/svg-filter-lh-rlh.html:
+- "== html/canvas/element/manual/filters/svg-filter-lh-rlh-expected.html"
 html/canvas/element/manual/filters/svg-flood-filter-visited-color-taints.html:
 - Tainting check for visited link in SVG flood filter
 html/canvas/element/manual/filters/svg-specular-filter-visited-color-taints.html:
@@ -5716,6 +5845,8 @@ html/canvas/element/manual/imagebitmap/createImageBitmap-serializable.html:
 - Serialize ImageBitmap created from an ImageData
 - Serialize ImageBitmap created from an OffscreenCanvas
 - Serializing a non-origin-clean ImageBitmap throws.
+html/canvas/element/manual/imagebitmap/createImageBitmap-svg-resize.html:
+- "== html/canvas/element/manual/imagebitmap/createImageBitmap-svg-resize-ref.html"
 html/canvas/element/manual/imagebitmap/createImageBitmap-transfer.html:
 - Transfer ImageBitmap created from a Blob
 - Transfer ImageBitmap created from a bitmap HTMLImageElement
@@ -5729,6 +5860,10 @@ html/canvas/element/manual/imagebitmap/createImageBitmap-transfer.html:
 - Transfer ImageBitmap created from an ImageData
 - Transfer ImageBitmap created from an OffscreenCanvas
 - Transferring a non-origin-clean ImageBitmap throws.
+html/canvas/element/manual/imagebitmap/imageBitmapRendering-transferFromImageBitmap-flipped.html:
+- "== html/canvas/element/manual/imagebitmap/imageBitmapRendering-transferFromImageBitmap-flipped-expected.html"
+html/canvas/element/manual/imagebitmap/imageBitmapRendering-transferFromImageBitmap.html:
+- "== html/canvas/element/manual/imagebitmap/imageBitmapRendering-transferFromImageBitmap-expected.html"
 html/canvas/element/manual/imagebitmap/imagebitmap-replication-exif-orientation.html:
 - ImageBitmap from file with EXIF rotation, duplicated via createImageBitmap
 - ImageBitmap from file with EXIF rotation, duplicated via structuredClone
@@ -5741,8 +5876,16 @@ html/canvas/element/manual/imagebitmap/imagebitmap-replication-exif-orientation.
   = none
 - ImageBitmap from file with EXIF rotation, loaded via <img> not in DOM, imageOrientation
   = none
+html/canvas/element/manual/shadows/canvas_shadows_system_colors.html:
+- "== html/canvas/element/manual/shadows/canvas_shadows_system_colors-expected.html"
 html/canvas/element/manual/shadows/shadowBlur_gaussian_tolerance.1.html:
 - shadowBlur Gaussian pixel values for small blur
+html/canvas/element/manual/text/canvas.2d.direction.inherit.disconnected.canvas.html:
+- "== html/canvas/element/manual/text/canvas.2d.direction-ref.html"
+html/canvas/element/manual/text/canvas.2d.disconnected.html:
+- "== html/canvas/element/manual/text/canvas.2d.disconnected-ref.html"
+html/canvas/element/manual/transformations/canvas_transformations_reset_001.html:
+- "== html/canvas/element/manual/transformations/canvas_transformations_reset_001-ref.html"
 html/canvas/element/manual/wide-gamut-canvas/canvas-display-p3-drawImage-ImageBitmap-Blob.html:
 - Adobe-RGB-FF0000CC.png, Context display-p3, ImageData display-p3, cropSource=true
 - Adobe-RGB-FF0000CC.png, Context display-p3, ImageData srgb, cropSource=false
@@ -5898,14 +6041,323 @@ html/canvas/element/path-objects/2d.path.isPointInPath.basic.html:
 - Verify the winding rule in isPointInPath works for for rect path.
 html/canvas/element/pixel-manipulation/2d.imageData.createImageBitmap.p3.rgba.unorm8.html:
 - Verify round-trip of 8-bit P3 data ImageData through ImageBitmap
+html/canvas/element/text/2d.text.fontVariantCaps.after.reset.font.html:
+- "== html/canvas/element/text/2d.text.fontVariantCaps.after.reset.font-expected.html"
 html/canvas/element/text/2d.text.measure.actualBoundingBox.small-font.html:
 - Testing that actualBoundingBox metrics are precise at small font sizes
 html/canvas/element/text/2d.text.measure.lang.html:
 - Testing the lang attribute
 html/canvas/element/text/2d.text.measure.lang.inherit.html:
 - Testing the lang attribute
+html/canvas/element/text/direction-inherit-rtl.html:
+- "== html/canvas/element/text/reference/direction-rtl-ref.html"
+html/canvas/element/text/direction-rtl.html:
+- "== html/canvas/element/text/reference/direction-rtl-ref.html"
+html/dom/directionality/bdi-element-invalid-dir.html:
+- "== html/dom/directionality/bdi-element-invalid-dir-ref.html"
 html/dom/elements/global-attributes/dir-auto-dynamic-changes.window.js:
 - dir=auto changes for slot reassignment
+html/dom/elements/global-attributes/dir-auto-dynamic-simple-dataChange.html:
+- "== html/dom/elements/global-attributes/dir-auto-dynamic-simple-ref.html (never
+  ready to capture)"
+html/dom/elements/global-attributes/dir-auto-dynamic-simple-replace.html:
+- "== html/dom/elements/global-attributes/dir-auto-dynamic-simple-ref.html (never
+  ready to capture)"
+html/dom/elements/global-attributes/dir-auto-dynamic-simple-textContent.html:
+- "== html/dom/elements/global-attributes/dir-auto-dynamic-simple-ref.html (never
+  ready to capture)"
+html/dom/elements/global-attributes/dir-shadow-37.html:
+- "== html/dom/elements/global-attributes/dir-shadow-37-ref.html"
+html/dom/elements/global-attributes/dir-shadow-39.html:
+- "== html/dom/elements/global-attributes/dir-shadow-39-ref.html"
+html/dom/elements/global-attributes/dir-shadow-40.html:
+- "== html/dom/elements/global-attributes/dir-shadow-40-ref.html"
+html/dom/elements/global-attributes/dir_auto-isolate.html:
+- "== html/dom/elements/global-attributes/dir_auto-isolate-ref.html"
+html/dom/elements/global-attributes/dir_auto-pre-N-between-Rs.html:
+- "== html/dom/elements/global-attributes/dir_auto-pre-N-between-Rs-ref.html"
+html/dom/elements/global-attributes/dir_auto-textarea-N-between-Rs.html:
+- "== html/dom/elements/global-attributes/dir_auto-textarea-N-between-Rs-ref.html"
+html/dom/elements/global-attributes/dir_auto-textarea-mixed.html:
+- "== html/dom/elements/global-attributes/dir_auto-textarea-mixed-ref.html"
+html/dom/elements/global-attributes/dir_auto-textarea-script-N-EN.html:
+- "== html/dom/elements/global-attributes/dir_auto-textarea-script-N-EN-ref.html"
+html/dom/elements/global-attributes/dir_auto-textarea-script-N-between-Rs.html:
+- "== html/dom/elements/global-attributes/dir_auto-textarea-script-N-between-Rs-ref.html"
+html/dom/elements/global-attributes/dir_auto-textarea-script-mixed.html:
+- "== html/dom/elements/global-attributes/dir_auto-textarea-script-mixed-ref.html"
+html/dom/elements/global-attributes/lang-xmllang-01.html:
+- "== html/dom/elements/global-attributes/lang-xmllang-01-ref.html"
+html/dom/elements/global-attributes/style-01.html:
+- "== html/dom/elements/global-attributes/style-01-ref.html"
+html/dom/elements/requirements-relating-to-bidirectional-algorithm-formatting-characters/dir-isolation-001a.html:
+- "== html/dom/elements/requirements-relating-to-bidirectional-algorithm-formatting-characters/reference/dir-isolation-001-ref.html"
+html/dom/elements/requirements-relating-to-bidirectional-algorithm-formatting-characters/dir-isolation-001b.html:
+- "== html/dom/elements/requirements-relating-to-bidirectional-algorithm-formatting-characters/reference/dir-isolation-001-ref.html"
+html/dom/elements/requirements-relating-to-bidirectional-algorithm-formatting-characters/dir-isolation-001c.html:
+- "== html/dom/elements/requirements-relating-to-bidirectional-algorithm-formatting-characters/reference/dir-isolation-001-ref.html"
+html/dom/elements/requirements-relating-to-bidirectional-algorithm-formatting-characters/dir-isolation-002a.html:
+- "== html/dom/elements/requirements-relating-to-bidirectional-algorithm-formatting-characters/reference/dir-isolation-002a-ref.html"
+html/dom/elements/requirements-relating-to-bidirectional-algorithm-formatting-characters/dir-isolation-002b.html:
+- "== html/dom/elements/requirements-relating-to-bidirectional-algorithm-formatting-characters/reference/dir-isolation-002b-ref.html"
+html/dom/elements/requirements-relating-to-bidirectional-algorithm-formatting-characters/dir-isolation-002c.html:
+- "== html/dom/elements/requirements-relating-to-bidirectional-algorithm-formatting-characters/reference/dir-isolation-002c-ref.html"
+html/dom/elements/requirements-relating-to-bidirectional-algorithm-formatting-characters/dir-isolation-003a.html:
+- "== html/dom/elements/requirements-relating-to-bidirectional-algorithm-formatting-characters/reference/dir-isolation-003-ref.html"
+html/dom/elements/requirements-relating-to-bidirectional-algorithm-formatting-characters/dir-isolation-003b.html:
+- "== html/dom/elements/requirements-relating-to-bidirectional-algorithm-formatting-characters/reference/dir-isolation-003-ref.html"
+html/dom/elements/requirements-relating-to-bidirectional-algorithm-formatting-characters/dir-isolation-003c.html:
+- "== html/dom/elements/requirements-relating-to-bidirectional-algorithm-formatting-characters/reference/dir-isolation-003-ref.html"
+html/dom/elements/requirements-relating-to-bidirectional-algorithm-formatting-characters/dir-isolation-004a.html:
+- "== html/dom/elements/requirements-relating-to-bidirectional-algorithm-formatting-characters/reference/dir-isolation-004-ref.html"
+html/dom/elements/requirements-relating-to-bidirectional-algorithm-formatting-characters/dir-isolation-004b.html:
+- "== html/dom/elements/requirements-relating-to-bidirectional-algorithm-formatting-characters/reference/dir-isolation-004-ref.html"
+html/dom/elements/requirements-relating-to-bidirectional-algorithm-formatting-characters/dir-isolation-004c.html:
+- "== html/dom/elements/requirements-relating-to-bidirectional-algorithm-formatting-characters/reference/dir-isolation-004-ref.html"
+html/dom/elements/requirements-relating-to-bidirectional-algorithm-formatting-characters/dir-isolation-005a.html:
+- "== html/dom/elements/requirements-relating-to-bidirectional-algorithm-formatting-characters/reference/dir-isolation-005-ref.html"
+html/dom/elements/requirements-relating-to-bidirectional-algorithm-formatting-characters/dir-isolation-005b.html:
+- "== html/dom/elements/requirements-relating-to-bidirectional-algorithm-formatting-characters/reference/dir-isolation-005-ref.html"
+html/dom/elements/requirements-relating-to-bidirectional-algorithm-formatting-characters/dir-isolation-005c.html:
+- "== html/dom/elements/requirements-relating-to-bidirectional-algorithm-formatting-characters/reference/dir-isolation-005-ref.html"
+html/dom/elements/requirements-relating-to-bidirectional-algorithm-formatting-characters/dir-isolation-006a.html:
+- "== html/dom/elements/requirements-relating-to-bidirectional-algorithm-formatting-characters/reference/dir-isolation-006-ref.html"
+html/dom/elements/requirements-relating-to-bidirectional-algorithm-formatting-characters/dir-isolation-006b.html:
+- "== html/dom/elements/requirements-relating-to-bidirectional-algorithm-formatting-characters/reference/dir-isolation-006-ref.html"
+html/dom/elements/requirements-relating-to-bidirectional-algorithm-formatting-characters/dir-isolation-006c.html:
+- "== html/dom/elements/requirements-relating-to-bidirectional-algorithm-formatting-characters/reference/dir-isolation-006c-ref.html"
+html/dom/elements/requirements-relating-to-bidirectional-algorithm-formatting-characters/dir-isolation-007a.html:
+- "== html/dom/elements/requirements-relating-to-bidirectional-algorithm-formatting-characters/reference/dir-isolation-007-ref.html"
+html/dom/elements/requirements-relating-to-bidirectional-algorithm-formatting-characters/dir-isolation-007b.html:
+- "== html/dom/elements/requirements-relating-to-bidirectional-algorithm-formatting-characters/reference/dir-isolation-007-ref.html"
+html/dom/elements/requirements-relating-to-bidirectional-algorithm-formatting-characters/dir-isolation-007c.html:
+- "== html/dom/elements/requirements-relating-to-bidirectional-algorithm-formatting-characters/reference/dir-isolation-007-ref.html"
+html/dom/elements/requirements-relating-to-bidirectional-algorithm-formatting-characters/dir-isolation-008a.html:
+- "== html/dom/elements/requirements-relating-to-bidirectional-algorithm-formatting-characters/reference/dir-isolation-008-ref.html"
+html/dom/elements/requirements-relating-to-bidirectional-algorithm-formatting-characters/dir-isolation-008b.html:
+- "== html/dom/elements/requirements-relating-to-bidirectional-algorithm-formatting-characters/reference/dir-isolation-008-ref.html"
+html/dom/elements/requirements-relating-to-bidirectional-algorithm-formatting-characters/dir-isolation-008c.html:
+- "== html/dom/elements/requirements-relating-to-bidirectional-algorithm-formatting-characters/reference/dir-isolation-008-ref.html"
+html/dom/elements/requirements-relating-to-bidirectional-algorithm-formatting-characters/dir-isolation-009a.html:
+- "== html/dom/elements/requirements-relating-to-bidirectional-algorithm-formatting-characters/reference/dir-isolation-009-ref.html"
+html/dom/elements/requirements-relating-to-bidirectional-algorithm-formatting-characters/dir-isolation-009b.html:
+- "== html/dom/elements/requirements-relating-to-bidirectional-algorithm-formatting-characters/reference/dir-isolation-009b-ref.html"
+html/dom/elements/requirements-relating-to-bidirectional-algorithm-formatting-characters/dir-isolation-009c.html:
+- "== html/dom/elements/requirements-relating-to-bidirectional-algorithm-formatting-characters/reference/dir-isolation-009b-ref.html"
+html/semantics/forms/customizable-combobox/customizable-combobox-appearance.html:
+- "== html/semantics/forms/customizable-combobox/customizable-combobox-appearance-ref.html"
+html/semantics/forms/the-datalist-element/input-text-datalist-removal.html:
+- "== html/semantics/forms/the-datalist-element/input-text-focused-ref.html"
+html/semantics/forms/the-input-element/image01.html:
+- "== html/semantics/forms/the-input-element/image01-ref.html (both renderings blank)"
+html/semantics/forms/the-input-element/range-intrinsic-size.html:
+- "== html/semantics/forms/the-input-element/range-intrinsic-size-ref.html"
+html/semantics/forms/the-input-element/range-list-added-repaint.html:
+- "== html/semantics/forms/the-input-element/range-tick-marks-05-ref.html (both renderings
+  blank)"
+html/semantics/forms/the-input-element/range-list-change-repaint.html:
+- "== html/semantics/forms/the-input-element/range-tick-marks-05-ref.html (both renderings
+  blank)"
+html/semantics/forms/the-input-element/range-list-duplicate-id-repaint.html:
+- "== html/semantics/forms/the-input-element/range-tick-marks-05-ref.html (both renderings
+  blank)"
+html/semantics/forms/the-input-element/range-list-nonexistent.html:
+- "== html/semantics/forms/the-input-element/range-tick-marks-05-ref.html (both renderings
+  blank)"
+html/semantics/forms/the-input-element/range-option-add-repaint.html:
+- "== html/semantics/forms/the-input-element/range-tick-marks-05-ref.html (both renderings
+  blank)"
+html/semantics/forms/the-input-element/range-option-remove-repaint.html:
+- "== html/semantics/forms/the-input-element/range-tick-marks-05-ref.html (both renderings
+  blank)"
+html/semantics/forms/the-input-element/range-option-value-change-repaint.html:
+- "== html/semantics/forms/the-input-element/range-tick-marks-05-ref.html (both renderings
+  blank)"
+html/semantics/forms/the-input-element/range-tick-marks-01.html:
+- "!= html/semantics/forms/the-input-element/range-tick-marks-01-notref.html"
+html/semantics/forms/the-input-element/range-tick-marks-02.html:
+- "== html/semantics/forms/the-input-element/range-tick-marks-02-ref.html (both renderings
+  blank)"
+html/semantics/forms/the-input-element/range-tick-marks-03.html:
+- "!= html/semantics/forms/the-input-element/range-tick-marks-03-notref.html"
+html/semantics/forms/the-input-element/range-tick-marks-04.html:
+- "== html/semantics/forms/the-input-element/range-tick-marks-04-ref.html (both renderings
+  blank)"
+html/semantics/forms/the-input-element/range-tick-marks-05.html:
+- "== html/semantics/forms/the-input-element/range-tick-marks-05-ref.html (both renderings
+  blank)"
+html/semantics/forms/the-meter-element/meter-appearance-none-even-less-good-value-rendering.html:
+- "!= html/semantics/forms/the-meter-element/reference/meter-appearance-auto-even-less-good-value-rendering.html"
+html/semantics/forms/the-meter-element/meter-appearance-none-optimum-value-rendering.html:
+- "!= html/semantics/forms/the-meter-element/reference/meter-appearance-auto-optimum-value-rendering.html"
+html/semantics/forms/the-meter-element/meter-appearance-none-rendering.html:
+- "!= html/semantics/forms/the-meter-element/reference/meter-appearance-auto-rendering-ref.html"
+html/semantics/forms/the-meter-element/meter-appearance-none-suboptimum-value-rendering.html:
+- "!= html/semantics/forms/the-meter-element/reference/meter-appearance-auto-suboptimum-value-rendering-ref.html"
+html/semantics/forms/the-meter-element/meter-min-rendering.html:
+- "== html/semantics/forms/the-meter-element/meter-min-rendering-ref.html (both renderings
+  blank)"
+html/semantics/forms/the-option-element/dynamic-content-change-rendering.html:
+- "== html/semantics/forms/the-option-element/dynamic-content-change-rendering-ref.html
+  (never ready to capture)"
+html/semantics/forms/the-select-element/customizable-select-listbox/customizable-select-listbox-appearance-focused.html:
+- "== html/semantics/forms/the-select-element/customizable-select-listbox/customizable-select-listbox-appearance-focused-ref.html"
+html/semantics/forms/the-select-element/customizable-select-listbox/customizable-select-listbox-appearance-grid.html:
+- "== html/semantics/forms/the-select-element/customizable-select-listbox/customizable-select-listbox-appearance-grid-ref.html"
+html/semantics/forms/the-select-element/customizable-select-listbox/customizable-select-listbox-appearance.html:
+- "== html/semantics/forms/the-select-element/customizable-select-listbox/customizable-select-listbox-appearance-ref.html"
+html/semantics/forms/the-select-element/customizable-select-listbox/customizable-select-listbox-sizing.html:
+- "== html/semantics/forms/the-select-element/customizable-select-listbox/customizable-select-listbox-sizing-ref.html"
+html/semantics/forms/the-select-element/customizable-select-listbox/listbox-hr-appearance.html:
+- "== html/semantics/forms/the-select-element/customizable-select-listbox/listbox-hr-appearance-ref.html"
+html/semantics/forms/the-select-element/customizable-select/border-rendering.html:
+- "== html/semantics/forms/the-select-element/customizable-select/border-rendering-ref.html"
+html/semantics/forms/the-select-element/customizable-select/checkmark-animation-002.html:
+- "== html/semantics/forms/the-select-element/customizable-select/checkmark-animation-002-ref.html
+  (never ready to capture)"
+html/semantics/forms/the-select-element/customizable-select/closed-listbox-rendering.html:
+- "== html/semantics/forms/the-select-element/customizable-select/closed-listbox-rendering-ref.html"
+html/semantics/forms/the-select-element/customizable-select/focus-ring-rendering.html:
+- "== html/semantics/forms/the-select-element/customizable-select/focus-ring-rendering-ref.html"
+html/semantics/forms/the-select-element/customizable-select/picker-icon-animation-002.html:
+- "== html/semantics/forms/the-select-element/customizable-select/picker-icon-animation-002-ref.html"
+html/semantics/forms/the-select-element/customizable-select/select-appearance-active.html:
+- "== html/semantics/forms/the-select-element/customizable-select/select-appearance-active-ref.html"
+html/semantics/forms/the-select-element/customizable-select/select-appearance-base-display.html:
+- "== html/semantics/forms/the-select-element/customizable-select/select-appearance-base-display-ref.html"
+html/semantics/forms/the-select-element/customizable-select/select-appearance-base-toggle-invalidation.html:
+- "== html/semantics/forms/the-select-element/customizable-select/select-appearance-base-toggle-invalidation-ref.html"
+html/semantics/forms/the-select-element/customizable-select/select-appearance-button-after-option.html:
+- "== html/semantics/forms/the-select-element/customizable-select/select-appearance-button-after-option-ref.html"
+html/semantics/forms/the-select-element/customizable-select/select-appearance-button-after-span.html:
+- "== html/semantics/forms/the-select-element/customizable-select/select-appearance-button-after-span-ref.html"
+html/semantics/forms/the-select-element/customizable-select/select-appearance-button-after-text.html:
+- "== html/semantics/forms/the-select-element/customizable-select/select-appearance-button-after-text-ref.html"
+html/semantics/forms/the-select-element/customizable-select/select-appearance-custom-button.html:
+- "== html/semantics/forms/the-select-element/customizable-select/select-appearance-button-ref.html"
+html/semantics/forms/the-select-element/customizable-select/select-appearance-dark-mode.html:
+- "== html/semantics/forms/the-select-element/customizable-select/select-appearance-dark-mode-ref.html"
+html/semantics/forms/the-select-element/customizable-select/select-appearance-default-button.html:
+- "== html/semantics/forms/the-select-element/customizable-select/select-appearance-button-ref.html"
+html/semantics/forms/the-select-element/customizable-select/select-appearance-disabled-option.html:
+- "== html/semantics/forms/the-select-element/customizable-select/select-appearance-disabled-option-ref.html"
+html/semantics/forms/the-select-element/customizable-select/select-appearance-disabled.html:
+- "== html/semantics/forms/the-select-element/customizable-select/select-appearance-disabled-ref.html"
+html/semantics/forms/the-select-element/customizable-select/select-appearance-fallback-bottom-left-scroller.html:
+- "== html/semantics/forms/the-select-element/customizable-select/select-appearance-fallback-bottom-left-scroller-ref.html
+  (never ready to capture)"
+html/semantics/forms/the-select-element/customizable-select/select-appearance-fallback-bottom-left.html:
+- "== html/semantics/forms/the-select-element/customizable-select/select-appearance-fallback-bottom-left-ref.html
+  (never ready to capture)"
+html/semantics/forms/the-select-element/customizable-select/select-appearance-fallback-bottom-right-scroller.html:
+- "== html/semantics/forms/the-select-element/customizable-select/select-appearance-fallback-bottom-right-scroller-ref.html
+  (never ready to capture)"
+html/semantics/forms/the-select-element/customizable-select/select-appearance-fallback-bottom-right.html:
+- "== html/semantics/forms/the-select-element/customizable-select/select-appearance-fallback-bottom-right-ref.html
+  (never ready to capture)"
+html/semantics/forms/the-select-element/customizable-select/select-appearance-fallback-top-left-scroller.html:
+- "== html/semantics/forms/the-select-element/customizable-select/select-appearance-fallback-top-left-scroller-ref.html
+  (never ready to capture)"
+html/semantics/forms/the-select-element/customizable-select/select-appearance-fallback-top-left.html:
+- "== html/semantics/forms/the-select-element/customizable-select/select-appearance-fallback-top-left-ref.html
+  (never ready to capture)"
+html/semantics/forms/the-select-element/customizable-select/select-appearance-fallback-top-right-scroller.html:
+- "== html/semantics/forms/the-select-element/customizable-select/select-appearance-fallback-top-right-scroller-ref.html
+  (never ready to capture)"
+html/semantics/forms/the-select-element/customizable-select/select-appearance-fallback-top-right.html:
+- "== html/semantics/forms/the-select-element/customizable-select/select-appearance-fallback-top-right-ref.html
+  (never ready to capture)"
+html/semantics/forms/the-select-element/customizable-select/select-appearance-font-inheriting.html:
+- "== html/semantics/forms/the-select-element/customizable-select/select-appearance-font-inheriting-ref.html"
+html/semantics/forms/the-select-element/customizable-select/select-appearance-hover.html:
+- "== html/semantics/forms/the-select-element/customizable-select/select-appearance-hover-ref.html"
+html/semantics/forms/the-select-element/customizable-select/select-appearance-optgroup-legend-and-label.html:
+- "== html/semantics/forms/the-select-element/customizable-select/select-appearance-optgroup-legend-ref.html"
+html/semantics/forms/the-select-element/customizable-select/select-appearance-optgroup-legend.html:
+- "== html/semantics/forms/the-select-element/customizable-select/select-appearance-optgroup-legend-ref.html"
+html/semantics/forms/the-select-element/customizable-select/select-appearance-optgroup-rendering.html:
+- "== html/semantics/forms/the-select-element/customizable-select/select-appearance-optgroup-rendering-ref.html"
+html/semantics/forms/the-select-element/customizable-select/select-appearance-option-with-label.html:
+- "== html/semantics/forms/the-select-element/customizable-select/select-appearance-button-ref.html"
+html/semantics/forms/the-select-element/customizable-select/select-appearance-picker-select-border.html:
+- "== html/semantics/forms/the-select-element/customizable-select/select-appearance-picker-select-border-ref.html"
+html/semantics/forms/the-select-element/customizable-select/select-appearance-sizing-in-flex.html:
+- "== html/semantics/forms/the-select-element/customizable-select/select-appearance-sizing-in-flex-ref.html"
+html/semantics/forms/the-select-element/customizable-select/select-appearance-switching-invalidation.html:
+- "== html/semantics/forms/the-select-element/customizable-select/select-appearance-switching-invalidation-ref.html"
+html/semantics/forms/the-select-element/customizable-select/select-appearance-writing-mode-vertical-lr.html:
+- "== html/semantics/forms/the-select-element/customizable-select/select-appearance-writing-mode-vertical-lr-ref.html"
+html/semantics/forms/the-select-element/customizable-select/select-appearance-writing-mode-vertical-rl.html:
+- "== html/semantics/forms/the-select-element/customizable-select/select-appearance-writing-mode-vertical-rl-ref.html"
+html/semantics/forms/the-select-element/customizable-select/select-base-appearance-ordering.html:
+- "== html/semantics/forms/the-select-element/customizable-select/select-base-appearance-ordering-ref.html"
+html/semantics/forms/the-select-element/customizable-select/select-base-appearance-writing-modes.html:
+- "== html/semantics/forms/the-select-element/customizable-select/select-base-appearance-writing-modes-ref.html"
+html/semantics/forms/the-select-element/customizable-select/select-base-overflow.html:
+- "== html/semantics/forms/the-select-element/customizable-select/select-base-overflow-ref.html"
+html/semantics/forms/the-select-element/customizable-select/select-button-text-and-icon-clipping.html:
+- "== html/semantics/forms/the-select-element/customizable-select/select-button-text-and-icon-clipping-ref.html"
+html/semantics/forms/the-select-element/customizable-select/select-clipping.html:
+- "== html/semantics/forms/the-select-element/customizable-select/select-clipping-ref.html"
+html/semantics/forms/the-select-element/customizable-select/select-explicit-size.html:
+- "== html/semantics/forms/the-select-element/customizable-select/select-explicit-size-ref.html"
+html/semantics/forms/the-select-element/customizable-select/select-font-size.html:
+- "== html/semantics/forms/the-select-element/customizable-select/select-font-size-ref.html"
+html/semantics/forms/the-select-element/customizable-select/select-icon-color.html:
+- "== html/semantics/forms/the-select-element/customizable-select/select-icon-color-ref.html"
+html/semantics/forms/the-select-element/customizable-select/select-open-invalidation.html:
+- "== html/semantics/forms/the-select-element/customizable-select/select-open-invalidation-ref.html"
+html/semantics/forms/the-select-element/customizable-select/select-optgroup-legend-label.html:
+- "== html/semantics/forms/the-select-element/customizable-select/select-optgroup-legend-label-ref.html"
+html/semantics/forms/the-select-element/customizable-select/select-option-images.html:
+- "== html/semantics/forms/the-select-element/customizable-select/select-option-images-ref.html"
+html/semantics/forms/the-select-element/customizable-select/select-picker-icon-content-none.html:
+- "== html/semantics/forms/the-select-element/customizable-select/select-picker-icon-content-none-ref.html"
+html/semantics/forms/the-select-element/customizable-select/select-picker-icon-open-state.html:
+- "== html/semantics/forms/the-select-element/customizable-select/select-picker-icon-open-state-ref.html"
+html/semantics/forms/the-select-element/customizable-select/select-picker-pseudo-backdrop.html:
+- "== html/semantics/forms/the-select-element/customizable-select/select-picker-pseudo-backdrop-ref.html"
+html/semantics/forms/the-select-element/customizable-select/select-picker-pseudo-before-after.html:
+- "== html/semantics/forms/the-select-element/customizable-select/select-picker-pseudo-before-after-ref.html"
+html/semantics/forms/the-select-element/customizable-select/select-picker-pseudo-first-letter-first-line.html:
+- "== html/semantics/forms/the-select-element/customizable-select/select-picker-pseudo-first-letter-first-line-ref.html"
+html/semantics/forms/the-select-element/customizable-select/select-picker-pseudo-highlight.html:
+- "== html/semantics/forms/the-select-element/customizable-select/select-picker-pseudo-highlight-ref.html
+  (never ready to capture)"
+html/semantics/forms/the-select-element/customizable-select/select-picker-pseudo-selection.html:
+- "== html/semantics/forms/the-select-element/customizable-select/select-picker-pseudo-selection-ref.html"
+html/semantics/forms/the-select-element/customizable-select/select-picker-pseudo-target-text.html:
+- "== html/semantics/forms/the-select-element/customizable-select/select-picker-pseudo-target-text-ref.html"
+html/semantics/forms/the-select-element/customizable-select/select-popover-exit-animation.html:
+- "== html/semantics/forms/the-select-element/customizable-select/select-popover-exit-animation-ref.html"
+html/semantics/forms/the-select-element/customizable-select/select-pseudo-ordering.html:
+- "== html/semantics/forms/the-select-element/customizable-select/select-pseudo-ordering-ref.html"
+html/semantics/forms/the-select-element/customizable-select/select-second-child-button.html:
+- "== html/semantics/forms/the-select-element/customizable-select/select-second-child-button-ref.html"
+html/semantics/forms/the-select-element/customizable-select/select-single-base-appearance-rendering.html:
+- "== html/semantics/forms/the-select-element/customizable-select/select-single-base-appearance-rendering-ref.html"
+html/semantics/forms/the-select-element/customizable-select/select-text-only.html:
+- "== html/semantics/forms/the-select-element/customizable-select/select-text-only-ref.html"
+html/semantics/forms/the-select-element/customizable-select/selectedcontent-color.html:
+- "== html/semantics/forms/the-select-element/customizable-select/selectedcontent-color-ref.html"
+html/semantics/forms/the-select-element/customizable-select/uses-label-dynamic.html:
+- "== html/semantics/forms/the-select-element/customizable-select/uses-label-dynamic-ref.html
+  (never ready to capture)"
+html/semantics/forms/the-select-element/list-box-important-colors.html:
+- "== html/semantics/forms/the-select-element/list-box-important-colors-ref.html"
+html/semantics/forms/the-select-element/reset-algorithm-rendering.html:
+- "== html/semantics/forms/the-select-element/reset-algorithm-rendering-ref.html (never
+  ready to capture)"
+html/semantics/forms/the-select-element/select-hr-listbox.html:
+- "!= html/semantics/forms/the-select-element/select-hr-listbox-notref.html"
+html/semantics/forms/the-select-element/select-listbox-selected-hscroll.html:
+- "!= css/reference/blank.html"
+html/semantics/forms/the-textarea-element/multiline-placeholder-cr.html:
+- "== html/semantics/forms/the-textarea-element/multiline-placeholder-ref.html"
+html/semantics/forms/the-textarea-element/multiline-placeholder-crlf.html:
+- "== html/semantics/forms/the-textarea-element/multiline-placeholder-ref.html"
+html/semantics/forms/the-textarea-element/multiline-placeholder.html:
+- "== html/semantics/forms/the-textarea-element/multiline-placeholder-ref.html"
 html/webappapis/scripting/events/compile-event-handler-lexical-scopes.html:
 - The EventHandler is not an element's event handler (i.e. Window's event handler)
   and has no form owner.
@@ -5914,8 +6366,6 @@ html/webappapis/scripting/events/compile-event-handler-settings-objects.html:
   must be that of the node document
 - The incumbent settings object while executing the compiled callback via Web IDL's
   invoke must be that of the node document
-html/webappapis/scripting/events/contextmenu-event-manual.htm:
-- contextmenu event generated from user action is MouseEvent
 html/webappapis/scripting/events/event-handler-idl-attribute-realm.window.js:
 - Event handler IDL attribute compilation errors must be fired on the element's document's
   global
@@ -6305,6 +6755,10 @@ service-workers/service-worker/xhr-response-url.https.html:
 - XHR Document should use the response URL (generated response)
 service-workers/service-worker/xsl-base-url.https.html:
 - base URL when service worker does respondWith(fetch(responseUrl))
+shadow-dom/layout-slot-no-longer-assigned.html:
+- "== shadow-dom/reference/empty.html (both renderings blank)"
+shadow-dom/layout-slot-no-longer-fallback.html:
+- "== shadow-dom/reference/empty.html (both renderings blank)"
 shadow-dom/offsetParent-across-shadow-boundaries.html:
 - offsetParent must return the fixed position containing block of a fixed element
   when the context object is assigned to a slot within a fixed containing block in
@@ -6312,6 +6766,10 @@ shadow-dom/offsetParent-across-shadow-boundaries.html:
 - offsetParent must return the fixed position containing block of a fixed element
   when the context object is assigned to a slot within a fixed containing block in
   shadow tree of open mode
+shadow-dom/shadow-style-invalidation-vw-units.html:
+- "== shadow-dom/shadow-style-invalidation-vw-units-ref.html"
+shadow-dom/slot-fallback-content-008.html:
+- "== shadow-dom/slot-fallback-content-008-ref.html"
 shadow-dom/untriaged/html-elements-in-shadow-trees/inert-html-elements/test-001.html:
 - A_08_01_01_T01
 webmessaging/Channel_postMessage_transfer_xsite_incoming_messages.window.js:
@@ -6500,10 +6958,6 @@ xhr/responseXML-unavailable-in-worker.html:
 - XMLHttpRequest's responseXML property should not be exposed in workers.
 xhr/send-authentication-cors-setrequestheader-no-cred.htm:
 - CORS request with setRequestHeader auth to URL NOT accepting Authorization header
-xhr/send-authentication-prompt-2-manual.htm:
-- 'XMLHttpRequest: WWW-Authenticate challenge when user,pass are not passed to open()'
-xhr/send-authentication-prompt-manual.htm:
-- 'XMLHttpRequest: send() - "Basic" authentication gets 401 response'
 xhr/send-conditional-cors.htm:
 - 304 with appropriate CORS header
 - 304 without appropriate CORS header

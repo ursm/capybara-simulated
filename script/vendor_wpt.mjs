@@ -22,9 +22,10 @@
 // disables DOM output and captures results into a global the Ruby runner
 // reads). The pinned SHA is written to spec/wpt/WPT_VERSION.
 //
-// `.any.js` / `.window.js` / `.worker.js` tests need a server-generated HTML
-// wrapper that we don't have; they're vendored as support but the runner only
-// visits real `.html` test files.
+// `.any.js` / `.window.js` tests need a server-generated HTML wrapper; the
+// runner synthesizes the window variant itself (WptRunner#any_js_wrapper), so
+// they are real tests here and JS_TREES controls which trees are scanned for
+// them. `.worker.js` still has no wrapper and is vendored as support only.
 
 import { mkdir, writeFile, rm, readdir, rmdir } from 'node:fs/promises';
 import { fileURLToPath, pathToFileURL } from 'node:url';
@@ -145,10 +146,14 @@ const TREES = [
 
 // Trees vendored HARNESS-ONLY: everything under `support/` plus the `.html` tests that actually
 // include the harness. `css/css-flexbox` is 2000 files of which ~330 are testharness tests; the
-// rest are reftests (`*-ref.html` and the pixel-comparison tests pointing at them), which the
-// runner already skips — it only visits `.html` that includes `/resources/testharness.js` — so
-// vendoring them would commit 1600 files that can never report a result. A tree listed here is
-// still a normal entry in TREES: it is scanned for tests exactly like any other.
+// rest are reftests, and vendoring them would commit ~1600 more files. The runner CAN now run a
+// reftest (it renders both sides through the painter and compares the images — see
+// WptRunner#run_reftest), so this is a scope decision about corpus size and gate time, not an
+// impossibility: flexbox's reftest slice is a backlog item to vendor deliberately, measured. When
+// it is, sweep it per-file under a hard timeout the way the `.any.js` trees were swept: a reftest
+// renders through `render_page`, which has none of the harness drain's step caps or force-timeout
+// ladder, so a document that spins inside one event-loop frame hangs the gate. A tree listed here
+// is still a normal entry in TREES: it is scanned for tests exactly like any other.
 const HARNESS_ONLY_TREES = ['css/css-flexbox'];
 
 // Support-only trees: vendored whole so absolute-path includes (`/common/…`)
@@ -210,7 +215,14 @@ const SUPPORT_FILES = [
   'media/sound_5.mp3',
   'media/sound_5.oga',
   'media/movie_5.mp4',
-  'media/movie_5.webm'
+  'media/movie_5.webm',
+  // The shared CSS references that vendored REFTESTS point at by absolute path.
+  // The css/ reference library is otherwise not vendored, and a reftest whose
+  // reference is missing can only be reported as a failure — see
+  // WptRunner#run_reftest.
+  'css/reference/blank.html',
+  'css/reference/ref-filled-green-100px-square-only.html',
+  'css/reference/ref-filled-green-100px-square.xht'
   // NOTE: service-workers/service-worker (vendored above) ships the FULL upstream
   // test-helpers.sub.js — `service_worker_test` and friends run against the real SW runtime.
   // The hand-written minimal helper that used to live at that path (with_iframe only, while SW
