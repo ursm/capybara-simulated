@@ -243,7 +243,7 @@ module Capybara
         # this so it doesn't bail before an async message (e.g. a freshly-spawned
         # worker's first postMessage) has had a chance to land.
         '__csim_asyncIoPending'      => ->(b, *_a) { b.async_io_pending? },
-        '__csim_transferStash'       => ->(b, *a) { b.transfer_buffer_stash(a[0]) },
+        '__csim_transferStash'       => ->(b, *a) { b.transfer_buffer_stash(a[0], a[1]) },
         '__csim_transferFetch'       => ->(b, *a) { b.transfer_buffer_fetch_for_js(a[0]) },
         # Zero-copy postMessage transfer-token bookkeeping (see Browser#drop_pending_transfers).
         '__csim_transferIssued'      => ->(b, *a) { b.transfer_token_issued(a[0]); nil },
