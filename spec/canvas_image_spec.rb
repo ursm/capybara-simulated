@@ -2267,14 +2267,23 @@ RSpec.describe 'Canvas / ImageData / OffscreenCanvas' do
     }.to_app
     session = simulated_session(parse_app)
     session.visit('/')
-    out = session.evaluate_script(<<~JS)
+    # WAIT for the load rather than assuming the visit's settle already decoded it: the fetch and
+    # decode of a parsed `<img src>` are asynchronous, and on a loaded CI box under QuickJS the
+    # script could run first and read `naturalWidth: 0`. What this example is about is what is true
+    # AFTER load, which is what its own title says.
+    out = session.evaluate_async_script(<<~JS)
+      const cb = arguments[arguments.length - 1];
       const img = document.getElementById('i');
-      const ctx = document.getElementById('c').getContext('2d');
-      ctx.drawImage(img, 0, 0);
-      JSON.stringify({
-        naturalWidth: img.naturalWidth, complete: img.complete,
-        pxBlue: Array.from(ctx.getImageData(2, 0, 1, 1).data)
-      });
+      const draw = () => {
+        const ctx = document.getElementById('c').getContext('2d');
+        ctx.drawImage(img, 0, 0);
+        cb(JSON.stringify({
+          naturalWidth: img.naturalWidth, complete: img.complete,
+          pxBlue: Array.from(ctx.getImageData(2, 0, 1, 1).data)
+        }));
+      };
+      if (img.complete) draw();
+      else { img.onload = draw; img.onerror = draw; }
     JS
     r = JSON.parse(out)
     expect(r['naturalWidth']).to eq(4)
