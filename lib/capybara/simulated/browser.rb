@@ -8231,8 +8231,12 @@ module Capybara
       # JS-side latin-1 / base64 intermediate is built. Without this
       # the 317 MB raw frames in Discourse's media-optimization-worker
       # peak >4 GB of JS strings before the worker even sees them.
-      def transfer_buffer_stash(bytes)
-        s = transfer_bytes_to_binary(bytes)
+      # `encoding` is how the JS side chose to hand the bytes over: `nil` for the engine's own
+      # marshalling, `'base64'` where that marshalling is too expensive to use (see `stashTransfer`
+      # — QuickJS turns a typed array into a Hash of "index" => byte, which costs ~175x the memory
+      # of the picture it carries). Base64 decodes here in C.
+      def transfer_buffer_stash(bytes, encoding = nil)
+        s = encoding.to_s == 'base64' ? bytes.to_s.unpack1('m0') : transfer_bytes_to_binary(bytes)
         s = s.dup.force_encoding(Encoding::ASCII_8BIT) unless s.encoding == Encoding::ASCII_8BIT
         @transfer_buffer_lock.synchronize {
           id = (@transfer_buffer_seq += 1)
@@ -8241,21 +8245,15 @@ module Capybara
         }
       end
 
-      # What a typed array looks like on THIS side depends on the engine: rusty_racer marshals it as
-      # an ASCII-8BIT String, while quickjs hands over a Hash of "index" => byte. `to_s` on that
-      # Hash produced its INSPECT text, and the registry stored `{"0" => 0, "1" => …` as if it were
-      # pixels — so under QuickJS a canvas encoded those characters as its image: a 4x4 blue square
-      # came back as `[32, 34, 50]`, which is `space " 2`.
-      #
-      # The Hash shape is the quickjs gem's marshalling, reported upstream as
-      # https://github.com/hmsk/quickjs.rb/issues/89 — so this arm is a workaround with an expiry
-      # date, not a contract. Keep the String arm first either way: that is the shape a binary
-      # payload SHOULD arrive in, and the one the hot paths (worker frame transfer) depend on.
+      # A binary payload SHOULD arrive as a String — that is what rusty_racer marshals a typed array
+      # to, and what the `'base64'` arm above decodes to. The Array arm is for a caller that hands
+      # over byte values rather than bytes. (The quickjs gem's own shape for a typed array — a Hash
+      # of "index" => byte — no longer reaches here: `stashTransfer` sends base64 on that engine
+      # precisely because materialising that Hash costs ~175x the payload.)
       private def transfer_bytes_to_binary(bytes)
         case bytes
         when String then bytes
         when Array  then bytes.pack('C*')
-        when Hash   then Array.new(bytes.size) {|i| bytes[i.to_s] || bytes[i] || 0 }.pack('C*')
         else bytes.to_s
         end
       end
