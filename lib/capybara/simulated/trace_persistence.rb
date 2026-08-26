@@ -29,6 +29,26 @@ module Capybara
           outcome:   outcome,
           exception: exception
         )
+        # The state the example ENDED in, painted once — and painted HERE, after the example,
+        # rather than per step: a paint is ~50 ms on V8 and ~525 ms on QuickJS, and doing it inside
+        # an action's failure path puts it inside Capybara's retry window, where it can turn an
+        # action a retry would have rescued into a failure (measured: a click waiting on an overlay
+        # went from 35 ms to 563 ms). Only for a failure — that is the state anyone opens the trace
+        # to look at, and a passing example should pay nothing.
+        # …unless the host already took it, before its own teardown reset the page (see
+        # `minitest.rb`). Whoever gets there first with a LIVE page wins.
+        if outcome.to_s == 'failed' && !driver.current_trace.metadata[:screenshot] &&
+           driver.respond_to?(:trace_screenshot)
+          # In its own rescue, and rescuing more than `StandardError`: the paint is the one part of
+          # persisting that runs arbitrary engine code, and the trace file — the thing this method
+          # exists to write — must not be lost to it.
+          begin
+            shot = driver.trace_screenshot
+            driver.current_trace.metadata[:screenshot] = shot if shot
+          rescue Exception => e # rubocop:disable Lint/RescueException
+            warn "capybara-simulated: trace screenshot failed: #{e.class}: #{e.message}"
+          end
+        end
         driver.stop_tracing(path: File.join(dir, "#{slug(title)}.json"))
       end
 

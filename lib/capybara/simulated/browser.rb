@@ -2036,11 +2036,31 @@ module Capybara
         dom_call('__csimDocumentHtml').to_s
       end
 
+      # The trace's screenshot: the painted page as a data URL, or nil if anything at all went
+      # wrong. Deliberately silent — a trace step with no image is a smaller loss than a suite that
+      # fails while recording why it failed.
+      #
+      # Refuses once this browser's trace has been handed over (`@trace` nil, `@pending_trace` set
+      # by `reset!`): the page has been rebuilt by then, so what there is to paint is the BLANK one
+      # the reset installed. A host that persists after its own teardown — Minitest's
+      # `after_teardown` chain — would otherwise store that white rectangle as "the state the
+      # failing example ended in", which is worse than storing nothing.
+      def trace_screenshot
+        return nil unless @trace
+
+        png = screenshot_png(tick: false)
+        png && "data:image/png;base64,#{[png].pack('m0')}"
+      rescue StandardError
+        nil
+      end
+
       # PNG bytes for the current page, painted from the layout the driver already holds
       # (js/src/paint.js). Routed through the active realm like `html`, so a screenshot taken
       # inside a `within_frame` block shows that frame.
-      def screenshot_png(full: false)
-        tick_real_time
+      # `tick`: a page-facing screenshot advances the clock like any other read, but one taken to
+      # RECORD what happened must not — a trace is an observer.
+      def screenshot_png(full: false, tick: true)
+        tick_real_time if tick
         out = dom_call('__csimScreenshot', full)
         return nil unless out.is_a?(Hash) && out['refId']
 
@@ -2368,8 +2388,23 @@ module Capybara
           # errored. The V8 round-trip + DOM serialize is the
           # expensive part of trace recording, so skipping it on the
           # happy path is the whole point of the default.
-          dom = (error || @trace_mode == :full) ? html : nil
-          @trace.finish_step(url_after: @current_url, dom_after: dom, error: error)
+          snapshot = error || @trace_mode == :full
+          # The DOM snapshot follows the same one-per-ACTION rule the screenshot does. Capybara
+          # records a step per RETRY, and serializing on each is the expensive half of tracing:
+          # measured, one click under an overlay that never clears records 183 attempts inside its
+          # 2 s wait (190 under QuickJS) — and, before this, 183 DOM serializations with it, 110 KB
+          # of JSON for ONE click on a trivial page.
+          dom      = snapshot && !@trace.retrying_failure?(kind, desc) ? html : nil
+          # A screenshot only in `full` mode, and there only for an action that SUCCEEDED. Painting
+          # a failure would put the paint inside Capybara's retry window — measured, 33 ms on V8
+          # and 517 ms on QuickJS for a SMALL page, 236 ms and 1.6 s for a 2000-row table — and an
+          # action a retry would have rescued starts failing because we photographed the first
+          # attempt: a click waiting on an overlay went from 35 ms to 563 ms. It is also the wrong
+          # frame: of a retried action, the interesting one is the attempt that finally worked.
+          # What a failure looks like is captured once, after the example, where no wait window is
+          # running (`TracePersistence`).
+          shot     = @trace_mode == :full && error.nil? ? trace_screenshot : nil
+          @trace.finish_step(url_after: @current_url, dom_after: dom, shot_after: shot, error: error)
           @recording_action = false
         end
       end

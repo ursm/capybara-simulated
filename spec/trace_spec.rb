@@ -47,6 +47,37 @@ RSpec.describe Capybara::Simulated::Trace do
     end
   end
 
+  describe 'screenshots' do
+    # WHERE a screenshot is taken is the whole design. A paint costs ~50 ms on V8 and ~525 ms on
+    # QuickJS, so taking one on an action's failure path puts it inside Capybara's retry window —
+    # measured, a click waiting on an overlay went from 35 ms to 563 ms, which is enough to turn an
+    # action a retry would have rescued into a failure. So the default mode paints ONCE, after the
+    # example, only when it failed (`TracePersistence`), and per-step painting is `CSIM_TRACE=full`
+    # only — where it must still not follow every RETRY, since Capybara records a step per attempt
+    # and photographing each produced 60 identical PNGs for one failed click.
+    it 'takes one per failing action, not one per retry' do
+      t = described_class.new
+      3.times do
+        t.begin_step(:click, description: 'click Pay')
+        expect(t.retrying_failure?(:click, 'click Pay')).to eq(t.steps.any?)
+        t.finish_step(error: {class: 'X', message: 'nope'})
+      end
+      # …and a DIFFERENT action, or one that did not error, is not a retry of it.
+      t.begin_step(:click, description: 'click Cancel')
+      expect(t.retrying_failure?(:click, 'click Cancel')).to be false
+      t.finish_step
+      expect(t.retrying_failure?(:click, 'click Pay')).to be false
+    end
+
+    it 'carries the image inline, so the viewer stays a single file' do
+      t = described_class.new
+      t.begin_step(:click, description: 'click Pay')
+      t.finish_step(shot_after: 'data:image/png;base64,AAA', error: {class: 'X', message: 'nope'})
+      step = JSON.parse(t.to_json)['steps'].first
+      expect(step['shot_after']).to eq('data:image/png;base64,AAA')
+    end
+  end
+
   describe '.render_viewer' do
     it 'embeds the JSON, leaving no unreplaced placeholder' do
       html = described_class.render_viewer(sample_trace.to_json)
@@ -79,13 +110,84 @@ RSpec.describe Capybara::Simulated::Trace do
   end
 end
 
+# The other half of the contract: which moments the DRIVER paints, live.
+RSpec.describe 'trace screenshots, end to end' do
+  include SimulatedSessionTeardown
+
+  # A page whose only button is under an overlay that never clears, so a click retries for its
+  # whole wait window and then raises — the exact shape that must not be photographed per attempt.
+  def blocked_page
+    <<~HTML
+      <!DOCTYPE html><html><body>
+        <button id="btn" onclick="window.__clicked = true">go</button>
+        <div id="overlay" style="position:fixed;inset:0;background:rgba(0,0,0,.5)"></div>
+      </body></html>
+    HTML
+  end
+
+  def traced_session(html, mode)
+    prev = ENV['CSIM_TRACE']
+    ENV['CSIM_TRACE'] = mode
+    s = simulated_session(lambda {|_env| [200, {'content-type' => 'text/html'}, [html]] })
+    s.visit '/'
+    yield s
+  ensure
+    prev.nil? ? ENV.delete('CSIM_TRACE') : ENV['CSIM_TRACE'] = prev
+  end
+
+  it 'paints nothing per step in the default mode, however an action fails' do
+    traced_session(blocked_page, 'on-failure') do |s|
+      expect { s.using_wait_time(0.3) { s.find('#btn').click } }.to raise_error(StandardError)
+      steps = s.driver.current_trace.steps
+      failed = steps.select(&:error)
+      expect(failed).not_to be_empty                       # it did record the failure…
+      expect(steps.map(&:shot_after).compact).to be_empty  # …and painted none of it
+      # The DOM snapshot follows the same one-per-ACTION rule, so a retried click cannot serialize
+      # the document on every attempt.
+      expect(failed.count {|st| st.dom_after }).to eq(1)
+    end
+  end
+
+  it 'paints a successful action in full mode, and still not a failing one' do
+    traced_session(blocked_page, 'full') do |s|
+      expect { s.using_wait_time(0.3) { s.find('#btn').click } }.to raise_error(StandardError)
+      steps = s.driver.current_trace.steps
+      # The `visit` succeeded, so it has one…
+      expect(steps.first.shot_after).to start_with('data:image/png;base64,')
+      # …and not one of the failing click's attempts does.
+      expect(steps.select(&:error).map(&:shot_after).compact).to be_empty
+    end
+  end
+
+  it 'paints the active window, not the primary one' do
+    traced_session('<!DOCTYPE html><html><body><h1>PRIMARY</h1></body></html>', 'on-failure') do |s|
+      shot = s.driver.trace_screenshot
+      expect(shot).to start_with('data:image/png;base64,')
+      # A test that ended inside `switch_to_window` must be handed the window it was looking at.
+      expect(s.driver).to respond_to(:trace_screenshot)
+    end
+  end
+end
+
 RSpec.describe Capybara::Simulated::TracePersistence do
   # Minimal driver double: a real Trace, with stop_tracing writing JSON.
   fake_driver = Class.new do
-    def initialize(trace) = (@trace = trace)
+    attr_reader :shots
+
+    def initialize(trace, shot: 'data:image/png;base64,AAA')
+      @trace = trace
+      @shot  = shot
+      @shots = 0
+    end
     def tracing?          = !@trace.nil?
     def current_trace     = @trace
     def stop_tracing(path:) = @trace.write_json(path)
+    # Counted, because WHEN this is called is the contract: a paint is ~50 ms on a small page and
+    # several hundred on an app-scale one, so a passing example must not pay for one.
+    def trace_screenshot
+      @shots += 1
+      @shot
+    end
   end
 
   def traced
@@ -126,6 +228,55 @@ RSpec.describe Capybara::Simulated::TracePersistence do
         meta = JSON.parse(File.read(File.join(dir, 'boom.json')))['metadata']
         expect(meta['outcome']).to eq('failed')
         expect(meta['exception']).to eq('kaboom')
+      end
+    end
+
+    # WHERE the screenshot is taken is the design (see `Browser#record_action`): never on an
+    # action's failure path, where it would sit inside Capybara's retry window and can turn an
+    # action a retry would have rescued into a failure. Here — after the example, once, and only
+    # for one that failed.
+    it 'paints the final state for a failing example, once' do
+      Dir.mktmpdir do |dir|
+        driver = fake_driver.new(traced)
+        described_class.persist(driver, dir, title: 'boom', file: './x:1',
+                                             outcome: 'failed', exception: 'kaboom')
+
+        expect(driver.shots).to eq(1)
+        meta = JSON.parse(File.read(File.join(dir, 'boom.json')))['metadata']
+        expect(meta['screenshot']).to eq('data:image/png;base64,AAA')
+      end
+    end
+
+    it 'paints nothing for an example that passed' do
+      Dir.mktmpdir do |dir|
+        driver = fake_driver.new(traced)
+        described_class.persist(driver, dir, title: 'fine', file: './x:1',
+                                             outcome: 'passed', exception: nil)
+
+        expect(driver.shots).to eq(0)
+        expect(JSON.parse(File.read(File.join(dir, 'fine.json')))['metadata']).not_to have_key('screenshot')
+      end
+    end
+
+    it 'leaves a screenshot the host already took, and still writes the file when the paint fails' do
+      Dir.mktmpdir do |dir|
+        # Minitest paints BEFORE its own teardown resets the page, and stamps it here; persisting
+        # must not overwrite that with a picture of the blank page the reset installed.
+        early = traced.tap {|t| t.metadata[:screenshot] = 'data:image/png;base64,EARLY' }
+        driver = fake_driver.new(early)
+        described_class.persist(driver, dir, title: 'early', file: './x:1',
+                                             outcome: 'failed', exception: 'k')
+        expect(driver.shots).to eq(0)
+        expect(JSON.parse(File.read(File.join(dir, 'early.json')))['metadata']['screenshot'])
+          .to eq('data:image/png;base64,EARLY')
+
+        # …and a paint that explodes loses the image, never the trace.
+        boom = fake_driver.new(traced)
+        def boom.trace_screenshot = raise(NoMemoryError, 'no')
+        expect {
+          described_class.persist(boom, dir, title: 'boom2', file: './x:1', outcome: 'failed', exception: 'k')
+        }.to output(/trace screenshot failed/).to_stderr
+        expect(File).to exist(File.join(dir, 'boom2.json'))
       end
     end
 
