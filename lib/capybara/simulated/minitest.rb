@@ -19,6 +19,22 @@ module Capybara
     module MinitestTrace
       module_function
 
+      # Paint each live trace's final state, while the page is still the one the test ended on.
+      # Stored on the trace so `TracePersistence` finds it already taken; a passing test pays
+      # nothing (`real_failures` is what decides), and nothing here may raise into a teardown.
+      def capture_screenshots(test)
+        return if real_failures(test).empty?
+
+        Capybara::Simulated::Driver.each_live_on_thread(Thread.current) do |driver|
+          next unless driver.respond_to?(:tracing?) && driver.tracing?
+
+          shot = driver.trace_screenshot
+          driver.current_trace.metadata[:screenshot] = shot if shot
+        rescue Exception => e # rubocop:disable Lint/RescueException
+          warn "capybara-simulated: trace screenshot failed: #{e.class}: #{e.message}"
+        end
+      end
+
       # Where the test method is defined, as `path:line` (best effort).
       def source_file(test)
         loc = test.class.instance_method(test.name).source_location
@@ -44,6 +60,12 @@ if (dir = ENV['CSIM_TRACE_DIR']) && !dir.empty?
   # no-ops for every non-Capybara test.
   hook = Module.new do
     define_method(:after_teardown) do
+      # BEFORE the host's teardown, because that is where `Capybara.reset_sessions!` lives and the
+      # page is rebuilt by it: a screenshot taken after `super()` is a picture of the blank page
+      # the reset installed, stored as "the state the failing example ended in". (RSpec's
+      # `prepend_after` already runs first, so only this host needs the split.) The trace itself is
+      # still WRITTEN after teardown — that is what the `super()` ordering was for.
+      Capybara::Simulated::MinitestTrace.capture_screenshots(self)
       super()
     ensure
       begin

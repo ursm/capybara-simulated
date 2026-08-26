@@ -133,17 +133,23 @@ puts page.text
 
 ## Trace
 
-Each Capybara action (`visit`, `click`, `set`, …) is recorded as a step in a per-test trace: URL before / after, console output and network requests during the step, plus elapsed and per-step durations. On action failure (and only then, by default) the post-action DOM is captured too.
+Each Capybara action (`visit`, `click`, `set`, …) is recorded as a step in a per-test trace: URL before / after, console output and network requests during the step, plus elapsed and per-step durations. On action failure (and only then, by default) the post-action DOM is captured too, and a failing example gets one **screenshot** of the state it ended in.
 
-Recording is **on by default** — fully in-memory, no files written unless you opt in via `CSIM_TRACE_DIR`. Wall-time overhead is run-to-run-variance equivalent because the expensive part — DOM serialization — only fires on action error.
+Recording is **on by default** — fully in-memory, no files written unless you opt in via `CSIM_TRACE_DIR`. Wall-time overhead is run-to-run-variance equivalent because the expensive parts fire only where they cannot cost a test anything: the DOM is serialized on an action error and only once per action however many times Capybara retries it, and the screenshot is painted after the example.
 
 ### Modes (`CSIM_TRACE=…`)
 
-| value | recording | DOM snapshot |
-|---|---|---|
-| (unset) / `on-failure` | yes (default) | per step on action error only |
-| `full` | yes | after every action — debug-heavy |
-| `off` | nothing recorded, `record_action` early-exits | — |
+| value | recording | DOM snapshot | screenshot |
+|---|---|---|---|
+| (unset) / `on-failure` | yes (default) | per step on action error only | one, of the state a failing example ended in |
+| `full` | yes | after every action — debug-heavy | per action too — debug-heavy |
+| `off` | nothing recorded, `record_action` early-exits | — | — |
+
+A screenshot is painted from the layout the driver already holds (see [Screenshots](#works-with-constraints)), so it shows what the test *saw*, and rides inline as a `data:` URL so a trace stays one file and the viewer still opens from `file://`.
+
+**Where** it is taken matters more than it sounds. A paint is 33 ms on V8 and 517 ms on QuickJS for a small page — 236 ms and 1.6 s for a 2000-row table — so painting an action's *failure* would put it inside Capybara's retry window. Capybara retries for the whole wait: one failing click records **183 attempts** in its 2 s window here, and photographing them turned a click waiting on an overlay to clear from 35 ms into 563 ms, which is enough to turn an action a retry would have rescued into a failure.
+
+So by default the trace paints exactly once, **after** the example and only if it failed, where no wait window is running. `CSIM_TRACE=full` adds a shot per action that *succeeded* — never a failing attempt, for the reason above, and the successful attempt is the interesting frame of a retried action anyway. Each shot is ~60-75 KB of inline base64, so a long trace in `full` mode is a multi-MB single-file HTML.
 
 ### Inspecting traces
 
@@ -187,7 +193,7 @@ capybara-simulated trace tmp/csim-traces/checkout_flow.json
 # wrote /tmp/checkout_flow.html   (then opens it in your browser)
 ```
 
-By default the HTML is written to a temp file and opened in your browser. The viewer works straight from `file://` — the trace JSON is embedded inline, so no server is needed — and shows a step-by-step UI: a timeline of actions, and per step the URL before/after, console output, network requests, the error, and a rendered preview of the post-action DOM snapshot. Its **Load JSON…** button / drag-and-drop swaps in any other trace file.
+By default the HTML is written to a temp file and opened in your browser. The viewer works straight from `file://` — the trace JSON is embedded inline, so no server is needed — and shows a step-by-step UI: a timeline of actions, and per step the URL before/after, console output, network requests, the error, the screenshot, and the post-action DOM snapshot as HTML. Its **Load JSON…** button / drag-and-drop swaps in any other trace file.
 
 `-o PATH` writes the HTML somewhere specific (`-o -` to stdout); `--no-open` skips launching the browser. Browser launching uses [launchy](https://rubygems.org/gems/launchy) when it's installed (`gem 'launchy'`, recommended for reliable cross-platform / WSL opening) and falls back to the platform opener (`xdg-open` / `open` / `start`) otherwise.
 
@@ -223,6 +229,10 @@ end
       "url_before":  null,
       "url_after":   "http://www.example.com/checkout",
       "dom_after":   null,          // populated only on action error or in `full` mode
+      "shot_after":  null,          // …and the same moment PAINTED, as a `data:image/png;base64,…`
+                                    // URL — `CSIM_TRACE=full` only, and only for an action that
+                                    // SUCCEEDED. A failing example's final state is painted once
+                                    // into `metadata.screenshot` instead (see above).
       "console":     [{ "severity": "info", "message": "Stripe.js loaded" }],
       "network":     [{ "method": "GET",    "url": "/checkout", "status": 200 }],
       "elapsed_ms":  0,
@@ -256,7 +266,7 @@ Most features run in-process; the notes below are mostly "works, but…", follow
 ### Works, with constraints
 
 - **Layout-backed geometry** — a coarse box-layout engine (block flow, absolute / relative / fixed, flex and grid track sizing, percentage and viewport units, overflow clipping, the flat tree through shadow roots and slots, and cross-realm frames) backs the page-visible geometry, so there is *one* geometry that both the driver and the page's own JS read. That gives you `obscured?` (real occlusion, including out through nested iframes), the spatial selectors (`:above` / `:below` / `:left_of` / `:right_of` / `:near`), `scroll_to` / `scroll_by` clamped to the real scrollable range, geometry that follows `resize_to` (so a mobile-breakpoint test measures mobile boxes), and `drag_to` — which drives jQuery UI, SortableJS, Dragula and jsTree. Text runs are measured with the font's own advance widths, inline content shares a line, tables get real CSS Tables 3 column sizing, and a flex line resolves its items together (CSS Flexbox §9.7: bases, grow / shrink, the automatic minimum, gaps, `auto` margins, `justify-content` / `align-items`), so on the block, inline, absolute, flex and table shapes an app page is built from the boxes it reports match Chrome's to the sub-pixel (measured against headless Chrome, fixture by fixture). It is laid out once per mutation generation and only when something asks for geometry. What it does *not* do: glyph shaping (kerning / ligatures / bidi), the real line-breaking algorithm, multi-line flex (`flex-wrap`) — see [Out of scope](#out-of-scope-by-design--use-selenium--cuprite).
-- **Screenshots** — `save_screenshot` (and `full: true` for the whole document) rasters the laid-out page: backgrounds, borders, images, text runs, `overflow` clipping, scroll offsets and `z-index` order. It reads the same boxes every geometry query reads, so a screenshot shows what the driver believes — which makes it useful for seeing what a failing test saw, and unsuitable as a pixel baseline. Not painted: `background-image`, `border-radius`, `opacity`, dashed / dotted borders (drawn solid), SVG, and stacking CONTEXTS (`z-index` is compared globally, not within a parent context). Form controls paint unstyled — that one is not the painter: the driver's UA stylesheet carries no chrome for them, which is also why `getComputedStyle(button).backgroundColor` is transparent where a browser says `rgb(239, 239, 239)`.
+- **Screenshots** — `save_screenshot` (and `full: true` for the whole document) rasters the laid-out page: backgrounds, borders, images, text runs, `overflow` clipping, scroll offsets and `z-index` order. It reads the same boxes every geometry query reads, so a screenshot shows what the driver believes — which makes it useful for seeing what a failing test saw, and unsuitable as a pixel baseline. Not painted: `background-image`, `border-radius`, `opacity`, dashed / dotted borders (drawn solid), SVG, and stacking CONTEXTS (`z-index` is compared globally, not within a parent context). Form controls carry the UA box a browser gives them — border, padding, background, and their own font — so a `<button>` paints as one; what they don't paint is the WIDGET a browser draws inside it (a checkbox's tick, a select's arrow, the value inside a text field).
 - **`within_frame` / `switch_to_frame`** (V8 engine) — each `<iframe>` runs its own scripts in its own per-frame realm; the DSL routes finds, reads, interactions, `evaluate_script`, and navigation into the active frame, nested frames included — the target frame's realm is rebuilt from the fetched document, the top page untouched. QuickJS has no nested browsing context, so `within_frame` raises there.
 - **Multiple windows / tabs** (both engines) — each window is its own Browser + JS VM (own DOM, sessionStorage, history; cookies + localStorage shared). `open_new_window` / `within_window` / `switch_to_window` / `window_opened_by` drive them; JS `window.open` opens a real window, `window.opener` links back, and `postMessage` crosses windows. Only the active window's event loop runs, so a message is delivered when you switch to its window. `target="_blank"` opens with no opener (modern-browser default). `postMessage` carries real structured data (not a lossy JSON hop) — `Map` / `Set` / `Date` / `BigInt` / typed arrays / cyclic graphs all round-trip on V8 — and a `transfer`-list buffer moves **zero-copy** (backing store by token, source detached); only bare `undefined` collapses to `null` (Ruby has no distinct `undefined`). `resize_to` moves the whole viewport: `innerWidth` / `innerHeight`, the `@media` cascade, `matchMedia` change + `resize` events, **and** the layout the geometry surface reports — so a mobile-breakpoint test measures mobile boxes. Each window has its own viewport. `maximize` / `fullscreen` restore the display size (a fixed 1024×768 — that part isn't configurable).
 - **WebSocket + Action Cable** — `new WebSocket(url)` works in-process over the `rack.hijack` socket the Rack app hijacks (hand-rolled RFC6455, including subprotocol negotiation). The real `@rails/actioncable` consumer connects, subscribes, and receives broadcasts, so `turbo_stream_from` live updates work. Constraints: server pushes land at settle (not instant); the Cable app must use the **async / in-process** adapter (a real Redis adapter needs real Redis); binary frames are V8-only (QuickJS corrupts raw bytes across the host boundary — text, hence Action Cable, works on both engines). `EventSource` and Web Workers are likewise real (background reader threads draining at settle).

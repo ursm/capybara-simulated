@@ -144,6 +144,12 @@ module Capybara
         result
       end
 
+      # The ACTIVE window's page, painted for the trace's final state (`TracePersistence`) —
+      # `current_browser`, like every other user-facing read here, not the primary `browser`: a
+      # test that ended inside `switch_to_window` would otherwise be handed a picture of the
+      # window it was not looking at.
+      def trace_screenshot = current_browser.trace_screenshot
+
       def tracing?      = !current_trace.nil?
       def current_trace = browser.trace || browser.pending_trace
 

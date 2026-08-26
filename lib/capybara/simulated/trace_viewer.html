@@ -101,12 +101,14 @@
   .kv.hdr dt { color: var(--muted); }
   .net-body { max-height: 260px; overflow: auto; background: var(--code); border: 1px solid var(--border);
               border-radius: 6px; padding: 8px 10px; font-size: 12px; margin: 0; white-space: pre-wrap; word-break: break-word; }
-  .tabs { display: flex; gap: 6px; margin-bottom: 8px; }
-  .tabs button.on { background: var(--accent-soft); border-color: var(--accent); color: var(--accent); }
-  iframe.dom { width: 100%; height: 460px; border: 1px solid var(--border); border-radius: 6px; background: #fff; }
   pre.dom { max-height: 460px; overflow: auto; background: var(--code); border: 1px solid var(--border);
             border-radius: 6px; padding: 12px; font-size: 12px; margin: 0; }
   .muted { color: var(--muted); }
+  /* Scaled to the panel, never up: a viewport-sized shot is wider than the detail column, and a
+     short one (a small `full: false` page) should not be blown up into a blur. */
+  .final { padding: 12px 16px; border-bottom: 1px solid var(--border); }
+  .final h3 { margin: 0 0 8px; font-size: 13px; font-weight: 600; }
+  .shot { display: block; max-width: 100%; height: auto; border: 1px solid var(--border); background: #fff; }
   #empty { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 14px; color: var(--muted); text-align: center; }
   #empty.hide { display: none; }
   #drop-veil { position: fixed; inset: 0; background: rgba(37,99,235,.08); border: 3px dashed var(--accent);
@@ -118,6 +120,7 @@
 <header>
   <h1>capybara-simulated trace</h1>
   <div class="meta" id="meta"></div>
+  <div class="final hide" id="final"></div>
   <span class="spacer"></span>
   <label class="btn">Load JSON…<input id="file" type="file" accept=".json,application/json" hidden></label>
 </header>
@@ -138,6 +141,7 @@
   var detailEl = document.getElementById('detail');
   var emptyEl  = document.getElementById('empty');
   var metaEl   = document.getElementById('meta');
+  var finalEl  = document.getElementById('final');
   var trace = null, selected = 0;
 
   // Escapes both text and double-quoted-attribute contexts (severity /
@@ -161,7 +165,7 @@
     trace = data; selected = 0;
     emptyEl.classList.add('hide');
     stepsEl.style.display = ''; detailEl.style.display = '';
-    renderMeta(); renderSteps(); renderDetail();
+    renderMeta(); renderFinalShot(); renderSteps(); renderDetail();
   }
 
   function renderMeta() {
@@ -173,6 +177,19 @@
     var total = trace.steps.reduce(function (a, s) { return a + (s.duration_ms || 0); }, 0);
     parts.push('<span>' + total + ' ms total</span>');
     metaEl.innerHTML = parts.join('');
+  }
+
+  // The state a FAILING example ended in — one paint, taken after the example (see
+  // `TracePersistence`). Trace-level rather than per step, and rendered whether or not any step is
+  // selected: the common failure — an expectation that did not hold — records no errored step at
+  // all, so a viewer that only showed it inside a step showed nothing.
+  function renderFinalShot() {
+    var shot = (trace.metadata || {}).screenshot;
+    finalEl.innerHTML = shot
+      ? '<h3>Final state</h3><img class="shot" alt="the page as the driver painted it at the end ' +
+        'of this example" src="' + esc(shot) + '">'
+      : '';
+    finalEl.classList.toggle('hide', !shot);
   }
 
   function renderSteps() {
@@ -283,20 +300,32 @@
         '<th>Type</th><th>Size</th><th>Time</th></tr>' + rows + '</table>');
     }
 
+    // The page as the driver painted it — the same boxes every geometry query reads, so this shows
+    // what the step SAW, not how a browser would have rendered it. Per step, and only under
+    // `CSIM_TRACE=full`; the state a FAILING example ENDED in is trace-level, and renders with the
+    // trace (`renderFinalShot`).
+    if (s.shot_after) {
+      html += section('Screenshot',
+        '<img class="shot" alt="the page as the driver painted it" src="' + esc(s.shot_after) + '">');
+    }
+
     if (s.dom_after) {
-      html += section('DOM snapshot',
-        '<div class="tabs"><button id="t-prev" class="on">Preview</button>' +
-        '<button id="t-src">HTML</button></div><div id="dom-host"></div>');
+      // SOURCE, not a rendered preview. This used to re-render the snapshot in an iframe, which
+      // was both redundant beside the screenshot above and misleading: the viewer's own browser
+      // draws it, and the snapshot's `<link>` stylesheets do not resolve from `file://` — so the
+      // "preview" was typically unstyled HTML, resembling neither what the step SAW nor what a
+      // browser would show. What the snapshot is uniquely good for is reading and copying.
+      html += section('DOM snapshot', '<div id="dom-host"></div>');
     } else {
       html += section('DOM snapshot',
-        '<div class="muted">Not captured for this step — snapshots are taken only on an action error, ' +
+        '<div class="muted">Not captured for this step — a snapshot is taken on an action error, ' +
         'or for every step under <code>CSIM_TRACE=full</code>.</div>');
     }
 
     detailEl.innerHTML = html;
     detailEl.scrollTop = 0;
     if (s.network && s.network.length) { wireNetwork(); }
-    if (s.dom_after) { wireDomTabs(s.dom_after); }
+    if (s.dom_after) { wireDomSource(s.dom_after); }
   }
 
   // Pretty-print a DOM-snapshot HTML string for the source view: the
@@ -356,24 +385,10 @@
     return out.join('\n');
   }
 
-  function wireDomTabs(domHtml) {
-    var host = document.getElementById('dom-host');
-    var bPrev = document.getElementById('t-prev');
-    var bSrc  = document.getElementById('t-src');
-    function preview() {
-      bPrev.classList.add('on'); bSrc.classList.remove('on');
-      var f = document.createElement('iframe');
-      f.className = 'dom'; f.setAttribute('sandbox', '');  // no scripts: a static visual snapshot
-      host.innerHTML = ''; host.appendChild(f);
-      f.srcdoc = domHtml;
-    }
-    function source() {
-      bSrc.classList.add('on'); bPrev.classList.remove('on');
-      var pretty = formatHtml(domHtml);
-      host.innerHTML = '<pre class="dom">' + esc(pretty != null ? pretty : domHtml) + '</pre>';
-    }
-    bPrev.onclick = preview; bSrc.onclick = source;
-    preview();
+  function wireDomSource(domHtml) {
+    var pretty = formatHtml(domHtml);
+    document.getElementById('dom-host').innerHTML =
+      '<pre class="dom">' + esc(pretty != null ? pretty : domHtml) + '</pre>';
   }
 
   // ── loading other traces (FileReader → CORS-free, works on file://) ──

@@ -5,9 +5,13 @@ require 'fileutils'
 
 module Capybara
   module Simulated
-    # Per-test trace of Capybara actions with DOM snapshots, console
-    # output, and network requests interleaved. JSON output, one file
-    # per test — downstream tooling builds whatever viewer it wants.
+    # Per-test trace of Capybara actions with DOM snapshots, screenshots,
+    # console output, and network requests interleaved. JSON output, one
+    # file per test — downstream tooling builds whatever viewer it wants.
+    #
+    # A screenshot is carried INLINE as a data URL, like everything else here:
+    # the viewer's whole point is that it opens from `file://` with no server,
+    # and a side-file image would need one (or a second artefact to lose).
     #
     # Off by default. `CSIM_TRACE_DIR=/path/to/dir` enables auto-mode
     # via `Browser#record_action`; the RSpec hook in `csim_rspec.rb`
@@ -21,6 +25,7 @@ module Capybara
         :url_before,
         :url_after,
         :dom_after,    # only the post-action snapshot — the previous step's `dom_after` is the implicit "before"
+        :shot_after,   # …and the same moment PAINTED, as a `data:image/png;base64,…` URL
         :console,
         :network,
         :elapsed_ms,
@@ -99,7 +104,7 @@ module Capybara
         @network_buf = []
       end
 
-      def finish_step(url_after: nil, dom_after: nil, error: nil)
+      def finish_step(url_after: nil, dom_after: nil, shot_after: nil, error: nil)
         return unless @open_step
         s = @open_step
         @steps << Step.new(
@@ -109,6 +114,7 @@ module Capybara
           url_before:   s[:url_before],
           url_after:    url_after,
           dom_after:    dom_after,
+          shot_after:   shot_after,
           console:      @console_buf,
           network:      @network_buf,
           elapsed_ms:   (s[:start_ms] - @started_at).round,
@@ -118,6 +124,14 @@ module Capybara
         @open_step   = nil
         @console_buf = []
         @network_buf = []
+      end
+
+      # Is the step just recorded another attempt at the SAME failing action? Capybara retries an
+      # action for its whole wait window, and every attempt records a step — so this is what keeps
+      # a screenshot from being painted 60 times for one failed click.
+      def retrying_failure?(kind, description)
+        last = @steps.last
+        !last.nil? && !last.error.nil? && last.kind == kind && last.description == description
       end
 
       def empty? = @steps.empty?
