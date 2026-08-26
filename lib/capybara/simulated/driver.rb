@@ -144,6 +144,9 @@ module Capybara
         result
       end
 
+      # Which JS engine is behind this driver (`:v8` / `:quickjs`), for a trace's metadata.
+      def js_engine = browser.js_engine
+
       # The ACTIVE window's page, painted for the trace's final state (`TracePersistence`) —
       # `current_browser`, like every other user-facing read here, not the primary `browser`: a
       # test that ended inside `switch_to_window` would otherwise be handed a picture of the

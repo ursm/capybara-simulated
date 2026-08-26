@@ -660,8 +660,14 @@ module Capybara
       ENGINE_GEM = {v8: %w[rusty_racer], quickjs: %w[quickjs]}.freeze
       private_constant :ENGINE_GEM
 
+      # Which JS engine this browser is running on, as a symbol. Recorded in a trace: a trace is
+      # an artifact someone reads later, and "which engine produced this" is the first thing that
+      # explains an engine-specific failure.
+      attr_reader :js_engine
+
       def build_runtime(engine)
         engine ||= detect_js_engine
+        @js_engine = engine
         case engine
         when :v8
           require_relative 'v8_runtime'

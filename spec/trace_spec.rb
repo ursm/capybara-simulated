@@ -86,21 +86,36 @@ RSpec.describe Capybara::Simulated::Trace do
       expect(html).to include('capybara-simulated trace')  # the viewer chrome
     end
 
-    it 'escapes `</` so an embedded </script> cannot close the data block' do
+    it 'escapes EVERY `<`, so nothing in a snapshot can steer the HTML tokenizer' do
       html = described_class.render_viewer(sample_trace.to_json)
 
       data = html[%r{<script id="csim-trace"[^>]*>(.*?)</script>}m, 1]
-      # The data block carries no raw `</`; the snapshot's `</script>`
-      # survives only as the JSON escape `<\/script>`.
-      expect(data).not_to include('</')
-      expect(data).to include('<\\/script>')
+      expect(data).not_to include('<')
+      expect(data).to include('\\u003c/script>')
+    end
+
+    # Escaping only `</` is the tempting half-measure, and it is worse than nothing: `<!--` puts
+    # the tokenizer into script-data-escaped state and a following `<script` into DOUBLE-escaped
+    # state, where a real `</script>` no longer closes the element — and `</` escaping guarantees
+    # the one sequence that could leave that state never appears. The viewer swallowed itself and
+    # rendered a blank page. A page with a commented-out script tag is all it takes.
+    it 'survives a snapshot that comments out a script tag' do
+      trace = described_class.new(metadata: {title: 'demo'})
+      trace.begin_step(:visit, description: '/')
+      trace.finish_step(dom_after: '<html><head><!-- <script src="/a.js"></script> --></head></html>')
+      html = described_class.render_viewer(trace.to_json)
+
+      data = html[%r{<script id="csim-trace"[^>]*>(.*?)</script>}m, 1]
+      # The block ends where it should: everything after it is still the viewer, not swallowed text.
+      expect(html[html.index(data) + data.length, 400]).to include('</script>')
+      expect(JSON.parse(data.gsub('\\u003c', '<'))['steps'][0]['dom_after']).to include('<!-- <script')
     end
 
     it 'round-trips: the embedded JSON un-escapes back to the original trace' do
       html = described_class.render_viewer(sample_trace.to_json)
 
       data    = html[%r{<script id="csim-trace"[^>]*>(.*?)</script>}m, 1]
-      decoded = JSON.parse(data.gsub('<\\/', '</'))
+      decoded = JSON.parse(data.gsub('\\u003c', '<'))
 
       expect(decoded['metadata']['title']).to eq('demo')
       expect(decoded['steps'].size).to eq(2)
@@ -182,6 +197,7 @@ RSpec.describe Capybara::Simulated::TracePersistence do
     def tracing?          = !@trace.nil?
     def current_trace     = @trace
     def stop_tracing(path:) = @trace.write_json(path)
+    def js_engine           = :v8
     # Counted, because WHEN this is called is the contract: a paint is ~50 ms on a small page and
     # several hundred on an app-scale one, so a passing example must not pay for one.
     def trace_screenshot
@@ -244,6 +260,21 @@ RSpec.describe Capybara::Simulated::TracePersistence do
         expect(driver.shots).to eq(1)
         meta = JSON.parse(File.read(File.join(dir, 'boom.json')))['metadata']
         expect(meta['screenshot']).to eq('data:image/png;base64,AAA')
+      end
+    end
+
+    it 'records which engine produced the trace, and omits the key when the driver cannot say' do
+      Dir.mktmpdir do |dir|
+        described_class.persist(fake_driver.new(traced), dir, title: 'engine', file: './x:1',
+                                                              outcome: 'passed', exception: nil)
+        expect(JSON.parse(File.read(File.join(dir, 'engine.json')))['metadata']['engine']).to eq('v8')
+
+        # A foreign driver — or one whose accessor raises — leaves the key out rather than
+        # writing a null, and never costs the trace file.
+        mute = fake_driver.new(traced)
+        mute.define_singleton_method(:js_engine) { raise 'no' }
+        described_class.persist(mute, dir, title: 'mute', file: './x:1', outcome: 'passed', exception: nil)
+        expect(JSON.parse(File.read(File.join(dir, 'mute.json')))['metadata']).not_to have_key('engine')
       end
     end
 

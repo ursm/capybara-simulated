@@ -39,17 +39,30 @@ module Capybara
 
       # Render the self-contained HTML viewer for a trace JSON *string*,
       # embedding it inline (the `capybara-simulated trace` CLI is the
-      # caller). `</` → `<\/` so an embedded `</script>` inside a DOM
-      # snapshot can't close the data block early — still valid JSON
-      # (`\/` is a legal JSON escape for `/`). The whole point of inline
-      # embedding over fetch / `import … with { type: 'json' }` is that
-      # the result opens straight from `file://` with no server (module /
-      # fetch loads are CORS-blocked for `file://` origins).
+      # caller). The whole point of inline embedding over fetch / `import
+      # … with { type: 'json' }` is that the result opens straight from
+      # `file://` with no server (module / fetch loads are CORS-blocked
+      # for `file://` origins).
+      #
+      # EVERY `<` is escaped, not just `</`. Escaping only the closing
+      # form looks sufficient — nothing can close the block early — and
+      # is worse than nothing: `<!--` puts the HTML tokenizer into
+      # script-data-escaped state and a following `<script` into
+      # script-data-DOUBLE-escaped state, where a real `</script>` no
+      # longer closes the element and only `</script` can leave... which
+      # is exactly what the old escaping guaranteed could never appear.
+      # A DOM snapshot of a page with a commented-out script tag —
+      # `<!-- <script src="/analytics.js"></script> -->`, which is not an
+      # exotic thing for a page to contain — therefore swallowed the rest
+      # of the viewer as text and rendered a blank white page, with
+      # nothing in the console to say why. `\u003c` is a legal escape
+      # inside a JSON string, `<` cannot appear anywhere else in JSON, and
+      # `JSON.parse` restores it, so the round trip is exact.
       def self.render_viewer(json_text)
         template = (@viewer_template ||= File.read(VIEWER_TEMPLATE_PATH))
         # Block form: the replacement is taken literally, so backslashes
         # in the JSON aren't interpreted as regexp backreferences.
-        template.sub(VIEWER_DATA_TOKEN) { json_text.to_s.gsub('</', '<\/') }
+        template.sub(VIEWER_DATA_TOKEN) { json_text.to_s.gsub('<', '\u003c') }
       end
 
       attr_reader :steps, :metadata

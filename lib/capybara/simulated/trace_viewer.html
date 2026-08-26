@@ -7,142 +7,311 @@
 <!--
   Self-contained trace viewer. The `capybara-simulated trace <file.json>`
   CLI replaces the data token in the script block below with the trace
-  JSON (with `</` escaped to `<\/` so an embedded `</script>` in a DOM
-  snapshot can't close the data block). Inline embedding — not fetch /
+  JSON, with every `<` escaped to `\u003c` — not just `</`: a snapshot
+  containing `<!-- <script …` steers the HTML tokenizer into a state a
+  real `</script>` no longer ends, and escaping only the closing form
+  guarantees it can never leave (see `Trace.render_viewer`). Inline
+  embedding — not fetch /
   `import … with { type: 'json' }` — is what lets the file open straight
   from `file://` without a server (module/fetch loads are CORS-blocked
   for `file://` origins). The Load button / drag-and-drop reads any other
   trace JSON via FileReader, which is also CORS-free.
+
+  Everything here is inline for the same reason: no webfont, no CDN, no
+  second file. A trace is an artifact people open from a CI download,
+  often offline, so the design's IBM Plex Mono is served by whatever the
+  reader's system mono is instead.
 -->
 <script id="csim-trace" type="application/json">__CSIM_TRACE_DATA__</script>
 <style>
   :root {
-    --bg: #f6f7f9; --panel: #fff; --border: #e2e5ea; --text: #1f2329;
-    --muted: #6b7280; --accent: #2563eb; --accent-soft: #eaf0fe;
-    --error: #dc2626; --error-soft: #fdecec; --ok: #15803d;
-    --warn: #b45309; --code: #f3f4f6;
+    --bg: #f6f7f8; --panel: #fff; --border: #e3e6ea; --hair: #eef0f3;
+    --text: #14171c; --text-2: #3d434c; --muted: #6a7280;
+    --accent: oklch(0.52 0.16 259); --accent-soft: oklch(0.97 0.02 259);
+    --red: oklch(0.48 0.19 27); --red-deep: oklch(0.42 0.19 27);
+    --red-line: oklch(0.9 0.05 27); --red-soft: oklch(0.97 0.02 27);
+    --red-tint: oklch(0.94 0.05 27); --amber: oklch(0.55 0.12 70);
+    --green: oklch(0.5 0.13 150);
+    --mono: ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, monospace;
+    --row-pad: 3px;
   }
   * { box-sizing: border-box; }
   html, body { height: 100%; margin: 0; }
   body {
-    font: 14px/1.5 -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-    color: var(--text); background: var(--bg); display: flex; flex-direction: column;
+    display: flex; flex-direction: column; overflow: hidden;
+    background: var(--bg); color: var(--text);
+    font: 12.5px/1.45 system-ui, -apple-system, 'Helvetica Neue', sans-serif;
+    -webkit-font-smoothing: antialiased;
   }
-  header {
-    display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
-    padding: 10px 16px; background: var(--panel); border-bottom: 1px solid var(--border);
-  }
-  header h1 { font-size: 15px; margin: 0; font-weight: 600; }
-  header .meta { color: var(--muted); font-size: 12px; display: flex; gap: 14px; flex-wrap: wrap; }
-  header .spacer { flex: 1; }
-  .badge { display: inline-block; padding: 1px 8px; border-radius: 10px; font-size: 11px; font-weight: 600; }
-  .badge.passed { background: #e6f4ea; color: var(--ok); }
-  .badge.failed { background: var(--error-soft); color: var(--error); }
+  .mono { font-family: var(--mono); }
+  .num { font-variant-numeric: tabular-nums; }
   button, label.btn {
-    font: inherit; font-size: 13px; padding: 5px 12px; border: 1px solid var(--border);
-    background: var(--panel); border-radius: 6px; cursor: pointer; color: var(--text);
+    font: inherit; font-size: 11px; padding: 3px 9px; border: 1px solid var(--border);
+    background: var(--panel); border-radius: 4px; color: var(--text-2); cursor: pointer;
   }
-  button:hover, label.btn:hover { background: var(--code); }
-  main { flex: 1; display: flex; min-height: 0; }
-  #steps { width: 320px; flex: none; overflow-y: auto; border-right: 1px solid var(--border); background: var(--panel); }
+  button:hover, label.btn:hover { background: #f1f3f5; }
+  ::-webkit-scrollbar { width: 10px; height: 10px; }
+  ::-webkit-scrollbar-thumb { background: #c9ced6; border: 3px solid #fff; border-radius: 6px; }
+  ::-webkit-scrollbar-track { background: #fff; }
+
+  /* ── header ───────────────────────────────────────────────────────── */
+  header {
+    flex: none; display: flex; align-items: center; gap: 14px; height: 42px;
+    padding: 0 12px; background: var(--panel); border-bottom: 1px solid var(--border);
+  }
+  .brand { display: flex; align-items: baseline; gap: 7px; flex: none; }
+  .brand b { font-size: 11px; font-weight: 600; letter-spacing: .02em; }
+  .brand span { font-family: var(--mono); font-size: 10.5px; color: var(--muted); }
+  .rule { width: 1px; height: 18px; background: var(--border); flex: none; }
+  .ident { display: flex; align-items: center; gap: 8px; min-width: 0; flex: 1; }
+  .ident .title { font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .ident .file { font-family: var(--mono); font-size: 11px; color: var(--muted);
+                 white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .badge {
+    flex: none; padding: 1px 7px; border-radius: 3px; font-family: var(--mono);
+    font-size: 10px; font-weight: 600; letter-spacing: .04em; text-transform: uppercase;
+    background: #f1f3f5; color: var(--muted);
+  }
+  .badge.failed { background: var(--red-tint); color: var(--red); }
+  .badge.passed { background: oklch(0.94 0.05 150); color: var(--green); }
+  .stats { display: flex; align-items: center; gap: 12px; flex: none;
+           font-family: var(--mono); font-size: 11px; color: var(--muted); }
+  .actions { display: flex; align-items: center; gap: 6px; flex: none; }
+
+  /* ── layout ───────────────────────────────────────────────────────── */
+  main { flex: 1; display: flex; min-height: 0; overflow-x: auto; }
+  nav {
+    width: 306px; flex: none; display: flex; flex-direction: column;
+    background: var(--panel); border-right: 1px solid var(--border); min-height: 0;
+  }
+  .nav-head, .nav-foot {
+    flex: none; display: flex; align-items: center; gap: 10px; padding: 5px 10px;
+  }
+  .nav-head { justify-content: space-between; border-bottom: 1px solid var(--hair); }
+  .nav-foot { padding: 4px 10px; border-top: 1px solid var(--hair);
+              font-family: var(--mono); font-size: 10px; color: var(--muted); }
+  .cap { font-size: 10px; font-weight: 600; letter-spacing: .07em;
+         text-transform: uppercase; color: var(--muted); }
+  #steps { flex: 1; overflow-y: auto; min-height: 0; }
+  .jump {
+    font-family: var(--mono); font-size: 10px; padding: 1px 6px; border-radius: 3px;
+    border: 1px solid oklch(0.88 0.06 27); background: var(--red-soft); color: var(--red);
+  }
+  .jump:hover { background: var(--red-tint); }
+  .jump[hidden] { display: none; }
+
   .step {
-    display: flex; align-items: baseline; gap: 8px; padding: 8px 12px;
-    border-bottom: 1px solid var(--border); cursor: pointer; border-left: 3px solid transparent;
+    display: flex; align-items: baseline; gap: 7px; padding: var(--row-pad) 10px;
+    cursor: pointer; border-bottom: 1px solid #f1f3f5; border-left: 2px solid transparent;
   }
   .step:hover { background: var(--bg); }
-  .step.sel { background: var(--accent-soft); border-left-color: var(--accent); }
-  .step.err { border-left-color: var(--error); }
-  .step .idx { color: var(--muted); font-variant-numeric: tabular-nums; font-size: 12px; min-width: 22px; }
-  .step .kind { font-weight: 600; font-size: 12px; }
-  .step .desc { flex: 1; color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-  .step .dur { color: var(--muted); font-size: 11px; font-variant-numeric: tabular-nums; }
-  .step.err .kind { color: var(--error); }
-  #detail { flex: 1; overflow-y: auto; padding: 18px 22px; min-width: 0; }
-  #detail h2 { margin: 0 0 2px; font-size: 17px; }
-  #detail .sub { color: var(--muted); font-size: 12px; margin-bottom: 16px; }
-  section.block { margin: 18px 0; }
-  section.block > h3 {
-    font-size: 12px; text-transform: uppercase; letter-spacing: .04em;
-    color: var(--muted); margin: 0 0 8px; font-weight: 600;
+  .step .idx { flex: none; font-family: var(--mono); font-size: 10.5px; color: var(--muted); }
+  .step .kind {
+    flex: none; width: 82px; font-family: var(--mono); font-size: 11px; font-weight: 600;
+    color: var(--text-2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
   }
-  code, pre, .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
-  .kv { display: grid; grid-template-columns: auto 1fr; gap: 2px 14px; }
+  .step .desc {
+    flex: 1; min-width: 0; font-family: var(--mono); font-size: 11.5px;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  }
+  .step .mark { flex: none; width: 8px; text-align: center; font-family: var(--mono);
+                font-size: 11px; font-weight: 700; color: var(--amber); }
+  .step .dur { flex: none; font-family: var(--mono); font-size: 10.5px; color: var(--muted); }
+  .step.sel { background: var(--accent-soft); border-left-color: var(--accent); }
+  .step.sel .kind { color: var(--accent); }
+  .step.err { border-left-color: var(--red); }
+  .step.err .kind, .step.err .mark { color: var(--red); }
+  .step.err.sel { background: var(--red-soft); }
+
+  /* ── detail ───────────────────────────────────────────────────────── */
+  section.pane { flex: 1; display: flex; flex-direction: column; min-width: 520px; min-height: 0; }
+  .banner {
+    flex: none; display: flex; align-items: flex-start; gap: 10px; padding: 8px 14px;
+    background: var(--red-soft); border-bottom: 1px solid var(--red-line);
+  }
+  .banner[hidden] { display: none; }
+  .banner .lbl { flex: none; margin-top: 1px; font-family: var(--mono); font-size: 10px;
+                 font-weight: 600; letter-spacing: .04em; text-transform: uppercase; color: var(--red); }
+  .banner .cls { font-family: var(--mono); font-size: 11.5px; font-weight: 600; color: var(--red-deep); }
+  .banner .msg { font-family: var(--mono); font-size: 11.5px; color: var(--text-2);
+                 white-space: pre-wrap; word-break: break-word; }
+  #detail { flex: 1; overflow-y: auto; min-height: 0; padding: 14px 16px 40px; }
+  .head { display: flex; align-items: baseline; gap: 9px; }
+  .head .idx { font-family: var(--mono); font-size: 12px; color: var(--muted); }
+  .head h2 { margin: 0; font-size: 15px; font-weight: 600; letter-spacing: -.01em; }
+  .desc-line { margin-top: 2px; font-family: var(--mono); font-size: 12px;
+               color: var(--text-2); word-break: break-word; }
+  .facts {
+    margin-top: 12px; display: flex; flex-wrap: wrap; gap: 0 22px; padding: 7px 10px;
+    background: var(--panel); border: 1px solid var(--border); border-radius: 5px;
+  }
+  .facts > div { display: flex; gap: 7px; align-items: baseline; min-width: 0; }
+  .facts .k { font-size: 10px; letter-spacing: .05em; text-transform: uppercase; color: var(--muted); }
+  .facts .v { font-family: var(--mono); font-size: 11.5px; font-variant-numeric: tabular-nums; }
+  .facts .v.from { color: var(--muted); }
+  .facts .v.to { font-weight: 600; }
+  .block { margin-top: 16px; }
+  .block > h3 { display: flex; align-items: center; gap: 8px; margin: 0 0 6px; font-weight: 600; }
+  .block > h3 .cap { flex: none; }
+  .block > h3 .count { font-family: var(--mono); font-size: 10px; color: var(--muted); font-weight: 400; }
+  .block > h3 .hair { flex: 1; height: 1px; background: var(--border); }
+  .block > h3 .note { font-size: 10.5px; color: var(--muted); font-weight: 400; }
+  .card { background: var(--panel); border: 1px solid var(--border); border-radius: 4px; }
+  .panel-error { border-color: var(--red-line); border-left: 2px solid oklch(0.55 0.19 27); padding: 8px 11px; }
+  .panel-error .cls { font-family: var(--mono); font-size: 11.5px; font-weight: 600; color: oklch(0.46 0.19 27); }
+  .panel-error .msg { margin-top: 3px; font-family: var(--mono); font-size: 11.5px;
+                      color: var(--text-2); white-space: pre-wrap; word-break: break-word; }
+  .log { display: flex; gap: 10px; padding: var(--row-pad) 10px; border-top: 1px solid #f1f3f5; }
+  .log:first-child { border-top: none; }
+  .log .sev {
+    flex: none; width: 44px; padding-top: 2px; font-family: var(--mono); font-size: 10px;
+    font-weight: 600; letter-spacing: .04em; text-transform: uppercase; color: var(--muted);
+  }
+  .log .sev.error { color: var(--red); }
+  .log .sev.warn, .log .sev.warning { color: var(--amber); }
+  .log .msg { min-width: 0; font-family: var(--mono); font-size: 11.5px;
+              white-space: pre-wrap; word-break: break-word; }
+
+  .net { overflow-x: auto; }
+  .net-row, .net-head {
+    display: grid; grid-template-columns: 58px minmax(120px, 1fr) 44px 130px 62px 56px;
+    gap: 10px; min-width: 560px; padding: var(--row-pad) 10px; align-items: baseline;
+  }
+  .net-head {
+    background: #fafbfc; border-bottom: 1px solid var(--hair); font-size: 10px;
+    font-weight: 600; letter-spacing: .05em; text-transform: uppercase; color: var(--muted);
+  }
+  .net-row { cursor: pointer; border-bottom: 1px solid #f1f3f5; font-family: var(--mono); font-size: 11px; }
+  .net-row:hover { background: var(--bg); }
+  .net-row.open { background: #f7f8f9; }
+  .net-row .m { font-size: 11px; font-weight: 600; }
+  .net-row .u { font-size: 11.5px; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .net-row .s { font-size: 11.5px; font-variant-numeric: tabular-nums; }
+  .net-row .s.ok { color: var(--green); } .net-row .s.redir { color: var(--amber); } .net-row .s.err { color: var(--red); }
+  .net-row .t, .net-row .z, .net-row .d { color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .net-row .z, .net-row .d { text-align: right; font-variant-numeric: tabular-nums; }
+  .net-head .z, .net-head .d { text-align: right; }
+  .net-detail {
+    padding: 8px 10px 10px 68px; min-width: 560px; background: #fafbfc;
+    border-bottom: 1px solid var(--hair); display: grid; gap: 8px;
+  }
+  .net-detail[hidden] { display: none; }
+  .net-sub { font-size: 10px; font-weight: 600; letter-spacing: .05em;
+             text-transform: uppercase; color: var(--muted); margin-bottom: 2px; }
+  .kv { display: grid; grid-template-columns: max-content 1fr; gap: 1px 12px;
+        font-family: var(--mono); font-size: 11px; margin: 0; }
   .kv dt { color: var(--muted); }
   .kv dd { margin: 0; word-break: break-all; }
-  .url-to { font-weight: 600; }
-  .panel-error { background: var(--error-soft); border: 1px solid #f3c4c4; border-radius: 6px; padding: 10px 12px; }
-  .panel-error .cls { font-weight: 600; color: var(--error); }
-  .panel-error .msg { white-space: pre-wrap; margin-top: 4px; }
-  .logs { border: 1px solid var(--border); border-radius: 6px; overflow: hidden; }
-  .log { display: flex; gap: 10px; padding: 4px 10px; border-top: 1px solid var(--border); font-size: 12.5px; }
-  .log:first-child { border-top: none; }
-  .log .sev { flex: none; width: 52px; font-weight: 600; font-size: 11px; text-transform: uppercase; }
-  .log .sev.error { color: var(--error); } .log .sev.warn, .log .sev.warning { color: var(--warn); }
-  .log .sev.debug { color: var(--muted); }
-  .log .msg { white-space: pre-wrap; word-break: break-word; }
-  .net-hint { font-size: 11px; margin-bottom: 6px; }
-  .net { width: 100%; border-collapse: collapse; font-size: 12.5px; }
-  .net th, .net td { text-align: left; padding: 4px 10px; border-bottom: 1px solid var(--border); vertical-align: top; }
-  .net th { color: var(--muted); font-weight: 600; }
-  .net td.method { font-weight: 600; } .net td.url { word-break: break-all; }
-  .net td.num { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
-  .net td.status { font-variant-numeric: tabular-nums; }
-  .net td.status.ok { color: var(--ok); } .net td.status.redir { color: var(--warn); } .net td.status.err { color: var(--error); }
-  .net-row { cursor: pointer; }
-  .net-row:hover { background: var(--bg); }
-  .net-row.open { background: var(--accent-soft); }
-  .redir-tag { display: inline-block; font-size: 10px; font-weight: 600; color: var(--warn);
-               background: #fff5e6; border-radius: 8px; padding: 0 6px; vertical-align: middle; }
-  .net-detail td { background: var(--bg); }
-  .net-sub { font-size: 11px; font-weight: 600; color: var(--muted); text-transform: uppercase;
-             letter-spacing: .03em; margin: 8px 0 4px; }
-  .net-detail .net-sub:first-child { margin-top: 0; }
-  .kv.hdr { font-size: 12px; grid-template-columns: max-content 1fr; gap: 1px 12px; }
-  .kv.hdr dt { color: var(--muted); }
-  .net-body { max-height: 260px; overflow: auto; background: var(--code); border: 1px solid var(--border);
-              border-radius: 6px; padding: 8px 10px; font-size: 12px; margin: 0; white-space: pre-wrap; word-break: break-word; }
-  pre.dom { max-height: 460px; overflow: auto; background: var(--code); border: 1px solid var(--border);
-            border-radius: 6px; padding: 12px; font-size: 12px; margin: 0; }
-  .muted { color: var(--muted); }
-  /* Scaled to the panel, never up: a viewport-sized shot is wider than the detail column, and a
-     short one (a small `full: false` page) should not be blown up into a blur. */
-  .final { padding: 12px 16px; border-bottom: 1px solid var(--border); }
-  .final h3 { margin: 0 0 8px; font-size: 13px; font-weight: 600; }
-  .shot { display: block; max-width: 100%; height: auto; border: 1px solid var(--border); background: #fff; }
-  #empty { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 14px; color: var(--muted); text-align: center; }
-  #empty.hide { display: none; }
-  #drop-veil { position: fixed; inset: 0; background: rgba(37,99,235,.08); border: 3px dashed var(--accent);
-               display: none; align-items: center; justify-content: center; font-size: 18px; color: var(--accent); z-index: 10; }
+  pre.body, pre.dom {
+    margin: 0; overflow: auto; padding: 7px 9px; background: var(--panel);
+    border: 1px solid var(--border); border-radius: 4px;
+    font-family: var(--mono); font-size: 11px; white-space: pre-wrap; word-break: break-word;
+  }
+  pre.body { max-height: 200px; }
+  pre.dom { max-height: 430px; font-size: 11.5px; line-height: 1.5; tab-size: 2; }
+  pre.dom.nowrap { white-space: pre; word-break: normal; }
+  .empty-note { padding: 9px 11px; border: 1px dashed #dfe3e8; border-radius: 4px;
+                color: var(--muted); font-size: 11.5px; }
+  .empty-note code { font-family: var(--mono); background: #f1f3f5; padding: 0 4px; border-radius: 3px; }
+
+  /* ── screenshot rail ──────────────────────────────────────────────── */
+  aside {
+    width: 348px; flex: none; display: flex; flex-direction: column;
+    background: var(--panel); border-left: 1px solid var(--border); min-height: 0;
+  }
+  aside[hidden] { display: none; }
+  .rail-tabs { flex: none; display: flex; align-items: center; gap: 2px;
+               padding: 4px 6px; border-bottom: 1px solid var(--hair); }
+  .rail-tabs .tab { border-color: transparent; background: transparent; color: var(--muted); }
+  .rail-tabs .tab.on { border-color: var(--border); background: #f1f3f5; color: var(--text); font-weight: 600; }
+  .rail-tabs .tab[hidden] { display: none; }
+  .rail-tabs .dims { flex: 1; text-align: right; padding-right: 4px;
+                     font-family: var(--mono); font-size: 10px; color: var(--muted); }
+  .rail-body { flex: 1; overflow-y: auto; min-height: 0; padding: 10px; }
+  .frame {
+    border: 1px solid var(--border); border-radius: 4px; overflow: hidden;
+    background: repeating-linear-gradient(135deg, #f3f4f6 0 6px, #fafbfc 6px 12px);
+  }
+  .frame .bar { height: 22px; display: flex; align-items: center; gap: 6px; padding: 0 8px;
+                background: var(--panel); border-bottom: 1px solid var(--border); }
+  .frame .dot { width: 6px; height: 6px; border-radius: 50%; background: #d6dae0; flex: none; }
+  .frame .loc { font-family: var(--mono); font-size: 10px; color: var(--muted);
+                white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  /* Scaled to the rail, never up: a viewport-sized shot is wider than the rail, and a short one
+     (a small `full: false` page) should not be blown up into a blur. */
+  .shot { display: block; max-width: 100%; width: auto; height: auto; background: #fff; }
+  .slot { height: 300px; display: flex; align-items: center; justify-content: center;
+          text-align: center; padding: 12px; }
+  .slot span { font-family: var(--mono); font-size: 10.5px; color: var(--muted);
+               background: var(--panel); border: 1px solid var(--border); border-radius: 3px; padding: 3px 7px; }
+  .caption { margin: 8px 0 0; font-size: 11px; color: var(--muted); text-wrap: pretty; }
+
+  /* ── empty / drop ─────────────────────────────────────────────────── */
+  #empty { flex: 1; display: flex; flex-direction: column; align-items: center;
+           justify-content: center; gap: 14px; color: var(--muted); text-align: center; }
+  #empty[hidden], main[hidden] { display: none; }
+  #drop-veil { position: fixed; inset: 0; background: oklch(0.52 0.16 259 / .08);
+               border: 3px dashed var(--accent); display: none; align-items: center;
+               justify-content: center; font-size: 18px; color: var(--accent); z-index: 10; }
   #drop-veil.on { display: flex; }
 </style>
 </head>
 <body>
 <header>
-  <h1>capybara-simulated trace</h1>
-  <div class="meta" id="meta"></div>
-  <div class="final hide" id="final"></div>
-  <span class="spacer"></span>
-  <label class="btn">Load JSON…<input id="file" type="file" accept=".json,application/json" hidden></label>
-</header>
-<main>
-  <div id="steps"></div>
-  <div id="detail"></div>
-  <div id="empty">
-    <div style="font-size:40px">📊</div>
-    <div>No trace loaded.<br>Drop a <code>*.json</code> trace here or use <b>Load JSON…</b>.</div>
+  <div class="brand"><b>capybara-simulated</b><span>trace</span></div>
+  <div class="rule" id="rule" hidden></div>
+  <div class="ident" id="ident"></div>
+  <div class="stats" id="stats"></div>
+  <div class="actions">
+    <button type="button" id="rail-toggle" hidden>Hide preview</button>
+    <label class="btn">Load JSON…<input id="file" type="file" accept=".json,application/json" hidden></label>
   </div>
+</header>
+<main id="main" hidden>
+  <nav>
+    <div class="nav-head">
+      <span class="cap">Steps</span>
+      <button type="button" class="jump" id="jump" hidden></button>
+    </div>
+    <div id="steps"></div>
+    <div class="nav-foot"><span>j / k move</span><span>f failure</span></div>
+  </nav>
+  <section class="pane">
+    <div class="banner" id="banner" hidden></div>
+    <div id="detail"></div>
+  </section>
+  <aside id="rail" hidden>
+    <div class="rail-tabs">
+      <button type="button" class="tab" id="tab-final">Final state</button>
+      <button type="button" class="tab" id="tab-step"></button>
+      <span class="dims" id="dims"></span>
+    </div>
+    <div class="rail-body" id="rail-body"></div>
+  </aside>
 </main>
+<div id="empty">
+  <div style="font-size:40px">📊</div>
+  <div>No trace loaded.<br>Drop a <code>*.json</code> trace here or use <b>Load JSON…</b>.</div>
+</div>
 <div id="drop-veil">Drop trace JSON to load</div>
 
 <script>
 (function () {
   'use strict';
-  var stepsEl  = document.getElementById('steps');
-  var detailEl = document.getElementById('detail');
-  var emptyEl  = document.getElementById('empty');
-  var metaEl   = document.getElementById('meta');
-  var finalEl  = document.getElementById('final');
-  var trace = null, selected = 0;
+  var $ = function (id) { return document.getElementById(id); };
+  var stepsEl = $('steps'), detailEl = $('detail'), emptyEl = $('empty'), mainEl = $('main');
+  var identEl = $('ident'), statsEl = $('stats'), bannerEl = $('banner'), jumpEl = $('jump');
+  var ruleEl = $('rule');
+  var railEl = $('rail'), railBodyEl = $('rail-body'), railToggleEl = $('rail-toggle');
+  var tabFinalEl = $('tab-final'), tabStepEl = $('tab-step'), dimsEl = $('dims');
+
+  var trace = null;      // the loaded trace
+  var rowEls = [];       // the step rows, kept so moving the selection is a class toggle
+  var selected = 0;      // index of the step being shown
+  var failureIdx = -1;   // first step that errored, or -1
+  var railOpen = true;   // the user's preference, kept across step changes
+  var shotTab = 'final'; // which screenshot the rail is showing
+  var wrap = false;      // DOM-source soft wrapping
 
   // Escapes both text and double-quoted-attribute contexts (severity /
   // outcome land in class="…"), so a quote in trace data can't break out
@@ -152,8 +321,25 @@
       .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
       .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
   }
+  function pad2(n) { return (n < 10 ? '0' : '') + n; }
+  // Trace data is whatever the app under test produced, and a field of the wrong SHAPE used to
+  // throw mid-render and leave a blank pane with nothing in the console.
+  function asArray(v) { return Array.isArray(v) ? v : []; }
+  // Trace-supplied words that land in `class="…"`, mapped to a KNOWN set rather than sanitised.
+  // `esc()` keeps a value inside its attribute, but not inside its own class: stripping the
+  // characters that could add a second class still lets a plain word collide with one of the
+  // viewer's own (an `outcome` of "hide" picked up a `display: none`). A whitelist cannot.
+  function outcomeClass(o) {
+    o = String(o == null ? '' : o).toLowerCase();
+    return o === 'failed' ? 'failed' : o === 'passed' ? 'passed' : '';
+  }
+  var SEVERITIES = {error: 1, warn: 1, warning: 1, debug: 1, log: 1, info: 1};
+  function sevClass(v) {
+    v = String(v == null ? '' : v).toLowerCase();
+    return SEVERITIES[v] ? v : '';
+  }
   function readEmbedded() {
-    var el = document.getElementById('csim-trace');
+    var el = $('csim-trace');
     try {
       var d = JSON.parse(el.textContent);
       return (d && Array.isArray(d.steps)) ? d : null;
@@ -162,53 +348,82 @@
 
   function load(data) {
     if (!data || !Array.isArray(data.steps)) { return; }
-    trace = data; selected = 0;
-    emptyEl.classList.add('hide');
-    stepsEl.style.display = ''; detailEl.style.display = '';
-    renderMeta(); renderFinalShot(); renderSteps(); renderDetail();
+    trace = data;
+    failureIdx = trace.steps.findIndex(function (s) { return !!s.error; });
+    // Open on the failure. That is what the reader came for, and on a long trace it is nowhere
+    // near the top; when nothing errored, the first step is the start of the story.
+    selected = failureIdx >= 0 ? failureIdx : 0;
+    shotTab = 'final';
+    emptyEl.hidden = true; mainEl.hidden = false;
+    try {
+      renderHeader(); renderSteps(); renderDetail();
+    } catch (e) {
+      // Better a visible complaint than the blank pane a mid-render throw used to leave.
+      detailEl.innerHTML = '<div class="empty-note">This trace could not be rendered: ' +
+        esc(e && e.message) + '</div>';
+    }
   }
 
-  function renderMeta() {
-    var m = trace.metadata || {}, parts = [];
-    if (m.title)   parts.push('<span>' + esc(m.title) + '</span>');
-    if (m.file)    parts.push('<span class="mono">' + esc(m.file) + '</span>');
-    if (m.outcome) parts.push('<span class="badge ' + esc(m.outcome) + '">' + esc(m.outcome) + '</span>');
-    parts.push('<span>' + trace.steps.length + ' steps</span>');
+  function renderHeader() {
+    var m = trace.metadata || {};
+    ruleEl.hidden = false;
+    var ident = '';
+    if (m.outcome) { ident += '<span class="badge ' + outcomeClass(m.outcome) + '">' + esc(m.outcome) + '</span>'; }
+    if (m.title)   { ident += '<span class="title">' + esc(m.title) + '</span>'; }
+    if (m.file)    { ident += '<span class="file">' + esc(m.file) + '</span>'; }
+    identEl.innerHTML = ident;
+
     var total = trace.steps.reduce(function (a, s) { return a + (s.duration_ms || 0); }, 0);
-    parts.push('<span>' + total + ' ms total</span>');
-    metaEl.innerHTML = parts.join('');
+    var stats = '<span>' + trace.steps.length + ' steps</span><span>' + total + ' ms</span>';
+    if (m.engine) { stats += '<span>engine ' + esc(m.engine) + '</span>'; }
+    statsEl.innerHTML = stats;
+
+    jumpEl.hidden = failureIdx < 0;
+    jumpEl.textContent = failureIdx < 0 ? '' : 'step ' + pad2(failureIdx);
   }
 
-  // The state a FAILING example ended in — one paint, taken after the example (see
-  // `TracePersistence`). Trace-level rather than per step, and rendered whether or not any step is
-  // selected: the common failure — an expectation that did not hold — records no errored step at
-  // all, so a viewer that only showed it inside a step showed nothing.
-  function renderFinalShot() {
-    var shot = (trace.metadata || {}).screenshot;
-    finalEl.innerHTML = shot
-      ? '<h3>Final state</h3><img class="shot" alt="the page as the driver painted it at the end ' +
-        'of this example" src="' + esc(shot) + '">'
-      : '';
-    finalEl.classList.toggle('hide', !shot);
-  }
-
+  // Built ONCE per trace. Rebuilding on every keypress cost 110 ms per `j` on a 5000-step trace
+  // (~9 fps held down) — and, worse, emptying the list reset its scroll, so the
+  // `scrollIntoView({block: 'nearest'})` that followed always landed the row against the bottom
+  // edge and `k` scrolled the wrong way. Moving the selection is two class toggles.
   function renderSteps() {
     stepsEl.innerHTML = '';
-    trace.steps.forEach(function (s, i) {
+    rowEls = trace.steps.map(function (s, i) {
+      // `!` for the step that failed, `·` for one that only complained — enough to scan a long
+      // list for where things started going wrong without opening every step.
+      var noisy = asArray(s.console).some(function (c) {
+        var sev = String((c && c.severity) || '').toLowerCase();
+        return sev === 'error' || sev === 'warn' || sev === 'warning';
+      });
       var row = document.createElement('div');
-      row.className = 'step' + (i === selected ? ' sel' : '') + (s.error ? ' err' : '');
+      row.className = 'step' + (s.error ? ' err' : '');
       row.innerHTML =
-        '<span class="idx">' + i + '</span>' +
+        '<span class="idx">' + pad2(i) + '</span>' +
         '<span class="kind">' + esc(s.kind) + '</span>' +
         '<span class="desc">' + esc(s.description) + '</span>' +
+        '<span class="mark">' + (s.error ? '!' : noisy ? '·' : '') + '</span>' +
         '<span class="dur">' + (s.duration_ms == null ? '' : s.duration_ms + 'ms') + '</span>';
-      row.onclick = function () { selected = i; renderSteps(); renderDetail(); };
+      row.onclick = function () { select(i); };
       stepsEl.appendChild(row);
+      return row;
     });
+    markSelected();
   }
 
-  function section(title, bodyHtml) {
-    return '<section class="block"><h3>' + title + '</h3>' + bodyHtml + '</section>';
+  function markSelected() {
+    rowEls.forEach(function (row, i) { row.classList.toggle('sel', i === selected); });
+    var row = rowEls[selected];
+    // Also on first paint: the viewer opens on the FAILURE, which on a long trace is far below
+    // the fold — leaving the reader looking at step 00 with no selected row in sight.
+    if (row && row.scrollIntoView) { row.scrollIntoView({block: 'nearest'}); }
+  }
+
+  function select(i) {
+    selected = i;
+    // A step that errored has its own picture worth seeing (in `full` mode); anything else, the
+    // rail stays on the end state rather than blanking out.
+    shotTab = trace.steps[i] && trace.steps[i].shot_after ? 'step' : 'final';
+    markSelected(); renderDetail();
   }
 
   function fmtBytes(n) {
@@ -221,112 +436,226 @@
     var c = Math.floor((+st || 0) / 100);
     return c === 2 ? 'ok' : c === 3 ? 'redir' : (c >= 4 ? 'err' : '');
   }
+  function originOf(u) { var m = /^[a-z]+:\/\/[^/]*/i.exec(String(u == null ? '' : u)); return m ? m[0] : ''; }
+  // Usually the origin is the same for every URL in a trace and eats the column, so the path is
+  // what tells them apart — but not always: a cross-origin navigation shown as its path alone
+  // reads as "/checkout → /checkout", an arrow claiming a change with nothing changed on screen.
+  // So the pair decides: same origin, show paths; different, show both in full.
+  function pathOf(u) { return String(u == null ? '' : u).replace(/^[a-z]+:\/\/[^/]*/i, '') || '/'; }
+  function urlPair(before, after) {
+    var same = originOf(before) === originOf(after);
+    return same ? {from: pathOf(before), to: pathOf(after)}
+                : {from: String(before == null ? '' : before), to: String(after == null ? '' : after)};
+  }
+  function block(title, extraHead, bodyHtml) {
+    return '<div class="block"><h3><span class="cap">' + title + '</span>' + extraHead +
+           '<span class="hair"></span></h3>' + bodyHtml + '</div>';
+  }
   function headerTable(h) {
     var keys = h ? Object.keys(h) : [];
-    if (!keys.length) { return '<div class="muted">—</div>'; }
-    return '<dl class="kv hdr">' + keys.map(function (k) {
+    if (!keys.length) { return '<div class="net-sub">—</div>'; }
+    return '<dl class="kv">' + keys.map(function (k) {
       return '<dt>' + esc(k) + '</dt><dd>' + esc(h[k]) + '</dd>';
     }).join('') + '</dl>';
   }
   function bodyBlock(label, body) {
     if (body == null || body === '') { return ''; }
-    return '<div class="net-sub">' + label + '</div><pre class="net-body">' + esc(body) + '</pre>';
+    return '<div><div class="net-sub">' + label + '</div><pre class="body">' + esc(body) + '</pre></div>';
   }
+
+  function renderBanner() {
+    // The failure, kept in view while reading any OTHER step — otherwise the reason the trace
+    // exists is one click away and easy to lose track of.
+    var show = failureIdx >= 0 && selected !== failureIdx;
+    bannerEl.hidden = !show;
+    if (!show) { return; }
+    var err = trace.steps[failureIdx].error || {};
+    bannerEl.innerHTML =
+      '<span class="lbl">failed</span>' +
+      '<div style="min-width:0;flex:1">' +
+        '<div class="cls">' + esc(err.class || 'Error') + '</div>' +
+        '<div class="msg">' + esc(err.message) + '</div>' +
+      '</div>' +
+      '<button type="button" id="banner-jump">step ' + pad2(failureIdx) + '</button>';
+    $('banner-jump').onclick = function () { select(failureIdx); };
+  }
+
+  function renderDetail() {
+    renderBanner(); renderRail();
+    var s = trace.steps[selected];
+    if (!s) {
+      detailEl.innerHTML = '<div class="empty-note">This trace recorded no steps — the example ' +
+        'ended before any Capybara action ran, or tracing was turned off for it.</div>';
+      return;
+    }
+
+    var html =
+      '<div class="head">' +
+        '<span class="idx">#' + pad2(selected) + '</span>' +
+        '<h2>' + esc(s.kind) + '</h2>' +
+        '<span class="badge' + (s.error ? ' failed' : '') + '">' + (s.error ? 'errored' : 'ok') + '</span>' +
+      '</div>' +
+      '<div class="desc-line">' + esc(s.description) + '</div>';
+
+    var facts =
+      '<div><span class="k">elapsed</span><span class="v">' + (s.elapsed_ms || 0) + ' ms</span></div>' +
+      '<div><span class="k">duration</span><span class="v">' + (s.duration_ms || 0) + ' ms</span></div>';
+    if (s.url_before != null || s.url_after != null) {
+      var changed = s.url_before !== s.url_after;
+      var u = urlPair(s.url_before, s.url_after);
+      facts += '<div><span class="k">url</span><span class="v from" title="' + esc(s.url_before) + '">' + esc(u.from) + '</span>' +
+               (changed ? '<span class="v from">→</span><span class="v to" title="' + esc(s.url_after) + '">' + esc(u.to) + '</span>' : '') +
+               '</div>';
+    }
+    html += '<div class="facts">' + facts + '</div>';
+
+    if (s.error) {
+      html += block('Error', '',
+        '<div class="card panel-error"><div class="cls">' + esc(s.error.class || 'Error') +
+        '</div><div class="msg">' + esc(s.error.message) + '</div></div>');
+    }
+
+    if (asArray(s.console).length) {
+      var logs = asArray(s.console).map(function (c) {
+        c = c || {};
+        var sev = String(c.severity || 'log').toLowerCase();
+        return '<div class="log"><span class="sev ' + sevClass(sev) + '">' + esc(sev) +
+               '</span><span class="msg">' + esc(c.message) + '</span></div>';
+      }).join('');
+      html += block('Console', '<span class="count">' + asArray(s.console).length + '</span>',
+                    '<div class="card">' + logs + '</div>');
+    }
+
+    if (asArray(s.network).length) {
+      var rows = asArray(s.network).map(function (n, i) {
+        n = n || {};
+        return '<div class="net-row" data-i="' + i + '">' +
+                 '<span class="m">' + esc(n.method) + '</span>' +
+                 '<span class="u">' + esc(n.url) + (n.redirected ? '  ↪' : '') + '</span>' +
+                 '<span class="s ' + statusClass(n.status) + '">' + esc(n.status) + '</span>' +
+                 '<span class="t">' + esc(String(n.content_type || '').split(';')[0]) + '</span>' +
+                 '<span class="z">' + fmtBytes(n.size) + '</span>' +
+                 '<span class="d">' + (n.duration_ms == null ? '' : n.duration_ms + 'ms') + '</span>' +
+               '</div>' +
+               '<div class="net-detail" data-i="' + i + '" hidden>' +
+                 '<div><div class="net-sub">request headers</div>' + headerTable(n.request_headers) + '</div>' +
+                 bodyBlock('request body', n.request_body) +
+                 '<div><div class="net-sub">response headers</div>' + headerTable(n.response_headers) + '</div>' +
+                 bodyBlock('response body', n.response_body) +
+               '</div>';
+      }).join('');
+      html += block('Network',
+        '<span class="count">' + asArray(s.network).length + '</span>' +
+        '<span class="hair"></span><span class="note">click a row for headers &amp; bodies</span>',
+        '<div class="card net">' +
+          '<div class="net-head"><span>method</span><span>url</span><span>status</span>' +
+          '<span>type</span><span class="z">size</span><span class="d">time</span></div>' + rows + '</div>');
+    }
+
+    // SOURCE, not a rendered preview. This used to re-render the snapshot in an iframe, which was
+    // both redundant beside the screenshot and misleading: the viewer's own browser draws it, and
+    // the snapshot's `<link>` stylesheets do not resolve from `file://` — so the "preview" was
+    // typically unstyled HTML, resembling neither what the step SAW nor what a browser would show.
+    // What the snapshot is uniquely good for is reading and copying.
+    var domHead = '<span class="count">' + (s.dom_after ? 'captured' : 'not captured') + '</span>' +
+                  '<span class="hair"></span>' +
+                  (s.dom_after ? '<button type="button" id="wrap-toggle">' + (wrap ? 'no wrap' : 'wrap') + '</button>' : '');
+    html += block('DOM snapshot', domHead, s.dom_after
+      ? '<div id="dom-host"></div>'
+      : '<div class="empty-note">Not captured for this step — a snapshot is taken on an action ' +
+        'error, or for every step under <code>CSIM_TRACE=full</code>.</div>');
+
+    detailEl.innerHTML = html;
+    detailEl.scrollTop = 0;
+    if (asArray(s.network).length) { wireNetwork(); }
+    if (s.dom_after) {
+      wireDomSource(s.dom_after);
+      $('wrap-toggle').onclick = function (e) {
+        // In place: re-rendering the pane for a wrapping toggle scrolled the reader back to the
+        // top and closed whichever network row they had open.
+        wrap = !wrap;
+        var pre = detailEl.querySelector('pre.dom');
+        if (pre) { pre.classList.toggle('nowrap', !wrap); }
+        e.currentTarget.textContent = wrap ? 'no wrap' : 'wrap';
+      };
+    }
+  }
+
   function wireNetwork() {
-    detailEl.querySelectorAll('tr.net-row').forEach(function (row) {
+    detailEl.querySelectorAll('.net-row').forEach(function (row) {
       row.onclick = function () {
-        var d = detailEl.querySelector('tr.net-detail[data-i="' + row.getAttribute('data-i') + '"]');
+        var d = detailEl.querySelector('.net-detail[data-i="' + row.getAttribute('data-i') + '"]');
         if (d) { d.hidden = !d.hidden; row.classList.toggle('open'); }
       };
     });
   }
 
-  function renderDetail() {
-    var s = trace.steps[selected];
-    if (!s) { detailEl.innerHTML = ''; return; }
-    var html = '<h2>#' + selected + ' · ' + esc(s.kind) + '</h2>';
-    html += '<div class="sub mono">' + esc(s.description) + '</div>';
-
-    var kv = '<dl class="kv">';
-    kv += '<dt>elapsed</dt><dd>' + (s.elapsed_ms || 0) + ' ms</dd>';
-    kv += '<dt>duration</dt><dd>' + (s.duration_ms || 0) + ' ms</dd>';
-    if (s.url_before != null || s.url_after != null) {
-      var changed = s.url_before !== s.url_after;
-      kv += '<dt>url</dt><dd class="mono">' + esc(s.url_before || '∅') +
-            (changed ? ' → <span class="url-to">' + esc(s.url_after || '∅') + '</span>' : '') + '</dd>';
-    }
-    kv += '</dl>';
-    html += section('Step', kv);
-
-    if (s.error) {
-      html += section('Error',
-        '<div class="panel-error"><div class="cls mono">' + esc(s.error.class || 'Error') +
-        '</div><div class="msg mono">' + esc(s.error.message) + '</div></div>');
-    }
-
-    if (s.console && s.console.length) {
-      var logs = s.console.map(function (c) {
-        var sev = String(c.severity || 'log').toLowerCase();
-        return '<div class="log"><span class="sev ' + esc(sev) + '">' + esc(sev) +
-               '</span><span class="msg">' + esc(c.message) + '</span></div>';
-      }).join('');
-      html += section('Console (' + s.console.length + ')', '<div class="logs">' + logs + '</div>');
-    }
-
-    if (s.network && s.network.length) {
-      var rows = s.network.map(function (n, i) {
-        var head =
-          '<tr class="net-row" data-i="' + i + '">' +
-            '<td class="method">' + esc(n.method) + '</td>' +
-            '<td class="url">' + esc(n.url) +
-              (n.redirected ? ' <span class="redir-tag">redirect</span>' : '') + '</td>' +
-            '<td class="status ' + statusClass(n.status) + '">' + esc(n.status) + '</td>' +
-            '<td>' + esc(n.content_type || '') + '</td>' +
-            '<td class="num">' + fmtBytes(n.size) + '</td>' +
-            '<td class="num">' + (n.duration_ms == null ? '' : n.duration_ms + ' ms') + '</td>' +
-          '</tr>';
-        var detail =
-          '<tr class="net-detail" data-i="' + i + '" hidden><td colspan="6">' +
-            '<div class="net-sub">Request headers</div>' + headerTable(n.request_headers) +
-            bodyBlock('Request body', n.request_body) +
-            '<div class="net-sub">Response headers</div>' + headerTable(n.response_headers) +
-            bodyBlock('Response body', n.response_body) +
-          '</td></tr>';
-        return head + detail;
-      }).join('');
-      html += section('Network (' + s.network.length + ')',
-        '<div class="muted net-hint">Click a request for headers and bodies.</div>' +
-        '<table class="net"><tr><th>Method</th><th>URL</th><th>Status</th>' +
-        '<th>Type</th><th>Size</th><th>Time</th></tr>' + rows + '</table>');
-    }
-
-    // The page as the driver painted it — the same boxes every geometry query reads, so this shows
-    // what the step SAW, not how a browser would have rendered it. Per step, and only under
-    // `CSIM_TRACE=full`; the state a FAILING example ENDED in is trace-level, and renders with the
-    // trace (`renderFinalShot`).
-    if (s.shot_after) {
-      html += section('Screenshot',
-        '<img class="shot" alt="the page as the driver painted it" src="' + esc(s.shot_after) + '">');
-    }
-
-    if (s.dom_after) {
-      // SOURCE, not a rendered preview. This used to re-render the snapshot in an iframe, which
-      // was both redundant beside the screenshot above and misleading: the viewer's own browser
-      // draws it, and the snapshot's `<link>` stylesheets do not resolve from `file://` — so the
-      // "preview" was typically unstyled HTML, resembling neither what the step SAW nor what a
-      // browser would show. What the snapshot is uniquely good for is reading and copying.
-      html += section('DOM snapshot', '<div id="dom-host"></div>');
-    } else {
-      html += section('DOM snapshot',
-        '<div class="muted">Not captured for this step — a snapshot is taken on an action error, ' +
-        'or for every step under <code>CSIM_TRACE=full</code>.</div>');
-    }
-
-    detailEl.innerHTML = html;
-    detailEl.scrollTop = 0;
-    if (s.network && s.network.length) { wireNetwork(); }
-    if (s.dom_after) { wireDomSource(s.dom_after); }
+  // ── the screenshot rail ────────────────────────────────────────────
+  // Two pictures can exist and they mean different things: the state a FAILING example ENDED in
+  // (trace-level, painted once after the example) and the state at ONE step (`CSIM_TRACE=full`).
+  // The rail keeps them apart rather than letting a step's shot stand in for the ending.
+  // …and only ever an inline PNG. `esc()` keeps a value inside the attribute, but `src` is a URL
+  // context: `http://…` in a trace would make this file — whose whole contract is that it opens
+  // offline with no network — fetch something, which is both a beacon and a way to smuggle data
+  // out of a CI artifact. Anything that is not a `data:image/…` URL is treated as no screenshot.
+  function shotSrc(u) {
+    u = String(u == null ? '' : u);
+    return /^data:image\/[a-z0-9.+-]+;base64,[A-Za-z0-9+/=\s]*$/i.test(u) ? u : null;
   }
+  function railShots() {
+    var s = trace.steps[selected] || {};
+    return {final: shotSrc((trace.metadata || {}).screenshot), step: shotSrc(s.shot_after)};
+  }
+
+  function renderRail() {
+    var shots = railShots();
+    var any = !!(shots.final || shots.step);
+    railToggleEl.hidden = !any;
+    railEl.hidden = !any || !railOpen;
+    if (railEl.hidden) { return; }
+
+    if (shotTab === 'step' && !shots.step) { shotTab = 'final'; }
+    if (shotTab === 'final' && !shots.final) { shotTab = 'step'; }
+    tabFinalEl.hidden = !shots.final;
+    tabStepEl.hidden  = !shots.step;
+    tabStepEl.textContent = 'Step ' + pad2(selected);
+    tabFinalEl.classList.toggle('on', shotTab === 'final');
+    tabStepEl.classList.toggle('on', shotTab === 'step');
+
+    var s = trace.steps[selected] || {};
+    var src = shotTab === 'step' ? shots.step : shots.final;
+    var loc = pathOf(shotTab === 'step' ? s.url_after : (trace.steps[trace.steps.length - 1] || {}).url_after);
+    railBodyEl.innerHTML =
+      '<div class="frame">' +
+        '<div class="bar"><span class="dot"></span><span class="loc">' + esc(loc) + '</span></div>' +
+        (src ? '<img class="shot" id="shot" alt="the page as the driver painted it" src="' + esc(src) + '">'
+             : '<div class="slot"><span>no screenshot</span></div>') +
+      '</div>' +
+      '<p class="caption">' + (shotTab === 'step'
+        ? 'The page as the driver painted it at this step — the same boxes every geometry query ' +
+          'reads, so this is what the step saw. Per-step shots require <code>CSIM_TRACE=full</code>.'
+        : 'The state this example ended in, painted once after the test. Recorded for failures; ' +
+          'carried inline in the trace JSON.') + '</p>';
+
+    // The real pixel size, read off the decoded image rather than assumed.
+    dimsEl.textContent = '';
+    var img = $('shot');
+    if (img) {
+      var show = function () {
+        if (img.naturalWidth) { dimsEl.textContent = img.naturalWidth + ' × ' + img.naturalHeight; }
+      };
+      img.complete ? show() : (img.onload = show);
+    }
+  }
+
+  railToggleEl.onclick = function () {
+    railOpen = !railOpen;
+    railToggleEl.textContent = railOpen ? 'Hide preview' : 'Show preview';
+    renderRail();
+  };
+  tabFinalEl.onclick = function () { shotTab = 'final'; renderRail(); };
+  tabStepEl.onclick  = function () { shotTab = 'step';  renderRail(); };
+  jumpEl.onclick     = function () { if (failureIdx >= 0) { select(failureIdx); } };
 
   // Pretty-print a DOM-snapshot HTML string for the source view: the
   // driver serializes flat (one line), so we re-parse with the browser's
@@ -343,9 +672,14 @@
     if (!doc || !doc.documentElement) { return null; }
     var out = [];
     var pad = function (d) { return '  '.repeat(d); };
+    // Attribute values and text are re-emitted as HTML, so they need HTML escaping — this block
+    // is offered for reading AND copying, and `title="say "hi""` does not paste back as the tree
+    // it came from. (The display `esc()` the caller applies is a separate layer.)
+    var attrEsc = function (v) { return String(v).replace(/&/g, '&amp;').replace(/"/g, '&quot;'); };
+    var textEsc = function (v) { return String(v).replace(/&/g, '&amp;').replace(/</g, '&lt;'); };
     var attrs = function (el) {
       return Array.prototype.map.call(el.attributes, function (a) {
-        return a.value === '' ? ' ' + a.name : ' ' + a.name + '="' + a.value + '"';
+        return a.value === '' ? ' ' + a.name : ' ' + a.name + '="' + attrEsc(a.value) + '"';
       }).join('');
     };
     function emit(el, depth) {
@@ -369,11 +703,11 @@
       if (kids.length === 0) {
         out.push(pad(depth) + open + '</' + tag + '>');
       } else if (kids.length === 1 && kids[0].nodeType === 3) {
-        out.push(pad(depth) + open + kids[0].nodeValue.trim() + '</' + tag + '>');
+        out.push(pad(depth) + open + textEsc(kids[0].nodeValue.trim()) + '</' + tag + '>');
       } else {
         out.push(pad(depth) + open);
         kids.forEach(function (k) {
-          if (k.nodeType === 3)      { out.push(pad(depth + 1) + k.nodeValue.trim()); }
+          if (k.nodeType === 3)      { out.push(pad(depth + 1) + textEsc(k.nodeValue.trim())); }
           else if (k.nodeType === 8) { out.push(pad(depth + 1) + '<!--' + k.nodeValue + '-->'); }
           else                       { emit(k, depth + 1); }
         });
@@ -387,8 +721,8 @@
 
   function wireDomSource(domHtml) {
     var pretty = formatHtml(domHtml);
-    document.getElementById('dom-host').innerHTML =
-      '<pre class="dom">' + esc(pretty != null ? pretty : domHtml) + '</pre>';
+    $('dom-host').innerHTML = '<pre class="dom' + (wrap ? '' : ' nowrap') + '">' +
+      esc(pretty != null ? pretty : domHtml) + '</pre>';
   }
 
   // ── loading other traces (FileReader → CORS-free, works on file://) ──
@@ -400,10 +734,10 @@
     };
     r.readAsText(file);
   }
-  document.getElementById('file').addEventListener('change', function (e) {
+  $('file').addEventListener('change', function (e) {
     if (e.target.files[0]) { readFile(e.target.files[0]); }
   });
-  var veil = document.getElementById('drop-veil');
+  var veil = $('drop-veil');
   window.addEventListener('dragover', function (e) { e.preventDefault(); veil.classList.add('on'); });
   window.addEventListener('dragleave', function (e) { if (e.relatedTarget === null) { veil.classList.remove('on'); } });
   window.addEventListener('drop', function (e) {
@@ -412,8 +746,13 @@
   });
   window.addEventListener('keydown', function (e) {
     if (!trace) { return; }
-    if (e.key === 'ArrowDown' || e.key === 'j') { selected = Math.min(selected + 1, trace.steps.length - 1); renderSteps(); renderDetail(); }
-    if (e.key === 'ArrowUp'   || e.key === 'k') { selected = Math.max(selected - 1, 0); renderSteps(); renderDetail(); }
+    if (e.ctrlKey || e.metaKey || e.altKey) { return; }   // Ctrl/Cmd+F is find-in-page, not `f`
+    var last = trace.steps.length - 1;
+    if (e.key === 'ArrowDown' || e.key === 'j')    { select(Math.min(selected + 1, last)); }
+    else if (e.key === 'ArrowUp' || e.key === 'k') { select(Math.max(selected - 1, 0)); }
+    else if (e.key === 'f' && failureIdx >= 0)     { select(failureIdx); }
+    else { return; }
+    e.preventDefault();
   });
 
   load(readEmbedded());
