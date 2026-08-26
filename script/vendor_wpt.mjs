@@ -237,7 +237,14 @@ const SUPPORT_FILES = [
   // html/rendering pulls these two by absolute path: an image one of its replaced-element
   // reftests renders, and the cross-document stash the details/text-fragment test posts through.
   'css/css-sizing/aspect-ratio/support/100x100-green.png',
-  'scroll-to-text-fragment/stash.js'
+  'scroll-to-text-fragment/stash.js',
+  // html/rendering's video sizing tests build these URLs in JS (`getVideoURI('/media/2x2-green')`),
+  // so no `src` scan finds them: without the files their subtests can only fail, which reads as a
+  // driver gap when it is a manifest gap.
+  'media/2x2-green.mp4',
+  'media/2x2-green.webm',
+  'media/white.mp4',
+  'media/white.webm'
   // NOTE: service-workers/service-worker (vendored above) ships the FULL upstream
   // test-helpers.sub.js — `service_worker_test` and friends run against the real SW runtime.
   // The hand-written minimal helper that used to live at that path (with_iframe only, while SW

@@ -907,7 +907,7 @@ module WptRunner
   # under a hard `timeout -s KILL` and found crasher-free — the earlier
   # infinite-loop concern was in dom/ HTML files, not this JS slice. (.tentative
   # files auto-route to out-of-scope, so a tentative window.js here self-excludes.)
-  JS_TREES = '{dom,hr-time,url,encoding,FileAPI,html/webappapis/timers,html/webappapis/microtask-queuing,html/webappapis/scripting/events,xhr,html/dom,html/semantics/forms,custom-elements,html/webappapis/atob,html/webappapis/structured-clone,webmessaging,input-events,fetch/api,fetch/data-urls,fetch/h1-parsing,service-workers/cache-storage,webstorage,websockets,WebCryptoAPI}'
+  JS_TREES = '{dom,hr-time,url,encoding,FileAPI,html/webappapis/timers,html/webappapis/microtask-queuing,html/webappapis/scripting/events,xhr,html/dom,html/semantics/forms,custom-elements,html/rendering,html/webappapis/atob,html/webappapis/structured-clone,webmessaging,input-events,fetch/api,fetch/data-urls,fetch/h1-parsing,service-workers/cache-storage,webstorage,websockets,WebCryptoAPI}'
 
   def test_files
     @test_files ||= (harness_files + js_files + reftest_files).sort

@@ -153,4 +153,19 @@ RSpec.describe 'save_screenshot' do
       expect(b['x']).to be >= (a['x'] + a['width'])
     end
   end
+
+  # `documentElement.remove()` is legal, and a browser answers it with a blank page rather than
+  # with nothing at all. The painter used to bail on a rootless document and return no image, so
+  # `save_screenshot` produced no file — and a WPT reftest that removes the root took the whole
+  # file down as a harness error. The one thing to pin is that a raster still comes back.
+  it 'paints a blank page for a document with no root element' do
+    s = page_with('<p>gone in a moment</p>')
+    s.execute_script('document.documentElement.remove()')
+    shot(s) do |img, px, path|
+      expect(File.binread(path, 8)).to eq(PNG_MAGIC)
+      expect([img.width, img.height]).to eq(viewport)
+      expect(px.call(10, 10)).to eq([255, 255, 255])
+      expect(px.call(160, 120)).to eq([255, 255, 255])
+    end
+  end
 end

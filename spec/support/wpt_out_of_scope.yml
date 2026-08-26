@@ -43286,6 +43286,13 @@ html/rendering/non-replaced-elements/phrasing-content-0/br-wbr-content/content-p
   reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
     specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
     path/suffix. CLAUDE.md rule 1.
+html/rendering/non-replaced-elements/the-page/Document-documentElement-remove-clears-content.html:
+- name: "== css/reference/blank.html (both renderings blank)"
+  reason: 'The correct rendering IS blank: the test removes documentElement and asserts
+    the page goes empty, and its reference is css/reference/blank.html. So the runners
+    blank-comparison guard (WptRunner::REFTEST_BLANK_SUFFIX) cannot tell this apart
+    from a painter that drew nothing — which is exactly the case that comment says
+    belongs here with this reason. No driver fix can ever clear it.'
 html/rendering/replaced-elements/the-textarea-element/textarea-padding-bend-overlaps-content-001.tentative.html:
 - name: "== html/rendering/replaced-elements/the-textarea-element/textarea-padding-bend-overlaps-content-001-ref.html"
   reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
@@ -43894,6 +43901,22 @@ html/rendering/widgets/input-checkbox-switch.tentative.html:
   reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
     specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
     path/suffix. CLAUDE.md rule 1.
+html/rendering/widgets/input-checkbox-switch.tentative.window.js:
+- name: Default appearance value
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: 'appearance:none should work: display gets its initial value'
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+html/rendering/widgets/input-checkbox-zero-size.html:
+- name: "== css/reference/blank.html (both renderings blank)"
+  reason: 'The correct rendering IS blank: a `width:0;height:0` checkbox paints nothing,
+    and Chrome agrees — the reference is css/reference/blank.html. So the runners
+    blank-comparison guard (WptRunner::REFTEST_BLANK_SUFFIX) cannot tell this apart
+    from a painter that drew nothing, which is exactly the case that guards comment
+    says belongs here with this reason. No driver fix can ever clear it.'
 html/rendering/widgets/the-select-element/select-as-listbox-default-styles.tentative.html:
 - name: <optgroup label="2"><option>3 (in <select multiple="">) - text-indent
   reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
