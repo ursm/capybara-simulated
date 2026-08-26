@@ -4362,7 +4362,12 @@ module Capybara
         # it and is terminated when it is discarded (terminate_realm_workers).
         # `sw_scope`: a SERVICE worker's registration scope — process_worker_unregister
         # (the worker's own registration.unregister()) resolves the scope from it.
-        record = {thread: nil, inbox: inbox, service: service, realm: parent_worker ? 0 : realm_id.to_i, parent_worker: parent_worker, sw_scope: service ? sw_scope.to_s : nil}
+        # `rt` / `rt_lock`: the worker's own runtime, published by its thread once built, so the
+        # session boundary can stop the JS half without waiting for it (see `stop_worker_js`). The
+        # lock is per worker rather than the shared counter mutex: the only two things that ever
+        # contend for it are that stop and the worker's own dispose, and holding it across a native
+        # call must not block anything else in the browser.
+        record = {thread: nil, inbox: inbox, service: service, realm: parent_worker ? 0 : realm_id.to_i, parent_worker: parent_worker, sw_scope: service ? sw_scope.to_s : nil, rt: nil, rt_lock: Mutex.new}
         # The Update algorithm byte-checks a new fetch against the running version's
         # script (+ its recorded imports — sw_note_import fills that map as the worker
         # evaluates). SW scripts are small; only service workers pay the retention.
@@ -4377,6 +4382,12 @@ module Capybara
           Thread.current.report_on_exception = false
           run_worker(
             handle, target, body, inbox, outbox, engine_class,
+            # The record, not `@workers[handle]` looked up later: `terminate_realm_workers` and
+            # `reset_workers` remove entries WITHOUT waiting for the thread, and building the
+            # isolate takes long enough (a fresh context plus ~20 host-fn attaches) for a frame
+            # discarded in that window to leave the lookup empty. A worker whose record it never
+            # found could publish no runtime and would never see the stop flag.
+            record:      record,
             shared:      shared,
             service:     service,
             creator_key: creator_key,
@@ -5558,6 +5569,10 @@ module Capybara
           # `polling?` stays true for the rest of the session.
           @workers.delete(handle)
           detach_worker(handle, w)
+          # …and stop the JS half, which `detach_worker`'s inbox message cannot: a worker inside a
+          # call reads no messages. This does NOT block — a mutex and one `terminate` — so it does
+          # not reintroduce the per-navigation stall the joins were removed to avoid.
+          stop_worker_js(w)
           # Racing the still-live thread is benign: a fallback reply it also answers is dropped
           # (the client's pending-fetch entry is one-shot), and the only real cost is that a blob
           # URL minted in the moment between the revoke and the thread noticing `:terminate` can
@@ -6297,8 +6312,10 @@ module Capybara
         # `&.`: a record inserted by worker_spawn before its Thread.new has `thread: nil`
         # for one statement — treat it as already gone, like every other liveness check.
         w[:thread]&.join(WORKER_TERMINATE_GRACE)
+        # Still there: it is inside JS (or a host fn), where the `:terminate` message cannot reach
+        # it and a kill cannot land. Stop the JS half, and only then fall back to the kill.
         if w[:thread]&.alive?
-          w[:thread].kill
+          stop_worker_wait(w)
           w[:thread].join(WORKER_TERMINATE_GRACE)
         end
         reap_worker(handle.to_i, w)
@@ -6312,6 +6329,70 @@ module Capybara
       private def detach_worker(handle, w)
         unregister_client(sw_worker_client_id(handle))
         w[:inbox] << :terminate
+      end
+
+      # Stop the worker's JS half, from the thread that wants it gone. `Thread#kill` cannot do this
+      # job, in two different ways: a kill that lands while the thread is inside V8 running JS is
+      # not delivered until that call RETURNS, and a kill that lands inside a HOST FUNCTION does not
+      # kill the thread at all — it surfaces as `RustyRacer::RuntimeError: Error: Fatal` from the
+      # call in flight and the thread runs on, with CRuby already treating it as killed so a second
+      # kill is a no-op (rusty_racer 0.2.3's documented contract; 0.2.2 tried to make the kill mean
+      # something there and segfaulted the suite instead).
+      #
+      # `Isolate#terminate` is the tool for that half — thread-safe by design, non-blocking, and
+      # already how the call-timeout watchdog stops a runaway. Measured: a worker inside a 400 ms
+      # spin on a repeating timer made `reset!` take 4.0 s every time; with this it is 0.0 s in 4
+      # runs out of 5. QuickJS exposes no cross-thread interrupt, so this is a V8-side improvement
+      # and a no-op there.
+      private def stop_worker_js(w)
+        return unless w && (lock = w[:rt_lock])
+        # Set the flag FIRST: it is what stops a worker that is between calls right now, and
+        # `terminate` cannot help there — there is nothing running to terminate, and the flag it
+        # sets does not survive to the next call. Measured, without it: one tick in four landed
+        # between calls and then spent 4.0 s inside a single `drain_timers` (its 50 ms budget is
+        # checked BETWEEN callbacks, and one callback here runs 400 ms).
+        w[:stopping] = true
+        # `try_lock`, not `synchronize`: the only other holder is the worker's own `ensure`,
+        # disposing the isolate — which is the outcome this method wants, and which takes long
+        # enough (watchdog shutdown, thread join, isolate drop) to blow the caller's grace.
+        return unless lock.try_lock
+        begin
+          w[:rt]&.terminate
+        ensure
+          lock.unlock
+        end
+      rescue StandardError
+        nil
+      end
+
+      # Ask, and keep asking for one grace period, until the worker's thread is gone — then kill as
+      # the last resort. The RE-ask is what makes this reliable: `terminate` only bites while the
+      # isolate is actually executing, so a stop that arrives while the worker is in Ruby (between
+      # its own JS calls, in a host fn, at its inbox) does nothing, and the worker is free to enter
+      # another seconds-long call. Re-asking every few ms means whichever call it enters next is
+      # the one that ends.
+      private def stop_worker_wait(w)
+        t = w[:thread]
+        return if t.nil?
+        # Nothing to re-ask — the engine cannot stop a call from another thread (QuickJS), or this
+        # worker never got as far as publishing a runtime. Waiting out the grace there is pure
+        # delay: it measured +80 ms per example on QuickJS, where `Thread#kill` does land.
+        unless terminable_worker?(w)
+          t.kill if t.alive?
+          return
+        end
+        deadline = Process.clock_gettime(Process::CLOCK_MONOTONIC) + WORKER_TERMINATE_GRACE
+        while t.alive? && (left = deadline - Process.clock_gettime(Process::CLOCK_MONOTONIC)) > 0
+          stop_worker_js(w)
+          t.join(left < 0.005 ? left : 0.005)
+        end
+        t.kill if t.alive?
+      end
+
+      private def terminable_worker?(w)
+        w[:rt_lock].synchronize { !!w[:rt]&.terminable? }
+      rescue StandardError
+        false
       end
 
       # Everything that must happen once a worker is out of `@workers`, whether or not we waited for
@@ -7979,10 +8060,16 @@ module Capybara
       end
 
       def reset_workers
-        @workers.each_value do |w|
+        # Ask first, and stop the JS half in the same pass: the `:terminate` message is only read
+        # BETWEEN messages, so a worker inside a long JS call would otherwise not see it until that
+        # call finished — and `Thread#kill` cannot reach it there either (see `stop_worker_js`).
+        # The kill stays as the last resort, for a worker that is neither in JS nor at its inbox.
+        doomed = @workers.values.dup
+        doomed.each do |w|
           w[:inbox] << :terminate
-          w[:thread]&.kill
+          stop_worker_js(w)
         end
+        doomed.each {|w| stop_worker_wait(w) }
         # Reap the killed threads before the boundary's own DB work runs: Thread#kill
         # is NOT deferred by ActiveRecord's `handle_interrupt(Exception => :never)`
         # (only an `Object => :never` mask would defer it), so a kill can land
@@ -7991,7 +8078,7 @@ module Capybara
         # exists for. Bounded the same way; a worker past the budget is warned, not
         # waited for forever.
         deadline = Process.clock_gettime(Process::CLOCK_MONOTONIC) + APP_REQUEST_DRAIN_BUDGET_S
-        @workers.each_value do |w|
+        doomed.each do |w|
           next if (t = w[:thread]).nil?
           joined = begin
             t.join([deadline - Process.clock_gettime(Process::CLOCK_MONOTONIC), 0].max)
@@ -8415,7 +8502,7 @@ module Capybara
       # `build_worker` factory, evaluates the worker script, then
       # loops draining microtasks + timers + inbox until `:terminate`
       # lands or an exception propagates.
-      private def run_worker(handle, url, body, inbox, outbox, engine_class, shared: false, service: false, creator_key: nil, seed: nil, sw_scope: nil, controller: 0, sw_script: nil, creator_client: nil, module_worker: false, sw_uvc: nil, sw_imports_map: nil, sw_prev_active: nil)
+      private def run_worker(handle, url, body, inbox, outbox, engine_class, record: nil, shared: false, service: false, creator_key: nil, seed: nil, sw_scope: nil, controller: 0, sw_script: nil, creator_client: nil, module_worker: false, sw_uvc: nil, sw_imports_map: nil, sw_prev_active: nil)
         # Release the spawn-time `@worker_initializing` count exactly once, however
         # this method exits (normal start, `self.close()`, or an exception), so
         # worker_pending? doesn't stay stuck true forever.
@@ -8434,6 +8521,10 @@ module Capybara
         # this handle and revoked on terminate (see blob_register / revoke_worker_blobs).
         Thread.current[:csim_worker_handle] = handle
         rt = nil
+        # "Has the session boundary asked this worker to stop?" — the Ruby-side half of that ask
+        # (`stop_worker_js` sets the flag; `terminate` handles the JS already in flight). Read
+        # where the tick could otherwise commit to another long call.
+        stopping = -> { !record.nil? && record[:stopping] }
         # A nil body with `sw_script` set is the DEFERRED case — the script is fetched
         # through the controlling SW below, after the isolate exists.
         raise "worker script not found: #{url}" unless body || sw_script
@@ -8530,6 +8621,8 @@ module Capybara
           port_post:      ->(channel, data) { outbox << {handle: handle, kind: 'port_msg', channel: channel.to_s, data: data.to_s} }
         }
         rt        = engine_class.build_worker(self, post_back, broadcast_out, sw_hooks)
+        # Hand the runtime to the session boundary (`stop_worker_js`) the moment it exists.
+        record[:rt_lock].synchronize { record[:rt] = rt } if record
         # A worker isolate loads the same snapshot as the main realm, so its `console.*`
         # is a no-op until `traceActive` is set (console.js). The main realm turns it on
         # from `CSIM_CONSOLE_STDERR`; without this a worker's console — and anything routed
@@ -8768,7 +8861,7 @@ module Capybara
         # (worker-interception-redirect's last case). Draining here runs the fetch's
         # dispatch on this thread while `@worker_initializing` still covers it, so the
         # follow-on pending (@sw_fetch_pending / outbox) is counted before the release.
-        if rt.call('__nextTimerDelay').to_f >= 0
+        if !stopping.call && rt.call('__nextTimerDelay').to_f >= 0
           rt.drain_microtasks
           rt.drain_timers
         end
@@ -8780,6 +8873,8 @@ module Capybara
           loop do
             msg = pop_with_timeout(inbox, WORKER_POLL_INTERVAL)
             break if msg == :terminate
+            # …and the same answer from the boundary, which cannot wait for this queue.
+            break if stopping.call
             # A main-side BroadcastChannel post to this worker arrives as a {kind:'broadcast'} hash;
             # deliver it to the worker's channels (the receiver's own origin gate drops cross-origin).
             # A plain string is a postMessage to the worker.
@@ -8898,7 +8993,7 @@ module Capybara
               @worker_init_lock.synchronize { @worker_busy += 1 }
               busy_held = true
               rt.call('__csim_swControllerFetchResponse', msg[:fetch_id], msg[:resp])
-              drive_worker_to_quiescence(rt)
+              drive_worker_to_quiescence(rt, stopping)
             elsif msg.is_a?(Hash) && msg[:kind] == 'nested_worker_msgs'
               # Postbacks from a NESTED worker this isolate created — dispatch on its
               # Worker objects here (deliver_worker_messages routed them by parentage).
@@ -8913,7 +9008,7 @@ module Capybara
                 rt.call('__csim_deliverWorkerMessages', [e])
                 rt.drain_microtasks if msg[:events].size > 1
               end
-              drive_worker_to_quiescence(rt)
+              drive_worker_to_quiescence(rt, stopping)
             elsif msg.is_a?(Hash) && msg[:kind] == 'claim_client'
               # clients.claim() reaches worker clients too: adopt the claiming SW as this
               # isolate's controller when this worker's script URL is in scope (the same
@@ -8943,7 +9038,7 @@ module Capybara
               # never settles (Tesseract hangs at "initializing tesseract"). Run the worker's
               # own event loop to quiescence instead of a single gated tick.
               rt.call('__csim_workerOnMessage', msg)
-              drive_worker_to_quiescence(rt)
+              drive_worker_to_quiescence(rt, stopping)
             end
             # Drive the worker's OWN event loop each tick: an AUTONOMOUS loop (the dispatcher
             # executor-worker's receive→fetch→setTimeout retry, which has no inbox message)
@@ -8955,7 +9050,12 @@ module Capybara
             # regular postMessage already drove itself to quiescence above (no timer left),
             # so this is a no-op for it. Host CALLS, not string `eval`, keep the per-tick
             # cost off the V8 compile path (rule 3).
-            if rt.call('__nextTimerDelay').to_f >= 0
+            # Asked again right before the drain, and not only at the top of the tick: THIS is
+            # the call that can run for seconds — its 50 ms budget is checked BETWEEN timer
+            # callbacks, and one callback is as long as it is — so a stop that arrived while we
+            # were deciding must not buy another one. What lands once the call is already running
+            # is `terminate`'s job; between the two, the window is a few instructions wide.
+            if !stopping.call && rt.call('__nextTimerDelay').to_f >= 0
               rt.drain_microtasks
               rt.drain_timers
             end
@@ -8973,10 +9073,16 @@ module Capybara
           end
         end
       rescue StandardError => e
-        # A SERVICE worker dying before its eval-outcome was posted (engine boot / script
-        # fetch raise) must still settle the parked register()/update() promise.
-        outbox << {handle: handle, kind: 'sw_eval', ok: false, msg: "#{e.class}: #{e.message}"} if service
-        outbox << {handle: handle, kind: '__error', message: "#{e.class}: #{e.message}"}
+        # …unless the raise IS the stop we were asked for. `terminate` ends the call in flight with
+        # a `ScriptTerminatedError`, which reaches here where `Thread#kill` never did — and posting
+        # that as a script failure rejects a still-parked `register()` / `update()` with "the
+        # script evaluation failed" for a failure that did not happen.
+        unless stopping.call
+          # A SERVICE worker dying before its eval-outcome was posted (engine boot / script
+          # fetch raise) must still settle the parked register()/update() promise.
+          outbox << {handle: handle, kind: 'sw_eval', ok: false, msg: "#{e.class}: #{e.message}"} if service
+          outbox << {handle: handle, kind: '__error', message: "#{e.class}: #{e.message}"}
+        end
       ensure
         # A service worker exiting with a lifecycle phase still OPEN — a raise on this
         # thread, `self.close()` during a parked install waitUntil, a terminate — can
@@ -8995,7 +9101,14 @@ module Capybara
         # counter; balance it here so worker_pending? can't stick true after this thread dies.
         @worker_init_lock.synchronize { @worker_busy -= 1 } if busy_held
         release_init.call   # guarantee the init count is released on an early raise
-        rt&.dispose
+        # Take the runtime back from the boundary BEFORE destroying it, and destroy it while
+        # holding the lock: terminating a disposed isolate is a use-after-free, and the two calls
+        # are on different threads. Whoever holds the lock owns the pointer for that moment.
+        if record
+          record[:rt_lock].synchronize { record[:rt] = nil; rt&.dispose }
+        else
+          rt&.dispose
+        end
       end
 
       # Bundlers that ship a worker inline as a Blob (Tesseract,
@@ -9053,10 +9166,15 @@ module Capybara
       # timer to re-trigger a gated drain). Bounded by WORKER_QUIESCE_MAX_ROUNDS so a
       # self-perpetuating timer (setInterval) yields back to the poll loop rather than
       # pinning the thread.
-      private def drive_worker_to_quiescence(rt)
+      # `stopping`: asked between rounds, because this loop is the other place a worker can spend
+      # seconds — 256 rounds, each a drain whose budget one long timer callback can overrun. On V8
+      # `terminate` ends whichever round is running; on QuickJS this check is the only thing that
+      # can end the loop at all.
+      private def drive_worker_to_quiescence(rt, stopping = nil)
         WORKER_QUIESCE_MAX_ROUNDS.times do
           rt.drain_microtasks
           break if rt.call('__nextTimerDelay').to_f < 0
+          break if stopping&.call
           rt.drain_timers
         end
       end

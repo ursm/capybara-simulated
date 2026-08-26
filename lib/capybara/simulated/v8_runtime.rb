@@ -1561,6 +1561,9 @@ module Capybara
           drain_timers:      ->        { c.call('__drainTimers', 50) },
           has_ready_timer:   ->        { !!c.call('__hasReadyTimer') },
           dispose:           ->        { c.dispose rescue nil },
+          # Called from the SESSION BOUNDARY's thread, not this worker's: V8's terminate is
+          # thread-safe by design, and it is the only way to end a call that is already running.
+          terminate:         ->        { c.terminate rescue nil },
           # A `{type: 'module'}` service worker's main script + static import graph,
           # via V8's native module API (the same surface the main realm's
           # eval_esm_module uses). The whole graph resolves through the root's
