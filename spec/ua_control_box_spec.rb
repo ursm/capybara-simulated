@@ -7,7 +7,7 @@ require_relative 'support/session_teardown'
 # chrome is 42px too narrow, and every one of those errors lands in hit-testing, `obscured?` and
 # how much room a row of controls takes.
 #
-# Every number here is real Chrome 137's, read off the same markup with
+# Every number here is real Chrome 151's, read off the same markup with
 # `--headless --dump-dom` over a `file://` page at the default font. Where a control's intrinsic
 # size still comes from a constant rather than from its attributes (a text `<input>`'s `size`, a
 # `<textarea>`'s `cols`/`rows`, the widest `<option>` in a `<select>`), the DEFAULT case is what
@@ -67,6 +67,18 @@ RSpec.describe 'UA stylesheet: the form-control box' do
     expect(size(s, 'f')).to   eq([253, 21])
     expect(size(s, 'r')).to   eq([129, 16])
     expect(size(s, 'col')).to eq([50, 27])
+  end
+
+  it 'takes an option\'s label the way HTML defines it' do
+    s = page_with('<select id="e"><option label="">a wide option text here</option></select>' \
+                  '<select id="g1"><optgroup label="a very long group label indeed"><option>x</option></optgroup></select>' \
+                  '<select id="g2"><optgroup><option>x</option></optgroup></select>')
+    # `label=""` is not a label — the option's TEXT is (Chrome: 157, not the 22 an empty one gives).
+    expect(size(s, 'e')).to eq([157, 19])
+    # An optgroup's own label does not widen the control; only the 15px indent it puts on its
+    # options does (Chrome: both of these are 44).
+    expect(size(s, 'g1')).to eq(size(s, 'g2'))
+    expect(size(s, 'g1')).to eq([44, 19])
   end
 
   it 'sizes a select from its widest option' do
@@ -174,14 +186,56 @@ RSpec.describe 'UA stylesheet: the form-control box' do
 
   it 'gives a checkbox and a radio the margins the UA gives them' do
     s = page_with('<label><input id="c" type="checkbox"><input id="r" type="radio"><span id="l">Yes</span></label>')
-    # Chrome's `margin: 3px 3px 3px 4px` is the only thing between the box and the word beside it —
-    # and a radio's left margin is 5px, not the checkbox's 4px.
-    expect(style(s, 'c', 'marginLeft', 'marginTop')).to eq(['4px', '3px'])
-    expect(style(s, 'r', 'marginLeft', 'marginTop')).to eq(['5px', '3px'])
+    # Chrome's `margin: 3px 3px 3px 4px` is the only thing between the box and the word beside it.
+    expect(style(s, 'c', 'marginTop', 'marginRight', 'marginBottom', 'marginLeft'))
+      .to eq(['3px', '3px', '3px', '4px'])
+    # …and a radio's are not a checkbox's: 5px on the left, and nothing at the bottom.
+    expect(style(s, 'r', 'marginTop', 'marginRight', 'marginBottom', 'marginLeft'))
+      .to eq(['3px', '3px', '0px', '5px'])
     # KNOWN GAP, not this sheet's: the inline flow ignores an ATOMIC inline's margins — an
     # `<img style="margin: 0 10px">` and an `inline-block` span lose them too — so the checkbox
     # sits at x=0 where Chrome puts it at 4, and the word beside it at 13 rather than 20.
     expect(size(s, 'c')).to eq([13, 13])
+  end
+
+  it 'sizes the date and time family to the segments it shows' do
+    s = page_with('<input id="d" type="date"><input id="t" type="time">' \
+                  '<input id="dt" type="datetime-local"><input id="m" type="month"><input id="w" type="week">')
+    expect(size(s, 'd')).to  eq([124.33, 24])
+    expect(size(s, 't')).to  eq([103, 24])
+    expect(size(s, 'dt')).to eq([210.33, 24])
+    expect(size(s, 'm')).to  eq([154.33, 24])
+    expect(size(s, 'w')).to  eq([146.33, 24])
+    # …in a MONOSPACE font, so the segments line up as they are typed over.
+    expect(style(s, 'd', 'fontFamily', 'paddingTop', 'paddingLeft')).to eq(['monospace', '0px', '1px'])
+  end
+
+  it 'lets a control take a flex line\'s cross size over its own' do
+    # Chrome, in a 100px row and a 200px column: a control whose height (or width) comes from the
+    # element rather than its content still stretches to the line. `align-items: center` does not.
+    s = page_with('<style>.row { display: flex; height: 100px; width: 600px }' \
+                  '.col { display: flex; flex-direction: column; width: 200px }</style>' \
+                  '<div class="row"><input id="ri"><select id="rs"><option>one</option></select>' \
+                  '<textarea id="rt"></textarea><input id="rc" type="checkbox"></div>' \
+                  '<div class="row" style="align-items: center"><input id="ci"></div>' \
+                  '<div class="col"><select id="cs"><option>one</option></select><input id="cx"></div>')
+    expect(size(s, 'ri')).to eq([185, 100])
+    expect(size(s, 'rs')).to eq([45, 100])
+    expect(size(s, 'rt')).to eq([201, 100])
+    expect(size(s, 'rc')).to eq([13, 94])        # 100 less its own 3px margins
+    expect(size(s, 'ci')).to eq([185, 21])
+    expect(size(s, 'cs')).to eq([200, 19])
+    expect(size(s, 'cx')).to eq([200, 21])
+  end
+
+  it 'scrolls a textarea, and nothing else that does not' do
+    s = page_with('<textarea id="a" style="width: 80px; height: 30px">one two three four five six seven</textarea>' \
+                  '<input id="t" value="a value far too long for the box">')
+    expect(style(s, 'a', 'overflowY')).to eq(['auto'])
+    expect(style(s, 't', 'overflowY')).to eq(['clip'])
+    expect(s.evaluate_script(<<~JS)).to eq(20)
+      (() => { const a = document.getElementById('a'); a.scrollTop = 20; return a.scrollTop })()
+    JS
   end
 
   it 'makes a listbox as tall as the rows it shows' do
@@ -198,7 +252,10 @@ RSpec.describe 'UA stylesheet: the form-control box' do
   end
 
   it 'does not render a hidden input at all' do
-    s = page_with('<input id="h" type="hidden" value="x"><div id="d">after</div>')
+    # …whatever the page declares: Chrome's UA rule is `display: none !important`, the one rule in
+    # this sheet an author cannot override.
+    s = page_with('<style>#h { display: block; width: 50px; height: 20px }</style>' \
+                  '<input id="h" type="hidden" value="x"><div id="d">after</div>')
     expect(style(s, 'h', 'display')).to eq(['none'])
     expect(size(s, 'h')).to eq([0, 0])
     expect(s.evaluate_script("document.getElementById('d').getBoundingClientRect().top")).to eq(0)
