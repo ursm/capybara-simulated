@@ -6144,6 +6144,9 @@ html/dom/elements/requirements-relating-to-bidirectional-algorithm-formatting-ch
 - "== html/dom/elements/requirements-relating-to-bidirectional-algorithm-formatting-characters/reference/dir-isolation-009b-ref.html"
 html/dom/elements/requirements-relating-to-bidirectional-algorithm-formatting-characters/dir-isolation-009c.html:
 - "== html/dom/elements/requirements-relating-to-bidirectional-algorithm-formatting-characters/reference/dir-isolation-009b-ref.html"
+html/rendering/bidi-rendering/slot-direction.window.js:
+- "<slot> element sets CSS direction property: <slot> inherits CSS direction from
+  parent"
 html/rendering/bidi-rendering/slot-no-isolate-001.html:
 - "== html/rendering/bidi-rendering/slot-no-isolate-001-ref.html"
 html/rendering/bidi-rendering/unicode-bidi-ua-rules.html:
@@ -8390,8 +8393,6 @@ html/rendering/non-replaced-elements/the-hr-element-0/size.html:
   blank)"
 html/rendering/non-replaced-elements/the-hr-element-0/width.html:
 - "== html/rendering/non-replaced-elements/the-hr-element-0/width-ref.html"
-html/rendering/non-replaced-elements/the-page/Document-documentElement-remove-clears-content.html:
-- "== css/reference/blank.html (both renderings blank)"
 html/rendering/non-replaced-elements/the-page/body-margin-1a.html:
 - "== html/rendering/non-replaced-elements/the-page/body-margin-1-ref.html (both renderings
   blank)"
@@ -8910,7 +8911,6 @@ html/rendering/replaced-elements/attributes-for-embedded-content-and-images/text
 - Textarea scrollHeight shouldn't collapse under a line height
 html/rendering/replaced-elements/attributes-for-embedded-content-and-images/video-aspect-ratio.html:
 - Aspect ratio for regular video
-- Aspect ratio for regular video with aspect-ratio:auto
 - Aspect ratio for regular video with width:auto
 - Aspect ratio for video with contain:size
 - 'Computed style test: video with {"width":"0","height":"0"}'
@@ -9673,8 +9673,6 @@ html/rendering/widgets/input-checkbox-disabled-checked.html:
 - "!= html/rendering/widgets/input-checkbox-disabled-checked-notref.html"
 html/rendering/widgets/input-checkbox-no-centering.html:
 - "== html/rendering/widgets/input-no-centering-ref.html"
-html/rendering/widgets/input-checkbox-zero-size.html:
-- "== css/reference/blank.html (both renderings blank)"
 html/rendering/widgets/input-date-baseline-print.html:
 - "== html/rendering/widgets/input-date-baseline-ref.html"
 html/rendering/widgets/input-date-baseline.html:
