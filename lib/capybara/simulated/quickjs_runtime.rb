@@ -459,6 +459,9 @@ module Capybara
           has_ready_timer:   ->        { !!vm.call('__hasReadyTimer') },
           # quickjs.rb has no explicit dispose; GC reclaims the VM.
           dispose:           ->        { nil }
+          # …and no cross-thread interrupt either, so `terminate` stays nil: a QuickJS worker
+          # inside a call is still only reachable through its inbox, and its own 30 s eval timeout
+          # is the backstop.
         )
       end
 
