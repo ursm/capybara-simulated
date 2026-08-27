@@ -3890,37 +3890,6 @@ css/css-logical/animations/padding-inline-interpolation.html:
   [20px]'
 - 'Web Animations: property <padding-inline> from [10px] to [20px] at (1.5) should
   be [25px]'
-css/css-logical/getComputedStyle-listing.html:
-- block-size
-- border-block-end-color
-- border-block-end-style
-- border-block-end-width
-- border-block-start-color
-- border-block-start-style
-- border-block-start-width
-- border-inline-end-color
-- border-inline-end-style
-- border-inline-end-width
-- border-inline-start-color
-- border-inline-start-style
-- border-inline-start-width
-- inline-size
-- inset-block-end
-- inset-block-start
-- inset-inline-end
-- inset-inline-start
-- margin-block-end
-- margin-block-start
-- margin-inline-end
-- margin-inline-start
-- max-block-size
-- max-inline-size
-- min-block-size
-- min-inline-size
-- padding-block-end
-- padding-block-start
-- padding-inline-end
-- padding-inline-start
 css/css-logical/inheritance.html:
 - Property block-size has initial value 0px
 - Property border-block-end-width has initial value 0px
@@ -4608,6 +4577,9 @@ css/cssom/cssimportrule-parent.html:
 - "@import stylesheet is properly unlinked from parent after removal"
 css/cssom/cssom-fontfacerule-constructors.html:
 - The style attribute must return a CSSFontFaceDescriptors block
+css/cssom/cssom-getPropertyValue-common-checks.html:
+- All shorthands (except 'all') can serialize their longhands set to their initial
+  value
 css/cssom/cssstyledeclaration-nested.html:
 - CSSNestedDeclarationBlock cssom interactions
 css/cssom/cssstyledeclaration-registered-custom-properties.html:

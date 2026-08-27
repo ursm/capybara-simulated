@@ -139,12 +139,74 @@ RSpec.describe 'CSS property names on a CSSStyleDeclaration' do
   #   also cost: the computed-style proxy's TARGET is the inline-style proxy, so V8 consults the
   #   target's [[GetOwnProperty]] on every property READ to check its invariants, and such a trap
   #   then ran a declaration lookup per read — 17-56% on `getComputedStyle(el).display` / `.color` /
-  #   `.width`, which app JS reads constantly.
+  #   `.width`, which app JS reads constantly. The prototype accessors below are how a caller that
+  #   wants a DESCRIPTOR (rather than an own one) gets it, at neither cost. Measured in Chrome
+  #   151.0.7922.169: an inline declaration carries 745 own attributes and a computed one 1220
+  #   (those plus its indices), while `CSSStyleDeclaration.prototype` holds only its 12 real
+  #   interface members — the mirror image of where CSSOM puts them.
   # - ENUMERATION is still missing, and that one IS a gap. Per spec the supported property INDICES
   #   are own enumerable properties, so `Object.keys(el.style)` should be `['0', '1']` for two
   #   declarations; ours is empty, because nothing here traps `ownKeys`. Discourse's
   #   `body-scroll-lock` snapshots a style object with `Object.assign({}, html.style)` and restores
   #   from it, which for us copies nothing back.
+
+  # The IDL attributes themselves. A `has`/`get` trap answers `in` and a read, but reflection asks
+  # a different question: `Reflect.getOwnPropertyDescriptor` / `Reflect.ownKeys` walking the
+  # prototype chain, which is how `css/css-logical/getComputedStyle-listing.html` checks that a
+  # property is exposed at all. Those find nothing on a proxy that only traps reads, so the
+  # attributes have to exist where CSSOM puts them — on the interface prototype.
+  it 'exposes each property as an IDL attribute on the interface prototype' do
+    s = style_probe
+    expect(s.evaluate_script(<<~JS)).to eq([true, true, true, true, true])
+      (() => { const p = CSSStyleDeclaration.prototype;
+               const d = Object.getOwnPropertyDescriptor(p, 'borderBlockEndColor');
+               return [!!d, typeof d.get === 'function', typeof d.set === 'function', d.enumerable, d.configurable]; })()
+    JS
+  end
+
+  # CSSOM spells one property up to three ways: the camel-cased attribute, the dashed attribute for
+  # any name carrying a `-`, the webkit-cased one for the `-webkit-…` family — plus `cssFloat`, the
+  # alias it minted because `float` was a reserved word when the interface was written.
+  it 'exposes every spelling CSSOM defines for a property' do
+    s = style_probe
+    expect(s.evaluate_script(<<~JS)).to eq([true, true, true, true, true, false])
+      (() => { const k = Reflect.ownKeys(CSSStyleDeclaration.prototype);
+               return ['marginInlineStart', 'margin-inline-start', 'webkitAppearance', 'WebkitAppearance', 'cssFloat',
+                       'notAProperty'].map(n => k.includes(n)); })()
+    JS
+  end
+
+  # The prototype accessors put a CSS property name on the chain of every declaration TARGET, so a
+  # read that misses can no longer be allowed to fall through to it — an unset property is '' , and
+  # reaching the accessor would invoke it with an internal receiver that has no declaration.
+  # `-ms-scrollbar-3dlight-color` is the name that proved it: camel-casing drops the dash before the
+  # digit, so folding `MsScrollbar3dlightColor` back by hand missed the property entirely.
+  it 'answers an unset property with the empty string, whatever its spelling' do
+    s = style_probe
+    expect(s.evaluate_script(<<~JS)).to eq(['', '', '', '', 'red'])
+      (() => { const st = document.getElementById('a').style;
+               const read = (n) => { try { return st[n]; } catch (e) { return e.constructor.name; } };
+               st.color = 'red';
+               return [read('marginInlineStart'), read('margin-inline-start'),
+                       read('MsScrollbar3dlightColor'), read('-ms-scrollbar-3dlight-color'),
+                       read('color')]; })()
+    JS
+  end
+
+  # A guard, not a new behaviour: an author-installed descriptor is the target's OWN property, and a
+  # proxy that answers anything else for a NON-CONFIGURABLE one violates the [[Get]] invariant — V8
+  # turns that into a TypeError raised from inside an ordinary read, which is what happened for a
+  # while once every property name also existed on the prototype. (Chrome answers `blue` here: a
+  # named property of a legacy platform object cannot be redefined out from under the interface. We
+  # let the own property win, which is what keeps the proxy legal.)
+  it 'reads the value of an own property the page installed on a declaration' do
+    s = style_probe
+    expect(s.evaluate_script(<<~JS)).to eq('x')
+      (() => { const st = document.createElement('div').style;
+               Object.defineProperty(st, 'color', {value: 'x', configurable: false, writable: false});
+               return st.color; })()
+    JS
+  end
 
   it 'still reads the value through the name it reports' do
     s = style_probe
