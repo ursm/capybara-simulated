@@ -136,6 +136,15 @@ const TREES = [
                                        // API, no layout. `.tentative` algorithms (Argon2 / cSHAKE / SHA-3 / Ed448
                                        // curve448 / AES-OCB / ML-KEM) auto-route out; getPublicKey / encap_decap /
                                        // supports are .tentative too.
+  'css/css-logical',                   // The FLOW-RELATIVE properties — `margin-inline-start`,
+                                       // `inset-block`, `border-end-end-radius`, the `*-block` /
+                                       // `*-inline` shorthands — and which PHYSICAL edge each maps
+                                       // to under a given `direction` / `writing-mode`. The driver
+                                       // resolves that mapping for every box (cascade.js
+                                       // `flowSides`), and nothing in the gate measured it: the
+                                       // twenty Chrome-verified divergences the `direction`
+                                       // increment fixed were all invisible here. Small tree, and
+                                       // the objective bar for the RTL layout work.
   'html/rendering',                    // THE UA stylesheet, normatively: what a browser's own
                                        // default sheet must compute for every element, how a
                                        // REPLACED element is sized, and what a form WIDGET looks
