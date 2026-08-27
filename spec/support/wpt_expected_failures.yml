@@ -6139,9 +6139,6 @@ html/dom/elements/requirements-relating-to-bidirectional-algorithm-formatting-ch
 - "== html/dom/elements/requirements-relating-to-bidirectional-algorithm-formatting-characters/reference/dir-isolation-009b-ref.html"
 html/dom/elements/requirements-relating-to-bidirectional-algorithm-formatting-characters/dir-isolation-009c.html:
 - "== html/dom/elements/requirements-relating-to-bidirectional-algorithm-formatting-characters/reference/dir-isolation-009b-ref.html"
-html/rendering/bidi-rendering/slot-direction.window.js:
-- "<slot> element sets CSS direction property: <slot> inherits CSS direction from
-  parent"
 html/rendering/bidi-rendering/slot-no-isolate-001.html:
 - "== html/rendering/bidi-rendering/slot-no-isolate-001-ref.html"
 html/rendering/bidi-rendering/unicode-bidi-ua-rules.html:
