@@ -207,10 +207,13 @@ RSpec.describe 'logical properties' do
                     %w[top left])).to eq(['5px', '5px'])
     expect(computed('', '<div id="t" style="position:absolute; inset-inline-start: 7px"></div>',
                     %w[left insetInlineStart])).to eq(['7px', '7px'])
-    # `auto` and a percentage stay layout-dependent — their used value is the box's static position
-    # / a share of the containing block — so the resolver declines them rather than reporting a
-    # length it would have to guess at.
-    expect(computed('#t { position: absolute; top: auto; left: 10% }', '<div id="t"></div>',
-                    %w[top left])).to eq(['', ''])
+    # `auto` and a percentage are layout-dependent, and a POSITIONED box owes the used value for
+    # both — the percentage absolutized against the containing block, `auto` resolved to where the
+    # box actually sits. All six match Chrome 151.0.7922.169 exactly on this page.
+    positioned = '#cb { position: relative; width: 400px; height: 200px; padding: 10px; border: 5px solid } ' \
+                 '#t { position: absolute; top: auto; left: 10%; width: 50px; height: 20px }'
+    expect(computed(positioned, '<div id="cb"><div id="t"></div></div>',
+                    %w[top left bottom right insetBlockStart insetInlineStart]))
+      .to eq(['10px', '42px', '190px', '328px', '10px', '42px'])
   end
 end
