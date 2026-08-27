@@ -3958,96 +3958,16 @@ css/css-logical/logical-box-border-radius.html:
 - 'Test that border-*-radius properties honor order of appearance when both logical
   and physical associates are declared, with ''-webkit-writing-mode: horizontal-bt;
   direction: rtl; ''.'
-- 'Test that border-*-radius properties honor order of appearance when both logical
-  and physical associates are declared, with ''writing-mode: horizontal-tb; direction:
-  ltr; ''.'
-- 'Test that border-*-radius properties honor order of appearance when both logical
-  and physical associates are declared, with ''writing-mode: horizontal-tb; direction:
-  rtl; ''.'
-- 'Test that border-*-radius properties honor order of appearance when both logical
-  and physical associates are declared, with ''writing-mode: sideways-lr; direction:
-  ltr; ''.'
-- 'Test that border-*-radius properties honor order of appearance when both logical
-  and physical associates are declared, with ''writing-mode: sideways-lr; direction:
-  rtl; ''.'
-- 'Test that border-*-radius properties honor order of appearance when both logical
-  and physical associates are declared, with ''writing-mode: sideways-rl; direction:
-  ltr; ''.'
-- 'Test that border-*-radius properties honor order of appearance when both logical
-  and physical associates are declared, with ''writing-mode: sideways-rl; direction:
-  rtl; ''.'
-- 'Test that border-*-radius properties honor order of appearance when both logical
-  and physical associates are declared, with ''writing-mode: vertical-lr; direction:
-  ltr; ''.'
-- 'Test that border-*-radius properties honor order of appearance when both logical
-  and physical associates are declared, with ''writing-mode: vertical-lr; direction:
-  rtl; ''.'
-- 'Test that border-*-radius properties honor order of appearance when both logical
-  and physical associates are declared, with ''writing-mode: vertical-rl; direction:
-  ltr; ''.'
-- 'Test that border-*-radius properties honor order of appearance when both logical
-  and physical associates are declared, with ''writing-mode: vertical-rl; direction:
-  rtl; ''.'
 - 'Test that border-*-radius properties honor selector specificty when both logical
   and physical associates are declared, with ''-webkit-writing-mode: horizontal-bt;
   direction: ltr; ''.'
 - 'Test that border-*-radius properties honor selector specificty when both logical
   and physical associates are declared, with ''-webkit-writing-mode: horizontal-bt;
   direction: rtl; ''.'
-- 'Test that border-*-radius properties honor selector specificty when both logical
-  and physical associates are declared, with ''writing-mode: horizontal-tb; direction:
-  ltr; ''.'
-- 'Test that border-*-radius properties honor selector specificty when both logical
-  and physical associates are declared, with ''writing-mode: horizontal-tb; direction:
-  rtl; ''.'
-- 'Test that border-*-radius properties honor selector specificty when both logical
-  and physical associates are declared, with ''writing-mode: sideways-lr; direction:
-  ltr; ''.'
-- 'Test that border-*-radius properties honor selector specificty when both logical
-  and physical associates are declared, with ''writing-mode: sideways-lr; direction:
-  rtl; ''.'
-- 'Test that border-*-radius properties honor selector specificty when both logical
-  and physical associates are declared, with ''writing-mode: sideways-rl; direction:
-  ltr; ''.'
-- 'Test that border-*-radius properties honor selector specificty when both logical
-  and physical associates are declared, with ''writing-mode: sideways-rl; direction:
-  rtl; ''.'
-- 'Test that border-*-radius properties honor selector specificty when both logical
-  and physical associates are declared, with ''writing-mode: vertical-lr; direction:
-  ltr; ''.'
-- 'Test that border-*-radius properties honor selector specificty when both logical
-  and physical associates are declared, with ''writing-mode: vertical-lr; direction:
-  rtl; ''.'
-- 'Test that border-*-radius properties honor selector specificty when both logical
-  and physical associates are declared, with ''writing-mode: vertical-rl; direction:
-  ltr; ''.'
-- 'Test that border-*-radius properties honor selector specificty when both logical
-  and physical associates are declared, with ''writing-mode: vertical-rl; direction:
-  rtl; ''.'
 - 'Test that logical border-*-radius properties share computed values with their physical
   associates, with ''-webkit-writing-mode: horizontal-bt; direction: ltr; ''.'
 - 'Test that logical border-*-radius properties share computed values with their physical
   associates, with ''-webkit-writing-mode: horizontal-bt; direction: rtl; ''.'
-- 'Test that logical border-*-radius properties share computed values with their physical
-  associates, with ''writing-mode: horizontal-tb; direction: ltr; ''.'
-- 'Test that logical border-*-radius properties share computed values with their physical
-  associates, with ''writing-mode: horizontal-tb; direction: rtl; ''.'
-- 'Test that logical border-*-radius properties share computed values with their physical
-  associates, with ''writing-mode: sideways-lr; direction: ltr; ''.'
-- 'Test that logical border-*-radius properties share computed values with their physical
-  associates, with ''writing-mode: sideways-lr; direction: rtl; ''.'
-- 'Test that logical border-*-radius properties share computed values with their physical
-  associates, with ''writing-mode: sideways-rl; direction: ltr; ''.'
-- 'Test that logical border-*-radius properties share computed values with their physical
-  associates, with ''writing-mode: sideways-rl; direction: rtl; ''.'
-- 'Test that logical border-*-radius properties share computed values with their physical
-  associates, with ''writing-mode: vertical-lr; direction: ltr; ''.'
-- 'Test that logical border-*-radius properties share computed values with their physical
-  associates, with ''writing-mode: vertical-lr; direction: rtl; ''.'
-- 'Test that logical border-*-radius properties share computed values with their physical
-  associates, with ''writing-mode: vertical-rl; direction: ltr; ''.'
-- 'Test that logical border-*-radius properties share computed values with their physical
-  associates, with ''writing-mode: vertical-rl; direction: rtl; ''.'
 css/css-logical/logical-box-border-shorthands.html:
 - 'Test that border-* properties honor order of appearance when both logical and physical
   associates are declared, with ''-webkit-writing-mode: horizontal-bt; direction:
@@ -4055,78 +3975,12 @@ css/css-logical/logical-box-border-shorthands.html:
 - 'Test that border-* properties honor order of appearance when both logical and physical
   associates are declared, with ''-webkit-writing-mode: horizontal-bt; direction:
   rtl; ''.'
-- 'Test that border-* properties honor order of appearance when both logical and physical
-  associates are declared, with ''writing-mode: horizontal-tb; direction: ltr; ''.'
-- 'Test that border-* properties honor order of appearance when both logical and physical
-  associates are declared, with ''writing-mode: horizontal-tb; direction: rtl; ''.'
-- 'Test that border-* properties honor order of appearance when both logical and physical
-  associates are declared, with ''writing-mode: sideways-lr; direction: ltr; ''.'
-- 'Test that border-* properties honor order of appearance when both logical and physical
-  associates are declared, with ''writing-mode: sideways-lr; direction: rtl; ''.'
-- 'Test that border-* properties honor order of appearance when both logical and physical
-  associates are declared, with ''writing-mode: sideways-rl; direction: ltr; ''.'
-- 'Test that border-* properties honor order of appearance when both logical and physical
-  associates are declared, with ''writing-mode: sideways-rl; direction: rtl; ''.'
-- 'Test that border-* properties honor order of appearance when both logical and physical
-  associates are declared, with ''writing-mode: vertical-lr; direction: ltr; ''.'
-- 'Test that border-* properties honor order of appearance when both logical and physical
-  associates are declared, with ''writing-mode: vertical-lr; direction: rtl; ''.'
-- 'Test that border-* properties honor order of appearance when both logical and physical
-  associates are declared, with ''writing-mode: vertical-rl; direction: ltr; ''.'
-- 'Test that border-* properties honor order of appearance when both logical and physical
-  associates are declared, with ''writing-mode: vertical-rl; direction: rtl; ''.'
 - 'Test that border-* properties honor selector specificty when both logical and physical
   associates are declared, with ''-webkit-writing-mode: horizontal-bt; direction:
   ltr; ''.'
 - 'Test that border-* properties honor selector specificty when both logical and physical
   associates are declared, with ''-webkit-writing-mode: horizontal-bt; direction:
   rtl; ''.'
-- 'Test that border-* properties honor selector specificty when both logical and physical
-  associates are declared, with ''writing-mode: horizontal-tb; direction: ltr; ''.'
-- 'Test that border-* properties honor selector specificty when both logical and physical
-  associates are declared, with ''writing-mode: horizontal-tb; direction: rtl; ''.'
-- 'Test that border-* properties honor selector specificty when both logical and physical
-  associates are declared, with ''writing-mode: sideways-lr; direction: ltr; ''.'
-- 'Test that border-* properties honor selector specificty when both logical and physical
-  associates are declared, with ''writing-mode: sideways-lr; direction: rtl; ''.'
-- 'Test that border-* properties honor selector specificty when both logical and physical
-  associates are declared, with ''writing-mode: sideways-rl; direction: ltr; ''.'
-- 'Test that border-* properties honor selector specificty when both logical and physical
-  associates are declared, with ''writing-mode: sideways-rl; direction: rtl; ''.'
-- 'Test that border-* properties honor selector specificty when both logical and physical
-  associates are declared, with ''writing-mode: vertical-lr; direction: ltr; ''.'
-- 'Test that border-* properties honor selector specificty when both logical and physical
-  associates are declared, with ''writing-mode: vertical-lr; direction: rtl; ''.'
-- 'Test that border-* properties honor selector specificty when both logical and physical
-  associates are declared, with ''writing-mode: vertical-rl; direction: ltr; ''.'
-- 'Test that border-* properties honor selector specificty when both logical and physical
-  associates are declared, with ''writing-mode: vertical-rl; direction: rtl; ''.'
-- 'Test that border-* shorthands set the computed value of both logical and physical
-  longhands, with ''-webkit-writing-mode: horizontal-bt; direction: ltr; ''.'
-- 'Test that border-* shorthands set the computed value of both logical and physical
-  longhands, with ''-webkit-writing-mode: horizontal-bt; direction: rtl; ''.'
-- 'Test that border-* shorthands set the computed value of both logical and physical
-  longhands, with ''writing-mode: horizontal-tb; direction: ltr; ''.'
-- 'Test that border-* shorthands set the computed value of both logical and physical
-  longhands, with ''writing-mode: horizontal-tb; direction: rtl; ''.'
-- 'Test that border-* shorthands set the computed value of both logical and physical
-  longhands, with ''writing-mode: sideways-lr; direction: ltr; ''.'
-- 'Test that border-* shorthands set the computed value of both logical and physical
-  longhands, with ''writing-mode: sideways-lr; direction: rtl; ''.'
-- 'Test that border-* shorthands set the computed value of both logical and physical
-  longhands, with ''writing-mode: sideways-rl; direction: ltr; ''.'
-- 'Test that border-* shorthands set the computed value of both logical and physical
-  longhands, with ''writing-mode: sideways-rl; direction: rtl; ''.'
-- 'Test that border-* shorthands set the computed value of both logical and physical
-  longhands, with ''writing-mode: vertical-lr; direction: ltr; ''.'
-- 'Test that border-* shorthands set the computed value of both logical and physical
-  longhands, with ''writing-mode: vertical-lr; direction: rtl; ''.'
-- 'Test that border-* shorthands set the computed value of both logical and physical
-  longhands, with ''writing-mode: vertical-rl; direction: ltr; ''.'
-- 'Test that border-* shorthands set the computed value of both logical and physical
-  longhands, with ''writing-mode: vertical-rl; direction: rtl; ''.'
-- Test that border-block shorthand sets longhands and serializes correctly.
-- Test that border-inline shorthand sets longhands and serializes correctly.
 - 'Test that logical border-* properties share computed values with their physical
   associates, with ''-webkit-writing-mode: horizontal-bt; direction: ltr; ''.'
 - 'Test that logical border-* properties share computed values with their physical
@@ -4327,7 +4181,6 @@ css/css-logical/parsing/border-block-style-invalid.html:
 css/css-logical/parsing/border-block-valid.html:
 - e.style['border-block-end'] = "calc(10px - 0.5em) dotted red" should set the property
   value
-- e.style['border-block-start'] = "green double thin" should set the property value
 css/css-logical/parsing/border-block-width-computed.html:
 - Property border-block-end-width value 'thick'
 - Property border-block-start-width value 'medium'
@@ -4382,7 +4235,6 @@ css/css-logical/parsing/border-inline-style-invalid.html:
 css/css-logical/parsing/border-inline-valid.html:
 - e.style['border-inline-end'] = "calc(10px - 0.5em) dotted red" should set the property
   value
-- e.style['border-inline-start'] = "green double thin" should set the property value
 css/css-logical/parsing/border-inline-width-computed.html:
 - Property border-inline-end-width value 'thick'
 - Property border-inline-start-width value 'medium'
