@@ -186,10 +186,32 @@ module WptRunner
   # cleared per file (run_one) for the same run-order independence the session reset gives.
   require 'tmpdir'
   require 'fileutils'
-  STASH_DIR = Dir.mktmpdir('csim-wpt-stash')
-  at_exit { FileUtils.remove_entry(STASH_DIR, true) }
-
   module_function
+
+  # The `server.stash` directory, per PROCESS rather than per module load: the regenerator FORKS
+  # workers, and they inherit whatever the parent had already built. `prepare_session!` clears this
+  # directory per file, so a shared one would let one worker delete another's in-flight entry.
+  # Keyed on the pid, so a fork gets its own without any handoff. (Under flatware the shard files
+  # load this module AFTER the fork, so each worker already had its own — this only makes that
+  # independence explicit instead of incidental.)
+  STASH_LOCK = Mutex.new
+  def stash_dir
+    return @stash_dir if @stash_dir && @stash_pid == Process.pid
+    # Synchronised because `run_py_handler` reads this from the driver's threads (see its header),
+    # and the memo is otherwise check-then-act: a lost race would mktmpdir twice and leave
+    # `prepare_session!` clearing a directory the handlers aren't writing to. Once per process, so
+    # the lock costs nothing. (A forked child re-enters here with the parent's ivars set and its
+    # own pid, which is the whole point — it must not share the parent's stash.)
+    STASH_LOCK.synchronize do
+      next @stash_dir if @stash_dir && @stash_pid == Process.pid
+      owner      = Process.pid
+      @stash_pid = owner
+      @stash_dir = Dir.mktmpdir('csim-wpt-stash')
+      dir        = @stash_dir
+      at_exit { FileUtils.remove_entry(dir, true) if Process.pid == owner }
+      @stash_dir
+    end
+  end
 
   # Run a vendored WPT `.py` request handler through script/wpt_py_handler.py (a
   # minimal wptserve shim) via python3, returning a Rack `[status, headers, [body]]`
@@ -236,7 +258,7 @@ module WptRunner
       # request.server.stash backing dir — shared across a test file's .py subprocesses
       # (the CORS preflight-denied flow stashes state across reset/preflight/complete);
       # cleared per file in run_one.
-      'WPT_STASH_DIR' => STASH_DIR,
+      'WPT_STASH_DIR' => stash_dir,
       'PYTHONDONTWRITEBYTECODE' => '1'   # no __pycache__ in the vendored WPT tree
     }
     # Serialized: concurrent capture2 from multiple driver threads (a race-network
@@ -1122,7 +1144,7 @@ module WptRunner
     # run-order independence the history/session resets enforce, and bounds the map).
     DISPATCHER_LOCK.synchronize { DISPATCHER_STASH.clear }
     # Per-file reset of the file-backed server.stash (same run-order independence).
-    FileUtils.rm_f(Dir.glob(File.join(STASH_DIR, '*')))
+    FileUtils.rm_f(Dir.glob(File.join(stash_dir, '*')))
   end
 
   # The driver doesn't auto-fire window 'load'; testharness completes its

@@ -30,6 +30,9 @@
 # in NEITHER turns the suite RED (fix it or list it), and a listed subtest that
 # now PASSes ALSO turns it RED (delete the stale line). Shrinking the in-scope
 # file is the parity roadmap.
+require 'etc'
+require 'tmpdir'
+require 'fileutils'
 require_relative '../spec/support/wpt_runner'
 
 # A `.tentative` test (or one under a `tentative/` directory) targets an unratified
@@ -117,8 +120,129 @@ def confirmed_run(rel)
   same ? result : WptRunner.run(rel)
 end
 
-files.each_with_index do |rel, i|
-  result = confirmed_run(rel)
+# Run phase, on every core. The corpus is ~10 CPU-minutes and every file is independent (the
+# runner resets the session per file, which is what lets the gate shard it at all), so a single
+# process was leaving 31 of 32 cores idle: `bin/flatware-rspec spec` covers the same 6000 files in
+# ~85 s wall because it uses all of them. Measured on an idle box: 7m26s serial -> 1m23s at eight
+# workers, with the same `confirmed_run` flake discipline inside each worker and the classification
+# and YAML writing untouched below.
+#
+# Fork, not threads: a V8 isolate is thread-confined and the isolates have to be independent. The
+# parent must not have booted an engine before forking (a forked V8 crashes loudly), which is why
+# everything above this line is file and YAML reading only.
+#
+# A WORK QUEUE rather than a stripe. Index striping is what the gate shards with, and it is good
+# enough there, but measured here the slowest stripe ran 21 % over the mean at eight workers (33 %
+# at 24) and the tail of the run was mostly idle — per-file cost spans three orders of magnitude.
+# Pulling the next index under an flock costs one lock per file against ~70 ms of work, and it
+# makes the progress line a real fraction and the crash report name the file.
+#
+# Eight is a MEMORY choice, not a scaling ceiling: 16 workers finish in 52 s but peak at 15.7 GB
+# (measured ~1.25 GB per worker over a ~3.3 GB floor), and contention grows with width — summed
+# worker time is +9 % at 8 and +35 % at 16. The default is clamped by available memory too, since
+# a box with the cores to want 8 does not necessarily have the RAM.
+def worker_count
+  raw = ENV['CSIM_REGEN_WORKERS']
+  if raw
+    parsed = begin
+      Integer(raw, 10)
+    rescue ArgumentError, TypeError
+      abort "CSIM_REGEN_WORKERS must be an integer, got #{raw.inspect}"
+    end
+    return parsed.clamp(1, 32)
+  end
+  by_cpu = [Etc.nprocessors - 2, 8].min
+  # `MemAvailable` is what the kernel thinks can be handed out without swapping. A worker measured
+  # ~1.25 GB peak; leave the floor for the parent and whatever else the machine is doing.
+  available_gb = (File.read('/proc/meminfo')[/^MemAvailable:\s+(\d+) kB/, 1].to_i / 1_048_576.0 rescue 0)
+  by_mem = available_gb.positive? ? ((available_gb - 2) / 1.25).floor : by_cpu
+  [by_cpu, by_mem].min.clamp(1, 32)
+end
+WORKERS = worker_count
+
+# One shared cursor, taken under an exclusive lock: whichever worker is free next takes the next
+# file, so a stripe of cheap files can't finish early while another is still on canvas.
+def next_index(path)
+  File.open(path, 'r+') do |f|
+    f.flock(File::LOCK_EX)
+    i = f.read.to_i
+    f.rewind
+    f.write(i + 1)
+    f.flush
+    f.truncate(f.pos)
+    i
+  end
+end
+
+def drain_queue(files, cursor, out_path, progress_path)
+  results = {}
+  loop do
+    i = next_index(cursor)
+    break if i >= files.size
+    rel = files[i]
+    # The file this worker is ON, so a crash can name it — `run_stripe` used to write only at the
+    # end, so a worker that died at file 700 discarded 700 results and identified none of them.
+    File.binwrite(progress_path, rel)
+    r = confirmed_run(rel)
+    results[rel] = r[:completed] ? {failing: r[:failing]} : {error: r[:error]}
+    warn "\r  #{i + 1}/#{files.size}" if ((i + 1) % 50).zero?
+  end
+  File.binwrite(out_path, Marshal.dump(results))
+end
+
+def run_serially(files)
+  files.each_with_object({}).with_index do |(rel, h), i|
+    r = confirmed_run(rel)
+    h[rel] = r[:completed] ? {failing: r[:failing]} : {error: r[:error]}
+    warn "\r  #{i + 1}/#{files.size}" if ((i + 1) % 50).zero?
+  end
+end
+
+def run_in_parallel(files, workers)
+  dir      = Dir.mktmpdir('csim-regen')
+  cursor   = File.join(dir, 'cursor')
+  parts    = (0...workers).map {|w| File.join(dir, "part-#{w}") }
+  progress = (0...workers).map {|w| File.join(dir, "at-#{w}") }
+  File.binwrite(cursor, '0')
+  pids = (0...workers).map {|w|
+    fork {
+      # A NORMAL exit: the child owns everything its at_exit hooks touch — its own WPT stash (the
+      # hook is pid-guarded), its own V8 isolates (the parent never booted one, which is the
+      # precondition above), its own script-cache flush. `exit!` skipped all of it and leaked a
+      # stash directory and a font tempfile per worker per run, for no speed at all (measured
+      # slightly FASTER with a normal exit).
+      drain_queue(files, cursor, parts[w], progress[w])
+      Process.exit(0)
+    }
+  }
+  begin
+    pids.each_with_index do |pid, w|
+      _, status = Process.waitpid2(pid)
+      next if status.success? && File.exist?(parts[w])
+      at = File.exist?(progress[w]) ? File.binread(progress[w]) : '(no file recorded)'
+      # The child already printed its own backtrace to this stderr, so don't send anyone to a
+      # serial rerun: for a crash you CAN'T see — an OOM kill under memory pressure — serial
+      # removes the very condition that caused it, and costs 7 minutes to not reproduce.
+      abort "regen worker #{w} died (#{status.inspect}) on #{at}"
+    end
+    parts.map {|path| Marshal.load(File.binread(path)) }.reduce({}, :merge)
+  ensure
+    # Whatever happens, no orphans: a worker outliving the parent keeps a ~1.2 GB isolate and a
+    # core busy for the rest of its queue, which is the runaway-process shape this project has
+    # been bitten by before.
+    pids.each {|pid| Process.kill('TERM', pid) rescue nil }
+    pids.each {|pid| Process.waitpid(pid) rescue nil }
+    FileUtils.remove_entry(dir, true)
+  end
+end
+
+warn "  #{WORKERS} worker#{'s' unless WORKERS == 1}"
+# rel => {failing:} | {error:}. Keyed by path, so the merge order never matters.
+results = WORKERS <= 1 ? run_serially(files) : run_in_parallel(files, WORKERS)
+
+files.each do |rel|
+  raw    = results.fetch(rel)
+  result = raw.key?(:failing) ? {completed: true, failing: raw[:failing]} : {completed: false, error: raw[:error]}
   if result[:completed]
     completed_count += 1
     # Keep the full multiset (no uniq): a subtest name that fails more than once
@@ -163,9 +287,8 @@ files.each_with_index do |rel, i|
       in_map[rel] = WptRunner::HARNESS_ERROR
     end
   end
-  warn "\r  #{i + 1}/#{files.size}" if ((i + 1) % 25).zero? || i + 1 == files.size
 end
-warn ''
+warn ''   # close the workers' \r progress line before the summary
 
 in_hdr = <<~H
   # WPT IN-SCOPE backlog — subtests that currently fail but are real driver gaps
