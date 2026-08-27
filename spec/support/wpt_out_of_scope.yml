@@ -29191,6 +29191,17 @@ css/css-flexbox/flex-container-min-content-002.tentative.html:
   reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
     specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
     path/suffix. CLAUDE.md rule 1.
+css/css-logical/animation-003.tentative.html:
+- name: Logical properties are represented as physical properties in keyframes
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+css/css-logical/animations/logical-shorthand-relative-prioritization-by-number-of-components.tentative.html:
+- name: Logical shorthands follow the usual prioritization based on number of component
+    longhands
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
 css/cssom/CSSContainerRule.tentative.html:
 - name: "@container (min-width: 100px) {}"
   reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
