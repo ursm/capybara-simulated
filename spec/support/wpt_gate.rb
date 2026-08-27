@@ -104,7 +104,12 @@ module WptGate
       # Compare one file's run against its allowlist; returns the mismatch message(s), or [] on a match.
       # Pure (no `expect`) so the retry loop below can re-run a file and only assert on the final result.
       def wpt_file_mismatches(rel)
-        result   = WptRunner.run(rel)
+        wpt_result_mismatches(rel, WptRunner.run(rel))
+      end
+
+      # The comparison half, over an already-produced result, so the retry loop can decide whether
+      # to run the file again from the OUTCOME rather than only from the mismatch.
+      def wpt_result_mismatches(rel, result)
         expected = WptRunner.expected[rel]
         errs     = []
 
@@ -141,15 +146,24 @@ module WptGate
         next unless i % shards == shard - 1
         it rel do
           # A REFTEST renders the same bytes every time (verified: repeated renders are
-          # byte-identical), so a retry can never rescue one — it would only triple the cost of a
-          # genuine red, and would quietly extend a flake allowance written for a cross-isolate
-          # service-worker race to a category where a flake means a NONDETERMINISTIC PAINTER, which
-          # is exactly what should red on the first attempt.
-          attempts   = WptRunner.reftest?(rel) ? 1 : WptGate::FILE_ATTEMPTS
+          # byte-identical), so retrying a COMPARISON can never rescue one — it would only triple
+          # the cost of a genuine red, and would extend a flake allowance written for a
+          # cross-isolate service-worker race to a category where a flake means a NONDETERMINISTIC
+          # PAINTER, which is exactly what should red on the first attempt.
+          #
+          # A reftest that did not COMPLETE is a different animal, and that distinction was missing
+          # here: it did not render two images and compare them, it raised or ran out of budget —
+          # which is the same wall-clock sensitivity the harness retry exists for. Measured: a
+          # `.tentative` canvas reftest that legitimately works for its whole frame budget (13 s
+          # here, every run, on a page that is never "ready" by design) completed 3/3 locally and
+          # on two of three CI Rubies, and reported "harness did not complete" on the slowest
+          # runner. So a reftest gets the retry too — but only for that outcome.
           mismatches = []
-          attempts.times do
-            mismatches = wpt_file_mismatches(rel)
+          WptGate::FILE_ATTEMPTS.times do
+            result     = WptRunner.run(rel)
+            mismatches = wpt_result_mismatches(rel, result)
             break if mismatches.empty?
+            break if WptRunner.reftest?(rel) && result[:completed]
           end
           expect(mismatches).to be_empty, mismatches.join("\n\n")
         end
