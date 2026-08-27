@@ -3515,19 +3515,6 @@ css/css-flexbox/parsing/flex-wrap-invalid.html:
 - e.style['flex-wrap'] = "nowrap wrap" should not set the property value
 css/css-flexbox/parsing/order-invalid.html:
 - e.style['order'] = "auto" should not set the property value
-css/css-flexbox/parsing/webkit-aliases.html:
-- "-webkit-align-content is a legacy name alias for align-content"
-- "-webkit-align-items is a legacy name alias for align-items"
-- "-webkit-align-self is a legacy name alias for align-self"
-- "-webkit-flex is a legacy name alias for flex"
-- "-webkit-flex-basis is a legacy name alias for flex-basis"
-- "-webkit-flex-direction is a legacy name alias for flex-direction"
-- "-webkit-flex-flow is a legacy name alias for flex-flow"
-- "-webkit-flex-grow is a legacy name alias for flex-grow"
-- "-webkit-flex-shrink is a legacy name alias for flex-shrink"
-- "-webkit-flex-wrap is a legacy name alias for flex-wrap"
-- "-webkit-justify-content is a legacy name alias for justify-content"
-- "-webkit-order is a legacy name alias for order"
 css/css-flexbox/percent-height-flex-items-cross-sizes-with-mutations.html:
 - percent-height-flex-items-cross-sizes-with-mutations
 - percent-height-flex-items-cross-sizes-with-mutations 1
@@ -6013,27 +6000,6 @@ custom-elements/reactions/Animation.html:
   observed style attribute
 - Animation.animate must not enqueue an attributeChanged reaction when it mutates
   the style attribute but the style attribute is not observed
-custom-elements/reactions/CSSStyleDeclaration.html:
-- A webkit prefixed camel case attribute (webkitFilter) on CSSStyleDeclaration must
-  enqueue an attributeChanged reaction when it adds the observed style attribute
-- A webkit prefixed camel case attribute (webkitFilter) on CSSStyleDeclaration must
-  enqueue an attributeChanged reaction when it mutates the observed style attribute
-- A webkit prefixed camel case attribute (webkitFilter) on CSSStyleDeclaration must
-  not enqueue an attributeChanged reaction when it adds the style attribute but the
-  style attribute is not observed
-- A webkit prefixed camel case attribute (webkitFilter) on CSSStyleDeclaration must
-  not enqueue an attributeChanged reaction when it mutates the style attribute but
-  the style attribute is not observed
-- A webkit prefixed dashed property (-webkit-filter) on CSSStyleDeclaration must enqueue
-  an attributeChanged reaction when it adds the observed style attribute
-- A webkit prefixed dashed property (-webkit-filter) on CSSStyleDeclaration must enqueue
-  an attributeChanged reaction when it mutates the observed style attribute
-- A webkit prefixed dashed property (-webkit-filter) on CSSStyleDeclaration must not
-  enqueue an attributeChanged reaction when it adds the style attribute but the style
-  attribute is not observed
-- A webkit prefixed dashed property (-webkit-filter) on CSSStyleDeclaration must not
-  enqueue an attributeChanged reaction when it mutates the style attribute but the
-  style attribute is not observed
 custom-elements/reactions/Document.html:
 - execCommand on Document must enqueue a disconnected reaction when deleting a custom
   element from a contenteditable element
@@ -8962,9 +8928,6 @@ html/rendering/widgets/appearance/appearance-transition-002.html:
 - "== html/rendering/widgets/appearance/appearance-transition-002-ref.html"
 html/rendering/widgets/appearance/default-styles.html:
 - "<button>"
-- "<details>"
-- "<div>"
-- <input type="HIDDEN">
 - <input type="TEXT">
 - <input type="button">
 - <input type="checkbox">
@@ -8972,9 +8935,6 @@ html/rendering/widgets/appearance/default-styles.html:
 - <input type="date">
 - <input type="datetime-local">
 - <input type="email">
-- <input type="file">
-- <input type="hidden">
-- <input type="image">
 - <input type="month">
 - <input type="number">
 - <input type="password">
@@ -8990,22 +8950,12 @@ html/rendering/widgets/appearance/default-styles.html:
 - <input type="url">
 - <input type="week">
 - "<input>"
-- "<input> (namespace: http://www.w3.org/2000/svg)"
-- "<input> (namespace: null)"
-- "<keygen>"
-- "<marquee>"
-- "<menuitem>"
 - "<meter>"
 - "<progress>"
 - <select multiple="">
 - <select size="2">
 - "<select>"
-- "<summary>"
 - "<textarea>"
-- <video controls="">
-- "<video>"
-- The body element
-- The html element
 html/rendering/widgets/button-layout/anonymous-button-content-box.html:
 - "== html/rendering/widgets/button-layout/anonymous-button-content-box-ref.html"
 html/rendering/widgets/button-layout/block-in-inline.html:
