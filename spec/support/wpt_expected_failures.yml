@@ -6306,10 +6306,6 @@ html/rendering/dimension-attributes.html:
 - <col width="200.25in"> mapping to <col> width property
 - <col width="200.7"> mapping to <col> width property
 - <col width="200in"> mapping to <col> width property
-- <embed height="   00523   "> mapping to <embed> height property
-- <embed height="-200px"> mapping to <embed> height property
-- <embed height="200 %"> mapping to <embed> height property
-- <embed height="200.%"> mapping to <embed> height property
 - <embed hspace="   00523   "> mapping to <embed> marginLeft property
 - <embed hspace="   00523   "> mapping to <embed> marginRight property
 - <embed hspace="0%"> mapping to <embed> marginLeft property
@@ -6378,10 +6374,6 @@ html/rendering/dimension-attributes.html:
 - <embed vspace="200.7"> mapping to <embed> marginTop property
 - <embed vspace="200in"> mapping to <embed> marginBottom property
 - <embed vspace="200in"> mapping to <embed> marginTop property
-- <embed width="   00523   "> mapping to <embed> width property
-- <embed width="-200px"> mapping to <embed> width property
-- <embed width="200 %"> mapping to <embed> width property
-- <embed width="200.%"> mapping to <embed> width property
 - <hr width="   00523   "> mapping to <hr> width property
 - <hr width="0"> mapping to <hr> width property
 - <hr width="0%"> mapping to <hr> width property
@@ -6401,18 +6393,6 @@ html/rendering/dimension-attributes.html:
 - <hr width="200.25in"> mapping to <hr> width property
 - <hr width="200.7"> mapping to <hr> width property
 - <hr width="200in"> mapping to <hr> width property
-- <iframe height="   00523   "> mapping to <iframe> height property
-- <iframe height="-200px"> mapping to <iframe> height property
-- <iframe height="200 %"> mapping to <iframe> height property
-- <iframe height="200.%"> mapping to <iframe> height property
-- <iframe width="   00523   "> mapping to <iframe> width property
-- <iframe width="-200px"> mapping to <iframe> width property
-- <iframe width="200 %"> mapping to <iframe> width property
-- <iframe width="200.%"> mapping to <iframe> width property
-- <img height="   00523   "> mapping to <img> height property
-- <img height="-200px"> mapping to <img> height property
-- <img height="200 %"> mapping to <img> height property
-- <img height="200.%"> mapping to <img> height property
 - <img hspace="   00523   "> mapping to <img> marginLeft property
 - <img hspace="   00523   "> mapping to <img> marginRight property
 - <img hspace="0%"> mapping to <img> marginLeft property
@@ -6481,24 +6461,6 @@ html/rendering/dimension-attributes.html:
 - <img vspace="200.7"> mapping to <img> marginTop property
 - <img vspace="200in"> mapping to <img> marginBottom property
 - <img vspace="200in"> mapping to <img> marginTop property
-- <img width="   00523   "> mapping to <img> width property
-- <img width="-200px"> mapping to <img> width property
-- <img width="200 %"> mapping to <img> width property
-- <img width="200.%"> mapping to <img> width property
-- <input height="   00523   "> mapping to <input> height property
-- <input height="-200px"> mapping to <input> height property
-- <input height="0%"> mapping to <input> height property
-- <input height="20.25E2"> mapping to <input> height property
-- <input height="20.25e2"> mapping to <input> height property
-- <input height="200 %"> mapping to <input> height property
-- <input height="200 abc"> mapping to <input> height property
-- <input height="200%"> mapping to <input> height property
-- <input height="200%abc"> mapping to <input> height property
-- <input height="200."> mapping to <input> height property
-- <input height="200.%"> mapping to <input> height property
-- <input height="200.25%"> mapping to <input> height property
-- <input height="200.25in"> mapping to <input> height property
-- <input height="200in"> mapping to <input> height property
 - <input hspace="   00523   "> mapping to <input> marginLeft property
 - <input hspace="   00523   "> mapping to <input> marginRight property
 - <input hspace="0%"> mapping to <input> marginLeft property
@@ -6567,20 +6529,6 @@ html/rendering/dimension-attributes.html:
 - <input vspace="200.7"> mapping to <input> marginTop property
 - <input vspace="200in"> mapping to <input> marginBottom property
 - <input vspace="200in"> mapping to <input> marginTop property
-- <input width="   00523   "> mapping to <input> width property
-- <input width="-200px"> mapping to <input> width property
-- <input width="0%"> mapping to <input> width property
-- <input width="20.25E2"> mapping to <input> width property
-- <input width="20.25e2"> mapping to <input> width property
-- <input width="200 %"> mapping to <input> width property
-- <input width="200 abc"> mapping to <input> width property
-- <input width="200%"> mapping to <input> width property
-- <input width="200%abc"> mapping to <input> width property
-- <input width="200."> mapping to <input> width property
-- <input width="200.%"> mapping to <input> width property
-- <input width="200.25%"> mapping to <input> width property
-- <input width="200.25in"> mapping to <input> width property
-- <input width="200in"> mapping to <input> width property
 - <marquee height="   00523   "> mapping to <marquee> height property
 - <marquee height="0"> mapping to <marquee> height property
 - <marquee height="0%"> mapping to <marquee> height property
@@ -6687,10 +6635,6 @@ html/rendering/dimension-attributes.html:
 - <marquee width="200.25in"> mapping to <marquee> width property
 - <marquee width="200.7"> mapping to <marquee> width property
 - <marquee width="200in"> mapping to <marquee> width property
-- <object height="   00523   "> mapping to <object> height property
-- <object height="-200px"> mapping to <object> height property
-- <object height="200 %"> mapping to <object> height property
-- <object height="200.%"> mapping to <object> height property
 - <object hspace="   00523   "> mapping to <object> marginLeft property
 - <object hspace="   00523   "> mapping to <object> marginRight property
 - <object hspace="0%"> mapping to <object> marginLeft property
@@ -6759,10 +6703,6 @@ html/rendering/dimension-attributes.html:
 - <object vspace="200.7"> mapping to <object> marginTop property
 - <object vspace="200in"> mapping to <object> marginBottom property
 - <object vspace="200in"> mapping to <object> marginTop property
-- <object width="   00523   "> mapping to <object> width property
-- <object width="-200px"> mapping to <object> width property
-- <object width="200 %"> mapping to <object> width property
-- <object width="200.%"> mapping to <object> width property
 - <source height="   00523   "> mapping to <img> height property
 - <source height="0"> mapping to <img> height property
 - <source height="0%"> mapping to <img> height property
@@ -6887,14 +6827,6 @@ html/rendering/dimension-attributes.html:
 - <tr height="200.25in"> mapping to <tr> height property
 - <tr height="200.7"> mapping to <tr> height property
 - <tr height="200in"> mapping to <tr> height property
-- <video height="   00523   "> mapping to <video> height property
-- <video height="-200px"> mapping to <video> height property
-- <video height="200 %"> mapping to <video> height property
-- <video height="200.%"> mapping to <video> height property
-- <video width="   00523   "> mapping to <video> width property
-- <video width="-200px"> mapping to <video> width property
-- <video width="200 %"> mapping to <video> width property
-- <video width="200.%"> mapping to <video> width property
 html/rendering/non-replaced-elements/flow-content-0/dialog.html:
 - 'Closed dialog in width: 538px iframe'
 - 'Closed dialog in width: 540px iframe'
@@ -8229,22 +8161,6 @@ html/rendering/non-replaced-elements/the-fieldset-and-legend-elements/fieldset-c
 - "== html/rendering/non-replaced-elements/the-fieldset-and-legend-elements/fieldset-containing-block-ref.html"
 html/rendering/non-replaced-elements/the-fieldset-and-legend-elements/fieldset-content-before-legend.html:
 - fieldset content before legend
-html/rendering/non-replaced-elements/the-fieldset-and-legend-elements/fieldset-default-style.html:
-- border-bottom-style
-- border-bottom-width
-- border-left-style
-- border-left-width
-- border-right-style
-- border-right-width
-- border-top-style
-- border-top-width
-- margin-left
-- margin-right
-- min-width
-- padding-bottom
-- padding-left
-- padding-right
-- padding-top
 html/rendering/non-replaced-elements/the-fieldset-and-legend-elements/fieldset-display-ruby.html:
 - 'fieldset with display: ruby'
 - 'fieldset with display: ruby-base'
@@ -8254,6 +8170,8 @@ html/rendering/non-replaced-elements/the-fieldset-and-legend-elements/fieldset-d
 html/rendering/non-replaced-elements/the-fieldset-and-legend-elements/fieldset-display.html:
 - 'fieldset with display: inline'
 - 'fieldset with display: table'
+html/rendering/non-replaced-elements/the-fieldset-and-legend-elements/fieldset-dynamic-baseline.html:
+- "== html/rendering/non-replaced-elements/the-fieldset-and-legend-elements/fieldset-dynamic-baseline-ref.html"
 html/rendering/non-replaced-elements/the-fieldset-and-legend-elements/fieldset-generated-content.html:
 - fieldset generated content
 html/rendering/non-replaced-elements/the-fieldset-and-legend-elements/fieldset-overflow-cssomview.html:
@@ -8326,17 +8244,9 @@ html/rendering/non-replaced-elements/the-fieldset-and-legend-elements/legend-san
 html/rendering/non-replaced-elements/the-fieldset-and-legend-elements/legend-tall.html:
 - "== html/rendering/non-replaced-elements/the-fieldset-and-legend-elements/legend-tall-ref.html"
 html/rendering/non-replaced-elements/the-fieldset-and-legend-elements/legend.html:
-- 'in-body: paddingLeft'
-- 'in-body: paddingRight'
 - 'in-body: unicodeBidi'
-- 'in-fieldset-descendant: paddingLeft'
-- 'in-fieldset-descendant: paddingRight'
 - 'in-fieldset-descendant: unicodeBidi'
-- 'in-fieldset-second-child: paddingLeft'
-- 'in-fieldset-second-child: paddingRight'
 - 'in-fieldset-second-child: unicodeBidi'
-- 'rendered-legend: paddingLeft'
-- 'rendered-legend: paddingRight'
 - 'rendered-legend: unicodeBidi'
 - 'rendered-legend: width'
 html/rendering/non-replaced-elements/the-fieldset-and-legend-elements/min-inline-size.html:
@@ -9690,7 +9600,6 @@ html/rendering/widgets/placeholder-text-overflow-ellipsis.html:
 html/rendering/widgets/shadow-dom.html:
 - <audio controls=""></audio> has a shadow tree with no slots
 - "<audio></audio> has a shadow tree with no slots"
-- <details open=""></details> has a shadow tree with slot
 - "<details></details> has a shadow tree with slot"
 - <select multiple=""></select> has a shadow tree with slot
 - <select size="4"></select> has a shadow tree with slot

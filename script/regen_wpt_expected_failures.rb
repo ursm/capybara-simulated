@@ -98,8 +98,27 @@ error_count = 0
 in_subtests = 0
 out_subtests = 0
 
+# A file whose result DIFFERS from what is already recorded is run again, and the second run is
+# the one recorded. The gate retries a mismatching file (WptGate::FILE_ATTEMPTS) precisely because
+# a handful of service-worker files carry an order-dependent timing flake under full-suite load —
+# but the regenerator had no such discipline, so a flake here BAKES a false failure into the
+# roadmap, and the gate then reds forever on "allowlisted subtest now PASSes". Measured: one
+# regen invented `register-same-scope-different-script-url.https.html`, which passes 3/3 alone.
+# Costs one extra run per genuinely-changed file, and nothing at all for the corpus that matches.
+def confirmed_run(rel)
+  result   = WptRunner.run(rel)
+  expected = WptRunner.expected[rel]
+  same = if result[:completed]
+    WptRunner.multiset_minus(result[:failing], Array(expected)).empty? &&
+      WptRunner.multiset_minus(Array(expected), result[:failing]).empty?
+  else
+    expected == WptRunner::HARNESS_ERROR
+  end
+  same ? result : WptRunner.run(rel)
+end
+
 files.each_with_index do |rel, i|
-  result = WptRunner.run(rel)
+  result = confirmed_run(rel)
   if result[:completed]
     completed_count += 1
     # Keep the full multiset (no uniq): a subtest name that fails more than once
