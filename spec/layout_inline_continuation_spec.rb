@@ -122,9 +122,15 @@ RSpec.describe 'inline continuation' do
     body = '<div id="d" style="width:200px"><span id="s">' \
            '<span style="display:inline-block;width:20px;height:60px"></span></span></div>' \
            '<div id="one"><span id="frag">x</span></div>'
-    boxes, = measure(body, ['#d', '#s', '#frag'])
+    boxes, _text, line = measure(body, ['#d', '#s', '#frag'])
     d, s, frag = boxes
-    expect(d[3]).to eq(60)                             # Chrome: the line is the image's
+    # The box hangs from the line's baseline — an empty `inline-block`'s own baseline is its bottom
+    # edge — so the fragment around it sits its own ascent above that, and the line is the box's 60
+    # plus what the strut still leaves below the baseline. (Re-measured in Chrome 151 when the line
+    # box learnt where its baseline is: 64 and a fragment at 46, where this example was written
+    # with 60 and a fragment at 0.)
+    ascent = 60 - s[1]
+    expect(d[3]).to eq(60 + (line - ascent))
     expect(s[3]).to eq(frag[3])                        # Chrome: 17, the font's content box
     expect(s[2]).to eq(20)
   end

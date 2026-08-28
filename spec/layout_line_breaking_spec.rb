@@ -113,8 +113,11 @@ RSpec.describe 'line breaking' do
            '<span style="display:inline-block;width:90px;height:12px"></span>' \
            '<span style="display:inline-block;width:90px;height:12px"></span>' \
            '<span style="display:inline-block;width:90px;height:12px"></span></div>'
-    boxes, = measure(body, ['#d'])
-    expect(boxes[0][3]).to eq(24)                      # Chrome: two rows of 12
+    boxes, _text, line = measure(body, ['#d'])
+    # Two lines — and each is a LINE box, not the height of the 12px boxes on it: they hang from
+    # its baseline and the block's own strut keeps it 18 tall (re-measured in Chrome 151: 36, with
+    # the boxes at y=2, 2 and 20).
+    expect(boxes[0][3]).to eq(line * 2)
   end
 
   # The same breaking inside a table cell, whose column width is what it wraps to.
