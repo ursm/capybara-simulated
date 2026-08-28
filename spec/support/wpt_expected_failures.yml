@@ -7910,6 +7910,9 @@ shadow-dom/offsetParent-across-shadow-boundaries.html:
 - offsetParent must return the fixed position containing block of a fixed element
   when the context object is assigned to a slot within a fixed containing block in
   shadow tree of open mode
+shadow-dom/offsetTop-offsetLeft-across-shadow-boundaries.html:
+- Verifies that HTMLElement.offsetTop accounts for shadow boundaries when nested in
+  multiple shadow roots.
 shadow-dom/shadow-style-invalidation-vw-units.html:
 - "== shadow-dom/shadow-style-invalidation-vw-units-ref.html"
 shadow-dom/slot-fallback-content-008.html:
