@@ -443,8 +443,6 @@ css/css-flexbox/alignment/flex-align-baseline-004.html:
 - "#target > div 5"
 - "#target > div 6"
 css/css-flexbox/alignment/flex-align-baseline-005.html:
-- "#target > div 1"
-- "#target > div 2"
 - "#target > div 3"
 css/css-flexbox/alignment/flex-align-baseline-006.html:
 - "#target > div 1"
@@ -468,30 +466,13 @@ css/css-flexbox/alignment/flex-align-baseline-fieldset-003.html:
 - ".target > * 3"
 - ".target > * 4"
 css/css-flexbox/alignment/flex-align-baseline-flex-001.html:
-- ".target > * 1"
-- ".target > * 11"
-- ".target > * 13"
-- ".target > * 15"
-- ".target > * 17"
-- ".target > * 19"
 - ".target > * 21"
 - ".target > * 23"
-- ".target > * 25"
-- ".target > * 27"
 - ".target > * 29"
-- ".target > * 3"
-- ".target > * 31"
 - ".target > * 33"
 - ".target > * 35"
-- ".target > * 37"
-- ".target > * 39"
 - ".target > * 41"
 - ".target > * 43"
-- ".target > * 45"
-- ".target > * 47"
-- ".target > * 5"
-- ".target > * 7"
-- ".target > * 9"
 css/css-flexbox/alignment/flex-align-baseline-flex-002.html:
 - ".target > * 1"
 - ".target > * 10"
@@ -573,7 +554,6 @@ css/css-flexbox/alignment/flex-align-baseline-grid-001.html:
 - ".target > * 3"
 - ".target > * 5"
 - ".target > * 7"
-- ".target > * 9"
 css/css-flexbox/alignment/flex-align-baseline-grid-002.html:
 - ".target > * 1"
 - ".target > * 10"
@@ -601,12 +581,9 @@ css/css-flexbox/alignment/flex-align-baseline-grid-003.html:
 - ".target > * 8"
 - ".target > * 9"
 css/css-flexbox/alignment/flex-align-baseline-multicol-001.html:
-- ".target > * 1"
 - ".target > * 11"
 - ".target > * 3"
-- ".target > * 5"
 - ".target > * 7"
-- ".target > * 9"
 css/css-flexbox/alignment/flex-align-baseline-multicol-002.html:
 - ".target > * 1"
 - ".target > * 10"
@@ -633,14 +610,6 @@ css/css-flexbox/alignment/flex-align-baseline-multicol-003.html:
 - ".target > * 7"
 - ".target > * 8"
 - ".target > * 9"
-css/css-flexbox/alignment/flex-align-baseline-overflow-001.html:
-- ".target > * 1"
-- ".target > * 11"
-- ".target > * 3"
-- ".target > * 6"
-- ".target > * 7"
-- ".target > * 8"
-- ".target > * 9"
 css/css-flexbox/alignment/flex-align-baseline-overflow-002.html:
 - ".target > * 1"
 - ".target > * 12"
@@ -663,6 +632,7 @@ css/css-flexbox/alignment/flex-align-baseline-overflow-003.html:
 - ".target > * 9"
 css/css-flexbox/alignment/flex-align-baseline-table-001.html:
 - ".target > * 1"
+- ".target > * 2"
 - ".target > * 3"
 - ".target > * 5"
 - ".target > * 7"
@@ -677,7 +647,6 @@ css/css-flexbox/alignment/flex-align-baseline-table-003.html:
 - ".target > * 3"
 - ".target > * 4"
 css/css-flexbox/alignment/multiline-align-self.html:
-- ".flexbox 1"
 - ".flexbox 11"
 - ".flexbox 12"
 - ".flexbox 13"
@@ -720,7 +689,6 @@ css/css-flexbox/alignment/multiline-align-self.html:
 - ".flexbox 5"
 - ".flexbox 7"
 - ".flexbox 8"
-- ".flexbox 9"
 css/css-flexbox/animation/discrete-no-interpolation.html:
 - 'CSS Animations: property <flex-direction> from [initial] to [column] at (0.5) should
   be [column]'
