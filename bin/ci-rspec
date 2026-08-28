@@ -1,0 +1,95 @@
+#!/usr/bin/env bash
+# The suite under the parallel runner, then ONE retry of the examples that run itself reported
+# as failures.
+#
+# Why retry at all, when the specs are not marginal: every Capybara wait is bounded in REAL time
+# while the page-side timer it waits on runs on the driver's VIRTUAL clock, which the retry loop
+# advances per POLL, not per second. Measured on both engines, the two examples that have flaked
+# converge in four polls and 0.02-0.05 s against a 2 s budget — forty times the headroom. Neither is
+# a slow test; both are tests a runner stalling for a couple of seconds turns red. That happened on
+# two consecutive PRs, on a different example each time, and each time the same commit went green on
+# a manual re-run of the whole 13-minute job.
+#
+# WHAT MAY BE RETRIED IS THE WHOLE DESIGN. Re-running examples can only re-check one kind of red:
+# examples that failed. Every other kind is invisible to it and must be left standing —
+#
+#   - a file that failed to LOAD (a syntax error, a bad require, a NameError at describe level).
+#     `--only-failures` would not even load it again, so its error cannot recur;
+#   - a `before(:suite)` / `after(:suite)` that raised;
+#   - a worker that DIED, taking its unrun spec files with it. This project has SEGVed and OOM-killed
+#     workers on record; the surviving workers' failures would be retried and the dead one's whole
+#     shard would go unmentioned.
+#
+# Each of those can appear ALONGSIDE a failing example, which is what makes "at least one example
+# failed" the wrong question. The script asks the right one: did anything go wrong that a retry
+# cannot re-check?
+#
+# The retry list is parsed from THIS run's own output, not taken from `--only-failures`. That status
+# file persists across runs (CI restores it from cache), so `--only-failures` answers "everything
+# recorded as failing", which is not the same set — and a run whose failures never reached the file
+# would send it off to re-run some earlier run's, watch them pass, and report success.
+#
+# WPT-gate examples are never retried: `spec/support/wpt_gate.rb` already runs each file up to
+# FILE_ATTEMPTS times inside the example, so a fourth attempt in a quieter process is not evidence,
+# it is a way to hide a load-sensitive failure. If those flake, the fix belongs in that retry.
+#
+# bash, not POSIX sh, for `PIPESTATUS` and arrays: keeping the runner's own status while streaming
+# it through `tee` is the one thing this script must not get wrong, and it already got it wrong once.
+set -euo pipefail
+
+# A flake loses a handful of time-bounded examples. A run with more failures than this is a broken
+# build, and re-running it SERIALLY — against a first pass that had every core — would spend the
+# job's remaining minutes to arrive at the same red, with the failure list scrolled off the top.
+readonly RETRY_LIMIT=20
+
+run_log=$(mktemp) && retry_log=$(mktemp)
+trap 'rm -f "$run_log" "$retry_log"' EXIT
+
+set +e
+bin/flatware-rspec "$@" 2>&1 | tee "$run_log"
+status=${PIPESTATUS[0]}
+set -e
+[ "$status" -eq 0 ] && exit 0
+
+if grep -qE "^A worker died!|weren.t run|error occurred outside of examples|^An error occurred (while loading|in a)" "$run_log"; then
+  echo '--- the run failed OUTSIDE the example set, which re-running examples cannot re-check ---' >&2
+  exit "$status"
+fi
+
+# `Failed examples:` is rspec's own list of re-runnable locations, one `rspec ./path:line` per line.
+mapfile -t failures < <(sed -n '/^Failed examples:/,$p' "$run_log" | sed -n 's|^rspec \(\./[^ ]*\).*|\1|p' | sort -u)
+retryable=()
+for location in ${failures[@]+"${failures[@]}"}; do
+  case "$location" in
+    ./spec/wpt_gate/*) ;;
+    *) retryable+=("$location") ;;
+  esac
+done
+
+if [ ${#failures[@]} -eq 0 ]; then
+  echo '--- the run failed without naming any example, so there is nothing to retry ---' >&2
+  exit "$status"
+fi
+if [ ${#retryable[@]} -ne ${#failures[@]} ]; then
+  echo '--- a WPT-gate example failed, and the gate has already retried it ---' >&2
+  exit "$status"
+fi
+if [ ${#retryable[@]} -gt "$RETRY_LIMIT" ]; then
+  echo "--- ${#retryable[@]} failures is a broken build, not a stalled runner ---" >&2
+  exit "$status"
+fi
+
+echo "--- retrying the ${#retryable[@]} example(s) this run reported as failures ---" >&2
+set +e
+bundle exec rspec "${retryable[@]}" 2>&1 | tee "$retry_log"
+retry_status=${PIPESTATUS[0]}
+set -e
+
+# The retry has to have run EVERY example it was given and passed them all. A retry that loaded
+# fewer than it asked for — a file that has since become unloadable, a filter that excluded one —
+# proves nothing about the ones it skipped.
+if ! grep -qE "^${#retryable[@]} examples?, 0 failures" "$retry_log"; then
+  echo '--- the retry did not clear every example it was given, so the first run stands ---' >&2
+  exit "$status"
+fi
+exit "$retry_status"
