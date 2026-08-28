@@ -59,8 +59,6 @@ css/css-flexbox/abspos/position-absolute-002.html:
 - ".flexbox 3"
 - ".flexbox 4"
 - ".flexbox 5"
-- ".flexbox 8"
-- ".flexbox 9"
 css/css-flexbox/align-content-horiz-001a.html:
 - ".flexbox div 10"
 - ".flexbox div 11"
@@ -206,7 +204,6 @@ css/css-flexbox/align-content-horiz-001b.html:
 - ".flexbox div 8"
 - ".flexbox div 9"
 css/css-flexbox/align-content-horiz-002.html:
-- ".flexbox div 1"
 - ".flexbox div 10"
 - ".flexbox div 11"
 - ".flexbox div 12"
@@ -534,27 +531,11 @@ css/css-flexbox/align-content-wmvert-001.html:
 css/css-flexbox/align-content-wrap-001.html:
 - ".default, .verticalWriting 10"
 - ".default, .verticalWriting 12"
-- ".default, .verticalWriting 2"
-- ".default, .verticalWriting 3"
-- ".default, .verticalWriting 5"
-- ".default, .verticalWriting 6"
 - ".default, .verticalWriting 9"
 css/css-flexbox/align-content-wrap-002.html:
-- ".flex-horizontal, .flex-vertical 2"
-- ".flex-horizontal, .flex-vertical 3"
 - ".flex-horizontal, .flex-vertical 5"
 - ".flex-horizontal, .flex-vertical 6"
 css/css-flexbox/align-content-wrap-003.html:
-- ".flexbox 1"
-- ".flexbox 10"
-- ".flexbox 11"
-- ".flexbox 12"
-- ".flexbox 13"
-- ".flexbox 14"
-- ".flexbox 19"
-- ".flexbox 2"
-- ".flexbox 20"
-- ".flexbox 21"
 - ".flexbox 23"
 - ".flexbox 24"
 - ".flexbox 25"
@@ -562,7 +543,6 @@ css/css-flexbox/align-content-wrap-003.html:
 - ".flexbox 27"
 - ".flexbox 28"
 - ".flexbox 29"
-- ".flexbox 3"
 - ".flexbox 30"
 - ".flexbox 31"
 - ".flexbox 32"
@@ -570,21 +550,11 @@ css/css-flexbox/align-content-wrap-003.html:
 - ".flexbox 34"
 - ".flexbox 35"
 - ".flexbox 36"
-- ".flexbox 4"
 - ".flexbox 41"
 - ".flexbox 42"
 - ".flexbox 43"
 - ".flexbox 44"
-- ".flexbox 5"
-- ".flexbox 6"
-- ".flexbox 7"
-- ".flexbox 8"
-- ".flexbox 9"
 css/css-flexbox/align-content-wrap-005.html:
-- ".flexitem 1"
-- ".flexitem 2"
-- ".flexitem 3"
-- ".flexitem 4"
 - ".flexitem 5"
 - ".flexitem 6"
 - ".flexitem 7"
@@ -904,7 +874,6 @@ css/css-flexbox/alignment/flex-align-baseline-table-003.html:
 - ".target > * 4"
 css/css-flexbox/alignment/multiline-align-self.html:
 - ".flexbox 1"
-- ".flexbox 10"
 - ".flexbox 11"
 - ".flexbox 12"
 - ".flexbox 13"
@@ -914,7 +883,6 @@ css/css-flexbox/alignment/multiline-align-self.html:
 - ".flexbox 17"
 - ".flexbox 18"
 - ".flexbox 19"
-- ".flexbox 2"
 - ".flexbox 20"
 - ".flexbox 21"
 - ".flexbox 22"
@@ -2026,10 +1994,8 @@ css/css-flexbox/flex-item-compressible-002.html:
 css/css-flexbox/flex-item-contains-strict.html:
 - ".inline-flex 1"
 - ".inline-flex 2"
-- ".inline-flex 3"
 - ".inline-flex 5"
 - ".inline-flex 6"
-- ".inline-flex 7"
 css/css-flexbox/flex-item-percentage-height-img-001.html:
 - ".flex-item 1"
 - ".flex-item 2"
@@ -2075,8 +2041,6 @@ css/css-flexbox/flexbox-justify-content-wmvert-002.html:
 css/css-flexbox/flexbox-justify-content-wmvert-003.html:
 - ".flexitem 3"
 - ".flexitem 4"
-css/css-flexbox/flexbox-lines-must-be-stretched-by-default.html:
-- ".flex-container 1"
 css/css-flexbox/flexbox-min-height-auto-003.html:
 - 'overflow-y:auto: min-height:auto resolves to 0; width includes scrollbar gutter'
 - 'overflow-y:hidden: min-height:auto resolves to 0; no scrollbar gutter'
@@ -2362,9 +2326,6 @@ css/css-flexbox/intrinsic-size/row-compat-001.html:
 - "#gmail-tables .flex 3"
 - "#wrapping-broke .flex 1"
 css/css-flexbox/intrinsic-size/row-use-cases-001.html:
-- left < right
-- no overflow
-- same widths
 - zero width
 css/css-flexbox/intrinsic-size/row-wrap-001.html:
 - ".floating-flexbox 1"
@@ -2373,7 +2334,6 @@ css/css-flexbox/intrinsic-size/row-wrap-001.html:
 - ".floating-flexbox 4"
 - ".floating-flexbox 5"
 css/css-flexbox/intrinsic-width-orthogonal-writing-mode.html:
-- ".inline-flexbox 1"
 - ".inline-flexbox 2"
 - ".inline-flexbox 3"
 css/css-flexbox/justify-content-007.html:
@@ -2382,18 +2342,6 @@ css/css-flexbox/justify-content-rounding.html:
 - The last item should match the end edge.
 css/css-flexbox/main-axis-margin-rounding.html:
 - The last item should match the end edge.
-css/css-flexbox/multiline-min-max.html:
-- ".flexbox 1"
-- ".flexbox 10"
-- ".flexbox 11"
-- ".flexbox 14"
-- ".flexbox 2"
-- ".flexbox 3"
-- ".flexbox 4"
-- ".flexbox 6"
-- ".flexbox 7"
-- ".flexbox 8"
-- ".flexbox 9"
 css/css-flexbox/negative-overflow-002.html:
 - ".container 1"
 - ".container 10"
@@ -2619,11 +2567,6 @@ css/css-flexbox/negative-overflow.html:
 - ".flexbox 5"
 - ".flexbox 8"
 - ".flexbox 9"
-css/css-flexbox/overflow-auto-006.html:
-- ".flexbox, .inline-flexbox 10"
-- ".flexbox, .inline-flexbox 7"
-- ".flexbox, .inline-flexbox 8"
-- ".flexbox, .inline-flexbox 9"
 css/css-flexbox/parsing/flex-basis-computed.html:
 - Property flex-basis value 'calc(10% + 0px)'
 - Property flex-basis value 'calc(10%)'
