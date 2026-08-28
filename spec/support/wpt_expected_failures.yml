@@ -6416,16 +6416,6 @@ html/rendering/pixel-length-attributes.html:
 - <object border="200in"> mapping to borderLeftWidth
 - <object border="200in"> mapping to borderRightWidth
 - <object border="200in"> mapping to borderTopWidth
-html/rendering/replaced-elements/attributes-for-embedded-content-and-images/align.html:
-- align=absbottom on replaced elements
-- align=abscenter on replaced elements
-- align=absmiddle on replaced elements
-- align=center on replaced elements
-- align=left on replaced elements
-- align=middle on replaced elements
-- align=right on replaced elements
-- align=texttop on replaced elements
-- align=top on replaced elements
 html/rendering/replaced-elements/attributes-for-embedded-content-and-images/canvas-aspect-ratio.html:
 - Canvas width and height attributes are used as the surface size
 - Canvas width and height attributes are used as the surface size with contain:size
@@ -6437,10 +6427,6 @@ html/rendering/replaced-elements/attributes-for-embedded-content-and-images/canv
 - 'Computed style test: canvas with {"width":"10%","height":"20"}'
 html/rendering/replaced-elements/attributes-for-embedded-content-and-images/canvas-dimension-attributes.html:
 - "== css/reference/ref-filled-green-200px-square.html"
-? html/rendering/replaced-elements/attributes-for-embedded-content-and-images/embedded-and-images-presentational-hints-ascii-case-insensitive.html
-: - keyword absbottom
-  - keyword abscenter
-  - keyword absmiddle
 html/rendering/replaced-elements/attributes-for-embedded-content-and-images/img-aspect-ratio-lazy.html:
 - Image width and height attributes are used to infer aspect-ratio for lazy-loaded
   images
