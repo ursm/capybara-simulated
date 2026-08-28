@@ -56,13 +56,33 @@ if grep -qE "^A worker died!|weren.t run|error occurred outside of examples|^An 
   exit "$status"
 fi
 
-# `Failed examples:` is rspec's own list of re-runnable locations, one `rspec ./path:line` per line.
-mapfile -t failures < <(sed -n '/^Failed examples:/,$p' "$run_log" | sed -n 's|^rspec \(\./[^ ]*\).*|\1|p' | sort -u)
+# `Failed examples:` is rspec's own list of re-runnable examples, one
+# `rspec ./path:line # full description` per line.
+#
+# The DESCRIPTION is load-bearing here, not decoration. A capybara-shared shard defines its ~200
+# examples from a single `it` block, so every one of them reports the SAME `shard_3_spec.rb:8`
+# location — and a retry by location alone re-runs the whole shard. That is a second full run
+# whose own failures say nothing about the one that started it: a lone ARIA-button flake came
+# back as a 200-example rerun with six unrelated reds, and the count guard below then refused it,
+# so the retry could never have cleared anything. Naming the description narrows the retry to the
+# example that actually failed, which is what the guard is counting.
+mapfile -t failures < <(sed -n '/^Failed examples:/,$p' "$run_log" | sed -n 's|^rspec \(\./.*\)|\1|p' | sort -u)
 retryable=()
-for location in ${failures[@]+"${failures[@]}"}; do
+retry_args=()
+for failure in ${failures[@]+"${failures[@]}"}; do
+  # `%% # *` cuts at the FIRST ` # `, `#* # ` keeps everything after it — a description that
+  # contains ` # ` itself (`#click_button # …`) survives whole.
+  location=${failure%% # *}
+  description=${failure#* # }
   case "$location" in
     ./spec/wpt_gate/*) ;;
-    *) retryable+=("$location") ;;
+    *)
+      retryable+=("$location")
+      retry_args+=("$location")
+      # `--example` is a substring match against the full description, so it selects that one
+      # example out of the location it shares with its shard-mates.
+      [ "$description" != "$failure" ] && retry_args+=(--example "$description")
+      ;;
   esac
 done
 
@@ -81,7 +101,7 @@ fi
 
 echo "--- retrying the ${#retryable[@]} example(s) this run reported as failures ---" >&2
 set +e
-bundle exec rspec "${retryable[@]}" 2>&1 | tee "$retry_log"
+bundle exec rspec "${retry_args[@]}" 2>&1 | tee "$retry_log"
 retry_status=${PIPESTATUS[0]}
 set -e
 
