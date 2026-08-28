@@ -87,7 +87,11 @@ jobs:
           key: rspec-examples-v8-${{ matrix.ruby }}-${{ github.sha }}
           restore-keys: rspec-examples-v8-${{ matrix.ruby }}-
 
-      - run: bin/flatware-rspec spec
+      # `bin/ci-rspec`, not the bare runner: the suite, then ONE retry of the examples this run
+      # itself reported as failures. The header on that script has the measurements, and — the part
+      # that matters — what a retry is NOT allowed to re-check: a load error, a suite hook that
+      # raised, or a dead worker leaves the red standing, however many examples also failed.
+      - run: bin/ci-rspec spec
 
   # Secondary engine: QuickJS. It shares the JS bridge but has a distinct runtime
   # layer (value marshalling, no per-frame realms), so it needs its own coverage
@@ -153,7 +157,7 @@ jobs:
       # The tag filter reaches the workers via fork inheritance: flatware's
       # JobBuilder applies the rspec args to the global RSpec configuration
       # BEFORE forking (workers discard the args themselves).
-      - run: bin/flatware-rspec spec --tag '~wpt'
+      - run: bin/ci-rspec spec --tag '~wpt'
         env:
           CSIM_JS_ENGINE: quickjs
 
