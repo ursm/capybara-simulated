@@ -181,6 +181,140 @@ RSpec.describe 'a wrapping flex container' do
     end
   end
 
+  describe 'a column' do
+    # A column's lines run down and stack ACROSS, so every figure here is a 200x40 container of
+    # three 30x20 items — two to a line, measured in the same Chrome.
+    def column(container, items = Array.new(3) { 'width:30px;height:20px' })
+      body = <<~HTML
+        <div id="c" style="display:flex;flex-direction:column;flex-wrap:wrap;width:200px;height:40px;#{container}">
+          #{items.map {|style| %(<div style="#{style}"></div>) }.join}
+        </div>
+      HTML
+      boxes, = measure(body, (1..items.size).map {|i| "#c > div:nth-child(#{i})" } + ['#c'])
+      boxes.map {|b| b.map {|n| n.round(2) } }
+    end
+
+    def cxs(container, items = Array.new(3) { 'width:30px;height:20px' })
+      column(container, items)[..-2].map {|b| b[0] }
+    end
+
+    # Two items fill the 40px height, so the third starts a new line BESIDE them — and the lines
+    # divide the container's width between them (`align-content` is `normal`), which is what puts
+    # the second line at 100 rather than at the first line's own 30.
+    it 'breaks items into lines that stack across' do
+      expect(column('')[..-2]).to eq([[0, 0, 30, 20], [0, 20, 30, 20], [100, 0, 30, 20]])
+    end
+
+    # Told not to stretch, each line is only as wide as its widest item.
+    it 'sizes a line to its widest item' do
+      expect(cxs('align-content:flex-start')).to eq([0, 0, 30])
+      expect(cxs('align-content:flex-start;align-items:flex-start',
+                 ['width:30px;height:20px', 'width:50px;height:20px', 'width:20px;height:20px'])).to eq([0, 0, 50])
+    end
+
+    it 'packs the lines where align-content says' do
+      expect(cxs('align-content:center')).to eq([70, 70, 100])
+      expect(cxs('align-content:space-between')).to eq([0, 0, 170])
+    end
+
+    # `column-gap` is the CROSS gap of a column, so it sits between the lines, while `row-gap` is
+    # the main one and decides where the line BREAKS: 20 + 6 + 20 does not fit 44px.
+    it 'reads each gap on its own axis' do
+      expect(cxs('column-gap:10px;align-content:flex-start')).to eq([0, 0, 40])
+      expect(cxs('height:44px;row-gap:6px;align-content:flex-start')).to eq([0, 30, 60])
+    end
+
+    it 'stacks the lines from the far edge for wrap-reverse' do
+      expect(cxs('flex-wrap:wrap-reverse')).to eq([170, 170, 70])
+      expect(cxs('flex-wrap:wrap-reverse;align-content:start')).to eq([30, 30, 0])
+      expect(cxs('flex-wrap:wrap-reverse;align-content:flex-start;align-items:flex-start'))
+        .to eq([170, 170, 140])
+    end
+
+    # An INDEFINITE main size has no line to overflow, so a wrapping column with an auto height is
+    # one column however many items it holds.
+    it 'does not break a column with an auto height' do
+      boxes = column('height:auto;align-content:flex-start;align-items:flex-start')
+      expect(boxes[..-2].map {|b| [b[0], b[1]] }).to eq([[0, 0], [0, 20], [0, 40]])
+      expect(boxes.last[3]).to eq(60)
+    end
+
+    # An AUTO height is what stops a column breaking — but not what stops `align-content` placing
+    # the one line it has, which is as wide as its widest item either way. The `nowrap` container
+    # beside it is the contrast: its line takes the whole width and the keyword does nothing.
+    it 'still places the line of an auto-height wrap column' do
+      expect(cxs('height:auto;align-content:center')).to eq([85, 85, 85])
+      expect(cxs('height:auto;align-content:flex-end', ['width:30px;height:20px'])).to eq([170])
+      expect(cxs('height:auto;flex-wrap:wrap-reverse;align-content:flex-end',
+                 ['width:10px;height:20px'])).to eq([0])
+      expect(cxs('height:auto;flex-wrap:nowrap;align-content:center',
+                 ['width:30px;height:20px'])).to eq([0])
+    end
+
+    # An item too tall for the line takes one of its own and is then shrunk into it, exactly as an
+    # over-wide item is in a row.
+    it 'gives an item taller than the line one of its own' do
+      expect(column('align-content:flex-start;align-items:flex-start',
+                    ['width:30px;height:60px', 'width:30px;height:20px'])[..-2])
+        .to eq([[0, 0, 30, 40], [30, 0, 30, 20]])
+    end
+
+    # What a column BREAKS against is a capacity, and a `min-height` is a floor rather than one: the
+    # items stay in a single column and the column grows past its floor. A `max-height` IS a
+    # capacity — the content cannot grow past it — so the same items break against that instead of
+    # being squeezed into one line.
+    it 'breaks against a max-height but never against a min-height' do
+      floor = column('height:auto;min-height:40px;align-content:flex-start;align-items:flex-start')
+      expect(floor[..-2].map {|b| [b[0], b[1], b[3]] }).to eq([[0, 0, 20], [0, 20, 20], [0, 40, 20]])
+      expect(floor.last[3]).to eq(60)
+
+      cap = column('height:auto;max-height:40px;align-content:flex-start;align-items:flex-start')
+      expect(cap[..-2].map {|b| [b[0], b[1], b[3]] }).to eq([[0, 0, 20], [0, 20, 20], [30, 0, 20]])
+      expect(cap.last[3]).to eq(40)
+    end
+
+    # …and a floor the items do not reach still divides the main size between them, which is what
+    # `min-h-screen` on a page shell relies on.
+    it 'divides a min-height the items do not fill' do
+      boxes = column('height:auto;flex-wrap:nowrap;min-height:100px', ['flex:1;width:30px'])
+      expect(boxes[0][3]).to eq(100)
+    end
+
+    # A stretched item is its LINE's width, not the container's — which is only known once the line
+    # has one, so the item is measured at its own content width first and again after. Asserted as
+    # the formula: the two lines share the container, each item fills the line it is on.
+    it 'stretches an item to its own line' do
+      body = <<~HTML
+        <div id="c" style="display:flex;flex-direction:column;flex-wrap:wrap;width:200px;height:40px">
+          <div style="height:20px">one</div>
+          <div style="height:20px">two</div>
+          <div style="height:20px">three</div>
+        </div>
+      HTML
+      one, two, three, box = measure(body, ['#c > div:nth-child(1)', '#c > div:nth-child(2)',
+                                            '#c > div:nth-child(3)', '#c']).first
+      expect(one[2]).to eq(two[2])
+      expect(three[0]).to be_within(0.01).of(one[2])
+      expect(one[2] + three[2]).to be_within(0.01).of(box[2])
+    end
+
+    # …and only its WIDTH. Its main size was resolved while the lines were being formed, from the
+    # width it had then (§9.4 sizes the cross axis after the main one), so the stretch does not send
+    # it back to be measured again — a two-line paragraph stays two lines tall where re-measuring at
+    # the wider box would have made it one.
+    it 'does not re-measure a stretched item down the main axis' do
+      body = <<~HTML
+        <div id="c" style="display:flex;flex-direction:column;flex-wrap:wrap;width:400px;height:60px">
+          <div><span style="display:block;width:50%">aaa bbb ccc ddd</span></div>
+          <div style="width:40px;height:50px"></div>
+        </div>
+      HTML
+      boxes, _text, line = measure(body, ['#c > div:nth-child(1)', '#c > div:nth-child(2)'])
+      expect(boxes[0][3]).to eq(line * 2)
+      expect(boxes[1][0]).to be_within(0.01).of(boxes[0][2])
+    end
+  end
+
   # `row-reverse` runs each line from the right; the lines themselves still stack downwards.
   it 'breaks a row-reverse container from the right' do
     expect(xs('flex-direction:row-reverse')).to eq([40, 40, 40])
