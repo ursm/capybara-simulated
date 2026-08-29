@@ -1208,7 +1208,9 @@ RSpec.describe 'cascade invalidation' do
         return [before, k.getBoundingClientRect().y];
       })()
     JS
-    expect(got[1] - got[0]).to eq(100)
+    # The 100px margin lands — and COLLAPSES out through `.dd` and the body, so the child ends up
+    # AT 100 rather than 100 below where it was (Chrome: 8 -> 100).
+    expect(got).to eq([8, 100])
   end
 
   it 'extracts a subject per selector GROUP for the scoped path' do

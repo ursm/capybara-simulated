@@ -291,7 +291,9 @@ RSpec.describe 'layout reuse across dynamic style state' do
         return before.concat([rect(), document.body.getBoundingClientRect().height]);
       JS
       expect(value[2]).to eq(value[0])                   # …and its boxes did not move
-      expect(value[3]).to eq(value[1] - 200)             # …while the removal really did land
+      # …while the removal really did land: the 200px box goes, and the last paragraph's bottom
+      # margin then COLLAPSES OUT of the body it was holding apart from it (Chrome: 268 -> 52).
+      expect(value[3]).to eq(value[1] - 216)
       expect(diff['hit']).to eq(1)
       expect(diff.values_at('escapingAbs', 'remeasured')).to eq([0, 0])
     end
