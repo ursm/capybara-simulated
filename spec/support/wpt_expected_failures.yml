@@ -1668,9 +1668,7 @@ css/css-flexbox/flex-aspect-ratio-img-column-011.html:
 - ".flexbox 3"
 - ".flexbox 4"
 - ".flexbox 5"
-- ".flexbox 6"
 - ".flexbox 7"
-- ".flexbox 9"
 css/css-flexbox/flex-aspect-ratio-img-column-017.html:
 - img 1
 css/css-flexbox/flex-aspect-ratio-img-row-005.html:
@@ -1877,49 +1875,26 @@ css/css-flexbox/hittest-before-pseudo.html:
 css/css-flexbox/image-as-flexitem-size-001.html:
 - ".flexbox > img 10"
 - ".flexbox > img 11"
-- ".flexbox > img 12"
 - ".flexbox > img 3"
 - ".flexbox > img 4"
-- ".flexbox > img 5"
 - ".flexbox > img 6"
 - ".flexbox > img 7"
-- ".flexbox > img 8"
-- ".flexbox > img 9"
 css/css-flexbox/image-as-flexitem-size-001v.html:
 - ".flexbox > img 10"
 - ".flexbox > img 11"
-- ".flexbox > img 12"
 - ".flexbox > img 3"
 - ".flexbox > img 4"
-- ".flexbox > img 5"
 - ".flexbox > img 6"
 - ".flexbox > img 7"
-- ".flexbox > img 8"
-- ".flexbox > img 9"
 css/css-flexbox/image-as-flexitem-size-002.html:
-- ".flexbox > img 10"
-- ".flexbox > img 11"
-- ".flexbox > img 12"
 - ".flexbox > img 4"
-- ".flexbox > img 5"
-- ".flexbox > img 6"
-- ".flexbox > img 7"
-- ".flexbox > img 8"
-- ".flexbox > img 9"
 css/css-flexbox/image-as-flexitem-size-002v.html:
-- ".flexbox > img 10"
-- ".flexbox > img 11"
-- ".flexbox > img 12"
 - ".flexbox > img 4"
-- ".flexbox > img 5"
-- ".flexbox > img 6"
-- ".flexbox > img 7"
-- ".flexbox > img 8"
-- ".flexbox > img 9"
 css/css-flexbox/image-as-flexitem-size-003.html:
 - ".flexbox > img 1"
 - ".flexbox > img 10"
 - ".flexbox > img 11"
+- ".flexbox > img 12"
 - ".flexbox > img 14"
 - ".flexbox > img 18"
 - ".flexbox > img 2"
@@ -1934,6 +1909,7 @@ css/css-flexbox/image-as-flexitem-size-003v.html:
 - ".flexbox > img 1"
 - ".flexbox > img 10"
 - ".flexbox > img 11"
+- ".flexbox > img 12"
 - ".flexbox > img 14"
 - ".flexbox > img 18"
 - ".flexbox > img 2"
@@ -1947,7 +1923,7 @@ css/css-flexbox/image-as-flexitem-size-003v.html:
 css/css-flexbox/image-as-flexitem-size-004.html:
 - ".flexbox > img 1"
 - ".flexbox > img 10"
-- ".flexbox > img 12"
+- ".flexbox > img 11"
 - ".flexbox > img 13"
 - ".flexbox > img 15"
 - ".flexbox > img 3"
@@ -1956,11 +1932,10 @@ css/css-flexbox/image-as-flexitem-size-004.html:
 - ".flexbox > img 6"
 - ".flexbox > img 7"
 - ".flexbox > img 8"
-- ".flexbox > img 9"
 css/css-flexbox/image-as-flexitem-size-004v.html:
 - ".flexbox > img 1"
 - ".flexbox > img 10"
-- ".flexbox > img 12"
+- ".flexbox > img 11"
 - ".flexbox > img 13"
 - ".flexbox > img 15"
 - ".flexbox > img 3"
@@ -1969,10 +1944,8 @@ css/css-flexbox/image-as-flexitem-size-004v.html:
 - ".flexbox > img 6"
 - ".flexbox > img 7"
 - ".flexbox > img 8"
-- ".flexbox > img 9"
 css/css-flexbox/image-as-flexitem-size-005.html:
 - ".flexbox > img 1"
-- ".flexbox > img 12"
 - ".flexbox > img 18"
 - ".flexbox > img 2"
 - ".flexbox > img 4"
@@ -1980,10 +1953,8 @@ css/css-flexbox/image-as-flexitem-size-005.html:
 - ".flexbox > img 6"
 - ".flexbox > img 7"
 - ".flexbox > img 8"
-- ".flexbox > img 9"
 css/css-flexbox/image-as-flexitem-size-005v.html:
 - ".flexbox > img 1"
-- ".flexbox > img 12"
 - ".flexbox > img 18"
 - ".flexbox > img 2"
 - ".flexbox > img 4"
@@ -1991,11 +1962,8 @@ css/css-flexbox/image-as-flexitem-size-005v.html:
 - ".flexbox > img 6"
 - ".flexbox > img 7"
 - ".flexbox > img 8"
-- ".flexbox > img 9"
 css/css-flexbox/image-as-flexitem-size-006.html:
 - ".flexbox > img 1"
-- ".flexbox > img 10"
-- ".flexbox > img 11"
 - ".flexbox > img 15"
 - ".flexbox > img 3"
 - ".flexbox > img 4"
@@ -2005,8 +1973,6 @@ css/css-flexbox/image-as-flexitem-size-006.html:
 - ".flexbox > img 8"
 css/css-flexbox/image-as-flexitem-size-006v.html:
 - ".flexbox > img 1"
-- ".flexbox > img 10"
-- ".flexbox > img 11"
 - ".flexbox > img 15"
 - ".flexbox > img 3"
 - ".flexbox > img 4"
@@ -2017,27 +1983,17 @@ css/css-flexbox/image-as-flexitem-size-006v.html:
 css/css-flexbox/image-as-flexitem-size-007.html:
 - ".flexbox > img 10"
 - ".flexbox > img 11"
-- ".flexbox > img 12"
-- ".flexbox > img 2"
 - ".flexbox > img 3"
 - ".flexbox > img 4"
-- ".flexbox > img 5"
 - ".flexbox > img 6"
 - ".flexbox > img 7"
-- ".flexbox > img 8"
-- ".flexbox > img 9"
 css/css-flexbox/image-as-flexitem-size-007v.html:
 - ".flexbox > img 10"
 - ".flexbox > img 11"
-- ".flexbox > img 12"
-- ".flexbox > img 2"
 - ".flexbox > img 3"
 - ".flexbox > img 4"
-- ".flexbox > img 5"
 - ".flexbox > img 6"
 - ".flexbox > img 7"
-- ".flexbox > img 8"
-- ".flexbox > img 9"
 css/css-flexbox/inline-flexbox-wrap-vertically-width-calculation.html:
 - ".inline-flexbox 11"
 - ".inline-flexbox 12"
@@ -2406,6 +2362,8 @@ css/css-flexbox/percentage-heights-012.html:
 - ".flexbox 4"
 - ".flexbox 5"
 - ".flexbox 9"
+css/css-flexbox/percentage-heights-013.html:
+- ".flexbox 4"
 css/css-flexbox/percentage-size-quirks-002.html:
 - ".pct 1"
 - ".pct 2"
@@ -5995,77 +5953,77 @@ html/rendering/non-replaced-elements/the-hr-element-0/size.html:
 html/rendering/non-replaced-elements/the-hr-element-0/width.html:
 - "== html/rendering/non-replaced-elements/the-hr-element-0/width-ref.html"
 html/rendering/non-replaced-elements/the-page/body-margin-1a.html:
-- "== html/rendering/non-replaced-elements/the-page/body-margin-1-ref.html (both renderings
-  blank)"
+- "== html/rendering/non-replaced-elements/the-page/body-margin-1-ref.html (a frame
+  the painter never enters)"
 html/rendering/non-replaced-elements/the-page/body-margin-1b.html:
-- "== html/rendering/non-replaced-elements/the-page/body-margin-1-ref.html (both renderings
-  blank)"
+- "== html/rendering/non-replaced-elements/the-page/body-margin-1-ref.html (a frame
+  the painter never enters)"
 html/rendering/non-replaced-elements/the-page/body-margin-1c.html:
-- "== html/rendering/non-replaced-elements/the-page/body-margin-1-ref.html (both renderings
-  blank)"
+- "== html/rendering/non-replaced-elements/the-page/body-margin-1-ref.html (a frame
+  the painter never enters)"
 html/rendering/non-replaced-elements/the-page/body-margin-1d.html:
-- "== html/rendering/non-replaced-elements/the-page/body-margin-1-ref.html (both renderings
-  blank)"
+- "== html/rendering/non-replaced-elements/the-page/body-margin-1-ref.html (a frame
+  the painter never enters)"
 html/rendering/non-replaced-elements/the-page/body-margin-1e.html:
-- "== html/rendering/non-replaced-elements/the-page/body-margin-1-ref.html (both renderings
-  blank)"
+- "== html/rendering/non-replaced-elements/the-page/body-margin-1-ref.html (a frame
+  the painter never enters)"
 html/rendering/non-replaced-elements/the-page/body-margin-1f.html:
-- "== html/rendering/non-replaced-elements/the-page/body-margin-1-ref.html (both renderings
-  blank)"
+- "== html/rendering/non-replaced-elements/the-page/body-margin-1-ref.html (a frame
+  the painter never enters)"
 html/rendering/non-replaced-elements/the-page/body-margin-1g.html:
-- "== html/rendering/non-replaced-elements/the-page/body-margin-1-ref.html (both renderings
-  blank)"
+- "== html/rendering/non-replaced-elements/the-page/body-margin-1-ref.html (a frame
+  the painter never enters)"
 html/rendering/non-replaced-elements/the-page/body-margin-1h.html:
-- "== html/rendering/non-replaced-elements/the-page/body-margin-1-ref.html (both renderings
-  blank)"
+- "== html/rendering/non-replaced-elements/the-page/body-margin-1-ref.html (a frame
+  the painter never enters)"
 html/rendering/non-replaced-elements/the-page/body-margin-1i.html:
-- "== html/rendering/non-replaced-elements/the-page/body-margin-1-ref.html (both renderings
-  blank)"
+- "== html/rendering/non-replaced-elements/the-page/body-margin-1-ref.html (a frame
+  the painter never enters)"
 html/rendering/non-replaced-elements/the-page/body-margin-1j.html:
-- "== html/rendering/non-replaced-elements/the-page/body-margin-1-ref.html (both renderings
-  blank)"
+- "== html/rendering/non-replaced-elements/the-page/body-margin-1-ref.html (a frame
+  the painter never enters)"
 html/rendering/non-replaced-elements/the-page/body-margin-1k.html:
-- "== html/rendering/non-replaced-elements/the-page/body-margin-1-ref.html (both renderings
-  blank)"
+- "== html/rendering/non-replaced-elements/the-page/body-margin-1-ref.html (a frame
+  the painter never enters)"
 html/rendering/non-replaced-elements/the-page/body-margin-1l.html:
-- "== html/rendering/non-replaced-elements/the-page/body-margin-1-ref.html (both renderings
-  blank)"
+- "== html/rendering/non-replaced-elements/the-page/body-margin-1-ref.html (a frame
+  the painter never enters)"
 html/rendering/non-replaced-elements/the-page/body-margin-2a.html:
-- "== html/rendering/non-replaced-elements/the-page/body-margin-2-ref.html (both renderings
-  blank)"
+- "== html/rendering/non-replaced-elements/the-page/body-margin-2-ref.html (a frame
+  the painter never enters)"
 html/rendering/non-replaced-elements/the-page/body-margin-2b.html:
-- "== html/rendering/non-replaced-elements/the-page/body-margin-2-ref.html (both renderings
-  blank)"
+- "== html/rendering/non-replaced-elements/the-page/body-margin-2-ref.html (a frame
+  the painter never enters)"
 html/rendering/non-replaced-elements/the-page/body-margin-2c.html:
-- "== html/rendering/non-replaced-elements/the-page/body-margin-2-ref.html (both renderings
-  blank)"
+- "== html/rendering/non-replaced-elements/the-page/body-margin-2-ref.html (a frame
+  the painter never enters)"
 html/rendering/non-replaced-elements/the-page/body-margin-2d.html:
-- "== html/rendering/non-replaced-elements/the-page/body-margin-2-ref.html (both renderings
-  blank)"
+- "== html/rendering/non-replaced-elements/the-page/body-margin-2-ref.html (a frame
+  the painter never enters)"
 html/rendering/non-replaced-elements/the-page/body-margin-2e.html:
-- "== html/rendering/non-replaced-elements/the-page/body-margin-2-ref.html (both renderings
-  blank)"
+- "== html/rendering/non-replaced-elements/the-page/body-margin-2-ref.html (a frame
+  the painter never enters)"
 html/rendering/non-replaced-elements/the-page/body-margin-2f.html:
-- "== html/rendering/non-replaced-elements/the-page/body-margin-2-ref.html (both renderings
-  blank)"
+- "== html/rendering/non-replaced-elements/the-page/body-margin-2-ref.html (a frame
+  the painter never enters)"
 html/rendering/non-replaced-elements/the-page/body-margin-2g.html:
-- "== html/rendering/non-replaced-elements/the-page/body-margin-2-ref.html (both renderings
-  blank)"
+- "== html/rendering/non-replaced-elements/the-page/body-margin-2-ref.html (a frame
+  the painter never enters)"
 html/rendering/non-replaced-elements/the-page/body-margin-2h.html:
-- "== html/rendering/non-replaced-elements/the-page/body-margin-2-ref.html (both renderings
-  blank)"
+- "== html/rendering/non-replaced-elements/the-page/body-margin-2-ref.html (a frame
+  the painter never enters)"
 html/rendering/non-replaced-elements/the-page/body-margin-2i.html:
-- "== html/rendering/non-replaced-elements/the-page/body-margin-2-ref.html (both renderings
-  blank)"
+- "== html/rendering/non-replaced-elements/the-page/body-margin-2-ref.html (a frame
+  the painter never enters)"
 html/rendering/non-replaced-elements/the-page/body-margin-2j.html:
-- "== html/rendering/non-replaced-elements/the-page/body-margin-2-ref.html (both renderings
-  blank)"
+- "== html/rendering/non-replaced-elements/the-page/body-margin-2-ref.html (a frame
+  the painter never enters)"
 html/rendering/non-replaced-elements/the-page/body-margin-2k.html:
-- "== html/rendering/non-replaced-elements/the-page/body-margin-2-ref.html (both renderings
-  blank)"
+- "== html/rendering/non-replaced-elements/the-page/body-margin-2-ref.html (a frame
+  the painter never enters)"
 html/rendering/non-replaced-elements/the-page/body-margin-2l.html:
-- "== html/rendering/non-replaced-elements/the-page/body-margin-2-ref.html (both renderings
-  blank)"
+- "== html/rendering/non-replaced-elements/the-page/body-margin-2-ref.html (a frame
+  the painter never enters)"
 html/rendering/non-replaced-elements/the-page/body-margin-3a.html:
 - Test that body's rightmargin and bottommargin attributes are ignored in standards
   mode
@@ -6077,6 +6035,12 @@ html/rendering/non-replaced-elements/the-page/iframe-body-margin-attributes.html
 - body marginwidth vs body leftmargin
 - iframe marginwidth vs child body leftmargin
 - iframe marginwidth vs child body marginwidth
+html/rendering/non-replaced-elements/the-page/iframe-scrolling-attribute-values.html:
+- "== html/rendering/non-replaced-elements/the-page/iframe-scrolling-attribute-values-ref.html
+  (a frame the painter never enters)"
+html/rendering/non-replaced-elements/the-page/iframe-scrolling-attribute.html:
+- "== html/rendering/non-replaced-elements/the-page/iframe-scrolling-attribute-ref.html
+  (a frame the painter never enters)"
 html/rendering/pixel-length-attributes.html:
 - <body leftmargin="   +200in    "> mapping to marginLeft
 - <body leftmargin="   00523   "> mapping to marginLeft
@@ -6417,8 +6381,6 @@ html/rendering/pixel-length-attributes.html:
 - <object border="200in"> mapping to borderRightWidth
 - <object border="200in"> mapping to borderTopWidth
 html/rendering/replaced-elements/attributes-for-embedded-content-and-images/canvas-aspect-ratio.html:
-- Canvas width and height attributes are used as the surface size
-- Canvas width and height attributes are used as the surface size with contain:size
 - 'Computed style test: canvas with {"width":"0","height":"0"}'
 - 'Computed style test: canvas with {"width":"0","height":"1"}'
 - 'Computed style test: canvas with {"width":"0.5","height":"1.5"}'
@@ -6446,12 +6408,7 @@ html/rendering/replaced-elements/attributes-for-embedded-content-and-images/img-
 - 'Create, append and test immediately: <img> with attributes width=50% height=25%'
 - 'Create, append and test immediately: <img> with invalid trailing attributes width=50pp
   height=25xx'
-- 'Loaded images test: <img> with width and height attributes, but conflicting to
-  the original aspect ratio'
-- 'Loaded images test: <img> with width and height attributes, but not equal to the
-  original aspect ratio'
 - 'Loaded images test: <img> with width, height and empty src attributes'
-- 'Loaded images test: <img> without width height attributes'
 - 'Loaded images test: Error image with width and height attributes'
 - 'Loaded images test: Error image with width, height and alt attributes'
 html/rendering/replaced-elements/attributes-for-embedded-content-and-images/img-empty-alt-replaced.html:
@@ -6509,38 +6466,20 @@ html/rendering/replaced-elements/embedded-content-rendering-rules/audio-controls
 - "!= common/blank.html"
 html/rendering/replaced-elements/embedded-content-rendering-rules/audio-controls-002.html:
 - "!= common/blank.html"
-html/rendering/replaced-elements/embedded-content-rendering-rules/audio-without-controls.html:
-- "== css/reference/ref-filled-green-100px-square.xht"
 html/rendering/replaced-elements/embedded-content-rendering-rules/canvas-update-with-border-object-fit.html:
 - "== html/rendering/replaced-elements/embedded-content-rendering-rules/canvas-update-with-border-object-fit-ref.html"
-html/rendering/replaced-elements/embedded-content-rendering-rules/canvas_scale.html:
-- "== html/rendering/replaced-elements/embedded-content-rendering-rules/canvas_scale_ref.html"
 html/rendering/replaced-elements/embedded-content/change-src-while-not-displayed.html:
 - "== html/rendering/replaced-elements/embedded-content/change-src-while-not-displayed-ref.html
   (both renderings blank)"
 html/rendering/replaced-elements/embedded-content/cross-domain-iframe-in-multicol.sub.html:
 - "== html/rendering/replaced-elements/embedded-content/cross-domain-iframe-in-multicol.sub-ref.html
-  (both renderings blank)"
+  (a frame the painter never enters)"
 html/rendering/replaced-elements/embedded-content/cross-domain-iframe.sub.html:
 - "== html/rendering/replaced-elements/embedded-content/cross-domain-iframe.sub-ref.html
-  (both renderings blank)"
-html/rendering/replaced-elements/embedded-content/iframe-frameborder.html:
-- <iframe frameborder=""></iframe>
-- <iframe frameborder="-0"></iframe>
-- <iframe frameborder="-1"></iframe>
-- <iframe frameborder="-10"></iframe>
-- <iframe frameborder="0"></iframe>
-- <iframe frameborder="0.5"></iframe>
-- <iframe frameborder="0.5e1"></iframe>
-- <iframe frameborder="1"></iframe>
-- <iframe frameborder="10"></iframe>
-- <iframe frameborder="error"></iframe>
-- <iframe frameborder="no"></iframe>
-- <iframe frameborder="none"></iframe>
-- "<iframe></iframe>"
+  (a frame the painter never enters)"
 html/rendering/replaced-elements/embedded-content/tall-cross-domain-iframe-in-scrolled.sub.html:
 - "== html/rendering/replaced-elements/embedded-content/tall-cross-domain-iframe-in-scrolled.sub-ref.html
-  (both renderings blank)"
+  (a frame the painter never enters)"
 html/rendering/replaced-elements/embedded-content/video-controls-vertical-writing-mode.html:
 - "== html/rendering/replaced-elements/embedded-content/video-controls-vertical-writing-mode-ref.html
   (both renderings blank)"
@@ -7028,7 +6967,9 @@ html/rendering/replaced-elements/the-select-element/select-1-line-height.html:
 - "== html/rendering/replaced-elements/the-select-element/select-1-line-height-ref.html"
 html/rendering/replaced-elements/the-select-element/select-adopted.html:
 - "== html/rendering/replaced-elements/the-select-element/select-adopted-ref.html
-  (both renderings blank)"
+  (a frame the painter never enters)"
+html/rendering/replaced-elements/the-select-element/select-display-inline.html:
+- "== html/rendering/replaced-elements/the-select-element/select-display-inline-ref.html"
 html/rendering/replaced-elements/the-select-element/select-empty.html:
 - "== html/rendering/replaced-elements/the-select-element/select-empty-ref.html"
 html/rendering/replaced-elements/the-select-element/select-intrinsic-option-font-size.html:
@@ -7836,6 +7777,9 @@ service-workers/service-worker/skip-waiting-installed.https.html:
 - Test skipWaiting when a installed worker is waiting
 service-workers/service-worker/skip-waiting-using-registration.https.html:
 - Test skipWaiting while a client is using the registration
+service-workers/service-worker/svg-target-reftest.https.html:
+- "== service-workers/service-worker/resources/svg-target-reftest-001.html (a frame
+  the painter never enters)"
 service-workers/service-worker/unregister-immediately-during-extendable-events.https.html:
 - Clear-Site-Data must fail pending subresource fetch events.
 service-workers/service-worker/unregister-immediately.https.html:
