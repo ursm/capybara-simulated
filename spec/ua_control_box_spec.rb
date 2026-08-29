@@ -260,4 +260,41 @@ RSpec.describe 'UA stylesheet: the form-control box' do
     expect(size(s, 'h')).to eq([0, 0])
     expect(s.evaluate_script("document.getElementById('d').getBoundingClientRect().top")).to eq(0)
   end
+  # A `<button>` is as wide as its content wants, whatever display the page gives it and however
+  # much room it is offered — HTML's button layout IS the shrink-to-fit algorithm. A block-level
+  # one filled its container here, which is a container-wide click target where Chrome draws a
+  # button around the label. (`html/rendering/widgets/button-layout/shrink-wrap`, Chrome-measured:
+  # a button whose content wants 250 and cannot go below 100 is 100 / 200 / 250 wide in a 50 /
+  # 200 / 300px block.)
+  it 'shrink-wraps a button whatever its display' do
+    s = page_with(<<~HTML)
+      <style>
+        button { border: none; margin: 0; padding: 0 }
+        button > span { width: 50px; display: inline-block }
+        button > span.wide { width: 100px }
+      </style>
+      #{[50, 200, 300].each_with_index.map {|w, i|
+        %(<div style="width:#{w}px"><button id="b#{i}" style="display:block">) +
+        '<span class="wide">x</span><span>x</span><span>x</span><span>x</span></button></div>'
+      }.join}
+    HTML
+    expect(size(s, 'b0')[0]).to eq(100)
+    expect(size(s, 'b1')[0]).to eq(200)
+    expect(size(s, 'b2')[0]).to eq(250)
+  end
+
+  # …and its box is the UA's, not the page's: every block-level `display` spelling gives the same
+  # flow-root button, which is what keeps `display: table` from turning one into a table.
+  it 'keeps a button a flow-root box whatever display it is given' do
+    s = page_with(<<~HTML)
+      <div style="width:300px">
+        <div style="float:left;width:100px;height:100px;margin:10px"></div>
+        <button id="b" style="display:table"><div style="float:left;width:100px;height:100px;margin:10px"></div></button>
+      </div>
+    HTML
+    # Beside the float, containing its own, and as wide as what it holds.
+    expect(s.evaluate_script("document.getElementById('b').offsetLeft")).to eq(120)
+    expect(size(s, 'b')).to eq([136, 126])   # the float's 120px margin box, plus the button's chrome
+  end
+
 end
