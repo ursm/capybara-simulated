@@ -59,222 +59,6 @@ css/css-flexbox/abspos/position-absolute-002.html:
 - ".flexbox 3"
 - ".flexbox 4"
 - ".flexbox 5"
-css/css-flexbox/align-content-horiz-001a.html:
-- ".flexbox div 10"
-- ".flexbox div 11"
-- ".flexbox div 12"
-- ".flexbox div 13"
-- ".flexbox div 14"
-- ".flexbox div 15"
-- ".flexbox div 16"
-- ".flexbox div 17"
-- ".flexbox div 18"
-- ".flexbox div 19"
-- ".flexbox div 2"
-- ".flexbox div 20"
-- ".flexbox div 21"
-- ".flexbox div 22"
-- ".flexbox div 23"
-- ".flexbox div 24"
-- ".flexbox div 25"
-- ".flexbox div 26"
-- ".flexbox div 27"
-- ".flexbox div 28"
-- ".flexbox div 29"
-- ".flexbox div 3"
-- ".flexbox div 30"
-- ".flexbox div 31"
-- ".flexbox div 32"
-- ".flexbox div 33"
-- ".flexbox div 34"
-- ".flexbox div 35"
-- ".flexbox div 36"
-- ".flexbox div 37"
-- ".flexbox div 38"
-- ".flexbox div 39"
-- ".flexbox div 4"
-- ".flexbox div 40"
-- ".flexbox div 41"
-- ".flexbox div 42"
-- ".flexbox div 43"
-- ".flexbox div 44"
-- ".flexbox div 45"
-- ".flexbox div 46"
-- ".flexbox div 47"
-- ".flexbox div 48"
-- ".flexbox div 49"
-- ".flexbox div 5"
-- ".flexbox div 50"
-- ".flexbox div 51"
-- ".flexbox div 52"
-- ".flexbox div 53"
-- ".flexbox div 54"
-- ".flexbox div 55"
-- ".flexbox div 56"
-- ".flexbox div 57"
-- ".flexbox div 58"
-- ".flexbox div 59"
-- ".flexbox div 6"
-- ".flexbox div 60"
-- ".flexbox div 61"
-- ".flexbox div 62"
-- ".flexbox div 63"
-- ".flexbox div 64"
-- ".flexbox div 65"
-- ".flexbox div 66"
-- ".flexbox div 67"
-- ".flexbox div 68"
-- ".flexbox div 69"
-- ".flexbox div 7"
-- ".flexbox div 70"
-- ".flexbox div 71"
-- ".flexbox div 72"
-- ".flexbox div 8"
-- ".flexbox div 9"
-css/css-flexbox/align-content-horiz-001b.html:
-- ".flexbox div 10"
-- ".flexbox div 11"
-- ".flexbox div 12"
-- ".flexbox div 13"
-- ".flexbox div 14"
-- ".flexbox div 15"
-- ".flexbox div 16"
-- ".flexbox div 17"
-- ".flexbox div 18"
-- ".flexbox div 19"
-- ".flexbox div 2"
-- ".flexbox div 20"
-- ".flexbox div 21"
-- ".flexbox div 22"
-- ".flexbox div 23"
-- ".flexbox div 24"
-- ".flexbox div 25"
-- ".flexbox div 26"
-- ".flexbox div 27"
-- ".flexbox div 28"
-- ".flexbox div 29"
-- ".flexbox div 3"
-- ".flexbox div 30"
-- ".flexbox div 31"
-- ".flexbox div 32"
-- ".flexbox div 33"
-- ".flexbox div 34"
-- ".flexbox div 35"
-- ".flexbox div 36"
-- ".flexbox div 37"
-- ".flexbox div 38"
-- ".flexbox div 39"
-- ".flexbox div 4"
-- ".flexbox div 40"
-- ".flexbox div 41"
-- ".flexbox div 42"
-- ".flexbox div 43"
-- ".flexbox div 44"
-- ".flexbox div 45"
-- ".flexbox div 46"
-- ".flexbox div 47"
-- ".flexbox div 48"
-- ".flexbox div 49"
-- ".flexbox div 5"
-- ".flexbox div 50"
-- ".flexbox div 51"
-- ".flexbox div 52"
-- ".flexbox div 53"
-- ".flexbox div 54"
-- ".flexbox div 55"
-- ".flexbox div 56"
-- ".flexbox div 57"
-- ".flexbox div 58"
-- ".flexbox div 59"
-- ".flexbox div 6"
-- ".flexbox div 60"
-- ".flexbox div 61"
-- ".flexbox div 62"
-- ".flexbox div 63"
-- ".flexbox div 64"
-- ".flexbox div 65"
-- ".flexbox div 66"
-- ".flexbox div 67"
-- ".flexbox div 68"
-- ".flexbox div 69"
-- ".flexbox div 7"
-- ".flexbox div 70"
-- ".flexbox div 71"
-- ".flexbox div 72"
-- ".flexbox div 8"
-- ".flexbox div 9"
-css/css-flexbox/align-content-horiz-002.html:
-- ".flexbox div 10"
-- ".flexbox div 11"
-- ".flexbox div 12"
-- ".flexbox div 13"
-- ".flexbox div 14"
-- ".flexbox div 15"
-- ".flexbox div 16"
-- ".flexbox div 17"
-- ".flexbox div 18"
-- ".flexbox div 19"
-- ".flexbox div 2"
-- ".flexbox div 20"
-- ".flexbox div 21"
-- ".flexbox div 22"
-- ".flexbox div 23"
-- ".flexbox div 24"
-- ".flexbox div 25"
-- ".flexbox div 26"
-- ".flexbox div 27"
-- ".flexbox div 28"
-- ".flexbox div 29"
-- ".flexbox div 3"
-- ".flexbox div 30"
-- ".flexbox div 31"
-- ".flexbox div 32"
-- ".flexbox div 33"
-- ".flexbox div 34"
-- ".flexbox div 35"
-- ".flexbox div 36"
-- ".flexbox div 37"
-- ".flexbox div 38"
-- ".flexbox div 39"
-- ".flexbox div 4"
-- ".flexbox div 40"
-- ".flexbox div 41"
-- ".flexbox div 42"
-- ".flexbox div 43"
-- ".flexbox div 44"
-- ".flexbox div 45"
-- ".flexbox div 46"
-- ".flexbox div 47"
-- ".flexbox div 48"
-- ".flexbox div 49"
-- ".flexbox div 5"
-- ".flexbox div 50"
-- ".flexbox div 51"
-- ".flexbox div 52"
-- ".flexbox div 53"
-- ".flexbox div 54"
-- ".flexbox div 55"
-- ".flexbox div 56"
-- ".flexbox div 57"
-- ".flexbox div 58"
-- ".flexbox div 59"
-- ".flexbox div 6"
-- ".flexbox div 60"
-- ".flexbox div 61"
-- ".flexbox div 62"
-- ".flexbox div 63"
-- ".flexbox div 64"
-- ".flexbox div 65"
-- ".flexbox div 66"
-- ".flexbox div 67"
-- ".flexbox div 68"
-- ".flexbox div 69"
-- ".flexbox div 7"
-- ".flexbox div 70"
-- ".flexbox div 71"
-- ".flexbox div 72"
-- ".flexbox div 8"
-- ".flexbox div 9"
 css/css-flexbox/align-content-rounding.html:
 - The last item should match the end edge.
 css/css-flexbox/align-content-wmvert-001.html:
@@ -1657,8 +1441,6 @@ css/css-flexbox/balance/flex-wrap-valid.html:
 - e.style['flex-wrap'] = "wrap balance" should set the property value
 css/css-flexbox/canvas-dynamic-change-001.html:
 - ".flexbox 1"
-css/css-flexbox/change-column-flex-width.html:
-- "#container 1"
 css/css-flexbox/dynamic-grid-flex-abspos.html:
 - ".relpos 4"
 - ".relpos 8"
@@ -1703,10 +1485,7 @@ css/css-flexbox/flex-basis-013.html:
 css/css-flexbox/flex-basis-intrinsics-001.html:
 - ".flex-item 10"
 - ".flex-item 12"
-- ".flex-item 2"
-- ".flex-item 3"
 - ".flex-item 7"
-- ".flex-item 8"
 - ".flex-item 9"
 css/css-flexbox/flex-factor-less-than-one.html:
 - ".flexbox 13"
@@ -1804,20 +1583,6 @@ css/css-flexbox/flexbox-justify-content-wmvert-002.html:
 css/css-flexbox/flexbox-justify-content-wmvert-003.html:
 - ".flexitem 3"
 - ".flexitem 4"
-css/css-flexbox/flexbox-min-height-auto-003.html:
-- 'overflow-y:auto: min-height:auto resolves to 0; width includes scrollbar gutter'
-- 'overflow-y:hidden: min-height:auto resolves to 0; no scrollbar gutter'
-- 'overflow-y:scroll: min-height:auto resolves to 0; width includes scrollbar gutter'
-- 'overflow-y:visible: min-height:auto holds; width has no scrollbar gutter'
-css/css-flexbox/flexbox-min-height-auto-004.html:
-- 'overflow-x:auto: forces overflow-y to auto; min-height:auto resolves to 0; width
-  includes scrollbar gutter'
-- 'overflow-x:hidden: forces overflow-y to auto; min-height:auto resolves to 0; width
-  includes scrollbar gutter'
-- 'overflow-x:scroll: forces overflow-y to auto; min-height:auto resolves to 0; width
-  includes scrollbar gutter'
-- 'overflow-x:visible: overflow-y stays visible; min-height:auto holds; no scrollbar
-  gutter'
 css/css-flexbox/flexbox_justifycontent-rtl-001.html:
 - ".container > div 1"
 - ".container > div 10"
@@ -1843,8 +1608,6 @@ css/css-flexbox/flexitem-no-margin-collapsing.html:
 - ".flexbox 1"
 css/css-flexbox/flexitem-stretch-image.html:
 - ".flexbox 1"
-css/css-flexbox/gap-018.html:
-- ".button 1"
 css/css-flexbox/getcomputedstyle/flexbox_computedstyle_align-items-invalid.html:
 - 'flexbox | computed style | align-items: invalid'
 css/css-flexbox/getcomputedstyle/flexbox_computedstyle_align-self-invalid.html:
@@ -2022,7 +1785,6 @@ css/css-flexbox/intrinsic-size/row-005.html:
 - ".floating-flexbox 4"
 - ".floating-flexbox 5"
 - ".floating-flexbox 6"
-- ".floating-flexbox 7"
 - ".floating-flexbox 8"
 - ".floating-flexbox 9"
 css/css-flexbox/intrinsic-size/row-008.html:
@@ -2046,7 +1808,6 @@ css/css-flexbox/intrinsic-size/row-use-cases-001.html:
 css/css-flexbox/intrinsic-size/row-wrap-001.html:
 - ".floating-flexbox 1"
 - ".floating-flexbox 2"
-- ".floating-flexbox 3"
 - ".floating-flexbox 4"
 - ".floating-flexbox 5"
 css/css-flexbox/intrinsic-width-orthogonal-writing-mode.html:
@@ -2859,10 +2620,6 @@ css/css-logical/logical-box-padding.html:
   longhands, with ''-webkit-writing-mode: horizontal-bt; direction: ltr; ''.'
 - 'Test that padding-* shorthands set the computed value of both logical and physical
   longhands, with ''-webkit-writing-mode: horizontal-bt; direction: rtl; ''.'
-css/css-logical/logical-values-float-clear-3.html:
-- "== css/css-logical/reference/logical-values-float-clear-3-ref.html"
-css/css-logical/logical-values-float-clear-4.html:
-- "== css/css-logical/reference/logical-values-float-clear-4-ref.html"
 css/css-logical/logicalprops-block-size.html:
 - ".tablecell 6"
 - ".tablecell 8"
@@ -5769,10 +5526,6 @@ html/rendering/non-replaced-elements/tables/table-border-1.html:
 - "== html/rendering/non-replaced-elements/tables/table-border-1-ref.html"
 html/rendering/non-replaced-elements/tables/table-cell-nowrap-with-fixed-width.html:
 - "== html/rendering/non-replaced-elements/tables/table-cell-nowrap-with-fixed-width-ref.html"
-html/rendering/non-replaced-elements/tables/table-cell-width-s.html:
-- "== html/rendering/non-replaced-elements/tables/table-cell-width-ref.html"
-html/rendering/non-replaced-elements/tables/table-cell-width.html:
-- "== html/rendering/non-replaced-elements/tables/table-cell-width-ref.html"
 html/rendering/non-replaced-elements/tables/table-direction.html:
 - "== html/rendering/non-replaced-elements/tables/table-direction-ref.html"
 html/rendering/non-replaced-elements/tables/table-row-direction.html:
@@ -5792,8 +5545,6 @@ html/rendering/non-replaced-elements/tables/tr-transform-and-will-change.html:
 - "== html/rendering/non-replaced-elements/tables/tr-transform-and-will-change-ref.html"
 html/rendering/non-replaced-elements/the-fieldset-and-legend-elements/absolute-fixed-in-legend.html:
 - "== html/rendering/non-replaced-elements/the-fieldset-and-legend-elements/absolute-fixed-in-legend-ref.html"
-html/rendering/non-replaced-elements/the-fieldset-and-legend-elements/fieldset-block-formatting-context.html:
-- 'The fieldset element: block formatting context'
 html/rendering/non-replaced-elements/the-fieldset-and-legend-elements/fieldset-block-size.html:
 - Test content's block-size
 html/rendering/non-replaced-elements/the-fieldset-and-legend-elements/fieldset-border-gap-negative-margin.html:
@@ -5818,7 +5569,6 @@ html/rendering/non-replaced-elements/the-fieldset-and-legend-elements/fieldset-d
 - 'fieldset with display: ruby-text-container'
 html/rendering/non-replaced-elements/the-fieldset-and-legend-elements/fieldset-display.html:
 - 'fieldset with display: inline'
-- 'fieldset with display: table'
 html/rendering/non-replaced-elements/the-fieldset-and-legend-elements/fieldset-dynamic-baseline.html:
 - "== html/rendering/non-replaced-elements/the-fieldset-and-legend-elements/fieldset-dynamic-baseline-ref.html"
 html/rendering/non-replaced-elements/the-fieldset-and-legend-elements/fieldset-generated-content.html:
@@ -5857,7 +5607,6 @@ html/rendering/non-replaced-elements/the-fieldset-and-legend-elements/legend-ali
 html/rendering/non-replaced-elements/the-fieldset-and-legend-elements/legend-auto-margins.html:
 - "== html/rendering/non-replaced-elements/the-fieldset-and-legend-elements/legend-auto-margins-ref.html"
 html/rendering/non-replaced-elements/the-fieldset-and-legend-elements/legend-block-formatting-context.html:
-- in-body
 - in-fieldset-descendant
 - in-fieldset-second-child
 - rendered-legend
@@ -5888,8 +5637,6 @@ html/rendering/non-replaced-elements/the-fieldset-and-legend-elements/legend-pos
 html/rendering/non-replaced-elements/the-fieldset-and-legend-elements/legend-sans-fieldset-display-ruby.html:
 - ".rt"
 - ".ruby"
-html/rendering/non-replaced-elements/the-fieldset-and-legend-elements/legend-sans-fieldset-display.html:
-- ".td"
 html/rendering/non-replaced-elements/the-fieldset-and-legend-elements/legend-tall.html:
 - "== html/rendering/non-replaced-elements/the-fieldset-and-legend-elements/legend-tall-ref.html"
 html/rendering/non-replaced-elements/the-fieldset-and-legend-elements/legend.html:
@@ -7075,34 +6822,12 @@ html/rendering/widgets/button-layout/computed-style.html:
 - 'computed display of <input type=submit> with display: flow'
 html/rendering/widgets/button-layout/display-none-or-contents.html:
 - "== html/rendering/widgets/button-layout/display-none-or-contents-ref.html"
-html/rendering/widgets/button-layout/display-other.html:
-- 'display: block'
-- 'display: table'
-html/rendering/widgets/button-layout/flex.html:
-- flex
-html/rendering/widgets/button-layout/grid.html:
-- grid
 html/rendering/widgets/button-layout/inline-level.html:
 - "== html/rendering/widgets/button-layout/inline-level-ref.html"
 html/rendering/widgets/button-layout/input-type-button-clip.html:
 - "== html/rendering/widgets/button-layout/input-type-button-clip-ref.html"
 html/rendering/widgets/button-layout/propagate-text-decoration.html:
 - "== html/rendering/widgets/button-layout/propagate-text-decoration-ref.html"
-html/rendering/widgets/button-layout/shrink-wrap.html:
-- 'display: block - available width: 300px'
-- 'display: block - available width: 50px'
-- 'display: inline-block - available width: 200px'
-- 'display: inline-block - available width: 300px'
-- 'display: list-item - available width: 300px'
-- 'display: list-item - available width: 50px'
-- 'display: table - available width: 200px'
-- 'display: table - available width: 50px'
-- 'display: table-cell - available width: 300px'
-- 'display: table-cell - available width: 50px'
-- 'display: table-row - available width: 300px'
-- 'display: table-row - available width: 50px'
-- 'float: left - available width: 200px'
-- 'float: left - available width: 300px'
 html/rendering/widgets/field-sizing-input-number.html:
 - 'number: Auto width and auto height with a long text'
 - 'number: Empty value'
