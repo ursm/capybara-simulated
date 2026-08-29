@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require 'capybara/simulated'
+require_relative 'support/js_engine'
 require_relative 'support/session_teardown'
 
 # The parts of HTML's rendering section that are TABLES rather than mechanisms: the attributes that
@@ -71,6 +72,8 @@ RSpec.describe 'UA stylesheet: the rendering tables' do
                                              'marginheight="7" marginwidth="3"></iframe></body></html>'
       [200, {'content-type' => 'text/html'}, [html]]
     })
+    # …and the frame half needs a realm of its own to look into.
+    skip 'per-frame realms need the V8 engine' unless CsimEngine.v8?
     framed.visit '/'
     framed.within_frame('f') do
       expect(framed.evaluate_script('getComputedStyle(document.body).marginTop')).to eq('7px')
