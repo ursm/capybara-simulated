@@ -56,9 +56,7 @@ WebCryptoAPI/sign_verify/eddsa_small_order_points.https.any.js:
 - Ed25519 Verification checks with small-order key of order - Test 13
 - Ed25519 Verification checks with small-order key of order - Test 2
 css/css-flexbox/abspos/position-absolute-002.html:
-- ".flexbox 3"
 - ".flexbox 4"
-- ".flexbox 5"
 css/css-flexbox/align-content-rounding.html:
 - The last item should match the end edge.
 css/css-flexbox/align-content-wmvert-001.html:
@@ -6627,8 +6625,6 @@ shadow-dom/offsetTop-offsetLeft-across-shadow-boundaries.html:
   multiple shadow roots.
 shadow-dom/shadow-style-invalidation-vw-units.html:
 - "== shadow-dom/shadow-style-invalidation-vw-units-ref.html"
-shadow-dom/slot-fallback-content-004.html:
-- "== shadow-dom/slot-fallback-content-004-ref.html"
 shadow-dom/slot-fallback-content-008.html:
 - "== shadow-dom/slot-fallback-content-008-ref.html"
 shadow-dom/untriaged/html-elements-in-shadow-trees/inert-html-elements/test-001.html:
