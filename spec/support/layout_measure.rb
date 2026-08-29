@@ -43,6 +43,13 @@ module LayoutMeasure
     [m['boxes'], Text.new(m['text']), m['line'], session]
   end
 
+  # A zero-sized `inline-block` on a line: it sits ON the baseline by its own bottom edge, so its
+  # `y` MINUS the line's is where the baseline runs. Every question about what a line does to a box
+  # is asked against that ruler rather than against a font figure, so the answer holds whatever face
+  # fontconfig serves. (A method, not a constant: a constant assigned inside a `describe` block
+  # lands at TOP LEVEL and leaks across the suite.)
+  def ruler = '<span style="display:inline-block;width:0;height:0"></span>'
+
   # The measured width of a string, and of the widest word in it (its min-content).
   Text = Struct.new(:table) do
     def [](s, weight = 'normal') = table.fetch("#{weight} #{s}")

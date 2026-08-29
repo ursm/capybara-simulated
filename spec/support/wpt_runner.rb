@@ -1383,6 +1383,15 @@ module WptRunner
   # check provides). What it does mean is that a reftest pass count is an upper bound: quote it with
   # this caveat, and don't read a green reftest as proof the feature works.
   #
+  # The painter draws a frame's own box — its background and the 2px chrome HTML gives it — but
+  # never the document INSIDE it, which is a page it does not visit. So a comparison over a page
+  # holding one measures everything except the part the frame was there for, and two frames that
+  # differ only in their content compare equal. That is the same inert pass the blank marker
+  # catches, one level in, and it survives the painter learning to draw frame chrome — which the
+  # blank marker does not.
+  REFTEST_FRAME_SUFFIX  = '(a frame the painter never enters)'
+  REFTEST_FRAME_MESSAGE = 'the page holds a frame whose document this painter never renders, so ' \
+                          'the comparison says nothing about anything inside it'
   # A reference the vendor manifest doesn't ship can't be compared against. It rides in the NAME,
   # not just the message, so it can't hide in the allowlist looking like an ordinary rendering gap.
   REFTEST_MISSING_SUFFIX = '(reference not vendored)'
@@ -1432,11 +1441,14 @@ module WptRunner
         next
       end
       message = reftest_mismatch(test[:png], ref[:png], op, fuzzy)
-      blank   = message.nil? && op == '==' && blank_render?(test[:png])
-      return reftest_result(name, nil) if message.nil? && !blank
+      inert   = if message || op != '=='            then nil
+                elsif blank_render?(test[:png])     then [REFTEST_BLANK_SUFFIX, REFTEST_BLANK_MESSAGE]
+                elsif test[:frames] || ref[:frames] then [REFTEST_FRAME_SUFFIX, REFTEST_FRAME_MESSAGE]
+                end
+      return reftest_result(name, nil) if message.nil? && inert.nil?
 
       reftest_dump(rel, ref_rel, test[:png], ref[:png])
-      attempts << (blank ? ["#{name} #{REFTEST_BLANK_SUFFIX}", REFTEST_BLANK_MESSAGE] : [name, message])
+      attempts << (inert ? ["#{name} #{inert[0]}", inert[1]] : [name, message])
     end
     reftest_result(*attempts.first)
   rescue StandardError => e
@@ -1542,9 +1554,11 @@ module WptRunner
       )
       break if ready
     end
-    png = s.driver.browser.screenshot_png(full: false)
+    # Whether the picture has a hole in it: see REFTEST_FRAME_SUFFIX.
+    frames = s.driver.peek_script('!!document.querySelector("iframe, frame")')
+    png    = s.driver.browser.screenshot_png(full: false)
     raise "the painter produced no rendering for #{rel}" unless png
-    {png: png, ready: ready}
+    {png: png, ready: ready, frames: frames}
   ensure
     drop_session! if origin
   end

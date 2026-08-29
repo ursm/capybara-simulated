@@ -18,10 +18,6 @@ require_relative 'support/layout_measure'
 RSpec.describe 'vertical-align' do
   include LayoutMeasure
 
-  # A method, not a constant: a constant assigned inside a `describe` block lands at TOP LEVEL and
-  # leaks across the suite (`layout_inline_flow_spec` carries the same note).
-  def ruler = '<span style="display:inline-block;width:0;height:0"></span>'
-
   # `[line height, the line's baseline, the box's top, the box's height]` for one aligned box.
   def aligned(value, box = 'width:20px;height:10px')
     body = %(<div id="c" style="width:400px">t#{ruler}<span id="b" style="display:inline-block;#{box};vertical-align:#{value}"></span>x</div>)
