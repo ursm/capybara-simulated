@@ -38,7 +38,6 @@ Document:
   - prerendering
   - rootElement
   - startViewTransition
-  - timeline
   - wasDiscarded
 Element:
   - activeViewTransition
