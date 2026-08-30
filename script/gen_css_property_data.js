@@ -211,7 +211,6 @@ const ADDS_DIMENSION = [
 const addsDimension = {};
 for (const name of ADDS_DIMENSION) addsDimension[name] = true;
 
-
 // Every BARE KEYWORD a property's grammar admits, followed through `<'property'>` and `<type>`
 // references — the data a full grammar validator would consult, reduced to the one question the
 // CSSOM actually has to answer cheaply: is this single identifier a value this property takes?
@@ -340,7 +339,6 @@ export const ANIMATION_TYPES = bare(${JSON.stringify(animationTypes, null, 0)});
 // it under \`composite: add\`, rather than replacing it. A plain number always composes, so only
 // the dimensioned ones need listing.
 export const ADDS_DIMENSION = bare(${JSON.stringify(addsDimension, null, 0)});
-
 
 // Longhand → the numeric LOWER BOUND its grammar imposes. An interpolation that extrapolates past
 // it clamps: a \`flex-grow\` animation seeking before its start reports 0, not a negative number.
