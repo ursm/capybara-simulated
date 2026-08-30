@@ -28771,68 +28771,11 @@ css/css-animations/AnimationEffect-getComputedTiming.tentative.html:
   reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
     specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
     path/suffix. CLAUDE.md rule 1.
-- name: activeDuration of a new animation
-  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
-    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
-    path/suffix. CLAUDE.md rule 1.
-- name: activeDuration of an animation with zero iterations
-  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
-    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
-    path/suffix. CLAUDE.md rule 1.
-- name: activeDuration of an infinitely repeating animation
-  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
-    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
-    path/suffix. CLAUDE.md rule 1.
 - name: activeDuration of an infinitely repeating zero-duration animation
   reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
     specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
     path/suffix. CLAUDE.md rule 1.
-- name: currentIteration of a finitely repeating zero-duration animation
-  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
-    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
-    path/suffix. CLAUDE.md rule 1.
-- name: currentIteration of a new animation is zero
-  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
-    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
-    path/suffix. CLAUDE.md rule 1.
-- name: currentIteration of a new animation with no backwards fill is unresolved in
-    before phase
-  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
-    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
-    path/suffix. CLAUDE.md rule 1.
-- name: currentIteration of an animation with a default iteration count
-  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
-    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
-    path/suffix. CLAUDE.md rule 1.
-- name: currentIteration of an animation with a non-integral iteration count
-  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
-    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
-    path/suffix. CLAUDE.md rule 1.
-- name: currentIteration of an animation with an integral iteration count
-  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
-    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
-    path/suffix. CLAUDE.md rule 1.
-- name: currentIteration of an infinitely repeating zero-duration animation
-  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
-    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
-    path/suffix. CLAUDE.md rule 1.
-- name: delay of a new animation
-  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
-    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
-    path/suffix. CLAUDE.md rule 1.
-- name: direction of a new animation
-  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
-    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
-    path/suffix. CLAUDE.md rule 1.
-- name: duration of a new animation
-  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
-    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
-    path/suffix. CLAUDE.md rule 1.
 - name: easing of a new animation
-  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
-    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
-    path/suffix. CLAUDE.md rule 1.
-- name: endDelay of a new animation
   reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
     specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
     path/suffix. CLAUDE.md rule 1.
@@ -28844,51 +28787,7 @@ css/css-animations/AnimationEffect-getComputedTiming.tentative.html:
   reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
     specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
     path/suffix. CLAUDE.md rule 1.
-- name: endTime of an infinitely repeating animation
-  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
-    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
-    path/suffix. CLAUDE.md rule 1.
 - name: endTime of an infinitely repeating zero-duration animation
-  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
-    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
-    path/suffix. CLAUDE.md rule 1.
-- name: endTime of an new animation
-  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
-    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
-    path/suffix. CLAUDE.md rule 1.
-- name: fill of a new animation
-  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
-    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
-    path/suffix. CLAUDE.md rule 1.
-- name: iterationStart of a new animation
-  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
-    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
-    path/suffix. CLAUDE.md rule 1.
-- name: iterations of a finitely repeating animation
-  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
-    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
-    path/suffix. CLAUDE.md rule 1.
-- name: iterations of a new animation
-  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
-    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
-    path/suffix. CLAUDE.md rule 1.
-- name: iterations of an infinitely repeating animation
-  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
-    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
-    path/suffix. CLAUDE.md rule 1.
-- name: localTime of a new animation
-  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
-    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
-    path/suffix. CLAUDE.md rule 1.
-- name: localTime of an animation is always equal to currentTime
-  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
-    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
-    path/suffix. CLAUDE.md rule 1.
-- name: localTime reflects playbackRate immediately
-  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
-    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
-    path/suffix. CLAUDE.md rule 1.
-- name: progress of a finitely repeating zero-duration animation
   reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
     specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
     path/suffix. CLAUDE.md rule 1.
@@ -28914,24 +28813,11 @@ css/css-animations/AnimationEffect-getComputedTiming.tentative.html:
   reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
     specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
     path/suffix. CLAUDE.md rule 1.
-- name: progress of an animation with different fill modes
-  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
-    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
-    path/suffix. CLAUDE.md rule 1.
-- name: progress of an infinitely repeating zero-duration animation
-  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
-    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
-    path/suffix. CLAUDE.md rule 1.
 - name: progress of an integral repeating animation with normal direction
   reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
     specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
     path/suffix. CLAUDE.md rule 1.
 css/css-animations/AnimationEffect-updateTiming.tentative.html:
-- name: AnimationEffect properties that do not map to animation-* properties should
-    not be changed when animation-* style is updated
-  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
-    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
-    path/suffix. CLAUDE.md rule 1.
 - name: AnimationEffect.updateTiming() does override to changes from animation-* properties
     if there is an error
   reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
@@ -28953,10 +28839,6 @@ css/css-animations/AnimationEffect-updateTiming.tentative.html:
     specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
     path/suffix. CLAUDE.md rule 1.
 css/css-animations/CSSAnimation-animationName.tentative.html:
-- name: Animation name makes keyframe rule
-  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
-    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
-    path/suffix. CLAUDE.md rule 1.
 - name: Animation name with hex-escape
   reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
     specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
@@ -28992,18 +28874,6 @@ css/css-animations/CSSAnimation-canceling.tentative.html:
   reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
     specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
     path/suffix. CLAUDE.md rule 1.
-- name: Setting animation-name to 'none' cancels the animation
-  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
-    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
-    path/suffix. CLAUDE.md rule 1.
-- name: Setting display:none on an ancestor element cancels animations on descendants
-  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
-    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
-    path/suffix. CLAUDE.md rule 1.
-- name: Setting display:none on an element cancel its animations
-  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
-    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
-    path/suffix. CLAUDE.md rule 1.
 css/css-animations/CSSAnimation-effect.tentative.html:
 - name: A play-pending animation's effect whose effect is replaced still exits the
     pending state
@@ -29012,16 +28882,6 @@ css/css-animations/CSSAnimation-effect.tentative.html:
     path/suffix. CLAUDE.md rule 1.
 - name: After replacing a finished animation's effect with a longer one it fires an
     animationstart event
-  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
-    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
-    path/suffix. CLAUDE.md rule 1.
-- name: CSS animation events are dispatched at the original element even after setting
-    an effect with a different target element
-  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
-    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
-    path/suffix. CLAUDE.md rule 1.
-- name: Replacing an animation's effect with a shorter one that should have already
-    finished, the animation finishes immediately
   reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
     specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
     path/suffix. CLAUDE.md rule 1.
@@ -29067,11 +28927,6 @@ css/css-animations/CSSAnimation-getCurrentTime.tentative.html:
   reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
     specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
     path/suffix. CLAUDE.md rule 1.
-css/css-animations/CSSAnimation-id.tentative.html:
-- name: Animation.id for CSS Animations
-  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
-    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
-    path/suffix. CLAUDE.md rule 1.
 css/css-animations/CSSAnimation-pausing.tentative.html:
 - name: Setting the current time completes a pending pause
   reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
@@ -29079,11 +28934,6 @@ css/css-animations/CSSAnimation-pausing.tentative.html:
     path/suffix. CLAUDE.md rule 1.
 - name: Setting the startTime to non-null does NOT override the animation-play-state
     if the animation is already running
-  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
-    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
-    path/suffix. CLAUDE.md rule 1.
-- name: Setting the startTime to non-null overrides animation-play-state if the animation
-    is paused
   reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
     specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
     path/suffix. CLAUDE.md rule 1.
@@ -29100,16 +28950,8 @@ css/css-animations/CSSAnimation-pausing.tentative.html:
   reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
     specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
     path/suffix. CLAUDE.md rule 1.
-- name: play() overrides animation-play-state
-  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
-    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
-    path/suffix. CLAUDE.md rule 1.
 - name: reverse() does NOT override animation-play-state if the animation is already
     running
-  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
-    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
-    path/suffix. CLAUDE.md rule 1.
-- name: reverse() overrides animation-play-state when it starts playing the animation
   reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
     specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
     path/suffix. CLAUDE.md rule 1.
@@ -29118,31 +28960,11 @@ css/css-animations/CSSAnimation-playState.tentative.html:
   reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
     specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
     path/suffix. CLAUDE.md rule 1.
-- name: Animation returns correct playState when canceled
-  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
-    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
-    path/suffix. CLAUDE.md rule 1.
 - name: Animation returns correct playState when paused
   reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
     specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
     path/suffix. CLAUDE.md rule 1.
-- name: Animation.playState updates when paused by script
-  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
-    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
-    path/suffix. CLAUDE.md rule 1.
-- name: Animation.playState updates when resumed by setting style
-  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
-    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
-    path/suffix. CLAUDE.md rule 1.
 css/css-animations/CSSAnimation-ready.tentative.html:
-- name: 'A new ready promise is created when setting animation-play-state: paused'
-  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
-    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
-    path/suffix. CLAUDE.md rule 1.
-- name: 'A new ready promise is created when setting animation-play-state: running'
-  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
-    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
-    path/suffix. CLAUDE.md rule 1.
 - name: Pausing twice re-uses the same Promise
   reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
     specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
@@ -29163,10 +28985,6 @@ css/css-animations/CSSAnimation-startTime.tentative.html:
     specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
     path/suffix. CLAUDE.md rule 1.
 - name: The start time can be set to seek a CSS animation
-  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
-    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
-    path/suffix. CLAUDE.md rule 1.
-- name: The start time of a CSS animation can be set
   reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
     specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
     path/suffix. CLAUDE.md rule 1.
@@ -29260,10 +29078,6 @@ css/css-animations/Element-getAnimations-dynamic-changes.tentative.html:
     specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
     path/suffix. CLAUDE.md rule 1.
 css/css-animations/Element-getAnimations.tentative.html:
-- name: getAnimations for CSS Animations
-  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
-    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
-    path/suffix. CLAUDE.md rule 1.
 - name: getAnimations for CSS Animations follows animation-name order
   reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
     specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
@@ -29272,31 +29086,11 @@ css/css-animations/Element-getAnimations.tentative.html:
   reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
     specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
     path/suffix. CLAUDE.md rule 1.
-- name: getAnimations for CSS Animations that have finished
-  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
-    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
-    path/suffix. CLAUDE.md rule 1.
-- name: getAnimations for CSS Animations that have finished but are forwards filling
-  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
-    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
-    path/suffix. CLAUDE.md rule 1.
 - name: getAnimations for CSS Animations where the @keyframes rule is added later
   reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
     specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
     path/suffix. CLAUDE.md rule 1.
-- name: 'getAnimations for CSS Animations with animation-name: missing'
-  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
-    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
-    path/suffix. CLAUDE.md rule 1.
-- name: 'getAnimations for CSS Animations with animation-name: none'
-  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
-    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
-    path/suffix. CLAUDE.md rule 1.
 - name: getAnimations for CSS Animations with duplicated animation-name
-  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
-    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
-    path/suffix. CLAUDE.md rule 1.
-- name: getAnimations for CSS Animations with empty keyframes rule
   reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
     specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
     path/suffix. CLAUDE.md rule 1.
@@ -29308,29 +29102,11 @@ css/css-animations/Element-getAnimations.tentative.html:
   reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
     specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
     path/suffix. CLAUDE.md rule 1.
-- name: getAnimations for multi-property animations
-  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
-    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
-    path/suffix. CLAUDE.md rule 1.
-- name: getAnimations for zero-duration CSS Animations
-  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
-    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
-    path/suffix. CLAUDE.md rule 1.
 - name: getAnimations returns CSSAnimation objects for CSS Animations
   reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
     specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
     path/suffix. CLAUDE.md rule 1.
 - name: getAnimations returns objects with the same identity
-  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
-    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
-    path/suffix. CLAUDE.md rule 1.
-- name: "{ subtree: false } on a leaf element returns the element's animations and
-    ignore pseudo-elements"
-  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
-    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
-    path/suffix. CLAUDE.md rule 1.
-- name: "{ subtree: false } on an element with a child returns only the element's
-    animations"
   reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
     specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
     path/suffix. CLAUDE.md rule 1.
@@ -29351,11 +29127,6 @@ css/css-animations/Element-getAnimations.tentative.html:
     path/suffix. CLAUDE.md rule 1.
 css/css-animations/KeyframeEffect-getKeyframes.tentative.html:
 - name: KeyframeEffect.getKeyframes() reflects changes to @keyframes rules
-  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
-    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
-    path/suffix. CLAUDE.md rule 1.
-- name: KeyframeEffect.getKeyframes() returns animation-wide easing for var() keyframe
-    easing
   reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
     specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
     path/suffix. CLAUDE.md rule 1.
@@ -29476,11 +29247,6 @@ css/css-animations/KeyframeEffect-getKeyframes.tentative.html:
     specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
     path/suffix. CLAUDE.md rule 1.
 - name: KeyframeEffect.getKeyframes() returns frames with expected composite values,
-    when the composite is set on the effect using animation-composition on the element
-  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
-    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
-    path/suffix. CLAUDE.md rule 1.
-- name: KeyframeEffect.getKeyframes() returns frames with expected composite values,
     when the composite is specified on each keyframe
   reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
     specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
@@ -29505,17 +29271,7 @@ css/css-animations/KeyframeEffect-getKeyframes.tentative.html:
   reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
     specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
     path/suffix. CLAUDE.md rule 1.
-- name: KeyframeEffect.getKeyframes() returns no frames for various kinds of empty
-    animations
-  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
-    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
-    path/suffix. CLAUDE.md rule 1.
 css/css-animations/KeyframeEffect-setKeyframes.tentative.html:
-- name: KeyframeEffect.setKeyframes() causes subsequent changes to @keyframes rules
-    to be ignored
-  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
-    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
-    path/suffix. CLAUDE.md rule 1.
 - name: KeyframeEffect.setKeyframes() causes subsequent changes to animation-timing-function
     to be ignored
   reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
@@ -29527,21 +29283,7 @@ css/css-animations/KeyframeEffect-setKeyframes.tentative.html:
     specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
     path/suffix. CLAUDE.md rule 1.
 css/css-animations/KeyframeEffect-target.tentative.html:
-- name: Returned CSS animations have the correct effect target
-  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
-    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
-    path/suffix. CLAUDE.md rule 1.
-- name: effect.target from the script-generated animation should return the same CSSPseudoElement
-    object as that from the CSS generated animation
-  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
-    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
-    path/suffix. CLAUDE.md rule 1.
 - name: effect.target should return the same CSSPseudoElement object each time
-  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
-    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
-    path/suffix. CLAUDE.md rule 1.
-css/css-animations/animation-play-state-005.tentative.html:
-- name: CSS animation should not restart after resetting its animation-play-state
   reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
     specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
     path/suffix. CLAUDE.md rule 1.
@@ -29575,11 +29317,6 @@ css/css-animations/display-none-dont-cancel.tentative.html:
   reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
     specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
     path/suffix. CLAUDE.md rule 1.
-css/css-animations/display-none-to-display-block-dont-cancel.tentative.html:
-- name: display:none animating to display:block should be block for the whole animation.
-  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
-    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
-    path/suffix. CLAUDE.md rule 1.
 css/css-animations/event-dispatch.tentative.html:
 - name: Active -> Active (backwards)
   reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
@@ -29597,15 +29334,7 @@ css/css-animations/event-dispatch.tentative.html:
   reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
     specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
     path/suffix. CLAUDE.md rule 1.
-- name: 'Active -> Idle -> Active: animationstart is fired by restarting animation'
-  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
-    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
-    path/suffix. CLAUDE.md rule 1.
 - name: Active -> Idle, calling Animation.cancel()
-  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
-    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
-    path/suffix. CLAUDE.md rule 1.
-- name: 'Active -> Idle, display: none'
   reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
     specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
     path/suffix. CLAUDE.md rule 1.
@@ -29645,10 +29374,6 @@ css/css-animations/event-dispatch.tentative.html:
   reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
     specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
     path/suffix. CLAUDE.md rule 1.
-- name: Idle -> Active
-  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
-    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
-    path/suffix. CLAUDE.md rule 1.
 - name: Idle -> After
   reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
     specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
@@ -29673,18 +29398,6 @@ css/css-animations/event-dispatch.tentative.html:
   reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
     specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
     path/suffix. CLAUDE.md rule 1.
-- name: Redundant change, before -> active, then back
-  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
-    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
-    path/suffix. CLAUDE.md rule 1.
-- name: Redundant change, before -> after, then back
-  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
-    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
-    path/suffix. CLAUDE.md rule 1.
-- name: Replacing a running animation should get animationcancel earlier than animationstart
-  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
-    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
-    path/suffix. CLAUDE.md rule 1.
 - name: Restart animation after canceling animation immediately.
   reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
     specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
@@ -29694,16 +29407,6 @@ css/css-animations/event-dispatch.tentative.html:
     specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
     path/suffix. CLAUDE.md rule 1.
 - name: Set timeline and play transition after clearing the timeline.
-  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
-    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
-    path/suffix. CLAUDE.md rule 1.
-- name: The cancel event should be fired before the new start event if both have the
-    same position in the animation list
-  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
-    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
-    path/suffix. CLAUDE.md rule 1.
-- name: The cancel event with an earlier position in animation list should be fired
-    earlier
   reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
     specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
     path/suffix. CLAUDE.md rule 1.
@@ -30624,10 +30327,6 @@ css/css-transitions/event-dispatch.tentative.html:
   reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
     specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
     path/suffix. CLAUDE.md rule 1.
-- name: Idle -> Pending or Before
-  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
-    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
-    path/suffix. CLAUDE.md rule 1.
 - name: Idle or Pending -> Active
   reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
     specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
@@ -31231,20 +30930,6 @@ dom/collections/HTMLCollection-supported-property-indices.html:
   reason: Exactly the 2^32 index-boundary exotic-object edge cited in rule 2; no real
     library/app depends on it and matching requires special index-coercion handling.
 dom/events/Event-dispatch-on-disabled-elements.html:
-- name: CSS Animation animationstart, animationiteration, animationend fire on disabled
-    form elements
-  reason: Requires CSS animations actually firing animationstart/iteration/end events,
-    which needs a layout/rendering engine we deliberately do not model.
-- name: CSS Animation's animationcancel event fires on disabled form elements
-  reason: Requires CSS animation lifecycle + animationcancel events from style/display
-    changes, which needs the rendering engine we do not model.
-- name: CSS Transitions transitioncancel event fires on disabled form elements
-  reason: Requires CSS transition firing transitioncancel on style-flush, which needs
-    layout/style-animation engine we do not model.
-- name: CSS Transitions transitionrun, transitionstart, transitionend events fire
-    on disabled form elements
-  reason: Requires CSS transition events fired on getComputedStyle flush, which needs
-    the layout/transition engine we do not model.
 - name: Real clicks on disabled elements must not dispatch events.
   reason: NOTRUN — blocked upstream. The CSS Transitions / Animations promise_tests
     earlier in this file await transition/animation end events that never fire without
@@ -31284,12 +30969,6 @@ dom/events/EventListener-invoke-legacy.html:
 - name: Legacy listener of transitionend
   reason: Requires real CSS transition timeline to fire transitionend; transitions
     are not modeled.
-- name: Listener of animationend
-  reason: Depends on style/animation engine actually running the @keyframes animation
-    to dispatch animationend.
-- name: Listener of animationstart
-  reason: Depends on style/animation engine actually running the animation to dispatch
-    animationstart.
 - name: Listener of transitionend
   reason: Depends on layout/style transition engine to fire transitionend after computed-style
     change.
@@ -31524,10 +31203,6 @@ dom/events/webkit-animation-end-event.html:
     be named appropriately
   reason: Depends on a real CSS animation firing animationend; CSS animation engine
     deliberately unmodeled.
-- name: onwebkitanimationend event handler should not trigger if an unprefixed event
-    handler also exists
-  reason: triggerAnimation must fire a real animationend to exercise dedup; CSS animation
-    engine unmodeled.
 - name: onwebkitanimationend event handler should not trigger if an unprefixed listener
     also exists
   reason: triggerAnimation must fire a real animationend to exercise dedup; CSS animation
@@ -31559,10 +31234,6 @@ dom/events/webkit-animation-iteration-event.html:
   reason: Needs CSS animation engine to actually run @keyframes and fire animationiteration;
     animation firing not modeled.
 - name: onwebkitanimationiteration event handler should not trigger if an unprefixed
-    event handler also exists
-  reason: Dedup assertion depends on the animation engine firing animationiteration;
-    CSS animation firing not modeled.
-- name: onwebkitanimationiteration event handler should not trigger if an unprefixed
     listener also exists
   reason: Dedup assertion depends on the animation engine firing animationiteration;
     CSS animation firing not modeled.
@@ -31592,10 +31263,6 @@ dom/events/webkit-animation-start-event.html:
     be named appropriately
   reason: Needs CSS animation engine to fire animationstart; animation firing not
     modeled.
-- name: onwebkitanimationstart event handler should not trigger if an unprefixed event
-    handler also exists
-  reason: Dedup assertion depends on the animation engine firing animationstart; CSS
-    animation firing not modeled.
 - name: onwebkitanimationstart event handler should not trigger if an unprefixed listener
     also exists
   reason: Dedup assertion depends on the animation engine firing animationstart; CSS
@@ -31626,10 +31293,6 @@ dom/events/webkit-transition-end-event.html:
     be named appropriately
   reason: Needs CSS transition engine to fire transitionend; transition firing not
     modeled.
-- name: onwebkittransitionend event handler should not trigger if an unprefixed event
-    handler also exists
-  reason: Dedup assertion depends on the transition engine firing transitionend; CSS
-    transition firing not modeled.
 - name: onwebkittransitionend event handler should not trigger if an unprefixed listener
     also exists
   reason: Dedup assertion depends on the transition engine firing transitionend; CSS
@@ -31655,22 +31318,10 @@ dom/nodes/insertion-removing-steps/Node-append-meta-referrer-and-script-from-fra
 - name: "<meta name=referrer> gets processed and applied in the post-insertion steps"
   reason: Asserts referrer-policy effect observed via real async fetch() to an echo-referrer
     .py resource; needs true network async runtime not modeled.
-dom/nodes/moveBefore/continue-css-animation-left.html:
-- name: Node.moveBefore should preserve CSS animation state (left)
-  reason: Requires CSS animation engine firing animationstart + mid-animation getComputedStyle(left);
-    no animation/layout engine modeled.
-dom/nodes/moveBefore/continue-css-animation-transform.html:
-- name: Node.moveBefore should preserve CSS animation state (transform)
-  reason: Requires CSS animation engine firing animationstart + mid-animation transform
-    value; no animation/layout engine modeled.
 dom/nodes/moveBefore/continue-css-transition-left-pseudo.html:
 - name: Node.moveBefore should preserve CSS transition state on pseudo-elements (left)
   reason: Requires CSS transition engine on pseudo-elements with mid-transition computed
     values; no transition/layout engine modeled.
-dom/nodes/moveBefore/continue-css-transition-left.html:
-- name: Node.moveBefore should preserve CSS transition state (left)
-  reason: Requires CSS transition engine firing with mid-transition computed left
-    value; no transition/layout engine modeled.
 dom/nodes/moveBefore/continue-css-transition-transform-pseudo.html:
 - name: Node.moveBefore should preserve CSS transition state on pseudo-elements (transform)
   reason: Requires CSS transition engine on pseudo-elements with mid-transition transform
@@ -31679,24 +31330,6 @@ dom/nodes/moveBefore/continue-css-transition-transform.html:
 - name: Node.moveBefore should preserve CSS transition state (transform)
   reason: Requires CSS transition engine firing with mid-transition transform computed
     value; no transition/layout engine modeled.
-dom/nodes/moveBefore/css-animation-commit-styles.html:
-- name: Calling commitStyles after Node.moveBefore should commit mid-transition value
-  reason: Requires animationstart + getAnimations()[0].commitStyles() writing mid-animation
-    transform; no animation/layout engine modeled.
-dom/nodes/moveBefore/css-transition-cross-document.html:
-- name: Moving a transition across documents should reset its state
-  reason: Awaits transitionstart (CSS transition firing) and asserts animated getBoundingClientRect.x;
-    needs animation+layout engine we don't model.
-dom/nodes/moveBefore/css-transition-cross-shadow.html:
-- name: Moving an element with a transition across shadow boundaries preserves the
-    transition
-  reason: Awaits transitionstart and asserts animated getBoundingClientRect.x < 400;
-    CSS transition firing + layout geometry not modeled.
-dom/nodes/moveBefore/css-transition-to-disconnected-document.html:
-- name: Moving an element with a transition to a disconnected document should reset
-    the transitionm state
-  reason: Awaits transitionstart and asserts getBoundingClientRect.x range after rAF;
-    CSS transition firing + layout geometry not modeled.
 dom/nodes/moveBefore/css-transition-trigger.html:
 - name: Node.moveBefore should trigger CSS transition state (left) if needed
   reason: Awaits transitionstart event and asserts mid-transition getBoundingClientRect.x==200;
@@ -46031,10 +45664,6 @@ html/semantics/forms/the-select-element/customizable-select/select-picker-intera
 - name: Clicking interactive elements inside the select picker should focus them.
   reason: Pointer automation (test_driver.Actions pointer sequences, :active/:hover
     interaction state, touch, click-drag, pointer-event metadata) — not modeled.
-html/semantics/forms/the-select-element/customizable-select/select-picker-option-animation-reopens.html:
-- name: CSS animations on option elements restart when the base-select picker reopens.
-  reason: CSS animations/transitions + top-layer/@starting-style on the customizable-select
-    picker pseudo-elements — no animation/rendering engine.
 html/semantics/forms/the-select-element/customizable-select/select-picker-popover-open-invalid.tentative.html:
 - name: '"::picker(select):popover-open" should be an invalid selector'
   reason: 'Unratified `.tentative` spec, so out per CLAUDE.md rule 1 — but the failure
