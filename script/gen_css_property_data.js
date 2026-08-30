@@ -96,6 +96,25 @@ for (const name of longhands) {
   if (t) valueTypes[name] = t;
 }
 
+// The numeric LOWER BOUND each property's grammar imposes, gathered from the ranges
+// `classifyValueType` read out of mdn's syntax and topped up with the ones mdn doesn't record.
+// This is separate from the value-type map above because it answers a different question: that one
+// decides whether a DECLARATION is valid, this one clamps an INTERPOLATION that extrapolates past
+// the property's range (an animation seeking below a `flex-grow` of 0 reports 0, not a negative
+// number). A property mdn leaves unclassified — `flex-basis`, whose grammar it writes as a
+// reference to `<'width'>` — still has a bound its own spec is explicit about.
+const MIN_FIXES = {
+  'flex-grow':   0,     // css-flexbox §7.1.1: <number [0,∞]>
+  'flex-shrink': 0,     // css-flexbox §7.1.2: <number [0,∞]>
+  'flex-basis':  0      // css-flexbox §7.1.3: <'width'>, i.e. <length-percentage [0,∞]>
+};
+const propertyMin = {};
+for (const name of longhands) {
+  const t = valueTypes[name];
+  if (t && t.min != null && Number.isFinite(t.min)) propertyMin[name] = t.min;
+}
+for (const [name, min] of Object.entries(MIN_FIXES)) if (longhands.includes(name)) propertyMin[name] = min;
+
 // Each longhand's INITIAL value and whether it INHERITS — what `getComputedStyle` must report
 // for a property no rule sets. mdn-data records the SPECIFIED initial; a few compute to something
 // else (`color: canvastext` → `rgb(0, 0, 0)`), which style-proxy overrides on top of this map.
@@ -152,6 +171,19 @@ for (const name of longhands) {
   if (props[name].inherited) inherited.push(name);
 }
 for (const [name, value] of Object.entries(MDN_INITIAL_FIXES)) if (longhands.includes(name)) initialValues[name] = value;
+
+// Each longhand's ANIMATION TYPE, verbatim from mdn-data — how two values of the property are
+// interpolated (`number`, `length`, `lpc`, `color`, `integer`, `discrete`, `notAnimatable`, and a
+// long tail of per-property rules). Emitted RAW rather than normalised: which of the tail this
+// engine can actually interpolate is the runtime's business, and a name it doesn't know yet falls
+// back to discrete interpolation, exactly as the spec says an uninterpolable pair does. Only
+// longhands are listed — mdn gives a shorthand its sub-property names here, which says nothing
+// about interpolation.
+const animationTypes = {};
+for (const name of longhands) {
+  const t = props[name].animationType;
+  if (typeof t === 'string' && t.indexOf(',') === -1) animationTypes[name] = t;
+}
 
 // Every BARE KEYWORD a property's grammar admits, followed through `<'property'>` and `<type>`
 // references — the data a full grammar validator would consult, reduced to the one question the
@@ -270,6 +302,16 @@ export const INITIAL_VALUES = bare(${JSON.stringify(initialValues, null, 0)});
 // The longhands that INHERIT. With no value of its own, one of these takes the parent's computed
 // value before falling back to the initial.
 export const INHERITED_PROPERTIES = new Set(${JSON.stringify(inherited)});
+
+// Longhand → its mdn-data ANIMATION TYPE: how an animation or transition interpolates two of its
+// values (\`number\`, \`length\`, \`lpc\`, \`color\`, \`integer\`, \`discrete\`, \`notAnimatable\`, plus a
+// tail of per-property rules). A name the interpolation engine doesn't implement interpolates
+// discretely, which is what the spec says an uninterpolable pair does anyway.
+export const ANIMATION_TYPES = bare(${JSON.stringify(animationTypes, null, 0)});
+
+// Longhand → the numeric LOWER BOUND its grammar imposes. An interpolation that extrapolates past
+// it clamps: a \`flex-grow\` animation seeking before its start reports 0, not a negative number.
+export const PROPERTY_MIN = bare(${JSON.stringify(propertyMin, null, 0)});
 
 // Every bare KEYWORD each property's grammar admits (colour keywords factored out below). Used to
 // reject a single identifier a property doesn't take — \`width: notalength\`, or the \`undefined\` a
