@@ -38,6 +38,22 @@ RSpec.describe 'CSS interpolation types' do
 
   def cssName(idl) = idl.gsub(/[A-Z]/) { |m| "-#{m.downcase}" }
 
+  # …and half way between two keyframes that composite DIFFERENTLY.
+  def mixed(prop, from, from_composite, to, to_composite, style)
+    s = page(%(<div id="a" style="#{style}"></div>))
+    s.evaluate_script(<<~JS)
+      (function () {
+        const el = document.getElementById('a');
+        const anim = el.animate([{ #{prop.inspect}: #{from.inspect}, composite: #{from_composite.inspect} },
+                                 { #{prop.inspect}: #{to.inspect}, composite: #{to_composite.inspect} }],
+                                { duration: 1000, fill: 'both' });
+        anim.pause();
+        anim.currentTime = 500;
+        return getComputedStyle(el).getPropertyValue(#{cssName(prop).inspect});
+      })()
+    JS
+  end
+
   describe 'shadow lists' do
     # A shadow list interpolates COMPONENTWISE, and `none` is a list of zero shadows — so it
     # interpolates against each entry's identity, a transparent shadow with every length at zero.
@@ -312,5 +328,82 @@ RSpec.describe 'CSS interpolation types' do
   it 'pads none with the other side\'s inset' do
     expect(midpoint('boxShadow', 'none', 'rgb(100,100,100) 10px 10px 10px 10px inset'))
       .to eq('rgba(100, 100, 100, 0.5) 5px 5px 5px 5px inset')
+  end
+  # A composite operation belongs to the KEYFRAME, not to the effect: each keyframe composites with
+  # the value underneath before anything is interpolated. Compositing the interpolated result
+  # instead agrees only where the operation is linear, which is why an all-`add` effect never
+  # showed it (Chrome-measured, every line).
+  describe 'a composite per keyframe' do
+    it 'composites each keyframe before interpolating' do
+      expect(mixed('opacity', '0', 'add', '0.4', 'replace', 'opacity:0.5')).to eq('0.45')
+      expect(mixed('opacity', '0', 'replace', '0.4', 'add', 'opacity:0.5')).to eq('0.45')
+      expect(mixed('opacity', '0', 'add', '0.4', 'add', 'opacity:0.5')).to eq('0.7')
+      expect(mixed('filter', 'blur(4px)', 'accumulate', 'blur(10px)', 'replace', 'filter:blur(2px)'))
+        .to eq('blur(8px)')
+    end
+
+    # …and a list keyframe that ADDS is the underlying list with the keyframe's appended, which the
+    # other end then pads against — two shadows against one.
+    it 'interpolates against a list a keyframe added to' do
+      expect(mixed('boxShadow', 'rgb(0,0,0) 0px 0px 0px 0px', 'add',
+                   'rgb(100,100,100) 10px 10px 10px 10px', 'replace',
+                   'box-shadow: rgb(10,0,0) 1px 1px 1px 1px'))
+        .to eq('rgb(55, 50, 50) 5.5px 5.5px 5.5px 5.5px, rgba(0, 0, 0, 0.5) 0px 0px 0px 0px')
+    end
+  end
+  # `animation-composition` says how a CSS animation's keyframes combine with the value underneath
+  # them, the same operations `element.animate` takes — per animation, or per keyframe. (A NEGATIVE
+  # delay is how these seek: a `CSSAnimation`'s `currentTime` does not drive the animation it
+  # mirrors yet, which is the gap that keeps `css/css-animations/animation-composition.html`
+  # listed.)
+  describe 'animation-composition' do
+    def composed(css, prop, delay)
+      s = page(%(<div id="a" style="animation-delay: #{delay}"></div>), css)
+      s.evaluate_script("getComputedStyle(document.getElementById('a')).#{prop}")
+    end
+
+    it 'composites a CSS animation onto the underlying value' do
+      css = <<~CSS
+        @keyframes grow { from { filter: blur(10px) } to { filter: blur(20px) } }
+        div { filter: blur(5px); animation: grow 1s linear both; animation-composition: add }
+      CSS
+      expect(composed(css, 'filter', '0s')).to eq('blur(5px) blur(10px)')
+      expect(composed(css, 'filter', '-500ms')).to eq('blur(5px) blur(15px)')
+    end
+
+    # `accumulate` is the other operation, and for a filter it is not the same answer as `add`.
+    it 'accumulates a CSS animation onto the underlying value' do
+      css = <<~CSS
+        @keyframes grow { from { filter: blur(10px) } to { filter: blur(20px) } }
+        div { filter: blur(5px); animation: grow 1s linear both; animation-composition: accumulate }
+      CSS
+      expect(composed(css, 'filter', '-500ms')).to eq('blur(20px)')
+    end
+
+    # …and a keyframe may name its own, which governs that keyframe alone.
+    it 'takes the operation a keyframe names for itself' do
+      css = <<~CSS
+        @keyframes grow { from { animation-composition: add; opacity: 0 } to { opacity: 0.4 } }
+        div { opacity: 0.5; animation: grow 1s linear both }
+      CSS
+      expect(composed(css, 'opacity', '-500ms')).to eq('0.45')
+    end
+  end
+
+  # A length ADDED to a percentage has no common unit, and composes into the `calc()` holding both
+  # — which the next combination reads back, and which the computed surface reports in ONE order
+  # whether an animation produced it or the author wrote it.
+  describe 'a length and a percentage together' do
+    it 'composes them into one calc()' do
+      expect(midpoint('flexBasis', '100px', '20%', composite: 'add', style: 'flex-basis:10%'))
+        .to eq('calc(20% + 50px)')
+      expect(midpoint('verticalAlign', '10%', '110%', style: 'vertical-align:10%')).to eq('60%')
+    end
+
+    it 'reports a mixed calc() percentage-first however it was written' do
+      s = page('<div id="a" style="flex-basis: calc(130px + 4%)"></div>')
+      expect(s.evaluate_script("getComputedStyle(document.getElementById('a')).flexBasis"))
+        .to eq('calc(4% + 130px)')
+    end
   end
 end
