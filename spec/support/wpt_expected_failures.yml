@@ -1045,67 +1045,6 @@ css/css-flexbox/alignment/multiline-align-self.html:
 - ".flexbox 5"
 - ".flexbox 7"
 - ".flexbox 8"
-css/css-flexbox/animation/flex-basis-composition.html:
-- 'Compositing CSS Animations: property <flex-basis> underlying [10%] from add [100px]
-  to add [20%] at (-0.3) should be [calc(130px + 4%)]'
-- 'Compositing CSS Animations: property <flex-basis> underlying [10%] from add [100px]
-  to add [20%] at (0) should be [calc(100px + 10%)]'
-- 'Compositing CSS Animations: property <flex-basis> underlying [10%] from add [100px]
-  to add [20%] at (0.5) should be [calc(50px + 20%)]'
-- 'Compositing CSS Animations: property <flex-basis> underlying [10%] from add [100px]
-  to add [20%] at (1) should be [30%]'
-- 'Compositing CSS Animations: property <flex-basis> underlying [10%] from add [100px]
-  to add [20%] at (1.5) should be [calc(-50px + 40%)]'
-- 'Compositing CSS Animations: property <flex-basis> underlying [100px] from add [100px]
-  to add [auto] at (-0.3) should be [200px]'
-- 'Compositing CSS Animations: property <flex-basis> underlying [100px] from add [100px]
-  to add [auto] at (0) should be [200px]'
-- 'Compositing CSS Animations: property <flex-basis> underlying [100px] from add [10px]
-  to add [2px] at (-0.5) should be [114px]'
-- 'Compositing CSS Animations: property <flex-basis> underlying [100px] from add [10px]
-  to add [2px] at (0) should be [110px]'
-- 'Compositing CSS Animations: property <flex-basis> underlying [100px] from add [10px]
-  to add [2px] at (0.5) should be [106px]'
-- 'Compositing CSS Animations: property <flex-basis> underlying [100px] from add [10px]
-  to add [2px] at (1) should be [102px]'
-- 'Compositing CSS Animations: property <flex-basis> underlying [100px] from add [10px]
-  to add [2px] at (1.5) should be [98px]'
-- 'Compositing CSS Animations: property <flex-basis> underlying [50px] from add [100px]
-  to add [200px] at (-0.3) should be [120px]'
-- 'Compositing CSS Animations: property <flex-basis> underlying [50px] from add [100px]
-  to add [200px] at (0) should be [150px]'
-- 'Compositing CSS Animations: property <flex-basis> underlying [50px] from add [100px]
-  to add [200px] at (0.5) should be [200px]'
-- 'Compositing CSS Animations: property <flex-basis> underlying [50px] from add [100px]
-  to add [200px] at (1) should be [250px]'
-- 'Compositing CSS Animations: property <flex-basis> underlying [50px] from add [100px]
-  to add [200px] at (1.5) should be [300px]'
-- 'Compositing CSS Animations: property <flex-basis> underlying [50px] from add [100px]
-  to replace [200px] at (-0.3) should be [135px]'
-- 'Compositing CSS Animations: property <flex-basis> underlying [50px] from add [100px]
-  to replace [200px] at (0) should be [150px]'
-- 'Compositing CSS Animations: property <flex-basis> underlying [50px] from add [100px]
-  to replace [200px] at (0.5) should be [175px]'
-- 'Compositing CSS Animations: property <flex-basis> underlying [50px] from add [100px]
-  to replace [200px] at (1.5) should be [225px]'
-- 'Compositing Web Animations: property <flex-basis> underlying [10%] from add [100px]
-  to add [20%] at (-0.3) should be [calc(130px + 4%)]'
-- 'Compositing Web Animations: property <flex-basis> underlying [10%] from add [100px]
-  to add [20%] at (0) should be [calc(100px + 10%)]'
-- 'Compositing Web Animations: property <flex-basis> underlying [10%] from add [100px]
-  to add [20%] at (0.5) should be [calc(50px + 20%)]'
-- 'Compositing Web Animations: property <flex-basis> underlying [10%] from add [100px]
-  to add [20%] at (1.5) should be [calc(-50px + 40%)]'
-- 'Compositing Web Animations: property <flex-basis> underlying [100px] from add [10px]
-  to add [2px] at (1.5) should be [98px]'
-- 'Compositing Web Animations: property <flex-basis> underlying [50px] from add [100px]
-  to replace [200px] at (-0.3) should be [135px]'
-- 'Compositing Web Animations: property <flex-basis> underlying [50px] from add [100px]
-  to replace [200px] at (0.5) should be [175px]'
-- 'Compositing Web Animations: property <flex-basis> underlying [50px] from add [100px]
-  to replace [200px] at (1) should be [200px]'
-- 'Compositing Web Animations: property <flex-basis> underlying [50px] from add [100px]
-  to replace [200px] at (1.5) should be [225px]'
 css/css-flexbox/balance/balance-negative-margin-002.html:
 - "#flex > div 2"
 - "#flex > div 3"
@@ -1746,7 +1685,6 @@ css/css-flexbox/negative-overflow.html:
 - ".flexbox 8"
 - ".flexbox 9"
 css/css-flexbox/parsing/flex-basis-computed.html:
-- Property flex-basis value 'calc(10% + 0px)'
 - Property flex-basis value 'calc(10%)'
 css/css-flexbox/parsing/flex-basis-invalid.html:
 - e.style['flex-basis'] = "-1px" should not set the property value
@@ -2536,261 +2474,11 @@ css/css-transitions/animations/change-duration-during-transition.html:
 - Transition duration change should not affect transition in progress
 css/css-transitions/animations/move-after-transition.html:
 - Move after transition.
-css/css-transitions/animations/text-shadow-composition.html:
-- 'Compositing CSS Animations: property <text-shadow> underlying [rgb(10, 20, 30)
-  1px 2px 3px, rgb(20, 40, 60) 2px 4px 6px, rgb(40, 80, 120) 4px 8px 12px] from add
-  [rgb(100, 100, 100) 10px 20px 30px, rgb(200, 200, 200) 20px 40px 60px] to replace
-  [rgb(200, 200, 200) 20px 40px 60px] at (-0.3) should be [rgb(0, 0, 0) -4.7px -9.4px
-  0px, rgb(26, 52, 78) 2.6px 5.2px 7.8px, rgb(52, 104, 156) 5.2px 10.4px 15.6px, rgb(130,
-  130, 130) 13px 26px 39px, rgb(255, 255, 255) 26px 52px 78px]'
-- 'Compositing CSS Animations: property <text-shadow> underlying [rgb(10, 20, 30)
-  1px 2px 3px, rgb(20, 40, 60) 2px 4px 6px, rgb(40, 80, 120) 4px 8px 12px] from add
-  [rgb(100, 100, 100) 10px 20px 30px, rgb(200, 200, 200) 20px 40px 60px] to replace
-  [rgb(200, 200, 200) 20px 40px 60px] at (0) should be [rgb(10, 20, 30) 1px 2px 3px,
-  rgb(20, 40, 60) 2px 4px 6px, rgb(40, 80, 120) 4px 8px 12px, rgb(100, 100, 100) 10px
-  20px 30px, rgb(200, 200, 200) 20px 40px 60px]'
-- 'Compositing CSS Animations: property <text-shadow> underlying [rgb(10, 20, 30)
-  1px 2px 3px, rgb(20, 40, 60) 2px 4px 6px, rgb(40, 80, 120) 4px 8px 12px] from add
-  [rgb(100, 100, 100) 10px 20px 30px, rgb(200, 200, 200) 20px 40px 60px] to replace
-  [rgb(200, 200, 200) 20px 40px 60px] at (0.5) should be [rgb(105, 110, 115) 10.5px
-  21px 31.5px, rgba(20, 40, 60, 0.5) 1px 2px 3px, rgba(40, 80, 120, 0.5) 2px 4px 6px,
-  rgba(100, 100, 100, 0.5) 5px 10px 15px, rgba(200, 200, 200, 0.5) 10px 20px 30px]'
-- 'Compositing CSS Animations: property <text-shadow> underlying [rgb(10, 20, 30)
-  1px 2px 3px, rgb(20, 40, 60) 2px 4px 6px, rgb(40, 80, 120) 4px 8px 12px] from add
-  [rgb(100, 100, 100) 10px 20px 30px, rgb(200, 200, 200) 20px 40px 60px] to replace
-  [rgb(200, 200, 200) 20px 40px 60px] at (1) should be [rgb(200, 200, 200) 20px 40px
-  60px, rgba(0, 0, 0, 0) 0px 0px 0px, rgba(0, 0, 0, 0) 0px 0px 0px, rgba(0, 0, 0,
-  0) 0px 0px 0px, rgba(0, 0, 0, 0) 0px 0px 0px]'
-- 'Compositing CSS Animations: property <text-shadow> underlying [rgb(10, 20, 30)
-  1px 2px 3px, rgb(20, 40, 60) 2px 4px 6px, rgb(40, 80, 120) 4px 8px 12px] from add
-  [rgb(100, 100, 100) 10px 20px 30px, rgb(200, 200, 200) 20px 40px 60px] to replace
-  [rgb(200, 200, 200) 20px 40px 60px] at (1.5) should be [rgb(255, 255, 255) 29.5px
-  59px 88.5px, rgba(0, 0, 0, 0) -1px -2px 0px, rgba(0, 0, 0, 0) -2px -4px 0px, rgba(0,
-  0, 0, 0) -5px -10px 0px, rgba(0, 0, 0, 0) -10px -20px 0px]'
-- 'Compositing CSS Animations: property <text-shadow> underlying [rgb(10, 20, 30)
-  1px 2px 3px, rgb(20, 40, 60) 2px 4px 6px] from add [rgb(100, 100, 100) 10px 20px
-  30px] to add [rgb(200, 200, 200) 20px 40px 60px] at (-0.3) should be [rgb(10, 20,
-  30) 1px 2px 3px, rgb(20, 40, 60) 2px 4px 6px, rgb(70, 70, 70) 7px 14px 21px]'
-- 'Compositing CSS Animations: property <text-shadow> underlying [rgb(10, 20, 30)
-  1px 2px 3px, rgb(20, 40, 60) 2px 4px 6px] from add [rgb(100, 100, 100) 10px 20px
-  30px] to add [rgb(200, 200, 200) 20px 40px 60px] at (0) should be [rgb(10, 20, 30)
-  1px 2px 3px, rgb(20, 40, 60) 2px 4px 6px, rgb(100, 100, 100) 10px 20px 30px]'
-- 'Compositing CSS Animations: property <text-shadow> underlying [rgb(10, 20, 30)
-  1px 2px 3px, rgb(20, 40, 60) 2px 4px 6px] from add [rgb(100, 100, 100) 10px 20px
-  30px] to add [rgb(200, 200, 200) 20px 40px 60px] at (0.5) should be [rgb(10, 20,
-  30) 1px 2px 3px, rgb(20, 40, 60) 2px 4px 6px, rgb(150, 150, 150) 15px 30px 45px]'
-- 'Compositing CSS Animations: property <text-shadow> underlying [rgb(10, 20, 30)
-  1px 2px 3px, rgb(20, 40, 60) 2px 4px 6px] from add [rgb(100, 100, 100) 10px 20px
-  30px] to add [rgb(200, 200, 200) 20px 40px 60px] at (1) should be [rgb(10, 20, 30)
-  1px 2px 3px, rgb(20, 40, 60) 2px 4px 6px, rgb(200, 200, 200) 20px 40px 60px]'
-- 'Compositing CSS Animations: property <text-shadow> underlying [rgb(10, 20, 30)
-  1px 2px 3px, rgb(20, 40, 60) 2px 4px 6px] from add [rgb(100, 100, 100) 10px 20px
-  30px] to add [rgb(200, 200, 200) 20px 40px 60px] at (1.5) should be [rgb(10, 20,
-  30) 1px 2px 3px, rgb(20, 40, 60) 2px 4px 6px, rgb(250, 250, 250) 25px 50px 75px]'
-- 'Compositing CSS Animations: property <text-shadow> underlying [rgb(10, 20, 30)
-  1px 2px 3px, rgb(20, 40, 60) 2px 4px 6px] from add [rgb(100, 100, 100) 10px 20px
-  30px] to replace [rgb(200, 200, 200) 20px 40px 60px] at (-0.3) should be [rgb(0,
-  0, 0) -4.7px -9.4px 0px, rgb(26, 52, 78) 2.6px 5.2px 7.8px, rgb(130, 130, 130) 13px
-  26px 39px]'
-- 'Compositing CSS Animations: property <text-shadow> underlying [rgb(10, 20, 30)
-  1px 2px 3px, rgb(20, 40, 60) 2px 4px 6px] from add [rgb(100, 100, 100) 10px 20px
-  30px] to replace [rgb(200, 200, 200) 20px 40px 60px] at (0) should be [rgb(10, 20,
-  30) 1px 2px 3px, rgb(20, 40, 60) 2px 4px 6px, rgb(100, 100, 100) 10px 20px 30px]'
-- 'Compositing CSS Animations: property <text-shadow> underlying [rgb(10, 20, 30)
-  1px 2px 3px, rgb(20, 40, 60) 2px 4px 6px] from add [rgb(100, 100, 100) 10px 20px
-  30px] to replace [rgb(200, 200, 200) 20px 40px 60px] at (0.5) should be [rgb(105,
-  110, 115) 10.5px 21px 31.5px, rgba(20, 40, 60, 0.5) 1px 2px 3px, rgba(100, 100,
-  100, 0.5) 5px 10px 15px]'
-- 'Compositing CSS Animations: property <text-shadow> underlying [rgb(10, 20, 30)
-  1px 2px 3px, rgb(20, 40, 60) 2px 4px 6px] from add [rgb(100, 100, 100) 10px 20px
-  30px] to replace [rgb(200, 200, 200) 20px 40px 60px] at (1) should be [rgb(200,
-  200, 200) 20px 40px 60px, rgba(0, 0, 0, 0) 0px 0px 0px, rgba(0, 0, 0, 0) 0px 0px
-  0px]'
-- 'Compositing CSS Animations: property <text-shadow> underlying [rgb(10, 20, 30)
-  1px 2px 3px, rgb(20, 40, 60) 2px 4px 6px] from add [rgb(100, 100, 100) 10px 20px
-  30px] to replace [rgb(200, 200, 200) 20px 40px 60px] at (1.5) should be [rgb(255,
-  255, 255) 29.5px 59px 88.5px, rgba(0, 0, 0, 0) -1px -2px 0px, rgba(0, 0, 0, 0) -5px
-  -10px 0px]'
-- 'Compositing CSS Animations: property <text-shadow> underlying [rgb(10, 20, 30)
-  1px 2px 3px, rgb(20, 40, 60) 2px 4px 6px] from replace [rgb(100, 100, 100) 10px
-  20px 30px] to add [rgb(200, 200, 200) 20px 40px 60px] at (-0.3) should be [rgb(127,
-  124, 121) 12.7px 25.4px 38.1px, rgba(0, 0, 0, 0) -0.6px -1.2px 0px, rgba(0, 0, 0,
-  0) -6px -12px 0px]'
-- 'Compositing CSS Animations: property <text-shadow> underlying [rgb(10, 20, 30)
-  1px 2px 3px, rgb(20, 40, 60) 2px 4px 6px] from replace [rgb(100, 100, 100) 10px
-  20px 30px] to add [rgb(200, 200, 200) 20px 40px 60px] at (0) should be [rgb(100,
-  100, 100) 10px 20px 30px, rgba(0, 0, 0, 0) 0px 0px 0px, rgba(0, 0, 0, 0) 0px 0px
-  0px]'
-- 'Compositing CSS Animations: property <text-shadow> underlying [rgb(10, 20, 30)
-  1px 2px 3px, rgb(20, 40, 60) 2px 4px 6px] from replace [rgb(100, 100, 100) 10px
-  20px 30px] to add [rgb(200, 200, 200) 20px 40px 60px] at (0.5) should be [rgb(55,
-  60, 65) 5.5px 11px 16.5px, rgba(20, 40, 60, 0.5) 1px 2px 3px, rgba(200, 200, 200,
-  0.5) 10px 20px 30px]'
-- 'Compositing CSS Animations: property <text-shadow> underlying [rgb(10, 20, 30)
-  1px 2px 3px, rgb(20, 40, 60) 2px 4px 6px] from replace [rgb(100, 100, 100) 10px
-  20px 30px] to add [rgb(200, 200, 200) 20px 40px 60px] at (1) should be [rgb(10,
-  20, 30) 1px 2px 3px, rgb(20, 40, 60) 2px 4px 6px, rgb(200, 200, 200) 20px 40px 60px]'
-- 'Compositing CSS Animations: property <text-shadow> underlying [rgb(10, 20, 30)
-  1px 2px 3px, rgb(20, 40, 60) 2px 4px 6px] from replace [rgb(100, 100, 100) 10px
-  20px 30px] to add [rgb(200, 200, 200) 20px 40px 60px] at (1.5) should be [rgb(0,
-  0, 0) -3.5px -7px 0px, rgb(30, 60, 90) 3px 6px 9px, rgb(255, 255, 255) 30px 60px
-  90px]'
-- 'Compositing CSS Animations: property <text-shadow> underlying [rgb(10, 20, 30)
-  1px 2px 3px] from add [rgb(100, 100, 100) 10px 20px 30px] to add [rgb(200, 200,
-  200) 20px 40px 60px] at (-0.3) should be [rgb(10, 20, 30) 1px 2px 3px, rgb(70, 70,
-  70) 7px 14px 21px]'
-- 'Compositing CSS Animations: property <text-shadow> underlying [rgb(10, 20, 30)
-  1px 2px 3px] from add [rgb(100, 100, 100) 10px 20px 30px] to add [rgb(200, 200,
-  200) 20px 40px 60px] at (0) should be [rgb(10, 20, 30) 1px 2px 3px, rgb(100, 100,
-  100) 10px 20px 30px]'
-- 'Compositing CSS Animations: property <text-shadow> underlying [rgb(10, 20, 30)
-  1px 2px 3px] from add [rgb(100, 100, 100) 10px 20px 30px] to add [rgb(200, 200,
-  200) 20px 40px 60px] at (0.5) should be [rgb(10, 20, 30) 1px 2px 3px, rgb(150, 150,
-  150) 15px 30px 45px]'
-- 'Compositing CSS Animations: property <text-shadow> underlying [rgb(10, 20, 30)
-  1px 2px 3px] from add [rgb(100, 100, 100) 10px 20px 30px] to add [rgb(200, 200,
-  200) 20px 40px 60px] at (1) should be [rgb(10, 20, 30) 1px 2px 3px, rgb(200, 200,
-  200) 20px 40px 60px]'
-- 'Compositing CSS Animations: property <text-shadow> underlying [rgb(10, 20, 30)
-  1px 2px 3px] from add [rgb(100, 100, 100) 10px 20px 30px] to add [rgb(200, 200,
-  200) 20px 40px 60px] at (1.5) should be [rgb(10, 20, 30) 1px 2px 3px, rgb(250, 250,
-  250) 25px 50px 75px]'
-- 'Compositing Web Animations: property <text-shadow> underlying [rgb(10, 20, 30)
-  1px 2px 3px, rgb(20, 40, 60) 2px 4px 6px, rgb(40, 80, 120) 4px 8px 12px] from add
-  [rgb(100, 100, 100) 10px 20px 30px, rgb(200, 200, 200) 20px 40px 60px] to replace
-  [rgb(200, 200, 200) 20px 40px 60px] at (-0.3) should be [rgb(0, 0, 0) -4.7px -9.4px
-  0px, rgb(26, 52, 78) 2.6px 5.2px 7.8px, rgb(52, 104, 156) 5.2px 10.4px 15.6px, rgb(130,
-  130, 130) 13px 26px 39px, rgb(255, 255, 255) 26px 52px 78px]'
-- 'Compositing Web Animations: property <text-shadow> underlying [rgb(10, 20, 30)
-  1px 2px 3px, rgb(20, 40, 60) 2px 4px 6px, rgb(40, 80, 120) 4px 8px 12px] from add
-  [rgb(100, 100, 100) 10px 20px 30px, rgb(200, 200, 200) 20px 40px 60px] to replace
-  [rgb(200, 200, 200) 20px 40px 60px] at (0.5) should be [rgb(105, 110, 115) 10.5px
-  21px 31.5px, rgba(20, 40, 60, 0.5) 1px 2px 3px, rgba(40, 80, 120, 0.5) 2px 4px 6px,
-  rgba(100, 100, 100, 0.5) 5px 10px 15px, rgba(200, 200, 200, 0.5) 10px 20px 30px]'
-- 'Compositing Web Animations: property <text-shadow> underlying [rgb(10, 20, 30)
-  1px 2px 3px, rgb(20, 40, 60) 2px 4px 6px, rgb(40, 80, 120) 4px 8px 12px] from add
-  [rgb(100, 100, 100) 10px 20px 30px, rgb(200, 200, 200) 20px 40px 60px] to replace
-  [rgb(200, 200, 200) 20px 40px 60px] at (1) should be [rgb(200, 200, 200) 20px 40px
-  60px, rgba(0, 0, 0, 0) 0px 0px 0px, rgba(0, 0, 0, 0) 0px 0px 0px, rgba(0, 0, 0,
-  0) 0px 0px 0px, rgba(0, 0, 0, 0) 0px 0px 0px]'
-- 'Compositing Web Animations: property <text-shadow> underlying [rgb(10, 20, 30)
-  1px 2px 3px, rgb(20, 40, 60) 2px 4px 6px, rgb(40, 80, 120) 4px 8px 12px] from add
-  [rgb(100, 100, 100) 10px 20px 30px, rgb(200, 200, 200) 20px 40px 60px] to replace
-  [rgb(200, 200, 200) 20px 40px 60px] at (1.5) should be [rgb(255, 255, 255) 29.5px
-  59px 88.5px, rgba(0, 0, 0, 0) -1px -2px 0px, rgba(0, 0, 0, 0) -2px -4px 0px, rgba(0,
-  0, 0, 0) -5px -10px 0px, rgba(0, 0, 0, 0) -10px -20px 0px]'
-- 'Compositing Web Animations: property <text-shadow> underlying [rgb(10, 20, 30)
-  1px 2px 3px, rgb(20, 40, 60) 2px 4px 6px] from add [rgb(100, 100, 100) 10px 20px
-  30px] to replace [rgb(200, 200, 200) 20px 40px 60px] at (-0.3) should be [rgb(0,
-  0, 0) -4.7px -9.4px 0px, rgb(26, 52, 78) 2.6px 5.2px 7.8px, rgb(130, 130, 130) 13px
-  26px 39px]'
-- 'Compositing Web Animations: property <text-shadow> underlying [rgb(10, 20, 30)
-  1px 2px 3px, rgb(20, 40, 60) 2px 4px 6px] from add [rgb(100, 100, 100) 10px 20px
-  30px] to replace [rgb(200, 200, 200) 20px 40px 60px] at (0.5) should be [rgb(105,
-  110, 115) 10.5px 21px 31.5px, rgba(20, 40, 60, 0.5) 1px 2px 3px, rgba(100, 100,
-  100, 0.5) 5px 10px 15px]'
-- 'Compositing Web Animations: property <text-shadow> underlying [rgb(10, 20, 30)
-  1px 2px 3px, rgb(20, 40, 60) 2px 4px 6px] from add [rgb(100, 100, 100) 10px 20px
-  30px] to replace [rgb(200, 200, 200) 20px 40px 60px] at (1) should be [rgb(200,
-  200, 200) 20px 40px 60px, rgba(0, 0, 0, 0) 0px 0px 0px, rgba(0, 0, 0, 0) 0px 0px
-  0px]'
-- 'Compositing Web Animations: property <text-shadow> underlying [rgb(10, 20, 30)
-  1px 2px 3px, rgb(20, 40, 60) 2px 4px 6px] from add [rgb(100, 100, 100) 10px 20px
-  30px] to replace [rgb(200, 200, 200) 20px 40px 60px] at (1.5) should be [rgb(255,
-  255, 255) 29.5px 59px 88.5px, rgba(0, 0, 0, 0) -1px -2px 0px, rgba(0, 0, 0, 0) -5px
-  -10px 0px]'
-- 'Compositing Web Animations: property <text-shadow> underlying [rgb(10, 20, 30)
-  1px 2px 3px, rgb(20, 40, 60) 2px 4px 6px] from replace [rgb(100, 100, 100) 10px
-  20px 30px] to add [rgb(200, 200, 200) 20px 40px 60px] at (-0.3) should be [rgb(127,
-  124, 121) 12.7px 25.4px 38.1px, rgba(0, 0, 0, 0) -0.6px -1.2px 0px, rgba(0, 0, 0,
-  0) -6px -12px 0px]'
-- 'Compositing Web Animations: property <text-shadow> underlying [rgb(10, 20, 30)
-  1px 2px 3px, rgb(20, 40, 60) 2px 4px 6px] from replace [rgb(100, 100, 100) 10px
-  20px 30px] to add [rgb(200, 200, 200) 20px 40px 60px] at (0) should be [rgb(100,
-  100, 100) 10px 20px 30px, rgba(0, 0, 0, 0) 0px 0px 0px, rgba(0, 0, 0, 0) 0px 0px
-  0px]'
-- 'Compositing Web Animations: property <text-shadow> underlying [rgb(10, 20, 30)
-  1px 2px 3px, rgb(20, 40, 60) 2px 4px 6px] from replace [rgb(100, 100, 100) 10px
-  20px 30px] to add [rgb(200, 200, 200) 20px 40px 60px] at (0.5) should be [rgb(55,
-  60, 65) 5.5px 11px 16.5px, rgba(20, 40, 60, 0.5) 1px 2px 3px, rgba(200, 200, 200,
-  0.5) 10px 20px 30px]'
-- 'Compositing Web Animations: property <text-shadow> underlying [rgb(10, 20, 30)
-  1px 2px 3px, rgb(20, 40, 60) 2px 4px 6px] from replace [rgb(100, 100, 100) 10px
-  20px 30px] to add [rgb(200, 200, 200) 20px 40px 60px] at (1) should be [rgb(10,
-  20, 30) 1px 2px 3px, rgb(20, 40, 60) 2px 4px 6px, rgb(200, 200, 200) 20px 40px 60px]'
-- 'Compositing Web Animations: property <text-shadow> underlying [rgb(10, 20, 30)
-  1px 2px 3px, rgb(20, 40, 60) 2px 4px 6px] from replace [rgb(100, 100, 100) 10px
-  20px 30px] to add [rgb(200, 200, 200) 20px 40px 60px] at (1.5) should be [rgb(0,
-  0, 0) -3.5px -7px 0px, rgb(30, 60, 90) 3px 6px 9px, rgb(255, 255, 255) 30px 60px
-  90px]'
 css/css-transitions/animations/transition-end-event-shorthands.html:
 - Transition end events generated for transition on shorthand property
 css/css-transitions/animations/transition-timing-function.html:
 - Ensure that transition easing functions are properly applied.
-css/css-transitions/animations/vertical-align-composition.html:
-- 'Compositing CSS Animations: property <vertical-align> underlying [10%] from add
-  [100px] to add [20%] at (-0.3) should be [calc(130px + 4%)]'
-- 'Compositing CSS Animations: property <vertical-align> underlying [10%] from add
-  [100px] to add [20%] at (0) should be [calc(100px + 10%)]'
-- 'Compositing CSS Animations: property <vertical-align> underlying [10%] from add
-  [100px] to add [20%] at (0.5) should be [calc(50px + 20%)]'
-- 'Compositing CSS Animations: property <vertical-align> underlying [10%] from add
-  [100px] to add [20%] at (1) should be [30%]'
-- 'Compositing CSS Animations: property <vertical-align> underlying [10%] from add
-  [100px] to add [20%] at (1.5) should be [calc(-50px + 40%)]'
-- 'Compositing CSS Animations: property <vertical-align> underlying [100px] from add
-  [10px] to add [2px] at (-0.5) should be [114px]'
-- 'Compositing CSS Animations: property <vertical-align> underlying [100px] from add
-  [10px] to add [2px] at (0) should be [110px]'
-- 'Compositing CSS Animations: property <vertical-align> underlying [100px] from add
-  [10px] to add [2px] at (0.5) should be [106px]'
-- 'Compositing CSS Animations: property <vertical-align> underlying [100px] from add
-  [10px] to add [2px] at (1) should be [102px]'
-- 'Compositing CSS Animations: property <vertical-align> underlying [100px] from add
-  [10px] to add [2px] at (1.5) should be [98px]'
-- 'Compositing CSS Animations: property <vertical-align> underlying [50px] from add
-  [100px] to add [200px] at (-0.3) should be [120px]'
-- 'Compositing CSS Animations: property <vertical-align> underlying [50px] from add
-  [100px] to add [200px] at (0) should be [150px]'
-- 'Compositing CSS Animations: property <vertical-align> underlying [50px] from add
-  [100px] to add [200px] at (0.5) should be [200px]'
-- 'Compositing CSS Animations: property <vertical-align> underlying [50px] from add
-  [100px] to add [200px] at (1) should be [250px]'
-- 'Compositing CSS Animations: property <vertical-align> underlying [50px] from add
-  [100px] to add [200px] at (1.5) should be [300px]'
-- 'Compositing CSS Animations: property <vertical-align> underlying [50px] from add
-  [100px] to replace [200px] at (-0.3) should be [135px]'
-- 'Compositing CSS Animations: property <vertical-align> underlying [50px] from add
-  [100px] to replace [200px] at (0) should be [150px]'
-- 'Compositing CSS Animations: property <vertical-align> underlying [50px] from add
-  [100px] to replace [200px] at (0.5) should be [175px]'
-- 'Compositing CSS Animations: property <vertical-align> underlying [50px] from add
-  [100px] to replace [200px] at (1.5) should be [225px]'
-- 'Compositing Web Animations: property <vertical-align> underlying [10%] from add
-  [100px] to add [20%] at (-0.3) should be [calc(130px + 4%)]'
-- 'Compositing Web Animations: property <vertical-align> underlying [10%] from add
-  [100px] to add [20%] at (0) should be [calc(100px + 10%)]'
-- 'Compositing Web Animations: property <vertical-align> underlying [10%] from add
-  [100px] to add [20%] at (0.5) should be [calc(50px + 20%)]'
-- 'Compositing Web Animations: property <vertical-align> underlying [10%] from add
-  [100px] to add [20%] at (1.5) should be [calc(-50px + 40%)]'
-- 'Compositing Web Animations: property <vertical-align> underlying [50px] from add
-  [100px] to replace [200px] at (-0.3) should be [135px]'
-- 'Compositing Web Animations: property <vertical-align> underlying [50px] from add
-  [100px] to replace [200px] at (0.5) should be [175px]'
-- 'Compositing Web Animations: property <vertical-align> underlying [50px] from add
-  [100px] to replace [200px] at (1) should be [200px]'
-- 'Compositing Web Animations: property <vertical-align> underlying [50px] from add
-  [100px] to replace [200px] at (1.5) should be [225px]'
 css/css-transitions/animations/vertical-align-interpolation.html:
-- 'CSS Animations: property <vertical-align> from [40px] to [40%] at (-0.5) should
-  be [calc(60px - 20%)]'
-- 'CSS Animations: property <vertical-align> from [40px] to [40%] at (0) should be
-  [calc(40px + 0%)]'
-- 'CSS Animations: property <vertical-align> from [40px] to [40%] at (0.3) should
-  be [calc(28px + 12%)]'
-- 'CSS Animations: property <vertical-align> from [40px] to [40%] at (1.5) should
-  be [calc(-20px + 60%)]'
 - 'CSS Animations: property <vertical-align> from [initial] to [100px] at (-0.5) should
   be [-50px]'
 - 'CSS Animations: property <vertical-align> from [initial] to [100px] at (0) should
@@ -2811,14 +2499,6 @@ css/css-transitions/animations/vertical-align-interpolation.html:
   be [60px]'
 - 'CSS Animations: property <vertical-align> from [unset] to [100px] at (1.5) should
   be [150px]'
-- 'CSS Transitions with transition: all: property <vertical-align> from [40px] to
-  [40%] at (-0.5) should be [calc(60px - 20%)]'
-- 'CSS Transitions with transition: all: property <vertical-align> from [40px] to
-  [40%] at (0) should be [calc(40px + 0%)]'
-- 'CSS Transitions with transition: all: property <vertical-align> from [40px] to
-  [40%] at (0.3) should be [calc(28px + 12%)]'
-- 'CSS Transitions with transition: all: property <vertical-align> from [40px] to
-  [40%] at (1.5) should be [calc(-20px + 60%)]'
 - 'CSS Transitions with transition: all: property <vertical-align> from [initial]
   to [100px] at (-0.5) should be [-50px]'
 - 'CSS Transitions with transition: all: property <vertical-align> from [initial]
@@ -2839,14 +2519,6 @@ css/css-transitions/animations/vertical-align-interpolation.html:
   [100px] at (0.6) should be [60px]'
 - 'CSS Transitions with transition: all: property <vertical-align> from [unset] to
   [100px] at (1.5) should be [150px]'
-- 'CSS Transitions: property <vertical-align> from [40px] to [40%] at (-0.5) should
-  be [calc(60px - 20%)]'
-- 'CSS Transitions: property <vertical-align> from [40px] to [40%] at (0) should be
-  [calc(40px + 0%)]'
-- 'CSS Transitions: property <vertical-align> from [40px] to [40%] at (0.3) should
-  be [calc(28px + 12%)]'
-- 'CSS Transitions: property <vertical-align> from [40px] to [40%] at (1.5) should
-  be [calc(-20px + 60%)]'
 - 'CSS Transitions: property <vertical-align> from [initial] to [100px] at (-0.5)
   should be [-50px]'
 - 'CSS Transitions: property <vertical-align> from [initial] to [100px] at (0) should
@@ -2867,14 +2539,6 @@ css/css-transitions/animations/vertical-align-interpolation.html:
   be [60px]'
 - 'CSS Transitions: property <vertical-align> from [unset] to [100px] at (1.5) should
   be [150px]'
-- 'Web Animations: property <vertical-align> from [40px] to [40%] at (-0.5) should
-  be [calc(60px - 20%)]'
-- 'Web Animations: property <vertical-align> from [40px] to [40%] at (0) should be
-  [calc(40px + 0%)]'
-- 'Web Animations: property <vertical-align> from [40px] to [40%] at (0.3) should
-  be [calc(28px + 12%)]'
-- 'Web Animations: property <vertical-align> from [40px] to [40%] at (1.5) should
-  be [calc(-20px + 60%)]'
 - 'Web Animations: property <vertical-align> from [initial] to [100px] at (-0.5) should
   be [-50px]'
 - 'Web Animations: property <vertical-align> from [initial] to [100px] at (0) should
@@ -7319,6 +6983,8 @@ shadow-dom/untriaged/html-elements-in-shadow-trees/inert-html-elements/test-001.
 web-animations/animation-model/animation-types/accumulation-per-property-001.html:
 - 'background-blend-mode: "multiply" onto "screen"'
 - 'background-blend-mode: "screen" onto "multiply"'
+- background-color supports animating as color of rgb() with overflowed  from and
+  to values
 - 'block-step-align: "auto" onto "center"'
 - 'block-step-align: "center" onto "auto"'
 - 'block-step-align: "center" onto "start"'
@@ -7339,35 +7005,44 @@ web-animations/animation-model/animation-types/accumulation-per-property-001.htm
 - 'block-step-round: "up" onto "nearest"'
 - 'block-step-size: length'
 - 'block-step-size: length of rem'
+- border-bottom-color supports animating as color of rgb() with overflowed  from and
+  to values
+- border-left-color supports animating as color of rgb() with overflowed  from and
+  to values
+- border-right-color supports animating as color of rgb() with overflowed  from and
+  to values
 - 'border-spacing: length pair'
 - 'border-spacing: length pair of rem'
+- border-top-color supports animating as color of rgb() with overflowed  from and
+  to values
 - 'buffered-rendering: "auto" onto "dynamic"'
 - 'buffered-rendering: "dynamic" onto "auto"'
+- caret-color supports animating as color of rgb() with overflowed  from and to values
 - 'clip: rect'
 - 'color supports animating as color of #RGB'
 - 'color supports animating as color of #RGBa'
 - color supports animating as color of hsl()
 - color supports animating as color of hsla()
+- color supports animating as color of rgb() with overflowed  from and to values
 - 'color-adjust: "economy" onto "exact"'
 - 'color-adjust: "exact" onto "economy"'
 - 'color-interpolation: "auto" onto "linearrgb"'
 - 'color-interpolation: "linearrgb" onto "auto"'
+- column-rule-color supports animating as color of rgb() with overflowed  from and
+  to values
 - 'columns: length'
 - 'columns: length of rem'
 - 'columns: positive integer'
 - 'fill-opacity: [0, 1] number (clamped)'
 - 'flex-basis: calc'
-- 'flex-basis: units "%" onto "px"'
-- 'flex-basis: units "%" onto "rem"'
 - 'flex-basis: units "calc" onto "px"'
-- 'flex-basis: units "px" onto "%"'
-- 'flex-basis: units "rem" onto "%"'
 - 'flex-flow: "row" onto "row-reverse wrap"'
 - 'flex-flow: "row-reverse wrap" onto "row"'
 - 'flood-color supports animating as color of #RGB'
 - 'flood-color supports animating as color of #RGBa'
 - flood-color supports animating as color of hsl()
 - flood-color supports animating as color of hsla()
+- flood-color supports animating as color of rgb() with overflowed  from and to values
 - 'flood-opacity: [0, 1] number (clamped)'
 - font-variation-settings with composite type accumulate
 - 'grid-area: "1" onto "5"'
@@ -7381,15 +7056,13 @@ web-animations/animation-model/animation-types/accumulation-per-property-001.htm
 web-animations/animation-model/animation-types/accumulation-per-property-002.html:
 - 'isolation: "isolate" onto "auto"'
 - 'letter-spacing: calc'
-- 'letter-spacing: units "%" onto "px"'
-- 'letter-spacing: units "%" onto "rem"'
 - 'letter-spacing: units "calc" onto "px"'
-- 'letter-spacing: units "px" onto "%"'
-- 'letter-spacing: units "rem" onto "%"'
 - 'lighting-color supports animating as color of #RGB'
 - 'lighting-color supports animating as color of #RGBa'
 - lighting-color supports animating as color of hsl()
 - lighting-color supports animating as color of hsla()
+- lighting-color supports animating as color of rgb() with overflowed  from and to
+  values
 - 'list-style: "inside url("http://localhost/test-1") circle" onto "outside url("http://localhost/test-2")
   square"'
 - 'list-style: "outside url("http://localhost/test-2") square" onto "inside url("http://localhost/test-1")
@@ -7402,11 +7075,9 @@ web-animations/animation-model/animation-types/accumulation-per-property-002.htm
 - 'mix-blend-mode: "multiply" onto "screen"'
 - 'mix-blend-mode: "screen" onto "multiply"'
 - 'offset-distance: calc'
-- 'offset-distance: units "%" onto "px"'
-- 'offset-distance: units "%" onto "rem"'
 - 'offset-distance: units "calc" onto "px"'
-- 'offset-distance: units "px" onto "%"'
-- 'offset-distance: units "rem" onto "%"'
+- outline-color supports animating as color of rgb() with overflowed  from and to
+  values
 - 'path-length: positive number'
 - 'perspective-origin: length pair'
 - 'perspective-origin: length pair of rem'
@@ -7437,10 +7108,15 @@ web-animations/animation-model/animation-types/accumulation-per-property-002.htm
 - 'stroke-color supports animating as color of #RGBa'
 - stroke-color supports animating as color of hsl()
 - stroke-color supports animating as color of hsla()
+- stroke-color supports animating as color of rgb() with overflowed  from and to values
 - 'stroke-dasharray: dasharray'
 - 'stroke-opacity: [0, 1] number (clamped)'
+- text-decoration-color supports animating as color of rgb() with overflowed  from
+  and to values
 - 'text-decoration: "overline" onto "underline"'
 - 'text-decoration: "underline" onto "overline"'
+- text-emphasis-color supports animating as color of rgb() with overflowed  from and
+  to values
 - 'text-group-align: "center" onto "none"'
 - 'text-group-align: "none" onto "center"'
 - 'text-wrap: "nowrap" onto "wrap"'
@@ -7448,7 +7124,6 @@ web-animations/animation-model/animation-types/accumulation-per-property-002.htm
 - 'touch-action: "none" onto "auto"'
 - 'transform: matrix'
 - 'transform: matrix3d'
-- 'transform: rotate on translate'
 - 'transform: rotate3d'
 - 'transform: translate on rotate'
 - translate
@@ -7456,14 +7131,12 @@ web-animations/animation-model/animation-types/accumulation-per-property-002.htm
 - 'visibility: onto "hidden"'
 - 'visibility: onto "visible"'
 - 'word-spacing: calc'
-- 'word-spacing: units "%" onto "px"'
-- 'word-spacing: units "%" onto "rem"'
 - 'word-spacing: units "calc" onto "px"'
-- 'word-spacing: units "px" onto "%"'
-- 'word-spacing: units "rem" onto "%"'
 web-animations/animation-model/animation-types/addition-per-property-001.html:
 - 'background-blend-mode: "multiply" onto "screen"'
 - 'background-blend-mode: "screen" onto "multiply"'
+- background-color supports animating as color of rgb() with overflowed  from and
+  to values
 - 'block-step-align: "auto" onto "center"'
 - 'block-step-align: "center" onto "auto"'
 - 'block-step-align: "center" onto "start"'
@@ -7484,35 +7157,44 @@ web-animations/animation-model/animation-types/addition-per-property-001.html:
 - 'block-step-round: "up" onto "nearest"'
 - 'block-step-size: length'
 - 'block-step-size: length of rem'
+- border-bottom-color supports animating as color of rgb() with overflowed  from and
+  to values
+- border-left-color supports animating as color of rgb() with overflowed  from and
+  to values
+- border-right-color supports animating as color of rgb() with overflowed  from and
+  to values
 - 'border-spacing: length pair'
 - 'border-spacing: length pair of rem'
+- border-top-color supports animating as color of rgb() with overflowed  from and
+  to values
 - 'buffered-rendering: "auto" onto "dynamic"'
 - 'buffered-rendering: "dynamic" onto "auto"'
+- caret-color supports animating as color of rgb() with overflowed  from and to values
 - 'clip: rect'
 - 'color supports animating as color of #RGB'
 - 'color supports animating as color of #RGBa'
 - color supports animating as color of hsl()
 - color supports animating as color of hsla()
+- color supports animating as color of rgb() with overflowed  from and to values
 - 'color-adjust: "economy" onto "exact"'
 - 'color-adjust: "exact" onto "economy"'
 - 'color-interpolation: "auto" onto "linearrgb"'
 - 'color-interpolation: "linearrgb" onto "auto"'
+- column-rule-color supports animating as color of rgb() with overflowed  from and
+  to values
 - 'columns: length'
 - 'columns: length of rem'
 - 'columns: positive integer'
 - 'fill-opacity: [0, 1] number (clamped)'
 - 'flex-basis: calc'
-- 'flex-basis: units "%" onto "px"'
-- 'flex-basis: units "%" onto "rem"'
 - 'flex-basis: units "calc" onto "px"'
-- 'flex-basis: units "px" onto "%"'
-- 'flex-basis: units "rem" onto "%"'
 - 'flex-flow: "row" onto "row-reverse wrap"'
 - 'flex-flow: "row-reverse wrap" onto "row"'
 - 'flood-color supports animating as color of #RGB'
 - 'flood-color supports animating as color of #RGBa'
 - flood-color supports animating as color of hsl()
 - flood-color supports animating as color of hsla()
+- flood-color supports animating as color of rgb() with overflowed  from and to values
 - 'flood-opacity: [0, 1] number (clamped)'
 - font-variation-settings with composite type add
 - 'grid-area: "1" onto "5"'
@@ -7526,15 +7208,13 @@ web-animations/animation-model/animation-types/addition-per-property-001.html:
 web-animations/animation-model/animation-types/addition-per-property-002.html:
 - 'isolation: "isolate" onto "auto"'
 - 'letter-spacing: calc'
-- 'letter-spacing: units "%" onto "px"'
-- 'letter-spacing: units "%" onto "rem"'
 - 'letter-spacing: units "calc" onto "px"'
-- 'letter-spacing: units "px" onto "%"'
-- 'letter-spacing: units "rem" onto "%"'
 - 'lighting-color supports animating as color of #RGB'
 - 'lighting-color supports animating as color of #RGBa'
 - lighting-color supports animating as color of hsl()
 - lighting-color supports animating as color of hsla()
+- lighting-color supports animating as color of rgb() with overflowed  from and to
+  values
 - 'list-style: "inside url("http://localhost/test-1") circle" onto "outside url("http://localhost/test-2")
   square"'
 - 'list-style: "outside url("http://localhost/test-2") square" onto "inside url("http://localhost/test-1")
@@ -7547,11 +7227,9 @@ web-animations/animation-model/animation-types/addition-per-property-002.html:
 - 'mix-blend-mode: "multiply" onto "screen"'
 - 'mix-blend-mode: "screen" onto "multiply"'
 - 'offset-distance: calc'
-- 'offset-distance: units "%" onto "px"'
-- 'offset-distance: units "%" onto "rem"'
 - 'offset-distance: units "calc" onto "px"'
-- 'offset-distance: units "px" onto "%"'
-- 'offset-distance: units "rem" onto "%"'
+- outline-color supports animating as color of rgb() with overflowed  from and to
+  values
 - 'path-length: positive number'
 - 'perspective-origin: length pair'
 - 'perspective-origin: length pair of rem'
@@ -7582,10 +7260,15 @@ web-animations/animation-model/animation-types/addition-per-property-002.html:
 - 'stroke-color supports animating as color of #RGBa'
 - stroke-color supports animating as color of hsl()
 - stroke-color supports animating as color of hsla()
+- stroke-color supports animating as color of rgb() with overflowed  from and to values
 - 'stroke-dasharray: dasharray'
 - 'stroke-opacity: [0, 1] number (clamped)'
+- text-decoration-color supports animating as color of rgb() with overflowed  from
+  and to values
 - 'text-decoration: "overline" onto "underline"'
 - 'text-decoration: "underline" onto "overline"'
+- text-emphasis-color supports animating as color of rgb() with overflowed  from and
+  to values
 - 'text-group-align: "center" onto "none"'
 - 'text-group-align: "none" onto "center"'
 - 'text-wrap: "nowrap" onto "wrap"'
@@ -7599,11 +7282,7 @@ web-animations/animation-model/animation-types/addition-per-property-002.html:
 - 'visibility: onto "hidden"'
 - 'visibility: onto "visible"'
 - 'word-spacing: calc'
-- 'word-spacing: units "%" onto "px"'
-- 'word-spacing: units "%" onto "rem"'
 - 'word-spacing: units "calc" onto "px"'
-- 'word-spacing: units "px" onto "%"'
-- 'word-spacing: units "rem" onto "%"'
 web-animations/animation-model/animation-types/interpolation-per-property-001.html:
 - background-blend-mode uses discrete animation when animating between "multiply"
   and "screen" with effect easing
@@ -7885,18 +7564,6 @@ web-animations/animation-model/combining-effects/clamping-001.html:
   = 0
 - 9. opacity keyframes should not clamp before compositing, replace -200% + add 200%
   = 0
-web-animations/animation-model/combining-effects/effect-composition.html:
-- Composite when mixing accumulate and replace
-- Composite when mixing add and replace
-- accumulate onto an underlying animation value with implicit from values
-- accumulate onto an underlying animation value with implicit to values
-- accumulate specified on a keyframe overrides the composite mode of the effect
-- add onto an underlying animation value with implicit from values
-- add onto an underlying animation value with implicit to values
-- add specified on a keyframe overrides the composite mode of the effect
-- unspecified composite mode on a keyframe is overriden by setting accumulate of the
-  effect
-- unspecified composite mode on a keyframe is overriden by setting add of the effect
 web-animations/animation-model/keyframe-effects/background-shorthand.html:
 - Shorthand properties expand to longhand counterparts in computed keyframes.
 web-animations/animation-model/keyframe-effects/computed-keyframes-shorthands.html:
@@ -7905,8 +7572,6 @@ web-animations/animation-model/keyframe-effects/effect-value-context-filling.htm
 - Filling effect values reflect changes to the animation's composite mode
 - Filling effect values reflect changes to the animation's iteration composite mode
 - Filling effect values reflect changes to the animation's keyframes
-- Filling effect values reflect changes to the base value when using additive animation
-  on a single keyframe
 - Filling effect values reflect changes to underlying animations made by directly
   changing the keyframes
 web-animations/animation-model/keyframe-effects/effect-value-context.html:

@@ -184,10 +184,12 @@ for (const name of longhands) {
   const t = props[name].animationType;
   if (typeof t === 'string' && t.indexOf(',') === -1) animationTypes[name] = t;
 }
-// Types the property's own spec has moved on from since mdn recorded them. `letter-spacing` and
-// `word-spacing` take a percentage in css-text-4 and interpolate as one (Chrome-measured), where
-// mdn still calls them plain lengths.
-const ANIMATION_TYPE_FIXES = { 'letter-spacing': 'lpc', 'word-spacing': 'lpc' };
+// Types the property's own spec has moved on from since mdn recorded them, or that mdn records
+// more narrowly than the property's own grammar. `letter-spacing` and `word-spacing` take a
+// percentage in css-text-4 and interpolate as one; `vertical-align` has taken one since CSS2, and
+// interpolates `10%` against `100px` into the `calc()` holding both (Chrome-measured, all three),
+// where mdn calls each of them a plain length.
+const ANIMATION_TYPE_FIXES = { 'letter-spacing': 'lpc', 'word-spacing': 'lpc', 'vertical-align': 'lpc' };
 for (const [name, type] of Object.entries(ANIMATION_TYPE_FIXES)) {
   if (animationTypes[name]) animationTypes[name] = type;
 }

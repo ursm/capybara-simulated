@@ -239,12 +239,14 @@ RSpec.describe 'CSS math functions' do
     # expression that stayed unresolved and changed what the expression means — `calc(100% -
     # var(--x))` with `--x: -10px` became `calc(100% - 0px)`, i.e. plain `100%`.
     #
-    # Chrome normalises the leftover arithmetic (`calc(100% + 10px)` / `calc(100% - 10px)`); we hand
-    # the substituted text back as-is. Same expression, different spelling — the simplification of a
-    # calc that can't fully reduce is a separate, open gap.
+    # A leftover mixture of a length and a percentage HAS a canonical computed form — the
+    # percentage first, a negative length subtracted — and a value that is only that mixture takes
+    # it (Chrome-measured: `calc(-10px + 100%)` computes to `calc(100% - 10px)`). A value with more
+    # in it than the mixture is still handed back as the substitution wrote it: same expression,
+    # different spelling, and simplifying an arbitrary unresolved calc is a separate open gap.
     expect(computed('background-size: calc(100% - var(--neg))', %w[backgroundSize],
                     extra_css: ':root { --neg: -10px }')).to eq(['calc(100% - -10px)'])
-    expect(computed('flex-basis: calc(-10px + 100%)', %w[flexBasis])).to eq(['calc(-10px + 100%)'])
+    expect(computed('flex-basis: calc(-10px + 100%)', %w[flexBasis])).to eq(['calc(100% - 10px)'])
   end
 
   it 'keeps the calc() wrapper on the SPECIFIED surface, with its contents reduced' do
