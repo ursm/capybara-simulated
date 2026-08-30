@@ -56,11 +56,9 @@ WebCryptoAPI/sign_verify/eddsa_small_order_points.https.any.js:
 - Ed25519 Verification checks with small-order key of order - Test 13
 - Ed25519 Verification checks with small-order key of order - Test 2
 css/css-animations/animate-with-background-color-hsla-to-legacy-rgb.html:
-- "== css/css-animations/animate-with-background-color-hsla-to-legacy-rgb-ref.html
-  (never ready to capture)"
+- "== css/css-animations/animate-with-background-color-hsla-to-legacy-rgb-ref.html"
 css/css-animations/animate-with-background-color-oklch-001.html:
-- "== css/css-animations/animate-with-background-color-oklch-001-ref.html (never ready
-  to capture)"
+- "== css/css-animations/animate-with-background-color-oklch-001-ref.html"
 css/css-animations/animate-with-background-color-oklch-002.html:
 - Animate from legacy rgb to color-mix oklch
 - Animate from legacy rgb to oklch
@@ -101,14 +99,8 @@ css/css-animations/animation-css-variable-in-keyframe-adjusted.html:
 - Animations reflect changes to variables on parent element
 css/css-animations/animation-delay-008.html:
 - "== css/css-animations/animation-common-ref.html"
-css/css-animations/animation-delay-009.html:
-- "== css/css-animations/animation-common-ref.html"
-css/css-animations/animation-delay-010.html:
-- "== css/css-animations/animation-common-ref.html (never ready to capture)"
 css/css-animations/animation-delay-011.html:
 - "== css/css-animations/animation-common-ref.html"
-css/css-animations/animation-duration-infinite.html:
-- "== css/css-animations/animation-duration-infinite-ref.html"
 css/css-animations/animation-important-001.html:
 - Custom property animations appearing via setKeyframes do not override important
   declarations
@@ -120,52 +112,19 @@ css/css-animations/animation-important-with-transition.html:
 - "!important overrides animation but not transition on the same element"
 - "!important overrides animation even when a CSS transition is concurrently running"
 - "!important overrides multiple animated properties even with a concurrent transition"
-css/css-animations/animation-iteration-event-001.html:
-- Got the expected elapsedTime in the correct order
-css/css-animations/animation-iteration-event-002.html:
-- By the time the finite animation ends, the infinite one had identical elapsedTime
 css/css-animations/animation-name-in-nested-shadow.html:
 - "== css/css-animations/animation-name-in-nested-shadow-ref.html"
 css/css-animations/animation-name-in-shadow-part-outer-match.html:
 - "== css/css-animations/animation-name-in-shadow-part-ref.html"
-css/css-animations/animation-offscreen-to-onscreen.html:
-- "== css/css-animations/animation-offscreen-to-onscreen-ref.html (never ready to
-  capture)"
 css/css-animations/animation-pseudo-dynamic-001.html:
 - "== css/css-animations/animation-pseudo-dynamic-001-ref.html (both renderings blank)"
 css/css-animations/animation-restarted-after-changing-iteration-count-after-completion.html:
 - 'Setting ''animation-iteration-count: infinite'' after a CSS Animation is completed
   restarts the animation.'
-css/css-animations/animationevent-interface.html:
-- Missing type argument
-- animationName is readonly
-- animationName set to [1, 2, 3]
-- animationName set to []
-- animationName set to a number
-- animationName set to an object
-- animationName set to an object with a valueOf function
-- animationName set to false
-- animationName set to null
-- animationName set to true
-- elapsedTime cannot be set to 'sample'
-- elapsedTime cannot be set to -Infinity
-- elapsedTime cannot be set to Infinity
-- elapsedTime cannot be set to NaN
-- elapsedTime cannot be set to [0.5, 1.0]
-- elapsedTime cannot be set to an object
-- elapsedTime is readonly
-- elapsedTime set to [0.5]
-- elapsedTime set to []
-- elapsedTime set to an object with a valueOf function
-- elapsedTime set to true
 css/css-animations/animationevent-marker-pseudoelement.html:
 - AnimationEvent should have the correct pseudoElement memeber
 css/css-animations/animationevent-pseudoelement.html:
 - AnimationEvent should have the correct pseudoElement memeber
-css/css-animations/animationevent-types.html:
-- animationend event is instanceof AnimationEvent
-- animationiteration event is instanceof AnimationEvent
-- animationstart event is instanceof AnimationEvent
 css/css-animations/cancel-animation-shadow-slot-invalidation.html:
 - "== css/reference/pass_if_pass_below.html (reference not vendored)"
 css/css-animations/computed-style-animation-parsing.html:
@@ -238,14 +197,8 @@ css/css-animations/display-interpolation.html:
 - 'Web Animations: property <display> from [none] to [none] at (1.5) should be [none]'
 css/css-animations/display-none-prevents-starting-in-subtree.html:
 - 'Elements in a "display: none" tree cannot start CSS Animations.'
-css/css-animations/flip-running-animation-via-variable.html:
-- "== css/css-animations/flip-running-animation-via-variable-ref.html (never ready
-  to capture)"
 css/css-animations/inheritance-pseudo-element.html:
 - "== css/css-animations/inheritance-pseudo-element-ref.html (both renderings blank)"
-css/css-animations/jump-start-animation-before-phase.html:
-- "== css/css-animations/jump-start-animation-before-phase-ref.html (never ready to
-  capture)"
 css/css-animations/keyframes-unrelated-custom-property.html:
 - Unrelated custom properties do not conflict with each other
 css/css-animations/missing-values-first-keyframe.html:
@@ -255,7 +208,7 @@ css/css-animations/missing-values-last-keyframe.html:
 - Missing property values in the last keyframe are correctly interpolated from a neutral
   keyframe value
 css/css-animations/nested-scale-animations.html:
-- "== css/css-animations/nested-scale-animations-ref.html (never ready to capture)"
+- "== css/css-animations/nested-scale-animations-ref.html"
 css/css-animations/parent-after-change-style-pseudo-element-flicker.html:
 - "== css/css-animations/parent-after-change-style-pseudo-element-flicker-ref.html
   (both renderings blank)"
@@ -571,8 +524,6 @@ css/css-animations/parsing/keyframes-name-invalid.html:
 - 'invalid: @keyframes revert-layer, four { }'
 - 'invalid: @keyframes unset { }'
 css/css-animations/pending-style-changes-001.html:
-- Animatable::getAnimations() should be able to see a style-created CSS animation
-  immediately
 - Document::getAnimations() should be able to see a style-created CSS animation immediately
 css/css-animations/responsive/column-rule-color-001.html:
 - column-rule-color responds to currentColor changes
@@ -586,8 +537,6 @@ css/css-animations/revert-rule-keyframes-dynamic.html:
 css/css-animations/revert-rule-keyframes.html:
 - revert-rule in keyframes (--x)
 - revert-rule in keyframes (width)
-css/css-animations/sample-on-last-keyframe.html:
-- Opacity at start of reverse running animation
 css/css-animations/stability/animation-event-destroy-renderer.html:
 - Triggering the cancel of an animation during event handling does not crash.
 - Triggering the cancel of an animation during event handling does not crash.
@@ -595,7 +544,7 @@ css/css-animations/svg-transform-animation.html:
 - "== css/css-animations/svg-transform-animation-ref.html"
 css/css-animations/svg-use-transform-keyframes-custom-property-override.html:
 - "== css/css-animations/svg-use-transform-keyframes-custom-property-override-ref.html
-  (never ready to capture)"
+  (both renderings blank)"
 css/css-animations/text-decoration-inset-auto.html:
 - 'CSS Animations: property <text-decoration-inset> from [0px] to [10px -20px] at
   (-1) should be [-10px 20px]'
@@ -1903,10 +1852,8 @@ css/css-logical/animation-001.html:
 - Logical longhands win over physical shorthands
 css/css-logical/animation-002.html:
 - Animations update when the writing-mode is changed through a CSS variable
-- Filling animations update when the writing-mode is changed
 - Logical shorthand with variable references animates correctly
 css/css-logical/animation-004.html:
-- Filling transitions update when the writing-mode is changed
 - The number of interpolating properties can be decreased when the writing-mode is
   changed
 - The number of interpolating properties can be increased when the writing-mode is
@@ -2580,8 +2527,6 @@ css/css-transitions/all-interpolates-same-as-explicit-property.html:
 - transition:all interpolates the same as transition:the-actual-property 20
 - transition:all interpolates the same as transition:the-actual-property 21
 - transition:all interpolates the same as transition:the-actual-property 9
-css/css-transitions/allow-discrete-auto-inset.html:
-- "== css/reference/ref-filled-green-100px-square-only.html"
 css/css-transitions/animations/animate-with-color-mix.html:
 - Transition from color-mix to legacy rgb
 - Transition from color-mix to srgb
@@ -3303,28 +3248,9 @@ css/css-transitions/disconnected-element-001.html:
 - Transitions are canceled when an element is removed from the document
 css/css-transitions/dynamic-root-element.html:
 - Transitions don't incorrectly start on dynamic document element insertion
-css/css-transitions/events-001.html:
-- transition:all changing padding
-- transition:all changing padding but not padding-bottom
-- transition:all changing padding-left
-- transition:padding changing padding
-- transition:padding changing padding but not padding-bottom
-- transition:padding changing padding-left
-- transition:padding-left changing padding
-- transition:padding-left changing padding but not padding-bottom
-- transition:padding-left changing padding-left
-css/css-transitions/events-002.html:
-- transition:all changing padding from nothing
-- transition:all changing padding-left from nothing
-css/css-transitions/events-003.html:
-- 'duration: 0.02s, delay: -0.01s'
 css/css-transitions/events-004.html:
 - repeating lists
 - truncating lists
-css/css-transitions/events-005.html:
-- padding, padding-left
-- padding-left, padding
-- property repetition
 css/css-transitions/events-006.html:
 - transition padding-left on ::after
 - transition padding-left on ::before
@@ -3338,11 +3264,6 @@ css/css-transitions/events-008.html:
 css/css-transitions/inherit-background-color-transition.html:
 - "== css/css-transitions/inherit-background-color-transition-ref.html (never ready
   to capture)"
-css/css-transitions/inherit-height-transition.html:
-- Transitioned height, explicitly inherited down two DOM levels, should inherit correctly
-css/css-transitions/non-rendered-element-001.html:
-- Transitions are canceled when an element is no longer rendered
-- Transitions do not run for an element newly rendered
 css/css-transitions/non-rendered-element-002.html:
 - Transitions on ::before/::after pseudo-elements are canceled when the content property
   is cleared
@@ -3474,97 +3395,25 @@ css/css-transitions/properties-value-001.html:
 - background-position-x percentage(%) / values
 - border-bottom-color color(rgba) / events
 - border-bottom-color color(rgba) / values
-- border-bottom-width length(cm) / events
-- border-bottom-width length(em) / events
-- border-bottom-width length(ex) / events
-- border-bottom-width length(in) / events
-- border-bottom-width length(mm) / events
-- border-bottom-width length(pc) / events
-- border-bottom-width length(pt) / events
-- border-bottom-width length(px) / events
 - border-left-color color(rgba) / events
 - border-left-color color(rgba) / values
-- border-left-width length(cm) / events
-- border-left-width length(em) / events
-- border-left-width length(ex) / events
-- border-left-width length(in) / events
-- border-left-width length(mm) / events
-- border-left-width length(pc) / events
-- border-left-width length(pt) / events
-- border-left-width length(px) / events
 - border-right-color color(rgba) / events
 - border-right-color color(rgba) / values
-- border-right-width length(cm) / events
-- border-right-width length(em) / events
-- border-right-width length(ex) / events
-- border-right-width length(in) / events
-- border-right-width length(mm) / events
-- border-right-width length(pc) / events
-- border-right-width length(pt) / events
-- border-right-width length(px) / events
 - border-top-color color(rgba) / events
 - border-top-color color(rgba) / values
-- border-top-width length(cm) / events
-- border-top-width length(em) / events
-- border-top-width length(ex) / events
-- border-top-width length(in) / events
-- border-top-width length(mm) / events
-- border-top-width length(pc) / events
-- border-top-width length(pt) / events
-- border-top-width length(px) / events
-- bottom length(cm) / events
-- bottom length(em) / events
-- bottom length(ex) / events
-- bottom length(in) / events
-- bottom length(mm) / events
-- bottom length(pc) / events
-- bottom length(pt) / events
-- bottom length(px) / events
-- bottom percentage(%) / events
 - clip rectangle(rectangle) / events
 - clip rectangle(rectangle) / values
 - color color(rgba) / events
 - color color(rgba) / values
-- font-size length(cm) / events
 - font-size length(cm) / values
-- font-size length(em) / events
 - font-size length(em) / values
-- font-size length(ex) / events
 - font-size length(ex) / values
-- font-size length(in) / events
 - font-size length(in) / values
-- font-size length(mm) / events
 - font-size length(mm) / values
-- font-size length(pc) / events
 - font-size length(pc) / values
-- font-size length(pt) / events
 - font-size length(pt) / values
-- font-size length(px) / events
-- font-size length(px) / values
-- font-size percentage(%) / events
-- font-size percentage(%) / values
 - font-weight font-weight(keyword) / events
 - font-weight font-weight(keyword) / values
-- font-weight font-weight(numeric) / events
-- font-weight font-weight(numeric) / values
-- height length(cm) / events
-- height length(em) / events
-- height length(ex) / events
-- height length(in) / events
-- height length(mm) / events
-- height length(pc) / events
-- height length(pt) / events
-- height length(px) / events
-- height percentage(%) / events
-- left length(cm) / events
-- left length(em) / events
-- left length(ex) / events
-- left length(in) / events
-- left length(mm) / events
-- left length(pc) / events
-- left length(pt) / events
-- left length(px) / events
-- left percentage(%) / events
 - letter-spacing length(cm) / events
 - letter-spacing length(cm) / values
 - letter-spacing length(em) / events
@@ -3603,74 +3452,6 @@ css/css-transitions/properties-value-001.html:
 - line-height number(integer) / values
 - line-height percentage(%) / events
 - line-height percentage(%) / values
-- margin-bottom length(cm) / events
-- margin-bottom length(em) / events
-- margin-bottom length(ex) / events
-- margin-bottom length(in) / events
-- margin-bottom length(mm) / events
-- margin-bottom length(pc) / events
-- margin-bottom length(pt) / events
-- margin-bottom length(px) / events
-- margin-left length(cm) / events
-- margin-left length(em) / events
-- margin-left length(ex) / events
-- margin-left length(in) / events
-- margin-left length(mm) / events
-- margin-left length(pc) / events
-- margin-left length(pt) / events
-- margin-left length(px) / events
-- margin-right length(cm) / events
-- margin-right length(em) / events
-- margin-right length(ex) / events
-- margin-right length(in) / events
-- margin-right length(mm) / events
-- margin-right length(pc) / events
-- margin-right length(pt) / events
-- margin-right length(px) / events
-- margin-top length(cm) / events
-- margin-top length(em) / events
-- margin-top length(ex) / events
-- margin-top length(in) / events
-- margin-top length(mm) / events
-- margin-top length(pc) / events
-- margin-top length(pt) / events
-- margin-top length(px) / events
-- max-height length(cm) / events
-- max-height length(em) / events
-- max-height length(ex) / events
-- max-height length(in) / events
-- max-height length(mm) / events
-- max-height length(pc) / events
-- max-height length(pt) / events
-- max-height length(px) / events
-- max-height percentage(%) / events
-- max-width length(cm) / events
-- max-width length(em) / events
-- max-width length(ex) / events
-- max-width length(in) / events
-- max-width length(mm) / events
-- max-width length(pc) / events
-- max-width length(pt) / events
-- max-width length(px) / events
-- max-width percentage(%) / events
-- min-height length(cm) / events
-- min-height length(em) / events
-- min-height length(ex) / events
-- min-height length(in) / events
-- min-height length(mm) / events
-- min-height length(pc) / events
-- min-height length(pt) / events
-- min-height length(px) / events
-- min-height percentage(%) / events
-- min-width length(cm) / events
-- min-width length(em) / events
-- min-width length(ex) / events
-- min-width length(in) / events
-- min-width length(mm) / events
-- min-width length(pc) / events
-- min-width length(pt) / events
-- min-width length(px) / events
-- min-width percentage(%) / events
 - opacity number[0,1](zero-to-one) / events
 - opacity number[0,1](zero-to-one) / values
 - outline-color color(rgba) / events
@@ -3707,47 +3488,6 @@ css/css-transitions/properties-value-001.html:
 - outline-width length(pt) / values
 - outline-width length(px) / events
 - outline-width length(px) / values
-- padding-bottom length(cm) / events
-- padding-bottom length(em) / events
-- padding-bottom length(ex) / events
-- padding-bottom length(in) / events
-- padding-bottom length(mm) / events
-- padding-bottom length(pc) / events
-- padding-bottom length(pt) / events
-- padding-bottom length(px) / events
-- padding-left length(cm) / events
-- padding-left length(em) / events
-- padding-left length(ex) / events
-- padding-left length(in) / events
-- padding-left length(mm) / events
-- padding-left length(pc) / events
-- padding-left length(pt) / events
-- padding-left length(px) / events
-- padding-right length(cm) / events
-- padding-right length(em) / events
-- padding-right length(ex) / events
-- padding-right length(in) / events
-- padding-right length(mm) / events
-- padding-right length(pc) / events
-- padding-right length(pt) / events
-- padding-right length(px) / events
-- padding-top length(cm) / events
-- padding-top length(em) / events
-- padding-top length(ex) / events
-- padding-top length(in) / events
-- padding-top length(mm) / events
-- padding-top length(pc) / events
-- padding-top length(pt) / events
-- padding-top length(px) / events
-- right length(cm) / events
-- right length(em) / events
-- right length(ex) / events
-- right length(in) / events
-- right length(mm) / events
-- right length(pc) / events
-- right length(pt) / events
-- right length(px) / events
-- right percentage(%) / events
 - text-indent length(cm) / events
 - text-indent length(cm) / values
 - text-indent length(em) / events
@@ -3768,15 +3508,6 @@ css/css-transitions/properties-value-001.html:
 - text-indent percentage(%) / values
 - text-shadow shadow(shadow) / events
 - text-shadow shadow(shadow) / values
-- top length(cm) / events
-- top length(em) / events
-- top length(ex) / events
-- top length(in) / events
-- top length(mm) / events
-- top length(pc) / events
-- top length(pt) / events
-- top length(px) / events
-- top percentage(%) / events
 - vertical-align length(cm) / events
 - vertical-align length(cm) / values
 - vertical-align length(em) / events
@@ -3797,15 +3528,6 @@ css/css-transitions/properties-value-001.html:
 - vertical-align percentage(%) / values
 - visibility visibility(keyword) / events
 - visibility visibility(keyword) / values
-- width length(cm) / events
-- width length(em) / events
-- width length(ex) / events
-- width length(in) / events
-- width length(mm) / events
-- width length(pc) / events
-- width length(pt) / events
-- width length(px) / events
-- width percentage(%) / events
 - word-spacing length(cm) / events
 - word-spacing length(cm) / values
 - word-spacing length(em) / events
@@ -3872,7 +3594,6 @@ css/css-transitions/properties-value-003.html:
 - border-top-right-radius border-radius(px-px) / values
 - box-shadow box-shadow(shadow) / events
 - box-shadow box-shadow(shadow) / values
-- column-count integer(integer) / events
 - column-gap length(cm) / events
 - column-gap length(cm) / values
 - column-gap length(em) / events
@@ -3923,14 +3644,6 @@ css/css-transitions/properties-value-003.html:
 - column-rule-width length(pt) / values
 - column-rule-width length(px) / events
 - column-rule-width length(px) / values
-- column-width length(cm) / events
-- column-width length(em) / events
-- column-width length(ex) / events
-- column-width length(in) / events
-- column-width length(mm) / events
-- column-width length(pc) / events
-- column-width length(pt) / events
-- column-width length(px) / events
 - display display(block to inline-block) / events
 - display display(block to inline-block) / values
 - display display(static to absolute) / events
@@ -4043,97 +3756,25 @@ css/css-transitions/properties-value-inherit-001.html:
 - background-position-x percentage(%) / values
 - border-bottom-color color(rgba) / events
 - border-bottom-color color(rgba) / values
-- border-bottom-width length(cm) / events
-- border-bottom-width length(em) / events
-- border-bottom-width length(ex) / events
-- border-bottom-width length(in) / events
-- border-bottom-width length(mm) / events
-- border-bottom-width length(pc) / events
-- border-bottom-width length(pt) / events
-- border-bottom-width length(px) / events
 - border-left-color color(rgba) / events
 - border-left-color color(rgba) / values
-- border-left-width length(cm) / events
-- border-left-width length(em) / events
-- border-left-width length(ex) / events
-- border-left-width length(in) / events
-- border-left-width length(mm) / events
-- border-left-width length(pc) / events
-- border-left-width length(pt) / events
-- border-left-width length(px) / events
 - border-right-color color(rgba) / events
 - border-right-color color(rgba) / values
-- border-right-width length(cm) / events
-- border-right-width length(em) / events
-- border-right-width length(ex) / events
-- border-right-width length(in) / events
-- border-right-width length(mm) / events
-- border-right-width length(pc) / events
-- border-right-width length(pt) / events
-- border-right-width length(px) / events
 - border-top-color color(rgba) / events
 - border-top-color color(rgba) / values
-- border-top-width length(cm) / events
-- border-top-width length(em) / events
-- border-top-width length(ex) / events
-- border-top-width length(in) / events
-- border-top-width length(mm) / events
-- border-top-width length(pc) / events
-- border-top-width length(pt) / events
-- border-top-width length(px) / events
-- bottom length(cm) / events
-- bottom length(em) / events
-- bottom length(ex) / events
-- bottom length(in) / events
-- bottom length(mm) / events
-- bottom length(pc) / events
-- bottom length(pt) / events
-- bottom length(px) / events
-- bottom percentage(%) / events
 - clip rectangle(rectangle) / events
 - clip rectangle(rectangle) / values
 - color color(rgba) / events
 - color color(rgba) / values
-- font-size length(cm) / events
 - font-size length(cm) / values
-- font-size length(em) / events
 - font-size length(em) / values
-- font-size length(ex) / events
 - font-size length(ex) / values
-- font-size length(in) / events
 - font-size length(in) / values
-- font-size length(mm) / events
 - font-size length(mm) / values
-- font-size length(pc) / events
 - font-size length(pc) / values
-- font-size length(pt) / events
 - font-size length(pt) / values
-- font-size length(px) / events
-- font-size length(px) / values
-- font-size percentage(%) / events
-- font-size percentage(%) / values
 - font-weight font-weight(keyword) / events
 - font-weight font-weight(keyword) / values
-- font-weight font-weight(numeric) / events
-- font-weight font-weight(numeric) / values
-- height length(cm) / events
-- height length(em) / events
-- height length(ex) / events
-- height length(in) / events
-- height length(mm) / events
-- height length(pc) / events
-- height length(pt) / events
-- height length(px) / events
-- height percentage(%) / events
-- left length(cm) / events
-- left length(em) / events
-- left length(ex) / events
-- left length(in) / events
-- left length(mm) / events
-- left length(pc) / events
-- left length(pt) / events
-- left length(px) / events
-- left percentage(%) / events
 - letter-spacing length(cm) / events
 - letter-spacing length(cm) / values
 - letter-spacing length(em) / events
@@ -4172,74 +3813,6 @@ css/css-transitions/properties-value-inherit-001.html:
 - line-height number(integer) / values
 - line-height percentage(%) / events
 - line-height percentage(%) / values
-- margin-bottom length(cm) / events
-- margin-bottom length(em) / events
-- margin-bottom length(ex) / events
-- margin-bottom length(in) / events
-- margin-bottom length(mm) / events
-- margin-bottom length(pc) / events
-- margin-bottom length(pt) / events
-- margin-bottom length(px) / events
-- margin-left length(cm) / events
-- margin-left length(em) / events
-- margin-left length(ex) / events
-- margin-left length(in) / events
-- margin-left length(mm) / events
-- margin-left length(pc) / events
-- margin-left length(pt) / events
-- margin-left length(px) / events
-- margin-right length(cm) / events
-- margin-right length(em) / events
-- margin-right length(ex) / events
-- margin-right length(in) / events
-- margin-right length(mm) / events
-- margin-right length(pc) / events
-- margin-right length(pt) / events
-- margin-right length(px) / events
-- margin-top length(cm) / events
-- margin-top length(em) / events
-- margin-top length(ex) / events
-- margin-top length(in) / events
-- margin-top length(mm) / events
-- margin-top length(pc) / events
-- margin-top length(pt) / events
-- margin-top length(px) / events
-- max-height length(cm) / events
-- max-height length(em) / events
-- max-height length(ex) / events
-- max-height length(in) / events
-- max-height length(mm) / events
-- max-height length(pc) / events
-- max-height length(pt) / events
-- max-height length(px) / events
-- max-height percentage(%) / events
-- max-width length(cm) / events
-- max-width length(em) / events
-- max-width length(ex) / events
-- max-width length(in) / events
-- max-width length(mm) / events
-- max-width length(pc) / events
-- max-width length(pt) / events
-- max-width length(px) / events
-- max-width percentage(%) / events
-- min-height length(cm) / events
-- min-height length(em) / events
-- min-height length(ex) / events
-- min-height length(in) / events
-- min-height length(mm) / events
-- min-height length(pc) / events
-- min-height length(pt) / events
-- min-height length(px) / events
-- min-height percentage(%) / events
-- min-width length(cm) / events
-- min-width length(em) / events
-- min-width length(ex) / events
-- min-width length(in) / events
-- min-width length(mm) / events
-- min-width length(pc) / events
-- min-width length(pt) / events
-- min-width length(px) / events
-- min-width percentage(%) / events
 - opacity number[0,1](zero-to-one) / events
 - opacity number[0,1](zero-to-one) / values
 - outline-color color(rgba) / events
@@ -4276,47 +3849,6 @@ css/css-transitions/properties-value-inherit-001.html:
 - outline-width length(pt) / values
 - outline-width length(px) / events
 - outline-width length(px) / values
-- padding-bottom length(cm) / events
-- padding-bottom length(em) / events
-- padding-bottom length(ex) / events
-- padding-bottom length(in) / events
-- padding-bottom length(mm) / events
-- padding-bottom length(pc) / events
-- padding-bottom length(pt) / events
-- padding-bottom length(px) / events
-- padding-left length(cm) / events
-- padding-left length(em) / events
-- padding-left length(ex) / events
-- padding-left length(in) / events
-- padding-left length(mm) / events
-- padding-left length(pc) / events
-- padding-left length(pt) / events
-- padding-left length(px) / events
-- padding-right length(cm) / events
-- padding-right length(em) / events
-- padding-right length(ex) / events
-- padding-right length(in) / events
-- padding-right length(mm) / events
-- padding-right length(pc) / events
-- padding-right length(pt) / events
-- padding-right length(px) / events
-- padding-top length(cm) / events
-- padding-top length(em) / events
-- padding-top length(ex) / events
-- padding-top length(in) / events
-- padding-top length(mm) / events
-- padding-top length(pc) / events
-- padding-top length(pt) / events
-- padding-top length(px) / events
-- right length(cm) / events
-- right length(em) / events
-- right length(ex) / events
-- right length(in) / events
-- right length(mm) / events
-- right length(pc) / events
-- right length(pt) / events
-- right length(px) / events
-- right percentage(%) / events
 - text-indent length(cm) / events
 - text-indent length(cm) / values
 - text-indent length(em) / events
@@ -4337,15 +3869,6 @@ css/css-transitions/properties-value-inherit-001.html:
 - text-indent percentage(%) / values
 - text-shadow shadow(shadow) / events
 - text-shadow shadow(shadow) / values
-- top length(cm) / events
-- top length(em) / events
-- top length(ex) / events
-- top length(in) / events
-- top length(mm) / events
-- top length(pc) / events
-- top length(pt) / events
-- top length(px) / events
-- top percentage(%) / events
 - vertical-align length(cm) / events
 - vertical-align length(cm) / values
 - vertical-align length(em) / events
@@ -4366,15 +3889,6 @@ css/css-transitions/properties-value-inherit-001.html:
 - vertical-align percentage(%) / values
 - visibility visibility(keyword) / events
 - visibility visibility(keyword) / values
-- width length(cm) / events
-- width length(em) / events
-- width length(ex) / events
-- width length(in) / events
-- width length(mm) / events
-- width length(pc) / events
-- width length(pt) / events
-- width length(px) / events
-- width percentage(%) / events
 - word-spacing length(cm) / events
 - word-spacing length(cm) / values
 - word-spacing length(em) / events
@@ -4957,37 +4471,8 @@ css/css-transitions/properties-value-inherit-002.html:
 - z-index integer(integer) / events
 - z-index integer(integer) / values
 css/css-transitions/properties-value-inherit-003.html:
-- background-position-x length-em(em) / events
-- border-bottom-width length-em(em) / events
-- border-left-width length-em(em) / events
-- border-right-width length-em(em) / events
-- border-top-width length-em(em) / events
-- bottom length-em(em) / events
-- height length-em(em) / events
-- left length-em(em) / events
-- letter-spacing length-em(em) / events
-- line-height length-em(em) / events
-- margin-bottom length-em(em) / events
-- margin-left length-em(em) / events
-- margin-right length-em(em) / events
-- margin-top length-em(em) / events
-- max-height length-em(em) / events
-- max-width length-em(em) / events
-- min-height length-em(em) / events
-- min-width length-em(em) / events
-- outline-offset length-em(em) / events
 - outline-width length-em(em) / events
 - outline-width length-em(em) / values
-- padding-bottom length-em(em) / events
-- padding-left length-em(em) / events
-- padding-right length-em(em) / events
-- padding-top length-em(em) / events
-- right length-em(em) / events
-- text-indent length-em(em) / events
-- top length-em(em) / events
-- vertical-align length-em(em) / events
-- width length-em(em) / events
-- word-spacing length-em(em) / events
 css/css-transitions/pseudo-element-transform.html:
 - "== css/css-transitions/pseudo-element-transform-ref.html (never ready to capture)"
 css/css-transitions/pseudo-elements-001.html:
@@ -5028,15 +4513,10 @@ css/css-transitions/transition-base-response-002.html:
 - Transitioning font-size on root affects rem units
 css/css-transitions/transition-base-response-003.html:
 - Identical elements are all responsive to font-size transition
-css/css-transitions/transition-behavior-events.html:
-- transitionrun events
-- transitionstart events
 css/css-transitions/transition-behavior.html:
 - transition-behavior changed to normal should stop the running discrete transitions.
 - transition-behavior:allow-discrete overlaps the previous normal value.
 - transition-behavior:allow-discrete should animate discrete properties.
-- transition-behavior:allow-discrete should animate for values fallback to discrete
-  animations.
 - transition-behavior:normal should cancel the running transitions whose animation
   values are not interpolatable
 css/css-transitions/transition-delay-001.html:
@@ -5047,46 +4527,16 @@ css/css-transitions/transition-duration-001.html:
 - parse 'foobar'
 css/css-transitions/transition-events-with-document-change.html:
 - transition events for an element changing document
-css/css-transitions/transition-in-iframe-001.html:
-- 'Transitions: Transition in <iframe> on page with empty rAF finishes'
 css/css-transitions/transition-property-002.html:
 - parse 'all, none'
 - parse 'none, all'
-css/css-transitions/transition-remove-and-change-immediate.html:
-- Removing transition and changing width applies change immediately
 css/css-transitions/transition-reparented.html:
 - When an element is reparented, any CSS Transition on it should be cancelled
-css/css-transitions/transition-zero-duration-with-delay.html:
-- 0-duration transition with delay applies change after delay period
 css/css-transitions/transitioncancel-001.html:
 - transitioncancel should be fired if the element is made display:none during the
   transition
 css/css-transitions/transitioncancel-002.html:
 - Removing a transitioning property from transition-property should trigger transitioncancel
-css/css-transitions/transitioncancel-003.html:
-- Mid-transition transition changes affect subsequent transitions
-css/css-transitions/transitionevent-interface.html:
-- Missing type argument
-- elapsedTime cannot be set to 'sample'
-- elapsedTime cannot be set to -Infinity
-- elapsedTime cannot be set to Infinity
-- elapsedTime cannot be set to NaN
-- elapsedTime cannot be set to [0.5, 1.0]
-- elapsedTime cannot be set to an object
-- elapsedTime is readonly
-- elapsedTime set to [0.5]
-- elapsedTime set to []
-- elapsedTime set to an object with a valueOf function
-- elapsedTime set to true
-- propertyName is readonly
-- propertyName set to [1, 2, 3]
-- propertyName set to []
-- propertyName set to a number
-- propertyName set to an object
-- propertyName set to an object with a valueOf function
-- propertyName set to false
-- propertyName set to null
-- propertyName set to true
 css/css-transitions/transitions-retarget.html:
 - Retargeting a transition should cause the old transition to be cancelled
 css/css-transitions/unregistered-custom-property-transition.html:
@@ -9845,16 +9295,10 @@ web-animations/responsive/lineHeight.html:
 - lineHeight responsive to inherited changes from keyword
 - lineHeight responsive to inherited changes from number
 - lineHeight responsive to style changes
-web-animations/responsive/multiple-properties-delayed-important.html:
-- "== web-animations/responsive/multiple-properties-delayed-important-ref.html (never
-  ready to capture)"
 web-animations/responsive/offset-path.html:
 - offset-path responsive to inherited offset-path changes
 web-animations/responsive/offsetRotate.html:
 - offsetRotate responsive to inherited offsetRotate changes
-web-animations/responsive/opacity-with-delayed-important.html:
-- "== web-animations/responsive/opacity-with-delayed-important-ref.html (never ready
-  to capture)"
 web-animations/responsive/opacity.html:
 - fillOpacity responsive to inherited changes
 - floodOpacity responsive to inherited changes
@@ -9889,9 +9333,6 @@ web-animations/responsive/to-style-change.html:
 - Percentages responsive to width style changes
 web-animations/responsive/toggle-animated-iframe-visibility.html:
 - "== web-animations/responsive/toggle-animated-iframe-visibility-ref.html"
-web-animations/responsive/tramsform-with-delayed-important.html:
-- "== web-animations/responsive/transform-with-delayed-important-ref.html (never ready
-  to capture)"
 web-animations/responsive/transform.html:
 - Transform responsive to font size changes
 web-animations/responsive/translate.html:
@@ -10133,7 +9574,6 @@ web-animations/timing-model/timelines/update-and-send-events-replacement.html:
 - Dispatches an event when removing
 - Dispatches remove events after finish events
 - Does NOT dispatch a remove event twice
-- Does NOT remove a CSS animation tied to markup
 - Does NOT remove a CSS transition tied to markup
 - Does NOT remove an animation after making a redundant change to another animation's
   current time
