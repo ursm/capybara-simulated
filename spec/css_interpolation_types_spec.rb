@@ -406,4 +406,101 @@ RSpec.describe 'CSS interpolation types' do
         .to eq('calc(4% + 130px)')
     end
   end
+  # The classes a second adversarial review found unpinned — each is a Chrome measurement, and each
+  # is a rule this file's other examples pass whichever way it goes.
+  describe 'the edges of the model' do
+    # A SYNTHESISED end — the one a single-keyframe effect gets for free — IS the underlying value,
+    # and composites with nothing. Only the keyframes the page wrote do.
+    it 'does not composite a neutral end' do
+      s = page('<div id="a" style="opacity:0.5"></div>')
+      expect(s.evaluate_script(<<~JS)).to eq(%w[0.5 0.7])
+        (function () {
+          const el = document.getElementById('a');
+          const anim = el.animate([{ opacity: '0.2', offset: 1, composite: 'add' }],
+                                  { duration: 1000, fill: 'both' });
+          anim.pause();
+          const out = [];
+          for (const t of [0, 1000]) { anim.currentTime = t; out.push(getComputedStyle(el).opacity); }
+          return out;
+        })()
+      JS
+    end
+
+    # A shadow endpoint that resolved `currentcolor` is only good while that colour is — and the
+    # colour may be the PARENT's, which no style epoch here moves.
+    it 'follows a colour the parent changes mid-animation' do
+      s = page('<div id="p"><div id="a"></div></div>')
+      expect(s.evaluate_script(<<~JS)).to eq(['rgb(0, 255, 0) 5px 5px 5px 5px', 'rgb(0, 0, 255) 5px 5px 5px 5px'])
+        (function () {
+          const el = document.getElementById('a');
+          const anim = el.animate([{ boxShadow: 'currentcolor 0px 0px 0px 0px' },
+                                   { boxShadow: 'currentcolor 10px 10px 10px 10px' }],
+                                  { duration: 1000, fill: 'both' });
+          anim.pause();
+          anim.currentTime = 500;
+          const before = getComputedStyle(el).boxShadow;
+          document.getElementById('p').style.color = 'rgb(0, 0, 255)';
+          return [before, getComputedStyle(el).boxShadow];
+        })()
+      JS
+    end
+
+    # An `animation-composition` list is valid WHOLE or not at all: one unknown keyword drops the
+    # declaration, where repairing it item by item let a typo change a rendered number.
+    it 'drops an animation-composition list with an unknown keyword' do
+      s = page('<div id="a"></div>', <<~CSS)
+        @keyframes k { from { opacity: 0 } to { opacity: 0.4 } }
+        div { opacity: 0.5; animation: k 1s linear both; animation-delay: -500ms;
+              animation-composition: add, bogus }
+      CSS
+      expect(s.evaluate_script("getComputedStyle(document.getElementById('a')).opacity")).to eq('0.2')
+    end
+
+    # A CUSTOM property's computed value is its specified token stream: the canonical order a
+    # length-percentage mixture takes is for the properties that HAVE a type.
+    it 'never reorders a custom property' do
+      s = page('<div id="a" style="--z: calc(5px + 10%)"></div>')
+      expect(s.evaluate_script("getComputedStyle(document.getElementById('a')).getPropertyValue('--z')"))
+        .to eq('calc(5px + 10%)')
+    end
+
+    # A filter amount is CAPPED where the function is a proportion, uncapped where it is a gain,
+    # and NEGATIVE nowhere — a negative one is an invalid declaration, and the property reports its
+    # initial. `inset` is a `box-shadow` word: a `text-shadow` or a `drop-shadow()` with one is
+    # invalid too, rather than a shadow with an extra flag.
+    it 'validates a filter and a shadow the way their grammars do' do
+      s = page(<<~HTML)
+        <div id="a" style="filter: grayscale(150%)"></div>
+        <div id="b" style="filter: brightness(150%)"></div>
+        <div id="c" style="filter: saturate(-10%)"></div>
+        <div id="d" style="filter: drop-shadow(1px 1px 1px inset)"></div>
+        <div id="e" style="text-shadow: rgb(0,0,0) 1px 1px 1px inset"></div>
+        <div id="f" style="text-shadow: rgb(0,0,0) 1px 1px 1px 1px"></div>
+        <div id="g" style="filter: url(#f)"></div>
+      HTML
+      expect(s.evaluate_script(<<~JS)).to eq(['grayscale(1)', 'brightness(1.5)', 'none', 'none', 'none', 'none', 'url("#f")'])
+        ['a', 'b', 'c', 'd', 'e', 'f', 'g'].map((id) => {
+          const el = document.getElementById(id);
+          return getComputedStyle(el)[id === 'e' || id === 'f' ? 'textShadow' : 'filter'];
+        })
+      JS
+    end
+
+    # A transform list accumulates by concatenation where its functions do not line up — unless it
+    # holds a SINGULAR matrix, which there is no accumulating onto: the effect's value stands
+    # alone. (A `matrix3d` is reported as the page wrote it: this engine composes the 2D matrices
+    # only, which is the 3D serialization gap the module header lists.)
+    it 'refuses to accumulate onto a singular matrix' do
+      singular3d = 'matrix3d(0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1)'
+      expect(midpoint('transform', singular3d, singular3d,
+                      composite: 'accumulate', style: 'transform: translateX(10px)')).to eq(singular3d)
+      expect(midpoint('transform', 'matrix(1, 1, 0, 0, 0, 100)', 'matrix(1, 1, 0, 0, 0, 100)',
+                      composite: 'accumulate', style: 'transform: translateX(10px)'))
+        .to eq('matrix(1, 1, 0, 0, 0, 100)')
+      # …where an INVERTIBLE one concatenates onto what is underneath.
+      expect(midpoint('transform', 'matrix(2, 0, 0, 2, 0, 0)', 'matrix(2, 0, 0, 2, 0, 0)',
+                      composite: 'accumulate', style: 'transform: translateX(10px)'))
+        .to eq('matrix(2, 0, 0, 2, 10, 0)')
+    end
+  end
 end
