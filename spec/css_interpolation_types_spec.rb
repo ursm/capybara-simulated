@@ -1,0 +1,316 @@
+# frozen_string_literal: true
+
+require 'capybara/simulated'
+require_relative 'support/session_teardown'
+
+# How two values of a LIST-valued property are combined — shadows, filters and transforms — and
+# what `composite: add` / `accumulate` do with them. These are the properties pages actually
+# animate, and until now each of them flipped discretely at the half-way point.
+#
+# Every figure is Chrome 151-measured on this machine.
+RSpec.describe 'CSS interpolation types' do
+  def page(markup, style = '')
+    html = %(<!DOCTYPE html><html><head><meta charset="utf-8"><style>
+               body { margin: 0; color: rgb(0, 255, 0) }
+               div { width: 100px; height: 100px }
+               #{style}
+             </style></head><body>#{markup}</body></html>)
+    s = simulated_session(->(_env) { [200, {'content-type' => 'text/html'}, [html]] })
+    s.visit '/'
+    s
+  end
+
+  # Half way through an animation between the two values, read back as the computed value.
+  def midpoint(prop, from, to, opts = {})
+    s = page(%(<div id="a" style="#{opts[:style]}"></div>), opts[:sheet].to_s)
+    s.evaluate_script(<<~JS)
+      (function () {
+        const el = document.getElementById('a');
+        const anim = el.animate([{ #{opts[:composite] ? "composite: #{opts[:composite].inspect}, " : ''}#{prop.inspect}: #{from.inspect} },
+                                 { #{opts[:composite] ? "composite: #{opts[:composite].inspect}, " : ''}#{prop.inspect}: #{to.inspect} }],
+                                { duration: 1000, fill: 'both'#{opts[:easing] ? ", easing: #{opts[:easing].inspect}" : ''} });
+        anim.pause();
+        anim.currentTime = 500;
+        return getComputedStyle(el).getPropertyValue(#{cssName(prop).inspect});
+      })()
+    JS
+  end
+
+  def cssName(idl) = idl.gsub(/[A-Z]/) { |m| "-#{m.downcase}" }
+
+  describe 'shadow lists' do
+    # A shadow list interpolates COMPONENTWISE, and `none` is a list of zero shadows — so it
+    # interpolates against each entry's identity, a transparent shadow with every length at zero.
+    it 'interpolates each shadow against its opposite number' do
+      expect(midpoint('boxShadow', 'rgb(0,0,0) 0px 0px 0px 0px', 'rgb(100,100,100) 10px 10px 10px 0px'))
+        .to eq('rgb(50, 50, 50) 5px 5px 5px 0px')
+      expect(midpoint('boxShadow', 'none', 'rgba(100,100,100,1) 10px 10px 10px 0px'))
+        .to eq('rgba(100, 100, 100, 0.5) 5px 5px 5px 0px')
+    end
+
+    # A shorter list is padded with that identity too, so the lists always line up.
+    it 'pads the shorter list' do
+      expect(midpoint('boxShadow', 'rgb(200,200,200) 20px 20px 20px 20px',
+                      'rgb(100,100,100) 10px 10px 10px 0px, rgb(100,100,100) 10px 10px 10px 0px'))
+        .to eq('rgb(150, 150, 150) 15px 15px 15px 10px, rgba(100, 100, 100, 0.5) 5px 5px 5px 0px')
+    end
+
+    # `currentcolor` is the element's own colour, resolved before anything is mixed.
+    it 'resolves currentcolor first' do
+      expect(midpoint('boxShadow', 'currentcolor 0px 0px 0px 0px', 'rgb(0,255,0) 10px 10px 10px 10px'))
+        .to eq('rgb(0, 255, 0) 5px 5px 5px 5px')
+    end
+
+    # …and each property serializes with the lengths it actually takes: a `text-shadow` has an
+    # offset and a blur, a `box-shadow` a spread as well.
+    it 'serializes each shadow with its own lengths' do
+      expect(midpoint('textShadow', 'rgb(0,0,0) 0px 0px 0px', 'rgb(100,100,100) 10px 10px 10px'))
+        .to eq('rgb(50, 50, 50) 5px 5px 5px')
+    end
+  end
+
+  describe 'filter lists' do
+    # Each function against its opposite number, and `none` against each function's OWN identity —
+    # zero for a blur, one for a brightness.
+    it 'interpolates each function against its identity' do
+      expect(midpoint('filter', 'blur(0px)', 'blur(10px)')).to eq('blur(5px)')
+      expect(midpoint('filter', 'none', 'blur(10px) brightness(0.5)')).to eq('blur(5px) brightness(0.75)')
+    end
+  end
+
+  describe 'transforms' do
+    # Componentwise where the lists name the same functions, `none` standing for each function's
+    # identity — reported as the matrix a page reads back.
+    it 'interpolates a matching function list' do
+      expect(midpoint('transform', 'translateX(0px)', 'translateX(100px)')).to eq('matrix(1, 0, 0, 1, 50, 0)')
+      expect(midpoint('transform', 'none', 'translateX(100px)')).to eq('matrix(1, 0, 0, 1, 50, 0)')
+      expect(midpoint('transform', 'translateX(0px) scale(1)', 'translateX(100px) scale(3)'))
+        .to eq('matrix(2, 0, 0, 2, 50, 0)')
+      expect(midpoint('transform', 'rotate(0deg)', 'rotate(90deg)'))
+        .to eq('matrix(0.707107, 0.707107, -0.707107, 0.707107, 0, 0)')
+    end
+
+    # Two lists naming DIFFERENT functions are the gap: the spec decomposes each into translate /
+    # rotate / scale / skew and interpolates those. `transformMatrix` already composes the matrix,
+    # so what is missing is the DECOMPOSITION — a backlog item, not a wall — and until it lands
+    # these flip discretely. Chrome reports `matrix(2, 0, 0, 2, 0, 0)` here.
+    it 'flips a mismatched function list discretely (a listed gap)' do
+      expect(midpoint('transform', 'translateX(0px)', 'scale(3)')).to eq('matrix(3, 0, 0, 3, 0, 0)')
+    end
+  end
+
+  describe 'composite operations' do
+    # A number, a length and a colour ADD to the value underneath.
+    it 'sums a numeric or colour value with the underlying one' do
+      expect(midpoint('marginLeft', '0px', '20px', composite: 'add', style: 'margin-left:10px')).to eq('20px')
+      expect(midpoint('opacity', '0', '0.4', composite: 'add', style: 'opacity:0.5')).to eq('0.7')
+      expect(midpoint('backgroundColor', 'rgb(0,0,0)', 'rgb(100,100,100)',
+                      composite: 'add', style: 'background-color:rgb(10,20,30)')).to eq('rgb(60, 70, 80)')
+    end
+
+    # A LIST adds by CONCATENATION — the underlying list, then the effect's.
+    it 'concatenates a list with the underlying one' do
+      expect(midpoint('boxShadow', 'rgb(0,0,0) 0px 0px 0px 0px', 'rgb(100,100,100) 10px 10px 10px 10px',
+                      composite: 'add', style: 'box-shadow: rgb(10,10,10) 1px 1px 1px 1px'))
+        .to eq('rgb(10, 10, 10) 1px 1px 1px 1px, rgb(50, 50, 50) 5px 5px 5px 5px')
+      expect(midpoint('filter', 'blur(0px)', 'blur(10px)', composite: 'add', style: 'filter: blur(1px)'))
+        .to eq('blur(1px) blur(5px)')
+      expect(midpoint('transform', 'translateX(0px)', 'translateX(100px)',
+                      composite: 'add', style: 'transform: translateX(10px)'))
+        .to eq('matrix(1, 0, 0, 1, 60, 0)')
+    end
+
+    # ACCUMULATION is not addition for a list: entries that line up combine, and where they do not
+    # line up at all the effect's value replaces.
+    it 'accumulates entry by entry, and replaces where they do not line up' do
+      expect(midpoint('filter', 'blur(0px)', 'blur(10px)',
+                      composite: 'accumulate', style: 'filter: blur(1px)')).to eq('blur(6px)')
+      expect(midpoint('filter', 'brightness(1)', 'brightness(1)',
+                      composite: 'accumulate', style: 'filter: blur(1px)')).to eq('brightness(1)')
+    end
+
+    # Addition is only defined where the type supports it. A track list is not a number just
+    # because it holds one, and mdn types `font-variation-settings` as a transform — neither adds.
+    it 'leaves a type that does not add alone' do
+      expect(midpoint('gridAutoColumns', '1px', '1px', composite: 'add', style: 'grid-auto-columns:5px'))
+        .to eq('1px')
+    end
+  end
+  # An easing that overshoots — the "back" easings every UI library ships — drives a value PAST its
+  # endpoints, and what stops it there is the value's own range rather than the progress.
+  UNDERSHOOT = 'cubic-bezier(0, -2, 1, 1)'
+  OVERSHOOT  = 'cubic-bezier(0, 0, 1, 3)'
+
+  describe 'ranges' do
+    # Every filter function floors at zero; the four that are PROPORTIONS also cap at one, while
+    # the gain functions have no ceiling at all (Chrome-measured, all four).
+    it 'clamps a filter function to its own range' do
+      expect(midpoint('filter', 'blur(0px)', 'blur(100px)', easing: UNDERSHOOT)).to eq('blur(0px)')
+      expect(midpoint('filter', 'brightness(0)', 'brightness(1)', easing: UNDERSHOOT)).to eq('brightness(0)')
+      expect(midpoint('filter', 'grayscale(0)', 'grayscale(1)', easing: OVERSHOOT)).to eq('grayscale(1)')
+    end
+
+    # In a shadow only the BLUR has a floor: an offset and a spread are real negative lengths.
+    it 'lets a shadow offset go negative but not its blur' do
+      expect(midpoint('boxShadow', 'rgb(0,0,0) 0px 0px 0px 0px', 'rgb(0,0,0) 40px 40px 40px 40px',
+                      easing: UNDERSHOOT))
+        .to eq('rgb(0, 0, 0) -10px -10px 0px -10px')
+    end
+
+    # Past an OPAQUE endpoint the channels go on climbing: the alpha clamps at 1 before the colour
+    # un-premultiplies, or dividing by it would undo the extrapolation.
+    it 'extrapolates a colour past an opaque endpoint' do
+      expect(midpoint('backgroundColor', 'rgba(0,128,0,0)', 'rgb(0,128,0)', easing: OVERSHOOT))
+        .to eq('rgb(0, 160, 0)')
+    end
+  end
+
+  describe 'serialization' do
+    # Alpha lives in eight bits like every other channel, and reports as the SHORTEST decimal that
+    # rounds back to its byte — 128 is `0.5`, 192 is `0.753`, and a shadow is no different.
+    it 'reports the shortest alpha that rounds back to its byte' do
+      expect(midpoint('backgroundColor', 'rgba(255,0,0,1)', 'rgba(0,0,255,0)')).to eq('rgba(255, 0, 0, 0.5)')
+      expect(midpoint('boxShadow', 'rgba(255,0,0,1) 0px 0px', 'rgba(0,0,255,0.5) 10px 10px'))
+        .to eq('rgba(170, 0, 85, 0.753) 5px 5px 0px 0px')
+    end
+
+    # Six SIGNIFICANT digits, which is what a browser reports for a third of a hundred pixels.
+    it 'reports six significant digits' do
+      s = page('<div id="a"></div>')
+      value = s.evaluate_script(<<~JS)
+        (function () {
+          const el = document.getElementById('a');
+          const anim = el.animate([{ marginLeft: '0px' }, { marginLeft: '100px' }],
+                                  { duration: 3000, fill: 'both' });
+          anim.pause();
+          anim.currentTime = 1000;
+          return getComputedStyle(el).marginLeft;
+        })()
+      JS
+      expect(value).to eq('33.3333px')
+    end
+
+    # A length mixed with a percentage is the `calc()` a browser writes: the percentage first, a
+    # negative length SUBTRACTED, and a length that has reached zero absorbed altogether.
+    it 'writes a mixed length and percentage as calc()' do
+      expect(midpoint('textIndent', '0px', '50%')).to eq('25%')
+      expect(midpoint('textIndent', '10px', '50%')).to eq('calc(25% + 5px)')
+      expect(midpoint('textIndent', '-10px', '50%')).to eq('calc(25% - 5px)')
+    end
+  end
+
+  describe 'the computed value an endpoint is written in' do
+    # Both ends of an interpolation go through the property's OWN computed-value serializer, so
+    # they are comparable: a filter's angle in degrees and its proportions as plain numbers, a
+    # shadow's colour first and resolved. Without that, mixing a `1turn` with a `0deg` took the
+    # first unit it saw and reported half a degree.
+    it 'normalizes a filter to its canonical units' do
+      s = page('<div id="a" style="filter: hue-rotate(1turn) brightness(50%) drop-shadow(10px 10px red)"></div>')
+      expect(s.evaluate_script("getComputedStyle(document.getElementById('a')).filter"))
+        .to eq('hue-rotate(360deg) brightness(0.5) drop-shadow(rgb(255, 0, 0) 10px 10px 0px)')
+      expect(midpoint('filter', 'hue-rotate(0deg)', 'hue-rotate(1turn)')).to eq('hue-rotate(180deg)')
+    end
+
+    # An OMITTED filter argument is the function's default, which is not its identity: `grayscale()`
+    # is fully grey, `blur()` no blur at all.
+    it 'fills in an omitted filter argument' do
+      s = page('<div id="a" style="filter: grayscale() blur() drop-shadow(1em 1em)"></div>')
+      expect(s.evaluate_script("getComputedStyle(document.getElementById('a')).filter"))
+        .to eq('grayscale(1) blur(0px) drop-shadow(rgb(0, 255, 0) 16px 16px 0px)')
+    end
+
+    it 'resolves currentcolor in a computed shadow' do
+      s = page('<div id="a" style="box-shadow: currentcolor 10px 10px"></div>')
+      expect(s.evaluate_script("getComputedStyle(document.getElementById('a')).boxShadow"))
+        .to eq('rgb(0, 255, 0) 10px 10px 0px 0px')
+    end
+
+    # A `drop-shadow()` IS a shadow, and interpolates as one.
+    it 'interpolates a drop-shadow' do
+      expect(midpoint('filter', 'none', 'drop-shadow(rgb(100,100,100) 10px 10px 10px)'))
+        .to eq('drop-shadow(rgba(100, 100, 100, 0.5) 5px 5px 5px)')
+    end
+
+    # A transform's PERCENTAGES resolve against the element's own border box, which is what makes
+    # a `translateX(20px)` to `translateX(50%)` pair a real interpolation rather than a flip. The
+    # box here is the 100px-wide one every test in this file uses, so half way is 35 — the same
+    # rule Chrome shows at 60 on a 200px box.
+    it 'resolves a translate percentage against the box' do
+      expect(midpoint('transform', 'translateX(20px)', 'translateX(50%)')).to eq('matrix(1, 0, 0, 1, 35, 0)')
+    end
+  end
+
+  describe 'more of the transform list' do
+    # An OMITTED argument is what the function means without it: `scale(2)` is `scale(2, 2)`, where
+    # `translate(10px)` is `translate(10px, 0)` — so a pair with different argument counts lines up.
+    it 'fills in an omitted transform argument' do
+      expect(midpoint('transform', 'scale(2)', 'scale(4, 6)')).to eq('matrix(3, 0, 0, 4, 0, 0)')
+      expect(midpoint('transform', 'translate(10px)', 'translate(30px, 40px)'))
+        .to eq('matrix(1, 0, 0, 1, 20, 20)')
+    end
+
+    # `none` is a keyword, not a string to compare.
+    it 'reads none case-insensitively' do
+      expect(midpoint('transform', 'NONE', 'translateX(100px)')).to eq('matrix(1, 0, 0, 1, 50, 0)')
+    end
+
+    # A `perspective()` interpolates its RECIPROCAL — half way from no perspective to 100px is 200,
+    # not 50 (Chrome-measured, as the `-0.005` of the matrix it reports). Chrome reports the whole
+    # value as a `matrix3d`; this engine does not model a 3D matrix and reports the function list,
+    # which is a separate listed gap.
+    it 'interpolates a perspective as its reciprocal' do
+      expect(midpoint('transform', 'none', 'perspective(100px)')).to eq('perspective(200px)')
+    end
+  end
+
+  describe 'more composite operations' do
+    # Accumulation is `a + b` only where the identity is ZERO. Everywhere else the identity comes
+    # off once, or two brightnesses accumulate to five where Chrome reports four.
+    it 'subtracts the identity when it accumulates' do
+      expect(midpoint('filter', 'brightness(3)', 'brightness(3)',
+                      composite: 'accumulate', style: 'filter: brightness(2)')).to eq('brightness(4)')
+      expect(midpoint('transform', 'scale(3)', 'scale(3)',
+                      composite: 'accumulate', style: 'transform: scale(2)')).to eq('matrix(4, 0, 0, 4, 0, 0)')
+    end
+
+    # A SHADOW list accumulates componentwise as well — it is a list like any other — and a list
+    # shorter than the other is padded rather than dropped.
+    it 'accumulates a shadow list and pads a ragged one' do
+      expect(midpoint('boxShadow', 'rgb(10,0,0) 3px 3px 3px 3px', 'rgb(10,0,0) 3px 3px 3px 3px',
+                      composite: 'accumulate', style: 'box-shadow: rgb(20,0,0) 2px 2px 2px 2px'))
+        .to eq('rgb(30, 0, 0) 5px 5px 5px 5px')
+      expect(midpoint('filter', 'blur(3px) brightness(3)', 'blur(3px) brightness(3)',
+                      composite: 'accumulate', style: 'filter: blur(2px)')).to eq('blur(5px) brightness(3)')
+    end
+
+    # Two colours whose alphas MATCH add channel by channel and keep that alpha; two whose alphas
+    # differ add premultiplied and take the sum (Chrome-measured, both).
+    it 'adds two colours by their alphas' do
+      expect(midpoint('backgroundColor', 'rgba(40,50,60,0.5)', 'rgba(40,50,60,0.5)',
+                      composite: 'add', style: 'background-color: rgba(10,20,30,0.5)'))
+        .to eq('rgba(50, 70, 90, 0.5)')
+      expect(midpoint('backgroundColor', 'rgba(255,0,0,0.3)', 'rgba(255,0,0,0.3)',
+                      composite: 'add', style: 'background-color: rgba(0,0,255,0.2)'))
+        .to eq('rgba(153, 0, 102, 0.5)')
+    end
+
+    # A LENGTH composes only where the property really is one value: `font-size` adds, and the
+    # track list two lines below does not (both Chrome-measured).
+    it 'adds a length where the property composes one' do
+      expect(midpoint('fontSize', '20px', '20px', composite: 'add', style: 'font-size:10px')).to eq('30px')
+    end
+  end
+
+  # `letter-spacing: normal` IS a zero spacing, where for most properties `normal` is a keyword
+  # with nothing behind it.
+  it 'interpolates letter-spacing from normal as from zero' do
+    expect(midpoint('letterSpacing', 'normal', '10px')).to eq('5px')
+  end
+
+  # An `inset` shadow interpolates against an inset identity — padding `none` with an outset one
+  # would be a pair that disagrees, and disagreeing is what makes a shadow list flip discretely.
+  it 'pads none with the other side\'s inset' do
+    expect(midpoint('boxShadow', 'none', 'rgb(100,100,100) 10px 10px 10px 10px inset'))
+      .to eq('rgba(100, 100, 100, 0.5) 5px 5px 5px 5px inset')
+  end
+end

@@ -184,6 +184,31 @@ for (const name of longhands) {
   const t = props[name].animationType;
   if (typeof t === 'string' && t.indexOf(',') === -1) animationTypes[name] = t;
 }
+// Types the property's own spec has moved on from since mdn recorded them. `letter-spacing` and
+// `word-spacing` take a percentage in css-text-4 and interpolate as one (Chrome-measured), where
+// mdn still calls them plain lengths.
+const ANIMATION_TYPE_FIXES = { 'letter-spacing': 'lpc', 'word-spacing': 'lpc' };
+for (const [name, type] of Object.entries(ANIMATION_TYPE_FIXES)) {
+  if (animationTypes[name]) animationTypes[name] = type;
+}
+
+// A property interpolated "by computed value" composes a plain NUMBER with the one underneath it
+// whenever `composite: add` asks for it — but a LENGTH only where the property really is one
+// value rather than a list, and mdn's data does not say which. Measured in Chrome, property by
+// property: `font-size` and `stroke-width` add their lengths, `grid-auto-columns` and
+// `scroll-margin-top` replace (Chrome interpolates neither of those two at all — they are
+// discrete there, so nothing composes onto them). The SVG geometry properties were measured
+// through `x` / `y` / `r` / `rx`; their three siblings follow them.
+const ADDS_DIMENSION = [
+  'baseline-shift', 'border-image-outset', 'border-image-slice', 'border-image-width',
+  'column-height', 'column-width', 'contain-intrinsic-block-size', 'contain-intrinsic-height',
+  'contain-intrinsic-inline-size', 'contain-intrinsic-width', 'cx', 'cy', 'font-size',
+  'font-stretch', 'font-width', 'r', 'rx', 'ry', 'stroke-dashoffset', 'stroke-width',
+  'text-size-adjust', 'text-underline-offset', 'x', 'y'
+].filter((name) => longhands.includes(name));
+const addsDimension = {};
+for (const name of ADDS_DIMENSION) addsDimension[name] = true;
+
 
 // Every BARE KEYWORD a property's grammar admits, followed through `<'property'>` and `<type>`
 // references — the data a full grammar validator would consult, reduced to the one question the
@@ -308,6 +333,12 @@ export const INHERITED_PROPERTIES = new Set(${JSON.stringify(inherited)});
 // tail of per-property rules). A name the interpolation engine doesn't implement interpolates
 // discretely, which is what the spec says an uninterpolable pair does anyway.
 export const ANIMATION_TYPES = bare(${JSON.stringify(animationTypes, null, 0)});
+
+// The "by computed value" properties whose LENGTH or PERCENTAGE composes with the value underneath
+// it under \`composite: add\`, rather than replacing it. A plain number always composes, so only
+// the dimensioned ones need listing.
+export const ADDS_DIMENSION = bare(${JSON.stringify(addsDimension, null, 0)});
+
 
 // Longhand → the numeric LOWER BOUND its grammar imposes. An interpolation that extrapolates past
 // it clamps: a \`flex-grow\` animation seeking before its start reports 0, not a negative number.
