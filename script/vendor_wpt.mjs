@@ -159,6 +159,19 @@ const TREES = [
                                        // HARNESS-ONLY (see below): the tree is ~2000 files and three
                                        // quarters of them are reftests, which compare rendered pixels and
                                        // are not something this driver can ever answer.
+  'css/css-animations',                // `@keyframes` + `animation-*` — the timing model, the keyframe
+  'css/css-transitions',               // cascade, the events, and the transition's own start / reverse /
+                                       // cancel rules. The driver models both as a VALUE (`js/src/
+                                       // animation.js`: at the moment a property is asked for, the
+                                       // animation's local time says where between its keyframes it is), and
+                                       // until these were vendored the only thing measuring that was the
+                                       // css-flexbox interpolation harness — which seeks with a negative
+                                       // delay and so exercises exactly one point of the timing model.
+  'web-animations',                    // The API the same model is reached through from script:
+                                       // `element.animate` / `Animation` / `KeyframeEffect` /
+                                       // `getAnimations`, plus the timing algorithms all three specs share.
+                                       // Every motion library (motion-one, GSAP's WAAPI path, Turbo's view
+                                       // transitions) drives animation through this rather than through CSS.
 ];
 
 // Trees vendored HARNESS-ONLY: everything under `support/` plus the `.html` tests that actually

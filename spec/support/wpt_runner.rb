@@ -919,7 +919,7 @@ module WptRunner
   # interception against the real SW runtime) plus committed local `csim-*` fixtures
   # (vendor_wpt.mjs's cleanTree preserves the prefix). Keep this list in sync with the
   # vendor manifest in script/vendor_wpt.mjs.
-  TREES = '{dom,domparsing,hr-time,url,encoding,shadow-dom,css/css-shadow/part,FileAPI,html/dom,html/webappapis/timers,html/webappapis/microtask-queuing,html/webappapis/scripting/events,html/semantics/forms,custom-elements,html/webappapis/atob,html/webappapis/structured-clone,webmessaging,input-events,xhr,fetch/api,fetch/data-urls,fetch/h1-parsing,css/cssom,css/css-logical,html/canvas/element,html/rendering,css/css-flexbox,service-workers,websockets,webstorage,WebCryptoAPI}'
+  TREES = '{dom,domparsing,hr-time,url,encoding,shadow-dom,css/css-shadow/part,FileAPI,html/dom,html/webappapis/timers,html/webappapis/microtask-queuing,html/webappapis/scripting/events,html/semantics/forms,custom-elements,html/webappapis/atob,html/webappapis/structured-clone,webmessaging,input-events,xhr,fetch/api,fetch/data-urls,fetch/h1-parsing,css/cssom,css/css-logical,html/canvas/element,html/rendering,css/css-flexbox,css/css-animations,css/css-transitions,web-animations,service-workers,websockets,webstorage,WebCryptoAPI}'
 
   # `.any.js` / `.window.js` trees safe to scan: url/ + encoding/ + the html/
   # event-loop oracle + xhr/ + html/dom/ + html/semantics/forms/ + atob/
@@ -932,7 +932,7 @@ module WptRunner
   # under a hard `timeout -s KILL` and found crasher-free — the earlier
   # infinite-loop concern was in dom/ HTML files, not this JS slice. (.tentative
   # files auto-route to out-of-scope, so a tentative window.js here self-excludes.)
-  JS_TREES = '{dom,hr-time,url,encoding,FileAPI,html/webappapis/timers,html/webappapis/microtask-queuing,html/webappapis/scripting/events,xhr,html/dom,html/semantics/forms,custom-elements,html/rendering,html/webappapis/atob,html/webappapis/structured-clone,webmessaging,input-events,fetch/api,fetch/data-urls,fetch/h1-parsing,service-workers/cache-storage,webstorage,websockets,WebCryptoAPI}'
+  JS_TREES = '{dom,hr-time,url,encoding,FileAPI,html/webappapis/timers,html/webappapis/microtask-queuing,html/webappapis/scripting/events,xhr,html/dom,html/semantics/forms,custom-elements,html/rendering,html/webappapis/atob,html/webappapis/structured-clone,webmessaging,input-events,fetch/api,fetch/data-urls,fetch/h1-parsing,service-workers/cache-storage,webstorage,websockets,web-animations,WebCryptoAPI}'
 
   def test_files
     @test_files ||= (harness_files + js_files + reftest_files).sort
