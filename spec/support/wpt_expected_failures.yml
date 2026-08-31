@@ -6155,8 +6155,6 @@ shadow-dom/slot-fallback-content-008.html:
 shadow-dom/untriaged/html-elements-in-shadow-trees/inert-html-elements/test-001.html:
 - A_08_01_01_T01
 web-animations/animation-model/animation-types/accumulation-per-property-001.html:
-- 'background-blend-mode: "multiply" onto "screen"'
-- 'background-blend-mode: "screen" onto "multiply"'
 - background-color supports animating as color of rgb() with overflowed  from and
   to values
 - 'block-step-align: "auto" onto "center"'
@@ -6193,10 +6191,6 @@ web-animations/animation-model/animation-types/accumulation-per-property-001.htm
 - 'buffered-rendering: "dynamic" onto "auto"'
 - caret-color supports animating as color of rgb() with overflowed  from and to values
 - 'clip: rect'
-- 'color supports animating as color of #RGB'
-- 'color supports animating as color of #RGBa'
-- color supports animating as color of hsl()
-- color supports animating as color of hsla()
 - color supports animating as color of rgb() with overflowed  from and to values
 - 'color-adjust: "economy" onto "exact"'
 - 'color-adjust: "exact" onto "economy"'
@@ -6204,50 +6198,24 @@ web-animations/animation-model/animation-types/accumulation-per-property-001.htm
 - 'color-interpolation: "linearrgb" onto "auto"'
 - column-rule-color supports animating as color of rgb() with overflowed  from and
   to values
-- 'columns: length'
-- 'columns: length of rem'
-- 'columns: positive integer'
 - 'fill-opacity: [0, 1] number (clamped)'
 - 'flex-basis: calc'
 - 'flex-basis: units "calc" onto "px"'
 - 'flex-flow: "row" onto "row-reverse wrap"'
-- 'flex-flow: "row-reverse wrap" onto "row"'
-- 'flood-color supports animating as color of #RGB'
-- 'flood-color supports animating as color of #RGBa'
-- flood-color supports animating as color of hsl()
-- flood-color supports animating as color of hsla()
 - flood-color supports animating as color of rgb() with overflowed  from and to values
 - 'flood-opacity: [0, 1] number (clamped)'
 - font-variation-settings with composite type accumulate
-- 'grid-area: "1" onto "5"'
-- 'grid-area: "5" onto "1"'
-- 'grid-column: "1" onto "5"'
-- 'grid-column: "5" onto "1"'
-- 'grid-row: "1" onto "5"'
-- 'grid-row: "5" onto "1"'
 - 'grid-template: "". . a b" ". . a b"" onto "none"'
 - 'grid-template: "none" onto "". . a b" ". . a b""'
 web-animations/animation-model/animation-types/accumulation-per-property-002.html:
-- 'isolation: "isolate" onto "auto"'
 - 'letter-spacing: calc'
 - 'letter-spacing: units "calc" onto "px"'
-- 'lighting-color supports animating as color of #RGB'
-- 'lighting-color supports animating as color of #RGBa'
-- lighting-color supports animating as color of hsl()
-- lighting-color supports animating as color of hsla()
 - lighting-color supports animating as color of rgb() with overflowed  from and to
   values
-- 'list-style: "inside url("http://localhost/test-1") circle" onto "outside url("http://localhost/test-2")
-  square"'
 - 'list-style: "outside url("http://localhost/test-2") square" onto "inside url("http://localhost/test-1")
   circle"'
 - 'mask: "url("http://localhost/test-1")" onto "url("http://localhost/test-2")"'
 - 'mask: "url("http://localhost/test-2")" onto "url("http://localhost/test-1")"'
-- 'math-depth: integer'
-- 'math-shift: "compact" onto "normal"'
-- 'math-style: "compact" onto "normal"'
-- 'mix-blend-mode: "multiply" onto "screen"'
-- 'mix-blend-mode: "screen" onto "multiply"'
 - 'offset-distance: calc'
 - 'offset-distance: units "calc" onto "px"'
 - outline-color supports animating as color of rgb() with overflowed  from and to
@@ -6262,7 +6230,6 @@ web-animations/animation-model/animation-types/accumulation-per-property-002.htm
 - scale
 - scale with one unspecified value
 - scale with two unspecified values
-- 'scroll-behavior: "smooth" onto "auto"'
 - 'scrollbar-color supports animating as color pair of #RGB'
 - 'scrollbar-color supports animating as color pair of #RGBa'
 - scrollbar-color supports animating as color pair of hsl()
@@ -6270,18 +6237,8 @@ web-animations/animation-model/animation-types/accumulation-per-property-002.htm
 - scrollbar-color supports animating as color pair of rgb() with overflowed  from
   and to values
 - scrollbar-color supports animating as color pair of rgba()
-- 'stop-color supports animating as color of #RGB'
-- 'stop-color supports animating as color of #RGBa'
-- stop-color supports animating as color of hsl()
-- stop-color supports animating as color of hsla()
 - stop-color supports animating as color of rgb() with overflowed  from and to values
-- stop-color supports animating as color of rgba()
-- 'stop-opacity: [0, 1] number'
 - 'stop-opacity: [0, 1] number (clamped)'
-- 'stroke-color supports animating as color of #RGB'
-- 'stroke-color supports animating as color of #RGBa'
-- stroke-color supports animating as color of hsl()
-- stroke-color supports animating as color of hsla()
 - stroke-color supports animating as color of rgb() with overflowed  from and to values
 - 'stroke-dasharray: dasharray'
 - 'stroke-opacity: [0, 1] number (clamped)'
@@ -6295,7 +6252,6 @@ web-animations/animation-model/animation-types/accumulation-per-property-002.htm
 - 'text-group-align: "none" onto "center"'
 - 'text-wrap: "nowrap" onto "wrap"'
 - 'text-wrap: "wrap" onto "nowrap"'
-- 'touch-action: "none" onto "auto"'
 - 'transform: matrix'
 - 'transform: matrix3d'
 - 'transform: rotate3d'
@@ -6307,8 +6263,6 @@ web-animations/animation-model/animation-types/accumulation-per-property-002.htm
 - 'word-spacing: calc'
 - 'word-spacing: units "calc" onto "px"'
 web-animations/animation-model/animation-types/addition-per-property-001.html:
-- 'background-blend-mode: "multiply" onto "screen"'
-- 'background-blend-mode: "screen" onto "multiply"'
 - background-color supports animating as color of rgb() with overflowed  from and
   to values
 - 'block-step-align: "auto" onto "center"'
@@ -6345,10 +6299,6 @@ web-animations/animation-model/animation-types/addition-per-property-001.html:
 - 'buffered-rendering: "dynamic" onto "auto"'
 - caret-color supports animating as color of rgb() with overflowed  from and to values
 - 'clip: rect'
-- 'color supports animating as color of #RGB'
-- 'color supports animating as color of #RGBa'
-- color supports animating as color of hsl()
-- color supports animating as color of hsla()
 - color supports animating as color of rgb() with overflowed  from and to values
 - 'color-adjust: "economy" onto "exact"'
 - 'color-adjust: "exact" onto "economy"'
@@ -6356,50 +6306,24 @@ web-animations/animation-model/animation-types/addition-per-property-001.html:
 - 'color-interpolation: "linearrgb" onto "auto"'
 - column-rule-color supports animating as color of rgb() with overflowed  from and
   to values
-- 'columns: length'
-- 'columns: length of rem'
-- 'columns: positive integer'
 - 'fill-opacity: [0, 1] number (clamped)'
 - 'flex-basis: calc'
 - 'flex-basis: units "calc" onto "px"'
 - 'flex-flow: "row" onto "row-reverse wrap"'
-- 'flex-flow: "row-reverse wrap" onto "row"'
-- 'flood-color supports animating as color of #RGB'
-- 'flood-color supports animating as color of #RGBa'
-- flood-color supports animating as color of hsl()
-- flood-color supports animating as color of hsla()
 - flood-color supports animating as color of rgb() with overflowed  from and to values
 - 'flood-opacity: [0, 1] number (clamped)'
 - font-variation-settings with composite type add
-- 'grid-area: "1" onto "5"'
-- 'grid-area: "5" onto "1"'
-- 'grid-column: "1" onto "5"'
-- 'grid-column: "5" onto "1"'
-- 'grid-row: "1" onto "5"'
-- 'grid-row: "5" onto "1"'
 - 'grid-template: "". . a b" ". . a b"" onto "none"'
 - 'grid-template: "none" onto "". . a b" ". . a b""'
 web-animations/animation-model/animation-types/addition-per-property-002.html:
-- 'isolation: "isolate" onto "auto"'
 - 'letter-spacing: calc'
 - 'letter-spacing: units "calc" onto "px"'
-- 'lighting-color supports animating as color of #RGB'
-- 'lighting-color supports animating as color of #RGBa'
-- lighting-color supports animating as color of hsl()
-- lighting-color supports animating as color of hsla()
 - lighting-color supports animating as color of rgb() with overflowed  from and to
   values
-- 'list-style: "inside url("http://localhost/test-1") circle" onto "outside url("http://localhost/test-2")
-  square"'
 - 'list-style: "outside url("http://localhost/test-2") square" onto "inside url("http://localhost/test-1")
   circle"'
 - 'mask: "url("http://localhost/test-1")" onto "url("http://localhost/test-2")"'
 - 'mask: "url("http://localhost/test-2")" onto "url("http://localhost/test-1")"'
-- 'math-depth: integer'
-- 'math-shift: "compact" onto "normal"'
-- 'math-style: "compact" onto "normal"'
-- 'mix-blend-mode: "multiply" onto "screen"'
-- 'mix-blend-mode: "screen" onto "multiply"'
 - 'offset-distance: calc'
 - 'offset-distance: units "calc" onto "px"'
 - outline-color supports animating as color of rgb() with overflowed  from and to
@@ -6414,7 +6338,6 @@ web-animations/animation-model/animation-types/addition-per-property-002.html:
 - scale
 - scale with one unspecified value
 - scale with two unspecified values
-- 'scroll-behavior: "smooth" onto "auto"'
 - 'scrollbar-color supports animating as color pair of #RGB'
 - 'scrollbar-color supports animating as color pair of #RGBa'
 - scrollbar-color supports animating as color pair of hsl()
@@ -6422,18 +6345,8 @@ web-animations/animation-model/animation-types/addition-per-property-002.html:
 - scrollbar-color supports animating as color pair of rgb() with overflowed  from
   and to values
 - scrollbar-color supports animating as color pair of rgba()
-- 'stop-color supports animating as color of #RGB'
-- 'stop-color supports animating as color of #RGBa'
-- stop-color supports animating as color of hsl()
-- stop-color supports animating as color of hsla()
 - stop-color supports animating as color of rgb() with overflowed  from and to values
-- stop-color supports animating as color of rgba()
-- 'stop-opacity: [0, 1] number'
 - 'stop-opacity: [0, 1] number (clamped)'
-- 'stroke-color supports animating as color of #RGB'
-- 'stroke-color supports animating as color of #RGBa'
-- stroke-color supports animating as color of hsl()
-- stroke-color supports animating as color of hsla()
 - stroke-color supports animating as color of rgb() with overflowed  from and to values
 - 'stroke-dasharray: dasharray'
 - 'stroke-opacity: [0, 1] number (clamped)'
@@ -6447,7 +6360,6 @@ web-animations/animation-model/animation-types/addition-per-property-002.html:
 - 'text-group-align: "none" onto "center"'
 - 'text-wrap: "nowrap" onto "wrap"'
 - 'text-wrap: "wrap" onto "nowrap"'
-- 'touch-action: "none" onto "auto"'
 - 'transform: matrix3d'
 - 'transform: rotate3d'
 - translate
@@ -6458,12 +6370,6 @@ web-animations/animation-model/animation-types/addition-per-property-002.html:
 - 'word-spacing: calc'
 - 'word-spacing: units "calc" onto "px"'
 web-animations/animation-model/animation-types/interpolation-per-property-001.html:
-- background-blend-mode uses discrete animation when animating between "multiply"
-  and "screen" with effect easing
-- background-blend-mode uses discrete animation when animating between "multiply"
-  and "screen" with keyframe easing
-- background-blend-mode uses discrete animation when animating between "multiply"
-  and "screen" with linear easing
 - block-step-align uses discrete animation when animating between "auto" and "center"
   with effect easing
 - block-step-align uses discrete animation when animating between "auto" and "center"
@@ -6529,10 +6435,6 @@ web-animations/animation-model/animation-types/interpolation-per-property-001.ht
 - buffered-rendering uses discrete animation when animating between "auto" and "dynamic"
   with linear easing
 - clip supports animating as a rect
-- 'color supports animating as color of #RGB'
-- 'color supports animating as color of #RGBa'
-- color supports animating as color of hsl()
-- color supports animating as color of hsla()
 - color-adjust uses discrete animation when animating between "economy" and "exact"
   with effect easing
 - color-adjust uses discrete animation when animating between "economy" and "exact"
@@ -6545,9 +6447,6 @@ web-animations/animation-model/animation-types/interpolation-per-property-001.ht
   "auto" with keyframe easing
 - color-interpolation uses discrete animation when animating between "linearrgb" and
   "auto" with linear easing
-- columns supports animating as a length
-- columns supports animating as a length of rem
-- columns supports animating as a positive integer
 - flex-basis supports animating as a calc
 - flex-basis supports animating as combination units "px" and "calc"
 - flex-flow uses discrete animation when animating between "row" and "row-reverse
@@ -6556,19 +6455,9 @@ web-animations/animation-model/animation-types/interpolation-per-property-001.ht
   wrap" with keyframe easing
 - flex-flow uses discrete animation when animating between "row" and "row-reverse
   wrap" with linear easing
-- 'flood-color supports animating as color of #RGB'
-- 'flood-color supports animating as color of #RGBa'
-- flood-color supports animating as color of hsl()
-- flood-color supports animating as color of hsla()
 - font-variation-settings supports animation as float
 - font-variation-settings supports animation as float with multiple duplicate tags
 - font-variation-settings supports animation as float with multiple tags
-- grid-area uses discrete animation when animating between "1" and "5" with effect
-  easing
-- grid-area uses discrete animation when animating between "1" and "5" with keyframe
-  easing
-- grid-area uses discrete animation when animating between "1" and "5" with linear
-  easing
 - grid-auto-columns uses discrete animation when animating between "1px" and "5px"
   with effect easing
 - grid-auto-columns uses discrete animation when animating between "1px" and "5px"
@@ -6581,18 +6470,6 @@ web-animations/animation-model/animation-types/interpolation-per-property-001.ht
   keyframe easing
 - grid-auto-rows uses discrete animation when animating between "1px" and "5px" with
   linear easing
-- grid-column uses discrete animation when animating between "1" and "5" with effect
-  easing
-- grid-column uses discrete animation when animating between "1" and "5" with keyframe
-  easing
-- grid-column uses discrete animation when animating between "1" and "5" with linear
-  easing
-- grid-row uses discrete animation when animating between "1" and "5" with effect
-  easing
-- grid-row uses discrete animation when animating between "1" and "5" with keyframe
-  easing
-- grid-row uses discrete animation when animating between "1" and "5" with linear
-  easing
 - grid-template uses discrete animation when animating between "". . a b" ". . a b""
   and "none" with effect easing
 - grid-template uses discrete animation when animating between "". . a b" ". . a b""
@@ -6600,18 +6477,8 @@ web-animations/animation-model/animation-types/interpolation-per-property-001.ht
 - grid-template uses discrete animation when animating between "". . a b" ". . a b""
   and "none" with linear easing
 web-animations/animation-model/animation-types/interpolation-per-property-002.html:
-- isolation uses discrete animation when animating between "auto" and "isolate" with
-  effect easing
-- isolation uses discrete animation when animating between "auto" and "isolate" with
-  keyframe easing
-- isolation uses discrete animation when animating between "auto" and "isolate" with
-  linear easing
 - letter-spacing supports animating as a calc
 - letter-spacing supports animating as combination units "px" and "calc"
-- 'lighting-color supports animating as color of #RGB'
-- 'lighting-color supports animating as color of #RGBa'
-- lighting-color supports animating as color of hsl()
-- lighting-color supports animating as color of hsla()
 - list-style uses discrete animation when animating between "inside url("http://localhost/test-1")
   circle" and "outside url("http://localhost/test-2") square" with effect easing
 - list-style uses discrete animation when animating between "inside url("http://localhost/test-1")
@@ -6624,24 +6491,6 @@ web-animations/animation-model/animation-types/interpolation-per-property-002.ht
   and "url("http://localhost/test-2")" with keyframe easing
 - mask uses discrete animation when animating between "url("http://localhost/test-1")"
   and "url("http://localhost/test-2")" with linear easing
-- math-shift uses discrete animation when animating between "normal" and "compact"
-  with effect easing
-- math-shift uses discrete animation when animating between "normal" and "compact"
-  with keyframe easing
-- math-shift uses discrete animation when animating between "normal" and "compact"
-  with linear easing
-- math-style uses discrete animation when animating between "normal" and "compact"
-  with effect easing
-- math-style uses discrete animation when animating between "normal" and "compact"
-  with keyframe easing
-- math-style uses discrete animation when animating between "normal" and "compact"
-  with linear easing
-- mix-blend-mode uses discrete animation when animating between "multiply" and "screen"
-  with effect easing
-- mix-blend-mode uses discrete animation when animating between "multiply" and "screen"
-  with keyframe easing
-- mix-blend-mode uses discrete animation when animating between "multiply" and "screen"
-  with linear easing
 - offset-distance supports animating as a calc
 - offset-distance supports animating as combination units "px" and "calc"
 - path-length supports animating as a positive number
@@ -6655,29 +6504,12 @@ web-animations/animation-model/animation-types/interpolation-per-property-002.ht
 - scale
 - scale with one unspecified value
 - scale with two unspecified values
-- scroll-behavior uses discrete animation when animating between "auto" and "smooth"
-  with effect easing
-- scroll-behavior uses discrete animation when animating between "auto" and "smooth"
-  with keyframe easing
-- scroll-behavior uses discrete animation when animating between "auto" and "smooth"
-  with linear easing
 - 'scrollbar-color supports animating as color pair of #RGB'
 - 'scrollbar-color supports animating as color pair of #RGBa'
 - scrollbar-color supports animating as color pair of hsl()
 - scrollbar-color supports animating as color pair of hsla()
 - scrollbar-color supports animating as color pair of rgb()
 - scrollbar-color supports animating as color pair of rgba()
-- 'stop-color supports animating as color of #RGB'
-- 'stop-color supports animating as color of #RGBa'
-- stop-color supports animating as color of hsl()
-- stop-color supports animating as color of hsla()
-- stop-color supports animating as color of rgb()
-- stop-color supports animating as color of rgba()
-- stop-opacity supports animating as a [0, 1] number
-- 'stroke-color supports animating as color of #RGB'
-- 'stroke-color supports animating as color of #RGBa'
-- stroke-color supports animating as color of hsl()
-- stroke-color supports animating as color of hsla()
 - stroke-dasharray supports animating as a dasharray (mismatched length)
 - stroke-dasharray supports animating as a dasharray (mixed lengths and percentages)
 - stroke-dasharray supports animating as a percentage
@@ -6699,12 +6531,6 @@ web-animations/animation-model/animation-types/interpolation-per-property-002.ht
 - text-wrap uses discrete animation when animating between "wrap" and "nowrap" with
   keyframe easing
 - text-wrap uses discrete animation when animating between "wrap" and "nowrap" with
-  linear easing
-- touch-action uses discrete animation when animating between "auto" and "none" with
-  effect easing
-- touch-action uses discrete animation when animating between "auto" and "none" with
-  keyframe easing
-- touch-action uses discrete animation when animating between "auto" and "none" with
   linear easing
 - 'transform: matrix'
 - 'transform: matrix3d'

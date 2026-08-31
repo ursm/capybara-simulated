@@ -185,11 +185,33 @@ for (const name of longhands) {
   if (typeof t === 'string' && t.indexOf(',') === -1) animationTypes[name] = t;
 }
 // Types the property's own spec has moved on from since mdn recorded them, or that mdn records
-// more narrowly than the property's own grammar. `letter-spacing` and `word-spacing` take a
+// more narrowly — or, below, not at all — than the property's own grammar. `letter-spacing` and `word-spacing` take a
 // percentage in css-text-4 and interpolate as one; `vertical-align` has taken one since CSS2, and
 // interpolates `10%` against `100px` into the `calc()` holding both (Chrome-measured, all three),
 // where mdn calls each of them a plain length.
-const ANIMATION_TYPE_FIXES = { 'letter-spacing': 'lpc', 'word-spacing': 'lpc', 'vertical-align': 'lpc' };
+const ANIMATION_TYPE_FIXES = {
+  'letter-spacing': 'lpc',
+  'word-spacing':   'lpc',
+  'vertical-align': 'lpc',
+
+  // …and the ones mdn calls NOT ANIMATABLE that a browser animates. Each was measured in Chrome
+  // (`element.animate` between the two values, sampled either side of the half-way point): seven
+  // flip discretely, and `math-depth` counts — `1` to `3` reports `2`.
+  'background-blend-mode': 'discrete',
+  'mix-blend-mode':        'discrete',
+  'isolation':             'discrete',
+  'touch-action':          'discrete',
+  'scroll-behavior':       'discrete',
+  'math-style':            'discrete',
+  'math-shift':            'discrete',
+  'math-depth':            'integer',
+
+  // …and the two mdn calls DISCRETE that are a colour and a number: an SVG gradient stop fades
+  // (Chrome-measured, `rgb(0,0,0)` to `rgb(100,100,100)` is `rgb(50, 50, 50)` half way, and its
+  // opacity 0 to 1 is 0.5).
+  'stop-color':   'color',
+  'stop-opacity': 'number'
+};
 for (const [name, type] of Object.entries(ANIMATION_TYPE_FIXES)) {
   if (animationTypes[name]) animationTypes[name] = type;
 }
