@@ -30969,9 +30969,6 @@ dom/events/EventListener-invoke-legacy.html:
 - name: Legacy listener of transitionend
   reason: Requires real CSS transition timeline to fire transitionend; transitions
     are not modeled.
-- name: Listener of transitionend
-  reason: Depends on layout/style transition engine to fire transitionend after computed-style
-    change.
 dom/events/click-on-absolute-pseudo.html:
 - name: Click on pseudo-element that disappears on mousedown
   reason: Needs pseudo-element hit-testing, event.pseudoTarget and target.pseudo('::after')

@@ -503,4 +503,72 @@ RSpec.describe 'CSS interpolation types' do
         .to eq('matrix(2, 0, 0, 2, 10, 0)')
     end
   end
+  # A keyframe may name a SHORTHAND, and each longhand under it takes ITS OWN component of the
+  # value — through the cascade's own expander, the same one a declaration goes through. Handing
+  # every longhand the whole text only looked right for the box shorthands, where they all take the
+  # same token.
+  describe 'a keyframe that names a shorthand' do
+    def longhands(prop, from, to, read)
+      s = page('<div id="a">x</div>')
+      s.evaluate_script(<<~JS)
+        (function () {
+          const el = document.getElementById('a');
+          const anim = el.animate([{ #{prop.inspect}: #{from.inspect} }, { #{prop.inspect}: #{to.inspect} }],
+                                  { duration: 1000, fill: 'both' });
+          anim.pause();
+          anim.currentTime = 500;
+          return #{read.inspect}.map((p) => getComputedStyle(el).getPropertyValue(p));
+        })()
+      JS
+    end
+
+    it 'gives each longhand its own component' do
+      expect(longhands('columns', '10px 3', '30px 3', %w[column-width column-count])).to eq(['20px', '3'])
+      expect(longhands('flexFlow', 'row wrap', 'column wrap', %w[flex-direction flex-wrap]))
+        .to eq(%w[column wrap])
+      expect(longhands('margin', '0px', '20px', %w[margin-left margin-top])).to eq(['10px', '10px'])
+    end
+  end
+
+  # mdn's animation data is a record, not the spec: it calls eight properties NOT ANIMATABLE that a
+  # browser animates, and two DISCRETE that are a colour and a number. Each was measured in Chrome.
+  describe 'properties mdn types wrongly' do
+    def sample(prop, from, to, at, id = 'a', markup = '<div id="a">x</div>')
+      s = page(markup)
+      s.evaluate_script(<<~JS)
+        (function () {
+          const el = document.getElementById(#{id.inspect});
+          const anim = el.animate([{ #{prop.inspect}: #{from.inspect} }, { #{prop.inspect}: #{to.inspect} }],
+                                  { duration: 1000, fill: 'both' });
+          anim.pause();
+          anim.currentTime = #{at};
+          return getComputedStyle(el).getPropertyValue(#{cssName(prop).inspect});
+        })()
+      JS
+    end
+
+    it 'animates the ones mdn calls not animatable' do
+      expect(sample('backgroundBlendMode', 'multiply', 'screen', 400)).to eq('multiply')
+      expect(sample('backgroundBlendMode', 'multiply', 'screen', 600)).to eq('screen')
+      expect(sample('touchAction', 'auto', 'none', 600)).to eq('none')
+      expect(sample('isolation', 'auto', 'isolate', 400)).to eq('auto')
+      # …and `math-depth` counts rather than flipping.
+      expect(sample('mathDepth', '1', '3', 400)).to eq('2')
+    end
+
+    it 'fades an SVG gradient stop' do
+      svg = '<svg width="10" height="10"><stop id="s"/></svg>'
+      expect(sample('stopColor', 'rgb(0,0,0)', 'rgb(100,100,100)', 500, 's', svg)).to eq('rgb(50, 50, 50)')
+      expect(sample('stopOpacity', '0', '1', 500, 's', svg)).to eq('0.5')
+    end
+  end
+
+  # A colour endpoint is normalised for EVERY colour-valued property, not only the ones mdn types
+  # literally as `color` — `color` itself is "by computed value type" — or a `#RGB` / `hsl()` pair
+  # is one the interpolator cannot read, and flips where a browser fades.
+  it 'interpolates a colour written any way' do
+    expect(midpoint('color', '#000', '#0f0')).to eq('rgb(0, 128, 0)')
+    expect(midpoint('color', 'hsl(0, 100%, 50%)', 'hsl(120, 100%, 50%)')).to eq('rgb(128, 128, 0)')
+    expect(midpoint('caretColor', '#000', '#0f0')).to eq('rgb(0, 128, 0)')
+  end
 end
