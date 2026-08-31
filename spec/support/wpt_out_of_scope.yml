@@ -30546,6 +30546,25 @@ css/cssom/getComputedStyle-pseudo.html:
   reason: getComputedStyle of pseudo-element (::before/::marker/::picker/…) boxes
     requires generating and laying out those boxes; layout deliberately unmodeled
     (rule 1).
+css/cssom/serialize-values.html:
+- name: 'baseline-shift: bottom'
+  reason: The test lists SVG 1.1's `top` / `center` / `bottom` among `baseline-shift`'s
+    values. css-inline-3 defines the property as `<length-percentage> | sub | super`,
+    SVG 2 dropped the keywords, and Chrome 151 drops the declaration (measured on
+    this machine), so satisfying it would mean accepting a value no current spec and
+    no browser accepts. CLAUDE.md rule 1's real-browser caveat.
+- name: 'baseline-shift: center'
+  reason: The test lists SVG 1.1's `top` / `center` / `bottom` among `baseline-shift`'s
+    values. css-inline-3 defines the property as `<length-percentage> | sub | super`,
+    SVG 2 dropped the keywords, and Chrome 151 drops the declaration (measured on
+    this machine), so satisfying it would mean accepting a value no current spec and
+    no browser accepts. CLAUDE.md rule 1's real-browser caveat.
+- name: 'baseline-shift: top'
+  reason: The test lists SVG 1.1's `top` / `center` / `bottom` among `baseline-shift`'s
+    values. css-inline-3 defines the property as `<length-percentage> | sub | super`,
+    SVG 2 dropped the keywords, and Chrome 151 drops the declaration (measured on
+    this machine), so satisfying it would mean accepting a value no current spec and
+    no browser accepts. CLAUDE.md rule 1's real-browser caveat.
 custom-elements/element-internals-behaviors.tentative.html:
 - name: Behavior state is preserved across disconnect and reconnect
   reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
