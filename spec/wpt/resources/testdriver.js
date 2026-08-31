@@ -10,14 +10,19 @@
 // This is a hand-written resource (like resources/testharnessreport.js), served
 // for all three /resources/testdriver*.js paths; the other two files are empty.
 //
-// Scope + limits (there is NO layout engine):
+// Scope + limits — and these are the SHIM's, not the driver's:
 //   - Pointer/touch/wheel/key GESTURES that only need event DISPATCH work.
-//   - Coordinate hit-testing is unavailable (elementFromPoint is null on these
-//     pages), so a "viewport"-origin action targets the element that actually
-//     carries a listener for the event type, falling back to the scrolling
-//     element (a bubbling event then reaches document/window listeners).
-//   - Actions that need a real scroll-position change / scrollend / topmost-hit
-//     remain HARNESS_ERROR by design — out of scope, not a shim bug.
+//   - Coordinate origins are DISCARDED: a "viewport"-origin action targets the
+//     element that actually carries a listener for the event type, falling back
+//     to the scrolling element (a bubbling event then reaches document/window
+//     listeners). This shim predates the layout engine and was written when the
+//     comment here could say "there is NO layout engine"; `elementFromPoint` has
+//     answered from real boxes since v0.8.0, so aiming these actions at the point
+//     they name is unfinished wiring — the backlog, not a limit.
+//   - Likewise an action that needs a real scroll-position change: the geometry
+//     to move is there, `case 'scroll'` just fires a `wheel` event without
+//     moving any offset. The subtests that need it are IN-SCOPE failures now
+//     (they used to be listed out with a "no layout engine" reason).
 'use strict';
 
 (function () {
