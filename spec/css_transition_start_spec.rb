@@ -142,4 +142,102 @@ RSpec.describe 'starting a transition' do
       })()
     JS
   end
+
+  # Two reads in a row with NOTHING changed between them are one style change event, not two: the
+  # second must not measure against the first, or nothing ever looks changed.
+  it 'treats consecutive reads with nothing dirty as one event' do
+    s = page('<div id="a" class="box"></div>', <<~CSS)
+      .box  { background-color: rgb(0,0,0); width: 50px; height: 50px }
+      .how  { transition: background-color 2s linear }
+      .to   { background-color: rgb(100,100,100) }
+    CSS
+    expect(s.evaluate_script(<<~JS)).to eq('rgb(0, 0, 0)')
+      (function () {
+        const a = document.getElementById('a');
+        a.classList.add('how');
+        getComputedStyle(a).backgroundColor;
+        getComputedStyle(a).backgroundColor;
+        a.classList.add('to');
+        return getComputedStyle(a).backgroundColor;
+      })()
+    JS
+  end
+
+  # …and the everyday pair — the transition and the value written together, after something has
+  # looked once — transitions from the value that read saw.
+  it 'starts on a transition and a value written together' do
+    s = page('<div id="a" class="box"></div>', '.box { background-color: rgb(0,0,0) }')
+    expect(s.evaluate_script(<<~JS)).to eq('rgb(0, 0, 0)')
+      (function () {
+        const a = document.getElementById('a');
+        getComputedStyle(a).backgroundColor;
+        a.style.transition = 'background-color 2s linear';
+        a.style.backgroundColor = 'rgb(100,100,100)';
+        return getComputedStyle(a).backgroundColor;
+      })()
+    JS
+  end
+
+  # A flow-relative name and its physical twin are ONE value, and one baseline: `block-size` and
+  # `height` in a block transition from what the block computed to, not from a value the other name
+  # was last seen with.
+  it 'keeps one baseline for a flow-relative pair' do
+    s = page('<div id="a"></div>', <<~CSS)
+      #a    { block-size: 0px; height: 200px; transition: block-size 10s linear -5s, height 10s linear -5s }
+      #a.to { block-size: 100px; height: 300px }
+    CSS
+    expect(s.evaluate_script(<<~JS)).to eq('250px')
+      (function () {
+        const a = document.getElementById('a');
+        getComputedStyle(a).height;
+        a.classList.add('to');
+        return getComputedStyle(a).height;
+      })()
+    JS
+  end
+
+  # The flush RECORDS; it fires nothing. Events belong to the rendering update, which is where a
+  # browser dispatches them (Chrome fires no `transitionrun` / `transitionstart` / `transitionend`
+  # around a forced `offsetWidth`, however many transitions it starts).
+  it 'fires nothing from the flush itself' do
+    s = page('<div id="a" class="box"></div>', <<~CSS)
+      .box  { background-color: rgb(0,0,0); width: 50px; height: 50px }
+      .how  { transition: background-color 2s linear }
+      .to   { background-color: rgb(100,100,100) }
+    CSS
+    expect(s.evaluate_script(<<~JS)).to eq([])
+      (function () {
+        const log = [];
+        for (const t of ['transitionrun', 'transitionstart', 'transitionend', 'animationstart']) {
+          document.addEventListener(t, () => log.push(t));
+        }
+        const a = document.getElementById('a');
+        a.classList.add('how');
+        document.body.offsetWidth;
+        a.classList.add('to');
+        getComputedStyle(a).backgroundColor;
+        return log;
+      })()
+    JS
+  end
+
+  # A shadow child inherits from its HOST — style descends the flat tree — so a change on the host
+  # is a change on it.
+  it 'inherits a change through the flat tree' do
+    s = page('<div id="h" class="host"></div>', <<~CSS)
+      .host    { color: rgb(0,0,0) }
+      .host.to { color: rgb(100,100,100) }
+    CSS
+    expect(s.evaluate_script(<<~JS)).to eq('rgb(0, 0, 0)')
+      (function () {
+        const h = document.getElementById('h');
+        const root = h.attachShadow({ mode: 'open' });
+        root.innerHTML = '<style>div { transition: color 2s linear }</style><div id="s">s</div>';
+        const kid = root.getElementById('s');
+        getComputedStyle(kid).color;
+        h.classList.add('to');
+        return getComputedStyle(kid).color;
+      })()
+    JS
+  end
 end
