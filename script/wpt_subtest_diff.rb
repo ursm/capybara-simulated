@@ -23,8 +23,11 @@ abort "could not read #{ALLOWLIST} at #{base}" unless was.is_a?(Hash)
 gained = {}
 fixed  = 0
 (now.keys | was.keys).each do |file|
-  before = (was[file] || []).to_a
-  after  = (now[file] || []).to_a
+  # A file whose whole RUN failed is recorded as a scalar (`HARNESS_ERROR`), not a subtest list —
+  # counting it as one entry says what it is: the file went from listing subtests to listing
+  # nothing, or the other way about.
+  before = Array(was[file])
+  after  = Array(now[file])
   broke  = after - before
   gained[file] = broke unless broke.empty?
   fixed += (before - after).size
