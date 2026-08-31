@@ -40,7 +40,7 @@ driver bug) only when one of these holds:
 
 1. **It needs a subsystem we deliberately don't model.** A *rendering*
    engine — glyph SHAPING (kerning, ligatures, bidi, the line-BREAKING
-   algorithm), flex / grid track sizing, `display: contents` — a real async
+   algorithm), `display: contents` — a real async
    runtime, or legacy-multibyte / Unicode-version-tied
    encoding tables (ISO-2022-JP & friends; the *residual* IDNA cases where
    `uri-idna` diverges from the WPT reference — **not IDNA wholesale**: see
@@ -71,14 +71,23 @@ earned-out before as "a subsystem we don't model", then reverted):
   `multi-origin-in-scope` memory.)
 - **Box layout is MODELED** (`js/src/layout.js`, since v0.8.0): block flow,
   inline runs, absolute / relative / fixed (shrink-to-fit included), margin
-  collapsing, a coarse grid pass, CSS Tables 3 auto/fixed TABLE layout, overflow
+  collapsing, floats, FLEX layout (line breaking + grow/shrink distribution),
+  a coarse grid pass, CSS Tables 3 auto/fixed TABLE layout, overflow
   clipping, the flat tree, cross-realm frames — and the page-visible geometry
   (`getBoundingClientRect` / `elementFromPoint` / `offset*` / `client*` /
   `scroll*`) reads from it, so there is ONE geometry. Visual hit-testing,
   gBCR truthiness and viewport-clip visibility are therefore IN scope: a
   failing geometry test is a coarse-model gap to diagnose (does it need glyph
-  SHAPING / track sizing, or just a box rule we haven't written?), not an
+  SHAPING, or just a box rule we haven't written?), not an
   automatic "needs a layout engine" exclusion.
+- **FLEX SIZING is IN SCOPE** — the "flex / grid track sizing" clause above was
+  written before `layout.js` existed and was retired 2026-08-31. `flexLines`
+  breaks lines and `resolveFlexRowWidths` distributes free space over
+  `flex-grow` / `flex-shrink` today; the css-flexbox allowlist earns out exactly
+  six `.tentative` files and nothing for sizing, and the ~1000 remaining
+  subtests are coarse-model gaps (e.g. the scrollable overflow region), not a
+  missing algorithm. css-grid is simply not vendored — un-measured, not
+  excluded. (See the `flex-sizing-in-scope` memory.)
 - **Text is MEASURED, not estimated** (since v0.8.x): run widths come from the
   font file's own `hmtx` advances and line boxes from its `hhea` metrics, for
   the face fontconfig resolves the CSS family to — the same face Chrome gets on
