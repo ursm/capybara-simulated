@@ -1460,18 +1460,6 @@ css/css-flexbox/justify-content-rounding.html:
 css/css-flexbox/main-axis-margin-rounding.html:
 - The last item should match the end edge.
 css/css-flexbox/negative-overflow-002.html:
-- ".container 13"
-- ".container 14"
-- ".container 15"
-- ".container 16"
-- ".container 17"
-- ".container 18"
-- ".container 19"
-- ".container 20"
-- ".container 21"
-- ".container 22"
-- ".container 23"
-- ".container 24"
 - ".container 25"
 - ".container 26"
 - ".container 27"
