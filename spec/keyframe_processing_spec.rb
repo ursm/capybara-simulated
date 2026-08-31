@@ -168,4 +168,99 @@ RSpec.describe 'processing a keyframes argument' do
       "Object.prototype.toString.call(document.timeline)"
     )).to eq(['"[object Animation]"', '"[object KeyframeEffect]"', '"[object DocumentTimeline]"'])
   end
+  # The classes an adversarial review found unpinned — each a Chrome measurement, each a rule this
+  # file's other examples pass whichever way it goes.
+  describe 'the edges of the surface' do
+    # An IDL ENUMERATION attribute IGNORES a value outside the enum. Only a dictionary member or an
+    # operation argument throws — so `effect.composite = someVar` must never blow up.
+    it 'ignores a bad value on the composite attribute' do
+      expect(results(
+        "(() => { const e = new KeyframeEffect(el, null, {}); e.composite = 'bogus'; return e.composite; })()",
+        "(() => { const e = new KeyframeEffect(el, null, {}); e.composite = 'auto'; return e.composite; })()",
+        "(() => { const e = new KeyframeEffect(el, null, {}); e.composite = 'add'; return e.composite; })()"
+      )).to eq(['"replace"', '"replace"', '"add"'])
+    end
+
+    # `updateTiming` goes through the same funnel the constructor does — it is the same dictionary.
+    it 'validates and canonicalizes through updateTiming' do
+      expect(results(
+        "(() => { const e = new KeyframeEffect(el, null, {}); e.updateTiming({easing: 'EASE-IN'}); return e.getTiming().easing; })()",
+        "(() => { const e = new KeyframeEffect(el, null, {}); e.updateTiming({easing: 'bogus'}); return e.getTiming().easing; })()"
+      )).to eq(['"ease-in"', 'THROW TypeError'])
+    end
+
+    # A property-indexed list is validated WHOLE, including the entries no keyframe reaches: an
+    # object with nothing but a bad easing throws, and so does a bad one in the unused tail.
+    it 'validates a list entry no keyframe uses' do
+      expect(results(
+        "new KeyframeEffect(el, {easing: 'bogus'})",
+        "new KeyframeEffect(el, {left: ['0px','1px'], easing: ['linear','bogus','x']})"
+      )).to eq(['THROW TypeError'] * 2)
+    end
+
+    # A member that is ABSENT takes the default; an explicit `null` is a value, and not one of these.
+    it 'tells an absent member from an explicit null' do
+      expect(results(
+        "new KeyframeEffect(el, null, {easing: null})",
+        "new KeyframeEffect(el, [{left: '0px', composite: null}, {left: '1px'}])",
+        "new KeyframeEffect(el, null, {}).getTiming().easing"
+      )).to eq(['THROW TypeError', 'THROW TypeError', '"linear"'])
+    end
+
+    # `Number()` is not the CSS number grammar: it takes hex, the empty string, and a fraction where
+    # an integer is required.
+    it 'parses numbers the way CSS does' do
+      expect(results(
+        "new KeyframeEffect(el, null, {easing: 'cubic-bezier(0x1,0,1,1)'})",
+        "new KeyframeEffect(el, null, {easing: 'cubic-bezier(0,,1,1)'})",
+        "new KeyframeEffect(el, null, {easing: 'steps(2.0)'})",
+        "new KeyframeEffect(el, null, {easing: 'ease /**/'}).getTiming().easing"
+      )).to eq(['THROW TypeError', 'THROW TypeError', 'THROW TypeError', '"ease"'])
+    end
+
+    # A member NAME is an IDL attribute: a hyphen belongs to a custom property alone, and the CSS
+    # `float` is spelled `cssFloat`. None of the three is even READ.
+    it 'never reads a member that is no IDL attribute' do
+      expect(page.evaluate_script(<<~JS)).to eq(0)
+        (function () {
+          const el = document.getElementById('a');
+          let reads = 0;
+          const keyframe = {};
+          for (const member of ['float', 'font-size', 'willChange']) {
+            Object.defineProperty(keyframe, member, { get() { reads++; return '1px'; }, enumerable: true });
+          }
+          new KeyframeEffect(el, [keyframe, { left: '1px' }]);
+          return reads;
+        })()
+      JS
+    end
+
+    # Two stops sharing a position are a vertical jump, and the output lands on the FAR side.
+    it 'jumps at a duplicated linear() position' do
+      expect(page.evaluate_script(<<~JS)).to eq('1')
+        (function () {
+          const el = document.getElementById('a');
+          const anim = el.animate([{ opacity: '0' }, { opacity: '1' }],
+                                  { duration: 1000, fill: 'both', easing: 'linear(0, 0.5 50%, 1 50%, 0)' });
+          anim.pause();
+          anim.currentTime = 500;
+          return getComputedStyle(el).opacity;
+        })()
+      JS
+    end
+
+    # …and the timing dictionary is a dictionary like any other.
+    it 'validates the timing members' do
+      expect(results(
+        "new KeyframeEffect(el, null, {iterations: -1})",
+        "new KeyframeEffect(el, null, {iterations: NaN})",
+        "new KeyframeEffect(el, null, {duration: 'bogus'})",
+        "new KeyframeEffect(el, null, {duration: -1})",
+        "new KeyframeEffect(el, null, {iterationStart: -1})",
+        "new KeyframeEffect(el, null, {delay: Infinity})",
+        "new KeyframeEffect(el, null, {fill: 'bogus'})",
+        "new KeyframeEffect(el, null, {direction: 'bogus'})"
+      )).to eq(['THROW TypeError'] * 8)
+    end
+  end
 end
