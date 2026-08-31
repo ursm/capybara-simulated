@@ -6157,26 +6157,6 @@ shadow-dom/untriaged/html-elements-in-shadow-trees/inert-html-elements/test-001.
 web-animations/animation-model/animation-types/accumulation-per-property-001.html:
 - background-color supports animating as color of rgb() with overflowed  from and
   to values
-- 'block-step-align: "auto" onto "center"'
-- 'block-step-align: "center" onto "auto"'
-- 'block-step-align: "center" onto "start"'
-- 'block-step-align: "end" onto "start"'
-- 'block-step-align: "start" onto "center"'
-- 'block-step-align: "start" onto "end"'
-- 'block-step-insert: "content-box" onto "margin-box"'
-- 'block-step-insert: "content-box" onto "padding-box"'
-- 'block-step-insert: "margin-box" onto "content-box"'
-- 'block-step-insert: "margin-box" onto "padding-box"'
-- 'block-step-insert: "padding-box" onto "content-box"'
-- 'block-step-insert: "padding-box" onto "margin-box"'
-- 'block-step-round: "down" onto "nearest"'
-- 'block-step-round: "down" onto "up"'
-- 'block-step-round: "nearest" onto "down"'
-- 'block-step-round: "nearest" onto "up"'
-- 'block-step-round: "up" onto "down"'
-- 'block-step-round: "up" onto "nearest"'
-- 'block-step-size: length'
-- 'block-step-size: length of rem'
 - border-bottom-color supports animating as color of rgb() with overflowed  from and
   to values
 - border-left-color supports animating as color of rgb() with overflowed  from and
@@ -6187,15 +6167,9 @@ web-animations/animation-model/animation-types/accumulation-per-property-001.htm
 - 'border-spacing: length pair of rem'
 - border-top-color supports animating as color of rgb() with overflowed  from and
   to values
-- 'buffered-rendering: "auto" onto "dynamic"'
-- 'buffered-rendering: "dynamic" onto "auto"'
 - caret-color supports animating as color of rgb() with overflowed  from and to values
 - 'clip: rect'
 - color supports animating as color of rgb() with overflowed  from and to values
-- 'color-adjust: "economy" onto "exact"'
-- 'color-adjust: "exact" onto "economy"'
-- 'color-interpolation: "auto" onto "linearrgb"'
-- 'color-interpolation: "linearrgb" onto "auto"'
 - column-rule-color supports animating as color of rgb() with overflowed  from and
   to values
 - 'flex-basis: calc'
@@ -6219,7 +6193,6 @@ web-animations/animation-model/animation-types/accumulation-per-property-002.htm
 - 'offset-distance: units "calc" onto "px"'
 - outline-color supports animating as color of rgb() with overflowed  from and to
   values
-- 'path-length: positive number'
 - 'perspective-origin: length pair'
 - 'perspective-origin: length pair of rem'
 - 'perspective-origin: position of percentage'
@@ -6243,8 +6216,6 @@ web-animations/animation-model/animation-types/accumulation-per-property-002.htm
   and to values
 - text-emphasis-color supports animating as color of rgb() with overflowed  from and
   to values
-- 'text-group-align: "center" onto "none"'
-- 'text-group-align: "none" onto "center"'
 - 'text-wrap: "nowrap" onto "wrap"'
 - 'text-wrap: "wrap" onto "nowrap"'
 - 'transform: matrix'
@@ -6260,26 +6231,6 @@ web-animations/animation-model/animation-types/accumulation-per-property-002.htm
 web-animations/animation-model/animation-types/addition-per-property-001.html:
 - background-color supports animating as color of rgb() with overflowed  from and
   to values
-- 'block-step-align: "auto" onto "center"'
-- 'block-step-align: "center" onto "auto"'
-- 'block-step-align: "center" onto "start"'
-- 'block-step-align: "end" onto "start"'
-- 'block-step-align: "start" onto "center"'
-- 'block-step-align: "start" onto "end"'
-- 'block-step-insert: "content-box" onto "margin-box"'
-- 'block-step-insert: "content-box" onto "padding-box"'
-- 'block-step-insert: "margin-box" onto "content-box"'
-- 'block-step-insert: "margin-box" onto "padding-box"'
-- 'block-step-insert: "padding-box" onto "content-box"'
-- 'block-step-insert: "padding-box" onto "margin-box"'
-- 'block-step-round: "down" onto "nearest"'
-- 'block-step-round: "down" onto "up"'
-- 'block-step-round: "nearest" onto "down"'
-- 'block-step-round: "nearest" onto "up"'
-- 'block-step-round: "up" onto "down"'
-- 'block-step-round: "up" onto "nearest"'
-- 'block-step-size: length'
-- 'block-step-size: length of rem'
 - border-bottom-color supports animating as color of rgb() with overflowed  from and
   to values
 - border-left-color supports animating as color of rgb() with overflowed  from and
@@ -6290,15 +6241,9 @@ web-animations/animation-model/animation-types/addition-per-property-001.html:
 - 'border-spacing: length pair of rem'
 - border-top-color supports animating as color of rgb() with overflowed  from and
   to values
-- 'buffered-rendering: "auto" onto "dynamic"'
-- 'buffered-rendering: "dynamic" onto "auto"'
 - caret-color supports animating as color of rgb() with overflowed  from and to values
 - 'clip: rect'
 - color supports animating as color of rgb() with overflowed  from and to values
-- 'color-adjust: "economy" onto "exact"'
-- 'color-adjust: "exact" onto "economy"'
-- 'color-interpolation: "auto" onto "linearrgb"'
-- 'color-interpolation: "linearrgb" onto "auto"'
 - column-rule-color supports animating as color of rgb() with overflowed  from and
   to values
 - 'flex-basis: calc'
@@ -6322,7 +6267,6 @@ web-animations/animation-model/animation-types/addition-per-property-002.html:
 - 'offset-distance: units "calc" onto "px"'
 - outline-color supports animating as color of rgb() with overflowed  from and to
   values
-- 'path-length: positive number'
 - 'perspective-origin: length pair'
 - 'perspective-origin: length pair of rem'
 - 'perspective-origin: position of percentage'
@@ -6346,8 +6290,6 @@ web-animations/animation-model/animation-types/addition-per-property-002.html:
   and to values
 - text-emphasis-color supports animating as color of rgb() with overflowed  from and
   to values
-- 'text-group-align: "center" onto "none"'
-- 'text-group-align: "none" onto "center"'
 - 'text-wrap: "nowrap" onto "wrap"'
 - 'text-wrap: "wrap" onto "nowrap"'
 - 'transform: matrix3d'
@@ -6360,83 +6302,9 @@ web-animations/animation-model/animation-types/addition-per-property-002.html:
 - 'word-spacing: calc'
 - 'word-spacing: units "calc" onto "px"'
 web-animations/animation-model/animation-types/interpolation-per-property-001.html:
-- block-step-align uses discrete animation when animating between "auto" and "center"
-  with effect easing
-- block-step-align uses discrete animation when animating between "auto" and "center"
-  with keyframe easing
-- block-step-align uses discrete animation when animating between "auto" and "center"
-  with linear easing
-- block-step-align uses discrete animation when animating between "end" and "start"
-  with effect easing
-- block-step-align uses discrete animation when animating between "end" and "start"
-  with keyframe easing
-- block-step-align uses discrete animation when animating between "end" and "start"
-  with linear easing
-- block-step-align uses discrete animation when animating between "start" and "center"
-  with effect easing
-- block-step-align uses discrete animation when animating between "start" and "center"
-  with keyframe easing
-- block-step-align uses discrete animation when animating between "start" and "center"
-  with linear easing
-- block-step-insert uses discrete animation when animating between "margin-box" and
-  "content-box" with effect easing
-- block-step-insert uses discrete animation when animating between "margin-box" and
-  "content-box" with keyframe easing
-- block-step-insert uses discrete animation when animating between "margin-box" and
-  "content-box" with linear easing
-- block-step-insert uses discrete animation when animating between "margin-box" and
-  "padding-box" with effect easing
-- block-step-insert uses discrete animation when animating between "margin-box" and
-  "padding-box" with keyframe easing
-- block-step-insert uses discrete animation when animating between "margin-box" and
-  "padding-box" with linear easing
-- block-step-insert uses discrete animation when animating between "padding-box" and
-  "content-box" with effect easing
-- block-step-insert uses discrete animation when animating between "padding-box" and
-  "content-box" with keyframe easing
-- block-step-insert uses discrete animation when animating between "padding-box" and
-  "content-box" with linear easing
-- block-step-round uses discrete animation when animating between "down" and "nearest"
-  with effect easing
-- block-step-round uses discrete animation when animating between "down" and "nearest"
-  with keyframe easing
-- block-step-round uses discrete animation when animating between "down" and "nearest"
-  with linear easing
-- block-step-round uses discrete animation when animating between "nearest" and "up"
-  with effect easing
-- block-step-round uses discrete animation when animating between "nearest" and "up"
-  with keyframe easing
-- block-step-round uses discrete animation when animating between "nearest" and "up"
-  with linear easing
-- block-step-round uses discrete animation when animating between "up" and "down"
-  with effect easing
-- block-step-round uses discrete animation when animating between "up" and "down"
-  with keyframe easing
-- block-step-round uses discrete animation when animating between "up" and "down"
-  with linear easing
-- block-step-size supports animating as a length
-- block-step-size supports animating as a length of rem
 - border-spacing supports animating as a length pair
 - border-spacing supports animating as a length pair of rem
-- buffered-rendering uses discrete animation when animating between "auto" and "dynamic"
-  with effect easing
-- buffered-rendering uses discrete animation when animating between "auto" and "dynamic"
-  with keyframe easing
-- buffered-rendering uses discrete animation when animating between "auto" and "dynamic"
-  with linear easing
 - clip supports animating as a rect
-- color-adjust uses discrete animation when animating between "economy" and "exact"
-  with effect easing
-- color-adjust uses discrete animation when animating between "economy" and "exact"
-  with keyframe easing
-- color-adjust uses discrete animation when animating between "economy" and "exact"
-  with linear easing
-- color-interpolation uses discrete animation when animating between "linearrgb" and
-  "auto" with effect easing
-- color-interpolation uses discrete animation when animating between "linearrgb" and
-  "auto" with keyframe easing
-- color-interpolation uses discrete animation when animating between "linearrgb" and
-  "auto" with linear easing
 - flex-basis supports animating as a calc
 - flex-basis supports animating as combination units "px" and "calc"
 - flex-flow uses discrete animation when animating between "row" and "row-reverse
@@ -6483,7 +6351,6 @@ web-animations/animation-model/animation-types/interpolation-per-property-002.ht
   and "url("http://localhost/test-2")" with linear easing
 - offset-distance supports animating as a calc
 - offset-distance supports animating as combination units "px" and "calc"
-- path-length supports animating as a positive number
 - perspective-origin supports animating as a length pair
 - perspective-origin supports animating as a length pair of rem
 - perspective-origin supports animating as a position of percent
@@ -6504,12 +6371,6 @@ web-animations/animation-model/animation-types/interpolation-per-property-002.ht
 - stroke-dasharray supports animating as a dasharray (mixed lengths and percentages)
 - stroke-dasharray supports animating as a percentage
 - stroke-dasharray supports animating as a positive number
-- text-group-align uses discrete animation when animating between "none" and "center"
-  with effect easing
-- text-group-align uses discrete animation when animating between "none" and "center"
-  with keyframe easing
-- text-group-align uses discrete animation when animating between "none" and "center"
-  with linear easing
 - text-wrap uses discrete animation when animating between "wrap" and "nowrap" with
   effect easing
 - text-wrap uses discrete animation when animating between "wrap" and "nowrap" with
@@ -6609,10 +6470,6 @@ web-animations/animation-model/keyframe-effects/effect-value-transformed-distanc
 - A steps(2, start) function on a keyframe affects the resulting style
 - Linear-equivalent cubic-bezier keyframe easing applied to an effect with a easing
   function which produces values greater than 1 does not alter the result
-web-animations/animation-model/keyframe-effects/keyframe-exceptions.html:
-- Invalid offset
-- Offsets must be loosely sorted
-- Offsets must be null or in the range [0,1]
 web-animations/animation-model/side-effects-of-animations-current.html:
 - "== web-animations/animation-model/side-effects-of-animations-current-ref.html"
 web-animations/animation-model/side-effects-of-animations-in-effect.html:
@@ -6627,35 +6484,18 @@ web-animations/interfaces/Animatable/animate-no-browsing-context.html:
 - The timeline associated with an animation trigger on an element in a document without
   a browsing context is inactive
 web-animations/interfaces/Animatable/animate.html:
-- Element.animate() accepts a keyframe sequence with different easing values, but
-  the same easing value for a given offset
 - Element.animate() accepts a one property two value property-indexed keyframes specification
   where the first value is invalid
 - Element.animate() accepts a one property two value property-indexed keyframes specification
   where the second value is invalid
-- Element.animate() accepts a property-indexed keyframe with a single offset
-- Element.animate() accepts a property-indexed keyframe with an array of offsets with
-  a trailing null value
-- Element.animate() accepts a property-indexed keyframe with an array of offsets with
-  adjacent null values
-- Element.animate() accepts a property-indexed keyframe with an array of offsets with
-  all null values (and too many at that)
-- Element.animate() accepts a property-indexed keyframe with an array of offsets with
-  an embedded null value
-- Element.animate() accepts a property-indexed keyframe with an array of offsets with
-  leading and trailing null values
 - Element.animate() accepts a property-indexed keyframes specification with an invalid
   value
-- Element.animate() accepts a single keyframe sequence with a single calc() offset
 - Element.animate() correctly sets the Animation's timeline with null timeline in
   KeyframeAnimationOptions.
-- Element.animate() creates an Animation object
 - Element.animate() creates an Animation object in the relevant realm of the target
   element
-- Element.animate() creates an Animation object with a KeyframeEffect
 - Element.animate() creates an Animation object with a KeyframeEffect that is created
   in the relevant realm of the target element
-- Element.animate() does not accept a keyframe sequence with an invalid easing value
 - Element.animate() does not accept empty property-indexed keyframe with an invalid
   easing
 - Element.animate() does not accept empty property-indexed keyframe with an invalid
@@ -6674,7 +6514,6 @@ web-animations/interfaces/Animatable/animate.html:
 - 'Element.animate() does not accept invalid duration value: -Infinity'
 - 'Element.animate() does not accept invalid duration value: -Infinity using a dictionary
   object'
-- 'Element.animate() does not accept invalid duration value: NaN'
 - 'Element.animate() does not accept invalid duration value: NaN using a dictionary
   object'
 - 'Element.animate() does not accept invalid easing: '''''
@@ -6705,34 +6544,12 @@ web-animations/interfaces/Animatable/animate.html:
 - 'Element.animate() does not accept invalid iterations value: -1'
 - 'Element.animate() does not accept invalid iterations value: -Infinity'
 - 'Element.animate() does not accept invalid iterations value: NaN'
-- Element.animate() does not accept keyframes not loosely sorted by offset
-- Element.animate() does not accept keyframes with an invalid composite value
-- Element.animate() does not accept keyframes with an out-of-bounded negative offset
-- Element.animate() does not accept keyframes with an out-of-bounded positive offset
 - Element.animate() does not accept property-indexed keyframe with an invalid easing
   in the unused part of the array of easings
-- Element.animate() does not accept property-indexed keyframes not loosely sorted
-  by offset
-- Element.animate() does not accept property-indexed keyframes not loosely sorted
-  by offset even though not all offsets are specified
-- Element.animate() does not accept property-indexed keyframes with an invalid composite
-  value
-- Element.animate() does not accept property-indexed keyframes with an invalid composite
-  value as one of the array values
-- Element.animate() does not accept property-indexed keyframes with an invalid easing
-  value
-- Element.animate() does not accept property-indexed keyframes with an invalid easing
-  value as one of the array values
-- Element.animate() does not accept property-indexed keyframes with offsets out of
-  range
 - animate() with a non-null invalid pseudoElement '' throws a SyntaxError
 - animate() with a non-null invalid pseudoElement '::abc' throws a SyntaxError
 - animate() with a non-null invalid pseudoElement ':abc' throws a SyntaxError
 - animate() with a non-null invalid pseudoElement 'before' throws a SyntaxError
-- animate() with pseudoElement parameter creates an Animation object
-- animate() with pseudoElement parameter creates an Animation object for ::first-line
-- animate() with pseudoElement parameter creates an Animation object for ::marker
-- animate() with pseudoElement parameter without content creates an Animation object
 web-animations/interfaces/Animatable/getAnimations-iframe.html:
 - Calling Document.getAnimations updates layout of parent frame if needed
 - Calling Element.getAnimations updates layout of parent frame if needed
@@ -6908,196 +6725,28 @@ web-animations/interfaces/DocumentTimeline/constructor.html:
 - A positive origin time makes the document timeline's current time lag behind the
   default document timeline
 web-animations/interfaces/KeyframeEffect/constructor.html:
-- A KeyframeEffect can be constructed with a keyframe sequence with different easing
-  values, but the same easing value for a given offset
 - A KeyframeEffect can be constructed with a one property two value property-indexed
   keyframes specification where the first value is invalid
 - A KeyframeEffect can be constructed with a one property two value property-indexed
   keyframes specification where the second value is invalid
-- A KeyframeEffect can be constructed with a property-indexed keyframe with a single
-  offset
-- A KeyframeEffect can be constructed with a property-indexed keyframe with an array
-  of offsets with a trailing null value
-- A KeyframeEffect can be constructed with a property-indexed keyframe with an array
-  of offsets with adjacent null values
-- A KeyframeEffect can be constructed with a property-indexed keyframe with an array
-  of offsets with all null values (and too many at that)
-- A KeyframeEffect can be constructed with a property-indexed keyframe with an array
-  of offsets with an embedded null value
-- A KeyframeEffect can be constructed with a property-indexed keyframe with an array
-  of offsets with leading and trailing null values
 - A KeyframeEffect can be constructed with a property-indexed keyframes specification
   with an invalid value
-- A KeyframeEffect can be constructed with a single keyframe sequence with a single
-  calc() offset
-- A KeyframeEffect constructed with a keyframe sequence with a CSS variable as its
-  property roundtrips
-- A KeyframeEffect constructed with a keyframe sequence with a CSS variable reference
-  in a shorthand property roundtrips
-- A KeyframeEffect constructed with a keyframe sequence with a CSS variable reference
-  roundtrips
-- A KeyframeEffect constructed with a keyframe sequence with different composite values,
-  but the same composite value for a given offset roundtrips
-- A KeyframeEffect constructed with a keyframe sequence with different easing values,
-  but the same easing value for a given offset roundtrips
-- A KeyframeEffect constructed with a keyframe sequence with duplicate values for
-  a given interior offset roundtrips
-- A KeyframeEffect constructed with a keyframe sequence with duplicate values for
-  offsets 0 and 1 roundtrips
-- A KeyframeEffect constructed with a one property keyframe sequence with all omitted
-  offsets roundtrips
-- A KeyframeEffect constructed with a one property keyframe sequence with some null
-  offsets roundtrips
-- A KeyframeEffect constructed with a one property keyframe sequence with some omitted
-  offsets roundtrips
-- A KeyframeEffect constructed with a one property one keyframe sequence roundtrips
-- A KeyframeEffect constructed with a one property one non-array value property-indexed
-  keyframes specification roundtrips
-- A KeyframeEffect constructed with a one property one value property-indexed keyframes
-  specification roundtrips
-- A KeyframeEffect constructed with a one property two keyframe sequence roundtrips
-- A KeyframeEffect constructed with a one property two keyframe sequence that needs
-  to stringify its values roundtrips
-- A KeyframeEffect constructed with a one property two value property-indexed keyframes
-  specification roundtrips
-- A KeyframeEffect constructed with a one property two value property-indexed keyframes
-  specification that needs to stringify its values roundtrips
-- A KeyframeEffect constructed with a one property two value property-indexed keyframes
-  specification where the first value is invalid roundtrips
-- A KeyframeEffect constructed with a one property two value property-indexed keyframes
-  specification where the second value is invalid roundtrips
-- A KeyframeEffect constructed with a one shorthand property two keyframe sequence
-  roundtrips
-- A KeyframeEffect constructed with a one shorthand property two value property-indexed
-  keyframes specification roundtrips
-- A KeyframeEffect constructed with a property-indexed keyframe with a composite array
-  roundtrips
-- A KeyframeEffect constructed with a property-indexed keyframe with a composite array
-  that is too long roundtrips
-- A KeyframeEffect constructed with a property-indexed keyframe with a composite array
-  that is too short roundtrips
-- A KeyframeEffect constructed with a property-indexed keyframe with a single composite
-  operation roundtrips
-- A KeyframeEffect constructed with a property-indexed keyframe with a single easing
-  roundtrips
-- A KeyframeEffect constructed with a property-indexed keyframe with a single null
-  offset roundtrips
-- A KeyframeEffect constructed with a property-indexed keyframe with a single offset
-  roundtrips
-- A KeyframeEffect constructed with a property-indexed keyframe with a single-element
-  array of easings roundtrips
-- A KeyframeEffect constructed with a property-indexed keyframe with a single-element
-  composite array roundtrips
-- A KeyframeEffect constructed with a property-indexed keyframe with an array of easings
-  roundtrips
-- A KeyframeEffect constructed with a property-indexed keyframe with an array of easings
-  that is too long roundtrips
-- A KeyframeEffect constructed with a property-indexed keyframe with an array of easings
-  that is too short roundtrips
-- A KeyframeEffect constructed with a property-indexed keyframe with an array of offsets
-  roundtrips
-- A KeyframeEffect constructed with a property-indexed keyframe with an array of offsets
-  that is not strictly ascending in the unused part of the array roundtrips
-- A KeyframeEffect constructed with a property-indexed keyframe with an array of offsets
-  that is too long roundtrips
-- A KeyframeEffect constructed with a property-indexed keyframe with an array of offsets
-  that is too short roundtrips
-- A KeyframeEffect constructed with a property-indexed keyframe with an array of offsets
-  with a trailing null value roundtrips
-- A KeyframeEffect constructed with a property-indexed keyframe with an array of offsets
-  with adjacent null values roundtrips
-- A KeyframeEffect constructed with a property-indexed keyframe with an array of offsets
-  with all null values (and too many at that) roundtrips
-- A KeyframeEffect constructed with a property-indexed keyframe with an array of offsets
-  with an embedded null value roundtrips
-- A KeyframeEffect constructed with a property-indexed keyframe with an array of offsets
-  with leading and trailing null values roundtrips
-- A KeyframeEffect constructed with a property-indexed keyframe with an empty array
-  of easings roundtrips
-- A KeyframeEffect constructed with a property-indexed keyframe with an empty array
-  of offsets roundtrips
-- A KeyframeEffect constructed with a property-indexed keyframe without any specified
-  easing roundtrips
-- A KeyframeEffect constructed with a property-indexed keyframes specification with
-  a CSS variable as the property roundtrips
-- A KeyframeEffect constructed with a property-indexed keyframes specification with
-  a CSS variable reference in a shorthand property roundtrips
-- A KeyframeEffect constructed with a property-indexed keyframes specification with
-  a CSS variable reference roundtrips
-- A KeyframeEffect constructed with a property-indexed keyframes specification with
-  an invalid value roundtrips
-- A KeyframeEffect constructed with a single keyframe sequence with a single calc()
-  offset roundtrips
-- A KeyframeEffect constructed with a single keyframe sequence with null offset roundtrips
-- A KeyframeEffect constructed with a single keyframe sequence with omitted offset
-  roundtrips
-- A KeyframeEffect constructed with a single keyframe sequence with string offset
-  roundtrips
-- A KeyframeEffect constructed with a two property (a shorthand and one of its component
-  longhands) two keyframe sequence roundtrips
-- A KeyframeEffect constructed with a two property (one shorthand and one of its longhand
-  components) two value property-indexed keyframes specification roundtrips
-- A KeyframeEffect constructed with a two property (one shorthand and one of its shorthand
-  components) two value property-indexed keyframes specification roundtrips
-- A KeyframeEffect constructed with a two property four keyframe sequence roundtrips
-- A KeyframeEffect constructed with a two property keyframe sequence where one property
-  is missing from the first keyframe roundtrips
-- A KeyframeEffect constructed with a two property keyframe sequence where one property
-  is missing from the last keyframe roundtrips
-- A KeyframeEffect constructed with a two property keyframe sequence with some omitted
-  offsets roundtrips
-- A KeyframeEffect constructed with a two property property-indexed keyframes specification
-  with different numbers of values roundtrips
-- A KeyframeEffect constructed with a two property two keyframe sequence roundtrips
-- A KeyframeEffect constructed with a two property two value property-indexed keyframes
-  specification roundtrips
 - A KeyframeEffect constructed without any KeyframeEffectOptions object
 - Invalid KeyframeEffect option by -Infinity
-- Invalid KeyframeEffect option by NaN
 - Invalid KeyframeEffect option by a NaN duration
 - Invalid KeyframeEffect option by a NaN iterations
-- Invalid KeyframeEffect option by a blank easing
-- Invalid KeyframeEffect option by a multi-value easing
 - Invalid KeyframeEffect option by a negative Infinity duration
 - Invalid KeyframeEffect option by a negative Infinity iterations
 - Invalid KeyframeEffect option by a negative duration
 - Invalid KeyframeEffect option by a negative iterations
 - Invalid KeyframeEffect option by a negative value
 - Invalid KeyframeEffect option by a string duration
-- Invalid KeyframeEffect option by a variable easing
-- Invalid KeyframeEffect option by an 'inherit' easing
-- Invalid KeyframeEffect option by an 'initial' easing
-- Invalid KeyframeEffect option by an unrecognized easing
-- Invalid easing values are correctly rejected when passed to the KeyframeEffect constructor
-  in KeyframeEffectOptions
-- KeyframeEffect constructor throws with a keyframe sequence with an invalid easing
-  value
 - KeyframeEffect constructor throws with empty property-indexed keyframe with an invalid
   easing
 - KeyframeEffect constructor throws with empty property-indexed keyframe with an invalid
   easings array
-- KeyframeEffect constructor throws with keyframes not loosely sorted by offset
-- KeyframeEffect constructor throws with keyframes with an invalid composite value
-- KeyframeEffect constructor throws with keyframes with an out-of-bounded negative
-  offset
-- KeyframeEffect constructor throws with keyframes with an out-of-bounded positive
-  offset
 - KeyframeEffect constructor throws with property-indexed keyframe with an invalid
   easing in the unused part of the array of easings
-- KeyframeEffect constructor throws with property-indexed keyframes not loosely sorted
-  by offset
-- KeyframeEffect constructor throws with property-indexed keyframes not loosely sorted
-  by offset even though not all offsets are specified
-- KeyframeEffect constructor throws with property-indexed keyframes with an invalid
-  composite value
-- KeyframeEffect constructor throws with property-indexed keyframes with an invalid
-  composite value as one of the array values
-- KeyframeEffect constructor throws with property-indexed keyframes with an invalid
-  easing value
-- KeyframeEffect constructor throws with property-indexed keyframes with an invalid
-  easing value as one of the array values
-- KeyframeEffect constructor throws with property-indexed keyframes with offsets out
-  of range
 - composite value is auto if the composite operation specified on the keyframe effect
   is being used
 - composite values are parsed correctly when passed to the KeyframeEffect constructor
@@ -7122,157 +6771,36 @@ web-animations/interfaces/KeyframeEffect/processing-a-keyframes-argument-001.htm
 - An undefined keyframe returned from a custom iterator should be treated as a default
   keyframe
 - Properties are read in ascending order by Unicode codepoint
-- Reading from a custom iterator that returns a keyframe with a non finite floating-point
-  offset value and an invalid easing should throw
-- Reading from a custom iterator that returns a keyframe with a non finite floating-point
-  offset value should throw
-- Reading from a custom iterator that returns a non-object keyframe and an invalid
-  easing should throw
 - Reading from a custom iterator that returns a non-object keyframe should throw
-- non-animatable property 'animation' is not accessed when using a keyframe sequence
-- non-animatable property 'animation' is not accessed when using a property-indexed
-  keyframe object
-- non-animatable property 'animationDelay' is not accessed when using a keyframe sequence
-- non-animatable property 'animationDelay' is not accessed when using a property-indexed
-  keyframe object
-- non-animatable property 'animationDirection' is not accessed when using a keyframe
-  sequence
-- non-animatable property 'animationDirection' is not accessed when using a property-indexed
-  keyframe object
-- non-animatable property 'animationDuration' is not accessed when using a keyframe
-  sequence
-- non-animatable property 'animationDuration' is not accessed when using a property-indexed
-  keyframe object
-- non-animatable property 'animationFillMode' is not accessed when using a keyframe
-  sequence
-- non-animatable property 'animationFillMode' is not accessed when using a property-indexed
-  keyframe object
-- non-animatable property 'animationIterationCount' is not accessed when using a keyframe
-  sequence
-- non-animatable property 'animationIterationCount' is not accessed when using a property-indexed
-  keyframe object
-- non-animatable property 'animationName' is not accessed when using a keyframe sequence
-- non-animatable property 'animationName' is not accessed when using a property-indexed
-  keyframe object
-- non-animatable property 'animationPlayState' is not accessed when using a keyframe
-  sequence
-- non-animatable property 'animationPlayState' is not accessed when using a property-indexed
-  keyframe object
-- non-animatable property 'animationTimingFunction' is not accessed when using a keyframe
-  sequence
-- non-animatable property 'animationTimingFunction' is not accessed when using a property-indexed
-  keyframe object
-- non-animatable property 'contain' is not accessed when using a keyframe sequence
-- non-animatable property 'contain' is not accessed when using a property-indexed
-  keyframe object
-- non-animatable property 'direction' is not accessed when using a keyframe sequence
-- non-animatable property 'direction' is not accessed when using a property-indexed
-  keyframe object
 - non-animatable property 'float' is not accessed when using a keyframe sequence
 - non-animatable property 'float' is not accessed when using a property-indexed keyframe
   object
 - non-animatable property 'font-size' is not accessed when using a keyframe sequence
 - non-animatable property 'font-size' is not accessed when using a property-indexed
   keyframe object
-- non-animatable property 'textCombineUpright' is not accessed when using a keyframe
-  sequence
-- non-animatable property 'textCombineUpright' is not accessed when using a property-indexed
-  keyframe object
-- non-animatable property 'textOrientation' is not accessed when using a keyframe
-  sequence
-- non-animatable property 'textOrientation' is not accessed when using a property-indexed
-  keyframe object
-- non-animatable property 'transition' is not accessed when using a keyframe sequence
-- non-animatable property 'transition' is not accessed when using a property-indexed
-  keyframe object
-- non-animatable property 'transitionDelay' is not accessed when using a keyframe
-  sequence
-- non-animatable property 'transitionDelay' is not accessed when using a property-indexed
-  keyframe object
-- non-animatable property 'transitionDuration' is not accessed when using a keyframe
-  sequence
-- non-animatable property 'transitionDuration' is not accessed when using a property-indexed
-  keyframe object
-- non-animatable property 'transitionProperty' is not accessed when using a keyframe
-  sequence
-- non-animatable property 'transitionProperty' is not accessed when using a property-indexed
-  keyframe object
-- non-animatable property 'transitionTimingFunction' is not accessed when using a
-  keyframe sequence
-- non-animatable property 'transitionTimingFunction' is not accessed when using a
-  property-indexed keyframe object
-- non-animatable property 'unicodeBidi' is not accessed when using a keyframe sequence
-- non-animatable property 'unicodeBidi' is not accessed when using a property-indexed
-  keyframe object
-- non-animatable property 'unsupportedProperty' is not accessed when using a keyframe
-  sequence
-- non-animatable property 'unsupportedProperty' is not accessed when using a property-indexed
-  keyframe object
 - non-animatable property 'willChange' is not accessed when using a keyframe sequence
 - non-animatable property 'willChange' is not accessed when using a property-indexed
-  keyframe object
-- non-animatable property 'writingMode' is not accessed when using a keyframe sequence
-- non-animatable property 'writingMode' is not accessed when using a property-indexed
   keyframe object
 web-animations/interfaces/KeyframeEffect/processing-a-keyframes-argument-002.html:
 - Errors from invalid easings on a keyframe sequence are thrown after reading all
   properties
-- Errors from invalid easings on a property-indexed keyframe are thrown after reading
-  all properties
 - Invalid easing values are correctly rejected after doing all the iterating
 - Invalid easing values are correctly rejected when set on a property-indexed keyframe
-- Invalid easing values are correctly rejected when using a keyframe sequence
 - easing values are parsed correctly when set on a property-indexed keyframe
 - easing values are parsed correctly when using a keyframe sequence
 web-animations/interfaces/KeyframeEffect/setKeyframes.html:
-- KeyframeEffect constructor throws with a keyframe sequence with an invalid easing
-  value
 - KeyframeEffect constructor throws with empty property-indexed keyframe with an invalid
   easing
 - KeyframeEffect constructor throws with empty property-indexed keyframe with an invalid
   easings array
-- KeyframeEffect constructor throws with keyframes not loosely sorted by offset
-- KeyframeEffect constructor throws with keyframes with an invalid composite value
-- KeyframeEffect constructor throws with keyframes with an out-of-bounded negative
-  offset
-- KeyframeEffect constructor throws with keyframes with an out-of-bounded positive
-  offset
 - KeyframeEffect constructor throws with property-indexed keyframe with an invalid
   easing in the unused part of the array of easings
-- KeyframeEffect constructor throws with property-indexed keyframes not loosely sorted
-  by offset
-- KeyframeEffect constructor throws with property-indexed keyframes not loosely sorted
-  by offset even though not all offsets are specified
-- KeyframeEffect constructor throws with property-indexed keyframes with an invalid
-  composite value
-- KeyframeEffect constructor throws with property-indexed keyframes with an invalid
-  composite value as one of the array values
-- KeyframeEffect constructor throws with property-indexed keyframes with an invalid
-  easing value
-- KeyframeEffect constructor throws with property-indexed keyframes with an invalid
-  easing value as one of the array values
-- KeyframeEffect constructor throws with property-indexed keyframes with offsets out
-  of range
-- Keyframes can be replaced with a keyframe sequence with different easing values,
-  but the same easing value for a given offset
 - Keyframes can be replaced with a one property two value property-indexed keyframes
   specification where the first value is invalid
 - Keyframes can be replaced with a one property two value property-indexed keyframes
   specification where the second value is invalid
-- Keyframes can be replaced with a property-indexed keyframe with a single offset
-- Keyframes can be replaced with a property-indexed keyframe with an array of offsets
-  with a trailing null value
-- Keyframes can be replaced with a property-indexed keyframe with an array of offsets
-  with adjacent null values
-- Keyframes can be replaced with a property-indexed keyframe with an array of offsets
-  with all null values (and too many at that)
-- Keyframes can be replaced with a property-indexed keyframe with an array of offsets
-  with an embedded null value
-- Keyframes can be replaced with a property-indexed keyframe with an array of offsets
-  with leading and trailing null values
 - Keyframes can be replaced with a property-indexed keyframes specification with an
   invalid value
-- Keyframes can be replaced with a single keyframe sequence with a single calc() offset
 web-animations/interfaces/KeyframeEffect/style-change-events.html:
 - All property keys are recognized
 web-animations/interfaces/KeyframeEffect/target.html:
@@ -7612,8 +7140,6 @@ web-animations/timing-model/time-transformations/transformed-progress.html:
 - Test bounds point of steps(jump-both) easing with iterationStart and delay
 - Test bounds point of steps(jump-none) easing
 - Test bounds point of steps(jump-none) easing with iterationStart and delay
-- Test global timing function with values outside [0,1] with a step timing function
-  on the keyframe
 - Test start bounds of step-start easing with no delay
 web-animations/timing-model/timelines/sibling-iframe-timeline.html:
 - animation tied to another frame's timeline runs properly
