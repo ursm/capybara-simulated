@@ -6198,7 +6198,6 @@ web-animations/animation-model/animation-types/accumulation-per-property-001.htm
 - 'color-interpolation: "linearrgb" onto "auto"'
 - column-rule-color supports animating as color of rgb() with overflowed  from and
   to values
-- 'fill-opacity: [0, 1] number (clamped)'
 - 'flex-basis: calc'
 - 'flex-basis: units "calc" onto "px"'
 - 'flex-flow: "row" onto "row-reverse wrap"'
@@ -6238,14 +6237,10 @@ web-animations/animation-model/animation-types/accumulation-per-property-002.htm
   and to values
 - scrollbar-color supports animating as color pair of rgba()
 - stop-color supports animating as color of rgb() with overflowed  from and to values
-- 'stop-opacity: [0, 1] number (clamped)'
 - stroke-color supports animating as color of rgb() with overflowed  from and to values
 - 'stroke-dasharray: dasharray'
-- 'stroke-opacity: [0, 1] number (clamped)'
 - text-decoration-color supports animating as color of rgb() with overflowed  from
   and to values
-- 'text-decoration: "overline" onto "underline"'
-- 'text-decoration: "underline" onto "overline"'
 - text-emphasis-color supports animating as color of rgb() with overflowed  from and
   to values
 - 'text-group-align: "center" onto "none"'
@@ -6306,7 +6301,6 @@ web-animations/animation-model/animation-types/addition-per-property-001.html:
 - 'color-interpolation: "linearrgb" onto "auto"'
 - column-rule-color supports animating as color of rgb() with overflowed  from and
   to values
-- 'fill-opacity: [0, 1] number (clamped)'
 - 'flex-basis: calc'
 - 'flex-basis: units "calc" onto "px"'
 - 'flex-flow: "row" onto "row-reverse wrap"'
@@ -6346,14 +6340,10 @@ web-animations/animation-model/animation-types/addition-per-property-002.html:
   and to values
 - scrollbar-color supports animating as color pair of rgba()
 - stop-color supports animating as color of rgb() with overflowed  from and to values
-- 'stop-opacity: [0, 1] number (clamped)'
 - stroke-color supports animating as color of rgb() with overflowed  from and to values
 - 'stroke-dasharray: dasharray'
-- 'stroke-opacity: [0, 1] number (clamped)'
 - text-decoration-color supports animating as color of rgb() with overflowed  from
   and to values
-- 'text-decoration: "overline" onto "underline"'
-- 'text-decoration: "underline" onto "overline"'
 - text-emphasis-color supports animating as color of rgb() with overflowed  from and
   to values
 - 'text-group-align: "center" onto "none"'
@@ -6514,12 +6504,6 @@ web-animations/animation-model/animation-types/interpolation-per-property-002.ht
 - stroke-dasharray supports animating as a dasharray (mixed lengths and percentages)
 - stroke-dasharray supports animating as a percentage
 - stroke-dasharray supports animating as a positive number
-- text-decoration uses discrete animation when animating between "underline" and "overline"
-  with effect easing
-- text-decoration uses discrete animation when animating between "underline" and "overline"
-  with keyframe easing
-- text-decoration uses discrete animation when animating between "underline" and "overline"
-  with linear easing
 - text-group-align uses discrete animation when animating between "none" and "center"
   with effect easing
 - text-group-align uses discrete animation when animating between "none" and "center"
