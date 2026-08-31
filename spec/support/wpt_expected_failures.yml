@@ -3891,9 +3891,6 @@ html/dom/elements/requirements-relating-to-bidirectional-algorithm-formatting-ch
 - "== html/dom/elements/requirements-relating-to-bidirectional-algorithm-formatting-characters/reference/dir-isolation-009b-ref.html"
 html/dom/elements/the-innertext-and-outertext-properties/getter.html:
 - ' ("<table><tfoot><tr><td>footer</tfoot><thead><tr><td style=''visibility:collapse''>thead</thead><tbody><tr><td>tbody</tbody></table>")'
-- '&nbsp; preserved ("<div>&nbsp;")'
-- 2 blank lines around <p> even when display:block ("<div>123<p style='display:block'>abc")
-- 2 blank lines around <p> even when display:inline-block ("<div>123<p style='display:inline-block'>abc")
 - '::first-letter styles applied ("<div class=''first-letter-uppercase'' style=''width:0''>abc
   def")'
 - '::first-line styles applied ("<div class=''first-line-uppercase'' style=''width:0''>abc
@@ -3902,15 +3899,11 @@ html/dom/elements/the-innertext-and-outertext-properties/getter.html:
 - <br> content ignored ("<div><br class='poke'>")
 - <br> induces line break even at end of block ("<div>abc<br>")
 - <canvas> should not collapse following space ("<div><canvas></canvas> abc")
-- <hr> induces line break ("<div>abc<hr>def")
-- <hr><hr> induces just one line break ("<div>abc<hr><hr>def")
-- <hr><hr><hr> induces just one line break ("<div>abc<hr><hr><hr>def")
 - <img> contents ignored ("<img src='about:blank' class='poke'>")
 - <object> contents ignored ("<div><object>abc")
 - <optgroup> containing <optgroup> ("<select><optgroup class='poke-optgroup'></select>")
 - <optgroup> in <div> ("<div>a<optgroup>123</optgroup>bc")
 - <option> in <div> ("<div>a<option>123</option>bc")
-- <pre> trailing newlines don't suppress <p> blank line ("<div><pre>abc\n\n</pre><p>def")
 - <rp> ("<div><ruby>abc<rp>(</rp><rt>def</rt><rp>)</rp></ruby>")
 - <rp> in a <select> ("<div><select class='poke-rp'></select>")
 - <select size='1'> contents of options preserved ("<div><select size='1'><option>abc</option><option>def")
@@ -3922,15 +3915,7 @@ html/dom/elements/the-innertext-and-outertext-properties/getter.html:
 - <svg><defs> text contents ignored ("<div><svg><defs><text>abc</text></defs></svg></div>")
 - <textarea> contents ignored ("<div><textarea>abc")
 - <textarea> contents ignored ("<textarea>abc")
-- Blank line after <p> ("<div><p>abc</p>def")
-- Blank line before <p> ("<div>abc<p>def")
-- Blank line between consecutive <p>s ("<div><p>abc<p>def")
-- Blank line between consecutive <p>s separated only by empty block ("<div><p>abc</p><div></div><p>def")
-- Blank lines around <p> even without margin ("<div>123<p style='margin:0px'>abc</p>def")
 - Blank lines around a <p> in its own block ("<div>abc<div><p>123</p></div>def")
-- Blank lines between <p>s separated by non-empty block ("<div><p>abc</p><div>123</div><p>def")
-- Consecutive empty blocks ignored ("<div>abc<div></div><div></div>def")
-- Empty block induces single line break ("<div>abc<div></div>def")
 - Internal whitespace preserved ("<div style='white-space:pre'>abc  def")
 - Internal whitespace preserved ("<pre>abc  def")
 - Internal whitespace preserved ("<span style='white-space:pre'>abc  def")
@@ -3953,7 +3938,6 @@ html/dom/elements/the-innertext-and-outertext-properties/getter.html:
 - Newline-separated table rows ("<div><div class='table'><span class='row'><span class='cell'>abc</span></span>\n<span
   class='row'><span class='cell'>def</span></span></div>")
 - No newlines around inline-table ("<div>abc<div class='itable'><span class='cell'>def</span></div>ghi")
-- One blank line between <p>s, ignoring empty <p>s ("<div><p>abc<p></p><p></p><p>def")
 - Replaced element <canvas> with display:block should be treated as block-level ("<div>abc
   <canvas style='display:block'></canvas> def")
 - Replaced element <img> with display:block should be treated as block-level ("<div>abc
@@ -3964,8 +3948,6 @@ html/dom/elements/the-innertext-and-outertext-properties/getter.html:
   class='cell'>def</span></div>")
 - Tab-separated table cells ("<div><div class='table'><span class='cell'>abc</span>\n<span
   class='cell'>def</span></div>")
-- Tab-separated table cells including empty cells ("<div><table><tr><td>abc<td><td>def</table>")
-- Tab-separated table cells including trailing empty cells ("<div><table><tr><td>abc<td><td></table>")
 - Trailing whitesapce should not be collapsed ("<div>abc <img>")
 - Trailing whitespace preserved ("<div style='white-space:pre'>abc ")
 - Trailing whitespace preserved ("<pre>abc ")
@@ -4041,78 +4023,6 @@ html/dom/elements/the-innertext-and-outertext-properties/innertext-setter.html:
 - innerText not supported on SVG elements
 - innerText not supported on SVG elements, detached
 html/dom/elements/the-innertext-and-outertext-properties/innertext-with-white-spaces.html:
-- CR after <div> should be invisible if it's collapsible
-- CR after <div> should be invisible if it's collapsible
-- CR after <div> should be invisible if it's collapsible
-- CR after <div> should be invisible if it's collapsible
-- CR after <div> should be invisible if it's collapsible
-- CR after <div> should be invisible if it's collapsible
-- CR after <div> should be invisible if it's collapsible
-- CR after <div> should be invisible if it's collapsible
-- CR after <div> should be invisible if it's collapsible
-- CR after <div> should be invisible if it's collapsible
-- CR after <div> should be invisible if it's collapsible
-- CR after <div> should be invisible if it's collapsible
-- CR after <hr> should be invisible if it's collapsible
-- CR after <hr> should be invisible if it's collapsible
-- CR after <hr> should be invisible if it's collapsible
-- CR after <hr> should be invisible if it's collapsible
-- CR after <hr> should be invisible if it's collapsible
-- CR after <hr> should be invisible if it's collapsible
-- CR after <hr> should be invisible if it's collapsible
-- CR after <hr> should be invisible if it's collapsible
-- CR after <hr> should be invisible if it's collapsible
-- CR after <hr> should be invisible if it's collapsible
-- CR after <hr> should be invisible if it's collapsible
-- CR after <hr> should be invisible if it's collapsible
-- CR before <div> should be invisible if it's collapsible
-- CR before <div> should be invisible if it's collapsible
-- CR before <div> should be invisible if it's collapsible
-- CR before <div> should be invisible if it's collapsible
-- CR before <div> should be invisible if it's collapsible
-- CR before <div> should be invisible if it's collapsible
-- CR before <div> should be invisible if it's collapsible
-- CR before <div> should be invisible if it's collapsible
-- CR before <div> should be invisible if it's collapsible
-- CR before <div> should be invisible if it's collapsible
-- CR before <div> should be invisible if it's collapsible
-- CR before <div> should be invisible if it's collapsible
-- CR before <hr> should be invisible if it's collapsible
-- CR before <hr> should be invisible if it's collapsible
-- CR before <hr> should be invisible if it's collapsible
-- CR before <hr> should be invisible if it's collapsible
-- CR before <hr> should be invisible if it's collapsible
-- CR before <hr> should be invisible if it's collapsible
-- CR before <hr> should be invisible if it's collapsible
-- CR before <hr> should be invisible if it's collapsible
-- CR before <hr> should be invisible if it's collapsible
-- CR before <hr> should be invisible if it's collapsible
-- CR before <hr> should be invisible if it's collapsible
-- CR before <hr> should be invisible if it's collapsible
-- CR between <div>s should be invisible if it's collapsible
-- CR between <div>s should be invisible if it's collapsible
-- CR between <div>s should be invisible if it's collapsible
-- CR between <div>s should be invisible if it's collapsible
-- CR between <div>s should be invisible if it's collapsible
-- CR between <div>s should be invisible if it's collapsible
-- CR between <div>s should be invisible if it's collapsible
-- CR between <div>s should be invisible if it's collapsible
-- CR between <div>s should be invisible if it's collapsible
-- CR between <div>s should be invisible if it's collapsible
-- CR between <div>s should be invisible if it's collapsible
-- CR between <div>s should be invisible if it's collapsible
-- CR between <hr>s should be invisible if it's collapsible
-- CR between <hr>s should be invisible if it's collapsible
-- CR between <hr>s should be invisible if it's collapsible
-- CR between <hr>s should be invisible if it's collapsible
-- CR between <hr>s should be invisible if it's collapsible
-- CR between <hr>s should be invisible if it's collapsible
-- CR between <hr>s should be invisible if it's collapsible
-- CR between <hr>s should be invisible if it's collapsible
-- CR between <hr>s should be invisible if it's collapsible
-- CR between <hr>s should be invisible if it's collapsible
-- CR between <hr>s should be invisible if it's collapsible
-- CR between <hr>s should be invisible if it's collapsible
 - Leading CR should be normalized to LF and should not appear if linefeeds are collapsible
 - Leading CR should be normalized to LF and should not appear if linefeeds are collapsible
 - Leading CR should be normalized to LF and should not appear if linefeeds are collapsible
@@ -4161,12 +4071,6 @@ html/dom/elements/the-innertext-and-outertext-properties/innertext-with-white-sp
 - Leading tab should not appear if white-spaces are collapsible
 - Leading tab should not appear if white-spaces are collapsible
 - Leading tab should not appear if white-spaces are collapsible
-- Leading tab should not appear if white-spaces are collapsible
-- Leading tab should not appear if white-spaces are collapsible
-- Leading tab should not appear if white-spaces are collapsible
-- Leading tabs should not appear if white-spaces are collapsible
-- Leading tabs should not appear if white-spaces are collapsible
-- Leading tabs should not appear if white-spaces are collapsible
 - Leading tabs should not appear if white-spaces are collapsible
 - Leading tabs should not appear if white-spaces are collapsible
 - Leading tabs should not appear if white-spaces are collapsible
@@ -4207,7 +4111,11 @@ html/dom/elements/the-innertext-and-outertext-properties/innertext-with-white-sp
 - 'Multiple mixed white-spaces between words may be invisible if they are collapsible
   #3'
 - 'Multiple mixed white-spaces between words may be invisible if they are collapsible
-  #4'
+  #3'
+- 'Multiple mixed white-spaces between words may be invisible if they are collapsible
+  #3'
+- 'Multiple mixed white-spaces between words may be invisible if they are collapsible
+  #3'
 - 'Multiple mixed white-spaces between words may be invisible if they are collapsible
   #4'
 - 'Multiple mixed white-spaces between words may be invisible if they are collapsible
@@ -4218,6 +4126,14 @@ html/dom/elements/the-innertext-and-outertext-properties/innertext-with-white-sp
   #4'
 - 'Multiple mixed white-spaces between words may be invisible if they are collapsible
   #4'
+- 'Multiple mixed white-spaces between words may be invisible if they are collapsible
+  #4'
+- 'Multiple mixed white-spaces between words may be invisible if they are collapsible
+  #4'
+- 'Multiple mixed white-spaces between words may be invisible if they are collapsible
+  #4'
+- 'Multiple mixed white-spaces between words may be invisible if they are collapsible
+  #4'
 - Multiple white-spaces between words may be invisible if they are collapsible
 - Multiple white-spaces between words may be invisible if they are collapsible
 - Multiple white-spaces between words may be invisible if they are collapsible
@@ -4251,9 +4167,6 @@ html/dom/elements/the-innertext-and-outertext-properties/innertext-with-white-sp
 - Only multiple collapsible tabs should be invisible
 - Only multiple collapsible tabs should be invisible
 - Only multiple collapsible tabs should be invisible
-- Only multiple collapsible tabs should be invisible
-- Only multiple collapsible tabs should be invisible
-- Only multiple collapsible tabs should be invisible
 - Only single collapsible CR should be invisible
 - Only single collapsible CR should be invisible
 - Only single collapsible CR should be invisible
@@ -4278,9 +4191,6 @@ html/dom/elements/the-innertext-and-outertext-properties/innertext-with-white-sp
 - Only single collapsible space should be invisible
 - Only single collapsible space should be invisible
 - Only single collapsible space should be invisible
-- Only single collapsible tab should be invisible
-- Only single collapsible tab should be invisible
-- Only single collapsible tab should be invisible
 - Only single collapsible tab should be invisible
 - Only single collapsible tab should be invisible
 - Only single collapsible tab should be invisible
@@ -4299,12 +4209,6 @@ html/dom/elements/the-innertext-and-outertext-properties/innertext-with-white-sp
 - Trailing tab should not appear if white-spaces are collapsible
 - Trailing tab should not appear if white-spaces are collapsible
 - Trailing tab should not appear if white-spaces are collapsible
-- Trailing tab should not appear if white-spaces are collapsible
-- Trailing tab should not appear if white-spaces are collapsible
-- Trailing tab should not appear if white-spaces are collapsible
-- Trailing tabs should not appear if white-spaces are collapsible
-- Trailing tabs should not appear if white-spaces are collapsible
-- Trailing tabs should not appear if white-spaces are collapsible
 - Trailing tabs should not appear if white-spaces are collapsible
 - Trailing tabs should not appear if white-spaces are collapsible
 - Trailing tabs should not appear if white-spaces are collapsible
@@ -4320,165 +4224,30 @@ html/dom/elements/the-innertext-and-outertext-properties/innertext-with-white-sp
 - Trailing white-spaces should not appear if white-spaces are collapsible
 - Trailing white-spaces should not appear if white-spaces are collapsible
 - Trailing white-spaces should not appear if white-spaces are collapsible
-- linefeed after <div> should be invisible if it's collapsible
-- linefeed after <div> should be invisible if it's collapsible
-- linefeed after <div> should be invisible if it's collapsible
-- linefeed after <div> should be invisible if it's collapsible
-- linefeed after <div> should be invisible if it's collapsible
-- linefeed after <div> should be invisible if it's collapsible
-- linefeed after <div> should be invisible if it's collapsible
-- linefeed after <div> should be invisible if it's collapsible
-- linefeed after <div> should be invisible if it's collapsible
-- linefeed after <div> should be invisible if it's collapsible
-- linefeed after <div> should be invisible if it's collapsible
-- linefeed after <div> should be invisible if it's collapsible
-- linefeed after <hr> should be invisible if it's collapsible
-- linefeed after <hr> should be invisible if it's collapsible
-- linefeed after <hr> should be invisible if it's collapsible
-- linefeed after <hr> should be invisible if it's collapsible
-- linefeed after <hr> should be invisible if it's collapsible
-- linefeed after <hr> should be invisible if it's collapsible
-- linefeed after <hr> should be invisible if it's collapsible
-- linefeed after <hr> should be invisible if it's collapsible
-- linefeed after <hr> should be invisible if it's collapsible
-- linefeed after <hr> should be invisible if it's collapsible
-- linefeed after <hr> should be invisible if it's collapsible
-- linefeed after <hr> should be invisible if it's collapsible
-- linefeed before <div> should be invisible if it's collapsible
-- linefeed before <div> should be invisible if it's collapsible
-- linefeed before <div> should be invisible if it's collapsible
-- linefeed before <div> should be invisible if it's collapsible
-- linefeed before <div> should be invisible if it's collapsible
-- linefeed before <div> should be invisible if it's collapsible
-- linefeed before <div> should be invisible if it's collapsible
-- linefeed before <div> should be invisible if it's collapsible
-- linefeed before <div> should be invisible if it's collapsible
-- linefeed before <div> should be invisible if it's collapsible
-- linefeed before <div> should be invisible if it's collapsible
-- linefeed before <div> should be invisible if it's collapsible
-- linefeed before <hr> should be invisible if it's collapsible
-- linefeed before <hr> should be invisible if it's collapsible
-- linefeed before <hr> should be invisible if it's collapsible
-- linefeed before <hr> should be invisible if it's collapsible
-- linefeed before <hr> should be invisible if it's collapsible
-- linefeed before <hr> should be invisible if it's collapsible
-- linefeed before <hr> should be invisible if it's collapsible
-- linefeed before <hr> should be invisible if it's collapsible
-- linefeed before <hr> should be invisible if it's collapsible
-- linefeed before <hr> should be invisible if it's collapsible
-- linefeed before <hr> should be invisible if it's collapsible
-- linefeed before <hr> should be invisible if it's collapsible
-- linefeed between <div>s should be invisible if it's collapsible
-- linefeed between <div>s should be invisible if it's collapsible
-- linefeed between <div>s should be invisible if it's collapsible
-- linefeed between <div>s should be invisible if it's collapsible
-- linefeed between <div>s should be invisible if it's collapsible
-- linefeed between <div>s should be invisible if it's collapsible
-- linefeed between <div>s should be invisible if it's collapsible
-- linefeed between <div>s should be invisible if it's collapsible
-- linefeed between <div>s should be invisible if it's collapsible
-- linefeed between <div>s should be invisible if it's collapsible
-- linefeed between <div>s should be invisible if it's collapsible
-- linefeed between <div>s should be invisible if it's collapsible
-- linefeed between <hr>s should be invisible if it's collapsible
-- linefeed between <hr>s should be invisible if it's collapsible
-- linefeed between <hr>s should be invisible if it's collapsible
-- linefeed between <hr>s should be invisible if it's collapsible
-- linefeed between <hr>s should be invisible if it's collapsible
-- linefeed between <hr>s should be invisible if it's collapsible
-- linefeed between <hr>s should be invisible if it's collapsible
-- linefeed between <hr>s should be invisible if it's collapsible
-- linefeed between <hr>s should be invisible if it's collapsible
-- linefeed between <hr>s should be invisible if it's collapsible
-- linefeed between <hr>s should be invisible if it's collapsible
-- linefeed between <hr>s should be invisible if it's collapsible
-- tab after <br> should be invisible if it's collapsible
-- tab after <br> should be invisible if it's collapsible
-- tab after <br> should be invisible if it's collapsible
 - tab after <br> should be invisible if it's collapsible
 - tab after <br> should be invisible if it's collapsible
 - tab after <br> should be invisible if it's collapsible
 - tab after <div> should be invisible if it's collapsible
 - tab after <div> should be invisible if it's collapsible
 - tab after <div> should be invisible if it's collapsible
-- tab after <div> should be invisible if it's collapsible
-- tab after <div> should be invisible if it's collapsible
-- tab after <div> should be invisible if it's collapsible
-- tab after <div> should be invisible if it's collapsible
-- tab after <div> should be invisible if it's collapsible
-- tab after <div> should be invisible if it's collapsible
-- tab after <div> should be invisible if it's collapsible
-- tab after <div> should be invisible if it's collapsible
-- tab after <div> should be invisible if it's collapsible
-- tab after <hr> should be invisible if it's collapsible
-- tab after <hr> should be invisible if it's collapsible
-- tab after <hr> should be invisible if it's collapsible
-- tab after <hr> should be invisible if it's collapsible
-- tab after <hr> should be invisible if it's collapsible
-- tab after <hr> should be invisible if it's collapsible
-- tab after <hr> should be invisible if it's collapsible
-- tab after <hr> should be invisible if it's collapsible
-- tab after <hr> should be invisible if it's collapsible
 - tab after <hr> should be invisible if it's collapsible
 - tab after <hr> should be invisible if it's collapsible
 - tab after <hr> should be invisible if it's collapsible
 - tab before <br> should be invisible if it's collapsible
 - tab before <br> should be invisible if it's collapsible
 - tab before <br> should be invisible if it's collapsible
-- tab before <br> should be invisible if it's collapsible
-- tab before <br> should be invisible if it's collapsible
-- tab before <br> should be invisible if it's collapsible
 - tab before <div> should be invisible if it's collapsible
 - tab before <div> should be invisible if it's collapsible
 - tab before <div> should be invisible if it's collapsible
-- tab before <div> should be invisible if it's collapsible
-- tab before <div> should be invisible if it's collapsible
-- tab before <div> should be invisible if it's collapsible
-- tab before <div> should be invisible if it's collapsible
-- tab before <div> should be invisible if it's collapsible
-- tab before <div> should be invisible if it's collapsible
-- tab before <div> should be invisible if it's collapsible
-- tab before <div> should be invisible if it's collapsible
-- tab before <div> should be invisible if it's collapsible
-- tab before <hr> should be invisible if it's collapsible
-- tab before <hr> should be invisible if it's collapsible
-- tab before <hr> should be invisible if it's collapsible
-- tab before <hr> should be invisible if it's collapsible
-- tab before <hr> should be invisible if it's collapsible
-- tab before <hr> should be invisible if it's collapsible
-- tab before <hr> should be invisible if it's collapsible
-- tab before <hr> should be invisible if it's collapsible
-- tab before <hr> should be invisible if it's collapsible
 - tab before <hr> should be invisible if it's collapsible
 - tab before <hr> should be invisible if it's collapsible
 - tab before <hr> should be invisible if it's collapsible
 - tab between <br>s should be invisible if it's collapsible
 - tab between <br>s should be invisible if it's collapsible
 - tab between <br>s should be invisible if it's collapsible
-- tab between <br>s should be invisible if it's collapsible
-- tab between <br>s should be invisible if it's collapsible
-- tab between <br>s should be invisible if it's collapsible
 - tab between <div>s should be invisible if it's collapsible
 - tab between <div>s should be invisible if it's collapsible
 - tab between <div>s should be invisible if it's collapsible
-- tab between <div>s should be invisible if it's collapsible
-- tab between <div>s should be invisible if it's collapsible
-- tab between <div>s should be invisible if it's collapsible
-- tab between <div>s should be invisible if it's collapsible
-- tab between <div>s should be invisible if it's collapsible
-- tab between <div>s should be invisible if it's collapsible
-- tab between <div>s should be invisible if it's collapsible
-- tab between <div>s should be invisible if it's collapsible
-- tab between <div>s should be invisible if it's collapsible
-- tab between <hr>s should be invisible if it's collapsible
-- tab between <hr>s should be invisible if it's collapsible
-- tab between <hr>s should be invisible if it's collapsible
-- tab between <hr>s should be invisible if it's collapsible
-- tab between <hr>s should be invisible if it's collapsible
-- tab between <hr>s should be invisible if it's collapsible
-- tab between <hr>s should be invisible if it's collapsible
-- tab between <hr>s should be invisible if it's collapsible
-- tab between <hr>s should be invisible if it's collapsible
 - tab between <hr>s should be invisible if it's collapsible
 - tab between <hr>s should be invisible if it's collapsible
 - tab between <hr>s should be invisible if it's collapsible
@@ -4494,18 +4263,6 @@ html/dom/elements/the-innertext-and-outertext-properties/innertext-with-white-sp
 - white-space after <div> should be invisible if it's collapsible
 - white-space after <div> should be invisible if it's collapsible
 - white-space after <div> should be invisible if it's collapsible
-- white-space after <div> should be invisible if it's collapsible
-- white-space after <div> should be invisible if it's collapsible
-- white-space after <div> should be invisible if it's collapsible
-- white-space after <div> should be invisible if it's collapsible
-- white-space after <div> should be invisible if it's collapsible
-- white-space after <div> should be invisible if it's collapsible
-- white-space after <hr> should be invisible if it's collapsible
-- white-space after <hr> should be invisible if it's collapsible
-- white-space after <hr> should be invisible if it's collapsible
-- white-space after <hr> should be invisible if it's collapsible
-- white-space after <hr> should be invisible if it's collapsible
-- white-space after <hr> should be invisible if it's collapsible
 - white-space after <hr> should be invisible if it's collapsible
 - white-space after <hr> should be invisible if it's collapsible
 - white-space after <hr> should be invisible if it's collapsible
@@ -4518,12 +4275,9 @@ html/dom/elements/the-innertext-and-outertext-properties/innertext-with-white-sp
 - white-space before <br> should be invisible if it's collapsible
 - white-space before <br> should be invisible if it's collapsible
 - white-space before <br> should be invisible if it's collapsible
-- white-space before <div> should be invisible if it's collapsible
-- white-space before <div> should be invisible if it's collapsible
-- white-space before <div> should be invisible if it's collapsible
-- white-space before <div> should be invisible if it's collapsible
-- white-space before <div> should be invisible if it's collapsible
-- white-space before <div> should be invisible if it's collapsible
+- white-space before <br> should be invisible if it's collapsible
+- white-space before <br> should be invisible if it's collapsible
+- white-space before <br> should be invisible if it's collapsible
 - white-space before <div> should be invisible if it's collapsible
 - white-space before <div> should be invisible if it's collapsible
 - white-space before <div> should be invisible if it's collapsible
@@ -4536,12 +4290,9 @@ html/dom/elements/the-innertext-and-outertext-properties/innertext-with-white-sp
 - white-space before <hr> should be invisible if it's collapsible
 - white-space before <hr> should be invisible if it's collapsible
 - white-space before <hr> should be invisible if it's collapsible
-- white-space before <hr> should be invisible if it's collapsible
-- white-space before <hr> should be invisible if it's collapsible
-- white-space before <hr> should be invisible if it's collapsible
-- white-space before <hr> should be invisible if it's collapsible
-- white-space before <hr> should be invisible if it's collapsible
-- white-space before <hr> should be invisible if it's collapsible
+- white-space between <br>s should be invisible if it's collapsible
+- white-space between <br>s should be invisible if it's collapsible
+- white-space between <br>s should be invisible if it's collapsible
 - white-space between <br>s should be invisible if it's collapsible
 - white-space between <br>s should be invisible if it's collapsible
 - white-space between <br>s should be invisible if it's collapsible
@@ -4557,12 +4308,6 @@ html/dom/elements/the-innertext-and-outertext-properties/innertext-with-white-sp
 - white-space between <div>s should be invisible if it's collapsible
 - white-space between <div>s should be invisible if it's collapsible
 - white-space between <div>s should be invisible if it's collapsible
-- white-space between <div>s should be invisible if it's collapsible
-- white-space between <div>s should be invisible if it's collapsible
-- white-space between <div>s should be invisible if it's collapsible
-- white-space between <hr>s should be invisible if it's collapsible
-- white-space between <hr>s should be invisible if it's collapsible
-- white-space between <hr>s should be invisible if it's collapsible
 - white-space between <hr>s should be invisible if it's collapsible
 - white-space between <hr>s should be invisible if it's collapsible
 - white-space between <hr>s should be invisible if it's collapsible
@@ -4584,18 +4329,6 @@ html/dom/elements/the-innertext-and-outertext-properties/innertext-with-white-sp
 - white-spaces after <div> should be invisible if they are collapsible
 - white-spaces after <div> should be invisible if they are collapsible
 - white-spaces after <div> should be invisible if they are collapsible
-- white-spaces after <div> should be invisible if they are collapsible
-- white-spaces after <div> should be invisible if they are collapsible
-- white-spaces after <div> should be invisible if they are collapsible
-- white-spaces after <div> should be invisible if they are collapsible
-- white-spaces after <div> should be invisible if they are collapsible
-- white-spaces after <div> should be invisible if they are collapsible
-- white-spaces after <hr> should be invisible if they are collapsible
-- white-spaces after <hr> should be invisible if they are collapsible
-- white-spaces after <hr> should be invisible if they are collapsible
-- white-spaces after <hr> should be invisible if they are collapsible
-- white-spaces after <hr> should be invisible if they are collapsible
-- white-spaces after <hr> should be invisible if they are collapsible
 - white-spaces after <hr> should be invisible if they are collapsible
 - white-spaces after <hr> should be invisible if they are collapsible
 - white-spaces after <hr> should be invisible if they are collapsible
@@ -4608,12 +4341,9 @@ html/dom/elements/the-innertext-and-outertext-properties/innertext-with-white-sp
 - white-spaces before <br> should be invisible if they are collapsible
 - white-spaces before <br> should be invisible if they are collapsible
 - white-spaces before <br> should be invisible if they are collapsible
-- white-spaces before <div> should be invisible if they are collapsible
-- white-spaces before <div> should be invisible if they are collapsible
-- white-spaces before <div> should be invisible if they are collapsible
-- white-spaces before <div> should be invisible if they are collapsible
-- white-spaces before <div> should be invisible if they are collapsible
-- white-spaces before <div> should be invisible if they are collapsible
+- white-spaces before <br> should be invisible if they are collapsible
+- white-spaces before <br> should be invisible if they are collapsible
+- white-spaces before <br> should be invisible if they are collapsible
 - white-spaces before <div> should be invisible if they are collapsible
 - white-spaces before <div> should be invisible if they are collapsible
 - white-spaces before <div> should be invisible if they are collapsible
@@ -4626,12 +4356,9 @@ html/dom/elements/the-innertext-and-outertext-properties/innertext-with-white-sp
 - white-spaces before <hr> should be invisible if they are collapsible
 - white-spaces before <hr> should be invisible if they are collapsible
 - white-spaces before <hr> should be invisible if they are collapsible
-- white-spaces before <hr> should be invisible if they are collapsible
-- white-spaces before <hr> should be invisible if they are collapsible
-- white-spaces before <hr> should be invisible if they are collapsible
-- white-spaces before <hr> should be invisible if they are collapsible
-- white-spaces before <hr> should be invisible if they are collapsible
-- white-spaces before <hr> should be invisible if they are collapsible
+- white-spaces between <br>s should be invisible if they are collapsible
+- white-spaces between <br>s should be invisible if they are collapsible
+- white-spaces between <br>s should be invisible if they are collapsible
 - white-spaces between <br>s should be invisible if they are collapsible
 - white-spaces between <br>s should be invisible if they are collapsible
 - white-spaces between <br>s should be invisible if they are collapsible
@@ -4647,12 +4374,6 @@ html/dom/elements/the-innertext-and-outertext-properties/innertext-with-white-sp
 - white-spaces between <div>s should be invisible if they are collapsible
 - white-spaces between <div>s should be invisible if they are collapsible
 - white-spaces between <div>s should be invisible if they are collapsible
-- white-spaces between <div>s should be invisible if they are collapsible
-- white-spaces between <div>s should be invisible if they are collapsible
-- white-spaces between <div>s should be invisible if they are collapsible
-- white-spaces between <hr>s should be invisible if they are collapsible
-- white-spaces between <hr>s should be invisible if they are collapsible
-- white-spaces between <hr>s should be invisible if they are collapsible
 - white-spaces between <hr>s should be invisible if they are collapsible
 - white-spaces between <hr>s should be invisible if they are collapsible
 - white-spaces between <hr>s should be invisible if they are collapsible
