@@ -16,6 +16,12 @@ FileAPI/BlobURL/cross-partition.https.html:
 - Blob URL shouldn't be fetched from a cross-partition iframe
 - Blob URL shouldn't be fetched from a cross-partition service worker
 - Blob URL shouldn't be fetched from a cross-partition shared worker
+FileAPI/url/sandboxed-iframe.html:
+- Blob URL fragment is implemented.
+FileAPI/url/unicode-origin.sub.html:
+- Verify serialization of non-ascii origin in Blob URLs
+FileAPI/url/url-in-tags.window.js:
+- Blob URL fragment is implemented.
 FileAPI/url/url_xmlhttprequest_img.html:
 - "== FileAPI/url/url_xmlhttprequest_img-ref.html (never ready to capture)"
 WebCryptoAPI/derive_bits_keys/derive_key_and_encrypt.https.any.js:
@@ -2397,6 +2403,26 @@ css/cssom/CSSStyleSheet-template-adoption.html:
 - adoptedStyleSheets won't be cleared when adopting into/from <template>s
 css/cssom/at-namespace.html:
 - 'CSS Test: @namespace in CSSOM is not severely broken'
+css/cssom/caretPositionFromPoint-audioVideo.html:
+- document.caretPositionFromPoint() should return a CaretPosition over audio elements
+- document.caretPositionFromPoint() should return a CaretPosition over video elements
+css/cssom/caretPositionFromPoint-in-flex-container.html:
+- caretPositionFromPoint inside the short flex child resolves correctly
+- caretPositionFromPoint just inside a tall flex child resolves to that child
+- caretPositionFromPoint well inside a tall flex child resolves to that child
+css/cssom/caretPositionFromPoint-with-transformation.html:
+- iframe's with equal content should report the same caret offset
+css/cssom/caretPositionFromPoint.html:
+- CaretRange.getClientRect() should return a DOMRect that matches one obtained from
+  a manually constructed Range
+- document.caretPositionFromPoint() should return a CaretPosition at the specified
+  location
+- document.caretPositionFromPoint() should return a CaretPosition over SVG elements
+- 'document.caretPositionFromPoint() should return a CaretPosition over elements with
+  `user-select: none`'
+- document.caretPositionFromPoint() should return null for a document with no viewport
+- document.caretPositionFromPoint() should return null if given coordinates outside
+  of the viewport
 css/cssom/computed-style-002.html:
 - Check that a percent width in an iframe is resolved against iframe width for getComputedStyle.
 css/cssom/computed-style-003.html:
@@ -2525,6 +2551,47 @@ css/cssom/getComputedStyle-insets-relpos-inline.html:
 - OOF with left auto right fixed in relpos inline container with mixed directions
 - OOF with left fixed right auto in relpos inline container
 - OOF with left fixed right auto in relpos inline container with mixed directions
+css/cssom/getComputedStyle-pseudo-checkmark.html:
+- Resolution of width is correct for pseudo-element (due to double-colon)
+css/cssom/getComputedStyle-pseudo-picker-icon.html:
+- Resolution of width is correct for pseudo-element (due to double-colon)
+css/cssom/getComputedStyle-pseudo-picker.html:
+- "::picker(select) on non-select element resolves the style"
+- "::picker(select) on non-select element with no rules resolves the style"
+- "::picker(select) returns picker element style"
+css/cssom/getComputedStyle-pseudo-with-argument.html:
+- |-
+  This pseudo-element should parse: ::highlight(
+  name
+- 'This pseudo-element should parse: ::highlight( n\61me )'
+- 'This pseudo-element should parse: ::highlight( name '
+- "This pseudo-element should parse: ::highlight(name\t"
+- 'This pseudo-element should parse: ::highlight(name)'
+css/cssom/getComputedStyle-pseudo.html:
+- "::file-selector-button resolves to the file input button element"
+- 'Dynamically change to display: contents on pseudo-elements'
+- Item-based blockification of nonexistent pseudo-elements
+- Item-based blockification of pseudo-elements
+- Pseudo-elements can use the full range of CSS syntax
+- Resolution of nonexistent pseudo-element styles
+- 'Resolution of pseudo-element styles in display: none elements'
+- Resolution of width is correct for ::before and ::after pseudo-elements (double-colon)
+- Resolution of width is correct for ::before and ::after pseudo-elements (single-colon)
+- 'Resolution of width is correct for ::before and ::after pseudo-elements of display:
+  contents elements'
+- 'Unknown pseudo-element with a known identifier: backdrop'
+- 'Unknown pseudo-element with a known identifier: file-selector-button'
+- 'Unknown pseudo-element with a known identifier: grammar-error'
+- 'Unknown pseudo-element with a known identifier: highlight(name)'
+- 'Unknown pseudo-element with a known identifier: marker'
+- 'Unknown pseudo-element with a known identifier: placeholder'
+- 'Unknown pseudo-element with a known identifier: spelling-error'
+- 'Unknown pseudo-element with a known identifier: view-transition'
+- 'Unknown pseudo-element with a known identifier: view-transition-group(name)'
+- 'Unknown pseudo-element with a known identifier: view-transition-image-pair(name)'
+- 'Unknown pseudo-element with a known identifier: view-transition-new(name)'
+- 'Unknown pseudo-element with a known identifier: view-transition-old(name)'
+- 'display: contents on pseudo-elements'
 css/cssom/getComputedStyle-resolved-min-size-auto.html:
 - Resolved value of min-width & min-height 'auto' keyword behaves as expected on element
   with id="block-with-degenerate-aspect-ratio"
@@ -2866,19 +2933,138 @@ custom-elements/upgrading/upgrading-parser-created-element.html:
   not SameValue as the upgraded element
 - Upgrading a custom element whose constructor returns a Text node must throw
 - Upgrading a custom element whose constructor returns an Element must throw
+dom/events/Event-dispatch-on-disabled-elements.html:
+- Real clicks on disabled elements must not dispatch events.
 dom/events/Event-isTrusted.any.js:
 - Event-isTrusted
+dom/events/EventListener-invoke-legacy.html:
+- Legacy listener of animationstart
+- Legacy listener of transitionend
+dom/events/click-on-absolute-pseudo.html:
+- Click on pseudo-element that disappears on mousedown
 dom/events/event-global-extra.window.js:
 - Listener from a different global
 - window.event and element from another document
 - window.event and moving an element post-dispatch
 - window.event should not be affected by nodes moving post-dispatch
+dom/events/mouse-event-retarget.html:
+- offsetX is correctly adjusted
 dom/events/relatedTarget.window.js:
 - Reset targets before activation behavior
 - Reset targets on early return
 - Retarget a shadow-tree relatedTarget
+dom/events/scrolling/iframe-chains.html:
+- Wheel scroll in iframe chains to containing element.
+dom/events/scrolling/scroll-cross-origin-iframes.html:
+- Verify sibling cross-origin iframes can wheel-scroll.
+dom/events/scrolling/scroll-event-fired-to-element.html:
+- scrollTop and scrollLeft when scrolling above maximum offset.
+dom/events/scrolling/scrollend-event-fired-after-snap.html:
+- Tests that scrollend is fired after fling snap animation completion.
+- Tests that scrollend is fired after scroll snap animation completion.
+dom/events/scrolling/scrollend-event-fired-for-mandatory-snap-point-after-load.html:
+- scrollend event fired after load for mandatory snap point
+dom/events/scrolling/scrollend-event-fired-to-document.html:
+- testing, horizontal
+- testing, vertical
+dom/events/scrolling/scrollend-event-fired-to-element-with-overscroll-behavior.html:
+- Tests that the scroll is not propagated beyond div with non-auto overscroll-behavior.
+dom/events/scrolling/scrollend-event-fired-to-window.html:
+- testing, vertical
+dom/events/scrolling/scrollend-event-fires-for-repeat-key-ending-after-scroll-container-end-is-reached.html:
+- scrollend event is fired after repeated Page Down key presses reach the end of the
+  scroll region.
+dom/events/scrolling/scrollend-event-fires-to-iframe-window.html:
+- Tests that the target_div within iframe gets scrollend event when clicking scrollbar.
+- Tests that the target_div within iframe gets scrollend event when dragging the scrollbar
+  thumb.
+- Tests that the target_div within iframe gets scrollend event when mouse wheel scrolling.
+- Tests that the target_div within iframe gets scrollend event when sending DOWN key
+  to the target.
+- Tests that the target_div within iframe gets scrollend event when touch dragging.
+- scrollend fires to iframe window on mousewheelscroll
+dom/events/scrolling/scrollend-event-for-user-scroll.html:
+- Tests that the target_div gets scrollend event when clicking scrollbar.
+- Tests that the target_div gets scrollend event when dragging the scrollbar thumb.
+- Tests that the target_div gets scrollend event when mouse wheel scrolling.
+- Tests that the target_div gets scrollend event when sending DOWN key to the target.
+- Tests that the target_div gets scrollend event when touch dragging.
 dom/events/scrolling/scrollend-with-snap-on-fractional-offset.html:
 - snap to fractional offset fires scrollend exactly once.
+dom/events/scrolling/wheel-event-transactions-basic.html:
+- The wheel event transactions target may not be a scroll frame
+- 'Wheel events should be captured to one target #1'
+- 'Wheel events should be captured to one target #2'
+dom/events/scrolling/wheel-event-transactions-multiple-action-chains.html:
+- Two separate webdriver action chains should have different wheel event transactions
+dom/events/scrolling/wheel-event-transactions-target-display-change.html:
+- Modify the initial wheel event target to display:contents
+- Modify the initial wheel event target to display:none
+dom/events/scrolling/wheel-event-transactions-target-elements.html:
+- Wheel event transactions target elements
+dom/events/scrolling/wheel-event-transactions-target-move.html:
+- Move the initial wheel event target.
+dom/events/scrolling/wheel-event-transactions-target-removal.html:
+- Remove the initial wheel event target.
+dom/events/scrolling/wheel-event-transactions-target-resize.html:
+- Resize the initial target and use a passive:false listener
+- Resize the initial target and use a passive:true listener
+dom/events/webkit-animation-end-event.html:
+- event types for prefixed and unprefixed animationend event handlers should be named
+  appropriately
+- event types for prefixed and unprefixed animationend event listeners should be named
+  appropriately
+- onwebkitanimationend event handler should not trigger if an unprefixed listener
+  also exists
+- onwebkitanimationend event handler should trigger for an animation
+- webkitAnimationEnd event listener is case sensitive
+- webkitAnimationEnd event listener should not trigger if an unprefixed event handler
+  also exists
+- webkitAnimationEnd event listener should not trigger if an unprefixed listener also
+  exists
+- webkitAnimationEnd event listener should trigger for an animation
+dom/events/webkit-animation-iteration-event.html:
+- event types for prefixed and unprefixed animationiteration event handlers should
+  be named appropriately
+- event types for prefixed and unprefixed animationiteration event listeners should
+  be named appropriately
+- onwebkitanimationiteration event handler should not trigger if an unprefixed listener
+  also exists
+- onwebkitanimationiteration event handler should trigger for an animation
+- webkitAnimationIteration event listener is case sensitive
+- webkitAnimationIteration event listener should not trigger if an unprefixed event
+  handler also exists
+- webkitAnimationIteration event listener should not trigger if an unprefixed listener
+  also exists
+- webkitAnimationIteration event listener should trigger for an animation
+dom/events/webkit-animation-start-event.html:
+- event types for prefixed and unprefixed animationstart event handlers should be
+  named appropriately
+- event types for prefixed and unprefixed animationstart event listeners should be
+  named appropriately
+- onwebkitanimationstart event handler should not trigger if an unprefixed listener
+  also exists
+- onwebkitanimationstart event handler should trigger for an animation
+- webkitAnimationStart event listener is case sensitive
+- webkitAnimationStart event listener should not trigger if an unprefixed event handler
+  also exists
+- webkitAnimationStart event listener should not trigger if an unprefixed listener
+  also exists
+- webkitAnimationStart event listener should trigger for an animation
+dom/events/webkit-transition-end-event.html:
+- event types for prefixed and unprefixed transitionend event handlers should be named
+  appropriately
+- event types for prefixed and unprefixed transitionend event listeners should be
+  named appropriately
+- onwebkittransitionend event handler should not trigger if an unprefixed listener
+  also exists
+- onwebkittransitionend event handler should trigger for an animation
+- webkitTransitionEnd event listener is case sensitive
+- webkitTransitionEnd event listener should not trigger if an unprefixed event handler
+  also exists
+- webkitTransitionEnd event listener should not trigger if an unprefixed listener
+  also exists
+- webkitTransitionEnd event listener should trigger for an animation
 dom/nodes/Node-appendChild-cereactions-vs-script.window.js:
 - Custom element reactions follow script execution
 dom/nodes/NodeList-live-mutations.window.js:
@@ -2895,12 +3081,48 @@ dom/nodes/insertion-removing-steps/insertion-removing-steps-iframe.window.js:
 - 'Removing steps (remove): script does not run synchronously during iframe destruction'
 - 'Removing steps (replaceChildren): script does not run synchronously during iframe
   destruction'
+dom/nodes/moveBefore/continue-css-transition-left-pseudo.html:
+- Node.moveBefore should preserve CSS transition state on pseudo-elements (left)
+dom/nodes/moveBefore/continue-css-transition-transform-pseudo.html:
+- Node.moveBefore should preserve CSS transition state on pseudo-elements (transform)
+dom/nodes/moveBefore/continue-css-transition-transform.html:
+- Node.moveBefore should preserve CSS transition state (transform)
+dom/nodes/moveBefore/css-transition-trigger.html:
+- Node.moveBefore should trigger CSS transition state (left) if needed
+dom/nodes/moveBefore/hover-style-update.html:
+- Element loses hover when moved to different position
+- Hover works immediately after moved
 dom/nodes/moveBefore/iframe-document-preserve.window.js:
 - window.frames ordering does not change due to moveBefore()
 dom/nodes/moveBefore/moveBefore-as-flex-item.html:
 - "== css/reference/ref-filled-green-100px-square-only.html"
+dom/nodes/moveBefore/moveBefore-from-light-to-shadow.html:
+- moveBefore-from-light-to-shadow
+dom/nodes/moveBefore/moveBefore-size-query.html:
+- moveBefore() between different size containers invalidates target
+dom/nodes/moveBefore/pointer-events.html:
+- Pointer capture should not be released when moving
+dom/nodes/moveBefore/selection-preserve.html:
+- moveBefore anchor node moved up to expand selection and absorb nodes
+- moveBefore focus node moved up to shrink selection and exclude nodes; focus node
+  gets reset
+- moveBefore move intersecting nodes out of a selection
+- moveBefore resets selection that enters a subtree, when the whole selection is moved
+- moveBefore selection is not preserved, especially when underlying range gets inverted
+- moveBefore should not reset selection with preceding text
 dom/nodes/remove-from-shadow-host-and-adopt-into-iframe.html:
 - "== dom/nodes/remove-from-shadow-host-and-adopt-into-iframe-ref.html"
+encoding/streams/realms.window.js:
+- TypeError for chunk with the wrong type should come from constructor realm of TextDecoderStream
+- TypeError for incomplete input should come from constructor realm of TextDecoderStream
+- TypeError for invalid chunk should come from constructor realm of TextDecoderStream
+- TypeError for unconvertable chunk should come from constructor realm of TextEncoderStream
+- the output chunks when write is called with a pending read should come from the
+  same realm as the constructor of TextEncoderStream
+- the result object when read is called after write should come from the same realm
+  as the constructor of TextDecoderStream
+- the result object when write is called with a pending read should come from the
+  same realm as the constructor of TextDecoderStream
 fetch/api/abort/keepalive.html:
 - aborting a keepalive fetch should work
 fetch/api/abort/serviceworker-intercepted.https.html:
@@ -3597,6 +3819,22 @@ html/dom/elements/global-attributes/lang-xmllang-01.html:
 - "== html/dom/elements/global-attributes/lang-xmllang-01-ref.html"
 html/dom/elements/global-attributes/style-01.html:
 - "== html/dom/elements/global-attributes/style-01-ref.html"
+html/dom/elements/global-attributes/the-lang-attribute-002.html:
+- The browser will NOT recognize a language declared in an xml:lang attribute on the
+  html tag.
+html/dom/elements/global-attributes/the-lang-attribute-003.html:
+- The browser will recognize a language declared in the HTTP header, when there is
+  no internal language declaration.
+html/dom/elements/global-attributes/the-lang-attribute-004.html:
+- The browser will recognize a language declared in a meta element in the head using
+  http-equiv='Content-Language' content='..' (with a single language tag value), when
+  there is no other language declaration inside the document.
+html/dom/elements/global-attributes/the-lang-attribute-006.html:
+- If there is a conflict between the language declarations in the HTTP header and
+  the Content-Language meta element, the UA will recognize the language declared in
+  the meta element.
+html/dom/elements/images/bypass-cache-revalidation.html:
+- Images can bypass no-cache
 html/dom/elements/requirements-relating-to-bidirectional-algorithm-formatting-characters/dir-isolation-001a.html:
 - "== html/dom/elements/requirements-relating-to-bidirectional-algorithm-formatting-characters/reference/dir-isolation-001-ref.html"
 html/dom/elements/requirements-relating-to-bidirectional-algorithm-formatting-characters/dir-isolation-001b.html:
@@ -3651,6 +3889,906 @@ html/dom/elements/requirements-relating-to-bidirectional-algorithm-formatting-ch
 - "== html/dom/elements/requirements-relating-to-bidirectional-algorithm-formatting-characters/reference/dir-isolation-009b-ref.html"
 html/dom/elements/requirements-relating-to-bidirectional-algorithm-formatting-characters/dir-isolation-009c.html:
 - "== html/dom/elements/requirements-relating-to-bidirectional-algorithm-formatting-characters/reference/dir-isolation-009b-ref.html"
+html/dom/elements/the-innertext-and-outertext-properties/getter.html:
+- ' ("<table><tfoot><tr><td>footer</tfoot><thead><tr><td style=''visibility:collapse''>thead</thead><tbody><tr><td>tbody</tbody></table>")'
+- '&nbsp; preserved ("<div>&nbsp;")'
+- 2 blank lines around <p> even when display:block ("<div>123<p style='display:block'>abc")
+- 2 blank lines around <p> even when display:inline-block ("<div>123<p style='display:inline-block'>abc")
+- '::first-letter styles applied ("<div class=''first-letter-uppercase'' style=''width:0''>abc
+  def")'
+- '::first-line styles applied ("<div class=''first-line-uppercase'' style=''width:0''>abc
+  def")'
+- '::first-line styles applied ("<div class=''first-line-uppercase''>abc")'
+- <br> content ignored ("<div><br class='poke'>")
+- <br> induces line break even at end of block ("<div>abc<br>")
+- <canvas> should not collapse following space ("<div><canvas></canvas> abc")
+- <hr> induces line break ("<div>abc<hr>def")
+- <hr><hr> induces just one line break ("<div>abc<hr><hr>def")
+- <hr><hr><hr> induces just one line break ("<div>abc<hr><hr><hr>def")
+- <img> contents ignored ("<img src='about:blank' class='poke'>")
+- <object> contents ignored ("<div><object>abc")
+- <optgroup> containing <optgroup> ("<select><optgroup class='poke-optgroup'></select>")
+- <optgroup> in <div> ("<div>a<optgroup>123</optgroup>bc")
+- <option> in <div> ("<div>a<option>123</option>bc")
+- <pre> trailing newlines don't suppress <p> blank line ("<div><pre>abc\n\n</pre><p>def")
+- <rp> ("<div><ruby>abc<rp>(</rp><rt>def</rt><rp>)</rp></ruby>")
+- <rp> in a <select> ("<div><select class='poke-rp'></select>")
+- <select size='1'> contents of options preserved ("<div><select size='1'><option>abc</option><option>def")
+- <select size='1'> contents of options preserved ("<select size='1'><option>abc</option><option>def")
+- <select size='2'> contents of options preserved ("<div><select size='2'><option>abc</option><option>def")
+- <select size='2'> contents of options preserved ("<select size='2'><option>abc</option><option>def")
+- <select> containing text node child ("<select class='poke'></select>")
+- <svg> non-rendered text ignored ("<div><svg><stop>abc</stop></svg></div>")
+- <svg><defs> text contents ignored ("<div><svg><defs><text>abc</text></defs></svg></div>")
+- <textarea> contents ignored ("<div><textarea>abc")
+- <textarea> contents ignored ("<textarea>abc")
+- Blank line after <p> ("<div><p>abc</p>def")
+- Blank line before <p> ("<div>abc<p>def")
+- Blank line between consecutive <p>s ("<div><p>abc<p>def")
+- Blank line between consecutive <p>s separated only by empty block ("<div><p>abc</p><div></div><p>def")
+- Blank lines around <p> even without margin ("<div>123<p style='margin:0px'>abc</p>def")
+- Blank lines around a <p> in its own block ("<div>abc<div><p>123</p></div>def")
+- Blank lines between <p>s separated by non-empty block ("<div><p>abc</p><div>123</div><p>def")
+- Consecutive empty blocks ignored ("<div>abc<div></div><div></div>def")
+- Empty block induces single line break ("<div>abc<div></div>def")
+- Internal whitespace preserved ("<div style='white-space:pre'>abc  def")
+- Internal whitespace preserved ("<pre>abc  def")
+- Internal whitespace preserved ("<span style='white-space:pre'>abc  def")
+- Invisible <p> doesn't induce extra line breaks ("<div style='visibility:hidden'><p><span
+  style='visibility:visible'>abc</span></p>\n<div style='visibility:visible'>def</div>")
+- Leading whitesapce should not be collapsed ("<div><img> abc")
+- Leading whitespace preserved ("<div style='white-space:pre'> abc")
+- Leading whitespace preserved ("<pre> abc")
+- Leading whitespace preserved ("<span style='white-space:pre'> abc")
+- Leading/trailing space removal at display:inline-block boundary ("<div>123<span
+  style='display:inline-block'> abc </span>def")
+- Leading/trailing space removal at display:inline-flex boundary ("<div>123<span style='display:inline-flex'>
+  abc </span>def")
+- Leading/trailing space removal at display:inline-grid boundary ("<div>123<span style='display:inline-grid'>
+  abc </span>def")
+- Lone <rp> ("<div><rp>abc</rp>")
+- Newline at display:block boundary ("<div>123<span style='display:block'>abc</span>def")
+- Newline-separated table rows ("<div><div class='itable'><span class='row'><span
+  class='cell'>abc</span></span>\n<span class='row'><span class='cell'>def</span></span></div>")
+- Newline-separated table rows ("<div><div class='table'><span class='row'><span class='cell'>abc</span></span>\n<span
+  class='row'><span class='cell'>def</span></span></div>")
+- No newlines around inline-table ("<div>abc<div class='itable'><span class='cell'>def</span></div>ghi")
+- One blank line between <p>s, ignoring empty <p>s ("<div><p>abc<p></p><p></p><p>def")
+- Replaced element <canvas> with display:block should be treated as block-level ("<div>abc
+  <canvas style='display:block'></canvas> def")
+- Replaced element <img> with display:block should be treated as block-level ("<div>abc
+  <img style='display:block'> def")
+- Single newline in two-row inline-table ("<div>abc<div class='itable'><span class='row'><span
+  class='cell'>def</span></span>\n<span class='row'><span class='cell'>123</span></span></div>ghi")
+- Tab-separated table cells ("<div><div class='itable'><span class='cell'>abc</span>\n<span
+  class='cell'>def</span></div>")
+- Tab-separated table cells ("<div><div class='table'><span class='cell'>abc</span>\n<span
+  class='cell'>def</span></div>")
+- Tab-separated table cells including empty cells ("<div><table><tr><td>abc<td><td>def</table>")
+- Tab-separated table cells including trailing empty cells ("<div><table><tr><td>abc<td><td></table>")
+- Trailing whitesapce should not be collapsed ("<div>abc <img>")
+- Trailing whitespace preserved ("<div style='white-space:pre'>abc ")
+- Trailing whitespace preserved ("<pre>abc ")
+- Trailing whitespace preserved ("<span style='white-space:pre'>abc ")
+- Whitespace around <img> should not be collapsed ("<div>abc <img width=1 height=1>
+  def")
+- Whitespace around <img> should not be collapsed ("<div>abc <img> def")
+- Whitespace around <input> should not be collapsed ("<div>abc <input> def")
+- Whitespace around inline-block should not be collapsed ("<div>abc <span style='display:inline-block'></span>
+  def")
+- Whitespace around inline-flex should not be collapsed ("<div>abc <span style='display:inline-flex'></span>
+  def")
+- Whitespace around inline-grid should not be collapsed ("<div>abc <span style='display:inline-grid'></span>
+  def")
+- \t converted to space ("<div style='white-space:pre-line'>abc\tdef")
+- display:block <rp> ("<div><rp style='display:block'>abc</rp>def")
+- display:block <rp> with whitespace ("<div><rp style='display:block'> abc </rp>def")
+- display:block <script> is rendered ("<div><script style='display:block'>abc")
+- display:block <style> is rendered ("<div><style style='display:block'>abc")
+- empty <optgroup> in <div> ("<div>a<optgroup></optgroup>bc")
+- empty <optgroup> in <select> ("<div>a<select><optgroup></select>bc")
+- empty <option> in <div> ("<div>a<option></option>bc")
+- empty <option> in <select> ("<div>a<select><option></select>bc")
+- floats induce a block boundary ("<div>abc<span style='float:left'>123</span>def")
+- innerText not supported on MathML elements ("<math>abc")
+- innerText not supported on SVG elements ("<svg>abc")
+- opened <details> content shown ("<div><details open><summary>abc</summary>123")
+- position:absolute induces a block boundary ("<div>abc<span style='position:absolute'>123</span>def")
+- text-transform handles Turkish casing ("<div><div lang='tr' style='text-transform:uppercase'>i
+  ı")
+- visibility:collapse row with visible cell ("<table><tr style='visibility:collapse'><td
+  style='visibility:visible'>abc")
+- visibility:collapse row-group with visible cell ("<table><tbody style='visibility:collapse'><tr><td
+  style='visibility:visible'>abc")
+- visibility:visible child rendered ("<div style='visibility:hidden'>123<span style='visibility:visible'>abc")
+html/dom/elements/the-innertext-and-outertext-properties/innertext-setter.html:
+- Assigning undefined
+- Assigning undefined, detached
+- CR/CR pair converts to two <br>s in non-white-space:pre element
+- CR/CR pair converts to two <br>s in non-white-space:pre element, detached
+- CRs convert to <br> in <pre> element
+- CRs convert to <br> in <pre> element, detached
+- CRs convert to <br> in non-white-space:pre elements
+- CRs convert to <br> in non-white-space:pre elements, detached
+- CRs convert to <br> in white-space:pre element
+- CRs convert to <br> in white-space:pre element, detached
+- End with CR
+- End with CR, detached
+- End with CRLF
+- End with CRLF, detached
+- End with LF
+- End with LF, detached
+- Newline/CR pair converts to <br> in non-white-space:pre element
+- Newline/CR pair converts to <br> in non-white-space:pre element, detached
+- Newline/newline pair converts to two <br>s in non-white-space:pre element
+- Newline/newline pair converts to two <br>s in non-white-space:pre element, detached
+- Newlines convert to <br> in <pre> element
+- Newlines convert to <br> in <pre> element, detached
+- Newlines convert to <br> in <textarea> element
+- Newlines convert to <br> in <textarea> element, detached
+- Newlines convert to <br> in non-white-space:pre elements
+- Newlines convert to <br> in non-white-space:pre elements, detached
+- Newlines convert to <br> in white-space:pre element
+- Newlines convert to <br> in white-space:pre element, detached
+- Start with CR
+- Start with CR, detached
+- Start with CRLF
+- Start with CRLF, detached
+- Start with LF
+- Start with LF, detached
+- innerText not supported on MathML elements
+- innerText not supported on MathML elements, detached
+- innerText not supported on SVG elements
+- innerText not supported on SVG elements, detached
+html/dom/elements/the-innertext-and-outertext-properties/innertext-with-white-spaces.html:
+- CR after <div> should be invisible if it's collapsible
+- CR after <div> should be invisible if it's collapsible
+- CR after <div> should be invisible if it's collapsible
+- CR after <div> should be invisible if it's collapsible
+- CR after <div> should be invisible if it's collapsible
+- CR after <div> should be invisible if it's collapsible
+- CR after <div> should be invisible if it's collapsible
+- CR after <div> should be invisible if it's collapsible
+- CR after <div> should be invisible if it's collapsible
+- CR after <div> should be invisible if it's collapsible
+- CR after <div> should be invisible if it's collapsible
+- CR after <div> should be invisible if it's collapsible
+- CR after <hr> should be invisible if it's collapsible
+- CR after <hr> should be invisible if it's collapsible
+- CR after <hr> should be invisible if it's collapsible
+- CR after <hr> should be invisible if it's collapsible
+- CR after <hr> should be invisible if it's collapsible
+- CR after <hr> should be invisible if it's collapsible
+- CR after <hr> should be invisible if it's collapsible
+- CR after <hr> should be invisible if it's collapsible
+- CR after <hr> should be invisible if it's collapsible
+- CR after <hr> should be invisible if it's collapsible
+- CR after <hr> should be invisible if it's collapsible
+- CR after <hr> should be invisible if it's collapsible
+- CR before <div> should be invisible if it's collapsible
+- CR before <div> should be invisible if it's collapsible
+- CR before <div> should be invisible if it's collapsible
+- CR before <div> should be invisible if it's collapsible
+- CR before <div> should be invisible if it's collapsible
+- CR before <div> should be invisible if it's collapsible
+- CR before <div> should be invisible if it's collapsible
+- CR before <div> should be invisible if it's collapsible
+- CR before <div> should be invisible if it's collapsible
+- CR before <div> should be invisible if it's collapsible
+- CR before <div> should be invisible if it's collapsible
+- CR before <div> should be invisible if it's collapsible
+- CR before <hr> should be invisible if it's collapsible
+- CR before <hr> should be invisible if it's collapsible
+- CR before <hr> should be invisible if it's collapsible
+- CR before <hr> should be invisible if it's collapsible
+- CR before <hr> should be invisible if it's collapsible
+- CR before <hr> should be invisible if it's collapsible
+- CR before <hr> should be invisible if it's collapsible
+- CR before <hr> should be invisible if it's collapsible
+- CR before <hr> should be invisible if it's collapsible
+- CR before <hr> should be invisible if it's collapsible
+- CR before <hr> should be invisible if it's collapsible
+- CR before <hr> should be invisible if it's collapsible
+- CR between <div>s should be invisible if it's collapsible
+- CR between <div>s should be invisible if it's collapsible
+- CR between <div>s should be invisible if it's collapsible
+- CR between <div>s should be invisible if it's collapsible
+- CR between <div>s should be invisible if it's collapsible
+- CR between <div>s should be invisible if it's collapsible
+- CR between <div>s should be invisible if it's collapsible
+- CR between <div>s should be invisible if it's collapsible
+- CR between <div>s should be invisible if it's collapsible
+- CR between <div>s should be invisible if it's collapsible
+- CR between <div>s should be invisible if it's collapsible
+- CR between <div>s should be invisible if it's collapsible
+- CR between <hr>s should be invisible if it's collapsible
+- CR between <hr>s should be invisible if it's collapsible
+- CR between <hr>s should be invisible if it's collapsible
+- CR between <hr>s should be invisible if it's collapsible
+- CR between <hr>s should be invisible if it's collapsible
+- CR between <hr>s should be invisible if it's collapsible
+- CR between <hr>s should be invisible if it's collapsible
+- CR between <hr>s should be invisible if it's collapsible
+- CR between <hr>s should be invisible if it's collapsible
+- CR between <hr>s should be invisible if it's collapsible
+- CR between <hr>s should be invisible if it's collapsible
+- CR between <hr>s should be invisible if it's collapsible
+- Leading CR should be normalized to LF and should not appear if linefeeds are collapsible
+- Leading CR should be normalized to LF and should not appear if linefeeds are collapsible
+- Leading CR should be normalized to LF and should not appear if linefeeds are collapsible
+- Leading CR should be normalized to LF and should not appear if linefeeds are collapsible
+- Leading CR should be normalized to LF and should not appear if linefeeds are collapsible
+- Leading CR should be normalized to LF and should not appear if linefeeds are collapsible
+- Leading CR should be normalized to LF and should not appear if linefeeds are collapsible
+- Leading CR should be normalized to LF and should not appear if linefeeds are collapsible
+- Leading CR should be normalized to LF and should not appear if linefeeds are collapsible
+- Leading CRs should be normalized to LFs and should not appear if linefeeds are collapsible
+- Leading CRs should be normalized to LFs and should not appear if linefeeds are collapsible
+- Leading CRs should be normalized to LFs and should not appear if linefeeds are collapsible
+- Leading CRs should be normalized to LFs and should not appear if linefeeds are collapsible
+- Leading CRs should be normalized to LFs and should not appear if linefeeds are collapsible
+- Leading CRs should be normalized to LFs and should not appear if linefeeds are collapsible
+- Leading CRs should be normalized to LFs and should not appear if linefeeds are collapsible
+- Leading CRs should be normalized to LFs and should not appear if linefeeds are collapsible
+- Leading CRs should be normalized to LFs and should not appear if linefeeds are collapsible
+- Leading linefeed should not appear if it's collapsible
+- Leading linefeed should not appear if it's collapsible
+- Leading linefeed should not appear if it's collapsible
+- Leading linefeed should not appear if it's collapsible
+- Leading linefeed should not appear if it's collapsible
+- Leading linefeed should not appear if it's collapsible
+- Leading linefeed should not appear if it's collapsible
+- Leading linefeed should not appear if it's collapsible
+- Leading linefeed should not appear if it's collapsible
+- Leading linefeeds should not appear if they are collapsible
+- Leading linefeeds should not appear if they are collapsible
+- Leading linefeeds should not appear if they are collapsible
+- Leading linefeeds should not appear if they are collapsible
+- Leading linefeeds should not appear if they are collapsible
+- Leading linefeeds should not appear if they are collapsible
+- Leading linefeeds should not appear if they are collapsible
+- Leading linefeeds should not appear if they are collapsible
+- Leading linefeeds should not appear if they are collapsible
+- Leading mixed white-spaces should not appear if they are collapsible
+- Leading mixed white-spaces should not appear if they are collapsible
+- Leading mixed white-spaces should not appear if they are collapsible
+- Leading mixed white-spaces should not appear if they are collapsible
+- Leading mixed white-spaces should not appear if they are collapsible
+- Leading mixed white-spaces should not appear if they are collapsible
+- Leading mixed white-spaces should not appear if they are collapsible
+- Leading mixed white-spaces should not appear if they are collapsible
+- Leading mixed white-spaces should not appear if they are collapsible
+- Leading tab should not appear if white-spaces are collapsible
+- Leading tab should not appear if white-spaces are collapsible
+- Leading tab should not appear if white-spaces are collapsible
+- Leading tab should not appear if white-spaces are collapsible
+- Leading tab should not appear if white-spaces are collapsible
+- Leading tab should not appear if white-spaces are collapsible
+- Leading tabs should not appear if white-spaces are collapsible
+- Leading tabs should not appear if white-spaces are collapsible
+- Leading tabs should not appear if white-spaces are collapsible
+- Leading tabs should not appear if white-spaces are collapsible
+- Leading tabs should not appear if white-spaces are collapsible
+- Leading tabs should not appear if white-spaces are collapsible
+- Leading white-space should not appear if white-spaces are collapsible
+- Leading white-space should not appear if white-spaces are collapsible
+- Leading white-space should not appear if white-spaces are collapsible
+- Leading white-space should not appear if white-spaces are collapsible
+- Leading white-space should not appear if white-spaces are collapsible
+- Leading white-space should not appear if white-spaces are collapsible
+- Leading white-spaces should not appear if white-spaces are collapsible
+- Leading white-spaces should not appear if white-spaces are collapsible
+- Leading white-spaces should not appear if white-spaces are collapsible
+- Leading white-spaces should not appear if white-spaces are collapsible
+- Leading white-spaces should not appear if white-spaces are collapsible
+- Leading white-spaces should not appear if white-spaces are collapsible
+- 'Multiple mixed white-spaces between words may be invisible if they are collapsible
+  #1'
+- 'Multiple mixed white-spaces between words may be invisible if they are collapsible
+  #1'
+- 'Multiple mixed white-spaces between words may be invisible if they are collapsible
+  #1'
+- 'Multiple mixed white-spaces between words may be invisible if they are collapsible
+  #2'
+- 'Multiple mixed white-spaces between words may be invisible if they are collapsible
+  #2'
+- 'Multiple mixed white-spaces between words may be invisible if they are collapsible
+  #2'
+- 'Multiple mixed white-spaces between words may be invisible if they are collapsible
+  #3'
+- 'Multiple mixed white-spaces between words may be invisible if they are collapsible
+  #3'
+- 'Multiple mixed white-spaces between words may be invisible if they are collapsible
+  #3'
+- 'Multiple mixed white-spaces between words may be invisible if they are collapsible
+  #3'
+- 'Multiple mixed white-spaces between words may be invisible if they are collapsible
+  #3'
+- 'Multiple mixed white-spaces between words may be invisible if they are collapsible
+  #3'
+- 'Multiple mixed white-spaces between words may be invisible if they are collapsible
+  #4'
+- 'Multiple mixed white-spaces between words may be invisible if they are collapsible
+  #4'
+- 'Multiple mixed white-spaces between words may be invisible if they are collapsible
+  #4'
+- 'Multiple mixed white-spaces between words may be invisible if they are collapsible
+  #4'
+- 'Multiple mixed white-spaces between words may be invisible if they are collapsible
+  #4'
+- 'Multiple mixed white-spaces between words may be invisible if they are collapsible
+  #4'
+- Multiple white-spaces between words may be invisible if they are collapsible
+- Multiple white-spaces between words may be invisible if they are collapsible
+- Multiple white-spaces between words may be invisible if they are collapsible
+- Multiple white-spaces between words may be invisible if they are collapsible
+- Multiple white-spaces between words may be invisible if they are collapsible
+- Multiple white-spaces between words may be invisible if they are collapsible
+- Only multiple collapsible CRs should be invisible
+- Only multiple collapsible CRs should be invisible
+- Only multiple collapsible CRs should be invisible
+- Only multiple collapsible CRs should be invisible
+- Only multiple collapsible CRs should be invisible
+- Only multiple collapsible CRs should be invisible
+- Only multiple collapsible CRs should be invisible
+- Only multiple collapsible CRs should be invisible
+- Only multiple collapsible CRs should be invisible
+- Only multiple collapsible linefeeds should be invisible
+- Only multiple collapsible linefeeds should be invisible
+- Only multiple collapsible linefeeds should be invisible
+- Only multiple collapsible linefeeds should be invisible
+- Only multiple collapsible linefeeds should be invisible
+- Only multiple collapsible linefeeds should be invisible
+- Only multiple collapsible linefeeds should be invisible
+- Only multiple collapsible linefeeds should be invisible
+- Only multiple collapsible linefeeds should be invisible
+- Only multiple collapsible spaces should be invisible
+- Only multiple collapsible spaces should be invisible
+- Only multiple collapsible spaces should be invisible
+- Only multiple collapsible spaces should be invisible
+- Only multiple collapsible spaces should be invisible
+- Only multiple collapsible spaces should be invisible
+- Only multiple collapsible tabs should be invisible
+- Only multiple collapsible tabs should be invisible
+- Only multiple collapsible tabs should be invisible
+- Only multiple collapsible tabs should be invisible
+- Only multiple collapsible tabs should be invisible
+- Only multiple collapsible tabs should be invisible
+- Only single collapsible CR should be invisible
+- Only single collapsible CR should be invisible
+- Only single collapsible CR should be invisible
+- Only single collapsible CR should be invisible
+- Only single collapsible CR should be invisible
+- Only single collapsible CR should be invisible
+- Only single collapsible CR should be invisible
+- Only single collapsible CR should be invisible
+- Only single collapsible CR should be invisible
+- Only single collapsible linefeed should be invisible
+- Only single collapsible linefeed should be invisible
+- Only single collapsible linefeed should be invisible
+- Only single collapsible linefeed should be invisible
+- Only single collapsible linefeed should be invisible
+- Only single collapsible linefeed should be invisible
+- Only single collapsible linefeed should be invisible
+- Only single collapsible linefeed should be invisible
+- Only single collapsible linefeed should be invisible
+- Only single collapsible space should be invisible
+- Only single collapsible space should be invisible
+- Only single collapsible space should be invisible
+- Only single collapsible space should be invisible
+- Only single collapsible space should be invisible
+- Only single collapsible space should be invisible
+- Only single collapsible tab should be invisible
+- Only single collapsible tab should be invisible
+- Only single collapsible tab should be invisible
+- Only single collapsible tab should be invisible
+- Only single collapsible tab should be invisible
+- Only single collapsible tab should be invisible
+- Single collapsible tab should be converted to an ASCII space
+- Single collapsible tab should be converted to an ASCII space
+- Single collapsible tab should be converted to an ASCII space
+- Trailing mixed white-spaces should not appear if they are collapsible
+- Trailing mixed white-spaces should not appear if they are collapsible
+- Trailing mixed white-spaces should not appear if they are collapsible
+- Trailing mixed white-spaces should not appear if they are collapsible
+- Trailing mixed white-spaces should not appear if they are collapsible
+- Trailing mixed white-spaces should not appear if they are collapsible
+- Trailing mixed white-spaces should not appear if they are collapsible
+- Trailing mixed white-spaces should not appear if they are collapsible
+- Trailing mixed white-spaces should not appear if they are collapsible
+- Trailing tab should not appear if white-spaces are collapsible
+- Trailing tab should not appear if white-spaces are collapsible
+- Trailing tab should not appear if white-spaces are collapsible
+- Trailing tab should not appear if white-spaces are collapsible
+- Trailing tab should not appear if white-spaces are collapsible
+- Trailing tab should not appear if white-spaces are collapsible
+- Trailing tabs should not appear if white-spaces are collapsible
+- Trailing tabs should not appear if white-spaces are collapsible
+- Trailing tabs should not appear if white-spaces are collapsible
+- Trailing tabs should not appear if white-spaces are collapsible
+- Trailing tabs should not appear if white-spaces are collapsible
+- Trailing tabs should not appear if white-spaces are collapsible
+- Trailing white-space should not appear if white-spaces are collapsible
+- Trailing white-space should not appear if white-spaces are collapsible
+- Trailing white-space should not appear if white-spaces are collapsible
+- Trailing white-space should not appear if white-spaces are collapsible
+- Trailing white-space should not appear if white-spaces are collapsible
+- Trailing white-space should not appear if white-spaces are collapsible
+- Trailing white-spaces should not appear if white-spaces are collapsible
+- Trailing white-spaces should not appear if white-spaces are collapsible
+- Trailing white-spaces should not appear if white-spaces are collapsible
+- Trailing white-spaces should not appear if white-spaces are collapsible
+- Trailing white-spaces should not appear if white-spaces are collapsible
+- Trailing white-spaces should not appear if white-spaces are collapsible
+- linefeed after <div> should be invisible if it's collapsible
+- linefeed after <div> should be invisible if it's collapsible
+- linefeed after <div> should be invisible if it's collapsible
+- linefeed after <div> should be invisible if it's collapsible
+- linefeed after <div> should be invisible if it's collapsible
+- linefeed after <div> should be invisible if it's collapsible
+- linefeed after <div> should be invisible if it's collapsible
+- linefeed after <div> should be invisible if it's collapsible
+- linefeed after <div> should be invisible if it's collapsible
+- linefeed after <div> should be invisible if it's collapsible
+- linefeed after <div> should be invisible if it's collapsible
+- linefeed after <div> should be invisible if it's collapsible
+- linefeed after <hr> should be invisible if it's collapsible
+- linefeed after <hr> should be invisible if it's collapsible
+- linefeed after <hr> should be invisible if it's collapsible
+- linefeed after <hr> should be invisible if it's collapsible
+- linefeed after <hr> should be invisible if it's collapsible
+- linefeed after <hr> should be invisible if it's collapsible
+- linefeed after <hr> should be invisible if it's collapsible
+- linefeed after <hr> should be invisible if it's collapsible
+- linefeed after <hr> should be invisible if it's collapsible
+- linefeed after <hr> should be invisible if it's collapsible
+- linefeed after <hr> should be invisible if it's collapsible
+- linefeed after <hr> should be invisible if it's collapsible
+- linefeed before <div> should be invisible if it's collapsible
+- linefeed before <div> should be invisible if it's collapsible
+- linefeed before <div> should be invisible if it's collapsible
+- linefeed before <div> should be invisible if it's collapsible
+- linefeed before <div> should be invisible if it's collapsible
+- linefeed before <div> should be invisible if it's collapsible
+- linefeed before <div> should be invisible if it's collapsible
+- linefeed before <div> should be invisible if it's collapsible
+- linefeed before <div> should be invisible if it's collapsible
+- linefeed before <div> should be invisible if it's collapsible
+- linefeed before <div> should be invisible if it's collapsible
+- linefeed before <div> should be invisible if it's collapsible
+- linefeed before <hr> should be invisible if it's collapsible
+- linefeed before <hr> should be invisible if it's collapsible
+- linefeed before <hr> should be invisible if it's collapsible
+- linefeed before <hr> should be invisible if it's collapsible
+- linefeed before <hr> should be invisible if it's collapsible
+- linefeed before <hr> should be invisible if it's collapsible
+- linefeed before <hr> should be invisible if it's collapsible
+- linefeed before <hr> should be invisible if it's collapsible
+- linefeed before <hr> should be invisible if it's collapsible
+- linefeed before <hr> should be invisible if it's collapsible
+- linefeed before <hr> should be invisible if it's collapsible
+- linefeed before <hr> should be invisible if it's collapsible
+- linefeed between <div>s should be invisible if it's collapsible
+- linefeed between <div>s should be invisible if it's collapsible
+- linefeed between <div>s should be invisible if it's collapsible
+- linefeed between <div>s should be invisible if it's collapsible
+- linefeed between <div>s should be invisible if it's collapsible
+- linefeed between <div>s should be invisible if it's collapsible
+- linefeed between <div>s should be invisible if it's collapsible
+- linefeed between <div>s should be invisible if it's collapsible
+- linefeed between <div>s should be invisible if it's collapsible
+- linefeed between <div>s should be invisible if it's collapsible
+- linefeed between <div>s should be invisible if it's collapsible
+- linefeed between <div>s should be invisible if it's collapsible
+- linefeed between <hr>s should be invisible if it's collapsible
+- linefeed between <hr>s should be invisible if it's collapsible
+- linefeed between <hr>s should be invisible if it's collapsible
+- linefeed between <hr>s should be invisible if it's collapsible
+- linefeed between <hr>s should be invisible if it's collapsible
+- linefeed between <hr>s should be invisible if it's collapsible
+- linefeed between <hr>s should be invisible if it's collapsible
+- linefeed between <hr>s should be invisible if it's collapsible
+- linefeed between <hr>s should be invisible if it's collapsible
+- linefeed between <hr>s should be invisible if it's collapsible
+- linefeed between <hr>s should be invisible if it's collapsible
+- linefeed between <hr>s should be invisible if it's collapsible
+- tab after <br> should be invisible if it's collapsible
+- tab after <br> should be invisible if it's collapsible
+- tab after <br> should be invisible if it's collapsible
+- tab after <br> should be invisible if it's collapsible
+- tab after <br> should be invisible if it's collapsible
+- tab after <br> should be invisible if it's collapsible
+- tab after <div> should be invisible if it's collapsible
+- tab after <div> should be invisible if it's collapsible
+- tab after <div> should be invisible if it's collapsible
+- tab after <div> should be invisible if it's collapsible
+- tab after <div> should be invisible if it's collapsible
+- tab after <div> should be invisible if it's collapsible
+- tab after <div> should be invisible if it's collapsible
+- tab after <div> should be invisible if it's collapsible
+- tab after <div> should be invisible if it's collapsible
+- tab after <div> should be invisible if it's collapsible
+- tab after <div> should be invisible if it's collapsible
+- tab after <div> should be invisible if it's collapsible
+- tab after <hr> should be invisible if it's collapsible
+- tab after <hr> should be invisible if it's collapsible
+- tab after <hr> should be invisible if it's collapsible
+- tab after <hr> should be invisible if it's collapsible
+- tab after <hr> should be invisible if it's collapsible
+- tab after <hr> should be invisible if it's collapsible
+- tab after <hr> should be invisible if it's collapsible
+- tab after <hr> should be invisible if it's collapsible
+- tab after <hr> should be invisible if it's collapsible
+- tab after <hr> should be invisible if it's collapsible
+- tab after <hr> should be invisible if it's collapsible
+- tab after <hr> should be invisible if it's collapsible
+- tab before <br> should be invisible if it's collapsible
+- tab before <br> should be invisible if it's collapsible
+- tab before <br> should be invisible if it's collapsible
+- tab before <br> should be invisible if it's collapsible
+- tab before <br> should be invisible if it's collapsible
+- tab before <br> should be invisible if it's collapsible
+- tab before <div> should be invisible if it's collapsible
+- tab before <div> should be invisible if it's collapsible
+- tab before <div> should be invisible if it's collapsible
+- tab before <div> should be invisible if it's collapsible
+- tab before <div> should be invisible if it's collapsible
+- tab before <div> should be invisible if it's collapsible
+- tab before <div> should be invisible if it's collapsible
+- tab before <div> should be invisible if it's collapsible
+- tab before <div> should be invisible if it's collapsible
+- tab before <div> should be invisible if it's collapsible
+- tab before <div> should be invisible if it's collapsible
+- tab before <div> should be invisible if it's collapsible
+- tab before <hr> should be invisible if it's collapsible
+- tab before <hr> should be invisible if it's collapsible
+- tab before <hr> should be invisible if it's collapsible
+- tab before <hr> should be invisible if it's collapsible
+- tab before <hr> should be invisible if it's collapsible
+- tab before <hr> should be invisible if it's collapsible
+- tab before <hr> should be invisible if it's collapsible
+- tab before <hr> should be invisible if it's collapsible
+- tab before <hr> should be invisible if it's collapsible
+- tab before <hr> should be invisible if it's collapsible
+- tab before <hr> should be invisible if it's collapsible
+- tab before <hr> should be invisible if it's collapsible
+- tab between <br>s should be invisible if it's collapsible
+- tab between <br>s should be invisible if it's collapsible
+- tab between <br>s should be invisible if it's collapsible
+- tab between <br>s should be invisible if it's collapsible
+- tab between <br>s should be invisible if it's collapsible
+- tab between <br>s should be invisible if it's collapsible
+- tab between <div>s should be invisible if it's collapsible
+- tab between <div>s should be invisible if it's collapsible
+- tab between <div>s should be invisible if it's collapsible
+- tab between <div>s should be invisible if it's collapsible
+- tab between <div>s should be invisible if it's collapsible
+- tab between <div>s should be invisible if it's collapsible
+- tab between <div>s should be invisible if it's collapsible
+- tab between <div>s should be invisible if it's collapsible
+- tab between <div>s should be invisible if it's collapsible
+- tab between <div>s should be invisible if it's collapsible
+- tab between <div>s should be invisible if it's collapsible
+- tab between <div>s should be invisible if it's collapsible
+- tab between <hr>s should be invisible if it's collapsible
+- tab between <hr>s should be invisible if it's collapsible
+- tab between <hr>s should be invisible if it's collapsible
+- tab between <hr>s should be invisible if it's collapsible
+- tab between <hr>s should be invisible if it's collapsible
+- tab between <hr>s should be invisible if it's collapsible
+- tab between <hr>s should be invisible if it's collapsible
+- tab between <hr>s should be invisible if it's collapsible
+- tab between <hr>s should be invisible if it's collapsible
+- tab between <hr>s should be invisible if it's collapsible
+- tab between <hr>s should be invisible if it's collapsible
+- tab between <hr>s should be invisible if it's collapsible
+- white-space after <br> should be invisible if it's collapsible
+- white-space after <br> should be invisible if it's collapsible
+- white-space after <br> should be invisible if it's collapsible
+- white-space after <br> should be invisible if it's collapsible
+- white-space after <br> should be invisible if it's collapsible
+- white-space after <br> should be invisible if it's collapsible
+- white-space after <div> should be invisible if it's collapsible
+- white-space after <div> should be invisible if it's collapsible
+- white-space after <div> should be invisible if it's collapsible
+- white-space after <div> should be invisible if it's collapsible
+- white-space after <div> should be invisible if it's collapsible
+- white-space after <div> should be invisible if it's collapsible
+- white-space after <div> should be invisible if it's collapsible
+- white-space after <div> should be invisible if it's collapsible
+- white-space after <div> should be invisible if it's collapsible
+- white-space after <div> should be invisible if it's collapsible
+- white-space after <div> should be invisible if it's collapsible
+- white-space after <div> should be invisible if it's collapsible
+- white-space after <hr> should be invisible if it's collapsible
+- white-space after <hr> should be invisible if it's collapsible
+- white-space after <hr> should be invisible if it's collapsible
+- white-space after <hr> should be invisible if it's collapsible
+- white-space after <hr> should be invisible if it's collapsible
+- white-space after <hr> should be invisible if it's collapsible
+- white-space after <hr> should be invisible if it's collapsible
+- white-space after <hr> should be invisible if it's collapsible
+- white-space after <hr> should be invisible if it's collapsible
+- white-space after <hr> should be invisible if it's collapsible
+- white-space after <hr> should be invisible if it's collapsible
+- white-space after <hr> should be invisible if it's collapsible
+- white-space before <br> should be invisible if it's collapsible
+- white-space before <br> should be invisible if it's collapsible
+- white-space before <br> should be invisible if it's collapsible
+- white-space before <br> should be invisible if it's collapsible
+- white-space before <br> should be invisible if it's collapsible
+- white-space before <br> should be invisible if it's collapsible
+- white-space before <div> should be invisible if it's collapsible
+- white-space before <div> should be invisible if it's collapsible
+- white-space before <div> should be invisible if it's collapsible
+- white-space before <div> should be invisible if it's collapsible
+- white-space before <div> should be invisible if it's collapsible
+- white-space before <div> should be invisible if it's collapsible
+- white-space before <div> should be invisible if it's collapsible
+- white-space before <div> should be invisible if it's collapsible
+- white-space before <div> should be invisible if it's collapsible
+- white-space before <div> should be invisible if it's collapsible
+- white-space before <div> should be invisible if it's collapsible
+- white-space before <div> should be invisible if it's collapsible
+- white-space before <hr> should be invisible if it's collapsible
+- white-space before <hr> should be invisible if it's collapsible
+- white-space before <hr> should be invisible if it's collapsible
+- white-space before <hr> should be invisible if it's collapsible
+- white-space before <hr> should be invisible if it's collapsible
+- white-space before <hr> should be invisible if it's collapsible
+- white-space before <hr> should be invisible if it's collapsible
+- white-space before <hr> should be invisible if it's collapsible
+- white-space before <hr> should be invisible if it's collapsible
+- white-space before <hr> should be invisible if it's collapsible
+- white-space before <hr> should be invisible if it's collapsible
+- white-space before <hr> should be invisible if it's collapsible
+- white-space between <br>s should be invisible if it's collapsible
+- white-space between <br>s should be invisible if it's collapsible
+- white-space between <br>s should be invisible if it's collapsible
+- white-space between <br>s should be invisible if it's collapsible
+- white-space between <br>s should be invisible if it's collapsible
+- white-space between <br>s should be invisible if it's collapsible
+- white-space between <div>s should be invisible if it's collapsible
+- white-space between <div>s should be invisible if it's collapsible
+- white-space between <div>s should be invisible if it's collapsible
+- white-space between <div>s should be invisible if it's collapsible
+- white-space between <div>s should be invisible if it's collapsible
+- white-space between <div>s should be invisible if it's collapsible
+- white-space between <div>s should be invisible if it's collapsible
+- white-space between <div>s should be invisible if it's collapsible
+- white-space between <div>s should be invisible if it's collapsible
+- white-space between <div>s should be invisible if it's collapsible
+- white-space between <div>s should be invisible if it's collapsible
+- white-space between <div>s should be invisible if it's collapsible
+- white-space between <hr>s should be invisible if it's collapsible
+- white-space between <hr>s should be invisible if it's collapsible
+- white-space between <hr>s should be invisible if it's collapsible
+- white-space between <hr>s should be invisible if it's collapsible
+- white-space between <hr>s should be invisible if it's collapsible
+- white-space between <hr>s should be invisible if it's collapsible
+- white-space between <hr>s should be invisible if it's collapsible
+- white-space between <hr>s should be invisible if it's collapsible
+- white-space between <hr>s should be invisible if it's collapsible
+- white-space between <hr>s should be invisible if it's collapsible
+- white-space between <hr>s should be invisible if it's collapsible
+- white-space between <hr>s should be invisible if it's collapsible
+- white-spaces after <br> should be invisible if they are collapsible
+- white-spaces after <br> should be invisible if they are collapsible
+- white-spaces after <br> should be invisible if they are collapsible
+- white-spaces after <br> should be invisible if they are collapsible
+- white-spaces after <br> should be invisible if they are collapsible
+- white-spaces after <br> should be invisible if they are collapsible
+- white-spaces after <div> should be invisible if they are collapsible
+- white-spaces after <div> should be invisible if they are collapsible
+- white-spaces after <div> should be invisible if they are collapsible
+- white-spaces after <div> should be invisible if they are collapsible
+- white-spaces after <div> should be invisible if they are collapsible
+- white-spaces after <div> should be invisible if they are collapsible
+- white-spaces after <div> should be invisible if they are collapsible
+- white-spaces after <div> should be invisible if they are collapsible
+- white-spaces after <div> should be invisible if they are collapsible
+- white-spaces after <div> should be invisible if they are collapsible
+- white-spaces after <div> should be invisible if they are collapsible
+- white-spaces after <div> should be invisible if they are collapsible
+- white-spaces after <hr> should be invisible if they are collapsible
+- white-spaces after <hr> should be invisible if they are collapsible
+- white-spaces after <hr> should be invisible if they are collapsible
+- white-spaces after <hr> should be invisible if they are collapsible
+- white-spaces after <hr> should be invisible if they are collapsible
+- white-spaces after <hr> should be invisible if they are collapsible
+- white-spaces after <hr> should be invisible if they are collapsible
+- white-spaces after <hr> should be invisible if they are collapsible
+- white-spaces after <hr> should be invisible if they are collapsible
+- white-spaces after <hr> should be invisible if they are collapsible
+- white-spaces after <hr> should be invisible if they are collapsible
+- white-spaces after <hr> should be invisible if they are collapsible
+- white-spaces before <br> should be invisible if they are collapsible
+- white-spaces before <br> should be invisible if they are collapsible
+- white-spaces before <br> should be invisible if they are collapsible
+- white-spaces before <br> should be invisible if they are collapsible
+- white-spaces before <br> should be invisible if they are collapsible
+- white-spaces before <br> should be invisible if they are collapsible
+- white-spaces before <div> should be invisible if they are collapsible
+- white-spaces before <div> should be invisible if they are collapsible
+- white-spaces before <div> should be invisible if they are collapsible
+- white-spaces before <div> should be invisible if they are collapsible
+- white-spaces before <div> should be invisible if they are collapsible
+- white-spaces before <div> should be invisible if they are collapsible
+- white-spaces before <div> should be invisible if they are collapsible
+- white-spaces before <div> should be invisible if they are collapsible
+- white-spaces before <div> should be invisible if they are collapsible
+- white-spaces before <div> should be invisible if they are collapsible
+- white-spaces before <div> should be invisible if they are collapsible
+- white-spaces before <div> should be invisible if they are collapsible
+- white-spaces before <hr> should be invisible if they are collapsible
+- white-spaces before <hr> should be invisible if they are collapsible
+- white-spaces before <hr> should be invisible if they are collapsible
+- white-spaces before <hr> should be invisible if they are collapsible
+- white-spaces before <hr> should be invisible if they are collapsible
+- white-spaces before <hr> should be invisible if they are collapsible
+- white-spaces before <hr> should be invisible if they are collapsible
+- white-spaces before <hr> should be invisible if they are collapsible
+- white-spaces before <hr> should be invisible if they are collapsible
+- white-spaces before <hr> should be invisible if they are collapsible
+- white-spaces before <hr> should be invisible if they are collapsible
+- white-spaces before <hr> should be invisible if they are collapsible
+- white-spaces between <br>s should be invisible if they are collapsible
+- white-spaces between <br>s should be invisible if they are collapsible
+- white-spaces between <br>s should be invisible if they are collapsible
+- white-spaces between <br>s should be invisible if they are collapsible
+- white-spaces between <br>s should be invisible if they are collapsible
+- white-spaces between <br>s should be invisible if they are collapsible
+- white-spaces between <div>s should be invisible if they are collapsible
+- white-spaces between <div>s should be invisible if they are collapsible
+- white-spaces between <div>s should be invisible if they are collapsible
+- white-spaces between <div>s should be invisible if they are collapsible
+- white-spaces between <div>s should be invisible if they are collapsible
+- white-spaces between <div>s should be invisible if they are collapsible
+- white-spaces between <div>s should be invisible if they are collapsible
+- white-spaces between <div>s should be invisible if they are collapsible
+- white-spaces between <div>s should be invisible if they are collapsible
+- white-spaces between <div>s should be invisible if they are collapsible
+- white-spaces between <div>s should be invisible if they are collapsible
+- white-spaces between <div>s should be invisible if they are collapsible
+- white-spaces between <hr>s should be invisible if they are collapsible
+- white-spaces between <hr>s should be invisible if they are collapsible
+- white-spaces between <hr>s should be invisible if they are collapsible
+- white-spaces between <hr>s should be invisible if they are collapsible
+- white-spaces between <hr>s should be invisible if they are collapsible
+- white-spaces between <hr>s should be invisible if they are collapsible
+- white-spaces between <hr>s should be invisible if they are collapsible
+- white-spaces between <hr>s should be invisible if they are collapsible
+- white-spaces between <hr>s should be invisible if they are collapsible
+- white-spaces between <hr>s should be invisible if they are collapsible
+- white-spaces between <hr>s should be invisible if they are collapsible
+- white-spaces between <hr>s should be invisible if they are collapsible
+html/dom/elements/the-innertext-and-outertext-properties/outertext-setter.html:
+- Assigning null
+- Assigning the empty string
+- Assigning undefined
+- CR/CR pair converts to two <br>s in non-white-space:pre element
+- CRs convert to <br> in <pre> element
+- CRs convert to <br> in non-white-space:pre elements
+- CRs convert to <br> in white-space:pre element
+- Detached node
+- Empty string
+- Empty string with surrounding text nodes
+- End with CR
+- End with CRLF
+- End with LF
+- Newline/CR pair converts to <br> in non-white-space:pre element
+- Newline/newline pair converts to two <br>s in non-white-space:pre element
+- Newlines convert to <br> in <pre> element
+- Newlines convert to <br> in <textarea> element
+- Newlines convert to <br> in non-white-space:pre elements
+- Newlines convert to <br> in white-space:pre element
+- Only merges with the previous and following text nodes, does not completely normalize
+- Removing a node
+- Replacing a node and merging with the following text node
+- Replacing a node and merging with the previous and following text node
+- Replacing a node and merging with the previous text node
+- Setting outerText to a bunch of newlines creates a bunch of <br>s with no text nodes
+- Start with CR
+- Start with CRLF
+- Start with LF
+- outerText not supported on MathML elements
+- outerText not supported on SVG elements
+html/dom/render-blocking/element-render-blocking-002.html:
+- blocking defers until needed element is parsed
+html/dom/render-blocking/element-render-blocking-004.html:
+- removing link in the head makes it no longer blocking
+html/dom/render-blocking/element-render-blocking-005.html:
+- removing 'blocking' makes it no longer blocking
+html/dom/render-blocking/element-render-blocking-007.html:
+- link with non-matching media has no effect
+html/dom/render-blocking/element-render-blocking-009.html:
+- changing media to non-matching makes it non blocking
+html/dom/render-blocking/element-render-blocking-010.html:
+- changing rel to non-expect makes it non blocking
+html/dom/render-blocking/element-render-blocking-013.html:
+- removing href makes it no longer blocking
+html/dom/render-blocking/element-render-blocking-014.html:
+- link in the body has no effect
+html/dom/render-blocking/element-render-blocking-015.html:
+- removing link the body makes it non blocking
+html/dom/render-blocking/element-render-blocking-016.html:
+- removing 'blocking' in the body makes it non blocking
+html/dom/render-blocking/element-render-blocking-017.html:
+- adding 'blocking=render' in the body has no effect
+html/dom/render-blocking/element-render-blocking-018.html:
+- changing media to matching in the body has no effect
+html/dom/render-blocking/element-render-blocking-019.html:
+- changing media to non-matching in the body makes it non blocking
+html/dom/render-blocking/element-render-blocking-020.html:
+- changing rel to non-expect in the body makes it non blocking
+html/dom/render-blocking/element-render-blocking-021.html:
+- changing rel to expect in the body has no effect
+html/dom/render-blocking/element-render-blocking-022.html:
+- adding href in the body has no effect
+html/dom/render-blocking/element-render-blocking-023.html:
+- removing href in the body makes it non blocking
+html/dom/render-blocking/element-render-blocking-025.html:
+- adding an id in the body satisfies render block
+html/dom/render-blocking/element-render-blocking-026.html:
+- removing id after it was renderer keeps render block satisfied
+html/dom/render-blocking/element-render-blocking-028.html:
+- removing some links but not all keeps at least the matching link blocking
+html/dom/render-blocking/element-render-blocking-029.html:
+- blocking defers frames until full parsing
+html/dom/render-blocking/element-render-blocking-030.html:
+- blocking defers frames until full parsing
+html/dom/render-blocking/element-render-blocking-031.html:
+- blocking defers frames until full parsing
+html/dom/render-blocking/element-render-blocking-032.html:
+- blocking defers frames until full parsing
+html/dom/render-blocking/element-render-blocking-033.html:
+- blocking defers frames until full parsing
+html/dom/render-blocking/element-render-blocking-034.html:
+- relative URLs that match this document are OK
+html/dom/render-blocking/element-render-blocking-035.html:
+- relative URLs that match this document are OK, regarless of <base>
+html/dom/render-blocking/element-render-blocking-036.html:
+- link URLs are relative to base URL, not to document URL
+html/dom/render-blocking/element-render-blocking-037.html:
+- relative URLs that match this document are OK, regarless of <base>
+html/dom/render-blocking/element-render-blocking-038.html:
+- 'link rel=expect: only connected elements are eligible'
+html/dom/render-blocking/element-render-blocking-040.html:
+- blocking defers frames until full parsing
+html/dom/render-blocking/element-render-blocking-041.html:
+- blocking defers frames until full parsing
+html/dom/render-blocking/parser-blocking-script.html:
+- Rendering is blocked before render-blocking resources are loaded
+html/dom/render-blocking/parser-inserted-async-inline-module-with-import.html:
+- Parser-inserted async inline module script elements with "blocking=render" are render-blocking
+html/dom/render-blocking/parser-inserted-async-script.html:
+- Rendering is blocked before render-blocking resources are loaded
+html/dom/render-blocking/parser-inserted-defer-script.html:
+- Rendering is blocked before render-blocking resources are loaded
+html/dom/render-blocking/parser-inserted-inline-module-with-import.html:
+- Parser-inserted module script elements with "blocking=render" are render-blocking
+html/dom/render-blocking/parser-inserted-module-script.html:
+- Rendering is blocked before render-blocking resources are loaded
+html/dom/render-blocking/parser-inserted-style-element.html:
+- Rendering is blocked before render-blocking resources are loaded
+html/dom/render-blocking/parser-inserted-stylesheet-link.html:
+- Rendering is blocked before render-blocking resources are loaded
+html/dom/render-blocking/remove-attr-script-keeps-blocking.html:
+- Rendering is blocked before render-blocking resources are loaded
+html/dom/render-blocking/remove-attr-style-keeps-blocking.html:
+- Rendering is blocked before render-blocking resources are loaded
+html/dom/render-blocking/remove-attr-stylesheet-link-keeps-blocking.html:
+- Rendering is blocked before render-blocking resources are loaded
+html/dom/render-blocking/script-inserted-inline-module-with-import.html:
+- Script-inserted module script elements with "blocking=render" are render-blocking
+html/dom/render-blocking/script-inserted-module-script.html:
+- Rendering is blocked before render-blocking resources are loaded
+html/dom/render-blocking/script-inserted-script.html:
+- Rendering is blocked before render-blocking resources are loaded
+html/dom/render-blocking/script-inserted-style-element.html:
+- Rendering is blocked before render-blocking resources are loaded
+html/dom/render-blocking/script-inserted-stylesheet-link.html:
+- Rendering is blocked before render-blocking resources are loaded
 html/rendering/bidi-rendering/slot-no-isolate-001.html:
 - "== html/rendering/bidi-rendering/slot-no-isolate-001-ref.html"
 html/rendering/bindings/the-select-element-0/option-label.html:
@@ -4870,10 +6008,33 @@ html/rendering/widgets/the-select-element/select-label-appearance.html:
 - "== html/rendering/widgets/the-select-element/select-label-appearance-ref.html"
 html/semantics/forms/customizable-combobox/customizable-combobox-appearance.html:
 - "== html/semantics/forms/customizable-combobox/customizable-combobox-appearance-ref.html"
+html/semantics/forms/customizable-combobox/customizable-combobox-option-attributes.html:
+- Choosing options with value and label attributes.
+html/semantics/forms/the-button-element/active-onblur.html:
+- Buttons should clear :active when the user tabs away from them while holding spacebar.
 html/semantics/forms/the-datalist-element/input-text-datalist-removal.html:
 - "== html/semantics/forms/the-datalist-element/input-text-focused-ref.html"
+html/semantics/forms/the-input-element/checkable-active-onblur-with-click.html:
+- Checkboxes should clear :active when the user tabs away from them while pressing
+  it with a pointing device
+- Checkboxes should clear :active when the user tabs away from them while pressing
+  the following label with a pointing device
+- Checkboxes should clear :active when the user tabs away from them while pressing
+  the parent label with a pointing device
+- Radios should clear :active when the user tabs away from them while pressing it
+  with a pointing device
+- Radios should clear :active when the user tabs away from them while pressing the
+  following label with a pointing device
+- Radios should clear :active when the user tabs away from them while pressing the
+  parent label with a pointing device
+html/semantics/forms/the-input-element/checkable-active-onblur.html:
+- Checkboxes should clear :active when the user tabs away from them while holding
+  spacebar.
+- Radios should clear :active when the user tabs away from them while holding spacebar.
 html/semantics/forms/the-input-element/image01.html:
 - "== html/semantics/forms/the-input-element/image01-ref.html (both renderings blank)"
+html/semantics/forms/the-input-element/radio-focused-and-scrolled-into-view.html:
+- Focusing offscreen radio via keyboard should scroll it into view
 html/semantics/forms/the-input-element/range-intrinsic-size.html:
 - "== html/semantics/forms/the-input-element/range-intrinsic-size-ref.html"
 html/semantics/forms/the-input-element/range-list-added-repaint.html:
@@ -4910,6 +6071,28 @@ html/semantics/forms/the-input-element/range-tick-marks-04.html:
 html/semantics/forms/the-input-element/range-tick-marks-05.html:
 - "== html/semantics/forms/the-input-element/range-tick-marks-05-ref.html (both renderings
   blank)"
+html/semantics/forms/the-input-element/selection-pointer.html:
+- Selecting texts across <input type=button> should not cancel selection
+- Selecting texts across <input type=checkbox> should not cancel selection
+- Selecting texts across <input type=color> should not cancel selection
+- Selecting texts across <input type=date> should not cancel selection
+- Selecting texts across <input type=datetime-local> should not cancel selection
+- Selecting texts across <input type=email> should not cancel selection
+- Selecting texts across <input type=file> should not cancel selection
+- Selecting texts across <input type=image> should not cancel selection
+- Selecting texts across <input type=month> should not cancel selection
+- Selecting texts across <input type=number> should not cancel selection
+- Selecting texts across <input type=password> should not cancel selection
+- Selecting texts across <input type=radio> should not cancel selection
+- Selecting texts across <input type=range> should not cancel selection
+- Selecting texts across <input type=reset> should not cancel selection
+- Selecting texts across <input type=search> should not cancel selection
+- Selecting texts across <input type=submit> should not cancel selection
+- Selecting texts across <input type=tel> should not cancel selection
+- Selecting texts across <input type=text> should not cancel selection
+- Selecting texts across <input type=time> should not cancel selection
+- Selecting texts across <input type=url> should not cancel selection
+- Selecting texts across <input type=week> should not cancel selection
 html/semantics/forms/the-meter-element/meter-appearance-none-even-less-good-value-rendering.html:
 - "!= html/semantics/forms/the-meter-element/reference/meter-appearance-auto-even-less-good-value-rendering.html"
 html/semantics/forms/the-meter-element/meter-appearance-none-optimum-value-rendering.html:
@@ -4930,21 +6113,59 @@ html/semantics/forms/the-select-element/customizable-select-listbox/customizable
 - "== html/semantics/forms/the-select-element/customizable-select-listbox/customizable-select-listbox-appearance-grid-ref.html"
 html/semantics/forms/the-select-element/customizable-select-listbox/customizable-select-listbox-appearance.html:
 - "== html/semantics/forms/the-select-element/customizable-select-listbox/customizable-select-listbox-appearance-ref.html"
+html/semantics/forms/the-select-element/customizable-select-listbox/customizable-select-listbox-keyboard-behavior.optional.html:
+- Base appearance listbox selects should not be focusable.
+- Keyboard behavior for base appearance <select multiple>
+- Keyboard behavior for base appearance <select size=4>
+- Tabbing and shift+tabbing into base appearance listbox.
+html/semantics/forms/the-select-element/customizable-select-listbox/customizable-select-listbox-mouse-behavior.html:
+- 'mouse: input behavior for base appearance <select size=4>'
+- 'touch: input behavior for base appearance <select multiple>'
+- 'touch: input behavior for base appearance <select size=4>'
 html/semantics/forms/the-select-element/customizable-select-listbox/customizable-select-listbox-sizing.html:
 - "== html/semantics/forms/the-select-element/customizable-select-listbox/customizable-select-listbox-sizing-ref.html"
 html/semantics/forms/the-select-element/customizable-select-listbox/listbox-hr-appearance.html:
 - "== html/semantics/forms/the-select-element/customizable-select-listbox/listbox-hr-appearance-ref.html"
+html/semantics/forms/the-select-element/customizable-select-listbox/select-listbox-home-end-pagedown-pageup.optional.html:
+- 'multiple: Home/End/PageUp/PageDown should move focus between options and scroll.'
+- 'single: Home/End/PageUp/PageDown should move focus between options and scroll.'
+html/semantics/forms/the-select-element/customizable-select-listbox/select-listbox-typeahead.optional.html:
+- "<select multiple>: Typeahead should focus options without checking them."
+- "<select>: Typeahead should focus options without checking them."
+html/semantics/forms/the-select-element/customizable-select/base-appearance-inheritance.html:
+- base appearance should not propagate to nested elements which support appearance.
 html/semantics/forms/the-select-element/customizable-select/border-rendering.html:
 - "== html/semantics/forms/the-select-element/customizable-select/border-rendering-ref.html"
+html/semantics/forms/the-select-element/customizable-select/button-in-popover.html:
+- Buttons in the popover should be rendered and should not close the popover when
+  clicked.
+- Non-interactive content in the popover should not close the popover when clicked.
 html/semantics/forms/the-select-element/customizable-select/checkmark-animation-002.html:
 - "== html/semantics/forms/the-select-element/customizable-select/checkmark-animation-002-ref.html
   (never ready to capture)"
+html/semantics/forms/the-select-element/customizable-select/checkmark-animation.html:
+- "::checkmark pseudo-element animates"
 html/semantics/forms/the-select-element/customizable-select/closed-listbox-rendering.html:
 - "== html/semantics/forms/the-select-element/customizable-select/closed-listbox-rendering-ref.html"
 html/semantics/forms/the-select-element/customizable-select/focus-ring-rendering.html:
 - "== html/semantics/forms/the-select-element/customizable-select/focus-ring-rendering-ref.html"
 html/semantics/forms/the-select-element/customizable-select/picker-icon-animation-002.html:
 - "== html/semantics/forms/the-select-element/customizable-select/picker-icon-animation-002-ref.html"
+html/semantics/forms/the-select-element/customizable-select/picker-icon-animation.html:
+- "::picker-icon pseudo-element animates"
+html/semantics/forms/the-select-element/customizable-select/select-accessibility-minimum-target-size.html:
+- 'horizontal-tb "": Select with appearance:base-select should have targets for pointer
+  inputs be at least 24x24 CSS pixels.'
+- 'horizontal-tb "i": Select with appearance:base-select should have targets for pointer
+  inputs be at least 24x24 CSS pixels.'
+- 'vertical-lr "": Select with appearance:base-select should have targets for pointer
+  inputs be at least 24x24 CSS pixels.'
+- 'vertical-lr "i": Select with appearance:base-select should have targets for pointer
+  inputs be at least 24x24 CSS pixels.'
+- 'vertical-rl "": Select with appearance:base-select should have targets for pointer
+  inputs be at least 24x24 CSS pixels.'
+- 'vertical-rl "i": Select with appearance:base-select should have targets for pointer
+  inputs be at least 24x24 CSS pixels.'
 html/semantics/forms/the-select-element/customizable-select/select-appearance-active.html:
 - "== html/semantics/forms/the-select-element/customizable-select/select-appearance-active-ref.html"
 html/semantics/forms/the-select-element/customizable-select/select-appearance-base-display.html:
@@ -5013,6 +6234,16 @@ html/semantics/forms/the-select-element/customizable-select/select-appearance-wr
 - "== html/semantics/forms/the-select-element/customizable-select/select-appearance-writing-mode-vertical-lr-ref.html"
 html/semantics/forms/the-select-element/customizable-select/select-appearance-writing-mode-vertical-rl.html:
 - "== html/semantics/forms/the-select-element/customizable-select/select-appearance-writing-mode-vertical-rl-ref.html"
+html/semantics/forms/the-select-element/customizable-select/select-base-appearance-computed-style.html:
+- UA styles of base appearance ::picker(select)
+- UA styles of base appearance <legend>.
+- UA styles of base appearance <optgroup>.
+- UA styles of base appearance <option> in <optgroup>.
+- UA styles of base appearance <option>.
+- UA styles of base appearance <select>.
+- UA styles of base appearance option::checkmark.
+- UA styles of base appearance select <button>.
+- UA styles of base appearance select::picker-icon.
 html/semantics/forms/the-select-element/customizable-select/select-base-appearance-ordering.html:
 - "== html/semantics/forms/the-select-element/customizable-select/select-base-appearance-ordering-ref.html"
 html/semantics/forms/the-select-element/customizable-select/select-base-appearance-writing-modes.html:
@@ -5021,24 +6252,122 @@ html/semantics/forms/the-select-element/customizable-select/select-base-overflow
 - "== html/semantics/forms/the-select-element/customizable-select/select-base-overflow-ref.html"
 html/semantics/forms/the-select-element/customizable-select/select-button-text-and-icon-clipping.html:
 - "== html/semantics/forms/the-select-element/customizable-select/select-button-text-and-icon-clipping-ref.html"
+html/semantics/forms/the-select-element/customizable-select/select-click-drag-option.optional.html:
+- Clicking the invoker button and dragging to an option should choose that option
+  and close the picker.
+- 'mouse: Releasing the pointer on an option positioned on top of the invoker button
+  should not close the picker.'
+- 'touch: Releasing the pointer on an option positioned on top of the invoker button
+  should not close the picker.'
 html/semantics/forms/the-select-element/customizable-select/select-clipping.html:
 - "== html/semantics/forms/the-select-element/customizable-select/select-clipping-ref.html"
+html/semantics/forms/the-select-element/customizable-select/select-dialog-mode-focus.optional.html:
+- In dialog mode tab should not close the picker.
+- In dialog mode the first focusable element should get focus.
+html/semantics/forms/the-select-element/customizable-select/select-disabled.html:
+- 'custombutton: <select disabled> should prevent focus and activation with appearance:base-select.'
+html/semantics/forms/the-select-element/customizable-select/select-events-2.optional.html:
+- "<select> should fire input and change events when new option is selected."
+- "<select> should fire input and change events when option in listbox is clicked"
+- "<select> should not fire input and change events when new selected option has the
+  same value as the old."
+- Button controller code should not run if the mousedown event is preventDefaulted.
+- Check that <Space> opens <select> when <select> specifies tabindex
+- Check that <Space> opens <select>.
+- Listbox controller code should not run if the mousedown event is preventDefaulted.
+html/semantics/forms/the-select-element/customizable-select/select-events.optional.html:
+- Events, explicit button
+- Events, implicit button
 html/semantics/forms/the-select-element/customizable-select/select-explicit-size.html:
 - "== html/semantics/forms/the-select-element/customizable-select/select-explicit-size-ref.html"
+html/semantics/forms/the-select-element/customizable-select/select-focus-visible-with-mouse.html:
+- Select should not match :focus-visible when using mouse.
 html/semantics/forms/the-select-element/customizable-select/select-font-size.html:
 - "== html/semantics/forms/the-select-element/customizable-select/select-font-size-ref.html"
+html/semantics/forms/the-select-element/customizable-select/select-home-end-pagedown-pageup-detailed.optional.html:
+- Behavior of Home and End for customizable-<select>
+- Behavior of Home and End for customizable-<select>, starting at the bottom
+- Behavior of Home and End for customizable-<select>, starting at the top
+- Behavior of PageUp and PageDown for customizable-<select>
+html/semantics/forms/the-select-element/customizable-select/select-home-end-pagedown-pageup.optional.html:
+- Behavior of End for customizable-<select>
+- Behavior of Home for customizable-<select>
+- Behavior of PageDown for customizable-<select>
+- Behavior of PageUp for customizable-<select>
 html/semantics/forms/the-select-element/customizable-select/select-icon-color.html:
 - "== html/semantics/forms/the-select-element/customizable-select/select-icon-color-ref.html"
+html/semantics/forms/the-select-element/customizable-select/select-initial-focus-display-animation.html:
+- Option initial focus should still work when a display animation is present.
+html/semantics/forms/the-select-element/customizable-select/select-inside-top-layer.html:
+- a modal dialog can be nested inside select
+- a popover can be nested inside select
+- select can be nested inside a modal dialog
+- select can be nested inside a popover
+html/semantics/forms/the-select-element/customizable-select/select-iterate-before-beginning.optional.html:
+- Attempting to focus the previous option while focused on the first option should
+  not crash.
+- Keyboard navigating backwards over an <hr> and <optgroup> should not crash.
+html/semantics/forms/the-select-element/customizable-select/select-keyboard-behavior.optional.html:
+- 'custombutton: When the listbox is closed, all arrow keys should open the listbox.'
+- 'custombutton: When the listbox is closed, spacebar should open the listbox.'
+- 'custombutton: When the listbox is closed, the enter key should not trigger form
+  submission.'
+- 'custombutton: When the listbox is open, the enter key should commit the selected
+  option.'
+- 'custombutton: When the listbox is open, the tab key should close the listbox.'
+- 'defaultbutton: When the listbox is closed, all arrow keys should open the listbox.'
+- 'defaultbutton: When the listbox is closed, spacebar should open the listbox.'
+- 'defaultbutton: When the listbox is closed, the enter key should not trigger form
+  submission.'
+- 'defaultbutton: When the listbox is open, the enter key should commit the selected
+  option.'
+- 'defaultbutton: When the listbox is open, the tab key should close the listbox.'
+html/semantics/forms/the-select-element/customizable-select/select-keyboard-focus-change-for-hidden-options.optional.html:
+- Hidden options should be skipped when changing focus using the up and down keys.
+html/semantics/forms/the-select-element/customizable-select/select-mouse-behavior.html:
+- 'custombutton: Clicking an option in an appearance:base-select select should choose
+  the option and close the popover.'
+- 'custombutton: Select with appearance:base-select should open and close when clicking
+  the button.'
+- 'custombutton: Touch input should work the same as mouse input.'
+- 'fallbackbutton: Clicking an option in an appearance:base-select select should choose
+  the option and close the popover.'
+- 'fallbackbutton: Select with appearance:base-select should open and close when clicking
+  the button.'
+- 'fallbackbutton: Touch input should work the same as mouse input.'
+html/semantics/forms/the-select-element/customizable-select/select-mousedown-slot-mutation.optional.html:
+- Select opens when options are mutated during mousedown
+- Select options work correctly after mousedown mutation
 html/semantics/forms/the-select-element/customizable-select/select-open-invalidation.html:
 - "== html/semantics/forms/the-select-element/customizable-select/select-open-invalidation-ref.html"
+html/semantics/forms/the-select-element/customizable-select/select-optgroup-arrow-keys.optional.html:
+- Keyboard navigation forwards and backwards should visit each option with optgroups.
 html/semantics/forms/the-select-element/customizable-select/select-optgroup-legend-label.html:
 - "== html/semantics/forms/the-select-element/customizable-select/select-optgroup-legend-label-ref.html"
+html/semantics/forms/the-select-element/customizable-select/select-option-arrow-scroll.optional.html:
+- 'bottomofdocument: Arrow keys on options should not scroll the document.'
+- 'topofdocument: Arrow keys on options should not scroll the document.'
+html/semantics/forms/the-select-element/customizable-select/select-option-hover-styles.html:
+- Hover styles should be present for appearance:base-select options.
 html/semantics/forms/the-select-element/customizable-select/select-option-images.html:
 - "== html/semantics/forms/the-select-element/customizable-select/select-option-images-ref.html"
+html/semantics/forms/the-select-element/customizable-select/select-picker-animations.html:
+- select::picker(select) should support author provided top layer animations.
+html/semantics/forms/the-select-element/customizable-select/select-picker-exit-animation.html:
+- Top layer exit animations should work on ::picker(select) just like a popover.
+html/semantics/forms/the-select-element/customizable-select/select-picker-hover-active-pseudo.html:
+- 'custombutton: select should match :hover and :active when interacting with button.'
+- 'custombutton: select should not match :hover or :active when interacting with elements
+  in the picker.'
+- 'defaultbutton: select should match :hover and :active when interacting with button.'
+- 'defaultbutton: select should not match :hover or :active when interacting with
+  elements in the picker.'
 html/semantics/forms/the-select-element/customizable-select/select-picker-icon-content-none.html:
 - "== html/semantics/forms/the-select-element/customizable-select/select-picker-icon-content-none-ref.html"
 html/semantics/forms/the-select-element/customizable-select/select-picker-icon-open-state.html:
 - "== html/semantics/forms/the-select-element/customizable-select/select-picker-icon-open-state-ref.html"
+html/semantics/forms/the-select-element/customizable-select/select-picker-interactive-element-focus.optional.html:
+- Clicking interactive elements inside the select picker should focus them.
 html/semantics/forms/the-select-element/customizable-select/select-picker-pseudo-backdrop.html:
 - "== html/semantics/forms/the-select-element/customizable-select/select-picker-pseudo-backdrop-ref.html"
 html/semantics/forms/the-select-element/customizable-select/select-picker-pseudo-before-after.html:
@@ -5052,18 +6381,50 @@ html/semantics/forms/the-select-element/customizable-select/select-picker-pseudo
 - "== html/semantics/forms/the-select-element/customizable-select/select-picker-pseudo-selection-ref.html"
 html/semantics/forms/the-select-element/customizable-select/select-picker-pseudo-target-text.html:
 - "== html/semantics/forms/the-select-element/customizable-select/select-picker-pseudo-target-text-ref.html"
+html/semantics/forms/the-select-element/customizable-select/select-picker-starting-style.html:
+- "@starting-style should work on ::picker(select) just like a popover."
 html/semantics/forms/the-select-element/customizable-select/select-popover-exit-animation.html:
 - "== html/semantics/forms/the-select-element/customizable-select/select-popover-exit-animation-ref.html"
+html/semantics/forms/the-select-element/customizable-select/select-pseudo-light-dismiss-invalidation.html:
+- select should not match :open when light dismissed.
+html/semantics/forms/the-select-element/customizable-select/select-pseudo-open.html:
+- select :open and :not(:open) should invalidate correctly.
+- select should support :open pseudo selector.
 html/semantics/forms/the-select-element/customizable-select/select-pseudo-ordering.html:
 - "== html/semantics/forms/the-select-element/customizable-select/select-pseudo-ordering-ref.html"
 html/semantics/forms/the-select-element/customizable-select/select-second-child-button.html:
 - "== html/semantics/forms/the-select-element/customizable-select/select-second-child-button-ref.html"
 html/semantics/forms/the-select-element/customizable-select/select-single-base-appearance-rendering.html:
 - "== html/semantics/forms/the-select-element/customizable-select/select-single-base-appearance-rendering-ref.html"
+html/semantics/forms/the-select-element/customizable-select/select-synthetic-events.html:
+- 'custombutton: Synthetic events should not trigger behaviors of select element.'
+- 'defaultbutton: Synthetic events should not trigger behaviors of select element.'
 html/semantics/forms/the-select-element/customizable-select/select-text-only.html:
 - "== html/semantics/forms/the-select-element/customizable-select/select-text-only-ref.html"
+html/semantics/forms/the-select-element/customizable-select/select-vertical-writing-mode-navigation.optional.html:
+- 'sideways-lr: Down/Up keys navigate as secondary axis'
+- 'sideways-lr: Right/Left keys navigate as primary axis'
+- 'sideways-rl: Down/Up keys navigate as secondary axis'
+- 'sideways-rl: Left/Right keys navigate as primary axis (block-flipped)'
+- 'vertical-lr: Down/Up keys navigate as secondary axis'
+- 'vertical-lr: Right/Left keys navigate as primary axis'
+- 'vertical-rl: Down/Up keys navigate as secondary axis'
+- 'vertical-rl: Left/Right keys navigate as primary axis (block-flipped)'
 html/semantics/forms/the-select-element/customizable-select/selectedcontent-color.html:
 - "== html/semantics/forms/the-select-element/customizable-select/selectedcontent-color-ref.html"
+html/semantics/forms/the-select-element/customizable-select/switch-picker-appearance.html:
+- Basic functionality of select picker and appearance
+- Basic functionality of select picker with appearance:auto
+- Basic functionality of select picker with appearance:none
+- Switching appearance in :open should close the picker
+- Switching appearance in JS after picker is open should close the picker
+- Test of the test harness
+- The select picker is closed if the ::picker() appearance value is changed via CSS
+  while the picker is open
+- The select picker is closed if the <select> appearance value is changed via CSS
+  while the picker is open
+- The select picker is closed if the <select> inline appearance value is changed while
+  the picker is open
 html/semantics/forms/the-select-element/customizable-select/uses-label-dynamic.html:
 - "== html/semantics/forms/the-select-element/customizable-select/uses-label-dynamic-ref.html
   (never ready to capture)"
@@ -5074,12 +6435,18 @@ html/semantics/forms/the-select-element/reset-algorithm-rendering.html:
   ready to capture)"
 html/semantics/forms/the-select-element/select-listbox-selected-hscroll.html:
 - "!= css/reference/blank.html"
+html/semantics/forms/the-select-element/select-listbox-touch.optional.html:
+- Using touch inputs should not deselect other options in a listbox <select multiple>.
+html/semantics/forms/the-select-element/select-multiple-resize-does-not-autoscroll.html:
+- Resizing <select multiple> should not autoscroll the listbox.
 html/semantics/forms/the-textarea-element/multiline-placeholder-cr.html:
 - "== html/semantics/forms/the-textarea-element/multiline-placeholder-ref.html"
 html/semantics/forms/the-textarea-element/multiline-placeholder-crlf.html:
 - "== html/semantics/forms/the-textarea-element/multiline-placeholder-ref.html"
 html/semantics/forms/the-textarea-element/multiline-placeholder.html:
 - "== html/semantics/forms/the-textarea-element/multiline-placeholder-ref.html"
+html/semantics/forms/the-textarea-element/textarea-placeholder-lineheight.html:
+- Bounding rect height for textarea must be the same as line-height
 html/webappapis/scripting/events/compile-event-handler-lexical-scopes.html:
 - The EventHandler is not an element's event handler (i.e. Window's event handler)
   and has no form owner.
@@ -5116,6 +6483,16 @@ input-events/input-events-arrow-key-on-number-input-delete-document.html:
   removes document
 input-events/input-events-get-target-ranges.html:
 - getTargetRanges() returns correct range and cleared after dispatch.
+input-events/input-events-spin-button-click-on-number-input-delete-document.html:
+- Number input should not crash and not fire subsequent events when event handler
+  removes document
+input-events/input-events-spin-button-click-on-number-input-prevent-default.html:
+- Number input should not fire input and change event if the beforeinput event is
+  default prevented
+input-events/input-events-spin-button-click-on-number-input.html:
+- Number input should fire beforeinput event before the input and change event
+input-events/select-event-drag-remove.html:
+- Drag and remove from the select event doesn't crash
 service-workers/cache-storage/cache-storage.https.any.js:
 - CacheStorage names are DOMStrings not USVStrings
 service-workers/cache-storage/credentials.https.html:
@@ -5480,26 +6857,249 @@ service-workers/service-worker/xhr-response-url.https.html:
 - XHR Document should use the response URL (generated response)
 service-workers/service-worker/xsl-base-url.https.html:
 - base URL when service worker does respondWith(fetch(responseUrl))
+shadow-dom/DocumentOrShadowRoot-prototype-elementFromPoint.html:
+- 'document.elementFromPoint and shadow.ElementFromPoint must return the shadow host
+  of the hit-tested text node when the hit-tested text node is a direct child of the
+  root and the host has display: block'
+- 'document.elementFromPoint and shadow.ElementFromPoint must return the shadow host
+  of the hit-tested text node when the hit-tested text node is a direct child of the
+  root and the host has display: inline'
+- 'document.elementFromPoint and shadow.ElementFromPoint must return the shadow host
+  of the hit-tested text node when the hit-tested text node is a direct child of the
+  root and the host has display: inline-block'
+- 'document.elementFromPoint and shadowRoot.elementFromPoint must return the element
+  assigned to a slot when hit-tested text node under an element is assigned to a slot
+  in the shadow tree and the shadow host of the slot has display: block'
+- 'document.elementFromPoint and shadowRoot.elementFromPoint must return the element
+  assigned to a slot when hit-tested text node under an element is assigned to a slot
+  in the shadow tree and the shadow host of the slot has display: inline'
+- 'document.elementFromPoint and shadowRoot.elementFromPoint must return the element
+  assigned to a slot when hit-tested text node under an element is assigned to a slot
+  in the shadow tree and the shadow host of the slot has display: inline-block'
+- 'document.elementFromPoint and shadowRoot.elementFromPoint must return the shadow
+  host when the hit-tested text node is assigned to a slot and the host has display:
+  block'
+- 'document.elementFromPoint and shadowRoot.elementFromPoint must return the shadow
+  host when the hit-tested text node is assigned to a slot and the host has display:
+  inline'
+- 'document.elementFromPoint and shadowRoot.elementFromPoint must return the shadow
+  host when the hit-tested text node is assigned to a slot and the host has display:
+  inline-block'
+- 'document.elementFromPoint must return the shadow host and shadowRoot.elementFromPoint
+  must return the slot parent of the fallback text when the hit-tested text node is
+  a fallback content and the host has display: block'
+- 'document.elementFromPoint must return the shadow host and shadowRoot.elementFromPoint
+  must return the slot parent of the fallback text when the hit-tested text node is
+  a fallback content and the host has display: inline'
+- 'document.elementFromPoint must return the shadow host and shadowRoot.elementFromPoint
+  must return the slot parent of the fallback text when the hit-tested text node is
+  a fallback content and the host has display: inline-block'
+- 'document.elementFromPoint must return the shadow host of the hit-tested element
+  under a shadow root and shadowRoot.elementFromPoint must return the element parent
+  of the hit-tested text node under the point when the shadow host has display: block'
+- 'document.elementFromPoint must return the shadow host of the hit-tested element
+  under a shadow root and shadowRoot.elementFromPoint must return the element parent
+  of the hit-tested text node under the point when the shadow host has display: inline'
+- 'document.elementFromPoint must return the shadow host of the hit-tested element
+  under a shadow root and shadowRoot.elementFromPoint must return the element parent
+  of the hit-tested text node under the point when the shadow host has display: inline-block'
+- 'document.elementFromPoint, shadowRoot.elementFromPoint must return a child element
+  with its own shadow tree assigned to a slot when the hit-tested text node is a child
+  of another element and innerShadow.elementFromPoint must return the parent element
+  of the hit-tested text node under it when the outer shadow host has display: block'
+- 'document.elementFromPoint, shadowRoot.elementFromPoint must return a child element
+  with its own shadow tree assigned to a slot when the hit-tested text node is a child
+  of another element and innerShadow.elementFromPoint must return the parent element
+  of the hit-tested text node under it when the outer shadow host has display: inline'
+- 'document.elementFromPoint, shadowRoot.elementFromPoint must return a child element
+  with its own shadow tree assigned to a slot when the hit-tested text node is a child
+  of another element and innerShadow.elementFromPoint must return the parent element
+  of the hit-tested text node under it when the outer shadow host has display: inline-block'
+- 'document.elementFromPoint, shadowRoot.elementFromPoint, innerShadow.elementFromPoint
+  must return a child element assigned to a slot when the hit-tested text node is
+  assigned to a slot in the shadow tree of the child element and the outer shadow
+  host has display: block'
+- 'document.elementFromPoint, shadowRoot.elementFromPoint, innerShadow.elementFromPoint
+  must return a child element assigned to a slot when the hit-tested text node is
+  assigned to a slot in the shadow tree of the child element and the outer shadow
+  host has display: inline'
+- 'document.elementFromPoint, shadowRoot.elementFromPoint, innerShadow.elementFromPoint
+  must return a child element assigned to a slot when the hit-tested text node is
+  assigned to a slot in the shadow tree of the child element and the outer shadow
+  host has display: inline-block'
+- 'document.elementFromPoint, shadowRoot.elementFromPoint, innerShadow.elementFromPoint
+  must return a child element with its own shadow tree assigned to a slot when the
+  hit-tested text node is its direct child and the outer shadow host has display:
+  block'
+- 'document.elementFromPoint, shadowRoot.elementFromPoint, innerShadow.elementFromPoint
+  must return a child element with its own shadow tree assigned to a slot when the
+  hit-tested text node is its direct child and the outer shadow host has display:
+  inline'
+- 'document.elementFromPoint, shadowRoot.elementFromPoint, innerShadow.elementFromPoint
+  must return a child element with its own shadow tree assigned to a slot when the
+  hit-tested text node is its direct child and the outer shadow host has display:
+  inline-block'
+- 'document.elementsFromPoint and shadow.elementsFromPoint must return the shadow
+  host and its ancestors of the hit-tested text node when the hit-tested text node
+  is a direct child of the root and the host has display: block'
+- 'document.elementsFromPoint and shadow.elementsFromPoint must return the shadow
+  host and its ancestors of the hit-tested text node when the hit-tested text node
+  is a direct child of the root and the host has display: inline'
+- 'document.elementsFromPoint and shadow.elementsFromPoint must return the shadow
+  host and its ancestors of the hit-tested text node when the hit-tested text node
+  is a direct child of the root and the host has display: inline-block'
+- 'document.elementsFromPoint and shadowRoot.elementsFromPoint must return the element
+  assigned to a slot and its non-shadow ancestors when hit-tested text node under
+  an element is assigned to a slot in the shadow tree and the shadow host of the slot
+  has display: block'
+- 'document.elementsFromPoint and shadowRoot.elementsFromPoint must return the element
+  assigned to a slot and its non-shadow ancestors when hit-tested text node under
+  an element is assigned to a slot in the shadow tree and the shadow host of the slot
+  has display: inline'
+- 'document.elementsFromPoint and shadowRoot.elementsFromPoint must return the element
+  assigned to a slot and its non-shadow ancestors when hit-tested text node under
+  an element is assigned to a slot in the shadow tree and the shadow host of the slot
+  has display: inline-block'
+- 'document.elementsFromPoint and shadowRoot.elementsFromPoint must return the shadow
+  host and its ancestors when the hit-tested text node is assigned to a slot and the
+  host has display: block'
+- 'document.elementsFromPoint and shadowRoot.elementsFromPoint must return the shadow
+  host and its ancestors when the hit-tested text node is assigned to a slot and the
+  host has display: inline'
+- 'document.elementsFromPoint and shadowRoot.elementsFromPoint must return the shadow
+  host and its ancestors when the hit-tested text node is assigned to a slot and the
+  host has display: inline-block'
+- 'document.elementsFromPoint must return the shadow host and its ancestors and shadowRoot.elementsFromPoint
+  must return the slot parent of the fallback text and its non-shadow ancestors when
+  the hit-tested text node is a fallback content and the host has display: block'
+- 'document.elementsFromPoint must return the shadow host and its ancestors and shadowRoot.elementsFromPoint
+  must return the slot parent of the fallback text and its non-shadow ancestors when
+  the hit-tested text node is a fallback content and the host has display: inline'
+- 'document.elementsFromPoint must return the shadow host and its ancestors and shadowRoot.elementsFromPoint
+  must return the slot parent of the fallback text and its non-shadow ancestors when
+  the hit-tested text node is a fallback content and the host has display: inline-block'
+- 'document.elementsFromPoint must return the shadow host and its ancestors of the
+  hit-tested element under a shadow root andshadowRoot.elementsFromPoint must return
+  the element parent and its non-shadow ancestors of the hit-tested text node under
+  the point when the shadow host has display: block'
+- 'document.elementsFromPoint must return the shadow host and its ancestors of the
+  hit-tested element under a shadow root andshadowRoot.elementsFromPoint must return
+  the element parent and its non-shadow ancestors of the hit-tested text node under
+  the point when the shadow host has display: inline'
+- 'document.elementsFromPoint must return the shadow host and its ancestors of the
+  hit-tested element under a shadow root andshadowRoot.elementsFromPoint must return
+  the element parent and its non-shadow ancestors of the hit-tested text node under
+  the point when the shadow host has display: inline-block'
+- elementsFromPoint should return all elements under a point, even when context object
+  is not connected
+- shadowRoot.elementsFromPoint must behave the same with document.elementsFromPoint
+  regarding HTML element
+shadow-dom/HighlightRegistry-highlightsFromPoint.html:
+- CSS.highlights.highlightsFromPoint() doesn't return Highlights that are not painted
+  at the given coordinates even when they fall inside the Highlights' ranges
+- CSS.highlights.highlightsFromPoint() handles slotted light DOM content correctly.
+- CSS.highlights.highlightsFromPoint() returns Highlights present at a given point
+  inside a shadow tree in the right order.
+shadow-dom/MouseEvent-prototype-offsetX-offsetY.html:
+- MouseEvent's offsetX and offsetY attributes must be relative to the shadow host
+  when an event is dispatched inside its shadow tree.
+- MouseEvent's offsetX and offsetY attributes must be relative to the target when
+  an event is dispatched on a slotted content.
+- MouseEvent's offsetX and offsetY attributes must be relative to the target.
+shadow-dom/dragenter-related-target.html:
+- dragleave relatedTarget should be retargeted to shadow host when entering shadow
+  DOM
+shadow-dom/execcommand-insertList-in-shadow.html:
+- Toggle off List for all the child nodes in the ShadowRoot
+shadow-dom/focus/click-focus-delegatesFocus-click.html:
+- click on the host with no delegatesFocus with another host with delegatesFocus and
+  a focusable child
+- click on the host with no delegatesFocus with another host with no delegatesFocus
+  and a focusable child
+shadow-dom/focus/click-focus-slot-ancestor.html:
+- Clicking on non-focusable slot inside focusable div will make the flat-tree focusable
+  ancestor get focused
+- Select on non-focusable non-editable slot in a contenteditable shadow DOM and inside
+  focusable div will select text
+- Select on non-focusable slot inside focusable div will select text
+shadow-dom/focus/focus-scroll-under-delegatesFocus.html:
+- delegatesFocus shouldn't cause extra focus steps
+shadow-dom/focus/focus-slot-box-generated-tabindex-0.html:
+- slot with tabindex=0 that generates a box should be focusable
+shadow-dom/focus/text-selection-with-delegatesFocus-on-slotted-content.html:
+- select slotted text in shadow root with delegatesFocus.
+shadow-dom/focus/text-selection-with-delegatesFocus-text-control.html:
+- shadow root has selectable text when focus is delegated. Selection goes to text
+  control if it is the delegated focusable area.
+shadow-dom/focus/text-selection-with-delegatesFocus.html:
+- shadow root has selectable text when focus is delegated
+- shadow root has selectable text when focus is not delegated
+shadow-dom/imperative-slot-fallback-clear.html:
+- Element fallback should be cleared in a subsequent layout
+- Text node fallback should be cleared in a subsequently layout
 shadow-dom/layout-slot-no-longer-assigned.html:
 - "== shadow-dom/reference/empty.html (both renderings blank)"
 shadow-dom/layout-slot-no-longer-fallback.html:
 - "== shadow-dom/reference/empty.html (both renderings blank)"
+shadow-dom/leaktests/selection.html:
+- selection API should not leak nodes in Shadow DOM.
 shadow-dom/offsetParent-across-shadow-boundaries.html:
+- offsetParent must find the first offset parent which is a shadow-including ancestor
+  of the context object even some shadow tree of closed mode did not have any offset
+  parent
+- offsetParent must find the first offset parent which is a shadow-including ancestor
+  of the context object even some shadow tree of open mode did not have any offset
+  parent
+- offsetParent must return null on a child element of a shadow host for the shadow
+  tree in closed mode which is not assigned to any slot
+- offsetParent must return null on a child element of a shadow host for the shadow
+  tree in closed mode which is not in the flat tree
+- offsetParent must return null on a child element of a shadow host for the shadow
+  tree in open mode which is not assigned to any slot
+- offsetParent must return null on a child element of a shadow host for the shadow
+  tree in open mode which is not in the flat tree
+- offsetParent must return null when the context object is assigned to a slot without
+  a fixed containing block in shadow tree of closed mode
+- offsetParent must return null when the context object is assigned to a slot without
+  a fixed containing block in shadow tree of open mode
 - offsetParent must return the fixed position containing block of a fixed element
   when the context object is assigned to a slot within a fixed containing block in
   shadow tree of closed mode
 - offsetParent must return the fixed position containing block of a fixed element
   when the context object is assigned to a slot within a fixed containing block in
   shadow tree of open mode
+- offsetParent must skip offset parents of an element when the context object is assigned
+  to a slot in nested shadow trees of closed mode
+- offsetParent must skip offset parents of an element when the context object is assigned
+  to a slot in nested shadow trees of open mode
 shadow-dom/offsetTop-offsetLeft-across-shadow-boundaries.html:
 - Verifies that HTMLElement.offsetTop accounts for shadow boundaries when nested in
   multiple shadow roots.
+shadow-dom/scroll-to-the-fragment-in-shadow-tree.html:
+- The user agent scroll to the fragment when there is an anchor element with a name
+  attribute exactly equal to the decoded fragid
+- The user agent scroll to the fragment when there is an element with an ID exactly
+  equal to the decoded fragid
+- The user agent should scroll to an anchor element with a name attribute exactly
+  equal to the decoded fragid in the document tree even if there was another element
+  with the same ID inside a closed shadow tree earlier in tree order
+- The user agent should scroll to an anchor element with a name attribute exactly
+  equal to the decoded fragid in the document tree even if there was another element
+  with the same ID inside an open shadow tree earlier in tree order
+- The user agent should scroll to an element with an ID exactly equal to the decoded
+  fragid in the document tree even if there was another element with the same ID inside
+  a closed shadow tree earlier in tree order
+- The user agent should scroll to an element with an ID exactly equal to the decoded
+  fragid in the document tree even if there was another element with the same ID inside
+  an open shadow tree earlier in tree order
 shadow-dom/shadow-style-invalidation-vw-units.html:
 - "== shadow-dom/shadow-style-invalidation-vw-units-ref.html"
 shadow-dom/slot-fallback-content-008.html:
 - "== shadow-dom/slot-fallback-content-008-ref.html"
 shadow-dom/untriaged/html-elements-in-shadow-trees/inert-html-elements/test-001.html:
 - A_08_01_01_T01
+shadow-dom/untriaged/styles/test-008.html:
+- A_06_00_09_T01
 web-animations/animation-model/animation-types/accumulation-per-property-001.html:
 - background-color supports animating as color of rgb() with overflowed  from and
   to values
