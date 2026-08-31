@@ -48,7 +48,7 @@ const TYPE_BASE = {
   'color': 'color', 'integer': 'integer', 'number': 'number',
   'length': 'length', 'percentage': 'length', 'length-percentage': 'length',
 };
-function parseRangeMin(bound) {
+function parseRangeBound(bound) {
   const s = bound.trim();
   if (s.indexOf('∞') !== -1) return s[0] === '-' ? -Infinity : Infinity;   // ∞ / -∞
   const n = parseFloat(s);
@@ -56,21 +56,23 @@ function parseRangeMin(bound) {
 }
 function classifyValueType(syntax) {
   if (!syntax) return null;
-  let base = null, min = null;
+  let base = null, min = null, max = null;
   const keywords = [];
   for (const raw of syntax.split('|')) {
     const part = raw.trim();
     if (part.indexOf('(') !== -1) continue;                // functional alternative — runtime accepts, skip
     // A type reference with an optional numeric range: `<name>` / `<name [min,max]>`.
-    const m = /^<([a-z-]+)(?:\s*\[\s*([^,\]]+)\s*,[^\]]*\])?>$/.exec(part);
+    const m = /^<([a-z-]+)(?:\s*\[\s*([^,\]]+)\s*,\s*([^\]]*)\])?>$/.exec(part);
     if (m) {
       const t = TYPE_BASE[m[1]];
       if (!t) return null;                                 // an unknown type — can't validate
       if (base && base !== t) return null;                 // mixed base types
       base = t;
       if (m[2] != null) {
-        const lo = parseRangeMin(m[2]);
+        const lo = parseRangeBound(m[2]);
         if (lo != null && Number.isFinite(lo)) min = (min == null) ? lo : Math.min(min, lo);
+        const hi = m[3] == null ? null : parseRangeBound(m[3]);
+        if (hi != null && Number.isFinite(hi)) max = (max == null) ? hi : Math.max(max, hi);
       }
     } else if (/^[a-z][a-z-]*$/i.test(part)) {
       keywords.push(part.toLowerCase());                   // a bare keyword alternative
@@ -88,6 +90,7 @@ function classifyValueType(syntax) {
   if (base === 'color' && keywords.length > 0) return null;
   const out = { base, keywords };
   if (min != null) out.min = min;
+  if (max != null) out.max = max;
   return out;
 }
 const valueTypes = {};
@@ -106,7 +109,13 @@ for (const name of longhands) {
 const MIN_FIXES = {
   'flex-grow':   0,     // css-flexbox §7.1.1: <number [0,∞]>
   'flex-shrink': 0,     // css-flexbox §7.1.2: <number [0,∞]>
-  'flex-basis':  0      // css-flexbox §7.1.3: <'width'>, i.e. <length-percentage [0,∞]>
+  'flex-basis':  0,     // css-flexbox §7.1.3: <'width'>, i.e. <length-percentage [0,∞]>
+  // …and the opacities, which mdn records as `<'opacity'>` / `<opacity-value>` with no range at
+  // all. `opacity` itself is clamped by its own computed-value reader; these three have nobody.
+  'stop-opacity':          0,
+  'fill-opacity':          0,
+  'stroke-opacity':        0,
+  'shape-image-threshold': 0
 };
 const propertyMin = {};
 for (const name of longhands) {
@@ -114,6 +123,24 @@ for (const name of longhands) {
   if (t && t.min != null && Number.isFinite(t.min)) propertyMin[name] = t.min;
 }
 for (const [name, min] of Object.entries(MIN_FIXES)) if (longhands.includes(name)) propertyMin[name] = min;
+
+// …and the UPPER bound, which an extrapolating easing runs into just as it runs into the lower one.
+// The four opacities carry no range in mdn — it records `<'opacity'>` / `<opacity-value>` — and
+// `opacity` itself is clamped by its own computed-value reader, which the others do not have
+// (Chrome-measured: `stop-opacity` 0 → 1 under an overshooting easing reports 0 and 1, never
+// -0.2 or 1.2).
+const MAX_FIXES = {
+  'stop-opacity':           1,
+  'fill-opacity':           1,
+  'stroke-opacity':         1,
+  'shape-image-threshold':  1
+};
+const propertyMax = {};
+for (const name of longhands) {
+  const t = valueTypes[name];
+  if (t && t.max != null && Number.isFinite(t.max)) propertyMax[name] = t.max;
+}
+for (const [name, max] of Object.entries(MAX_FIXES)) if (longhands.includes(name)) propertyMax[name] = max;
 
 // Each longhand's INITIAL value and whether it INHERITS — what `getComputedStyle` must report
 // for a property no rule sets. mdn-data records the SPECIFIED initial; a few compute to something
@@ -210,10 +237,19 @@ const ANIMATION_TYPE_FIXES = {
   // (Chrome-measured, `rgb(0,0,0)` to `rgb(100,100,100)` is `rgb(50, 50, 50)` half way, and its
   // opacity 0 to 1 is 0.5).
   'stop-color':   'color',
-  'stop-opacity': 'number'
+  'stop-opacity': 'number',
+
+  // …and `stroke`, which mdn records as an ARRAY of property names rather than a type, so it had
+  // none at all and its keyframes were dropped. It is a PAINT like `fill`, which mdn does type
+  // (Chrome-measured: `#000` to `#0f0` is `rgb(0, 128, 0)` half way).
+  'stroke': 'byComputedValueType'
 };
 for (const [name, type] of Object.entries(ANIMATION_TYPE_FIXES)) {
-  if (animationTypes[name]) animationTypes[name] = type;
+  // Keyed on the LONGHAND list, not on what mdn already recorded: mdn gives `stroke` an ARRAY of
+  // other property names rather than a type, so the sweep above skips it and the property was not
+  // animatable at all — a table that can only CORRECT an existing entry would silently do nothing
+  // for the next one like it.
+  if (longhands.includes(name)) animationTypes[name] = type;
 }
 
 // A property interpolated "by computed value" composes a plain NUMBER with the one underneath it
@@ -365,6 +401,9 @@ export const ADDS_DIMENSION = bare(${JSON.stringify(addsDimension, null, 0)});
 // Longhand → the numeric LOWER BOUND its grammar imposes. An interpolation that extrapolates past
 // it clamps: a \`flex-grow\` animation seeking before its start reports 0, not a negative number.
 export const PROPERTY_MIN = bare(${JSON.stringify(propertyMin, null, 0)});
+
+// …and its UPPER bound, for the same reason: an interpolation that extrapolates past it clamps.
+export const PROPERTY_MAX = bare(${JSON.stringify(propertyMax, null, 0)});
 
 // Every bare KEYWORD each property's grammar admits (colour keywords factored out below). Used to
 // reject a single identifier a property doesn't take — \`width: notalength\`, or the \`undefined\` a

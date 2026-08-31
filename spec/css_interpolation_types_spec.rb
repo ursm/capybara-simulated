@@ -528,6 +528,18 @@ RSpec.describe 'CSS interpolation types' do
         .to eq(%w[column wrap])
       expect(longhands('margin', '0px', '20px', %w[margin-left margin-top])).to eq(['10px', '10px'])
     end
+
+    # …including the four the CSSOM registry does not carry at all — they live only in the
+    # cascade's hand-written expanders, which is exactly why the registry must not be asked first.
+    it 'expands the shorthands the registry does not carry' do
+      expect(longhands('background', 'rgb(0,0,0)', 'rgb(100,100,100)', %w[background-color]))
+        .to eq(['rgb(50, 50, 50)'])
+      expect(longhands('inset', '0px', '20px', %w[top left])).to eq(['10px', '10px'])
+      expect(longhands('font', 'italic bold 10px/20px serif', 'italic bold 30px/60px serif',
+                       %w[font-size font-weight])).to eq(['20px', '700'])
+      expect(longhands('textDecoration', 'underline rgb(0,0,0)', 'underline rgb(100,100,100)',
+                       %w[text-decoration-color])).to eq(['rgb(50, 50, 50)'])
+    end
   end
 
   # mdn's animation data is a record, not the spec: it calls eight properties NOT ANIMATABLE that a
@@ -554,6 +566,31 @@ RSpec.describe 'CSS interpolation types' do
       expect(sample('isolation', 'auto', 'isolate', 400)).to eq('auto')
       # …and `math-depth` counts rather than flipping.
       expect(sample('mathDepth', '1', '3', 400)).to eq('2')
+    end
+
+    # mdn records `stroke` as an ARRAY of property names rather than a type, so it had none at all
+    # and its keyframes were dropped — a fixes table that can only CORRECT an existing entry would
+    # have gone on doing nothing for it.
+    it 'animates an SVG paint' do
+      expect(sample('stroke', 'rgb(0,0,0)', 'rgb(100,100,100)', 500, 'r',
+                    '<svg style="width:10px;height:10px"><rect id="r"/></svg>')).to eq('rgb(50, 50, 50)')
+    end
+
+    # …and an opacity CLAMPS at both ends, which only an extrapolating easing reaches — mdn gives
+    # these three no range, and unlike `opacity` they have no computed-value reader to clamp them.
+    it 'clamps an opacity that overshoots' do
+      s = page('<svg style="width:10px;height:10px"><stop id="s"/></svg>')
+      expect(s.evaluate_script(<<~JS)).to eq(%w[0 1])
+        (function () {
+          const el = document.getElementById('s');
+          const anim = el.animate([{ stopOpacity: '0' }, { stopOpacity: '1' }],
+                                  { duration: 1000, fill: 'both', easing: 'cubic-bezier(0.5, -1, 0.5, 2)' });
+          anim.pause();
+          const out = [];
+          for (const t of [200, 800]) { anim.currentTime = t; out.push(getComputedStyle(el).stopOpacity); }
+          return out;
+        })()
+      JS
     end
 
     it 'fades an SVG gradient stop' do
