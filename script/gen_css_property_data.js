@@ -54,11 +54,46 @@ function parseRangeBound(bound) {
   const n = parseFloat(s);
   return Number.isFinite(n) ? n : null;
 }
-function classifyValueType(syntax) {
-  if (!syntax) return null;
+// mdn writes a LOGICAL property's grammar as a reference to the physical one it mirrors
+// (`padding-block-start` is `<'padding-top'>`, `block-size` is `<'width'>`), and several properties
+// take the same value one to N times (`border-block-color` is `<'border-top-color'>{1,2}`). Both
+// shapes fell through the alternation loop below and left the property UNCLASSIFIED — which is to
+// say unvalidated, so `block-size: none` and `padding-block-start: -10px` were kept where every
+// browser drops them. 52 of the 471 longhands are a pure reference, and all of them are logical.
+// Do the leading `[` and trailing `]` close each other, rather than being two separate groups?
+function bracketsWrapWhole(src) {
+  let depth = 0;
+  for (let i = 0; i < src.length; i++) {
+    if (src[i] === '[') depth++;
+    else if (src[i] === ']' && --depth === 0) return i === src.length - 1;
+  }
+  return false;
+}
+
+function classifyValueType(syntax, depth = 0) {
+  if (!syntax || depth > 4) return null;
+  let src = String(syntax).trim();
+  let repeat = 1;
+  // A multiplier over the WHOLE grammar — `<'border-top-color'>{1,2}`, `[ a | b ]{1,4}`. Anything
+  // else (`&&`, `+`, `#`, a lone `?`) is left to fall through and bail below.
+  const mult = /^(.*?)\{\s*1\s*,\s*(\d+)\s*\}$/.exec(src);
+  if (mult) { src = mult[1].trim(); repeat = Number(mult[2]); }
+  // …and the brackets a multiplied alternation is wrapped in — only when they are the OUTERMOST
+  // pair. `[ pack | next ] || [ definite-first | ordered ]` starts and ends with a bracket without
+  // being one group, and stripping those left a fragment the alternation loop below reads as
+  // garbage. It bails on that today, so this is a guard rather than a fix.
+  if (src.startsWith('[') && src.endsWith(']') && bracketsWrapWhole(src)) src = src.slice(1, -1).trim();
+  const ref = /^<'([-a-z]+)'>$/.exec(src);
+  if (ref) {
+    const target = props[ref[1]];
+    const t = target ? classifyValueType(target.syntax, depth + 1) : null;
+    if (!t) return null;
+    const n = repeat * (t.repeat || 1);
+    return n > 1 ? { ...t, repeat: n } : t;
+  }
   let base = null, min = null, max = null;
   const keywords = [];
-  for (const raw of syntax.split('|')) {
+  for (const raw of src.split('|')) {
     const part = raw.trim();
     if (part.indexOf('(') !== -1) continue;                // functional alternative — runtime accepts, skip
     // A type reference with an optional numeric range: `<name>` / `<name [min,max]>`.
@@ -91,6 +126,9 @@ function classifyValueType(syntax) {
   const out = { base, keywords };
   if (min != null) out.min = min;
   if (max != null) out.max = max;
+  // How many space-separated values the grammar takes: `border-block-width: 1px 2px` is valid where
+  // `block-size: 1px 2px` is not, and the validator needs to tell them apart.
+  if (repeat > 1) out.repeat = repeat;
   return out;
 }
 const valueTypes = {};
