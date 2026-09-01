@@ -70,6 +70,38 @@ RSpec.describe 'innerText line breaks' do
     expect(inner_text('<table><tr><td>abc<td><td></table>')).to    eq("abc\t\t")
   end
 
+  # `white-space` is an INHERITED property, so a descendant can leave the mode its ancestor set.
+  # It could not before: the walk read the author cascade — where `<pre>`'s `white-space: pre` is
+  # invisible, being a UA rule — so `<pre>` was special-cased by TAG and the preserve flag was made
+  # sticky to fake the inheritance. It goes through the same resolution layout uses now, which
+  # reads `declaredValue ?? uaDefault` up the ancestors.
+  it 'lets a descendant leave the white-space mode its ancestor set' do
+    expect(inner_text('<pre>a  <span style="white-space:normal">b   c</span>  d</pre>'))
+      .to eq("a  b c  d")
+    expect(inner_text('<div style="white-space:pre-line">x  <span style="white-space:pre">a  b</span>  y</div>'))
+      .to eq("x a  b y")
+  end
+
+  # A `<textarea>`'s content is its VALUE, not rendered text, so it contributes nothing to an
+  # ancestor — while the element asked about itself still answers with the value, which is what
+  # Capybara reads.
+  it 'keeps a textarea value out of its ancestor' do
+    expect(inner_text('<textarea>a  b</textarea>')).to eq('')
+  end
+
+  # An ATOMIC INLINE renders as a box of its own, so it does not join the collapsible white space
+  # on either side of it into one run — where an empty inline does.
+  it 'separates the white space around an atomic inline' do
+    expect(inner_text('abc <img> def')).to  eq('abc  def')
+    expect(inner_text('abc <span></span> def')).to eq('abc def')
+  end
+
+  # …and a required break SEPARATES: with nothing left before it — the input renders but
+  # contributes no text, and the space it kept apart is stripped — there is nothing to separate.
+  it 'writes no break when nothing precedes it' do
+    expect(inner_text('<input> <div>abc</div>')).to eq('abc')
+  end
+
   # A shadow HOST only looks empty from here — its rendered content is in its shadow tree, which
   # this walk does not descend into — so it is not the empty block the rule above is about.
   # Capybara's own suite pins the shape: an empty-looking host between two inlines reads as a

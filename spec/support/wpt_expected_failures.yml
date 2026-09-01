@@ -3911,12 +3911,10 @@ html/dom/elements/the-innertext-and-outertext-properties/getter.html:
 - <select> containing text node child ("<select class='poke'></select>")
 - <svg> non-rendered text ignored ("<div><svg><stop>abc</stop></svg></div>")
 - <svg><defs> text contents ignored ("<div><svg><defs><text>abc</text></defs></svg></div>")
-- <textarea> contents ignored ("<div><textarea>abc")
 - <textarea> contents ignored ("<textarea>abc")
 - Blank lines around a <p> in its own block ("<div>abc<div><p>123</p></div>def")
 - Invisible <p> doesn't induce extra line breaks ("<div style='visibility:hidden'><p><span
   style='visibility:visible'>abc</span></p>\n<div style='visibility:visible'>def</div>")
-- Leading whitesapce should not be collapsed ("<div><img> abc")
 - Leading/trailing space removal at display:inline-block boundary ("<div>123<span
   style='display:inline-block'> abc </span>def")
 - Leading/trailing space removal at display:inline-flex boundary ("<div>123<span style='display:inline-flex'>
@@ -3940,11 +3938,6 @@ html/dom/elements/the-innertext-and-outertext-properties/getter.html:
   class='cell'>def</span></div>")
 - Tab-separated table cells ("<div><div class='table'><span class='cell'>abc</span>\n<span
   class='cell'>def</span></div>")
-- Trailing whitesapce should not be collapsed ("<div>abc <img>")
-- Whitespace around <img> should not be collapsed ("<div>abc <img width=1 height=1>
-  def")
-- Whitespace around <img> should not be collapsed ("<div>abc <img> def")
-- Whitespace around <input> should not be collapsed ("<div>abc <input> def")
 - Whitespace around inline-block should not be collapsed ("<div>abc <span style='display:inline-block'></span>
   def")
 - Whitespace around inline-flex should not be collapsed ("<div>abc <span style='display:inline-flex'></span>
