@@ -163,6 +163,158 @@ const MIN_FIXES = {
   'line-height': 0,
   'tab-size':    0
 };
+// The longhands whose grammar admits NO NEGATIVE value, so a negative one is a parse error and the
+// whole declaration is dropped — `padding-left: -1px` and `line-height: -1` leave the earlier
+// declaration (or the initial) in place, they do not clamp. This cannot be derived for most of
+// them: mdn records the bound for about a third (`width`, `padding-*`, the radii — those also carry
+// `min: 0` in PROPERTY_VALUE_TYPES, and the assertion below keeps the two facts agreeing) and for
+// none of the rest (`line-height: normal | <number> | <length> | <percentage>`, `outline-width:
+// <line-width>`). So the list is MEASURED, by `script/measure_css_value_ranges.mjs`, which
+// reproduces all three arrays below and names the properties it skipped — every longhand mdn knows,
+// offered
+// `-1px` / `-1` / `-1%` / `-1s` and then the same four positive, keeping the ones Chrome 151
+// rejects in every form it otherwise accepts, among the ones it IMPLEMENTS — a property Chrome
+// does not support rejects every value including its own keywords, which is a different fact, so
+// the census asks `CSS.supports(prop, 'inherit')` first and leaves the other 44 alone (this
+// driver's own initial value for `box-flex` has to survive its own validator). Not one property
+// took a negative in some units and refused it in others.
+//
+// This is deliberately NOT `PROPERTY_MIN`: an opacity's bound is a CLAMP (`opacity: -1` is kept and
+// reports 0), and the two facts must not be confused. A property can be in both.
+const NEGATIVE_INVALID = [
+  'animation-duration', 'animation-iteration-count', 'aspect-ratio', 'background-size',
+  'block-size', 'border-block-end-width', 'border-block-start-width', 'border-block-width',
+  'border-bottom-left-radius', 'border-bottom-right-radius', 'border-bottom-width',
+  'border-end-end-radius', 'border-end-start-radius', 'border-image-outset',
+  'border-image-slice', 'border-image-width', 'border-inline-end-width',
+  'border-inline-start-width', 'border-inline-width', 'border-left-width', 'border-right-width',
+  'border-spacing', 'border-start-end-radius', 'border-start-start-radius',
+  'border-top-left-radius', 'border-top-right-radius', 'border-top-width', 'column-count',
+  'column-gap', 'column-height', 'column-rule-width', 'column-width',
+  'contain-intrinsic-block-size', 'contain-intrinsic-height', 'contain-intrinsic-inline-size',
+  'contain-intrinsic-width', 'flex-basis', 'flex-grow', 'flex-shrink', 'font-size',
+  'font-size-adjust', 'font-stretch', 'font-weight', 'grid-auto-columns', 'grid-auto-rows',
+  'grid-column-gap', 'grid-row-gap', 'grid-template-columns', 'grid-template-rows', 'height',
+  'hyphenate-limit-chars', 'initial-letter', 'inline-size', 'interest-delay-end',
+  'interest-delay-start', 'line-height', 'mask-size', 'max-block-size', 'max-height',
+  'max-inline-size', 'max-width', 'min-block-size', 'min-height', 'min-inline-size',
+  'min-width', 'orphans', 'outline-width', 'overflow-clip-margin', 'padding-block-end',
+  'padding-block-start', 'padding-bottom', 'padding-inline-end', 'padding-inline-start',
+  'padding-left', 'padding-right', 'padding-top', 'perspective', 'r', 'row-gap', 'rx', 'ry',
+  'scroll-padding-block-end', 'scroll-padding-block-start', 'scroll-padding-bottom',
+  'scroll-padding-inline-end', 'scroll-padding-inline-start', 'scroll-padding-left',
+  'scroll-padding-right', 'scroll-padding-top', 'shape-margin', 'stroke-dasharray',
+  'stroke-miterlimit', 'stroke-width', 'tab-size', 'text-size-adjust', 'transition-duration',
+  'widows', 'width', 'zoom'
+];
+
+// …and the ones that take no UNITLESS NUMBER at all, where CSS's "a zero needs no unit" intuition
+// is wrong: a `<time>` or an `<angle>` is never bare, so `transition-duration: 0`,
+// `animation-delay: 2` and `rotate: 1` are dropped whole (Chrome-measured, the same census as
+// above with `0` / `1px` / `1s` / `1deg`; `overflow-clip-margin` is in the list on Chrome's say-so
+// even though its grammar reads like a length). The check is per comma ENTRY — `transition-duration:
+// 1s, 0` is dropped too — and only for an entry that is ONE bare number, so `rotate: 1 0 0 45deg`,
+// whose axis really is unitless, still parses.
+const UNITLESS_NUMBER_INVALID = [
+  'animation-delay', 'animation-duration', 'interest-delay-end', 'interest-delay-start',
+  'offset-rotate', 'overflow-clip-margin', 'rotate', 'transition-delay', 'transition-duration'
+];
+
+// …and the ones that take NO NUMBER AT ALL: a keyword-only grammar (`align-items`,
+// `background-clip`), a colour (`accent-color` — its numbers live inside `rgb()`), an identifier
+// (`animation-name`). Every numeric form the census offered — `1px` `1` `1%` `1s` `1deg` `0` and
+// their negatives — is dropped by Chrome for these 303 longhands, where this driver kept all of
+// them (`align-items: -1px` was a declaration here). Only the properties Chrome IMPLEMENTS, for the
+// reason given above — which is why this is 259 of the 471 rather than the 303 the raw census says.
+//
+// Derived by MEASUREMENT rather than from the grammar for the same reason as the tables above, and
+// applied only to an entry that is ONE numeric token: `font-variation-settings: "wght" 400` carries
+// a bare number legitimately, and a number inside a function (`rgb(1, 2, 3)`) is not a top-level
+// token at all.
+const NUMERIC_INVALID = [
+  'accent-color', 'align-content', 'align-items', 'align-self', 'alignment-baseline', 'all',
+  'anchor-name', 'anchor-scope', 'animation-composition', 'animation-direction',
+  'animation-fill-mode', 'animation-name', 'animation-play-state', 'animation-timeline',
+  'animation-timing-function', 'animation-trigger', 'appearance', 'backdrop-filter',
+  'backface-visibility', 'background-attachment', 'background-blend-mode', 'background-clip',
+  'background-color', 'background-image', 'background-origin', 'background-repeat',
+  'baseline-source', 'border-block-color', 'border-block-end-color', 'border-block-end-style',
+  'border-block-start-color', 'border-block-start-style', 'border-block-style',
+  'border-bottom-color', 'border-bottom-style', 'border-collapse', 'border-image-repeat',
+  'border-image-source', 'border-inline-color', 'border-inline-end-color',
+  'border-inline-end-style', 'border-inline-start-color', 'border-inline-start-style',
+  'border-inline-style', 'border-left-color', 'border-left-style', 'border-right-color',
+  'border-right-style', 'border-top-color', 'border-top-style', 'box-decoration-break',
+  'box-shadow', 'box-sizing', 'break-after', 'break-before', 'break-inside', 'caption-side',
+  'caret-animation', 'caret-color', 'caret-shape', 'clear', 'clip', 'clip-path', 'clip-rule',
+  'color', 'color-interpolation-filters', 'color-scheme', 'column-fill', 'column-rule-color',
+  'column-rule-style', 'column-span', 'column-wrap', 'contain', 'container-name',
+  'container-type', 'content', 'content-visibility', 'corner-bottom-left-shape',
+  'corner-bottom-right-shape', 'corner-end-end-shape', 'corner-end-start-shape',
+  'corner-start-end-shape', 'corner-start-start-shape', 'corner-top-left-shape',
+  'corner-top-right-shape', 'counter-increment', 'counter-reset', 'counter-set', 'cursor', 'd',
+  'direction', 'display', 'dominant-baseline', 'dynamic-range-limit', 'empty-cells',
+  'field-sizing', 'fill', 'fill-rule', 'filter', 'flex-direction', 'flex-wrap', 'float',
+  'flood-color', 'font-family', 'font-feature-settings', 'font-kerning',
+  'font-language-override', 'font-optical-sizing', 'font-palette', 'font-style',
+  'font-synthesis', 'font-synthesis-small-caps', 'font-synthesis-style',
+  'font-synthesis-weight', 'font-variant', 'font-variant-alternates', 'font-variant-caps',
+  'font-variant-east-asian', 'font-variant-emoji', 'font-variant-ligatures',
+  'font-variant-numeric', 'font-variant-position', 'font-variation-settings',
+  'forced-color-adjust', 'grid-auto-flow', 'grid-template-areas', 'hyphenate-character',
+  'hyphens', 'image-orientation', 'image-rendering', 'interactivity', 'interpolate-size',
+  'isolation', 'justify-content', 'justify-items', 'justify-self', 'lighting-color',
+  'line-break', 'list-style-image', 'list-style-position', 'list-style-type', 'marker',
+  'marker-end', 'marker-mid', 'marker-start', 'mask-clip', 'mask-composite', 'mask-image',
+  'mask-mode', 'mask-origin', 'mask-repeat', 'mask-type', 'math-shift', 'math-style',
+  'mix-blend-mode', 'object-fit', 'object-view-box', 'offset-path', 'outline-color',
+  'outline-style', 'overflow-anchor', 'overflow-block', 'overflow-inline', 'overflow-wrap',
+  'overflow-x', 'overflow-y', 'overlay', 'overscroll-behavior-block',
+  'overscroll-behavior-inline', 'overscroll-behavior-x', 'overscroll-behavior-y', 'page',
+  'page-break-after', 'page-break-before', 'page-break-inside', 'paint-order', 'pointer-events',
+  'position', 'position-anchor', 'position-area', 'position-try-fallbacks',
+  'position-try-order', 'position-visibility', 'print-color-adjust', 'quotes', 'reading-flow',
+  'resize', 'ruby-align', 'ruby-overhang', 'ruby-position', 'scroll-behavior',
+  'scroll-initial-target', 'scroll-marker-group', 'scroll-snap-align', 'scroll-snap-stop',
+  'scroll-snap-type', 'scroll-target-group', 'scroll-timeline-axis', 'scroll-timeline-name',
+  'scrollbar-color', 'scrollbar-gutter', 'scrollbar-width', 'shape-outside', 'shape-rendering',
+  'stop-color', 'stroke', 'stroke-linecap', 'stroke-linejoin', 'table-layout', 'text-align',
+  'text-align-last', 'text-anchor', 'text-autospace', 'text-box', 'text-box-edge',
+  'text-box-trim', 'text-combine-upright', 'text-decoration-color', 'text-decoration-line',
+  'text-decoration-skip-ink', 'text-decoration-style', 'text-emphasis-color',
+  'text-emphasis-position', 'text-emphasis-style', 'text-justify', 'text-orientation',
+  'text-overflow', 'text-rendering', 'text-shadow', 'text-spacing-trim', 'text-transform',
+  'text-underline-position', 'text-wrap-mode', 'text-wrap-style', 'timeline-scope',
+  'timeline-trigger-name', 'timeline-trigger-source', 'touch-action', 'transform',
+  'transform-box', 'transform-style', 'transition-behavior', 'transition-property',
+  'transition-timing-function', 'trigger-scope', 'unicode-bidi', 'user-select', 'vector-effect',
+  'view-timeline-axis', 'view-timeline-name', 'view-transition-class', 'view-transition-name',
+  'visibility', 'white-space', 'white-space-collapse', 'will-change', 'word-break', 'word-wrap',
+  'writing-mode'
+];
+
+// SVG's geometry properties measure in USER UNITS, so a bare number is a length for them where it
+// is a parse error everywhere else (Chrome-measured: `x: 1` and `baseline-shift: 1` are kept, while
+// `width: 1` is not). Recorded on the value type, which is where the length check reads it.
+const UNITLESS_LENGTH = ['baseline-shift', 'cx', 'cy', 'r', 'rx', 'ry', 'x', 'y'];
+for (const name of UNITLESS_LENGTH) if (valueTypes[name]) valueTypes[name].unitless = true;
+
+// The measured tables and mdn's own bounds describe the same properties from two directions, so
+// where both speak they must agree. A mismatch means one of them moved — a re-measured census, or
+// an mdn release that filled a range in — and the build stops rather than shipping two answers.
+for (const name of NEGATIVE_INVALID) {
+  const t = valueTypes[name];
+  if (t && t.min != null && t.min !== 0) {
+    throw new Error(`${name}: measured as taking no negative, but mdn gives it a minimum of ${t.min}`);
+  }
+}
+for (const name of NUMERIC_INVALID) {
+  const t = valueTypes[name];
+  if (t && t.base !== 'color') {
+    throw new Error(`${name}: measured as taking no number, but mdn's grammar classifies it as ${t.base}`);
+  }
+}
+
 const propertyMin = {};
 for (const name of longhands) {
   const t = valueTypes[name];
@@ -494,6 +646,16 @@ export const COLOR_VALUED_PROPERTIES = new Set(${JSON.stringify(colorValued.sort
 // Properties whose grammar admits an ARBITRARY identifier (\`font-family\`, \`list-style-type\`,
 // anything reaching \`<custom-ident>\`). There is no identifier to reject for these.
 export const OPEN_IDENT_PROPERTIES = new Set(${JSON.stringify(openIdentProps.sort())});
+
+// The longhands that reject a NEGATIVE value outright (see NEGATIVE_INVALID above). Filtered
+// against the longhand set, so a name mdn drops leaves with it.
+export const NEGATIVE_INVALID_PROPERTIES = new Set(${JSON.stringify(NEGATIVE_INVALID.filter((n) => longhands.includes(n)))});
+
+// The longhands that take no bare NUMBER (see UNITLESS_NUMBER_INVALID above).
+export const UNITLESS_NUMBER_INVALID_PROPERTIES = new Set(${JSON.stringify(UNITLESS_NUMBER_INVALID.filter((n) => longhands.includes(n)))});
+
+// The longhands that take no numeric value at all (see NUMERIC_INVALID above).
+export const NUMERIC_INVALID_PROPERTIES = new Set(${JSON.stringify(NUMERIC_INVALID.filter((n) => longhands.includes(n)))});
 `;
 
 const dest = path.join(__dirname, '..', 'lib', 'capybara', 'simulated', 'js', 'src', 'css-property-data.js');
