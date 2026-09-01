@@ -265,7 +265,6 @@ css/css-animations/parsing/animation-name-computed.html:
 - Property animation-name value '"---\22---"'
 - Property animation-name value '"multi word string"'
 - Property animation-name value '"something"'
-- Property animation-name value 'NONE'
 css/css-animations/parsing/animation-name-edge-cases.html:
 - "== css/css-animations/parsing/animation-name-edge-cases-ref.html"
 css/css-animations/parsing/animation-name-invalid.html:
@@ -278,7 +277,6 @@ css/css-animations/parsing/animation-name-invalid.html:
 - e.style['animation-name'] = "revert, three" should not set the property value
 - e.style['animation-name'] = "revert-layer, four" should not set the property value
 css/css-animations/parsing/animation-name-valid.html:
-- e.style['animation-name'] = "NONE" should set the property value
 - e.style['animation-name'] = "\"---\\22---\"" should set the property value
 - e.style['animation-name'] = "\"multi word string\"" should set the property value
 - e.style['animation-name'] = "\"something\"" should set the property value
@@ -290,8 +288,6 @@ css/css-animations/parsing/animation-play-state-invalid.html:
 - e.style['animation-play-state'] = "paused, initial" should not set the property
   value
 css/css-animations/parsing/animation-range-end-computed.html:
-- Property animation-range-end value '0'
-- Property animation-range-end value 'COVER 0%'
 - Property animation-range-end value 'COVER 100%'
 - Property animation-range-end value 'cover 100%'
 - Property animation-range-end value 'exit 1%, cover 2%, contain 100%'
@@ -313,7 +309,6 @@ css/css-animations/parsing/animation-range-end-invalid.html:
 - e.style['animation-range-end'] = "normal foo" should not set the property value
 - e.style['animation-range-end'] = "peek 50%" should not set the property value
 css/css-animations/parsing/animation-range-end-valid.html:
-- e.style['animation-range-end'] = "0" should set the property value
 - e.style['animation-range-end'] = "contain calc(10px + 10%)" should set the property
   value
 - e.style['animation-range-end'] = "cover 100%" should set the property value
@@ -418,9 +413,7 @@ css/css-animations/parsing/animation-range-shorthand.html:
 - e.style['animation-range'] = "thing 100px" should not set the property value
 - e.style['animation-range'] = "thing 42%" should not set the property value
 css/css-animations/parsing/animation-range-start-computed.html:
-- Property animation-range-start value '0'
 - Property animation-range-start value 'COVER 0%'
-- Property animation-range-start value 'COVER 100%'
 - Property animation-range-start value 'cover 0%'
 - Property animation-range-start value 'exit 1%, cover 2%, contain 0%'
 - Property animation-range-start value 'exit calc(41% + 1%)'
@@ -439,7 +432,6 @@ css/css-animations/parsing/animation-range-start-invalid.html:
 - e.style['animation-range-start'] = "normal foo" should not set the property value
 - e.style['animation-range-start'] = "peek 50%" should not set the property value
 css/css-animations/parsing/animation-range-start-valid.html:
-- e.style['animation-range-start'] = "0" should set the property value
 - e.style['animation-range-start'] = "contain calc(10px + 10%)" should set the property
   value
 - e.style['animation-range-start'] = "cover 0%" should set the property value
@@ -1019,8 +1011,6 @@ css/css-flexbox/flexitem-no-margin-collapsing.html:
 - ".flexbox 1"
 css/css-flexbox/flexitem-stretch-image.html:
 - ".flexbox 1"
-css/css-flexbox/getcomputedstyle/flexbox_computedstyle_flex-basis-0.html:
-- 'flexbox | computed style | flex-basis: 0'
 css/css-flexbox/getcomputedstyle/flexbox_computedstyle_flex-shorthand-invalid.html:
 - 'flexbox | computed style | flex: invalid'
 css/css-flexbox/getcomputedstyle/flexbox_computedstyle_min-auto-size.html:
@@ -1513,9 +1503,6 @@ css/css-logical/logicalprops-with-variables.html:
 - Logical longhands with variables - margin-inline
 - Logical longhands with variables - margin-inline-end
 - Logical longhands with variables - margin-inline-start
-css/css-logical/parsing/border-block-color-valid.html:
-- e.style['border-block-color'] = "#234" should set the property value
-- e.style['border-block-end-color'] = "#234" should set the property value
 css/css-logical/parsing/border-block-style-invalid.html:
 - e.style['border-block-end-style'] = "solid double" should not set the property value
 - e.style['border-block-start-style'] = "auto" should not set the property value
@@ -1537,16 +1524,12 @@ css/css-logical/parsing/border-block-width-invalid.html:
 - e.style['border-block-start-width'] = "medium 40px" should not set the property
   value
 css/css-logical/parsing/border-block-width-valid.html:
-- e.style['border-block-end-width'] = "0" should set the property value
 - e.style['border-block-end-width'] = "calc(10px - 0.5em)" should set the property
   value
 - e.style['border-block-start-width'] = "calc(10px + 0.5em)" should set the property
   value
 - e.style['border-block-width'] = "medium calc(10px + 0.5em)" should set the property
   value
-css/css-logical/parsing/border-inline-color-valid.html:
-- e.style['border-inline-color'] = "#234" should set the property value
-- e.style['border-inline-end-color'] = "#234" should set the property value
 css/css-logical/parsing/border-inline-style-invalid.html:
 - e.style['border-inline-end-style'] = "solid double" should not set the property
   value
@@ -1569,7 +1552,6 @@ css/css-logical/parsing/border-inline-width-invalid.html:
 - e.style['border-inline-start-width'] = "medium 40px" should not set the property
   value
 css/css-logical/parsing/border-inline-width-valid.html:
-- e.style['border-inline-end-width'] = "0" should set the property value
 - e.style['border-inline-end-width'] = "calc(10px - 0.5em)" should set the property
   value
 - e.style['border-inline-start-width'] = "calc(10px + 0.5em)" should set the property
@@ -1594,8 +1576,6 @@ css/css-logical/parsing/padding-block-inline-computed.html:
 - Property padding-block-start value 'calc(10% + 40px)'
 - Property padding-inline-end value 'calc(10% + 40px)'
 - Property padding-inline-start value 'calc(10% - 40px)'
-css/css-logical/parsing/padding-block-inline-valid.html:
-- e.style['padding-block-start'] = "0" should set the property value
 css/css-shadow/part/animation-part.html:
 - "== css/css-shadow/part/animation-part-ref.html"
 css/css-shadow/part/exportparts-layered.html:
@@ -1940,9 +1920,6 @@ css/css-transitions/parsing/transition-property-invalid.html:
   value
 - e.style['transition-property'] = "top, unset" should not set the property value
 - e.style['transition-property'] = "unset, top" should not set the property value
-css/css-transitions/parsing/transition-property-valid.html:
-- e.style['transition-property'] = "ALL, INVALID, SYNTAX, SRC" should set the property
-  value
 css/css-transitions/parsing/transition-timing-function-computed.html:
 - Property transition-timing-function value 'step-end'
 - Property transition-timing-function value 'step-start'
@@ -2200,8 +2177,6 @@ css/cssom/cssstyledeclaration-registered-custom-properties.html:
 - Only relevant custom properties are included
 - Registered custom properties are included in CSSComputedStyleDeclaration
 css/cssom/flex-serialization.html:
-- Multiple values flex with CSS-wide and two non-CSS-wide-keyword values should serialize
-  correctly.
 - Single value flex with non-CSS-wide value should serialize correctly.
 css/cssom/font-family-serialization-001.html:
 - 'Computed: mixed font-family list serialization'
@@ -2211,8 +2186,6 @@ css/cssom/font-family-serialization-001.html:
 - 'Specified: multi-word family name serializes unquoted'
 - 'Specified: quoted multi-word name normalizes to unquoted'
 - 'Specified: three-word family name serializes unquoted'
-css/cssom/font-shorthand-serialization.html:
-- The font shorthand should be serialized just like any other shorthand.
 css/cssom/getComputedStyle-detached-subtree.html:
 - getComputedStyle returns no style for descendant outside the flat tree
 - 'getComputedStyle returns no style for element in non-rendered iframe (display:
@@ -6338,8 +6311,6 @@ web-animations/animation-model/animation-types/addition-per-property-002.html:
 - 'word-spacing: calc'
 - 'word-spacing: units "calc" onto "px"'
 web-animations/animation-model/animation-types/interpolation-per-property-001.html:
-- border-spacing supports animating as a length pair
-- border-spacing supports animating as a length pair of rem
 - clip supports animating as a rect
 - flex-basis supports animating as a calc
 - flex-basis supports animating as combination units "px" and "calc"

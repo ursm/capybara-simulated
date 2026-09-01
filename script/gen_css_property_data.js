@@ -315,6 +315,40 @@ for (const name of NUMERIC_INVALID) {
   }
 }
 
+// The longhands where a bare `0` is a LENGTH, and reports as `0px`. `padding-left: 0` reads back
+// as `0px` and `opacity: 0` as `0`, and which of the two a property is cannot be read off mdn's
+// grammar for most of them — so this is measured with the others, by
+// `script/measure_css_value_ranges.mjs`.
+const ZERO_IS_LENGTH = [
+  'animation-range-end', 'animation-range-start', 'background-position-x',
+  'background-position-y', 'background-size', 'block-size', 'border-block-end-width',
+  'border-block-start-width', 'border-block-width', 'border-bottom-left-radius',
+  'border-bottom-right-radius', 'border-bottom-width', 'border-end-end-radius',
+  'border-end-start-radius', 'border-inline-end-width', 'border-inline-start-width',
+  'border-inline-width', 'border-left-width', 'border-right-width', 'border-spacing',
+  'border-start-end-radius', 'border-start-start-radius', 'border-top-left-radius',
+  'border-top-right-radius', 'border-top-width', 'bottom', 'column-gap', 'column-height',
+  'column-rule-width', 'column-width', 'contain-intrinsic-block-size',
+  'contain-intrinsic-height', 'contain-intrinsic-inline-size', 'contain-intrinsic-width', 'cx',
+  'cy', 'flex-basis', 'font-size', 'grid-auto-columns', 'grid-auto-rows', 'grid-column-gap',
+  'grid-row-gap', 'grid-template-columns', 'grid-template-rows', 'height', 'inline-size',
+  'inset-block-end', 'inset-block-start', 'inset-inline-end', 'inset-inline-start', 'left',
+  'letter-spacing', 'margin-block-end', 'margin-block-start', 'margin-bottom',
+  'margin-inline-end', 'margin-inline-start', 'margin-left', 'margin-right', 'margin-top',
+  'mask-size', 'max-block-size', 'max-height', 'max-inline-size', 'max-width', 'min-block-size',
+  'min-height', 'min-inline-size', 'min-width', 'offset-distance', 'outline-offset',
+  'outline-width', 'padding-block-end', 'padding-block-start', 'padding-bottom',
+  'padding-inline-end', 'padding-inline-start', 'padding-left', 'padding-right', 'padding-top',
+  'perspective', 'r', 'right', 'row-gap', 'rx', 'ry', 'scroll-margin-block-end',
+  'scroll-margin-block-start', 'scroll-margin-bottom', 'scroll-margin-inline-end',
+  'scroll-margin-inline-start', 'scroll-margin-left', 'scroll-margin-right',
+  'scroll-margin-top', 'scroll-padding-block-end', 'scroll-padding-block-start',
+  'scroll-padding-bottom', 'scroll-padding-inline-end', 'scroll-padding-inline-start',
+  'scroll-padding-left', 'scroll-padding-right', 'scroll-padding-top', 'shape-margin',
+  'text-decoration-thickness', 'text-indent', 'text-underline-offset', 'top', 'translate',
+  'vertical-align', 'view-timeline-inset', 'width', 'word-spacing', 'x', 'y'
+];
+
 const propertyMin = {};
 for (const name of longhands) {
   const t = valueTypes[name];
@@ -656,6 +690,9 @@ export const UNITLESS_NUMBER_INVALID_PROPERTIES = new Set(${JSON.stringify(UNITL
 
 // The longhands that take no numeric value at all (see NUMERIC_INVALID above).
 export const NUMERIC_INVALID_PROPERTIES = new Set(${JSON.stringify(NUMERIC_INVALID.filter((n) => longhands.includes(n)))});
+
+// The longhands whose bare \`0\` serializes as \`0px\` (see ZERO_IS_LENGTH above).
+export const ZERO_IS_LENGTH_PROPERTIES = new Set(${JSON.stringify(ZERO_IS_LENGTH.filter((n) => longhands.includes(n)))});
 `;
 
 const dest = path.join(__dirname, '..', 'lib', 'capybara', 'simulated', 'js', 'src', 'css-property-data.js');
