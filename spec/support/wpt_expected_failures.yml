@@ -224,7 +224,6 @@ css/css-animations/parsing/animation-delay-computed.html:
 - Property animation-delay value 'calc(10s + (sign(2cqw - 10px) * 5s))'
 css/css-animations/parsing/animation-delay-invalid.html:
 - e.style['animation-delay'] = "-3s, initial" should not set the property value
-- e.style['animation-delay'] = "0" should not set the property value
 - e.style['animation-delay'] = "1s 2s 3s" should not set the property value
 - e.style['animation-delay'] = "infinite" should not set the property value
 - e.style['animation-delay'] = "initial, -3s" should not set the property value
@@ -241,8 +240,6 @@ css/css-animations/parsing/animation-duration-computed.html:
 - Property animation-duration value 'calc(10s + (sign(2cqw - 10px) * 5s))'
 - Resolved value of animation-duration:auto with animation-timeline:auto
 css/css-animations/parsing/animation-duration-invalid.html:
-- e.style['animation-duration'] = "-3s" should not set the property value
-- e.style['animation-duration'] = "0" should not set the property value
 - e.style['animation-duration'] = "1s 2s" should not set the property value
 - e.style['animation-duration'] = "1s, initial" should not set the property value
 - e.style['animation-duration'] = "infinite" should not set the property value
@@ -254,14 +251,10 @@ css/css-animations/parsing/animation-fill-mode-invalid.html:
   value
 - e.style['animation-fill-mode'] = "initial, both" should not set the property value
 css/css-animations/parsing/animation-invalid.html:
-- e.style['animation'] = "-1s -2s" should not set the property value
-- e.style['animation'] = "1 2" should not set the property value
-- e.style['animation'] = "1s 2s 3s" should not set the property value
 - e.style['animation'] = "steps(1) steps(2)" should not set the property value
 css/css-animations/parsing/animation-iteration-count-computed.html:
 - Property animation-iteration-count value 'calc(10 + (sign(2cqw - 10px) * 5))'
 css/css-animations/parsing/animation-iteration-count-invalid.html:
-- e.style['animation-iteration-count'] = "-2" should not set the property value
 - e.style['animation-iteration-count'] = "3 4" should not set the property value
 - e.style['animation-iteration-count'] = "4, initial" should not set the property
   value
@@ -276,7 +269,6 @@ css/css-animations/parsing/animation-name-computed.html:
 css/css-animations/parsing/animation-name-edge-cases.html:
 - "== css/css-animations/parsing/animation-name-edge-cases-ref.html"
 css/css-animations/parsing/animation-name-invalid.html:
-- e.style['animation-name'] = "12" should not set the property value
 - e.style['animation-name'] = "\"\"" should not set the property value
 - e.style['animation-name'] = "default, two" should not set the property value
 - e.style['animation-name'] = "one two" should not set the property value
@@ -1027,30 +1019,16 @@ css/css-flexbox/flexitem-no-margin-collapsing.html:
 - ".flexbox 1"
 css/css-flexbox/flexitem-stretch-image.html:
 - ".flexbox 1"
-css/css-flexbox/getcomputedstyle/flexbox_computedstyle_align-items-invalid.html:
-- 'flexbox | computed style | align-items: invalid'
-css/css-flexbox/getcomputedstyle/flexbox_computedstyle_align-self-invalid.html:
-- 'flexbox | computed style | align-self: invalid'
 css/css-flexbox/getcomputedstyle/flexbox_computedstyle_flex-basis-0.html:
 - 'flexbox | computed style | flex-basis: 0'
-css/css-flexbox/getcomputedstyle/flexbox_computedstyle_flex-direction-invalid.html:
-- 'flexbox | computed style | flex-direction: row'
-css/css-flexbox/getcomputedstyle/flexbox_computedstyle_flex-grow-invalid.html:
-- 'flexbox | computed style | flex-grow: negative'
 css/css-flexbox/getcomputedstyle/flexbox_computedstyle_flex-shorthand-invalid.html:
 - 'flexbox | computed style | flex: invalid'
-css/css-flexbox/getcomputedstyle/flexbox_computedstyle_flex-shrink-invalid.html:
-- 'flexbox | computed style | flex-shrink: negative'
-css/css-flexbox/getcomputedstyle/flexbox_computedstyle_flex-wrap-invalid.html:
-- 'flexbox | computed style | flex-wrap: wrap'
 css/css-flexbox/getcomputedstyle/flexbox_computedstyle_min-auto-size.html:
 - Computed min-width/min-height of specified auto for flex item inside display:contents.
 - Computed min-width/min-height of specified auto inside display:none which would
   otherwise have been a flex item.
 - Computed min-width/min-height of specified auto with display:none which would otherwise
   have been a flex item.
-css/css-flexbox/getcomputedstyle/flexbox_computedstyle_order-invalid.html:
-- 'flexbox | computed style | order: noninteger'
 css/css-flexbox/hittest-before-pseudo.html:
 - Hit-testing text within a pseudo-element flex-item should return the flexbox as
   the hittest result.
@@ -1233,8 +1211,6 @@ css/css-flexbox/main-axis-margin-rounding.html:
 css/css-flexbox/parsing/flex-basis-computed.html:
 - Property flex-basis value 'calc(10%)'
 css/css-flexbox/parsing/flex-basis-invalid.html:
-- e.style['flex-basis'] = "-1px" should not set the property value
-- e.style['flex-basis'] = "-2%" should not set the property value
 - e.style['flex-basis'] = "3px 4%" should not set the property value
 - e.style['flex-basis'] = "anchor-size(--a width)" should not set the property value
 - e.style['flex-basis'] = "anchor-size(--a width, 10px)" should not set the property
@@ -1546,7 +1522,6 @@ css/css-logical/parsing/border-block-style-invalid.html:
 - e.style['border-block-start-style'] = "hidden, outset" should not set the property
   value
 - e.style['border-block-style'] = "auto" should not set the property value
-- e.style['border-block-style'] = "groove, ridge" should not set the property value
 css/css-logical/parsing/border-block-valid.html:
 - e.style['border-block-end'] = "calc(10px - 0.5em) dotted red" should set the property
   value
@@ -1558,11 +1533,9 @@ css/css-logical/parsing/border-block-width-computed.html:
 css/css-logical/parsing/border-block-width-invalid.html:
 - e.style['border-block-end-width'] = "10" should not set the property value
 - e.style['border-block-end-width'] = "30%" should not set the property value
-- e.style['border-block-start-width'] = "-20px" should not set the property value
 - e.style['border-block-start-width'] = "auto" should not set the property value
 - e.style['border-block-start-width'] = "medium 40px" should not set the property
   value
-- e.style['border-block-width'] = "thick, thin" should not set the property value
 css/css-logical/parsing/border-block-width-valid.html:
 - e.style['border-block-end-width'] = "0" should set the property value
 - e.style['border-block-end-width'] = "calc(10px - 0.5em)" should set the property
@@ -1581,7 +1554,6 @@ css/css-logical/parsing/border-inline-style-invalid.html:
 - e.style['border-inline-start-style'] = "hidden, outset" should not set the property
   value
 - e.style['border-inline-style'] = "auto" should not set the property value
-- e.style['border-inline-style'] = "groove, ridge" should not set the property value
 css/css-logical/parsing/border-inline-valid.html:
 - e.style['border-inline-end'] = "calc(10px - 0.5em) dotted red" should set the property
   value
@@ -1593,11 +1565,9 @@ css/css-logical/parsing/border-inline-width-computed.html:
 css/css-logical/parsing/border-inline-width-invalid.html:
 - e.style['border-inline-end-width'] = "10" should not set the property value
 - e.style['border-inline-end-width'] = "30%" should not set the property value
-- e.style['border-inline-start-width'] = "-20px" should not set the property value
 - e.style['border-inline-start-width'] = "auto" should not set the property value
 - e.style['border-inline-start-width'] = "medium 40px" should not set the property
   value
-- e.style['border-inline-width'] = "thick, thin" should not set the property value
 css/css-logical/parsing/border-inline-width-valid.html:
 - e.style['border-inline-end-width'] = "0" should set the property value
 - e.style['border-inline-end-width'] = "calc(10px - 0.5em)" should set the property
@@ -1945,20 +1915,15 @@ css/css-transitions/parsing/transition-computed.html:
 - Transition with a delay but no duration
 css/css-transitions/parsing/transition-delay-invalid.html:
 - e.style['transition-delay'] = "-3s, initial" should not set the property value
-- e.style['transition-delay'] = "0" should not set the property value
 - e.style['transition-delay'] = "500ms 0.5s" should not set the property value
 - e.style['transition-delay'] = "infinite" should not set the property value
 - e.style['transition-delay'] = "initial, -3s" should not set the property value
 css/css-transitions/parsing/transition-duration-invalid.html:
-- e.style['transition-duration'] = "-500ms" should not set the property value
 - e.style['transition-duration'] = "1s 2s" should not set the property value
 - e.style['transition-duration'] = "1s, initial" should not set the property value
 - e.style['transition-duration'] = "infinite" should not set the property value
 - e.style['transition-duration'] = "initial, 1s" should not set the property value
-css/css-transitions/parsing/transition-invalid.html:
-- e.style['transition'] = "-1s -2s" should not set the property value
 css/css-transitions/parsing/transition-property-invalid.html:
-- e.style['transition-property'] = "1, 2, 3" should not set the property value
 - e.style['transition-property'] = "default, top" should not set the property value
 - e.style['transition-property'] = "inherit, top" should not set the property value
 - e.style['transition-property'] = "initial, top" should not set the property value
@@ -2164,12 +2129,6 @@ css/css-transitions/transition-behavior.html:
 - transition-behavior:allow-discrete should animate discrete properties.
 - transition-behavior:normal should cancel the running transitions whose animation
   values are not interpolatable
-css/css-transitions/transition-delay-001.html:
-- parse 'foobar'
-css/css-transitions/transition-duration-001.html:
-- parse '-500ms'
-- parse '-5s'
-- parse 'foobar'
 css/css-transitions/transition-events-with-document-change.html:
 - transition events for an element changing document
 css/css-transitions/transition-property-002.html:
@@ -4964,12 +4923,10 @@ html/rendering/the-details-element/summary-display-flex.html:
 - "== html/rendering/the-details-element/summary-display-flex-ref.html"
 html/rendering/the-details-element/summary-display-inline-flex.html:
 - "== html/rendering/the-details-element/summary-display-inline-flex-ref.html"
-html/rendering/widgets/appearance/appearance-animation-001.html:
-- "== html/rendering/widgets/appearance/appearance-transition-001-ref.html"
-html/rendering/widgets/appearance/appearance-transition-001.html:
-- "== html/rendering/widgets/appearance/appearance-transition-001-ref.html"
-html/rendering/widgets/appearance/appearance-transition-002.html:
-- "== html/rendering/widgets/appearance/appearance-transition-002-ref.html"
+html/rendering/widgets/appearance/appearance-animation-002.html:
+- "== html/rendering/widgets/appearance/appearance-animation-002-ref.html"
+html/rendering/widgets/appearance/appearance-transition-003.html:
+- "== html/rendering/widgets/appearance/appearance-animation-002-ref.html"
 html/rendering/widgets/appearance/default-styles.html:
 - "<button>"
 - <input type="TEXT">
@@ -6556,12 +6513,6 @@ web-animations/interfaces/Animatable/animate-no-browsing-context.html:
 - The timeline associated with an animation trigger on an element in a document without
   a browsing context is inactive
 web-animations/interfaces/Animatable/animate.html:
-- Element.animate() accepts a one property two value property-indexed keyframes specification
-  where the first value is invalid
-- Element.animate() accepts a one property two value property-indexed keyframes specification
-  where the second value is invalid
-- Element.animate() accepts a property-indexed keyframes specification with an invalid
-  value
 - Element.animate() correctly sets the Animation's timeline with null timeline in
   KeyframeAnimationOptions.
 - Element.animate() creates an Animation object in the relevant realm of the target
@@ -6727,12 +6678,6 @@ web-animations/interfaces/DocumentTimeline/constructor.html:
 - A positive origin time makes the document timeline's current time lag behind the
   default document timeline
 web-animations/interfaces/KeyframeEffect/constructor.html:
-- A KeyframeEffect can be constructed with a one property two value property-indexed
-  keyframes specification where the first value is invalid
-- A KeyframeEffect can be constructed with a one property two value property-indexed
-  keyframes specification where the second value is invalid
-- A KeyframeEffect can be constructed with a property-indexed keyframes specification
-  with an invalid value
 - A KeyframeEffect constructed without any KeyframeEffectOptions object
 web-animations/interfaces/KeyframeEffect/copy-constructor.html:
 - Copied KeyframeEffect does not expose UA-shadow DOM
@@ -6747,13 +6692,6 @@ web-animations/interfaces/KeyframeEffect/iterationComposite.html:
 web-animations/interfaces/KeyframeEffect/processing-a-keyframes-argument-001.html:
 - A list of values returned from a custom iterator should be ignored
 - Reading from a custom iterator that returns a non-object keyframe should throw
-web-animations/interfaces/KeyframeEffect/setKeyframes.html:
-- Keyframes can be replaced with a one property two value property-indexed keyframes
-  specification where the first value is invalid
-- Keyframes can be replaced with a one property two value property-indexed keyframes
-  specification where the second value is invalid
-- Keyframes can be replaced with a property-indexed keyframes specification with an
-  invalid value
 web-animations/interfaces/KeyframeEffect/style-change-events.html:
 - All property keys are recognized
 web-animations/interfaces/KeyframeEffect/target.html:

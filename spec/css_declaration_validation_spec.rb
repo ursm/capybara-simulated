@@ -153,4 +153,93 @@ RSpec.describe 'declaration validation' do
       })()
     JS
   end
+
+  # A property whose grammar admits no NEGATIVE value drops the declaration rather than clamping it.
+  # mdn records the bound for almost none of them, so the table is Chrome-measured: every longhand
+  # offered `-1px` / `-1` / `-1%` / `-1s` and the same four positive, keeping the 99 that refuse a
+  # negative in every form they otherwise take.
+  it 'drops a negative where the grammar takes none' do
+    expect(set('lineHeight', '-1')).to       eq('')
+    expect(set('lineHeight', '-1px')).to     eq('')
+    expect(set('tabSize', '-1')).to          eq('')
+    expect(set('borderSpacing', '1px -2px')).to eq('')
+    expect(set('strokeDasharray', '4 -2')).to   eq('')
+    expect(set('outlineWidth', '-1px')).to   eq('')
+    expect(set('perspective', '-1px')).to    eq('')
+    expect(set('backgroundSize', '-1px')).to eq('')
+  end
+
+  # …while a negative INSIDE a function is a valid declaration — it resolves later, and is clamped
+  # then — and so is one in a `var()` fallback that may never be used.
+  it 'keeps a negative a function may still resolve' do
+    expect(set('width', 'calc(-5px)')).to        eq('calc(-5px)')
+    expect(set('paddingLeft', 'calc(-5px)')).to  eq('calc(-5px)')
+    expect(set('flexGrow', 'calc(-1)')).to       eq('calc(-1)')
+    expect(set('width', 'var(--w, -1px)')).to    eq('var(--w, -1px)')
+  end
+
+  # …and a property whose bound is a CLAMP keeps the out-of-range value: an opacity reports 0 for
+  # `-1`, it does not fall back to the initial.
+  it 'keeps a value whose range only clamps' do
+    expect(set('opacity', '-1')).to              eq('-1')
+    expect(set('opacity', '1.5')).to             eq('1.5')
+    expect(set('shapeImageThreshold', '2')).to   eq('2')
+  end
+
+  # A keyword-, colour- or identifier-valued property takes no number at all — 303 of the 471
+  # longhands, all of which used to keep one.
+  it 'drops a number a keyword grammar cannot take' do
+    expect(set('alignItems', '-1px')).to        eq('')
+    expect(set('accentColor', '1s')).to         eq('')
+    expect(set('backgroundClip', '1')).to       eq('')
+    expect(set('animationName', '1')).to        eq('')
+    # …but a number that belongs to something larger is left alone, and so is one inside a function.
+    expect(set('fontVariationSettings', '"wght" 400')).to eq('"wght" 400')
+    expect(set('backgroundColor', 'rgb(1, 2, 3)')).to     eq('rgb(1, 2, 3)')
+  end
+
+  # A `<time>` or an `<angle>` is never bare, not even a zero — where CSS's "a zero needs no unit"
+  # intuition says otherwise. Checked per comma entry, and only for an entry that IS one number, so
+  # a `rotate` axis (which really is unitless) still parses.
+  it 'drops a bare number where a unit is required' do
+    expect(set('transitionDuration', '0')).to     eq('')
+    expect(set('transitionDuration', '1s, 0')).to eq('')
+    expect(set('animationDelay', '2')).to         eq('')
+    expect(set('rotate', '1')).to                 eq('')
+    expect(set('transitionDuration', '0s')).to    eq('0s')
+    # (Chrome serializes this one back as `x 45deg` — it names the axis. That is the specified
+    # surface's value SERIALIZATION, which this driver still stores verbatim; what matters here is
+    # that the declaration survives.)
+    expect(set('rotate', '1 0 0 45deg')).not_to eq('')
+  end
+
+  # …except in SVG's geometry properties, where a bare number IS a length: the same user units the
+  # presentation attribute carries.
+  it 'takes a bare number as an SVG user unit' do
+    expect(set('x', '1')).to             eq('1')
+    expect(set('cx', '-1')).to           eq('-1')
+    expect(set('baselineShift', '1')).to eq('1')
+    expect(set('width', '1')).to         eq('')
+  end
+
+  # A stray comma leaves an EMPTY list entry, which no property takes.
+  it 'drops a list with an empty entry' do
+    expect(set('fontFamily', 'Arial,')).to          eq('')
+    expect(set('transitionProperty', 'color,')).to  eq('')
+    expect(set('backgroundPositionX', '10px,,20px')).to eq('')
+    expect(set('strokeDasharray', ',1')).to         eq('')
+  end
+
+  # The `<position>` family has a grammar keywords alone can violate: an axis longhand takes one
+  # part and only its own axis's keywords, and a pair takes at most one part per axis.
+  it 'drops a position keyword on the wrong axis' do
+    expect(set('backgroundPositionX', 'bottom')).to    eq('')
+    expect(set('backgroundPositionX', 'center 10px')).to eq('')
+    expect(set('backgroundPositionY', 'right 10px')).to eq('')
+    expect(set('backgroundPosition', 'left left')).to  eq('')
+    expect(set('objectPosition', 'top top')).to        eq('')
+    expect(set('objectPosition', '1px 2px 3px')).to    eq('')
+    expect(set('backgroundPositionX', 'right 10px')).to eq('right 10px')
+    expect(set('backgroundPosition', 'left top 10px')).to eq('left top 10px')
+  end
 end
