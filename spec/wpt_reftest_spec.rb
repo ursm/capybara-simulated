@@ -25,6 +25,31 @@ RSpec.describe WptRunner do
         .to eq([['!=', 'dom/x-notref.html']])
     end
 
+    # A QUERY selects what the reference draws: eight css-transforms tests point at one
+    # `transform-interpolation-ref.html` and pass it `?rotate` / `?scale` / …, which the page reads
+    # out of `location.search`. Resolving the href as a bare path left `File.file?` looking for a
+    # name with `?rotate` glued to it, and eight tests recorded "reference not vendored" against a
+    # reference that is right there.
+    it 'keeps the query a reference carries' do
+      expect(described_class.parse_reftest_refs('<link rel=match href="ref.html?rotate">', 'css/x'))
+        .to eq([['==', 'css/x/ref.html?rotate']])
+      expect(described_class.ref_path('css/x/ref.html?rotate')).to eq('css/x/ref.html')
+    end
+
+    # `about:blank` is a reference like any other — a `mismatch` against it asserts the test drew
+    # something. Resolving it as a relative path produced `css/x/about:blank`.
+    it 'keeps about:blank as itself' do
+      expect(described_class.parse_reftest_refs('<link rel=mismatch href="about:blank">', 'css/x'))
+        .to eq([['!=', 'about:blank']])
+    end
+
+    # A `<link>` inside a COMMENT is not a link. One vendored test carries its reference that way,
+    # and reading it made a file WPT does not treat as a reftest into a permanently failing one.
+    it 'ignores a link inside a comment' do
+      head = '<!--<link rel="match" href="tutorial-ref.html">--><p>not a reftest'
+      expect(described_class.parse_reftest_refs(head, 'css/x')).to eq([])
+    end
+
     it 'keeps several references in document order — WPT passes the test if ANY holds' do
       head = '<link rel=match href=a-ref.html><link rel=match href=b-ref.html>'
       expect(described_class.parse_reftest_refs(head, 'dom')).to eq([['==', 'dom/a-ref.html'], ['==', 'dom/b-ref.html']])

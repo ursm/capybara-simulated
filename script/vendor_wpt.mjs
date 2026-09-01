@@ -172,6 +172,15 @@ const TREES = [
                                        // `getAnimations`, plus the timing algorithms all three specs share.
                                        // Every motion library (motion-one, GSAP's WAAPI path, Turbo's view
                                        // transitions) drives animation through this rather than through CSS.
+  'css/css-transforms',                // `transform` / `transform-origin` / `transform-box` /
+                                       // `perspective` / `rotate` / `scale` / `translate`. The driver
+                                       // reports a composed MATRIX for `transform` and resolves an origin
+                                       // to used px, and NOTHING was measuring either: the whole gate
+                                       // signal behind the origin work was two allowlist lines, and six
+                                       // real bugs in it had to be found by review instead. Its geometry
+                                       // half is reftests, which this gate renders (see the reftest
+                                       // painter), so a transform that lands in the wrong place is visible
+                                       // rather than merely un-asserted.
 ];
 
 // Trees vendored HARNESS-ONLY: everything under `support/` plus the `.html` tests that actually
@@ -233,6 +242,10 @@ const SUPPORT_FILES = [
   'css/support/shorthand-testcommon.js',
   'css/support/interpolation-testcommon.js',
   'css/support/inheritance-testcommon.js',
+  // …and the numeric-comparison helper, without which `transform-with-sign-function.html` loads,
+  // completes, and reports ZERO subtests — a file that counts as green while asserting nothing,
+  // which is the one failure mode this gate cannot see by itself.
+  'css/support/numeric-testcommon.js',
   // The layout oracle every CSS layout suite is written against: `checkLayout()` turns an
   // element's `data-expected-width` / `-height` / `data-offset-x` / `-y` annotations into
   // testharness subtests. 220 of the 368 vendored css-flexbox tests include it by absolute path —
