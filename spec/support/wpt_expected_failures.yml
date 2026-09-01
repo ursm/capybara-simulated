@@ -2031,8 +2031,6 @@ css/css-transitions/properties-value-003.html:
 - position position(relative to absolute) / values
 - position position(static to absolute) / events
 - position position(static to absolute) / values
-- transform-origin horizontal(keyword) / events
-- transform-origin horizontal(keyword) / values
 css/css-transitions/properties-value-inherit-001.html:
 - clip rectangle(rectangle) / events
 - clip rectangle(rectangle) / values
