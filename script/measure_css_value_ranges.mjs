@@ -5,7 +5,7 @@
 //
 //   node script/measure_css_value_ranges.mjs [--chrome /path/to/chrome]
 //
-// Prints the three arrays and the skipped-property list, ready to paste into
+// Prints the four arrays and the skipped-property list, ready to paste into
 // gen_css_property_data.js, plus the browser version they were measured with. Re-run it when the
 // tables look stale (a property mdn adds, or a browser that starts implementing one of the 44).
 //
@@ -41,14 +41,18 @@ const NAMES = ${JSON.stringify(longhands)};
 const NEG = ${JSON.stringify(NEGATIVE)}, POS = ${JSON.stringify(POSITIVE)}, EXTRA = ${JSON.stringify(EXTRA)};
 const el = document.createElement('div');
 document.body.appendChild(el);
-const keeps = (prop, v) => { el.style.setProperty(prop, ''); el.style.setProperty(prop, v);
-                             return el.style.getPropertyValue(prop) !== ''; };
+const reads = (prop, v) => { el.style.setProperty(prop, ''); el.style.setProperty(prop, v);
+                             return el.style.getPropertyValue(prop); };
+const keeps = (prop, v) => reads(prop, v) !== '';
 const rows = NAMES.map((prop) => ({
   prop,
   supported: CSS.supports(prop, 'inherit'),
   neg:   NEG.map((v) => keeps(prop, v)),
   pos:   POS.map((v) => keeps(prop, v)),
-  extra: EXTRA.map((v) => keeps(prop, v))
+  extra: EXTRA.map((v) => keeps(prop, v)),
+  // …and how a bare zero SERIALIZES, which is a different question from whether it is kept: a
+  // length-valued property reports it with a px unit where a number-valued one leaves it bare.
+  zero:  reads(prop, '0')
 }));
 document.getElementById('out').textContent = JSON.stringify({ ua: navigator.userAgent, rows });
 </` + `script>`;
@@ -73,11 +77,14 @@ const numericInvalid = supported.filter((r) =>
 // …and UNITLESS-free when it refuses a bare number while taking a dimensioned one.
 const unitlessInvalid = supported.filter((r) =>
   !r.extra[0] && (r.pos[0] || r.pos[3] || r.extra[1])).map((r) => r.prop);
+// …and where a bare `0` IS a length, which the specified-value serializer needs.
+const zeroIsLength = supported.filter((r) => r.zero === '0px').map((r) => r.prop);
 
 const fmt = (names) => names.map((n) => `  '${n}',`).join('\n');
 console.log(`// measured with ${ua}`);
 console.log(`const NEGATIVE_INVALID = [\n${fmt(negativeInvalid)}\n];\n`);
 console.log(`const NUMERIC_INVALID = [\n${fmt(numericInvalid)}\n];\n`);
 console.log(`const UNITLESS_NUMBER_INVALID = [\n${fmt(unitlessInvalid)}\n];\n`);
+console.log(`const ZERO_IS_LENGTH = [\n${fmt(zeroIsLength)}\n];\n`);
 console.log(`// not implemented by this browser, so it has no opinion to record (${rows.length - supported.length}):`);
 console.log(rows.filter((r) => !r.supported).map((r) => `//   ${r.prop}`).join('\n'));
