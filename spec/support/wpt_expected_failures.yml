@@ -535,8 +535,6 @@ css/css-animations/responsive/column-rule-color-001.html:
 - column-rule-color responds to currentColor changes
 css/css-animations/responsive/fill-forwards-viewport-units.html:
 - 'fill: forwards with viewport units updates on viewport resize'
-css/css-animations/responsive/line-height.html:
-- line-height responds to inherited changes
 css/css-animations/revert-rule-keyframes-dynamic.html:
 - revert-rule in keyframes, reverted-to value changing (custom property)
 - revert-rule in keyframes, reverted-to value changing (standard property)
@@ -1811,8 +1809,6 @@ css/css-transitions/after-change-style-inherited.html:
 - Start inner transitions based on inherited after-change color and word-spacing from
   two different ancestors
 css/css-transitions/all-interpolates-same-as-explicit-property.html:
-- transition:all interpolates the same as transition:the-actual-property 20
-- transition:all interpolates the same as transition:the-actual-property 21
 - transition:all interpolates the same as transition:the-actual-property 9
 css/css-transitions/animations/animate-with-color-mix.html:
 - Transition from color-mix to legacy rgb
@@ -2049,83 +2045,13 @@ css/css-transitions/parsing/transition-timing-function-valid.html:
 - e.style['transition-timing-function'] = "steps(2, jump-end)" should set the property
   value
 css/css-transitions/properties-value-001.html:
-- background-position-x length(cm) / events
-- background-position-x length(cm) / values
-- background-position-x length(em) / events
-- background-position-x length(em) / values
-- background-position-x length(ex) / events
-- background-position-x length(ex) / values
-- background-position-x length(in) / events
-- background-position-x length(in) / values
-- background-position-x length(mm) / events
-- background-position-x length(mm) / values
-- background-position-x length(pc) / events
-- background-position-x length(pc) / values
-- background-position-x length(pt) / events
-- background-position-x length(pt) / values
-- background-position-x length(px) / events
-- background-position-x length(px) / values
-- background-position-x percentage(%) / events
-- background-position-x percentage(%) / values
 - clip rectangle(rectangle) / events
 - clip rectangle(rectangle) / values
 - font-weight font-weight(keyword) / events
 - font-weight font-weight(keyword) / values
-- line-height length(cm) / events
-- line-height length(cm) / values
-- line-height length(em) / events
-- line-height length(em) / values
-- line-height length(ex) / events
-- line-height length(ex) / values
-- line-height length(in) / events
-- line-height length(in) / values
-- line-height length(mm) / events
-- line-height length(mm) / values
-- line-height length(pc) / events
-- line-height length(pc) / values
-- line-height length(pt) / events
-- line-height length(pt) / values
-- line-height length(px) / events
-- line-height length(px) / values
-- line-height number(decimal) / events
-- line-height number(decimal) / values
-- line-height number(integer) / events
-- line-height number(integer) / values
-- line-height percentage(%) / events
-- line-height percentage(%) / values
-- outline-width length(cm) / events
-- outline-width length(cm) / values
-- outline-width length(em) / events
-- outline-width length(em) / values
-- outline-width length(ex) / events
-- outline-width length(ex) / values
-- outline-width length(in) / events
-- outline-width length(in) / values
-- outline-width length(mm) / events
-- outline-width length(mm) / values
-- outline-width length(pc) / events
-- outline-width length(pc) / values
-- outline-width length(pt) / events
-- outline-width length(pt) / values
 - visibility visibility(keyword) / events
 - visibility visibility(keyword) / values
 css/css-transitions/properties-value-002.html:
-- margin-bottom percentage(%) / events
-- margin-bottom percentage(%) / values
-- margin-left percentage(%) / events
-- margin-left percentage(%) / values
-- margin-right percentage(%) / events
-- margin-right percentage(%) / values
-- margin-top percentage(%) / events
-- margin-top percentage(%) / values
-- padding-bottom percentage(%) / events
-- padding-bottom percentage(%) / values
-- padding-left percentage(%) / events
-- padding-left percentage(%) / values
-- padding-right percentage(%) / events
-- padding-right percentage(%) / values
-- padding-top percentage(%) / events
-- padding-top percentage(%) / values
 - vertical-align vertical(keyword) / events
 - vertical-align vertical(keyword) / values
 css/css-transitions/properties-value-003.html:
@@ -2145,20 +2071,6 @@ css/css-transitions/properties-value-003.html:
 - border-top-left-radius border-radius(px-px) / values
 - border-top-right-radius border-radius(px-px) / events
 - border-top-right-radius border-radius(px-px) / values
-- column-rule-width length(cm) / events
-- column-rule-width length(cm) / values
-- column-rule-width length(em) / events
-- column-rule-width length(em) / values
-- column-rule-width length(ex) / events
-- column-rule-width length(ex) / values
-- column-rule-width length(in) / events
-- column-rule-width length(in) / values
-- column-rule-width length(mm) / events
-- column-rule-width length(mm) / values
-- column-rule-width length(pc) / events
-- column-rule-width length(pc) / values
-- column-rule-width length(pt) / events
-- column-rule-width length(pt) / values
 - display display(block to inline-block) / events
 - display display(block to inline-block) / values
 - display display(static to absolute) / events
@@ -2179,116 +2091,15 @@ css/css-transitions/properties-value-003.html:
 - position position(static to absolute) / values
 - transform-origin horizontal(keyword) / events
 - transform-origin horizontal(keyword) / values
-css/css-transitions/properties-value-implicit-001.html:
-- background-position-x length-em(em) / events
-- background-position-x length-em(em) / values
-- line-height length-em(em) / events
-- line-height length-em(em) / values
-- outline-width length-em(em) / events
-- outline-width length-em(em) / values
 css/css-transitions/properties-value-inherit-001.html:
-- background-position-x length(cm) / events
-- background-position-x length(cm) / values
-- background-position-x length(em) / events
-- background-position-x length(em) / values
-- background-position-x length(ex) / events
-- background-position-x length(ex) / values
-- background-position-x length(in) / events
-- background-position-x length(in) / values
-- background-position-x length(mm) / events
-- background-position-x length(mm) / values
-- background-position-x length(pc) / events
-- background-position-x length(pc) / values
-- background-position-x length(pt) / events
-- background-position-x length(pt) / values
-- background-position-x length(px) / events
-- background-position-x length(px) / values
-- background-position-x percentage(%) / events
-- background-position-x percentage(%) / values
 - clip rectangle(rectangle) / events
 - clip rectangle(rectangle) / values
 - font-weight font-weight(keyword) / events
-- line-height length(cm) / events
-- line-height length(cm) / values
-- line-height length(em) / events
-- line-height length(em) / values
-- line-height length(ex) / events
-- line-height length(ex) / values
-- line-height length(in) / events
-- line-height length(in) / values
-- line-height length(mm) / events
-- line-height length(mm) / values
-- line-height length(pc) / events
-- line-height length(pc) / values
-- line-height length(pt) / events
-- line-height length(pt) / values
-- line-height length(px) / events
-- line-height length(px) / values
-- line-height number(decimal) / events
-- line-height number(decimal) / values
-- line-height number(integer) / events
-- line-height number(integer) / values
-- line-height percentage(%) / events
-- line-height percentage(%) / values
-- outline-width length(cm) / events
-- outline-width length(cm) / values
-- outline-width length(em) / events
-- outline-width length(em) / values
-- outline-width length(ex) / events
-- outline-width length(ex) / values
-- outline-width length(in) / events
-- outline-width length(in) / values
-- outline-width length(mm) / events
-- outline-width length(mm) / values
-- outline-width length(pc) / events
-- outline-width length(pc) / values
-- outline-width length(pt) / events
-- outline-width length(pt) / values
 - visibility visibility(keyword) / events
 - visibility visibility(keyword) / values
 css/css-transitions/properties-value-inherit-002.html:
-- background-position-x length(cm) / events
-- background-position-x length(cm) / values
-- background-position-x length(em) / events
-- background-position-x length(em) / values
-- background-position-x length(ex) / events
-- background-position-x length(ex) / values
-- background-position-x length(in) / events
-- background-position-x length(in) / values
-- background-position-x length(mm) / events
-- background-position-x length(mm) / values
-- background-position-x length(pc) / events
-- background-position-x length(pc) / values
-- background-position-x length(pt) / events
-- background-position-x length(pt) / values
-- background-position-x length(px) / events
-- background-position-x length(px) / values
-- background-position-x percentage(%) / events
-- background-position-x percentage(%) / values
 - clip rectangle(rectangle) / events
 - clip rectangle(rectangle) / values
-- line-height length(cm) / events
-- line-height length(cm) / values
-- line-height length(em) / events
-- line-height length(em) / values
-- line-height length(ex) / events
-- line-height length(ex) / values
-- line-height length(in) / events
-- line-height length(in) / values
-- line-height length(mm) / events
-- line-height length(mm) / values
-- line-height length(pc) / events
-- line-height length(pc) / values
-- line-height length(pt) / events
-- line-height length(pt) / values
-- line-height length(px) / events
-- line-height length(px) / values
-- line-height number(decimal) / events
-- line-height number(decimal) / values
-- line-height number(integer) / events
-- line-height number(integer) / values
-- line-height percentage(%) / events
-- line-height percentage(%) / values
 - margin-left length(cm) / values
 - margin-left length(em) / values
 - margin-left length(ex) / values
@@ -2305,25 +2116,8 @@ css/css-transitions/properties-value-inherit-002.html:
 - margin-right length(pc) / values
 - margin-right length(pt) / values
 - margin-right length(px) / values
-- outline-width length(cm) / events
-- outline-width length(cm) / values
-- outline-width length(em) / events
-- outline-width length(em) / values
-- outline-width length(ex) / events
-- outline-width length(ex) / values
-- outline-width length(in) / events
-- outline-width length(in) / values
-- outline-width length(mm) / events
-- outline-width length(mm) / values
-- outline-width length(pc) / events
-- outline-width length(pc) / values
-- outline-width length(pt) / events
-- outline-width length(pt) / values
 - visibility visibility(keyword) / events
 - visibility visibility(keyword) / values
-css/css-transitions/properties-value-inherit-003.html:
-- outline-width length-em(em) / events
-- outline-width length-em(em) / values
 css/css-transitions/pseudo-element-transform.html:
 - "== css/css-transitions/pseudo-element-transform-ref.html (never ready to capture)"
 css/css-transitions/pseudo-elements-001.html:
@@ -6498,7 +6292,6 @@ web-animations/animation-model/animation-types/accumulation-per-property-002.htm
 - scrollbar-color supports animating as color pair of rgba()
 - stop-color supports animating as color of rgb() with overflowed  from and to values
 - stroke-color supports animating as color of rgb() with overflowed  from and to values
-- 'stroke-dasharray: dasharray'
 - text-decoration-color supports animating as color of rgb() with overflowed  from
   and to values
 - text-emphasis-color supports animating as color of rgb() with overflowed  from and
@@ -6572,7 +6365,6 @@ web-animations/animation-model/animation-types/addition-per-property-002.html:
 - scrollbar-color supports animating as color pair of rgba()
 - stop-color supports animating as color of rgb() with overflowed  from and to values
 - stroke-color supports animating as color of rgb() with overflowed  from and to values
-- 'stroke-dasharray: dasharray'
 - text-decoration-color supports animating as color of rgb() with overflowed  from
   and to values
 - text-emphasis-color supports animating as color of rgb() with overflowed  from and
@@ -6638,9 +6430,6 @@ web-animations/animation-model/animation-types/interpolation-per-property-002.ht
   and "url("http://localhost/test-2")" with linear easing
 - offset-distance supports animating as a calc
 - offset-distance supports animating as combination units "px" and "calc"
-- perspective-origin supports animating as a length pair
-- perspective-origin supports animating as a length pair of rem
-- perspective-origin supports animating as a position of percent
 - rotate with different rotation axes
 - rotate with rotation axes
 - rotate with rotation axes and range over 360 degrees
@@ -6654,10 +6443,6 @@ web-animations/animation-model/animation-types/interpolation-per-property-002.ht
 - scrollbar-color supports animating as color pair of hsla()
 - scrollbar-color supports animating as color pair of rgb()
 - scrollbar-color supports animating as color pair of rgba()
-- stroke-dasharray supports animating as a dasharray (mismatched length)
-- stroke-dasharray supports animating as a dasharray (mixed lengths and percentages)
-- stroke-dasharray supports animating as a percentage
-- stroke-dasharray supports animating as a positive number
 - text-wrap uses discrete animation when animating between "wrap" and "nowrap" with
   effect easing
 - text-wrap uses discrete animation when animating between "wrap" and "nowrap" with
@@ -7014,8 +6799,6 @@ web-animations/interfaces/TimelineTrigger/constructor.html:
 - Multiple timelines not supported
 web-animations/responsive/animation-on-pseudo-to-display-none.html:
 - display:none via a CSS animation on a pseudo-element does not cancel the animation.
-web-animations/responsive/assorted-lengths.html:
-- marginRight allows percentages
 web-animations/responsive/background-color-animation-plus-opacity.html:
 - "== web-animations/responsive/background-color-animation-plus-opacity-ref.html"
 web-animations/responsive/background-position-responsive.html:
@@ -7024,8 +6807,6 @@ web-animations/responsive/background-position-responsive.html:
   parent
 web-animations/responsive/backgroundPosition.html:
 - Background position responsive to style changes
-web-animations/responsive/backgroundSize.html:
-- Border image width responsive to font size changes
 web-animations/responsive/borderImageWidth.html:
 - Border image width responsive to font size changes
 web-animations/responsive/borderRadius.html:
@@ -7043,9 +6824,6 @@ web-animations/responsive/fontSize.html:
 - Font size medium responsive to style changes
 web-animations/responsive/lineHeight.html:
 - lineHeight clamped to 0px on keyframes
-- lineHeight responsive to inherited changes from keyword
-- lineHeight responsive to inherited changes from number
-- lineHeight responsive to style changes
 web-animations/responsive/offset-path.html:
 - offset-path responsive to inherited offset-path changes
 web-animations/responsive/offsetRotate.html:
@@ -7078,8 +6856,6 @@ web-animations/responsive/to-color-change.html:
 - Text decoration color responsive to currentColor changes
 web-animations/responsive/to-style-change.html:
 - Lengths responsive to style changes
-- Numbers responsive to style changes
-- Percentages responsive to width style changes
 web-animations/responsive/toggle-animated-iframe-visibility.html:
 - "== web-animations/responsive/toggle-animated-iframe-visibility-ref.html"
 web-animations/responsive/translate.html:

@@ -153,7 +153,15 @@ const MIN_FIXES = {
   'stop-opacity':          0,
   'fill-opacity':          0,
   'stroke-opacity':        0,
-  'shape-image-threshold': 0
+  'shape-image-threshold': 0,
+  // …and the two `numberOrLength` properties, whose grammar writes the bound on each branch
+  // (`line-height: normal | <number [0,∞]> | <length-percentage [0,∞]>`) rather than on the value
+  // as a whole, so `classifyValueType` — which classifies the UNION — never sees it. A negative end
+  // is not a value either property takes: an interpolation that reaches one clamps, and one
+  // DECLARED that way is dropped whole (Chrome-measured, `line-height: -1` to `2` reports `2` for
+  // the entire transition).
+  'line-height': 0,
+  'tab-size':    0
 };
 const propertyMin = {};
 for (const name of longhands) {
@@ -280,8 +288,38 @@ const ANIMATION_TYPE_FIXES = {
   // …and `stroke`, which mdn records as an ARRAY of property names rather than a type, so it had
   // none at all and its keyframes were dropped. It is a PAINT like `fill`, which mdn does type
   // (Chrome-measured: `#000` to `#0f0` is `rgb(0, 128, 0)` half way).
-  'stroke': 'byComputedValueType'
+  'stroke': 'byComputedValueType',
+
+  // …and `border-spacing`, which mdn calls discrete and Chrome interpolates as the pair of lengths
+  // it is (measured: `2px` to `10px` reports `6px` half way, and `2px 4px` to `10px 20px` reports
+  // `6px 12px`).
+  'border-spacing': 'simpleListOfLpc'
 };
+// mdn types several properties that accept a PERCENTAGE as plain `length` — `margin-left`,
+// `padding-top` and friends — and the length handler refuses a percentage pair, so a transition
+// between two of them fell through to discrete where Chrome interpolates (`10%` to `50%` reports
+// 30% of the containing block half way). Derived from the syntax rather than listed by hand: if the
+// grammar admits a percentage, the animation type is `lpc`.
+//
+// The syntax is read RAW, so a logical property — whose grammar mdn writes as a reference to its
+// physical twin — is deliberately left alone. Its computed value is not resolved either
+// (`margin-block-start: 10%` reports `10%` where `margin-top` reports `40px`), so animating it
+// would interpolate percentages into a value no browser reports. Both halves move together.
+for (const name of longhands) {
+  if (animationTypes[name] !== 'length') continue;
+  const syntax = props[name].syntax || '';
+  if (/<percentage|<length-percentage/.test(syntax)) animationTypes[name] = 'lpc';
+}
+// …and the mirror case: a property whose grammar admits a bare NUMBER as well as a length is
+// `numberOrLength`, whichever of the two mdn happened to record. The distinction is not a nicety —
+// the two forms do not interpolate INTO each other, they flip discretely (Chrome-measured:
+// `tab-size: 4` to `8px` reports `8px` half way, where reading both as lengths gave `6px`), and
+// two unitless ends stay unitless (`2` to `8` is `5`, not `5px`).
+for (const name of longhands) {
+  if (animationTypes[name] !== 'length') continue;
+  const syntax = props[name].syntax || '';
+  if (/<integer|<number/.test(syntax)) animationTypes[name] = 'numberOrLength';
+}
 for (const [name, type] of Object.entries(ANIMATION_TYPE_FIXES)) {
   // Keyed on the LONGHAND list, not on what mdn already recorded: mdn gives `stroke` an ARRAY of
   // other property names rather than a type, so the sweep above skips it and the property was not
