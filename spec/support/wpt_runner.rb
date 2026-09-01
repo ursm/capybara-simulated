@@ -919,7 +919,7 @@ module WptRunner
   # interception against the real SW runtime) plus committed local `csim-*` fixtures
   # (vendor_wpt.mjs's cleanTree preserves the prefix). Keep this list in sync with the
   # vendor manifest in script/vendor_wpt.mjs.
-  TREES = '{dom,domparsing,hr-time,url,encoding,shadow-dom,css/css-shadow/part,FileAPI,html/dom,html/webappapis/timers,html/webappapis/microtask-queuing,html/webappapis/scripting/events,html/semantics/forms,custom-elements,html/webappapis/atob,html/webappapis/structured-clone,webmessaging,input-events,xhr,fetch/api,fetch/data-urls,fetch/h1-parsing,css/cssom,css/css-logical,html/canvas/element,html/rendering,css/css-flexbox,css/css-animations,css/css-transitions,web-animations,service-workers,websockets,webstorage,WebCryptoAPI}'
+  TREES = '{dom,domparsing,hr-time,url,encoding,shadow-dom,css/css-shadow/part,FileAPI,html/dom,html/webappapis/timers,html/webappapis/microtask-queuing,html/webappapis/scripting/events,html/semantics/forms,custom-elements,html/webappapis/atob,html/webappapis/structured-clone,webmessaging,input-events,xhr,fetch/api,fetch/data-urls,fetch/h1-parsing,css/cssom,css/css-logical,html/canvas/element,html/rendering,css/css-flexbox,css/css-animations,css/css-transitions,css/css-transforms,web-animations,service-workers,websockets,webstorage,WebCryptoAPI}'
 
   # `.any.js` / `.window.js` trees safe to scan: url/ + encoding/ + the html/
   # event-loop oracle + xhr/ + html/dom/ + html/semantics/forms/ + atob/
@@ -1395,6 +1395,9 @@ module WptRunner
   # A reference the vendor manifest doesn't ship can't be compared against. It rides in the NAME,
   # not just the message, so it can't hide in the allowlist looking like an ordinary rendering gap.
   REFTEST_MISSING_SUFFIX = '(reference not vendored)'
+  # …and the page `about:blank` names, which the manifest already ships for the tests that link it
+  # by path.
+  BLANK_REFERENCE = 'css/reference/blank.html'
   # A page that never clears `reftest-wait` was never READY to be captured, so whatever it looks
   # like says nothing about the property under test. wptrunner reports that as TIMEOUT and compares
   # nothing; so does this. Capturing anyway and reporting a pixel verdict is worse than useless — it
@@ -1430,7 +1433,9 @@ module WptRunner
     attempts = []
     refs.each do |op, ref_rel|
       name = "#{op} #{ref_rel}"
-      unless File.file?(File.join(ROOT, ref_rel))
+      # `about:blank` is a real reference — WPT compares against an empty page, and a test that
+      # MISmatches it is asserting that it drew SOMETHING.
+      unless ref_rel == 'about:blank' || File.file?(File.join(ROOT, ref_path(ref_rel)))
         attempts << ["#{name} #{REFTEST_MISSING_SUFFIX}",
                      'the reference is not vendored — extend the manifest in script/vendor_wpt.mjs']
         next
@@ -1537,6 +1542,10 @@ module WptRunner
   # ever became READY: one still holding reftest-wait when the budget runs out is captured (the
   # bytes still help a dump) but its rendering means nothing — see REFTEST_TIMEOUT_SUFFIX.
   def render_page(rel)
+    # `about:blank` is a page in its own right — the empty one a `mismatch` against it asserts the
+    # test does NOT look like. WPT's own blank reference is vendored, and rendering that puts both
+    # sides of the comparison through the same painter.
+    rel = BLANK_REFERENCE if rel == 'about:blank'
     origin = origin_for(rel)
     drop_session! if origin
     prepare_session!
@@ -1590,12 +1599,29 @@ module WptRunner
   # are relative to it). Kept separate from the file read so spec/wpt_reftest_spec.rb
   # can pin the parse without a vendored file standing behind every case.
   def parse_reftest_refs(head, dir)
-    head.scan(/<link\b([^>]*\brel\s*=\s*["']?(?:match|mismatch)\b[^>]*)>/i).flatten.filter_map {|attrs|
+    strip_html_comments(head).scan(/<link\b([^>]*\brel\s*=\s*["']?(?:match|mismatch)\b[^>]*)>/i).flatten.filter_map {|attrs|
       href = attr_value(attrs, 'href')
       next if href.nil?
       op = attrs.match?(/\brel\s*=\s*["']?mismatch\b/i) ? '!=' : '=='
-      [op, File.expand_path(href, File.join('/', dir)).delete_prefix('/')]
+      # A QUERY is part of the reference — eight of the transform-interpolation tests point at one
+      # reference with `?rotate` / `?scale` / … and the page draws a different list for each. It
+      # rides along with the path (the runner serves it, and `ref_path` strips it to find the file).
+      next [op, href] if href == 'about:blank'
+      path, _, query = href.partition('?')
+      [op, File.expand_path(path, File.join('/', dir)).delete_prefix('/') + (query.empty? ? '' : "?#{query}")]
     }
+  end
+
+  # A `<link rel=match>` inside a COMMENT is not a link — one vendored test carries its reference
+  # that way, and reading it made a file WPT does not treat as a reftest into a permanently failing
+  # one.
+  def strip_html_comments(text)
+    text.gsub(/<!--.*?-->/m, '')
+  end
+
+  # The FILE a reference names, without the query that selects what it draws.
+  def ref_path(ref_rel)
+    ref_rel.split('?', 2).first
   end
 
   # One HTML attribute's value, written the way tests actually write it —

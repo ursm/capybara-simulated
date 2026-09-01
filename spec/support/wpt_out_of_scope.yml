@@ -29744,6 +29744,40 @@ css/css-logical/animations/logical-shorthand-relative-prioritization-by-number-o
   reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
     specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
     path/suffix. CLAUDE.md rule 1.
+css/css-transforms/parsing/webkit-perspective-invalid.tentative.html:
+- name: e.style['-webkit-perspective'] = "calc(1000)" should not set the property
+    value
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: e.style['-webkit-perspective'] = "calc(25)" should not set the property value
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+css/css-transforms/parsing/webkit-perspective-valid.tentative.html:
+- name: e.style['-webkit-perspective'] = "1000" should set the property value
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: e.style['-webkit-perspective'] = "25" should set the property value
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+css/css-transforms/parsing/webkit-transform-valid.tentative.html:
+- name: e.style['-webkit-transform'] = "perspective(1000)" should set the property
+    value
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: e.style['-webkit-transform'] = "perspective(25)" should set the property value
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+css/css-transforms/transform-fixed-bg-008.tentative.html:
+- name: "== css/css-transforms/transform-fixed-bg-ref.html (both renderings blank)"
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
 css/css-transitions/AnimationEffect-getComputedTiming.tentative.html:
 - name: Negative delay of a new transition
   reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
