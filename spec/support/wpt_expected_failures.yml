@@ -127,6 +127,8 @@ css/css-animations/animation-pseudo-dynamic-001.html:
 css/css-animations/animation-restarted-after-changing-iteration-count-after-completion.html:
 - 'Setting ''animation-iteration-count: infinite'' after a CSS Animation is completed
   restarts the animation.'
+css/css-animations/animation-transform-pause-and-set-time.html:
+- "== css/css-animations/animation-transform-pause-and-set-time-ref.html"
 css/css-animations/animationevent-marker-pseudoelement.html:
 - AnimationEvent should have the correct pseudoElement memeber
 css/css-animations/animationevent-pseudoelement.html:
@@ -203,8 +205,12 @@ css/css-animations/display-interpolation.html:
 - 'Web Animations: property <display> from [none] to [none] at (1.5) should be [none]'
 css/css-animations/display-none-prevents-starting-in-subtree.html:
 - 'Elements in a "display: none" tree cannot start CSS Animations.'
+css/css-animations/flip-running-animation-via-variable.html:
+- "== css/css-animations/flip-running-animation-via-variable-ref.html"
 css/css-animations/inheritance-pseudo-element.html:
 - "== css/css-animations/inheritance-pseudo-element-ref.html (both renderings blank)"
+css/css-animations/jump-start-animation-before-phase.html:
+- "== css/css-animations/jump-start-animation-before-phase-ref.html"
 css/css-animations/keyframes-unrelated-custom-property.html:
 - Unrelated custom properties do not conflict with each other
 css/css-animations/missing-values-first-keyframe.html:
@@ -611,8 +617,6 @@ css/css-animations/text-decoration-inset-auto.html:
 - 'Web Animations: property <text-decoration-inset> from [auto] to [10px -20px] at
   (1.5) should be [NaNpx NaNpx]'
 - "`auto` computes to a length when interpolating with length values"
-css/css-animations/transform-animation-under-large-scale.html:
-- "== css/css-animations/transform-animation-under-large-scale-ref.html"
 css/css-animations/transition-ready-time-offscreen.html:
 - Transitions start at the same time regardless of on-screen status
 css/css-animations/translation-animation-subpixel-offset.html:
@@ -1799,8 +1803,6 @@ css/css-transforms/3d-point-mapping.html:
 - Point mapping through 3D transforms, hittesting box6)
 - Point mapping through 3D transforms, hittesting box7)
 - Point mapping through 3D transforms, hittesting box9)
-css/css-transforms/3d-rendering-context-and-inline.html:
-- "== css/css-transforms/transform-blank-ref.html"
 css/css-transforms/3d-rendering-context-behavior.html:
 - Direct DOM parent is root of rendering context (absolute)
 - Direct DOM parent is root of rendering context (fixed)
@@ -2159,6 +2161,8 @@ css/css-transforms/animation/perspective-origin-composition.html:
 css/css-transforms/animation/rotate-animation-on-svg.html:
 - "== css/css-transforms/animation/rotate-animation-on-svg-ref.html (never ready to
   capture)"
+css/css-transforms/animation/rotate-animation-with-will-change-transform-001.html:
+- "== css/css-transforms/animation/rotate-animation-with-will-change-transform-001-ref.html"
 css/css-transforms/animation/rotate-composition.html:
 - 'Compositing CSS Animations: property <rotate> underlying [0 1 0 -40deg] from replace
   [0 1 0 50deg] to add [0 1 0 10deg] at (-1) should be [0 1 0 130deg]'
@@ -2376,6 +2380,8 @@ css/css-transforms/animation/rotate-composition.html:
   to replace [0 1 0 100deg] at (0.75) should be [y 75deg]'
 - 'Compositing Web Animations: property <rotate> underlying [none] from add [none]
   to replace [0 1 0 100deg] at (2) should be [y 200deg]'
+css/css-transforms/animation/rotate-explicit-and-implicit-keyframes.html:
+- "== css/css-transforms/animation/rotate-explicit-and-implicit-keyframes-ref.html"
 css/css-transforms/animation/rotate-interpolation-math-functions-tentative.html:
 - 'CSS Animations: property <rotate> from [100deg] to [calc(sign(20rem - 20px) * 180deg)]
   at (-1) should be [20deg]'
@@ -2999,6 +3005,8 @@ css/css-transforms/animation/rotate-interpolation.html:
 - 'Web Animations: property <rotate> from neutral to [30deg] at (0.25) should be [15deg]'
 - 'Web Animations: property <rotate> from neutral to [30deg] at (0.75) should be [25deg]'
 - 'Web Animations: property <rotate> from neutral to [30deg] at (2) should be [50deg]'
+css/css-transforms/animation/scale-and-rotate-both-specified-on-animation-keyframes.html:
+- "== css/css-transforms/animation/scale-and-rotate-both-specified-on-animation-keyframes-ref.html"
 css/css-transforms/animation/scale-animation-math-functions-tentative.html:
 - 'CSS Animations: property <scale> from [100] to [calc(sign(20rem - 20px) * 180)]
   at (-1) should be [20]'
@@ -3238,6 +3246,8 @@ css/css-transforms/animation/scale-composition.html:
   to replace [1.5 1] at (0.75) should be [1.375 1]'
 - 'Compositing Web Animations: property <scale> underlying [none] from add [none]
   to replace [1.5 1] at (2) should be [2 1]'
+css/css-transforms/animation/scale-explicit-and-implicit-keyframes.html:
+- "== css/css-transforms/animation/scale-explicit-and-implicit-keyframes-ref.html"
 css/css-transforms/animation/scale-interpolation.html:
 - 'CSS Animations: property <scale> from [-10 5 1] to [1] at (-1) should be [-21 9]'
 - 'CSS Animations: property <scale> from [-10 5 1] to [1] at (0) should be [-10 5]'
@@ -7123,6 +7133,10 @@ css/css-transforms/animation/transform-origin-composition.html:
 - 'Compositing Web Animations: property <transform-origin> underlying [top right 20px]
   from add [left top 80px] to add [right bottom 20px] at (1.25) should be [450px 250px
   25px]'
+css/css-transforms/animation/transform-percent-with-width-and-height-separate.html:
+- "== css/css-transforms/animation/transform-percent-with-width-and-height-separate-ref.html"
+css/css-transforms/animation/transform-percent-with-width-and-height.html:
+- "== css/css-transforms/animation/transform-percent-with-width-and-height-ref.html"
 css/css-transforms/animation/transform-perspective-composition.html:
 - 'Compositing CSS Animations: property <transform> underlying [perspective(10px)]
   from accumulate [perspective(10px)] to accumulate [perspective(50px)] at (-0.5)
@@ -7675,6 +7689,8 @@ css/css-transforms/animation/translate-composition.html:
   [none] to add [100px] at (0.75) should be [75px]'
 - 'Compositing Web Animations: property <translate> underlying [none] from replace
   [none] to add [100px] at (2) should be [200px]'
+css/css-transforms/animation/translate-explicit-and-implicit-keyframes.html:
+- "== css/css-transforms/animation/translate-explicit-and-implicit-keyframes-ref.html"
 css/css-transforms/animation/translate-interpolation.html:
 - 'CSS Animations: property <translate> from [-100%] to [100%] at (-1) should be [-300%]'
 - 'CSS Animations: property <translate> from [-100%] to [100%] at (0.25) should be
@@ -8268,6 +8284,8 @@ css/css-transforms/animation/translate-interpolation.html:
 - 'Web Animations: property <translate> from neutral to [20px] at (0.75) should be
   [17.5px]'
 - 'Web Animations: property <translate> from neutral to [20px] at (2) should be [30px]'
+css/css-transforms/animation/translate-percent-with-width-and-height-separate.html:
+- "== css/css-transforms/animation/translate-percent-with-width-and-height-separate-ref.html"
 css/css-transforms/backface-visibility-hidden-002.html:
 - "== css/css-transforms/backface-visibility-hidden-002-ref.html"
 css/css-transforms/backface-visibility-hidden-003.html:
@@ -8296,8 +8314,6 @@ css/css-transforms/composited-under-rotateY-180deg.html:
 - "== css/css-transforms/composited-under-rotateY-180deg-ref.html"
 css/css-transforms/css-rotate-2d-3d-001.html:
 - "== css/css-transforms/css-rotate-2d-3d-001-ref.html"
-css/css-transforms/css-scale-nested-001.html:
-- "== css/css-transforms/reference/css-scale-nested-ref.html"
 css/css-transforms/css-skew-001.html:
 - "== css/css-transforms/css-skew-001-ref.html"
 css/css-transforms/css-skew-002.html:
@@ -8310,39 +8326,15 @@ css/css-transforms/css-transform-3d-rotate3d-Y-negative.html:
 - "== css/css-transforms/reference/css-transform-3d-rotateX-ref.html"
 css/css-transforms/css-transform-3d-rotate3d-Y-positive.html:
 - "== css/css-transforms/reference/css-transform-3d-rotateX-ref.html"
-css/css-transforms/css-transform-3d-rotate3d-Z-negative.html:
-- "== css/css-transforms/reference/css-transform-3d-rotateZ-ref.html"
-css/css-transforms/css-transform-3d-rotate3d-Z-positive.html:
-- "== css/css-transforms/reference/css-transform-3d-rotateZ-ref.html"
-css/css-transforms/css-transform-3d-rotateX-negative.html:
-- "== css/css-transforms/reference/css-transform-3d-rotateX-ref.html"
-css/css-transforms/css-transform-3d-rotateX-positive.html:
-- "== css/css-transforms/reference/css-transform-3d-rotateX-ref.html"
-css/css-transforms/css-transform-3d-rotateY-negative.html:
-- "== css/css-transforms/reference/css-transform-3d-rotateX-ref.html"
-css/css-transforms/css-transform-3d-rotateY-positive.html:
-- "== css/css-transforms/reference/css-transform-3d-rotateX-ref.html"
-css/css-transforms/css-transform-3d-rotateZ-negative.html:
-- "== css/css-transforms/reference/css-transform-3d-rotateZ-ref.html"
-css/css-transforms/css-transform-3d-rotateZ-positive.html:
-- "== css/css-transforms/reference/css-transform-3d-rotateZ-ref.html"
 css/css-transforms/css-transform-3d-transform-style.html:
 - "== css/css-transforms/reference/css-transform-3d-transform-style-ref.html"
-css/css-transforms/css-transform-inherit-scale.html:
-- "== css/reference/ref-filled-green-200px-square.html"
-css/css-transforms/css-transform-scale-002.html:
-- "== css/css-transforms/reference/css-transform-scale-ref-002.html"
+css/css-transforms/css-transform-animate-translate-implied-y.html:
+- "== css/css-transforms/css-transform-animate-translate-implied-y-ref.html"
 css/css-transforms/css-transform-style-evaluation-validation.html:
 - 'transform: Check bad-format multi-expr input.'
 - 'transform: Check multi-expr input with tab.'
 css/css-transforms/css-transforms-transformlist.html:
 - "== css/css-transforms/reference/css-transforms-transformlist-ref.html"
-css/css-transforms/css3-transform-rotateY.html:
-- "== css/css-transforms/css3-transform-rotateY-ref.html"
-css/css-transforms/css3-transform-scale-002.html:
-- "== css/css-transforms/css3-transform-scale-ref-002.html"
-css/css-transforms/css3-transform-scale.html:
-- "== css/css-transforms/reference/css3-transform-scale-ref.html"
 css/css-transforms/group/svg-transform-group-008.html:
 - "== css/css-transforms/group/reference/svg-green-square-250x250-ref.html"
 css/css-transforms/group/svg-transform-group-009.html:
@@ -8363,16 +8355,22 @@ css/css-transforms/hittest-preserve-3d-2.html:
 - Hit test preserve-3d descendant
 css/css-transforms/hittest-preserve-3d.html:
 - Hit test preserve-3d descendant
-css/css-transforms/huge-length-tiny-scale.html:
-- "== css/css-transforms/huge-length-tiny-scale-ref.html"
+css/css-transforms/individual-transform/animation/individual-transform-combine.html:
+- "== css/css-transforms/individual-transform/animation/individual-transform-combine-ref.html"
+css/css-transforms/individual-transform/individual-transform-1.html:
+- "== css/css-transforms/individual-transform/individual-transform-1-ref.html"
+css/css-transforms/individual-transform/individual-transform-2a.html:
+- "== css/css-transforms/individual-transform/individual-transform-2-ref.html"
+css/css-transforms/individual-transform/individual-transform-2b.html:
+- "== css/css-transforms/individual-transform/individual-transform-2-ref.html"
+css/css-transforms/individual-transform/individual-transform-2c.html:
+- "== css/css-transforms/individual-transform/individual-transform-2-ref.html"
 css/css-transforms/individual-transform/individual-transform-3.html:
 - "== css/reference/ref-filled-green-200px-square.html"
 css/css-transforms/individual-transform/translate-fill-box.html:
 - "== css/css-transforms/transform-box/reference/greensquare200x200.html"
 css/css-transforms/individual-transform/translate-view-box.html:
 - "== css/css-transforms/transform-box/reference/greensquare200x200.html"
-css/css-transforms/paint-order-with-transform-change.html:
-- "== css/css-transforms/paint-order-with-transform-change-ref.html"
 css/css-transforms/parsing/backface-visibility-invalid.html:
 - e.style['backface-visibility'] = "auto" should not set the property value
 - e.style['backface-visibility'] = "visible hidden" should not set the property value
@@ -8637,7 +8635,8 @@ css/css-transforms/preserve-3d-flat-grouping-properties.html:
 css/css-transforms/preserve3d-and-filter-no-perspective.html:
 - "== css/css-transforms/preserve3d-and-filter-no-perspective-ref.html"
 css/css-transforms/preserve3d-and-filter-with-perspective.html:
-- "== css/css-transforms/preserve3d-and-filter-with-perspective-ref.html"
+- "== css/css-transforms/preserve3d-and-filter-with-perspective-ref.html (both renderings
+  blank)"
 css/css-transforms/preserve3d-and-flattening-001.html:
 - "== css/css-transforms/preserve3d-and-flattening-001-ref.html"
 css/css-transforms/preserve3d-and-flattening-002.html:
@@ -8654,8 +8653,6 @@ css/css-transforms/preserve3d-and-flattening-z-order-008.html:
 - "== css/css-transforms/reference/green.html"
 css/css-transforms/preserve3d-backface-hit-test-1.html:
 - Hit test back face hidden preserve3d, hittesting
-css/css-transforms/preserve3d-overflow-percent.html:
-- "!= common/blank.html"
 css/css-transforms/preserve3d-pseudo-element.html:
 - "== css/css-transforms/preserve3d-pseudo-element-ref.html"
 css/css-transforms/rotate/svg-rotate-angle-45-001.html:
@@ -8666,22 +8663,14 @@ css/css-transforms/rotate/svg-rotate-angle-45-022.html:
 - "== css/css-transforms/rotate/reference/svg-rotate-angle-45-ref.html"
 css/css-transforms/rotateY-180deg-with-overflow-scroll.html:
 - "== css/css-transforms/rotateY-180deg-with-overflow-scroll-ref.html"
-css/css-transforms/rotateY.html:
-- "== css/css-transforms/reference/rotateY-ref.html"
 css/css-transforms/rotate_45deg.html:
 - "== css/css-transforms/rotate_45deg-ref.html"
-css/css-transforms/rotate_x_45deg.html:
-- "== css/css-transforms/rotate_x_45deg-ref.html"
 css/css-transforms/rotate_y_45deg.html:
 - "== css/css-transforms/rotate_y_45deg-ref.html"
 css/css-transforms/rotated-clip-under-opacity.html:
 - "== css/css-transforms/reference/green.html"
 css/css-transforms/scale-animation-with-var-001.html:
 - "== css/reference/ref-filled-green-100px-square-only.html"
-css/css-transforms/scale-optional-second-001.html:
-- "== css/css-transforms/reference/scale-optional-second-ref.html"
-css/css-transforms/scale-zero-001.html:
-- "== css/css-transforms/reference/scale-zero-ref.html"
 css/css-transforms/scale/svg-scale-001.html:
 - "== css/css-transforms/scale/reference/svg-scale-ref.html"
 css/css-transforms/scale/svg-scale-002.html:
@@ -8750,6 +8739,8 @@ css/css-transforms/skewY/svg-skewy-with-units.html:
 - "== css/css-transforms/skewY/reference/svg-skewy-ref.html"
 css/css-transforms/subpixel-perspective-translate-z-0.html:
 - "== css/css-transforms/subpixel-perspective-translate-z-0-ref.html"
+css/css-transforms/text-perspective-001.html:
+- "!= about:blank"
 css/css-transforms/transform-3d-rotateY-stair-above-001.xht:
 - "== css/css-transforms/reference/transform-3d-rotateY-stair-above-ref-001.xht"
 css/css-transforms/transform-3d-rotateY-stair-below-001.xht:
@@ -8760,20 +8751,6 @@ css/css-transforms/transform-3d-scales-different-x-y-dynamic-001.html:
 css/css-transforms/transform-3d-scales-different-x-y-dynamic-002.html:
 - "== css/css-transforms/transform-3d-scales-different-x-y-dynamic-002-ref.html (never
   ready to capture)"
-css/css-transforms/transform-abspos-001.html:
-- "== css/css-transforms/transform-abspos-ref.html"
-css/css-transforms/transform-abspos-002.html:
-- "== css/css-transforms/transform-abspos-ref.html"
-css/css-transforms/transform-abspos-003.html:
-- "== css/css-transforms/transform-abspos-ref.html"
-css/css-transforms/transform-abspos-004.html:
-- "== css/css-transforms/transform-abspos-ref.html"
-css/css-transforms/transform-abspos-006.html:
-- "== css/css-transforms/transform-abspos-ref.html"
-css/css-transforms/transform-abspos-007.html:
-- "== css/css-transforms/transform-abspos-ref.html"
-css/css-transforms/transform-applies-to-001.xht:
-- "== css/css-transforms/reference/transform-applies-to-001-ref.xht"
 css/css-transforms/transform-background-001.html:
 - "== css/css-transforms/transform-background-ref-1.html (both renderings blank)"
 css/css-transforms/transform-background-002.html:
@@ -8792,19 +8769,11 @@ css/css-transforms/transform-background-008.html:
 - "== css/css-transforms/transform-root-bg-001-ref.html (both renderings blank)"
 css/css-transforms/transform-box/content-box-mutation-001.html:
 - "== css/css-transforms/transform-box/reference/cssbox-ref.html"
-css/css-transforms/transform-box/cssbox-border-box.html:
-- "== css/css-transforms/transform-box/reference/cssbox-ref.html"
 css/css-transforms/transform-box/cssbox-content-box-001.html:
 - "== css/css-transforms/transform-box/reference/cssbox-ref.html"
 css/css-transforms/transform-box/cssbox-content-box-002.html:
 - "== css/css-transforms/transform-box/reference/cssbox-ref.html"
 css/css-transforms/transform-box/cssbox-fill-box.html:
-- "== css/css-transforms/transform-box/reference/cssbox-ref.html"
-css/css-transforms/transform-box/cssbox-initial.html:
-- "== css/css-transforms/transform-box/reference/cssbox-ref.html"
-css/css-transforms/transform-box/cssbox-stroke-box.html:
-- "== css/css-transforms/transform-box/reference/cssbox-ref.html"
-css/css-transforms/transform-box/cssbox-view-box.html:
 - "== css/css-transforms/transform-box/reference/cssbox-ref.html"
 css/css-transforms/transform-box/fill-box-001.html:
 - "== css/css-transforms/transform-box/reference/greensquare200x200.html"
@@ -8862,6 +8831,8 @@ css/css-transforms/transform-box/view-box-mutation-001.html:
 - "== css/css-transforms/transform-box/reference/greensquare200x200.html"
 css/css-transforms/transform-box/view-box-mutation-002.html:
 - "== css/css-transforms/transform-box/reference/greensquare200x200.html"
+css/css-transforms/transform-box/view-box-mutation-003.html:
+- "== css/css-transforms/transform-box/reference/greensquare200x200.html"
 css/css-transforms/transform-box/view-box-nested.html:
 - "== css/css-transforms/transform-box/reference/greensquare200x200.html"
 css/css-transforms/transform-box/view-box-viewbox-nested.html:
@@ -8870,12 +8841,6 @@ css/css-transforms/transform-box/view-box-viewbox.html:
 - "== css/css-transforms/transform-box/reference/greensquare200x200.html"
 css/css-transforms/transform-box/view-box.html:
 - "== css/css-transforms/transform-box/reference/greensquare200x200.html"
-css/css-transforms/transform-clip-001.html:
-- "== css/css-transforms/transform-clip-001-ref.html"
-css/css-transforms/transform-containing-block-and-scrolling-area-for-fixed.html:
-- "== css/css-transforms/transform-containing-block-and-scrolling-area-for-fixed-ref.html"
-css/css-transforms/transform-descendant-001.html:
-- "== css/css-transforms/transform-descendant-ref.html"
 css/css-transforms/transform-fixed-bg-001.html:
 - "== css/css-transforms/transform-fixed-bg-ref.html (both renderings blank)"
 css/css-transforms/transform-fixed-bg-002.html:
@@ -8904,60 +8869,12 @@ css/css-transforms/transform-iframe-scroll-position.html:
 - "== css/css-transforms/transform-iframe-scroll-position-ref.html"
 css/css-transforms/transform-image-001.html:
 - "== css/css-transforms/transform-image-ref.html"
-css/css-transforms/transform-inherit-001.html:
-- "== css/css-transforms/transform-inherit-ref.html"
 css/css-transforms/transform-inherit-002.html:
 - "== css/css-transforms/transform-inherit-ref.html"
 css/css-transforms/transform-inherit-origin-001.html:
 - "== css/css-transforms/transform-inherit-origin-ref.html"
-css/css-transforms/transform-inherit-origin-002.html:
-- "== css/css-transforms/transform-inherit-origin-ref.html"
-css/css-transforms/transform-input-001.html:
-- "== css/css-transforms/transform-input-001-ref.html"
-css/css-transforms/transform-input-003.html:
-- "== css/css-transforms/transform-input-003-ref.html"
-css/css-transforms/transform-input-004.html:
-- "== css/css-transforms/transform-input-004-ref.html"
-css/css-transforms/transform-input-005.html:
-- "== css/css-transforms/transform-input-005-ref.html"
-css/css-transforms/transform-input-006.html:
-- "== css/css-transforms/transform-input-006-ref.html"
-css/css-transforms/transform-input-007.html:
-- "== css/css-transforms/transform-input-007-ref.html"
-css/css-transforms/transform-input-008.html:
-- "== css/css-transforms/transform-input-008-ref.html"
-css/css-transforms/transform-input-009.html:
-- "== css/css-transforms/transform-input-009-ref.html"
-css/css-transforms/transform-input-010.html:
-- "== css/css-transforms/transform-input-010-ref.html"
-css/css-transforms/transform-input-011.html:
-- "== css/css-transforms/transform-input-011-ref.html"
-css/css-transforms/transform-input-012.html:
-- "== css/css-transforms/transform-input-012-ref.html"
-css/css-transforms/transform-input-013.html:
-- "== css/css-transforms/transform-input-013-ref.html"
-css/css-transforms/transform-input-014.html:
-- "== css/css-transforms/transform-input-014-ref.html"
-css/css-transforms/transform-input-016.html:
-- "== css/css-transforms/transform-input-016-ref.html"
-css/css-transforms/transform-input-019.html:
-- "== css/css-transforms/transform-input-019-ref.html"
-css/css-transforms/transform-matrix-001.html:
-- "== css/css-transforms/transform-matrix-001-ref.html"
-css/css-transforms/transform-matrix-002.html:
-- "== css/css-transforms/transform-matrix-002-ref.html"
-css/css-transforms/transform-matrix-003.html:
-- "== css/css-transforms/transform-matrix-003-ref.html"
-css/css-transforms/transform-matrix-004.html:
-- "== css/css-transforms/transform-matrix-004-ref.html"
-css/css-transforms/transform-matrix-007.html:
-- "== css/css-transforms/transform-matrix-007-ref.html"
-css/css-transforms/transform-origin-001.html:
-- "!= css/css-transforms/transform-origin-ref-1.html"
-css/css-transforms/transform-origin-002.html:
-- "!= css/css-transforms/transform-origin-ref-1.html"
-css/css-transforms/transform-origin-01.html:
-- "== css/css-transforms/reference/transform-origin-01-ref.html"
+css/css-transforms/transform-matrix-008.html:
+- "== css/css-transforms/transform-matrix-008-ref.html"
 css/css-transforms/transform-origin-013.html:
 - "== css/css-transforms/transform-origin-013-ref.html"
 css/css-transforms/transform-origin-014.html:
@@ -8967,12 +8884,6 @@ css/css-transforms/transform-origin-014.html:
   'viewBox'
 - Percentage 'transform-origin' with 'view-box' transform-box in nested <svg> without
   'viewBox'
-css/css-transforms/transform-origin.html:
-- "== css/css-transforms/reference/transform-origin-ref.html"
-css/css-transforms/transform-overflow-001.html:
-- "== css/css-transforms/transform-overflow-001-ref.html"
-css/css-transforms/transform-overflow-002.html:
-- "== css/css-transforms/transform-overflow-002-ref.html"
 css/css-transforms/transform-percent-009.html:
 - Percentage 'translate(...)' with 'fill-box' transform-box
 - Percentage 'translate(...)' with 'view-box' transform-box
@@ -8981,8 +8892,6 @@ css/css-transforms/transform-percent-009.html:
   'viewBox'
 css/css-transforms/transform-percent-010.html:
 - "== css/css-transforms/transform-box/reference/greensquare200x200.html"
-css/css-transforms/transform-propagate-inherit-boolean-001.html:
-- "== css/css-transforms/transform-propagate-inherit-boolean-ref.html"
 css/css-transforms/transform-root-bg-001.html:
 - "== css/css-transforms/transform-root-bg-001-ref.html (both renderings blank)"
 css/css-transforms/transform-root-bg-002.html:
@@ -8991,26 +8900,10 @@ css/css-transforms/transform-root-bg-003.html:
 - "== css/css-transforms/transform-root-bg-001-ref.html (both renderings blank)"
 css/css-transforms/transform-root-bg-004.html:
 - "== css/css-transforms/transform-root-bg-004-ref.html (both renderings blank)"
-css/css-transforms/transform-rotate-007.html:
-- "== css/css-transforms/transform-rotate-007-ref.html"
-css/css-transforms/transform-rounding-001.html:
-- "== css/css-transforms/transform-rounding-ref.html"
-css/css-transforms/transform-scale-001.html:
-- "== css/css-transforms/transform-scale-ref.html"
-css/css-transforms/transform-scale-002.html:
-- "== css/css-transforms/transform-scale-ref.html"
-css/css-transforms/transform-scale-test.html:
-- "== css/css-transforms/reference/transform-scale-test-ref.html"
-css/css-transforms/transform-scalex-001.html:
-- "== css/css-transforms/transform-scalex-ref.html"
-css/css-transforms/transform-scaley-001.html:
-- "== css/css-transforms/transform-scaley-ref.html"
 css/css-transforms/transform-singular-001.html:
 - "== css/css-transforms/transform-singular-ref.html"
 css/css-transforms/transform-stacking-001.html:
 - "== css/css-transforms/transform-lime-square-ref.html"
-css/css-transforms/transform-stresstest-001.html:
-- "== css/css-transforms/transform-stresstest-ref.html"
 css/css-transforms/transform-style-stacking-context.html:
 - "== css/css-transforms/transform-lime-square-ref.html"
 css/css-transforms/transform-table-006.html:
@@ -9019,27 +8912,9 @@ css/css-transforms/transform-table-007.html:
 - "== css/css-transforms/transform-blank-ref.html"
 css/css-transforms/transform-table-008.html:
 - "== css/css-transforms/transform-blank-ref.html"
-css/css-transforms/transform-transformable-inline-block.html:
-- "== css/css-transforms/transform-transformable-inline-block-ref.html"
-css/css-transforms/transform-transformable-inline-table.html:
-- "== css/css-transforms/transform-transformable-inline-table-ref.html"
-css/css-transforms/transform-transformable-list-item.html:
-- "== css/css-transforms/transform-transformable-list-item-ref.html"
-css/css-transforms/transform-transformable-table-caption.html:
-- "== css/css-transforms/transform-transformable-table-caption-ref.html"
-css/css-transforms/transform-transformable-table-cell.html:
-- "== css/css-transforms/transform-transformable-table-cell-ref.html"
-css/css-transforms/transform-transformable-table-footer-group.html:
-- "== css/css-transforms/transform-transformable-table-footer-group-ref.html"
-css/css-transforms/transform-transformable-table-header-group.html:
-- "== css/css-transforms/transform-transformable-table-header-group-ref.html"
-css/css-transforms/transform-transformable-table-row-group.html:
-- "== css/css-transforms/transform-transformable-table-row-group-ref.html"
 css/css-transforms/transform-transformable-table-row.html:
 - "== css/css-transforms/transform-transformable-table-row-ref.html (both renderings
   blank)"
-css/css-transforms/transform-transformable-table.html:
-- "== css/css-transforms/transform-transformable-table-ref.html"
 css/css-transforms/transform-transformed-tbody-contains-fixed-position.html:
 - "== css/css-transforms/transform-transformed-tbody-contains-fixed-position-ref.html"
 css/css-transforms/transform-transformed-tfoot-contains-fixed-position.html:
@@ -9050,42 +8925,10 @@ css/css-transforms/transform-transformed-tr-contains-fixed-position.html:
 - "== css/css-transforms/transform-transformed-tr-contains-fixed-position-ref.html"
 css/css-transforms/transform-transformed-tr-percent-height-child.html:
 - "== css/css-transforms/transform-transformed-tr-percent-height-child-ref.html"
-css/css-transforms/transform-translate-001.html:
-- "== css/css-transforms/transform-translate-ref.html"
-css/css-transforms/transform-translate-002.html:
-- "== css/css-transforms/transform-translate-ref.html"
-css/css-transforms/transform-translate-003.html:
-- "== css/css-transforms/transform-translate-ref.html"
-css/css-transforms/transform-translate-004.html:
-- "== css/css-transforms/transform-translate-ref.html"
-css/css-transforms/transform-translate-005.html:
-- "== css/css-transforms/transform-translate-ref.html"
 css/css-transforms/transform-translate-background-001.html:
 - "== css/css-transforms/transform-translate-background-001-ref.html"
 css/css-transforms/transform-translate-background-002.html:
 - "== css/css-transforms/transform-translate-background-001-ref.html"
-css/css-transforms/transform-translatex-001.html:
-- "== css/css-transforms/transform-translatex-ref.html"
-css/css-transforms/transform-translatex-002.html:
-- "== css/css-transforms/transform-translatex-ref.html"
-css/css-transforms/transform-translatex-003.html:
-- "== css/css-transforms/transform-translatex-ref.html"
-css/css-transforms/transform-translatex-004.html:
-- "== css/css-transforms/transform-translatex-ref.html"
-css/css-transforms/transform-translatex-005.html:
-- "== css/css-transforms/transform-translatex-ref.html"
-css/css-transforms/transform-translatex-006.html:
-- "== css/css-transforms/reference/transform-translatex-006-ref.html"
-css/css-transforms/transform-translatey-001.html:
-- "== css/css-transforms/transform-translatey-ref.html"
-css/css-transforms/transform-translatey-002.html:
-- "== css/css-transforms/transform-translatey-ref.html"
-css/css-transforms/transform-translatey-003.html:
-- "== css/css-transforms/transform-translatey-ref.html"
-css/css-transforms/transform-translatey-004.html:
-- "== css/css-transforms/transform-translatey-ref.html"
-css/css-transforms/transform-translatey-005.html:
-- "== css/css-transforms/transform-translatey-ref.html"
 css/css-transforms/transform-with-sign-function.html:
 - calc(sign(1em - 1px) * 2) calc(sign(1em - 1px) * 2) calc(sign(1em - 1px) * 2) calc(sign(1em
   - 1px) * 2deg) should be used-value-equivalent to 2 2 2 2deg
@@ -9121,78 +8964,58 @@ css/css-transforms/transform3d-backface-visibility-006.html:
 - "== css/css-transforms/transform-lime-square-ref.html"
 css/css-transforms/transform3d-backface-visibility-007.html:
 - "== css/css-transforms/transform-lime-square-ref.html"
-css/css-transforms/transform3d-image-scale-001.html:
-- "== css/css-transforms/transform-lime-square-ref.html"
-css/css-transforms/transform3d-image-scale-002.html:
-- "== css/css-transforms/transform-lime-square-ref.html"
 css/css-transforms/transform3d-matrix3d-005.html:
 - "== css/css-transforms/transform3d-matrix3d-005-ref.html"
 css/css-transforms/transform3d-perspective-005.html:
 - "== css/css-transforms/transform-lime-square-ref.html"
 css/css-transforms/transform3d-perspective-006.html:
 - "== css/css-transforms/transform-lime-square-ref.html"
-css/css-transforms/transform3d-preserve3d-002.html:
-- "== css/css-transforms/transform-lime-square-ref.html"
-css/css-transforms/transform3d-preserve3d-003.html:
-- "== css/css-transforms/transform-lime-square-ref.html"
-css/css-transforms/transform3d-preserve3d-004.html:
-- "== css/css-transforms/transform-lime-square-ref.html"
-css/css-transforms/transform3d-preserve3d-006.html:
-- "== css/css-transforms/transform-lime-square-ref.html"
-css/css-transforms/transform3d-preserve3d-007.html:
-- "== css/css-transforms/transform-lime-square-ref.html"
-css/css-transforms/transform3d-preserve3d-008.html:
-- "== css/css-transforms/transform-lime-square-ref.html"
-css/css-transforms/transform3d-preserve3d-009.html:
-- "== css/css-transforms/transform-lime-square-ref.html"
+css/css-transforms/transform3d-preserve3d-001.html:
+- "== css/css-transforms/transform3d-preserve3d-001-ref.html"
 css/css-transforms/transform3d-preserve3d-010.html:
 - "== css/css-transforms/transform-lime-square-ref.html"
 css/css-transforms/transform3d-preserve3d-011.html:
 - "== css/css-transforms/transform-lime-square-ref.html"
 css/css-transforms/transform3d-preserve3d-012.html:
 - "== css/css-transforms/transform-blank-ref.html"
-css/css-transforms/transform3d-preserve3d-013.html:
-- "== css/css-transforms/transform3d-preserve3d-013-ref.html"
 css/css-transforms/transform3d-preserve3d-014.html:
 - "== css/css-transforms/transform-lime-square-ref.html"
-css/css-transforms/transform3d-rotatex-perspective-001.html:
-- "!= css/css-transforms/transform3d-rotatex-ref.html"
+css/css-transforms/transform3d-rotate3d-001.html:
+- "== css/css-transforms/transform3d-rotatex-ref.html"
+css/css-transforms/transform3d-rotate3d-002.html:
+- "== css/css-transforms/transform3d-rotatey-ref.html"
+css/css-transforms/transform3d-rotatex-001.html:
+- "== css/css-transforms/transform3d-rotatex-ref.html"
 css/css-transforms/transform3d-rotatex-perspective-002.html:
 - "!= css/css-transforms/transform3d-rotatex-ref.html"
+css/css-transforms/transform3d-rotatey-001.html:
+- "== css/css-transforms/transform3d-rotatey-ref.html"
+css/css-transforms/transform3d-scale-002.html:
+- "== css/css-transforms/transform3d-scale-001-ref.html"
 css/css-transforms/transform3d-scale-004.html:
 - "== css/css-transforms/transform-blank-ref.html"
+css/css-transforms/transform3d-scale-005.html:
+- "== css/css-transforms/transform3d-scale-005-ref.html"
+css/css-transforms/transform3d-scale-006.html:
+- "== css/css-transforms/transform3d-scale-005-ref.html"
+css/css-transforms/transform3d-scale-007.html:
+- "== css/css-transforms/transform3d-scale-007-ref.html"
 css/css-transforms/transform3d-sorting-001.html:
-- "== css/css-transforms/transform-lime-square-ref.html"
-css/css-transforms/transform3d-sorting-002.html:
-- "== css/css-transforms/transform-lime-square-ref.html"
-css/css-transforms/transform3d-sorting-003.html:
-- "== css/css-transforms/transform-lime-square-ref.html"
-css/css-transforms/transform3d-sorting-004.html:
 - "== css/css-transforms/transform-lime-square-ref.html"
 css/css-transforms/transform3d-sorting-005.html:
 - "== css/css-transforms/transform-lime-square-ref.html"
 css/css-transforms/transform3d-sorting-006.html:
 - "== css/css-transforms/transform3d-sorting-006-ref.html"
+css/css-transforms/transform3d-translatez-001.html:
+- "== css/css-transforms/transform3d-translatez-ref.html"
 css/css-transforms/transform_translate_invalid.html:
 - transform_translate_null_null
 css/css-transforms/transform_translate_max.html:
 - transform_translate_max
 css/css-transforms/transform_translate_min.html:
 - transform_translate_min
-css/css-transforms/transformed-preserve-3d-1.html:
-- "== css/css-transforms/reference/transformed-preserve-3d-1-ref.html"
-css/css-transforms/transformed-rotateX-3.html:
-- "== css/css-transforms/reference/transformed-rotateX-3-ref.html"
-css/css-transforms/transformed-rotateY-1.html:
-- "== css/css-transforms/reference/transformed-rotateY-1-ref.html"
 css/css-transforms/transforms-rotate-degree-45.html:
 - "== css/css-transforms/reference/transforms-rotate-degree-45-ref.html"
-css/css-transforms/transforms-rotate-degree-90.html:
-- "== css/css-transforms/reference/transforms-rotate-degree-90-ref.html"
-css/css-transforms/transforms-rotate-translate-scale.html:
-- "== css/css-transforms/reference/transforms-rotate-translate-scale-ref.html"
-css/css-transforms/transforms-rotateY-degree-60.html:
-- "== css/css-transforms/reference/transforms-rotateY-degree-60-ref.html"
 css/css-transforms/transforms-skewX.html:
 - "== css/css-transforms/reference/transforms-skewX-ref.html"
 css/css-transforms/transforms-skewY.html:
@@ -9202,26 +9025,12 @@ css/css-transforms/transforms-support-calc.html:
 - translate supports calc
 css/css-transforms/translate-getComputedStyle.html:
 - computed style for translate
-css/css-transforms/translate-optional-second-001.html:
-- "== css/css-transforms/reference/translate-optional-second-ref.html"
-css/css-transforms/translate.html:
-- "== css/css-transforms/translate-ref.html"
-css/css-transforms/ttwf-css-3d-polygon-cycle-mismatch.html:
-- "!= css/css-transforms/reference/ttwf-css-3d-polygon-cycle-ref.html"
 css/css-transforms/ttwf-css-3d-polygon-cycle.html:
 - "== css/css-transforms/reference/ttwf-css-3d-polygon-cycle-ref.html"
-css/css-transforms/ttwf-reftest-rotate.html:
-- "== css/css-transforms/reference/ttwf-reftest-rotate-ref.html"
 css/css-transforms/ttwf-transform-skewx-001.html:
 - "== css/css-transforms/reference/ttwf-reftest-transform-skewx-001.html"
 css/css-transforms/ttwf-transform-skewy-001.html:
 - "== css/css-transforms/reference/ttwf-reftest-transform-skewy-001.html"
-css/css-transforms/ttwf-transform-translatex-001.html:
-- "== css/css-transforms/reference/ttwf-reftest-transform-translatex-001.html"
-css/css-transforms/ttwf-transform-translatey-001.html:
-- "== css/css-transforms/reference/ttwf-reftest-transform-translatey-001.html"
-css/css-transforms/z-index-does-not-apply.html:
-- "== css/css-transforms/z-index-does-not-apply-ref.html"
 css/css-transitions/after-change-style-inherited-try-fallback.html:
 - Position fallback correctly applied to after-change style
 css/css-transitions/after-change-style-inherited.html:
@@ -12320,8 +12129,6 @@ html/rendering/replaced-elements/the-select-element/select-1-line-height.html:
 html/rendering/replaced-elements/the-select-element/select-adopted.html:
 - "== html/rendering/replaced-elements/the-select-element/select-adopted-ref.html
   (a frame the painter never enters)"
-html/rendering/replaced-elements/the-select-element/select-display-inline.html:
-- "== html/rendering/replaced-elements/the-select-element/select-display-inline-ref.html"
 html/rendering/replaced-elements/the-select-element/select-empty.html:
 - "== html/rendering/replaced-elements/the-select-element/select-empty-ref.html"
 html/rendering/replaced-elements/the-select-element/select-intrinsic-option-font-size.html:

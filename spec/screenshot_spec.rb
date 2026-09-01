@@ -154,6 +154,112 @@ RSpec.describe 'save_screenshot' do
     end
   end
 
+  # ── Transforms ────────────────────────────────────────────────────────────────────────────
+  # The painter hands the canvas the matrix and draws in the coordinates layout gave it, so the
+  # box, its borders, its bitmap and its text runs all move together. What these pin is that the
+  # picture agrees with what `getBoundingClientRect` reports — there is one geometry.
+
+  it 'moves a box and the text inside it together' do
+    s = page_with('<div class="t">Hi</div>',
+                  css: '.t{width:60px;height:20px;background:rgb(255,0,0);color:rgb(0,0,255);' \
+                       'margin:0;transform:translateX(100px)}')
+    shot(s) do |_img, px, _path|
+      expect(px.call(10, 10)).to  eq([255, 255, 255])   # where the box was laid out
+      expect(px.call(130, 10)).to eq([255, 0, 0])       # where the transform puts it
+      inked = (0...320).select {|x| (0...20).any? {|y| px.call(x, y)[2] > 150 && px.call(x, y)[0] < 120 } }
+      expect(inked).not_to be_empty
+      expect(inked.min).to be >= 100                    # the ink travelled with its box
+    end
+  end
+
+  it 'scales about the transform-origin' do
+    # `transform-origin: 0 0` keeps the top-left corner still, so a 2x box covers twice the extent.
+    s = page_with('<div class="t"></div>',
+                  css: '.t{width:50px;height:50px;background:rgb(0,200,0);' \
+                       'transform:scale(2);transform-origin:0 0}')
+    shot(s) do |_img, px, _path|
+      expect(px.call(2, 2)).to    eq([0, 200, 0])
+      expect(px.call(95, 95)).to  eq([0, 200, 0])       # inside the scaled box
+      expect(px.call(105, 105)).to eq([255, 255, 255])  # past it
+    end
+  end
+
+  it 'rotates a box into the quad it is, not into its bounding rectangle' do
+    # 90deg about the centre turns a 100x20 bar into a 20x100 one. A painter that drew the
+    # bounding rect would fill the whole 100x100 square instead.
+    s = page_with('<div class="t"></div>',
+                  css: '.t{width:100px;height:20px;background:rgb(255,0,0);transform:rotate(90deg)}')
+    shot(s) do |_img, px, _path|
+      expect(px.call(50, 50)).to eq([255, 0, 0])        # the bar, stood up
+      expect(px.call(10, 10)).to eq([255, 255, 255])    # a corner of the bounding square
+      expect(px.call(90, 90)).to eq([255, 255, 255])
+    end
+  end
+
+  it 'composes a nested transform exactly once' do
+    s = page_with('<div class="o"><div class="i"></div></div>',
+                  css: '.o{transform:translateX(100px)}' \
+                       '.i{width:20px;height:20px;background:rgb(0,0,255);transform:translateX(20px)}')
+    shot(s) do |_img, px, _path|
+      expect(px.call(130, 10)).to eq([0, 0, 255])       # 100 + 20, applied once
+      expect(px.call(110, 10)).to eq([255, 255, 255])   # not the parent's shift alone
+      expect(px.call(150, 10)).to eq([255, 255, 255])   # and not applied twice
+    end
+  end
+
+  # The clip belongs to the CLIPPER, not to what it clips. Drawn under the clipped element's own
+  # matrix the scrollport travelled with its child, and ink appeared where a browser paints none.
+  it 'holds an overflow clip still while its child transforms out of it' do
+    s = page_with('<div class="sc"><div class="in"></div></div>',
+                  css: '.sc{width:100px;height:100px;overflow:hidden}' \
+                       '.in{width:50px;height:50px;background:rgb(255,0,0);transform:translateX(150px)}')
+    shot(s) do |_img, px, _path|
+      expect(px.call(170, 25)).to eq([255, 255, 255])   # where the transform sends it: clipped away
+      expect(px.call(25, 25)).to  eq([255, 255, 255])   # and it did not stay behind either
+    end
+  end
+
+  it 'clips in the clipper own space when the clipper is the transformed one' do
+    s = page_with('<div class="sc"><div class="in"></div></div>',
+                  css: '.sc{width:100px;height:100px;overflow:hidden;transform:translateX(100px)}' \
+                       '.in{width:400px;height:40px;background:rgb(0,200,0)}')
+    shot(s) do |_img, px, _path|
+      expect(px.call(150, 20)).to eq([0, 200, 0])       # inside the moved scrollport
+      expect(px.call(50, 20)).to  eq([255, 255, 255])   # the scrollport is not where it was laid out
+      expect(px.call(250, 20)).to eq([255, 255, 255])   # the 400px child, still clipped
+    end
+  end
+
+  # Reading a transform reaches `documentBoxOf`, and a style read can move the keys `ensureLayout`
+  # gates on — so the paint laid the page out a second time. With the run recorder still armed that
+  # pass re-offered every run and the painter drew each of them twice, compositing the text darker.
+  # The ink SUM, not the darkest pixel: a run's core is already saturated at its own colour, so a
+  # second pass over it changes nothing there. The doubling shows up in the antialiased edges.
+  it 'paints each text run once even when the page has a transform on it' do
+    css = 'div{margin:0;color:rgb(80,80,80)}' \
+          '.t{position:absolute;left:250px;top:0;width:10px;height:10px;transform:scale(3)}'
+    plain  = page_with('<div>Test Text</div>', css: css)
+    withtf = page_with('<div>Test Text<span class="t"></span></div>', css: css)
+    ink = lambda do |session|
+      shot(session) do |_img, px, _path|
+        (0...200).sum {|x| (0...30).sum {|y| 255 - px.call(x, y)[0] } }
+      end
+    end
+    expect(ink.call(plain)).to be > 0
+    expect(ink.call(withtf)).to eq(ink.call(plain))
+  end
+
+  # The matrix is in viewport coordinates; a full-page shot moves the whole picture by the root
+  # scroll. Testing the cull in the wrong one of those two spaces is off by `(A - I)` times the
+  # scroll — zero for a translate, and enough to cull a scaled box unpainted for anything else.
+  it 'paints a scaled box on a full-page shot of a scrolled page' do
+    s = page_with('<div class="sp"></div><div class="t"></div>',
+                  css: '.sp{height:1500px}' \
+                       '.t{width:50px;height:50px;background:rgb(255,0,0);transform:scale(2)}')
+    s.execute_script('window.scrollTo(0, 1000)')
+    shot(s, full: true) {|_img, px, _path| expect(px.call(25, 1525)).to eq([255, 0, 0]) }
+  end
+
   # `documentElement.remove()` is legal, and a browser answers it with a blank page rather than
   # with nothing at all. The painter used to bail on a rootless document and return no image, so
   # `save_screenshot` produced no file — and a WPT reftest that removes the root took the whole
