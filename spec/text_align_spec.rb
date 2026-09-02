@@ -9,13 +9,24 @@ require_relative 'support/session_teardown'
 # the free space after its content is what `right` and `center` shift it by, what `justify` spreads
 # over the collapsible spaces of a WRAPPED line, and an rtl block lines up `right` by default.
 #
-# The rules, Chrome-measured on 300px blocks at 16px monospace (47 cases, all matched):
+# The rules, Chrome-measured on 300px blocks at 16px monospace (76 cases in four batteries, then
+# the reviewers' 90 — all matched but the backlog below):
 #   - right / end / rtl-start: x = right edge - content width; center: half the free space
 #   - the whole line moves together — atomic inlines, inline-blocks, a preserved trailing space,
-#     the first line's `text-indent`, and the static position of an out-of-flow box on the line
+#     the first line's `text-indent`, the static position of an out-of-flow box on the line, and
+#     an empty inline's cursor
 #   - a line WIDER than the block stays at the start edge in ltr and hangs off the LEFT in rtl
-#   - `justify` widens only the gaps of a line that wrapped; the last line, and one a `<br>` ends,
-#     keep their spacing
+#   - `justify` widens each space of a line that wrapped (a preserved double space twice); the last
+#     line, and one a `<br>` ends, are start-aligned; an inline box spanning a gap widens with it
+#   - a collapsible trailing space hangs; a preserved one hangs at a soft wrap only
+#   - `text-indent` narrows the first line from the START edge (the right one in rtl); `hanging`
+#     inverts the choice, `each-line` re-indents after a forced break; the line after a block
+#     child takes none
+#   - HTML's `align` attribute and `<center>` are the `-webkit-` values Chrome computes, and they
+#     move the block-level descendants too
+# Backlog (Chrome-measured, not modelled): the spaces INSIDE a `white-space: pre` / `nowrap` run
+# on a justified line, `text-align-last`, and the static position of an out-of-flow box in an rtl
+# block (`staticCornerFor` ignores the cursor).
 #
 # Every x here is a FORMULA over widths measured on the same page — the block's width and the run's
 # own — never a figure: the run's width is the face's, and the face is the machine's.
