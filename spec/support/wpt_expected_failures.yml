@@ -127,8 +127,6 @@ css/css-animations/animation-pseudo-dynamic-001.html:
 css/css-animations/animation-restarted-after-changing-iteration-count-after-completion.html:
 - 'Setting ''animation-iteration-count: infinite'' after a CSS Animation is completed
   restarts the animation.'
-css/css-animations/animation-transform-pause-and-set-time.html:
-- "== css/css-animations/animation-transform-pause-and-set-time-ref.html"
 css/css-animations/animationevent-marker-pseudoelement.html:
 - AnimationEvent should have the correct pseudoElement memeber
 css/css-animations/animationevent-pseudoelement.html:
@@ -205,8 +203,6 @@ css/css-animations/display-interpolation.html:
 - 'Web Animations: property <display> from [none] to [none] at (1.5) should be [none]'
 css/css-animations/display-none-prevents-starting-in-subtree.html:
 - 'Elements in a "display: none" tree cannot start CSS Animations.'
-css/css-animations/flip-running-animation-via-variable.html:
-- "== css/css-animations/flip-running-animation-via-variable-ref.html"
 css/css-animations/inheritance-pseudo-element.html:
 - "== css/css-animations/inheritance-pseudo-element-ref.html (both renderings blank)"
 css/css-animations/jump-start-animation-before-phase.html:
@@ -219,8 +215,6 @@ css/css-animations/missing-values-first-keyframe.html:
 css/css-animations/missing-values-last-keyframe.html:
 - Missing property values in the last keyframe are correctly interpolated from a neutral
   keyframe value
-css/css-animations/nested-scale-animations.html:
-- "== css/css-animations/nested-scale-animations-ref.html"
 css/css-animations/parent-after-change-style-pseudo-element-flicker.html:
 - "== css/css-animations/parent-after-change-style-pseudo-element-flicker-ref.html
   (both renderings blank)"
@@ -2161,8 +2155,6 @@ css/css-transforms/animation/perspective-origin-composition.html:
 css/css-transforms/animation/rotate-animation-on-svg.html:
 - "== css/css-transforms/animation/rotate-animation-on-svg-ref.html (never ready to
   capture)"
-css/css-transforms/animation/rotate-animation-with-will-change-transform-001.html:
-- "== css/css-transforms/animation/rotate-animation-with-will-change-transform-001-ref.html"
 css/css-transforms/animation/rotate-composition.html:
 - 'Compositing CSS Animations: property <rotate> underlying [0 1 0 -40deg] from replace
   [0 1 0 50deg] to add [0 1 0 10deg] at (-1) should be [0 1 0 130deg]'
@@ -3005,8 +2997,6 @@ css/css-transforms/animation/rotate-interpolation.html:
 - 'Web Animations: property <rotate> from neutral to [30deg] at (0.25) should be [15deg]'
 - 'Web Animations: property <rotate> from neutral to [30deg] at (0.75) should be [25deg]'
 - 'Web Animations: property <rotate> from neutral to [30deg] at (2) should be [50deg]'
-css/css-transforms/animation/scale-and-rotate-both-specified-on-animation-keyframes.html:
-- "== css/css-transforms/animation/scale-and-rotate-both-specified-on-animation-keyframes-ref.html"
 css/css-transforms/animation/scale-animation-math-functions-tentative.html:
 - 'CSS Animations: property <scale> from [100] to [calc(sign(20rem - 20px) * 180)]
   at (-1) should be [20]'
@@ -6550,9 +6540,21 @@ css/css-transforms/animation/transform-interpolation-inline-value.html:
   value halfway according to commitStyles.
 - Interpolation between translateZ(50px) and translateX(50px) gives the correct computed
   value halfway according to commitStyles.
+css/css-transforms/animation/transform-interpolation-matrix.html:
+- "== css/css-transforms/animation/transform-interpolation-ref.html?matrix"
+css/css-transforms/animation/transform-interpolation-rotate-slerp.html:
+- "== css/css-transforms/animation/transform-interpolation-ref.html?rotateSlerp"
+css/css-transforms/animation/transform-interpolation-rotate.html:
+- "== css/css-transforms/animation/transform-interpolation-ref.html?rotate"
 css/css-transforms/animation/transform-interpolation-rotate3d-180deg-near-x-axis.html:
 - decompose4() recovers the correct quaternion y component near a 180deg rotation
   about the X axis
+css/css-transforms/animation/transform-interpolation-scale.html:
+- "== css/css-transforms/animation/transform-interpolation-ref.html?scale"
+css/css-transforms/animation/transform-interpolation-translate-em.html:
+- "== css/css-transforms/animation/transform-interpolation-ref.html?translateEm"
+css/css-transforms/animation/transform-interpolation-translate.html:
+- "== css/css-transforms/animation/transform-interpolation-ref.html?translate"
 css/css-transforms/animation/transform-interpolation-verify-reftests.html:
 - 'CSS Animations: property <transform> from [matrix(1,0,0,1,0,0) rotate(0deg)] to
   [matrix(2,0,0,2,0,0) rotate(360deg)] at (0.5) should be [matrix(1.5,0,0,1.5,0,0)
@@ -7133,10 +7135,6 @@ css/css-transforms/animation/transform-origin-composition.html:
 - 'Compositing Web Animations: property <transform-origin> underlying [top right 20px]
   from add [left top 80px] to add [right bottom 20px] at (1.25) should be [450px 250px
   25px]'
-css/css-transforms/animation/transform-percent-with-width-and-height-separate.html:
-- "== css/css-transforms/animation/transform-percent-with-width-and-height-separate-ref.html"
-css/css-transforms/animation/transform-percent-with-width-and-height.html:
-- "== css/css-transforms/animation/transform-percent-with-width-and-height-ref.html"
 css/css-transforms/animation/transform-perspective-composition.html:
 - 'Compositing CSS Animations: property <transform> underlying [perspective(10px)]
   from accumulate [perspective(10px)] to accumulate [perspective(50px)] at (-0.5)
@@ -8284,8 +8282,6 @@ css/css-transforms/animation/translate-interpolation.html:
 - 'Web Animations: property <translate> from neutral to [20px] at (0.75) should be
   [17.5px]'
 - 'Web Animations: property <translate> from neutral to [20px] at (2) should be [30px]'
-css/css-transforms/animation/translate-percent-with-width-and-height-separate.html:
-- "== css/css-transforms/animation/translate-percent-with-width-and-height-separate-ref.html"
 css/css-transforms/backface-visibility-hidden-002.html:
 - "== css/css-transforms/backface-visibility-hidden-002-ref.html"
 css/css-transforms/backface-visibility-hidden-003.html:
@@ -8328,8 +8324,6 @@ css/css-transforms/css-transform-3d-rotate3d-Y-positive.html:
 - "== css/css-transforms/reference/css-transform-3d-rotateX-ref.html"
 css/css-transforms/css-transform-3d-transform-style.html:
 - "== css/css-transforms/reference/css-transform-3d-transform-style-ref.html"
-css/css-transforms/css-transform-animate-translate-implied-y.html:
-- "== css/css-transforms/css-transform-animate-translate-implied-y-ref.html"
 css/css-transforms/css-transform-style-evaluation-validation.html:
 - 'transform: Check bad-format multi-expr input.'
 - 'transform: Check multi-expr input with tab.'
@@ -8357,6 +8351,8 @@ css/css-transforms/hittest-preserve-3d.html:
 - Hit test preserve-3d descendant
 css/css-transforms/individual-transform/animation/individual-transform-combine.html:
 - "== css/css-transforms/individual-transform/animation/individual-transform-combine-ref.html"
+css/css-transforms/individual-transform/animation/individual-transform-ordering.html:
+- "== css/css-transforms/individual-transform/animation/individual-transform-ordering-ref.html"
 css/css-transforms/individual-transform/individual-transform-1.html:
 - "== css/css-transforms/individual-transform/individual-transform-1-ref.html"
 css/css-transforms/individual-transform/individual-transform-2a.html:
@@ -13693,11 +13689,7 @@ web-animations/animation-model/keyframe-effects/background-shorthand.html:
 web-animations/animation-model/keyframe-effects/computed-keyframes-shorthands.html:
 - It should be possible to animate the all shorthand
 web-animations/animation-model/keyframe-effects/effect-value-context-filling.html:
-- Filling effect values reflect changes to the animation's composite mode
 - Filling effect values reflect changes to the animation's iteration composite mode
-- Filling effect values reflect changes to the animation's keyframes
-- Filling effect values reflect changes to underlying animations made by directly
-  changing the keyframes
 web-animations/animation-model/keyframe-effects/effect-value-context.html:
 - Effect values reflect changes to target element
 web-animations/animation-model/keyframe-effects/effect-value-iteration-composite-operation.html:
@@ -13973,7 +13965,6 @@ web-animations/interfaces/KeyframeEffect/target.html:
 - Changing pseudoElement to a non-null invalid pseudo-selector ':abc' throws a SyntaxError
 - Changing pseudoElement to a non-null invalid pseudo-selector 'before' throws a SyntaxError
 - Test setting target from a valid target to another target
-- Test setting target from a valid target to null
 - Test setting target from null to a valid target
 web-animations/interfaces/TimelineTrigger/constructor.html:
 - Active range supplied; entry copied from active
@@ -14138,8 +14129,6 @@ web-animations/timing-model/animations/canceling-an-animation.html:
 - A play-pending ready promise should be rejected when the animation is canceled
 - Canceling an animation should fire cancel event on orphaned element
 - The finished promise should NOT be rejected if the animation is already idle
-web-animations/timing-model/animations/document-timeline-animation.html:
-- "== web-animations/timing-model/animations/document-timeline-animation-ref.html"
 web-animations/timing-model/animations/finishing-an-animation.html:
 - A pending playback rate should be applied immediately when an animation is finished
 - A pending ready promise is resolved and not replaced when the animation is finished
@@ -14248,6 +14237,8 @@ web-animations/timing-model/animations/setting-the-timeline-of-an-animation.html
   still running
 - After transitioning from a null timeline on an animation with a sufficiently ancient
   start time it is finished
+web-animations/timing-model/animations/sync-start-times.html:
+- "== web-animations/timing-model/animations/sync-start-times-ref.html"
 web-animations/timing-model/animations/updating-the-finished-state.html:
 - Animation finish event is fired again after seeking back to start
 - Animation finished promise is replaced after seeking back to start
