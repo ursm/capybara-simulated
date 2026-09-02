@@ -29778,6 +29778,12 @@ css/css-transforms/transform-fixed-bg-008.tentative.html:
   reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
     specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
     path/suffix. CLAUDE.md rule 1.
+css/css-transforms/transform-singular-001.html:
+- name: "== css/css-transforms/transform-singular-ref.html (both renderings blank)"
+  reason: 'The correct rendering IS blank: `matrix(1, 1, 1, 1, 0, 0)` has determinant
+    zero, so css-transforms says the element and its content do not get displayed
+    — and the reference is an EMPTY document. Both sides being white is the assertion,
+    not a painter that drew neither.'
 css/css-transitions/AnimationEffect-getComputedTiming.tentative.html:
 - name: Negative delay of a new transition
   reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
