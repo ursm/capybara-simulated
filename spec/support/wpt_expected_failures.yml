@@ -1748,55 +1748,17 @@ css/css-shadow/part/serialization.html:
 - Escape start space in ::part name.
 css/css-transforms/2d-rotate-001.html:
 - "== css/css-transforms/2d-rotate-ref.html"
-css/css-transforms/3d-point-mapping-2-transforminterop.html:
-- More point mapping through 3D transform hierarchies, hittesting box10)
-- More point mapping through 3D transform hierarchies, hittesting box11)
-- More point mapping through 3D transform hierarchies, hittesting box12)
-- More point mapping through 3D transform hierarchies, hittesting box3)
-- More point mapping through 3D transform hierarchies, hittesting box4)
-- More point mapping through 3D transform hierarchies, hittesting box7)
-- More point mapping through 3D transform hierarchies, hittesting box8)
 css/css-transforms/3d-point-mapping-3.html:
 - Point mapping through 3D transform hierarchies, hittesting card)
 css/css-transforms/3d-point-mapping-4.html:
 - Point mapping through 3D transform hierarchies, hittesting card
 - Point mapping through 3D transform hierarchies, hittesting card2
 css/css-transforms/3d-point-mapping-deep.html:
-- Point mapping through deeply nested 3D transforms, hittesting box2
-- Point mapping through deeply nested 3D transforms, hittesting box3
-- Point mapping through deeply nested 3D transforms, hittesting box4
-- Point mapping through deeply nested 3D transforms, hittesting box5
-- Point mapping through deeply nested 3D transforms, hittesting box6
-- Point mapping through deeply nested 3D transforms, hittesting box7
 - Point mapping through deeply nested 3D transforms, hittesting box8
 css/css-transforms/3d-point-mapping-origins.html:
-- Point mapping through 3D transforms with origins, hittesting bottom-left-blue)
-- Point mapping through 3D transforms with origins, hittesting bottom-left-medium-gray)
-- Point mapping through 3D transforms with origins, hittesting bottom-right-blue)
-- Point mapping through 3D transforms with origins, hittesting bottom-right-green)
-- Point mapping through 3D transforms with origins, hittesting bottom-right-medium-gray)
-- Point mapping through 3D transforms with origins, hittesting top-left-medium-gray)
 - Point mapping through 3D transforms with origins, hittesting top-right-blue)
-- Point mapping through 3D transforms with origins, hittesting top-right-medium-gray)
 css/css-transforms/3d-point-mapping-preserve-3d.html:
-- Point mapping through 3D transform hierarchies, hittesting bottom-left-light-yellow
-- Point mapping through 3D transform hierarchies, hittesting bottom-middle-light-green
-- Point mapping through 3D transform hierarchies, hittesting bottom-middle-light-yellow
-- Point mapping through 3D transform hierarchies, hittesting bottom-middle-medium-blue
-- Point mapping through 3D transform hierarchies, hittesting bottom-right-light-rose
 - Point mapping through 3D transform hierarchies, hittesting bottom-right-light-yellow
-- Point mapping through 3D transform hierarchies, hittesting bottom-right-medium-blue
-- Point mapping through 3D transform hierarchies, hittesting top-left-light-green
-- Point mapping through 3D transform hierarchies, hittesting top-middle-light-green
-css/css-transforms/3d-point-mapping.html:
-- Point mapping through 3D transforms, hittesting box10)
-- Point mapping through 3D transforms, hittesting box12)
-- Point mapping through 3D transforms, hittesting box13)
-- Point mapping through 3D transforms, hittesting box14)
-- Point mapping through 3D transforms, hittesting box2)
-- Point mapping through 3D transforms, hittesting box6)
-- Point mapping through 3D transforms, hittesting box7)
-- Point mapping through 3D transforms, hittesting box9)
 css/css-transforms/3d-rendering-context-behavior.html:
 - Direct DOM parent is root of rendering context (absolute)
 - Direct DOM parent is root of rendering context (fixed)
@@ -1804,9 +1766,6 @@ css/css-transforms/3d-rendering-context-behavior.html:
 - Intermediate DOM nodes cause rendering context to end (absolute)
 - Intermediate DOM nodes cause rendering context to end (fixed)
 - Intermediate DOM nodes cause rendering context to end (normal flow)
-- Perspective applies to direct DOM abs-pos children
-- Perspective applies to direct DOM fixed-pos children
-- Perspective applies to direct DOM normal-flow children
 css/css-transforms/3d-scene-with-iframe-001.html:
 - "== css/css-transforms/3d-scene-with-iframe-001-ref.html"
 css/css-transforms/3dtransform-and-filter-no-perspective-001.html:
@@ -3736,8 +3695,6 @@ css/css-transforms/animation/scale-interpolation.html:
   1]'
 - 'Web Animations: property <scale> from neutral to [1.5 1] at (2) should be [1.9
   1]'
-css/css-transforms/animation/singular-scale-nested.html:
-- "== css/css-transforms/animation/singular-scale-nested-ref.html"
 css/css-transforms/animation/transform-box-will-change-transform-layer.html:
 - "== css/css-transforms/animation/transform-box-ref.html"
 css/css-transforms/animation/transform-box.html:
@@ -6719,8 +6676,6 @@ css/css-transforms/backface-visibility-hidden-child-will-change-transform.html:
 - "== css/reference/ref-filled-green-100px-square.xht"
 css/css-transforms/backface-visibility-with-sibling-001.html:
 - "== common/blank.html"
-css/css-transforms/change-perspective-property.html:
-- "== css/reference/ref-filled-green-100px-square-only.html"
 css/css-transforms/composited-under-rotateY-180deg-clip-perspective.html:
 - "== css/css-transforms/composited-under-rotateY-180deg-clip-perspective-ref.html"
 css/css-transforms/composited-under-rotateY-180deg-clip.html:
@@ -6992,29 +6947,14 @@ css/css-transforms/perspective-origin-005.html:
 - "== css/reference/ref-filled-green-100px-square.xht"
 css/css-transforms/perspective-origin-006.html:
 - "== css/reference/ref-filled-green-100px-square.xht"
-css/css-transforms/perspective-origin-x.html:
-- "== css/css-transforms/reference/perspective-origin-reftest.html"
-css/css-transforms/perspective-origin-xy.html:
-- "== css/css-transforms/reference/perspective-reftest.html"
 css/css-transforms/perspective-split-by-zero-w.html:
 - "== css/css-transforms/perspective-split-by-zero-w-ref.html"
 css/css-transforms/perspective-svg-001.html:
 - "== css/css-transforms/perspective-svg-001-ref.html (both renderings blank)"
 css/css-transforms/perspective-transforms-equivalence.html:
-- "== css/css-transforms/perspective-transforms-equivalence-ref.html (both renderings
-  blank)"
-css/css-transforms/perspective-translateZ-0.html:
-- "== css/css-transforms/reference/perspective-reftest.html"
-css/css-transforms/perspective-translateZ-negative.html:
-- "== css/css-transforms/reference/perspective-reftest.html"
-css/css-transforms/perspective-translateZ-positive.html:
-- "== css/css-transforms/reference/perspective-reftest.html"
+- "== css/css-transforms/perspective-transforms-equivalence-ref.html"
 css/css-transforms/perspective-untransformable-no-stacking-context.html:
 - "== css/css-transforms/perspective-untransformable-no-stacking-context-ref.html"
-css/css-transforms/perspective-zero-2.html:
-- "== css/css-transforms/perspective-zero-2-ref.html"
-css/css-transforms/perspective-zero-3.html:
-- "== css/css-transforms/reference/green.html"
 css/css-transforms/perspective-zero-point-five.html:
 - "== css/css-transforms/reference/green.html"
 css/css-transforms/perspective-zero.html:
@@ -7023,19 +6963,12 @@ css/css-transforms/preserve-3d-flat-grouping-properties-containing-block.html:
 - Preserve-3d element with a grouping property still a containing block
 - Preserve-3d element without a grouping property still a containing block
 css/css-transforms/preserve-3d-flat-grouping-properties.html:
-- Preserve-3d element flattened due to backdrop-filter
 - Preserve-3d element flattened due to clip CSS
-- Preserve-3d element flattened due to clip-path
-- Preserve-3d element flattened due to filter
-- Preserve-3d element flattened due to isolation
 - Preserve-3d element flattened due to mask
-- Preserve-3d element flattened due to opacity
-- Preserve-3d element flattened due to overflow clip
 css/css-transforms/preserve3d-and-filter-no-perspective.html:
 - "== css/css-transforms/preserve3d-and-filter-no-perspective-ref.html"
 css/css-transforms/preserve3d-and-filter-with-perspective.html:
-- "== css/css-transforms/preserve3d-and-filter-with-perspective-ref.html (both renderings
-  blank)"
+- "== css/css-transforms/preserve3d-and-filter-with-perspective-ref.html"
 css/css-transforms/preserve3d-and-flattening-001.html:
 - "== css/css-transforms/preserve3d-and-flattening-001-ref.html"
 css/css-transforms/preserve3d-and-flattening-002.html:
@@ -7138,10 +7071,6 @@ css/css-transforms/skewY/svg-skewy-with-units.html:
 - "== css/css-transforms/skewY/reference/svg-skewy-ref.html"
 css/css-transforms/subpixel-perspective-translate-z-0.html:
 - "== css/css-transforms/subpixel-perspective-translate-z-0-ref.html"
-css/css-transforms/text-perspective-001.html:
-- "!= about:blank"
-css/css-transforms/transform-3d-rotateY-stair-above-001.xht:
-- "== css/css-transforms/reference/transform-3d-rotateY-stair-above-ref-001.xht"
 css/css-transforms/transform-3d-rotateY-stair-below-001.xht:
 - "== css/css-transforms/reference/transform-3d-rotateY-stair-above-ref-001.xht"
 css/css-transforms/transform-3d-scales-different-x-y-dynamic-001.html:
@@ -7297,18 +7226,10 @@ css/css-transforms/transform-root-bg-003.html:
 - "== css/css-transforms/transform-root-bg-001-ref.html (both renderings blank)"
 css/css-transforms/transform-root-bg-004.html:
 - "== css/css-transforms/transform-root-bg-004-ref.html (both renderings blank)"
-css/css-transforms/transform-singular-001.html:
-- "== css/css-transforms/transform-singular-ref.html"
 css/css-transforms/transform-stacking-001.html:
 - "== css/css-transforms/transform-lime-square-ref.html"
 css/css-transforms/transform-style-stacking-context.html:
 - "== css/css-transforms/transform-lime-square-ref.html"
-css/css-transforms/transform-table-006.html:
-- "== css/css-transforms/transform-blank-ref.html"
-css/css-transforms/transform-table-007.html:
-- "== css/css-transforms/transform-blank-ref.html"
-css/css-transforms/transform-table-008.html:
-- "== css/css-transforms/transform-blank-ref.html"
 css/css-transforms/transform-transformable-table-row.html:
 - "== css/css-transforms/transform-transformable-table-row-ref.html (both renderings
   blank)"
@@ -7361,22 +7282,8 @@ css/css-transforms/transform3d-backface-visibility-006.html:
 - "== css/css-transforms/transform-lime-square-ref.html"
 css/css-transforms/transform3d-backface-visibility-007.html:
 - "== css/css-transforms/transform-lime-square-ref.html"
-css/css-transforms/transform3d-perspective-005.html:
-- "== css/css-transforms/transform-lime-square-ref.html"
-css/css-transforms/transform3d-preserve3d-001.html:
-- "== css/css-transforms/transform3d-preserve3d-001-ref.html"
-css/css-transforms/transform3d-preserve3d-010.html:
-- "== css/css-transforms/transform-lime-square-ref.html"
-css/css-transforms/transform3d-preserve3d-011.html:
-- "== css/css-transforms/transform-lime-square-ref.html"
-css/css-transforms/transform3d-preserve3d-012.html:
-- "== css/css-transforms/transform-blank-ref.html"
 css/css-transforms/transform3d-preserve3d-014.html:
 - "== css/css-transforms/transform-lime-square-ref.html"
-css/css-transforms/transform3d-rotatex-perspective-001.html:
-- "!= css/css-transforms/transform3d-rotatex-ref.html"
-css/css-transforms/transform3d-rotatex-perspective-002.html:
-- "!= css/css-transforms/transform3d-rotatex-ref.html"
 css/css-transforms/transform3d-scale-004.html:
 - "== css/css-transforms/transform-blank-ref.html"
 css/css-transforms/transform3d-sorting-001.html:
