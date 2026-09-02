@@ -7430,9 +7430,6 @@ css/css-transitions/disconnected-element-001.html:
 - Transitions are canceled when an element is removed from the document
 css/css-transitions/dynamic-root-element.html:
 - Transitions don't incorrectly start on dynamic document element insertion
-css/css-transitions/events-004.html:
-- repeating lists
-- truncating lists
 css/css-transitions/events-006.html:
 - transition padding-left on ::after
 - transition padding-left on ::before
