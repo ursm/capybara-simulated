@@ -153,13 +153,13 @@ RSpec.describe 'interpolating a transform list' do
     expect(midpoint('scale(2,)', 'scale(3)')).to eq('matrix(3, 0, 0, 3, 0, 0)')
   end
 
-  # Also a driver-shape assertion: Chrome reports a 3D list as `matrix3d(...)` and this driver
-  # reports the function list (measured, Chrome gives
-  # `matrix3d(1, 0, 0, 0, 0, 0.5, 0.866025, 0, 0, -0.866025, 0.5, 0, 0, 0, 0, 1)`). What is under
-  # test is the SPELLING: the parser matches a name case-insensitively and used to write its
-  # lowercased lookup key back, so this read `rotatex(60deg)` — a string no browser writes. The
-  # geometry was right either way; only the reported value was wrong.
-  it 'writes a function name back as it was spelled (driver spelling, not Chrome)' do
-    expect(midpoint('rotateX(30deg)', 'rotateX(90deg)')).to eq('rotateX(60deg)')
+  # The computed value of a 3D list is the matrix, which is where this driver now agrees with Chrome.
+  # The SPELLING the interpolation produced is still observable — `commitStyles` writes it into the
+  # inline style — and that is what `spec/transform_matrix_spec.rb` pins: the parser matches a name
+  # case-insensitively and used to write its lowercased lookup key back, so the committed value read
+  # `rotatex(60deg)`, a string no browser writes.
+  it 'reports an interpolated 3D rotation as the matrix it composes to' do
+    expect(midpoint('rotateX(30deg)', 'rotateX(90deg)'))
+      .to eq('matrix3d(1, 0, 0, 0, 0, 0.5, 0.866025, 0, 0, -0.866025, 0.5, 0, 0, 0, 0, 1)')
   end
 end
