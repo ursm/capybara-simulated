@@ -52270,6 +52270,11 @@ shadow-dom/declarative/tentative/shadowrootadoptedstylesheets/shadowrootadopteds
 - name: Sheet identity does not change after fetch completes.
   reason: Awaits fetchAndWait and asserts the pre-fetch placeholder sheet object survives
     the async CSS fetch; async-fetch outcome.
+shadow-dom/directionality-001.tentative.html:
+- name: "== shadow-dom/directionality-001-ref.html"
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
 shadow-dom/dragleave-related-target.html:
 - name: dragleave relatedTarget should be retargeted to shadow host when entering
     shadow DOM
