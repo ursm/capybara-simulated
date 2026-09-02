@@ -271,11 +271,12 @@ RSpec.describe 'CSS interpolation types' do
     end
 
     # A `perspective()` interpolates its RECIPROCAL — half way from no perspective to 100px is 200,
-    # not 50 (Chrome-measured, as the `-0.005` of the matrix it reports). Chrome reports the whole
-    # value as a `matrix3d`; this engine does not model a 3D matrix and reports the function list,
-    # which is a separate listed gap.
+    # not 50 — which the computed value shows as the `-0.005` in its fourth row (Chrome-measured;
+    # `-1 / 200`). The SPELLING is visible through `commitStyles`, which commits `perspective(200px)`
+    # (spec/transform_matrix_spec.rb).
     it 'interpolates a perspective as its reciprocal' do
-      expect(midpoint('transform', 'none', 'perspective(100px)')).to eq('perspective(200px)')
+      expect(midpoint('transform', 'none', 'perspective(100px)'))
+        .to eq('matrix3d(1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, -0.005, 0, 0, 0, 1)')
     end
   end
 
