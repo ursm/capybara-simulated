@@ -1853,10 +1853,6 @@ css/css-transforms/animation/list-interpolation.html:
   0, 0)]'
 - 'CSS Animations: property <transform> from [scaleY(-3) translateX(0px)] to [scaleX(-3)
   scaleY(2)] at (0.25) should be [scale(0, -2) matrix(1, 0, 0, 1.25, 0, 0)]'
-- 'CSS Animations: property <transform> from [translateX(100px) scaleX(3) translate(500px)
-  scale(2)] to [translateY(200px) scale(5) translateX(100px) scaleY(3)] at (0.25)
-  should be [translate(75px, 50px) scale(3.5, 2) translate(400px, 0px) scale(1.75,
-  2.25)]'
 - 'CSS Transitions with transition: all: property <transform> from [rotate(0deg) scaleX(1)]
   to [rotate(720deg) translateX(0px) scaleX(2)] at (0.25) should be [rotate(180deg)
   matrix(1.25, 0, 0, 1, 0, 0)]'
@@ -1897,10 +1893,6 @@ css/css-transforms/animation/list-interpolation.html:
 - 'CSS Transitions with transition: all: property <transform> from [scaleY(-3) translateX(0px)]
   to [scaleX(-3) scaleY(2)] at (0.25) should be [scale(0, -2) matrix(1, 0, 0, 1.25,
   0, 0)]'
-- 'CSS Transitions with transition: all: property <transform> from [translateX(100px)
-  scaleX(3) translate(500px) scale(2)] to [translateY(200px) scale(5) translateX(100px)
-  scaleY(3)] at (0.25) should be [translate(75px, 50px) scale(3.5, 2) translate(400px,
-  0px) scale(1.75, 2.25)]'
 - 'CSS Transitions: property <transform> from [rotate(0deg) scaleX(1)] to [rotate(720deg)
   translateX(0px) scaleX(2)] at (0.25) should be [rotate(180deg) matrix(1.25, 0, 0,
   1, 0, 0)]'
@@ -1939,10 +1931,6 @@ css/css-transforms/animation/list-interpolation.html:
   0, 0)]'
 - 'CSS Transitions: property <transform> from [scaleY(-3) translateX(0px)] to [scaleX(-3)
   scaleY(2)] at (0.25) should be [scale(0, -2) matrix(1, 0, 0, 1.25, 0, 0)]'
-- 'CSS Transitions: property <transform> from [translateX(100px) scaleX(3) translate(500px)
-  scale(2)] to [translateY(200px) scale(5) translateX(100px) scaleY(3)] at (0.25)
-  should be [translate(75px, 50px) scale(3.5, 2) translate(400px, 0px) scale(1.75,
-  2.25)]'
 - 'Web Animations: property <transform> from [rotate(0deg) scaleX(1)] to [rotate(720deg)
   translateX(0px) scaleX(2)] at (0.25) should be [rotate(180deg) matrix(1.25, 0, 0,
   1, 0, 0)]'
@@ -1981,10 +1969,6 @@ css/css-transforms/animation/list-interpolation.html:
   0, 0)]'
 - 'Web Animations: property <transform> from [scaleY(-3) translateX(0px)] to [scaleX(-3)
   scaleY(2)] at (0.25) should be [scale(0, -2) matrix(1, 0, 0, 1.25, 0, 0)]'
-- 'Web Animations: property <transform> from [translateX(100px) scaleX(3) translate(500px)
-  scale(2)] to [translateY(200px) scale(5) translateX(100px) scaleY(3)] at (0.25)
-  should be [translate(75px, 50px) scale(3.5, 2) translate(400px, 0px) scale(1.75,
-  2.25)]'
 css/css-transforms/animation/matrix-interpolation.html:
 - 'CSS Animations: property <transform> from [rotateY(360deg)] to [rotateX(720deg)]
   at (0.5) should be [matrix(1, 0, 0, 1, 0, 0)]'
@@ -3780,41 +3764,8 @@ css/css-transforms/animation/transform-box-will-change-transform-layer.html:
 css/css-transforms/animation/transform-box.html:
 - "== css/css-transforms/animation/transform-box-ref.html"
 css/css-transforms/animation/transform-composition.html:
-- 'Compositing CSS Animations: property <transform> underlying [rotateX(100deg) rotateY(100deg)]
-  from add [translate(10px, 20px)] to replace [rotateX(200deg) rotateY(200deg) translate(110px,
-  220px)] at (-0.5) should be [rotateX(50deg) rotateY(50deg) translate(-40px, -80px)]'
-- 'Compositing CSS Animations: property <transform> underlying [rotateX(100deg) rotateY(100deg)]
-  from add [translate(10px, 20px)] to replace [rotateX(200deg) rotateY(200deg) translate(110px,
-  220px)] at (0) should be [rotateX(100deg) rotateY(100deg) translate(10px, 20px)]'
-- 'Compositing CSS Animations: property <transform> underlying [rotateX(100deg) rotateY(100deg)]
-  from add [translate(10px, 20px)] to replace [rotateX(200deg) rotateY(200deg) translate(110px,
-  220px)] at (0.25) should be [rotateX(125deg) rotateY(125deg) translate(35px, 70px)]'
-- 'Compositing CSS Animations: property <transform> underlying [rotateX(100deg) rotateY(100deg)]
-  from add [translate(10px, 20px)] to replace [rotateX(200deg) rotateY(200deg) translate(110px,
-  220px)] at (0.5) should be [rotateX(150deg) rotateY(150deg) translate(60px, 120px)]'
-- 'Compositing CSS Animations: property <transform> underlying [rotateX(100deg) rotateY(100deg)]
-  from add [translate(10px, 20px)] to replace [rotateX(200deg) rotateY(200deg) translate(110px,
-  220px)] at (0.75) should be [rotateX(175deg) rotateY(175deg) translate(85px, 170px)]'
-- 'Compositing CSS Animations: property <transform> underlying [rotateX(100deg) rotateY(100deg)]
-  from add [translate(10px, 20px)] to replace [rotateX(200deg) rotateY(200deg) translate(110px,
-  220px)] at (1) should be [rotateX(200deg) rotateY(200deg) translate(110px, 220px)]'
-- 'Compositing CSS Animations: property <transform> underlying [rotateX(100deg) rotateY(100deg)]
-  from add [translate(10px, 20px)] to replace [rotateX(200deg) rotateY(200deg) translate(110px,
-  220px)] at (1.5) should be [rotateX(250deg) rotateY(250deg) translate(160px, 320px)]'
-- 'Compositing CSS Animations: property <transform> underlying [rotateX(45deg)] from
-  add [none] to add [rotateY(360deg)] at (-0.5) should be [rotateX(45deg) rotateY(-180deg)]'
 - 'Compositing CSS Animations: property <transform> underlying [rotateX(45deg)] from
   add [none] to add [rotateY(360deg)] at (0) should be [rotateX(45deg) rotateY(0deg)]'
-- 'Compositing CSS Animations: property <transform> underlying [rotateX(45deg)] from
-  add [none] to add [rotateY(360deg)] at (0.25) should be [rotateX(45deg) rotateY(90deg)]'
-- 'Compositing CSS Animations: property <transform> underlying [rotateX(45deg)] from
-  add [none] to add [rotateY(360deg)] at (0.5) should be [rotateX(45deg) rotateY(180deg)]'
-- 'Compositing CSS Animations: property <transform> underlying [rotateX(45deg)] from
-  add [none] to add [rotateY(360deg)] at (0.75) should be [rotateX(45deg) rotateY(270deg)]'
-- 'Compositing CSS Animations: property <transform> underlying [rotateX(45deg)] from
-  add [none] to add [rotateY(360deg)] at (1) should be [rotateX(45deg) rotateY(360deg)]'
-- 'Compositing CSS Animations: property <transform> underlying [rotateX(45deg)] from
-  add [none] to add [rotateY(360deg)] at (1.5) should be [rotateX(45deg) rotateY(540deg)]'
 - 'Compositing CSS Animations: property <transform> underlying [rotateX(45deg)] from
   add [scaleX(1)] to add [rotateY(360deg)] at (-0.5) should be [rotateX(45deg)]'
 - 'Compositing CSS Animations: property <transform> underlying [rotateX(45deg)] from
@@ -3851,41 +3802,8 @@ css/css-transforms/animation/transform-composition.html:
   add [translate(100px, 100px)] to add [scale(2)] at (1.5) should be [matrix3d(2.5,
   0, 0, 0, 0, 5.55112e-16, 2.5, 0, 0, -1, 2.22045e-16, 0, -50, -3.06162e-15, -50,
   1)]'
-- 'Compositing Web Animations: property <transform> underlying [rotateX(100deg) rotateY(100deg)]
-  from add [translate(10px, 20px)] to replace [rotateX(200deg) rotateY(200deg) translate(110px,
-  220px)] at (-0.5) should be [rotateX(50deg) rotateY(50deg) translate(-40px, -80px)]'
-- 'Compositing Web Animations: property <transform> underlying [rotateX(100deg) rotateY(100deg)]
-  from add [translate(10px, 20px)] to replace [rotateX(200deg) rotateY(200deg) translate(110px,
-  220px)] at (0) should be [rotateX(100deg) rotateY(100deg) translate(10px, 20px)]'
-- 'Compositing Web Animations: property <transform> underlying [rotateX(100deg) rotateY(100deg)]
-  from add [translate(10px, 20px)] to replace [rotateX(200deg) rotateY(200deg) translate(110px,
-  220px)] at (0.25) should be [rotateX(125deg) rotateY(125deg) translate(35px, 70px)]'
-- 'Compositing Web Animations: property <transform> underlying [rotateX(100deg) rotateY(100deg)]
-  from add [translate(10px, 20px)] to replace [rotateX(200deg) rotateY(200deg) translate(110px,
-  220px)] at (0.5) should be [rotateX(150deg) rotateY(150deg) translate(60px, 120px)]'
-- 'Compositing Web Animations: property <transform> underlying [rotateX(100deg) rotateY(100deg)]
-  from add [translate(10px, 20px)] to replace [rotateX(200deg) rotateY(200deg) translate(110px,
-  220px)] at (0.75) should be [rotateX(175deg) rotateY(175deg) translate(85px, 170px)]'
-- 'Compositing Web Animations: property <transform> underlying [rotateX(100deg) rotateY(100deg)]
-  from add [translate(10px, 20px)] to replace [rotateX(200deg) rotateY(200deg) translate(110px,
-  220px)] at (1) should be [rotateX(200deg) rotateY(200deg) translate(110px, 220px)]'
-- 'Compositing Web Animations: property <transform> underlying [rotateX(100deg) rotateY(100deg)]
-  from add [translate(10px, 20px)] to replace [rotateX(200deg) rotateY(200deg) translate(110px,
-  220px)] at (1.5) should be [rotateX(250deg) rotateY(250deg) translate(160px, 320px)]'
-- 'Compositing Web Animations: property <transform> underlying [rotateX(45deg)] from
-  add [none] to add [rotateY(360deg)] at (-0.5) should be [rotateX(45deg) rotateY(-180deg)]'
 - 'Compositing Web Animations: property <transform> underlying [rotateX(45deg)] from
   add [none] to add [rotateY(360deg)] at (0) should be [rotateX(45deg) rotateY(0deg)]'
-- 'Compositing Web Animations: property <transform> underlying [rotateX(45deg)] from
-  add [none] to add [rotateY(360deg)] at (0.25) should be [rotateX(45deg) rotateY(90deg)]'
-- 'Compositing Web Animations: property <transform> underlying [rotateX(45deg)] from
-  add [none] to add [rotateY(360deg)] at (0.5) should be [rotateX(45deg) rotateY(180deg)]'
-- 'Compositing Web Animations: property <transform> underlying [rotateX(45deg)] from
-  add [none] to add [rotateY(360deg)] at (0.75) should be [rotateX(45deg) rotateY(270deg)]'
-- 'Compositing Web Animations: property <transform> underlying [rotateX(45deg)] from
-  add [none] to add [rotateY(360deg)] at (1) should be [rotateX(45deg) rotateY(360deg)]'
-- 'Compositing Web Animations: property <transform> underlying [rotateX(45deg)] from
-  add [none] to add [rotateY(360deg)] at (1.5) should be [rotateX(45deg) rotateY(540deg)]'
 - 'Compositing Web Animations: property <transform> underlying [rotateX(45deg)] from
   add [scaleX(1)] to add [rotateY(360deg)] at (-0.5) should be [rotateX(45deg)]'
 - 'Compositing Web Animations: property <transform> underlying [rotateX(45deg)] from
@@ -3942,8 +3860,6 @@ css/css-transforms/animation/transform-interpolation-001.html:
 - 'CSS Animations: property <transform> from [rotate3d(0, 1, 0, 0deg)] to [rotate3d(0,
   2, 0, 450deg)] at (-1) should be [rotate3d(0, 1, 0, -450deg)]'
 - 'CSS Animations: property <transform> from [rotate3d(0, 1, 0, 0deg)] to [rotate3d(0,
-  2, 0, 450deg)] at (0) should be [rotate3d(0, 1, 0, 0deg)]'
-- 'CSS Animations: property <transform> from [rotate3d(0, 1, 0, 0deg)] to [rotate3d(0,
   2, 0, 450deg)] at (0.25) should be [rotate3d(0, 1, 0, 112.5deg)]'
 - 'CSS Animations: property <transform> from [rotate3d(0, 1, 0, 0deg)] to [rotate3d(0,
   2, 0, 450deg)] at (0.75) should be [rotate3d(0, 1, 0, 337.5deg)]'
@@ -3959,36 +3875,6 @@ css/css-transforms/animation/transform-interpolation-001.html:
   1, 1, 180deg)] at (0.75) should be [rotate3d(0.163027, 0.774382, 0.611354, 153.99deg)]'
 - 'CSS Animations: property <transform> from [rotate3d(1, 1, 0, 90deg)] to [rotate3d(0,
   1, 1, 180deg)] at (2) should be [rotate3d(0.71, 0, -0.71, 90deg)]'
-- 'CSS Animations: property <transform> from [rotateX(0deg) rotateY(0deg) rotateZ(0deg)]
-  to [rotateX(700deg) rotateY(800deg) rotateZ(900deg)] at (-1) should be [rotateX(-700deg)
-  rotateY(-800deg) rotateZ(-900deg)]'
-- 'CSS Animations: property <transform> from [rotateX(0deg) rotateY(0deg) rotateZ(0deg)]
-  to [rotateX(700deg) rotateY(800deg) rotateZ(900deg)] at (0) should be [rotateX(0deg)
-  rotateY(0deg) rotateZ(0deg)]'
-- 'CSS Animations: property <transform> from [rotateX(0deg) rotateY(0deg) rotateZ(0deg)]
-  to [rotateX(700deg) rotateY(800deg) rotateZ(900deg)] at (0.25) should be [rotateX(175deg)
-  rotateY(200deg) rotateZ(225deg)]'
-- 'CSS Animations: property <transform> from [rotateX(0deg) rotateY(0deg) rotateZ(0deg)]
-  to [rotateX(700deg) rotateY(800deg) rotateZ(900deg)] at (0.75) should be [rotateX(525deg)
-  rotateY(600deg) rotateZ(675deg)]'
-- 'CSS Animations: property <transform> from [rotateX(0deg) rotateY(0deg) rotateZ(0deg)]
-  to [rotateX(700deg) rotateY(800deg) rotateZ(900deg)] at (1) should be [rotateX(700deg)
-  rotateY(800deg) rotateZ(900deg)]'
-- 'CSS Animations: property <transform> from [rotateX(0deg) rotateY(0deg) rotateZ(0deg)]
-  to [rotateX(700deg) rotateY(800deg) rotateZ(900deg)] at (2) should be [rotateX(1400deg)
-  rotateY(1600deg) rotateZ(1800deg)]'
-- 'CSS Animations: property <transform> from [rotateX(0deg)] to [rotateX(700deg)]
-  at (-1) should be [rotateX(-700deg)]'
-- 'CSS Animations: property <transform> from [rotateX(0deg)] to [rotateX(700deg)]
-  at (0) should be [rotateX(0deg)]'
-- 'CSS Animations: property <transform> from [rotateX(0deg)] to [rotateX(700deg)]
-  at (0.25) should be [rotateX(175deg)]'
-- 'CSS Animations: property <transform> from [rotateX(0deg)] to [rotateX(700deg)]
-  at (0.75) should be [rotateX(525deg)]'
-- 'CSS Animations: property <transform> from [rotateX(0deg)] to [rotateX(700deg)]
-  at (1) should be [rotateX(700deg)]'
-- 'CSS Animations: property <transform> from [rotateX(0deg)] to [rotateX(700deg)]
-  at (2) should be [rotateX(1400deg)]'
 - 'CSS Animations: property <transform> from [rotateX(0deg)] to [rotateY(900deg)]
   at (-1) should be [rotateY(-900deg)]'
 - 'CSS Animations: property <transform> from [rotateX(0deg)] to [rotateY(900deg)]
@@ -3999,18 +3885,6 @@ css/css-transforms/animation/transform-interpolation-001.html:
   at (0.75) should be [rotateY(675deg)]'
 - 'CSS Animations: property <transform> from [rotateX(0deg)] to [rotateY(900deg)]
   at (2) should be [rotateY(1800deg)]'
-- 'CSS Animations: property <transform> from [rotateY(0deg)] to [rotateY(800deg)]
-  at (-1) should be [rotateY(-800deg)]'
-- 'CSS Animations: property <transform> from [rotateY(0deg)] to [rotateY(800deg)]
-  at (0) should be [rotateY(0deg)]'
-- 'CSS Animations: property <transform> from [rotateY(0deg)] to [rotateY(800deg)]
-  at (0.25) should be [rotateY(200deg)]'
-- 'CSS Animations: property <transform> from [rotateY(0deg)] to [rotateY(800deg)]
-  at (0.75) should be [rotateY(600deg)]'
-- 'CSS Animations: property <transform> from [rotateY(0deg)] to [rotateY(800deg)]
-  at (1) should be [rotateY(800deg)]'
-- 'CSS Animations: property <transform> from [rotateY(0deg)] to [rotateY(800deg)]
-  at (2) should be [rotateY(1600deg)]'
 - 'CSS Animations: property <transform> from [rotateY(900deg)] to [rotateZ(0deg)]
   at (-1) should be [rotateY(1800deg)]'
 - 'CSS Animations: property <transform> from [rotateY(900deg)] to [rotateZ(0deg)]
@@ -4078,8 +3952,6 @@ css/css-transforms/animation/transform-interpolation-001.html:
 - 'CSS Transitions with transition: all: property <transform> from [rotate3d(0, 1,
   0, 0deg)] to [rotate3d(0, 2, 0, 450deg)] at (-1) should be [rotate3d(0, 1, 0, -450deg)]'
 - 'CSS Transitions with transition: all: property <transform> from [rotate3d(0, 1,
-  0, 0deg)] to [rotate3d(0, 2, 0, 450deg)] at (0) should be [rotate3d(0, 1, 0, 0deg)]'
-- 'CSS Transitions with transition: all: property <transform> from [rotate3d(0, 1,
   0, 0deg)] to [rotate3d(0, 2, 0, 450deg)] at (0.25) should be [rotate3d(0, 1, 0,
   112.5deg)]'
 - 'CSS Transitions with transition: all: property <transform> from [rotate3d(0, 1,
@@ -4103,36 +3975,6 @@ css/css-transforms/animation/transform-interpolation-001.html:
 - 'CSS Transitions with transition: all: property <transform> from [rotate3d(1, 1,
   0, 90deg)] to [rotate3d(0, 1, 1, 180deg)] at (2) should be [rotate3d(0.71, 0, -0.71,
   90deg)]'
-- 'CSS Transitions with transition: all: property <transform> from [rotateX(0deg)
-  rotateY(0deg) rotateZ(0deg)] to [rotateX(700deg) rotateY(800deg) rotateZ(900deg)]
-  at (-1) should be [rotateX(-700deg) rotateY(-800deg) rotateZ(-900deg)]'
-- 'CSS Transitions with transition: all: property <transform> from [rotateX(0deg)
-  rotateY(0deg) rotateZ(0deg)] to [rotateX(700deg) rotateY(800deg) rotateZ(900deg)]
-  at (0) should be [rotateX(0deg) rotateY(0deg) rotateZ(0deg)]'
-- 'CSS Transitions with transition: all: property <transform> from [rotateX(0deg)
-  rotateY(0deg) rotateZ(0deg)] to [rotateX(700deg) rotateY(800deg) rotateZ(900deg)]
-  at (0.25) should be [rotateX(175deg) rotateY(200deg) rotateZ(225deg)]'
-- 'CSS Transitions with transition: all: property <transform> from [rotateX(0deg)
-  rotateY(0deg) rotateZ(0deg)] to [rotateX(700deg) rotateY(800deg) rotateZ(900deg)]
-  at (0.75) should be [rotateX(525deg) rotateY(600deg) rotateZ(675deg)]'
-- 'CSS Transitions with transition: all: property <transform> from [rotateX(0deg)
-  rotateY(0deg) rotateZ(0deg)] to [rotateX(700deg) rotateY(800deg) rotateZ(900deg)]
-  at (1) should be [rotateX(700deg) rotateY(800deg) rotateZ(900deg)]'
-- 'CSS Transitions with transition: all: property <transform> from [rotateX(0deg)
-  rotateY(0deg) rotateZ(0deg)] to [rotateX(700deg) rotateY(800deg) rotateZ(900deg)]
-  at (2) should be [rotateX(1400deg) rotateY(1600deg) rotateZ(1800deg)]'
-- 'CSS Transitions with transition: all: property <transform> from [rotateX(0deg)]
-  to [rotateX(700deg)] at (-1) should be [rotateX(-700deg)]'
-- 'CSS Transitions with transition: all: property <transform> from [rotateX(0deg)]
-  to [rotateX(700deg)] at (0) should be [rotateX(0deg)]'
-- 'CSS Transitions with transition: all: property <transform> from [rotateX(0deg)]
-  to [rotateX(700deg)] at (0.25) should be [rotateX(175deg)]'
-- 'CSS Transitions with transition: all: property <transform> from [rotateX(0deg)]
-  to [rotateX(700deg)] at (0.75) should be [rotateX(525deg)]'
-- 'CSS Transitions with transition: all: property <transform> from [rotateX(0deg)]
-  to [rotateX(700deg)] at (1) should be [rotateX(700deg)]'
-- 'CSS Transitions with transition: all: property <transform> from [rotateX(0deg)]
-  to [rotateX(700deg)] at (2) should be [rotateX(1400deg)]'
 - 'CSS Transitions with transition: all: property <transform> from [rotateX(0deg)]
   to [rotateY(900deg)] at (-1) should be [rotateY(-900deg)]'
 - 'CSS Transitions with transition: all: property <transform> from [rotateX(0deg)]
@@ -4143,22 +3985,8 @@ css/css-transforms/animation/transform-interpolation-001.html:
   to [rotateY(900deg)] at (0.75) should be [rotateY(675deg)]'
 - 'CSS Transitions with transition: all: property <transform> from [rotateX(0deg)]
   to [rotateY(900deg)] at (2) should be [rotateY(1800deg)]'
-- 'CSS Transitions with transition: all: property <transform> from [rotateY(0deg)]
-  to [rotateY(800deg)] at (-1) should be [rotateY(-800deg)]'
-- 'CSS Transitions with transition: all: property <transform> from [rotateY(0deg)]
-  to [rotateY(800deg)] at (0) should be [rotateY(0deg)]'
-- 'CSS Transitions with transition: all: property <transform> from [rotateY(0deg)]
-  to [rotateY(800deg)] at (0.25) should be [rotateY(200deg)]'
-- 'CSS Transitions with transition: all: property <transform> from [rotateY(0deg)]
-  to [rotateY(800deg)] at (0.75) should be [rotateY(600deg)]'
-- 'CSS Transitions with transition: all: property <transform> from [rotateY(0deg)]
-  to [rotateY(800deg)] at (1) should be [rotateY(800deg)]'
-- 'CSS Transitions with transition: all: property <transform> from [rotateY(0deg)]
-  to [rotateY(800deg)] at (2) should be [rotateY(1600deg)]'
 - 'CSS Transitions with transition: all: property <transform> from [rotateY(900deg)]
   to [rotateZ(0deg)] at (-1) should be [rotateY(1800deg)]'
-- 'CSS Transitions with transition: all: property <transform> from [rotateY(900deg)]
-  to [rotateZ(0deg)] at (0) should be [rotateY(900deg)]'
 - 'CSS Transitions with transition: all: property <transform> from [rotateY(900deg)]
   to [rotateZ(0deg)] at (0.25) should be [rotateY(675deg)]'
 - 'CSS Transitions with transition: all: property <transform> from [rotateY(900deg)]
@@ -4224,8 +4052,6 @@ css/css-transforms/animation/transform-interpolation-001.html:
 - 'CSS Transitions: property <transform> from [rotate3d(0, 1, 0, 0deg)] to [rotate3d(0,
   2, 0, 450deg)] at (-1) should be [rotate3d(0, 1, 0, -450deg)]'
 - 'CSS Transitions: property <transform> from [rotate3d(0, 1, 0, 0deg)] to [rotate3d(0,
-  2, 0, 450deg)] at (0) should be [rotate3d(0, 1, 0, 0deg)]'
-- 'CSS Transitions: property <transform> from [rotate3d(0, 1, 0, 0deg)] to [rotate3d(0,
   2, 0, 450deg)] at (0.25) should be [rotate3d(0, 1, 0, 112.5deg)]'
 - 'CSS Transitions: property <transform> from [rotate3d(0, 1, 0, 0deg)] to [rotate3d(0,
   2, 0, 450deg)] at (0.75) should be [rotate3d(0, 1, 0, 337.5deg)]'
@@ -4243,36 +4069,6 @@ css/css-transforms/animation/transform-interpolation-001.html:
   1, 1, 180deg)] at (0.75) should be [rotate3d(0.163027, 0.774382, 0.611354, 153.99deg)]'
 - 'CSS Transitions: property <transform> from [rotate3d(1, 1, 0, 90deg)] to [rotate3d(0,
   1, 1, 180deg)] at (2) should be [rotate3d(0.71, 0, -0.71, 90deg)]'
-- 'CSS Transitions: property <transform> from [rotateX(0deg) rotateY(0deg) rotateZ(0deg)]
-  to [rotateX(700deg) rotateY(800deg) rotateZ(900deg)] at (-1) should be [rotateX(-700deg)
-  rotateY(-800deg) rotateZ(-900deg)]'
-- 'CSS Transitions: property <transform> from [rotateX(0deg) rotateY(0deg) rotateZ(0deg)]
-  to [rotateX(700deg) rotateY(800deg) rotateZ(900deg)] at (0) should be [rotateX(0deg)
-  rotateY(0deg) rotateZ(0deg)]'
-- 'CSS Transitions: property <transform> from [rotateX(0deg) rotateY(0deg) rotateZ(0deg)]
-  to [rotateX(700deg) rotateY(800deg) rotateZ(900deg)] at (0.25) should be [rotateX(175deg)
-  rotateY(200deg) rotateZ(225deg)]'
-- 'CSS Transitions: property <transform> from [rotateX(0deg) rotateY(0deg) rotateZ(0deg)]
-  to [rotateX(700deg) rotateY(800deg) rotateZ(900deg)] at (0.75) should be [rotateX(525deg)
-  rotateY(600deg) rotateZ(675deg)]'
-- 'CSS Transitions: property <transform> from [rotateX(0deg) rotateY(0deg) rotateZ(0deg)]
-  to [rotateX(700deg) rotateY(800deg) rotateZ(900deg)] at (1) should be [rotateX(700deg)
-  rotateY(800deg) rotateZ(900deg)]'
-- 'CSS Transitions: property <transform> from [rotateX(0deg) rotateY(0deg) rotateZ(0deg)]
-  to [rotateX(700deg) rotateY(800deg) rotateZ(900deg)] at (2) should be [rotateX(1400deg)
-  rotateY(1600deg) rotateZ(1800deg)]'
-- 'CSS Transitions: property <transform> from [rotateX(0deg)] to [rotateX(700deg)]
-  at (-1) should be [rotateX(-700deg)]'
-- 'CSS Transitions: property <transform> from [rotateX(0deg)] to [rotateX(700deg)]
-  at (0) should be [rotateX(0deg)]'
-- 'CSS Transitions: property <transform> from [rotateX(0deg)] to [rotateX(700deg)]
-  at (0.25) should be [rotateX(175deg)]'
-- 'CSS Transitions: property <transform> from [rotateX(0deg)] to [rotateX(700deg)]
-  at (0.75) should be [rotateX(525deg)]'
-- 'CSS Transitions: property <transform> from [rotateX(0deg)] to [rotateX(700deg)]
-  at (1) should be [rotateX(700deg)]'
-- 'CSS Transitions: property <transform> from [rotateX(0deg)] to [rotateX(700deg)]
-  at (2) should be [rotateX(1400deg)]'
 - 'CSS Transitions: property <transform> from [rotateX(0deg)] to [rotateY(900deg)]
   at (-1) should be [rotateY(-900deg)]'
 - 'CSS Transitions: property <transform> from [rotateX(0deg)] to [rotateY(900deg)]
@@ -4283,22 +4079,8 @@ css/css-transforms/animation/transform-interpolation-001.html:
   at (0.75) should be [rotateY(675deg)]'
 - 'CSS Transitions: property <transform> from [rotateX(0deg)] to [rotateY(900deg)]
   at (2) should be [rotateY(1800deg)]'
-- 'CSS Transitions: property <transform> from [rotateY(0deg)] to [rotateY(800deg)]
-  at (-1) should be [rotateY(-800deg)]'
-- 'CSS Transitions: property <transform> from [rotateY(0deg)] to [rotateY(800deg)]
-  at (0) should be [rotateY(0deg)]'
-- 'CSS Transitions: property <transform> from [rotateY(0deg)] to [rotateY(800deg)]
-  at (0.25) should be [rotateY(200deg)]'
-- 'CSS Transitions: property <transform> from [rotateY(0deg)] to [rotateY(800deg)]
-  at (0.75) should be [rotateY(600deg)]'
-- 'CSS Transitions: property <transform> from [rotateY(0deg)] to [rotateY(800deg)]
-  at (1) should be [rotateY(800deg)]'
-- 'CSS Transitions: property <transform> from [rotateY(0deg)] to [rotateY(800deg)]
-  at (2) should be [rotateY(1600deg)]'
 - 'CSS Transitions: property <transform> from [rotateY(900deg)] to [rotateZ(0deg)]
   at (-1) should be [rotateY(1800deg)]'
-- 'CSS Transitions: property <transform> from [rotateY(900deg)] to [rotateZ(0deg)]
-  at (0) should be [rotateY(900deg)]'
 - 'CSS Transitions: property <transform> from [rotateY(900deg)] to [rotateZ(0deg)]
   at (0.25) should be [rotateY(675deg)]'
 - 'CSS Transitions: property <transform> from [rotateY(900deg)] to [rotateZ(0deg)]
@@ -4360,8 +4142,6 @@ css/css-transforms/animation/transform-interpolation-001.html:
 - 'Web Animations: property <transform> from [rotate3d(0, 1, 0, 0deg)] to [rotate3d(0,
   2, 0, 450deg)] at (-1) should be [rotate3d(0, 1, 0, -450deg)]'
 - 'Web Animations: property <transform> from [rotate3d(0, 1, 0, 0deg)] to [rotate3d(0,
-  2, 0, 450deg)] at (0) should be [rotate3d(0, 1, 0, 0deg)]'
-- 'Web Animations: property <transform> from [rotate3d(0, 1, 0, 0deg)] to [rotate3d(0,
   2, 0, 450deg)] at (0.25) should be [rotate3d(0, 1, 0, 112.5deg)]'
 - 'Web Animations: property <transform> from [rotate3d(0, 1, 0, 0deg)] to [rotate3d(0,
   2, 0, 450deg)] at (0.75) should be [rotate3d(0, 1, 0, 337.5deg)]'
@@ -4377,36 +4157,6 @@ css/css-transforms/animation/transform-interpolation-001.html:
   1, 1, 180deg)] at (0.75) should be [rotate3d(0.163027, 0.774382, 0.611354, 153.99deg)]'
 - 'Web Animations: property <transform> from [rotate3d(1, 1, 0, 90deg)] to [rotate3d(0,
   1, 1, 180deg)] at (2) should be [rotate3d(0.71, 0, -0.71, 90deg)]'
-- 'Web Animations: property <transform> from [rotateX(0deg) rotateY(0deg) rotateZ(0deg)]
-  to [rotateX(700deg) rotateY(800deg) rotateZ(900deg)] at (-1) should be [rotateX(-700deg)
-  rotateY(-800deg) rotateZ(-900deg)]'
-- 'Web Animations: property <transform> from [rotateX(0deg) rotateY(0deg) rotateZ(0deg)]
-  to [rotateX(700deg) rotateY(800deg) rotateZ(900deg)] at (0) should be [rotateX(0deg)
-  rotateY(0deg) rotateZ(0deg)]'
-- 'Web Animations: property <transform> from [rotateX(0deg) rotateY(0deg) rotateZ(0deg)]
-  to [rotateX(700deg) rotateY(800deg) rotateZ(900deg)] at (0.25) should be [rotateX(175deg)
-  rotateY(200deg) rotateZ(225deg)]'
-- 'Web Animations: property <transform> from [rotateX(0deg) rotateY(0deg) rotateZ(0deg)]
-  to [rotateX(700deg) rotateY(800deg) rotateZ(900deg)] at (0.75) should be [rotateX(525deg)
-  rotateY(600deg) rotateZ(675deg)]'
-- 'Web Animations: property <transform> from [rotateX(0deg) rotateY(0deg) rotateZ(0deg)]
-  to [rotateX(700deg) rotateY(800deg) rotateZ(900deg)] at (1) should be [rotateX(700deg)
-  rotateY(800deg) rotateZ(900deg)]'
-- 'Web Animations: property <transform> from [rotateX(0deg) rotateY(0deg) rotateZ(0deg)]
-  to [rotateX(700deg) rotateY(800deg) rotateZ(900deg)] at (2) should be [rotateX(1400deg)
-  rotateY(1600deg) rotateZ(1800deg)]'
-- 'Web Animations: property <transform> from [rotateX(0deg)] to [rotateX(700deg)]
-  at (-1) should be [rotateX(-700deg)]'
-- 'Web Animations: property <transform> from [rotateX(0deg)] to [rotateX(700deg)]
-  at (0) should be [rotateX(0deg)]'
-- 'Web Animations: property <transform> from [rotateX(0deg)] to [rotateX(700deg)]
-  at (0.25) should be [rotateX(175deg)]'
-- 'Web Animations: property <transform> from [rotateX(0deg)] to [rotateX(700deg)]
-  at (0.75) should be [rotateX(525deg)]'
-- 'Web Animations: property <transform> from [rotateX(0deg)] to [rotateX(700deg)]
-  at (1) should be [rotateX(700deg)]'
-- 'Web Animations: property <transform> from [rotateX(0deg)] to [rotateX(700deg)]
-  at (2) should be [rotateX(1400deg)]'
 - 'Web Animations: property <transform> from [rotateX(0deg)] to [rotateY(900deg)]
   at (-1) should be [rotateY(-900deg)]'
 - 'Web Animations: property <transform> from [rotateX(0deg)] to [rotateY(900deg)]
@@ -4417,18 +4167,6 @@ css/css-transforms/animation/transform-interpolation-001.html:
   at (0.75) should be [rotateY(675deg)]'
 - 'Web Animations: property <transform> from [rotateX(0deg)] to [rotateY(900deg)]
   at (2) should be [rotateY(1800deg)]'
-- 'Web Animations: property <transform> from [rotateY(0deg)] to [rotateY(800deg)]
-  at (-1) should be [rotateY(-800deg)]'
-- 'Web Animations: property <transform> from [rotateY(0deg)] to [rotateY(800deg)]
-  at (0) should be [rotateY(0deg)]'
-- 'Web Animations: property <transform> from [rotateY(0deg)] to [rotateY(800deg)]
-  at (0.25) should be [rotateY(200deg)]'
-- 'Web Animations: property <transform> from [rotateY(0deg)] to [rotateY(800deg)]
-  at (0.75) should be [rotateY(600deg)]'
-- 'Web Animations: property <transform> from [rotateY(0deg)] to [rotateY(800deg)]
-  at (1) should be [rotateY(800deg)]'
-- 'Web Animations: property <transform> from [rotateY(0deg)] to [rotateY(800deg)]
-  at (2) should be [rotateY(1600deg)]'
 - 'Web Animations: property <transform> from [rotateY(900deg)] to [rotateZ(0deg)]
   at (-1) should be [rotateY(1800deg)]'
 - 'Web Animations: property <transform> from [rotateY(900deg)] to [rotateZ(0deg)]
@@ -4473,151 +4211,6 @@ css/css-transforms/animation/transform-interpolation-001.html:
   [skewX(20rad) perspective(500px)] at (1) should be [skewX(20rad) perspective(500px)]'
 - 'Web Animations: property <transform> from [skewX(10rad) perspective(400px)] to
   [skewX(20rad) perspective(500px)] at (2) should be [skewX(30rad) perspective(666.6666666666666px)]'
-css/css-transforms/animation/transform-interpolation-002.html:
-- 'CSS Animations: property <transform> from [scaleX(0)] to [scaleY(0)] at (-1) should
-  be [scale(-1, 2)]'
-- 'CSS Animations: property <transform> from [scaleX(0)] to [scaleY(0)] at (0.25)
-  should be [scale(0.25, 0.75)]'
-- 'CSS Animations: property <transform> from [scaleX(0)] to [scaleY(0)] at (0.75)
-  should be [scale(0.75, 0.25)]'
-- 'CSS Animations: property <transform> from [scaleX(0)] to [scaleY(0)] at (2) should
-  be [scale(2, -1)]'
-- 'CSS Animations: property <transform> from [scaleX(10) scaleY(0.5) scaleZ(1)] to
-  [scaleX(20) scaleY(1) scaleZ(2)] at (-1) should be [scaleX(0) scaleY(0) scaleZ(0)]'
-- 'CSS Animations: property <transform> from [scaleX(10) scaleY(0.5) scaleZ(1)] to
-  [scaleX(20) scaleY(1) scaleZ(2)] at (0) should be [scaleX(10) scaleY(0.5) scaleZ(1)]'
-- 'CSS Animations: property <transform> from [scaleX(10) scaleY(0.5) scaleZ(1)] to
-  [scaleX(20) scaleY(1) scaleZ(2)] at (0.25) should be [scaleX(12.5) scaleY(0.625)
-  scaleZ(1.25)]'
-- 'CSS Animations: property <transform> from [scaleX(10) scaleY(0.5) scaleZ(1)] to
-  [scaleX(20) scaleY(1) scaleZ(2)] at (0.75) should be [scaleX(17.5) scaleY(0.875)
-  scaleZ(1.75)]'
-- 'CSS Animations: property <transform> from [scaleX(10) scaleY(0.5) scaleZ(1)] to
-  [scaleX(20) scaleY(1) scaleZ(2)] at (1) should be [scaleX(20) scaleY(1) scaleZ(2)]'
-- 'CSS Animations: property <transform> from [scaleX(10) scaleY(0.5) scaleZ(1)] to
-  [scaleX(20) scaleY(1) scaleZ(2)] at (2) should be [scaleX(30) scaleY(1.5) scaleZ(3)]'
-- 'CSS Animations: property <transform> from [scaleZ(1)] to [scaleZ(2)] at (-1) should
-  be [scaleZ(0)]'
-- 'CSS Animations: property <transform> from [scaleZ(1)] to [scaleZ(2)] at (0) should
-  be [scaleZ(1)]'
-- 'CSS Animations: property <transform> from [scaleZ(1)] to [scaleZ(2)] at (0.25)
-  should be [scaleZ(1.25)]'
-- 'CSS Animations: property <transform> from [scaleZ(1)] to [scaleZ(2)] at (0.75)
-  should be [scaleZ(1.75)]'
-- 'CSS Animations: property <transform> from [scaleZ(1)] to [scaleZ(2)] at (1) should
-  be [scaleZ(2)]'
-- 'CSS Animations: property <transform> from [scaleZ(1)] to [scaleZ(2)] at (2) should
-  be [scaleZ(3)]'
-- 'CSS Transitions with transition: all: property <transform> from [scaleX(0)] to
-  [scaleY(0)] at (-1) should be [scale(-1, 2)]'
-- 'CSS Transitions with transition: all: property <transform> from [scaleX(0)] to
-  [scaleY(0)] at (0) should be [scale(0, 1)]'
-- 'CSS Transitions with transition: all: property <transform> from [scaleX(0)] to
-  [scaleY(0)] at (0.25) should be [scale(0.25, 0.75)]'
-- 'CSS Transitions with transition: all: property <transform> from [scaleX(0)] to
-  [scaleY(0)] at (0.75) should be [scale(0.75, 0.25)]'
-- 'CSS Transitions with transition: all: property <transform> from [scaleX(0)] to
-  [scaleY(0)] at (2) should be [scale(2, -1)]'
-- 'CSS Transitions with transition: all: property <transform> from [scaleX(10) scaleY(0.5)
-  scaleZ(1)] to [scaleX(20) scaleY(1) scaleZ(2)] at (-1) should be [scaleX(0) scaleY(0)
-  scaleZ(0)]'
-- 'CSS Transitions with transition: all: property <transform> from [scaleX(10) scaleY(0.5)
-  scaleZ(1)] to [scaleX(20) scaleY(1) scaleZ(2)] at (0) should be [scaleX(10) scaleY(0.5)
-  scaleZ(1)]'
-- 'CSS Transitions with transition: all: property <transform> from [scaleX(10) scaleY(0.5)
-  scaleZ(1)] to [scaleX(20) scaleY(1) scaleZ(2)] at (0.25) should be [scaleX(12.5)
-  scaleY(0.625) scaleZ(1.25)]'
-- 'CSS Transitions with transition: all: property <transform> from [scaleX(10) scaleY(0.5)
-  scaleZ(1)] to [scaleX(20) scaleY(1) scaleZ(2)] at (0.75) should be [scaleX(17.5)
-  scaleY(0.875) scaleZ(1.75)]'
-- 'CSS Transitions with transition: all: property <transform> from [scaleX(10) scaleY(0.5)
-  scaleZ(1)] to [scaleX(20) scaleY(1) scaleZ(2)] at (1) should be [scaleX(20) scaleY(1)
-  scaleZ(2)]'
-- 'CSS Transitions with transition: all: property <transform> from [scaleX(10) scaleY(0.5)
-  scaleZ(1)] to [scaleX(20) scaleY(1) scaleZ(2)] at (2) should be [scaleX(30) scaleY(1.5)
-  scaleZ(3)]'
-- 'CSS Transitions with transition: all: property <transform> from [scaleZ(1)] to
-  [scaleZ(2)] at (-1) should be [scaleZ(0)]'
-- 'CSS Transitions with transition: all: property <transform> from [scaleZ(1)] to
-  [scaleZ(2)] at (0) should be [scaleZ(1)]'
-- 'CSS Transitions with transition: all: property <transform> from [scaleZ(1)] to
-  [scaleZ(2)] at (0.25) should be [scaleZ(1.25)]'
-- 'CSS Transitions with transition: all: property <transform> from [scaleZ(1)] to
-  [scaleZ(2)] at (0.75) should be [scaleZ(1.75)]'
-- 'CSS Transitions with transition: all: property <transform> from [scaleZ(1)] to
-  [scaleZ(2)] at (1) should be [scaleZ(2)]'
-- 'CSS Transitions with transition: all: property <transform> from [scaleZ(1)] to
-  [scaleZ(2)] at (2) should be [scaleZ(3)]'
-- 'CSS Transitions: property <transform> from [scaleX(0)] to [scaleY(0)] at (-1) should
-  be [scale(-1, 2)]'
-- 'CSS Transitions: property <transform> from [scaleX(0)] to [scaleY(0)] at (0) should
-  be [scale(0, 1)]'
-- 'CSS Transitions: property <transform> from [scaleX(0)] to [scaleY(0)] at (0.25)
-  should be [scale(0.25, 0.75)]'
-- 'CSS Transitions: property <transform> from [scaleX(0)] to [scaleY(0)] at (0.75)
-  should be [scale(0.75, 0.25)]'
-- 'CSS Transitions: property <transform> from [scaleX(0)] to [scaleY(0)] at (2) should
-  be [scale(2, -1)]'
-- 'CSS Transitions: property <transform> from [scaleX(10) scaleY(0.5) scaleZ(1)] to
-  [scaleX(20) scaleY(1) scaleZ(2)] at (-1) should be [scaleX(0) scaleY(0) scaleZ(0)]'
-- 'CSS Transitions: property <transform> from [scaleX(10) scaleY(0.5) scaleZ(1)] to
-  [scaleX(20) scaleY(1) scaleZ(2)] at (0) should be [scaleX(10) scaleY(0.5) scaleZ(1)]'
-- 'CSS Transitions: property <transform> from [scaleX(10) scaleY(0.5) scaleZ(1)] to
-  [scaleX(20) scaleY(1) scaleZ(2)] at (0.25) should be [scaleX(12.5) scaleY(0.625)
-  scaleZ(1.25)]'
-- 'CSS Transitions: property <transform> from [scaleX(10) scaleY(0.5) scaleZ(1)] to
-  [scaleX(20) scaleY(1) scaleZ(2)] at (0.75) should be [scaleX(17.5) scaleY(0.875)
-  scaleZ(1.75)]'
-- 'CSS Transitions: property <transform> from [scaleX(10) scaleY(0.5) scaleZ(1)] to
-  [scaleX(20) scaleY(1) scaleZ(2)] at (1) should be [scaleX(20) scaleY(1) scaleZ(2)]'
-- 'CSS Transitions: property <transform> from [scaleX(10) scaleY(0.5) scaleZ(1)] to
-  [scaleX(20) scaleY(1) scaleZ(2)] at (2) should be [scaleX(30) scaleY(1.5) scaleZ(3)]'
-- 'CSS Transitions: property <transform> from [scaleZ(1)] to [scaleZ(2)] at (-1) should
-  be [scaleZ(0)]'
-- 'CSS Transitions: property <transform> from [scaleZ(1)] to [scaleZ(2)] at (0) should
-  be [scaleZ(1)]'
-- 'CSS Transitions: property <transform> from [scaleZ(1)] to [scaleZ(2)] at (0.25)
-  should be [scaleZ(1.25)]'
-- 'CSS Transitions: property <transform> from [scaleZ(1)] to [scaleZ(2)] at (0.75)
-  should be [scaleZ(1.75)]'
-- 'CSS Transitions: property <transform> from [scaleZ(1)] to [scaleZ(2)] at (1) should
-  be [scaleZ(2)]'
-- 'CSS Transitions: property <transform> from [scaleZ(1)] to [scaleZ(2)] at (2) should
-  be [scaleZ(3)]'
-- 'Web Animations: property <transform> from [scaleX(0)] to [scaleY(0)] at (-1) should
-  be [scale(-1, 2)]'
-- 'Web Animations: property <transform> from [scaleX(0)] to [scaleY(0)] at (0.25)
-  should be [scale(0.25, 0.75)]'
-- 'Web Animations: property <transform> from [scaleX(0)] to [scaleY(0)] at (0.75)
-  should be [scale(0.75, 0.25)]'
-- 'Web Animations: property <transform> from [scaleX(0)] to [scaleY(0)] at (2) should
-  be [scale(2, -1)]'
-- 'Web Animations: property <transform> from [scaleX(10) scaleY(0.5) scaleZ(1)] to
-  [scaleX(20) scaleY(1) scaleZ(2)] at (-1) should be [scaleX(0) scaleY(0) scaleZ(0)]'
-- 'Web Animations: property <transform> from [scaleX(10) scaleY(0.5) scaleZ(1)] to
-  [scaleX(20) scaleY(1) scaleZ(2)] at (0) should be [scaleX(10) scaleY(0.5) scaleZ(1)]'
-- 'Web Animations: property <transform> from [scaleX(10) scaleY(0.5) scaleZ(1)] to
-  [scaleX(20) scaleY(1) scaleZ(2)] at (0.25) should be [scaleX(12.5) scaleY(0.625)
-  scaleZ(1.25)]'
-- 'Web Animations: property <transform> from [scaleX(10) scaleY(0.5) scaleZ(1)] to
-  [scaleX(20) scaleY(1) scaleZ(2)] at (0.75) should be [scaleX(17.5) scaleY(0.875)
-  scaleZ(1.75)]'
-- 'Web Animations: property <transform> from [scaleX(10) scaleY(0.5) scaleZ(1)] to
-  [scaleX(20) scaleY(1) scaleZ(2)] at (1) should be [scaleX(20) scaleY(1) scaleZ(2)]'
-- 'Web Animations: property <transform> from [scaleX(10) scaleY(0.5) scaleZ(1)] to
-  [scaleX(20) scaleY(1) scaleZ(2)] at (2) should be [scaleX(30) scaleY(1.5) scaleZ(3)]'
-- 'Web Animations: property <transform> from [scaleZ(1)] to [scaleZ(2)] at (-1) should
-  be [scaleZ(0)]'
-- 'Web Animations: property <transform> from [scaleZ(1)] to [scaleZ(2)] at (0) should
-  be [scaleZ(1)]'
-- 'Web Animations: property <transform> from [scaleZ(1)] to [scaleZ(2)] at (0.25)
-  should be [scaleZ(1.25)]'
-- 'Web Animations: property <transform> from [scaleZ(1)] to [scaleZ(2)] at (0.75)
-  should be [scaleZ(1.75)]'
-- 'Web Animations: property <transform> from [scaleZ(1)] to [scaleZ(2)] at (1) should
-  be [scaleZ(2)]'
-- 'Web Animations: property <transform> from [scaleZ(1)] to [scaleZ(2)] at (2) should
-  be [scaleZ(3)]'
 css/css-transforms/animation/transform-interpolation-003.html:
 - 'CSS Animations: property <transform> from [scaleZ(3) perspective(400px)] to [scaleZ(4)
   skewX(1rad) perspective(500px)] at (-1) should be [scaleZ(2) matrix3d(1, 0, 0, 0,
@@ -4637,30 +4230,8 @@ css/css-transforms/animation/transform-interpolation-003.html:
 - 'CSS Animations: property <transform> from [scaleZ(3) perspective(400px)] to [scaleZ(4)
   skewX(1rad) perspective(500px)] at (2) should be [scaleZ(5) matrix3d(1, 0, 0, 0,
   3.11482, 1, 0, 0, 0, 0, 1, -0.0015, 0, 0, 0, 1)]'
-- 'CSS Animations: property <transform> from [skewX(10rad) scaleZ(1)] to [skewX(20rad)
-  scaleZ(2)] at (-1) should be [skewX(0rad) scaleZ(0)]'
-- 'CSS Animations: property <transform> from [skewX(10rad) scaleZ(1)] to [skewX(20rad)
-  scaleZ(2)] at (0) should be [skewX(10rad) scaleZ(1)]'
-- 'CSS Animations: property <transform> from [skewX(10rad) scaleZ(1)] to [skewX(20rad)
-  scaleZ(2)] at (0.25) should be [skewX(12.5rad) scaleZ(1.25)]'
-- 'CSS Animations: property <transform> from [skewX(10rad) scaleZ(1)] to [skewX(20rad)
-  scaleZ(2)] at (0.75) should be [skewX(17.5rad) scaleZ(1.75)]'
-- 'CSS Animations: property <transform> from [skewX(10rad) scaleZ(1)] to [skewX(20rad)
-  scaleZ(2)] at (1) should be [skewX(20rad) scaleZ(2)]'
-- 'CSS Animations: property <transform> from [skewX(10rad) scaleZ(1)] to [skewX(20rad)
-  scaleZ(2)] at (2) should be [skewX(30rad) scaleZ(3)]'
-- 'CSS Animations: property <transform> from [skewX(10rad)] to [skewX(20rad) scaleZ(2)]
-  at (-1) should be [skewX(0rad) scaleZ(0)]'
 - 'CSS Animations: property <transform> from [skewX(10rad)] to [skewX(20rad) scaleZ(2)]
   at (0) should be [skewX(10rad) scaleZ(1)]'
-- 'CSS Animations: property <transform> from [skewX(10rad)] to [skewX(20rad) scaleZ(2)]
-  at (0.25) should be [skewX(12.5rad) scaleZ(1.25)]'
-- 'CSS Animations: property <transform> from [skewX(10rad)] to [skewX(20rad) scaleZ(2)]
-  at (0.75) should be [skewX(17.5rad) scaleZ(1.75)]'
-- 'CSS Animations: property <transform> from [skewX(10rad)] to [skewX(20rad) scaleZ(2)]
-  at (1) should be [skewX(20rad) scaleZ(2)]'
-- 'CSS Animations: property <transform> from [skewX(10rad)] to [skewX(20rad) scaleZ(2)]
-  at (2) should be [skewX(30rad) scaleZ(3)]'
 - 'CSS Animations: property <transform> from [translateY(70%) scaleZ(1)] to [translateY(90%)
   scaleZ(2)] at (-1) should be [translateY(50%) scaleZ(0)]'
 - 'CSS Animations: property <transform> from [translateY(70%) scaleZ(1)] to [translateY(90%)
@@ -4675,8 +4246,6 @@ css/css-transforms/animation/transform-interpolation-003.html:
   scaleZ(2)] at (2) should be [translateY(110%) scaleZ(3)]'
 - 'CSS Animations: property <transform> from [translateY(70%)] to [translateY(90%)
   scaleZ(2)] at (-1) should be [translateY(50%) scaleZ(0)]'
-- 'CSS Animations: property <transform> from [translateY(70%)] to [translateY(90%)
-  scaleZ(2)] at (0) should be [translateY(70%)]'
 - 'CSS Animations: property <transform> from [translateY(70%)] to [translateY(90%)
   scaleZ(2)] at (0.25) should be [translateY(75%) scaleZ(1.25)]'
 - 'CSS Animations: property <transform> from [translateY(70%)] to [translateY(90%)
@@ -4703,30 +4272,8 @@ css/css-transforms/animation/transform-interpolation-003.html:
 - 'CSS Transitions with transition: all: property <transform> from [scaleZ(3) perspective(400px)]
   to [scaleZ(4) skewX(1rad) perspective(500px)] at (2) should be [scaleZ(5) matrix3d(1,
   0, 0, 0, 3.11482, 1, 0, 0, 0, 0, 1, -0.0015, 0, 0, 0, 1)]'
-- 'CSS Transitions with transition: all: property <transform> from [skewX(10rad) scaleZ(1)]
-  to [skewX(20rad) scaleZ(2)] at (-1) should be [skewX(0rad) scaleZ(0)]'
-- 'CSS Transitions with transition: all: property <transform> from [skewX(10rad) scaleZ(1)]
-  to [skewX(20rad) scaleZ(2)] at (0) should be [skewX(10rad) scaleZ(1)]'
-- 'CSS Transitions with transition: all: property <transform> from [skewX(10rad) scaleZ(1)]
-  to [skewX(20rad) scaleZ(2)] at (0.25) should be [skewX(12.5rad) scaleZ(1.25)]'
-- 'CSS Transitions with transition: all: property <transform> from [skewX(10rad) scaleZ(1)]
-  to [skewX(20rad) scaleZ(2)] at (0.75) should be [skewX(17.5rad) scaleZ(1.75)]'
-- 'CSS Transitions with transition: all: property <transform> from [skewX(10rad) scaleZ(1)]
-  to [skewX(20rad) scaleZ(2)] at (1) should be [skewX(20rad) scaleZ(2)]'
-- 'CSS Transitions with transition: all: property <transform> from [skewX(10rad) scaleZ(1)]
-  to [skewX(20rad) scaleZ(2)] at (2) should be [skewX(30rad) scaleZ(3)]'
-- 'CSS Transitions with transition: all: property <transform> from [skewX(10rad)]
-  to [skewX(20rad) scaleZ(2)] at (-1) should be [skewX(0rad) scaleZ(0)]'
 - 'CSS Transitions with transition: all: property <transform> from [skewX(10rad)]
   to [skewX(20rad) scaleZ(2)] at (0) should be [skewX(10rad) scaleZ(1)]'
-- 'CSS Transitions with transition: all: property <transform> from [skewX(10rad)]
-  to [skewX(20rad) scaleZ(2)] at (0.25) should be [skewX(12.5rad) scaleZ(1.25)]'
-- 'CSS Transitions with transition: all: property <transform> from [skewX(10rad)]
-  to [skewX(20rad) scaleZ(2)] at (0.75) should be [skewX(17.5rad) scaleZ(1.75)]'
-- 'CSS Transitions with transition: all: property <transform> from [skewX(10rad)]
-  to [skewX(20rad) scaleZ(2)] at (1) should be [skewX(20rad) scaleZ(2)]'
-- 'CSS Transitions with transition: all: property <transform> from [skewX(10rad)]
-  to [skewX(20rad) scaleZ(2)] at (2) should be [skewX(30rad) scaleZ(3)]'
 - 'CSS Transitions with transition: all: property <transform> from [translateY(70%)
   scaleZ(1)] to [translateY(90%) scaleZ(2)] at (-1) should be [translateY(50%) scaleZ(0)]'
 - 'CSS Transitions with transition: all: property <transform> from [translateY(70%)
@@ -4741,8 +4288,6 @@ css/css-transforms/animation/transform-interpolation-003.html:
   scaleZ(1)] to [translateY(90%) scaleZ(2)] at (2) should be [translateY(110%) scaleZ(3)]'
 - 'CSS Transitions with transition: all: property <transform> from [translateY(70%)]
   to [translateY(90%) scaleZ(2)] at (-1) should be [translateY(50%) scaleZ(0)]'
-- 'CSS Transitions with transition: all: property <transform> from [translateY(70%)]
-  to [translateY(90%) scaleZ(2)] at (0) should be [translateY(70%)]'
 - 'CSS Transitions with transition: all: property <transform> from [translateY(70%)]
   to [translateY(90%) scaleZ(2)] at (0.25) should be [translateY(75%) scaleZ(1.25)]'
 - 'CSS Transitions with transition: all: property <transform> from [translateY(70%)]
@@ -4769,30 +4314,8 @@ css/css-transforms/animation/transform-interpolation-003.html:
 - 'CSS Transitions: property <transform> from [scaleZ(3) perspective(400px)] to [scaleZ(4)
   skewX(1rad) perspective(500px)] at (2) should be [scaleZ(5) matrix3d(1, 0, 0, 0,
   3.11482, 1, 0, 0, 0, 0, 1, -0.0015, 0, 0, 0, 1)]'
-- 'CSS Transitions: property <transform> from [skewX(10rad) scaleZ(1)] to [skewX(20rad)
-  scaleZ(2)] at (-1) should be [skewX(0rad) scaleZ(0)]'
-- 'CSS Transitions: property <transform> from [skewX(10rad) scaleZ(1)] to [skewX(20rad)
-  scaleZ(2)] at (0) should be [skewX(10rad) scaleZ(1)]'
-- 'CSS Transitions: property <transform> from [skewX(10rad) scaleZ(1)] to [skewX(20rad)
-  scaleZ(2)] at (0.25) should be [skewX(12.5rad) scaleZ(1.25)]'
-- 'CSS Transitions: property <transform> from [skewX(10rad) scaleZ(1)] to [skewX(20rad)
-  scaleZ(2)] at (0.75) should be [skewX(17.5rad) scaleZ(1.75)]'
-- 'CSS Transitions: property <transform> from [skewX(10rad) scaleZ(1)] to [skewX(20rad)
-  scaleZ(2)] at (1) should be [skewX(20rad) scaleZ(2)]'
-- 'CSS Transitions: property <transform> from [skewX(10rad) scaleZ(1)] to [skewX(20rad)
-  scaleZ(2)] at (2) should be [skewX(30rad) scaleZ(3)]'
-- 'CSS Transitions: property <transform> from [skewX(10rad)] to [skewX(20rad) scaleZ(2)]
-  at (-1) should be [skewX(0rad) scaleZ(0)]'
 - 'CSS Transitions: property <transform> from [skewX(10rad)] to [skewX(20rad) scaleZ(2)]
   at (0) should be [skewX(10rad) scaleZ(1)]'
-- 'CSS Transitions: property <transform> from [skewX(10rad)] to [skewX(20rad) scaleZ(2)]
-  at (0.25) should be [skewX(12.5rad) scaleZ(1.25)]'
-- 'CSS Transitions: property <transform> from [skewX(10rad)] to [skewX(20rad) scaleZ(2)]
-  at (0.75) should be [skewX(17.5rad) scaleZ(1.75)]'
-- 'CSS Transitions: property <transform> from [skewX(10rad)] to [skewX(20rad) scaleZ(2)]
-  at (1) should be [skewX(20rad) scaleZ(2)]'
-- 'CSS Transitions: property <transform> from [skewX(10rad)] to [skewX(20rad) scaleZ(2)]
-  at (2) should be [skewX(30rad) scaleZ(3)]'
 - 'CSS Transitions: property <transform> from [translateY(70%) scaleZ(1)] to [translateY(90%)
   scaleZ(2)] at (-1) should be [translateY(50%) scaleZ(0)]'
 - 'CSS Transitions: property <transform> from [translateY(70%) scaleZ(1)] to [translateY(90%)
@@ -4807,8 +4330,6 @@ css/css-transforms/animation/transform-interpolation-003.html:
   scaleZ(2)] at (2) should be [translateY(110%) scaleZ(3)]'
 - 'CSS Transitions: property <transform> from [translateY(70%)] to [translateY(90%)
   scaleZ(2)] at (-1) should be [translateY(50%) scaleZ(0)]'
-- 'CSS Transitions: property <transform> from [translateY(70%)] to [translateY(90%)
-  scaleZ(2)] at (0) should be [translateY(70%)]'
 - 'CSS Transitions: property <transform> from [translateY(70%)] to [translateY(90%)
   scaleZ(2)] at (0.25) should be [translateY(75%) scaleZ(1.25)]'
 - 'CSS Transitions: property <transform> from [translateY(70%)] to [translateY(90%)
@@ -4835,30 +4356,8 @@ css/css-transforms/animation/transform-interpolation-003.html:
 - 'Web Animations: property <transform> from [scaleZ(3) perspective(400px)] to [scaleZ(4)
   skewX(1rad) perspective(500px)] at (2) should be [scaleZ(5) matrix3d(1, 0, 0, 0,
   3.11482, 1, 0, 0, 0, 0, 1, -0.0015, 0, 0, 0, 1)]'
-- 'Web Animations: property <transform> from [skewX(10rad) scaleZ(1)] to [skewX(20rad)
-  scaleZ(2)] at (-1) should be [skewX(0rad) scaleZ(0)]'
-- 'Web Animations: property <transform> from [skewX(10rad) scaleZ(1)] to [skewX(20rad)
-  scaleZ(2)] at (0) should be [skewX(10rad) scaleZ(1)]'
-- 'Web Animations: property <transform> from [skewX(10rad) scaleZ(1)] to [skewX(20rad)
-  scaleZ(2)] at (0.25) should be [skewX(12.5rad) scaleZ(1.25)]'
-- 'Web Animations: property <transform> from [skewX(10rad) scaleZ(1)] to [skewX(20rad)
-  scaleZ(2)] at (0.75) should be [skewX(17.5rad) scaleZ(1.75)]'
-- 'Web Animations: property <transform> from [skewX(10rad) scaleZ(1)] to [skewX(20rad)
-  scaleZ(2)] at (1) should be [skewX(20rad) scaleZ(2)]'
-- 'Web Animations: property <transform> from [skewX(10rad) scaleZ(1)] to [skewX(20rad)
-  scaleZ(2)] at (2) should be [skewX(30rad) scaleZ(3)]'
-- 'Web Animations: property <transform> from [skewX(10rad)] to [skewX(20rad) scaleZ(2)]
-  at (-1) should be [skewX(0rad) scaleZ(0)]'
 - 'Web Animations: property <transform> from [skewX(10rad)] to [skewX(20rad) scaleZ(2)]
   at (0) should be [skewX(10rad) scaleZ(1)]'
-- 'Web Animations: property <transform> from [skewX(10rad)] to [skewX(20rad) scaleZ(2)]
-  at (0.25) should be [skewX(12.5rad) scaleZ(1.25)]'
-- 'Web Animations: property <transform> from [skewX(10rad)] to [skewX(20rad) scaleZ(2)]
-  at (0.75) should be [skewX(17.5rad) scaleZ(1.75)]'
-- 'Web Animations: property <transform> from [skewX(10rad)] to [skewX(20rad) scaleZ(2)]
-  at (1) should be [skewX(20rad) scaleZ(2)]'
-- 'Web Animations: property <transform> from [skewX(10rad)] to [skewX(20rad) scaleZ(2)]
-  at (2) should be [skewX(30rad) scaleZ(3)]'
 - 'Web Animations: property <transform> from [translateY(70%) scaleZ(1)] to [translateY(90%)
   scaleZ(2)] at (-1) should be [translateY(50%) scaleZ(0)]'
 - 'Web Animations: property <transform> from [translateY(70%) scaleZ(1)] to [translateY(90%)
@@ -4873,8 +4372,6 @@ css/css-transforms/animation/transform-interpolation-003.html:
   scaleZ(2)] at (2) should be [translateY(110%) scaleZ(3)]'
 - 'Web Animations: property <transform> from [translateY(70%)] to [translateY(90%)
   scaleZ(2)] at (-1) should be [translateY(50%) scaleZ(0)]'
-- 'Web Animations: property <transform> from [translateY(70%)] to [translateY(90%)
-  scaleZ(2)] at (0) should be [translateY(70%)]'
 - 'Web Animations: property <transform> from [translateY(70%)] to [translateY(90%)
   scaleZ(2)] at (0.25) should be [translateY(75%) scaleZ(1.25)]'
 - 'Web Animations: property <transform> from [translateY(70%)] to [translateY(90%)
@@ -6474,13 +5971,9 @@ css/css-transforms/animation/transform-interpolation-inline-value.html:
   value halfway according to commitStyles.
 - Interpolation between perspective(10px) and perspective(none) gives the correct
   computed value halfway according to commitStyles.
-- Interpolation between rotate(0deg) and rotateX(90deg) gives the correct computed
-  value halfway according to commitStyles.
 - Interpolation between rotate(0deg) and rotateZ(90deg) gives the correct computed
   value halfway according to commitStyles.
 - Interpolation between rotate(30deg) and rotate(90deg) gives the correct computed
-  value halfway according to commitStyles.
-- Interpolation between rotateX(0deg) and rotateX(90deg) gives the correct computed
   value halfway according to commitStyles.
 - Interpolation between rotateZ(30deg) and rotateZ(90deg) gives the correct computed
   value halfway according to commitStyles.
@@ -6488,12 +5981,8 @@ css/css-transforms/animation/transform-interpolation-inline-value.html:
   according to commitStyles.
 - Interpolation between scale(1, 2) and scale(3, 4) gives the correct computed value
   halfway according to commitStyles.
-- Interpolation between scale(1, 2) and scale3d(3, 4, 5) gives the correct computed
-  value halfway according to commitStyles.
 - Interpolation between scale(1, 3) and scale(2) gives the correct computed value
   halfway according to commitStyles.
-- Interpolation between scale3d(1, 2, 3) and scale(4, 5) gives the correct computed
-  value halfway according to commitStyles.
 - Interpolation between scaleX(1) and scaleX(2) gives the correct computed value halfway
   according to commitStyles.
 - Interpolation between scaleX(2) and scaleY(2) gives the correct computed value halfway
@@ -6501,8 +5990,6 @@ css/css-transforms/animation/transform-interpolation-inline-value.html:
 - Interpolation between scaleX(2) and scaleY(3) gives the correct computed value halfway
   according to commitStyles.
 - Interpolation between scaleY(1) and scaleY(2) gives the correct computed value halfway
-  according to commitStyles.
-- Interpolation between scaleZ(1) and scale(2) gives the correct computed value halfway
   according to commitStyles.
 - Interpolation between skew(0deg, 0deg) and skew(60deg, 60deg) gives the correct
   computed value halfway according to commitStyles.
@@ -6544,17 +6031,9 @@ css/css-transforms/animation/transform-interpolation-matrix.html:
 - "== css/css-transforms/animation/transform-interpolation-ref.html?matrix"
 css/css-transforms/animation/transform-interpolation-rotate-slerp.html:
 - "== css/css-transforms/animation/transform-interpolation-ref.html?rotateSlerp"
-css/css-transforms/animation/transform-interpolation-rotate.html:
-- "== css/css-transforms/animation/transform-interpolation-ref.html?rotate"
 css/css-transforms/animation/transform-interpolation-rotate3d-180deg-near-x-axis.html:
 - decompose4() recovers the correct quaternion y component near a 180deg rotation
   about the X axis
-css/css-transforms/animation/transform-interpolation-scale.html:
-- "== css/css-transforms/animation/transform-interpolation-ref.html?scale"
-css/css-transforms/animation/transform-interpolation-translate-em.html:
-- "== css/css-transforms/animation/transform-interpolation-ref.html?translateEm"
-css/css-transforms/animation/transform-interpolation-translate.html:
-- "== css/css-transforms/animation/transform-interpolation-ref.html?translate"
 css/css-transforms/animation/transform-interpolation-verify-reftests.html:
 - 'CSS Animations: property <transform> from [matrix(1,0,0,1,0,0) rotate(0deg)] to
   [matrix(2,0,0,2,0,0) rotate(360deg)] at (0.5) should be [matrix(1.5,0,0,1.5,0,0)
@@ -6564,20 +6043,12 @@ css/css-transforms/animation/transform-interpolation-verify-reftests.html:
   translateZ(0.25px)]'
 - 'CSS Animations: property <transform> from [perspective(0px) translateZ(0.25px)]
   to [perspective(0px) translateZ(0.25px)] at (0.5) should be [perspective(1px) translateZ(0.25px)]'
-- 'CSS Animations: property <transform> from [perspective(0px) translateZ(0.5px)]
-  to [perspective(3px) translateZ(0.5px)] at (0.5) should be [perspective(1.5px) translateZ(0.5px)]'
-- 'CSS Animations: property <transform> from [perspective(100px) translateZ(15px)]
-  to [perspective(25px) translateZ(15px)] at (0.5) should be [perspective(40px) translateZ(15px)]'
 - 'CSS Animations: property <transform> from [perspective(100px) translateZ(50px)]
   to [perspective(none) translateZ(50px)] at (0.5) should be [perspective(200px) translateZ(50px)]'
 - 'CSS Animations: property <transform> from [perspective(10px) translateZ(0.5px)]
   to [perspective(1px) translateZ(0.5px)] at (-1) should be [translateZ(0.5px)]'
-- 'CSS Animations: property <transform> from [perspective(1px) translateZ(0.5px)]
-  to [perspective(10px) translateZ(0.5px)] at (-1) should be [perspective(1px) translateZ(0.5px)]'
 - 'CSS Animations: property <transform> from [perspective(none) translateZ(15px)]
   to [perspective(25px) translateZ(15px)] at (0.5) should be [perspective(50px) translateZ(15px)]'
-- 'CSS Animations: property <transform> from [rotate(30deg)] to [rotateZ(90deg)] at
-  (0.5) should be [rotate(60deg)]'
 - 'CSS Animations: property <transform> from [rotate(45deg)] to [rotate3d(0, 0, -1,
   45deg)] at (0.5) should be [rotate(0deg)]'
 - 'CSS Animations: property <transform> from [rotate3d(1, 1, 0, 90deg)] to [rotate3d(0,
@@ -6586,28 +6057,12 @@ css/css-transforms/animation/transform-interpolation-verify-reftests.html:
   4, 6, 90deg)] at (0.5) should be [rotate3d(3, 6, 9, 45deg)]'
 - 'CSS Animations: property <transform> from [rotateX(0deg)] to [rotate(90deg)] at
   (0.5) should be [rotate(45deg)]'
-- 'CSS Animations: property <transform> from [rotateX(30deg)] to [rotateX(90deg)]
-  at (0.5) should be [rotateX(60deg)]'
 - 'CSS Animations: property <transform> from [rotateX(360deg)] to [rotateZ(90deg)]
   at (0.5) should be [rotateZ(45deg)]'
 - 'CSS Animations: property <transform> from [rotateX(90deg)] to [rotate(0deg)] at
   (0.5) should be [rotateX(45deg)]'
 - 'CSS Animations: property <transform> from [rotateX(90deg)] to [rotateY(90deg)]
   at (0.5) should be [rotate3d(1, 1, 0, 70.5288deg)]'
-- 'CSS Animations: property <transform> from [rotateY(30deg)] to [rotateY(90deg)]
-  at (0.5) should be [rotateY(60deg)]'
-- 'CSS Animations: property <transform> from [scaleX(0.5)] to [scaleY(0.5)] at (0.5)
-  should be [scale(0.75)]'
-- 'CSS Animations: property <transform> from [translateX(-50px)] to [translateX(4em)]
-  at (0.5) should be [translateX(calc(2em - 25px))]'
-- 'CSS Animations: property <transform> from [translateX(50%)] to [translateX(-4em)]
-  at (0.5) should be [translateX(calc(25% - 2em))]'
-- 'CSS Animations: property <transform> from [translateX(50%)] to [translateY(50%)]
-  at (0.5) should be [translate(25%, 25%)]'
-- 'CSS Animations: property <transform> from [translateX(50%)] to [translateY(50px)]
-  at (0.5) should be [translate(25%, 25px)]'
-- 'CSS Animations: property <transform> from [translateX(50px)] to [translateX(50%)]
-  at (0.5) should be [translateX(calc(25px + 25%))]'
 - 'CSS Transitions with transition: all: property <transform> from [matrix(1,0,0,1,0,0)
   rotate(0deg)] to [matrix(2,0,0,2,0,0) rotate(360deg)] at (0.5) should be [matrix(1.5,0,0,1.5,0,0)
   rotate(180deg)]'
@@ -6617,25 +6072,14 @@ css/css-transforms/animation/transform-interpolation-verify-reftests.html:
 - 'CSS Transitions with transition: all: property <transform> from [perspective(0px)
   translateZ(0.25px)] to [perspective(0px) translateZ(0.25px)] at (0.5) should be
   [perspective(1px) translateZ(0.25px)]'
-- 'CSS Transitions with transition: all: property <transform> from [perspective(0px)
-  translateZ(0.5px)] to [perspective(3px) translateZ(0.5px)] at (0.5) should be [perspective(1.5px)
-  translateZ(0.5px)]'
-- 'CSS Transitions with transition: all: property <transform> from [perspective(100px)
-  translateZ(15px)] to [perspective(25px) translateZ(15px)] at (0.5) should be [perspective(40px)
-  translateZ(15px)]'
 - 'CSS Transitions with transition: all: property <transform> from [perspective(100px)
   translateZ(50px)] to [perspective(none) translateZ(50px)] at (0.5) should be [perspective(200px)
   translateZ(50px)]'
 - 'CSS Transitions with transition: all: property <transform> from [perspective(10px)
   translateZ(0.5px)] to [perspective(1px) translateZ(0.5px)] at (-1) should be [translateZ(0.5px)]'
-- 'CSS Transitions with transition: all: property <transform> from [perspective(1px)
-  translateZ(0.5px)] to [perspective(10px) translateZ(0.5px)] at (-1) should be [perspective(1px)
-  translateZ(0.5px)]'
 - 'CSS Transitions with transition: all: property <transform> from [perspective(none)
   translateZ(15px)] to [perspective(25px) translateZ(15px)] at (0.5) should be [perspective(50px)
   translateZ(15px)]'
-- 'CSS Transitions with transition: all: property <transform> from [rotate(30deg)]
-  to [rotateZ(90deg)] at (0.5) should be [rotate(60deg)]'
 - 'CSS Transitions with transition: all: property <transform> from [rotate(45deg)]
   to [rotate3d(0, 0, -1, 45deg)] at (0.5) should be [rotate(0deg)]'
 - 'CSS Transitions with transition: all: property <transform> from [rotate3d(1, 1,
@@ -6645,28 +6089,12 @@ css/css-transforms/animation/transform-interpolation-verify-reftests.html:
   3, 0deg)] to [rotate3d(2, 4, 6, 90deg)] at (0.5) should be [rotate3d(3, 6, 9, 45deg)]'
 - 'CSS Transitions with transition: all: property <transform> from [rotateX(0deg)]
   to [rotate(90deg)] at (0.5) should be [rotate(45deg)]'
-- 'CSS Transitions with transition: all: property <transform> from [rotateX(30deg)]
-  to [rotateX(90deg)] at (0.5) should be [rotateX(60deg)]'
 - 'CSS Transitions with transition: all: property <transform> from [rotateX(360deg)]
   to [rotateZ(90deg)] at (0.5) should be [rotateZ(45deg)]'
 - 'CSS Transitions with transition: all: property <transform> from [rotateX(90deg)]
   to [rotate(0deg)] at (0.5) should be [rotateX(45deg)]'
 - 'CSS Transitions with transition: all: property <transform> from [rotateX(90deg)]
   to [rotateY(90deg)] at (0.5) should be [rotate3d(1, 1, 0, 70.5288deg)]'
-- 'CSS Transitions with transition: all: property <transform> from [rotateY(30deg)]
-  to [rotateY(90deg)] at (0.5) should be [rotateY(60deg)]'
-- 'CSS Transitions with transition: all: property <transform> from [scaleX(0.5)] to
-  [scaleY(0.5)] at (0.5) should be [scale(0.75)]'
-- 'CSS Transitions with transition: all: property <transform> from [translateX(-50px)]
-  to [translateX(4em)] at (0.5) should be [translateX(calc(2em - 25px))]'
-- 'CSS Transitions with transition: all: property <transform> from [translateX(50%)]
-  to [translateX(-4em)] at (0.5) should be [translateX(calc(25% - 2em))]'
-- 'CSS Transitions with transition: all: property <transform> from [translateX(50%)]
-  to [translateY(50%)] at (0.5) should be [translate(25%, 25%)]'
-- 'CSS Transitions with transition: all: property <transform> from [translateX(50%)]
-  to [translateY(50px)] at (0.5) should be [translate(25%, 25px)]'
-- 'CSS Transitions with transition: all: property <transform> from [translateX(50px)]
-  to [translateX(50%)] at (0.5) should be [translateX(calc(25px + 25%))]'
 - 'CSS Transitions: property <transform> from [matrix(1,0,0,1,0,0) rotate(0deg)] to
   [matrix(2,0,0,2,0,0) rotate(360deg)] at (0.5) should be [matrix(1.5,0,0,1.5,0,0)
   rotate(180deg)]'
@@ -6675,20 +6103,12 @@ css/css-transforms/animation/transform-interpolation-verify-reftests.html:
   translateZ(0.25px)]'
 - 'CSS Transitions: property <transform> from [perspective(0px) translateZ(0.25px)]
   to [perspective(0px) translateZ(0.25px)] at (0.5) should be [perspective(1px) translateZ(0.25px)]'
-- 'CSS Transitions: property <transform> from [perspective(0px) translateZ(0.5px)]
-  to [perspective(3px) translateZ(0.5px)] at (0.5) should be [perspective(1.5px) translateZ(0.5px)]'
-- 'CSS Transitions: property <transform> from [perspective(100px) translateZ(15px)]
-  to [perspective(25px) translateZ(15px)] at (0.5) should be [perspective(40px) translateZ(15px)]'
 - 'CSS Transitions: property <transform> from [perspective(100px) translateZ(50px)]
   to [perspective(none) translateZ(50px)] at (0.5) should be [perspective(200px) translateZ(50px)]'
 - 'CSS Transitions: property <transform> from [perspective(10px) translateZ(0.5px)]
   to [perspective(1px) translateZ(0.5px)] at (-1) should be [translateZ(0.5px)]'
-- 'CSS Transitions: property <transform> from [perspective(1px) translateZ(0.5px)]
-  to [perspective(10px) translateZ(0.5px)] at (-1) should be [perspective(1px) translateZ(0.5px)]'
 - 'CSS Transitions: property <transform> from [perspective(none) translateZ(15px)]
   to [perspective(25px) translateZ(15px)] at (0.5) should be [perspective(50px) translateZ(15px)]'
-- 'CSS Transitions: property <transform> from [rotate(30deg)] to [rotateZ(90deg)]
-  at (0.5) should be [rotate(60deg)]'
 - 'CSS Transitions: property <transform> from [rotate(45deg)] to [rotate3d(0, 0, -1,
   45deg)] at (0.5) should be [rotate(0deg)]'
 - 'CSS Transitions: property <transform> from [rotate3d(1, 1, 0, 90deg)] to [rotate3d(0,
@@ -6697,28 +6117,12 @@ css/css-transforms/animation/transform-interpolation-verify-reftests.html:
   4, 6, 90deg)] at (0.5) should be [rotate3d(3, 6, 9, 45deg)]'
 - 'CSS Transitions: property <transform> from [rotateX(0deg)] to [rotate(90deg)] at
   (0.5) should be [rotate(45deg)]'
-- 'CSS Transitions: property <transform> from [rotateX(30deg)] to [rotateX(90deg)]
-  at (0.5) should be [rotateX(60deg)]'
 - 'CSS Transitions: property <transform> from [rotateX(360deg)] to [rotateZ(90deg)]
   at (0.5) should be [rotateZ(45deg)]'
 - 'CSS Transitions: property <transform> from [rotateX(90deg)] to [rotate(0deg)] at
   (0.5) should be [rotateX(45deg)]'
 - 'CSS Transitions: property <transform> from [rotateX(90deg)] to [rotateY(90deg)]
   at (0.5) should be [rotate3d(1, 1, 0, 70.5288deg)]'
-- 'CSS Transitions: property <transform> from [rotateY(30deg)] to [rotateY(90deg)]
-  at (0.5) should be [rotateY(60deg)]'
-- 'CSS Transitions: property <transform> from [scaleX(0.5)] to [scaleY(0.5)] at (0.5)
-  should be [scale(0.75)]'
-- 'CSS Transitions: property <transform> from [translateX(-50px)] to [translateX(4em)]
-  at (0.5) should be [translateX(calc(2em - 25px))]'
-- 'CSS Transitions: property <transform> from [translateX(50%)] to [translateX(-4em)]
-  at (0.5) should be [translateX(calc(25% - 2em))]'
-- 'CSS Transitions: property <transform> from [translateX(50%)] to [translateY(50%)]
-  at (0.5) should be [translate(25%, 25%)]'
-- 'CSS Transitions: property <transform> from [translateX(50%)] to [translateY(50px)]
-  at (0.5) should be [translate(25%, 25px)]'
-- 'CSS Transitions: property <transform> from [translateX(50px)] to [translateX(50%)]
-  at (0.5) should be [translateX(calc(25px + 25%))]'
 - 'Web Animations: property <transform> from [matrix(1,0,0,1,0,0) rotate(0deg)] to
   [matrix(2,0,0,2,0,0) rotate(360deg)] at (0.5) should be [matrix(1.5,0,0,1.5,0,0)
   rotate(180deg)]'
@@ -6727,20 +6131,12 @@ css/css-transforms/animation/transform-interpolation-verify-reftests.html:
   translateZ(0.25px)]'
 - 'Web Animations: property <transform> from [perspective(0px) translateZ(0.25px)]
   to [perspective(0px) translateZ(0.25px)] at (0.5) should be [perspective(1px) translateZ(0.25px)]'
-- 'Web Animations: property <transform> from [perspective(0px) translateZ(0.5px)]
-  to [perspective(3px) translateZ(0.5px)] at (0.5) should be [perspective(1.5px) translateZ(0.5px)]'
-- 'Web Animations: property <transform> from [perspective(100px) translateZ(15px)]
-  to [perspective(25px) translateZ(15px)] at (0.5) should be [perspective(40px) translateZ(15px)]'
 - 'Web Animations: property <transform> from [perspective(100px) translateZ(50px)]
   to [perspective(none) translateZ(50px)] at (0.5) should be [perspective(200px) translateZ(50px)]'
 - 'Web Animations: property <transform> from [perspective(10px) translateZ(0.5px)]
   to [perspective(1px) translateZ(0.5px)] at (-1) should be [translateZ(0.5px)]'
-- 'Web Animations: property <transform> from [perspective(1px) translateZ(0.5px)]
-  to [perspective(10px) translateZ(0.5px)] at (-1) should be [perspective(1px) translateZ(0.5px)]'
 - 'Web Animations: property <transform> from [perspective(none) translateZ(15px)]
   to [perspective(25px) translateZ(15px)] at (0.5) should be [perspective(50px) translateZ(15px)]'
-- 'Web Animations: property <transform> from [rotate(30deg)] to [rotateZ(90deg)] at
-  (0.5) should be [rotate(60deg)]'
 - 'Web Animations: property <transform> from [rotate(45deg)] to [rotate3d(0, 0, -1,
   45deg)] at (0.5) should be [rotate(0deg)]'
 - 'Web Animations: property <transform> from [rotate3d(1, 1, 0, 90deg)] to [rotate3d(0,
@@ -6749,28 +6145,12 @@ css/css-transforms/animation/transform-interpolation-verify-reftests.html:
   4, 6, 90deg)] at (0.5) should be [rotate3d(3, 6, 9, 45deg)]'
 - 'Web Animations: property <transform> from [rotateX(0deg)] to [rotate(90deg)] at
   (0.5) should be [rotate(45deg)]'
-- 'Web Animations: property <transform> from [rotateX(30deg)] to [rotateX(90deg)]
-  at (0.5) should be [rotateX(60deg)]'
 - 'Web Animations: property <transform> from [rotateX(360deg)] to [rotateZ(90deg)]
   at (0.5) should be [rotateZ(45deg)]'
 - 'Web Animations: property <transform> from [rotateX(90deg)] to [rotate(0deg)] at
   (0.5) should be [rotateX(45deg)]'
 - 'Web Animations: property <transform> from [rotateX(90deg)] to [rotateY(90deg)]
   at (0.5) should be [rotate3d(1, 1, 0, 70.5288deg)]'
-- 'Web Animations: property <transform> from [rotateY(30deg)] to [rotateY(90deg)]
-  at (0.5) should be [rotateY(60deg)]'
-- 'Web Animations: property <transform> from [scaleX(0.5)] to [scaleY(0.5)] at (0.5)
-  should be [scale(0.75)]'
-- 'Web Animations: property <transform> from [translateX(-50px)] to [translateX(4em)]
-  at (0.5) should be [translateX(calc(2em - 25px))]'
-- 'Web Animations: property <transform> from [translateX(50%)] to [translateX(-4em)]
-  at (0.5) should be [translateX(calc(25% - 2em))]'
-- 'Web Animations: property <transform> from [translateX(50%)] to [translateY(50%)]
-  at (0.5) should be [translate(25%, 25%)]'
-- 'Web Animations: property <transform> from [translateX(50%)] to [translateY(50px)]
-  at (0.5) should be [translate(25%, 25px)]'
-- 'Web Animations: property <transform> from [translateX(50px)] to [translateX(50%)]
-  at (0.5) should be [translateX(calc(25px + 25%))]'
 css/css-transforms/animation/transform-matrix-composition.html:
 - 'Compositing CSS Animations: property <transform> underlying [matrix(0, 1, -1, 0,
   100, 0)] from accumulate [matrix(1, 0, 0, 1, 100, 0)] to accumulate [matrix(1, 0,
@@ -7190,20 +6570,6 @@ css/css-transforms/animation/transform-perspective-composition.html:
   from add [perspective(10px)] to add [perspective(50px)] at (1.5) should be [perspective(10px)]'
 css/css-transforms/animation/transform-rotate-composition.html:
 - 'Compositing CSS Animations: property <transform> underlying [rotateX(20deg)] from
-  accumulate [rotateX(40deg)] to accumulate [rotateX(60deg)] at (-0.5) should be [rotateX(50deg)]'
-- 'Compositing CSS Animations: property <transform> underlying [rotateX(20deg)] from
-  accumulate [rotateX(40deg)] to accumulate [rotateX(60deg)] at (0) should be [rotateX(60deg)]'
-- 'Compositing CSS Animations: property <transform> underlying [rotateX(20deg)] from
-  accumulate [rotateX(40deg)] to accumulate [rotateX(60deg)] at (0.25) should be [rotateX(65deg)]'
-- 'Compositing CSS Animations: property <transform> underlying [rotateX(20deg)] from
-  accumulate [rotateX(40deg)] to accumulate [rotateX(60deg)] at (0.5) should be [rotateX(70deg)]'
-- 'Compositing CSS Animations: property <transform> underlying [rotateX(20deg)] from
-  accumulate [rotateX(40deg)] to accumulate [rotateX(60deg)] at (0.75) should be [rotateX(75deg)]'
-- 'Compositing CSS Animations: property <transform> underlying [rotateX(20deg)] from
-  accumulate [rotateX(40deg)] to accumulate [rotateX(60deg)] at (1) should be [rotateX(80deg)]'
-- 'Compositing CSS Animations: property <transform> underlying [rotateX(20deg)] from
-  accumulate [rotateX(40deg)] to accumulate [rotateX(60deg)] at (1.5) should be [rotateX(90deg)]'
-- 'Compositing CSS Animations: property <transform> underlying [rotateX(20deg)] from
   add [rotateX(40deg)] to add [rotateX(60deg)] at (-0.5) should be [rotateX(50deg)]'
 - 'Compositing CSS Animations: property <transform> underlying [rotateX(20deg)] from
   add [rotateX(40deg)] to add [rotateX(60deg)] at (0) should be [rotateX(60deg)]'
@@ -7217,41 +6583,6 @@ css/css-transforms/animation/transform-rotate-composition.html:
   add [rotateX(40deg)] to add [rotateX(60deg)] at (1) should be [rotateX(80deg)]'
 - 'Compositing CSS Animations: property <transform> underlying [rotateX(20deg)] from
   add [rotateX(40deg)] to add [rotateX(60deg)] at (1.5) should be [rotateX(90deg)]'
-- 'Compositing CSS Animations: property <transform> underlying [rotateX(45deg)] from
-  accumulate [rotateY(30deg)] to accumulate [rotateY(70deg)] at (-0.5) should be [rotateX(45deg)
-  rotateY(10deg)]'
-- 'Compositing CSS Animations: property <transform> underlying [rotateX(45deg)] from
-  accumulate [rotateY(30deg)] to accumulate [rotateY(70deg)] at (0) should be [rotateX(45deg)
-  rotateY(30deg)]'
-- 'Compositing CSS Animations: property <transform> underlying [rotateX(45deg)] from
-  accumulate [rotateY(30deg)] to accumulate [rotateY(70deg)] at (0.25) should be [rotateX(45deg)
-  rotateY(40deg)]'
-- 'Compositing CSS Animations: property <transform> underlying [rotateX(45deg)] from
-  accumulate [rotateY(30deg)] to accumulate [rotateY(70deg)] at (0.5) should be [rotateX(45deg)
-  rotateY(50deg)]'
-- 'Compositing CSS Animations: property <transform> underlying [rotateX(45deg)] from
-  accumulate [rotateY(30deg)] to accumulate [rotateY(70deg)] at (0.75) should be [rotateX(45deg)
-  rotateY(60deg)]'
-- 'Compositing CSS Animations: property <transform> underlying [rotateX(45deg)] from
-  accumulate [rotateY(30deg)] to accumulate [rotateY(70deg)] at (1) should be [rotateX(45deg)
-  rotateY(70deg)]'
-- 'Compositing CSS Animations: property <transform> underlying [rotateX(45deg)] from
-  accumulate [rotateY(30deg)] to accumulate [rotateY(70deg)] at (1.5) should be [rotateX(45deg)
-  rotateY(90deg)]'
-- 'Compositing CSS Animations: property <transform> underlying [rotateY(20deg)] from
-  accumulate [rotateY(40deg)] to accumulate [rotateY(60deg)] at (-0.5) should be [rotateY(50deg)]'
-- 'Compositing CSS Animations: property <transform> underlying [rotateY(20deg)] from
-  accumulate [rotateY(40deg)] to accumulate [rotateY(60deg)] at (0) should be [rotateY(60deg)]'
-- 'Compositing CSS Animations: property <transform> underlying [rotateY(20deg)] from
-  accumulate [rotateY(40deg)] to accumulate [rotateY(60deg)] at (0.25) should be [rotateY(65deg)]'
-- 'Compositing CSS Animations: property <transform> underlying [rotateY(20deg)] from
-  accumulate [rotateY(40deg)] to accumulate [rotateY(60deg)] at (0.5) should be [rotateY(70deg)]'
-- 'Compositing CSS Animations: property <transform> underlying [rotateY(20deg)] from
-  accumulate [rotateY(40deg)] to accumulate [rotateY(60deg)] at (0.75) should be [rotateY(75deg)]'
-- 'Compositing CSS Animations: property <transform> underlying [rotateY(20deg)] from
-  accumulate [rotateY(40deg)] to accumulate [rotateY(60deg)] at (1) should be [rotateY(80deg)]'
-- 'Compositing CSS Animations: property <transform> underlying [rotateY(20deg)] from
-  accumulate [rotateY(40deg)] to accumulate [rotateY(60deg)] at (1.5) should be [rotateY(90deg)]'
 - 'Compositing CSS Animations: property <transform> underlying [rotateY(20deg)] from
   add [rotateY(40deg)] to add [rotateY(60deg)] at (-0.5) should be [rotateY(50deg)]'
 - 'Compositing CSS Animations: property <transform> underlying [rotateY(20deg)] from
@@ -7267,20 +6598,6 @@ css/css-transforms/animation/transform-rotate-composition.html:
 - 'Compositing CSS Animations: property <transform> underlying [rotateY(20deg)] from
   add [rotateY(40deg)] to add [rotateY(60deg)] at (1.5) should be [rotateY(90deg)]'
 - 'Compositing Web Animations: property <transform> underlying [rotateX(20deg)] from
-  accumulate [rotateX(40deg)] to accumulate [rotateX(60deg)] at (-0.5) should be [rotateX(50deg)]'
-- 'Compositing Web Animations: property <transform> underlying [rotateX(20deg)] from
-  accumulate [rotateX(40deg)] to accumulate [rotateX(60deg)] at (0) should be [rotateX(60deg)]'
-- 'Compositing Web Animations: property <transform> underlying [rotateX(20deg)] from
-  accumulate [rotateX(40deg)] to accumulate [rotateX(60deg)] at (0.25) should be [rotateX(65deg)]'
-- 'Compositing Web Animations: property <transform> underlying [rotateX(20deg)] from
-  accumulate [rotateX(40deg)] to accumulate [rotateX(60deg)] at (0.5) should be [rotateX(70deg)]'
-- 'Compositing Web Animations: property <transform> underlying [rotateX(20deg)] from
-  accumulate [rotateX(40deg)] to accumulate [rotateX(60deg)] at (0.75) should be [rotateX(75deg)]'
-- 'Compositing Web Animations: property <transform> underlying [rotateX(20deg)] from
-  accumulate [rotateX(40deg)] to accumulate [rotateX(60deg)] at (1) should be [rotateX(80deg)]'
-- 'Compositing Web Animations: property <transform> underlying [rotateX(20deg)] from
-  accumulate [rotateX(40deg)] to accumulate [rotateX(60deg)] at (1.5) should be [rotateX(90deg)]'
-- 'Compositing Web Animations: property <transform> underlying [rotateX(20deg)] from
   add [rotateX(40deg)] to add [rotateX(60deg)] at (-0.5) should be [rotateX(50deg)]'
 - 'Compositing Web Animations: property <transform> underlying [rotateX(20deg)] from
   add [rotateX(40deg)] to add [rotateX(60deg)] at (0) should be [rotateX(60deg)]'
@@ -7294,41 +6611,6 @@ css/css-transforms/animation/transform-rotate-composition.html:
   add [rotateX(40deg)] to add [rotateX(60deg)] at (1) should be [rotateX(80deg)]'
 - 'Compositing Web Animations: property <transform> underlying [rotateX(20deg)] from
   add [rotateX(40deg)] to add [rotateX(60deg)] at (1.5) should be [rotateX(90deg)]'
-- 'Compositing Web Animations: property <transform> underlying [rotateX(45deg)] from
-  accumulate [rotateY(30deg)] to accumulate [rotateY(70deg)] at (-0.5) should be [rotateX(45deg)
-  rotateY(10deg)]'
-- 'Compositing Web Animations: property <transform> underlying [rotateX(45deg)] from
-  accumulate [rotateY(30deg)] to accumulate [rotateY(70deg)] at (0) should be [rotateX(45deg)
-  rotateY(30deg)]'
-- 'Compositing Web Animations: property <transform> underlying [rotateX(45deg)] from
-  accumulate [rotateY(30deg)] to accumulate [rotateY(70deg)] at (0.25) should be [rotateX(45deg)
-  rotateY(40deg)]'
-- 'Compositing Web Animations: property <transform> underlying [rotateX(45deg)] from
-  accumulate [rotateY(30deg)] to accumulate [rotateY(70deg)] at (0.5) should be [rotateX(45deg)
-  rotateY(50deg)]'
-- 'Compositing Web Animations: property <transform> underlying [rotateX(45deg)] from
-  accumulate [rotateY(30deg)] to accumulate [rotateY(70deg)] at (0.75) should be [rotateX(45deg)
-  rotateY(60deg)]'
-- 'Compositing Web Animations: property <transform> underlying [rotateX(45deg)] from
-  accumulate [rotateY(30deg)] to accumulate [rotateY(70deg)] at (1) should be [rotateX(45deg)
-  rotateY(70deg)]'
-- 'Compositing Web Animations: property <transform> underlying [rotateX(45deg)] from
-  accumulate [rotateY(30deg)] to accumulate [rotateY(70deg)] at (1.5) should be [rotateX(45deg)
-  rotateY(90deg)]'
-- 'Compositing Web Animations: property <transform> underlying [rotateY(20deg)] from
-  accumulate [rotateY(40deg)] to accumulate [rotateY(60deg)] at (-0.5) should be [rotateY(50deg)]'
-- 'Compositing Web Animations: property <transform> underlying [rotateY(20deg)] from
-  accumulate [rotateY(40deg)] to accumulate [rotateY(60deg)] at (0) should be [rotateY(60deg)]'
-- 'Compositing Web Animations: property <transform> underlying [rotateY(20deg)] from
-  accumulate [rotateY(40deg)] to accumulate [rotateY(60deg)] at (0.25) should be [rotateY(65deg)]'
-- 'Compositing Web Animations: property <transform> underlying [rotateY(20deg)] from
-  accumulate [rotateY(40deg)] to accumulate [rotateY(60deg)] at (0.5) should be [rotateY(70deg)]'
-- 'Compositing Web Animations: property <transform> underlying [rotateY(20deg)] from
-  accumulate [rotateY(40deg)] to accumulate [rotateY(60deg)] at (0.75) should be [rotateY(75deg)]'
-- 'Compositing Web Animations: property <transform> underlying [rotateY(20deg)] from
-  accumulate [rotateY(40deg)] to accumulate [rotateY(60deg)] at (1) should be [rotateY(80deg)]'
-- 'Compositing Web Animations: property <transform> underlying [rotateY(20deg)] from
-  accumulate [rotateY(40deg)] to accumulate [rotateY(60deg)] at (1.5) should be [rotateY(90deg)]'
 - 'Compositing Web Animations: property <transform> underlying [rotateY(20deg)] from
   add [rotateY(40deg)] to add [rotateY(60deg)] at (-0.5) should be [rotateY(50deg)]'
 - 'Compositing Web Animations: property <transform> underlying [rotateY(20deg)] from
@@ -7344,41 +6626,6 @@ css/css-transforms/animation/transform-rotate-composition.html:
 - 'Compositing Web Animations: property <transform> underlying [rotateY(20deg)] from
   add [rotateY(40deg)] to add [rotateY(60deg)] at (1.5) should be [rotateY(90deg)]'
 css/css-transforms/animation/transform-scale-composition.html:
-- 'Compositing CSS Animations: property <transform> underlying [scale(2, 4)] from
-  accumulate [scaleZ(3)] to accumulate [scaleZ(4)] at (-0.5) should be [scale3d(2,
-  4, 2.5)]'
-- 'Compositing CSS Animations: property <transform> underlying [scale(2, 4)] from
-  accumulate [scaleZ(3)] to accumulate [scaleZ(4)] at (0) should be [scale3d(2, 4,
-  3)]'
-- 'Compositing CSS Animations: property <transform> underlying [scale(2, 4)] from
-  accumulate [scaleZ(3)] to accumulate [scaleZ(4)] at (0.25) should be [scale3d(2,
-  4, 3.25)]'
-- 'Compositing CSS Animations: property <transform> underlying [scale(2, 4)] from
-  accumulate [scaleZ(3)] to accumulate [scaleZ(4)] at (0.5) should be [scale3d(2,
-  4, 3.5)]'
-- 'Compositing CSS Animations: property <transform> underlying [scale(2, 4)] from
-  accumulate [scaleZ(3)] to accumulate [scaleZ(4)] at (0.75) should be [scale3d(2,
-  4, 3.75)]'
-- 'Compositing CSS Animations: property <transform> underlying [scale(2, 4)] from
-  accumulate [scaleZ(3)] to accumulate [scaleZ(4)] at (1) should be [scale3d(2, 4,
-  4)]'
-- 'Compositing CSS Animations: property <transform> underlying [scale(2, 4)] from
-  accumulate [scaleZ(3)] to accumulate [scaleZ(4)] at (1.5) should be [scale3d(2,
-  4, 4.5)]'
-- 'Compositing CSS Animations: property <transform> underlying [scaleZ(2)] from accumulate
-  [scaleZ(3)] to accumulate [scaleZ(4)] at (-0.5) should be [scaleZ(3.5)]'
-- 'Compositing CSS Animations: property <transform> underlying [scaleZ(2)] from accumulate
-  [scaleZ(3)] to accumulate [scaleZ(4)] at (0) should be [scaleZ(4)]'
-- 'Compositing CSS Animations: property <transform> underlying [scaleZ(2)] from accumulate
-  [scaleZ(3)] to accumulate [scaleZ(4)] at (0.25) should be [scaleZ(4.25)]'
-- 'Compositing CSS Animations: property <transform> underlying [scaleZ(2)] from accumulate
-  [scaleZ(3)] to accumulate [scaleZ(4)] at (0.5) should be [scaleZ(4.5)]'
-- 'Compositing CSS Animations: property <transform> underlying [scaleZ(2)] from accumulate
-  [scaleZ(3)] to accumulate [scaleZ(4)] at (0.75) should be [scaleZ(4.75)]'
-- 'Compositing CSS Animations: property <transform> underlying [scaleZ(2)] from accumulate
-  [scaleZ(3)] to accumulate [scaleZ(4)] at (1) should be [scaleZ(5)]'
-- 'Compositing CSS Animations: property <transform> underlying [scaleZ(2)] from accumulate
-  [scaleZ(3)] to accumulate [scaleZ(4)] at (1.5) should be [scaleZ(5.5)]'
 - 'Compositing CSS Animations: property <transform> underlying [scaleZ(2)] from add
   [scaleZ(3)] to add [scaleZ(4)] at (-0.5) should be [scaleZ(5)]'
 - 'Compositing CSS Animations: property <transform> underlying [scaleZ(2)] from add
@@ -7393,41 +6640,6 @@ css/css-transforms/animation/transform-scale-composition.html:
   [scaleZ(3)] to add [scaleZ(4)] at (1) should be [scaleZ(8)]'
 - 'Compositing CSS Animations: property <transform> underlying [scaleZ(2)] from add
   [scaleZ(3)] to add [scaleZ(4)] at (1.5) should be [scaleZ(9)]'
-- 'Compositing Web Animations: property <transform> underlying [scale(2, 4)] from
-  accumulate [scaleZ(3)] to accumulate [scaleZ(4)] at (-0.5) should be [scale3d(2,
-  4, 2.5)]'
-- 'Compositing Web Animations: property <transform> underlying [scale(2, 4)] from
-  accumulate [scaleZ(3)] to accumulate [scaleZ(4)] at (0) should be [scale3d(2, 4,
-  3)]'
-- 'Compositing Web Animations: property <transform> underlying [scale(2, 4)] from
-  accumulate [scaleZ(3)] to accumulate [scaleZ(4)] at (0.25) should be [scale3d(2,
-  4, 3.25)]'
-- 'Compositing Web Animations: property <transform> underlying [scale(2, 4)] from
-  accumulate [scaleZ(3)] to accumulate [scaleZ(4)] at (0.5) should be [scale3d(2,
-  4, 3.5)]'
-- 'Compositing Web Animations: property <transform> underlying [scale(2, 4)] from
-  accumulate [scaleZ(3)] to accumulate [scaleZ(4)] at (0.75) should be [scale3d(2,
-  4, 3.75)]'
-- 'Compositing Web Animations: property <transform> underlying [scale(2, 4)] from
-  accumulate [scaleZ(3)] to accumulate [scaleZ(4)] at (1) should be [scale3d(2, 4,
-  4)]'
-- 'Compositing Web Animations: property <transform> underlying [scale(2, 4)] from
-  accumulate [scaleZ(3)] to accumulate [scaleZ(4)] at (1.5) should be [scale3d(2,
-  4, 4.5)]'
-- 'Compositing Web Animations: property <transform> underlying [scaleZ(2)] from accumulate
-  [scaleZ(3)] to accumulate [scaleZ(4)] at (-0.5) should be [scaleZ(3.5)]'
-- 'Compositing Web Animations: property <transform> underlying [scaleZ(2)] from accumulate
-  [scaleZ(3)] to accumulate [scaleZ(4)] at (0) should be [scaleZ(4)]'
-- 'Compositing Web Animations: property <transform> underlying [scaleZ(2)] from accumulate
-  [scaleZ(3)] to accumulate [scaleZ(4)] at (0.25) should be [scaleZ(4.25)]'
-- 'Compositing Web Animations: property <transform> underlying [scaleZ(2)] from accumulate
-  [scaleZ(3)] to accumulate [scaleZ(4)] at (0.5) should be [scaleZ(4.5)]'
-- 'Compositing Web Animations: property <transform> underlying [scaleZ(2)] from accumulate
-  [scaleZ(3)] to accumulate [scaleZ(4)] at (0.75) should be [scaleZ(4.75)]'
-- 'Compositing Web Animations: property <transform> underlying [scaleZ(2)] from accumulate
-  [scaleZ(3)] to accumulate [scaleZ(4)] at (1) should be [scaleZ(5)]'
-- 'Compositing Web Animations: property <transform> underlying [scaleZ(2)] from accumulate
-  [scaleZ(3)] to accumulate [scaleZ(4)] at (1.5) should be [scaleZ(5.5)]'
 - 'Compositing Web Animations: property <transform> underlying [scaleZ(2)] from add
   [scaleZ(3)] to add [scaleZ(4)] at (-0.5) should be [scaleZ(5)]'
 - 'Compositing Web Animations: property <transform> underlying [scaleZ(2)] from add
@@ -8308,20 +7520,10 @@ css/css-transforms/composited-under-rotateY-180deg-perspective.html:
 - "== css/css-transforms/composited-under-rotateY-180deg-ref.html"
 css/css-transforms/composited-under-rotateY-180deg.html:
 - "== css/css-transforms/composited-under-rotateY-180deg-ref.html"
-css/css-transforms/css-rotate-2d-3d-001.html:
-- "== css/css-transforms/css-rotate-2d-3d-001-ref.html"
 css/css-transforms/css-skew-001.html:
 - "== css/css-transforms/css-skew-001-ref.html"
 css/css-transforms/css-skew-002.html:
 - "== css/css-transforms/css-skew-002-ref.html"
-css/css-transforms/css-transform-3d-rotate3d-X-negative.html:
-- "== css/css-transforms/reference/css-transform-3d-rotateX-ref.html"
-css/css-transforms/css-transform-3d-rotate3d-X-positive.html:
-- "== css/css-transforms/reference/css-transform-3d-rotateX-ref.html"
-css/css-transforms/css-transform-3d-rotate3d-Y-negative.html:
-- "== css/css-transforms/reference/css-transform-3d-rotateX-ref.html"
-css/css-transforms/css-transform-3d-rotate3d-Y-positive.html:
-- "== css/css-transforms/reference/css-transform-3d-rotateX-ref.html"
 css/css-transforms/css-transform-3d-transform-style.html:
 - "== css/css-transforms/reference/css-transform-3d-transform-style-ref.html"
 css/css-transforms/css-transform-style-evaluation-validation.html:
@@ -8353,8 +7555,6 @@ css/css-transforms/individual-transform/animation/individual-transform-combine.h
 - "== css/css-transforms/individual-transform/animation/individual-transform-combine-ref.html"
 css/css-transforms/individual-transform/animation/individual-transform-ordering.html:
 - "== css/css-transforms/individual-transform/animation/individual-transform-ordering-ref.html"
-css/css-transforms/individual-transform/individual-transform-1.html:
-- "== css/css-transforms/individual-transform/individual-transform-1-ref.html"
 css/css-transforms/individual-transform/individual-transform-2a.html:
 - "== css/css-transforms/individual-transform/individual-transform-2-ref.html"
 css/css-transforms/individual-transform/individual-transform-2b.html:
@@ -8976,10 +8176,6 @@ css/css-transforms/transform3d-preserve3d-012.html:
 - "== css/css-transforms/transform-blank-ref.html"
 css/css-transforms/transform3d-preserve3d-014.html:
 - "== css/css-transforms/transform-lime-square-ref.html"
-css/css-transforms/transform3d-rotate3d-001.html:
-- "== css/css-transforms/transform3d-rotatex-ref.html"
-css/css-transforms/transform3d-rotate3d-002.html:
-- "== css/css-transforms/transform3d-rotatey-ref.html"
 css/css-transforms/transform3d-rotatex-001.html:
 - "== css/css-transforms/transform3d-rotatex-ref.html"
 css/css-transforms/transform3d-rotatex-perspective-002.html:
@@ -9017,7 +8213,6 @@ css/css-transforms/transforms-skewX.html:
 css/css-transforms/transforms-skewY.html:
 - "== css/css-transforms/reference/transforms-skewY-ref.html"
 css/css-transforms/transforms-support-calc.html:
-- transform supports calc
 - translate supports calc
 css/css-transforms/translate-getComputedStyle.html:
 - computed style for translate
