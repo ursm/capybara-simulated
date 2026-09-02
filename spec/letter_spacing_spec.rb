@@ -9,10 +9,13 @@ require_relative 'support/session_teardown'
 # width and wrapped two lines where Chrome wraps three — while `getComputedStyle` reported the
 # spacing correctly the whole time.
 #
-# The rule, Chrome-measured at 16px monospace (an advance of 9.6px per glyph): letter-spacing is
-# added after EVERY character, the last one included, and word-spacing after each word separator on
-# top of it. Widths are asserted at 0.05px because the face's advance is 9.6025 in Chrome and 9.6
-# here — the faces agree to a hundredth and the assertion is about the spacing.
+# The rule, Chrome-measured at 16px monospace: letter-spacing is added after EVERY character, the
+# last one included, and word-spacing after each word separator on top of it.
+#
+# Every width here is asserted as the DIFFERENCE from the same run unspaced — the spacing times the
+# characters it applies to — and never as an absolute number. The face's advance is the machine's:
+# 9.6px per glyph here, 9.6328 on CI, and an absolute assertion turned every CI job red on the first
+# push. The spacing is what the assertion is about, and it is exact whatever the face.
 RSpec.describe 'letter-spacing and word-spacing reach the flow' do
   def page(body, css = '')
     session = simulated_session(->(_env) {
@@ -39,42 +42,54 @@ RSpec.describe 'letter-spacing and word-spacing reach the flow' do
 
   def width(session, id = 't') = size(session, id)[0]
 
+  # The width a run GAINS from its spacing: the same markup with and without the style.
+  def gain(body_with_style, body_plain, css = '')
+    width(page(body_with_style, css)) - width(page(body_plain, css))
+  end
+
   it 'adds letter-spacing after every character, the last one included' do
-    expect(width(page('<div><span id=t>abcd</span></div>'))).to be_within(0.05).of(38.41)
-    expect(width(page('<div><span id=t style="letter-spacing:10px">abcd</span></div>'))).to be_within(0.05).of(78.41)
+    expect(gain('<div><span id=t style="letter-spacing:10px">abcd</span></div>', '<div><span id=t>abcd</span></div>'))
+      .to be_within(0.01).of(40)                      # 4 characters x 10px
   end
 
   it 'takes a negative letter-spacing' do
-    expect(width(page('<div><span id=t style="letter-spacing:-3px">abcd</span></div>'))).to be_within(0.05).of(26.41)
+    expect(gain('<div><span id=t style="letter-spacing:-3px">abcd</span></div>', '<div><span id=t>abcd</span></div>'))
+      .to be_within(0.01).of(-12)
   end
 
   it 'spaces a single character too' do
-    expect(width(page('<div><span id=t style="letter-spacing:10px">a</span></div>'))).to be_within(0.05).of(19.61)
+    expect(gain('<div><span id=t style="letter-spacing:10px">a</span></div>', '<div><span id=t>a</span></div>'))
+      .to be_within(0.01).of(10)
   end
 
   it 'resolves a font-relative letter-spacing' do
-    expect(width(page('<div><span id=t style="letter-spacing:1em">abcd</span></div>'))).to be_within(0.05).of(102.41)
+    expect(gain('<div><span id=t style="letter-spacing:1em">abcd</span></div>', '<div><span id=t>abcd</span></div>'))
+      .to be_within(0.01).of(64)                      # 4 x 16px
   end
 
   it 'adds word-spacing after each word separator' do
-    expect(width(page('<div><span id=t style="word-spacing:20px">ab cd ef</span></div>'))).to be_within(0.05).of(116.81)
+    expect(gain('<div><span id=t style="word-spacing:20px">ab cd ef</span></div>', '<div><span id=t>ab cd ef</span></div>'))
+      .to be_within(0.01).of(40)                      # 2 separators
   end
 
   it 'counts a preserved trailing space as a separator' do
-    expect(width(page('<div><span id=t style="word-spacing:20px">ab cd ef </span></div>'))).to be_within(0.05).of(146.41)
+    expect(gain('<div><span id=t style="word-spacing:20px">ab cd ef </span></div>', '<div><span id=t>ab cd ef </span></div>'))
+      .to be_within(0.01).of(60)                      # 3, the trailing one included
   end
 
   it 'letter-spaces the space itself' do
-    expect(width(page('<div><span id=t style="letter-spacing:10px">ab cd</span></div>'))).to be_within(0.05).of(98.02)
+    expect(gain('<div><span id=t style="letter-spacing:10px">ab cd</span></div>', '<div><span id=t>ab cd</span></div>'))
+      .to be_within(0.01).of(50)                      # 5 characters, the space among them
   end
 
   it 'adds both spacings together' do
-    expect(width(page('<div><span id=t style="letter-spacing:10px;word-spacing:20px">ab cd</span></div>')))
-      .to be_within(0.05).of(118.02)
+    expect(gain('<div><span id=t style="letter-spacing:10px;word-spacing:20px">ab cd</span></div>', '<div><span id=t>ab cd</span></div>'))
+      .to be_within(0.01).of(70)                      # 5 x 10 + 1 x 20
   end
 
   it 'counts a CJK character once' do
-    expect(width(page('<div><span id=t style="letter-spacing:10px">日本語</span></div>'))).to be_within(0.05).of(78.02)
+    expect(gain('<div><span id=t style="letter-spacing:10px">日本語</span></div>', '<div><span id=t>日本語</span></div>'))
+      .to be_within(0.01).of(30)
   end
 
   it 'leaves an empty run empty' do
@@ -82,20 +97,27 @@ RSpec.describe 'letter-spacing and word-spacing reach the flow' do
   end
 
   # …and the line breaks where the SPACED words run out of room: "abcd efgh ijkl" in 120px is two
-  # lines unspaced and three under `letter-spacing: 10px` (Chrome: 66px tall, 78.41 wide).
+  # lines unspaced and three under `letter-spacing: 10px` (Chrome). Line COUNTS, against the height
+  # of one line of the same font — the line box's height is the face's.
   it 'breaks lines on the spaced width' do
-    s = page('<div style="width:120px"><span id=t style="letter-spacing:10px;white-space:normal">abcd efgh ijkl</span></div>')
-    expect(size(s)).to eq([size(s)[0], 66])
-    expect(width(s)).to be_within(0.05).of(78.41)
+    # A container just wide enough for "abcd efgh" UNSPACED, whatever the face: the unspaced run
+    # then wraps once (before "ijkl") and the spaced one — 90px longer — twice.
+    fits = (width(page('<div><span id=t>abcd efgh</span></div>')) + 1).ceil
+    box  = ->(style) { "<div style=\"width:#{fits}px\"><span id=t style=\"white-space:normal;#{style}\">abcd efgh ijkl</span></div>" }
+    # Line COUNTS, as a rounded ratio: a face with a fractional line box (17.5px) snaps three lines
+    # to 53 rather than 52.5, and the count is what the example is about.
+    one_line = size(page(box.call('')))[1] / 2.0
+    expect((size(page(box.call('letter-spacing:10px')))[1] / one_line).round).to eq(3)
   end
 
   it 'inherits the spacing into a child that declares none' do
-    expect(width(page('<div style="letter-spacing:10px"><span id=t>abcd</span></div>'))).to be_within(0.05).of(78.41)
+    expect(gain('<div style="letter-spacing:10px"><span id=t>abcd</span></div>', '<div><span id=t>abcd</span></div>'))
+      .to be_within(0.01).of(40)
   end
 
   it 'lets a child override the spacing it inherits' do
-    expect(width(page('<div style="letter-spacing:10px"><span id=t style="letter-spacing:0">abcd</span></div>')))
-      .to be_within(0.05).of(38.41)
+    expect(gain('<div style="letter-spacing:10px"><span id=t style="letter-spacing:0">abcd</span></div>', '<div><span id=t>abcd</span></div>'))
+      .to be_within(0.01).of(0)
   end
 
   # ── inheritance crosses a font boundary ──
@@ -105,34 +127,36 @@ RSpec.describe 'letter-spacing and word-spacing reach the flow' do
   # RULE declared the property (measured: 38.4 where Chrome has 78.41). The record takes the
   # parent's figure instead.
   it 'inherits an inline ancestor spacing through a bold child' do
-    expect(width(page('<div style="letter-spacing:10px"><b id=t>abcd</b></div>', 'b{white-space:pre}')))
-      .to be_within(0.05).of(78.41)
+    expect(gain('<div style="letter-spacing:10px"><b id=t>abcd</b></div>', '<div><b id=t>abcd</b></div>', 'b{white-space:pre}'))
+      .to be_within(0.01).of(40)
   end
 
   it 'inherits an inline ancestor spacing through a child with its own font-size' do
-    expect(width(page('<div style="letter-spacing:10px"><span id=t style="font-size:32px">abcd</span></div>')))
-      .to be_within(0.05).of(116.81)
+    expect(gain('<div style="letter-spacing:10px"><span id=t style="font-size:32px">abcd</span></div>',
+                '<div><span id=t style="font-size:32px">abcd</span></div>')).to be_within(0.01).of(40)
   end
 
   it 'inherits an inline ancestor word-spacing through a bold child' do
-    expect(width(page('<div style="word-spacing:20px"><b id=t>ab cd</b></div>', 'b{white-space:pre}')))
-      .to be_within(0.05).of(68.02)
+    expect(gain('<div style="word-spacing:20px"><b id=t>ab cd</b></div>', '<div><b id=t>ab cd</b></div>', 'b{white-space:pre}'))
+      .to be_within(0.01).of(20)
   end
 
   # ── percentages and calc() ──
   # A percentage is of the FONT SIZE — 50% at 16px is 8px — and Chrome takes one for
   # `letter-spacing` as well. `parseFloat` read `50%` as 50 pixels.
   it 'resolves a word-spacing percentage against the font size' do
-    expect(width(page('<div><span id=t style="word-spacing:50%">ab cd</span></div>'))).to be_within(0.05).of(56.02)
+    expect(gain('<div><span id=t style="word-spacing:50%">ab cd</span></div>', '<div><span id=t>ab cd</span></div>'))
+      .to be_within(0.01).of(8)                       # 50% of 16px, once
   end
 
   it 'resolves a letter-spacing percentage against the font size' do
-    expect(width(page('<div><span id=t style="letter-spacing:50%">ab cd</span></div>'))).to be_within(0.05).of(88.02)
+    expect(gain('<div><span id=t style="letter-spacing:50%">ab cd</span></div>', '<div><span id=t>ab cd</span></div>'))
+      .to be_within(0.01).of(40)                      # 5 x 8px
   end
 
   it 'resolves a calc() with a percentage in it' do
-    expect(width(page('<div><span id=t style="word-spacing:calc(50% + 2px)">ab cd</span></div>')))
-      .to be_within(0.05).of(58.02)
+    expect(gain('<div><span id=t style="word-spacing:calc(50% + 2px)">ab cd</span></div>', '<div><span id=t>ab cd</span></div>'))
+      .to be_within(0.01).of(10)
   end
 
   # ── what takes no spacing ──
@@ -141,16 +165,19 @@ RSpec.describe 'letter-spacing and word-spacing reach the flow' do
   # width joiner. Those have no ADVANCE either — charging them the Latin mean made `ab&shy;cd`
   # 9.6px wider than `abcd` before any spacing was involved.
   it 'gives a soft hyphen neither an advance nor a spacing' do
-    expect(width(page('<div><span id=t>ab&shy;cd</span></div>'))).to be_within(0.05).of(38.41)
-    expect(width(page('<div><span id=t style="letter-spacing:10px">ab&shy;cd</span></div>'))).to be_within(0.05).of(78.41)
+    expect(gain('<div><span id=t>ab&shy;cd</span></div>', '<div><span id=t>abcd</span></div>')).to be_within(0.01).of(0)
+    expect(gain('<div><span id=t style="letter-spacing:10px">ab&shy;cd</span></div>', '<div><span id=t>abcd</span></div>'))
+      .to be_within(0.01).of(40)
   end
 
   it 'gives a zero-width space no spacing' do
-    expect(width(page('<div><span id=t style="letter-spacing:10px">ab&#x200B;cd</span></div>'))).to be_within(0.05).of(78.41)
+    expect(gain('<div><span id=t style="letter-spacing:10px">ab&#x200B;cd</span></div>', '<div><span id=t>abcd</span></div>'))
+      .to be_within(0.01).of(40)
   end
 
   it 'spaces a combining sequence once' do
-    expect(width(page('<div><span id=t style="letter-spacing:10px">e&#x301;</span></div>'))).to be_within(0.05).of(19.61)
+    expect(gain('<div><span id=t style="letter-spacing:10px">e&#x301;</span></div>', '<div><span id=t>e&#x301;</span></div>'))
+      .to be_within(0.01).of(10)
   end
 
   it 'spaces a ZWJ emoji sequence once' do
@@ -219,17 +246,19 @@ RSpec.describe 'letter-spacing and word-spacing reach the flow' do
   # spacing alone, and that is font-independent.
   it 'paints the glyphs at the spaced positions' do
     s = page('<div><span id=u>abcd</span></div><div><span id=t style="letter-spacing:10px">abcd</span></div>')
+    # Each run's own line, from its rect — the line box's height is the face's.
+    band = ->(id) { s.evaluate_script("(function () { var r = document.getElementById(#{id.to_json}).getBoundingClientRect(); return [Math.floor(r.top), Math.ceil(r.bottom)]; })()") }
     path = File.join(Dir.tmpdir, "csim-ls-#{Process.pid}.png")
     begin
       s.driver.save_screenshot(path)
       img = Vips::Image.new_from_file(path)
       raw = img.write_to_memory
       bands = img.bands
-      ink_right = lambda do |y0, y1|
+      ink_right = lambda do |(y0, y1)|
         (0...img.width).select {|x| (y0...y1).any? {|y| raw.byteslice(((y * img.width) + x) * bands, 3).bytes[0] < 128 } }.max
       end
-      unspaced = ink_right.call(0, 22)
-      spaced   = ink_right.call(22, 44)
+      unspaced = ink_right.call(band.call('u'))
+      spaced   = ink_right.call(band.call('t'))
       expect(spaced - unspaced).to be_between(28, 32)      # 3 gaps of 10px, ± antialiasing
     ensure
       File.delete(path) if File.exist?(path)
