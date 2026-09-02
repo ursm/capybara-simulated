@@ -93,13 +93,23 @@ RSpec.describe 'a value an animation declares reaches layout' do
 
   # `white-space` and the inherited-property ancestor walk are two more gates written to the same
   # shape, and they were blind in the same way. A 60px monospace box whose only `white-space: pre`
-  # comes from an animation is ONE line high (Chrome: 22px); wrapping it means layout read `normal`.
+  # comes from an animation does not wrap.
+  #
+  # Against a CONTROL rather than against a number: a line box's height comes from the `hhea`
+  # metrics of whatever face fontconfig resolves `monospace` to, which is not the same face on CI
+  # as on this machine — asserting Chrome's 22px here passed locally and turned CI red. And the
+  # control declares its `white-space` INLINE, because a rule would put the property in the
+  # document-wide index and open the gate for the element under test too.
   it 'stops a box wrapping for a white-space only an animation declares' do
     s = page_with('@keyframes ws { from { white-space: pre } to { white-space: pre } }' \
-                  '#t { animation: ws 10s linear paused; width: 60px; font: 16px monospace }',
-                  '<div id=t>a b c d e f g h</div>')
+                  '#t, #c, #n { width: 60px; font: 16px monospace }' \
+                  '#t { animation: ws 10s linear paused }',
+                  '<div id=t>a b c d e f g h</div>' \
+                  '<div id=c style="white-space:pre">a b c d e f g h</div>' \
+                  '<div id=n>a b c d e f g h</div>')
     expect(computed(s, 'whiteSpace')).to eq('pre')
-    expect(rect(s)[3]).to eq(22)
+    expect(rect(s, 't')[3]).to eq(rect(s, 'c')[3])   # one line, like the unwrapped control
+    expect(rect(s, 't')[3]).to be < rect(s, 'n')[3]  # …and not the wrapped one
   end
 
   it 'inherits a value only an animation on the ancestor declares' do
