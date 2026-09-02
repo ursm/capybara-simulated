@@ -279,4 +279,15 @@ RSpec.describe 'CSS animations and transitions' do
       expect(pair).to eq(['20px', '20px'])
     end
   end
+  # The live-keyframes filter reads the SHEETS for the names animations reference; a name an
+  # element brings in its style attribute is invisible there, and the filter is widened at the
+  # attribute write — not when the element's style is first parsed, which for an element nobody
+  # has read may be after the keyframe index was built without its name.
+  it 'runs an inline animation on an element nobody read' do
+    s = page('<style>@keyframes grow { from { width: 100px } to { width: 200px } }</style>' \
+             '<div id="a" style="animation: grow 10s linear; width: 50px">a</div>')
+    expect(s.evaluate_script("document.getElementById('a').getAnimations().length")).to eq(1)
+    expect(s.evaluate_script("getComputedStyle(document.getElementById('a')).width")).to eq('100px')
+  end
+
 end

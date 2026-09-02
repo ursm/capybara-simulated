@@ -40,6 +40,21 @@ RSpec.describe 'starting a transition' do
     JS
   end
 
+  # The transition model is armed by the FIRST `transition` declaration the document sees, and an
+  # inline one arms it at the attribute write — not when the element's style is first parsed,
+  # which for an element nobody has read is after the change it should have measured (the width
+  # jumped straight to 200px where the rule-declared control below read 100px).
+  it 'arms the model from an inline declaration on an element nobody read' do
+    s = page('<div id="a" style="transition: width 1s linear; width: 100px"></div>')
+    expect(s.evaluate_script(<<~JS)).to eq('100px')
+      (function () {
+        const a = document.getElementById('a');
+        a.style.width = '200px';
+        return getComputedStyle(a).width;
+      })()
+    JS
+  end
+
   # …and a computed-value READ is one too, which is the other way a page forces the recalc.
   it 'treats a computed-value read as a style change event' do
     s = page('<div id="a" class="box"></div>', <<~CSS)
