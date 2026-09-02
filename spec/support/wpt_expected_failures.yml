@@ -13690,8 +13690,6 @@ web-animations/animation-model/keyframe-effects/computed-keyframes-shorthands.ht
 - It should be possible to animate the all shorthand
 web-animations/animation-model/keyframe-effects/effect-value-context-filling.html:
 - Filling effect values reflect changes to the animation's iteration composite mode
-web-animations/animation-model/keyframe-effects/effect-value-context.html:
-- Effect values reflect changes to target element
 web-animations/animation-model/keyframe-effects/effect-value-iteration-composite-operation.html:
 - duration changes with an iteration composition operation of accumulate
 - iteration composition of <calc()> value animation
@@ -13799,7 +13797,6 @@ web-animations/interfaces/Animatable/getAnimations.html:
 - Throws SyntaxError for an invalid pseudo-element selector
 - Triggers a style change event
 web-animations/interfaces/Animation/cancel.html:
-- After cancelling an animation, it can still be re-used
 - After cancelling an animation, it can still be seeked
 web-animations/interfaces/Animation/commitStyles.html:
 - Checks the pseudo element condition before the not rendered condition
@@ -13829,9 +13826,6 @@ web-animations/interfaces/Animation/commitStyles.html:
 - Triggers mutation observers when updating style
 web-animations/interfaces/Animation/constructor.html:
 - Animation created with an affect associated with another animation.
-web-animations/interfaces/Animation/effect.html:
-- Clearing and setting Animation.effect should update the computed style of the target
-  element
 web-animations/interfaces/Animation/finished.html:
 - Finished promise should be rejected after the ready promise is rejected
 - Test finished promise changes for animation duration changes
@@ -13964,8 +13958,6 @@ web-animations/interfaces/KeyframeEffect/target.html:
 - Changing pseudoElement to a non-null invalid pseudo-selector '::abc' throws a SyntaxError
 - Changing pseudoElement to a non-null invalid pseudo-selector ':abc' throws a SyntaxError
 - Changing pseudoElement to a non-null invalid pseudo-selector 'before' throws a SyntaxError
-- Test setting target from a valid target to another target
-- Test setting target from null to a valid target
 web-animations/interfaces/TimelineTrigger/constructor.html:
 - Active range supplied; entry copied from active
 - All values supplied (scroll timeline).
