@@ -295,6 +295,28 @@ RSpec.describe "text-align lines a block's lines up" do
     expect(just['c'][0]).to be_within(0.01).of(left['c'][0] + free)
   end
 
+  # A run placed WHOLE — `white-space: pre` / `nowrap` — keeps its spaces inside, and Chrome widens
+  # each of them like any other gap: the run itself grows, and what follows moves by its gaps too.
+  it 'widens the spaces inside a nowrap run' do
+    fits = (lay('<div><span id=t>aa bb cc</span></div>')['t'][2] + 1).ceil
+    box  = ->(align) { "<div style=\"width:#{fits}px;text-align:#{align};white-space:normal\">aa <span id=b style=\"white-space:nowrap\">bb cc</span> dd</div>" }
+    left = lay(box.call('left'))
+    just = lay(box.call('justify'))
+    free = fits - (left['b'][0] + left['b'][2])
+    expect(just['b'][0]).to be_within(0.01).of(left['b'][0] + free / 2)
+    expect(just['b'][2]).to be_within(0.01).of(left['b'][2] + free / 2)
+  end
+
+  it 'widens the spaces inside a pre run, a double space twice' do
+    fits = (lay('<div><span id=t>aa  bb cc</span></div>')['t'][2] + 1).ceil
+    box  = ->(align) { "<div style=\"width:#{fits}px;text-align:#{align};white-space:normal\"><span id=b>aa  bb</span> <span id=c>cc</span> dd</div>" }
+    left = lay(box.call('left'))
+    just = lay(box.call('justify'))
+    free = fits - (left['c'][0] + left['c'][2])                          # three gaps, two in the run
+    expect(just['b'][2]).to be_within(0.01).of(left['b'][2] + free * 2 / 3)
+    expect(just['c'][0]).to be_within(0.01).of(left['c'][0] + free)
+  end
+
   it 'start-aligns the lines it leaves alone in an rtl block' do
     r = lay('<div class=w style="direction:rtl;text-align:justify;white-space:normal">aa <span id=b>bb</span><br>cc</div>')
     expect(r['b'][0]).to be_within(0.01).of(300 - r['b'][2])
@@ -414,6 +436,34 @@ RSpec.describe "text-align lines a block's lines up" do
     x, w = xw(rects(s), 't')
     expect(s.evaluate_script("document.elementFromPoint(#{x + w / 2}, 5).id")).to eq('t')
     expect(s.evaluate_script('document.elementFromPoint(5, 5).id')).not_to eq('t')
+  end
+
+  it 'paints the words inside a justified pre run at their widened positions' do
+    fits = (lay('<div><span id=t>aa bb cc</span></div>')['t'][2] + 1).ceil
+    box  = ->(align) { "<div style=\"width:#{fits}px;text-align:#{align};white-space:normal\"><span id=b>aa bb</span> cc dd</div>" }
+    s = page(box.call('left') + box.call('justify'))
+    r = s.evaluate_script(<<~JS)
+      (function () {
+        var out = [];
+        document.querySelectorAll('#b').forEach(function (el) { var q = el.getBoundingClientRect(); out.push([q.x, q.width, Math.floor(q.top), Math.ceil(q.bottom)]); });
+        return out;
+      })()
+    JS
+    path = File.join(Dir.tmpdir, "csim-tj-#{Process.pid}.png")
+    begin
+      s.driver.save_screenshot(path)
+      img = Vips::Image.new_from_file(path)
+      raw = img.write_to_memory
+      bands = img.bands
+      # The right edge of the ink in each run's own band: "bb" ends where the run ends.
+      ink_right = lambda do |(_x, _w, y0, y1)|
+        (0...img.width).select {|x| (y0...y1).any? {|y| raw.byteslice(((y * img.width) + x) * bands, 3).bytes[0] < 128 } }.max
+      end
+      shift = ink_right.call(r[1]) - ink_right.call(r[0])
+      expect(shift).to be_within(1.5).of(r[1][1] - r[0][1])              # by the run's widening
+    ensure
+      File.delete(path) if File.exist?(path)
+    end
   end
 
   it 'paints the glyphs where the line was lined up' do
