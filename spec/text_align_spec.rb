@@ -24,9 +24,15 @@ require_relative 'support/session_teardown'
 #     child takes none
 #   - HTML's `align` attribute and `<center>` are the `-webkit-` values Chrome computes, and they
 #     move the block-level descendants too
-# Backlog (Chrome-measured, not modelled): the spaces INSIDE a `white-space: pre` / `nowrap` run
-# on a justified line, `text-align-last`, and the static position of an out-of-flow box in an rtl
-# block (`staticCornerFor` ignores the cursor).
+#   - the separators INSIDE a run placed whole (`white-space: pre` / `nowrap`), and a U+00A0 in
+#     any word, are gaps too; a run widens by the gaps inside it. A `nowrap` run's trailing
+#     collapsible space hangs like any other; a `pre` run's trailing space is content and, as the
+#     last white space on the line, takes no share
+# Backlog (Chrome-measured, not modelled): `text-align-last`; `tab-size` (a tab advances one
+# average glyph, Chrome to the next tab stop); Chrome does NOT wrap between a `nowrap` / `pre`
+# run's trailing space and the next word (we do); the share Chrome gives several trailing
+# preserved spaces is non-uniform; and the static position of an out-of-flow box in an rtl block
+# (`staticCornerFor` ignores the cursor).
 #
 # Every x here is a FORMULA over widths measured on the same page — the block's width and the run's
 # own — never a figure: the run's width is the face's, and the face is the machine's.
@@ -315,6 +321,36 @@ RSpec.describe "text-align lines a block's lines up" do
     free = fits - (left['c'][0] + left['c'][2])                          # three gaps, two in the run
     expect(just['b'][2]).to be_within(0.01).of(left['b'][2] + free * 2 / 3)
     expect(just['c'][0]).to be_within(0.01).of(left['c'][0] + free)
+  end
+
+  it 'widens a no-break space like a space' do
+    fits = (lay('<div><span id=t>aa bb cc</span></div>')['t'][2] + 1).ceil
+    box  = ->(align) { "<div style=\"width:#{fits}px;text-align:#{align};white-space:normal\">aa <span id=b>bb&nbsp;cc</span> dd</div>" }
+    left = lay(box.call('left'))
+    just = lay(box.call('justify'))
+    free = fits - (left['b'][0] + left['b'][2])
+    expect(just['b'][0]).to be_within(0.01).of(left['b'][0] + free / 2)
+    expect(just['b'][2]).to be_within(0.01).of(left['b'][2] + free / 2)
+  end
+
+  it 'hangs the collapsible space a nowrap run ends in at the wrap' do
+    fits = (lay('<div><span id=t>aa bb cc</span></div>')['t'][2] + 1).ceil
+    r = lay("<div style=\"width:#{fits}px;text-align:justify;white-space:normal\">aa bb <span id=c style=\"white-space:nowrap\">cc </span>dd</div>")
+    expect(r['c'][2]).to be_within(0.01).of(lay('<div><span id=t>cc</span></div>')['t'][2])   # the glyphs only
+    expect(r['c'][0] + r['c'][2]).to be_within(0.01).of(fits)
+  end
+
+  it 'gives the trailing space of a pre run no share when it ends the line' do
+    # "aa bb " fits; the collapsible space after the pre run hangs and "cc" wraps, so the pre
+    # run's own trailing space is the last white space on the line: content, but no gap. The one
+    # gap is the space after "aa".
+    fits = (lay('<div><span id=t>aa bb </span></div>')['t'][2] + 1).ceil
+    box  = ->(align) { "<div style=\"width:#{fits}px;text-align:#{align};white-space:normal\">aa <span id=b>bb </span> <span id=c>cc</span></div>" }
+    left = lay(box.call('left'))
+    just = lay(box.call('justify'))
+    free = fits - (left['b'][0] + left['b'][2])
+    expect(just['b'][0]).to be_within(0.01).of(left['b'][0] + free)
+    expect(just['b'][2]).to be_within(0.01).of(left['b'][2])
   end
 
   it 'start-aligns the lines it leaves alone in an rtl block' do
