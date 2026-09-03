@@ -1005,8 +1005,6 @@ css/css-flexbox/flex-wrap-column-grow.html:
 - Single flex-grow item fills multi-line column container height
 - flex-grow distributes space proportionally
 - flex-grow respects max-height on individual items
-css/css-flexbox/flexitem-no-margin-collapsing.html:
-- ".flexbox 1"
 css/css-flexbox/flexitem-stretch-image.html:
 - ".flexbox 1"
 css/css-flexbox/getcomputedstyle/flexbox_computedstyle_flex-shorthand-invalid.html:
@@ -1145,11 +1143,7 @@ css/css-flexbox/image-as-flexitem-size-007v.html:
 css/css-flexbox/inline-flexbox-wrap-vertically-width-calculation.html:
 - ".inline-flexbox 14"
 - ".inline-flexbox 6"
-css/css-flexbox/intrinsic-size/col-wrap-004.html:
-- body > div 1
 css/css-flexbox/intrinsic-size/col-wrap-005.html:
-- body > div 1
-css/css-flexbox/intrinsic-size/col-wrap-010.html:
 - body > div 1
 css/css-flexbox/intrinsic-size/col-wrap-018.html:
 - body > div 1
@@ -1165,7 +1159,6 @@ css/css-flexbox/intrinsic-size/row-005.html:
 - ".floating-flexbox 8"
 - ".floating-flexbox 9"
 css/css-flexbox/intrinsic-size/row-008.html:
-- ".min-width-flexbox 1"
 - ".min-width-flexbox 10"
 - ".min-width-flexbox 11"
 - ".min-width-flexbox 2"
@@ -1174,12 +1167,11 @@ css/css-flexbox/intrinsic-size/row-008.html:
 - ".min-width-flexbox 5"
 - ".min-width-flexbox 6"
 - ".min-width-flexbox 7"
-- ".min-width-flexbox 8"
 - ".min-width-flexbox 9"
 css/css-flexbox/intrinsic-size/row-compat-001.html:
 - "#gmail-tables .flex 3"
-- "#wrapping-broke .flex 1"
 css/css-flexbox/intrinsic-size/row-use-cases-001.html:
+- no overflow 2
 - same heights
 - zero width
 css/css-flexbox/intrinsic-size/row-wrap-001.html:
@@ -1231,21 +1223,6 @@ css/css-flexbox/parsing/flex-valid.html:
 css/css-flexbox/parsing/flex-wrap-invalid.html:
 - e.style['flex-wrap'] = "auto" should not set the property value
 - e.style['flex-wrap'] = "nowrap wrap" should not set the property value
-css/css-flexbox/percent-height-flex-items-cross-sizes-with-mutations.html:
-- percent-height-flex-items-cross-sizes-with-mutations
-- percent-height-flex-items-cross-sizes-with-mutations 1
-- percent-height-flex-items-cross-sizes-with-mutations 10
-- percent-height-flex-items-cross-sizes-with-mutations 11
-- percent-height-flex-items-cross-sizes-with-mutations 16
-- percent-height-flex-items-cross-sizes-with-mutations 17
-- percent-height-flex-items-cross-sizes-with-mutations 19
-- percent-height-flex-items-cross-sizes-with-mutations 2
-- percent-height-flex-items-cross-sizes-with-mutations 20
-- percent-height-flex-items-cross-sizes-with-mutations 3
-- percent-height-flex-items-cross-sizes-with-mutations 4
-- percent-height-flex-items-cross-sizes-with-mutations 5
-- percent-height-flex-items-cross-sizes-with-mutations 6
-- percent-height-flex-items-cross-sizes-with-mutations 7
 css/css-flexbox/percentage-heights-001.html:
 - ".flexbox 1"
 - ".flexbox 10"
@@ -1556,9 +1533,6 @@ css/css-logical/parsing/border-inline-width-valid.html:
   value
 - e.style['border-inline-width'] = "medium calc(10px + 0.5em)" should set the property
   value
-css/css-logical/parsing/inline-size-computed.html:
-- Property inline-size value 'max-content'
-- Property inline-size value 'min-content'
 css/css-logical/parsing/inset-block-inline-valid.html:
 - e.style['inset-block'] = "calc(10px - 0.5em) -20%" should set the property value
 - e.style['inset-inline'] = "auto calc(10px + 0.5em)" should set the property value
@@ -9599,8 +9573,6 @@ html/rendering/non-replaced-elements/the-fieldset-and-legend-elements/fieldset-d
 - 'fieldset with display: ruby-text-container'
 html/rendering/non-replaced-elements/the-fieldset-and-legend-elements/fieldset-display.html:
 - 'fieldset with display: inline'
-html/rendering/non-replaced-elements/the-fieldset-and-legend-elements/fieldset-dynamic-baseline.html:
-- "== html/rendering/non-replaced-elements/the-fieldset-and-legend-elements/fieldset-dynamic-baseline-ref.html"
 html/rendering/non-replaced-elements/the-fieldset-and-legend-elements/fieldset-generated-content.html:
 - fieldset generated content
 html/rendering/non-replaced-elements/the-fieldset-and-legend-elements/fieldset-overflow-cssomview.html:
@@ -11952,7 +11924,6 @@ web-animations/animation-model/keyframe-effects/effect-value-iteration-composite
 - iteration composition of filter drop-shadow animation
 - iteration composition of incompatible calc-size() bases (accumulation skipped at
   0%, allowed at 50%)
-- iteration composition of incompatible intrinsic size keywords (accumulation is skipped)
 - iteration composition of opacity animation
 - iteration composition of same filter list animation
 - iteration composition of transform from none to translate
