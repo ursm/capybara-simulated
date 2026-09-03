@@ -162,6 +162,34 @@ RSpec.describe 'generated content' do
     expect(s.evaluate_script("document.getElementById('t').getBoundingClientRect().x")).to eq(0)
   end
 
+  it 'follows a state flip — a checked box shows the label\'s ::before' do
+    _, w, s = measure('<div class=w><input type=checkbox id=c><label id=h for=c><span id=t>L</span></label></div>', '#c:checked + label::before { content: "ck" }')
+    x0 = s.evaluate_script("document.getElementById('t').getBoundingClientRect().x")
+    s.check('c')
+    expect(s.evaluate_script("document.getElementById('t').getBoundingClientRect().x")).to be_within(0.01).of(x0 + w.call('ck'))
+    s.uncheck('c')
+    expect(s.evaluate_script("document.getElementById('t').getBoundingClientRect().x")).to be_within(0.01).of(x0)
+  end
+
+  it 'renders a shadow tree\'s own pseudo rules and keeps the document\'s out' do
+    _, _, s = measure('<div id=host></div><span id=t></span>', 'span.lk::before { content: "leak" }')
+    s.execute_script(<<~JS)
+      var root = document.getElementById('host').attachShadow({ mode: 'open' });
+      root.innerHTML = '<style>.s::before { content: "sh" }</style><span class="s" id="in">T</span><span class="lk" id="in2">T</span>';
+    JS
+    content = ->(id) { s.evaluate_script("getComputedStyle(document.getElementById('host').shadowRoot.getElementById(#{id.to_json}), '::before').content") }
+    expect(content.call('in')).to eq('"sh"')
+    expect(content.call('in2')).to eq('none')
+    inner = ->(id) { s.evaluate_script("document.getElementById('host').shadowRoot.getElementById(#{id.to_json}).getBoundingClientRect().width") }
+    expect(inner.call('in')).to be > inner.call('in2')                  # the in-tree pseudo renders, the leak does not
+  end
+
+  it 'answers the element for a hit over a pseudo positioned outside its box' do
+    _, _, s = measure('<div class=w style="position:relative"><span id=h style="position:relative"><span id=t>T</span></span></div>',
+                      '#h::after { content: "badge"; position: absolute; left: 100px; top: 0 }')
+    expect(s.evaluate_script('document.elementFromPoint(110, 5).id')).to eq('h')
+  end
+
   it 'is not in the text Capybara reads' do
     _, _, s = measure('<div class=w id=h><span id=t>T</span></div>', '#h::before { content: "hidden-" }')
     expect(s).to have_text('T')
