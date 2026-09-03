@@ -9,8 +9,9 @@ require_relative 'support/session_teardown'
 # collapsed onto its text.
 #
 # The rules, Chrome-measured on 300px `<pre>` blocks at 16px monospace (27 cases, all matched):
-#   - the stop unit is `tab-size` x the BLOCK's space advance, letter- and word-spacing included
-#     (8 x (9.6 + 2) under `letter-spacing: 2px`), or the length as given
+#   - the stop is the tab's OWN element's `tab-size` (`code { tab-size: 4 }` inside a `pre` stops
+#     every 4) x the BLOCK's space advance, letter- and word-spacing included (8 x (9.6 + 2)
+#     under `letter-spacing: 2px`), or the length as given; a percentage is not a `tab-size`
 #   - stops are counted from the content edge: padding moves them, `text-indent` does not, a
 #     pre span in the middle of a line uses the block's edge, a tab inside a bigger inline uses
 #     the block's font
@@ -129,6 +130,31 @@ RSpec.describe 'tab stops' do
     expect(x).to be_within(0.01).of(8 * big)
     x, sp = measure("<pre>ab<span style=\"font-size:32px\">\t</span><span id=t>X</span></pre>")
     expect(x).to be_within(0.01).of(8 * sp)
+  end
+
+  it 'takes the count from the tab\'s own element and the unit from the block' do
+    x, sp = measure("<pre style=\"tab-size:8\"><code style=\"tab-size:4;font-size:32px\">a\t<span id=t>X</span></code></pre>")
+    expect(x).to be_within(0.01).of(4 * sp)
+  end
+
+  it 'drops a percentage tab-size' do
+    x, sp = measure("<pre style=\"tab-size:50%\">ab\t<span id=t>X</span></pre>")
+    expect(x).to be_within(0.01).of(8 * sp)
+    s = page('<pre id=p style="tab-size:50%">a</pre>')
+    expect(s.evaluate_script("getComputedStyle(document.getElementById('p')).tabSize")).to eq('8')
+  end
+
+  it 'counts an inline\'s opening padding before the tab' do
+    x, sp = measure("<pre>ab<span style=\"padding-left:30px;tab-size:16\">\t<span id=t>X</span></span></pre>")
+    expect(x).to be_within(0.01).of(16 * sp)
+  end
+
+  # Under `pre-wrap` the tab is a white-space TOKEN placed on its own; its width, and the stop it
+  # picks, count the letter-spacing the text before it carries (a regression the review caught:
+  # the token was summed unspaced).
+  it 'places a pre-wrap tab after letter-spaced text at the spaced stop' do
+    x, sp = measure("<pre style=\"white-space:pre-wrap;letter-spacing:2px\">a \t<span id=t>X</span></pre>")
+    expect(x).to be_within(0.01).of(8 * (sp + 2))
   end
 
   # ── the painter ──
