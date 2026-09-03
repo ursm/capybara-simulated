@@ -334,8 +334,10 @@ RSpec.describe "text-align lines a block's lines up" do
   end
 
   it 'hangs the collapsible space a nowrap run ends in at the wrap' do
+    # The line may break at the block's own space after the run (not right after the run's, whose
+    # `nowrap` forbids it): "dd" wraps there, and the run's trailing space hangs outside its box.
     fits = (lay('<div><span id=t>aa bb cc</span></div>')['t'][2] + 1).ceil
-    r = lay("<div style=\"width:#{fits}px;text-align:justify;white-space:normal\">aa bb <span id=c style=\"white-space:nowrap\">cc </span>dd</div>")
+    r = lay("<div style=\"width:#{fits}px;text-align:justify;white-space:normal\">aa bb <span id=c style=\"white-space:nowrap\">cc </span> dd</div>")
     expect(r['c'][2]).to be_within(0.01).of(lay('<div><span id=t>cc</span></div>')['t'][2])   # the glyphs only
     expect(r['c'][0] + r['c'][2]).to be_within(0.01).of(fits)
   end
