@@ -129,11 +129,7 @@ Navigator:
   - windowControlsOverlay
   - xr
 Performance:
-  - clearResourceTimings
   - eventCounts
   - interactionCount
   - measureUserAgentSpecificMemory
   - navigation
-  - onresourcetimingbufferfull
-  - setResourceTimingBufferSize
-  - toJSON
