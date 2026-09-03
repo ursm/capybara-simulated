@@ -122,9 +122,67 @@ RSpec.describe 'intrinsic widths' do
     expect(width).to be_within(0.01).of(w.call('abcd'))
   end
 
+  # ── what the review round measured ──
+  it 'counts a replaced element into a cell' do
+    width = measure('<table style="border-spacing:0;width:100px"><tr><td id=t style="padding:0"><img width=40 height=40></td><td style="padding:0">aaaa bbbb cccc dddd eeee</td></tr></table>')[0][0]
+    expect(width).to eq(40)
+  end
+
+  it 'takes a wide character as its own unbreakable unit' do
+    (width, _), w = measure('<div id=t style="width:min-content">日本語テキスト</div>')
+    expect(width).to be_within(0.01).of(w.call('日'))
+  end
+
+  it 'breaks a word at a <wbr>' do
+    (width, _), w = measure('<div id=t style="width:min-content">aaaa<wbr>bbbb</div>')
+    expect(width).to be_within(0.01).of(w.call('aaaa'))
+  end
+
+  it 'keeps a no-break space as content' do
+    (width, _), w = measure('<span id=t style="display:inline-block">aa&nbsp;</span>')
+    expect(width).to be_within(0.01).of(w.call("aa\u00A0"))
+  end
+
+  it 'walks through a display: contents box' do
+    (width, _), w = measure('<span id=t style="display:inline-block;white-space:nowrap">a <span style="display:contents">bb cc</span> d</span>')
+    expect(width).to be_within(0.01).of(w.call('a bb cc d'))
+  end
+
+  it 'joins the spaces of a nowrap run into one unit' do
+    (width, _), w = measure('<table style="border-spacing:0;width:30px"><tr><td id=t style="padding:0">a <span style="white-space:nowrap">bb cc</span> d</td></tr></table>')
+    expect(width).to be_within(0.01).of(w.call('bb cc'))
+  end
+
+  it 'puts an atomic inline\'s margins on the line' do
+    (width, _), w = measure('<span id=t style="display:inline-block">a<span style="display:inline-block;width:20px;margin:0 7px"></span>b</span>')
+    expect(width).to be_within(0.01).of(w.call('ab') + 34)
+  end
+
+  it 'indents the first line of both figures' do
+    (width, _), w = measure('<div id=t style="width:max-content;text-indent:30px">aa bb</div>')
+    expect(width).to be_within(0.01).of(30 + w.call('aa bb'))
+    hidden = measure('<span id=t style="display:inline-block;padding:0 5px;text-indent:-9999px">Label</span>')[0][0]
+    expect(hidden).to eq(10)
+  end
+
+  it 'gives every break-spaces space its width and a break after it' do
+    (width, _), w = measure('<div id=t style="width:min-content;white-space:break-spaces">aa   bb</div>')
+    expect(width).to be_within(0.01).of(w.call('aa '))
+  end
+
+  it 'lets a block child\'s negative margin narrow the box' do
+    width = measure('<span id=t style="display:inline-block"><div style="width:100px;margin-right:-50px;height:5px"></div></span>')[0][0]
+    expect(width).to eq(50)
+  end
+
+  it 'collapses the space after an empty inline box, padded or not' do
+    (width, _), w = measure('<div id=t style="width:max-content"><span style="padding-left:5px"></span> aa</div>')
+    expect(width).to be_within(0.01).of(5 + w.call('aa'))
+  end
+
   # ── every atomic inline is shrink-to-fit ──
   it 'keeps the right padding of an inline-block around a block child' do
-    (width, _), = measure('<div><div id=t style="display:inline-block;border:2px solid;padding:1px 6px"><div style="width:80px;height:10px"></div></div></div>')
+    width = measure('<div><div id=t style="display:inline-block;border:2px solid;padding:1px 6px"><div style="width:80px;height:10px"></div></div></div>')[0][0]
     expect(width).to eq(96)
   end
 
@@ -135,7 +193,7 @@ RSpec.describe 'intrinsic widths' do
   end
 
   it 'fills the room an inline-block\'s content overflows' do
-    (width, _), = measure('<div style="width:100px"><span id=t style="display:inline-block">aaaa bbbb cccc</span></div>')
+    width = measure('<div style="width:100px"><span id=t style="display:inline-block">aaaa bbbb cccc</span></div>')[0][0]
     expect(width).to eq(100)
   end
 end
