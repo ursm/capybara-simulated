@@ -199,3 +199,9 @@
   Well-known-Symbol enumeration over the Storage proxy spins past the harness timeout.
 "webstorage/storage_supported_property_names.window.js": >-
   Supported-property-name enumeration over the Storage proxy spins past the harness timeout.
+"resource-timing/response-status-code.html": >-
+  Outcome depends on wall time. Ten `load.font` cases lead the file; the driver
+  fetches no `@font-face` (web fonts are backlog), so each waits out its 2 s
+  `await_with_timeout` and the harness timeout then falls on a different image /
+  script case per run (11 passed locally, 10 on CI). Rejoins the gate when web
+  fonts load.
