@@ -14,9 +14,10 @@ require_relative 'support/session_teardown'
 #   - a hyphen, en dash or figure dash between letters or digits is an opportunity after it, an em
 #     dash on both sides, a non-breaking hyphen (U+2011) none; `-5` and `foo-,bar` hold, `--no`
 #     breaks after each hyphen
-#   - a soft hyphen (U+00AD) is one too, and shows a hyphen — its own fragment — only where the
-#     line breaks at it: the LAST soft hyphen whose piece fits with its hyphen, or the piece that
-#     overflows even alone; `hyphens: none` takes them out
+#   - a soft hyphen (U+00AD) is one too — a `<wbr>` as well — and shows a hyphen (its own fragment,
+#     inside the box the piece was in, with no letter-spacing after it) only where the line breaks
+#     at it: the LAST soft hyphen whose piece fits with its hyphen, or the piece that overflows even
+#     alone; a soft hyphen opening a text node counts; `hyphens: none` takes them out
 #   - `overflow-wrap` / `word-wrap` / `word-break` INHERIT, and a hyphenated word's pieces each
 #     start a fresh line under `overflow-wrap: break-word` (not under `word-break: break-all`)
 #   - a `display: contents` box is no box: its inline content sits on the line in place
@@ -100,6 +101,15 @@ RSpec.describe 'line breaking' do
     r, w = lay("<div id=b style=\"width:#{width}px\"><span id=a>aaaa</span><span style=\"white-space:nowrap\"> </span><span id=g>bbbb</span></div>")
     expect(r['g'][0]).to be_within(0.01).of(w.call('aaaa '))
     expect(r['g'][1]).to eq(r['a'][1])
+  end
+
+  it 'breaks at a <wbr>, after a nowrap run too' do
+    width = fits('aaaa')
+    r, = lay("<div style=\"width:#{width}px\"><span id=t>aaaa<wbr><span id=k>bbbb</span></span></div>")
+    expect(r['k'][0]).to eq(0)
+    expect(r['k'][1]).to be > r['t'][1]
+    r, = lay("<div style=\"width:#{width}px\"><span id=t style=\"white-space:nowrap\">aaaa </span><wbr><span id=k>bbbb</span></div>")
+    expect(r['k'][1]).to be > r['t'][1]
   end
 
   # ── an inline box boundary is no opportunity ──
@@ -202,6 +212,45 @@ RSpec.describe 'line breaking' do
     expect(r['k'][1]).to be > r['t'][1]
     first = s.evaluate_script("document.getElementById('t').getClientRects()[0].x")
     expect(first).to be_within(0.01).of(width - w.call('aaaa-'))
+  end
+
+  it 'shows the hyphen inside the box the piece was in, not the box that follows' do
+    width = fits('aaaa-')
+    r, w, s = lay("<div style=\"width:#{width}px\"><span id=t><b id=j>aaaa&shy;</b><i id=k>bbbb</i></span></div>")
+    expect(r['j'][2]).to be_within(0.01).of(w.call('aaaa-'))
+    expect(r['k'][1]).to be > r['j'][1]
+    expect(s.evaluate_script("document.getElementById('k').getClientRects().length")).to eq(1)
+  end
+
+  it 'carries a soft hyphen that opens the next text node' do
+    width = fits('aaaa-')
+    r, w, s = lay("<div style=\"width:#{width}px\"><span id=t>aaaa<b id=k>&shy;bbbb</b></span></div>")
+    expect(r['t'][2]).to be_within(0.01).of(w.call('aaaa-'))
+    expect(r['t'][3]).to be_within(0.01).of(2 * line_height)
+    rects = s.evaluate_script("Array.from(document.getElementById('k').getClientRects()).map(function (q) { return [q.y, q.width]; })")
+    expect(rects.first[0]).to eq(0)
+    expect(rects.first[1]).to be_within(0.01).of(w.call('-'))                    # the hyphen is the <b>'s own
+    expect(rects.last[0]).to be > 0
+  end
+
+  it 'shows no hyphen for a soft hyphen nothing follows' do
+    width = fits('aa')
+    r, w = lay("<div style=\"width:#{width}px\"><span id=t>aaaa&shy;</span></div>")
+    expect(r['t'][2]).to be_within(0.01).of(w.call('aaaa'))
+  end
+
+  it 'shows the hyphen when an atomic inline wraps after the piece' do
+    width = fits('aaaa-')
+    r, w = lay("<div style=\"width:#{width}px\"><span id=t>aaaa&shy;<span id=k style=\"display:inline-block;width:30px\"></span></span></div>")
+    expect(r['k'][1]).to be > r['t'][1]
+    expect(r['t'][2]).to be_within(0.01).of(w.call('aaaa-'))
+  end
+
+  it 'adds no letter-spacing after the shown hyphen' do
+    width = fits('aaaa') + 8 + 5                                              # room for the spaced piece and the bare hyphen
+    r, w = lay("<div style=\"width:#{width}px;letter-spacing:2px\"><span id=t>aaaa&shy;bbbb</span></div>")
+    expect(r['t'][2]).to be_within(0.01).of(w.call('aaaa') + 8 + w.call('-'))
+    expect(r['t'][3]).to be_within(0.01).of(2 * line_height)
   end
 
   it 'takes the soft hyphens out under hyphens: none' do
