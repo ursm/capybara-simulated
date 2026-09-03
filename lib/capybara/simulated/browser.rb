@@ -3494,8 +3494,36 @@ module Capybara
 
       def rack_fetch_body(url)
         result = rack_fetch('GET', url, '', {}, 'follow')
+        # What the asset's Resource Timing entry reports — kept beside the cached body (see
+        # `external_asset_source`), since the body alone is what the loader hands back.
+        Thread.current[:csim_asset_meta] = result && resource_timing_meta(result)
         return nil unless result && result['status'].to_i < 400
         result['body'].to_s
+      end
+
+      # The response facts a `PerformanceResourceTiming` entry is built from, without the body.
+      def resource_timing_meta(result)
+        {
+          'url'             => result['url'],
+          'status'          => result['status'].to_i,
+          'headers'         => {'content-type' => result['headers']&.find {|k, _| k.to_s.casecmp?('content-type') }&.last},
+          'bytes'           => result['bytes'].to_i,
+          'encoded'         => result['encoded'].to_i,
+          'cached'          => result['cached'],
+          'redirected'      => result['redirected'] == true,
+          'type'            => result['type'],
+          'tao'             => result['tao'],
+          'serverTiming'    => result['serverTiming'],
+          'contentEncoding' => result['contentEncoding']
+        }
+      end
+
+      # The metadata of the asset `external_asset_source` last served for `url` (nil when it
+      # never loaded).
+      def external_asset_meta(url)
+        needs_base = @current_url.to_s.start_with?('blob:', 'data:', 'about:')
+        key = resolve_against_current(url.to_s, use_base: needs_base)
+        key.is_a?(String) ? (@asset_meta ||= {})[key] : nil
       end
 
       # Fetch a source body and report how long it stays safely reusable per its
@@ -3588,14 +3616,20 @@ module Capybara
         return nil unless key.is_a?(String)
         @@asset_src_lock.synchronize do
           if (e = @@asset_src[key])
-            return e[0] if e[1].nil? || Time.now < e[1]
+            if e[1].nil? || Time.now < e[1]
+              (@asset_meta ||= {})[key] = e[2]
+              return e[0]
+            end
             @@asset_src.delete(key)
           end
         end
         # `durable_source` already does the spec-compliant fetch + header-driven
         # freshness (RFC 9111 max-age → absolute deadline); reuse it instead of
         # re-deriving `fresh_until` here.
+        Thread.current[:csim_asset_meta] = nil
         body, fresh_until = durable_source(key)
+        meta = Thread.current[:csim_asset_meta]
+        (@asset_meta ||= {})[key] = meta
         return nil unless body
         # Script / stylesheet source is TEXT, but the raw Rack / binread body
         # arrives BINARY-tagged (see `RuntimeShared.utf8_text`).
@@ -3603,7 +3637,7 @@ module Capybara
         if fresh_until
           @@asset_src_lock.synchronize do
             @@asset_src.clear if @@asset_src.size >= ASSET_SRC_MAX
-            @@asset_src[key] = [body, fresh_until]
+            @@asset_src[key] = [body, fresh_until, meta]
           end
         end
         body
@@ -7184,6 +7218,7 @@ module Capybara
       def load_image(url, cors = false, credentials = 'same-origin')
         key = resolve_against_current(url.to_s)
         return nil unless key.is_a?(String)
+        Thread.current[:csim_image_meta] = nil
         entry = cached_image(key, cors, credentials)
         return {'unsupported' => true} if entry == :unsupported
         # A valid zero-area image: complete + not broken, but no pixels. rsvg throws
@@ -7193,7 +7228,7 @@ module Capybara
         # non-zero area.
         tainted = image_tainted?(key, cors)
         return {'zeroSize' => true, 'width' => 0, 'height' => 0, 'tainted' => tainted} if entry == :zero_size
-        return nil unless entry
+        return undecodable_image_result unless entry
         r = {'width' => entry['width'], 'height' => entry['height'], 'refId' => transfer_buffer_stash(entry['bytes']), 'colorSpace' => entry['colorSpace'], 'tainted' => tainted}
         r['refIdP3'] = transfer_buffer_stash(entry['bytesP3']) if entry['bytesP3']
         r
@@ -7258,12 +7293,19 @@ module Capybara
       # The thread-side body: everything except the transfer stash (engine-affine, done at
       # delivery on the main thread). Result mirrors `load_image`'s shapes with the raw entry.
       private def image_load_result(key, cors, credentials, origin_base)
+        Thread.current[:csim_image_meta] = nil
         entry = cached_image(key, cors, credentials, origin_base: origin_base)
         return {'unsupported' => true} if entry == :unsupported
         tainted = origin_tainted?(key, cors, client_url: origin_base)
         return {'zeroSize' => true, 'width' => 0, 'height' => 0, 'tainted' => tainted} if entry == :zero_size
-        return nil unless entry
-        { entry: entry, tainted: tainted }
+        return undecodable_image_result unless entry
+        { entry: entry, tainted: tainted, meta: Thread.current[:csim_image_meta] }
+      end
+      # A response that arrived but is no image: the element is broken, the resource was still
+      # fetched — its Resource Timing entry carries the real status and size.
+      private def undecodable_image_result
+        meta = Thread.current[:csim_image_meta]
+        meta ? {'broken' => true, 'meta' => meta} : nil
       end
 
       def image_loads_pending?
@@ -7319,7 +7361,7 @@ module Capybara
         return nil if r.nil?
         return r unless r.is_a?(Hash) && r.key?(:entry)
         entry = r[:entry]
-        out = {'width' => entry['width'], 'height' => entry['height'], 'refId' => transfer_buffer_stash(entry['bytes']), 'colorSpace' => entry['colorSpace'], 'tainted' => r[:tainted]}
+        out = {'width' => entry['width'], 'height' => entry['height'], 'refId' => transfer_buffer_stash(entry['bytes']), 'colorSpace' => entry['colorSpace'], 'tainted' => r[:tainted], 'encoded' => entry['encoded'], 'meta' => r[:meta]}
         out['refIdP3'] = transfer_buffer_stash(entry['bytesP3']) if entry['bytesP3']
         out
       end
@@ -7365,6 +7407,7 @@ module Capybara
         entry = decode_or_nil(bytes)
         # nil (broken) and :zero_size (valid but zero-area) both carry no bitmap to cache.
         return entry unless entry.is_a?(Hash)
+        entry['encoded'] = bytes.bytesize   # the resource's size for its Resource Timing entry
         @@image_cache_lock.synchronize do
           @@image_cache.clear if @@image_cache.size >= IMAGE_CACHE_MAX
           @@image_cache[cache_key] = entry
@@ -7389,6 +7432,18 @@ module Capybara
           # issued this request.
           result = rack_fetch('GET', key, '', {}, 'follow', cors ? 'cors' : nil, credentials: credentials,
                               client_url: origin_base, referrer: origin_base, body_raw: true)
+          # What the image's Resource Timing entry reports of the response — its content type,
+          # whether it was redirected to, its status and size — read back on this thread right
+          # after; a 404 is a response too (the element breaks, the entry keeps the status).
+          if result
+            Thread.current[:csim_image_meta] = {
+              'contentType' => result['headers'].find {|k, _| k.to_s.casecmp?('content-type') }&.last,
+              'tao'         => result['tao'],
+              'redirected'  => result['redirected'] == true,
+              'status'      => result['status'].to_i,
+              'encoded'     => result['encoded'].to_i
+            }
+          end
           return nil unless result && result['status'].to_i < 400
           bytes = result['body_raw'].to_s
           bytes.empty? ? nil : bytes
@@ -7404,7 +7459,7 @@ module Capybara
         # nil (broken) or :zero_size — createImageBitmap of either rejects (a zero-area
         # source is an InvalidStateError), so surface nil for the caller to reject on.
         return nil unless entry.is_a?(Hash)
-        r = {'width' => entry['width'], 'height' => entry['height'], 'refId' => transfer_buffer_stash(entry['bytes']), 'colorSpace' => entry['colorSpace']}
+        r = {'width' => entry['width'], 'height' => entry['height'], 'refId' => transfer_buffer_stash(entry['bytes']), 'colorSpace' => entry['colorSpace'], 'encoded' => entry['encoded'], 'meta' => Thread.current[:csim_image_meta]}
         r['refIdP3'] = transfer_buffer_stash(entry['bytesP3']) if entry['bytesP3']
         r
       end
@@ -8094,6 +8149,18 @@ module Capybara
           bytes.empty? ? nil : bytes
         elsif key.match?(%r{\Ahttps?://}i)
           result = rack_fetch('GET', key, '', {}, 'follow', body_raw: true)
+          # What the image's Resource Timing entry reports of the response — its content type,
+          # whether it was redirected to, its status and size — read back on this thread right
+          # after; a 404 is a response too (the element breaks, the entry keeps the status).
+          if result
+            Thread.current[:csim_image_meta] = {
+              'contentType' => result['headers'].find {|k, _| k.to_s.casecmp?('content-type') }&.last,
+              'tao'         => result['tao'],
+              'redirected'  => result['redirected'] == true,
+              'status'      => result['status'].to_i,
+              'encoded'     => result['encoded'].to_i
+            }
+          end
           return nil unless result && result['status'].to_i < 400
           bytes = result['body_raw'].to_s
           bytes.empty? ? nil : bytes
@@ -9539,7 +9606,7 @@ module Capybara
             end
             # Cached asset — log headers/type/size but skip the (boring) body.
             trace_network(method, target, cache_entry.status, headers, body, cache_entry.headers, nil, t0, false)
-            return response_hash(cache_entry.status, cache_entry.headers, cache_entry.body, target, redirected, body_raw: body_raw)
+            return response_hash(cache_entry.status, cache_entry.headers, cache_entry.body, target, redirected, body_raw: body_raw, cached: 'cache')
           end
           # only-if-cached forbids the network: no usable stored response → a network error.
           return nil if cache_mode == 'only-if-cached'
@@ -9687,7 +9754,7 @@ module Capybara
             # be re-filtered through the CORS exposed-header set on the way back to script —
             # a 304 revalidation must not leak headers the original cross-origin fetch hid.
             cached_headers = cross_origin ? cors_exposed_headers(cache_entry.headers, with_credentials) : cache_entry.headers
-            return response_hash(cache_entry.status, cached_headers, cache_entry.body, target, redirected, body_raw: body_raw)
+            return response_hash(cache_entry.status, cached_headers, cache_entry.body, target, redirected, body_raw: body_raw, cached: 'validated', raw_headers: cache_entry.headers)
           end
           # Fetch "CORS check" runs on EVERY cross-origin response — including a 3xx the
           # UA is about to follow (a redirect whose response lacks a valid Access-Control
@@ -9797,7 +9864,9 @@ module Capybara
           null_body = method.to_s.upcase == 'HEAD' || NULL_BODY_STATUSES.include?(status.to_i)
           body_str = '' if null_body
           # The UA transparently decodes a Content-Encoding'd body (gzip/deflate); the
-          # header stays, the bytes are inflated (response-data-gzip / -deflate).
+          # header stays, the bytes are inflated (response-data-gzip / -deflate). The size on
+          # the wire is what Resource Timing's `encodedBodySize` reports.
+          encoded_size = body_str.bytesize
           body_str = decode_content_encoding(body_str, resp_headers)
           # A cross-origin response only EXPOSES (getResponseHeader / getAllResponseHeaders)
           # the CORS-safelisted response headers plus those named in Access-Control-Expose
@@ -9821,8 +9890,8 @@ module Capybara
           # A no-cors cross-origin response is OPAQUE: status 0, empty body, no exposed
           # headers, empty URL (cors-basic "Opaque filter"). Otherwise the type is 'cors'
           # for a cross-origin (CORS-allowed) response, else 'basic'.
-          return response_hash(0, {}, '', '', false, type: 'opaque', body_null: true, opaque_render: body_str) if no_cors_mode && crossed
-          return response_hash(status, exposed_headers, body_str, target, redirected, type: crossed ? 'cors' : 'basic', body_null: null_body, body_raw: body_raw)
+          return response_hash(0, {}, '', '', false, type: 'opaque', body_null: true, opaque_render: body_str, encoded: encoded_size) if no_cors_mode && crossed
+          return response_hash(status, exposed_headers, body_str, target, redirected, type: crossed ? 'cors' : 'basic', body_null: null_body, body_raw: body_raw, encoded: encoded_size, raw_headers: resp_headers)
         end
         raise StandardError, "[capybara-simulated] fetch exceeded #{MAX_FETCH_REDIRECTS} redirects"
       rescue StandardError => e
@@ -9931,15 +10000,28 @@ module Capybara
       # that decodes the bytes here and never shows them to script): the bytes ride
       # `body_raw` untouched and the text decode + base64 are skipped — they would be
       # ~15 ms per MB of pure waste on a path that runs for EVERY image load.
-      def response_hash(status, headers, body, url, redirected, type: 'basic', body_null: false, opaque_render: nil, body_raw: false)
+      def response_hash(status, headers, body, url, redirected, type: 'basic', body_null: false, opaque_render: nil, body_raw: false, cached: nil, encoded: nil, raw_headers: nil)
         raw     = body.to_s
         hdrs    = stringify(headers)
+        # Resource Timing's sizes: the decoded body, the body on the wire (before a
+        # Content-Encoding was undone), and whether the HTTP cache served it — fresh
+        # (`'cache'`: nothing crossed the wire) or after a 304 (`'validated'`: headers did) —
+        # plus the three headers its checks read from the UNFILTERED response (a cross-origin
+        # fetch exposes only the CORS-safelisted headers to script, and none of these is).
+        timing  = {'bytes' => raw.bytesize, 'encoded' => encoded || raw.bytesize, 'cached' => cached}
+        (raw_headers || headers).each do |k, v|
+          case k.to_s.downcase
+          when 'timing-allow-origin' then timing['tao'] = v.is_a?(Array) ? v.join(', ') : v.to_s
+          when 'server-timing'       then timing['serverTiming'] = v.is_a?(Array) ? v.join(', ') : v.to_s
+          when 'content-encoding'    then timing['contentEncoding'] = v.is_a?(Array) ? v.join(', ') : v.to_s
+          end
+        end
         # A NUL in a header value is not a valid HTTP message; a real server can't
         # put it on the wire, so the fetch is a network error (nil → status 0 / a
         # thrown NetworkError for a sync XHR). See headers-normalize-response.
         return nil if hdrs.any? {|_, v| v.include?("\u0000") }
         if body_raw
-          return {
+          return timing.merge(
             'status'     => status,
             'statusText' => '',
             'headers'    => hdrs,
@@ -9948,7 +10030,7 @@ module Capybara
             'url'        => url,
             'redirected' => redirected,
             'type'       => type
-          }
+          )
         end
         is_text = text_response?(hdrs)
         # `body` crosses as TEXT — `responseText` semantics: the bytes decoded
@@ -9979,7 +10061,7 @@ module Capybara
         # off the document URL — the same signal WPT uses to serve the resource over h2
         # (fetch/xhr status.h2 "statusText over H2 … should be the empty string").
         reason = '' if @current_url.to_s.include?('.h2.')
-        out = {
+        out = timing.merge(
           'status'     => status,
           'statusText' => reason,
           'headers'    => hdrs,
@@ -9987,7 +10069,7 @@ module Capybara
           'url'        => url,
           'redirected' => redirected,
           'type'       => type
-        }
+        )
         out['body_null'] = true if body_null   # null-body status / HEAD → response.body is null
         # The BOM-detected encoding (if any) — a frame load pins its document's
         # characterSet to it (see __csimFrameWindow); highest-precedence signal.

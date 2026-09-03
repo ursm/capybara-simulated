@@ -30312,11 +30312,6 @@ css/cssom/CSSContainerRule.tentative.html:
   reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
     specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
     path/suffix. CLAUDE.md rule 1.
-css/cssom/CSSStyleSheet-constructable-disallow-import.tentative.html:
-- name: "@import rules should not trigger any loads."
-  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
-    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
-    path/suffix. CLAUDE.md rule 1.
 css/cssom/adoptedstylesheets-adopt-link.tentative.html:
 - name: "== css/reference/ref-filled-green-100px-square-only.html"
   reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
@@ -51887,6 +51882,245 @@ input-events/input-events-range-exceptions.tentative.html:
     specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
     path/suffix. CLAUDE.md rule 1.
 - name: valid target ranges in Text don't throw exceptions
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+resource-timing/delivery-type.tentative.any.js:
+- name: PerformanceResourceTiming deliveryType test, cross origin, TAO passes.
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+resource-timing/tentative/initiator-url/event-handler-overwritten.html:
+- name: The initiator Url for /images/red.png?initiator_url_eventhandler initiatorUrl
+    from event handlers must be 'http://www.example.com/resource-timing/tentative/initiator-url/event-handler-overwritten.html'
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+resource-timing/tentative/initiator-url/event-handler.html:
+- name: The initiator Url for /images/blue.png?initiator_url_eventhandler initiatorUrl
+    from event handlers must be 'http://www.example.com/resource-timing/tentative/initiator-url/event-handler.html'
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: The initiator Url for /images/red.png?initiator_url_eventhandler initiatorUrl
+    from event handlers must be 'http://www.example.com/resource-timing/tentative/initiator-url/event-handler.html'
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+resource-timing/tentative/initiator-url/external-script-in-posted-task.html:
+- name: The initiator Url for blue.png?no_cache initiatorUrl by scheduler.postTask()
+    from external scripts must be 'http://www.example.com/resource-timing/resources/loading-resources-in-posted-task.js'
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: The initiator Url for empty.js?no_cache initiatorUrl by scheduler.postTask()
+    from external scripts must be 'http://www.example.com/resource-timing/resources/loading-resources-in-posted-task.js'
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: The initiator Url for empty_style.css?no_cache initiatorUrl by scheduler.postTask()
+    from external scripts must be 'http://www.example.com/resource-timing/resources/loading-resources-in-posted-task.js'
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: The initiator Url for green.html?no_cache initiatorUrl by scheduler.postTask()
+    from external scripts must be 'http://www.example.com/resource-timing/resources/loading-resources-in-posted-task.js'
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+resource-timing/tentative/initiator-url/external-script.html:
+- name: The initiator Url for blue.png?no_cache initiatorUrl from external scripts
+    must be 'http://www.example.com/resource-timing/resources/loading-resources.js'
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: The initiator Url for empty.js?no_cache initiatorUrl from external scripts
+    must be 'http://www.example.com/resource-timing/resources/loading-resources.js'
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: The initiator Url for empty_style.css?no_cache initiatorUrl from external
+    scripts must be 'http://www.example.com/resource-timing/resources/loading-resources.js'
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: The initiator Url for green.html?no_cache initiatorUrl from external scripts
+    must be 'http://www.example.com/resource-timing/resources/loading-resources.js'
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+resource-timing/tentative/initiator-url/iframe-post-message.html:
+- name: The initiator Url for /images/blue.png?initiator_url_iframe_postmessage initiatorUrl
+    from iframe postMessage() must be 'http://www.example.com/resource-timing/tentative/initiator-url/iframe-post-message.html'
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+resource-timing/tentative/initiator-url/inline-document-write.html:
+- name: The initiator Url for blue.png?inline-script-doc-write initiatorUrl from document-initiated
+    must be 'http://www.example.com/resource-timing/tentative/initiator-url/inline-document-write.html'
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: The initiator Url for empty.js?doc-write initiatorUrl from document-initiated
+    must be 'http://www.example.com/resource-timing/tentative/initiator-url/inline-document-write.html'
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: The initiator Url for empty_style.css?inline-script-doc-write initiatorUrl
+    from document-initiated must be 'http://www.example.com/resource-timing/tentative/initiator-url/inline-document-write.html'
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+resource-timing/tentative/initiator-url/inline-script.html:
+- name: The initiator Url for blank_page_green.html?no_cache_inline_script initiatorUrl
+    from inline-script must be 'http://www.example.com/resource-timing/tentative/initiator-url/inline-script.html'
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: The initiator Url for blue.png?no_cache_inline_script initiatorUrl from inline-script
+    must be 'http://www.example.com/resource-timing/tentative/initiator-url/inline-script.html'
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: The initiator Url for empty_style.css?no_cache_inline_script initiatorUrl
+    from inline-script must be 'http://www.example.com/resource-timing/tentative/initiator-url/inline-script.html'
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+resource-timing/tentative/initiator-url/post-message-shared-worker.html:
+- name: check initiatorUrl for resources fetched in message handler in worker thread
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+resource-timing/tentative/initiator-url/post-message-worker.html:
+- name: check initiatorUrl for resources fetched in message handler in worker thread
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+resource-timing/tentative/initiator-url/promise.html:
+- name: The initiator Url for /images/blue.png?initiator_url_promise initiatorUrl
+    from fullfilled promise must be 'http://www.example.com/resource-timing/tentative/initiator-url/promise.html'
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+resource-timing/tentative/initiator-url/queue-microtask.html:
+- name: The initiator Url for /images/blue.png?initiator_url_queuemicrotask initiatorUrl
+    from queueMicrotask() must be 'http://www.example.com/resource-timing/tentative/initiator-url/queue-microtask.html'
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+resource-timing/tentative/initiator-url/request-animation-frame.html:
+- name: The initiator Url for /images/blue.png?initiator_url_requestanimationframe
+    initiatorUrl from requestAnimationFrame() must be 'http://www.example.com/resource-timing/tentative/initiator-url/request-animation-frame.html'
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+resource-timing/tentative/initiator-url/request-idle-callback.html:
+- name: |-
+    The initiator Url for function test(func, name, properties)
+        {
+            if (tests.promise_setup_called) {
+                tests.status.status = tests.status.ERROR;
+                tests.status.message = '`test` invoked after `promise_setup`';
+                tests.complete();
+            }
+            var test_name = get_test_name(func, name);
+            var test_obj = new Test(test_name, properties);
+            var value = test_obj.step(func, test_obj, test_obj);
+
+            if (value !== undefined) {
+                var msg = 'Test named "' + test_name +
+                    '" passed a function to `test` that returned a value.';
+
+                try {
+                    if (value && typeof value.then === 'function') {
+                        msg += ' Consider using `promise_test` instead when ' +
+                            'using Promises or async/await.';
+                    }
+                } catch (err) {}
+
+                tests.status.status = tests.status.ERROR;
+                tests.status.message = msg;
+            }
+
+            if (test_obj.phase === test_obj.phases.STARTED) {
+                test_obj.done();
+            }
+        } initiatorUrl from requestIdleCallback() must be 'http://www.example.com/resource-timing/tentative/initiator-url/request-idle-callback.html'
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+resource-timing/tentative/initiator-url/set-interval.html:
+- name: The initiator Url for /images/blue.png?initiator_url_setinterval initiatorUrl
+    from setInterval() must be 'http://www.example.com/resource-timing/tentative/initiator-url/set-interval.html'
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+resource-timing/tentative/initiator-url/set-timeout.html:
+- name: The initiator Url for /images/blue.png?initiator_url_settimeout initiatorUrl
+    from setTimeout() must be 'http://www.example.com/resource-timing/tentative/initiator-url/set-timeout.html'
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+resource-timing/tentative/initiator-url/static-resource.html:
+- name: The initiator Url for Ahem.ttf?initiator-html initiatorUrl from static-resource
+    must be 'http://www.example.com/resource-timing/tentative/initiator-url/static-resource.html'
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: The initiator Url for blue.png?inline-style initiatorUrl from static-resource
+    must be 'http://www.example.com/resource-timing/tentative/initiator-url/static-resource.html'
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: The initiator Url for blue.png?using-Img-tag initiatorUrl from static-resource
+    must be 'http://www.example.com/resource-timing/tentative/initiator-url/static-resource.html'
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: The initiator Url for display_paragraph.js initiatorUrl from static-resource
+    must be 'http://www.example.com/resource-timing/tentative/initiator-url/static-resource.html'
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: The initiator Url for empty.js?async initiatorUrl from static-resource must
+    be 'http://www.example.com/resource-timing/tentative/initiator-url/static-resource.html'
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: The initiator Url for empty.js?blocking initiatorUrl from static-resource
+    must be 'http://www.example.com/resource-timing/tentative/initiator-url/static-resource.html'
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: The initiator Url for empty.js?deferred initiatorUrl from static-resource
+    must be 'http://www.example.com/resource-timing/tentative/initiator-url/static-resource.html'
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: The initiator Url for empty.js?module initiatorUrl from static-resource must
+    be 'http://www.example.com/resource-timing/tentative/initiator-url/static-resource.html'
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: The initiator Url for empty_style.css?link initiatorUrl from static-resource
+    must be 'http://www.example.com/resource-timing/tentative/initiator-url/static-resource.html'
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: The initiator Url for green.html initiatorUrl from static-resource must be
+    'http://www.example.com/resource-timing/tentative/initiator-url/static-resource.html'
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+resource-timing/tentative/initiator-url/xml-http-request.html:
+- name: The initiator Url for /images/blue.png?initiator_url_xmlhttprequest initiatorUrl
+    from XMLHttpRequest() must be 'http://www.example.com/resource-timing/tentative/initiator-url/xml-http-request.html'
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+resource-timing/tentative/stylesheet-initiated.html:
+- name: Ensure initiator Attribute matches with Stylesheet ResourceID
   reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
     specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
     path/suffix. CLAUDE.md rule 1.

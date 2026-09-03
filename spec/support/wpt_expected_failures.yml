@@ -7648,9 +7648,6 @@ css/css-transitions/unregistered-custom-property-transition.html:
 css/cssom/CSSStyleSheet-constructable-insertRule-base-uri.html:
 - "== css/cssom/CSSStyleSheet-constructable-insertRule-base-uri-ref.html"
 css/cssom/CSSStyleSheet-constructable.html:
-- CSSStyleSheet.replace allows, but ignores, import rule inside
-- CSSStyleSheet.replace ignores @import rule but still loads other rules
-- CSSStyleSheet.replaceSync should not trigger any loads from @import rules
 - Stylesheet constructed on iframe cannot be used in the main Document
 css/cssom/CSSStyleSheet-template-adoption.html:
 - adoptedStyleSheets won't be cleared when adopting into/from <template>s
@@ -11031,6 +11028,702 @@ input-events/input-events-spin-button-click-on-number-input.html:
 - Number input should fire beforeinput event before the input and change event
 input-events/select-event-drag-remove.html:
 - Drag and remove from the select event doesn't crash
+resource-timing/SO-XO-SO-redirect-chain-tao.https.html:
+- Verify that cross origin resources' timings are not exposed when same-origin=>cross-origin=>same-origin
+  redirects have `Timing-Allow-Origin:` headers only on some of the responses.
+- Verify that cross origin resources' timings are not exposed when same-origin=>cross-origin=>same-origin
+  redirects have `Timing-Allow-Origin:` headers with a specific origin.
+- Verify that cross origin resources' timings are not exposed when same-origin=>cross-origin=>same-origin
+  redirects have no `Timing-Allow-Origin:` headers.
+resource-timing/TAO-match.html:
+- The timing allow check algorithm will fail when the Timing-Allow-Origin header is
+  not present. (XMLHttpRequest)
+- The timing allow check algorithm will fail when the Timing-Allow-Origin header is
+  not present. (font)
+- The timing allow check algorithm will fail when the Timing-Allow-Origin header is
+  not present. (iframe)
+- The timing allow check algorithm will fail when the Timing-Allow-Origin header is
+  not present. (image)
+- The timing allow check algorithm will fail when the Timing-Allow-Origin header is
+  not present. (script)
+- The timing allow check algorithm will fail when the Timing-Allow-Origin header is
+  not present. (stylesheet)
+- The timing allow check algorithm will fail when the Timing-Allow-Origin header value
+  contains only the uppercased origin. (XMLHttpRequest)
+- The timing allow check algorithm will fail when the Timing-Allow-Origin header value
+  contains only the uppercased origin. (font)
+- The timing allow check algorithm will fail when the Timing-Allow-Origin header value
+  contains only the uppercased origin. (iframe)
+- The timing allow check algorithm will fail when the Timing-Allow-Origin header value
+  contains only the uppercased origin. (image)
+- The timing allow check algorithm will fail when the Timing-Allow-Origin header value
+  contains only the uppercased origin. (script)
+- The timing allow check algorithm will fail when the Timing-Allow-Origin header value
+  contains only the uppercased origin. (stylesheet)
+- The timing allow check algorithm will fail when the Timing-Allow-Origin header value
+  contains the origin, a space, then a wildcard. (XMLHttpRequest)
+- The timing allow check algorithm will fail when the Timing-Allow-Origin header value
+  contains the origin, a space, then a wildcard. (font)
+- The timing allow check algorithm will fail when the Timing-Allow-Origin header value
+  contains the origin, a space, then a wildcard. (iframe)
+- The timing allow check algorithm will fail when the Timing-Allow-Origin header value
+  contains the origin, a space, then a wildcard. (image)
+- The timing allow check algorithm will fail when the Timing-Allow-Origin header value
+  contains the origin, a space, then a wildcard. (script)
+- The timing allow check algorithm will fail when the Timing-Allow-Origin header value
+  contains the origin, a space, then a wildcard. (stylesheet)
+- The timing allow check algorithm will fail when the Timing-Allow-Origin header value
+  list contains a null origin. (XMLHttpRequest)
+- The timing allow check algorithm will fail when the Timing-Allow-Origin header value
+  list contains a null origin. (font)
+- The timing allow check algorithm will fail when the Timing-Allow-Origin header value
+  list contains a null origin. (iframe)
+- The timing allow check algorithm will fail when the Timing-Allow-Origin header value
+  list contains a null origin. (image)
+- The timing allow check algorithm will fail when the Timing-Allow-Origin header value
+  list contains a null origin. (script)
+- The timing allow check algorithm will fail when the Timing-Allow-Origin header value
+  list contains a null origin. (stylesheet)
+- The timing allow check algorithm will pass when the Timing-Allow-Origin header value
+  contains only a wildcard. (XMLHttpRequest)
+- The timing allow check algorithm will pass when the Timing-Allow-Origin header value
+  contains only a wildcard. (font)
+- The timing allow check algorithm will pass when the Timing-Allow-Origin header value
+  contains only a wildcard. (iframe)
+- The timing allow check algorithm will pass when the Timing-Allow-Origin header value
+  contains only a wildcard. (image)
+- The timing allow check algorithm will pass when the Timing-Allow-Origin header value
+  contains only a wildcard. (script)
+- The timing allow check algorithm will pass when the Timing-Allow-Origin header value
+  contains only a wildcard. (stylesheet)
+- The timing allow check algorithm will pass when the Timing-Allow-Origin header value
+  contains only the origin. (XMLHttpRequest)
+- The timing allow check algorithm will pass when the Timing-Allow-Origin header value
+  contains only the origin. (font)
+- The timing allow check algorithm will pass when the Timing-Allow-Origin header value
+  contains only the origin. (iframe)
+- The timing allow check algorithm will pass when the Timing-Allow-Origin header value
+  contains only the origin. (image)
+- The timing allow check algorithm will pass when the Timing-Allow-Origin header value
+  contains only the origin. (script)
+- The timing allow check algorithm will pass when the Timing-Allow-Origin header value
+  contains only the origin. (stylesheet)
+- The timing allow check algorithm will pass when the Timing-Allow-Origin header value
+  list contains a case-sensitive match. (XMLHttpRequest)
+- The timing allow check algorithm will pass when the Timing-Allow-Origin header value
+  list contains a case-sensitive match. (font)
+- The timing allow check algorithm will pass when the Timing-Allow-Origin header value
+  list contains a case-sensitive match. (iframe)
+- The timing allow check algorithm will pass when the Timing-Allow-Origin header value
+  list contains a case-sensitive match. (image)
+- The timing allow check algorithm will pass when the Timing-Allow-Origin header value
+  list contains a case-sensitive match. (script)
+- The timing allow check algorithm will pass when the Timing-Allow-Origin header value
+  list contains a case-sensitive match. (stylesheet)
+- The timing allow check algorithm will pass when the Timing-Allow-Origin header value
+  list contains a wildcard. (XMLHttpRequest)
+- The timing allow check algorithm will pass when the Timing-Allow-Origin header value
+  list contains a wildcard. (font)
+- The timing allow check algorithm will pass when the Timing-Allow-Origin header value
+  list contains a wildcard. (iframe)
+- The timing allow check algorithm will pass when the Timing-Allow-Origin header value
+  list contains a wildcard. (image)
+- The timing allow check algorithm will pass when the Timing-Allow-Origin header value
+  list contains a wildcard. (script)
+- The timing allow check algorithm will pass when the Timing-Allow-Origin header value
+  list contains a wildcard. (stylesheet)
+- The timing allow check algorithm will pass when the Timing-Allow-Origin header value
+  list contains multiple wildcards. (XMLHttpRequest)
+- The timing allow check algorithm will pass when the Timing-Allow-Origin header value
+  list contains multiple wildcards. (font)
+- The timing allow check algorithm will pass when the Timing-Allow-Origin header value
+  list contains multiple wildcards. (iframe)
+- The timing allow check algorithm will pass when the Timing-Allow-Origin header value
+  list contains multiple wildcards. (image)
+- The timing allow check algorithm will pass when the Timing-Allow-Origin header value
+  list contains multiple wildcards. (script)
+- The timing allow check algorithm will pass when the Timing-Allow-Origin header value
+  list contains multiple wildcards. (stylesheet)
+- The timing allow check algorithm will pass when the Timing-Allow-Origin header value
+  list contains the origin and a wildcard. (XMLHttpRequest)
+- The timing allow check algorithm will pass when the Timing-Allow-Origin header value
+  list contains the origin and a wildcard. (font)
+- The timing allow check algorithm will pass when the Timing-Allow-Origin header value
+  list contains the origin and a wildcard. (iframe)
+- The timing allow check algorithm will pass when the Timing-Allow-Origin header value
+  list contains the origin and a wildcard. (image)
+- The timing allow check algorithm will pass when the Timing-Allow-Origin header value
+  list contains the origin and a wildcard. (script)
+- The timing allow check algorithm will pass when the Timing-Allow-Origin header value
+  list contains the origin and a wildcard. (stylesheet)
+resource-timing/TAO-port-mismatch-means-crossorigin.html:
+- An identical port must pass the TAO check
+resource-timing/body-size-cross-origin.https.html:
+- Retrieving a cors resource without Timing-Allow-Origin should expose body size
+- Retrieving a no-cors resource with Timing-Allow-Origin should not expose body size
+resource-timing/content-encoding.https.html:
+- contentEncoding in resource timing 22
+- contentEncoding in resource timing 23
+- contentEncoding in resource timing 24
+- contentEncoding in resource timing 25
+- contentEncoding in resource timing 26
+- contentEncoding in resource timing 27
+resource-timing/content-type.html:
+- This test validates the content-type of resources. 18
+- This test validates the content-type of resources. 20
+resource-timing/cross-origin-redirects.html:
+- Verify that a redirect chain through cross-origin resources do not have their timings
+  exposed when any of the TAO checks fail. (FAIL -> FAIL -> FAIL)
+- Verify that a redirect chain through cross-origin resources do not have their timings
+  exposed when any of the TAO checks fail. (FAIL -> FAIL -> PASS)
+- Verify that a redirect chain through cross-origin resources do not have their timings
+  exposed when any of the TAO checks fail. (FAIL -> PASS -> FAIL)
+- Verify that a redirect chain through cross-origin resources do not have their timings
+  exposed when any of the TAO checks fail. (FAIL -> PASS -> PASS)
+- Verify that a redirect chain through cross-origin resources do not have their timings
+  exposed when any of the TAO checks fail. (PASS -> FAIL -> FAIL)
+- Verify that a redirect chain through cross-origin resources do not have their timings
+  exposed when any of the TAO checks fail. (PASS -> FAIL -> PASS)
+- Verify that a redirect chain through cross-origin resources do not have their timings
+  exposed when any of the TAO checks fail. (PASS -> PASS -> FAIL)
+resource-timing/decoded-body-size-compressed.https.html:
+- decodedBodySize for brotli-compressed text resource
+resource-timing/document-domain-no-impact-opener.html:
+- test that document.domain being set doesn't have an impact on the resource timing
+  entry.
+resource-timing/entries-for-network-errors.sub.https.html:
+- A ResourceTiming entry should be created for network error of type Mixed content
+- A ResourceTiming entry should be created for network error of type network error
+  for ORB-blocked response
+- A ResourceTiming entry should be created for network error of type only-if-cached
+  resource that was not cached
+- A ResourceTiming entry should be created for network error of type too many redirects
+resource-timing/entry-attributes.html:
+- Font resources should generate conformant entries
+resource-timing/event-source-timing.html:
+- ResourceTiming for EventSource should reflect number of re-connections to source
+resource-timing/font-timestamps.html:
+- Test a font's timestamps
+- Test a font's timestamps with delays
+resource-timing/iframe-failed-commit.html:
+- Same-origin empty iframe with a 200 status gets reported
+- Same-origin empty iframe with a 204 status gets reported
+- Same-origin empty iframe with a 205 status gets reported
+- Same-origin iframe that doesn't comply with CSP attribute gets reported
+- Test iframe from non-existent host gets reported
+resource-timing/iframe-sequence-of-events.html:
+- A iframe should report its RT entry when the response is done and before it is completely
+  loaded
+resource-timing/iframe-with-download.html:
+- Iframes should not report resource timing for non-handled mime-types (downloads)
+resource-timing/initiator-type/audio.html:
+- The initiator type for <audio src> without 'type' attribute must be 'audio'
+- The initiator type for <source src> with type 'audio/mpeg' must be 'audio'
+- The initiator type for <source src> with type 'audio/ogg' must be 'audio'
+- The initiator type for <source src> with type 'audio/wav' must be 'audio'
+resource-timing/initiator-type/dynamic-insertion.html:
+- A font should have the 'css' initiator type.
+resource-timing/initiator-type/embed.html:
+- The initiator type for <embed> must be 'embed'
+resource-timing/initiator-type/img-srcset.html:
+- The initiator type for <img srcset> must be 'img'
+resource-timing/initiator-type/input.html:
+- The initiator type for <input type=image> must be 'input'
+resource-timing/initiator-type/link.html:
+- The initiator type for <link manifest> must be 'link'
+- The initiator type for <link prefetch> must be 'link'
+- The initiator type for font resources embedded in css must be 'css'
+- The initiator type for image resources embedded in css must be 'css'
+- The initiator type for module preload must be 'other'
+resource-timing/initiator-type/misc.html:
+- The initiator type for <body background> must be 'body'
+- The initiator type for <input type='image'> must be 'input'
+- The initiator type for <object type='image/png'> must be 'object'
+- The initiator type for new EventSource() must be 'other'
+resource-timing/initiator-type/picture.html:
+- The initiator type for <img srcset> in a <picture> must be 'img'
+- The initiator type for <source> in a <picture> must be 'img'
+resource-timing/initiator-type/script.html:
+- The initiator type for script imported from another script must be 'script'
+resource-timing/initiator-type/style.html:
+- The initiator type for '@font-face' resources must be 'css'
+- The initiator type for 'background' attributes in <style> elements must be 'css'
+- The initiator type for 'cursor' attributes in <style> elements must be 'css'
+- The initiator type for 'list-style-image' attributes in <style> elements must be
+  'css'
+resource-timing/initiator-type/svg.html:
+- The initiator type for <image> in an <svg> must be 'image'
+- The initiator type for <use> in an <svg> must be 'other'
+resource-timing/initiator-type/video.html:
+- The initiator type for <source src> with type="video/mp4" must be 'video'
+- The initiator type for <source src> with type="video/webm" must be 'video'
+- The initiator type for <track src> must be 'track'
+- The initiator type for <video poster> must be 'video'
+- The initiator type for <video src> must be 'video'
+resource-timing/initiator-type/workers.html:
+- The initiator type for classic worker must be 'other'
+- The initiator type for module worker must be 'script'
+resource-timing/input-sequence-of-events.html:
+- An image input element should receive its load event after the ResourceTiming entry
+  is available
+resource-timing/interim-response-times.h2.html:
+- Fetch from http://www.example.com with early hints, with 100 response
+- Fetch from http://www.example.com with early hints, with 100 response
+- Fetch from http://www.example.com with early hints, with 100 response
+- Fetch from http://www.example.com with early hints, without 100 response
+- Fetch from http://www.example.com with early hints, without 100 response
+- Fetch from http://www.example.com with early hints, without 100 response
+- Fetch from http://www.example.com without early hints, with 100 response
+- Fetch from http://www.example.com without early hints, with 100 response
+- Fetch from http://www.example.com without early hints, with 100 response
+- Fetch from http://www.example.com without early hints, without 100 response
+- Fetch from http://www.example.com without early hints, without 100 response
+- Fetch from http://www.example.com without early hints, without 100 response
+resource-timing/interim-response-times.html:
+- Fetch from http://www.example.com with early hints, with 100 response
+- Fetch from http://www.example.com with early hints, with 100 response
+- Fetch from http://www.example.com with early hints, with 100 response
+- Fetch from http://www.example.com with early hints, without 100 response
+- Fetch from http://www.example.com with early hints, without 100 response
+- Fetch from http://www.example.com with early hints, without 100 response
+- Fetch from http://www.example.com without early hints, with 100 response
+- Fetch from http://www.example.com without early hints, with 100 response
+- Fetch from http://www.example.com without early hints, with 100 response
+- Fetch from http://www.example.com without early hints, without 100 response
+- Fetch from http://www.example.com without early hints, without 100 response
+- Fetch from http://www.example.com without early hints, without 100 response
+resource-timing/nested-context-navigations-embed.html:
+- Test that cross-site embed navigations are not observable by the parent
+- Test that cross-site embed navigations are not observable by the parent, even after
+  history navigations by the parent
+- Test that cross-site embed refreshes are not observable by the parent
+- Test that crossorigin embed navigations are not observable by the parent
+- Test that crossorigin embed navigations are not observable by the parent, even after
+  history navigations by the parent
+- Test that crossorigin embed refreshes are not observable by the parent
+- Test that embed navigations are not observable by the parent
+- Test that embed navigations are not observable by the parent, even after history
+  navigations by the parent
+- Test that embed refreshes are not observable by the parent
+resource-timing/nested-context-navigations-iframe.html:
+- Test that cross-site iframe refreshes are not observable by the parent
+- Test that crossorigin iframe refreshes are not observable by the parent
+- Test that iframe refreshes are not observable by the parent
+resource-timing/nested-context-navigations-object.html:
+- Test that cross-site object navigations are not observable by the parent
+- Test that cross-site object navigations are not observable by the parent, even after
+  history navigations by the parent
+- Test that cross-site object refreshes are not observable by the parent
+- Test that crossorigin object navigations are not observable by the parent
+- Test that crossorigin object navigations are not observable by the parent, even
+  after history navigations by the parent
+- Test that crossorigin object refreshes are not observable by the parent
+- Test that object navigations are not observable by the parent
+- Test that object navigations are not observable by the parent, even after history
+  navigations by the parent
+- Test that object refreshes are not observable by the parent
+resource-timing/nested-nav-fallback-timing.html:
+- Cross-origin TAO-fail IFrame entries should report window load time
+- Cross-origin TAO-fail object entries should report window load time
+resource-timing/nextHopProtocol-is-tao-protected.https.html:
+- Fetch TAO'd font from remote origin. Make sure nextHopProtocol is not the empty
+  string.
+- Fetch TAO'd object from remote origin. Make sure nextHopProtocol is not the empty
+  string.
+- Fetch TAO-less font from remote origin. Make sure nextHopProtocol is the empty string.
+- Fetch TAO-less object from remote origin. Make sure nextHopProtocol is the empty
+  string.
+resource-timing/no-entries-for-cross-origin-css-fetched-memory-cache.sub.html:
+- Make sure that resources fetched by cross origin CSS are not in the timeline.
+resource-timing/no-entries-for-cross-origin-css-fetched.sub.html:
+- Make sure that resources fetched by cross origin CSS are not in the timeline.
+resource-timing/object-not-found-adds-entry.html:
+- Verify that a 200 null-typed object emits an entry.
+- Verify that a 404 img-typed object emits an entry.
+- Verify that a 404 null-typed object emits an entry.
+resource-timing/object-not-found-after-cross-origin-redirect.html:
+- Verify that cross-origin object resources don't implicitly expose their redirect
+  timings
+resource-timing/ping-rt-entries.html:
+- Hyperlink auditing (<a ping>) should have a resource timing entry
+resource-timing/render-blocking-status-link.html:
+- Validate render blocking status of link resources in PerformanceResourceTiming
+resource-timing/render-blocking-status-script.html:
+- Validate render blocking status of script resources in PerformanceResourceTiming
+resource-timing/resource-timing-level1.sub.html: HARNESS_ERROR
+resource-timing/resource_reparenting.html:
+- Testing resource entries
+resource-timing/resource_subframe_self_navigation.html:
+- Subsequent <embed> navigations don't appear in the resource-timing buffer.
+- Subsequent <frame> navigations don't appear in the resource-timing buffer.
+- Subsequent <iframe> navigations don't appear in the resource-timing buffer.
+- Subsequent <object> navigations don't appear in the resource-timing buffer.
+resource-timing/resource_timing_content_length.html:
+- encodedBodySize should be equal to the actual byte size of the content when header
+  value is lower than actual content
+resource-timing/response-status-code.html:
+- This test validates the response status of resources.
+- This test validates the response status of resources. 1
+- This test validates the response status of resources. 100
+- This test validates the response status of resources. 101
+- This test validates the response status of resources. 102
+- This test validates the response status of resources. 103
+- This test validates the response status of resources. 104
+- This test validates the response status of resources. 105
+- This test validates the response status of resources. 106
+- This test validates the response status of resources. 107
+- This test validates the response status of resources. 108
+- This test validates the response status of resources. 109
+- This test validates the response status of resources. 110
+- This test validates the response status of resources. 111
+- This test validates the response status of resources. 112
+- This test validates the response status of resources. 113
+- This test validates the response status of resources. 114
+- This test validates the response status of resources. 115
+- This test validates the response status of resources. 116
+- This test validates the response status of resources. 117
+- This test validates the response status of resources. 118
+- This test validates the response status of resources. 119
+- This test validates the response status of resources. 12
+- This test validates the response status of resources. 120
+- This test validates the response status of resources. 121
+- This test validates the response status of resources. 122
+- This test validates the response status of resources. 123
+- This test validates the response status of resources. 124
+- This test validates the response status of resources. 125
+- This test validates the response status of resources. 126
+- This test validates the response status of resources. 127
+- This test validates the response status of resources. 128
+- This test validates the response status of resources. 129
+- This test validates the response status of resources. 13
+- This test validates the response status of resources. 130
+- This test validates the response status of resources. 131
+- This test validates the response status of resources. 132
+- This test validates the response status of resources. 133
+- This test validates the response status of resources. 134
+- This test validates the response status of resources. 135
+- This test validates the response status of resources. 136
+- This test validates the response status of resources. 137
+- This test validates the response status of resources. 138
+- This test validates the response status of resources. 139
+- This test validates the response status of resources. 14
+- This test validates the response status of resources. 140
+- This test validates the response status of resources. 141
+- This test validates the response status of resources. 142
+- This test validates the response status of resources. 143
+- This test validates the response status of resources. 144
+- This test validates the response status of resources. 145
+- This test validates the response status of resources. 146
+- This test validates the response status of resources. 147
+- This test validates the response status of resources. 148
+- This test validates the response status of resources. 149
+- This test validates the response status of resources. 15
+- This test validates the response status of resources. 150
+- This test validates the response status of resources. 151
+- This test validates the response status of resources. 152
+- This test validates the response status of resources. 153
+- This test validates the response status of resources. 154
+- This test validates the response status of resources. 155
+- This test validates the response status of resources. 156
+- This test validates the response status of resources. 157
+- This test validates the response status of resources. 158
+- This test validates the response status of resources. 159
+- This test validates the response status of resources. 16
+- This test validates the response status of resources. 160
+- This test validates the response status of resources. 161
+- This test validates the response status of resources. 162
+- This test validates the response status of resources. 163
+- This test validates the response status of resources. 164
+- This test validates the response status of resources. 165
+- This test validates the response status of resources. 166
+- This test validates the response status of resources. 167
+- This test validates the response status of resources. 168
+- This test validates the response status of resources. 169
+- This test validates the response status of resources. 17
+- This test validates the response status of resources. 170
+- This test validates the response status of resources. 171
+- This test validates the response status of resources. 172
+- This test validates the response status of resources. 173
+- This test validates the response status of resources. 174
+- This test validates the response status of resources. 175
+- This test validates the response status of resources. 176
+- This test validates the response status of resources. 177
+- This test validates the response status of resources. 178
+- This test validates the response status of resources. 179
+- This test validates the response status of resources. 18
+- This test validates the response status of resources. 180
+- This test validates the response status of resources. 181
+- This test validates the response status of resources. 182
+- This test validates the response status of resources. 183
+- This test validates the response status of resources. 184
+- This test validates the response status of resources. 185
+- This test validates the response status of resources. 186
+- This test validates the response status of resources. 187
+- This test validates the response status of resources. 188
+- This test validates the response status of resources. 189
+- This test validates the response status of resources. 19
+- This test validates the response status of resources. 190
+- This test validates the response status of resources. 191
+- This test validates the response status of resources. 192
+- This test validates the response status of resources. 193
+- This test validates the response status of resources. 194
+- This test validates the response status of resources. 195
+- This test validates the response status of resources. 196
+- This test validates the response status of resources. 197
+- This test validates the response status of resources. 198
+- This test validates the response status of resources. 199
+- This test validates the response status of resources. 2
+- This test validates the response status of resources. 20
+- This test validates the response status of resources. 200
+- This test validates the response status of resources. 201
+- This test validates the response status of resources. 202
+- This test validates the response status of resources. 203
+- This test validates the response status of resources. 204
+- This test validates the response status of resources. 205
+- This test validates the response status of resources. 206
+- This test validates the response status of resources. 207
+- This test validates the response status of resources. 208
+- This test validates the response status of resources. 209
+- This test validates the response status of resources. 21
+- This test validates the response status of resources. 210
+- This test validates the response status of resources. 211
+- This test validates the response status of resources. 212
+- This test validates the response status of resources. 213
+- This test validates the response status of resources. 214
+- This test validates the response status of resources. 215
+- This test validates the response status of resources. 216
+- This test validates the response status of resources. 217
+- This test validates the response status of resources. 218
+- This test validates the response status of resources. 219
+- This test validates the response status of resources. 22
+- This test validates the response status of resources. 220
+- This test validates the response status of resources. 221
+- This test validates the response status of resources. 222
+- This test validates the response status of resources. 223
+- This test validates the response status of resources. 224
+- This test validates the response status of resources. 225
+- This test validates the response status of resources. 226
+- This test validates the response status of resources. 227
+- This test validates the response status of resources. 228
+- This test validates the response status of resources. 229
+- This test validates the response status of resources. 23
+- This test validates the response status of resources. 230
+- This test validates the response status of resources. 231
+- This test validates the response status of resources. 232
+- This test validates the response status of resources. 233
+- This test validates the response status of resources. 234
+- This test validates the response status of resources. 235
+- This test validates the response status of resources. 236
+- This test validates the response status of resources. 237
+- This test validates the response status of resources. 238
+- This test validates the response status of resources. 239
+- This test validates the response status of resources. 24
+- This test validates the response status of resources. 240
+- This test validates the response status of resources. 241
+- This test validates the response status of resources. 242
+- This test validates the response status of resources. 243
+- This test validates the response status of resources. 244
+- This test validates the response status of resources. 245
+- This test validates the response status of resources. 246
+- This test validates the response status of resources. 247
+- This test validates the response status of resources. 248
+- This test validates the response status of resources. 249
+- This test validates the response status of resources. 25
+- This test validates the response status of resources. 250
+- This test validates the response status of resources. 251
+- This test validates the response status of resources. 252
+- This test validates the response status of resources. 253
+- This test validates the response status of resources. 254
+- This test validates the response status of resources. 255
+- This test validates the response status of resources. 256
+- This test validates the response status of resources. 257
+- This test validates the response status of resources. 258
+- This test validates the response status of resources. 259
+- This test validates the response status of resources. 26
+- This test validates the response status of resources. 260
+- This test validates the response status of resources. 261
+- This test validates the response status of resources. 262
+- This test validates the response status of resources. 263
+- This test validates the response status of resources. 264
+- This test validates the response status of resources. 265
+- This test validates the response status of resources. 266
+- This test validates the response status of resources. 267
+- This test validates the response status of resources. 268
+- This test validates the response status of resources. 269
+- This test validates the response status of resources. 27
+- This test validates the response status of resources. 270
+- This test validates the response status of resources. 271
+- This test validates the response status of resources. 272
+- This test validates the response status of resources. 273
+- This test validates the response status of resources. 274
+- This test validates the response status of resources. 275
+- This test validates the response status of resources. 276
+- This test validates the response status of resources. 277
+- This test validates the response status of resources. 278
+- This test validates the response status of resources. 279
+- This test validates the response status of resources. 28
+- This test validates the response status of resources. 280
+- This test validates the response status of resources. 281
+- This test validates the response status of resources. 282
+- This test validates the response status of resources. 283
+- This test validates the response status of resources. 284
+- This test validates the response status of resources. 285
+- This test validates the response status of resources. 286
+- This test validates the response status of resources. 287
+- This test validates the response status of resources. 288
+- This test validates the response status of resources. 289
+- This test validates the response status of resources. 29
+- This test validates the response status of resources. 290
+- This test validates the response status of resources. 291
+- This test validates the response status of resources. 292
+- This test validates the response status of resources. 293
+- This test validates the response status of resources. 294
+- This test validates the response status of resources. 295
+- This test validates the response status of resources. 296
+- This test validates the response status of resources. 297
+- This test validates the response status of resources. 298
+- This test validates the response status of resources. 299
+- This test validates the response status of resources. 3
+- This test validates the response status of resources. 30
+- This test validates the response status of resources. 300
+- This test validates the response status of resources. 301
+- This test validates the response status of resources. 302
+- This test validates the response status of resources. 303
+- This test validates the response status of resources. 304
+- This test validates the response status of resources. 305
+- This test validates the response status of resources. 306
+- This test validates the response status of resources. 307
+- This test validates the response status of resources. 308
+- This test validates the response status of resources. 309
+- This test validates the response status of resources. 31
+- This test validates the response status of resources. 310
+- This test validates the response status of resources. 311
+- This test validates the response status of resources. 312
+- This test validates the response status of resources. 313
+- This test validates the response status of resources. 314
+- This test validates the response status of resources. 315
+- This test validates the response status of resources. 316
+- This test validates the response status of resources. 317
+- This test validates the response status of resources. 318
+- This test validates the response status of resources. 319
+- This test validates the response status of resources. 32
+- This test validates the response status of resources. 320
+- This test validates the response status of resources. 321
+- This test validates the response status of resources. 322
+- This test validates the response status of resources. 323
+- This test validates the response status of resources. 324
+- This test validates the response status of resources. 325
+- This test validates the response status of resources. 326
+- This test validates the response status of resources. 327
+- This test validates the response status of resources. 328
+- This test validates the response status of resources. 329
+- This test validates the response status of resources. 33
+- This test validates the response status of resources. 330
+- This test validates the response status of resources. 331
+- This test validates the response status of resources. 332
+- This test validates the response status of resources. 333
+- This test validates the response status of resources. 334
+- This test validates the response status of resources. 335
+- This test validates the response status of resources. 336
+- This test validates the response status of resources. 337
+- This test validates the response status of resources. 338
+- This test validates the response status of resources. 339
+- This test validates the response status of resources. 34
+- This test validates the response status of resources. 340
+- This test validates the response status of resources. 341
+- This test validates the response status of resources. 342
+- This test validates the response status of resources. 343
+- This test validates the response status of resources. 344
+- This test validates the response status of resources. 345
+- This test validates the response status of resources. 346
+- This test validates the response status of resources. 347
+- This test validates the response status of resources. 348
+- This test validates the response status of resources. 349
+- This test validates the response status of resources. 35
+- This test validates the response status of resources. 36
+- This test validates the response status of resources. 37
+- This test validates the response status of resources. 38
+- This test validates the response status of resources. 39
+- This test validates the response status of resources. 4
+- This test validates the response status of resources. 40
+- This test validates the response status of resources. 41
+- This test validates the response status of resources. 42
+- This test validates the response status of resources. 43
+- This test validates the response status of resources. 44
+- This test validates the response status of resources. 45
+- This test validates the response status of resources. 46
+- This test validates the response status of resources. 47
+- This test validates the response status of resources. 48
+- This test validates the response status of resources. 49
+- This test validates the response status of resources. 5
+- This test validates the response status of resources. 50
+- This test validates the response status of resources. 51
+- This test validates the response status of resources. 52
+- This test validates the response status of resources. 53
+- This test validates the response status of resources. 54
+- This test validates the response status of resources. 55
+- This test validates the response status of resources. 56
+- This test validates the response status of resources. 57
+- This test validates the response status of resources. 58
+- This test validates the response status of resources. 59
+- This test validates the response status of resources. 6
+- This test validates the response status of resources. 60
+- This test validates the response status of resources. 61
+- This test validates the response status of resources. 62
+- This test validates the response status of resources. 63
+- This test validates the response status of resources. 64
+- This test validates the response status of resources. 65
+- This test validates the response status of resources. 66
+- This test validates the response status of resources. 67
+- This test validates the response status of resources. 68
+- This test validates the response status of resources. 69
+- This test validates the response status of resources. 7
+- This test validates the response status of resources. 70
+- This test validates the response status of resources. 71
+- This test validates the response status of resources. 72
+- This test validates the response status of resources. 73
+- This test validates the response status of resources. 74
+- This test validates the response status of resources. 75
+- This test validates the response status of resources. 76
+- This test validates the response status of resources. 77
+- This test validates the response status of resources. 78
+- This test validates the response status of resources. 79
+- This test validates the response status of resources. 8
+- This test validates the response status of resources. 80
+- This test validates the response status of resources. 81
+- This test validates the response status of resources. 82
+- This test validates the response status of resources. 83
+- This test validates the response status of resources. 84
+- This test validates the response status of resources. 85
+- This test validates the response status of resources. 86
+- This test validates the response status of resources. 87
+- This test validates the response status of resources. 88
+- This test validates the response status of resources. 89
+- This test validates the response status of resources. 9
+- This test validates the response status of resources. 90
+- This test validates the response status of resources. 91
+- This test validates the response status of resources. 92
+- This test validates the response status of resources. 93
+- This test validates the response status of resources. 94
+- This test validates the response status of resources. 95
+- This test validates the response status of resources. 96
+- This test validates the response status of resources. 97
+- This test validates the response status of resources. 98
+- This test validates the response status of resources. 99
+resource-timing/same-origin-from-cross-origin-redirect.html:
+- Verify that cross origin resources' timings are exposed when the final resource
+  at the end of an HTTP redirect chain is same-origin.
+resource-timing/secure-iframe-in-insecure-context.html:
+- secureConnectionStart is reported for iframes loaded over https in http context
+- secureConnectionStart is reported for object documents loaded over https in http
+  context
+resource-timing/sizes-cache.any.js:
+- PerformanceResourceTiming sizes caching test
+resource-timing/workerStart-tao-protected.https.html:
+- A resource from a cross-origin service worker must expose workerStart when there
+  is a TAO match
+resource-timing/worklet-rt-entries.https.html:
+- Worklets should generate Resource Timing Entries
 service-workers/cache-storage/cache-storage.https.any.js:
 - CacheStorage names are DOMStrings not USVStrings
 service-workers/cache-storage/credentials.https.html:
@@ -11235,7 +11928,6 @@ service-workers/service-worker/opaque-script.https.html:
 - Verify small cross-origin cache_storage scripts are opaque.
 service-workers/service-worker/performance-timeline.https.html:
 - Resource Timing
-- empty service worker fetch event included in performance timings
 service-workers/service-worker/postmessage-blob-url.https.html:
 - postMessage Blob URL to a ServiceWorker
 service-workers/service-worker/postmessage-to-client-message-queue.https.html:
@@ -11296,13 +11988,11 @@ service-workers/service-worker/resource-timing-cross-origin.https.html:
 - Test that timing allow check fails when service worker changes origin from same
   to cross origin (no-cors).
 service-workers/service-worker/resource-timing-fetch-variants.https.html:
-- Connection info from within a service-worker should not be exposed to client ResourceTiming
 - Delay from within service-worker (after internal fetching) should be accessible
   through `responseStart`
 - Delay from within service-worker (before internal fetching) should be measured before
   responseStart in the client ResourceTiming entry
 - Redirects done from within a service-worker should not be exposed to client ResourceTiming
-- requestStart should never be before fetchStart
 service-workers/service-worker/resource-timing.sub.https.html:
 - Controlled resource loads
 - Non-controlled resource loads
@@ -12594,22 +13284,11 @@ websockets/unload-a-document/005.html:
 - 'WebSockets: navigating nested browsing context with a websocket in top-level'
 - 'WebSockets: navigating nested browsing context with a websocket in top-level'
 - 'WebSockets: navigating nested browsing context with a websocket in top-level'
-webstorage/event_basic.html:
-- localStorage mutations fire StorageEvents that are caught by the event listener
-  set via window.onstorage.
-webstorage/event_body_attribute.html:
-- localStorage mutations fire StorageEvents that are caught by the event listener
-  specified as an attribute on the body.
-webstorage/event_case_sensitive.html:
-- localStorage storage events fire even when only the case of the value changes.
 webstorage/event_no_duplicates.html:
 - Clearing empty storage does not trigger event for localStorage
 - Clearing empty storage does not trigger event for sessionStorage
 - Setting to same value does not trigger event for localStorage
 - Setting to same value does not trigger event for sessionStorage
-webstorage/event_setattribute.html:
-- localStorage mutations fire StorageEvents that are caught by the event listener
-  attached via setattribute.
 webstorage/localstorage-about-blank-3P-iframe-opens-3P-window.partitioned.html:
 - 'StorageKey: test 3P about:blank window opened from a 3P iframe'
 webstorage/localstorage-basic-partitioned.sub.html:

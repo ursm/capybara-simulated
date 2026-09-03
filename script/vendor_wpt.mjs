@@ -54,6 +54,8 @@ const TREES = [
                                        // then, and nothing in the gate said so (one shadow-dom
                                        // test used it incidentally, and passed by accident).
   'hr-time',                           // DOMHighResTimeStamp: performance.now() resolution +
+  'resource-timing',                   // PerformanceResourceTiming — one entry per fetched resource (fetch /
+                                       // XHR / <link> / <script> / <img> …), sizes, initiatorType, the buffer
                                        // monotonicity + timeOrigin — the gate for the sub-ms clock
   'FileAPI',                           // Blob / File / FileReader / createObjectURL — data API, no layout
   'html/dom',                          // IDL attribute REFLECTION (content attr <-> IDL prop) — the IDL
