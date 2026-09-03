@@ -110,7 +110,6 @@ css/css-animations/animation-delay-011.html:
 css/css-animations/animation-important-001.html:
 - Custom property animations appearing via setKeyframes do not override important
   declarations
-- Important rules override animations (::before)
 css/css-animations/animation-important-002.html:
 - "== css/css-animations/animation-important-002-ref.html"
 css/css-animations/animation-important-with-transition.html:
@@ -1015,9 +1014,6 @@ css/css-flexbox/getcomputedstyle/flexbox_computedstyle_min-auto-size.html:
   otherwise have been a flex item.
 - Computed min-width/min-height of specified auto with display:none which would otherwise
   have been a flex item.
-css/css-flexbox/hittest-before-pseudo.html:
-- Hit-testing text within a pseudo-element flex-item should return the flexbox as
-  the hittest result.
 css/css-flexbox/image-as-flexitem-size-001.html:
 - ".flexbox > img 10"
 - ".flexbox > img 11"
@@ -7157,10 +7153,6 @@ css/css-transforms/transform-fixed-bg-006.html:
 - "== css/css-transforms/transform-fixed-bg-ref.html (both renderings blank)"
 css/css-transforms/transform-fixed-bg-007.html:
 - "== css/css-transforms/transform-fixed-bg-ref.html (both renderings blank)"
-css/css-transforms/transform-generated-001.html:
-- "== css/css-transforms/transform-generated-001-ref.html"
-css/css-transforms/transform-generated-002.html:
-- "== css/css-transforms/transform-generated-002-ref.html"
 css/css-transforms/transform-hit-testing.html:
 - hit testing of square with 'scale'
 css/css-transforms/transform-iframe-001.html:
@@ -7824,14 +7816,8 @@ css/cssom/getComputedStyle-pseudo-with-argument.html:
 - 'This pseudo-element should parse: ::highlight(name)'
 css/cssom/getComputedStyle-pseudo.html:
 - "::file-selector-button resolves to the file input button element"
-- 'Dynamically change to display: contents on pseudo-elements'
 - Item-based blockification of nonexistent pseudo-elements
-- Item-based blockification of pseudo-elements
 - Pseudo-elements can use the full range of CSS syntax
-- Resolution of nonexistent pseudo-element styles
-- 'Resolution of pseudo-element styles in display: none elements'
-- Resolution of width is correct for ::before and ::after pseudo-elements (double-colon)
-- Resolution of width is correct for ::before and ::after pseudo-elements (single-colon)
 - 'Resolution of width is correct for ::before and ::after pseudo-elements of display:
   contents elements'
 - 'Unknown pseudo-element with a known identifier: backdrop'
@@ -7846,7 +7832,6 @@ css/cssom/getComputedStyle-pseudo.html:
 - 'Unknown pseudo-element with a known identifier: view-transition-image-pair(name)'
 - 'Unknown pseudo-element with a known identifier: view-transition-new(name)'
 - 'Unknown pseudo-element with a known identifier: view-transition-old(name)'
-- 'display: contents on pseudo-elements'
 css/cssom/getComputedStyle-resolved-min-size-auto.html:
 - Resolved value of min-width & min-height 'auto' keyword behaves as expected on element
   with id="block-with-degenerate-aspect-ratio"
@@ -9672,9 +9657,6 @@ html/rendering/non-replaced-elements/the-hr-element-0/align.html:
 - "== html/rendering/non-replaced-elements/the-hr-element-0/align-ref.html"
 html/rendering/non-replaced-elements/the-hr-element-0/color.html:
 - "== html/rendering/non-replaced-elements/the-hr-element-0/color-ref.html"
-html/rendering/non-replaced-elements/the-hr-element-0/setting-overflow-visible.html:
-- control
-- 'overflow: visible'
 html/rendering/non-replaced-elements/the-hr-element-0/width.html:
 - "== html/rendering/non-replaced-elements/the-hr-element-0/width-ref.html"
 html/rendering/non-replaced-elements/the-page/body-margin-1a.html:
@@ -10360,10 +10342,6 @@ html/rendering/the-css-user-agent-style-sheet-and-presentational-hints/pre-margi
 html/rendering/the-details-element/auto-expand-details-text-fragment.html:
 - Verifies that the target page has scrolled as a result of a ScrollToTextFragment
   navigation.
-html/rendering/the-details-element/details-after.html:
-- "!= html/rendering/the-details-element/single-summary.html"
-html/rendering/the-details-element/details-before.html:
-- "!= html/rendering/the-details-element/single-summary.html"
 html/rendering/the-details-element/details-blockification.html:
 - Summary and content should have display:block computed value
 html/rendering/the-details-element/details-content-pseudo-attr.html:
@@ -10846,6 +10824,8 @@ html/semantics/forms/the-select-element/customizable-select/select-focus-visible
 - Select should not match :focus-visible when using mouse.
 html/semantics/forms/the-select-element/customizable-select/select-font-size.html:
 - "== html/semantics/forms/the-select-element/customizable-select/select-font-size-ref.html"
+html/semantics/forms/the-select-element/customizable-select/select-grid-before-after.html:
+- "== html/semantics/forms/the-select-element/customizable-select/select-grid-before-after-ref.html"
 html/semantics/forms/the-select-element/customizable-select/select-home-end-pagedown-pageup-detailed.optional.html:
 - Behavior of Home and End for customizable-<select>
 - Behavior of Home and End for customizable-<select>, starting at the bottom
@@ -12145,7 +12125,6 @@ web-animations/interfaces/KeyframeEffect/processing-a-keyframes-argument-001.htm
 web-animations/interfaces/KeyframeEffect/style-change-events.html:
 - All property keys are recognized
 web-animations/interfaces/KeyframeEffect/target.html:
-- Change target from a non-existing pseudo-element to the originating element.
 - Change target from a non-existing to a different existing pseudo-element by setting
   pseudoElement.
 - Change target from a non-existing to a different existing pseudo-element by setting
@@ -12154,7 +12133,6 @@ web-animations/interfaces/KeyframeEffect/target.html:
   setting pseudoElement.
 - Change target from a non-existing to a different non-existing pseudo-element by
   setting target.
-- Change target from an existing pseudo-element to the originating element.
 - Change target from an existing to a different existing pseudo-element by setting
   pseudoElement.
 - Change target from an existing to a different existing pseudo-element by setting
