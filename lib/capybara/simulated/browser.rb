@@ -7229,7 +7229,7 @@ module Capybara
         tainted = image_tainted?(key, cors)
         return {'zeroSize' => true, 'width' => 0, 'height' => 0, 'tainted' => tainted} if entry == :zero_size
         return undecodable_image_result unless entry
-        r = {'width' => entry['width'], 'height' => entry['height'], 'refId' => transfer_buffer_stash(entry['bytes']), 'colorSpace' => entry['colorSpace'], 'tainted' => tainted}
+        r = {'width' => entry['width'], 'height' => entry['height'], 'refId' => transfer_buffer_stash(entry['bytes']), 'colorSpace' => entry['colorSpace'], 'tainted' => tainted, 'encoded' => entry['encoded'], 'meta' => Thread.current[:csim_image_meta]}
         r['refIdP3'] = transfer_buffer_stash(entry['bytesP3']) if entry['bytesP3']
         r
       end
@@ -7459,7 +7459,7 @@ module Capybara
         # nil (broken) or :zero_size — createImageBitmap of either rejects (a zero-area
         # source is an InvalidStateError), so surface nil for the caller to reject on.
         return nil unless entry.is_a?(Hash)
-        r = {'width' => entry['width'], 'height' => entry['height'], 'refId' => transfer_buffer_stash(entry['bytes']), 'colorSpace' => entry['colorSpace'], 'encoded' => entry['encoded'], 'meta' => Thread.current[:csim_image_meta]}
+        r = {'width' => entry['width'], 'height' => entry['height'], 'refId' => transfer_buffer_stash(entry['bytes']), 'colorSpace' => entry['colorSpace']}
         r['refIdP3'] = transfer_buffer_stash(entry['bytesP3']) if entry['bytesP3']
         r
       end
@@ -8149,18 +8149,6 @@ module Capybara
           bytes.empty? ? nil : bytes
         elsif key.match?(%r{\Ahttps?://}i)
           result = rack_fetch('GET', key, '', {}, 'follow', body_raw: true)
-          # What the image's Resource Timing entry reports of the response — its content type,
-          # whether it was redirected to, its status and size — read back on this thread right
-          # after; a 404 is a response too (the element breaks, the entry keeps the status).
-          if result
-            Thread.current[:csim_image_meta] = {
-              'contentType' => result['headers'].find {|k, _| k.to_s.casecmp?('content-type') }&.last,
-              'tao'         => result['tao'],
-              'redirected'  => result['redirected'] == true,
-              'status'      => result['status'].to_i,
-              'encoded'     => result['encoded'].to_i
-            }
-          end
           return nil unless result && result['status'].to_i < 400
           bytes = result['body_raw'].to_s
           bytes.empty? ? nil : bytes
@@ -9606,7 +9594,7 @@ module Capybara
             end
             # Cached asset — log headers/type/size but skip the (boring) body.
             trace_network(method, target, cache_entry.status, headers, body, cache_entry.headers, nil, t0, false)
-            return response_hash(cache_entry.status, cache_entry.headers, cache_entry.body, target, redirected, body_raw: body_raw, cached: 'cache')
+            return response_hash(cache_entry.status, cache_entry.headers, cache_entry.body, target, redirected, body_raw: body_raw, cached: 'cache', encoded: cache_entry.encoded)
           end
           # only-if-cached forbids the network: no usable stored response → a network error.
           return nil if cache_mode == 'only-if-cached'
@@ -9754,7 +9742,7 @@ module Capybara
             # be re-filtered through the CORS exposed-header set on the way back to script —
             # a 304 revalidation must not leak headers the original cross-origin fetch hid.
             cached_headers = cross_origin ? cors_exposed_headers(cache_entry.headers, with_credentials) : cache_entry.headers
-            return response_hash(cache_entry.status, cached_headers, cache_entry.body, target, redirected, body_raw: body_raw, cached: 'validated', raw_headers: cache_entry.headers)
+            return response_hash(cache_entry.status, cached_headers, cache_entry.body, target, redirected, body_raw: body_raw, cached: 'validated', raw_headers: cache_entry.headers, encoded: cache_entry.encoded)
           end
           # Fetch "CORS check" runs on EVERY cross-origin response — including a 3xx the
           # UA is about to follow (a redirect whose response lacks a valid Access-Control
@@ -9886,7 +9874,7 @@ module Capybara
           # the author's own conditional bypasses the UA cache entirely (read AND write) — it's
           # "treated similarly to no-store" (request-cache-default-conditional). Every other mode
           # (incl. reload, which refreshes it) stores a cacheable GET response.
-          @@asset_cache.store(target, status, resp_headers, body_str) if method == 'GET' && cache_mode != 'no-store' && !skip_cache
+          @@asset_cache.store(target, status, resp_headers, body_str, encoded: encoded_size) if method == 'GET' && cache_mode != 'no-store' && !skip_cache
           # A no-cors cross-origin response is OPAQUE: status 0, empty body, no exposed
           # headers, empty URL (cors-basic "Opaque filter"). Otherwise the type is 'cors'
           # for a cross-origin (CORS-allowed) response, else 'basic'.

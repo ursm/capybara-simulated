@@ -33,12 +33,13 @@ RSpec.describe 'resource timing' do
       when '/i.css'    then [200, {'content-type' => 'text/css'}, ['b { color: blue }']]
       when '/d.json'   then [200, {'content-type' => 'application/json; charset=utf-8'}, ['{"a":1}']]
       when '/gz.js'    then [200, {'content-type' => 'text/javascript', 'content-encoding' => 'gzip'}, [GZIPPED]]
+      when '/gz-cached.js' then [200, {'content-type' => 'text/javascript', 'content-encoding' => 'gzip', 'cache-control' => 'max-age=600'}, [GZIPPED]]
       when '/cached'   then [200, {'content-type' => 'text/plain', 'cache-control' => 'max-age=600'}, ['cached body']]
       when '/redir'    then [302, {'location' => '/d.json'}, ['']]
       when '/i.png'    then [200, {'content-type' => 'image/png'}, [File.binread(Dir.glob('spec/wpt/resource-timing/resources/blue.png').first)]]
       when '/f.html'   then [200, {'content-type' => 'text/html'}, ['<p>frame</p>']]
       when '/hash.html' then [200, {'content-type' => 'text/html'}, ['<script>parent.__hashes = (parent.__hashes || []).concat([location.hash]); if (parent.__hashes.length < 2) setTimeout(function () { location.hash = "check"; location.reload(); }, 0);</script>']]
-      when '/missing'  then [404, {'content-type' => 'text/plain'}, ['no']]
+      when '/missing', '/missing.js' then [404, {'content-type' => 'text/plain'}, ['no']]
       when '/xo'       then [200, {'content-type' => 'text/plain', 'access-control-allow-origin' => '*'}, ['cross origin']]
       when '/xo-tao'   then [200, {'content-type' => 'text/plain', 'access-control-allow-origin' => '*', 'timing-allow-origin' => '*'}, ['cross origin with tao']]
       when '/beacon'   then [204, {}, ['']]
@@ -81,6 +82,11 @@ RSpec.describe 'resource timing' do
     by_name = entries(s).to_h {|e| [e['name'].sub('http://www.example.com', ''), e['initiatorType']] }
     expect(by_name).to include('/a.css' => 'link', '/i.css' => 'css', '/a.js' => 'script', '/i.png' => 'img')
     expect(by_name).to include('/f.html' => 'iframe') if CsimEngine.v8?      # a frame document is a fetch of its own realm
+    imported = entry(s, '/i.css')                                             # an @import is a real fetch, recorded once
+    expect(imported['responseStatus']).to eq(200)
+    expect(imported['contentType']).to eq('text/css')
+    s.execute_script("document.head.appendChild(document.createElement('style')).textContent = 'i { color: red }'")
+    expect(entries(s, '/i.css').length).to eq(1)
     expect(entries(s).map {|e| e['entryType'] }.uniq).to eq(['resource'])
   end
 
@@ -156,6 +162,15 @@ RSpec.describe 'resource timing' do
     expect(e['domainLookupStart']).to eq(0)
     expect(e['fetchStart']).to eq(e['startTime'])
     expect(entry(s, '/missing')['responseStatus']).to eq(404)          # a 404 is a response, not a network error
+    s.execute_script("var sc = document.createElement('script'); sc.src = '/missing.js'; document.head.appendChild(sc);")
+    expect(entry(s, '/missing.js')['responseStatus']).to eq(404)
+  end
+
+  it 'records nothing for a navigation the document submits into a frame' do
+    skip 'per-frame realms need the V8 engine' unless CsimEngine.v8?
+    s = session
+    s.execute_script("var f = document.createElement('form'); f.target = 'fr'; f.action = '/f.html?posted'; document.body.appendChild(f); f.submit();")
+    expect(entries(s).map {|e| e['initiatorType'] }).not_to include('fetch')
   end
 
   it 'hides a cross-origin response\'s timings without Timing-Allow-Origin and exposes them with it' do
@@ -192,6 +207,15 @@ RSpec.describe 'resource timing' do
     expect(second['deliveryType']).to eq('cache')
     expect(second['transferSize']).to eq(0)
     expect(second['encodedBodySize']).to eq('cached body'.bytesize)
+  end
+
+  it 'keeps the wire size of a content-encoded body across a cache hit' do
+    s = session
+    s.execute_script("fetch('/gz-cached.js').then(function () { return fetch('/gz-cached.js'); })")
+    _, second = entries(s, '/gz-cached.js')
+    expect(second['deliveryType']).to eq('cache')
+    expect(second['encodedBodySize']).to eq(GZIPPED.bytesize)
+    expect(second['decodedBodySize']).to eq('var gz = 1;'.bytesize)
   end
 
   it 'gives an image the document already holds no second entry' do
@@ -256,6 +280,7 @@ RSpec.describe 'resource timing' do
       fetch('/d.json');
     JS
     expect(s.evaluate_script('__seen')).to eq(['.json'])
+    s.execute_script("new PerformanceObserver(function () {}).observe({ entryTypes: ['resource'], buffered: true })")   # ignored, not an error
     expect(s.evaluate_script('__buffered[0]')).to be >= 4                # everything the page loaded, replayed
     expect(s.evaluate_script('PerformanceObserver.supportedEntryTypes')).to include('resource')
   end

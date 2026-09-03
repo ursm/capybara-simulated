@@ -42,7 +42,9 @@ module Capybara
     # racing reader sees is a partial `stored_at`/`max_age` pair on `refresh`: freshness
     # computed against a transient mix, never a corrupted structure.
     class AssetCache
-      Entry = Struct.new(:status, :headers, :body, :stored_at, :max_age, :no_cache, :immutable, keyword_init: true) do
+      # `encoded`: the body's size on the wire before a Content-Encoding was undone — what a
+      # cache hit's Resource Timing entry reports as `encodedBodySize`.
+      Entry = Struct.new(:status, :headers, :body, :stored_at, :max_age, :no_cache, :immutable, :encoded, keyword_init: true) do
         # `must-revalidate` (RFC 9111 §5.2.2.2) only forbids reusing a
         # response *once it has become stale* without revalidation — it
         # does NOT force revalidation while the entry is still fresh, and
@@ -111,7 +113,7 @@ module Capybara
         @entries.select! {|_, e| e.immutable }
       end
 
-      def store(url, status, headers, body)
+      def store(url, status, headers, body, encoded: nil)
         return unless CACHEABLE_STATUSES.include?(status)
         h = ensure_lowercase(headers)
         return unless vary_compatible?(h['vary'])
@@ -136,7 +138,8 @@ module Capybara
           stored_at: Time.now,
           max_age:   max_age,
           no_cache:  cc[:no_cache],
-          immutable: cc[:immutable] == true
+          immutable: cc[:immutable] == true,
+          encoded:   encoded
         )
       end
 
