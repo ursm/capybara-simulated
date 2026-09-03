@@ -82,8 +82,11 @@ module WptRunner
   # Real-time grace rounds after an idle-bail before the force-timeout (see the
   # drain loop): 10 ms sleep + one frame each, resumed on any progress signal.
   DRAIN_GRACE_ROUNDS = 20
-  # Real-time bounds on the clock-hold while worker cross-thread work is in
-  # flight (the wait-hold branch of the drain loop). Generous — they only bite
+  # Real-time bounds on the clock-hold while cross-thread work is in flight — a
+  # worker's, or an `<img>` fetched on a host thread (the wait-hold branch of the
+  # drain loop): a page's `step_timeout(2000)` race against an image's entry must
+  # not be decided by how loaded the CI runner is (resource-timing/sizes-redirect-img
+  # flaked exactly so). Generous — they only bite
   # on a page whose worker pending never resolves (a wedged counter would
   # otherwise hold the clock forever); a healthy loaded runner resumes on the
   # next delivered reply, typically well under a second per stretch.
@@ -1224,7 +1227,7 @@ module WptRunner
           advance      = true
           wait_started = nil
           hold_last    = nil
-        elsif s.driver.worker_drive_pending?
+        elsif s.driver.worker_drive_pending? || s.driver.browser.image_loads_pending?
           # Async-only frame with worker cross-thread work in flight (an SW
           # round-trip, a worker mid-boot / mid-message — in ANY window; the
           # driver aggregate matches the merged `async` above): the page is
