@@ -253,24 +253,24 @@ module Capybara
       # precompiled bytecode. Partial in-VM resets carry the same
       # library-init-leak hazards V8Runtime documents.
       #
-      # We don't `@vm&.dispose!` before swapping: per-visit rebuilds
-      # happen on every spec example, and `dispose!` blocks on the
-      # quickjs GC running with the GVL held. Ruby GC will eventually
-      # reach the unreferenced VM and the gem's dfree handler frees
-      # the JSRuntime. The transient C-heap growth between GCs is the
-      # tradeoff for not paying ~hundreds of ms per spec.
+      # The OLD VM is disposed here, not left to Ruby's GC: a VM holding the bridge is ~40 MB of
+      # C heap behind a Ruby object a few hundred bytes big, so nothing prompts a collection and
+      # the dead VMs pile up — a flatware worker climbed monotonically from 300 MB to 4.6 GB over
+      # one QuickJS gate, and 30 sessions of two visits each held 1945 MB (measured 2026-09-03).
+      # `dispose!` on a bridge-sized VM costs ~4 ms (the same thirty sessions: 3.69 s → 3.92 s,
+      # 515 MB), not the hundreds of milliseconds this used to fear.
       def rebuild_ctx
+        old = @vm
         @vm = build_vm
+        old&.dispose!
       end
 
       # Same operation as `rebuild_ctx` since per-visit rebuilds are
       # already the inter-test reset point.
       def reset_page = rebuild_ctx
 
-      # PERMANENTLY drop this runtime. Distinct from `rebuild_ctx` above, which
-      # deliberately does NOT `dispose!` — that runs per visit, on every example,
-      # and `dispose!` blocks on the quickjs GC with the GVL held. Here it runs
-      # once, when a session is dropped for good, and the cost is the point.
+      # PERMANENTLY drop this runtime: the current VM goes the way every superseded one goes in
+      # `rebuild_ctx`, disposed rather than left to a GC that has no reason to run.
       #
       # This used to be intentionally absent, on the reasoning that Ruby GC's
       # dfree would reach an unreferenced `@vm` on its own. Measured, it does not
