@@ -7648,6 +7648,8 @@ css/css-transitions/unregistered-custom-property-transition.html:
 css/cssom/CSSStyleSheet-constructable-insertRule-base-uri.html:
 - "== css/cssom/CSSStyleSheet-constructable-insertRule-base-uri-ref.html"
 css/cssom/CSSStyleSheet-constructable.html:
+- CSSStyleSheet.replace allows, but ignores, import rule inside
+- CSSStyleSheet.replace ignores @import rule but still loads other rules
 - CSSStyleSheet.replaceSync should not trigger any loads from @import rules
 - Stylesheet constructed on iframe cannot be used in the main Document
 css/cssom/CSSStyleSheet-template-adoption.html:
@@ -7714,9 +7716,6 @@ css/cssom/getComputedStyle-detached-subtree.html:
 - 'getComputedStyle returns no style for element in non-rendered iframe (display:
   none) from iframe''s window'
 - getComputedStyle returns no style for element outside the flat tree
-css/cssom/getComputedStyle-display-none-001.html:
-- 'getComputedStyle gets invalidated in display: none subtrees due to inherited changes
-  to an ancestor shadow host'
 css/cssom/getComputedStyle-dynamic-subdoc.html:
 - getComputedStyle cross-doc properly reflects media query changes
 css/cssom/getComputedStyle-insets-absolute.html:
@@ -7863,7 +7862,6 @@ css/cssom/rule-restrictions.html:
 css/cssom/selectorSerialize.html:
 - escaped character as code point in attribute name
 css/cssom/selectorText-modification-restyle-002.html:
-- Check initial color.
 - 'Check that color changes correctly after shadow stylesheet selector and #container
   class is changed.'
 css/cssom/serialize-values.html:
@@ -10426,8 +10424,6 @@ html/rendering/widgets/button-layout/computed-style.html:
 - 'computed display of <input type=reset> with display: flow'
 - 'computed display of <input type=submit> with display: contents'
 - 'computed display of <input type=submit> with display: flow'
-html/rendering/widgets/button-layout/display-none-or-contents.html:
-- "== html/rendering/widgets/button-layout/display-none-or-contents-ref.html"
 html/rendering/widgets/button-layout/inline-level.html:
 - "== html/rendering/widgets/button-layout/inline-level-ref.html"
 html/rendering/widgets/button-layout/input-type-button-clip.html:
@@ -11614,9 +11610,6 @@ shadow-dom/offsetParent-across-shadow-boundaries.html:
   to a slot in nested shadow trees of closed mode
 - offsetParent must skip offset parents of an element when the context object is assigned
   to a slot in nested shadow trees of open mode
-shadow-dom/offsetTop-offsetLeft-across-shadow-boundaries.html:
-- Verifies that HTMLElement.offsetTop accounts for shadow boundaries when nested in
-  multiple shadow roots.
 shadow-dom/scroll-to-the-fragment-in-shadow-tree.html:
 - The user agent scroll to the fragment when there is an anchor element with a name
   attribute exactly equal to the decoded fragid
@@ -11640,8 +11633,6 @@ shadow-dom/slot-fallback-content-008.html:
 - "== shadow-dom/slot-fallback-content-008-ref.html"
 shadow-dom/untriaged/html-elements-in-shadow-trees/inert-html-elements/test-001.html:
 - A_08_01_01_T01
-shadow-dom/untriaged/styles/test-008.html:
-- A_06_00_09_T01
 web-animations/animation-model/animation-types/accumulation-per-property-001.html:
 - background-color supports animating as color of rgb() with overflowed  from and
   to values
