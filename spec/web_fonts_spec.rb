@@ -286,11 +286,32 @@ RSpec.describe 'web fonts' do
     expect(out['setOk']).to eq('25%')
   end
 
-  it 'errors a face built with an invalid descriptor and rejects its load' do
+  it 'normalizes a descriptor value and accepts calc()' do
     s = session
-    s.execute_script("window.__r = []; var f = new FontFace('Bad', 'url(/ahem.ttf)', { ascentOverride: '-50%' }); __r.push(f.status); f.load().then(function () { __r.push('ok'); }, function (e) { __r.push(f.status + ':' + e.name); });")
-    Timeout.timeout(5) { sleep 0.05 until s.evaluate_script('window.__r.length >= 2') }
-    expect(s.evaluate_script('window.__r')).to eq(['unloaded', 'error:SyntaxError'])
+    out = s.evaluate_script(<<~JS)
+      (function () {
+        var f = new FontFace('N', 'url(/ahem.ttf)');
+        var norm = ['  90% ', '+50%', '.5%', '-0%', 'NORMAL', '50.0%'].map(function (v) { f.ascentOverride = v; return f.ascentOverride; });
+        f.sizeAdjust = 'calc(50%)'; f.display = 'BLOCK';
+        return { norm: norm, calc: f.sizeAdjust, display: f.display, keys: Object.keys(f), json: JSON.stringify(f) };
+      })()
+    JS
+    expect(out['norm']).to eq(['90%', '50%', '0.5%', '0%', 'normal', '50%'])
+    expect(out['calc']).to eq('calc(50%)')
+    expect(out['display']).to eq('block')
+    expect(out['keys']).to eq([])                                             # no internal slots leak
+    expect(out['json']).to eq('{}')
+  end
+
+  it 'errors a face built with an invalid descriptor at construction, rejecting loaded without load()' do
+    s = session
+    # Chrome errors it synchronously: status 'error' at once, the bad value discarded, and
+    # `loaded` already rejected whether or not `load()` is called.
+    s.execute_script("window.__r = []; window.__st = null; window.__av = null; var f = new FontFace('Bad', 'url(/ahem.ttf)', { ascentOverride: '-50%' }); __st = f.status; __av = f.ascentOverride; f.loaded.then(function () { __r.push('ok'); }, function (e) { __r.push(e.name); });")
+    expect(s.evaluate_script('window.__st')).to eq('error')
+    expect(s.evaluate_script('window.__av')).to eq('normal')                  # the invalid value is discarded
+    Timeout.timeout(5) { sleep 0.05 until s.evaluate_script('window.__r.length >= 1') }
+    expect(s.evaluate_script('window.__r')).to eq(['SyntaxError'])            # loaded rejected, no load() call
   end
 
   # ── the worker scope ──
