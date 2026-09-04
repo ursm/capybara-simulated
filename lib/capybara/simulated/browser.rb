@@ -7597,6 +7597,11 @@ module Capybara
       # back to the mean.
       private def build_font_advance_table(family, weight_style)
         file = font_file_for_family(family, weight_style) or return nil
+        font_table_from_file(file)
+      end
+      # The table `__csim_fontAdvances` hands the flow, from one font FILE: printable-ASCII
+      # advances as em fractions, their mean, the x-height and the hhea line metrics.
+      private def font_table_from_file(file)
         g = font_glyph_data(file) or return nil
         upm = g[:upm].to_f
         return nil unless upm.positive?
@@ -8116,17 +8121,34 @@ module Capybara
       # the bytes through the Rack app (binary-safe) once and caching the temp path for
       # the process. Returns nil when the fetch fails.
       def font_file_for(url)
+        font_file_and_meta_for(url).first
+      end
+
+      # `[path, meta]`: the face's file on disk (nil when it could not be fetched or read) and
+      # the facts of the fetch that brought it (`resource_timing_meta`); a cross-visit cache hit
+      # reports the same facts as served from the cache (Chrome files a cached font with
+      # `transferSize` 0).
+      def font_file_and_meta_for(url)
         key = resolve_against_current(url.to_s)
-        return nil unless key.is_a?(String)
-        @@font_file_lock.synchronize { return @@font_file_cache[key] if @@font_file_cache.key?(key) }
+        return [nil, nil] unless key.is_a?(String)
+        @@font_file_lock.synchronize do
+          if @@font_file_cache.key?(key)
+            path, meta = @@font_file_cache[key]
+            return [path, meta && meta.merge('cached' => 'cache')]
+          end
+        end
+        Thread.current[:csim_font_meta] = nil
         path = build_font_file(key)
-        @@font_file_lock.synchronize { @@font_file_cache[key] = path }
-        path
+        meta = Thread.current[:csim_font_meta]
+        @@font_file_lock.synchronize { @@font_file_cache[key] = [path, meta] }
+        [path, meta]
       end
 
       private def build_font_file(key)
         bytes = font_source_bytes(key)
         return nil unless bytes && !bytes.empty?
+        bytes = woff_to_sfnt(bytes)
+        return nil unless bytes
         require 'tempfile'
         # Keep the Tempfile object alive for the process so its file isn't reaped while
         # fontconfig may still read it; the cache holds the path.
@@ -8149,10 +8171,49 @@ module Capybara
           bytes.empty? ? nil : bytes
         elsif key.match?(%r{\Ahttps?://}i)
           result = rack_fetch('GET', key, '', {}, 'follow', body_raw: true)
+          # The fetch's facts for the font's Resource Timing entry (read back by the caller
+          # on this thread), a 404 included.
+          Thread.current[:csim_font_meta] = result && resource_timing_meta(result)
           return nil unless result && result['status'].to_i < 400
           bytes = result['body_raw'].to_s
           bytes.empty? ? nil : bytes
         end
+      end
+
+      # A WOFF (1.0) container holds the SFNT tables zlib-compressed one by one; the metrics
+      # parser and pango want the plain SFNT, so it is rebuilt here (RFC-like layout: a 44-byte
+      # header, 20-byte table entries). A WOFF2 (Brotli) file is left as is — no decoder on the
+      # host — so its face is fetched but measured with the fallback family.
+      def woff_to_sfnt(bytes)
+        return bytes unless bytes.bytesize > 44 && bytes[0, 4] == 'wOFF'
+        flavor, _len, num = bytes[4, 10].unpack('a4Nn')   # flavor @4, length @8, numTables @12
+        entries = (0...num).map {|i|
+          tag, off, comp, orig, csum = bytes[44 + i * 20, 20].unpack('a4NNNN')
+          data = bytes[off, comp].to_s
+          data = Zlib::Inflate.inflate(data) if comp < orig
+          [tag, csum, data]
+        }
+        entry_selector = (Math.log2(num)).floor
+        search_range   = (2**entry_selector) * 16
+        out = [flavor, num, search_range, entry_selector, num * 16 - search_range].pack('a4nnnn')
+        offset = 12 + num * 16
+        dir = +''
+        body = +''
+        entries.each do |tag, csum, data|
+          dir << [tag, csum, offset + body.bytesize, data.bytesize].pack('a4NNN')
+          body << data << ("\0" * ((4 - data.bytesize % 4) % 4))
+        end
+        (out << dir << body).b
+      rescue Zlib::Error
+        nil
+      end
+
+      # The advance table of a downloaded face (an `@font-face` src), fetched through the
+      # HTTP layer like any resource, with the fetch's facts for its Resource Timing entry.
+      # `table` is nil when the file is no SFNT the parser reads (WOFF2, a 404, a broken file).
+      def font_advance_table_from_url(url)
+        file, meta = font_file_and_meta_for(url)
+        {'table' => file ? font_table_from_file(file) : nil, 'meta' => meta}
       end
 
       def reset_workers

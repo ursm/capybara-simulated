@@ -55,6 +55,7 @@ const TREES = [
                                        // test used it incidentally, and passed by accident).
   'hr-time',                           // DOMHighResTimeStamp: performance.now() resolution +
   'resource-timing',                   // PerformanceResourceTiming — one entry per fetched resource (fetch /
+  'css/css-font-loading',              // FontFace / FontFaceSet: CSS-connected faces, load(), ready, events
                                        // XHR / <link> / <script> / <img> …), sizes, initiatorType, the buffer
                                        // monotonicity + timeOrigin — the gate for the sub-ms clock
   'FileAPI',                           // Blob / File / FileReader / createObjectURL — data API, no layout
