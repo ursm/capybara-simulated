@@ -8137,10 +8137,17 @@ module Capybara
             return [path, meta && meta.merge('cached' => 'cache')]
           end
         end
+        if (failed = (@font_file_failed ||= {})[key])
+          return [nil, failed]
+        end
         Thread.current[:csim_font_meta] = nil
         path = build_font_file(key)
         meta = Thread.current[:csim_font_meta]
-        @@font_file_lock.synchronize { @@font_file_cache[key] = [path, meta] }
+        if path
+          @@font_file_lock.synchronize { @@font_file_cache[key] = [path, meta] }
+        else
+          @font_file_failed[key] = meta          # remembered for THIS session only
+        end
         [path, meta]
       end
 
@@ -8170,7 +8177,10 @@ module Capybara
           bytes = decode_data_url_body(key)
           bytes.empty? ? nil : bytes
         elsif key.match?(%r{\Ahttps?://}i)
-          result = rack_fetch('GET', key, '', {}, 'follow', body_raw: true)
+          # A font is a CORS fetch (CSS Fonts 4 §4.9.1): a cross-origin face without
+          # `Access-Control-Allow-Origin` fails, as in Chrome.
+          result = rack_fetch('GET', key, '', {}, 'follow', 'cors', credentials: 'same-origin',
+                              client_url: @current_url, referrer: @current_url, body_raw: true)
           # The fetch's facts for the font's Resource Timing entry (read back by the caller
           # on this thread), a 404 included.
           Thread.current[:csim_font_meta] = result && resource_timing_meta(result)
@@ -8187,8 +8197,10 @@ module Capybara
       def woff_to_sfnt(bytes)
         return bytes unless bytes.bytesize > 44 && bytes[0, 4] == 'wOFF'
         flavor, _len, num = bytes[4, 10].unpack('a4Nn')   # flavor @4, length @8, numTables @12
+        return nil unless num.positive? && bytes.bytesize >= 44 + num * 20
         entries = (0...num).map {|i|
           tag, off, comp, orig, csum = bytes[44 + i * 20, 20].unpack('a4NNNN')
+          return nil if off + comp > bytes.bytesize
           data = bytes[off, comp].to_s
           data = Zlib::Inflate.inflate(data) if comp < orig
           [tag, csum, data]
@@ -8204,7 +8216,7 @@ module Capybara
           body << data << ("\0" * ((4 - data.bytesize % 4) % 4))
         end
         (out << dir << body).b
-      rescue Zlib::Error
+      rescue StandardError
         nil
       end
 
@@ -8213,7 +8225,26 @@ module Capybara
       # `table` is nil when the file is no SFNT the parser reads (WOFF2, a 404, a broken file).
       def font_advance_table_from_url(url)
         file, meta = font_file_and_meta_for(url)
-        {'table' => file ? font_table_from_file(file) : nil, 'meta' => meta}
+        # `ok`: bytes arrived (a data: face has no fetch facts; a WOFF2 one no table) — what
+        # a face's `status` follows.
+        {'table' => file ? font_table_from_file(file) : nil, 'meta' => meta,
+         'ok'    => !file.nil? || (meta && meta['status'].to_i.between?(200, 399)) == true}
+      end
+
+      # A face's own bytes (a `FontFace` built from a buffer, a `blob:` src): parsed like a
+      # downloaded file; `ok` is false when they are no font the parser reads.
+      def font_advance_table_from_bytes(b64)
+        bytes = Base64.decode64(b64.to_s)
+        sfnt  = woff_to_sfnt(bytes)
+        return {'table' => nil, 'ok' => false} if sfnt.nil? || sfnt.bytesize < 12
+        require 'tempfile'
+        file = Tempfile.new(['csim-font', '.bin'])
+        file.binmode
+        file.write(sfnt)
+        file.flush
+        @@font_file_lock.synchronize { @@font_files << file }
+        table = font_table_from_file(file.path)
+        {'table' => table, 'ok' => !table.nil?}
       end
 
       def reset_workers

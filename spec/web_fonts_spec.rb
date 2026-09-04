@@ -41,6 +41,33 @@ RSpec.describe 'web fonts' do
       when '/ahem.ttf'  then [200, {'content-type' => 'font/ttf'}, [AHEM]]
       when '/ahem.woff' then [200, {'content-type' => 'font/woff'}, [woff_of(AHEM)]]
       when '/missing.ttf' then [404, {'content-type' => 'text/plain'}, ['no']]
+      when '/css/rel.css' then [200, {'content-type' => 'text/css'}, ['@font-face { font-family: Rel; src: url(ahem.ttf); }']]
+      when '/css/ahem.ttf' then [200, {'content-type' => 'font/ttf'}, [AHEM]]
+      when '/css/imp.css' then [200, {'content-type' => 'text/css'}, ['@font-face { font-family: Imp; src: url("ahem.ttf"); }']]
+      when '/nested.html'
+        [200, {'content-type' => 'text/html'}, [<<~HTML]]
+          <!DOCTYPE html><html><head>
+            <link rel="stylesheet" href="/css/rel.css">
+            <style>
+              body { margin: 0; font: 20px monospace }
+              @import url("/css/imp.css");
+              @media screen { @font-face { font-family: InMedia; src: url("/ahem.ttf"); } }
+              @supports (display: block) { @font-face { font-family: InSupports; src: url("/ahem.ttf"); } }
+              @font-face { font-family: Bold; src: url("/ahem.ttf"); font-weight: bold; }
+              @font-face { font-family: Bold; src: url("/missing.ttf"); font-weight: normal; }
+            </style>
+            <style media="print">@font-face { font-family: Print; src: url("/ahem.ttf"); }</style>
+            <link rel="alternate stylesheet" title="alt" href="/css/imp.css">
+          </head><body>
+            <span id="rel" style="font-family: Rel">abcd</span>
+            <span id="imp" style="font-family: Imp">abcd</span>
+            <span id="media" style="font-family: InMedia">abcd</span>
+            <span id="sup" style="font-family: InSupports">abcd</span>
+            <span id="print" style="font-family: Print">abcd</span>
+            <span id="bold" style="font-family: Bold; font-weight: bold">abcd</span>
+            <span id="regular" style="font-family: Bold">abcd</span>
+          </body></html>
+        HTML
       else
         [200, {'content-type' => 'text/html'}, [<<~HTML]]
           <!DOCTYPE html><html><head><style>
@@ -61,9 +88,9 @@ RSpec.describe 'web fonts' do
     }
   end
 
-  def session
+  def session(path = '/')
     s = simulated_session(app)
-    s.visit 'http://www.example.com/'
+    s.visit "http://www.example.com#{path}"
     s
   end
 
@@ -143,6 +170,84 @@ RSpec.describe 'web fonts' do
     s = session
     s.execute_script("document.fonts.add(new FontFace('Added', 'url(/ahem.ttf)')); var el = document.createElement('span'); el.id = 'added'; el.style.fontFamily = 'Added'; el.textContent = 'abcd'; document.body.appendChild(el);")
     expect(width(s, 'added')).to eq(80)
+  end
+
+  # ── which rules apply, and against what base ──
+  it 'resolves a src against the stylesheet that declares it' do
+    s = session('/nested.html')
+    expect(width(s, 'rel')).to eq(80)
+    names = s.evaluate_script("performance.getEntriesByType('resource').filter(function (e) { return e.initiatorType === 'css'; }).map(function (e) { return e.name.replace('http://www.example.com', ''); })")
+    expect(names).to include('/css/ahem.ttf')
+  end
+
+  it 'sees faces inside @import, @media and @supports, and not those of a print or alternate sheet' do
+    s = session('/nested.html')
+    expect([width(s, 'imp'), width(s, 'media'), width(s, 'sup')]).to eq([80, 80, 80])
+    expect(width(s, 'print')).not_to eq(80)
+    families = s.evaluate_script("Array.from(document.fonts).map(function (f) { return f.family; })")
+    expect(families).to include('Rel', 'Imp', 'InMedia', 'InSupports')
+    expect(families).not_to include('Print')
+    expect(families.count('Imp')).to eq(1)                                # the alternate sheet's copy is off
+  end
+
+  it 'picks the face by weight' do
+    s = session('/nested.html')
+    expect(width(s, 'bold')).to eq(80)
+    expect(width(s, 'regular')).not_to eq(80)                                 # the normal-weight face 404s
+  end
+
+  it 'follows insertRule and deleteRule on an existing sheet' do
+    s = session
+    s.execute_script("var el = document.createElement('span'); el.id = 'ins'; el.style.fontFamily = 'Inserted'; el.textContent = 'abcd'; document.body.appendChild(el);")
+    expect(width(s, 'ins')).not_to eq(80)
+    s.execute_script("document.styleSheets[0].insertRule('@font-face { font-family: Inserted; src: url(/ahem.ttf); }', 0)")
+    expect(width(s, 'ins')).to eq(80)
+    s.execute_script("document.styleSheets[0].deleteRule(0)")
+    expect(width(s, 'ins')).not_to eq(80)
+  end
+
+  it 'lays text out again when a face is added to the set and loaded' do
+    s = session
+    s.execute_script("var el = document.createElement('span'); el.id = 'late'; el.style.fontFamily = 'Late'; el.textContent = 'abcd'; document.body.appendChild(el);")
+    expect(width(s, 'late')).not_to eq(80)
+    s.execute_script("var f = new FontFace('Late', 'url(/ahem.ttf)'); document.fonts.add(f); window.__ld = f.load();")
+    expect(width(s, 'late')).to eq(80)
+  end
+
+  it 'fails a cross-origin face the server does not share' do
+    s = session
+    s.execute_script("var st = document.createElement('style'); st.textContent = '@font-face { font-family: Xo; src: url(http://other.example.com/ahem.ttf); }'; document.head.appendChild(st); var el = document.createElement('span'); el.id = 'xo'; el.style.fontFamily = 'Xo'; el.textContent = 'abcd'; document.body.appendChild(el);")
+    expect(width(s, 'xo')).not_to eq(80)
+    expect(s.evaluate_script("Array.from(document.fonts).filter(function (f) { return f.family === 'Xo'; })[0].status")).to eq('error')
+  end
+
+  it 'loads a WOFF2 face without measuring with it' do
+    s = session
+    s.execute_script("var el = document.createElement('span'); el.id = 'w2'; el.style.fontFamily = 'OnlyWoff2'; el.textContent = 'abcd'; document.body.appendChild(el);")
+    expect(width(s, 'w2')).not_to eq(80)
+    expect(s.evaluate_script("Array.from(document.fonts).filter(function (f) { return f.family === 'OnlyWoff2'; })[0].status")).to eq('loaded')
+  end
+
+  it 'rejects a font shorthand it cannot parse' do
+    s = session
+    expect(s.evaluate_script("['12px inherit', 'MyAhem', '', '12px', 'var(--x) MyAhem', '12px initial'].map(function (f) { try { document.fonts.check(f); return 'ok'; } catch (e) { return e.name; } })")).to eq(%w[SyntaxError] * 6)
+    s.execute_script("window.__r = null; document.fonts.load('12px inherit').then(function () { __r = 'ok'; }, function (e) { __r = e.name; });")
+    expect(s.evaluate_script('__r')).to eq('SyntaxError')
+    expect(s.evaluate_script("[document.fonts.check('bold 16px MyAhem'), document.fonts.check('12px/1.5 \"MyAhem\", monospace')]")).to eq([true, true])
+  end
+
+  it 'builds a face from a buffer and measures with it' do
+    s = session
+    s.execute_script(<<~JS)
+      window.__b = [];
+      fetch('/ahem.ttf').then(function (r) { return r.arrayBuffer(); }).then(function (buf) {
+        var f = new FontFace('Buf', buf); document.fonts.add(f);
+        return f.loaded.then(function () { __b.push(f.status); var el = document.createElement('span'); el.id = 'buf'; el.style.fontFamily = 'Buf'; el.textContent = 'abcd'; document.body.appendChild(el); });
+      });
+      var bad = new FontFace('Bad', new ArrayBuffer(10)); bad.loaded.catch(function (e) { __b.push(e.name); });
+    JS
+    expect(s.evaluate_script('__b')).to match_array(%w[loaded SyntaxError])
+    expect(width(s, 'buf')).to eq(80)
   end
 
   it 'picks up an @font-face a later stylesheet declares' do
