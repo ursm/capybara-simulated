@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require 'base64'
+require 'brotli'
 require 'date'
 require 'digest'
 require 'fileutils'
@@ -8191,32 +8192,143 @@ module Capybara
         end
       end
 
-      # A WOFF (1.0) container holds the SFNT tables zlib-compressed one by one; the metrics
-      # parser and pango want the plain SFNT, so it is rebuilt here (RFC-like layout: a 44-byte
-      # header, 20-byte table entries). A WOFF2 (Brotli) file is left as is — no decoder on the
-      # host — so its face is fetched but measured with the fallback family.
+      # A WOFF container holds an SFNT's tables compressed; the metrics parser and pango want the
+      # plain SFNT, so it is rebuilt here. WOFF 1.0 (`wOFF`) zlib-inflates each table on its own;
+      # WOFF 2.0 (`wOF2`) Brotli-decompresses all of them as one stream and drops the glyf/loca
+      # GLYPH transform (which measurement doesn't need). Anything else is already an SFNT and is
+      # returned unchanged; nil means "not a font we can rebuild" and the face measures with the
+      # fallback family, as a WOFF2 file did before there was a decoder.
       def woff_to_sfnt(bytes)
-        return bytes unless bytes.bytesize > 44 && bytes[0, 4] == 'wOFF'
+        # Every parse below advances a byte cursor with `getbyte` but slices with `String#[]`,
+        # which counts CHARACTERS — so a font body that arrived tagged UTF-8 (a Rack app that did
+        # not mark its font response binary) would misalign the moment a high byte before an offset
+        # formed a valid multibyte sequence. Force binary once, at the door.
+        bytes = bytes.b
+        return woff1_to_sfnt(bytes) if bytes.bytesize > 44 && bytes[0, 4] == 'wOFF'
+        return woff2_to_sfnt(bytes) if bytes.bytesize > 48 && bytes[0, 4] == 'wOF2'
+        bytes
+      end
+
+      private def woff1_to_sfnt(bytes)
         flavor, _len, num = bytes[4, 10].unpack('a4Nn')   # flavor @4, length @8, numTables @12
         return nil unless num.positive? && bytes.bytesize >= 44 + num * 20
         entries = (0...num).map {|i|
-          tag, off, comp, orig, csum = bytes[44 + i * 20, 20].unpack('a4NNNN')
+          tag, off, comp, orig = bytes[44 + i * 20, 20].unpack('a4NNN')   # csum @16 recomputed on assembly
           return nil if off + comp > bytes.bytesize
           data = bytes[off, comp].to_s
           data = Zlib::Inflate.inflate(data) if comp < orig
-          [tag, csum, data]
+          [tag, data]
         }
-        entry_selector = (Math.log2(num)).floor
+        assemble_sfnt(flavor, entries)
+      rescue StandardError
+        nil
+      end
+
+      # WOFF 2.0: the 48-byte header, a compact table directory (a flags byte, an optional tag,
+      # then UIntBase128 lengths), and a single Brotli stream holding every table's data in
+      # directory order. A `glyf` / `loca` pair is stored in a transformed GLYPH representation
+      # (its outlines), which the metrics tables — `head` / `hhea` / `hmtx` / `cmap` / `maxp` /
+      # `OS/2`, none of which an encoder transforms — don't depend on, so the transformed tables
+      # are skipped and the rest assembled into a metrics-faithful SFNT. `ttcf` collections and a
+      # transformed metric table (a rare `hmtx` transform) fall through to the fallback family.
+      WOFF2_KNOWN_TAGS = %w[
+        cmap head hhea hmtx maxp name OS/2 post cvt\  fpgm glyf loca prep CFF\  VORG EBDT EBLC gasp
+        hdmx kern LTSH PCLT VDMX vhea vmtx BASE GDEF GPOS GSUB EBSC JSTF MATH CBDT CBLC COLR CPAL
+        SVG\  sbix acnt avar bdat bloc bsln cvar fdsc feat fmtx fvar gcid hsty just lcar mort morx
+        opbd prop trak Zapf Silf Glat Gloc Feat Sill
+      ].freeze
+      private def woff2_to_sfnt(bytes)
+        flavor = bytes[4, 4]
+        return nil if flavor == 'ttcf'                    # font collections: not rebuilt
+        num, total_comp = bytes[12, 2].unpack1('n'), bytes[20, 4].unpack1('N')
+        return nil unless num.positive?
+        i = 48
+        tables = []
+        num.times do
+          return nil if i >= bytes.bytesize
+          flags = bytes.getbyte(i); i += 1
+          idx = flags & 0x3f
+          if idx == 0x3f                                  # 63: an arbitrary 4-byte tag follows
+            tag = bytes[i, 4]; i += 4
+          else
+            tag = WOFF2_KNOWN_TAGS[idx] or return nil
+          end
+          orig, i = uint_base128(bytes, i)
+          return nil unless orig
+          transformed = (tag == 'glyf' || tag == 'loca') ? ((flags >> 6).zero?) : ((flags >> 6) != 0)
+          len = orig
+          if transformed
+            len, i = uint_base128(bytes, i)
+            return nil unless len
+          end
+          tables << [tag, len, transformed]
+        end
+        comp = bytes[i, total_comp]
+        return nil unless comp && comp.bytesize == total_comp
+        data = brotli_decompress(comp) or return nil
+        # Slice each table out of the decompressed stream (directory order), keeping only the ones
+        # stored untransformed — the transformed glyf/loca occupy their bytes in the stream but are
+        # glyph outlines, not metrics.
+        off = 0
+        entries = []
+        tables.each do |tag, len, transformed|
+          entries << [tag, data[off, len]] unless transformed
+          off += len
+        end
+        return nil if off > data.bytesize || entries.empty?
+        assemble_sfnt(flavor, entries)
+      rescue StandardError
+        nil
+      end
+
+      # A UIntBase128 (WOFF2 §4.4): up to five 7-bit groups, most significant first, the top bit a
+      # continuation flag. Returns `[value, next_index]`, or `[nil, i]` on a malformed encoding (a
+      # leading `0x80`, over five bytes, or a value past 2³²−1) so the caller bails to the fallback.
+      private def uint_base128(bytes, i)
+        v = 0
+        5.times do |n|
+          return [nil, i] if i >= bytes.bytesize
+          b = bytes.getbyte(i); i += 1
+          return [nil, i] if n.zero? && b == 0x80        # no leading zero group
+          return [nil, i] if v > 0x01ff_ffff             # would overflow 32 bits after the shift
+          v = (v << 7) | (b & 0x7f)
+          return [v, i] if (b & 0x80).zero?
+        end
+        [nil, i]
+      end
+
+      # Assemble an SFNT from `[tag, data]` tables: the 12-byte offset table, a directory sorted by
+      # tag (spec order), then each table's data padded to a 4-byte boundary with a freshly summed
+      # table checksum. Shared by both WOFF rebuilders.
+      private def assemble_sfnt(flavor, entries)
+        entries = entries.map {|tag, data| [tag.to_s, data.to_s] }.sort_by {|tag, _| tag }
+        num = entries.size
+        entry_selector = Math.log2(num).floor
         search_range   = (2**entry_selector) * 16
-        out = [flavor, num, search_range, entry_selector, num * 16 - search_range].pack('a4nnnn')
+        out    = [flavor, num, search_range, entry_selector, num * 16 - search_range].pack('a4nnnn')
         offset = 12 + num * 16
-        dir = +''
+        dir  = +''
         body = +''
-        entries.each do |tag, csum, data|
-          dir << [tag, csum, offset + body.bytesize, data.bytesize].pack('a4NNN')
+        entries.each do |tag, data|
+          dir  << [tag, sfnt_table_checksum(data), offset + body.bytesize, data.bytesize].pack('a4NNN')
           body << data << ("\0" * ((4 - data.bytesize % 4) % 4))
         end
         (out << dir << body).b
+      end
+
+      # An SFNT table checksum: the sum of its 32-bit big-endian words (zero-padded to a 4-byte
+      # boundary), truncated to 32 bits.
+      private def sfnt_table_checksum(data)
+        padded = data + ("\0" * ((4 - data.bytesize % 4) % 4))
+        padded.unpack('N*').sum & 0xffff_ffff
+      end
+
+      # Brotli-decompress a raw stream (a WOFF2 font block) with the `brotli` gem (in-process, its
+      # own vendored C library). A decode error yields nil, so a malformed face falls back to the
+      # substitute family rather than crashing.
+      private def brotli_decompress(data)
+        out = Brotli.inflate(data)
+        out && out.b
       rescue StandardError
         nil
       end
@@ -8226,17 +8338,17 @@ module Capybara
       # `table` is nil when the file is no SFNT the parser reads (WOFF2, a 404, a broken file).
       def font_advance_table_from_url(url)
         file, meta = font_file_and_meta_for(url)
-        # `ok`: bytes arrived (a data: face has no fetch facts; a WOFF2 one no table) — what
+        # `ok`: bytes arrived (a data: face has no fetch facts; an unreadable container no
         # a face's `status` follows.
         {'table' => file ? font_table_from_file(file) : nil, 'meta' => meta,
          'ok'    => !file.nil? || (meta && meta['status'].to_i.between?(200, 399)) == true}
       end
 
       # A face's own bytes (a `FontFace` built from a buffer, a `blob:` src): parsed like a
-      # downloaded file. `ok` is whether the bytes are a recognised font container (a WOFF2 or
-      # OpenType-CFF buffer loads even though the metrics parser reads no table from it, as a
-      # WOFF2 url does — measured with the fallback family). Content-addressed so identical
-      # bytes reuse one temp file, not one per call.
+      # downloaded file. `ok` is whether the bytes are a recognised font container (an
+      # OpenType-CFF buffer loads even though the metrics parser reads no glyf/loca table from
+      # it, so it measures with the fallback family). Content-addressed so identical bytes reuse
+      # one temp file, not one per call.
       FONT_MAGIC = ["\x00\x01\x00\x00".b, 'OTTO'.b, 'true'.b, 'ttcf'.b, 'wOFF'.b, 'wOF2'.b].freeze
       def font_advance_table_from_bytes(b64)
         bytes = Base64.decode64(b64.to_s)
