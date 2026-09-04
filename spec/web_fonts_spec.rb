@@ -3,6 +3,7 @@
 require 'capybara/simulated'
 require 'zlib'
 require_relative 'support/session_teardown'
+require_relative 'support/js_engine'
 
 # Web fonts: a family the document declares an `@font-face` for is FETCHED the first time text
 # needs it (Chrome loads a web font on first use) and measured with the downloaded file's own
@@ -263,6 +264,33 @@ RSpec.describe 'web fonts' do
     JS
     expect(s.evaluate_script('__b')).to match_array(%w[loaded SyntaxError])
     expect(width(s, 'buf')).to eq(80)
+  end
+
+  # ── the worker scope ──
+  it 'exposes self.fonts in a worker and rejects a css-wide keyword as a DOMException' do
+    skip 'worker microtask delivery under the rspec poll needs the V8 engine' unless CsimEngine.v8?
+    s = session
+    # The worker checks `instanceof DOMException` itself and reports a string.
+    s.execute_script(<<~JS)
+      window.__w = [];
+      var blob = new Blob(["self.postMessage(typeof self.fonts); self.fonts.load('inherit').then(function () { self.postMessage('ok'); }, function (e) { self.postMessage((e instanceof DOMException ? 'DOMException:' : typeof e + ':') + (e && e.name)); });"]);
+      var w = new Worker(URL.createObjectURL(blob));
+      w.onmessage = function (m) { __w.push(m.data); };
+    JS
+    Timeout.timeout(5) { sleep 0.05 until s.evaluate_script('window.__w.length >= 2') }
+    expect(s.evaluate_script('window.__w')).to eq(['object', 'DOMException:SyntaxError'])
+  end
+
+  it 'clones a DOMException a worker posts back as a real DOMException' do
+    s = session
+    s.execute_script(<<~JS)
+      window.__d = null;
+      var blob = new Blob(["self.postMessage(new DOMException('boom', 'DataCloneError'));"]);
+      var w = new Worker(URL.createObjectURL(blob));
+      w.onmessage = function (m) { __d = [m.data instanceof DOMException, m.data.name, m.data.message]; };
+    JS
+    Timeout.timeout(5) { sleep 0.05 until s.evaluate_script('window.__d') }
+    expect(s.evaluate_script('window.__d')).to eq([true, 'DataCloneError', 'boom'])
   end
 
   it 'picks up an @font-face a later stylesheet declares' do
