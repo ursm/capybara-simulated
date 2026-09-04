@@ -1256,16 +1256,6 @@ css/css-font-loading/fontface-font-variation-settings-persisted-js-api.html:
 - Test FontFace variationSettings property
 css/css-font-loading/fontface-from-arraybuffer.html:
 - "== css/css-font-loading/fontface-from-arraybuffer-ref.html"
-css/css-font-loading/fontface-override-descriptor-getter-setter.sub.html:
-- Changing ascentOverride to invalid value should fail
-- Changing descentOverride to invalid value should fail
-- Changing lineGapOverride to invalid value should fail
-- Initialize ascentOverride with a negative percentage should fail
-- Initialize ascentOverride with a non-percentage should fail
-- Initialize descentOverride with a negative percentage should fail
-- Initialize descentOverride with a non-percentage should fail
-- Initialize lineGapOverride with a negative percentage should fail
-- Initialize lineGapOverride with a non-percentage should fail
 css/css-font-loading/fontface-override-descriptors.html:
 - "== css/css-font-loading/fontface-override-descriptors-ref.html"
 css/css-font-loading/fontface-size-adjust-descriptor.html:
