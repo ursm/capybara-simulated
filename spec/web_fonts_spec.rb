@@ -281,6 +281,19 @@ RSpec.describe 'web fonts' do
     expect(s.evaluate_script('window.__w')).to eq(['object', 'DOMException:SyntaxError'])
   end
 
+  it 'loads a face on demand inside a worker' do
+    skip 'worker microtask delivery under the rspec poll needs the V8 engine' unless CsimEngine.v8?
+    s = session
+    s.execute_script(<<~JS)
+      window.__w = null;
+      var blob = new Blob(["var f = new FontFace('W', 'url(/ahem.ttf)'); self.fonts.add(f); f.load().then(function (x) { self.postMessage('loaded:' + x.status); }, function (e) { self.postMessage('rej:' + e.name); });"]);
+      var w = new Worker(URL.createObjectURL(blob));
+      w.onmessage = function (m) { __w = m.data; };
+    JS
+    Timeout.timeout(5) { sleep 0.05 until s.evaluate_script('window.__w') }
+    expect(s.evaluate_script('window.__w')).to eq('loaded:loaded')            # the fetch settles the face
+  end
+
   it 'clones a DOMException a worker posts back as a real DOMException' do
     s = session
     s.execute_script(<<~JS)
@@ -291,6 +304,21 @@ RSpec.describe 'web fonts' do
     JS
     Timeout.timeout(5) { sleep 0.05 until s.evaluate_script('window.__d') }
     expect(s.evaluate_script('window.__d')).to eq([true, 'DataCloneError', 'boom'])
+  end
+
+  it 'clones an Error subtype a worker posts back, by its name, with stack and cause' do
+    s = session
+    s.execute_script(<<~JS)
+      window.__e = null;
+      var blob = new Blob(["var e = new TypeError('t'); e.stack = 'SX'; e.cause = {c: 1}; self.postMessage(e); var r = new Error('x'); r.name = 'RangeError'; self.postMessage(r);"]);
+      var w = new Worker(URL.createObjectURL(blob));
+      window.__all = [];
+      w.onmessage = function (m) { __all.push([m.data instanceof TypeError, m.data.constructor.name, m.data.stack, m.data.cause && m.data.cause.c]); };
+    JS
+    Timeout.timeout(5) { sleep 0.05 until s.evaluate_script('window.__all.length >= 2') }
+    all = s.evaluate_script('window.__all')
+    expect(all[0]).to eq([true, 'TypeError', 'SX', 1])                        # subtype by name, stack + cause kept
+    expect(all[1][1]).to eq('RangeError')                                     # a standard .name selects the subtype
   end
 
   it 'picks up an @font-face a later stylesheet declares' do
