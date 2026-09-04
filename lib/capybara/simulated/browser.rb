@@ -3582,6 +3582,7 @@ module Capybara
       @@font_file_cache      = {}
       @@font_file_lock       = Mutex.new
       @@font_files           = []   # pins the Tempfiles for the PROCESS (the cache is cross-visit)
+      @@local_font_cache     = {}   # `local(<name>)` resolution — installed fonts don't change per process
 
       # Empty the process-wide HTTP cache: the RFC 9111 store behind `rack_fetch` plus
       # the URL-keyed memos layered on it — script / stylesheet source, @font-face
@@ -8342,6 +8343,22 @@ module Capybara
         # a face's `status` follows.
         {'table' => file ? font_table_from_file(file) : nil, 'meta' => meta,
          'ok'    => !file.nil? || (meta && meta['status'].to_i.between?(200, 399)) == true}
+      end
+
+      # A `local(<name>)` `@font-face` source: the advance table of the font INSTALLED under that
+      # name, or `ok: false` when this machine has no such font (fontconfig SUBSTITUTES silently, so
+      # `resolved_family_file` — the same exact-match test the family stack uses — is what tells a
+      # real installed face from a fallback). A face whose every `local()` misses and that has no
+      # readable `url()` then fails, as a browser rejects a UA font load it cannot satisfy.
+      def local_font_table(name, weight_style = '')
+        key = "#{name} #{weight_style}"
+        @@font_file_lock.synchronize do
+          return @@local_font_cache[key] if @@local_font_cache.key?(key)
+        end
+        file   = resolved_family_file(name.to_s, weight_style.to_s)
+        result = file ? {'table' => font_table_from_file(file), 'ok' => true} : {'table' => nil, 'ok' => false}
+        @@font_file_lock.synchronize { @@local_font_cache[key] = result }
+        result
       end
 
       # A face's own bytes (a `FontFace` built from a buffer, a `blob:` src): parsed like a
