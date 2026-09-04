@@ -89,6 +89,7 @@ RSpec.describe 'web fonts' do
             @font-face { font-family: Combined; src: url("/ahem.ttf"); size-adjust: 200%; ascent-override: 100%; }
             @font-face { font-family: Scoped; src: url("/ahem.ttf"); size-adjust: 200%; unicode-range: U+41-5A; }
             @font-face { font-family: ScopedBase; src: url("/ahem.ttf"); }
+            @font-face { font-family: Low; src: url("/ahem.ttf"); unicode-range: U+61-7A; }
           </style></head><body>
             <span id="t" style="font-family: MyAhem">abcd</span>
             <span id="w" style="font-family: WoffAhem">abcd</span>
@@ -139,7 +140,7 @@ RSpec.describe 'web fonts' do
     s = session
     faces = s.evaluate_script("Array.from(document.fonts).map(function (f) { return [f.family, f.status]; })")
     expect(faces).to include(['MyAhem', 'loaded'], ['WoffAhem', 'loaded'], ['Gone', 'unloaded'])
-    expect(s.evaluate_script("[document.fonts.size, document.fonts.check('12px MyAhem'), document.fonts.check('12px Gone'), document.fonts.check('12px monospace')]")).to eq([10, true, false, true])
+    expect(s.evaluate_script("[document.fonts.size, document.fonts.check('12px MyAhem'), document.fonts.check('12px Gone'), document.fonts.check('12px monospace')]")).to eq([11, true, false, true])
     expect(s.evaluate_script("Object.prototype.toString.call(document.fonts)")).to eq('[object FontFaceSet]')
   end
 
@@ -326,6 +327,33 @@ RSpec.describe 'web fonts' do
     s.execute_script("var mk = function (t) { var e = document.createElement('span'); e.style.cssText = 'display: inline-block; font: 20px Scoped'; e.textContent = t; document.body.appendChild(e); return e.getBoundingClientRect().width; }; window.__wUp = mk('AB'); window.__wMix = mk('Ab');")
     expect(s.evaluate_script('window.__wUp')).to eq(80)                     # A and B both covered → 40 + 40
     expect(s.evaluate_script('window.__wMix')).to be < 80                   # b uncovered → system font, not the doubled face
+  end
+
+  it 'grows the line box to a taller non-primary face' do
+    # Stack `Low, Scoped`: the lowercase `a` takes `Low` (the 20px primary), the uppercase `B` the
+    # A–Z-scoped size-adjust:200% `Scoped` (40px) — which is NOT the primary. The line box must
+    # still grow to the 40px face, as Chrome raises a line for its tallest glyph.
+    s = session
+    s.execute_script("var e = document.createElement('div'); e.id = 'np'; e.style.cssText = 'display: inline-block; font: 20px Low, Scoped'; e.textContent = 'aB'; document.body.appendChild(e);")
+    r = s.evaluate_script("var b = document.getElementById('np').getBoundingClientRect(); [b.width, b.height]")
+    expect(r).to eq([60, 40])                                              # a(20) + B(40) wide; line box 40 tall
+  end
+
+  it 'fits both the deepest ascent and the deepest descent when they come from different faces' do
+    # Two scoped faces with ASYMMETRIC overrides: `A` is all ascent (2em up, 0 down) for U+41, `B`
+    # all descent (0 up, 3em down) for U+42. In "AB" the line must fit A's 40px ascent AND B's 60px
+    # descent — 100px — not collapse to one face's box (folding a combined height would clip B).
+    doc = <<~HTML
+      <!DOCTYPE html><html><head><style>
+        body { margin: 0 }
+        @font-face { font-family: AscOnly;  src: url(/ahem.ttf); ascent-override: 200%; descent-override: 0%;   unicode-range: U+41 }
+        @font-face { font-family: DescOnly; src: url(/ahem.ttf); ascent-override: 0%;   descent-override: 300%; unicode-range: U+42 }
+      </style></head><body><div id="ab" style="display: inline-block; font: 20px AscOnly, DescOnly">AB</div></body></html>
+    HTML
+    a = ->(env) { env['PATH_INFO'] == '/ahem.ttf' ? [200, {'content-type' => 'font/ttf'}, [AHEM]] : [200, {'content-type' => 'text/html'}, [doc]] }
+    s = simulated_session(a)
+    s.visit 'http://www.example.com/'
+    expect(s.evaluate_script("document.getElementById('ab').getBoundingClientRect().height")).to eq(100)
   end
 
   # ── descriptors ──
