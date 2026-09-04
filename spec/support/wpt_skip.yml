@@ -205,3 +205,9 @@
   `await_with_timeout` and the harness timeout then falls on a different image /
   script case per run (11 passed locally, 10 on CI). Rejoins the gate when web
   fonts load.
+"html/rendering/non-replaced-elements/phrasing-content-0/br-wbr-content/content-property.tentative.html": >-
+  Environment-dependent `.tentative` reftest: it renders Ahem text and pixel-compares it to a
+  black square. With web fonts the driver paints the real Ahem face, which matches the
+  reference on some rasterization stacks (local libvips/pango) and not others (CI) — so it can
+  be neither reliably in-scope nor allowlisted (the gate is symmetric). Skipped until the
+  tentative spec ratifies.
