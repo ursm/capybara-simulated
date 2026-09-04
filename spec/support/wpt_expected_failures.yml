@@ -935,20 +935,11 @@ css/css-flexbox/flex-basis-intrinsics-001.html:
 - ".flex-item 9"
 css/css-flexbox/flex-item-compressible-001.html:
 - ".flexbox 1"
-- ".flexbox 10"
 - ".flexbox 11"
 - ".flexbox 12"
-- ".flexbox 13"
-- ".flexbox 14"
-- ".flexbox 15"
 - ".flexbox 2"
-- ".flexbox 3"
-- ".flexbox 4"
-- ".flexbox 5"
 - ".flexbox 6"
 - ".flexbox 7"
-- ".flexbox 8"
-- ".flexbox 9"
 css/css-flexbox/flex-item-compressible-002.html:
 - ".flexbox 10"
 - ".flexbox 11"
@@ -1253,12 +1244,59 @@ css/css-flexbox/position-relative-stretch-height-001.html:
 - 'height: stretch inside stretched flex item, top: 50%'
 css/css-flexbox/relayout-input.html:
 - "#target 1"
-css/css-flexbox/text-as-flexitem-size-001.html:
-- ".flexbox > div 1"
-- ".flexbox > div 11"
-- ".flexbox > div 2"
-- ".flexbox > div 5"
-- ".flexbox > div 8"
+css/css-font-loading/font-face-reject.html:
+- font-face-reject
+css/css-font-loading/fontface-descriptor-updates-2.html:
+- Descriptor mutations before adding to FontFaceSet are correctly reflected
+- Font matching uses updated style and family name
+- FontFace descriptor mutations are reflected in FontFaceSet
+css/css-font-loading/fontface-descriptor-updates.html:
+- "== css/css-font-loading/fontface-descriptor-updates-ref.html"
+css/css-font-loading/fontface-font-variation-settings-persisted-js-api.html:
+- Test FontFace variationSettings property
+css/css-font-loading/fontface-from-arraybuffer.html:
+- "== css/css-font-loading/fontface-from-arraybuffer-ref.html"
+css/css-font-loading/fontface-override-descriptor-getter-setter.sub.html:
+- Changing ascentOverride to invalid value should fail
+- Changing descentOverride to invalid value should fail
+- Changing lineGapOverride to invalid value should fail
+- Initialize ascentOverride with a negative percentage should fail
+- Initialize ascentOverride with a non-percentage should fail
+- Initialize descentOverride with a negative percentage should fail
+- Initialize descentOverride with a non-percentage should fail
+- Initialize lineGapOverride with a negative percentage should fail
+- Initialize lineGapOverride with a non-percentage should fail
+css/css-font-loading/fontface-override-descriptors.html:
+- "== css/css-font-loading/fontface-override-descriptors-ref.html"
+css/css-font-loading/fontface-size-adjust-descriptor.html:
+- "== css/css-font-loading/fontface-size-adjust-descriptor-ref.html"
+css/css-font-loading/fontfaceset-load-css-wide-keywords.html:
+- Loading CSS-wide keyword "default" causes SyntaxError (document)
+- Loading CSS-wide keyword "default" causes SyntaxError (worker)
+- Loading CSS-wide keyword "inherit" causes SyntaxError (document)
+- Loading CSS-wide keyword "inherit" causes SyntaxError (worker)
+- Loading CSS-wide keyword "initial" causes SyntaxError (worker)
+- Loading CSS-wide keyword "revert" causes SyntaxError (document)
+- Loading CSS-wide keyword "revert" causes SyntaxError (worker)
+- Loading CSS-wide keyword "revert-layer" causes SyntaxError (document)
+- Loading CSS-wide keyword "revert-layer" causes SyntaxError (worker)
+- Loading CSS-wide keyword "unset" causes SyntaxError (document)
+- Loading CSS-wide keyword "unset" causes SyntaxError (worker)
+- Loading value with CSS-wide keyword "default" causes SyntaxError (document)
+- Loading value with CSS-wide keyword "default" causes SyntaxError (worker)
+- Loading value with CSS-wide keyword "inherit" causes SyntaxError (document)
+- Loading value with CSS-wide keyword "inherit" causes SyntaxError (worker)
+- Loading value with CSS-wide keyword "initial" causes SyntaxError (document)
+- Loading value with CSS-wide keyword "initial" causes SyntaxError (worker)
+- Loading value with CSS-wide keyword "revert" causes SyntaxError (document)
+- Loading value with CSS-wide keyword "revert" causes SyntaxError (worker)
+- Loading value with CSS-wide keyword "revert-layer" causes SyntaxError (document)
+- Loading value with CSS-wide keyword "revert-layer" causes SyntaxError (worker)
+- Loading value with CSS-wide keyword "unset" causes SyntaxError (document)
+- Loading value with CSS-wide keyword "unset" causes SyntaxError (worker)
+css/css-font-loading/fontfaceset-load-var.html:
+- Loading "var(--x) serif" causes SyntaxError (worker)
+- Loading "var(--x, 10px) serif" causes SyntaxError (worker)
 css/css-logical/animation-001.html:
 - Animations update when the writing-mode is changed through a CSS variable
 - Logical longhands win over physical shorthands
@@ -7789,11 +7827,6 @@ css/cssom/getComputedStyle-insets-fixed.html:
   to used value
 - vertical-rl rtl inside vertical-rl rtl - If opposite sides are 'auto', they resolve
   to used value
-css/cssom/getComputedStyle-insets-relpos-inline.html:
-- OOF with left auto right fixed in relpos inline container
-- OOF with left auto right fixed in relpos inline container with mixed directions
-- OOF with left fixed right auto in relpos inline container
-- OOF with left fixed right auto in relpos inline container with mixed directions
 css/cssom/getComputedStyle-pseudo-checkmark.html:
 - Resolution of width is correct for pseudo-element (due to double-colon)
 css/cssom/getComputedStyle-pseudo-picker-icon.html:
@@ -8848,6 +8881,21 @@ html/canvas/element/manual/text/canvas.2d.direction.inherit.disconnected.canvas.
 - "== html/canvas/element/manual/text/canvas.2d.direction-ref.html"
 html/canvas/element/manual/text/canvas.2d.disconnected.html:
 - "== html/canvas/element/manual/text/canvas.2d.disconnected-ref.html"
+html/canvas/element/manual/text/canvas.2d.lang.dynamic.html:
+- "== html/canvas/element/manual/text/canvas.2d.lang.dynamic-ref.html (never ready
+  to capture)"
+html/canvas/element/manual/text/canvas.2d.lang.empty.canvas.html:
+- "== html/canvas/element/manual/text/canvas.2d.lang.empty-ref.html (never ready to
+  capture)"
+html/canvas/element/manual/text/canvas.2d.lang.html:
+- "== html/canvas/element/manual/text/canvas.2d.lang-ref.html (never ready to capture)"
+html/canvas/element/manual/text/canvas.2d.lang.inherit.disconnected.canvas.html:
+- "== html/canvas/element/manual/text/canvas.2d.lang-ref.html (never ready to capture)"
+html/canvas/element/manual/text/canvas.2d.lang.inherit.disconnected.canvas.no.lang.html:
+- "== html/canvas/element/manual/text/canvas.2d.unknown.lang-ref.html (never ready
+  to capture)"
+html/canvas/element/manual/text/canvas.2d.lang.inherit.html:
+- "== html/canvas/element/manual/text/canvas.2d.lang-ref.html (never ready to capture)"
 html/canvas/element/manual/transformations/canvas_transformations_reset_001.html:
 - "== html/canvas/element/manual/transformations/canvas_transformations_reset_001-ref.html"
 html/canvas/element/manual/wide-gamut-canvas/canvas-display-p3-drawImage-ImageBitmap-Blob.html:
@@ -11035,127 +11083,6 @@ resource-timing/SO-XO-SO-redirect-chain-tao.https.html:
   redirects have `Timing-Allow-Origin:` headers with a specific origin.
 - Verify that cross origin resources' timings are not exposed when same-origin=>cross-origin=>same-origin
   redirects have no `Timing-Allow-Origin:` headers.
-resource-timing/TAO-match.html:
-- The timing allow check algorithm will fail when the Timing-Allow-Origin header is
-  not present. (XMLHttpRequest)
-- The timing allow check algorithm will fail when the Timing-Allow-Origin header is
-  not present. (font)
-- The timing allow check algorithm will fail when the Timing-Allow-Origin header is
-  not present. (iframe)
-- The timing allow check algorithm will fail when the Timing-Allow-Origin header is
-  not present. (image)
-- The timing allow check algorithm will fail when the Timing-Allow-Origin header is
-  not present. (script)
-- The timing allow check algorithm will fail when the Timing-Allow-Origin header is
-  not present. (stylesheet)
-- The timing allow check algorithm will fail when the Timing-Allow-Origin header value
-  contains only the uppercased origin. (XMLHttpRequest)
-- The timing allow check algorithm will fail when the Timing-Allow-Origin header value
-  contains only the uppercased origin. (font)
-- The timing allow check algorithm will fail when the Timing-Allow-Origin header value
-  contains only the uppercased origin. (iframe)
-- The timing allow check algorithm will fail when the Timing-Allow-Origin header value
-  contains only the uppercased origin. (image)
-- The timing allow check algorithm will fail when the Timing-Allow-Origin header value
-  contains only the uppercased origin. (script)
-- The timing allow check algorithm will fail when the Timing-Allow-Origin header value
-  contains only the uppercased origin. (stylesheet)
-- The timing allow check algorithm will fail when the Timing-Allow-Origin header value
-  contains the origin, a space, then a wildcard. (XMLHttpRequest)
-- The timing allow check algorithm will fail when the Timing-Allow-Origin header value
-  contains the origin, a space, then a wildcard. (font)
-- The timing allow check algorithm will fail when the Timing-Allow-Origin header value
-  contains the origin, a space, then a wildcard. (iframe)
-- The timing allow check algorithm will fail when the Timing-Allow-Origin header value
-  contains the origin, a space, then a wildcard. (image)
-- The timing allow check algorithm will fail when the Timing-Allow-Origin header value
-  contains the origin, a space, then a wildcard. (script)
-- The timing allow check algorithm will fail when the Timing-Allow-Origin header value
-  contains the origin, a space, then a wildcard. (stylesheet)
-- The timing allow check algorithm will fail when the Timing-Allow-Origin header value
-  list contains a null origin. (XMLHttpRequest)
-- The timing allow check algorithm will fail when the Timing-Allow-Origin header value
-  list contains a null origin. (font)
-- The timing allow check algorithm will fail when the Timing-Allow-Origin header value
-  list contains a null origin. (iframe)
-- The timing allow check algorithm will fail when the Timing-Allow-Origin header value
-  list contains a null origin. (image)
-- The timing allow check algorithm will fail when the Timing-Allow-Origin header value
-  list contains a null origin. (script)
-- The timing allow check algorithm will fail when the Timing-Allow-Origin header value
-  list contains a null origin. (stylesheet)
-- The timing allow check algorithm will pass when the Timing-Allow-Origin header value
-  contains only a wildcard. (XMLHttpRequest)
-- The timing allow check algorithm will pass when the Timing-Allow-Origin header value
-  contains only a wildcard. (font)
-- The timing allow check algorithm will pass when the Timing-Allow-Origin header value
-  contains only a wildcard. (iframe)
-- The timing allow check algorithm will pass when the Timing-Allow-Origin header value
-  contains only a wildcard. (image)
-- The timing allow check algorithm will pass when the Timing-Allow-Origin header value
-  contains only a wildcard. (script)
-- The timing allow check algorithm will pass when the Timing-Allow-Origin header value
-  contains only a wildcard. (stylesheet)
-- The timing allow check algorithm will pass when the Timing-Allow-Origin header value
-  contains only the origin. (XMLHttpRequest)
-- The timing allow check algorithm will pass when the Timing-Allow-Origin header value
-  contains only the origin. (font)
-- The timing allow check algorithm will pass when the Timing-Allow-Origin header value
-  contains only the origin. (iframe)
-- The timing allow check algorithm will pass when the Timing-Allow-Origin header value
-  contains only the origin. (image)
-- The timing allow check algorithm will pass when the Timing-Allow-Origin header value
-  contains only the origin. (script)
-- The timing allow check algorithm will pass when the Timing-Allow-Origin header value
-  contains only the origin. (stylesheet)
-- The timing allow check algorithm will pass when the Timing-Allow-Origin header value
-  list contains a case-sensitive match. (XMLHttpRequest)
-- The timing allow check algorithm will pass when the Timing-Allow-Origin header value
-  list contains a case-sensitive match. (font)
-- The timing allow check algorithm will pass when the Timing-Allow-Origin header value
-  list contains a case-sensitive match. (iframe)
-- The timing allow check algorithm will pass when the Timing-Allow-Origin header value
-  list contains a case-sensitive match. (image)
-- The timing allow check algorithm will pass when the Timing-Allow-Origin header value
-  list contains a case-sensitive match. (script)
-- The timing allow check algorithm will pass when the Timing-Allow-Origin header value
-  list contains a case-sensitive match. (stylesheet)
-- The timing allow check algorithm will pass when the Timing-Allow-Origin header value
-  list contains a wildcard. (XMLHttpRequest)
-- The timing allow check algorithm will pass when the Timing-Allow-Origin header value
-  list contains a wildcard. (font)
-- The timing allow check algorithm will pass when the Timing-Allow-Origin header value
-  list contains a wildcard. (iframe)
-- The timing allow check algorithm will pass when the Timing-Allow-Origin header value
-  list contains a wildcard. (image)
-- The timing allow check algorithm will pass when the Timing-Allow-Origin header value
-  list contains a wildcard. (script)
-- The timing allow check algorithm will pass when the Timing-Allow-Origin header value
-  list contains a wildcard. (stylesheet)
-- The timing allow check algorithm will pass when the Timing-Allow-Origin header value
-  list contains multiple wildcards. (XMLHttpRequest)
-- The timing allow check algorithm will pass when the Timing-Allow-Origin header value
-  list contains multiple wildcards. (font)
-- The timing allow check algorithm will pass when the Timing-Allow-Origin header value
-  list contains multiple wildcards. (iframe)
-- The timing allow check algorithm will pass when the Timing-Allow-Origin header value
-  list contains multiple wildcards. (image)
-- The timing allow check algorithm will pass when the Timing-Allow-Origin header value
-  list contains multiple wildcards. (script)
-- The timing allow check algorithm will pass when the Timing-Allow-Origin header value
-  list contains multiple wildcards. (stylesheet)
-- The timing allow check algorithm will pass when the Timing-Allow-Origin header value
-  list contains the origin and a wildcard. (XMLHttpRequest)
-- The timing allow check algorithm will pass when the Timing-Allow-Origin header value
-  list contains the origin and a wildcard. (font)
-- The timing allow check algorithm will pass when the Timing-Allow-Origin header value
-  list contains the origin and a wildcard. (iframe)
-- The timing allow check algorithm will pass when the Timing-Allow-Origin header value
-  list contains the origin and a wildcard. (image)
-- The timing allow check algorithm will pass when the Timing-Allow-Origin header value
-  list contains the origin and a wildcard. (script)
-- The timing allow check algorithm will pass when the Timing-Allow-Origin header value
-  list contains the origin and a wildcard. (stylesheet)
 resource-timing/TAO-port-mismatch-means-crossorigin.html:
 - An identical port must pass the TAO check
 resource-timing/body-size-cross-origin.https.html:
@@ -11198,12 +11125,9 @@ resource-timing/entries-for-network-errors.sub.https.html:
 - A ResourceTiming entry should be created for network error of type only-if-cached
   resource that was not cached
 - A ResourceTiming entry should be created for network error of type too many redirects
-resource-timing/entry-attributes.html:
-- Font resources should generate conformant entries
 resource-timing/event-source-timing.html:
 - ResourceTiming for EventSource should reflect number of re-connections to source
 resource-timing/font-timestamps.html:
-- Test a font's timestamps
 - Test a font's timestamps with delays
 resource-timing/iframe-failed-commit.html:
 - Same-origin empty iframe with a 200 status gets reported
@@ -11221,8 +11145,6 @@ resource-timing/initiator-type/audio.html:
 - The initiator type for <source src> with type 'audio/mpeg' must be 'audio'
 - The initiator type for <source src> with type 'audio/ogg' must be 'audio'
 - The initiator type for <source src> with type 'audio/wav' must be 'audio'
-resource-timing/initiator-type/dynamic-insertion.html:
-- A font should have the 'css' initiator type.
 resource-timing/initiator-type/embed.html:
 - The initiator type for <embed> must be 'embed'
 resource-timing/initiator-type/img-srcset.html:
@@ -11326,11 +11248,8 @@ resource-timing/nested-nav-fallback-timing.html:
 - Cross-origin TAO-fail IFrame entries should report window load time
 - Cross-origin TAO-fail object entries should report window load time
 resource-timing/nextHopProtocol-is-tao-protected.https.html:
-- Fetch TAO'd font from remote origin. Make sure nextHopProtocol is not the empty
-  string.
 - Fetch TAO'd object from remote origin. Make sure nextHopProtocol is not the empty
   string.
-- Fetch TAO-less font from remote origin. Make sure nextHopProtocol is the empty string.
 - Fetch TAO-less object from remote origin. Make sure nextHopProtocol is the empty
   string.
 resource-timing/no-entries-for-cross-origin-css-fetched-memory-cache.sub.html:
