@@ -3350,6 +3350,7 @@ module Capybara
         # is discarding — firing it against the next one would be a load event for a
         # document that never loaded.
         @window_load_due = false
+        @font_file_failed = nil   # a 404'd @font-face refetches on the next navigation (Chrome)
         # Background app requests must not cross the session boundary — QUIESCE them
         # before touching anything else. Diagnosed on Discourse (2026-08-22): a
         # leftover async image fetch, holding ActiveRecord's pinned-connection + pool
@@ -8232,19 +8233,29 @@ module Capybara
       end
 
       # A face's own bytes (a `FontFace` built from a buffer, a `blob:` src): parsed like a
-      # downloaded file; `ok` is false when they are no font the parser reads.
+      # downloaded file. `ok` is whether the bytes are a recognised font container (a WOFF2 or
+      # OpenType-CFF buffer loads even though the metrics parser reads no table from it, as a
+      # WOFF2 url does — measured with the fallback family). Content-addressed so identical
+      # bytes reuse one temp file, not one per call.
+      FONT_MAGIC = ["\x00\x01\x00\x00".b, 'OTTO'.b, 'true'.b, 'ttcf'.b, 'wOFF'.b, 'wOF2'.b].freeze
       def font_advance_table_from_bytes(b64)
         bytes = Base64.decode64(b64.to_s)
-        sfnt  = woff_to_sfnt(bytes)
-        return {'table' => nil, 'ok' => false} if sfnt.nil? || sfnt.bytesize < 12
-        require 'tempfile'
-        file = Tempfile.new(['csim-font', '.bin'])
-        file.binmode
-        file.write(sfnt)
-        file.flush
-        @@font_file_lock.synchronize { @@font_files << file }
-        table = font_table_from_file(file.path)
-        {'table' => table, 'ok' => !table.nil?}
+        ok    = bytes.bytesize >= 4 && FONT_MAGIC.include?(bytes[0, 4].b)
+        return {'table' => nil, 'ok' => ok} unless ok
+        sfnt = woff_to_sfnt(bytes)
+        return {'table' => nil, 'ok' => true} if sfnt.nil? || sfnt.bytesize < 12
+        key  = "bytes:#{Digest::SHA256.hexdigest(sfnt)}"
+        path = @@font_file_lock.synchronize { @@font_file_cache[key]&.first }
+        unless path
+          require 'tempfile'
+          file = Tempfile.new(['csim-font', '.bin'])
+          file.binmode
+          file.write(sfnt)
+          file.flush
+          @@font_file_lock.synchronize { @@font_files << file; @@font_file_cache[key] = [file.path, nil] }
+          path = file.path
+        end
+        {'table' => font_table_from_file(path), 'ok' => true}
       end
 
       def reset_workers
