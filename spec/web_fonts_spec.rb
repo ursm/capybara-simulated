@@ -87,6 +87,8 @@ RSpec.describe 'web fonts' do
             @font-face { font-family: Overridden; src: url("/ahem.ttf"); ascent-override: 100%; descent-override: 100%; line-gap-override: 100%; }
             @font-face { font-family: Doubled; src: url("/ahem.ttf"); size-adjust: 200%; }
             @font-face { font-family: Combined; src: url("/ahem.ttf"); size-adjust: 200%; ascent-override: 100%; }
+            @font-face { font-family: Scoped; src: url("/ahem.ttf"); size-adjust: 200%; unicode-range: U+41-5A; }
+            @font-face { font-family: ScopedBase; src: url("/ahem.ttf"); }
           </style></head><body>
             <span id="t" style="font-family: MyAhem">abcd</span>
             <span id="w" style="font-family: WoffAhem">abcd</span>
@@ -137,7 +139,7 @@ RSpec.describe 'web fonts' do
     s = session
     faces = s.evaluate_script("Array.from(document.fonts).map(function (f) { return [f.family, f.status]; })")
     expect(faces).to include(['MyAhem', 'loaded'], ['WoffAhem', 'loaded'], ['Gone', 'unloaded'])
-    expect(s.evaluate_script("[document.fonts.size, document.fonts.check('12px MyAhem'), document.fonts.check('12px Gone'), document.fonts.check('12px monospace')]")).to eq([8, true, false, true])
+    expect(s.evaluate_script("[document.fonts.size, document.fonts.check('12px MyAhem'), document.fonts.check('12px Gone'), document.fonts.check('12px monospace')]")).to eq([10, true, false, true])
     expect(s.evaluate_script("Object.prototype.toString.call(document.fonts)")).to eq('[object FontFaceSet]')
   end
 
@@ -305,6 +307,25 @@ RSpec.describe 'web fonts' do
     s = session
     s.execute_script("var c = document.createElement('div'); c.id = 'c'; c.style.cssText = 'font: 20px Combined'; c.textContent = 'X'; document.body.appendChild(c);")
     expect(s.evaluate_script("document.getElementById('c').getBoundingClientRect().height")).to eq(48)
+  end
+
+  it 'selects a face per character by unicode-range' do
+    # The stack is a size-adjust:200% face scoped to U+41-5A (uppercase) over a universal family.
+    # In "AbCd" the A and C double (40px each at 20px), the lowercase fall through to `ScopedBase`
+    # (20px) — a run split across faces, as Chrome renders the size-adjust reftest.
+    s = session
+    s.execute_script("var e = document.createElement('div'); e.id = 'sc'; e.style.cssText = 'display: inline-block; font: 20px Scoped, ScopedBase'; e.textContent = 'AbCd'; document.body.appendChild(e);")
+    expect(s.evaluate_script("document.getElementById('sc').getBoundingClientRect().width")).to eq(120)   # 40 + 20 + 40 + 20
+  end
+
+  it 'sends a character outside every range to the system font, not the restricted face' do
+    # `Scoped` alone covers only U+41-5A. Its uppercase glyphs double (size-adjust: 200%), but a
+    # lowercase letter no face covers must fall to the system font — NOT be measured through the
+    # scoped face's doubled table (a Chrome-faithful last resort, so size-adjust can't leak out).
+    s = session
+    s.execute_script("var mk = function (t) { var e = document.createElement('span'); e.style.cssText = 'display: inline-block; font: 20px Scoped'; e.textContent = t; document.body.appendChild(e); return e.getBoundingClientRect().width; }; window.__wUp = mk('AB'); window.__wMix = mk('Ab');")
+    expect(s.evaluate_script('window.__wUp')).to eq(80)                     # A and B both covered → 40 + 40
+    expect(s.evaluate_script('window.__wMix')).to be < 80                   # b uncovered → system font, not the doubled face
   end
 
   # ── descriptors ──
