@@ -1256,8 +1256,6 @@ css/css-font-loading/fontface-font-variation-settings-persisted-js-api.html:
 - Test FontFace variationSettings property
 css/css-font-loading/fontface-from-arraybuffer.html:
 - "== css/css-font-loading/fontface-from-arraybuffer-ref.html"
-css/css-font-loading/fontface-override-descriptors.html:
-- "== css/css-font-loading/fontface-override-descriptors-ref.html"
 css/css-font-loading/fontface-size-adjust-descriptor.html:
 - "== css/css-font-loading/fontface-size-adjust-descriptor-ref.html"
 css/css-logical/animation-001.html:

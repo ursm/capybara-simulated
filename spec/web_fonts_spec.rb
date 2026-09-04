@@ -80,6 +80,9 @@ RSpec.describe 'web fonts' do
             @font-face { font-family: TwoSrc; src: url("/ahem.woff2") format("woff2"), url("/ahem.ttf") format("truetype"); }
             @font-face { font-family: OnlyWoff2; src: url("/ahem.woff2") format("woff2"); }
             @font-face { font-family: Gone; src: url("/missing.ttf"); }
+            @font-face { font-family: Overridden; src: url("/ahem.ttf"); ascent-override: 100%; descent-override: 100%; line-gap-override: 100%; }
+            @font-face { font-family: Doubled; src: url("/ahem.ttf"); size-adjust: 200%; }
+            @font-face { font-family: Combined; src: url("/ahem.ttf"); size-adjust: 200%; ascent-override: 100%; }
           </style></head><body>
             <span id="t" style="font-family: MyAhem">abcd</span>
             <span id="w" style="font-family: WoffAhem">abcd</span>
@@ -131,7 +134,7 @@ RSpec.describe 'web fonts' do
     s = session
     faces = s.evaluate_script("Array.from(document.fonts).map(function (f) { return [f.family, f.status]; })")
     expect(faces).to include(['MyAhem', 'loaded'], ['WoffAhem', 'loaded'], ['Gone', 'unloaded'])
-    expect(s.evaluate_script("[document.fonts.size, document.fonts.check('12px MyAhem'), document.fonts.check('12px Gone'), document.fonts.check('12px monospace')]")).to eq([5, true, false, true])
+    expect(s.evaluate_script("[document.fonts.size, document.fonts.check('12px MyAhem'), document.fonts.check('12px Gone'), document.fonts.check('12px monospace')]")).to eq([8, true, false, true])
     expect(s.evaluate_script("Object.prototype.toString.call(document.fonts)")).to eq('[object FontFaceSet]')
   end
 
@@ -264,6 +267,31 @@ RSpec.describe 'web fonts' do
     JS
     expect(s.evaluate_script('__b')).to match_array(%w[loaded SyntaxError])
     expect(width(s, 'buf')).to eq(80)
+  end
+
+  # ── metric descriptors reach layout ──
+  it 'drives the line box height from the metric override descriptors' do
+    s = session
+    s.execute_script("var o = document.createElement('div'); o.id = 'o'; o.style.cssText = 'font: 20px Overridden'; o.textContent = 'X'; document.body.appendChild(o);")
+    expect(s.evaluate_script("document.getElementById('o').getBoundingClientRect().height")).to eq(60)   # ascent+descent+gap = 3em at 20px
+    expect(width(s, 't')).to eq(80)                                          # the same face without overrides measures 1em/glyph
+  end
+
+  it 'scales the advances by size-adjust' do
+    s = session
+    s.execute_script("var d = document.createElement('span'); d.id = 'd'; d.style.cssText = 'font: 20px Doubled'; d.textContent = 'XX'; document.body.appendChild(d); var p = document.createElement('span'); p.id = 'p'; p.style.cssText = 'font: 20px MyAhem'; p.textContent = 'XX'; document.body.appendChild(p);")
+    dw = s.evaluate_script("document.getElementById('d').getBoundingClientRect().width")
+    pw = s.evaluate_script("document.getElementById('p').getBoundingClientRect().width")
+    expect(dw).to eq(2 * pw)                                                  # size-adjust: 200% doubles the run width
+  end
+
+  it 'scales a metric override by size-adjust' do
+    # The fallback-matching recipe sets size-adjust AND the overrides together, so size-adjust
+    # scales the RESOLVED metric: a 100% ascent override under size-adjust: 200% is 2em, not 1em.
+    # Chrome (Ahem, 20px): 100% * 200% ascent + intrinsic 0.2 * 200% descent = 40 + 8 = 48px.
+    s = session
+    s.execute_script("var c = document.createElement('div'); c.id = 'c'; c.style.cssText = 'font: 20px Combined'; c.textContent = 'X'; document.body.appendChild(c);")
+    expect(s.evaluate_script("document.getElementById('c').getBoundingClientRect().height")).to eq(48)
   end
 
   # ── descriptors ──
