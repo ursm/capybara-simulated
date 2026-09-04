@@ -266,6 +266,33 @@ RSpec.describe 'web fonts' do
     expect(width(s, 'buf')).to eq(80)
   end
 
+  # ── descriptors ──
+  it 'validates a FontFace override / size-adjust descriptor on set and in the constructor' do
+    s = session
+    out = s.evaluate_script(<<~JS)
+      (function () {
+        var r = {};
+        var f = new FontFace('D', 'url(/ahem.ttf)', { ascentOverride: '90%', sizeAdjust: '150%' });
+        r.round = [f.ascentOverride, f.descentOverride, f.sizeAdjust, f.lineGapOverride];
+        r.defaults = (function () { var g = new FontFace('E', 'url(/ahem.ttf)'); return [g.ascentOverride, g.sizeAdjust, g.display]; })();
+        r.setThrows = ['10px', '-5%', 'x'].map(function (v) { try { f.ascentOverride = v; return 'ok'; } catch (e) { return e.name; } });
+        f.ascentOverride = '25%'; r.setOk = f.ascentOverride;
+        return r;
+      })()
+    JS
+    expect(out['round']).to eq(['90%', 'normal', '150%', 'normal'])
+    expect(out['defaults']).to eq(['normal', '100%', 'auto'])
+    expect(out['setThrows']).to eq(%w[SyntaxError SyntaxError SyntaxError])
+    expect(out['setOk']).to eq('25%')
+  end
+
+  it 'errors a face built with an invalid descriptor and rejects its load' do
+    s = session
+    s.execute_script("window.__r = []; var f = new FontFace('Bad', 'url(/ahem.ttf)', { ascentOverride: '-50%' }); __r.push(f.status); f.load().then(function () { __r.push('ok'); }, function (e) { __r.push(f.status + ':' + e.name); });")
+    Timeout.timeout(5) { sleep 0.05 until s.evaluate_script('window.__r.length >= 2') }
+    expect(s.evaluate_script('window.__r')).to eq(['unloaded', 'error:SyntaxError'])
+  end
+
   # ── the worker scope ──
   it 'exposes self.fonts in a worker and rejects a css-wide keyword as a DOMException' do
     skip 'worker microtask delivery under the rspec poll needs the V8 engine' unless CsimEngine.v8?
