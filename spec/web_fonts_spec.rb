@@ -4,6 +4,7 @@ require 'capybara/simulated'
 require 'zlib'
 require_relative 'support/session_teardown'
 require_relative 'support/js_engine'
+require_relative 'support/poll_until'
 
 # Web fonts: a family the document declares an `@font-face` for is FETCHED the first time text
 # needs it (Chrome loads a web font on first use) and measured with the downloaded file's own
@@ -354,6 +355,27 @@ RSpec.describe 'web fonts' do
     s = simulated_session(a)
     s.visit 'http://www.example.com/'
     expect(s.evaluate_script("document.getElementById('ab').getBoundingClientRect().height")).to eq(100)
+  end
+
+  it 'errors a local()-only face whose font this machine lacks' do
+    # A `local(<name>)` source with no `url()` fallback: when nothing is installed under that name
+    # the face fails (Chrome rejects `loaded` with NetworkError). The `font-face-reject` WPT test
+    # covers the rendering-update trigger; here `document.fonts` is what drives the resolution.
+    doc = <<~HTML
+      <!DOCTYPE html><html><body>
+        <div style="font-family: NoSuchLocal">a</div>
+        <script>
+          var f = new FontFace('NoSuchLocal', 'local("nonexistent-9a1a9f78-c8d4-11e9-af16")');
+          document.fonts.add(f);
+          f.loaded.then(function () { window.__r = 'loaded'; }, function (e) { window.__r = 'rejected:' + e.name; });
+        </script>
+      </body></html>
+    HTML
+    a = ->(env) { [200, {'content-type' => 'text/html'}, [doc]] }
+    s = simulated_session(a)
+    s.visit 'http://www.example.com/'
+    expect(poll_until { s.evaluate_script("Array.from(document.fonts)[0].status") == 'error' }).to be true
+    expect(s.evaluate_script('window.__r')).to eq('rejected:NetworkError')
   end
 
   # ── descriptors ──

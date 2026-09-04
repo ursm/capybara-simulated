@@ -1244,8 +1244,6 @@ css/css-flexbox/position-relative-stretch-height-001.html:
 - 'height: stretch inside stretched flex item, top: 50%'
 css/css-flexbox/relayout-input.html:
 - "#target 1"
-css/css-font-loading/font-face-reject.html:
-- font-face-reject
 css/css-font-loading/fontface-descriptor-updates-2.html:
 - Descriptor mutations before adding to FontFaceSet are correctly reflected
 - FontFace descriptor mutations are reflected in FontFaceSet
