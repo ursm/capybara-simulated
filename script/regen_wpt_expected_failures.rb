@@ -265,6 +265,16 @@ files.each do |rel|
         in_list << name
       end
     end
+    # An unratified file (`.tentative` / WICG / proposal) is out-of-scope WHOLE — a subtest
+    # of it that happens to PASS on this machine (a rasterization-sensitive reftest that
+    # renders differently on the CI image) must keep its out-of-scope entry, or it re-enters
+    # in-scope and reds the gate on the machine where it fails. Re-emit the prior entries the
+    # failing-loop above did not consume.
+    if in_list.empty? && (tentative_path?(rel) || WICG_OUT.key?(rel) || PROPOSAL_OUT.key?(rel))
+      leftover = (out_existing[rel] || {}).flat_map {|name, reasons| reasons.map {|r| { 'name' => name, 'reason' => r.to_s } } }
+      leftover.each {|e| out_list << e unless out_list.any? {|o| o['name'] == e['name'] && o['reason'] == e['reason'] } }
+      (out_existing[rel] || {}).each_value(&:clear)
+    end
     unless in_list.empty?
       in_map[rel] = in_list
       in_subtests += in_list.size
