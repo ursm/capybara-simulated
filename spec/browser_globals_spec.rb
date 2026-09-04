@@ -78,18 +78,23 @@ RSpec.describe 'browser global surface' do
 
     it 'records mark / measure entries observable via getEntries* / clearMarks / clearMeasures' do
       expect(session.evaluate_script('typeof performance.timeOrigin')).to eq('number')
-      entries = session.evaluate_script(<<~JS)
+      result = session.evaluate_script(<<~JS)
         performance.clearMarks(); performance.clearMeasures();
         performance.mark('start');
         performance.mark('end');
         performance.measure('span', 'start', 'end');
-        performance.getEntries().map(e => ({name: e.name, type: e.entryType}))
+        // getEntries() is sorted by startTime — a measure carries its start mark's time, so its
+        // place among later marks depends on the clock; assert per type (insertion order within a
+        // type is deterministic) plus the whole set.
+        ({
+          marks:    performance.getEntriesByType('mark').map(e => e.name),
+          measures: performance.getEntriesByType('measure').map(e => e.name),
+          all:      performance.getEntries().map(e => e.name + ':' + e.entryType).sort()
+        })
       JS
-      expect(entries).to eq([
-        {'name' => 'start', 'type' => 'mark'},
-        {'name' => 'end',   'type' => 'mark'},
-        {'name' => 'span',  'type' => 'measure'}
-      ])
+      expect(result['marks']).to eq(%w[start end])
+      expect(result['measures']).to eq(['span'])
+      expect(result['all']).to eq(['end:mark', 'span:measure', 'start:mark'])
       cleared = session.evaluate_script('performance.clearMarks(); performance.clearMeasures(); performance.getEntries().length')
       expect(cleared).to eq(0)
     end
