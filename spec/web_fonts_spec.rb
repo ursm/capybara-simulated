@@ -11,10 +11,13 @@ require_relative 'support/js_engine'
 # fontconfig would substitute. The fetch is a `css` Resource Timing entry, and `document.fonts`
 # is the CSS Font Loading set: one `FontFace` per `@font-face` rule with its status, `ready`,
 # `check()` / `load()`, and a loading cycle's `loadingdone` / `loadingerror` events. A WOFF file
-# is unwrapped on the host; a WOFF2 one has no decoder there, so it is fetched and the text
-# measured with the fallback family.
+# is unwrapped on the host, a WOFF2 one Brotli-decoded, and either measures with the face's own
+# advances.
 RSpec.describe 'web fonts' do
   AHEM = File.binread(File.expand_path('wpt/fonts/Ahem.ttf', __dir__))
+
+  # Ahem encoded as a WOFF2 (Brotli), generated once from Ahem.ttf with `woff2_compress`.
+  AHEM_WOFF2 = File.binread(File.expand_path('fixtures/fonts/Ahem.woff2', __dir__))
 
   # Ahem wrapped as a WOFF (1.0): the SFNT tables zlib-compressed one by one.
   def woff_of(sfnt)
@@ -41,6 +44,7 @@ RSpec.describe 'web fonts' do
       case env['PATH_INFO']
       when '/ahem.ttf'  then [200, {'content-type' => 'font/ttf'}, [AHEM]]
       when '/ahem.woff' then [200, {'content-type' => 'font/woff'}, [woff_of(AHEM)]]
+      when '/ahem.woff2' then [200, {'content-type' => 'font/woff2'}, [AHEM_WOFF2]]
       when '/missing.ttf' then [404, {'content-type' => 'text/plain'}, ['no']]
       when '/css/rel.css' then [200, {'content-type' => 'text/css'}, ['@font-face { font-family: Rel; src: url(ahem.ttf); }']]
       when '/css/ahem.ttf' then [200, {'content-type' => 'font/ttf'}, [AHEM]]
@@ -115,12 +119,11 @@ RSpec.describe 'web fonts' do
     expect(width(s, 'w')).to eq(80)
   end
 
-  it 'takes the first src the host can read, skipping a WOFF2 one' do
+  it 'takes the first supported src — a WOFF2 ahead of a TrueType one' do
     s = session
-    expect(width(s, 'two')).to eq(80)
+    expect(width(s, 'two')).to eq(80)                                      # the WOFF2 Ahem, decoded
     names = s.evaluate_script("performance.getEntriesByType('resource').filter(function (e) { return e.initiatorType === 'css'; }).map(function (e) { return e.name.split('/').pop(); })")
-    expect(names).to include('ahem.ttf')
-    expect(names).not_to include('ahem.woff2')
+    expect(names).to include('ahem.woff2')                                 # the WOFF2 src was the one fetched
   end
 
   it 'records the fetch as a css Resource Timing entry, once per face' do
@@ -240,11 +243,21 @@ RSpec.describe 'web fonts' do
     expect(s.evaluate_script("Array.from(document.fonts).filter(function (f) { return f.family === 'Xo'; })[0].status")).to eq('error')
   end
 
-  it 'loads a WOFF2 face without measuring with it' do
+  it 'measures with a WOFF2 face, Brotli-decoded on the host' do
     s = session
     s.execute_script("var el = document.createElement('span'); el.id = 'w2'; el.style.fontFamily = 'OnlyWoff2'; el.textContent = 'abcd'; document.body.appendChild(el);")
-    expect(width(s, 'w2')).not_to eq(80)
+    expect(width(s, 'w2')).to eq(80)                                       # four one-em Ahem glyphs at 20px
     expect(s.evaluate_script("Array.from(document.fonts).filter(function (f) { return f.family === 'OnlyWoff2'; })[0].status")).to eq('loaded')
+  end
+
+  it 'decodes a WOFF2 body regardless of its string encoding' do
+    # The container is parsed with a byte cursor but sliced with String#[] (character-based), so a
+    # font body that reached the host tagged UTF-8 would misalign without a binary coercion.
+    browser = Capybara::Simulated::Browser.allocate
+    binary  = browser.woff_to_sfnt(AHEM_WOFF2)
+    tagged  = browser.woff_to_sfnt(AHEM_WOFF2.dup.force_encoding('UTF-8'))
+    expect(binary).to be_a(String)
+    expect(tagged).to eq(binary)
   end
 
   it 'rejects a font shorthand it cannot parse' do

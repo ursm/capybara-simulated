@@ -41,6 +41,8 @@ Gem::Specification.new do |spec|
   # the canvas surface, and `save_screenshot`. Binds to the libvips SYSTEM library — Debian/Ubuntu
   # `libvips42`, Homebrew `vips`, Gentoo `media-libs/vips`.
   spec.add_dependency 'ruby-vips', '~> 2.2'
+  # Brotli, to decode WOFF2 web fonts to their real text metrics.
+  spec.add_dependency 'brotli', '~> 0.5'
 
   # JS engine is a soft dependency — add exactly one to your Gemfile.
   # The engine is auto-selected based on which is loadable; `:v8` wins when
