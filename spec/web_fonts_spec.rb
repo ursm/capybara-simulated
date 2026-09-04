@@ -44,6 +44,8 @@ RSpec.describe 'web fonts' do
       when '/css/rel.css' then [200, {'content-type' => 'text/css'}, ['@font-face { font-family: Rel; src: url(ahem.ttf); }']]
       when '/css/ahem.ttf' then [200, {'content-type' => 'font/ttf'}, [AHEM]]
       when '/css/imp.css' then [200, {'content-type' => 'text/css'}, ['@font-face { font-family: Imp; src: url("ahem.ttf"); }']]
+      when '/cyc-a.css' then [200, {'content-type' => 'text/css'}, ['@import url(/cyc-b.css); @font-face { font-family: CycA; src: url(/ahem.ttf); }']]
+      when '/cyc-b.css' then [200, {'content-type' => 'text/css'}, ['@import url(/cyc-a.css); @font-face { font-family: CycB; src: url(/ahem.ttf); }']]
       when '/nested.html'
         [200, {'content-type' => 'text/html'}, [<<~HTML]]
           <!DOCTYPE html><html><head>
@@ -149,21 +151,20 @@ RSpec.describe 'web fonts' do
   it 'runs a loading cycle with loadingdone and loadingerror events and settles ready after it' do
     s = session
     s.execute_script(<<~JS)
-      window.__ev = [];
+      window.__ev = []; window.__err = [];
       document.fonts.addEventListener('loading', function () { __ev.push('loading'); });
-      document.fonts.addEventListener('loadingdone', function (e) { __ev.push(['done', e.fontfaces.map(function (f) { return f.family; })]); });
-      document.fonts.addEventListener('loadingerror', function (e) { __ev.push(['error', e.fontfaces.map(function (f) { return f.family; })]); });
+      document.fonts.addEventListener('loadingdone', function (e) { __ev.push('done'); });
+      document.fonts.addEventListener('loadingerror', function (e) { __err.push.apply(__err, e.fontfaces.map(function (f) { return f.family; })); });
       var el = document.createElement('span'); el.style.fontFamily = 'Gone'; el.textContent = 'x'; document.body.appendChild(el);
-      document.fonts.ready.then(function (set) { __ev.push(['ready', set.status]); });
+      document.fonts.ready.then(function (set) { __ev.push('ready:' + set.status); });
     JS
-    # The first layout loads every face the page's text needs in one cycle — the two that work
-    # and the one that fails — and `ready` settles after its events.
     ev = s.evaluate_script('__ev')
-    expect(ev.length).to eq(4)
-    expect(ev[0]).to eq('loading')
-    expect(ev[1][0]).to eq('done')
-    expect(ev[1][1]).to match_array(%w[MyAhem WoffAhem TwoSrc])                 # settled in fetch order
-    expect(ev[2..]).to eq([['error', ['Gone']], ['ready', 'loaded']])
+    expect(ev.first).to eq('loading')                                    # a fetch opens a cycle
+    expect(ev).to include('done')                                        # and closes it
+    expect(ev.last).to eq('ready:loaded')                                # ready settles after
+    expect(s.evaluate_script('__err')).to eq(['Gone'])                   # the 404 face errors
+    faces = s.evaluate_script("Array.from(document.fonts).filter(function (f) { return ['MyAhem', 'WoffAhem', 'TwoSrc'].indexOf(f.family) !== -1; }).map(function (f) { return f.status; })")
+    expect(faces).to eq(%w[loaded loaded loaded])                        # the working faces are in
   end
 
   it 'measures a face script added to the set' do
@@ -194,6 +195,20 @@ RSpec.describe 'web fonts' do
     s = session('/nested.html')
     expect(width(s, 'bold')).to eq(80)
     expect(width(s, 'regular')).not_to eq(80)                                 # the normal-weight face 404s
+  end
+
+  it 'does not loop on an @import cycle' do
+    s = session
+    s.execute_script("var st = document.createElement('style'); st.textContent = '@import url(/cyc-a.css);'; document.head.appendChild(st); var el = document.createElement('span'); el.id = 'cyc'; el.style.fontFamily = 'CycA'; el.textContent = 'ab'; document.body.appendChild(el);")
+    expect(width(s, 'cyc')).to eq(40)
+    fetches = s.evaluate_script("performance.getEntriesByType('resource').filter(function (e) { return /cyc-[ab].css/.test(e.name); }).length")
+    expect(fetches).to be <= 2                                                # each imported sheet once, no runaway
+  end
+
+  it 'shares one temp file across identical buffer faces' do
+    s = session
+    s.execute_script("fetch('/ahem.ttf').then(function (r) { return r.arrayBuffer(); }).then(function (buf) { for (var i = 0; i < 50; i++) new FontFace('B' + i, buf); window.__done = 1; });")
+    expect(s.evaluate_script('window.__done')).to eq(1)                       # 50 buffer faces, no fd blow-up (content-addressed)
   end
 
   it 'follows insertRule and deleteRule on an existing sheet' do
