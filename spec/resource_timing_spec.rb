@@ -415,4 +415,29 @@ RSpec.describe 'resource timing' do
     expect(got).to include(['i.png?id=srcset', 'img'], ['i.png?id=highdpr-src', 'img'], ['i.png?id=svg', 'image'])
     expect(got.map(&:first)).not_to include('i.png?id=src', 'i.png?id=highdpr')   # the unselected candidates
   end
+
+  it 'times <link> resources: manifest and prefetch as \'link\', modulepreload as \'other\'' do
+    doc = <<~HTML
+      <!DOCTYPE html><html><head>
+        <link rel="manifest" href="/m.json">
+        <link rel="prefetch" href="/p.css">
+        <link rel="modulepreload" href="/mod.js">
+      </head><body>hi</body></html>
+    HTML
+    a = ->(env) {
+      case env['PATH_INFO']
+      when '/m.json' then [200, {'content-type' => 'application/manifest+json'}, ['{}']]
+      when '/p.css'  then [200, {'content-type' => 'text/css'}, ['p{}']]
+      when '/mod.js' then [200, {'content-type' => 'text/javascript'}, ['export const x = 1;']]
+      else [200, {'content-type' => 'text/html'}, [doc]]
+      end
+    }
+    s = simulated_session(a)
+    s.visit 'http://www.example.com/'
+    got = poll_until do
+      m = s.evaluate_script("performance.getEntriesByType('resource').map(function (e) { return [e.name.split('/').pop(), e.initiatorType]; })")
+      m.length >= 3 ? m : nil
+    end
+    expect(got).to include(['m.json', 'link'], ['p.css', 'link'], ['mod.js', 'other'])
+  end
 end
