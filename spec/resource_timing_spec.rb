@@ -393,4 +393,26 @@ RSpec.describe 'resource timing' do
     end
     expect(got).to include(['x.png?id=input', 'input'], ['x.sse?id=es', 'other'])
   end
+
+  it 'selects the srcset candidate and labels an SVG image, per initiator' do
+    # `<img src srcset=..w>` fetches the srcset candidate (not src); a `srcset=..99x` at DPR 1 falls
+    # back to src; an SVG `<image>` is initiator 'image'.
+    png = File.binread(Dir.glob('spec/wpt/resource-timing/resources/blue.png').first)
+    doc = <<~HTML
+      <!DOCTYPE html><html><body>
+        <img src="/i.png?id=src" srcset="/i.png?id=srcset 67w" sizes="67px">
+        <img src="/i.png?id=highdpr-src" srcset="/i.png?id=highdpr 99x">
+        <svg><image href="/i.png?id=svg"></image></svg>
+      </body></html>
+    HTML
+    a = ->(env) { env['PATH_INFO'].start_with?('/i.png') ? [200, {'content-type' => 'image/png'}, [png]] : [200, {'content-type' => 'text/html'}, [doc]] }
+    s = simulated_session(a)
+    s.visit 'http://www.example.com/'
+    got = poll_until do
+      m = s.evaluate_script("performance.getEntriesByType('resource').map(function (e) { return [e.name.split('/').pop(), e.initiatorType]; })")
+      m.length >= 3 ? m : nil
+    end
+    expect(got).to include(['i.png?id=srcset', 'img'], ['i.png?id=highdpr-src', 'img'], ['i.png?id=svg', 'image'])
+    expect(got.map(&:first)).not_to include('i.png?id=src', 'i.png?id=highdpr')   # the unselected candidates
+  end
 end
