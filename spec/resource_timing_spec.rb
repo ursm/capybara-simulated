@@ -372,4 +372,25 @@ RSpec.describe 'resource timing' do
       ['m.aud?id=asrc', 'audio'], ['m.dat?id=embed', 'embed'], ['m.png?id=object', 'object']
     )
   end
+
+  it 'records an <input type=image> as \'input\' and an EventSource as \'other\'' do
+    # Both record on connection (the image-button load path and the EventSource constructor),
+    # without waiting on the rendering update. `<body background>` ('body') records at the
+    # rendering update — covered by the WPT `initiator-type/{misc,input}` gate.
+    png = File.binread(Dir.glob('spec/wpt/resource-timing/resources/blue.png').first)
+    doc = <<~HTML
+      <!DOCTYPE html><html><body>
+        <input type="image" src="/x.png?id=input">
+        <script>new EventSource('/x.sse?id=es');</script>
+      </body></html>
+    HTML
+    a = ->(env) { env['PATH_INFO'].start_with?('/x.') ? [200, {'content-type' => 'image/png'}, [png]] : [200, {'content-type' => 'text/html'}, [doc]] }
+    s = simulated_session(a)
+    s.visit 'http://www.example.com/'
+    got = poll_until do
+      m = s.evaluate_script("performance.getEntriesByType('resource').map(function (e) { return [e.name.split('/').pop(), e.initiatorType]; })")
+      m.length >= 2 ? m : nil
+    end
+    expect(got).to include(['x.png?id=input', 'input'], ['x.sse?id=es', 'other'])
+  end
 end

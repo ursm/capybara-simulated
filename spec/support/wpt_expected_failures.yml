@@ -11098,16 +11098,10 @@ resource-timing/iframe-with-download.html:
 - Iframes should not report resource timing for non-handled mime-types (downloads)
 resource-timing/initiator-type/img-srcset.html:
 - The initiator type for <img srcset> must be 'img'
-resource-timing/initiator-type/input.html:
-- The initiator type for <input type=image> must be 'input'
 resource-timing/initiator-type/link.html:
 - The initiator type for <link manifest> must be 'link'
 - The initiator type for <link prefetch> must be 'link'
 - The initiator type for module preload must be 'other'
-resource-timing/initiator-type/misc.html:
-- The initiator type for <body background> must be 'body'
-- The initiator type for <input type='image'> must be 'input'
-- The initiator type for new EventSource() must be 'other'
 resource-timing/initiator-type/picture.html:
 - The initiator type for <img srcset> in a <picture> must be 'img'
 - The initiator type for <source> in a <picture> must be 'img'
@@ -11119,9 +11113,6 @@ resource-timing/initiator-type/svg.html:
 resource-timing/initiator-type/workers.html:
 - The initiator type for classic worker must be 'other'
 - The initiator type for module worker must be 'script'
-resource-timing/input-sequence-of-events.html:
-- An image input element should receive its load event after the ResourceTiming entry
-  is available
 resource-timing/interim-response-times.h2.html:
 - Fetch from http://www.example.com with early hints, with 100 response
 - Fetch from http://www.example.com with early hints, with 100 response
