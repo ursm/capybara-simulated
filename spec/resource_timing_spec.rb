@@ -5,6 +5,7 @@ require 'timeout'
 require 'zlib'
 require_relative 'support/session_teardown'
 require_relative 'support/js_engine'
+require_relative 'support/poll_until'
 
 # Resource Timing Level 2: every resource a document fetches is a `PerformanceResourceTiming`
 # entry — scripts, stylesheets, `@import`s, images, frames, fetch / XHR / beacon — that the page
@@ -319,5 +320,30 @@ RSpec.describe 'resource timing' do
     s = session
     s.execute_script("var f = document.createElement('iframe'); f.src = '/hash.html'; document.body.appendChild(f);")
     expect(s.evaluate_script('window.__hashes')).to eq(['', '#check'])
+  end
+
+  it 'records css entries for background-image, cursor, and list-style-image' do
+    # A browser fetches a CSS-embedded image when a rendered element uses it, at the rendering
+    # update — even with no script — and files a `css` Resource Timing entry.
+    png = File.binread(Dir.glob('spec/wpt/resource-timing/resources/blue.png').first)
+    doc = <<~HTML
+      <!DOCTYPE html><html><head><style>
+        #bg { background-image: url("/css.png?id=bg"); width: 10px; height: 10px }
+        #cur { cursor: url("/css.png?id=cursor"), pointer }
+        ul { list-style-image: url("/css.png?id=list") }
+      </style></head><body>
+        <div id="bg"></div>
+        <div id="cur">hover</div>
+        <ul><li>item</li></ul>
+      </body></html>
+    HTML
+    a = ->(env) { env['PATH_INFO'].start_with?('/css.png') ? [200, {'content-type' => 'image/png'}, [png]] : [200, {'content-type' => 'text/html'}, [doc]] }
+    s = simulated_session(a)
+    s.visit 'http://www.example.com/'
+    names = poll_until do
+      ns = s.evaluate_script("performance.getEntriesByType('resource').filter(function (e) { return e.initiatorType === 'css'; }).map(function (e) { return e.name.split('/').pop(); })")
+      ns.length >= 3 ? ns : nil
+    end
+    expect(names).to include('css.png?id=bg', 'css.png?id=cursor', 'css.png?id=list')
   end
 end
