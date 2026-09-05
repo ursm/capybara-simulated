@@ -11110,7 +11110,6 @@ resource-timing/initiator-type/input.html:
 resource-timing/initiator-type/link.html:
 - The initiator type for <link manifest> must be 'link'
 - The initiator type for <link prefetch> must be 'link'
-- The initiator type for font resources embedded in css must be 'css'
 - The initiator type for image resources embedded in css must be 'css'
 - The initiator type for module preload must be 'other'
 resource-timing/initiator-type/misc.html:
@@ -11124,7 +11123,6 @@ resource-timing/initiator-type/picture.html:
 resource-timing/initiator-type/script.html:
 - The initiator type for script imported from another script must be 'script'
 resource-timing/initiator-type/style.html:
-- The initiator type for '@font-face' resources must be 'css'
 - The initiator type for 'background' attributes in <style> elements must be 'css'
 - The initiator type for 'cursor' attributes in <style> elements must be 'css'
 - The initiator type for 'list-style-image' attributes in <style> elements must be
