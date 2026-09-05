@@ -346,4 +346,30 @@ RSpec.describe 'resource timing' do
     end
     expect(names).to include('css.png?id=bg', 'css.png?id=cursor', 'css.png?id=list')
   end
+
+  it 'records timing entries for media and plugin resources with the right initiator' do
+    # The driver does not play media, but a browser fetches a media / plugin element's resource and
+    # files its entry — 'video' / 'audio' for the media (poster, src or <source>), 'track' for a
+    # showing <track>, 'embed' / 'object' for the plugin resource.
+    png = File.binread(Dir.glob('spec/wpt/resource-timing/resources/blue.png').first)
+    doc = <<~HTML
+      <!DOCTYPE html><html><body>
+        <video poster="/m.png?id=poster"><source src="/m.mp4?id=vsrc" type="video/mp4"><track default src="/m.vtt?id=track"></video>
+        <audio src="/m.aud?id=asrc"></audio>
+        <embed src="/m.dat?id=embed">
+        <object type="image/png" data="/m.png?id=object"></object>
+      </body></html>
+    HTML
+    a = ->(env) { env['PATH_INFO'].start_with?('/m.') ? [200, {'content-type' => 'application/octet-stream'}, [env['PATH_INFO'].end_with?('.png') || env['PATH_INFO'].include?('.png') ? png : 'x']] : [200, {'content-type' => 'text/html'}, [doc]] }
+    s = simulated_session(a)
+    s.visit 'http://www.example.com/'
+    got = poll_until do
+      m = s.evaluate_script("performance.getEntriesByType('resource').map(function (e) { return [e.name.split('/').pop(), e.initiatorType]; })")
+      m.length >= 6 ? m : nil
+    end
+    expect(got).to include(
+      ['m.png?id=poster', 'video'], ['m.mp4?id=vsrc', 'video'], ['m.vtt?id=track', 'track'],
+      ['m.aud?id=asrc', 'audio'], ['m.dat?id=embed', 'embed'], ['m.png?id=object', 'object']
+    )
+  end
 end

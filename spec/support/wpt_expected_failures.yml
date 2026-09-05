@@ -11096,13 +11096,6 @@ resource-timing/iframe-sequence-of-events.html:
   loaded
 resource-timing/iframe-with-download.html:
 - Iframes should not report resource timing for non-handled mime-types (downloads)
-resource-timing/initiator-type/audio.html:
-- The initiator type for <audio src> without 'type' attribute must be 'audio'
-- The initiator type for <source src> with type 'audio/mpeg' must be 'audio'
-- The initiator type for <source src> with type 'audio/ogg' must be 'audio'
-- The initiator type for <source src> with type 'audio/wav' must be 'audio'
-resource-timing/initiator-type/embed.html:
-- The initiator type for <embed> must be 'embed'
 resource-timing/initiator-type/img-srcset.html:
 - The initiator type for <img srcset> must be 'img'
 resource-timing/initiator-type/input.html:
@@ -11114,7 +11107,6 @@ resource-timing/initiator-type/link.html:
 resource-timing/initiator-type/misc.html:
 - The initiator type for <body background> must be 'body'
 - The initiator type for <input type='image'> must be 'input'
-- The initiator type for <object type='image/png'> must be 'object'
 - The initiator type for new EventSource() must be 'other'
 resource-timing/initiator-type/picture.html:
 - The initiator type for <img srcset> in a <picture> must be 'img'
@@ -11124,12 +11116,6 @@ resource-timing/initiator-type/script.html:
 resource-timing/initiator-type/svg.html:
 - The initiator type for <image> in an <svg> must be 'image'
 - The initiator type for <use> in an <svg> must be 'other'
-resource-timing/initiator-type/video.html:
-- The initiator type for <source src> with type="video/mp4" must be 'video'
-- The initiator type for <source src> with type="video/webm" must be 'video'
-- The initiator type for <track src> must be 'track'
-- The initiator type for <video poster> must be 'video'
-- The initiator type for <video src> must be 'video'
 resource-timing/initiator-type/workers.html:
 - The initiator type for classic worker must be 'other'
 - The initiator type for module worker must be 'script'
