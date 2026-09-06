@@ -74,6 +74,13 @@ jobs:
           ruby-version: ${{ matrix.ruby }}
           bundler-cache: true
 
+      # The native cascade accelerator (Rust). Compiled into lib/ before the specs: the gem's OWN
+      # extension isn't built by `bundle install` (that only compiles it for downstream consumers),
+      # so dev and CI build it explicitly. A broken build fails HERE — this step is the extension's
+      # build gate.
+      - uses: dtolnay/rust-toolchain@stable
+      - run: bundle exec rake compile
+
       # Multi-process run (worker count = vCPUs). The WPT and capybara-shared
       # gates — the dominant cost centres — are sharded across spec/wpt_gate/
       # and spec/capybara_shared/ files precisely so they distribute here; a
@@ -145,6 +152,11 @@ jobs:
         with:
           ruby-version: '4.0'
           bundler-cache: true
+
+      # The native cascade accelerator (Rust) — see the V8 job. Built here too so the QuickJS
+      # engine exercises the same code path.
+      - uses: dtolnay/rust-toolchain@stable
+      - run: bundle exec rake compile
 
       # Engine-specific cache: QuickJS runs the same files ~2x slower than V8,
       # so it balances from its own timing file.
