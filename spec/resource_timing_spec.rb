@@ -440,4 +440,22 @@ RSpec.describe 'resource timing' do
     end
     expect(got).to include(['m.json', 'link'], ['p.css', 'link'], ['mod.js', 'other'])
   end
+
+  it 'times a module and the modules it imports as \'script\'' do
+    doc = '<!DOCTYPE html><html><body><script type="module" src="/parent.mjs"></script></body></html>'
+    a = ->(env) {
+      case env['PATH_INFO']
+      when '/parent.mjs' then [200, {'content-type' => 'text/javascript'}, ["import './child.mjs'; window.__p = 1;"]]
+      when '/child.mjs'  then [200, {'content-type' => 'text/javascript'}, ['window.__c = 1;']]
+      else [200, {'content-type' => 'text/html'}, [doc]]
+      end
+    }
+    s = simulated_session(a)
+    s.visit 'http://www.example.com/'
+    got = poll_until do
+      m = s.evaluate_script("performance.getEntriesByType('resource').map(function (e) { return [e.name.split('/').pop(), e.initiatorType]; })")
+      m.length >= 2 ? m : nil
+    end
+    expect(got).to include(['parent.mjs', 'script'], ['child.mjs', 'script'])
+  end
 end
