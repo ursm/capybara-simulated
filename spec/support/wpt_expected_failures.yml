@@ -11100,9 +11100,6 @@ resource-timing/initiator-type/picture.html:
 - The initiator type for <source> in a <picture> must be 'img'
 resource-timing/initiator-type/svg.html:
 - The initiator type for <use> in an <svg> must be 'other'
-resource-timing/initiator-type/workers.html:
-- The initiator type for classic worker must be 'other'
-- The initiator type for module worker must be 'script'
 resource-timing/interim-response-times.h2.html:
 - Fetch from http://www.example.com with early hints, with 100 response
 - Fetch from http://www.example.com with early hints, with 100 response

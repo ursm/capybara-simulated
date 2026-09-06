@@ -40,6 +40,21 @@ const REPO = 'web-platform-tests/wpt';
 const PINNED = 'bbe4ce211741e3b36f58ccdcffd6a7c1926fde1b';   // web-platform-tests/wpt @ 2026-06-27
 const REF = process.env.WPT_REF || PINNED;
 
+// Written after cleanTree — see the call site. Each is a fixture a vendored in-scope test imports
+// by a fixed name that WPT does not carry in its tree (raw 404 at the pin AND at master), so it
+// can't be fetched and, having a fixed name, can't be preserved with the `csim-` prefix.
+//   - resource-timing/resources/child.js: parent_script.js does `import './child.js'`, exercising
+//     module-import Resource Timing (initiator-type/script.html "script imported from another script").
+//   - resource-timing/initiator-type/resources/empty.js: workers.html loads it as a classic AND a
+//     module worker (`resources/empty.js?worker` / `?moduleWorker`), so it must parse as both — a
+//     comment-only body does, an `export {}` would not (classic scripts can't export).
+const LOCAL_FIXTURES = {
+  'resource-timing/resources/child.js':
+    '// Imported by parent_script.js to exercise module-import Resource Timing.\nexport {};\n',
+  'resource-timing/initiator-type/resources/empty.js':
+    '/* Nothing here */\n'
+};
+
 // Directories to vendor whole and scan for tests. Top-level trees plus a few
 // narrow html/ SUBTREES (the full html/ tree is thousands of mostly
 // layout-dependent files; we cherry-pick the layout-light slices: the
@@ -429,6 +444,18 @@ async function main() {
   console.error(`Downloading ${paths.length} files (concurrency ${CONCURRENCY})…`);
   await pool(paths, CONCURRENCY, (p) => vendorPath(sha, p));
   if (skipped) console.error(`  ${skipped} reftest/unused files fetched and dropped (harness-only trees)`);
+
+  // Fixtures a vendored in-scope test imports by a FIXED relative name that is ABSENT from the WPT
+  // tree at every ref checked (raw 404 + not in the git tree), so the recursive walk never fetches
+  // them. Written AFTER the download + cleanTree so a re-vendor recreates them: cleanTree spares only
+  // `csim-*` names, and these names are fixed by the importing test, so they can't take that prefix.
+  // Trivial no-op scripts (matching the sibling `resource-timing/resources/empty.js`).
+  for (const [rel, content] of Object.entries(LOCAL_FIXTURES)) {
+    const dest = join(OUT, rel);
+    await mkdir(dirname(dest), { recursive: true });
+    await writeFile(dest, content);
+  }
+  console.error(`  ${Object.keys(LOCAL_FIXTURES).length} local fixtures written (absent upstream)`);
 
   await writeFile(
     join(OUT, 'WPT_VERSION'),

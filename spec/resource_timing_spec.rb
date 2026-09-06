@@ -495,4 +495,26 @@ RSpec.describe 'resource timing' do
     end
     expect(shared).to eq(1)
   end
+
+  it 'times a worker main script: classic as \'other\', module as \'script\'' do
+    doc = <<~HTML
+      <!DOCTYPE html><html><body><script>
+        new Worker('/w.js?classic', {type: 'classic'});
+        new Worker('/w.js?module', {type: 'module'});
+      </script></body></html>
+    HTML
+    a = ->(env) {
+      case env['PATH_INFO']
+      when '/w.js' then [200, {'content-type' => 'text/javascript'}, ['self.onmessage = function () {};']]
+      else [200, {'content-type' => 'text/html'}, [doc]]
+      end
+    }
+    s = simulated_session(a)
+    s.visit 'http://www.example.com/'
+    got = poll_until do
+      m = s.evaluate_script("performance.getEntriesByType('resource').filter(function (e) { return /w\\.js/.test(e.name); }).map(function (e) { return [e.name.split('?').pop(), e.initiatorType]; })")
+      m.length >= 2 ? m : nil
+    end
+    expect(got).to include(['classic', 'other'], ['module', 'script'])
+  end
 end

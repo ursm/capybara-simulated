@@ -3525,6 +3525,15 @@ module Capybara
         list
       end
 
+      # The `{url, meta}` for the worker main-script fetch the last `worker_spawn` made (or nil) —
+      # the Worker / SharedWorker constructor reads it right after the spawn to file a 'other'
+      # (classic) / 'script' (module) Resource Timing entry in the creating realm. Cleared on read.
+      def take_worker_rt
+        rt = Thread.current[:csim_worker_rt]
+        Thread.current[:csim_worker_rt] = nil
+        rt
+      end
+
       # File the Resource Timing entries for any module a dynamic `import()` fetched since the last
       # drain, before a script reads `performance`. A static `<script type=module>` graph files its
       # own entries inline (see `runModuleScript`, before the element's `load`); a dynamic import has
@@ -4421,6 +4430,9 @@ module Capybara
         parent_worker = realm_id.to_i.negative? ? -realm_id.to_i : nil
         # The handle counter is bumped from worker threads too (nested spawns) — lock it.
         handle = @worker_init_lock.synchronize { @worker_seq += 1 }
+        # Clear any Resource Timing fact a preceding spawn left, so an early `worker_fail` below (which
+        # still returns a handle the JS registers) can't hand its constructor a stale entry.
+        Thread.current[:csim_worker_rt] = nil
         # A NESTED blob:/data: worker script would need the MAIN VM's blob registry from a
         # non-owning thread (the documented SEGV hazard) — fail it cleanly (onerror), the
         # same observable as before nested workers existed. Marshalling the blob read to
@@ -4467,6 +4479,18 @@ module Capybara
           pending
         elsif !sw_script
           fetch_worker_script(target)
+        end
+        # Resource Timing for a DEDICATED worker's own main-script fetch — a browser files it in the
+        # creating context's timeline (a classic worker as 'other', a module worker as 'script'; the
+        # JS Worker constructor knows the type and reads this back after the spawn returns, filing it
+        # in its own realm). A SHARED worker's script is NOT a subresource of any one document, so it
+        # generates no entry (resource-timing/shared-worker-rt-entry); nor does a service worker's
+        # registration. Only for a script actually fetched over the network here: a blob:/data: script
+        # has no fetch to time, and an SW-intercepted worker script (`sw_script`, deferred) is timed
+        # by the SW path. `csim_asset_meta` is the fetch fact `fetch_worker_script`'s `rack_fetch_body`
+        # just stashed (cleared at the top of the spawn so a failed one can't leak).
+        if !service && !shared && !sw_script && body && target.match?(%r{\Ahttps?://}i)
+          Thread.current[:csim_worker_rt] = {'url' => target, 'meta' => Thread.current[:csim_asset_meta]}
         end
         # A blob: worker script that didn't resolve (revoked / unavailable) fails the
         # same way — fire onerror rather than spawn a worker that runs nothing.

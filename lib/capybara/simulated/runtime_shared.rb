@@ -234,6 +234,7 @@ module Capybara
         '__csim_localFontTable'      => ->(b, *a) { b.local_font_table(a[0], a[1] || '') },
         '__csim_resourceTimingFetch' => ->(b, *a) { b.resource_timing_fetch(a[0], a[1] == true, a[2] || 'same-origin') },
         '__csim_takeModuleRt'        => ->(b, *a) { b.take_module_rt },
+        '__csim_takeWorkerRt'        => ->(b, *a) { b.take_worker_rt },
         '__csim_fontAdvancesFromBytes' => ->(b, *a) { b.font_advance_table_from_bytes(a[0]) },
         '__csim_loadImage'           => ->(b, *a) { b.load_image(a[0], !!a[1], a[2] || 'same-origin') },
         '__csim_imageLoadStart'      => ->(b, *a) { b.image_load_start(a[0], !!a[1], a[2] || 'same-origin') },
