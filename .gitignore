@@ -15,3 +15,8 @@
 __pycache__/
 *.pyc
 /flatware-sink
+
+# ci_rspec_spec writes a throwaway fixture spec here to drive bin/ci-rspec; its `ensure` cleans it
+# up, but a KILLED test run leaks one, which then fails the next gate and (via `git add -A`) can be
+# committed. Never track them.
+/spec/tmp_ci_rspec_fixture_*_spec.rb
