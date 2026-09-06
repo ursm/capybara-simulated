@@ -3503,6 +3503,22 @@ module Capybara
         result['body'].to_s
       end
 
+      # A module the graph loader just fetched (via `rack_fetch_body`, whose facts are stashed in
+      # `csim_asset_meta`) — collected so the bridge can file its 'script' Resource Timing entry
+      # after the graph evaluates. One per URL; the loader's own handle cache dedupes re-imports.
+      def note_module_fetch(url)
+        meta = Thread.current[:csim_asset_meta]
+        return unless meta
+
+        (Thread.current[:csim_module_rt] ||= []) << {'url' => url.to_s, 'meta' => meta}
+      end
+      # The modules fetched since the last call, for the bridge to time as 'script' — cleared on read.
+      def take_module_rt
+        list = Thread.current[:csim_module_rt] || []
+        Thread.current[:csim_module_rt] = []
+        list
+      end
+
       # A resource fetched only for its Resource Timing entry — a `<video>` / `<audio>` / `<embed>` /
       # `<object>` / `<track>` source the driver does not otherwise decode or play. Returns the fetch
       # facts (`resource_timing_meta`), or nil when the URL can't resolve; a 4xx/5xx still returns

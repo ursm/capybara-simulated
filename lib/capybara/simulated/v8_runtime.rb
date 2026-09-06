@@ -1169,7 +1169,10 @@ module Capybara
           return handles[url] = nil if r && r['blocked']   # respondWith failed the load
           src = r && r['body']
         end
-        src ||= @browser.rack_fetch_body(url_s)
+        if src.nil?
+          src = @browser.rack_fetch_body(url_s)
+          @browser.note_module_fetch(url_s) if src   # its Resource Timing entry ('script')
+        end
         return handles[url] = nil unless src
         body = module_body(url_s, src)
         # No-cd warm path: once this isolate has compiled a URL, its in-memory

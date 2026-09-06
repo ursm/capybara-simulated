@@ -480,6 +480,7 @@ module Capybara
           resolved = browser.resolve_module_specifier(specifier, importer)
           body = browser.rack_fetch_body(resolved)
           return nil unless body
+          browser.note_module_fetch(resolved.to_s)   # its Resource Timing entry ('script')
           # `.json` (and `?import` JSON) imports come from Vite's
           # `import.meta.glob` and `import x from './data.json'`
           # patterns. quickjs.rb's loader passes the source through
