@@ -2466,6 +2466,7 @@ module Capybara
         # *before* the page's own setup code that the test expects
         # to be active.
         tick_real_time
+        flush_module_rt
         invalidate_find_cache
         # Routes to the active frame realm inside `within_frame` (Selenium
         # parity: `evaluate_script` runs in the current browsing context).
@@ -2480,6 +2481,7 @@ module Capybara
       # …) that the marshaller would recurse into.
       def execute_script(code, args = [])
         tick_real_time
+        flush_module_rt
         invalidate_find_cache
         dom_call('__csimExecScript', code.to_s, marshal_args(args || []))
         drain_pending_navigation
@@ -3504,19 +3506,41 @@ module Capybara
       end
 
       # A module the graph loader just fetched (via `rack_fetch_body`, whose facts are stashed in
-      # `csim_asset_meta`) — collected so the bridge can file its 'script' Resource Timing entry
-      # after the graph evaluates. One per URL; the loader's own handle cache dedupes re-imports.
+      # `csim_asset_meta`) — collected so the bridge can file its 'script' Resource Timing entry.
+      # One per URL: the V8 loader's handle cache already skips a re-import before it fetches, but
+      # the QuickJS loader dedupes compilation only after the block returns, so it fetches a shared
+      # child once per importer — dedup here gives both engines the browser's one-entry-per-URL.
       def note_module_fetch(url)
         meta = Thread.current[:csim_asset_meta]
         return unless meta
 
-        (Thread.current[:csim_module_rt] ||= []) << {'url' => url.to_s, 'meta' => meta}
+        url  = url.to_s
+        list = (Thread.current[:csim_module_rt] ||= [])
+        list << {'url' => url, 'meta' => meta} unless list.any? {|m| m['url'] == url }
       end
       # The modules fetched since the last call, for the bridge to time as 'script' — cleared on read.
       def take_module_rt
         list = Thread.current[:csim_module_rt] || []
         Thread.current[:csim_module_rt] = []
         list
+      end
+
+      # File the Resource Timing entries for any module a dynamic `import()` fetched since the last
+      # drain, before a script reads `performance`. A static `<script type=module>` graph files its
+      # own entries inline (see `runModuleScript`, before the element's `load`); a dynamic import has
+      # no such follow-up, so this read-boundary flush is what files it — at the next driver read, so
+      # every Capybara assertion on `performance` sees it. Two known gaps of this backstop, kept
+      # small deliberately (the alternative — recording in the loader mid-resolution — re-enters V8
+      # from the host during module resolution, which the rusty_racer rendezvous makes risky): a
+      # dynamic import's entry is filed at drain time rather than fetch time, and a page that reads
+      # `performance` from within the import's own `.then` (before any driver read) won't see it yet.
+      # Gated on the thread-local so a module-free page never crosses into JS; routed through
+      # `dom_call` so the flush runs in the active realm (a `within_frame` dynamic import read from a
+      # different realm is filed there, not in the frame's `performance` — the remaining gap).
+      def flush_module_rt
+        return if (Thread.current[:csim_module_rt] || []).empty?
+
+        dom_call('__csimFlushModuleRt')
       end
 
       # A resource fetched only for its Resource Timing entry — a `<video>` / `<audio>` / `<embed>` /
@@ -9586,10 +9610,12 @@ module Capybara
 
       def resolve_against(url, base)
         return url if url =~ %r{\A[a-z]+://}i
-        # quickjs.rb's module_loader passes the importer for nested
-        # relative imports; if the importer was an inline-script
-        # pseudo-name (no scheme), fall through to the page URL.
-        base = nil unless base.is_a?(String) && base =~ %r{\A[a-z]+://}i
+        # quickjs.rb's module_loader passes the importer for nested relative imports (and for a
+        # dynamic `import()`, the importer is the referring script). An inline script / module has no
+        # real URL — its pseudo-name is `<eval>` (no scheme, from V8) or `inline://<hash>` (from
+        # `__csim_runScript`) — so a specifier must resolve against the PAGE URL, not the pseudo-name.
+        # Fall through for a base that is not a real URL or is one of those `inline:` pseudo-names.
+        base = nil unless base.is_a?(String) && base =~ %r{\A[a-z]+://}i && !base.start_with?('inline:')
         eff = base || @current_url || @default_host
         # Memo of `URI.join(eff, url)` — a pure function of (effective base, url).
         # A heavy ESM app re-resolves the same ~80 module specifiers against the

@@ -458,4 +458,41 @@ RSpec.describe 'resource timing' do
     end
     expect(got).to include(['parent.mjs', 'script'], ['child.mjs', 'script'])
   end
+
+  it 'times a dynamically imported module as \'script\'' do
+    doc = '<!DOCTYPE html><html><body><script>import("/dyn.mjs")</script></body></html>'
+    a = ->(env) {
+      case env['PATH_INFO']
+      when '/dyn.mjs' then [200, {'content-type' => 'text/javascript'}, ['window.__d = 1;']]
+      else [200, {'content-type' => 'text/html'}, [doc]]
+      end
+    }
+    s = simulated_session(a)
+    s.visit 'http://www.example.com/'
+    got = poll_until do
+      m = s.evaluate_script("performance.getEntriesByType('resource').filter(function (e) { return /dyn\\.mjs$/.test(e.name); }).map(function (e) { return e.initiatorType; })")
+      m.any? ? m : nil
+    end
+    expect(got).to eq(['script'])   # filed once, at the rendering update after the import resolves
+  end
+
+  it 'times a module imported by two importers once (both engines)' do
+    doc = '<!DOCTYPE html><html><body><script type="module" src="/root.mjs"></script></body></html>'
+    a = ->(env) {
+      case env['PATH_INFO']
+      when '/root.mjs'   then [200, {'content-type' => 'text/javascript'}, ["import './a.mjs'; import './b.mjs';"]]
+      when '/a.mjs'      then [200, {'content-type' => 'text/javascript'}, ["import './shared.mjs';"]]
+      when '/b.mjs'      then [200, {'content-type' => 'text/javascript'}, ["import './shared.mjs';"]]
+      when '/shared.mjs' then [200, {'content-type' => 'text/javascript'}, ['window.__s = 1;']]
+      else [200, {'content-type' => 'text/html'}, [doc]]
+      end
+    }
+    s = simulated_session(a)
+    s.visit 'http://www.example.com/'
+    shared = poll_until do
+      n = s.evaluate_script("performance.getEntriesByType('resource').filter(function (e) { return /shared\\.mjs$/.test(e.name); }).length")
+      n.positive? ? n : nil
+    end
+    expect(shared).to eq(1)
+  end
 end
