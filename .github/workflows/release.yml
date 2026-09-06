@@ -1,17 +1,64 @@
 name: Release
 
+# Cross-compile the native cascade accelerator (ext/native_cascade) into prebuilt (fat) platform
+# gems — the same distribution model as the rusty_racer dependency — so `gem install` needs no Rust
+# toolchain on the covered platforms. A source gem is published too as the fallback for uncovered
+# platforms (which then compile it, or fail loudly — the accelerator is required, never silently
+# skipped). `rake compile` cross-compiles via rb-sys / rake-compiler-dock, driven by
+# oxidize-rb/actions/cross-gem.
 on:
   push:
     tags: ['v*']
+  # Manual runs cross-compile and upload the gems as artifacts WITHOUT publishing — a way to test
+  # the build matrix (the `push` job is gated on a tag push).
+  workflow_dispatch:
 
 jobs:
-  push:
+  cross-gem:
+    name: Cross-compile (${{ matrix.platform }})
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # The same platforms the rusty_racer (V8) dependency ships — musl and Windows are excluded
+        # (rusty_racer has no gem for them, and musl/Alpine isn't a typical dev environment), so we
+        # don't ship an accelerator for a platform that can't run the primary engine anyway.
+        platform:
+          - x86_64-linux
+          - aarch64-linux
+          - arm64-darwin
+          - x86_64-darwin
+    steps:
+      - uses: actions/checkout@v7
 
+      - uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: '3.4'
+          bundler-cache: true
+
+      # Builds pkg/capybara-simulated-<version>-<platform>.gem with the .so precompiled for every
+      # listed Ruby ABI (and `extensions` cleared, so it installs without compiling).
+      - uses: oxidize-rb/actions/cross-gem@v1
+        id: cross-gem
+        with:
+          platform: ${{ matrix.platform }}
+          ruby-versions: '3.3,3.4,4.0'
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: gem-${{ matrix.platform }}
+          path: ${{ steps.cross-gem.outputs.gem-path }}
+          if-no-files-found: error
+
+  push:
+    name: Publish to RubyGems
+    needs: cross-gem
+    # Only a real tag publishes; a manual dispatch stops after cross-gem (artifacts only).
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
     permissions:
-      contents: write
-      id-token: write
-
+      contents: read
+      id-token: write   # trusted publishing (OIDC), as the previous single-gem release used
     steps:
       - uses: actions/checkout@v7
 
@@ -20,4 +67,23 @@ jobs:
           ruby-version: '4.0'
           bundler-cache: true
 
-      - uses: rubygems/release-gem@v1
+      - name: Collect the cross-compiled platform gems
+        uses: actions/download-artifact@v4
+        with:
+          path: pkg
+          merge-multiple: true
+
+      # The source gem: the fallback for any platform without a prebuilt gem above (it compiles the
+      # extension at install, or fails loudly — there is no silent JS-only install).
+      - name: Build the source gem
+        run: gem build capybara-simulated.gemspec --output pkg/capybara-simulated.gem
+
+      - uses: rubygems/configure-rubygems-credentials@main
+
+      - name: Push every gem
+        run: |
+          shopt -s nullglob
+          for gem in pkg/*.gem; do
+            echo "→ gem push ${gem}"
+            gem push "${gem}"
+          done
