@@ -517,4 +517,41 @@ RSpec.describe 'resource timing' do
     end
     expect(got).to include(['classic', 'other'], ['module', 'script'])
   end
+
+  it 'times a <picture> <source>-selected image as \'img\', and fetches only the source' do
+    png = File.binread(Dir.glob('spec/wpt/resource-timing/resources/blue.png').first)
+    doc = <<~HTML
+      <!DOCTYPE html><html><body>
+      <picture>
+        <source srcset="/blue.png?source" type="image/png">
+        <img src="/blue.png?imgfallback">
+      </picture>
+      </body></html>
+    HTML
+    a = ->(env) { env['PATH_INFO'] == '/blue.png' ? [200, {'content-type' => 'image/png'}, [png]] : [200, {'content-type' => 'text/html'}, [doc]] }
+    s = simulated_session(a)
+    s.visit 'http://www.example.com/'
+    got = poll_until do
+      m = s.evaluate_script("performance.getEntriesByType('resource').filter(function (e) { return /blue\\.png/.test(e.name); }).map(function (e) { return [e.name.split('?').pop(), e.initiatorType]; })")
+      m.any? ? m : nil
+    end
+    expect(got).to eq([['source', 'img']])   # the matching <source> wins; the img's own src is never fetched
+  end
+
+  it 'times an SVG external <use> reference as \'other\'; a same-document #ref makes no request' do
+    doc = <<~HTML
+      <!DOCTYPE html><html><body>
+      <svg style="display:none"><use href="/sprite.svg?ext"></use></svg>
+      <svg style="display:none"><use href="#local"></use></svg>
+      </body></html>
+    HTML
+    a = ->(env) { env['PATH_INFO'] == '/sprite.svg' ? [200, {'content-type' => 'image/svg+xml'}, ['<svg xmlns="http://www.w3.org/2000/svg"/>']] : [200, {'content-type' => 'text/html'}, [doc]] }
+    s = simulated_session(a)
+    s.visit 'http://www.example.com/'
+    got = poll_until do
+      m = s.evaluate_script("performance.getEntriesByType('resource').filter(function (e) { return /svg/.test(e.name); }).map(function (e) { return [e.name.split('/').pop(), e.initiatorType]; })")
+      m.any? ? m : nil
+    end
+    expect(got).to eq([['sprite.svg?ext', 'other']])   # the #local reference is same-document — no entry
+  end
 end
