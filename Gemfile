@@ -19,6 +19,7 @@ group :development, :test do
   gem 'puma'               # for Capybara's :server tests (also used by spec helper)
   gem 'rack-test'
   gem 'rake',              require: false
+  gem 'rake-compiler',     require: false # builds the native cascade ext (ext/native_cascade) for dev/CI
   gem 'rspec',             '~> 3.13'
   gem 'selenium-webdriver' # bench/run.rb under :selenium
   gem 'stackprof',         require: false # sampling profiler for perf investigations

@@ -20,3 +20,16 @@ __pycache__/
 # up, but a KILLED test run leaks one, which then fails the next gate and (via `git add -A`) can be
 # committed. Never track them.
 /spec/tmp_ci_rspec_fixture_*_spec.rb
+
+# Native cascade accelerator build artifacts (the compiled ext ships in fat gems, is built
+# on source-install, and is rebuilt locally by `rake compile`). Cargo.toml/Cargo.lock and the
+# ext/ source ARE tracked; the build outputs are not.
+/target/
+/tmp/
+/ext/native_cascade/Makefile
+/ext/native_cascade/*.so
+/ext/native_cascade/*.bundle
+/ext/native_cascade/mkmf.log
+/ext/native_cascade/.sitearchdir.time
+/lib/capybara/simulated/native_cascade.so
+/lib/capybara/simulated/native_cascade.bundle

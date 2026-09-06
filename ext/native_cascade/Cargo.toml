@@ -1,0 +1,12 @@
+[package]
+name    = "native_cascade"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+magnus = { version = "0.8", features = ["rb-sys"] }
+rb-sys = "0.9"

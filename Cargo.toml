@@ -1,0 +1,5 @@
+# Cargo workspace root for the native cascade accelerator (ext/native_cascade). rb-sys's
+# ExtensionTask runs `cargo metadata` from here; the crate itself lives under ext/.
+[workspace]
+members  = ["ext/native_cascade"]
+resolver = "2"

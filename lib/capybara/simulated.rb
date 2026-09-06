@@ -12,6 +12,7 @@ rescue LoadError => e
                    "`libvips42`, Homebrew `vips`, Gentoo `media-libs/vips`): #{e.message}"
 end
 require 'capybara/simulated/version'
+require 'capybara/simulated/native'   # the Rust cascade accelerator (required; run `rake compile` in a dev checkout)
 require 'capybara/simulated/driver'
 
 module Capybara
