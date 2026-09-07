@@ -217,9 +217,11 @@ fn import_node(
     rv.set_uint32(new_id as u32);
 }
 
-// __dom.queryIds(rootId, selector) -> [nativeId, …], or null for an invalid selector.
-// Returns NodeIds (not wrappers) so the measurement path can map results back to the
-// JS tree cheaply; this is also the shape the host-query layer would use.
+// __dom.queryIds(rootId, selector) -> [nativeId, …] when native matching answers the selector;
+// `undefined` when it needs the JS engine (a live-state selector like `:hover` / `:checked`);
+// `null` for an invalid selector. Returns NodeIds (not wrappers) so the query layer can map
+// results back to the JS tree cheaply, and lets it distinguish "defer to css-select" (undefined)
+// from "SyntaxError" (null) — this is the shape the host-query layer uses.
 fn query_ids(
     scope: &mut v8::PinScope<'_, '_>,
     args: v8::FunctionCallbackArguments<'_>,
@@ -231,7 +233,7 @@ fn query_ids(
     };
     let selector = args.get(1).to_rust_string_lossy(scope);
     match crate::selector::query_text(dom(scope), root, &selector, false) {
-        Some(ids) => {
+        crate::selector::QueryOutcome::Matched(ids) => {
             let array = v8::Array::new(scope, ids.len() as i32);
             for (i, id) in ids.iter().enumerate() {
                 let v: v8::Local<v8::Value> = v8::Integer::new_from_unsigned(scope, *id as u32).into();
@@ -239,7 +241,11 @@ fn query_ids(
             }
             rv.set(array.into());
         }
-        None => rv.set_null(),
+        crate::selector::QueryOutcome::NeedsJsFallback => {
+            let undef: v8::Local<v8::Value> = v8::undefined(scope).into();
+            rv.set(undef);
+        }
+        crate::selector::QueryOutcome::Invalid => rv.set_null(),
     }
 }
 
@@ -788,8 +794,14 @@ fn query_selector(
         return;
     };
     let selector = args.get(0).to_rust_string_lossy(scope);
-    let found = crate::selector::query_text(dom(scope), root, &selector, true);
-    match found.and_then(|mut ids| ids.drain(..).next()) {
+    // The native element-wrapper probe has no JS engine to defer to, so a live-state selector
+    // (NeedsJsFallback) or an invalid one both yield null here. Production state-pseudo handling
+    // is on the queryIds → css-select path.
+    let first = match crate::selector::query_text(dom(scope), root, &selector, true) {
+        crate::selector::QueryOutcome::Matched(ids) => ids.into_iter().next(),
+        crate::selector::QueryOutcome::NeedsJsFallback | crate::selector::QueryOutcome::Invalid => None,
+    };
+    match first {
         Some(id) => {
             if let Some(obj) = element_wrapper(scope, id) {
                 rv.set(obj.into());
@@ -810,7 +822,12 @@ fn query_selector_all(
         return;
     };
     let selector = args.get(0).to_rust_string_lossy(scope);
-    let found = crate::selector::query_text(dom(scope), root, &selector, false).unwrap_or_default();
+    // Same probe limitation as querySelector: no JS fallback here, so a live-state or invalid
+    // selector yields an empty list.
+    let found = match crate::selector::query_text(dom(scope), root, &selector, false) {
+        crate::selector::QueryOutcome::Matched(ids) => ids,
+        crate::selector::QueryOutcome::NeedsJsFallback | crate::selector::QueryOutcome::Invalid => Vec::new(),
+    };
     let array = v8::Array::new(scope, found.len() as i32);
     for (i, id) in found.into_iter().enumerate() {
         if let Some(obj) = element_wrapper(scope, id) {

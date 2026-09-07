@@ -10,9 +10,11 @@
 // repointed from the mirror's flat `RawNode` at our `NodeData`.
 //
 // State-dependent, non-tree-structural pseudo-classes (`:hover`, `:checked`, `:focus`, `:disabled`,
-// …) depend on element state that still lives in the JS DOM; they are parsed (so real selectors
-// don't error) but only `:link`/`:any-link` (structural: a/area/link with href) match here. A
-// selector that needs live state must fall back to the JS engine — see the caller.
+// …) depend on element state that still lives in the JS DOM. They are parsed (so real selectors
+// don't error), but a selector using one is flagged at parse time (`needs_fallback`) and reported
+// to the caller as `QueryOutcome::NeedsJsFallback` — it is NOT matched natively, because the arena
+// can't see the state and would return a wrong subset. The caller then runs css-select. Only
+// `:link`/`:any-link` (structural: a/area/link with href) are answered here.
 
 use std::borrow::Borrow;
 use std::fmt;
@@ -125,7 +127,15 @@ impl PseudoElement for PseudoEl {
 // The parser: everything tree-structural is handled by the crate; we only name the non-TS
 // pseudo-classes and pseudo-elements so real selectors parse instead of erroring. The enabled
 // features mirror what the driver's css-select supports, so native matching agrees.
-struct CsimParser;
+#[derive(Default)]
+struct CsimParser {
+    // Set when a selector uses a construct the native matcher can't answer correctly (a
+    // state pseudo-class, an unknown functional pseudo-class, or a pseudo-element), so the
+    // caller defers the whole selector to the JS css-select engine. The crate calls the
+    // parser callbacks for nested `:is()` / `:not()` / `:has()` contents too, so this flag
+    // catches a state pseudo at any depth without walking the parsed tree.
+    needs_fallback: std::cell::Cell<bool>,
+}
 
 impl<'i> Parser<'i> for CsimParser {
     type Impl = CsimImpl;
@@ -152,7 +162,11 @@ impl<'i> Parser<'i> for CsimParser {
         _location: SourceLocation,
         name: CowRcStr<'i>,
     ) -> Result<PseudoClass, cssparser::ParseError<'i, Self::Error>> {
-        Ok(PseudoClass(name.as_ref().to_ascii_lowercase()))
+        let name = name.as_ref().to_ascii_lowercase();
+        if !is_native_pseudo_class(&name) {
+            self.needs_fallback.set(true);
+        }
+        Ok(PseudoClass(name))
     }
 
     fn parse_non_ts_functional_pseudo_class<'t>(
@@ -163,6 +177,10 @@ impl<'i> Parser<'i> for CsimParser {
     ) -> Result<PseudoClass, cssparser::ParseError<'i, Self::Error>> {
         // Consume the argument tokens so parsing succeeds; the class is carried by name only.
         while arguments.next().is_ok() {}
+        // Functional non-TS pseudo-classes (:lang(), :dir(), …) all need state/info the arena
+        // doesn't model — always defer. (:nth-child() & friends are tree-structural and handled
+        // by the crate, so they never reach here.)
+        self.needs_fallback.set(true);
         Ok(PseudoClass(name.as_ref().to_ascii_lowercase()))
     }
 
@@ -171,6 +189,9 @@ impl<'i> Parser<'i> for CsimParser {
         _location: SourceLocation,
         name: CowRcStr<'i>,
     ) -> Result<PseudoEl, cssparser::ParseError<'i, Self::Error>> {
+        // A pseudo-element in a query selector matches no element; defer to css-select so
+        // whatever it does (match nothing, or error) is reproduced exactly.
+        self.needs_fallback.set(true);
         Ok(PseudoEl(name.as_ref().to_ascii_lowercase()))
     }
 }
@@ -334,22 +355,73 @@ impl<'a> Element for NodeRef<'a> {
     }
 }
 
-// Parse a selector list, or None if invalid.
-pub fn parse(text: &str) -> Option<SelectorList<CsimImpl>> {
+// Pseudo-classes the native matcher answers correctly from arena structure alone. Everything
+// else (:hover, :checked, :focus, :valid, :target, …) depends on live element state the JS DOM
+// still owns, so a selector using one must defer to css-select rather than silently return a
+// wrong (subset) result.
+//
+// This gate only sees pseudo-classes routed through `parse_non_ts_pseudo_class`. A few crate
+// BUILT-INS bypass it: `:scope` (handled correctly via the context's scope_element — see
+// new_context) and the shadow-DOM `:host` / `::part()` / `::slotted()`, which the arena can't
+// model. The latter three match nothing here (no shadow host / parts), which agrees with
+// css-select on a shadow-less tree; they'll need real handling — not this structural gate — when
+// shadow DOM enters the arena.
+fn is_native_pseudo_class(name: &str) -> bool {
+    matches!(name, "link" | "any-link")
+}
+
+// A parsed selector plus whether it needs the JS fallback (it uses a non-native pseudo).
+struct Parsed {
+    list: SelectorList<CsimImpl>,
+    needs_fallback: bool,
+}
+
+// The outcome of a native query: a matched id set, a request to fall back to the JS css-select
+// engine (the selector uses live-state constructs), or an invalid selector.
+pub enum QueryOutcome {
+    Matched(Vec<usize>),
+    NeedsJsFallback,
+    Invalid,
+}
+
+// Parse a selector list, or None if invalid, recording whether it needs JS fallback.
+fn parse(text: &str) -> Option<Parsed> {
     let mut input = ParserInput::new(text);
     let mut parser = CssParser::new(&mut input);
-    SelectorList::parse(&CsimParser, &mut parser, ParseRelative::No).ok()
+    let csim = CsimParser::default();
+    let list = SelectorList::parse(&csim, &mut parser, ParseRelative::No).ok()?;
+    Some(Parsed {
+        list,
+        needs_fallback: csim.needs_fallback.get(),
+    })
 }
 
 // Parsed-selector cache — the driver emits a small recurring set of selectors, so parsing each once
 // and reusing it keeps matching off the parser. Keyed by the selector text.
 thread_local! {
-    static CACHE: std::cell::RefCell<std::collections::HashMap<String, Option<SelectorList<CsimImpl>>>> =
+    static CACHE: std::cell::RefCell<std::collections::HashMap<String, Option<Parsed>>> =
         std::cell::RefCell::new(std::collections::HashMap::new());
 }
 
-// Whether the element at `idx` matches the (already-parsed) selector list.
-pub fn matches(dom: &Dom, idx: usize, list: &SelectorList<CsimImpl>) -> bool {
+// Collect descendants of `root` (preorder / document order) matching `list`, with `:scope` bound to
+// `root` so `:scope > .child` resolves against the query root. `first_only` stops at the first hit
+// (querySelector).
+//
+// `:scope` binding: the crate matches `Component::Scope` as `element.opaque() == scope_element` when
+// the context sets it, falling back to `is_root()` when it doesn't (context.rs / matching.rs).
+// `is_root()` would wrongly resolve `:scope` to the arena root, so we set scope_element to `root`;
+// OpaqueElement is a type-erased pointer (no borrow), so it outlives the short dom borrow here.
+//
+// ONE MatchingContext (and its SelectorCaches — the nth-index cache) is reused across every
+// candidate, the crate's intended usage; a fresh cache per candidate would be pure waste. The
+// matcher walks each candidate's full ancestor chain, so ancestor-dependent combinators resolve
+// correctly even above `root`.
+pub fn query(dom: &Dom, root: usize, list: &SelectorList<CsimImpl>, first_only: bool) -> Vec<usize> {
+    let mut out = Vec::new();
+    let mut stack: Vec<usize> = match dom.nodes.get(root) {
+        Some(node) => node.children.iter().rev().copied().collect(),
+        None => return out,
+    };
     let mut caches = SelectorCaches::default();
     let mut ctx = MatchingContext::new(
         MatchingMode::Normal,
@@ -359,20 +431,9 @@ pub fn matches(dom: &Dom, idx: usize, list: &SelectorList<CsimImpl>) -> bool {
         NeedsSelectorFlags::No,
         MatchingForInvalidation::No,
     );
-    matches_selector_list(list, &NodeRef { dom, idx }, &mut ctx)
-}
-
-// Collect descendants of `root` (preorder / document order) matching `list`. `first_only` stops at
-// the first hit (querySelector). The matcher walks each candidate's full ancestor chain, so
-// ancestor-dependent combinators resolve correctly even above `root`.
-pub fn query(dom: &Dom, root: usize, list: &SelectorList<CsimImpl>, first_only: bool) -> Vec<usize> {
-    let mut out = Vec::new();
-    let mut stack: Vec<usize> = match dom.nodes.get(root) {
-        Some(node) => node.children.iter().rev().copied().collect(),
-        None => return out,
-    };
+    ctx.scope_element = Some(NodeRef { dom, idx: root }.opaque());
     while let Some(idx) = stack.pop() {
-        if matches(dom, idx, list) {
+        if matches_selector_list(list, &NodeRef { dom, idx }, &mut ctx) {
             out.push(idx);
             if first_only {
                 return out;
@@ -385,11 +446,17 @@ pub fn query(dom: &Dom, root: usize, list: &SelectorList<CsimImpl>, first_only: 
     out
 }
 
-// Parse (cached) + collect. An invalid selector yields None (the caller treats it as a SyntaxError).
-pub fn query_text(dom: &Dom, root: usize, text: &str, first_only: bool) -> Option<Vec<usize>> {
+// Parse (cached) + collect. Distinguishes three outcomes: a matched id set, a request to defer to
+// the JS engine (a live-state selector), or Invalid (the caller treats it as a SyntaxError). A
+// deferred selector is NOT matched here — the arena result would be a wrong subset.
+pub fn query_text(dom: &Dom, root: usize, text: &str, first_only: bool) -> QueryOutcome {
     CACHE.with(|c| {
         let mut c = c.borrow_mut();
         let entry = c.entry(text.to_owned()).or_insert_with(|| parse(text));
-        entry.as_ref().map(|list| query(dom, root, list, first_only))
+        match entry {
+            None => QueryOutcome::Invalid,
+            Some(p) if p.needs_fallback => QueryOutcome::NeedsJsFallback,
+            Some(p) => QueryOutcome::Matched(query(dom, root, &p.list, first_only)),
+        }
     })
 }
