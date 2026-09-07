@@ -16,7 +16,7 @@ capybara-simulated is not a complete replacement for real-browser testing. But i
 
 **A good fit when** your tests are JavaScript-driven but don't depend on pixel-accurate rendering:
 
-- **No browser to install or boot** — no Chrome, no WebDriver, no Node toolchain; everything runs in-process. Execution is about **1.9×** faster than a headless browser on server-rendered / Hotwire apps and roughly at parity on JS-heavy SPAs (rusty_racer) — but the real win is skipping the browser's install, boot, and driver setup, not raw speed.
+- **No browser to install or boot** — no Chrome, no WebDriver, no Node toolchain; everything runs in-process. On a typical Turbo-based Rails app execution runs roughly **1.4×** faster than a headless browser (Turbo keeps the document — and the driver's cascade/layout memo — warm across fragment swaps); a JS-heavy SPA, bottlenecked on JavaScript that runs in V8 either way, comes out around **parity**; and a legacy full-page-reload app, cold on every click, can run slower. Either way the real win is skipping the browser's install, boot, and driver setup, not raw speed.
 - **Deterministic** — a virtual clock and synchronous in-process execution remove the wall-clock timing, network, and rendering races that make headless-browser suites flaky.
 - **Real front-end JS runs**: inline `<script>` + event handlers, MutationObserver, custom elements, `<template>`, Shadow DOM, ES modules importmap, **Hotwire (Stimulus + Turbo)**, Trix.
 - **Drop-in**: the Capybara DSL is unchanged — register `:simulated` and go. Just this gem plus one JS-engine gem.
