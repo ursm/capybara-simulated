@@ -1,0 +1,12 @@
+---
+grid_table:
+  counts:
+    passes: 3
+    reuse_hit: 200
+    reuse_remeasured: 0
+    reuse_escapingAbs: 0
+    ctx_sweeps: 201
+  wall:
+    workload_ms: 318.435
+    calib_ms: 2.785
+    ratio: 114.325
