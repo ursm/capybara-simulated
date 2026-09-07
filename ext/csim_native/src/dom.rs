@@ -46,6 +46,11 @@ pub(crate) struct NodeData {
     pub(crate) attributes: Vec<(String, String)>,
     pub(crate) parent: Option<usize>,
     pub(crate) children: Vec<usize>,
+    // Position within `parent.children`, kept current on every link/unlink, so the
+    // selector engine's prev/next-sibling nav is O(1) — without it `:nth-child` is
+    // O(n²) per query on a wide parent (a 500-sibling list measured 2.5x slower than
+    // css-select; O(1) flips it).
+    pub(crate) child_index: usize,
     // Whether the node has any text/comment child content — so `:empty` is correct even
     // though the arena is element-only (children holds only elements).
     pub(crate) has_text: bool,
@@ -96,16 +101,17 @@ impl Dom {
         self.nodes.get(idx).and_then(|n| n.children.first().copied())
     }
     pub(crate) fn prev_sibling(&self, idx: usize) -> Option<usize> {
-        let parent = self.parent_of(idx)?;
-        let siblings = &self.nodes[parent].children;
-        let pos = siblings.iter().position(|&c| c == idx)?;
-        pos.checked_sub(1).map(|p| siblings[p])
+        let node = self.nodes.get(idx)?;
+        let parent = node.parent?;
+        let pos = node.child_index.checked_sub(1)?;
+        self.nodes.get(parent).and_then(|p| p.children.get(pos).copied())
     }
     pub(crate) fn next_sibling(&self, idx: usize) -> Option<usize> {
-        let parent = self.parent_of(idx)?;
-        let siblings = &self.nodes[parent].children;
-        let pos = siblings.iter().position(|&c| c == idx)?;
-        siblings.get(pos + 1).copied()
+        let node = self.nodes.get(idx)?;
+        let parent = node.parent?;
+        self.nodes
+            .get(parent)
+            .and_then(|p| p.children.get(node.child_index + 1).copied())
     }
 }
 
@@ -136,16 +142,115 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_, ()>, ctx: &v8::Global<v8:
     ensure_templates(scope);
 
     let ns = v8::Object::new(scope);
-    if let (Some(f), Some(k)) = (
-        v8::Function::new(scope, create_element),
-        v8::String::new(scope, "createElement"),
-    ) {
-        ns.set(scope, k.into(), f.into());
-    }
+    register(scope, ns, "createElement", create_element);
+    // Bulk import + id-level query: the measurement / eventual parse-time population
+    // path (build the arena from an already-parsed page and match natively), distinct
+    // from createElement's per-node wrapper path.
+    register(scope, ns, "importNode", import_node);
+    register(scope, ns, "queryIds", query_ids);
+    register(scope, ns, "resetArena", reset_arena);
     if let Some(key) = v8::String::new(scope, "__dom") {
         let global = context.global(scope);
         global.set(scope, key.into(), ns.into());
     }
+}
+
+fn register(
+    scope: &mut v8::PinScope<'_, '_>,
+    ns: v8::Local<'_, v8::Object>,
+    name: &str,
+    callback: impl v8::MapFnTo<v8::FunctionCallback>,
+) {
+    if let (Some(f), Some(k)) = (v8::Function::new(scope, callback), v8::String::new(scope, name)) {
+        ns.set(scope, k.into(), f.into());
+    }
+}
+
+// __dom.importNode(tagName, localName, ns, hasText, parentId, attrsFlat) -> nativeId.
+// Adds an arena node with NO V8 wrapper — the bulk path that builds the arena from an
+// already-parsed document. `attrsFlat` is a flat [name, value, name, value, …] array.
+// `parentId` < 0 makes a root; otherwise the node is appended under that parent.
+fn import_node(
+    scope: &mut v8::PinScope<'_, '_>,
+    args: v8::FunctionCallbackArguments<'_>,
+    mut rv: v8::ReturnValue<'_, v8::Value>,
+) {
+    let tag_name = args.get(0).to_rust_string_lossy(scope);
+    let local_name = args.get(1).to_rust_string_lossy(scope);
+    let ns = args.get(2).to_rust_string_lossy(scope);
+    let has_text = args.get(3).boolean_value(scope);
+    let parent = match args.get(4).integer_value(scope) {
+        Some(p) if p >= 0 => Some(p as usize),
+        _ => None,
+    };
+    let mut attributes = Vec::new();
+    if let Ok(arr) = v8::Local::<v8::Array>::try_from(args.get(5)) {
+        let len = arr.length();
+        let mut i = 0;
+        while i + 1 < len {
+            let name = arr.get_index(scope, i).map(|v| v.to_rust_string_lossy(scope));
+            let value = arr.get_index(scope, i + 1).map(|v| v.to_rust_string_lossy(scope));
+            if let (Some(name), Some(value)) = (name, value) {
+                attributes.push((name, value));
+            }
+            i += 2;
+        }
+    }
+    let st = dom(scope);
+    let new_id = st.nodes.len();
+    st.nodes.push(NodeData {
+        tag_name,
+        local_name,
+        ns,
+        attributes,
+        parent,
+        children: Vec::new(),
+        child_index: 0,
+        has_text,
+        wrapper: None,
+        child_nodes_wrapper: None,
+        dataset_wrapper: None,
+    });
+    if let Some(p) = parent {
+        link_child(&mut st.nodes, p, new_id);
+    }
+    rv.set_uint32(new_id as u32);
+}
+
+// __dom.queryIds(rootId, selector) -> [nativeId, …], or null for an invalid selector.
+// Returns NodeIds (not wrappers) so the measurement path can map results back to the
+// JS tree cheaply; this is also the shape the host-query layer would use.
+fn query_ids(
+    scope: &mut v8::PinScope<'_, '_>,
+    args: v8::FunctionCallbackArguments<'_>,
+    mut rv: v8::ReturnValue<'_, v8::Value>,
+) {
+    let root = match args.get(0).integer_value(scope) {
+        Some(r) if r >= 0 => r as usize,
+        _ => return,
+    };
+    let selector = args.get(1).to_rust_string_lossy(scope);
+    match crate::selector::query_text(dom(scope), root, &selector, false) {
+        Some(ids) => {
+            let array = v8::Array::new(scope, ids.len() as i32);
+            for (i, id) in ids.iter().enumerate() {
+                let v: v8::Local<v8::Value> = v8::Integer::new_from_unsigned(scope, *id as u32).into();
+                array.set_index(scope, i as u32, v);
+            }
+            rv.set(array.into());
+        }
+        None => rv.set_null(),
+    }
+}
+
+// __dom.resetArena() — drop all arena nodes (and their cached wrappers). For the
+// measurement harness, which rebuilds the arena per page.
+fn reset_arena(
+    scope: &mut v8::PinScope<'_, '_>,
+    _args: v8::FunctionCallbackArguments<'_>,
+    _rv: v8::ReturnValue<'_, v8::Value>,
+) {
+    dom(scope).nodes.clear();
 }
 
 // Build the element / NodeList / dataset instance templates once per isolate. Each
@@ -273,20 +378,33 @@ fn create_element(
             attributes,
             parent,
             children: Vec::new(),
+            child_index: 0,
             has_text: false,
             wrapper: None,
             child_nodes_wrapper: None,
             dataset_wrapper: None,
         });
-        if let Some(p) = parent
-            && let Some(parent_node) = st.nodes.get_mut(p)
-        {
-            parent_node.children.push(new_id);
+        if let Some(p) = parent {
+            link_child(&mut st.nodes, p, new_id);
         }
         new_id
     };
     if let Some(obj) = element_wrapper(scope, node_id) {
         rv.set(obj.into());
+    }
+}
+
+// Append `child` at the end of `parent`'s children, recording its position so
+// prev/next-sibling nav is O(1). The one place children are linked (create / import
+// / appendChild), so child_index can never drift from the list.
+fn link_child(nodes: &mut Vec<NodeData>, parent: usize, child: usize) {
+    let pos = match nodes.get(parent) {
+        Some(p) => p.children.len(),
+        None => return,
+    };
+    nodes[parent].children.push(child);
+    if let Some(c) = nodes.get_mut(child) {
+        c.child_index = pos;
     }
 }
 
@@ -622,20 +740,35 @@ fn append_child(
     }
     {
         let st = dom(scope);
-        if let Some(old_parent) = st.nodes.get(child).and_then(|n| n.parent)
-            && let Some(old) = st.nodes.get_mut(old_parent)
-        {
-            old.children.retain(|&c| c != child);
+        if let Some(old_parent) = st.nodes.get(child).and_then(|n| n.parent) {
+            if let Some(old) = st.nodes.get_mut(old_parent) {
+                old.children.retain(|&c| c != child);
+            }
+            // Detaching shifts every later sibling down one — reindex so child_index
+            // stays exact (prev/next-sibling nav depends on it).
+            reindex_children(&mut st.nodes, old_parent);
         }
         if let Some(node) = st.nodes.get_mut(child) {
             node.parent = Some(parent);
         }
-        if let Some(node) = st.nodes.get_mut(parent) {
-            node.children.push(child);
-        }
+        link_child(&mut st.nodes, parent, child);
     }
     if let Some(obj) = element_wrapper(scope, child) {
         rv.set(obj.into());
+    }
+}
+
+// Rewrite child_index for every child of `parent` from its list position. Called
+// after a removal, which shifts the positions of the siblings that followed.
+fn reindex_children(nodes: &mut Vec<NodeData>, parent: usize) {
+    let kids: Vec<usize> = match nodes.get(parent) {
+        Some(p) => p.children.clone(),
+        None => return,
+    };
+    for (i, &k) in kids.iter().enumerate() {
+        if let Some(node) = nodes.get_mut(k) {
+            node.child_index = i;
+        }
     }
 }
 
