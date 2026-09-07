@@ -149,6 +149,7 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_, ()>, ctx: &v8::Global<v8:
     register(scope, ns, "importNode", import_node);
     register(scope, ns, "queryIds", query_ids);
     register(scope, ns, "resetArena", reset_arena);
+    register(scope, ns, "nowNanos", now_nanos);
     if let Some(key) = v8::String::new(scope, "__dom") {
         let global = context.global(scope);
         global.set(scope, key.into(), ns.into());
@@ -257,6 +258,24 @@ fn reset_arena(
     _rv: v8::ReturnValue<'_, v8::Value>,
 ) {
     dom(scope).nodes.clear();
+}
+
+// __dom.nowNanos() -> a process-monotonic wall time in nanoseconds (as a Number).
+// The measurement path times native matching against css-select from INSIDE JS, but
+// csim's own clock (Date.now / performance.now) is the VIRTUAL event-loop clock,
+// frozen for the whole of a synchronous JS turn — so it can't separate the two.
+// This is a REAL monotonic clock, exposed only for the shadow-measurement harness
+// (not a web API). Anchored to the first call so the value stays a small integer that
+// an f64 represents exactly (nanos fit exactly below 2^53 ≈ 104 days of uptime).
+fn now_nanos(
+    scope: &mut v8::PinScope<'_, '_>,
+    _args: v8::FunctionCallbackArguments<'_>,
+    mut rv: v8::ReturnValue<'_, v8::Value>,
+) {
+    static ORIGIN: std::sync::OnceLock<std::time::Instant> = std::sync::OnceLock::new();
+    let origin = ORIGIN.get_or_init(std::time::Instant::now);
+    let ns = origin.elapsed().as_nanos() as f64;
+    rv.set(v8::Number::new(scope, ns).into());
 }
 
 // Build the element / NodeList / dataset instance templates once per isolate. Each

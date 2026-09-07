@@ -346,7 +346,15 @@ impl<'a> Element for NodeRef<'a> {
         self.node().children.is_empty() && !self.node().has_text
     }
     fn is_root(&self) -> bool {
-        self.node().parent.is_none()
+        match self.node().parent {
+            None => true,
+            // A shadow-built arena hangs the tree under a synthetic '#document' node so a
+            // document-scoped query includes <html> as a candidate; an element whose parent
+            // IS that document is the document root — css-select matches `:root` as "parent
+            // is not an element", and '#document' is the arena's one non-element node. A
+            // bulk-imported arena with no document node still roots at parent == None.
+            Some(parent) => self.dom.nodes.get(parent).is_some_and(|n| n.local_name == "#document"),
+        }
     }
 
     fn add_element_unique_hashes(&self, _filter: &mut selectors::bloom::BloomFilter) -> bool {
