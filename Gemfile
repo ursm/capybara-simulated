@@ -26,4 +26,11 @@ group :development, :test do
   gem 'sinatra',           '>= 4.0'
   gem 'websocket-driver'   # server side of the WebSocket spec's in-process echo app (Action Cable's own framing lib)
   gem 'actioncable'        # self-contained Action Cable end-to-end spec (standalone async-adapter server + the gem's own JS client)
+  gem 'json', '< 3'        # activesupport 8.1.3 calls `JSON.parse(json, options)` with a 2nd POSITIONAL arg that
+                           # json 3.0.0 removed (options are keyword-only now), so Action Cable's #decode raises
+                           # `wrong number of arguments` on every incoming frame — the subscribe never processes
+                           # and the cable spec's `connected()` never fires. csim's own JSON is 3.0-clean; this is
+                           # purely the dev/test Rails stack. Pinned until activesupport ships a json-3 fix — and,
+                           # like flatware above, because the gitignored lock let an unconstrained major hit CI
+                           # unbisectably. gemspec stays unconstrained: the DRIVER runs fine on json 3.
 end
