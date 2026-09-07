@@ -37,10 +37,18 @@
 // One node's data. Attributes are the source of truth (ordered, as the DOM keeps
 // them); className/id read and write the "class"/"id" attributes through it.
 pub(crate) struct NodeData {
+    // tagName as returned to JS (upper-case for HTML). `local_name` is the ASCII-
+    // lowercased name the selector engine matches on (tagName vs localName in the DOM).
     pub(crate) tag_name: String,
+    pub(crate) local_name: String,
+    // Element namespace URL ("" = HTML). Read by the selector engine's namespace matching.
+    pub(crate) ns: String,
     pub(crate) attributes: Vec<(String, String)>,
     pub(crate) parent: Option<usize>,
     pub(crate) children: Vec<usize>,
+    // Whether the node has any text/comment child content — so `:empty` is correct even
+    // though the arena is element-only (children holds only elements).
+    pub(crate) has_text: bool,
     // The node's one JS object (identity). Strong Global for now — roots every
     // wrapper for the isolate life; weak/GC-aware wrappers are a later slice.
     wrapper: Option<v8::Global<v8::Object>>,
@@ -51,7 +59,7 @@ pub(crate) struct NodeData {
 }
 
 impl NodeData {
-    fn get_attr(&self, name: &str) -> Option<&str> {
+    pub(crate) fn get_attr(&self, name: &str) -> Option<&str> {
         self.attributes
             .iter()
             .find(|(k, _)| k == name)
@@ -76,6 +84,29 @@ pub(crate) struct Dom {
     element_template: Option<v8::Global<v8::ObjectTemplate>>,
     nodelist_template: Option<v8::Global<v8::ObjectTemplate>>,
     dataset_template: Option<v8::Global<v8::ObjectTemplate>>,
+}
+
+// Element-tree navigation for the selector engine. The arena is element-only, so
+// children/siblings are already element nodes (no text/comment to skip).
+impl Dom {
+    pub(crate) fn parent_of(&self, idx: usize) -> Option<usize> {
+        self.nodes.get(idx).and_then(|n| n.parent)
+    }
+    pub(crate) fn first_child(&self, idx: usize) -> Option<usize> {
+        self.nodes.get(idx).and_then(|n| n.children.first().copied())
+    }
+    pub(crate) fn prev_sibling(&self, idx: usize) -> Option<usize> {
+        let parent = self.parent_of(idx)?;
+        let siblings = &self.nodes[parent].children;
+        let pos = siblings.iter().position(|&c| c == idx)?;
+        pos.checked_sub(1).map(|p| siblings[p])
+    }
+    pub(crate) fn next_sibling(&self, idx: usize) -> Option<usize> {
+        let parent = self.parent_of(idx)?;
+        let siblings = &self.nodes[parent].children;
+        let pos = siblings.iter().position(|&c| c == idx)?;
+        siblings.get(pos + 1).copied()
+    }
 }
 
 // Borrow the isolate's Dom, lazily creating the slot on first touch. rusty_v8
@@ -231,14 +262,18 @@ fn create_element(
         attributes.push(("class".to_string(), class_name));
     }
 
+    let local_name = tag_name.to_ascii_lowercase();
     let node_id = {
         let st = dom(scope);
         let new_id = st.nodes.len();
         st.nodes.push(NodeData {
             tag_name,
+            local_name,
+            ns: String::new(),
             attributes,
             parent,
             children: Vec::new(),
+            has_text: false,
             wrapper: None,
             child_nodes_wrapper: None,
             dataset_wrapper: None,
@@ -547,7 +582,7 @@ fn set_attribute(
 //
 // A browser throws HierarchyRequestError when the new child is the parent itself
 // or an ancestor of it — and here that is not just a spec nicety: an accepted
-// cycle would make the tree walks (collect_matches / matches_selector) loop
+// cycle would make the selector engine's tree walk / ancestor traversal loop
 // forever with no V8 interrupt point, hanging or aborting the isolate. So the
 // check is load-bearing. (Thrown as a generic Error naming HierarchyRequestError;
 // it becomes a real DOMException once the realm exposes that constructor.)
@@ -619,14 +654,9 @@ fn query_selector(
     let Some(root) = object_node_id(scope, args.this()) else {
         return;
     };
-    let compounds = parse_selector(&args.get(0).to_rust_string_lossy(scope));
-    let found = {
-        let st = dom(scope);
-        let mut out = Vec::new();
-        collect_matches(&st.nodes, root, &compounds, &mut out, true);
-        out.into_iter().next()
-    };
-    match found {
+    let selector = args.get(0).to_rust_string_lossy(scope);
+    let found = crate::selector::query_text(dom(scope), root, &selector, true);
+    match found.and_then(|mut ids| ids.drain(..).next()) {
         Some(id) => {
             if let Some(obj) = element_wrapper(scope, id) {
                 rv.set(obj.into());
@@ -646,13 +676,8 @@ fn query_selector_all(
     let Some(root) = object_node_id(scope, args.this()) else {
         return;
     };
-    let compounds = parse_selector(&args.get(0).to_rust_string_lossy(scope));
-    let found = {
-        let st = dom(scope);
-        let mut out = Vec::new();
-        collect_matches(&st.nodes, root, &compounds, &mut out, false);
-        out
-    };
+    let selector = args.get(0).to_rust_string_lossy(scope);
+    let found = crate::selector::query_text(dom(scope), root, &selector, false).unwrap_or_default();
     let array = v8::Array::new(scope, found.len() as i32);
     for (i, id) in found.into_iter().enumerate() {
         if let Some(obj) = element_wrapper(scope, id) {
@@ -748,145 +773,6 @@ fn data_attr_name(scope: &mut v8::PinScope<'_, '_>, key: v8::Local<'_, v8::Name>
         }
     }
     Some(attr)
-}
-
-// ── minimal selector matcher (tag / #id / .class + descendant combinator) ───
-//
-// WARNING — this is a stopgap, replaced by the real cascade selector engine at
-// integration. Only type/#id/.class compounds joined by whitespace (descendant)
-// are understood. Any other syntax — child `>`, sibling `+`/`~`, selector lists
-// `,`, attribute `[x]`, pseudo `:hover` — is NOT parsed; it is silently treated as
-// bogus compound tokens that match nothing, so querySelector returns null instead
-// of the right element or a SyntaxError. The failure mode is WRONG RESULTS, not an
-// error — callers must not rely on this for anything past the three simple forms.
-
-#[derive(Default)]
-struct Compound {
-    tag: Option<String>,
-    id: Option<String>,
-    classes: Vec<String>,
-}
-
-fn parse_selector(selector: &str) -> Vec<Compound> {
-    selector.split_whitespace().map(parse_compound).collect()
-}
-
-fn parse_compound(part: &str) -> Compound {
-    let mut compound = Compound::default();
-    // kind: 0 = type (tag / *), 1 = id (#), 2 = class (.)
-    let mut kind = 0u8;
-    let mut buf = String::new();
-    for ch in part.chars() {
-        match ch {
-            '#' | '.' => {
-                flush_token(&mut compound, kind, &mut buf);
-                kind = if ch == '#' { 1 } else { 2 };
-            }
-            _ => buf.push(ch),
-        }
-    }
-    flush_token(&mut compound, kind, &mut buf);
-    compound
-}
-
-fn flush_token(compound: &mut Compound, kind: u8, buf: &mut String) {
-    if buf.is_empty() {
-        return;
-    }
-    let token = std::mem::take(buf);
-    match kind {
-        0 if token != "*" => compound.tag = Some(token),
-        0 => {}
-        1 => compound.id = Some(token),
-        _ => compound.classes.push(token),
-    }
-}
-
-fn matches_compound(node: &NodeData, compound: &Compound) -> bool {
-    if let Some(tag) = &compound.tag
-        && !node.tag_name.eq_ignore_ascii_case(tag)
-    {
-        return false;
-    }
-    if let Some(id) = &compound.id
-        && node.get_attr("id") != Some(id.as_str())
-    {
-        return false;
-    }
-    if !compound.classes.is_empty() {
-        let class_attr = node.get_attr("class").unwrap_or("");
-        for want in &compound.classes {
-            if !class_attr.split_whitespace().any(|c| c == want) {
-                return false;
-            }
-        }
-    }
-    true
-}
-
-// The rightmost compound must match `node`; each earlier compound must match some
-// ancestor, in order but not necessarily contiguous (the descendant combinator).
-// Indexes via `.get` throughout so a stale id can never panic.
-fn matches_selector(nodes: &[NodeData], node_id: usize, compounds: &[Compound]) -> bool {
-    let Some((last, rest)) = compounds.split_last() else {
-        return false;
-    };
-    let Some(node) = nodes.get(node_id) else {
-        return false;
-    };
-    if !matches_compound(node, last) {
-        return false;
-    }
-    let mut remaining = rest.iter().rev();
-    let Some(mut want) = remaining.next() else {
-        return true;
-    };
-    let mut ancestor = node.parent;
-    while let Some(a) = ancestor {
-        let Some(anode) = nodes.get(a) else {
-            break;
-        };
-        ancestor = anode.parent;
-        if matches_compound(anode, want) {
-            match remaining.next() {
-                Some(next) => want = next,
-                None => return true,
-            }
-        }
-    }
-    false
-}
-
-// Preorder (document-order) walk of `root`'s descendants, collecting matches. An
-// explicit stack, not native recursion — a legitimately deep DOM (thousands of
-// nested nodes) would otherwise overflow the native stack. Cycles can't arise
-// because appendChild rejects them, so no visited-set is needed on this hot path.
-fn collect_matches(
-    nodes: &[NodeData],
-    root: usize,
-    compounds: &[Compound],
-    out: &mut Vec<usize>,
-    first_only: bool,
-) {
-    // Seed with root's children in reverse, so the leftmost is popped first.
-    let mut stack: Vec<usize> = match nodes.get(root) {
-        Some(node) => node.children.iter().rev().copied().collect(),
-        None => return,
-    };
-    while let Some(id) = stack.pop() {
-        let Some(node) = nodes.get(id) else {
-            continue;
-        };
-        if matches_selector(nodes, id, compounds) {
-            out.push(id);
-            if first_only {
-                return;
-            }
-        }
-        // Push this node's children reversed, so its subtree is visited (in
-        // document order) before its later siblings — preorder DFS.
-        stack.extend(node.children.iter().rev().copied());
-    }
 }
 
 // ── NodeId plumbing ─────────────────────────────────────────────────────────

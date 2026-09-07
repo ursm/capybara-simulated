@@ -7,6 +7,7 @@
 // engine itself stays a pure V8 binding with no DOM knowledge.
 
 mod dom;
+mod selector;
 
 use magnus::{Error, Ruby};
 

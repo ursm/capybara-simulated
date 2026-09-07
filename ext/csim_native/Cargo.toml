@@ -23,3 +23,11 @@ rb-sys = "0.9"
 # MUST match rusty_racer's v8 exactly (version + features) so Cargo unifies to one
 # V8; a mismatch would link two runtimes.
 v8 = { version = "150.4.0", features = ["simdutf"] }
+
+# Native CSS selector matching over the arena: Servo's production engine (the same
+# selectors/cssparser Firefox ships), so tree-structural matching is correct by
+# construction. Ported from the unmerged native-selector-matching branch, repointed
+# from a JSON mirror at the live arena.
+selectors = "0.40"
+cssparser = "0.37"
+precomputed-hash = "0.1"
