@@ -91,7 +91,47 @@ jobs:
       # itself reported as failures. The header on that script has the measurements, and — the part
       # that matters — what a retry is NOT allowed to re-check: a load error, a suite hook that
       # raised, or a dead worker leaves the red standing, however many examples also failed.
-      - run: bin/ci-rspec spec
+      # `~perf` excludes the perf gate: it is timing-heavy (a multi-second workload + calibration
+      # burst) and must NOT run inside the flatware pool, where it starves timing-sensitive async
+      # tests in sibling workers (it flaked the ActionCable subscription test) and where CPU
+      # contention wrecks its own wall ratio. It runs alone in the dedicated `perf-gate` job below —
+      # the same reason bench/dom_scaling isn't in the default rspec run.
+      - run: bin/ci-rspec spec --tag '~perf'
+
+  # Performance regression gate — its OWN job (not a step in `test`) so a perf red is a
+  # distinct, obvious check rather than one red example buried in the functional matrix.
+  # Runs SERIALLY and alone (never the flatware pool) so nothing contends with its wall
+  # timing and it contends with nothing — the same reason bench/dom_scaling isn't in the
+  # default rspec run. ONE run: the op-counts are Ruby-independent AND engine-independent
+  # (verified identical on V8 and QuickJS), so there's nothing to gain from the matrix or a
+  # second engine; the wall baseline is V8, exactly as the WPT allowlist is V8-only.
+  perf-gate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+
+      # ruby-vips dlopens libvips at load and the gem requires it at load, so the gem won't
+      # load without it even here (see the `test` job for the mirror-hardening rationale).
+      - name: Install libvips
+        timeout-minutes: 6
+        run: |
+          sudo sed -i '/azure\.archive\.ubuntu\.com/d' /etc/apt/apt-mirrors.txt || true
+          apt_try() {
+            sudo timeout 120 apt-get -o Acquire::http::Timeout=15 -o Acquire::Retries=2 update &&
+            sudo timeout 120 apt-get -o Acquire::http::Timeout=15 -o Acquire::Retries=2 \
+                             install -y --no-install-recommends libvips42t64
+          }
+          apt_try || { echo 'apt failed; retrying once' >&2; sleep 10; apt_try; }
+
+      - uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: '4.0'
+          bundler-cache: true
+
+      # A bare `rspec` (no ci-rspec retry): the counts are deterministic, so a red is a real
+      # change to lock in. No build step — the gem needs no native extension.
+      - run: bundle exec rspec spec/perf_gate
 
   # Secondary engine: QuickJS. It shares the JS bridge but has a distinct runtime
   # layer (value marshalling, no per-frame realms), so it needs its own coverage
@@ -156,8 +196,11 @@ jobs:
 
       # The tag filter reaches the workers via fork inheritance: flatware's
       # JobBuilder applies the rspec args to the global RSpec configuration
-      # BEFORE forking (workers discard the args themselves).
-      - run: bin/ci-rspec spec --tag '~wpt'
+      # BEFORE forking (workers discard the args themselves). `~perf` joins
+      # `~wpt`: both gates' baselines are captured on V8 (the perf op-counts
+      # should match, but the wall ratio is engine-specific), so the QuickJS job
+      # skips them exactly as it skips the V8-tuned WPT allowlist.
+      - run: bin/ci-rspec spec --tag '~wpt' --tag '~perf'
         env:
           CSIM_JS_ENGINE: quickjs
 
