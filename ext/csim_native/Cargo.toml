@@ -1,0 +1,25 @@
+# capybara-simulated's native extension: the V8 engine (rusty_racer, linked as a
+# library) + the native DOM, built into ONE cdylib. The hot DOM accessors must
+# share the same V8 as the engine, and two separately-linked .so files would each
+# bake their own V8 runtime (unsound to share an isolate across them) — so the DOM
+# lives here, in the same cdylib, rather than in a second extension. rusty_racer
+# stays a pure V8 binding and is reached only through its generic realm-init hook.
+[package]
+name = "csim_native"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+# rusty_racer as a LIBRARY (not its gem .so): we call install_classes from our own
+# magnus init and register the DOM via set_realm_init_hook. Path dep during
+# development; a git/tagged dep at release time.
+rusty_racer = { path = "../../../rusty_racer/ext/rusty_racer" }
+magnus = { version = "0.8", features = ["rb-sys"] }
+rb-sys = "0.9"
+# MUST match rusty_racer's v8 exactly (version + features) so Cargo unifies to one
+# V8; a mismatch would link two runtimes.
+v8 = { version = "150.4.0", features = ["simdutf"] }
