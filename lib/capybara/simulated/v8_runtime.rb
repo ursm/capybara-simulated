@@ -12,6 +12,12 @@
 require 'digest'
 require 'fileutils'
 require 'uri'
+
+# csim's own native extension: the V8 engine (rusty_racer, linked as a library)
+# plus the native DOM, in one cdylib. Loading it defines RustyRacer::* and
+# installs the native DOM into every realm. Required BEFORE 'rusty_racer' so the
+# gem's Ruby file adds its API wrappers without loading a second V8 .so.
+require 'capybara/simulated/csim_native'
 require 'rusty_racer'
 
 # The engine is a SOFT dependency (the gemspec names no version), so say what

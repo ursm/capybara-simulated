@@ -23,6 +23,10 @@ Gem::Specification.new do |spec|
     'lib/capybara/simulated/js/*.js',  # bridge.bundle.js + snapshot_stubs.js — NOT src/
     'lib/capybara/simulated/*.html',   # trace_viewer.html — the `trace` CLI's viewer template
     'vendor/js/*.js',
+    'Cargo.toml', 'Cargo.lock',                     # the Rust workspace root (rb-sys builds from here)
+    'ext/native_cascade/src/*.rs',                  # the native cascade accelerator's source
+    'ext/native_cascade/Cargo.toml',
+    'ext/native_cascade/extconf.rb',
     'exe/*',
     'README.md',
     'LICENSE'
@@ -30,6 +34,11 @@ Gem::Specification.new do |spec|
   spec.bindir        = 'exe'
   spec.executables   = ['capybara-simulated']
   spec.require_paths = ['lib']
+
+  # The native extension (Rust): the V8 engine (rusty_racer, linked as a library) + the native DOM,
+  # built into one cdylib. Compiled at source-install; a prebuilt (fat) gem ships it precompiled.
+  # Only the V8 runtime requires it; a QuickJS-only install never loads it.
+  spec.extensions = ['ext/csim_native/extconf.rb']
 
   spec.add_dependency 'capybara', '>= 3.37'
   spec.add_dependency 'rack',     '>= 2.2'
@@ -43,6 +52,9 @@ Gem::Specification.new do |spec|
   spec.add_dependency 'ruby-vips', '~> 2.2'
   # Brotli, to decode WOFF2 web fonts to their real text metrics.
   spec.add_dependency 'brotli', '~> 0.5'
+  # rb-sys drives the native cascade accelerator's build (ext/native_cascade/extconf.rb). Needed
+  # only when compiling from source; a prebuilt (fat) gem carries the compiled extension already.
+  spec.add_dependency 'rb_sys', '~> 0.9'
 
   # JS engine is a soft dependency — add exactly one to your Gemfile.
   # The engine is auto-selected based on which is loadable; `:v8` wins when

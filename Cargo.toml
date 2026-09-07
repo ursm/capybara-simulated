@@ -1,0 +1,6 @@
+# Cargo workspace root for the native extension (ext/csim_native): the V8 engine
+# (rusty_racer, linked as a library) + the native DOM. rb-sys's ExtensionTask runs
+# `cargo metadata` from here; the crate itself lives under ext/.
+[workspace]
+members  = ["ext/csim_native"]
+resolver = "2"

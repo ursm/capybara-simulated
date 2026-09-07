@@ -26,11 +26,11 @@ __pycache__/
 # ext/ source ARE tracked; the build outputs are not.
 /target/
 /tmp/
-/ext/native_cascade/Makefile
-/ext/native_cascade/*.so
-/ext/native_cascade/*.bundle
-/ext/native_cascade/mkmf.log
-/ext/native_cascade/.sitearchdir.time
-/lib/capybara/simulated/native_cascade.so
-/lib/capybara/simulated/native_cascade.bundle
+/ext/csim_native/Makefile
+/ext/csim_native/*.so
+/ext/csim_native/*.bundle
+/ext/csim_native/mkmf.log
+/ext/csim_native/.sitearchdir.time
 ext/*/target/
+lib/capybara/simulated/*.so
+lib/capybara/simulated/*.bundle
