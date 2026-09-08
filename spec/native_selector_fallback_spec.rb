@@ -18,7 +18,14 @@ require 'capybara/simulated'
 require 'rack'
 require_relative 'support/session_teardown'
 
-RSpec.describe 'native selector engine: JS fallback for live-state selectors', if: ENV.fetch('CSIM_JS_ENGINE', 'v8') == 'v8' do
+# Hand-drives the isolate arena (resetArena + importNode) then reads DOCUMENT elements, so it needs the
+# production cascade to NOT own the arena: with native matching on by default, cascade builds+syncs that
+# same arena and swaps each element's `_attrs` to the native attrsView (store flip), which this spec's
+# resetArena would then wipe. Run it only under the kill switch (CSIM_NO_NATIVE_CASCADE), where the arena
+# is free and `_attrs` stays a plain JS object. The queryIds fallback contract is exercised in production
+# by the default matching path (and covered by WPT) regardless.
+RSpec.describe 'native selector engine: JS fallback for live-state selectors',
+  if: ENV.fetch('CSIM_JS_ENGINE', 'v8') == 'v8' && ENV['CSIM_NO_NATIVE_CASCADE'] do
   let(:app) {
     html = <<~HTML
       <!doctype html>
