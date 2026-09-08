@@ -108,8 +108,9 @@ module Capybara
 
       def self.record_shadow_stats(snap)
         return unless snap.is_a?(Hash)
-        %w[calls cssNs natNs buildNs rebuilds matched fallbacks invalid mismatches natResults].each do |k|
-          @@shadow_totals[k] += snap[k].to_i
+        %w[calls cssNs natNs buildNs rebuilds matched fallbacks invalid mismatches natResults
+           cascMatchNs cascMatchCalls cascTotalNs cascRuns].each do |k|
+          @@shadow_totals[k] += snap[k].to_i if snap.key?(k)
         end
         @@shadow_totals['lastMismatch'] = snap['lastMismatch'] if snap['mismatches'].to_i.positive? && snap['lastMismatch']
       end
@@ -127,6 +128,16 @@ module Capybara
             warn format('[native-shadow] matched %d, fallbacks %d, invalid %d, mismatches %d%s',
                         t['matched'].to_i, t['fallbacks'].to_i, t['invalid'].to_i, t['mismatches'].to_i,
                         t['mismatches'].to_i.positive? ? " (last: #{t['lastMismatch'].inspect})" : '')
+          end
+          # Cascade selector-matching cost — where a native matcher over the arena would actually pay
+          # (the find path is negligible). match = css-select time inside the cascade; total = full
+          # rebuildCascade time; the fraction sizes the store-flip's real ceiling. Reported
+          # independently of finds (a page restyle needs no Capybara find).
+          if t['cascMatchCalls'].to_i.positive?
+            cmatch = t['cascMatchNs'].to_f / 1e6
+            ctotal = t['cascTotalNs'].to_f / 1e6
+            warn format('[native-cascade] rebuildCascade %.1f ms over %d run(s); selector-match %.1f ms in %d calls = %.1f%% of cascade',
+                        ctotal, t['cascRuns'].to_i, cmatch, t['cascMatchCalls'].to_i, ctotal.positive? ? cmatch / ctotal * 100 : 0.0)
           end
         end
       end
@@ -690,6 +701,8 @@ module Capybara
         return unless ENV['CSIM_NATIVE_QUERY_SHADOW'] && @ctx
         snap = @ctx.call('__csimNativeShadowStats', true) rescue nil
         self.class.record_shadow_stats(snap) if snap
+        casc = @ctx.call('__csimCascadeTimingStats', true) rescue nil
+        self.class.record_shadow_stats(casc) if casc
       end
 
       # Memory-pressure threshold (MB) above which `rebuild_ctx` forces a full

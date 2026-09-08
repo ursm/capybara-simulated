@@ -3470,6 +3470,10 @@ module Capybara
       # stores this window issued (the transfer registry is process-wide). Runs
       # while the runtime is still alive so the transferDrop call lands.
       def dispose
+        # SHADOW measurement: harvest this runtime's native-vs-css / cascade stats before it
+        # is torn down (reset! harvests too, but a disposed session — never reset — would
+        # otherwise lose its final page's stats). No-op unless CSIM_NATIVE_QUERY_SHADOW is set.
+        @runtime.harvest_shadow_stats if @runtime.respond_to?(:harvest_shadow_stats)
         # An aux window's background app requests are the same boundary hazard
         # reset! drains (Driver#reset! disposes aux windows BEFORE the primary's
         # reset, so without this they'd cross into the next test untouched).
