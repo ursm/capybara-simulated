@@ -28,9 +28,10 @@ use selectors::context::{
 };
 use selectors::matching::{matches_selector_list, ElementSelectorFlags};
 use selectors::parser::{
-    NonTSPseudoClass, ParseRelative, Parser, PseudoElement, SelectorImpl, SelectorList,
+    Component, NonTSPseudoClass, ParseRelative, Parser, PseudoElement, SelectorImpl, SelectorList,
     SelectorParseErrorKind,
 };
+use selectors::visitor::SelectorVisitor;
 use selectors::{Element, OpaqueElement};
 
 use crate::dom::Dom;
@@ -392,15 +393,42 @@ pub enum QueryOutcome {
     Invalid,
 }
 
+// Detects shadow-DOM selector constructs the FLAT arena can't evaluate: `:host` / `:host()` /
+// `:host-context()` (Component::Host), `::part()` (Component::Part), `::slotted()`
+// (Component::Slotted). The crate parses these as BUILT-IN components, so they never reach the
+// CsimParser::parse_* callbacks that set needs_fallback — a post-parse visit is the only way to catch
+// them. Any hit means the whole selector must defer to css-select (which knows the shadow tree).
+struct ShadowConstructVisitor {
+    found: bool,
+}
+impl SelectorVisitor for ShadowConstructVisitor {
+    type Impl = CsimImpl;
+    fn visit_simple_selector(&mut self, s: &Component<CsimImpl>) -> bool {
+        if matches!(s, Component::Host(..) | Component::Part(..) | Component::Slotted(..)) {
+            self.found = true;
+            return false; // found one — stop this branch's walk
+        }
+        true
+    }
+}
+
 // Parse a selector list, or None if invalid, recording whether it needs JS fallback.
 fn parse(text: &str) -> Option<Parsed> {
     let mut input = ParserInput::new(text);
     let mut parser = CssParser::new(&mut input);
     let csim = CsimParser::default();
     let list = SelectorList::parse(&csim, &mut parser, ParseRelative::No).ok()?;
+    // A shadow-DOM construct (:host / ::part() / ::slotted()) forces fallback too — the arena is the
+    // flat tree and models no host/part/slot relationship, so native matching would answer it wrong.
+    let mut shadow = ShadowConstructVisitor { found: false };
+    for sel in list.slice() {
+        if !shadow.found {
+            sel.visit(&mut shadow);
+        }
+    }
     Some(Parsed {
         list,
-        needs_fallback: csim.needs_fallback.get(),
+        needs_fallback: csim.needs_fallback.get() || shadow.found,
     })
 }
 
@@ -409,6 +437,59 @@ fn parse(text: &str) -> Option<Parsed> {
 thread_local! {
     static CACHE: std::cell::RefCell<std::collections::HashMap<String, Option<Parsed>>> =
         std::cell::RefCell::new(std::collections::HashMap::new());
+}
+
+// Compiled-selector store for the AUTHORITATIVE cascade path. The shadow / query APIs re-send the
+// selector STRING every call (marshalled across V8→Rust, then hashed in CACHE); the cascade matches
+// millions of times, so instead it compiles each rule's selector ONCE to a stable integer handle and
+// then matches by handle — no per-call string conversion, hash, or key allocation. COMPILED holds the
+// parsed lists; COMPILED_IDX dedups by text so distinct rules that share a selector share one entry,
+// keeping COMPILED bounded by distinct selectors (like CACHE).
+thread_local! {
+    static COMPILED: std::cell::RefCell<Vec<SelectorList<CsimImpl>>> = std::cell::RefCell::new(Vec::new());
+    static COMPILED_IDX: std::cell::RefCell<std::collections::HashMap<String, i32>> =
+        std::cell::RefCell::new(std::collections::HashMap::new());
+}
+
+// Compile a selector to a stable handle: `>= 0` indexes COMPILED (a natively-matchable selector);
+// `-1` means invalid OR needs JS fallback (a live-state pseudo) — the caller must use css-select for
+// it, and should cache this handle so it never re-asks. Idempotent per text.
+pub fn compile_selector(text: &str) -> i32 {
+    if let Some(h) = COMPILED_IDX.with(|m| m.borrow().get(text).copied()) {
+        return h;
+    }
+    let h = match parse(text) {
+        Some(p) if !p.needs_fallback => COMPILED.with(|c| {
+            let mut v = c.borrow_mut();
+            v.push(p.list);
+            (v.len() - 1) as i32
+        }),
+        _ => -1, // invalid or live-state → the caller uses css-select
+    };
+    COMPILED_IDX.with(|m| m.borrow_mut().insert(text.to_owned(), h));
+    h
+}
+
+// Match ONE element against a previously compiled selector handle. `None` when the handle is out of
+// range or the node id is stale (the caller falls back to css-select); `Some(bool)` is authoritative.
+pub fn matches_compiled(dom: &Dom, idx: usize, handle: i32) -> Option<bool> {
+    if handle < 0 || idx >= dom.nodes.len() {
+        return None;
+    }
+    COMPILED.with(|c| {
+        let v = c.borrow();
+        let list = v.get(handle as usize)?;
+        let mut caches = SelectorCaches::default();
+        let mut ctx = MatchingContext::new(
+            MatchingMode::Normal,
+            None,
+            &mut caches,
+            QuirksMode::NoQuirks,
+            NeedsSelectorFlags::No,
+            MatchingForInvalidation::No,
+        );
+        Some(matches_selector_list(list, &NodeRef { dom, idx }, &mut ctx))
+    })
 }
 
 // Collect descendants of `root` (preorder / document order) matching `list`, with `:scope` bound to

@@ -154,6 +154,10 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_, ()>, ctx: &v8::Global<v8:
     register(scope, ns, "importNode", import_node);
     register(scope, ns, "queryIds", query_ids);
     register(scope, ns, "matchesId", matches_id);
+    // Authoritative cascade matching: compile a rule's selector once to an integer handle, then match
+    // by handle with no per-call string marshalling (compileSelector / matchesCompiled).
+    register(scope, ns, "compileSelector", compile_selector);
+    register(scope, ns, "matchesCompiled", matches_compiled);
     register(scope, ns, "resetArena", reset_arena);
     register(scope, ns, "nowNanos", now_nanos);
     // Incremental-sync primitives (the store-flip F1 foundation): keep the arena current
@@ -434,6 +438,39 @@ fn matches_id(
             rv.set(undef);
         }
         crate::selector::QueryOutcome::Invalid => rv.set_null(),
+    }
+}
+
+// __dom.compileSelector(text) -> handle. The authoritative cascade path calls this ONCE per rule and
+// caches the integer, then matches by handle (matchesCompiled) with no per-call string marshalling.
+// `>= 0` = a natively-matchable compiled selector; `-1` = invalid or needs JS fallback → use css.
+fn compile_selector(
+    scope: &mut v8::PinScope<'_, '_>,
+    args: v8::FunctionCallbackArguments<'_>,
+    mut rv: v8::ReturnValue<'_, v8::Value>,
+) {
+    let text = args.get(0).to_rust_string_lossy(scope);
+    rv.set_int32(crate::selector::compile_selector(&text));
+}
+
+// __dom.matchesCompiled(nid, handle) -> bool, or undefined when the handle/node is out of range so the
+// caller falls back to css. The per-match hot path of authoritative cascade matching: an integer id +
+// an integer handle, no string.
+fn matches_compiled(
+    scope: &mut v8::PinScope<'_, '_>,
+    args: v8::FunctionCallbackArguments<'_>,
+    mut rv: v8::ReturnValue<'_, v8::Value>,
+) {
+    let id = match args.get(0).integer_value(scope) {
+        Some(i) if i >= 0 => i as usize,
+        _ => return,
+    };
+    let handle = match args.get(1).integer_value(scope) {
+        Some(h) => h as i32,
+        _ => return,
+    };
+    if let Some(hit) = crate::selector::matches_compiled(dom(scope), id, handle) {
+        rv.set_bool(hit);
     }
 }
 
