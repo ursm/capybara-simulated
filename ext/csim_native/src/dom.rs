@@ -79,26 +79,15 @@ impl NodeData {
     }
 }
 
-// The per-isolate DOM: the node arena plus the cached instance templates every
-// wrapper is stamped from. Stored in the isolate's own TypeId-keyed slot, reached
-// from any callback via dom(scope). Templates are isolate-scoped (one serves every
-// realm).
+// ONE realm's node arena. The selector matcher reads it through NodeRef, so a match resolves the
+// realm's arena ONCE and then does direct Vec indexing (no per-node-access map lookup). Element-tree
+// navigation lives here: the arena is element-only, so children/siblings are already element nodes.
 #[derive(Default)]
-pub(crate) struct Dom {
+pub(crate) struct RealmArena {
     pub(crate) nodes: Vec<NodeData>,
-    element_template: Option<v8::Global<v8::ObjectTemplate>>,
-    nodelist_template: Option<v8::Global<v8::ObjectTemplate>>,
-    dataset_template: Option<v8::Global<v8::ObjectTemplate>>,
-    // The store-flip's native-backed `_attrs`: a full named-interceptor view over a node's
-    // attributes Vec (get/set/query/delete/enumerate/descriptor), so `el._attrs.foo`, `for..in`,
-    // `hasOwnProperty`, `Object.keys`, `delete` all work against the arena in C++ — faster than a
-    // JS Proxy and a faithful stand-in for the native-backed endgame.
-    attrs_view_template: Option<v8::Global<v8::ObjectTemplate>>,
 }
 
-// Element-tree navigation for the selector engine. The arena is element-only, so
-// children/siblings are already element nodes (no text/comment to skip).
-impl Dom {
+impl RealmArena {
     pub(crate) fn parent_of(&self, idx: usize) -> Option<usize> {
         self.nodes.get(idx).and_then(|n| n.parent)
     }
@@ -120,6 +109,23 @@ impl Dom {
     }
 }
 
+// The per-isolate DOM: ONE node arena PER REALM (keyed by rusty_racer's context_id — main = 0, frames
+// 1,2,…) plus the isolate-scoped instance templates every wrapper is stamped from. Reached from any
+// callback via dom(scope); the node ops route to their realm's arena by the context_id carried as
+// each realm's `__dom` function data (see `realm_of` / `install`). Templates serve every realm.
+#[derive(Default)]
+pub(crate) struct Dom {
+    pub(crate) realms: std::collections::HashMap<i32, RealmArena>,
+    element_template: Option<v8::Global<v8::ObjectTemplate>>,
+    nodelist_template: Option<v8::Global<v8::ObjectTemplate>>,
+    dataset_template: Option<v8::Global<v8::ObjectTemplate>>,
+    // The store-flip's native-backed `_attrs`: a full named-interceptor view over a node's
+    // attributes Vec (get/set/query/delete/enumerate/descriptor), so `el._attrs.foo`, `for..in`,
+    // `hasOwnProperty`, `Object.keys`, `delete` all work against the arena in C++ — faster than a
+    // JS Proxy and a faithful stand-in for the native-backed endgame.
+    attrs_view_template: Option<v8::Global<v8::ObjectTemplate>>,
+}
+
 // Borrow the isolate's Dom, lazily creating the slot on first touch. rusty_v8
 // stores slots in a TypeId->value map, so this `Dom` coexists with rusty_racer's
 // own IsolateState slot without either knowing about the other. Used in SHORT
@@ -135,54 +141,83 @@ fn dom<'s>(scope: &'s mut v8::PinScope<'_, '_>) -> &'s mut Dom {
         .expect("Dom slot was just set")
 }
 
+// The context_id of the realm whose `__dom` invoked this callback — carried as each realm's `__dom`
+// function DATA (set in `install`), so a node op routes to its OWN realm's arena. `0` (main) when
+// unset. This is how the isolate-global `Dom` is partitioned per realm without threading a realm id
+// through the JS op signatures.
+fn realm_id(scope: &mut v8::PinScope<'_, '_>, args: &v8::FunctionCallbackArguments<'_>) -> i32 {
+    args.data().int32_value(scope).unwrap_or(0)
+}
+
+// The calling realm's arena (created empty on first touch). Node ops go through this instead of a
+// shared `realm(scope, 0).nodes`.
+fn realm<'s>(scope: &'s mut v8::PinScope<'_, '_>, cid: i32) -> &'s mut RealmArena {
+    dom(scope).realms.entry(cid).or_default()
+}
+
 // Install globalThis.__dom = { createElement } into |ctx|, building the templates
 // on first call. Mirrors install_host_namespace's shape (its own HandleScope +
 // ContextScope, safe to re-run per realm). A later slice folds this into the real
 // document / Node surface.
-pub(crate) fn install(scope: &mut v8::PinScope<'_, '_, ()>, ctx: &v8::Global<v8::Context>, _context_id: i32) {
+pub(crate) fn install(scope: &mut v8::PinScope<'_, '_, ()>, ctx: &v8::Global<v8::Context>, context_id: i32) {
     v8::scope!(let scope, &mut *scope);
     let context = v8::Local::new(scope, ctx);
     let scope = &mut v8::ContextScope::new(scope, context);
 
     ensure_templates(scope);
 
+    // The arena for this realm is created lazily (realm(scope, cid) on first touch) and cleared per
+    // page by resetArena, so a re-installed realm (main = context_id 0 on every reset) reuses its slot
+    // rather than accumulating. Each op below carries `context_id` as its function data so it routes to
+    // THIS realm's arena.
     let ns = v8::Object::new(scope);
-    register(scope, ns, "createElement", create_element);
+    register(scope, ns, "createElement", create_element, context_id);
     // Bulk import + id-level query: the measurement / eventual parse-time population
     // path (build the arena from an already-parsed page and match natively), distinct
     // from createElement's per-node wrapper path.
-    register(scope, ns, "importNode", import_node);
-    register(scope, ns, "queryIds", query_ids);
-    register(scope, ns, "matchesId", matches_id);
+    register(scope, ns, "importNode", import_node, context_id);
+    register(scope, ns, "queryIds", query_ids, context_id);
+    register(scope, ns, "matchesId", matches_id, context_id);
     // Authoritative cascade matching: compile a rule's selector once to an integer handle, then match
     // by handle with no per-call string marshalling (compileSelector / matchesCompiled).
-    register(scope, ns, "compileSelector", compile_selector);
-    register(scope, ns, "matchesCompiled", matches_compiled);
-    register(scope, ns, "resetArena", reset_arena);
-    register(scope, ns, "nowNanos", now_nanos);
+    register(scope, ns, "compileSelector", compile_selector, context_id);
+    register(scope, ns, "matchesCompiled", matches_compiled, context_id);
+    register(scope, ns, "resetArena", reset_arena, context_id);
+    register(scope, ns, "nowNanos", now_nanos, context_id);
     // Incremental-sync primitives (the store-flip F1 foundation): keep the arena current
     // as the DOM mutates, instead of rebuilding it. syncChildren relinks one parent's
     // element children; setAttr/removeAttr mirror attribute writes.
-    register(scope, ns, "syncChildren", sync_children);
-    register(scope, ns, "setAttr", set_attr);
-    register(scope, ns, "removeAttr", remove_attr);
-    register(scope, ns, "syncAttrs", sync_attrs);
+    register(scope, ns, "syncChildren", sync_children, context_id);
+    register(scope, ns, "setAttr", set_attr, context_id);
+    register(scope, ns, "removeAttr", remove_attr, context_id);
+    register(scope, ns, "syncAttrs", sync_attrs, context_id);
     // The store-flip's native-backed `_attrs`: __dom.attrsView(nid) -> an interceptor object over
     // that node's attributes (the Element constructor installs it in place of the JS `{}`).
-    register(scope, ns, "attrsView", attrs_view);
+    register(scope, ns, "attrsView", attrs_view, context_id);
+    // Free a disposed realm's arena — csim calls this before tearing down a frame realm (main reuses
+    // slot 0). Takes an explicit id (the realm being dropped), not the caller's own.
+    register(scope, ns, "dropRealm", drop_realm, context_id);
     if let Some(key) = v8::String::new(scope, "__dom") {
         let global = context.global(scope);
         global.set(scope, key.into(), ns.into());
     }
 }
 
+// Register one `__dom.<name>` for a realm, carrying the realm's `context_id` as the function's DATA so
+// `realm_id(scope, &args)` can route the op to that realm's arena (each realm gets its own `__dom` with
+// its own functions, so the data is per-realm).
 fn register(
     scope: &mut v8::PinScope<'_, '_>,
     ns: v8::Local<'_, v8::Object>,
     name: &str,
     callback: impl v8::MapFnTo<v8::FunctionCallback>,
+    context_id: i32,
 ) {
-    if let (Some(f), Some(k)) = (v8::Function::new(scope, callback), v8::String::new(scope, name)) {
+    let data: v8::Local<v8::Value> = v8::Integer::new(scope, context_id).into();
+    if let (Some(f), Some(k)) = (
+        v8::Function::builder(callback).data(data).build(scope),
+        v8::String::new(scope, name),
+    ) {
         ns.set(scope, k.into(), f.into());
     }
 }
@@ -217,7 +252,8 @@ fn import_node(
             i += 2;
         }
     }
-    let st = dom(scope);
+    let cid = realm_id(scope, &args);
+    let st = realm(scope, cid);
     let new_id = st.nodes.len();
     st.nodes.push(NodeData {
         tag_name,
@@ -265,7 +301,8 @@ fn sync_children(
             }
         }
     }
-    let st = dom(scope);
+    let cid = realm_id(scope, &args);
+    let st = realm(scope, cid);
     if parent >= st.nodes.len() {
         return;
     }
@@ -334,7 +371,8 @@ fn set_attr(
     };
     let name = args.get(1).to_rust_string_lossy(scope);
     let value = args.get(2).to_rust_string_lossy(scope);
-    if let Some(node) = dom(scope).nodes.get_mut(id) {
+    let cid = realm_id(scope, &args);
+    if let Some(node) = realm(scope, cid).nodes.get_mut(id) {
         node.set_attr(&name, value);
     }
 }
@@ -349,7 +387,8 @@ fn remove_attr(
         _ => return,
     };
     let name = args.get(1).to_rust_string_lossy(scope);
-    if let Some(node) = dom(scope).nodes.get_mut(id) {
+    let cid = realm_id(scope, &args);
+    if let Some(node) = realm(scope, cid).nodes.get_mut(id) {
         node.attributes.retain(|(k, _)| k != &name);
     }
 }
@@ -380,7 +419,8 @@ fn sync_attrs(
             i += 2;
         }
     }
-    if let Some(node) = dom(scope).nodes.get_mut(id) {
+    let cid = realm_id(scope, &args);
+    if let Some(node) = realm(scope, cid).nodes.get_mut(id) {
         node.attributes = attributes;
     }
 }
@@ -400,7 +440,8 @@ fn query_ids(
         _ => return,
     };
     let selector = args.get(1).to_rust_string_lossy(scope);
-    match crate::selector::query_text(dom(scope), root, &selector, false) {
+    let cid = realm_id(scope, &args);
+    match crate::selector::query_text(realm(scope, cid), root, &selector, false) {
         crate::selector::QueryOutcome::Matched(ids) => {
             let array = v8::Array::new(scope, ids.len() as i32);
             for (i, id) in ids.iter().enumerate() {
@@ -431,7 +472,8 @@ fn matches_id(
         _ => return,
     };
     let selector = args.get(1).to_rust_string_lossy(scope);
-    match crate::selector::matches_text(dom(scope), id, &selector) {
+    let cid = realm_id(scope, &args);
+    match crate::selector::matches_text(realm(scope, cid), id, &selector) {
         crate::selector::QueryOutcome::Matched(ids) => rv.set_bool(!ids.is_empty()),
         crate::selector::QueryOutcome::NeedsJsFallback => {
             let undef: v8::Local<v8::Value> = v8::undefined(scope).into();
@@ -469,19 +511,35 @@ fn matches_compiled(
         Some(h) => h as i32,
         _ => return,
     };
-    if let Some(hit) = crate::selector::matches_compiled(dom(scope), id, handle) {
+    let cid = realm_id(scope, &args);
+    if let Some(hit) = crate::selector::matches_compiled(realm(scope, cid), id, handle) {
         rv.set_bool(hit);
     }
 }
 
-// __dom.resetArena() — drop all arena nodes (and their cached wrappers). For the
-// measurement harness, which rebuilds the arena per page.
+// __dom.resetArena() — drop the CALLING REALM's arena nodes. Each page rebuild (ensureBuilt) clears
+// its realm's arena first; a realm's slot is created lazily and cleared here, so main (realm 0) is
+// reset per page without accumulating.
 fn reset_arena(
     scope: &mut v8::PinScope<'_, '_>,
-    _args: v8::FunctionCallbackArguments<'_>,
+    args: v8::FunctionCallbackArguments<'_>,
     _rv: v8::ReturnValue<'_, v8::Value>,
 ) {
-    dom(scope).nodes.clear();
+    let cid = realm_id(scope, &args);
+    realm(scope, cid).nodes.clear();
+}
+
+// __dom.dropRealm(id) — free realm `id`'s arena entirely (not the caller's own). csim calls this as it
+// disposes a frame realm, so a page's frame arenas don't accumulate across visits. Main (id 0) is not
+// dropped — it reuses its slot across resets, cleared per page by resetArena.
+fn drop_realm(
+    scope: &mut v8::PinScope<'_, '_>,
+    args: v8::FunctionCallbackArguments<'_>,
+    _rv: v8::ReturnValue<'_, v8::Value>,
+) {
+    if let Some(id) = args.get(0).integer_value(scope) {
+        dom(scope).realms.remove(&(id as i32));
+    }
 }
 
 // __dom.nowNanos() -> a process-monotonic wall time in nanoseconds (as a Number).
@@ -633,7 +691,7 @@ fn create_element(
 
     let local_name = tag_name.to_ascii_lowercase();
     let node_id = {
-        let st = dom(scope);
+        let st = realm(scope, 0);
         let new_id = st.nodes.len();
         st.nodes.push(NodeData {
             tag_name,
@@ -725,7 +783,7 @@ fn cached_wrapper<'s>(
     get_template: impl Fn(&Dom) -> Option<v8::Global<v8::ObjectTemplate>>,
     store: impl Fn(&mut NodeData, v8::Global<v8::Object>),
 ) -> Option<v8::Local<'s, v8::Object>> {
-    if let Some(cached) = dom(scope).nodes.get(node_id).and_then(&get_cached) {
+    if let Some(cached) = realm(scope, 0).nodes.get(node_id).and_then(&get_cached) {
         return Some(v8::Local::new(scope, &cached));
     }
     let template = get_template(&*dom(scope))?;
@@ -734,7 +792,7 @@ fn cached_wrapper<'s>(
     let id_value: v8::Local<v8::Value> = v8::Integer::new_from_unsigned(scope, node_id as u32).into();
     obj.set_internal_field(0, id_value.into());
     let global = v8::Global::new(scope, obj);
-    if let Some(node) = dom(scope).nodes.get_mut(node_id) {
+    if let Some(node) = realm(scope, 0).nodes.get_mut(node_id) {
         store(node, global);
     }
     Some(obj)
@@ -789,7 +847,7 @@ fn tag_name_getter(
     let Some(id) = holder_node_id(scope, &args) else {
         return;
     };
-    let tag = dom(scope).nodes.get(id).map(|n| n.tag_name.clone());
+    let tag = realm(scope, 0).nodes.get(id).map(|n| n.tag_name.clone());
     if let Some(tag) = tag
         && let Some(js) = v8::String::new(scope, &tag)
     {
@@ -809,7 +867,7 @@ fn reflect_get(
         return;
     };
     let value = {
-        let st = dom(scope);
+        let st = realm(scope, 0);
         st.nodes
             .get(id)
             .map(|n| n.get_attr(attr).unwrap_or("").to_string())
@@ -830,7 +888,7 @@ fn reflect_set(
         return;
     };
     let value = value.to_rust_string_lossy(scope);
-    if let Some(node) = dom(scope).nodes.get_mut(id) {
+    if let Some(node) = realm(scope, 0).nodes.get_mut(id) {
         node.set_attr(attr, value);
     }
 }
@@ -846,7 +904,7 @@ fn parent_node_getter(
     let Some(id) = holder_node_id(scope, &args) else {
         return;
     };
-    let parent = dom(scope).nodes.get(id).and_then(|n| n.parent);
+    let parent = realm(scope, 0).nodes.get(id).and_then(|n| n.parent);
     match parent {
         Some(parent_id) => {
             if let Some(obj) = element_wrapper(scope, parent_id) {
@@ -880,7 +938,7 @@ fn nodelist_length_getter(
     let Some(owner) = holder_node_id(scope, &args) else {
         return;
     };
-    let len = dom(scope)
+    let len = realm(scope, 0)
         .nodes
         .get(owner)
         .map(|n| n.children.len())
@@ -899,7 +957,7 @@ fn nodelist_index_getter(
     let Some(owner) = holder_node_id(scope, &args) else {
         return v8::Intercepted::kNo;
     };
-    let child = dom(scope)
+    let child = realm(scope, 0)
         .nodes
         .get(owner)
         .and_then(|n| n.children.get(index as usize).copied());
@@ -928,7 +986,7 @@ fn get_attribute(
     // HTML lowercases the qualified name on getAttribute / setAttribute.
     let name = args.get(0).to_rust_string_lossy(scope).to_ascii_lowercase();
     let value = {
-        let st = dom(scope);
+        let st = realm(scope, 0);
         st.nodes
             .get(id)
             .and_then(|n| n.get_attr(&name).map(str::to_string))
@@ -954,7 +1012,7 @@ fn set_attribute(
     // HTML lowercases the qualified name on getAttribute / setAttribute.
     let name = args.get(0).to_rust_string_lossy(scope).to_ascii_lowercase();
     let value = args.get(1).to_rust_string_lossy(scope);
-    if let Some(node) = dom(scope).nodes.get_mut(id) {
+    if let Some(node) = realm(scope, 0).nodes.get_mut(id) {
         node.set_attr(&name, value);
     }
 }
@@ -982,7 +1040,7 @@ fn append_child(
     // Reject if `child` is `parent` or one of its ancestors (walking up from
     // `parent` includes `parent` itself, so child == parent is covered).
     let creates_cycle = {
-        let st = dom(scope);
+        let st = realm(scope, 0);
         let mut ancestor = Some(parent);
         let mut found = false;
         while let Some(node_id) = ancestor {
@@ -1003,7 +1061,7 @@ fn append_child(
         return;
     }
     {
-        let st = dom(scope);
+        let st = realm(scope, 0);
         if let Some(old_parent) = st.nodes.get(child).and_then(|n| n.parent) {
             if let Some(old) = st.nodes.get_mut(old_parent) {
                 old.children.retain(|&c| c != child);
@@ -1055,7 +1113,7 @@ fn query_selector(
     // The native element-wrapper probe has no JS engine to defer to, so a live-state selector
     // (NeedsJsFallback) or an invalid one both yield null here. Production state-pseudo handling
     // is on the queryIds → css-select path.
-    let first = match crate::selector::query_text(dom(scope), root, &selector, true) {
+    let first = match crate::selector::query_text(realm(scope, 0), root, &selector, true) {
         crate::selector::QueryOutcome::Matched(ids) => ids.into_iter().next(),
         crate::selector::QueryOutcome::NeedsJsFallback | crate::selector::QueryOutcome::Invalid => None,
     };
@@ -1082,7 +1140,7 @@ fn query_selector_all(
     let selector = args.get(0).to_rust_string_lossy(scope);
     // Same probe limitation as querySelector: no JS fallback here, so a live-state or invalid
     // selector yields an empty list.
-    let found = match crate::selector::query_text(dom(scope), root, &selector, false) {
+    let found = match crate::selector::query_text(realm(scope, 0), root, &selector, false) {
         crate::selector::QueryOutcome::Matched(ids) => ids,
         crate::selector::QueryOutcome::NeedsJsFallback | crate::selector::QueryOutcome::Invalid => Vec::new(),
     };
@@ -1126,7 +1184,7 @@ fn dataset_getter_named(
         return v8::Intercepted::kNo;
     };
     let value = {
-        let st = dom(scope);
+        let st = realm(scope, 0);
         st.nodes
             .get(owner)
             .and_then(|n| n.get_attr(&attr).map(str::to_string))
@@ -1156,7 +1214,7 @@ fn dataset_setter_named(
         return v8::Intercepted::kNo;
     };
     let value = value.to_rust_string_lossy(scope);
-    if let Some(node) = dom(scope).nodes.get_mut(owner) {
+    if let Some(node) = realm(scope, 0).nodes.get_mut(owner) {
         node.set_attr(&attr, value);
     }
     v8::Intercepted::kYes
@@ -1232,7 +1290,7 @@ fn attrs_get(
     let Some(name) = name_string(scope, key) else {
         return v8::Intercepted::kNo;
     };
-    let value = dom(scope).nodes.get(id).and_then(|n| n.get_attr(&name).map(str::to_string));
+    let value = realm(scope, 0).nodes.get(id).and_then(|n| n.get_attr(&name).map(str::to_string));
     match value {
         Some(v) => {
             if let Some(js) = v8::String::new(scope, &v) {
@@ -1258,7 +1316,7 @@ fn attrs_set(
         return v8::Intercepted::kNo;
     };
     let value = value.to_rust_string_lossy(scope);
-    if let Some(node) = dom(scope).nodes.get_mut(id) {
+    if let Some(node) = realm(scope, 0).nodes.get_mut(id) {
         node.set_attr(&name, value);
     }
     v8::Intercepted::kYes
@@ -1276,7 +1334,7 @@ fn attrs_query(
     let Some(name) = name_string(scope, key) else {
         return v8::Intercepted::kNo;
     };
-    let present = dom(scope).nodes.get(id).is_some_and(|n| n.get_attr(&name).is_some());
+    let present = realm(scope, 0).nodes.get(id).is_some_and(|n| n.get_attr(&name).is_some());
     if present {
         // PropertyAttribute::NONE (0) = enumerable + writable + configurable.
         rv.set_uint32(0);
@@ -1298,7 +1356,7 @@ fn attrs_delete(
     let Some(name) = name_string(scope, key) else {
         return v8::Intercepted::kNo;
     };
-    if let Some(node) = dom(scope).nodes.get_mut(id) {
+    if let Some(node) = realm(scope, 0).nodes.get_mut(id) {
         node.attributes.retain(|(k, _)| k != &name);
     }
     rv.set_bool(true);
@@ -1313,7 +1371,7 @@ fn attrs_enumerate(
     let Some(id) = holder_node_id(scope, &args) else {
         return;
     };
-    let names: Vec<String> = dom(scope)
+    let names: Vec<String> = realm(scope, 0)
         .nodes
         .get(id)
         .map(|n| n.attributes.iter().map(|(k, _)| k.clone()).collect())
@@ -1339,7 +1397,7 @@ fn attrs_descriptor(
     let Some(name) = name_string(scope, key) else {
         return v8::Intercepted::kNo;
     };
-    let value = dom(scope).nodes.get(id).and_then(|n| n.get_attr(&name).map(str::to_string));
+    let value = realm(scope, 0).nodes.get(id).and_then(|n| n.get_attr(&name).map(str::to_string));
     match value {
         Some(v) => {
             // A data descriptor consistent with the enumerator: enumerable + writable + configurable,
