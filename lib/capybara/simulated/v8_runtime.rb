@@ -876,12 +876,13 @@ module Capybara
         # context reset drops all post-snapshot globals. Off unless the env var is set,
         # so production never touches it. See V8Runtime.shadow_totals.
         c.eval_void('globalThis.__csimNativeShadow = true;') if ENV['CSIM_NATIVE_QUERY_SHADOW']
-        # Native-AUTHORITATIVE cascade matching (store-flip reader-first): the arena matcher becomes the
-        # authority for the rules it can answer, css-select the fallback. Main context only (the arena is
-        # mirrored in the top realm alone), so a frame realm never sees the flag. Off unless the env var
-        # is set — production is unchanged. Self-sufficient: cascade.js builds/maintains the arena itself
-        # (it doesn't require the SHADOW flag's find-path machinery).
-        c.eval_void('globalThis.__csimNativeCascadeAuthoritative = true;') if ENV['CSIM_NATIVE_CASCADE_AUTHORITATIVE']
+        # Native cascade matching: the arena matcher is the AUTHORITY for the rules it can answer (css-select
+        # is the fallback for the rest). ON BY DEFAULT, seeded on the main context only — a frame realm never
+        # runs this seeder (attach_frame_realm_loader) and workers use the class-level attach_host_fns, so
+        # both keep the pure-css path until the arena is partitioned per realm. cascade.js builds/maintains
+        # the arena itself (no dependency on the SHADOW find-path machinery). CSIM_NO_NATIVE_CASCADE is the
+        # rollback kill switch (revert to css matching everywhere without a recompile).
+        c.eval_void('globalThis.__csimNativeCascadeAuthoritative = true;') unless ENV['CSIM_NO_NATIVE_CASCADE']
       end
 
       # The bridge calls `__csim_createFrameRealm(url, body, contentType, parentId)`
