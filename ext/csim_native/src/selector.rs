@@ -478,3 +478,35 @@ pub fn query_text(dom: &Dom, root: usize, text: &str, first_only: bool) -> Query
         }
     })
 }
+
+// Does ONE element match the selector? The cascade path (Element.matches / rule matching against a
+// single element), distinct from the descendant query above. Same three outcomes; on a match it
+// returns Matched with the element's own id (empty = no match), so the caller reads it as a bool.
+// No scope_element — a cascade rule / bare matches() has no query root (and rules don't use :scope);
+// the matcher still walks the element's full ancestor chain for descendant/child combinators.
+pub fn matches_text(dom: &Dom, idx: usize, text: &str) -> QueryOutcome {
+    CACHE.with(|c| {
+        let mut c = c.borrow_mut();
+        let entry = c.entry(text.to_owned()).or_insert_with(|| parse(text));
+        match entry {
+            None => QueryOutcome::Invalid,
+            Some(p) if p.needs_fallback => QueryOutcome::NeedsJsFallback,
+            Some(p) => {
+                if idx >= dom.nodes.len() {
+                    return QueryOutcome::Matched(Vec::new());
+                }
+                let mut caches = SelectorCaches::default();
+                let mut ctx = MatchingContext::new(
+                    MatchingMode::Normal,
+                    None,
+                    &mut caches,
+                    QuirksMode::NoQuirks,
+                    NeedsSelectorFlags::No,
+                    MatchingForInvalidation::No,
+                );
+                let hit = matches_selector_list(&p.list, &NodeRef { dom, idx }, &mut ctx);
+                QueryOutcome::Matched(if hit { vec![idx] } else { Vec::new() })
+            }
+        }
+    })
+}

@@ -148,6 +148,7 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_, ()>, ctx: &v8::Global<v8:
     // from createElement's per-node wrapper path.
     register(scope, ns, "importNode", import_node);
     register(scope, ns, "queryIds", query_ids);
+    register(scope, ns, "matchesId", matches_id);
     register(scope, ns, "resetArena", reset_arena);
     register(scope, ns, "nowNanos", now_nanos);
     // Incremental-sync primitives (the store-flip F1 foundation): keep the arena current
@@ -396,6 +397,30 @@ fn query_ids(
             }
             rv.set(array.into());
         }
+        crate::selector::QueryOutcome::NeedsJsFallback => {
+            let undef: v8::Local<v8::Value> = v8::undefined(scope).into();
+            rv.set(undef);
+        }
+        crate::selector::QueryOutcome::Invalid => rv.set_null(),
+    }
+}
+
+// __dom.matchesId(nodeId, selector) -> bool when native matching answers it; `undefined` when it
+// needs the JS engine (a live-state selector / pseudo-element); `null` for an invalid selector. The
+// single-element match the cascade uses (does this element match this rule?), distinct from queryIds'
+// descendant search.
+fn matches_id(
+    scope: &mut v8::PinScope<'_, '_>,
+    args: v8::FunctionCallbackArguments<'_>,
+    mut rv: v8::ReturnValue<'_, v8::Value>,
+) {
+    let id = match args.get(0).integer_value(scope) {
+        Some(i) if i >= 0 => i as usize,
+        _ => return,
+    };
+    let selector = args.get(1).to_rust_string_lossy(scope);
+    match crate::selector::matches_text(dom(scope), id, &selector) {
+        crate::selector::QueryOutcome::Matched(ids) => rv.set_bool(!ids.is_empty()),
         crate::selector::QueryOutcome::NeedsJsFallback => {
             let undef: v8::Local<v8::Value> = v8::undefined(scope).into();
             rv.set(undef);

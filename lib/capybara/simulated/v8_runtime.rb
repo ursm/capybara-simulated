@@ -109,7 +109,8 @@ module Capybara
       def self.record_shadow_stats(snap)
         return unless snap.is_a?(Hash)
         %w[calls cssNs natNs buildNs rebuilds syncNs syncCalls matched fallbacks invalid mismatches
-           natResults cascMatchNs cascMatchCalls cascTotalNs cascRuns].each do |k|
+           natResults cascMatchNs cascMatchCalls cascTotalNs cascRuns
+           cascNatNs cascNatCalls cascNatFallback cascNatMismatch].each do |k|
           @@shadow_totals[k] += snap[k].to_i if snap.key?(k)
         end
         @@shadow_totals['lastMismatch'] = snap['lastMismatch'] if snap['mismatches'].to_i.positive? && snap['lastMismatch']
@@ -141,6 +142,17 @@ module Capybara
             ctotal = t['cascTotalNs'].to_f / 1e6
             warn format('[native-cascade] rebuildCascade %.1f ms over %d run(s); selector-match %.1f ms in %d calls = %.1f%% of cascade',
                         ctotal, t['cascRuns'].to_i, cmatch, t['cascMatchCalls'].to_i, ctotal.positive? ? cmatch / ctotal * 100 : 0.0)
+            # F2 sizing: native single-element match run beside css in the cascade (css authoritative).
+            # nat vs the css time on the SAME rules is the real cascade-match speedup a synced-arena
+            # native matcher would give; mismatches must stay 0 (parity).
+            if t['cascNatCalls'].to_i.positive?
+              cnat = t['cascNatNs'].to_f / 1e6
+              # css time attributable to the rules native also answered (calls-weighted estimate).
+              share = t['cascMatchCalls'].to_i.positive? ? t['cascNatCalls'].to_f / t['cascMatchCalls'].to_i : 0.0
+              css_on_nat = cmatch * share
+              warn format('[native-cascade] native match %.1f ms in %d calls (%.2fx vs css); deferred %d, mismatches %d',
+                          cnat, t['cascNatCalls'].to_i, cnat.positive? ? css_on_nat / cnat : 0.0, t['cascNatFallback'].to_i, t['cascNatMismatch'].to_i)
+            end
           end
         end
       end
