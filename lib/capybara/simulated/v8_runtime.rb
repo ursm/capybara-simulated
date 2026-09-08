@@ -876,6 +876,12 @@ module Capybara
         # context reset drops all post-snapshot globals. Off unless the env var is set,
         # so production never touches it. See V8Runtime.shadow_totals.
         c.eval_void('globalThis.__csimNativeShadow = true;') if ENV['CSIM_NATIVE_QUERY_SHADOW']
+        # Native-AUTHORITATIVE cascade matching (store-flip reader-first): the arena matcher becomes the
+        # authority for the rules it can answer, css-select the fallback. Main context only (the arena is
+        # mirrored in the top realm alone), so a frame realm never sees the flag. Off unless the env var
+        # is set — production is unchanged. Self-sufficient: cascade.js builds/maintains the arena itself
+        # (it doesn't require the SHADOW flag's find-path machinery).
+        c.eval_void('globalThis.__csimNativeCascadeAuthoritative = true;') if ENV['CSIM_NATIVE_CASCADE_AUTHORITATIVE']
       end
 
       # The bridge calls `__csim_createFrameRealm(url, body, contentType, parentId)`

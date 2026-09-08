@@ -17,7 +17,12 @@ require 'capybara/simulated'
 require 'rack'
 require_relative 'support/session_teardown'
 
-RSpec.describe 'native arena incremental sync (store-flip F1a)', if: ENV.fetch('CSIM_JS_ENGINE', 'v8') == 'v8' do
+# These examples hand-DRIVE the arena (resetArena + their own `__nid` map + syncChildren/setAttr by
+# hand), so they need EXCLUSIVE ownership of the isolate-global arena. Skip them when native cascade
+# matching is authoritative: cascade then builds and syncs that same arena itself, and the two drivers
+# collide. The primitives under test are exercised in production by the authoritative path anyway.
+RSpec.describe 'native arena incremental sync (store-flip F1a)',
+  if: ENV.fetch('CSIM_JS_ENGINE', 'v8') == 'v8' && !ENV['CSIM_NATIVE_CASCADE_AUTHORITATIVE'] do
   let(:app) {
     html = <<~HTML
       <!doctype html>
