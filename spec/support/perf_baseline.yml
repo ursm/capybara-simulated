@@ -7,6 +7,6 @@ grid_table:
     reuse_escapingAbs: 0
     ctx_sweeps: 201
   wall:
-    workload_ms: 318.435
-    calib_ms: 2.785
-    ratio: 114.325
+    workload_ms: 329.995
+    calib_ms: 2.799
+    ratio: 117.902
