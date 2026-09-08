@@ -108,9 +108,9 @@ module Capybara
 
       def self.record_shadow_stats(snap)
         return unless snap.is_a?(Hash)
-        %w[calls cssNs natNs buildNs rebuilds syncNs syncCalls matched fallbacks invalid mismatches
-           natResults cascMatchNs cascMatchCalls cascTotalNs cascRuns
-           cascNatNs cascNatCalls cascNatFallback cascNatMismatch].each do |k|
+        %w[calls cssNs natNs buildNs rebuilds syncNs syncCalls parseNs parsePages constructNs
+           constructNodes matched fallbacks invalid mismatches natResults cascMatchNs cascMatchCalls
+           cascTotalNs cascRuns cascNatNs cascNatCalls cascNatFallback cascNatMismatch].each do |k|
           @@shadow_totals[k] += snap[k].to_i if snap.key?(k)
         end
         @@shadow_totals['lastMismatch'] = snap['lastMismatch'] if snap['mismatches'].to_i.positive? && snap['lastMismatch']
@@ -132,6 +132,20 @@ module Capybara
             warn format('[native-shadow] matched %d, fallbacks %d, invalid %d, mismatches %d%s',
                         t['matched'].to_i, t['fallbacks'].to_i, t['invalid'].to_i, t['mismatches'].to_i,
                         t['mismatches'].to_i.positive? ? " (last: #{t['lastMismatch'].inspect})" : '')
+          end
+          # Thinning-ceiling probes (what a native-backed store would reclaim, which the matching
+          # shadow cannot see): JS DOM construction time, and peak V8 heap.
+          if t['parsePages'].to_i.positive?
+            bringup   = t['parseNs'].to_f / 1e6
+            construct = t['constructNs'].to_f / 1e6
+            # bring-up = parse5 algo + node construction + connect/upgrade + INLINE APP SCRIPTS + cascade.
+            # Only the node-construction subset is what a native store reclaims; scripts/cascade are not.
+            warn format('[native-parse] page bring-up %.1f ms over %d page(s); node construction %.1f ms in %d nodes = %.1f%% of bring-up (the store-reclaimable part)',
+                        bringup, t['parsePages'].to_i, construct, t['constructNodes'].to_i, bringup.positive? ? construct / bringup * 100 : 0.0)
+          end
+          if t['peakHeapBytes'].to_i.positive?
+            warn format('[native-heap] peak V8 heap+external %.1f MB (indicative DOM-heap footprint the thinning reclaims)',
+                        t['peakHeapBytes'].to_f / 1_048_576)
           end
           # Cascade selector-matching cost — where a native matcher over the arena would actually pay
           # (the find path is negligible). match = css-select time inside the cascade; total = full
@@ -718,6 +732,13 @@ module Capybara
         self.class.record_shadow_stats(snap) if snap
         casc = @ctx.call('__csimCascadeTimingStats', true) rescue nil
         self.class.record_shadow_stats(casc) if casc
+        # Peak V8 heap (indicative DOM-heap footprint the thinning would reclaim): track the max
+        # used+external seen at a page boundary. Not attributable to the DOM alone, but a rough ceiling.
+        hs = @ctx.heap_statistics rescue nil
+        if hs
+          bytes = hs[:used_heap_size].to_i + hs[:external_memory].to_i
+          self.class.shadow_totals['peakHeapBytes'] = [self.class.shadow_totals['peakHeapBytes'].to_i, bytes].max
+        end
       end
 
       # Memory-pressure threshold (MB) above which `rebuild_ctx` forces a full
