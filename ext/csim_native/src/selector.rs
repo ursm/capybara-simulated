@@ -440,7 +440,17 @@ pub fn query(dom: &Dom, root: usize, list: &SelectorList<CsimImpl>, first_only: 
         MatchingForInvalidation::No,
     );
     ctx.scope_element = Some(NodeRef { dom, idx: root }.opaque());
+    // Defense against a malformed sync delta: an acyclic subtree visits each node at most once, so a
+    // pop count past the arena size means a cycle was planted (only a buggy caller can — the matcher,
+    // like Servo, assumes an acyclic tree). Break rather than spin the isolate forever with no V8
+    // interrupt. sync_children's own guards make this unreachable in practice; this is the backstop.
+    let cap = dom.nodes.len().saturating_add(1);
+    let mut steps = 0usize;
     while let Some(idx) = stack.pop() {
+        steps += 1;
+        if steps > cap {
+            break;
+        }
         if matches_selector_list(list, &NodeRef { dom, idx }, &mut ctx) {
             out.push(idx);
             if first_only {

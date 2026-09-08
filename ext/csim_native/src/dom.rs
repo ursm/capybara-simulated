@@ -150,6 +150,12 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_, ()>, ctx: &v8::Global<v8:
     register(scope, ns, "queryIds", query_ids);
     register(scope, ns, "resetArena", reset_arena);
     register(scope, ns, "nowNanos", now_nanos);
+    // Incremental-sync primitives (the store-flip F1 foundation): keep the arena current
+    // as the DOM mutates, instead of rebuilding it. syncChildren relinks one parent's
+    // element children; setAttr/removeAttr mirror attribute writes.
+    register(scope, ns, "syncChildren", sync_children);
+    register(scope, ns, "setAttr", set_attr);
+    register(scope, ns, "removeAttr", remove_attr);
     if let Some(key) = v8::String::new(scope, "__dom") {
         let global = context.global(scope);
         global.set(scope, key.into(), ns.into());
@@ -216,6 +222,122 @@ fn import_node(
         link_child(&mut st.nodes, p, new_id);
     }
     rv.set_uint32(new_id as u32);
+}
+
+// __dom.syncChildren(parentId, childIds, hasText): make parentId's element children EXACTLY
+// `childIds` (in document order) and set its has_text (whether it has non-empty text content).
+// Each child is detached from any current parent first, so a MOVED node — still listed under its
+// old parent until that parent is itself synced — is re-homed correctly whichever order the two
+// syncs arrive in. The single structural-sync primitive the incremental (parse + mutation) arena
+// upkeep drives, replacing the shadow path's full rebuild. New nodes are created with
+// importNode(parent = -1) first, then linked here.
+fn sync_children(
+    scope: &mut v8::PinScope<'_, '_>,
+    args: v8::FunctionCallbackArguments<'_>,
+    _rv: v8::ReturnValue<'_, v8::Value>,
+) {
+    let parent = match args.get(0).integer_value(scope) {
+        Some(p) if p >= 0 => p as usize,
+        _ => return,
+    };
+    let has_text = args.get(2).boolean_value(scope);
+    let mut raw: Vec<usize> = Vec::new();
+    if let Ok(arr) = v8::Local::<v8::Array>::try_from(args.get(1)) {
+        for i in 0..arr.length() {
+            if let Some(id) = arr.get_index(scope, i).and_then(|v| v.integer_value(scope)) {
+                if id >= 0 {
+                    raw.push(id as usize);
+                }
+            }
+        }
+    }
+    let st = dom(scope);
+    if parent >= st.nodes.len() {
+        return;
+    }
+    // Sanitize the delta: drop out-of-range ids (would panic the matcher's node() deref), the parent
+    // itself (a self-cycle), and duplicates (a node can't be its own sibling), preserving order. The
+    // matcher assumes an ACYCLIC tree; these cheap checks kill the footguns a malformed delta could
+    // plant. A transient ANCESTOR inversion during a multi-parent move (child re-homed before its old
+    // parent is re-synced) is legitimate and self-heals, so it is NOT rejected here — the invariant is
+    // "mirror an acyclic tree and sync every affected parent before the next query."
+    let n = st.nodes.len();
+    let mut seen: std::collections::HashSet<usize> = std::collections::HashSet::with_capacity(raw.len());
+    let mut kids: Vec<usize> = Vec::with_capacity(raw.len());
+    for &k in &raw {
+        if k < n && k != parent && seen.insert(k) {
+            kids.push(k);
+        }
+    }
+    // Detach each incoming child from a DIFFERENT current parent (a same-parent reorder skips this).
+    for &k in &kids {
+        let old = st.nodes.get(k).and_then(|node| node.parent);
+        if old != Some(parent) {
+            if let Some(op) = old {
+                if let Some(o) = st.nodes.get_mut(op) {
+                    o.children.retain(|&c| c != k);
+                }
+                reindex_children(&mut st.nodes, op);
+            }
+            if let Some(kn) = st.nodes.get_mut(k) {
+                kn.parent = Some(parent);
+            }
+        }
+    }
+    // Null the .parent of children DROPPED from this parent (were here, gone now, still pointing
+    // here). Otherwise a detached subtree keeps a phantom upward chain and an element-rooted query
+    // inside it could match an ancestor it no longer has. A child that MOVED to another parent was
+    // already retained-out above, so it isn't in the old list here; only truly-dropped ones are nulled
+    // (and a later syncChildren re-homing one re-sets its parent).
+    let dropped: Vec<usize> = match st.nodes.get(parent) {
+        Some(p) => p.children.iter().copied().filter(|c| !seen.contains(c)).collect(),
+        None => Vec::new(),
+    };
+    for d in dropped {
+        if st.nodes.get(d).and_then(|node| node.parent) == Some(parent) {
+            if let Some(dn) = st.nodes.get_mut(d) {
+                dn.parent = None;
+            }
+        }
+    }
+    if let Some(p) = st.nodes.get_mut(parent) {
+        p.children = kids;
+        p.has_text = has_text;
+    }
+    reindex_children(&mut st.nodes, parent);
+}
+
+// __dom.setAttr(nodeId, name, value) / __dom.removeAttr(nodeId, name): mirror an attribute write
+// into the arena. Names arrive already lowercased for HTML (the JS side passes the stored key).
+fn set_attr(
+    scope: &mut v8::PinScope<'_, '_>,
+    args: v8::FunctionCallbackArguments<'_>,
+    _rv: v8::ReturnValue<'_, v8::Value>,
+) {
+    let id = match args.get(0).integer_value(scope) {
+        Some(i) if i >= 0 => i as usize,
+        _ => return,
+    };
+    let name = args.get(1).to_rust_string_lossy(scope);
+    let value = args.get(2).to_rust_string_lossy(scope);
+    if let Some(node) = dom(scope).nodes.get_mut(id) {
+        node.set_attr(&name, value);
+    }
+}
+
+fn remove_attr(
+    scope: &mut v8::PinScope<'_, '_>,
+    args: v8::FunctionCallbackArguments<'_>,
+    _rv: v8::ReturnValue<'_, v8::Value>,
+) {
+    let id = match args.get(0).integer_value(scope) {
+        Some(i) if i >= 0 => i as usize,
+        _ => return,
+    };
+    let name = args.get(1).to_rust_string_lossy(scope);
+    if let Some(node) = dom(scope).nodes.get_mut(id) {
+        node.attributes.retain(|(k, _)| k != &name);
+    }
 }
 
 // __dom.queryIds(rootId, selector) -> [nativeId, …] when native matching answers the selector;
