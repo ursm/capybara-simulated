@@ -530,6 +530,13 @@ module Capybara
         @frame_realm_parents&.clear
         @window_realm_meta&.clear
         return if @frame_realms.nil?
+        # Free each frame realm's native arena (an isolate-global Dom entry keyed by its context_id)
+        # before disposing the realm — otherwise a page's frame arenas accumulate across visits. Done
+        # from the main context (its `__dom.dropRealm` frees ANY realm's arena); main (id 0) is untouched.
+        if @ctx && !@frame_realms.empty?
+          drops = @frame_realms.keys.map {|id| "__dom.dropRealm(#{id.to_i});" }.join
+          @ctx.eval_void("if (globalThis.__dom && globalThis.__dom.dropRealm) { #{drops} }") rescue nil
+        end
         @frame_realms.each_value {|fr| fr.dispose rescue nil }
         @frame_realms.clear
       end
@@ -1587,6 +1594,12 @@ module Capybara
       def reseed_realm_js(c)
         c.eval_void("globalThis.__csim_yield = globalThis.#{HOST_NAMESPACE_NAME}.drainMicrotasks;")
         c.eval_void('__csim_installWorker();')
+        # Native cascade matching in FRAME realms too. The arena is now partitioned per realm (each
+        # realm's `__dom` functions carry their context_id and route to their OWN arena — see dom.rs
+        # RealmArena / register), so a frame builds and matches over its own arena, independent of the
+        # main realm. Same kill switch as the main context. Before the partition this was main-realm
+        # only (one shared isolate arena); it is safe per realm now.
+        c.eval_void('globalThis.__csimNativeCascadeAuthoritative = true;') unless ENV['CSIM_NO_NATIVE_CASCADE']
       end
 
       # Class-level attach so Worker isolates (Ruby-thread-owned
