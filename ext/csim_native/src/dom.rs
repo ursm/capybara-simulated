@@ -139,7 +139,7 @@ fn dom<'s>(scope: &'s mut v8::PinScope<'_, '_>) -> &'s mut Dom {
 // on first call. Mirrors install_host_namespace's shape (its own HandleScope +
 // ContextScope, safe to re-run per realm). A later slice folds this into the real
 // document / Node surface.
-pub(crate) fn install(scope: &mut v8::PinScope<'_, '_, ()>, ctx: &v8::Global<v8::Context>) {
+pub(crate) fn install(scope: &mut v8::PinScope<'_, '_, ()>, ctx: &v8::Global<v8::Context>, _context_id: i32) {
     v8::scope!(let scope, &mut *scope);
     let context = v8::Local::new(scope, ctx);
     let scope = &mut v8::ContextScope::new(scope, context);
