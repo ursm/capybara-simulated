@@ -97,6 +97,10 @@ pub(crate) struct NodeData {
     // Whether the node has any text/comment child content — so `:empty` is correct even
     // though the arena is element-only (children holds only elements).
     pub(crate) has_text: bool,
+    // The border-box a native layout pass wrote for this node (document coords), read back by the JS
+    // geometry getters (getBoundingClientRect / offset* / scroll*). None until a pass lays it out;
+    // overwritten each pass. See mod layout + the layoutPass / boxOf ops.
+    pub(crate) layout_box: Option<crate::layout::Box>,
 }
 
 impl NodeData {
@@ -500,6 +504,11 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_, ()>, ctx: &v8::Global<v8:
     // Free a disposed realm's arena — csim calls this before tearing down a frame realm (main reuses
     // slot 0). Takes an explicit id (the realm being dropped), not the caller's own.
     register(scope, ns, "dropRealm", drop_realm, context_id);
+    // Native layout (reader-flip endgame, stage L1 = block flow): lay a subtree out from a flat buffer
+    // of per-node used values in ONE crossing, writing a border-box per node into the arena; boxOf reads
+    // one back for the JS geometry getters.
+    register(scope, ns, "layoutPass", layout_pass, context_id);
+    register(scope, ns, "boxOf", box_of, context_id);
     if let Some(key) = v8::String::new(scope, "__dom") {
         let global = context.global(scope);
         global.set(scope, key.into(), ns.into());
@@ -553,6 +562,7 @@ fn import_node(
         children: Vec::new(),
         child_index: 0,
         has_text,
+        layout_box: None,
     });
     if let Some(p) = parent {
         st.link_child(p, new_id);
@@ -847,6 +857,101 @@ fn drop_realm(
     if let Some(id) = args.get(0).integer_value(scope) {
         dom(scope).realms.remove(&(id as i32));
     }
+}
+
+// Fields per node in the layoutPass input buffer (a flat Float64Array). Order MUST match the JS packer
+// (native-query-shadow.js / layout.js) and layout::Input.
+const LAYOUT_STRIDE: usize = 22;
+
+// __dom.layoutPass(inputsFlat, rootX, rootY, rootCbW) -> bool. Decode the flat per-node record buffer
+// (root at record 0), run native block layout, and write each node's border-box into its arena slot.
+// Returns false when the subtree uses a feature L1 doesn't model (Outcome::Unsupported) — the caller
+// then lays it out in JS. One crossing per pass.
+fn layout_pass(
+    scope: &mut v8::PinScope<'_, '_>,
+    args: v8::FunctionCallbackArguments<'_>,
+    mut rv: v8::ReturnValue<'_, v8::Value>,
+) {
+    let Ok(arr) = v8::Local::<v8::Float64Array>::try_from(args.get(0)) else {
+        rv.set_bool(false);
+        return;
+    };
+    let n = arr.length();
+    let mut bytes = vec![0u8; n * 8];
+    arr.copy_contents(&mut bytes);
+    let floats: Vec<f64> = bytes
+        .chunks_exact(8)
+        .map(|c| f64::from_ne_bytes(c.try_into().unwrap()))
+        .collect();
+    let mut inputs: Vec<crate::layout::Input> = Vec::with_capacity(floats.len() / LAYOUT_STRIDE);
+    for r in floats.chunks_exact(LAYOUT_STRIDE) {
+        inputs.push(crate::layout::Input {
+            nid: r[0],
+            parent: r[1] as i32,
+            display: r[2] as u8,
+            border_box: r[3] != 0.0,
+            width: r[4],
+            height: r[5],
+            min_w: r[6],
+            max_w: r[7],
+            min_h: r[8],
+            max_h: r[9],
+            mt: r[10],
+            mr: r[11],
+            mb: r[12],
+            ml: r[13],
+            pt: r[14],
+            pr: r[15],
+            pb: r[16],
+            pl: r[17],
+            bt: r[18],
+            br: r[19],
+            bb: r[20],
+            bl: r[21],
+        });
+    }
+    let root_x = args.get(1).number_value(scope).unwrap_or(0.0);
+    let root_y = args.get(2).number_value(scope).unwrap_or(0.0);
+    let root_cb_w = args.get(3).number_value(scope).unwrap_or(0.0);
+    match crate::layout::layout_block(&inputs, root_x, root_y, root_cb_w) {
+        crate::layout::Outcome::Unsupported => rv.set_bool(false),
+        crate::layout::Outcome::LaidOut(boxes) => {
+            let cid = realm_id(scope, &args);
+            let st = realm(scope, cid);
+            for b in boxes {
+                if let Some(id) = NodeId::from_i64(b.nid as i64) {
+                    if let Some(node) = st.get_mut(id) {
+                        node.layout_box = Some(b);
+                    }
+                }
+            }
+            rv.set_bool(true);
+        }
+    }
+}
+
+// __dom.boxOf(nid) -> [x, y, w, h, autoHeight] (document coords, border-box) or undefined when the node
+// has no native box (never laid out this pass / stale nid). The JS geometry getters read this.
+fn box_of(
+    scope: &mut v8::PinScope<'_, '_>,
+    args: v8::FunctionCallbackArguments<'_>,
+    mut rv: v8::ReturnValue<'_, v8::Value>,
+) {
+    let Some(id) = nid_arg(scope, &args, 0) else {
+        return;
+    };
+    let cid = realm_id(scope, &args);
+    let b = match realm(scope, cid).get(id).and_then(|node| node.layout_box) {
+        Some(b) => b,
+        None => return,
+    };
+    let arr = v8::Array::new(scope, 5);
+    let vals = [b.x, b.y, b.w, b.h, if b.auto_height { 1.0 } else { 0.0 }];
+    for (i, v) in vals.iter().enumerate() {
+        let num: v8::Local<v8::Value> = v8::Number::new(scope, *v).into();
+        arr.set_index(scope, i as u32, num);
+    }
+    rv.set(arr.into());
 }
 
 // __dom.nowNanos() -> a process-monotonic wall time in nanoseconds (as a Number).

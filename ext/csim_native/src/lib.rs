@@ -7,6 +7,8 @@
 // engine itself stays a pure V8 binding with no DOM knowledge.
 
 mod dom;
+// Native layout (reader-flip endgame), stage L1 = block flow. Driven by the layoutPass / boxOf ops.
+mod layout;
 mod selector;
 
 use magnus::{Error, Ruby};
