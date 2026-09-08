@@ -11,9 +11,63 @@
 // mutation seams; the Servo `selectors` matcher (selector.rs) reads a RealmArena directly. This is the
 // READER half of the DOM-in-Rust flip — the store stays in JS; only MATCHING is native.
 //
-// One `__dom.attrsView(nid)` object exists as the first store-flip foundation piece (a native-backed
-// `_attrs` via a named interceptor) but nothing in production installs it yet.
+// GENERATIONAL ARENA. A node lives in a SLOT (`Vec<Slot>`); a slot carries a `gen` counter and, when
+// free, an empty `data`. A `NodeId` is a `(index, gen)` pair — and so is every INTERNAL edge
+// (`parent` / `children`). Freeing a node bumps its slot's gen and lists the index for reuse; a later
+// `importNode` hands the recycled index a fresh gen. The point: a STALE edge (a `children` entry left
+// pointing at an index whose node was since freed + the slot reused — the class of bug the DOM has
+// ~30 unsynced `_children` splice sites that can plant) carries the OLD gen, so following it
+// gen-mismatches and is SKIPPED rather than aliasing the new occupant. That converts the silent
+// tree corruption naive index-reuse caused (proven on Avo) into safe, self-healing behaviour, which
+// is what lets the JS side reclaim a collected node's slot (FinalizationRegistry -> dropNode) and
+// bound arena growth in a long no-navigation session. See native-query-shadow.js for the JS lifecycle.
+//
+// The `nid` that crosses the FFI is the `(index, gen)` pair PACKED into one JS Number (index in the
+// low `INDEX_BITS`, gen above — both fit exactly under 2^53); JS treats it as an opaque token and only
+// hands it back. `attrsView(nid)` is the native-backed `_attrs` (a named interceptor over a node's
+// attributes Vec), installed by the Element constructor in place of the JS `{}`.
 
+// How a NodeId splits across a JS Number: the low INDEX_BITS are the slot index, the rest the
+// generation. A packed nid must stay an EXACT f64, i.e. below 2^53 (NID_BITS) — so index and
+// generation share those 53 bits. 26 index bits = up to ~67M live slots (a page's high-water element
+// count); the remaining 53 - 26 = 27 gen bits = ~134M reuses of one slot before it must retire (see
+// `free_node`). JS never unpacks — it stores the Number and passes it back — so the split is private
+// to this file + selector.rs.
+const NID_BITS: u32 = 53;
+const INDEX_BITS: u32 = 26;
+const INDEX_MASK: i64 = (1 << INDEX_BITS) - 1;
+// Largest generation the pack can represent while keeping the whole nid < 2^53. NOT tied to u32 width:
+// the ceiling is the f64 exact-integer budget above the index bits (27 bits here, ~134M), so a hot
+// slot is reused ~134M times before it retires — not 63, which a `32 - INDEX_BITS` split would give
+// and which would starve the free-list (defeating reclamation) almost immediately in a churny session.
+const GEN_MAX: u32 = (1 << (NID_BITS - INDEX_BITS)) - 1;
+
+// A stable reference to an arena node: which slot, and which generation of it. Held both as the JS
+// `nid` (packed) and as every internal tree edge, so a reference outliving its node's freeing is
+// detectable (the slot's live gen no longer equals `gen`). `Copy` so the matcher's Element-returning
+// methods stay cheap.
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
+pub(crate) struct NodeId {
+    pub(crate) idx: u32,
+    pub(crate) generation: u32,
+}
+
+impl NodeId {
+    // Pack into one JS Number (exact f64). gen above INDEX_BITS, index below.
+    fn to_f64(self) -> f64 {
+        (((self.generation as i64) << INDEX_BITS) | (self.idx as i64)) as f64
+    }
+    // Unpack a non-negative wire value; a negative value (the JS `-1` "no node" sentinel) is None.
+    fn from_i64(n: i64) -> Option<NodeId> {
+        if n < 0 {
+            return None;
+        }
+        Some(NodeId {
+            idx: (n & INDEX_MASK) as u32,
+            generation: (n >> INDEX_BITS) as u32,
+        })
+    }
+}
 
 // One arena node's data: what the selector matcher reads. Attributes are the source of truth
 // (ordered, as the DOM keeps them).
@@ -32,12 +86,13 @@ pub(crate) struct NodeData {
     // reads the original UTF-16 units from here when present. Empty for virtually every element; only the
     // value that actually lost data lands here, keyed by attribute name.
     pub(crate) attr_u16: Vec<(String, Vec<u16>)>,
-    pub(crate) parent: Option<usize>,
-    pub(crate) children: Vec<usize>,
+    pub(crate) parent: Option<NodeId>,
+    pub(crate) children: Vec<NodeId>,
     // Position within `parent.children`, kept current on every link/unlink, so the
     // selector engine's prev/next-sibling nav is O(1) — without it `:nth-child` is
     // O(n²) per query on a wide parent (a 500-sibling list measured 2.5x slower than
-    // css-select; O(1) flips it).
+    // css-select; O(1) flips it). It counts ALL entries (a stale edge included), so the
+    // sibling walks step from it and skip any stale neighbour they land on.
     pub(crate) child_index: usize,
     // Whether the node has any text/comment child content — so `:empty` is correct even
     // though the arena is element-only (children holds only elements).
@@ -127,33 +182,196 @@ fn read_v8_value(scope: &mut v8::PinScope<'_, '_>, val: v8::Local<'_, v8::Value>
     }
 }
 
+// One slot of the arena: the current generation, and the node (None = free). A NodeId referring to a
+// slot is live only while `gen` still equals the id's gen — freeing bumps `gen`, so the id (and any
+// tree edge holding it) reads as absent afterwards.
+#[derive(Default)]
+struct Slot {
+    generation: u32,
+    data: Option<NodeData>,
+}
+
 // ONE realm's node arena. The selector matcher reads it through NodeRef, so a match resolves the
-// realm's arena ONCE and then does direct Vec indexing (no per-node-access map lookup). Element-tree
+// realm's arena ONCE and then does direct slot indexing (no per-node-access map lookup). Element-tree
 // navigation lives here: the arena is element-only, so children/siblings are already element nodes.
+// Every navigation and deref goes through `get` (gen-checked), so a stale edge self-elides.
 #[derive(Default)]
 pub(crate) struct RealmArena {
-    pub(crate) nodes: Vec<NodeData>,
+    slots: Vec<Slot>,
+    // Indices whose slot is free, LIFO. `importNode` pops one before growing `slots`, so a page's
+    // live-node high-water mark bounds `slots.len()` even as nodes churn.
+    free: Vec<u32>,
 }
 
 impl RealmArena {
-    pub(crate) fn parent_of(&self, idx: usize) -> Option<usize> {
-        self.nodes.get(idx).and_then(|n| n.parent)
+    // The live node for `id`, or None if the slot was freed / reused (its gen moved past id.generation) or the
+    // index is out of range. The one deref both the ops and the matcher route through.
+    pub(crate) fn get(&self, id: NodeId) -> Option<&NodeData> {
+        let slot = self.slots.get(id.idx as usize)?;
+        if slot.generation == id.generation {
+            slot.data.as_ref()
+        } else {
+            None
+        }
     }
-    pub(crate) fn first_child(&self, idx: usize) -> Option<usize> {
-        self.nodes.get(idx).and_then(|n| n.children.first().copied())
+    fn get_mut(&mut self, id: NodeId) -> Option<&mut NodeData> {
+        let slot = self.slots.get_mut(id.idx as usize)?;
+        if slot.generation == id.generation {
+            slot.data.as_mut()
+        } else {
+            None
+        }
     }
-    pub(crate) fn prev_sibling(&self, idx: usize) -> Option<usize> {
-        let node = self.nodes.get(idx)?;
-        let parent = node.parent?;
-        let pos = node.child_index.checked_sub(1)?;
-        self.nodes.get(parent).and_then(|p| p.children.get(pos).copied())
+
+    // Put `data` in a free slot (reusing a recycled index when one is listed, else growing), returning
+    // its NodeId at the slot's CURRENT generation. A recycled slot's gen was already bumped at free.
+    fn alloc(&mut self, data: NodeData) -> NodeId {
+        if let Some(idx) = self.free.pop() {
+            let slot = &mut self.slots[idx as usize];
+            slot.data = Some(data);
+            NodeId { idx, generation: slot.generation }
+        } else {
+            let idx = self.slots.len() as u32;
+            // The index must fit in INDEX_BITS or it would overflow into the generation bits when packed
+            // (to_f64), silently ALIASING a different node — the very corruption this arena prevents. The
+            // ceiling (~67M live slots in one realm) is astronomically above any real page, so this is a
+            // loud dev-time tripwire on a can't-happen breach, not a production branch.
+            debug_assert!((idx as i64) <= INDEX_MASK, "arena index overflowed INDEX_BITS ({idx} > {INDEX_MASK})");
+            self.slots.push(Slot { generation: 0, data: Some(data) });
+            NodeId { idx, generation: 0 }
+        }
     }
-    pub(crate) fn next_sibling(&self, idx: usize) -> Option<usize> {
-        let node = self.nodes.get(idx)?;
-        let parent = node.parent?;
-        self.nodes
-            .get(parent)
-            .and_then(|p| p.children.get(node.child_index + 1).copied())
+
+    // Free `id`'s slot: drop the node, bump the gen (so every surviving reference — the JS nid, an
+    // attrsView holder, a stale tree edge — now reads absent), and list the index for reuse. A gen at
+    // the pack ceiling RETIRES the slot instead (dropped but not recycled) so its index can never be
+    // handed out with a gen that would collide with an outstanding reference; a no-op if `id` is
+    // already stale (double-free / a FinalizationRegistry callback for a slot resetArena already
+    // recycled). Idempotent and safe against any wire id.
+    fn free_node(&mut self, id: NodeId) {
+        let Some(slot) = self.slots.get_mut(id.idx as usize) else {
+            return;
+        };
+        if slot.generation != id.generation || slot.data.is_none() {
+            return;
+        }
+        slot.data = None;
+        if slot.generation < GEN_MAX {
+            slot.generation += 1;
+            self.free.push(id.idx);
+        }
+    }
+
+    // Drop every node, bumping each occupied slot's gen and listing it for reuse. This is the per-page
+    // reset (a navigation) — NOT a Vec clear: bumping (rather than restarting gens from 0) means a
+    // detached element from the previous page, still held across the navigation, carries a nid whose
+    // gen no longer matches, so it reads absent instead of ALIASING whichever new-page node reused its
+    // index. Growth stays bounded because the freed indices feed the next page's allocations.
+    fn reset(&mut self) {
+        for idx in 0..self.slots.len() {
+            let slot = &mut self.slots[idx];
+            if slot.data.is_some() {
+                slot.data = None;
+                if slot.generation < GEN_MAX {
+                    slot.generation += 1;
+                    self.free.push(idx as u32);
+                }
+            }
+        }
+    }
+
+    // Append `child` at the end of `parent`'s children, recording its position so prev/next-sibling
+    // nav is O(1). The one place children are linked (create / import), so child_index can never drift
+    // from the list.
+    fn link_child(&mut self, parent: NodeId, child: NodeId) {
+        let pos = match self.get(parent) {
+            Some(p) => p.children.len(),
+            None => return,
+        };
+        if let Some(p) = self.get_mut(parent) {
+            p.children.push(child);
+        }
+        if let Some(c) = self.get_mut(child) {
+            c.child_index = pos;
+        }
+    }
+
+    // Rewrite child_index for every child of `parent` from its list position. Called after a removal,
+    // which shifts the positions of the siblings that followed.
+    fn reindex_children(&mut self, parent: NodeId) {
+        let kids: Vec<NodeId> = match self.get(parent) {
+            Some(p) => p.children.clone(),
+            None => return,
+        };
+        for (i, &c) in kids.iter().enumerate() {
+            if let Some(node) = self.get_mut(c) {
+                node.child_index = i;
+            }
+        }
+    }
+
+    // ── element-tree navigation (all gen-checked: a stale edge is skipped, never followed) ──
+
+    pub(crate) fn parent_of(&self, id: NodeId) -> Option<NodeId> {
+        let parent = self.get(id)?.parent?;
+        // Only report a parent whose slot still holds that gen — a stale upward edge (parent freed +
+        // reused) reads as no parent, so the node matches as a detached root rather than under an alias.
+        self.get(parent).map(|_| parent)
+    }
+    pub(crate) fn first_child(&self, id: NodeId) -> Option<NodeId> {
+        let node = self.get(id)?;
+        node.children.iter().copied().find(|&c| self.get(c).is_some())
+    }
+    pub(crate) fn prev_sibling(&self, id: NodeId) -> Option<NodeId> {
+        let node = self.get(id)?;
+        let parent = self.get(node.parent?)?;
+        // Step back from this child's position, skipping any stale edge, to the nearest live sibling.
+        // With no stale edges (the synced document tree) this is the single `child_index - 1` step.
+        let mut i = node.child_index;
+        while i > 0 {
+            i -= 1;
+            if let Some(&c) = parent.children.get(i) {
+                if self.get(c).is_some() {
+                    return Some(c);
+                }
+            }
+        }
+        None
+    }
+    pub(crate) fn next_sibling(&self, id: NodeId) -> Option<NodeId> {
+        let node = self.get(id)?;
+        let parent = self.get(node.parent?)?;
+        let mut i = node.child_index + 1;
+        while let Some(&c) = parent.children.get(i) {
+            if self.get(c).is_some() {
+                return Some(c);
+            }
+            i += 1;
+        }
+        None
+    }
+    // Whether `id` has any LIVE element child — `:empty` (with has_text) is correct even when a stale
+    // edge lingers in `children`.
+    pub(crate) fn has_element_child(&self, id: NodeId) -> bool {
+        match self.get(id) {
+            Some(node) => node.children.iter().any(|&c| self.get(c).is_some()),
+            None => false,
+        }
+    }
+    // Is `parent`'s live node the synthetic '#document' root? (used by the matcher's `:root`.)
+    pub(crate) fn is_document(&self, id: NodeId) -> bool {
+        self.get(id).is_some_and(|n| n.local_name == "#document")
+    }
+    // The live element children of `root`, for the matcher's descendant walk (preorder seed).
+    pub(crate) fn element_children(&self, id: NodeId) -> Vec<NodeId> {
+        match self.get(id) {
+            Some(node) => node.children.iter().copied().filter(|&c| self.get(c).is_some()).collect(),
+            None => Vec::new(),
+        }
+    }
+    // A stable count for the matcher's cycle backstop (see selector::query).
+    pub(crate) fn slot_count(&self) -> usize {
+        self.slots.len()
     }
 }
 
@@ -200,6 +418,40 @@ fn realm<'s>(scope: &'s mut v8::PinScope<'_, '_>, cid: i32) -> &'s mut RealmAren
     dom(scope).realms.entry(cid).or_default()
 }
 
+// A NodeId argument off the JS wire: reads arg `i` as a Number and unpacks it, or None for a negative
+// sentinel / non-number. Does NOT check liveness — the op does that via `realm(...).get(id)`.
+fn nid_arg(scope: &mut v8::PinScope<'_, '_>, args: &v8::FunctionCallbackArguments<'_>, i: i32) -> Option<NodeId> {
+    args.get(i).integer_value(scope).and_then(NodeId::from_i64)
+}
+
+// Set a NodeId return value as its packed JS Number.
+fn set_nid(scope: &mut v8::PinScope<'_, '_>, rv: &mut v8::ReturnValue<'_, v8::Value>, id: NodeId) {
+    rv.set(v8::Number::new(scope, id.to_f64()).into());
+}
+
+// Read a flat [name, value, name, value, …] attributes array into (attributes, attr_u16 override).
+fn read_attrs_flat(scope: &mut v8::PinScope<'_, '_>, val: v8::Local<'_, v8::Value>) -> (Vec<(String, String)>, Vec<(String, Vec<u16>)>) {
+    let mut attributes = Vec::new();
+    let mut attr_u16: Vec<(String, Vec<u16>)> = Vec::new();
+    if let Ok(arr) = v8::Local::<v8::Array>::try_from(val) {
+        let len = arr.length();
+        let mut i = 0;
+        while i + 1 < len {
+            let name = arr.get_index(scope, i).map(|v| v.to_rust_string_lossy(scope));
+            let value = arr.get_index(scope, i + 1);
+            if let (Some(name), Some(value)) = (name, value) {
+                let (utf8, u16) = read_v8_value(scope, value);
+                if let Some(u) = u16 {
+                    attr_u16.push((name.clone(), u));
+                }
+                attributes.push((name, utf8));
+            }
+            i += 2;
+        }
+    }
+    (attributes, attr_u16)
+}
+
 // Install `globalThis.__dom` (the arena build / query / match surface + attrsView) into |ctx|, building
 // the isolate-shared templates on first call. Mirrors install_host_namespace's shape (its own
 // HandleScope + ContextScope, safe to re-run per realm — each realm gets its own function set carrying
@@ -240,6 +492,11 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_, ()>, ctx: &v8::Global<v8:
     // Store flip: eager-create a node (importNode with no parent/attrs) at Element construction, then
     // fix its namespace once finalized (setNodeMeta) — the arena becomes the element's `_attrs` store.
     register(scope, ns, "setNodeMeta", set_node_meta, context_id);
+    // Reclamation: free ONE node's slot when its JS wrapper is garbage-collected (the
+    // FinalizationRegistry callback in native-query-shadow.js calls this), so a long no-navigation
+    // session's transient/detached nodes don't accumulate. Safe by construction — the generational
+    // slot bumps its gen, so any surviving reference reads absent.
+    register(scope, ns, "dropNode", drop_node, context_id);
     // Free a disposed realm's arena — csim calls this before tearing down a frame realm (main reuses
     // slot 0). Takes an explicit id (the realm being dropped), not the caller's own.
     register(scope, ns, "dropRealm", drop_realm, context_id);
@@ -268,11 +525,11 @@ fn register(
     }
 }
 
-// __dom.importNode(tagName, localName, ns, hasText, parentId, attrsFlat) -> nativeId. Adds an arena
-// node — the bulk path that builds the arena from an already-parsed document. `attrsFlat` is a flat
-// [name, value, name, value, …] array; `parentId` < 0 makes a root, else the node is appended there.
-// `tagName` (arg 0) is accepted for call-site compatibility but not stored — the matcher works off the
-// lowercased `localName`.
+// __dom.importNode(tagName, localName, ns, hasText, parentNid, attrsFlat) -> nid. Adds an arena
+// node — the bulk path that builds the arena from an already-parsed document, and the per-element
+// eager create at construction. `attrsFlat` is a flat [name, value, name, value, …] array;
+// `parentNid` < 0 makes a root, else the node is appended to that (live) parent. `tagName` (arg 0) is
+// accepted for call-site compatibility but not stored — the matcher works off the lowercased `localName`.
 fn import_node(
     scope: &mut v8::PinScope<'_, '_>,
     args: v8::FunctionCallbackArguments<'_>,
@@ -281,32 +538,13 @@ fn import_node(
     let local_name = args.get(1).to_rust_string_lossy(scope);
     let ns = args.get(2).to_rust_string_lossy(scope);
     let has_text = args.get(3).boolean_value(scope);
-    let parent = match args.get(4).integer_value(scope) {
-        Some(p) if p >= 0 => Some(p as usize),
-        _ => None,
-    };
-    let mut attributes = Vec::new();
-    let mut attr_u16: Vec<(String, Vec<u16>)> = Vec::new();
-    if let Ok(arr) = v8::Local::<v8::Array>::try_from(args.get(5)) {
-        let len = arr.length();
-        let mut i = 0;
-        while i + 1 < len {
-            let name = arr.get_index(scope, i).map(|v| v.to_rust_string_lossy(scope));
-            let value = arr.get_index(scope, i + 1);
-            if let (Some(name), Some(value)) = (name, value) {
-                let (utf8, u16) = read_v8_value(scope, value);
-                if let Some(u) = u16 {
-                    attr_u16.push((name.clone(), u));
-                }
-                attributes.push((name, utf8));
-            }
-            i += 2;
-        }
-    }
+    let parent = nid_arg(scope, &args, 4);
+    let (attributes, attr_u16) = read_attrs_flat(scope, args.get(5));
     let cid = realm_id(scope, &args);
     let st = realm(scope, cid);
-    let new_id = st.nodes.len();
-    st.nodes.push(NodeData {
+    // Only link under a still-live parent; a stale parent nid leaves the node a detached root.
+    let parent = parent.filter(|&p| st.get(p).is_some());
+    let new_id = st.alloc(NodeData {
         local_name,
         ns,
         attributes,
@@ -317,13 +555,13 @@ fn import_node(
         has_text,
     });
     if let Some(p) = parent {
-        link_child(&mut st.nodes, p, new_id);
+        st.link_child(p, new_id);
     }
-    rv.set_uint32(new_id as u32);
+    set_nid(scope, &mut rv, new_id);
 }
 
-// __dom.syncChildren(parentId, childIds, hasText): make parentId's element children EXACTLY
-// `childIds` (in document order) and set its has_text (whether it has non-empty text content).
+// __dom.syncChildren(parentNid, childNids, hasText): make parentNid's element children EXACTLY
+// `childNids` (in document order) and set its has_text (whether it has non-empty text content).
 // Each child is detached from any current parent first, so a MOVED node — still listed under its
 // old parent until that parent is itself synced — is re-homed correctly whichever order the two
 // syncs arrive in. The single structural-sync primitive the incremental (parse + mutation) arena
@@ -334,51 +572,47 @@ fn sync_children(
     args: v8::FunctionCallbackArguments<'_>,
     _rv: v8::ReturnValue<'_, v8::Value>,
 ) {
-    let parent = match args.get(0).integer_value(scope) {
-        Some(p) if p >= 0 => p as usize,
-        _ => return,
+    let Some(parent) = nid_arg(scope, &args, 0) else {
+        return;
     };
     let has_text = args.get(2).boolean_value(scope);
-    let mut raw: Vec<usize> = Vec::new();
+    let mut raw: Vec<NodeId> = Vec::new();
     if let Ok(arr) = v8::Local::<v8::Array>::try_from(args.get(1)) {
         for i in 0..arr.length() {
-            if let Some(id) = arr.get_index(scope, i).and_then(|v| v.integer_value(scope)) {
-                if id >= 0 {
-                    raw.push(id as usize);
-                }
+            if let Some(id) = arr.get_index(scope, i).and_then(|v| v.integer_value(scope)).and_then(NodeId::from_i64) {
+                raw.push(id);
             }
         }
     }
     let cid = realm_id(scope, &args);
     let st = realm(scope, cid);
-    if parent >= st.nodes.len() {
+    if st.get(parent).is_none() {
         return;
     }
-    // Sanitize the delta: drop out-of-range ids (would panic the matcher's node() deref), the parent
-    // itself (a self-cycle), and duplicates (a node can't be its own sibling), preserving order. The
-    // matcher assumes an ACYCLIC tree; these cheap checks kill the footguns a malformed delta could
+    // Sanitize the delta: keep only LIVE children (a stale id would plant a dangling edge), drop the
+    // parent itself (a self-cycle) and duplicates (a node can't be its own sibling), preserving order.
+    // The matcher assumes an ACYCLIC tree; these cheap checks kill the footguns a malformed delta could
     // plant. A transient ANCESTOR inversion during a multi-parent move (child re-homed before its old
     // parent is re-synced) is legitimate and self-heals, so it is NOT rejected here — the invariant is
     // "mirror an acyclic tree and sync every affected parent before the next query."
-    let n = st.nodes.len();
-    let mut seen: std::collections::HashSet<usize> = std::collections::HashSet::with_capacity(raw.len());
-    let mut kids: Vec<usize> = Vec::with_capacity(raw.len());
+    let mut seen: std::collections::HashSet<NodeId> = std::collections::HashSet::with_capacity(raw.len());
+    let mut kids: Vec<NodeId> = Vec::with_capacity(raw.len());
     for &k in &raw {
-        if k < n && k != parent && seen.insert(k) {
+        if k != parent && st.get(k).is_some() && seen.insert(k) {
             kids.push(k);
         }
     }
     // Detach each incoming child from a DIFFERENT current parent (a same-parent reorder skips this).
     for &k in &kids {
-        let old = st.nodes.get(k).and_then(|node| node.parent);
+        let old = st.get(k).and_then(|node| node.parent);
         if old != Some(parent) {
             if let Some(op) = old {
-                if let Some(o) = st.nodes.get_mut(op) {
+                if let Some(o) = st.get_mut(op) {
                     o.children.retain(|&c| c != k);
                 }
-                reindex_children(&mut st.nodes, op);
+                st.reindex_children(op);
             }
-            if let Some(kn) = st.nodes.get_mut(k) {
+            if let Some(kn) = st.get_mut(k) {
                 kn.parent = Some(parent);
             }
         }
@@ -388,39 +622,38 @@ fn sync_children(
     // inside it could match an ancestor it no longer has. A child that MOVED to another parent was
     // already retained-out above, so it isn't in the old list here; only truly-dropped ones are nulled
     // (and a later syncChildren re-homing one re-sets its parent).
-    let dropped: Vec<usize> = match st.nodes.get(parent) {
+    let dropped: Vec<NodeId> = match st.get(parent) {
         Some(p) => p.children.iter().copied().filter(|c| !seen.contains(c)).collect(),
         None => Vec::new(),
     };
     for d in dropped {
-        if st.nodes.get(d).and_then(|node| node.parent) == Some(parent) {
-            if let Some(dn) = st.nodes.get_mut(d) {
+        if st.get(d).and_then(|node| node.parent) == Some(parent) {
+            if let Some(dn) = st.get_mut(d) {
                 dn.parent = None;
             }
         }
     }
-    if let Some(p) = st.nodes.get_mut(parent) {
+    if let Some(p) = st.get_mut(parent) {
         p.children = kids;
         p.has_text = has_text;
     }
-    reindex_children(&mut st.nodes, parent);
+    st.reindex_children(parent);
 }
 
-// __dom.setAttr(nodeId, name, value) / __dom.removeAttr(nodeId, name): mirror an attribute write
+// __dom.setAttr(nodeNid, name, value) / __dom.removeAttr(nodeNid, name): mirror an attribute write
 // into the arena. Names arrive already lowercased for HTML (the JS side passes the stored key).
 fn set_attr(
     scope: &mut v8::PinScope<'_, '_>,
     args: v8::FunctionCallbackArguments<'_>,
     _rv: v8::ReturnValue<'_, v8::Value>,
 ) {
-    let id = match args.get(0).integer_value(scope) {
-        Some(i) if i >= 0 => i as usize,
-        _ => return,
+    let Some(id) = nid_arg(scope, &args, 0) else {
+        return;
     };
     let name = args.get(1).to_rust_string_lossy(scope);
     let (utf8, u16) = read_v8_value(scope, args.get(2));
     let cid = realm_id(scope, &args);
-    if let Some(node) = realm(scope, cid).nodes.get_mut(id) {
+    if let Some(node) = realm(scope, cid).get_mut(id) {
         node.set_attr_full(&name, utf8, u16);
     }
 }
@@ -430,19 +663,18 @@ fn remove_attr(
     args: v8::FunctionCallbackArguments<'_>,
     _rv: v8::ReturnValue<'_, v8::Value>,
 ) {
-    let id = match args.get(0).integer_value(scope) {
-        Some(i) if i >= 0 => i as usize,
-        _ => return,
+    let Some(id) = nid_arg(scope, &args, 0) else {
+        return;
     };
     let name = args.get(1).to_rust_string_lossy(scope);
     let cid = realm_id(scope, &args);
-    if let Some(node) = realm(scope, cid).nodes.get_mut(id) {
+    if let Some(node) = realm(scope, cid).get_mut(id) {
         node.attributes.retain(|(k, _)| k != &name);
         node.clear_attr_u16(&name);
     }
 }
 
-// __dom.syncAttrs(nodeId, attrsFlat): replace a node's attributes with the flat [name, value, …]
+// __dom.syncAttrs(nodeNid, attrsFlat): replace a node's attributes with the flat [name, value, …]
 // list wholesale. The mutation hook mirrors an element's current _attrs on any attribute change —
 // wholesale (attrs per element are few) so it can't drift on attribute-name CASE (the arena keys
 // then match the initial mirror exactly, both taken from the same _attrs iteration).
@@ -451,38 +683,20 @@ fn sync_attrs(
     args: v8::FunctionCallbackArguments<'_>,
     _rv: v8::ReturnValue<'_, v8::Value>,
 ) {
-    let id = match args.get(0).integer_value(scope) {
-        Some(i) if i >= 0 => i as usize,
-        _ => return,
+    let Some(id) = nid_arg(scope, &args, 0) else {
+        return;
     };
-    let mut attributes = Vec::new();
-    let mut attr_u16: Vec<(String, Vec<u16>)> = Vec::new();
-    if let Ok(arr) = v8::Local::<v8::Array>::try_from(args.get(1)) {
-        let len = arr.length();
-        let mut i = 0;
-        while i + 1 < len {
-            let name = arr.get_index(scope, i).map(|v| v.to_rust_string_lossy(scope));
-            let value = arr.get_index(scope, i + 1);
-            if let (Some(name), Some(value)) = (name, value) {
-                let (utf8, u16) = read_v8_value(scope, value);
-                if let Some(u) = u16 {
-                    attr_u16.push((name.clone(), u));
-                }
-                attributes.push((name, utf8));
-            }
-            i += 2;
-        }
-    }
+    let (attributes, attr_u16) = read_attrs_flat(scope, args.get(1));
     let cid = realm_id(scope, &args);
-    if let Some(node) = realm(scope, cid).nodes.get_mut(id) {
+    if let Some(node) = realm(scope, cid).get_mut(id) {
         node.attributes = attributes;
         node.attr_u16 = attr_u16;
     }
 }
 
-// __dom.queryIds(rootId, selector) -> [nativeId, …] when native matching answers the selector;
+// __dom.queryIds(rootNid, selector) -> [nid, …] when native matching answers the selector;
 // `undefined` when it needs the JS engine (a live-state selector like `:hover` / `:checked`);
-// `null` for an invalid selector. Returns NodeIds (not wrappers) so the query layer can map
+// `null` for an invalid selector. Returns nids (not wrappers) so the query layer can map
 // results back to the JS tree cheaply, and lets it distinguish "defer to css-select" (undefined)
 // from "SyntaxError" (null) — this is the shape the host-query layer uses.
 fn query_ids(
@@ -490,9 +704,8 @@ fn query_ids(
     args: v8::FunctionCallbackArguments<'_>,
     mut rv: v8::ReturnValue<'_, v8::Value>,
 ) {
-    let root = match args.get(0).integer_value(scope) {
-        Some(r) if r >= 0 => r as usize,
-        _ => return,
+    let Some(root) = nid_arg(scope, &args, 0) else {
+        return;
     };
     let selector = args.get(1).to_rust_string_lossy(scope);
     let cid = realm_id(scope, &args);
@@ -500,7 +713,7 @@ fn query_ids(
         crate::selector::QueryOutcome::Matched(ids) => {
             let array = v8::Array::new(scope, ids.len() as i32);
             for (i, id) in ids.iter().enumerate() {
-                let v: v8::Local<v8::Value> = v8::Integer::new_from_unsigned(scope, *id as u32).into();
+                let v: v8::Local<v8::Value> = v8::Number::new(scope, id.to_f64()).into();
                 array.set_index(scope, i as u32, v);
             }
             rv.set(array.into());
@@ -513,7 +726,7 @@ fn query_ids(
     }
 }
 
-// __dom.matchesId(nodeId, selector) -> bool when native matching answers it; `undefined` when it
+// __dom.matchesId(nodeNid, selector) -> bool when native matching answers it; `undefined` when it
 // needs the JS engine (a live-state selector / pseudo-element); `null` for an invalid selector. The
 // single-element match the cascade uses (does this element match this rule?), distinct from queryIds'
 // descendant search.
@@ -522,9 +735,8 @@ fn matches_id(
     args: v8::FunctionCallbackArguments<'_>,
     mut rv: v8::ReturnValue<'_, v8::Value>,
 ) {
-    let id = match args.get(0).integer_value(scope) {
-        Some(i) if i >= 0 => i as usize,
-        _ => return,
+    let Some(id) = nid_arg(scope, &args, 0) else {
+        return;
     };
     let selector = args.get(1).to_rust_string_lossy(scope);
     let cid = realm_id(scope, &args);
@@ -551,16 +763,15 @@ fn compile_selector(
 }
 
 // __dom.matchesCompiled(nid, handle) -> bool, or undefined when the handle/node is out of range so the
-// caller falls back to css. The per-match hot path of authoritative cascade matching: an integer id +
-// an integer handle, no string.
+// caller falls back to css. The per-match hot path of authoritative cascade matching: a nid + an
+// integer handle, no string.
 fn matches_compiled(
     scope: &mut v8::PinScope<'_, '_>,
     args: v8::FunctionCallbackArguments<'_>,
     mut rv: v8::ReturnValue<'_, v8::Value>,
 ) {
-    let id = match args.get(0).integer_value(scope) {
-        Some(i) if i >= 0 => i as usize,
-        _ => return,
+    let Some(id) = nid_arg(scope, &args, 0) else {
+        return;
     };
     let handle = match args.get(1).integer_value(scope) {
         Some(h) => h as i32,
@@ -572,16 +783,16 @@ fn matches_compiled(
     }
 }
 
-// __dom.resetArena() — drop the CALLING REALM's arena nodes. Each page rebuild (ensureBuilt) clears
-// its realm's arena first; a realm's slot is created lazily and cleared here, so main (realm 0) is
-// reset per page without accumulating.
+// __dom.resetArena() — free the CALLING REALM's nodes for a new page (a navigation). Each occupied
+// slot's gen is bumped (not zeroed), so a detached element held across the navigation can't alias a
+// new-page node that reuses its index; the freed indices feed the new page.
 fn reset_arena(
     scope: &mut v8::PinScope<'_, '_>,
     args: v8::FunctionCallbackArguments<'_>,
     _rv: v8::ReturnValue<'_, v8::Value>,
 ) {
     let cid = realm_id(scope, &args);
-    realm(scope, cid).nodes.clear();
+    realm(scope, cid).reset();
 }
 
 // __dom.setNodeMeta(nid, localName, ns) — update a node's localName + namespace after creation. The
@@ -593,16 +804,35 @@ fn set_node_meta(
     args: v8::FunctionCallbackArguments<'_>,
     _rv: v8::ReturnValue<'_, v8::Value>,
 ) {
-    let id = match args.get(0).integer_value(scope) {
-        Some(i) if i >= 0 => i as usize,
-        _ => return,
+    let Some(id) = nid_arg(scope, &args, 0) else {
+        return;
     };
     let local_name = args.get(1).to_rust_string_lossy(scope);
     let ns = args.get(2).to_rust_string_lossy(scope);
     let cid = realm_id(scope, &args);
-    if let Some(node) = realm(scope, cid).nodes.get_mut(id) {
+    if let Some(node) = realm(scope, cid).get_mut(id) {
         node.local_name = local_name;
         node.ns = ns;
+    }
+}
+
+// __dom.dropNode(nid) — free ONE node's slot (its JS wrapper was garbage-collected). Routes to the
+// CALLING realm's arena (the FinalizationRegistry that fires it was created in that realm). Idempotent
+// and safe against a stale nid (a slot resetArena already recycled): free_node no-ops on a gen mismatch.
+fn drop_node(
+    scope: &mut v8::PinScope<'_, '_>,
+    args: v8::FunctionCallbackArguments<'_>,
+    _rv: v8::ReturnValue<'_, v8::Value>,
+) {
+    let Some(id) = nid_arg(scope, &args, 0) else {
+        return;
+    };
+    let cid = realm_id(scope, &args);
+    // NON-creating lookup on purpose: a frame's FR cleanup can fire AFTER dropRealm removed its arena.
+    // `realm()` would resurrect an empty RealmArena (a lingering HashMap entry per such frame); freeing
+    // nothing from a dropped realm is exactly right, so skip when the realm is gone.
+    if let Some(arena) = dom(scope).realms.get_mut(&cid) {
+        arena.free_node(id);
     }
 }
 
@@ -638,8 +868,9 @@ fn now_nanos(
 }
 
 // Build the native-backed `_attrs` instance template once per isolate. Reserves internal field 0 for
-// the owner NodeId and field 1 for its realm's context_id (attrsView stamps both), so the interceptors
-// resolve the RIGHT realm's arena — the template is isolate-shared but its instances are per realm.
+// the owner nid (packed) and field 1 for its realm's context_id (attrsView stamps both), so the
+// interceptors resolve the RIGHT realm's arena and the RIGHT node generation — the template is
+// isolate-shared but its instances are per realm.
 fn ensure_templates(scope: &mut v8::PinScope<'_, '_>) {
     if dom(scope).attrs_view_template.is_none() {
         let tmpl = v8::ObjectTemplate::new(scope);
@@ -658,71 +889,6 @@ fn ensure_templates(scope: &mut v8::PinScope<'_, '_>) {
     }
 }
 
-
-
-
-
-// Append `child` at the end of `parent`'s children, recording its position so
-// prev/next-sibling nav is O(1). The one place children are linked (create / import
-// / appendChild), so child_index can never drift from the list.
-fn link_child(nodes: &mut Vec<NodeData>, parent: usize, child: usize) {
-    let pos = match nodes.get(parent) {
-        Some(p) => p.children.len(),
-        None => return,
-    };
-    nodes[parent].children.push(child);
-    if let Some(c) = nodes.get_mut(child) {
-        c.child_index = pos;
-    }
-}
-
-
-
-
-
-// ── reflected string attributes (className / id) ────────────────────────────
-
-
-
-
-
-
-
-
-// ── navigation (parentNode / childNodes) ────────────────────────────────────
-
-
-
-
-
-// ── methods (FunctionTemplate, reading args.this()) ─────────────────────────
-
-
-
-
-// Rewrite child_index for every child of `parent` from its list position. Called
-// after a removal, which shifts the positions of the siblings that followed.
-fn reindex_children(nodes: &mut Vec<NodeData>, parent: usize) {
-    let kids: Vec<usize> = match nodes.get(parent) {
-        Some(p) => p.children.clone(),
-        None => return,
-    };
-    for (i, &k) in kids.iter().enumerate() {
-        if let Some(node) = nodes.get_mut(k) {
-            node.child_index = i;
-        }
-    }
-}
-
-
-
-
-// ── dataset (named interceptor over data-* attributes) ──────────────────────
-
-
-
-
-
 // ── native-backed _attrs (store flip): a full named-interceptor view over a node's attributes ──
 // The Element constructor installs one of these in place of the JS `_attrs` object, so every
 // `el._attrs.foo` / `el._attrs[k]=v` / `k in el._attrs` / `delete` / `for..in` / `Object.keys` /
@@ -735,9 +901,8 @@ fn attrs_view(
     args: v8::FunctionCallbackArguments<'_>,
     mut rv: v8::ReturnValue<'_, v8::Value>,
 ) {
-    let nid = match args.get(0).integer_value(scope) {
-        Some(i) if i >= 0 => i as usize,
-        _ => return,
+    let Some(id) = nid_arg(scope, &args, 0) else {
+        return;
     };
     let cid = realm_id(scope, &args);
     let Some(template) = dom(scope).attrs_view_template.clone() else {
@@ -745,7 +910,7 @@ fn attrs_view(
     };
     let template = v8::Local::new(scope, &template);
     if let Some(obj) = template.new_instance(scope) {
-        let id_value: v8::Local<v8::Value> = v8::Integer::new_from_unsigned(scope, nid as u32).into();
+        let id_value: v8::Local<v8::Value> = v8::Number::new(scope, id.to_f64()).into();
         obj.set_internal_field(0, id_value.into());
         let cid_value: v8::Local<v8::Value> = v8::Integer::new(scope, cid).into();
         obj.set_internal_field(1, cid_value.into());
@@ -778,7 +943,7 @@ fn attrs_get(
     };
     // Prefer the lossless UTF-16 override (a value that carried a lone surrogate); else the UTF-8. Clone
     // the chosen representation out of the node borrow so the V8 string can be built with the scope after.
-    let value: Option<Result<Vec<u16>, String>> = realm(scope, cid).nodes.get(id).and_then(|n| {
+    let value: Option<Result<Vec<u16>, String>> = realm(scope, cid).get(id).and_then(|n| {
         match n.get_attr_u16(&name) {
             Some(u) => Some(Ok(u.to_vec())),
             None => n.get_attr(&name).map(|v| Err(v.to_string())),
@@ -816,7 +981,7 @@ fn attrs_set(
         return v8::Intercepted::kNo;
     };
     let (utf8, u16) = read_v8_value(scope, value);
-    if let Some(node) = realm(scope, cid).nodes.get_mut(id) {
+    if let Some(node) = realm(scope, cid).get_mut(id) {
         node.set_attr_full(&name, utf8, u16);
     }
     v8::Intercepted::kYes
@@ -835,7 +1000,7 @@ fn attrs_query(
     let Some(name) = name_string(scope, key) else {
         return v8::Intercepted::kNo;
     };
-    let present = realm(scope, cid).nodes.get(id).is_some_and(|n| n.get_attr(&name).is_some());
+    let present = realm(scope, cid).get(id).is_some_and(|n| n.get_attr(&name).is_some());
     if present {
         // PropertyAttribute::NONE (0) = enumerable + writable + configurable.
         rv.set_uint32(0);
@@ -858,7 +1023,7 @@ fn attrs_delete(
     let Some(name) = name_string(scope, key) else {
         return v8::Intercepted::kNo;
     };
-    if let Some(node) = realm(scope, cid).nodes.get_mut(id) {
+    if let Some(node) = realm(scope, cid).get_mut(id) {
         node.attributes.retain(|(k, _)| k != &name);
         node.clear_attr_u16(&name);
     }
@@ -876,7 +1041,6 @@ fn attrs_enumerate(
     };
     let cid = holder_realm_id(scope, &args);
     let names: Vec<String> = realm(scope, cid)
-        .nodes
         .get(id)
         .map(|n| n.attributes.iter().map(|(k, _)| k.clone()).collect())
         .unwrap_or_default();
@@ -902,7 +1066,7 @@ fn attrs_descriptor(
     let Some(name) = name_string(scope, key) else {
         return v8::Intercepted::kNo;
     };
-    let value: Option<Result<Vec<u16>, String>> = realm(scope, cid).nodes.get(id).and_then(|n| {
+    let value: Option<Result<Vec<u16>, String>> = realm(scope, cid).get(id).and_then(|n| {
         match n.get_attr_u16(&name) {
             Some(u) => Some(Ok(u.to_vec())),
             None => n.get_attr(&name).map(|v| Err(v.to_string())),
@@ -940,12 +1104,14 @@ fn desc_set_bool(scope: &mut v8::PinScope<'_, '_>, obj: v8::Local<'_, v8::Object
 
 // ── NodeId plumbing ─────────────────────────────────────────────────────────
 
-// The NodeId stamped into the accessor holder's internal field 0.
+// The NodeId packed into the accessor holder's internal field 0.
 fn holder_node_id(
     scope: &mut v8::PinScope<'_, '_>,
     args: &v8::PropertyCallbackArguments<'_>,
-) -> Option<usize> {
-    object_node_id(scope, args.holder())
+) -> Option<NodeId> {
+    let data = args.holder().get_internal_field(scope, 0)?;
+    let value = v8::Local::<v8::Value>::try_from(data).ok()?;
+    NodeId::from_i64(value.integer_value(scope)?)
 }
 
 // The realm context_id stamped into the holder's internal field 1 (attrsView), so the interceptor
@@ -956,11 +1122,4 @@ fn holder_realm_id(scope: &mut v8::PinScope<'_, '_>, args: &v8::PropertyCallback
         .and_then(|d| v8::Local::<v8::Value>::try_from(d).ok())
         .and_then(|v| v.int32_value(scope))
         .unwrap_or(0)
-}
-
-
-fn object_node_id(scope: &mut v8::PinScope<'_, '_>, obj: v8::Local<'_, v8::Object>) -> Option<usize> {
-    let data = obj.get_internal_field(scope, 0)?;
-    let value = v8::Local::<v8::Value>::try_from(data).ok()?;
-    Some(value.uint32_value(scope)? as usize)
 }

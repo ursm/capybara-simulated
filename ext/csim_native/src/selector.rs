@@ -34,7 +34,7 @@ use selectors::parser::{
 use selectors::visitor::SelectorVisitor;
 use selectors::{Element, OpaqueElement};
 
-use crate::dom::RealmArena;
+use crate::dom::{NodeId, RealmArena};
 
 const HTML_NS: &str = "http://www.w3.org/1999/xhtml";
 
@@ -197,19 +197,21 @@ impl<'i> Parser<'i> for CsimParser {
     }
 }
 
-// A handle into the arena. Copy so the Element trait's element-returning methods are cheap.
+// A handle into the arena: which arena, and the generational id of the node. Copy so the Element
+// trait's element-returning methods are cheap. Only ever constructed for a LIVE node — the query seed
+// filters stale ids, and every navigation method returns gen-checked (live) ids — so `node()` resolves.
 #[derive(Clone, Copy)]
 pub struct NodeRef<'a> {
     pub arena: &'a RealmArena,
-    pub idx: usize,
+    pub id: NodeId,
 }
 
 impl<'a> NodeRef<'a> {
-    fn at(&self, idx: usize) -> NodeRef<'a> {
-        NodeRef { arena: self.arena, idx }
+    fn at(&self, id: NodeId) -> NodeRef<'a> {
+        NodeRef { arena: self.arena, id }
     }
     fn node(&self) -> &'a crate::dom::NodeData {
-        &self.arena.nodes[self.idx]
+        self.arena.get(self.id).expect("NodeRef points at a live node")
     }
 }
 
@@ -227,7 +229,7 @@ impl<'a> Element for NodeRef<'a> {
     }
 
     fn parent_element(&self) -> Option<Self> {
-        self.arena.parent_of(self.idx).map(|p| self.at(p))
+        self.arena.parent_of(self.id).map(|p| self.at(p))
     }
     fn parent_node_is_shadow_root(&self) -> bool {
         false
@@ -240,13 +242,13 @@ impl<'a> Element for NodeRef<'a> {
     }
 
     fn prev_sibling_element(&self) -> Option<Self> {
-        self.arena.prev_sibling(self.idx).map(|s| self.at(s))
+        self.arena.prev_sibling(self.id).map(|s| self.at(s))
     }
     fn next_sibling_element(&self) -> Option<Self> {
-        self.arena.next_sibling(self.idx).map(|s| self.at(s))
+        self.arena.next_sibling(self.id).map(|s| self.at(s))
     }
     fn first_element_child(&self) -> Option<Self> {
-        self.arena.first_child(self.idx).map(|c| self.at(c))
+        self.arena.first_child(self.id).map(|c| self.at(c))
     }
 
     fn is_html_element_in_html_document(&self) -> bool {
@@ -344,17 +346,18 @@ impl<'a> Element for NodeRef<'a> {
     }
 
     fn is_empty(&self) -> bool {
-        self.node().children.is_empty() && !self.node().has_text
+        !self.arena.has_element_child(self.id) && !self.node().has_text
     }
     fn is_root(&self) -> bool {
-        match self.node().parent {
+        match self.arena.parent_of(self.id) {
             None => true,
             // A shadow-built arena hangs the tree under a synthetic '#document' node so a
             // document-scoped query includes <html> as a candidate; an element whose parent
             // IS that document is the document root — css-select matches `:root` as "parent
             // is not an element", and '#document' is the arena's one non-element node. A
-            // bulk-imported arena with no document node still roots at parent == None.
-            Some(parent) => self.arena.nodes.get(parent).is_some_and(|n| n.local_name == "#document"),
+            // bulk-imported arena with no document node still roots at parent == None (and a
+            // stale upward edge reads as no parent, so it too roots here).
+            Some(parent) => self.arena.is_document(parent),
         }
     }
 
@@ -388,7 +391,7 @@ struct Parsed {
 // The outcome of a native query: a matched id set, a request to fall back to the JS css-select
 // engine (the selector uses live-state constructs), or an invalid selector.
 pub enum QueryOutcome {
-    Matched(Vec<usize>),
+    Matched(Vec<NodeId>),
     NeedsJsFallback,
     Invalid,
 }
@@ -484,8 +487,10 @@ pub fn compile_selector(text: &str) -> i32 {
 
 // Match ONE element against a previously compiled selector handle. `None` when the handle is out of
 // range or the node id is stale (the caller falls back to css-select); `Some(bool)` is authoritative.
-pub fn matches_compiled(arena: &RealmArena, idx: usize, handle: i32) -> Option<bool> {
-    if handle < 0 || idx >= arena.nodes.len() {
+// Like `query`, the crate's ancestor walk (for combinators) relies on the arena being acyclic — a
+// property the sync layer maintains (it mirrors the acyclic JS DOM); there is no per-call cycle cap here.
+pub fn matches_compiled(arena: &RealmArena, id: NodeId, handle: i32) -> Option<bool> {
+    if handle < 0 || arena.get(id).is_none() {
         return None;
     }
     COMPILED.with(|c| {
@@ -500,7 +505,7 @@ pub fn matches_compiled(arena: &RealmArena, idx: usize, handle: i32) -> Option<b
             NeedsSelectorFlags::No,
             MatchingForInvalidation::No,
         );
-        Some(matches_selector_list(list, &NodeRef { arena, idx }, &mut ctx))
+        Some(matches_selector_list(list, &NodeRef { arena, id }, &mut ctx))
     })
 }
 
@@ -517,12 +522,14 @@ pub fn matches_compiled(arena: &RealmArena, idx: usize, handle: i32) -> Option<b
 // candidate, the crate's intended usage; a fresh cache per candidate would be pure waste. The
 // matcher walks each candidate's full ancestor chain, so ancestor-dependent combinators resolve
 // correctly even above `root`.
-pub fn query(arena: &RealmArena, root: usize, list: &SelectorList<CsimImpl>, first_only: bool) -> Vec<usize> {
+pub fn query(arena: &RealmArena, root: NodeId, list: &SelectorList<CsimImpl>, first_only: bool) -> Vec<NodeId> {
     let mut out = Vec::new();
-    let mut stack: Vec<usize> = match arena.nodes.get(root) {
-        Some(node) => node.children.iter().rev().copied().collect(),
-        None => return out,
-    };
+    if arena.get(root).is_none() {
+        return out;
+    }
+    // Seed with the root's LIVE element children, reversed so the stack pops in document order.
+    let mut stack: Vec<NodeId> = arena.element_children(root);
+    stack.reverse();
     let mut caches = SelectorCaches::default();
     let mut ctx = MatchingContext::new(
         MatchingMode::Normal,
@@ -532,27 +539,35 @@ pub fn query(arena: &RealmArena, root: usize, list: &SelectorList<CsimImpl>, fir
         NeedsSelectorFlags::No,
         MatchingForInvalidation::No,
     );
-    ctx.scope_element = Some(NodeRef { arena, idx: root }.opaque());
-    // Defense against a malformed sync delta: an acyclic subtree visits each node at most once, so a
-    // pop count past the arena size means a cycle was planted (only a buggy caller can — the matcher,
-    // like Servo, assumes an acyclic tree). Break rather than spin the isolate forever with no V8
-    // interrupt. sync_children's own guards make this unreachable in practice; this is the backstop.
-    let cap = arena.nodes.len().saturating_add(1);
+    ctx.scope_element = Some(NodeRef { arena, id: root }.opaque());
+    // Backstop for the DESCENDANT DFS below only: an acyclic subtree pushes each node onto `stack` at
+    // most once, so a pop count past the slot count means a `children` cycle was planted, and we break
+    // rather than spin the isolate forever (no V8 interrupt reaches native code). It does NOT bound the
+    // crate's ANCESTOR walk (repeated parent_element for descendant/sibling combinators, inside a single
+    // matches_selector_list) — that relies on the arena being ACYCLIC, which it is: the arena mirrors the
+    // always-acyclic JS DOM, and sync_children rejects self-cycles + stale/duplicate edges. Only a buggy
+    // driver planting a genuine parent-chain cycle (never a real DOM) could hang that walk; the same
+    // acyclicity assumption Servo itself makes. matches_compiled / matches_text share it.
+    let cap = arena.slot_count().saturating_add(1);
     let mut steps = 0usize;
-    while let Some(idx) = stack.pop() {
+    while let Some(id) = stack.pop() {
+        // A stale edge (child freed + slot reused) reads absent — skip it, never alias the reoccupant.
+        if arena.get(id).is_none() {
+            continue;
+        }
         steps += 1;
         if steps > cap {
             break;
         }
-        if matches_selector_list(list, &NodeRef { arena, idx }, &mut ctx) {
-            out.push(idx);
+        if matches_selector_list(list, &NodeRef { arena, id }, &mut ctx) {
+            out.push(id);
             if first_only {
                 return out;
             }
         }
-        if let Some(node) = arena.nodes.get(idx) {
-            stack.extend(node.children.iter().rev().copied());
-        }
+        let mut kids = arena.element_children(id);
+        kids.reverse();
+        stack.extend(kids);
     }
     out
 }
@@ -560,7 +575,7 @@ pub fn query(arena: &RealmArena, root: usize, list: &SelectorList<CsimImpl>, fir
 // Parse (cached) + collect. Distinguishes three outcomes: a matched id set, a request to defer to
 // the JS engine (a live-state selector), or Invalid (the caller treats it as a SyntaxError). A
 // deferred selector is NOT matched here — the arena result would be a wrong subset.
-pub fn query_text(arena: &RealmArena, root: usize, text: &str, first_only: bool) -> QueryOutcome {
+pub fn query_text(arena: &RealmArena, root: NodeId, text: &str, first_only: bool) -> QueryOutcome {
     CACHE.with(|c| {
         let mut c = c.borrow_mut();
         let entry = c.entry(text.to_owned()).or_insert_with(|| parse(text));
@@ -577,7 +592,7 @@ pub fn query_text(arena: &RealmArena, root: usize, text: &str, first_only: bool)
 // returns Matched with the element's own id (empty = no match), so the caller reads it as a bool.
 // No scope_element — a cascade rule / bare matches() has no query root (and rules don't use :scope);
 // the matcher still walks the element's full ancestor chain for descendant/child combinators.
-pub fn matches_text(arena: &RealmArena, idx: usize, text: &str) -> QueryOutcome {
+pub fn matches_text(arena: &RealmArena, id: NodeId, text: &str) -> QueryOutcome {
     CACHE.with(|c| {
         let mut c = c.borrow_mut();
         let entry = c.entry(text.to_owned()).or_insert_with(|| parse(text));
@@ -585,7 +600,7 @@ pub fn matches_text(arena: &RealmArena, idx: usize, text: &str) -> QueryOutcome 
             None => QueryOutcome::Invalid,
             Some(p) if p.needs_fallback => QueryOutcome::NeedsJsFallback,
             Some(p) => {
-                if idx >= arena.nodes.len() {
+                if arena.get(id).is_none() {
                     return QueryOutcome::Matched(Vec::new());
                 }
                 let mut caches = SelectorCaches::default();
@@ -597,8 +612,8 @@ pub fn matches_text(arena: &RealmArena, idx: usize, text: &str) -> QueryOutcome 
                     NeedsSelectorFlags::No,
                     MatchingForInvalidation::No,
                 );
-                let hit = matches_selector_list(&p.list, &NodeRef { arena, idx }, &mut ctx);
-                QueryOutcome::Matched(if hit { vec![idx] } else { Vec::new() })
+                let hit = matches_selector_list(&p.list, &NodeRef { arena, id }, &mut ctx);
+                QueryOutcome::Matched(if hit { vec![id] } else { Vec::new() })
             }
         }
     })
