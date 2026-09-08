@@ -89,6 +89,11 @@ pub(crate) struct Dom {
     element_template: Option<v8::Global<v8::ObjectTemplate>>,
     nodelist_template: Option<v8::Global<v8::ObjectTemplate>>,
     dataset_template: Option<v8::Global<v8::ObjectTemplate>>,
+    // The store-flip's native-backed `_attrs`: a full named-interceptor view over a node's
+    // attributes Vec (get/set/query/delete/enumerate/descriptor), so `el._attrs.foo`, `for..in`,
+    // `hasOwnProperty`, `Object.keys`, `delete` all work against the arena in C++ — faster than a
+    // JS Proxy and a faithful stand-in for the native-backed endgame.
+    attrs_view_template: Option<v8::Global<v8::ObjectTemplate>>,
 }
 
 // Element-tree navigation for the selector engine. The arena is element-only, so
@@ -158,6 +163,9 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_, ()>, ctx: &v8::Global<v8:
     register(scope, ns, "setAttr", set_attr);
     register(scope, ns, "removeAttr", remove_attr);
     register(scope, ns, "syncAttrs", sync_attrs);
+    // The store-flip's native-backed `_attrs`: __dom.attrsView(nid) -> an interceptor object over
+    // that node's attributes (the Element constructor installs it in place of the JS `{}`).
+    register(scope, ns, "attrsView", attrs_view);
     if let Some(key) = v8::String::new(scope, "__dom") {
         let global = context.global(scope);
         global.set(scope, key.into(), ns.into());
@@ -498,6 +506,21 @@ fn ensure_templates(scope: &mut v8::PinScope<'_, '_>) {
         );
         let global = v8::Global::new(scope, tmpl);
         dom(scope).dataset_template = Some(global);
+    }
+    if dom(scope).attrs_view_template.is_none() {
+        let tmpl = v8::ObjectTemplate::new(scope);
+        tmpl.set_internal_field_count(1);
+        tmpl.set_named_property_handler(
+            v8::NamedPropertyHandlerConfiguration::new()
+                .getter(attrs_get)
+                .setter(attrs_set)
+                .query(attrs_query)
+                .deleter(attrs_delete)
+                .enumerator(attrs_enumerate)
+                .descriptor(attrs_descriptor),
+        );
+        let global = v8::Global::new(scope, tmpl);
+        dom(scope).attrs_view_template = Some(global);
     }
 }
 
@@ -1121,6 +1144,192 @@ fn data_attr_name(scope: &mut v8::PinScope<'_, '_>, key: v8::Local<'_, v8::Name>
         }
     }
     Some(attr)
+}
+
+// ── native-backed _attrs (store flip): a full named-interceptor view over a node's attributes ──
+// The Element constructor installs one of these in place of the JS `_attrs` object, so every
+// `el._attrs.foo` / `el._attrs[k]=v` / `k in el._attrs` / `delete` / `for..in` / `Object.keys` /
+// `hasOwnProperty` runs against the arena in C++. Keys are matched EXACTLY (the JS side already
+// lowercases HTML attribute names before storing), and enumeration returns them in insertion
+// (Vec) order — the serialization / NamedNodeMap order contract.
+
+fn attrs_view(
+    scope: &mut v8::PinScope<'_, '_>,
+    args: v8::FunctionCallbackArguments<'_>,
+    mut rv: v8::ReturnValue<'_, v8::Value>,
+) {
+    let nid = match args.get(0).integer_value(scope) {
+        Some(i) if i >= 0 => i as usize,
+        _ => return,
+    };
+    let Some(template) = dom(scope).attrs_view_template.clone() else {
+        return;
+    };
+    let template = v8::Local::new(scope, &template);
+    if let Some(obj) = template.new_instance(scope) {
+        let id_value: v8::Local<v8::Value> = v8::Integer::new_from_unsigned(scope, nid as u32).into();
+        obj.set_internal_field(0, id_value.into());
+        rv.set(obj.into());
+    }
+}
+
+// A string property key, or None for a Symbol (which falls through to normal lookup so the
+// attrs-view's prototype methods — hasOwnProperty etc. — still resolve).
+fn name_string(scope: &mut v8::PinScope<'_, '_>, key: v8::Local<'_, v8::Name>) -> Option<String> {
+    let key: v8::Local<v8::Value> = key.into();
+    if !key.is_string() {
+        return None;
+    }
+    Some(key.to_rust_string_lossy(scope))
+}
+
+fn attrs_get(
+    scope: &mut v8::PinScope<'_, '_>,
+    key: v8::Local<'_, v8::Name>,
+    args: v8::PropertyCallbackArguments<'_>,
+    mut rv: v8::ReturnValue<'_, v8::Value>,
+) -> v8::Intercepted {
+    let Some(id) = holder_node_id(scope, &args) else {
+        return v8::Intercepted::kNo;
+    };
+    let Some(name) = name_string(scope, key) else {
+        return v8::Intercepted::kNo;
+    };
+    let value = dom(scope).nodes.get(id).and_then(|n| n.get_attr(&name).map(str::to_string));
+    match value {
+        Some(v) => {
+            if let Some(js) = v8::String::new(scope, &v) {
+                rv.set(js.into());
+            }
+            v8::Intercepted::kYes
+        }
+        None => v8::Intercepted::kNo,
+    }
+}
+
+fn attrs_set(
+    scope: &mut v8::PinScope<'_, '_>,
+    key: v8::Local<'_, v8::Name>,
+    value: v8::Local<'_, v8::Value>,
+    args: v8::PropertyCallbackArguments<'_>,
+    _rv: v8::ReturnValue<'_, ()>,
+) -> v8::Intercepted {
+    let Some(id) = holder_node_id(scope, &args) else {
+        return v8::Intercepted::kNo;
+    };
+    let Some(name) = name_string(scope, key) else {
+        return v8::Intercepted::kNo;
+    };
+    let value = value.to_rust_string_lossy(scope);
+    if let Some(node) = dom(scope).nodes.get_mut(id) {
+        node.set_attr(&name, value);
+    }
+    v8::Intercepted::kYes
+}
+
+fn attrs_query(
+    scope: &mut v8::PinScope<'_, '_>,
+    key: v8::Local<'_, v8::Name>,
+    args: v8::PropertyCallbackArguments<'_>,
+    mut rv: v8::ReturnValue<'_, v8::Integer>,
+) -> v8::Intercepted {
+    let Some(id) = holder_node_id(scope, &args) else {
+        return v8::Intercepted::kNo;
+    };
+    let Some(name) = name_string(scope, key) else {
+        return v8::Intercepted::kNo;
+    };
+    let present = dom(scope).nodes.get(id).is_some_and(|n| n.get_attr(&name).is_some());
+    if present {
+        // PropertyAttribute::NONE (0) = enumerable + writable + configurable.
+        rv.set_uint32(0);
+        v8::Intercepted::kYes
+    } else {
+        v8::Intercepted::kNo
+    }
+}
+
+fn attrs_delete(
+    scope: &mut v8::PinScope<'_, '_>,
+    key: v8::Local<'_, v8::Name>,
+    args: v8::PropertyCallbackArguments<'_>,
+    mut rv: v8::ReturnValue<'_, v8::Boolean>,
+) -> v8::Intercepted {
+    let Some(id) = holder_node_id(scope, &args) else {
+        return v8::Intercepted::kNo;
+    };
+    let Some(name) = name_string(scope, key) else {
+        return v8::Intercepted::kNo;
+    };
+    if let Some(node) = dom(scope).nodes.get_mut(id) {
+        node.attributes.retain(|(k, _)| k != &name);
+    }
+    rv.set_bool(true);
+    v8::Intercepted::kYes
+}
+
+fn attrs_enumerate(
+    scope: &mut v8::PinScope<'_, '_>,
+    args: v8::PropertyCallbackArguments<'_>,
+    mut rv: v8::ReturnValue<'_, v8::Array>,
+) {
+    let Some(id) = holder_node_id(scope, &args) else {
+        return;
+    };
+    let names: Vec<String> = dom(scope)
+        .nodes
+        .get(id)
+        .map(|n| n.attributes.iter().map(|(k, _)| k.clone()).collect())
+        .unwrap_or_default();
+    let array = v8::Array::new(scope, names.len() as i32);
+    for (i, name) in names.iter().enumerate() {
+        if let Some(js) = v8::String::new(scope, name) {
+            array.set_index(scope, i as u32, js.into());
+        }
+    }
+    rv.set(array);
+}
+
+fn attrs_descriptor(
+    scope: &mut v8::PinScope<'_, '_>,
+    key: v8::Local<'_, v8::Name>,
+    args: v8::PropertyCallbackArguments<'_>,
+    mut rv: v8::ReturnValue<'_, v8::Value>,
+) -> v8::Intercepted {
+    let Some(id) = holder_node_id(scope, &args) else {
+        return v8::Intercepted::kNo;
+    };
+    let Some(name) = name_string(scope, key) else {
+        return v8::Intercepted::kNo;
+    };
+    let value = dom(scope).nodes.get(id).and_then(|n| n.get_attr(&name).map(str::to_string));
+    match value {
+        Some(v) => {
+            // A data descriptor consistent with the enumerator: enumerable + writable + configurable,
+            // so Object.keys / hasOwnProperty / Object.assign see a valid own property (V8 invariant).
+            let desc = v8::Object::new(scope);
+            desc_set_str(scope, desc, "value", &v);
+            desc_set_bool(scope, desc, "writable", true);
+            desc_set_bool(scope, desc, "enumerable", true);
+            desc_set_bool(scope, desc, "configurable", true);
+            rv.set(desc.into());
+            v8::Intercepted::kYes
+        }
+        None => v8::Intercepted::kNo,
+    }
+}
+
+fn desc_set_str(scope: &mut v8::PinScope<'_, '_>, obj: v8::Local<'_, v8::Object>, key: &str, value: &str) {
+    if let (Some(k), Some(v)) = (v8::String::new(scope, key), v8::String::new(scope, value)) {
+        obj.set(scope, k.into(), v.into());
+    }
+}
+
+fn desc_set_bool(scope: &mut v8::PinScope<'_, '_>, obj: v8::Local<'_, v8::Object>, key: &str, value: bool) {
+    if let Some(k) = v8::String::new(scope, key) {
+        let b = v8::Boolean::new(scope, value);
+        obj.set(scope, k.into(), b.into());
+    }
 }
 
 // ── NodeId plumbing ─────────────────────────────────────────────────────────
