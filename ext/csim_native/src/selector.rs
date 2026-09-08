@@ -28,8 +28,8 @@ use selectors::context::{
 };
 use selectors::matching::{matches_selector_list, ElementSelectorFlags};
 use selectors::parser::{
-    Component, NonTSPseudoClass, ParseRelative, Parser, PseudoElement, SelectorImpl, SelectorList,
-    SelectorParseErrorKind,
+    Component, NonTSPseudoClass, ParseRelative, Parser, PseudoElement, RelativeSelector, SelectorImpl,
+    SelectorList, SelectorParseErrorKind,
 };
 use selectors::visitor::SelectorVisitor;
 use selectors::{Element, OpaqueElement};
@@ -407,6 +407,18 @@ impl SelectorVisitor for ShadowConstructVisitor {
         if matches!(s, Component::Host(..) | Component::Part(..) | Component::Slotted(..)) {
             self.found = true;
             return false; // found one — stop this branch's walk
+        }
+        true
+    }
+    // `:is()` / `:where()` / `:not()` / `:nth-child(...of...)` nest via visit_selector_list, whose crate
+    // default recurses — so a shadow construct there is already caught. `:has()` nests via THIS callback,
+    // whose crate default SKIPS the inner selectors; recurse explicitly so `:has(::slotted(.x))` and the
+    // like also force fallback.
+    fn visit_relative_selector_list(&mut self, list: &[RelativeSelector<CsimImpl>]) -> bool {
+        for rs in list {
+            if !rs.selector.visit(self) {
+                return false;
+            }
         }
         true
     }
