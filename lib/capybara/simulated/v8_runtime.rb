@@ -97,6 +97,40 @@ module Capybara
         }
       end
 
+      # ── DOM-in-Rust store-migration SHADOW measurement (CSIM_NATIVE_QUERY_SHADOW) ──
+      # When enabled, native selector matching runs beside css-select on every find
+      # (js/src/native-query-shadow.js) — css-select stays authoritative, native is only
+      # timed + parity-checked. Each context's accumulated stats are harvested as it is
+      # reset (rebuild_ctx wipes JS state), summed process-wide, and dumped at exit. This
+      # is temporary measurement scaffolding; it is inert unless the env var is set.
+      @@shadow_totals = Hash.new(0)
+      def self.shadow_totals = @@shadow_totals
+
+      def self.record_shadow_stats(snap)
+        return unless snap.is_a?(Hash)
+        %w[calls cssNs natNs buildNs rebuilds matched fallbacks invalid mismatches natResults].each do |k|
+          @@shadow_totals[k] += snap[k].to_i
+        end
+        @@shadow_totals['lastMismatch'] = snap['lastMismatch'] if snap['mismatches'].to_i.positive? && snap['lastMismatch']
+      end
+
+      if ENV['CSIM_NATIVE_QUERY_SHADOW']
+        at_exit do
+          t     = @@shadow_totals
+          calls = t['calls'].to_i
+          if calls.positive?
+            css   = t['cssNs'].to_f / 1e6
+            nat   = t['natNs'].to_f / 1e6
+            build = t['buildNs'].to_f / 1e6
+            warn format("\n[native-shadow] %d finds — css-select %.1f ms, native %.1f ms (%.2fx faster), arena build %.1f ms over %d rebuild(s)",
+                        calls, css, nat, nat.positive? ? css / nat : 0.0, build, t['rebuilds'].to_i)
+            warn format('[native-shadow] matched %d, fallbacks %d, invalid %d, mismatches %d%s',
+                        t['matched'].to_i, t['fallbacks'].to_i, t['invalid'].to_i, t['mismatches'].to_i,
+                        t['mismatches'].to_i.positive? ? " (last: #{t['lastMismatch'].inspect})" : '')
+          end
+        end
+      end
+
       # The host namespace rusty_racer installs into every context (main and
       # per-frame): `globalThis.RustyRacer.drainMicrotasks()` (a native,
       # rendezvous-free microtask checkpoint), `contextGlobal(id)` /
@@ -581,6 +615,9 @@ module Capybara
       # reset falls back to the cold route: dispose the isolate and build a
       # fresh one (synchronously, on this thread).
       def rebuild_ctx
+        # SHADOW measurement: harvest the outgoing context's native-vs-css stats before
+        # the reset/rebuild below wipes JS state (no-op unless the env var is set).
+        harvest_shadow_stats
         # Produce any queued bytecode-cache blobs while every queued target
         # (frame realms included) is still alive — a job queued by the last
         # activity of a test (e.g. a timer-fired dynamic import in a lazy
@@ -645,6 +682,15 @@ module Capybara
       # here. With per-visit rebuild already running, the inter-test
       # path is the same operation.
       def reset_page = rebuild_ctx
+
+      # Read + reset the current context's shadow-measurement stats and fold them into
+      # the process-wide totals. Called before a context reset (which would drop them).
+      # Inert unless CSIM_NATIVE_QUERY_SHADOW is set.
+      def harvest_shadow_stats
+        return unless ENV['CSIM_NATIVE_QUERY_SHADOW'] && @ctx
+        snap = @ctx.call('__csimNativeShadowStats', true) rescue nil
+        self.class.record_shadow_stats(snap) if snap
+      end
 
       # Memory-pressure threshold (MB) above which `rebuild_ctx` forces a full
       # GC to reclaim dead per-frame realms (see the call site). Measured
@@ -777,6 +823,10 @@ module Capybara
         attach_run_script_with_cache(c)
         attach_native_module_loader(c)
         attach_frame_realm_loader(c)
+        # Re-seed the store-migration SHADOW flag on every main-context (re)build — a
+        # context reset drops all post-snapshot globals. Off unless the env var is set,
+        # so production never touches it. See V8Runtime.shadow_totals.
+        c.eval_void('globalThis.__csimNativeShadow = true;') if ENV['CSIM_NATIVE_QUERY_SHADOW']
       end
 
       # The bridge calls `__csim_createFrameRealm(url, body, contentType, parentId)`
