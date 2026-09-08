@@ -156,6 +156,7 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_, ()>, ctx: &v8::Global<v8:
     register(scope, ns, "syncChildren", sync_children);
     register(scope, ns, "setAttr", set_attr);
     register(scope, ns, "removeAttr", remove_attr);
+    register(scope, ns, "syncAttrs", sync_attrs);
     if let Some(key) = v8::String::new(scope, "__dom") {
         let global = context.global(scope);
         global.set(scope, key.into(), ns.into());
@@ -337,6 +338,37 @@ fn remove_attr(
     let name = args.get(1).to_rust_string_lossy(scope);
     if let Some(node) = dom(scope).nodes.get_mut(id) {
         node.attributes.retain(|(k, _)| k != &name);
+    }
+}
+
+// __dom.syncAttrs(nodeId, attrsFlat): replace a node's attributes with the flat [name, value, …]
+// list wholesale. The mutation hook mirrors an element's current _attrs on any attribute change —
+// wholesale (attrs per element are few) so it can't drift on attribute-name CASE (the arena keys
+// then match the initial mirror exactly, both taken from the same _attrs iteration).
+fn sync_attrs(
+    scope: &mut v8::PinScope<'_, '_>,
+    args: v8::FunctionCallbackArguments<'_>,
+    _rv: v8::ReturnValue<'_, v8::Value>,
+) {
+    let id = match args.get(0).integer_value(scope) {
+        Some(i) if i >= 0 => i as usize,
+        _ => return,
+    };
+    let mut attributes = Vec::new();
+    if let Ok(arr) = v8::Local::<v8::Array>::try_from(args.get(1)) {
+        let len = arr.length();
+        let mut i = 0;
+        while i + 1 < len {
+            let name = arr.get_index(scope, i).map(|v| v.to_rust_string_lossy(scope));
+            let value = arr.get_index(scope, i + 1).map(|v| v.to_rust_string_lossy(scope));
+            if let (Some(name), Some(value)) = (name, value) {
+                attributes.push((name, value));
+            }
+            i += 2;
+        }
+    }
+    if let Some(node) = dom(scope).nodes.get_mut(id) {
+        node.attributes = attributes;
     }
 }
 

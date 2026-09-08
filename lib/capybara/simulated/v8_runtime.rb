@@ -108,8 +108,8 @@ module Capybara
 
       def self.record_shadow_stats(snap)
         return unless snap.is_a?(Hash)
-        %w[calls cssNs natNs buildNs rebuilds matched fallbacks invalid mismatches natResults
-           cascMatchNs cascMatchCalls cascTotalNs cascRuns].each do |k|
+        %w[calls cssNs natNs buildNs rebuilds syncNs syncCalls matched fallbacks invalid mismatches
+           natResults cascMatchNs cascMatchCalls cascTotalNs cascRuns].each do |k|
           @@shadow_totals[k] += snap[k].to_i if snap.key?(k)
         end
         @@shadow_totals['lastMismatch'] = snap['lastMismatch'] if snap['mismatches'].to_i.positive? && snap['lastMismatch']
@@ -123,8 +123,11 @@ module Capybara
             css   = t['cssNs'].to_f / 1e6
             nat   = t['natNs'].to_f / 1e6
             build = t['buildNs'].to_f / 1e6
-            warn format("\n[native-shadow] %d finds — css-select %.1f ms, native %.1f ms (%.2fx faster), arena build %.1f ms over %d rebuild(s)",
-                        calls, css, nat, nat.positive? ? css / nat : 0.0, build, t['rebuilds'].to_i)
+            sync = t['syncNs'].to_f / 1e6
+            warn format("\n[native-shadow] %d finds — css-select %.1f ms, native %.1f ms (%.2fx faster)",
+                        calls, css, nat, nat.positive? ? css / nat : 0.0)
+            warn format('[native-shadow] arena upkeep — one-time mirror %.1f ms over %d page(s); incremental sync %.1f ms over %d delta(s)',
+                        build, t['rebuilds'].to_i, sync, t['syncCalls'].to_i)
             warn format('[native-shadow] matched %d, fallbacks %d, invalid %d, mismatches %d%s',
                         t['matched'].to_i, t['fallbacks'].to_i, t['invalid'].to_i, t['mismatches'].to_i,
                         t['mismatches'].to_i.positive? ? " (last: #{t['lastMismatch'].inspect})" : '')
