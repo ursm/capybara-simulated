@@ -110,7 +110,7 @@ module Capybara
         return unless snap.is_a?(Hash)
         %w[calls cssNs natNs buildNs rebuilds syncNs syncCalls parseNs parsePages constructNs
            constructNodes matched fallbacks invalid mismatches natResults cascMatchNs cascMatchCalls
-           cascTotalNs cascRuns cascNatNs cascNatCalls cascNatFallback cascNatMismatch].each do |k|
+           cascTotalNs cascRuns cascNatNs cascNatCalls cascNatFallback cascNatMismatch cascNatUnmirrored].each do |k|
           @@shadow_totals[k] += snap[k].to_i if snap.key?(k)
         end
         @@shadow_totals['lastMismatch'] = snap['lastMismatch'] if snap['mismatches'].to_i.positive? && snap['lastMismatch']
