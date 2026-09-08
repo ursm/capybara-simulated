@@ -24,6 +24,14 @@ pub(crate) struct NodeData {
     // Element namespace URL ("" = HTML). Read by the selector engine's namespace matching.
     pub(crate) ns: String,
     pub(crate) attributes: Vec<(String, String)>,
+    // Lossless override for the rare attribute value that carries a LONE SURROGATE (unpaired U+D800..
+    // U+DFFF) — valid in a JS DOMString (UTF-16) but not in Rust's UTF-8 `String`, where it degrades to
+    // U+FFFD. The selector matcher reads `attributes` (the lossy UTF-8) — a lone surrogate can't appear in
+    // a spec-parsed selector anyway (an escape resolves to U+FFFD), so matching is unaffected — but the
+    // attrsView GETTER must return exactly what was written (getAttribute / css-select identity), so it
+    // reads the original UTF-16 units from here when present. Empty for virtually every element; only the
+    // value that actually lost data lands here, keyed by attribute name.
+    pub(crate) attr_u16: Vec<(String, Vec<u16>)>,
     pub(crate) parent: Option<usize>,
     pub(crate) children: Vec<usize>,
     // Position within `parent.children`, kept current on every link/unlink, so the
@@ -44,11 +52,78 @@ impl NodeData {
             .map(|(_, v)| v.as_str())
     }
 
-    fn set_attr(&mut self, name: &str, value: String) {
+    // Set the lossy-UTF-8 value the matcher reads, plus (only when the write lost a lone surrogate) the
+    // lossless UTF-16 units the getter needs (attrs_get / setAttr). A clean value clears any stale override.
+    fn set_attr_full(&mut self, name: &str, value: String, u16: Option<Vec<u16>>) {
         match self.attributes.iter_mut().find(|(k, _)| k == name) {
             Some(slot) => slot.1 = value,
             None => self.attributes.push((name.to_string(), value)),
         }
+        match u16 {
+            Some(u) => match self.attr_u16.iter_mut().find(|(k, _)| k == name) {
+                Some(slot) => slot.1 = u,
+                None => self.attr_u16.push((name.to_string(), u)),
+            },
+            None => {
+                if !self.attr_u16.is_empty() {
+                    self.attr_u16.retain(|(k, _)| k != name);
+                }
+            }
+        }
+    }
+
+    fn clear_attr_u16(&mut self, name: &str) {
+        if !self.attr_u16.is_empty() {
+            self.attr_u16.retain(|(k, _)| k != name);
+        }
+    }
+
+    fn get_attr_u16(&self, name: &str) -> Option<&[u16]> {
+        if self.attr_u16.is_empty() {
+            return None;
+        }
+        self.attr_u16.iter().find(|(k, _)| k == name).map(|(_, u)| u.as_slice())
+    }
+}
+
+// Does this UTF-16 unit sequence contain an unpaired surrogate (a high with no following low, or a lone
+// low)? Only such a value needs the lossless override — a well-formed value round-trips through UTF-8.
+fn has_lone_surrogate(u: &[u16]) -> bool {
+    let mut i = 0;
+    while i < u.len() {
+        let c = u[i];
+        if (0xD800..=0xDBFF).contains(&c) {
+            if i + 1 < u.len() && (0xDC00..=0xDFFF).contains(&u[i + 1]) {
+                i += 2;
+                continue;
+            }
+            return true; // lone high surrogate
+        }
+        if (0xDC00..=0xDFFF).contains(&c) {
+            return true; // lone low surrogate
+        }
+        i += 1;
+    }
+    false
+}
+
+// Read a V8 value as (lossy UTF-8, optional lossless UTF-16). The UTF-8 is what the matcher stores; the
+// UTF-16 is filled ONLY when the value degraded — detected cheaply, since a lost surrogate shows up as a
+// U+FFFD in the lossy string (so a value with no U+FFFD skips the second read entirely).
+fn read_v8_value(scope: &mut v8::PinScope<'_, '_>, val: v8::Local<'_, v8::Value>) -> (String, Option<Vec<u16>>) {
+    let utf8 = val.to_rust_string_lossy(scope);
+    if !utf8.contains('\u{FFFD}') {
+        return (utf8, None);
+    }
+    let Some(vs) = val.to_string(scope) else {
+        return (utf8, None);
+    };
+    let mut u = vec![0u16; vs.length()];
+    vs.write_v2(scope, 0, &mut u, v8::WriteFlags::empty());
+    if has_lone_surrogate(&u) {
+        (utf8, Some(u))
+    } else {
+        (utf8, None) // the U+FFFD was a genuine replacement char in the source, not a lost surrogate
     }
 }
 
@@ -162,6 +237,9 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_, ()>, ctx: &v8::Global<v8:
     // The store-flip's native-backed `_attrs`: __dom.attrsView(nid) -> an interceptor object over
     // that node's attributes (the Element constructor installs it in place of the JS `{}`).
     register(scope, ns, "attrsView", attrs_view, context_id);
+    // Store flip: eager-create a node (importNode with no parent/attrs) at Element construction, then
+    // fix its namespace once finalized (setNodeMeta) — the arena becomes the element's `_attrs` store.
+    register(scope, ns, "setNodeMeta", set_node_meta, context_id);
     // Free a disposed realm's arena — csim calls this before tearing down a frame realm (main reuses
     // slot 0). Takes an explicit id (the realm being dropped), not the caller's own.
     register(scope, ns, "dropRealm", drop_realm, context_id);
@@ -208,14 +286,19 @@ fn import_node(
         _ => None,
     };
     let mut attributes = Vec::new();
+    let mut attr_u16: Vec<(String, Vec<u16>)> = Vec::new();
     if let Ok(arr) = v8::Local::<v8::Array>::try_from(args.get(5)) {
         let len = arr.length();
         let mut i = 0;
         while i + 1 < len {
             let name = arr.get_index(scope, i).map(|v| v.to_rust_string_lossy(scope));
-            let value = arr.get_index(scope, i + 1).map(|v| v.to_rust_string_lossy(scope));
+            let value = arr.get_index(scope, i + 1);
             if let (Some(name), Some(value)) = (name, value) {
-                attributes.push((name, value));
+                let (utf8, u16) = read_v8_value(scope, value);
+                if let Some(u) = u16 {
+                    attr_u16.push((name.clone(), u));
+                }
+                attributes.push((name, utf8));
             }
             i += 2;
         }
@@ -227,6 +310,7 @@ fn import_node(
         local_name,
         ns,
         attributes,
+        attr_u16,
         parent,
         children: Vec::new(),
         child_index: 0,
@@ -334,10 +418,10 @@ fn set_attr(
         _ => return,
     };
     let name = args.get(1).to_rust_string_lossy(scope);
-    let value = args.get(2).to_rust_string_lossy(scope);
+    let (utf8, u16) = read_v8_value(scope, args.get(2));
     let cid = realm_id(scope, &args);
     if let Some(node) = realm(scope, cid).nodes.get_mut(id) {
-        node.set_attr(&name, value);
+        node.set_attr_full(&name, utf8, u16);
     }
 }
 
@@ -354,6 +438,7 @@ fn remove_attr(
     let cid = realm_id(scope, &args);
     if let Some(node) = realm(scope, cid).nodes.get_mut(id) {
         node.attributes.retain(|(k, _)| k != &name);
+        node.clear_attr_u16(&name);
     }
 }
 
@@ -371,14 +456,19 @@ fn sync_attrs(
         _ => return,
     };
     let mut attributes = Vec::new();
+    let mut attr_u16: Vec<(String, Vec<u16>)> = Vec::new();
     if let Ok(arr) = v8::Local::<v8::Array>::try_from(args.get(1)) {
         let len = arr.length();
         let mut i = 0;
         while i + 1 < len {
             let name = arr.get_index(scope, i).map(|v| v.to_rust_string_lossy(scope));
-            let value = arr.get_index(scope, i + 1).map(|v| v.to_rust_string_lossy(scope));
+            let value = arr.get_index(scope, i + 1);
             if let (Some(name), Some(value)) = (name, value) {
-                attributes.push((name, value));
+                let (utf8, u16) = read_v8_value(scope, value);
+                if let Some(u) = u16 {
+                    attr_u16.push((name.clone(), u));
+                }
+                attributes.push((name, utf8));
             }
             i += 2;
         }
@@ -386,6 +476,7 @@ fn sync_attrs(
     let cid = realm_id(scope, &args);
     if let Some(node) = realm(scope, cid).nodes.get_mut(id) {
         node.attributes = attributes;
+        node.attr_u16 = attr_u16;
     }
 }
 
@@ -491,6 +582,28 @@ fn reset_arena(
 ) {
     let cid = realm_id(scope, &args);
     realm(scope, cid).nodes.clear();
+}
+
+// __dom.setNodeMeta(nid, localName, ns) — update a node's localName + namespace after creation. The
+// store flip eager-creates arena nodes in the Element ctor, where `_ns` is still the HTML default;
+// createElementNS / parser foreign content finalize a non-HTML namespace AFTER construction and call
+// this so the arena node's namespace matching is correct.
+fn set_node_meta(
+    scope: &mut v8::PinScope<'_, '_>,
+    args: v8::FunctionCallbackArguments<'_>,
+    _rv: v8::ReturnValue<'_, v8::Value>,
+) {
+    let id = match args.get(0).integer_value(scope) {
+        Some(i) if i >= 0 => i as usize,
+        _ => return,
+    };
+    let local_name = args.get(1).to_rust_string_lossy(scope);
+    let ns = args.get(2).to_rust_string_lossy(scope);
+    let cid = realm_id(scope, &args);
+    if let Some(node) = realm(scope, cid).nodes.get_mut(id) {
+        node.local_name = local_name;
+        node.ns = ns;
+    }
 }
 
 // __dom.dropRealm(id) — free realm `id`'s arena entirely (not the caller's own). csim calls this as it
@@ -663,9 +776,22 @@ fn attrs_get(
     let Some(name) = name_string(scope, key) else {
         return v8::Intercepted::kNo;
     };
-    let value = realm(scope, cid).nodes.get(id).and_then(|n| n.get_attr(&name).map(str::to_string));
+    // Prefer the lossless UTF-16 override (a value that carried a lone surrogate); else the UTF-8. Clone
+    // the chosen representation out of the node borrow so the V8 string can be built with the scope after.
+    let value: Option<Result<Vec<u16>, String>> = realm(scope, cid).nodes.get(id).and_then(|n| {
+        match n.get_attr_u16(&name) {
+            Some(u) => Some(Ok(u.to_vec())),
+            None => n.get_attr(&name).map(|v| Err(v.to_string())),
+        }
+    });
     match value {
-        Some(v) => {
+        Some(Ok(u)) => {
+            if let Some(js) = v8::String::new_from_two_byte(scope, &u, v8::NewStringType::Normal) {
+                rv.set(js.into());
+            }
+            v8::Intercepted::kYes
+        }
+        Some(Err(v)) => {
             if let Some(js) = v8::String::new(scope, &v) {
                 rv.set(js.into());
             }
@@ -689,9 +815,9 @@ fn attrs_set(
     let Some(name) = name_string(scope, key) else {
         return v8::Intercepted::kNo;
     };
-    let value = value.to_rust_string_lossy(scope);
+    let (utf8, u16) = read_v8_value(scope, value);
     if let Some(node) = realm(scope, cid).nodes.get_mut(id) {
-        node.set_attr(&name, value);
+        node.set_attr_full(&name, utf8, u16);
     }
     v8::Intercepted::kYes
 }
@@ -734,6 +860,7 @@ fn attrs_delete(
     };
     if let Some(node) = realm(scope, cid).nodes.get_mut(id) {
         node.attributes.retain(|(k, _)| k != &name);
+        node.clear_attr_u16(&name);
     }
     rv.set_bool(true);
     v8::Intercepted::kYes
@@ -775,13 +902,25 @@ fn attrs_descriptor(
     let Some(name) = name_string(scope, key) else {
         return v8::Intercepted::kNo;
     };
-    let value = realm(scope, cid).nodes.get(id).and_then(|n| n.get_attr(&name).map(str::to_string));
+    let value: Option<Result<Vec<u16>, String>> = realm(scope, cid).nodes.get(id).and_then(|n| {
+        match n.get_attr_u16(&name) {
+            Some(u) => Some(Ok(u.to_vec())),
+            None => n.get_attr(&name).map(|v| Err(v.to_string())),
+        }
+    });
     match value {
-        Some(v) => {
+        Some(rep) => {
             // A data descriptor consistent with the enumerator: enumerable + writable + configurable,
-            // so Object.keys / hasOwnProperty / Object.assign see a valid own property (V8 invariant).
+            // so Object.keys / hasOwnProperty / Object.assign see a valid own property (V8 invariant). The
+            // value round-trips losslessly (the UTF-16 override wins over the lossy UTF-8 when present).
             let desc = v8::Object::new(scope);
-            desc_set_str(scope, desc, "value", &v);
+            let vstr = match rep {
+                Ok(u) => v8::String::new_from_two_byte(scope, &u, v8::NewStringType::Normal),
+                Err(s) => v8::String::new(scope, &s),
+            };
+            if let (Some(k), Some(v)) = (v8::String::new(scope, "value"), vstr) {
+                desc.set(scope, k.into(), v.into());
+            }
             desc_set_bool(scope, desc, "writable", true);
             desc_set_bool(scope, desc, "enumerable", true);
             desc_set_bool(scope, desc, "configurable", true);
@@ -789,12 +928,6 @@ fn attrs_descriptor(
             v8::Intercepted::kYes
         }
         None => v8::Intercepted::kNo,
-    }
-}
-
-fn desc_set_str(scope: &mut v8::PinScope<'_, '_>, obj: v8::Local<'_, v8::Object>, key: &str, value: &str) {
-    if let (Some(k), Some(v)) = (v8::String::new(scope, key), v8::String::new(scope, value)) {
-        obj.set(scope, k.into(), v.into());
     }
 }
 
