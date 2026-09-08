@@ -85,7 +85,7 @@ impl RealmArena {
 // The per-isolate DOM: ONE node arena PER REALM (keyed by rusty_racer's context_id — main = 0, frames
 // 1,2,…) plus the isolate-scoped instance templates every wrapper is stamped from. Reached from any
 // callback via dom(scope); the node ops route to their realm's arena by the context_id carried as
-// each realm's `__dom` function data (see `realm_of` / `install`). Templates serve every realm.
+// each realm's `__dom` function data (see `realm_id` / `realm` / `install`). Templates serve every realm.
 #[derive(Default)]
 pub(crate) struct Dom {
     pub(crate) realms: std::collections::HashMap<i32, RealmArena>,
@@ -119,16 +119,16 @@ fn realm_id(scope: &mut v8::PinScope<'_, '_>, args: &v8::FunctionCallbackArgumen
     args.data().int32_value(scope).unwrap_or(0)
 }
 
-// The calling realm's arena (created empty on first touch). Node ops go through this instead of a
-// shared `realm(scope, 0).nodes`.
+// The arena for realm `cid` (created empty on first touch). The node ops resolve this from their
+// function data instead of touching a single shared arena.
 fn realm<'s>(scope: &'s mut v8::PinScope<'_, '_>, cid: i32) -> &'s mut RealmArena {
     dom(scope).realms.entry(cid).or_default()
 }
 
-// Install globalThis.__dom = { createElement } into |ctx|, building the templates
-// on first call. Mirrors install_host_namespace's shape (its own HandleScope +
-// ContextScope, safe to re-run per realm). A later slice folds this into the real
-// document / Node surface.
+// Install `globalThis.__dom` (the arena build / query / match surface + attrsView) into |ctx|, building
+// the isolate-shared templates on first call. Mirrors install_host_namespace's shape (its own
+// HandleScope + ContextScope, safe to re-run per realm — each realm gets its own function set carrying
+// its context_id).
 pub(crate) fn install(scope: &mut v8::PinScope<'_, '_, ()>, ctx: &v8::Global<v8::Context>, context_id: i32) {
     v8::scope!(let scope, &mut *scope);
     let context = v8::Local::new(scope, ctx);
@@ -525,11 +525,12 @@ fn now_nanos(
 }
 
 // Build the native-backed `_attrs` instance template once per isolate. Reserves internal field 0 for
-// the owner NodeId (attrsView stamps it there).
+// the owner NodeId and field 1 for its realm's context_id (attrsView stamps both), so the interceptors
+// resolve the RIGHT realm's arena — the template is isolate-shared but its instances are per realm.
 fn ensure_templates(scope: &mut v8::PinScope<'_, '_>) {
     if dom(scope).attrs_view_template.is_none() {
         let tmpl = v8::ObjectTemplate::new(scope);
-        tmpl.set_internal_field_count(1);
+        tmpl.set_internal_field_count(2);
         tmpl.set_named_property_handler(
             v8::NamedPropertyHandlerConfiguration::new()
                 .getter(attrs_get)
@@ -625,6 +626,7 @@ fn attrs_view(
         Some(i) if i >= 0 => i as usize,
         _ => return,
     };
+    let cid = realm_id(scope, &args);
     let Some(template) = dom(scope).attrs_view_template.clone() else {
         return;
     };
@@ -632,6 +634,8 @@ fn attrs_view(
     if let Some(obj) = template.new_instance(scope) {
         let id_value: v8::Local<v8::Value> = v8::Integer::new_from_unsigned(scope, nid as u32).into();
         obj.set_internal_field(0, id_value.into());
+        let cid_value: v8::Local<v8::Value> = v8::Integer::new(scope, cid).into();
+        obj.set_internal_field(1, cid_value.into());
         rv.set(obj.into());
     }
 }
@@ -655,10 +659,11 @@ fn attrs_get(
     let Some(id) = holder_node_id(scope, &args) else {
         return v8::Intercepted::kNo;
     };
+    let cid = holder_realm_id(scope, &args);
     let Some(name) = name_string(scope, key) else {
         return v8::Intercepted::kNo;
     };
-    let value = realm(scope, 0).nodes.get(id).and_then(|n| n.get_attr(&name).map(str::to_string));
+    let value = realm(scope, cid).nodes.get(id).and_then(|n| n.get_attr(&name).map(str::to_string));
     match value {
         Some(v) => {
             if let Some(js) = v8::String::new(scope, &v) {
@@ -680,11 +685,12 @@ fn attrs_set(
     let Some(id) = holder_node_id(scope, &args) else {
         return v8::Intercepted::kNo;
     };
+    let cid = holder_realm_id(scope, &args);
     let Some(name) = name_string(scope, key) else {
         return v8::Intercepted::kNo;
     };
     let value = value.to_rust_string_lossy(scope);
-    if let Some(node) = realm(scope, 0).nodes.get_mut(id) {
+    if let Some(node) = realm(scope, cid).nodes.get_mut(id) {
         node.set_attr(&name, value);
     }
     v8::Intercepted::kYes
@@ -699,10 +705,11 @@ fn attrs_query(
     let Some(id) = holder_node_id(scope, &args) else {
         return v8::Intercepted::kNo;
     };
+    let cid = holder_realm_id(scope, &args);
     let Some(name) = name_string(scope, key) else {
         return v8::Intercepted::kNo;
     };
-    let present = realm(scope, 0).nodes.get(id).is_some_and(|n| n.get_attr(&name).is_some());
+    let present = realm(scope, cid).nodes.get(id).is_some_and(|n| n.get_attr(&name).is_some());
     if present {
         // PropertyAttribute::NONE (0) = enumerable + writable + configurable.
         rv.set_uint32(0);
@@ -721,10 +728,11 @@ fn attrs_delete(
     let Some(id) = holder_node_id(scope, &args) else {
         return v8::Intercepted::kNo;
     };
+    let cid = holder_realm_id(scope, &args);
     let Some(name) = name_string(scope, key) else {
         return v8::Intercepted::kNo;
     };
-    if let Some(node) = realm(scope, 0).nodes.get_mut(id) {
+    if let Some(node) = realm(scope, cid).nodes.get_mut(id) {
         node.attributes.retain(|(k, _)| k != &name);
     }
     rv.set_bool(true);
@@ -739,7 +747,8 @@ fn attrs_enumerate(
     let Some(id) = holder_node_id(scope, &args) else {
         return;
     };
-    let names: Vec<String> = realm(scope, 0)
+    let cid = holder_realm_id(scope, &args);
+    let names: Vec<String> = realm(scope, cid)
         .nodes
         .get(id)
         .map(|n| n.attributes.iter().map(|(k, _)| k.clone()).collect())
@@ -762,10 +771,11 @@ fn attrs_descriptor(
     let Some(id) = holder_node_id(scope, &args) else {
         return v8::Intercepted::kNo;
     };
+    let cid = holder_realm_id(scope, &args);
     let Some(name) = name_string(scope, key) else {
         return v8::Intercepted::kNo;
     };
-    let value = realm(scope, 0).nodes.get(id).and_then(|n| n.get_attr(&name).map(str::to_string));
+    let value = realm(scope, cid).nodes.get(id).and_then(|n| n.get_attr(&name).map(str::to_string));
     match value {
         Some(v) => {
             // A data descriptor consistent with the enumerator: enumerable + writable + configurable,
@@ -803,6 +813,16 @@ fn holder_node_id(
     args: &v8::PropertyCallbackArguments<'_>,
 ) -> Option<usize> {
     object_node_id(scope, args.holder())
+}
+
+// The realm context_id stamped into the holder's internal field 1 (attrsView), so the interceptor
+// reads the OWNER realm's arena. Defaults to 0 (main) if absent.
+fn holder_realm_id(scope: &mut v8::PinScope<'_, '_>, args: &v8::PropertyCallbackArguments<'_>) -> i32 {
+    args.holder()
+        .get_internal_field(scope, 1)
+        .and_then(|d| v8::Local::<v8::Value>::try_from(d).ok())
+        .and_then(|v| v.int32_value(scope))
+        .unwrap_or(0)
 }
 
 
