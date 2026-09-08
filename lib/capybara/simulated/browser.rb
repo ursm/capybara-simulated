@@ -1969,6 +1969,19 @@ module Capybara
           sleep 0.005 if image_loads_pending? && !@timers_active && !@runtime.has_ready_timer?
           prev_gen = @runtime.settle_gen
         end
+        # Reclaim arena slots for any DOM nodes the settle's churn left unreachable: pump the foreground
+        # message loop so V8's FinalizationRegistry cleanup callbacks run (native-query-shadow.js frees
+        # each collected node's slot via __dom.dropNode). A no-op when nothing was collected. Only V8
+        # exposes it (QuickJS lacks a pumpable loop); guarded so it's inert there.
+        #
+        # INVARIANT this relies on: the pump drains ALL pending foreground platform tasks (and runs a
+        # microtask checkpoint) — safe to do here, AFTER settle has quiesced, only because this driver
+        # models timers/promises on its own virtual-clock queues, NOT V8's platform queue, so the only
+        # foreground tasks are FR cleanup callbacks; and our FR callback is pure-arena (dropNode +
+        # Map.delete — no DOM mutation, no queued microtask, no app code). If either stops holding (a
+        # cleanup callback with DOM/microtask side effects, or app work posted as a foreground task), its
+        # effect would land post-settle and go un-settled — revisit this placement then.
+        @runtime.pump_message_loop if @runtime.respond_to?(:pump_message_loop)
         @find_cache_dirty = true
       end
 

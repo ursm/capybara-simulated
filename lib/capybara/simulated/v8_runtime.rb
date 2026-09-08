@@ -246,6 +246,11 @@ module Capybara
         # heap-pressure relief in `rebuild_ctx`.
         def heap_statistics                  = @iso.heap_statistics
         def low_memory_notification          = @iso.low_memory_notification
+        # Run pending foreground platform tasks — chiefly the FinalizationRegistry cleanup callbacks
+        # V8 posts when it collects a wrapper. The native arena's per-node reclamation
+        # (native-query-shadow.js finRegistry -> __dom.dropNode) fires only when these run, so the
+        # browser pumps once per settle. Watchdog-bracketed inside rusty_racer.
+        def pump_message_loop                = @iso.pump_message_loop
 
         def dynamic_import_resolver=(prc)
           @iso.dynamic_import_resolver = prc
@@ -620,6 +625,13 @@ module Capybara
       # between ticks.
       def drain_microtasks
         @ctx&.perform_microtask_checkpoint
+      end
+
+      # Run pending foreground platform tasks (FinalizationRegistry cleanup callbacks) so the native
+      # arena reclaims collected nodes' slots. The browser calls this once per settle; a no-op when the
+      # queue is empty (the common case). QuickJS has no equivalent — the browser guards on respond_to?.
+      def pump_message_loop
+        @ctx&.pump_message_loop
       end
 
       # Raw bytes pass through as-is: rusty marshals tag-driven — a
