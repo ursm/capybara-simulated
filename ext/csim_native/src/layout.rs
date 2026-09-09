@@ -27,6 +27,7 @@ fn is_auto(v: f64) -> bool {
 // flex/grid/table, mixed block+text, …) is DISPLAY_UNSUPPORTED and the whole subtree falls back to JS.
 pub(crate) const DISPLAY_BLOCK: u8 = 1;
 pub(crate) const DISPLAY_TEXT_BLOCK: u8 = 2;
+pub(crate) const DISPLAY_FLEX: u8 = 3;
 pub(crate) const DISPLAY_UNSUPPORTED: u8 = 255;
 
 // One element's used values for block layout, decoded from the flat buffer. Lengths are px; auto/none
@@ -82,6 +83,15 @@ pub(crate) struct Input {
     pub(crate) float_kind: u8,
     pub(crate) clear: u8,
     pub(crate) starts_bfc: bool,
+    // Flex (§9.7) — the SIZING is resolved JS-side (each item's used main+cross size rides its
+    // width/height, like a float's shrink-to-fit width), so native does only PLACEMENT. On a flex
+    // CONTAINER: `flex_justify` (main-axis distribution) 0 start / 1 center / 2 end / 3 space-between /
+    // 4 space-around / 5 space-evenly, and `flex_main_gap` (px). On a flex ITEM: `flex_cross_align`
+    // 0 start-or-stretch / 1 center / 2 end (the item's used cross size already fills the line, so
+    // stretch folds to a zero offset).
+    pub(crate) flex_justify: u8,
+    pub(crate) flex_main_gap: f64,
+    pub(crate) flex_cross_align: u8,
 }
 
 pub(crate) const FLOAT_LEFT: u8 = 1;
@@ -184,7 +194,7 @@ pub(crate) fn layout_block(inputs: &[Input], runs: &[Run], run_texts: &[Option<V
     for (i, n) in inputs.iter().enumerate() {
         if n.parent >= 0 {
             let p = n.parent as usize;
-            if p < inputs.len() && (n.display == DISPLAY_BLOCK || n.display == DISPLAY_TEXT_BLOCK) {
+            if p < inputs.len() && (n.display == DISPLAY_BLOCK || n.display == DISPLAY_TEXT_BLOCK || n.display == DISPLAY_FLEX) {
                 children[p].push(i);
             }
         }
@@ -556,6 +566,12 @@ fn measure(
     let content_top_rel = n.bt + n.pt;
     let content_w = (w - n.edges_x()).max(0.0);
 
+    // A flex container (§9.7): the item SIZING is resolved JS-side (each item's used main/cross size rides
+    // its width/height); native does only the placement — main-axis distribution + cross-axis alignment.
+    if n.display == DISPLAY_FLEX {
+        return measure_flex(i, w, inputs, runs, run_texts, children, boxes, failed);
+    }
+
     // A text block (inline formatting context): its content height is the greedy line layout over its
     // run sequence, measured natively (font.rs) with no per-run crossing. It has no child records; its
     // runs are runs[run_start..run_start+run_count]. If it can't be measured (bad font / tab / combining
@@ -807,6 +823,113 @@ fn measure(
     MInfo { top: top_m, top_only: top_m, bottom: bottom_m, collapse_through: false }
 }
 
+// Native flex PLACEMENT for a single-line LTR `row` (§9.7). The item SIZING is resolved JS-side — each
+// item's used main (width) and cross (height) size rides its record, like a float's shrink-to-fit width —
+// so this only DISTRIBUTES the items on the main axis (justify-content + gap + margins) and ALIGNS them
+// on the cross axis, then sizes the container's own box; each item's subtree is laid out by the ordinary
+// `measure` at its pushed border-box, in a fresh float context (an item is its own formatting context).
+// Mirrors layoutFlexRow / distributionOffsets / crossAlignPhysical. The harness bails column / wrap /
+// reverse / rtl / baseline / min-max-height / auto-margin / nested-flex / replaced, so a single line with
+// an exact container cross size is all that reaches here.
+fn measure_flex(
+    i: usize,
+    w: f64,
+    inputs: &[Input],
+    runs: &[Run],
+    run_texts: &[Option<Vec<u16>>],
+    children: &[Vec<usize>],
+    boxes: &mut [Box],
+    failed: &std::cell::Cell<bool>,
+) -> MInfo {
+    let n = inputs[i];
+    let content_w = (w - n.edges_x()).max(0.0);
+    let content_left_rel = n.bl + n.pl;
+    let content_top_rel = n.bt + n.pt;
+
+    // Phase A — lay each item's subtree out at its pushed border-box (record order == flex order, the
+    // harness sorted by `order`), each in a fresh float context.
+    for &c in &children[i] {
+        let iw = resolve_width(&inputs[c], content_w);
+        measure(c, iw, inputs, runs, run_texts, children, boxes, failed, &mut FloatCtx::new(), 0.0, 0.0);
+    }
+
+    let cnt = children[i].len();
+    // Phase B — MAIN axis (x): distribute free space per justify-content, honouring the gap and each
+    // item's horizontal margins.
+    let gap = n.flex_main_gap;
+    let mut sum = 0.0;
+    for &c in &children[i] {
+        sum += boxes[c].w + Input::m(inputs[c].ml) + Input::m(inputs[c].mr);
+    }
+    let free = content_w - (sum + gap * cnt.saturating_sub(1) as f64);
+    let (lead, between) = flex_distribution(n.flex_justify, free, cnt);
+    let mut at = lead;
+    for (k, &c) in children[i].iter().enumerate() {
+        if k > 0 {
+            at += gap + between;
+        }
+        at += Input::m(inputs[c].ml);
+        boxes[c].x = content_left_rel + at;
+        at += boxes[c].w + Input::m(inputs[c].mr);
+    }
+
+    // Phase C — CROSS axis (y) + the container's own height. The line's cross size is the tallest item
+    // outer; an auto-height container wraps it, a definite one fills its content box (min/max-height is
+    // bailed, so the container cross size is exact and stretch needs no re-layout — the item's pushed
+    // cross size already fills the line, so a start/stretch item's offset is 0).
+    let mut line_cross = 0.0f64;
+    for &c in &children[i] {
+        let outer = boxes[c].h + Input::m(inputs[c].mt) + Input::m(inputs[c].mb);
+        if outer > line_cross {
+            line_cross = outer;
+        }
+    }
+    let edges_y = n.edges_y();
+    let (box_h, container_cross) = if is_auto(n.height) {
+        (line_cross + edges_y, line_cross)
+    } else {
+        let bh = if n.border_box { n.height } else { n.height + edges_y };
+        (bh, (bh - edges_y).max(0.0))
+    };
+    for &c in &children[i] {
+        let outer = boxes[c].h + Input::m(inputs[c].mt) + Input::m(inputs[c].mb);
+        let free_c = container_cross - outer;
+        let off = match inputs[c].flex_cross_align {
+            1 => free_c / 2.0, // center
+            2 => free_c,       // end
+            _ => 0.0,          // start / stretch
+        };
+        boxes[c].y = content_top_rel + off + Input::m(inputs[c].mt);
+    }
+
+    boxes[i].nid = n.nid;
+    boxes[i].w = w;
+    boxes[i].h = box_h.max(0.0);
+    boxes[i].auto_height = is_auto(n.height);
+    let top = CMargin::of(Input::m(n.mt));
+    MInfo { top, top_only: top, bottom: CMargin::of(Input::m(n.mb)), collapse_through: false }
+}
+
+// Main-axis free-space distribution → (leading offset before the first item, extra space between items).
+// Mirrors the oracle's distributionOffsets: center/end apply even when free is negative (overflow);
+// space-* collapse to 0 (start) when free is non-positive.
+fn flex_distribution(code: u8, free: f64, n: usize) -> (f64, f64) {
+    if n == 0 {
+        return (0.0, 0.0);
+    }
+    match code {
+        1 => (free / 2.0, 0.0), // center
+        2 => (free, 0.0),       // end
+        3 if free > 0.0 && n > 1 => (0.0, free / (n as f64 - 1.0)), // space-between
+        4 if free > 0.0 => (free / n as f64 / 2.0, free / n as f64), // space-around
+        5 if free > 0.0 => {
+            let s = free / (n as f64 + 1.0); // space-evenly
+            (s, s)
+        }
+        _ => (0.0, 0.0), // start (and space-* under non-positive free)
+    }
+}
+
 // Convert the relative boxes to absolute document coordinates: add each node's absolute border-box
 // origin to its children (whose x/y are relative to it), top-down in one pass.
 fn place(i: usize, ax: f64, ay: f64, children: &[Vec<usize>], boxes: &mut [Box]) {
@@ -873,6 +996,9 @@ mod tests {
             float_kind: 0,
             clear: 0,
             starts_bfc: false,
+            flex_justify: 0,
+            flex_main_gap: 0.0,
+            flex_cross_align: 0,
         }
     }
 
@@ -1029,6 +1155,82 @@ mod tests {
         assert_eq!(bx[3].y, 40.0); // second drops below the first
         assert_eq!(bx[3].x, 0.0); // …back at the left edge
         assert_eq!(bx[1].h, 70.0); // owner contains both (40 + 30)
+    }
+
+    fn flex(nid: f64, parent: i32, width: f64) -> Input {
+        let mut c = blk(nid, parent);
+        c.display = DISPLAY_FLEX;
+        c.border_box = true;
+        c.width = width;
+        c
+    }
+    fn item(nid: f64, parent: i32, w: f64, h: f64) -> Input {
+        let mut c = blk(nid, parent);
+        c.border_box = true; // the pushed used size is a border box
+        c.width = w;
+        c.height = h;
+        c.height_adjoins = false;
+        c
+    }
+
+    #[test]
+    fn flex_row_justify_content() {
+        // 600px row, three 100px items — every justify-content value's main-axis offsets.
+        let cases: [(u8, [f64; 3]); 6] = [
+            (0, [0.0, 100.0, 200.0]),   // start
+            (1, [150.0, 250.0, 350.0]), // center
+            (2, [300.0, 400.0, 500.0]), // end
+            (3, [0.0, 250.0, 500.0]),   // space-between
+            (4, [50.0, 250.0, 450.0]),  // space-around
+            (5, [75.0, 250.0, 425.0]),  // space-evenly
+        ];
+        for (code, xs) in cases {
+            let mut f = flex(0.0, -1, 600.0);
+            f.flex_justify = code;
+            let inputs = vec![f, item(1.0, 0, 100.0, 30.0), item(2.0, 0, 100.0, 30.0), item(3.0, 0, 100.0, 30.0)];
+            let bx = boxes(layout_block(&inputs, &[], &[], 0.0, 0.0, 800.0));
+            assert_eq!([bx[1].x, bx[2].x, bx[3].x], xs, "justify code {code}");
+        }
+    }
+
+    #[test]
+    fn flex_row_gap_and_margins() {
+        let mut f = flex(0.0, -1, 600.0);
+        f.flex_main_gap = 20.0;
+        let inputs = vec![f, item(1.0, 0, 100.0, 30.0), item(2.0, 0, 100.0, 30.0), item(3.0, 0, 100.0, 30.0)];
+        let bx = boxes(layout_block(&inputs, &[], &[], 0.0, 0.0, 800.0));
+        assert_eq!([bx[1].x, bx[2].x, bx[3].x], [0.0, 120.0, 240.0]); // 100 + 20 gap
+
+        // A left margin on the middle item pushes it (and the run after) right.
+        let mut m = item(2.0, 0, 100.0, 30.0);
+        m.ml = 15.0;
+        let inputs = vec![flex(0.0, -1, 600.0), item(1.0, 0, 100.0, 30.0), m, item(3.0, 0, 100.0, 30.0)];
+        let bx = boxes(layout_block(&inputs, &[], &[], 0.0, 0.0, 800.0));
+        assert_eq!([bx[1].x, bx[2].x, bx[3].x], [0.0, 115.0, 215.0]);
+    }
+
+    #[test]
+    fn flex_row_cross_align() {
+        // 90px-tall row, a 30px item — align-items start / center / end.
+        for (code, y) in [(0u8, 0.0), (1u8, 30.0), (2u8, 60.0)] {
+            let mut f = flex(0.0, -1, 600.0);
+            f.height = 90.0;
+            f.height_adjoins = false;
+            let mut a = item(1.0, 0, 100.0, 30.0);
+            a.flex_cross_align = code;
+            let inputs = vec![f, a];
+            let bx = boxes(layout_block(&inputs, &[], &[], 0.0, 0.0, 800.0));
+            assert_eq!(bx[1].y, y, "align code {code}");
+            assert_eq!(bx[0].h, 90.0);
+        }
+    }
+
+    #[test]
+    fn flex_row_auto_height_wraps_the_tallest_item() {
+        let inputs = vec![flex(0.0, -1, 600.0), item(1.0, 0, 100.0, 30.0), item(2.0, 0, 100.0, 50.0)];
+        let bx = boxes(layout_block(&inputs, &[], &[], 0.0, 0.0, 800.0));
+        assert_eq!(bx[0].h, 50.0); // auto height = tallest item outer
+        assert!(bx[0].auto_height);
     }
 
     #[test]
