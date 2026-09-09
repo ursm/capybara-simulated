@@ -1,8 +1,10 @@
 # frozen_string_literal: true
 # Native layout — CSS tables (§17), geometry shadow-parity. Increments t1 (base) + t2 (spans) + t3 (collapse) +
-# t4 (caption):
+# t4 (caption) + t5 (thead/tfoot):
 # an auto-layout `display:table` in normal flow, border-collapse SEPARATE or COLLAPSE — table >
-# (table-row-group | table-row)* > table-cell*, LTR. Each cell's used border box (its spanned column width ×
+# (table-header-group | table-row-group | table-footer-group | table-row)* > table-cell*, LTR. thead / tbody /
+# tfoot are sorted into RENDER order (header, body, footer) regardless of source order. Each cell's used border
+# box (its spanned column width ×
 # row height, halved borders in collapse) is resolved by the oracle and PUSHED (like a flex item); native
 # reassembles the column/row tracks from the NON-spanning cells, prefix-sums them with border-spacing to
 # position every cell at its (pushed) starting column/row, and derives every row, row-group and the table's
@@ -12,13 +14,12 @@
 # box-sizing / auto-margin centering honored, auto width fills the table; a caption with a definite width WIDER
 # than the grid floors the table (which stretches its columns to fill it, like an explicit table width) —
 # stacked above (the grid offsets down) or below the grid, its own block / text subtree laid out normally.
-# colspan/rowspan, ragged grids, border-collapse, a caption, and a position:relative cell (offset ignored) ARE
-# supported. Still DECLINES to JS — a caption with a MARGIN or one that OVERFLOWS the table (a %-width wider
-# than the grid; the oracle lays both out correctly, native just declines) or more than one caption,
-# <col>/<colgroup>, thead/tfoot (render reorder), table-layout:fixed,
-# inline-table, anonymous rows/cells, rtl, nested tables, an imposed table height (declared / attribute / min /
-# max), an empty row group, and a column/row only spanning cells cover. Each bail is an A/B: the feature-
-# carrying input declines, a plain table stays native. V8 only.
+# colspan/rowspan, ragged grids, border-collapse, thead/tbody/tfoot, a caption, and a position:relative cell
+# (offset ignored) ARE supported. Still DECLINES to JS — a caption with a MARGIN or one that OVERFLOWS the table
+# (a %-width wider than the grid; the oracle lays both out correctly, native just declines) or more than one
+# caption, <col>/<colgroup>, table-layout:fixed, inline-table, anonymous rows/cells, rtl, nested tables, an
+# imposed table height (declared / attribute / min / max), an empty row group, and a column/row only spanning
+# cells cover. Each bail is an A/B: the feature-carrying input declines, a plain table stays native. V8 only.
 require 'capybara/simulated'
 require 'rack'
 require_relative 'support/session_teardown'
@@ -101,6 +102,24 @@ RSpec.describe 'native layout table parity', if: ENV.fetch('CSIM_JS_ENGINE', 'v8
 
   it 'matches a ragged grid (a row missing a trailing cell)' do
     expect_parity('<table style="border-spacing:4px"><tr><td style="width:40px">a</td><td style="width:50px">b</td></tr><tr><td>c</td></tr></table>')
+  end
+
+  # t5 — thead / tbody / tfoot. tableGrid sorts the rows into RENDER order (header, body, footer) regardless of
+  # source order, and the walk emits the groups in that order; native stacks them like any row groups.
+  it 'matches thead / tbody / tfoot in normal source order' do
+    expect_parity('<table style="border-spacing:4px"><thead><tr><td style="width:60px;height:10px">h</td></tr></thead><tbody><tr><td style="height:30px">b</td></tr></tbody><tfoot><tr><td style="height:20px">f</td></tr></tfoot></table>')
+  end
+
+  it 'matches a tfoot / tbody / thead written OUT of order (rendered header, body, footer)' do
+    expect_parity('<table style="border-spacing:4px"><tfoot><tr><td style="width:60px;height:20px">foot</td></tr></tfoot><tbody><tr><td style="height:30px">body</td></tr></tbody><thead><tr><td style="height:10px">head</td></tr></thead></table>')
+  end
+
+  it 'matches a thead over two tbody groups' do
+    expect_parity('<table style="border-spacing:4px"><thead><tr><td style="width:50px;height:10px">h</td></tr></thead><tbody><tr><td style="height:20px">b1</td></tr></tbody><tbody><tr><td style="height:25px">b2</td></tr></tbody></table>')
+  end
+
+  it 'matches thead / tfoot carrying colspans' do
+    expect_parity('<table style="border-spacing:4px"><thead><tr><td colspan="2" style="height:10px">H</td></tr></thead><tbody><tr><td style="width:30px">a</td><td style="width:40px">b</td></tr></tbody><tfoot><tr><td colspan="2" style="height:15px">F</td></tr></tfoot></table>')
   end
 
   # t3 — border-collapse:collapse (half-borders, spacing 0, the outer half-border frame).
@@ -217,12 +236,12 @@ RSpec.describe 'native layout table parity', if: ENV.fetch('CSIM_JS_ENGINE', 'v8
   it('declines a caption that overflows the table (a %-width wider than the grid — the table does not grow)') { a_bails_b_native('<table style="border-spacing:4px"><caption style="width:120%">c</caption><tr><td style="width:40px">a</td></tr></table>') }
   it('declines two captions') { a_bails_b_native('<table style="border-spacing:4px"><caption>top</caption><caption style="caption-side:bottom">bottom</caption><tr><td style="width:40px">a</td></tr></table>') }
   it('declines a colgroup/col') { a_bails_b_native('<table><colgroup><col></colgroup><tr><td>a</td></tr></table>') }
-  it('declines thead/tfoot (render reorder)') { a_bails_b_native('<table><thead><tr><td>h</td></tr></thead><tbody><tr><td>b</td></tr></tbody></table>') }
   it('declines table-layout:fixed') { a_bails_b_native('<table style="table-layout:fixed;width:200px"><tr><td>a</td><td>b</td></tr></table>') }
   it('declines inline-table') { a_bails_b_native('<span style="display:inline-table"><span style="display:table-row"><span style="display:table-cell">a</span></span></span>') }
   it('declines an rtl table (column reversal)') { a_bails_b_native('<table dir="rtl"><tr><td style="width:40px">a</td><td style="width:60px">b</td></tr></table>') }
   it('declines a table with a declared height below its natural grid height') { a_bails_b_native('<table style="height:10px;border-spacing:4px"><tr><td style="height:50px">a</td></tr></table>') }
   it('declines a table with a min-height floor') { a_bails_b_native('<table style="min-height:200px"><tr><td style="height:50px">a</td></tr></table>') }
   it('declines an empty row group (the oracle boxes it below the grid)') { a_bails_b_native('<table style="border-spacing:4px"><tbody></tbody><tbody><tr><td style="width:40px;height:20px">a</td></tr></tbody></table>') }
+  it('declines a same-display group NESTED in another (its rows interleave in render order)') { a_bails_b_native('<div style="display:table;border-spacing:4px"><div style="display:table-row-group"><div style="display:table-row"><div style="display:table-cell;width:40px;height:20px">r1</div></div><div style="display:table-row-group"><div style="display:table-row"><div style="display:table-cell;height:18px">r2</div></div></div><div style="display:table-row"><div style="display:table-cell;height:36px">r3</div></div></div></div>') }
   it('declines a column that only spanning cells cover (no single-column cell to size it)') { a_bails_b_native('<table style="border-spacing:4px"><tr><td colspan="2">A</td><td style="width:20px">b</td></tr><tr><td style="width:30px">c</td><td colspan="2">DE</td></tr></table>') }
 end
