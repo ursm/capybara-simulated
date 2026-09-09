@@ -102,6 +102,11 @@ pub(crate) struct Input {
     pub(crate) flex_wrap: bool,
     pub(crate) flex_align_content: u8,
     pub(crate) flex_cross_gap: f64,
+    // Main axis reversed (row-reverse / column-reverse / rtl-row): the main axis runs from the FAR
+    // physical edge back toward the near one. The abstract (main-start-relative) placement is unchanged;
+    // only the final physical mapping mirrors, and the leading margin is the main-start-side one. The cross
+    // axis is always FORWARD in this increment (rtl-column / wrap-reverse / vertical are bailed).
+    pub(crate) flex_main_reverse: bool,
 }
 
 pub(crate) const FLOAT_LEFT: u8 = 1;
@@ -872,19 +877,23 @@ fn measure_flex(
     // main/cross margin, parallel to `children[i]` (so the line logic never re-borrows `boxes`). The item
     // cross sizes are the FINAL (pushed, post-stretch) ones, so a line's cross already includes whatever
     // align-content:stretch grew it to — native positions the lines, it never re-grows them.
+    let main_reverse = n.flex_main_reverse;
     let kids: Vec<usize> = children[i].clone();
     let (mut mo, mut co, mut ml_lead, mut cl_lead) = (Vec::with_capacity(cnt), Vec::with_capacity(cnt), Vec::with_capacity(cnt), Vec::with_capacity(cnt));
     for &c in &kids {
         let cn = inputs[c];
+        // The LEADING main margin is the one on the main-START side, which a reversed axis puts on the far
+        // physical side (a row-reverse item's leading margin is its right margin). The cross is forward here,
+        // so the leading cross margin is the ordinary near-side one.
         if main_is_x {
             mo.push(boxes[c].w + Input::m(cn.ml) + Input::m(cn.mr));
             co.push(boxes[c].h + Input::m(cn.mt) + Input::m(cn.mb));
-            ml_lead.push(Input::m(cn.ml));
+            ml_lead.push(Input::m(if main_reverse { cn.mr } else { cn.ml }));
             cl_lead.push(Input::m(cn.mt));
         } else {
             mo.push(boxes[c].h + Input::m(cn.mt) + Input::m(cn.mb));
             co.push(boxes[c].w + Input::m(cn.ml) + Input::m(cn.mr));
-            ml_lead.push(Input::m(cn.mt));
+            ml_lead.push(Input::m(if main_reverse { cn.mb } else { cn.mt }));
             cl_lead.push(Input::m(cn.ml));
         }
     }
@@ -989,7 +998,11 @@ fn measure_flex(
                 at += gap + m_between;
             }
             at += ml_lead[p];
-            let main_pos = main_start + at;
+            let m_size = if main_is_x { boxes[c].w } else { boxes[c].h };
+            // `at` is the item's abstract border-box start (from main-start). A forward axis maps it
+            // straight off the near edge; a reversed axis mirrors it within the main extent (main-start is
+            // the far physical edge).
+            let main_pos = if main_reverse { main_start + (content_main - at - m_size) } else { main_start + at };
             at += mo[p] - ml_lead[p]; // advance past the item's main size + its trailing margin
             let off = match inputs[c].flex_cross_align {
                 1 => (lc - co[p]) / 2.0, // center
@@ -1124,6 +1137,7 @@ mod tests {
             flex_wrap: false,
             flex_align_content: 6, // stretch
             flex_cross_gap: 0.0,
+            flex_main_reverse: false,
         }
     }
 
@@ -1386,6 +1400,43 @@ mod tests {
         let inputs = vec![flex_col(0.0, -1, 200.0), a];
         let bx = boxes(layout_block(&inputs, &[], &[], 0.0, 0.0, 800.0));
         assert_eq!(bx[1].x, 75.0); // (200 - 50) / 2
+    }
+
+    #[test]
+    fn flex_row_reverse_places_from_the_right() {
+        let mut f = flex(0.0, -1, 600.0);
+        f.flex_main_reverse = true;
+        let inputs = vec![f, item(1.0, 0, 100.0, 30.0), item(2.0, 0, 100.0, 30.0), item(3.0, 0, 100.0, 30.0)];
+        let bx = boxes(layout_block(&inputs, &[], &[], 0.0, 0.0, 800.0));
+        assert_eq!([bx[1].x, bx[2].x, bx[3].x], [500.0, 400.0, 300.0]); // first item rightmost, packed at the right
+        assert_eq!([bx[1].y, bx[2].y, bx[3].y], [0.0, 0.0, 0.0]);       // cross still forward
+    }
+
+    #[test]
+    fn flex_column_reverse_places_from_the_bottom() {
+        let mut f = flex_col(0.0, -1, 200.0);
+        f.flex_main_reverse = true;
+        f.height = 200.0;
+        f.height_adjoins = false;
+        let inputs = vec![f, item(1.0, 0, 50.0, 30.0), item(2.0, 0, 50.0, 30.0)];
+        let bx = boxes(layout_block(&inputs, &[], &[], 0.0, 0.0, 800.0));
+        assert_eq!([bx[1].y, bx[2].y], [170.0, 140.0]); // first item at the bottom (200-30), packed at main-start
+        assert_eq!([bx[1].x, bx[2].x], [0.0, 0.0]);
+    }
+
+    #[test]
+    fn flex_row_reverse_leading_margin_is_the_right_margin() {
+        // main-start is the right edge, so the leading margin is margin-right.
+        let mut f = flex(0.0, -1, 600.0);
+        f.flex_main_reverse = true;
+        let mut a = item(1.0, 0, 100.0, 30.0);
+        a.mr = 20.0; // leading margin on a reversed row
+        let inputs = vec![f, a, item(2.0, 0, 100.0, 30.0)];
+        let bx = boxes(layout_block(&inputs, &[], &[], 0.0, 0.0, 800.0));
+        // item a: abstract at = 0 + lead(mr 20) = 20, size 100 → main_phys = 600 - 20 - 100 = 480.
+        assert_eq!(bx[1].x, 480.0);
+        // item 2: abstract at advances by a's outer (20+100) then its own lead(0) → 120; phys = 600-120-100=380.
+        assert_eq!(bx[2].x, 380.0);
     }
 
     #[test]

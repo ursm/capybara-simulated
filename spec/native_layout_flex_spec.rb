@@ -129,6 +129,22 @@ RSpec.describe 'native layout flex parity', if: ENV.fetch('CSIM_JS_ENGINE', 'v8'
     expect_parity('<div style="display:flex;flex-wrap:wrap;width:250px;height:200px"><div style="width:100px;height:30px"></div><div style="width:100px;height:30px"></div><div style="width:100px;height:30px"></div></div>')
   end
 
+  it 'matches row-reverse (items packed from the right, first item rightmost)' do
+    expect_parity('<div style="display:flex;flex-direction:row-reverse;width:600px"><div style="width:100px;height:30px;margin-right:20px"></div><div style="width:100px;height:40px"></div><div style="width:100px;height:20px"></div></div>')
+  end
+
+  it 'matches row-reverse with justify-content and a gap' do
+    expect_parity('<div style="display:flex;flex-direction:row-reverse;justify-content:space-between;gap:10px;width:600px"><div style="width:100px;height:30px"></div><div style="width:100px;height:30px"></div></div>')
+  end
+
+  it 'matches column-reverse at a definite height (items from the bottom)' do
+    expect_parity('<div style="display:flex;flex-direction:column-reverse;height:200px;width:200px"><div style="width:50px;height:30px"></div><div style="width:50px;height:40px"></div></div>')
+  end
+
+  it 'matches row-reverse with justify-content:left (physical keyword → the reversed main-end)' do
+    expect_parity('<div style="display:flex;flex-direction:row-reverse;justify-content:left;width:500px"><div style="width:80px;height:30px"></div><div style="width:80px;height:30px"></div></div>')
+  end
+
   # A/B bails — the feature declines; the same shape without it stays native.
   def a_bails_b_native(feature, plain = '<div style="display:flex;width:400px"><div style="width:80px;height:30px"></div><div style="width:80px;height:30px"></div></div>')
     expect(run_shadow(feature)['ok']).to be(false), "expected #{feature.inspect} to bail"
@@ -139,9 +155,8 @@ RSpec.describe 'native layout flex parity', if: ENV.fetch('CSIM_JS_ENGINE', 'v8'
   # align-content:stretch with lines that MIX stretch-filled and explicit cross sizes can't be recovered
   # from the pushed final sizes → decline; a uniform (all-explicit) one stays native.
   it('declines a mixed stretch/explicit wrap under align-content:stretch') { a_bails_b_native('<div style="display:flex;flex-wrap:wrap;width:250px;height:200px"><div style="width:100px"></div><div style="width:100px"></div><div style="width:100px;height:50px"></div></div>', '<div style="display:flex;flex-wrap:wrap;width:250px;height:200px"><div style="width:100px;height:30px"></div><div style="width:100px;height:30px"></div><div style="width:100px;height:30px"></div></div>') }
-  it('declines row-reverse') { a_bails_b_native('<div style="display:flex;flex-direction:row-reverse;width:400px"><div style="width:80px;height:30px"></div><div style="width:80px;height:30px"></div></div>') }
-  it('declines column-reverse') { a_bails_b_native('<div style="display:flex;flex-direction:column-reverse;width:400px"><div style="width:80px;height:30px"></div><div style="width:80px;height:30px"></div></div>') }
-  it('declines direction:rtl') { a_bails_b_native('<div style="display:flex;direction:rtl;width:400px"><div style="width:80px;height:30px"></div><div style="width:80px;height:30px"></div></div>') }
+  it('declines an rtl flex row (rtl propagates to items — deferred)') { a_bails_b_native('<div style="display:flex;direction:rtl;width:400px"><div style="width:80px;height:30px"></div><div style="width:80px;height:30px"></div></div>') }
+  it('declines an rtl flex column (cross axis runs right→left)') { a_bails_b_native('<div style="display:flex;flex-direction:column;direction:rtl;width:400px"><div style="width:80px;height:30px"></div><div style="width:80px;height:30px"></div></div>') }
   it('declines align-items:baseline') { a_bails_b_native('<div style="display:flex;align-items:baseline;width:400px"><div style="width:80px;height:30px"></div><div style="width:80px;height:30px"></div></div>') }
   it('declines min-height on the container') { a_bails_b_native('<div style="display:flex;min-height:200px;width:400px"><div style="width:80px;height:30px"></div><div style="width:80px;height:30px"></div></div>') }
   it('declines an auto item margin') { a_bails_b_native('<div style="display:flex;width:400px"><div style="width:80px;height:30px;margin-left:auto"></div><div style="width:80px;height:30px"></div></div>') }
