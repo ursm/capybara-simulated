@@ -57,9 +57,21 @@ pub(crate) struct Input {
     pub(crate) br: f64,
     pub(crate) bb: f64,
     pub(crate) bl: f64,
-    // Text-block (DISPLAY_TEXT_BLOCK) fields — a native font handle + size/spacing for measuring runs
-    // in-process, and the JS-resolved line-height px (so no hhea parity is needed). The block's collapsed
-    // inline text is in the parallel `texts` array at the same record index. Unused for a plain block.
+    // Text-block (DISPLAY_TEXT_BLOCK) fields. Its inline content is a RUN SEQUENCE (each run its own
+    // font/size/spacing/line-height) in the `runs` buffer at [run_start, run_start+run_count); a run's
+    // text is in `run_texts` at the run's index. `strut_lh` is the block's own resolved line-height —
+    // the line-box STRUT, which each line's height grows from (max with the runs on it). Unused for a
+    // plain block (run_count 0).
+    pub(crate) run_start: i32,
+    pub(crate) run_count: i32,
+    pub(crate) strut_lh: f64,
+}
+
+// One inline run: a maximal same-font piece of a text block's content. Text is in `run_texts` at the
+// run's index. Widths come from `fm.measure_run` (bit-parity with JS measureRun); `line_height` grows
+// the line box.
+#[derive(Clone, Copy)]
+pub(crate) struct Run {
     pub(crate) font: i32,
     pub(crate) size: f64,
     pub(crate) ls: f64,
@@ -119,7 +131,7 @@ pub(crate) enum Outcome {
 // box per node in input order. Block flow: each block fills its containing block's content width (auto)
 // or takes its declared width; in-flow block children stack vertically at the content origin; auto
 // height is the children's stacked height (plus this box's own vertical edges).
-pub(crate) fn layout_block(inputs: &[Input], texts: &[Option<Vec<u16>>], root_x: f64, root_y: f64, root_cb_w: f64) -> Outcome {
+pub(crate) fn layout_block(inputs: &[Input], runs: &[Run], run_texts: &[Option<Vec<u16>>], root_x: f64, root_y: f64, root_cb_w: f64) -> Outcome {
     if inputs.is_empty() {
         return Outcome::LaidOut(Vec::new());
     }
@@ -152,7 +164,7 @@ pub(crate) fn layout_block(inputs: &[Input], texts: &[Option<Vec<u16>>], root_x:
     // — the whole pass then falls back to JS.
     let root_w = resolve_width(&inputs[0], root_cb_w);
     let failed = std::cell::Cell::new(false);
-    measure(0, root_w, inputs, texts, &children, &mut boxes, &failed);
+    measure(0, root_w, inputs, runs, run_texts, &children, &mut boxes, &failed);
     if failed.get() {
         return Outcome::Unsupported;
     }
@@ -160,51 +172,91 @@ pub(crate) fn layout_block(inputs: &[Input], texts: &[Option<Vec<u16>>], root_x:
     Outcome::LaidOut(boxes)
 }
 
-// Greedy line count for a text block: collapse-split the text into words (maximal non-`[ \t\n\r\f]+`
-// runs — NBSP is NOT a break), pack them greedily against `content_w` comparing `lineX + spaceW + wordW`,
-// and count lines. Widths come from `fm.measure_run` (bit-parity with JS measureRun). None when the
-// text holds a construct the L2 breaker doesn't model — a tab / combining mark (measure_run returns
-// None) or a wide/CJK char (its own break unit, not handled yet) — so the caller declines to JS.
-fn line_count(fm: &crate::font::FontMetrics, text: &[u16], size: f64, ls: f64, ws: f64, content_w: f64) -> Option<u32> {
-    // Wide/CJK chars break between characters (not on spaces) — decline until L2 models that.
-    for &u in text {
-        if is_wide_unit(u) {
-            return None;
-        }
+// Measure a word (a run of code points) in a run's font (px). None on a bad handle or a tab / combining
+// mark measure_run declines.
+fn measure_word(run: &Run, word: &[u16]) -> Option<f64> {
+    crate::font::with_font(run.font, |fm| fm.measure_run(word, run.size, run.ls, run.ws)).flatten()
+}
+
+fn is_ws_u16(u: u16) -> bool {
+    matches!(u, 0x20 | 0x09 | 0x0A | 0x0D | 0x0C)
+}
+
+// Greedy line layout for a text block's RUN SEQUENCE (`runs` / `run_texts` parallel, this block's
+// slice): tokenize each run's text into words (maximal non-`[ \t\n\r\f]+` runs — NBSP is NOT a break),
+// each measured in its OWN run's font; a collapsible space (the first ws at a boundary, that run's
+// spaceW) is the break opportunity. Pack greedily against `content_w` comparing `lineX + spaceW + wordW`.
+// Line height = `strut_lh` (the block's line-height) grown to the max line-height of the runs on the
+// line. Returns (line count, total content height = Σ line heights). None when the text needs a
+// construct not modelled — a tab / combining mark (measure_run None), a wide/CJK char (its own break
+// unit), or a WORD spanning two runs (no space at the boundary) — so the caller declines to JS.
+fn line_layout(runs: &[Run], run_texts: &[Option<Vec<u16>>], strut_lh: f64, content_w: f64) -> Option<(u32, f64)> {
+    struct W {
+        width: f64,
+        lh: f64,
+        space_w: f64, // the collapsed space before this word (0 for the first word on the run stream)
+        space_before: bool,
     }
-    let space_w = fm.measure_run(&[0x20], size, ls, ws)?;
-    let is_ws = |u: u16| matches!(u, 0x20 | 0x09 | 0x0A | 0x0D | 0x0C);
-    // words = maximal non-whitespace runs
-    let mut words: Vec<&[u16]> = Vec::new();
-    let mut start = None;
-    for (i, &u) in text.iter().enumerate() {
-        if is_ws(u) {
-            if let Some(s) = start.take() {
-                words.push(&text[s..i]);
+    let mut words: Vec<W> = Vec::new();
+    let mut pending: Option<f64> = None; // collapsed space width waiting before the next word
+
+    for (ri, run) in runs.iter().enumerate() {
+        let text = run_texts.get(ri).and_then(|t| t.as_ref())?;
+        if text.iter().any(|&u| is_wide_unit(u)) {
+            return None; // CJK/wide breaks between chars — not modelled here
+        }
+        let space_w = measure_word(run, &[0x20])?;
+        let mut i = 0;
+        while i < text.len() {
+            if is_ws_u16(text[i]) {
+                while i < text.len() && is_ws_u16(text[i]) {
+                    i += 1;
+                }
+                // A space is a break opportunity — unless it's leading whitespace at the very start
+                // (dropped). Collapse consecutive/boundary spaces to the FIRST one seen.
+                if (!words.is_empty() || pending.is_some()) && pending.is_none() {
+                    pending = Some(space_w);
+                }
+            } else {
+                let start = i;
+                while i < text.len() && !is_ws_u16(text[i]) {
+                    i += 1;
+                }
+                let width = measure_word(run, &text[start..i])?;
+                let (space_before, sw) = match pending.take() {
+                    Some(s) => (true, s),
+                    None => (false, 0.0),
+                };
+                if !words.is_empty() && !space_before {
+                    return None; // a word spans two runs with no space between (mixed-font word)
+                }
+                words.push(W { width, lh: run.line_height, space_w: sw, space_before });
             }
-        } else if start.is_none() {
-            start = Some(i);
         }
     }
-    if let Some(s) = start {
-        words.push(&text[s..]);
-    }
+
     if words.is_empty() {
-        return Some(0);
+        return Some((0, 0.0));
     }
     let mut n = 1u32;
-    let mut line_x = fm.measure_run(words[0], size, ls, ws)?;
-    for word in &words[1..] {
-        let w = fm.measure_run(word, size, ls, ws)?;
-        let with_space = line_x + space_w;
-        if with_space + w > content_w {
+    let mut line_x = words[0].width;
+    let mut line_lh = strut_lh.max(words[0].lh);
+    let mut total = 0.0f64;
+    for w in &words[1..] {
+        let with_space = line_x + w.space_w; // space_before is always true here (else we declined)
+        let _ = w.space_before;
+        if with_space + w.width > content_w {
+            total += line_lh; // close the line
             n += 1;
-            line_x = w; // break eats the space; the word starts the new line
+            line_x = w.width; // break eats the space; the word starts the new line
+            line_lh = strut_lh.max(w.lh);
         } else {
-            line_x = with_space + w;
+            line_x = with_space + w.width;
+            line_lh = line_lh.max(w.lh);
         }
     }
-    Some(n)
+    total += line_lh;
+    Some((n, total))
 }
 
 // A UTF-16 unit whose code point is a wide/CJK character (its own break unit) — a lone BMP unit, or a
@@ -277,7 +329,8 @@ fn measure(
     i: usize,
     w: f64,
     inputs: &[Input],
-    texts: &[Option<Vec<u16>>],
+    runs: &[Run],
+    run_texts: &[Option<Vec<u16>>],
     children: &[Vec<usize>],
     boxes: &mut [Box],
     failed: &std::cell::Cell<bool>,
@@ -286,21 +339,24 @@ fn measure(
     let content_top_rel = n.bt + n.pt;
     let content_w = (w - n.edges_x()).max(0.0);
 
-    // A text block (inline formatting context): its height is the greedy line count × the line-height,
-    // measured natively (font.rs) with no per-run crossing. It has no child records; the text is in
-    // `texts[i]`. If it can't be measured (bad font / tab / combining / CJK), flag the pass for JS.
+    // A text block (inline formatting context): its content height is the greedy line layout over its
+    // run sequence, measured natively (font.rs) with no per-run crossing. It has no child records; its
+    // runs are runs[run_start..run_start+run_count]. If it can't be measured (bad font / tab / combining
+    // / CJK / mixed-font word), flag the pass for JS.
     if n.display == DISPLAY_TEXT_BLOCK {
-        let lines = match texts.get(i).and_then(|t| t.as_ref()) {
-            Some(txt) => match crate::font::with_font(n.font, |fm| line_count(fm, txt, n.size, n.ls, n.ws, content_w)) {
-                Some(Some(count)) => count,
-                _ => {
+        let (rs, re) = (n.run_start.max(0) as usize, (n.run_start + n.run_count).max(0) as usize);
+        let content_h = if re <= runs.len() && rs <= re {
+            match line_layout(&runs[rs..re], &run_texts[rs..re], n.strut_lh, content_w) {
+                Some((_, h)) => h,
+                None => {
                     failed.set(true);
-                    0
+                    0.0
                 }
-            },
-            None => 0,
+            }
+        } else {
+            failed.set(true);
+            0.0
         };
-        let content_h = lines as f64 * n.line_height;
         let box_h = if is_auto(n.height) {
             content_top_rel + content_h + n.pb + n.bb
         } else if n.border_box {
@@ -331,7 +387,7 @@ fn measure(
         has_child = true;
         let cn = inputs[c];
         let child_w = resolve_width(&cn, content_w);
-        let cm = measure(c, child_w, inputs, texts, children, boxes, failed);
+        let cm = measure(c, child_w, inputs, runs, run_texts, children, boxes, failed);
         boxes[c].x = content_left_rel + Input::m(cn.ml);
         if first && top_open {
             // The first in-flow child's top margin collapses with this node's top margin (collapse-
@@ -457,11 +513,9 @@ mod tests {
             br: 0.0,
             bb: 0.0,
             bl: 0.0,
-            font: -1,
-            size: 16.0,
-            ls: 0.0,
-            ws: 0.0,
-            line_height: 0.0,
+            run_start: -1,
+            run_count: 0,
+            strut_lh: 0.0,
         }
     }
 
@@ -480,7 +534,7 @@ mod tests {
         let mut b = blk(2.0, 0);
         b.height = 30.0;
         let inputs = vec![blk(0.0, -1), a, b];
-        let bx = boxes(layout_block(&inputs, &[], 0.0, 0.0, 800.0));
+        let bx = boxes(layout_block(&inputs, &[], &[], 0.0, 0.0, 800.0));
         assert_eq!(bx[1], Box { nid: 1.0, x: 0.0, y: 0.0, w: 800.0, h: 50.0, auto_height: false });
         assert_eq!(bx[2], Box { nid: 2.0, x: 0.0, y: 50.0, w: 800.0, h: 30.0, auto_height: false });
         assert_eq!(bx[0].h, 80.0); // root auto height = 50 + 30
@@ -503,7 +557,7 @@ mod tests {
         let mut c = blk(2.0, 1);
         c.height = 20.0;
         let inputs = vec![blk(0.0, -1), a, c];
-        let bx = boxes(layout_block(&inputs, &[], 0.0, 0.0, 100.0));
+        let bx = boxes(layout_block(&inputs, &[], &[], 0.0, 0.0, 100.0));
         // a: y = 10 (margin), border-box width = 100 - 0 margins = 100, auto height = 20 + pt+pb+bt+bb = 20+14
         assert_eq!(bx[1].y, 10.0);
         assert_eq!(bx[1].w, 100.0);
@@ -522,7 +576,7 @@ mod tests {
         a.max_w = 150.0;
         a.height = 40.0;
         let inputs = vec![blk(0.0, -1), a];
-        let bx = boxes(layout_block(&inputs, &[], 0.0, 0.0, 800.0));
+        let bx = boxes(layout_block(&inputs, &[], &[], 0.0, 0.0, 800.0));
         assert_eq!(bx[1].w, 150.0); // clamped by max-width (border-box)
     }
 
@@ -531,6 +585,6 @@ mod tests {
         let mut a = blk(1.0, 0);
         a.display = DISPLAY_UNSUPPORTED; // e.g. flex
         let inputs = vec![blk(0.0, -1), a];
-        assert!(matches!(layout_block(&inputs, &[], 0.0, 0.0, 800.0), Outcome::Unsupported));
+        assert!(matches!(layout_block(&inputs, &[], &[], 0.0, 0.0, 800.0), Outcome::Unsupported));
     }
 }

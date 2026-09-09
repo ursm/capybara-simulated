@@ -57,6 +57,23 @@ RSpec.describe 'native layout L2 text-block parity', if: ENV.fetch('CSIM_JS_ENGI
     expect(r['mismatches']).to eq(0), "mismatch: #{r.inspect}"
   end
 
+  it 'matches text with different-font inline runs (bold / em)' do
+    text = 'plain words then <b>some bold words</b> then <em>emphasised ones</em> and plain again onward.'
+    session = simulated_session(page(%(<div style="width:170px">#{text}</div>)))
+    session.visit '/'
+    r = parity(session)
+    expect(r).to include('ok' => true), "harness bailed: #{r.inspect}"
+    expect(r['mismatches']).to eq(0), "mismatch: #{r.inspect}"
+  end
+
+  it 'matches a larger-font inline run growing the line height' do
+    session = simulated_session(page(%(<div style="width:300px">small text <span style="font-size:28px">BIG</span> small again</div>)))
+    session.visit '/'
+    r = parity(session)
+    expect(r).to include('ok' => true), "harness bailed: #{r.inspect}"
+    expect(r['mismatches']).to eq(0), "mismatch: #{r.inspect}"
+  end
+
   it 'matches a text block with padding, border, and margins' do
     text = 'Some words wrapping inside a padded bordered box to check content width and stacked height.'
     session = simulated_session(page(%(<div style="width:180px;margin:12px 0;padding:6px;border:2px solid #000">#{text}</div><div style="height:10px"></div>)))

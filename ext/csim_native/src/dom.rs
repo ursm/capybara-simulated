@@ -890,33 +890,38 @@ fn register_font_bytes(
     }
 }
 
-// Fields per node in the layoutPass input buffer (a flat Float64Array). Order MUST match the JS packer
-// (layout.js `__csimLayoutShadowRun`) and layout::Input.
-const LAYOUT_STRIDE: usize = 27;
+// Fields per node in the layoutPass input buffer, and per run in the runs buffer (flat Float64Arrays).
+// Order MUST match the JS packer (layout.js `__csimLayoutShadowRun`) and layout::Input / layout::Run.
+const LAYOUT_STRIDE: usize = 25;
+const RUN_STRIDE: usize = 5;
 
-// __dom.layoutPass(inputsFlat, texts, rootX, rootY, rootCbW) -> bool. Decode the flat per-node record
-// buffer (root at record 0) + the parallel `texts` array (each text block's collapsed inline text, else
-// non-string), run native layout, and write each node's border-box into its arena slot. Returns false
-// when the subtree uses a feature the native engine doesn't model (Outcome::Unsupported) — the caller
-// then lays it out in JS. One crossing per pass.
+// Decode a V8 Float64Array argument into a Vec<f64> (native-endian raw bytes).
+fn read_f64_array(val: v8::Local<'_, v8::Value>) -> Vec<f64> {
+    let Ok(arr) = v8::Local::<v8::Float64Array>::try_from(val) else {
+        return Vec::new();
+    };
+    let mut bytes = vec![0u8; arr.length() * 8];
+    arr.copy_contents(&mut bytes);
+    bytes.chunks_exact(8).map(|c| f64::from_ne_bytes(c.try_into().unwrap())).collect()
+}
+
+// __dom.layoutPass(inputsFlat, runsFlat, runTexts, rootX, rootY, rootCbW) -> bool. Decode the flat
+// per-node record buffer (root at record 0), the per-run buffer, and the parallel `runTexts` string
+// array (a run's text, else non-string), run native layout, and write each node's border-box into its
+// arena slot. Returns false when the subtree uses a feature the native engine doesn't model
+// (Outcome::Unsupported) — the caller then lays it out in JS. One crossing per pass.
 fn layout_pass(
     scope: &mut v8::PinScope<'_, '_>,
     args: v8::FunctionCallbackArguments<'_>,
     mut rv: v8::ReturnValue<'_, v8::Value>,
 ) {
-    let Ok(arr) = v8::Local::<v8::Float64Array>::try_from(args.get(0)) else {
+    let node_floats = read_f64_array(args.get(0));
+    if node_floats.is_empty() {
         rv.set_bool(false);
         return;
-    };
-    let n = arr.length();
-    let mut bytes = vec![0u8; n * 8];
-    arr.copy_contents(&mut bytes);
-    let floats: Vec<f64> = bytes
-        .chunks_exact(8)
-        .map(|c| f64::from_ne_bytes(c.try_into().unwrap()))
-        .collect();
-    let mut inputs: Vec<crate::layout::Input> = Vec::with_capacity(floats.len() / LAYOUT_STRIDE);
-    for r in floats.chunks_exact(LAYOUT_STRIDE) {
+    }
+    let mut inputs: Vec<crate::layout::Input> = Vec::with_capacity(node_floats.len() / LAYOUT_STRIDE);
+    for r in node_floats.chunks_exact(LAYOUT_STRIDE) {
         inputs.push(crate::layout::Input {
             nid: r[0],
             parent: r[1] as i32,
@@ -940,33 +945,36 @@ fn layout_pass(
             br: r[19],
             bb: r[20],
             bl: r[21],
-            font: r[22] as i32,
-            size: r[23],
-            ls: r[24],
-            ws: r[25],
-            line_height: r[26],
+            run_start: r[22] as i32,
+            run_count: r[23] as i32,
+            strut_lh: r[24],
         });
     }
-    // Parallel text channel: texts[i] = record i's collapsed inline text (for a text block), else a
-    // non-string (None). Read as UTF-16 to iterate exactly as JS does. Done before any arena borrow.
-    let mut texts: Vec<Option<Vec<u16>>> = Vec::with_capacity(inputs.len());
-    if let Ok(tarr) = v8::Local::<v8::Array>::try_from(args.get(1)) {
+    let run_floats = read_f64_array(args.get(1));
+    let mut runs: Vec<crate::layout::Run> = Vec::with_capacity(run_floats.len() / RUN_STRIDE);
+    for r in run_floats.chunks_exact(RUN_STRIDE) {
+        runs.push(crate::layout::Run { font: r[0] as i32, size: r[1], ls: r[2], ws: r[3], line_height: r[4] });
+    }
+    // Parallel run-text channel: run_texts[r] = run r's text (a string), read as UTF-16 to iterate
+    // exactly as JS does. Done before any arena borrow.
+    let mut run_texts: Vec<Option<Vec<u16>>> = Vec::with_capacity(runs.len());
+    if let Ok(tarr) = v8::Local::<v8::Array>::try_from(args.get(2)) {
         for i in 0..tarr.length() {
             match tarr.get_index(scope, i) {
                 Some(val) if val.is_string() => {
                     let s = val.to_string(scope).unwrap();
                     let mut u = vec![0u16; s.length()];
                     s.write_v2(scope, 0, &mut u, v8::WriteFlags::empty());
-                    texts.push(Some(u));
+                    run_texts.push(Some(u));
                 }
-                _ => texts.push(None),
+                _ => run_texts.push(None),
             }
         }
     }
-    let root_x = args.get(2).number_value(scope).unwrap_or(0.0);
-    let root_y = args.get(3).number_value(scope).unwrap_or(0.0);
-    let root_cb_w = args.get(4).number_value(scope).unwrap_or(0.0);
-    match crate::layout::layout_block(&inputs, &texts, root_x, root_y, root_cb_w) {
+    let root_x = args.get(3).number_value(scope).unwrap_or(0.0);
+    let root_y = args.get(4).number_value(scope).unwrap_or(0.0);
+    let root_cb_w = args.get(5).number_value(scope).unwrap_or(0.0);
+    match crate::layout::layout_block(&inputs, &runs, &run_texts, root_x, root_y, root_cb_w) {
         crate::layout::Outcome::Unsupported => rv.set_bool(false),
         crate::layout::Outcome::LaidOut(boxes) => {
             let cid = realm_id(scope, &args);
