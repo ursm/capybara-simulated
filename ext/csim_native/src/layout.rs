@@ -67,16 +67,26 @@ pub(crate) struct Input {
     pub(crate) strut_lh: f64,
 }
 
-// One inline run: a maximal same-font piece of a text block's content. Text is in `run_texts` at the
-// run's index. Widths come from `fm.measure_run` (bit-parity with JS measureRun); `line_height` grows
-// the line box.
+// Run kinds in a text block's inline stream. TEXT is a maximal same-font piece (its text in `run_texts`
+// at the run's index); OPEN/CLOSE are an inline element's horizontal edges (open = left margin+border+
+// padding, reserved in the fit test and flushed onto the first line content lands on; close = right
+// border+padding+margin, added on the last line); BR is a `<br>` hard break.
+pub(crate) const RUN_TEXT: u8 = 0;
+pub(crate) const RUN_OPEN: u8 = 1;
+pub(crate) const RUN_CLOSE: u8 = 2;
+pub(crate) const RUN_BR: u8 = 3;
+
+// One item of a text block's inline stream. For TEXT: font/size/ls/ws/line_height measure its words.
+// For OPEN/CLOSE: `metric` is the horizontal edge width. `kind` selects.
 #[derive(Clone, Copy)]
 pub(crate) struct Run {
+    pub(crate) kind: u8,
     pub(crate) font: i32,
     pub(crate) size: f64,
     pub(crate) ls: f64,
     pub(crate) ws: f64,
     pub(crate) line_height: f64,
+    pub(crate) metric: f64,
 }
 
 impl Input {
@@ -182,80 +192,116 @@ fn is_ws_u16(u: u16) -> bool {
     matches!(u, 0x20 | 0x09 | 0x0A | 0x0D | 0x0C)
 }
 
-// Greedy line layout for a text block's RUN SEQUENCE (`runs` / `run_texts` parallel, this block's
-// slice): tokenize each run's text into words (maximal non-`[ \t\n\r\f]+` runs — NBSP is NOT a break),
-// each measured in its OWN run's font; a collapsible space (the first ws at a boundary, that run's
-// spaceW) is the break opportunity. Pack greedily against `content_w` comparing `lineX + spaceW + wordW`.
-// Line height = `strut_lh` (the block's line-height) grown to the max line-height of the runs on the
-// line. Returns (line count, total content height = Σ line heights). None when the text needs a
-// construct not modelled — a tab / combining mark (measure_run None), a wide/CJK char (its own break
-// unit), or a WORD spanning two runs (no space at the boundary) — so the caller declines to JS.
+// Greedy line layout for a text block's run/marker STREAM (`runs` / `run_texts` parallel, this block's
+// slice). TEXT runs tokenize into words (maximal non-`[ \t\n\r\f]+` — NBSP is NOT a break), each measured
+// in its own font; a collapsible space (the first ws at a boundary, that run's spaceW) is the break
+// opportunity. OPEN/CLOSE are an inline element's horizontal edges: OPEN reserves `metric` in the fit
+// test (openEdgeWidth) and flushes onto the first line content lands on; CLOSE adds `metric` on the
+// current line. BR forces a line break. Line height = `strut_lh` (the block's line-height) grown to the
+// max line-height of the runs on the line; an empty line (a lone/leading `<br>`) is `strut_lh`. Returns
+// (line count, total content height = Σ line heights). None when a construct isn't modelled — a tab /
+// combining mark / CJK char, a WORD spanning two runs (no space at the boundary), or a `<br>` while an
+// inline edge is open — so the caller declines to JS.
 fn line_layout(runs: &[Run], run_texts: &[Option<Vec<u16>>], strut_lh: f64, content_w: f64) -> Option<(u32, f64)> {
-    struct W {
-        width: f64,
-        lh: f64,
-        space_w: f64, // the collapsed space before this word (0 for the first word on the run stream)
-        space_before: bool,
-    }
-    let mut words: Vec<W> = Vec::new();
-    let mut pending: Option<f64> = None; // collapsed space width waiting before the next word
+    let mut line_x = 0.0f64;
+    let mut total = 0.0f64;
+    let mut line_lh = strut_lh;
+    let mut line_has_content = false;
+    let mut n = 1u32;
+    // Open inline edges not yet closed: (pending-open width, already-flushed?). openEdgeWidth = Σ of the
+    // unflushed pendings — reserved in the fit test until the first content flushes it onto the line.
+    let mut open: Vec<(f64, bool)> = Vec::new();
+    let mut pending_space: Option<f64> = None; // collapsed space before the next word
+    let mut prev_was_word = false;
 
     for (ri, run) in runs.iter().enumerate() {
-        let text = run_texts.get(ri).and_then(|t| t.as_ref())?;
-        if text.iter().any(|&u| is_wide_unit(u)) {
-            return None; // CJK/wide breaks between chars — not modelled here
-        }
-        let space_w = measure_word(run, &[0x20])?;
-        let mut i = 0;
-        while i < text.len() {
-            if is_ws_u16(text[i]) {
-                while i < text.len() && is_ws_u16(text[i]) {
-                    i += 1;
-                }
-                // A space is a break opportunity — unless it's leading whitespace at the very start
-                // (dropped). Collapse consecutive/boundary spaces to the FIRST one seen.
-                if (!words.is_empty() || pending.is_some()) && pending.is_none() {
-                    pending = Some(space_w);
-                }
-            } else {
-                let start = i;
-                while i < text.len() && !is_ws_u16(text[i]) {
-                    i += 1;
-                }
-                let width = measure_word(run, &text[start..i])?;
-                let (space_before, sw) = match pending.take() {
-                    Some(s) => (true, s),
-                    None => (false, 0.0),
-                };
-                if !words.is_empty() && !space_before {
-                    return None; // a word spans two runs with no space between (mixed-font word)
-                }
-                words.push(W { width, lh: run.line_height, space_w: sw, space_before });
+        match run.kind {
+            RUN_OPEN => {
+                open.push((run.metric, false));
+                prev_was_word = false;
             }
+            RUN_CLOSE => {
+                open.pop(); // LIFO; an unflushed (empty-inline) open's pending is dropped, matching JS
+                line_x += run.metric;
+                if run.metric != 0.0 {
+                    line_has_content = true;
+                }
+                prev_was_word = false;
+            }
+            RUN_BR => {
+                if !open.is_empty() {
+                    return None; // <br> inside an open inline edge (fragment) — defer to JS
+                }
+                total += if line_has_content { line_lh } else { strut_lh };
+                n += 1;
+                line_x = 0.0;
+                line_lh = strut_lh;
+                line_has_content = false;
+                pending_space = None;
+                prev_was_word = false;
+            }
+            RUN_TEXT => {
+                let text = run_texts.get(ri).and_then(|t| t.as_ref())?;
+                if text.iter().any(|&u| is_wide_unit(u)) {
+                    return None; // CJK/wide breaks between chars — not modelled here
+                }
+                let space_w = measure_word(run, &[0x20])?;
+                let mut i = 0;
+                while i < text.len() {
+                    if is_ws_u16(text[i]) {
+                        while i < text.len() && is_ws_u16(text[i]) {
+                            i += 1;
+                        }
+                        // A space is a break opportunity, unless it is leading whitespace on a fresh line
+                        // (dropped). Collapse consecutive / boundary spaces to the FIRST seen.
+                        if line_has_content && pending_space.is_none() {
+                            pending_space = Some(space_w);
+                        }
+                    } else {
+                        let start = i;
+                        while i < text.len() && !is_ws_u16(text[i]) {
+                            i += 1;
+                        }
+                        let width = measure_word(run, &text[start..i])?;
+                        let (space_before, sw) = match pending_space.take() {
+                            Some(s) => (true, s),
+                            None => (false, 0.0),
+                        };
+                        if prev_was_word && !space_before {
+                            return None; // a word spans two runs with no space between (mixed-font word)
+                        }
+                        if space_before && line_has_content {
+                            line_x += sw; // hanging space
+                        }
+                        let ow: f64 = open.iter().filter(|o| !o.1).map(|o| o.0).sum();
+                        if line_has_content && space_before && line_x + ow + width > content_w {
+                            total += line_lh; // break: close the line (the hanging space is dropped)
+                            n += 1;
+                            line_x = 0.0;
+                            line_lh = strut_lh;
+                            // line_has_content is set true just below as the word is placed on the new line
+                        }
+                        // Flush the still-open edges onto this line (once), then place the word.
+                        for o in open.iter_mut() {
+                            if !o.1 {
+                                line_x += o.0;
+                                o.1 = true;
+                            }
+                        }
+                        line_x += width;
+                        line_lh = line_lh.max(run.line_height);
+                        line_has_content = true;
+                        prev_was_word = true;
+                    }
+                }
+            }
+            _ => return None, // unknown run kind
         }
     }
 
-    if words.is_empty() {
-        return Some((0, 0.0));
+    if line_has_content {
+        total += line_lh; // close the final line (a trailing <br>'s fresh empty line is NOT closed)
     }
-    let mut n = 1u32;
-    let mut line_x = words[0].width;
-    let mut line_lh = strut_lh.max(words[0].lh);
-    let mut total = 0.0f64;
-    for w in &words[1..] {
-        let with_space = line_x + w.space_w; // space_before is always true here (else we declined)
-        let _ = w.space_before;
-        if with_space + w.width > content_w {
-            total += line_lh; // close the line
-            n += 1;
-            line_x = w.width; // break eats the space; the word starts the new line
-            line_lh = strut_lh.max(w.lh);
-        } else {
-            line_x = with_space + w.width;
-            line_lh = line_lh.max(w.lh);
-        }
-    }
-    total += line_lh;
     Some((n, total))
 }
 

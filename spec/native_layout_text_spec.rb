@@ -74,6 +74,31 @@ RSpec.describe 'native layout L2 text-block parity', if: ENV.fetch('CSIM_JS_ENGI
     expect(r['mismatches']).to eq(0), "mismatch: #{r.inspect}"
   end
 
+  it 'matches <br> hard breaks (mid, trailing, leading, doubled)' do
+    [
+      'line one<br>line two',
+      'only line<br>',
+      '<br>after a leading break',
+      'a<br><br>b with a blank line between',
+      'first<br>second<br>third',
+    ].each do |body|
+      session = simulated_session(page(%(<div style="width:400px">#{body}</div>)))
+      session.visit '/'
+      r = parity(session)
+      expect(r).to include('ok' => true), "harness bailed on #{body.inspect}: #{r.inspect}"
+      expect(r['mismatches']).to eq(0), "mismatch on #{body.inspect}: #{r.inspect}"
+    end
+  end
+
+  it 'matches an edged inline element (padding/border/margin) affecting wrap' do
+    text = 'some words then <span style="padding:0 10px;border:1px solid #000;margin:0 6px">a boxed span</span> and more words that wrap onward here.'
+    session = simulated_session(page(%(<div style="width:200px">#{text}</div>)))
+    session.visit '/'
+    r = parity(session)
+    expect(r).to include('ok' => true), "harness bailed: #{r.inspect}"
+    expect(r['mismatches']).to eq(0), "mismatch: #{r.inspect}"
+  end
+
   it 'matches a text block with padding, border, and margins' do
     text = 'Some words wrapping inside a padded bordered box to check content width and stacked height.'
     session = simulated_session(page(%(<div style="width:180px;margin:12px 0;padding:6px;border:2px solid #000">#{text}</div><div style="height:10px"></div>)))
