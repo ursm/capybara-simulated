@@ -28,6 +28,11 @@ fn is_auto(v: f64) -> bool {
 pub(crate) const DISPLAY_BLOCK: u8 = 1;
 pub(crate) const DISPLAY_TEXT_BLOCK: u8 = 2;
 pub(crate) const DISPLAY_FLEX: u8 = 3;
+// CSS Tables 3 (t1): the table box and its internal structure. Cells are ordinary block / text blocks
+// (DISPLAY_BLOCK / DISPLAY_TEXT_BLOCK) sized by the oracle (pushed), so they need no code of their own.
+pub(crate) const DISPLAY_TABLE: u8 = 4;
+pub(crate) const DISPLAY_TABLE_ROW_GROUP: u8 = 5;
+pub(crate) const DISPLAY_TABLE_ROW: u8 = 6;
 pub(crate) const DISPLAY_UNSUPPORTED: u8 = 255;
 
 // One element's used values for block layout, decoded from the flat buffer. Lengths are px; auto/none
@@ -128,6 +133,11 @@ pub(crate) struct Input {
     // border-box origin + its resolved displacement (rel_x/rel_y = el._lb − container._lb), so the insets /
     // static position the oracle already resolved are replayed. 0 = an ordinary in-flow item.
     pub(crate) out_of_flow: u8,
+    // TABLE border-spacing (§17.6.1), set only on a DISPLAY_TABLE node (0 elsewhere). The cell sizes (the
+    // column widths × row heights) are pushed like flex-item sizes; native reassembles the tracks and
+    // prefix-sums them with this spacing to position every cell, row, row-group, and the table box itself.
+    pub(crate) sp_x: f64,
+    pub(crate) sp_y: f64,
 }
 
 pub(crate) const CROSS_BASELINE: u8 = 3;
@@ -233,7 +243,12 @@ pub(crate) fn layout_block(inputs: &[Input], runs: &[Run], run_texts: &[Option<V
     for (i, n) in inputs.iter().enumerate() {
         if n.parent >= 0 {
             let p = n.parent as usize;
-            if p < inputs.len() && (n.display == DISPLAY_BLOCK || n.display == DISPLAY_TEXT_BLOCK || n.display == DISPLAY_FLEX) {
+            if p < inputs.len()
+                && matches!(
+                    n.display,
+                    DISPLAY_BLOCK | DISPLAY_TEXT_BLOCK | DISPLAY_FLEX | DISPLAY_TABLE | DISPLAY_TABLE_ROW_GROUP | DISPLAY_TABLE_ROW
+                )
+            {
                 children[p].push(i);
             }
         }
@@ -609,6 +624,12 @@ fn measure(
     // its width/height); native does only the placement — main-axis distribution + cross-axis alignment.
     if n.display == DISPLAY_FLEX {
         return measure_flex(i, w, inputs, runs, run_texts, children, boxes, failed);
+    }
+
+    // A TABLE (§17): the cell SIZING (column widths × row heights) is resolved JS-side and rides each cell's
+    // record; native reassembles the tracks and positions every cell / row / row-group and the table box.
+    if n.display == DISPLAY_TABLE {
+        return measure_table(i, inputs, runs, run_texts, children, boxes, failed);
     }
 
     // A text block (inline formatting context): its content height is the greedy line layout over its
@@ -1194,6 +1215,161 @@ fn flex_distribution(code: u8, free: f64, n: usize) -> (f64, f64) {
     }
 }
 
+// Native TABLE layout (§17, t1): a separate-borders, auto-layout table in normal flow — `table >
+// (row-group | row)* > cell*`. Each cell's used border box (its column width × its unified row height) is
+// PUSHED (rec[4]/rec[5], like a flex item); native reassembles the column/row TRACKS from the pushed cell
+// sizes, prefix-sums them with border-spacing to position every cell, and DERIVES every row, row-group, and
+// the table's OWN box — a table self-sizes from Σtracks + spacing, ignoring the width its block parent would
+// give it. All boxes are written in their immediate parent's border-box frame; `place` composes the origins
+// table → group → row → cell → content. Mirrors layoutTable / tableFrame / tableGrid. Spans, collapsed
+// borders, caption, colgroup, thead/tfoot reorder, fixed layout and rtl are gated out in nlTableSupported.
+fn measure_table(
+    i: usize,
+    inputs: &[Input],
+    runs: &[Run],
+    run_texts: &[Option<Vec<u16>>],
+    children: &[Vec<usize>],
+    boxes: &mut [Box],
+    failed: &std::cell::Cell<bool>,
+) -> MInfo {
+    let n = inputs[i];
+    let content_left = n.bl + n.pl;
+    let content_top = n.bt + n.pt;
+    let (sx, sy) = (n.sp_x, n.sp_y);
+    let bail = |failed: &std::cell::Cell<bool>| {
+        failed.set(true);
+        MInfo { top: CMargin::of(0.0), top_only: CMargin::of(0.0), bottom: CMargin::of(0.0), collapse_through: false }
+    };
+
+    // Flatten into rows + the group each belongs to. A table child is a ROW GROUP (its children are the
+    // rows) or a bare ROW. Record order == render order (thead/tfoot reorder is gated out, so it is document
+    // order here).
+    let mut rows: Vec<usize> = Vec::new();
+    let mut row_group: Vec<Option<usize>> = Vec::new();
+    for &ch in &children[i] {
+        if inputs[ch].display == DISPLAY_TABLE_ROW_GROUP {
+            for &r in &children[ch] {
+                rows.push(r);
+                row_group.push(Some(ch));
+            }
+        } else {
+            rows.push(ch);
+            row_group.push(None);
+        }
+    }
+    let r_count = rows.len();
+    if r_count == 0 {
+        return bail(failed);
+    }
+    let c_count = children[rows[0]].len();
+    if c_count == 0 {
+        return bail(failed);
+    }
+
+    // Phase A — lay each cell's subtree out at its pushed border box, in a fresh float context.
+    for &r in &rows {
+        for &c in &children[r] {
+            let iw = resolve_width(&inputs[c], 0.0);
+            measure(c, iw, inputs, runs, run_texts, children, boxes, failed, &mut FloatCtx::new(), 0.0, 0.0);
+        }
+    }
+
+    // Tracks: a column's width is the widest cell down it, a row's height the tallest across it. The oracle
+    // already unified these, so this reduction recovers the tracks AND validates the grouping.
+    let mut col_w = vec![0.0f64; c_count];
+    let mut row_h = vec![0.0f64; r_count];
+    for (ri, &r) in rows.iter().enumerate() {
+        if children[r].len() != c_count {
+            return bail(failed); // ragged grid the gate missed
+        }
+        for (ci, &c) in children[r].iter().enumerate() {
+            col_w[ci] = col_w[ci].max(boxes[c].w);
+            row_h[ri] = row_h[ri].max(boxes[c].h);
+        }
+    }
+    // SAFETY NET: every cell must already equal its column width and row height (separate borders, no spans).
+    // If a span / ragged grid slipped past the gate, decline rather than mislay.
+    for (ri, &r) in rows.iter().enumerate() {
+        for (ci, &c) in children[r].iter().enumerate() {
+            if (boxes[c].w - col_w[ci]).abs() > 0.01 || (boxes[c].h - row_h[ri]).abs() > 0.01 {
+                return bail(failed);
+            }
+        }
+    }
+
+    // Prefix sums (table-relative): a track's start is one border-spacing in, plus every earlier track + its
+    // trailing spacing.
+    let mut col_x = vec![0.0f64; c_count];
+    let mut acc = content_left + sx;
+    for ci in 0..c_count {
+        col_x[ci] = acc;
+        acc += col_w[ci] + sx;
+    }
+    let mut row_top = vec![0.0f64; r_count];
+    let mut accy = content_top + sy;
+    for ri in 0..r_count {
+        row_top[ri] = accy;
+        accy += row_h[ri] + sy;
+    }
+    let row_x = col_x[0];
+    let row_w = col_x[c_count - 1] + col_w[c_count - 1] - row_x;
+
+    // The table SELF-sizes from its tracks + spacing + its own edges — not the width its parent passed.
+    let sum_col: f64 = col_w.iter().sum();
+    let sum_row: f64 = row_h.iter().sum();
+    boxes[i].nid = n.nid;
+    boxes[i].w = sum_col + (c_count as f64 + 1.0) * sx + n.edges_x();
+    boxes[i].h = sum_row + (r_count as f64 + 1.0) * sy + n.edges_y();
+    boxes[i].auto_height = false;
+
+    // Row-group boxes (relative to the table): span their rows across the full row width.
+    for &ch in &children[i] {
+        if inputs[ch].display != DISPLAY_TABLE_ROW_GROUP {
+            continue;
+        }
+        let mut first = None;
+        let mut last = 0usize;
+        for ri in 0..r_count {
+            if row_group[ri] == Some(ch) {
+                if first.is_none() {
+                    first = Some(ri);
+                }
+                last = ri;
+            }
+        }
+        if let Some(f) = first {
+            boxes[ch].nid = inputs[ch].nid;
+            boxes[ch].x = row_x;
+            boxes[ch].y = row_top[f];
+            boxes[ch].w = row_w;
+            boxes[ch].h = row_top[last] + row_h[last] - row_top[f];
+            boxes[ch].auto_height = false;
+        }
+    }
+
+    // Row boxes (relative to their parent: the group box, else the table) + cell positions (relative to the
+    // row). A cell's w/h are already the pushed track from Phase A.
+    for (ri, &r) in rows.iter().enumerate() {
+        let (gx, gy) = match row_group[ri] {
+            Some(g) => (boxes[g].x, boxes[g].y),
+            None => (0.0, 0.0),
+        };
+        boxes[r].nid = inputs[r].nid;
+        boxes[r].x = row_x - gx;
+        boxes[r].y = row_top[ri] - gy;
+        boxes[r].w = row_w;
+        boxes[r].h = row_h[ri];
+        boxes[r].auto_height = false;
+        for (ci, &c) in children[r].iter().enumerate() {
+            boxes[c].x = col_x[ci] - row_x;
+            boxes[c].y = 0.0;
+        }
+    }
+
+    let top = CMargin::of(Input::m(n.mt));
+    MInfo { top, top_only: top, bottom: CMargin::of(Input::m(n.mb)), collapse_through: false }
+}
+
 // Convert the relative boxes to absolute document coordinates: add each node's absolute border-box
 // origin to its children (whose x/y are relative to it), top-down in one pass — plus each node's
 // `position: relative` offset, which moves it AND its subtree at paint time (the flow used the unshifted
@@ -1275,6 +1451,8 @@ mod tests {
             flex_item_auto: 0,
             flex_baseline_asc: f64::NAN,
             out_of_flow: 0,
+            sp_x: 0.0,
+            sp_y: 0.0,
         }
     }
 
@@ -1856,6 +2034,80 @@ mod tests {
         let mut a = blk(1.0, 0);
         a.display = DISPLAY_UNSUPPORTED; // e.g. flex
         let inputs = vec![blk(0.0, -1), a];
+        assert!(matches!(layout_block(&inputs, &[], &[], 0.0, 0.0, 800.0), Outcome::Unsupported));
+    }
+
+    fn tbl(nid: f64, parent: i32, sx: f64, sy: f64) -> Input {
+        let mut c = blk(nid, parent);
+        c.display = DISPLAY_TABLE;
+        c.sp_x = sx;
+        c.sp_y = sy;
+        c
+    }
+    fn rowgroup(nid: f64, parent: i32) -> Input {
+        let mut c = blk(nid, parent);
+        c.display = DISPLAY_TABLE_ROW_GROUP;
+        c
+    }
+    fn rowel(nid: f64, parent: i32) -> Input {
+        let mut c = blk(nid, parent);
+        c.display = DISPLAY_TABLE_ROW;
+        c
+    }
+
+    #[test]
+    fn table_2x2_grouped_positions_cells_by_prefix_sums() {
+        // The probed 2x2 table: border-spacing 4, columns 62/82, rows 32/42. Cells placed by prefix sums;
+        // rows/row-group/table boxes all derived; table self-sizes (ignores the 800 passed width).
+        let inputs = vec![
+            tbl(0.0, -1, 4.0, 4.0),   // 0 table
+            rowgroup(1.0, 0),         // 1 tbody
+            rowel(2.0, 1),            // 2 tr0
+            item(3.0, 2, 62.0, 32.0), // 3 td(0,0)
+            item(4.0, 2, 82.0, 32.0), // 4 td(0,1)
+            rowel(5.0, 1),            // 5 tr1
+            item(6.0, 5, 62.0, 42.0), // 6 td(1,0)
+            item(7.0, 5, 82.0, 42.0), // 7 td(1,1)
+        ];
+        let bx = boxes(layout_block(&inputs, &[], &[], 0.0, 0.0, 800.0));
+        assert_eq!([bx[0].x, bx[0].y, bx[0].w, bx[0].h], [0.0, 0.0, 156.0, 86.0]); // table
+        assert_eq!([bx[1].x, bx[1].y, bx[1].w, bx[1].h], [4.0, 4.0, 148.0, 78.0]); // tbody
+        assert_eq!([bx[2].x, bx[2].y, bx[2].w, bx[2].h], [4.0, 4.0, 148.0, 32.0]); // tr0
+        assert_eq!([bx[3].x, bx[3].y], [4.0, 4.0]); // td(0,0)
+        assert_eq!([bx[4].x, bx[4].y], [70.0, 4.0]); // td(0,1) = 4 + 62 + 4
+        assert_eq!([bx[5].x, bx[5].y, bx[5].h], [4.0, 40.0, 42.0]); // tr1 = 4 + 32 + 4
+        assert_eq!([bx[6].x, bx[6].y], [4.0, 40.0]); // td(1,0)
+        assert_eq!([bx[7].x, bx[7].y], [70.0, 40.0]); // td(1,1)
+    }
+
+    #[test]
+    fn table_bare_rows_parent_is_the_table() {
+        // A display:table with bare rows (no row group): each row's parent is the table itself.
+        let inputs = vec![
+            tbl(0.0, -1, 3.0, 3.0),   // 0 table
+            rowel(1.0, 0),            // 1 tr (parent = table)
+            item(2.0, 1, 40.0, 20.0), // 2 td
+            item(3.0, 1, 60.0, 20.0), // 3 td
+        ];
+        let bx = boxes(layout_block(&inputs, &[], &[], 0.0, 0.0, 800.0));
+        assert_eq!([bx[0].w, bx[0].h], [109.0, 26.0]); // 40+60 + 3*3 ; 20 + 2*3
+        assert_eq!([bx[1].x, bx[1].y], [3.0, 3.0]); // row at (sx, sy)
+        assert_eq!([bx[2].x, bx[2].y], [3.0, 3.0]); // td0
+        assert_eq!([bx[3].x, bx[3].y], [46.0, 3.0]); // td1 = 3 + 40 + 3
+    }
+
+    #[test]
+    fn table_ragged_grid_declines() {
+        // The safety net: a second row with fewer cells than the first is a grid native can't reassemble
+        // (the JS gate bails it too), so native declines rather than mislay.
+        let inputs = vec![
+            tbl(0.0, -1, 0.0, 0.0),
+            rowel(1.0, 0),
+            item(2.0, 1, 40.0, 20.0),
+            item(3.0, 1, 40.0, 20.0),
+            rowel(4.0, 0),
+            item(5.0, 4, 40.0, 20.0), // only one cell → ragged
+        ];
         assert!(matches!(layout_block(&inputs, &[], &[], 0.0, 0.0, 800.0), Outcome::Unsupported));
     }
 }
