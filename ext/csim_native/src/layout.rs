@@ -95,6 +95,13 @@ pub(crate) struct Input {
     // Flex main axis: true = row (main is X / width), false = column (main is Y / height). The item
     // main/cross sizes swap accordingly; both come pushed.
     pub(crate) flex_main_is_x: bool,
+    // Flex wrap: false = nowrap (one line, fills the cross), true = wrap (multi-line, align-content stacks
+    // the lines). `flex_align_content` 0 start / 1 center / 2 end / 3 space-between / 4 space-around /
+    // 5 space-evenly / 6 stretch — but stretch's GROW is already baked into the pushed item cross sizes,
+    // so native only positions the lines (lead/between). `flex_cross_gap` is the px gap between lines.
+    pub(crate) flex_wrap: bool,
+    pub(crate) flex_align_content: u8,
+    pub(crate) flex_cross_gap: f64,
 }
 
 pub(crate) const FLOAT_LEFT: u8 = 1;
@@ -861,28 +868,31 @@ fn measure_flex(
         measure(c, iw, inputs, runs, run_texts, children, boxes, failed, &mut FloatCtx::new(), 0.0, 0.0);
     }
 
-    // An item's OUTER extent (size + the two margins) along the main / cross axes, in the flow's axes.
-    let main_outer = |c: usize, boxes: &[Box]| -> f64 {
+    // Per-item OUTER extents (size + the two margins) along the main and cross axes, plus the leading
+    // main/cross margin, parallel to `children[i]` (so the line logic never re-borrows `boxes`). The item
+    // cross sizes are the FINAL (pushed, post-stretch) ones, so a line's cross already includes whatever
+    // align-content:stretch grew it to — native positions the lines, it never re-grows them.
+    let kids: Vec<usize> = children[i].clone();
+    let (mut mo, mut co, mut ml_lead, mut cl_lead) = (Vec::with_capacity(cnt), Vec::with_capacity(cnt), Vec::with_capacity(cnt), Vec::with_capacity(cnt));
+    for &c in &kids {
         let cn = inputs[c];
         if main_is_x {
-            boxes[c].w + Input::m(cn.ml) + Input::m(cn.mr)
+            mo.push(boxes[c].w + Input::m(cn.ml) + Input::m(cn.mr));
+            co.push(boxes[c].h + Input::m(cn.mt) + Input::m(cn.mb));
+            ml_lead.push(Input::m(cn.ml));
+            cl_lead.push(Input::m(cn.mt));
         } else {
-            boxes[c].h + Input::m(cn.mt) + Input::m(cn.mb)
+            mo.push(boxes[c].h + Input::m(cn.mt) + Input::m(cn.mb));
+            co.push(boxes[c].w + Input::m(cn.ml) + Input::m(cn.mr));
+            ml_lead.push(Input::m(cn.mt));
+            cl_lead.push(Input::m(cn.ml));
         }
-    };
-    let cross_outer = |c: usize, boxes: &[Box]| -> f64 {
-        let cn = inputs[c];
-        if main_is_x {
-            boxes[c].h + Input::m(cn.mt) + Input::m(cn.mb)
-        } else {
-            boxes[c].w + Input::m(cn.ml) + Input::m(cn.mr)
-        }
-    };
+    }
 
-    // The container's MAIN content extent: for a row it is the content width (from `width`); for a column
-    // it is the content height — the declared one, or (auto) the stacked items, which leaves no free space.
+    // The container's MAIN content extent (the wrap capacity + the per-line justify basis): a row's is its
+    // content width; a column's is its declared content height, or (auto) the stacked items.
     let gap_total = gap * cnt.saturating_sub(1) as f64;
-    let sum_main: f64 = children[i].iter().map(|&c| main_outer(c, boxes)).sum();
+    let sum_main: f64 = mo.iter().sum();
     let content_main = if main_is_x {
         content_w
     } else if is_auto(n.height) {
@@ -891,22 +901,41 @@ fn measure_flex(
         let bh = if n.border_box { n.height } else { n.height + edges_y };
         (bh - edges_y).max(0.0)
     };
-    let free = content_main - (sum_main + gap_total);
-    let (lead, between) = flex_distribution(n.flex_justify, free, cnt);
 
-    // The container's CROSS content extent: a row's is its height (auto = tallest item outer, else the
-    // declared content height); a column's is its content width. min/max on the cross axis is bailed in
-    // the harness, so this is exact and stretch needs no re-layout (the item's pushed cross size already
-    // fills the line → a start/stretch offset of 0).
-    let line_cross: f64 = children[i].iter().map(|&c| cross_outer(c, boxes)).fold(0.0, f64::max);
-    let (box_w, box_h, container_cross) = if main_is_x {
-        let (bh, cc) = if is_auto(n.height) {
-            (line_cross + edges_y, line_cross)
+    // Break into flex lines (positions into `kids`): nowrap is one line holding everything; wrap greedily
+    // starts a new line when the next item (plus the main gap) would overflow the main extent. Mirrors
+    // flexLines.
+    let lines: Vec<Vec<usize>> = if n.flex_wrap {
+        let mut ls: Vec<Vec<usize>> = Vec::new();
+        let mut cur: Vec<usize> = Vec::new();
+        let mut used = 0.0;
+        for p in 0..cnt {
+            if !cur.is_empty() && used + gap + mo[p] > content_main {
+                ls.push(std::mem::take(&mut cur));
+                used = 0.0;
+            }
+            used += if cur.is_empty() { 0.0 } else { gap } + mo[p];
+            cur.push(p);
+        }
+        ls.push(cur);
+        ls
+    } else {
+        vec![(0..cnt).collect()]
+    };
+    let nlines = lines.len();
+    let line_cross: Vec<f64> = lines.iter().map(|l| l.iter().map(|&p| co[p]).fold(0.0, f64::max)).collect();
+
+    // The container's CROSS content extent + its own box. The cross is a row's height (auto = the stacked
+    // lines, else the declared content height) and a column's content width (always definite here).
+    let cross_gap = n.flex_cross_gap;
+    let lines_cross_sum: f64 = line_cross.iter().sum::<f64>() + cross_gap * nlines.saturating_sub(1) as f64;
+    let (box_w, box_h, container_cross, definite_cross) = if main_is_x {
+        if is_auto(n.height) {
+            (w, lines_cross_sum + edges_y, lines_cross_sum, false)
         } else {
             let bh = if n.border_box { n.height } else { n.height + edges_y };
-            (bh, (bh - edges_y).max(0.0))
-        };
-        (w, bh, cc)
+            (w, bh, (bh - edges_y).max(0.0), true)
+        }
     } else {
         let bh = if is_auto(n.height) {
             content_main + edges_y
@@ -915,45 +944,62 @@ fn measure_flex(
         } else {
             n.height + edges_y
         };
-        (w, bh, content_w)
+        (w, bh, content_w, true) // a column's cross (width) is always definite
     };
 
-    // Place each item: MAIN axis by justify-content (+ gap + main margins), CROSS axis by align.
-    let main_start = if main_is_x { content_left_rel } else { content_top_rel };
-    let cross_start = if main_is_x { content_top_rel } else { content_left_rel };
-    let mut at = lead;
-    for (k, &c) in children[i].iter().enumerate() {
-        let cn = inputs[c];
-        if k > 0 {
-            at += gap + between;
+    // Per-line cross SIZE and cross-START. A NOWRAP line takes the whole container cross (§9.6 — a definite
+    // cross fills it, an auto one is the line's own); a WRAP container stacks its lines by align-content
+    // (the stretch GROW is already in the item sizes, so only the lead/between positioning is applied).
+    let cross_start_base = if main_is_x { content_top_rel } else { content_left_rel };
+    let mut line_lc = vec![0.0f64; nlines];
+    let mut line_cs = vec![0.0f64; nlines];
+    if !n.flex_wrap {
+        line_lc[0] = if definite_cross { container_cross } else { line_cross[0].max(container_cross) };
+        line_cs[0] = cross_start_base;
+    } else {
+        // free is measured from the FINAL (pushed) line crosses: for align-content:stretch a line whose
+        // items already fill it (align-items stretch on an auto cross size) contributes its grown cross, so
+        // free is 0 there and no grow is double-applied; a line of explicit-size items contributes its
+        // natural cross, so the leftover grows the lines to position the later ones (§9.6).
+        let (ac_lead, ac_between, ac_grow) = align_content(n.flex_align_content, container_cross - lines_cross_sum, nlines);
+        let mut cross_at = cross_start_base + ac_lead;
+        for li in 0..nlines {
+            line_lc[li] = line_cross[li] + ac_grow;
+            line_cs[li] = cross_at;
+            cross_at += line_lc[li] + cross_gap + ac_between;
         }
-        let (m_lead, m_trail, m_size) = if main_is_x {
-            (Input::m(cn.ml), Input::m(cn.mr), boxes[c].w)
-        } else {
-            (Input::m(cn.mt), Input::m(cn.mb), boxes[c].h)
-        };
-        at += m_lead;
-        let main_pos = main_start + at;
-        at += m_size + m_trail;
+    }
 
-        let (c_lead, c_out) = if main_is_x {
-            (Input::m(cn.mt), boxes[c].h + Input::m(cn.mt) + Input::m(cn.mb))
-        } else {
-            (Input::m(cn.ml), boxes[c].w + Input::m(cn.ml) + Input::m(cn.mr))
-        };
-        let off = match cn.flex_cross_align {
-            1 => (container_cross - c_out) / 2.0, // center
-            2 => container_cross - c_out,         // end
-            _ => 0.0,                             // start / stretch
-        };
-        let cross_pos = cross_start + off + c_lead;
-
-        if main_is_x {
-            boxes[c].x = main_pos;
-            boxes[c].y = cross_pos;
-        } else {
-            boxes[c].y = main_pos;
-            boxes[c].x = cross_pos;
+    // Place each line's items: MAIN axis by justify-content within the main extent (per line), CROSS axis by
+    // align-items/self within the line's cross size.
+    let main_start = if main_is_x { content_left_rel } else { content_top_rel };
+    for (li, line) in lines.iter().enumerate() {
+        let lc = line_lc[li];
+        let cs = line_cs[li];
+        let line_main: f64 = line.iter().map(|&p| mo[p]).sum::<f64>() + gap * line.len().saturating_sub(1) as f64;
+        let (m_lead, m_between) = flex_distribution(n.flex_justify, content_main - line_main, line.len());
+        let mut at = m_lead;
+        for (k, &p) in line.iter().enumerate() {
+            let c = kids[p];
+            if k > 0 {
+                at += gap + m_between;
+            }
+            at += ml_lead[p];
+            let main_pos = main_start + at;
+            at += mo[p] - ml_lead[p]; // advance past the item's main size + its trailing margin
+            let off = match inputs[c].flex_cross_align {
+                1 => (lc - co[p]) / 2.0, // center
+                2 => lc - co[p],         // end
+                _ => 0.0,                // start / stretch
+            };
+            let cross_pos = cs + off + cl_lead[p];
+            if main_is_x {
+                boxes[c].x = main_pos;
+                boxes[c].y = cross_pos;
+            } else {
+                boxes[c].y = main_pos;
+                boxes[c].x = cross_pos;
+            }
         }
     }
 
@@ -963,6 +1009,22 @@ fn measure_flex(
     boxes[i].auto_height = is_auto(n.height);
     let top = CMargin::of(Input::m(n.mt));
     MInfo { top, top_only: top, bottom: CMargin::of(Input::m(n.mb)), collapse_through: false }
+}
+
+// How the LINES of a wrap container sit in its cross size (§9.6): (lead, between, grow). `stretch` (the
+// default) hands the free space to the lines as GROW and positions them tight; the other keywords position
+// with lead/between and don't grow. A stretch line whose items already fill it contributes 0 free (see the
+// caller), so the grow is never double-applied. Mirrors alignContentLines (crossFlip / wrap-reverse bailed).
+fn align_content(code: u8, free: f64, count: usize) -> (f64, f64, f64) {
+    if code == 6 {
+        return (0.0, 0.0, if free > 0.0 && count > 0 { free / count as f64 } else { 0.0 }); // stretch
+    }
+    let mut c = code;
+    if free < 0.0 && (c == 3 || c == 4 || c == 5) {
+        c = 0; // a distribution with no free space falls back to start
+    }
+    let (lead, between) = flex_distribution(c, free, count);
+    (lead, between, 0.0)
 }
 
 // Main-axis free-space distribution → (leading offset before the first item, extra space between items).
@@ -1055,6 +1117,9 @@ mod tests {
             flex_main_gap: 0.0,
             flex_cross_align: 0,
             flex_main_is_x: true, // row by default
+            flex_wrap: false,
+            flex_align_content: 6, // stretch
+            flex_cross_gap: 0.0,
         }
     }
 
@@ -1317,6 +1382,45 @@ mod tests {
         let inputs = vec![flex_col(0.0, -1, 200.0), a];
         let bx = boxes(layout_block(&inputs, &[], &[], 0.0, 0.0, 800.0));
         assert_eq!(bx[1].x, 75.0); // (200 - 50) / 2
+    }
+
+    #[test]
+    fn flex_row_wrap_breaks_lines_and_auto_height_stacks_them() {
+        // width 250, three 100px items → [item0,item1] then [item2]; auto height = two 30px lines.
+        let mut f = flex(0.0, -1, 250.0);
+        f.flex_wrap = true;
+        let inputs = vec![f, item(1.0, 0, 100.0, 30.0), item(2.0, 0, 100.0, 30.0), item(3.0, 0, 100.0, 30.0)];
+        let bx = boxes(layout_block(&inputs, &[], &[], 0.0, 0.0, 800.0));
+        assert_eq!((bx[1].x, bx[1].y), (0.0, 0.0));
+        assert_eq!((bx[2].x, bx[2].y), (100.0, 0.0)); // second item fits on line 0
+        assert_eq!((bx[3].x, bx[3].y), (0.0, 30.0));  // third wraps to line 1
+        assert_eq!(bx[0].h, 60.0);                     // two stacked lines
+    }
+
+    #[test]
+    fn flex_row_wrap_align_content_center_at_definite_height() {
+        // two lines (cross 30 each, sum 60) in a 200px-tall container → free 140, center lead 70.
+        let mut f = flex(0.0, -1, 250.0);
+        f.flex_wrap = true;
+        f.height = 200.0;
+        f.height_adjoins = false;
+        f.flex_align_content = 1; // center
+        let inputs = vec![f, item(1.0, 0, 100.0, 30.0), item(2.0, 0, 100.0, 30.0), item(3.0, 0, 100.0, 30.0)];
+        let bx = boxes(layout_block(&inputs, &[], &[], 0.0, 0.0, 800.0));
+        assert_eq!(bx[1].y, 70.0); // line 0 at the centred stack start
+        assert_eq!(bx[3].y, 100.0); // line 1 = 70 + 30
+        assert_eq!(bx[0].h, 200.0);
+    }
+
+    #[test]
+    fn flex_row_wrap_cross_gap_between_lines() {
+        let mut f = flex(0.0, -1, 250.0);
+        f.flex_wrap = true;
+        f.flex_cross_gap = 10.0;
+        let inputs = vec![f, item(1.0, 0, 100.0, 30.0), item(2.0, 0, 100.0, 30.0), item(3.0, 0, 100.0, 30.0)];
+        let bx = boxes(layout_block(&inputs, &[], &[], 0.0, 0.0, 800.0));
+        assert_eq!(bx[3].y, 40.0); // 30 (line 0) + 10 (cross gap)
+        assert_eq!(bx[0].h, 70.0); // 30 + 10 + 30
     }
 
     #[test]
