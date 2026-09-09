@@ -123,6 +123,11 @@ pub(crate) struct Input {
     // MARGIN box (the oracle's baselineParts.asc — own baseline offset + top margin, or the bottom margin
     // edge when the item has no line to give), resolved JS-side. NaN for a non-baseline item.
     pub(crate) flex_baseline_asc: f64,
+    // An OUT-OF-FLOW flex child (position:absolute / fixed, §4.1): 1 = out of flow. It is removed from flex
+    // sizing and flow — its subtree lays out at its pushed border box, and it is placed at the container's
+    // border-box origin + its resolved displacement (rel_x/rel_y = el._lb − container._lb), so the insets /
+    // static position the oracle already resolved are replayed. 0 = an ordinary in-flow item.
+    pub(crate) out_of_flow: u8,
 }
 
 pub(crate) const CROSS_BASELINE: u8 = 3;
@@ -923,8 +928,11 @@ fn measure_flex(
     // The container's MAIN content extent (the wrap capacity + the per-line justify basis): a row's is its
     // content width; a column's is its declared content height (clamped by min/max-height), or (auto) the
     // extent its items are justified within.
-    let gap_total = gap * cnt.saturating_sub(1) as f64;
-    let sum_main: f64 = mo.iter().sum();
+    // In-flow item positions (into `kids`). OUT-OF-FLOW children (abspos/fixed, §4.1) are removed from flex
+    // sizing and line breaking — their subtrees are laid out in Phase A, but they are placed separately below.
+    let flow: Vec<usize> = (0..cnt).filter(|&p| inputs[kids[p]].out_of_flow == 0).collect();
+    let gap_total = gap * flow.len().saturating_sub(1) as f64;
+    let sum_main: f64 = flow.iter().map(|&p| mo[p]).sum();
     let used_main = sum_main + gap_total; // the items are PUSHED (grow/shrink resolved), so this is final
     let content_main = if main_is_x {
         content_w
@@ -952,7 +960,7 @@ fn measure_flex(
         let mut ls: Vec<Vec<usize>> = Vec::new();
         let mut cur: Vec<usize> = Vec::new();
         let mut used = 0.0;
-        for p in 0..cnt {
+        for &p in &flow {
             if !cur.is_empty() && used + gap + mo[p] > content_main {
                 ls.push(std::mem::take(&mut cur));
                 used = 0.0;
@@ -963,7 +971,7 @@ fn measure_flex(
         ls.push(cur);
         ls
     } else {
-        vec![(0..cnt).collect()]
+        vec![flow.clone()]
     };
     let nlines = lines.len();
     // A line's natural cross size is the deepest of its PLAIN items' outers and its first-baseline GROUP's
@@ -1120,6 +1128,17 @@ fn measure_flex(
         }
     }
 
+    // OUT-OF-FLOW children (§4.1): removed from the flow above, each is placed at the container's border-box
+    // origin + its resolved displacement (rel_x/rel_y = el._lb − container._lb, replaying the insets or the
+    // justify/align static position the oracle already resolved). Reset its box to the origin so `place`
+    // positions it by rel_x/rel_y alone (over the container origin); its Phase-A subtree follows.
+    for &c in &kids {
+        if inputs[c].out_of_flow != 0 {
+            boxes[c].x = 0.0;
+            boxes[c].y = 0.0;
+        }
+    }
+
     boxes[i].nid = n.nid;
     boxes[i].w = box_w;
     boxes[i].h = box_h.max(0.0);
@@ -1244,6 +1263,7 @@ mod tests {
             rel_y: 0.0,
             flex_item_auto: 0,
             flex_baseline_asc: f64::NAN,
+            out_of_flow: 0,
         }
     }
 
@@ -1485,6 +1505,37 @@ mod tests {
         let bx = boxes(layout_block(&inputs, &[], &[], 0.0, 0.0, 800.0));
         assert_eq!([bx[1].y, bx[2].y], [0.0, 15.0]);
         assert_eq!(bx[0].h, 37.0); // auto height = the baseline group's extent
+    }
+
+    #[test]
+    fn flex_out_of_flow_child_placed_at_its_pushed_offset() {
+        // An abspos child (out_of_flow) is placed at the container origin + its resolved displacement
+        // (rel_x/rel_y — insets or the static position), while the in-flow item is placed normally.
+        let f = flex(0.0, -1, 300.0);
+        let a = item(1.0, 0, 50.0, 20.0);
+        let mut abs = item(2.0, 0, 40.0, 30.0);
+        abs.out_of_flow = 1;
+        abs.rel_x = 20.0;
+        abs.rel_y = 10.0;
+        let inputs = vec![f, a, abs];
+        let bx = boxes(layout_block(&inputs, &[], &[], 0.0, 0.0, 800.0));
+        assert_eq!([bx[1].x, bx[1].y], [0.0, 0.0]); // in-flow item at the start
+        assert_eq!([bx[2].x, bx[2].y], [20.0, 10.0]); // abspos at origin + (20,10)
+    }
+
+    #[test]
+    fn flex_out_of_flow_child_excluded_from_sizing_and_justify() {
+        // Auto-height row, justify center: the 99px-tall abspos child neither grows the container nor takes
+        // main free space — the height is the in-flow item's cross, and center uses only the in-flow width.
+        let mut f = flex(0.0, -1, 300.0);
+        f.flex_justify = 1;
+        let a = item(1.0, 0, 50.0, 20.0);
+        let mut abs = item(2.0, 0, 40.0, 99.0);
+        abs.out_of_flow = 1;
+        let inputs = vec![f, a, abs];
+        let bx = boxes(layout_block(&inputs, &[], &[], 0.0, 0.0, 800.0));
+        assert_eq!(bx[0].h, 20.0); // auto height = in-flow cross, not the 99px abspos
+        assert_eq!(bx[1].x, 125.0); // center: (300-50)/2, abspos not in the free space
     }
 
     #[test]

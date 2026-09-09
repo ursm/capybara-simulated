@@ -4,11 +4,11 @@
 # main-axis distribution (justify-content + gap + main-axis auto margins), cross-axis alignment
 # (align-items/self + cross-axis auto margins + first-baseline), and the container's own box. Supported: row /
 # column, nowrap / wrap, main-axis reverse, nested flex, position:relative offsets, main- and cross-axis auto
-# item margins, row & non-wrapping-column min/max-height, align-items/self:baseline (first). Still DECLINES to
-# JS — rtl / vertical writing modes, align-items:last baseline, a wrapping column's min/max clamp + a column's
-# cross min/max-width, wrap-reverse, inline-flex, out-of-flow (abspos/fixed) items, replaced / inline-block
-# items, bare text. Each bail is an A/B: the feature-carrying input declines, a sibling without it stays
-# native. V8 only.
+# item margins, row & non-wrapping-column min/max-height, align-items/self:baseline (first), out-of-flow
+# (absolute / fixed) items placed at their oracle-resolved box. Still DECLINES to JS — rtl / vertical writing
+# modes, align-items:last baseline, a wrapping column's min/max clamp + a column's cross min/max-width,
+# wrap-reverse, inline-flex, position:sticky items, replaced / inline-block items, bare text. Each bail is an
+# A/B: the feature-carrying input declines, a sibling without it stays native. V8 only.
 require 'capybara/simulated'
 require 'rack'
 require_relative 'support/session_teardown'
@@ -176,6 +176,30 @@ RSpec.describe 'native layout flex parity', if: ENV.fetch('CSIM_JS_ENGINE', 'v8'
     expect_parity('<div style="display:flex;gap:20px;align-items:center;height:120px;width:500px"><div style="display:flex;justify-content:space-between;width:200px;height:40px"><div style="width:50px;height:30px"></div><div style="width:50px;height:30px"></div></div><div style="width:100px;height:60px"></div></div>')
   end
 
+  it 'matches an out-of-flow (absolute) flex child positioned by its insets' do
+    expect_parity('<div style="position:relative;display:flex;width:300px;height:100px"><div style="width:50px;height:20px"></div><div style="position:absolute;top:10px;left:20px;width:40px;height:30px"></div></div>')
+  end
+
+  it 'matches an out-of-flow flex child at its justify/align static position (no insets)' do
+    expect_parity('<div style="position:relative;display:flex;justify-content:center;align-items:center;width:300px;height:100px"><div style="width:50px;height:20px"></div><div style="position:absolute;width:40px;height:30px"></div></div>')
+  end
+
+  it 'matches an absolute flex child with its own block subtree' do
+    expect_parity('<div style="position:relative;display:flex;width:300px;height:100px"><div style="width:50px;height:20px"></div><div style="position:absolute;top:5px;right:5px;width:80px;height:60px"><div style="height:10px;margin:4px"></div><div style="height:20px"></div></div></div>')
+  end
+
+  it 'matches an out-of-flow child excluded from an auto-height row sizing and justify' do
+    expect_parity('<div style="position:relative;display:flex;justify-content:center;width:300px"><div style="width:50px;height:20px"></div><div style="position:absolute;inset:0;height:80px"></div></div>')
+  end
+
+  it 'matches an absolute flex child in a column' do
+    expect_parity('<div style="position:relative;display:flex;flex-direction:column;width:200px;height:300px"><div style="width:60px;height:40px"></div><div style="position:absolute;bottom:10px;right:10px;width:50px;height:50px"></div></div>')
+  end
+
+  it 'matches a fixed-position flex child' do
+    expect_parity('<div style="display:flex;width:300px;height:100px"><div style="width:50px;height:20px"></div><div style="position:fixed;top:30px;left:40px;width:40px;height:30px"></div></div>')
+  end
+
   it 'matches a flex column stacking items (auto height)' do
     expect_parity('<div style="display:flex;flex-direction:column;width:200px"><div style="width:80px;height:30px"></div><div style="width:120px;height:50px"></div></div>')
   end
@@ -276,6 +300,8 @@ RSpec.describe 'native layout flex parity', if: ENV.fetch('CSIM_JS_ENGINE', 'v8'
   it('declines an inline-flex container') { a_bails_b_native('<div style="display:inline-flex;width:400px"><div style="width:80px;height:30px"></div></div>') }
   it('declines bare text in the container') { a_bails_b_native('<div style="display:flex;width:400px">loose text<div style="width:80px;height:30px"></div></div>') }
   it('declines a replaced (img) item') { a_bails_b_native('<div style="display:flex;width:400px"><img src="x.png" style="width:80px;height:30px"><div style="width:80px;height:30px"></div></div>') }
+  it('declines a position:sticky flex item') { a_bails_b_native('<div style="display:flex;width:400px"><div style="position:sticky;top:0;width:80px;height:30px"></div><div style="width:80px;height:30px"></div></div>') }
+  it('declines an absolute replaced (img) flex child') { a_bails_b_native('<div style="position:relative;display:flex;width:400px;height:100px"><div style="width:80px;height:30px"></div><img src="x.png" style="position:absolute;top:0;left:0;width:40px;height:30px"></div>') }
 
   # A `position: relative` inset shifts the box and its subtree (the oracle folds it into el._lb); native
   # now applies the pushed shift in place(), so these lay out rather than decline.
