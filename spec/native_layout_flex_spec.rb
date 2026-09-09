@@ -2,13 +2,13 @@
 # Native layout — flex (§9.7), geometry shadow-parity. The item SIZING is resolved JS-side (each item's used
 # main+cross size rides its record, like a float's shrink-to-fit width); native does only the PLACEMENT —
 # main-axis distribution (justify-content + gap + main-axis auto margins), cross-axis alignment
-# (align-items/self + cross-axis auto margins + first-baseline), and the container's own box. Supported: row /
-# column, nowrap / wrap, main-axis reverse, nested flex, position:relative offsets, main- and cross-axis auto
-# item margins, row & non-wrapping-column min/max-height, align-items/self:baseline (first), out-of-flow
-# (absolute / fixed) items placed at their oracle-resolved box. Still DECLINES to JS — rtl / vertical writing
-# modes, align-items:last baseline, a wrapping column's min/max clamp + a column's cross min/max-width,
-# wrap-reverse, inline-flex, position:sticky items, replaced / inline-block items, bare text. Each bail is an
-# A/B: the feature-carrying input declines, a sibling without it stays native. V8 only.
+# (align-items/self + cross-axis auto margins + first/last baseline), and the container's own box. Supported:
+# row / column, nowrap / wrap, main-axis reverse, nested flex, position:relative offsets, main- and cross-axis
+# auto item margins, row & non-wrapping-column min/max-height, align-items/self:baseline & last baseline,
+# out-of-flow (absolute / fixed) items placed at their oracle-resolved box. Still DECLINES to JS — rtl /
+# vertical writing modes, a wrapping column's min/max clamp + a column's cross min/max-width, wrap-reverse,
+# inline-flex, position:sticky items, replaced / inline-block items, bare text. Each bail is an A/B: the
+# feature-carrying input declines, a sibling without it stays native. V8 only.
 require 'capybara/simulated'
 require 'rack'
 require_relative 'support/session_teardown'
@@ -66,6 +66,18 @@ RSpec.describe 'native layout flex parity', if: ENV.fetch('CSIM_JS_ENGINE', 'v8'
 
   it 'matches align-items:baseline where an item has no text (box baseline) and another does' do
     expect_parity('<div style="display:flex;align-items:baseline;height:120px;width:400px"><div style="width:30px;height:40px"></div><div style="font-size:24px">Mg</div><div style="width:30px;height:20px"></div></div>')
+  end
+
+  it 'matches align-items:last baseline anchoring the group at the cross-end' do
+    expect_parity('<div style="display:flex;align-items:last baseline;height:80px;width:400px;font-size:16px"><div style="font-size:32px">Ag</div><div>xy</div></div>')
+  end
+
+  it 'matches align-items:last baseline with a text-less box (bottom-edge baseline)' do
+    expect_parity('<div style="display:flex;align-items:last baseline;height:90px;width:400px"><div style="font-size:32px">Ag</div><div style="width:40px;height:60px"></div></div>')
+  end
+
+  it 'matches coexisting first- and last-baseline groups (align-self per item)' do
+    expect_parity('<div style="display:flex;height:80px;width:400px;font-size:16px"><div style="align-self:baseline;font-size:32px">Ag</div><div style="align-self:last baseline">xy</div></div>')
   end
 
   it 'matches the default stretch (items with no cross size fill the line)' do
@@ -288,7 +300,6 @@ RSpec.describe 'native layout flex parity', if: ENV.fetch('CSIM_JS_ENGINE', 'v8'
   it('declines a mixed stretch/explicit wrap under align-content:stretch') { a_bails_b_native('<div style="display:flex;flex-wrap:wrap;width:250px;height:200px"><div style="width:100px"></div><div style="width:100px"></div><div style="width:100px;height:50px"></div></div>', '<div style="display:flex;flex-wrap:wrap;width:250px;height:200px"><div style="width:100px;height:30px"></div><div style="width:100px;height:30px"></div><div style="width:100px;height:30px"></div></div>') }
   it('declines an rtl flex row (rtl propagates to items — deferred)') { a_bails_b_native('<div style="display:flex;direction:rtl;width:400px"><div style="width:80px;height:30px"></div><div style="width:80px;height:30px"></div></div>') }
   it('declines an rtl flex column (cross axis runs right→left)') { a_bails_b_native('<div style="display:flex;flex-direction:column;direction:rtl;width:400px"><div style="width:80px;height:30px"></div><div style="width:80px;height:30px"></div></div>') }
-  it('declines align-items:last baseline (anchored at the cross-end — deferred)') { a_bails_b_native('<div style="display:flex;align-items:last baseline;width:400px;font-size:16px"><div style="font-size:32px">Ag</div><div>xy</div></div>', '<div style="display:flex;align-items:baseline;width:400px;font-size:16px"><div style="font-size:32px">Ag</div><div>xy</div></div>') }
   it('declines min-height on a WRAPPING column (breaks lines against the capacity)') { a_bails_b_native('<div style="display:flex;flex-direction:column;flex-wrap:wrap;min-height:200px;width:100px"><div style="width:80px;height:30px"></div><div style="width:80px;height:30px"></div></div>', '<div style="display:flex;flex-direction:column;flex-wrap:wrap;width:100px"><div style="width:80px;height:30px"></div><div style="width:80px;height:30px"></div></div>') }
   it('declines max-height on a WRAPPING column (breaks lines against the capacity)') { a_bails_b_native('<div style="display:flex;flex-direction:column;flex-wrap:wrap;max-height:40px;width:300px"><div style="width:80px;height:30px"></div><div style="width:80px;height:30px"></div></div>', '<div style="display:flex;flex-direction:column;flex-wrap:wrap;width:300px"><div style="width:80px;height:30px"></div><div style="width:80px;height:30px"></div></div>') }
   it('declines an inline-block item') { a_bails_b_native('<div style="display:flex;width:400px"><span style="display:inline-block;width:80px;height:30px"></span><div style="width:80px;height:30px"></div></div>') }
