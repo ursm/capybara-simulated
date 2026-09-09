@@ -117,6 +117,18 @@ RSpec.describe 'native layout flex parity', if: ENV.fetch('CSIM_JS_ENGINE', 'v8'
     expect_parity('<div style="display:flex;flex-direction:column;flex-wrap:wrap;height:80px;width:300px"><div style="width:80px;height:30px"></div><div style="width:80px;height:30px"></div><div style="width:120px;height:30px"></div></div>')
   end
 
+  it 'keeps an auto-height wrapping column as a single line (no FP split, matches the oracle)' do
+    expect_parity('<div style="display:flex;flex-direction:column;flex-wrap:wrap;row-gap:0.13px"><div>one</div><div>two</div><div>three</div><div>four</div><div>five</div><div>six</div></div>')
+  end
+
+  it 'matches a uniform all-stretch wrapping row under align-content:stretch' do
+    expect_parity('<div style="display:flex;flex-wrap:wrap;width:250px;height:200px"><div style="width:100px"></div><div style="width:100px"></div><div style="width:100px"></div></div>')
+  end
+
+  it 'matches a uniform all-explicit wrapping row under align-content:stretch' do
+    expect_parity('<div style="display:flex;flex-wrap:wrap;width:250px;height:200px"><div style="width:100px;height:30px"></div><div style="width:100px;height:30px"></div><div style="width:100px;height:30px"></div></div>')
+  end
+
   # A/B bails — the feature declines; the same shape without it stays native.
   def a_bails_b_native(feature, plain = '<div style="display:flex;width:400px"><div style="width:80px;height:30px"></div><div style="width:80px;height:30px"></div></div>')
     expect(run_shadow(feature)['ok']).to be(false), "expected #{feature.inspect} to bail"
@@ -124,6 +136,9 @@ RSpec.describe 'native layout flex parity', if: ENV.fetch('CSIM_JS_ENGINE', 'v8'
   end
 
   it('declines flex-wrap:wrap-reverse') { a_bails_b_native('<div style="display:flex;flex-wrap:wrap-reverse;width:120px"><div style="width:80px;height:30px"></div><div style="width:80px;height:30px"></div></div>') }
+  # align-content:stretch with lines that MIX stretch-filled and explicit cross sizes can't be recovered
+  # from the pushed final sizes → decline; a uniform (all-explicit) one stays native.
+  it('declines a mixed stretch/explicit wrap under align-content:stretch') { a_bails_b_native('<div style="display:flex;flex-wrap:wrap;width:250px;height:200px"><div style="width:100px"></div><div style="width:100px"></div><div style="width:100px;height:50px"></div></div>', '<div style="display:flex;flex-wrap:wrap;width:250px;height:200px"><div style="width:100px;height:30px"></div><div style="width:100px;height:30px"></div><div style="width:100px;height:30px"></div></div>') }
   it('declines row-reverse') { a_bails_b_native('<div style="display:flex;flex-direction:row-reverse;width:400px"><div style="width:80px;height:30px"></div><div style="width:80px;height:30px"></div></div>') }
   it('declines column-reverse') { a_bails_b_native('<div style="display:flex;flex-direction:column-reverse;width:400px"><div style="width:80px;height:30px"></div><div style="width:80px;height:30px"></div></div>') }
   it('declines direction:rtl') { a_bails_b_native('<div style="display:flex;direction:rtl;width:400px"><div style="width:80px;height:30px"></div><div style="width:80px;height:30px"></div></div>') }

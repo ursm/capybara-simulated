@@ -902,10 +902,14 @@ fn measure_flex(
         (bh - edges_y).max(0.0)
     };
 
-    // Break into flex lines (positions into `kids`): nowrap is one line holding everything; wrap greedily
-    // starts a new line when the next item (plus the main gap) would overflow the main extent. Mirrors
-    // flexLines.
-    let lines: Vec<Vec<usize>> = if n.flex_wrap {
+    // Break into flex lines (positions into `kids`). Wrapping needs a DEFINITE main capacity: a row always
+    // has one (its content width), but an AUTO-height column has none — the oracle keeps it a single line
+    // structurally (capacity == null → never calls flexLines), so native must too rather than re-breaking
+    // a summed capacity (which a FP-non-associative re-accumulation could trip into a spurious split).
+    // nowrap is also one line holding everything; otherwise wrap greedily starts a new line when the next
+    // item (plus the main gap) would overflow the main extent. Mirrors flexLines.
+    let wrap_capacity = main_is_x || !is_auto(n.height);
+    let lines: Vec<Vec<usize>> = if n.flex_wrap && wrap_capacity {
         let mut ls: Vec<Vec<usize>> = Vec::new();
         let mut cur: Vec<usize> = Vec::new();
         let mut used = 0.0;
