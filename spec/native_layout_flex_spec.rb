@@ -65,6 +65,10 @@ RSpec.describe 'native layout flex parity', if: ENV.fetch('CSIM_JS_ENGINE', 'v8'
     expect_parity('<div style="padding:8px"><div style="display:flex;gap:10px;width:400px"><div style="width:80px;height:30px"></div><div style="width:80px;height:50px"></div></div></div>')
   end
 
+  it 'matches a nested flex row (a flex item that is itself a flex container, f2)' do
+    expect_parity('<div style="display:flex;gap:20px;align-items:center;height:120px;width:500px"><div style="display:flex;justify-content:space-between;width:200px;height:40px"><div style="width:50px;height:30px"></div><div style="width:50px;height:30px"></div></div><div style="width:100px;height:60px"></div></div>')
+  end
+
   # A/B bails — the feature declines; the same shape without it stays native.
   def a_bails_b_native(feature, plain = '<div style="display:flex;width:400px"><div style="width:80px;height:30px"></div><div style="width:80px;height:30px"></div></div>')
     expect(run_shadow(feature)['ok']).to be(false), "expected #{feature.inspect} to bail"
@@ -80,7 +84,7 @@ RSpec.describe 'native layout flex parity', if: ENV.fetch('CSIM_JS_ENGINE', 'v8'
   it('declines an auto item margin') { a_bails_b_native('<div style="display:flex;width:400px"><div style="width:80px;height:30px;margin-left:auto"></div><div style="width:80px;height:30px"></div></div>') }
   it('declines a position:relative item') { a_bails_b_native('<div style="display:flex;width:400px"><div style="width:80px;height:30px;position:relative;top:5px"></div><div style="width:80px;height:30px"></div></div>') }
   it('declines an inline-block item') { a_bails_b_native('<div style="display:flex;width:400px"><span style="display:inline-block;width:80px;height:30px"></span><div style="width:80px;height:30px"></div></div>') }
-  it('declines a nested flex item') { a_bails_b_native('<div style="display:flex;width:400px"><div style="display:flex;width:80px;height:30px"></div><div style="width:80px;height:30px"></div></div>') }
+  it('declines a nested UNSUPPORTED flex item (column)') { a_bails_b_native('<div style="display:flex;width:400px"><div style="display:flex;flex-direction:column;width:80px;height:30px"></div><div style="width:80px;height:30px"></div></div>') }
   it('declines an inline-flex container') { a_bails_b_native('<div style="display:inline-flex;width:400px"><div style="width:80px;height:30px"></div></div>') }
   it('declines bare text in the container') { a_bails_b_native('<div style="display:flex;width:400px">loose text<div style="width:80px;height:30px"></div></div>') }
   it('declines a replaced (img) item') { a_bails_b_native('<div style="display:flex;width:400px"><img src="x.png" style="width:80px;height:30px"><div style="width:80px;height:30px"></div></div>') }
