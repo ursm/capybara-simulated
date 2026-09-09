@@ -113,9 +113,11 @@ pub(crate) struct Input {
     // a non-relative box.
     pub(crate) rel_x: f64,
     pub(crate) rel_y: f64,
-    // A flex ITEM's AUTO main-axis margins (§9.5): bit0 = the main-start-side margin is `auto`, bit1 = the
-    // main-end-side is. Auto margins absorb the line's free space (free/autos each) before justify-content,
-    // which then yields (ZERO_JUSTIFY). Cross-axis auto margins are bailed in the harness.
+    // A flex ITEM's AUTO margins. MAIN axis (§9.5): bit0 = main-start-side `auto`, bit1 = main-end-side —
+    // these absorb the line's free space (free/autos each) before justify-content, which then yields
+    // (ZERO_JUSTIFY). CROSS axis (§8.1): bit2 = cross-start-side `auto`, bit3 = cross-end-side — these eat
+    // the line's leftover (autoMarginSplit) and win over align-self. Sides are resolved JS-side through the
+    // flex axis + main-reverse, so a given bit is always the abstract start/end margin native expects.
     pub(crate) flex_item_auto: u8,
 }
 
@@ -1026,12 +1028,36 @@ fn measure_flex(
             if auto & 2 != 0 {
                 at += each_auto; // auto main-end margin
             }
-            let off = match inputs[c].flex_cross_align {
-                1 => (lc - co[p]) / 2.0, // center
-                2 => lc - co[p],         // end
-                _ => 0.0,                // start / stretch
+            // A CROSS-axis auto margin (§8.1) eats the line's leftover and WINS over align-self, which
+            // then has no free space left to place the item with (bit2 = cross-start-side auto, bit3 =
+            // cross-end-side). `autoMarginSplit`: both auto centre, one auto pushes to the other edge, and
+            // an over-constrained item (leftover <= 0) sits flush at the cross-start with a negative trail.
+            let cross_pos = if auto & 0b1100 != 0 {
+                let cross_box = if main_is_x { boxes[c].h } else { boxes[c].w };
+                let lead_m = cl_lead[p];
+                let trail_m = co[p] - cross_box - lead_m;
+                let (lead_auto, trail_auto) = (auto & 4 != 0, auto & 8 != 0);
+                let spare = lc - cross_box
+                    - if lead_auto { 0.0 } else { lead_m }
+                    - if trail_auto { 0.0 } else { trail_m };
+                let lead = if spare <= 0.0 {
+                    if lead_auto { 0.0 } else { lead_m }
+                } else if lead_auto && trail_auto {
+                    spare / 2.0
+                } else if lead_auto {
+                    spare
+                } else {
+                    lead_m
+                };
+                cs + lead
+            } else {
+                let off = match inputs[c].flex_cross_align {
+                    1 => (lc - co[p]) / 2.0, // center
+                    2 => lc - co[p],         // end
+                    _ => 0.0,                // start / stretch
+                };
+                cs + off + cl_lead[p]
             };
-            let cross_pos = cs + off + cl_lead[p];
             if main_is_x {
                 boxes[c].x = main_pos;
                 boxes[c].y = cross_pos;
@@ -1421,6 +1447,34 @@ mod tests {
         let bx = boxes(layout_block(&inputs, &[], &[], 0.0, 0.0, 800.0));
         // free = 600 - 200 = 400, each = 200. a at 0; after a: +100 +200(a.mr) → 300; b.ml auto +200 → 500.
         assert_eq!([bx[1].x, bx[2].x], [0.0, 500.0]);
+    }
+
+    #[test]
+    fn flex_row_cross_auto_margins_place_on_the_cross_axis() {
+        // 90px-tall row, one 30px item. A cross `auto` margin eats the line's leftover and wins over
+        // align-items. Bits are cross-start=top(4) / cross-end=bottom(8): both centre (y=30), top-only
+        // pushes to the bottom (y=60), bottom-only keeps it flush at the top (y=0).
+        for (bits, y) in [(12u8, 30.0), (4u8, 60.0), (8u8, 0.0)] {
+            let mut f = flex(0.0, -1, 600.0);
+            f.height = 90.0;
+            f.height_adjoins = false;
+            let mut a = item(1.0, 0, 100.0, 30.0);
+            a.flex_item_auto = bits;
+            let inputs = vec![f, a];
+            let bx = boxes(layout_block(&inputs, &[], &[], 0.0, 0.0, 800.0));
+            assert_eq!(bx[1].y, y, "cross-auto bits {bits}");
+        }
+    }
+
+    #[test]
+    fn flex_column_cross_auto_margin_centers_on_x() {
+        // A column's cross axis is X: margin-left:auto + margin-right:auto (bits 4|8) centres the 50px
+        // item in the 200px width → x=75, the same split as align-items:center but via the margins.
+        let mut a = item(1.0, 0, 50.0, 30.0);
+        a.flex_item_auto = 12;
+        let inputs = vec![flex_col(0.0, -1, 200.0), a];
+        let bx = boxes(layout_block(&inputs, &[], &[], 0.0, 0.0, 800.0));
+        assert_eq!(bx[1].x, 75.0); // (200 - 50) / 2
     }
 
     #[test]

@@ -1,11 +1,13 @@
 # frozen_string_literal: true
-# Native layout — flex (§9.7), geometry shadow-parity. Increment f1: a plain LTR horizontal `row`,
-# `nowrap`. The item SIZING is resolved JS-side (each item's used main+cross size rides its record, like a
-# float's shrink-to-fit width); native does only the PLACEMENT — main-axis distribution (justify-content +
-# gap + margins), cross-axis alignment (align-items/self), and the container's own box. Everything native
-# can't place yet — column / wrap / reverse / rtl / vertical / baseline / min-max-height / auto item
-# margins / relative or out-of-flow items / replaced items / nested flex — DECLINES to JS. Each bail is an
-# A/B: the feature-carrying input declines, a sibling without it stays native. V8 only.
+# Native layout — flex (§9.7), geometry shadow-parity. The item SIZING is resolved JS-side (each item's used
+# main+cross size rides its record, like a float's shrink-to-fit width); native does only the PLACEMENT —
+# main-axis distribution (justify-content + gap + main-axis auto margins), cross-axis alignment
+# (align-items/self + cross-axis auto margins), and the container's own box. Supported through f7: row /
+# column, nowrap / wrap, main-axis reverse, nested flex, position:relative offsets, main- and cross-axis auto
+# item margins. Still DECLINES to JS — rtl / vertical writing modes, align-items:baseline, the container's
+# min/max cross clamp, wrap-reverse, inline-flex, out-of-flow (abspos/fixed) items, replaced / inline-block
+# items, bare text. Each bail is an A/B: the feature-carrying input declines, a sibling without it stays
+# native. V8 only.
 require 'capybara/simulated'
 require 'rack'
 require_relative 'support/session_teardown'
@@ -71,6 +73,26 @@ RSpec.describe 'native layout flex parity', if: ENV.fetch('CSIM_JS_ENGINE', 'v8'
 
   it 'matches a main-axis auto margin on a row-reverse item' do
     expect_parity('<div style="display:flex;flex-direction:row-reverse;width:600px"><div style="width:100px;height:30px"></div><div style="width:100px;height:30px;margin-right:auto"></div></div>')
+  end
+
+  it 'matches a cross-axis auto margin centring a row item vertically (margin:auto on the cross)' do
+    expect_parity('<div style="display:flex;height:90px;width:400px"><div style="width:100px;height:30px;margin-top:auto;margin-bottom:auto"></div><div style="width:100px;height:30px"></div></div>')
+  end
+
+  it 'matches a single cross-axis auto margin pushing a row item to the far edge' do
+    expect_parity('<div style="display:flex;height:90px;width:400px"><div style="width:100px;height:30px;margin-top:auto"></div><div style="width:100px;height:30px"></div></div>')
+  end
+
+  it 'matches a cross-axis auto margin centring a column item horizontally' do
+    expect_parity('<div style="display:flex;flex-direction:column;width:200px"><div style="width:50px;height:30px;margin-left:auto;margin-right:auto"></div></div>')
+  end
+
+  it 'matches an over-constrained cross-axis auto margin (item taller than the line sits flush)' do
+    expect_parity('<div style="display:flex;height:20px;width:400px"><div style="width:100px;height:30px;margin-top:auto"></div><div style="width:100px;height:30px"></div></div>')
+  end
+
+  it 'matches margin:auto on one item (both axes) centring it in a definite row' do
+    expect_parity('<div style="display:flex;height:90px;width:400px"><div style="width:100px;height:30px;margin:auto"></div></div>')
   end
 
   it 'matches a flex container nested inside a block' do
@@ -171,7 +193,6 @@ RSpec.describe 'native layout flex parity', if: ENV.fetch('CSIM_JS_ENGINE', 'v8'
   it('declines an rtl flex column (cross axis runs right→left)') { a_bails_b_native('<div style="display:flex;flex-direction:column;direction:rtl;width:400px"><div style="width:80px;height:30px"></div><div style="width:80px;height:30px"></div></div>') }
   it('declines align-items:baseline') { a_bails_b_native('<div style="display:flex;align-items:baseline;width:400px"><div style="width:80px;height:30px"></div><div style="width:80px;height:30px"></div></div>') }
   it('declines min-height on the container') { a_bails_b_native('<div style="display:flex;min-height:200px;width:400px"><div style="width:80px;height:30px"></div><div style="width:80px;height:30px"></div></div>') }
-  it('declines a CROSS-axis auto item margin (autoMarginSplit)') { a_bails_b_native('<div style="display:flex;height:100px;width:400px"><div style="width:80px;height:30px;margin-top:auto"></div><div style="width:80px;height:30px"></div></div>') }
   it('declines an inline-block item') { a_bails_b_native('<div style="display:flex;width:400px"><span style="display:inline-block;width:80px;height:30px"></span><div style="width:80px;height:30px"></div></div>') }
   it('declines a nested UNSUPPORTED flex item (wrap-reverse)') { a_bails_b_native('<div style="display:flex;width:400px"><div style="display:flex;flex-wrap:wrap-reverse;width:80px;height:30px"></div><div style="width:80px;height:30px"></div></div>') }
   it('declines min-width on a column container (cross clamp)') { a_bails_b_native('<div style="display:flex;flex-direction:column;min-width:200px;width:100px"><div style="width:80px;height:30px"></div><div style="width:80px;height:30px"></div></div>', '<div style="display:flex;flex-direction:column;width:100px"><div style="width:80px;height:30px"></div><div style="width:80px;height:30px"></div></div>') }
