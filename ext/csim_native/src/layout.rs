@@ -146,6 +146,10 @@ pub(crate) struct Input {
     pub(crate) cell_col: usize,
     pub(crate) cell_colspan: usize,
     pub(crate) cell_rowspan: usize,
+    // border-collapse:collapse on a DISPLAY_TABLE node (t3): 1 = collapsed. border-spacing is then 0 and the
+    // cells' borders are halved (pushed so), and the table gains a `collapseOuter` frame (the outer half of
+    // the edge cells' borders) inside its own border+padding. 0 on every other node.
+    pub(crate) table_collapse: u8,
 }
 
 pub(crate) const CROSS_BASELINE: u8 = 3;
@@ -1241,8 +1245,6 @@ fn measure_table(
     failed: &std::cell::Cell<bool>,
 ) -> MInfo {
     let n = inputs[i];
-    let content_left = n.bl + n.pl;
-    let content_top = n.bt + n.pt;
     let (sx, sy) = (n.sp_x, n.sp_y);
     let bail = |failed: &std::cell::Cell<bool>| {
         failed.set(true);
@@ -1317,6 +1319,35 @@ fn measure_table(
         return bail(failed); // a track only spanning cells cover — native can't split it
     }
 
+    // border-collapse:collapse (§17.6.2): border-spacing is 0 (pushed), and the cells' borders are halved —
+    // the outer half of an edge cell's border belongs to the TABLE box, a `collapseOuter` frame that sits
+    // INSIDE the table's own border+padding (the cell's pushed edges are already halved, so this reuses them;
+    // `tableCollapses` gates it, else the frame is 0 and the table is the ordinary separate one). Mirrors
+    // collapseOuter / tableFrame.
+    let (mut o_l, mut o_r, mut o_t, mut o_b) = (0.0f64, 0.0f64, 0.0f64, 0.0f64);
+    if n.table_collapse != 0 {
+        let (last_col, last_row) = (c_count - 1, r_count - 1);
+        for (ri, &r) in rows.iter().enumerate() {
+            for &c in &children[r] {
+                let cn = inputs[c];
+                if cn.cell_col == 0 {
+                    o_l = o_l.max(cn.bl);
+                }
+                if cn.cell_col + cn.cell_colspan - 1 >= last_col {
+                    o_r = o_r.max(cn.br);
+                }
+                if ri == 0 {
+                    o_t = o_t.max(cn.bt);
+                }
+                if ri + cn.cell_rowspan - 1 >= last_row {
+                    o_b = o_b.max(cn.bb);
+                }
+            }
+        }
+    }
+    let content_left = n.bl + n.pl + o_l;
+    let content_top = n.bt + n.pt + o_t;
+
     // Prefix sums (table-relative): a track's start is one border-spacing in, plus every earlier track + its
     // trailing spacing.
     let mut col_x = vec![0.0f64; c_count];
@@ -1334,12 +1365,13 @@ fn measure_table(
     let row_x = col_x[0];
     let row_w = col_x[c_count - 1] + col_w[c_count - 1] - row_x;
 
-    // The table SELF-sizes from its tracks + spacing + its own edges — not the width its parent passed.
+    // The table SELF-sizes from its tracks + spacing + the collapse frame + its own edges — not the width its
+    // parent passed. (Separate: the frame is 0 and spacing > 0; collapse: spacing is 0 and the frame > 0.)
     let sum_col: f64 = col_w.iter().sum();
     let sum_row: f64 = row_h.iter().sum();
     boxes[i].nid = n.nid;
-    boxes[i].w = sum_col + (c_count as f64 + 1.0) * sx + n.edges_x();
-    boxes[i].h = sum_row + (r_count as f64 + 1.0) * sy + n.edges_y();
+    boxes[i].w = sum_col + (c_count as f64 + 1.0) * sx + o_l + o_r + n.edges_x();
+    boxes[i].h = sum_row + (r_count as f64 + 1.0) * sy + o_t + o_b + n.edges_y();
     boxes[i].auto_height = false;
 
     // Row-group boxes (relative to the table): span their rows across the full row width.
@@ -1485,6 +1517,7 @@ mod tests {
             cell_col: 0,
             cell_colspan: 1,
             cell_rowspan: 1,
+            table_collapse: 0,
         }
     }
 
@@ -2193,6 +2226,37 @@ mod tests {
         assert_eq!([bx[3].x, bx[3].y, bx[3].h], [4.0, 4.0, 63.0]); // the rowspan cell
         assert_eq!([bx[4].x, bx[4].y], [40.0, 4.0]); // col 1 row 0
         assert_eq!([bx[6].x, bx[6].y], [40.0, 30.0]); // col 1 row 1 (pushed col = 1)
+    }
+
+    #[test]
+    fn table_collapse_adds_the_outer_half_border_frame() {
+        // border-collapse: spacing 0, cells carry HALVED borders (edges), the table gains the outer half-border
+        // frame. A 2x2 with col widths 46/56, rows 26/36, each cell's halved border 2 on all sides → outer 2.
+        let mut t = tbl(0.0, -1, 0.0, 0.0);
+        t.table_collapse = 1;
+        let bordered = |nid: f64, parent: i32, w: f64, h: f64, col: usize| {
+            let mut c = cell(nid, parent, w, h, col, 1, 1);
+            c.bt = 2.0;
+            c.br = 2.0;
+            c.bb = 2.0;
+            c.bl = 2.0;
+            c
+        };
+        let inputs = vec![
+            t,                          // 0 table (collapse)
+            rowgroup(1.0, 0),           // 1
+            rowel(2.0, 1),              // 2
+            bordered(3.0, 2, 46.0, 26.0, 0), // 3
+            bordered(4.0, 2, 56.0, 26.0, 1), // 4
+            rowel(5.0, 1),              // 5
+            bordered(6.0, 5, 46.0, 36.0, 0), // 6
+            bordered(7.0, 5, 56.0, 36.0, 1), // 7
+        ];
+        let bx = boxes(layout_block(&inputs, &[], &[], 0.0, 0.0, 800.0));
+        assert_eq!([bx[0].w, bx[0].h], [106.0, 66.0]); // outer 2 each side + Σtracks, no spacing
+        assert_eq!([bx[3].x, bx[3].y], [2.0, 2.0]); // content origin = outer frame
+        assert_eq!(bx[4].x, 48.0); // 2 + 46 (cells meet, no spacing)
+        assert_eq!(bx[6].y, 28.0); // 2 + 26
     }
 
     #[test]

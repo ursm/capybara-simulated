@@ -1,16 +1,16 @@
 # frozen_string_literal: true
-# Native layout — CSS tables (§17), geometry shadow-parity. Increments t1 (base) + t2 (spans): a
-# border-collapse:SEPARATE, auto-layout `display:table` in normal flow — table > (table-row-group |
-# table-row)* > table-cell*, LTR. Each cell's used border box (its spanned column width × row height) is
-# resolved by the oracle and PUSHED (like a flex item); native reassembles the column/row tracks from the
-# NON-spanning cells, prefix-sums them with border-spacing to position every cell at its (pushed) starting
-# column/row, and derives every row, row-group and the table's OWN box (a table self-sizes from Σtracks +
-# spacing). colspan/rowspan, ragged grids (missing cells), and a position:relative cell (offset ignored) ARE
-# supported. Still DECLINES to JS — border-collapse:collapse, caption, <col>/<colgroup>, thead/tfoot (render
-# reorder), table-layout:fixed, inline-table, anonymous rows/cells, rtl, nested tables, an imposed table
-# height (declared / attribute / min / max), an empty row group, and a column/row only spanning cells cover
-# (no single-span cell to size that track). Each bail is an A/B: the feature-carrying input declines, a plain
-# table stays native. V8 only.
+# Native layout — CSS tables (§17), geometry shadow-parity. Increments t1 (base) + t2 (spans) + t3 (collapse):
+# an auto-layout `display:table` in normal flow, border-collapse SEPARATE or COLLAPSE — table >
+# (table-row-group | table-row)* > table-cell*, LTR. Each cell's used border box (its spanned column width ×
+# row height, halved borders in collapse) is resolved by the oracle and PUSHED (like a flex item); native
+# reassembles the column/row tracks from the NON-spanning cells, prefix-sums them with border-spacing to
+# position every cell at its (pushed) starting column/row, and derives every row, row-group and the table's
+# OWN box. In collapse the spacing is 0 and the table gains a `collapseOuter` half-border frame (from the edge
+# cells) inside its own border+padding. colspan/rowspan, ragged grids, border-collapse, and a
+# position:relative cell (offset ignored) ARE supported. Still DECLINES to JS — caption, <col>/<colgroup>,
+# thead/tfoot (render reorder), table-layout:fixed, inline-table, anonymous rows/cells, rtl, nested tables, an
+# imposed table height (declared / attribute / min / max), an empty row group, and a column/row only spanning
+# cells cover. Each bail is an A/B: the feature-carrying input declines, a plain table stays native. V8 only.
 require 'capybara/simulated'
 require 'rack'
 require_relative 'support/session_teardown'
@@ -95,13 +95,37 @@ RSpec.describe 'native layout table parity', if: ENV.fetch('CSIM_JS_ENGINE', 'v8
     expect_parity('<table style="border-spacing:4px"><tr><td style="width:40px">a</td><td style="width:50px">b</td></tr><tr><td>c</td></tr></table>')
   end
 
+  # t3 — border-collapse:collapse (half-borders, spacing 0, the outer half-border frame).
+  it 'matches a border-collapse 2x2 with bordered cells' do
+    expect_parity('<table style="border-collapse:collapse"><tr><td style="border:4px solid;width:40px;height:20px">a</td><td style="border:4px solid;width:50px">b</td></tr><tr><td style="border:4px solid">c</td><td style="border:4px solid;height:30px">d</td></tr></table>')
+  end
+
+  it 'matches a collapsed table with its own border (outer frame inside the table border)' do
+    expect_parity('<table style="border-collapse:collapse;border:10px solid"><tr><td style="border:2px solid;width:40px;height:20px">a</td></tr></table>')
+  end
+
+  it 'matches a collapsed table with padding' do
+    expect_parity('<table style="border-collapse:collapse;padding:10px"><tr><td style="border:4px solid;width:40px;height:20px">a</td></tr></table>')
+  end
+
+  it 'matches collapsed cells with unequal borders (shared border = the widest)' do
+    expect_parity('<table style="border-collapse:collapse"><tr><td style="border:2px solid;width:40px;height:20px">a</td><td style="border:8px solid;width:50px">b</td></tr></table>')
+  end
+
+  it 'matches border-collapse with a colspan' do
+    expect_parity('<table style="border-collapse:collapse"><tr><td colspan="2" style="border:3px solid">A</td></tr><tr><td style="border:3px solid;width:30px">b</td><td style="border:3px solid;width:40px">c</td></tr></table>')
+  end
+
+  it 'matches border-collapse with a rowspan' do
+    expect_parity('<table style="border-collapse:collapse"><tr><td rowspan="2" style="border:3px solid;width:30px">A</td><td style="border:3px solid;height:20px">b</td></tr><tr><td style="border:3px solid;height:25px">c</td></tr></table>')
+  end
+
   # A/B bails — the feature declines; a plain table stays native.
   def a_bails_b_native(feature, plain = '<table style="border-spacing:4px"><tr><td style="width:40px">a</td><td style="width:40px">b</td></tr></table>')
     expect(run_shadow(feature)['ok']).to be(false), "expected #{feature.inspect} to bail"
     expect(run_shadow(plain)['ok']).to be(true), 'expected the plain table to stay native'
   end
 
-  it('declines border-collapse:collapse (half-borders)') { a_bails_b_native('<table style="border-collapse:collapse"><tr><td style="border:1px solid">a</td></tr></table>') }
   it('declines a caption') { a_bails_b_native('<table><caption>cap</caption><tr><td>a</td></tr></table>') }
   it('declines a colgroup/col') { a_bails_b_native('<table><colgroup><col></colgroup><tr><td>a</td></tr></table>') }
   it('declines thead/tfoot (render reorder)') { a_bails_b_native('<table><thead><tr><td>h</td></tr></thead><tbody><tr><td>b</td></tr></tbody></table>') }
