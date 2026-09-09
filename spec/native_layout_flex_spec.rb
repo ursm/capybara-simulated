@@ -160,7 +160,6 @@ RSpec.describe 'native layout flex parity', if: ENV.fetch('CSIM_JS_ENGINE', 'v8'
   it('declines align-items:baseline') { a_bails_b_native('<div style="display:flex;align-items:baseline;width:400px"><div style="width:80px;height:30px"></div><div style="width:80px;height:30px"></div></div>') }
   it('declines min-height on the container') { a_bails_b_native('<div style="display:flex;min-height:200px;width:400px"><div style="width:80px;height:30px"></div><div style="width:80px;height:30px"></div></div>') }
   it('declines an auto item margin') { a_bails_b_native('<div style="display:flex;width:400px"><div style="width:80px;height:30px;margin-left:auto"></div><div style="width:80px;height:30px"></div></div>') }
-  it('declines a position:relative item') { a_bails_b_native('<div style="display:flex;width:400px"><div style="width:80px;height:30px;position:relative;top:5px"></div><div style="width:80px;height:30px"></div></div>') }
   it('declines an inline-block item') { a_bails_b_native('<div style="display:flex;width:400px"><span style="display:inline-block;width:80px;height:30px"></span><div style="width:80px;height:30px"></div></div>') }
   it('declines a nested UNSUPPORTED flex item (wrap-reverse)') { a_bails_b_native('<div style="display:flex;width:400px"><div style="display:flex;flex-wrap:wrap-reverse;width:80px;height:30px"></div><div style="width:80px;height:30px"></div></div>') }
   it('declines min-width on a column container (cross clamp)') { a_bails_b_native('<div style="display:flex;flex-direction:column;min-width:200px;width:100px"><div style="width:80px;height:30px"></div><div style="width:80px;height:30px"></div></div>', '<div style="display:flex;flex-direction:column;width:100px"><div style="width:80px;height:30px"></div><div style="width:80px;height:30px"></div></div>') }
@@ -168,15 +167,21 @@ RSpec.describe 'native layout flex parity', if: ENV.fetch('CSIM_JS_ENGINE', 'v8'
   it('declines bare text in the container') { a_bails_b_native('<div style="display:flex;width:400px">loose text<div style="width:80px;height:30px"></div></div>') }
   it('declines a replaced (img) item') { a_bails_b_native('<div style="display:flex;width:400px"><img src="x.png" style="width:80px;height:30px"><div style="width:80px;height:30px"></div></div>') }
 
-  # A relative box with a NON-ZERO inset shifts its whole subtree in the oracle; native carries no inset,
-  # so it must decline. A zero-inset relative (containing-block only) is the common case and stays native.
-  it 'declines a relative flex container with an inset, keeps a zero-inset relative one' do
-    expect(run_shadow('<div style="display:flex;position:relative;top:20px;left:30px;width:400px"><div style="width:80px;height:30px"></div><div style="width:80px;height:30px"></div></div>')['ok']).to be false
-    expect(run_shadow('<div style="display:flex;position:relative;width:400px"><div style="width:80px;height:30px"></div><div style="width:80px;height:30px"></div></div>')['ok']).to be true
+  # A `position: relative` inset shifts the box and its subtree (the oracle folds it into el._lb); native
+  # now applies the pushed shift in place(), so these lay out rather than decline.
+  it 'matches a relative flex container with an inset (shifts the whole subtree)' do
+    expect_parity('<div style="display:flex;position:relative;top:20px;left:30px;width:400px"><div style="width:80px;height:30px"></div><div style="width:80px;height:30px"></div></div>')
   end
 
-  it 'declines a relative BLOCK with an inset (pre-existing gap), keeps a zero-inset relative one' do
-    expect(run_shadow('<div style="position:relative;top:15px;left:25px;width:400px"><div style="height:30px"></div></div>')['ok']).to be false
-    expect(run_shadow('<div style="position:relative;width:400px"><div style="height:30px"></div></div>')['ok']).to be true
+  it 'matches a relative BLOCK with an inset (shifts the whole subtree)' do
+    expect_parity('<div style="position:relative;top:15px;left:25px;width:400px"><div style="height:30px"></div></div>')
+  end
+
+  it 'matches a relative flex ITEM with an inset (moves the item, not its siblings)' do
+    expect_parity('<div style="display:flex;gap:10px;width:400px"><div style="width:80px;height:30px;position:relative;top:8px;left:12px"></div><div style="width:80px;height:30px"></div></div>')
+  end
+
+  it 'matches a relative block whose relative child shifts under it' do
+    expect_parity('<div style="position:relative;left:20px;width:300px"><div style="height:20px"></div><div style="position:relative;top:5px;left:10px;height:20px"></div></div>')
   end
 end

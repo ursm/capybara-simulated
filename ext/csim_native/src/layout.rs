@@ -107,6 +107,12 @@ pub(crate) struct Input {
     // only the final physical mapping mirrors, and the leading margin is the main-start-side one. The cross
     // axis is always FORWARD in this increment (rtl-column / wrap-reverse / vertical are bailed).
     pub(crate) flex_main_reverse: bool,
+    // `position: relative` offset (§9.4.3), resolved JS-side (relativeOffset). It moves the box and its
+    // subtree at PAINT time without touching the flow, so `place` adds it after the absolute origin; the
+    // flow (margin collapse, sibling positions, float bands) is computed from the unshifted position. 0 for
+    // a non-relative box.
+    pub(crate) rel_x: f64,
+    pub(crate) rel_y: f64,
 }
 
 pub(crate) const FLOAT_LEFT: u8 = 1;
@@ -230,7 +236,7 @@ pub(crate) fn layout_block(inputs: &[Input], runs: &[Run], run_texts: &[Option<V
     if failed.get() {
         return Outcome::Unsupported;
     }
-    place(0, root_x, root_y, &children, &mut boxes);
+    place(0, root_x, root_y, inputs, &children, &mut boxes);
     Outcome::LaidOut(boxes)
 }
 
@@ -1065,13 +1071,15 @@ fn flex_distribution(code: u8, free: f64, n: usize) -> (f64, f64) {
 }
 
 // Convert the relative boxes to absolute document coordinates: add each node's absolute border-box
-// origin to its children (whose x/y are relative to it), top-down in one pass.
-fn place(i: usize, ax: f64, ay: f64, children: &[Vec<usize>], boxes: &mut [Box]) {
-    boxes[i].x += ax;
-    boxes[i].y += ay;
+// origin to its children (whose x/y are relative to it), top-down in one pass — plus each node's
+// `position: relative` offset, which moves it AND its subtree at paint time (the flow used the unshifted
+// position, so only this pass, after the origin is added, applies the shift; children follow via `bx`/`by`).
+fn place(i: usize, ax: f64, ay: f64, inputs: &[Input], children: &[Vec<usize>], boxes: &mut [Box]) {
+    boxes[i].x += ax + inputs[i].rel_x;
+    boxes[i].y += ay + inputs[i].rel_y;
     let (bx, by) = (boxes[i].x, boxes[i].y);
     for &c in &children[i] {
-        place(c, bx, by, children, boxes);
+        place(c, bx, by, inputs, children, boxes);
     }
 }
 
@@ -1138,6 +1146,8 @@ mod tests {
             flex_align_content: 6, // stretch
             flex_cross_gap: 0.0,
             flex_main_reverse: false,
+            rel_x: 0.0,
+            rel_y: 0.0,
         }
     }
 
