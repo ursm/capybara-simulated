@@ -74,6 +74,17 @@ RSpec.describe 'native layout L2 text-block parity', if: ENV.fetch('CSIM_JS_ENGI
     expect(r['mismatches']).to eq(0), "mismatch: #{r.inspect}"
   end
 
+  it 'matches a fixed line-height with mixed font metrics (ascent/descent line box)' do
+    # A LENGTH line-height does not scale per run, so the taller 28px run's ascent grows the line box
+    # past the 40px line-height — max(ascent)+max(descent), not max(line-height). Diverges unless native
+    # composes the line box from per-run ascent/descent.
+    session = simulated_session(page(%(<div style="width:400px;line-height:40px">small text <span style="font-size:28px">BIG</span> more small text</div>)))
+    session.visit '/'
+    r = parity(session)
+    expect(r).to include('ok' => true), "harness bailed: #{r.inspect}"
+    expect(r['mismatches']).to eq(0), "mismatch: #{r.inspect}"
+  end
+
   it 'matches <br> hard breaks (mid, trailing, leading, doubled)' do
     [
       'line one<br>line two',

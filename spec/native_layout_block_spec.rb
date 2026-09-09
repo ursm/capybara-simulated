@@ -62,6 +62,20 @@ RSpec.describe 'native layout L1 block-flow parity', if: ENV.fetch('CSIM_JS_ENGI
     expect(r['mismatches']).to eq(0), "mismatch: #{r.inspect}"
   end
 
+  it 'matches declared-zero-height and wrapped collapse-through' do
+    session = simulated_session(page(<<~HTML))
+      <div style="height:40px;margin-bottom:12px"></div>
+      <div style="height:0;margin:18px 0"></div>
+      <div style="height:25px;margin-top:6px"></div>
+      <div style="margin:22px 0"><div style="margin:0"></div></div>
+      <div style="height:15px;margin-top:9px"></div>
+    HTML
+    session.visit '/'
+    r = parity(session)
+    expect(r).to include('ok' => true), "harness bailed: #{r.inspect}"
+    expect(r['mismatches']).to eq(0), "mismatch: #{r.inspect}"
+  end
+
   it 'matches percentage and clamped widths' do
     session = simulated_session(page(<<~HTML))
       <div style="width:60%;height:30px"></div>
