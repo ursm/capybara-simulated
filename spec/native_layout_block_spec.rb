@@ -76,6 +76,21 @@ RSpec.describe 'native layout L1 block-flow parity', if: ENV.fetch('CSIM_JS_ENGI
     expect(r['mismatches']).to eq(0), "mismatch: #{r.inspect}"
   end
 
+  it 'matches a BFC wrapper keeping its child margin inside (no collapse-through the BFC)' do
+    # overflow:hidden establishes a block formatting context, so the inner div's margin-top does NOT
+    # collapse out of the wrapper (§8.3.1) — the child sits 30px down inside a 40px-tall wrapper.
+    session = simulated_session(page(<<~HTML))
+      <div style="overflow:hidden;margin-top:20px">
+        <div style="margin-top:30px;height:10px"></div>
+      </div>
+      <div style="height:15px"></div>
+    HTML
+    session.visit '/'
+    r = parity(session)
+    expect(r).to include('ok' => true), "harness bailed: #{r.inspect}"
+    expect(r['mismatches']).to eq(0), "mismatch: #{r.inspect}"
+  end
+
   it 'matches percentage and clamped widths' do
     session = simulated_session(page(<<~HTML))
       <div style="width:60%;height:30px"></div>

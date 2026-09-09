@@ -74,7 +74,21 @@ pub(crate) struct Input {
     pub(crate) run_count: i32,
     pub(crate) strut_lh: f64,
     pub(crate) strut_asc: f64,
+    // Float positioning (§9.5), resolved JS-side to pure rectangle arithmetic. `float_kind` 0 none /
+    // 1 left / 2 right; `clear` 0 none / 1 left / 2 right / 3 both. `starts_bfc` marks a block that owns
+    // a float context (a float never crosses this boundary) AND establishes a block formatting context,
+    // so its own margins do NOT collapse with its children's (§8.3.1). For a floated box, its used width
+    // rides `width` (JS resolves the shrink-to-fit; native computes the auto height from the subtree).
+    pub(crate) float_kind: u8,
+    pub(crate) clear: u8,
+    pub(crate) starts_bfc: bool,
 }
+
+pub(crate) const FLOAT_LEFT: u8 = 1;
+pub(crate) const FLOAT_RIGHT: u8 = 2;
+// `clear` 1/2 (left/right) align with FLOAT_LEFT/FLOAT_RIGHT so clearance_y compares against a float's
+// side directly; CLEAR_BOTH clears either side.
+pub(crate) const CLEAR_BOTH: u8 = 3;
 
 // Run kinds in a text block's inline stream. TEXT is a maximal same-font piece (its text in `run_texts`
 // at the run's index); OPEN/CLOSE are an inline element's horizontal edges (open = left margin+border+
@@ -186,7 +200,8 @@ pub(crate) fn layout_block(inputs: &[Input], runs: &[Run], run_texts: &[Option<V
     // — the whole pass then falls back to JS.
     let root_w = resolve_width(&inputs[0], root_cb_w);
     let failed = std::cell::Cell::new(false);
-    measure(0, root_w, inputs, runs, run_texts, &children, &mut boxes, &failed);
+    let mut root_fc = FloatCtx::new();
+    measure(0, root_w, inputs, runs, run_texts, &children, &mut boxes, &failed, &mut root_fc, 0.0, 0.0);
     if failed.get() {
         return Outcome::Unsupported;
     }
@@ -215,8 +230,34 @@ fn is_ws_u16(u: u16) -> bool {
 // is the bare strut (asc + desc == strut_lh). Returns (line count, total content height = Σ line
 // heights). None when a construct isn't modelled — a tab / combining mark / CJK char, a WORD spanning
 // two runs (no space at the boundary), or a `<br>` while an inline edge is open — so the caller declines to JS.
-fn line_layout(runs: &[Run], run_texts: &[Option<Vec<u16>>], strut_lh: f64, strut_asc: f64, content_w: f64) -> Option<(u32, f64)> {
+//
+// FLOATS (§9.5): when `floats` is non-empty the block's lines route around them. Each line's usable width
+// is the band at its flow position `top + total` (owner frame; `cl`/`cr` are the block's content edges
+// there), queried at `strut_lh` tall (the oracle's `lineHeightOf`, not the grown line box); an empty line
+// whose first word won't fit the band DROPS below the shallowest float squeezing it (float_fit_y). When
+// `floats` is empty the width is `content_w` exactly, so the no-float path is bit-identical to before.
+fn line_layout(
+    runs: &[Run],
+    run_texts: &[Option<Vec<u16>>],
+    strut_lh: f64,
+    strut_asc: f64,
+    content_w: f64,
+    floats: &[FloatItem],
+    cl: f64,
+    cr: f64,
+    top: f64,
+) -> Option<(u32, f64)> {
     let strut_desc = strut_lh - strut_asc;
+    // The usable width of the line whose top is at `top + t` — the float band there, or the full content
+    // width when there are no floats (kept exact, not `cr - cl`, so the no-float path never drifts).
+    let band_w = |t: f64| -> f64 {
+        if floats.is_empty() {
+            content_w
+        } else {
+            let (bl, br) = float_band(floats, top + t, strut_lh, cl, cr);
+            br - bl
+        }
+    };
     let mut line_x = 0.0f64;
     let mut total = 0.0f64;
     // The current line's box, seeded to the strut and grown by each placed run's ascent / descent.
@@ -291,13 +332,22 @@ fn line_layout(runs: &[Run], run_texts: &[Option<Vec<u16>>], strut_lh: f64, stru
                             line_x += sw; // hanging space
                         }
                         let ow: f64 = open.iter().filter(|o| !o.1).map(|o| o.0).sum();
-                        if line_has_content && space_before && line_x + ow + width > content_w {
+                        if line_has_content && space_before && line_x + ow + width > band_w(total) {
                             total += line_asc + line_desc; // break: close the line (the hanging space is dropped)
                             n += 1;
                             line_x = 0.0;
                             line_asc = strut_asc;
                             line_desc = strut_desc;
-                            // line_has_content is set true just below as the word is placed on the new line
+                            line_has_content = false; // fresh line — its first word may still need to drop below a float
+                        }
+                        // An empty line whose first word won't fit the band drops below the float squeezing
+                        // it (§9.5, "if a shortened line box is too small…"), growing the block by the gap.
+                        if !floats.is_empty() && !line_has_content && width + ow > band_w(total) {
+                            let fy = top + total;
+                            let at = float_fit_y(floats, fy, width + ow, cl, cr, strut_lh);
+                            if at > fy {
+                                total += at - fy;
+                            }
                         }
                         // Flush the still-open edges onto this line (once), then place the word.
                         for o in open.iter_mut() {
@@ -336,6 +386,98 @@ fn is_wide_unit(u: u16) -> bool {
         || (0xFF00..=0xFF60).contains(&cp)
         || (0xFFE0..=0xFFE6).contains(&cp)
         || (0xD800..=0xDBFF).contains(&u) // astral (emoji etc.) — full-width, own unit
+}
+
+// The FLOAT CONTEXT of one block formatting context (§9.5): the margin boxes of the floats placed in
+// it so far, in the OWNER's border-box frame (the frame `measure(owner)` lays its children in). A float
+// never crosses a `starts_bfc` boundary, so each such block gets a fresh, empty context. `side` is
+// FLOAT_LEFT / FLOAT_RIGHT.
+#[derive(Clone, Copy)]
+struct FloatItem {
+    side: u8,
+    left: f64,
+    right: f64,
+    top: f64,
+    bottom: f64,
+}
+struct FloatCtx {
+    items: Vec<FloatItem>,
+}
+impl FloatCtx {
+    fn new() -> Self {
+        FloatCtx { items: Vec::new() }
+    }
+}
+
+// The band [l, r] a line or box of height `h` starting at `y` has to itself: the content edges
+// [left, right] moved in by every float overlapping [y, y + max(h, 1)). Mirrors layout.js floatBand.
+fn float_band(items: &[FloatItem], y: f64, h: f64, left: f64, right: f64) -> (f64, f64) {
+    let mut l = left;
+    let mut r = right;
+    let bottom = y + h.max(1.0);
+    for f in items {
+        if f.bottom <= y || f.top >= bottom {
+            continue;
+        }
+        if f.side == FLOAT_LEFT {
+            if f.right > l {
+                l = f.right;
+            }
+        } else if f.side == FLOAT_RIGHT && f.left < r {
+            r = f.left;
+        }
+    }
+    (l, r.max(l))
+}
+
+// The first y at or below `y` where a band of height `h` is at least `w` wide (§9.5.1 rule 3) — where a
+// float that doesn't fit beside the ones there drops to, and where a line too narrow for its first word
+// starts. The band only widens at a float bottom, so this scans those, not pixels. Mirrors floatFitY.
+fn float_fit_y(items: &[FloatItem], y: f64, w: f64, left: f64, right: f64, h: f64) -> f64 {
+    if items.is_empty() {
+        return y;
+    }
+    let mut stops = vec![y];
+    for f in items {
+        if f.bottom > y {
+            stops.push(f.bottom);
+        }
+    }
+    stops.sort_by(|a, b| a.partial_cmp(b).unwrap());
+    for &at in &stops {
+        let (bl, br) = float_band(items, at, h, left, right);
+        if br - bl >= w {
+            return at;
+        }
+    }
+    *stops.last().unwrap()
+}
+
+// Where a box with `clear` starts: at or below every float bottom on the side(s) it named. Mirrors
+// clearanceY (clear: CLEAR_LEFT / CLEAR_RIGHT / CLEAR_BOTH).
+fn clearance_y(items: &[FloatItem], y: f64, clear: u8) -> f64 {
+    let mut out = y;
+    for f in items {
+        if clear != CLEAR_BOTH && f.side != clear {
+            continue;
+        }
+        if f.bottom > out {
+            out = f.bottom;
+        }
+    }
+    out
+}
+
+// The lowest edge any float reaches — what a box that CONTAINS its floats (started the context) grows
+// to. -inf when there are none, so `max` with the flow bottom is a no-op. Mirrors floatsBottom.
+fn floats_bottom(items: &[FloatItem]) -> f64 {
+    let mut b = f64::NEG_INFINITY;
+    for f in items {
+        if f.bottom > b {
+            b = f.bottom;
+        }
+    }
+    b
 }
 
 // A collapsing-margin SET: the largest positive and the smallest (most negative) adjoining margins.
@@ -404,6 +546,11 @@ fn measure(
     children: &[Vec<usize>],
     boxes: &mut [Box],
     failed: &std::cell::Cell<bool>,
+    fc: &mut FloatCtx,
+    // This node's border-box origin in the frame of the float context `fc` (its owner's border-box).
+    // Used only by the text-block branch to place its lines around the floats; 0 when `fc` is empty.
+    bfc_x: f64,
+    bfc_y: f64,
 ) -> MInfo {
     let n = inputs[i];
     let content_top_rel = n.bt + n.pt;
@@ -414,9 +561,15 @@ fn measure(
     // runs are runs[run_start..run_start+run_count]. If it can't be measured (bad font / tab / combining
     // / CJK / mixed-font word), flag the pass for JS.
     if n.display == DISPLAY_TEXT_BLOCK {
+        // The block's content edges and top in the float context's (owner's) frame — the lines route
+        // around any floats that overlap them. `fc.items` is empty for the ordinary text block, and then
+        // line_layout uses the full content width (bit-identical to the no-float path).
+        let cl = bfc_x + n.bl + n.pl;
+        let cr = cl + content_w;
+        let bfc_top = bfc_y + content_top_rel;
         let (rs, re) = (n.run_start.max(0) as usize, (n.run_start + n.run_count).max(0) as usize);
         let content_h = if re <= runs.len() && rs <= re {
-            match line_layout(&runs[rs..re], &run_texts[rs..re], n.strut_lh, n.strut_asc, content_w) {
+            match line_layout(&runs[rs..re], &run_texts[rs..re], n.strut_lh, n.strut_asc, content_w, &fc.items, cl, cr, bfc_top) {
                 Some((_, h)) => h,
                 None => {
                     failed.set(true);
@@ -445,11 +598,20 @@ fn measure(
     }
 
     let content_left_rel = n.bl + n.pl;
-    let top_open = n.bt == 0.0 && n.pt == 0.0;
-    // §8.3.1: the bottom margin adjoins the last child's only where the box has no bottom border/padding
-    // and its height does not keep them apart — asked of the DECLARATION (`height_adjoins`, so a
-    // `height:0` box still adjoins) rather than the used size.
-    let bottom_open = n.bb == 0.0 && n.pb == 0.0 && n.height_adjoins;
+    // §8.3.1: a box that establishes a BLOCK FORMATTING CONTEXT (starts_bfc) keeps its children's
+    // margins inside it — its own top/bottom edges never adjoin a child's margin, whatever the
+    // border/padding/height. Otherwise the top edge is open with no border/padding, and the bottom edge
+    // also needs an adjoining height (from the DECLARATION — `height:0` still adjoins).
+    let top_open = !n.starts_bfc && n.bt == 0.0 && n.pt == 0.0;
+    let bottom_open = !n.starts_bfc && n.bb == 0.0 && n.pb == 0.0 && n.height_adjoins;
+
+    // Float context (owner frame = this measure frame): a block that establishes a BFC owns a FRESH one;
+    // otherwise floats flow in from the context it inherits (`fc`). `cl`/`cr` are the content edges every
+    // band query is measured against.
+    let cl = content_left_rel;
+    let cr = content_left_rel + content_w;
+    let mut own = FloatCtx::new();
+    let ctx: &mut FloatCtx = if n.starts_bfc { &mut own } else { fc };
 
     let mut top_m = CMargin::of(Input::m(n.mt));
     let mut cursor = content_top_rel; // relative border-box bottom of the last non-collapse-through child
@@ -459,10 +621,68 @@ fn measure(
     let mut all_children_through = true; // every in-flow child so far collapsed through (empty when childless)
 
     for &c in &children[i] {
-        has_child = true;
         let cn = inputs[c];
+        if cn.float_kind != 0 {
+            // A FLOAT is placed where the flow has reached (top0) but does NOT advance the flow cursor and
+            // never collapses margins (§9.5.1 / §8.3.1); the lines/blocks after it route around it instead.
+            // Its used width rode `width` (auto shrink-to-fit is bailed in the harness); its subtree lays
+            // out in a fresh context (a float starts its own BFC).
+            let top0 = cursor + pending.value();
+            let fw = resolve_width(&cn, content_w);
+            measure(c, fw, inputs, runs, run_texts, children, boxes, failed, &mut FloatCtx::new(), 0.0, 0.0);
+            let (fml, fmr, fmt, fmb) = (Input::m(cn.ml), Input::m(cn.mr), Input::m(cn.mt), Input::m(cn.mb));
+            let outer = boxes[c].w + fml + fmr;
+            let outer_h = boxes[c].h + fmt + fmb;
+            let mut mtop = top0;
+            if cn.clear != 0 {
+                mtop = mtop.max(clearance_y(&ctx.items, mtop, cn.clear));
+            }
+            mtop = float_fit_y(&ctx.items, mtop, outer, cl, cr, outer_h);
+            let top = mtop + fmt;
+            let (band_l, band_r) = float_band(&ctx.items, mtop, outer_h, cl, cr);
+            let x = if cn.float_kind == FLOAT_LEFT { band_l + fml } else { band_r - outer + fml };
+            boxes[c].x = x;
+            boxes[c].y = top;
+            ctx.items.push(FloatItem {
+                side: cn.float_kind,
+                left: x - fml,
+                right: x + boxes[c].w + fmr,
+                top: mtop,
+                bottom: top + boxes[c].h + fmb,
+            });
+            continue; // the flow cursor / first / has_child are untouched
+        }
         let child_w = resolve_width(&cn, content_w);
-        let cm = measure(c, child_w, inputs, runs, run_texts, children, boxes, failed);
+        // A DIRECT text-block child coexisting with floats routes its lines around them (§9.5). Its
+        // collapsed top is deterministic (a text block never collapses through, top_only == of(mt)), so it
+        // can be placed BEFORE measuring — which the narrowing needs, to know each line's flow position in
+        // the owner frame. Anything else in-flow beside a float (a block container, a cleared box) needs
+        // the deferred machinery, so decline the whole pass.
+        if !ctx.items.is_empty() {
+            if cn.display == DISPLAY_TEXT_BLOCK && cn.clear == 0 {
+                let t_top = CMargin::of(Input::m(cn.mt));
+                let cy = if first && top_open {
+                    top_m.merge(t_top);
+                    content_top_rel
+                } else {
+                    pending.merge(t_top);
+                    cursor + pending.value()
+                };
+                let cx = content_left_rel + Input::m(cn.ml);
+                boxes[c].x = cx;
+                boxes[c].y = cy;
+                let cm = measure(c, child_w, inputs, runs, run_texts, children, boxes, failed, ctx, cx, cy);
+                cursor = cy + boxes[c].h;
+                pending = cm.bottom;
+                all_children_through = false;
+                has_child = true;
+                first = false;
+                continue;
+            }
+            failed.set(true);
+        }
+        has_child = true;
+        let cm = measure(c, child_w, inputs, runs, run_texts, children, boxes, failed, ctx, 0.0, 0.0);
         if !cm.collapse_through {
             all_children_through = false;
         }
@@ -496,16 +716,20 @@ fn measure(
 
     let mut bottom_m = CMargin::of(Input::m(n.mb));
     let box_h = if is_auto(n.height) {
-        if !has_child {
-            content_top_rel + n.pb + n.bb // empty block: just its own vertical edges (0 when all open)
+        let flow_bottom = if !has_child {
+            content_top_rel // empty block: just its own vertical edges (0 when all open)
         } else if bottom_open {
             // The last child's trailing margin collapses with this node's bottom margin (open bottom
             // edge, auto height): it propagates up rather than adding to the height.
             bottom_m.merge(pending);
-            cursor + n.pb + n.bb
+            cursor
         } else {
-            cursor + pending.value() + n.pb + n.bb // closed bottom: the trailing margin is contained
-        }
+            cursor + pending.value() // closed bottom: the trailing margin is contained
+        };
+        // A block that OWNS a float context CONTAINS its floats: its auto height grows to the lowest of
+        // them (§9.5 — the `overflow:hidden` / `flow-root` clearfix). Only the owner grows; -inf else.
+        let floats_to = if n.starts_bfc { floats_bottom(&ctx.items) } else { f64::NEG_INFINITY };
+        flow_bottom.max(floats_to) + n.pb + n.bb
     } else if n.border_box {
         n.height
     } else {
@@ -524,7 +748,8 @@ fn measure(
     // zero, per the DECLARATION), a zero box, and every in-flow child itself collapses through (so a
     // childless empty block, and a wrapper whose children are all empty, both collapse; a text-block or
     // sized child stops it). Mirrors the oracle's `marginInfo(el).through`.
-    let collapse_through = n.height_adjoins
+    let collapse_through = !n.starts_bfc
+        && n.height_adjoins
         && n.minh_adjoins
         && all_children_through
         && n.bt == 0.0
@@ -603,6 +828,9 @@ mod tests {
             run_count: 0,
             strut_lh: 0.0,
             strut_asc: 0.0,
+            float_kind: 0,
+            clear: 0,
+            starts_bfc: false,
         }
     }
 
@@ -715,6 +943,50 @@ mod tests {
         let inputs = vec![blk(0.0, -1), a, p, empty, c];
         let bx = boxes(layout_block(&inputs, &[], &[], 0.0, 0.0, 800.0));
         assert_eq!(bx[4].y, 80.0); // C after the run collapsed through the empty wrapper
+    }
+
+    #[test]
+    fn bfc_owner_contains_a_left_float() {
+        // root > owner(overflow:hidden, auto height) > float(left, 80x120). The owner OWNS the float
+        // context, so its auto height grows to contain the float (clearfix); the float sits at the
+        // owner's content top-left and does not advance the flow.
+        let mut owner = blk(1.0, 0);
+        owner.starts_bfc = true;
+        let mut f = blk(2.0, 1);
+        f.float_kind = FLOAT_LEFT;
+        f.width = 80.0;
+        f.height = 120.0;
+        f.height_adjoins = false;
+        let inputs = vec![blk(0.0, -1), owner, f];
+        let bx = boxes(layout_block(&inputs, &[], &[], 0.0, 0.0, 800.0));
+        assert_eq!(bx[1].h, 120.0); // owner contains the float
+        assert_eq!(bx[2], Box { nid: 2.0, x: 0.0, y: 0.0, w: 80.0, h: 120.0, auto_height: false });
+    }
+
+    #[test]
+    fn two_left_floats_second_drops_when_it_does_not_fit() {
+        // owner content width 200; two left floats 120 wide each — the second cannot sit beside the first
+        // (240 > 200), so it drops below it (§9.5.1 rule 3).
+        let mut owner = blk(1.0, 0);
+        owner.starts_bfc = true;
+        owner.width = 200.0;
+        owner.height_adjoins = false;
+        let mut a = blk(2.0, 1);
+        a.float_kind = FLOAT_LEFT;
+        a.width = 120.0;
+        a.height = 40.0;
+        a.height_adjoins = false;
+        let mut b = blk(3.0, 1);
+        b.float_kind = FLOAT_LEFT;
+        b.width = 120.0;
+        b.height = 30.0;
+        b.height_adjoins = false;
+        let inputs = vec![blk(0.0, -1), owner, a, b];
+        let bx = boxes(layout_block(&inputs, &[], &[], 0.0, 0.0, 800.0));
+        assert_eq!(bx[2].y, 0.0); // first float at the top
+        assert_eq!(bx[3].y, 40.0); // second drops below the first
+        assert_eq!(bx[3].x, 0.0); // …back at the left edge
+        assert_eq!(bx[1].h, 70.0); // owner contains both (40 + 30)
     }
 
     #[test]
