@@ -119,7 +119,13 @@ pub(crate) struct Input {
     // the line's leftover (autoMarginSplit) and win over align-self. Sides are resolved JS-side through the
     // flex axis + main-reverse, so a given bit is always the abstract start/end margin native expects.
     pub(crate) flex_item_auto: u8,
+    // A flex ITEM aligned on the baseline (flex_cross_align == 3): its FIRST-baseline ascent within its
+    // MARGIN box (the oracle's baselineParts.asc — own baseline offset + top margin, or the bottom margin
+    // edge when the item has no line to give), resolved JS-side. NaN for a non-baseline item.
+    pub(crate) flex_baseline_asc: f64,
 }
+
+pub(crate) const CROSS_BASELINE: u8 = 3;
 
 pub(crate) const FLOAT_LEFT: u8 = 1;
 pub(crate) const FLOAT_RIGHT: u8 = 2;
@@ -960,7 +966,28 @@ fn measure_flex(
         vec![(0..cnt).collect()]
     };
     let nlines = lines.len();
-    let line_cross: Vec<f64> = lines.iter().map(|l| l.iter().map(|&p| co[p]).fold(0.0, f64::max)).collect();
+    // A line's natural cross size is the deepest of its PLAIN items' outers and its first-baseline GROUP's
+    // extent. Baseline-aligned items (flex_cross_align == CROSS_BASELINE) share a baseline, so the group is
+    // ONE thing: its extent is max(ascent) + max(outer - ascent) over its members, not the items taken singly
+    // (a 32px word 29 above its baseline beside a text-less 60px box, whose baseline is its own bottom edge,
+    // makes a 68px line, where max(37, 60) alone says 60). line_first_asc is the shared baseline the group
+    // hangs from, reused at placement.
+    let mut line_cross = vec![0.0f64; nlines];
+    let mut line_first_asc = vec![0.0f64; nlines];
+    for (li, line) in lines.iter().enumerate() {
+        let (mut plain, mut first_asc, mut first_below) = (0.0f64, 0.0f64, 0.0f64);
+        for &p in line {
+            if inputs[kids[p]].flex_cross_align == CROSS_BASELINE {
+                let asc = inputs[kids[p]].flex_baseline_asc;
+                first_asc = first_asc.max(asc);
+                first_below = first_below.max(co[p] - asc);
+            } else {
+                plain = plain.max(co[p]);
+            }
+        }
+        line_cross[li] = plain.max(first_asc + first_below);
+        line_first_asc[li] = first_asc;
+    }
 
     // The container's CROSS content extent + its own box. The cross is a row's height (auto = the stacked
     // lines, else the declared content height) and a column's content width (always definite here).
@@ -1075,6 +1102,10 @@ fn measure_flex(
                 let off = match inputs[c].flex_cross_align {
                     1 => (lc - co[p]) / 2.0, // center
                     2 => lc - co[p],         // end
+                    // baseline: hang from the line's shared baseline (the group's deepest ascent), so every
+                    // member's own baseline coincides at line_first_asc. The group anchors at the cross-START
+                    // (forward cross, first baseline), so the offset is measured from there.
+                    CROSS_BASELINE => line_first_asc[li] - inputs[c].flex_baseline_asc,
                     _ => 0.0,                // start / stretch
                 };
                 cs + off + cl_lead[p]
@@ -1212,6 +1243,7 @@ mod tests {
             rel_x: 0.0,
             rel_y: 0.0,
             flex_item_auto: 0,
+            flex_baseline_asc: f64::NAN,
         }
     }
 
@@ -1436,6 +1468,41 @@ mod tests {
             assert_eq!(bx[1].y, y, "align code {code}");
             assert_eq!(bx[0].h, 90.0);
         }
+    }
+
+    #[test]
+    fn flex_row_baseline_aligns_items_on_a_shared_baseline() {
+        // Two baseline items: a (outer 37, asc 29) and b (outer 18, asc 14). They hang from the deepest
+        // ascent (firstAsc=29): a at y=0, b at y=29-14=15. Line cross = 29 + max(37-29, 18-14) = 37.
+        let f = flex(0.0, -1, 400.0);
+        let mut a = item(1.0, 0, 39.0, 37.0);
+        a.flex_cross_align = CROSS_BASELINE;
+        a.flex_baseline_asc = 29.0;
+        let mut b = item(2.0, 0, 16.0, 18.0);
+        b.flex_cross_align = CROSS_BASELINE;
+        b.flex_baseline_asc = 14.0;
+        let inputs = vec![f, a, b];
+        let bx = boxes(layout_block(&inputs, &[], &[], 0.0, 0.0, 800.0));
+        assert_eq!([bx[1].y, bx[2].y], [0.0, 15.0]);
+        assert_eq!(bx[0].h, 37.0); // auto height = the baseline group's extent
+    }
+
+    #[test]
+    fn flex_row_baseline_group_extent_counts_the_deepest_ascent() {
+        // A text item (outer 37, asc 29) beside a text-less box whose synthesised baseline is its bottom edge
+        // (outer 60, asc 60). firstAsc=60, firstBelow=max(37-29, 60-60)=8 → line cross 68; text at 60-29=31,
+        // box at 60-60=0.
+        let f = flex(0.0, -1, 400.0);
+        let mut t = item(1.0, 0, 39.0, 37.0);
+        t.flex_cross_align = CROSS_BASELINE;
+        t.flex_baseline_asc = 29.0;
+        let mut bx2 = item(2.0, 0, 40.0, 60.0);
+        bx2.flex_cross_align = CROSS_BASELINE;
+        bx2.flex_baseline_asc = 60.0;
+        let inputs = vec![f, t, bx2];
+        let b = boxes(layout_block(&inputs, &[], &[], 0.0, 0.0, 800.0));
+        assert_eq!([b[1].y, b[2].y], [31.0, 0.0]);
+        assert_eq!(b[0].h, 68.0);
     }
 
     fn flex_col(nid: f64, parent: i32, width: f64) -> Input {
