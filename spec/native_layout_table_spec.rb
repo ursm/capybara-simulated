@@ -1,16 +1,20 @@
 # frozen_string_literal: true
-# Native layout — CSS tables (§17), geometry shadow-parity. Increments t1 (base) + t2 (spans) + t3 (collapse):
+# Native layout — CSS tables (§17), geometry shadow-parity. Increments t1 (base) + t2 (spans) + t3 (collapse) +
+# t4 (caption):
 # an auto-layout `display:table` in normal flow, border-collapse SEPARATE or COLLAPSE — table >
 # (table-row-group | table-row)* > table-cell*, LTR. Each cell's used border box (its spanned column width ×
 # row height, halved borders in collapse) is resolved by the oracle and PUSHED (like a flex item); native
 # reassembles the column/row tracks from the NON-spanning cells, prefix-sums them with border-spacing to
 # position every cell at its (pushed) starting column/row, and derives every row, row-group and the table's
 # OWN box. In collapse the spacing is 0 and the table gains a `collapseOuter` half-border frame (from the edge
-# cells) inside its own border+padding. colspan/rowspan, ragged grids, border-collapse, and a
-# position:relative cell (offset ignored) ARE supported. Still DECLINES to JS — caption, <col>/<colgroup>,
-# thead/tfoot (render reorder), table-layout:fixed, inline-table, anonymous rows/cells, rtl, nested tables, an
-# imposed table height (declared / attribute / min / max), an empty row group, and a column/row only spanning
-# cells cover. Each bail is an A/B: the feature-carrying input declines, a plain table stays native. V8 only.
+# cells) inside its own border+padding. A single CAPTION (top or bottom) makes the `<table>` box the WRAPPER:
+# the caption is a block spanning the table's content width, stacked above (the grid offsets down) or below the
+# grid, its own block / text subtree laid out normally. colspan/rowspan, ragged grids, border-collapse, a
+# caption, and a position:relative cell (offset ignored) ARE supported. Still DECLINES to JS — a caption with a
+# margin or more than one caption, <col>/<colgroup>, thead/tfoot (render reorder), table-layout:fixed,
+# inline-table, anonymous rows/cells, rtl, nested tables, an imposed table height (declared / attribute / min /
+# max), an empty row group, and a column/row only spanning cells cover. Each bail is an A/B: the feature-
+# carrying input declines, a plain table stays native. V8 only.
 require 'capybara/simulated'
 require 'rack'
 require_relative 'support/session_teardown'
@@ -120,13 +124,49 @@ RSpec.describe 'native layout table parity', if: ENV.fetch('CSIM_JS_ENGINE', 'v8
     expect_parity('<table style="border-collapse:collapse"><tr><td rowspan="2" style="border:3px solid;width:30px">A</td><td style="border:3px solid;height:20px">b</td></tr><tr><td style="border:3px solid;height:25px">c</td></tr></table>')
   end
 
+  # t4 — the caption (a single block box, top or bottom). The `<table>` el._lb is the WRAPPER (caption + grid):
+  # a top caption offsets the grid down by its own height, a bottom one sits below it, and a wider caption
+  # widens the wrapper. The caption's own block / text subtree lays out normally.
+  it 'matches a caption above the grid (default caption-side)' do
+    expect_parity('<table style="border-spacing:4px"><caption style="height:16px">Cap</caption><tr><td style="width:60px;height:20px">a</td><td style="width:80px">b</td></tr></table>')
+  end
+
+  it 'matches a caption below the grid (caption-side:bottom)' do
+    expect_parity('<table style="border-spacing:4px;caption-side:bottom"><caption style="height:16px">Cap</caption><tr><td style="width:60px;height:20px">a</td><td style="width:80px">b</td></tr></table>')
+  end
+
+  it 'matches a caption wider than the grid (the wrapper widens to the caption)' do
+    expect_parity('<table style="border-spacing:4px"><caption style="height:16px;width:300px">Wide</caption><tr><td style="width:40px;height:20px">a</td></tr></table>')
+  end
+
+  it 'matches a caption on a table carrying its own border' do
+    expect_parity('<table style="border-spacing:4px;border:6px solid"><caption style="height:16px">c</caption><tr><td style="width:60px;height:20px">a</td></tr></table>')
+  end
+
+  it 'matches a caption on a border-collapse table' do
+    expect_parity('<table style="border-collapse:collapse"><caption style="height:16px">c</caption><tr><td style="border:4px solid;width:40px;height:20px">a</td></tr></table>')
+  end
+
+  it 'matches a caption with a wrapping text / block subtree of its own' do
+    expect_parity('<table style="border-spacing:4px"><caption><div style="height:10px;margin:3px"></div><div style="height:8px"></div></caption><tr><td style="width:50px;height:20px">x</td></tr></table>')
+  end
+
+  it 'matches a position:relative caption (its paint-time offset shifts the box, Chrome: top:5/left:7 -> {7,5})' do
+    expect_parity('<table style="border-spacing:4px"><caption style="height:16px;position:relative;top:5px;left:7px">c</caption><tr><td style="width:60px;height:20px">a</td></tr></table>')
+  end
+
+  it 'matches a position:relative caption below the grid' do
+    expect_parity('<table style="border-spacing:4px;caption-side:bottom"><caption style="height:16px;position:relative;left:11px">c</caption><tr><td style="width:60px;height:20px">a</td></tr></table>')
+  end
+
   # A/B bails — the feature declines; a plain table stays native.
   def a_bails_b_native(feature, plain = '<table style="border-spacing:4px"><tr><td style="width:40px">a</td><td style="width:40px">b</td></tr></table>')
     expect(run_shadow(feature)['ok']).to be(false), "expected #{feature.inspect} to bail"
     expect(run_shadow(plain)['ok']).to be(true), 'expected the plain table to stay native'
   end
 
-  it('declines a caption') { a_bails_b_native('<table><caption>cap</caption><tr><td>a</td></tr></table>') }
+  it('declines a caption with a margin (folds into the stacking)') { a_bails_b_native('<table style="border-spacing:4px"><caption style="height:16px;margin:5px">c</caption><tr><td style="width:40px">a</td></tr></table>') }
+  it('declines two captions') { a_bails_b_native('<table style="border-spacing:4px"><caption>top</caption><caption style="caption-side:bottom">bottom</caption><tr><td style="width:40px">a</td></tr></table>') }
   it('declines a colgroup/col') { a_bails_b_native('<table><colgroup><col></colgroup><tr><td>a</td></tr></table>') }
   it('declines thead/tfoot (render reorder)') { a_bails_b_native('<table><thead><tr><td>h</td></tr></thead><tbody><tr><td>b</td></tr></tbody></table>') }
   it('declines table-layout:fixed') { a_bails_b_native('<table style="table-layout:fixed;width:200px"><tr><td>a</td><td>b</td></tr></table>') }

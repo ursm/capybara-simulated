@@ -33,6 +33,8 @@ pub(crate) const DISPLAY_FLEX: u8 = 3;
 pub(crate) const DISPLAY_TABLE: u8 = 4;
 pub(crate) const DISPLAY_TABLE_ROW_GROUP: u8 = 5;
 pub(crate) const DISPLAY_TABLE_ROW: u8 = 6;
+// A table CAPTION keeps its own block / text display (measure lays out its subtree); it is identified
+// structurally as the table's only non-row/non-group child (t4), not by a display code.
 pub(crate) const DISPLAY_UNSUPPORTED: u8 = 255;
 
 // One element's used values for block layout, decoded from the flat buffer. Lengths are px; auto/none
@@ -150,6 +152,10 @@ pub(crate) struct Input {
     // cells' borders are halved (pushed so), and the table gains a `collapseOuter` frame (the outer half of
     // the edge cells' borders) inside its own border+padding. 0 on every other node.
     pub(crate) table_collapse: u8,
+    // Caption placement (t4), on a DISPLAY_TABLE node that has a caption child: 0 = caption-side top (the grid
+    // is offset down by the caption's height), 1 = bottom (the caption sits below the grid). The caption's box
+    // is pushed like a cell; the `<table>` el._lb is then the WRAPPER (caption + grid). 0 when no caption.
+    pub(crate) caption_side: u8,
 }
 
 pub(crate) const CROSS_BASELINE: u8 = 3;
@@ -258,7 +264,12 @@ pub(crate) fn layout_block(inputs: &[Input], runs: &[Run], run_texts: &[Option<V
             if p < inputs.len()
                 && matches!(
                     n.display,
-                    DISPLAY_BLOCK | DISPLAY_TEXT_BLOCK | DISPLAY_FLEX | DISPLAY_TABLE | DISPLAY_TABLE_ROW_GROUP | DISPLAY_TABLE_ROW
+                    DISPLAY_BLOCK
+                        | DISPLAY_TEXT_BLOCK
+                        | DISPLAY_FLEX
+                        | DISPLAY_TABLE
+                        | DISPLAY_TABLE_ROW_GROUP
+                        | DISPLAY_TABLE_ROW
                 )
             {
                 children[p].push(i);
@@ -1252,19 +1263,26 @@ fn measure_table(
     };
 
     // Flatten into rows + the group each belongs to. A table child is a ROW GROUP (its children are the
-    // rows) or a bare ROW. Record order == render order (thead/tfoot reorder is gated out, so it is document
-    // order here).
+    // rows), a bare ROW, or the CAPTION (t4 — at most one, gated). Record order == render order (thead/tfoot
+    // reorder is gated out, so it is document order here).
     let mut rows: Vec<usize> = Vec::new();
     let mut row_group: Vec<Option<usize>> = Vec::new();
+    let mut caption: Option<usize> = None;
     for &ch in &children[i] {
-        if inputs[ch].display == DISPLAY_TABLE_ROW_GROUP {
-            for &r in &children[ch] {
-                rows.push(r);
-                row_group.push(Some(ch));
+        match inputs[ch].display {
+            DISPLAY_TABLE_ROW_GROUP => {
+                for &r in &children[ch] {
+                    rows.push(r);
+                    row_group.push(Some(ch));
+                }
             }
-        } else {
-            rows.push(ch);
-            row_group.push(None);
+            DISPLAY_TABLE_ROW => {
+                rows.push(ch);
+                row_group.push(None);
+            }
+            // The only other table child the walk emits is the CAPTION (a block / text box, at most one; the
+            // gate enforces that), identified here by NOT being a row / row-group.
+            _ => caption = Some(ch),
         }
     }
     let r_count = rows.len();
@@ -1283,12 +1301,17 @@ fn measure_table(
         return bail(failed);
     }
 
-    // Phase A — lay each cell's subtree out at its pushed border box, in a fresh float context.
+    // Phase A — lay each cell's (and the caption's) subtree out at its pushed border box, in a fresh float
+    // context. The caption is a block box spanning the table's content width (pushed).
     for &r in &rows {
         for &c in &children[r] {
             let iw = resolve_width(&inputs[c], 0.0);
             measure(c, iw, inputs, runs, run_texts, children, boxes, failed, &mut FloatCtx::new(), 0.0, 0.0);
         }
+    }
+    if let Some(cap) = caption {
+        let iw = resolve_width(&inputs[cap], 0.0);
+        measure(cap, iw, inputs, runs, run_texts, children, boxes, failed, &mut FloatCtx::new(), 0.0, 0.0);
     }
 
     // Tracks: a column's width is the widest NON-spanning (colspan==1) cell in it, a row's height the tallest
@@ -1345,8 +1368,14 @@ fn measure_table(
             }
         }
     }
+    // The `<table>` el._lb is the WRAPPER (caption + grid). A caption-side:top caption offsets the whole grid
+    // down by its own (pushed) height; a bottom one sits below the grid (placed later). The caption is a block
+    // box spanning the table's content width, OUTSIDE the collapse frame.
+    let caption_h = caption.map(|cap| boxes[cap].h).unwrap_or(0.0);
+    let caption_w = caption.map(|cap| boxes[cap].w).unwrap_or(0.0);
+    let caption_top = caption.is_some() && n.caption_side == 0;
     let content_left = n.bl + n.pl + o_l;
-    let content_top = n.bt + n.pt + o_t;
+    let content_top = n.bt + n.pt + o_t + if caption_top { caption_h } else { 0.0 };
 
     // Prefix sums (table-relative): a track's start is one border-spacing in, plus every earlier track + its
     // trailing spacing.
@@ -1365,14 +1394,26 @@ fn measure_table(
     let row_x = col_x[0];
     let row_w = col_x[c_count - 1] + col_w[c_count - 1] - row_x;
 
-    // The table SELF-sizes from its tracks + spacing + the collapse frame + its own edges — not the width its
-    // parent passed. (Separate: the frame is 0 and spacing > 0; collapse: spacing is 0 and the frame > 0.)
+    // The table (WRAPPER) SELF-sizes from its grid tracks + spacing + the collapse frame, unioned with the
+    // caption, plus its own edges — not the width its parent passed. (Separate: the frame is 0 and spacing >
+    // 0; collapse: spacing is 0 and the frame > 0. No caption: caption_h/_w are 0.)
     let sum_col: f64 = col_w.iter().sum();
     let sum_row: f64 = row_h.iter().sum();
+    let grid_w = sum_col + (c_count as f64 + 1.0) * sx + o_l + o_r;
+    let grid_h = sum_row + (r_count as f64 + 1.0) * sy + o_t + o_b;
     boxes[i].nid = n.nid;
-    boxes[i].w = sum_col + (c_count as f64 + 1.0) * sx + o_l + o_r + n.edges_x();
-    boxes[i].h = sum_row + (r_count as f64 + 1.0) * sy + o_t + o_b + n.edges_y();
+    boxes[i].w = grid_w.max(caption_w) + n.edges_x();
+    boxes[i].h = grid_h + caption_h + n.edges_y();
     boxes[i].auto_height = false;
+
+    // Place the caption (a block spanning the table's content width, outside the collapse frame): at the
+    // wrapper's content origin for a top caption, below the grid for a bottom one. Its Phase-A subtree follows.
+    if let Some(cap) = caption {
+        boxes[cap].x = n.bl + n.pl;
+        // The grid's box spans [n.bt+n.pt, +grid_h] (grid_h already includes the collapse frame); a bottom
+        // caption sits just past it. A top caption is at the wrapper content origin (the grid is offset down).
+        boxes[cap].y = if caption_top { n.bt + n.pt } else { n.bt + n.pt + grid_h };
+    }
 
     // Row-group boxes (relative to the table): span their rows across the full row width.
     for &ch in &children[i] {
@@ -1518,6 +1559,7 @@ mod tests {
             cell_colspan: 1,
             cell_rowspan: 1,
             table_collapse: 0,
+            caption_side: 0,
         }
     }
 
@@ -2274,5 +2316,61 @@ mod tests {
             cell(7.0, 5, 40.0, 20.0, 1, 2, 1), // cols 1-2 → col 1 never a single cell
         ];
         assert!(matches!(layout_block(&inputs, &[], &[], 0.0, 0.0, 800.0), Outcome::Unsupported));
+    }
+
+    // t4 — the caption (a block box, the table's only non-row/-group child). The `<table>` box is the WRAPPER:
+    // a top caption offsets the whole grid down by its own height; a bottom one sits below the grid; the wrapper
+    // width unions the grid with a wider caption. The caption here is `item()` (a pushed fixed border box), a
+    // plain block child of the table — measure_table finds it structurally, not by a display code.
+    #[test]
+    fn table_caption_top_offsets_the_grid_down() {
+        let inputs = vec![
+            tbl(0.0, -1, 4.0, 4.0),            // 0 table (wrapper); caption_side top (0 = default)
+            item(1.0, 0, 100.0, 16.0),         // 1 caption (block, pushed 100x16)
+            rowel(2.0, 0),                     // 2 tr
+            cell(3.0, 2, 60.0, 20.0, 0, 1, 1), // 3 td col 0
+            cell(4.0, 2, 80.0, 20.0, 1, 1, 1), // 4 td col 1
+        ];
+        let bx = boxes(layout_block(&inputs, &[], &[], 0.0, 0.0, 800.0));
+        // wrapper: width = grid (60+80 + 3*4 = 152) ; height = grid (20 + 2*4 = 28) + caption 16 = 44
+        assert_eq!([bx[0].w, bx[0].h], [152.0, 44.0]);
+        assert_eq!([bx[1].x, bx[1].y, bx[1].w, bx[1].h], [0.0, 0.0, 100.0, 16.0]); // caption at the top
+        assert_eq!([bx[3].x, bx[3].y], [4.0, 20.0]); // td col 0: grid offset DOWN by caption (16) + sy (4)
+        assert_eq!([bx[4].x, bx[4].y], [68.0, 20.0]); // td col 1 = 4 + 60 + 4
+    }
+
+    #[test]
+    fn table_caption_bottom_sits_below_the_grid() {
+        let mut t = tbl(0.0, -1, 4.0, 4.0);
+        t.caption_side = 1; // bottom
+        let inputs = vec![
+            t,                                 // 0 table (wrapper)
+            item(1.0, 0, 100.0, 16.0),         // 1 caption
+            rowel(2.0, 0),                     // 2 tr
+            cell(3.0, 2, 60.0, 20.0, 0, 1, 1), // 3
+            cell(4.0, 2, 80.0, 20.0, 1, 1, 1), // 4
+        ];
+        let bx = boxes(layout_block(&inputs, &[], &[], 0.0, 0.0, 800.0));
+        assert_eq!([bx[0].w, bx[0].h], [152.0, 44.0]); // same wrapper size
+        assert_eq!([bx[3].x, bx[3].y], [4.0, 4.0]); // grid NOT offset — cells at the top
+        assert_eq!([bx[4].x, bx[4].y], [68.0, 4.0]);
+        assert_eq!([bx[1].x, bx[1].y], [0.0, 28.0]); // caption below the grid (grid_h = 28)
+    }
+
+    #[test]
+    fn table_caption_wider_than_grid_widens_the_wrapper() {
+        let t = tbl(0.0, -1, 4.0, 4.0);
+        let inputs = vec![
+            t,                                 // 0 table
+            item(1.0, 0, 300.0, 16.0),         // 1 caption, wider than the 152 grid
+            rowel(2.0, 0),                     // 2 tr
+            cell(3.0, 2, 60.0, 20.0, 0, 1, 1), // 3
+            cell(4.0, 2, 80.0, 20.0, 1, 1, 1), // 4
+        ];
+        let bx = boxes(layout_block(&inputs, &[], &[], 0.0, 0.0, 800.0));
+        assert_eq!(bx[0].w, 300.0); // wrapper widened to the caption
+        assert_eq!(bx[0].h, 44.0);
+        // the grid keeps its own width — cells are NOT stretched to the caption
+        assert_eq!([bx[3].x, bx[4].x], [4.0, 68.0]);
     }
 }
