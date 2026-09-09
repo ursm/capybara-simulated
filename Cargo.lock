@@ -50,6 +50,26 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b588b76d00fde79687d7646a9b5bdf3cc0f655e0bbd080335a95d7e96f3587da"
 
 [[package]]
+name = "bytemuck"
+version = "1.25.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "95832e849adfb21180ccb6826a99da14e5d266ae5c2e668e1602cf234f153797"
+dependencies = [
+ "bytemuck_derive",
+]
+
+[[package]]
+name = "bytemuck_derive"
+version = "1.12.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "fc0e56a716f1e132ff6bf4bdac1c944a3fcdc1cae65f70a4a2a1ac3b401d2d1f"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 3.0.5",
+]
+
+[[package]]
 name = "calendrical_calculations"
 version = "0.2.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -113,6 +133,7 @@ dependencies = [
  "rb-sys",
  "rusty_racer",
  "selectors",
+ "skrifa",
  "v8",
 ]
 
@@ -239,6 +260,15 @@ name = "fastrand"
 version = "2.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "da7c62ceae207dd37ea5b845da6a0696c799f85e97da1ab5b7910be3c1c80223"
+
+[[package]]
+name = "font-types"
+version = "0.9.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "02a596f5713680923a2080d86de50fe472fb290693cf0f701187a1c8b36996b7"
+dependencies = [
+ "bytemuck",
+]
 
 [[package]]
 name = "fslock"
@@ -618,6 +648,16 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "cca7ad6a7e21e72151d56fe2495a259b5670e204c3adac41ee7ef676ea08117a"
 
 [[package]]
+name = "read-fonts"
+version = "0.29.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "04ca636dac446b5664bd16c069c00a9621806895b8bb02c2dc68542b23b8f25d"
+dependencies = [
+ "bytemuck",
+ "font-types",
+]
+
+[[package]]
 name = "regex"
 version = "1.13.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -781,6 +821,16 @@ name = "siphasher"
 version = "1.0.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8ee5873ec9cce0195efcb7a4e9507a04cd49aec9c83d0389df45b1ef7ba2e649"
+
+[[package]]
+name = "skrifa"
+version = "0.31.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "dbeb4ca4399663735553a09dd17ce7e49a0a0203f03b706b39628c4d913a8607"
+dependencies = [
+ "bytemuck",
+ "read-fonts",
+]
 
 [[package]]
 name = "smallvec"

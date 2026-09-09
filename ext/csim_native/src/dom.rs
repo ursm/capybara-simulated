@@ -509,6 +509,10 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_, ()>, ctx: &v8::Global<v8:
     // one back for the JS geometry getters.
     register(scope, ns, "layoutPass", layout_pass, context_id);
     register(scope, ns, "boxOf", box_of, context_id);
+    // Native text metrics (fontations) for native inline layout (L2): register a font (fontconfig path
+    // or in-memory SFNT bytes) to a handle JS puts in the layout inputs; native measures runs in-process.
+    register(scope, ns, "registerFontPath", register_font_path, context_id);
+    register(scope, ns, "registerFontBytes", register_font_bytes, context_id);
     if let Some(key) = v8::String::new(scope, "__dom") {
         let global = context.global(scope);
         global.set(scope, key.into(), ns.into());
@@ -859,13 +863,41 @@ fn drop_realm(
     }
 }
 
-// Fields per node in the layoutPass input buffer (a flat Float64Array). Order MUST match the JS packer
-// (native-query-shadow.js / layout.js) and layout::Input.
-const LAYOUT_STRIDE: usize = 22;
+// __dom.registerFontPath(path) -> handle (>=0), or -1 when the file can't be read/parsed. The host
+// resolved `path` via fontconfig; native parses it (skrifa) into an advance table, cached.
+fn register_font_path(
+    scope: &mut v8::PinScope<'_, '_>,
+    args: v8::FunctionCallbackArguments<'_>,
+    mut rv: v8::ReturnValue<'_, v8::Value>,
+) {
+    let path = args.get(0).to_rust_string_lossy(scope);
+    rv.set_int32(crate::font::register_path(&path));
+}
 
-// __dom.layoutPass(inputsFlat, rootX, rootY, rootCbW) -> bool. Decode the flat per-node record buffer
-// (root at record 0), run native block layout, and write each node's border-box into its arena slot.
-// Returns false when the subtree uses a feature L1 doesn't model (Outcome::Unsupported) — the caller
+// __dom.registerFontBytes(uint8array) -> handle. In-memory SFNT bytes for a web / buffer face the host
+// already fetched + decoded. -1 for anything but a Uint8Array.
+fn register_font_bytes(
+    _scope: &mut v8::PinScope<'_, '_>,
+    args: v8::FunctionCallbackArguments<'_>,
+    mut rv: v8::ReturnValue<'_, v8::Value>,
+) {
+    if let Ok(ta) = v8::Local::<v8::Uint8Array>::try_from(args.get(0)) {
+        let mut buf = vec![0u8; ta.byte_length()];
+        ta.copy_contents(&mut buf);
+        rv.set_int32(crate::font::register_bytes(&buf));
+    } else {
+        rv.set_int32(-1);
+    }
+}
+
+// Fields per node in the layoutPass input buffer (a flat Float64Array). Order MUST match the JS packer
+// (layout.js `__csimLayoutShadowRun`) and layout::Input.
+const LAYOUT_STRIDE: usize = 27;
+
+// __dom.layoutPass(inputsFlat, texts, rootX, rootY, rootCbW) -> bool. Decode the flat per-node record
+// buffer (root at record 0) + the parallel `texts` array (each text block's collapsed inline text, else
+// non-string), run native layout, and write each node's border-box into its arena slot. Returns false
+// when the subtree uses a feature the native engine doesn't model (Outcome::Unsupported) — the caller
 // then lays it out in JS. One crossing per pass.
 fn layout_pass(
     scope: &mut v8::PinScope<'_, '_>,
@@ -908,12 +940,33 @@ fn layout_pass(
             br: r[19],
             bb: r[20],
             bl: r[21],
+            font: r[22] as i32,
+            size: r[23],
+            ls: r[24],
+            ws: r[25],
+            line_height: r[26],
         });
     }
-    let root_x = args.get(1).number_value(scope).unwrap_or(0.0);
-    let root_y = args.get(2).number_value(scope).unwrap_or(0.0);
-    let root_cb_w = args.get(3).number_value(scope).unwrap_or(0.0);
-    match crate::layout::layout_block(&inputs, root_x, root_y, root_cb_w) {
+    // Parallel text channel: texts[i] = record i's collapsed inline text (for a text block), else a
+    // non-string (None). Read as UTF-16 to iterate exactly as JS does. Done before any arena borrow.
+    let mut texts: Vec<Option<Vec<u16>>> = Vec::with_capacity(inputs.len());
+    if let Ok(tarr) = v8::Local::<v8::Array>::try_from(args.get(1)) {
+        for i in 0..tarr.length() {
+            match tarr.get_index(scope, i) {
+                Some(val) if val.is_string() => {
+                    let s = val.to_string(scope).unwrap();
+                    let mut u = vec![0u16; s.length()];
+                    s.write_v2(scope, 0, &mut u, v8::WriteFlags::empty());
+                    texts.push(Some(u));
+                }
+                _ => texts.push(None),
+            }
+        }
+    }
+    let root_x = args.get(2).number_value(scope).unwrap_or(0.0);
+    let root_y = args.get(3).number_value(scope).unwrap_or(0.0);
+    let root_cb_w = args.get(4).number_value(scope).unwrap_or(0.0);
+    match crate::layout::layout_block(&inputs, &texts, root_x, root_y, root_cb_w) {
         crate::layout::Outcome::Unsupported => rv.set_bool(false),
         crate::layout::Outcome::LaidOut(boxes) => {
             let cid = realm_id(scope, &args);

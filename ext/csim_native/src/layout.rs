@@ -6,12 +6,14 @@
 // exactly: `el._lb` is a BORDER-BOX in DOCUMENT coordinates, sub-pixel (no rounding — the read
 // boundary rounds the integer CSSOM properties). See the layout↔geometry interface mapping.
 //
-// STAGE L1 = block flow only (the ~30%-of-wall structural bucket's core): width/height/min/max,
-// box-sizing, margins/padding/borders, %-resolution against the containing block, auto width (fill)
-// and auto height (sum of in-flow children). NOT YET: margin collapsing, floats, inline/text (L2,
-// resurrects font.rs), flex/grid/table (L3), abspos. A subtree using an unmodelled feature is declined
-// as a whole (the pass returns "unsupported" → JS lays it out), never mixed per-node. This module is
-// pure (no V8) so the algorithm is unit-tested here before the op wiring.
+// STAGE L1 = block flow (width/height/min/max, box-sizing, margins/padding/borders, %-resolution, auto
+// width=fill, auto height=stacked children, full margin collapsing). STAGE L2 = pure-text blocks (an
+// inline formatting context): greedy line breaking with in-process font metrics (mod font / skrifa),
+// height = line count × the JS-resolved line-height. NOT YET: floats, inline elements / mixed
+// block+text, flex/grid/table (L3), abspos, native cascade (L4). A subtree using an unmodelled feature
+// is declined as a WHOLE (the pass returns Unsupported → JS lays it out), never mixed per-node. This
+// module is pure (no V8) so the block algorithm is unit-tested here; text-block parity is validated by
+// the JS shadow harness against the live layout.
 
 // Sentinels in the input record: a used value that is `auto` / `none` arrives as f64::NAN (JS writes
 // NaN for auto width/height/margin and for absent min/max), distinguished from a real 0.
@@ -19,10 +21,12 @@ fn is_auto(v: f64) -> bool {
     v.is_nan()
 }
 
-// Display codes JS writes into the buffer. `display:none` nodes are NOT pushed (no box), so only these
-// two appear: a block-flow participant, or an unsupported display (inline/flex/grid/table/contents/…)
-// that makes the whole subtree fall back to JS.
+// Display codes JS writes into the buffer. `display:none` nodes are NOT pushed (no box). A block whose
+// children are all block-level is DISPLAY_BLOCK; one whose content is pure text in a single font (an
+// inline formatting context — stage L2) is DISPLAY_TEXT_BLOCK; anything else (inline elements,
+// flex/grid/table, mixed block+text, …) is DISPLAY_UNSUPPORTED and the whole subtree falls back to JS.
 pub(crate) const DISPLAY_BLOCK: u8 = 1;
+pub(crate) const DISPLAY_TEXT_BLOCK: u8 = 2;
 pub(crate) const DISPLAY_UNSUPPORTED: u8 = 255;
 
 // One element's used values for block layout, decoded from the flat buffer. Lengths are px; auto/none
@@ -53,6 +57,14 @@ pub(crate) struct Input {
     pub(crate) br: f64,
     pub(crate) bb: f64,
     pub(crate) bl: f64,
+    // Text-block (DISPLAY_TEXT_BLOCK) fields — a native font handle + size/spacing for measuring runs
+    // in-process, and the JS-resolved line-height px (so no hhea parity is needed). The block's collapsed
+    // inline text is in the parallel `texts` array at the same record index. Unused for a plain block.
+    pub(crate) font: i32,
+    pub(crate) size: f64,
+    pub(crate) ls: f64,
+    pub(crate) ws: f64,
+    pub(crate) line_height: f64,
 }
 
 impl Input {
@@ -107,25 +119,24 @@ pub(crate) enum Outcome {
 // box per node in input order. Block flow: each block fills its containing block's content width (auto)
 // or takes its declared width; in-flow block children stack vertically at the content origin; auto
 // height is the children's stacked height (plus this box's own vertical edges).
-pub(crate) fn layout_block(inputs: &[Input], root_x: f64, root_y: f64, root_cb_w: f64) -> Outcome {
+pub(crate) fn layout_block(inputs: &[Input], texts: &[Option<Vec<u16>>], root_x: f64, root_y: f64, root_cb_w: f64) -> Outcome {
     if inputs.is_empty() {
         return Outcome::LaidOut(Vec::new());
     }
-    // Reject up front if any node uses an unmodelled display — L1 lays out a subtree only when every
-    // participant is block flow (or display:none, skipped). This is the whole-subtree gate.
+    // Reject up front if any node uses an unmodelled display — a subtree is laid out natively only when
+    // every participant is a block-flow box or a text block. This is the whole-subtree gate.
     for n in inputs {
         if n.display == DISPLAY_UNSUPPORTED {
             return Outcome::Unsupported;
         }
     }
-    // Precompute each node's in-flow block children (input indices), in document order.
+    // Precompute each node's in-flow child boxes (input indices), in document order. A text block has no
+    // child records (its text is in `texts`); a block-container's children are block-level boxes.
     let mut children: Vec<Vec<usize>> = vec![Vec::new(); inputs.len()];
     for (i, n) in inputs.iter().enumerate() {
         if n.parent >= 0 {
             let p = n.parent as usize;
-            // Only in-flow block boxes participate in block stacking; display:none is skipped (and any
-            // unsupported display already returned Unsupported above).
-            if p < inputs.len() && n.display == DISPLAY_BLOCK {
+            if p < inputs.len() && (n.display == DISPLAY_BLOCK || n.display == DISPLAY_TEXT_BLOCK) {
                 children[p].push(i);
             }
         }
@@ -134,14 +145,80 @@ pub(crate) fn layout_block(inputs: &[Input], root_x: f64, root_y: f64, root_cb_w
         .iter()
         .map(|n| Box { nid: n.nid, x: 0.0, y: 0.0, w: 0.0, h: 0.0, auto_height: false })
         .collect();
-    // The root's border-box width: its declared width (border-box adjusted) clamped, else it fills the
-    // caller's containing block. Two phases: MEASURE lays the subtree out relative to each node's own
-    // border-box origin (so collapse-through margins can propagate UP through returns without knowing
-    // final positions), then PLACE walks once top-down adding absolute offsets.
+    // Two phases: MEASURE lays the subtree out relative to each node's own border-box origin (so
+    // collapse-through margins can propagate UP through returns without knowing final positions), then
+    // PLACE walks once top-down adding absolute offsets. `failed` is set when a text block can't be
+    // measured natively (bad font handle, or a tab / combining mark / CJK the L2 line breaker declines)
+    // — the whole pass then falls back to JS.
     let root_w = resolve_width(&inputs[0], root_cb_w);
-    measure(0, root_w, inputs, &children, &mut boxes);
+    let failed = std::cell::Cell::new(false);
+    measure(0, root_w, inputs, texts, &children, &mut boxes, &failed);
+    if failed.get() {
+        return Outcome::Unsupported;
+    }
     place(0, root_x, root_y, &children, &mut boxes);
     Outcome::LaidOut(boxes)
+}
+
+// Greedy line count for a text block: collapse-split the text into words (maximal non-`[ \t\n\r\f]+`
+// runs — NBSP is NOT a break), pack them greedily against `content_w` comparing `lineX + spaceW + wordW`,
+// and count lines. Widths come from `fm.measure_run` (bit-parity with JS measureRun). None when the
+// text holds a construct the L2 breaker doesn't model — a tab / combining mark (measure_run returns
+// None) or a wide/CJK char (its own break unit, not handled yet) — so the caller declines to JS.
+fn line_count(fm: &crate::font::FontMetrics, text: &[u16], size: f64, ls: f64, ws: f64, content_w: f64) -> Option<u32> {
+    // Wide/CJK chars break between characters (not on spaces) — decline until L2 models that.
+    for &u in text {
+        if is_wide_unit(u) {
+            return None;
+        }
+    }
+    let space_w = fm.measure_run(&[0x20], size, ls, ws)?;
+    let is_ws = |u: u16| matches!(u, 0x20 | 0x09 | 0x0A | 0x0D | 0x0C);
+    // words = maximal non-whitespace runs
+    let mut words: Vec<&[u16]> = Vec::new();
+    let mut start = None;
+    for (i, &u) in text.iter().enumerate() {
+        if is_ws(u) {
+            if let Some(s) = start.take() {
+                words.push(&text[s..i]);
+            }
+        } else if start.is_none() {
+            start = Some(i);
+        }
+    }
+    if let Some(s) = start {
+        words.push(&text[s..]);
+    }
+    if words.is_empty() {
+        return Some(0);
+    }
+    let mut n = 1u32;
+    let mut line_x = fm.measure_run(words[0], size, ls, ws)?;
+    for word in &words[1..] {
+        let w = fm.measure_run(word, size, ls, ws)?;
+        let with_space = line_x + space_w;
+        if with_space + w > content_w {
+            n += 1;
+            line_x = w; // break eats the space; the word starts the new line
+        } else {
+            line_x = with_space + w;
+        }
+    }
+    Some(n)
+}
+
+// A UTF-16 unit whose code point is a wide/CJK character (its own break unit) — a lone BMP unit, or a
+// high surrogate (astral chars are wide too). Used to decline CJK text in the L2 breaker.
+fn is_wide_unit(u: u16) -> bool {
+    let cp = u as u32;
+    (0x1100..=0x115F).contains(&cp)
+        || (0x2E80..=0xA4CF).contains(&cp)
+        || (0xAC00..=0xD7A3).contains(&cp)
+        || (0xF900..=0xFAFF).contains(&cp)
+        || (0xFE30..=0xFE6F).contains(&cp)
+        || (0xFF00..=0xFF60).contains(&cp)
+        || (0xFFE0..=0xFFE6).contains(&cp)
+        || (0xD800..=0xDBFF).contains(&u) // astral (emoji etc.) — full-width, own unit
 }
 
 // A collapsing-margin SET: the largest positive and the smallest (most negative) adjoining margins.
@@ -196,11 +273,51 @@ struct MInfo {
 // collapse; a parent's top/bottom margin collapses with its first/last in-flow child's when that edge
 // is "open" (no border, no padding — and, for the bottom, an auto height); an empty block collapses
 // through.
-fn measure(i: usize, w: f64, inputs: &[Input], children: &[Vec<usize>], boxes: &mut [Box]) -> MInfo {
+fn measure(
+    i: usize,
+    w: f64,
+    inputs: &[Input],
+    texts: &[Option<Vec<u16>>],
+    children: &[Vec<usize>],
+    boxes: &mut [Box],
+    failed: &std::cell::Cell<bool>,
+) -> MInfo {
     let n = inputs[i];
-    let content_left_rel = n.bl + n.pl;
     let content_top_rel = n.bt + n.pt;
     let content_w = (w - n.edges_x()).max(0.0);
+
+    // A text block (inline formatting context): its height is the greedy line count × the line-height,
+    // measured natively (font.rs) with no per-run crossing. It has no child records; the text is in
+    // `texts[i]`. If it can't be measured (bad font / tab / combining / CJK), flag the pass for JS.
+    if n.display == DISPLAY_TEXT_BLOCK {
+        let lines = match texts.get(i).and_then(|t| t.as_ref()) {
+            Some(txt) => match crate::font::with_font(n.font, |fm| line_count(fm, txt, n.size, n.ls, n.ws, content_w)) {
+                Some(Some(count)) => count,
+                _ => {
+                    failed.set(true);
+                    0
+                }
+            },
+            None => 0,
+        };
+        let content_h = lines as f64 * n.line_height;
+        let box_h = if is_auto(n.height) {
+            content_top_rel + content_h + n.pb + n.bb
+        } else if n.border_box {
+            n.height
+        } else {
+            n.height + n.edges_y()
+        };
+        let to_border = |v: f64| if is_auto(v) || n.border_box { v } else { v + n.edges_y() };
+        let box_h = clamp_min_max(box_h, to_border(n.min_h), to_border(n.max_h)).max(0.0);
+        boxes[i].nid = n.nid;
+        boxes[i].w = w;
+        boxes[i].h = box_h;
+        boxes[i].auto_height = is_auto(n.height);
+        return MInfo { top: CMargin::of(Input::m(n.mt)), bottom: CMargin::of(Input::m(n.mb)), collapse_through: false };
+    }
+
+    let content_left_rel = n.bl + n.pl;
     let top_open = n.bt == 0.0 && n.pt == 0.0;
     let bottom_open = n.bb == 0.0 && n.pb == 0.0 && is_auto(n.height);
 
@@ -214,7 +331,7 @@ fn measure(i: usize, w: f64, inputs: &[Input], children: &[Vec<usize>], boxes: &
         has_child = true;
         let cn = inputs[c];
         let child_w = resolve_width(&cn, content_w);
-        let cm = measure(c, child_w, inputs, children, boxes);
+        let cm = measure(c, child_w, inputs, texts, children, boxes, failed);
         boxes[c].x = content_left_rel + Input::m(cn.ml);
         if first && top_open {
             // The first in-flow child's top margin collapses with this node's top margin (collapse-
@@ -340,6 +457,11 @@ mod tests {
             br: 0.0,
             bb: 0.0,
             bl: 0.0,
+            font: -1,
+            size: 16.0,
+            ls: 0.0,
+            ws: 0.0,
+            line_height: 0.0,
         }
     }
 
@@ -358,7 +480,7 @@ mod tests {
         let mut b = blk(2.0, 0);
         b.height = 30.0;
         let inputs = vec![blk(0.0, -1), a, b];
-        let bx = boxes(layout_block(&inputs, 0.0, 0.0, 800.0));
+        let bx = boxes(layout_block(&inputs, &[], 0.0, 0.0, 800.0));
         assert_eq!(bx[1], Box { nid: 1.0, x: 0.0, y: 0.0, w: 800.0, h: 50.0, auto_height: false });
         assert_eq!(bx[2], Box { nid: 2.0, x: 0.0, y: 50.0, w: 800.0, h: 30.0, auto_height: false });
         assert_eq!(bx[0].h, 80.0); // root auto height = 50 + 30
@@ -381,7 +503,7 @@ mod tests {
         let mut c = blk(2.0, 1);
         c.height = 20.0;
         let inputs = vec![blk(0.0, -1), a, c];
-        let bx = boxes(layout_block(&inputs, 0.0, 0.0, 100.0));
+        let bx = boxes(layout_block(&inputs, &[], 0.0, 0.0, 100.0));
         // a: y = 10 (margin), border-box width = 100 - 0 margins = 100, auto height = 20 + pt+pb+bt+bb = 20+14
         assert_eq!(bx[1].y, 10.0);
         assert_eq!(bx[1].w, 100.0);
@@ -400,7 +522,7 @@ mod tests {
         a.max_w = 150.0;
         a.height = 40.0;
         let inputs = vec![blk(0.0, -1), a];
-        let bx = boxes(layout_block(&inputs, 0.0, 0.0, 800.0));
+        let bx = boxes(layout_block(&inputs, &[], 0.0, 0.0, 800.0));
         assert_eq!(bx[1].w, 150.0); // clamped by max-width (border-box)
     }
 
@@ -409,6 +531,6 @@ mod tests {
         let mut a = blk(1.0, 0);
         a.display = DISPLAY_UNSUPPORTED; // e.g. flex
         let inputs = vec![blk(0.0, -1), a];
-        assert!(matches!(layout_block(&inputs, 0.0, 0.0, 800.0), Outcome::Unsupported));
+        assert!(matches!(layout_block(&inputs, &[], 0.0, 0.0, 800.0), Outcome::Unsupported));
     }
 }

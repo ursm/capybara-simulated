@@ -31,3 +31,8 @@ v8 = { version = "150.4.0", features = ["simdutf"] }
 selectors = "0.40"
 cssparser = "0.37"
 precomputed-hash = "0.1"
+
+# Native text metrics for native layout (stage L2): fontations (the pure-Rust font stack Chrome & Servo
+# use). `skrifa` reads a font's cmap + hmtx advances + metrics, so native inline layout measures runs +
+# breaks lines IN-PROCESS (no per-run V8 crossing). Re-exports read-fonts as `skrifa::raw`.
+skrifa = "0.31"

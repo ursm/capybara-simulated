@@ -584,6 +584,7 @@ module Capybara
         # `fc-match` once per family, not once per measurement.
         @font_table_lock      = Mutex.new
         @font_advance_tables  = {}
+        @font_files           = {}   # (family, weight/style) -> fontconfig path, for native text metrics
         @font_glyph_lock      = Mutex.new
         @font_glyph           = {}
         @fc_strong_lock       = Mutex.new
@@ -7685,6 +7686,20 @@ module Capybara
         table = build_font_advance_table(family.to_s, weight_style.to_s)
         @font_table_lock.synchronize { @font_advance_tables[key] = table }
         table
+      end
+
+      # The fontconfig file backing a CSS family + weight/style, for NATIVE text metrics: csim_native
+      # parses it with fontations (skrifa) so native layout measures runs in-process. Same fontconfig
+      # resolution the system advance table uses, so native's advances match the JS table's; nil when
+      # unresolved (JS keeps its estimate). Memoised (hit AND miss) so it costs no extra `fc-match`.
+      def font_file(family, weight_style = nil)
+        key = "#{family} #{weight_style}"
+        @font_table_lock.synchronize do
+          return @font_files[key] if @font_files.key?(key)
+        end
+        path = font_file_for_family(family.to_s, weight_style.to_s)
+        @font_table_lock.synchronize { @font_files[key] = path }
+        path
       end
 
       # fontconfig resolves a CSS family (or a generic like sans-serif) to a real

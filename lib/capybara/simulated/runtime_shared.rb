@@ -230,6 +230,7 @@ module Capybara
         '__csim_decodeImage'         => ->(b, *a) { b.decode_image(a[0], a[1], a[2]) },
         '__csim_renderText'          => ->(b, *a) { b.render_text(a[0], a[1], a[2], a[3], a[4]) },
         '__csim_fontAdvances'        => ->(b, *a) { b.font_advance_table(a[0], a[1]) },
+        '__csim_fontFile'            => ->(b, *a) { b.font_file(a[0], a[1]) },
         '__csim_fontAdvancesFromUrl' => ->(b, *a) { b.font_advance_table_from_url(a[0]) },
         '__csim_localFontTable'      => ->(b, *a) { b.local_font_table(a[0], a[1] || '') },
         '__csim_resourceTimingFetch' => ->(b, *a) { b.resource_timing_fetch(a[0], a[1] == true, a[2] || 'same-origin') },
