@@ -1,6 +1,6 @@
 # frozen_string_literal: true
 # Native layout — CSS tables (§17), geometry shadow-parity. Increments t1 (base) + t2 (spans) + t3 (collapse) +
-# t4 (caption) + t5 (thead/tfoot) + t6 (table-layout:fixed):
+# t4 (caption) + t5 (thead/tfoot) + t6 (table-layout:fixed) + t7 (colgroup/<col>):
 # an auto-layout `display:table` in normal flow, border-collapse SEPARATE or COLLAPSE — table >
 # (table-header-group | table-row-group | table-footer-group | table-row)* > table-cell*, LTR. thead / tbody /
 # tfoot are sorted into RENDER order (header, body, footer) regardless of source order. Each cell's used border
@@ -14,12 +14,14 @@
 # box-sizing / auto-margin centering honored, auto width fills the table; a caption with a definite width WIDER
 # than the grid floors the table (which stretches its columns to fill it, like an explicit table width) —
 # stacked above (the grid offsets down) or below the grid, its own block / text subtree laid out normally.
-# colspan/rowspan, ragged grids, border-collapse, thead/tbody/tfoot, table-layout:fixed, a caption, and a
-# position:relative cell (offset ignored) ARE supported. Still DECLINES to JS — a caption with a MARGIN or one
-# that OVERFLOWS the table (a %-width wider than the grid; the oracle lays both out correctly, native just
-# declines) or more than one caption, <col>/<colgroup>, inline-table, anonymous rows/cells, rtl, nested tables,
-# an imposed table height (declared / attribute / min / max), an empty row group, and a column/row only spanning
-# cells cover. Each bail is an A/B: the feature-carrying input declines, a plain table stays native. V8 only.
+# colspan/rowspan, ragged grids, border-collapse, thead/tbody/tfoot, table-layout:fixed, colgroup/<col> widths,
+# a caption, and a position:relative cell (offset ignored) ARE supported. Still DECLINES to JS — a caption with
+# a MARGIN or one that OVERFLOWS the table (a %-width wider than the grid; the oracle lays both out correctly,
+# native just declines) or more than one caption, inline-table, anonymous rows/cells, rtl, nested tables, an
+# imposed table height (declared / attribute / min / max), an empty row group, and a column/row only spanning
+# cells cover. (A column's visibility:collapse is a conformance gap the oracle itself doesn't model, so native
+# matches it rather than bailing.) Each bail is an A/B: the feature-carrying input declines, a plain table stays
+# native. V8 only.
 require 'capybara/simulated'
 require 'rack'
 require_relative 'support/session_teardown'
@@ -158,6 +160,29 @@ RSpec.describe 'native layout table parity', if: ENV.fetch('CSIM_JS_ENGINE', 'v8
     expect_parity('<table style="table-layout:fixed;width:300px;border-spacing:0"><tr><td style="width:0;padding:0;height:20px">a</td><td style="width:0;padding:0">b</td></tr></table>')
   end
 
+  # t7 — colgroup / <col>. A column's declared width / span constrains its track: the oracle folds it into the
+  # table's intrinsic width AND the column distribution, so the auto table grows to hold a wide <col> and the
+  # cells fill their columns — native reassembles those pushed widths as usual.
+  it 'matches an auto-layout table with a <col> width (the table grows to it)' do
+    expect_parity('<table style="border-spacing:4px"><colgroup><col style="width:120px"><col></colgroup><tr><td style="height:20px">a</td><td>bbbb</td></tr></table>')
+  end
+
+  it 'matches a <colgroup span="2"> width applied to both columns' do
+    expect_parity('<table style="border-spacing:4px"><colgroup span="2" style="width:90px"></colgroup><tr><td style="height:20px">a</td><td>b</td></tr></table>')
+  end
+
+  it 'matches a <col span="2"> width applied to both columns' do
+    expect_parity('<table style="border-spacing:4px"><col span="2" style="width:70px"><tr><td style="height:20px">a</td><td>b</td></tr></table>')
+  end
+
+  it 'matches a <col> width overridden by a wider cell width (the larger wins)' do
+    expect_parity('<table style="border-spacing:4px"><col style="width:50px"><col><tr><td style="width:150px;height:20px">a</td><td>b</td></tr></table>')
+  end
+
+  it 'matches <col> widths in a fixed-layout table' do
+    expect_parity('<table style="table-layout:fixed;width:300px;border-spacing:4px"><colgroup><col style="width:80px"><col></colgroup><tr><td style="height:20px">a</td><td>b</td></tr></table>')
+  end
+
   # t3 — border-collapse:collapse (half-borders, spacing 0, the outer half-border frame).
   it 'matches a border-collapse 2x2 with bordered cells' do
     expect_parity('<table style="border-collapse:collapse"><tr><td style="border:4px solid;width:40px;height:20px">a</td><td style="border:4px solid;width:50px">b</td></tr><tr><td style="border:4px solid">c</td><td style="border:4px solid;height:30px">d</td></tr></table>')
@@ -271,7 +296,6 @@ RSpec.describe 'native layout table parity', if: ENV.fetch('CSIM_JS_ENGINE', 'v8
   it('declines a caption with a margin (folds into the stacking)') { a_bails_b_native('<table style="border-spacing:4px"><caption style="height:16px;margin:5px">c</caption><tr><td style="width:40px">a</td></tr></table>') }
   it('declines a caption that overflows the table (a %-width wider than the grid — the table does not grow)') { a_bails_b_native('<table style="border-spacing:4px"><caption style="width:120%">c</caption><tr><td style="width:40px">a</td></tr></table>') }
   it('declines two captions') { a_bails_b_native('<table style="border-spacing:4px"><caption>top</caption><caption style="caption-side:bottom">bottom</caption><tr><td style="width:40px">a</td></tr></table>') }
-  it('declines a colgroup/col') { a_bails_b_native('<table><colgroup><col></colgroup><tr><td>a</td></tr></table>') }
   it('declines inline-table') { a_bails_b_native('<span style="display:inline-table"><span style="display:table-row"><span style="display:table-cell">a</span></span></span>') }
   it('declines an rtl table (column reversal)') { a_bails_b_native('<table dir="rtl"><tr><td style="width:40px">a</td><td style="width:60px">b</td></tr></table>') }
   it('declines a table with a declared height below its natural grid height') { a_bails_b_native('<table style="height:10px;border-spacing:4px"><tr><td style="height:50px">a</td></tr></table>') }
