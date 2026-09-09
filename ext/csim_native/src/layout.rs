@@ -911,17 +911,28 @@ fn measure_flex(
         }
     }
 
+    // min/max-height (content-box in CSS unless border-box) as a border-box figure, for the clamps below.
+    let to_border_y = |v: f64| if is_auto(v) || n.border_box { v } else { v + edges_y };
+
     // The container's MAIN content extent (the wrap capacity + the per-line justify basis): a row's is its
-    // content width; a column's is its declared content height, or (auto) the stacked items.
+    // content width; a column's is its declared content height (clamped by min/max-height), or (auto) the
+    // extent its items are justified within.
     let gap_total = gap * cnt.saturating_sub(1) as f64;
     let sum_main: f64 = mo.iter().sum();
+    let used_main = sum_main + gap_total; // the items are PUSHED (grow/shrink resolved), so this is final
     let content_main = if main_is_x {
         content_w
     } else if is_auto(n.height) {
-        sum_main + gap_total
+        // A COLUMN's main is its HEIGHT; with the items already sized, the extent they are justified within
+        // is a max-height CAPACITY the content overruns (items overflow it), else the content floored by
+        // min-height (a min-height the items underflow IS a main size for justify to distribute —
+        // `min-h-screen` on a page shell). No min/max → just the stacked items. (A wrapping column with a
+        // min/max-height bails in the harness — this is its single line's extent.)
+        let floor = if is_auto(n.min_h) { 0.0 } else { (to_border_y(n.min_h) - edges_y).max(0.0) };
+        let cap = if is_auto(n.max_h) { f64::INFINITY } else { (to_border_y(n.max_h) - edges_y).max(0.0) };
+        if used_main > cap { cap } else { used_main.max(floor) }
     } else {
-        let bh = if n.border_box { n.height } else { n.height + edges_y };
-        (bh - edges_y).max(0.0)
+        (clamp_min_max(to_border_y(n.height), to_border_y(n.min_h), to_border_y(n.max_h)).max(0.0) - edges_y).max(0.0)
     };
 
     // Break into flex lines (positions into `kids`). Wrapping needs a DEFINITE main capacity: a row always
@@ -963,22 +974,21 @@ fn measure_flex(
         // (the stacked lines), and min/max-height then grows/shrinks the FINAL box around them WITHOUT moving
         // them — so container_cross stays the unclamped content (a min-height:100 app-shell row of a 30px
         // item keeps the item at the top and grows the box to 100; align-content sees free = 0).
-        let to_border = |v: f64| if is_auto(v) || n.border_box { v } else { v + edges_y };
         if is_auto(n.height) {
-            let bh = clamp_min_max(lines_cross_sum + edges_y, to_border(n.min_h), to_border(n.max_h)).max(0.0);
+            let bh = clamp_min_max(lines_cross_sum + edges_y, to_border_y(n.min_h), to_border_y(n.max_h)).max(0.0);
             (w, bh, lines_cross_sum, false)
         } else {
-            let raw_h = if n.border_box { n.height } else { n.height + edges_y };
-            let bh = clamp_min_max(raw_h, to_border(n.min_h), to_border(n.max_h)).max(0.0);
+            let bh = clamp_min_max(to_border_y(n.height), to_border_y(n.min_h), to_border_y(n.max_h)).max(0.0);
             (w, bh, (bh - edges_y).max(0.0), true)
         }
     } else {
         let bh = if is_auto(n.height) {
-            content_main + edges_y
-        } else if n.border_box {
-            n.height
+            // The box wraps what the items consumed OR the extent a min-height floored under them, then the
+            // OUTER min/max-height clamp (a max-height the content overruns caps the box at it while the
+            // items overflow — content_main holds the capped extent, used_main the overrunning content).
+            clamp_min_max(content_main.max(used_main) + edges_y, to_border_y(n.min_h), to_border_y(n.max_h)).max(0.0)
         } else {
-            n.height + edges_y
+            clamp_min_max(to_border_y(n.height), to_border_y(n.min_h), to_border_y(n.max_h)).max(0.0)
         };
         (w, bh, content_w, true) // a column's cross (width) is always definite
     };
@@ -1550,6 +1560,46 @@ mod tests {
         let inputs = vec![flex_col(0.0, -1, 200.0), a];
         let bx = boxes(layout_block(&inputs, &[], &[], 0.0, 0.0, 800.0));
         assert_eq!(bx[1].x, 75.0); // (200 - 50) / 2
+    }
+
+    #[test]
+    fn flex_column_min_height_floors_the_extent_and_justify_distributes() {
+        // Auto-height column, two 30px items (content 60). min-height:200 floors the extent to 200 — a main
+        // size justify-content distributes (§page-shell min-h-screen) — and grows the box to 200.
+        let mut f = flex_col(0.0, -1, 100.0);
+        f.min_h = 200.0;
+        f.flex_justify = 1; // center
+        let inputs = vec![f, item(1.0, 0, 100.0, 30.0), item(2.0, 0, 100.0, 30.0)];
+        let bx = boxes(layout_block(&inputs, &[], &[], 0.0, 0.0, 800.0));
+        assert_eq!(bx[0].h, 200.0);
+        assert_eq!([bx[1].y, bx[2].y], [70.0, 100.0]); // free = 200-60 = 140, center lead 70
+    }
+
+    #[test]
+    fn flex_column_max_height_caps_the_box_while_content_overflows() {
+        // Auto-height column, three non-shrinking 30px items (content 90). max-height:40 caps the BOX at 40,
+        // but the items (pushed at their own size) overflow it — extent = capacity, justify free negative.
+        let mut f = flex_col(0.0, -1, 100.0);
+        f.max_h = 40.0;
+        let inputs = vec![f, item(1.0, 0, 100.0, 30.0), item(2.0, 0, 100.0, 30.0), item(3.0, 0, 100.0, 30.0)];
+        let bx = boxes(layout_block(&inputs, &[], &[], 0.0, 0.0, 800.0));
+        assert_eq!(bx[0].h, 40.0); // box capped by max-height
+        assert_eq!([bx[1].y, bx[2].y, bx[3].y], [0.0, 30.0, 60.0]); // items overflow (free = 40 - 90 < 0)
+    }
+
+    #[test]
+    fn flex_column_declared_height_clamped_up_by_min_height() {
+        // A DECLARED height is clamped by min/max-height before layout (definite), so items justify in the
+        // clamped extent: height:40 clamped up to min-height:90, justify-end puts the 30px item at y=60.
+        let mut f = flex_col(0.0, -1, 100.0);
+        f.height = 40.0;
+        f.height_adjoins = false;
+        f.min_h = 90.0;
+        f.flex_justify = 2; // end
+        let inputs = vec![f, item(1.0, 0, 100.0, 30.0)];
+        let bx = boxes(layout_block(&inputs, &[], &[], 0.0, 0.0, 800.0));
+        assert_eq!(bx[0].h, 90.0);
+        assert_eq!(bx[1].y, 60.0); // extent 90, free 60, end
     }
 
     #[test]
