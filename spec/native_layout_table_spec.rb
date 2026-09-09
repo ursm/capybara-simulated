@@ -8,10 +8,14 @@
 # position every cell at its (pushed) starting column/row, and derives every row, row-group and the table's
 # OWN box. In collapse the spacing is 0 and the table gains a `collapseOuter` half-border frame (from the edge
 # cells) inside its own border+padding. A single CAPTION (top or bottom) makes the `<table>` box the WRAPPER:
-# the caption is a block spanning the table's content width, stacked above (the grid offsets down) or below the
-# grid, its own block / text subtree laid out normally. colspan/rowspan, ragged grids, border-collapse, a
-# caption, and a position:relative cell (offset ignored) ARE supported. Still DECLINES to JS — a caption with a
-# margin or more than one caption, <col>/<colgroup>, thead/tfoot (render reorder), table-layout:fixed,
+# the caption is a NORMAL BLOCK in the table's content width (§17.4) — declared height / width / min-max /
+# box-sizing / auto-margin centering honored, auto width fills the table; a caption with a definite width WIDER
+# than the grid floors the table (which stretches its columns to fill it, like an explicit table width) —
+# stacked above (the grid offsets down) or below the grid, its own block / text subtree laid out normally.
+# colspan/rowspan, ragged grids, border-collapse, a caption, and a position:relative cell (offset ignored) ARE
+# supported. Still DECLINES to JS — a caption with a MARGIN or one that OVERFLOWS the table (a %-width wider
+# than the grid; the oracle lays both out correctly, native just declines) or more than one caption,
+# <col>/<colgroup>, thead/tfoot (render reorder), table-layout:fixed,
 # inline-table, anonymous rows/cells, rtl, nested tables, an imposed table height (declared / attribute / min /
 # max), an empty row group, and a column/row only spanning cells cover. Each bail is an A/B: the feature-
 # carrying input declines, a plain table stays native. V8 only.
@@ -159,6 +163,50 @@ RSpec.describe 'native layout table parity', if: ENV.fetch('CSIM_JS_ENGINE', 'v8
     expect_parity('<table style="border-spacing:4px;caption-side:bottom"><caption style="height:16px;position:relative;left:11px">c</caption><tr><td style="width:60px;height:20px">a</td></tr></table>')
   end
 
+  # A caption is a normal block in the table's content width (§17.4): declared height / width / min-max /
+  # box-sizing / auto-margin centering honored, auto width fills the table, and a caption with a definite width
+  # wider than the grid floors the table (stretching its columns to fill it).
+  it 'matches a caption honoring a declared height (content overflows the box)' do
+    expect_parity('<table style="border-spacing:4px"><caption style="height:40px">Cap</caption><tr><td style="width:60px;height:20px">a</td></tr></table>')
+  end
+
+  it 'matches a caption floored by min-height and capped by max-height' do
+    expect_parity('<table style="border-spacing:4px"><caption style="min-height:50px">Cap</caption><tr><td style="width:60px;height:20px">a</td></tr></table>')
+    expect_parity('<table style="border-spacing:4px"><caption style="max-height:8px">Cap</caption><tr><td style="width:60px;height:20px">a</td></tr></table>')
+  end
+
+  it 'matches a caption narrower than the grid (declared width honored, table unchanged)' do
+    expect_parity('<table style="border-spacing:4px"><caption style="width:20px">Cap</caption><tr><td style="width:200px;height:20px">a</td></tr></table>')
+  end
+
+  it 'matches a caption wider than the grid (the table grows and its columns stretch to fill it)' do
+    # A definite (length / min-width) caption width floors the table via tableIntrinsicWidths, so the columns
+    # STRETCH to fill it (Chrome: a 300px caption over a 156px grid stretches the two columns to 124/164).
+    expect_parity('<table style="border-spacing:4px"><caption style="width:300px">Cap</caption><tr><td style="width:60px;height:20px">a</td><td style="width:80px">b</td></tr></table>')
+    expect_parity('<table style="border-spacing:4px"><caption style="min-width:300px">Cap</caption><tr><td style="width:60px;height:20px">a</td><td style="width:80px">b</td></tr></table>')
+  end
+
+  it 'matches a caption whose max-width caps both the caption and the table it floors' do
+    expect_parity('<table style="border-spacing:4px"><caption style="width:300px;max-width:200px">Cap</caption><tr><td style="width:60px;height:20px">a</td><td style="width:80px">b</td></tr></table>')
+  end
+
+  it 'matches a caption where min-width beats a smaller max-width (§10.4: min wins the contradiction)' do
+    expect_parity('<table style="border-spacing:4px"><caption style="min-width:300px;max-width:200px">Cap</caption><tr><td style="width:60px;height:20px">a</td><td style="width:80px">b</td></tr></table>')
+  end
+
+  it 'matches a caption wider than an explicitly-narrow table (the table grows past its declared width, §17.5.2)' do
+    expect_parity('<table style="width:100px;border-spacing:4px"><caption style="width:300px">Cap</caption><tr><td style="width:40px;height:20px">a</td></tr></table>')
+  end
+
+  it 'matches a caption with a percentage width narrower than the table (resolved against the table width)' do
+    expect_parity('<table style="border-spacing:4px"><caption style="width:50%">Cap</caption><tr><td style="width:60px;height:20px">a</td></tr></table>')
+  end
+
+  it 'matches a caption with box-sizing and its own padding' do
+    expect_parity('<table style="border-spacing:4px"><caption style="box-sizing:border-box;width:100px;padding:10px">Cap</caption><tr><td style="width:60px;height:20px">a</td></tr></table>')
+    expect_parity('<table style="border-spacing:4px"><caption style="width:100px;padding:10px">Cap</caption><tr><td style="width:60px;height:20px">a</td></tr></table>')
+  end
+
   # A/B bails — the feature declines; a plain table stays native.
   def a_bails_b_native(feature, plain = '<table style="border-spacing:4px"><tr><td style="width:40px">a</td><td style="width:40px">b</td></tr></table>')
     expect(run_shadow(feature)['ok']).to be(false), "expected #{feature.inspect} to bail"
@@ -166,6 +214,7 @@ RSpec.describe 'native layout table parity', if: ENV.fetch('CSIM_JS_ENGINE', 'v8
   end
 
   it('declines a caption with a margin (folds into the stacking)') { a_bails_b_native('<table style="border-spacing:4px"><caption style="height:16px;margin:5px">c</caption><tr><td style="width:40px">a</td></tr></table>') }
+  it('declines a caption that overflows the table (a %-width wider than the grid — the table does not grow)') { a_bails_b_native('<table style="border-spacing:4px"><caption style="width:120%">c</caption><tr><td style="width:40px">a</td></tr></table>') }
   it('declines two captions') { a_bails_b_native('<table style="border-spacing:4px"><caption>top</caption><caption style="caption-side:bottom">bottom</caption><tr><td style="width:40px">a</td></tr></table>') }
   it('declines a colgroup/col') { a_bails_b_native('<table><colgroup><col></colgroup><tr><td>a</td></tr></table>') }
   it('declines thead/tfoot (render reorder)') { a_bails_b_native('<table><thead><tr><td>h</td></tr></thead><tbody><tr><td>b</td></tr></tbody></table>') }
