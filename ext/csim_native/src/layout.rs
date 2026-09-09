@@ -92,6 +92,9 @@ pub(crate) struct Input {
     pub(crate) flex_justify: u8,
     pub(crate) flex_main_gap: f64,
     pub(crate) flex_cross_align: u8,
+    // Flex main axis: true = row (main is X / width), false = column (main is Y / height). The item
+    // main/cross sizes swap accordingly; both come pushed.
+    pub(crate) flex_main_is_x: bool,
 }
 
 pub(crate) const FLOAT_LEFT: u8 = 1;
@@ -823,14 +826,15 @@ fn measure(
     MInfo { top: top_m, top_only: top_m, bottom: bottom_m, collapse_through: false }
 }
 
-// Native flex PLACEMENT for a single-line LTR `row` (§9.7). The item SIZING is resolved JS-side — each
-// item's used main (width) and cross (height) size rides its record, like a float's shrink-to-fit width —
-// so this only DISTRIBUTES the items on the main axis (justify-content + gap + margins) and ALIGNS them
-// on the cross axis, then sizes the container's own box; each item's subtree is laid out by the ordinary
-// `measure` at its pushed border-box, in a fresh float context (an item is its own formatting context).
-// Mirrors layoutFlexRow / distributionOffsets / crossAlignPhysical. The harness bails column / wrap /
-// reverse / rtl / baseline / min-max-height / auto-margin / nested-flex / replaced, so a single line with
-// an exact container cross size is all that reaches here.
+// Native flex PLACEMENT for a single-line LTR `row` OR `column` (§9.7), `nowrap`. The item SIZING is
+// resolved JS-side — each item's used main and cross size rides its record (width/height, swapped by
+// `flex_main_is_x`), like a float's shrink-to-fit width — so this only DISTRIBUTES the items on the MAIN
+// axis (justify-content + gap + margins) and ALIGNS them on the CROSS axis, then sizes the container's own
+// box; each item's subtree is laid out by the ordinary `measure` at its pushed border-box, in a fresh
+// float context (an item is its own formatting context). Mirrors layoutFlexRow / layoutFlexColumn /
+// distributionOffsets / crossAlignPhysical. The harness bails wrap / reverse / rtl / vertical writing
+// modes / baseline / the cross-axis min-max clamp / auto-margin / unsupported-nested-flex / replaced, so a
+// single line with an exact container cross size is all that reaches here.
 fn measure_flex(
     i: usize,
     w: f64,
@@ -845,6 +849,10 @@ fn measure_flex(
     let content_w = (w - n.edges_x()).max(0.0);
     let content_left_rel = n.bl + n.pl;
     let content_top_rel = n.bt + n.pt;
+    let edges_y = n.edges_y();
+    let main_is_x = n.flex_main_is_x; // row: main = X/width; column: main = Y/height
+    let gap = n.flex_main_gap;
+    let cnt = children[i].len();
 
     // Phase A — lay each item's subtree out at its pushed border-box (record order == flex order, the
     // harness sorted by `order`), each in a fresh float context.
@@ -853,57 +861,104 @@ fn measure_flex(
         measure(c, iw, inputs, runs, run_texts, children, boxes, failed, &mut FloatCtx::new(), 0.0, 0.0);
     }
 
-    let cnt = children[i].len();
-    // Phase B — MAIN axis (x): distribute free space per justify-content, honouring the gap and each
-    // item's horizontal margins.
-    let gap = n.flex_main_gap;
-    let mut sum = 0.0;
-    for &c in &children[i] {
-        sum += boxes[c].w + Input::m(inputs[c].ml) + Input::m(inputs[c].mr);
-    }
-    let free = content_w - (sum + gap * cnt.saturating_sub(1) as f64);
+    // An item's OUTER extent (size + the two margins) along the main / cross axes, in the flow's axes.
+    let main_outer = |c: usize, boxes: &[Box]| -> f64 {
+        let cn = inputs[c];
+        if main_is_x {
+            boxes[c].w + Input::m(cn.ml) + Input::m(cn.mr)
+        } else {
+            boxes[c].h + Input::m(cn.mt) + Input::m(cn.mb)
+        }
+    };
+    let cross_outer = |c: usize, boxes: &[Box]| -> f64 {
+        let cn = inputs[c];
+        if main_is_x {
+            boxes[c].h + Input::m(cn.mt) + Input::m(cn.mb)
+        } else {
+            boxes[c].w + Input::m(cn.ml) + Input::m(cn.mr)
+        }
+    };
+
+    // The container's MAIN content extent: for a row it is the content width (from `width`); for a column
+    // it is the content height — the declared one, or (auto) the stacked items, which leaves no free space.
+    let gap_total = gap * cnt.saturating_sub(1) as f64;
+    let sum_main: f64 = children[i].iter().map(|&c| main_outer(c, boxes)).sum();
+    let content_main = if main_is_x {
+        content_w
+    } else if is_auto(n.height) {
+        sum_main + gap_total
+    } else {
+        let bh = if n.border_box { n.height } else { n.height + edges_y };
+        (bh - edges_y).max(0.0)
+    };
+    let free = content_main - (sum_main + gap_total);
     let (lead, between) = flex_distribution(n.flex_justify, free, cnt);
+
+    // The container's CROSS content extent: a row's is its height (auto = tallest item outer, else the
+    // declared content height); a column's is its content width. min/max on the cross axis is bailed in
+    // the harness, so this is exact and stretch needs no re-layout (the item's pushed cross size already
+    // fills the line → a start/stretch offset of 0).
+    let line_cross: f64 = children[i].iter().map(|&c| cross_outer(c, boxes)).fold(0.0, f64::max);
+    let (box_w, box_h, container_cross) = if main_is_x {
+        let (bh, cc) = if is_auto(n.height) {
+            (line_cross + edges_y, line_cross)
+        } else {
+            let bh = if n.border_box { n.height } else { n.height + edges_y };
+            (bh, (bh - edges_y).max(0.0))
+        };
+        (w, bh, cc)
+    } else {
+        let bh = if is_auto(n.height) {
+            content_main + edges_y
+        } else if n.border_box {
+            n.height
+        } else {
+            n.height + edges_y
+        };
+        (w, bh, content_w)
+    };
+
+    // Place each item: MAIN axis by justify-content (+ gap + main margins), CROSS axis by align.
+    let main_start = if main_is_x { content_left_rel } else { content_top_rel };
+    let cross_start = if main_is_x { content_top_rel } else { content_left_rel };
     let mut at = lead;
     for (k, &c) in children[i].iter().enumerate() {
+        let cn = inputs[c];
         if k > 0 {
             at += gap + between;
         }
-        at += Input::m(inputs[c].ml);
-        boxes[c].x = content_left_rel + at;
-        at += boxes[c].w + Input::m(inputs[c].mr);
-    }
-
-    // Phase C — CROSS axis (y) + the container's own height. The line's cross size is the tallest item
-    // outer; an auto-height container wraps it, a definite one fills its content box (min/max-height is
-    // bailed, so the container cross size is exact and stretch needs no re-layout — the item's pushed
-    // cross size already fills the line, so a start/stretch item's offset is 0).
-    let mut line_cross = 0.0f64;
-    for &c in &children[i] {
-        let outer = boxes[c].h + Input::m(inputs[c].mt) + Input::m(inputs[c].mb);
-        if outer > line_cross {
-            line_cross = outer;
-        }
-    }
-    let edges_y = n.edges_y();
-    let (box_h, container_cross) = if is_auto(n.height) {
-        (line_cross + edges_y, line_cross)
-    } else {
-        let bh = if n.border_box { n.height } else { n.height + edges_y };
-        (bh, (bh - edges_y).max(0.0))
-    };
-    for &c in &children[i] {
-        let outer = boxes[c].h + Input::m(inputs[c].mt) + Input::m(inputs[c].mb);
-        let free_c = container_cross - outer;
-        let off = match inputs[c].flex_cross_align {
-            1 => free_c / 2.0, // center
-            2 => free_c,       // end
-            _ => 0.0,          // start / stretch
+        let (m_lead, m_trail, m_size) = if main_is_x {
+            (Input::m(cn.ml), Input::m(cn.mr), boxes[c].w)
+        } else {
+            (Input::m(cn.mt), Input::m(cn.mb), boxes[c].h)
         };
-        boxes[c].y = content_top_rel + off + Input::m(inputs[c].mt);
+        at += m_lead;
+        let main_pos = main_start + at;
+        at += m_size + m_trail;
+
+        let (c_lead, c_out) = if main_is_x {
+            (Input::m(cn.mt), boxes[c].h + Input::m(cn.mt) + Input::m(cn.mb))
+        } else {
+            (Input::m(cn.ml), boxes[c].w + Input::m(cn.ml) + Input::m(cn.mr))
+        };
+        let off = match cn.flex_cross_align {
+            1 => (container_cross - c_out) / 2.0, // center
+            2 => container_cross - c_out,         // end
+            _ => 0.0,                             // start / stretch
+        };
+        let cross_pos = cross_start + off + c_lead;
+
+        if main_is_x {
+            boxes[c].x = main_pos;
+            boxes[c].y = cross_pos;
+        } else {
+            boxes[c].y = main_pos;
+            boxes[c].x = cross_pos;
+        }
     }
 
     boxes[i].nid = n.nid;
-    boxes[i].w = w;
+    boxes[i].w = box_w;
     boxes[i].h = box_h.max(0.0);
     boxes[i].auto_height = is_auto(n.height);
     let top = CMargin::of(Input::m(n.mt));
@@ -999,6 +1054,7 @@ mod tests {
             flex_justify: 0,
             flex_main_gap: 0.0,
             flex_cross_align: 0,
+            flex_main_is_x: true, // row by default
         }
     }
 
@@ -1223,6 +1279,44 @@ mod tests {
             assert_eq!(bx[1].y, y, "align code {code}");
             assert_eq!(bx[0].h, 90.0);
         }
+    }
+
+    fn flex_col(nid: f64, parent: i32, width: f64) -> Input {
+        let mut c = flex(nid, parent, width);
+        c.flex_main_is_x = false;
+        c
+    }
+
+    #[test]
+    fn flex_column_stacks_items_and_auto_height_sums_them() {
+        let inputs = vec![flex_col(0.0, -1, 200.0), item(1.0, 0, 50.0, 30.0), item(2.0, 0, 50.0, 30.0), item(3.0, 0, 50.0, 30.0)];
+        let bx = boxes(layout_block(&inputs, &[], &[], 0.0, 0.0, 800.0));
+        assert_eq!([bx[1].y, bx[2].y, bx[3].y], [0.0, 30.0, 60.0]); // stacked down the main (Y) axis
+        assert_eq!([bx[1].x, bx[2].x, bx[3].x], [0.0, 0.0, 0.0]);   // cross-start on X
+        assert_eq!(bx[0].h, 90.0); // auto main = Σ item heights
+        assert_eq!(bx[0].w, 200.0);
+    }
+
+    #[test]
+    fn flex_column_justify_center_with_definite_height() {
+        let mut f = flex_col(0.0, -1, 200.0);
+        f.height = 200.0;
+        f.height_adjoins = false;
+        f.flex_justify = 1; // center
+        let inputs = vec![f, item(1.0, 0, 50.0, 30.0), item(2.0, 0, 50.0, 30.0), item(3.0, 0, 50.0, 30.0)];
+        let bx = boxes(layout_block(&inputs, &[], &[], 0.0, 0.0, 800.0));
+        // free = 200 - 90 = 110; center lead = 55 → y 55 / 85 / 115.
+        assert_eq!([bx[1].y, bx[2].y, bx[3].y], [55.0, 85.0, 115.0]);
+        assert_eq!(bx[0].h, 200.0);
+    }
+
+    #[test]
+    fn flex_column_cross_align_center_on_x() {
+        let mut a = item(1.0, 0, 50.0, 30.0);
+        a.flex_cross_align = 1; // center on the cross (X) axis
+        let inputs = vec![flex_col(0.0, -1, 200.0), a];
+        let bx = boxes(layout_block(&inputs, &[], &[], 0.0, 0.0, 800.0));
+        assert_eq!(bx[1].x, 75.0); // (200 - 50) / 2
     }
 
     #[test]

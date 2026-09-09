@@ -69,6 +69,26 @@ RSpec.describe 'native layout flex parity', if: ENV.fetch('CSIM_JS_ENGINE', 'v8'
     expect_parity('<div style="display:flex;gap:20px;align-items:center;height:120px;width:500px"><div style="display:flex;justify-content:space-between;width:200px;height:40px"><div style="width:50px;height:30px"></div><div style="width:50px;height:30px"></div></div><div style="width:100px;height:60px"></div></div>')
   end
 
+  it 'matches a flex column stacking items (auto height)' do
+    expect_parity('<div style="display:flex;flex-direction:column;width:200px"><div style="width:80px;height:30px"></div><div style="width:120px;height:50px"></div></div>')
+  end
+
+  it 'matches a column with a row gap and align-items:center (cross on X)' do
+    expect_parity('<div style="display:flex;flex-direction:column;align-items:center;gap:12px;width:300px"><div style="width:80px;height:30px"></div><div style="width:140px;height:40px"></div></div>')
+  end
+
+  it 'matches a column with justify-content:space-between at a definite height' do
+    expect_parity('<div style="display:flex;flex-direction:column;justify-content:space-between;height:300px;width:200px"><div style="width:80px;height:30px"></div><div style="width:80px;height:40px"></div><div style="width:80px;height:30px"></div></div>')
+  end
+
+  it 'matches a column with block-flow item subtrees (descendant boxes)' do
+    expect_parity('<div style="display:flex;flex-direction:column;gap:8px;width:300px"><div style="width:200px"><div style="height:20px;margin:4px"></div></div><div style="width:150px;height:40px"></div></div>')
+  end
+
+  it 'matches a row nested inside a column' do
+    expect_parity('<div style="display:flex;flex-direction:column;gap:10px;width:400px"><div style="display:flex;justify-content:center;gap:6px;width:300px;height:40px"><div style="width:60px;height:30px"></div><div style="width:60px;height:30px"></div></div><div style="width:120px;height:50px"></div></div>')
+  end
+
   # A/B bails — the feature declines; the same shape without it stays native.
   def a_bails_b_native(feature, plain = '<div style="display:flex;width:400px"><div style="width:80px;height:30px"></div><div style="width:80px;height:30px"></div></div>')
     expect(run_shadow(feature)['ok']).to be(false), "expected #{feature.inspect} to bail"
@@ -76,15 +96,16 @@ RSpec.describe 'native layout flex parity', if: ENV.fetch('CSIM_JS_ENGINE', 'v8'
   end
 
   it('declines flex-wrap:wrap') { a_bails_b_native('<div style="display:flex;flex-wrap:wrap;width:120px"><div style="width:80px;height:30px"></div><div style="width:80px;height:30px"></div></div>') }
-  it('declines flex-direction:column') { a_bails_b_native('<div style="display:flex;flex-direction:column;width:400px"><div style="width:80px;height:30px"></div><div style="width:80px;height:30px"></div></div>') }
   it('declines row-reverse') { a_bails_b_native('<div style="display:flex;flex-direction:row-reverse;width:400px"><div style="width:80px;height:30px"></div><div style="width:80px;height:30px"></div></div>') }
+  it('declines column-reverse') { a_bails_b_native('<div style="display:flex;flex-direction:column-reverse;width:400px"><div style="width:80px;height:30px"></div><div style="width:80px;height:30px"></div></div>') }
   it('declines direction:rtl') { a_bails_b_native('<div style="display:flex;direction:rtl;width:400px"><div style="width:80px;height:30px"></div><div style="width:80px;height:30px"></div></div>') }
   it('declines align-items:baseline') { a_bails_b_native('<div style="display:flex;align-items:baseline;width:400px"><div style="width:80px;height:30px"></div><div style="width:80px;height:30px"></div></div>') }
   it('declines min-height on the container') { a_bails_b_native('<div style="display:flex;min-height:200px;width:400px"><div style="width:80px;height:30px"></div><div style="width:80px;height:30px"></div></div>') }
   it('declines an auto item margin') { a_bails_b_native('<div style="display:flex;width:400px"><div style="width:80px;height:30px;margin-left:auto"></div><div style="width:80px;height:30px"></div></div>') }
   it('declines a position:relative item') { a_bails_b_native('<div style="display:flex;width:400px"><div style="width:80px;height:30px;position:relative;top:5px"></div><div style="width:80px;height:30px"></div></div>') }
   it('declines an inline-block item') { a_bails_b_native('<div style="display:flex;width:400px"><span style="display:inline-block;width:80px;height:30px"></span><div style="width:80px;height:30px"></div></div>') }
-  it('declines a nested UNSUPPORTED flex item (column)') { a_bails_b_native('<div style="display:flex;width:400px"><div style="display:flex;flex-direction:column;width:80px;height:30px"></div><div style="width:80px;height:30px"></div></div>') }
+  it('declines a nested UNSUPPORTED flex item (wrap)') { a_bails_b_native('<div style="display:flex;width:400px"><div style="display:flex;flex-wrap:wrap;width:80px;height:30px"></div><div style="width:80px;height:30px"></div></div>') }
+  it('declines min-width on a column container (cross clamp)') { a_bails_b_native('<div style="display:flex;flex-direction:column;min-width:200px;width:100px"><div style="width:80px;height:30px"></div><div style="width:80px;height:30px"></div></div>', '<div style="display:flex;flex-direction:column;width:100px"><div style="width:80px;height:30px"></div><div style="width:80px;height:30px"></div></div>') }
   it('declines an inline-flex container') { a_bails_b_native('<div style="display:inline-flex;width:400px"><div style="width:80px;height:30px"></div></div>') }
   it('declines bare text in the container') { a_bails_b_native('<div style="display:flex;width:400px">loose text<div style="width:80px;height:30px"></div></div>') }
   it('declines a replaced (img) item') { a_bails_b_native('<div style="display:flex;width:400px"><img src="x.png" style="width:80px;height:30px"><div style="width:80px;height:30px"></div></div>') }
