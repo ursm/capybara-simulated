@@ -1,15 +1,16 @@
 # frozen_string_literal: true
-# Native layout — CSS tables (§17), geometry shadow-parity. Increment t1: a border-collapse:SEPARATE,
-# auto-layout `display:table` in normal flow — table > (table-row-group | table-row)* > table-cell*, a
-# rectangular grid, LTR, no spans. Each cell's used border box (its column width × its unified row height) is
-# resolved by the oracle and PUSHED (like a flex item); native reassembles the column/row tracks, prefix-sums
-# them with border-spacing to position every cell, and derives every row, row-group and the table's OWN box
-# (a table self-sizes from Σtracks + spacing). Still DECLINES to JS — colspan/rowspan, border-collapse:collapse,
-# caption, <col>/<colgroup>, thead/tfoot (render reorder), table-layout:fixed, inline-table, ragged/anonymous
-# grids, rtl, nested tables, and an imposed table height (declared / attribute / min / max — the track
-# self-size can't reproduce the two-phase). A position:relative cell IS supported (the oracle ignores the
-# offset, so the cell stays grid-positioned). Each bail is an A/B: the feature-carrying input declines, a
-# plain table stays native. V8 only.
+# Native layout — CSS tables (§17), geometry shadow-parity. Increments t1 (base) + t2 (spans): a
+# border-collapse:SEPARATE, auto-layout `display:table` in normal flow — table > (table-row-group |
+# table-row)* > table-cell*, LTR. Each cell's used border box (its spanned column width × row height) is
+# resolved by the oracle and PUSHED (like a flex item); native reassembles the column/row tracks from the
+# NON-spanning cells, prefix-sums them with border-spacing to position every cell at its (pushed) starting
+# column/row, and derives every row, row-group and the table's OWN box (a table self-sizes from Σtracks +
+# spacing). colspan/rowspan, ragged grids (missing cells), and a position:relative cell (offset ignored) ARE
+# supported. Still DECLINES to JS — border-collapse:collapse, caption, <col>/<colgroup>, thead/tfoot (render
+# reorder), table-layout:fixed, inline-table, anonymous rows/cells, rtl, nested tables, an imposed table
+# height (declared / attribute / min / max), an empty row group, and a column/row only spanning cells cover
+# (no single-span cell to size that track). Each bail is an A/B: the feature-carrying input declines, a plain
+# table stays native. V8 only.
 require 'capybara/simulated'
 require 'rack'
 require_relative 'support/session_teardown'
@@ -77,23 +78,38 @@ RSpec.describe 'native layout table parity', if: ENV.fetch('CSIM_JS_ENGINE', 'v8
     expect_parity('<table style="border-spacing:4px"><tr><td style="position:relative;left:10px;top:5px;width:50px;height:30px">a</td><td style="width:60px">b</td></tr></table>')
   end
 
+  # t2 — spans.
+  it 'matches a colspan=2 cell over a three-column table' do
+    expect_parity('<table style="border-spacing:4px"><tr><td colspan="2" style="height:20px">A</td><td style="width:50px">B</td></tr><tr><td style="width:30px">c</td><td style="width:40px">d</td><td>e</td></tr></table>')
+  end
+
+  it 'matches a rowspan=2 cell' do
+    expect_parity('<table style="border-spacing:4px"><tr><td rowspan="2" style="width:30px">A</td><td style="width:50px;height:20px">b</td></tr><tr><td style="height:35px">c</td></tr></table>')
+  end
+
+  it 'matches a combined colspan=2 rowspan=2 corner cell' do
+    expect_parity('<table style="border-spacing:4px"><tr><td colspan="2" rowspan="2" style="width:60px;height:40px">A</td><td style="width:30px">b</td></tr><tr><td style="height:25px">c</td></tr><tr><td style="width:20px">d</td><td>e</td><td>f</td></tr></table>')
+  end
+
+  it 'matches a ragged grid (a row missing a trailing cell)' do
+    expect_parity('<table style="border-spacing:4px"><tr><td style="width:40px">a</td><td style="width:50px">b</td></tr><tr><td>c</td></tr></table>')
+  end
+
   # A/B bails — the feature declines; a plain table stays native.
   def a_bails_b_native(feature, plain = '<table style="border-spacing:4px"><tr><td style="width:40px">a</td><td style="width:40px">b</td></tr></table>')
     expect(run_shadow(feature)['ok']).to be(false), "expected #{feature.inspect} to bail"
     expect(run_shadow(plain)['ok']).to be(true), 'expected the plain table to stay native'
   end
 
-  it('declines a colspan') { a_bails_b_native('<table><tr><td colspan="2">a</td></tr><tr><td>b</td><td>c</td></tr></table>') }
-  it('declines a rowspan') { a_bails_b_native('<table><tr><td rowspan="2">a</td><td>b</td></tr><tr><td>c</td></tr></table>') }
   it('declines border-collapse:collapse (half-borders)') { a_bails_b_native('<table style="border-collapse:collapse"><tr><td style="border:1px solid">a</td></tr></table>') }
   it('declines a caption') { a_bails_b_native('<table><caption>cap</caption><tr><td>a</td></tr></table>') }
   it('declines a colgroup/col') { a_bails_b_native('<table><colgroup><col></colgroup><tr><td>a</td></tr></table>') }
   it('declines thead/tfoot (render reorder)') { a_bails_b_native('<table><thead><tr><td>h</td></tr></thead><tbody><tr><td>b</td></tr></tbody></table>') }
   it('declines table-layout:fixed') { a_bails_b_native('<table style="table-layout:fixed;width:200px"><tr><td>a</td><td>b</td></tr></table>') }
   it('declines inline-table') { a_bails_b_native('<span style="display:inline-table"><span style="display:table-row"><span style="display:table-cell">a</span></span></span>') }
-  it('declines a ragged grid (rows of unequal cell counts)') { a_bails_b_native('<table><tr><td>a</td><td>b</td></tr><tr><td>c</td></tr></table>') }
   it('declines an rtl table (column reversal)') { a_bails_b_native('<table dir="rtl"><tr><td style="width:40px">a</td><td style="width:60px">b</td></tr></table>') }
   it('declines a table with a declared height below its natural grid height') { a_bails_b_native('<table style="height:10px;border-spacing:4px"><tr><td style="height:50px">a</td></tr></table>') }
   it('declines a table with a min-height floor') { a_bails_b_native('<table style="min-height:200px"><tr><td style="height:50px">a</td></tr></table>') }
   it('declines an empty row group (the oracle boxes it below the grid)') { a_bails_b_native('<table style="border-spacing:4px"><tbody></tbody><tbody><tr><td style="width:40px;height:20px">a</td></tr></tbody></table>') }
+  it('declines a column that only spanning cells cover (no single-column cell to size it)') { a_bails_b_native('<table style="border-spacing:4px"><tr><td colspan="2">A</td><td style="width:20px">b</td></tr><tr><td style="width:30px">c</td><td colspan="2">DE</td></tr></table>') }
 end

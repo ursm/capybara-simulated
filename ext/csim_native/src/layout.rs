@@ -138,6 +138,14 @@ pub(crate) struct Input {
     // prefix-sums them with this spacing to position every cell, row, row-group, and the table box itself.
     pub(crate) sp_x: f64,
     pub(crate) sp_y: f64,
+    // A table CELL's grid placement (t2 spans): its starting COLUMN (the Nth cell in a row is NOT at column N
+    // once a colspan or a rowspan-from-above shifts it, so the oracle's resolved col is pushed) and its
+    // colspan / rowspan. Tracks (column widths / row heights) are derived only from NON-spanning cells
+    // (colspan==1 / rowspan==1); a spanning cell sits at col_x[col] / row_top[row] with its pushed spanned
+    // size (= Σ spanned tracks + internal spacing, checked by the safety net). 0 / 1 / 1 on a non-cell node.
+    pub(crate) cell_col: usize,
+    pub(crate) cell_colspan: usize,
+    pub(crate) cell_rowspan: usize,
 }
 
 pub(crate) const CROSS_BASELINE: u8 = 3;
@@ -1261,7 +1269,14 @@ fn measure_table(
     if r_count == 0 {
         return bail(failed);
     }
-    let c_count = children[rows[0]].len();
+    // The column count spans all cells: the last column any cell reaches (its start col + colspan). (t1's
+    // "cells in row 0" breaks once a span shifts the grid.)
+    let mut c_count = 0usize;
+    for &r in &rows {
+        for &c in &children[r] {
+            c_count = c_count.max(inputs[c].cell_col + inputs[c].cell_colspan);
+        }
+    }
     if c_count == 0 {
         return bail(failed);
     }
@@ -1274,27 +1289,32 @@ fn measure_table(
         }
     }
 
-    // Tracks: a column's width is the widest cell down it, a row's height the tallest across it. The oracle
-    // already unified these, so this reduction recovers the tracks AND validates the grouping.
+    // Tracks: a column's width is the widest NON-spanning (colspan==1) cell in it, a row's height the tallest
+    // rowspan==1 cell in it — a cell that SPANS several tracks can't size any one of them. This recovers the
+    // tracks AND validates the grid; a column / row that no single-span cell covers is not reconstructible
+    // (the oracle distributed a span across it) → decline.
     let mut col_w = vec![0.0f64; c_count];
+    let mut col_seen = vec![false; c_count];
     let mut row_h = vec![0.0f64; r_count];
+    let mut row_seen = vec![false; r_count];
     for (ri, &r) in rows.iter().enumerate() {
-        if children[r].len() != c_count {
-            return bail(failed); // ragged grid the gate missed
-        }
-        for (ci, &c) in children[r].iter().enumerate() {
-            col_w[ci] = col_w[ci].max(boxes[c].w);
-            row_h[ri] = row_h[ri].max(boxes[c].h);
-        }
-    }
-    // SAFETY NET: every cell must already equal its column width and row height (separate borders, no spans).
-    // If a span / ragged grid slipped past the gate, decline rather than mislay.
-    for (ri, &r) in rows.iter().enumerate() {
-        for (ci, &c) in children[r].iter().enumerate() {
-            if (boxes[c].w - col_w[ci]).abs() > 0.01 || (boxes[c].h - row_h[ri]).abs() > 0.01 {
-                return bail(failed);
+        for &c in &children[r] {
+            let (col, cs, rs) = (inputs[c].cell_col, inputs[c].cell_colspan, inputs[c].cell_rowspan);
+            if cs == 0 || rs == 0 || col + cs > c_count || ri + rs > r_count {
+                return bail(failed); // a malformed / out-of-range span (shouldn't happen; be safe)
+            }
+            if cs == 1 {
+                col_w[col] = col_w[col].max(boxes[c].w);
+                col_seen[col] = true;
+            }
+            if rs == 1 {
+                row_h[ri] = row_h[ri].max(boxes[c].h);
+                row_seen[ri] = true;
             }
         }
+    }
+    if col_seen.iter().any(|&s| !s) || row_seen.iter().any(|&s| !s) {
+        return bail(failed); // a track only spanning cells cover — native can't split it
     }
 
     // Prefix sums (table-relative): a track's start is one border-spacing in, plus every earlier track + its
@@ -1360,8 +1380,17 @@ fn measure_table(
         boxes[r].w = row_w;
         boxes[r].h = row_h[ri];
         boxes[r].auto_height = false;
-        for (ci, &c) in children[r].iter().enumerate() {
-            boxes[c].x = col_x[ci] - row_x;
+        for &c in &children[r] {
+            let (col, cs, rs) = (inputs[c].cell_col, inputs[c].cell_colspan, inputs[c].cell_rowspan);
+            // SAFETY NET: a cell's pushed border box must equal the tracks it spans plus the internal
+            // border-spacing — colspan 1 / rowspan 1 reduce to "equals its own column / row". A grid the gate
+            // let through that doesn't reconcile declines rather than mislay.
+            let exp_w = col_w[col..col + cs].iter().sum::<f64>() + (cs as f64 - 1.0) * sx;
+            let exp_h = row_h[ri..ri + rs].iter().sum::<f64>() + (rs as f64 - 1.0) * sy;
+            if (boxes[c].w - exp_w).abs() > 0.01 || (boxes[c].h - exp_h).abs() > 0.01 {
+                return bail(failed);
+            }
+            boxes[c].x = col_x[col] - row_x; // at its STARTING column (relative to the row)
             boxes[c].y = 0.0;
         }
     }
@@ -1453,6 +1482,9 @@ mod tests {
             out_of_flow: 0,
             sp_x: 0.0,
             sp_y: 0.0,
+            cell_col: 0,
+            cell_colspan: 1,
+            cell_rowspan: 1,
         }
     }
 
@@ -2054,20 +2086,27 @@ mod tests {
         c.display = DISPLAY_TABLE_ROW;
         c
     }
+    fn cell(nid: f64, parent: i32, w: f64, h: f64, col: usize, colspan: usize, rowspan: usize) -> Input {
+        let mut c = item(nid, parent, w, h);
+        c.cell_col = col;
+        c.cell_colspan = colspan;
+        c.cell_rowspan = rowspan;
+        c
+    }
 
     #[test]
     fn table_2x2_grouped_positions_cells_by_prefix_sums() {
         // The probed 2x2 table: border-spacing 4, columns 62/82, rows 32/42. Cells placed by prefix sums;
         // rows/row-group/table boxes all derived; table self-sizes (ignores the 800 passed width).
         let inputs = vec![
-            tbl(0.0, -1, 4.0, 4.0),   // 0 table
-            rowgroup(1.0, 0),         // 1 tbody
-            rowel(2.0, 1),            // 2 tr0
-            item(3.0, 2, 62.0, 32.0), // 3 td(0,0)
-            item(4.0, 2, 82.0, 32.0), // 4 td(0,1)
-            rowel(5.0, 1),            // 5 tr1
-            item(6.0, 5, 62.0, 42.0), // 6 td(1,0)
-            item(7.0, 5, 82.0, 42.0), // 7 td(1,1)
+            tbl(0.0, -1, 4.0, 4.0),            // 0 table
+            rowgroup(1.0, 0),                  // 1 tbody
+            rowel(2.0, 1),                     // 2 tr0
+            cell(3.0, 2, 62.0, 32.0, 0, 1, 1), // 3 td(0,0)
+            cell(4.0, 2, 82.0, 32.0, 1, 1, 1), // 4 td(0,1)
+            rowel(5.0, 1),                     // 5 tr1
+            cell(6.0, 5, 62.0, 42.0, 0, 1, 1), // 6 td(1,0)
+            cell(7.0, 5, 82.0, 42.0, 1, 1, 1), // 7 td(1,1)
         ];
         let bx = boxes(layout_block(&inputs, &[], &[], 0.0, 0.0, 800.0));
         assert_eq!([bx[0].x, bx[0].y, bx[0].w, bx[0].h], [0.0, 0.0, 156.0, 86.0]); // table
@@ -2084,10 +2123,10 @@ mod tests {
     fn table_bare_rows_parent_is_the_table() {
         // A display:table with bare rows (no row group): each row's parent is the table itself.
         let inputs = vec![
-            tbl(0.0, -1, 3.0, 3.0),   // 0 table
-            rowel(1.0, 0),            // 1 tr (parent = table)
-            item(2.0, 1, 40.0, 20.0), // 2 td
-            item(3.0, 1, 60.0, 20.0), // 3 td
+            tbl(0.0, -1, 3.0, 3.0),            // 0 table
+            rowel(1.0, 0),                     // 1 tr (parent = table)
+            cell(2.0, 1, 40.0, 20.0, 0, 1, 1), // 2 td
+            cell(3.0, 1, 60.0, 20.0, 1, 1, 1), // 3 td
         ];
         let bx = boxes(layout_block(&inputs, &[], &[], 0.0, 0.0, 800.0));
         assert_eq!([bx[0].w, bx[0].h], [109.0, 26.0]); // 40+60 + 3*3 ; 20 + 2*3
@@ -2097,16 +2136,78 @@ mod tests {
     }
 
     #[test]
-    fn table_ragged_grid_declines() {
-        // The safety net: a second row with fewer cells than the first is a grid native can't reassemble
-        // (the JS gate bails it too), so native declines rather than mislay.
+    fn table_ragged_grid_lays_out_present_cells() {
+        // A ragged grid (row 1 missing its col-1 cell) is fine once cells carry their own column: the present
+        // cells sit at their columns, and the absent slot simply has no box — matching the oracle.
+        let inputs = vec![
+            tbl(0.0, -1, 4.0, 4.0),
+            rowel(1.0, 0),
+            cell(2.0, 1, 40.0, 20.0, 0, 1, 1),
+            cell(3.0, 1, 50.0, 20.0, 1, 1, 1),
+            rowel(4.0, 0),
+            cell(5.0, 4, 40.0, 20.0, 0, 1, 1), // row 1 has only col 0
+        ];
+        let bx = boxes(layout_block(&inputs, &[], &[], 0.0, 0.0, 800.0));
+        assert_eq!(bx[0].w, 102.0); // 4+40+4+50+4 (2 columns)
+        assert_eq!([bx[2].x, bx[3].x], [4.0, 48.0]); // row 0 cols
+        assert_eq!([bx[5].x, bx[5].y], [4.0, 28.0]); // row 1 col 0
+    }
+
+    #[test]
+    fn table_colspan_cell_spans_columns() {
+        // t2: a colspan=2 cell (cols 0-1) over a 3-column table; its width = colW[0] + sx + colW[1]. Columns
+        // (32/42/52) come from the full second row; the spanning cell sits at col_x[0].
+        let inputs = vec![
+            tbl(0.0, -1, 4.0, 4.0),            // 0 table
+            rowgroup(1.0, 0),                  // 1
+            rowel(2.0, 1),                     // 2 tr0
+            cell(3.0, 2, 78.0, 22.0, 0, 2, 1), // 3 colspan=2 (cols 0-1), 32+4+42
+            cell(4.0, 2, 52.0, 22.0, 2, 1, 1), // 4 col 2
+            rowel(5.0, 1),                     // 5 tr1
+            cell(6.0, 5, 32.0, 20.0, 0, 1, 1), // 6 col 0
+            cell(7.0, 5, 42.0, 20.0, 1, 1, 1), // 7 col 1
+            cell(8.0, 5, 52.0, 20.0, 2, 1, 1), // 8 col 2
+        ];
+        let bx = boxes(layout_block(&inputs, &[], &[], 0.0, 0.0, 800.0));
+        assert_eq!([bx[0].w, bx[0].h], [142.0, 54.0]); // 4+32+4+42+4+52+4 ; 4+22+4+20+4
+        assert_eq!([bx[3].x, bx[3].y, bx[3].w], [4.0, 4.0, 78.0]); // the colspan cell at col 0
+        assert_eq!([bx[4].x, bx[4].y], [86.0, 4.0]); // col 2
+        assert_eq!([bx[6].x, bx[7].x, bx[8].x], [4.0, 40.0, 86.0]); // tr1 columns
+    }
+
+    #[test]
+    fn table_rowspan_cell_spans_rows() {
+        // t2: a rowspan=2 cell (col 0) in a 2-column, 2-row table; its height = rowH[0] + sy + rowH[1]. Row 1
+        // has only the col-1 cell (col 0 occupied by the span), so that cell's pushed col is 1, not 0.
+        let inputs = vec![
+            tbl(0.0, -1, 4.0, 4.0),            // 0 table
+            rowgroup(1.0, 0),                  // 1
+            rowel(2.0, 1),                     // 2 tr0
+            cell(3.0, 2, 32.0, 63.0, 0, 1, 2), // 3 rowspan=2 (col 0), 22+4+37
+            cell(4.0, 2, 52.0, 22.0, 1, 1, 1), // 4 col 1, row 0
+            rowel(5.0, 1),                     // 5 tr1
+            cell(6.0, 5, 52.0, 37.0, 1, 1, 1), // 6 col 1, row 1
+        ];
+        let bx = boxes(layout_block(&inputs, &[], &[], 0.0, 0.0, 800.0));
+        assert_eq!([bx[0].w, bx[0].h], [96.0, 71.0]); // 4+32+4+52+4 ; 4+22+4+37+4
+        assert_eq!([bx[3].x, bx[3].y, bx[3].h], [4.0, 4.0, 63.0]); // the rowspan cell
+        assert_eq!([bx[4].x, bx[4].y], [40.0, 4.0]); // col 1 row 0
+        assert_eq!([bx[6].x, bx[6].y], [40.0, 30.0]); // col 1 row 1 (pushed col = 1)
+    }
+
+    #[test]
+    fn table_column_only_spanned_declines() {
+        // col 1 is covered only by spans (row0 cols 0-1, row1 cols 1-2) — no colspan==1 cell gives its width,
+        // so native can't split the track → decline.
         let inputs = vec![
             tbl(0.0, -1, 0.0, 0.0),
-            rowel(1.0, 0),
-            item(2.0, 1, 40.0, 20.0),
-            item(3.0, 1, 40.0, 20.0),
-            rowel(4.0, 0),
-            item(5.0, 4, 40.0, 20.0), // only one cell → ragged
+            rowgroup(1.0, 0),
+            rowel(2.0, 1),
+            cell(3.0, 2, 50.0, 20.0, 0, 2, 1), // cols 0-1
+            cell(4.0, 2, 20.0, 20.0, 2, 1, 1), // col 2
+            rowel(5.0, 1),
+            cell(6.0, 5, 30.0, 20.0, 0, 1, 1), // col 0
+            cell(7.0, 5, 40.0, 20.0, 1, 2, 1), // cols 1-2 → col 1 never a single cell
         ];
         assert!(matches!(layout_block(&inputs, &[], &[], 0.0, 0.0, 800.0), Outcome::Unsupported));
     }
