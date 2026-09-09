@@ -48,6 +48,15 @@ RSpec.describe 'native layout L2 text-block parity', if: ENV.fetch('CSIM_JS_ENGI
     expect(r['mismatches']).to eq(0), "mismatch: #{r.inspect}"
   end
 
+  it 'matches text with same-font inline elements (a / span) folded in' do
+    text = 'Some words with <a href="#">a link here</a> and a <span>span too</span> that keep wrapping onward.'
+    session = simulated_session(page(%(<div style="width:160px">#{text}</div>)))
+    session.visit '/'
+    r = parity(session)
+    expect(r).to include('ok' => true), "harness bailed: #{r.inspect}"
+    expect(r['mismatches']).to eq(0), "mismatch: #{r.inspect}"
+  end
+
   it 'matches a text block with padding, border, and margins' do
     text = 'Some words wrapping inside a padded bordered box to check content width and stacked height.'
     session = simulated_session(page(%(<div style="width:180px;margin:12px 0;padding:6px;border:2px solid #000">#{text}</div><div style="height:10px"></div>)))
