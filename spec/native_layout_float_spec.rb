@@ -126,6 +126,28 @@ RSpec.describe 'native layout float parity', if: ENV.fetch('CSIM_JS_ENGINE', 'v8
     HTML
   end
 
+  it 'matches a cleared block whose descendant margin collapses through its open top' do
+    # The inner p's margin-top collapses through the cleared div's open top edge, so the div's collapsing
+    # top margin is 60 (not its own 0) — it must sit at 60 (past the 30px float), not at 30.
+    expect_parity(<<~HTML)
+      <div style="overflow:hidden;width:300px">
+        <div style="float:left;width:80px;height:30px"></div>
+        <div style="clear:left"><p style="margin-top:60px;height:20px"></p></div>
+      </div>
+    HTML
+  end
+
+  it 'declines a collapse-through cleared box, keeps a non-empty cleared box' do
+    expect(run_shadow('<div style="overflow:hidden;width:300px"><div style="float:left;width:80px;height:30px"></div><div style="clear:both;margin-top:10px"></div></div>')['ok']).to be false
+    expect(run_shadow('<div style="overflow:hidden;width:300px"><div style="float:left;width:80px;height:30px"></div><div style="clear:both;height:10px"></div></div>')['ok']).to be true
+  end
+
+  it 'declines a contain/multicol BFC (margin barrier native cannot key), keeps a plain block' do
+    expect(run_shadow('<div style="contain:layout"><p style="margin-top:30px">hi there</p></div>')['ok']).to be false
+    expect(run_shadow('<div style="column-count:2"><p style="margin-top:30px">hi there</p></div>')['ok']).to be false
+    expect(run_shadow('<div><p style="margin-top:30px">hi there</p></div>')['ok']).to be true
+  end
+
   it 'declines a partial clear that leaves a float overlapping, clears the matching side' do
     # clear:left with only a RIGHT float still overlaps it → defer; clear:right clears past it → native.
     expect(run_shadow('<div style="overflow:hidden;width:300px"><div style="float:right;width:80px;height:60px"></div><div style="clear:left;height:20px"></div></div>')['ok']).to be false
