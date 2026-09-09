@@ -113,6 +113,10 @@ pub(crate) struct Input {
     // a non-relative box.
     pub(crate) rel_x: f64,
     pub(crate) rel_y: f64,
+    // A flex ITEM's AUTO main-axis margins (§9.5): bit0 = the main-start-side margin is `auto`, bit1 = the
+    // main-end-side is. Auto margins absorb the line's free space (free/autos each) before justify-content,
+    // which then yields (ZERO_JUSTIFY). Cross-axis auto margins are bailed in the harness.
+    pub(crate) flex_item_auto: u8,
 }
 
 pub(crate) const FLOAT_LEFT: u8 = 1;
@@ -996,12 +1000,21 @@ fn measure_flex(
         let lc = line_lc[li];
         let cs = line_cs[li];
         let line_main: f64 = line.iter().map(|&p| mo[p]).sum::<f64>() + gap * line.len().saturating_sub(1) as f64;
-        let (m_lead, m_between) = flex_distribution(n.flex_justify, content_main - line_main, line.len());
+        let free = content_main - line_main;
+        // Auto main-axis margins take the line's free space (free/autos each) BEFORE justify-content, which
+        // then yields — but only when there IS free space; with none they resolve to 0 and justify runs.
+        let line_autos: usize = line.iter().map(|&p| (inputs[kids[p]].flex_item_auto & 1) as usize + ((inputs[kids[p]].flex_item_auto >> 1) & 1) as usize).sum();
+        let each_auto = if line_autos > 0 && free > 0.0 { free / line_autos as f64 } else { 0.0 };
+        let (m_lead, m_between) = if line_autos > 0 && free > 0.0 { (0.0, 0.0) } else { flex_distribution(n.flex_justify, free, line.len()) };
         let mut at = m_lead;
         for (k, &p) in line.iter().enumerate() {
             let c = kids[p];
+            let auto = inputs[c].flex_item_auto;
             if k > 0 {
                 at += gap + m_between;
+            }
+            if auto & 1 != 0 {
+                at += each_auto; // auto main-start margin
             }
             at += ml_lead[p];
             let m_size = if main_is_x { boxes[c].w } else { boxes[c].h };
@@ -1010,6 +1023,9 @@ fn measure_flex(
             // the far physical edge).
             let main_pos = if main_reverse { main_start + (content_main - at - m_size) } else { main_start + at };
             at += mo[p] - ml_lead[p]; // advance past the item's main size + its trailing margin
+            if auto & 2 != 0 {
+                at += each_auto; // auto main-end margin
+            }
             let off = match inputs[c].flex_cross_align {
                 1 => (lc - co[p]) / 2.0, // center
                 2 => lc - co[p],         // end
@@ -1148,6 +1164,7 @@ mod tests {
             flex_main_reverse: false,
             rel_x: 0.0,
             rel_y: 0.0,
+            flex_item_auto: 0,
         }
     }
 
@@ -1378,6 +1395,32 @@ mod tests {
         let mut c = flex(nid, parent, width);
         c.flex_main_is_x = false;
         c
+    }
+
+    #[test]
+    fn flex_row_auto_left_margin_pushes_item_and_rest_right() {
+        // [a, b(margin-left:auto), c] in 600px: the one auto margin absorbs all 300 free space, so a stays
+        // left and b/c are pushed right; justify-content yields.
+        let f = flex(0.0, -1, 600.0);
+        let mut b = item(2.0, 0, 100.0, 30.0);
+        b.flex_item_auto = 1; // main-start-side (left) margin is auto
+        let inputs = vec![f, item(1.0, 0, 100.0, 30.0), b, item(3.0, 0, 100.0, 30.0)];
+        let bx = boxes(layout_block(&inputs, &[], &[], 0.0, 0.0, 800.0));
+        assert_eq!([bx[1].x, bx[2].x, bx[3].x], [0.0, 400.0, 500.0]);
+    }
+
+    #[test]
+    fn flex_row_two_auto_margins_split_the_free_space() {
+        // a(margin-right:auto) and b(margin-left:auto) → 2 autos share 400 free (200 each): a at 0,
+        // b at 100 + 200 + 200 = ... a:0, gap to b = a.mr-auto(200) + b.ml-auto(200).
+        let mut a = item(1.0, 0, 100.0, 30.0);
+        a.flex_item_auto = 2; // main-end-side (right) auto
+        let mut b = item(2.0, 0, 100.0, 30.0);
+        b.flex_item_auto = 1; // main-start-side (left) auto
+        let inputs = vec![flex(0.0, -1, 600.0), a, b];
+        let bx = boxes(layout_block(&inputs, &[], &[], 0.0, 0.0, 800.0));
+        // free = 600 - 200 = 400, each = 200. a at 0; after a: +100 +200(a.mr) → 300; b.ml auto +200 → 500.
+        assert_eq!([bx[1].x, bx[2].x], [0.0, 500.0]);
     }
 
     #[test]
