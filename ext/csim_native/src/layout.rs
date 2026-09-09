@@ -850,15 +850,16 @@ fn measure(
     MInfo { top: top_m, top_only: top_m, bottom: bottom_m, collapse_through: false }
 }
 
-// Native flex PLACEMENT for a single-line LTR `row` OR `column` (§9.7), `nowrap`. The item SIZING is
-// resolved JS-side — each item's used main and cross size rides its record (width/height, swapped by
-// `flex_main_is_x`), like a float's shrink-to-fit width — so this only DISTRIBUTES the items on the MAIN
-// axis (justify-content + gap + margins) and ALIGNS them on the CROSS axis, then sizes the container's own
-// box; each item's subtree is laid out by the ordinary `measure` at its pushed border-box, in a fresh
-// float context (an item is its own formatting context). Mirrors layoutFlexRow / layoutFlexColumn /
-// distributionOffsets / crossAlignPhysical. The harness bails wrap / reverse / rtl / vertical writing
-// modes / baseline / the cross-axis min-max clamp / auto-margin / unsupported-nested-flex / replaced, so a
-// single line with an exact container cross size is all that reaches here.
+// Native flex PLACEMENT for an LTR `row` OR `column` (§9.7), nowrap or wrap, main axis forward or reversed.
+// The item SIZING is resolved JS-side — each item's used main and cross size rides its record (width/height,
+// swapped by `flex_main_is_x`), like a float's shrink-to-fit width — so this only DISTRIBUTES the items on
+// the MAIN axis (justify-content + gap + main-axis auto margins) and ALIGNS them on the CROSS axis
+// (align-items/self + cross-axis auto margins), then sizes the container's own box (clamping a ROW's box
+// height by min/max-height — two-phase, so an auto-height row's items stay content-aligned). Each item's
+// subtree is laid out by the ordinary `measure` at its pushed border-box, in
+// a fresh float context (an item is its own formatting context). Mirrors layoutFlexRow / layoutFlexColumn /
+// stackFlexLines / crossAlignPhysical / autoMarginSplit. The harness bails rtl / vertical writing modes /
+// baseline / a COLUMN's min-max clamp / wrap-reverse / unsupported-nested-flex / replaced.
 fn measure_flex(
     i: usize,
     w: f64,
@@ -955,10 +956,20 @@ fn measure_flex(
     let cross_gap = n.flex_cross_gap;
     let lines_cross_sum: f64 = line_cross.iter().sum::<f64>() + cross_gap * nlines.saturating_sub(1) as f64;
     let (box_w, box_h, container_cross, definite_cross) = if main_is_x {
+        // A ROW's cross is its HEIGHT, clamped by min/max-height — but the clamp is TWO-PHASE and hinges on
+        // whether the height is declared (the oracle: `definiteCross = box.height !== 0 || autoHeight ===
+        // false`, clamp applied in layoutElement). A DECLARED height is clamped BEFORE layout, so the items
+        // align in the clamped cross (definite). An AUTO height is NOT: the items align in the CONTENT cross
+        // (the stacked lines), and min/max-height then grows/shrinks the FINAL box around them WITHOUT moving
+        // them — so container_cross stays the unclamped content (a min-height:100 app-shell row of a 30px
+        // item keeps the item at the top and grows the box to 100; align-content sees free = 0).
+        let to_border = |v: f64| if is_auto(v) || n.border_box { v } else { v + edges_y };
         if is_auto(n.height) {
-            (w, lines_cross_sum + edges_y, lines_cross_sum, false)
+            let bh = clamp_min_max(lines_cross_sum + edges_y, to_border(n.min_h), to_border(n.max_h)).max(0.0);
+            (w, bh, lines_cross_sum, false)
         } else {
-            let bh = if n.border_box { n.height } else { n.height + edges_y };
+            let raw_h = if n.border_box { n.height } else { n.height + edges_y };
+            let bh = clamp_min_max(raw_h, to_border(n.min_h), to_border(n.max_h)).max(0.0);
             (w, bh, (bh - edges_y).max(0.0), true)
         }
     } else {
@@ -1475,6 +1486,38 @@ mod tests {
         let inputs = vec![flex_col(0.0, -1, 200.0), a];
         let bx = boxes(layout_block(&inputs, &[], &[], 0.0, 0.0, 800.0));
         assert_eq!(bx[1].x, 75.0); // (200 - 50) / 2
+    }
+
+    #[test]
+    fn flex_row_min_height_grows_the_box_below_content_aligned_items() {
+        // Auto-height row of a 30px + a 50px item: the content cross is 50, so align-items:center centres
+        // each item in 50 (the 30px one at y=10, the 50px one at y=0). min-height:100 then grows the BOX to
+        // 100 WITHOUT repositioning the items (two-phase — the clamp lands after flex layout).
+        let mut f = flex(0.0, -1, 600.0);
+        f.min_h = 100.0;
+        let mut a = item(1.0, 0, 80.0, 30.0);
+        a.flex_cross_align = 1;
+        let mut b = item(2.0, 0, 80.0, 50.0);
+        b.flex_cross_align = 1;
+        let inputs = vec![f, a, b];
+        let bx = boxes(layout_block(&inputs, &[], &[], 0.0, 0.0, 800.0));
+        assert_eq!(bx[0].h, 100.0); // box grown by min-height
+        assert_eq!(bx[1].y, 10.0);  // 30px item centred in the 50px content line
+        assert_eq!(bx[2].y, 0.0);   // 50px item fills the content line
+    }
+
+    #[test]
+    fn flex_row_max_height_shrinks_the_box_but_the_content_line_overflows() {
+        // max-height:20 caps the container box at 20, but a 30px item's line is taller than the cap, so the
+        // line stays 30 (the item overflows downward) and a centred item sits at y=0 — the box is 20 tall.
+        let mut f = flex(0.0, -1, 600.0);
+        f.max_h = 20.0;
+        let mut a = item(1.0, 0, 100.0, 30.0);
+        a.flex_cross_align = 1; // center, but the line equals the item so there is no slack
+        let inputs = vec![f, a];
+        let bx = boxes(layout_block(&inputs, &[], &[], 0.0, 0.0, 800.0));
+        assert_eq!(bx[0].h, 20.0);
+        assert_eq!(bx[1].y, 0.0);
     }
 
     #[test]

@@ -95,6 +95,26 @@ RSpec.describe 'native layout flex parity', if: ENV.fetch('CSIM_JS_ENGINE', 'v8'
     expect_parity('<div style="display:flex;height:90px;width:400px"><div style="width:100px;height:30px;margin:auto"></div></div>')
   end
 
+  it 'matches a row whose min-height grows the cross the items align in (the app-shell min-height)' do
+    expect_parity('<div style="display:flex;align-items:center;min-height:100px;width:400px"><div style="width:80px;height:30px"></div><div style="width:80px;height:50px"></div></div>')
+  end
+
+  it 'matches a row whose max-height caps the box while the taller content overflows it' do
+    expect_parity('<div style="display:flex;align-items:center;max-height:20px;width:400px"><div style="width:80px;height:30px"></div><div style="width:80px;height:50px"></div></div>')
+  end
+
+  it 'matches a declared row height clamped up by min-height' do
+    expect_parity('<div style="display:flex;align-items:flex-end;height:40px;min-height:90px;width:400px"><div style="width:80px;height:30px"></div></div>')
+  end
+
+  it 'matches align-items:stretch filling a row grown by min-height' do
+    expect_parity('<div style="display:flex;min-height:120px;width:400px"><div style="width:80px"></div><div style="width:80px"></div></div>')
+  end
+
+  it 'matches a wrapping row whose min-height grows the cross for align-content to distribute' do
+    expect_parity('<div style="display:flex;flex-wrap:wrap;align-content:center;min-height:200px;width:180px"><div style="width:80px;height:30px"></div><div style="width:80px;height:30px"></div><div style="width:80px;height:30px"></div></div>')
+  end
+
   it 'matches a flex container nested inside a block' do
     expect_parity('<div style="padding:8px"><div style="display:flex;gap:10px;width:400px"><div style="width:80px;height:30px"></div><div style="width:80px;height:50px"></div></div></div>')
   end
@@ -192,7 +212,8 @@ RSpec.describe 'native layout flex parity', if: ENV.fetch('CSIM_JS_ENGINE', 'v8'
   it('declines an rtl flex row (rtl propagates to items — deferred)') { a_bails_b_native('<div style="display:flex;direction:rtl;width:400px"><div style="width:80px;height:30px"></div><div style="width:80px;height:30px"></div></div>') }
   it('declines an rtl flex column (cross axis runs right→left)') { a_bails_b_native('<div style="display:flex;flex-direction:column;direction:rtl;width:400px"><div style="width:80px;height:30px"></div><div style="width:80px;height:30px"></div></div>') }
   it('declines align-items:baseline') { a_bails_b_native('<div style="display:flex;align-items:baseline;width:400px"><div style="width:80px;height:30px"></div><div style="width:80px;height:30px"></div></div>') }
-  it('declines min-height on the container') { a_bails_b_native('<div style="display:flex;min-height:200px;width:400px"><div style="width:80px;height:30px"></div><div style="width:80px;height:30px"></div></div>') }
+  it('declines min-height on a COLUMN container (main-axis floor — two-phase)') { a_bails_b_native('<div style="display:flex;flex-direction:column;min-height:200px;width:100px"><div style="width:80px;height:30px"></div><div style="width:80px;height:30px"></div></div>', '<div style="display:flex;flex-direction:column;width:100px"><div style="width:80px;height:30px"></div><div style="width:80px;height:30px"></div></div>') }
+  it('declines max-height on a COLUMN container (main-axis capacity — two-phase)') { a_bails_b_native('<div style="display:flex;flex-direction:column;max-height:40px;width:100px"><div style="width:80px;height:30px"></div><div style="width:80px;height:30px"></div></div>', '<div style="display:flex;flex-direction:column;width:100px"><div style="width:80px;height:30px"></div><div style="width:80px;height:30px"></div></div>') }
   it('declines an inline-block item') { a_bails_b_native('<div style="display:flex;width:400px"><span style="display:inline-block;width:80px;height:30px"></span><div style="width:80px;height:30px"></div></div>') }
   it('declines a nested UNSUPPORTED flex item (wrap-reverse)') { a_bails_b_native('<div style="display:flex;width:400px"><div style="display:flex;flex-wrap:wrap-reverse;width:80px;height:30px"></div><div style="width:80px;height:30px"></div></div>') }
   it('declines min-width on a column container (cross clamp)') { a_bails_b_native('<div style="display:flex;flex-direction:column;min-width:200px;width:100px"><div style="width:80px;height:30px"></div><div style="width:80px;height:30px"></div></div>', '<div style="display:flex;flex-direction:column;width:100px"><div style="width:80px;height:30px"></div><div style="width:80px;height:30px"></div></div>') }
