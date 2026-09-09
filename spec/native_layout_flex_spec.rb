@@ -84,4 +84,16 @@ RSpec.describe 'native layout flex parity', if: ENV.fetch('CSIM_JS_ENGINE', 'v8'
   it('declines an inline-flex container') { a_bails_b_native('<div style="display:inline-flex;width:400px"><div style="width:80px;height:30px"></div></div>') }
   it('declines bare text in the container') { a_bails_b_native('<div style="display:flex;width:400px">loose text<div style="width:80px;height:30px"></div></div>') }
   it('declines a replaced (img) item') { a_bails_b_native('<div style="display:flex;width:400px"><img src="x.png" style="width:80px;height:30px"><div style="width:80px;height:30px"></div></div>') }
+
+  # A relative box with a NON-ZERO inset shifts its whole subtree in the oracle; native carries no inset,
+  # so it must decline. A zero-inset relative (containing-block only) is the common case and stays native.
+  it 'declines a relative flex container with an inset, keeps a zero-inset relative one' do
+    expect(run_shadow('<div style="display:flex;position:relative;top:20px;left:30px;width:400px"><div style="width:80px;height:30px"></div><div style="width:80px;height:30px"></div></div>')['ok']).to be false
+    expect(run_shadow('<div style="display:flex;position:relative;width:400px"><div style="width:80px;height:30px"></div><div style="width:80px;height:30px"></div></div>')['ok']).to be true
+  end
+
+  it 'declines a relative BLOCK with an inset (pre-existing gap), keeps a zero-inset relative one' do
+    expect(run_shadow('<div style="position:relative;top:15px;left:25px;width:400px"><div style="height:30px"></div></div>')['ok']).to be false
+    expect(run_shadow('<div style="position:relative;width:400px"><div style="height:30px"></div></div>')['ok']).to be true
+  end
 end
