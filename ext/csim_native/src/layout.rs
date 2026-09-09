@@ -659,7 +659,38 @@ fn measure(
         // the owner frame. Anything else in-flow beside a float (a block container, a cleared box) needs
         // the deferred machinery, so decline the whole pass.
         if !ctx.items.is_empty() {
-            if cn.display == DISPLAY_TEXT_BLOCK && cn.clear == 0 {
+            // A cleared child (§9.5.2) moves DOWN to below the floats it named — its margin collapses as
+            // usual, then clearance replaces its position with the float bottom. When that clears past
+            // EVERY float (all now above it), the child sees none, so it lays out normally below them; a
+            // partial clear (a float remains on an uncleared side, still overlapping) defers to JS.
+            if cn.clear != 0 {
+                let c_top = CMargin::of(Input::m(cn.mt));
+                let y0 = if first && top_open {
+                    top_m.merge(c_top);
+                    content_top_rel
+                } else {
+                    pending.merge(c_top);
+                    cursor + pending.value()
+                };
+                let y = y0.max(clearance_y(&ctx.items, y0, cn.clear));
+                if y >= floats_bottom(&ctx.items) {
+                    let cx = content_left_rel + Input::m(cn.ml);
+                    boxes[c].x = cx;
+                    boxes[c].y = y;
+                    // Below every float → a fresh empty context (its subtree meets no float).
+                    let cm = measure(c, child_w, inputs, runs, run_texts, children, boxes, failed, &mut FloatCtx::new(), 0.0, 0.0);
+                    cursor = y + boxes[c].h;
+                    pending = cm.bottom;
+                    all_children_through = false;
+                    has_child = true;
+                    first = false;
+                    continue;
+                }
+                failed.set(true);
+            } else if cn.display == DISPLAY_TEXT_BLOCK {
+                // A DIRECT text-block child routes its lines around the floats. Its collapsed top is
+                // deterministic (a text block never collapses through, top_only == of(mt)), so it can be
+                // placed BEFORE measuring — which the narrowing needs, to know each line's owner-frame y.
                 let t_top = CMargin::of(Input::m(cn.mt));
                 let cy = if first && top_open {
                     top_m.merge(t_top);
@@ -678,8 +709,11 @@ fn measure(
                 has_child = true;
                 first = false;
                 continue;
+            } else {
+                // A block container beside a float (not cleared past it) needs the avoid/two-column
+                // machinery — defer to JS.
+                failed.set(true);
             }
-            failed.set(true);
         }
         has_child = true;
         let cm = measure(c, child_w, inputs, runs, run_texts, children, boxes, failed, ctx, 0.0, 0.0);

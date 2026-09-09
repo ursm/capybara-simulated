@@ -98,6 +98,40 @@ RSpec.describe 'native layout float parity', if: ENV.fetch('CSIM_JS_ENGINE', 'v8
     HTML
   end
 
+  it 'matches a clear:left block dropping below a left float' do
+    expect_parity(<<~HTML)
+      <div style="overflow:hidden;width:300px">
+        <div style="float:left;width:100px;height:60px"></div>
+        <div style="clear:left;height:20px"></div>
+      </div>
+    HTML
+  end
+
+  it 'matches clear:both below a left + right float pair' do
+    expect_parity(<<~HTML)
+      <div style="overflow:hidden;width:300px">
+        <div style="float:left;width:80px;height:60px"></div>
+        <div style="float:right;width:80px;height:40px"></div>
+        <div style="clear:both;height:20px"></div>
+      </div>
+    HTML
+  end
+
+  it 'matches a cleared text block laying out full width below the float' do
+    expect_parity(<<~HTML)
+      <div style="overflow:hidden;width:300px">
+        <div style="float:left;width:100px;height:60px"></div>
+        <div style="clear:left">now on full width lines below the float because it was cleared here</div>
+      </div>
+    HTML
+  end
+
+  it 'declines a partial clear that leaves a float overlapping, clears the matching side' do
+    # clear:left with only a RIGHT float still overlaps it → defer; clear:right clears past it → native.
+    expect(run_shadow('<div style="overflow:hidden;width:300px"><div style="float:right;width:80px;height:60px"></div><div style="clear:left;height:20px"></div></div>')['ok']).to be false
+    expect(run_shadow('<div style="overflow:hidden;width:300px"><div style="float:right;width:80px;height:60px"></div><div style="clear:right;height:20px"></div></div>')['ok']).to be true
+  end
+
   # A/B bails — the feature-carrying input declines; a sibling without it stays native.
   it 'declines a float whose parent does not establish a BFC, keeps a BFC parent' do
     expect(run_shadow('<div><div style="float:left;width:50px;height:50px"></div></div>')['ok']).to be false
