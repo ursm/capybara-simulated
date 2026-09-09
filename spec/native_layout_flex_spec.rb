@@ -4,11 +4,12 @@
 # main-axis distribution (justify-content + gap + main-axis auto margins), cross-axis alignment
 # (align-items/self + cross-axis auto margins + first/last baseline), and the container's own box. Supported:
 # row / column, nowrap / wrap, main-axis reverse, nested flex, position:relative offsets, main- and cross-axis
-# auto item margins, row & non-wrapping-column min/max-height, align-items/self:baseline & last baseline,
-# out-of-flow (absolute / fixed) items placed at their oracle-resolved box. Still DECLINES to JS — rtl /
-# vertical writing modes, a wrapping column's min/max clamp + a column's cross min/max-width, wrap-reverse,
-# inline-flex, position:sticky items, replaced / inline-block items, bare text. Each bail is an A/B: the
-# feature-carrying input declines, a sibling without it stays native. V8 only.
+# auto item margins, row & column min/max-height (incl. declared-height wrapping columns) + a column's cross
+# min/max-width, align-items/self:baseline & last baseline, out-of-flow (absolute / fixed) items placed at
+# their oracle-resolved box. Still DECLINES to JS — rtl / vertical writing modes, a WRAPPING AUTO-height
+# column with a max-height (it breaks its lines against that capacity), wrap-reverse, inline-flex,
+# position:sticky items, replaced / inline-block items, bare text. Each bail is an A/B: the feature-carrying
+# input declines, a sibling without it stays native. V8 only.
 require 'capybara/simulated'
 require 'rack'
 require_relative 'support/session_teardown'
@@ -176,6 +177,26 @@ RSpec.describe 'native layout flex parity', if: ENV.fetch('CSIM_JS_ENGINE', 'v8'
     expect_parity('<div style="display:flex;flex-wrap:wrap;min-height:200px;row-gap:50%;width:100px"><div style="width:80px;height:30px"></div><div style="width:80px;height:30px"></div></div>')
   end
 
+  it 'matches a column clamped by min-width on its cross axis (width resolved before layout)' do
+    expect_parity('<div style="display:flex;flex-direction:column;min-width:200px;width:100px;align-items:center"><div style="width:40px;height:30px"></div><div style="width:60px;height:30px"></div></div>')
+  end
+
+  it 'matches a column clamped by max-width on its cross axis' do
+    expect_parity('<div style="display:flex;flex-direction:column;max-width:80px;width:200px"><div style="height:30px"></div><div style="height:30px"></div></div>')
+  end
+
+  it 'matches a declared-height wrapping column (lines break + justify within the declared height)' do
+    expect_parity('<div style="display:flex;flex-direction:column;flex-wrap:wrap;justify-content:center;height:100px;min-height:80px;width:300px"><div style="width:40px;height:30px"></div><div style="width:40px;height:30px"></div><div style="width:40px;height:30px"></div><div style="width:40px;height:30px"></div></div>')
+  end
+
+  it 'matches a wrapping auto-height column with only a min-height (no capacity, stays one line)' do
+    expect_parity('<div style="display:flex;flex-direction:column;flex-wrap:wrap;min-height:200px;width:100px"><div style="width:40px;height:30px"></div><div style="width:40px;height:30px"></div></div>')
+  end
+
+  it 'matches percentage vertical padding on a flex container that fills its parent (width == cb, no basis divergence)' do
+    expect_parity('<div style="width:400px"><div style="display:flex;padding:10% 5%"><div style="width:50px;height:30px"></div><div style="width:50px;height:40px"></div></div></div>')
+  end
+
   it 'matches a % main-gap in a cross-stretched column (height definite via stretch, not declared)' do
     expect_parity('<div style="display:flex;height:200px;align-items:stretch;width:100px"><div style="display:flex;flex-direction:column;row-gap:50%"><div style="width:30px;height:20px"></div><div style="width:30px;height:20px"></div></div></div>')
   end
@@ -300,11 +321,12 @@ RSpec.describe 'native layout flex parity', if: ENV.fetch('CSIM_JS_ENGINE', 'v8'
   it('declines a mixed stretch/explicit wrap under align-content:stretch') { a_bails_b_native('<div style="display:flex;flex-wrap:wrap;width:250px;height:200px"><div style="width:100px"></div><div style="width:100px"></div><div style="width:100px;height:50px"></div></div>', '<div style="display:flex;flex-wrap:wrap;width:250px;height:200px"><div style="width:100px;height:30px"></div><div style="width:100px;height:30px"></div><div style="width:100px;height:30px"></div></div>') }
   it('declines an rtl flex row (rtl propagates to items — deferred)') { a_bails_b_native('<div style="display:flex;direction:rtl;width:400px"><div style="width:80px;height:30px"></div><div style="width:80px;height:30px"></div></div>') }
   it('declines an rtl flex column (cross axis runs right→left)') { a_bails_b_native('<div style="display:flex;flex-direction:column;direction:rtl;width:400px"><div style="width:80px;height:30px"></div><div style="width:80px;height:30px"></div></div>') }
-  it('declines min-height on a WRAPPING column (breaks lines against the capacity)') { a_bails_b_native('<div style="display:flex;flex-direction:column;flex-wrap:wrap;min-height:200px;width:100px"><div style="width:80px;height:30px"></div><div style="width:80px;height:30px"></div></div>', '<div style="display:flex;flex-direction:column;flex-wrap:wrap;width:100px"><div style="width:80px;height:30px"></div><div style="width:80px;height:30px"></div></div>') }
   it('declines max-height on a WRAPPING column (breaks lines against the capacity)') { a_bails_b_native('<div style="display:flex;flex-direction:column;flex-wrap:wrap;max-height:40px;width:300px"><div style="width:80px;height:30px"></div><div style="width:80px;height:30px"></div></div>', '<div style="display:flex;flex-direction:column;flex-wrap:wrap;width:300px"><div style="width:80px;height:30px"></div><div style="width:80px;height:30px"></div></div>') }
+  # A flex container's % VERTICAL padding resolves against its OWN box.width in the oracle but the CB width in
+  # native — diverges only when those widths differ, so an explicitly-sized container with % padding declines.
+  it('declines percentage vertical padding on an explicitly-sized flex container') { a_bails_b_native('<div style="display:flex;flex-direction:column;width:100px;padding-top:10%"><div style="width:80px;height:30px"></div></div>', '<div style="display:flex;flex-direction:column;width:100px;padding-top:12px"><div style="width:80px;height:30px"></div></div>') }
   it('declines an inline-block item') { a_bails_b_native('<div style="display:flex;width:400px"><span style="display:inline-block;width:80px;height:30px"></span><div style="width:80px;height:30px"></div></div>') }
   it('declines a nested UNSUPPORTED flex item (wrap-reverse)') { a_bails_b_native('<div style="display:flex;width:400px"><div style="display:flex;flex-wrap:wrap-reverse;width:80px;height:30px"></div><div style="width:80px;height:30px"></div></div>') }
-  it('declines min-width on a column container (cross clamp)') { a_bails_b_native('<div style="display:flex;flex-direction:column;min-width:200px;width:100px"><div style="width:80px;height:30px"></div><div style="width:80px;height:30px"></div></div>', '<div style="display:flex;flex-direction:column;width:100px"><div style="width:80px;height:30px"></div><div style="width:80px;height:30px"></div></div>') }
   it('declines a flex container with min-height AND percentage vertical padding (floor edge basis diverges)') { a_bails_b_native('<div style="display:flex;flex-direction:column;min-height:100px;padding-top:10%;width:100px"><div style="width:80px;height:30px"></div></div>', '<div style="display:flex;flex-direction:column;width:100px"><div style="width:80px;height:30px"></div></div>') }
   it('declines a cross-stretched column clamped by max-height (oracle sizes against the pre-clamp room native lacks)') { a_bails_b_native('<div style="display:flex;height:300px;width:400px"><div style="display:flex;flex-direction:column;max-height:100px;row-gap:20%;width:100px"><div style="height:20px"></div><div style="height:30px"></div></div></div>', '<div style="display:flex;height:300px;width:400px"><div style="display:flex;flex-direction:column;row-gap:20%;width:100px"><div style="height:20px"></div><div style="height:30px"></div></div></div>') }
   it('declines an auto-height min-height ROW that is itself a flex item (item-push collapses its two-phase clamp)') { a_bails_b_native('<div style="display:flex;flex-direction:column;width:300px"><div style="display:flex;align-items:center;min-height:120px;width:200px"><div style="width:50px;height:30px"></div></div></div>', '<div style="display:flex;flex-direction:column;width:300px"><div style="display:flex;align-items:center;width:200px"><div style="width:50px;height:30px"></div></div></div>') }
