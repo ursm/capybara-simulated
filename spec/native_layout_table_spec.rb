@@ -1,9 +1,10 @@
 # frozen_string_literal: true
 # Native layout — CSS tables (§17), geometry shadow-parity. Increments t1 (base) + t2 (spans) + t3 (collapse) +
 # t4 (caption) + t5 (thead/tfoot) + t6 (table-layout:fixed) + t7 (colgroup/<col>) + t8 (imposed height) +
-# t9 (anonymous rows):
-# an auto-layout `display:table` in normal flow, border-collapse SEPARATE or COLLAPSE — table >
-# (table-header-group | table-row-group | table-footer-group | table-row)* > table-cell*, LTR. thead / tbody /
+# t9 (anonymous rows) + r2 (rtl tables):
+# an auto-layout `display:table` in normal flow, border-collapse SEPARATE or COLLAPSE, LTR or RTL (an rtl table
+# MIRRORS its columns — column 0 at the right) — table >
+# (table-header-group | table-row-group | table-footer-group | table-row)* > table-cell*. thead / tbody /
 # tfoot are sorted into RENDER order (header, body, footer) regardless of source order. Each cell's used border
 # box (its spanned column width ×
 # row height, halved borders in collapse) is resolved by the oracle and PUSHED (like a flex item); native
@@ -22,7 +23,9 @@
 # table (a %-width wider than the grid; the oracle lays both out correctly, native just declines) or more than
 # one caption, an imposed height the tracks DON'T fill (a min-height's empty space, a too-small height /
 # max-height below the grid) or one alongside a caption / collapsed border, an anonymous CELL (stray non-cell
-# content), inline-table, rtl, nested tables, an empty row group, and a column/row only spanning cells cover.
+# content), an rtl table with a caption or collapsed border (the caption's rtl placement / the frame's
+# left-right swap aren't reflected yet), inline-table, nested tables, an empty row group, and a column/row only
+# spanning cells cover.
 # (A column's visibility:collapse is a conformance gap the oracle itself doesn't model, so native matches it
 # rather than bailing.) Each bail is an A/B: the feature-carrying input
 # declines, a plain table stays native. A `display:table-cell` with no `display:table-row` parent is wrapped in
@@ -237,6 +240,31 @@ RSpec.describe 'native layout table parity', if: ENV.fetch('CSIM_JS_ENGINE', 'v8
     expect_parity('<div style="display:table;border-spacing:0"><div style="display:table-cell;width:30px;height:40px">a</div><div style="display:table-column"></div><div style="display:table-cell;width:30px;height:40px">b</div></div>')
   end
 
+  # r2 — rtl tables (column reversal). The columns run RIGHT-to-LEFT: column 0 is at the right edge. The oracle
+  # mirrors each cell within the table content box, and native reflects it within its row (row_w - ltr_rel -
+  # cell_width); the row / group / table boxes span the whole grid and are direction-agnostic. (An rtl caption
+  # or collapsed border still declines — the caption's own rtl placement and the frame's left/right swap aren't
+  # reflected yet.)
+  it 'matches a 2-column rtl table (column 0 at the right)' do
+    expect_parity('<table dir="rtl" style="border-spacing:4px"><tr><td style="width:60px;height:20px">a</td><td style="width:80px">b</td></tr></table>')
+  end
+
+  it 'matches a 3-column rtl table' do
+    expect_parity('<table dir="rtl" style="border-spacing:4px"><tr><td style="width:30px;height:20px">a</td><td style="width:40px">b</td><td style="width:50px">c</td></tr></table>')
+  end
+
+  it 'matches an rtl table with a colspan (reflected by its spanned width)' do
+    expect_parity('<table dir="rtl" style="border-spacing:4px"><tr><td colspan="2" style="height:20px">A</td><td style="width:50px">c</td></tr><tr><td style="width:30px">d</td><td style="width:40px">e</td><td style="width:50px">f</td></tr></table>')
+  end
+
+  it 'matches an rtl table with a rowspan' do
+    expect_parity('<table dir="rtl" style="border-spacing:4px"><tr><td rowspan="2" style="width:30px">A</td><td style="width:50px;height:20px">b</td></tr><tr><td style="height:25px">c</td></tr></table>')
+  end
+
+  it 'matches an rtl fixed-layout table (columns mirrored)' do
+    expect_parity('<table dir="rtl" style="table-layout:fixed;width:300px;border-spacing:4px"><tr><td style="height:20px">a</td><td>b</td></tr></table>')
+  end
+
   # t3 — border-collapse:collapse (half-borders, spacing 0, the outer half-border frame).
   it 'matches a border-collapse 2x2 with bordered cells' do
     expect_parity('<table style="border-collapse:collapse"><tr><td style="border:4px solid;width:40px;height:20px">a</td><td style="border:4px solid;width:50px">b</td></tr><tr><td style="border:4px solid">c</td><td style="border:4px solid;height:30px">d</td></tr></table>')
@@ -351,7 +379,8 @@ RSpec.describe 'native layout table parity', if: ENV.fetch('CSIM_JS_ENGINE', 'v8
   it('declines a caption that overflows the table (a %-width wider than the grid — the table does not grow)') { a_bails_b_native('<table style="border-spacing:4px"><caption style="width:120%">c</caption><tr><td style="width:40px">a</td></tr></table>') }
   it('declines two captions') { a_bails_b_native('<table style="border-spacing:4px"><caption>top</caption><caption style="caption-side:bottom">bottom</caption><tr><td style="width:40px">a</td></tr></table>') }
   it('declines inline-table') { a_bails_b_native('<span style="display:inline-table"><span style="display:table-row"><span style="display:table-cell">a</span></span></span>') }
-  it('declines an rtl table (column reversal)') { a_bails_b_native('<table dir="rtl"><tr><td style="width:40px">a</td><td style="width:60px">b</td></tr></table>') }
+  it('declines an rtl table with a caption (the caption\'s own rtl placement is not reflected yet)') { a_bails_b_native('<table dir="rtl" style="border-spacing:4px"><caption style="height:16px">c</caption><tr><td style="width:40px;height:20px">a</td></tr></table>') }
+  it('declines an rtl border-collapse table (the outer frame left/right swap is not reflected yet)') { a_bails_b_native('<table dir="rtl" style="border-collapse:collapse"><tr><td style="border:2px solid;width:40px;height:20px">a</td></tr></table>') }
   it('declines a table with a declared height below its natural grid (the tracks overflow it)') { a_bails_b_native('<table style="height:10px;border-spacing:4px"><tr><td style="height:50px">a</td></tr></table>') }
   it('declines a table with a min-height that leaves empty space below the tracks') { a_bails_b_native('<table style="min-height:200px"><tr><td style="height:50px">a</td></tr></table>') }
   it('declines a table with a max-height below its natural grid') { a_bails_b_native('<table style="max-height:10px;border-spacing:4px"><tr><td style="height:50px">a</td></tr></table>') }

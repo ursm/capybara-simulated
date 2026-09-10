@@ -1476,7 +1476,12 @@ fn measure_table(
             if (boxes[c].w - exp_w).abs() > 0.01 || (boxes[c].h - exp_h).abs() > 0.01 {
                 return bail(failed);
             }
-            boxes[c].x = col_x[col] - row_x; // at its STARTING column (relative to the row)
+            // The cell's position within the row (relative to it). An rtl table (r2) MIRRORS its columns —
+            // column 0 is rightmost — so the cell's box is reflected within the row width: rel = row_w - ltr_rel
+            // - cell_width (a colspan reflects by its own spanned width; the row / group / table boxes span the
+            // whole grid and are direction-agnostic).
+            let ltr_rel = col_x[col] - row_x;
+            boxes[c].x = if n.rtl != 0 { row_w - ltr_rel - boxes[c].w } else { ltr_rel };
             boxes[c].y = 0.0;
         }
     }
