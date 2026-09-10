@@ -165,6 +165,52 @@ RSpec.describe 'table layout' do
     expect(inl[3]).to be_within(0.5).of(line + 20)    # content line + the full 10px border top+bottom, NOT dropped to 0
   end
 
+  # Anonymous cells (CSS 2.1 §17.2.1): a table cannot leave content loose, so stray text and non-table
+  # boxes are wrapped in anonymous table-cell boxes. A maximal RUN of consecutive stray content becomes
+  # ONE anonymous cell laying the run out as block flow — two stray blocks STACK in one cell, they are
+  # not two cells side by side. (Figures depend only on the explicit sizes, not the font.)
+  it 'wraps a run of stray blocks in one anonymous cell' do
+    body = <<~HTML
+      <div id="t" style="display:table;border:1px solid">
+      <div style="width:40px;height:20px"></div><div style="width:60px;height:10px"></div></div>
+    HTML
+    t, = measure(body, ['#t']).first
+    expect([t[2], t[3]]).to eq([62, 32])      # one cell: 60 wide (the wider block), 30 tall (both stacked), + 1px border
+  end
+
+  # Stray content BESIDE a real cell is its own anonymous cell — a run is bounded by the real cells around it.
+  it 'gives stray content beside a real cell its own anonymous cell' do
+    body = <<~HTML
+      <div id="t" style="display:table;border:1px solid">
+      <div style="display:table-cell;width:20px;height:20px"></div><div style="width:30px;height:10px"></div></div>
+    HTML
+    t, = measure(body, ['#t']).first
+    expect([t[2], t[3]]).to eq([52, 22])      # real cell (20) + an anonymous cell for the stray block (30), side by side
+  end
+
+  # In a border-collapse table the anonymous cell participates in the collapse like any cell: it carries
+  # the INNER half of the table's rim border, so the table keeps only the outer half (clientLeft) and the
+  # content sits inset by both halves. (This is the grid-less collapse case that used to keep the full border.)
+  it 'lets an anonymous cell carry the inner half of a collapsed border' do
+    body = '<div id="t" style="display:table;border:10px solid;border-collapse:collapse"><div id="b" style="width:20px;height:20px"></div></div>'
+    boxes, _text, _line, session = measure(body, ['#t', '#b'])
+    t, b = boxes
+    expect([t[2], t[3]]).to eq([40, 40])      # block 20 + 2*5 inner halves (in the anon cell) + 2*5 outer halves (the table)
+    expect([b[0], b[1]]).to eq([10, 10])      # the block is inset by the outer half (5) AND the anon cell's inner half (5)
+    expect(session.evaluate_script("document.getElementById('t').clientLeft")).to eq(5)   # the table keeps only the outer half
+  end
+
+  # §17.2.1 applies to a real table-ROW too, not just the table: stray content inside a row is wrapped in an
+  # anonymous cell, not dropped. (It used to vanish — the table collapsed to its own border.)
+  it 'wraps stray content inside a real table-row in an anonymous cell' do
+    body = <<~HTML
+      <div id="t" style="display:table;border:1px solid">
+      <div style="display:table-row"><div style="width:40px;height:20px"></div></div></div>
+    HTML
+    t, = measure(body, ['#t']).first
+    expect([t[2], t[3]]).to eq([42, 22])      # the stray block gets an anonymous cell in the row: 40 + 1px border each side
+  end
+
   # A collapsed edge is resolved from the WHOLE grid, not one cell: a shared edge is as wide as
   # the widest of the two borders facing across it, an outer edge collapses with the table's own
   # border, and the two boxes sharing the edge own HALF each. With borders that differ per side
