@@ -10,9 +10,11 @@
 # row height, halved borders in collapse) is resolved by the oracle and PUSHED (like a flex item); native
 # reassembles the column/row tracks from the NON-spanning cells, prefix-sums them with border-spacing to
 # position every cell at its (pushed) starting column/row, and derives every row, row-group and the table's
-# OWN box. In collapse the whole shared-border model is resolved by the oracle — spacing 0, each cell's halved
-# borders in its pushed box, and the table's OWN border set to the outer half of its rim cells' borders with no
-# padding — so native lays a collapse table out exactly like a separate one. A single CAPTION (top or bottom) makes the `<table>` box the WRAPPER:
+# OWN box. In collapse the whole shared-border model (§17.6.2.1) is resolved by the oracle — spacing 0, each
+# edge as wide as the WIDEST declaration meeting on it (cells AND tr / row-group / col / colgroup / table
+# borders all participate), border-style:hidden SUPPRESSING the edge entirely, each cell's halved result in its
+# pushed box, and the table's OWN border set to the outer half of its rim's borders with no padding — so native
+# lays a collapse table out exactly like a separate one. A single CAPTION (top or bottom) makes the `<table>` box the WRAPPER:
 # the caption is a NORMAL BLOCK in the table's content width (§17.4) — declared height / width / min-max /
 # box-sizing / auto-margin centering honored, auto width fills the table; a caption with a definite width WIDER
 # than the grid floors the table (which stretches its columns to fill it, like an explicit table width) —
@@ -317,6 +319,20 @@ RSpec.describe 'native layout table parity', if: ENV.fetch('CSIM_JS_ENGINE', 'v8
 
   it 'matches a spanning cell with one hidden facing segment' do
     expect_parity('<table style="border-collapse:collapse"><tr><td colspan="2" style="border:4px solid;width:80px;padding:0">A</td></tr><tr><td style="border-top:20px hidden;width:40px;padding:0">b</td><td style="border-top:10px solid;width:40px;padding:0">c</td></tr></table>')
+  end
+
+  # Structural (tr / row-group / col / colgroup) borders participate in the collapsed width (§17.6.2.1); native
+  # reassembles from the oracle-resolved cell boxes + the outer-half frame, both of which fold them in.
+  it 'matches a table with a row border on the inter-row edge' do
+    expect_parity('<table style="border-collapse:collapse"><tr style="border-bottom:20px solid"><td style="border:2px solid;width:40px;height:20px;padding:0">a</td></tr><tr><td style="border:2px solid;width:40px;height:20px;padding:0">b</td></tr></table>')
+  end
+
+  it 'matches a table with a <col> border on the inter-column edge' do
+    expect_parity('<table style="border-collapse:collapse"><colgroup><col style="border-right:20px solid"><col></colgroup><tr><td style="border:2px solid;width:40px;padding:0">a</td><td style="border:2px solid;width:40px;padding:0">b</td></tr></table>')
+  end
+
+  it 'matches a table with a row-group border and a row border on the outer rim' do
+    expect_parity('<table style="border-collapse:collapse"><tbody style="border-top:16px solid"><tr style="border-left:12px solid"><td style="border:2px solid;width:40px;height:20px;padding:0">a</td><td style="border:2px solid;width:40px;padding:0">b</td></tr></tbody></table>')
   end
 
   it 'matches border-collapse with a colspan' do

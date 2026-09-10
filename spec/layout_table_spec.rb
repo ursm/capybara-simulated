@@ -209,6 +209,74 @@ RSpec.describe 'table layout' do
     expect([t[0], t[2]]).to eq([0, 88])
   end
 
+  # Not only CELLS meet on a collapsed grid line — a tr / row-group / col / colgroup border is resolved into it
+  # too (widest wins, hidden suppresses; §17.6.2.1). Chrome 137, widths/heights pinned by the explicit sizes.
+  it 'folds a row border into the inter-row collapsed edge' do
+    body = <<~HTML
+      <table id="t" style="border-collapse:collapse">
+      <tr style="border-bottom:20px solid"><td id="a" style="border:2px solid;width:40px;height:20px;padding:0">a</td></tr>
+      <tr><td id="b" style="border:2px solid;width:40px;height:20px;padding:0">b</td></tr></table>
+    HTML
+    t, a, b = measure(body, ['#t', '#a', '#b']).first
+    expect([a[1], a[3]]).to eq([1, 31])   # top outer 1 + 20 + shared max(2,20,2)/2 = 10
+    expect([b[1], b[3]]).to eq([32, 31])
+    expect(t[3]).to eq(64)
+  end
+
+  it 'folds a <col> border into the inter-column collapsed edge' do
+    body = <<~HTML
+      <table id="t" style="border-collapse:collapse"><colgroup><col style="border-right:20px solid"><col></colgroup>
+      <tr><td id="a" style="border:2px solid;width:40px;padding:0">a</td>
+      <td id="b" style="border:2px solid;width:40px;padding:0">b</td></tr></table>
+    HTML
+    t, a, b = measure(body, ['#t', '#a', '#b']).first
+    expect([a[0], a[2]]).to eq([1, 51])   # left outer 1 + 40 + shared max(2,20,2)/2 = 10
+    expect([b[0], b[2]]).to eq([52, 51])
+    expect(t[2]).to eq(104)
+  end
+
+  # A <col span=N> is N column boxes, each carrying the border — so the col's left/right reaches EVERY column
+  # it covers, the internal edges inside the span included (Chrome renders it identically to N separate <col>s).
+  it 'applies a spanning <col> border to every column it covers' do
+    body = <<~HTML
+      <table id="t" style="border-collapse:collapse"><colgroup><col span="2" style="border-left:14px solid"><col></colgroup>
+      <tr><td id="a" style="border:2px solid;width:40px;padding:0">a</td>
+      <td id="b" style="border:2px solid;width:40px;padding:0">b</td>
+      <td id="c" style="border:2px solid;width:40px;padding:0">c</td></tr></table>
+    HTML
+    t, a, b, c = measure(body, ['#t', '#a', '#b', '#c']).first
+    # col0.left AND col1.left = 14, so both the outer-left AND the col0|col1 internal edge grow to 14 (half 7)
+    expect([a[0], a[2]]).to eq([7, 54])   # outer-left 7 + 40 + shared max(2,14)/2 = 7
+    expect([b[0], b[2]]).to eq([61, 48])  # shared 7 + 40 + b|c shared 1
+    expect([c[0], c[2]]).to eq([109, 42])
+    expect(t[2]).to eq(152)
+  end
+
+  # A childless <colgroup span=N> is ONE box (unlike <col span=N> = N boxes): its left/right land only at the
+  # group's OUTER rim, NOT on the internal edges inside the span. Chrome: with border-left:12/right:6 the
+  # internal col edge stays cells-only (flush), so the cells are narrower than the <col span=2> case above.
+  it 'applies a childless <colgroup span> border only at its outer rim' do
+    body = <<~HTML
+      <table id="t" style="border-collapse:collapse"><colgroup span="2" style="border-left:12px solid;border-right:6px solid"></colgroup>
+      <tr><td id="a" style="border:2px solid;width:40px;height:20px;padding:0">a</td>
+      <td id="b" style="border:2px solid;width:40px;padding:0">b</td></tr></table>
+    HTML
+    t, a, b = measure(body, ['#t', '#a', '#b']).first
+    expect([a[0], a[2]]).to eq([6, 47])   # outer-left max(2,12)/2=6 + 40 + internal cells-only 1 (colgroup does NOT reach it)
+    expect([b[0], b[2]]).to eq([53, 44])  # internal 1 + 40 + outer-right max(2,6)/2=3
+    expect(t[2]).to eq(100)
+  end
+
+  it 'folds a row-group border into the outer collapsed edge' do
+    body = <<~HTML
+      <table id="t" style="border-collapse:collapse"><tbody style="border-top:16px solid">
+      <tr><td id="a" style="border:2px solid;width:40px;height:20px;padding:0">a</td></tr></tbody></table>
+    HTML
+    t, a = measure(body, ['#t', '#a']).first
+    expect([a[1], a[3]]).to eq([8, 29])   # top outer max(2,16)/2 = 8 + 20 + bottom outer 1
+    expect(t[3]).to eq(38)
+  end
+
   # A collapse table has NO padding of its own and its border collapses with the edge cells: the
   # table box adds only the OUTER half of max(its own border, the rim cell's border) on each side.
   it 'ignores its own padding and collapses its own border with the edge cells' do
