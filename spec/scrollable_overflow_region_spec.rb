@@ -193,4 +193,35 @@ RSpec.describe 'the scrollable overflow region' do
       })()
     JS
   end
+
+  # A table CAPTION sits at the table's BORDER box, OUTSIDE the border+padding (§17.4 wrapper box), so a caption
+  # wider or taller than the grid OVERFLOWS the table's padding box (the scrollport) even though its edge only
+  # reaches the border box. scrollWidth / scrollHeight count it — the border-box-seeded union alone could not,
+  # since the caption's edge coincides with the seed. (Caption heights are comfortably above the text line so the
+  # figures don't depend on which face fontconfig serves; each is Chrome-measured on this machine.)
+  def table_scroll(table_style, caption_style)
+    html = %(<!DOCTYPE html><html><head><meta charset="utf-8"><style>body { margin: 0; font: 16px Arial }</style>
+             </head><body><table id="t" style="#{table_style}"><caption style="#{caption_style}">W</caption>
+             <tr><td style="width:40px;height:20px;padding:0">a</td></tr></table></body></html>)
+    session = simulated_session(->(_env) { [200, {'content-type' => 'text/html; charset=utf-8'}, [html]] })
+    session.visit '/'
+    session.evaluate_script("(function () { var t = document.getElementById('t'); return [t.scrollWidth, t.scrollHeight]; })()")
+  end
+
+  # The caption (width 300) reaches the border-box right at x=300; the padding box starts at clientLeft=10, so the
+  # region is 300-10=290 wide — past the 80px grid padding box. scrollHeight is the grid, the caption sits above it.
+  it 'counts a wide top caption overflowing the table padding box' do
+    expect(table_scroll('width:100px;border:10px solid;border-spacing:0', 'width:300px;height:30px')).to eq([290, 50])
+  end
+
+  # A caption NARROWER than the table does not extend the region past the grid's own padding box (80 wide).
+  it 'leaves scrollWidth at the padding box for a narrow caption' do
+    expect(table_scroll('width:100px;border:10px solid;border-spacing:0', 'width:40px;height:30px')).to eq([80, 50])
+  end
+
+  # A bottom caption sits below the table's bottom border, overflowing the padding box downward: the region runs
+  # from clientTop=10 to the caption bottom (70), i.e. 60 tall — and 290 wide for the same reason as above.
+  it 'counts a bottom caption overflowing the table padding box downward' do
+    expect(table_scroll('width:100px;border:10px solid;border-spacing:0;caption-side:bottom', 'width:300px;height:30px')).to eq([290, 60])
+  end
 end

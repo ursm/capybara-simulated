@@ -539,6 +539,19 @@ RSpec.describe 'table layout' do
     expect(cap[2]).to eq(100)
   end
 
+  # Like any block in the table's width, a caption is placed from the inline-start edge: in an `rtl` table a
+  # caption NARROWER than the border box sits flush against the RIGHT (§10.3.3 balances the leading — right —
+  # margin). (Chrome: border:10 / caption width:40 over a 100px border box → caption x = 60, right edge at 100.)
+  it 'places a narrow caption at the inline-start of an rtl table' do
+    body = <<~HTML
+      <table id="t" style="direction:rtl;border:10px solid;border-spacing:0">
+      <caption id="cap" style="width:40px">cap</caption><tr><td id="a" style="width:40px;padding:0">a</td></tr></table>
+    HTML
+    t, cap = measure(body, ['#t', '#cap']).first
+    expect(cap[2]).to eq(40)
+    expect(cap[0] + cap[2]).to be_within(0.01).of(t[0] + t[2])   # flush against the border box's right edge
+  end
+
   # A `<col span>` width is the width of EACH column it covers, not a total to split.
   it 'gives every column a col span covers the width it names' do
     body = <<~HTML
