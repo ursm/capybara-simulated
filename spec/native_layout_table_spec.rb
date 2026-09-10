@@ -15,15 +15,16 @@
 # borders all participate), border-style:hidden SUPPRESSING the edge entirely, each cell's halved result in its
 # pushed box, and the table's OWN border set to the outer half of its rim's borders with no padding — so native
 # lays a collapse table out exactly like a separate one. A single CAPTION (top or bottom) makes the `<table>` box the WRAPPER:
-# the caption is a NORMAL BLOCK in the table's content width (§17.4) — declared height / width / min-max /
-# box-sizing / auto-margin centering honored, auto width fills the table; a caption with a definite width WIDER
-# than the grid floors the table (which stretches its columns to fill it, like an explicit table width) —
-# stacked above (the grid offsets down) or below the grid, its own block / text subtree laid out normally.
+# the caption is a NORMAL BLOCK in the table's BORDER box (§17.4 wrapper box), OUTSIDE the table's own border +
+# padding — declared height / width / min-max / box-sizing / auto-margin centering honored, auto width fills the
+# border box; a caption with a definite width WIDER than the grid floors the table's BORDER box (which stretches
+# its columns to fill what is left inside the border, like an explicit table width) — stacked above (the grid
+# offsets down past it) or below the grid, its own block / text subtree laid out normally.
 # colspan/rowspan, ragged grids, border-collapse, thead/tbody/tfoot, table-layout:fixed, colgroup/<col> widths,
 # a caption, a position:relative cell (offset ignored), an imposed table height TALLER than the grid (declared /
 # attribute / min, shared out over the rows so the tracks fill the box), and ANONYMOUS ROWS (a table-cell with
 # no table-row parent) ARE supported. Still DECLINES to JS — a caption with a MARGIN or one that OVERFLOWS the
-# table (a %-width wider than the grid; the oracle lays both out correctly, native just declines) or more than
+# table (a %-width wider than the BORDER box; the oracle lays both out correctly, native just declines) or more than
 # one caption, an imposed height the tracks DON'T fill (a min-height's empty space, a too-small height /
 # max-height below the grid) or one alongside a caption / collapsed border, an anonymous CELL (stray non-cell
 # content), an rtl table with a caption or collapsed border (the caption's rtl placement / the frame's
@@ -366,6 +367,21 @@ RSpec.describe 'native layout table parity', if: ENV.fetch('CSIM_JS_ENGINE', 'v8
     expect_parity('<table style="border-collapse:collapse"><caption style="height:16px">c</caption><tr><td style="border:4px solid;width:40px;height:20px">a</td></tr></table>')
   end
 
+  # A caption spans the table's BORDER box, OUTSIDE the table's own border+padding (§17.4 wrapper box) — so a
+  # definite caption WIDER than the grid floors the BORDER box to the caption (the columns then fill what is
+  # left inside the border+padding), not the content box to the caption plus the border on top.
+  it 'matches a wide caption flooring a bordered table border box' do
+    expect_parity('<table style="border-spacing:0;border:10px solid"><caption style="height:16px;width:300px">Wide</caption><tr><td style="width:40px;height:20px">a</td></tr></table>')
+  end
+
+  it 'matches a caption on a table carrying its own padding (spans the border box)' do
+    expect_parity('<table style="border-spacing:0;padding:12px"><caption style="height:16px">c</caption><tr><td style="width:60px;height:20px">a</td></tr></table>')
+  end
+
+  it 'matches a bottom caption clearing a bordered table bottom border' do
+    expect_parity('<table style="border-spacing:0;border:8px solid;caption-side:bottom"><caption style="height:16px">c</caption><tr><td style="width:60px;height:20px">a</td></tr></table>')
+  end
+
   it 'matches a caption with a wrapping text / block subtree of its own' do
     expect_parity('<table style="border-spacing:4px"><caption><div style="height:10px;margin:3px"></div><div style="height:8px"></div></caption><tr><td style="width:50px;height:20px">x</td></tr></table>')
   end
@@ -378,9 +394,9 @@ RSpec.describe 'native layout table parity', if: ENV.fetch('CSIM_JS_ENGINE', 'v8
     expect_parity('<table style="border-spacing:4px;caption-side:bottom"><caption style="height:16px;position:relative;left:11px">c</caption><tr><td style="width:60px;height:20px">a</td></tr></table>')
   end
 
-  # A caption is a normal block in the table's content width (§17.4): declared height / width / min-max /
-  # box-sizing / auto-margin centering honored, auto width fills the table, and a caption with a definite width
-  # wider than the grid floors the table (stretching its columns to fill it).
+  # A caption is a normal block in the table's BORDER box (§17.4 wrapper box): declared height / width / min-max /
+  # box-sizing / auto-margin centering honored, auto width fills the border box, and a caption with a definite
+  # width wider than the grid floors the table (stretching its columns to fill what is left inside the border).
   it 'matches a caption honoring a declared height (content overflows the box)' do
     expect_parity('<table style="border-spacing:4px"><caption style="height:40px">Cap</caption><tr><td style="width:60px;height:20px">a</td></tr></table>')
   end
@@ -429,7 +445,7 @@ RSpec.describe 'native layout table parity', if: ENV.fetch('CSIM_JS_ENGINE', 'v8
   end
 
   it('declines a caption with a margin (folds into the stacking)') { a_bails_b_native('<table style="border-spacing:4px"><caption style="height:16px;margin:5px">c</caption><tr><td style="width:40px">a</td></tr></table>') }
-  it('declines a caption that overflows the table (a %-width wider than the grid — the table does not grow)') { a_bails_b_native('<table style="border-spacing:4px"><caption style="width:120%">c</caption><tr><td style="width:40px">a</td></tr></table>') }
+  it('declines a caption that overflows the table (a %-width wider than the border box — the table does not grow)') { a_bails_b_native('<table style="border-spacing:4px"><caption style="width:120%">c</caption><tr><td style="width:40px">a</td></tr></table>') }
   it('declines two captions') { a_bails_b_native('<table style="border-spacing:4px"><caption>top</caption><caption style="caption-side:bottom">bottom</caption><tr><td style="width:40px">a</td></tr></table>') }
   it('declines inline-table') { a_bails_b_native('<span style="display:inline-table"><span style="display:table-row"><span style="display:table-cell">a</span></span></span>') }
   it('declines an rtl table with a caption (the caption\'s own rtl placement is not reflected yet)') { a_bails_b_native('<table dir="rtl" style="border-spacing:4px"><caption style="height:16px">c</caption><tr><td style="width:40px;height:20px">a</td></tr></table>') }
@@ -438,6 +454,10 @@ RSpec.describe 'native layout table parity', if: ENV.fetch('CSIM_JS_ENGINE', 'v8
   it('declines a table with a min-height that leaves empty space below the tracks') { a_bails_b_native('<table style="min-height:200px"><tr><td style="height:50px">a</td></tr></table>') }
   it('declines a table with a max-height below its natural grid') { a_bails_b_native('<table style="max-height:10px;border-spacing:4px"><tr><td style="height:50px">a</td></tr></table>') }
   it('declines an imposed table height alongside a caption') { a_bails_b_native('<table style="border-spacing:4px;height:200px"><caption style="height:16px">c</caption><tr><td style="height:20px">a</td></tr></table>') }
+  # A SUB-PIXEL %-overflow caption must still decline: the oracle leaves the table at 200 (a % caption overflows
+  # without growing it), so native's wrapper union must not round it up to the caption's 200.4 — the gate uses
+  # the shadow compare epsilon, not a half-pixel slack, so this bails rather than silently mislaying the wrapper.
+  it('declines a caption that overflows the border box by a sub-pixel amount') { a_bails_b_native('<table style="width:200px;border-spacing:0"><caption style="height:16px;width:100.2%">c</caption><tr><td style="width:40px;height:20px">a</td></tr></table>') }
   it('declines an imposed table height on a collapsed table') { a_bails_b_native('<table style="border-collapse:collapse;height:200px"><tr><td style="border:2px solid;height:20px">a</td></tr></table>') }
   it('declines an empty row group (the oracle boxes it below the grid)') { a_bails_b_native('<table style="border-spacing:4px"><tbody></tbody><tbody><tr><td style="width:40px;height:20px">a</td></tr></tbody></table>') }
   it('declines stray non-cell content in a table (an anonymous CELL, which the oracle does not model)') { a_bails_b_native('<div style="display:table;border-spacing:4px"><div style="display:block;width:60px;height:20px">a</div></div>') }

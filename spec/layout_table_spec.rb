@@ -464,6 +464,81 @@ RSpec.describe 'table layout' do
     expect(cap[1] + cap[3]).to eq(t[1] + t[3])
   end
 
+  # A caption's containing block is the table's BORDER box, and it sits OUTSIDE the
+  # table's own border and padding (§17.4 / the "table wrapper box") — so on a
+  # bordered, padded table the caption spans the FULL border-box width at the
+  # wrapper's top-left corner, ABOVE the border, not inset into the content box.
+  # (Chrome, border:10 padding:7: caption [0,0,74,18], the first cell at [17,35].)
+  it 'gives a caption the table border-box width, outside the border and padding' do
+    body = <<~HTML
+      <table id="t" style="border:10px solid;padding:7px;border-spacing:0">
+      <caption id="cap">cap</caption><tr><td id="a" style="width:40px;padding:0">a</td></tr></table>
+    HTML
+    boxes, _text, line = measure(body, ['#t', '#cap', '#a'])
+    t, cap, a = boxes
+    expect([cap[0], cap[1]]).to eq([t[0], t[1]])         # the wrapper's top-left, above the border
+    expect(cap[2]).to be_within(0.01).of(t[2])           # the WHOLE border box, not the 40px content
+    expect(cap[3]).to eq(line)
+    expect(a[0]).to eq(t[0] + 17)                        # the grid is inset by border+padding, below the caption
+    expect(a[1]).to eq(cap[1] + cap[3] + 17)
+  end
+
+  # Auto horizontal margins centre a narrower caption over the border box (§10.3.3),
+  # exactly like a block in its containing block. (Chrome, table 200 / caption 40:
+  # caption x = (200-40)/2 = 80.)
+  it 'centres a caption with auto margins over the border box' do
+    body = <<~HTML
+      <table id="t" style="width:200px;border-spacing:0">
+      <caption id="cap" style="width:40px;margin:0 auto">cap</caption><tr><td id="a">a</td></tr></table>
+    HTML
+    t, cap = measure(body, ['#t', '#cap']).first
+    expect(cap[2]).to eq(40)
+    expect(cap[0]).to be_within(0.01).of(t[0] + (t[2] - cap[2]) / 2)
+  end
+
+  # A caption's own margins inset its margin box within the border box, and an AUTO
+  # width then fills what is left. (Chrome, border:4 / caption margin:5: caption
+  # [5,5,38,18] — width = border-box 48 minus the two 5px margins.)
+  it 'insets an auto-width caption by its own margins' do
+    body = <<~HTML
+      <table id="t" style="border:4px solid;border-spacing:0">
+      <caption id="cap" style="margin:5px">cap</caption><tr><td id="a" style="width:40px;padding:0">a</td></tr></table>
+    HTML
+    t, cap = measure(body, ['#t', '#cap']).first
+    expect([cap[0], cap[1]]).to eq([t[0] + 5, t[1] + 5])
+    expect(cap[2]).to be_within(0.01).of(t[2] - 10)
+  end
+
+  # A caption WIDER than the grid floors the table's BORDER-box width to the caption's
+  # margin box (§17.5.2 / the caption spans the wrapper); the columns then distribute
+  # over what is left inside the border+padding, NOT over the caption's full width.
+  # (Chrome, border:10 / caption 300: table 300, the cell 280 = 300 - the two borders.)
+  it 'floors the table border box to a wide caption, insetting the grid by the border' do
+    body = <<~HTML
+      <table id="t" style="border:10px solid;border-spacing:0">
+      <caption id="cap" style="width:300px">cap</caption><tr><td id="a" style="width:40px;padding:0">a</td></tr></table>
+    HTML
+    t, cap, a = measure(body, ['#t', '#cap', '#a']).first
+    expect(t[2]).to eq(300)                              # the border box grows to the caption, not caption+border
+    expect(cap[2]).to eq(300)
+    expect(a[2]).to eq(300 - 20)                         # the cell fills the content box: border box minus borders
+  end
+
+  # A caption's declared width is honored as-measured, box-sizing and all: a
+  # border-box caption's border+padding come OUT of its declared width, they do not
+  # grow it. (Chrome, caption width:100 box-sizing:border-box border:8 padding:5:
+  # caption width stays 100.)
+  it 'honors a border-box caption width' do
+    body = <<~HTML
+      <table id="t" style="width:200px;border-spacing:0">
+      <caption id="cap" style="width:100px;box-sizing:border-box;border:8px solid;padding:5px">cap</caption>
+      <tr><td id="a">a</td></tr></table>
+    HTML
+    t, cap = measure(body, ['#t', '#cap']).first
+    expect(cap[0]).to eq(t[0])
+    expect(cap[2]).to eq(100)
+  end
+
   # A `<col span>` width is the width of EACH column it covers, not a total to split.
   it 'gives every column a col span covers the width it names' do
     body = <<~HTML

@@ -1319,7 +1319,7 @@ fn measure_table(
     }
 
     // Phase A — lay each cell's (and the caption's) subtree out at its pushed border box, in a fresh float
-    // context. The caption is a block box spanning the table's content width (pushed).
+    // context. The caption is a block box spanning the table's BORDER box (pushed), positioned later.
     for &r in &rows {
         for &c in &children[r] {
             let iw = resolve_width(&inputs[c], 0.0);
@@ -1366,7 +1366,7 @@ fn measure_table(
     // 0 and the halved borders the oracle pushed.
     // The `<table>` el._lb is the WRAPPER (caption + grid). A caption-side:top caption offsets the whole grid
     // down by its own (pushed) height; a bottom one sits below the grid (placed later). The caption is a block
-    // box spanning the table's content width.
+    // box spanning the table's BORDER box, outside the table's own border+padding (§17.4 wrapper box).
     let caption_h = caption.map(|cap| boxes[cap].h).unwrap_or(0.0);
     let caption_w = caption.map(|cap| boxes[cap].w).unwrap_or(0.0);
     let caption_top = caption.is_some() && n.caption_side == 0;
@@ -1398,17 +1398,19 @@ fn measure_table(
     let grid_w = sum_col + (c_count as f64 + 1.0) * sx;
     let grid_h = sum_row + (r_count as f64 + 1.0) * sy;
     boxes[i].nid = n.nid;
-    boxes[i].w = grid_w.max(caption_w) + n.edges_x();
+    // The caption spans the BORDER box (the oracle pushed that width, edges included), so union it with the
+    // grid's OWN border box rather than adding the table edges to it a second time.
+    boxes[i].w = (grid_w + n.edges_x()).max(caption_w);
     boxes[i].h = grid_h + caption_h + n.edges_y();
     boxes[i].auto_height = false;
 
-    // Place the caption (a block spanning the table's content width, outside the collapse frame): at the
-    // wrapper's content origin for a top caption, below the grid for a bottom one. Its Phase-A subtree follows.
+    // Place the caption at the table WRAPPER's border box (§17.4) — OUTSIDE the table's own border+padding, as
+    // wide as the border box: a top caption at the wrapper's top-left corner (the grid is offset DOWN past it,
+    // via content_top), a bottom one just below the table's bottom padding+border. Its Phase-A subtree follows
+    // through `place`. (Native declines a caption MARGIN, so there is no lead to inset / centre it.)
     if let Some(cap) = caption {
-        boxes[cap].x = n.bl + n.pl;
-        // The grid's box spans [n.bt+n.pt, +grid_h] (grid_h already includes the collapse frame); a bottom
-        // caption sits just past it. A top caption is at the wrapper content origin (the grid is offset down).
-        boxes[cap].y = if caption_top { n.bt + n.pt } else { n.bt + n.pt + grid_h };
+        boxes[cap].x = 0.0;
+        boxes[cap].y = if caption_top { 0.0 } else { n.bt + n.pt + grid_h + n.pb + n.bb };
     }
 
     // Row-group boxes (relative to the table): span their rows across the full row width.
@@ -2407,5 +2409,71 @@ mod tests {
         assert_eq!(bx[0].h, 44.0);
         // the grid keeps its own width — cells are NOT stretched to the caption
         assert_eq!([bx[3].x, bx[4].x], [4.0, 68.0]);
+    }
+
+    // A caption on a table with its OWN border sits at the WRAPPER's border box — outside the border, not inset
+    // into the content box: x=0 / y=0 at the top-left, the full border-box width (the oracle pushes it), and the
+    // grid is offset DOWN past the caption and then IN by the border. (§17.4 wrapper box.)
+    #[test]
+    fn table_caption_spans_the_border_box_outside_the_border() {
+        let mut t = tbl(0.0, -1, 0.0, 0.0);
+        t.bl = 10.0;
+        t.br = 10.0;
+        t.bt = 10.0;
+        t.bb = 10.0;
+        let inputs = vec![
+            t,                                 // 0 table (border 10, no spacing)
+            item(1.0, 0, 60.0, 16.0),          // 1 caption, pushed at the border box (40 cell + 2*10)
+            rowel(2.0, 0),                     // 2 tr
+            cell(3.0, 2, 40.0, 20.0, 0, 1, 1), // 3 td
+        ];
+        let bx = boxes(layout_block(&inputs, &[], &[], 0.0, 0.0, 800.0));
+        // wrapper: width = grid border box (40 + 2*10) unioned with the caption (60) = 60 ; height = grid 20 +
+        // caption 16 + edges 20 = 56
+        assert_eq!([bx[0].w, bx[0].h], [60.0, 56.0]);
+        assert_eq!([bx[1].x, bx[1].y, bx[1].w, bx[1].h], [0.0, 0.0, 60.0, 16.0]); // caption OUTSIDE the border
+        assert_eq!([bx[3].x, bx[3].y], [10.0, 26.0]); // grid: border-left in, down past caption(16) + border(10)
+    }
+
+    // A bottom caption on a bordered table sits just BELOW the table's bottom border, not inside it.
+    #[test]
+    fn table_caption_bottom_clears_the_border() {
+        let mut t = tbl(0.0, -1, 0.0, 0.0);
+        t.bl = 10.0;
+        t.br = 10.0;
+        t.bt = 10.0;
+        t.bb = 10.0;
+        t.caption_side = 1; // bottom
+        let inputs = vec![
+            t,
+            item(1.0, 0, 60.0, 16.0),          // 1 caption
+            rowel(2.0, 0),
+            cell(3.0, 2, 40.0, 20.0, 0, 1, 1), // 3 td
+        ];
+        let bx = boxes(layout_block(&inputs, &[], &[], 0.0, 0.0, 800.0));
+        assert_eq!([bx[3].x, bx[3].y], [10.0, 10.0]); // grid at the top, inside the border (no top caption)
+        assert_eq!([bx[1].x, bx[1].y], [0.0, 40.0]); // caption below the bottom border: bt(10)+grid_h(20)+bb(10)
+    }
+
+    // A wide caption on a bordered table floors the wrapper to the caption's border box — it does NOT add the
+    // table border on TOP of it (the over-grow this revision fixed): caption 300 → wrapper 300, not 320. The
+    // oracle floors the content box to 280 (300 - the two borders) and pushes the cell at that width.
+    #[test]
+    fn table_caption_wider_than_a_bordered_grid_does_not_re_add_the_border() {
+        let mut t = tbl(0.0, -1, 0.0, 0.0);
+        t.bl = 10.0;
+        t.br = 10.0;
+        t.bt = 10.0;
+        t.bb = 10.0;
+        let inputs = vec![
+            t,
+            item(1.0, 0, 300.0, 16.0),          // 1 caption, spans the border box the oracle grew to 300
+            rowel(2.0, 0),
+            cell(3.0, 2, 280.0, 20.0, 0, 1, 1), // 3 td filling the floored content box (300 - 2*10)
+        ];
+        let bx = boxes(layout_block(&inputs, &[], &[], 0.0, 0.0, 800.0));
+        assert_eq!(bx[0].w, 300.0); // NOT 320 — the caption border box IS the wrapper, the border is not re-added
+        assert_eq!([bx[1].x, bx[1].w], [0.0, 300.0]);
+        assert_eq!([bx[3].x, bx[3].w], [10.0, 280.0]);
     }
 }
