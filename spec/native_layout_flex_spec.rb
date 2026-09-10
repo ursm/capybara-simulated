@@ -319,7 +319,11 @@ RSpec.describe 'native layout flex parity', if: ENV.fetch('CSIM_JS_ENGINE', 'v8'
   # align-content:stretch with lines that MIX stretch-filled and explicit cross sizes can't be recovered
   # from the pushed final sizes → decline; a uniform (all-explicit) one stays native.
   it('declines a mixed stretch/explicit wrap under align-content:stretch') { a_bails_b_native('<div style="display:flex;flex-wrap:wrap;width:250px;height:200px"><div style="width:100px"></div><div style="width:100px"></div><div style="width:100px;height:50px"></div></div>', '<div style="display:flex;flex-wrap:wrap;width:250px;height:200px"><div style="width:100px;height:30px"></div><div style="width:100px;height:30px"></div><div style="width:100px;height:30px"></div></div>') }
-  it('declines an rtl flex row (rtl propagates to items — deferred)') { a_bails_b_native('<div style="display:flex;direction:rtl;width:400px"><div style="width:80px;height:30px"></div><div style="width:80px;height:30px"></div></div>') }
+  # An rtl flex ROW reverses the main axis (first item at the right); once rtl blocks lay out natively (r1) its
+  # items no longer decline, so the whole row is native.
+  it 'matches an rtl flex row (main axis reversed, first item at the right)' do
+    expect_parity('<div style="display:flex;direction:rtl;width:400px"><div style="width:80px;height:30px"></div><div style="width:80px;height:30px"></div></div>')
+  end
   it('declines an rtl flex column (cross axis runs right→left)') { a_bails_b_native('<div style="display:flex;flex-direction:column;direction:rtl;width:400px"><div style="width:80px;height:30px"></div><div style="width:80px;height:30px"></div></div>') }
   it('declines max-height on a WRAPPING column (breaks lines against the capacity)') { a_bails_b_native('<div style="display:flex;flex-direction:column;flex-wrap:wrap;max-height:40px;width:300px"><div style="width:80px;height:30px"></div><div style="width:80px;height:30px"></div></div>', '<div style="display:flex;flex-direction:column;flex-wrap:wrap;width:300px"><div style="width:80px;height:30px"></div><div style="width:80px;height:30px"></div></div>') }
   # A flex container's % VERTICAL padding resolves against its OWN box.width in the oracle but the CB width in

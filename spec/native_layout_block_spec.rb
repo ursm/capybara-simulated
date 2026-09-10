@@ -102,4 +102,44 @@ RSpec.describe 'native layout L1 block-flow parity', if: ENV.fetch('CSIM_JS_ENGI
     expect(r).to include('ok' => true), "harness bailed: #{r.inspect}"
     expect(r['mismatches']).to eq(0), "mismatch: #{r.inspect}"
   end
+
+  it 'matches box-sizing:border-box whose border+padding exceed the declared size (border box floored at its edges)' do
+    session = simulated_session(page(<<~HTML))
+      <div style="box-sizing:border-box;width:100px;height:20px;border:10px solid;padding:5px">x</div>
+      <div style="box-sizing:border-box;width:15px;height:60px;border:10px solid;padding:5px"></div>
+    HTML
+    session.visit '/'
+    r = parity(session)
+    expect(r).to include('ok' => true), "harness bailed: #{r.inspect}"
+    expect(r['mismatches']).to eq(0), "mismatch: #{r.inspect}"
+  end
+
+  it 'matches an over-constrained (left AND right) position:relative child under rtl (§9.4.3: right wins)' do
+    session = simulated_session(page(<<~HTML))
+      <div style="width:300px;direction:rtl">
+        <div style="position:relative;left:10px;right:40px;width:100px;height:20px">a</div>
+      </div>
+    HTML
+    session.visit '/'
+    r = parity(session)
+    expect(r).to include('ok' => true), "harness bailed: #{r.inspect}"
+    expect(r['mismatches']).to eq(0), "mismatch: #{r.inspect}"
+  end
+
+  it 'matches an rtl block: children start at the inline-start = right edge (r1)' do
+    # A narrow fixed-width child sits at content_right - width - margin_right; an auto-width child fills and
+    # lands back at content-left; an overflowing child hangs off the LEFT; a nested rtl block reverses too.
+    session = simulated_session(page(<<~HTML))
+      <div style="width:300px;direction:rtl">
+        <div style="width:100px;height:20px;margin-right:20px"></div>
+        <div style="height:20px"></div>
+        <div style="width:200px;height:30px"><div style="width:80px;height:10px"></div></div>
+      </div>
+      <div style="width:100px;direction:rtl"><div style="width:300px;height:20px"></div></div>
+    HTML
+    session.visit '/'
+    r = parity(session)
+    expect(r).to include('ok' => true), "harness bailed: #{r.inspect}"
+    expect(r['mismatches']).to eq(0), "mismatch: #{r.inspect}"
+  end
 end

@@ -156,6 +156,11 @@ pub(crate) struct Input {
     // is offset down by the caption's height), 1 = bottom (the caption sits below the grid). The caption's box
     // is pushed like a cell; the `<table>` el._lb is then the WRAPPER (caption + grid). 0 when no caption.
     pub(crate) caption_side: u8,
+    // direction: rtl on a block container (r1). Its in-flow block children are placed from the inline-start =
+    // RIGHT edge: x = content_left + content_w - child_border_width - margin_right (which reduces to the ltr
+    // content_left + margin_left for a block that FILLS the width, so one formula serves both). 0 = ltr. The
+    // harness bails an rtl block with floats or auto horizontal margins, so only this placement differs.
+    pub(crate) rtl: u8,
 }
 
 pub(crate) const CROSS_BASELINE: u8 = 3;
@@ -682,7 +687,7 @@ fn measure(
         let box_h = if is_auto(n.height) {
             content_top_rel + content_h + n.pb + n.bb
         } else if n.border_box {
-            n.height
+            n.height.max(n.edges_y())   // a border box is never smaller than its border+padding (content ≥ 0)
         } else {
             n.height + n.edges_y()
         };
@@ -827,7 +832,15 @@ fn measure(
         if !cm.collapse_through {
             all_children_through = false;
         }
-        boxes[c].x = content_left_rel + Input::m(cn.ml);
+        // In an rtl block the in-flow children start at the RIGHT content edge (r1): the child's own right
+        // edge sits at content_right - margin_right, so its left is that minus its width. A block that fills
+        // the width lands back at content_left + margin_left, so this covers both. (The harness bails rtl with
+        // floats, so the float paths above are never reached for an rtl block.)
+        boxes[c].x = if n.rtl != 0 {
+            content_left_rel + content_w - boxes[c].w - Input::m(cn.mr)
+        } else {
+            content_left_rel + Input::m(cn.ml)
+        };
         if first && top_open {
             // The first in-flow child's top margin collapses with this node's top margin (collapse-
             // through the open top edge): it propagates up, and the child sits AT the content top.
@@ -872,7 +885,7 @@ fn measure(
         let floats_to = if n.starts_bfc { floats_bottom(&ctx.items) } else { f64::NEG_INFINITY };
         flow_bottom.max(floats_to) + n.pb + n.bb
     } else if n.border_box {
-        n.height
+        n.height.max(n.edges_y())   // a border box is never smaller than its border+padding (content box ≥ 0)
     } else {
         n.height + n.edges_y()
     };
@@ -1493,7 +1506,7 @@ fn resolve_width(n: &Input, cb_w: f64) -> f64 {
         // auto: fill the containing block, less horizontal margins (auto margins count 0 in L1).
         (cb_w - Input::m(n.ml) - Input::m(n.mr)).max(0.0)
     } else if n.border_box {
-        n.width
+        n.width.max(n.edges_x())   // a border box is never smaller than its border+padding (content box ≥ 0)
     } else {
         n.width + n.edges_x()
     };
@@ -1560,6 +1573,7 @@ mod tests {
             cell_rowspan: 1,
             table_collapse: 0,
             caption_side: 0,
+            rtl: 0,
         }
     }
 
@@ -1583,6 +1597,42 @@ mod tests {
         assert_eq!(bx[2], Box { nid: 2.0, x: 0.0, y: 50.0, w: 800.0, h: 30.0, auto_height: false });
         assert_eq!(bx[0].h, 80.0); // root auto height = 50 + 30
         assert!(bx[0].auto_height);
+    }
+
+    #[test]
+    fn rtl_block_places_children_from_the_right() {
+        // An rtl root (width 300) with a narrow fixed-width child (100, margin-right 20) and an auto-width child.
+        // The fixed child's right edge sits at content_right - margin_right, so x = 300 - 100 - 20 = 180; the
+        // auto-width child FILLS the width and lands back at content_left (x = 0), exercising the shared formula.
+        let mut root = blk(0.0, -1);
+        root.rtl = 1;
+        let mut a = blk(1.0, 0);
+        a.width = 100.0;
+        a.height = 20.0;
+        a.mr = 20.0;
+        let mut b = blk(2.0, 0);
+        b.height = 10.0; // auto width → fills 300
+        let inputs = vec![root, a, b];
+        let bx = boxes(layout_block(&inputs, &[], &[], 0.0, 0.0, 300.0));
+        assert_eq!([bx[1].x, bx[1].w], [180.0, 100.0]); // fixed child at the right, inset by its right margin
+        assert_eq!([bx[2].x, bx[2].w], [0.0, 300.0]);   // auto-width child fills and sits at content-left
+    }
+
+    #[test]
+    fn border_box_size_is_floored_at_its_edges() {
+        // box-sizing:border-box with border+padding LARGER than the declared size: the content box can't go
+        // below 0, so the border box is max(declared, edges) — width 100 vs edges 30 → 100; height 20 vs edges
+        // 30 → 30 (Chrome / the oracle grow it, native used to keep the too-small 20).
+        let mut a = blk(1.0, 0);
+        a.border_box = true;
+        a.width = 100.0;
+        a.height = 20.0;
+        a.bt = 10.0; a.br = 10.0; a.bb = 10.0; a.bl = 10.0; // border 10 each side → edges 20
+        a.pt = 5.0; a.pr = 5.0; a.pb = 5.0; a.pl = 5.0;     // padding 5 each side → +10 → edges_y = 30
+        a.height_adjoins = false;
+        let inputs = vec![blk(0.0, -1), a];
+        let bx = boxes(layout_block(&inputs, &[], &[], 0.0, 0.0, 800.0));
+        assert_eq!([bx[1].w, bx[1].h], [100.0, 30.0]); // width keeps 100 (> edges 30); height floored to 30
     }
 
     #[test]

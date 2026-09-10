@@ -26,9 +26,12 @@ RSpec.describe 'native layout bail coverage', if: ENV.fetch('CSIM_JS_ENGINE', 'v
     expect(native?('<div style="width:100px;margin:0 20px">x</div>')).to be true
   end
 
-  it 'declines an rtl flow, keeps ltr' do
-    expect(native?('<div dir="rtl">hello world</div>')).to be false
+  it 'lays out an rtl block natively (r1: its block children start at the inline-start = right edge)' do
+    # A text block is direction-agnostic in the box the shadow compares (rtl only moves glyphs within it).
+    expect(native?('<div dir="rtl">hello world</div>')).to be true
     expect(native?('<div dir="ltr">hello world</div>')).to be true
+    # A float or a horizontal auto margin under rtl still declines (native's rtl path doesn't handle those).
+    expect(native?('<div dir="rtl" style="width:300px"><div style="float:left;width:50px;height:20px"></div><div style="width:100px;height:20px"></div></div>')).to be false
   end
 
   it 'declines text-indent, keeps a plain block' do
