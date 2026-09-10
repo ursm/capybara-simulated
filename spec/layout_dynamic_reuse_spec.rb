@@ -298,4 +298,46 @@ RSpec.describe 'layout reuse across dynamic style state' do
       expect(diff.values_at('escapingAbs', 'remeasured')).to eq([0, 0])
     end
   end
+
+  # A border-collapse cell's border is grid-resolved — as wide as the widest of the two borders facing
+  # across each shared edge — so a SIBLING's border change moves THIS cell even though the cell itself
+  # was never touched. The per-cell edge / intrinsic-width memos key on the cell's own dirty stamp, which
+  # a sibling mutation does not bump (only the table, an ancestor of both, is dirtied); `collapseDepStamp`
+  # folds the table's stamp into their freshness so the facing cell re-lays-out. Chrome: c1 goes 66 -> 76
+  # when c2's border-left grows 6 -> 30 (c1's shared edge = max(10, 30)/2 = 15, so 60 + 1 + 15).
+  it "updates a collapsed cell when a facing sibling cell's border changes" do
+    s = session_for('', '<table style="border-collapse:collapse"><tr>' \
+      '<td id="c1" style="border-left:2px solid;border-right:10px solid;width:60px;padding:0">a</td>' \
+      '<td id="c2" style="border-left:6px solid;border-right:4px solid;width:80px;padding:0">b</td></tr></table>')
+    got = s.evaluate_script(<<~JS)
+      (() => {
+        const w = () => document.getElementById('c1').getBoundingClientRect().width;
+        const before = w();
+        document.getElementById('c2').style.borderLeftWidth = '30px';   // the edge c1 FACES
+        return [before, w()];
+      })()
+    JS
+    expect(got).to eq([66, 76])
+  end
+
+  # The same cross-cell dependency reaches the SUBTREE-reuse path: when a facing sibling's border grows, a
+  # fixed-layout border-box cell keeps its (pinned) border box but its CONTENT box shrinks, so its children
+  # must re-flow. reuseSubtree is keyed on the cell's own stamp (unchanged by a sibling mutation) and the
+  # border box (unchanged here), so without the collapse-dep guard it would hand back the child's stale box.
+  # Chrome: the child goes 100 -> 85 as the neighbour's border-left grows 0 -> 30 (200 - 2*100 border-box,
+  # the 30px collapsed border eating into this cell's content).
+  it "re-flows a collapsed cell's children when a facing sibling's border changes its content box" do
+    s = session_for('', '<table style="border-collapse:collapse;table-layout:fixed;width:200px"><tr>' \
+      '<td id="x" style="box-sizing:border-box;width:100px;padding:0;border:0"><div id="c">c</div></td>' \
+      '<td id="y" style="box-sizing:border-box;width:100px;padding:0;border:0">y</td></tr></table>')
+    got = s.evaluate_script(<<~JS)
+      (() => {
+        const w = () => document.getElementById('c').getBoundingClientRect().width;
+        const before = w();
+        document.getElementById('y').style.borderLeft = '30px solid';   // eats into x's content box
+        return [before, w()];
+      })()
+    JS
+    expect(got).to eq([100, 85])
+  end
 end

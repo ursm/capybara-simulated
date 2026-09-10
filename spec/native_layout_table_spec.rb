@@ -10,8 +10,9 @@
 # row height, halved borders in collapse) is resolved by the oracle and PUSHED (like a flex item); native
 # reassembles the column/row tracks from the NON-spanning cells, prefix-sums them with border-spacing to
 # position every cell at its (pushed) starting column/row, and derives every row, row-group and the table's
-# OWN box. In collapse the spacing is 0 and the table gains a `collapseOuter` half-border frame (from the edge
-# cells) inside its own border+padding. A single CAPTION (top or bottom) makes the `<table>` box the WRAPPER:
+# OWN box. In collapse the whole shared-border model is resolved by the oracle — spacing 0, each cell's halved
+# borders in its pushed box, and the table's OWN border set to the outer half of its rim cells' borders with no
+# padding — so native lays a collapse table out exactly like a separate one. A single CAPTION (top or bottom) makes the `<table>` box the WRAPPER:
 # the caption is a NORMAL BLOCK in the table's content width (§17.4) — declared height / width / min-max /
 # box-sizing / auto-margin centering honored, auto width fills the table; a caption with a definite width WIDER
 # than the grid floors the table (which stretches its columns to fill it, like an explicit table width) —
@@ -280,6 +281,25 @@ RSpec.describe 'native layout table parity', if: ENV.fetch('CSIM_JS_ENGINE', 'v8
 
   it 'matches collapsed cells with unequal borders (shared border = the widest)' do
     expect_parity('<table style="border-collapse:collapse"><tr><td style="border:2px solid;width:40px;height:20px">a</td><td style="border:8px solid;width:50px">b</td></tr></table>')
+  end
+
+  # Borders that differ per SIDE — the collapsed edge is grid-aware (widest of the two facing
+  # borders across a shared edge, the table's own border at the rim), which the oracle resolves and
+  # native reassembles from the pushed halved cell edges + the pushed outer-half table border.
+  it 'matches collapsed cells whose borders differ per side' do
+    expect_parity('<table style="border-collapse:collapse"><tr><td style="border-left:2px solid;border-right:10px solid;width:60px;height:20px;padding:0">a</td><td style="border-left:6px solid;border-right:4px solid;width:80px;padding:0">b</td></tr></table>')
+  end
+
+  it 'matches per-side collapsed borders down a column (top/bottom)' do
+    expect_parity('<table style="border-collapse:collapse"><tr><td style="border-top:2px solid;border-bottom:10px solid;width:40px;height:20px;padding:0">a</td></tr><tr><td style="border-top:6px solid;border-bottom:4px solid;width:40px;height:30px;padding:0">b</td></tr></table>')
+  end
+
+  it 'matches a collapsed rowspan cell facing two different neighbours (widest wins)' do
+    expect_parity('<table style="border-collapse:collapse"><tr><td rowspan="2" style="border-left:2px solid;border-right:4px solid;width:30px;padding:0">a</td><td style="border-left:20px solid;border-right:6px solid;width:40px;padding:0">b</td></tr><tr><td style="border-left:8px solid;border-right:6px solid;width:40px;padding:0">c</td></tr></table>')
+  end
+
+  it 'matches a collapse table that ignores its own padding and collapses its own border' do
+    expect_parity('<table style="border-collapse:collapse;padding:10px;border:4px solid"><tr><td style="border:2px solid;width:40px;padding:0">a</td><td style="border:2px solid;width:40px;padding:0">b</td></tr></table>')
   end
 
   it 'matches border-collapse with a colspan' do

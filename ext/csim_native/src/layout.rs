@@ -148,10 +148,10 @@ pub(crate) struct Input {
     pub(crate) cell_col: usize,
     pub(crate) cell_colspan: usize,
     pub(crate) cell_rowspan: usize,
-    // border-collapse:collapse on a DISPLAY_TABLE node (t3): 1 = collapsed. border-spacing is then 0 and the
-    // cells' borders are halved (pushed so), and the table gains a `collapseOuter` frame (the outer half of
-    // the edge cells' borders) inside its own border+padding. 0 on every other node.
-    pub(crate) table_collapse: u8,
+    // (border-collapse needs no flag here: the oracle resolves the whole collapsed-border model and pushes it as
+    // ordinary edges — border-spacing 0, each cell's halved borders in its pushed box, and the table's OWN border
+    // set to the outer half of its rim cells' borders with no padding — so `measure_table` lays a collapse table
+    // out exactly like a separate one.)
     // Caption placement (t4), on a DISPLAY_TABLE node that has a caption child: 0 = caption-side top (the grid
     // is offset down by the caption's height), 1 = bottom (the caption sits below the grid). The caption's box
     // is pushed like a cell; the `<table>` el._lb is then the WRAPPER (caption + grid). 0 when no caption.
@@ -1257,8 +1257,12 @@ fn flex_distribution(code: u8, free: f64, n: usize) -> (f64, f64) {
 // sizes, prefix-sums them with border-spacing to position every cell, and DERIVES every row, row-group, and
 // the table's OWN box — a table self-sizes from Σtracks + spacing, ignoring the width its block parent would
 // give it. All boxes are written in their immediate parent's border-box frame; `place` composes the origins
-// table → group → row → cell → content. Mirrors layoutTable / tableFrame / tableGrid. Spans, collapsed
-// borders, caption, colgroup, thead/tfoot reorder, fixed layout and rtl are gated out in nlTableSupported.
+// table → group → row → cell → content. Mirrors layoutTable / tableGapsWidth / tableGrid. Spans, captions,
+// colgroup, thead/tfoot reorder, fixed layout, rtl AND border-collapse are all IN scope (the oracle folds the
+// collapsed borders into the pushed edges, so a collapse table reassembles here exactly like a separate one).
+// nlTableSupported declines only what native can't reassemble: rtl combined with a caption or a collapsed
+// border, an imposed height the oracle didn't distribute into the rows, an empty or interleaved row group, a
+// nested table, and a track only spanning cells cover.
 fn measure_table(
     i: usize,
     inputs: &[Input],
@@ -1355,40 +1359,19 @@ fn measure_table(
         return bail(failed); // a track only spanning cells cover — native can't split it
     }
 
-    // border-collapse:collapse (§17.6.2): border-spacing is 0 (pushed), and the cells' borders are halved —
-    // the outer half of an edge cell's border belongs to the TABLE box, a `collapseOuter` frame that sits
-    // INSIDE the table's own border+padding (the cell's pushed edges are already halved, so this reuses them;
-    // `tableCollapses` gates it, else the frame is 0 and the table is the ordinary separate one). Mirrors
-    // collapseOuter / tableFrame.
-    let (mut o_l, mut o_r, mut o_t, mut o_b) = (0.0f64, 0.0f64, 0.0f64, 0.0f64);
-    if n.table_collapse != 0 {
-        let (last_col, last_row) = (c_count - 1, r_count - 1);
-        for (ri, &r) in rows.iter().enumerate() {
-            for &c in &children[r] {
-                let cn = inputs[c];
-                if cn.cell_col == 0 {
-                    o_l = o_l.max(cn.bl);
-                }
-                if cn.cell_col + cn.cell_colspan - 1 >= last_col {
-                    o_r = o_r.max(cn.br);
-                }
-                if ri == 0 {
-                    o_t = o_t.max(cn.bt);
-                }
-                if ri + cn.cell_rowspan - 1 >= last_row {
-                    o_b = o_b.max(cn.bb);
-                }
-            }
-        }
-    }
+    // border-collapse:collapse (§17.6.2) needs no special frame here: the oracle folds each shared edge into
+    // one border split between the two cells, and the table's OWN border (`n.bl`/`n.bt`/`n.br`/`n.bb`, pushed
+    // from `edgeInsets`) is already the outer half of its rim cells' collapsed borders, with no padding. So a
+    // collapse table self-sizes from its tracks + edges exactly like a separate one — only with border-spacing
+    // 0 and the halved borders the oracle pushed.
     // The `<table>` el._lb is the WRAPPER (caption + grid). A caption-side:top caption offsets the whole grid
     // down by its own (pushed) height; a bottom one sits below the grid (placed later). The caption is a block
-    // box spanning the table's content width, OUTSIDE the collapse frame.
+    // box spanning the table's content width.
     let caption_h = caption.map(|cap| boxes[cap].h).unwrap_or(0.0);
     let caption_w = caption.map(|cap| boxes[cap].w).unwrap_or(0.0);
     let caption_top = caption.is_some() && n.caption_side == 0;
-    let content_left = n.bl + n.pl + o_l;
-    let content_top = n.bt + n.pt + o_t + if caption_top { caption_h } else { 0.0 };
+    let content_left = n.bl + n.pl;
+    let content_top = n.bt + n.pt + if caption_top { caption_h } else { 0.0 };
 
     // Prefix sums (table-relative): a track's start is one border-spacing in, plus every earlier track + its
     // trailing spacing.
@@ -1407,13 +1390,13 @@ fn measure_table(
     let row_x = col_x[0];
     let row_w = col_x[c_count - 1] + col_w[c_count - 1] - row_x;
 
-    // The table (WRAPPER) SELF-sizes from its grid tracks + spacing + the collapse frame, unioned with the
-    // caption, plus its own edges — not the width its parent passed. (Separate: the frame is 0 and spacing >
-    // 0; collapse: spacing is 0 and the frame > 0. No caption: caption_h/_w are 0.)
+    // The table (WRAPPER) SELF-sizes from its grid tracks + spacing, unioned with the caption, plus its own
+    // edges — not the width its parent passed. (Separate: spacing > 0. Collapse: spacing is 0 and the edges are
+    // the outer-half frame. No caption: caption_h/_w are 0.)
     let sum_col: f64 = col_w.iter().sum();
     let sum_row: f64 = row_h.iter().sum();
-    let grid_w = sum_col + (c_count as f64 + 1.0) * sx + o_l + o_r;
-    let grid_h = sum_row + (r_count as f64 + 1.0) * sy + o_t + o_b;
+    let grid_w = sum_col + (c_count as f64 + 1.0) * sx;
+    let grid_h = sum_row + (r_count as f64 + 1.0) * sy;
     boxes[i].nid = n.nid;
     boxes[i].w = grid_w.max(caption_w) + n.edges_x();
     boxes[i].h = grid_h + caption_h + n.edges_y();
@@ -1576,7 +1559,6 @@ mod tests {
             cell_col: 0,
             cell_colspan: 1,
             cell_rowspan: 1,
-            table_collapse: 0,
             caption_side: 0,
             rtl: 0,
         }
@@ -2326,32 +2308,30 @@ mod tests {
     }
 
     #[test]
-    fn table_collapse_adds_the_outer_half_border_frame() {
-        // border-collapse: spacing 0, cells carry HALVED borders (edges), the table gains the outer half-border
-        // frame. A 2x2 with col widths 46/56, rows 26/36, each cell's halved border 2 on all sides → outer 2.
+    fn table_collapse_frame_is_the_tables_own_outer_half_border() {
+        // border-collapse: spacing 0, and the oracle resolves the whole collapsed-border model up front — it
+        // pushes each cell's border box already carrying its halved borders (col widths 46/56, rows 26/36) and
+        // the TABLE's own border as the outer half of its rim cells' borders (2 on every side). So native needs
+        // no frame of its own: it self-sizes from Σtracks + its edges, placing the grid inside that border,
+        // exactly as for a separate table.
         let mut t = tbl(0.0, -1, 0.0, 0.0);
-        t.table_collapse = 1;
-        let bordered = |nid: f64, parent: i32, w: f64, h: f64, col: usize| {
-            let mut c = cell(nid, parent, w, h, col, 1, 1);
-            c.bt = 2.0;
-            c.br = 2.0;
-            c.bb = 2.0;
-            c.bl = 2.0;
-            c
-        };
+        t.bt = 2.0;
+        t.br = 2.0;
+        t.bb = 2.0;
+        t.bl = 2.0;
         let inputs = vec![
-            t,                          // 0 table (collapse)
+            t,                          // 0 table (collapse); its border IS the outer half-frame
             rowgroup(1.0, 0),           // 1
             rowel(2.0, 1),              // 2
-            bordered(3.0, 2, 46.0, 26.0, 0), // 3
-            bordered(4.0, 2, 56.0, 26.0, 1), // 4
+            cell(3.0, 2, 46.0, 26.0, 0, 1, 1), // 3
+            cell(4.0, 2, 56.0, 26.0, 1, 1, 1), // 4
             rowel(5.0, 1),              // 5
-            bordered(6.0, 5, 46.0, 36.0, 0), // 6
-            bordered(7.0, 5, 56.0, 36.0, 1), // 7
+            cell(6.0, 5, 46.0, 36.0, 0, 1, 1), // 6
+            cell(7.0, 5, 56.0, 36.0, 1, 1, 1), // 7
         ];
         let bx = boxes(layout_block(&inputs, &[], &[], 0.0, 0.0, 800.0));
-        assert_eq!([bx[0].w, bx[0].h], [106.0, 66.0]); // outer 2 each side + Σtracks, no spacing
-        assert_eq!([bx[3].x, bx[3].y], [2.0, 2.0]); // content origin = outer frame
+        assert_eq!([bx[0].w, bx[0].h], [106.0, 66.0]); // Σtracks (102 / 62) + the table's own edges (2 each side)
+        assert_eq!([bx[3].x, bx[3].y], [2.0, 2.0]); // content origin = the table border (no padding, no spacing)
         assert_eq!(bx[4].x, 48.0); // 2 + 46 (cells meet, no spacing)
         assert_eq!(bx[6].y, 28.0); // 2 + 26
     }

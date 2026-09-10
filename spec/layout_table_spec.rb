@@ -134,6 +134,49 @@ RSpec.describe 'table layout' do
     expect(t[3]).to eq((line + PAD + 1) * 2 + 1)                                # Chrome: 43
   end
 
+  # A collapsed edge is resolved from the WHOLE grid, not one cell: a shared edge is as wide as
+  # the widest of the two borders facing across it, an outer edge collapses with the table's own
+  # border, and the two boxes sharing the edge own HALF each. With borders that differ per side
+  # the old "max of this cell's own two sides" was wrong; these figures are Chrome 137 and depend
+  # only on the explicit widths + border widths, not on the font.
+  it 'splits each collapsed edge by the widest border meeting on it' do
+    body = <<~HTML
+      <table id="t" style="border-collapse:collapse">
+      <tr><td id="a" style="border-left:2px solid;border-right:10px solid;width:60px;padding:0">a</td>
+      <td id="b" style="border-left:6px solid;border-right:4px solid;width:80px;padding:0">b</td></tr></table>
+    HTML
+    t, a, b = measure(body, ['#t', '#a', '#b']).first
+    expect([a[0], a[2]]).to eq([1, 66])   # outer-left max(2,0)/2 + 60 + shared max(10,6)/2 = 1 + 60 + 5
+    expect([b[0], b[2]]).to eq([67, 87])  # shared 5 + 80 + outer-right max(4,0)/2 = meets a at 67, 87 wide
+    expect([t[0], t[2]]).to eq([0, 156])
+  end
+
+  it 'splits collapsed edges the same way down a column (top/bottom borders)' do
+    body = <<~HTML
+      <table id="t" style="border-collapse:collapse">
+      <tr><td id="a" style="border-top:2px solid;border-bottom:10px solid;width:40px;height:20px;padding:0">a</td></tr>
+      <tr><td id="b" style="border-top:6px solid;border-bottom:4px solid;width:40px;height:30px;padding:0">b</td></tr></table>
+    HTML
+    t, a, b = measure(body, ['#t', '#a', '#b']).first
+    expect([a[1], a[3]]).to eq([1, 26])   # outer-top 1 + 20 + shared max(10,6)/2 = 5
+    expect([b[1], b[3]]).to eq([27, 37])  # shared 5 + 30 + outer-bottom max(4,0)/2 = 2
+    expect(t[3]).to eq(66)
+  end
+
+  # A collapse table has NO padding of its own and its border collapses with the edge cells: the
+  # table box adds only the OUTER half of max(its own border, the rim cell's border) on each side.
+  it 'ignores its own padding and collapses its own border with the edge cells' do
+    body = <<~HTML
+      <table id="t" style="border-collapse:collapse;padding:10px;border:4px solid">
+      <tr><td id="a" style="border:2px solid;width:40px;padding:0">a</td>
+      <td id="b" style="border:2px solid;width:40px;padding:0">b</td></tr></table>
+    HTML
+    t, a, b = measure(body, ['#t', '#a', '#b']).first
+    expect([a[0], a[2]]).to eq([2, 43])   # outer-left max(2,4)/2 = 2 (padding ignored) + 40 + shared 1
+    expect([b[0], b[2]]).to eq([45, 43])
+    expect([t[0], t[2]]).to eq([0, 90])   # 43 + 43 + the two outer halves (2 + 2)
+  end
+
   it 'puts the declared border-spacing around and between every cell' do
     body = <<~HTML
       <table id="t" style="border-spacing:10px 5px">
