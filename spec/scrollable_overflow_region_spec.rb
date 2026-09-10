@@ -224,4 +224,35 @@ RSpec.describe 'the scrollable overflow region' do
   it 'counts a bottom caption overflowing the table padding box downward' do
     expect(table_scroll('width:100px;border:10px solid;border-spacing:0;caption-side:bottom', 'width:300px;height:30px')).to eq([290, 60])
   end
+
+  # A border-collapse table's scroll region runs to its BORDER-box far corner, not the padding box: Chrome reports
+  # scrollWidth == clientWidth - clientLeft and scrollHeight == clientHeight - clientTop, i.e. only the TOP-LEFT
+  # outer-half border is the scrollport origin — the FAR outer-half border stays inside the region (a separate
+  # table, by contrast, reports the padding box on both axes). Each figure is Chrome-measured on this machine.
+  def plain_table_scroll(table_style, inner)
+    html = %(<!DOCTYPE html><html><head><meta charset="utf-8"><style>body { margin: 0; font: 16px Arial }</style>
+             </head><body><table id="t" style="#{table_style}">#{inner}</table></body></html>)
+    session = simulated_session(->(_env) { [200, {'content-type' => 'text/html; charset=utf-8'}, [html]] })
+    session.visit '/'
+    session.evaluate_script("(function () { var t = document.getElementById('t'); return [t.scrollWidth, t.scrollHeight]; })()")
+  end
+
+  # border:10 collapse over a 100x40 border box: clientLeft/Top = the 5px outer half, so 100-5 / 40-5.
+  it 'runs a collapse table scroll region to its border-box far corner' do
+    expect(plain_table_scroll('width:100px;border:10px solid;border-collapse:collapse',
+                              '<tr><td style="width:40px;height:20px;padding:0">a</td></tr>')).to eq([95, 35])
+  end
+
+  # A separate table with the same nominal border stops at the padding box (100-20 / 40-20) — the contrast.
+  it 'stops a separate table scroll region at the padding box' do
+    expect(plain_table_scroll('width:100px;border:10px solid;border-spacing:0',
+                              '<tr><td style="width:40px;height:20px;padding:0">a</td></tr>')).to eq([80, 20])
+  end
+
+  # Asymmetric collapse borders (top 6 / right 20 / bottom 2 / left 4): the outer halves are 3/10/1/2, so the
+  # near-edge origin is left 2 / top 3 and the far edge is the border box — 100-2 wide, 28-3 tall.
+  it 'uses each outer-half border on its own edge for an asymmetric collapse table' do
+    expect(plain_table_scroll('width:100px;border-style:solid;border-width:6px 20px 2px 4px;border-collapse:collapse',
+                              '<tr><td style="width:40px;height:20px;padding:0">a</td></tr>')).to eq([98, 25])
+  end
 end
