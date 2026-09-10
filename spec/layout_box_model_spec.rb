@@ -158,6 +158,46 @@ RSpec.describe 'layout box model' do
         })()
       JS
     end
+
+    # CSSOM-View: for a STATIC element, a td / th / table HTML ANCESTOR is an offsetParent as well — so a
+    # cell's descendant reports the cell, and a cell / caption / row reports the table, rather than skipping
+    # straight to the body. (offsetLeft is measured from that offsetParent's padding edge.)
+    it 'makes a td / table an offsetParent for its static descendants' do
+      body = <<~HTML
+        <table id="tbl" style="border-spacing:0"><caption id="cap">c</caption>
+        <tr><td id="td" style="padding:7px"><div id="in" style="width:5px;height:5px"></div></td></tr></table>
+      HTML
+      s = simulated_session(->(_env) { [200, {'content-type' => 'text/html'}, [%(<body style="margin:0">#{body}</body>)]] })
+      s.visit '/'
+      expect(s.evaluate_script("document.getElementById('in').offsetParent.id")).to eq('td')
+      expect(s.evaluate_script("document.getElementById('td').offsetParent.id")).to eq('tbl')
+      expect(s.evaluate_script("document.getElementById('cap').offsetParent.id")).to eq('tbl')
+      expect(s.evaluate_script("document.getElementById('in').offsetLeft")).to eq(7)   # from the td's padding edge
+    end
+
+    # …but ONLY when the element itself is static: a POSITIONED cell ignores the td/th/table rule and reports
+    # the body (Chrome). And the rule is keyed on the HTML ELEMENT, not `display`.
+    it 'ignores the td/th/table rule for a positioned element, and keys it on the tag not the display' do
+      body = <<~HTML
+        <table style="border-spacing:0"><tr><td id="posTd" style="position:relative"></td></tr></table>
+        <div style="display:table"><div style="display:table-cell"><div id="inDcell" style="width:5px;height:5px"></div></div></div>
+        <table style="border-spacing:0"><tr><td id="tdBlock" style="display:block"><div id="inTdBlock" style="width:5px;height:5px"></div></td></tr></table>
+      HTML
+      s = simulated_session(->(_env) { [200, {'content-type' => 'text/html'}, [%(<body style="margin:0">#{body}</body>)]] })
+      s.visit '/'
+      expect(s.evaluate_script("document.getElementById('posTd').offsetParent.tagName")).to eq('BODY')      # positioned → the table doesn't count
+      expect(s.evaluate_script("document.getElementById('inDcell').offsetParent.tagName")).to eq('BODY')    # display:table-cell DIV is not a <td>
+      expect(s.evaluate_script("document.getElementById('inTdBlock').offsetParent.id")).to eq('tdBlock')    # a real <td> counts even as display:block
+    end
+
+    # A `display: contents` td generates no box, so it is not in the box tree — Chrome skips it and returns the
+    # next qualifying ancestor (the table), not the box-less cell.
+    it 'skips a box-less (display:contents) td as an offsetParent' do
+      body = '<table id="tbl" style="border-spacing:0"><tr><td id="td" style="display:contents"><div id="in" style="width:5px;height:5px"></div></td></tr></table>'
+      s = simulated_session(->(_env) { [200, {'content-type' => 'text/html'}, [%(<body style="margin:0">#{body}</body>)]] })
+      s.visit '/'
+      expect(s.evaluate_script("document.getElementById('in').offsetParent.id")).to eq('tbl')
+    end
   end
 
   # `overflow` clips per AXIS. After the CSS Overflow 3 computed-value rule the only box that clips
