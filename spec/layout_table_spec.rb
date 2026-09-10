@@ -134,6 +134,37 @@ RSpec.describe 'table layout' do
     expect(t[3]).to eq((line + PAD + 1) * 2 + 1)                                # Chrome: 43
   end
 
+  # An inline-table collapses its borders exactly like a block-level table (§17.6 is indifferent to the table's
+  # outer display): the table keeps only the OUTER HALF of its rim cells' collapsed borders, the inner half going
+  # to the cell. (It used to keep the FULL border — laid out like a SEPARATE table — so its box, cell offset, and
+  # client / scroll geometry were each a half-border off.)
+  it 'collapses an inline-table border like a block table' do
+    body = <<~HTML
+      <table id="t" style="display:inline-table;border:10px solid;border-collapse:collapse">
+      <tr><td id="a" style="width:40px;height:20px;padding:0">a</td></tr></table>
+    HTML
+    t, a = measure(body, ['#t', '#a']).first
+    expect([a[0], a[1]]).to eq([5, 5])            # the cell is inset by the table's OUTER half (10/2), not the full 10
+    expect([a[2], a[3]]).to eq([50, 30])          # the cell's border box carries the INNER half: 40 + 2*5 ; 20 + 2*5
+    expect([t[2], t[3]]).to eq([60, 40])          # and the table box adds the outer halves: 50 + 2*5 ; 30 + 2*5
+  end
+
+  # A collapse table with NO grid to collapse (a display:table / inline-table element over bare text) has no
+  # rim-cell borders to halve, so it keeps its OWN border rather than dropping the frame to zero — Chrome frames
+  # it as if an anonymous cell held the inner halves, so the border box is content + the FULL border. Both outer
+  # displays frame it identically. (Regression guard: routing inline-table through the collapse model must not
+  # zero a grid-less table's frame.)
+  it 'keeps the border on a grid-less collapse table' do
+    body = <<~HTML
+      <div id="blk" style="display:table;border:10px solid;border-collapse:collapse">hi</div>
+      <span id="inl" style="display:inline-table;border:10px solid;border-collapse:collapse">hi</span>
+    HTML
+    boxes, _text, line = measure(body, ['#blk', '#inl'])
+    blk, inl = boxes
+    expect(inl[3]).to eq(blk[3])                       # inline-table frames a grid-less collapse table like display:table
+    expect(inl[3]).to be_within(0.5).of(line + 20)    # content line + the full 10px border top+bottom, NOT dropped to 0
+  end
+
   # A collapsed edge is resolved from the WHOLE grid, not one cell: a shared edge is as wide as
   # the widest of the two borders facing across it, an outer edge collapses with the table's own
   # border, and the two boxes sharing the edge own HALF each. With borders that differ per side
