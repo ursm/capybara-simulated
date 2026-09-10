@@ -242,4 +242,47 @@ RSpec.describe 'layout box model' do
     end
   end
 
+  # clientLeft/clientTop = the used top/left border width (rounded); clientWidth/clientHeight = the padding box
+  # (border box minus borders) — EXCEPT a table box, whose clientWidth/clientHeight Blink reports as the whole
+  # border box (== offsetWidth/offsetHeight), and a border-collapse table, whose clientLeft/clientTop are the
+  # outer HALF of the collapsed border. All Chrome 137.
+  describe 'clientLeft/clientTop/clientWidth/clientHeight' do
+    def client(body, sel)
+      s = simulated_session(->(_env) { [200, {'content-type' => 'text/html'}, ["<html><body style='margin:0'>#{body}</body></html>"]] })
+      s.visit '/'
+      s.evaluate_script(<<~JS)
+        (function () { var e = document.querySelector(#{sel.to_json});
+          return [e.clientLeft, e.clientTop, e.clientWidth, e.clientHeight]; })()
+      JS
+    end
+
+    it 'reports a block box border in clientLeft/clientTop and its padding box in clientWidth/clientHeight' do
+      expect(client('<div id="t" style="border-left:5px solid;border-top:7px solid;border-right:3px solid;border-bottom:9px solid;padding:10px;width:100px;height:20px"></div>', '#t'))
+        .to eq([5, 7, 120, 40])   # borders 5/7; client = 100+20 x 20+20
+    end
+
+    it 'reports a table box clientWidth/clientHeight as the whole border box (Blink quirk)' do
+      # separate table: border 4, cell 40x20, spacing 0 -> offsetWidth 48; clientWidth is ALSO 48, not 40.
+      expect(client('<table id="t" style="border:4px solid;border-collapse:separate;border-spacing:0"><tr><td style="width:40px;height:20px;padding:0">a</td></tr></table>', '#t'))
+        .to eq([4, 4, 48, 28])
+    end
+
+    it 'reports a collapse table clientLeft/clientTop as the outer half of the collapsed border' do
+      # table border 6 vs cells 2 -> outer half max(6,2)/2 = 3; clientWidth == offsetWidth (52).
+      expect(client('<table id="t" style="border-collapse:collapse;border:6px solid"><tr><td style="border:2px solid;width:40px;height:20px;padding:0">a</td></tr></table>', '#t'))
+        .to eq([3, 3, 52, 32])
+    end
+
+    it 'reports zero for a non-rendered element' do
+      expect(client('<div id="t" style="display:none;border:5px solid">x</div>', '#t')).to eq([0, 0, 0, 0])
+    end
+
+    it 'reports zero for a box-less (display:contents) or non-replaced inline element' do
+      # neither generates a border box, so all four metrics are 0 (Chrome) — a replaced/inline-block box does not.
+      expect(client('<div id="t" style="display:contents;border:5px solid">x</div>', '#t')).to eq([0, 0, 0, 0])
+      expect(client('<span id="t" style="border:5px solid;padding:10px">hi</span>', '#t')).to eq([0, 0, 0, 0])
+      expect(client('<span id="t" style="display:inline-block;border:5px solid;padding:10px;width:100px;height:20px">x</span>', '#t')).to eq([5, 5, 120, 40])
+    end
+  end
+
 end

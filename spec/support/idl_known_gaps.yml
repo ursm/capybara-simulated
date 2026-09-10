@@ -7,8 +7,8 @@
 # the spec-compliance backlog made measurable. Regenerate after implementing
 # members with: bundle exec ruby script/regen_idl_gaps.rb
 #
-# Remaining entries are dominated by: layout-engine geometry (clientLeft,
-# getBoxQuads, convert*FromNode), fullscreen / pointer-lock / view-transitions,
+# Remaining entries are dominated by: layout-engine geometry (getBoxQuads,
+# convert*FromNode), fullscreen / pointer-lock / view-transitions,
 # device / streaming / privacy-sandbox navigator APIs (all OUT OF SCOPE), plus
 # in-scope-but-deferred work: most HTMLInputElement reflection (max/min/step/
 # labels/valueAs*), element-reference ARIA reflection, and Document write-stream.
@@ -42,8 +42,6 @@ Document:
 Element:
   - activeViewTransition
   - ariaNotify
-  - clientLeft
-  - clientTop
   - computedStyleMap
   - containertiming
   - containertimingIgnore
