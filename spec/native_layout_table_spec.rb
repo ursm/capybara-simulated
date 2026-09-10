@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 # Native layout — CSS tables (§17), geometry shadow-parity. Increments t1 (base) + t2 (spans) + t3 (collapse) +
-# t4 (caption) + t5 (thead/tfoot) + t6 (table-layout:fixed) + t7 (colgroup/<col>) + t8 (imposed height):
+# t4 (caption) + t5 (thead/tfoot) + t6 (table-layout:fixed) + t7 (colgroup/<col>) + t8 (imposed height) +
+# t9 (anonymous rows):
 # an auto-layout `display:table` in normal flow, border-collapse SEPARATE or COLLAPSE — table >
 # (table-header-group | table-row-group | table-footer-group | table-row)* > table-cell*, LTR. thead / tbody /
 # tfoot are sorted into RENDER order (header, body, footer) regardless of source order. Each cell's used border
@@ -15,15 +16,18 @@
 # than the grid floors the table (which stretches its columns to fill it, like an explicit table width) —
 # stacked above (the grid offsets down) or below the grid, its own block / text subtree laid out normally.
 # colspan/rowspan, ragged grids, border-collapse, thead/tbody/tfoot, table-layout:fixed, colgroup/<col> widths,
-# a caption, a position:relative cell (offset ignored), and an imposed table height TALLER than the grid
-# (declared / attribute / min, shared out over the rows so the tracks fill the box) ARE supported. Still
-# DECLINES to JS — a caption with a MARGIN or one that OVERFLOWS the table (a %-width wider than the grid; the
-# oracle lays both out correctly, native just declines) or more than one caption, an imposed height the tracks
-# DON'T fill (a min-height's empty space, a too-small height / max-height below the grid) or one alongside a
-# caption / collapsed border, inline-table, anonymous rows/cells, rtl, nested tables, an empty row group, and a
-# column/row only spanning cells cover. (A column's visibility:collapse is a conformance gap the oracle itself
-# doesn't model, so native matches it rather than bailing.) Each bail is an A/B: the feature-carrying input
-# declines, a plain table stays native. V8 only.
+# a caption, a position:relative cell (offset ignored), an imposed table height TALLER than the grid (declared /
+# attribute / min, shared out over the rows so the tracks fill the box), and ANONYMOUS ROWS (a table-cell with
+# no table-row parent) ARE supported. Still DECLINES to JS — a caption with a MARGIN or one that OVERFLOWS the
+# table (a %-width wider than the grid; the oracle lays both out correctly, native just declines) or more than
+# one caption, an imposed height the tracks DON'T fill (a min-height's empty space, a too-small height /
+# max-height below the grid) or one alongside a caption / collapsed border, an anonymous CELL (stray non-cell
+# content), inline-table, rtl, nested tables, an empty row group, and a column/row only spanning cells cover.
+# (A column's visibility:collapse is a conformance gap the oracle itself doesn't model, so native matches it
+# rather than bailing.) Each bail is an A/B: the feature-carrying input
+# declines, a plain table stays native. A `display:table-cell` with no `display:table-row` parent is wrapped in
+# an ANONYMOUS row (t9) and IS supported; stray NON-cell content (which a browser wraps in an anonymous CELL, a
+# box the oracle doesn't model) still declines. V8 only.
 require 'capybara/simulated'
 require 'rack'
 require_relative 'support/session_teardown'
@@ -205,6 +209,34 @@ RSpec.describe 'native layout table parity', if: ENV.fetch('CSIM_JS_ENGINE', 'v8
     expect_parity('<table style="border-spacing:4px;max-height:300px"><tr><td style="width:60px;height:20px">a</td></tr><tr><td style="height:20px">b</td></tr></table>')
   end
 
+  # t9 — anonymous rows. A `display:table-cell` with no `display:table-row` parent is wrapped in an ANONYMOUS
+  # row (consecutive such cells share one row; a real row resets the run). The row has no element/box — the walk
+  # emits it with a sentinel nid and the parity compare skips it — but its cells are real and matched.
+  it 'matches two table-cells with no row (one anonymous row wraps both)' do
+    expect_parity('<div style="display:table;border-spacing:4px"><div style="display:table-cell;width:60px;height:20px">a</div><div style="display:table-cell;width:80px;height:30px">b</div></div>')
+  end
+
+  it 'matches a single table-cell with no row' do
+    expect_parity('<div style="display:table;border-spacing:4px"><div style="display:table-cell;width:60px;height:20px">a</div></div>')
+  end
+
+  it 'matches a real row followed by a stray cell (its own anonymous row)' do
+    expect_parity('<div style="display:table;border-spacing:4px"><div style="display:table-row"><div style="display:table-cell;width:60px;height:20px">a</div></div><div style="display:table-cell;width:80px;height:25px">b</div></div>')
+  end
+
+  it 'matches a table-cell with no row inside a row-group' do
+    expect_parity('<div style="display:table;border-spacing:4px"><div style="display:table-row-group"><div style="display:table-cell;width:60px;height:20px">a</div></div></div>')
+  end
+
+  it 'matches anonymous-row cells in a border-collapse table' do
+    expect_parity('<div style="display:table;border-collapse:collapse"><div style="display:table-cell;width:60px;height:20px;border:4px solid">a</div><div style="display:table-cell;width:80px;height:20px;border:4px solid">b</div></div>')
+  end
+
+  it 'matches cells split into two anonymous rows by a caption / column between them (a proper table child breaks the run)' do
+    expect_parity('<div style="display:table;border-spacing:0"><div style="display:table-cell;width:30px;height:40px">a</div><div style="display:table-caption">cap</div><div style="display:table-cell;width:30px;height:40px">b</div></div>')
+    expect_parity('<div style="display:table;border-spacing:0"><div style="display:table-cell;width:30px;height:40px">a</div><div style="display:table-column"></div><div style="display:table-cell;width:30px;height:40px">b</div></div>')
+  end
+
   # t3 — border-collapse:collapse (half-borders, spacing 0, the outer half-border frame).
   it 'matches a border-collapse 2x2 with bordered cells' do
     expect_parity('<table style="border-collapse:collapse"><tr><td style="border:4px solid;width:40px;height:20px">a</td><td style="border:4px solid;width:50px">b</td></tr><tr><td style="border:4px solid">c</td><td style="border:4px solid;height:30px">d</td></tr></table>')
@@ -326,6 +358,7 @@ RSpec.describe 'native layout table parity', if: ENV.fetch('CSIM_JS_ENGINE', 'v8
   it('declines an imposed table height alongside a caption') { a_bails_b_native('<table style="border-spacing:4px;height:200px"><caption style="height:16px">c</caption><tr><td style="height:20px">a</td></tr></table>') }
   it('declines an imposed table height on a collapsed table') { a_bails_b_native('<table style="border-collapse:collapse;height:200px"><tr><td style="border:2px solid;height:20px">a</td></tr></table>') }
   it('declines an empty row group (the oracle boxes it below the grid)') { a_bails_b_native('<table style="border-spacing:4px"><tbody></tbody><tbody><tr><td style="width:40px;height:20px">a</td></tr></tbody></table>') }
+  it('declines stray non-cell content in a table (an anonymous CELL, which the oracle does not model)') { a_bails_b_native('<div style="display:table;border-spacing:4px"><div style="display:block;width:60px;height:20px">a</div></div>') }
   it('declines a same-display group NESTED in another (its rows interleave in render order)') { a_bails_b_native('<div style="display:table;border-spacing:4px"><div style="display:table-row-group"><div style="display:table-row"><div style="display:table-cell;width:40px;height:20px">r1</div></div><div style="display:table-row-group"><div style="display:table-row"><div style="display:table-cell;height:18px">r2</div></div></div><div style="display:table-row"><div style="display:table-cell;height:36px">r3</div></div></div></div>') }
   it('declines a column that only spanning cells cover (no single-column cell to size it)') { a_bails_b_native('<table style="border-spacing:4px"><tr><td colspan="2">A</td><td style="width:20px">b</td></tr><tr><td style="width:30px">c</td><td colspan="2">DE</td></tr></table>') }
 end
