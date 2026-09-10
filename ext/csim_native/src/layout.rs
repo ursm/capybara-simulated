@@ -161,6 +161,10 @@ pub(crate) struct Input {
     // content_left + margin_left for a block that FILLS the width, so one formula serves both). 0 = ltr. The
     // harness bails an rtl block with floats or auto horizontal margins, so only this placement differs.
     pub(crate) rtl: u8,
+    // vertical-align on a table CELL: the px the oracle moved the cell's content down by within its (row-tall)
+    // box (0 for top / a content that fills the row). The oracle already resolved top/middle/bottom into this
+    // scalar; native lays cell content top-aligned, then shifts the cell's own child boxes down by it to match.
+    pub(crate) cell_va_offset: f64,
 }
 
 pub(crate) const CROSS_BASELINE: u8 = 3;
@@ -1330,6 +1334,19 @@ fn measure_table(
         let iw = resolve_width(&inputs[cap], 0.0);
         measure(cap, iw, inputs, runs, run_texts, children, boxes, failed, &mut FloatCtx::new(), 0.0, 0.0);
     }
+    // vertical-align: content laid out top-aligned above, moved down by the offset the oracle pushed (§17.5.3;
+    // the UA default is `middle`). Shift the cell's direct children — their subtrees follow through `place`, and
+    // text runs (not compared) need no shift; the cell BOX itself stays at the row top.
+    for &r in &rows {
+        for &c in &children[r] {
+            let off = inputs[c].cell_va_offset;
+            if off != 0.0 {
+                for &ch in &children[c] {
+                    boxes[ch].y += off;
+                }
+            }
+        }
+    }
 
     // Tracks: a column's width is the widest NON-spanning (colspan==1) cell in it, a row's height the tallest
     // rowspan==1 cell in it — a cell that SPANS several tracks can't size any one of them. This recovers the
@@ -1563,6 +1580,7 @@ mod tests {
             cell_rowspan: 1,
             caption_side: 0,
             rtl: 0,
+            cell_va_offset: 0.0,
         }
     }
 

@@ -200,6 +200,31 @@ RSpec.describe 'table layout' do
     expect(session.evaluate_script("document.getElementById('t').clientLeft")).to eq(5)   # the table keeps only the outer half
   end
 
+  # A cell's content is vertically aligned within its (row-tall) box (§17.5.3): the UA default is `middle`, and
+  # `top` / `bottom` are honored, so a cell shorter than its row has its content pushed down. (Cross-cell baseline
+  # alignment — and a cell whose OWN declared height exceeds its content — are a separate pass; a lone block's
+  # baseline resolves to the top.) The tall cell here makes the row 40; the short cell's 10px block moves.
+  def va_inner_y(va)
+    body = %(<table id="t" style="border-spacing:0"><tr><td style="padding:0"><div style="width:20px;height:40px"></div></td>) +
+           %(<td style="padding:0#{va == :default ? '' : ";vertical-align:#{va}"}"><div id="k" style="width:20px;height:10px"></div></td></tr></table>)
+    boxes, = measure(body, ['#t', '#k'])
+    boxes[1][1] - boxes[0][1]
+  end
+  it 'vertically aligns a short cell content within a taller row' do
+    expect(va_inner_y(:default)).to eq(15)   # the UA default is middle: (40 - 10) / 2
+    expect(va_inner_y('top')).to eq(0)
+    expect(va_inner_y('middle')).to eq(15)
+    expect(va_inner_y('bottom')).to eq(30)   # 40 - 10
+  end
+
+  it 'defaults a table cell to vertical-align: middle' do
+    html = '<html><body><table><tr><td id="d">x</td><th id="h">y</th></tr></table></body></html>'
+    s = simulated_session(->(_env) { [200, {'content-type' => 'text/html'}, [html]] })
+    s.visit '/'
+    expect(s.evaluate_script("getComputedStyle(document.getElementById('d')).verticalAlign")).to eq('middle')
+    expect(s.evaluate_script("getComputedStyle(document.getElementById('h')).verticalAlign")).to eq('middle')
+  end
+
   # §17.2.1 applies to a real table-ROW too, not just the table: stray content inside a row is wrapped in an
   # anonymous cell, not dropped. (It used to vanish — the table collapsed to its own border.)
   it 'wraps stray content inside a real table-row in an anonymous cell' do

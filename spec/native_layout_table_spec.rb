@@ -90,6 +90,13 @@ RSpec.describe 'native layout table parity', if: ENV.fetch('CSIM_JS_ENGINE', 'v8
     expect_parity('<table style="border-spacing:4px"><tr><td style="width:100px"><div style="height:10px;margin:5px"></div><div style="height:20px"></div></td><td style="width:60px;height:50px">x</td></tr></table>')
   end
 
+  # vertical-align (§17.5.3): a short cell beside a taller one has its content pushed down — the UA default is
+  # middle, and top/bottom are honored. Native lays cell content top-aligned then applies the oracle's pushed
+  # offset, so the descendant boxes match.
+  it 'matches vertical-aligned cell content in a taller row (middle default, and explicit top/bottom)' do
+    expect_parity('<table style="border-spacing:4px"><tr><td style="width:20px;vertical-align:top"><div style="width:20px;height:40px"></div></td><td style="width:20px"><div style="width:20px;height:10px"></div></td><td style="width:20px;vertical-align:bottom"><div style="width:20px;height:12px"></div></td></tr></table>')
+  end
+
   it 'matches a table with a declared width (distributed into the columns by the oracle)' do
     expect_parity('<table style="width:300px;border-spacing:4px"><tr><td>a</td><td>b</td></tr></table>')
   end
@@ -460,7 +467,7 @@ RSpec.describe 'native layout table parity', if: ENV.fetch('CSIM_JS_ENGINE', 'v8
   it('declines a caption that overflows the border box by a sub-pixel amount') { a_bails_b_native('<table style="width:200px;border-spacing:0"><caption style="height:16px;width:100.2%">c</caption><tr><td style="width:40px;height:20px">a</td></tr></table>') }
   it('declines an imposed table height on a collapsed table') { a_bails_b_native('<table style="border-collapse:collapse;height:200px"><tr><td style="border:2px solid;height:20px">a</td></tr></table>') }
   it('declines an empty row group (the oracle boxes it below the grid)') { a_bails_b_native('<table style="border-spacing:4px"><tbody></tbody><tbody><tr><td style="width:40px;height:20px">a</td></tr></tbody></table>') }
-  it('declines stray non-cell content in a table (an anonymous CELL, which the oracle does not model)') { a_bails_b_native('<div style="display:table;border-spacing:4px"><div style="display:block;width:60px;height:20px">a</div></div>') }
+  it('declines stray non-cell content in a table (the oracle wraps it in an anonymous CELL, which has no node id)') { a_bails_b_native('<div style="display:table;border-spacing:4px"><div style="display:block;width:60px;height:20px">a</div></div>') }
   it('declines a same-display group NESTED in another (its rows interleave in render order)') { a_bails_b_native('<div style="display:table;border-spacing:4px"><div style="display:table-row-group"><div style="display:table-row"><div style="display:table-cell;width:40px;height:20px">r1</div></div><div style="display:table-row-group"><div style="display:table-row"><div style="display:table-cell;height:18px">r2</div></div></div><div style="display:table-row"><div style="display:table-cell;height:36px">r3</div></div></div></div>') }
   it('declines a column that only spanning cells cover (no single-column cell to size it)') { a_bails_b_native('<table style="border-spacing:4px"><tr><td colspan="2">A</td><td style="width:20px">b</td></tr><tr><td style="width:30px">c</td><td colspan="2">DE</td></tr></table>') }
 end
