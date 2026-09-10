@@ -163,6 +163,52 @@ RSpec.describe 'table layout' do
     expect(t[3]).to eq(66)
   end
 
+  # border-style:hidden has the HIGHEST priority in the collapsing model (CSS 2.1 §17.6.2.1): it SUPPRESSES
+  # the whole shared edge (width 0), beating any wider neighbour — unlike `none`, which merely contributes 0
+  # and loses to a neighbour. Chrome 137: a 10px-hidden right on A facing a 10px-solid left on B collapses to
+  # NOTHING between them (both cells 61 = 60 + the outer 1 + nothing shared).
+  it 'suppresses a collapsed edge when either side is border-style:hidden' do
+    body = <<~HTML
+      <table id="t" style="border-collapse:collapse">
+      <tr><td id="a" style="border:2px solid;border-right:10px hidden;width:60px;padding:0">a</td>
+      <td id="b" style="border:2px solid;border-left:10px solid;width:60px;padding:0">b</td></tr></table>
+    HTML
+    t, a, b = measure(body, ['#t', '#a', '#b']).first
+    expect([a[0], a[2]]).to eq([1, 61])   # left outer 1 + 60 + shared SUPPRESSED (0)
+    expect([b[0], b[2]]).to eq([62, 61])  # meets a with no border between; right outer 1
+    expect([t[0], t[2]]).to eq([0, 124])
+  end
+
+  # hidden on a RIM cell's outer edge suppresses the whole shared edge INCLUDING the table's own border on
+  # that rim — not just the cell's half (§17.6.2.1). Chrome: a 20px-bordered table around a cell whose left is
+  # hidden puts the cell flush at x=0 and the table is 70 wide (50 + the right outer half 10), its left gone.
+  it 'lets a rim cell border-style:hidden suppress the table\'s own border on that rim' do
+    body = <<~HTML
+      <table id="t" style="border-collapse:collapse;border:20px solid">
+      <tr><td id="a" style="border:4px solid;border-left:4px hidden;width:50px;height:20px;padding:0">a</td></tr></table>
+    HTML
+    t, a = measure(body, ['#t', '#a']).first
+    expect([a[0], a[2]]).to eq([0, 60])   # left edge SUPPRESSED (table's 20px gone) + 50 + shared... right outer max(4,20)/2=10
+    expect([t[0], t[2]]).to eq([0, 70])
+  end
+
+  # A SPANNING cell shares one edge with several cells; a hidden on ONE of them suppresses only THAT segment,
+  # not the spanning cell's whole edge (the widest surviving segment still sets its border). Chrome 137.
+  it 'suppresses only the hidden segment of a spanning cell\'s collapsed edge' do
+    body = <<~HTML
+      <table id="t" style="border-collapse:collapse">
+      <tr><td id="A" colspan="2" style="border:4px solid;width:80px;padding:0">A</td></tr>
+      <tr><td id="b" style="border-top:20px hidden;width:40px;padding:0">b</td>
+      <td id="c" style="border-top:10px solid;width:40px;padding:0">c</td></tr></table>
+    HTML
+    t, a, b, c = measure(body, ['#t', '#A', '#b', '#c']).first
+    # A's bottom: the b-segment (hidden) is suppressed, the c-segment (max(4,10)/2=5) survives → A keeps a 5px bottom
+    expect([a[0], a[2]]).to eq([2, 84])   # outer-left 2 + 80 + outer-right 2
+    expect([b[0], b[2]]).to eq([2, 42])
+    expect([c[0], c[2]]).to eq([44, 42])
+    expect([t[0], t[2]]).to eq([0, 88])
+  end
+
   # A collapse table has NO padding of its own and its border collapses with the edge cells: the
   # table box adds only the OUTER half of max(its own border, the rim cell's border) on each side.
   it 'ignores its own padding and collapses its own border with the edge cells' do

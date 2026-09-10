@@ -302,6 +302,23 @@ RSpec.describe 'native layout table parity', if: ENV.fetch('CSIM_JS_ENGINE', 'v8
     expect_parity('<table style="border-collapse:collapse;padding:10px;border:4px solid"><tr><td style="border:2px solid;width:40px;padding:0">a</td><td style="border:2px solid;width:40px;padding:0">b</td></tr></table>')
   end
 
+  # border-style:hidden SUPPRESSES a collapsed edge (§17.6.2.1) — a cell hidden edge, and the table's own.
+  it 'matches a collapse table with a border-style:hidden cell edge' do
+    expect_parity('<table style="border-collapse:collapse"><tr><td style="border:2px solid;border-right:10px hidden;width:60px;padding:0">a</td><td style="border:2px solid;border-left:10px solid;width:60px;padding:0">b</td></tr></table>')
+  end
+
+  it 'matches a collapse table whose own border is border-style:hidden' do
+    expect_parity('<table style="border-collapse:collapse;border-left:20px hidden"><tr><td style="border:4px solid;width:40px;padding:0">a</td></tr></table>')
+  end
+
+  it 'matches a rim cell whose hidden edge suppresses the table border' do
+    expect_parity('<table style="border-collapse:collapse;border:20px solid"><tr><td style="border:4px solid;border-left:4px hidden;width:50px;height:20px;padding:0">a</td></tr></table>')
+  end
+
+  it 'matches a spanning cell with one hidden facing segment' do
+    expect_parity('<table style="border-collapse:collapse"><tr><td colspan="2" style="border:4px solid;width:80px;padding:0">A</td></tr><tr><td style="border-top:20px hidden;width:40px;padding:0">b</td><td style="border-top:10px solid;width:40px;padding:0">c</td></tr></table>')
+  end
+
   it 'matches border-collapse with a colspan' do
     expect_parity('<table style="border-collapse:collapse"><tr><td colspan="2" style="border:3px solid">A</td></tr><tr><td style="border:3px solid;width:30px">b</td><td style="border:3px solid;width:40px">c</td></tr></table>')
   end
