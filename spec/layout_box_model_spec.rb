@@ -325,4 +325,24 @@ RSpec.describe 'layout box model' do
     end
   end
 
+  # A box's own min-width / max-width clamp its intrinsic width — its OUTER min/max-content contribution (CSS
+  # Sizing 3 §5.1) — so a shrink-to-fit ancestor grows to a descendant's min-width and shrinks to its max-width.
+  # Chrome 137-measured (16px monospace). Before this only a child's declared `width` reached the container.
+  describe 'a child min/max-width sizes its shrink-to-fit container' do
+    def w(body) = boxes(%(<div id="t" style="display:inline-block;font:16px monospace">#{body}</div>), ['#t']).first[2]
+
+    it 'grows an inline-block to a block child min-width' do
+      expect(w('<div style="min-width:130px">A</div>')).to eq(130)
+    end
+    it 'caps an inline-block at a block child max-width, below content' do
+      expect(w('<div style="max-width:40px">wwwwwwww</div>')).to eq(40)
+    end
+    it 'propagates a grandchild min-width through an auto child' do
+      expect(w('<div><div style="min-width:110px">A</div></div>')).to eq(110)
+    end
+    it 'grows a left float to a child min-width' do
+      x, _y, fw = boxes('<div style="width:0"><div id="t" style="float:left;font:16px monospace"><div style="min-width:120px">A</div></div></div>', ['#t']).first
+      expect(fw).to eq(120)
+    end
+  end
 end
