@@ -492,6 +492,22 @@ RSpec.describe 'table layout' do
     expect([t[0], t[2]]).to eq([0, 156])
   end
 
+  # The SAME grid under rtl mirrors the columns (§17): logical column a (0) is at the physical RIGHT, b (1) at
+  # the left, so the physical `border-left`/`border-right` collapse with the OPPOSITE cells. Chrome 137: b (left)
+  # keeps its own outer-left half max(6,0)/2 = 3 and the shared max(4,2)/2 = 2 → 85 wide at x=3; a (right) the
+  # shared 2 and its outer-right half max(10,0)/2 = 5 → 67 wide, meeting b at x=88; the table is 160.
+  it 'mirrors a collapsed edge split under rtl (physical borders swap with the columns)' do
+    body = <<~HTML
+      <table id="t" dir="rtl" style="border-collapse:collapse">
+      <tr><td id="a" style="border-left:2px solid;border-right:10px solid;width:60px;padding:0">a</td>
+      <td id="b" style="border-left:6px solid;border-right:4px solid;width:80px;padding:0">b</td></tr></table>
+    HTML
+    t, a, b = measure(body, ['#t', '#a', '#b']).first
+    expect([b[0], b[2]]).to eq([3, 85])   # outer-left max(6,0)/2 = 3 + 80 + shared max(4,2)/2 = 2
+    expect([a[0], a[2]]).to eq([88, 67])  # shared 2 + 60 + outer-right max(10,0)/2 = 5, meets b at 88
+    expect([t[0], t[2]]).to eq([0, 160])
+  end
+
   it 'splits collapsed edges the same way down a column (top/bottom borders)' do
     body = <<~HTML
       <table id="t" style="border-collapse:collapse">

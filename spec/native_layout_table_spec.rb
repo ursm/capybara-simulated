@@ -27,9 +27,9 @@
 # table (a %-width wider than the BORDER box; the oracle lays both out correctly, native just declines) or more than
 # one caption, an imposed height the tracks DON'T fill (a min-height's empty space, a too-small height /
 # max-height below the grid) or one alongside a caption / collapsed border, an anonymous CELL (stray non-cell
-# content), an rtl table with a MARGIN-offset caption or a collapsed border (the caption's auto-margin / lead
-# inset and the frame's left-right swap aren't reflected yet — a full-width OR narrower rtl caption IS placed at
-# the inline-start), inline-table,
+# content), an rtl table with a MARGIN-offset caption (the caption's auto-margin / lead inset isn't reflected
+# yet — a full-width OR narrower rtl caption IS placed at the inline-start; an rtl border-COLLAPSE table IS
+# reproduced, its frame resolved with the columns mirrored), inline-table,
 # nested tables, an empty row group, and a column/row only
 # spanning cells cover.
 # (A column's visibility:collapse is a conformance gap the oracle itself doesn't model, so native matches it
@@ -303,6 +303,37 @@ RSpec.describe 'native layout table parity', if: ENV.fetch('CSIM_JS_ENGINE', 'v8
     expect_parity('<table dir="rtl" style="table-layout:fixed;width:300px;border-spacing:4px"><tr><td style="height:20px">a</td><td>b</td></tr></table>')
   end
 
+  # An rtl border-COLLAPSE table resolves its frame with the columns mirrored: the physical `border-left`
+  # collapses with the HIGHEST-index column and `border-right` with column 0, so an asymmetric left/right frame
+  # (or asymmetric cell borders) lands the wide half on the opposite cell from LTR (§17.6.2). The oracle now
+  # resolves that (matched to Chrome), and native reproduces the pushed edges.
+  it 'matches an rtl border-collapse table with an asymmetric frame' do
+    expect_parity('<table dir="rtl" style="border-collapse:collapse;border-left:10px solid;border-right:2px solid"><tr><td style="width:40px;height:20px">a</td><td style="width:60px">b</td></tr></table>')
+  end
+
+  it 'matches an rtl border-collapse table with asymmetric cell borders' do
+    expect_parity('<table dir="rtl" style="border-collapse:collapse"><tr><td style="border-left:8px solid;border-right:1px solid;width:40px;height:20px">a</td><td style="border-left:1px solid;border-right:6px solid;width:60px">b</td></tr></table>')
+  end
+
+  it 'matches an rtl border-collapse table with a rowspan and an asymmetric frame' do
+    expect_parity('<table dir="rtl" style="border-collapse:collapse;border-left:12px solid;border-right:2px solid"><tr><td rowspan="2" style="width:30px;height:20px">A</td><td style="width:50px">b</td></tr><tr><td style="height:20px">c</td></tr></table>')
+  end
+
+  it 'matches an rtl border-collapse table with a colspan and an asymmetric frame' do
+    expect_parity('<table dir="rtl" style="border-collapse:collapse;border-left:10px solid;border-right:2px solid"><tr><td colspan="2" style="height:20px">A</td></tr><tr><td style="width:30px">d</td><td style="width:40px">e</td></tr></table>')
+  end
+
+  # A `<col>` / `<colgroup>` border participates in the collapse on its PHYSICAL grid line, which the rtl mirror
+  # also flips: a `<col>`'s physical border-left / -right and a childless `<colgroup span=N>`'s outer rims land
+  # on the opposite columns from LTR.
+  it 'matches an rtl border-collapse table with a bordered <col>' do
+    expect_parity('<table dir="rtl" style="border-collapse:collapse"><colgroup><col style="border-left:8px solid;border-right:2px solid"><col style="border-left:1px solid;border-right:6px solid"></colgroup><tr><td style="width:40px;height:20px">a</td><td style="width:50px">b</td></tr></table>')
+  end
+
+  it 'matches an rtl border-collapse table with a childless <colgroup span=2> frame' do
+    expect_parity('<table dir="rtl" style="border-collapse:collapse"><colgroup span="2" style="border-left:10px solid;border-right:2px solid"></colgroup><tr><td style="width:40px;height:20px">a</td><td style="width:50px">b</td></tr></table>')
+  end
+
   # t3 — border-collapse:collapse (half-borders, spacing 0, the outer half-border frame).
   it 'matches a border-collapse 2x2 with bordered cells' do
     expect_parity('<table style="border-collapse:collapse"><tr><td style="border:4px solid;width:40px;height:20px">a</td><td style="border:4px solid;width:50px">b</td></tr><tr><td style="border:4px solid">c</td><td style="border:4px solid;height:30px">d</td></tr></table>')
@@ -483,7 +514,6 @@ RSpec.describe 'native layout table parity', if: ENV.fetch('CSIM_JS_ENGINE', 'v8
   it('declines two captions') { a_bails_b_native('<table style="border-spacing:4px"><caption>top</caption><caption style="caption-side:bottom">bottom</caption><tr><td style="width:40px">a</td></tr></table>') }
   it('declines inline-table') { a_bails_b_native('<span style="display:inline-table"><span style="display:table-row"><span style="display:table-cell">a</span></span></span>') }
   it('declines an rtl table with a MARGIN-offset caption (its auto-margin / lead inset is not reflected yet)') { a_bails_b_native('<table dir="rtl" style="border-spacing:4px"><caption style="width:20px;height:16px;margin-left:8px">c</caption><tr><td style="width:40px;height:20px">a</td></tr></table>') }
-  it('declines an rtl border-collapse table (the outer frame left/right swap is not reflected yet)') { a_bails_b_native('<table dir="rtl" style="border-collapse:collapse"><tr><td style="border:2px solid;width:40px;height:20px">a</td></tr></table>') }
   it('declines an imposed table height alongside a caption') { a_bails_b_native('<table style="border-spacing:4px;height:200px"><caption style="height:16px">c</caption><tr><td style="height:20px">a</td></tr></table>') }
   # A SUB-PIXEL %-overflow caption must still decline: the oracle leaves the table at 200 (a % caption overflows
   # without growing it), so native's wrapper union must not round it up to the caption's 200.4 — the gate uses
