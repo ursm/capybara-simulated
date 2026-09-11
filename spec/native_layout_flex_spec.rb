@@ -3,13 +3,14 @@
 # main+cross size rides its record, like a float's shrink-to-fit width); native does only the PLACEMENT —
 # main-axis distribution (justify-content + gap + main-axis auto margins), cross-axis alignment
 # (align-items/self + cross-axis auto margins + first/last baseline), and the container's own box. Supported:
-# row / column, nowrap / wrap, main-axis reverse, nested flex, position:relative offsets, main- and cross-axis
-# auto item margins, row & column min/max-height (incl. declared-height wrapping columns) + a column's cross
-# min/max-width, align-items/self:baseline & last baseline, out-of-flow (absolute / fixed) items placed at
-# their oracle-resolved box. Still DECLINES to JS — rtl / vertical writing modes, a WRAPPING AUTO-height
-# column with a max-height (it breaks its lines against that capacity), wrap-reverse, inline-flex,
-# position:sticky items, replaced / inline-block items, bare text. Each bail is an A/B: the feature-carrying
-# input declines, a sibling without it stays native. V8 only.
+# row / column, nowrap / wrap, main-axis reverse (row-reverse / column-reverse / rtl ROW), an rtl COLUMN (its
+# cross axis runs right→left; items pack from the right), nested flex, position:relative offsets, main- and
+# cross-axis auto item margins, row & column min/max-height (incl. declared-height wrapping columns) + a column's
+# cross min/max-width, align-items/self:baseline & last baseline, out-of-flow (absolute / fixed) items placed at
+# their oracle-resolved box. Still DECLINES to JS — vertical writing modes, an rtl column with a cross (horizontal)
+# auto margin or WRAP, a WRAPPING AUTO-height column with a max-height (it breaks its lines against that
+# capacity), wrap-reverse, inline-flex, position:sticky items, replaced / inline-block items, bare text. Each bail
+# is an A/B: the feature-carrying input declines, a sibling without it stays native. V8 only.
 require 'capybara/simulated'
 require 'rack'
 require_relative 'support/session_teardown'
@@ -324,7 +325,25 @@ RSpec.describe 'native layout flex parity', if: ENV.fetch('CSIM_JS_ENGINE', 'v8'
   it 'matches an rtl flex row (main axis reversed, first item at the right)' do
     expect_parity('<div style="display:flex;direction:rtl;width:400px"><div style="width:80px;height:30px"></div><div style="width:80px;height:30px"></div></div>')
   end
-  it('declines an rtl flex column (cross axis runs right→left)') { a_bails_b_native('<div style="display:flex;flex-direction:column;direction:rtl;width:400px"><div style="width:80px;height:30px"></div><div style="width:80px;height:30px"></div></div>') }
+  # An rtl flex COLUMN packs its items from the RIGHT edge (its cross axis runs right→left). `crossAlignPhysical`
+  # flips each item's align onto the physical cross, so native's forward-frame placement lands them correctly —
+  # a non-stretching `stretch` item at the right too. A cross (horizontal) auto MARGIN or a WRAP still declines.
+  it 'matches an rtl flex column (items packed from the right)' do
+    expect_parity('<div style="display:flex;flex-direction:column;direction:rtl;width:200px;height:120px"><div style="height:30px"></div><div style="width:60px;height:40px"></div></div>')
+    expect_parity('<div style="display:flex;flex-direction:column;direction:rtl;align-items:center;width:200px;height:120px"><div style="width:50px;height:30px"></div><div style="width:70px;height:40px"></div></div>')
+    expect_parity('<div style="display:flex;flex-direction:column;direction:rtl;align-items:flex-end;width:200px;height:120px"><div style="width:50px;height:30px"></div><div style="width:70px;height:40px"></div></div>')
+  end
+  # A `stretch` item that can't fill its line sits at the cross-start — the RIGHT edge here — whether it's short
+  # of the width (a max-width, or an explicit width), OVER it (a min-width), or aligned by self. The oracle maps
+  # `stretch` → flex-end on a reversed cross unconditionally, so native's code-2 placement must too (it once only
+  # flipped an explicitly-sized item, leaving a min/max-clamped one wrongly at the LEFT).
+  it 'matches an rtl flex column whose stretch item is clamped short of / past its line' do
+    expect_parity('<div style="display:flex;flex-direction:column;direction:rtl;width:200px;height:120px"><div style="max-width:60px;height:30px"></div><div style="height:30px"></div></div>')
+    expect_parity('<div style="display:flex;flex-direction:column;direction:rtl;width:200px;height:120px"><div style="min-width:300px;height:30px"></div></div>')
+    expect_parity('<div style="display:flex;flex-direction:column;direction:rtl;align-items:stretch;width:200px;height:120px"><div style="max-width:40px;height:30px;align-self:stretch"></div></div>')
+  end
+  it('declines an rtl flex column with a cross auto margin') { a_bails_b_native('<div style="display:flex;flex-direction:column;direction:rtl;width:200px;height:120px"><div style="width:50px;height:30px;margin-left:auto"></div></div>', '<div style="display:flex;flex-direction:column;direction:rtl;width:200px;height:120px"><div style="width:50px;height:30px"></div></div>') }
+  it('declines an rtl WRAPPING flex column') { a_bails_b_native('<div style="display:flex;flex-direction:column;flex-wrap:wrap;direction:rtl;width:200px;height:60px"><div style="width:40px;height:30px"></div><div style="width:50px;height:40px"></div></div>', '<div style="display:flex;flex-direction:column;direction:rtl;width:200px;height:60px"><div style="width:40px;height:30px"></div></div>') }
   it('declines max-height on a WRAPPING column (breaks lines against the capacity)') { a_bails_b_native('<div style="display:flex;flex-direction:column;flex-wrap:wrap;max-height:40px;width:300px"><div style="width:80px;height:30px"></div><div style="width:80px;height:30px"></div></div>', '<div style="display:flex;flex-direction:column;flex-wrap:wrap;width:300px"><div style="width:80px;height:30px"></div><div style="width:80px;height:30px"></div></div>') }
   # A flex container's % VERTICAL padding resolves against its OWN box.width in the oracle but the CB width in
   # native — diverges only when those widths differ, so an explicitly-sized container with % padding declines.
