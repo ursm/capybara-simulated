@@ -1439,18 +1439,12 @@ css/css-logical/logical-box-padding.html:
   longhands, with ''-webkit-writing-mode: horizontal-bt; direction: ltr; ''.'
 - 'Test that padding-* shorthands set the computed value of both logical and physical
   longhands, with ''-webkit-writing-mode: horizontal-bt; direction: rtl; ''.'
-css/css-logical/logicalprops-block-size.html:
-- ".tablecell 6"
-- ".tablecell 8"
 css/css-logical/logicalprops-inline-size-vlr.html:
 - ".block 1"
 - ".block 2"
 - ".block 3"
 - ".override 4"
 - ".override 5"
-css/css-logical/logicalprops-inline-size.html:
-- ".tablecell 6"
-- ".tablecell 8"
 css/css-logical/logicalprops-with-deferred-writing-mode.html:
 - Writing mode with 'initial'
 - Writing mode with 'revert-layer'
@@ -9496,7 +9490,6 @@ html/rendering/non-replaced-elements/tables/table-attribute.html:
 - table cellspacing attribute is correct
 - table_td height attribute percentage is correct
 - table_th height attribute percentage is correct
-- table_tr height attribute percentage is correct
 - tbody background attribute is correct
 - tbody bgcolor attribute is correct
 - td background attribute is correct
@@ -9506,12 +9499,10 @@ html/rendering/non-replaced-elements/tables/table-attribute.html:
 - tfoot bgcolor attribute is correct
 - th background attribute is correct
 - th bgcolor attribute is correct
-- th height attribute pixel is correct
 - thead background attribute is correct
 - thead bgcolor attribute is correct
 - tr background attribute is correct
 - tr bgcolor attribute is correct
-- tr height attribute pixel is correct
 html/rendering/non-replaced-elements/tables/table-border-1.html:
 - "== html/rendering/non-replaced-elements/tables/table-border-1-ref.html"
 html/rendering/non-replaced-elements/tables/table-cell-nowrap-with-fixed-width.html:
