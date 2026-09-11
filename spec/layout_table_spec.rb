@@ -766,6 +766,23 @@ RSpec.describe 'table layout' do
     expect(mh.call('min-height:100px', '<tr style="height:50%"><td id="r1" style="padding:0"></td></tr><tr><td id="r2" style="padding:0"><div style="width:5px;height:10px"></div></td></tr>')).to eq([50, 50])
   end
 
+  # An imposed height sizes the ROW GRID; a caption sits OUTSIDE it (§17.4 wrapper) and adds ON TOP, so the rows
+  # fill the whole imposed height and the table box grows by the caption. A too-small imposed height is just a
+  # floor — the box grows to its tracks. Chrome 137, border-spacing:0, padding:0.
+  it 'fills the rows to an imposed height and adds a caption on top' do
+    body = <<~HTML
+      <table id="t" style="border-spacing:0;height:100px"><caption style="height:16px">c</caption>
+      <tr><td id="r1" style="padding:0"><div style="width:5px;height:10px"></div></td></tr>
+      <tr><td id="r2" style="padding:0"><div style="width:5px;height:30px"></div></td></tr></table>
+    HTML
+    t, r1, r2 = measure(body, ['#t', '#r1', '#r2']).first
+    expect([t[3], r1[3], r2[3]]).to eq([116, 25, 75])   # rows share the full 100; the 16 caption is on top
+  end
+  it 'grows a table box past a declared height too small for its content' do
+    t = measure('<table id="t" style="border-spacing:0;height:10px"><tr><td style="padding:0"><div style="width:5px;height:50px"></div></td></tr></table>', ['#t']).first.first
+    expect(t[3]).to eq(50)   # the declared height is a floor; the box grows to the 50px content
+  end
+
   # A table told to be narrower than its content grows instead of letting its own
   # cells overflow the box that is supposed to contain them.
   it 'grows past a declared width too narrow for its content' do

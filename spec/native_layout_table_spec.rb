@@ -205,14 +205,18 @@ RSpec.describe 'native layout table parity', if: ENV.fetch('CSIM_JS_ENGINE', 'v8
 
   # t8 — imposed table height. A declared or MIN height TALLER than the grid is shared out over the rows so the
   # tracks FILL the box (Chrome: two 22px rows in a 200px table become 94 each). Native reassembles those grown
-  # rows and self-sizes to the same box. Cases where the tracks DON'T fill (a too-small height / max-height below
-  # the grid) — and a caption or collapsed border alongside an imposed height — bail.
+  # rows and self-sizes to the same box (a too-small height / min-height just floors it — the box grows to the
+  # tracks). A `max-height` below the grid, and a caption or collapsed border alongside an imposed height, bail.
   it 'matches a table height taller than the grid (shared out over the rows)' do
     expect_parity('<table style="border-spacing:4px;height:200px"><tr><td style="width:60px;height:20px">a</td></tr><tr><td style="height:20px">b</td></tr></table>')
   end
 
   it 'matches a MIN-height taller than the grid (shared out over the rows too)' do
     expect_parity('<table style="min-height:200px"><tr><td style="height:50px">a</td></tr></table>')
+  end
+
+  it 'matches a table whose declared height is BELOW its natural grid (the box grows to the tracks)' do
+    expect_parity('<table style="height:10px;border-spacing:4px"><tr><td style="height:50px">a</td></tr></table>')
   end
 
   it 'matches a table height from the height attribute' do
@@ -461,7 +465,6 @@ RSpec.describe 'native layout table parity', if: ENV.fetch('CSIM_JS_ENGINE', 'v8
   it('declines inline-table') { a_bails_b_native('<span style="display:inline-table"><span style="display:table-row"><span style="display:table-cell">a</span></span></span>') }
   it('declines an rtl table with a caption (the caption\'s own rtl placement is not reflected yet)') { a_bails_b_native('<table dir="rtl" style="border-spacing:4px"><caption style="height:16px">c</caption><tr><td style="width:40px;height:20px">a</td></tr></table>') }
   it('declines an rtl border-collapse table (the outer frame left/right swap is not reflected yet)') { a_bails_b_native('<table dir="rtl" style="border-collapse:collapse"><tr><td style="border:2px solid;width:40px;height:20px">a</td></tr></table>') }
-  it('declines a table with a declared height below its natural grid (the tracks overflow it)') { a_bails_b_native('<table style="height:10px;border-spacing:4px"><tr><td style="height:50px">a</td></tr></table>') }
   it('declines a table with a max-height below its natural grid') { a_bails_b_native('<table style="max-height:10px;border-spacing:4px"><tr><td style="height:50px">a</td></tr></table>') }
   it('declines an imposed table height alongside a caption') { a_bails_b_native('<table style="border-spacing:4px;height:200px"><caption style="height:16px">c</caption><tr><td style="height:20px">a</td></tr></table>') }
   # A SUB-PIXEL %-overflow caption must still decline: the oracle leaves the table at 200 (a % caption overflows
