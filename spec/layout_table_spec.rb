@@ -217,6 +217,36 @@ RSpec.describe 'table layout' do
     expect(va_inner_y('bottom')).to eq(30)   # 40 - 10
   end
 
+  # `vertical-align: baseline` aligns each cell's FIRST-baseline across the row (§17.5.3): a smaller-font cell
+  # drops so its text sits on the same line as a larger-font neighbour's, and the row grows to hold it — unlike
+  # `top`, which leaves the small cell's content flush with the row top. (Positions are font-metric-dependent, so
+  # these assert the relationship, not pixels; the two `Ay` cells differ only in font-size.)
+  def baseline_offsets(va_small)
+    body = %(<table id="t" style="border-spacing:0"><tr>) +
+           %(<td style="padding:0;vertical-align:#{va_small}"><span id="s" style="font:16px monospace">Ay</span></td>) +
+           %(<td style="padding:0;vertical-align:baseline"><span id="b" style="font:40px monospace">Ay</span></td></tr></table>)
+    t, s, b = measure(body, ['#t', '#s', '#b']).first
+    [t[3], s[1] - t[1], b[1] - t[1]]   # row height, small-cell content offset, big-cell content offset
+  end
+  it 'aligns baseline cells to a common row baseline' do
+    row, small, big = baseline_offsets('baseline')
+    expect(big).to eq(0)               # the deepest-baseline (40px) cell sits at the row top
+    expect(small).to be > 0            # the 16px cell DROPS to meet its baseline (not flush with the top)
+    expect(small + 22).to be <= row + 0.5   # its dropped line box still fits inside the grown row
+    # `top` instead leaves the small cell flush with the top — proving baseline actually moved it.
+    _row, small_top, = baseline_offsets('top')
+    expect(small_top).to eq(0)
+    expect(small).to be > small_top
+  end
+  it 'does not over-grow the row for a baseline cell with its own declared height' do
+    # a `height: 80px` baseline cell keeps its 80 — the baseline drop moves its content WITHIN the box, it does
+    # not stack on top of the box height (which would make the row 80 + the drop). Chrome: the row is 80.
+    body = %(<table id="t" style="border-spacing:0"><tr>) +
+           %(<td style="padding:0;height:80px;vertical-align:baseline"><span style="font:16px monospace">Ay</span></td>) +
+           %(<td style="padding:0;vertical-align:baseline"><span style="font:40px monospace">Ay</span></td></tr></table>)
+    expect(measure(body, ['#t']).first.first[3]).to eq(80)
+  end
+
   it 'defaults a table cell to vertical-align: middle' do
     html = '<html><body><table><tr><td id="d">x</td><th id="h">y</th></tr></table></body></html>'
     s = simulated_session(->(_env) { [200, {'content-type' => 'text/html'}, [html]] })
