@@ -225,6 +225,18 @@ RSpec.describe 'table layout' do
     expect(s.evaluate_script("getComputedStyle(document.getElementById('h')).verticalAlign")).to eq('middle')
   end
 
+  # colspan / rowspan are HTML attributes only <td> / <th> carry; on any other element acting as a cell (a
+  # display:table-cell div, an anonymous cell) a browser ignores them, so it stays a single 1x1 cell.
+  it 'ignores colspan / rowspan on a non-td/th cell' do
+    body = <<~HTML
+      <div style="display:table;border-spacing:0">
+      <div style="display:table-row"><div id="a" style="display:table-cell;width:20px;height:24px" colspan="2" rowspan="2"></div><div style="display:table-cell;width:20px;height:24px"></div></div>
+      <div style="display:table-row"><div style="display:table-cell;width:20px;height:24px"></div><div style="display:table-cell;width:20px;height:24px"></div></div></div>
+    HTML
+    a, = measure(body, ['#a']).first
+    expect([a[2], a[3]]).to eq([20, 24])   # one column, one row — the span attributes do nothing on a <div>
+  end
+
   # §17.2.1 applies to a real table-ROW too, not just the table: stray content inside a row is wrapped in an
   # anonymous cell, not dropped. (It used to vanish — the table collapsed to its own border.)
   it 'wraps stray content inside a real table-row in an anonymous cell' do
