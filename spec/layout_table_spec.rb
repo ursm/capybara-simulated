@@ -250,6 +250,45 @@ RSpec.describe 'table layout' do
     expect(cell_and_child_h('height:80px', 'height:100%')).to eq([80, 80])
   end
 
+  # When a DECLARED-height cell GROWS past its declared height — from taller content or a row stretched by a
+  # sibling — its percentage-height children resolve against the USED (row) height, not the declared floor, and
+  # do NOT themselves inflate the cell (they are auto for sizing, §17.5.3 / CSS Sizing). A cell with NO declared
+  # height stays indefinite: its percentage children resolve to 0 even when it grows. All Chrome 137-measured.
+  def cell_child(cell_style, inner)
+    body = %(<table style="border-spacing:0"><tr><td id="c" style="padding:0;#{cell_style}">#{inner}</td></tr></table>)
+    boxes = measure(body, ['#c', '#k']).first
+    [boxes[0][3], boxes[1][3]]
+  end
+  it 'resolves a percentage child against the used height of a cell that grew past its declared height' do
+    # declared 10, sized by the 30px sibling to 30; the 50% child is 15 of that used 30 (was 5 of the floor).
+    expect(cell_child('height:10px', '<div id="k" style="width:5px;height:50%"></div><div style="width:5px;height:30px"></div>')).to eq([30, 15])
+    expect(cell_child('height:10px', '<div id="k" style="width:5px;height:100%"></div><div style="width:5px;height:30px"></div>')).to eq([30, 30])
+    # a 200% child overflows the 30px used height (60) without growing the cell.
+    expect(cell_child('height:10px', '<div id="k" style="width:5px;height:200%"></div><div style="width:5px;height:30px"></div>')).to eq([30, 60])
+    # declared 80 > content: the child is 50% of 80, and the cell keeps 80.
+    expect(cell_child('height:80px', '<div id="k" style="width:5px;height:50%"></div><div style="width:5px;height:30px"></div>')).to eq([80, 40])
+  end
+  it 'leaves a percentage child of an AUTO-height cell at 0 even when the cell grows' do
+    # no declared height → indefinite CB; the 40px sibling grows the cell to 40 but the 50% child stays 0.
+    expect(cell_child('', '<div id="k" style="width:5px;height:50%"></div><div style="width:5px;height:40px"></div>')).to eq([40, 0])
+  end
+  it 'resolves a percentage MIN/MAX-height child against the cell height (auto-height child)' do
+    # an auto-`height` child with a `%` min/max-height is sized height:0 (the clamp is deferred), so the cell's
+    # second layout must re-lay it — not reuse its stale 0 — for the clamp to resolve against the used height.
+    expect(cell_child('height:100px', '<div id="k" style="width:5px;min-height:50%"></div>')).to eq([100, 50])
+    expect(cell_child('height:100px', '<div id="k" style="width:5px;height:80px;max-height:40%"></div>')).to eq([100, 40])
+  end
+
+  it 'resolves a percentage child against a cell stretched by a taller sibling cell' do
+    body = <<~HTML
+      <table style="border-spacing:0"><tr>
+      <td id="c" style="height:10px;padding:0"><div id="k" style="width:5px;height:50%"></div></td>
+      <td style="padding:0"><div style="width:5px;height:60px"></div></td></tr></table>
+    HTML
+    c, k = measure(body, ['#c', '#k']).first
+    expect([c[3], k[3]]).to eq([60, 30])   # the row is 60; the 50% child resolves against that, not the declared 10
+  end
+
   # A cell whose OWN declared height exceeds its content still vertical-aligns that content within the (row-tall)
   # box — the slack is measured against the content's natural height, not the floored box. Chrome 137: a 12px
   # block in a `height: 50px` cell sits at 19 (middle) / 38 (bottom) from the cell top.
