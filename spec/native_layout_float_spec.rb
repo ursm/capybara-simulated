@@ -80,6 +80,29 @@ RSpec.describe 'native layout float parity', if: ENV.fetch('CSIM_JS_ENGINE', 'v8
     HTML
   end
 
+  # The media object (§9.5): a sibling that ESTABLISHES its own BFC (overflow / flow-root) does not overlap the
+  # float — its whole border box sits in the band the float leaves, narrowed to it, so the two read as columns.
+  it 'matches a BFC sibling shrinking into the band beside a left float' do
+    expect_parity('<div style="display:flow-root;width:300px"><div style="float:left;width:80px;height:40px"></div><div style="overflow:hidden;height:30px">x</div></div>')
+  end
+
+  it 'matches a BFC sibling beside a right float, and under rtl' do
+    expect_parity('<div style="display:flow-root;width:300px"><div style="float:right;width:80px;height:40px"></div><div style="overflow:hidden;height:30px">x</div></div>')
+    expect_parity('<div dir="rtl" style="display:flow-root;width:300px"><div style="float:right;width:80px;height:40px"></div><div style="overflow:hidden;height:30px">x</div></div>')
+  end
+
+  it 'matches a declared-width BFC sibling that keeps its size in the band' do
+    expect_parity('<div style="display:flow-root;width:300px"><div style="float:left;width:80px;height:40px"></div><div style="overflow:hidden;width:100px;height:30px"></div></div>')
+  end
+
+  it 'matches a BFC sibling too wide for the band dropping below the float' do
+    expect_parity('<div style="display:flow-root;width:300px"><div style="float:left;width:80px;height:40px"></div><div style="overflow:hidden;width:280px;height:30px"></div></div>')
+  end
+
+  it 'matches a flow-root TEXT sibling avoiding the float with its box (not routing its lines)' do
+    expect_parity('<div style="display:flow-root;width:300px"><div style="float:left;width:80px;height:40px"></div><div style="display:flow-root;width:100px;height:30px">x</div></div>')
+  end
+
   it 'matches a line dropping below a wide float its first word cannot clear' do
     expect_parity(<<~HTML)
       <div style="overflow:hidden;width:400px">

@@ -36,11 +36,11 @@ RSpec.describe 'native layout bail coverage', if: ENV.fetch('CSIM_JS_ENGINE', 'v
     # A float whose context is a HIGHER ancestor (this div doesn't start one) still declines — for that reason,
     # not the direction; a horizontal auto margin under rtl also declines.
     expect(native?('<div dir="rtl" style="width:300px"><div style="float:left;width:50px;height:20px"></div><div style="width:100px;height:20px"></div></div>')).to be false
-    # A sibling child that ESTABLISHES its own BFC (flow-root/overflow) must keep its whole border box clear of
-    # the float (the media-object shift), not just route its lines — native shifts lines only, so it declines
-    # this both ways round. (The plain-block sibling above, whose box may overlap the float, stays native.)
-    expect(native?('<div dir="rtl" style="display:flow-root;width:300px"><div style="float:right;width:50px;height:20px"></div><div style="display:flow-root;width:120px;height:20px">x</div></div>')).to be false
-    expect(native?('<div dir="ltr" style="display:flow-root;width:300px"><div style="float:left;width:50px;height:20px"></div><div style="display:flow-root;width:120px;height:20px">x</div></div>')).to be false
+    # A sibling child that ESTABLISHES its own BFC (flow-root/overflow) keeps its whole border box clear of the
+    # float (the media-object shift): native places it in the band the float leaves, narrowed to it, both ways
+    # round. (The plain-block sibling above, whose box may overlap the float, also stays native.)
+    expect(native?('<div dir="rtl" style="display:flow-root;width:300px"><div style="float:right;width:50px;height:20px"></div><div style="display:flow-root;width:120px;height:20px">x</div></div>')).to be true
+    expect(native?('<div dir="ltr" style="display:flow-root;width:300px"><div style="float:left;width:50px;height:20px"></div><div style="display:flow-root;width:120px;height:20px">x</div></div>')).to be true
   end
 
   it 'declines text-indent, keeps a plain block' do

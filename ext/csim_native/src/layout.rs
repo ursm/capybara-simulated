@@ -807,6 +807,41 @@ fn measure(
                     }
                     failed.set(true);
                 }
+            } else if cn.starts_bfc {
+                // A child that ESTABLISHES a BFC does not OVERLAP the floats (§9.5): its whole border box is
+                // placed in the band they leave and narrowed to it — the media-object shift, where a float and
+                // a `flow-root` sibling read as two columns. The BFC barrier keeps its own top margin from
+                // folding a descendant's through, so its collapsed top is deterministic. It is sized to the band
+                // at that top (an auto width narrows to it, a declared one keeps its size); a box too WIDE for
+                // the band drops below the float instead and re-places in the widened band below it.
+                let (ml, mr) = (Input::m(cn.ml), Input::m(cn.mr));
+                let t_top = CMargin::of(Input::m(cn.mt));
+                let cy = if first && top_open {
+                    top_m.merge(t_top);
+                    content_top_rel
+                } else {
+                    pending.merge(t_top);
+                    cursor + pending.value()
+                };
+                let (bl0, br0) = float_band(&ctx.items, cy, 1.0, cl, cr);
+                let cw = resolve_width(&cn, (br0 - bl0).max(0.0));
+                let cm = measure(c, cw, inputs, runs, run_texts, children, boxes, failed, &mut FloatCtx::new(), 0.0, 0.0);
+                let outer = boxes[c].w + ml + mr;
+                let (y, bl, br) = if outer > br0 - bl0 {
+                    let yy = float_fit_y(&ctx.items, cy, outer, cl, cr, boxes[c].h);
+                    let (l, r) = float_band(&ctx.items, yy, boxes[c].h.max(1.0), cl, cr);
+                    (yy, l, r)
+                } else {
+                    (cy, bl0, br0)
+                };
+                boxes[c].x = if n.rtl != 0 { br - boxes[c].w - mr } else { bl + ml };
+                boxes[c].y = y;
+                cursor = y + boxes[c].h;
+                pending = cm.bottom;
+                all_children_through = false;
+                has_child = true;
+                first = false;
+                continue;
             } else if cn.display == DISPLAY_TEXT_BLOCK {
                 // A DIRECT text-block child routes its lines around the floats. Its collapsed top is
                 // deterministic (a text block never collapses through, top_only == of(mt)), so it can be
