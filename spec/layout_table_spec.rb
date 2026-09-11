@@ -312,6 +312,31 @@ RSpec.describe 'table layout' do
     expect([c[3], k[3]]).to eq([60, 30])   # the row is 60; the 50% child resolves against that, not the declared 10
   end
 
+  # A PERCENTAGE height on a <tr> resolves against the space the rows share (the table's content box minus the
+  # border-spacing around and between them) when the table's height is definite, and is then a FIXED track like
+  # a declared length — excluded from the surplus distribution, a MINIMUM its content can still grow past, and
+  # squeezed in source order so percentage rows never overflow the table. With an auto-height table it has no
+  # basis and is auto. All Chrome 137-measured.
+  def pct_rows(table_style, markup)
+    measure(%(<table style="border-spacing:#{table_style}">#{markup}</table>), ['#r1', '#r2']).first.map { it[3] }
+  end
+  it 'resolves a percentage <tr> height against the table height as a fixed track' do
+    # row1 50% of the 100px table → 50; the auto row2 takes the rest.
+    expect(pct_rows('0;height:100px', '<tr style="height:50%"><td id="r1" style="padding:0"><div style="width:5px;height:10px"></div></td></tr><tr><td id="r2" style="padding:0"><div style="width:5px;height:30px"></div></td></tr>')).to eq([50, 50])
+    # two 50% rows → 50 / 50.
+    expect(pct_rows('0;height:100px', '<tr style="height:50%"><td id="r1" style="padding:0"></td></tr><tr style="height:50%"><td id="r2" style="padding:0"></td></tr>')).to eq([50, 50])
+    # two 60% rows cannot both fit: the later is squeezed into what is left → 60 / 40 (no overflow).
+    expect(pct_rows('0;height:100px', '<tr style="height:60%"><td id="r1" style="padding:0"></td></tr><tr style="height:60%"><td id="r2" style="padding:0"></td></tr>')).to eq([60, 40])
+    # a 20% row (20) whose content is 40 grows to 40 (the % is a minimum); the auto row takes the rest.
+    expect(pct_rows('0;height:100px', '<tr style="height:20%"><td id="r1" style="padding:0"><div style="width:5px;height:40px"></div></td></tr><tr><td id="r2" style="padding:0"><div style="width:5px;height:10px"></div></td></tr>')).to eq([40, 60])
+    # border-spacing:4 — the % resolves against the 88 the two rows share (3 gaps of 4) → 44 each.
+    expect(pct_rows('4px;height:100px', '<tr style="height:50%"><td id="r1" style="padding:0"></td></tr><tr style="height:50%"><td id="r2" style="padding:0"></td></tr>')).to eq([44, 44])
+  end
+  it 'treats a percentage <tr> height as auto when the table height is indefinite' do
+    # no table height → the % has no basis, so the rows are their content heights.
+    expect(pct_rows('0', '<tr style="height:50%"><td id="r1" style="padding:0"><div style="width:5px;height:10px"></div></td></tr><tr><td id="r2" style="padding:0"><div style="width:5px;height:30px"></div></td></tr>')).to eq([10, 30])
+  end
+
   # A cell whose OWN declared height exceeds its content still vertical-aligns that content within the (row-tall)
   # box — the slack is measured against the content's natural height, not the floored box. Chrome 137: a 12px
   # block in a `height: 50px` cell sits at 19 (middle) / 38 (bottom) from the cell top.
