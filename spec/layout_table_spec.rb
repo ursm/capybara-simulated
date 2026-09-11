@@ -700,8 +700,27 @@ RSpec.describe 'table layout' do
     body = '<table id="t" style="height:200px"><tr><td id="a">A</td></tr><tr><td id="b">B</td></tr></table>'
     t, a, b = measure(body, ['#t', '#a', '#b']).first
     expect(t[3]).to eq(200)
-    expect([a[3], b[3]]).to all(eq((200 - SPACING * 3) / 2))     # Chrome: 97 each
+    expect([a[3], b[3]]).to all(eq((200 - SPACING * 3) / 2))     # Chrome: 97 each (equal content → equal share)
     expect(b[1]).to eq(a[1] + a[3] + SPACING)
+  end
+
+  # The surplus of a declared table height goes to the AUTO rows in proportion to their CONTENT, not equally
+  # (Chrome 137): rows of 10 and 30 in a 100px table become 25 and 75. A row with a DECLARED height is a fixed
+  # track and takes none; when every row is declared the surplus spreads over all of them by their heights.
+  it 'distributes a table-height surplus to auto rows in proportion to their content' do
+    rows = lambda { |markup|
+      measure(%(<table style="border-spacing:0;height:100px">#{markup}</table>), ['#r1', '#r2']).first.map { it[3] }
+    }
+    # auto rows, content 10 / 30 → proportional 25 / 75 (not 50 / 50).
+    expect(rows.call('<tr><td id="r1" style="padding:0"><div style="width:5px;height:10px"></div></td></tr><tr><td id="r2" style="padding:0"><div style="width:5px;height:30px"></div></td></tr>')).to eq([25, 75])
+    # a 0-content auto row takes none of the surplus.
+    expect(rows.call('<tr><td id="r1" style="padding:0"></td></tr><tr><td id="r2" style="padding:0"><div style="width:5px;height:30px"></div></td></tr>')).to eq([0, 100])
+    # a declared-height row (r1) is fixed; all the surplus goes to the auto row (r2).
+    expect(rows.call('<tr style="height:50px"><td id="r1" style="padding:0"></td></tr><tr><td id="r2" style="padding:0"><div style="width:5px;height:10px"></div></td></tr>')).to eq([50, 50])
+    # every row declared (20 / 40) → surplus in proportion to their heights → 33.33 / 66.67 (Chrome) of the 100.
+    r1, r2 = rows.call('<tr style="height:20px"><td id="r1" style="padding:0"></td></tr><tr style="height:40px"><td id="r2" style="padding:0"></td></tr>')
+    expect(r1).to be_within(0.01).of(100.0 / 3)
+    expect(r2).to be_within(0.01).of(200.0 / 3)
   end
 
   # A table told to be narrower than its content grows instead of letting its own
