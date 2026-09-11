@@ -345,4 +345,34 @@ RSpec.describe 'layout box model' do
       expect(fw).to eq(120)
     end
   end
+
+  # A block in a VERTICAL writing mode fills its containing block along its INLINE axis (the height) and
+  # is SHRINK-TO-FIT along its BLOCK axis (the physical width) — the mirror of a horizontal block, which
+  # fills its width and fits its height to content. So its width comes from the content, then its own
+  # min/max-width (which are in its block axis and DO apply to an ordinary block) clamp it. Chrome-measured.
+  describe 'vertical writing-mode block width' do
+    def vw(style, inner = '<div style="width:40px;height:90px"></div>')
+      boxes(%(<div id="t" style="writing-mode:vertical-lr;#{style}">#{inner}</div>), ['#t']).first
+    end
+
+    it 'shrink-wraps the width to content instead of filling the container' do
+      expect(vw('')[2]).to eq(40)                        # not the ~1024 a horizontal block would fill to
+    end
+    it 'clamps the shrink-wrapped width up to min-width' do
+      expect(vw('min-width:70px')[2]).to eq(70)
+    end
+    it 'clamps the shrink-wrapped width down to max-width' do
+      expect(vw('max-width:30px')[2]).to eq(30)
+    end
+    it 'floors then caps, min-width winning content and max-width capping it' do
+      expect(vw('min-width:70px;max-width:150px')[2]).to eq(70)
+    end
+    it 'leaves an explicit width alone' do
+      expect(vw('width:200px')[2]).to eq(200)
+    end
+    it 'centres a shrink-wrapped vertical block under auto horizontal margins' do
+      x, _y, w = boxes('<div style="width:300px"><div id="t" style="writing-mode:vertical-lr;margin:0 auto"><div style="width:40px;height:90px"></div></div></div>', ['#t']).first
+      expect([x, w]).to eq([130, 40])                    # (300 - 40) / 2 = 130
+    end
+  end
 end

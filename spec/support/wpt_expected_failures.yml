@@ -1439,12 +1439,6 @@ css/css-logical/logical-box-padding.html:
   longhands, with ''-webkit-writing-mode: horizontal-bt; direction: ltr; ''.'
 - 'Test that padding-* shorthands set the computed value of both logical and physical
   longhands, with ''-webkit-writing-mode: horizontal-bt; direction: rtl; ''.'
-css/css-logical/logicalprops-inline-size-vlr.html:
-- ".block 1"
-- ".block 2"
-- ".block 3"
-- ".override 4"
-- ".override 5"
 css/css-logical/logicalprops-with-deferred-writing-mode.html:
 - Writing mode with 'initial'
 - Writing mode with 'revert-layer'
