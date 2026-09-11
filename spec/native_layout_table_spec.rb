@@ -219,6 +219,10 @@ RSpec.describe 'native layout table parity', if: ENV.fetch('CSIM_JS_ENGINE', 'v8
     expect_parity('<table style="height:10px;border-spacing:4px"><tr><td style="height:50px">a</td></tr></table>')
   end
 
+  it 'matches a table whose MAX-height is below its natural grid (max-height never clips a table)' do
+    expect_parity('<table style="max-height:10px;border-spacing:4px"><tr><td style="height:50px">a</td></tr></table>')
+  end
+
   it 'matches a table height from the height attribute' do
     expect_parity('<table height="200" style="border-spacing:4px"><tr><td style="width:60px;height:20px">a</td></tr><tr><td style="height:20px">b</td></tr></table>')
   end
@@ -465,7 +469,6 @@ RSpec.describe 'native layout table parity', if: ENV.fetch('CSIM_JS_ENGINE', 'v8
   it('declines inline-table') { a_bails_b_native('<span style="display:inline-table"><span style="display:table-row"><span style="display:table-cell">a</span></span></span>') }
   it('declines an rtl table with a caption (the caption\'s own rtl placement is not reflected yet)') { a_bails_b_native('<table dir="rtl" style="border-spacing:4px"><caption style="height:16px">c</caption><tr><td style="width:40px;height:20px">a</td></tr></table>') }
   it('declines an rtl border-collapse table (the outer frame left/right swap is not reflected yet)') { a_bails_b_native('<table dir="rtl" style="border-collapse:collapse"><tr><td style="border:2px solid;width:40px;height:20px">a</td></tr></table>') }
-  it('declines a table with a max-height below its natural grid') { a_bails_b_native('<table style="max-height:10px;border-spacing:4px"><tr><td style="height:50px">a</td></tr></table>') }
   it('declines an imposed table height alongside a caption') { a_bails_b_native('<table style="border-spacing:4px;height:200px"><caption style="height:16px">c</caption><tr><td style="height:20px">a</td></tr></table>') }
   # A SUB-PIXEL %-overflow caption must still decline: the oracle leaves the table at 200 (a % caption overflows
   # without growing it), so native's wrapper union must not round it up to the caption's 200.4 — the gate uses

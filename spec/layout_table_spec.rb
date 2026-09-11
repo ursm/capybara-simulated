@@ -783,6 +783,29 @@ RSpec.describe 'table layout' do
     expect(t[3]).to eq(50)   # the declared height is a floor; the box grows to the 50px content
   end
 
+  # A table's height / max-height are MINIMUMS, never clips: `max-height` caps a declared/preferred height but
+  # never the CONTENT (a table is at least as tall as its rows), and `min-height` beats `max-height`. Chrome 137.
+  it 'treats a table max-height as a cap on the declared height, never below the content' do
+    th = lambda { |style, inner| measure(%(<table id="t" style="border-spacing:0;#{style}"><tr><td style="padding:0">#{inner}</td></tr></table>), ['#t']).first.first[3] }
+    tall = '<div style="width:5px;height:50px"></div>'
+    expect(th.call('max-height:10px', tall)).to eq(50)                              # max-height never clips content
+    expect(th.call('height:200px;max-height:100px', tall)).to eq(100)              # caps the declared height
+    expect(th.call('max-height:100px', '<div style="width:5px;height:200px"></div>')).to eq(200)   # content wins over max
+    expect(th.call('min-height:100px;max-height:50px', '<div style="width:5px;height:10px"></div>')).to eq(100)  # min beats max
+  end
+
+  # An imposed height reaches the box even with NO rows to distribute over — an empty or caption-only table is
+  # still as tall as its height / min-height (the imposed height floors the grid region directly). Chrome 137.
+  it 'floors an empty table at its imposed height' do
+    e = lambda { |style, inner = ''| measure(%(<table id="t" style="border-spacing:0;#{style}">#{inner}</table>), ['#t']).first.first[3] }
+    expect(e.call('height:200px')).to eq(200)
+    expect(e.call('min-height:100px')).to eq(100)
+    expect(e.call('height:200px;max-height:10px')).to eq(10)     # capped
+    expect(e.call('height:200px;border:5px solid;padding:7px')).to eq(200)   # border-box floor
+    expect(e.call('height:200px', '<caption style="height:16px">c</caption>')).to eq(216)   # caption on top of the imposed grid
+    expect(e.call('')).to eq(0)                                  # no imposed height → empty
+  end
+
   # A table told to be narrower than its content grows instead of letting its own
   # cells overflow the box that is supposed to contain them.
   it 'grows past a declared width too narrow for its content' do
