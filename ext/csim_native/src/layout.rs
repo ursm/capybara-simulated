@@ -1433,12 +1433,14 @@ fn measure_table(
     boxes[i].h = grid_h + caption_h + n.edges_y();
     boxes[i].auto_height = false;
 
-    // Place the caption at the table WRAPPER's border box (§17.4) — OUTSIDE the table's own border+padding, as
-    // wide as the border box: a top caption at the wrapper's top-left corner (the grid is offset DOWN past it,
-    // via content_top), a bottom one just below the table's bottom padding+border. Its Phase-A subtree follows
-    // through `place`. (Native declines a caption MARGIN, so there is no lead to inset / centre it.)
+    // Place the caption at the table WRAPPER's border box (§17.4) — OUTSIDE the table's own border+padding: a top
+    // caption at the wrapper's top edge (the grid is offset DOWN past it, via content_top), a bottom one just
+    // below the table's bottom padding+border. Along the inline axis it sits at the wrapper's inline-start: the
+    // left edge in LTR, and — for a caption NARROWER than the wrapper — the right edge in rtl (§10.3.3 balances
+    // the leading margin). Native declines a caption MARGIN, so there is no lead to inset / centre it. Its Phase-A
+    // subtree follows through `place`.
     if let Some(cap) = caption {
-        boxes[cap].x = 0.0;
+        boxes[cap].x = if n.rtl != 0 { boxes[i].w - boxes[cap].w } else { 0.0 };
         boxes[cap].y = if caption_top { 0.0 } else { n.bt + n.pt + grid_h + n.pb + n.bb };
     }
 

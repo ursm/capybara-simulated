@@ -27,8 +27,9 @@
 # table (a %-width wider than the BORDER box; the oracle lays both out correctly, native just declines) or more than
 # one caption, an imposed height the tracks DON'T fill (a min-height's empty space, a too-small height /
 # max-height below the grid) or one alongside a caption / collapsed border, an anonymous CELL (stray non-cell
-# content), an rtl table with a NARROWER caption or a collapsed border (the caption's inline-start placement /
-# the frame's left-right swap aren't reflected yet — a full-width rtl caption IS reproduced), inline-table,
+# content), an rtl table with a MARGIN-offset caption or a collapsed border (the caption's auto-margin / lead
+# inset and the frame's left-right swap aren't reflected yet — a full-width OR narrower rtl caption IS placed at
+# the inline-start), inline-table,
 # nested tables, an empty row group, and a column/row only
 # spanning cells cover.
 # (A column's visibility:collapse is a conformance gap the oracle itself doesn't model, so native matches it
@@ -267,14 +268,23 @@ RSpec.describe 'native layout table parity', if: ENV.fetch('CSIM_JS_ENGINE', 'v8
   # r2 — rtl tables (column reversal). The columns run RIGHT-to-LEFT: column 0 is at the right edge. The oracle
   # mirrors each cell within the table content box, and native reflects it within its row (row_w - ltr_rel -
   # cell_width); the row / group / table boxes span the whole grid and are direction-agnostic. A FULL-WIDTH
-  # caption sits at the same left edge in either direction, so native reproduces it; only a NARROWER (or
-  # margin-offset) rtl caption — which belongs at the inline-start = right — and a collapsed frame still decline.
+  # caption sits at the same left edge in either direction, and native mirrors a NARROWER rtl caption to the
+  # inline-start = right (`wrapper_width - caption_width`). Only a MARGIN-offset (incl. auto-centred) caption and
+  # a collapsed frame still decline.
   it 'matches a 2-column rtl table (column 0 at the right)' do
     expect_parity('<table dir="rtl" style="border-spacing:4px"><tr><td style="width:60px;height:20px">a</td><td style="width:80px">b</td></tr></table>')
   end
 
   it 'matches an rtl table with a FULL-WIDTH caption (a caption is left-flush both ways)' do
     expect_parity('<table dir="rtl" style="border-spacing:4px"><caption style="height:16px">c</caption><tr><td style="width:60px;height:20px">a</td><td style="width:80px">b</td></tr></table>')
+  end
+
+  it 'matches an rtl table with a NARROWER caption (at the inline-start = right edge)' do
+    expect_parity('<table dir="rtl" style="border-spacing:4px"><caption style="width:40px;height:16px">c</caption><tr><td style="width:60px;height:20px">a</td><td style="width:80px">b</td></tr></table>')
+  end
+
+  it 'matches an rtl table with a NARROWER bottom caption (inline-start = right, below the grid)' do
+    expect_parity('<table dir="rtl" style="border-spacing:4px;caption-side:bottom"><caption style="width:40px;height:16px">c</caption><tr><td style="width:60px;height:20px">a</td><td style="width:80px">b</td></tr></table>')
   end
 
   it 'matches a 3-column rtl table' do
@@ -472,7 +482,7 @@ RSpec.describe 'native layout table parity', if: ENV.fetch('CSIM_JS_ENGINE', 'v8
   it('declines a caption that overflows the table (a %-width wider than the border box — the table does not grow)') { a_bails_b_native('<table style="border-spacing:4px"><caption style="width:120%">c</caption><tr><td style="width:40px">a</td></tr></table>') }
   it('declines two captions') { a_bails_b_native('<table style="border-spacing:4px"><caption>top</caption><caption style="caption-side:bottom">bottom</caption><tr><td style="width:40px">a</td></tr></table>') }
   it('declines inline-table') { a_bails_b_native('<span style="display:inline-table"><span style="display:table-row"><span style="display:table-cell">a</span></span></span>') }
-  it('declines an rtl table with a NARROWER caption (its inline-start placement is not reflected yet)') { a_bails_b_native('<table dir="rtl" style="border-spacing:4px"><caption style="width:20px;height:16px;padding:0">c</caption><tr><td style="width:40px;height:20px">a</td></tr></table>') }
+  it('declines an rtl table with a MARGIN-offset caption (its auto-margin / lead inset is not reflected yet)') { a_bails_b_native('<table dir="rtl" style="border-spacing:4px"><caption style="width:20px;height:16px;margin-left:8px">c</caption><tr><td style="width:40px;height:20px">a</td></tr></table>') }
   it('declines an rtl border-collapse table (the outer frame left/right swap is not reflected yet)') { a_bails_b_native('<table dir="rtl" style="border-collapse:collapse"><tr><td style="border:2px solid;width:40px;height:20px">a</td></tr></table>') }
   it('declines an imposed table height alongside a caption') { a_bails_b_native('<table style="border-spacing:4px;height:200px"><caption style="height:16px">c</caption><tr><td style="height:20px">a</td></tr></table>') }
   # A SUB-PIXEL %-overflow caption must still decline: the oracle leaves the table at 200 (a % caption overflows
