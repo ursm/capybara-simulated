@@ -154,6 +154,36 @@ RSpec.describe 'save_screenshot' do
     end
   end
 
+  # A cell's bare TEXT is vertically aligned in the paint like its block children (§17.5.3) — the UA default is
+  # middle. Cell text carries no DOM geometry in this driver (getBoundingClientRect / Range see nothing), so the
+  # alignment is observable ONLY through the painter's recorded runs.
+  def cell_text_y(va)
+    s = page_with(%(<table id="t"><tr><td style="padding:0"><div style="width:20px;height:80px"></div></td>) +
+                  %(<td style="padding:0;vertical-align:#{va}">Hi</td></tr></table>), css: 'table{border-spacing:0}')
+    runs = s.evaluate_script('globalThis.__csimPaintRuns()')
+    top  = s.evaluate_script("document.getElementById('t').getBoundingClientRect().y")
+    hi   = runs.find {|r| r['text'].to_s.include?('Hi') }
+    (hi['y'] - top).round(2)
+  end
+  it 'vertically aligns a cell bare text in the paint (middle default / top / bottom)' do
+    top, mid, bot = cell_text_y('top'), cell_text_y('middle'), cell_text_y('bottom')
+    expect(top).to eq(0)                                        # top: at the cell content top
+    expect(bot - top).to be > 30                                # bottom: pushed to the bottom of the 80px row
+    expect(mid - top).to be_within(0.5).of((bot - top) / 2.0)   # middle: exactly halfway (the UA default)
+  end
+
+  # A cell's text follows the cell to its final row in the paint: a declared table height makes the rows taller
+  # than their content and shifts them down, and the text (recorded runs) moves with the row, not left behind up
+  # in the first row.
+  it 'paints a cell text on the row the flow placed it (declared-height table)' do
+    s = page_with('<table id="t" style="height:200px"><tr><td style="padding:0">R1</td></tr><tr><td style="padding:0">R2</td></tr></table>', css: 'table{border-spacing:0}')
+    runs = s.evaluate_script('globalThis.__csimPaintRuns()')
+    top  = s.evaluate_script("document.getElementById('t').getBoundingClientRect().y")
+    y = ->(t) { r = runs.find {|x| x['text'].to_s.include?(t) }; (r['y'] - top).round(2) }
+    expect(y.('R2')).to be > 90                 # the second row sits in the lower half of the 200px table
+    expect(y.('R2') - y.('R1')).to be > 90      # a full row below the first, not stacked at the top
+  end
+
   # ── Transforms ────────────────────────────────────────────────────────────────────────────
   # The painter hands the canvas the matrix and draws in the coordinates layout gave it, so the
   # box, its borders, its bitmap and its text runs all move together. What these pin is that the
