@@ -202,8 +202,8 @@ RSpec.describe 'table layout' do
 
   # A cell's content is vertically aligned within its (row-tall) box (§17.5.3): the UA default is `middle`, and
   # `top` / `bottom` are honored, so a cell shorter than its row has its content pushed down. (Cross-cell baseline
-  # alignment — and a cell whose OWN declared height exceeds its content — are a separate pass; a lone block's
-  # baseline resolves to the top.) The tall cell here makes the row 40; the short cell's 10px block moves.
+  # alignment is a separate pass; a lone block's baseline resolves to the top.) The tall cell here makes the row
+  # 40; the short cell's 10px block moves.
   def va_inner_y(va)
     body = %(<table id="t" style="border-spacing:0"><tr><td style="padding:0"><div style="width:20px;height:40px"></div></td>) +
            %(<td style="padding:0#{va == :default ? '' : ";vertical-align:#{va}"}"><div id="k" style="width:20px;height:10px"></div></td></tr></table>)
@@ -223,6 +223,45 @@ RSpec.describe 'table layout' do
     s.visit '/'
     expect(s.evaluate_script("getComputedStyle(document.getElementById('d')).verticalAlign")).to eq('middle')
     expect(s.evaluate_script("getComputedStyle(document.getElementById('h')).verticalAlign")).to eq('middle')
+  end
+
+  # A cell's declared `height` is a MINIMUM (§17.5.3), not a fixed size like a block's: content taller than it
+  # grows the cell (and its row), a declared height taller than the content is kept, and box-sizing is honored.
+  def cell_h(style, inner)
+    body = %(<table style="border-spacing:0"><tr><td id="c" style="#{style}">#{inner}</td></tr></table>)
+    measure(body, ['#c']).first.first[3]
+  end
+  it 'treats a cell declared height as a minimum, growing to fit content' do
+    expect(cell_h('height:10px;padding:0', '<div style="width:5px;height:30px"></div>')).to eq(30)   # content grows it
+    expect(cell_h('height:50px;padding:0', '<div style="width:5px;height:12px"></div>')).to eq(50)   # declared kept as the floor
+    expect(cell_h('height:40px;padding:5px;box-sizing:border-box', '<div style="width:5px;height:12px"></div>')).to eq(40)   # border-box floor
+  end
+
+  # A declared cell height is also a DEFINITE containing block for its percentage-height children — unlike a
+  # block's `min-height`, which leaves the block auto-height so a `%` child there collapses. Chrome 137: a
+  # `height: 50%` child of a `height: 100px` cell is 50, and a `height: 100%` child of an 80px cell is 80.
+  def cell_and_child_h(cell_style, child_style)
+    body = %(<table style="border-spacing:0"><tr><td id="c" style="padding:0;#{cell_style}"><div id="k" style="width:5px;#{child_style}"></div></td></tr></table>)
+    boxes = measure(body, ['#c', '#k']).first
+    [boxes[0][3], boxes[1][3]]
+  end
+  it 'resolves a percentage-height child against a declared cell height' do
+    expect(cell_and_child_h('height:100px', 'height:50%')).to eq([100, 50])
+    expect(cell_and_child_h('height:80px', 'height:100%')).to eq([80, 80])
+  end
+
+  # A cell whose OWN declared height exceeds its content still vertical-aligns that content within the (row-tall)
+  # box — the slack is measured against the content's natural height, not the floored box. Chrome 137: a 12px
+  # block in a `height: 50px` cell sits at 19 (middle) / 38 (bottom) from the cell top.
+  def va_overtall_y(va)
+    body = %(<table style="border-spacing:0"><tr><td id="c" style="padding:0;height:50px;vertical-align:#{va}"><div id="k" style="width:5px;height:12px"></div></td></tr></table>)
+    boxes = measure(body, ['#c', '#k']).first
+    boxes[1][1] - boxes[0][1]
+  end
+  it 'vertical-aligns content within a cell taller than the content by its own declared height' do
+    expect(va_overtall_y('top')).to eq(0)
+    expect(va_overtall_y('middle')).to eq(19)   # (50 - 12) / 2
+    expect(va_overtall_y('bottom')).to eq(38)   # 50 - 12
   end
 
   # colspan / rowspan are HTML attributes only <td> / <th> carry; on any other element acting as a cell (a
