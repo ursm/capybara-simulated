@@ -285,6 +285,37 @@ RSpec.describe 'table layout' do
     end
   end
 
+  # A cell's min-width / max-width DO size its column (CSS Tables 3 §4.1, unlike its min/max-height): min-width
+  # raises the column, max-width caps it — even below the content's own min-content, and clamping a declared
+  # `width` too. The cap is over the WHOLE column (the widest cell's constraint wins across rows).
+  def col_w(sel, body) = measure(body, sel).first.map { it[2].round(2) }
+  it 'lets a cell min-width / max-width size its column' do
+    tbl = ->(cells) { %(<table style="border-spacing:0;font:16px monospace"><tr>#{cells}</tr></table>) }
+    expect(col_w(['#c'], tbl['<td id="c" style="min-width:80px;padding:0">A</td>'])).to eq([80])              # raises past content
+    expect(col_w(['#c'], tbl['<td id="c" style="max-width:3px;padding:0">wwww</td>'])).to eq([3])             # caps below min-content
+    expect(col_w(['#c'], tbl['<td id="c" style="width:50px;min-width:80px;padding:0">A</td>'])).to eq([80])   # min-width beats a smaller width
+    expect(col_w(['#c'], tbl['<td id="c" style="width:200px;max-width:40px;padding:0">A</td>'])).to eq([40])  # max-width beats a larger width
+  end
+  it 'raises the whole column to the widest cell min-width across rows' do
+    body = <<~HTML
+      <table style="border-spacing:0;font:16px monospace">
+      <tr><td id="a" style="padding:0">A</td></tr><tr><td id="b" style="min-width:80px;padding:0">C</td></tr></table>
+    HTML
+    expect(col_w(['#a', '#b'], body)).to eq([80, 80])   # the 2nd row's min-width sizes the shared column
+  end
+
+  # max-width caps only the INTRINSIC contribution: a fixed table width still shares its surplus over the column,
+  # which grows PAST the max-width (Chrome: a max-width:40 column in a 300px table grows to ~242).
+  it 'grows a max-width column past its max when a fixed table width has a surplus' do
+    body = <<~HTML
+      <table style="border-spacing:0;width:300px;font:16px monospace">
+      <tr><td id="g1" style="max-width:40px;padding:0">wwwwwwww</td><td id="g2" style="padding:0">B</td></tr></table>
+    HTML
+    g1, g2 = col_w(['#g1', '#g2'], body)
+    expect(g1).to be > 40           # grew past its own max-width
+    expect(g1 + g2).to be_within(0.01).of(300)   # the two columns fill the fixed table
+  end
+
   # colspan / rowspan are HTML attributes only <td> / <th> carry; on any other element acting as a cell (a
   # display:table-cell div, an anonymous cell) a browser ignores them, so it stays a single 1x1 cell.
   it 'ignores colspan / rowspan on a non-td/th cell' do
