@@ -299,6 +299,10 @@ RSpec.describe 'native layout table parity', if: ENV.fetch('CSIM_JS_ENGINE', 'v8
     expect_parity('<table dir="rtl" style="border-spacing:4px"><tr><td rowspan="2" style="width:30px">A</td><td style="width:50px;height:20px">b</td></tr><tr><td style="height:25px">c</td></tr></table>')
   end
 
+  it 'matches a rowspan cell joining its first row baseline group (its baseline is the deepest)' do
+    expect_parity('<table style="border-collapse:collapse"><tr><td rowspan="2" style="vertical-align:baseline;font:40px monospace;padding:0">Ay</td><td style="vertical-align:baseline;font:16px monospace;padding:0">Ay</td></tr><tr><td style="padding:0">x</td></tr></table>')
+  end
+
   it 'matches an rtl fixed-layout table (columns mirrored)' do
     expect_parity('<table dir="rtl" style="table-layout:fixed;width:300px;border-spacing:4px"><tr><td style="height:20px">a</td><td>b</td></tr></table>')
   end

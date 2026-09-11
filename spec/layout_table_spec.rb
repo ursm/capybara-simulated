@@ -238,6 +238,20 @@ RSpec.describe 'table layout' do
     expect(small_top).to eq(0)
     expect(small).to be > small_top
   end
+  # A rowSpan cell joins its FIRST row's baseline group (§17.5.3): its own first-baseline counts toward that
+  # row's baseline, so when it is the DEEPEST the shallower siblings drop to meet IT. Before this the rowspan
+  # cell was excluded from the group, and a shallower sibling stayed flush with the top. Font-metric-dependent,
+  # so assert the relationship.
+  it 'joins a rowspan cell to its first row baseline group when it is the deepest' do
+    body = %(<table id="t" style="border-spacing:0">) +
+           %(<tr><td rowspan="2" style="padding:0;vertical-align:baseline"><span id="r" style="font:40px monospace">Ay</span></td>) +
+           %(<td style="padding:0;vertical-align:baseline"><span id="s" style="font:16px monospace">Ay</span></td></tr>) +
+           %(<tr><td style="padding:0"><span style="font:16px monospace">x</span></td></tr></table>)
+    t, r, s = measure(body, ['#t', '#r', '#s']).first
+    expect(r[1] - t[1]).to eq(0)         # the rowspan cell (deepest baseline) sits at the row top
+    expect(s[1] - t[1]).to be > 0        # the 16px sibling DROPS to meet the rowspan cell's baseline
+  end
+
   it 'does not over-grow the row for a baseline cell with its own declared height' do
     # a `height: 80px` baseline cell keeps its 80 — the baseline drop moves its content WITHIN the box, it does
     # not stack on top of the box height (which would make the row 80 + the drop). Chrome: the row is 80.
