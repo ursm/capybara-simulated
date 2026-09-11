@@ -730,6 +730,17 @@ fn measure(
 
     for &c in &children[i] {
         let cn = inputs[c];
+        if cn.out_of_flow != 0 {
+            // §4.1: an absolute/fixed child neither sizes nor shifts the flow. Lay its subtree out at its pushed
+            // border box (in a fresh context — it establishes a BFC) and reset its box to this block's origin;
+            // `place` then positions it by rel_x/rel_y alone (el._lb − container._lb, the oracle's resolved
+            // insets / static position). It touches no cursor / margin / has_child state.
+            let cw = resolve_width(&cn, content_w);
+            measure(c, cw, inputs, runs, run_texts, children, boxes, failed, &mut FloatCtx::new(), 0.0, 0.0);
+            boxes[c].x = 0.0;
+            boxes[c].y = 0.0;
+            continue;
+        }
         if cn.float_kind != 0 {
             // A FLOAT is placed where the flow has reached (top0) but does NOT advance the flow cursor and
             // never collapses margins (§9.5.1 / §8.3.1); the lines/blocks after it route around it instead.

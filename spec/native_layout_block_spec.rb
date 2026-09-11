@@ -142,4 +142,32 @@ RSpec.describe 'native layout L1 block-flow parity', if: ENV.fetch('CSIM_JS_ENGI
     expect(r).to include('ok' => true), "harness bailed: #{r.inspect}"
     expect(r['mismatches']).to eq(0), "mismatch: #{r.inspect}"
   end
+
+  # An out-of-flow (absolute / fixed) child is removed from flow and REPLAYED at the oracle's resolved box
+  # (§4.1): native lays out its subtree and positions it by its displacement from the block's border box,
+  # neither sizing nor shifting the in-flow siblings. A `sticky` child, an abspos flex/table container, and an
+  # abspos subtree native can't lay out still decline.
+  def expect_parity(body)
+    session = simulated_session(page(body)); session.visit '/'
+    r = parity(session)
+    expect(r).to include('ok' => true), "harness bailed: #{r.inspect}"
+    expect(r['mismatches']).to eq(0), "mismatch: #{r.inspect}"
+  end
+
+  it 'matches an absolute child positioned by insets in a relative parent' do
+    expect_parity('<div style="position:relative;width:300px;height:200px"><div style="height:20px">flow</div><div style="position:absolute;top:10px;left:20px;width:50px;height:30px">a</div></div>')
+  end
+  it 'matches an absolute child whose width comes from left+right insets' do
+    expect_parity('<div style="position:relative;width:300px;height:200px"><div style="position:absolute;left:10px;right:40px;top:5px;height:25px">a</div></div>')
+  end
+  it 'matches an auto-positioned absolute child at its static position' do
+    expect_parity('<div style="position:relative;width:300px"><div style="height:20px">x</div><div style="position:absolute;width:60px;height:20px">a</div></div>')
+  end
+  it 'matches a fixed child, and two absolute children around in-flow content' do
+    expect_parity('<div style="width:300px;height:100px"><div style="position:fixed;top:5px;left:5px;width:40px;height:40px">f</div><div style="height:20px">flow</div></div>')
+    expect_parity('<div style="position:relative;width:300px;height:200px"><div style="height:30px">a</div><div style="position:absolute;top:0;right:0;width:40px;height:40px">b</div><div style="position:absolute;bottom:0;left:0;width:30px;height:30px">c</div><div style="height:20px">d</div></div>')
+  end
+  it 'matches an absolute child that carries its own block subtree and margins' do
+    expect_parity('<div style="position:relative;width:300px;height:200px"><div style="position:absolute;top:10px;left:10px;width:100px;height:60px"><div style="height:20px;margin:5px">c</div></div></div>')
+  end
 end
