@@ -264,6 +264,27 @@ RSpec.describe 'table layout' do
     expect(va_overtall_y('bottom')).to eq(38)   # 50 - 12
   end
 
+  # min-height / max-height have no effect on a table cell (CSS 2.2 §17.5.3 leaves them undefined; Chrome 137
+  # treats both as auto): the cell's block size is only its `height` (a minimum) and its content. Only the
+  # HEIGHT axis is ignored — min-width / max-width still feed the column width (a separate path).
+  it 'ignores min-height / max-height on a table cell' do
+    expect(cell_h('min-height:40px;padding:0', '<div style="width:5px;height:12px"></div>')).to eq(12)   # not 40
+    expect(cell_h('max-height:20px;padding:0', '<div style="width:5px;height:30px"></div>')).to eq(30)   # not 20
+    expect(cell_h('min-height:40px;padding:0', '')).to eq(0)                                             # not 40
+    expect(cell_h('height:10px;min-height:40px;padding:0', '<div style="width:5px;height:12px"></div>')).to eq(12)   # height floor 10 < content 12; min-height inert
+    expect(cell_h('height:60px;max-height:20px;padding:0', '<div style="width:5px;height:12px"></div>')).to eq(60)   # declared 60 kept; max-height inert
+  end
+
+  # …but a `display:table-cell` that is a FLEX / GRID item is BLOCKIFIED (CSS Display §2.7) — it is a block, not
+  # a cell, so its min-height / max-height DO apply. Chrome 137: min-height:40 on a 12px-content flex-item cell
+  # gives 40 (a genuine cell would give 12).
+  it 'honors min-height / max-height on a table-cell that is a flex or grid item' do
+    %w[flex grid].each do |mode|
+      body = %(<div style="display:#{mode}"><div id="c" style="display:table-cell;min-height:40px"><div style="width:5px;height:12px"></div></div></div>)
+      expect(measure(body, ['#c']).first.first[3]).to eq(40)
+    end
+  end
+
   # colspan / rowspan are HTML attributes only <td> / <th> carry; on any other element acting as a cell (a
   # display:table-cell div, an anonymous cell) a browser ignores them, so it stays a single 1x1 cell.
   it 'ignores colspan / rowspan on a non-td/th cell' do
