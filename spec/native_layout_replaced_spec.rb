@@ -63,8 +63,8 @@ RSpec.describe 'native layout replaced-leaf parity', if: ENV.fetch('CSIM_JS_ENGI
   end
 
   # STILL DECLINES.
-  it 'declines an INLINE svg in a block (atomic inline in a text line)' do
-    expect_bail('<div style="width:300px">text <svg width="16" height="16"></svg> more</div>')
+  it 'lays out an INLINE svg in a block (atomic inline — see native_layout_inline_atomic_spec)' do
+    expect_parity('<div style="width:300px">text <svg width="16" height="16"></svg> more</div>')
   end
   it 'declines an inline-block img in a block' do
     expect_bail('<div style="width:300px"><img width="20" height="20" style="display:inline-block"></div>')

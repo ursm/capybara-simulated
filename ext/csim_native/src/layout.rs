@@ -188,6 +188,10 @@ pub(crate) const RUN_TEXT: u8 = 0;
 pub(crate) const RUN_OPEN: u8 = 1;
 pub(crate) const RUN_CLOSE: u8 = 2;
 pub(crate) const RUN_BR: u8 = 3;
+// An ATOMIC inline (an inline replaced element — svg / img / a control): a single box on the line. `metric`
+// is its margin-box width (advance), `asc` its ascent above the line baseline, `line_height` its full
+// margin-box height (asc + descent). Placed like an unbreakable word; grows the line box by asc / descent.
+pub(crate) const RUN_ATOMIC: u8 = 4;
 
 // One item of a text block's inline stream. For TEXT: font/size/ls/ws/line_height measure its words,
 // and `asc` is the run's ascent within its line box (baselineWithin its owner) — its descent is
@@ -370,6 +374,11 @@ fn line_layout(
     let mut open: Vec<(f64, bool)> = Vec::new();
     let mut pending_space: Option<f64> = None; // collapsed space before the next word
     let mut prev_was_word = false;
+    // An atomic inline is a break opportunity on BOTH sides regardless of whitespace: this flag carries the
+    // AFTER-side break (a zero-width break opportunity) to the next box, so a word glued to an atomic can still
+    // wrap before it. (The BEFORE-side break is unconditional in the RUN_ATOMIC arm itself.) Reset on any word
+    // placement and at a line break.
+    let mut atomic_break = false;
 
     for (ri, run) in runs.iter().enumerate() {
         match run.kind {
@@ -397,6 +406,7 @@ fn line_layout(
                 line_has_content = false;
                 pending_space = None;
                 prev_was_word = false;
+                atomic_break = false;
             }
             RUN_TEXT => {
                 let text = run_texts.get(ri).and_then(|t| t.as_ref())?;
@@ -432,7 +442,8 @@ fn line_layout(
                             line_x += sw; // hanging space
                         }
                         let ow: f64 = open.iter().filter(|o| !o.1).map(|o| o.0).sum();
-                        if line_has_content && space_before && line_x + ow + width > band_w(total) {
+                        // A break opportunity precedes this word at a collapsed space OR right after an atomic.
+                        if line_has_content && (space_before || atomic_break) && line_x + ow + width > band_w(total) {
                             total += line_asc + line_desc; // break: close the line (the hanging space is dropped)
                             n += 1;
                             line_x = 0.0;
@@ -461,8 +472,51 @@ fn line_layout(
                         line_desc = line_desc.max(run.line_height - run.asc);
                         line_has_content = true;
                         prev_was_word = true;
+                        atomic_break = false; // consumed the after-atomic break opportunity
                     }
                 }
+            }
+            RUN_ATOMIC => {
+                // A single box on the line — placed like an unbreakable word of width `metric`, growing the
+                // line box by its own ascent / descent. An atomic is a break opportunity on BOTH sides
+                // regardless of whitespace: it may break BEFORE it here (unconditional, on overflow), and it
+                // sets `atomic_break` so the NEXT box may break before itself too.
+                let width = run.metric;
+                let (space_before, sw) = match pending_space.take() {
+                    Some(s) => (true, s),
+                    None => (false, 0.0),
+                };
+                if space_before && line_has_content {
+                    line_x += sw; // hanging space
+                }
+                let ow: f64 = open.iter().filter(|o| !o.1).map(|o| o.0).sum();
+                if line_has_content && line_x + ow + width > band_w(total) {
+                    total += line_asc + line_desc; // break before the atomic (drop any hanging space)
+                    n += 1;
+                    line_x = 0.0;
+                    line_asc = strut_asc;
+                    line_desc = strut_desc;
+                    line_has_content = false;
+                }
+                if !floats.is_empty() && !line_has_content && width + ow > band_w(total) {
+                    let fy = top + total;
+                    let at = float_fit_y(floats, fy, width + ow, cl, cr, strut_lh);
+                    if at > fy {
+                        total += at - fy;
+                    }
+                }
+                for o in open.iter_mut() {
+                    if !o.1 {
+                        line_x += o.0;
+                        o.1 = true;
+                    }
+                }
+                line_x += width;
+                line_asc = line_asc.max(run.asc);
+                line_desc = line_desc.max(run.line_height - run.asc);
+                line_has_content = true;
+                prev_was_word = false; // a box, not a word that can span two runs
+                atomic_break = true; // a break opportunity follows this atomic
             }
             _ => return None, // unknown run kind
         }
