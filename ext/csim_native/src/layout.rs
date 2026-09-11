@@ -792,7 +792,11 @@ fn measure(
                     };
                     let y = y0.max(clearance_y(&ctx.items, y0, cn.clear));
                     if y >= floats_bottom(&ctx.items) {
-                        boxes[c].x = content_left_rel + Input::m(cn.ml);
+                        boxes[c].x = if n.rtl != 0 {
+                            content_left_rel + content_w - boxes[c].w - Input::m(cn.mr)
+                        } else {
+                            content_left_rel + Input::m(cn.ml)
+                        };
                         boxes[c].y = y;
                         cursor = y + boxes[c].h;
                         pending = cm.bottom;
@@ -815,7 +819,15 @@ fn measure(
                     pending.merge(t_top);
                     cursor + pending.value()
                 };
-                let cx = content_left_rel + Input::m(cn.ml);
+                // In an rtl block a NARROWER text block sits at the inline-start = RIGHT (its right edge at
+                // content_right - margin_right), mirroring the no-float placement below. A full-width one lands
+                // back at content_left either way. `child_w` is its border box (`boxes[c].w` isn't set until the
+                // measure below). Its lines still route around the floats through the shared `ctx`.
+                let cx = if n.rtl != 0 {
+                    content_left_rel + content_w - child_w - Input::m(cn.mr)
+                } else {
+                    content_left_rel + Input::m(cn.ml)
+                };
                 boxes[c].x = cx;
                 boxes[c].y = cy;
                 let cm = measure(c, child_w, inputs, runs, run_texts, children, boxes, failed, ctx, cx, cy);
@@ -838,8 +850,8 @@ fn measure(
         }
         // In an rtl block the in-flow children start at the RIGHT content edge (r1): the child's own right
         // edge sits at content_right - margin_right, so its left is that minus its width. A block that fills
-        // the width lands back at content_left + margin_left, so this covers both. (The harness bails rtl with
-        // floats, so the float paths above are never reached for an rtl block.)
+        // the width lands back at content_left + margin_left, so this covers both. (This is the no-float path;
+        // the float-context paths above mirror the same rtl placement for their own children.)
         boxes[c].x = if n.rtl != 0 {
             content_left_rel + content_w - boxes[c].w - Input::m(cn.mr)
         } else {
