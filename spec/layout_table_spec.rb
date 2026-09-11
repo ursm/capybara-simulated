@@ -272,6 +272,29 @@ RSpec.describe 'table layout' do
     # no declared height → indefinite CB; the 40px sibling grows the cell to 40 but the 50% child stays 0.
     expect(cell_child('', '<div id="k" style="width:5px;height:50%"></div><div style="width:5px;height:40px"></div>')).to eq([40, 0])
   end
+  # A cell with NO declared height of its own is still a definite containing block when a declared TABLE height
+  # stretches its row past the content (§17.5.3 / Chrome): the percentage child resolves against that imposed
+  # height. A declared ROW height does NOT make Chrome resolve (that cell stays indefinite → child 0), and a
+  # cell whose own CONTENT drives it taller than the table split is content-driven → child 0. Chrome 137.
+  def tbl_cell_child(table_style, inner)
+    body = %(<table style="border-spacing:0;#{table_style}"><tr><td id="c" style="padding:0">#{inner}</td></tr></table>)
+    boxes = measure(body, ['#c', '#k']).first
+    [boxes[0][3], boxes[1][3]]
+  end
+  it 'resolves a percentage child against a cell height imposed by a declared table height' do
+    expect(tbl_cell_child('height:100px', '<div id="k" style="width:5px;height:50%"></div>')).to eq([100, 50])
+    expect(tbl_cell_child('height:100px', '<div id="k" style="width:5px;height:100%"></div>')).to eq([100, 100])
+    # a 20px sibling is below the table split → cell is table-imposed at 100, child 50 of it.
+    expect(tbl_cell_child('height:100px', '<div id="k" style="width:5px;height:50%"></div><div style="width:5px;height:20px"></div>')).to eq([100, 50])
+    # content (120) exceeds the table split → the cell is CONTENT-driven, so the child stays 0.
+    expect(tbl_cell_child('height:100px', '<div id="k" style="width:5px;height:50%"></div><div style="width:5px;height:120px"></div>')).to eq([120, 0])
+  end
+  it 'leaves a percentage child of a declared-ROW-height (auto table) cell at 0' do
+    body = '<table style="border-spacing:0"><tr style="height:100px"><td id="c" style="padding:0"><div id="k" style="width:5px;height:50%"></div></td></tr></table>'
+    c, k = measure(body, ['#c', '#k']).first
+    expect([c[3], k[3]]).to eq([100, 0])   # a declared row height does not make the cell a definite CB (Chrome)
+  end
+
   it 'resolves a percentage MIN/MAX-height child against the cell height (auto-height child)' do
     # an auto-`height` child with a `%` min/max-height is sized height:0 (the clamp is deferred), so the cell's
     # second layout must re-lay it — not reuse its stale 0 — for the clamp to resolve against the used height.
