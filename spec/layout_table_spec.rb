@@ -508,6 +508,22 @@ RSpec.describe 'table layout' do
     expect([t[0], t[2]]).to eq([0, 160])
   end
 
+  # A `<colgroup>` that defines its columns through `<col>` children still contributes its OWN border to the
+  # collapse at the group's outer rim (§17.6.2.1): its border-left on the leftmost column, border-right on the
+  # rightmost, top/bottom on every column it spans. Chrome 137: an 8/4 colgroup around two cells (no padding)
+  # makes the table 102 — outer-left half 4, outer-right half 2, no border on the internal edge.
+  it 'collapses a bordered colgroup with col children at the group rim' do
+    body = <<~HTML
+      <table id="t" style="border-collapse:collapse">
+      <colgroup style="border-left:8px solid;border-right:4px solid"><col><col></colgroup>
+      <tr><td id="a" style="width:40px;padding:0;height:20px">a</td><td id="b" style="width:50px;padding:0">b</td></tr></table>
+    HTML
+    t, a, b = measure(body, ['#t', '#a', '#b']).first
+    expect([a[0], a[2]]).to eq([4, 44])   # outer-left max(8,0)/2 = 4 + 40 + internal 0
+    expect([b[0], b[2]]).to eq([48, 52])  # internal 0 + 50 + outer-right max(4,0)/2 = 2, meets a at 48
+    expect([t[0], t[2]]).to eq([0, 102])
+  end
+
   it 'splits collapsed edges the same way down a column (top/bottom borders)' do
     body = <<~HTML
       <table id="t" style="border-collapse:collapse">

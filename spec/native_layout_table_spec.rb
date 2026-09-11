@@ -334,6 +334,11 @@ RSpec.describe 'native layout table parity', if: ENV.fetch('CSIM_JS_ENGINE', 'v8
     expect_parity('<table dir="rtl" style="border-collapse:collapse"><colgroup span="2" style="border-left:10px solid;border-right:2px solid"></colgroup><tr><td style="width:40px;height:20px">a</td><td style="width:50px">b</td></tr></table>')
   end
 
+  it 'matches a bordered <colgroup> that defines its columns through <col> children' do
+    expect_parity('<table style="border-collapse:collapse"><colgroup style="border-left:8px solid;border-right:4px solid"><col><col></colgroup><tr><td style="width:40px;height:20px">a</td><td style="width:50px">b</td></tr></table>')
+    expect_parity('<table dir="rtl" style="border-collapse:collapse"><colgroup style="border-left:8px solid;border-right:4px solid"><col><col></colgroup><tr><td style="width:40px;height:20px">a</td><td style="width:50px">b</td></tr></table>')
+  end
+
   # t3 — border-collapse:collapse (half-borders, spacing 0, the outer half-border frame).
   it 'matches a border-collapse 2x2 with bordered cells' do
     expect_parity('<table style="border-collapse:collapse"><tr><td style="border:4px solid;width:40px;height:20px">a</td><td style="border:4px solid;width:50px">b</td></tr><tr><td style="border:4px solid">c</td><td style="border:4px solid;height:30px">d</td></tr></table>')
