@@ -748,6 +748,24 @@ RSpec.describe 'table layout' do
     expect(r2).to be_within(0.01).of(200.0 / 3)
   end
 
+  # A `<thead>` and `<tfoot>` are held at their NATURAL height when a table-height surplus is shared out — it
+  # goes to the `<tbody>` rows (Chrome: a 20px header in a 200px table stays 20 while the body grows). Multiple
+  # `<tbody>`s all take a proportional share. Chrome 137, border-spacing:0, padding:0.
+  it 'holds a thead / tfoot at natural height and gives the surplus to the tbody' do
+    cell = ->(id, h) { %(<tr><td id="#{id}" style="padding:0"><div style="width:5px;height:#{h}px"></div></td></tr>) }
+    tbl = ->(inner) { measure(%(<table style="border-spacing:0;height:200px">#{inner}</table>), ['#a', '#b', '#c']) }
+    # thead(20) held; tbody rows 10/30 share the 140 surplus → 45/135.
+    a, b, c = tbl.call("<thead>#{cell.call('a', 20)}</thead><tbody>#{cell.call('b', 10)}#{cell.call('c', 30)}</tbody>").first
+    expect([a[3], b[3], c[3]]).to eq([20, 45, 135])
+    # thead(20) AND tfoot(30) held; the single tbody row takes all 150 → 150.
+    a, b, c = tbl.call("<thead>#{cell.call('a', 20)}</thead><tbody>#{cell.call('b', 0)}</tbody><tfoot>#{cell.call('c', 30)}</tfoot>").first
+    expect([a[3], b[3], c[3]]).to eq([20, 150, 30])
+    # even when the tbody has only DECLARED-height rows, the surplus grows THEM (past their height) while the
+    # header is held — a `<tr height>` tbody row is not a fixed track against the header (Chrome 20/72/108).
+    a, b, c = tbl.call("<thead>#{cell.call('a', 20)}</thead><tbody><tr style=\"height:40px\"><td id=\"b\" style=\"padding:0\"></td></tr><tr style=\"height:60px\"><td id=\"c\" style=\"padding:0\"></td></tr></tbody>").first
+    expect([a[3], b[3], c[3]]).to eq([20, 72, 108])
+  end
+
   # A table's MIN-height taller than the grid shares its surplus over the rows exactly like a height does, and
   # is the basis a percentage row resolves against — the larger of a declared height and a min-height is the
   # imposed height. A min-height SMALLER than the content has no effect; a declared height still wins when it is
