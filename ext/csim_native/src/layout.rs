@@ -165,6 +165,10 @@ pub(crate) struct Input {
     // box (0 for top / a content that fills the row). The oracle already resolved top/middle/bottom into this
     // scalar; native lays cell content top-aligned, then shifts the cell's own child boxes down by it to match.
     pub(crate) cell_va_offset: f64,
+    // A flex container's anonymous-item cross floor: the line-height of any bare (non-whitespace) text directly
+    // inside it (0 when there is none). The oracle does not lay that text out as a real flex item, it only
+    // floors the container's AUTO cross size at this line-height (`anonymousItemHeight`); native does the same.
+    pub(crate) anon_cross: f64,
 }
 
 pub(crate) const CROSS_BASELINE: u8 = 3;
@@ -1138,8 +1142,14 @@ fn measure_flex(
         // them — so container_cross stays the unclamped content (a min-height:100 app-shell row of a 30px
         // item keeps the item at the top and grows the box to 100; align-content sees free = 0).
         if is_auto(n.height) {
-            let bh = clamp_min_max(lines_cross_sum + edges_y, to_border_y(n.min_h), to_border_y(n.max_h)).max(0.0);
-            (w, bh, lines_cross_sum, false)
+            // A bare-text anonymous item floors the row's auto cross at its line-height. Unlike a min-height
+            // (clamped later, outside the flex pass), the oracle folds it into box.height HERE and reads
+            // container_cross back from the grown box (layout.js: `containerCross = box.height - edges`), so the
+            // single nowrap line grows to it and its items align WITHIN that floor — and a wrapping row shares
+            // the surplus (anon − stacked) out through align-content. So container_cross carries the floor too,
+            // not just box_h. (Pre-clamp, like the oracle: box.height is grown before the outer min/max clamp.)
+            let bh = clamp_min_max(lines_cross_sum.max(n.anon_cross) + edges_y, to_border_y(n.min_h), to_border_y(n.max_h)).max(0.0);
+            (w, bh, lines_cross_sum.max(n.anon_cross), false)
         } else {
             let bh = clamp_min_max(to_border_y(n.height), to_border_y(n.min_h), to_border_y(n.max_h)).max(0.0);
             (w, bh, (bh - edges_y).max(0.0), true)
@@ -1149,7 +1159,9 @@ fn measure_flex(
             // The box wraps what the items consumed OR the extent a min-height floored under them, then the
             // OUTER min/max-height clamp (a max-height the content overruns caps the box at it while the
             // items overflow — content_main holds the capped extent, used_main the overrunning content).
-            clamp_min_max(content_main.max(used_main) + edges_y, to_border_y(n.min_h), to_border_y(n.max_h)).max(0.0)
+            // A bare-text anonymous item floors the box height (a column's MAIN) at its line-height, applied
+            // after the items' extent exactly as the oracle's `max(contentExtent, anonymousItemHeight)`.
+            clamp_min_max(content_main.max(used_main).max(n.anon_cross) + edges_y, to_border_y(n.min_h), to_border_y(n.max_h)).max(0.0)
         } else {
             clamp_min_max(to_border_y(n.height), to_border_y(n.min_h), to_border_y(n.max_h)).max(0.0)
         };
@@ -1641,6 +1653,7 @@ mod tests {
             caption_side: 0,
             rtl: 0,
             cell_va_offset: 0.0,
+            anon_cross: 0.0,
         }
     }
 

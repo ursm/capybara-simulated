@@ -354,7 +354,41 @@ RSpec.describe 'native layout flex parity', if: ENV.fetch('CSIM_JS_ENGINE', 'v8'
   it('declines a cross-stretched column clamped by max-height (oracle sizes against the pre-clamp room native lacks)') { a_bails_b_native('<div style="display:flex;height:300px;width:400px"><div style="display:flex;flex-direction:column;max-height:100px;row-gap:20%;width:100px"><div style="height:20px"></div><div style="height:30px"></div></div></div>', '<div style="display:flex;height:300px;width:400px"><div style="display:flex;flex-direction:column;row-gap:20%;width:100px"><div style="height:20px"></div><div style="height:30px"></div></div></div>') }
   it('declines an auto-height min-height ROW that is itself a flex item (item-push collapses its two-phase clamp)') { a_bails_b_native('<div style="display:flex;flex-direction:column;width:300px"><div style="display:flex;align-items:center;min-height:120px;width:200px"><div style="width:50px;height:30px"></div></div></div>', '<div style="display:flex;flex-direction:column;width:300px"><div style="display:flex;align-items:center;width:200px"><div style="width:50px;height:30px"></div></div></div>') }
   it('declines an inline-flex container') { a_bails_b_native('<div style="display:inline-flex;width:400px"><div style="width:80px;height:30px"></div></div>') }
-  it('declines bare text in the container') { a_bails_b_native('<div style="display:flex;width:400px">loose text<div style="width:80px;height:30px"></div></div>') }
+  # Bare (non-whitespace) text directly in a flex container is an anonymous flex item. The oracle does not lay
+  # it out as a real item (siblings ignore it), it only floors the container's AUTO cross size at the text's
+  # line-height; native reproduces both. These lay out rather than decline.
+  it 'matches bare text beside a SHORT item (line-height floors the auto row height)' do
+    expect_parity('<div style="display:flex;width:400px">loose text<div style="width:80px;height:10px"></div></div>')
+  end
+  it 'matches bare text beside a TALL item (the item, not the line-height, sets the row height)' do
+    expect_parity('<div style="display:flex;width:400px">loose text<div style="width:80px;height:40px"></div></div>')
+  end
+  it 'matches bare text BETWEEN two items with justify-content (siblings ignore the text)' do
+    expect_parity('<div style="display:flex;justify-content:space-between;width:400px"><div style="width:80px;height:20px"></div>middle<div style="width:80px;height:20px"></div></div>')
+  end
+  it 'matches bare text in an auto-height COLUMN (line-height floors the column main size)' do
+    expect_parity('<div style="display:flex;flex-direction:column;width:200px">only text</div>')
+  end
+  it 'matches bare text with a DECLARED height (line-height does not grow a fixed box)' do
+    expect_parity('<div style="display:flex;height:50px;width:400px">text<div style="width:80px;height:10px"></div></div>')
+  end
+  it 'matches bare text with a main gap between the real items' do
+    expect_parity('<div style="display:flex;gap:15px;width:400px">lead<div style="width:60px;height:20px"></div><div style="width:60px;height:20px"></div></div>')
+  end
+  # The line-height floor grows the LINE the items align within (not just the box): a short item under a
+  # non-stretch alignment sits inside that grown line, so its cross position depends on the floor.
+  it 'matches bare text taller than a CENTER-aligned short item (item centres in the grown line)' do
+    expect_parity('<div style="display:flex;align-items:center;width:400px">text<div style="width:80px;height:10px"></div></div>')
+  end
+  it 'matches bare text taller than a FLEX-END-aligned short item' do
+    expect_parity('<div style="display:flex;align-items:flex-end;width:400px">text<div style="width:80px;height:10px"></div></div>')
+  end
+  it 'matches bare text with a BASELINE-aligned short item' do
+    expect_parity('<div style="display:flex;align-items:baseline;width:400px">text<div style="width:80px;height:10px"></div></div>')
+  end
+  it 'matches a WRAPPING row where the line-height floor exceeds the stacked line (align-content shares the surplus)' do
+    expect_parity('<div style="display:flex;flex-wrap:wrap;align-content:center;width:400px">text<div style="width:60px;height:8px"></div></div>')
+  end
   it('declines a replaced (img) item') { a_bails_b_native('<div style="display:flex;width:400px"><img src="x.png" style="width:80px;height:30px"><div style="width:80px;height:30px"></div></div>') }
   it('declines a position:sticky flex item') { a_bails_b_native('<div style="display:flex;width:400px"><div style="position:sticky;top:0;width:80px;height:30px"></div><div style="width:80px;height:30px"></div></div>') }
   it('declines an absolute replaced (img) flex child') { a_bails_b_native('<div style="position:relative;display:flex;width:400px;height:100px"><div style="width:80px;height:30px"></div><img src="x.png" style="position:absolute;top:0;left:0;width:40px;height:30px"></div>') }
