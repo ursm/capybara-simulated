@@ -748,6 +748,24 @@ RSpec.describe 'table layout' do
     expect(r2).to be_within(0.01).of(200.0 / 3)
   end
 
+  # A table's MIN-height taller than the grid shares its surplus over the rows exactly like a height does, and
+  # is the basis a percentage row resolves against — the larger of a declared height and a min-height is the
+  # imposed height. A min-height SMALLER than the content has no effect; a declared height still wins when it is
+  # the larger. Chrome 137, border-spacing:0.
+  it 'distributes a table min-height over its rows like a height' do
+    mh = lambda { |style, markup|
+      measure(%(<table style="border-spacing:0;#{style}">#{markup}</table>), ['#r1', '#r2']).first.map { it[3] }
+    }
+    two = '<tr><td id="r1" style="padding:0"><div style="width:5px;height:10px"></div></td></tr><tr><td id="r2" style="padding:0"><div style="width:5px;height:30px"></div></td></tr>'
+    expect(mh.call('min-height:100px', two)).to eq([25, 75])                 # min-height distributes like height
+    expect(mh.call('height:80px;min-height:100px', two)).to eq([25, 75])     # min-height (100) wins over the smaller height
+    expect(mh.call('height:120px;min-height:100px', two)).to eq([30, 90])    # the larger declared height wins → shares 120
+    # content taller than the min-height: no surplus, rows at their natural heights.
+    expect(mh.call('min-height:50px', '<tr><td id="r1" style="padding:0"><div style="width:5px;height:60px"></div></td></tr><tr><td id="r2" style="padding:0"><div style="width:5px;height:60px"></div></td></tr>')).to eq([60, 60])
+    # a min-height is a percentage row's basis too: a 50% row is 50 of the 100.
+    expect(mh.call('min-height:100px', '<tr style="height:50%"><td id="r1" style="padding:0"></td></tr><tr><td id="r2" style="padding:0"><div style="width:5px;height:10px"></div></td></tr>')).to eq([50, 50])
+  end
+
   # A table told to be narrower than its content grows instead of letting its own
   # cells overflow the box that is supposed to contain them.
   it 'grows past a declared width too narrow for its content' do
