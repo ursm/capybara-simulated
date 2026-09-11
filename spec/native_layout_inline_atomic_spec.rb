@@ -82,13 +82,40 @@ RSpec.describe 'native layout inline-atomic parity', if: ENV.fetch('CSIM_JS_ENGI
     expect_parity('<div style="width:300px;font-size:14px">a <svg width="10" height="10" style="margin:9px 0 3px"></svg> b</div>')
   end
 
+  # INLINE-BLOCK / INLINE-FLEX atomics (slice 2): a box on the line whose content native does NOT lay out —
+  # only its oracle-resolved advance + baseline reach the line, exactly like an inline replaced atomic.
+  it 'matches an empty inline-block box among words' do
+    expect_parity('<div style="width:300px">x <span style="display:inline-block;width:20px;height:20px"></span> y</div>')
+  end
+  it 'matches an inline-block with TEXT content (its own baseline)' do
+    expect_parity('<div style="width:300px;font-size:16px">go <span style="display:inline-block">tag</span> now</div>')
+  end
+  it 'matches an inline-block TALLER than the text (grows the line)' do
+    expect_parity('<div style="width:300px;font-size:12px">a <span style="display:inline-block;width:20px;height:40px"></span> b</div>')
+  end
+  it 'matches an inline-block with margins and padding' do
+    expect_parity('<div style="width:300px">a <span style="display:inline-block;width:20px;height:16px;margin:0 6px;padding:2px"></span> b</div>')
+  end
+  it 'matches an inline-block form control in text (default inline-block)' do
+    expect_parity('<div style="width:400px">name <input type="text" style="width:90px;height:22px"> ok</div>')
+  end
+  it 'matches an inline-flex box among words' do
+    expect_parity('<div style="width:300px">x <span style="display:inline-flex;width:24px;height:18px"></span> y</div>')
+  end
+  it 'matches an inline-block that forces a wrap' do
+    expect_parity('<div style="width:80px">aaaa <span style="display:inline-block;width:50px;height:10px"></span> bbbb</div>')
+  end
+  it 'matches an inline-block glued to a word that overflows' do
+    expect_parity('<div style="width:70px">aaaaaaaa<span style="display:inline-block;width:40px;height:10px"></span></div>')
+  end
+
   it 'declines a super-aligned atomic (non-baseline vertical-align)' do
     expect_bail('<div style="width:300px">x <svg width="10" height="10" style="vertical-align:super"></svg> y</div>')
   end
-  it 'declines an inline-block atomic (deferred)' do
-    expect_bail('<div style="width:300px">x <span style="display:inline-block;width:20px;height:20px"></span> y</div>')
+  it 'declines a super-aligned inline-block atomic' do
+    expect_bail('<div style="width:300px">x <span style="display:inline-block;width:10px;height:10px;vertical-align:super"></span> y</div>')
   end
-  it 'declines a default (inline-block) form control in text (deferred)' do
-    expect_bail('<div style="width:400px">name <input type="text" style="width:90px;height:22px"> ok</div>')
+  it 'declines an absolutely-positioned atomic nested in a span (out of flow)' do
+    expect_bail('<div style="position:relative;width:300px">x <b>hi <span style="display:inline-block;position:absolute;width:10px;height:10px"></span></b> y</div>')
   end
 end

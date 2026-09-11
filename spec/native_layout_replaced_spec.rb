@@ -66,8 +66,8 @@ RSpec.describe 'native layout replaced-leaf parity', if: ENV.fetch('CSIM_JS_ENGI
   it 'lays out an INLINE svg in a block (atomic inline — see native_layout_inline_atomic_spec)' do
     expect_parity('<div style="width:300px">text <svg width="16" height="16"></svg> more</div>')
   end
-  it 'declines an inline-block img in a block' do
-    expect_bail('<div style="width:300px"><img width="20" height="20" style="display:inline-block"></div>')
+  it 'lays out an inline-block img in a block (atomic inline — see native_layout_inline_atomic_spec)' do
+    expect_parity('<div style="width:300px"><img width="20" height="20" style="display:inline-block"></div>')
   end
   # A control that lays out its OWN content (a display:block <select> whose options carry _lb) is NOT a leaf:
   # the oracle sizes it from its intrinsic (one-row) size, so native must decline rather than stack the options.
