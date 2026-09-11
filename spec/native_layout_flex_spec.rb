@@ -9,8 +9,9 @@
 # cross min/max-width, align-items/self:baseline & last baseline, out-of-flow (absolute / fixed) items placed at
 # their oracle-resolved box. Still DECLINES to JS — vertical writing modes, an rtl column with a cross (horizontal)
 # auto margin or WRAP, a WRAPPING AUTO-height column with a max-height (it breaks its lines against that
-# capacity), wrap-reverse, inline-flex, position:sticky items, replaced / inline-block items, bare text. Each bail
-# is an A/B: the feature-carrying input declines, a sibling without it stays native. V8 only.
+# capacity), wrap-reverse, inline-flex, position:sticky items, inline-block items. A REPLACED item (svg / img /
+# input …) is now replayed as a leaf box (see native_layout_replaced_spec). Each bail is an A/B: the
+# feature-carrying input declines, a sibling without it stays native. V8 only.
 require 'capybara/simulated'
 require 'rack'
 require_relative 'support/session_teardown'
@@ -389,9 +390,11 @@ RSpec.describe 'native layout flex parity', if: ENV.fetch('CSIM_JS_ENGINE', 'v8'
   it 'matches a WRAPPING row where the line-height floor exceeds the stacked line (align-content shares the surplus)' do
     expect_parity('<div style="display:flex;flex-wrap:wrap;align-content:center;width:400px">text<div style="width:60px;height:8px"></div></div>')
   end
-  it('declines a replaced (img) item') { a_bails_b_native('<div style="display:flex;width:400px"><img src="x.png" style="width:80px;height:30px"><div style="width:80px;height:30px"></div></div>') }
+  # A replaced element is a LEAF native replays (its box is oracle-resolved) — as an in-flow item and as an
+  # out-of-flow (abspos) one — so these lay out rather than decline.
+  it('matches a replaced (img) item') { expect_parity('<div style="display:flex;width:400px"><img src="x.png" style="width:80px;height:30px"><div style="width:80px;height:30px"></div></div>') }
+  it('matches an absolute replaced (img) flex child') { expect_parity('<div style="position:relative;display:flex;width:400px;height:100px"><div style="width:80px;height:30px"></div><img src="x.png" style="position:absolute;top:0;left:0;width:40px;height:30px"></div>') }
   it('declines a position:sticky flex item') { a_bails_b_native('<div style="display:flex;width:400px"><div style="position:sticky;top:0;width:80px;height:30px"></div><div style="width:80px;height:30px"></div></div>') }
-  it('declines an absolute replaced (img) flex child') { a_bails_b_native('<div style="position:relative;display:flex;width:400px;height:100px"><div style="width:80px;height:30px"></div><img src="x.png" style="position:absolute;top:0;left:0;width:40px;height:30px"></div>') }
 
   # A `position: relative` inset shifts the box and its subtree (the oracle folds it into el._lb); native
   # now applies the pushed shift in place(), so these lay out rather than decline.
