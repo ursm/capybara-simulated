@@ -403,6 +403,25 @@ RSpec.describe 'table layout' do
     expect(g1 + g2).to be_within(0.01).of(300)   # the two columns fill the fixed table
   end
 
+  # A PERCENTAGE column widens an AUTO table so its used width can be that fraction (CSS Tables 3): the table
+  # grows until the %-column's own want (its content, or a min-width) is that percentage of the whole. These are
+  # written as relationships (col = pct·table) because the pixel figures depend on which face fontconfig serves.
+  it 'grows an auto table so a percentage column is that fraction of it' do
+    m = ->(cells) { measure(%(<table id="t" style="border-spacing:0;font:16px monospace"><tr>#{cells}</tr></table>), ['#t', '#a', '#b']).first }
+    # a min-width:90 at 20% forces the table to 90 / 0.2 = 450 (min-width is a length, so these are exact).
+    t, a, b = m.call('<td id="a" style="width:20%;min-width:90px;padding:0">A</td><td id="b" style="padding:0">B</td>')
+    expect([t[2], a[2], b[2]]).to eq([450, 90, 360])
+    # a 20% column of unbreakable content grows the table until that content is 20% of it; the auto column fills the rest.
+    t, a, b = m.call('<td id="a" style="width:20%;padding:0">wwwwwwww</td><td id="b" style="padding:0">B</td>')
+    expect(a[2]).to be_within(0.5).of(0.20 * t[2])   # col1 is 20% of the table (which grew to make it so)
+    expect(a[2] + b[2]).to be_within(0.5).of(t[2])
+    expect(t[2]).to be_within(0.5).of(a[2] / 0.20)   # the table = that content ÷ its fraction
+    # when the AUTO column's content dominates, the table is content / (1 - pct) and the %-column takes its share.
+    t, a, b = m.call('<td id="a" style="width:20%;padding:0">A</td><td id="b" style="padding:0">wwwwwwwwww</td>')
+    expect(a[2]).to be_within(0.5).of(0.20 * t[2])
+    expect(t[2]).to be_within(0.5).of(b[2] / 0.80)
+  end
+
   # colspan / rowspan are HTML attributes only <td> / <th> carry; on any other element acting as a cell (a
   # display:table-cell div, an anonymous cell) a browser ignores them, so it stays a single 1x1 cell.
   it 'ignores colspan / rowspan on a non-td/th cell' do
