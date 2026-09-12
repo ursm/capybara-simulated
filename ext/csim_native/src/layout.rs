@@ -33,6 +33,12 @@ pub(crate) const DISPLAY_FLEX: u8 = 3;
 pub(crate) const DISPLAY_TABLE: u8 = 4;
 pub(crate) const DISPLAY_TABLE_ROW_GROUP: u8 = 5;
 pub(crate) const DISPLAY_TABLE_ROW: u8 = 6;
+// CSS Grid (§12), native COMPUTE (not replay): the container's `grid_start` indexes the parallel `grids`
+// buffer, which holds the parsed column template + gaps + per-item placement. measure_grid sizes the columns
+// (fixed / % / fr) and lays out each item at its track width — rows are content-height (reproducing the coarse
+// oracle). A grid the native engine can't compute (intrinsic tracks, etc.) still arrives as DISPLAY_BLOCK with
+// its items REPLAYED (grid_start < 0), the pre-existing path.
+pub(crate) const DISPLAY_GRID: u8 = 7;
 // A table CAPTION keeps its own block / text display (measure lays out its subtree); it is identified
 // structurally as the table's only non-row/non-group child (t4), not by a display code.
 pub(crate) const DISPLAY_UNSUPPORTED: u8 = 255;
@@ -179,6 +185,9 @@ pub(crate) struct Input {
     // pre-clamp content, the box floors/caps around them), instead of aligning in the pushed definite box —
     // reproducing the oracle's auto-height two-phase for a nested min-height flex row (the Avo field-wrapper).
     pub(crate) item_auto_height: bool,
+    // A native-COMPUTE grid container's offset into the parallel `grids` buffer (see measure_grid). Read only
+    // when `display == DISPLAY_GRID`; 0 (unused) for every other node, including a grid REPLAYED as DISPLAY_BLOCK.
+    pub(crate) grid_start: i32,
 }
 
 pub(crate) const CROSS_BASELINE: u8 = 3;
@@ -274,7 +283,7 @@ pub(crate) enum Outcome {
 // box per node in input order. Block flow: each block fills its containing block's content width (auto)
 // or takes its declared width; in-flow block children stack vertically at the content origin; auto
 // height is the children's stacked height (plus this box's own vertical edges).
-pub(crate) fn layout_block(inputs: &[Input], runs: &[Run], run_texts: &[Option<Vec<u16>>], root_x: f64, root_y: f64, root_cb_w: f64) -> Outcome {
+pub(crate) fn layout_block(inputs: &[Input], runs: &[Run], run_texts: &[Option<Vec<u16>>], grids: &[f64], root_x: f64, root_y: f64, root_cb_w: f64) -> Outcome {
     if inputs.is_empty() {
         return Outcome::LaidOut(Vec::new());
     }
@@ -300,6 +309,7 @@ pub(crate) fn layout_block(inputs: &[Input], runs: &[Run], run_texts: &[Option<V
                         | DISPLAY_TABLE
                         | DISPLAY_TABLE_ROW_GROUP
                         | DISPLAY_TABLE_ROW
+                        | DISPLAY_GRID
                 )
             {
                 children[p].push(i);
@@ -318,7 +328,7 @@ pub(crate) fn layout_block(inputs: &[Input], runs: &[Run], run_texts: &[Option<V
     let root_w = resolve_width(&inputs[0], root_cb_w);
     let failed = std::cell::Cell::new(false);
     let mut root_fc = FloatCtx::new();
-    measure(0, root_w, inputs, runs, run_texts, &children, &mut boxes, &failed, &mut root_fc, 0.0, 0.0);
+    measure(0, root_w, inputs, runs, run_texts, grids, &children, &mut boxes, &failed, &mut root_fc, 0.0, 0.0);
     if failed.get() {
         return Outcome::Unsupported;
     }
@@ -824,6 +834,7 @@ fn measure(
     inputs: &[Input],
     runs: &[Run],
     run_texts: &[Option<Vec<u16>>],
+    grids: &[f64],
     children: &[Vec<usize>],
     boxes: &mut [Box],
     failed: &std::cell::Cell<bool>,
@@ -840,13 +851,19 @@ fn measure(
     // A flex container (§9.7): the item SIZING is resolved JS-side (each item's used main/cross size rides
     // its width/height); native does only the placement — main-axis distribution + cross-axis alignment.
     if n.display == DISPLAY_FLEX {
-        return measure_flex(i, w, inputs, runs, run_texts, children, boxes, failed);
+        return measure_flex(i, w, inputs, runs, run_texts, grids, children, boxes, failed);
     }
 
     // A TABLE (§17): the cell SIZING (column widths × row heights) is resolved JS-side and rides each cell's
     // record; native reassembles the tracks and positions every cell / row / row-group and the table box.
     if n.display == DISPLAY_TABLE {
-        return measure_table(i, inputs, runs, run_texts, children, boxes, failed);
+        return measure_table(i, inputs, runs, run_texts, grids, children, boxes, failed);
+    }
+
+    // A computed GRID (§12): native sizes the columns (fixed / % / fr) and lays out each item at its track
+    // width; rows are content-height. The parsed template + gaps + placement live in `grids[grid_start..]`.
+    if n.display == DISPLAY_GRID {
+        return measure_grid(i, w, inputs, runs, run_texts, grids, children, boxes, failed);
     }
 
     // A text block (inline formatting context): its content height is the greedy line layout over its
@@ -921,7 +938,7 @@ fn measure(
             // `place` then positions it by rel_x/rel_y alone (el._lb − container._lb, the oracle's resolved
             // insets / static position). It touches no cursor / margin / has_child state.
             let cw = resolve_width(&cn, content_w);
-            measure(c, cw, inputs, runs, run_texts, children, boxes, failed, &mut FloatCtx::new(), 0.0, 0.0);
+            measure(c, cw, inputs, runs, run_texts, grids, children, boxes, failed, &mut FloatCtx::new(), 0.0, 0.0);
             boxes[c].x = 0.0;
             boxes[c].y = 0.0;
             continue;
@@ -933,7 +950,7 @@ fn measure(
             // out in a fresh context (a float starts its own BFC).
             let top0 = cursor + pending.value();
             let fw = resolve_width(&cn, content_w);
-            measure(c, fw, inputs, runs, run_texts, children, boxes, failed, &mut FloatCtx::new(), 0.0, 0.0);
+            measure(c, fw, inputs, runs, run_texts, grids, children, boxes, failed, &mut FloatCtx::new(), 0.0, 0.0);
             let (fml, fmr, fmt, fmb) = (Input::m(cn.ml), Input::m(cn.mr), Input::m(cn.mt), Input::m(cn.mb));
             let outer = boxes[c].w + fml + fmr;
             let outer_h = boxes[c].h + fmt + fmb;
@@ -973,7 +990,7 @@ fn measure(
                 // COLLAPSING top margin (cm.top_only) — its own margin joined with any a first descendant
                 // folds through its open top edge — which is what the oracle advances the flow by
                 // (collapsingTopMargin); the own declared margin alone would drop the descendant's.
-                let cm = measure(c, child_w, inputs, runs, run_texts, children, boxes, failed, &mut FloatCtx::new(), 0.0, 0.0);
+                let cm = measure(c, child_w, inputs, runs, run_texts, grids, children, boxes, failed, &mut FloatCtx::new(), 0.0, 0.0);
                 if cm.collapse_through {
                     // A THROUGH cleared box is placed by a different rule (§8.3.1: its own above-margin sits
                     // ON TOP of the clearance line, and it does not advance the flow) — defer to JS.
@@ -1021,7 +1038,7 @@ fn measure(
                 };
                 let (bl0, br0) = float_band(&ctx.items, cy, 1.0, cl, cr);
                 let cw = resolve_width(&cn, (br0 - bl0).max(0.0));
-                let cm = measure(c, cw, inputs, runs, run_texts, children, boxes, failed, &mut FloatCtx::new(), 0.0, 0.0);
+                let cm = measure(c, cw, inputs, runs, run_texts, grids, children, boxes, failed, &mut FloatCtx::new(), 0.0, 0.0);
                 let outer = boxes[c].w + ml + mr;
                 let (y, bl, br) = if outer > br0 - bl0 {
                     let yy = float_fit_y(&ctx.items, cy, outer, cl, cr, boxes[c].h);
@@ -1061,7 +1078,7 @@ fn measure(
                 };
                 boxes[c].x = cx;
                 boxes[c].y = cy;
-                let cm = measure(c, child_w, inputs, runs, run_texts, children, boxes, failed, ctx, cx, cy);
+                let cm = measure(c, child_w, inputs, runs, run_texts, grids, children, boxes, failed, ctx, cx, cy);
                 cursor = cy + boxes[c].h;
                 pending = cm.bottom;
                 all_children_through = false;
@@ -1075,7 +1092,7 @@ fn measure(
             }
         }
         has_child = true;
-        let cm = measure(c, child_w, inputs, runs, run_texts, children, boxes, failed, ctx, 0.0, 0.0);
+        let cm = measure(c, child_w, inputs, runs, run_texts, grids, children, boxes, failed, ctx, 0.0, 0.0);
         if !cm.collapse_through {
             all_children_through = false;
         }
@@ -1182,6 +1199,7 @@ fn measure_flex(
     inputs: &[Input],
     runs: &[Run],
     run_texts: &[Option<Vec<u16>>],
+    grids: &[f64],
     children: &[Vec<usize>],
     boxes: &mut [Box],
     failed: &std::cell::Cell<bool>,
@@ -1199,7 +1217,7 @@ fn measure_flex(
     // harness sorted by `order`), each in a fresh float context.
     for &c in &children[i] {
         let iw = resolve_width(&inputs[c], content_w);
-        measure(c, iw, inputs, runs, run_texts, children, boxes, failed, &mut FloatCtx::new(), 0.0, 0.0);
+        measure(c, iw, inputs, runs, run_texts, grids, children, boxes, failed, &mut FloatCtx::new(), 0.0, 0.0);
     }
 
     // Per-item OUTER extents (size + the two margins) along the main and cross axes, plus the leading
@@ -1528,6 +1546,7 @@ fn measure_table(
     inputs: &[Input],
     runs: &[Run],
     run_texts: &[Option<Vec<u16>>],
+    grids: &[f64],
     children: &[Vec<usize>],
     boxes: &mut [Box],
     failed: &std::cell::Cell<bool>,
@@ -1583,12 +1602,12 @@ fn measure_table(
     for &r in &rows {
         for &c in &children[r] {
             let iw = resolve_width(&inputs[c], 0.0);
-            measure(c, iw, inputs, runs, run_texts, children, boxes, failed, &mut FloatCtx::new(), 0.0, 0.0);
+            measure(c, iw, inputs, runs, run_texts, grids, children, boxes, failed, &mut FloatCtx::new(), 0.0, 0.0);
         }
     }
     if let Some(cap) = caption {
         let iw = resolve_width(&inputs[cap], 0.0);
-        measure(cap, iw, inputs, runs, run_texts, children, boxes, failed, &mut FloatCtx::new(), 0.0, 0.0);
+        measure(cap, iw, inputs, runs, run_texts, grids, children, boxes, failed, &mut FloatCtx::new(), 0.0, 0.0);
     }
     // vertical-align: content laid out top-aligned above, moved down by the offset the oracle pushed (§17.5.3;
     // the UA default is `middle`). Shift the cell's direct children — their subtrees follow through `place`, and
@@ -1750,6 +1769,164 @@ fn measure_table(
     MInfo { top, top_only: top, bottom: CMargin::of(Input::m(n.mb)), collapse_through: false }
 }
 
+// The column widths a computed grid hands its items (§12.4-12.7, the NON-intrinsic subset the gate admits:
+// fixed px, `%`, and plain `fr`). `grids[base + 2c ..]` holds each column as (kind, value): 0 = px (value),
+// 1 = `%` (value is the fraction, resolved against the container's own content width), 2 = `fr` (value is the
+// weight, floor 0). No intrinsic tracks reach here, so §12.6 "maximize" and the `auto` stretch are no-ops —
+// only the §12.7 `fr` distribution runs (spare = inner − the fixed tracks, split by weight, sum floored at 1).
+fn grid_column_widths(grids: &[f64], base: usize, col_count: usize, content_w: f64, col_gap: f64) -> Vec<f64> {
+    let inner = content_w - col_gap * (col_count as f64 - 1.0).max(0.0);
+    let mut track = vec![0.0f64; col_count]; // px / % resolve to their size; an `fr` bases at 0 (no floor here)
+    let mut is_fr = vec![false; col_count];
+    let mut fr_weight = vec![0.0f64; col_count];
+    for c in 0..col_count {
+        let val = grids[base + 2 * c + 1];
+        match grids[base + 2 * c] as u8 {
+            1 => track[c] = val * content_w, // `%`: the fraction against the container content width
+            2 => {
+                is_fr[c] = true;
+                fr_weight[c] = val;
+            }
+            _ => track[c] = val, // px
+        }
+    }
+    // §12.7 "find the size of an fr": `fr` divides `inner` less the fixed tracks (its own floor is NOT
+    // subtracted first — here the floor is 0). A weight sum below 1 is NOT scaled up. The freeze loop is kept
+    // general (it does nothing while floors are 0, but is the shape Phase 1b's minmax floors will need).
+    let fr_idx: Vec<usize> = (0..col_count).filter(|&c| is_fr[c]).collect();
+    if !fr_idx.is_empty() {
+        let taken: f64 = (0..col_count).filter(|&c| !is_fr[c]).map(|c| track[c]).sum();
+        let mut flexible = fr_idx;
+        let mut spare = (inner - taken).max(0.0);
+        loop {
+            let weight = flexible.iter().map(|&c| fr_weight[c]).sum::<f64>().max(1.0);
+            let frozen: Vec<usize> = flexible.iter().copied().filter(|&c| track[c] > spare * fr_weight[c] / weight).collect();
+            if frozen.is_empty() {
+                for &c in &flexible {
+                    track[c] = track[c].max(spare * fr_weight[c] / weight);
+                }
+                break;
+            }
+            for &c in &frozen {
+                spare = (spare - track[c]).max(0.0);
+            }
+            flexible.retain(|c| !frozen.contains(c));
+            if flexible.is_empty() {
+                break;
+            }
+        }
+    }
+    track.iter().map(|&w| w.max(0.0)).collect()
+}
+
+// A computed GRID container (§12), the native COMPUTE path (see DISPLAY_GRID). Sizes the columns natively,
+// then runs the oracle's row-major placement: each item is laid out at its track width (auto fills the track
+// less its margins; a length uses its resolved box), rows are as tall as their content (the tallest item's
+// border box — a top margin moves the item but, matching the coarse oracle, neither grows the row nor stretches
+// a shorter item). The parsed template + gaps + per-item (col-start, col-span) live in `grids[grid_start..]`.
+fn measure_grid(
+    i: usize,
+    w: f64,
+    inputs: &[Input],
+    runs: &[Run],
+    run_texts: &[Option<Vec<u16>>],
+    grids: &[f64],
+    children: &[Vec<usize>],
+    boxes: &mut [Box],
+    failed: &std::cell::Cell<bool>,
+) -> MInfo {
+    let n = inputs[i];
+    let bail = |failed: &std::cell::Cell<bool>| {
+        failed.set(true);
+        MInfo { top: CMargin::of(0.0), top_only: CMargin::of(0.0), bottom: CMargin::of(0.0), collapse_through: false }
+    };
+    let content_w = (w - n.edges_x()).max(0.0);
+    let content_top_rel = n.bt + n.pt;
+    let content_left = n.bl + n.pl;
+    let gs = n.grid_start.max(0) as usize;
+    if gs + 3 > grids.len() {
+        return bail(failed);
+    }
+    let col_count = grids[gs] as usize;
+    let col_gap = grids[gs + 1];
+    let row_gap = grids[gs + 2];
+    let tmpl_base = gs + 3;
+    let kids = &children[i];
+    if col_count == 0 || tmpl_base + 2 * col_count + 2 * kids.len() > grids.len() {
+        return bail(failed);
+    }
+    let widths = grid_column_widths(grids, tmpl_base, col_count, content_w, col_gap);
+    let mut offsets = vec![0.0f64; col_count];
+    let mut atx = 0.0;
+    for c in 0..col_count {
+        offsets[c] = atx;
+        atx += widths[c] + col_gap;
+    }
+    let place_base = tmpl_base + 2 * col_count;
+
+    // Row-major auto-placement, mirroring `layoutGrid`: an explicit start that fits resets the column (a new
+    // row if the cursor already passed it); otherwise a span that would overflow wraps. Rows advance by the
+    // tallest item placed (content rows).
+    let mut col = 0usize;
+    let mut row_top = 0.0f64; // relative to the content origin
+    let mut row_h = 0.0f64;
+    let mut bottom = 0.0f64;
+    for (k, &c) in kids.iter().enumerate() {
+        let start_f = grids[place_base + 2 * k];
+        let span = (grids[place_base + 2 * k + 1] as usize).clamp(1, col_count);
+        if start_f >= 0.0 && (start_f as usize) + span <= col_count {
+            let start = start_f as usize;
+            if start < col {
+                row_top += row_h + row_gap; // the row already passed this line → open a new one
+                row_h = 0.0;
+            }
+            col = start;
+        } else if col + span > col_count {
+            row_top += row_h + row_gap; // the span would overflow the row → wrap
+            row_h = 0.0;
+            col = 0;
+        }
+        let mut track_w = 0.0;
+        for x in col..col + span {
+            track_w += widths[x] + if x > col { col_gap } else { 0.0 };
+        }
+        let item = &inputs[c];
+        let child_w = resolve_width(item, track_w);
+        measure(c, child_w, inputs, runs, run_texts, grids, children, boxes, failed, &mut FloatCtx::new(), 0.0, 0.0);
+        let ih = boxes[c].h;
+        boxes[c].x = content_left + offsets[col] + Input::m(item.ml);
+        boxes[c].y = content_top_rel + row_top + Input::m(item.mt);
+        if ih > row_h {
+            row_h = ih;
+        }
+        if row_top + ih > bottom {
+            bottom = row_top + ih;
+        }
+        col += span;
+        if col >= col_count {
+            row_top += row_h + row_gap;
+            row_h = 0.0;
+            col = 0;
+        }
+    }
+
+    boxes[i].nid = n.nid;
+    boxes[i].w = w;
+    let box_h = if is_auto(n.height) {
+        content_top_rel + bottom + n.pb + n.bb
+    } else if n.border_box {
+        n.height.max(n.edges_y())
+    } else {
+        n.height + n.edges_y()
+    };
+    let to_border = |v: f64| if is_auto(v) || n.border_box { v } else { v + n.edges_y() };
+    boxes[i].h = clamp_min_max(box_h, to_border(n.min_h), to_border(n.max_h)).max(0.0);
+    boxes[i].auto_height = is_auto(n.height);
+    // A grid establishes an independent formatting context: its margins do not collapse with its items'.
+    let top = CMargin::of(Input::m(n.mt));
+    MInfo { top, top_only: top, bottom: CMargin::of(Input::m(n.mb)), collapse_through: false }
+}
+
 // Convert the relative boxes to absolute document coordinates: add each node's absolute border-box
 // origin to its children (whose x/y are relative to it), top-down in one pass — plus each node's
 // `position: relative` offset, which moves it AND its subtree at paint time (the flow used the unshifted
@@ -1768,8 +1945,15 @@ fn place(i: usize, ax: f64, ay: f64, inputs: &[Input], children: &[Vec<usize>], 
 // then converted to border-box; clamped by min/max (which are treated in the same box model).
 fn resolve_width(n: &Input, cb_w: f64) -> f64 {
     let border_w = if is_auto(n.width) {
-        // auto: fill the containing block, less horizontal margins (auto margins count 0 in L1).
-        (cb_w - Input::m(n.ml) - Input::m(n.mr)).max(0.0)
+        // auto: fill the containing block, less horizontal margins (auto margins count 0 in L1). A border box
+        // is floored at its own border+padding (content ≥ 0), matching usedSize's `isBorderBox` floor — normal
+        // block flow never binds it (cb ≫ edges), but a grid item can be narrower than its own padding.
+        let avail = (cb_w - Input::m(n.ml) - Input::m(n.mr)).max(0.0);
+        if n.border_box {
+            avail.max(n.edges_x())
+        } else {
+            avail
+        }
     } else if n.border_box {
         n.width.max(n.edges_x())   // a border box is never smaller than its border+padding (content box ≥ 0)
     } else {
@@ -1860,7 +2044,7 @@ mod tests {
         let mut b = blk(2.0, 0);
         b.height = 30.0;
         let inputs = vec![blk(0.0, -1), a, b];
-        let bx = boxes(layout_block(&inputs, &[], &[], 0.0, 0.0, 800.0));
+        let bx = boxes(layout_block(&inputs, &[], &[], &[], 0.0, 0.0, 800.0));
         assert_eq!(bx[1], Box { nid: 1.0, x: 0.0, y: 0.0, w: 800.0, h: 50.0, auto_height: false });
         assert_eq!(bx[2], Box { nid: 2.0, x: 0.0, y: 50.0, w: 800.0, h: 30.0, auto_height: false });
         assert_eq!(bx[0].h, 80.0); // root auto height = 50 + 30
@@ -1881,7 +2065,7 @@ mod tests {
         let mut b = blk(2.0, 0);
         b.height = 10.0; // auto width → fills 300
         let inputs = vec![root, a, b];
-        let bx = boxes(layout_block(&inputs, &[], &[], 0.0, 0.0, 300.0));
+        let bx = boxes(layout_block(&inputs, &[], &[], &[], 0.0, 0.0, 300.0));
         assert_eq!([bx[1].x, bx[1].w], [180.0, 100.0]); // fixed child at the right, inset by its right margin
         assert_eq!([bx[2].x, bx[2].w], [0.0, 300.0]);   // auto-width child fills and sits at content-left
     }
@@ -1899,7 +2083,7 @@ mod tests {
         a.pt = 5.0; a.pr = 5.0; a.pb = 5.0; a.pl = 5.0;     // padding 5 each side → +10 → edges_y = 30
         a.height_adjoins = false;
         let inputs = vec![blk(0.0, -1), a];
-        let bx = boxes(layout_block(&inputs, &[], &[], 0.0, 0.0, 800.0));
+        let bx = boxes(layout_block(&inputs, &[], &[], &[], 0.0, 0.0, 800.0));
         assert_eq!([bx[1].w, bx[1].h], [100.0, 30.0]); // width keeps 100 (> edges 30); height floored to 30
     }
 
@@ -1919,7 +2103,7 @@ mod tests {
         let mut c = blk(2.0, 1);
         c.height = 20.0;
         let inputs = vec![blk(0.0, -1), a, c];
-        let bx = boxes(layout_block(&inputs, &[], &[], 0.0, 0.0, 100.0));
+        let bx = boxes(layout_block(&inputs, &[], &[], &[], 0.0, 0.0, 100.0));
         // a is the first child of an OPEN-top root, so its margin-top collapses through the root and is
         // absorbed (§8.3.1) — a sits at the root's content top (y = 0), not pushed down by its own margin.
         // (This is what a body's first child does — the margin escapes to the top; the JS layout puts
@@ -1942,7 +2126,7 @@ mod tests {
         a.max_w = 150.0;
         a.height = 40.0;
         let inputs = vec![blk(0.0, -1), a];
-        let bx = boxes(layout_block(&inputs, &[], &[], 0.0, 0.0, 800.0));
+        let bx = boxes(layout_block(&inputs, &[], &[], &[], 0.0, 0.0, 800.0));
         assert_eq!(bx[1].w, 150.0); // clamped by max-width (border-box)
     }
 
@@ -1963,7 +2147,7 @@ mod tests {
         c.height = 30.0;
         c.height_adjoins = false;
         let inputs = vec![blk(0.0, -1), a, b, c];
-        let bx = boxes(layout_block(&inputs, &[], &[], 0.0, 0.0, 800.0));
+        let bx = boxes(layout_block(&inputs, &[], &[], &[], 0.0, 0.0, 800.0));
         assert_eq!(bx[2].y, 70.0); // B placed at its top-only run (A.mb 0 vs B.mt 20)
         assert_eq!(bx[2].h, 0.0);
         assert_eq!(bx[3].y, 90.0); // C after the collapsed 40px run
@@ -1988,7 +2172,7 @@ mod tests {
         c.height_adjoins = false;
         c.mt = 20.0;
         let inputs = vec![blk(0.0, -1), a, p, empty, c];
-        let bx = boxes(layout_block(&inputs, &[], &[], 0.0, 0.0, 800.0));
+        let bx = boxes(layout_block(&inputs, &[], &[], &[], 0.0, 0.0, 800.0));
         assert_eq!(bx[4].y, 80.0); // C after the run collapsed through the empty wrapper
     }
 
@@ -2005,7 +2189,7 @@ mod tests {
         f.height = 120.0;
         f.height_adjoins = false;
         let inputs = vec![blk(0.0, -1), owner, f];
-        let bx = boxes(layout_block(&inputs, &[], &[], 0.0, 0.0, 800.0));
+        let bx = boxes(layout_block(&inputs, &[], &[], &[], 0.0, 0.0, 800.0));
         assert_eq!(bx[1].h, 120.0); // owner contains the float
         assert_eq!(bx[2], Box { nid: 2.0, x: 0.0, y: 0.0, w: 80.0, h: 120.0, auto_height: false });
     }
@@ -2029,7 +2213,7 @@ mod tests {
         b.height = 30.0;
         b.height_adjoins = false;
         let inputs = vec![blk(0.0, -1), owner, a, b];
-        let bx = boxes(layout_block(&inputs, &[], &[], 0.0, 0.0, 800.0));
+        let bx = boxes(layout_block(&inputs, &[], &[], &[], 0.0, 0.0, 800.0));
         assert_eq!(bx[2].y, 0.0); // first float at the top
         assert_eq!(bx[3].y, 40.0); // second drops below the first
         assert_eq!(bx[3].x, 0.0); // …back at the left edge
@@ -2067,7 +2251,7 @@ mod tests {
             let mut f = flex(0.0, -1, 600.0);
             f.flex_justify = code;
             let inputs = vec![f, item(1.0, 0, 100.0, 30.0), item(2.0, 0, 100.0, 30.0), item(3.0, 0, 100.0, 30.0)];
-            let bx = boxes(layout_block(&inputs, &[], &[], 0.0, 0.0, 800.0));
+            let bx = boxes(layout_block(&inputs, &[], &[], &[], 0.0, 0.0, 800.0));
             assert_eq!([bx[1].x, bx[2].x, bx[3].x], xs, "justify code {code}");
         }
     }
@@ -2077,14 +2261,14 @@ mod tests {
         let mut f = flex(0.0, -1, 600.0);
         f.flex_main_gap = 20.0;
         let inputs = vec![f, item(1.0, 0, 100.0, 30.0), item(2.0, 0, 100.0, 30.0), item(3.0, 0, 100.0, 30.0)];
-        let bx = boxes(layout_block(&inputs, &[], &[], 0.0, 0.0, 800.0));
+        let bx = boxes(layout_block(&inputs, &[], &[], &[], 0.0, 0.0, 800.0));
         assert_eq!([bx[1].x, bx[2].x, bx[3].x], [0.0, 120.0, 240.0]); // 100 + 20 gap
 
         // A left margin on the middle item pushes it (and the run after) right.
         let mut m = item(2.0, 0, 100.0, 30.0);
         m.ml = 15.0;
         let inputs = vec![flex(0.0, -1, 600.0), item(1.0, 0, 100.0, 30.0), m, item(3.0, 0, 100.0, 30.0)];
-        let bx = boxes(layout_block(&inputs, &[], &[], 0.0, 0.0, 800.0));
+        let bx = boxes(layout_block(&inputs, &[], &[], &[], 0.0, 0.0, 800.0));
         assert_eq!([bx[1].x, bx[2].x, bx[3].x], [0.0, 115.0, 215.0]);
     }
 
@@ -2098,7 +2282,7 @@ mod tests {
             let mut a = item(1.0, 0, 100.0, 30.0);
             a.flex_cross_align = code;
             let inputs = vec![f, a];
-            let bx = boxes(layout_block(&inputs, &[], &[], 0.0, 0.0, 800.0));
+            let bx = boxes(layout_block(&inputs, &[], &[], &[], 0.0, 0.0, 800.0));
             assert_eq!(bx[1].y, y, "align code {code}");
             assert_eq!(bx[0].h, 90.0);
         }
@@ -2116,7 +2300,7 @@ mod tests {
         b.flex_cross_align = CROSS_BASELINE;
         b.flex_baseline_asc = 14.0;
         let inputs = vec![f, a, b];
-        let bx = boxes(layout_block(&inputs, &[], &[], 0.0, 0.0, 800.0));
+        let bx = boxes(layout_block(&inputs, &[], &[], &[], 0.0, 0.0, 800.0));
         assert_eq!([bx[1].y, bx[2].y], [0.0, 15.0]);
         assert_eq!(bx[0].h, 37.0); // auto height = the baseline group's extent
     }
@@ -2132,7 +2316,7 @@ mod tests {
         abs.rel_x = 20.0;
         abs.rel_y = 10.0;
         let inputs = vec![f, a, abs];
-        let bx = boxes(layout_block(&inputs, &[], &[], 0.0, 0.0, 800.0));
+        let bx = boxes(layout_block(&inputs, &[], &[], &[], 0.0, 0.0, 800.0));
         assert_eq!([bx[1].x, bx[1].y], [0.0, 0.0]); // in-flow item at the start
         assert_eq!([bx[2].x, bx[2].y], [20.0, 10.0]); // abspos at origin + (20,10)
     }
@@ -2147,7 +2331,7 @@ mod tests {
         let mut abs = item(2.0, 0, 40.0, 99.0);
         abs.out_of_flow = 1;
         let inputs = vec![f, a, abs];
-        let bx = boxes(layout_block(&inputs, &[], &[], 0.0, 0.0, 800.0));
+        let bx = boxes(layout_block(&inputs, &[], &[], &[], 0.0, 0.0, 800.0));
         assert_eq!(bx[0].h, 20.0); // auto height = in-flow cross, not the 99px abspos
         assert_eq!(bx[1].x, 125.0); // center: (300-50)/2, abspos not in the free space
     }
@@ -2165,7 +2349,7 @@ mod tests {
         bx2.flex_cross_align = CROSS_BASELINE;
         bx2.flex_baseline_asc = 60.0;
         let inputs = vec![f, t, bx2];
-        let b = boxes(layout_block(&inputs, &[], &[], 0.0, 0.0, 800.0));
+        let b = boxes(layout_block(&inputs, &[], &[], &[], 0.0, 0.0, 800.0));
         assert_eq!([b[1].y, b[2].y], [31.0, 0.0]);
         assert_eq!(b[0].h, 68.0);
     }
@@ -2184,7 +2368,7 @@ mod tests {
         b.flex_cross_align = CROSS_BASELINE_LAST;
         b.flex_baseline_asc = 14.0;
         let inputs = vec![f, a, b];
-        let bx = boxes(layout_block(&inputs, &[], &[], 0.0, 0.0, 800.0));
+        let bx = boxes(layout_block(&inputs, &[], &[], &[], 0.0, 0.0, 800.0));
         assert_eq!([bx[1].y, bx[2].y], [43.0, 58.0]);
     }
 
@@ -2202,7 +2386,7 @@ mod tests {
         b.flex_cross_align = CROSS_BASELINE_LAST;
         b.flex_baseline_asc = 14.0;
         let inputs = vec![f, a, b];
-        let bx = boxes(layout_block(&inputs, &[], &[], 0.0, 0.0, 800.0));
+        let bx = boxes(layout_block(&inputs, &[], &[], &[], 0.0, 0.0, 800.0));
         assert_eq!([bx[1].y, bx[2].y], [0.0, 62.0]);
     }
 
@@ -2220,7 +2404,7 @@ mod tests {
         let mut b = item(2.0, 0, 100.0, 30.0);
         b.flex_item_auto = 1; // main-start-side (left) margin is auto
         let inputs = vec![f, item(1.0, 0, 100.0, 30.0), b, item(3.0, 0, 100.0, 30.0)];
-        let bx = boxes(layout_block(&inputs, &[], &[], 0.0, 0.0, 800.0));
+        let bx = boxes(layout_block(&inputs, &[], &[], &[], 0.0, 0.0, 800.0));
         assert_eq!([bx[1].x, bx[2].x, bx[3].x], [0.0, 400.0, 500.0]);
     }
 
@@ -2233,7 +2417,7 @@ mod tests {
         let mut b = item(2.0, 0, 100.0, 30.0);
         b.flex_item_auto = 1; // main-start-side (left) auto
         let inputs = vec![flex(0.0, -1, 600.0), a, b];
-        let bx = boxes(layout_block(&inputs, &[], &[], 0.0, 0.0, 800.0));
+        let bx = boxes(layout_block(&inputs, &[], &[], &[], 0.0, 0.0, 800.0));
         // free = 600 - 200 = 400, each = 200. a at 0; after a: +100 +200(a.mr) → 300; b.ml auto +200 → 500.
         assert_eq!([bx[1].x, bx[2].x], [0.0, 500.0]);
     }
@@ -2250,7 +2434,7 @@ mod tests {
             let mut a = item(1.0, 0, 100.0, 30.0);
             a.flex_item_auto = bits;
             let inputs = vec![f, a];
-            let bx = boxes(layout_block(&inputs, &[], &[], 0.0, 0.0, 800.0));
+            let bx = boxes(layout_block(&inputs, &[], &[], &[], 0.0, 0.0, 800.0));
             assert_eq!(bx[1].y, y, "cross-auto bits {bits}");
         }
     }
@@ -2262,7 +2446,7 @@ mod tests {
         let mut a = item(1.0, 0, 50.0, 30.0);
         a.flex_item_auto = 12;
         let inputs = vec![flex_col(0.0, -1, 200.0), a];
-        let bx = boxes(layout_block(&inputs, &[], &[], 0.0, 0.0, 800.0));
+        let bx = boxes(layout_block(&inputs, &[], &[], &[], 0.0, 0.0, 800.0));
         assert_eq!(bx[1].x, 75.0); // (200 - 50) / 2
     }
 
@@ -2278,7 +2462,7 @@ mod tests {
         let mut b = item(2.0, 0, 80.0, 50.0);
         b.flex_cross_align = 1;
         let inputs = vec![f, a, b];
-        let bx = boxes(layout_block(&inputs, &[], &[], 0.0, 0.0, 800.0));
+        let bx = boxes(layout_block(&inputs, &[], &[], &[], 0.0, 0.0, 800.0));
         assert_eq!(bx[0].h, 100.0); // box grown by min-height
         assert_eq!(bx[1].y, 10.0);  // 30px item centred in the 50px content line
         assert_eq!(bx[2].y, 0.0);   // 50px item fills the content line
@@ -2293,7 +2477,7 @@ mod tests {
         let mut a = item(1.0, 0, 100.0, 30.0);
         a.flex_cross_align = 1; // center, but the line equals the item so there is no slack
         let inputs = vec![f, a];
-        let bx = boxes(layout_block(&inputs, &[], &[], 0.0, 0.0, 800.0));
+        let bx = boxes(layout_block(&inputs, &[], &[], &[], 0.0, 0.0, 800.0));
         assert_eq!(bx[0].h, 20.0);
         assert_eq!(bx[1].y, 0.0);
     }
@@ -2301,7 +2485,7 @@ mod tests {
     #[test]
     fn flex_column_stacks_items_and_auto_height_sums_them() {
         let inputs = vec![flex_col(0.0, -1, 200.0), item(1.0, 0, 50.0, 30.0), item(2.0, 0, 50.0, 30.0), item(3.0, 0, 50.0, 30.0)];
-        let bx = boxes(layout_block(&inputs, &[], &[], 0.0, 0.0, 800.0));
+        let bx = boxes(layout_block(&inputs, &[], &[], &[], 0.0, 0.0, 800.0));
         assert_eq!([bx[1].y, bx[2].y, bx[3].y], [0.0, 30.0, 60.0]); // stacked down the main (Y) axis
         assert_eq!([bx[1].x, bx[2].x, bx[3].x], [0.0, 0.0, 0.0]);   // cross-start on X
         assert_eq!(bx[0].h, 90.0); // auto main = Σ item heights
@@ -2315,7 +2499,7 @@ mod tests {
         f.height_adjoins = false;
         f.flex_justify = 1; // center
         let inputs = vec![f, item(1.0, 0, 50.0, 30.0), item(2.0, 0, 50.0, 30.0), item(3.0, 0, 50.0, 30.0)];
-        let bx = boxes(layout_block(&inputs, &[], &[], 0.0, 0.0, 800.0));
+        let bx = boxes(layout_block(&inputs, &[], &[], &[], 0.0, 0.0, 800.0));
         // free = 200 - 90 = 110; center lead = 55 → y 55 / 85 / 115.
         assert_eq!([bx[1].y, bx[2].y, bx[3].y], [55.0, 85.0, 115.0]);
         assert_eq!(bx[0].h, 200.0);
@@ -2326,7 +2510,7 @@ mod tests {
         let mut a = item(1.0, 0, 50.0, 30.0);
         a.flex_cross_align = 1; // center on the cross (X) axis
         let inputs = vec![flex_col(0.0, -1, 200.0), a];
-        let bx = boxes(layout_block(&inputs, &[], &[], 0.0, 0.0, 800.0));
+        let bx = boxes(layout_block(&inputs, &[], &[], &[], 0.0, 0.0, 800.0));
         assert_eq!(bx[1].x, 75.0); // (200 - 50) / 2
     }
 
@@ -2338,7 +2522,7 @@ mod tests {
         f.min_h = 200.0;
         f.flex_justify = 1; // center
         let inputs = vec![f, item(1.0, 0, 100.0, 30.0), item(2.0, 0, 100.0, 30.0)];
-        let bx = boxes(layout_block(&inputs, &[], &[], 0.0, 0.0, 800.0));
+        let bx = boxes(layout_block(&inputs, &[], &[], &[], 0.0, 0.0, 800.0));
         assert_eq!(bx[0].h, 200.0);
         assert_eq!([bx[1].y, bx[2].y], [70.0, 100.0]); // free = 200-60 = 140, center lead 70
     }
@@ -2350,7 +2534,7 @@ mod tests {
         let mut f = flex_col(0.0, -1, 100.0);
         f.max_h = 40.0;
         let inputs = vec![f, item(1.0, 0, 100.0, 30.0), item(2.0, 0, 100.0, 30.0), item(3.0, 0, 100.0, 30.0)];
-        let bx = boxes(layout_block(&inputs, &[], &[], 0.0, 0.0, 800.0));
+        let bx = boxes(layout_block(&inputs, &[], &[], &[], 0.0, 0.0, 800.0));
         assert_eq!(bx[0].h, 40.0); // box capped by max-height
         assert_eq!([bx[1].y, bx[2].y, bx[3].y], [0.0, 30.0, 60.0]); // items overflow (free = 40 - 90 < 0)
     }
@@ -2365,7 +2549,7 @@ mod tests {
         f.min_h = 90.0;
         f.flex_justify = 2; // end
         let inputs = vec![f, item(1.0, 0, 100.0, 30.0)];
-        let bx = boxes(layout_block(&inputs, &[], &[], 0.0, 0.0, 800.0));
+        let bx = boxes(layout_block(&inputs, &[], &[], &[], 0.0, 0.0, 800.0));
         assert_eq!(bx[0].h, 90.0);
         assert_eq!(bx[1].y, 60.0); // extent 90, free 60, end
     }
@@ -2375,7 +2559,7 @@ mod tests {
         let mut f = flex(0.0, -1, 600.0);
         f.flex_main_reverse = true;
         let inputs = vec![f, item(1.0, 0, 100.0, 30.0), item(2.0, 0, 100.0, 30.0), item(3.0, 0, 100.0, 30.0)];
-        let bx = boxes(layout_block(&inputs, &[], &[], 0.0, 0.0, 800.0));
+        let bx = boxes(layout_block(&inputs, &[], &[], &[], 0.0, 0.0, 800.0));
         assert_eq!([bx[1].x, bx[2].x, bx[3].x], [500.0, 400.0, 300.0]); // first item rightmost, packed at the right
         assert_eq!([bx[1].y, bx[2].y, bx[3].y], [0.0, 0.0, 0.0]);       // cross still forward
     }
@@ -2387,7 +2571,7 @@ mod tests {
         f.height = 200.0;
         f.height_adjoins = false;
         let inputs = vec![f, item(1.0, 0, 50.0, 30.0), item(2.0, 0, 50.0, 30.0)];
-        let bx = boxes(layout_block(&inputs, &[], &[], 0.0, 0.0, 800.0));
+        let bx = boxes(layout_block(&inputs, &[], &[], &[], 0.0, 0.0, 800.0));
         assert_eq!([bx[1].y, bx[2].y], [170.0, 140.0]); // first item at the bottom (200-30), packed at main-start
         assert_eq!([bx[1].x, bx[2].x], [0.0, 0.0]);
     }
@@ -2400,7 +2584,7 @@ mod tests {
         let mut a = item(1.0, 0, 100.0, 30.0);
         a.mr = 20.0; // leading margin on a reversed row
         let inputs = vec![f, a, item(2.0, 0, 100.0, 30.0)];
-        let bx = boxes(layout_block(&inputs, &[], &[], 0.0, 0.0, 800.0));
+        let bx = boxes(layout_block(&inputs, &[], &[], &[], 0.0, 0.0, 800.0));
         // item a: abstract at = 0 + lead(mr 20) = 20, size 100 → main_phys = 600 - 20 - 100 = 480.
         assert_eq!(bx[1].x, 480.0);
         // item 2: abstract at advances by a's outer (20+100) then its own lead(0) → 120; phys = 600-120-100=380.
@@ -2413,7 +2597,7 @@ mod tests {
         let mut f = flex(0.0, -1, 250.0);
         f.flex_wrap = true;
         let inputs = vec![f, item(1.0, 0, 100.0, 30.0), item(2.0, 0, 100.0, 30.0), item(3.0, 0, 100.0, 30.0)];
-        let bx = boxes(layout_block(&inputs, &[], &[], 0.0, 0.0, 800.0));
+        let bx = boxes(layout_block(&inputs, &[], &[], &[], 0.0, 0.0, 800.0));
         assert_eq!((bx[1].x, bx[1].y), (0.0, 0.0));
         assert_eq!((bx[2].x, bx[2].y), (100.0, 0.0)); // second item fits on line 0
         assert_eq!((bx[3].x, bx[3].y), (0.0, 30.0));  // third wraps to line 1
@@ -2429,7 +2613,7 @@ mod tests {
         f.height_adjoins = false;
         f.flex_align_content = 1; // center
         let inputs = vec![f, item(1.0, 0, 100.0, 30.0), item(2.0, 0, 100.0, 30.0), item(3.0, 0, 100.0, 30.0)];
-        let bx = boxes(layout_block(&inputs, &[], &[], 0.0, 0.0, 800.0));
+        let bx = boxes(layout_block(&inputs, &[], &[], &[], 0.0, 0.0, 800.0));
         assert_eq!(bx[1].y, 70.0); // line 0 at the centred stack start
         assert_eq!(bx[3].y, 100.0); // line 1 = 70 + 30
         assert_eq!(bx[0].h, 200.0);
@@ -2441,7 +2625,7 @@ mod tests {
         f.flex_wrap = true;
         f.flex_cross_gap = 10.0;
         let inputs = vec![f, item(1.0, 0, 100.0, 30.0), item(2.0, 0, 100.0, 30.0), item(3.0, 0, 100.0, 30.0)];
-        let bx = boxes(layout_block(&inputs, &[], &[], 0.0, 0.0, 800.0));
+        let bx = boxes(layout_block(&inputs, &[], &[], &[], 0.0, 0.0, 800.0));
         assert_eq!(bx[3].y, 40.0); // 30 (line 0) + 10 (cross gap)
         assert_eq!(bx[0].h, 70.0); // 30 + 10 + 30
     }
@@ -2449,7 +2633,7 @@ mod tests {
     #[test]
     fn flex_row_auto_height_wraps_the_tallest_item() {
         let inputs = vec![flex(0.0, -1, 600.0), item(1.0, 0, 100.0, 30.0), item(2.0, 0, 100.0, 50.0)];
-        let bx = boxes(layout_block(&inputs, &[], &[], 0.0, 0.0, 800.0));
+        let bx = boxes(layout_block(&inputs, &[], &[], &[], 0.0, 0.0, 800.0));
         assert_eq!(bx[0].h, 50.0); // auto height = tallest item outer
         assert!(bx[0].auto_height);
     }
@@ -2459,7 +2643,7 @@ mod tests {
         let mut a = blk(1.0, 0);
         a.display = DISPLAY_UNSUPPORTED; // e.g. flex
         let inputs = vec![blk(0.0, -1), a];
-        assert!(matches!(layout_block(&inputs, &[], &[], 0.0, 0.0, 800.0), Outcome::Unsupported));
+        assert!(matches!(layout_block(&inputs, &[], &[], &[], 0.0, 0.0, 800.0), Outcome::Unsupported));
     }
 
     fn tbl(nid: f64, parent: i32, sx: f64, sy: f64) -> Input {
@@ -2501,7 +2685,7 @@ mod tests {
             cell(6.0, 5, 62.0, 42.0, 0, 1, 1), // 6 td(1,0)
             cell(7.0, 5, 82.0, 42.0, 1, 1, 1), // 7 td(1,1)
         ];
-        let bx = boxes(layout_block(&inputs, &[], &[], 0.0, 0.0, 800.0));
+        let bx = boxes(layout_block(&inputs, &[], &[], &[], 0.0, 0.0, 800.0));
         assert_eq!([bx[0].x, bx[0].y, bx[0].w, bx[0].h], [0.0, 0.0, 156.0, 86.0]); // table
         assert_eq!([bx[1].x, bx[1].y, bx[1].w, bx[1].h], [4.0, 4.0, 148.0, 78.0]); // tbody
         assert_eq!([bx[2].x, bx[2].y, bx[2].w, bx[2].h], [4.0, 4.0, 148.0, 32.0]); // tr0
@@ -2521,7 +2705,7 @@ mod tests {
             cell(2.0, 1, 40.0, 20.0, 0, 1, 1), // 2 td
             cell(3.0, 1, 60.0, 20.0, 1, 1, 1), // 3 td
         ];
-        let bx = boxes(layout_block(&inputs, &[], &[], 0.0, 0.0, 800.0));
+        let bx = boxes(layout_block(&inputs, &[], &[], &[], 0.0, 0.0, 800.0));
         assert_eq!([bx[0].w, bx[0].h], [109.0, 26.0]); // 40+60 + 3*3 ; 20 + 2*3
         assert_eq!([bx[1].x, bx[1].y], [3.0, 3.0]); // row at (sx, sy)
         assert_eq!([bx[2].x, bx[2].y], [3.0, 3.0]); // td0
@@ -2540,7 +2724,7 @@ mod tests {
             rowel(4.0, 0),
             cell(5.0, 4, 40.0, 20.0, 0, 1, 1), // row 1 has only col 0
         ];
-        let bx = boxes(layout_block(&inputs, &[], &[], 0.0, 0.0, 800.0));
+        let bx = boxes(layout_block(&inputs, &[], &[], &[], 0.0, 0.0, 800.0));
         assert_eq!(bx[0].w, 102.0); // 4+40+4+50+4 (2 columns)
         assert_eq!([bx[2].x, bx[3].x], [4.0, 48.0]); // row 0 cols
         assert_eq!([bx[5].x, bx[5].y], [4.0, 28.0]); // row 1 col 0
@@ -2561,7 +2745,7 @@ mod tests {
             cell(7.0, 5, 42.0, 20.0, 1, 1, 1), // 7 col 1
             cell(8.0, 5, 52.0, 20.0, 2, 1, 1), // 8 col 2
         ];
-        let bx = boxes(layout_block(&inputs, &[], &[], 0.0, 0.0, 800.0));
+        let bx = boxes(layout_block(&inputs, &[], &[], &[], 0.0, 0.0, 800.0));
         assert_eq!([bx[0].w, bx[0].h], [142.0, 54.0]); // 4+32+4+42+4+52+4 ; 4+22+4+20+4
         assert_eq!([bx[3].x, bx[3].y, bx[3].w], [4.0, 4.0, 78.0]); // the colspan cell at col 0
         assert_eq!([bx[4].x, bx[4].y], [86.0, 4.0]); // col 2
@@ -2581,7 +2765,7 @@ mod tests {
             rowel(5.0, 1),                     // 5 tr1
             cell(6.0, 5, 52.0, 37.0, 1, 1, 1), // 6 col 1, row 1
         ];
-        let bx = boxes(layout_block(&inputs, &[], &[], 0.0, 0.0, 800.0));
+        let bx = boxes(layout_block(&inputs, &[], &[], &[], 0.0, 0.0, 800.0));
         assert_eq!([bx[0].w, bx[0].h], [96.0, 71.0]); // 4+32+4+52+4 ; 4+22+4+37+4
         assert_eq!([bx[3].x, bx[3].y, bx[3].h], [4.0, 4.0, 63.0]); // the rowspan cell
         assert_eq!([bx[4].x, bx[4].y], [40.0, 4.0]); // col 1 row 0
@@ -2610,7 +2794,7 @@ mod tests {
             cell(6.0, 5, 46.0, 36.0, 0, 1, 1), // 6
             cell(7.0, 5, 56.0, 36.0, 1, 1, 1), // 7
         ];
-        let bx = boxes(layout_block(&inputs, &[], &[], 0.0, 0.0, 800.0));
+        let bx = boxes(layout_block(&inputs, &[], &[], &[], 0.0, 0.0, 800.0));
         assert_eq!([bx[0].w, bx[0].h], [106.0, 66.0]); // Σtracks (102 / 62) + the table's own edges (2 each side)
         assert_eq!([bx[3].x, bx[3].y], [2.0, 2.0]); // content origin = the table border (no padding, no spacing)
         assert_eq!(bx[4].x, 48.0); // 2 + 46 (cells meet, no spacing)
@@ -2631,7 +2815,7 @@ mod tests {
             cell(6.0, 5, 30.0, 20.0, 0, 1, 1), // col 0
             cell(7.0, 5, 40.0, 20.0, 1, 2, 1), // cols 1-2 → col 1 never a single cell
         ];
-        assert!(matches!(layout_block(&inputs, &[], &[], 0.0, 0.0, 800.0), Outcome::Unsupported));
+        assert!(matches!(layout_block(&inputs, &[], &[], &[], 0.0, 0.0, 800.0), Outcome::Unsupported));
     }
 
     // t4 — the caption (a block box, the table's only non-row/-group child). The `<table>` box is the WRAPPER:
@@ -2647,7 +2831,7 @@ mod tests {
             cell(3.0, 2, 60.0, 20.0, 0, 1, 1), // 3 td col 0
             cell(4.0, 2, 80.0, 20.0, 1, 1, 1), // 4 td col 1
         ];
-        let bx = boxes(layout_block(&inputs, &[], &[], 0.0, 0.0, 800.0));
+        let bx = boxes(layout_block(&inputs, &[], &[], &[], 0.0, 0.0, 800.0));
         // wrapper: width = grid (60+80 + 3*4 = 152) ; height = grid (20 + 2*4 = 28) + caption 16 = 44
         assert_eq!([bx[0].w, bx[0].h], [152.0, 44.0]);
         assert_eq!([bx[1].x, bx[1].y, bx[1].w, bx[1].h], [0.0, 0.0, 100.0, 16.0]); // caption at the top
@@ -2666,7 +2850,7 @@ mod tests {
             cell(3.0, 2, 60.0, 20.0, 0, 1, 1), // 3
             cell(4.0, 2, 80.0, 20.0, 1, 1, 1), // 4
         ];
-        let bx = boxes(layout_block(&inputs, &[], &[], 0.0, 0.0, 800.0));
+        let bx = boxes(layout_block(&inputs, &[], &[], &[], 0.0, 0.0, 800.0));
         assert_eq!([bx[0].w, bx[0].h], [152.0, 44.0]); // same wrapper size
         assert_eq!([bx[3].x, bx[3].y], [4.0, 4.0]); // grid NOT offset — cells at the top
         assert_eq!([bx[4].x, bx[4].y], [68.0, 4.0]);
@@ -2683,7 +2867,7 @@ mod tests {
             cell(3.0, 2, 60.0, 20.0, 0, 1, 1), // 3
             cell(4.0, 2, 80.0, 20.0, 1, 1, 1), // 4
         ];
-        let bx = boxes(layout_block(&inputs, &[], &[], 0.0, 0.0, 800.0));
+        let bx = boxes(layout_block(&inputs, &[], &[], &[], 0.0, 0.0, 800.0));
         assert_eq!(bx[0].w, 300.0); // wrapper widened to the caption
         assert_eq!(bx[0].h, 44.0);
         // the grid keeps its own width — cells are NOT stretched to the caption
@@ -2706,7 +2890,7 @@ mod tests {
             rowel(2.0, 0),                     // 2 tr
             cell(3.0, 2, 40.0, 20.0, 0, 1, 1), // 3 td
         ];
-        let bx = boxes(layout_block(&inputs, &[], &[], 0.0, 0.0, 800.0));
+        let bx = boxes(layout_block(&inputs, &[], &[], &[], 0.0, 0.0, 800.0));
         // wrapper: width = grid border box (40 + 2*10) unioned with the caption (60) = 60 ; height = grid 20 +
         // caption 16 + edges 20 = 56
         assert_eq!([bx[0].w, bx[0].h], [60.0, 56.0]);
@@ -2729,7 +2913,7 @@ mod tests {
             rowel(2.0, 0),
             cell(3.0, 2, 40.0, 20.0, 0, 1, 1), // 3 td
         ];
-        let bx = boxes(layout_block(&inputs, &[], &[], 0.0, 0.0, 800.0));
+        let bx = boxes(layout_block(&inputs, &[], &[], &[], 0.0, 0.0, 800.0));
         assert_eq!([bx[3].x, bx[3].y], [10.0, 10.0]); // grid at the top, inside the border (no top caption)
         assert_eq!([bx[1].x, bx[1].y], [0.0, 40.0]); // caption below the bottom border: bt(10)+grid_h(20)+bb(10)
     }
@@ -2750,7 +2934,7 @@ mod tests {
             rowel(2.0, 0),
             cell(3.0, 2, 280.0, 20.0, 0, 1, 1), // 3 td filling the floored content box (300 - 2*10)
         ];
-        let bx = boxes(layout_block(&inputs, &[], &[], 0.0, 0.0, 800.0));
+        let bx = boxes(layout_block(&inputs, &[], &[], &[], 0.0, 0.0, 800.0));
         assert_eq!(bx[0].w, 300.0); // NOT 320 — the caption border box IS the wrapper, the border is not re-added
         assert_eq!([bx[1].x, bx[1].w], [0.0, 300.0]);
         assert_eq!([bx[3].x, bx[3].w], [10.0, 280.0]);

@@ -115,4 +115,71 @@ RSpec.describe 'native layout grid parity', if: ENV.fetch('CSIM_JS_ENGINE', 'v8'
   it 'declines a sticky inline-grid flex item' do
     expect_bail('<div style="display:flex;width:300px"><div style="display:inline-grid;position:sticky;grid-template-columns:50px"><span>a</span></div></div>')
   end
+
+  # ── Native COMPUTE path (Phase 1a) ──────────────────────────────────────────────────────────────────────
+  # measure_grid sizes the columns itself (fixed / % / plain fr) from the marshalled template + gaps, runs the
+  # row-major placement, and lays each item out at its track width (rows are content-height) — NO replay of the
+  # oracle's item boxes. A grid outside this subset (intrinsic tracks, out-of-flow items, rtl, …) still parity-
+  # matches via the replay fallback, covered above.
+  describe 'native column-track compute' do
+    it 'matches fixed-px columns' do
+      expect_parity('<div style="display:grid;grid-template-columns:100px 100px;width:300px"><div style="height:20px">a</div><div style="height:30px">b</div></div>')
+    end
+    it 'matches fr columns splitting the free space' do
+      expect_parity('<div style="display:grid;grid-template-columns:1fr 1fr;width:300px"><div style="height:20px">a</div><div style="height:30px">b</div></div>')
+    end
+    it 'matches a fixed column beside an fr column' do
+      expect_parity('<div style="display:grid;grid-template-columns:200px 1fr;width:500px"><div style="height:20px">a</div><div style="height:30px">b</div></div>')
+    end
+    it 'matches weighted fr columns' do
+      expect_parity('<div style="display:grid;grid-template-columns:1fr 2fr;gap:8px;width:320px"><div style="height:20px">a</div><div style="height:30px">b</div></div>')
+    end
+    it 'matches percentage columns' do
+      expect_parity('<div style="display:grid;grid-template-columns:25% 75%;width:400px"><div style="height:20px">a</div><div style="height:30px">b</div></div>')
+    end
+    it 'matches three columns wrapping to a second row with independent row/column gaps' do
+      expect_parity('<div style="display:grid;grid-template-columns:80px 80px 80px;gap:10px 20px;width:280px"><div style="height:20px">1</div><div style="height:40px">2</div><div style="height:15px">3</div><div style="height:30px">4</div></div>')
+    end
+    it 'matches a spanning item (grid-column: span 2)' do
+      expect_parity('<div style="display:grid;grid-template-columns:60px 60px 60px;gap:10px;width:200px"><div style="grid-column:span 2;height:20px">wide</div><div style="height:20px">c</div><div style="height:25px">d</div></div>')
+    end
+    it 'matches an explicit column-start placement' do
+      expect_parity('<div style="display:grid;grid-template-columns:50px 50px 50px;width:150px"><div style="grid-column-start:2;height:20px">b</div><div style="height:30px">c</div></div>')
+    end
+    it 'matches repeat() fr columns' do
+      expect_parity('<div style="display:grid;grid-template-columns:repeat(3,1fr);gap:8px;width:320px"><div style="height:20px">1</div><div style="height:30px">2</div><div style="height:15px">3</div></div>')
+    end
+    it 'matches repeat(auto-fill) fixed columns' do
+      expect_parity('<div style="display:grid;grid-template-columns:repeat(auto-fill,80px);gap:10px;width:300px"><div style="height:20px">1</div><div style="height:20px">2</div><div style="height:20px">3</div></div>')
+    end
+    it 'matches item margins pulled out of the track' do
+      expect_parity('<div style="display:grid;grid-template-columns:100px 100px;width:200px"><div style="height:20px;margin:5px 8px">a</div><div style="height:30px">b</div></div>')
+    end
+    it 'matches a declared container height' do
+      expect_parity('<div style="display:grid;grid-template-columns:1fr 1fr;width:300px;height:100px"><div>a</div><div>b</div></div>')
+    end
+    it 'matches a text-block item sized to its track width (content height)' do
+      expect_parity('<div style="display:grid;grid-template-columns:120px 1fr;width:400px"><div>The quick brown fox jumps over the lazy dog repeatedly today</div><div style="height:20px">side</div></div>')
+    end
+    it 'matches a grid with its own padding and border' do
+      expect_parity('<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;width:300px;padding:15px;border:2px solid"><div style="height:20px">a</div><div style="height:30px">b</div></div>')
+    end
+    it 'matches an empty grid (container box from edges only)' do
+      expect_parity('<div style="display:grid;grid-template-columns:1fr 1fr;width:300px;padding:12px"></div>')
+    end
+    it 'matches a border-box item narrower than its own padding (width floored at edges)' do
+      expect_parity('<div style="display:grid;grid-template-columns:20px 1fr;width:300px"><div style="box-sizing:border-box;padding:40px">a</div><div style="height:10px">b</div></div>')
+    end
+    it 'matches horizontal % padding on an explicitly-sized grid (resolved against cbW by both)' do
+      expect_parity('<div style="display:grid;grid-template-columns:1fr 1fr;width:200px;padding:0 10%"><div style="height:20px">a</div><div style="height:30px">b</div></div>')
+    end
+    it 'matches % vertical padding when the grid width equals its containing block' do
+      expect_parity('<div style="width:200px"><div style="display:grid;grid-template-columns:1fr 1fr;padding:10% 0"><div style="height:20px">a</div><div style="height:30px">b</div></div></div>')
+    end
+    # % VERTICAL padding on an explicitly-sized grid (width ≠ cbW): the oracle resolves the grid's own top/bottom
+    # % padding against box.width for its auto-height, native's edges against cbW — they diverge, so decline.
+    it 'declines % vertical padding on a grid whose width differs from its containing block' do
+      expect_bail('<div style="display:grid;grid-template-columns:1fr 1fr;width:200px;padding:20% 0"><div style="height:20px">a</div><div style="height:30px">b</div></div>')
+    end
+  end
 end
