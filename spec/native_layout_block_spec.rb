@@ -218,6 +218,12 @@ RSpec.describe 'native layout L1 block-flow parity', if: ENV.fetch('CSIM_JS_ENGI
   it 'declines a preserve white-space mixed block' do
     expect_bail('<div style="width:300px;white-space:pre">text<div style="height:20px">block</div>more</div>')
   end
+  # Whitespace-only direct text between a preserve block's block children is line content (the oracle lays out
+  # a line box for it), which a plain block-container record drops — decline (review finding, Phase 2b).
+  it 'declines a preserve block container holding whitespace-only text beside its block children' do
+    expect_bail(%(<div style="width:300px;white-space:pre-wrap"><div style="height:5px"></div>\n    <div style="height:5px"></div></div>))
+    expect_bail(%(<div style="width:300px;white-space:pre">    <div style="height:5px"></div></div>))
+  end
 
   # A text node holding only a no-break space (or another non-CSS space) is CONTENT: it makes a line box the
   # oracle counts, so the walk must not drop it as white space (`String#trim` strips U+00A0).

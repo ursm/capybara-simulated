@@ -244,6 +244,7 @@ RSpec.describe 'native layout grid parity', if: ENV.fetch('CSIM_JS_ENGINE', 'v8'
   # column a track sizes to is only right when the measure is.
   describe 'native intrinsic measurement' do
     let(:two_auto) { 'display:grid;grid-template-columns:auto auto;width:600px' }
+    let(:mc_auto) { 'display:grid;grid-template-columns:max-content auto;width:600px' }
 
     it 'measures a text item (auto columns: min-content floor, max-content ceiling)' do
       expect_native_intrinsic(%(<div style="#{two_auto}"><div style="height:20px">short</div><div style="height:30px">a much longer cell here</div></div>))
@@ -324,20 +325,42 @@ RSpec.describe 'native layout grid parity', if: ENV.fetch('CSIM_JS_ENGINE', 'v8'
       expect_resolved_fallback(%(<div style="#{two_auto}"><div style="width:50%;height:10px">pct width</div><div style="height:10px">b</div></div>))
       expect_resolved_fallback(%(<div style="#{two_auto}"><div style="min-width:50%;height:10px">pct min</div><div style="height:10px">b</div></div>))
     end
-    it 'falls back for a nowrap block container (the oracle pins the whole box, children included)' do
+    it 'falls back for a nowrap / pre block container (the oracle pins the whole box, children included)' do
       expect_resolved_fallback(%(<div style="#{two_auto}"><div style="white-space:nowrap"><p style="margin:0">block child under nowrap</p></div><div style="height:10px">b</div></div>))
+      expect_resolved_fallback(%(<div style="#{two_auto}"><div style="white-space:pre"><p style="margin:0">block child under pre</p></div><div style="height:10px">b</div></div>))
     end
-    it 'falls back for an atomic inline, an edged inline, and a float in the content' do
+    it 'puts an edged inline\'s open / close edges on the line and in the word, taking the pending space at its open' do
+      expect_native_intrinsic(%(<div style="#{mc_auto}"><div>with <span style="padding:0 8px">padded span</span> here</div><div>b</div></div>))
+      expect_native_intrinsic(%(<div style="#{mc_auto}"><div>aa <span style="margin:0 3px;border:1px solid">bb</span>cc</div><div>b</div></div>))
+      expect_native_intrinsic(%(<div style="#{mc_auto}"><div>aa<span style="padding-right:8px"> bb</span> cc</div><div>b</div></div>))
+      expect_native_intrinsic(%(<div style="#{mc_auto}"><div>aa <span style="padding:0 4px"><span style="padding:0 2px">deep</span> x</span></div><div>b</div></div>))
+      expect_native_intrinsic(%(<div style="#{mc_auto}"><div style="white-space:nowrap">aa <span style="padding:0 5px">bb</span> cc</div><div>b</div></div>))
+      # "any edge" is decided by the same open+close float sum in both engines (sub-pixel cancelling margins)
+      expect_native_intrinsic(%(<div style="#{mc_auto}"><div>aa <span style="margin-left:-1px;padding-right:0.7px;margin-right:0.3px"> bb</span> cc</div><div>b</div></div>))
+      expect_native_intrinsic(%(<div style="#{mc_auto}"><div>aa <span style="margin-left:5px;margin-right:-5px"> bb</span> cc</div><div>b</div></div>))
+    end
+    it 'breaks between characters for the min-content under break-all / anywhere, not break-word (unspaced advances)' do
+      expect_native_intrinsic(%(<div style="#{mc_auto}"><div style="word-break:break-all">breakallword here</div><div>b</div></div>))
+      expect_native_intrinsic(%(<div style="#{mc_auto}"><div style="overflow-wrap:anywhere">anywhereword here</div><div>b</div></div>))
+      expect_native_intrinsic(%(<div style="#{mc_auto}"><div style="overflow-wrap:break-word">breakword words here</div><div>b</div></div>))
+      expect_native_intrinsic(%(<div style="#{mc_auto}"><div style="word-break:break-all;letter-spacing:3px;word-spacing:4px">spaced break all</div><div>b</div></div>))
+    end
+    it 'measures preserved white-space (pre / pre-wrap: spaces are content, a newline ends the line) and pre-line' do
+      expect_native_intrinsic(%(<div style="#{mc_auto}"><div style="white-space:pre">pre   spaced\nsecond longer line   </div><div>b</div></div>))
+      expect_native_intrinsic(%(<div style="#{mc_auto}"><div style="white-space:pre-wrap">  wrap   spaced\nsecond longer line   </div><div>b</div></div>))
+      expect_native_intrinsic(%(<div style="#{mc_auto}"><div style="white-space:pre-wrap">aa <span style="padding:0 5px">bb</span>   cc</div><div>b</div></div>))
+      expect_native_intrinsic(%(<div style="#{mc_auto}"><div style="white-space:pre-line">aa bb\ncc dd ee\n\nff</div><div>b</div></div>))
+    end
+    it 'packs floats on a line inside a block-container item (max sums, min stands alone)' do
+      expect_native_intrinsic(%(<div style="#{two_auto}"><div><div style="float:left;width:40px;height:10px"></div><div style="float:left;width:70px;height:10px;margin:0 5px"></div><p style="margin:0">beside floats</p></div><div>b</div></div>))
+      expect_native_intrinsic(%(<div style="#{two_auto}"><div><div style="float:left;width:40px;height:10px"></div><div style="float:right;width:70px;height:10px"></div></div><div>b</div></div>))
+    end
+    it 'falls back for an atomic inline (its box is replayed, not measured)' do
       expect_resolved_fallback(%(<div style="#{two_auto}"><div><span style="display:inline-block;width:80px;height:10px"></span> after</div><div style="height:10px">b</div></div>))
-      expect_resolved_fallback(%(<div style="#{two_auto}"><div>with <span style="padding:0 8px">padded span</span> here</div><div style="height:10px">b</div></div>))
-      expect_resolved_fallback(%(<div style="#{two_auto}"><div><div style="float:left;width:40px;height:10px"></div><p style="margin:0">beside a float</p></div><div style="height:10px">b</div></div>))
     end
-    it 'falls back for a flex / grid item, in-word breaking, and preserved white-space' do
+    it 'falls back for a flex / grid item' do
       expect_resolved_fallback(%(<div style="#{two_auto}"><div style="display:flex"><div style="width:40px;height:10px"></div><div style="width:60px;height:10px"></div></div><div style="height:10px">b</div></div>))
       expect_resolved_fallback(%(<div style="#{two_auto}"><div style="display:grid;grid-template-columns:auto auto"><div>nested grid words</div><div>x</div></div><div style="height:10px">b</div></div>))
-      expect_resolved_fallback(%(<div style="#{two_auto}"><div style="word-break:break-all">breakallword here</div><div style="height:10px">b</div></div>))
-      expect_resolved_fallback(%(<div style="#{two_auto}"><div style="overflow-wrap:anywhere">anywhereword here</div><div style="height:10px">b</div></div>))
-      expect_resolved_fallback(%(<div style="#{two_auto}"><div style="white-space:pre">pre   spaced\nsecond</div><div style="height:10px">b</div></div>))
     end
   end
 end

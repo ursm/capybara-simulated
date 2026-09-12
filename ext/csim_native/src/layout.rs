@@ -524,7 +524,8 @@ fn line_layout(
                         // WIDER THAN THE BAND may break between characters (a word that fits the band stays atomic
                         // and takes the normal path below, so it only ever soft-wraps as a whole). `wrap_mode` rides
                         // the run's otherwise-unused `metric` slot: 1 = break-all (fill the current line), 2 =
-                        // break-word/anywhere (the over-long word moves to a FRESH line first, then breaks). Wide
+                        // break-word / 3 = anywhere (the over-long word moves to a FRESH line first, then breaks —
+                        // alike in the flow; they differ only for the min-content measure, `text_intrinsic`). Wide
                         // chars and hyphens are declined upstream, so this is the Latin per-character case the
                         // oracle's `charUnits` produces (one unit per code point, each measured on its own).
                         let wrap_mode = run.metric as u8;
@@ -536,7 +537,7 @@ fn line_layout(
                             // break-word / anywhere first move the word to a fresh line where that opportunity sits —
                             // exactly the normal break-before condition, which the over-long word always satisfies.
                             // break-all takes no fresh line: it fills the current line in place.
-                            if wrap_mode == 2 && line_has_content && preceded {
+                            if wrap_mode >= 2 && line_has_content && preceded {
                                 soft_break!();
                             }
                             let mut u = start;
@@ -1961,8 +1962,9 @@ fn grid_column_content(
 // box, for min and max alike; then the box's own edges add on and its min/max-width clamp the contribution
 // (border-box per `box-sizing`, min winning over max). The record's edges and widths are its cbW-resolved used
 // values, which equal the basis-less intrinsic read only when nothing is a percentage — the JS gate
-// (`nlIntrinsicMeasurable`) guarantees that, so no basis appears here. `None` for what this slice doesn't
-// measure: an out-of-flow-free block holding a float, a flex / table / replayed grid, an unmodelled run.
+// (`nlIntrinsicMeasurable`) guarantees that, so no basis appears here. Floats pack on a line inside a block
+// container as inline boxes would. `None` for what isn't measured: a flex / table / replayed grid, an atomic
+// inline, an unmodelled run.
 fn intrinsic_widths(i: usize, inputs: &[Input], runs: &[Run], run_texts: &[Option<Vec<u16>>], children: &[Vec<usize>]) -> Option<(f64, f64)> {
     let n = inputs[i];
     let extra = n.edges_x();
@@ -1980,21 +1982,29 @@ fn intrinsic_widths(i: usize, inputs: &[Input], runs: &[Run], run_texts: &[Optio
             }
             DISPLAY_BLOCK => {
                 let (mut min, mut max) = (0.0f64, 0.0f64);
+                let mut line = 0.0f64; // floats pack beside each other on a line, as inline boxes would
                 for &c in &children[i] {
                     let k = inputs[c];
                     if k.out_of_flow != 0 {
                         continue; // out of flow: sizes nothing
                     }
-                    if k.float_kind != 0 {
-                        return None; // a float packs on the line like an inline box — not modelled here
-                    }
-                    // A block-level child contributes its MARGIN box (a negative margin narrows it; auto is 0).
+                    // Each child contributes its MARGIN box (a negative margin narrows it; auto is 0).
                     let (cmin, cmax) = intrinsic_widths(c, inputs, runs, run_texts, children)?;
                     let m = Input::m(k.ml) + Input::m(k.mr);
+                    if k.float_kind != 0 {
+                        // A FLOAT packs beside its neighbours like an inline-level box: its max-content joins the
+                        // line, its min-content stands alone (the oracle's float arm — no line end).
+                        line += cmax + m;
+                        min = min.max(cmin + m);
+                        continue;
+                    }
+                    // A block-level child ends the line the floats were packing, then contributes on its own.
+                    max = max.max(line);
+                    line = 0.0;
                     min = min.max(cmin + m);
                     max = max.max(cmax + m);
                 }
-                (min, max)
+                (min, max.max(line))
             }
             _ => return None,
         }
@@ -2009,18 +2019,27 @@ fn intrinsic_widths(i: usize, inputs: &[Input], runs: &[Run], run_texts: &[Optio
 // The (min-content, max-content) widths of a text block's inline content — the oracle's `contentIntrinsicWidths`
 // pen-walk over the same run stream `line_layout` lays out. ONE pen runs along the line: `line` is the width the
 // content reaches with no soft wrap (the widest line is the MAX-content), `word` the unbreakable run since the
-// last break opportunity, across run boundaries (the widest is the MIN-content); a `<br>` ends the line. Under a
-// collapsing mode a run of white space is one space, content only once something follows it on the line — a
-// leading one at line start is nothing, a trailing one hangs pending until the next word takes it (the LAST
-// pending run's space width wins, as the oracle overwrites it) — and, when the mode wraps, a break opportunity.
-// `nowrap` (1) never breaks: its spaces join the word and its min-content IS its max-content. `<wbr>` is a bare
-// opportunity. Modelled: `normal` / `nowrap` text and `<br>` / `<wbr>`; `None` for an inline edge (OPEN /
-// CLOSE), an atomic, a preserve / pre-line mode, or a run breaking inside words (`wrap_mode`) — the oracle
-// measures those differently (later slices).
+// last break opportunity, across run boundaries (the widest is the MIN-content); a `<br>` or a preserved newline
+// ends the line. Under a COLLAPSING mode (normal / nowrap / pre-line) a run of white space is one space, content
+// only once something follows it on the line — a leading one at line start is nothing, a trailing one hangs
+// pending until the next word takes it (the LAST pending run's space width wins, as the oracle overwrites it) —
+// and, when the mode wraps, a break opportunity; pre-line's newlines end the line. Under a PRESERVING mode (pre /
+// pre-wrap) every space is content on the line, an opportunity only when the mode wraps. A mode that never wraps
+// (nowrap / pre) pins the min-content to the max-content. An inline element's EDGES (OPEN / CLOSE) are content
+// on the line and in the word — and an inline with any edge takes the pending space at its open (the oracle
+// reads its close edge there too). `<wbr>` is a bare opportunity. A run under `word-break: break-all` /
+// `overflow-wrap: anywhere` (wrap mode 1 / 3) breaks between ANY two characters for the min-content: each
+// character's UNSPACED advance is a unit of its own (the oracle's `charAdvances` — letter/word-spacing is left
+// out of both figures there); `break-word` (2) leaves the measure alone. `None` for an atomic inline (its
+// intrinsic box is not in the stream), a tab / other control, a wide character, or a ZWJ under per-character
+// breaking (the oracle's per-character advance carries the previous character).
 fn text_intrinsic(runs: &[Run], run_texts: &[Option<Vec<u16>>], ws_mode: u8) -> Option<(f64, f64)> {
-    let wraps = match ws_mode {
-        0 => true,
-        1 => false,
+    let (wraps, preserve, break_nl, pin) = match ws_mode {
+        0 => (true, false, false, false),
+        1 => (false, false, false, true),
+        2 => (false, true, true, true),
+        3 => (true, true, true, false),
+        4 => (true, false, true, false),
         _ => return None,
     };
     let (mut min, mut max) = (0.0f64, 0.0f64);
@@ -2066,24 +2085,74 @@ fn text_intrinsic(runs: &[Run], run_texts: &[Option<Vec<u16>>], ws_mode: u8) -> 
         match run.kind {
             RUN_BR => end_line!(),
             RUN_WBR => opportunity!(),
-            RUN_TEXT => {
-                if run.metric as u8 != 0 {
-                    return None; // break-all / break-word / anywhere: min-content may break inside a word
+            RUN_OPEN => {
+                // The matching CLOSE (LIFO) — an inline with ANY horizontal edge takes the pending space at its open.
+                let mut depth = 0i32;
+                let mut close = None;
+                for r in &runs[ri + 1..] {
+                    match r.kind {
+                        RUN_OPEN => depth += 1,
+                        RUN_CLOSE if depth == 0 => {
+                            close = Some(r.metric);
+                            break;
+                        }
+                        RUN_CLOSE => depth -= 1,
+                        _ => {}
+                    }
                 }
+                if run.metric + close? != 0.0 {
+                    take_pending!();
+                }
+                line += run.metric;
+                word += run.metric;
+            }
+            RUN_CLOSE => {
+                line += run.metric;
+                word += run.metric;
+            }
+            RUN_TEXT => {
+                let per_char = matches!(run.metric as u8, 1 | 3);
                 let text = run_texts.get(ri).and_then(|t| t.as_ref())?;
-                if text.iter().any(|&u| is_wide_unit(u)) {
+                if text.iter().any(|&u| is_wide_unit(u) || (per_char && u == 0x200D)) {
                     return None;
                 }
                 let space_w = measure_word(run, &[0x20])?;
+                let unspaced = Run { ls: 0.0, ws: 0.0, ..*run };
                 let mut i = 0;
                 while i < text.len() {
                     if is_ws_u16(text[i]) {
+                        let start = i;
+                        let mut nl = 0u32;
                         while i < text.len() && is_ws_u16(text[i]) {
+                            if text[i] == 0x0A {
+                                nl += 1;
+                            } else if text[i] != 0x20 {
+                                return None; // a tab (tab stops) / \r / \f — not modelled
+                            }
                             i += 1;
                         }
-                        // A collapsed space: pending after content on the line, nothing at line start (an
-                        // opportunity either way when the mode wraps — a no-op at line start, the word is empty).
-                        if inline_on_line {
+                        if preserve {
+                            // Every space is content on the line (an opportunity, when the mode wraps, before it —
+                            // the oracle's order), and each newline ends the line where it sits.
+                            for &u in &text[start..i] {
+                                if u == 0x0A {
+                                    end_line!();
+                                } else {
+                                    if wraps {
+                                        opportunity!();
+                                    } else {
+                                        word += space_w;
+                                    }
+                                    line += space_w;
+                                }
+                            }
+                        } else if break_nl && nl > 0 {
+                            for _ in 0..nl {
+                                end_line!(); // pre-line: a newline is a line end, the spaces around it collapse away
+                            }
+                        } else if inline_on_line {
+                            // A collapsed space: pending after content on the line, nothing at line start (an
+                            // opportunity either way when the mode wraps — a no-op at line start, the word is empty).
                             pend!(space_w);
                         } else if wraps {
                             opportunity!();
@@ -2093,22 +2162,35 @@ fn text_intrinsic(runs: &[Run], run_texts: &[Option<Vec<u16>>], ws_mode: u8) -> 
                         while i < text.len() && !is_ws_u16(text[i]) {
                             i += 1;
                         }
-                        let w = measure_word(run, &text[start..i])?;
                         // A word takes the pending space ONCE — the one before it in this run, or an earlier run's
                         // trailing space (a word glued to the previous run, nothing pending, continues that word).
                         take_pending!();
-                        line += w;
-                        word += w;
+                        if per_char {
+                            let mut u = start;
+                            while u < i {
+                                let ulen = if (0xD800u16..=0xDBFF).contains(&text[u]) && u + 1 < i { 2 } else { 1 };
+                                let adv = measure_word(&unspaced, &text[u..u + ulen])?;
+                                opportunity!();
+                                line += adv;
+                                word += adv;
+                                opportunity!();
+                                u += ulen;
+                            }
+                        } else {
+                            let w = measure_word(run, &text[start..i])?;
+                            line += w;
+                            word += w;
+                        }
                         inline_on_line = true;
                     }
                 }
             }
-            _ => return None, // OPEN / CLOSE / ATOMIC — not measured here yet
+            _ => return None, // ATOMIC — its intrinsic box is not in the stream
         }
     }
     max = max.max(line); // the last line closes without a reset
     min = min.max(word);
-    if !wraps {
+    if pin {
         min = max;
     }
     Some((min.max(0.0), max.max(0.0)))
