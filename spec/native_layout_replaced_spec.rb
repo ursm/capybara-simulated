@@ -62,6 +62,17 @@ RSpec.describe 'native layout replaced-leaf parity', if: ENV.fetch('CSIM_JS_ENGI
     expect_parity('<div style="width:300px"><svg width="40" height="30" style="display:block;border:3px solid;padding:5px"></svg></div>')
   end
 
+  # A block svg with INTERNAL content (<path>/<g>/…): SVG paints its subtree through the SVG model, not the CSS
+  # box model — the oracle stamps a degenerate _lb on those descendants, but they must NOT make the svg a
+  # non-leaf (native would otherwise lay them out as CSS boxes and mismatch). A sized svg is always a leaf; native
+  # replays its viewBox-sized box and emits no subtree. (This icon-with-a-path shape is pervasive in real apps.)
+  it 'matches a block svg with internal path/g content (leaf — svg descendants are painted, not laid out)' do
+    expect_parity('<div style="width:200px"><svg viewBox="0 0 24 24" style="height:16px;display:block"><path d="M4 4h16v16H4z"/><g><circle cx="5" cy="5" r="2"/></g></svg></div>')
+  end
+  it 'matches a flex-item svg icon with internal content (leaf)' do
+    expect_parity('<div style="display:flex;align-items:center;width:200px"><svg viewBox="0 0 20 20" style="height:16px"><path d="M0 0h20v20z"/></svg><div style="width:40px;height:16px"></div></div>')
+  end
+
   # STILL DECLINES.
   it 'lays out an INLINE svg in a block (atomic inline — see native_layout_inline_atomic_spec)' do
     expect_parity('<div style="width:300px">text <svg width="16" height="16"></svg> more</div>')
