@@ -63,8 +63,12 @@ RSpec.describe 'native layout bail coverage', if: ENV.fetch('CSIM_JS_ENGINE', 'v
     expect(native?('<div style="width:90px">well known example text</div>')).to be true
   end
 
-  it 'declines overflow-wrap in-word breaking, keeps normal wrapping' do
-    expect(native?('<div style="width:50px;overflow-wrap:break-word">supercalifragilistic</div>')).to be false
-    expect(native?('<div style="width:200px">normal wrapping words here</div>')).to be true
+  it 'lays out Latin in-word breaking natively, declines the hyphen/CJK cases it cannot reproduce' do
+    # overflow-wrap / word-break break a Latin word between characters natively (parity in the text spec)…
+    expect(native?('<div style="width:50px;overflow-wrap:break-word">supercalifragilistic</div>')).to be true
+    # …but a hyphen is still a break opportunity the native breaker does not model, and a wide/CJK character
+    # breaks between characters in a way it declines — both bail even under break-word / break-all.
+    expect(native?('<div style="width:50px;overflow-wrap:break-word">super-cali-fragilistic</div>')).to be false
+    expect(native?('<div style="width:50px;word-break:break-all">日本語のテキストです</div>')).to be false
   end
 end

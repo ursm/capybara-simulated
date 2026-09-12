@@ -202,6 +202,9 @@ pub(crate) const RUN_BR: u8 = 3;
 // is its margin-box width (advance), `asc` its ascent above the line baseline, `line_height` its full
 // margin-box height (asc + descent). Placed like an unbreakable word; grows the line box by asc / descent.
 pub(crate) const RUN_ATOMIC: u8 = 4;
+// A `<wbr>`: a zero-width soft-wrap opportunity carrying no metrics — it only lets the next word break
+// before it (modelled as a width-0 collapsed space), and its presence keeps the flanking text runs distinct.
+pub(crate) const RUN_WBR: u8 = 5;
 
 // One item of a text block's inline stream. For TEXT: font/size/ls/ws/line_height measure its words,
 // and `asc` is the run's ascent within its line box (baselineWithin its owner) — its descent is
@@ -396,9 +399,11 @@ fn line_layout(
     // wrap before it. (The BEFORE-side break is unconditional in the RUN_ATOMIC arm itself.) Reset on any word
     // placement and at a line break.
     let mut atomic_break = false;
-    // Close the current line and start a fresh one (a <br>, a preserved/pre-line newline, or the bare strut of
-    // an empty line). Captures the surrounding mutable line state.
-    macro_rules! break_line {
+    // Close the current line and start a fresh one. `soft_break!` is the geometry alone (a mid-word wrap, a
+    // between-words wrap, a break before an atomic — where no pending space or after-atomic break carries over);
+    // `break_line!` adds the resets a HARD break needs (a <br>, a preserved/pre-line newline, an empty line's
+    // bare strut) so a queued space / atomic opportunity does not survive it. Capture the surrounding line state.
+    macro_rules! soft_break {
         () => {{
             total += line_asc + line_desc;
             n += 1;
@@ -406,6 +411,11 @@ fn line_layout(
             line_asc = strut_asc;
             line_desc = strut_desc;
             line_has_content = false;
+        }};
+    }
+    macro_rules! break_line {
+        () => {{
+            soft_break!();
             pending_space = None;
             atomic_break = false;
         }};
@@ -483,7 +493,8 @@ fn line_layout(
                         while i < text.len() && !is_ws_u16(text[i]) {
                             i += 1;
                         }
-                        let width = measure_word(run, &text[start..i])?;
+                        let word = &text[start..i];
+                        let width = measure_word(run, word)?;
                         let (space_before, sw) = match pending_space.take() {
                             Some(s) => (true, s),
                             None => (false, 0.0),
@@ -498,40 +509,92 @@ fn line_layout(
                         if space_before && line_has_content {
                             line_x += sw; // hanging space
                         }
-                        let ow: f64 = open.iter().filter(|o| !o.1).map(|o| o.0).sum();
-                        // A break opportunity precedes this word at a collapsed space OR right after an atomic —
-                        // but `white-space: nowrap` never SOFT-wraps (only <br>), so the line grows past the band.
-                        if !no_wrap && line_has_content && (space_before || atomic_break) && line_x + ow + width > band_w(total) {
-                            total += line_asc + line_desc; // break: close the line (the hanging space is dropped)
-                            n += 1;
-                            line_x = 0.0;
-                            line_asc = strut_asc;
-                            line_desc = strut_desc;
-                            line_has_content = false; // fresh line — its first word may still need to drop below a float
-                        }
-                        // An empty line whose first word won't fit the band drops below the float squeezing
-                        // it (§9.5, "if a shortened line box is too small…"), growing the block by the gap. A
-                        // `nowrap` line is NOT shortened by a float and never drops — it overlaps it on one line
-                        // (the oracle does no float handling for a nowrap block), so skip this too.
-                        if !no_wrap && !floats.is_empty() && !line_has_content && width + ow > band_w(total) {
-                            let fy = top + total;
-                            let at = float_fit_y(floats, fy, width + ow, cl, cr, strut_lh);
-                            if at > fy {
-                                total += at - fy;
+                        // IN-WORD BREAKING (`overflow-wrap: break-word|anywhere` / `word-break: break-all`): a word
+                        // WIDER THAN THE BAND may break between characters (a word that fits the band stays atomic
+                        // and takes the normal path below, so it only ever soft-wraps as a whole). `wrap_mode` rides
+                        // the run's otherwise-unused `metric` slot: 1 = break-all (fill the current line), 2 =
+                        // break-word/anywhere (the over-long word moves to a FRESH line first, then breaks). Wide
+                        // chars and hyphens are declined upstream, so this is the Latin per-character case the
+                        // oracle's `charUnits` produces (one unit per code point, each measured on its own).
+                        let wrap_mode = run.metric as u8;
+                        if !no_wrap && wrap_mode != 0 && width > band_w(total) {
+                            // The over-long word's break opportunity before it (a space / atomic) is what `first`
+                            // and the loop's fit tests act on; capture it before the fresh-line break clears the
+                            // line, so `atomic_break` need only be consumed once, after the word is placed.
+                            let preceded = space_before || atomic_break;
+                            // break-word / anywhere first move the word to a fresh line where that opportunity sits —
+                            // exactly the normal break-before condition, which the over-long word always satisfies.
+                            // break-all takes no fresh line: it fills the current line in place.
+                            if wrap_mode == 2 && line_has_content && preceded {
+                                soft_break!();
                             }
-                        }
-                        // Flush the still-open edges onto this line (once), then place the word.
-                        for o in open.iter_mut() {
-                            if !o.1 {
-                                line_x += o.0;
-                                o.1 = true;
+                            let mut u = start;
+                            let mut first = true;
+                            while u < i {
+                                // One code point per unit (a surrogate pair stays together).
+                                let ulen = if (0xD800u16..=0xDBFF).contains(&text[u]) && u + 1 < i { 2 } else { 1 };
+                                let cw = measure_word(run, &text[u..u + ulen])?;
+                                let ow_now: f64 = open.iter().filter(|o| !o.1).map(|o| o.0).sum();
+                                // A unit boundary is always an opportunity (`u > start`); the first unit breaks only
+                                // where one already preceded the word (a space / atomic / line start) — the oracle's
+                                // `mayBreak = u > 0 || textMayBreak()`.
+                                let may_break = !first || preceded || !line_has_content;
+                                if line_has_content && may_break && line_x + ow_now + cw > band_w(total) {
+                                    soft_break!();
+                                }
+                                // An empty line still too narrow for even one character drops below the float.
+                                if !floats.is_empty() && !line_has_content && cw + ow_now > band_w(total) {
+                                    let fy = top + total;
+                                    let at = float_fit_y(floats, fy, cw + ow_now, cl, cr, strut_lh);
+                                    if at > fy {
+                                        total += at - fy;
+                                    }
+                                }
+                                for o in open.iter_mut() {
+                                    if !o.1 {
+                                        line_x += o.0;
+                                        o.1 = true;
+                                    }
+                                }
+                                line_x += cw;
+                                line_asc = line_asc.max(run.asc);
+                                line_desc = line_desc.max(run.line_height - run.asc);
+                                line_has_content = true;
+                                first = false;
+                                u += ulen;
                             }
+                            atomic_break = false; // consumed the after-atomic break opportunity
+                        } else {
+                            let ow: f64 = open.iter().filter(|o| !o.1).map(|o| o.0).sum();
+                            // A break opportunity precedes this word at a collapsed space OR right after an atomic —
+                            // but `white-space: nowrap` never SOFT-wraps (only <br>), so the line grows past the band.
+                            if !no_wrap && line_has_content && (space_before || atomic_break) && line_x + ow + width > band_w(total) {
+                                soft_break!(); // break: close the line (the hanging space is dropped)
+                            }
+                            // An empty line whose first word won't fit the band drops below the float squeezing
+                            // it (§9.5, "if a shortened line box is too small…"), growing the block by the gap. A
+                            // `nowrap` line is NOT shortened by a float and never drops — it overlaps it on one line
+                            // (the oracle does no float handling for a nowrap block), so skip this too.
+                            if !no_wrap && !floats.is_empty() && !line_has_content && width + ow > band_w(total) {
+                                let fy = top + total;
+                                let at = float_fit_y(floats, fy, width + ow, cl, cr, strut_lh);
+                                if at > fy {
+                                    total += at - fy;
+                                }
+                            }
+                            // Flush the still-open edges onto this line (once), then place the word.
+                            for o in open.iter_mut() {
+                                if !o.1 {
+                                    line_x += o.0;
+                                    o.1 = true;
+                                }
+                            }
+                            line_x += width;
+                            line_asc = line_asc.max(run.asc);
+                            line_desc = line_desc.max(run.line_height - run.asc);
+                            line_has_content = true;
+                            atomic_break = false; // consumed the after-atomic break opportunity
                         }
-                        line_x += width;
-                        line_asc = line_asc.max(run.asc);
-                        line_desc = line_desc.max(run.line_height - run.asc);
-                        line_has_content = true;
-                        atomic_break = false; // consumed the after-atomic break opportunity
                     }
                 }
             }
@@ -552,12 +615,7 @@ fn line_layout(
                 // An atomic is a break opportunity before it (§ line breaking) — but not under `white-space:
                 // nowrap`, which never soft-wraps.
                 if !no_wrap && line_has_content && line_x + ow + width > band_w(total) {
-                    total += line_asc + line_desc; // break before the atomic (drop any hanging space)
-                    n += 1;
-                    line_x = 0.0;
-                    line_asc = strut_asc;
-                    line_desc = strut_desc;
-                    line_has_content = false;
+                    soft_break!(); // break before the atomic (drop any hanging space)
                 }
                 // A nowrap line is not shortened by / dropped below a float (see the word branch above).
                 if !no_wrap && !floats.is_empty() && !line_has_content && width + ow > band_w(total) {
@@ -578,6 +636,14 @@ fn line_layout(
                 line_desc = line_desc.max(run.line_height - run.asc);
                 line_has_content = true;
                 atomic_break = true; // a break opportunity follows this atomic
+            }
+            RUN_WBR => {
+                // `<wbr>`: a zero-width soft-wrap opportunity — exactly the oracle's `barrier = null`, the same
+                // thing it sets after an atomic inline. So carry it on `atomic_break` (the after-atomic break
+                // flag) rather than the `pending_space` slot: the next box may break before it, yet a collapsible
+                // space that immediately FOLLOWS still installs its own advance (a phantom width-0 pending space
+                // would suppress that space's width). Under `nowrap` the break-before tests ignore the flag.
+                atomic_break = true;
             }
             _ => return None, // unknown run kind
         }

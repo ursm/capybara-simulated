@@ -107,6 +107,81 @@ RSpec.describe 'native layout L2 text-block parity', if: ENV.fetch('CSIM_JS_ENGI
     expect_parity('<div style="width:90px">word H<sub>2222222222222</sub></div>')
   end
 
+  # In-word breaking (overflow-wrap / word-break): a word WIDER than the band breaks between characters. The
+  # oracle's charUnits emits one unit per code point and the flow fills greedily; native reproduces that in
+  # line_layout (wrap_mode on the run). break-word / anywhere move the over-long word to a FRESH line first;
+  # break-all fills the line it is on. A word that FITS the band still wraps as a whole (no in-word break).
+  it 'matches overflow-wrap:break-word breaking a long unbroken word' do
+    expect_parity('<div style="width:120px; overflow-wrap:break-word">see thisisaverylongunbrokenwordthatmustbreak here</div>')
+  end
+  it 'matches word-break:break-all filling each line' do
+    expect_parity('<div style="width:120px; word-break:break-all">The quick brown fox jumps over the lazy dog repeatedly.</div>')
+  end
+  it 'matches overflow-wrap:anywhere breaking a long word' do
+    expect_parity('<div style="width:100px; overflow-wrap:anywhere">prefix supercalifragilisticexpialidocious suffix</div>')
+  end
+  it 'matches word-wrap:break-word (the legacy spelling) on a long URL' do
+    expect_parity('<div style="width:140px; word-wrap:break-word">Visit https://example.com/a/very/long/path/that/keeps/going/onward for details</div>')
+  end
+  # freshLine: break-word puts the whole word on its own line, THEN breaks it there (a leading short word
+  # stays above); break-all has no fresh line and fills the current line — the counts differ, so this pins it.
+  it 'matches break-word starting the over-long word on a fresh line' do
+    expect_parity('<div style="width:110px; overflow-wrap:break-word">a bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb c</div>')
+  end
+  it 'matches break-all with no fresh line for the over-long word' do
+    expect_parity('<div style="width:110px; word-break:break-all">a bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb c</div>')
+  end
+  # A break-anywhere word that FITS the band is atomic — it soft-wraps as a whole, no in-word split.
+  it 'matches a break-word word that fits the band wrapping whole' do
+    expect_parity('<div style="width:200px; overflow-wrap:break-word">alpha bravo charlie delta echo foxtrot golf hotel india</div>')
+  end
+  # The mode is per-run and inherits: only the break-all span breaks inside; the plain span does not.
+  it 'matches a break-all span beside a plain span (per-run mode)' do
+    expect_parity('<div style="width:130px"><span style="word-break:break-all">antidisestablishmentarianism</span> <span>and thennnnnnnnnnnnnnnnnnnn</span></div>')
+  end
+  it 'matches break-word inherited from an ancestor onto a nested span' do
+    expect_parity('<div style="width:120px; overflow-wrap:break-word">lead <span>nestedsuperlongunbreakableword</span> tail</div>')
+  end
+  # white-space:nowrap suppresses ALL soft-wrapping, in-word breaking included — one line even with break-all.
+  it 'matches nowrap + break-all staying on one line' do
+    expect_parity('<div style="width:80px; white-space:nowrap; word-break:break-all">unbreakablelongwordonasingleline plus more</div>')
+  end
+  # pre-wrap preserves whitespace and still soft-wraps, so a long word breaks inside under break-word too.
+  it 'matches pre-wrap + break-word breaking a long word' do
+    expect_parity("<div style=\"width:120px; white-space:pre-wrap; overflow-wrap:break-word\">line one\nthisisaverylongwordunderprewrap end</div>")
+  end
+  # break-word on a nested block element inside a wider container: the run fills the nested block's own width.
+  it 'matches break-word on a nested block element' do
+    expect_parity('<div style="width:180px"><p style="overflow-wrap:break-word">areallylongunbreakableurlwordhere followed by ordinary words wrapping past edge</p></div>')
+  end
+
+  # <wbr> is a zero-width soft-wrap opportunity: it separates the runs it sits between (so they do not merge
+  # into one glued word) and lets the next word break before it. This holds at white-space:normal too — the
+  # native breaker ignored <wbr> entirely before, merging the flanking text and mis-breaking it.
+  it 'matches a <wbr> break opportunity in a long token (normal wrapping)' do
+    expect_parity('<div style="width:70px">aaaaaaaaaa<wbr>bbbbbbbbbb</div>')
+  end
+  it 'matches a <wbr> across a font boundary' do
+    expect_parity('<div style="width:70px">aaaaaaaaaa<wbr><b>bbbbbbbbbb</b></div>')
+  end
+  it 'matches multiple <wbr> break points in a URL' do
+    expect_parity('<div style="width:80px">https://<wbr>example<wbr>.com<wbr>/very<wbr>/long<wbr>/path/onward</div>')
+  end
+  it 'matches a <wbr> inside a break-word block (the over-long-token case)' do
+    expect_parity('<div style="width:70px; overflow-wrap:break-word">aaaaaaaaaa<wbr>bbbbbbbbbbbbbbbbbbbb</div>')
+  end
+  it 'matches a <wbr> just after a real space (space width preserved)' do
+    expect_parity('<div style="width:70px">aaaa <wbr>bbbbbbbbbbbb</div>')
+  end
+  # A <wbr> immediately BEFORE a collapsible space must not swallow that space's advance — the space still
+  # separates the words (width tuned so `aaaabbbb` fits one line but `aaaa bbbb` does not).
+  it 'matches a <wbr> immediately before a collapsible space' do
+    expect_parity('<div style="width:61px">aaaa<wbr> bbbb</div>')
+  end
+  it 'matches a <wbr> suppressed under white-space:nowrap' do
+    expect_parity('<div style="width:60px; white-space:nowrap">aaaaaaaa<wbr>bbbbbbbb ccc</div>')
+  end
+
   it 'matches a larger-font inline run growing the line height' do
     session = simulated_session(page(%(<div style="width:300px">small text <span style="font-size:28px">BIG</span> small again</div>)))
     session.visit '/'
