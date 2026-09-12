@@ -195,6 +195,37 @@ RSpec.describe 'native layout flex parity', if: ENV.fetch('CSIM_JS_ENGINE', 'v8'
     expect_parity('<div style="display:flex;flex-direction:column;flex-wrap:wrap;min-height:200px;width:100px"><div style="width:40px;height:30px"></div><div style="width:40px;height:30px"></div></div>')
   end
 
+  # A flex ITEM that is itself a flex container with an AUTO height + min/max-height: the parent-push overwrites
+  # its height with the final (clamped) box, so native carries the item's autoHeight on rec[54] and recomputes
+  # the box from the container's own content — a min-height FLOOR aligns the items in the pre-floor content
+  # (the Avo `field-wrapper` row), a max-height CAP lets a taller row overflow. Only a box the FLOW made DEFINITE
+  # (stretch / abspos) that a clamp then BINDS still declines (native holds no pre-clamp extent).
+  it 'matches a flex-item row whose min-height floors its content, items centered in the pre-floor content' do
+    expect_parity('<div style="display:flex;width:400px"><div style="display:flex;align-items:center;min-height:80px;flex:1"><div style="width:50px;height:30px"></div></div></div>')
+  end
+  it 'matches a flex-item row whose min-height floors its content, items at flex-end of the pre-floor content' do
+    expect_parity('<div style="display:flex;width:400px"><div style="display:flex;align-items:flex-end;min-height:80px;flex:1"><div style="width:50px;height:30px"></div></div></div>')
+  end
+  it 'matches a flex-item row whose max-height caps the box while its taller content overflows' do
+    expect_parity('<div style="display:flex;width:400px"><div style="display:flex;align-items:center;max-height:20px;flex:1"><div style="width:50px;height:50px"></div></div></div>')
+  end
+  it 'matches a flex-item column whose min-height floors the main extent for justify-content' do
+    expect_parity('<div style="display:flex;width:400px"><div style="display:flex;flex-direction:column;justify-content:space-between;min-height:120px;flex:1"><div style="width:40px;height:20px"></div><div style="width:40px;height:20px"></div></div></div>')
+  end
+  it 'matches a cross-stretched flex-item row with a NON-binding min-height (box on the stretch extent)' do
+    expect_parity('<div style="display:flex;height:200px;width:400px"><div style="display:flex;flex-direction:column;justify-content:space-between;min-height:100px;flex:1"><div style="width:40px;height:20px"></div><div style="width:40px;height:20px"></div></div></div>')
+  end
+  # DECLINES: a box the FLOW made definite (stretch) then a clamp BINDS away from the pre-clamp extent — native
+  # holds only the post-clamp box, so it cannot recover where the items sit. A/B: drop the clamp → native.
+  it 'declines a cross-stretched flex row clamped BELOW the stretch by max-height (items placed against the pre-clamp stretch)' do
+    a_bails_b_native('<div style="display:flex;height:120px;align-items:stretch;width:400px"><div style="display:flex;max-height:80px;align-items:center"><div style="width:50px;height:20px"></div></div></div>',
+                     '<div style="display:flex;height:120px;align-items:stretch;width:400px"><div style="display:flex;align-items:center"><div style="width:50px;height:20px"></div></div></div>')
+  end
+  it 'declines a cross-stretched flex row whose min-height floors ABOVE the stretch (items placed against the smaller stretch)' do
+    a_bails_b_native('<div style="display:flex;height:40px;align-items:stretch;width:400px"><div style="display:flex;min-height:120px;align-items:center"><div style="width:50px;height:20px"></div></div></div>',
+                     '<div style="display:flex;height:40px;align-items:stretch;width:400px"><div style="display:flex;align-items:center"><div style="width:50px;height:20px"></div></div></div>')
+  end
+
   it 'matches percentage vertical padding on a flex container that fills its parent (width == cb, no basis divergence)' do
     expect_parity('<div style="width:400px"><div style="display:flex;padding:10% 5%"><div style="width:50px;height:30px"></div><div style="width:50px;height:40px"></div></div></div>')
   end
@@ -353,7 +384,10 @@ RSpec.describe 'native layout flex parity', if: ENV.fetch('CSIM_JS_ENGINE', 'v8'
   it('declines a nested UNSUPPORTED flex item (wrap-reverse)') { a_bails_b_native('<div style="display:flex;width:400px"><div style="display:flex;flex-wrap:wrap-reverse;width:80px;height:30px"></div><div style="width:80px;height:30px"></div></div>') }
   it('declines a flex container with min-height AND percentage vertical padding (floor edge basis diverges)') { a_bails_b_native('<div style="display:flex;flex-direction:column;min-height:100px;padding-top:10%;width:100px"><div style="width:80px;height:30px"></div></div>', '<div style="display:flex;flex-direction:column;width:100px"><div style="width:80px;height:30px"></div></div>') }
   it('declines a cross-stretched column clamped by max-height (oracle sizes against the pre-clamp room native lacks)') { a_bails_b_native('<div style="display:flex;height:300px;width:400px"><div style="display:flex;flex-direction:column;max-height:100px;row-gap:20%;width:100px"><div style="height:20px"></div><div style="height:30px"></div></div></div>', '<div style="display:flex;height:300px;width:400px"><div style="display:flex;flex-direction:column;row-gap:20%;width:100px"><div style="height:20px"></div><div style="height:30px"></div></div></div>') }
-  it('declines an auto-height min-height ROW that is itself a flex item (item-push collapses its two-phase clamp)') { a_bails_b_native('<div style="display:flex;flex-direction:column;width:300px"><div style="display:flex;align-items:center;min-height:120px;width:200px"><div style="width:50px;height:30px"></div></div></div>', '<div style="display:flex;flex-direction:column;width:300px"><div style="display:flex;align-items:center;width:200px"><div style="width:50px;height:30px"></div></div></div>') }
+  # A flex-ITEM flex ROW whose min-height floors its own (auto) content lays out natively: the item's autoHeight
+  # rides rec[54] past the parent-push, so native recomputes the cross from content and two-phases the clamp —
+  # the child aligns in the PRE-floor content (align-items:center in a 30px content → 0), box grows to min-height.
+  it('matches an auto-height min-height ROW that is itself a flex item (two-phase floor, align in pre-floor content)') { expect_parity('<div style="display:flex;flex-direction:column;width:300px"><div style="display:flex;align-items:center;min-height:120px;width:200px"><div style="width:50px;height:30px"></div></div></div>') }
   # An inline-flex container is an ATOMIC inline in its parent's line — native replays its oracle box (its flex
   # items are covered via the parent), so a block holding one lays out rather than declining.
   it('matches an inline-flex container as an atomic inline') { expect_parity('<div style="display:inline-flex;width:400px"><div style="width:80px;height:30px"></div></div>') }

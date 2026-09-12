@@ -173,6 +173,12 @@ pub(crate) struct Input {
     // `<br>` breaks it. The line grows past the content width; the block's height is the strut (one line, or one
     // per <br>). (pre / pre-wrap / pre-line, which preserve whitespace, still decline in the harness.)
     pub(crate) no_wrap: bool,
+    // A pushed flex ITEM whose OWN height is AUTO (content-derived), carried past the parent-push that
+    // overwrote `height` with the item's final (oracle-clamped) box. When set, `measure_flex` recomputes a
+    // ROW item's cross from its content and two-phases the min/max-height clamp (the items align in the
+    // pre-clamp content, the box floors/caps around them), instead of aligning in the pushed definite box —
+    // reproducing the oracle's auto-height two-phase for a nested min-height flex row (the Avo field-wrapper).
+    pub(crate) item_auto_height: bool,
 }
 
 pub(crate) const CROSS_BASELINE: u8 = 3;
@@ -1205,8 +1211,13 @@ fn measure_flex(
         // align in the clamped cross (definite). An AUTO height is NOT: the items align in the CONTENT cross
         // (the stacked lines), and min/max-height then grows/shrinks the FINAL box around them WITHOUT moving
         // them — so container_cross stays the unclamped content (a min-height:100 app-shell row of a 30px
-        // item keeps the item at the top and grows the box to 100; align-content sees free = 0).
-        if is_auto(n.height) {
+        // item keeps the item at the top and grows the box to 100; align-content sees free = 0). A pushed flex
+        // ITEM whose OWN height is auto reaches here with `height` overwritten by its final (clamped) box, but
+        // `item_auto_height` (rec[54]) carries its autoHeight so it takes this SAME auto path — recomputing the
+        // box from its content and two-phasing the clamp (a min-height FLOOR aligns its items in the pre-floor
+        // content, a max-height CAP its taller content overflows — the Avo `field-wrapper` row). A genuinely
+        // DEFINITE height (declared, or stretch/abspos-imposed — autoHeight false) takes the else branch below.
+        if is_auto(n.height) || n.item_auto_height {
             // A bare-text anonymous item floors the row's auto cross at its line-height. Unlike a min-height
             // (clamped later, outside the flex pass), the oracle folds it into box.height HERE and reads
             // container_cross back from the grown box (layout.js: `containerCross = box.height - edges`), so the
@@ -1720,6 +1731,7 @@ mod tests {
             cell_va_offset: 0.0,
             anon_cross: 0.0,
             no_wrap: false,
+            item_auto_height: false,
         }
     }
 

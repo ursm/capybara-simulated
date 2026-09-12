@@ -77,6 +77,17 @@ RSpec.describe 'native layout grid parity', if: ENV.fetch('CSIM_JS_ENGINE', 'v8'
     expect_parity('<div style="display:flex;gap:10px;width:420px"><div style="display:grid;grid-template-columns:80px 80px;gap:6px;width:180px"><div style="height:20px">a</div><div style="height:30px">b</div></div><div style="width:100px;height:40px">z</div></div>')
   end
 
+  # A GRID ITEM that is itself an auto-height flex container with min/max-height two-phases its OWN clamp: the
+  # grid item-push keeps its min/max-height (rec[8]/rec[9]) and its autoHeight (rec[54]), so native recomputes the
+  # box from the container's content and aligns its items in the pre-clamp content, box floors/caps to the track —
+  # NOT in the track-fitted box (which would be a silent-wrong: the child centres one place too low).
+  it 'matches a grid-item flex row whose min-height floors it, items centred in the pre-floor content' do
+    expect_parity('<div style="display:grid;grid-template-columns:100px;width:100px"><div style="display:flex;align-items:center;min-height:30px"><div style="width:30px;height:20px"></div></div></div>')
+  end
+  it 'matches a grid-item flex row whose max-height caps it while its taller content overflows' do
+    expect_parity('<div style="display:grid;grid-template-columns:100px;width:100px"><div style="display:flex;align-items:center;max-height:20px"><div style="width:30px;height:60px"></div></div></div>')
+  end
+
   it 'declines an absolutely-positioned grid CONTAINER as the root' do
     expect_bail('<div style="position:absolute;display:grid;grid-template-columns:50px 50px;width:120px"><div style="height:20px">a</div></div>')
   end
