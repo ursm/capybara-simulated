@@ -57,7 +57,53 @@ RSpec.describe 'native layout nowrap parity', if: ENV.fetch('CSIM_JS_ENGINE', 'v
   it 'declines a child that OVERRIDES the block white-space (per-run wrap difference)' do
     expect_bail('<div style="width:80px">wraps here <span style="white-space:nowrap">but this span does not</span> more</div>')
   end
-  it 'declines pre (preserves whitespace)' do
-    expect_bail('<div style="width:200px;white-space:pre">preserved   spaces</div>')
+  # pre / pre-wrap / pre-line are now modelled (WS_MODE code in rec[53]; the Rust tokenizer preserves whitespace
+  # for pre/pre-wrap, soft-wraps for normal/pre-wrap/pre-line, and breaks on a newline for all three pre modes).
+  it 'matches pre (preserves whitespace + newlines, no soft-wrap)' do
+    expect_parity("<div style=\"width:200px;white-space:pre\">preserved   spaces\n    indented line\nthird</div>")
+  end
+  it 'matches pre with a long line that does NOT soft-wrap (overflows)' do
+    expect_parity('<div style="width:60px;white-space:pre">a very long line that will not wrap in pre mode</div>')
+  end
+  it 'matches pre with blank lines (consecutive newlines each make a line)' do
+    expect_parity("<div style=\"width:200px;white-space:pre\">a\n\n\nb</div>")
+  end
+  it 'matches pre-wrap (preserves whitespace, soft-wraps, breaks on newline)' do
+    expect_parity("<div style=\"width:80px;white-space:pre-wrap\">word word word word word word\n    indented</div>")
+  end
+  it 'matches pre-wrap preserving leading indentation (code-editor shape)' do
+    expect_parity('<div style="width:300px;white-space:pre-wrap"><span>  </span><span style="font-weight:bold">def</span> <span>foo</span></div>')
+  end
+  it 'matches pre-line (collapses spaces, soft-wraps, breaks on newline)' do
+    expect_parity("<div style=\"width:80px;white-space:pre-line\">a    b\nword word word word word</div>")
+  end
+  it 'matches pre-line blank lines (newlines preserved, spaces collapsed)' do
+    expect_parity("<div style=\"width:200px;white-space:pre-line\">a\n\nb</div>")
+  end
+  it 'declines pre with a TAB (tab stops not modelled)' do
+    expect_bail("<div style=\"width:200px;white-space:pre\">a\tb</div>")
+  end
+  # A blank/whitespace pre line INSIDE an inline element (the CodeMirror blank-line shape) is ordinary content —
+  # it lays out through the text path (its line box gives the block height, which propagates normally).
+  it 'matches a pre-wrap blank line wrapped in a span (CodeMirror blank-line shape)' do
+    expect_parity('<div style="width:200px;white-space:pre-wrap"><span> </span></div>')
+  end
+  it 'matches a pre-wrap line with real content and whitespace between spans' do
+    expect_parity('<div style="width:400px;white-space:pre-wrap"><span>  </span><span>def</span> <span>foo</span></div>')
+  end
+  # An ENTIRELY-whitespace preserve block whose whitespace is DIRECT text (no wrapping element, no real content)
+  # declines: the oracle gives it a line box the parent's height does not pick up (block 22 / body 0), a quirk
+  # native's block flow can't reproduce.
+  it 'declines an entirely-whitespace pre block (direct text — non-propagating line box)' do
+    expect_bail('<div style="width:200px;white-space:pre">     </div>')
+  end
+  it 'declines an entirely-newline pre-wrap block (direct text)' do
+    expect_bail("<div style=\"width:200px;white-space:pre-wrap\">\n\n</div>")
+  end
+  # A whitespace-only EDGED (padded / bordered) inline stays declined even under preserve — the edged-inline gate
+  # keys on REAL glyph content, not preserved whitespace (a padded inline's line-box height is fiddly). A padded
+  # inline with real content, and an edgeless whitespace span, both lay out fine.
+  it 'declines a whitespace-only padded inline in a pre block' do
+    expect_bail('<div style="width:200px;white-space:pre">a<b style="padding:0 5px"> </b>b</div>')
   end
 end

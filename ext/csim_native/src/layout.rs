@@ -169,10 +169,10 @@ pub(crate) struct Input {
     // inside it (0 when there is none). The oracle does not lay that text out as a real flex item, it only
     // floors the container's AUTO cross size at this line-height (`anonymousItemHeight`); native does the same.
     pub(crate) anon_cross: f64,
-    // `white-space: nowrap` on a text block: whitespace still collapses, but the line never SOFT-wraps — only a
-    // `<br>` breaks it. The line grows past the content width; the block's height is the strut (one line, or one
-    // per <br>). (pre / pre-wrap / pre-line, which preserve whitespace, still decline in the harness.)
-    pub(crate) no_wrap: bool,
+    // A text block's `white-space` mode: 0 normal, 1 nowrap, 2 pre, 3 pre-wrap, 4 pre-line. It selects three
+    // orthogonal behaviours in `line_layout`: COLLAPSE whitespace (0/1/4) vs PRESERVE it (2/3), SOFT-WRAP at
+    // break opportunities (0/3/4) vs never (1/2), and whether a NEWLINE forces a break (2/3/4).
+    pub(crate) ws_mode: u8,
     // A pushed flex ITEM whose OWN height is AUTO (content-derived), carried past the parent-push that
     // overwrote `height` with the item's final (oracle-clamped) box. When set, `measure_flex` recomputes a
     // ROW item's cross from its content and two-phases the min/max-height clamp (the items align in the
@@ -360,8 +360,15 @@ fn line_layout(
     cl: f64,
     cr: f64,
     top: f64,
-    no_wrap: bool,
+    ws_mode: u8,
 ) -> Option<(u32, f64)> {
+    // The three orthogonal `white-space` behaviours (see Input::ws_mode). `no_wrap` keeps the old name for the
+    // four soft-wrap gates below: a line SOFT-wraps under normal (0) / pre-wrap (3) / pre-line (4), never under
+    // nowrap (1) / pre (2). `preserve` keeps every space as a real advance (pre / pre-wrap) rather than
+    // collapsing runs of whitespace to one break-opportunity; `break_nl` makes a literal newline force a break.
+    let no_wrap = ws_mode == 1 || ws_mode == 2;
+    let preserve = ws_mode == 2 || ws_mode == 3;
+    let break_nl = ws_mode >= 2;
     let strut_desc = strut_lh - strut_asc;
     // The usable width of the line whose top is at `top + t` — the float band there, or the full content
     // width when there are no floats (kept exact, not `cr - cl`, so the no-float path never drifts).
@@ -390,6 +397,21 @@ fn line_layout(
     // wrap before it. (The BEFORE-side break is unconditional in the RUN_ATOMIC arm itself.) Reset on any word
     // placement and at a line break.
     let mut atomic_break = false;
+    // Close the current line and start a fresh one (a <br>, a preserved/pre-line newline, or the bare strut of
+    // an empty line). Captures the surrounding mutable line state.
+    macro_rules! break_line {
+        () => {{
+            total += line_asc + line_desc;
+            n += 1;
+            line_x = 0.0;
+            line_asc = strut_asc;
+            line_desc = strut_desc;
+            line_has_content = false;
+            pending_space = None;
+            prev_was_word = false;
+            atomic_break = false;
+        }};
+    }
 
     for (ri, run) in runs.iter().enumerate() {
         match run.kind {
@@ -409,15 +431,7 @@ fn line_layout(
                 if !open.is_empty() {
                     return None; // <br> inside an open inline edge (fragment) — defer to JS
                 }
-                total += line_asc + line_desc; // an empty line's box is the bare strut
-                n += 1;
-                line_x = 0.0;
-                line_asc = strut_asc;
-                line_desc = strut_desc;
-                line_has_content = false;
-                pending_space = None;
-                prev_was_word = false;
-                atomic_break = false;
+                break_line!(); // an empty line's box is the bare strut
             }
             RUN_TEXT => {
                 let text = run_texts.get(ri).and_then(|t| t.as_ref())?;
@@ -428,13 +442,46 @@ fn line_layout(
                 let mut i = 0;
                 while i < text.len() {
                     if is_ws_u16(text[i]) {
-                        while i < text.len() && is_ws_u16(text[i]) {
-                            i += 1;
-                        }
-                        // A space is a break opportunity, unless it is leading whitespace on a fresh line
-                        // (dropped). Collapse consecutive / boundary spaces to the FIRST seen.
-                        if line_has_content && pending_space.is_none() {
-                            pending_space = Some(space_w);
+                        if preserve {
+                            // pre / pre-wrap: every space is a REAL advance (kept, not collapsed); a newline
+                            // forces a break; a tab / other control is not modelled. Under pre-wrap a preserved
+                            // space is ALSO a soft-wrap opportunity — carried as a zero-width `pending_space` so
+                            // the word branch may break before the next word (the space itself already advanced
+                            // the line and hangs at a wrap). Leading whitespace is KEPT (code indentation).
+                            while i < text.len() && is_ws_u16(text[i]) {
+                                match text[i] {
+                                    0x0A => break_line!(), // newline → forced break
+                                    0x20 => {
+                                        line_x += space_w;
+                                        line_has_content = true;
+                                        prev_was_word = false;
+                                        if !no_wrap {
+                                            pending_space = Some(0.0); // wrap opportunity, width already added
+                                        }
+                                    }
+                                    _ => return None, // tab (tab stops) / \r / \f — not modelled
+                                }
+                                i += 1;
+                            }
+                        } else {
+                            // collapse (normal / nowrap / pre-line): consume the whitespace run. Under pre-line
+                            // each NEWLINE it holds forces a break (spaces around it collapse away); otherwise the
+                            // run collapses to a single break-space. A run of N newlines makes N breaks (blank
+                            // lines), so count them.
+                            let mut nl = 0u32;
+                            while i < text.len() && is_ws_u16(text[i]) {
+                                if text[i] == 0x0A {
+                                    nl += 1;
+                                }
+                                i += 1;
+                            }
+                            if break_nl && nl > 0 {
+                                for _ in 0..nl {
+                                    break_line!();
+                                }
+                            } else if line_has_content && pending_space.is_none() {
+                                pending_space = Some(space_w);
+                            }
                         }
                     } else {
                         let start = i;
@@ -752,7 +799,7 @@ fn measure(
         let bfc_top = bfc_y + content_top_rel;
         let (rs, re) = (n.run_start.max(0) as usize, (n.run_start + n.run_count).max(0) as usize);
         let content_h = if re <= runs.len() && rs <= re {
-            match line_layout(&runs[rs..re], &run_texts[rs..re], n.strut_lh, n.strut_asc, content_w, &fc.items, cl, cr, bfc_top, n.no_wrap) {
+            match line_layout(&runs[rs..re], &run_texts[rs..re], n.strut_lh, n.strut_asc, content_w, &fc.items, cl, cr, bfc_top, n.ws_mode) {
                 Some((_, h)) => h,
                 None => {
                     failed.set(true);
@@ -1730,7 +1777,7 @@ mod tests {
             rtl: 0,
             cell_va_offset: 0.0,
             anon_cross: 0.0,
-            no_wrap: false,
+            ws_mode: 0,
             item_auto_height: false,
         }
     }

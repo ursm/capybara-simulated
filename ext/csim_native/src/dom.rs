@@ -976,7 +976,7 @@ fn layout_pass(
             rtl: r[50] as u8,
             cell_va_offset: r[51],
             anon_cross: r[52],
-            no_wrap: r[53] != 0.0,
+            ws_mode: r[53] as u8,
             item_auto_height: r[54] != 0.0,
         });
     }
