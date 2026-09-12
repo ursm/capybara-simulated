@@ -73,6 +73,40 @@ RSpec.describe 'native layout L2 text-block parity', if: ENV.fetch('CSIM_JS_ENGI
     expect(r['mismatches']).to eq(0), "mismatch: #{r.inspect}"
   end
 
+  # A mixed-font word — one glued across a run boundary with NO space between, because a plain (edgeless)
+  # inline emits no OPEN/CLOSE run to separate the fonts: `foo<b>bar</b>baz`, `H<sub>2</sub>O`. It is ONE
+  # unbreakable unit: the fonts differ but there is no line-break opportunity between the segments, so its
+  # width is the sum of the per-font advances and the whole unit wraps together (its tail never spills).
+  it 'matches a bold run glued mid-word' do
+    expect_parity('<div style="width:300px">foo<b>bar</b>baz</div>')
+  end
+  it 'matches a subscript glued mid-word (H2O)' do
+    expect_parity('<div style="width:300px">H<sub>2</sub>O and a longer <sub>subscripted</sub>word wrapping onward here past the edge</div>')
+  end
+  it 'matches a font-size change glued mid-word growing the line box' do
+    expect_parity('<div style="width:300px">a<span style="font-size:24px">B</span>c then more plain words wrapping onward past the box edge here</div>')
+  end
+  it 'matches a three-font glued word' do
+    expect_parity('<div style="width:400px">a<b>b</b><i>c</i>d and then several more plain words that wrap onward past the edge</div>')
+  end
+  # The glued unit is unbreakable; when its LEADING segment doesn't fit the line it wraps as one.
+  it 'matches a glued mixed-font unit wrapping as one at the box edge' do
+    expect_parity('<div style="width:70px">xxxxx yyyy<b>yyyy</b>yyyy and zzz</div>')
+  end
+  it 'matches a glued mixed-font prefix followed by a real space and more words' do
+    expect_parity('<div style="width:120px">pre<b>fix</b>ed words then more that keep wrapping onward past the edge here</div>')
+  end
+  # The over-break guard: the glued unit's LEADING segment (`xx`) fits the current line but the WHOLE unit
+  # (`xx` + the long bold tail) does not. The oracle's greedy breaker commits the unit to the line on the
+  # leading segment alone and lets the tail OVERFLOW — a mid-word run boundary is never a break opportunity —
+  # so this is ONE line. Fit-testing the whole unit instead would wrap it to a second line (a silent-wrong).
+  it 'matches a glued unit whose leading segment fits but whose tail overflows the line (no extra break)' do
+    expect_parity('<div style="width:120px">x xx<b>xxxxxxxxxxxxxxxx</b></div>')
+  end
+  it 'matches a subscript tail overflowing after a fitting leading segment' do
+    expect_parity('<div style="width:90px">word H<sub>2222222222222</sub></div>')
+  end
+
   it 'matches a larger-font inline run growing the line height' do
     session = simulated_session(page(%(<div style="width:300px">small text <span style="font-size:28px">BIG</span> small again</div>)))
     session.visit '/'

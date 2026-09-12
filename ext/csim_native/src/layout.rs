@@ -391,7 +391,6 @@ fn line_layout(
     // unflushed pendings — reserved in the fit test until the first content flushes it onto the line.
     let mut open: Vec<(f64, bool)> = Vec::new();
     let mut pending_space: Option<f64> = None; // collapsed space before the next word
-    let mut prev_was_word = false;
     // An atomic inline is a break opportunity on BOTH sides regardless of whitespace: this flag carries the
     // AFTER-side break (a zero-width break opportunity) to the next box, so a word glued to an atomic can still
     // wrap before it. (The BEFORE-side break is unconditional in the RUN_ATOMIC arm itself.) Reset on any word
@@ -408,7 +407,6 @@ fn line_layout(
             line_desc = strut_desc;
             line_has_content = false;
             pending_space = None;
-            prev_was_word = false;
             atomic_break = false;
         }};
     }
@@ -417,7 +415,6 @@ fn line_layout(
         match run.kind {
             RUN_OPEN => {
                 open.push((run.metric, false));
-                prev_was_word = false;
             }
             RUN_CLOSE => {
                 open.pop(); // LIFO; an unflushed (empty-inline) open's pending is dropped, matching JS
@@ -425,7 +422,6 @@ fn line_layout(
                 if run.metric != 0.0 {
                     line_has_content = true;
                 }
-                prev_was_word = false;
             }
             RUN_BR => {
                 if !open.is_empty() {
@@ -454,7 +450,6 @@ fn line_layout(
                                     0x20 => {
                                         line_x += space_w;
                                         line_has_content = true;
-                                        prev_was_word = false;
                                         if !no_wrap {
                                             pending_space = Some(0.0); // wrap opportunity, width already added
                                         }
@@ -493,9 +488,13 @@ fn line_layout(
                             Some(s) => (true, s),
                             None => (false, 0.0),
                         };
-                        if prev_was_word && !space_before {
-                            return None; // a word spans two runs with no space between (mixed-font word)
-                        }
+                        // A word glued to the previous one across a run boundary — no space between, a mixed-font
+                        // word like `foo<b>bar</b>` or `H<sub>2</sub>O` where the edgeless inline emits no
+                        // OPEN/CLOSE run to split the fonts — has `space_before` false, so the break-before test
+                        // below already skips it: it places right after the leading segment, glued, and its tail
+                        // simply overflows the line when the whole unit runs long. This matches the oracle's greedy
+                        // breaker exactly — a mid-word run boundary is never a line-break opportunity (§ CSS Text:
+                        // no break within a word), and ONLY the unit's leading word is fit-tested against the band.
                         if space_before && line_has_content {
                             line_x += sw; // hanging space
                         }
@@ -532,7 +531,6 @@ fn line_layout(
                         line_asc = line_asc.max(run.asc);
                         line_desc = line_desc.max(run.line_height - run.asc);
                         line_has_content = true;
-                        prev_was_word = true;
                         atomic_break = false; // consumed the after-atomic break opportunity
                     }
                 }
@@ -579,7 +577,6 @@ fn line_layout(
                 line_asc = line_asc.max(run.asc);
                 line_desc = line_desc.max(run.line_height - run.asc);
                 line_has_content = true;
-                prev_was_word = false; // a box, not a word that can span two runs
                 atomic_break = true; // a break opportunity follows this atomic
             }
             _ => return None, // unknown run kind
