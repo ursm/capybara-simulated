@@ -189,6 +189,17 @@ pub(crate) struct Input {
     // A native-COMPUTE grid container's offset into the parallel `grids` buffer (see measure_grid). Read only
     // when `display == DISPLAY_GRID`; 0 (unused) for every other node, including a grid REPLAYED as DISPLAY_BLOCK.
     pub(crate) grid_start: i32,
+    // The DECLARED inline sizing with NO percentage basis — what an intrinsic measure reads (`intrinsic_widths`):
+    // `width` / `min-width` / `max-width` as declared (a percentage is NaN = auto there, having nothing to
+    // resolve against), the item's `flex-basis` (NaN = auto / content) and whether it may grow (`flex-grow` > 0),
+    // and the declared `box-sizing`. Kept apart from `width` / `min_w` / `max_w` / `border_box`, which a flex /
+    // out-of-flow / replay push overwrites with the USED box.
+    pub(crate) decl_w: f64,
+    pub(crate) decl_min_w: f64,
+    pub(crate) decl_max_w: f64,
+    pub(crate) flex_basis: f64,
+    pub(crate) flex_grows: bool,
+    pub(crate) decl_border_box: bool,
 }
 
 pub(crate) const CROSS_BASELINE: u8 = 3;
@@ -1959,20 +1970,22 @@ fn grid_column_content(
 // A box's (min-content, max-content) BORDER-box widths — CSS Sizing 3's intrinsic contribution, the oracle's
 // `intrinsicWidths` on the record tree. A declared width pins both (border-box per `box-sizing`); a text block
 // measures its inline content (`text_intrinsic`); a block container is as wide as its widest child's margin
-// box, for min and max alike; then the box's own edges add on and its min/max-width clamp the contribution
-// (border-box per `box-sizing`, min winning over max). The record's edges and widths are its cbW-resolved used
-// values, which equal the basis-less intrinsic read only when nothing is a percentage — the JS gate
-// (`nlIntrinsicMeasurable`) guarantees that, so no basis appears here. Floats pack on a line inside a block
-// container as inline boxes would. `None` for what isn't measured: a flex / table / replayed grid, an atomic
-// inline, an unmodelled run.
+// box, for min and max alike; a flex container stacks its items along its main axis (`flex_intrinsic_widths`);
+// then the box's own edges add on and its min/max-width clamp the contribution (border-box per `box-sizing`, min
+// winning over max). The widths read are the record's DECLARED, basis-less ones (`decl_*`: a percentage is auto
+// here, as in the oracle), never the used box a push may have written; the edges are the record's cbW-resolved
+// ones, equal to the basis-less read only when no edge is a percentage — the JS gate (`nlIntrinsicMeasurable`)
+// guarantees that. Floats pack on a line inside a block container as inline boxes would. `None` for what isn't
+// measured: a table / replayed grid, an atomic inline, an unmodelled run.
 fn intrinsic_widths(i: usize, inputs: &[Input], runs: &[Run], run_texts: &[Option<Vec<u16>>], children: &[Vec<usize>]) -> Option<(f64, f64)> {
     let n = inputs[i];
     let extra = n.edges_x();
-    let (inner_min, inner_max) = if !is_auto(n.width) {
-        let w = if n.border_box { (n.width - extra).max(0.0) } else { n.width };
+    let (inner_min, inner_max) = if !is_auto(n.decl_w) {
+        let w = if n.decl_border_box { (n.decl_w - extra).max(0.0) } else { n.decl_w };
         (w, w)
     } else {
         match n.display {
+            DISPLAY_FLEX => flex_intrinsic_widths(i, inputs, runs, run_texts, children)?,
             DISPLAY_TEXT_BLOCK => {
                 let (rs, re) = (n.run_start.max(0) as usize, (n.run_start + n.run_count).max(0) as usize);
                 if re > runs.len() || rs > re {
@@ -2010,9 +2023,71 @@ fn intrinsic_widths(i: usize, inputs: &[Input], runs: &[Run], run_texts: &[Optio
         }
     };
     // The box's own min/max-width clamp its OUTER contribution (CSS Sizing 3 §5.1), in its box-sizing model.
-    let to_border = |v: f64| if is_auto(v) || n.border_box { v } else { v + extra };
-    let min = clamp_min_max(inner_min + extra, to_border(n.min_w), to_border(n.max_w));
-    let max = clamp_min_max(inner_max + extra, to_border(n.min_w), to_border(n.max_w));
+    let to_border = |v: f64| if is_auto(v) || n.decl_border_box { v } else { v + extra };
+    let min = clamp_min_max(inner_min + extra, to_border(n.decl_min_w), to_border(n.decl_max_w));
+    let max = clamp_min_max(inner_max + extra, to_border(n.decl_min_w), to_border(n.decl_max_w));
+    Some((min, max))
+}
+
+// A flex container's (min-content, max-content) CONTENT widths — the oracle's `flexIntrinsicWidths`: its in-flow
+// items' contributions stacked along the main axis. Along a ROW they sum, margins and the main gap between them
+// (the min-content too, unless the row WRAPS — then each item may have a line to itself and the widest wins);
+// down a COLUMN the widest wins. A row item's contribution is its intrinsic box, its `flex-basis` pinning it — or,
+// when the item may grow, only raising its max (the coarse form of §9.9) — then its own min/max-width (border-box
+// per `box-sizing`); a column item contributes the width it wants, as any block child would.
+fn flex_intrinsic_widths(i: usize, inputs: &[Input], runs: &[Run], run_texts: &[Option<Vec<u16>>], children: &[Vec<usize>]) -> Option<(f64, f64)> {
+    let n = inputs[i];
+    let column = !n.flex_main_is_x;
+    let wrap = !column && n.flex_wrap;
+    let (mut min, mut max) = (0.0f64, 0.0f64);
+    let mut count = 0usize;
+    for &c in &children[i] {
+        let k = inputs[c];
+        if k.out_of_flow != 0 {
+            continue; // out of flow: sizes nothing
+        }
+        let (mut imin, mut imax) = intrinsic_widths(c, inputs, runs, run_texts, children)?;
+        if !column {
+            let extra = if k.decl_border_box { 0.0 } else { k.edges_x() };
+            if !is_auto(k.flex_basis) {
+                let fixed = k.flex_basis + extra;
+                if k.flex_grows {
+                    imax = imax.max(fixed);
+                } else {
+                    imin = fixed;
+                    imax = fixed;
+                }
+            }
+            if !is_auto(k.decl_max_w) && k.decl_max_w >= 0.0 {
+                imin = imin.min(k.decl_max_w + extra);
+                imax = imax.min(k.decl_max_w + extra);
+            }
+            if !is_auto(k.decl_min_w) && k.decl_min_w >= 0.0 {
+                imin = imin.max(k.decl_min_w + extra);
+                imax = imax.max(k.decl_min_w + extra);
+            }
+        }
+        let m = Input::m(k.ml) + Input::m(k.mr);
+        count += 1;
+        if column {
+            min = min.max(imin + m);
+            max = max.max(imax + m);
+        } else {
+            max += imax + m;
+            if wrap {
+                min = min.max(imin + m);
+            } else {
+                min += imin + m;
+            }
+        }
+    }
+    if !column && count > 1 {
+        let gaps = n.flex_main_gap * (count as f64 - 1.0);
+        max += gaps;
+        if !wrap {
+            min += gaps;
+        }
+    }
     Some((min, max))
 }
 
@@ -2400,6 +2475,12 @@ mod tests {
             ws_mode: 0,
             item_auto_height: false,
             grid_start: -1,
+            decl_w: f64::NAN,
+            decl_min_w: f64::NAN,
+            decl_max_w: f64::NAN,
+            flex_basis: f64::NAN,
+            flex_grows: false,
+            decl_border_box: false,
         }
     }
 
@@ -3312,5 +3393,63 @@ mod tests {
         assert_eq!(bx[0].w, 300.0); // NOT 320 — the caption border box IS the wrapper, the border is not re-added
         assert_eq!([bx[1].x, bx[1].w], [0.0, 300.0]);
         assert_eq!([bx[3].x, bx[3].w], [10.0, 280.0]);
+    }
+
+    // `intrinsic_widths` reads the DECLARED sizing (decl_*), never the used box a push wrote into width/min_w/
+    // max_w/border_box: a flex item pushed to a 100-wide used box with an auto declared width measures from its
+    // content (a 40-wide declared child), and a declared border-box width pins the box less nothing.
+    #[test]
+    fn intrinsic_widths_reads_declared_not_pushed_sizing() {
+        let mut root = blk(0.0, -1);
+        root.display = DISPLAY_FLEX;
+        let mut flex_item = blk(1.0, 0);
+        flex_item.width = 100.0; // the flex push
+        flex_item.border_box = true;
+        flex_item.min_w = f64::NAN;
+        let mut child = blk(2.0, 1);
+        child.decl_w = 40.0;
+        child.pl = 5.0;
+        child.pr = 5.0;
+        let mut pinned = blk(3.0, 0);
+        pinned.decl_w = 70.0;
+        pinned.decl_border_box = true;
+        pinned.pl = 10.0;
+        pinned.width = 200.0; // pushed, ignored
+        let inputs = [root, flex_item, child, pinned];
+        let children = vec![vec![1, 3], vec![2], vec![], vec![]];
+        assert_eq!(intrinsic_widths(1, &inputs, &[], &[], &children), Some((50.0, 50.0)));
+        assert_eq!(intrinsic_widths(3, &inputs, &[], &[], &children), Some((70.0, 70.0)));
+        // the row sums its items: 50 + 70, plus the main gap between them
+        root.flex_main_gap = 8.0;
+        let inputs = [root, flex_item, child, pinned];
+        assert_eq!(intrinsic_widths(0, &inputs, &[], &[], &children), Some((128.0, 128.0)));
+    }
+
+    // A row item's flex-basis pins its contribution, or — when the item may grow — only raises its max; the
+    // item's own min/max-width then clamp; a wrapping row's min is its widest item.
+    #[test]
+    fn flex_intrinsic_basis_grow_and_wrap() {
+        let mut root = blk(0.0, -1);
+        root.display = DISPLAY_FLEX;
+        let mut a = blk(1.0, 0);
+        a.decl_w = 60.0;
+        a.flex_basis = 30.0; // pinned at the basis (no grow)
+        let mut b = blk(2.0, 0);
+        b.decl_w = 20.0;
+        b.flex_basis = 50.0;
+        b.flex_grows = true; // max raised to the basis, min stays the content
+        let mut c = blk(3.0, 0);
+        c.decl_w = 90.0;
+        c.decl_max_w = 40.0; // capped
+        let inputs = [root, a, b, c];
+        let children = vec![vec![1, 2, 3], vec![], vec![], vec![]];
+        assert_eq!(intrinsic_widths(0, &inputs, &[], &[], &children), Some((30.0 + 20.0 + 40.0, 30.0 + 50.0 + 40.0)));
+        root.flex_wrap = true;
+        let inputs = [root, a, b, c];
+        assert_eq!(intrinsic_widths(0, &inputs, &[], &[], &children), Some((40.0, 120.0)));
+        root.flex_wrap = false;
+        root.flex_main_is_x = false; // a column: the widest item
+        let inputs = [root, a, b, c];
+        assert_eq!(intrinsic_widths(0, &inputs, &[], &[], &children), Some((60.0, 60.0)));
     }
 }

@@ -273,8 +273,9 @@ RSpec.describe 'native layout grid parity', if: ENV.fetch('CSIM_JS_ENGINE', 'v8'
       expect_native_intrinsic(%(<div style="#{two_auto}"><div><div style="margin:0 12px 0 5px;height:10px">nested block words here</div><div style="margin-right:-20px;height:10px">shorter</div></div><div style="height:30px">b</div></div>))
       expect_native_intrinsic(%(<div style="#{two_auto}"><div><div style="padding:0 7px;margin:0 9px">child with edges and a few words</div></div><div style="height:10px">b</div></div>))
     end
-    it 'measures a mixed block item (anonymous text blocks around a block child)' do
+    it 'measures a mixed block item (anonymous text blocks around a block child — their declared sizing is auto)' do
       expect_native_intrinsic(%(<div style="#{two_auto}"><div>text before<p style="margin:0 4px">a paragraph in the middle</p>and after</div><div style="height:10px">b</div></div>))
+      expect_native_intrinsic(%(<div style="#{mc_auto}"><div>text before is long<p style="margin:0">para</p>and after</div><div>b</div></div>))
     end
     it 'skips an out-of-flow child of an item' do
       expect_native_intrinsic(%(<div style="#{two_auto}"><div style="position:relative"><p style="margin:0">a</p><div style="position:absolute;width:300px;height:5px">abs</div></div><div style="height:10px">b</div></div>))
@@ -321,9 +322,13 @@ RSpec.describe 'native layout grid parity', if: ENV.fetch('CSIM_JS_ENGINE', 'v8'
     end
 
     # What native does not measure yet falls back to the oracle's resolved contribution — with parity.
-    it 'falls back for a percentage width / min-width (no basis in an intrinsic measure)' do
-      expect_resolved_fallback(%(<div style="#{two_auto}"><div style="width:50%;height:10px">pct width</div><div style="height:10px">b</div></div>))
-      expect_resolved_fallback(%(<div style="#{two_auto}"><div style="min-width:50%;height:10px">pct min</div><div style="height:10px">b</div></div>))
+    it 'reads a percentage width / min-width / calc as auto (no basis in an intrinsic measure), from the declared sizing' do
+      expect_native_intrinsic(%(<div style="#{mc_auto}"><div style="width:50%;height:10px">pct width</div><div>b</div></div>))
+      expect_native_intrinsic(%(<div style="#{mc_auto}"><div style="min-width:50%;height:10px">pct min</div><div>b</div></div>))
+      expect_native_intrinsic(%(<div style="#{mc_auto}"><div style="width:calc(50% - 10px);height:10px">calc pct</div><div>b</div></div>))
+    end
+    it 'falls back for a percentage padding / margin (the record\'s edges are cbW-resolved)' do
+      expect_resolved_fallback(%(<div style="#{two_auto}"><div style="padding-left:10%;height:10px">pct pad</div><div style="height:10px">b</div></div>))
     end
     it 'falls back for a nowrap / pre block container (the oracle pins the whole box, children included)' do
       expect_resolved_fallback(%(<div style="#{two_auto}"><div style="white-space:nowrap"><p style="margin:0">block child under nowrap</p></div><div style="height:10px">b</div></div>))
@@ -358,8 +363,21 @@ RSpec.describe 'native layout grid parity', if: ENV.fetch('CSIM_JS_ENGINE', 'v8'
     it 'falls back for an atomic inline (its box is replayed, not measured)' do
       expect_resolved_fallback(%(<div style="#{two_auto}"><div><span style="display:inline-block;width:80px;height:10px"></span> after</div><div style="height:10px">b</div></div>))
     end
-    it 'falls back for a flex / grid item' do
-      expect_resolved_fallback(%(<div style="#{two_auto}"><div style="display:flex"><div style="width:40px;height:10px"></div><div style="width:60px;height:10px"></div></div><div style="height:10px">b</div></div>))
+    it 'measures a flex-container item: a row sums its items (gap + margins), a wrapping row\'s min is one item, a column takes the widest' do
+      expect_native_intrinsic(%(<div style="#{mc_auto}"><div style="display:flex"><div style="width:40px;height:10px"></div><div style="width:60px;height:10px"></div></div><div>b</div></div>))
+      expect_native_intrinsic(%(<div style="#{mc_auto}"><div style="display:flex;gap:10px"><div>alpha beta</div><div style="margin:0 4px">gamma</div></div><div>b</div></div>))
+      expect_native_intrinsic(%(<div style="display:grid;grid-template-columns:min-content 1fr;width:600px"><div style="display:flex;flex-wrap:wrap;gap:6px"><div>alpha beta</div><div>gamma delta</div></div><div>b</div></div>))
+      expect_native_intrinsic(%(<div style="#{mc_auto}"><div style="display:flex;flex-direction:column"><div>alpha beta gamma</div><div style="margin:0 20px">short</div></div><div>b</div></div>))
+      expect_native_intrinsic(%(<div style="#{mc_auto}"><div style="display:flex;flex-direction:row-reverse"><div style="width:40px;height:10px"></div><div>rev words</div></div><div>b</div></div>))
+      expect_native_intrinsic(%(<div style="#{mc_auto}"><div style="display:flex"><div style="display:flex;gap:3px"><div>nested</div><div>flex</div></div><div>outer</div></div><div>b</div></div>))
+    end
+    it 'reads a flex item\'s DECLARED sizing (not its pushed used box): flex-basis pins or, when it grows, raises the max; min/max-width clamp' do
+      expect_native_intrinsic(%(<div style="#{mc_auto}"><div style="display:flex"><div style="flex:0 0 30px;width:60px;height:10px">x</div><div style="flex:1 0 0">grows from zero basis text</div></div><div>b</div></div>))
+      expect_native_intrinsic(%(<div style="#{mc_auto}"><div style="display:flex"><div style="flex-basis:50px;flex-grow:1;padding:0 5px">grow basis</div><div style="min-width:120px">min</div><div style="max-width:20px">capped words</div></div><div>b</div></div>))
+      expect_native_intrinsic(%(<div style="#{mc_auto}"><div style="display:flex"><div style="box-sizing:border-box;flex-basis:50px;padding:0 10px">bb</div><div style="width:50%">pct</div><div style="flex-basis:50%">half</div></div><div>b</div></div>))
+    end
+    it 'falls back for a flex container with a percentage main gap, and for a grid item' do
+      expect_resolved_fallback(%(<div style="#{mc_auto}"><div style="display:flex;column-gap:5%"><div>a</div><div>b</div></div><div>b</div></div>))
       expect_resolved_fallback(%(<div style="#{two_auto}"><div style="display:grid;grid-template-columns:auto auto"><div>nested grid words</div><div>x</div></div><div style="height:10px">b</div></div>))
     end
   end
