@@ -1,9 +1,10 @@
 # frozen_string_literal: true
-# Native layout — REPLACED LEAF replay, geometry shadow-parity. A replaced element (svg / img / canvas /
-# input / …) whose box the oracle resolved from its intrinsic size + CSS, and which lays out no CSS-box
-# children of its own, is replayed by native as a childless border box in flow — the same push-and-replay the
-# out-of-flow path uses. Handled as a BLOCK-LEVEL child of a block and as a FLEX ITEM (a flex item is
-# blockified, so its computed display doesn't matter). Still DECLINES: an INLINE replaced element (an atomic
+# Native layout — REPLACED LEAF sizing, geometry shadow-parity. A replaced element (svg / img / canvas /
+# input / …) lays out no CSS-box children of its own; its INTRINSIC size is data the walk hands native (a
+# decoded image's natural size, a control's chrome, an svg's viewBox), and native sizes the box from it as
+# the oracle's `usedSize` does (`replaced_box`: declared sizes win, an intrinsic ratio derives the other axis,
+# min/max clamp through the ratio, a border box floors at its edges). Handled as a BLOCK-LEVEL child, a FLEX
+# ITEM (row and column, sized natively) and a GRID ITEM. Still DECLINES: an INLINE replaced element (an atomic
 # inline in a text line) and a control that lays out its own content (a child carries an `_lb`). V8 only.
 require 'capybara/simulated'
 require 'rack'
@@ -84,5 +85,67 @@ RSpec.describe 'native layout replaced-leaf parity', if: ENV.fetch('CSIM_JS_ENGI
   # the oracle sizes it from its intrinsic (one-row) size, so native must decline rather than stack the options.
   it 'declines a display:block <select> that lays out its options (sized by intrinsic, not child flow)' do
     expect_bail('<div style="width:300px"><select style="display:block"><option>aaaa</option><option>bb</option></select></div>')
+  end
+
+  # ── Sized natively from the intrinsic data ─────────────────────────────────────────────────────────────
+  describe 'native replaced sizing' do
+    it 'sizes an undecoded img at its 16x16 placeholder, a declared axis deriving the other through the ratio' do
+      expect_parity('<div style="width:400px"><img><div style="height:10px"></div></div>')
+      expect_parity('<div style="width:400px"><img style="display:block;width:100px"><img style="display:block;height:40px"><img style="display:block;width:100px;height:40px"></div>')
+      expect_parity('<div style="width:400px"><img style="display:block;width:50%"><img style="display:block;height:10%"></div>')
+    end
+    it 'adds edges to a content-box replaced size and floors a border box at its edges' do
+      expect_parity('<div style="width:400px"><img style="display:block;width:100px;padding:5px;border:2px solid"><img style="display:block;width:100px;padding:5px;box-sizing:border-box"></div>')
+    end
+    it 'clamps through the ratio: the binding clamp scales the content box and the other axis follows' do
+      expect_parity('<div style="width:400px"><img style="display:block;width:100px;max-height:20px"><img style="display:block;width:100px;min-height:80px"><img style="display:block;height:64px;max-width:20px"></div>')
+      expect_parity('<div style="width:400px"><img style="display:block;max-width:8px;max-height:20px"><img style="display:block;min-width:30px;min-height:50px"></div>')
+    end
+    it 'sizes a ratio-only svg (viewBox) from the room on offer, or from a declared axis' do
+      expect_parity('<div style="width:400px"><svg viewBox="0 0 4 3" style="display:block"></svg><div style="height:5px"></div></div>')
+      expect_parity('<div style="width:400px"><svg viewBox="0 0 4 3" style="display:block;height:60px"></svg><svg viewBox="0 0 4 3" style="display:block;width:80px"></svg><svg style="display:block"></svg></div>')
+    end
+    it 'sizes controls and other replaced elements from their intrinsic size' do
+      expect_parity('<div style="width:400px"><input type="checkbox" style="display:block"><input type="range" style="display:block"><input type="file" style="display:block"><iframe style="display:block"></iframe><canvas style="display:block"></canvas><video style="display:block"></video></div>')
+      expect_parity('<div style="width:400px"><img style="display:block;margin:5px 10px"><div style="height:10px"></div><img style="display:block;margin-top:8px"></div>')
+    end
+    it 'sizes replaced flex items natively: intrinsic base, no ratio stretches, a ratio keeps its own' do
+      expect_parity('<div style="display:flex;width:400px"><img><div style="flex:1">text</div></div>')
+      expect_parity('<div style="display:flex;width:400px"><input><div style="flex:1;height:60px">text</div></div>')
+      expect_parity('<div style="display:flex;width:400px"><img style="width:100px"><img style="flex:1;width:100px"><div style="width:50px;height:80px"></div></div>')
+      expect_parity('<div style="display:flex;width:400px"><svg viewBox="0 0 4 3"></svg><div style="width:100px;height:20px"></div></div>')
+      expect_parity('<div style="display:flex;width:100px"><img style="width:300px"><div style="width:300px">shrink</div></div>')
+      expect_parity('<div style="display:flex;width:100px"><img><input><textarea></textarea></div>')
+      expect_parity('<div style="display:flex;width:400px"><button>a button</button><div style="flex:1">x</div></div>')
+    end
+    it 'sizes replaced column items natively (stretch fills a no-ratio control, a ratio box keeps its width)' do
+      expect_parity('<div style="display:flex;flex-direction:column;width:300px"><img><input><div>text</div></div>')
+      expect_parity('<div style="display:flex;flex-direction:column;width:300px;align-items:flex-start"><img><input><svg viewBox="0 0 4 3"></svg></div>')
+      expect_parity('<div style="display:flex;flex-direction:column;width:300px;height:200px"><img style="flex:1"><input style="flex:1"><div style="height:30px"></div></div>')
+      expect_parity('<div style="display:flex;flex-direction:column;width:300px;height:100px;flex-wrap:wrap"><img style="height:60px"><input style="height:60px"><div style="height:60px;width:30px"></div></div>')
+    end
+    # A replaced column item's automatic minimum (review finding, Chrome-measured in both engines): a RATIO box
+    # (img, viewBox svg) may shrink to nothing, a ratio-less control keeps its intrinsic height; a stretching
+    # ratio box in a multi-line column takes the container's width for its measure.
+    it 'lets a ratio item shrink below its intrinsic height in a column but floors a control at its own' do
+      expect_parity('<div style="display:flex;flex-direction:column;width:300px;height:20px"><img style="height:100px"><div style="height:50px"></div></div>')
+      expect_parity('<div style="display:flex;flex-direction:column;width:300px;height:20px"><input style="height:100px"><div style="height:50px"></div></div>')
+      expect_parity('<div style="display:flex;flex-direction:column;width:300px;height:20px"><img><input><div style="height:50px"></div></div>')
+      expect_parity('<div style="display:flex;flex-direction:column;width:300px;height:20px"><img style="flex:1"><input style="flex:1"><div style="height:50px"></div></div>')
+      expect_parity('<div style="display:flex;flex-direction:column;width:300px;height:100px"><svg viewBox="0 0 4 3" style="flex:1"></svg><div style="height:30px"></div></div>')
+      expect_parity('<div style="display:flex;flex-direction:column;flex-wrap:wrap;width:300px;height:100px"><svg viewBox="0 0 4 3"></svg><div style="height:60px;width:30px"></div></div>')
+    end
+    it 'declines a block-level button (the oracle shrink-wraps it to its content)' do
+      expect_bail('<div style="width:400px"><button style="display:block">a long button label</button><div style="height:10px"></div></div>')
+    end
+    it 'sizes replaced grid items natively, contributing their intrinsic width to intrinsic tracks' do
+      expect_parity('<div style="display:grid;grid-template-columns:auto 1fr;width:400px"><img><div style="height:20px">b</div></div>')
+      expect_parity('<div style="display:grid;grid-template-columns:100px 100px;width:400px"><img><input><svg viewBox="0 0 4 3"></svg><canvas></canvas></div>')
+      expect_parity('<div style="display:grid;grid-template-columns:max-content 1fr;width:400px"><input><div>b</div></div>')
+    end
+    it 'gives a replaced item no baseline of its own (its bottom margin edge), and skips a block-level one as a candidate' do
+      expect_parity('<div style="display:flex;align-items:baseline;width:400px"><img><div style="font-size:32px">BIG</div></div>')
+      expect_parity('<div style="display:flex;align-items:baseline;width:400px"><div><img style="display:block"><p style="margin:0">after img</p></div><div style="font-size:32px">BIG</div></div>')
+    end
   end
 end

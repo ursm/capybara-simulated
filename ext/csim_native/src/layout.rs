@@ -219,6 +219,17 @@ pub(crate) struct Input {
     // On a flex CONTAINER: `flex-direction` is a `*-reverse` value (its baseline candidates run backwards; an
     // rtl row reverses the main axis without this).
     pub(crate) flex_dir_reverse: bool,
+    // A REPLACED leaf (img / svg / a control / iframe …): sized from its intrinsic size — DATA the walk
+    // carries (a decoded image's natural size, a control's chrome, an svg's viewBox) — by `replaced_box`. `ratio`
+    // = the intrinsic size is a real aspect ratio (an image, a canvas, a viewBox); `ratio_only` = a ratio with no
+    // intrinsic SIZE (a viewBox): the box wants what its container gives it. It lays out no children.
+    pub(crate) replaced: bool,
+    pub(crate) ratio: bool,
+    pub(crate) ratio_only: bool,
+    // The box has no content height to floor a flex column's automatic minimum at (an image, a ratio box).
+    pub(crate) shrinks_to_nothing: bool,
+    pub(crate) intrinsic_w: f64,
+    pub(crate) intrinsic_h: f64,
 }
 
 pub(crate) const CROSS_BASELINE: u8 = 3;
@@ -949,6 +960,25 @@ fn measure(
     let content_top_rel = n.bt + n.pt;
     let content_w = (w - n.edges_x()).max(0.0);
 
+    // A REPLACED leaf: its box comes from its intrinsic size (`replaced_box`) — the width the caller resolved
+    // through `used_width` (or a flex size), the height derived here; no children, no baseline of its own
+    // (a container synthesises its bottom edge), margins that never adjoin.
+    if n.replaced {
+        // Its CONTENT height, when a flex column asks for it as the automatic minimum (MEASURE_AUTO_HEIGHT →
+        // `item_auto_height`): an image, or a box with an intrinsic RATIO, has none of its own to hold (Chrome:
+        // an img in a 20px column shrinks to 13.33); a ratio-less control keeps its intrinsic height (an input
+        // stays 21) — `shrinks_to_nothing`, decided where the intrinsic size is.
+        let (_, h) = if n.item_auto_height && n.shrinks_to_nothing { (0.0, 0.0) } else { replaced_box(&n, w) };
+        boxes[i].nid = n.nid;
+        boxes[i].w = w;
+        boxes[i].h = h;
+        boxes[i].auto_height = false;
+        boxes[i].first_baseline = None;
+        boxes[i].last_baseline = None;
+        let top = CMargin::of(Input::m(n.mt));
+        return MInfo { top, top_only: top, bottom: CMargin::of(Input::m(n.mb)), collapse_through: false };
+    }
+
     // A flex container (§9.7): the item SIZING is resolved JS-side (each item's used main/cross size rides
     // its width/height); native does only the placement — main-axis distribution + cross-axis alignment.
     if n.display == DISPLAY_FLEX {
@@ -1427,6 +1457,10 @@ fn flex_row_sizes(
             inner + edges
         } else if k.flex_basis_kw != 1 && !is_auto(k.width) {
             k.width + extra
+        } else if k.replaced {
+            // A replaced item's base is its intrinsic width plus its edges — a ratio-only one takes the room.
+            content_based[p] = true;
+            if k.ratio_only { (content_w - Input::m(k.ml) - Input::m(k.mr)).max(0.0) } else { k.intrinsic_w + edges }
         } else {
             content_based[p] = true;
             if k.flex_basis_kw == 1 {
@@ -1573,14 +1607,27 @@ fn flex_column_sizes(
         let c = kids[p];
         let k = inputs[c];
         let avail_w = (content_w - Input::m(k.ml) - Input::m(k.mr)).max(0.0);
-        let auto_w = if k.flex_stretch && !multiline {
+        // A stretched item fills its line — the container, single-line; a multi-line column's line is only as wide
+        // as its widest item, so the item starts at its shrink-to-fit width and is re-stretched once the line has
+        // a size — except a RATIO box, whose two axes are derived from each other: it takes the container's width
+        // in both paths (the oracle's `ratioBox`).
+        let auto_w = if k.flex_stretch && (!multiline || (k.replaced && k.ratio)) {
             avail_w
         } else {
             let (imin, imax) = intrinsic_widths(c, inputs, runs, run_texts, children)?;
             imin.max(avail_w).min(imax)
         };
         width[p] = used_width(&k, auto_w);
-        if !is_auto(k.height) {
+        // STRETCH beats an intrinsic size: a replaced item with a size but no ratio (a control, an iframe) is the
+        // line's cross size; a ratio box keeps its own (the oracle re-derives nothing through the ratio).
+        if k.replaced && !k.ratio && k.flex_stretch && !multiline {
+            let extra = if k.border_box { 0.0 } else { k.edges_x() };
+            let to_border = |v: f64| if is_auto(v) { v } else { v + extra };
+            width[p] = clamp_min_max(avail_w, to_border(k.min_w), to_border(k.max_w));
+        }
+        if k.replaced {
+            decl_h[p] = replaced_box(&k, auto_w).1; // a replaced item's height is definite (its size, at that width)
+        } else if !is_auto(k.height) {
             let edges_y = k.edges_y();
             let h = if k.border_box { k.height.max(edges_y) } else { k.height + edges_y };
             let to_border = |v: f64| if is_auto(v) || k.border_box { v } else { v + edges_y };
@@ -2655,6 +2702,8 @@ fn intrinsic_widths(i: usize, inputs: &[Input], runs: &[Run], run_texts: &[Optio
     let (inner_min, inner_max) = if !is_auto(n.decl_w) {
         let w = if n.decl_border_box { (n.decl_w - extra).max(0.0) } else { n.decl_w };
         (w, w)
+    } else if n.replaced && !n.ratio_only {
+        (n.intrinsic_w, n.intrinsic_w) // a replaced box wants its intrinsic width (a ratio-only one, its container's)
     } else if n.display == DISPLAY_FLEX {
         flex_intrinsic_widths(i, inputs, runs, run_texts, children)?
     } else {
@@ -2683,6 +2732,7 @@ fn content_intrinsic(i: usize, inputs: &[Input], runs: &[Run], run_texts: &[Opti
             }
             text_intrinsic(&runs[rs..re], &run_texts[rs..re], n.ws_mode)
         }
+        _ if n.replaced => Some((0.0, 0.0)), // a replaced box holds no CSS content (a ratio-only svg asks its container)
         DISPLAY_BLOCK | DISPLAY_FLEX => {
             let (mut min, mut max) = (0.0f64, 0.0f64);
             let mut line = 0.0f64; // floats pack beside each other on a line, as inline boxes would
@@ -2718,6 +2768,9 @@ fn content_intrinsic(i: usize, inputs: &[Input], runs: &[Run], run_texts: &[Opti
 // percentage is auto, `decl_w`).
 fn min_content_width(i: usize, inputs: &[Input], runs: &[Run], run_texts: &[Option<Vec<u16>>], children: &[Vec<usize>]) -> Option<f64> {
     let n = inputs[i];
+    if n.replaced && !n.ratio_only {
+        return Some(n.intrinsic_w); // the oracle's minContentWidth: the intrinsic width, edges not counted
+    }
     let content = content_intrinsic(i, inputs, runs, run_texts, children)?.0 + n.edges_x();
     if is_auto(n.decl_w) {
         return Some(content);
@@ -3116,6 +3169,65 @@ fn child_baselines(order: impl Iterator<Item = usize> + Clone, inputs: &[Input],
     (first, last)
 }
 
+// A REPLACED box's used border-box (width, height) — the oracle's `usedSize` for a box with an intrinsic size:
+// the declared width / height win (content-box unless `box-sizing: border-box`), else the intrinsic size plus the
+// edges (a ratio-only box with no declared width takes `auto_w`, the room on offer); an intrinsic RATIO derives
+// the other axis from a declared one (or from the room, for a ratio-only box); min/max clamp through the ratio
+// (`clampWithRatio`: the binding clamp scales the content box, the other axis follows) or plainly without one; a
+// border box is floored at its own edges. Never auto-height: a replaced box is definite.
+fn replaced_box(n: &Input, auto_w: f64) -> (f64, f64) {
+    let (extra_w, extra_h) = (n.edges_x(), n.edges_y());
+    let (w_decl, h_decl) = (!is_auto(n.width), !is_auto(n.height));
+    let grow = (w_decl || h_decl) && !n.border_box;
+    let sized = !n.ratio_only;
+    let mut width = if w_decl { n.width + if grow { extra_w } else { 0.0 } } else if sized { n.intrinsic_w + extra_w } else { auto_w };
+    let mut height = if h_decl { n.height + if grow { extra_h } else { 0.0 } } else if sized { n.intrinsic_h + extra_h } else { 0.0 };
+    let ratio = if n.ratio && n.intrinsic_w > 0.0 && n.intrinsic_h > 0.0 { n.intrinsic_w / n.intrinsic_h } else { 0.0 };
+    if ratio > 0.0 {
+        if !h_decl && (w_decl || n.ratio_only) {
+            height = (width - extra_w).max(0.0) / ratio + extra_h;
+        } else if !w_decl && h_decl {
+            width = (height - extra_h).max(0.0) * ratio + extra_w;
+        }
+    }
+    let to_border_w = |v: f64| if is_auto(v) || n.border_box { v } else { v + extra_w };
+    let to_border_h = |v: f64| if is_auto(v) || n.border_box { v } else { v + extra_h };
+    let clamp_w = |bw: f64| clamp_min_max(bw, to_border_w(n.min_w), to_border_w(n.max_w));
+    let clamp_h = |bh: f64| clamp_min_max(bh, to_border_h(n.min_h), to_border_h(n.max_h));
+    if ratio > 0.0 {
+        // CSS 2.1 §10.4's constraint table for a box whose axes are tied by a ratio: whichever clamp binds hardest
+        // wins, the other axis follows the ratio and is clamped in turn; only an AUTO axis follows.
+        let (cw, ch) = ((width - extra_w).max(0.0), (height - extra_h).max(0.0));
+        let sw = if cw > 0.0 { (clamp_w(width) - extra_w) / cw } else { 1.0 };
+        let sh = if ch > 0.0 { (clamp_h(height) - extra_h) / ch } else { 1.0 };
+        let (auto_w_axis, auto_h_axis) = (!w_decl, !h_decl);
+        let scale = if auto_w_axis && auto_h_axis {
+            if sw == 1.0 { sh } else if sh == 1.0 { sw } else if (sw < 1.0) != (sh < 1.0) { 0.0 } else if sw < 1.0 { sw.min(sh) } else { sw.max(sh) }
+        } else if auto_h_axis {
+            sw
+        } else if auto_w_axis {
+            sh
+        } else {
+            0.0
+        };
+        if scale == 0.0 || scale == 1.0 {
+            width = clamp_w(width);
+            height = clamp_h(height);
+        } else {
+            width = clamp_w(cw * scale + extra_w);
+            height = clamp_h(ch * scale + extra_h);
+        }
+    } else {
+        width = clamp_w(width);
+        height = clamp_h(height);
+    }
+    if n.border_box {
+        width = width.max(extra_w);
+        height = height.max(extra_h);
+    }
+    (width, height)
+}
+
 // Convert the relative boxes to absolute document coordinates: add each node's absolute border-box
 // origin to its children (whose x/y are relative to it), top-down in one pass — plus each node's
 // `position: relative` offset, which moves it AND its subtree at paint time (the flow used the unshifted
@@ -3141,6 +3253,9 @@ fn resolve_width(n: &Input, cb_w: f64) -> f64 {
 // width): a declared width converted to border-box, else `auto_w`; clamped by min/max-width (same box model);
 // a border box floored at its own border+padding (content ≥ 0), matching usedSize's `isBorderBox` floor.
 fn used_width(n: &Input, auto_w: f64) -> f64 {
+    if n.replaced {
+        return replaced_box(n, auto_w).0;
+    }
     let border_w = if is_auto(n.width) {
         if n.border_box {
             auto_w.max(n.edges_x())
@@ -3234,6 +3349,12 @@ mod tests {
             flex_stretch: false,
             flex_native: false,
             flex_dir_reverse: false,
+            replaced: false,
+            ratio: false,
+            ratio_only: false,
+            shrinks_to_nothing: false,
+            intrinsic_w: 0.0,
+            intrinsic_h: 0.0,
         }
     }
 
