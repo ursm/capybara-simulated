@@ -681,4 +681,91 @@ RSpec.describe 'native layout flex parity', if: ENV.fetch('CSIM_JS_ENGINE', 'v8'
       expect_native_flex('<div style="display:flex;width:400px;box-sizing:border-box;height:5px;padding:10px"><div>x</div></div>')
     end
   end
+
+  # ── Native BASELINES ──────────────────────────────────────────────────────────────────────────────────
+  # A baseline-aligned item hangs from its own first (or last) baseline, which native now reads from its
+  # laid-out lines (`Box::first_baseline`, the oracle's boxBaselineOffset): a text block's line top + ascent,
+  # a block / grid / flex container's from its first in-flow child that has one (flex items in flex order,
+  # reversed for a *-reverse direction), a scrolling item's clamped into its box, and the bottom margin edge
+  # where no line is there to give one. Items with a shape the line ascent does not reproduce (an atomic
+  # inline, a vertical-align, a replaced element, a table) keep the pushed path.
+  describe 'native baselines' do
+    let(:base) { 'display:flex;align-items:baseline;width:400px' }
+
+    it 'aligns text items of different sizes on their first line baselines' do
+      expect_native_flex(%(<div style="#{base}"><div>small text</div><div style="font-size:32px">BIG</div><div style="font-size:12px">tiny</div></div>))
+      expect_native_flex(%(<div style="#{base}"><div style="line-height:40px">tall line</div><div style="font-size:32px;line-height:1">BIG</div></div>))
+      expect_native_flex(%(<div style="#{base}"><div>text <b style="font-size:28px">bold big</b> more</div><div>x</div></div>))
+      expect_native_flex(%(<div style="#{base}"><div style="white-space:pre">pre\nsecond</div><div style="font-size:32px">BIG</div></div>))
+    end
+    it 'takes a block item\'s baseline from its first in-flow child with a line, skipping empty blocks' do
+      expect_native_flex(%(<div style="#{base}"><div><p style="margin:0">first para</p><p style="margin:0;font-size:24px">second</p></div><div style="font-size:32px">BIG</div></div>))
+      expect_native_flex(%(<div style="#{base}"><div><div style="height:20px"></div><p style="margin:0">after empty block</p></div><div style="font-size:32px">BIG</div></div>))
+      expect_native_flex(%(<div style="#{base}"><div style="position:relative"><p style="margin:0">a</p><div style="position:absolute;font-size:40px">abs</div></div><div style="font-size:32px">BIG</div></div>))
+    end
+    it 'synthesises the bottom margin edge for an item with no line, and counts a <br>\'s empty line' do
+      expect_native_flex(%(<div style="#{base}"><div style="height:40px;width:40px"></div><div style="font-size:32px">BIG</div></div>))
+      expect_native_flex(%(<div style="#{base}"><div></div><div style="font-size:32px">BIG</div></div>))
+      expect_native_flex(%(<div style="#{base}"><div><div></div></div><div style="font-size:32px">BIG</div></div>))
+      expect_native_flex(%(<div style="#{base}"><div><br>after br</div><div style="font-size:32px">BIG</div></div>))
+    end
+    it 'adds the item\'s top margin and edges, clamps a scrolling item\'s baseline into its box' do
+      expect_native_flex(%(<div style="#{base}"><div style="padding:10px;border:2px solid;margin-top:7px">padded</div><div style="font-size:32px;margin-bottom:9px">BIG</div></div>))
+      expect_native_flex(%(<div style="#{base}"><div style="overflow:hidden;height:8px">clipped text</div><div style="font-size:32px">BIG</div></div>))
+    end
+    it 'aligns last baselines on the last line' do
+      expect_native_flex('<div style="display:flex;align-items:last baseline;width:400px"><div>line one<br>line two<br>line three</div><div style="font-size:32px">BIG</div></div>')
+      expect_native_flex(%(<div style="#{base}"><div>two lines of wrapping text in a narrow item here we go</div><div style="font-size:32px;width:250px">BIG</div></div>))
+    end
+    it 'reads a nested flex / grid container\'s baseline from its items in flex order, reversed for *-reverse' do
+      expect_native_flex(%(<div style="#{base}"><div style="display:flex"><div style="font-size:24px">nested</div><div>row</div></div><div style="font-size:32px">BIG</div></div>))
+      expect_native_flex(%(<div style="#{base}"><div style="display:flex;flex-direction:row-reverse"><div style="font-size:24px">a</div><div>b</div></div><div style="font-size:32px">BIG</div></div>))
+      expect_native_flex(%(<div style="#{base}"><div style="display:flex;flex-direction:column"><div style="font-size:24px">col a</div><div>col b</div></div><div style="font-size:32px">BIG</div></div>))
+      expect_native_flex(%(<div style="#{base}"><div style="display:flex;flex-direction:column-reverse"><div style="font-size:24px">col a</div><div>col b</div></div><div style="font-size:32px">BIG</div></div>))
+      expect_native_flex(%(<div style="#{base};direction:rtl"><div><div style="font-size:24px">rtl a</div></div><div style="font-size:32px">BIG</div></div>))
+    end
+    # A grid item is not natively measurable yet, so a grid baseline item still takes the pushed path — this
+    # only guards parity there; `measure_grid`'s own baseline derivation is exercised once grids are measurable.
+    it 'keeps parity for a nested grid baseline item (pushed path)' do
+      r = run_shadow(%(<div style="#{base}"><div style="display:grid;grid-template-columns:1fr 1fr"><div>g1</div><div style="font-size:24px">g2</div></div><div style="font-size:32px">BIG</div></div>))
+      expect(r).to include('ok' => true, 'mismatches' => 0, 'nativeFlexRows' => 0)
+    end
+    # Review findings, oracle side (native and Chrome agreed): a block holding both inline content and block
+    # children reads whichever comes first / last DOWN THE FLOW; a `position: relative` child's offset moves the
+    # box, not its baseline; a preserved newline's empty line is a line a baseline reads from; and the line's
+    # baseline is the ascent the flow grew it to, not a second scan of what sits on it.
+    it 'merges a block\'s own lines and its block children in flow order' do
+      expect_native_flex('<div style="display:flex;align-items:last baseline;width:400px"><div>text<p style="margin:0">para</p></div><div style="font-size:32px">BIG</div></div>')
+      expect_native_flex(%(<div style="#{base}"><div><p style="margin:0">para</p>text</div><div style="font-size:32px">BIG</div></div>))
+    end
+    it 'orders by flow, not by y: a negative margin does not make a later block come first' do
+      expect_native_flex(%(<div style="#{base}"><div>text<p style="margin:-30px 0 0">para</p></div><div style="font-size:32px">BIG</div></div>))
+      expect_native_flex('<div style="display:flex;align-items:last baseline;width:400px"><div><p style="margin:0 0 -30px">para</p>text</div><div style="font-size:32px">BIG</div></div>')
+      expect_native_flex(%(<div style="#{base}"><div><p style="margin:0">para</p><p style="margin:-40px 0 0">up</p></div><div style="font-size:32px">BIG</div></div>))
+    end
+    it 'ignores a relative child\'s offset for the baseline' do
+      expect_native_flex(%(<div style="#{base}"><div><p style="position:relative;top:10px;margin:0">a</p></div><div style="font-size:32px">BIG</div></div>))
+    end
+    it 'reads a baseline from the empty line a preserved newline leaves' do
+      expect_native_flex('<div style="display:flex;align-items:last baseline;width:400px"><div style="white-space:pre">a\n\n</div><div style="font-size:32px">BIG</div></div>')
+      expect_native_flex(%(<div style="#{base}"><div style="white-space:pre">\n\na</div><div style="font-size:32px">BIG</div></div>))
+      expect_native_flex(%(<div style="#{base}"><div style="white-space:pre-line">\n\na</div><div style="font-size:32px">BIG</div></div>))
+    end
+    it 'takes the line\'s baseline from the ascent the flow used (an empty inline, an open edge, a <br> in a larger inline)' do
+      expect_native_flex(%(<div style="#{base}"><div>a<span style="font-size:40px"></span>b</div><div style="font-size:32px">BIG</div></div>))
+      expect_native_flex(%(<div style="#{base}"><div style="width:120px">aaaa aaaa aaaa<span style="font-size:40px;padding-left:5px"> bbbbb</span></div><div style="font-size:32px">BIG</div></div>))
+      expect_native_flex(%(<div style="#{base}"><div><span style="font-size:40px"><br></span>text</div><div style="font-size:32px">BIG</div></div>))
+      expect_native_flex('<div style="display:flex;align-items:last baseline;width:400px"><div>text<span style="font-size:40px"><br></span></div><div style="font-size:32px">BIG</div></div>')
+    end
+    it 'keeps wrapped and mixed-alignment rows native' do
+      expect_native_flex(%(<div style="#{base};flex-wrap:wrap"><div style="width:300px">wrapped one</div><div style="font-size:32px;width:300px">BIG</div></div>))
+      expect_native_flex(%(<div style="#{base}"><div style="align-self:flex-start;height:50px">start</div><div>base</div><div style="font-size:32px">BIG</div></div>))
+    end
+    it 'falls back for a baseline item holding a vertical-align or an atomic inline' do
+      r = run_shadow(%(<div style="#{base}"><div>text <sup>sup</sup> more</div><div>x</div></div>))
+      expect(r).to include('ok' => true, 'mismatches' => 0, 'nativeFlexRows' => 0)
+      r = run_shadow(%(<div style="#{base}"><div>text <span style="display:inline-block;height:30px;width:10px"></span> more</div><div>x</div></div>))
+      expect(r).to include('ok' => true, 'mismatches' => 0, 'nativeFlexRows' => 0)
+    end
+  end
 end

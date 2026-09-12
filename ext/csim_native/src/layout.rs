@@ -204,16 +204,21 @@ pub(crate) struct Input {
     pub(crate) decl_border_box: bool,
     // Flex SIZING inputs (an item of a natively-sized container, `flex_native`): `flex-shrink`; `flex-basis`
     // resolved against the container's main size (NaN = auto / a keyword — `flex_basis_kw` 0 none, 1 content,
-    // 2 min-content, 3 max-content, 4 fit-content); whether the item scrolls in the main axis (its automatic
-    // minimum is then zero, §4.5); whether it STRETCHES in the cross axis (`align-self: stretch` with an auto
-    // cross size and no auto cross margin). On a CONTAINER, `flex_native` = the items' main sizes are computed
-    // here (`flex_row_sizes`) rather than pushed from the oracle.
+    // 2 min-content, 3 max-content, 4 fit-content); whether the item scrolls across (its automatic minimum in
+    // that axis is then zero, §4.5, and its baseline is clamped into its box); whether it STRETCHES in the
+    // cross axis (`align-self: stretch` with an auto cross size and no auto cross margin). On a CONTAINER,
+    // `flex_native` = the items' main sizes are computed here (`flex_row_sizes` / `flex_column_sizes`) rather
+    // than pushed from the oracle.
     pub(crate) flex_shrink: f64,
     pub(crate) flex_basis_cb: f64,
     pub(crate) flex_basis_kw: u8,
-    pub(crate) scrolls_main: bool,
+    pub(crate) scrolls_x: bool,
+    pub(crate) scrolls_y: bool,
     pub(crate) flex_stretch: bool,
     pub(crate) flex_native: bool,
+    // On a flex CONTAINER: `flex-direction` is a `*-reverse` value (its baseline candidates run backwards; an
+    // rtl row reverses the main axis without this).
+    pub(crate) flex_dir_reverse: bool,
 }
 
 pub(crate) const CROSS_BASELINE: u8 = 3;
@@ -301,6 +306,12 @@ pub(crate) struct Box {
     pub(crate) w: f64,
     pub(crate) h: f64,
     pub(crate) auto_height: bool,
+    // The box's FIRST and LAST baselines as offsets from its border-box top (the oracle's `boxBaselineOffset`):
+    // a text block's first / last line baseline (the line's top + its ascent — strut and runs); a block, grid
+    // or flex container's from the first / last in-flow child that has one (flex items in flex order); None
+    // when no line is there to give one (a flex item then synthesises its bottom margin edge).
+    pub(crate) first_baseline: Option<f64>,
+    pub(crate) last_baseline: Option<f64>,
 }
 
 // Clamp a resolved main size by min/max (min wins over max, per CSS). `none` (NaN) bounds are skipped.
@@ -363,7 +374,7 @@ pub(crate) fn layout_block(inputs: &[Input], runs: &[Run], run_texts: &[Option<V
     }
     let mut boxes: Vec<Box> = inputs
         .iter()
-        .map(|n| Box { nid: n.nid, x: 0.0, y: 0.0, w: 0.0, h: 0.0, auto_height: false })
+        .map(|n| Box { nid: n.nid, x: 0.0, y: 0.0, w: 0.0, h: 0.0, auto_height: false, first_baseline: None, last_baseline: None })
         .collect();
     // Two phases: MEASURE lays the subtree out relative to each node's own border-box origin (so
     // collapse-through margins can propagate UP through returns without knowing final positions), then
@@ -399,7 +410,7 @@ fn is_ws_u16(u: u16) -> bool {
 // current line. BR forces a line break. A line's box is max(ascent)+max(descent) over the STRUT
 // (`strut_lh` / `strut_asc`) and the runs on it (each run's descent = line_height - asc), §10.8 — so a
 // taller-metric run grows the box even under a fixed line-height; an empty line (a lone/leading `<br>`)
-// is the bare strut (asc + desc == strut_lh). Returns (line count, total content height = Σ line
+// is the bare strut (asc + desc == strut_lh). Returns the content height (Σ line heights) and the first / last
 // heights). None when a construct isn't modelled — a tab / combining mark / CJK char, a WORD spanning
 // two runs (no space at the boundary), or a `<br>` while an inline edge is open — so the caller declines to JS.
 //
@@ -419,7 +430,7 @@ fn line_layout(
     cr: f64,
     top: f64,
     ws_mode: u8,
-) -> Option<(u32, f64)> {
+) -> Option<LineLayout> {
     // The three orthogonal `white-space` behaviours (see Input::ws_mode). `no_wrap` keeps the old name for the
     // four soft-wrap gates below: a line SOFT-wraps under normal (0) / pre-wrap (3) / pre-line (4), never under
     // nowrap (1) / pre (2). `preserve` keeps every space as a real advance (pre / pre-wrap) rather than
@@ -444,11 +455,10 @@ fn line_layout(
     let mut line_asc = strut_asc;
     let mut line_desc = strut_desc;
     let mut line_has_content = false;
-    let mut n = 1u32;
     // Open inline edges not yet closed: (pending-open width, already-flushed?). openEdgeWidth = Σ of the
     // unflushed pendings — reserved in the fit test until the first content flushes it onto the line.
     let mut open: Vec<(f64, bool)> = Vec::new();
-    let mut pending_space: Option<f64> = None; // collapsed space before the next word
+    let mut pending_space: Option<(f64, f64, f64)> = None; // collapsed space before the next word: (width, asc, desc) of its run
     // An atomic inline is a break opportunity on BOTH sides regardless of whitespace: this flag carries the
     // AFTER-side break (a zero-width break opportunity) to the next box, so a word glued to an atomic can still
     // wrap before it. (The BEFORE-side break is unconditional in the RUN_ATOMIC arm itself.) Reset on any word
@@ -458,10 +468,16 @@ fn line_layout(
     // between-words wrap, a break before an atomic — where no pending space or after-atomic break carries over);
     // `break_line!` adds the resets a HARD break needs (a <br>, a preserved/pre-line newline, an empty line's
     // bare strut) so a queued space / atomic opportunity does not survive it. Capture the surrounding line state.
+    // The first / last line CLOSED, as (top, ascent) — a line a `<br>` left empty is a line too (its bare strut).
+    let mut first_line: Option<(f64, f64)> = None;
+    let mut last_line: Option<(f64, f64)> = None;
     macro_rules! soft_break {
         () => {{
+            if first_line.is_none() {
+                first_line = Some((total, line_asc));
+            }
+            last_line = Some((total, line_asc));
             total += line_asc + line_desc;
-            n += 1;
             line_x = 0.0;
             line_asc = strut_asc;
             line_desc = strut_desc;
@@ -513,10 +529,15 @@ fn line_layout(
                                 match text[i] {
                                     0x0A => break_line!(), // newline → forced break
                                     0x20 => {
+                                        // A preserved space is content on the line: it grows the line box by its
+                                        // run's metrics as a word would (a lone space in a larger font is a fragment
+                                        // there).
                                         line_x += space_w;
                                         line_has_content = true;
+                                        line_asc = line_asc.max(run.asc);
+                                        line_desc = line_desc.max(run.line_height - run.asc);
                                         if !no_wrap {
-                                            pending_space = Some(0.0); // wrap opportunity, width already added
+                                            pending_space = Some((0.0, run.asc, run.line_height - run.asc)); // wrap opportunity, width already added
                                         }
                                     }
                                     _ => return None, // tab (tab stops) / \r / \f — not modelled
@@ -540,7 +561,7 @@ fn line_layout(
                                     break_line!();
                                 }
                             } else if line_has_content && pending_space.is_none() {
-                                pending_space = Some(space_w);
+                                pending_space = Some((space_w, run.asc, run.line_height - run.asc));
                             }
                         }
                     } else {
@@ -550,9 +571,9 @@ fn line_layout(
                         }
                         let word = &text[start..i];
                         let width = measure_word(run, word)?;
-                        let (space_before, sw) = match pending_space.take() {
-                            Some(s) => (true, s),
-                            None => (false, 0.0),
+                        let (space_before, sw, sasc, sdesc) = match pending_space.take() {
+                            Some((s, a, d)) => (true, s, a, d),
+                            None => (false, 0.0, 0.0, 0.0),
                         };
                         // A word glued to the previous one across a run boundary — no space between, a mixed-font
                         // word like `foo<b>bar</b>` or `H<sub>2</sub>O` where the edgeless inline emits no
@@ -561,7 +582,13 @@ fn line_layout(
                         // simply overflows the line when the whole unit runs long. This matches the oracle's greedy
                         // breaker exactly — a mid-word run boundary is never a line-break opportunity (§ CSS Text:
                         // no break within a word), and ONLY the unit's leading word is fit-tested against the band.
-                        if space_before && line_has_content {
+                        // The collapsed space lands on the line as a fragment of ITS run — a whitespace-only inline in
+                        // a larger font grows the line it sits on (Chrome: 47 for `a<span style="font-size:40px"> </span>b`
+                        // in a 16px block). The oracle grows it only where the space STAYS (a space the wrap drops
+                        // grows nothing there; Chrome grows the line for any fragment on it — a shared gap, see the
+                        // native_layout_text spec), so the growth is applied once the line the space sits on is settled.
+                        let space_on_line = space_before && line_has_content;
+                        if space_on_line {
                             line_x += sw; // hanging space
                         }
                         // IN-WORD BREAKING (`overflow-wrap: break-word|anywhere` / `word-break: break-all`): a word
@@ -583,6 +610,9 @@ fn line_layout(
                             // break-all takes no fresh line: it fills the current line in place.
                             if wrap_mode >= 2 && line_has_content && preceded {
                                 soft_break!();
+                            } else if space_on_line {
+                                line_asc = line_asc.max(sasc); // the space stays on this line: its run's metrics grow it
+                                line_desc = line_desc.max(sdesc);
                             }
                             let mut u = start;
                             let mut first = true;
@@ -624,8 +654,10 @@ fn line_layout(
                             let ow: f64 = open.iter().filter(|o| !o.1).map(|o| o.0).sum();
                             // A break opportunity precedes this word at a collapsed space OR right after an atomic —
                             // but `white-space: nowrap` never SOFT-wraps (only <br>), so the line grows past the band.
+                            let mut broke = false;
                             if !no_wrap && line_has_content && (space_before || atomic_break) && line_x + ow + width > band_w(total) {
                                 soft_break!(); // break: close the line (the hanging space is dropped)
+                                broke = true;
                             }
                             // An empty line whose first word won't fit the band drops below the float squeezing
                             // it (§9.5, "if a shortened line box is too small…"), growing the block by the gap. A
@@ -650,6 +682,10 @@ fn line_layout(
                             line_desc = line_desc.max(run.line_height - run.asc);
                             line_has_content = true;
                             atomic_break = false; // consumed the after-atomic break opportunity
+                            if space_on_line && !broke {
+                                line_asc = line_asc.max(sasc); // the space stayed: its run's metrics grow the line
+                                line_desc = line_desc.max(sdesc);
+                            }
                         }
                     }
                 }
@@ -660,11 +696,13 @@ fn line_layout(
                 // regardless of whitespace: it may break BEFORE it here (unconditional, on overflow), and it
                 // sets `atomic_break` so the NEXT box may break before itself too.
                 let width = run.metric;
-                let (space_before, sw) = match pending_space.take() {
-                    Some(s) => (true, s),
-                    None => (false, 0.0),
+                let (space_before, sw, sasc, sdesc) = match pending_space.take() {
+                    Some((s, a, d)) => (true, s, a, d),
+                    None => (false, 0.0, 0.0, 0.0),
                 };
-                if space_before && line_has_content {
+                let space_on_line = space_before && line_has_content;
+                let mut broke = false;
+                if space_on_line {
                     line_x += sw; // hanging space
                 }
                 let ow: f64 = open.iter().filter(|o| !o.1).map(|o| o.0).sum();
@@ -672,6 +710,11 @@ fn line_layout(
                 // nowrap`, which never soft-wraps.
                 if !no_wrap && line_has_content && line_x + ow + width > band_w(total) {
                     soft_break!(); // break before the atomic (drop any hanging space)
+                    broke = true;
+                }
+                if space_on_line && !broke {
+                    line_asc = line_asc.max(sasc); // the space stayed: its run's metrics grow the line
+                    line_desc = line_desc.max(sdesc);
                 }
                 // A nowrap line is not shortened by / dropped below a float (see the word branch above).
                 if !no_wrap && !floats.is_empty() && !line_has_content && width + ow > band_w(total) {
@@ -706,9 +749,20 @@ fn line_layout(
     }
 
     if line_has_content {
+        if first_line.is_none() {
+            first_line = Some((total, line_asc));
+        }
+        last_line = Some((total, line_asc));
         total += line_asc + line_desc; // close the final line (a trailing <br>'s fresh empty line is NOT closed)
     }
-    Some((n, total))
+    Some(LineLayout { height: total, first: first_line, last: last_line })
+}
+// What `line_layout` lays out: the line count, the content height, and the first / last line as (top, ascent)
+// within the content box — the baselines a box hands its container.
+struct LineLayout {
+    height: f64,
+    first: Option<(f64, f64)>,
+    last: Option<(f64, f64)>,
 }
 
 // A UTF-16 unit whose code point is a wide/CJK character (its own break unit) — a lone BMP unit, or a
@@ -927,7 +981,11 @@ fn measure(
         let (rs, re) = (n.run_start.max(0) as usize, (n.run_start + n.run_count).max(0) as usize);
         let content_h = if re <= runs.len() && rs <= re {
             match line_layout(&runs[rs..re], &run_texts[rs..re], n.strut_lh, n.strut_asc, content_w, &fc.items, cl, cr, bfc_top, n.ws_mode) {
-                Some((_, h)) => h,
+                Some(ll) => {
+                    boxes[i].first_baseline = ll.first.map(|(top, asc)| content_top_rel + top + asc);
+                    boxes[i].last_baseline = ll.last.map(|(top, asc)| content_top_rel + top + asc);
+                    ll.height
+                }
                 None => {
                     failed.set(true);
                     0.0
@@ -1179,6 +1237,11 @@ fn measure(
         first = false;
     }
 
+    // The block's baselines: the first / last in-flow, non-floated child that has one (`baselineCandidates`).
+    let (fb, lb) = child_baselines(children[i].iter().copied(), inputs, boxes);
+    boxes[i].first_baseline = fb;
+    boxes[i].last_baseline = lb;
+
     let mut bottom_m = CMargin::of(Input::m(n.mb));
     let box_h = if is_auto(n.height) {
         let flow_bottom = if !has_child {
@@ -1380,7 +1443,7 @@ fn flex_row_sizes(
     let floor_of = |p: usize, inputs: &[Input]| -> Option<f64> {
         let c = kids[p];
         let k = inputs[c];
-        Some(if k.scrolls_main { k.edges_x() } else { min_content_width(c, inputs, runs, run_texts, children)? })
+        Some(if k.scrolls_x { k.edges_x() } else { min_content_width(c, inputs, runs, run_texts, children)? })
     };
     for &p in flow {
         if is_auto(inputs[kids[p]].min_w) && !content_based[p] {
@@ -1554,7 +1617,7 @@ fn flex_column_sizes(
     let auto_min_of = |p: usize, width: &Vec<f64>, measured: &mut Vec<Option<f64>>, auto_min: &mut Vec<Option<f64>>, boxes: &mut [Box]| -> f64 {
         if auto_min[p].is_none() {
             let k = inputs[kids[p]];
-            auto_min[p] = Some(if k.scrolls_main {
+            auto_min[p] = Some(if k.scrolls_y {
                 0.0
             } else {
                 let m = measure_of(p, width, measured, boxes);
@@ -1879,10 +1942,27 @@ fn measure_flex(
     let mut line_first_asc = vec![0.0f64; nlines];
     let mut line_last_asc = vec![0.0f64; nlines];
     let mut line_last_extent = vec![0.0f64; nlines];
+    // Each item's baseline ASCENT within its margin box — the oracle's `baselineParts.asc`: its own first (or, for
+    // a `last baseline` item, last) baseline plus its top margin, clamped into the box when the item scrolls
+    // down (a scroll container's baseline comes from its border box), else its bottom margin edge when it has no
+    // line to give. Read from the natively laid-out item where this container sizes its items itself; a pushed
+    // item carries the oracle's figure (rec[42]).
+    let bl_asc: Vec<f64> = (0..cnt).map(|p| {
+        let c = kids[p];
+        let k = inputs[c];
+        if !n.flex_native {
+            return k.flex_baseline_asc;
+        }
+        let own = if k.flex_cross_align == CROSS_BASELINE_LAST { boxes[c].last_baseline } else { boxes[c].first_baseline };
+        match own {
+            Some(o) => (if k.scrolls_y { o.max(0.0).min(boxes[c].h) } else { o }) + Input::m(k.mt),
+            None => boxes[c].h + Input::m(k.mt) + Input::m(k.mb),
+        }
+    }).collect();
     for (li, line) in lines.iter().enumerate() {
         let (mut plain, mut fa, mut fb, mut la, mut lb) = (0.0f64, 0.0f64, 0.0f64, 0.0f64, 0.0f64);
         for &p in line {
-            let asc = inputs[kids[p]].flex_baseline_asc;
+            let asc = bl_asc[p];
             match inputs[kids[p]].flex_cross_align {
                 CROSS_BASELINE => { fa = fa.max(asc); fb = fb.max(co[p] - asc); }
                 CROSS_BASELINE_LAST => { la = la.max(asc); lb = lb.max(co[p] - asc); }
@@ -2055,8 +2135,8 @@ fn measure_flex(
                     // member's own baseline coincides at line_first_asc. The FIRST-baseline group anchors at
                     // the cross-START; the LAST-baseline group anchors at the cross-END (groupTop = lc −
                     // lastExtent), both measured from their anchor.
-                    CROSS_BASELINE => line_first_asc[li] - inputs[c].flex_baseline_asc,
-                    CROSS_BASELINE_LAST => (lc - line_last_extent[li]) + line_last_asc[li] - inputs[c].flex_baseline_asc,
+                    CROSS_BASELINE => line_first_asc[li] - bl_asc[p],
+                    CROSS_BASELINE_LAST => (lc - line_last_extent[li]) + line_last_asc[li] - bl_asc[p],
                     _ => 0.0,                // start / stretch
                 };
                 cs + off + cl_lead[p]
@@ -2081,6 +2161,13 @@ fn measure_flex(
             boxes[c].y = 0.0;
         }
     }
+
+    // The container's baselines: from its items in FLEX order — record order, reversed for a `*-reverse`
+    // direction (`baselineCandidates`; an rtl row is not reversed there).
+    let order: Vec<usize> = if n.flex_dir_reverse { flow.iter().rev().map(|&p| kids[p]).collect() } else { flow.iter().map(|&p| kids[p]).collect() };
+    let (fb, lb) = child_baselines(order.into_iter(), inputs, boxes);
+    boxes[i].first_baseline = fb;
+    boxes[i].last_baseline = lb;
 
     boxes[i].nid = n.nid;
     boxes[i].w = box_w;
@@ -2986,6 +3073,9 @@ fn measure_grid(
         }
     }
 
+    let (fb, lb) = child_baselines(children[i].iter().copied(), inputs, boxes);
+    boxes[i].first_baseline = fb;
+    boxes[i].last_baseline = lb;
     boxes[i].nid = n.nid;
     boxes[i].w = w;
     let box_h = if is_auto(n.height) {
@@ -3001,6 +3091,29 @@ fn measure_grid(
     // A grid establishes an independent formatting context: its margins do not collapse with its items'.
     let top = CMargin::of(Input::m(n.mt));
     MInfo { top, top_only: top, bottom: CMargin::of(Input::m(n.mb)), collapse_through: false }
+}
+
+// A container's first / last baseline from its children in the given order — the first that has a first
+// baseline and the last that has a last baseline, each offset by the child's relative top; out-of-flow and
+// floated children give none (the oracle's `baselineCandidates`).
+fn child_baselines(order: impl Iterator<Item = usize> + Clone, inputs: &[Input], boxes: &[Box]) -> (Option<f64>, Option<f64>) {
+    let mut first = None;
+    let mut last = None;
+    for c in order {
+        let cn = inputs[c];
+        if cn.out_of_flow != 0 || cn.float_kind != 0 {
+            continue;
+        }
+        if first.is_none() {
+            if let Some(b) = boxes[c].first_baseline {
+                first = Some(boxes[c].y + b);
+            }
+        }
+        if let Some(b) = boxes[c].last_baseline {
+            last = Some(boxes[c].y + b);
+        }
+    }
+    (first, last)
 }
 
 // Convert the relative boxes to absolute document coordinates: add each node's absolute border-box
@@ -3116,9 +3229,11 @@ mod tests {
             flex_shrink: 1.0,
             flex_basis_cb: f64::NAN,
             flex_basis_kw: 0,
-            scrolls_main: false,
+            scrolls_x: false,
+            scrolls_y: false,
             flex_stretch: false,
             flex_native: false,
+            flex_dir_reverse: false,
         }
     }
 
@@ -3138,8 +3253,8 @@ mod tests {
         b.height = 30.0;
         let inputs = vec![blk(0.0, -1), a, b];
         let bx = boxes(layout_block(&inputs, &[], &[], &[], 0.0, 0.0, 800.0));
-        assert_eq!(bx[1], Box { nid: 1.0, x: 0.0, y: 0.0, w: 800.0, h: 50.0, auto_height: false });
-        assert_eq!(bx[2], Box { nid: 2.0, x: 0.0, y: 50.0, w: 800.0, h: 30.0, auto_height: false });
+        assert_eq!(bx[1], Box { nid: 1.0, x: 0.0, y: 0.0, w: 800.0, h: 50.0, auto_height: false, first_baseline: None, last_baseline: None });
+        assert_eq!(bx[2], Box { nid: 2.0, x: 0.0, y: 50.0, w: 800.0, h: 30.0, auto_height: false, first_baseline: None, last_baseline: None });
         assert_eq!(bx[0].h, 80.0); // root auto height = 50 + 30
         assert!(bx[0].auto_height);
     }
@@ -3284,7 +3399,7 @@ mod tests {
         let inputs = vec![blk(0.0, -1), owner, f];
         let bx = boxes(layout_block(&inputs, &[], &[], &[], 0.0, 0.0, 800.0));
         assert_eq!(bx[1].h, 120.0); // owner contains the float
-        assert_eq!(bx[2], Box { nid: 2.0, x: 0.0, y: 0.0, w: 80.0, h: 120.0, auto_height: false });
+        assert_eq!(bx[2], Box { nid: 2.0, x: 0.0, y: 0.0, w: 80.0, h: 120.0, auto_height: false, first_baseline: None, last_baseline: None });
     }
 
     #[test]

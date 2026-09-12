@@ -202,4 +202,20 @@ RSpec.describe 'flex baseline alignment' do
                   [item('small'), item('big', 'font-size:32px')])
     expect(boxes[0, 2].map {|b| b[0] }).to eq([0, 0])
   end
+
+  # A box's baseline merges its own lines and its in-flow block children in FLOW order (Chrome: the last
+  # baseline of `text<p>para</p>` is the paragraph's; the first of `<p>para</p>text` is the paragraph's), and a
+  # `position: relative` child's offset moves its box, not the baseline read through it.
+  def last_ascent_of(subject)
+    boxes, = flex('align-items:last baseline', [subject, ruler])
+    boxes[1][1]
+  end
+
+  it 'reads a mixed block\'s first and last baselines in flow order' do
+    expect(ascent_of(item('<p style="margin:0;font-size:24px">para</p>text'))).to eq(ascent_of(item('<p style="margin:0;font-size:24px">para</p>')))
+    expect(last_ascent_of(item('text<p style="margin:0;font-size:24px">para</p>'))).to eq(last_ascent_of(item('<div style="height:18px"></div><p style="margin:0;font-size:24px">para</p>')))
+  end
+  it 'does not move a baseline with a relative child\'s offset' do
+    expect(ascent_of(item('<p style="position:relative;top:10px;margin:0">a</p>'))).to eq(ascent_of(item('<p style="margin:0">a</p>')))
+  end
 end

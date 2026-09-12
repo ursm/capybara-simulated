@@ -988,7 +988,9 @@ fn layout_pass(
             flex_shrink: r[62],
             flex_basis_cb: r[63],
             flex_basis_kw: r[64] as u8,
-            scrolls_main: r[65] != 0.0,
+            scrolls_x: (r[65] as u32) & 1 != 0,
+            scrolls_y: (r[65] as u32) & 2 != 0,
+            flex_dir_reverse: (r[65] as u32) & 4 != 0,
             flex_stretch: r[66] != 0.0,
             flex_native: r[67] != 0.0,
         });

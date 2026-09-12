@@ -279,6 +279,22 @@ RSpec.describe 'native layout L2 text-block parity', if: ENV.fetch('CSIM_JS_ENGI
   it 'matches a shift wrapping bold nested content (no line growth)' do
     expect_parity('<div style="width:300px">a <sup><b>1</b></sup> b</div>')
   end
+  # A whitespace-only inline in a larger font is a fragment on the line it sits on and grows the line box
+  # (Chrome: 47 for `a<span style="font-size:40px"> </span>b` in a 16px block); native never grew a line for a
+  # placed collapsed space (review finding). The ORACLE grows it only where the space stays — a space the wrap
+  # drops grows nothing there, where Chrome grows a line for ANY inline fragment on it (CSS 2.1 §10.8: an empty
+  # inline, a dropped space, a <br> inside a larger inline). That is a shared gap of both engines, kept in
+  # parity here and tracked as a backlog item; these cases pin the parity, not Chrome.
+  it 'grows a line for a placed whitespace-only inline of a larger font (the oracle: not for a space the wrap drops)' do
+    expect_parity('<div style="width:300px"><div>a<span style="font-size:40px"> </span>b</div></div>')
+    expect_parity('<div style="width:300px"><div>a <span style="font-size:40px"> </span> b</div></div>')
+    expect_parity('<div style="width:60px"><div>aaaa<span style="font-size:40px"> </span>bbbb cccc</div></div>')
+    expect_parity('<div style="width:300px"><div><span style="font-size:40px"> </span>a</div></div>')
+    expect_parity('<div style="width:300px;white-space:pre"><div>a<span style="font-size:40px"> </span>b</div></div>')
+    expect_parity('<div style="width:60px;white-space:pre-wrap"><div>aaaa<span style="font-size:40px"> </span>bbbb</div></div>')
+    expect_parity('<div style="width:60px"><div>aaaa<span style="font-size:40px"> </span><span style="display:inline-block;width:30px;height:5px"></span></div></div>')
+  end
+
 end
 
 RSpec.describe 'native text valign decline', if: ENV.fetch('CSIM_JS_ENGINE', 'v8') == 'v8' do
