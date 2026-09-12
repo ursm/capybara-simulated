@@ -311,4 +311,11 @@ RSpec.describe 'native text valign decline', if: ENV.fetch('CSIM_JS_ENGINE', 'v8
 
   it('declines vertical-align:middle on an inline element') { expect_bail('<div style="width:300px">text <span style="vertical-align:middle">m</span> here</div>') }
   it('declines vertical-align:text-top on an inline element') { expect_bail('<div style="width:300px">text <span style="vertical-align:text-top">t</span> here</div>') }
+
+  # A forced break INSIDE an inline's edges splits the box into fragments whose edges native's line layout
+  # cannot place (its `RUN_BR` arm declines an open edge), so the walk declines the block rather than let the
+  # pass fail on it. An unedged inline around a `<br>` emits no edge runs and stays native.
+  it('declines a break inside a padded inline') { expect_bail('<div style="width:400px">x <b style="padding:0 5px">t<br>u</b> y</div>') }
+  it('declines a break inside a bordered inline') { expect_bail('<div style="width:400px">x <b style="border-left:2px solid">t<br>u</b> y</div>') }
+  it('declines a break inside a margined inline') { expect_bail('<div style="width:400px">x <b style="margin:0 5px"><br></b> y</div>') }
 end

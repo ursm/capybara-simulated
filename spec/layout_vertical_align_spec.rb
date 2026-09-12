@@ -236,6 +236,17 @@ RSpec.describe 'vertical-align' do
     expect(boxes[1][1]).to be_within(0.02).of(boxes[0][1])
   end
 
+  # An inline-block hangs from a LINE BOX (CSS2 §10.8.1), and a TABLE generates none: an inline-block whose
+  # content is a table has no baseline of its own and hangs from its bottom margin edge (Chrome: the line is 28
+  # tall around a 24px table, where the table's own first-row baseline would make it 24).
+  it 'gives an inline-block wrapping a table no baseline of its own' do
+    body = %(<div id="c" style="width:400px">t#{ruler}<span id="i" style="display:inline-block"><table id="t"><tr><td>a</td><td>b</td></tr></table></span></div>)
+    boxes, = measure(body, ['#c', '#c > span:nth-of-type(1)', '#i', '#t'])
+    line, ruler_box, ib, table = boxes
+    expect(ib[1] + ib[3]).to be_within(0.02).of(ruler_box[1])   # its bottom margin edge is the baseline
+    expect(line[3]).to be > table[3]                            # …so the line is taller than the table
+  end
+
   # HTML's own sheet raises and shrinks `<sup>` and `<sub>`, and both halves show.
   it 'gives sup and sub their UA rules' do
     body = %(<div id="c" style="width:400px">x#{ruler}<sup id="s">2</sup></div>)

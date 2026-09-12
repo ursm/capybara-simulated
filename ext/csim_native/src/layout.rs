@@ -219,6 +219,26 @@ pub(crate) struct Input {
     pub(crate) scrolls_y: bool,
     // A `<button>`: its baseline is its content's however it scrolls (`child_baselines`).
     pub(crate) is_button: bool,
+    // TABLE: whether the box is the table's OWN to size — an in-flow block-level table, whose auto width
+    // shrink-to-fits its columns (§17.5.2). False where the parent handed it a box (a grid area, a flex item's
+    // pushed size, an out-of-flow inset box), and then the width the caller passed is the used one.
+    pub(crate) self_sizes: bool,
+    // TABLE CELL: the `%` fraction its `width` declared (0 for none / a length) — a column's `pct`, resolved
+    // against the width the columns share out rather than the table's own box (`distribute_columns`).
+    pub(crate) cell_pct: f64,
+    // TABLE CELL: its (min-content, max-content) contribution as the ORACLE measured it — NaN where native
+    // measures the cell itself (`nlIntrinsicMeasurable`). A cell native cannot measure (a control's chrome, CJK
+    // text, a nested grid, a `%` edge an intrinsic measure has no basis for) rides its resolved figures instead
+    // of declining the whole table, exactly as an un-measurable grid track does.
+    pub(crate) cell_min_content: f64,
+    pub(crate) cell_max_content: f64,
+    // TABLE CELL: the BORDER-box height its row gives it (NaN until the native row algorithm lands: the
+    // oracle's used row height, imposed on the cell's layout).
+    pub(crate) cell_height: f64,
+    // TABLE: `table-layout: fixed` is declared. With a width to hand out it sizes the columns from the first
+    // row alone (`fixed_column_widths`); with `width: auto` there is nothing to distribute and the content
+    // algorithm takes over, which an auto `width` already says.
+    pub(crate) table_fixed: bool,
     pub(crate) flex_stretch: bool,
     pub(crate) flex_native: bool,
     // On a flex CONTAINER: `flex-direction` is a `*-reverse` value (its baseline candidates run backwards; an
@@ -1075,14 +1095,15 @@ fn measure(
         return measure_flex(i, w, imposed_h, inputs, runs, run_texts, grids, children, boxes, failed);
     }
 
-    // A TABLE (§17): the cell SIZING (column widths × row heights) is resolved JS-side and rides each cell's
-    // record; native reassembles the tracks and positions every cell / row / row-group and the table box.
+    // A TABLE (§17): native sizes the COLUMNS from the cells' own content and positions every cell / row /
+    // row-group and the table box; each cell's ROW height still rides its record (`cell_height`).
     if n.display == DISPLAY_TABLE {
-        return measure_table(i, imposed_h, inputs, runs, run_texts, grids, children, boxes, failed);
+        return measure_table(i, w, imposed_h, inputs, runs, run_texts, grids, children, boxes, failed);
     }
 
     // A computed GRID (§12): native sizes the columns (fixed / % / fr / intrinsic) and lays out each item at its
     // track width; rows are content-height. The parsed template + gaps + placement live in `grids[grid_start..]`.
+    // (A TABLE's own side-channel, `table_col_decls`, lives at the same index.)
     if n.display == DISPLAY_GRID {
         return measure_grid(i, w, imposed_h, inputs, runs, run_texts, grids, children, boxes, failed);
     }
@@ -1119,7 +1140,7 @@ fn measure(
                 let auto_w = if k.replaced && k.ratio_only {
                     (content_w - ml - mr).max(0.0)
                 } else {
-                    match intrinsic_widths(c, inputs, runs, run_texts, children) {
+                    match intrinsic_widths(c, inputs, runs, run_texts, grids, children) {
                         Some((imin, imax)) => imin.max(content_w).min(imax),
                         None => {
                             failed.set(true);
@@ -1579,6 +1600,7 @@ fn flex_row_sizes(
     inputs: &[Input],
     runs: &[Run],
     run_texts: &[Option<Vec<u16>>],
+    grids: &[f64],
     children: &[Vec<usize>],
 ) -> Option<Vec<f64>> {
     let cnt = kids.len();
@@ -1594,7 +1616,7 @@ fn flex_row_sizes(
             k.flex_basis_cb + extra
         } else if matches!(k.flex_basis_kw, 2 | 3 | 4) {
             content_based[p] = true;
-            let (wmin, wmax) = content_intrinsic(c, inputs, runs, run_texts, children)?;
+            let (wmin, wmax) = content_intrinsic(c, inputs, runs, run_texts, grids, children)?;
             let inner = match k.flex_basis_kw {
                 2 => wmin,
                 3 => wmax,
@@ -1610,9 +1632,9 @@ fn flex_row_sizes(
         } else {
             content_based[p] = true;
             if k.flex_basis_kw == 1 {
-                content_intrinsic(c, inputs, runs, run_texts, children)?.1 + edges
+                content_intrinsic(c, inputs, runs, run_texts, grids, children)?.1 + edges
             } else {
-                intrinsic_widths(c, inputs, runs, run_texts, children)?.1
+                intrinsic_widths(c, inputs, runs, run_texts, grids, children)?.1
             }
         };
     }
@@ -1623,7 +1645,7 @@ fn flex_row_sizes(
     let floor_of = |p: usize, inputs: &[Input]| -> Option<f64> {
         let c = kids[p];
         let k = inputs[c];
-        Some(if k.scrolls_x { k.edges_x() } else { min_content_width(c, inputs, runs, run_texts, children)? })
+        Some(if k.scrolls_x { k.edges_x() } else { min_content_width(c, inputs, runs, run_texts, grids, children)? })
     };
     for &p in flow {
         if is_auto(inputs[kids[p]].min_w) && !content_based[p] {
@@ -1760,7 +1782,7 @@ fn flex_column_sizes(
         let auto_w = if k.flex_stretch && (!multiline || (k.replaced && k.ratio)) {
             avail_w
         } else {
-            let (imin, imax) = intrinsic_widths(c, inputs, runs, run_texts, children)?;
+            let (imin, imax) = intrinsic_widths(c, inputs, runs, run_texts, grids, children)?;
             imin.max(avail_w).min(imax)
         };
         width[p] = used_width(&k, auto_w);
@@ -2022,7 +2044,7 @@ fn measure_flex(
             }
         }
     } else if native_row {
-        let widths = match flex_row_sizes(&kids, &flow, &mut native_lines, content_w, gap, n.flex_wrap, inputs, runs, run_texts, children) {
+        let widths = match flex_row_sizes(&kids, &flow, &mut native_lines, content_w, gap, n.flex_wrap, inputs, runs, run_texts, grids, children) {
             Some(ws) => ws,
             None => {
                 failed.set(true);
@@ -2410,20 +2432,349 @@ fn flex_distribution(code: u8, free: f64, n: usize) -> (f64, f64) {
     }
 }
 
-// Native TABLE layout (§17, t1): a separate-borders, auto-layout table in normal flow — `table >
-// (row-group | row)* > cell*`. Each cell's used border box (its column width × its unified row height) is
-// PUSHED (rec[4]/rec[5], like a flex item); native reassembles the column/row TRACKS from the pushed cell
-// sizes, prefix-sums them with border-spacing to position every cell, and DERIVES every row, row-group, and
-// the table's OWN box — a table self-sizes from Σtracks + spacing, ignoring the width its block parent would
-// give it. All boxes are written in their immediate parent's border-box frame; `place` composes the origins
-// table → group → row → cell → content. Mirrors layoutTable / tableGapsWidth / tableGrid. Spans, captions,
+// ── Tables (§17 / CSS Tables 3) ───────────────────────────────────────────────────────────────────────
+// A table in normal flow — `table > (row-group | row)* > cell*`, plus a caption. Native COMPUTES the COLUMN
+// tracks (`table_columns` from every cell's own min/max-content, `distribute_columns` / `fixed_column_widths`
+// sharing out the width) and the table's own width (declared, or shrink-to-fit its columns), lays each cell out
+// at its column width, then prefix-sums the tracks with border-spacing to position every cell and DERIVES every
+// row, row-group and the table's OWN box from them. Its ROW heights are still the oracle's, imposed on each
+// cell (rec[82]) and read back here — the next increment. All boxes are written in their immediate parent's
+// border-box frame; `place` composes the origins table → group → row → cell → content. Mirrors layoutTable /
+// tableColumns / distributeColumns / fixedColumnWidths / tableIntrinsicWidths / tableGrid. Spans, captions,
 // colgroup, thead/tfoot reorder, fixed layout, rtl AND border-collapse are all IN scope (the oracle folds the
-// collapsed borders into the pushed edges, so a collapse table reassembles here exactly like a separate one).
-// nlTableSupported declines only what native can't reassemble: rtl combined with a caption or a collapsed
+// collapsed borders into the pushed edges, so a collapse table sizes here exactly like a separate one).
+// nlTableSupported declines only what native can't reproduce: rtl combined with a caption or a collapsed
 // border, an imposed height the oracle didn't distribute into the rows, an empty or interleaved row group, a
-// nested table, and a track only spanning cells cover.
+// nested table, and a row whose cells all span rows (no row height to read).
+// A table's ROW / COLUMN structure, recovered from the record tree the walk emitted (the oracle's `tableGrid`
+// resolved the anonymous boxes and the render order): every row in render order with the row GROUP it belongs
+// to, the caption (the table's only non-row / non-group child), and the column count: `declared_cols` (the
+// oracle's, which a `<col>` / `<colgroup span>` raises past the cells' own reach) or the last column any cell
+// reaches, whichever is larger. `None` for a table native can't read (no rows, no columns, a malformed span).
+struct TableGrid {
+    rows: Vec<usize>,
+    row_group: Vec<Option<usize>>,
+    caption: Option<usize>,
+    c_count: usize,
+}
+fn table_grid(i: usize, inputs: &[Input], children: &[Vec<usize>], declared_cols: usize) -> Option<TableGrid> {
+    let mut rows: Vec<usize> = Vec::new();
+    let mut row_group: Vec<Option<usize>> = Vec::new();
+    let mut caption = None;
+    for &ch in &children[i] {
+        match inputs[ch].display {
+            DISPLAY_TABLE_ROW_GROUP => {
+                for &r in &children[ch] {
+                    rows.push(r);
+                    row_group.push(Some(ch));
+                }
+            }
+            DISPLAY_TABLE_ROW => {
+                rows.push(ch);
+                row_group.push(None);
+            }
+            _ => caption = Some(ch),
+        }
+    }
+    if rows.is_empty() {
+        return None;
+    }
+    let mut c_count = declared_cols;
+    for &r in &rows {
+        for &c in &children[r] {
+            let k = inputs[c];
+            if k.cell_colspan == 0 || k.cell_rowspan == 0 {
+                return None;
+            }
+            c_count = c_count.max(k.cell_col + k.cell_colspan);
+        }
+    }
+    if c_count == 0 {
+        return None;
+    }
+    for (ri, &r) in rows.iter().enumerate() {
+        for &c in &children[r] {
+            let k = inputs[c];
+            if k.cell_col + k.cell_colspan > c_count || ri + k.cell_rowspan > rows.len() {
+                return None;
+            }
+        }
+    }
+    Some(TableGrid { rows, row_group, caption, c_count })
+}
+// The border-spacing gaps around and between the columns / rows — (count + 1) of them. Zero for a
+// border-COLLAPSE table (its shared edges are the cells' own halved borders, the outer ones the table's).
+fn table_gaps(count: usize, sp: f64) -> f64 {
+    if count == 0 { 0.0 } else { (count as f64 + 1.0) * sp }
+}
+// Each column's sizing inputs — the oracle's `tableColumns`. `min` / `max` are the widest its cells NEED and
+// WANT (their own `intrinsic_widths`, so a cell's declared width and min/max-width already speak there); `spec`
+// is the width a column was GIVEN by a cell's declared LENGTH and `pct` the fraction a `%` gave it, 0 for
+// neither — either makes the column "constrained", taking no part in sharing out space beyond max-content. A
+// cell that SPANS columns sizes none of them on its own: it only tops up whatever the ones it covers are short
+// of (`distribute_span`), the spacing it swallows discounted.
+struct TableCols {
+    min: Vec<f64>,
+    max: Vec<f64>,
+    spec: Vec<f64>,
+    pct: Vec<f64>,
+}
+// A table's COLUMNS as the walk marshalled them on its side-channel (`grid_start`): how many there are — the
+// oracle's count, which a `<col>` / `<colgroup span>` raises past the cells' own reach — and what each one was
+// DECLARED, as the px length (NaN for none) and the `%` fraction (0 for none) a `<col>` gave it. `None` for a
+// table with no channel (one built without a walk — the unit tests): the caller then counts the columns the
+// cells reach and takes no `<col>` declaration.
+struct TableColumnDecls {
+    count: usize,
+    spec: Vec<f64>,
+    pct: Vec<f64>,
+}
+fn table_col_decls(n: &Input, grids: &[f64]) -> Option<TableColumnDecls> {
+    if n.grid_start < 0 {
+        return None;
+    }
+    let at = n.grid_start as usize;
+    if at >= grids.len() {
+        return None;
+    }
+    let count = grids[at] as usize;
+    if count == 0 || at + 1 + 2 * count > grids.len() {
+        return None;
+    }
+    let mut spec = Vec::with_capacity(count);
+    let mut pct = Vec::with_capacity(count);
+    for ci in 0..count {
+        spec.push(grids[at + 1 + 2 * ci]);
+        pct.push(grids[at + 2 + 2 * ci]);
+    }
+    Some(TableColumnDecls { count, spec, pct })
+}
+fn table_columns(
+    g: &TableGrid,
+    sp_x: f64,
+    col_decls: Option<&TableColumnDecls>,
+    inputs: &[Input],
+    runs: &[Run],
+    run_texts: &[Option<Vec<u16>>],
+    grids: &[f64],
+    children: &[Vec<usize>],
+) -> Option<TableCols> {
+    let n = g.c_count;
+    let mut cols = TableCols { min: vec![0.0; n], max: vec![0.0; n], spec: vec![0.0; n], pct: vec![0.0; n] };
+    let mut spans: Vec<(usize, usize, f64, f64)> = Vec::new(); // (col, colspan, min, max)
+    for &r in &g.rows {
+        for &c in &children[r] {
+            let k = inputs[c];
+            let (imin, imax) = if is_auto(k.cell_min_content) {
+                intrinsic_widths(c, inputs, runs, run_texts, grids, children)?
+            } else {
+                (k.cell_min_content, k.cell_max_content) // the oracle's contribution: native can't measure this cell
+            };
+            if k.cell_colspan > 1 {
+                spans.push((k.cell_col, k.cell_colspan, imin, imax));
+                continue;
+            }
+            let col = k.cell_col;
+            cols.min[col] = cols.min[col].max(imin);
+            cols.max[col] = cols.max[col].max(imax);
+            if k.cell_pct > 0.0 {
+                cols.pct[col] = cols.pct[col].max(k.cell_pct);
+            } else if !is_auto(k.decl_w) {
+                cols.spec[col] = cols.spec[col].max(imax);
+            }
+        }
+    }
+    // A `<col>` names the column instead of a cell, so it carries no padding of its own: its length / fraction
+    // constrains the column just as a cell's declaration does.
+    if let Some(d) = col_decls {
+        for ci in 0..n.min(d.count) {
+            if !is_auto(d.spec[ci]) {
+                cols.spec[ci] = cols.spec[ci].max(d.spec[ci]);
+            }
+            if d.pct[ci] > 0.0 {
+                cols.pct[ci] = cols.pct[ci].max(d.pct[ci]);
+            }
+        }
+    }
+    for &(col, span, smin, smax) in &spans {
+        let inner = (span as f64 - 1.0) * sp_x; // the spacing a span covers is width it doesn't need
+        distribute_span(&mut cols.min, col, span, smin - inner);
+        distribute_span(&mut cols.max, col, span, smax - inner);
+    }
+    Some(cols)
+}
+// Share a spanning cell's shortfall over the columns it covers, in proportion to what they already want
+// (equally when they want nothing at all).
+fn distribute_span(widths: &mut [f64], start: usize, span: usize, required: f64) {
+    let end = (start + span).min(widths.len());
+    if end <= start {
+        return;
+    }
+    let total: f64 = widths[start..end].iter().sum();
+    let deficit = required - total;
+    if deficit <= 0.0 {
+        return;
+    }
+    let count = (end - start) as f64;
+    for w in widths[start..end].iter_mut() {
+        *w += if total > 0.0 { deficit * (*w / total) } else { deficit / count };
+    }
+}
+// CSS Tables 3 §"Distributing width to columns" — a ladder of guesses, each a wider table than the last, with
+// the assignable width interpolated between whichever two it falls between: min-content (every column at its
+// minimum), specified-width (…and the columns GIVEN a width or a percentage raised to it), max-content (…and
+// every remaining column raised to its maximum), beyond (the surplus shared over the columns given neither).
+// The oracle's `distributeColumns`, Chrome-exact on every branch.
+fn distribute_columns(cols: &TableCols, assignable: f64) -> Vec<f64> {
+    let n = cols.min.len();
+    if n == 0 {
+        return Vec::new();
+    }
+    let min_sum: f64 = cols.min.iter().sum();
+    if assignable <= min_sum {
+        return cols.min.clone();
+    }
+    // A percentage column is only now resolvable: its basis is the width being shared out, not the table's own
+    // box (Chrome: `width: 25%` of a 400px table is 98.5 — a quarter of the 394 left after border-spacing).
+    let specified: Vec<f64> = (0..n).map(|i| cols.min[i].max(cols.spec[i]).max(cols.pct[i] * assignable)).collect();
+    let maxes: Vec<f64> = (0..n).map(|i| cols.max[i].max(specified[i])).collect();
+    let spec_sum: f64 = specified.iter().sum();
+    let max_sum: f64 = maxes.iter().sum();
+    if assignable <= spec_sum {
+        let ratio = (assignable - min_sum) / (spec_sum - min_sum);
+        return (0..n).map(|i| cols.min[i] + (specified[i] - cols.min[i]) * ratio).collect();
+    }
+    if assignable <= max_sum {
+        let ratio = (assignable - spec_sum) / (max_sum - spec_sum);
+        return (0..n).map(|i| specified[i] + (maxes[i] - specified[i]) * ratio).collect();
+    }
+    let surplus = assignable - max_sum;
+    let growable: Vec<f64> = (0..n).map(|i| if cols.spec[i] > 0.0 || cols.pct[i] > 0.0 { 0.0 } else { maxes[i] }).collect();
+    let basis: f64 = growable.iter().sum();
+    if basis > 0.0 {
+        return (0..n).map(|i| maxes[i] + surplus * (growable[i] / basis)).collect();
+    }
+    if max_sum > 0.0 {
+        return maxes.iter().map(|m| m + surplus * (m / max_sum)).collect();
+    }
+    vec![assignable / n as f64; n]
+}
+// `table-layout: fixed` (§17.5.2): the columns come from the FIRST ROW alone — a `<col>` width, then a
+// first-row cell's declared width (a border box: the column holds the whole cell, so a content-box declaration
+// takes the cell's own horizontal edges; a colspan splits it evenly) — and whatever is left is shared EQUALLY
+// among the columns that named nothing. Content never enters into it, which is the whole point: the table lays
+// out without measuring any of it, and a cell's text wraps to its column instead of the column growing to the
+// text. With NO auto column the leftover is spread PROPORTIONALLY over the declared widths (Chrome: two 50px
+// columns in a 300px fixed table are 144 each) — equally when they are all 0 — so the columns always FILL the
+// table; columns that OVERFLOW it keep their widths and the table grows around them instead.
+fn fixed_column_widths(
+    g: &TableGrid,
+    col_decls: Option<&TableColumnDecls>,
+    assignable: f64,
+    inputs: &[Input],
+    children: &[Vec<usize>],
+) -> Vec<f64> {
+    let n = g.c_count;
+    let mut widths: Vec<Option<f64>> = (0..n)
+        .map(|ci| {
+            let d = col_decls.filter(|d| ci < d.count)?;
+            if d.pct[ci] > 0.0 {
+                Some(d.pct[ci] * assignable)
+            } else if !is_auto(d.spec[ci]) {
+                Some(d.spec[ci])
+            } else {
+                None
+            }
+        })
+        .collect();
+    for &c in &children[g.rows[0]] {
+        let k = inputs[c];
+        let declared = if k.cell_pct > 0.0 {
+            k.cell_pct * assignable
+        } else if !is_auto(k.decl_w) {
+            k.decl_w
+        } else {
+            continue;
+        };
+        let border = if k.decl_border_box { declared } else { declared + k.edges_x() };
+        let each = border / k.cell_colspan as f64;
+        for ci in k.cell_col..(k.cell_col + k.cell_colspan).min(n) {
+            if widths[ci].is_none() {
+                widths[ci] = Some(each);
+            }
+        }
+    }
+    let used: f64 = widths.iter().filter_map(|w| *w).sum();
+    let autos = widths.iter().filter(|w| w.is_none()).count();
+    if autos > 0 {
+        let share = (assignable - used).max(0.0) / autos as f64;
+        return widths.iter().map(|w| w.unwrap_or(share)).collect();
+    }
+    let extra = assignable - used;
+    if extra <= 0.0 {
+        return widths.iter().map(|w| w.unwrap_or(0.0)).collect();
+    }
+    if used > 0.0 {
+        return widths.iter().map(|w| { let v = w.unwrap_or(0.0); v + extra * (v / used) }).collect();
+    }
+    vec![assignable / n as f64; n]
+}
+
+// A table's own (min-content, max-content) BORDER-box widths — the oracle's `tableIntrinsicWidths`, the answer
+// `intrinsic_widths` gives for a table (its rows are not blocks to be measured one at a time). Each column
+// contributes its minimum / maximum, floored by the LENGTH a `<col>` or a cell gave it, plus the frame (the
+// gaps and the table's own border + padding). A PERCENTAGE column widens the max-content so the table can be
+// wide enough for the column to BE that fraction of it — its own want divided by the fraction — and, when the
+// percentages leave room, wide enough that the non-percentage columns' content is the share that remains. A
+// caption's margin box spans the table's border box, so its min-content floors the whole figure.
+fn table_intrinsic_widths(
+    i: usize,
+    inputs: &[Input],
+    runs: &[Run],
+    run_texts: &[Option<Vec<u16>>],
+    grids: &[f64],
+    children: &[Vec<usize>],
+) -> Option<(f64, f64)> {
+    let n = inputs[i];
+    let decls = table_col_decls(&n, grids);
+    let g = table_grid(i, inputs, children, decls.as_ref().map_or(0, |d| d.count))?;
+    let cols = table_columns(&g, n.sp_x, decls.as_ref(), inputs, runs, run_texts, grids, children)?;
+    let caption_floor = match g.caption {
+        Some(cap) if !is_auto(inputs[cap].cell_min_content) => inputs[cap].cell_min_content,
+        Some(cap) => intrinsic_widths(cap, inputs, runs, run_texts, grids, children)?.0,
+        None => 0.0,
+    };
+    Some(table_min_max_with_caption(&n, &g, &cols, caption_floor))
+}
+// …from columns already measured: the figure `measure_table` needs, where the caption's floor is the box it
+// laid out rather than the caption's own min-content.
+fn table_min_max(n: &Input, g: &TableGrid, cols: &TableCols) -> (f64, f64) {
+    table_min_max_with_caption(n, g, cols, 0.0)
+}
+fn table_min_max_with_caption(n: &Input, g: &TableGrid, cols: &TableCols, floor: f64) -> (f64, f64) {
+    let frame = table_gaps(g.c_count, n.sp_x) + n.edges_x();
+    let (mut min_sum, mut max_sum, mut sum_pct, mut non_pct_max, mut pct_implied) = (0.0, 0.0, 0.0, 0.0, 0.0f64);
+    for ci in 0..g.c_count {
+        min_sum += cols.min[ci].max(cols.spec[ci]);
+        let cmax = cols.max[ci].max(cols.spec[ci]);
+        max_sum += cmax;
+        if cols.pct[ci] > 0.0 {
+            sum_pct += cols.pct[ci];
+            pct_implied = pct_implied.max(cmax.max(cols.min[ci]) / cols.pct[ci]);
+        } else {
+            non_pct_max += cmax;
+        }
+    }
+    let mut pct_max = pct_implied;
+    if sum_pct > 0.0 && sum_pct < 1.0 {
+        pct_max = pct_max.max(non_pct_max / (1.0 - sum_pct));
+    }
+    ((min_sum + frame).max(floor), (max_sum + frame).max(pct_max + frame).max(floor))
+}
+
 fn measure_table(
     i: usize,
+    w: f64,
     imposed_h: f64,
     inputs: &[Input],
     runs: &[Run],
@@ -2440,61 +2791,79 @@ fn measure_table(
         MInfo { top: CMargin::of(0.0), top_only: CMargin::of(0.0), bottom: CMargin::of(0.0), collapse_through: false }
     };
 
-    // Flatten into rows + the group each belongs to. A table child is a ROW GROUP (its children are the
-    // rows), a bare ROW, or the CAPTION (t4 — at most one, gated). Record order == render order (thead/tfoot
-    // reorder is gated out, so it is document order here).
-    let mut rows: Vec<usize> = Vec::new();
-    let mut row_group: Vec<Option<usize>> = Vec::new();
-    let mut caption: Option<usize> = None;
-    for &ch in &children[i] {
-        match inputs[ch].display {
-            DISPLAY_TABLE_ROW_GROUP => {
-                for &r in &children[ch] {
-                    rows.push(r);
-                    row_group.push(Some(ch));
-                }
-            }
-            DISPLAY_TABLE_ROW => {
-                rows.push(ch);
-                row_group.push(None);
-            }
-            // The only other table child the walk emits is the CAPTION (a block / text box, at most one; the
-            // gate enforces that), identified here by NOT being a row / row-group.
-            _ => caption = Some(ch),
-        }
-    }
+    // The row / column structure the walk emitted (`table_grid`) and every column's sizing inputs from the
+    // cells' own intrinsic widths (`table_columns`).
+    let decls = table_col_decls(&n, grids);
+    let g = match table_grid(i, inputs, children, decls.as_ref().map_or(0, |d| d.count)) {
+        Some(g) => g,
+        None => return bail(failed),
+    };
+    let (rows, row_group, caption, c_count) = (&g.rows, &g.row_group, g.caption, g.c_count);
     let r_count = rows.len();
-    if r_count == 0 {
-        return bail(failed);
-    }
-    // The column count spans all cells: the last column any cell reaches (its start col + colspan). (t1's
-    // "cells in row 0" breaks once a span shifts the grid.)
-    let mut c_count = 0usize;
-    for &r in &rows {
-        for &c in &children[r] {
-            c_count = c_count.max(inputs[c].cell_col + inputs[c].cell_colspan);
+    // `table-layout: fixed` sizes the columns from the first row's declarations alone, so it measures NO cell —
+    // the per-column min/max-content pass is only for the content algorithm.
+    let fixed = n.table_fixed && !is_auto(n.width);
+    let cols = if fixed {
+        None
+    } else {
+        match table_columns(&g, sx, decls.as_ref(), inputs, runs, run_texts, grids, children) {
+            Some(c) => Some(c),
+            None => return bail(failed),
         }
-    }
-    if c_count == 0 {
-        return bail(failed);
-    }
+    };
 
-    // Phase A — lay each cell's (and the caption's) subtree out at its pushed border box, in a fresh float
-    // context. The caption is a block box spanning the table's BORDER box (pushed), positioned later.
-    for &r in &rows {
-        for &c in &children[r] {
-            let iw = resolve_width(&inputs[c], 0.0);
-            measure(c, iw, f64::NAN, inputs, runs, run_texts, grids, children, boxes, failed, &mut FloatCtx::new(), 0.0, 0.0);
-        }
-    }
+    // The CAPTION first (§17.4 — a block box spanning the table WRAPPER, sized by the oracle for now): a caption
+    // wider than the table floors its border-box width, so the columns share out what is left inside that.
     if let Some(cap) = caption {
         let iw = resolve_width(&inputs[cap], 0.0);
         measure(cap, iw, f64::NAN, inputs, runs, run_texts, grids, children, boxes, failed, &mut FloatCtx::new(), 0.0, 0.0);
     }
+    // The table's own used width (§17.5.2): a declared one wins, an AUTO one SHRINK-TO-FITS its columns within
+    // the room on offer — unless the box was handed to it (a grid area, a flex item, an out-of-flow inset box),
+    // where `w` already is the used border box. A table whose columns then OVERFLOW that width simply grows:
+    // it self-sizes from its tracks below, rather than letting the cells spill out of the box that is supposed
+    // to contain them.
+    let border_w = if n.self_sizes && is_auto(n.width) {
+        // Its own min/max-content (a fixed table never reaches here: it has a declared width).
+        let (imin, imax) = match cols.as_ref().map(|c| table_min_max(&n, &g, c)) {
+            Some(v) => v,
+            None => return bail(failed),
+        };
+        used_width(&n, imin.max(w.min(imax)))
+    } else {
+        w
+    };
+    let cap_floor = caption.map(|cap| boxes[cap].w).unwrap_or(0.0);
+    let content_w = (border_w.max(cap_floor) - n.edges_x()).max(0.0);
+    let gaps = table_gaps(c_count, sx);
+    let assignable = (content_w - gaps).max(0.0);
+    let col_w = match &cols {
+        Some(c) => distribute_columns(c, assignable),
+        None => fixed_column_widths(&g, decls.as_ref(), assignable, inputs, children),
+    };
+
+    // Then each cell's subtree, at its COLUMN (span) width and with its row height imposed (the oracle's row
+    // algorithm still decides that), in a fresh float context. The cell's own declared width does not speak
+    // here: it already did, when the column was sized.
+    let span_w = |c: usize| -> f64 {
+        let k = inputs[c];
+        let last = k.cell_col + k.cell_colspan - 1; // `table_grid` validated the span against the column count
+        let mut wsum = col_w[k.cell_col];
+        for ci in (k.cell_col + 1)..=last {
+            wsum += sx + col_w[ci];
+        }
+        wsum
+    };
+    for &r in rows {
+        for &c in &children[r] {
+            let cw = span_w(c);
+            measure(c, cw, inputs[c].cell_height, inputs, runs, run_texts, grids, children, boxes, failed, &mut FloatCtx::new(), 0.0, 0.0);
+        }
+    }
     // vertical-align: content laid out top-aligned above, moved down by the offset the oracle pushed (§17.5.3;
     // the UA default is `middle`). Shift the cell's direct children — their subtrees follow through `place`, and
     // text runs (not compared) need no shift; the cell BOX itself stays at the row top.
-    for &r in &rows {
+    for &r in rows {
         for &c in &children[r] {
             let off = inputs[c].cell_va_offset;
             if off != 0.0 {
@@ -2505,32 +2874,20 @@ fn measure_table(
         }
     }
 
-    // Tracks: a column's width is the widest NON-spanning (colspan==1) cell in it, a row's height the tallest
-    // rowspan==1 cell in it — a cell that SPANS several tracks can't size any one of them. This recovers the
-    // tracks AND validates the grid; a column / row that no single-span cell covers is not reconstructible
-    // (the oracle distributed a span across it) → decline.
-    let mut col_w = vec![0.0f64; c_count];
-    let mut col_seen = vec![false; c_count];
+    // Row heights: the tallest rowspan==1 cell in each row (a cell that SPANS rows can't size any one of them).
+    // The row the oracle imposed is what each cell was laid out at, so this recovers the same tracks.
     let mut row_h = vec![0.0f64; r_count];
     let mut row_seen = vec![false; r_count];
     for (ri, &r) in rows.iter().enumerate() {
         for &c in &children[r] {
-            let (col, cs, rs) = (inputs[c].cell_col, inputs[c].cell_colspan, inputs[c].cell_rowspan);
-            if cs == 0 || rs == 0 || col + cs > c_count || ri + rs > r_count {
-                return bail(failed); // a malformed / out-of-range span (shouldn't happen; be safe)
-            }
-            if cs == 1 {
-                col_w[col] = col_w[col].max(boxes[c].w);
-                col_seen[col] = true;
-            }
-            if rs == 1 {
+            if inputs[c].cell_rowspan == 1 {
                 row_h[ri] = row_h[ri].max(boxes[c].h);
                 row_seen[ri] = true;
             }
         }
     }
-    if col_seen.iter().any(|&s| !s) || row_seen.iter().any(|&s| !s) {
-        return bail(failed); // a track only spanning cells cover — native can't split it
+    if row_seen.iter().any(|&s| !s) {
+        return bail(failed); // a row only spanning cells cover — native can't split it
     }
 
     // border-collapse:collapse (§17.6.2) needs no special frame here: the oracle folds each shared edge into
@@ -2821,12 +3178,13 @@ fn grid_column_content(
     inputs: &[Input],
     runs: &[Run],
     run_texts: &[Option<Vec<u16>>],
+    grids: &[f64],
     children: &[Vec<usize>],
 ) -> Option<Vec<(f64, f64)>> {
     let mut cols = vec![(0.0f64, 0.0f64); col_count];
     for (k, &c) in kids.iter().enumerate() {
         let cell = cells[k];
-        let (min, max) = intrinsic_widths(c, inputs, runs, run_texts, children)?;
+        let (min, max) = intrinsic_widths(c, inputs, runs, run_texts, grids, children)?;
         let span = cell.span as f64;
         for col in cols.iter_mut().skip(cell.col).take(cell.span) {
             col.0 = col.0.max(min / span);
@@ -2840,13 +3198,15 @@ fn grid_column_content(
 // `intrinsicWidths` on the record tree. A declared width pins both (border-box per `box-sizing`); a text block
 // measures its inline content (`text_intrinsic`); a block container is as wide as its widest child's margin
 // box, for min and max alike; a flex container stacks its items along its main axis (`flex_intrinsic_widths`);
-// then the box's own edges add on and its min/max-width clamp the contribution (border-box per `box-sizing`, min
-// winning over max). The widths read are the record's DECLARED, basis-less ones (`decl_*`: a percentage is auto
-// here, as in the oracle), never the used box a push may have written; the edges are the record's cbW-resolved
-// ones, equal to the basis-less read only when no edge is a percentage — the JS gate (`nlIntrinsicMeasurable`)
-// guarantees that. Floats pack on a line inside a block container as inline boxes would. `None` for what isn't
-// measured: a table / replayed grid, an atomic inline, an unmodelled run.
-fn intrinsic_widths(i: usize, inputs: &[Input], runs: &[Run], run_texts: &[Option<Vec<u16>>], children: &[Vec<usize>]) -> Option<(f64, f64)> {
+// a TABLE runs its own column algorithm (`table_intrinsic_widths`, which answers a border box unclamped, as the
+// oracle's early return does); then the box's own edges add on and its min/max-width clamp the contribution
+// (border-box per `box-sizing`, min winning over max). The widths read are the record's DECLARED, basis-less
+// ones (`decl_*`: a percentage is auto here, as in the oracle), never the used box a push may have written; the
+// edges are the record's cbW-resolved ones, equal to the basis-less read only when no edge is a percentage —
+// the JS gate (`nlIntrinsicMeasurable`) guarantees that. Floats pack on a line inside a block container as
+// inline boxes would. `None` for what isn't measured: a replayed grid, a pushed atomic inline, an unmodelled
+// run.
+fn intrinsic_widths(i: usize, inputs: &[Input], runs: &[Run], run_texts: &[Option<Vec<u16>>], grids: &[f64], children: &[Vec<usize>]) -> Option<(f64, f64)> {
     let n = inputs[i];
     let extra = n.edges_x();
     let (inner_min, inner_max) = if !is_auto(n.decl_w) {
@@ -2855,9 +3215,14 @@ fn intrinsic_widths(i: usize, inputs: &[Input], runs: &[Run], run_texts: &[Optio
     } else if n.replaced && !n.ratio_only {
         (n.intrinsic_w, n.intrinsic_w) // a replaced box wants its intrinsic width (a ratio-only one, its container's)
     } else if n.display == DISPLAY_FLEX {
-        flex_intrinsic_widths(i, inputs, runs, run_texts, children)?
+        flex_intrinsic_widths(i, inputs, runs, run_texts, grids, children)?
+    } else if n.display == DISPLAY_TABLE {
+        // A table brings its own algorithm for the same question, and its rows are not blocks to be measured one
+        // at a time. That answer is already a BORDER-box figure (the frame included) and the oracle returns it
+        // unclamped, so it stands as it is — no edges, no min/max-width clamp.
+        return table_intrinsic_widths(i, inputs, runs, run_texts, grids, children);
     } else {
-        content_intrinsic(i, inputs, runs, run_texts, children)?
+        content_intrinsic(i, inputs, runs, run_texts, grids, children)?
     };
     // The box's own min/max-width clamp its OUTER contribution (CSS Sizing 3 §5.1), in its box-sizing model.
     let to_border = |v: f64| if is_auto(v) || n.decl_border_box { v } else { v + extra };
@@ -2872,7 +3237,7 @@ fn intrinsic_widths(i: usize, inputs: &[Input], runs: &[Run], run_texts: &[Optio
 // keyword `flex-basis` or its automatic minimum the oracle walks its children as block-level boxes (the same
 // widest-child answer), not along the flex axis. No declared width, no edges, no clamp: those are
 // `intrinsic_widths`' business.
-fn content_intrinsic(i: usize, inputs: &[Input], runs: &[Run], run_texts: &[Option<Vec<u16>>], children: &[Vec<usize>]) -> Option<(f64, f64)> {
+fn content_intrinsic(i: usize, inputs: &[Input], runs: &[Run], run_texts: &[Option<Vec<u16>>], grids: &[f64], children: &[Vec<usize>]) -> Option<(f64, f64)> {
     let n = inputs[i];
     match n.display {
         DISPLAY_TEXT_BLOCK => {
@@ -2880,7 +3245,7 @@ fn content_intrinsic(i: usize, inputs: &[Input], runs: &[Run], run_texts: &[Opti
             if re > runs.len() || rs > re {
                 return None;
             }
-            text_intrinsic(&runs[rs..re], &run_texts[rs..re], n.ws_mode, inputs, runs, run_texts, children)
+            text_intrinsic(&runs[rs..re], &run_texts[rs..re], n.ws_mode, inputs, runs, run_texts, grids, children)
         }
         _ if n.replaced => Some((0.0, 0.0)), // a replaced box holds no CSS content (a ratio-only svg asks its container)
         DISPLAY_BLOCK | DISPLAY_FLEX => {
@@ -2892,7 +3257,7 @@ fn content_intrinsic(i: usize, inputs: &[Input], runs: &[Run], run_texts: &[Opti
                     continue; // out of flow: sizes nothing
                 }
                 // Each child contributes its MARGIN box (a negative margin narrows it; auto is 0).
-                let (cmin, cmax) = intrinsic_widths(c, inputs, runs, run_texts, children)?;
+                let (cmin, cmax) = intrinsic_widths(c, inputs, runs, run_texts, grids, children)?;
                 let m = Input::m(k.ml) + Input::m(k.mr);
                 if k.float_kind != 0 {
                     // A FLOAT packs beside its neighbours like an inline-level box: its max-content joins the
@@ -2916,12 +3281,12 @@ fn content_intrinsic(i: usize, inputs: &[Input], runs: &[Run], run_texts: &[Opti
 // A box's min-content WIDTH as a flex item's automatic minimum (§4.5) — the oracle's `minContentWidth`: the
 // content's min-content plus the edges, capped by a declared width (border-box per `box-sizing`; a
 // percentage is auto, `decl_w`).
-fn min_content_width(i: usize, inputs: &[Input], runs: &[Run], run_texts: &[Option<Vec<u16>>], children: &[Vec<usize>]) -> Option<f64> {
+fn min_content_width(i: usize, inputs: &[Input], runs: &[Run], run_texts: &[Option<Vec<u16>>], grids: &[f64], children: &[Vec<usize>]) -> Option<f64> {
     let n = inputs[i];
     if n.replaced && !n.ratio_only {
         return Some(n.intrinsic_w); // the oracle's minContentWidth: the intrinsic width, edges not counted
     }
-    let content = content_intrinsic(i, inputs, runs, run_texts, children)?.0 + n.edges_x();
+    let content = content_intrinsic(i, inputs, runs, run_texts, grids, children)?.0 + n.edges_x();
     if is_auto(n.decl_w) {
         return Some(content);
     }
@@ -2935,7 +3300,7 @@ fn min_content_width(i: usize, inputs: &[Input], runs: &[Run], run_texts: &[Opti
 // down a COLUMN the widest wins. A row item's contribution is its intrinsic box, its `flex-basis` pinning it — or,
 // when the item may grow, only raising its max (the coarse form of §9.9) — then its own min/max-width (border-box
 // per `box-sizing`); a column item contributes the width it wants, as any block child would.
-fn flex_intrinsic_widths(i: usize, inputs: &[Input], runs: &[Run], run_texts: &[Option<Vec<u16>>], children: &[Vec<usize>]) -> Option<(f64, f64)> {
+fn flex_intrinsic_widths(i: usize, inputs: &[Input], runs: &[Run], run_texts: &[Option<Vec<u16>>], grids: &[f64], children: &[Vec<usize>]) -> Option<(f64, f64)> {
     let n = inputs[i];
     let column = !n.flex_main_is_x;
     let wrap = !column && n.flex_wrap;
@@ -2946,7 +3311,7 @@ fn flex_intrinsic_widths(i: usize, inputs: &[Input], runs: &[Run], run_texts: &[
         if k.out_of_flow != 0 {
             continue; // out of flow: sizes nothing
         }
-        let (mut imin, mut imax) = intrinsic_widths(c, inputs, runs, run_texts, children)?;
+        let (mut imin, mut imax) = intrinsic_widths(c, inputs, runs, run_texts, grids, children)?;
         if !column {
             let extra = if k.decl_border_box { 0.0 } else { k.edges_x() };
             if !is_auto(k.flex_basis) {
@@ -3009,7 +3374,7 @@ fn flex_intrinsic_widths(i: usize, inputs: &[Input], runs: &[Run], run_texts: &[
 // out itself contributes its own intrinsic widths (plus margins) as one unbreakable unit with an opportunity on
 // each side. `None` for a PUSHED atomic (its box is not in the stream), a tab / other control, a wide character,
 // or a ZWJ under per-character breaking (the oracle's per-character advance carries the previous character).
-fn text_intrinsic(runs: &[Run], run_texts: &[Option<Vec<u16>>], ws_mode: u8, inputs: &[Input], all_runs: &[Run], all_texts: &[Option<Vec<u16>>], children: &[Vec<usize>]) -> Option<(f64, f64)> {
+fn text_intrinsic(runs: &[Run], run_texts: &[Option<Vec<u16>>], ws_mode: u8, inputs: &[Input], all_runs: &[Run], all_texts: &[Option<Vec<u16>>], grids: &[f64], children: &[Vec<usize>]) -> Option<(f64, f64)> {
     let (wraps, preserve, break_nl, pin) = match ws_mode {
         0 => (true, false, false, false),
         1 => (false, false, false, true),
@@ -3166,7 +3531,7 @@ fn text_intrinsic(runs: &[Run], run_texts: &[Option<Vec<u16>>], ws_mode: u8, inp
                 // own intrinsic widths plus its margins (the oracle's atomic arm).
                 let c = run.font as usize;
                 let k = inputs[c];
-                let (imin, imax) = intrinsic_widths(c, inputs, all_runs, all_texts, children)?;
+                let (imin, imax) = intrinsic_widths(c, inputs, all_runs, all_texts, grids, children)?;
                 let m = Input::m(k.ml) + Input::m(k.mr);
                 take_pending!();
                 opportunity!();
@@ -3255,7 +3620,7 @@ fn measure_grid(
     // An intrinsic track (auto / min|max-content / fit-content / a minmax side) sizes from the items' content —
     // measured natively here; a template of px / % / fr sides needs no measure at all.
     let cols = if tracks.iter().any(GridTrack::needs_content) {
-        match grid_column_content(&kids, &cells, col_count, inputs, runs, run_texts, children) {
+        match grid_column_content(&kids, &cells, col_count, inputs, runs, run_texts, grids, children) {
             Some(cols) => Some(cols),
             None => return bail(failed),
         }
@@ -3504,7 +3869,7 @@ fn place_out_of_flow(
     let auto_w = if stretched || (n.replaced && n.ratio_only) {
         (avail_w - ml - mr).max(0.0)
     } else {
-        match intrinsic_widths(c, inputs, runs, run_texts, children) {
+        match intrinsic_widths(c, inputs, runs, run_texts, grids, children) {
             Some((imin, imax)) => imin.max(avail_w).min(imax),
             None => {
                 failed.set(true);
@@ -3693,6 +4058,12 @@ mod tests {
             scrolls_x: false,
             scrolls_y: false,
             is_button: false,
+            self_sizes: false,
+            cell_pct: 0.0,
+            cell_min_content: f64::NAN,
+            cell_max_content: f64::NAN,
+            cell_height: f64::NAN,
+            table_fixed: false,
             flex_stretch: false,
             flex_native: false,
             flex_dir_reverse: false,
@@ -4336,6 +4707,8 @@ mod tests {
         c.display = DISPLAY_TABLE;
         c.sp_x = sx;
         c.sp_y = sy;
+        c.self_sizes = true; // an in-flow block-level table: its auto width shrink-to-fits its columns
+        c.grid_start = -1;   // no column side-channel: the cells' reach is the column count
         c
     }
     fn rowgroup(nid: f64, parent: i32) -> Input {
@@ -4348,8 +4721,13 @@ mod tests {
         c.display = DISPLAY_TABLE_ROW;
         c
     }
+    // A cell that DECLARES its width (so its column sizes to `w` — `intrinsic_widths` pins min == max there)
+    // and takes `h` as the height its row imposes.
     fn cell(nid: f64, parent: i32, w: f64, h: f64, col: usize, colspan: usize, rowspan: usize) -> Input {
-        let mut c = item(nid, parent, w, h);
+        let mut c = item(nid, parent, w, f64::NAN);
+        c.decl_w = w;
+        c.decl_border_box = true;
+        c.cell_height = h;
         c.cell_col = col;
         c.cell_colspan = colspan;
         c.cell_rowspan = rowspan;
@@ -4487,9 +4865,11 @@ mod tests {
     }
 
     #[test]
-    fn table_column_only_spanned_declines() {
-        // col 1 is covered only by spans (row0 cols 0-1, row1 cols 1-2) — no colspan==1 cell gives its width,
-        // so native can't split the track → decline.
+    fn table_spanning_cells_top_up_the_columns_they_cover() {
+        // col 1 is covered only by spans (row0 cols 0-1, row1 cols 1-2): no colspan==1 cell sizes it, so it gets
+        // only what the spans are short of, shared in proportion to what the covered columns already want
+        // (`distribute_span`). col0 = 30 → topped to 50 by the first span; col2 = 20 → topped to 40 by the
+        // second; col1 stays 0 both times (it wants nothing, and its neighbour takes the whole deficit).
         let inputs = vec![
             tbl(0.0, -1, 0.0, 0.0),
             rowgroup(1.0, 0),
@@ -4498,9 +4878,14 @@ mod tests {
             cell(4.0, 2, 20.0, 20.0, 2, 1, 1), // col 2
             rowel(5.0, 1),
             cell(6.0, 5, 30.0, 20.0, 0, 1, 1), // col 0
-            cell(7.0, 5, 40.0, 20.0, 1, 2, 1), // cols 1-2 → col 1 never a single cell
+            cell(7.0, 5, 40.0, 20.0, 1, 2, 1), // cols 1-2
         ];
-        assert!(matches!(layout_block(&inputs, &[], &[], &[], 0.0, 0.0, 800.0), Outcome::Unsupported));
+        let bx = boxes(layout_block(&inputs, &[], &[], &[], 0.0, 0.0, 800.0));
+        assert_eq!([bx[0].w, bx[0].h], [90.0, 40.0]); // 50 + 0 + 40 ; two 20px rows
+        assert_eq!([bx[3].x, bx[3].w], [0.0, 50.0]);  // row0: the 0-1 span
+        assert_eq!([bx[4].x, bx[4].w], [50.0, 40.0]); // row0: col 2
+        assert_eq!([bx[6].x, bx[6].w], [0.0, 50.0]);  // row1: col 0
+        assert_eq!([bx[7].x, bx[7].w], [50.0, 40.0]); // row1: the 1-2 span
     }
 
     // t4 — the caption (a block box, the table's only non-row/-group child). The `<table>` box is the WRAPPER:
@@ -4555,8 +4940,9 @@ mod tests {
         let bx = boxes(layout_block(&inputs, &[], &[], &[], 0.0, 0.0, 800.0));
         assert_eq!(bx[0].w, 300.0); // wrapper widened to the caption
         assert_eq!(bx[0].h, 44.0);
-        // the grid keeps its own width — cells are NOT stretched to the caption
-        assert_eq!([bx[3].x, bx[4].x], [4.0, 68.0]);
+        // …and the columns share out that width: the surplus over their 60/80 maximums goes to them in
+        // proportion (288 assignable − 140 = 148 → 60 + 63.43 and 80 + 84.57), so the grid fills the wrapper.
+        assert_eq!([bx[3].x, bx[4].x], [4.0, 131.42857142857142]);
     }
 
     // A caption on a table with its OWN border sits at the WRAPPER's border box — outside the border, not inset
@@ -4647,12 +5033,12 @@ mod tests {
         pinned.width = 200.0; // pushed, ignored
         let inputs = [root, flex_item, child, pinned];
         let children = vec![vec![1, 3], vec![2], vec![], vec![]];
-        assert_eq!(intrinsic_widths(1, &inputs, &[], &[], &children), Some((50.0, 50.0)));
-        assert_eq!(intrinsic_widths(3, &inputs, &[], &[], &children), Some((70.0, 70.0)));
+        assert_eq!(intrinsic_widths(1, &inputs, &[], &[], &[], &children), Some((50.0, 50.0)));
+        assert_eq!(intrinsic_widths(3, &inputs, &[], &[], &[], &children), Some((70.0, 70.0)));
         // the row sums its items: 50 + 70, plus the main gap between them
         root.flex_main_gap = 8.0;
         let inputs = [root, flex_item, child, pinned];
-        assert_eq!(intrinsic_widths(0, &inputs, &[], &[], &children), Some((128.0, 128.0)));
+        assert_eq!(intrinsic_widths(0, &inputs, &[], &[], &[], &children), Some((128.0, 128.0)));
     }
 
     // A row item's flex-basis pins its contribution, or — when the item may grow — only raises its max; the
@@ -4673,13 +5059,13 @@ mod tests {
         c.decl_max_w = 40.0; // capped
         let inputs = [root, a, b, c];
         let children = vec![vec![1, 2, 3], vec![], vec![], vec![]];
-        assert_eq!(intrinsic_widths(0, &inputs, &[], &[], &children), Some((30.0 + 20.0 + 40.0, 30.0 + 50.0 + 40.0)));
+        assert_eq!(intrinsic_widths(0, &inputs, &[], &[], &[], &children), Some((30.0 + 20.0 + 40.0, 30.0 + 50.0 + 40.0)));
         root.flex_wrap = true;
         let inputs = [root, a, b, c];
-        assert_eq!(intrinsic_widths(0, &inputs, &[], &[], &children), Some((40.0, 120.0)));
+        assert_eq!(intrinsic_widths(0, &inputs, &[], &[], &[], &children), Some((40.0, 120.0)));
         root.flex_wrap = false;
         root.flex_main_is_x = false; // a column: the widest item
         let inputs = [root, a, b, c];
-        assert_eq!(intrinsic_widths(0, &inputs, &[], &[], &children), Some((60.0, 60.0)));
+        assert_eq!(intrinsic_widths(0, &inputs, &[], &[], &[], &children), Some((60.0, 60.0)));
     }
 }

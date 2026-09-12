@@ -534,5 +534,112 @@ RSpec.describe 'native layout table parity', if: ENV.fetch('CSIM_JS_ENGINE', 'v8
   it('declines an empty row group (the oracle boxes it below the grid)') { a_bails_b_native('<table style="border-spacing:4px"><tbody></tbody><tbody><tr><td style="width:40px;height:20px">a</td></tr></tbody></table>') }
   it('declines stray non-cell content in a table (the oracle wraps it in an anonymous CELL, which has no node id)') { a_bails_b_native('<div style="display:table;border-spacing:4px"><div style="display:block;width:60px;height:20px">a</div></div>') }
   it('declines a same-display group NESTED in another (its rows interleave in render order)') { a_bails_b_native('<div style="display:table;border-spacing:4px"><div style="display:table-row-group"><div style="display:table-row"><div style="display:table-cell;width:40px;height:20px">r1</div></div><div style="display:table-row-group"><div style="display:table-row"><div style="display:table-cell;height:18px">r2</div></div></div><div style="display:table-row"><div style="display:table-cell;height:36px">r3</div></div></div></div>') }
-  it('declines a column that only spanning cells cover (no single-column cell to size it)') { a_bails_b_native('<table style="border-spacing:4px"><tr><td colspan="2">A</td><td style="width:20px">b</td></tr><tr><td style="width:30px">c</td><td colspan="2">DE</td></tr></table>') }
+
+  # ── Native COLUMN sizing ──────────────────────────────────────────────────────────────────────────────
+  # The columns are native's own now (`table_columns` / `distribute_columns` / `fixed_column_widths`): each one
+  # sized from the cells' own min/max-content widths, a spanning cell topping up whatever the columns it covers
+  # are short of, a declared length or `%` constraining it, a `<col>` naming it — then the distribution ladder
+  # (min-content → specified → max-content → the surplus over the unconstrained columns) over the width inside
+  # the frame, and the table itself shrink-to-fitting that when its own width is auto.
+  # A grid whose intrinsic tracks native measured itself (no oracle contribution).
+  def expect_native_intrinsic(body)
+    r = run_shadow(body)
+    expect(r).to include('ok' => true), "harness bailed: #{r.inspect}"
+    expect(r['mismatches']).to eq(0), "mismatch: #{r.inspect}"
+    expect(r['nativeIntrinsicGrids']).to be >= 1, "the track took the oracle's contribution: #{r.inspect}"
+  end
+
+  describe 'native column sizing' do
+    it 'sizes columns from the cells\' content, the widest cell winning' do
+      expect_parity('<table style="border-spacing:0"><tr><td>a</td><td>wider text</td></tr><tr><td>longer word</td><td>b</td></tr></table>')
+      expect_parity('<table style="border-spacing:4px"><tr><td>aa</td><td>bbb</td></tr><tr><td>c</td><td>d</td></tr></table>')
+      expect_parity('<table><tr><td>one two three four five six seven eight nine ten</td></tr></table>')
+      expect_parity('<table style="width:600px"><tr><td>one two three</td><td>four five six seven eight</td></tr></table>')
+      expect_parity('<table style="width:60px"><tr><td>one two three</td><td>four five six</td></tr></table>')
+    end
+    it 'lets a spanning cell top up only what the columns it covers are short of' do
+      expect_parity('<table style="border-spacing:4px"><tr><td colspan="2">A very wide spanning cell</td><td>b</td></tr><tr><td>c</td><td>d</td><td>e</td></tr></table>')
+      expect_parity('<table style="border-spacing:4px"><tr><td colspan="2">A</td><td style="width:20px">b</td></tr><tr><td style="width:30px">c</td><td colspan="2">DE</td></tr></table>')
+      expect_parity('<table><tr><td colspan="3">one wide spanning row</td></tr><tr><td>a</td><td>b</td><td>c</td></tr></table>')
+    end
+    it 'honours a declared cell width, a percentage, and min/max-width' do
+      expect_parity('<table style="width:400px"><tr><td style="width:100px">a</td><td>b</td></tr></table>')
+      expect_parity('<table style="width:400px"><tr><td style="width:25%">a</td><td>b</td></tr></table>')
+      expect_parity('<table><tr><td style="width:25%">a</td><td>b</td></tr></table>')
+      expect_parity('<table style="width:400px"><tr><td style="width:25%">a</td><td style="width:50%">b</td></tr></table>')
+      expect_parity('<table style="width:400px"><tr><td style="min-width:200px">a</td><td>b</td></tr></table>')
+      expect_parity('<table style="width:400px"><tr><td style="max-width:40px">a longer text</td><td>b</td></tr></table>')
+      expect_parity('<table style="width:400px"><tr><td style="width:100px;padding:10px;border:2px solid">a</td><td>b</td></tr></table>')
+      expect_parity('<table style="width:400px"><tr><td style="width:100px;box-sizing:border-box;padding:10px">a</td><td>b</td></tr></table>')
+    end
+    it 'reads a <col> / <colgroup> width and span' do
+      expect_parity('<table><col style="width:120px"><col><tr><td>a</td><td>b</td></tr></table>')
+      expect_parity('<table style="width:400px"><col style="width:25%"><col><tr><td>a</td><td>b</td></tr></table>')
+      expect_parity('<table style="width:400px"><colgroup><col span="2" style="width:80px"><col></colgroup><tr><td>a</td><td>b</td><td>c</td></tr></table>')
+      expect_parity('<table><col style="width:120px"><tr><td>a</td><td>b</td></tr></table>')
+    end
+    it 'sizes a fixed-layout table from its first row alone' do
+      expect_parity('<table style="table-layout:fixed;width:300px"><tr><td>a</td><td>b</td></tr></table>')
+      expect_parity('<table style="table-layout:fixed;width:300px"><tr><td style="width:50px">a</td><td>b</td></tr></table>')
+      expect_parity('<table style="table-layout:fixed;width:300px"><tr><td style="width:50px">a</td><td style="width:100px">b</td></tr></table>')
+      expect_parity('<table style="table-layout:fixed;width:300px"><tr><td style="width:25%">a</td><td>b</td></tr></table>')
+      expect_parity('<table style="table-layout:fixed;width:300px"><col style="width:40px"><tr><td>a</td><td style="width:100px">b</td></tr></table>')
+      expect_parity('<table style="table-layout:fixed;width:300px"><tr><td colspan="2" style="width:200px">a</td><td>b</td></tr><tr><td>x</td><td>y</td><td>z</td></tr></table>')
+      expect_parity('<table style="table-layout:fixed"><tr><td style="width:50px">a</td><td>wide content here</td></tr></table>')
+    end
+    it 'shrink-to-fits an auto-width table, and grows past a width its columns overflow' do
+      expect_parity('<div style="width:300px"><table><tr><td>one two three four five six seven</td></tr></table></div>')
+      expect_parity('<div style="width:80px"><table><tr><td>one two three four</td><td>five six</td></tr></table></div>')
+      expect_parity('<table style="width:20px"><tr><td>unbreakableword</td><td>another</td></tr></table>')
+      expect_parity('<div style="width:300px"><table style="min-width:280px"><tr><td>a</td></tr></table></div>')
+      expect_parity('<div style="width:300px"><table style="max-width:100px"><tr><td>one two three four five</td></tr></table></div>')
+    end
+    it 'takes the oracle\'s contribution for a cell it cannot measure, rather than declining the table' do
+      # A control's chrome, a nested grid, a `%` edge an intrinsic measure has no basis for: the cell's resolved
+      # min/max-content ride its record (rec[84..85]) and size its column, exactly as an un-measurable grid
+      # track's contribution does. The table stays native either way.
+      expect_parity('<table><tr><td><input type="text"></td><td>b</td></tr></table>')
+      expect_parity('<table><tr><td><select><option>x</option></select></td><td>b</td></tr></table>')
+      expect_parity('<table><tr><td><div style="display:grid;grid-template-columns:30px 40px"><div>x</div><div>y</div></div></td><td>b</td></tr></table>')
+      expect_parity('<table style="width:400px;border-spacing:0"><tr><td style="padding-left:10%">a</td><td>b</td></tr></table>')
+      expect_parity('<table style="width:400px;border-spacing:0"><tr><td><div style="padding-left:10%">a</div></td><td>b</td></tr></table>')
+      expect_parity('<table><caption><input></caption><tr><td>a</td></tr></table>')
+      expect_parity('<table style="width:100%"><thead><tr><th>Name</th><th>Actions</th></tr></thead><tbody><tr><td>x</td><td><input value="v"></td></tr></tbody></table>')
+    end
+    it 'takes the contribution for a cell whose atomic inline is PUSHED, not just one it cannot measure' do
+      # A `justify` block spreads its spaces (positions native does not hold) and a MIXED block's anonymous
+      # groups get no atomic hook, so both push every atomic — whose box is then not in the run stream
+      # `text_intrinsic` reads. The gate says so, and the cell's contribution comes off its record.
+      expect_parity('<table><tr><td style="text-align:justify">x <span style="display:inline-block">y</span></td><td>b</td></tr></table>')
+      expect_parity('<table><tr><td><div>blk</div>p <span style="display:inline-block">ok</span> q</td><td>b</td></tr></table>')
+      # …and so does an inline the WALK refuses to emit as runs: its own `white-space`, a non-shift
+      # `vertical-align`, an edged inline whose font box exceeds its line-height (`nlInlineMeasurable` mirrors
+      # the walk's checks, so the measure is never attempted).
+      expect_parity('<table><tr><td>x <span style="display:inline-block">a <i style="white-space:pre">b  c</i></span></td><td>b</td></tr></table>')
+      expect_parity('<table><tr><td>x <span style="display:inline-block"><b style="padding:0 5px;line-height:4px">y</b></span></td><td>b</td></tr></table>')
+      # The fact is ONE per inline formatting context: a nested atomic is pushed too, however deep the inline
+      # chain, so the gate threads it down (a link holding an icon beside a block is ordinary app markup).
+      expect_parity('<table><tr><td style="text-align:justify">x <span>y <span style="display:inline-block">z</span></span></td><td>b</td></tr></table>')
+      expect_parity('<table><tr><td style="text-align:justify">x <span>y <img width="10" height="10"></span></td><td>b</td></tr></table>')
+      expect_parity('<table><tr><td><div>head</div>x <a href="#">link <img width="10" height="10"></a></td><td>b</td></tr></table>')
+      # …while the same shapes with the hook LIVE still lay their atomic out natively.
+      expect_parity('<table><tr><td>x <a href="#">link <img width="10" height="10"></a></td><td>b</td></tr></table>')
+    end
+    it 'counts the columns a <col> / <colgroup span> declares past the cells\' own reach' do
+      expect_parity('<table style="width:400px;border-spacing:0"><col><col><col><tr><td>a</td><td>b</td></tr></table>')
+      expect_parity('<table style="width:400px;border-spacing:0"><colgroup span="3"></colgroup><tr><td>a</td><td>b</td></tr></table>')
+      expect_parity('<table style="width:400px;border-spacing:0"><col span="2"><tr><td>a</td></tr></table>')
+      expect_parity('<table style="table-layout:fixed;width:300px;border-spacing:0"><col><col><col><tr><td>a</td><td>b</td></tr></table>')
+    end
+    # A table in an INTRINSIC grid track is measured by native itself now (`nlIntrinsicMeasurable` admits one),
+    # so the track sizes from the table's own columns rather than an oracle contribution.
+    it 'measures a table in a grid track itself' do
+      expect_native_intrinsic('<div style="display:grid;grid-template-columns:max-content auto;width:400px"><table><tr><td>a</td><td>bb</td></tr></table><div>x</div></div>')
+      expect_native_intrinsic('<div style="display:grid;grid-template-columns:min-content auto;width:400px"><table><tr><td>aaa bbb</td><td>bb</td></tr></table><div>x</div></div>')
+      expect_native_intrinsic('<div style="display:grid;grid-template-columns:max-content auto;width:400px"><table style="border-spacing:4px"><caption>a wide caption here</caption><tr><td>a</td></tr></table><div>x</div></div>')
+      expect_native_intrinsic('<div style="display:grid;grid-template-columns:max-content auto;width:400px"><table><tr><td style="width:25%">a</td><td>b</td></tr></table><div>x</div></div>')
+      expect_native_intrinsic('<div style="display:grid;grid-template-columns:max-content auto;width:400px"><table><col style="width:120px"><tr><td>a</td><td>b</td></tr></table><div>x</div></div>')
+      expect_parity('<div style="display:grid;grid-template-columns:100px 200px;width:400px"><table><tr><td>a</td><td>bb</td></tr></table><div>x</div></div>')
+    end
+  end
 end

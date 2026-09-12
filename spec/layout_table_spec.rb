@@ -1075,4 +1075,33 @@ RSpec.describe 'table layout' do
     expect(two[2]).to be_within(0.01).of(text['second'] + PAD + SPACING * 2)    # Chrome: 57.59
     expect(two[1]).to eq(one[1] + one[3])
   end
+
+  # Only a LENGTH or a PERCENTAGE is a "specified width" in CSS Tables 3's sense. `auto`, an intrinsic keyword
+  # and a `calc()` holding a percentage constrain nothing — an intrinsic measure has no basis for them — so the
+  # column sizes from its content exactly as if nothing were declared (Chrome measured: a `width: auto` cell in
+  # a 600px table takes 286 of it beside a one-letter neighbour, not 9; `calc(25% + 10px)` the same).
+  it 'ignores a width declaration that is no length or percentage' do
+    ['auto', 'calc(25% + 10px)'].each do |value|
+      body = %(<table id="t" style="width:600px;border-spacing:0"><tr><td id="a" style="width:#{value}">A quite long first cell</td><td id="b">B</td></tr></table>)
+      boxes, = measure(body, ['#a', '#b'])
+      plain, = measure(%(<table id="t" style="width:600px;border-spacing:0"><tr><td id="a">A quite long first cell</td><td id="b">B</td></tr></table>), ['#a', '#b'])
+      expect(boxes[0][2]).to be_within(0.01).of(plain[0][2]), value
+      expect(boxes[1][2]).to be_within(0.01).of(plain[1][2]), value
+    end
+  end
+
+  # …and the same under `table-layout: fixed`, where a declaration is ALL the column has: a `calc()` holding a
+  # percentage leaves the column to the equal split (Chrome: 150/150 of a 300px table, not 87/213).
+  it 'ignores a calc() percentage width in a fixed-layout table' do
+    body = %(<table id="t" style="table-layout:fixed;width:300px;border-spacing:0"><tr><td id="a" style="width:calc(25% + 10px)">a</td><td id="b">b</td></tr></table>)
+    boxes, = measure(body, ['#a', '#b'])
+    expect(boxes[0][2]).to be_within(0.01).of(150)
+    expect(boxes[1][2]).to be_within(0.01).of(150)
+
+    # A `<col>` is read the same way.
+    body = %(<table id="t" style="table-layout:fixed;width:300px;border-spacing:0"><col style="width:calc(25% + 10px)"><col><tr><td id="a">a</td><td id="b">b</td></tr></table>)
+    boxes, = measure(body, ['#a', '#b'])
+    expect(boxes[0][2]).to be_within(0.01).of(150)
+    expect(boxes[1][2]).to be_within(0.01).of(150)
+  end
 end
