@@ -96,4 +96,23 @@ RSpec.describe 'native layout grid parity', if: ENV.fetch('CSIM_JS_ENGINE', 'v8'
   it 'declines a floated grid container' do
     expect_bail('<div style="width:400px"><div style="float:left;display:grid;grid-template-columns:50px 50px"><div style="height:20px">a</div></div><div style="height:20px"></div></div>')
   end
+
+  # An `inline-grid` that is a flex / grid ITEM is BLOCKIFIED to `grid` (§4), so it lays out as a block-level
+  # grid container — its oracle-resolved box pushed, its items replayed within it. Mirrors the inline-flex item.
+  it 'matches an inline-grid flex item' do
+    expect_parity('<div style="display:flex;width:300px"><div style="display:inline-grid;grid-template-columns:60px 60px;gap:4px"><span>a</span><span>b</span><span>c</span><span>d</span></div><div>sibling</div></div>')
+  end
+  it 'matches an inline-grid item nested in a grid' do
+    expect_parity('<div style="display:grid;grid-template-columns:1fr 1fr;width:300px"><div style="display:inline-grid;grid-template-columns:40px 40px"><span>x</span><span>y</span></div><div>b</div></div>')
+  end
+  it 'matches an inline-grid flex item in a column container' do
+    expect_parity('<div style="display:flex;flex-direction:column;width:200px;height:200px"><div style="display:inline-grid;grid-template-columns:50px 50px"><span>a</span><span>b</span></div></div>')
+  end
+  # A STANDALONE inline-grid (not a flex/grid item) stays an atomic inline — it must NOT be admitted as a grid.
+  it 'keeps a standalone inline-grid an atomic inline (unchanged)' do
+    expect_parity('<div style="width:300px">text <span style="display:inline-grid;grid-template-columns:30px 30px"><span>x</span><span>y</span></span> more text wrapping onward past the edge</div>')
+  end
+  it 'declines a sticky inline-grid flex item' do
+    expect_bail('<div style="display:flex;width:300px"><div style="display:inline-grid;position:sticky;grid-template-columns:50px"><span>a</span></div></div>')
+  end
 end
