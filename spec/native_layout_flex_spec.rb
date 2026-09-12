@@ -349,7 +349,7 @@ RSpec.describe 'native layout flex parity', if: ENV.fetch('CSIM_JS_ENGINE', 'v8'
   # A flex container's % VERTICAL padding resolves against its OWN box.width in the oracle but the CB width in
   # native — diverges only when those widths differ, so an explicitly-sized container with % padding declines.
   it('declines percentage vertical padding on an explicitly-sized flex container') { a_bails_b_native('<div style="display:flex;flex-direction:column;width:100px;padding-top:10%"><div style="width:80px;height:30px"></div></div>', '<div style="display:flex;flex-direction:column;width:100px;padding-top:12px"><div style="width:80px;height:30px"></div></div>') }
-  it('declines an inline-block item') { a_bails_b_native('<div style="display:flex;width:400px"><span style="display:inline-block;width:80px;height:30px"></span><div style="width:80px;height:30px"></div></div>') }
+  it('matches an inline-block item with an explicit size (blockified)') { expect_parity('<div style="display:flex;width:400px"><span style="display:inline-block;width:80px;height:30px"></span><div style="width:80px;height:30px"></div></div>') }
   it('declines a nested UNSUPPORTED flex item (wrap-reverse)') { a_bails_b_native('<div style="display:flex;width:400px"><div style="display:flex;flex-wrap:wrap-reverse;width:80px;height:30px"></div><div style="width:80px;height:30px"></div></div>') }
   it('declines a flex container with min-height AND percentage vertical padding (floor edge basis diverges)') { a_bails_b_native('<div style="display:flex;flex-direction:column;min-height:100px;padding-top:10%;width:100px"><div style="width:80px;height:30px"></div></div>', '<div style="display:flex;flex-direction:column;width:100px"><div style="width:80px;height:30px"></div></div>') }
   it('declines a cross-stretched column clamped by max-height (oracle sizes against the pre-clamp room native lacks)') { a_bails_b_native('<div style="display:flex;height:300px;width:400px"><div style="display:flex;flex-direction:column;max-height:100px;row-gap:20%;width:100px"><div style="height:20px"></div><div style="height:30px"></div></div></div>', '<div style="display:flex;height:300px;width:400px"><div style="display:flex;flex-direction:column;row-gap:20%;width:100px"><div style="height:20px"></div><div style="height:30px"></div></div></div>') }
@@ -392,6 +392,15 @@ RSpec.describe 'native layout flex parity', if: ENV.fetch('CSIM_JS_ENGINE', 'v8'
   it 'matches a WRAPPING row where the line-height floor exceeds the stacked line (align-content shares the surplus)' do
     expect_parity('<div style="display:flex;flex-wrap:wrap;align-content:center;width:400px">text<div style="width:60px;height:8px"></div></div>')
   end
+  # A flex item is BLOCKIFIED (§4): an inline / inline-block item lays out as a block-level flex item.
+  it('matches an inline element as a flex item (blockified)') { expect_parity('<div style="display:flex;gap:10px;width:400px"><label>Save changes</label><div style="width:80px;height:20px"></div></div>') }
+  it('matches an inline-block element as a flex item') { expect_parity('<div style="display:flex;gap:10px;width:400px"><span style="display:inline-block">a tag here</span><div style="width:80px;height:20px"></div></div>') }
+  it('matches an auto-width inline flex item whose text sets its size') { expect_parity('<div style="display:flex;width:500px"><label>one two three four</label><div style="width:100px;height:20px"></div></div>') }
+  it('matches an inline flex item with an explicit width and block content') { expect_parity('<div style="display:flex;gap:8px;width:400px"><span style="display:inline-block;width:120px"><div style="height:20px;margin:4px"></div></span><div style="width:80px;height:30px"></div></div>') }
+  it('matches several inline items with justify-content') { expect_parity('<div style="display:flex;justify-content:space-between;width:500px"><label>alpha</label><label>beta</label><label>gamma</label></div>') }
+  it('matches an AUTO-width inline-block item carrying block children') { expect_parity('<div style="display:flex;width:400px"><span style="display:inline-block"><div style="height:20px">aaa</div><div style="width:60px;height:30px"></div></span><div style="width:80px;height:20px"></div></div>') }
+  it('matches an inline flex item alongside align-items:center') { expect_parity('<div style="display:flex;align-items:center;height:80px;width:400px"><label>centered label</label><div style="width:60px;height:40px"></div></div>') }
+
   # A replaced element is a LEAF native replays (its box is oracle-resolved) — as an in-flow item and as an
   # out-of-flow (abspos) one — so these lay out rather than decline.
   it('matches a replaced (img) item') { expect_parity('<div style="display:flex;width:400px"><img src="x.png" style="width:80px;height:30px"><div style="width:80px;height:30px"></div></div>') }
