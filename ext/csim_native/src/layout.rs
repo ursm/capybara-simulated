@@ -20,6 +20,9 @@
 fn is_auto(v: f64) -> bool {
     v.is_nan()
 }
+// An `imposed_h` that asks `measure` for a box's content height, its declared height set aside — see
+// `Input::with_imposed_height`. (A negative-infinite height is no height a layout could impose.)
+const MEASURE_AUTO_HEIGHT: f64 = f64::NEG_INFINITY;
 
 // Display codes JS writes into the buffer. `display:none` nodes are NOT pushed (no box). A block whose
 // children are all block-level is DISPLAY_BLOCK; one whose content is pure text in a single font (an
@@ -258,12 +261,18 @@ impl Input {
     // This record with a border-box height IMPOSED on it (a flex item stretched to its line, or handed its
     // resolved main size) — the oracle's `layoutElement(child, {height, autoHeight: false})`: the declared
     // height is replaced (content-box per `box-sizing`), the min/max clamp still applies after
-    // (layoutElementInner clamps every box). NaN imposes nothing.
+    // (layoutElementInner clamps every box). NaN imposes nothing; MEASURE_AUTO_HEIGHT asks for the box's
+    // CONTENT height whatever it declares (the oracle's `measureItemHeight`: `{height: 0, autoHeight: true}`).
     fn with_imposed_height(self, h: f64) -> Input {
         if is_auto(h) {
             return self;
         }
         let mut n = self;
+        if h == MEASURE_AUTO_HEIGHT {
+            n.height = f64::NAN;
+            n.item_auto_height = true;
+            return n;
+        }
         n.height = if n.border_box { h } else { (h - n.edges_y()).max(0.0) };
         n.item_auto_height = false;
         n
@@ -1453,6 +1462,240 @@ fn flex_row_sizes(
     Some(widths)
 }
 
+// A flex COLUMN's item sizes, resolved natively — the oracle's `layoutFlexColumn` up to placement. The CROSS axis
+// first: an item's width is its declared width, else the container's room when it stretches (a single-line
+// column's line IS the container) or its shrink-to-fit width (`intrinsic_widths` clamped to the room), clamped by
+// its min/max-width. Its flex BASE is its `flex-basis` (a length against the main size, content-box per
+// `box-sizing`), else its declared height, else its content height MEASURED at that width; the automatic minimum
+// (`min-height: auto`) is that same measure (zero when the item scrolls), asked only where it can bind, and the
+// declared min/max-height clamp on top. A WRAPPING column breaks against a DEFINITE main size (the height, or a
+// `max-height` cap), each line as wide as its widest item, `align-content` growing the lines, and a stretched item
+// is then widened to its line (`restretched`). Each line's heights are shared by `resolve_flexible_lengths`
+// against the definite main size, or re-resolved against a `min-height` floor the items underrun or a
+// `max-height` cap they overrun. Returns per position (width, height, imposed): `imposed` says the height is
+// handed to the item as definite (the oracle's `imposed` — a definite column, a restretched item, or a height
+// the measure did not already produce); else the item keeps its auto height. `main` is the definite main size
+// or the min-height floor (NaN = none); `capacity` the size lines break against (NaN = single line).
+fn flex_column_sizes(
+    kids: &[usize],
+    flow: &[usize],
+    lines: &mut Vec<Vec<usize>>,
+    line_crosses: &mut Vec<f64>,
+    content_w: f64,
+    main: f64,
+    height_definite: bool,
+    capacity: f64,
+    cap: f64,
+    gap: f64,
+    cross_gap: f64,
+    wrap: bool,
+    align_content_code: u8,
+    inputs: &[Input],
+    runs: &[Run],
+    run_texts: &[Option<Vec<u16>>],
+    grids: &[f64],
+    children: &[Vec<usize>],
+    boxes: &mut [Box],
+    failed: &std::cell::Cell<bool>,
+) -> Option<Vec<(f64, f64, bool)>> {
+    let cnt = kids.len();
+    let floor = if height_definite { f64::NAN } else { main };
+    // A MULTI-LINE container is one that SAYS `wrap` (its items shrink to fit and its line is as wide as its
+    // widest item, `align-content` placing it); it BREAKS only against a definite capacity with more than one item.
+    let multiline = wrap;
+    let breaks = multiline && !is_auto(capacity) && flow.len() > 1;
+    let mut width = vec![0.0f64; cnt];
+    let mut decl_h = vec![f64::NAN; cnt]; // the declared border-box height, NaN = auto
+    for &p in flow {
+        let c = kids[p];
+        let k = inputs[c];
+        let avail_w = (content_w - Input::m(k.ml) - Input::m(k.mr)).max(0.0);
+        let auto_w = if k.flex_stretch && !multiline {
+            avail_w
+        } else {
+            let (imin, imax) = intrinsic_widths(c, inputs, runs, run_texts, children)?;
+            imin.max(avail_w).min(imax)
+        };
+        width[p] = used_width(&k, auto_w);
+        if !is_auto(k.height) {
+            let edges_y = k.edges_y();
+            let h = if k.border_box { k.height.max(edges_y) } else { k.height + edges_y };
+            let to_border = |v: f64| if is_auto(v) || k.border_box { v } else { v + edges_y };
+            decl_h[p] = clamp_min_max(h, to_border(k.min_h), to_border(k.max_h)).max(0.0);
+        }
+    }
+    // The content height of item `p` at its current width, measured at most once (its auto height, the
+    // declared one set aside — MEASURE_AUTO_HEIGHT), memoised in `measured`.
+    let mut measured: Vec<Option<f64>> = vec![None; cnt];
+    let measure_of = |p: usize, width: &Vec<f64>, measured: &mut Vec<Option<f64>>, boxes: &mut [Box]| -> f64 {
+        if measured[p].is_none() {
+            let c = kids[p];
+            measure(c, width[p], MEASURE_AUTO_HEIGHT, inputs, runs, run_texts, grids, children, boxes, failed, &mut FloatCtx::new(), 0.0, 0.0);
+            measured[p] = Some(boxes[c].h);
+        }
+        measured[p].unwrap()
+    };
+    let mut base = vec![0.0f64; cnt];
+    let mut base_measured = vec![false; cnt];
+    for &p in flow {
+        let k = inputs[kids[p]];
+        let extra = if k.border_box { 0.0 } else { k.edges_y() };
+        base[p] = if k.flex_basis_kw == 0 && !is_auto(k.flex_basis_cb) {
+            k.flex_basis_cb + extra
+        } else if !is_auto(decl_h[p]) && k.flex_basis_kw == 0 {
+            decl_h[p]
+        } else {
+            base_measured[p] = true;
+            measure_of(p, &width, &mut measured, boxes)
+        };
+    }
+    // The automatic minimum: the item's content height (zero when it scrolls down), memoised in `auto_min`.
+    let mut auto_min: Vec<Option<f64>> = vec![None; cnt];
+    let auto_min_of = |p: usize, width: &Vec<f64>, measured: &mut Vec<Option<f64>>, auto_min: &mut Vec<Option<f64>>, boxes: &mut [Box]| -> f64 {
+        if auto_min[p].is_none() {
+            let k = inputs[kids[p]];
+            auto_min[p] = Some(if k.scrolls_main {
+                0.0
+            } else {
+                let m = measure_of(p, width, measured, boxes);
+                if is_auto(decl_h[p]) { m } else { decl_h[p].min(m) }
+            });
+        }
+        auto_min[p].unwrap()
+    };
+    // The floor is asked wherever the clamp can bind AT THE BASE already — the oracle's `clampOf` measures it
+    // when `known == null || size < known`, `known` being the measure (an item whose base was measured already
+    // holds it) or the declared height: an auto-height item with a basis has no other minimum, and a basis
+    // BELOW a declared height binds on any line. Only a declared-height item at or above its declaration is
+    // measured lazily, where a line SHRINKS it (the oracle's lazy `automaticMinHeight`), so a column of
+    // fixed-height rows costs one layout per item.
+    for &p in flow {
+        if is_auto(inputs[kids[p]].min_h) {
+            let known = if base_measured[p] { measured[p] } else if is_auto(decl_h[p]) { None } else { Some(decl_h[p]) };
+            if known.map_or(true, |kn| base[p] < kn) {
+                auto_min_of(p, &width, &mut measured, &mut auto_min, boxes);
+            }
+        }
+    }
+    let clamp_with = |floors: &Vec<Option<f64>>, measured: &Vec<Option<f64>>, p: usize, size: f64| -> f64 {
+        let k = inputs[kids[p]];
+        let mut out = size;
+        if is_auto(k.min_h) {
+            let known = if base_measured[p] { measured[p] } else if is_auto(decl_h[p]) { None } else { Some(decl_h[p]) };
+            if known.map_or(true, |kn| size < kn) {
+                out = out.max(floors[p].unwrap_or(0.0));
+            }
+        }
+        let extra = if k.border_box { 0.0 } else { k.edges_y() };
+        if !is_auto(k.max_h) && k.max_h >= 0.0 {
+            out = out.min(k.max_h + extra);
+        }
+        if !is_auto(k.min_h) && k.min_h >= 0.0 {
+            out = out.max(k.min_h + extra);
+        }
+        out
+    };
+    // A base-measured item's hypothetical size is at least its base, a declared one's is its declaration:
+    // no unmeasured floor is consulted by the line breaker.
+    // §9.3 down the block axis: lines broken on the hypothetical outer heights against the capacity.
+    if breaks {
+        let clamp_of = |p: usize, size: f64| clamp_with(&auto_min, &measured, p, size);
+        let mut ls: Vec<Vec<usize>> = Vec::new();
+        let mut cur: Vec<usize> = Vec::new();
+        let mut used = 0.0;
+        for &p in flow {
+            let k = inputs[kids[p]];
+            let outer = clamp_of(p, base[p]) + Input::m(k.mt) + Input::m(k.mb);
+            if !cur.is_empty() && used + gap + outer > capacity {
+                ls.push(std::mem::take(&mut cur));
+                used = 0.0;
+            }
+            used += if cur.is_empty() { 0.0 } else { gap } + outer;
+            cur.push(p);
+        }
+        ls.push(cur);
+        *lines = ls;
+    } else {
+        *lines = vec![flow.to_vec()];
+    }
+    // §9.6 across it: each line as wide as its widest item (its NATURAL cross, handed back in `line_crosses` for
+    // the placement to stack by `align-content`), the lines grown by `align-content`; a stretched item is then
+    // widened to its grown line, clamped by its min/max-width (`restretched`).
+    let mut restretched = vec![false; cnt];
+    if multiline {
+        let nl = lines.len();
+        let crosses: Vec<f64> = lines.iter().map(|line| line.iter().map(|&p| {
+            let k = inputs[kids[p]];
+            width[p] + Input::m(k.ml) + Input::m(k.mr)
+        }).fold(0.0, f64::max)).collect();
+        let stacked: f64 = crosses.iter().sum::<f64>() + cross_gap * nl.saturating_sub(1) as f64;
+        let (_, _, grow) = align_content(align_content_code, content_w - stacked, nl);
+        *line_crosses = crosses.clone();
+        for (li, line) in lines.iter().enumerate() {
+            let line_cross = crosses[li] + grow;
+            for &p in line {
+                let k = inputs[kids[p]];
+                if k.flex_stretch {
+                    let room = (line_cross - Input::m(k.ml) - Input::m(k.mr)).max(0.0);
+                    let extra = if k.border_box { 0.0 } else { k.edges_x() };
+                    let to_border = |v: f64| if is_auto(v) { v } else { v + extra };
+                    let w = clamp_min_max(room, to_border(k.min_w), to_border(k.max_w));
+                    if w != width[p] {
+                        width[p] = w;
+                        restretched[p] = true;
+                    }
+                }
+            }
+        }
+    }
+    // The main sizes, per line.
+    let mut out = vec![(0.0f64, 0.0f64, false); cnt];
+    for line in lines.iter() {
+        let k_n = line.len();
+        let mut taken = gap * k_n.saturating_sub(1) as f64;
+        for &p in line {
+            let k = inputs[kids[p]];
+            taken += Input::m(k.mt) + Input::m(k.mb);
+        }
+        let bases: Vec<f64> = line.iter().map(|&p| base[p]).collect();
+        let inner: Vec<f64> = line.iter().map(|&p| {
+            let k = inputs[kids[p]];
+            (base[p] - if k.border_box { 0.0 } else { k.edges_y() }).max(0.0)
+        }).collect();
+        let grow_f: Vec<f64> = line.iter().map(|&p| inputs[kids[p]].flex_grow).collect();
+        let shrink_f: Vec<f64> = line.iter().map(|&p| inputs[kids[p]].flex_shrink).collect();
+        let available = if height_definite { Some((main - taken).max(0.0)) } else { None };
+        // A line that SHRINKS (its hypothetical sizes exceed the room — the definite height, or the cap the
+        // items overrun) may take an item below its declaration, where its floor binds: measure those now.
+        let wanted: f64 = line.iter().map(|&p| clamp_with(&auto_min, &measured, p, base[p])).sum();
+        let shrinks = available.map_or(false, |a| wanted > a) || (!height_definite && !is_auto(cap) && taken + wanted > cap);
+        let mut floors = auto_min.clone();
+        if shrinks {
+            for &p in line {
+                if is_auto(inputs[kids[p]].min_h) && floors[p].is_none() {
+                    floors[p] = Some(auto_min_of(p, &width, &mut measured, &mut auto_min, boxes));
+                }
+            }
+        }
+        let line_clamp = |j: usize, size: f64| clamp_with(&floors, &measured, line[j], size);
+        let mut heights = resolve_flexible_lengths(&bases, &inner, &grow_f, &shrink_f, available, &line_clamp);
+        let mut used = taken + heights.iter().sum::<f64>();
+        if !is_auto(floor) && used < floor {
+            heights = resolve_flexible_lengths(&bases, &inner, &grow_f, &shrink_f, Some((floor - taken).max(0.0)), &line_clamp);
+            used = taken + heights.iter().sum::<f64>();
+        }
+        if !height_definite && !is_auto(cap) && used > cap {
+            heights = resolve_flexible_lengths(&bases, &inner, &grow_f, &shrink_f, Some((cap - taken).max(0.0)), &line_clamp);
+        }
+        for (j, &p) in line.iter().enumerate() {
+            let h = heights[j];
+            let imposed = height_definite || restretched[p] || measured[p].map_or(true, |m| m != h) || !is_auto(decl_h[p]);
+            out[p] = (width[p], h, imposed);
+        }
+    }
+    Some(out)
+}
+
 fn measure_flex(
     i: usize,
     w: f64,
@@ -1483,8 +1726,46 @@ fn measure_flex(
     // each item out at its oracle-resolved box. Either way record order == flex order (the harness sorted by
     // `order`), each item in a fresh float context.
     let native_row = n.flex_native && main_is_x;
+    let native_col = n.flex_native && !main_is_x;
     let mut native_lines: Vec<Vec<usize>> = Vec::new();
-    if native_row {
+    let mut native_line_crosses: Vec<f64> = Vec::new(); // a native multi-line column's NATURAL line crosses
+    if native_col {
+        // The column's main size: its definite content height, else a min-height FLOOR (NaN = none); lines break
+        // against the definite height or a max-height CAP (NaN = one line).
+        let to_border_y = |v: f64| if is_auto(v) || n.border_box { v } else { v + edges_y };
+        // Definite as the oracle reads it: a declared or imposed height — not a PUSHED auto-height column
+        // (`item_auto_height`), whose record carries its final box but whose main size is still its content.
+        let height_definite = !is_auto(n.height) && !n.item_auto_height;
+        let floor_main = if is_auto(n.min_h) || n.min_h <= 0.0 { f64::NAN } else { (to_border_y(n.min_h) - edges_y).max(0.0) };
+        let cap_main = if is_auto(n.max_h) || n.max_h < 0.0 { f64::NAN } else { (to_border_y(n.max_h) - edges_y).max(0.0) };
+        let main = if height_definite {
+            (clamp_min_max(to_border_y(n.height), to_border_y(n.min_h), to_border_y(n.max_h)).max(0.0) - edges_y).max(0.0)
+        } else {
+            floor_main
+        };
+        let capacity = if height_definite { main } else { cap_main };
+        let sizes = match flex_column_sizes(&kids, &flow, &mut native_lines, &mut native_line_crosses, content_w, main, height_definite, capacity, cap_main, gap, n.flex_cross_gap, n.flex_wrap, n.flex_align_content, inputs, runs, run_texts, grids, children, boxes, failed) {
+            Some(sz) => sz,
+            None => {
+                failed.set(true);
+                return MInfo { top: CMargin::of(0.0), top_only: CMargin::of(0.0), bottom: CMargin::of(0.0), collapse_through: false };
+            }
+        };
+        for &p in &flow {
+            let (w_p, h_p, imposed) = sizes[p];
+            // An item whose measure already produced its height keeps that layout (the oracle reuses it); the
+            // rest are laid out at their resolved height, definite.
+            if imposed || boxes[kids[p]].w != w_p {
+                measure(kids[p], w_p, if imposed { h_p } else { f64::NAN }, inputs, runs, run_texts, grids, children, boxes, failed, &mut FloatCtx::new(), 0.0, 0.0);
+            }
+        }
+        for &c in &kids {
+            if inputs[c].out_of_flow != 0 {
+                let iw = resolve_width(&inputs[c], content_w);
+                measure(c, iw, f64::NAN, inputs, runs, run_texts, grids, children, boxes, failed, &mut FloatCtx::new(), 0.0, 0.0);
+            }
+        }
+    } else if native_row {
         let widths = match flex_row_sizes(&kids, &flow, &mut native_lines, content_w, gap, n.flex_wrap, inputs, runs, run_texts, children) {
             Some(ws) => ws,
             None => {
@@ -1563,8 +1844,8 @@ fn measure_flex(
     // nowrap is also one line holding everything; otherwise wrap greedily starts a new line when the next
     // item (plus the main gap) would overflow the main extent. Mirrors flexLines.
     let wrap_capacity = main_is_x || !is_auto(n.height);
-    let lines: Vec<Vec<usize>> = if native_row {
-        native_lines // broken on the hypothetical sizes by flex_row_sizes
+    let lines: Vec<Vec<usize>> = if native_row || native_col {
+        native_lines // broken on the hypothetical sizes by flex_row_sizes / flex_column_sizes
     } else if n.flex_wrap && wrap_capacity {
         let mut ls: Vec<Vec<usize>> = Vec::new();
         let mut cur: Vec<usize> = Vec::new();
@@ -1608,7 +1889,10 @@ fn measure_flex(
                 _ => plain = plain.max(co[p]),
             }
         }
-        line_cross[li] = plain.max(fa + fb).max(la + lb);
+        // A natively-sized multi-line COLUMN's line cross is its NATURAL one (the widest item before any stretch
+        // widened it to the grown line) — `align-content` below grows it, as the oracle's stackFlexLines does; the
+        // final item widths already fill the grown line, so measuring from them would grow it twice.
+        line_cross[li] = if native_col && li < native_line_crosses.len() { native_line_crosses[li] } else { plain.max(fa + fb).max(la + lb) };
         line_first_asc[li] = fa;
         line_last_asc[li] = la;
         line_last_extent[li] = la + lb;
@@ -1641,7 +1925,8 @@ fn measure_flex(
             let bh = clamp_min_max(lines_cross_sum.max(n.anon_cross) + edges_y, to_border_y(n.min_h), to_border_y(n.max_h)).max(0.0);
             (w, bh, lines_cross_sum.max(n.anon_cross), false)
         } else {
-            let bh = clamp_min_max(to_border_y(n.height), to_border_y(n.min_h), to_border_y(n.max_h)).max(0.0);
+            // A declared height is never smaller than the box's own border+padding (usedSize's border-box floor).
+            let bh = clamp_min_max(to_border_y(n.height), to_border_y(n.min_h), to_border_y(n.max_h)).max(edges_y).max(0.0);
             (w, bh, (bh - edges_y).max(0.0), true)
         }
     } else {
@@ -1653,7 +1938,7 @@ fn measure_flex(
             // after the items' extent exactly as the oracle's `max(contentExtent, anonymousItemHeight)`.
             clamp_min_max(content_main.max(used_main).max(n.anon_cross) + edges_y, to_border_y(n.min_h), to_border_y(n.max_h)).max(0.0)
         } else {
-            clamp_min_max(to_border_y(n.height), to_border_y(n.min_h), to_border_y(n.max_h)).max(0.0)
+            clamp_min_max(to_border_y(n.height), to_border_y(n.min_h), to_border_y(n.max_h)).max(edges_y).max(0.0)
         };
         (w, bh, content_w, true) // a column's cross (width) is always definite
     };
@@ -1678,6 +1963,11 @@ fn measure_flex(
             line_lc[li] = line_cross[li] + ac_grow;
             line_cs[li] = cross_at;
             cross_at += line_lc[li] + cross_gap + ac_between;
+        }
+        // Lines that STRETCH fill the cross size exactly, so the last one is closed against the container's far
+        // edge rather than left where an equal share of the free space accumulated to (stackFlexLines).
+        if ac_grow > 0.0 && nlines > 0 {
+            line_lc[nlines - 1] = (cross_start_base + container_cross - line_cs[nlines - 1]).max(0.0);
         }
     }
 
@@ -2730,15 +3020,19 @@ fn place(i: usize, ax: f64, ay: f64, inputs: &[Input], children: &[Vec<usize>], 
 // (minus this box's own horizontal margins); a declared width is content-box unless box-sizing:border-box,
 // then converted to border-box; clamped by min/max (which are treated in the same box model).
 fn resolve_width(n: &Input, cb_w: f64) -> f64 {
+    // auto: fill the containing block, less horizontal margins (auto margins count 0 in L1).
+    used_width(n, (cb_w - Input::m(n.ml) - Input::m(n.mr)).max(0.0))
+}
+// The BORDER-BOX width a box uses given what an AUTO width would be (`auto_w` — the oracle's `usedSize`
+// with its `autoW`: the containing block's room in block flow, a flex column item's stretch or shrink-to-fit
+// width): a declared width converted to border-box, else `auto_w`; clamped by min/max-width (same box model);
+// a border box floored at its own border+padding (content ≥ 0), matching usedSize's `isBorderBox` floor.
+fn used_width(n: &Input, auto_w: f64) -> f64 {
     let border_w = if is_auto(n.width) {
-        // auto: fill the containing block, less horizontal margins (auto margins count 0 in L1). A border box
-        // is floored at its own border+padding (content ≥ 0), matching usedSize's `isBorderBox` floor — normal
-        // block flow never binds it (cb ≫ edges), but a grid item can be narrower than its own padding.
-        let avail = (cb_w - Input::m(n.ml) - Input::m(n.mr)).max(0.0);
         if n.border_box {
-            avail.max(n.edges_x())
+            auto_w.max(n.edges_x())
         } else {
-            avail
+            auto_w
         }
     } else if n.border_box {
         n.width.max(n.edges_x())   // a border box is never smaller than its border+padding (content box ≥ 0)

@@ -583,4 +583,102 @@ RSpec.describe 'native layout flex parity', if: ENV.fetch('CSIM_JS_ENGINE', 'v8'
       expect_native_flex(%(<div style="#{row}"><div style="flex:1;display:flex"><div style="flex:1">nested</div><div>x</div></div><div style="width:50px">y</div></div>))
     end
   end
+
+  # ── Native COLUMN sizing ──────────────────────────────────────────────────────────────────────────────
+  # The items' sizes resolved by the native engine (layout.rs `flex_column_sizes`, the oracle's
+  # layoutFlexColumn up to placement): the cross (width) first — declared, stretched to the line, or
+  # shrink-to-fit — then each item's flex base (basis / declared height / its content height MEASURED at that
+  # width, the declared height set aside), the automatic minimum, line breaking against a definite height or a
+  # max-height cap, `align-content` growing the lines and re-stretching their items, and the heights shared
+  # against the definite height, a min-height floor the items underrun, or a max-height cap they overrun.
+  describe 'native column sizing' do
+    let(:col) { 'display:flex;flex-direction:column;width:300px' }
+
+    it 'measures content heights for the bases and shares a definite height by flex-grow' do
+      expect_native_flex(%(<div style="#{col}"><div>one line</div><div>two lines of text that wrap around here in the column</div></div>))
+      expect_native_flex(%(<div style="#{col};height:300px"><div style="flex:1">a</div><div style="flex:2">b</div></div>))
+      expect_native_flex(%(<div style="#{col};height:200px;gap:10px"><div style="flex:1">a</div><div style="flex:1">b</div></div>))
+    end
+    it 'shrinks a declared-height item (its automatic minimum is its content, capped by the declaration)' do
+      expect_native_flex(%(<div style="#{col};height:100px"><div style="flex:1">a</div><div style="height:200px">tall</div><div style="flex:1">c</div></div>))
+      expect_native_flex(%(<div style="#{col};height:100px"><div style="flex:1"><p style="margin:0">a</p><p style="margin:0">b</p><p style="margin:0">c</p></div><div style="height:80px">tall</div></div>))
+      expect_native_flex(%(<div style="#{col};height:100px"><div style="flex:1;min-height:0"><p style="margin:0">a</p><p style="margin:0">b</p><p style="margin:0">c</p></div><div style="height:80px">tall</div></div>))
+      expect_native_flex(%(<div style="#{col};height:200px"><div style="flex:1"><div style="height:500px"></div></div><div style="height:30px">footer</div></div>))
+      expect_native_flex(%(<div style="#{col};height:200px"><div style="flex:1;overflow-y:auto"><div style="height:500px"></div></div><div style="height:30px">footer</div></div>))
+    end
+    it 'divides a min-height floor the items underrun and a max-height cap they overrun' do
+      expect_native_flex(%(<div style="#{col};min-height:200px"><div style="flex:1">a</div><div>b</div></div>))
+      expect_native_flex(%(<div style="#{col};min-height:40px"><div style="height:20px"></div><div style="height:20px"></div><div style="height:20px"></div></div>))
+      expect_native_flex(%(<div style="#{col};max-height:100px"><div style="height:200px;flex-shrink:1">shrinks</div></div>))
+      expect_native_flex(%(<div style="#{col};max-height:100px"><div style="height:200px;min-height:150px">cannot</div></div>))
+    end
+    it 'sizes the cross axis: stretch fills, an aligned item shrinks to fit, declared / min / max widths clamp' do
+      expect_native_flex(%(<div style="#{col};align-items:flex-start"><div>start aligned</div><div style="width:50px">fixed</div></div>))
+      expect_native_flex(%(<div style="#{col};align-items:center"><div>centered text</div><div style="margin:0 auto">auto</div></div>))
+      expect_native_flex(%(<div style="#{col};height:200px"><div style="flex:1;width:100px">declared width</div><div style="height:30px;width:400px">wide</div></div>))
+      expect_native_flex(%(<div style="#{col};height:200px"><div style="flex:1;max-width:60px">capped width text</div><div style="height:30px;min-width:350px">min</div></div>))
+    end
+    it 'reads flex-basis as a length (content-box per box-sizing) or a percentage of the definite main size' do
+      expect_native_flex(%(<div style="#{col}"><div style="flex:0 0 120px;padding:10px">basis pad</div><div style="flex:0 0 120px;box-sizing:border-box;padding:10px">bb</div><div style="flex-basis:50%">half</div></div>))
+      expect_native_flex(%(<div style="#{col};height:200px"><div style="flex-basis:50%">half</div><div style="flex:1;max-height:30px"><div style="height:60px"></div></div><div style="flex:1;min-height:80px">min</div></div>))
+      expect_native_flex(%(<div style="#{col}"><div style="flex:1 1 0;min-height:auto">zero basis text</div><div>b</div></div>))
+    end
+    it 'wraps against a definite height, sizes each line to its widest item, and re-stretches to the grown line' do
+      expect_native_flex(%(<div style="#{col};height:100px;flex-wrap:wrap"><div style="height:60px;width:50px"></div><div style="height:60px;width:70px"></div><div style="height:60px;width:30px"></div></div>))
+      expect_native_flex(%(<div style="#{col};height:100px;flex-wrap:wrap"><div style="height:60px">stretch me</div><div style="height:60px">and me too</div><div style="height:60px">x</div></div>))
+      expect_native_flex(%(<div style="#{col};height:100px;flex-wrap:wrap;align-content:center"><div style="height:60px;width:50px"></div><div style="height:60px;width:70px"></div></div>))
+      expect_native_flex(%(<div style="#{col};height:100px;flex-wrap:wrap;gap:5px 20px"><div style="height:60px;width:50px"></div><div style="height:60px;width:70px"></div><div style="height:60px;width:30px"></div></div>))
+    end
+    it 'keeps justify, reverse, auto margins, relative offsets, out-of-flow children and nesting on the native path' do
+      expect_native_flex(%(<div style="#{col};height:200px;flex-direction:column-reverse"><div style="flex:1">a</div><div style="height:30px">b</div></div>))
+      expect_native_flex(%(<div style="#{col};height:200px;justify-content:center"><div style="height:30px">a</div><div style="height:30px">b</div></div>))
+      expect_native_flex(%(<div style="#{col};height:200px"><div style="margin-top:auto;height:30px">pushed down</div></div>))
+      expect_native_flex(%(<div style="#{col};height:200px"><div style="flex:1;position:relative;left:10px">rel</div><div style="height:30px">b</div></div>))
+      expect_native_flex(%(<div style="#{col};height:200px"><div style="flex:1">a</div><div style="position:absolute;width:30px;height:30px"></div><div style="height:30px">b</div></div>))
+      expect_native_flex(%(<div style="#{col};height:200px"><div style="flex:1;display:flex;flex-direction:column"><div style="flex:1">nested col</div><div>x</div></div><div>b</div></div>))
+      expect_native_flex(%(<div style="display:flex;width:400px"><div style="flex:1;display:flex;flex-direction:column"><div style="flex:1">col in row</div><div>x</div></div><div style="width:50px;height:120px"></div></div>))
+    end
+    # A descendant declaring a % height / (for a column) % width or edge keeps the item on the pushed path: native
+    # measures the item at a provisional size the records' resolved percentages don't know (review finding).
+    it 'falls back for an item whose subtree declares a percentage size the measure would misread' do
+      r = run_shadow(%(<div style="#{col};height:200px"><div style="flex:1 1 auto"><div style="height:50%">pct</div></div><div style="flex:1 1 auto">plain</div></div>))
+      expect(r).to include('ok' => true, 'mismatches' => 0, 'nativeFlexRows' => 0)
+      r = run_shadow('<div style="display:flex;width:400px"><div><div style="height:150%">pct</div></div><div style="height:40px;width:50px"></div></div>')
+      expect(r).to include('ok' => true, 'mismatches' => 0, 'nativeFlexRows' => 0)
+      r = run_shadow(%(<div style="#{col};flex-wrap:wrap"><div><div style="width:50%">some text words here to wrap</div></div><div>two</div></div>))
+      expect(r).to include('ok' => true, 'mismatches' => 0, 'nativeFlexRows' => 0)
+    end
+    # Review findings: a base-measured item shrunk below its measure keeps its floor; a `wrap` column that never
+    # breaks still shrinks its items to fit and places its line by align-content; a multi-line column stacks its
+    # lines from their NATURAL crosses (a clamped stretch item does not shrink its line); a border-box container
+    # is never shorter than its own edges.
+    it 'floors a base-measured item at its measure when the line shrinks it' do
+      expect_native_flex(%(<div style="#{col};height:50px"><div>a<br>b<br>c</div><div style="height:40px">b</div></div>))
+      expect_native_flex(%(<div style="#{col};height:50px"><div style="flex-basis:content;height:70px">a<br>b<br>c</div></div>))
+      expect_native_flex(%(<div style="#{col};height:50px"><div style="flex-shrink:1">a<br>b<br>c<br>d</div><div style="flex-shrink:1">a<br>b<br>c<br>d</div></div>))
+      expect_native_flex(%(<div style="#{col};height:50px"><div style="flex:1 1 auto">a<br>b<br>c<br>d<br>e</div></div>))
+    end
+    it 'treats a wrap column as multi-line even when it never breaks (shrink-to-fit items, align-content placement)' do
+      expect_native_flex(%(<div style="#{col};flex-wrap:wrap;align-content:center"><div>one</div><div>two</div></div>))
+      expect_native_flex(%(<div style="#{col};height:100px;flex-wrap:wrap;align-content:center"><div>one</div></div>))
+      expect_native_flex(%(<div style="#{col};flex-wrap:wrap;align-content:flex-end;min-height:100px"><div>one</div><div>two</div></div>))
+    end
+    it 'stacks a multi-line column\'s lines from their natural crosses and closes the last stretched line at the edge' do
+      expect_native_flex(%(<div style="#{col};height:100px;flex-wrap:wrap;width:200px"><div style="height:60px;max-width:20px">text here</div><div style="height:60px">b</div><div style="height:60px">c</div></div>))
+      expect_native_flex(%(<div style="#{col};height:100px;flex-wrap:wrap;width:200px"><div style="height:60px;width:20px"></div><div style="height:60px;width:20px"></div><div style="height:60px;width:20px"></div><div style="height:60px;width:20px"></div><div style="height:60px;width:20px"></div></div>))
+    end
+    it 'floors a flex-basis below a declared height at the item\'s content (the floor binds at the base, on any line)' do
+      expect_native_flex(%(<div style="#{col};height:200px"><div style="flex-basis:20px;height:100px">a<br>b<br>c</div><div style="height:30px">b</div></div>))
+      expect_native_flex(%(<div style="#{col}"><div style="flex-basis:20px;height:100px">a<br>b<br>c</div><div style="height:30px">b</div></div>))
+      expect_native_flex(%(<div style="#{col};flex-wrap:wrap;height:70px"><div style="flex-basis:20px;height:100px">a<br>b<br>c</div><div style="height:30px">b</div></div>))
+    end
+    it 'falls back for a wrap column\'s stretching item whose subtree declares any percentage (measured at a provisional width)' do
+      r = run_shadow(%(<div style="#{col};flex-wrap:wrap"><div><div style="padding-top:50%">x</div></div></div>))
+      expect(r).to include('ok' => true, 'mismatches' => 0, 'nativeFlexRows' => 0)
+    end
+    it 'floors a border-box flex container at its own border and padding' do
+      expect_native_flex(%(<div style="#{col};box-sizing:border-box;height:5px;padding:10px"><div>x</div></div>))
+      expect_native_flex('<div style="display:flex;width:400px;box-sizing:border-box;height:5px;padding:10px"><div>x</div></div>')
+    end
+  end
 end
