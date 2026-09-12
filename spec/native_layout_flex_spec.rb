@@ -262,6 +262,33 @@ RSpec.describe 'native layout flex parity', if: ENV.fetch('CSIM_JS_ENGINE', 'v8'
     expect_parity('<div style="position:relative;display:flex;flex-direction:column;width:200px;height:300px"><div style="width:60px;height:40px"></div><div style="position:absolute;bottom:10px;right:10px;width:50px;height:50px"></div></div>')
   end
 
+  # An abspos / fixed flex CONTAINER is out of flow: its parent replays its oracle-resolved box (insets / static
+  # position) and native lays out its items within it — the position never enters the flex sizing. Only sticky
+  # declines. (Before this, the flex gate rejected the container's own non-static position.)
+  it 'matches an absolutely-positioned flex container placed by insets' do
+    expect_parity('<div style="position:relative;width:300px;height:200px"><div style="position:absolute;top:10px;left:20px;display:flex;gap:8px"><div style="width:40px;height:30px"></div><div style="width:40px;height:50px"></div></div></div>')
+  end
+  it 'matches an absolutely-positioned flex container sized by left+right insets' do
+    expect_parity('<div style="position:relative;width:300px;height:200px"><div style="position:absolute;left:10px;right:40px;top:5px;display:flex;justify-content:space-between"><div style="width:40px;height:30px"></div><div style="width:40px;height:30px"></div></div></div>')
+  end
+  it 'matches a fixed-position flex container' do
+    expect_parity('<div style="width:300px;height:100px"><div style="position:fixed;top:5px;left:5px;display:flex"><div style="width:30px;height:30px"></div><div style="width:30px;height:30px"></div></div></div>')
+  end
+  it 'declines a sticky flex container' do
+    a_bails_b_native('<div style="width:300px;height:400px"><div style="position:sticky;top:0;display:flex"><div style="width:30px;height:30px"></div></div></div>',
+                     '<div style="width:300px;height:400px"><div style="display:flex"><div style="width:30px;height:30px"></div></div></div>')
+  end
+  # An abspos flex container is SELF-SIZED (autoHeight true) but its oof replay pushes the clamped box + clears
+  # rec[54], so measure_flex can't two-phase — a binding min/max-height would mislay the items in the clamped
+  # cross. Decline it (mirroring the autoHeight===false in-flow case); a NON-binding clamp stays native.
+  it 'declines an abspos flex row whose min-height binds (no two-phase after the oof replay)' do
+    a_bails_b_native('<div style="position:relative;width:300px;height:200px"><div style="position:absolute;top:0;left:0;display:flex;align-items:center;min-height:80px"><div style="width:40px;height:30px"></div></div></div>',
+                     '<div style="position:relative;width:300px;height:200px"><div style="position:absolute;top:0;left:0;display:flex;align-items:center"><div style="width:40px;height:30px"></div></div></div>')
+  end
+  it 'matches an abspos flex row with a NON-binding min-height (box on its content extent)' do
+    expect_parity('<div style="position:relative;width:300px;height:200px"><div style="position:absolute;top:0;left:0;display:flex;align-items:center;min-height:20px"><div style="width:40px;height:60px"></div></div></div>')
+  end
+
   it 'matches a fixed-position flex child' do
     expect_parity('<div style="display:flex;width:300px;height:100px"><div style="width:50px;height:20px"></div><div style="position:fixed;top:30px;left:40px;width:40px;height:30px"></div></div>')
   end

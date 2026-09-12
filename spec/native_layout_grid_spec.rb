@@ -88,8 +88,10 @@ RSpec.describe 'native layout grid parity', if: ENV.fetch('CSIM_JS_ENGINE', 'v8'
     expect_parity('<div style="display:grid;grid-template-columns:100px;width:100px"><div style="display:flex;align-items:center;max-height:20px"><div style="width:30px;height:60px"></div></div></div>')
   end
 
-  it 'declines an absolutely-positioned grid CONTAINER as the root' do
-    expect_bail('<div style="position:absolute;display:grid;grid-template-columns:50px 50px;width:120px"><div style="height:20px">a</div></div>')
+  # An absolute / fixed grid container is out of flow — its parent replays its oracle-resolved box and native
+  # replays its items within it (grid is pure replay), so the position never enters layout. It lays out natively.
+  it 'matches an absolutely-positioned grid container in a relative parent' do
+    expect_parity('<div style="position:relative;width:300px;height:200px"><div style="position:absolute;top:10px;left:10px;display:grid;grid-template-columns:50px 50px;gap:6px"><div style="height:20px">a</div><div style="height:30px">b</div></div></div>')
   end
   it 'declines a floated grid container' do
     expect_bail('<div style="width:400px"><div style="float:left;display:grid;grid-template-columns:50px 50px"><div style="height:20px">a</div></div><div style="height:20px"></div></div>')
