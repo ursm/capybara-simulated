@@ -230,6 +230,16 @@ pub(crate) struct Input {
     pub(crate) shrinks_to_nothing: bool,
     pub(crate) intrinsic_w: f64,
     pub(crate) intrinsic_h: f64,
+    // An OUT-OF-FLOW box (`out_of_flow`) native positions itself (`place_out_of_flow`): the record index of its
+    // CONTAINING BLOCK (−1 = the oracle's resolved box is replayed instead, the CB lying outside the pass), its
+    // insets resolved against the CB's padding box (NaN = auto), and which of its margins are `auto` (bit 1
+    // left, 2 right, 4 top, 8 bottom — they take the slack between two insets).
+    pub(crate) cb_index: i32,
+    pub(crate) inset_top: f64,
+    pub(crate) inset_right: f64,
+    pub(crate) inset_bottom: f64,
+    pub(crate) inset_left: f64,
+    pub(crate) oof_auto_margins: u8,
 }
 
 pub(crate) const CROSS_BASELINE: u8 = 3;
@@ -274,6 +284,10 @@ pub(crate) struct Run {
 }
 
 impl Input {
+    // An out-of-flow box native positions from its containing block (vs one whose oracle box is replayed).
+    fn native_oof(&self) -> bool {
+        self.out_of_flow != 0 && self.cb_index >= 0
+    }
     // This record with a border-box height IMPOSED on it (a flex item stretched to its line, or handed its
     // resolved main size) — the oracle's `layoutElement(child, {height, autoHeight: false})`: the declared
     // height is replaced (content-box per `box-sizing`), the min/max clamp still applies after
@@ -399,7 +413,10 @@ pub(crate) fn layout_block(inputs: &[Input], runs: &[Run], run_texts: &[Option<V
     if failed.get() {
         return Outcome::Unsupported;
     }
-    place(0, root_x, root_y, inputs, &children, &mut boxes);
+    place(0, root_x, root_y, inputs, runs, run_texts, grids, &children, &mut boxes, &failed);
+    if failed.get() {
+        return Outcome::Unsupported; // an out-of-flow box sized in `place` met a construct the measure declines
+    }
     Outcome::LaidOut(boxes)
 }
 
@@ -1068,10 +1085,17 @@ fn measure(
     for &c in &children[i] {
         let cn = inputs[c];
         if cn.out_of_flow != 0 {
-            // §4.1: an absolute/fixed child neither sizes nor shifts the flow. Lay its subtree out at its pushed
-            // border box (in a fresh context — it establishes a BFC) and reset its box to this block's origin;
-            // `place` then positions it by rel_x/rel_y alone (el._lb − container._lb, the oracle's resolved
-            // insets / static position). It touches no cursor / margin / has_child state.
+            // §4.1: an absolute/fixed child neither sizes nor shifts the flow. Positioned NATIVELY, it only records
+            // its STATIC position here — where the flow has reached (the cursor, before any margin still open; the
+            // content's right edge for an rtl flow) — and is sized and placed by `place_out_of_flow` once every
+            // box is final. Replayed, its subtree is laid out at its pushed border box (in a fresh context — it
+            // establishes a BFC) and its box reset to this block's origin; `place` then positions it by rel_x/rel_y
+            // alone (el._lb − container._lb). Neither touches the cursor / margin / has_child state.
+            if cn.native_oof() {
+                boxes[c].x = if n.rtl != 0 { content_left_rel + content_w } else { content_left_rel };
+                boxes[c].y = cursor;
+                continue;
+            }
             let cw = resolve_width(&cn, content_w);
             measure(c, cw, f64::NAN, inputs, runs, run_texts, grids, children, boxes, failed, &mut FloatCtx::new(), 0.0, 0.0);
             boxes[c].x = 0.0;
@@ -1870,7 +1894,7 @@ fn measure_flex(
             }
         }
         for &c in &kids {
-            if inputs[c].out_of_flow != 0 {
+            if inputs[c].out_of_flow != 0 && !inputs[c].native_oof() {
                 let iw = resolve_width(&inputs[c], content_w);
                 measure(c, iw, f64::NAN, inputs, runs, run_texts, grids, children, boxes, failed, &mut FloatCtx::new(), 0.0, 0.0);
             }
@@ -1887,13 +1911,16 @@ fn measure_flex(
             measure(kids[p], widths[p], f64::NAN, inputs, runs, run_texts, grids, children, boxes, failed, &mut FloatCtx::new(), 0.0, 0.0);
         }
         for &c in &kids {
-            if inputs[c].out_of_flow != 0 {
+            if inputs[c].out_of_flow != 0 && !inputs[c].native_oof() {
                 let iw = resolve_width(&inputs[c], content_w);
                 measure(c, iw, f64::NAN, inputs, runs, run_texts, grids, children, boxes, failed, &mut FloatCtx::new(), 0.0, 0.0);
             }
         }
     } else {
         for &c in &kids {
+            if inputs[c].native_oof() {
+                continue; // sized and placed by place_out_of_flow
+            }
             let iw = resolve_width(&inputs[c], content_w);
             measure(c, iw, f64::NAN, inputs, runs, run_texts, grids, children, boxes, failed, &mut FloatCtx::new(), 0.0, 0.0);
         }
@@ -3073,7 +3100,14 @@ fn measure_grid(
     for &c in &children[i] {
         let cn = inputs[c];
         if cn.out_of_flow != 0 {
-            // §4.1: lay the subtree out at its pushed border box; `place` positions it by rel_x/rel_y alone.
+            if cn.native_oof() {
+                // §4.1: its static position is the grid's content origin (the content's right edge in an rtl grid),
+                // whatever precedes it; sized and placed by place_out_of_flow.
+                boxes[c].x = if n.rtl != 0 { content_left + content_w } else { content_left };
+                boxes[c].y = content_top_rel;
+                continue;
+            }
+            // Replayed: lay the subtree out at its pushed border box; `place` positions it by rel_x/rel_y alone.
             let cw = resolve_width(&cn, content_w);
             measure(c, cw, f64::NAN, inputs, runs, run_texts, grids, children, boxes, failed, &mut FloatCtx::new(), 0.0, 0.0);
             boxes[c].x = 0.0;
@@ -3232,12 +3266,175 @@ fn replaced_box(n: &Input, auto_w: f64) -> (f64, f64) {
 // origin to its children (whose x/y are relative to it), top-down in one pass — plus each node's
 // `position: relative` offset, which moves it AND its subtree at paint time (the flow used the unshifted
 // position, so only this pass, after the origin is added, applies the shift; children follow via `bx`/`by`).
-fn place(i: usize, ax: f64, ay: f64, inputs: &[Input], children: &[Vec<usize>], boxes: &mut [Box]) {
+fn place(
+    i: usize,
+    ax: f64,
+    ay: f64,
+    inputs: &[Input],
+    runs: &[Run],
+    run_texts: &[Option<Vec<u16>>],
+    grids: &[f64],
+    children: &[Vec<usize>],
+    boxes: &mut [Box],
+    failed: &std::cell::Cell<bool>,
+) {
     boxes[i].x += ax + inputs[i].rel_x;
     boxes[i].y += ay + inputs[i].rel_y;
     let (bx, by) = (boxes[i].x, boxes[i].y);
     for &c in &children[i] {
-        place(c, bx, by, inputs, children, boxes);
+        if inputs[c].native_oof() {
+            place_out_of_flow(c, i, inputs, runs, run_texts, grids, children, boxes, failed);
+        } else {
+            place(c, bx, by, inputs, runs, run_texts, grids, children, boxes, failed);
+        }
+    }
+}
+
+// The slack between two insets shared out to `auto` margins (CSS 2.1 §10.3.7 across, §10.6.4 down) — the
+// oracle's `autoMarginSplit`: both auto centre the box, one auto takes it all, and an over-constrained box (no
+// slack) sits flush at the lead edge with the trailing margin absorbing the negative remainder.
+fn auto_margin_split(lead_auto: bool, trail_auto: bool, lm: f64, tm: f64, available: f64, size: f64) -> (f64, f64) {
+    if !lead_auto && !trail_auto {
+        return (lm, tm);
+    }
+    let spare = available - size - if lead_auto { 0.0 } else { lm } - if trail_auto { 0.0 } else { tm };
+    if !(spare > 0.0) {
+        return (if lead_auto { 0.0 } else { lm }, if trail_auto { spare } else { tm });
+    }
+    if lead_auto && trail_auto {
+        return (spare / 2.0, spare / 2.0);
+    }
+    if lead_auto { (spare, tm) } else { (lm, spare) }
+}
+
+// Where `justify-content` puts the SOLE flex item of a line — an out-of-flow child's static position (§4.1, the
+// oracle's `justifyOffsets` with `staticPos`): a distribution keyword falls back to its alignment even when the
+// box overflows (`space-around` / `space-evenly` centre it, `space-between` packs at the start).
+fn static_justify_lead(code: u8, free: f64) -> f64 {
+    match code {
+        1 | 4 | 5 => free / 2.0, // center, space-around, space-evenly (one item)
+        2 => free,               // end
+        _ => 0.0,                // start, space-between
+    }
+}
+
+// Size and place an OUT-OF-FLOW box (§10.3.7 / §10.6.4 — the oracle's `placeAbsolute`) from its containing
+// block, now that every box is final: the CB's padding box in absolute coordinates gives the insets their basis;
+// both insets on an axis STRETCH an auto size between them (less the box's margins, an `auto` margin taking the
+// slack), one or none leaves an auto width to SHRINK TO FIT (its intrinsic widths clamped to the room; a
+// ratio-only box takes the room) and an auto height to its content; a declared size wins either way (a replaced
+// box through its intrinsic size). The subtree is laid out at that size here — it needed the CB's height, which
+// only the finished layout has — and the box is placed from its insets, or from its STATIC position where an axis
+// has none: the flow cursor its parent recorded (`boxes[c]` before this call, relative to the parent; an rtl
+// flow's static corner is the content's right edge), or a flex container's ALIGNMENT of the box as its sole item.
+fn place_out_of_flow(
+    c: usize,
+    parent: usize,
+    inputs: &[Input],
+    runs: &[Run],
+    run_texts: &[Option<Vec<u16>>],
+    grids: &[f64],
+    children: &[Vec<usize>],
+    boxes: &mut [Box],
+    failed: &std::cell::Cell<bool>,
+) {
+    let n = inputs[c];
+    let cb_i = n.cb_index as usize;
+    let cbn = inputs[cb_i];
+    let (cb_x, cb_y) = (boxes[cb_i].x + cbn.bl, boxes[cb_i].y + cbn.bt);
+    let cb_w = (boxes[cb_i].w - cbn.bl - cbn.br).max(0.0);
+    let cb_h = (boxes[cb_i].h - cbn.bt - cbn.bb).max(0.0);
+    let (top, right, bottom, left) = (n.inset_top, n.inset_right, n.inset_bottom, n.inset_left);
+    let (ml, mr, mt, mb) = (Input::m(n.ml), Input::m(n.mr), Input::m(n.mt), Input::m(n.mb));
+    let stretched = !is_auto(left) && !is_auto(right);
+    let stretched_v = !is_auto(top) && !is_auto(bottom);
+    let or0 = |v: f64| if is_auto(v) { 0.0 } else { v };
+    let avail_w = (cb_w - or0(left) - or0(right)).max(0.0);
+    let avail_h = if stretched_v { (cb_h - top - bottom).max(0.0) } else { 0.0 };
+    // The static position its parent recorded (relative to the parent's border box), read before the box is sized.
+    let (static_rx, static_ry) = (boxes[c].x, boxes[c].y);
+    let auto_w = if stretched || (n.replaced && n.ratio_only) {
+        (avail_w - ml - mr).max(0.0)
+    } else {
+        match intrinsic_widths(c, inputs, runs, run_texts, children) {
+            Some((imin, imax)) => imin.max(avail_w).min(imax),
+            None => {
+                failed.set(true);
+                0.0
+            }
+        }
+    };
+    let w = used_width(&n, auto_w);
+    // A stretched AUTO height is imposed (usedSize hands it in as the box's height; the flow keeps a non-zero one) —
+    // a zero one is the oracle's auto placeholder and back-fills from the content.
+    let auto_h = if stretched_v { (avail_h - mt - mb).max(0.0) } else { 0.0 };
+    let imposed = if is_auto(n.height) && auto_h > 0.0 { auto_h } else { f64::NAN };
+    measure(c, w, imposed, inputs, runs, run_texts, grids, children, boxes, failed, &mut FloatCtx::new(), 0.0, 0.0);
+    let h = boxes[c].h;
+    let am = n.oof_auto_margins;
+    let (mx_lead, mx_trail) = if stretched { auto_margin_split(am & 1 != 0, am & 2 != 0, ml, mr, avail_w, w) } else { (ml, mr) };
+    let (my_lead, my_trail) = if stretched_v { auto_margin_split(am & 4 != 0, am & 8 != 0, mt, mb, avail_h, h) } else { (mt, mb) };
+    // The static position, in absolute coordinates: the parent's origin plus what it recorded — or, for a flex
+    // container, the box aligned as the line's sole item (§4.1: justify-content along the main axis, its own
+    // align-self across, its MARGIN box being what is aligned).
+    let pn = inputs[parent];
+    let (px, py) = (boxes[parent].x, boxes[parent].y);
+    let (static_x, static_y) = if pn.display == DISPLAY_FLEX {
+        let (ix, iy) = (px + pn.bl + pn.pl, py + pn.bt + pn.pt);
+        let inner_w = (boxes[parent].w - pn.edges_x()).max(0.0);
+        let inner_h = (boxes[parent].h - pn.edges_y()).max(0.0);
+        let (main_size, cross_size) = if pn.flex_main_is_x { (inner_w, inner_h) } else { (inner_h, inner_w) };
+        let main_box = if pn.flex_main_is_x { w } else { h };
+        // The leading main margin is the one on the main-START side (the far physical side on a reversed axis).
+        let (main_lead, main_item) = if pn.flex_main_is_x {
+            (if pn.flex_main_reverse { mr } else { ml }, w + ml + mr)
+        } else {
+            (if pn.flex_main_reverse { mb } else { mt }, h + mt + mb)
+        };
+        // An rtl COLUMN's cross axis runs right-to-left (its cross-start is the right edge): the leading cross margin
+        // is the right one and the cross offset is measured back from the right edge (the oracle's `alongAxis`).
+        let cross_far = !pn.flex_main_is_x && pn.rtl != 0;
+        let (cross_lead, cross_item) = if pn.flex_main_is_x { (mt, h + mt + mb) } else { (if cross_far { mr } else { ml }, w + ml + mr) };
+        let main = static_justify_lead(pn.flex_justify, main_size - main_item) + main_lead;
+        let cross_free = cross_size - cross_item;
+        let cross = match n.flex_cross_align {
+            1 => cross_free / 2.0,
+            2 => cross_free,
+            _ => 0.0,
+        } + cross_lead;
+        let along = |reversed: bool, size: f64, from_start: f64, item: f64| if reversed { size - from_start - item } else { from_start };
+        if pn.flex_main_is_x {
+            (ix + along(pn.flex_main_reverse, inner_w, main, main_box), iy + cross)
+        } else {
+            (ix + along(cross_far, inner_w, cross, w), iy + along(pn.flex_main_reverse, inner_h, main, main_box))
+        }
+    } else if pn.rtl != 0 {
+        (px + static_rx - w, py + static_ry) // an rtl flow's static corner: the content's right edge, less the box
+    } else {
+        (px + static_rx, py + static_ry)
+    };
+    let x = if !is_auto(left) {
+        cb_x + left + mx_lead
+    } else if !is_auto(right) {
+        cb_x + cb_w - right - w - mx_trail
+    } else {
+        static_x
+    };
+    let y = if !is_auto(top) {
+        cb_y + top + my_lead
+    } else if !is_auto(bottom) {
+        cb_y + cb_h - bottom - h - my_trail
+    } else {
+        static_y
+    };
+    boxes[c].x = x;
+    boxes[c].y = y;
+    for &cc in &children[c] {
+        if inputs[cc].native_oof() {
+            place_out_of_flow(cc, c, inputs, runs, run_texts, grids, children, boxes, failed);
+        } else {
+            place(cc, x, y, inputs, runs, run_texts, grids, children, boxes, failed);
+        }
     }
 }
 
@@ -3355,6 +3552,12 @@ mod tests {
             shrinks_to_nothing: false,
             intrinsic_w: 0.0,
             intrinsic_h: 0.0,
+            cb_index: -1,
+            inset_top: f64::NAN,
+            inset_right: f64::NAN,
+            inset_bottom: f64::NAN,
+            inset_left: f64::NAN,
+            oof_auto_margins: 0,
         }
     }
 
