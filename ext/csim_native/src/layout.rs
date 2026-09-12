@@ -169,6 +169,10 @@ pub(crate) struct Input {
     // inside it (0 when there is none). The oracle does not lay that text out as a real flex item, it only
     // floors the container's AUTO cross size at this line-height (`anonymousItemHeight`); native does the same.
     pub(crate) anon_cross: f64,
+    // `white-space: nowrap` on a text block: whitespace still collapses, but the line never SOFT-wraps — only a
+    // `<br>` breaks it. The line grows past the content width; the block's height is the strut (one line, or one
+    // per <br>). (pre / pre-wrap / pre-line, which preserve whitespace, still decline in the harness.)
+    pub(crate) no_wrap: bool,
 }
 
 pub(crate) const CROSS_BASELINE: u8 = 3;
@@ -350,6 +354,7 @@ fn line_layout(
     cl: f64,
     cr: f64,
     top: f64,
+    no_wrap: bool,
 ) -> Option<(u32, f64)> {
     let strut_desc = strut_lh - strut_asc;
     // The usable width of the line whose top is at `top + t` — the float band there, or the full content
@@ -442,8 +447,9 @@ fn line_layout(
                             line_x += sw; // hanging space
                         }
                         let ow: f64 = open.iter().filter(|o| !o.1).map(|o| o.0).sum();
-                        // A break opportunity precedes this word at a collapsed space OR right after an atomic.
-                        if line_has_content && (space_before || atomic_break) && line_x + ow + width > band_w(total) {
+                        // A break opportunity precedes this word at a collapsed space OR right after an atomic —
+                        // but `white-space: nowrap` never SOFT-wraps (only <br>), so the line grows past the band.
+                        if !no_wrap && line_has_content && (space_before || atomic_break) && line_x + ow + width > band_w(total) {
                             total += line_asc + line_desc; // break: close the line (the hanging space is dropped)
                             n += 1;
                             line_x = 0.0;
@@ -452,8 +458,10 @@ fn line_layout(
                             line_has_content = false; // fresh line — its first word may still need to drop below a float
                         }
                         // An empty line whose first word won't fit the band drops below the float squeezing
-                        // it (§9.5, "if a shortened line box is too small…"), growing the block by the gap.
-                        if !floats.is_empty() && !line_has_content && width + ow > band_w(total) {
+                        // it (§9.5, "if a shortened line box is too small…"), growing the block by the gap. A
+                        // `nowrap` line is NOT shortened by a float and never drops — it overlaps it on one line
+                        // (the oracle does no float handling for a nowrap block), so skip this too.
+                        if !no_wrap && !floats.is_empty() && !line_has_content && width + ow > band_w(total) {
                             let fy = top + total;
                             let at = float_fit_y(floats, fy, width + ow, cl, cr, strut_lh);
                             if at > fy {
@@ -490,7 +498,9 @@ fn line_layout(
                     line_x += sw; // hanging space
                 }
                 let ow: f64 = open.iter().filter(|o| !o.1).map(|o| o.0).sum();
-                if line_has_content && line_x + ow + width > band_w(total) {
+                // An atomic is a break opportunity before it (§ line breaking) — but not under `white-space:
+                // nowrap`, which never soft-wraps.
+                if !no_wrap && line_has_content && line_x + ow + width > band_w(total) {
                     total += line_asc + line_desc; // break before the atomic (drop any hanging space)
                     n += 1;
                     line_x = 0.0;
@@ -498,7 +508,8 @@ fn line_layout(
                     line_desc = strut_desc;
                     line_has_content = false;
                 }
-                if !floats.is_empty() && !line_has_content && width + ow > band_w(total) {
+                // A nowrap line is not shortened by / dropped below a float (see the word branch above).
+                if !no_wrap && !floats.is_empty() && !line_has_content && width + ow > band_w(total) {
                     let fy = top + total;
                     let at = float_fit_y(floats, fy, width + ow, cl, cr, strut_lh);
                     if at > fy {
@@ -735,7 +746,7 @@ fn measure(
         let bfc_top = bfc_y + content_top_rel;
         let (rs, re) = (n.run_start.max(0) as usize, (n.run_start + n.run_count).max(0) as usize);
         let content_h = if re <= runs.len() && rs <= re {
-            match line_layout(&runs[rs..re], &run_texts[rs..re], n.strut_lh, n.strut_asc, content_w, &fc.items, cl, cr, bfc_top) {
+            match line_layout(&runs[rs..re], &run_texts[rs..re], n.strut_lh, n.strut_asc, content_w, &fc.items, cl, cr, bfc_top, n.no_wrap) {
                 Some((_, h)) => h,
                 None => {
                     failed.set(true);
@@ -1708,6 +1719,7 @@ mod tests {
             rtl: 0,
             cell_va_offset: 0.0,
             anon_cross: 0.0,
+            no_wrap: false,
         }
     }
 
