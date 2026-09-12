@@ -109,11 +109,39 @@ RSpec.describe 'native layout inline-atomic parity', if: ENV.fetch('CSIM_JS_ENGI
     expect_parity('<div style="width:70px">aaaaaaaa<span style="display:inline-block;width:40px;height:10px"></span></div>')
   end
 
-  it 'declines a super-aligned atomic (non-baseline vertical-align)' do
-    expect_bail('<div style="width:300px">x <svg width="10" height="10" style="vertical-align:super"></svg> y</div>')
+  # A `vertical-align` that only shifts the atomic's ASCENT within the line (baseline shift — super / sub /
+  # length / %, or middle / text-top / text-bottom against the parent's font box) is reproduced by pushing the
+  # va-adjusted ascent (`alignedAscent`); the Rust line layout grows the line box around it. Only `top` /
+  # `bottom`, which align to the LINE box itself (height not known until the line closes), still decline.
+  it 'matches a super-aligned atomic (baseline shift raises it and grows the line)' do
+    expect_parity('<div style="width:300px">x <svg width="10" height="10" style="vertical-align:super"></svg> y</div>')
   end
-  it 'declines a super-aligned inline-block atomic' do
-    expect_bail('<div style="width:300px">x <span style="display:inline-block;width:10px;height:10px;vertical-align:super"></span> y</div>')
+  it 'matches a super-aligned inline-block atomic' do
+    expect_parity('<div style="width:300px">x <span style="display:inline-block;width:10px;height:10px;vertical-align:super"></span> y</div>')
+  end
+  it 'matches a sub-aligned inline-block atomic (baseline shift down)' do
+    expect_parity('<div style="width:300px">x <span style="display:inline-block;width:10px;height:14px;vertical-align:sub"></span> y</div>')
+  end
+  it 'matches a middle-aligned atomic (centred half an x-height above the baseline)' do
+    expect_parity('<div style="width:300px;font-size:16px">text <span style="display:inline-block;width:12px;height:24px;vertical-align:middle"></span> more</div>')
+  end
+  it 'matches a text-top-aligned atomic (top on the parent ascent)' do
+    expect_parity('<div style="width:300px">text <span style="display:inline-block;width:12px;height:12px;vertical-align:text-top"></span> more</div>')
+  end
+  it 'matches a text-bottom-aligned atomic (bottom on the parent descent)' do
+    expect_parity('<div style="width:300px">text <span style="display:inline-block;width:12px;height:12px;vertical-align:text-bottom"></span> more</div>')
+  end
+  it 'matches a length-shifted atomic' do
+    expect_parity('<div style="width:300px">text <span style="display:inline-block;width:12px;height:12px;vertical-align:5px"></span> more</div>')
+  end
+  it 'matches a middle-aligned svg icon in a text line' do
+    expect_parity('<div style="width:300px">label <svg viewBox="0 0 16 16" style="height:16px;vertical-align:middle"><path d="M0 0h16v16z"/></svg> here</div>')
+  end
+  it 'declines a top-aligned atomic (line-box-relative — line height unknown until it closes)' do
+    expect_bail('<div style="width:300px">x <span style="display:inline-block;width:10px;height:30px;vertical-align:top"></span> y</div>')
+  end
+  it 'declines a bottom-aligned atomic (line-box-relative)' do
+    expect_bail('<div style="width:300px">x <span style="display:inline-block;width:10px;height:30px;vertical-align:bottom"></span> y</div>')
   end
   it 'declines an absolutely-positioned atomic nested in a span (out of flow)' do
     expect_bail('<div style="position:relative;width:300px">x <b>hi <span style="display:inline-block;position:absolute;width:10px;height:10px"></span></b> y</div>')
