@@ -1769,54 +1769,88 @@ fn measure_table(
     MInfo { top, top_only: top, bottom: CMargin::of(Input::m(n.mb)), collapse_through: false }
 }
 
-// The column widths a computed grid hands its items (§12.4-12.7, the NON-intrinsic subset the gate admits:
-// fixed px, `%`, and plain `fr`). `grids[base + 2c ..]` holds each column as (kind, value): 0 = px (value),
-// 1 = `%` (value is the fraction, resolved against the container's own content width), 2 = `fr` (value is the
-// weight, floor 0). No intrinsic tracks reach here, so §12.6 "maximize" and the `auto` stretch are no-ops —
-// only the §12.7 `fr` distribution runs (spare = inner − the fixed tracks, split by weight, sum floored at 1).
-fn grid_column_widths(grids: &[f64], base: usize, col_count: usize, content_w: f64, col_gap: f64) -> Vec<f64> {
+// The column widths a computed grid hands its items (§12.4-12.7). `grids[base + 5c ..]` holds each column as
+// (base, limit, is_fr, fr_weight, is_auto): the base/limit sizing already resolved by the oracle's trackBase /
+// trackLimit at marshal time — so an INTRINSIC track (auto / min|max-content / minmax / fit-content) arrives as
+// its resolved base (its floor / min-content) and limit (its ceiling / max-content), a fixed / % track as
+// base == limit, and an `fr` track as base = its floor, limit = base with `is_fr` set. Native runs the two
+// distributions on those figures: §12.6 "maximize" grows the non-fr tracks toward their limits sharing free
+// space equally, then §12.7 hands the remainder to the `fr` tracks (weight sum floored at 1, floors refrozen),
+// or — with no `fr` — stretches the `auto` tracks to fill (`justify-content: normal`).
+fn grid_column_widths(grids: &[f64], base_i: usize, col_count: usize, content_w: f64, col_gap: f64) -> Vec<f64> {
     let inner = content_w - col_gap * (col_count as f64 - 1.0).max(0.0);
-    let mut track = vec![0.0f64; col_count]; // px / % resolve to their size; an `fr` bases at 0 (no floor here)
+    let mut base = vec![0.0f64; col_count];
+    let mut limit = vec![0.0f64; col_count];
     let mut is_fr = vec![false; col_count];
     let mut fr_weight = vec![0.0f64; col_count];
+    let mut is_auto = vec![false; col_count];
     for c in 0..col_count {
-        let val = grids[base + 2 * c + 1];
-        match grids[base + 2 * c] as u8 {
-            1 => track[c] = val * content_w, // `%`: the fraction against the container content width
-            2 => {
-                is_fr[c] = true;
-                fr_weight[c] = val;
+        let o = base_i + 5 * c;
+        base[c] = grids[o];
+        limit[c] = grids[o + 1];
+        is_fr[c] = grids[o + 2] != 0.0;
+        fr_weight[c] = grids[o + 3];
+        is_auto[c] = grids[o + 4] != 0.0;
+    }
+    let mut free = inner - base.iter().sum::<f64>();
+    // §12.6 "maximize tracks": grow the intrinsic (non-fr, limit > base) tracks toward their limits, sharing what
+    // is free equally; a negative free space grows nothing (the grid overflows, as a browser lets it).
+    if free > 0.01 {
+        let mut growable: Vec<usize> = (0..col_count).filter(|&c| !is_fr[c] && limit[c] > base[c]).collect();
+        while free > 0.01 && !growable.is_empty() {
+            let share = free / growable.len() as f64;
+            let mut next = Vec::new();
+            for &c in &growable {
+                let add = (limit[c] - base[c]).min(share);
+                base[c] += add;
+                free -= add;
+                if limit[c] - base[c] > 0.01 {
+                    next.push(c);
+                }
             }
-            _ => track[c] = val, // px
+            if next.len() == growable.len() && share <= 0.01 {
+                break;
+            }
+            growable = next;
         }
     }
-    // §12.7 "find the size of an fr": `fr` divides `inner` less the fixed tracks (its own floor is NOT
-    // subtracted first — here the floor is 0). A weight sum below 1 is NOT scaled up. The freeze loop is kept
-    // general (it does nothing while floors are 0, but is the shape Phase 1b's minmax floors will need).
+    // §12.7 "find the size of an fr": `fr` divides `inner` less the (grown) non-fr tracks — its own floor is NOT
+    // subtracted first, but is a minimum its share can't fall below (a floor that beats its share refreezes and
+    // leaves the pool). A weight sum below 1 is NOT scaled up.
     let fr_idx: Vec<usize> = (0..col_count).filter(|&c| is_fr[c]).collect();
     if !fr_idx.is_empty() {
-        let taken: f64 = (0..col_count).filter(|&c| !is_fr[c]).map(|c| track[c]).sum();
+        let taken: f64 = (0..col_count).filter(|&c| !is_fr[c]).map(|c| base[c]).sum();
         let mut flexible = fr_idx;
         let mut spare = (inner - taken).max(0.0);
         loop {
             let weight = flexible.iter().map(|&c| fr_weight[c]).sum::<f64>().max(1.0);
-            let frozen: Vec<usize> = flexible.iter().copied().filter(|&c| track[c] > spare * fr_weight[c] / weight).collect();
+            let frozen: Vec<usize> = flexible.iter().copied().filter(|&c| base[c] > spare * fr_weight[c] / weight).collect();
             if frozen.is_empty() {
                 for &c in &flexible {
-                    track[c] = track[c].max(spare * fr_weight[c] / weight);
+                    base[c] = base[c].max(spare * fr_weight[c] / weight);
                 }
                 break;
             }
             for &c in &frozen {
-                spare = (spare - track[c]).max(0.0);
+                spare = (spare - base[c]).max(0.0);
             }
             flexible.retain(|c| !frozen.contains(c));
             if flexible.is_empty() {
                 break;
             }
         }
+    } else if free > 0.01 {
+        // No `fr` to absorb the remainder: `auto` tracks stretch to fill the row (the `justify-content: normal`
+        // default behaves as `stretch` for them); a fixed-only list keeps its sizes and leaves the remainder.
+        let autos: Vec<usize> = (0..col_count).filter(|&c| is_auto[c]).collect();
+        if !autos.is_empty() {
+            let extra = free / autos.len() as f64;
+            for &c in &autos {
+                base[c] += extra;
+            }
+        }
     }
-    track.iter().map(|&w| w.max(0.0)).collect()
+    base.iter().map(|&w| w.max(0.0)).collect()
 }
 
 // A computed GRID container (§12), the native COMPUTE path (see DISPLAY_GRID). Sizes the columns natively,
@@ -1852,7 +1886,8 @@ fn measure_grid(
     let row_gap = grids[gs + 2];
     let tmpl_base = gs + 3;
     let kids = &children[i];
-    if col_count == 0 || tmpl_base + 2 * col_count + 2 * kids.len() > grids.len() {
+    // Template is 5 values per column (base, limit, is_fr, fr_weight, is_auto); placement is 2 per item.
+    if col_count == 0 || tmpl_base + 5 * col_count + 2 * kids.len() > grids.len() {
         return bail(failed);
     }
     let widths = grid_column_widths(grids, tmpl_base, col_count, content_w, col_gap);
@@ -1862,7 +1897,7 @@ fn measure_grid(
         offsets[c] = atx;
         atx += widths[c] + col_gap;
     }
-    let place_base = tmpl_base + 2 * col_count;
+    let place_base = tmpl_base + 5 * col_count;
 
     // Row-major auto-placement, mirroring `layoutGrid`: an explicit start that fits resets the column (a new
     // row if the cursor already passed it); otherwise a span that would overflow wraps. Rows advance by the

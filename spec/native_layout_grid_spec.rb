@@ -182,4 +182,36 @@ RSpec.describe 'native layout grid parity', if: ENV.fetch('CSIM_JS_ENGINE', 'v8'
       expect_bail('<div style="display:grid;grid-template-columns:1fr 1fr;width:200px;padding:20% 0"><div style="height:20px">a</div><div style="height:30px">b</div></div>')
     end
   end
+
+  # ── Phase 1b: intrinsic tracks ──────────────────────────────────────────────────────────────────────────
+  # auto / min-content / max-content / minmax() / fit-content() need each column's content contribution
+  # (gridColumnContent, from the items' intrinsicWidths). Those base/limit sizes are marshalled (the Phase-1b
+  # shortcut) and native runs the §12.6 maximize + §12.7 fr distribution on them — a Phase-2 native
+  # min/max-content will compute the contributions too.
+  describe 'native intrinsic-track compute' do
+    it 'matches two auto columns sized to their content' do
+      expect_parity('<div style="display:grid;grid-template-columns:auto auto;width:500px"><div style="height:20px">short</div><div style="height:30px">a much longer cell here</div></div>')
+    end
+    it 'matches auto beside fr (auto to content, fr fills the rest)' do
+      expect_parity('<div style="display:grid;grid-template-columns:auto 1fr;width:400px"><div style="height:20px">label</div><div style="height:30px">value fills the rest of the row</div></div>')
+    end
+    it 'matches minmax(px, 1fr) beside a fixed column' do
+      expect_parity('<div style="display:grid;grid-template-columns:minmax(100px,1fr) 200px;width:500px"><div style="height:20px">a</div><div style="height:30px">b</div></div>')
+    end
+    it 'matches minmax(600px,1fr) 1fr with the fr floor refreezing' do
+      expect_parity('<div style="display:grid;grid-template-columns:minmax(600px,1fr) 1fr;width:800px"><div style="height:20px">a</div><div style="height:30px">b</div></div>')
+    end
+    it 'matches min-content beside fr' do
+      expect_parity('<div style="display:grid;grid-template-columns:min-content 1fr;width:400px"><div style="height:20px">wordwordword</div><div style="height:30px">rest</div></div>')
+    end
+    it 'matches max-content beside auto' do
+      expect_parity('<div style="display:grid;grid-template-columns:max-content auto;width:500px"><div style="height:20px">some text here</div><div style="height:30px">more content in this column here</div></div>')
+    end
+    it 'matches fit-content(px) beside fr' do
+      expect_parity('<div style="display:grid;grid-template-columns:fit-content(80px) 1fr;width:400px"><div style="height:20px">a longer piece of text than eighty px</div><div style="height:30px">rest</div></div>')
+    end
+    it 'matches repeat(auto-fit) collapsing to the item count' do
+      expect_parity('<div style="display:grid;grid-template-columns:repeat(auto-fit,80px);gap:10px;width:300px"><div style="height:20px">1</div><div style="height:20px">2</div></div>')
+    end
+  end
 end
