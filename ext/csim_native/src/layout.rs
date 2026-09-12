@@ -35,9 +35,10 @@ pub(crate) const DISPLAY_TABLE_ROW_GROUP: u8 = 5;
 pub(crate) const DISPLAY_TABLE_ROW: u8 = 6;
 // CSS Grid (§12), native COMPUTE (not replay): the container's `grid_start` indexes the parallel `grids`
 // buffer, which holds the parsed column template + gaps + per-item placement. measure_grid sizes the columns
-// (fixed / % / fr) and lays out each item at its track width — rows are content-height (reproducing the coarse
-// oracle). A grid the native engine can't compute (intrinsic tracks, etc.) still arrives as DISPLAY_BLOCK with
-// its items REPLAYED (grid_start < 0), the pre-existing path.
+// (fixed / % / fr / intrinsic — measuring the items' min/max-content itself, `intrinsic_widths`) and lays out
+// each item at its track width — rows are content-height (reproducing the coarse oracle). A grid the native
+// engine can't compute (an rtl / row-templated / bare-text grid, etc.) still arrives as DISPLAY_BLOCK with its
+// items REPLAYED (grid_start < 0), the pre-existing path.
 pub(crate) const DISPLAY_GRID: u8 = 7;
 // A table CAPTION keeps its own block / text display (measure lays out its subtree); it is identified
 // structurally as the table's only non-row/non-group child (t4), not by a display code.
@@ -860,8 +861,8 @@ fn measure(
         return measure_table(i, inputs, runs, run_texts, grids, children, boxes, failed);
     }
 
-    // A computed GRID (§12): native sizes the columns (fixed / % / fr) and lays out each item at its track
-    // width; rows are content-height. The parsed template + gaps + placement live in `grids[grid_start..]`.
+    // A computed GRID (§12): native sizes the columns (fixed / % / fr / intrinsic) and lays out each item at its
+    // track width; rows are content-height. The parsed template + gaps + placement live in `grids[grid_start..]`.
     if n.display == DISPLAY_GRID {
         return measure_grid(i, w, inputs, runs, run_texts, grids, children, boxes, failed);
     }
@@ -1769,34 +1770,70 @@ fn measure_table(
     MInfo { top, top_only: top, bottom: CMargin::of(Input::m(n.mb)), collapse_through: false }
 }
 
-// The column widths a computed grid hands its items (§12.4-12.7). `grids[base + 5c ..]` holds each column as
-// (base, limit, is_fr, fr_weight, is_auto): the base/limit sizing already resolved by the oracle's trackBase /
-// trackLimit at marshal time — so an INTRINSIC track (auto / min|max-content / minmax / fit-content) arrives as
-// its resolved base (its floor / min-content) and limit (its ceiling / max-content), a fixed / % track as
-// base == limit, and an `fr` track as base = its floor, limit = base with `is_fr` set. Native runs the two
-// distributions on those figures: §12.6 "maximize" grows the non-fr tracks toward their limits sharing free
-// space equally, then §12.7 hands the remainder to the `fr` tracks (weight sum floored at 1, floors refrozen),
-// or — with no `fr` — stretches the `auto` tracks to fill (`justify-content: normal`).
-fn grid_column_widths(grids: &[f64], base_i: usize, col_count: usize, content_w: f64, col_gap: f64) -> Vec<f64> {
+// One column of a computed grid's template (§12.4), decoded from `grids` at 7 values per column: `(base_kind,
+// base_val, limit_kind, limit_val, is_fr, fr_weight, is_auto)`. A SIDE (the track's base or its limit) is either a
+// px figure (kind 0: fixed / %-resolved — or an intrinsic side the oracle already resolved, the fallback when
+// native can't measure an item) or an intrinsic reference native resolves from the column's content
+// contribution: kind 1 = the column's min-content, 2 = its max-content, 3 = `fit-content(val)` = max-content
+// capped at `val`, never below min-content. The kinds mirror the oracle's `trackSideSpec`.
+#[derive(Clone, Copy)]
+struct GridTrack {
+    base_kind: u8,
+    base_val: f64,
+    limit_kind: u8,
+    limit_val: f64,
+    is_fr: bool,
+    fr_weight: f64,
+    is_auto: bool,
+}
+const GRID_TRACK_STRIDE: usize = 7;
+impl GridTrack {
+    fn decode(grids: &[f64], o: usize) -> GridTrack {
+        GridTrack {
+            base_kind: grids[o] as u8,
+            base_val: grids[o + 1],
+            limit_kind: grids[o + 2] as u8,
+            limit_val: grids[o + 3],
+            is_fr: grids[o + 4] != 0.0,
+            fr_weight: grids[o + 5],
+            is_auto: grids[o + 6] != 0.0,
+        }
+    }
+    fn needs_content(&self) -> bool {
+        self.base_kind != 0 || self.limit_kind != 0
+    }
+}
+// One side of a track in px, given the column's (min, max) content contribution — the oracle's `resolveSideSpec`.
+fn resolve_track_side(kind: u8, val: f64, col: (f64, f64)) -> f64 {
+    match kind {
+        1 => col.0,
+        2 => col.1,
+        3 => col.0.max(val.min(col.1)),
+        _ => val,
+    }
+}
+
+// The column widths a computed grid hands its items (§12.4-12.7). Each track's base and limit resolve from its
+// spec (a px figure, or an intrinsic reference into `cols`, the per-column content contributions — `None` when
+// no track asks for one). Native then runs the two distributions: §12.6 "maximize" grows the non-fr tracks
+// toward their limits sharing free space equally, then §12.7 hands the remainder to the `fr` tracks (weight
+// sum floored at 1, floors refrozen), or — with no `fr` — stretches the `auto` tracks to fill
+// (`justify-content: normal`).
+fn grid_column_widths(tracks: &[GridTrack], cols: Option<&[(f64, f64)]>, content_w: f64, col_gap: f64) -> Vec<f64> {
+    let col_count = tracks.len();
     let inner = content_w - col_gap * (col_count as f64 - 1.0).max(0.0);
     let mut base = vec![0.0f64; col_count];
     let mut limit = vec![0.0f64; col_count];
-    let mut is_fr = vec![false; col_count];
-    let mut fr_weight = vec![0.0f64; col_count];
-    let mut is_auto = vec![false; col_count];
-    for c in 0..col_count {
-        let o = base_i + 5 * c;
-        base[c] = grids[o];
-        limit[c] = grids[o + 1];
-        is_fr[c] = grids[o + 2] != 0.0;
-        fr_weight[c] = grids[o + 3];
-        is_auto[c] = grids[o + 4] != 0.0;
+    for (c, t) in tracks.iter().enumerate() {
+        let col = cols.map(|cs| cs[c]).unwrap_or((0.0, 0.0));
+        base[c] = resolve_track_side(t.base_kind, t.base_val, col);
+        limit[c] = if t.is_fr { base[c] } else { resolve_track_side(t.limit_kind, t.limit_val, col) };
     }
     let mut free = inner - base.iter().sum::<f64>();
     // §12.6 "maximize tracks": grow the intrinsic (non-fr, limit > base) tracks toward their limits, sharing what
     // is free equally; a negative free space grows nothing (the grid overflows, as a browser lets it).
     if free > 0.01 {
-        let mut growable: Vec<usize> = (0..col_count).filter(|&c| !is_fr[c] && limit[c] > base[c]).collect();
+        let mut growable: Vec<usize> = (0..col_count).filter(|&c| !tracks[c].is_fr && limit[c] > base[c]).collect();
         while free > 0.01 && !growable.is_empty() {
             let share = free / growable.len() as f64;
             let mut next = Vec::new();
@@ -1817,17 +1854,17 @@ fn grid_column_widths(grids: &[f64], base_i: usize, col_count: usize, content_w:
     // §12.7 "find the size of an fr": `fr` divides `inner` less the (grown) non-fr tracks — its own floor is NOT
     // subtracted first, but is a minimum its share can't fall below (a floor that beats its share refreezes and
     // leaves the pool). A weight sum below 1 is NOT scaled up.
-    let fr_idx: Vec<usize> = (0..col_count).filter(|&c| is_fr[c]).collect();
+    let fr_idx: Vec<usize> = (0..col_count).filter(|&c| tracks[c].is_fr).collect();
     if !fr_idx.is_empty() {
-        let taken: f64 = (0..col_count).filter(|&c| !is_fr[c]).map(|c| base[c]).sum();
+        let taken: f64 = (0..col_count).filter(|&c| !tracks[c].is_fr).map(|c| base[c]).sum();
         let mut flexible = fr_idx;
         let mut spare = (inner - taken).max(0.0);
         loop {
-            let weight = flexible.iter().map(|&c| fr_weight[c]).sum::<f64>().max(1.0);
-            let frozen: Vec<usize> = flexible.iter().copied().filter(|&c| base[c] > spare * fr_weight[c] / weight).collect();
+            let weight = flexible.iter().map(|&c| tracks[c].fr_weight).sum::<f64>().max(1.0);
+            let frozen: Vec<usize> = flexible.iter().copied().filter(|&c| base[c] > spare * tracks[c].fr_weight / weight).collect();
             if frozen.is_empty() {
                 for &c in &flexible {
-                    base[c] = base[c].max(spare * fr_weight[c] / weight);
+                    base[c] = base[c].max(spare * tracks[c].fr_weight / weight);
                 }
                 break;
             }
@@ -1842,7 +1879,7 @@ fn grid_column_widths(grids: &[f64], base_i: usize, col_count: usize, content_w:
     } else if free > 0.01 {
         // No `fr` to absorb the remainder: `auto` tracks stretch to fill the row (the `justify-content: normal`
         // default behaves as `stretch` for them); a fixed-only list keeps its sizes and leaves the remainder.
-        let autos: Vec<usize> = (0..col_count).filter(|&c| is_auto[c]).collect();
+        let autos: Vec<usize> = (0..col_count).filter(|&c| tracks[c].is_auto).collect();
         if !autos.is_empty() {
             let extra = free / autos.len() as f64;
             for &c in &autos {
@@ -1853,11 +1890,236 @@ fn grid_column_widths(grids: &[f64], base_i: usize, col_count: usize, content_w:
     base.iter().map(|&w| w.max(0.0)).collect()
 }
 
-// A computed GRID container (§12), the native COMPUTE path (see DISPLAY_GRID). Sizes the columns natively,
-// then runs the oracle's row-major placement: each item is laid out at its track width (auto fills the track
-// less its margins; a length uses its resolved box), rows are as tall as their content (the tallest item's
-// border box — a top margin moves the item but, matching the coarse oracle, neither grows the row nor stretches
-// a shorter item). The parsed template + gaps + per-item (col-start, col-span) live in `grids[grid_start..]`.
+// One item's place in a computed grid: its first column, its span, and its row (consecutive items on
+// different rows are separated by exactly one row advance).
+#[derive(Clone, Copy)]
+struct GridCell {
+    col: usize,
+    span: usize,
+    row: usize,
+}
+// Row-major auto-placement, mirroring the oracle (`layoutGrid` / `gridColumnContent` agree on the columns): an
+// explicit start that fits resets the column (a new row if the cursor already passed it); otherwise a span that
+// would overflow wraps; a filled row advances at once. `grids[place_base + 2k ..]` holds item k's (col-start or
+// -1, span). Shared by the content measure (which columns an item contributes to) and the layout (where it lands).
+fn grid_placement(grids: &[f64], place_base: usize, col_count: usize, n_items: usize) -> Vec<GridCell> {
+    let mut cells = Vec::with_capacity(n_items);
+    let mut col = 0usize;
+    let mut row = 0usize;
+    for k in 0..n_items {
+        let start_f = grids[place_base + 2 * k];
+        let span = (grids[place_base + 2 * k + 1] as usize).clamp(1, col_count);
+        if start_f >= 0.0 && (start_f as usize) + span <= col_count {
+            let start = start_f as usize;
+            if start < col {
+                row += 1; // the row already passed this line → open a new one
+            }
+            col = start;
+        } else if col + span > col_count {
+            row += 1; // the span would overflow the row → wrap
+            col = 0;
+        }
+        cells.push(GridCell { col, span, row });
+        col += span;
+        if col >= col_count {
+            row += 1;
+            col = 0;
+        }
+    }
+    cells
+}
+
+// Each column's (min, max) content contribution: the widest item placed in it — a spanning item's contribution
+// divided EVENLY across its columns (the coarse oracle's `gridColumnContent`). `None` when an item's intrinsic
+// widths aren't natively measurable (the JS gate should have routed such a grid to the resolved-px fallback; this
+// is the safety net that declines the pass rather than lay out a wrong column).
+fn grid_column_content(
+    kids: &[usize],
+    cells: &[GridCell],
+    col_count: usize,
+    inputs: &[Input],
+    runs: &[Run],
+    run_texts: &[Option<Vec<u16>>],
+    children: &[Vec<usize>],
+) -> Option<Vec<(f64, f64)>> {
+    let mut cols = vec![(0.0f64, 0.0f64); col_count];
+    for (k, &c) in kids.iter().enumerate() {
+        let cell = cells[k];
+        let (min, max) = intrinsic_widths(c, inputs, runs, run_texts, children)?;
+        let span = cell.span as f64;
+        for col in cols.iter_mut().skip(cell.col).take(cell.span) {
+            col.0 = col.0.max(min / span);
+            col.1 = col.1.max(max / span);
+        }
+    }
+    Some(cols)
+}
+
+// A box's (min-content, max-content) BORDER-box widths — CSS Sizing 3's intrinsic contribution, the oracle's
+// `intrinsicWidths` on the record tree. A declared width pins both (border-box per `box-sizing`); a text block
+// measures its inline content (`text_intrinsic`); a block container is as wide as its widest child's margin
+// box, for min and max alike; then the box's own edges add on and its min/max-width clamp the contribution
+// (border-box per `box-sizing`, min winning over max). The record's edges and widths are its cbW-resolved used
+// values, which equal the basis-less intrinsic read only when nothing is a percentage — the JS gate
+// (`nlIntrinsicMeasurable`) guarantees that, so no basis appears here. `None` for what this slice doesn't
+// measure: an out-of-flow-free block holding a float, a flex / table / replayed grid, an unmodelled run.
+fn intrinsic_widths(i: usize, inputs: &[Input], runs: &[Run], run_texts: &[Option<Vec<u16>>], children: &[Vec<usize>]) -> Option<(f64, f64)> {
+    let n = inputs[i];
+    let extra = n.edges_x();
+    let (inner_min, inner_max) = if !is_auto(n.width) {
+        let w = if n.border_box { (n.width - extra).max(0.0) } else { n.width };
+        (w, w)
+    } else {
+        match n.display {
+            DISPLAY_TEXT_BLOCK => {
+                let (rs, re) = (n.run_start.max(0) as usize, (n.run_start + n.run_count).max(0) as usize);
+                if re > runs.len() || rs > re {
+                    return None;
+                }
+                text_intrinsic(&runs[rs..re], &run_texts[rs..re], n.ws_mode)?
+            }
+            DISPLAY_BLOCK => {
+                let (mut min, mut max) = (0.0f64, 0.0f64);
+                for &c in &children[i] {
+                    let k = inputs[c];
+                    if k.out_of_flow != 0 {
+                        continue; // out of flow: sizes nothing
+                    }
+                    if k.float_kind != 0 {
+                        return None; // a float packs on the line like an inline box — not modelled here
+                    }
+                    // A block-level child contributes its MARGIN box (a negative margin narrows it; auto is 0).
+                    let (cmin, cmax) = intrinsic_widths(c, inputs, runs, run_texts, children)?;
+                    let m = Input::m(k.ml) + Input::m(k.mr);
+                    min = min.max(cmin + m);
+                    max = max.max(cmax + m);
+                }
+                (min, max)
+            }
+            _ => return None,
+        }
+    };
+    // The box's own min/max-width clamp its OUTER contribution (CSS Sizing 3 §5.1), in its box-sizing model.
+    let to_border = |v: f64| if is_auto(v) || n.border_box { v } else { v + extra };
+    let min = clamp_min_max(inner_min + extra, to_border(n.min_w), to_border(n.max_w));
+    let max = clamp_min_max(inner_max + extra, to_border(n.min_w), to_border(n.max_w));
+    Some((min, max))
+}
+
+// The (min-content, max-content) widths of a text block's inline content — the oracle's `contentIntrinsicWidths`
+// pen-walk over the same run stream `line_layout` lays out. ONE pen runs along the line: `line` is the width the
+// content reaches with no soft wrap (the widest line is the MAX-content), `word` the unbreakable run since the
+// last break opportunity, across run boundaries (the widest is the MIN-content); a `<br>` ends the line. Under a
+// collapsing mode a run of white space is one space, content only once something follows it on the line — a
+// leading one at line start is nothing, a trailing one hangs pending until the next word takes it (the LAST
+// pending run's space width wins, as the oracle overwrites it) — and, when the mode wraps, a break opportunity.
+// `nowrap` (1) never breaks: its spaces join the word and its min-content IS its max-content. `<wbr>` is a bare
+// opportunity. Modelled: `normal` / `nowrap` text and `<br>` / `<wbr>`; `None` for an inline edge (OPEN /
+// CLOSE), an atomic, a preserve / pre-line mode, or a run breaking inside words (`wrap_mode`) — the oracle
+// measures those differently (later slices).
+fn text_intrinsic(runs: &[Run], run_texts: &[Option<Vec<u16>>], ws_mode: u8) -> Option<(f64, f64)> {
+    let wraps = match ws_mode {
+        0 => true,
+        1 => false,
+        _ => return None,
+    };
+    let (mut min, mut max) = (0.0f64, 0.0f64);
+    let (mut line, mut word) = (0.0f64, 0.0f64);
+    let mut inline_on_line = false; // content has landed on this line (a space after it is pending, not dropped)
+    let mut pending_space = 0.0f64; // a collapsible space waiting for content to follow it
+    macro_rules! opportunity {
+        () => {{
+            min = min.max(word);
+            word = 0.0;
+        }};
+    }
+    macro_rules! end_line {
+        () => {{
+            max = max.max(line);
+            min = min.max(word);
+            line = 0.0;
+            word = 0.0;
+            pending_space = 0.0;
+            inline_on_line = false;
+        }};
+    }
+    // A collapsible space after content: pending on the line, and a break opportunity unless the run never wraps
+    // (then it joins the word when taken).
+    macro_rules! pend {
+        ($w:expr) => {{
+            pending_space = $w;
+            if wraps {
+                opportunity!();
+            }
+        }};
+    }
+    macro_rules! take_pending {
+        () => {{
+            line += pending_space;
+            if !wraps {
+                word += pending_space;
+            }
+            pending_space = 0.0;
+        }};
+    }
+    for (ri, run) in runs.iter().enumerate() {
+        match run.kind {
+            RUN_BR => end_line!(),
+            RUN_WBR => opportunity!(),
+            RUN_TEXT => {
+                if run.metric as u8 != 0 {
+                    return None; // break-all / break-word / anywhere: min-content may break inside a word
+                }
+                let text = run_texts.get(ri).and_then(|t| t.as_ref())?;
+                if text.iter().any(|&u| is_wide_unit(u)) {
+                    return None;
+                }
+                let space_w = measure_word(run, &[0x20])?;
+                let mut i = 0;
+                while i < text.len() {
+                    if is_ws_u16(text[i]) {
+                        while i < text.len() && is_ws_u16(text[i]) {
+                            i += 1;
+                        }
+                        // A collapsed space: pending after content on the line, nothing at line start (an
+                        // opportunity either way when the mode wraps — a no-op at line start, the word is empty).
+                        if inline_on_line {
+                            pend!(space_w);
+                        } else if wraps {
+                            opportunity!();
+                        }
+                    } else {
+                        let start = i;
+                        while i < text.len() && !is_ws_u16(text[i]) {
+                            i += 1;
+                        }
+                        let w = measure_word(run, &text[start..i])?;
+                        // A word takes the pending space ONCE — the one before it in this run, or an earlier run's
+                        // trailing space (a word glued to the previous run, nothing pending, continues that word).
+                        take_pending!();
+                        line += w;
+                        word += w;
+                        inline_on_line = true;
+                    }
+                }
+            }
+            _ => return None, // OPEN / CLOSE / ATOMIC — not measured here yet
+        }
+    }
+    max = max.max(line); // the last line closes without a reset
+    min = min.max(word);
+    if !wraps {
+        min = max;
+    }
+    Some((min.max(0.0), max.max(0.0)))
+}
+
+// A computed GRID container (§12), the native COMPUTE path (see DISPLAY_GRID). Sizes the columns natively —
+// measuring each item's min/max-content itself when a track asks for content (`intrinsic_widths`) — then runs
+// the oracle's row-major placement: each item is laid out at its track width (auto fills the track less its
+// margins; a length uses its resolved box), rows are as tall as their content (the tallest item's border box —
+// a top margin moves the item but, matching the coarse oracle, neither grows the row nor stretches a shorter
+// item). The parsed template + gaps + per-item (col-start, col-span) live in `grids[grid_start..]`.
 fn measure_grid(
     i: usize,
     w: f64,
@@ -1886,62 +2148,56 @@ fn measure_grid(
     let row_gap = grids[gs + 2];
     let tmpl_base = gs + 3;
     let kids = &children[i];
-    // Template is 5 values per column (base, limit, is_fr, fr_weight, is_auto); placement is 2 per item.
-    if col_count == 0 || tmpl_base + 5 * col_count + 2 * kids.len() > grids.len() {
+    // Template is GRID_TRACK_STRIDE values per column; placement is 2 per item.
+    if col_count == 0 || tmpl_base + GRID_TRACK_STRIDE * col_count + 2 * kids.len() > grids.len() {
         return bail(failed);
     }
-    let widths = grid_column_widths(grids, tmpl_base, col_count, content_w, col_gap);
+    let tracks: Vec<GridTrack> = (0..col_count).map(|c| GridTrack::decode(grids, tmpl_base + GRID_TRACK_STRIDE * c)).collect();
+    let place_base = tmpl_base + GRID_TRACK_STRIDE * col_count;
+    let cells = grid_placement(grids, place_base, col_count, kids.len());
+    // An intrinsic track (auto / min|max-content / fit-content / a minmax side) sizes from the items' content —
+    // measured natively here; a template of px / % / fr sides needs no measure at all.
+    let cols = if tracks.iter().any(GridTrack::needs_content) {
+        match grid_column_content(kids, &cells, col_count, inputs, runs, run_texts, children) {
+            Some(cols) => Some(cols),
+            None => return bail(failed),
+        }
+    } else {
+        None
+    };
+    let widths = grid_column_widths(&tracks, cols.as_deref(), content_w, col_gap);
     let mut offsets = vec![0.0f64; col_count];
     let mut atx = 0.0;
     for c in 0..col_count {
         offsets[c] = atx;
         atx += widths[c] + col_gap;
     }
-    let place_base = tmpl_base + 5 * col_count;
 
-    // Row-major auto-placement, mirroring `layoutGrid`: an explicit start that fits resets the column (a new
-    // row if the cursor already passed it); otherwise a span that would overflow wraps. Rows advance by the
-    // tallest item placed (content rows).
-    let mut col = 0usize;
+    // Rows advance by the tallest item placed (content rows).
     let mut row_top = 0.0f64; // relative to the content origin
     let mut row_h = 0.0f64;
     let mut bottom = 0.0f64;
     for (k, &c) in kids.iter().enumerate() {
-        let start_f = grids[place_base + 2 * k];
-        let span = (grids[place_base + 2 * k + 1] as usize).clamp(1, col_count);
-        if start_f >= 0.0 && (start_f as usize) + span <= col_count {
-            let start = start_f as usize;
-            if start < col {
-                row_top += row_h + row_gap; // the row already passed this line → open a new one
-                row_h = 0.0;
-            }
-            col = start;
-        } else if col + span > col_count {
-            row_top += row_h + row_gap; // the span would overflow the row → wrap
+        let cell = cells[k];
+        if k > 0 && cell.row != cells[k - 1].row {
+            row_top += row_h + row_gap;
             row_h = 0.0;
-            col = 0;
         }
         let mut track_w = 0.0;
-        for x in col..col + span {
-            track_w += widths[x] + if x > col { col_gap } else { 0.0 };
+        for x in cell.col..cell.col + cell.span {
+            track_w += widths[x] + if x > cell.col { col_gap } else { 0.0 };
         }
         let item = &inputs[c];
         let child_w = resolve_width(item, track_w);
         measure(c, child_w, inputs, runs, run_texts, grids, children, boxes, failed, &mut FloatCtx::new(), 0.0, 0.0);
         let ih = boxes[c].h;
-        boxes[c].x = content_left + offsets[col] + Input::m(item.ml);
+        boxes[c].x = content_left + offsets[cell.col] + Input::m(item.ml);
         boxes[c].y = content_top_rel + row_top + Input::m(item.mt);
         if ih > row_h {
             row_h = ih;
         }
         if row_top + ih > bottom {
             bottom = row_top + ih;
-        }
-        col += span;
-        if col >= col_count {
-            row_top += row_h + row_gap;
-            row_h = 0.0;
-            col = 0;
         }
     }
 
@@ -2061,6 +2317,7 @@ mod tests {
             anon_cross: 0.0,
             ws_mode: 0,
             item_auto_height: false,
+            grid_start: -1,
         }
     }
 

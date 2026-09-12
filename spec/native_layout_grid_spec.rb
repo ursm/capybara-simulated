@@ -1,8 +1,11 @@
 # frozen_string_literal: true
-# Native layout — GRID (§12) REPLAY, geometry shadow-parity. The oracle resolves the whole track layout (column
-# sizing, row heights, spans, gaps, item margins — a coarse grid pass) and every item's box; native holds the
-# container's box and positions each item at its resolved offset (an out-of-flow displacement), re-laying-out
-# only the item's own subtree. The track math is never re-derived. V8 only.
+# Native layout — GRID (§12), geometry shadow-parity. Two paths. REPLAY: the oracle resolves the whole track
+# layout (column sizing, row heights, spans, gaps, item margins — a coarse grid pass) and every item's box;
+# native holds the container's box and positions each item at its resolved offset (an out-of-flow displacement),
+# re-laying-out only the item's own subtree. COMPUTE (the bounded subset `nlGridComputable` admits): native sizes
+# the columns itself — px / % / fr, and the intrinsic tracks from the items' min/max-content, which native
+# measures natively where it can (`nlIntrinsicMeasurable`) and otherwise receives resolved from the oracle — and
+# lays each item out at its track width. V8 only.
 require 'capybara/simulated'
 require 'rack'
 require_relative 'support/session_teardown'
@@ -28,6 +31,24 @@ RSpec.describe 'native layout grid parity', if: ENV.fetch('CSIM_JS_ENGINE', 'v8'
 
   def expect_bail(body)
     expect(run_shadow(body)).to include('ok' => false)
+  end
+
+  # Parity, AND the intrinsic tracks were sized from native's own min/max-content measure (no oracle
+  # contribution marshalled) — `nativeIntrinsicGrids` counts the computed grids that took that path.
+  def expect_native_intrinsic(body)
+    r = run_shadow(body)
+    expect(r).to include('ok' => true), "harness bailed: #{r.inspect}"
+    expect(r['mismatches']).to eq(0), "mismatch: #{r.inspect}"
+    expect(r['nativeIntrinsicGrids']).to be >= 1, "intrinsic tracks fell back to the oracle's contribution: #{r.inspect}"
+  end
+
+  # Parity through the FALLBACK: the oracle's per-column contribution is marshalled resolved because an item's
+  # content is not natively measurable yet.
+  def expect_resolved_fallback(body)
+    r = run_shadow(body)
+    expect(r).to include('ok' => true), "harness bailed: #{r.inspect}"
+    expect(r['mismatches']).to eq(0), "mismatch: #{r.inspect}"
+    expect(r['nativeIntrinsicGrids']).to eq(0), "expected the oracle-resolved fallback: #{r.inspect}"
   end
 
   it 'matches a fixed 2-column grid with a gap' do
@@ -183,11 +204,11 @@ RSpec.describe 'native layout grid parity', if: ENV.fetch('CSIM_JS_ENGINE', 'v8'
     end
   end
 
-  # ── Phase 1b: intrinsic tracks ──────────────────────────────────────────────────────────────────────────
-  # auto / min-content / max-content / minmax() / fit-content() need each column's content contribution
-  # (gridColumnContent, from the items' intrinsicWidths). Those base/limit sizes are marshalled (the Phase-1b
-  # shortcut) and native runs the §12.6 maximize + §12.7 fr distribution on them — a Phase-2 native
-  # min/max-content will compute the contributions too.
+  # ── Intrinsic tracks ───────────────────────────────────────────────────────────────────────────────────
+  # auto / min-content / max-content / minmax() / fit-content() need each column's content contribution (the
+  # items' min/max-content). Native runs the §12.6 maximize + §12.7 fr distribution on the track specs, taking
+  # the contribution from its own measure (below) or, for content it can't measure yet, resolved from the
+  # oracle's gridColumnContent.
   describe 'native intrinsic-track compute' do
     it 'matches two auto columns sized to their content' do
       expect_parity('<div style="display:grid;grid-template-columns:auto auto;width:500px"><div style="height:20px">short</div><div style="height:30px">a much longer cell here</div></div>')
@@ -212,6 +233,111 @@ RSpec.describe 'native layout grid parity', if: ENV.fetch('CSIM_JS_ENGINE', 'v8'
     end
     it 'matches repeat(auto-fit) collapsing to the item count' do
       expect_parity('<div style="display:grid;grid-template-columns:repeat(auto-fit,80px);gap:10px;width:300px"><div style="height:20px">1</div><div style="height:20px">2</div></div>')
+    end
+  end
+
+  # ── Native min/max-content ─────────────────────────────────────────────────────────────────────────────
+  # The items' intrinsic widths measured by native itself (layout.rs `intrinsic_widths` / `text_intrinsic` —
+  # the oracle's intrinsicWidths / contentIntrinsicWidths on the record tree): a declared width pins, a text
+  # block's pen-walk gives the widest line (max) and the widest unbreakable run (min), a block container is
+  # its widest child's margin box, then the box's edges and min/max-width. Validated THROUGH the grid: the
+  # column a track sizes to is only right when the measure is.
+  describe 'native intrinsic measurement' do
+    let(:two_auto) { 'display:grid;grid-template-columns:auto auto;width:600px' }
+
+    it 'measures a text item (auto columns: min-content floor, max-content ceiling)' do
+      expect_native_intrinsic(%(<div style="#{two_auto}"><div style="height:20px">short</div><div style="height:30px">a much longer cell here</div></div>))
+    end
+    it 'measures min-content beside fr (the widest word)' do
+      expect_native_intrinsic('<div style="display:grid;grid-template-columns:min-content 1fr;width:400px"><div style="height:20px">wordwordword and more</div><div style="height:30px">rest</div></div>')
+    end
+    it 'measures max-content and fit-content(px) tracks' do
+      expect_native_intrinsic('<div style="display:grid;grid-template-columns:max-content auto;width:500px"><div style="height:20px">some text here</div><div style="height:30px">more content in this column here</div></div>')
+      expect_native_intrinsic('<div style="display:grid;grid-template-columns:fit-content(80px) 1fr;width:400px"><div style="height:20px">a longer piece of text than eighty px</div><div style="height:30px">rest</div></div>')
+    end
+    it 'measures minmax() sides that are intrinsic' do
+      expect_native_intrinsic('<div style="display:grid;grid-template-columns:minmax(auto,200px) minmax(min-content,max-content);width:600px"><div>some words in the first</div><div>and some more words in the second column</div></div>')
+    end
+    it 'pins a declared width (content-box and border-box), then adds the edges' do
+      expect_native_intrinsic(%(<div style="#{two_auto}"><div style="width:150px;padding:0 10px;height:10px">declared</div><div style="box-sizing:border-box;width:150px;padding:0 10px;height:10px">declared</div></div>))
+      expect_native_intrinsic('<div style="display:grid;grid-template-columns:auto 1fr;width:300px"><div style="box-sizing:border-box;width:50px;padding:0 40px;height:10px">x</div><div style="height:10px">b</div></div>')
+    end
+    it 'clamps the contribution by max-width (below the widest word) and min-width' do
+      expect_native_intrinsic(%(<div style="#{two_auto}"><div style="max-width:40px;height:10px">unbreakableword and more</div><div style="min-width:250px;height:10px">x</div></div>))
+    end
+    it 'adds an item\'s own padding and border, and counts an auto margin as zero' do
+      expect_native_intrinsic(%(<div style="#{two_auto}"><div style="padding:0 15px;border:3px solid;height:10px">edged item</div><div style="margin:0 auto;height:10px">auto margins</div></div>))
+    end
+    it 'measures a block-container item by its widest child margin box (a negative margin narrows)' do
+      expect_native_intrinsic(%(<div style="#{two_auto}"><div><div style="margin:0 12px 0 5px;height:10px">nested block words here</div><div style="margin-right:-20px;height:10px">shorter</div></div><div style="height:30px">b</div></div>))
+      expect_native_intrinsic(%(<div style="#{two_auto}"><div><div style="padding:0 7px;margin:0 9px">child with edges and a few words</div></div><div style="height:10px">b</div></div>))
+    end
+    it 'measures a mixed block item (anonymous text blocks around a block child)' do
+      expect_native_intrinsic(%(<div style="#{two_auto}"><div>text before<p style="margin:0 4px">a paragraph in the middle</p>and after</div><div style="height:10px">b</div></div>))
+    end
+    it 'skips an out-of-flow child of an item' do
+      expect_native_intrinsic(%(<div style="#{two_auto}"><div style="position:relative"><p style="margin:0">a</p><div style="position:absolute;width:300px;height:5px">abs</div></div><div style="height:10px">b</div></div>))
+    end
+    it 'ends a line at <br> (the widest line, not the sum) and breaks at <wbr>' do
+      expect_native_intrinsic(%(<div style="#{two_auto}"><div>one line<br>a much longer second line here<br>three</div><div style="height:10px">b</div></div>))
+      expect_native_intrinsic(%(<div style="#{two_auto}"><div>averyveryverylongword<wbr>splithere and more</div><div style="height:10px">b</div></div>))
+    end
+    it 'takes a pending space once: a multi-word run glued to the next run (review finding 1)' do
+      expect_native_intrinsic(%(<div style="display:grid;grid-template-columns:max-content auto;width:600px"><div>aa bb<b>cc</b></div><div>b</div></div>))
+      expect_native_intrinsic(%(<div style="display:grid;grid-template-columns:max-content auto;width:600px"><div style="white-space:nowrap">aa bb<b>cc</b></div><div>b</div></div>))
+      expect_native_intrinsic(%(<div style="display:grid;grid-template-columns:max-content auto;width:600px"><div>aa bb<wbr>cc</div><div>b</div></div>))
+      expect_native_intrinsic(%(<div style="display:grid;grid-template-columns:max-content auto;width:600px"><div>aa<b> bb cc</b>dd</div><div>b</div></div>))
+    end
+    it 'measures an item holding only a no-break space as that space (content, not white space)' do
+      expect_native_intrinsic(%(<div style="display:grid;grid-template-columns:max-content auto;width:600px"><div>&nbsp;</div><div>b</div></div>))
+      expect_native_intrinsic(%(<div style="display:grid;grid-template-columns:max-content auto;width:600px"><div>x<p style="margin:0">y</p>&nbsp;</div><div>b</div></div>))
+    end
+    it 'continues a word across edgeless inline boundaries (mixed-font glued word)' do
+      expect_native_intrinsic(%(<div style="#{two_auto}"><div>foo<b>bar</b> baz <i>qux</i>quux</div><div style="height:10px">b</div></div>))
+      expect_native_intrinsic(%(<div style="#{two_auto}"><div style="font-size:24px">bigger <small>and smaller</small> text</div><div style="height:10px">b</div></div>))
+      expect_native_intrinsic(%(<div style="#{two_auto}"><div><span>nested <span>inline <b>deep</b></span></span></div><div style="height:10px">b</div></div>))
+    end
+    it 'collapses white space: leading / trailing / newlines, and a later run\'s pending space wins' do
+      expect_native_intrinsic(%(<div style="#{two_auto}"><div>   leading and trailing   </div><div>\n   newlines\n   collapse   </div></div>))
+      expect_native_intrinsic(%(<div style="#{two_auto}"><div>foo <span style="font-size:40px"> </span> bar</div><div style="height:10px">b</div></div>))
+      expect_native_intrinsic(%(<div style="#{two_auto}"><div>a&nbsp;b&nbsp;c glued</div><div style="height:10px">b</div></div>))
+    end
+    it 'measures letter-spacing and word-spacing into the words' do
+      expect_native_intrinsic(%(<div style="#{two_auto}"><div style="letter-spacing:2px;word-spacing:5px">spaced out letters</div><div style="height:10px">b</div></div>))
+    end
+    it 'pins a nowrap text item\'s min-content to its max-content' do
+      expect_native_intrinsic(%(<div style="#{two_auto}"><div style="white-space:nowrap;height:10px">never wraps these words</div><div style="height:10px">wraps these words fine</div></div>))
+      expect_native_intrinsic(%(<div style="#{two_auto}"><div style="white-space:nowrap">plain<br>nowrap<wbr>lines</div><div style="height:10px">b</div></div>))
+    end
+    it 'measures empty and whitespace-only items as zero' do
+      expect_native_intrinsic(%(<div style="#{two_auto}"><div></div><div>   </div></div>))
+    end
+    it 'splits a spanning item evenly over its columns and honours an explicit column start' do
+      expect_native_intrinsic('<div style="display:grid;grid-template-columns:auto auto auto;width:600px"><div style="grid-column:span 2">spans two columns with lots of text</div><div>c</div><div style="grid-column:3">explicit third</div><div>x</div><div>yy</div></div>')
+    end
+    it 'takes the widest item from a later row' do
+      expect_native_intrinsic(%(<div style="#{two_auto}"><div>a</div><div>b</div><div>the widest item sits in the second row</div><div>c</div></div>))
+    end
+
+    # What native does not measure yet falls back to the oracle's resolved contribution — with parity.
+    it 'falls back for a percentage width / min-width (no basis in an intrinsic measure)' do
+      expect_resolved_fallback(%(<div style="#{two_auto}"><div style="width:50%;height:10px">pct width</div><div style="height:10px">b</div></div>))
+      expect_resolved_fallback(%(<div style="#{two_auto}"><div style="min-width:50%;height:10px">pct min</div><div style="height:10px">b</div></div>))
+    end
+    it 'falls back for a nowrap block container (the oracle pins the whole box, children included)' do
+      expect_resolved_fallback(%(<div style="#{two_auto}"><div style="white-space:nowrap"><p style="margin:0">block child under nowrap</p></div><div style="height:10px">b</div></div>))
+    end
+    it 'falls back for an atomic inline, an edged inline, and a float in the content' do
+      expect_resolved_fallback(%(<div style="#{two_auto}"><div><span style="display:inline-block;width:80px;height:10px"></span> after</div><div style="height:10px">b</div></div>))
+      expect_resolved_fallback(%(<div style="#{two_auto}"><div>with <span style="padding:0 8px">padded span</span> here</div><div style="height:10px">b</div></div>))
+      expect_resolved_fallback(%(<div style="#{two_auto}"><div><div style="float:left;width:40px;height:10px"></div><p style="margin:0">beside a float</p></div><div style="height:10px">b</div></div>))
+    end
+    it 'falls back for a flex / grid item, in-word breaking, and preserved white-space' do
+      expect_resolved_fallback(%(<div style="#{two_auto}"><div style="display:flex"><div style="width:40px;height:10px"></div><div style="width:60px;height:10px"></div></div><div style="height:10px">b</div></div>))
+      expect_resolved_fallback(%(<div style="#{two_auto}"><div style="display:grid;grid-template-columns:auto auto"><div>nested grid words</div><div>x</div></div><div style="height:10px">b</div></div>))
+      expect_resolved_fallback(%(<div style="#{two_auto}"><div style="word-break:break-all">breakallword here</div><div style="height:10px">b</div></div>))
+      expect_resolved_fallback(%(<div style="#{two_auto}"><div style="overflow-wrap:anywhere">anywhereword here</div><div style="height:10px">b</div></div>))
+      expect_resolved_fallback(%(<div style="#{two_auto}"><div style="white-space:pre">pre   spaced\nsecond</div><div style="height:10px">b</div></div>))
     end
   end
 end

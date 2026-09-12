@@ -218,4 +218,23 @@ RSpec.describe 'native layout L1 block-flow parity', if: ENV.fetch('CSIM_JS_ENGI
   it 'declines a preserve white-space mixed block' do
     expect_bail('<div style="width:300px;white-space:pre">text<div style="height:20px">block</div>more</div>')
   end
+
+  # A text node holding only a no-break space (or another non-CSS space) is CONTENT: it makes a line box the
+  # oracle counts, so the walk must not drop it as white space (`String#trim` strips U+00A0).
+  it 'matches a block whose only text is a no-break space' do
+    expect_parity('<div style="width:300px"><div>&nbsp;</div><div style="height:10px"></div></div>')
+  end
+
+  # An intrinsic-size KEYWORD (`min-content` / `max-content` / `fit-content`) sizes a box from its content; the
+  # record can only carry `auto`, which would fill the containing block instead — so the walk declines it, on
+  # a size and on a min/max alike. (A plain declared length keeps laying out natively.)
+  it 'declines a block whose width is an intrinsic-size keyword' do
+    expect_bail('<div style="width:min-content;height:10px">keyword width here</div>')
+    expect_bail('<div style="width:600px"><div style="width:max-content;height:10px">keyword width here</div></div>')
+    expect_bail('<div style="width:fit-content;height:10px">keyword width here</div>')
+  end
+  it 'declines a block whose min-width or max-width is an intrinsic-size keyword' do
+    expect_bail('<div style="width:20px;min-width:max-content;height:10px">keyword width here</div>')
+    expect_bail('<div style="max-width:min-content;height:10px">keyword width here</div>')
+  end
 end
