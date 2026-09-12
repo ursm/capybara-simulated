@@ -154,6 +154,11 @@ RSpec.describe 'native layout L1 block-flow parity', if: ENV.fetch('CSIM_JS_ENGI
     expect(r['mismatches']).to eq(0), "mismatch: #{r.inspect}"
   end
 
+  def expect_bail(body)
+    session = simulated_session(page(body)); session.visit '/'
+    expect(parity(session)).to include('ok' => false)
+  end
+
   it 'matches an absolute child positioned by insets in a relative parent' do
     expect_parity('<div style="position:relative;width:300px;height:200px"><div style="height:20px">flow</div><div style="position:absolute;top:10px;left:20px;width:50px;height:30px">a</div></div>')
   end
@@ -169,5 +174,48 @@ RSpec.describe 'native layout L1 block-flow parity', if: ENV.fetch('CSIM_JS_ENGI
   end
   it 'matches an absolute child that carries its own block subtree and margins' do
     expect_parity('<div style="position:relative;width:300px;height:200px"><div style="position:absolute;top:10px;left:10px;width:100px;height:60px"><div style="height:20px;margin:5px">c</div></div></div>')
+  end
+
+  # ANONYMOUS BLOCKS (§9.2.1.1): a block with BOTH inline and block children wraps each maximal run of
+  # consecutive inline content in an anonymous block box. Native emits an anonymous text-block record (nid = -1,
+  # not compared) per group, interleaved with the real block children in document order, and Rust block flow
+  # stacks them — so the block children land where the anonymous blocks' heights push them.
+  it 'matches inline text then a block then inline text (two anonymous blocks around a block)' do
+    expect_parity('<div style="width:300px">some inline text<div style="height:30px">block</div>more inline text after</div>')
+  end
+  it 'matches a block, inline text, a block (an anonymous block between two blocks)' do
+    expect_parity('<div style="width:300px"><div style="height:20px">A</div>middle inline<div style="height:20px">B</div></div>')
+  end
+  it 'matches leading and trailing inline runs around blocks' do
+    expect_parity('<div style="width:300px">lead<div style="height:20px">x</div>trail</div>')
+  end
+  it 'matches inline ELEMENTS mixed with blocks (bold/italic in the anonymous runs)' do
+    expect_parity('<div style="width:300px">text <b>bold</b> here<div style="height:20px">block</div>after <i>it</i></div>')
+  end
+  it 'matches a WRAPPING inline run stacked with a block' do
+    expect_parity('<div style="width:120px">this inline text wraps across multiple lines here<div style="height:20px">block</div>and more text wrapping too</div>')
+  end
+  it 'matches a block child with margins between anonymous inline blocks' do
+    expect_parity('<div style="width:300px">text before<div style="height:20px;margin:10px 0">block</div>text after</div>')
+  end
+  it 'matches adjacent block children with collapsing margins amid inline runs' do
+    expect_parity('<div style="width:300px">t<div style="height:20px;margin-bottom:8px">B1</div><div style="height:20px;margin-top:12px">B2</div>t2</div>')
+  end
+  it 'matches a NESTED mixed block (a mixed block inside an anonymous-block sibling chain)' do
+    expect_parity('<div style="width:300px">outer<div style="width:200px">inner text<div style="height:15px">deep</div>inner tail</div>outer tail</div>')
+  end
+  it 'collapses whitespace-only inline content between blocks (no anonymous block)' do
+    expect_parity('<div style="width:300px"><div style="height:20px">a</div>   <div style="height:20px">b</div></div>')
+  end
+
+  # DECLINES: a float or an out-of-flow child in the mix, or a preserve white-space, are deferred.
+  it 'declines a float in a mixed block' do
+    expect_bail('<div style="width:300px;overflow:hidden">text<div style="float:left;width:50px;height:20px"></div><div style="height:20px">block</div>more</div>')
+  end
+  it 'declines an absolutely-positioned child in a mixed block' do
+    expect_bail('<div style="position:relative;width:300px">text<div style="position:absolute;top:5px;width:20px;height:20px"></div><div style="height:20px">block</div>more</div>')
+  end
+  it 'declines a preserve white-space mixed block' do
+    expect_bail('<div style="width:300px;white-space:pre">text<div style="height:20px">block</div>more</div>')
   end
 end
