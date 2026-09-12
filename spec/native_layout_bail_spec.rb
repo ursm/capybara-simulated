@@ -48,9 +48,14 @@ RSpec.describe 'native layout bail coverage', if: ENV.fetch('CSIM_JS_ENGINE', 'v
     expect(native?('<div style="width:200px">wrap some words here please</div>')).to be true
   end
 
-  it 'declines inline vertical-align (sup), keeps a plain inline' do
-    expect(native?('<div>text <sup>x</sup> more text here</div>')).to be false
+  it 'lays out an inline vertical-align SHIFT (sup) natively (its runs ride the shift, growing the line)' do
+    # A baseline shift (sub / super / length / %) offsets the element's runs; native threads the shift into the
+    # run stream. (A sub/sup GLUED to a word with no space is a mixed-font word, a separate pre-existing decline.)
+    expect(native?('<div>text <sup>x</sup> more text here</div>')).to be true
+    expect(native?('<div>text <span style="vertical-align:sub">y</span> more text here</div>')).to be true
     expect(native?('<div>text <span>x</span> more text here</div>')).to be true
+    # middle / text-top / text-bottom place the element against a box — still declined.
+    expect(native?('<div>text <span style="vertical-align:middle">m</span> more</div>')).to be false
   end
 
   it 'declines a hyphen/dash break opportunity, keeps unhyphenated text' do

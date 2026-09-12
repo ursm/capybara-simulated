@@ -18,6 +18,13 @@ RSpec.describe 'native layout L2 text-block parity', if: ENV.fetch('CSIM_JS_ENGI
     session.evaluate_script('globalThis.__csimLayoutShadowRun()')
   end
 
+  def expect_parity(body)
+    session = simulated_session(page(body)); session.visit '/'
+    r = parity(session)
+    expect(r).to include('ok' => true), "harness bailed: #{r.inspect}"
+    expect(r['mismatches']).to eq(0), "mismatch: #{r.inspect}"
+  end
+
   it 'matches a single-line text block' do
     session = simulated_session(page('<div>Hello world</div>'))
     session.visit '/'
@@ -135,4 +142,48 @@ RSpec.describe 'native layout L2 text-block parity', if: ENV.fetch('CSIM_JS_ENGI
     session.visit '/'
     expect(parity(session)).to include('ok' => false)
   end
+
+  # A `vertical-align` baseline SHIFT (sub / super / length / %) on an inline element offsets its whole content —
+  # its runs ride the shift, growing the line box the block's height reflects. Native threads the accumulated
+  # shift through the run stream. (`middle` / `text-top` / `text-bottom`, which place against a box, still decline.)
+  ['<sup>x</sup>', '<sub>x</sub>', '<span style="vertical-align:super">x</span>',
+   '<span style="vertical-align:sub">x</span>', '<span style="vertical-align:6px">x</span>',
+   '<span style="vertical-align:-4px">x</span>', '<span style="vertical-align:40%">x</span>'].each do |el|
+    it "matches an inline vertical-align shift #{el[0, 30]}" do
+      expect_parity(%(<div style="width:300px">text before #{el} and after text</div>))
+    end
+  end
+  it 'matches nested vertical-align shifts (a sub inside a sup accumulate)' do
+    expect_parity('<div style="width:300px">base <sup>up <sub>back down</sub> up</sup> base</div>')
+  end
+  it 'matches a shifted inline wrapping across lines' do
+    expect_parity('<div style="width:120px">word word <span style="vertical-align:super">up</span> word word word word</div>')
+  end
+  # A shifted element raises only its DIRECTLY-owned text; a NESTED inline child stays on the baseline (the
+  # oracle does not raise it), so the line box does not grow — the common `<sup><a>1</a></sup>` footnote-link.
+  it 'matches a superscript wrapping a link (nested text stays on the baseline)' do
+    expect_parity('<div style="width:300px">footnote <sup><a href="#">1</a></sup> here</div>')
+  end
+  it 'matches a shift whose text is inside a nested span (no line growth)' do
+    expect_parity('<div style="width:300px">a <span style="vertical-align:super"><span>text</span></span> b</div>')
+  end
+  it 'matches a shift wrapping bold nested content (no line growth)' do
+    expect_parity('<div style="width:300px">a <sup><b>1</b></sup> b</div>')
+  end
+end
+
+RSpec.describe 'native text valign decline', if: ENV.fetch('CSIM_JS_ENGINE', 'v8') == 'v8' do
+  def page(body)
+    html = "<!doctype html><html><head></head><body style=\"margin:0;font:16px monospace\">#{body}</body></html>"
+    Rack::Builder.new { run ->(_env) { [200, {'content-type' => 'text/html'}, [html]] } }.to_app
+  end
+
+  def expect_bail(body)
+    session = simulated_session(page(body)); session.visit '/'
+    r = session.evaluate_script('document.body.offsetHeight')
+    expect(session.evaluate_script('globalThis.__csimLayoutShadowRun()')).to include('ok' => false)
+  end
+
+  it('declines vertical-align:middle on an inline element') { expect_bail('<div style="width:300px">text <span style="vertical-align:middle">m</span> here</div>') }
+  it('declines vertical-align:text-top on an inline element') { expect_bail('<div style="width:300px">text <span style="vertical-align:text-top">t</span> here</div>') }
 end
