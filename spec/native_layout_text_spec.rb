@@ -118,4 +118,21 @@ RSpec.describe 'native layout L2 text-block parity', if: ENV.fetch('CSIM_JS_ENGI
     expect(r).to include('ok' => true), "harness bailed: #{r.inspect}"
     expect(r['mismatches']).to eq(0), "mismatch: #{r.inspect}"
   end
+
+  # An EDGED (horizontal padding / border / margin) inline whose font CONTENT-AREA exceeds the line-height grows
+  # the block to that content-area box — the oracle makes `a<span style="padding:0 5px">x</span>` in an 8px
+  # line-height 22 tall (the font box), where a NON-edged span stays at the line-height. Native's line box uses
+  # the strut line-height and would under-size it, so it declines this until it grows an edged inline's line box
+  # to its content area. A tiny line-height forces the trigger on any host (font-independent). A non-edged span
+  # in the same block stays native.
+  it 'declines an edged inline whose content-area exceeds the line-height' do
+    session = simulated_session(page('<div style="line-height:8px;width:200px">a<span style="padding:0 5px">x</span>b</div>'))
+    session.visit '/'
+    expect(parity(session)).to include('ok' => false)
+  end
+  it 'declines a bordered inline whose content-area exceeds the line-height' do
+    session = simulated_session(page('<div style="line-height:8px;width:200px">a<span style="border-left:2px solid">x</span>b</div>'))
+    session.visit '/'
+    expect(parity(session)).to include('ok' => false)
+  end
 end
