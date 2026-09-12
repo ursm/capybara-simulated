@@ -35,6 +35,15 @@ RSpec.describe 'native layout flex parity', if: ENV.fetch('CSIM_JS_ENGINE', 'v8'
     expect(r['mismatches']).to eq(0), "mismatch: #{r.inspect}"
   end
 
+  # Parity, AND the row's item widths were resolved by the native engine (`flex_row_sizes`), not pushed —
+  # `nativeFlexRows` counts the flex rows that took that path.
+  def expect_native_flex(body)
+    r = run_shadow(body)
+    expect(r).to include('ok' => true), "harness bailed: #{r.inspect}"
+    expect(r['mismatches']).to eq(0), "mismatch: #{r.inspect}"
+    expect(r['nativeFlexRows']).to be >= 1, "the row's item widths were pushed, not native: #{r.inspect}"
+  end
+
   it 'matches justify-content:space-between across three items' do
     expect_parity('<div style="display:flex;justify-content:space-between;width:600px"><div style="width:100px;height:30px"></div><div style="width:100px;height:30px"></div><div style="width:100px;height:30px"></div></div>')
   end
@@ -376,9 +385,11 @@ RSpec.describe 'native layout flex parity', if: ENV.fetch('CSIM_JS_ENGINE', 'v8'
   end
 
   it('declines flex-wrap:wrap-reverse') { a_bails_b_native('<div style="display:flex;flex-wrap:wrap-reverse;width:120px"><div style="width:80px;height:30px"></div><div style="width:80px;height:30px"></div></div>') }
-  # align-content:stretch with lines that MIX stretch-filled and explicit cross sizes can't be recovered
-  # from the pushed final sizes → decline; a uniform (all-explicit) one stays native.
-  it('declines a mixed stretch/explicit wrap under align-content:stretch') { a_bails_b_native('<div style="display:flex;flex-wrap:wrap;width:250px;height:200px"><div style="width:100px"></div><div style="width:100px"></div><div style="width:100px;height:50px"></div></div>', '<div style="display:flex;flex-wrap:wrap;width:250px;height:200px"><div style="width:100px;height:30px"></div><div style="width:100px;height:30px"></div><div style="width:100px;height:30px"></div></div>') }
+  # align-content:stretch with lines that MIX stretch-filled and explicit cross sizes: a natively-sized row
+  # grows its lines from their NATURAL crosses, so the mix is computed (it declined while item boxes were pushed).
+  it 'matches a mixed stretch/explicit wrap under align-content:stretch' do
+    expect_native_flex('<div style="display:flex;flex-wrap:wrap;width:250px;height:200px"><div style="width:100px"></div><div style="width:100px"></div><div style="width:100px;height:50px"></div></div>')
+  end
   # An rtl flex ROW reverses the main axis (first item at the right); once rtl blocks lay out natively (r1) its
   # items no longer decline, so the whole row is native.
   it 'matches an rtl flex row (main axis reversed, first item at the right)' do
@@ -504,5 +515,72 @@ RSpec.describe 'native layout flex parity', if: ENV.fetch('CSIM_JS_ENGINE', 'v8'
     expect_parity('<div style="display:flex;align-items:flex-start;width:400px"><div style="max-height:50px;padding:10px"><div style="height:100px"></div></div></div>')
     expect_parity('<div style="display:flex;align-items:flex-start;width:400px"><div style="min-height:50px;padding:10px"><div style="height:10px"></div></div></div>')
     expect_parity('<div style="display:flex;align-items:flex-start;width:400px"><div style="display:grid;grid-template-columns:50px;max-height:50px;padding:10px"><div style="height:100px"></div></div></div>')
+  end
+
+  # ── Native ROW sizing ─────────────────────────────────────────────────────────────────────────────────
+  # The items' widths resolved by the native engine (layout.rs `flex_row_sizes`, the oracle's flexRowMetrics +
+  # resolveFlexibleLengths): flex base (basis / width / content), the automatic minimum (min-content, zero when
+  # the item scrolls), declared min/max, line breaking on hypothetical sizes, grow / shrink with freezing, the
+  # equal-share fallback for an item that measured nothing, then stretch as an imposed height.
+  describe 'native row sizing' do
+    let(:row) { 'display:flex;width:400px' }
+
+    it 'grows in proportion to flex-grow and shrinks declared widths to fit' do
+      expect_native_flex(%(<div style="#{row}"><div style="flex:1">one</div><div style="flex:2">two words</div></div>))
+      expect_native_flex(%(<div style="#{row}"><div style="width:300px">a</div><div style="width:300px">b</div></div>))
+      expect_native_flex(%(<div style="#{row}"><div style="width:100px;flex-shrink:0">fixed</div><div style="width:500px">shrinks a lot of text</div></div>))
+    end
+    it 'bases an item on its content (max-content) and floors it at its min-content unless min-width says otherwise' do
+      expect_native_flex(%(<div style="#{row}"><div>short</div><div>a somewhat longer text item here</div><div style="flex:1">grow</div></div>))
+      expect_native_flex(%(<div style="#{row}"><div style="flex:1">verylongunbreakablewordthatoverflowsthecontainerwidth</div><div style="flex:1">short</div></div>))
+      expect_native_flex(%(<div style="#{row}"><div style="flex:1;min-width:0">verylongunbreakablewordthatoverflows</div><div style="flex:1">short</div></div>))
+      expect_native_flex(%(<div style="#{row}"><div style="flex:1;overflow-x:hidden">verylongunbreakablewordthatoverflowsthecontainerwidth</div><div style="flex:1">short</div></div>))
+    end
+    it 'clamps by min/max-width, freezing the clamped item and re-sharing what it gave up' do
+      expect_native_flex(%(<div style="#{row}"><div style="flex:1;max-width:80px">capped</div><div style="flex:1">rest</div><div style="flex:1;min-width:200px">floor</div></div>))
+    end
+    it 'reads flex-basis as a content-box length (border-box per box-sizing), a percentage, and the intrinsic keywords' do
+      expect_native_flex(%(<div style="#{row}"><div style="flex:0 0 100px;padding:0 10px">basis pad</div><div style="flex:0 0 100px;box-sizing:border-box;padding:0 10px">bb</div><div style="flex:1 1 0%">z</div></div>))
+      expect_native_flex(%(<div style="#{row}"><div style="flex-basis:content;width:300px">content basis</div><div style="flex-basis:max-content">max</div><div style="flex-basis:min-content">min content basis</div><div style="flex-basis:fit-content">fit here</div></div>))
+      expect_native_flex(%(<div style="#{row}"><div style="flex:1;width:50%">pct</div><div style="flex:none;width:25%">quarter</div></div>))
+    end
+    it 'scales flex factors below one against the initial free space' do
+      expect_native_flex(%(<div style="#{row}"><div style="flex:1 0.25 200px">quarter</div><div style="flex:1 0.25 200px">quarter</div><div style="width:100px">x</div></div>))
+      expect_native_flex(%(<div style="#{row}"><div style="flex:0.5">half grow</div></div>))
+    end
+    it 'breaks lines on the hypothetical sizes and stacks them by align-content' do
+      expect_native_flex(%(<div style="#{row};flex-wrap:wrap;gap:10px"><div style="width:150px;height:10px"></div><div style="width:150px;height:20px"></div><div style="width:150px;height:30px"></div></div>))
+      expect_native_flex(%(<div style="#{row};flex-wrap:wrap;gap:10px;align-content:center;height:200px"><div style="width:150px;height:10px"></div><div style="width:150px;height:20px"></div><div style="width:150px;height:30px"></div></div>))
+      expect_native_flex(%(<div style="#{row};flex-wrap:wrap"><div style="flex:1 1 150px;height:10px"></div><div style="flex:1 1 150px;height:20px"></div><div style="flex:1 1 150px;height:30px"></div></div>))
+      expect_native_flex(%(<div style="#{row};flex-wrap:wrap;height:150px;align-content:stretch"><div style="width:300px;height:10px"></div><div style="width:300px">stretchy</div></div>))
+    end
+    it 'stretches an auto-height item to its line as an imposed height, its own min/max-height still clamping' do
+      expect_native_flex(%(<div style="#{row}"><div style="flex:1"><div style="height:10px"></div></div><div style="flex:1"><div style="height:30px"></div></div></div>))
+      expect_native_flex(%(<div style="#{row};align-items:center"><div style="flex:1;height:10px"></div><div style="flex:1;height:30px"></div></div>))
+      expect_native_flex(%(<div style="#{row};height:100px"><div style="flex:1"><div style="height:10px"></div></div><div style="flex:1;max-height:30px"><div style="height:50px"></div></div></div>))
+      expect_native_flex(%(<div style="#{row}"><div style="flex:1;display:flex;align-items:center;min-height:50px"><div style="width:10px;height:10px"></div></div><div style="width:50px;height:80px">y</div></div>))
+    end
+    it 'gives an item that measured nothing an equal share, but an all-out-of-flow item its real zero' do
+      expect_native_flex(%(<div style="#{row}"><div style="flex:1"></div><div style="flex:1"><div></div></div><div style="width:50px">y</div></div>))
+      expect_native_flex(%(<div style="#{row}"><div style="flex:1"><div style="position:absolute;width:30px;height:30px"></div></div><div style="width:50px">y</div></div>))
+    end
+    # A nested flex container's items are BLOCKIFIED for its content measure (CSS Flexbox §4): inline items do
+    # not join into one word, inline-blocks are not atomics, and the container's own `white-space` pins nothing
+    # (review finding — the oracle's contentIntrinsicWidths now blockifies flex items, as native does).
+    it 'measures a nested flex item\'s keyword basis and automatic minimum with its items blockified' do
+      expect_native_flex('<div style="display:flex;width:100px"><div style="flex:1;display:flex"><span>aaaa</span><span>bbbb</span></div><div style="width:90px">y</div></div>')
+      expect_native_flex('<div style="display:flex;width:100px"><div style="flex:1;display:flex;flex-basis:max-content"><span>aaaa</span> <span>bbbb</span></div><div style="width:90px">y</div></div>')
+      expect_native_flex('<div style="display:flex;width:100px"><div style="flex:1;display:flex;flex-basis:content"><span style="display:inline-block">aaaa</span><span style="display:inline-block">bbbb</span></div><div style="width:90px">y</div></div>')
+      expect_native_flex('<div style="display:flex;width:120px"><a style="display:flex;gap:8px"><span>Brand</span><span>tagline</span></a><div style="display:flex;gap:12px"><a>One</a><a>Two</a></div></div>')
+      expect_native_flex('<div style="display:flex;width:100px"><div style="flex:1;display:flex;white-space:nowrap"><div style="white-space:normal">aa bb cc dd</div></div><div style="width:90px">y</div></div>')
+    end
+    it 'keeps margins, gaps, auto margins, order, reverse and relative offsets on the native path' do
+      expect_native_flex(%(<div style="#{row}"><div style="flex:1;margin:5px 8px">m</div><div style="flex:1;margin-left:auto;width:50px">auto</div></div>))
+      expect_native_flex(%(<div style="#{row};gap:20px"><div style="flex:1">a</div><div style="flex:1">b</div><div style="flex:1">c</div></div>))
+      expect_native_flex(%(<div style="#{row}"><div style="order:2;flex:1">second</div><div style="order:1;width:50px">first</div></div>))
+      expect_native_flex(%(<div style="#{row};flex-direction:row-reverse"><div style="flex:1">a</div><div style="width:50px">b</div></div>))
+      expect_native_flex(%(<div style="#{row}"><div style="flex:1;position:relative;top:3px">rel</div><div style="width:50px">y</div></div>))
+      expect_native_flex(%(<div style="#{row}"><div style="flex:1;display:flex"><div style="flex:1">nested</div><div>x</div></div><div style="width:50px">y</div></div>))
+    end
   end
 end

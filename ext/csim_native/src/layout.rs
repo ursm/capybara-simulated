@@ -197,8 +197,20 @@ pub(crate) struct Input {
     pub(crate) decl_min_w: f64,
     pub(crate) decl_max_w: f64,
     pub(crate) flex_basis: f64,
-    pub(crate) flex_grows: bool,
+    pub(crate) flex_grow: f64,
     pub(crate) decl_border_box: bool,
+    // Flex SIZING inputs (an item of a natively-sized container, `flex_native`): `flex-shrink`; `flex-basis`
+    // resolved against the container's main size (NaN = auto / a keyword — `flex_basis_kw` 0 none, 1 content,
+    // 2 min-content, 3 max-content, 4 fit-content); whether the item scrolls in the main axis (its automatic
+    // minimum is then zero, §4.5); whether it STRETCHES in the cross axis (`align-self: stretch` with an auto
+    // cross size and no auto cross margin). On a CONTAINER, `flex_native` = the items' main sizes are computed
+    // here (`flex_row_sizes`) rather than pushed from the oracle.
+    pub(crate) flex_shrink: f64,
+    pub(crate) flex_basis_cb: f64,
+    pub(crate) flex_basis_kw: u8,
+    pub(crate) scrolls_main: bool,
+    pub(crate) flex_stretch: bool,
+    pub(crate) flex_native: bool,
 }
 
 pub(crate) const CROSS_BASELINE: u8 = 3;
@@ -243,6 +255,19 @@ pub(crate) struct Run {
 }
 
 impl Input {
+    // This record with a border-box height IMPOSED on it (a flex item stretched to its line, or handed its
+    // resolved main size) — the oracle's `layoutElement(child, {height, autoHeight: false})`: the declared
+    // height is replaced (content-box per `box-sizing`), the min/max clamp still applies after
+    // (layoutElementInner clamps every box). NaN imposes nothing.
+    fn with_imposed_height(self, h: f64) -> Input {
+        if is_auto(h) {
+            return self;
+        }
+        let mut n = self;
+        n.height = if n.border_box { h } else { (h - n.edges_y()).max(0.0) };
+        n.item_auto_height = false;
+        n
+    }
     // Sum of the horizontal / vertical non-content edges (padding + border), used to convert between
     // content-box and border-box widths/heights.
     fn edges_x(&self) -> f64 {
@@ -339,7 +364,7 @@ pub(crate) fn layout_block(inputs: &[Input], runs: &[Run], run_texts: &[Option<V
     let root_w = resolve_width(&inputs[0], root_cb_w);
     let failed = std::cell::Cell::new(false);
     let mut root_fc = FloatCtx::new();
-    measure(0, root_w, inputs, runs, run_texts, grids, &children, &mut boxes, &failed, &mut root_fc, 0.0, 0.0);
+    measure(0, root_w, f64::NAN, inputs, runs, run_texts, grids, &children, &mut boxes, &failed, &mut root_fc, 0.0, 0.0);
     if failed.get() {
         return Outcome::Unsupported;
     }
@@ -843,6 +868,7 @@ struct MInfo {
 fn measure(
     i: usize,
     w: f64,
+    imposed_h: f64,
     inputs: &[Input],
     runs: &[Run],
     run_texts: &[Option<Vec<u16>>],
@@ -856,26 +882,26 @@ fn measure(
     bfc_x: f64,
     bfc_y: f64,
 ) -> MInfo {
-    let n = inputs[i];
+    let n = inputs[i].with_imposed_height(imposed_h);
     let content_top_rel = n.bt + n.pt;
     let content_w = (w - n.edges_x()).max(0.0);
 
     // A flex container (§9.7): the item SIZING is resolved JS-side (each item's used main/cross size rides
     // its width/height); native does only the placement — main-axis distribution + cross-axis alignment.
     if n.display == DISPLAY_FLEX {
-        return measure_flex(i, w, inputs, runs, run_texts, grids, children, boxes, failed);
+        return measure_flex(i, w, imposed_h, inputs, runs, run_texts, grids, children, boxes, failed);
     }
 
     // A TABLE (§17): the cell SIZING (column widths × row heights) is resolved JS-side and rides each cell's
     // record; native reassembles the tracks and positions every cell / row / row-group and the table box.
     if n.display == DISPLAY_TABLE {
-        return measure_table(i, inputs, runs, run_texts, grids, children, boxes, failed);
+        return measure_table(i, imposed_h, inputs, runs, run_texts, grids, children, boxes, failed);
     }
 
     // A computed GRID (§12): native sizes the columns (fixed / % / fr / intrinsic) and lays out each item at its
     // track width; rows are content-height. The parsed template + gaps + placement live in `grids[grid_start..]`.
     if n.display == DISPLAY_GRID {
-        return measure_grid(i, w, inputs, runs, run_texts, grids, children, boxes, failed);
+        return measure_grid(i, w, imposed_h, inputs, runs, run_texts, grids, children, boxes, failed);
     }
 
     // A text block (inline formatting context): its content height is the greedy line layout over its
@@ -950,7 +976,7 @@ fn measure(
             // `place` then positions it by rel_x/rel_y alone (el._lb − container._lb, the oracle's resolved
             // insets / static position). It touches no cursor / margin / has_child state.
             let cw = resolve_width(&cn, content_w);
-            measure(c, cw, inputs, runs, run_texts, grids, children, boxes, failed, &mut FloatCtx::new(), 0.0, 0.0);
+            measure(c, cw, f64::NAN, inputs, runs, run_texts, grids, children, boxes, failed, &mut FloatCtx::new(), 0.0, 0.0);
             boxes[c].x = 0.0;
             boxes[c].y = 0.0;
             continue;
@@ -962,7 +988,7 @@ fn measure(
             // out in a fresh context (a float starts its own BFC).
             let top0 = cursor + pending.value();
             let fw = resolve_width(&cn, content_w);
-            measure(c, fw, inputs, runs, run_texts, grids, children, boxes, failed, &mut FloatCtx::new(), 0.0, 0.0);
+            measure(c, fw, f64::NAN, inputs, runs, run_texts, grids, children, boxes, failed, &mut FloatCtx::new(), 0.0, 0.0);
             let (fml, fmr, fmt, fmb) = (Input::m(cn.ml), Input::m(cn.mr), Input::m(cn.mt), Input::m(cn.mb));
             let outer = boxes[c].w + fml + fmr;
             let outer_h = boxes[c].h + fmt + fmb;
@@ -1002,7 +1028,7 @@ fn measure(
                 // COLLAPSING top margin (cm.top_only) — its own margin joined with any a first descendant
                 // folds through its open top edge — which is what the oracle advances the flow by
                 // (collapsingTopMargin); the own declared margin alone would drop the descendant's.
-                let cm = measure(c, child_w, inputs, runs, run_texts, grids, children, boxes, failed, &mut FloatCtx::new(), 0.0, 0.0);
+                let cm = measure(c, child_w, f64::NAN, inputs, runs, run_texts, grids, children, boxes, failed, &mut FloatCtx::new(), 0.0, 0.0);
                 if cm.collapse_through {
                     // A THROUGH cleared box is placed by a different rule (§8.3.1: its own above-margin sits
                     // ON TOP of the clearance line, and it does not advance the flow) — defer to JS.
@@ -1050,7 +1076,7 @@ fn measure(
                 };
                 let (bl0, br0) = float_band(&ctx.items, cy, 1.0, cl, cr);
                 let cw = resolve_width(&cn, (br0 - bl0).max(0.0));
-                let cm = measure(c, cw, inputs, runs, run_texts, grids, children, boxes, failed, &mut FloatCtx::new(), 0.0, 0.0);
+                let cm = measure(c, cw, f64::NAN, inputs, runs, run_texts, grids, children, boxes, failed, &mut FloatCtx::new(), 0.0, 0.0);
                 let outer = boxes[c].w + ml + mr;
                 let (y, bl, br) = if outer > br0 - bl0 {
                     let yy = float_fit_y(&ctx.items, cy, outer, cl, cr, boxes[c].h);
@@ -1090,7 +1116,7 @@ fn measure(
                 };
                 boxes[c].x = cx;
                 boxes[c].y = cy;
-                let cm = measure(c, child_w, inputs, runs, run_texts, grids, children, boxes, failed, ctx, cx, cy);
+                let cm = measure(c, child_w, f64::NAN, inputs, runs, run_texts, grids, children, boxes, failed, ctx, cx, cy);
                 cursor = cy + boxes[c].h;
                 pending = cm.bottom;
                 all_children_through = false;
@@ -1104,7 +1130,7 @@ fn measure(
             }
         }
         has_child = true;
-        let cm = measure(c, child_w, inputs, runs, run_texts, grids, children, boxes, failed, ctx, 0.0, 0.0);
+        let cm = measure(c, child_w, f64::NAN, inputs, runs, run_texts, grids, children, boxes, failed, ctx, 0.0, 0.0);
         if !cm.collapse_through {
             all_children_through = false;
         }
@@ -1205,9 +1231,232 @@ fn measure(
 // a fresh float context (an item is its own formatting context). Mirrors layoutFlexRow / layoutFlexColumn /
 // stackFlexLines / crossAlignPhysical / autoMarginSplit. The harness bails rtl / vertical writing modes /
 // baseline / a COLUMN's min-max clamp / wrap-reverse / unsupported-nested-flex / replaced.
+// CSS Flexbox §9.7, "resolve the flexible lengths" — the oracle's `resolveFlexibleLengths`: the line's free
+// space goes to (or comes from) the items in proportion to their factors, each result clamped by that item's
+// own minimum and maximum (`clamp_of`). Which way the line flexes is decided ONCE, from the HYPOTHETICAL sizes
+// (each base already clamped). An item that cannot flex that way, or whose base already violates its clamp in
+// that direction, is frozen at its hypothetical size; §9.7.4's scaled shrink factor weights by the INNER base;
+// factors summing below 1 hand out only that fraction of the INITIAL free space; after each round the items
+// that violated in the direction of the total violation freeze and the rest flex again against what those
+// gave up. An indefinite main size (`available` None — an auto-height column) has no free space either way.
+fn resolve_flexible_lengths(bases: &[f64], inner: &[f64], grow: &[f64], shrink: &[f64], available: Option<f64>, clamp_of: &dyn Fn(usize, f64) -> f64) -> Vec<f64> {
+    let n = bases.len();
+    let mut sizes: Vec<f64> = bases.to_vec();
+    let hypothetical: Vec<f64> = (0..n).map(|i| clamp_of(i, bases[i])).collect();
+    let wanted: f64 = hypothetical.iter().sum();
+    let room = available.unwrap_or(wanted);
+    let growing = room >= wanted;
+    let factor_of = |i: usize| if growing { grow[i] } else { shrink[i] * inner[i] };
+    let flex_factor_of = |i: usize| if growing { grow[i] } else { shrink[i] };
+    let mut frozen = vec![false; n];
+    for i in 0..n {
+        frozen[i] = flex_factor_of(i) <= 0.0 || if growing { hypothetical[i] < bases[i] } else { hypothetical[i] > bases[i] };
+        if frozen[i] {
+            sizes[i] = hypothetical[i];
+        }
+    }
+    let mut raw = vec![0.0f64; n];
+    let mut initial: Option<f64> = None;
+    for _round in 0..=n {
+        let (mut free, mut weight, mut factors) = (room, 0.0f64, 0.0f64);
+        for i in 0..n {
+            if frozen[i] {
+                free -= sizes[i];
+                continue;
+            }
+            free -= bases[i];
+            weight += factor_of(i);
+            factors += flex_factor_of(i);
+        }
+        if weight <= 0.0 {
+            break;
+        }
+        let init = *initial.get_or_insert(free);
+        let mut space = free;
+        if factors < 1.0 {
+            let part = init * factors;
+            if part.abs() < free.abs() {
+                space = part;
+            }
+        }
+        let mut violation = 0.0f64;
+        for i in 0..n {
+            if frozen[i] {
+                continue;
+            }
+            raw[i] = bases[i] + (space * factor_of(i)) / weight;
+            sizes[i] = clamp_of(i, raw[i]);
+            violation += sizes[i] - raw[i];
+        }
+        if violation == 0.0 {
+            break;
+        }
+        for i in 0..n {
+            if !frozen[i] && (if violation > 0.0 { sizes[i] > raw[i] } else { sizes[i] < raw[i] }) {
+                frozen[i] = true;
+            }
+        }
+    }
+    sizes
+}
+
+// Whether a box's content is ALL out of flow — an element with children, every one absolutely positioned,
+// and no text (the oracle's `outOfFlowOnly`): its zero content width is real, not a measurement that failed.
+fn out_of_flow_only(i: usize, inputs: &[Input], children: &[Vec<usize>]) -> bool {
+    let n = inputs[i];
+    if n.display == DISPLAY_TEXT_BLOCK || children[i].is_empty() {
+        return false;
+    }
+    children[i].iter().all(|&c| inputs[c].out_of_flow != 0 && inputs[c].nid >= 0.0)
+}
+
+// A flex ROW's item widths, resolved natively — the oracle's `flexRowMetrics` + `resolveFlexRowWidths` per
+// line. `flow` indexes the in-flow items (positions into `kids`); `lines` groups them. Each item's flex BASE is,
+// in the spec's order, its `flex-basis` (a length, or an intrinsic keyword answered from its content), else its
+// declared width (unless the basis is `content`), else its content's max-content (`intrinsic_widths`) — and
+// whether that base came FROM the content, in which case it is its own minimum and no floor can bind. The
+// automatic minimum (`min-width: auto`) is the item's min-content — zero when it scrolls in the main axis —
+// applied only where it can bind; a declared min/max-width clamps on top (max first, §4.5). What an item's
+// lines have left is shared by `resolve_flexible_lengths`; an item that measured NOTHING (a wrapper around
+// blocks, no basis / width / text) takes an equal share of the line instead of collapsing to zero — unless its
+// content is all out of flow, where zero is real. Returns the per-position width, or None when an item's
+// content isn't natively measurable (the JS gate should have routed the container to the pushed path).
+fn flex_row_sizes(
+    kids: &[usize],
+    flow: &[usize],
+    lines: &mut Vec<Vec<usize>>,
+    content_w: f64,
+    gap: f64,
+    wrap: bool,
+    inputs: &[Input],
+    runs: &[Run],
+    run_texts: &[Option<Vec<u16>>],
+    children: &[Vec<usize>],
+) -> Option<Vec<f64>> {
+    let cnt = kids.len();
+    let mut base = vec![0.0f64; cnt];
+    let mut content_based = vec![false; cnt];
+    let mut min_auto: Vec<Option<f64>> = vec![None; cnt]; // memoised automatic minimum
+    for &p in flow {
+        let c = kids[p];
+        let k = inputs[c];
+        let edges = k.edges_x();
+        let extra = if k.border_box { 0.0 } else { edges };
+        base[p] = if !is_auto(k.flex_basis_cb) {
+            k.flex_basis_cb + extra
+        } else if matches!(k.flex_basis_kw, 2 | 3 | 4) {
+            content_based[p] = true;
+            let (wmin, wmax) = content_intrinsic(c, inputs, runs, run_texts, children)?;
+            let inner = match k.flex_basis_kw {
+                2 => wmin,
+                3 => wmax,
+                _ => wmin.max((content_w - Input::m(k.ml) - Input::m(k.mr)).max(0.0)).min(wmax),
+            };
+            inner + edges
+        } else if k.flex_basis_kw != 1 && !is_auto(k.width) {
+            k.width + extra
+        } else {
+            content_based[p] = true;
+            if k.flex_basis_kw == 1 {
+                content_intrinsic(c, inputs, runs, run_texts, children)?.1 + edges
+            } else {
+                intrinsic_widths(c, inputs, runs, run_texts, children)?.1
+            }
+        };
+    }
+    // The automatic minimum (`min-width: auto`), measured at most once per item and only where the clamp can
+    // ask for it — the oracle measures lazily, at the first round that shrinks an item below its base. A
+    // content-based item's base is its own maximum, so its floor is asked only once its line SHRINKS; every
+    // other auto-minimum item's floor is asked by its hypothetical size.
+    let floor_of = |p: usize, inputs: &[Input]| -> Option<f64> {
+        let c = kids[p];
+        let k = inputs[c];
+        Some(if k.scrolls_main { k.edges_x() } else { min_content_width(c, inputs, runs, run_texts, children)? })
+    };
+    for &p in flow {
+        if is_auto(inputs[kids[p]].min_w) && !content_based[p] {
+            min_auto[p] = Some(floor_of(p, inputs)?);
+        }
+    }
+    let clamp_with = |floors: &Vec<Option<f64>>, p: usize, size: f64| -> f64 {
+        let k = inputs[kids[p]];
+        let extra = if k.border_box { 0.0 } else { k.edges_x() };
+        let mut out = size;
+        if is_auto(k.min_w) && !(content_based[p] && size >= base[p]) {
+            out = out.max(floors[p].unwrap_or(0.0));
+        }
+        if !is_auto(k.max_w) && k.max_w >= 0.0 {
+            out = out.min(k.max_w + extra);
+        }
+        if !is_auto(k.min_w) && k.min_w >= 0.0 {
+            out = out.max(k.min_w + extra);
+        }
+        out
+    };
+    // Lines are broken on the HYPOTHETICAL outer sizes (each base clamped) — `flexLines`. A content-based
+    // item's hypothetical size is at least its base, so no unmeasured floor is consulted here.
+    let clamp_of = |p: usize, size: f64| clamp_with(&min_auto, p, size);
+    if wrap && flow.len() > 1 {
+        let mut ls: Vec<Vec<usize>> = Vec::new();
+        let mut cur: Vec<usize> = Vec::new();
+        let mut used = 0.0;
+        for &p in flow {
+            let k = inputs[kids[p]];
+            let outer = clamp_of(p, base[p]) + Input::m(k.ml) + Input::m(k.mr);
+            if !cur.is_empty() && used + gap + outer > content_w {
+                ls.push(std::mem::take(&mut cur));
+                used = 0.0;
+            }
+            used += if cur.is_empty() { 0.0 } else { gap } + outer;
+            cur.push(p);
+        }
+        ls.push(cur);
+        *lines = ls;
+    } else {
+        *lines = vec![flow.to_vec()];
+    }
+    let mut widths = vec![0.0f64; cnt];
+    for line in lines.iter() {
+        let n = line.len();
+        let mut taken = gap * n.saturating_sub(1) as f64;
+        for &p in line {
+            let k = inputs[kids[p]];
+            taken += Input::m(k.ml) + Input::m(k.mr);
+        }
+        let avail = (content_w - taken).max(0.0);
+        let share = if n > 0 { (avail / n as f64).floor() } else { avail };
+        let bases: Vec<f64> = line.iter().map(|&p| base[p]).collect();
+        // A line that SHRINKS (its hypothetical sizes exceed the room) may take a content-based item below its
+        // base, where its floor binds — measure those floors now, before the resolution asks for them.
+        let wanted: f64 = line.iter().map(|&p| clamp_of(p, base[p])).sum();
+        let mut floors = min_auto.clone();
+        if wanted > avail {
+            for &p in line {
+                if is_auto(inputs[kids[p]].min_w) && floors[p].is_none() {
+                    floors[p] = Some(floor_of(p, inputs)?);
+                }
+            }
+        }
+        let inner: Vec<f64> = line.iter().map(|&p| {
+            let k = inputs[kids[p]];
+            (base[p] - if k.border_box { 0.0 } else { k.edges_x() }).max(0.0)
+        }).collect();
+        let grow: Vec<f64> = line.iter().map(|&p| inputs[kids[p]].flex_grow).collect();
+        let shrink: Vec<f64> = line.iter().map(|&p| inputs[kids[p]].flex_shrink).collect();
+        let line_clamp = |j: usize, size: f64| clamp_with(&floors, line[j], size);
+        let sizes = resolve_flexible_lengths(&bases, &inner, &grow, &shrink, Some(avail), &line_clamp);
+        for (j, &p) in line.iter().enumerate() {
+            let w = sizes[j];
+            widths[p] = if w > 0.0 || !content_based[p] || out_of_flow_only(kids[p], inputs, children) { w } else { share };
+        }
+    }
+    Some(widths)
+}
+
 fn measure_flex(
     i: usize,
     w: f64,
+    imposed_h: f64,
     inputs: &[Input],
     runs: &[Run],
     run_texts: &[Option<Vec<u16>>],
@@ -1216,7 +1465,7 @@ fn measure_flex(
     boxes: &mut [Box],
     failed: &std::cell::Cell<bool>,
 ) -> MInfo {
-    let n = inputs[i];
+    let n = inputs[i].with_imposed_height(imposed_h);
     let content_w = (w - n.edges_x()).max(0.0);
     let content_left_rel = n.bl + n.pl;
     let content_top_rel = n.bt + n.pt;
@@ -1225,11 +1474,38 @@ fn measure_flex(
     let gap = n.flex_main_gap;
     let cnt = children[i].len();
 
-    // Phase A — lay each item's subtree out at its pushed border-box (record order == flex order, the
-    // harness sorted by `order`), each in a fresh float context.
-    for &c in &children[i] {
-        let iw = resolve_width(&inputs[c], content_w);
-        measure(c, iw, inputs, runs, run_texts, grids, children, boxes, failed, &mut FloatCtx::new(), 0.0, 0.0);
+    let kids: Vec<usize> = children[i].clone();
+    // In-flow item positions (into `kids`). OUT-OF-FLOW children (abspos/fixed, §4.1) are removed from flex
+    // sizing and line breaking — their subtrees are laid out at their pushed box, and they are placed separately.
+    let flow: Vec<usize> = (0..cnt).filter(|&p| inputs[kids[p]].out_of_flow == 0).collect();
+    // A ROW sized NATIVELY (`flex_native`): each in-flow item's width is resolved here (`flex_row_sizes` —
+    // base, clamps, line breaking, grow/shrink), and its subtree laid out at that width; the pushed path lays
+    // each item out at its oracle-resolved box. Either way record order == flex order (the harness sorted by
+    // `order`), each item in a fresh float context.
+    let native_row = n.flex_native && main_is_x;
+    let mut native_lines: Vec<Vec<usize>> = Vec::new();
+    if native_row {
+        let widths = match flex_row_sizes(&kids, &flow, &mut native_lines, content_w, gap, n.flex_wrap, inputs, runs, run_texts, children) {
+            Some(ws) => ws,
+            None => {
+                failed.set(true);
+                return MInfo { top: CMargin::of(0.0), top_only: CMargin::of(0.0), bottom: CMargin::of(0.0), collapse_through: false };
+            }
+        };
+        for &p in &flow {
+            measure(kids[p], widths[p], f64::NAN, inputs, runs, run_texts, grids, children, boxes, failed, &mut FloatCtx::new(), 0.0, 0.0);
+        }
+        for &c in &kids {
+            if inputs[c].out_of_flow != 0 {
+                let iw = resolve_width(&inputs[c], content_w);
+                measure(c, iw, f64::NAN, inputs, runs, run_texts, grids, children, boxes, failed, &mut FloatCtx::new(), 0.0, 0.0);
+            }
+        }
+    } else {
+        for &c in &kids {
+            let iw = resolve_width(&inputs[c], content_w);
+            measure(c, iw, f64::NAN, inputs, runs, run_texts, grids, children, boxes, failed, &mut FloatCtx::new(), 0.0, 0.0);
+        }
     }
 
     // Per-item OUTER extents (size + the two margins) along the main and cross axes, plus the leading
@@ -1237,7 +1513,6 @@ fn measure_flex(
     // cross sizes are the FINAL (pushed, post-stretch) ones, so a line's cross already includes whatever
     // align-content:stretch grew it to — native positions the lines, it never re-grows them.
     let main_reverse = n.flex_main_reverse;
-    let kids: Vec<usize> = children[i].clone();
     let (mut mo, mut co, mut ml_lead, mut cl_lead) = (Vec::with_capacity(cnt), Vec::with_capacity(cnt), Vec::with_capacity(cnt), Vec::with_capacity(cnt));
     for &c in &kids {
         let cn = inputs[c];
@@ -1263,9 +1538,6 @@ fn measure_flex(
     // The container's MAIN content extent (the wrap capacity + the per-line justify basis): a row's is its
     // content width; a column's is its declared content height (clamped by min/max-height), or (auto) the
     // extent its items are justified within.
-    // In-flow item positions (into `kids`). OUT-OF-FLOW children (abspos/fixed, §4.1) are removed from flex
-    // sizing and line breaking — their subtrees are laid out in Phase A, but they are placed separately below.
-    let flow: Vec<usize> = (0..cnt).filter(|&p| inputs[kids[p]].out_of_flow == 0).collect();
     let gap_total = gap * flow.len().saturating_sub(1) as f64;
     let sum_main: f64 = flow.iter().map(|&p| mo[p]).sum();
     let used_main = sum_main + gap_total; // the items are PUSHED (grow/shrink resolved), so this is final
@@ -1291,7 +1563,9 @@ fn measure_flex(
     // nowrap is also one line holding everything; otherwise wrap greedily starts a new line when the next
     // item (plus the main gap) would overflow the main extent. Mirrors flexLines.
     let wrap_capacity = main_is_x || !is_auto(n.height);
-    let lines: Vec<Vec<usize>> = if n.flex_wrap && wrap_capacity {
+    let lines: Vec<Vec<usize>> = if native_row {
+        native_lines // broken on the hypothetical sizes by flex_row_sizes
+    } else if n.flex_wrap && wrap_capacity {
         let mut ls: Vec<Vec<usize>> = Vec::new();
         let mut cur: Vec<usize> = Vec::new();
         let mut used = 0.0;
@@ -1404,6 +1678,27 @@ fn measure_flex(
             line_lc[li] = line_cross[li] + ac_grow;
             line_cs[li] = cross_at;
             cross_at += line_lc[li] + cross_gap + ac_between;
+        }
+    }
+
+    // A natively-sized row STRETCHES its stretching items to their line now that the lines have a cross size
+    // (§9.4 step 11): the item is laid out again at the line's cross less its margins as an IMPOSED height
+    // (its min/max-height still clamp), so its own contents see the taller box. The line's cross was measured
+    // from the items' natural (hypothetical) heights, as the oracle's measureLineCross does before stackFlexLines.
+    if native_row {
+        for (li, line) in lines.iter().enumerate() {
+            for &p in line {
+                let c = kids[p];
+                let cn = inputs[c];
+                if !cn.flex_stretch {
+                    continue;
+                }
+                let room = line_lc[li] - Input::m(cn.mt) - Input::m(cn.mb);
+                if boxes[c].h != room {
+                    measure(c, boxes[c].w, room, inputs, runs, run_texts, grids, children, boxes, failed, &mut FloatCtx::new(), 0.0, 0.0);
+                    co[p] = boxes[c].h + Input::m(cn.mt) + Input::m(cn.mb);
+                }
+            }
         }
     }
 
@@ -1555,6 +1850,7 @@ fn flex_distribution(code: u8, free: f64, n: usize) -> (f64, f64) {
 // nested table, and a track only spanning cells cover.
 fn measure_table(
     i: usize,
+    imposed_h: f64,
     inputs: &[Input],
     runs: &[Run],
     run_texts: &[Option<Vec<u16>>],
@@ -1563,7 +1859,7 @@ fn measure_table(
     boxes: &mut [Box],
     failed: &std::cell::Cell<bool>,
 ) -> MInfo {
-    let n = inputs[i];
+    let n = inputs[i].with_imposed_height(imposed_h);
     let (sx, sy) = (n.sp_x, n.sp_y);
     let bail = |failed: &std::cell::Cell<bool>| {
         failed.set(true);
@@ -1614,12 +1910,12 @@ fn measure_table(
     for &r in &rows {
         for &c in &children[r] {
             let iw = resolve_width(&inputs[c], 0.0);
-            measure(c, iw, inputs, runs, run_texts, grids, children, boxes, failed, &mut FloatCtx::new(), 0.0, 0.0);
+            measure(c, iw, f64::NAN, inputs, runs, run_texts, grids, children, boxes, failed, &mut FloatCtx::new(), 0.0, 0.0);
         }
     }
     if let Some(cap) = caption {
         let iw = resolve_width(&inputs[cap], 0.0);
-        measure(cap, iw, inputs, runs, run_texts, grids, children, boxes, failed, &mut FloatCtx::new(), 0.0, 0.0);
+        measure(cap, iw, f64::NAN, inputs, runs, run_texts, grids, children, boxes, failed, &mut FloatCtx::new(), 0.0, 0.0);
     }
     // vertical-align: content laid out top-aligned above, moved down by the offset the oracle pushed (§17.5.3;
     // the UA default is `middle`). Shift the cell's direct children — their subtrees follow through `place`, and
@@ -1982,50 +2278,75 @@ fn intrinsic_widths(i: usize, inputs: &[Input], runs: &[Run], run_texts: &[Optio
     let (inner_min, inner_max) = if !is_auto(n.decl_w) {
         let w = if n.decl_border_box { (n.decl_w - extra).max(0.0) } else { n.decl_w };
         (w, w)
+    } else if n.display == DISPLAY_FLEX {
+        flex_intrinsic_widths(i, inputs, runs, run_texts, children)?
     } else {
-        match n.display {
-            DISPLAY_FLEX => flex_intrinsic_widths(i, inputs, runs, run_texts, children)?,
-            DISPLAY_TEXT_BLOCK => {
-                let (rs, re) = (n.run_start.max(0) as usize, (n.run_start + n.run_count).max(0) as usize);
-                if re > runs.len() || rs > re {
-                    return None;
-                }
-                text_intrinsic(&runs[rs..re], &run_texts[rs..re], n.ws_mode)?
-            }
-            DISPLAY_BLOCK => {
-                let (mut min, mut max) = (0.0f64, 0.0f64);
-                let mut line = 0.0f64; // floats pack beside each other on a line, as inline boxes would
-                for &c in &children[i] {
-                    let k = inputs[c];
-                    if k.out_of_flow != 0 {
-                        continue; // out of flow: sizes nothing
-                    }
-                    // Each child contributes its MARGIN box (a negative margin narrows it; auto is 0).
-                    let (cmin, cmax) = intrinsic_widths(c, inputs, runs, run_texts, children)?;
-                    let m = Input::m(k.ml) + Input::m(k.mr);
-                    if k.float_kind != 0 {
-                        // A FLOAT packs beside its neighbours like an inline-level box: its max-content joins the
-                        // line, its min-content stands alone (the oracle's float arm — no line end).
-                        line += cmax + m;
-                        min = min.max(cmin + m);
-                        continue;
-                    }
-                    // A block-level child ends the line the floats were packing, then contributes on its own.
-                    max = max.max(line);
-                    line = 0.0;
-                    min = min.max(cmin + m);
-                    max = max.max(cmax + m);
-                }
-                (min, max.max(line))
-            }
-            _ => return None,
-        }
+        content_intrinsic(i, inputs, runs, run_texts, children)?
     };
     // The box's own min/max-width clamp its OUTER contribution (CSS Sizing 3 §5.1), in its box-sizing model.
     let to_border = |v: f64| if is_auto(v) || n.decl_border_box { v } else { v + extra };
     let min = clamp_min_max(inner_min + extra, to_border(n.decl_min_w), to_border(n.decl_max_w));
     let max = clamp_min_max(inner_max + extra, to_border(n.decl_min_w), to_border(n.decl_max_w));
     Some((min, max))
+}
+
+// What a box CONTAINS, as (min-content, max-content) content widths — the oracle's `contentIntrinsicWidths`:
+// a text block's inline content (`text_intrinsic`); a block container's children, each contributing its
+// margin box (a float packs on a line, a block-level child ends it). Asked of a FLEX container too — for a
+// keyword `flex-basis` or its automatic minimum the oracle walks its children as block-level boxes (the same
+// widest-child answer), not along the flex axis. No declared width, no edges, no clamp: those are
+// `intrinsic_widths`' business.
+fn content_intrinsic(i: usize, inputs: &[Input], runs: &[Run], run_texts: &[Option<Vec<u16>>], children: &[Vec<usize>]) -> Option<(f64, f64)> {
+    let n = inputs[i];
+    match n.display {
+        DISPLAY_TEXT_BLOCK => {
+            let (rs, re) = (n.run_start.max(0) as usize, (n.run_start + n.run_count).max(0) as usize);
+            if re > runs.len() || rs > re {
+                return None;
+            }
+            text_intrinsic(&runs[rs..re], &run_texts[rs..re], n.ws_mode)
+        }
+        DISPLAY_BLOCK | DISPLAY_FLEX => {
+            let (mut min, mut max) = (0.0f64, 0.0f64);
+            let mut line = 0.0f64; // floats pack beside each other on a line, as inline boxes would
+            for &c in &children[i] {
+                let k = inputs[c];
+                if k.out_of_flow != 0 {
+                    continue; // out of flow: sizes nothing
+                }
+                // Each child contributes its MARGIN box (a negative margin narrows it; auto is 0).
+                let (cmin, cmax) = intrinsic_widths(c, inputs, runs, run_texts, children)?;
+                let m = Input::m(k.ml) + Input::m(k.mr);
+                if k.float_kind != 0 {
+                    // A FLOAT packs beside its neighbours like an inline-level box: its max-content joins the
+                    // line, its min-content stands alone (the oracle's float arm — no line end).
+                    line += cmax + m;
+                    min = min.max(cmin + m);
+                    continue;
+                }
+                // A block-level child ends the line the floats were packing, then contributes on its own.
+                max = max.max(line);
+                line = 0.0;
+                min = min.max(cmin + m);
+                max = max.max(cmax + m);
+            }
+            Some((min, max.max(line)))
+        }
+        _ => None,
+    }
+}
+
+// A box's min-content WIDTH as a flex item's automatic minimum (§4.5) — the oracle's `minContentWidth`: the
+// content's min-content plus the edges, capped by a declared width (border-box per `box-sizing`; a
+// percentage is auto, `decl_w`).
+fn min_content_width(i: usize, inputs: &[Input], runs: &[Run], run_texts: &[Option<Vec<u16>>], children: &[Vec<usize>]) -> Option<f64> {
+    let n = inputs[i];
+    let content = content_intrinsic(i, inputs, runs, run_texts, children)?.0 + n.edges_x();
+    if is_auto(n.decl_w) {
+        return Some(content);
+    }
+    let declared = if n.decl_border_box { n.decl_w } else { n.decl_w + n.edges_x() };
+    Some(declared.min(content))
 }
 
 // A flex container's (min-content, max-content) CONTENT widths — the oracle's `flexIntrinsicWidths`: its in-flow
@@ -2050,7 +2371,7 @@ fn flex_intrinsic_widths(i: usize, inputs: &[Input], runs: &[Run], run_texts: &[
             let extra = if k.decl_border_box { 0.0 } else { k.edges_x() };
             if !is_auto(k.flex_basis) {
                 let fixed = k.flex_basis + extra;
-                if k.flex_grows {
+                if k.flex_grow > 0.0 {
                     imax = imax.max(fixed);
                 } else {
                     imin = fixed;
@@ -2284,6 +2605,7 @@ fn text_intrinsic(runs: &[Run], run_texts: &[Option<Vec<u16>>], ws_mode: u8) -> 
 fn measure_grid(
     i: usize,
     w: f64,
+    imposed_h: f64,
     inputs: &[Input],
     runs: &[Run],
     run_texts: &[Option<Vec<u16>>],
@@ -2292,7 +2614,7 @@ fn measure_grid(
     boxes: &mut [Box],
     failed: &std::cell::Cell<bool>,
 ) -> MInfo {
-    let n = inputs[i];
+    let n = inputs[i].with_imposed_height(imposed_h);
     let bail = |failed: &std::cell::Cell<bool>| {
         failed.set(true);
         MInfo { top: CMargin::of(0.0), top_only: CMargin::of(0.0), bottom: CMargin::of(0.0), collapse_through: false }
@@ -2323,7 +2645,7 @@ fn measure_grid(
         if cn.out_of_flow != 0 {
             // §4.1: lay the subtree out at its pushed border box; `place` positions it by rel_x/rel_y alone.
             let cw = resolve_width(&cn, content_w);
-            measure(c, cw, inputs, runs, run_texts, grids, children, boxes, failed, &mut FloatCtx::new(), 0.0, 0.0);
+            measure(c, cw, f64::NAN, inputs, runs, run_texts, grids, children, boxes, failed, &mut FloatCtx::new(), 0.0, 0.0);
             boxes[c].x = 0.0;
             boxes[c].y = 0.0;
         }
@@ -2362,7 +2684,7 @@ fn measure_grid(
         }
         let item = &inputs[c];
         let child_w = resolve_width(item, track_w);
-        measure(c, child_w, inputs, runs, run_texts, grids, children, boxes, failed, &mut FloatCtx::new(), 0.0, 0.0);
+        measure(c, child_w, f64::NAN, inputs, runs, run_texts, grids, children, boxes, failed, &mut FloatCtx::new(), 0.0, 0.0);
         let ih = boxes[c].h;
         boxes[c].x = content_left + offsets[cell.col] + Input::m(item.ml);
         boxes[c].y = content_top_rel + row_top + Input::m(item.mt);
@@ -2495,8 +2817,14 @@ mod tests {
             decl_min_w: f64::NAN,
             decl_max_w: f64::NAN,
             flex_basis: f64::NAN,
-            flex_grows: false,
+            flex_grow: 0.0,
             decl_border_box: false,
+            flex_shrink: 1.0,
+            flex_basis_cb: f64::NAN,
+            flex_basis_kw: 0,
+            scrolls_main: false,
+            flex_stretch: false,
+            flex_native: false,
         }
     }
 
@@ -3453,7 +3781,7 @@ mod tests {
         let mut b = blk(2.0, 0);
         b.decl_w = 20.0;
         b.flex_basis = 50.0;
-        b.flex_grows = true; // max raised to the basis, min stays the content
+        b.flex_grow = 1.0; // max raised to the basis, min stays the content
         let mut c = blk(3.0, 0);
         c.decl_w = 90.0;
         c.decl_max_w = 40.0; // capped
