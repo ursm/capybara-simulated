@@ -497,4 +497,12 @@ RSpec.describe 'native layout flex parity', if: ENV.fetch('CSIM_JS_ENGINE', 'v8'
   it 'matches a relative block whose relative child shifts under it' do
     expect_parity('<div style="position:relative;left:20px;width:300px"><div style="height:20px"></div><div style="position:relative;top:5px;left:10px;height:20px"></div></div>')
   end
+
+  # A content-box flex item's min/max-height are pushed as BORDER-box figures once its record says border-box
+  # (the flex push): a `max-height: 50px; padding: 10px` item is a 70px box, not 50 (review finding, grid Phase 3).
+  it 'clamps a content-box item with vertical edges by its max/min-height as border-box figures' do
+    expect_parity('<div style="display:flex;align-items:flex-start;width:400px"><div style="max-height:50px;padding:10px"><div style="height:100px"></div></div></div>')
+    expect_parity('<div style="display:flex;align-items:flex-start;width:400px"><div style="min-height:50px;padding:10px"><div style="height:10px"></div></div></div>')
+    expect_parity('<div style="display:flex;align-items:flex-start;width:400px"><div style="display:grid;grid-template-columns:50px;max-height:50px;padding:10px"><div style="height:100px"></div></div></div>')
+  end
 end

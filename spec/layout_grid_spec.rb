@@ -200,4 +200,19 @@ RSpec.describe 'grid track sizing' do
     expect(b[0].round).to eq((g[0] + a[2]).round)     # …and the second starts where the first ends
     expect(a[0] + a[2]).to be <= g[0] + g[2]          # both inside the container
   end
+
+  # A `position: relative` grid item is shifted by its insets at paint time (Chrome moves it; the row and the
+  # track it sits in are computed from the unshifted place), as every other flow's relative box is.
+  it 'shifts a relative grid item by its insets without moving its neighbours' do
+    body = <<~HTML
+      <div id="g" style="display:grid;grid-template-columns:100px 100px;width:400px">
+        <div id="a" style="position:relative;top:10px;left:5px;height:20px">a</div><div id="b" style="height:20px">b</div>
+      </div>
+    HTML
+    boxes, = measure(body, ['#g', '#a', '#b'], style: 'margin:0;font:16px Arial')
+    g, a, b = boxes
+    expect([a[0] - g[0], a[1] - g[1]]).to eq([5, 10])
+    expect([b[0] - g[0], b[1] - g[1]]).to eq([100, 0])
+    expect(g[3]).to eq(20)                            # the row is as tall as the unshifted item
+  end
 end

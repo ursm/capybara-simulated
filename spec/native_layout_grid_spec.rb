@@ -1,11 +1,10 @@
 # frozen_string_literal: true
-# Native layout — GRID (§12), geometry shadow-parity. Two paths. REPLAY: the oracle resolves the whole track
-# layout (column sizing, row heights, spans, gaps, item margins — a coarse grid pass) and every item's box;
-# native holds the container's box and positions each item at its resolved offset (an out-of-flow displacement),
-# re-laying-out only the item's own subtree. COMPUTE (the bounded subset `nlGridComputable` admits): native sizes
-# the columns itself — px / % / fr, and the intrinsic tracks from the items' min/max-content, which native
-# measures natively where it can (`nlIntrinsicMeasurable`) and otherwise receives resolved from the oracle — and
-# lays each item out at its track width. V8 only.
+# Native layout — GRID (§12), geometry shadow-parity. Native COMPUTES every grid it admits (`nlGridSupported`):
+# it sizes the columns itself — px / % / fr, and the intrinsic tracks from the items' min/max-content, which
+# native measures natively where it can (`nlIntrinsicMeasurable`) and otherwise receives resolved from the
+# oracle — runs the row-major placement (content rows or `grid-auto-rows`), and lays each item out at its track
+# width; an out-of-flow item is replayed at its resolved box as a block's abspos child is. The former replay
+# path (the oracle's item boxes pushed) is retired. V8 only.
 require 'capybara/simulated'
 require 'rack'
 require_relative 'support/session_teardown'
@@ -85,15 +84,15 @@ RSpec.describe 'native layout grid parity', if: ENV.fetch('CSIM_JS_ENGINE', 'v8'
     expect_parity('<div style="display:grid;position:relative;grid-template-columns:100px 100px;gap:10px;width:220px;height:120px"><div style="height:20px">a</div><div style="height:20px">b</div><div style="position:absolute;top:5px;left:5px;width:30px;height:30px">p</div></div>')
   end
 
-  # A grid item's auto margins are resolved by the oracle and replayed at its _lb, so a centring auto margin
-  # needs no native handling (review finding 2).
+  # A grid item's horizontal auto margins are resolved by the oracle against its track (its record's margins),
+  # so a centring auto margin needs no native distribution.
   it 'matches a grid item with a horizontal auto margin (centred in its track)' do
     expect_parity('<div style="display:grid;grid-template-columns:200px;width:220px"><div style="width:100px;height:20px;margin:0 auto">a</div></div>')
   end
   it 'matches two grid items each auto-margin-centred in their tracks' do
     expect_parity('<div style="display:grid;grid-template-columns:150px 150px;gap:10px;width:320px"><div style="width:80px;height:20px;margin:0 auto">a</div><div style="width:60px;height:20px;margin-left:auto">b</div></div>')
   end
-  # A grid nested inside a flex container is a (blockified) grid flex item — walked and replayed (review finding 3).
+  # A grid nested inside a flex container is a (blockified) grid flex item — computed within its pushed box.
   it 'matches a grid nested inside a flex container (grid flex item)' do
     expect_parity('<div style="display:flex;gap:10px;width:420px"><div style="display:grid;grid-template-columns:80px 80px;gap:6px;width:180px"><div style="height:20px">a</div><div style="height:30px">b</div></div><div style="width:100px;height:40px">z</div></div>')
   end
@@ -378,7 +377,67 @@ RSpec.describe 'native layout grid parity', if: ENV.fetch('CSIM_JS_ENGINE', 'v8'
     end
     it 'falls back for a flex container with a percentage main gap, and for a grid item' do
       expect_resolved_fallback(%(<div style="#{mc_auto}"><div style="display:flex;column-gap:5%"><div>a</div><div>b</div></div><div>b</div></div>))
-      expect_resolved_fallback(%(<div style="#{two_auto}"><div style="display:grid;grid-template-columns:auto auto"><div>nested grid words</div><div>x</div></div><div style="height:10px">b</div></div>))
+      expect_resolved_fallback(%(<div style="#{two_auto}"><div style="display:grid;grid-template-columns:50px 50px"><div>nested grid words</div><div>x</div></div><div style="height:10px">b</div></div>))
+    end
+  end
+
+  # ── Replay retired ─────────────────────────────────────────────────────────────────────────────────────
+  # Every shape the compute path once handed to the oracle-box replay is computed now: a grid that is itself
+  # a flex / grid / out-of-flow box (its parent pushes its box, the tracks compute within it), `grid-auto-rows`
+  # (rows advance by the declared height; an auto-height item IS that height, clamped by its own min/max),
+  # bare text (an anonymous item that only floors the auto height), an rtl grid (the oracle lays columns out
+  # LTR regardless), an empty / invalid template (one full-width column), and an out-of-flow item.
+  describe 'computed grids that used to replay' do
+    it 'computes a grid that is a flex item, stretched or not' do
+      expect_native_intrinsic('<div style="display:flex;width:400px"><div style="display:grid;grid-template-columns:auto 1fr;flex:1"><div style="height:10px">a</div><div style="height:20px">b</div></div><div style="width:50px;height:60px"></div></div>')
+      expect_native_intrinsic('<div style="display:flex;width:400px;align-items:flex-start"><div style="display:grid;grid-template-columns:auto 1fr;flex:1"><div style="height:10px">a</div><div style="height:20px">b</div></div><div style="width:50px;height:60px"></div></div>')
+    end
+    it 'computes a grid nested as a grid item, and an absolutely positioned grid' do
+      expect_native_intrinsic('<div style="display:grid;grid-template-columns:100px 100px;width:400px"><div style="display:grid;grid-template-columns:auto auto"><div>n1</div><div>n2</div></div><div style="height:20px">b</div></div>')
+      expect_native_intrinsic('<div style="position:relative;width:400px;height:200px"><div style="position:absolute;top:10px;left:20px;width:200px;display:grid;grid-template-columns:auto 1fr"><div style="height:10px">a</div><div style="height:20px">b</div></div></div>')
+    end
+    it 'computes grid-auto-rows: rows advance by the declared height, an auto-height item is that height' do
+      expect_parity('<div style="display:grid;grid-template-columns:100px 1fr;grid-auto-rows:40px;width:400px"><div style="height:50%">pct h</div><div>b</div><div style="height:60px">tall</div><div>d</div></div>')
+      expect_parity('<div style="display:grid;grid-template-columns:100px;grid-auto-rows:60px;width:400px;height:300px"><div style="height:50%">pct</div><div style="padding:5px;border:2px solid">edged auto</div><div style="box-sizing:border-box;padding:5px">bb auto</div><div style="min-height:100px">minh</div><div style="max-height:10px">maxh</div></div>')
+      expect_parity('<div style="display:grid;grid-template-columns:100px;grid-auto-rows:60px;gap:7px;width:400px"><div><p style="margin:20px 0">inner margins</p></div><div style="margin:8px 0">m</div><img style="display:block;width:30px;height:30px"></div>')
+    end
+    it 'lays a flex-container / nested-grid / table item out within its declared row height' do
+      expect_parity('<div style="display:grid;grid-template-columns:100px;grid-auto-rows:60px;width:400px"><div style="display:flex;align-items:center"><div style="width:10px;height:10px"></div></div><div>b</div></div>')
+      expect_parity('<div style="display:grid;grid-template-columns:100px;grid-auto-rows:60px;width:400px"><div style="display:flex;flex-direction:column;justify-content:flex-end"><div style="width:10px;height:10px"></div></div></div>')
+      expect_native_intrinsic('<div style="display:grid;grid-template-columns:100px;grid-auto-rows:60px;width:400px"><div style="display:grid;grid-template-columns:auto"><div>nested in row</div></div></div>')
+      expect_parity('<div style="display:grid;grid-template-columns:200px;grid-auto-rows:60px;width:400px"><table><tr><td>cell</td></tr></table></div>')
+    end
+    it 'declines a row shorter than an item\'s vertical edges, and a flex-container item with a min/max-height under declared rows' do
+      expect_bail('<div style="display:grid;grid-template-columns:100px;grid-auto-rows:20px;width:400px"><div style="padding:30px">padding taller than row</div></div>')
+      expect_bail('<div style="display:grid;grid-template-columns:100px;grid-auto-rows:60px;width:400px"><div style="display:flex;align-items:center;min-height:100px"><div style="width:10px;height:10px"></div></div></div>')
+    end
+    it 'keeps an auto-height item content-sized under grid-auto-rows: 0 (a 0 height is the oracle\'s auto placeholder)' do
+      expect_parity('<div style="display:grid;grid-template-columns:100px;grid-auto-rows:0px;width:400px"><div><p style="margin:0">text</p></div><div>b</div></div>')
+    end
+    it 'resolves a % gap inside an item against the row height it was given (definite at gap time)' do
+      expect_native_intrinsic('<div style="display:grid;grid-template-columns:100px;grid-auto-rows:100px;width:400px"><div style="display:grid;grid-template-columns:auto;row-gap:10%"><div>a</div><div>b</div></div></div>')
+      expect_parity('<div style="display:grid;grid-template-columns:100px;grid-auto-rows:100px;width:400px"><div style="display:flex;flex-direction:column;row-gap:10%"><div style="height:10px"></div><div style="height:10px"></div></div></div>')
+      expect_parity('<div style="display:grid;grid-template-columns:100px;grid-auto-rows:100px;width:400px"><div style="display:flex;flex-wrap:wrap;row-gap:10%"><div style="width:60px;height:10px"></div><div style="width:60px;height:10px"></div></div></div>')
+    end
+    it 'shifts a relative item by its insets (as Chrome does — the oracle now applies flowShift to grid items)' do
+      expect_parity('<div style="display:grid;grid-template-columns:100px 100px;width:400px"><div style="position:relative;top:10px;left:5px;height:20px">rel</div><div style="height:20px">b</div></div>')
+    end
+    it 'declines a non-leaf control item (a <select> with options — sized from its intrinsic size, not its children)' do
+      expect_bail('<div style="display:grid;grid-template-columns:100px;width:400px"><select><option>o</option></select></div>')
+    end
+    it 'floors an auto height at bare text (an anonymous item the oracle never places)' do
+      expect_parity('<div style="display:grid;grid-template-columns:100px 1fr;width:400px">bare text<div style="height:10px">a</div><div style="height:20px">b</div></div>')
+      expect_parity('<div style="display:grid;grid-template-columns:100px 1fr;width:400px">bare<div style="height:10px">a</div></div>')
+    end
+    it 'computes an rtl grid (columns laid out LTR, as the oracle does), and a missing / invalid template as one column' do
+      expect_parity('<div style="display:grid;grid-template-columns:100px 1fr;width:400px;direction:rtl"><div style="height:10px">a</div><div style="height:20px">b</div></div>')
+      expect_parity('<div style="display:grid;width:400px"><div style="height:10px">a</div><div style="height:20px">b</div></div>')
+      expect_parity('<div style="display:grid;grid-template-columns:foo;width:400px"><div style="height:10px">a</div></div>')
+      expect_parity('<div style="display:grid;grid-template-columns:[a] 1fr;width:400px"><div style="height:10px">a</div></div>')
+    end
+    it 'replays an out-of-flow item at its resolved box while the in-flow items compute' do
+      expect_parity('<div style="display:grid;position:relative;grid-template-columns:100px 100px;gap:10px;width:220px"><div style="height:20px">a</div><div style="height:20px">b</div><div style="position:absolute;width:30px;height:30px">p</div><div style="height:20px">c</div></div>')
+      expect_native_intrinsic('<div style="display:grid;position:relative;grid-template-columns:auto 1fr;width:300px"><div style="position:absolute;right:0;top:0;width:30px;height:30px">p</div><div>label text</div><div style="height:20px">b</div></div>')
     end
   end
 end

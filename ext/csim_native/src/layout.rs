@@ -33,12 +33,11 @@ pub(crate) const DISPLAY_FLEX: u8 = 3;
 pub(crate) const DISPLAY_TABLE: u8 = 4;
 pub(crate) const DISPLAY_TABLE_ROW_GROUP: u8 = 5;
 pub(crate) const DISPLAY_TABLE_ROW: u8 = 6;
-// CSS Grid (§12), native COMPUTE (not replay): the container's `grid_start` indexes the parallel `grids`
-// buffer, which holds the parsed column template + gaps + per-item placement. measure_grid sizes the columns
+// CSS Grid (§12), computed natively: the container's `grid_start` indexes the parallel `grids` buffer, which
+// holds the parsed column template + gaps + row height + per-item placement. measure_grid sizes the columns
 // (fixed / % / fr / intrinsic — measuring the items' min/max-content itself, `intrinsic_widths`) and lays out
-// each item at its track width — rows are content-height (reproducing the coarse oracle). A grid the native
-// engine can't compute (an rtl / row-templated / bare-text grid, etc.) still arrives as DISPLAY_BLOCK with its
-// items REPLAYED (grid_start < 0), the pre-existing path.
+// each item at its track width — rows are content-height or the declared `grid-auto-rows` (reproducing the
+// coarse oracle). An out-of-flow item is replayed at its pushed box, as a block's abspos child is.
 pub(crate) const DISPLAY_GRID: u8 = 7;
 // A table CAPTION keeps its own block / text display (measure lays out its subtree); it is identified
 // structurally as the table's only non-row/non-group child (t4), not by a display code.
@@ -186,8 +185,8 @@ pub(crate) struct Input {
     // pre-clamp content, the box floors/caps around them), instead of aligning in the pushed definite box —
     // reproducing the oracle's auto-height two-phase for a nested min-height flex row (the Avo field-wrapper).
     pub(crate) item_auto_height: bool,
-    // A native-COMPUTE grid container's offset into the parallel `grids` buffer (see measure_grid). Read only
-    // when `display == DISPLAY_GRID`; 0 (unused) for every other node, including a grid REPLAYED as DISPLAY_BLOCK.
+    // A grid container's offset into the parallel `grids` buffer (see measure_grid). Read only when
+    // `display == DISPLAY_GRID`; 0 (unused) for every other node.
     pub(crate) grid_start: i32,
     // The DECLARED inline sizing with NO percentage basis — what an intrinsic measure reads (`intrinsic_widths`):
     // `width` / `min-width` / `max-width` as declared (a percentage is NaN = auto there, having nothing to
@@ -2271,12 +2270,17 @@ fn text_intrinsic(runs: &[Run], run_texts: &[Option<Vec<u16>>], ws_mode: u8) -> 
     Some((min.max(0.0), max.max(0.0)))
 }
 
-// A computed GRID container (§12), the native COMPUTE path (see DISPLAY_GRID). Sizes the columns natively —
-// measuring each item's min/max-content itself when a track asks for content (`intrinsic_widths`) — then runs
-// the oracle's row-major placement: each item is laid out at its track width (auto fills the track less its
-// margins; a length uses its resolved box), rows are as tall as their content (the tallest item's border box —
-// a top margin moves the item but, matching the coarse oracle, neither grows the row nor stretches a shorter
-// item). The parsed template + gaps + per-item (col-start, col-span) live in `grids[grid_start..]`.
+// A GRID container (§12, see DISPLAY_GRID). Sizes the columns natively — measuring each item's min/max-content
+// itself when a track asks for content (`intrinsic_widths`) — then runs the oracle's row-major placement: each
+// in-flow item is laid out at its track width (auto fills the track less its margins; a length uses its
+// resolved box); rows are as tall as their content (the tallest item's border box — a top margin moves the item
+// but, matching the coarse oracle, neither grows the row nor stretches a shorter item) or, under
+// `grid-auto-rows`, the declared height whatever the content (the container still reaches under an overflowing
+// item). Bare text directly in the grid is an anonymous item the oracle never places — it only floors the auto
+// height at its line-height (`anon_cross`). An out-of-flow child joins no row: its subtree lays out at its
+// pushed box and `place` positions it by its displacement. The buffer at `grids[grid_start..]` is
+// `[col_count, col_gap, row_gap, decl_row_h (NaN = content rows), template (GRID_TRACK_STRIDE per column),
+// (col_start | -1, span) per in-flow item]`.
 fn measure_grid(
     i: usize,
     w: f64,
@@ -2297,25 +2301,37 @@ fn measure_grid(
     let content_top_rel = n.bt + n.pt;
     let content_left = n.bl + n.pl;
     let gs = n.grid_start.max(0) as usize;
-    if gs + 3 > grids.len() {
+    if gs + 4 > grids.len() {
         return bail(failed);
     }
     let col_count = grids[gs] as usize;
     let col_gap = grids[gs + 1];
     let row_gap = grids[gs + 2];
-    let tmpl_base = gs + 3;
-    let kids = &children[i];
-    // Template is GRID_TRACK_STRIDE values per column; placement is 2 per item.
+    let decl_row_h = grids[gs + 3];
+    let tmpl_base = gs + 4;
+    // The in-flow items, in record order — the out-of-flow children join no row.
+    let kids: Vec<usize> = children[i].iter().copied().filter(|&c| inputs[c].out_of_flow == 0).collect();
+    // Template is GRID_TRACK_STRIDE values per column; placement is 2 per in-flow item.
     if col_count == 0 || tmpl_base + GRID_TRACK_STRIDE * col_count + 2 * kids.len() > grids.len() {
         return bail(failed);
     }
     let tracks: Vec<GridTrack> = (0..col_count).map(|c| GridTrack::decode(grids, tmpl_base + GRID_TRACK_STRIDE * c)).collect();
     let place_base = tmpl_base + GRID_TRACK_STRIDE * col_count;
     let cells = grid_placement(grids, place_base, col_count, kids.len());
+    for &c in &children[i] {
+        let cn = inputs[c];
+        if cn.out_of_flow != 0 {
+            // §4.1: lay the subtree out at its pushed border box; `place` positions it by rel_x/rel_y alone.
+            let cw = resolve_width(&cn, content_w);
+            measure(c, cw, inputs, runs, run_texts, grids, children, boxes, failed, &mut FloatCtx::new(), 0.0, 0.0);
+            boxes[c].x = 0.0;
+            boxes[c].y = 0.0;
+        }
+    }
     // An intrinsic track (auto / min|max-content / fit-content / a minmax side) sizes from the items' content —
     // measured natively here; a template of px / % / fr sides needs no measure at all.
     let cols = if tracks.iter().any(GridTrack::needs_content) {
-        match grid_column_content(kids, &cells, col_count, inputs, runs, run_texts, children) {
+        match grid_column_content(&kids, &cells, col_count, inputs, runs, run_texts, children) {
             Some(cols) => Some(cols),
             None => return bail(failed),
         }
@@ -2330,14 +2346,14 @@ fn measure_grid(
         atx += widths[c] + col_gap;
     }
 
-    // Rows advance by the tallest item placed (content rows).
+    // Rows advance by the tallest item placed (content rows), or by the declared row height.
     let mut row_top = 0.0f64; // relative to the content origin
     let mut row_h = 0.0f64;
     let mut bottom = 0.0f64;
     for (k, &c) in kids.iter().enumerate() {
         let cell = cells[k];
         if k > 0 && cell.row != cells[k - 1].row {
-            row_top += row_h + row_gap;
+            row_top += if is_auto(decl_row_h) { row_h } else { decl_row_h } + row_gap;
             row_h = 0.0;
         }
         let mut track_w = 0.0;
@@ -2361,7 +2377,7 @@ fn measure_grid(
     boxes[i].nid = n.nid;
     boxes[i].w = w;
     let box_h = if is_auto(n.height) {
-        content_top_rel + bottom + n.pb + n.bb
+        content_top_rel + bottom.max(n.anon_cross) + n.pb + n.bb
     } else if n.border_box {
         n.height.max(n.edges_y())
     } else {
