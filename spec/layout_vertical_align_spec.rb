@@ -148,6 +148,94 @@ RSpec.describe 'vertical-align' do
     expect((ruler_box[1] - line[1]) - (inner[1] - line[1] + font_box[:ascent])).to be_within(0.02).of(2 * one)
   end
 
+  # A box that declares nothing of its own still rises with the inline around it (Chrome: the `<a>` in a
+  # `<sup>`, and the `<b>` and the inline-block inside a `vertical-align: 5px` span, move by the parent's
+  # shift, and the line grows for them).
+  it 'carries a shift into a box that declares none' do
+    body = %(<div id="c" style="width:400px">t#{ruler}<span style="vertical-align:5px">o<span id="n">n</span><span id="i" style="display:inline-block;width:10px;height:10px"></span></span></div>)
+    boxes, = measure(body, ['#c', '#c > span:nth-of-type(1)', '#n', '#i'])
+    line, ruler_box, nested, ib = boxes
+    baseline = ruler_box[1] - line[1]
+    expect(nested[1] - line[1] + font_box[:ascent]).to be_within(0.02).of(baseline - 5)
+    expect(ib[1] - line[1] + ib[3]).to be_within(0.02).of(baseline - 5)
+  end
+
+  # `middle` / `text-top` / `text-bottom` place the box against the PARENT's font box — which sits wherever the
+  # parent's own shift put it (Chrome: a `text-top` box inside a `vertical-align: 5px` span tops out 5 higher
+  # than beside it).
+  it 'places a font-box-aligned box against a shifted parent' do
+    %w[text-top text-bottom middle].each do |mode|
+      body = %(<div id="c" style="width:400px">t#{ruler}<span id="p" style="vertical-align:5px">o<span id="i" style="display:inline-block;width:10px;height:10px;vertical-align:#{mode}"></span></span><span id="f" style="display:inline-block;width:10px;height:10px;vertical-align:#{mode}"></span></div>)
+      boxes, = measure(body, ['#c', '#i', '#f'])
+      shifted, flat = boxes[1], boxes[2]
+      expect(flat[1] - shifted[1]).to be_within(0.02).of(5), mode
+    end
+  end
+
+  # A text-drawing CONTROL's baseline is its font's, wherever it sits: a block-level `<input>` gives the
+  # inline-block around it that baseline (Chrome: a 21px input's line is 21 tall, hanging from the input's text
+  # rather than its bottom edge), and a flex item holding one aligns on it too (measured: the input lands at 14
+  # beside a 32px word). A `<textarea>` scrolls, so it keeps its bottom edge.
+  it 'reads a block-level control child as a font baseline' do
+    body = %(<div id="c" style="width:400px">t#{ruler}<span id="i" style="display:inline-block"><input id="n" style="display:block"></span></span></div>)
+    boxes, = measure(body, ['#c', '#c > span:nth-of-type(1)', '#n'])
+    line, ruler_box, input = boxes
+    baseline = ruler_box[1] - line[1]
+    expect(input[1] + input[3] - line[1]).to be > baseline          # its bottom edge is BELOW the baseline…
+    expect(line[3]).to be_within(0.02).of(input[3])                 # …and the line is exactly the input tall
+
+    body = %(<div style="display:flex;align-items:baseline;width:400px"><div><input id="n" style="display:block"></div><div id="b" style="font-size:32px">BIG#{ruler}</div></div>)
+    boxes, = measure(body, ['#n', '#b span'])
+    expect(boxes[0][1]).to be > 0                                   # the input drops to the big word's baseline
+
+    # …but a BLOCK-LEVEL list box stacking real rows reads its baseline off those rows' lines (Chrome: the big
+    # word stays at 0 and the 53px `size=3` box drops to 16, its first row's line on the word's baseline), while
+    # a DROPDOWN keeps the control rule — its `<option>`s have no box at all in Chrome, so the ones the driver
+    # lays out inside it must not answer for it (Chrome: the select drops to 15, not 16).
+    body = %(<div style="display:flex;align-items:baseline;width:400px"><div><select id="n" style="display:block" size="3"><option>a</option><option>b</option></select></div><div id="b" style="font-size:32px">BIG</div></div>)
+    boxes, = measure(body, ['#n', '#b'])
+    expect(boxes[1][1]).to eq(0)
+    expect(boxes[0][1]).to be > 10
+
+    body = %(<div style="display:flex;align-items:baseline;width:400px"><div><select id="n" style="display:block"><option>a</option></select></div><div id="b" style="font-size:32px">BIG</div></div>)
+    boxes, = measure(body, ['#n', '#b'])
+    expect(boxes[1][1]).to eq(0)
+    expect(boxes[0][1]).to be_within(0.02).of(15)
+  end
+
+  # An INLINE-LEVEL child sits on one of the block's own lines, which already carries its baseline — reading it
+  # as a child too would let it win against its own line (Chrome: a `<select multiple>` hands its line the
+  # list-box baseline at 67, while its option rows sit at 13).
+  it 'reads an inline-level child through its line, not as a child box' do
+    body = %(<div style="display:flex;align-items:baseline;width:400px"><div id="i"><select multiple><option>a</option><option>b</option></select></div><div id="b" style="font-size:32px">BIG</div></div>)
+    boxes, = measure(body, ['#i', '#b'])
+    expect(boxes[0][1]).to eq(0)
+    expect(boxes[1][1]).to be > 30
+  end
+
+  # An inline-block hangs from its last line — except that a SCROLL CONTAINER inside it has no line to give and
+  # hands its bottom MARGIN edge instead (CSS2 §10.8.1 as Blink applies it down the tree; Chrome: 36 for a text
+  # line over an `overflow: hidden` one, 46 with `margin-bottom: 10px` on it, and a trailing empty block reads
+  # past to it). A text line after it takes over, and a flex item's baseline still reads the scroll container's
+  # line.
+  it 'hangs an inline-block from a scroll-container child by its margin edge' do
+    ib = ->(kids) { %(<div id="c" style="width:400px">t#{ruler}<span id="i" style="display:inline-block">#{kids}</span></div>) }
+    boxes, = measure(ib.call('<div>t</div><div style="overflow:hidden;margin-bottom:10px">oh</div>'), ['#c', '#c > span:nth-of-type(1)', '#i'])
+    line, ruler_box, box = boxes
+    expect(box[1] + box[3] - line[1]).to be_within(0.02).of(ruler_box[1] - line[1])
+
+    boxes, = measure(ib.call('<div>t</div><div id="s" style="overflow:hidden">oh</div><div style="height:5px"></div>'), ['#c', '#c > span:nth-of-type(1)', '#s'])
+    line, ruler_box, scroller = boxes
+    expect(scroller[1] + scroller[3] - line[1]).to be_within(0.02).of(ruler_box[1] - line[1])
+
+    boxes, = measure(ib.call("<div style=\"overflow:hidden\">oh</div><div>t#{ruler}</div>"), ['#c > span:nth-of-type(1)', '#i span'])
+    expect(boxes[1][1]).to be_within(0.02).of(boxes[0][1])
+
+    body = %(<div style="display:flex;align-items:last baseline;width:400px"><div><div>t</div><div style="overflow:hidden;height:40px;margin-bottom:6px">oh#{ruler}</div></div><div style="font-size:32px">BIG#{ruler}</div></div>)
+    boxes, = measure(body, ['div > div > div > span', 'div > div:nth-of-type(2) > span'])
+    expect(boxes[1][1]).to be_within(0.02).of(boxes[0][1])
+  end
+
   # HTML's own sheet raises and shrinks `<sup>` and `<sub>`, and both halves show.
   it 'gives sup and sub their UA rules' do
     body = %(<div id="c" style="width:400px">x#{ruler}<sup id="s">2</sup></div>)

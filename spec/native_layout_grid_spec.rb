@@ -359,8 +359,10 @@ RSpec.describe 'native layout grid parity', if: ENV.fetch('CSIM_JS_ENGINE', 'v8'
       expect_native_intrinsic(%(<div style="#{two_auto}"><div><div style="float:left;width:40px;height:10px"></div><div style="float:left;width:70px;height:10px;margin:0 5px"></div><p style="margin:0">beside floats</p></div><div>b</div></div>))
       expect_native_intrinsic(%(<div style="#{two_auto}"><div><div style="float:left;width:40px;height:10px"></div><div style="float:right;width:70px;height:10px"></div></div><div>b</div></div>))
     end
-    it 'falls back for an atomic inline (its box is replayed, not measured)' do
-      expect_resolved_fallback(%(<div style="#{two_auto}"><div><span style="display:inline-block;width:80px;height:10px"></span> after</div><div style="height:10px">b</div></div>))
+    it 'measures an atomic inline native lays out itself, and falls back for one whose box is pushed' do
+      expect_native_intrinsic(%(<div style="#{two_auto}"><div><span style="display:inline-block;width:80px;height:10px"></span> after</div><div style="height:10px">b</div></div>))
+      expect_native_intrinsic(%(<div style="#{two_auto}"><div>an <img style="width:30px"> image</div><div style="height:10px">b</div></div>))
+      expect_resolved_fallback(%(<div style="#{two_auto}"><div><span style="display:inline-block;vertical-align:middle;width:80px;height:10px"></span> after</div><div style="height:10px">b</div></div>))
     end
     it 'measures a flex-container item: a row sums its items (gap + margins), a wrapping row\'s min is one item, a column takes the widest' do
       expect_native_intrinsic(%(<div style="#{mc_auto}"><div style="display:flex"><div style="width:40px;height:10px"></div><div style="width:60px;height:10px"></div></div><div>b</div></div>))

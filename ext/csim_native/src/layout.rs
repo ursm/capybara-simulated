@@ -170,6 +170,9 @@ pub(crate) struct Input {
     // content_left + margin_left for a block that FILLS the width, so one formula serves both). 0 = ltr. The
     // harness bails an rtl block with floats or auto horizontal margins, so only this placement differs.
     pub(crate) rtl: u8,
+    // A text block's line alignment, PHYSICAL (the oracle's `textAlignOf` folds `start` / `end` through rtl):
+    // 0 left, 1 right, 2 center. It moves a line's atomics (`line_layout`); `justify` never reaches native.
+    pub(crate) text_align: u8,
     // vertical-align on a table CELL: the px the oracle moved the cell's content down by within its (row-tall)
     // box (0 for top / a content that fills the row). The oracle already resolved top/middle/bottom into this
     // scalar; native lays cell content top-aligned, then shifts the cell's own child boxes down by it to match.
@@ -214,6 +217,8 @@ pub(crate) struct Input {
     pub(crate) flex_basis_kw: u8,
     pub(crate) scrolls_x: bool,
     pub(crate) scrolls_y: bool,
+    // A `<button>`: its baseline is its content's however it scrolls (`child_baselines`).
+    pub(crate) is_button: bool,
     pub(crate) flex_stretch: bool,
     pub(crate) flex_native: bool,
     // On a flex CONTAINER: `flex-direction` is a `*-reverse` value (its baseline candidates run backwards; an
@@ -228,6 +233,12 @@ pub(crate) struct Input {
     pub(crate) ratio_only: bool,
     // The box has no content height to floor a flex column's automatic minimum at (an image, a ratio box).
     pub(crate) shrinks_to_nothing: bool,
+    // A text-drawing CONTROL's baseline (the oracle's `controlBaseline`): 0 none (an image / chromeless control —
+    // the box gives no baseline), 1 its font's — the font box (`control_font_box`) centred in the content box
+    // plus its ascent (`control_font_asc`), 2 a list box — its content box's bottom.
+    pub(crate) control_baseline: u8,
+    pub(crate) control_font_box: f64,
+    pub(crate) control_font_asc: f64,
     pub(crate) intrinsic_w: f64,
     pub(crate) intrinsic_h: f64,
     // An OUT-OF-FLOW box (`out_of_flow`) native positions itself (`place_out_of_flow`): the record index of its
@@ -337,6 +348,11 @@ pub(crate) struct Box {
     // when no line is there to give one (a flex item then synthesises its bottom margin edge).
     pub(crate) first_baseline: Option<f64>,
     pub(crate) last_baseline: Option<f64>,
+    // The baseline an INLINE-BLOCK made of this box hangs by — its last baseline under one more rule Blink applies
+    // down the tree (CSS2 §10.8.1: a box whose `overflow` is not visible hangs from its bottom margin edge): a
+    // SCROLL-CONTAINER child gives its bottom MARGIN edge, not its lines. The oracle's `boxBaselineOffset(el,
+    // true, inlineBlock = true)`.
+    pub(crate) inline_block_baseline: Option<f64>,
 }
 
 // Clamp a resolved main size by min/max (min wins over max, per CSS). `none` (NaN) bounds are skipped.
@@ -399,7 +415,7 @@ pub(crate) fn layout_block(inputs: &[Input], runs: &[Run], run_texts: &[Option<V
     }
     let mut boxes: Vec<Box> = inputs
         .iter()
-        .map(|n| Box { nid: n.nid, x: 0.0, y: 0.0, w: 0.0, h: 0.0, auto_height: false, first_baseline: None, last_baseline: None })
+        .map(|n| Box { nid: n.nid, x: 0.0, y: 0.0, w: 0.0, h: 0.0, auto_height: false, first_baseline: None, last_baseline: None, inline_block_baseline: None })
         .collect();
     // Two phases: MEASURE lays the subtree out relative to each node's own border-box origin (so
     // collapse-through margins can propagate UP through returns without knowing final positions), then
@@ -458,6 +474,8 @@ fn line_layout(
     cr: f64,
     top: f64,
     ws_mode: u8,
+    align: u8,
+    rtl: bool,
 ) -> Option<LineLayout> {
     // The three orthogonal `white-space` behaviours (see Input::ws_mode). `no_wrap` keeps the old name for the
     // four soft-wrap gates below: a line SOFT-wraps under normal (0) / pre-wrap (3) / pre-line (4), never under
@@ -477,7 +495,19 @@ fn line_layout(
             br - bl
         }
     };
+    // …and where that band starts, from the content edge (0 with no floats).
+    let band_l = |t: f64| -> f64 {
+        if floats.is_empty() {
+            0.0
+        } else {
+            float_band(floats, top + t, strut_lh, cl, cr).0 - cl
+        }
+    };
     let mut line_x = 0.0f64;
+    // The trailing white space on `line_x` since the last content — a collapsed space placed ahead of the word
+    // that may then wrap away from it, or preserved spaces — which HANGS at a soft wrap: the line ends before it
+    // for alignment (the oracle's `trailingHang` / `trailingPreserved`).
+    let mut hang = 0.0f64;
     let mut total = 0.0f64;
     // The current line's box, seeded to the strut and grown by each placed run's ascent / descent.
     let mut line_asc = strut_asc;
@@ -499,14 +529,38 @@ fn line_layout(
     // The first / last line CLOSED, as (top, ascent) — a line a `<br>` left empty is a line too (its bare strut).
     let mut first_line: Option<(f64, f64)> = None;
     let mut last_line: Option<(f64, f64)> = None;
-    macro_rules! soft_break {
-        () => {{
+    // The atomic runs placed on the current line (run index, x from the content edge), settled against the
+    // line's top + ascent — and moved by the line's alignment — at close.
+    let mut line_atomics: Vec<(usize, f64)> = Vec::new();
+    let mut atomics: Vec<(usize, f64, f64, f64)> = Vec::new();
+    // Close the current line: `$wrap` says a soft wrap closed it (its hanging white space is not part of the
+    // line's extent; a hard break keeps preserved spaces before it). The line's atomics move by the alignment
+    // (the oracle's `alignLine`): `right` takes the free width, `center` half — clamped at zero in ltr, where an
+    // overflowing line stays at the start edge; in rtl the overflow hangs off the LEFT, so the shift goes negative.
+    macro_rules! close_line {
+        ($wrap:expr) => {{
             if first_line.is_none() {
                 first_line = Some((total, line_asc));
             }
             last_line = Some((total, line_asc));
+            let end = if $wrap { line_x - hang } else { line_x };
+            let free = band_w(total) - end;
+            let dx = match align {
+                1 => if rtl { free } else { free.max(0.0) },
+                2 => if rtl { (free / 2.0).min(free) } else { (free / 2.0).max(0.0) },
+                _ => 0.0,
+            };
+            for (ri, x) in line_atomics.drain(..) {
+                atomics.push((ri, x + dx, total, line_asc));
+            }
             total += line_asc + line_desc;
-            line_x = 0.0;
+        }};
+    }
+    // …and start a fresh one.
+    macro_rules! soft_break {
+        () => {{
+            close_line!(true);
+            line_x = 0.0; // (`hang` is reset by the content the wrap moves onto the fresh line)
             line_asc = strut_asc;
             line_desc = strut_desc;
             line_has_content = false;
@@ -514,7 +568,12 @@ fn line_layout(
     }
     macro_rules! break_line {
         () => {{
-            soft_break!();
+            close_line!(false);
+            line_x = 0.0;
+            hang = 0.0;
+            line_asc = strut_asc;
+            line_desc = strut_desc;
+            line_has_content = false;
             pending_space = None;
             atomic_break = false;
         }};
@@ -530,6 +589,7 @@ fn line_layout(
                 line_x += run.metric;
                 if run.metric != 0.0 {
                     line_has_content = true;
+                    hang = 0.0;
                 }
             }
             RUN_BR => {
@@ -561,6 +621,7 @@ fn line_layout(
                                         // run's metrics as a word would (a lone space in a larger font is a fragment
                                         // there).
                                         line_x += space_w;
+                                        hang += space_w;
                                         line_has_content = true;
                                         line_asc = line_asc.max(run.asc);
                                         line_desc = line_desc.max(run.line_height - run.asc);
@@ -617,7 +678,8 @@ fn line_layout(
                         // native_layout_text spec), so the growth is applied once the line the space sits on is settled.
                         let space_on_line = space_before && line_has_content;
                         if space_on_line {
-                            line_x += sw; // hanging space
+                            line_x += sw; // hanging space (after preserved ones, under pre-wrap: all of them hang)
+                            hang += sw;
                         }
                         // IN-WORD BREAKING (`overflow-wrap: break-word|anywhere` / `word-break: break-all`): a word
                         // WIDER THAN THE BAND may break between characters (a word that fits the band stays atomic
@@ -671,6 +733,7 @@ fn line_layout(
                                     }
                                 }
                                 line_x += cw;
+                                hang = 0.0;
                                 line_asc = line_asc.max(run.asc);
                                 line_desc = line_desc.max(run.line_height - run.asc);
                                 line_has_content = true;
@@ -706,6 +769,7 @@ fn line_layout(
                                 }
                             }
                             line_x += width;
+                            hang = 0.0;
                             line_asc = line_asc.max(run.asc);
                             line_desc = line_desc.max(run.line_height - run.asc);
                             line_has_content = true;
@@ -732,6 +796,7 @@ fn line_layout(
                 let mut broke = false;
                 if space_on_line {
                     line_x += sw; // hanging space
+                    hang += sw;
                 }
                 let ow: f64 = open.iter().filter(|o| !o.1).map(|o| o.0).sum();
                 // An atomic is a break opportunity before it (§ line breaking) — but not under `white-space:
@@ -758,7 +823,9 @@ fn line_layout(
                         o.1 = true;
                     }
                 }
+                line_atomics.push((ri, band_l(total) + line_x)); // its margin box starts here on this line
                 line_x += width;
+                hang = 0.0;
                 line_asc = line_asc.max(run.asc);
                 line_desc = line_desc.max(run.line_height - run.asc);
                 line_has_content = true;
@@ -777,13 +844,9 @@ fn line_layout(
     }
 
     if line_has_content {
-        if first_line.is_none() {
-            first_line = Some((total, line_asc));
-        }
-        last_line = Some((total, line_asc));
-        total += line_asc + line_desc; // close the final line (a trailing <br>'s fresh empty line is NOT closed)
+        close_line!(false); // close the final line (a trailing <br>'s fresh empty line is NOT closed)
     }
-    Some(LineLayout { height: total, first: first_line, last: last_line })
+    Some(LineLayout { height: total, first: first_line, last: last_line, atomics })
 }
 // What `line_layout` lays out: the line count, the content height, and the first / last line as (top, ascent)
 // within the content box — the baselines a box hands its container.
@@ -791,6 +854,10 @@ struct LineLayout {
     height: f64,
     first: Option<(f64, f64)>,
     last: Option<(f64, f64)>,
+    // Where each ATOMIC run landed: (run index, x of its margin box from the content edge — its float band and
+    // the line's alignment applied — the line's top, the line's ascent): the text arm drops a natively laid-out
+    // atomic onto its line's baseline from these.
+    atomics: Vec<(usize, f64, f64, f64)>,
 }
 
 // A UTF-16 unit whose code point is a wide/CJK character (its own break unit) — a lone BMP unit, or a
@@ -990,8 +1057,14 @@ fn measure(
         boxes[i].w = w;
         boxes[i].h = h;
         boxes[i].auto_height = false;
-        boxes[i].first_baseline = None;
-        boxes[i].last_baseline = None;
+        let baseline = match n.control_baseline {
+            1 => Some(n.pt + n.bt + ((h - n.edges_y()).max(0.0) - n.control_font_box) / 2.0 + n.control_font_asc),
+            2 => Some((h - n.pb - n.bb).max(0.0)),
+            _ => None,
+        };
+        boxes[i].first_baseline = baseline;
+        boxes[i].last_baseline = baseline;
+        boxes[i].inline_block_baseline = baseline;
         let top = CMargin::of(Input::m(n.mt));
         return MInfo { top, top_only: top, bottom: CMargin::of(Input::m(n.mb)), collapse_through: false };
     }
@@ -1015,9 +1088,9 @@ fn measure(
     }
 
     // A text block (inline formatting context): its content height is the greedy line layout over its
-    // run sequence, measured natively (font.rs) with no per-run crossing. It has no child records; its
-    // runs are runs[run_start..run_start+run_count]. If it can't be measured (bad font / tab / combining
-    // / CJK / mixed-font word), flag the pass for JS.
+    // run sequence, measured natively (font.rs) with no per-run crossing. Its runs are
+    // runs[run_start..run_start+run_count]; its only child records are the atomic inlines it lays out itself.
+    // If it can't be measured (bad font / tab / combining / CJK / mixed-font word), flag the pass for JS.
     if n.display == DISPLAY_TEXT_BLOCK {
         // The block's content edges and top in the float context's (owner's) frame — the lines route
         // around any floats that overlap them. `fc.items` is empty for the ordinary text block, and then
@@ -1027,10 +1100,58 @@ fn measure(
         let bfc_top = bfc_y + content_top_rel;
         let (rs, re) = (n.run_start.max(0) as usize, (n.run_start + n.run_count).max(0) as usize);
         let content_h = if re <= runs.len() && rs <= re {
-            match line_layout(&runs[rs..re], &run_texts[rs..re], n.strut_lh, n.strut_asc, content_w, &fc.items, cl, cr, bfc_top, n.ws_mode) {
+            // An ATOMIC inline native lays out itself (its run names a child record): SHRINK-TO-FIT wide (its
+            // intrinsic widths clamped to the block's content width — a ratio-only box takes the width less its
+            // margins; a declared width wins), laid out at that width, hanging from its own inline-block baseline
+            // (its bottom margin edge when it has no line, or scrolls) plus its top margin, raised by the baseline
+            // SHIFT the run carries in `asc` — the oracle's `growAtomic` / `atomicBaselineOffset` / `alignedAscent`.
+            // The settled margin box, ascent and outer height ride a copy of the run stream (taken only when
+            // there is such an atomic), which `line_layout` places like any pushed atomic.
+            let has_native_atomic = runs[rs..re].iter().any(|r| r.kind == RUN_ATOMIC && r.font >= 0);
+            let mut owned: Vec<Run> = if has_native_atomic { runs[rs..re].to_vec() } else { Vec::new() };
+            for r in owned.iter_mut() {
+                if r.kind != RUN_ATOMIC || r.font < 0 {
+                    continue;
+                }
+                let c = r.font as usize;
+                let k = inputs[c];
+                let (ml, mr, mt, mb) = (Input::m(k.ml), Input::m(k.mr), Input::m(k.mt), Input::m(k.mb));
+                let auto_w = if k.replaced && k.ratio_only {
+                    (content_w - ml - mr).max(0.0)
+                } else {
+                    match intrinsic_widths(c, inputs, runs, run_texts, children) {
+                        Some((imin, imax)) => imin.max(content_w).min(imax),
+                        None => {
+                            failed.set(true);
+                            0.0
+                        }
+                    }
+                };
+                let w = used_width(&k, auto_w);
+                measure(c, w, f64::NAN, inputs, runs, run_texts, grids, children, boxes, failed, &mut FloatCtx::new(), 0.0, 0.0);
+                let h = boxes[c].h;
+                let own = if k.scrolls_y || k.replaced { None } else { boxes[c].inline_block_baseline };
+                r.metric = w + ml + mr;
+                r.asc += mt + own.unwrap_or(h + mb);
+                r.line_height = h + mt + mb;
+            }
+            let local: &[Run] = if has_native_atomic { &owned } else { &runs[rs..re] };
+            match line_layout(local, &run_texts[rs..re], n.strut_lh, n.strut_asc, content_w, &fc.items, cl, cr, bfc_top, n.ws_mode, n.text_align, n.rtl != 0) {
                 Some(ll) => {
                     boxes[i].first_baseline = ll.first.map(|(top, asc)| content_top_rel + top + asc);
                     boxes[i].last_baseline = ll.last.map(|(top, asc)| content_top_rel + top + asc);
+                    boxes[i].inline_block_baseline = boxes[i].last_baseline;
+                    // Each native atomic drops from its line's top to where its own baseline meets the line's.
+                    for (ri, x, top, line_asc) in ll.atomics {
+                        let r = local[ri];
+                        if r.font < 0 {
+                            continue;
+                        }
+                        let c = r.font as usize;
+                        let k = inputs[c];
+                        boxes[c].x = n.bl + n.pl + x + Input::m(k.ml);
+                        boxes[c].y = content_top_rel + top + (line_asc - r.asc) + Input::m(k.mt);
+                    }
                     ll.height
                 }
                 None => {
@@ -1292,9 +1413,10 @@ fn measure(
     }
 
     // The block's baselines: the first / last in-flow, non-floated child that has one (`baselineCandidates`).
-    let (fb, lb) = child_baselines(children[i].iter().copied(), inputs, boxes);
+    let (fb, lb, ib) = child_baselines(children[i].iter().copied(), inputs, boxes);
     boxes[i].first_baseline = fb;
     boxes[i].last_baseline = lb;
+    boxes[i].inline_block_baseline = ib;
 
     let mut bottom_m = CMargin::of(Input::m(n.mb));
     let box_h = if is_auto(n.height) {
@@ -2239,9 +2361,10 @@ fn measure_flex(
     // The container's baselines: from its items in FLEX order — record order, reversed for a `*-reverse`
     // direction (`baselineCandidates`; an rtl row is not reversed there).
     let order: Vec<usize> = if n.flex_dir_reverse { flow.iter().rev().map(|&p| kids[p]).collect() } else { flow.iter().map(|&p| kids[p]).collect() };
-    let (fb, lb) = child_baselines(order.into_iter(), inputs, boxes);
+    let (fb, lb, ib) = child_baselines(order.into_iter(), inputs, boxes);
     boxes[i].first_baseline = fb;
     boxes[i].last_baseline = lb;
+    boxes[i].inline_block_baseline = ib;
 
     boxes[i].nid = n.nid;
     boxes[i].w = box_w;
@@ -2757,7 +2880,7 @@ fn content_intrinsic(i: usize, inputs: &[Input], runs: &[Run], run_texts: &[Opti
             if re > runs.len() || rs > re {
                 return None;
             }
-            text_intrinsic(&runs[rs..re], &run_texts[rs..re], n.ws_mode)
+            text_intrinsic(&runs[rs..re], &run_texts[rs..re], n.ws_mode, inputs, runs, run_texts, children)
         }
         _ if n.replaced => Some((0.0, 0.0)), // a replaced box holds no CSS content (a ratio-only svg asks its container)
         DISPLAY_BLOCK | DISPLAY_FLEX => {
@@ -2882,10 +3005,11 @@ fn flex_intrinsic_widths(i: usize, inputs: &[Input], runs: &[Run], run_texts: &[
 // reads its close edge there too). `<wbr>` is a bare opportunity. A run under `word-break: break-all` /
 // `overflow-wrap: anywhere` (wrap mode 1 / 3) breaks between ANY two characters for the min-content: each
 // character's UNSPACED advance is a unit of its own (the oracle's `charAdvances` — letter/word-spacing is left
-// out of both figures there); `break-word` (2) leaves the measure alone. `None` for an atomic inline (its
-// intrinsic box is not in the stream), a tab / other control, a wide character, or a ZWJ under per-character
-// breaking (the oracle's per-character advance carries the previous character).
-fn text_intrinsic(runs: &[Run], run_texts: &[Option<Vec<u16>>], ws_mode: u8) -> Option<(f64, f64)> {
+// out of both figures there); `break-word` (2) leaves the measure alone. An atomic inline native lays
+// out itself contributes its own intrinsic widths (plus margins) as one unbreakable unit with an opportunity on
+// each side. `None` for a PUSHED atomic (its box is not in the stream), a tab / other control, a wide character,
+// or a ZWJ under per-character breaking (the oracle's per-character advance carries the previous character).
+fn text_intrinsic(runs: &[Run], run_texts: &[Option<Vec<u16>>], ws_mode: u8, inputs: &[Input], all_runs: &[Run], all_texts: &[Option<Vec<u16>>], children: &[Vec<usize>]) -> Option<(f64, f64)> {
     let (wraps, preserve, break_nl, pin) = match ws_mode {
         0 => (true, false, false, false),
         1 => (false, false, false, true),
@@ -3037,7 +3161,21 @@ fn text_intrinsic(runs: &[Run], run_texts: &[Option<Vec<u16>>], ws_mode: u8) -> 
                     }
                 }
             }
-            _ => return None, // ATOMIC — its intrinsic box is not in the stream
+            RUN_ATOMIC if run.font >= 0 => {
+                // A natively laid-out atomic: one unbreakable unit the line may break on either side of, its
+                // own intrinsic widths plus its margins (the oracle's atomic arm).
+                let c = run.font as usize;
+                let k = inputs[c];
+                let (imin, imax) = intrinsic_widths(c, inputs, all_runs, all_texts, children)?;
+                let m = Input::m(k.ml) + Input::m(k.mr);
+                take_pending!();
+                opportunity!();
+                line += imax + m;
+                min = min.max(imin + m);
+                inline_on_line = true;
+                opportunity!();
+            }
+            _ => return None, // a PUSHED atomic — its intrinsic box is not in the stream
         }
     }
     max = max.max(line); // the last line closes without a reset
@@ -3160,9 +3298,10 @@ fn measure_grid(
         }
     }
 
-    let (fb, lb) = child_baselines(children[i].iter().copied(), inputs, boxes);
+    let (fb, lb, ib) = child_baselines(children[i].iter().copied(), inputs, boxes);
     boxes[i].first_baseline = fb;
     boxes[i].last_baseline = lb;
+    boxes[i].inline_block_baseline = ib;
     boxes[i].nid = n.nid;
     boxes[i].w = w;
     let box_h = if is_auto(n.height) {
@@ -3183,9 +3322,10 @@ fn measure_grid(
 // A container's first / last baseline from its children in the given order — the first that has a first
 // baseline and the last that has a last baseline, each offset by the child's relative top; out-of-flow and
 // floated children give none (the oracle's `baselineCandidates`).
-fn child_baselines(order: impl Iterator<Item = usize> + Clone, inputs: &[Input], boxes: &[Box]) -> (Option<f64>, Option<f64>) {
+fn child_baselines(order: impl Iterator<Item = usize> + Clone, inputs: &[Input], boxes: &[Box]) -> (Option<f64>, Option<f64>, Option<f64>) {
     let mut first = None;
     let mut last = None;
+    let mut inline_block = None;
     for c in order {
         let cn = inputs[c];
         if cn.out_of_flow != 0 || cn.float_kind != 0 {
@@ -3199,8 +3339,16 @@ fn child_baselines(order: impl Iterator<Item = usize> + Clone, inputs: &[Input],
         if let Some(b) = boxes[c].last_baseline {
             last = Some(boxes[c].y + b);
         }
+        // A scroll container gives its bottom margin edge — except a BUTTON, which is a button however it
+        // scrolls (the oracle's exception; native never sees one today, every atomic holding a control is
+        // pushed, but the rule has to be the same rule).
+        if cn.scrolls_y && !cn.is_button {
+            inline_block = Some(boxes[c].y + boxes[c].h + Input::m(cn.mb));
+        } else if let Some(b) = boxes[c].inline_block_baseline {
+            inline_block = Some(boxes[c].y + b);
+        }
     }
-    (first, last)
+    (first, last, inline_block)
 }
 
 // A REPLACED box's used border-box (width, height) — the oracle's `usedSize` for a box with an intrinsic size:
@@ -3527,6 +3675,7 @@ mod tests {
             cell_rowspan: 1,
             caption_side: 0,
             rtl: 0,
+            text_align: 0,
             cell_va_offset: 0.0,
             anon_cross: 0.0,
             ws_mode: 0,
@@ -3543,6 +3692,7 @@ mod tests {
             flex_basis_kw: 0,
             scrolls_x: false,
             scrolls_y: false,
+            is_button: false,
             flex_stretch: false,
             flex_native: false,
             flex_dir_reverse: false,
@@ -3550,6 +3700,9 @@ mod tests {
             ratio: false,
             ratio_only: false,
             shrinks_to_nothing: false,
+            control_baseline: 0,
+            control_font_box: 0.0,
+            control_font_asc: 0.0,
             intrinsic_w: 0.0,
             intrinsic_h: 0.0,
             cb_index: -1,
@@ -3577,8 +3730,8 @@ mod tests {
         b.height = 30.0;
         let inputs = vec![blk(0.0, -1), a, b];
         let bx = boxes(layout_block(&inputs, &[], &[], &[], 0.0, 0.0, 800.0));
-        assert_eq!(bx[1], Box { nid: 1.0, x: 0.0, y: 0.0, w: 800.0, h: 50.0, auto_height: false, first_baseline: None, last_baseline: None });
-        assert_eq!(bx[2], Box { nid: 2.0, x: 0.0, y: 50.0, w: 800.0, h: 30.0, auto_height: false, first_baseline: None, last_baseline: None });
+        assert_eq!(bx[1], Box { nid: 1.0, x: 0.0, y: 0.0, w: 800.0, h: 50.0, auto_height: false, first_baseline: None, last_baseline: None, inline_block_baseline: None });
+        assert_eq!(bx[2], Box { nid: 2.0, x: 0.0, y: 50.0, w: 800.0, h: 30.0, auto_height: false, first_baseline: None, last_baseline: None, inline_block_baseline: None });
         assert_eq!(bx[0].h, 80.0); // root auto height = 50 + 30
         assert!(bx[0].auto_height);
     }
@@ -3723,7 +3876,7 @@ mod tests {
         let inputs = vec![blk(0.0, -1), owner, f];
         let bx = boxes(layout_block(&inputs, &[], &[], &[], 0.0, 0.0, 800.0));
         assert_eq!(bx[1].h, 120.0); // owner contains the float
-        assert_eq!(bx[2], Box { nid: 2.0, x: 0.0, y: 0.0, w: 80.0, h: 120.0, auto_height: false, first_baseline: None, last_baseline: None });
+        assert_eq!(bx[2], Box { nid: 2.0, x: 0.0, y: 0.0, w: 80.0, h: 120.0, auto_height: false, first_baseline: None, last_baseline: None, inline_block_baseline: None });
     }
 
     #[test]
