@@ -8,69 +8,56 @@ require 'rack'
 require_relative 'support/session_teardown'
 
 RSpec.describe 'native layout L2 text-block parity', if: ENV.fetch('CSIM_JS_ENGINE', 'v8') == 'v8' do
+  # The charset is declared because the CJK shapes below are UTF-8 in this file's own source: served without
+  # it they would decode as windows-1252 and the specs would be testing mojibake rather than Japanese.
   def page(body)
-    html = "<!doctype html><html><head></head><body style=\"margin:0\">#{body}</body></html>"
-    Rack::Builder.new { run ->(_env) { [200, {'content-type' => 'text/html'}, [html]] } }.to_app
+    html = %(<!doctype html><html><head><meta charset="utf-8"></head><body style="margin:0">#{body}</body></html>)
+    Rack::Builder.new { run ->(_env) { [200, {'content-type' => 'text/html; charset=utf-8'}, [html]] } }.to_app
   end
 
   def parity(session)
-    session.evaluate_script('document.body.offsetHeight')
+    session.evaluate_script('document.body.offsetHeight')   # force a layout pass
     session.evaluate_script('globalThis.__csimLayoutShadowRun()')
   end
 
-  def expect_parity(body)
+  def shadow(body)
     session = simulated_session(page(body)); session.visit '/'
-    r = parity(session)
-    expect(r).to include('ok' => true), "harness bailed: #{r.inspect}"
-    expect(r['mismatches']).to eq(0), "mismatch: #{r.inspect}"
+    parity(session)
+  end
+
+  def expect_parity(body)
+    r = shadow(body)
+    expect(r).to include('ok' => true), "harness bailed: #{body}: #{r.inspect}"
+    expect(r['compared']).to be > 0, "nothing was compared: #{body}: #{r.inspect}"
+    expect(r['mismatches']).to eq(0), "mismatch: #{body}: #{r.inspect}"
   end
 
   it 'matches a single-line text block' do
-    session = simulated_session(page('<div>Hello world</div>'))
-    session.visit '/'
-    r = parity(session)
-    expect(r).to include('ok' => true), "harness bailed: #{r.inspect}"
-    expect(r['mismatches']).to eq(0), "mismatch: #{r.inspect}"
+    expect_parity('<div>Hello world</div>')
   end
 
   it 'matches a multi-line wrapping text block' do
     text = 'The quick brown fox jumps over the lazy dog and then keeps on running well past the edge of the box.'
-    session = simulated_session(page(%(<div style="width:150px">#{text}</div>)))
-    session.visit '/'
-    r = parity(session)
-    expect(r).to include('ok' => true), "harness bailed: #{r.inspect}"
-    expect(r['mismatches']).to eq(0), "mismatch: #{r.inspect}"
+    expect_parity(%(<div style="width:150px">#{text}</div>))
   end
 
   it 'matches nested block containers of text blocks' do
-    session = simulated_session(page(<<~HTML))
+    expect_parity(<<~HTML)
       <div>
         <div style="width:120px">first paragraph of words that wraps onto multiple lines here</div>
         <div style="width:300px">second paragraph on probably one line</div>
       </div>
     HTML
-    session.visit '/'
-    r = parity(session)
-    expect(r).to include('ok' => true), "harness bailed: #{r.inspect}"
-    expect(r['mismatches']).to eq(0), "mismatch: #{r.inspect}"
   end
 
   it 'matches text with same-font inline elements (a / span) folded in' do
     text = 'Some words with <a href="#">a link here</a> and a <span>span too</span> that keep wrapping onward.'
-    session = simulated_session(page(%(<div style="width:160px">#{text}</div>)))
-    session.visit '/'
-    r = parity(session)
-    expect(r).to include('ok' => true), "harness bailed: #{r.inspect}"
-    expect(r['mismatches']).to eq(0), "mismatch: #{r.inspect}"
+    expect_parity(%(<div style="width:160px">#{text}</div>))
   end
 
   it 'matches text with different-font inline runs (bold / em)' do
     text = 'plain words then <b>some bold words</b> then <em>emphasised ones</em> and plain again onward.'
-    session = simulated_session(page(%(<div style="width:170px">#{text}</div>)))
-    session.visit '/'
-    r = parity(session)
-    expect(r).to include('ok' => true), "harness bailed: #{r.inspect}"
-    expect(r['mismatches']).to eq(0), "mismatch: #{r.inspect}"
+    expect_parity(%(<div style="width:170px">#{text}</div>))
   end
 
   # A mixed-font word — one glued across a run boundary with NO space between, because a plain (edgeless)
@@ -183,22 +170,14 @@ RSpec.describe 'native layout L2 text-block parity', if: ENV.fetch('CSIM_JS_ENGI
   end
 
   it 'matches a larger-font inline run growing the line height' do
-    session = simulated_session(page(%(<div style="width:300px">small text <span style="font-size:28px">BIG</span> small again</div>)))
-    session.visit '/'
-    r = parity(session)
-    expect(r).to include('ok' => true), "harness bailed: #{r.inspect}"
-    expect(r['mismatches']).to eq(0), "mismatch: #{r.inspect}"
+    expect_parity(%(<div style="width:300px">small text <span style="font-size:28px">BIG</span> small again</div>))
   end
 
   it 'matches a fixed line-height with mixed font metrics (ascent/descent line box)' do
     # A LENGTH line-height does not scale per run, so the taller 28px run's ascent grows the line box
     # past the 40px line-height — max(ascent)+max(descent), not max(line-height). Diverges unless native
     # composes the line box from per-run ascent/descent.
-    session = simulated_session(page(%(<div style="width:400px;line-height:40px">small text <span style="font-size:28px">BIG</span> more small text</div>)))
-    session.visit '/'
-    r = parity(session)
-    expect(r).to include('ok' => true), "harness bailed: #{r.inspect}"
-    expect(r['mismatches']).to eq(0), "mismatch: #{r.inspect}"
+    expect_parity(%(<div style="width:400px;line-height:40px">small text <span style="font-size:28px">BIG</span> more small text</div>))
   end
 
   it 'matches <br> hard breaks (mid, trailing, leading, doubled)' do
@@ -209,30 +188,18 @@ RSpec.describe 'native layout L2 text-block parity', if: ENV.fetch('CSIM_JS_ENGI
       'a<br><br>b with a blank line between',
       'first<br>second<br>third',
     ].each do |body|
-      session = simulated_session(page(%(<div style="width:400px">#{body}</div>)))
-      session.visit '/'
-      r = parity(session)
-      expect(r).to include('ok' => true), "harness bailed on #{body.inspect}: #{r.inspect}"
-      expect(r['mismatches']).to eq(0), "mismatch on #{body.inspect}: #{r.inspect}"
+      expect_parity(%(<div style="width:400px">#{body}</div>))
     end
   end
 
   it 'matches an edged inline element (padding/border/margin) affecting wrap' do
     text = 'some words then <span style="padding:0 10px;border:1px solid #000;margin:0 6px">a boxed span</span> and more words that wrap onward here.'
-    session = simulated_session(page(%(<div style="width:200px">#{text}</div>)))
-    session.visit '/'
-    r = parity(session)
-    expect(r).to include('ok' => true), "harness bailed: #{r.inspect}"
-    expect(r['mismatches']).to eq(0), "mismatch: #{r.inspect}"
+    expect_parity(%(<div style="width:200px">#{text}</div>))
   end
 
   it 'matches a text block with padding, border, and margins' do
     text = 'Some words wrapping inside a padded bordered box to check content width and stacked height.'
-    session = simulated_session(page(%(<div style="width:180px;margin:12px 0;padding:6px;border:2px solid #000">#{text}</div><div style="height:10px"></div>)))
-    session.visit '/'
-    r = parity(session)
-    expect(r).to include('ok' => true), "harness bailed: #{r.inspect}"
-    expect(r['mismatches']).to eq(0), "mismatch: #{r.inspect}"
+    expect_parity(%(<div style="width:180px;margin:12px 0;padding:6px;border:2px solid #000">#{text}</div><div style="height:10px"></div>))
   end
 
   # An EDGED (horizontal padding / border / margin) inline whose font CONTENT-AREA exceeds the line-height grows
@@ -242,14 +209,10 @@ RSpec.describe 'native layout L2 text-block parity', if: ENV.fetch('CSIM_JS_ENGI
   # to its content area. A tiny line-height forces the trigger on any host (font-independent). A non-edged span
   # in the same block stays native.
   it 'declines an edged inline whose content-area exceeds the line-height' do
-    session = simulated_session(page('<div style="line-height:8px;width:200px">a<span style="padding:0 5px">x</span>b</div>'))
-    session.visit '/'
-    expect(parity(session)).to include('ok' => false)
+    expect(shadow('<div style="line-height:8px;width:200px">a<span style="padding:0 5px">x</span>b</div>')).to include('ok' => false)
   end
   it 'declines a bordered inline whose content-area exceeds the line-height' do
-    session = simulated_session(page('<div style="line-height:8px;width:200px">a<span style="border-left:2px solid">x</span>b</div>'))
-    session.visit '/'
-    expect(parity(session)).to include('ok' => false)
+    expect(shadow('<div style="line-height:8px;width:200px">a<span style="border-left:2px solid">x</span>b</div>')).to include('ok' => false)
   end
 
   # A `vertical-align` baseline SHIFT (sub / super / length / %) on an inline element offsets its whole content —
@@ -295,6 +258,126 @@ RSpec.describe 'native layout L2 text-block parity', if: ENV.fetch('CSIM_JS_ENGI
     expect_parity('<div style="width:60px"><div>aaaa<span style="font-size:40px"> </span><span style="display:inline-block;width:30px;height:5px"></span></div></div>')
   end
 
+  # A WIDE character — CJK, fullwidth, Hangul — is its own break unit, which is what makes a Japanese paragraph
+  # wrap at all: it has no spaces to break at. Native cuts the same units the oracle's `charUnits` does
+  # (`break_unit_len`: a wide character alone, a maximal non-wide run otherwise), in the flow and in the
+  # min-content measure alike. Until this, such a run reached Rust, `measure_run` answered None and the whole
+  # PASS was discarded — so every Japanese page fell back to the oracle entirely.
+  describe 'wide characters break between themselves' do
+    it 'wraps a CJK run between characters, and measures its min-content as one' do
+      expect_parity('<div style="width:100px">日本語のテキストです</div>')
+      expect_parity('<div style="width:100px">これは長い日本語の文章で折り返しが必要になります</div>')
+      expect_parity('<div style="width:400px">日本語</div>')
+      expect_parity('<div style="width:100px">mixed 日本語 and ascii text here</div>')
+      expect_parity('<div style="display:grid;grid-template-columns:min-content auto;width:400px"><div>日本語のテキスト</div><div>x</div></div>')
+      expect_parity('<table style="border-spacing:0"><tr><td style="padding:0">日本語のテキスト</td><td style="padding:0">bb</td></tr></table>')
+    end
+    # A wide character is an opportunity on BOTH sides, across a run boundary too — two text nodes, or a
+    # `<span>` between them, are one word to the flow otherwise. An astral emoji is NOT one (the oracle's
+    # `isWideChar` is BMP-only), and a ZWJ sequence must not be split into per-surrogate units.
+    it 'breaks beside a wide character across a run boundary, and not around an astral one' do
+      expect_parity('<div style="width:60px">日本語<span>abcdefghijkl</span></div>')
+      expect_parity('<div style="width:60px"><span>日本語</span>abcdefghijkl</div>')
+      expect_parity('<div style="width:60px">abc<span>defghijkl</span></div>')
+      expect_parity('<div style="width:100px">aaaaaaaaaaaa&#x1F600;bbbbbbbbbbbb</div>')
+      expect_parity('<div style="display:inline-block"><span>&#x1F468;&#x200D;&#x1F469;&#x200D;&#x1F467;</span></div>')
+    end
+    # The opportunity a wide character leaves has to cross a RUN boundary, because that is where the two
+    # engines can disagree: native merges only same-font runs, so a plain `<b>` around a Japanese word — or a
+    # padded inline, or a different size — splits them, and without carrying the opportunity native glued what
+    # the oracle (and Chrome) break. Both directions: a run ENDING wide, and a word STARTING wide.
+    it 'breaks beside a wide character across a font, weight or padding boundary' do
+      expect_parity('<div style="width:60px">abcdefghij<b>日本語</b>klmnopqrst</div>')
+      expect_parity('<div style="width:60px"><b style="padding-right:4px">日本語</b>abcdefghij</div>')
+      expect_parity('<div style="width:60px">日本語<span style="font-size:24px">abcdefghijkl</span></div>')
+      expect_parity('<div style="width:60px">abcdefgh<span style="font-size:24px">日</span>ijklmnop</div>')
+      expect_parity('<div style="width:60px">abc<span style="font-size:24px">日本語</span>def</div>')
+      expect_parity('<div style="width:60px">日本語<span style="font-size:24px">日本語</span>日本語</div>')
+      expect_parity('<table style="border-spacing:0"><tr><td style="padding:0;width:60px">日本語<span style="font-size:24px">abcdefghijkl</span></td></tr></table>')
+      # …and the MIN-CONTENT of a word whose wide character is not at its edge: only the wide unit is an
+      # opportunity there (`own`), so the Latin run before it stays glued to the run before THAT — bracketing
+      # every unit closed the word early and measured 42.63 where the oracle says 59.53, and lost a padded
+      # inline's 20px edge outright.
+      ['<div style="display:grid;grid-template-columns:min-content auto;width:400px"><div>%s</div><div>x</div></div>'].each do |wrap|
+        expect_parity(format(wrap, 'abcdef<b>gh日</b>'))
+        expect_parity(format(wrap, '<b>日ab</b>cdefgh'))
+        expect_parity(format(wrap, '<span style="padding-left:20px">abcd日</span>'))
+        expect_parity(format(wrap, 'abcdef日'))
+      end
+      # …and the ASCII shapes it must not move: a mid-word run boundary is still no opportunity
+      expect_parity('<div style="width:60px">abcdefghij<b>klm</b>nopqrst</div>')
+      expect_parity('<div style="width:60px">abc<span style="font-size:24px">def</span>ghi</div>')
+    end
+    # …and per-character breaking is the OWNER's mode: one CJK character in a paragraph must not stop its Latin
+    # words from breaking, nor route them through the unspaced measure that drops their letter-spacing.
+    it 'keeps break-all over the Latin words of a mixed paragraph' do
+      expect_parity('<div style="display:flex;width:50px"><div style="word-break:break-all">&#x65E5; abcdefghijklmnop</div></div>')
+      expect_parity('<div style="display:flex;width:50px"><div style="word-break:break-all"><span>&#x65E5;</span> abcdefghijklmnop</div></div>')
+      expect_parity('<div style="display:inline-block;letter-spacing:4px"><span>&#x65E5; abcdefgh</span></div>')
+      # …while a word that DOES hold one still breaks per code point under that mode (`own = perChar || wide`),
+      # tail included — grouping the Latin tail back into one unit measured 58.63 against the oracle's 50.
+      expect_parity('<div style="display:flex;width:50px"><div style="word-break:break-all">&#x65E5;abcdefgh</div></div>')
+    end
+    # A COLLAPSED tab is measured by nobody — the whitespace run never reaches `measure_run` — so tab-indented
+    # markup lays out natively; only a PRESERVED one declines.
+    it 'lays out tab-indented markup and declines only a preserved tab' do
+      expect_parity("<div style=\"width:400px\">\n\t<span>hello</span>\n</div>")
+      expect(shadow("<div style=\"width:400px;white-space:pre\">a\tb</div>")).to include('ok' => false)
+    end
+    it 'keeps the wrap modes and spacing over a CJK run' do
+      expect_parity('<div style="width:60px;word-break:break-all">日本語のテキスト</div>')
+      expect_parity('<div style="width:60px;overflow-wrap:anywhere">日本語のテキスト</div>')
+      expect_parity('<div style="width:60px;white-space:nowrap">日本語のテキスト</div>')
+      expect_parity('<div style="width:60px;white-space:pre-wrap">日本語の テキスト</div>')
+      expect_parity('<div style="width:60px;letter-spacing:2px">日本語のテキスト</div>')
+    end
+    # …and the same undecidable arm took down every OTHER character at or above U+0300, because whether one is a
+    # combining mark is the question `zero_width` could not answer. It answers it from `combining.rs` now.
+    it 'measures a space, a dash, an emoji and a combining mark' do
+      expect_parity('<div style="width:400px">a&#x2003;b</div>')
+      expect_parity('<div style="width:400px">a&#x2002;b</div>')
+      expect_parity('<div style="width:400px">a&#x3000;b</div>')
+      expect_parity('<div style="width:400px">a&#x00B7;b</div>')
+      expect_parity('<div style="width:400px">caf&#x00E9; na&#x00EF;ve</div>')
+      expect_parity('<div style="width:400px">&#x0301;a</div>')
+      expect_parity('<div style="width:400px">&#x2764;&#xFE0F;</div>')
+      expect_parity('<div style="width:400px">&#x1F600;&#x1F601;</div>')
+    end
+    # The table `zero_width` answers from is GENERATED (script/gen_combining_marks.rb) from this engine's own
+    # `\p{M}`, because that is what the oracle asks. Ruby's Unicode tables are a different version and disagree
+    # (8 ranges when this was written), and either side can move on an upgrade — so re-ask the engine at every
+    # range boundary. A drift reds here instead of showing up as a character measured wider in one engine.
+    it 'agrees with the engine at every combining-mark range boundary' do
+      table = File.read(File.expand_path('../ext/csim_native/src/combining.rs', __dir__)).scan(/\(0x([0-9A-F]+), 0x([0-9A-F]+)\),/)
+                  .map {|lo, hi| [lo.to_i(16), hi.to_i(16)] }
+      expect(table.size).to be > 300, 'the generated table looks empty'
+      # Each range's edges, plus the MIDPOINT of every gap between them: a Unicode upgrade that adds a range
+      # where the table has none is invisible to an edges-only probe.
+      gaps   = table.each_cons(2).map {|(_, hi), (lo, _)| (hi + lo) / 2 }
+      probes = (table.flat_map {|lo, hi| [lo - 1, lo, hi, hi + 1] } + gaps).uniq.select {|cp| cp >= 0x300 && cp <= 0x10FFFF }
+      expected = probes.map {|cp| table.any? {|lo, hi| cp.between?(lo, hi) } }
+      session = simulated_session(page('<div>x</div>')); session.visit '/'
+      actual = session.evaluate_script(<<~JS)
+        (() => {
+          const re = new RegExp('^' + String.fromCharCode(92) + 'p{M}$', 'u');
+          return #{probes.inspect}.map((cp) => (cp >= 0xD800 && cp <= 0xDFFF) ? false : re.test(String.fromCodePoint(cp)));
+        })()
+      JS
+      drift = probes.each_index.reject {|i| expected[i] == actual[i] }
+                    .map {|i| format('U+%04X table=%s engine=%s', probes[i], expected[i], actual[i]) }
+      expect(drift).to be_empty, "regenerate ext/csim_native/src/combining.rs:\n#{drift.first(12).join("\n")}"
+    end
+
+    # What native still cannot measure is refused by the WALK now, not discovered in Rust: a TAB needs the
+    # block's tab stops, and a ZWJ under a per-character wrap carries the previous character's advance.
+    it 'declines a tab and a per-character ZWJ in the walk' do
+      ["<div style=\"width:400px;white-space:pre\">a\tb</div>",
+       '<div style="width:400px;word-break:break-all">a&#x200D;b</div>'].each do |body|
+        expect(shadow(body)).to include('ok' => false, 'reason' => 'unsupported subtree'), body
+      end
+    end
+  end
+
 end
 
 RSpec.describe 'native text valign decline', if: ENV.fetch('CSIM_JS_ENGINE', 'v8') == 'v8' do
@@ -305,7 +388,7 @@ RSpec.describe 'native text valign decline', if: ENV.fetch('CSIM_JS_ENGINE', 'v8
 
   def expect_bail(body)
     session = simulated_session(page(body)); session.visit '/'
-    r = session.evaluate_script('document.body.offsetHeight')
+    session.evaluate_script('document.body.offsetHeight')   # force a layout pass
     expect(session.evaluate_script('globalThis.__csimLayoutShadowRun()')).to include('ok' => false)
   end
 

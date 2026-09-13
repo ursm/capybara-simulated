@@ -6,6 +6,7 @@
 // DOM to be installed into every realm through rusty_racer's generic hook. The
 // engine itself stays a pure V8 binding with no DOM knowledge.
 
+mod combining;
 mod dom;
 // Native text metrics (fontations) — used IN-PROCESS by native inline layout (L2, mod layout); JS
 // registers a font (registerFontPath) to a handle it passes in the layout inputs.

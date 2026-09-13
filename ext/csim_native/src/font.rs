@@ -6,9 +6,9 @@
 //
 // PARITY is the contract: `measure_run` reproduces layout.js `measureRun`/`unitOf` exactly, in f64 (JS
 // Numbers are f64) — the ASCII table, NBSP-as-space, the CJK/fullwidth full-em fallback, the zero-width
-// classes, ZWJ joining, astral full-em, and letter/word spacing. It returns None for a run holding a TAB
-// or a code point at/above U+0300 that would need the `\p{M}` combining-mark test (a Unicode table); the
-// caller (native line breaking) declines such a block to JS. Line HEIGHT is not computed here — JS pushes
+// classes, ZWJ joining, astral full-em, and letter/word spacing. It returns None only for a run holding a TAB
+// (the advance is the BLOCK's tab stops, not the run's); the caller declines such a block to JS. Every other
+// character is decidable, the combining marks (the oracle's `\p{M}`) through `combining.rs`. Line HEIGHT is not computed here — JS pushes
 // the resolved line-height px, so no hhea/vertical-metric parity is needed for L2.
 
 use std::cell::RefCell;
@@ -60,8 +60,10 @@ impl FontMetrics {
     }
 
     // Width (px) of a UTF-16 run at `size` px with letter/word spacing, exactly as layout.js measureRun
-    // does for the common path. None when the run holds a TAB or a combining mark (≥ U+0300) — the caller
-    // declines the block to JS. Validated bit-parity vs JS measureRun over ~667k calls (perf log 2026-09-09).
+    // does for the common path. None only when the run holds a TAB — the caller declines the block to JS.
+    // Bit-parity vs JS measureRun was validated over ~667k calls (perf log 2026-09-09) on the ASCII-and-Latin
+    // input this accepted then; the classes admitted since (wide characters, combining marks) are held to the
+    // box-level parity the shadow harness checks, not to that measurement.
     pub(crate) fn measure_run(&self, text: &[u16], size: f64, ls: f64, ws: f64) -> Option<f64> {
         let spaced = ls != 0.0 || ws != 0.0;
         let mut units = 0.0f64;
@@ -92,8 +94,15 @@ impl FontMetrics {
     }
 }
 
-// layout.js isWideChar: CJK / fullwidth / Hangul are full-em in every font that has them.
-fn is_wide_char(cp: u32) -> bool {
+// layout.js isWideChar: CJK / fullwidth / Hangul are full-em in every font that has them — and, since the
+// break units follow the same classifier (`break_unit_len`), the ONE definition both sides read. BMP only,
+// exactly as the oracle's is: an astral code point is full-em there but never its own break unit.
+pub(crate) fn is_wide_char(cp: u32) -> bool {
+    // The oracle's own gate (`u >= 0x1100 && isWideChar(...)`): every ASCII character answers on one compare
+    // instead of walking seven ranges, and this is asked per WORD of every line layout now, not per run.
+    if cp < 0x1100 {
+        return false;
+    }
     (0x1100..=0x115F).contains(&cp)
         || (0x2E80..=0xA4CF).contains(&cp)
         || (0xAC00..=0xD7A3).contains(&cp)
@@ -133,7 +142,10 @@ fn zero_width(cp: u32) -> Option<bool> {
     if (0xE0100..=0xE01EF).contains(&cp) {
         return Some(true);
     }
-    None
+    // …and the one question structure cannot answer — is this a COMBINING MARK? — is answered from the table
+    // the oracle's `/^\p{M}$/u` is generated into (`combining.rs`). So every character is decidable now: a CJK
+    // run, an em space, a dash, an emoji no longer reach an undecidable arm and take the whole pass with them.
+    Some(crate::combining::is_combining_mark(cp))
 }
 
 // layout.js unitOf: one character's advance in em-fractions. None when zero_width is undecidable.

@@ -597,6 +597,12 @@ fn line_layout(
     // wrap before it. (The BEFORE-side break is unconditional in the RUN_ATOMIC arm itself.) Reset on any word
     // placement and at a line break.
     let mut atomic_break = false;
+    // …and the same for a WIDE character: a line may break on both of its sides, so a text run ENDING in one
+    // leaves an opportunity for whatever the next run starts with (the oracle's `endsWithBreak`), and a word
+    // STARTING with one may break before it however the previous run ended (`startsWithWide`). Carried across
+    // runs because that is where it matters: `abcdefghij<b>日本語</b>klmnopqrst` is three runs, and native
+    // merges only same-font ones — a plain `<b>` around a Japanese word already splits them.
+    let mut wide_break = false;
     // Close the current line and start a fresh one. `soft_break!` is the geometry alone (a mid-word wrap, a
     // between-words wrap, a break before an atomic — where no pending space or after-atomic break carries over);
     // `break_line!` adds the resets a HARD break needs (a <br>, a preserved/pre-line newline, an empty line's
@@ -651,6 +657,7 @@ fn line_layout(
             line_has_content = false;
             pending_space = None;
             atomic_break = false;
+            wide_break = false;
         }};
     }
 
@@ -675,9 +682,9 @@ fn line_layout(
             }
             RUN_TEXT => {
                 let text = run_texts.get(ri).and_then(|t| t.as_ref())?;
-                if text.iter().any(|&u| is_wide_unit(u)) {
-                    return None; // CJK/wide breaks between chars — not modelled here
-                }
+                // Asked ONCE per run so the per-word scan below is skipped outright on the Latin runs that are
+                // almost all of them (this is per word of every line layout).
+                let run_has_wide = text.iter().any(|&u| is_wide_unit(u));
                 let space_w = measure_word(run, &[0x20])?;
                 let mut i = 0;
                 while i < text.len() {
@@ -761,19 +768,27 @@ fn line_layout(
                         // and takes the normal path below, so it only ever soft-wraps as a whole). `wrap_mode` rides
                         // the run's otherwise-unused `metric` slot: 1 = break-all (fill the current line), 2 =
                         // break-word / 3 = anywhere (the over-long word moves to a FRESH line first, then breaks —
-                        // alike in the flow; they differ only for the min-content measure, `text_intrinsic`). Wide
-                        // chars and hyphens are declined upstream, so this is the Latin per-character case the
-                        // oracle's `charUnits` produces (one unit per code point, each measured on its own).
+                        // alike in the flow; they differ only for the min-content measure, `text_intrinsic`).
+                        // Hyphens are declined upstream; a WIDE character takes the same loop by a different
+                        // door (below), so this is `charUnits` either way — one unit per code point under a
+                        // per-character mode, wide characters as units of their own otherwise.
                         let wrap_mode = run.metric as u8;
-                        if !no_wrap && wrap_mode != 0 && width > band_w(total) {
+                        // A word holding a WIDE character always breaks into units — it is not a question of
+                        // room, the character IS the opportunity — where an in-word Latin break is offered only
+                        // to a word too wide for the band. The two cannot both apply: the oracle's `anywhere`
+                        // is `!wide && breaksAnywhere(el)`, so a wide word takes wide units, not per-character
+                        // ones, and never the fresh line `break-word` moves an over-long word to.
+                        let has_wide = run_has_wide && text[start..i].iter().any(|&u| is_wide_unit(u));
+                        let per_char = wrap_mode != 0 && !has_wide;
+                        if !no_wrap && (has_wide || (per_char && width > band_w(total))) {
                             // The over-long word's break opportunity before it (a space / atomic) is what `first`
                             // and the loop's fit tests act on; capture it before the fresh-line break clears the
                             // line, so `atomic_break` need only be consumed once, after the word is placed.
-                            let preceded = space_before || atomic_break;
+                            let preceded = space_before || atomic_break || wide_break;
                             // break-word / anywhere first move the word to a fresh line where that opportunity sits —
                             // exactly the normal break-before condition, which the over-long word always satisfies.
                             // break-all takes no fresh line: it fills the current line in place.
-                            if wrap_mode >= 2 && line_has_content && preceded {
+                            if !has_wide && wrap_mode >= 2 && line_has_content && preceded {
                                 soft_break!();
                             } else if space_on_line {
                                 line_asc = line_asc.max(sasc); // the space stays on this line: its run's metrics grow it
@@ -782,14 +797,13 @@ fn line_layout(
                             let mut u = start;
                             let mut first = true;
                             while u < i {
-                                // One code point per unit (a surrogate pair stays together).
-                                let ulen = if (0xD800u16..=0xDBFF).contains(&text[u]) && u + 1 < i { 2 } else { 1 };
+                                let ulen = break_unit_len(text, u, i, per_char);   // per_char wins: `own = perChar || isWideChar(cp)`
                                 let cw = measure_word(run, &text[u..u + ulen])?;
                                 let ow_now: f64 = open.iter().filter(|o| !o.1).map(|o| o.0).sum();
                                 // A unit boundary is always an opportunity (`u > start`); the first unit breaks only
                                 // where one already preceded the word (a space / atomic / line start) — the oracle's
                                 // `mayBreak = u > 0 || textMayBreak()`.
-                                let may_break = !first || preceded || !line_has_content;
+                                let may_break = !first || preceded || !line_has_content || is_wide_unit(text[u]);
                                 if line_has_content && may_break && line_x + ow_now + cw > band_w(total) {
                                     soft_break!();
                                 }
@@ -816,12 +830,17 @@ fn line_layout(
                                 u += ulen;
                             }
                             atomic_break = false; // consumed the after-atomic break opportunity
+                            wide_break = is_wide_unit(text[i - 1]); // …and this word may leave one behind
                         } else {
                             let ow: f64 = open.iter().filter(|o| !o.1).map(|o| o.0).sum();
                             // A break opportunity precedes this word at a collapsed space OR right after an atomic —
                             // but `white-space: nowrap` never SOFT-wraps (only <br>), so the line grows past the band.
                             let mut broke = false;
-                            if !no_wrap && line_has_content && (space_before || atomic_break) && line_x + ow + width > band_w(total) {
+                            // (No `is_wide_unit(text[start])` here: under a wrapping mode a wide-bearing word took
+                            // the unit loop above, and under `nowrap` — the one way one reaches this branch — the
+                            // line never soft-wraps at all, so the whole test is moot.)
+                            let may_break = space_before || atomic_break || wide_break;
+                            if !no_wrap && line_has_content && may_break && line_x + ow + width > band_w(total) {
                                 soft_break!(); // break: close the line (the hanging space is dropped)
                                 broke = true;
                             }
@@ -849,6 +868,8 @@ fn line_layout(
                             line_desc = line_desc.max(run.line_height - run.asc);
                             line_has_content = true;
                             atomic_break = false; // consumed the after-atomic break opportunity
+                            // …and this word leaves one behind when it ENDS in a wide character.
+                            wide_break = is_wide_unit(text[i - 1]);
                             if space_on_line && !broke {
                                 line_asc = line_asc.max(sasc); // the space stayed: its run's metrics grow the line
                                 line_desc = line_desc.max(sdesc);
@@ -935,18 +956,35 @@ struct LineLayout {
     atomics: Vec<(usize, f64, f64, f64)>,
 }
 
-// A UTF-16 unit whose code point is a wide/CJK character (its own break unit) — a lone BMP unit, or a
-// high surrogate (astral chars are wide too). Used to decline CJK text in the L2 breaker.
+// The next break UNIT at `u` in `text[..end]`, as the oracle's `charUnits` cuts one: a WIDE character is its
+// own — which is what makes a Japanese paragraph wrap at all, having no spaces to break at — under `per_char`
+// (`word-break: break-all`, `overflow-wrap: anywhere`) every code point is one, and otherwise a maximal run of
+// non-wide characters is one unit. A surrogate pair is never split.
+fn break_unit_len(text: &[u16], u: usize, end: usize, per_char: bool) -> usize {
+    // A PAIRED high surrogate is two units; an unpaired one is a lone unit, exactly as `measure_run` slices it
+    // (a disagreement there would measure a slice the break did not cut).
+    let cp_len = |i: usize| {
+        let paired = (0xD800u16..=0xDBFF).contains(&text[i])
+            && i + 1 < end
+            && (0xDC00u16..=0xDFFF).contains(&text[i + 1]);
+        if paired { 2 } else { 1 }
+    };
+    let first = cp_len(u);
+    if per_char || is_wide_unit(text[u]) {
+        return first;
+    }
+    let mut n = first;
+    while u + n < end && !is_wide_unit(text[u + n]) {
+        n += cp_len(u + n);
+    }
+    n
+}
+// A UTF-16 unit whose code point is a WIDE character, and so a break unit of its own. One definition, shared
+// with the metrics (`font::is_wide_char`): a second copy drifted once already — it counted a high surrogate as
+// wide, which made every astral emoji its own break unit and split a ZWJ sequence into three full-em glyphs,
+// where the oracle's `isWideChar` is BMP-only.
 fn is_wide_unit(u: u16) -> bool {
-    let cp = u as u32;
-    (0x1100..=0x115F).contains(&cp)
-        || (0x2E80..=0xA4CF).contains(&cp)
-        || (0xAC00..=0xD7A3).contains(&cp)
-        || (0xF900..=0xFAFF).contains(&cp)
-        || (0xFE30..=0xFE6F).contains(&cp)
-        || (0xFF00..=0xFF60).contains(&cp)
-        || (0xFFE0..=0xFFE6).contains(&cp)
-        || (0xD800..=0xDBFF).contains(&u) // astral (emoji etc.) — full-width, own unit
+    crate::font::is_wide_char(u as u32)
 }
 
 // The FLOAT CONTEXT of one block formatting context (§9.5): the margin boxes of the floats placed in
@@ -3618,8 +3656,8 @@ fn flex_intrinsic_widths(i: usize, inputs: &[Input], runs: &[Run], run_texts: &[
 // character's UNSPACED advance is a unit of its own (the oracle's `charAdvances` — letter/word-spacing is left
 // out of both figures there); `break-word` (2) leaves the measure alone. An atomic inline native lays
 // out itself contributes its own intrinsic widths (plus margins) as one unbreakable unit with an opportunity on
-// each side. `None` for a PUSHED atomic (its box is not in the stream), a tab / other control, a wide character,
-// or a ZWJ under per-character breaking (the oracle's per-character advance carries the previous character).
+// each side. `None` for a PUSHED atomic (its box is not in the stream), a tab / other control, or a ZWJ under
+// per-character breaking (the oracle's per-character advance carries the previous character).
 fn text_intrinsic(runs: &[Run], run_texts: &[Option<Vec<u16>>], ws_mode: u8, inputs: &[Input], all_runs: &[Run], all_texts: &[Option<Vec<u16>>], grids: &[f64], children: &[Vec<usize>]) -> Option<(f64, f64)> {
     let (wraps, preserve, break_nl, pin) = match ws_mode {
         0 => (true, false, false, false),
@@ -3701,13 +3739,19 @@ fn text_intrinsic(runs: &[Run], run_texts: &[Option<Vec<u16>>], ws_mode: u8, inp
                 word += run.asc;
             }
             RUN_TEXT => {
-                let per_char = matches!(run.metric as u8, 1 | 3);
                 let text = run_texts.get(ri).and_then(|t| t.as_ref())?;
-                if text.iter().any(|&u| is_wide_unit(u) || (per_char && u == 0x200D)) {
+                // Per-character breaking is the OWNER's mode (`minBreaksAnywhere`), never conditioned on what
+                // the run holds — the oracle's `addUnit` reads it that way, and a single CJK character in a
+                // paragraph must not stop its Latin words from breaking. Whether a WORD holds a wide character
+                // is asked per word below, where `charUnits` asks it. ZWJ still declines under a per-character
+                // mode: the oracle's advance there carries the previous character.
+                let per_char = matches!(run.metric as u8, 1 | 3);
+                if per_char && text.iter().any(|&u| u == 0x200D) {
                     return None;
                 }
                 let space_w = measure_word(run, &[0x20])?;
                 let unspaced = Run { ls: 0.0, ws: 0.0, ..*run };
+                let run_has_wide = text.iter().any(|&u| is_wide_unit(u)); // once per run, as in the flow arm
                 let mut i = 0;
                 while i < text.len() {
                     if is_ws_u16(text[i]) {
@@ -3755,15 +3799,29 @@ fn text_intrinsic(runs: &[Run], run_texts: &[Option<Vec<u16>>], ws_mode: u8, inp
                         // A word takes the pending space ONCE — the one before it in this run, or an earlier run's
                         // trailing space (a word glued to the previous run, nothing pending, continues that word).
                         take_pending!();
-                        if per_char {
+                        let word_wide = run_has_wide && text[start..i].iter().any(|&u| is_wide_unit(u));
+                        if per_char || word_wide {
                             let mut u = start;
                             while u < i {
-                                let ulen = if (0xD800u16..=0xDBFF).contains(&text[u]) && u + 1 < i { 2 } else { 1 };
+                                // `own = perChar || isWideChar(cp)` — the oracle's `addUnit`, and BOTH halves of
+                                // it matter. Under a per-character mode every code point is a unit, a wide-bearing
+                                // word included (grouping its Latin tail back into one measured 58.63 where the
+                                // oracle and Chrome say 50); otherwise only the WIDE units are opportunities, and
+                                // the maximal Latin run between them is glued to whatever precedes it. Bracketing
+                                // every unit instead closed the word at the Latin run's own edges, losing whatever
+                                // was glued across a run boundary — `abcdef<b>gh日</b>` measured 42.63 against the
+                                // oracle's 59.53, and a padded inline lost its 20px edge outright.
+                                let ulen = break_unit_len(text, u, i, per_char);
+                                let own = per_char || is_wide_unit(text[u]);
                                 let adv = measure_word(&unspaced, &text[u..u + ulen])?;
-                                opportunity!();
+                                if own {
+                                    opportunity!();
+                                }
                                 line += adv;
                                 word += adv;
-                                opportunity!();
+                                if own {
+                                    opportunity!();
+                                }
                                 u += ulen;
                             }
                         } else {
