@@ -8,6 +8,7 @@
 require 'capybara/simulated'
 require 'rack'
 require_relative 'support/session_teardown'
+require_relative 'support/walk_refusals'
 
 RSpec.describe 'native layout grid parity', if: ENV.fetch('CSIM_JS_ENGINE', 'v8') == 'v8' do
   def page(body)
@@ -448,6 +449,53 @@ RSpec.describe 'native layout grid parity', if: ENV.fetch('CSIM_JS_ENGINE', 'v8'
     it 'replays an out-of-flow item at its resolved box while the in-flow items compute' do
       expect_parity('<div style="display:grid;position:relative;grid-template-columns:100px 100px;gap:10px;width:220px"><div style="height:20px">a</div><div style="height:20px">b</div><div style="position:absolute;width:30px;height:30px">p</div><div style="height:20px">c</div></div>')
       expect_native_intrinsic('<div style="display:grid;position:relative;grid-template-columns:auto 1fr;width:300px"><div style="position:absolute;right:0;top:0;width:30px;height:30px">p</div><div>label text</div><div style="height:20px">b</div></div>')
+    end
+  end
+  # Native measures the items' own min/max-content for an intrinsic track only if it can measure EVERY item, and
+  # which it is, the WALK decides: where it declines one item's subtree under that promise the whole grid — the
+  # tracks it marshalled included — is rolled back and re-emitted with the oracle's column contributions. Under a
+  # predicate-decided gate each of these shapes took the whole pass down, because the refusal is one
+  # `nlIntrinsicMeasurable` does not model.
+  describe 'a grid whose item the walk declines to measure re-emits with the oracle contributions' do
+    WalkRefusals::ATOMIC.each_with_index do |inner, i|
+      it "lays out a min-content and a fit-content track around refused content #{i}" do
+        [
+          %{<div style="display:grid;grid-template-columns:min-content auto;width:400px"><div>a #{inner}</div><div>x</div></div>},
+          %{<div style="display:grid;grid-template-columns:fit-content(200px);width:400px"><div>a #{inner}</div></div>}
+        ].each do |body|
+          r = run_shadow(body)
+          expect(r).to include('ok' => true, 'mismatches' => 0), "#{body}: #{r.inspect}"
+          expect(r['nativeIntrinsicGrids']).to eq(0), "the grid should have used the oracle's contributions: #{r.inspect}"
+        end
+      end
+    end
+    it 'still measures the tracks itself where every item allows it, and counts the grid once' do
+      r = run_shadow('<div style="display:grid;grid-template-columns:min-content auto;width:400px"><div>a <span style="display:inline-block">ok</span></div><div>x</div></div>')
+      expect(r).to include('ok' => true, 'mismatches' => 0, 'nativeIntrinsicGrids' => 1), r.inspect
+    end
+    # The rollback has to put the container's OWN marshalled data back too, not just its items' records: a grid
+    # pushes its tracks and placements before them, and rec[55] points at that offset. These pin it — a stale
+    # offset would have native reading the neighbouring table's column data as track specs, and a leaked push
+    # would double or lose the grid count.
+    it 'rolls its own marshalled tracks back, whatever else is in the stream' do
+      refusal = WalkRefusals::ATOMIC.first
+      nested = '<div style="display:grid;grid-template-columns:min-content;width:60px"><div>n</div></div>'
+      cols = '<table style="border-spacing:0"><colgroup><col style="width:20px"><col></colgroup><tr><td style="padding:0">c</td><td style="padding:0">d</td></tr></table>'
+      [
+        # the falling-back grid holds a NESTED grid, before and after the refusal: the outer takes the oracle's
+        # contributions, the inner still measures its own tracks — one count, neither doubled nor lost
+        [%{<div style="display:grid;grid-template-columns:min-content auto;width:400px"><div>#{nested}a #{refusal}</div><div>x</div></div>}, 1],
+        [%{<div style="display:grid;grid-template-columns:min-content auto;width:400px"><div>a #{refusal}</div><div>#{nested}</div></div>}, 1],
+        # …and a `<colgroup>` table inside it, whose column data shares the same stream rec[55] indexes into
+        [%{<div style="display:grid;grid-template-columns:min-content auto;width:400px"><div>#{cols}a #{refusal}</div><div>x</div></div>}, 0],
+        [%{<div style="width:400px">#{cols}<div style="display:grid;grid-template-columns:min-content;width:200px"><div>a #{refusal}</div></div></div>}, 0],
+        # …and two sibling grids where only one falls back
+        [%{<div style="width:400px"><div style="display:grid;grid-template-columns:min-content"><div>a #{refusal}</div></div><div style="display:grid;grid-template-columns:min-content"><div>a <span style="display:inline-block">ok</span></div></div></div>}, 1]
+      ].each do |body, measured|
+        r = run_shadow(body)
+        expect(r).to include('ok' => true, 'mismatches' => 0), "#{body}: #{r.inspect}"
+        expect(r['nativeIntrinsicGrids']).to eq(measured), "#{body}: #{r.inspect}"
+      end
     end
   end
 end

@@ -15,6 +15,7 @@
 require 'capybara/simulated'
 require 'rack'
 require_relative 'support/session_teardown'
+require_relative 'support/walk_refusals'
 
 RSpec.describe 'native layout flex parity', if: ENV.fetch('CSIM_JS_ENGINE', 'v8') == 'v8' do
   def page(body)
@@ -783,6 +784,28 @@ RSpec.describe 'native layout flex parity', if: ENV.fetch('CSIM_JS_ENGINE', 'v8'
       expect(r).to include('ok' => true, 'mismatches' => 0, 'nativeFlexRows' => 0)
       r = run_shadow(%(<div style="#{base}"><div>text <span style="display:inline-block;height:30px;width:10px"></span> more</div><div>x</div></div>))
       expect(r).to include('ok' => true, 'mismatches' => 0, 'nativeFlexRows' => 0)
+    end
+  end
+  # Native sizing is a promise about every item at once, and the WALK decides whether it holds: where it declines
+  # one item's subtree the whole set is rolled back and re-emitted with the oracle's boxes pushed. Each shape
+  # here holds content the walk refuses for a reason `nlFlexNativeSizable`'s predicate does not model, and under
+  # a predicate-decided gate each took the whole pass down.
+  describe 'a flex container whose item the walk declines to size re-emits with pushed boxes' do
+    WalkRefusals::ATOMIC.each_with_index do |inner, i|
+      it "lays out a row and a column around refused content #{i}" do
+        [
+          %{<div style="display:flex;width:300px"><div>a #{inner}</div><div style="flex:1">x</div></div>},
+          %{<div style="display:flex;flex-direction:column;width:300px;height:200px"><div>a #{inner}</div><div>x</div></div>}
+        ].each do |body|
+          r = run_shadow(body)
+          expect(r).to include('ok' => true, 'mismatches' => 0), "#{body}: #{r.inspect}"
+          expect(r['nativeFlexRows']).to eq(0), "the container should have pushed its item boxes: #{r.inspect}"
+        end
+      end
+    end
+    it 'still resolves the item sizes itself where every item allows it' do
+      r = run_shadow('<div style="display:flex;width:300px"><div>a <span style="display:inline-block">ok</span></div><div style="flex:1">x</div></div>')
+      expect(r).to include('ok' => true, 'mismatches' => 0, 'nativeFlexRows' => 1), r.inspect
     end
   end
 end
