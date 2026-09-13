@@ -186,6 +186,44 @@ RSpec.describe 'native layout inline-atomic parity', if: ENV.fetch('CSIM_JS_ENGI
       expect_native_atomic('<div style="width:400px;white-space:nowrap">no wrap <span style="display:inline-block;width:80px;height:10px"></span> here at all in this long line of text that keeps going</div>')
       expect_native_atomic('<div style="width:400px;white-space:pre">pre <span style="display:inline-block;width:80px;height:10px"></span>\nnext</div>')
     end
+    # A `position: relative` INLINE offsets its whole fragment at paint time (§9.4.3), the atomic inlines on its
+    # lines included — and the inline boxes themselves have no records, so the atomic's own box is where that
+    # shift lands. Nested relative inlines add per axis, and so does the atomic's own offset.
+    it 'offsets an atomic by the position:relative of the inlines above it' do
+      ib = 'display:inline-block;width:20px;height:20px'
+      expect_native_atomic(%(<div style="width:200px">a <span style="position:relative;left:30px;top:7px"><span style="#{ib}"></span></span></div>))
+      expect_native_atomic(%(<div style="width:200px">a <span style="position:relative;left:30px"><span style="#{ib}"></span></span></div>))
+      expect_native_atomic(%(<div style="width:200px">a <span style="position:relative;top:7px"><span style="#{ib}"></span></span></div>))
+      expect_native_atomic(%(<div style="width:200px">a <span style="position:relative;left:30px;top:7px">t <span style="#{ib}"></span> u</span> v</div>))
+      expect_native_atomic(%(<div style="width:200px">a <span style="position:relative;left:30px"><b style="position:relative;top:4px"><span style="#{ib}"></span></b></span></div>))
+      expect_native_atomic(%(<div style="width:200px">a <span style="position:relative;left:30px;top:7px"><img style="width:20px;height:20px"></span></div>))
+      expect_native_atomic(%(<div style="width:200px">a <span style="position:relative;left:-10px;top:-4px"><span style="#{ib}"></span></span></div>))
+      expect_native_atomic(%(<div style="width:200px">a <span style="position:relative;right:10px;bottom:4px"><span style="#{ib}"></span></span></div>))
+      expect_native_atomic(%(<div style="width:200px;height:100px">a <span style="position:relative;left:10%;top:10%"><span style="#{ib};position:relative;top:5px"></span></span></div>))
+      # A fragment that WRAPS carries its offset onto both lines.
+      expect_native_atomic(%(<div style="width:120px">aaa bbb ccc <span style="position:relative;left:8px;top:3px"><span style="#{ib}"></span> ddd eee <span style="#{ib}"></span></span> fff</div>), 2)
+      # An atomic's OWN inline formatting context is a different fragment: the outer offset reaches it once,
+      # through the atomic it sits in, never twice.
+      expect_native_atomic(%(<div style="width:200px;height:100px">a <span style="position:relative;top:10%"><span style="display:inline-block;width:60px">x <span style="position:relative;top:10%"><span style="#{ib}"></span></span></span></span></div>), 2)
+      # A PUSHED atomic (aligned against the parent's font box) already carries the oracle's offset — the shift
+      # must not be added to it a second time.
+      r = run_shadow(%(<div style="width:200px">a <span style="position:relative;left:30px"><span style="#{ib};vertical-align:middle"></span></span></div>))
+      expect(r).to include('ok' => true, 'mismatches' => 0, 'nativeAtomics' => 0)
+    end
+    # A PERCENTAGE inset resolves against the containing block of the fragment — both axes, which needs the pair
+    # `placeInlineBox` stamps on a fragmented inline (it has no box of its own to read one off). An auto-height
+    # block gives no vertical basis, so a `%` there is 0 (Chrome).
+    it 'resolves a percentage offset on the inline above it, on both axes' do
+      ib = 'display:inline-block;width:20px;height:20px'
+      expect_native_atomic(%(<div style="width:200px;height:100px">a <span style="position:relative;top:10%"><span style="#{ib}"></span></span></div>))
+      expect_native_atomic(%(<div style="width:200px;height:100px">a <span style="position:relative;bottom:10%"><span style="#{ib}"></span></span></div>))
+      expect_native_atomic(%(<div style="width:200px;height:100px">a <span style="position:relative;left:10%"><span style="#{ib}"></span></span></div>))
+      expect_native_atomic(%(<div style="width:200px;height:200px"><div style="height:50%">a <span style="position:relative;top:10%"><span style="#{ib}"></span></span></div></div>))
+      expect_native_atomic(%(<table style="width:200px"><tr><td style="height:60px">a <span style="position:relative;top:10%;left:10%"><span style="#{ib}"></span></span></td></tr></table>))
+      expect_native_atomic(%(<div style="width:200px">a <span style="position:relative;top:50%"><span style="#{ib}"></span></span></div>))
+      expect_native_atomic(%(<div style="width:200px;min-height:80px">a <span style="position:relative;top:50%"><span style="#{ib}"></span></span></div>))
+      expect_native_atomic(%(<div style="width:200px;height:100px">a <span style="position:relative;top:10%"><span style="position:relative;top:10%"><span style="#{ib}"></span></span></span></div>))
+    end
     it 'keeps the box at its min/max and box-sizing; overflowing content grows neither the box nor the line' do
       expect_native_atomic('<div style="width:400px">text <span style="display:inline-block;box-sizing:border-box;width:50px;padding:10px">bb</span> x</div>')
       expect_native_atomic('<div style="width:400px">text <span style="display:inline-block;min-width:150px;max-height:5px"><div style="height:30px"></div></span> x</div>')

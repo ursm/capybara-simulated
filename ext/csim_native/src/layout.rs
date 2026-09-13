@@ -125,8 +125,10 @@ pub(crate) struct Input {
     pub(crate) flex_main_reverse: bool,
     // `position: relative` offset (§9.4.3), resolved JS-side (relativeOffset). It moves the box and its
     // subtree at PAINT time without touching the flow, so `place` adds it after the absolute origin; the
-    // flow (margin collapse, sibling positions, float bands) is computed from the unshifted position. 0 for
-    // a non-relative box.
+    // flow (margin collapse, sibling positions, float bands) is computed from the unshifted position. A box's
+    // own offset PLUS the accumulated offset of the relative inline boxes whose fragment it sits in — those
+    // have no records of their own, so an atomic inline inside them carries their shift here. 0 where neither
+    // it nor any inline above it is relative.
     pub(crate) rel_x: f64,
     pub(crate) rel_y: f64,
     // A flex ITEM's AUTO margins. MAIN axis (§9.5): bit0 = main-start-side `auto`, bit1 = main-end-side —
