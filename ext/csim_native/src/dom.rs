@@ -892,7 +892,7 @@ fn register_font_bytes(
 
 // Fields per node in the layoutPass input buffer, and per run in the runs buffer (flat Float64Arrays).
 // Order MUST match the JS packer (layout.js `__csimLayoutShadowRun`) and layout::Input / layout::Run.
-const LAYOUT_STRIDE: usize = 89;
+const LAYOUT_STRIDE: usize = 91;
 const RUN_STRIDE: usize = 8;
 
 // Decode a V8 Float64Array argument into a Vec<f64> (native-endian raw bytes).
@@ -992,6 +992,8 @@ fn layout_pass(
             scrolls_y: (r[65] as u32) & 2 != 0,
             is_button: (r[65] as u32) & 128 != 0,
             self_sizes: r[80] != 0.0,
+            decl_edges_x: r[89],
+            decl_margin_x: r[90],
             cell_pct: r[81],
             cell_min_content: r[84],
             cell_max_content: r[85],

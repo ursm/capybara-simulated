@@ -221,6 +221,12 @@ pub(crate) struct Input {
     // shrink-to-fits its columns (§17.5.2). False where the parent handed it a box (a grid area, a flex item's
     // pushed size, an out-of-flow inset box), and then the width the caller passed is the used one.
     pub(crate) self_sizes: bool,
+    // The horizontal EDGES with NO percentage basis — padding + border (`decl_edges_x`) and the margins
+    // (`decl_margin_x`, `auto` counted as 0) as an INTRINSIC measure reads them, a percentage resolving to
+    // nothing (`edgeInsets(el, null)`). The record's own `pl`/`pr`/`ml`/`mr` are cbW-resolved, which is the right
+    // figure for LAYOUT and the wrong one for an intrinsic contribution.
+    pub(crate) decl_edges_x: f64,
+    pub(crate) decl_margin_x: f64,
     // TABLE CELL: the `%` fraction its `width` declared (NaN where it declares none) — a column's `pct`,
     // resolved against the width the columns share out rather than the table's own box (`distribute_columns`).
     pub(crate) cell_pct: f64,
@@ -318,6 +324,9 @@ pub(crate) struct Run {
     pub(crate) ls: f64,
     pub(crate) ws: f64,
     pub(crate) line_height: f64,
+    // A TEXT run's ascent above its line's baseline; an ATOMIC's too (its own baseline plus any shift). On an
+    // OPEN / CLOSE edge run this slot carries the edge width with NO percentage basis — what an INTRINSIC
+    // measure reads, where `metric` is the resolved px the laid-out line uses.
     pub(crate) asc: f64,
     pub(crate) metric: f64,
 }
@@ -1662,10 +1671,18 @@ fn flex_row_sizes(
             if k.ratio_only { (content_w - Input::m(k.ml) - Input::m(k.mr)).max(0.0) } else { k.intrinsic_w + edges }
         } else {
             content_based[p] = true;
+            // What the item's CONTENT wants, its BASIS-LESS edges corrected to the real ones: a percentage
+            // padding resolves against nothing in an intrinsic measure but against this container's content width
+            // in the item's box (the oracle's `flexRowMetrics`). The two arms differ in BOTH of the ways that
+            // matters: `flex-basis: content` looks PAST a declared width, which only `content_intrinsic` does
+            // (`intrinsic_widths` would pin the base to it) — and it answers a CONTENT width, so the real edges
+            // go on whole, where `intrinsic_widths` already carries the basis-less ones. Using `content_intrinsic`
+            // for BOTH loses the per-display dispatch a nested flex / grid / table item needs (it would be
+            // measured as a stack of blocks) — two css-flexbox WPT tests caught exactly that.
             if k.flex_basis_kw == 1 {
                 content_intrinsic(c, inputs, runs, run_texts, grids, children)?.1 + edges
             } else {
-                intrinsic_widths(c, inputs, runs, run_texts, grids, children)?.1
+                intrinsic_widths(c, inputs, runs, run_texts, grids, children)?.1 + edges - k.decl_edges_x
             }
         };
     }
@@ -2777,15 +2794,18 @@ fn table_intrinsic_widths(
         Some(cap) => intrinsic_widths(cap, inputs, runs, run_texts, grids, children)?.0,
         None => 0.0,
     };
-    Some(table_min_max_with_caption(&n, &g, &cols, caption_floor))
+    // An intrinsic CONTRIBUTION reads the table's own edges basis-less, like every other box's (the oracle's
+    // `tableIntrinsicWidths` uses `edgeInsets(table, null)`).
+    Some(table_min_max_with_caption(&n, &g, &cols, caption_floor, n.decl_edges_x))
 }
-// …from columns already measured: the figure `measure_table` needs, where the caption's floor is the box it
-// laid out rather than the caption's own min-content.
+// …from columns already measured: the figure `measure_table` needs, where the caption's floor is the box it laid
+// out rather than the caption's own min-content, and the frame carries the table's edges as the box uses them
+// (RESOLVED) rather than as an intrinsic contribution reads them (basis-less).
 fn table_min_max(n: &Input, g: &TableGrid, cols: &TableCols) -> (f64, f64) {
-    table_min_max_with_caption(n, g, cols, 0.0)
+    table_min_max_with_caption(n, g, cols, 0.0, n.edges_x())
 }
-fn table_min_max_with_caption(n: &Input, g: &TableGrid, cols: &TableCols, floor: f64) -> (f64, f64) {
-    let frame = table_gaps(g.c_count, n.sp_x) + n.edges_x();
+fn table_min_max_with_caption(n: &Input, g: &TableGrid, cols: &TableCols, floor: f64, edges: f64) -> (f64, f64) {
+    let frame = table_gaps(g.c_count, n.sp_x) + edges;
     let (mut min_sum, mut max_sum, mut sum_pct, mut non_pct_max, mut pct_implied) = (0.0, 0.0, 0.0, 0.0, 0.0f64);
     for ci in 0..g.c_count {
         min_sum += cols.min[ci].max(cols.spec[ci]);
@@ -3331,15 +3351,15 @@ fn grid_column_content(
 // box, for min and max alike; a flex container stacks its items along its main axis (`flex_intrinsic_widths`);
 // a TABLE runs its own column algorithm (`table_intrinsic_widths`, which answers a border box unclamped, as the
 // oracle's early return does); then the box's own edges add on and its min/max-width clamp the contribution
-// (border-box per `box-sizing`, min winning over max). The widths read are the record's DECLARED, basis-less
-// ones (`decl_*`: a percentage is auto here, as in the oracle), never the used box a push may have written; the
-// edges are the record's cbW-resolved ones, equal to the basis-less read only when no edge is a percentage —
-// the JS gate (`nlIntrinsicMeasurable`) guarantees that. Floats pack on a line inside a block container as
-// inline boxes would. `None` for what isn't measured: a replayed grid, a pushed atomic inline, an unmodelled
-// run.
+// (border-box per `box-sizing`, min winning over max). EVERY figure read is the record's DECLARED, BASIS-LESS
+// one — the sizes in `decl_*`, the horizontal edges in `decl_edges_x` / `decl_margin_x` — because a percentage
+// resolves against nothing in an intrinsic measure (CSS Sizing 3, and the oracle's `edgeInsets(el, null)`),
+// never the used box a push may have written nor the cbW-resolved edges a laid-out box uses. Floats pack on a
+// line inside a block container as inline boxes would. `None` for what isn't measured: a replayed grid, a pushed
+// atomic inline, an unmodelled run.
 fn intrinsic_widths(i: usize, inputs: &[Input], runs: &[Run], run_texts: &[Option<Vec<u16>>], grids: &[f64], children: &[Vec<usize>]) -> Option<(f64, f64)> {
     let n = inputs[i];
-    let extra = n.edges_x();
+    let extra = n.decl_edges_x;
     let (inner_min, inner_max) = if !is_auto(n.decl_w) {
         let w = if n.decl_border_box { (n.decl_w - extra).max(0.0) } else { n.decl_w };
         (w, w)
@@ -3387,9 +3407,10 @@ fn content_intrinsic(i: usize, inputs: &[Input], runs: &[Run], run_texts: &[Opti
                 if k.out_of_flow != 0 {
                     continue; // out of flow: sizes nothing
                 }
-                // Each child contributes its MARGIN box (a negative margin narrows it; auto is 0).
+                // Each child contributes its MARGIN box (a negative margin narrows it; auto is 0) — basis-less,
+                // as every figure an intrinsic measure reads is.
                 let (cmin, cmax) = intrinsic_widths(c, inputs, runs, run_texts, grids, children)?;
-                let m = Input::m(k.ml) + Input::m(k.mr);
+                let m = k.decl_margin_x;
                 if k.float_kind != 0 {
                     // A FLOAT packs beside its neighbours like an inline-level box: its max-content joins the
                     // line, its min-content stands alone (the oracle's float arm — no line end).
@@ -3417,11 +3438,11 @@ fn min_content_width(i: usize, inputs: &[Input], runs: &[Run], run_texts: &[Opti
     if n.replaced && !n.ratio_only {
         return Some(n.intrinsic_w); // the oracle's minContentWidth: the intrinsic width, edges not counted
     }
-    let content = content_intrinsic(i, inputs, runs, run_texts, grids, children)?.0 + n.edges_x();
+    let content = content_intrinsic(i, inputs, runs, run_texts, grids, children)?.0 + n.decl_edges_x;
     if is_auto(n.decl_w) {
         return Some(content);
     }
-    let declared = if n.decl_border_box { n.decl_w } else { n.decl_w + n.edges_x() };
+    let declared = if n.decl_border_box { n.decl_w } else { n.decl_w + n.decl_edges_x };
     Some(declared.min(content))
 }
 
@@ -3444,7 +3465,9 @@ fn flex_intrinsic_widths(i: usize, inputs: &[Input], runs: &[Run], run_texts: &[
         }
         let (mut imin, mut imax) = intrinsic_widths(c, inputs, runs, run_texts, grids, children)?;
         if !column {
-            let extra = if k.decl_border_box { 0.0 } else { k.edges_x() };
+            // …converted with the BASIS-LESS edges, like every other figure an intrinsic measure reads (the
+            // oracle's `flexIntrinsicWidths` uses `edgeInsets(child, null)`).
+            let extra = if k.decl_border_box { 0.0 } else { k.decl_edges_x };
             if !is_auto(k.flex_basis) {
                 let fixed = k.flex_basis + extra;
                 if k.flex_grow > 0.0 {
@@ -3463,7 +3486,7 @@ fn flex_intrinsic_widths(i: usize, inputs: &[Input], runs: &[Run], run_texts: &[
                 imax = imax.max(k.decl_min_w + extra);
             }
         }
-        let m = Input::m(k.ml) + Input::m(k.mr);
+        let m = k.decl_margin_x;
         count += 1;
         if column {
             min = min.max(imin + m);
@@ -3558,6 +3581,9 @@ fn text_intrinsic(runs: &[Run], run_texts: &[Option<Vec<u16>>], ws_mode: u8, inp
             RUN_BR => end_line!(),
             RUN_WBR => opportunity!(),
             RUN_OPEN => {
+                // An inline's EDGES here are the BASIS-LESS ones (`Run::asc` on an edge run): an intrinsic measure
+                // has no percentage basis, so a `padding: 0 10%` inline contributes nothing where the laid-out
+                // line counts its resolved px.
                 // The matching CLOSE (LIFO) — an inline with ANY horizontal edge takes the pending space at its open.
                 let mut depth = 0i32;
                 let mut close = None;
@@ -3565,22 +3591,22 @@ fn text_intrinsic(runs: &[Run], run_texts: &[Option<Vec<u16>>], ws_mode: u8, inp
                     match r.kind {
                         RUN_OPEN => depth += 1,
                         RUN_CLOSE if depth == 0 => {
-                            close = Some(r.metric);
+                            close = Some(r.asc);
                             break;
                         }
                         RUN_CLOSE => depth -= 1,
                         _ => {}
                     }
                 }
-                if run.metric + close? != 0.0 {
+                if run.asc + close? != 0.0 {
                     take_pending!();
                 }
-                line += run.metric;
-                word += run.metric;
+                line += run.asc;
+                word += run.asc;
             }
             RUN_CLOSE => {
-                line += run.metric;
-                word += run.metric;
+                line += run.asc;
+                word += run.asc;
             }
             RUN_TEXT => {
                 let per_char = matches!(run.metric as u8, 1 | 3);
@@ -3663,7 +3689,7 @@ fn text_intrinsic(runs: &[Run], run_texts: &[Option<Vec<u16>>], ws_mode: u8, inp
                 let c = run.font as usize;
                 let k = inputs[c];
                 let (imin, imax) = intrinsic_widths(c, inputs, all_runs, all_texts, grids, children)?;
-                let m = Input::m(k.ml) + Input::m(k.mr);
+                let m = k.decl_margin_x;
                 take_pending!();
                 opportunity!();
                 line += imax + m;
@@ -4189,6 +4215,8 @@ mod tests {
             scrolls_y: false,
             is_button: false,
             self_sizes: false,
+            decl_edges_x: 0.0,
+            decl_margin_x: 0.0,
             cell_pct: f64::NAN,
             cell_min_content: f64::NAN,
             cell_max_content: f64::NAN,
@@ -5160,10 +5188,12 @@ mod tests {
         child.decl_w = 40.0;
         child.pl = 5.0;
         child.pr = 5.0;
+        child.decl_edges_x = 10.0; // the basis-less edges are their own input, like `decl_w`
         let mut pinned = blk(3.0, 0);
         pinned.decl_w = 70.0;
         pinned.decl_border_box = true;
         pinned.pl = 10.0;
+        pinned.decl_edges_x = 10.0;
         pinned.width = 200.0; // pushed, ignored
         let inputs = [root, flex_item, child, pinned];
         let children = vec![vec![1, 3], vec![2], vec![], vec![]];

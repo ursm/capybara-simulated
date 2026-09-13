@@ -196,10 +196,12 @@ RSpec.describe 'native layout grid parity', if: ENV.fetch('CSIM_JS_ENGINE', 'v8'
     it 'matches % vertical padding when the grid width equals its containing block' do
       expect_parity('<div style="width:200px"><div style="display:grid;grid-template-columns:1fr 1fr;padding:10% 0"><div style="height:20px">a</div><div style="height:30px">b</div></div></div>')
     end
-    # % VERTICAL padding on an explicitly-sized grid (width ≠ cbW): the oracle resolves the grid's own top/bottom
-    # % padding against box.width for its auto-height, native's edges against cbW — they diverge, so decline.
-    it 'declines % vertical padding on a grid whose width differs from its containing block' do
-      expect_bail('<div style="display:grid;grid-template-columns:1fr 1fr;width:200px;padding:20% 0"><div style="height:20px">a</div><div style="height:30px">b</div></div>')
+    # A grid's own % padding resolves against its CONTAINING BLOCK's width, on both axes (§ CSS Box: a
+    # percentage padding is always of the CB width) — which is what Chrome does and what the oracle does now, so
+    # an explicitly-sized grid carrying one lays out natively.
+    it 'resolves its own % vertical padding against its containing block' do
+      expect_parity('<div style="display:grid;grid-template-columns:1fr 1fr;width:200px;padding:20% 0"><div style="height:20px">a</div><div style="height:30px">b</div></div>')
+      expect_parity('<div style="width:400px"><div style="display:grid;grid-template-columns:1fr;width:200px;padding:10%"><div style="height:20px">a</div></div></div>')
     end
   end
 
@@ -326,8 +328,14 @@ RSpec.describe 'native layout grid parity', if: ENV.fetch('CSIM_JS_ENGINE', 'v8'
       expect_native_intrinsic(%(<div style="#{mc_auto}"><div style="min-width:50%;height:10px">pct min</div><div>b</div></div>))
       expect_native_intrinsic(%(<div style="#{mc_auto}"><div style="width:calc(50% - 10px);height:10px">calc pct</div><div>b</div></div>))
     end
-    it 'falls back for a percentage padding / margin (the record\'s edges are cbW-resolved)' do
-      expect_resolved_fallback(%(<div style="#{two_auto}"><div style="padding-left:10%;height:10px">pct pad</div><div style="height:10px">b</div></div>))
+    # A PERCENTAGE padding / margin resolves to nothing in an intrinsic measure (CSS Sizing 3), and the record
+    # carries those basis-less edges beside its cbW-resolved ones, so native measures such a box itself.
+    it 'measures a percentage padding / margin itself (the basis-less edges ride the record)' do
+      expect_native_intrinsic(%(<div style="#{two_auto}"><div style="padding-left:10%;height:10px">pct pad</div><div style="height:10px">b</div></div>))
+      expect_native_intrinsic(%(<div style="#{two_auto}"><div style="margin:0 10%;height:10px">pct margin</div><div style="height:10px">b</div></div>))
+      expect_native_intrinsic(%(<div style="#{two_auto}"><div style="height:10px">a <span style="padding:0 10%">pct</span> b</div><div style="height:10px">b</div></div>))
+      expect_native_intrinsic(%(<div style="#{two_auto}"><div style="display:flex"><div style="padding:0 10%;min-width:50px;width:20px;height:10px"></div></div><div style="height:10px">b</div></div>))
+      expect_native_intrinsic(%(<div style="#{two_auto}"><div><table style="padding:0 10%"><tr><td>hello</td></tr></table></div><div style="height:10px">b</div></div>))
     end
     it 'falls back for a nowrap / pre block container (the oracle pins the whole box, children included)' do
       expect_resolved_fallback(%(<div style="#{two_auto}"><div style="white-space:nowrap"><p style="margin:0">block child under nowrap</p></div><div style="height:10px">b</div></div>))
