@@ -449,10 +449,21 @@ RSpec.describe 'native layout L1 block-flow parity', if: ENV.fetch('CSIM_JS_ENGI
       expect_native_oof(%{<div style="display:grid;grid-template-columns:auto;width:400px"><div style="position:relative">#{oof}</div></div>})
     end
     # An out-of-flow box whose OWN width IS a shrink-to-fit needs an intrinsic measure of its content, so where
-    # native cannot measure that content the box keeps the oracle's box — the pass is not declined for it.
+    # native cannot measure that content the box keeps the oracle's box — the pass is not declined for it. WHICH
+    # it is, the WALK decides: a subtree it refuses under the measuring obligation is rolled back and the box is
+    # replayed, so content the predicate cannot judge (a `text-indent`ed atomic, a sticky child) lands here too.
     it 'replays a shrink-to-fit box whose own content native cannot measure' do
       expect_replayed_oof(%{<div style="width:400px;position:relative"><div style="writing-mode:vertical-lr"><div style="position:absolute;left:0">#{pushed_atomic}</div><div style="width:9px;height:4px"></div></div></div>})
       expect_replayed_oof(%{<div style="width:400px;position:relative"><div style="writing-mode:vertical-lr"><div style="position:absolute">#{pushed_atomic}</div><div style="width:9px;height:4px"></div></div></div>})
+      [
+        '<span style="display:inline-block;text-indent:5px">t<div>x</div></span>',
+        '<span style="display:inline-block"><div style="position:sticky;top:0">s</div></span>',
+        '<span style="display:inline-block"><div style="width:max-content">bb</div></span>'
+      ].each do |inner|
+        expect_replayed_oof(%{<div style="width:400px;position:relative"><div style="position:absolute;left:0">a #{inner}</div><p>x</p></div>})
+      end
+      # …while one it CAN measure is still sized and placed natively
+      expect_native_oof(%{<div style="width:400px;position:relative"><div style="position:absolute;left:0">a <span style="display:inline-block">ok</span></div><p>x</p></div>})
     end
   end
 

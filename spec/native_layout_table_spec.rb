@@ -740,7 +740,65 @@ RSpec.describe 'native layout table parity', if: ENV.fetch('CSIM_JS_ENGINE', 'v8
   # oracle's contribution rides rec[84..85] (`table_min_max_with_caption` reads that and never descends). So it
   # is the same measure BOUNDARY a pushed cell is — marked measured instead, a caption holding an atomic native
   # cannot lay out declined the whole pass.
+  # WHICH of the two a cell is — measured, or a boundary contributing the oracle's figure — is decided by
+  # TRYING: the walk is the only thing that knows what it can build, so a cell it declines under the measuring
+  # obligation is rolled back and re-walked as a boundary. Every shape here holds content the walk refuses for a
+  # reason `nlIntrinsicMeasurable` does not model, so under a predicate-decided gate each took its whole table
+  # down; `table-layout: fixed` is here too, where native measures no cell at all and the obligation was never
+  # real. The one thing that cannot be recovered is a subtree the walk cannot build EITHER way.
+  describe 'a cell the walk declines to measure is re-walked as a boundary' do
+    refused = [
+      '<span style="display:inline-block;text-indent:5px">t<div>x</div></span>',
+      '<span style="display:inline-block"><div style="position:sticky;top:0">s</div></span>',
+      '<span style="display:inline-block"><div style="float:left;width:9px;height:4px"></div>t</span>',
+      '<span style="display:inline-block;position:relative">t<div style="position:absolute">y</div></span>',
+      '<span style="display:inline-block;white-space:pre">   </span>',
+      '<span style="display:inline-block"><div style="contain:layout;width:9px;height:4px"></div></span>',
+      '<span style="display:inline-block"><div style="width:max-content">bb</div></span>',
+      '<span style="display:inline-block"><div style="margin:0 auto;width:10px">x</div></span>'
+    ]
+    it 'lays out an auto, a fixed and a measured table around such a cell' do
+      refused.each do |inner|
+        # An AUTO table sizes its columns from the cells, so the contribution is asked for and pushed; a FIXED
+        # one with a width sizes them from the first row and asks for nothing at all, so nothing is pushed.
+        [[%{<div style="width:400px"><table><tr><td>a #{inner}</td></tr></table></div>}, 1],
+         [%{<div style="width:400px"><table style="table-layout:fixed;width:300px"><tr><td>a #{inner}</td></tr></table></div>}, 0],
+         [%{<div style="width:400px"><div style="writing-mode:vertical-lr"><table><tr><td>a #{inner}</td></tr></table></div></div>}, 1]].each do |body, pushed|
+          r = run_shadow(body)
+          expect(r).to include('ok' => true, 'mismatches' => 0), "#{body}: #{r.inspect}"
+          expect(r['pushedContributions']).to eq(pushed), "the cell's contribution: #{r.inspect}"
+        end
+      end
+    end
+    # The rollback has to put EVERY stream back — records, runs, grids, the node/index maps, the statistics — so
+    # where in the attempted subtree the refusal sits cannot change the outcome. A stream someone forgets to
+    # restore shows up here as a differing node count or a double-counted grid.
+    it 'leaves the same records behind wherever the refusal sits in the subtree' do
+      refusal = '<span style="display:inline-block;text-indent:5px">t<div>x</div></span>'
+      inert = '<div style="width:3px;height:2px"></div>' * 4
+      grid = '<div style="display:grid;grid-template-columns:min-content;width:50px"><div>g</div></div>'
+      early = run_shadow(%{<div style="width:400px"><table><tr><td>#{grid}#{refusal}#{inert}</td></tr></table></div>})
+      late  = run_shadow(%{<div style="width:400px"><table><tr><td>#{grid}#{inert}#{refusal}</td></tr></table></div>})
+      expect(early).to include('ok' => true, 'mismatches' => 0), early.inspect
+      expect(late['nodes']).to eq(early['nodes']), "#{early.inspect} vs #{late.inspect}"
+      expect(late['compared']).to eq(early['compared']), "#{early.inspect} vs #{late.inspect}"
+      %w[nativeIntrinsicGrids nativeFlexRows nativeOutOfFlow nativeAtomics pushedContributions].each do |k|
+        expect(late[k]).to eq(early[k]), "#{k}: #{early.inspect} vs #{late.inspect}"
+      end
+      expect(early['nativeIntrinsicGrids']).to eq(1), "the grid inside the re-walk should be counted once: #{early.inspect}"
+    end
+    it 'still measures a cell it can, and still declines what no walk can build' do
+      r = run_shadow('<table style="border-spacing:0"><tr><td style="padding:0">a <span style="display:inline-block">ok</span></td></tr></table>')
+      expect(r).to include('ok' => true, 'mismatches' => 0, 'pushedContributions' => 0, 'nativeAtomics' => 1), r.inspect
+      declined = run_shadow('<table style="border-spacing:0"><tr><td style="padding:0"><div style="position:sticky;top:0">s</div></td></tr></table>')
+      expect(declined).to include('ok' => false, 'reason' => 'unsupported subtree'), declined.inspect
+    end
+  end
+
   describe 'a caption whose content native cannot lay out pushes its contribution' do
+    # The tally counts a contribution native was ASKED for and could not produce. A caption nobody asks about
+    # (a normal-flow table: only `table_intrinsic_widths` reads one) is therefore 0 whatever it holds, even
+    # though its figure rides the record anyway.
     def expect_pushed_contribution(body, count = 1)
       r = run_shadow(body)
       expect(r).to include('ok' => true), "harness bailed: #{r.inspect}"
@@ -750,10 +808,13 @@ RSpec.describe 'native layout table parity', if: ENV.fetch('CSIM_JS_ENGINE', 'v8
 
     it 'lays out a table whose caption holds a centred inline-block' do
       atomic = 'a <span style="display:inline-block;margin:0 auto;width:20px;height:10px"></span>'
-      expect_pushed_contribution(%{<table style="border-spacing:0"><caption>#{atomic}</caption><tr><td style="padding:0">x</td></tr></table>})
+      # asked for, and native cannot produce it: a vertical-writing-mode block child and a `min-content` track
       expect_pushed_contribution(%{<div style="width:400px"><div style="writing-mode:vertical-lr"><table><caption>#{atomic}</caption><tr><td>x</td></tr></table></div></div>})
       expect_pushed_contribution(%{<div style="display:grid;grid-template-columns:min-content;width:400px"><table style="border-spacing:0"><caption>#{atomic}</caption><tr><td style="padding:0">x</td></tr></table></div>})
-      # …and one native CAN measure pushes nothing
+      # …asked for and native CAN produce it, so nothing is pushed
+      expect_pushed_contribution(%{<div style="display:grid;grid-template-columns:min-content;width:400px"><table style="border-spacing:0"><caption>cap</caption><tr><td style="padding:0">x</td></tr></table></div>}, 0)
+      # …and never asked for at all: a normal-flow table, either way
+      expect_pushed_contribution(%{<table style="border-spacing:0"><caption>#{atomic}</caption><tr><td style="padding:0">x</td></tr></table>}, 0)
       expect_pushed_contribution(%{<table style="border-spacing:0"><caption>cap</caption><tr><td style="padding:0">x</td></tr></table>}, 0)
     end
     # A caption's contribution is read ONLY where the table's own is asked, so in a normal-flow table nothing
