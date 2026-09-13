@@ -346,4 +346,75 @@ RSpec.describe 'layout: inline / flex / grid / table rows' do
     # A document shorter than the window is still viewport-tall, as in a browser.
     expect(s.evaluate_script('document.documentElement.scrollHeight')).to eq(768)
   end
+  # A box HELD by an open inline box keeps its static position until that inline settles — and an inline-block on
+  # the line is laid out at the line's PROVISIONAL y, then moved by the baseline settle. The held position has to
+  # move with it, or an auto-inset box inside the atomic lands at the block's top instead of the atomic's own
+  # content origin (Chrome: 30 on a 48px line, where the un-shifted capture said 0).
+  it 'moves a held static position with the atomic inline the baseline settle shifts' do
+    html = '<html><body style="margin:0"><div style="width:400px;font-size:48px">Big ' \
+           '<span>x<span id="ib" style="display:inline-block;font-size:12px;width:60px;height:14px">' \
+           '<div id="f" style="position:absolute;width:10px;height:10px"></div></span></span></div></body></html>'
+    s = simulated_session(->(_env) { [200, {'content-type' => 'text/html'}, [html]] })
+    s.visit '/'
+    atomic = s.evaluate_script('document.getElementById("ib").getBoundingClientRect().top')
+    held   = s.evaluate_script('document.getElementById("f").getBoundingClientRect().top')
+    expect(atomic).to be > 20                                # the settle really did move the atomic
+    expect(held).to be_within(0.01).of(atomic)
+    # …once per pass. A shift applied again on the next layout — or an offset the capture already folded in and
+    # a later sweep adds a second time — shows up here as the box drifting away from its atomic.
+    2.times do |i|
+      s.evaluate_script(%{document.querySelector('div').style.width = '#{401 + i}px'})
+      again = s.evaluate_script('document.getElementById("f").getBoundingClientRect().top')
+      expect(again).to be_within(0.01).of(atomic), "pass #{i + 2} drifted to #{again}"
+    end
+  end
+
+  # The same rule on the INLINE axis, which `text-align` moves — and with a `position: relative` wrapper, whose
+  # offset `placeAbsolute` folds into the held position at capture: it must not be applied a second time.
+  # `#f` is held inside `#ib`; both rects come back so a caller asserts the box TRACKS its atomic rather than a
+  # coordinate, which is the invariant — wherever the line puts the atomic, the held box goes with it.
+  def held_and_atomic(markup)
+    html = %(<html><body style="margin:0"><div style="width:400px">#{markup}</div></body></html>)
+    s = simulated_session(->(_env) { [200, {'content-type' => 'text/html'}, [html]] })
+    s.visit '/'
+    [s.evaluate_script('document.getElementById("f").getBoundingClientRect()'),
+     s.evaluate_script('document.getElementById("ib").getBoundingClientRect()')]
+  end
+
+  it 'carries a held static position across the line alignment, and a relative offset only once' do
+    ib = '<span id="ib" style="display:inline-block;width:60px;height:14px"><div id="f" style="position:absolute;width:10px;height:10px"></div></span>'
+    held, atomic = held_and_atomic(%(<div style="text-align:right">t #{ib}</div>))
+    expect(atomic['x']).to be > 300                          # the alignment really did move the atomic
+    expect(held['x']).to be_within(0.01).of(atomic['x'])
+    %w[top:25px top:-8px left:12px].each do |offset|
+      prop, value = offset.split(':')
+      held, atomic = held_and_atomic(%(t <span style="position:relative;#{prop}:#{value}">a#{ib}</span>))
+      expect(held['x']).to be_within(0.01).of(atomic['x']), "#{offset}: x #{held['x']} vs #{atomic['x']}"
+      expect(held['y']).to be_within(0.01).of(atomic['y']), "#{offset}: y #{held['y']} vs #{atomic['y']}"
+    end
+  end
+
+  # An entry is parked in the OUTERMOST open inline's list, which belongs to whichever block opened that inline
+  # — so one `<span>` wrapped around a block puts a box held INSIDE that block into someone else's list. The
+  # settle has to sweep every still-open frame, not just its own.
+  it 'carries one held in an outer block\'s list, and through two nested atomics' do
+    inner = '<div style="font-size:48px">Big <span>y<span id="ib" style="display:inline-block;font-size:12px;width:60px;height:14px">' \
+            '<div id="f" style="position:absolute;width:10px;height:10px"></div></span></span></div>'
+    ib = %(<span style="display:inline-block;width:300px">#{inner}</span>)
+    [
+      %(outer <span>x#{ib}</span>),
+      %(outer #{ib}),                                        # …the entry in this block's own list
+      %(<span style="font-size:32px">o<span style="display:inline-block;font-size:14px;width:300px">#{inner}</span></span>),
+      # …and NESTED inline boxes of one block, which all carry the SAME list: sweeping per frame would move the
+      # held box once per wrapper (measured: 60 with two, 90 with three, where the atomic stays at 30).
+      %(o <span>x<em>y#{ib}</em></span>),
+      %(o <span>x<em>y<b>z#{ib}</b></em></span>)
+    ].each do |markup|
+      held, atomic = held_and_atomic(markup)
+      expect(atomic['y']).to be > 20, "the settle did not move the atomic: #{atomic.inspect}"
+      expect(held['y']).to be_within(0.01).of(atomic['y']), "#{markup}: #{held['y']} vs #{atomic['y']}"
+      expect(held['x']).to be_within(0.01).of(atomic['x']), "#{markup}: #{held['x']} vs #{atomic['x']}"
+    end
+  end
+
 end

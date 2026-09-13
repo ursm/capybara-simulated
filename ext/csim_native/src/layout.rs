@@ -282,7 +282,8 @@ pub(crate) struct Input {
     pub(crate) intrinsic_w: f64,
     pub(crate) intrinsic_h: f64,
     // An OUT-OF-FLOW box (`out_of_flow`) native positions itself (`place_out_of_flow`): the record index of its
-    // CONTAINING BLOCK (−1 = the oracle's resolved box is replayed instead, the CB lying outside the pass), its
+    // CONTAINING BLOCK (−1 = the oracle's whole box is replayed instead — an in-pass CB with percentage edges,
+    // or a shrink-to-fit width native cannot measure — so nothing here is usable), its
     // insets resolved against the CB's padding box (NaN = auto), and which of its margins are `auto` (bit 1
     // left, 2 right, 4 top, 8 bottom — they take the slack between two insets).
     pub(crate) cb_index: i32,
@@ -291,7 +292,17 @@ pub(crate) struct Input {
     pub(crate) inset_bottom: f64,
     pub(crate) inset_left: f64,
     pub(crate) oof_auto_margins: u8,
+    // …and where that containing block is NOT a record of this pass — the viewport for a `fixed` box, an
+    // ancestor above the pass root, a relatively-positioned inline — its PADDING BOX arrives instead, in the
+    // pass's own (document) coordinates: `cb_index` is CB_RECT and these four are x / y / width / height, taken
+    // from the containing block the PLACEMENT stamped on the box (`_lb.cbEl` — the walk reads that stamp rather
+    // than resolving the question a second time). `place_out_of_flow` reads one or the other and does the same
+    // arithmetic either way, so the only difference between a viewport-positioned box and an in-pass one is
+    // where the rectangle came from.
+    pub(crate) cb_rect: [f64; 4],
 }
+// `cb_index` for an out-of-flow box whose containing block is not in the pass but whose RECTANGLE is (cb_rect).
+pub(crate) const CB_RECT: i32 = -2;
 
 pub(crate) const CROSS_BASELINE: u8 = 3;
 pub(crate) const CROSS_BASELINE_LAST: u8 = 4;
@@ -340,7 +351,7 @@ pub(crate) struct Run {
 impl Input {
     // An out-of-flow box native positions from its containing block (vs one whose oracle box is replayed).
     fn native_oof(&self) -> bool {
-        self.out_of_flow != 0 && self.cb_index >= 0
+        self.out_of_flow != 0 && (self.cb_index >= 0 || self.cb_index == CB_RECT)
     }
     // This record with a border-box height IMPOSED on it (a flex item stretched to its line, or handed its
     // resolved main size) — the oracle's `layoutElement(child, {height, autoHeight: false})`: the declared
@@ -4090,11 +4101,21 @@ fn place_out_of_flow(
     failed: &std::cell::Cell<bool>,
 ) {
     let n = inputs[c];
-    let cb_i = n.cb_index as usize;
-    let cbn = inputs[cb_i];
-    let (cb_x, cb_y) = (boxes[cb_i].x + cbn.bl, boxes[cb_i].y + cbn.bt);
-    let cb_w = (boxes[cb_i].w - cbn.bl - cbn.br).max(0.0);
-    let cb_h = (boxes[cb_i].h - cbn.bt - cbn.bb).max(0.0);
+    // The containing block's PADDING box, in document coordinates: from its record where the pass holds one
+    // (its border box less its borders, final by the time `place` reaches here), else the rectangle the walk
+    // pushed for a CB outside the pass (the viewport, an ancestor above the root, an inline box).
+    let (cb_x, cb_y, cb_w, cb_h) = if n.cb_index == CB_RECT {
+        (n.cb_rect[0], n.cb_rect[1], n.cb_rect[2], n.cb_rect[3])
+    } else {
+        let cb_i = n.cb_index as usize;
+        let cbn = inputs[cb_i];
+        (
+            boxes[cb_i].x + cbn.bl,
+            boxes[cb_i].y + cbn.bt,
+            (boxes[cb_i].w - cbn.bl - cbn.br).max(0.0),
+            (boxes[cb_i].h - cbn.bt - cbn.bb).max(0.0),
+        )
+    };
     let (top, right, bottom, left) = (n.inset_top, n.inset_right, n.inset_bottom, n.inset_left);
     let (ml, mr, mt, mb) = (Input::m(n.ml), Input::m(n.mr), Input::m(n.mt), Input::m(n.mb));
     let stretched = !is_auto(left) && !is_auto(right);
@@ -4385,6 +4406,7 @@ mod tests {
             intrinsic_w: 0.0,
             intrinsic_h: 0.0,
             cb_index: -1,
+            cb_rect: [0.0, 0.0, 0.0, 0.0],
             inset_top: f64::NAN,
             inset_right: f64::NAN,
             inset_bottom: f64::NAN,

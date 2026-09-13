@@ -1153,4 +1153,19 @@ RSpec.describe 'table layout' do
     expect(boxes[0][1]).to be_within(0.01).of(boxes[1][1])   # on the flow it follows, wherever the row put it
     expect(boxes[0][1]).to be > 20
   end
+  # A box whose BLOCK position comes from the flow moves when that flow moves — a `position: fixed` box with no
+  # `top` included. Its insets are the viewport's business; the axis it takes from the flow is not. (Chrome: the
+  # box sits at the shifted content, not at the cell's top.)
+  it 'moves a fixed box at its static position with the content a cell alignment shifts' do
+    html = '<html><body style="margin:0"><table style="width:200px"><tr>' \
+           '<td style="height:100px;vertical-align:middle">' \
+           '<div id="f" style="position:fixed;width:20px;height:20px">f</div>' \
+           '<div id="x" style="height:10px">x</div></td></tr></table></body></html>'
+    s = simulated_session(->(_env) { [200, {'content-type' => 'text/html'}, [html]] })
+    s.visit '/'
+    fixed_top = s.evaluate_script('document.getElementById("f").getBoundingClientRect().top')
+    flow_top  = s.evaluate_script('document.getElementById("x").getBoundingClientRect().top')
+    expect(flow_top).to be > 40                              # the alignment really did shift the content
+    expect(fixed_top).to be_within(0.01).of(flow_top)
+  end
 end

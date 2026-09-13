@@ -892,7 +892,7 @@ fn register_font_bytes(
 
 // Fields per node in the layoutPass input buffer, and per run in the runs buffer (flat Float64Arrays).
 // Order MUST match the JS packer (layout.js `__csimLayoutShadowRun`) and layout::Input / layout::Run.
-const LAYOUT_STRIDE: usize = 92;
+const LAYOUT_STRIDE: usize = 96;
 const RUN_STRIDE: usize = 8;
 
 // Decode a V8 Float64Array argument into a Vec<f64> (native-endian raw bytes).
@@ -917,6 +917,14 @@ fn layout_pass(
 ) {
     let node_floats = read_f64_array(args.get(0));
     if node_floats.is_empty() {
+        rv.set_bool(false);
+        return;
+    }
+    // The record STRIDE is a contract between two files, and a buffer that does not divide by it is not a
+    // layout the pass should guess at: `chunks_exact` would silently drop the remainder and read every field at
+    // the wrong offset — garbage boxes, not a decline. That is precisely what a stale `.so` (the
+    // `rm -rf target/release` trap) or a half-applied stride bump produces, so check it once per pass.
+    if node_floats.len() % LAYOUT_STRIDE != 0 {
         rv.set_bool(false);
         return;
     }
@@ -1014,6 +1022,7 @@ fn layout_pass(
             ratio_only: (r[70] as u32) & 4 != 0,
             shrinks_to_nothing: (r[70] as u32) & 8 != 0,
             cb_index: r[71] as i32,
+            cb_rect: [r[92], r[93], r[94], r[95]],
             inset_top: r[72],
             inset_right: r[73],
             inset_bottom: r[74],

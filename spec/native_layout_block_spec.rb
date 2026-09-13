@@ -13,9 +13,12 @@ RSpec.describe 'native layout L1 block-flow parity', if: ENV.fetch('CSIM_JS_ENGI
     Rack::Builder.new { run ->(_env) { [200, {'content-type' => 'text/html'}, [html]] } }.to_app
   end
 
-  def parity(session)
+  # The pass root defaults to `<body>`; naming a SELECTOR runs the pass over that subtree instead, which is how
+  # a containing block ABOVE the root — the case a viewport-origin page cannot exercise — gets tested.
+  def parity(session, root = nil)
     session.evaluate_script('document.body.offsetHeight')   # force a layout pass
-    session.evaluate_script('globalThis.__csimLayoutShadowRun()')
+    return session.evaluate_script('globalThis.__csimLayoutShadowRun()') unless root
+    session.evaluate_script(%{globalThis.__csimLayoutShadowRun(document.querySelector(#{root.inspect}))})
   end
 
   it 'matches on stacked blocks with explicit heights' do
@@ -257,10 +260,12 @@ RSpec.describe 'native layout L1 block-flow parity', if: ENV.fetch('CSIM_JS_ENGI
   # axis stretching an auto size (less margins, an auto margin taking the slack), one or none leaving an auto
   # width to shrink to fit and an auto height to its content, the static position where an axis has no inset —
   # the flow cursor in block flow (the content's right edge in rtl), a flex container's alignment, a grid's
-  # content origin. A CB outside the pass (the viewport, an inline box) still replays the oracle's box.
-  def expect_native_oof(body, count = 1)
+  # content origin. A CB that is not a record of the pass — the viewport, an ancestor above it, an inline box —
+  # hands over its RECTANGLE instead (rec[92..95]); what still replays is an in-pass CB with percentage edges, or
+  # a shrink-to-fit width native cannot measure.
+  def expect_native_oof(body, count = 1, root: nil)
     session = simulated_session(page(body)); session.visit '/'
-    r = parity(session)
+    r = parity(session, root)
     expect(r).to include('ok' => true), "harness bailed: #{r.inspect}"
     expect(r['mismatches']).to eq(0), "mismatch: #{r.inspect}"
     expect(r['nativeOutOfFlow']).to be >= count, "the out-of-flow box was replayed, not placed natively: #{r.inspect}"
@@ -336,10 +341,11 @@ RSpec.describe 'native layout L1 block-flow parity', if: ENV.fetch('CSIM_JS_ENGI
       expect_native_oof('<div style="display:flex;position:relative;width:400px;padding:50px;height:100px"><div style="position:absolute;margin-left:10%;width:20px;height:20px"></div></div>')
       expect_native_oof('<div style="display:flex;position:relative;width:400px;padding:50px;height:100px;justify-content:center"><div style="position:absolute;margin-left:10%;width:20px;height:20px"></div></div>')
     end
-    it 'replays a box whose containing block lies outside the pass, or whose shrink-to-fit width native cannot measure' do
+    it 'places both an in-pass and a viewport containing block, and replays what it cannot lay out' do
+      # …the `fixed` box included: its containing block is the viewport, whose rectangle rides its record
       session = simulated_session(page('<div style="width:400px"><div style="position:relative;height:100px"><div style="position:absolute;top:10px;left:10px;width:20px;height:20px"></div></div><div style="position:fixed;top:5px;left:5px;width:40px;height:40px"></div></div>')); session.visit '/'
       r = parity(session)
-      expect(r).to include('ok' => true, 'mismatches' => 0, 'nativeOutOfFlow' => 1)
+      expect(r).to include('ok' => true, 'mismatches' => 0, 'nativeOutOfFlow' => 2)
       session = simulated_session(page(%(<div style="#{cb}"><div style="position:absolute;top:10px;left:20px;display:grid;grid-template-columns:100px 1fr"><div style="height:10px">a</div><div style="height:20px">b</div></div></div>))); session.visit '/'
       r = parity(session)
       expect(r).to include('ok' => true, 'mismatches' => 0, 'nativeOutOfFlow' => 0)
@@ -419,6 +425,70 @@ RSpec.describe 'native layout L1 block-flow parity', if: ENV.fetch('CSIM_JS_ENGI
     it 'still mirrors the columns of an rtl table in a vertical writing mode' do
       expect_parity('<div style="width:400px;direction:rtl;writing-mode:vertical-lr"><table><tr><td>a</td><td>bb</td></tr></table></div>')
       expect_parity('<div style="width:400px;direction:rtl"><table><tr><td>a</td><td>bb</td></tr></table></div>')
+    end
+  end
+
+  # A containing block is a RECTANGLE wherever it lives. One that is a record of the pass hands native its own
+  # box; one OUTSIDE the pass — the viewport of a `fixed` box, an ancestor above the pass root, a
+  # relatively-positioned inline — used to make the whole box replay the oracle's resolved geometry. Now the
+  # oracle's `containingBlockFor` rectangle rides the record (rec[92..95]) and native sizes and places the box
+  # from it exactly as it does for an in-pass containing block. `expect_native_oof` is what pins that: parity
+  # alone would pass on the replay too.
+  describe 'an out-of-flow box whose containing block is outside the pass' do
+    it 'places a fixed box against the viewport itself' do
+      expect_native_oof('<div style="width:400px;height:200px"><div style="position:fixed;top:10px;left:20px;width:50px;height:30px">f</div><div style="height:20px">flow</div></div>')
+      expect_native_oof('<div style="width:400px;height:200px"><div style="position:fixed;top:0;right:0;width:40px;height:40px">f</div></div>')
+      expect_native_oof('<div style="width:400px;height:200px"><div style="position:fixed;bottom:5px;right:5px;width:30px;height:30px">br</div></div>')
+      expect_native_oof('<div style="width:400px;height:200px"><div style="position:fixed;inset:0">stretched</div></div>')
+      expect_native_oof('<div style="width:400px;height:200px"><div style="position:fixed;left:0;right:0;height:20px;margin:0 auto;width:100px">centred</div></div>')
+      expect_native_oof('<div style="width:400px;height:200px"><div style="position:fixed;top:10%;left:25%;width:10%;height:5%">pct</div></div>')
+    end
+    it 'places an absolute box against the initial containing block' do
+      expect_native_oof('<div style="width:400px;height:200px"><div style="position:absolute;top:10px;left:10px;width:50px;height:20px">a</div><div style="height:30px">flow</div></div>')
+      expect_native_oof('<div style="width:400px;height:200px"><div style="position:absolute;left:0;right:0;top:0;height:25px">stretch</div></div>')
+      expect_native_oof('<div style="width:400px;height:200px"><div style="position:absolute;width:60px;height:20px">staticpos</div></div>')
+      expect_native_oof('<div style="width:400px;height:200px"><div style="position:absolute;top:50%;left:50%;width:50px;height:20px">half</div></div>')
+      # …its auto width shrink-to-fitting against that rectangle, measured natively
+      expect_native_oof('<div style="width:400px;height:200px"><div style="position:absolute;left:30px">shrink to fit me</div></div>')
+      expect_native_oof('<div style="width:400px;height:200px"><div style="position:absolute;left:30px"><div style="width:80px;height:10px"></div></div></div>')
+    end
+    # A containing block AWAY from the origin, above the pass root: the rectangle has to carry its position and
+    # its padding box, not just its size — every viewport-rooted shape above would pass on a (0,0) rect.
+    it 'places against a containing block above the pass root' do
+      outer = 'position:relative;margin:30px 0 0 40px;border:5px solid;padding:10px;width:300px;height:200px'
+      expect_native_oof(%{<div style="#{outer}"><div id="sub" style="height:50px"><div style="position:absolute;bottom:0;right:0;width:20px;height:10px"></div></div></div>}, root: '#sub')
+      expect_native_oof(%{<div style="#{outer}"><div id="sub" style="height:50px"><div style="position:absolute;top:50%;left:50%;width:20px;height:10px"></div></div></div>}, root: '#sub')
+      # …and one that is not the viewport and not a record either: a transformed ancestor contains a FIXED box
+      expect_native_oof(%{<div style="transform:translate(10px,20px);border:3px solid;width:300px;height:200px"><div id="sub" style="height:50px"><div style="position:fixed;top:10px;left:30px;width:20px;height:10px"></div></div></div>}, root: '#sub')
+    end
+    # …the one containing block that is INSIDE the pass and still has no record of its own: a relatively
+    # positioned inline, whose rectangle is the oracle's line layout (a pushed input, finer than the old replay).
+    it 'places against a relatively positioned inline' do
+      expect_native_oof('<div style="width:400px">t <span style="position:relative">a<span style="display:inline-block;width:30px;height:10px"><span style="position:absolute;top:1px;left:2px;width:20px;height:10px"></span></span></span></div>')
+    end
+    # …and one at its STATIC position inside an inline-block inside an inline box, which is the shape that
+    # showed the oracle holding a stale static position: the atomic is laid out at the line's provisional y and
+    # the baseline settle moves it afterwards, so the held position has to move with it (Chrome puts the box at
+    # the atomic's own content origin, y = 30 on a 48px line, not at the block's top).
+    it 'places one at its static position inside an atomic inline' do
+      expect_native_oof('<div style="width:400px;font-size:48px">Big <span>x<span style="display:inline-block;font-size:12px;width:60px;height:14px"><div style="position:absolute;width:10px;height:10px"></div></span></span></div>')
+      expect_native_oof('<div style="width:300px">t <span>a<span style="display:inline-block;width:30px;height:10px"><div style="position:fixed;width:5px;height:5px"></div></span></span></div>')
+      expect_native_oof('<div style="width:300px">t <span style="position:relative">a<span style="display:inline-block;width:30px;height:10px"><div style="position:absolute;width:5px;height:5px"></div></span></span></div>')
+    end
+    # …and where native cannot measure such a box's shrink-to-fit content, the oracle's box is still replayed
+    # rather than the pass being declined.
+    it 'replays one whose content native cannot measure' do
+      expect_replayed_oof(%{<div style="width:400px;height:200px"><div style="position:absolute;left:30px">a <span style="display:inline-block;margin:0 auto;width:20px;height:10px"></span></div></div>})
+    end
+    # The walk marshals the containing block the PLACEMENT resolved (`_lb.cbEl`), never its own re-derivation:
+    # `containingBlockElementFor` skips an ancestor whose box did not exist yet when the placement ran, so a
+    # positioned `<html>` reads as the viewport there and as the root here. Reading the stamp is what keeps the
+    # record and the geometry it is marshalling from being about two different boxes.
+    it 'measures against the containing block the placement resolved, not a fresh one' do
+      expect_native_oof('<style>html{position:relative}</style><div style="height:200px"><div style="position:absolute;bottom:0;left:0;width:40px;height:20px"></div></div>')
+      expect_native_oof('<style>html{position:relative;padding:20px;height:400px}</style><div style="height:200px"><div style="position:absolute;top:50%;left:0;width:40px;height:20px"></div></div>')
+      expect_native_oof('<style>html{transform:translateZ(0)}</style><div style="height:2000px"><div style="position:fixed;bottom:0;width:40px;height:20px"></div></div>')
+      expect_native_oof('<style>html{filter:invert(1)}</style><div style="height:2000px"><div style="position:fixed;bottom:0;width:40px;height:20px"></div></div>')
     end
   end
 
