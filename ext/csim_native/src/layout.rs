@@ -291,7 +291,14 @@ pub(crate) struct Input {
     pub(crate) inset_right: f64,
     pub(crate) inset_bottom: f64,
     pub(crate) inset_left: f64,
-    pub(crate) oof_auto_margins: u8,
+    // Which of this box's margins are `auto` (1 left, 2 right, 4 top, 8 bottom) — the record carries the mask
+    // because a resolved `auto` margin arrives as 0, indistinguishable from a declared one. The slack goes to
+    // them: between the INSETS of an out-of-flow box (§10.3.7 / §10.6.4), and in the containing block for an
+    // in-flow one (§10.3.3 — `margin: 0 auto`, how half the pages on the web centre their shell).
+    pub(crate) auto_margins: u8,
+    // HTML's LEGACY alignment on this box AS A CONTAINER (0 none, 1 center, 2 right, 3 left): `<center>` and
+    // the `align` attribute move a narrower block-level descendant in its band the way `margin: auto` would.
+    pub(crate) legacy_align: u8,
     // …and where that containing block is NOT a record of this pass — the viewport for a `fixed` box, an
     // ancestor above the pass root, a relatively-positioned inline — its PADDING BOX arrives instead, in the
     // pass's own (document) coordinates: `cb_index` is CB_RECT and these four are x / y / width / height, taken
@@ -1416,11 +1423,10 @@ fn measure(
                     };
                     let y = y0.max(clearance_y(&ctx.items, y0, cn.clear));
                     if y >= floats_bottom(&ctx.items) {
-                        boxes[c].x = if n.from_right() {
-                            content_left_rel + content_w - boxes[c].w - Input::m(cn.mr)
-                        } else {
-                            content_left_rel + Input::m(cn.ml)
-                        };
+                        // Past every float, so its band is the whole content width — which is what the
+                        // oracle's own `band == null` gives it, auto margins and legacy alignment included.
+                        boxes[c].x =
+                            block_child_x(&n, &cn, content_left_rel, content_left_rel + content_w, boxes[c].w);
                         boxes[c].y = y;
                         cursor = y + boxes[c].h;
                         pending = cm.bottom;
@@ -1458,7 +1464,7 @@ fn measure(
                 } else {
                     (cy, bl0, br0)
                 };
-                boxes[c].x = if n.from_right() { br - boxes[c].w - mr } else { bl + ml };
+                boxes[c].x = block_child_x(&n, &cn, bl, br, boxes[c].w);
                 boxes[c].y = y;
                 cursor = y + boxes[c].h;
                 pending = cm.bottom;
@@ -1483,11 +1489,7 @@ fn measure(
                 // back at content_left either way. `child_w` is its border box (`boxes[c].w` isn't set until the
                 // measure below). Its lines still route around the floats through the shared `ctx`.
                 let child_w = width_in(c, content_w);
-                let cx = if n.from_right() {
-                    content_left_rel + content_w - child_w - Input::m(cn.mr)
-                } else {
-                    content_left_rel + Input::m(cn.ml)
-                };
+                let cx = block_child_x(&n, &cn, content_left_rel, content_left_rel + content_w, child_w);
                 boxes[c].x = cx;
                 boxes[c].y = cy;
                 let cm = measure(c, child_w, f64::NAN, inputs, runs, run_texts, grids, children, boxes, failed, ctx, cx, cy);
@@ -1512,11 +1514,7 @@ fn measure(
         // edge sits at content_right - margin_right, so its left is that minus its width. A block that fills
         // the width lands back at content_left + margin_left, so this covers both. (This is the no-float path;
         // the float-context paths above mirror the same rtl placement for their own children.)
-        boxes[c].x = if n.from_right() {
-            content_left_rel + content_w - boxes[c].w - Input::m(cn.mr)
-        } else {
-            content_left_rel + Input::m(cn.ml)
-        };
+        boxes[c].x = block_child_x(&n, &cn, content_left_rel, content_left_rel + content_w, boxes[c].w);
         if first && top_open {
             // The first in-flow child's top margin collapses with this node's top margin (collapse-
             // through the open top edge): it propagates up, and the child sits AT the content top.
@@ -4110,6 +4108,50 @@ fn place(
     }
 }
 
+// Where an in-flow BLOCK-LEVEL child sits across its band, CSS 2.1 §10.3.3 applied: the leftover width goes to
+// whichever horizontal margins are `auto` — both, and the box is centred; one, and it is pushed to the other
+// side — and HTML's legacy `<center>` / `align` moves a box with no auto margin the same way. The flow's own
+// direction decides which margin LEADS: an `rtl` containing block balances on `margin-left`, so a 500px block
+// with `margin: 0 auto` in a 400px rtl container hangs off the LEFT. A FLOAT never distributes (§10.3.5
+// computes its auto margins to zero); it is placed by the float machinery, and the guard here says so anyway.
+// (Only the LEADING margin is returned: the trailing one is what the oracle stamps as `_lbMargins`, which is
+// what `getComputedStyle().marginLeft` resolves to on a centred box. Native produces no such output yet — one
+// of the oracle outputs still to be carried across before the JS layout can go.)
+fn block_child_x(n: &Input, cn: &Input, band_l: f64, band_r: f64, w: f64) -> f64 {
+    let (ml, mr) = (Input::m(cn.ml), Input::m(cn.mr));
+    let from_right = n.from_right();
+    let (lm, tm) = if from_right { (mr, ml) } else { (ml, mr) };
+    let (lead_auto, trail_auto) = if from_right {
+        (cn.auto_margins & 2 != 0, cn.auto_margins & 1 != 0)
+    } else {
+        (cn.auto_margins & 1 != 0, cn.auto_margins & 2 != 0)
+    };
+    let distributes = cn.auto_margins & 3 != 0 && cn.float_kind == 0;
+    let lead = if distributes {
+        auto_margin_split(lead_auto, trail_auto, lm, tm, band_r - band_l, w).0
+    } else {
+        lm + legacy_align_shift(n.legacy_align, from_right, band_r - band_l - w - ml - mr)
+    };
+    if from_right { band_r - w - lead } else { band_l + lead }
+}
+
+// …the legacy half of it, as an offset ON the leading margin: `<center>` centres, `align=right` pushes to the
+// end, `align=left` to the start — each measured from the edge the flow starts at, so an rtl block moves the
+// other way. Only a POSITIVE leftover moves anything.
+fn legacy_align_shift(legacy_align: u8, from_right: bool, spare: f64) -> f64 {
+    if legacy_align == 0 || !(spare > 0.0) {
+        return 0.0;
+    }
+    match (legacy_align, from_right) {
+        (1, false) | (1, true) => spare / 2.0, // center, either way round
+        (2, false) => spare,                   // right, in an ltr flow: all the way to the end
+        (2, true) => 0.0,                      // …which in rtl is where the box already starts
+        (3, false) => 0.0,                     // left, in ltr: likewise already there
+        (3, true) => spare,
+        _ => 0.0,
+    }
+}
+
 // The slack between two insets shared out to `auto` margins (CSS 2.1 §10.3.7 across, §10.6.4 down) — the
 // oracle's `autoMarginSplit`: both auto centre the box, one auto takes it all, and an over-constrained box (no
 // slack) sits flush at the lead edge with the trailing margin absorbing the negative remainder.
@@ -4209,7 +4251,7 @@ fn place_out_of_flow(
     let imposed = if is_auto(n.height) && auto_h > 0.0 { auto_h } else { f64::NAN };
     measure(c, w, imposed, inputs, runs, run_texts, grids, children, boxes, failed, &mut FloatCtx::new(), 0.0, 0.0);
     let h = boxes[c].h;
-    let am = n.oof_auto_margins;
+    let am = n.auto_margins;
     let (mx_lead, mx_trail) = if stretched { auto_margin_split(am & 1 != 0, am & 2 != 0, ml, mr, avail_w, w) } else { (ml, mr) };
     let (my_lead, my_trail) = if stretched_v { auto_margin_split(am & 4 != 0, am & 8 != 0, mt, mb, avail_h, h) } else { (mt, mb) };
     // The static position, in absolute coordinates: the parent's origin plus what it recorded — or, for a flex
@@ -4469,7 +4511,8 @@ mod tests {
             inset_right: f64::NAN,
             inset_bottom: f64::NAN,
             inset_left: f64::NAN,
-            oof_auto_margins: 0,
+            auto_margins: 0,
+            legacy_align: 0,
         }
     }
 

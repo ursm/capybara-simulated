@@ -11,6 +11,6 @@ module WalkRefusals
     '<span style="display:inline-block;white-space:pre">   </span>',
     '<span style="display:inline-block"><div style="contain:layout;width:9px;height:4px"></div></span>',
     '<span style="display:inline-block"><div style="width:max-content">bb</div></span>',
-    '<span style="display:inline-block"><div style="margin:0 auto;width:10px">x</div></span>'
+    '<span style="display:inline-block;max-width:min-content">bb</span>'
   ].freeze
 end

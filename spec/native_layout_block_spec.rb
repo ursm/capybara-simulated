@@ -391,19 +391,18 @@ RSpec.describe 'native layout L1 block-flow parity', if: ENV.fetch('CSIM_JS_ENGI
     # hand Rust a subtree it cannot re-measure. Every shape here lays out natively without the writing mode.
     it 'declines a vertical block whose atomic inline is pushed, not laid out natively' do
       [
-        'a <span style="display:inline-block;margin:0 auto;width:20px;height:10px"></span>',
         'a <span style="display:inline-block;width:max-content">bb</span>',
         'a <span style="display:inline-block;max-width:min-content">bb</span>',
         'a <span style="display:inline-block;text-indent:5px">t<div>x</div></span>',
         'a <span style="display:inline-block"><div style="position:sticky;top:0">s</div></span>',
         'a <span style="display:inline-block"><div style="float:left;width:9px;height:4px"></div>t</span>',
-        'a<br>b <span style="display:inline-block;margin:0 auto;width:20px;height:10px"></span>'
+        'a<br>b <span style="display:inline-block;width:max-content">bb</span>'
       ].each do |inner|
         expect_walk_declines(%{<div style="width:400px"><div style="writing-mode:vertical-lr">#{inner}</div></div>})
       end
       # …and through a GRID item, whose subtree is measured for the track sizes
-      expect_walk_declines('<div style="display:grid;grid-template-columns:200px;width:400px"><div><div style="writing-mode:vertical-lr">a <span style="display:inline-block;margin:0 auto;width:20px;height:10px"></span></div></div></div>')
-      expect_parity('<div style="width:400px"><div>a <span style="display:inline-block;margin:0 auto;width:20px;height:10px"></span></div></div>')
+      expect_walk_declines('<div style="display:grid;grid-template-columns:200px;width:400px"><div><div style="writing-mode:vertical-lr">a <span style="display:inline-block;width:max-content">bb</span></div></div></div>')
+      # …and the same content in a HORIZONTAL block lays out, the atomic pushed rather than the pass declined.
       expect_parity('<div style="width:400px"><div>a <span style="display:inline-block;width:max-content">bb</span></div></div>')
     end
     # `direction` runs the INLINE axis, which in a vertical mode is the vertical one: an rtl vertical block's
@@ -478,7 +477,7 @@ RSpec.describe 'native layout L1 block-flow parity', if: ENV.fetch('CSIM_JS_ENGI
     # …and where native cannot measure such a box's shrink-to-fit content, the oracle's box is still replayed
     # rather than the pass being declined.
     it 'replays one whose content native cannot measure' do
-      expect_replayed_oof(%{<div style="width:400px;height:200px"><div style="position:absolute;left:30px">a <span style="display:inline-block;margin:0 auto;width:20px;height:10px"></span></div></div>})
+      expect_replayed_oof(%{<div style="width:400px;height:200px"><div style="position:absolute;left:30px">a <span style="display:inline-block;width:max-content">bb</span></div></div>})
     end
     # The walk marshals the containing block the PLACEMENT resolved (`_lb.cbEl`), never its own re-derivation:
     # `containingBlockElementFor` skips an ancestor whose box did not exist yet when the placement ran, so a
@@ -497,7 +496,7 @@ RSpec.describe 'native layout L1 block-flow parity', if: ENV.fetch('CSIM_JS_ENGI
   # cannot MEASURE inside it is nobody's problem, because nobody measures it. Before this, the flag was
   # inherited and a pushed atomic inline inside an absolute box declined the whole pass.
   describe 'an out-of-flow box leaves the measured region' do
-    pushed_atomic = 'a <span style="display:inline-block;margin:0 auto;width:20px;height:10px"></span>'
+    pushed_atomic = 'a <span style="display:inline-block;width:max-content">bb</span>'
     it 'lays out an absolute box whose content native cannot measure, inside a subtree it does measure' do
       # …its box replayed, because its containing block is outside the pass — and the same as a `fixed` box
       expect_replayed_oof(%{<div style="width:400px"><div style="writing-mode:vertical-lr"><div style="position:absolute">#{pushed_atomic}</div><div style="width:9px;height:4px"></div></div></div>})
@@ -539,16 +538,82 @@ RSpec.describe 'native layout L1 block-flow parity', if: ENV.fetch('CSIM_JS_ENGI
 
   # A `<td>` whose content native cannot lay out itself pushes its own width CONTRIBUTION (rec[84..85]) and the
   # table is laid out around it. That needs `nlIntrinsicMeasurable` to answer what the walk will actually DO:
-  # while it ignored the walk's own refusals — a horizontal `auto` margin, an intrinsic-size keyword — a
-  # centred inline-block in a cell was called measurable, the cell was walked measured, and the atomic inside
-  # then declined the whole table.
+  # while it ignored the walk's own refusal of an intrinsic-size keyword, such an inline-block in a cell was
+  # called measurable, the cell was walked measured, and the atomic inside then declined the whole table.
   describe 'a cell whose content native cannot lay out pushes its contribution' do
-    it 'lays out a table around a cell holding a centred or keyword-sized inline-block' do
-      expect_parity(%{<table style="border-spacing:0"><tr><td style="padding:0">a <span style="display:inline-block;margin:0 auto;width:20px;height:10px"></span></td></tr></table>})
-      expect_parity(%{<table style="border-spacing:0"><tr><td style="padding:0">a <span style="display:inline-block;margin:0 auto;width:20px;height:10px"></span></td><td style="padding:0">bb</td></tr></table>})
+    it 'lays out a table around a cell holding a keyword-sized inline-block' do
+      expect_parity(%{<table style="border-spacing:0"><tr><td style="padding:0">a <span style="display:inline-block;width:max-content">bb</span></td><td style="padding:0">cc</td></tr></table>})
       expect_parity(%{<table style="border-spacing:0"><tr><td style="padding:0">a <span style="display:inline-block;width:max-content">bb</span></td></tr></table>})
-      expect_parity(%{<table style="border-spacing:0"><tr><td style="padding:0;width:50px">a <span style="display:inline-block;margin:0 auto;width:20px;height:10px"></span></td></tr></table>})
-      expect_parity(%{<div style="display:table;border-spacing:0"><div style="display:table-row"><div style="display:table-cell">a <span style="display:inline-block;margin:0 auto;width:20px;height:10px"></span></div></div></div>})
+      expect_parity(%{<table style="border-spacing:0"><tr><td style="padding:0;width:50px">a <span style="display:inline-block;width:max-content">bb</span></td></tr></table>})
+      expect_parity(%{<div style="display:table;border-spacing:0"><div style="display:table-row"><div style="display:table-cell">a <span style="display:inline-block;width:max-content">bb</span></div></div></div>})
+    end
+  end
+
+  # CSS 2.1 §10.3.3: the width a block does not take goes to whichever horizontal margins are `auto` — both,
+  # and the box is centred; one, and it is pushed to the other side. `margin: 0 auto` is how half the pages on
+  # the web centre their shell, so until native did it, none of them laid out natively at all.
+  describe 'auto horizontal margins place a block in its containing block' do
+    it 'centres a block with both margins auto, and pushes one with a single auto' do
+      expect_parity('<div style="width:400px"><div style="width:100px;height:10px;margin:0 auto"></div></div>')
+      expect_parity('<div style="width:400px"><div style="width:100px;height:10px;margin-left:auto"></div></div>')
+      expect_parity('<div style="width:400px"><div style="width:100px;height:10px;margin-right:auto"></div></div>')
+      expect_parity('<div style="width:400px"><div style="width:100px;height:10px;margin:0 auto 0 20px"></div></div>')
+      # …and a text block, whose lines are laid out around the placement
+      expect_parity('<div style="width:400px"><div style="width:100px;margin:0 auto">text that wraps here</div></div>')
+    end
+    # An AUTO width leaves nothing over (§10.3.3 resolves the margins to 0 first), and an over-constrained box
+    # balances on its TRAILING margin — Chrome puts `width:600px; margin:0 auto` in 400px flush at x=0.
+    it 'leaves an auto-width box alone and hangs an over-constrained one off the leading edge' do
+      expect_parity('<div style="width:400px"><div style="height:10px;margin:0 auto"></div></div>')
+      expect_parity('<div style="width:400px"><div style="width:600px;height:10px;margin:0 auto"></div></div>')
+      expect_parity('<div style="width:400px"><div style="width:600px;height:10px;margin-left:auto"></div></div>')
+    end
+    # …on the FLOW's own axis: an `rtl` containing block balances on `margin-left`, so the same over-constrained
+    # box hangs 200px off the LEFT (Chrome: x = -200).
+    it 'balances on the leading margin of the flow, which rtl reverses' do
+      expect_parity('<div style="width:400px;direction:rtl"><div style="width:100px;height:10px;margin:0 auto"></div></div>')
+      expect_parity('<div style="width:400px;direction:rtl"><div style="width:600px;height:10px;margin:0 auto"></div></div>')
+      expect_parity('<div style="width:400px;direction:rtl"><div style="width:100px;height:10px;margin-left:auto"></div></div>')
+    end
+    # A FLOAT computes its auto margins to ZERO instead (§10.3.5), and an atomic inline is placed on its line
+    # by the line box, not by its margins — both must keep laying out the way they did.
+    it 'gives a float and an atomic inline no slack' do
+      expect_parity('<div style="overflow:hidden;width:400px"><div style="float:left;width:100px;height:10px;margin:0 auto"></div></div>')
+      expect_parity('<div style="width:400px">t <span style="display:inline-block;width:50px;height:10px;margin:0 auto"></span> u</div>')
+      expect_parity('<div style="width:400px"><span style="display:inline-block;width:200px"><div style="width:50px;height:10px;margin:0 auto"></div></span></div>')
+    end
+    # The block flow places a child in FOUR places — the ordinary one, a text block, a box that establishes a
+    # BFC beside a float, and one CLEARED past the floats — and §10.3.3 belongs to all of them. Native shared
+    # the rule between three and left the cleared one placing by hand (Chrome centres it at 150, native had it
+    # at 0): a review found it, because no spec here had ever put an auto margin in a float context.
+    it 'places a cleared, a BFC and a text-block child by the same rule' do
+      float = '<div style="float:left;width:50px;height:20px"></div>'
+      expect_parity(%{<div style="overflow:hidden;width:400px">#{float}<div style="clear:left;width:100px;height:10px;margin:0 auto"></div></div>})
+      expect_parity(%{<div style="overflow:hidden;width:400px">#{float}<div style="clear:left;width:100px;height:10px;margin-left:auto"></div></div>})
+      expect_parity(%{<div align="center" style="overflow:hidden;width:400px">#{float}<div style="clear:left;width:100px;height:10px"></div></div>})
+      expect_parity(%{<div style="overflow:hidden;width:400px">#{float}<div style="overflow:hidden;width:100px;height:10px;margin:0 auto"></div></div>})
+      expect_parity(%{<div style="overflow:hidden;width:400px">#{float}<div style="width:100px;margin:0 auto">text</div></div>})
+    end
+    # HTML's legacy alignment moves a narrower block-level DESCENDANT the same way `margin: auto` would —
+    # `<center>` and the `align` attribute, still all over old app markup. Native laid these out at the start
+    # edge and only the parity harness saw it (the walk had no gate for them at all).
+    it 'moves a block the way <center> and an align attribute do' do
+      expect_parity('<center><div style="width:100px;height:10px"></div></center>')
+      expect_parity('<div align="center" style="width:400px"><div style="width:100px;height:10px"></div></div>')
+      expect_parity('<div align="right" style="width:400px"><div style="width:100px;height:10px"></div></div>')
+      expect_parity('<div align="left" style="width:400px;direction:rtl"><div style="width:100px;height:10px"></div></div>')
+      expect_parity('<div align="center" style="width:400px;direction:rtl"><div style="width:100px;height:10px"></div></div>')
+      # …and the two combinations that move NOTHING, because the box already starts at that end
+      expect_parity('<div align="right" style="width:400px;direction:rtl"><div style="width:100px;height:10px"></div></div>')
+      expect_parity('<div align="left" style="width:400px"><div style="width:100px;height:10px"></div></div>')
+      # …a VERTICAL-only auto margin distributes nothing across, so the legacy shift still applies through it
+      # (Chrome: 150. The oracle read any auto margin as "this box distributes" and left it at 0.)
+      expect_parity('<div align="center" style="width:400px"><div style="width:100px;height:10px;margin-top:auto"></div></div>')
+      expect_parity('<div align="center" style="width:400px"><div style="width:100px;height:10px;margin-bottom:auto"></div></div>')
+      # …and an auto margin wins over it: the box distributes, and the legacy shift is not applied on top.
+      expect_parity('<div align="center" style="width:400px"><div style="width:100px;height:10px;margin-left:auto"></div></div>')
+      # …it reaches a DESCENDANT, not just a child (the attribute is inherited down the flow).
+      expect_parity('<div align="center" style="width:400px"><div><div style="width:100px;height:10px"></div></div></div>')
     end
   end
 

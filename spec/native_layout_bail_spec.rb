@@ -21,8 +21,10 @@ RSpec.describe 'native layout bail coverage', if: ENV.fetch('CSIM_JS_ENGINE', 'v
     session.evaluate_script('globalThis.__csimLayoutShadowRun()')['ok']
   end
 
-  it 'declines a horizontal auto margin (centring), keeps a fixed margin' do
-    expect(native?('<div style="width:100px;margin:0 auto">x</div>')).to be false
+  it 'lays out a horizontal auto margin (centring) and a fixed margin alike' do
+    # §10.3.3 centring is native's own now (`block_child_x`); it used to be the walk's most common decline, and
+    # a page centring its shell with `margin: 0 auto` laid out nothing natively at all.
+    expect(native?('<div style="width:100px;margin:0 auto">x</div>')).to be true
     expect(native?('<div style="width:100px;margin:0 20px">x</div>')).to be true
   end
 

@@ -297,7 +297,7 @@ RSpec.describe 'native layout inline-atomic parity', if: ENV.fetch('CSIM_JS_ENGI
       # laid out with the atomic pushed rather than declined. (A FLOAT and a STRETCHED out-of-flow box never
       # needed a measure at all.) The one route with no fallback is a vertical writing mode's block child, whose
       # width IS its content's: that still declines.
-      ib = 'display:inline-block;margin:0 auto'
+      ib = 'display:inline-block;width:max-content'
       expect_bail(%(<div style="width:400px"><div style="writing-mode:vertical-lr">a <span style="#{ib}">in</span> b</div></div>))
       # Each route with the atomic it cannot lay out, and the SAME shape with one it can — so the counter shows
       # the fallback was taken here and is not simply never taken.
@@ -344,12 +344,12 @@ RSpec.describe 'native layout inline-atomic parity', if: ENV.fetch('CSIM_JS_ENGI
       expect(r).to include('ok' => true, 'mismatches' => 0, 'nativeAtomics' => 0)
       expect_native_atomic('<div style="width:400px">a <span style="display:inline-block"><div style="position:relative">t <span style="display:inline-block">ok</span></div></span> c</div>', 2)
     end
-    it 'answers the same two refusals for an inline image' do
-      # `nlAtomicNative` tests the auto margin and the size keyword BEFORE the `inline` branch, because the walk
-      # refuses an `<img>` record on the same two grounds — so a cell holding one pushes its contribution
-      # instead of taking the table down, exactly as for an inline-block.
+    it 'answers the same refusal for an inline image' do
+      # `nlAtomicNative` tests the size keyword BEFORE the `inline` branch, because the walk refuses an `<img>`
+      # record on the same ground — so a cell holding one pushes its contribution instead of taking the table
+      # down, exactly as for an inline-block.
       img = 'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7'
-      [%(<img style="margin:0 auto;width:20px;height:10px" src="#{img}">), %(<img style="width:max-content;height:10px" src="#{img}">)].each do |tag|
+      [%(<img style="max-width:min-content;width:20px;height:10px" src="#{img}">), %(<img style="width:max-content;height:10px" src="#{img}">)].each do |tag|
         r = run_shadow(%(<table style="border-spacing:0"><tr><td style="padding:0">a #{tag}</td></tr></table>))
         expect(r).to include('ok' => true, 'mismatches' => 0, 'nativeAtomics' => 0), "#{tag}: #{r.inspect}"
       end
@@ -363,7 +363,7 @@ RSpec.describe 'native layout inline-atomic parity', if: ENV.fetch('CSIM_JS_ENGI
         '<div style="width:400px">text <span style="display:inline-block"><div style="float:left;width:10px;height:10px"></div>beside</span> after</div>',
         '<div style="width:400px">text <span style="display:inline-block">日本語</span> after</div>',
         "<div style=\"width:400px\">text <span style=\"display:inline-block;white-space:pre\">a\tb</span> after</div>",
-        '<div style="width:400px">text <span style="display:inline-block;margin:0 auto;width:20px;height:10px"></span> after</div>'
+        '<div style="width:400px">text <span style="display:inline-block;width:max-content">bb</span> after</div>'
       ].each do |body|
         r = run_shadow(body)
         expect(r).to include('ok' => true, 'mismatches' => 0, 'nativeAtomics' => 0), "#{body}: #{r.inspect}"

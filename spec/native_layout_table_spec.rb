@@ -755,7 +755,7 @@ RSpec.describe 'native layout table parity', if: ENV.fetch('CSIM_JS_ENGINE', 'v8
       '<span style="display:inline-block;white-space:pre">   </span>',
       '<span style="display:inline-block"><div style="contain:layout;width:9px;height:4px"></div></span>',
       '<span style="display:inline-block"><div style="width:max-content">bb</div></span>',
-      '<span style="display:inline-block"><div style="margin:0 auto;width:10px">x</div></span>'
+      '<span style="display:inline-block;max-width:min-content">bb</span>'
     ]
     it 'lays out an auto, a fixed and a measured table around such a cell' do
       refused.each do |inner|
@@ -806,8 +806,8 @@ RSpec.describe 'native layout table parity', if: ENV.fetch('CSIM_JS_ENGINE', 'v8
       expect(r['pushedContributions']).to eq(count), "expected the oracle's contribution to be pushed: #{r.inspect}"
     end
 
-    it 'lays out a table whose caption holds a centred inline-block' do
-      atomic = 'a <span style="display:inline-block;margin:0 auto;width:20px;height:10px"></span>'
+    it 'lays out a table whose caption holds an inline-block native cannot measure' do
+      atomic = 'a <span style="display:inline-block;width:max-content">bb</span>'
       # asked for, and native cannot produce it: a vertical-writing-mode block child and a `min-content` track
       expect_pushed_contribution(%{<div style="width:400px"><div style="writing-mode:vertical-lr"><table><caption>#{atomic}</caption><tr><td>x</td></tr></table></div></div>})
       expect_pushed_contribution(%{<div style="display:grid;grid-template-columns:min-content;width:400px"><table style="border-spacing:0"><caption>#{atomic}</caption><tr><td style="padding:0">x</td></tr></table></div>})
@@ -828,7 +828,7 @@ RSpec.describe 'native layout table parity', if: ENV.fetch('CSIM_JS_ENGINE', 'v8
         '<span style="display:inline-block;position:relative">t<div style="position:absolute">y</div></span>',
         '<span style="display:inline-block;white-space:pre">   </span>',
         '<span style="display:inline-block"><div style="width:max-content">bb</div></span>',
-        '<span style="display:inline-block"><div style="margin:0 auto;width:10px">x</div></span>',
+        '<span style="display:inline-block;max-width:min-content">bb</span>',
         '<span style="display:inline-block"><div style="contain:layout;width:9px;height:4px"></div></span>'
       ].each do |inner|
         # …parked, unmeasured, and its contribution nobody's business — which is what the tally says
