@@ -349,9 +349,10 @@ module Capybara
       # Dispose every auxiliary window and return focus to the primary — a fresh
       # browsing context has no sibling windows. Disposing each aux Browser tears
       # down its worker / SSE / websocket threads and its V8 isolate eagerly; left
-      # alone they pile into V8Runtime's process-wide `@@live` set and are only
-      # reclaimed by the at_exit hook, which on a long-lived multi-file session
-      # (the WPT runner) means a slow — sometimes minutes-long — process exit. Split
+      # alone they are reclaimed by nothing until the at_exit hook (the engine
+      # roots every attached host fn — see V8Runtime's `@@live`), which on a
+      # long-lived multi-file session (the WPT runner) means a slow — sometimes
+      # minutes-long — process exit. Split
       # out of `reset!` so a caller can drop windows WITHOUT resetting the primary's
       # page state (the WPT runner rebuilds the primary itself, per file, via visit).
       def reset_windows!
@@ -368,7 +369,8 @@ module Capybara
       # per-test reset path rebuilds only its page); this is for permanently
       # DROPPING a session. A caller that nils its session without this leaks the
       # primary isolate — with its heap, canvas pixel buffers, and worker threads —
-      # into V8Runtime's process-wide `@@live` until at_exit. The WPT runner recycles
+      # until at_exit, no GC being able to reach it (V8Runtime's `@@live` explains
+      # why: the engine roots the attached host fns). The WPT runner recycles
       # the cross-origin session per `.sub.`/`.https.` file, so that leak is ~one
       # isolate per cross-origin file (hundreds over the suite); disposing here
       # incrementally is what reset_windows! already does for aux windows.
@@ -377,7 +379,10 @@ module Capybara
         @disposed = true
         # Drop out of the live registry FIRST: everything below tears down the runtime this driver
         # would be asked to step if `each_live_on_thread` still yielded it.
-        @@live_lock.synchronize { @@live.reject! {|ref| (ref.__getobj__ rescue nil).equal?(self) } }
+        @@live_lock.synchronize {
+          @@live.select!(&:weakref_alive?)
+          @@live.reject! {|ref| (ref.__getobj__ rescue nil).equal?(self) }
+        }
         reset_windows!
         @browser.dispose rescue nil
       end

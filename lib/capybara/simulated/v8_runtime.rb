@@ -12,6 +12,7 @@
 require 'digest'
 require 'fileutils'
 require 'uri'
+require 'weakref'
 
 # csim's own native extension: the V8 engine (rusty_racer, linked as a library)
 # plus the native DOM, in one cdylib. Loading it defines RustyRacer::* and
@@ -81,12 +82,28 @@ module Capybara
 
       @@snapshot_lock = Mutex.new
       @@snapshot      = nil
+      # Every isolate this process built, held WEAKLY (as `Driver.@@live` holds its drivers). The
+      # at_exit sweep disposes whatever is still reachable then, so a run ends with V8's background
+      # threads stopped rather than racing interpreter teardown — but a runtime the app has dropped
+      # must not be kept alive merely to be swept: a STRONG entry here pinned every session for the
+      # life of the process (~31 MB each), which is what exhausted memory on a long single-process
+      # corpus run.
+      #
+      # This alone does NOT make a dropped session collectable, and nothing in csim can: rusty_racer
+      # roots every ATTACHED host fn with `rb_gc_register_address`, and ours capture the Browser, so
+      # root → Proc → Browser → V8Runtime → Ctx → Isolate is a cycle THROUGH a GC root, which
+      # mark-and-sweep cannot break. Measured 2026-09-13: dropping fifteen sessions and forcing a full
+      # GC reclaimed none of them (RSS +426 MB, all fifteen isolates alive); `Driver#dispose`, which
+      # releases the context's procs, keeps RSS flat. So `dispose` remains mandatory for anything that
+      # builds many sessions in one process until that rooting becomes a MARK from rusty_racer's own
+      # wrapper — what this registry no longer does is add a second pin of csim's own.
       @@live_lock     = Mutex.new
       @@live          = []
 
       at_exit do
         @@live_lock.synchronize {
-          @@live.each {|c|
+          @@live.each {|ref|
+            c = (ref.__getobj__ rescue nil) or next
             begin
               c.terminate rescue nil
               c.dispose
@@ -815,34 +832,44 @@ module Capybara
         @ctx ||= build_and_track_ctx
       end
 
-      # build_ctx + register for at_exit cleanup.
+      # build_ctx + register for at_exit cleanup. Registering prunes the entries
+      # already collected, so the array tracks the LIVE isolates rather than
+      # growing once per session for the life of the process.
       def build_and_track_ctx
         c = build_ctx
-        @@live_lock.synchronize { @@live << c }
+        @@live_lock.synchronize {
+          @@live.select!(&:weakref_alive?)
+          @@live << WeakRef.new(c)
+        }
         c
       end
 
       # Terminate + dispose a tracked isolate and drop it from the at-exit
       # `@@live` registry. Dispose FIRST and de-register only on success: if
-      # `dispose` raises (rescued), the isolate stays in `@@live` so the at_exit
-      # sweep retries it instead of leaking it un-disposed. Shared by the
-      # cold-rebuild fallback (`rebuild_ctx`) and `#dispose`.
+      # `dispose` raises (rescued), the isolate stays registered so the at_exit
+      # sweep retries it — as far as it can, the entry being weak: a caller that
+      # then drops the runtime leaves the sweep a dead ref, and the retry falls to
+      # the wrapper's own free. Shared by the cold-rebuild fallback
+      # (`rebuild_ctx`) and `#dispose`.
       def dispose_ctx(c)
         return unless c
         c.terminate rescue nil
         c.dispose
-        @@live_lock.synchronize { @@live.delete(c) }
+        @@live_lock.synchronize {
+          @@live.select!(&:weakref_alive?)
+          @@live.reject! {|ref| (ref.__getobj__ rescue nil).equal?(c) }
+        }
       rescue StandardError
       end
 
       # Tear this runtime's isolate down for good. Each auxiliary window
       # (`window.open` / a switched-into `target=_blank`) is its own Browser +
       # V8Runtime + isolate; without this, closing the window reaped its
-      # background threads (Browser#dispose) but left the isolate ALIVE — the
-      # `@@live` at-exit registry holds a strong reference, so a bare GC never
-      # reclaimed it. Over a long suite those isolates (and their RSS)
-      # accumulated (measured: V8 isolate count 2 → 10, RSS ~2.7 → 6.6 GB across
-      # the Discourse suite). Idempotent; only ever called on teardown
+      # background threads (Browser#dispose) but left the isolate ALIVE — and no
+      # GC reclaims it, the attached host fns being GC roots (see `@@live`). Over
+      # a long suite those isolates (and their RSS) accumulated (measured: V8
+      # isolate count 2 → 10, RSS ~2.7 → 6.6 GB across the Discourse suite).
+      # Idempotent; only ever called on teardown
       # (Browser#dispose) — never on the per-test `reset_page` path, which
       # reuses the isolate via `Context#reset`. The `ctx` getter stops rebuilding
       # once `@disposed`, so a stray post-close call can't resurrect the isolate.
