@@ -1183,6 +1183,8 @@ fn measure(
                 let (ml, mr, mt, mb) = (Input::m(k.ml), Input::m(k.mr), Input::m(k.mt), Input::m(k.mb));
                 let auto_w = if k.replaced && k.ratio_only {
                     (content_w - ml - mr).max(0.0)
+                } else if !is_auto(k.width) {
+                    0.0 // a declared width discards it — and asking would walk a subtree for nothing (see place_out_of_flow)
                 } else {
                     // …else it shrink-to-fits in the block's own content width (the oracle's inline-level path
                     // passes that as both the room and the percentage basis).
@@ -4104,6 +4106,14 @@ fn place_out_of_flow(
     let (static_rx, static_ry) = (boxes[c].x, boxes[c].y);
     let auto_w = if stretched || (n.replaced && n.ratio_only) {
         (avail_w - ml - mr).max(0.0)
+    } else if !is_auto(n.width) {
+        // A DECLARED width: `used_width` answers from the declaration and discards `auto_w`, so the
+        // shrink-to-fit measure is not merely wasted work (an O(subtree) walk per out-of-flow box) — asked, it
+        // descends where the WALK did not gate for it. The record's `decl_w` is basis-less, so a PERCENTAGE
+        // width reads as `auto` inside `intrinsic_widths` and the walk it short-circuits for a length runs
+        // after all: a `position: absolute; width: 50%` box holding an atomic native cannot measure failed the
+        // whole pass over a figure nobody reads.
+        0.0
     } else {
         match shrink_to_fit_width(c, avail_w, inputs, runs, run_texts, grids, children) {
             Some(w) => w,

@@ -288,16 +288,33 @@ RSpec.describe 'native layout inline-atomic parity', if: ENV.fetch('CSIM_JS_ENGI
       r = run_shadow('<div style="width:400px">text <span style="display:inline-block"><select multiple style="display:block"><option>a</option></select></span> after</div>')
       expect(r).to include('ok' => true, 'mismatches' => 0, 'nativeAtomics' => 0)
     end
-    it 'declines a text block whose atomic needs the pushed box inside a subtree native MEASURES' do
+    it 'keeps the pushed box by NOT measuring the subtree it sits in' do
       # A pushed atomic's box is not in the run stream `text_intrinsic` reads, so it may only sit in a text block
-      # whose intrinsic widths native never asks for: a nested atomic, a grid intrinsic track's item, a natively
-      # sized flex item or a shrink-to-fit out-of-flow box declines the whole pass instead (the oracle lays it
-      # out). A FLOAT and a STRETCHED out-of-flow box are sized without an intrinsic measure, so they push.
+      # whose intrinsic widths native never asks for. That is decided BEFORE the walk: `nlAtomicMeasurable`
+      # answers what the walk will DO with the atomic, so a container that would have measured such a subtree
+      # takes its own fallback instead — a grid intrinsic track and a flex item use the oracle's contribution, a
+      # shrink-to-fit out-of-flow box keeps the oracle's box, an outer atomic is pushed whole — and the pass is
+      # laid out with the atomic pushed rather than declined. (A FLOAT and a STRETCHED out-of-flow box never
+      # needed a measure at all.) The one route with no fallback is a vertical writing mode's block child, whose
+      # width IS its content's: that still declines.
       ib = 'display:inline-block;margin:0 auto'
-      expect_bail(%(<div style="display:grid;grid-template-columns:min-content auto;width:400px"><div>a <span style="#{ib}">in</span> b</div><div>x</div></div>))
-      expect_bail(%(<div style="display:flex;width:100px"><div>a <span style="#{ib}">in</span> b</div><div style="flex:1">x</div></div>))
-      expect_bail(%(<div style="width:400px;position:relative"><div style="position:absolute;left:0">a <span style="#{ib}">in</span> b</div><p>x</p></div>))
+      expect_bail(%(<div style="width:400px"><div style="writing-mode:vertical-lr">a <span style="#{ib}">in</span> b</div></div>))
+      # Each route with the atomic it cannot lay out, and the SAME shape with one it can — so the counter shows
+      # the fallback was taken here and is not simply never taken.
       [
+        ['nativeIntrinsicGrids', %(<div style="display:grid;grid-template-columns:min-content auto;width:400px"><div>a <span style="%s">in</span> b</div><div>x</div></div>)],
+        ['nativeFlexRows',       %(<div style="display:flex;width:100px"><div>a <span style="%s">in</span> b</div><div style="flex:1">x</div></div>)],
+        ['nativeOutOfFlow',      %(<div style="width:400px;position:relative"><div style="position:absolute;left:0">a <span style="%s">in</span> b</div><p>x</p></div>)]
+      ].each do |counter, shape|
+        fallback = run_shadow(shape.sub('%s', ib))
+        expect(fallback).to include('ok' => true, 'mismatches' => 0, 'nativeAtomics' => 0), "#{shape}: #{fallback.inspect}"
+        expect(fallback[counter]).to eq(0), "#{counter} should have fallen back: #{fallback.inspect}"
+        measured = run_shadow(shape.sub('%s', 'display:inline-block'))
+        expect(measured).to include('ok' => true, 'mismatches' => 0), "#{shape}: #{measured.inspect}"
+        expect(measured[counter]).to be >= 1, "#{counter} never measures, so the fallback pins nothing: #{measured.inspect}"
+      end
+      [
+        %(<div style="width:400px">x <span style="display:inline-block">a <span style="#{ib}">in</span> b</span></div>),
         %(<div style="overflow:hidden;width:400px"><div style="float:left;width:200px">f <span style="display:inline-block">a <span style="#{ib}">x</span> b</span> g</div></div>),
         %(<div style="width:400px;position:relative"><div style="position:absolute;left:0;right:100px">a <span style="#{ib}">in</span> b</div><p>x</p></div>),
         %(<div style="display:grid;grid-template-columns:100px 200px;width:400px"><div>a <span style="#{ib}">in</span> b</div><div>x</div></div>)
@@ -326,6 +343,19 @@ RSpec.describe 'native layout inline-atomic parity', if: ENV.fetch('CSIM_JS_ENGI
       r = run_shadow(%(<div style="width:400px">a <span style="display:inline-block">a <span style="#{ib}">in</span> b</span> c</div>))
       expect(r).to include('ok' => true, 'mismatches' => 0, 'nativeAtomics' => 0)
       expect_native_atomic('<div style="width:400px">a <span style="display:inline-block"><div style="position:relative">t <span style="display:inline-block">ok</span></div></span> c</div>', 2)
+    end
+    it 'answers the same two refusals for an inline image' do
+      # `nlAtomicNative` tests the auto margin and the size keyword BEFORE the `inline` branch, because the walk
+      # refuses an `<img>` record on the same two grounds — so a cell holding one pushes its contribution
+      # instead of taking the table down, exactly as for an inline-block.
+      img = 'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7'
+      [%(<img style="margin:0 auto;width:20px;height:10px" src="#{img}">), %(<img style="width:max-content;height:10px" src="#{img}">)].each do |tag|
+        r = run_shadow(%(<table style="border-spacing:0"><tr><td style="padding:0">a #{tag}</td></tr></table>))
+        expect(r).to include('ok' => true, 'mismatches' => 0, 'nativeAtomics' => 0), "#{tag}: #{r.inspect}"
+      end
+      # …while an image it does lay out stays native, in a cell and on an ordinary line
+      expect_native_atomic(%(<table style="border-spacing:0"><tr><td style="padding:0">a <img style="width:20px;height:10px" src="#{img}"></td></tr></table>))
+      expect_native_atomic(%(<div style="width:400px">a <img style="width:20px;height:10px" src="#{img}"> b</div>))
     end
     it 'rolls a declined subtree back off the record stream and pushes its box' do
       [

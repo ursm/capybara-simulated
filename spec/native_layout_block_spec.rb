@@ -266,6 +266,15 @@ RSpec.describe 'native layout L1 block-flow parity', if: ENV.fetch('CSIM_JS_ENGI
     expect(r['nativeOutOfFlow']).to be >= count, "the out-of-flow box was replayed, not placed natively: #{r.inspect}"
   end
 
+  # …and the fallback: the pass still succeeds with the oracle's box REPLAYED over the container's origin.
+  def expect_replayed_oof(body)
+    session = simulated_session(page(body)); session.visit '/'
+    r = parity(session)
+    expect(r).to include('ok' => true), "harness bailed: #{r.inspect}"
+    expect(r['mismatches']).to eq(0), "mismatch: #{r.inspect}"
+    expect(r['nativeOutOfFlow']).to eq(0), "expected the oracle's box to be replayed: #{r.inspect}"
+  end
+
   describe 'native out-of-flow positioning' do
     let(:cb) { 'position:relative;width:400px;height:200px' }
 
@@ -410,6 +419,55 @@ RSpec.describe 'native layout L1 block-flow parity', if: ENV.fetch('CSIM_JS_ENGI
     it 'still mirrors the columns of an rtl table in a vertical writing mode' do
       expect_parity('<div style="width:400px;direction:rtl;writing-mode:vertical-lr"><table><tr><td>a</td><td>bb</td></tr></table></div>')
       expect_parity('<div style="width:400px;direction:rtl"><table><tr><td>a</td><td>bb</td></tr></table></div>')
+    end
+  end
+
+  # An out-of-flow box is in NO ancestor's intrinsic contribution: a contribution skips an out-of-flow child
+  # outright, and the box is in no run stream. So walking one LEAVES the measured region — whatever native
+  # cannot MEASURE inside it is nobody's problem, because nobody measures it. Before this, the flag was
+  # inherited and a pushed atomic inline inside an absolute box declined the whole pass.
+  describe 'an out-of-flow box leaves the measured region' do
+    pushed_atomic = 'a <span style="display:inline-block;margin:0 auto;width:20px;height:10px"></span>'
+    it 'lays out an absolute box whose content native cannot measure, inside a subtree it does measure' do
+      # …its box replayed, because its containing block is outside the pass — and the same as a `fixed` box
+      expect_replayed_oof(%{<div style="width:400px"><div style="writing-mode:vertical-lr"><div style="position:absolute">#{pushed_atomic}</div><div style="width:9px;height:4px"></div></div></div>})
+      expect_replayed_oof(%{<div style="width:400px"><div style="writing-mode:vertical-lr"><div style="position:fixed;top:0;left:0">#{pushed_atomic}</div><div style="width:9px;height:4px"></div></div></div>})
+      # …and sized and placed by NATIVE itself, from both insets, from a declared width, or from a percentage
+      # one (whose figure `used_width` takes from the record, so no intrinsic measure is asked at all)
+      expect_native_oof(%{<div style="width:400px"><div style="writing-mode:vertical-lr;position:relative"><div style="position:absolute;left:0;right:0">#{pushed_atomic}</div><div style="width:9px;height:4px"></div></div></div>})
+      expect_native_oof(%{<div style="width:400px"><div style="writing-mode:vertical-lr;position:relative"><div style="position:absolute;width:60px">#{pushed_atomic}</div><div style="width:9px;height:4px"></div></div></div>})
+      expect_native_oof(%{<div style="width:400px"><div style="writing-mode:vertical-lr;position:relative"><div style="position:absolute;width:50%">#{pushed_atomic}</div><div style="width:9px;height:4px"></div></div></div>})
+      expect_native_oof(%{<div style="width:400px;position:relative"><div style="position:absolute;width:calc(50% + 10px)">#{pushed_atomic}</div><div style="width:9px;height:4px"></div></div>})
+    end
+    # …and the other routes walked measured reach it too: an atomic inline, a flex item, a table cell, a grid
+    # item. (Through a pure BLOCK child, because a text block holding an out-of-flow child declines outright.)
+    it 'lays one out inside every other measured route' do
+      oof = %{<div style="width:30px"><div style="position:absolute;width:60px">#{pushed_atomic}</div></div>}
+      expect_native_oof(%{<div style="width:400px">x <span style="display:inline-block;position:relative">#{oof}</span></div>})
+      expect_native_oof(%{<div style="width:400px;display:flex"><div style="position:relative">#{oof}</div></div>})
+      expect_native_oof(%{<table style="border-spacing:0"><tr><td style="padding:0;position:relative">#{oof}</td></tr></table>})
+      expect_native_oof(%{<div style="display:grid;grid-template-columns:auto;width:400px"><div style="position:relative">#{oof}</div></div>})
+    end
+    # An out-of-flow box whose OWN width IS a shrink-to-fit needs an intrinsic measure of its content, so where
+    # native cannot measure that content the box keeps the oracle's box — the pass is not declined for it.
+    it 'replays a shrink-to-fit box whose own content native cannot measure' do
+      expect_replayed_oof(%{<div style="width:400px;position:relative"><div style="writing-mode:vertical-lr"><div style="position:absolute;left:0">#{pushed_atomic}</div><div style="width:9px;height:4px"></div></div></div>})
+      expect_replayed_oof(%{<div style="width:400px;position:relative"><div style="writing-mode:vertical-lr"><div style="position:absolute">#{pushed_atomic}</div><div style="width:9px;height:4px"></div></div></div>})
+    end
+  end
+
+  # A `<td>` whose content native cannot lay out itself pushes its own width CONTRIBUTION (rec[84..85]) and the
+  # table is laid out around it. That needs `nlIntrinsicMeasurable` to answer what the walk will actually DO:
+  # while it ignored the walk's own refusals — a horizontal `auto` margin, an intrinsic-size keyword — a
+  # centred inline-block in a cell was called measurable, the cell was walked measured, and the atomic inside
+  # then declined the whole table.
+  describe 'a cell whose content native cannot lay out pushes its contribution' do
+    it 'lays out a table around a cell holding a centred or keyword-sized inline-block' do
+      expect_parity(%{<table style="border-spacing:0"><tr><td style="padding:0">a <span style="display:inline-block;margin:0 auto;width:20px;height:10px"></span></td></tr></table>})
+      expect_parity(%{<table style="border-spacing:0"><tr><td style="padding:0">a <span style="display:inline-block;margin:0 auto;width:20px;height:10px"></span></td><td style="padding:0">bb</td></tr></table>})
+      expect_parity(%{<table style="border-spacing:0"><tr><td style="padding:0">a <span style="display:inline-block;width:max-content">bb</span></td></tr></table>})
+      expect_parity(%{<table style="border-spacing:0"><tr><td style="padding:0;width:50px">a <span style="display:inline-block;margin:0 auto;width:20px;height:10px"></span></td></tr></table>})
+      expect_parity(%{<div style="display:table;border-spacing:0"><div style="display:table-row"><div style="display:table-cell">a <span style="display:inline-block;margin:0 auto;width:20px;height:10px"></span></div></div></div>})
     end
   end
 

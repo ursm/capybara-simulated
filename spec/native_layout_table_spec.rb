@@ -736,4 +736,44 @@ RSpec.describe 'native layout table parity', if: ENV.fetch('CSIM_JS_ENGINE', 'v8
       expect_parity('<table style="border-spacing:0;height:100px"><tr style="height:auto"><td>a</td></tr><tr style="height:40px"><td>b</td></tr></table>')
     end
   end
+  # A CAPTION is the cell's twin: it floors the table's intrinsic width, and where native cannot measure it the
+  # oracle's contribution rides rec[84..85] (`table_min_max_with_caption` reads that and never descends). So it
+  # is the same measure BOUNDARY a pushed cell is — marked measured instead, a caption holding an atomic native
+  # cannot lay out declined the whole pass.
+  describe 'a caption whose content native cannot lay out pushes its contribution' do
+    def expect_pushed_contribution(body, count = 1)
+      r = run_shadow(body)
+      expect(r).to include('ok' => true), "harness bailed: #{r.inspect}"
+      expect(r['mismatches']).to eq(0), "mismatch: #{r.inspect}"
+      expect(r['pushedContributions']).to eq(count), "expected the oracle's contribution to be pushed: #{r.inspect}"
+    end
+
+    it 'lays out a table whose caption holds a centred inline-block' do
+      atomic = 'a <span style="display:inline-block;margin:0 auto;width:20px;height:10px"></span>'
+      expect_pushed_contribution(%{<table style="border-spacing:0"><caption>#{atomic}</caption><tr><td style="padding:0">x</td></tr></table>})
+      expect_pushed_contribution(%{<div style="width:400px"><div style="writing-mode:vertical-lr"><table><caption>#{atomic}</caption><tr><td>x</td></tr></table></div></div>})
+      expect_pushed_contribution(%{<div style="display:grid;grid-template-columns:min-content;width:400px"><table style="border-spacing:0"><caption>#{atomic}</caption><tr><td style="padding:0">x</td></tr></table></div>})
+      # …and one native CAN measure pushes nothing
+      expect_pushed_contribution(%{<table style="border-spacing:0"><caption>cap</caption><tr><td style="padding:0">x</td></tr></table>}, 0)
+    end
+    # A caption's contribution is read ONLY where the table's own is asked, so in a normal-flow table nothing
+    # measures it — and marking it measured there declined the pass over content the walk merely refuses. Each
+    # of these is a refusal `nlIntrinsicMeasurable` does not model, so only the unmarked caption survives them.
+    it 'never measures a caption no one asks about' do
+      [
+        '<span style="display:inline-block;text-indent:5px">t<div>x</div></span>',
+        '<span style="display:inline-block"><div style="position:sticky;top:0">s</div></span>',
+        '<span style="display:inline-block"><div style="float:left;width:9px;height:4px"></div>t</span>',
+        '<span style="display:inline-block;position:relative">t<div style="position:absolute">y</div></span>',
+        '<span style="display:inline-block;white-space:pre">   </span>',
+        '<span style="display:inline-block"><div style="width:max-content">bb</div></span>',
+        '<span style="display:inline-block"><div style="margin:0 auto;width:10px">x</div></span>',
+        '<span style="display:inline-block"><div style="contain:layout;width:9px;height:4px"></div></span>'
+      ].each do |inner|
+        # …parked, unmeasured, and its contribution nobody's business — which is what the tally says
+        expect_pushed_contribution(%{<div style="width:400px"><table><caption>a #{inner}</caption><tr><td>x</td></tr></table></div>}, 0)
+      end
+    end
+  end
+
 end
