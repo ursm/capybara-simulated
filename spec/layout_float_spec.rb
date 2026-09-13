@@ -181,4 +181,15 @@ RSpec.describe 'floats' do
     expect(session.evaluate_script("getComputedStyle(document.getElementById('t')).display")).to eq('table')
   end
 
+  # A SHRINK-TO-FIT box's own used width carries its percentage padding, where an intrinsic CONTRIBUTION leaves it
+  # out (a percentage resolves against nothing in an intrinsic measure). Chrome measured in a 400px block: a
+  # `float: left; padding: 0 10%` box around "hello there" is 147.97 — its 67.97 of text and padding-less box plus
+  # the 80 its padding comes to — and an `inline-block` or an out-of-flow box the same.
+  it 'gives a shrink-to-fit box its percentage padding' do
+    %w[float:left display:inline-block position:absolute].each do |style|
+      body = %(<div id="c" style="width:400px;position:relative"><div id="b" style="#{style};padding:0 10%">hello there</div></div>)
+      boxes, text = measure(body, ['#c', '#b'], probes: ['hello there'])
+      expect(boxes[1][2]).to be_within(0.02).of(text['hello there'] + 80), style
+    end
+  end
 end

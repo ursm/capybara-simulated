@@ -430,6 +430,10 @@ RSpec.describe 'native layout flex parity', if: ENV.fetch('CSIM_JS_ENGINE', 'v8'
   it('matches a percentage-padded item inside an intrinsically measured flex container') { expect_parity('<div style="display:flex;width:400px"><div style="display:flex"><div style="padding:0 10%;min-width:50px;width:20px;height:10px"></div></div><div>x</div></div>') }
   it('matches an auto margin beside a real one on a measured item') { expect_parity('<div style="display:flex;width:400px"><div style="display:flex"><div style="margin-left:auto;margin-right:30px;width:50px;height:10px"></div></div><div>x</div></div>') }
   it('matches a percentage-padded TABLE measured inside a flex item') { expect_parity('<div style="display:flex;width:400px"><div><table style="padding:0 10%"><tr><td>hello</td></tr></table></div><div>x</div></div>') }
+  # A shrink-to-fit COLUMN item and a row item's automatic MINIMUM both carry the item's own percentage padding
+  # (the mirror of the row base's correction; Chrome floors the shrinking item at 52 in a 100px row).
+  it('matches a percentage-padded shrink-to-fit column item') { expect_parity('<div style="width:400px"><div style="display:flex;flex-direction:column;align-items:flex-start"><div style="padding:0 10%">hello there</div></div></div>') }
+  it('matches a percentage-padded item floored by its automatic minimum') { expect_parity('<div style="display:flex;width:100px"><div style="padding:0 10%;flex-shrink:1">hello there</div><div style="width:90px;flex-shrink:0">x</div></div>') }
   it('matches a percentage padding item beside a fixed one') { expect_parity('<div style="display:flex;width:400px"><div style="padding-left:10%">a</div><div style="width:80px">b</div></div>') }
   it('matches an inline-block item with an explicit size (blockified)') { expect_parity('<div style="display:flex;width:400px"><span style="display:inline-block;width:80px;height:30px"></span><div style="width:80px;height:30px"></div></div>') }
   # An INLINE-FLEX flex item is BLOCKIFIED (§4: inline-flex → flex): it lays out as a block-level flex container

@@ -360,6 +360,12 @@ impl Input {
     fn edges_x(&self) -> f64 {
         self.pl + self.pr + self.bl + self.br
     }
+    // How much of that is PERCENTAGE: what an intrinsic contribution leaves out (`decl_edges_x` resolves a
+    // percentage to nothing) and what a box's OWN used width — a shrink-to-fit one — has to put back. Zero for
+    // the common box, which declares no percentage edge at all.
+    fn pct_edges_x(&self) -> f64 {
+        self.edges_x() - self.decl_edges_x
+    }
     fn edges_y(&self) -> f64 {
         self.pt + self.pb + self.bt + self.bb
     }
@@ -1162,7 +1168,12 @@ fn measure(
                     (content_w - ml - mr).max(0.0)
                 } else {
                     match intrinsic_widths(c, inputs, runs, run_texts, grids, children) {
-                        Some((imin, imax)) => imin.max(content_w).min(imax),
+                        // …plus the percentage part of its own edges: the intrinsic figures leave it out, the
+                        // box uses it (`shrinkToFitWidth`).
+                        Some((imin, imax)) => {
+                            let pct = k.pct_edges_x();
+                            (imin + pct).max(content_w).min(imax + pct)
+                        }
                         None => {
                             failed.set(true);
                             0.0
@@ -1831,7 +1842,8 @@ fn flex_column_sizes(
             avail_w
         } else {
             let (imin, imax) = intrinsic_widths(c, inputs, runs, run_texts, grids, children)?;
-            imin.max(avail_w).min(imax)
+            let pct = k.pct_edges_x(); // its own percentage edges, which the intrinsic figures leave out
+            (imin + pct).max(avail_w).min(imax + pct)
         };
         width[p] = used_width(&k, auto_w);
         // STRETCH beats an intrinsic size: a replaced item with a size but no ratio (a control, an iframe) is the
@@ -3431,18 +3443,22 @@ fn content_intrinsic(i: usize, inputs: &[Input], runs: &[Run], run_texts: &[Opti
 }
 
 // A box's min-content WIDTH as a flex item's automatic minimum (§4.5) — the oracle's `minContentWidth`: the
-// content's min-content plus the edges, capped by a declared width (border-box per `box-sizing`; a
-// percentage is auto, `decl_w`).
+// content's min-content plus the box's RESOLVED edges (this is a floor on a used size, not an intrinsic
+// contribution — see the body), capped by a declared width (border-box per `box-sizing`; a percentage is auto,
+// `decl_w`).
 fn min_content_width(i: usize, inputs: &[Input], runs: &[Run], run_texts: &[Option<Vec<u16>>], grids: &[f64], children: &[Vec<usize>]) -> Option<f64> {
     let n = inputs[i];
     if n.replaced && !n.ratio_only {
         return Some(n.intrinsic_w); // the oracle's minContentWidth: the intrinsic width, edges not counted
     }
-    let content = content_intrinsic(i, inputs, runs, run_texts, grids, children)?.0 + n.decl_edges_x;
+    // The box's own edges RESOLVED: this is a floor on a used size, not an intrinsic contribution, so a
+    // percentage padding counts here as it does in the box (Chrome floors a `padding: 0 10%` item in a 100px row
+    // at 52 — its text plus the 20 the padding comes to).
+    let content = content_intrinsic(i, inputs, runs, run_texts, grids, children)?.0 + n.edges_x();
     if is_auto(n.decl_w) {
         return Some(content);
     }
-    let declared = if n.decl_border_box { n.decl_w } else { n.decl_w + n.decl_edges_x };
+    let declared = if n.decl_border_box { n.decl_w } else { n.decl_w + n.edges_x() };
     Some(declared.min(content))
 }
 
@@ -4027,7 +4043,10 @@ fn place_out_of_flow(
         (avail_w - ml - mr).max(0.0)
     } else {
         match intrinsic_widths(c, inputs, runs, run_texts, grids, children) {
-            Some((imin, imax)) => imin.max(avail_w).min(imax),
+            Some((imin, imax)) => {
+                let pct = n.pct_edges_x(); // its own percentage edges (`shrinkToFitWidth`)
+                (imin + pct).max(avail_w).min(imax + pct)
+            }
             None => {
                 failed.set(true);
                 0.0
@@ -5188,7 +5207,9 @@ mod tests {
         child.decl_w = 40.0;
         child.pl = 5.0;
         child.pr = 5.0;
-        child.decl_edges_x = 10.0; // the basis-less edges are their own input, like `decl_w`
+        // The basis-less edges are their own input, like `decl_w` — and they must be set beside any `pl` / `pr`,
+        // or `pct_edges_x()` reads the whole padding as a percentage.
+        child.decl_edges_x = 10.0;
         let mut pinned = blk(3.0, 0);
         pinned.decl_w = 70.0;
         pinned.decl_border_box = true;
