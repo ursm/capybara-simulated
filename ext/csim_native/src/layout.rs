@@ -167,10 +167,12 @@ pub(crate) struct Input {
     // is offset down by the caption's height), 1 = bottom (the caption sits below the grid). The caption's box
     // is pushed like a cell; the `<table>` el._lb is then the WRAPPER (caption + grid). 0 when no caption.
     pub(crate) caption_side: u8,
-    // direction: rtl on a block container (r1). Its in-flow block children are placed from the inline-start =
-    // RIGHT edge: x = content_left + content_w - child_border_width - margin_right (which reduces to the ltr
-    // content_left + margin_left for a block that FILLS the width, so one formula serves both). 0 = ltr. The
-    // harness bails an rtl block with floats or auto horizontal margins, so only this placement differs.
+    // `direction: rtl` (r1): the box's own INLINE axis runs backwards. 0 = ltr. Which PHYSICAL edge that
+    // inline-start is depends on the writing mode, so each consumer pairs this with the axis where the oracle
+    // does: the block flow places children from the right edge only where the inline axis is the horizontal one
+    // (`from_right`), while a TABLE mirrors its columns off `direction` ALONE (`measure_table`) — the oracle's
+    // table path reads `flowSides(table).rtl` and mirrors horizontally, because it never runs a table sideways.
+    // (Chrome reverses the columns down a vertical table's inline axis instead: the oracle's gap, not native's.)
     pub(crate) rtl: u8,
     // A text block's line alignment, PHYSICAL (the oracle's `textAlignOf` folds `start` / `end` through rtl):
     // 0 left, 1 right, 2 center. It moves a line's atomics (`line_layout`); `justify` never reaches native.
@@ -221,6 +223,10 @@ pub(crate) struct Input {
     // shrink-to-fits its columns (§17.5.2). False where the parent handed it a box (a grid area, a flex item's
     // pushed size, an out-of-flow inset box), and then the width the caller passed is the used one.
     pub(crate) self_sizes: bool,
+    // Whether the box's own BLOCK axis is the horizontal one — a vertical `writing-mode` (the oracle's
+    // `blockAxisOf(el) === 'width'`). Its AUTO width is then a BLOCK size, so as a block-level child it
+    // shrink-to-fits (`block_child_width`) instead of filling its containing block's inline size.
+    pub(crate) block_axis_is_x: bool,
     // The horizontal EDGES with NO percentage basis — padding + border (`decl_edges_x`) and the margins
     // (`decl_margin_x`, `auto` counted as 0) as an INTRINSIC measure reads them, a percentage resolving to
     // nothing (`edgeInsets(el, null)`). The record's own `pl`/`pr`/`ml`/`mr` are cbW-resolved, which is the right
@@ -366,6 +372,14 @@ impl Input {
     fn pct_edges_x(&self) -> f64 {
         self.edges_x() - self.decl_edges_x
     }
+    // Whether the box lays its own content out from the RIGHT: its inline axis runs backwards (`direction:
+    // rtl`) AND that axis is the horizontal one. In a VERTICAL writing mode the inline axis is the vertical
+    // one, so `direction` orders the lines along it and leaves the horizontal (block) axis alone: the children
+    // still start at the left content edge — which is what the oracle's block flow does, and what its `lineup`
+    // and `staticCornerFor` read off the PHYSICAL inline-start rather than off `direction`.
+    fn from_right(&self) -> bool {
+        self.rtl != 0 && !self.block_axis_is_x
+    }
     fn edges_y(&self) -> f64 {
         self.pt + self.pb + self.bt + self.bb
     }
@@ -470,6 +484,9 @@ pub(crate) fn layout_block(inputs: &[Input], runs: &[Run], run_texts: &[Option<V
     // measured natively (bad font handle, or a tab / combining mark / CJK the L2 line breaker declines)
     // — the whole pass then falls back to JS.
     let root_w = resolve_width(&inputs[0], root_cb_w);
+    // Bound to a name, never `let _`: the guard has to LIVE to the end of the pass — dropped at the semicolon
+    // it would clear the memo again immediately, silently, with nothing measuring the loss.
+    let _iw_guard = IwMemo::install(inputs.len());
     let failed = std::cell::Cell::new(false);
     let mut root_fc = FloatCtx::new();
     measure(0, root_w, f64::NAN, inputs, runs, run_texts, grids, &children, &mut boxes, &failed, &mut root_fc, 0.0, 0.0);
@@ -1167,13 +1184,10 @@ fn measure(
                 let auto_w = if k.replaced && k.ratio_only {
                     (content_w - ml - mr).max(0.0)
                 } else {
-                    match intrinsic_widths(c, inputs, runs, run_texts, grids, children) {
-                        // …plus the percentage part of its own edges: the intrinsic figures leave it out, the
-                        // box uses it (`shrinkToFitWidth`).
-                        Some((imin, imax)) => {
-                            let pct = k.pct_edges_x();
-                            (imin + pct).max(content_w).min(imax + pct)
-                        }
+                    // …else it shrink-to-fits in the block's own content width (the oracle's inline-level path
+                    // passes that as both the room and the percentage basis).
+                    match shrink_to_fit_width(c, content_w, inputs, runs, run_texts, grids, children) {
+                        Some(w) => w,
                         None => {
                             failed.set(true);
                             0.0
@@ -1189,7 +1203,7 @@ fn measure(
                 r.line_height = h + mt + mb;
             }
             let local: &[Run] = if has_native_atomic { &owned } else { &runs[rs..re] };
-            match line_layout(local, &run_texts[rs..re], n.strut_lh, n.strut_asc, content_w, &fc.items, cl, cr, bfc_top, n.ws_mode, n.text_align, n.rtl != 0) {
+            match line_layout(local, &run_texts[rs..re], n.strut_lh, n.strut_asc, content_w, &fc.items, cl, cr, bfc_top, n.ws_mode, n.text_align, n.from_right()) {
                 Some(ll) => {
                     boxes[i].first_baseline = ll.first.map(|(top, asc)| content_top_rel + top + asc);
                     boxes[i].last_baseline = ll.last.map(|(top, asc)| content_top_rel + top + asc);
@@ -1263,6 +1277,12 @@ fn measure(
     let mut first = true;
     let mut has_child = false;
     let mut all_children_through = true; // every in-flow child so far collapsed through (empty when childless)
+    // The border-box width an in-flow block child takes in `avail` of inline room — which is the content
+    // width, or the band a float narrows it to (`block_child_width`). Asked per branch, because each knows
+    // its own room and because the shrink-to-fit arm walks the child's subtree.
+    let width_in = |c: usize, avail: f64| {
+        block_child_width(c, avail, inputs, runs, run_texts, grids, children, failed)
+    };
 
     for &c in &children[i] {
         let cn = inputs[c];
@@ -1274,7 +1294,7 @@ fn measure(
             // establishes a BFC) and its box reset to this block's origin; `place` then positions it by rel_x/rel_y
             // alone (el._lb − container._lb). Neither touches the cursor / margin / has_child state.
             if cn.native_oof() {
-                boxes[c].x = if n.rtl != 0 { content_left_rel + content_w } else { content_left_rel };
+                boxes[c].x = if n.from_right() { content_left_rel + content_w } else { content_left_rel };
                 boxes[c].y = cursor;
                 continue;
             }
@@ -1314,7 +1334,6 @@ fn measure(
             });
             continue; // the flow cursor / first / has_child are untouched
         }
-        let child_w = resolve_width(&cn, content_w);
         // A DIRECT text-block child coexisting with floats routes its lines around them (§9.5). Its
         // collapsed top is deterministic (a text block never collapses through, top_only == of(mt)), so it
         // can be placed BEFORE measuring — which the narrowing needs, to know each line's flow position in
@@ -1331,7 +1350,7 @@ fn measure(
                 // COLLAPSING top margin (cm.top_only) — its own margin joined with any a first descendant
                 // folds through its open top edge — which is what the oracle advances the flow by
                 // (collapsingTopMargin); the own declared margin alone would drop the descendant's.
-                let cm = measure(c, child_w, f64::NAN, inputs, runs, run_texts, grids, children, boxes, failed, &mut FloatCtx::new(), 0.0, 0.0);
+                let cm = measure(c, width_in(c, content_w), f64::NAN, inputs, runs, run_texts, grids, children, boxes, failed, &mut FloatCtx::new(), 0.0, 0.0);
                 if cm.collapse_through {
                     // A THROUGH cleared box is placed by a different rule (§8.3.1: its own above-margin sits
                     // ON TOP of the clearance line, and it does not advance the flow) — defer to JS.
@@ -1346,7 +1365,7 @@ fn measure(
                     };
                     let y = y0.max(clearance_y(&ctx.items, y0, cn.clear));
                     if y >= floats_bottom(&ctx.items) {
-                        boxes[c].x = if n.rtl != 0 {
+                        boxes[c].x = if n.from_right() {
                             content_left_rel + content_w - boxes[c].w - Input::m(cn.mr)
                         } else {
                             content_left_rel + Input::m(cn.ml)
@@ -1378,7 +1397,7 @@ fn measure(
                     cursor + pending.value()
                 };
                 let (bl0, br0) = float_band(&ctx.items, cy, 1.0, cl, cr);
-                let cw = resolve_width(&cn, (br0 - bl0).max(0.0));
+                let cw = width_in(c, (br0 - bl0).max(0.0));
                 let cm = measure(c, cw, f64::NAN, inputs, runs, run_texts, grids, children, boxes, failed, &mut FloatCtx::new(), 0.0, 0.0);
                 let outer = boxes[c].w + ml + mr;
                 let (y, bl, br) = if outer > br0 - bl0 {
@@ -1388,7 +1407,7 @@ fn measure(
                 } else {
                     (cy, bl0, br0)
                 };
-                boxes[c].x = if n.rtl != 0 { br - boxes[c].w - mr } else { bl + ml };
+                boxes[c].x = if n.from_right() { br - boxes[c].w - mr } else { bl + ml };
                 boxes[c].y = y;
                 cursor = y + boxes[c].h;
                 pending = cm.bottom;
@@ -1412,7 +1431,8 @@ fn measure(
                 // content_right - margin_right), mirroring the no-float placement below. A full-width one lands
                 // back at content_left either way. `child_w` is its border box (`boxes[c].w` isn't set until the
                 // measure below). Its lines still route around the floats through the shared `ctx`.
-                let cx = if n.rtl != 0 {
+                let child_w = width_in(c, content_w);
+                let cx = if n.from_right() {
                     content_left_rel + content_w - child_w - Input::m(cn.mr)
                 } else {
                     content_left_rel + Input::m(cn.ml)
@@ -1433,7 +1453,7 @@ fn measure(
             }
         }
         has_child = true;
-        let cm = measure(c, child_w, f64::NAN, inputs, runs, run_texts, grids, children, boxes, failed, ctx, 0.0, 0.0);
+        let cm = measure(c, width_in(c, content_w), f64::NAN, inputs, runs, run_texts, grids, children, boxes, failed, ctx, 0.0, 0.0);
         if !cm.collapse_through {
             all_children_through = false;
         }
@@ -1441,7 +1461,7 @@ fn measure(
         // edge sits at content_right - margin_right, so its left is that minus its width. A block that fills
         // the width lands back at content_left + margin_left, so this covers both. (This is the no-float path;
         // the float-context paths above mirror the same rtl placement for their own children.)
-        boxes[c].x = if n.rtl != 0 {
+        boxes[c].x = if n.from_right() {
             content_left_rel + content_w - boxes[c].w - Input::m(cn.mr)
         } else {
             content_left_rel + Input::m(cn.ml)
@@ -1841,9 +1861,7 @@ fn flex_column_sizes(
         let auto_w = if k.flex_stretch && (!multiline || (k.replaced && k.ratio)) {
             avail_w
         } else {
-            let (imin, imax) = intrinsic_widths(c, inputs, runs, run_texts, grids, children)?;
-            let pct = k.pct_edges_x(); // its own percentage edges, which the intrinsic figures leave out
-            (imin + pct).max(avail_w).min(imax + pct)
+            shrink_to_fit_width(c, avail_w, inputs, runs, run_texts, grids, children)?
         };
         width[p] = used_width(&k, auto_w);
         // STRETCH beats an intrinsic size: a replaced item with a size but no ratio (a control, an iframe) is the
@@ -3369,7 +3387,52 @@ fn grid_column_content(
 // never the used box a push may have written nor the cbW-resolved edges a laid-out box uses. Floats pack on a
 // line inside a block container as inline boxes would. `None` for what isn't measured: a replayed grid, a pushed
 // atomic inline, an unmodelled run.
+// `intrinsic_widths` is a pure function of the RECORD TREE, which no pass ever mutates (`inputs` is a shared
+// slice, and nothing under it touches `boxes` or `failed`) — so within one pass each node's answer is asked
+// once and kept. That is the memo's contract, and a pass that ever DOES adjust a record and measure again owes
+// it a clear: park or drop the memo there, the way `IwMemo` parks an outer one. Without the memo every shrink-to-fit route re-walks the whole
+// subtree under it, and since `writing-mode` INHERITS, a vertical page asks for EVERY nested block: the walk
+// goes O(nodes × depth) (measured: 80 records nested 48 deep took 80 ms, against 17 ms for the same tree with
+// declared widths, and it scaled with DEPTH — 20 / 35 / 79 ms at depth 12 / 24 / 48).
+//
+// The memo exists only FOR the duration of a pass (`IwMemo::install`, dropped when `layout_block` returns or
+// unwinds), which is what makes "the tree cannot change under it" true rather than hopeful — a direct caller
+// outside a pass (the unit tests, which mutate their fixtures between asks) memoizes nothing.
+thread_local! {
+    static IW_MEMO: std::cell::RefCell<Option<Vec<Option<Option<(f64, f64)>>>>> = const { std::cell::RefCell::new(None) };
+}
+// The guard PARKS whatever memo was installed and restores it on the way out, so a pass nested inside another
+// gets a memo of its own size rather than reading the outer pass's answers at its own indices. (No path nests
+// today — Rust never calls back into JS — which is exactly why the invariant belongs in the guard.)
+struct IwMemo(Option<Vec<Option<Option<(f64, f64)>>>>);
+impl IwMemo {
+    fn install(len: usize) -> Self {
+        IwMemo(IW_MEMO.with(|m| m.borrow_mut().replace(vec![None; len])))
+    }
+}
+impl Drop for IwMemo {
+    fn drop(&mut self) {
+        IW_MEMO.with(|m| *m.borrow_mut() = self.0.take());
+    }
+}
 fn intrinsic_widths(i: usize, inputs: &[Input], runs: &[Run], run_texts: &[Option<Vec<u16>>], grids: &[f64], children: &[Vec<usize>]) -> Option<(f64, f64)> {
+    // The borrow is taken and released around the recursion, never across it (`intrinsic_widths_of` recurses
+    // back in here). The outer Option is "asked before"; the inner one is the answer, `None` included — a
+    // subtree native cannot measure is asked about as often as a measurable one.
+    if let Some(hit) = IW_MEMO.with(|m| m.borrow().as_ref().and_then(|v| v.get(i).copied()).flatten()) {
+        return hit;
+    }
+    let answer = intrinsic_widths_of(i, inputs, runs, run_texts, grids, children);
+    IW_MEMO.with(|m| {
+        if let Some(v) = m.borrow_mut().as_mut() {
+            if let Some(slot) = v.get_mut(i) {
+                *slot = Some(answer);
+            }
+        }
+    });
+    answer
+}
+fn intrinsic_widths_of(i: usize, inputs: &[Input], runs: &[Run], run_texts: &[Option<Vec<u16>>], grids: &[f64], children: &[Vec<usize>]) -> Option<(f64, f64)> {
     let n = inputs[i];
     let extra = n.decl_edges_x;
     let (inner_min, inner_max) = if !is_auto(n.decl_w) {
@@ -3777,9 +3840,9 @@ fn measure_grid(
         let cn = inputs[c];
         if cn.out_of_flow != 0 {
             if cn.native_oof() {
-                // §4.1: its static position is the grid's content origin (the content's right edge in an rtl grid),
-                // whatever precedes it; sized and placed by place_out_of_flow.
-                boxes[c].x = if n.rtl != 0 { content_left + content_w } else { content_left };
+                // §4.1: its static position is the grid's content origin (the content's right edge where the
+                // inline axis runs from there), whatever precedes it; sized and placed by place_out_of_flow.
+                boxes[c].x = if n.from_right() { content_left + content_w } else { content_left };
                 boxes[c].y = content_top_rel;
                 continue;
             }
@@ -4042,11 +4105,8 @@ fn place_out_of_flow(
     let auto_w = if stretched || (n.replaced && n.ratio_only) {
         (avail_w - ml - mr).max(0.0)
     } else {
-        match intrinsic_widths(c, inputs, runs, run_texts, grids, children) {
-            Some((imin, imax)) => {
-                let pct = n.pct_edges_x(); // its own percentage edges (`shrinkToFitWidth`)
-                (imin + pct).max(avail_w).min(imax + pct)
-            }
+        match shrink_to_fit_width(c, avail_w, inputs, runs, run_texts, grids, children) {
+            Some(w) => w,
             None => {
                 failed.set(true);
                 0.0
@@ -4082,6 +4142,8 @@ fn place_out_of_flow(
         };
         // An rtl COLUMN's cross axis runs right-to-left (its cross-start is the right edge): the leading cross margin
         // is the right one and the cross offset is measured back from the right edge (the oracle's `alongAxis`).
+        // `rtl` alone is the right key ONLY because the walk declines every non-`horizontal-tb` flex container
+        // (`nlFlexSupported`), where it would have to be paired with the axis as `from_right` is.
         let cross_far = !pn.flex_main_is_x && pn.rtl != 0;
         let (cross_lead, cross_item) = if pn.flex_main_is_x { (mt, h + mt + mb) } else { (if cross_far { mr } else { ml }, w + ml + mr) };
         let main = static_justify_lead(pn.flex_justify, main_size - main_item) + main_lead;
@@ -4097,8 +4159,10 @@ fn place_out_of_flow(
         } else {
             (ix + along(cross_far, inner_w, cross, w), iy + along(pn.flex_main_reverse, inner_h, main, main_box))
         }
-    } else if pn.rtl != 0 {
-        (px + static_rx - w, py + static_ry) // an rtl flow's static corner: the content's right edge, less the box
+    } else if pn.from_right() {
+        // …and an inline axis running from the RIGHT puts the static corner at the content's right edge, less
+        // the box (`staticCornerFor`, which asks for that physical side — a vertical mode's rtl has none).
+        (px + static_rx - w, py + static_ry)
     } else {
         (px + static_rx, py + static_ry)
     };
@@ -4134,28 +4198,80 @@ fn resolve_width(n: &Input, cb_w: f64) -> f64 {
     // auto: fill the containing block, less horizontal margins (auto margins count 0 in L1).
     used_width(n, (cb_w - Input::m(n.ml) - Input::m(n.mr)).max(0.0))
 }
-// The BORDER-BOX width a box uses given what an AUTO width would be (`auto_w` — the oracle's `usedSize`
-// with its `autoW`: the containing block's room in block flow, a flex column item's stretch or shrink-to-fit
-// width): a declared width converted to border-box, else `auto_w`; clamped by min/max-width (same box model);
-// a border box floored at its own border+padding (content ≥ 0), matching usedSize's `isBorderBox` floor.
+// What an AUTO width becomes for a box sized from its own CONTENT in `room` of inline space — the oracle's
+// `shrinkToFitWidth`: its min-content, widened to the room, capped at its max-content. Both figures carry the
+// percentage part of the box's own edges, which an intrinsic CONTRIBUTION reads as nothing and a USED size
+// puts back (`pct_edges_x`). `None` where native cannot measure the subtree; each caller decides what that
+// means (a whole-pass failure, or `?` out of its own sizing). What `room` is differs by caller — the callers
+// mirror the basis their oracle counterpart passes.
+fn shrink_to_fit_width(
+    c: usize,
+    room: f64,
+    inputs: &[Input],
+    runs: &[Run],
+    run_texts: &[Option<Vec<u16>>],
+    grids: &[f64],
+    children: &[Vec<usize>],
+) -> Option<f64> {
+    let (imin, imax) = intrinsic_widths(c, inputs, runs, run_texts, grids, children)?;
+    let pct = inputs[c].pct_edges_x();
+    Some((imin + pct).max(room).min(imax + pct))
+}
+// The BORDER-BOX width an in-flow BLOCK-LEVEL child uses, given the inline room its containing block leaves it
+// (`avail` — the content width, or the band a float narrows it to). Normally that is the containing block's
+// room (`resolve_width`); a box whose own block axis is the HORIZONTAL one (a vertical `writing-mode`) has no
+// inline size to fill there, so its auto width comes from its own content instead. The walk both refuses such
+// a child native cannot measure and walks the rest MEASURED (`nlIntrinsicMeasurable` + `walkMeasured`), so
+// `None` here means that gate has a hole — fail the pass rather than answer with a width nothing measured.
+#[allow(clippy::too_many_arguments)]
+fn block_child_width(
+    c: usize,
+    avail: f64,
+    inputs: &[Input],
+    runs: &[Run],
+    run_texts: &[Option<Vec<u16>>],
+    grids: &[f64],
+    children: &[Vec<usize>],
+    failed: &std::cell::Cell<bool>,
+) -> f64 {
+    let cn = &inputs[c];
+    if !(cn.block_axis_is_x && is_auto(cn.width)) {
+        return resolve_width(cn, avail);
+    }
+    let room = (avail - Input::m(cn.ml) - Input::m(cn.mr)).max(0.0);
+    match shrink_to_fit_width(c, room, inputs, runs, run_texts, grids, children) {
+        Some(w) => used_width(cn, w),
+        None => {
+            failed.set(true);
+            0.0
+        }
+    }
+}
+// The BORDER-BOX width a box uses given what an AUTO width would be (`auto_w` — the oracle's `usedSize` with
+// its `autoW`: the containing block's room in block flow, or a content size where the box is sized from its own
+// content there — a vertical writing mode, a flex column item, an out-of-flow or atomic box —
+// `shrink_to_fit_width`): a declared width converted to border-box, else `auto_w`, clamped by min/max-width
+// (same box model).
 fn used_width(n: &Input, auto_w: f64) -> f64 {
     if n.replaced {
         return replaced_box(n, auto_w).0;
     }
     let border_w = if is_auto(n.width) {
-        if n.border_box {
-            auto_w.max(n.edges_x())
-        } else {
-            auto_w
-        }
+        auto_w
     } else if n.border_box {
-        n.width.max(n.edges_x())   // a border box is never smaller than its border+padding (content box ≥ 0)
+        n.width
     } else {
         n.width + n.edges_x()
     };
     // min/max-width are content-box in CSS unless border-box; convert to border-box for the clamp.
     let to_border = |v: f64| if is_auto(v) || n.border_box { v } else { v + n.edges_x() };
-    clamp_min_max(border_w, to_border(n.min_w), to_border(n.max_w)).max(0.0)
+    let w = clamp_min_max(border_w, to_border(n.min_w), to_border(n.max_w));
+    // A BORDER box is never smaller than the border and padding inside it — the content box floors at zero, it
+    // does not go negative. The floor comes LAST, AFTER the clamp, exactly as `usedSize` applies it: a
+    // `max-width` below the box's own edges clamps the width under them and the floor lifts it back
+    // (`box-sizing: border-box; padding: 0 10px; max-width: 5px` is 20 wide in Chrome, not 5). Floored first,
+    // the max clamped it below its own padding again.
+    if n.border_box { w.max(n.edges_x()) } else { w.max(0.0) }
 }
 
 
@@ -4234,6 +4350,7 @@ mod tests {
             scrolls_y: false,
             is_button: false,
             self_sizes: false,
+            block_axis_is_x: false,
             decl_edges_x: 0.0,
             decl_margin_x: 0.0,
             cell_pct: f64::NAN,

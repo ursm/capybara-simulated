@@ -159,6 +159,13 @@ RSpec.describe 'native layout L1 block-flow parity', if: ENV.fetch('CSIM_JS_ENGI
     expect(parity(session)).to include('ok' => false)
   end
 
+  # …and refused by the WALK in particular ('unsupported subtree'), not discovered mid-measure in Rust
+  # ('native declined', which throws the whole pass away rather than this one subtree).
+  def expect_walk_declines(body)
+    session = simulated_session(page(body)); session.visit '/'
+    expect(parity(session)).to include('ok' => false, 'reason' => 'unsupported subtree')
+  end
+
   it 'matches an absolute child positioned by insets in a relative parent' do
     expect_parity('<div style="position:relative;width:300px;height:200px"><div style="height:20px">flow</div><div style="position:absolute;top:10px;left:20px;width:50px;height:30px">a</div></div>')
   end
@@ -327,6 +334,95 @@ RSpec.describe 'native layout L1 block-flow parity', if: ENV.fetch('CSIM_JS_ENGI
       session = simulated_session(page(%(<div style="#{cb}"><div style="position:absolute;top:10px;left:20px;display:grid;grid-template-columns:100px 1fr"><div style="height:10px">a</div><div style="height:20px">b</div></div></div>))); session.visit '/'
       r = parity(session)
       expect(r).to include('ok' => true, 'mismatches' => 0, 'nativeOutOfFlow' => 0)
+    end
+  end
+
+  # A block whose own BLOCK axis is the horizontal one (a vertical `writing-mode`) does not fill its containing
+  # block: its auto width is a BLOCK size, so the oracle takes it from the box's own content. Native used to
+  # fill it, which the harness admitted — a silent 400 where the oracle and Chrome agree on the content's own
+  # width. The oracle's model of it is an INLINE-axis shrink-to-fit (max-content clamped to the room), which
+  # coincides with Chrome for a single block child; Chrome sums a vertical block's children along the block
+  # axis, and rotates the flow, neither of which the oracle does. Parity is what these specs pin.
+  describe 'a vertical writing mode shrink-to-fits its width' do
+    it 'sizes an auto-width vertical block from its content' do
+      expect_parity('<div style="width:400px"><div style="writing-mode:vertical-lr"><div style="width:40px;height:20px"></div></div></div>')
+      expect_parity('<div style="width:400px"><div style="writing-mode:vertical-rl"><div style="width:40px;height:20px"></div></div></div>')
+      expect_parity('<div style="width:400px"><div style="writing-mode:vertical-lr;padding:0 10%"><div style="width:40px;height:20px"></div></div></div>')
+      expect_parity('<div style="width:400px"><div style="writing-mode:vertical-lr;margin:0 30px"><div style="width:40px;height:20px"></div></div></div>')
+      expect_parity('<div style="width:400px"><div style="writing-mode:vertical-lr"><div style="width:500px;height:20px"></div></div></div>')
+      expect_parity('<div style="width:400px"><div style="writing-mode:vertical-lr;min-width:200px"><div style="width:40px;height:20px"></div></div></div>')
+      expect_parity('<div style="width:400px"><div style="writing-mode:vertical-lr;max-width:20px"><div style="width:40px;height:20px"></div></div></div>')
+    end
+    it 'leaves a declared width alone, and a horizontal block filling' do
+      expect_parity('<div style="width:400px"><div style="writing-mode:vertical-lr;width:50px;height:100px"><div style="width:40px;height:20px"></div></div></div>')
+      expect_parity('<div style="width:400px"><div><div style="width:40px;height:20px"></div></div></div>')
+      expect_parity('<div style="writing-mode:vertical-lr;width:400px;height:200px"><div style="width:40px;height:20px"></div></div>')
+    end
+    # The shrink-to-fit is a real min/max-content pair, so what fits in the room decides the width — and the
+    # mode INHERITS, so a plain child of a vertical block shrink-to-fits as well.
+    it 'lets the available room decide, through an inherited writing mode and around its own float' do
+      expect_parity('<div style="width:60px"><div style="writing-mode:vertical-lr">hello there everyone</div></div>')
+      expect_parity('<div style="width:400px"><div style="writing-mode:vertical-lr"><div><div style="width:40px;height:20px"></div></div></div></div>')
+      expect_parity('<div style="width:400px"><div style="writing-mode:vertical-lr;overflow:hidden"><div style="float:left;width:40px;height:20px"></div></div></div>')
+    end
+    # Native ASKS such a child's intrinsic widths, so a child it cannot measure has to be refused by the WALK —
+    # discovered in Rust it would fail the whole pass instead of this one subtree.
+    it 'declines a vertical block holding content native cannot measure' do
+      expect_walk_declines('<div style="width:400px"><div style="writing-mode:vertical-lr"><div style="display:grid;grid-template-columns:40px"><div></div></div></div></div>')
+      expect_walk_declines('<div style="width:400px"><div style="writing-mode:vertical-lr"><select><option>a</option></select></div></div>')
+    end
+    # …which is also why such a child is walked as a MEASURED subtree: an atomic inline whose own box would be
+    # PUSHED is not in the run stream native measures from, so the walk has to decline where it would otherwise
+    # hand Rust a subtree it cannot re-measure. Every shape here lays out natively without the writing mode.
+    it 'declines a vertical block whose atomic inline is pushed, not laid out natively' do
+      [
+        'a <span style="display:inline-block;margin:0 auto;width:20px;height:10px"></span>',
+        'a <span style="display:inline-block;width:max-content">bb</span>',
+        'a <span style="display:inline-block;max-width:min-content">bb</span>',
+        'a <span style="display:inline-block;text-indent:5px">t<div>x</div></span>',
+        'a <span style="display:inline-block"><div style="position:sticky;top:0">s</div></span>',
+        'a <span style="display:inline-block"><div style="float:left;width:9px;height:4px"></div>t</span>',
+        'a<br>b <span style="display:inline-block;margin:0 auto;width:20px;height:10px"></span>'
+      ].each do |inner|
+        expect_walk_declines(%{<div style="width:400px"><div style="writing-mode:vertical-lr">#{inner}</div></div>})
+      end
+      # …and through a GRID item, whose subtree is measured for the track sizes
+      expect_walk_declines('<div style="display:grid;grid-template-columns:200px;width:400px"><div><div style="writing-mode:vertical-lr">a <span style="display:inline-block;margin:0 auto;width:20px;height:10px"></span></div></div></div>')
+      expect_parity('<div style="width:400px"><div>a <span style="display:inline-block;margin:0 auto;width:20px;height:10px"></span></div></div>')
+      expect_parity('<div style="width:400px"><div>a <span style="display:inline-block;width:max-content">bb</span></div></div>')
+    end
+    # `direction` runs the INLINE axis, which in a vertical mode is the vertical one: an rtl vertical block's
+    # children still start at the LEFT content edge, where an rtl HORIZONTAL block's start at the right. Its
+    # lines and their atomics, and an out-of-flow child's static corner, stay at the left with them.
+    it 'keeps an rtl vertical block placing its children from the left' do
+      expect_parity('<div style="width:400px;direction:rtl;writing-mode:vertical-lr"><div style="width:40px;height:20px"></div></div>')
+      expect_parity('<div style="width:400px;direction:rtl;writing-mode:vertical-lr"><div style="width:40px;height:20px"></div><div style="width:60px;height:10px"></div></div>')
+      expect_parity('<div style="width:400px;direction:rtl;writing-mode:sideways-lr"><div style="width:40px;height:20px"></div></div>')
+      expect_parity('<div style="width:400px;direction:rtl"><div style="writing-mode:vertical-lr"><div style="width:40px;height:20px"></div></div></div>')
+      expect_parity('<div style="width:400px;direction:rtl"><div style="width:40px;height:20px"></div></div>')
+      expect_parity('<div style="width:400px;direction:rtl;writing-mode:vertical-lr">a <span style="display:inline-block;width:20px;height:10px"></span></div>')
+      expect_parity('<div style="width:400px;direction:rtl;writing-mode:vertical-lr;position:relative"><div style="position:absolute;width:20px;height:10px"></div></div>')
+    end
+    # …while what `direction` does key on its own is the MIRROR of a table's columns: the oracle's table path
+    # reads `flowSides(table).rtl` alone and mirrors along the PHYSICAL horizontal axis, because it never runs
+    # a table sideways (Chrome reverses the columns down its vertical inline axis instead — the oracle's gap to
+    # close, not native's). Native reproduces the oracle, so the mirror must not be paired with the axis here.
+    it 'still mirrors the columns of an rtl table in a vertical writing mode' do
+      expect_parity('<div style="width:400px;direction:rtl;writing-mode:vertical-lr"><table><tr><td>a</td><td>bb</td></tr></table></div>')
+      expect_parity('<div style="width:400px;direction:rtl"><table><tr><td>a</td><td>bb</td></tr></table></div>')
+    end
+  end
+
+  # A BORDER box is never smaller than the border and padding inside it, and that floor comes AFTER the
+  # min/max clamp (`usedSize`): a `max-width` below the box's own edges clamps the width under them and the
+  # floor lifts it back (Chrome gives `box-sizing: border-box; padding: 0 10px; max-width: 5px` a width of 20).
+  describe "a border box's edges floor its width after the min/max clamp" do
+    it 'floors a width a max-width clamped below the box edges' do
+      expect_parity('<div style="width:400px"><div style="box-sizing:border-box;padding:0 10px;max-width:5px">x</div></div>')
+      expect_parity('<div style="width:400px"><div style="box-sizing:border-box;padding:40px;max-width:30px">x</div></div>')
+      expect_parity('<div style="width:400px"><div style="box-sizing:border-box;border:3px solid;padding:0 10px;max-width:8px;min-width:4px">x</div></div>')
+      expect_parity('<div style="width:400px"><div style="box-sizing:border-box;padding:0 10px;width:100px;max-width:5px">x</div></div>')
+      expect_parity('<div style="width:400px"><div style="box-sizing:border-box;padding:0 10px;max-width:5px;writing-mode:vertical-lr"><div style="width:40px;height:20px"></div></div></div>')
     end
   end
 end
