@@ -1104,4 +1104,53 @@ RSpec.describe 'table layout' do
     expect(boxes[0][2]).to be_within(0.01).of(150)
     expect(boxes[1][2]).to be_within(0.01).of(150)
   end
+
+  # A box ANCHORED to a cell (a non-auto inset, or a percentage size) resolves against the cell's used box —
+  # which its ROW decides (§17.5.3), not the cell's own content flow. Chrome measured: a `bottom: 0` overlay in a
+  # cell stretched to a 42px row sits at 36, and a `height: 100%` one is 42 tall, where the cell's own 12px
+  # content would give 6 and 12.
+  it 'resolves a cell-anchored abspos box against the row-tall cell' do
+    body = %(<table style="border-spacing:0"><tr><td id="c" style="position:relative"><div id="o" style="position:absolute;bottom:0;width:6px;height:6px"></div><div style="height:10px"></div></td><td style="height:40px"><div style="height:40px"></div></td></tr></table>)
+    boxes, = measure(body, ['#c', '#o'])
+    cell, overlay = boxes
+    expect(cell[3]).to be_within(0.01).of(42)
+    expect(overlay[1] + overlay[3]).to be_within(0.01).of(cell[1] + cell[3])   # its bottom on the cell's padding edge
+
+    body = %(<table style="border-spacing:0"><tr><td id="c" style="position:relative"><div id="o" style="position:absolute;height:100%;width:6px"></div><div style="height:10px"></div></td><td style="height:40px"><div style="height:40px"></div></td></tr></table>)
+    boxes, = measure(body, ['#c', '#o'])
+    expect(boxes[1][3]).to be_within(0.01).of(boxes[0][3])   # 100% of the cell's PADDING box (no border here)
+  end
+
+  # A `width: 0%` in a FIXED-layout table: Chrome honours it on a CELL (that column takes nothing, its neighbour
+  # takes the rest) and ignores it on a `<col>` (the columns split the width evenly).
+  it 'honours a zero-percent cell width in a fixed table and ignores it on a col' do
+    body = %(<table style="table-layout:fixed;width:300px;border-spacing:0"><tr><td id="a" style="width:0%">a</td><td id="b">b</td></tr></table>)
+    boxes, = measure(body, ['#a', '#b'])
+    expect(boxes[0][2]).to be_within(0.01).of(2)      # its own padding is all that is left
+    expect(boxes[1][2]).to be_within(0.01).of(298)
+
+    body = %(<table style="table-layout:fixed;width:300px;border-spacing:0"><col style="width:0%"><col><tr><td id="a">a</td><td id="b">b</td></tr></table>)
+    boxes, = measure(body, ['#a', '#b'])
+    expect([boxes[0][2], boxes[1][2]]).to all(be_within(0.01).of(150))
+  end
+
+  # A cell's box is not final until its ROW is sized, even when the cell DECLARES a height (which is only a
+  # minimum there) — so a box anchored to it waits for the row either way (Chrome: the overlay sits at 36 in a
+  # 42px row, not at 16 where the cell's own 20px declaration would put it).
+  it 'defers a cell-anchored abspos box even when the cell declares a height' do
+    body = %(<table style="border-spacing:0"><tr><td id="c" style="position:relative;height:20px"><div id="o" style="position:absolute;bottom:0;width:6px;height:6px"></div><div style="height:10px"></div></td><td style="height:40px"><div style="height:40px"></div></td></tr></table>)
+    boxes, = measure(body, ['#c', '#o'])
+    expect(boxes[0][3]).to be_within(0.01).of(42)
+    expect(boxes[1][1] + boxes[1][3]).to be_within(0.01).of(boxes[0][1] + boxes[0][3])
+  end
+
+  # A box WAITING for an ancestor's size when the cell's content is moved — by the row, or by `vertical-align` —
+  # has no box to move yet, so its captured static position takes the same delta (Chrome: the overlay sits at 26,
+  # the centred flow's position, not at 1 where the cell's pass-1 flow left it).
+  it 'carries a subtree move into a static position still waiting for its containing block' do
+    body = %(<div style="position:relative"><table style="border-spacing:0"><tr><td style="vertical-align:middle"><div id="o" style="position:absolute;width:6px;height:6px"></div><div id="f" style="height:10px"></div></td><td style="height:60px"><div style="height:60px"></div></td></tr></table></div>)
+    boxes, = measure(body, ['#o', '#f'])
+    expect(boxes[0][1]).to be_within(0.01).of(boxes[1][1])   # on the flow it follows, wherever the row put it
+    expect(boxes[0][1]).to be > 20
+  end
 end

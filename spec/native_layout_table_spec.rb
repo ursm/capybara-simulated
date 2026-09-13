@@ -525,12 +525,10 @@ RSpec.describe 'native layout table parity', if: ENV.fetch('CSIM_JS_ENGINE', 'v8
   # covered via the parent), so a block holding one lays out rather than declining.
   it('matches an inline-table as an atomic inline') { expect_parity('<div style="width:300px">x <span style="display:inline-table"><span style="display:table-row"><span style="display:table-cell">a</span></span></span> y</div>') }
   it('declines an rtl table with a MARGIN-offset caption (its auto-margin / lead inset is not reflected yet)') { a_bails_b_native('<table dir="rtl" style="border-spacing:4px"><caption style="width:20px;height:16px;margin-left:8px">c</caption><tr><td style="width:40px;height:20px">a</td></tr></table>') }
-  it('declines an imposed table height alongside a caption') { a_bails_b_native('<table style="border-spacing:4px;height:200px"><caption style="height:16px">c</caption><tr><td style="height:20px">a</td></tr></table>') }
   # A SUB-PIXEL %-overflow caption must still decline: the oracle leaves the table at 200 (a % caption overflows
   # without growing it), so native's wrapper union must not round it up to the caption's 200.4 — the gate uses
   # the shadow compare epsilon, not a half-pixel slack, so this bails rather than silently mislaying the wrapper.
   it('declines a caption that overflows the border box by a sub-pixel amount') { a_bails_b_native('<table style="width:200px;border-spacing:0"><caption style="height:16px;width:100.2%">c</caption><tr><td style="width:40px;height:20px">a</td></tr></table>') }
-  it('declines an imposed table height on a collapsed table') { a_bails_b_native('<table style="border-collapse:collapse;height:200px"><tr><td style="border:2px solid;height:20px">a</td></tr></table>') }
   it('declines an empty row group (the oracle boxes it below the grid)') { a_bails_b_native('<table style="border-spacing:4px"><tbody></tbody><tbody><tr><td style="width:40px;height:20px">a</td></tr></tbody></table>') }
   it('declines stray non-cell content in a table (the oracle wraps it in an anonymous CELL, which has no node id)') { a_bails_b_native('<div style="display:table;border-spacing:4px"><div style="display:block;width:60px;height:20px">a</div></div>') }
   it('declines a same-display group NESTED in another (its rows interleave in render order)') { a_bails_b_native('<div style="display:table;border-spacing:4px"><div style="display:table-row-group"><div style="display:table-row"><div style="display:table-cell;width:40px;height:20px">r1</div></div><div style="display:table-row-group"><div style="display:table-row"><div style="display:table-cell;height:18px">r2</div></div></div><div style="display:table-row"><div style="display:table-cell;height:36px">r3</div></div></div></div>') }
@@ -583,6 +581,10 @@ RSpec.describe 'native layout table parity', if: ENV.fetch('CSIM_JS_ENGINE', 'v8
       expect_parity('<table style="table-layout:fixed;width:300px"><tr><td style="width:50px">a</td><td>b</td></tr></table>')
       expect_parity('<table style="table-layout:fixed;width:300px"><tr><td style="width:50px">a</td><td style="width:100px">b</td></tr></table>')
       expect_parity('<table style="table-layout:fixed;width:300px"><tr><td style="width:25%">a</td><td>b</td></tr></table>')
+      # Chrome's own asymmetry: a `width: 0%` CELL really takes 0 of the width, a `<col style="width:0%">` is
+      # ignored and the columns split it evenly.
+      expect_parity('<table style="table-layout:fixed;width:300px;border-spacing:0"><tr><td style="width:0%">a</td><td>b</td></tr></table>')
+      expect_parity('<table style="table-layout:fixed;width:300px;border-spacing:0"><col style="width:0%"><col><tr><td>a</td><td>b</td></tr></table>')
       expect_parity('<table style="table-layout:fixed;width:300px"><col style="width:40px"><tr><td>a</td><td style="width:100px">b</td></tr></table>')
       expect_parity('<table style="table-layout:fixed;width:300px"><tr><td colspan="2" style="width:200px">a</td><td>b</td></tr><tr><td>x</td><td>y</td><td>z</td></tr></table>')
       expect_parity('<table style="table-layout:fixed"><tr><td style="width:50px">a</td><td>wide content here</td></tr></table>')
@@ -640,6 +642,98 @@ RSpec.describe 'native layout table parity', if: ENV.fetch('CSIM_JS_ENGINE', 'v8
       expect_native_intrinsic('<div style="display:grid;grid-template-columns:max-content auto;width:400px"><table><tr><td style="width:25%">a</td><td>b</td></tr></table><div>x</div></div>')
       expect_native_intrinsic('<div style="display:grid;grid-template-columns:max-content auto;width:400px"><table><col style="width:120px"><tr><td>a</td><td>b</td></tr></table><div>x</div></div>')
       expect_parity('<div style="display:grid;grid-template-columns:100px 200px;width:400px"><table><tr><td>a</td><td>bb</td></tr></table><div>x</div></div>')
+    end
+  end
+
+  # ── Native ROW sizing ─────────────────────────────────────────────────────────────────────────────────
+  # The rows are native's own too: each is as tall as the tallest cell that does not span rows (a cell's declared
+  # height being a MINIMUM its content grows past), a spanning cell tops up the last row it touches, a declared
+  # row height floors it, a `%` one takes its share of what the rows have, and a declared TABLE height hands its
+  # surplus to the body group's auto rows. Then each cell fills the rows it spans and its content sits within
+  # that box per `vertical-align`.
+  describe 'native row sizing' do
+    it 'sizes a row from its tallest non-spanning cell, a declared cell height being a floor' do
+      expect_parity('<table style="border-spacing:4px"><tr><td>one line</td><td>two<br>lines</td></tr></table>')
+      expect_parity('<table style="border-spacing:4px"><tr><td style="height:50px">short</td><td>x</td></tr></table>')
+      expect_parity('<table style="border-spacing:4px"><tr><td style="height:5px">taller content than five pixels</td><td>x</td></tr></table>')
+      # min/max-height do not apply to a cell (measured: Chrome leaves both tables 28 tall).
+      expect_parity('<table style="border-spacing:4px"><tr><td style="min-height:40px">x</td><td>y</td></tr></table>')
+      expect_parity('<table style="border-spacing:4px"><tr><td style="max-height:5px">x</td><td>y</td></tr></table>')
+      expect_parity('<table style="border-spacing:4px"><tr><td style="height:30px;box-sizing:border-box;padding:6px">x</td><td>y</td></tr></table>')
+      expect_parity('<table style="border-spacing:4px"><tr><td><div style="height:10px;margin:5px"></div><div style="height:20px"></div></td><td style="height:50px">x</td></tr></table>')
+    end
+    it 'honours a declared row height, and shares a percentage one' do
+      expect_parity('<table style="border-spacing:4px"><tr style="height:60px"><td>a</td></tr><tr><td>b</td></tr></table>')
+      expect_parity('<table style="border-spacing:4px"><tr style="height:5px"><td>content taller than the row</td></tr></table>')
+      expect_parity('<table style="border-spacing:0;height:100px"><tr style="height:60%"><td>a</td></tr><tr style="height:60%"><td>b</td></tr></table>')
+      expect_parity('<table style="border-spacing:0;height:100px"><tr style="height:30%"><td>a</td></tr><tr><td>b</td></tr></table>')
+      expect_parity('<table style="border-spacing:0"><tr style="height:30%"><td>a</td></tr><tr><td>b</td></tr></table>')
+    end
+    it 'hands a declared table height\'s surplus to the body group\'s auto rows' do
+      expect_parity('<table style="border-spacing:0;height:100px"><tr><td style="height:10px">a</td></tr><tr><td style="height:30px">b</td></tr></table>')
+      expect_parity('<table style="border-spacing:4px;height:200px"><thead><tr><td style="height:20px">h</td></tr></thead><tbody><tr><td style="height:10px">b1</td></tr><tr><td style="height:30px">b2</td></tr></tbody><tfoot><tr><td style="height:20px">f</td></tr></tfoot></table>')
+      expect_parity('<table style="border-spacing:0;height:100px"><tr style="height:20px"><td>fixed</td></tr><tr><td>auto</td></tr></table>')
+      expect_parity('<table style="border-spacing:0;min-height:100px"><tr><td style="height:10px">a</td></tr><tr><td style="height:30px">b</td></tr></table>')
+      expect_parity('<table style="border-spacing:0;height:200px;max-height:100px"><tr><td style="height:10px">a</td></tr></table>')
+      expect_parity('<table style="border-spacing:0;height:20px"><tr><td style="height:40px">taller than the table</td></tr></table>')
+      expect_parity('<table style="border-spacing:4px;height:200px"><caption style="height:16px">c</caption><tr><td style="height:20px">a</td></tr></table>')
+      expect_parity('<table style="border-collapse:collapse;height:200px"><tr><td style="border:2px solid;height:20px">a</td></tr></table>')
+      expect_parity('<table style="border-spacing:0;height:100px;box-sizing:border-box;padding:10px"><tr><td>a</td></tr></table>')
+    end
+    # NOTE (both engines vs Chrome, pre-existing): Chrome SPREADS a spanning cell's deficit over the rows it
+    # covers (39/39 for a rowspan=2 80px cell over two auto rows); both engines give it all to the last row
+    # (20/58). These expectations pin the driver's own model, not Chrome's — see the campaign's table backlog.
+    it 'grows the last row a spanning cell touches by what the rows it covers are short of' do
+      expect_parity('<table style="border-spacing:4px"><tr><td rowspan="2" style="height:80px">tall</td><td>a</td></tr><tr><td>b</td></tr></table>')
+      expect_parity('<table style="border-spacing:4px"><tr><td rowspan="3" style="height:100px">tall</td><td>a</td></tr><tr><td style="height:20px">b</td></tr><tr><td>c</td></tr></table>')
+      expect_parity('<table style="border-spacing:4px"><tr><td rowspan="2">short</td><td style="height:40px">a</td></tr><tr><td style="height:40px">b</td></tr></table>')
+      expect_parity('<table style="border-spacing:4px;height:200px"><tr><td rowspan="2" style="height:60px">tall</td><td>a</td></tr><tr><td>b</td></tr></table>')
+    end
+    it 'places each cell\'s content in the row-tall box per vertical-align' do
+      %w[top middle bottom baseline].each do |va|
+        expect_parity(%(<table style="border-spacing:0"><tr><td style="vertical-align:#{va}"><div style="width:20px;height:10px"></div></td><td style="height:60px"><div style="height:60px"></div></td></tr></table>))
+      end
+      expect_parity('<table style="border-spacing:0"><tr><td><div style="height:10px"></div></td><td style="height:61px"><div style="height:61px"></div></td></tr></table>')
+      expect_parity('<table style="border-spacing:0"><tr><td style="vertical-align:middle;height:80px"><div style="height:10px"></div></td><td><div style="height:20px"></div></td></tr></table>')
+      expect_parity('<table style="border-collapse:collapse"><tr><td style="vertical-align:baseline;font:40px monospace;padding:0"><div>Ay</div></td><td style="vertical-align:baseline;font:16px monospace;padding:0"><div>Ay</div></td></tr></table>')
+      expect_parity('<table style="border-spacing:0"><tr><td rowspan="2" style="vertical-align:bottom"><div style="height:10px"></div></td><td style="height:30px"><div style="height:30px"></div></td></tr><tr><td style="height:40px"><div style="height:40px"></div></td></tr></table>')
+    end
+    it 'declines a cell the oracle lays out TWICE for its percentage-height descendants, and keeps the rest' do
+      # Only the two-pass shapes decline: a definite table height stretching the cell, or the cell's own declared
+      # height. An AUTO cell in an AUTO table resolves such a descendant against nothing in either engine.
+      a_bails_b_native('<table style="height:200px"><tr><td><div style="height:50%">a</div></td></tr></table>')
+      a_bails_b_native('<table><tr><td style="height:100px"><div style="min-height:50%">a</div></td></tr></table>')
+      expect_parity('<table><tr><td><div style="height:50%">a</div></td></tr></table>')
+      expect_parity('<table><tr><td><div style="height:100%">a</div></td><td>b</td></tr></table>')
+    end
+
+    # A box anchored to a CELL resolves its insets against the ROW-tall box (measured: a `bottom: 0` overlay in a
+    # 42px cell sits at 36, where the cell's own 12px content flow would put it at 6) — the oracle now defers
+    # those until `layoutTable` has the row height, which is also when native places them.
+    it 'places a box anchored to a cell against the row-tall box' do
+      %w[middle top bottom].each do |va|
+        expect_parity(%(<table style="border-spacing:0"><tr><td style="position:relative;vertical-align:#{va}"><div style="position:absolute;bottom:0;width:6px;height:6px"></div><div style="height:10px"></div></td><td style="height:40px"><div style="height:40px"></div></td></tr></table>))
+      end
+      expect_parity('<table style="border-spacing:0"><tr><td style="position:relative"><div style="position:absolute;height:100%;width:6px"></div><div style="height:10px"></div></td><td style="height:40px"><div style="height:40px"></div></td></tr></table>')
+      # …including a cell with a DECLARED height, whose box looks definite but is still only a minimum until the
+      # row speaks (measured: the overlay sits at 36 in a 42px row, not at 16 where the cell's own 20px would).
+      expect_parity('<table style="border-spacing:0"><tr><td style="position:relative;height:20px"><div style="position:absolute;bottom:0;width:6px;height:6px"></div><div style="height:10px"></div></td><td style="height:40px"><div style="height:40px"></div></td></tr></table>')
+      expect_parity('<table style="border-spacing:0"><tr><td style="position:relative;height:20px"><div style="position:absolute;height:100%;width:6px"></div><div style="height:10px"></div></td><td style="height:40px"><div style="height:40px"></div></td></tr></table>')
+      # …and one still WAITING for an ancestor's size takes the same delta in its static position, so it lands
+      # where the moved flow is (measured: 26 in a cell whose content the row centred, not 1).
+      expect_parity('<div style="position:relative"><table style="border-spacing:0"><tr><td style="vertical-align:middle"><div style="position:absolute;width:6px;height:6px"></div><div style="height:10px"></div></td><td style="height:60px"><div style="height:60px"></div></td></tr></table></div>')
+      expect_parity('<table style="position:relative;border-spacing:0"><tr><td style="vertical-align:middle"><div style="position:absolute;width:6px;height:6px"></div><div style="height:10px"></div></td><td style="height:60px"><div style="height:60px"></div></td></tr></table>')
+      expect_parity('<div style="position:relative"><table style="border-spacing:0;height:200px"><tr><td style="height:20px">a</td></tr><tr><td style="vertical-align:top"><div style="position:absolute;width:6px;height:6px"></div><div style="height:10px"></div></td></tr></table></div>')
+      # …while a STATIC-position one is placed in the flow and moves down with the content it follows.
+      expect_parity('<table style="border-spacing:0"><tr><td style="vertical-align:middle"><div style="position:absolute;width:6px;height:6px"></div><div style="height:10px"></div></td><td style="height:60px"><div style="height:60px"></div></td></tr></table>')
+      expect_parity('<table style="border-spacing:0"><tr><td style="vertical-align:bottom"><div style="position:absolute;top:5px;left:5px;width:6px;height:6px"></div><div style="height:10px"></div></td><td style="height:60px"><div style="height:60px"></div></td></tr></table>')
+    end
+
+    it 'reads a row height declaration the way Chrome does: a plain length or percentage, nothing else' do
+      expect_parity('<table style="border-spacing:0;height:100px"><tr style="height:0%"><td>a</td></tr><tr><td>b</td></tr></table>')
+      expect_parity('<table style="border-spacing:0;height:100px"><tr style="height:0"><td>a</td></tr><tr><td>b</td></tr></table>')
+      expect_parity('<table style="border-spacing:0;height:100px"><tr style="height:calc(50% + 10px)"><td>a</td></tr><tr><td>b</td></tr></table>')
+      expect_parity('<table style="border-spacing:0;height:100px"><tr style="height:auto"><td>a</td></tr><tr style="height:40px"><td>b</td></tr></table>')
     end
   end
 end

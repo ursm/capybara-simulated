@@ -32,7 +32,7 @@ pub(crate) const DISPLAY_BLOCK: u8 = 1;
 pub(crate) const DISPLAY_TEXT_BLOCK: u8 = 2;
 pub(crate) const DISPLAY_FLEX: u8 = 3;
 // CSS Tables 3 (t1): the table box and its internal structure. Cells are ordinary block / text blocks
-// (DISPLAY_BLOCK / DISPLAY_TEXT_BLOCK) sized by the oracle (pushed), so they need no code of their own.
+// (DISPLAY_BLOCK / DISPLAY_TEXT_BLOCK) laid out at the column width and row height the table computed for them.
 pub(crate) const DISPLAY_TABLE: u8 = 4;
 pub(crate) const DISPLAY_TABLE_ROW_GROUP: u8 = 5;
 pub(crate) const DISPLAY_TABLE_ROW: u8 = 6;
@@ -173,10 +173,6 @@ pub(crate) struct Input {
     // A text block's line alignment, PHYSICAL (the oracle's `textAlignOf` folds `start` / `end` through rtl):
     // 0 left, 1 right, 2 center. It moves a line's atomics (`line_layout`); `justify` never reaches native.
     pub(crate) text_align: u8,
-    // vertical-align on a table CELL: the px the oracle moved the cell's content down by within its (row-tall)
-    // box (0 for top / a content that fills the row). The oracle already resolved top/middle/bottom into this
-    // scalar; native lays cell content top-aligned, then shifts the cell's own child boxes down by it to match.
-    pub(crate) cell_va_offset: f64,
     // A flex container's anonymous-item cross floor: the line-height of any bare (non-whitespace) text directly
     // inside it (0 when there is none). The oracle does not lay that text out as a real flex item, it only
     // floors the container's AUTO cross size at this line-height (`anonymousItemHeight`); native does the same.
@@ -223,8 +219,8 @@ pub(crate) struct Input {
     // shrink-to-fits its columns (§17.5.2). False where the parent handed it a box (a grid area, a flex item's
     // pushed size, an out-of-flow inset box), and then the width the caller passed is the used one.
     pub(crate) self_sizes: bool,
-    // TABLE CELL: the `%` fraction its `width` declared (0 for none / a length) — a column's `pct`, resolved
-    // against the width the columns share out rather than the table's own box (`distribute_columns`).
+    // TABLE CELL: the `%` fraction its `width` declared (NaN where it declares none) — a column's `pct`,
+    // resolved against the width the columns share out rather than the table's own box (`distribute_columns`).
     pub(crate) cell_pct: f64,
     // TABLE CELL: its (min-content, max-content) contribution as the ORACLE measured it — NaN where native
     // measures the cell itself (`nlIntrinsicMeasurable`). A cell native cannot measure (a control's chrome, CJK
@@ -232,9 +228,19 @@ pub(crate) struct Input {
     // of declining the whole table, exactly as an un-measurable grid track does.
     pub(crate) cell_min_content: f64,
     pub(crate) cell_max_content: f64,
-    // TABLE CELL: the BORDER-box height its row gives it (NaN until the native row algorithm lands: the
-    // oracle's used row height, imposed on the cell's layout).
-    pub(crate) cell_height: f64,
+    // TABLE CELL: its declared `height` is a MINIMUM, not a size (§17.5.3) — content taller than it grows the
+    // box (the oracle's `growFloor`), and min/max-height clamp the result. Its natural flow height is kept in
+    // `Box::natural_h`, which is the slack `vertical-align` distributes against.
+    pub(crate) height_is_floor: bool,
+    // TABLE CELL: how its content sits in the row-tall box (§17.5.3) — 0 baseline (its first baseline meets the
+    // row's), 1 top, 2 middle, 3 bottom.
+    pub(crate) cell_valign: u8,
+    // TABLE ROW: the height it declares as a MINIMUM — the px length, or the `%` fraction resolved against what
+    // the rows share out (each NaN where it declares none) — and its group's rank: 0 header, 1 body, 2 footer,
+    // which decides who takes a declared table height's surplus.
+    pub(crate) row_height: f64,
+    pub(crate) row_pct: f64,
+    pub(crate) row_rank: u8,
     // TABLE: `table-layout: fixed` is declared. With a width to hand out it sizes the columns from the first
     // row alone (`fixed_column_widths`); with `width: auto` there is nothing to distribute and the content
     // algorithm takes over, which an auto `width` already says.
@@ -373,6 +379,10 @@ pub(crate) struct Box {
     // SCROLL-CONTAINER child gives its bottom MARGIN edge, not its lines. The oracle's `boxBaselineOffset(el,
     // true, inlineBlock = true)`.
     pub(crate) inline_block_baseline: Option<f64>,
+    // A TABLE CELL's natural flow height (`height_is_floor`): what its content alone came to, before its own
+    // declared floor or min/max raised the box and before the row stretched it — the slack `vertical-align`
+    // distributes against (the oracle's `_lbCellContentH`). None for every other box.
+    pub(crate) natural_h: Option<f64>,
 }
 
 // Clamp a resolved main size by min/max (min wins over max, per CSS). `none` (NaN) bounds are skipped.
@@ -435,7 +445,7 @@ pub(crate) fn layout_block(inputs: &[Input], runs: &[Run], run_texts: &[Option<V
     }
     let mut boxes: Vec<Box> = inputs
         .iter()
-        .map(|n| Box { nid: n.nid, x: 0.0, y: 0.0, w: 0.0, h: 0.0, auto_height: false, first_baseline: None, last_baseline: None, inline_block_baseline: None })
+        .map(|n| Box { nid: n.nid, x: 0.0, y: 0.0, w: 0.0, h: 0.0, auto_height: false, first_baseline: None, last_baseline: None, inline_block_baseline: None, natural_h: None })
         .collect();
     // Two phases: MEASURE lays the subtree out relative to each node's own border-box origin (so
     // collapse-through margins can propagate UP through returns without knowing final positions), then
@@ -1095,8 +1105,8 @@ fn measure(
         return measure_flex(i, w, imposed_h, inputs, runs, run_texts, grids, children, boxes, failed);
     }
 
-    // A TABLE (§17): native sizes the COLUMNS from the cells' own content and positions every cell / row /
-    // row-group and the table box; each cell's ROW height still rides its record (`cell_height`).
+    // A TABLE (§17): native sizes the COLUMNS and the ROWS from the cells' own content, and positions every
+    // cell / row / row-group and the table box.
     if n.display == DISPLAY_TABLE {
         return measure_table(i, w, imposed_h, inputs, runs, run_texts, grids, children, boxes, failed);
     }
@@ -1184,18 +1194,26 @@ fn measure(
             failed.set(true);
             0.0
         };
+        // What the lines alone came to — the auto height, and a table cell's `natural_h` (whose declared height
+        // is a FLOOR the content grows past, §17.5.3).
+        let flow_h = content_top_rel + content_h + n.pb + n.bb;
         let box_h = if is_auto(n.height) {
-            content_top_rel + content_h + n.pb + n.bb
+            flow_h
+        } else if n.height_is_floor {
+            flow_h.max(if n.border_box { n.height.max(n.edges_y()) } else { n.height + n.edges_y() })
         } else if n.border_box {
             n.height.max(n.edges_y())   // a border box is never smaller than its border+padding (content ≥ 0)
         } else {
             n.height + n.edges_y()
         };
         let to_border = |v: f64| if is_auto(v) || n.border_box { v } else { v + n.edges_y() };
-        let box_h = clamp_min_max(box_h, to_border(n.min_h), to_border(n.max_h)).max(0.0);
+        // A table CELL's min/max-height do not apply (measured: Chrome leaves a `min-height: 40px` cell at its
+        // 20px line, and a `max-height: 5px` one uncapped) — its height is a floor and its row decides the rest.
+        let box_h = if n.height_is_floor { box_h.max(0.0) } else { clamp_min_max(box_h, to_border(n.min_h), to_border(n.max_h)).max(0.0) };
         boxes[i].nid = n.nid;
         boxes[i].w = w;
         boxes[i].h = box_h;
+        boxes[i].natural_h = Some(flow_h);
         boxes[i].auto_height = is_auto(n.height);
         let top = CMargin::of(Input::m(n.mt));
         return MInfo { top, top_only: top, bottom: CMargin::of(Input::m(n.mb)), collapse_through: false };
@@ -1440,7 +1458,8 @@ fn measure(
     boxes[i].inline_block_baseline = ib;
 
     let mut bottom_m = CMargin::of(Input::m(n.mb));
-    let box_h = if is_auto(n.height) {
+    // What the flow alone came to: the auto height, and every box's `natural_h` (only a table cell reads it).
+    let flow_h = if is_auto(n.height) || n.height_is_floor {
         let flow_bottom = if !has_child {
             content_top_rel // empty block: just its own vertical edges (0 when all open)
         } else if bottom_open {
@@ -1454,19 +1473,29 @@ fn measure(
         // A block that OWNS a float context CONTAINS its floats: its auto height grows to the lowest of
         // them (§9.5 — the `overflow:hidden` / `flow-root` clearfix). Only the owner grows; -inf else.
         let floats_to = if n.starts_bfc { floats_bottom(&ctx.items) } else { f64::NEG_INFINITY };
-        flow_bottom.max(floats_to) + n.pb + n.bb
+        (flow_bottom.max(floats_to) + n.pb + n.bb).max(0.0)
+    } else {
+        f64::NAN
+    };
+    let box_h = if is_auto(n.height) {
+        flow_h
+    } else if n.height_is_floor {
+        // A TABLE CELL: the declared height is a floor the content grows past (§17.5.3).
+        flow_h.max(if n.border_box { n.height.max(n.edges_y()) } else { n.height + n.edges_y() })
     } else if n.border_box {
         n.height.max(n.edges_y())   // a border box is never smaller than its border+padding (content box ≥ 0)
     } else {
         n.height + n.edges_y()
     };
     let to_border = |v: f64| if is_auto(v) || n.border_box { v } else { v + n.edges_y() };
-    let box_h = clamp_min_max(box_h, to_border(n.min_h), to_border(n.max_h)).max(0.0);
+    // A table CELL's min/max-height do not apply (see the text arm) — its height is a floor, its row decides.
+    let box_h = if n.height_is_floor { box_h.max(0.0) } else { clamp_min_max(box_h, to_border(n.min_h), to_border(n.max_h)).max(0.0) };
 
     boxes[i].nid = n.nid;
     boxes[i].w = w;
     boxes[i].h = box_h;
     boxes[i].auto_height = is_auto(n.height);
+    boxes[i].natural_h = if flow_h.is_nan() { None } else { Some(flow_h) };
 
     // §8.3.1: a block collapses THROUGH — its top and bottom margins are one adjoining set that passes
     // to its neighbours — when it has no border/padding, an adjoining height and min-height (auto or
@@ -2436,9 +2465,11 @@ fn flex_distribution(code: u8, free: f64, n: usize) -> (f64, f64) {
 // A table in normal flow — `table > (row-group | row)* > cell*`, plus a caption. Native COMPUTES the COLUMN
 // tracks (`table_columns` from every cell's own min/max-content, `distribute_columns` / `fixed_column_widths`
 // sharing out the width) and the table's own width (declared, or shrink-to-fit its columns), lays each cell out
-// at its column width, then prefix-sums the tracks with border-spacing to position every cell and DERIVES every
-// row, row-group and the table's OWN box from them. Its ROW heights are still the oracle's, imposed on each
-// cell (rec[82]) and read back here — the next increment. All boxes are written in their immediate parent's
+// at its column width, then sizes every ROW from the cells' own content — a declared cell height a floor, a
+// spanning cell topping up the last row it touches, a declared row height a minimum, and a declared TABLE
+// height's surplus shared over the body group's auto rows — and prefix-sums both tracks with border-spacing to
+// position every cell and DERIVE every row, row-group and the table's OWN box. All boxes are written in their
+// immediate parent's
 // border-box frame; `place` composes the origins table → group → row → cell → content. Mirrors layoutTable /
 // tableColumns / distributeColumns / fixedColumnWidths / tableIntrinsicWidths / tableGrid. Spans, captions,
 // colgroup, thead/tfoot reorder, fixed layout, rtl AND border-collapse are all IN scope (the oracle folds the
@@ -2577,7 +2608,7 @@ fn table_columns(
             let col = k.cell_col;
             cols.min[col] = cols.min[col].max(imin);
             cols.max[col] = cols.max[col].max(imax);
-            if k.cell_pct > 0.0 {
+            if !is_auto(k.cell_pct) {
                 cols.pct[col] = cols.pct[col].max(k.cell_pct);
             } else if !is_auto(k.decl_w) {
                 cols.spec[col] = cols.spec[col].max(imax);
@@ -2689,7 +2720,7 @@ fn fixed_column_widths(
         .collect();
     for &c in &children[g.rows[0]] {
         let k = inputs[c];
-        let declared = if k.cell_pct > 0.0 {
+        let declared = if !is_auto(k.cell_pct) {
             k.cell_pct * assignable
         } else if !is_auto(k.decl_w) {
             k.decl_w
@@ -2842,9 +2873,9 @@ fn measure_table(
         None => fixed_column_widths(&g, decls.as_ref(), assignable, inputs, children),
     };
 
-    // Then each cell's subtree, at its COLUMN (span) width and with its row height imposed (the oracle's row
-    // algorithm still decides that), in a fresh float context. The cell's own declared width does not speak
-    // here: it already did, when the column was sized.
+    // Then each cell's subtree, at its COLUMN (span) width and with NO height imposed — what its content comes
+    // to is what the rows are sized from below — in a fresh float context. The cell's own declared width does not
+    // speak here: it already did, when the column was sized.
     let span_w = |c: usize| -> f64 {
         let k = inputs[c];
         let last = k.cell_col + k.cell_colspan - 1; // `table_grid` validated the span against the column count
@@ -2857,37 +2888,114 @@ fn measure_table(
     for &r in rows {
         for &c in &children[r] {
             let cw = span_w(c);
-            measure(c, cw, inputs[c].cell_height, inputs, runs, run_texts, grids, children, boxes, failed, &mut FloatCtx::new(), 0.0, 0.0);
-        }
-    }
-    // vertical-align: content laid out top-aligned above, moved down by the offset the oracle pushed (§17.5.3;
-    // the UA default is `middle`). Shift the cell's direct children — their subtrees follow through `place`, and
-    // text runs (not compared) need no shift; the cell BOX itself stays at the row top.
-    for &r in rows {
-        for &c in &children[r] {
-            let off = inputs[c].cell_va_offset;
-            if off != 0.0 {
-                for &ch in &children[c] {
-                    boxes[ch].y += off;
-                }
-            }
+            measure(c, cw, f64::NAN, inputs, runs, run_texts, grids, children, boxes, failed, &mut FloatCtx::new(), 0.0, 0.0);
         }
     }
 
-    // Row heights: the tallest rowspan==1 cell in each row (a cell that SPANS rows can't size any one of them).
-    // The row the oracle imposed is what each cell was laid out at, so this recovers the same tracks.
+    // ROW heights (§17.5.3). A row is as tall as the tallest cell that does NOT span rows — each cell's own box,
+    // its declared height already a floor and its min/max applied (`height_is_floor`) — floored by what the row
+    // itself declared. A cell aligned on the BASELINE contributes differently: the row's baseline is the deepest
+    // first-baseline among those cells, each then drops so its own baseline reaches it, and the row must hold the
+    // lowest resulting cell bottom — so those are deferred until the row's baseline is known. A cell that SPANS
+    // rows sizes none of them on its own: it joins its FIRST row's baseline group, and whatever the rows it
+    // covers come up short of grows the LAST one it touches.
+    // A PERCENTAGE row height resolves against what the rows share out — the imposed content height less the
+    // spacing around and between them — and only when that height is definite; the percentages are taken in
+    // RENDER order (header, body, footer — the order the rows arrive in) and cannot overflow the basis (Chrome
+    // squeezes a later one into what is left).
+    let imposed_h = {
+        let to_content = |v: f64| if n.border_box { (v - n.edges_y()).max(0.0) } else { v };
+        let declared = if is_auto(n.height) { 0.0 } else { to_content(n.height) };
+        let capped = if is_auto(n.max_h) { declared } else { declared.min(to_content(n.max_h)) };
+        if is_auto(n.min_h) { capped } else { capped.max(to_content(n.min_h)) }
+    };
+    let row_pct_basis = if imposed_h > 0.0 { (imposed_h - table_gaps(r_count, sy)).max(0.0) } else { f64::NAN };
     let mut row_h = vec![0.0f64; r_count];
+    let mut row_declared = vec![false; r_count];
+    let mut row_baseline = vec![0.0f64; r_count];
+    let mut spans: Vec<(usize, usize)> = Vec::new(); // (cell, its first row) — sized when it ENDS
     let mut row_seen = vec![false; r_count];
+    let mut pct_used = 0.0f64;
     for (ri, &r) in rows.iter().enumerate() {
+        let rn = inputs[r];
+        let declared = if !is_auto(rn.row_pct) && !is_auto(row_pct_basis) {
+            let take = (rn.row_pct * row_pct_basis).min(row_pct_basis - pct_used).max(0.0);
+            pct_used += take;
+            Some(take)
+        } else if !is_auto(rn.row_height) {
+            Some(rn.row_height)
+        } else {
+            None
+        };
+        row_declared[ri] = declared.is_some();
+        let mut h = declared.unwrap_or(0.0);
+        let mut baseline_cells: Vec<usize> = Vec::new();
         for &c in &children[r] {
-            if inputs[c].cell_rowspan == 1 {
-                row_h[ri] = row_h[ri].max(boxes[c].h);
-                row_seen[ri] = true;
+            let k = inputs[c];
+            // A cell aligned on the baseline joins this row's group — a spanning one too, for the baseline alone.
+            let base = if k.cell_valign == 0 { boxes[c].first_baseline } else { None };
+            if let Some(b) = base {
+                row_baseline[ri] = row_baseline[ri].max(b);
             }
+            if k.cell_rowspan > 1 {
+                spans.push((c, ri));
+                continue;
+            }
+            row_seen[ri] = true;
+            if base.is_some() {
+                baseline_cells.push(c);
+            } else {
+                h = h.max(boxes[c].h);
+            }
+        }
+        // …and now the baseline cells: each one's content drops by (row baseline − its own), and the row grows to
+        // hold the lowest bottom that makes — a box floored taller than its content keeps that height either way.
+        for c in baseline_cells {
+            let base = boxes[c].first_baseline.unwrap_or(0.0);
+            let nat = boxes[c].natural_h.unwrap_or(boxes[c].h);
+            h = h.max(boxes[c].h).max((row_baseline[ri] - base) + nat);
+        }
+        row_h[ri] = h;
+        // A spanning cell that ENDS on this row grows it by whatever the rows it covers are short of.
+        for &(c, start) in spans.iter() {
+            let end = (start + inputs[c].cell_rowspan - 1).min(r_count - 1);
+            if end != ri {
+                continue;
+            }
+            let have: f64 = (start..ri).map(|k| row_h[k] + sy).sum();
+            row_h[ri] = row_h[ri].max(boxes[c].h - have);
         }
     }
     if row_seen.iter().any(|&s| !s) {
-        return bail(failed); // a row only spanning cells cover — native can't split it
+        return bail(failed); // a row whose cells all span rows — no height to read
+    }
+
+    // A declared table height TALLER than the grid is shared out over the rows — a click aimed at the visible
+    // bottom of a cell has to land inside it. The surplus goes to the BODY group's AUTO rows in proportion to
+    // their content (Chrome: rows of 10 and 30 in a 100px table become 25 and 75, and a declared-height row keeps
+    // its height and takes none); a header / footer row is held at its natural height. Failing any body auto row
+    // it goes to the body's declared rows, then to any auto row, then to every row by height.
+    if imposed_h > 0.0 {
+        let grid_h: f64 = row_h.iter().sum::<f64>() + table_gaps(r_count, sy);
+        let room = imposed_h - grid_h;
+        if room > 0.0 {
+            let body: Vec<usize> = (0..r_count).filter(|&i| inputs[rows[i]].row_rank == 1).collect();
+            let body_autos: Vec<usize> = body.iter().copied().filter(|&i| !row_declared[i]).collect();
+            let autos: Vec<usize> = (0..r_count).filter(|&i| !row_declared[i]).collect();
+            let targets = if !body_autos.is_empty() {
+                body_autos
+            } else if !body.is_empty() {
+                body
+            } else if !autos.is_empty() {
+                autos
+            } else {
+                (0..r_count).collect()
+            };
+            let weight: f64 = targets.iter().map(|&i| row_h[i]).sum();
+            for &i in &targets {
+                row_h[i] += if weight > 0.0 { room * (row_h[i] / weight) } else { room / targets.len() as f64 };
+            }
+        }
     }
 
     // border-collapse:collapse (§17.6.2) needs no special frame here: the oracle folds each shared edge into
@@ -2972,7 +3080,12 @@ fn measure_table(
     }
 
     // Row boxes (relative to their parent: the group box, else the table) + cell positions (relative to the
-    // row). A cell's w/h are already the pushed track from Phase A.
+    // row). A cell FILLS the rows it spans — that box, not its content's, is what a click has to land in — and
+    // its content then sits within it per `vertical-align` (§17.5.3): `baseline` drops it so the cell's own first
+    // baseline meets the row's, `middle` / `bottom` take half / all of the slack the row is taller than the
+    // content by (the content's NATURAL height, not the floored box — a `middle` cell whose declared height
+    // already exceeds its content still centres that content). The box stays at the row top either way, so the
+    // shift moves the cell's own children (their subtrees follow through `place`).
     for (ri, &r) in rows.iter().enumerate() {
         let (gx, gy) = match row_group[ri] {
             Some(g) => (boxes[g].x, boxes[g].y),
@@ -2985,15 +3098,19 @@ fn measure_table(
         boxes[r].h = row_h[ri];
         boxes[r].auto_height = false;
         for &c in &children[r] {
-            let (col, cs, rs) = (inputs[c].cell_col, inputs[c].cell_colspan, inputs[c].cell_rowspan);
-            // SAFETY NET: a cell's pushed border box must equal the tracks it spans plus the internal
-            // border-spacing — colspan 1 / rowspan 1 reduce to "equals its own column / row". A grid the gate
-            // let through that doesn't reconcile declines rather than mislay.
-            let exp_w = col_w[col..col + cs].iter().sum::<f64>() + (cs as f64 - 1.0) * sx;
-            let exp_h = row_h[ri..ri + rs].iter().sum::<f64>() + (rs as f64 - 1.0) * sy;
-            if (boxes[c].w - exp_w).abs() > 0.01 || (boxes[c].h - exp_h).abs() > 0.01 {
-                return bail(failed);
-            }
+            let k = inputs[c];
+            let (col, rs) = (k.cell_col, k.cell_rowspan);
+            let content_h = boxes[c].natural_h.unwrap_or(boxes[c].h);
+            let h = row_h[ri..ri + rs].iter().sum::<f64>() + (rs as f64 - 1.0) * sy;
+            let shift = match k.cell_valign {
+                0 => (row_baseline[ri] - boxes[c].first_baseline.unwrap_or(row_baseline[ri])).max(0.0),
+                2 | 3 if h - content_h > 0.01 => {
+                    let slack = h - content_h;
+                    if k.cell_valign == 3 { slack } else { slack / 2.0 }
+                }
+                _ => 0.0,
+            };
+            boxes[c].h = h;
             // The cell's position within the row (relative to it). An rtl table (r2) MIRRORS its columns —
             // column 0 is rightmost — so the cell's box is reflected within the row width: rel = row_w - ltr_rel
             // - cell_width (a colspan reflects by its own spanned width; the row / group / table boxes span the
@@ -3001,6 +3118,18 @@ fn measure_table(
             let ltr_rel = col_x[col] - row_x;
             boxes[c].x = if n.rtl != 0 { row_w - ltr_rel - boxes[c].w } else { ltr_rel };
             boxes[c].y = 0.0;
+            if shift > 0.0 {
+                for &ch in &children[c] {
+                    // …but not a REPLAYED out-of-flow child: its box comes from the oracle's own displacement
+                    // (`rel_y`, applied in `place`), which already carries the shift. One native positions itself
+                    // does move with the content, since its static position is the cell's flow.
+                    let cn = inputs[ch];
+                    if cn.out_of_flow != 0 && !cn.native_oof() {
+                        continue;
+                    }
+                    boxes[ch].y += shift;
+                }
+            }
         }
     }
 
@@ -4041,7 +4170,6 @@ mod tests {
             caption_side: 0,
             rtl: 0,
             text_align: 0,
-            cell_va_offset: 0.0,
             anon_cross: 0.0,
             ws_mode: 0,
             item_auto_height: false,
@@ -4059,10 +4187,14 @@ mod tests {
             scrolls_y: false,
             is_button: false,
             self_sizes: false,
-            cell_pct: 0.0,
+            cell_pct: f64::NAN,
             cell_min_content: f64::NAN,
             cell_max_content: f64::NAN,
-            cell_height: f64::NAN,
+            height_is_floor: false,
+            cell_valign: 0,
+            row_height: f64::NAN,
+            row_pct: f64::NAN,
+            row_rank: 1,
             table_fixed: false,
             flex_stretch: false,
             flex_native: false,
@@ -4101,8 +4233,8 @@ mod tests {
         b.height = 30.0;
         let inputs = vec![blk(0.0, -1), a, b];
         let bx = boxes(layout_block(&inputs, &[], &[], &[], 0.0, 0.0, 800.0));
-        assert_eq!(bx[1], Box { nid: 1.0, x: 0.0, y: 0.0, w: 800.0, h: 50.0, auto_height: false, first_baseline: None, last_baseline: None, inline_block_baseline: None });
-        assert_eq!(bx[2], Box { nid: 2.0, x: 0.0, y: 50.0, w: 800.0, h: 30.0, auto_height: false, first_baseline: None, last_baseline: None, inline_block_baseline: None });
+        assert_eq!(bx[1], Box { nid: 1.0, x: 0.0, y: 0.0, w: 800.0, h: 50.0, auto_height: false, first_baseline: None, last_baseline: None, inline_block_baseline: None, natural_h: None });
+        assert_eq!(bx[2], Box { nid: 2.0, x: 0.0, y: 50.0, w: 800.0, h: 30.0, auto_height: false, first_baseline: None, last_baseline: None, inline_block_baseline: None, natural_h: None });
         assert_eq!(bx[0].h, 80.0); // root auto height = 50 + 30
         assert!(bx[0].auto_height);
     }
@@ -4247,7 +4379,7 @@ mod tests {
         let inputs = vec![blk(0.0, -1), owner, f];
         let bx = boxes(layout_block(&inputs, &[], &[], &[], 0.0, 0.0, 800.0));
         assert_eq!(bx[1].h, 120.0); // owner contains the float
-        assert_eq!(bx[2], Box { nid: 2.0, x: 0.0, y: 0.0, w: 80.0, h: 120.0, auto_height: false, first_baseline: None, last_baseline: None, inline_block_baseline: None });
+        assert_eq!(bx[2], Box { nid: 2.0, x: 0.0, y: 0.0, w: 80.0, h: 120.0, auto_height: false, first_baseline: None, last_baseline: None, inline_block_baseline: None, natural_h: None });
     }
 
     #[test]
@@ -4722,12 +4854,12 @@ mod tests {
         c
     }
     // A cell that DECLARES its width (so its column sizes to `w` — `intrinsic_widths` pins min == max there)
-    // and takes `h` as the height its row imposes.
+    // and its height (a FLOOR for a cell, so with no content it is what the row comes to).
     fn cell(nid: f64, parent: i32, w: f64, h: f64, col: usize, colspan: usize, rowspan: usize) -> Input {
-        let mut c = item(nid, parent, w, f64::NAN);
+        let mut c = item(nid, parent, w, h);
         c.decl_w = w;
         c.decl_border_box = true;
-        c.cell_height = h;
+        c.height_is_floor = true;
         c.cell_col = col;
         c.cell_colspan = colspan;
         c.cell_rowspan = rowspan;
