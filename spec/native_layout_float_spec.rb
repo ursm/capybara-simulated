@@ -1,13 +1,15 @@
 # frozen_string_literal: true
 # Native layout — floats (§9.5), geometry shadow-parity. A float is placed in the band its own parent's
-# content box leaves (left/right, dropping when it doesn't fit) and is CONTAINED by the auto height of the
-# box that establishes the context — which is the nearest ancestor that does, however many plain blocks lie
-# between: native shifts the rectangle up through each of them. Cases the engine can't reproduce yet
-# (auto-width shrink-to-fit, position:relative, a relatively SHIFTED ancestor, coexisting in-flow content)
-# must DECLINE to JS — an A/B per bail proves the guard is specific. V8 only.
+# content box leaves (left/right, dropping when it doesn't fit), sized from its own content where its width
+# is `auto` (§10.3.5), and CONTAINED by the auto height of the box that establishes the context — which is
+# the nearest ancestor that does, however many plain blocks lie between: native shifts the rectangle up
+# through each of them. Cases the engine can't reproduce yet (position:relative, a relatively SHIFTED
+# ancestor, a float whose content native cannot measure) must DECLINE to JS — an A/B per bail proves the
+# guard is specific. V8 only.
 require 'capybara/simulated'
 require 'rack'
 require_relative 'support/session_teardown'
+require_relative 'support/walk_refusals'
 
 RSpec.describe 'native layout float parity', if: ENV.fetch('CSIM_JS_ENGINE', 'v8') == 'v8' do
   def page(body)
@@ -287,9 +289,48 @@ RSpec.describe 'native layout float parity', if: ENV.fetch('CSIM_JS_ENGINE', 'v8
                   '<div style="float:left;width:50px;height:50px"></div></div><div style="clear:left;height:5px"></div></div>')
   end
 
-  it 'declines an auto-width (shrink-to-fit) float, keeps an explicit width' do
-    expect(run_shadow('<div style="overflow:hidden"><div style="float:left;height:50px">hi</div></div>')['ok']).to be false
-    expect(run_shadow('<div style="overflow:hidden"><div style="float:left;width:40px;height:50px">hi</div></div>')['ok']).to be true
+  # §10.3.5: a float's AUTO width SHRINKS TO FIT where a block's fills — its min-content widened to the room
+  # its containing block leaves it, capped at its max-content. Native measures that from the float's own
+  # content like every other content-sized box; the walk marks the float a MEASURED subtree so a shape native
+  # cannot measure declines in the walk rather than mid-pass.
+  it 'shrinks an auto-width float to fit its own content' do
+    expect_parity('<div style="width:300px;overflow:hidden"><div style="float:left">hi there</div></div>')
+    # …capped at the room, so a long run wraps inside the float rather than overflowing it
+    expect_parity('<div style="width:300px;overflow:hidden"><div style="float:left">one two three four five ' \
+                  'six seven eight nine ten eleven twelve</div></div>')
+    # …its own edges ride the width — a PERCENTAGE one is the interesting half, since an intrinsic
+    # contribution resolves it against nothing and the used width has to put it back (`pctEdgesX`).
+    expect_parity('<div style="width:300px;overflow:hidden"><div style="float:left;padding:0 10px;border:2px solid">hi</div></div>')
+    expect_parity('<div style="width:400px;overflow:hidden"><div style="float:left;padding:0 10%">hello there</div></div>')
+    expect_parity('<div style="width:400px;overflow:hidden"><div style="float:left;margin:0 5%;padding:0 10%">hello there</div></div>')
+    expect_parity('<div style="width:300px;overflow:hidden"><div style="float:right;margin:0 20px">hi there</div></div>')
+    # …and its own min/max clamp the result, as they do a declared width — where `box-sizing` finally shows,
+    # because the border-box floor is applied AFTER the clamp (a `max-width: 5px` border box is its own 20px
+    # of padding wide, a content box 25).
+    expect_parity('<div style="width:300px;overflow:hidden"><div style="float:left;max-width:30px">hi there</div></div>')
+    expect_parity('<div style="width:300px;overflow:hidden"><div style="float:left;min-width:200px">hi</div></div>')
+    expect_parity('<div style="width:300px;overflow:hidden"><div style="float:left;box-sizing:border-box;padding:0 10px;max-width:5px">hi</div></div>')
+    expect_parity('<div style="width:300px;overflow:hidden"><div style="float:left;padding:0 10px;max-width:5px">hi</div></div>')
+    # …an intrinsic-size KEYWORD on a float is the same helper's other arm, not the fit-content one
+    %w[min-content max-content fit-content].each do |kw|
+      expect_parity(%(<div style="width:300px;overflow:hidden"><div style="float:left;width:#{kw}">bb cc</div></div>))
+    end
+    # …a box child, not text, sizes it just the same, and the flow around it still clears
+    expect_parity('<div style="width:300px;overflow:hidden"><div style="float:left"><div style="width:40px;height:10px"></div></div>' \
+                  '<div style="clear:left;height:5px"></div></div>')
+    expect_parity('<div style="width:300px;overflow:hidden"><div style="float:left">hi</div><div>text beside the float</div></div>')
+  end
+
+  # …and a float whose content native cannot measure declines in the WALK — the same `nlIntrinsicMeasurable`
+  # gate every other content-sized box goes through — rather than leaving Rust to fail the whole pass.
+  it 'declines an auto-width float native cannot measure, keeps one it can' do
+    WalkRefusals::ATOMIC.each do |inner|
+      r = run_shadow(%(<div style="width:300px;overflow:hidden"><div style="float:left">#{inner}</div></div>))
+      expect(r).to include('ok' => false), "#{inner}: #{r.inspect}"
+      # …and the SAME content behind a declared width, which needs no measure: the refusal is width-driven,
+      # not a refusal of the subtree itself.
+      expect_parity(%(<div style="width:300px;overflow:hidden"><div style="float:left;width:200px">#{inner}</div></div>))
+    end
   end
 
   it 'declines a position:relative float, keeps a static one' do

@@ -22,6 +22,11 @@ fn is_auto(v: f64) -> bool {
 }
 // An `imposed_h` that asks `measure` for a box's content height, its declared height set aside — see
 // `Input::with_imposed_height`. (A negative-infinite height is no height a layout could impose.)
+// How much a line may exceed its band and still count as fitting (the oracle's `LINE_FIT_EPS`). The two
+// engines add a line's widths in different orders — the oracle from the page origin, this one from the
+// content edge — so a box whose content is EXACTLY its band wide lands on the comparison to the last bit and
+// one ULP decides whether a line wraps. "Exactly fits" is the answer both should give.
+const LINE_FIT_EPS: f64 = 1e-9;
 const MEASURE_AUTO_HEIGHT: f64 = f64::NEG_INFINITY;
 
 // Display codes JS writes into the buffer. `display:none` nodes are NOT pushed (no box). A block whose
@@ -411,6 +416,15 @@ impl Input {
     // content-box and border-box widths/heights.
     fn edges_x(&self) -> f64 {
         self.pl + self.pr + self.bl + self.br
+    }
+    // The CONTENT width inside a border box — the oracle's `box.width - edge.left - edge.right`, subtracted
+    // ONE SIDE AT A TIME because that is how the oracle spells it and floating-point subtraction is not
+    // associative. It matters on exactly the box this is for: a SHRINK-TO-FIT width is `max-content + edges`
+    // by construction, so its content width lands on the line-break boundary to the last bit, and summing the
+    // four edges first put it one ULP under — 249.27343749999997 against the oracle's 249.2734375, which is
+    // one more line in the float and a box a different height (`padding: 0 19.2px` around a 37-character run).
+    fn content_w(&self, w: f64) -> f64 {
+        ((w - (self.pl + self.bl)) - (self.pr + self.br)).max(0.0)
     }
     // How much of that is PERCENTAGE: what an intrinsic contribution leaves out (`decl_edges_x` resolves a
     // percentage to nothing) and what a box's OWN used width — a shrink-to-fit one — has to put back. Zero for
@@ -841,7 +855,7 @@ fn line_layout(
                         // ones, and never the fresh line `break-word` moves an over-long word to.
                         let has_wide = run_has_wide && text[start..i].iter().any(|&u| is_wide_unit(u));
                         let per_char = wrap_mode != 0 && !has_wide;
-                        if !no_wrap && (has_wide || (per_char && width > band_w(total))) {
+                        if !no_wrap && (has_wide || (per_char && width > band_w(total) + LINE_FIT_EPS)) {
                             // The over-long word's break opportunity before it (a space / atomic) is what `first`
                             // and the loop's fit tests act on; capture it before the fresh-line break clears the
                             // line, so `atomic_break` need only be consumed once, after the word is placed.
@@ -865,11 +879,11 @@ fn line_layout(
                                 // where one already preceded the word (a space / atomic / line start) — the oracle's
                                 // `mayBreak = u > 0 || textMayBreak()`.
                                 let may_break = !first || preceded || !line_has_content || is_wide_unit(text[u]);
-                                if line_has_content && may_break && line_x + ow_now + cw > band_w(total) {
+                                if line_has_content && may_break && line_x + ow_now + cw > band_w(total) + LINE_FIT_EPS {
                                     soft_break!();
                                 }
                                 // An empty line still too narrow for even one character drops below the float.
-                                if !floats.is_empty() && !line_has_content && cw + ow_now > band_w(total) {
+                                if !floats.is_empty() && !line_has_content && cw + ow_now > band_w(total) + LINE_FIT_EPS {
                                     let fy = top + total;
                                     let at = float_fit_y(floats, fy, cw + ow_now + indent_now.get(), cl, cr, strut_lh);
                                     if at > fy {
@@ -901,7 +915,7 @@ fn line_layout(
                             // the unit loop above, and under `nowrap` — the one way one reaches this branch — the
                             // line never soft-wraps at all, so the whole test is moot.)
                             let may_break = space_before || atomic_break || wide_break;
-                            if !no_wrap && line_has_content && may_break && line_x + ow + width > band_w(total) {
+                            if !no_wrap && line_has_content && may_break && line_x + ow + width > band_w(total) + LINE_FIT_EPS {
                                 soft_break!(); // break: close the line (the hanging space is dropped)
                                 broke = true;
                             }
@@ -909,7 +923,7 @@ fn line_layout(
                             // it (§9.5, "if a shortened line box is too small…"), growing the block by the gap. A
                             // `nowrap` line is NOT shortened by a float and never drops — it overlaps it on one line
                             // (the oracle does no float handling for a nowrap block), so skip this too.
-                            if !no_wrap && !floats.is_empty() && !line_has_content && width + ow > band_w(total) {
+                            if !no_wrap && !floats.is_empty() && !line_has_content && width + ow > band_w(total) + LINE_FIT_EPS {
                                 let fy = top + total;
                                 let at = float_fit_y(floats, fy, width + ow + indent_now.get(), cl, cr, strut_lh);
                                 if at > fy {
@@ -958,7 +972,7 @@ fn line_layout(
                 let ow: f64 = open.iter().filter(|o| !o.1).map(|o| o.0).sum();
                 // An atomic is a break opportunity before it (§ line breaking) — but not under `white-space:
                 // nowrap`, which never soft-wraps.
-                if !no_wrap && line_has_content && line_x + ow + width > band_w(total) {
+                if !no_wrap && line_has_content && line_x + ow + width > band_w(total) + LINE_FIT_EPS {
                     soft_break!(); // break before the atomic (drop any hanging space)
                     broke = true;
                 }
@@ -967,7 +981,7 @@ fn line_layout(
                     line_desc = line_desc.max(sdesc);
                 }
                 // A nowrap line is not shortened by / dropped below a float (see the word branch above).
-                if !no_wrap && !floats.is_empty() && !line_has_content && width + ow > band_w(total) {
+                if !no_wrap && !floats.is_empty() && !line_has_content && width + ow > band_w(total) + LINE_FIT_EPS {
                     let fy = top + total;
                     let at = float_fit_y(floats, fy, width + ow + indent_now.get(), cl, cr, strut_lh);
                     if at > fy {
@@ -1239,7 +1253,7 @@ fn measure(
 ) -> MInfo {
     let n = inputs[i].with_imposed_height(imposed_h);
     let content_top_rel = n.bt + n.pt;
-    let content_w = (w - n.edges_x()).max(0.0);
+    let content_w = n.content_w(w);
 
     // A REPLACED leaf: its box comes from its intrinsic size (`replaced_box`) — the width the caller resolved
     // through `used_width` (or a flex size), the height derived here; no children, no baseline of its own
@@ -1442,10 +1456,29 @@ fn measure(
         if cn.float_kind != 0 {
             // A FLOAT is placed where the flow has reached (top0) but does NOT advance the flow cursor and
             // never collapses margins (§9.5.1 / §8.3.1); the lines/blocks after it route around it instead.
-            // Its used width rode `width` (auto shrink-to-fit is bailed in the harness); its subtree lays
-            // out in a fresh context (a float starts its own BFC).
+            // Its subtree lays out in a fresh context (a float starts its own BFC).
             let top0 = cursor + pending.value();
-            let fw = resolve_width(&cn, content_w);
+            // §10.3.5: a float's AUTO width SHRINKS TO FIT where a block's fills — its min-content widened to
+            // the room its containing block leaves it (its own margins off, as the oracle's `avail`), capped
+            // at its max-content, and then through `used_width` for its min/max and the border-box floor like
+            // any declared one. That is `block_child_width`'s own `fit-content` arm, and an intrinsic-size
+            // KEYWORD on a float wants the same treatment as on any other box, so the one helper answers
+            // both — reading only `is_auto` would send `width: max-content` down the fit-content path, which
+            // is the same answer only while `intrinsic_widths_of` happens to PIN the keyword's figure (it
+            // returns early for a table before that pin). The walk marks such a float a MEASURED subtree, so
+            // a measure that fails is that gate having a hole rather than a shape to defer.
+            let fw = if is_auto(cn.width) || cn.width_kw != 0 {
+                let room = (content_w - Input::m(cn.ml) - Input::m(cn.mr)).max(0.0);
+                match content_sized_width(c, room, inputs, runs, run_texts, grids, children) {
+                    Some(w) => used_width(&cn, w),
+                    None => {
+                        failed.set(true);
+                        0.0
+                    }
+                }
+            } else {
+                resolve_width(&cn, content_w)
+            };
             measure(c, fw, f64::NAN, inputs, runs, run_texts, grids, children, boxes, failed, &mut FloatCtx::new(), 0.0, 0.0);
             let (fml, fmr, fmt, fmb) = (Input::m(cn.ml), Input::m(cn.mr), Input::m(cn.mt), Input::m(cn.mb));
             let outer = boxes[c].w + fml + fmr;
@@ -2313,7 +2346,7 @@ fn measure_flex(
     failed: &std::cell::Cell<bool>,
 ) -> MInfo {
     let n = inputs[i].with_imposed_height(imposed_h);
-    let content_w = (w - n.edges_x()).max(0.0);
+    let content_w = n.content_w(w);
     let content_left_rel = n.bl + n.pl;
     let content_top_rel = n.bt + n.pt;
     let edges_y = n.edges_y();
@@ -3165,7 +3198,7 @@ fn measure_table(
         w
     };
     let cap_floor = caption.map(|cap| boxes[cap].w).unwrap_or(0.0);
-    let content_w = (border_w.max(cap_floor) - n.edges_x()).max(0.0);
+    let content_w = n.content_w(border_w.max(cap_floor));
     let gaps = table_gaps(c_count, sx);
     let assignable = (content_w - gaps).max(0.0);
     let col_w = match &cols {
@@ -4102,7 +4135,7 @@ fn measure_grid(
         failed.set(true);
         MInfo { top: CMargin::of(0.0), top_only: CMargin::of(0.0), bottom: CMargin::of(0.0), collapse_through: false }
     };
-    let content_w = (w - n.edges_x()).max(0.0);
+    let content_w = n.content_w(w);
     let content_top_rel = n.bt + n.pt;
     let content_left = n.bl + n.pl;
     let gs = n.grid_start.max(0) as usize;
@@ -4479,7 +4512,7 @@ fn place_out_of_flow(
     let (px, py) = (boxes[parent].x, boxes[parent].y);
     let (static_x, static_y) = if pn.display == DISPLAY_FLEX {
         let (ix, iy) = (px + pn.bl + pn.pl, py + pn.bt + pn.pt);
-        let inner_w = (boxes[parent].w - pn.edges_x()).max(0.0);
+        let inner_w = pn.content_w(boxes[parent].w);
         let inner_h = (boxes[parent].h - pn.edges_y()).max(0.0);
         let (main_size, cross_size) = if pn.flex_main_is_x { (inner_w, inner_h) } else { (inner_h, inner_w) };
         let main_box = if pn.flex_main_is_x { w } else { h };
@@ -4588,11 +4621,32 @@ fn block_child_width(
         return resolve_width(cn, avail);
     }
     let room = (avail - Input::m(cn.ml) - Input::m(cn.mr)).max(0.0);
-    // An intrinsic-size KEYWORD sizes the box from its own content (the oracle's `usedSize`): its min-content,
-    // its max-content, or — `fit-content` — the room clamped between the two, each carrying the percentage part
-    // of the box's own edges back (`pct_edges_x`, which an intrinsic CONTRIBUTION leaves out). `fit-content` is
-    // `shrink_to_fit_width` by another name, and a vertical writing mode's auto width is the same rule again.
-    let sized = match cn.width_kw {
+    match content_sized_width(c, room, inputs, runs, run_texts, grids, children) {
+        Some(w) => used_width(cn, w),
+        None => {
+            failed.set(true);
+            0.0
+        }
+    }
+}
+// What a box sized from its OWN CONTENT comes to in `room` of inline space (the oracle's `usedSize` for the
+// same box): an intrinsic-size KEYWORD asks for its min-content, its max-content, or — `fit-content` — the
+// room clamped between the two; no keyword is the shrink-to-fit rule, which is `fit-content` by another name
+// and what a float's `auto` width means (§10.3.5), and a vertical writing mode's auto width again. Each
+// figure carries the percentage part of the box's own edges back (`pct_edges_x`, which an intrinsic
+// CONTRIBUTION leaves out). `None` where native cannot measure the subtree — the caller decides.
+#[allow(clippy::too_many_arguments)]
+fn content_sized_width(
+    c: usize,
+    room: f64,
+    inputs: &[Input],
+    runs: &[Run],
+    run_texts: &[Option<Vec<u16>>],
+    grids: &[f64],
+    children: &[Vec<usize>],
+) -> Option<f64> {
+    let cn = &inputs[c];
+    match cn.width_kw {
         0 => shrink_to_fit_width(c, room, inputs, runs, run_texts, grids, children),
         kw => intrinsic_widths(c, inputs, runs, run_texts, grids, children).map(|(imin, imax)| {
             let pct = cn.pct_edges_x();
@@ -4602,13 +4656,6 @@ fn block_child_width(
                 _ => (room - pct).max(imin).min(imax) + pct,
             }
         }),
-    };
-    match sized {
-        Some(w) => used_width(cn, w),
-        None => {
-            failed.set(true);
-            0.0
-        }
     }
 }
 // The BORDER-BOX width a box uses given what an AUTO width would be (`auto_w` — the oracle's `usedSize` with

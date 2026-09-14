@@ -154,6 +154,26 @@ RSpec.describe 'save_screenshot' do
     end
   end
 
+  # A float whose height is AUTO is laid out TWICE — once to learn the height its band search needs, then
+  # again where that search puts it — and only the second placement is real. The first left its text runs
+  # behind at the position the float was about to leave: a wrapped row of `float: left` columns painted every
+  # label on the row above, piled at the right edge, with the boxes in the right places all along. Geometry
+  # cannot see this; only the painter can.
+  it 'paints an auto-height float where its second placement put it' do
+    s = page_with('<div style="width:200px">' + (1..6).map {|i| %(<div style="float:left;width:60px">c#{i}</div>) }.join + '</div>')
+    recorded = s.evaluate_script('globalThis.__csimPaintRuns()').map {|r| [r['text'], [r['x'].round, r['y'].round]] }
+    runs = recorded.to_h
+    boxes = s.evaluate_script(<<~JS).to_h {|t, x, y| [t, [x.round, y.round]] }
+      [...document.querySelectorAll('div div')].map(e => {
+        const r = e.getBoundingClientRect(); return [e.textContent, r.x, r.y];
+      })
+    JS
+    expect(recorded.map(&:first).sort).to eq(%w[c1 c2 c3 c4 c5 c6])   # each recorded ONCE — the probe's
+                                                                      # placement must leave no ghost behind
+    expect(runs).to eq(boxes)                             # …and where its own box is
+    expect(boxes['c4'][1]).to be > boxes['c1'][1]         # …with the row that wrapped genuinely below
+  end
+
   # A cell's bare TEXT is vertically aligned in the paint like its block children (§17.5.3) — the UA default is
   # middle. Cell text carries no DOM geometry in this driver (getBoundingClientRect / Range see nothing), so the
   # alignment is observable ONLY through the painter's recorded runs.

@@ -15,9 +15,8 @@ RSpec.describe 'floats' do
   include LayoutMeasure
 
   # The boxes named by `selectors` inside a 300px block.
-  def floated(body, selectors)
-    boxes, text, line = measure(%(<div id="cb" style="width:300px">#{body}</div>), selectors,
-                                probes: ['one two three four five six seven eight'])
+  def floated(body, selectors, probes: ['one two three four five six seven eight'])
+    boxes, text, line = measure(%(<div id="cb" style="width:300px">#{body}</div>), selectors, probes: probes)
     [boxes.map {|b| b.map {|n| n.round(2) } }, text, line]
   end
 
@@ -247,6 +246,47 @@ RSpec.describe 'floats' do
     expect(boxes[0][3]).to eq(65)    # Chrome: 55
     expect(boxes[1][1]).to eq(10)    # …the float itself is where Chrome has it
     expect(boxes[2][1]).to eq(60)    # Chrome: 50
+  end
+
+  # KNOWN DIVERGENCES, both of them the SHRINK-TO-FIT route rather than floats as such — pinned here because
+  # a float is where a page meets them. A float with an intrinsic RATIO and no intrinsic size (a
+  # `viewBox`-only `<svg>`) asks `intrinsicWidths` for a figure a replaced box does not have, and collapses to
+  # nothing: Chrome 153 gives it 400x300 in a 400px block, this engine 0x0 — where the same `<svg>` as an
+  # ordinary block child is 400x300 here too, so it is the route and not the box. And a float in a VERTICAL
+  # writing mode shrinks to fit along the wrong axis: Chrome makes it 18 wide and 67.97 tall, this engine
+  # 67.97 by 18.
+  it 'collapses a ratio-only float and mis-axes a vertical one (Chrome does not)' do
+    ratio, = floated('<svg id="s" style="float:left" viewBox="0 0 4 3"></svg>', ['#s'])
+    expect(ratio.first[2, 2]).to eq([0, 0])              # Chrome: 400 x 300
+
+    vertical, text = floated('<div id="v" style="float:left;writing-mode:vertical-rl">hello there</div>', ['#v'],
+                             probes: ['hello there'])
+    # Chrome has these the other way round: 18 wide (one line box) and as tall as the text is long.
+    expect(vertical.first[2]).to be_within(0.02).of(text['hello there'])
+    expect(vertical.first[3]).to eq(18)
+  end
+
+  # WHERE a float goes needs its HEIGHT: one too tall for the gap another float leaves drops past it
+  # (§9.5.1). An AUTO height is not known until the float's own subtree is laid out, and searching the band
+  # with a zero-height box squeezed this one into the 12px gap beside the right float — Chrome 153 drops it
+  # below both, at 36.
+  it 'drops an auto-height float past the floats it cannot fit beside' do
+    boxes, = floated(<<~HTML, ['#a', '#b', '#c'])
+      <div id="a" style="float:right;width:90px;height:12px"></div>
+      <div id="b" style="float:left;width:300px;height:24px"></div>
+      <div id="c" style="float:left;width:19px">sib</div>
+    HTML
+    expect(boxes[0][0, 2]).to eq([210, 0])
+    expect(boxes[1][0, 2]).to eq([0, 12])
+    expect(boxes[2][0, 2]).to eq([0, 36])
+
+    # …and a DECLARED height went the same way already, which is what makes this the auto one's bug alone.
+    declared, = floated(<<~HTML, ['#c'])
+      <div style="float:right;width:90px;height:12px"></div>
+      <div style="float:left;width:300px;height:24px"></div>
+      <div id="c" style="float:left;width:19px;height:18px">sib</div>
+    HTML
+    expect(declared[0][0, 2]).to eq([0, 36])
   end
 
   # An ordinary block, by contrast, keeps the whole width and lets the float overlap it.
