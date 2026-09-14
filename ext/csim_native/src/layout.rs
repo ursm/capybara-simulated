@@ -81,6 +81,10 @@ pub(crate) struct Input {
     // come from the used `height` (0 and NaN can't tell these apart), so JS pushes the boolean.
     pub(crate) height_adjoins: bool,
     pub(crate) minh_adjoins: bool,
+    // …and §8.3.1's BOTTOM rule, which is not the same question: it wants an AUTO height where the two above
+    // want "auto or zero". A `height: 0` block collapses THROUGH and still keeps its last child's bottom
+    // margin in (Chrome: the block around it is 0 tall, not 12).
+    pub(crate) bottom_adjoins: bool,
     // Text-block (DISPLAY_TEXT_BLOCK) fields. Its inline content is a RUN SEQUENCE (each run its own
     // font/size/spacing/line-height) in the `runs` buffer at [run_start, run_start+run_count); a run's
     // text is in `run_texts` at the run's index. `strut_lh` is the block's own resolved line-height and
@@ -1392,7 +1396,7 @@ fn measure(
     // border/padding/height. Otherwise the top edge is open with no border/padding, and the bottom edge
     // also needs an adjoining height (from the DECLARATION — `height:0` still adjoins).
     let top_open = !n.starts_bfc && n.bt == 0.0 && n.pt == 0.0;
-    let bottom_open = !n.starts_bfc && n.bb == 0.0 && n.pb == 0.0 && n.height_adjoins;
+    let bottom_open = !n.starts_bfc && n.bb == 0.0 && n.pb == 0.0 && n.bottom_adjoins;
 
     // Float context (owner frame = this measure frame): a block that establishes a BFC owns a FRESH one;
     // otherwise floats flow in from the context it inherits (`fc`). `cl`/`cr` are the content edges every
@@ -4665,6 +4669,7 @@ mod tests {
             bl: 0.0,
             height_adjoins: true, // auto height/min-height adjoin (autoOrZeroHeight); overridden per test
             minh_adjoins: true,
+            bottom_adjoins: true,
             run_start: -1,
             run_count: 0,
             strut_lh: 0.0,
@@ -4804,6 +4809,7 @@ mod tests {
         a.bt = 10.0; a.br = 10.0; a.bb = 10.0; a.bl = 10.0; // border 10 each side → edges 20
         a.pt = 5.0; a.pr = 5.0; a.pb = 5.0; a.pl = 5.0;     // padding 5 each side → +10 → edges_y = 30
         a.height_adjoins = false;
+        a.bottom_adjoins = false;
         let inputs = vec![blk(0.0, -1), a];
         let bx = boxes(layout_block(&inputs, &[], &[], &[], 0.0, 0.0, 800.0));
         assert_eq!([bx[1].w, bx[1].h], [100.0, 30.0]); // width keeps 100 (> edges 30); height floored to 30
@@ -4860,14 +4866,17 @@ mod tests {
         let mut a = blk(1.0, 0);
         a.height = 50.0;
         a.height_adjoins = false;
+        a.bottom_adjoins = false;
         let mut b = blk(2.0, 0);
         b.height = 0.0;
-        b.height_adjoins = true; // height:0 adjoins (autoOrZeroHeight)
+        b.height_adjoins = true; // height:0 adjoins the THROUGH rule (auto or zero)
+        b.bottom_adjoins = false; //  …but not the BOTTOM rule, which wants auto
         b.mt = 20.0;
         b.mb = 40.0;
         let mut c = blk(3.0, 0);
         c.height = 30.0;
         c.height_adjoins = false;
+        c.bottom_adjoins = false;
         let inputs = vec![blk(0.0, -1), a, b, c];
         let bx = boxes(layout_block(&inputs, &[], &[], &[], 0.0, 0.0, 800.0));
         assert_eq!(bx[2].y, 70.0); // B placed at its top-only run (A.mb 0 vs B.mt 20)
@@ -4884,6 +4893,7 @@ mod tests {
         let mut a = blk(1.0, 0);
         a.height = 50.0;
         a.height_adjoins = false;
+        a.bottom_adjoins = false;
         a.mb = 10.0;
         let mut p = blk(2.0, 0); // auto height, no border/padding
         p.mt = 30.0;
@@ -4892,6 +4902,7 @@ mod tests {
         let mut c = blk(4.0, 0);
         c.height = 30.0;
         c.height_adjoins = false;
+        c.bottom_adjoins = false;
         c.mt = 20.0;
         let inputs = vec![blk(0.0, -1), a, p, empty, c];
         let bx = boxes(layout_block(&inputs, &[], &[], &[], 0.0, 0.0, 800.0));
@@ -4910,6 +4921,7 @@ mod tests {
         f.width = 80.0;
         f.height = 120.0;
         f.height_adjoins = false;
+        f.bottom_adjoins = false;
         let inputs = vec![blk(0.0, -1), owner, f];
         let bx = boxes(layout_block(&inputs, &[], &[], &[], 0.0, 0.0, 800.0));
         assert_eq!(bx[1].h, 120.0); // owner contains the float
@@ -4924,16 +4936,19 @@ mod tests {
         owner.starts_bfc = true;
         owner.width = 200.0;
         owner.height_adjoins = false;
+        owner.bottom_adjoins = false;
         let mut a = blk(2.0, 1);
         a.float_kind = FLOAT_LEFT;
         a.width = 120.0;
         a.height = 40.0;
         a.height_adjoins = false;
+        a.bottom_adjoins = false;
         let mut b = blk(3.0, 1);
         b.float_kind = FLOAT_LEFT;
         b.width = 120.0;
         b.height = 30.0;
         b.height_adjoins = false;
+        b.bottom_adjoins = false;
         let inputs = vec![blk(0.0, -1), owner, a, b];
         let bx = boxes(layout_block(&inputs, &[], &[], &[], 0.0, 0.0, 800.0));
         assert_eq!(bx[2].y, 0.0); // first float at the top
@@ -4955,6 +4970,7 @@ mod tests {
         c.width = w;
         c.height = h;
         c.height_adjoins = false;
+        c.bottom_adjoins = false;
         c
     }
 
@@ -5001,6 +5017,7 @@ mod tests {
             let mut f = flex(0.0, -1, 600.0);
             f.height = 90.0;
             f.height_adjoins = false;
+            f.bottom_adjoins = false;
             let mut a = item(1.0, 0, 100.0, 30.0);
             a.flex_cross_align = code;
             let inputs = vec![f, a];
@@ -5083,6 +5100,7 @@ mod tests {
         let mut f = flex(0.0, -1, 400.0);
         f.height = 80.0;
         f.height_adjoins = false;
+        f.bottom_adjoins = false;
         let mut a = item(1.0, 0, 39.0, 37.0);
         a.flex_cross_align = CROSS_BASELINE_LAST;
         a.flex_baseline_asc = 29.0;
@@ -5101,6 +5119,7 @@ mod tests {
         let mut f = flex(0.0, -1, 400.0);
         f.height = 80.0;
         f.height_adjoins = false;
+        f.bottom_adjoins = false;
         let mut a = item(1.0, 0, 39.0, 37.0);
         a.flex_cross_align = CROSS_BASELINE;
         a.flex_baseline_asc = 29.0;
@@ -5153,6 +5172,7 @@ mod tests {
             let mut f = flex(0.0, -1, 600.0);
             f.height = 90.0;
             f.height_adjoins = false;
+            f.bottom_adjoins = false;
             let mut a = item(1.0, 0, 100.0, 30.0);
             a.flex_item_auto = bits;
             let inputs = vec![f, a];
@@ -5219,6 +5239,7 @@ mod tests {
         let mut f = flex_col(0.0, -1, 200.0);
         f.height = 200.0;
         f.height_adjoins = false;
+        f.bottom_adjoins = false;
         f.flex_justify = 1; // center
         let inputs = vec![f, item(1.0, 0, 50.0, 30.0), item(2.0, 0, 50.0, 30.0), item(3.0, 0, 50.0, 30.0)];
         let bx = boxes(layout_block(&inputs, &[], &[], &[], 0.0, 0.0, 800.0));
@@ -5268,6 +5289,7 @@ mod tests {
         let mut f = flex_col(0.0, -1, 100.0);
         f.height = 40.0;
         f.height_adjoins = false;
+        f.bottom_adjoins = false;
         f.min_h = 90.0;
         f.flex_justify = 2; // end
         let inputs = vec![f, item(1.0, 0, 100.0, 30.0)];
@@ -5292,6 +5314,7 @@ mod tests {
         f.flex_main_reverse = true;
         f.height = 200.0;
         f.height_adjoins = false;
+        f.bottom_adjoins = false;
         let inputs = vec![f, item(1.0, 0, 50.0, 30.0), item(2.0, 0, 50.0, 30.0)];
         let bx = boxes(layout_block(&inputs, &[], &[], &[], 0.0, 0.0, 800.0));
         assert_eq!([bx[1].y, bx[2].y], [170.0, 140.0]); // first item at the bottom (200-30), packed at main-start
@@ -5333,6 +5356,7 @@ mod tests {
         f.flex_wrap = true;
         f.height = 200.0;
         f.height_adjoins = false;
+        f.bottom_adjoins = false;
         f.flex_align_content = 1; // center
         let inputs = vec![f, item(1.0, 0, 100.0, 30.0), item(2.0, 0, 100.0, 30.0), item(3.0, 0, 100.0, 30.0)];
         let bx = boxes(layout_block(&inputs, &[], &[], &[], 0.0, 0.0, 800.0));

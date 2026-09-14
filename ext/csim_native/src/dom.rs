@@ -1035,6 +1035,7 @@ fn layout_pass(
             indent_spent: (r[65] as u32) & 1024 != 0,
             width_kw: ((r[65] as u32) >> 11 & 3) as u8,
             takes_clearance: (r[65] as u32) & 8192 != 0,
+            bottom_adjoins: (r[65] as u32) & 16384 != 0,
             control_baseline: r[77] as u8,
             control_font_box: r[78],
             control_font_asc: r[79],

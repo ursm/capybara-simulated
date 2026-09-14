@@ -16,9 +16,10 @@ RSpec.describe 'margin collapsing' do
   # `[y, height]` of each selector inside a 300px block. `host:` puts that shadow-root markup on the block —
   # the body is SLOTTED content then, inheriting through the flat tree rather than through the DOM parent —
   # and gives the block a height of its own, so that taking the host's instead of the slot's is visible.
-  def boxes_for(body, selectors, host: nil, host_style: 'height:10px')
+  def boxes_for(body, selectors, host: nil, host_style: 'height:10px', wrapper_height: nil)
     shadow = host ? %(<script>document.getElementById('cb').attachShadow({mode: 'open'}).innerHTML = #{host.to_json}</script>) : ''
-    boxes, = measure(%(<div id="cb" style="width:300px#{host ? ";#{host_style}" : ''}">#{body}</div>#{shadow}), selectors)
+    style = "width:300px#{host ? ";#{host_style}" : ''}#{wrapper_height ? ";height:#{wrapper_height}" : ''}"
+    boxes, = measure(%(<div id="cb" style="#{style}">#{body}</div>#{shadow}), selectors)
     boxes.map {|b| [b[1].round(2), b[3].round(2)] }
   end
 
@@ -217,6 +218,73 @@ RSpec.describe 'margin collapsing' do
                        host: '<div style="padding-top:inherit"><slot></slot></div>', host_style: 'padding-top:30px')
     expect(hosted[0]).to eq([0, 65])
     expect(hosted[1][0]).to eq(60)
+  end
+
+  # §8.3.1's BOTTOM rule is not the collapse-THROUGH rule, and the difference is a `height: 0` box: nothing
+  # separates its own two margins, so it collapses through — but its last child's bottom margin does NOT come
+  # out of it. Chrome 153: a `height: 0` box holding a `margin-bottom: 12px` child is 0 tall and so is the
+  # block around it, where letting the margin escape made that block 12. Reading one rule for both was a
+  # MISMATCH the native engine got right and this one did not.
+  it 'keeps a last child bottom margin inside a box with a declared height' do
+    %w[0 0px 1px].each do |h|
+      (wrap,) = boxes_for(%(<div id="w" style="overflow:hidden"><div style="height:#{h}">) +
+                          '<div id="c" style="margin-bottom:12px;height:5px"></div></div></div>', ['#w', '#c'])
+      expect([h, wrap]).to eq([h, [0, h == '1px' ? 1 : 0]])
+    end
+    # …and an AUTO height, or an intrinsic keyword, still lets it out: the block comes to 5 + 12.
+    %w[auto min-content max-content fit-content].each do |h|
+      (wrap,) = boxes_for(%(<div id="w" style="overflow:hidden"><div style="height:#{h}">) +
+                          '<div id="c" style="margin-bottom:12px;height:5px"></div></div></div>', ['#w', '#c'])
+      expect([h, wrap]).to eq([h, [0, 17]])
+    end
+    # …the TOP rule has no height clause at all, so the same box still hands its child's top margin up.
+    (top,) = boxes_for('<div id="w" style="overflow:hidden"><div style="height:0">' \
+                       '<div id="c" style="margin-top:12px;height:5px"></div></div></div>', ['#w', '#c'])
+    expect(top).to eq([0, 12])
+  end
+
+  # …and it is the USED height that decides, not the declaration: a PERCENTAGE against an indefinite
+  # containing block IS auto (§10.5), so `height: 0%` and `height: 100%` under an auto-height parent both let
+  # the margin out where a declared `0` keeps it in — and the same percentage against a DEFINITE block is a
+  # real height and keeps it in. All four Chrome 153-measured.
+  it 'reads the used height, so a percentage against an indefinite block is auto' do
+    %w[0% 100%].each do |h|
+      (wrap, box) = boxes_for(%(<div id="w" style="overflow:hidden"><div id="p" style="height:#{h}">) +
+                              '<div style="margin-bottom:12px;height:5px"></div></div></div>', ['#w', '#p'])
+      expect([h, wrap, box]).to eq([h, [0, 17], [0, 5]])
+    end
+
+    definite = boxes_for('<div id="w" style="overflow:hidden;height:40px"><div id="p" style="height:0%">' \
+                         '<div style="margin-bottom:12px;height:5px"></div></div></div>', ['#w', '#p'])
+    expect(definite).to eq([[0, 40], [0, 0]])
+
+    # …asked of the box's own SIBLING, which is where the answer actually shows: the margin the box keeps
+    # inside it does not move what comes after. The basis has to travel with the question for this to hold —
+    # read off a stamp `usedSize` writes later, the memoised answer said `auto` and the sibling moved 12px on
+    # the first pass and not on the second.
+    [['50%', 30], ['0%', 0], ['100%', 60], ['calc(50%)', 30], ['30px', 30]].each do |h, y|
+      sib = boxes_for(%(<div id="p" style="height:#{h}"><div style="margin-bottom:12px;height:5px"></div></div>) +
+                      '<div id="s" style="height:5px"></div>', ['#s'], wrapper_height: '60px')
+      expect([h, sib.first.first]).to eq([h, y])
+    end
+    # …and `calc(0px)`, which is a length however it is written
+    zero = boxes_for('<div id="w" style="overflow:hidden"><div id="p" style="height:calc(0px)">' \
+                     '<div style="margin-bottom:12px;height:5px"></div></div></div>', ['#w', '#p'])
+    expect(zero).to eq([[0, 0], [0, 0]])
+  end
+
+  # KNOWN DIVERGENCE: the same rule's `min-height` half, which this engine does not model at all. Chrome 153
+  # gives the bottom margin to the box only while `min-height` does NOT raise it above its content: a
+  # `min-height: 5px` box over a 5px child with a 12px bottom margin is 5 tall and the block around it 17,
+  # while `min-height: 6px` makes it 6 and the block 6 — the margin reaches NEITHER, consumed by the clamp.
+  # Both engines let it escape either way, so the shadow harness cannot see this; fixing it means deciding
+  # the margin's fate AFTER the min clamp, in both.
+  it 'does not model the min-height half of the bottom rule' do
+    [['5px', 17], ['6px', 18], ['20px', 32]].each do |mh, outer|
+      (wrap,) = boxes_for(%(<div id="w" style="overflow:hidden"><div style="min-height:#{mh}">) +
+                          '<div id="c" style="margin-bottom:12px;height:5px"></div></div></div>', ['#w', '#c'])
+      expect([mh, wrap]).to eq([mh, [0, outer]])   # Chrome: 17, 6, 20
+    end
   end
 
   # An intrinsic height keyword is no height at all for this purpose.

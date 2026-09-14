@@ -700,6 +700,34 @@ RSpec.describe 'native layout L1 block-flow parity', if: ENV.fetch('CSIM_JS_ENGI
     end
   end
 
+  # §8.3.1's BOTTOM rule wants an AUTO height where the collapse-THROUGH rule wants "auto or zero": a
+  # `height: 0` box collapses through and still keeps its last child's bottom margin in. Native had that
+  # right from its own structure (it only propagates a bottom margin out of an auto-height box) while the
+  # oracle read one rule for both, so this was a MISMATCH rather than a decline — rec[65] bit 14 carries the
+  # bottom rule's own answer now.
+  it 'keeps a last child bottom margin inside a box with a declared height' do
+    %w[0 0px 1px auto min-content max-content fit-content].each do |h|
+      expect_parity(%(<div style="width:400px;overflow:hidden"><div style="height:#{h}">) +
+                    '<div style="margin-bottom:12px;height:5px"></div></div></div>')
+    end
+    # …the same box still hands its child's TOP margin up, and still collapses through when it is empty
+    expect_parity('<div style="width:400px;overflow:hidden"><div style="height:0">' \
+                  '<div style="margin-top:12px;height:5px"></div></div></div>')
+    expect_parity('<div style="width:400px"><div style="margin:20px 0"><div style="height:0"></div></div>' \
+                  '<div style="height:5px"></div></div>')
+    # …and the USED height is what answers: a percentage against an INDEFINITE block is auto and lets the
+    # margin out, against a definite one it is a height and keeps it in.
+    %w[0% 50% 100% calc(50%)].each do |h|
+      expect_parity(%(<div style="width:400px;overflow:hidden"><div style="height:#{h}">) +
+                    '<div style="margin-bottom:12px;height:5px"></div></div></div>')
+      expect_parity(%(<div style="width:400px;overflow:hidden;height:40px"><div style="height:#{h}">) +
+                    '<div style="margin-bottom:12px;height:5px"></div></div></div>')
+      # …and where it shows: the SIBLING after the box, which the kept-in margin must not move
+      expect_parity(%(<div style="width:400px;height:60px"><div style="height:#{h}">) +
+                    '<div style="margin-bottom:12px;height:5px"></div></div><div style="height:5px"></div></div>')
+    end
+  end
+
   # CSS 2.1 §10.3.3: the width a block does not take goes to whichever horizontal margins are `auto` — both,
   # and the box is centred; one, and it is pushed to the other side. `margin: 0 auto` is how half the pages on
   # the web centre their shell, so until native did it, none of them laid out natively at all.
