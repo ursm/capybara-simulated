@@ -62,6 +62,27 @@ RSpec.describe 'layout box model' do
     expect(big[3]).to be_within(1).of(23)
   end
 
+  # SIZE containment is NOT modelled, and `contain` buying a formatting context here is exactly the reason
+  # to say so out loud: `contain: layout|paint|content|strict` holds its children's margins and floats in,
+  # but `contain: size|strict` ALSO makes the box size as if it had no contents at all (css-contain-2 §3.1).
+  # Chrome 153: the 50px child lays out, and the box around it is still 0 tall, so the block below it sits
+  # at 0 — and a `contain: strict` wrapper around a 50px float leaves the `clear` box below at 30, not 80.
+  # This engine sizes all of them to their contents. Whoever models size containment makes this example
+  # fail, which is the whole point of it.
+  it 'does not model size containment' do
+    %w[size strict].each do |kind|
+      b = boxes(%(<div id="a" style="contain:#{kind}"><div style="height:50px"></div></div><div id="b"></div>), ['#a', '#b'])
+      expect([kind, b[0][3]]).to eq([kind, 50])   # Chrome: 0
+      expect([kind, b[1][1]]).to eq([kind, 50])   # Chrome: 0
+    end
+    # …and the float half of it, which the float spec leaves to this example: the box is still as tall as the
+    # float it contains, so the `clear` box below takes its clearance from 50 rather than from 0.
+    f = boxes('<div id="a" style="contain:strict"><div style="float:left;width:50px;height:50px"></div></div>' \
+              '<div id="b" style="clear:left;margin-top:30px;height:5px"></div>', ['#a', '#b'])
+    expect(f[0][3]).to eq(50)   # Chrome: 0
+    expect(f[1][1]).to eq(80)   # Chrome: 30
+  end
+
   # WHICH FACE a CSS family resolves to decides every width on the page, and
   # fontconfig makes that harder than it looks: it answers every name, so a name it
   # SUBSTITUTED (`Arial` → the metric-compatible Liberation Sans, which is what a

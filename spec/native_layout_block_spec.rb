@@ -632,6 +632,74 @@ RSpec.describe 'native layout L1 block-flow parity', if: ENV.fetch('CSIM_JS_ENGI
     end
   end
 
+  # A box that establishes an INDEPENDENT FORMATTING CONTEXT does all three things at once: it owns its floats,
+  # it avoids its parent's, and its children's margins stay inside it. `contain: layout|paint|content|strict`
+  # and a multi-column box are such contexts (css-contain-2 §2.1, css-multicol-1 §2) — this engine read them as
+  # margin-only, which made the walk decline them AND left the engine contradicting itself: `subtreeHasFloat`
+  # believed a `contain` box held its floats while the layout let them escape, and the escaped float then ate a
+  # later sibling's clearance margin (Chrome puts that sibling at 80, the oracle answered 50).
+  describe 'a box that establishes its own formatting context' do
+    it 'keeps a child margin inside contain and multicol' do
+      %w[layout paint content].each do |kind|
+        expect_parity(%(<div style="width:400px"><div style="contain:#{kind}"><div style="margin-top:30px;height:10px"></div></div><div style="height:5px"></div></div>))
+      end
+      expect_parity('<div style="width:400px"><div style="contain:strict;height:40px"><div style="margin-top:30px;height:10px"></div></div><div style="height:5px"></div></div>')
+      expect_parity('<div style="width:400px"><div style="column-count:2"><div style="margin-top:30px;height:10px"></div></div><div style="height:5px"></div></div>')
+      expect_parity('<div style="width:400px"><div style="column-width:100px"><div style="margin-top:30px;height:10px"></div></div><div style="height:5px"></div></div>')
+      # …its own margins collapse with its neighbours' as any block's do, and an EMPTY one does not collapse
+      # through (a BFC root never does)
+      expect_parity('<div style="width:400px"><div style="contain:layout;margin-top:20px"><div style="margin-top:30px;height:10px"></div></div></div>')
+      expect_parity('<div style="width:400px"><div style="contain:layout;margin:20px 0"></div><div style="margin-top:30px;height:10px"></div></div>')
+      expect_parity('<div style="width:400px"><div style="contain:paint;margin-bottom:20px"><div style="margin-bottom:30px;height:10px"></div></div><div style="height:5px"></div></div>')
+    end
+    # …and it OWNS the floats inside it, which is the half this engine used to get wrong: the box is as tall as
+    # its float, and a later `clear` sibling clears past the float's bottom rather than past nothing.
+    it 'owns a float inside it, and its height' do
+      expect_parity('<div style="width:400px"><div style="contain:layout"><div style="float:left;width:50px;height:50px"></div></div><div style="height:5px"></div></div>')
+      expect_parity('<div style="width:400px"><div style="contain:layout"><div style="float:left;width:50px;height:50px"></div></div><div style="clear:left;margin-top:30px;height:5px"></div></div>')
+      expect_parity('<div style="width:400px"><div style="column-count:2"><div style="float:left;width:50px;height:50px"></div></div><div style="height:5px"></div></div>')
+    end
+  end
+
+  # A first child that COLLAPSES THROUGH an open top edge leaves its run in the PARENT's top margin — and only
+  # there. Native also left it pushing the next sibling, counting it twice: `<div style="margin:20px 0">` then
+  # `<div style="margin:15px 0">` put the second box at 40 where Chrome and the oracle say 20, and the block's
+  # own height grew with it. The next sibling is still the FIRST whose top margin joins the parent's, which is
+  # what the oracle's `topOnly` loop does by construction.
+  it 'hoists a collapse-through first child once, not twice' do
+    expect_parity('<div style="width:400px"><div style="margin:20px 0"></div><div style="margin:15px 0"></div><div style="height:5px"></div></div>')
+    expect_parity('<div style="width:400px"><div style="margin:20px 0"></div><div style="margin-top:15px;height:5px"></div></div>')
+    expect_parity('<div style="width:400px"><div style="margin:20px 0"></div><div style="margin:10px 0"></div><div style="margin:30px 0"></div><div style="height:5px"></div></div>')
+    # …a closed top edge keeps the run inside, where it pushes the next sibling as any margin does
+    expect_parity('<div style="width:400px;padding-top:1px"><div style="margin:20px 0"></div><div style="margin:15px 0"></div><div style="height:5px"></div></div>')
+    expect_parity('<div style="width:400px"><div style="margin:20px 0;height:5px"></div><div style="margin:15px 0"></div><div style="height:5px"></div></div>')
+  end
+
+  # …and where such a run comes to a NEGATIVE number the flow ends ABOVE the content top, which floors the
+  # CONTENT height at zero and leaves the box's own padding taking its room: a `padding-top: 1px` wrapper is
+  # 1 tall (Chrome-measured), where flooring the BORDER box instead made native answer 0.
+  it 'floors the content height, not the border box, under a negative collapse-through run' do
+    expect_parity('<div style="width:400px;padding-top:1px"><div style="margin-top:-30px;margin-bottom:10px"></div><div style="height:5px"></div></div>')
+    expect_parity('<div style="width:400px;padding-top:1px;padding-bottom:2px"><div style="margin-top:-30px;margin-bottom:10px"></div><div style="height:5px"></div></div>')
+    expect_parity('<div style="width:400px;border-top:3px solid"><div style="margin-top:-30px;margin-bottom:10px"></div><div style="height:5px"></div></div>')
+    expect_parity('<div style="width:400px;padding-top:1px"><div style="margin-top:-40px"></div></div>')
+    # …and with an OPEN top edge the run leaves the box entirely, which is zero tall either way
+    expect_parity('<div style="width:400px"><div style="margin-top:-30px;margin-bottom:10px"></div><div style="height:5px"></div></div>')
+  end
+
+  # Whether a height separates two margins is decided by the DECLARATION, and a CSS-wide keyword is not one:
+  # `height: inherit` is the parent's height (80, and no collapse-through), `initial` / `unset` / `revert`
+  # stand for `auto`. Native reads that decision off rec[25]/rec[26], so the oracle taking `inherit` for auto
+  # showed up here as a MISMATCH — native and Chrome said 80, the oracle 0.
+  it 'reads a CSS-wide height keyword as the value it stands for' do
+    expect_parity('<div style="width:400px;height:80px"><div style="height:inherit"></div></div>')
+    expect_parity('<div style="width:400px;height:80px"><div style="min-height:inherit"></div></div>')
+    expect_parity('<div style="width:400px"><div style="height:inherit"><div style="margin:20px 0"></div></div><div style="height:5px"></div></div>')
+    %w[initial unset revert].each do |kw|
+      expect_parity(%(<div style="width:400px;height:80px"><div style="height:#{kw}"><div style="margin:20px 0"></div></div></div>))
+    end
+  end
+
   # CSS 2.1 §10.3.3: the width a block does not take goes to whichever horizontal margins are `auto` — both,
   # and the box is centred; one, and it is pushed to the other side. `margin: 0 auto` is how half the pages on
   # the web centre their shell, so until native did it, none of them laid out natively at all.

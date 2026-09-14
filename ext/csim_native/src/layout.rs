@@ -92,9 +92,10 @@ pub(crate) struct Input {
     pub(crate) strut_lh: f64,
     pub(crate) strut_asc: f64,
     // Float positioning (§9.5), resolved JS-side to pure rectangle arithmetic. `float_kind` 0 none /
-    // 1 left / 2 right; `clear` 0 none / 1 left / 2 right / 3 both. `starts_bfc` marks a block that owns
-    // a float context (a float never crosses this boundary) AND establishes a block formatting context,
-    // so its own margins do NOT collapse with its children's (§8.3.1). For a floated box, its used width
+    // 1 left / 2 right; `clear` 0 none / 1 left / 2 right / 3 both. `starts_bfc` marks a block that
+    // establishes a BLOCK FORMATTING CONTEXT — one flag because it is one property: no float crosses the
+    // boundary in either direction, and its own margins do NOT collapse with its children's (§8.3.1).
+    // For a floated box, its used width
     // rides `width` (JS resolves the shrink-to-fit; native computes the auto height from the subtree).
     pub(crate) float_kind: u8,
     pub(crate) clear: u8,
@@ -1565,11 +1566,16 @@ fn measure(
             top_m.merge(cm.top);
             boxes[c].y = content_top_rel;
             if cm.collapse_through {
-                pending = cm.top; // empty child: its single margin carries on to the next sibling
-            } else {
-                cursor = content_top_rel + boxes[c].h;
-                pending = cm.bottom;
+                // …and a child that collapses THROUGH leaves the run where it put it — in the parent's own
+                // top margin — without also pushing the next sibling with it, which counted it twice (a
+                // `margin: 20px 0` empty box followed by a `margin: 15px 0` one put the second at 40 where
+                // Chrome and the oracle say 20). The next sibling is still the FIRST whose top joins the
+                // parent's, exactly as the oracle's `topOnly` loop keeps joining while children come back
+                // through: leave `first` alone and `pending` empty.
+                continue;
             }
+            cursor = content_top_rel + boxes[c].h;
+            pending = cm.bottom;
         } else {
             // Place at the run ABOVE the child's own bottom (top_only) — for a through child that is its
             // top margin only, so its bottom does not push it down; for a normal child top_only == top.
@@ -1608,7 +1614,10 @@ fn measure(
         // A block that OWNS a float context CONTAINS its floats: its auto height grows to the lowest of
         // them (§9.5 — the `overflow:hidden` / `flow-root` clearfix). Only the owner grows; -inf else.
         let floats_to = if n.starts_bfc { floats_bottom(&ctx.items) } else { f64::NEG_INFINITY };
-        (flow_bottom.max(floats_to) + n.pb + n.bb).max(0.0)
+        // The CONTENT height is what floors at zero — a net-negative run of collapse-through children can
+        // leave the flow ABOVE the content top, and the block is then zero-content-tall, not zero-tall: its
+        // own padding and borders still take their room (`grown` in the oracle).
+        content_top_rel + (flow_bottom.max(floats_to) - content_top_rel).max(0.0) + n.pb + n.bb
     } else {
         f64::NAN
     };

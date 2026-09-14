@@ -13,9 +13,12 @@ require_relative 'support/layout_measure'
 RSpec.describe 'margin collapsing' do
   include LayoutMeasure
 
-  # `[y, height]` of each selector inside a 300px block.
-  def boxes_for(body, selectors)
-    boxes, = measure(%(<div style="width:300px">#{body}</div>), selectors)
+  # `[y, height]` of each selector inside a 300px block. `host:` puts that shadow-root markup on the block —
+  # the body is SLOTTED content then, inheriting through the flat tree rather than through the DOM parent —
+  # and gives the block a height of its own, so that taking the host's instead of the slot's is visible.
+  def boxes_for(body, selectors, host: nil, host_style: 'height:10px')
+    shadow = host ? %(<script>document.getElementById('cb').attachShadow({mode: 'open'}).innerHTML = #{host.to_json}</script>) : ''
+    boxes, = measure(%(<div id="cb" style="width:300px#{host ? ";#{host_style}" : ''}">#{body}</div>#{shadow}), selectors)
     boxes.map {|b| [b[1].round(2), b[3].round(2)] }
   end
 
@@ -114,6 +117,18 @@ RSpec.describe 'margin collapsing' do
     expect(y).to eq([16, 50, 74])                    # the 5px joins the run above it, the 40 the one below
   end
 
+  # A run of collapse-through children can come to a NEGATIVE number, which leaves the flow ABOVE the
+  # content top — and what floors at zero then is the CONTENT height, not the border box: the padding is
+  # still there. Chrome: a `padding-top: 1px` block over `margin: -30px 0 10px` and a 5px box is 1 tall, with
+  # the children at -29 and -19 (its own padding-box top is still 0).
+  it 'floors the content height under a negative run, keeping the padding' do
+    boxes = boxes_for('<div id="w" style="padding-top:1px"><div id="e" style="margin-top:-30px;margin-bottom:10px"></div>' \
+                      '<div id="n" style="height:5px"></div></div>', ['#w', '#e', '#n'])
+    expect(boxes[0]).to eq([0, 1])
+    expect(boxes[1]).to eq([-29, 0])
+    expect(boxes[2]).to eq([-19, 5])
+  end
+
   # CLEARANCE is a separator: a first child that has to clear a float keeps its margin to itself.
   it 'stops collapsing at a box that takes clearance' do
     boxes = boxes_for('<div style="float:left;width:20px;height:60px"></div>' \
@@ -139,6 +154,37 @@ RSpec.describe 'margin collapsing' do
     y = boxes_for('<div id="w"><p>x</p><div><div style="margin:30px 0"></div></div></div><p id="n">n</p>',
                   ['#w', '#n']).map(&:first)
     expect(y).to eq([16, 64])
+  end
+
+  # A CSS-WIDE keyword is no height of its own either — it has to be resolved to the one it stands for first.
+  # `inherit` IS the parent's, so an `inherit` child of an 80px block is 80 tall and keeps the margins around
+  # it apart; `initial` / `unset` / `revert` stand for `auto` and collapse through like any empty box. Reading
+  # the keyword literally made all four auto, which left the `inherit` box 0 tall where Chrome says 80.
+  it 'resolves a CSS-wide keyword before asking whether a height separates margins' do
+    tall = boxes_for('<div id="w" style="height:80px"><div id="e" style="height:inherit"></div></div>', ['#w', '#e'])
+    expect(tall[1]).to eq([0, 80])
+
+    %w[initial unset revert].each do |kw|
+      y = boxes_for(%(<p id="a">a</p><div id="e" style="height:#{kw}"></div><p id="b">b</p>), ['#a', '#e', '#b']).map(&:first)
+      expect([kw, y]).to eq([kw, [16, 50, 50]])
+    end
+
+    # …and it is the FLAT tree it inherits through, as everything else in the cascade does: slotted content
+    # takes the SLOT's height, not the host's. Chrome puts the `inherit` box at 0 tall here, where taking the
+    # host's `height: 10px` left it 10 and pushed the paragraph after it to 76.
+    slotted = boxes_for('<p id="a">a</p><div id="e" style="height:inherit"></div><p id="b">b</p>', ['#e', '#b'],
+                        host: '<slot style="display:block;height:0"></slot>')
+    expect(slotted[0]).to eq([50, 0])
+    expect(slotted[1][0]).to eq(50)
+
+    # …and the other hop the flat tree knows: an element at the top of a SHADOW tree inherits from the HOST.
+    # Its DOM parent is the shadow root, which is no element at all, so that walk found nothing and fell back
+    # to the initial value — Chrome gives the `padding-top: inherit` div the host's 30px, putting the slotted
+    # box at 60 and making the host 65 tall.
+    hosted = boxes_for('<div id="e" style="height:5px"></div>', ['#cb', '#e'],
+                       host: '<div style="padding-top:inherit"><slot></slot></div>', host_style: 'padding-top:30px')
+    expect(hosted[0]).to eq([0, 65])
+    expect(hosted[1][0]).to eq(60)
   end
 
   # An intrinsic height keyword is no height at all for this purpose.

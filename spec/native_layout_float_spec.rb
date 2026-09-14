@@ -165,10 +165,14 @@ RSpec.describe 'native layout float parity', if: ENV.fetch('CSIM_JS_ENGINE', 'v8
     expect(run_shadow('<div style="overflow:hidden;width:300px"><div style="float:left;width:80px;height:30px"></div><div style="clear:both;height:10px"></div></div>')['ok']).to be true
   end
 
-  it 'declines a contain/multicol BFC (margin barrier native cannot key), keeps a plain block' do
-    expect(run_shadow('<div style="contain:layout"><p style="margin-top:30px">hi there</p></div>')['ok']).to be false
-    expect(run_shadow('<div style="column-count:2"><p style="margin-top:30px">hi there</p></div>')['ok']).to be false
-    expect(run_shadow('<div><p style="margin-top:30px">hi there</p></div>')['ok']).to be true
+  # `contain` and multicol establish a formatting context of their own (css-contain-2 §2.1, css-multicol-1 §2):
+  # they hold their children's margins in AND own the floats inside them. This engine answered only the first
+  # half, which the walk then declined; both halves are native now.
+  it 'keeps a contain/multicol formatting context natively' do
+    expect(run_shadow('<div style="contain:layout"><p style="margin-top:30px">hi there</p></div>')).to include('ok' => true, 'mismatches' => 0)
+    expect(run_shadow('<div style="column-count:2"><p style="margin-top:30px">hi there</p></div>')).to include('ok' => true, 'mismatches' => 0)
+    expect(run_shadow('<div><p style="margin-top:30px">hi there</p></div>')).to include('ok' => true, 'mismatches' => 0)
+    expect(run_shadow('<div style="width:300px"><div style="contain:layout"><div style="float:left;width:9px;height:4px"></div></div></div>')).to include('ok' => true, 'mismatches' => 0)
   end
 
   it 'declines a partial clear that leaves a float overlapping, clears the matching side' do

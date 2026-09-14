@@ -95,6 +95,129 @@ RSpec.describe 'floats' do
     expect(boxes[1][0, 3]).to eq([0, 0, 220])
   end
 
+  # …and which boxes those are is ONE question: `contain: layout|paint|content|strict`, a multi-column box
+  # and `display: flow-root` establish a formatting context as surely as `overflow: hidden` does
+  # (css-contain-2 §2.1, css-multicol-1 §2). This engine answered only the margin half for the first two, so
+  # their floats escaped — and an escaped float then ate the clearance margin of the box below (Chrome puts
+  # it at 80, this answered 50). Chrome 153-measured in the 300px block. (`contain: strict` and
+  # `contain: size` are left to the box-model spec's size-containment tripwire: size containment is not
+  # modelled here, and it moves both figures.)
+  it 'contains its floats and takes the band for every kind of formatting context' do
+    ['overflow:hidden', 'display:flow-root', 'contain:layout', 'contain:paint', 'contain:content'].each do |style|
+      boxes, = floated(<<~HTML, ['#w', '#n'])
+        <div id="w" style="#{style}"><div style="float:left;width:50px;height:50px"></div></div>
+        <div id="n" style="clear:left;margin-top:30px;height:5px"></div>
+      HTML
+      expect([style, boxes[0][3]]).to eq([style, 50])   # the owner's auto height grew to its float
+      expect([style, boxes[1][1]]).to eq([style, 80])   # …which the box below then cleared, margin and all
+
+      # …and beside a float OUTSIDE it, such a box takes the band rather than the full width.
+      beside, = floated(<<~HTML, ['#b'])
+        <div style="float:left;width:80px;height:30px"></div>
+        <div id="b" style="#{style};height:10px"></div>
+      HTML
+      expect([style, beside[0][0, 3]]).to eq([style, [80, 0, 220]])
+    end
+  end
+
+  # Multicol is such a context too — but Chrome also COLUMNISES, which this engine does not model: it
+  # balances the 50px float into two 25px columns and puts the cleared box at 55, where one column puts it
+  # at 80. What is pinned here is the containment; the column layout is backlog.
+  it 'contains a multicol float, in the one column it lays out' do
+    boxes, = floated(<<~HTML, ['#w', '#n'])
+      <div id="w" style="column-count:2"><div style="float:left;width:50px;height:50px"></div></div>
+      <div id="n" style="clear:left;margin-top:30px;height:5px"></div>
+    HTML
+    expect(boxes[0][3]).to eq(50)   # Chrome: 25, over two balanced columns
+    expect(boxes[1][1]).to eq(80)   # Chrome: 55
+
+    # …and `column-width: inherit` under a real one is a multicol box too: it holds its child's margin in
+    # (30 down inside a 40-tall box), where Chrome columnises the same content into a 20-tall pair.
+    inherited, = floated('<div style="column-width:100px"><div id="w" style="column-width:inherit">' \
+                         '<div id="p" style="margin-top:30px;height:10px"></div></div></div>', ['#w', '#p'])
+    expect(inherited[0][3]).to eq(40)   # Chrome: 20
+    expect(inherited[1][1]).to eq(30)   # Chrome: 0, in the second column
+  end
+
+  # What the predicate reads is CASCADED text, so a CSS-WIDE keyword arrives verbatim and has to be resolved
+  # to the value it stands for. `contain` and `column-*` are non-inherited and no UA rule declares them, so
+  # `initial` / `unset` / `revert` are the initial value — no context, and the float inside escapes — while
+  # `inherit` IS the parent's, which taking it literally got backwards in both directions. Chrome 153-measured.
+  it 'resolves a CSS-wide keyword rather than reading it as a value' do
+    %w[initial unset revert].each do |kw|
+      boxes, = floated(<<~HTML, ['#w', '#n'])
+        <div id="w" style="column-count:#{kw}"><div style="float:left;width:50px;height:50px"></div></div>
+        <div id="n" style="height:5px"></div>
+      HTML
+      expect([kw, boxes[0][3]]).to eq([kw, 0])   # no context of its own, so the float escaped it…
+      expect([kw, boxes[1][1]]).to eq([kw, 0])   # …and the next box sits beside it rather than below
+    end
+
+    # …and `inherit` takes the parent's declaration: a `column-count: 1` parent makes it a multicol box, which
+    # holds its child's margin in (40 tall, the child 30 down inside it).
+    cols, = floated('<div style="column-count:1"><div id="w" style="column-count:inherit">' \
+                    '<div id="p" style="margin-top:30px;height:10px"></div></div></div>', ['#w', '#p'])
+    expect(cols[0][1, 3]).to eq([0, 300, 40])
+    expect(cols[1][1]).to eq(30)
+
+    # …the same for `contain`, whose float it holds in and whose clearance the box below then takes — and
+    # `contain: initial|unset|revert` is `none`, so that float escapes as it would with no declaration at all.
+    held, = floated('<div style="contain:layout"><div id="w" style="contain:inherit">' \
+                    '<div style="float:left;width:50px;height:50px"></div></div>' \
+                    '<div id="n" style="clear:left;margin-top:30px;height:5px"></div></div>', ['#w', '#n'])
+    expect(held[0][3]).to eq(50)
+    expect(held[1][1]).to eq(80)
+
+    %w[initial unset revert].each do |kw|
+      boxes, = floated(<<~HTML, ['#w', '#n'])
+        <div id="w" style="contain:#{kw}"><div style="float:left;width:50px;height:50px"></div></div>
+        <div id="n" style="height:5px"></div>
+      HTML
+      expect([kw, boxes[0][3]]).to eq([kw, 0])
+      expect([kw, boxes[1][1]]).to eq([kw, 0])
+    end
+
+    # …a chain of them keeps climbing — two `inherit` boxes under a `contain: layout` are both contexts, so
+    # the float stays in and the box below sits at the float's bottom.
+    chain, = floated('<div style="contain:layout"><div style="contain:inherit"><div id="w" style="contain:inherit">' \
+                     '<div style="float:left;width:50px;height:50px"></div></div></div>' \
+                     '<div id="n" style="height:5px"></div></div>', ['#w', '#n'])
+    expect(chain[0][3]).to eq(50)
+    expect(chain[1][1]).to eq(50)
+
+    # …and the walk up stops at the first ancestor that declares something of its own: a `contain: initial`
+    # between the `inherit` and the `contain: layout` is `none`, so the float escapes all three boxes.
+    stopped, = floated('<div style="contain:layout"><div style="contain:initial"><div id="w" style="contain:inherit">' \
+                       '<div style="float:left;width:50px;height:50px"></div></div></div>' \
+                       '<div id="n" style="height:5px"></div></div>', ['#w', '#n'])
+    expect(stopped[0][3]).to eq(0)
+    expect(stopped[1][1]).to eq(0)
+
+    # …`column-width` is read the same way, and an `inherit` whose ancestors declare nothing is nothing.
+    bare, = floated('<div id="w" style="column-width:inherit"><div id="p" style="margin-top:30px;height:10px"></div></div>',
+                    ['#w', '#p'])
+    expect(bare[0][1]).to eq(30)     # no context: the child's margin came out through it
+    expect(bare[1][1]).to eq(30)
+  end
+
+  # `display: contents` generates no box at all, so it establishes nothing whatever it declares — containment
+  # applies to a box and this element has none (css-contain-2 §2.1), and a multicol box with no box is no
+  # box. Chrome 153: the float inside one escapes to the block around it exactly as it would without the
+  # declaration, and a child's margin collapses straight out through it.
+  it 'establishes nothing on a box-less display:contents element' do
+    boxes, = floated(<<~HTML, ['#f', '#n'])
+      <div style="display:contents;contain:layout"><div id="f" style="float:left;width:50px;height:50px"></div></div>
+      <div id="n" style="height:5px"></div>
+    HTML
+    expect(boxes[0][0, 2]).to eq([0, 0])
+    expect(boxes[1][1]).to eq(0)     # the float escaped: the block below starts beside it, not under it
+
+    margin, = floated('<div style="display:contents;column-count:2"><div id="p" style="margin-top:30px;height:10px"></div></div>',
+                      ['#cb', '#p'])
+    expect(margin[0][1]).to eq(30)   # …and the margin came out through it, moving the 300px block itself
+    expect(margin[1][1]).to eq(30)
+  end
+
   # An ordinary block, by contrast, keeps the whole width and lets the float overlap it.
   it 'leaves an ordinary block its full width beside a float' do
     boxes, = floated(<<~HTML, ['#f', '#w'])

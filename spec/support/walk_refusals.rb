@@ -9,7 +9,7 @@ module WalkRefusals
     '<span style="display:inline-block"><div style="float:left;width:9px;height:4px"></div>t</span>',
     '<span style="display:inline-block;position:relative">t<div style="position:absolute">y</div></span>',
     '<span style="display:inline-block;white-space:pre">   </span>',
-    '<span style="display:inline-block"><div style="contain:layout;width:9px;height:4px"></div></span>',
+    '<span style="display:inline-block"><div style="display:table-cell">c</div></span>',
     '<span style="display:inline-block;width:max-content">bb</span>',
     '<span style="display:inline-block;width:min-content">bb cc</span>'
   ].freeze
