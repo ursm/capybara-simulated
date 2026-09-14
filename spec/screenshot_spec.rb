@@ -174,6 +174,77 @@ RSpec.describe 'save_screenshot' do
     expect(boxes['c4'][1]).to be > boxes['c1'][1]         # …with the row that wrapped genuinely below
   end
 
+  # ONE INVARIANT, everywhere a box moves after it is laid out: its recorded GLYPHS move with it. A flex item
+  # is placed on the main axis first and aligned on the cross axis only once its line's size is known; an
+  # out-of-flow box is placed against a height nobody knows until its own flow has run; an atomic drops to its
+  # line's baseline; a cell takes `vertical-align`; a relative inline carries its content. Each of those left
+  # the glyphs behind — `align-items: center` painted its label at the top of the row, a `bottom`-anchored
+  # tooltip painted its text below itself, a `left: 30px` span left its word — and GEOMETRY SAW NOTHING WRONG,
+  # because every box was right. A box laid out TWICE has the mirror problem: the first layout's runs are a
+  # second copy of every glyph, and dropping them by index moved every other box's.
+  #
+  # So a run belongs to the box that laid it out, `shiftSubtree` carries each box's own runs as it walks (which
+  # is what keeps a `fixed` descendant's glyphs still, since the walk deliberately does not move its box), and
+  # a box laid out again marks what it recorded before as dead.
+  it 'paints every box that moves after layout where it ended up' do
+    {
+      'align-items:center'    => '<div style="display:flex;align-items:center;height:60px;width:200px"><div>hi</div></div>',
+      'align-items:flex-end'  => '<div style="display:flex;align-items:flex-end;height:60px;width:200px"><div>hi</div></div>',
+      'flex-wrap second line' => '<div style="display:flex;flex-wrap:wrap;width:100px"><div style="width:60px">a</div><div style="width:60px">b</div></div>',
+      'stretch that grows'    => '<div style="display:flex;align-items:stretch;height:60px;width:200px"><div>hi</div></div>',
+      'two stretch items'     => '<div style="display:flex;height:60px;width:200px"><div>aa</div><div>bb</div></div>',
+      'stretch + self:center' => '<div style="display:flex;height:60px;width:200px"><div>aa</div><div style="align-self:center">bb</div></div>',
+      'plain column'          => '<div style="display:flex;flex-direction:column;width:200px"><div>aa</div><div>bb</div></div>',
+      'column flex:1'         => '<div style="display:flex;flex-direction:column;height:60px;width:200px"><div style="flex:1">a</div><div style="flex:1">b</div></div>',
+      'column flex:1 + auto'  => '<div style="display:flex;flex-direction:column;height:100px;width:200px"><div style="flex:1">aa</div><div>bb</div></div>',
+      'bottom-anchored'       => '<div style="position:relative;height:100px;width:200px"><div style="position:absolute;bottom:10px">tip</div></div>',
+      'flex-aligned abspos'   => '<div style="display:flex;align-items:center;height:100px;width:200px;position:relative"><div style="position:absolute">dd</div></div>',
+      'fixed in centred item' => '<div style="display:flex;align-items:center;height:60px;width:200px"><div><span style="position:fixed;top:5px;left:100px">fx</span></div></div>',
+      'relative inline'       => '<div style="width:200px"><span style="position:relative;left:30px;top:10px">aa</span></div>',
+      # …the two shifts this model replaced an index range for, both A/B-proven: an ATOMIC inline drops to its
+      # line's baseline after it is laid out (without the per-box shift its glyphs stay at the line's top, 0
+      # where the box is at 2), and an out-of-flow box takes its static position from a line `text-align`
+      # then moves (run at 14 where the box is at 107). The second needs its containing block already SIZED —
+      # with `position: relative` on the line's own block the box is held back instead, and the alignment
+      # nudges a static position rather than anything recorded.
+      'atomic on a baseline'  => '<div style="width:200px;font-size:24px;line-height:40px">' \
+                                 '<span style="display:inline-block;font-size:10px;vertical-align:middle">at</span></div>',
+      'static on a centred line' => '<div style="width:200px;text-align:center">' \
+                                    '<b>hi</b><span style="position:absolute">st</span></div>'
+    }.each do |label, body|
+      s = page_with(body)
+      runs = s.evaluate_script('globalThis.__csimPaintRuns()').map {|r| [r['text'], r['x'].round, r['y'].round] }
+      boxes = s.evaluate_script(<<~JS).map {|t, x, y| [t, x.round, y.round] }
+        [...document.querySelectorAll('div div, span, b')].filter(e => !e.children.length)
+          .map(e => { const r = e.getBoundingClientRect(); return [e.textContent, r.x, r.y]; })
+      JS
+      # Sorted, because the painter's order is PAINT order and the query's is DOM order — a wrapped or
+      # aligned line puts them in different sequences. What is asserted is that each glyph run exists exactly
+      # ONCE and sits on its own box: a doubled run or one piled on a neighbour fails either way. (Every
+      # shape uses DISTINCT labels, which is what the sort rests on — two runs reading the same text could
+      # swap boxes and still sort equal. And these pages neither scroll nor transform, so the painter's
+      # DOCUMENT coordinates and `getBoundingClientRect`'s viewport ones are the same numbers.)
+      expect([label, runs.sort]).to eq([label, boxes.sort])
+    end
+  end
+
+  # …and the runs a relative inline carries are bucketed onto it as they are RECORDED, by walking from the
+  # run's owner up the FLAT tree — the chain of boxes that actually laid it out. Walking `_parent` climbs out
+  # of a shadow tree instead: a relative inline in the shadow, wrapping a `<slot>`, never matched the
+  # light-DOM run's ancestors, so the box moved and the word stayed.
+  it "moves a relative inline's slotted text with it" do
+    s = page_with('<div id="h"><b>bb</b></div>')
+    s.evaluate_script(<<~JS)
+      document.getElementById('h').attachShadow({ mode: 'open' }).innerHTML =
+        '<div style="width:200px"><span style="position:relative;left:40px;top:12px"><slot></slot></span></div>'
+    JS
+    s.evaluate_script('document.body.offsetHeight')
+    runs = s.evaluate_script('globalThis.__csimPaintRuns()').map {|r| [r['text'], r['x'].round, r['y'].round] }
+    box  = s.evaluate_script("(r => [r.x, r.y])(document.querySelector('b').getBoundingClientRect())").map(&:round)
+    expect(box).to eq([40, 12])          # …the shadow's relative inline moved the slotted box
+    expect(runs).to eq([['bb', 40, 12]]) # …and its glyphs went with it
+  end
+
   # A cell's bare TEXT is vertically aligned in the paint like its block children (§17.5.3) — the UA default is
   # middle. Cell text carries no DOM geometry in this driver (getBoundingClientRect / Range see nothing), so the
   # alignment is observable ONLY through the painter's recorded runs.
