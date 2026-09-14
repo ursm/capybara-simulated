@@ -60,7 +60,8 @@ impl FontMetrics {
     }
 
     // Width (px) of a UTF-16 run at `size` px with letter/word spacing, exactly as layout.js measureRun
-    // does for the common path. None only when the run holds a TAB — the caller declines the block to JS.
+    // does for the common path. None ONLY when the run holds a TAB — whose advance is the block's tab stops,
+    // not the run's — and the caller declines the block to JS; every character is measurable otherwise.
     // Bit-parity vs JS measureRun was validated over ~667k calls (perf log 2026-09-09) on the ASCII-and-Latin
     // input this accepted then; the classes admitted since (wide characters, combining marks) are held to the
     // box-level parity the shadow harness checks, not to that measurement.
@@ -83,8 +84,8 @@ impl FontMetrics {
             if cp == 0x09 {
                 return None; // a tab needs the block's tab stop — defer to JS
             }
-            units += unit_of(cp, prev, self)?;
-            if spaced && takes_spacing(cp, prev)? {
+            units += unit_of(cp, prev, self);
+            if spaced && takes_spacing(cp, prev) {
                 spacing += ls + if cp == 0x20 || cp == 0x00A0 { ws } else { 0.0 };
             }
             prev = cp as i64;
@@ -112,72 +113,65 @@ pub(crate) fn is_wide_char(cp: u32) -> bool {
         || (0xFFE0..=0xFFE6).contains(&cp)
 }
 
-// layout.js zeroWidth: Some(true/false) for the ranges decidable without a Unicode table; None for a
-// code point that would reach the `\p{M}` combining-mark test — the caller falls back to JS then.
-fn zero_width(cp: u32) -> Option<bool> {
+// layout.js zeroWidth. Every code point is decidable: the ranges below from structure, and the rest from the
+// oracle's own `\p{M}` (see the last arm). This used to answer `None` where a combining-mark test was needed
+// and the whole layout pass fell back to JS — which is why `unicode.rs` exists.
+fn zero_width(cp: u32) -> bool {
     if cp < 0x20 {
-        return Some(true);
+        return true;
     }
     if cp < 0x7F {
-        return Some(false);
+        return false;
     }
     if cp <= 0x9F {
-        return Some(true);
+        return true;
     }
     if cp < 0x300 {
-        return Some(cp == 0xAD);
+        return cp == 0xAD;
     }
     if cp == 0xFEFF || cp == 0xFFFC || cp == 0x200E || cp == 0x200F {
-        return Some(true);
+        return true;
     }
     if (0x200B..=0x200D).contains(&cp) {
-        return Some(true);
+        return true;
     }
     if (0x202A..=0x202E).contains(&cp) {
-        return Some(true);
+        return true;
     }
     if (0xFE00..=0xFE0F).contains(&cp) {
-        return Some(true);
+        return true;
     }
     if (0xE0100..=0xE01EF).contains(&cp) {
-        return Some(true);
+        return true;
     }
-    // …and the one question structure cannot answer — is this a COMBINING MARK? — is answered from the table
-    // the oracle's `/^\p{M}$/u` is generated into (`unicode.rs`). So every character is decidable now: a CJK
+    // …and the one question structure cannot answer — is this a COMBINING MARK? — is answered by the oracle's
+    // own `\p{M}`, parsed out of the same regex (`unicode.rs`). So every character is decidable now: a CJK
     // run, an em space, a dash, an emoji no longer reach an undecidable arm and take the whole pass with them.
-    Some(crate::unicode::is_combining_mark(cp))
+    crate::unicode::is_combining_mark(cp)
 }
 
-// layout.js unitOf: one character's advance in em-fractions. None when zero_width is undecidable.
-fn unit_of(cp: u32, prev: i64, fm: &FontMetrics) -> Option<f64> {
-    if prev == 0x200D {
-        return Some(0.0);
-    }
-    match zero_width(cp) {
-        Some(true) => return Some(0.0),
-        Some(false) => {}
-        None => return None,
+// layout.js unitOf: one character's advance in em-fractions.
+fn unit_of(cp: u32, prev: i64, fm: &FontMetrics) -> f64 {
+    if prev == 0x200D || zero_width(cp) {
+        return 0.0;
     }
     if cp <= 0xFFFF {
         if (0x20..0x7F).contains(&cp) {
             if let Some(a) = fm.ascii[cp as usize] {
-                return Some(a);
+                return a;
             }
         }
         if cp == 0x00A0 {
-            return Some(fm.ascii[0x20].unwrap_or(fm.avg));
+            return fm.ascii[0x20].unwrap_or(fm.avg);
         }
-        return Some(if is_wide_char(cp) { 1.0 } else { fm.avg });
+        return if is_wide_char(cp) { 1.0 } else { fm.avg };
     }
-    Some(1.0)
+    1.0
 }
 
 // layout.js takesSpacing: once per grapheme, never after a ZWJ, never on a zero-width character.
-fn takes_spacing(cp: u32, prev: i64) -> Option<bool> {
-    if prev == 0x200D {
-        return Some(false);
-    }
-    Some(!zero_width(cp)?)
+fn takes_spacing(cp: u32, prev: i64) -> bool {
+    prev != 0x200D && !zero_width(cp)
 }
 
 // The isolate-level font registry: parsed metrics keyed by an integer handle, deduped by source. A

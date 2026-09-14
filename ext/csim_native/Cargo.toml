@@ -36,3 +36,13 @@ precomputed-hash = "0.1"
 # use). `skrifa` reads a font's cmap + hmtx advances + metrics, so native inline layout measures runs +
 # breaks lines IN-PROCESS (no per-run V8 crossing). Re-exports read-fonts as `skrifa::raw`.
 skrifa = "0.31"
+
+# The Unicode general categories the ORACLE asks a regex for (`\p{L}` / `\p{N}` / `\p{M}`) — the classes
+# `layout::hyphen_breaks_after` and `font::zero_width` have to agree with it about. regex-syntax bakes in a
+# UCD snapshot of its own, so its answers are CHECKED against the driver's own engine (native_layout_text_spec)
+# rather than assumed. `unicode-gencat` is the narrowest feature that answers them — it brings all 38 general
+# categories plus the property name/value tables, ~480 KB of the .so — and it is also the ONLY one enabled, so
+# a pattern outside `\p{<general category>}` does not parse: `\p{Alphabetic}`, `\p{Script=Hebrew}` and `\w`
+# would all reach `unicode.rs`'s panic. Porting something that needs one (the oracle's `dir=auto` uses Script)
+# means enabling its feature here first.
+regex-syntax = { version = "0.8", default-features = false, features = ["unicode-gencat"] }

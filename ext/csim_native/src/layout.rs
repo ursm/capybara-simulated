@@ -1077,12 +1077,12 @@ struct LineLayout {
     atomics: Vec<(usize, f64, f64, f64)>,
 }
 
-// `\p{L}\p{N}`, which is how the oracle's `HYPHEN_BREAK_RE` spells its classes — read from the table the
-// oracle's own engine generated (`unicode.rs`), never from Rust std. The three Unicode tables in this process
-// disagree and move independently: rustc's `char::is_alphabetic` knows 4662 code points this V8 does not, and
+// `\p{L}\p{N}`, which is how the oracle's `HYPHEN_BREAK_RE` spells its classes — read from that same regex
+// (`unicode.rs` parses it), never from Rust std. The Unicode tables in this process disagree and move
+// independently: rustc's `char::is_alphabetic` knows 4662 code points this V8 does not, and
 // `char::is_alphanumeric` is Alphabetic ∪ N, which reads a COMBINING MARK as a letter where the regex does
 // not. Either one MOVES BOXES — `abab-\u{93E}cdcd` and `abab-\u{A7F1}cdcd` break after the hyphen in native
-// and not in the oracle — and an upgrade of a toolchain would move them again.
+// and not in the oracle — and with Rust std the answer moved with the toolchain the build happened to use.
 fn letter_or_number(c: char) -> bool {
     let cp = c as u32;
     crate::unicode::is_letter(cp) || crate::unicode::is_number(cp)

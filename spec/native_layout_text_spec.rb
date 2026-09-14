@@ -6,8 +6,8 @@
 require 'capybara/simulated'
 require 'rack'
 require_relative 'support/session_teardown'
-# …and the generator's own enumerator, so the drift check asks the engine exactly the way the table was built.
-require_relative '../script/gen_unicode_classes'
+# …and the enumerator the Unicode drift check asks the engine with.
+require_relative 'support/unicode_classes'
 
 RSpec.describe 'native layout L2 text-block parity', if: ENV.fetch('CSIM_JS_ENGINE', 'v8') == 'v8' do
   # The charset is declared because the CJK shapes below are UTF-8 in this file's own source: served without
@@ -424,7 +424,7 @@ RSpec.describe 'native layout L2 text-block parity', if: ENV.fetch('CSIM_JS_ENGI
     # letter, an enclosed one (U+24B6) is So and no letter, and reading either as one moved the boxes.
     it 'reads a combining or enclosed character after a hyphen as no letter' do
       # …and A7F1 / 0C5C, which Rust std calls letters and this V8 does not: asking `char::is_alphabetic`
-      # rather than the generated `\p{L}` made the answer depend on the rustc the extension was built with.
+      # rather than `\p{L}` itself made the answer depend on the rustc the extension was built with.
       %w[093E 0903 064E 05B8 0345 0E31 17BB 24B6 2160 0301 00AA 2070 A7F1 0C5C].each do |cp|
         expect_parity(%(<div style="width:30px">q abab-&\#x#{cp};cdcd more</div>))
         # …and min-content, where the piece the break would make is the measure itself — the word-OPENING
@@ -441,7 +441,7 @@ RSpec.describe 'native layout L2 text-block parity', if: ENV.fetch('CSIM_JS_ENGI
       expect_parity('<div style="width:min-content">mix-&#x65E5;&#x672C;-ed</div>')
     end
     # …and the same undecidable arm took down every OTHER character at or above U+0300, because whether one is a
-    # combining mark is the question `zero_width` could not answer. It answers it from `unicode.rs` now.
+    # combining mark is the question `zero_width` could not answer. It answers it from `\p{M}` now (`unicode.rs`).
     it 'measures a space, a dash, an emoji and a combining mark' do
       expect_parity('<div style="width:400px">a&#x2003;b</div>')
       expect_parity('<div style="width:400px">a&#x2002;b</div>')
@@ -453,24 +453,6 @@ RSpec.describe 'native layout L2 text-block parity', if: ENV.fetch('CSIM_JS_ENGI
       expect_parity('<div style="width:400px">&#x1F600;&#x1F601;</div>')
     end
 
-    # The tables native answers these questions from are GENERATED (script/gen_unicode_classes.rb) from this
-    # engine's own `\p{M}` / `\p{L}` / `\p{N}`, because that is what the ORACLE asks — `zero_width` for the
-    # marks, `hyphen_breaks_after` for the other two. Ruby's Unicode tables are a different version and
-    # disagree (8 mark ranges when this was written), and so are Rust std's (4662 code points `is_alphabetic`
-    # calls letters that this V8 does not), and any of the three can move on an upgrade. So re-enumerate the
-    # class here and compare the WHOLE range list: one crossing of the code space costs ~0.02s, where probing
-    # the table's own boundaries missed 60% of a DELETED range (the table can lose `A-Z` and the probes go
-    # with it) — and a table that lost a range is exactly the shape an upgrade makes.
-    UnicodeClasses::CLASSES.each do |c|
-      it "agrees with the engine on every \\p{#{c[:klass]}} range" do
-        table = File.read(File.expand_path('../ext/csim_native/src/unicode.rs', __dir__))
-                    .split(/^(?:pub\(crate\) )?const /).find {|block| block.start_with?("#{c[:const]}:") }
-        expect(table).not_to be_nil, "#{c[:const]} is not in the generated file"
-        ranges = table.split('];').first.scan(/\(0x([0-9A-F]+), 0x([0-9A-F]+)\),/).map {|lo, hi| [lo.to_i(16), hi.to_i(16)] }
-        engine = with_simulated_session(page('<div>x</div>')) {|s| s.visit '/'; UnicodeClasses.ranges_of(s, c[:klass], c[:from]) }
-        expect(ranges).to eq(engine), 'regenerate ext/csim_native/src/unicode.rs'
-      end
-    end
 
     # What native still cannot measure is refused by the WALK now, not discovered in Rust: a TAB needs the
     # block's tab stops, and a ZWJ under a per-character wrap carries the previous character's advance.
@@ -589,4 +571,43 @@ RSpec.describe 'native text valign decline', if: ENV.fetch('CSIM_JS_ENGINE', 'v8
   it('declines a break inside a padded inline') { expect_bail('<div style="width:400px">x <b style="padding:0 5px">t<br>u</b> y</div>') }
   it('declines a break inside a bordered inline') { expect_bail('<div style="width:400px">x <b style="border-left:2px solid">t<br>u</b> y</div>') }
   it('declines a break inside a margined inline') { expect_bail('<div style="width:400px">x <b style="margin:0 5px"><br></b> y</div>') }
+  # The classes native answers `\p{L}` / `\p{N}` / `\p{M}` from come from regex-syntax — the same regex the
+  # ORACLE writes, parsed rather than reimplemented (`unicode.rs`). But regex-syntax bakes in a UCD snapshot of
+  # its own and the engine has another, on separate release trains (Ruby's and Rust std's are two more: rustc
+  # 1.98 calls 4662 code points letters that this V8 does not, and answering from IT moved boxes). So ask the
+  # engine for the whole class and compare every range: an upgrade of either side reds this instead of drifting
+  # silently. One crossing of the code space costs ~0.02s — and sampling the boundaries was actively wrong
+  # here, because probes taken from the table under test vanish with the range they came from (the old check
+  # missed a DELETED range 60% of the time: `\p{L}` could lose `A-Z` and stay green).
+  describe 'the Unicode classes the oracle asks a regex for' do
+    UnicodeClasses::CLASSES.each do |klass|
+      it "answers \\p{#{klass}} the way the oracle's own engine does" do
+        require 'capybara/simulated/v8_runtime'   # …which is what defines the module below (v8-only, as is this)
+        engine, name = with_simulated_session(page('<div>x</div>')) {|s|
+          s.visit '/'
+          [UnicodeClasses.ranges_of(s, klass), s.driver.js_engine]
+        }
+        native = Capybara::Simulated::Native.unicode_class_ranges(klass)
+        # RSpec elides a 677-element array identically on both sides, so the difference has to be spelled out:
+        # the FIRST position they disagree at (which a set difference would hide for a duplicate or a
+        # reordering), and then which side is carrying ranges the other has not — because that decides the
+        # remedy, and it is not otherwise guessable.
+        expect(native).to eq(engine), lambda {
+          at = native.each_index.find {|i| native[i] != engine[i] } || [native.size, engine.size].min
+          hex = ->(rs) { rs.map {|lo, hi| lo == hi ? format('U+%04X', lo) : format('U+%04X-%04X', lo, hi) }.join(' ') }
+          <<~MSG
+            \\p{#{klass}} differs between regex-syntax and the #{name} engine the oracle asks
+            (#{native.size} ranges vs #{engine.size}), first at index #{at}:
+              regex-syntax: #{hex.call(native[at, 3].to_a)}
+              #{name}:#{' ' * [13 - name.length, 1].max}#{hex.call(engine[at, 3].to_a)}
+              only regex-syntax has: #{hex.call((native - engine).first(5))}
+              only #{name} has: #{hex.call((engine - native).first(5))}
+            If the ENGINE carries the extra ranges it moved to a newer Unicode first, and there is no local
+            fix: native lays those code points out differently from the oracle until regex-syntax ships a
+            matching snapshot. If REGEX-SYNTAX carries them, a `cargo update` moved it — revert Cargo.lock.
+          MSG
+        }
+      end
+    end
+  end
 end

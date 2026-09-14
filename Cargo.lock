@@ -131,6 +131,7 @@ dependencies = [
  "magnus",
  "precomputed-hash",
  "rb-sys",
+ "regex-syntax",
  "rusty_racer",
  "selectors",
  "skrifa",
