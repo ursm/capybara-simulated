@@ -393,7 +393,7 @@ RSpec.describe 'native layout L1 block-flow parity', if: ENV.fetch('CSIM_JS_ENGI
       [
         'a <span style="display:inline-block;width:max-content">bb</span>',
         'a <span style="display:inline-block;max-width:min-content">bb</span>',
-        'a <span style="display:inline-block;text-indent:5px">t<div>x</div></span>',
+        'a <span style="display:inline-block">t<div style="width:fit-content">x</div></span>',
         'a <span style="display:inline-block"><div style="position:sticky;top:0">s</div></span>',
         'a <span style="display:inline-block"><div style="float:left;width:9px;height:4px"></div>t</span>',
         'a<br>b <span style="display:inline-block;width:max-content">bb</span>'
@@ -525,7 +525,7 @@ RSpec.describe 'native layout L1 block-flow parity', if: ENV.fetch('CSIM_JS_ENGI
       expect_replayed_oof(%{<div style="width:400px;position:relative"><div style="writing-mode:vertical-lr"><div style="position:absolute;left:0">#{pushed_atomic}</div><div style="width:9px;height:4px"></div></div></div>})
       expect_replayed_oof(%{<div style="width:400px;position:relative"><div style="writing-mode:vertical-lr"><div style="position:absolute">#{pushed_atomic}</div><div style="width:9px;height:4px"></div></div></div>})
       [
-        '<span style="display:inline-block;text-indent:5px">t<div>x</div></span>',
+        '<span style="display:inline-block">t<div style="width:fit-content">x</div></span>',
         '<span style="display:inline-block"><div style="position:sticky;top:0">s</div></span>',
         '<span style="display:inline-block"><div style="width:max-content">bb</div></span>'
       ].each do |inner|

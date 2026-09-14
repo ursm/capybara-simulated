@@ -299,6 +299,19 @@ pub(crate) struct Input {
     // HTML's LEGACY alignment on this box AS A CONTAINER (0 none, 1 center, 2 right, 3 left): `<center>` and
     // the `align` attribute move a narrower block-level descendant in its band the way `margin: auto` would.
     pub(crate) legacy_align: u8,
+    // `text-indent` on a TEXT BLOCK: the px the indent narrows a line by, from the line's START edge (the
+    // right one in rtl), resolved by the walk against the block's own content width. Which LINES take it: the
+    // first, or with `hanging` every line BUT the first, and with `each_line` the first after every forced
+    // break as well. The FLOW only — an INTRINSIC measure of an indented block is declined in the walk, so
+    // nothing here carries an indent into `text_intrinsic`.
+    pub(crate) indent_px: f64,
+    pub(crate) indent_hanging: bool,
+    pub(crate) indent_each_line: bool,
+    // …and whether the FIRST-LINE indent is already spent: an anonymous text block in a MIXED block carries
+    // its container's indent, but only the first group that places a line (and nothing after a block-level
+    // child) counts as the block's first line. The per-line rules still apply — a `hanging` indent indents
+    // every line of the third group too.
+    pub(crate) indent_spent: bool,
     // …and where that containing block is NOT a record of this pass — the viewport for a `fixed` box, an
     // ancestor above the pass root, a relatively-positioned inline — its PADDING BOX arrives instead, in the
     // pass's own (document) coordinates: `cb_index` is CB_RECT and these four are x / y / width / height, taken
@@ -558,6 +571,7 @@ fn line_layout(
     ws_mode: u8,
     align: u8,
     rtl: bool,
+    indent: (f64, bool, bool, bool), // `text-indent`: px, hanging, each-line, first-line-spent (Input::indent_px)
 ) -> Option<LineLayout> {
     // The three orthogonal `white-space` behaviours (see Input::ws_mode). `no_wrap` keeps the old name for the
     // four soft-wrap gates below: a line SOFT-wraps under normal (0) / pre-wrap (3) / pre-line (4), never under
@@ -567,9 +581,22 @@ fn line_layout(
     let preserve = ws_mode == 2 || ws_mode == 3;
     let break_nl = ws_mode >= 2;
     let strut_desc = strut_lh - strut_asc;
+    // `text-indent` NARROWS the line from its start edge (the oracle's `applyIndent`: `lineLeft += px` in ltr,
+    // `lineRight -= px` in rtl) rather than moving a cursor inside it, so an indented empty line is still
+    // empty. `indent_first` is the oracle's `indentNext`: true for the FIRST line, and set again after a forced
+    // break under `each-line` (`next_line_indent`); the indent applies when it DISAGREES with `hanging`, which
+    // is what makes `hanging` indent every line BUT the first.
+    let (indent_px, indent_hanging, indent_each_line, indent_spent) = indent;
+    // A Cell because the band closures below read it while the line loop writes it (one owner thread, no
+    // borrow to keep): `indent_now` is what THIS line gives up, 0 on every line that takes no indent. The seed
+    // is the oracle's `indentNext = true` — unless this block's first line is not the BLOCK's first, where the
+    // flag starts false and a `hanging` indent is the one that applies.
+    let indent_first = !indent_spent;
+    let indent_now = std::cell::Cell::new(if indent_first != indent_hanging { indent_px } else { 0.0 });
     // The usable width of the line whose top is at `top + t` — the float band there, or the full content
-    // width when there are no floats (kept exact, not `cr - cl`, so the no-float path never drifts).
-    let band_w = |t: f64| -> f64 {
+    // width when there are no floats (kept exact, not `cr - cl`, so the no-float path never drifts) — less
+    // whatever the indent takes off this line.
+    let raw_band_w = |t: f64| -> f64 {
         if floats.is_empty() {
             content_w
         } else {
@@ -577,13 +604,24 @@ fn line_layout(
             br - bl
         }
     };
-    // …and where that band starts, from the content edge (0 with no floats).
-    let band_l = |t: f64| -> f64 {
+    // …and where that band starts, from the content edge (0 with no floats). The indent moves the START edge,
+    // which in rtl is the RIGHT one: the origin is the band's left either way, so in rtl the narrowing shows up
+    // only in the width — which `close_line`'s `free` already carries into the alignment shift — and adding it
+    // to the origin too would move the line twice.
+    let raw_band_l = |t: f64| -> f64 {
         if floats.is_empty() {
             0.0
         } else {
             float_band(floats, top + t, strut_lh, cl, cr).0 - cl
         }
+    };
+    let band_w = |t: f64| raw_band_w(t) - indent_now.get();
+    let band_l = |t: f64| raw_band_l(t) + if rtl { 0.0 } else { indent_now.get() };
+    // A line has closed: the next one takes the indent only under `each-line`, and only after a FORCED break
+    // (the oracle's `endLine`, where `kind === 'forced'`).
+    let next_line_indent = |forced: bool| {
+        let takes = if indent_each_line && forced { !indent_hanging } else { indent_hanging };
+        indent_now.set(if takes { indent_px } else { 0.0 });
     };
     let mut line_x = 0.0f64;
     // The trailing white space on `line_x` since the last content — a collapsed space placed ahead of the word
@@ -642,6 +680,7 @@ fn line_layout(
                 atomics.push((ri, x + dx, total, line_asc));
             }
             total += line_asc + line_desc;
+            next_line_indent(!$wrap); // a soft wrap is not a forced break
         }};
     }
     // …and start a fresh one.
@@ -817,7 +856,7 @@ fn line_layout(
                                 // An empty line still too narrow for even one character drops below the float.
                                 if !floats.is_empty() && !line_has_content && cw + ow_now > band_w(total) {
                                     let fy = top + total;
-                                    let at = float_fit_y(floats, fy, cw + ow_now, cl, cr, strut_lh);
+                                    let at = float_fit_y(floats, fy, cw + ow_now + indent_now.get(), cl, cr, strut_lh);
                                     if at > fy {
                                         total += at - fy;
                                     }
@@ -857,7 +896,7 @@ fn line_layout(
                             // (the oracle does no float handling for a nowrap block), so skip this too.
                             if !no_wrap && !floats.is_empty() && !line_has_content && width + ow > band_w(total) {
                                 let fy = top + total;
-                                let at = float_fit_y(floats, fy, width + ow, cl, cr, strut_lh);
+                                let at = float_fit_y(floats, fy, width + ow + indent_now.get(), cl, cr, strut_lh);
                                 if at > fy {
                                     total += at - fy;
                                 }
@@ -915,7 +954,7 @@ fn line_layout(
                 // A nowrap line is not shortened by / dropped below a float (see the word branch above).
                 if !no_wrap && !floats.is_empty() && !line_has_content && width + ow > band_w(total) {
                     let fy = top + total;
-                    let at = float_fit_y(floats, fy, width + ow, cl, cr, strut_lh);
+                    let at = float_fit_y(floats, fy, width + ow + indent_now.get(), cl, cr, strut_lh);
                     if at > fy {
                         total += at - fy;
                     }
@@ -1261,7 +1300,7 @@ fn measure(
                 r.line_height = h + mt + mb;
             }
             let local: &[Run] = if has_native_atomic { &owned } else { &runs[rs..re] };
-            match line_layout(local, &run_texts[rs..re], n.strut_lh, n.strut_asc, content_w, &fc.items, cl, cr, bfc_top, n.ws_mode, n.text_align, n.from_right()) {
+            match line_layout(local, &run_texts[rs..re], n.strut_lh, n.strut_asc, content_w, &fc.items, cl, cr, bfc_top, n.ws_mode, n.text_align, n.from_right(), (n.indent_px, n.indent_hanging, n.indent_each_line, n.indent_spent)) {
                 Some(ll) => {
                     boxes[i].first_baseline = ll.first.map(|(top, asc)| content_top_rel + top + asc);
                     boxes[i].last_baseline = ll.last.map(|(top, asc)| content_top_rel + top + asc);
@@ -3666,6 +3705,9 @@ fn text_intrinsic(runs: &[Run], run_texts: &[Option<Vec<u16>>], ws_mode: u8, inp
         _ => return None,
     };
     let (mut min, mut max) = (0.0f64, 0.0f64);
+    // (No `text-indent` here: the WALK declines an indented block whose intrinsic widths native would be asked
+    // for, because what Chrome's min-content does with an indent is a real break pass at zero available width —
+    // see the walk's own note. The FLOW applies it, in `line_layout`.)
     let (mut line, mut word) = (0.0f64, 0.0f64);
     let mut inline_on_line = false; // content has landed on this line (a space after it is pending, not dropped)
     let mut pending_space = 0.0f64; // a collapsible space waiting for content to follow it
@@ -3853,6 +3895,10 @@ fn text_intrinsic(runs: &[Run], run_texts: &[Option<Vec<u16>>], ws_mode: u8, inp
     if pin {
         min = max;
     }
+    // KNOWN GAP (both engines, measured): a box can come back wanting MORE at min-content than at max — a SOFT
+    // HYPHEN puts its width in `min` alone (`aaaa&shy;` is 33.73/28.41 here, 33.73/33.73 in Chrome, which
+    // closes the gap by raising the max). Left alone deliberately: the rule that reproduces every figure is
+    // Chrome's real break pass at zero available width, not a clamp on these two numbers.
     Some((min.max(0.0), max.max(0.0)))
 }
 
@@ -4513,6 +4559,10 @@ mod tests {
             inset_left: f64::NAN,
             auto_margins: 0,
             legacy_align: 0,
+            indent_px: 0.0,
+            indent_hanging: false,
+            indent_each_line: false,
+            indent_spent: false,
         }
     }
 

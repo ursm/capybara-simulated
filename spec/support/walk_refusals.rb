@@ -4,7 +4,7 @@
 # one list, so a new refusal is added in one place and every route is held to it.
 module WalkRefusals
   ATOMIC = [
-    '<span style="display:inline-block;text-indent:5px">t<div>x</div></span>',
+    '<span style="display:inline-block">t<div style="width:fit-content">x</div></span>',
     '<span style="display:inline-block"><div style="position:sticky;top:0">s</div></span>',
     '<span style="display:inline-block"><div style="float:left;width:9px;height:4px"></div>t</span>',
     '<span style="display:inline-block;position:relative">t<div style="position:absolute">y</div></span>',

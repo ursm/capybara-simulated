@@ -165,6 +165,60 @@ RSpec.describe 'intrinsic widths' do
     expect(hidden).to eq(10)
   end
 
+  # …and it is TAKEN by the first thing that occupies the line — a word, an atomic, an inline box, a `<br>`, a
+  # `<wbr>` — never by a line nothing occupies. Every number here is Chrome's (16px default face), and the
+  # native engine is not involved: it declines an indented block whose intrinsic widths it would be asked for.
+  describe 'the first-line text-indent goes to the line\'s first occupant' do
+    it 'gives it to the first word, not to a collapsible space before it' do
+      (width, _), w = measure('<div id=t style="width:min-content;text-indent:40px"> aa bbbb</div>')
+      expect(width).to be_within(0.01).of(40 + w.call('aa'))
+    end
+    it 'gives it to a <br>, a <wbr> and an empty inline box alike' do
+      expect(measure('<span id=t style="display:inline-block;text-indent:40px"><br>t</span>')[0][0]).to be_within(0.01).of(40)
+      expect(measure('<div id=t style="width:min-content;text-indent:40px"><wbr>aa bbbb</div>')[0][0]).to be_within(0.01).of(40)
+      expect(measure('<span id=t style="display:inline-block;text-indent:40px"><b></b><div style="height:3px"></div>t</span>')[0][0]).to be_within(0.01).of(40)
+      expect(measure('<span id=t style="display:inline-block;text-indent:40px"><b style="padding-left:10px"></b><div style="height:3px"></div>t</span>')[0][0]).to be_within(0.01).of(50)
+    end
+    # …and a line nothing lands on carries none: a block-level child ends it without placing it, and an empty
+    # box never opens one (Chrome measures both at what follows, not at the indent).
+    it 'drops it where no line is occupied' do
+      (width, _), w = measure('<span id=t style="display:inline-block;text-indent:40px"><div style="height:3px"></div>t</span>')
+      expect(width).to be_within(0.01).of(w.call('t'))
+      expect(measure('<span id=t style="display:inline-block;text-indent:40px"></span>')[0][0]).to eq(0)
+      # …which is what an EMPTY CELL under an inherited indent wants too — 0, where it measured the indent and
+      # took the whole table 20px wide with it. (Its sibling, which does hold text, keeps the indent: Chrome
+      # gives that one 20 + its text.)
+      empty_cell = measure('<table style="text-indent:20px;border-spacing:0"><tr><td id=t style="height:4px;padding:0"></td><td style="padding:0">c</td></tr></table>')[0][0]
+      expect(empty_cell).to eq(0)
+    end
+    # `each-line` starts every line after a FORCED break indented, so the widest line of `aa<br>bbbb` is the
+    # SECOND one (Chrome: 72, where indenting only the first said 54.2).
+    # …and a PRESERVED segment occupies its line as much as a word does, an empty one included (a leading
+    # newline makes a real first line: Chrome 40).
+    it 'gives it to a preserved segment' do
+      (width, _), w = measure('<span id=t style="display:inline-block;white-space:pre;text-indent:40px">aa</span>')
+      expect(width).to be_within(0.01).of(40 + w.call('aa'))
+      expect(measure(%(<span id=t style="display:inline-block;white-space:pre;text-indent:40px">\naa</span>))[0][0]).to be_within(0.01).of(40)
+    end
+    it 'indents again after a forced break under each-line' do
+      (each_line, _), w = measure('<span id=t style="display:inline-block;text-indent:40px each-line">aa<br>bbbb</span>')
+      expect(each_line).to be_within(0.01).of(40 + w.call('bbbb'))      # the SECOND line is the widest
+      first_only = measure('<span id=t style="display:inline-block;text-indent:40px">aa<br>bbbb</span>')[0][0]
+      expect(first_only).to be_within(0.01).of(40 + w.call('aa'))
+      hanging = measure('<span id=t style="display:inline-block;text-indent:40px each-line hanging">aa<br>bbbb</span>')[0][0]
+      expect(hanging).to be_within(0.01).of(w.call('bbbb'))
+    end
+    # `hanging` indents every line BUT the first, in the measure as in the flow — so the widest line of
+    # `aa<br>bbbb` is the indented second one (Chrome 72). Re-arming only for `each-line` shrink-wrapped the box
+    # to 32 and let its own second line overflow it.
+    it 'indents every line but the first under hanging' do
+      (width, _), w = measure('<span id=t style="display:inline-block;text-indent:40px hanging">aa<br>bbbb</span>')
+      expect(width).to be_within(0.01).of(40 + w.call('bbbb'))
+      after_block = measure('<span id=t style="display:inline-block;text-indent:40px hanging">a<div></div>bbbb</span>')[0][0]
+      expect(after_block).to be_within(0.01).of(40 + w.call('bbbb'))
+    end
+  end
+
   it 'gives every break-spaces space its width and a break after it' do
     (width, _), w = measure('<div id=t style="width:min-content;white-space:break-spaces">aa   bb</div>')
     expect(width).to be_within(0.01).of(w.call('aa '))

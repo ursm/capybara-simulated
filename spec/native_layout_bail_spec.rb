@@ -45,11 +45,6 @@ RSpec.describe 'native layout bail coverage', if: ENV.fetch('CSIM_JS_ENGINE', 'v
     expect(native?('<div dir="ltr" style="display:flow-root;width:300px"><div style="float:left;width:50px;height:20px"></div><div style="display:flow-root;width:120px;height:20px">x</div></div>')).to be true
   end
 
-  it 'declines text-indent, keeps a plain block' do
-    expect(native?('<div style="width:200px;text-indent:20px">wrap some words here please</div>')).to be false
-    expect(native?('<div style="width:200px">wrap some words here please</div>')).to be true
-  end
-
   it 'lays out an inline vertical-align SHIFT (sup) natively (its runs ride the shift, growing the line)' do
     # A baseline shift (sub / super / length / %) offsets the element's runs; native threads the shift into the
     # run stream. (A sub/sup GLUED to a word with no space is a mixed-font word, a separate pre-existing decline.)

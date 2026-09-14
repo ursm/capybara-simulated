@@ -343,6 +343,7 @@ RSpec.describe 'native layout L2 text-block parity', if: ENV.fetch('CSIM_JS_ENGI
       expect_parity('<div style="width:400px">&#x2764;&#xFE0F;</div>')
       expect_parity('<div style="width:400px">&#x1F600;&#x1F601;</div>')
     end
+
     # The table `zero_width` answers from is GENERATED (script/gen_combining_marks.rb) from this engine's own
     # `\p{M}`, because that is what the oracle asks. Ruby's Unicode tables are a different version and disagree
     # (8 ranges when this was written), and either side can move on an upgrade — so re-ask the engine at every
@@ -375,6 +376,90 @@ RSpec.describe 'native layout L2 text-block parity', if: ENV.fetch('CSIM_JS_ENGI
        '<div style="width:400px;word-break:break-all">a&#x200D;b</div>'].each do |body|
         expect(shadow(body)).to include('ok' => false, 'reason' => 'unsupported subtree'), body
       end
+    end
+  end
+  # `text-indent` narrows the line it is on from the START edge — the right one in rtl — rather than moving a
+  # cursor inside it, so an indented empty line is still empty. Which lines take it: the first, or with
+  # `hanging` every line BUT the first, and with `each-line` the first after every forced break as well. It was
+  # the walk's most common decline after auto margins, and it is on BOTH figures the intrinsic measure returns.
+  # A `<br clear>` clears the floats before the next line, which native's line layout does not model — and the
+  # walk read the TAG and not the attribute, so it laid such a block out 18px short and only a Chrome comparison
+  # saw it. Declined until native models the clearance.
+  it 'declines a <br> carrying a clear' do
+    expect(shadow('<div style="display:flow-root;width:300px"><div style="float:left;width:100px;height:40px"></div><div>aa<br clear="left">bb</div></div>')).to include('ok' => false)
+    expect(shadow('<div style="width:300px">aa<br clear="both">bb</div>')).to include('ok' => false)
+    # …a plain `<br>` in the same float context stays native
+    expect_parity('<div style="display:flow-root;width:300px"><div style="float:left;width:100px;height:40px"></div><div>aa<br>bb</div></div>')
+  end
+
+  describe 'text-indent narrows the lines it is on' do
+    it 'indents the first line, and wraps around the narrower line' do
+      expect_parity('<div style="width:200px;text-indent:40px">one two three four five six seven eight</div>')
+      expect_parity('<div style="width:200px;text-indent:40px"><span style="display:inline-block;width:10px;height:10px"></span> tail</div>')
+      expect_parity('<div style="width:200px;text-indent:-30px">one two three four five six seven eight</div>')
+      # …a PERCENTAGE against the block's own CONTENT width, not its border box
+      expect_parity('<div style="width:200px;padding:0 20px;border-left:10px solid;text-indent:20%">one two three four five six</div>')
+    end
+    it 'indents every line but the first under hanging, and after a forced break under each-line' do
+      expect_parity('<div style="width:200px;text-indent:40px hanging"><span style="display:inline-block;width:10px;height:10px"></span> one two three four five six seven</div>')
+      expect_parity('<div style="width:200px;text-indent:40px each-line">x<br><span style="display:inline-block;width:10px;height:10px"></span> two</div>')
+      expect_parity('<div style="width:200px;text-indent:40px">x<br><span style="display:inline-block;width:10px;height:10px"></span> two</div>')
+    end
+    # In a MIXED block the indent is the BLOCK's, not each anonymous group's: only "is this the block's first
+    # line" is one-shot — the first group that places a line takes it, and a block-level child spends whatever
+    # no line took (Chrome puts the span after the inner block at x=0, not at 40). The PER-LINE rules go on
+    # applying in every later group, which is what these wrapping cases pin: writing the indent to the first
+    # group alone left a later group's `hanging` lines flush (native 77 where Chrome says 113).
+    it 'gives a mixed block its indent once, and a block child spends it' do
+      expect_parity('<div style="width:200px;text-indent:40px">text <div style="height:5px"></div><span style="display:inline-block;width:10px;height:10px"></span> after</div>')
+      expect_parity('<div style="width:200px;text-indent:40px"><div style="height:5px"></div><span style="display:inline-block;width:10px;height:10px"></span> after</div>')
+      expect_parity('<div style="width:200px;text-indent:40px">  <div style="height:5px"></div><span style="display:inline-block;width:10px;height:10px"></span> after</div>')
+      # …and the LINE COUNT of a group after the block child, where the per-line rules actually show
+      words = 'aa bb cc dd ee ff gg hh ii jj kk ll mm nn'
+      expect_parity(%(<div style="width:100px;text-indent:40px hanging">x<div style="height:5px"></div>#{words}</div>))
+      expect_parity(%(<div style="width:100px;text-indent:40px each-line">x<div style="height:5px"></div>q<br>#{words}</div>))
+      expect_parity(%(<div style="width:100px;text-indent:40px">x<div style="height:5px"></div>#{words}</div>))
+      expect_parity(%(<div style="width:100px;text-indent:-20px">#{words}</div>))
+    end
+    # …and it is on the first line of BOTH intrinsic figures, where a PERCENTAGE resolves against nothing —
+    # which is what leaves the `text-indent: -9999px` hidden-label idiom its padding.
+    # …but an INTRINSIC measure of an indented block stays with the oracle. What Chrome's min-content does with
+    # an indent is a real break pass at zero available width — a break at an ITEM boundary always taken, one
+    # inside a text item taken only on overflow — where this engine's measure is an accumulator that agrees only
+    # when the first line opens with a plain word. Four review rounds of near-miss rules came out of trying to
+    # mirror it (an empty inline, a `<wbr>`, a leading space, a negative indent and a soft hyphen each broke a
+    # different one), so a MEASURED indented block declines and its caller takes the fallback it already has.
+    it 'declines an indented block whose intrinsic widths native would measure' do
+      # Each pair is the same shape with and without the indent: the indented one takes its caller's FALLBACK
+      # (the oracle's contribution / box) where the plain one is measured natively, and the pass lays out either
+      # way — the decline is a route change, not a bail.
+      [['<div style="display:grid;grid-template-columns:min-content auto;width:400px"><div style="%s">aa bb</div><div>x</div></div>', 'nativeIntrinsicGrids'],
+       ['<div style="display:grid;grid-template-columns:max-content auto;width:400px"><div style="%s">aa bb</div><div>x</div></div>', 'nativeIntrinsicGrids'],
+       ['<div style="width:400px">a <span style="display:inline-block;%s">bb cc</span></div>', 'nativeAtomics']].each do |shape, key|
+        indented = shadow(format(shape, 'text-indent:20px'))
+        plain    = shadow(format(shape, ''))
+        expect(indented).to include('ok' => true, 'mismatches' => 0), shape
+        expect(indented[key]).to eq(0), "#{key} with the indent: #{indented.inspect}"
+        expect(plain[key]).to be > 0, "#{key} without it: #{plain.inspect}"
+      end
+      # …a `<td>` pushes its own contribution instead, and the hidden-label idiom keeps the oracle's box.
+      cell = shadow('<table style="border-spacing:0"><tr><td style="padding:0;text-indent:20px">aa bb</td><td style="padding:0">cc</td></tr></table>')
+      expect(cell).to include('ok' => true, 'mismatches' => 0)
+      expect(cell['pushedContributions']).to be > 0, cell.inspect
+      expect_parity('<div style="display:inline-block;padding:0 5px;text-indent:-9999px">Label</div>')
+      expect_parity('<div style="display:flex;width:400px"><div style="text-indent:30px">aa bb</div></div>')
+    end
+    # A line's room for content is its band LESS the indent, and the band it drops to has to hold both: a 70px
+    # inline-block under a 60px indent beside a 200px float of 300 clears the float (Chrome), where both engines
+    # used to keep it beside — and a NEGATIVE indent keeps a line beside a float it would otherwise clear.
+    it 'fits a line beside a float on the indented width' do
+      float = '<div style="float:left;width:200px;height:40px"></div>'
+      wide  = '<div style="float:left;width:250px;height:40px"></div>'
+      ib    = '<span style="display:inline-block;width:70px;height:10px"></span>'
+      expect_parity(%(<div style="display:flow-root;width:300px">#{float}<div style="text-indent:60px">#{ib}</div></div>))
+      expect_parity(%(<div style="display:flow-root;width:300px">#{wide}<div style="text-indent:-30px">#{ib}</div></div>))
+      expect_parity(%(<div style="display:flow-root;width:300px">#{wide}<div style="text-indent:-9999px">wwwwwwwwww</div></div>))
+      expect_parity(%(<div style="display:flow-root;width:300px">#{float}<div>#{ib}</div></div>))
     end
   end
 
