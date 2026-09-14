@@ -24,9 +24,9 @@ Gem::Specification.new do |spec|
     'lib/capybara/simulated/*.html',   # trace_viewer.html — the `trace` CLI's viewer template
     'vendor/js/*.js',
     'Cargo.toml', 'Cargo.lock',                     # the Rust workspace root (rb-sys builds from here)
-    'ext/native_cascade/src/*.rs',                  # the native cascade accelerator's source
-    'ext/native_cascade/Cargo.toml',
-    'ext/native_cascade/extconf.rb',
+    'ext/csim_native/src/*.rs',                     # the native extension's source (V8 engine + DOM + layout)
+    'ext/csim_native/Cargo.toml',
+    'ext/csim_native/extconf.rb',
     'exe/*',
     'README.md',
     'LICENSE'
@@ -38,6 +38,13 @@ Gem::Specification.new do |spec|
   # The native extension (Rust): the V8 engine (rusty_racer, linked as a library) + the native DOM,
   # built into one cdylib. Compiled at source-install; a prebuilt (fat) gem ships it precompiled.
   # Only the V8 runtime requires it; a QuickJS-only install never loads it.
+  #
+  # `spec.files` above has to carry the crate this builds — extconf.rb alone (which RubyGems adds here for
+  # free) would ship a build script with nothing to build. `spec/gemspec_packaging_spec.rb` asserts that, and
+  # that no pattern in the list matches nothing: `ext/native_cascade/*` outlived its directory by months
+  # exactly because a dead glob is silent. NOTE that a source install still needs rusty_racer resolvable —
+  # ext/csim_native/Cargo.toml points at it by PATH during development, and that becomes a git/tagged dep at
+  # release time.
   spec.extensions = ['ext/csim_native/extconf.rb']
 
   spec.add_dependency 'capybara', '>= 3.37'
