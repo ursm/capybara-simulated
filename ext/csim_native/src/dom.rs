@@ -1033,6 +1033,7 @@ fn layout_pass(
             indent_hanging: (r[65] as u32) & 256 != 0,
             indent_each_line: (r[65] as u32) & 512 != 0,
             indent_spent: (r[65] as u32) & 1024 != 0,
+            width_kw: ((r[65] as u32) >> 11 & 3) as u8,
             control_baseline: r[77] as u8,
             control_font_box: r[78],
             control_font_asc: r[79],

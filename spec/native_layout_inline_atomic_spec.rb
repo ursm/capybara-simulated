@@ -345,11 +345,11 @@ RSpec.describe 'native layout inline-atomic parity', if: ENV.fetch('CSIM_JS_ENGI
       expect_native_atomic('<div style="width:400px">a <span style="display:inline-block"><div style="position:relative">t <span style="display:inline-block">ok</span></div></span> c</div>', 2)
     end
     it 'answers the same refusal for an inline image' do
-      # `nlAtomicNative` tests the size keyword BEFORE the `inline` branch, because the walk refuses an `<img>`
-      # record on the same ground — so a cell holding one pushes its contribution instead of taking the table
-      # down, exactly as for an inline-block.
+      # `nlAtomicNative` tests the WIDTH keyword before the `inline` branch, because a replaced element's width
+      # comes from its own intrinsic size and the walk refuses that record on the same ground — so a cell
+      # holding one pushes its contribution instead of taking the table down, exactly as for an inline-block.
       img = 'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7'
-      [%(<img style="max-width:min-content;width:20px;height:10px" src="#{img}">), %(<img style="width:max-content;height:10px" src="#{img}">)].each do |tag|
+      [%(<img style="width:fit-content;height:10px" src="#{img}">), %(<img style="width:max-content;height:10px" src="#{img}">)].each do |tag|
         r = run_shadow(%(<table style="border-spacing:0"><tr><td style="padding:0">a #{tag}</td></tr></table>))
         expect(r).to include('ok' => true, 'mismatches' => 0, 'nativeAtomics' => 0), "#{tag}: #{r.inspect}"
       end

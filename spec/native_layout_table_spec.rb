@@ -748,14 +748,14 @@ RSpec.describe 'native layout table parity', if: ENV.fetch('CSIM_JS_ENGINE', 'v8
   # real. The one thing that cannot be recovered is a subtree the walk cannot build EITHER way.
   describe 'a cell the walk declines to measure is re-walked as a boundary' do
     refused = [
-      '<span style="display:inline-block">t<div style="width:fit-content">x</div></span>',
+      '<span style="display:inline-block;width:fit-content">t<div>x</div></span>',
       '<span style="display:inline-block"><div style="position:sticky;top:0">s</div></span>',
       '<span style="display:inline-block"><div style="float:left;width:9px;height:4px"></div>t</span>',
       '<span style="display:inline-block;position:relative">t<div style="position:absolute">y</div></span>',
       '<span style="display:inline-block;white-space:pre">   </span>',
       '<span style="display:inline-block"><div style="contain:layout;width:9px;height:4px"></div></span>',
-      '<span style="display:inline-block"><div style="width:max-content">bb</div></span>',
-      '<span style="display:inline-block;max-width:min-content">bb</span>'
+      '<span style="display:inline-block;width:max-content">bb</span>',
+      '<span style="display:inline-block;width:min-content">bb cc</span>'
     ]
     it 'lays out an auto, a fixed and a measured table around such a cell' do
       refused.each do |inner|
@@ -774,7 +774,7 @@ RSpec.describe 'native layout table parity', if: ENV.fetch('CSIM_JS_ENGINE', 'v8
     # where in the attempted subtree the refusal sits cannot change the outcome. A stream someone forgets to
     # restore shows up here as a differing node count or a double-counted grid.
     it 'leaves the same records behind wherever the refusal sits in the subtree' do
-      refusal = '<span style="display:inline-block">t<div style="width:fit-content">x</div></span>'
+      refusal = '<span style="display:inline-block;width:fit-content">t<div>x</div></span>'
       inert = '<div style="width:3px;height:2px"></div>' * 4
       grid = '<div style="display:grid;grid-template-columns:min-content;width:50px"><div>g</div></div>'
       early = run_shadow(%{<div style="width:400px"><table><tr><td>#{grid}#{refusal}#{inert}</td></tr></table></div>})
@@ -822,13 +822,13 @@ RSpec.describe 'native layout table parity', if: ENV.fetch('CSIM_JS_ENGINE', 'v8
     # of these is a refusal `nlIntrinsicMeasurable` does not model, so only the unmarked caption survives them.
     it 'never measures a caption no one asks about' do
       [
-        '<span style="display:inline-block">t<div style="width:fit-content">x</div></span>',
+        '<span style="display:inline-block;width:fit-content">t<div>x</div></span>',
         '<span style="display:inline-block"><div style="position:sticky;top:0">s</div></span>',
         '<span style="display:inline-block"><div style="float:left;width:9px;height:4px"></div>t</span>',
         '<span style="display:inline-block;position:relative">t<div style="position:absolute">y</div></span>',
         '<span style="display:inline-block;white-space:pre">   </span>',
-        '<span style="display:inline-block"><div style="width:max-content">bb</div></span>',
-        '<span style="display:inline-block;max-width:min-content">bb</span>',
+        '<span style="display:inline-block;width:max-content">bb</span>',
+        '<span style="display:inline-block;width:min-content">bb cc</span>',
         '<span style="display:inline-block"><div style="contain:layout;width:9px;height:4px"></div></span>'
       ].each do |inner|
         # …parked, unmeasured, and its contribution nobody's business — which is what the tally says

@@ -312,6 +312,11 @@ pub(crate) struct Input {
     // child) counts as the block's first line. The per-line rules still apply — a `hanging` indent indents
     // every line of the third group too.
     pub(crate) indent_spent: bool,
+    // An INTRINSIC-SIZE KEYWORD on `width` (0 none, 1 min-content, 2 max-content, 3 fit-content): the box is as
+    // wide as its own content asks rather than as wide as the room it is given. Only an in-flow BLOCK-LEVEL box
+    // carries one here — every other sizing path (a flex or grid item, an out-of-flow box, a replaced element)
+    // has a basis of its own and the walk declines it there.
+    pub(crate) width_kw: u8,
     // …and where that containing block is NOT a record of this pass — the viewport for a `fixed` box, an
     // ancestor above the pass root, a relatively-positioned inline — its PADDING BOX arrives instead, in the
     // pass's own (document) coordinates: `cb_index` is CB_RECT and these four are x / y / width / height, taken
@@ -3533,10 +3538,22 @@ fn intrinsic_widths_of(i: usize, inputs: &[Input], runs: &[Run], run_texts: &[Op
     } else if n.display == DISPLAY_TABLE {
         // A table brings its own algorithm for the same question, and its rows are not blocks to be measured one
         // at a time. That answer is already a BORDER-box figure (the frame included) and the oracle returns it
-        // unclamped, so it stands as it is — no edges, no min/max-width clamp.
+        // unclamped, so it stands as it is — no edges, no min/max-width clamp. KNOWN GAP, faithfully mirrored:
+        // returning here also skips the keyword PIN below, so a `width: min-content` TABLE contributes its
+        // range where Chrome contributes the one figure (`<div style="width:min-content"><table
+        // style="width:max-content">aa bb cc` is 52.41 in Chrome, 16 in both engines).
         return table_intrinsic_widths(i, inputs, runs, run_texts, grids, children);
     } else {
         content_intrinsic(i, inputs, runs, run_texts, grids, children)?
+    };
+    // `width: min-content` / `max-content` PIN the box to that one figure (CSS Sizing 3 §5) — the box asks for
+    // the same width whatever room it is offered, so both of an ancestor's figures see it; `fit-content` leaves
+    // the range, and the room decides between them. (A keyword is basis-independent, so the same bit that
+    // resolved the used width answers here.)
+    let (inner_min, inner_max) = match n.width_kw {
+        1 => (inner_min, inner_min),
+        2 => (inner_max, inner_max),
+        _ => (inner_min, inner_max),
     };
     // The box's own min/max-width clamp its OUTER contribution (CSS Sizing 3 §5.1), in its box-sizing model.
     let to_border = |v: f64| if is_auto(v) || n.decl_border_box { v } else { v + extra };
@@ -4412,11 +4429,26 @@ fn block_child_width(
     failed: &std::cell::Cell<bool>,
 ) -> f64 {
     let cn = &inputs[c];
-    if !(cn.block_axis_is_x && is_auto(cn.width)) {
+    if cn.width_kw == 0 && !(cn.block_axis_is_x && is_auto(cn.width)) {
         return resolve_width(cn, avail);
     }
     let room = (avail - Input::m(cn.ml) - Input::m(cn.mr)).max(0.0);
-    match shrink_to_fit_width(c, room, inputs, runs, run_texts, grids, children) {
+    // An intrinsic-size KEYWORD sizes the box from its own content (the oracle's `usedSize`): its min-content,
+    // its max-content, or — `fit-content` — the room clamped between the two, each carrying the percentage part
+    // of the box's own edges back (`pct_edges_x`, which an intrinsic CONTRIBUTION leaves out). `fit-content` is
+    // `shrink_to_fit_width` by another name, and a vertical writing mode's auto width is the same rule again.
+    let sized = match cn.width_kw {
+        0 => shrink_to_fit_width(c, room, inputs, runs, run_texts, grids, children),
+        kw => intrinsic_widths(c, inputs, runs, run_texts, grids, children).map(|(imin, imax)| {
+            let pct = cn.pct_edges_x();
+            match kw {
+                1 => imin + pct,
+                2 => imax + pct,
+                _ => (room - pct).max(imin).min(imax) + pct,
+            }
+        }),
+    };
+    match sized {
         Some(w) => used_width(cn, w),
         None => {
             failed.set(true);
@@ -4563,6 +4595,7 @@ mod tests {
             indent_hanging: false,
             indent_each_line: false,
             indent_spent: false,
+            width_kw: 0,
         }
     }
 

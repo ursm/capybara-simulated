@@ -241,17 +241,100 @@ RSpec.describe 'native layout L1 block-flow parity', if: ENV.fetch('CSIM_JS_ENGI
     expect_parity('<div style="width:300px"><div>&nbsp;</div><div style="height:10px"></div></div>')
   end
 
-  # An intrinsic-size KEYWORD (`min-content` / `max-content` / `fit-content`) sizes a box from its content; the
-  # record can only carry `auto`, which would fill the containing block instead — so the walk declines it, on
-  # a size and on a min/max alike. (A plain declared length keeps laying out natively.)
-  it 'declines a block whose width is an intrinsic-size keyword' do
-    expect_bail('<div style="width:min-content;height:10px">keyword width here</div>')
-    expect_bail('<div style="width:600px"><div style="width:max-content;height:10px">keyword width here</div></div>')
-    expect_bail('<div style="width:fit-content;height:10px">keyword width here</div>')
-  end
-  it 'declines a block whose min-width or max-width is an intrinsic-size keyword' do
-    expect_bail('<div style="width:20px;min-width:max-content;height:10px">keyword width here</div>')
-    expect_bail('<div style="max-width:min-content;height:10px">keyword width here</div>')
+  # An intrinsic-size KEYWORD (`min-content` / `max-content` / `fit-content`) sizes a box from its OWN CONTENT,
+  # which native measures itself (`block_child_width` asks `intrinsic_widths` for the same figures the oracle's
+  # `intrinsicWidths` gives it, each carrying the percentage part of the box's own edges back — a
+  # `width: max-content; padding: 0 10%` box around "hello there" is 147.97 in Chrome, not the 67.97 the
+  # contribution alone gives). `fit-content` is the room, clamped between the two.
+  describe 'an intrinsic-size keyword width sizes a block from its content' do
+    it 'lays out min-content, max-content and fit-content' do
+      expect_parity('<div style="width:400px"><div style="width:max-content">aa bb</div></div>')
+      expect_parity('<div style="width:400px"><div style="width:min-content">aa bb</div></div>')
+      expect_parity('<div style="width:400px"><div style="width:fit-content">aa bb</div></div>')
+      expect_parity('<div style="width:40px"><div style="width:fit-content">aa bb</div></div>')
+      expect_parity('<div style="width:400px"><div style="width:max-content;padding:0 10%">hello there</div></div>')
+      expect_parity('<div style="width:400px"><div style="box-sizing:border-box;width:max-content;padding:0 10px;border-left:3px solid">aa bb</div></div>')
+      # …and the min/max clamp, the auto-margin centring and rtl all still act on the width it produces
+      expect_parity('<div style="width:400px"><div style="width:min-content;min-width:120px">aa bb</div></div>')
+      expect_parity('<div style="width:400px"><div style="width:max-content;max-width:30px">aa bb</div></div>')
+      expect_parity('<div style="width:400px"><div style="width:max-content;margin:0 auto">aa bb</div></div>')
+      expect_parity('<div style="width:400px;direction:rtl"><div style="width:max-content">aa bb</div></div>')
+    end
+    # A KEYWORD box pins its own contribution to one figure (CSS Sizing 3 §5): a `min-content` box asks for the
+    # same width whatever room it is offered, so both of an ancestor's figures see that one number. Native
+    # ignored the keyword when MEASURING (only when sizing), so a keyword box inside anything measured — a
+    # nested keyword, a cell, a flex or grid item, an atomic — was measured unpinned.
+    it 'pins its own contribution to the figure the keyword names' do
+      %w[max-content min-content fit-content].each do |outer|
+        expect_parity(%(<div style="width:400px"><div style="width:#{outer}"><div style="width:min-content">aa bb cc</div></div></div>))
+        expect_parity(%(<div style="width:400px"><div style="width:#{outer}"><div style="width:max-content">aa bb cc</div></div></div>))
+      end
+      expect_parity('<table style="border-spacing:0"><tr><td style="padding:0"><div style="width:min-content">aa bb</div></td></tr></table>')
+      expect_parity('<div style="display:flex;width:400px"><div><div style="width:min-content">aa bb</div></div></div>')
+      expect_parity('<div style="display:grid;grid-template-columns:min-content;width:400px"><div><div style="width:max-content">aa bb</div></div></div>')
+      expect_parity('<div style="width:400px"><span style="display:inline-block"><div style="width:min-content">aa bb</div></span></div>')
+    end
+    # …and it is walked as a MEASURED subtree, like the other route whose width comes from its own content (a
+    # vertical writing mode): native has to MEASURE such a box, so what it cannot measure must be refused by the
+    # WALK — where the caller can still fall back — and not discovered mid-measure in Rust, which throws the
+    # whole pass away. A measure-only gap (native's intrinsic has no `text-indent`) is refused here too.
+    it 'refuses in the walk what it would have to measure and cannot' do
+      expect_walk_declines('<div style="width:400px"><div style="width:max-content;text-indent:30px">aa bb</div></div>')
+      expect_walk_declines('<div style="width:400px"><div style="width:max-content"><span style="display:inline-block"><div style="position:sticky;top:0">s</div></span></div></div>')
+      expect_walk_declines('<div style="width:400px"><table><tr><td><div style="width:max-content"><div style="display:grid;grid-template-columns:40px"><div>g</div></div></div></td></tr></table></div>')
+    end
+    # A keyword on any of the OTHER five size properties is not a width native has to find: the oracle resolves
+    # a keyword `height` to `auto` and a keyword min/max to no clamp at all, which the record already says.
+    # (That the two engines AGREE there is the contract; that the oracle then differs from Chrome — which
+    # clamps `max-width: min-content` to 16 where this leaves 400 — is a conformance gap of its own, written up
+    # at `clampToMinMax` in layout.js.)
+    it 'lays out a keyword height, min-width and max-width as the oracle resolves them' do
+      expect_parity('<div style="width:400px"><div style="height:max-content">aa bb</div></div>')
+      expect_parity('<div style="width:400px"><div style="min-width:max-content">aa bb</div></div>')
+      expect_parity('<div style="width:400px"><div style="max-width:min-content">aa bb</div></div>')
+      expect_parity('<div style="width:400px"><div style="max-height:min-content;height:50px">aa bb</div></div>')
+    end
+    # …and every OTHER sizing path keeps its own basis, so a keyword width declines there: a flex or grid item
+    # (sized by its line / track), an out-of-flow box (by its insets), a table cell (by its column), a replaced
+    # element (by its intrinsic size — an inline one is pushed as an atomic instead of declining the pass).
+    it 'declines a keyword width a different sizing path owns' do
+      # …the pass ROOT (sized from the width the harness hands in — native would fill its containing block and
+      # report the box as laid out), an out-of-flow box (sized from its insets) and a grid item (from its
+      # track). A replaced element is sized by its intrinsic size and declines the same way.
+      expect_walk_declines('<div style="display:grid;grid-template-columns:auto;width:400px"><div style="width:max-content">aa bb</div></div>')
+      expect_walk_declines('<div style="position:relative;width:400px"><div style="position:absolute;width:max-content">aa bb</div></div>')
+      session = simulated_session(page('<div id="r" style="width:max-content">aa bb cc</div>')); session.visit '/'
+      expect(parity(session, '#r')).to include('ok' => false, 'reason' => 'unsupported subtree')
+      # …and the vertical writing mode's root, which has no inline size to fill either (the same hole)
+      session = simulated_session(page('<div id="r" style="writing-mode:vertical-lr;height:100px">aa bb cc</div>')); session.visit '/'
+      expect(parity(session, '#r')).to include('ok' => false, 'reason' => 'unsupported subtree')
+    end
+    # …while a FLEX ITEM and a TABLE CELL carry one natively: their sizing paths ask for the box's intrinsic
+    # figures, which the pin has already answered. (A `<td style="width:min-content">` is 16 wide in both
+    # engines where Chrome's auto-table algorithm gives the column its max-content, 52.41 — an oracle gap of
+    # its own, untouched by this.)
+    # A CSS-WIDE keyword resolves to whatever it stands for BEFORE the intrinsic-keyword test, so `width:
+    # inherit` under a keyword parent IS a keyword width — and the cheap pre-test that keeps the question off
+    # the hot path has to let it through, or the walk marks a box measured that native then measures without
+    # the obligations measuring carries (it laid out a `text-indent`ed one at the wrong width, and threw a
+    # whole pass away on a sticky child).
+    it 'sees a keyword width arriving through inherit' do
+      expect_walk_declines('<div style="display:flex;width:400px"><div style="width:min-content"><div style="width:inherit;text-indent:30px">aa bb cc</div></div></div>')
+      expect_walk_declines('<table style="border-spacing:0"><tr><td style="padding:0;width:min-content"><div style="width:inherit;text-indent:30px">aa bb cc</div></td></tr></table>')
+      expect_walk_declines('<div style="display:flex;width:400px"><div style="width:min-content"><div style="width:inherit"><span style="display:inline-block"><div style="position:sticky;top:0">s</div></span></div></div></div>')
+      # …and one with nothing to refuse lays out, the inherited keyword measured like any other
+      expect_parity('<div style="width:400px"><div style="width:min-content"><div style="width:inherit">aa bb cc</div></div></div>')
+      expect_parity('<div style="width:400px"><span style="width:min-content"><span style="display:inline-block;width:inherit">bb cc</span></span></div>')
+    end
+    it 'carries a keyword width on a flex item and a table cell' do
+      %w[min-content max-content fit-content].each do |kw|
+        expect_parity(%(<div style="display:flex;width:400px"><div style="width:#{kw}">aa bb cc</div><div>x</div></div>))
+        expect_parity(%(<div style="display:flex;width:60px"><div style="width:#{kw};flex-shrink:1">aa bb cc</div><div>x</div></div>))
+        expect_parity(%(<div style="display:flex;flex-direction:column;width:400px;height:200px"><div style="width:#{kw}">aa bb cc</div></div>))
+        expect_parity(%(<table style="border-spacing:0"><tr><td style="padding:0;width:#{kw}">aa bb cc</td><td style="padding:0">xx</td></tr></table>))
+        expect_parity(%(<table style="border-spacing:0;table-layout:fixed;width:300px"><tr><td style="padding:0;width:#{kw}">aa bb cc</td><td style="padding:0">xx</td></tr></table>))
+      end
+    end
   end
 
   # ── Out-of-flow boxes positioned natively ─────────────────────────────────────────────────────────────
@@ -392,8 +475,8 @@ RSpec.describe 'native layout L1 block-flow parity', if: ENV.fetch('CSIM_JS_ENGI
     it 'declines a vertical block whose atomic inline is pushed, not laid out natively' do
       [
         'a <span style="display:inline-block;width:max-content">bb</span>',
-        'a <span style="display:inline-block;max-width:min-content">bb</span>',
-        'a <span style="display:inline-block">t<div style="width:fit-content">x</div></span>',
+        'a <span style="display:inline-block;width:min-content">bb cc</span>',
+        'a <span style="display:inline-block;width:fit-content">t<div>x</div></span>',
         'a <span style="display:inline-block"><div style="position:sticky;top:0">s</div></span>',
         'a <span style="display:inline-block"><div style="float:left;width:9px;height:4px"></div>t</span>',
         'a<br>b <span style="display:inline-block;width:max-content">bb</span>'
@@ -525,9 +608,9 @@ RSpec.describe 'native layout L1 block-flow parity', if: ENV.fetch('CSIM_JS_ENGI
       expect_replayed_oof(%{<div style="width:400px;position:relative"><div style="writing-mode:vertical-lr"><div style="position:absolute;left:0">#{pushed_atomic}</div><div style="width:9px;height:4px"></div></div></div>})
       expect_replayed_oof(%{<div style="width:400px;position:relative"><div style="writing-mode:vertical-lr"><div style="position:absolute">#{pushed_atomic}</div><div style="width:9px;height:4px"></div></div></div>})
       [
-        '<span style="display:inline-block">t<div style="width:fit-content">x</div></span>',
+        '<span style="display:inline-block;width:fit-content">t<div>x</div></span>',
         '<span style="display:inline-block"><div style="position:sticky;top:0">s</div></span>',
-        '<span style="display:inline-block"><div style="width:max-content">bb</div></span>'
+        '<span style="display:inline-block;width:max-content">bb</span>'
       ].each do |inner|
         expect_replayed_oof(%{<div style="width:400px;position:relative"><div style="position:absolute;left:0">a #{inner}</div><p>x</p></div>})
       end
