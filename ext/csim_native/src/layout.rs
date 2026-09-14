@@ -99,6 +99,11 @@ pub(crate) struct Input {
     // rides `width` (JS resolves the shrink-to-fit; native computes the auto height from the subtree).
     pub(crate) float_kind: u8,
     pub(crate) clear: u8,
+    // Whether that `clear` SEPARATES this box's top margin from its parent's (§8.3.1). Answered by the walk,
+    // STRUCTURALLY — is there a float earlier in this box's formatting context — because the measure that
+    // decides where a box goes cannot see the floats its ancestors inherited, and a box whose margin depends
+    // on them would be placed differently by the two measures the float paths take.
+    pub(crate) takes_clearance: bool,
     pub(crate) starts_bfc: bool,
     // Flex (§9.7) — the SIZING is resolved JS-side (each item's used main+cross size rides its
     // width/height, like a float's shrink-to-fit width), so native does only PLACEMENT. On a flex
@@ -1493,27 +1498,23 @@ fn measure(
                     // moved by it at all (Chrome: a `clear: left; margin-top: 20px` FIRST child of a plain
                     // wrapper after a 5px float sits at 5, its margin spent, and the wrapper stays at 0 — where
                     // collapsing it out both moved the wrapper and left the child below its own float).
-                    // `clear` with no float on the named side is no separator: nothing changes then.
-                    // The line the box is pulled to is also what decides whether its margin collapses:
-                    // seeded from -inf it is finite exactly when a float on the named side exists in this
-                    // context, which is how this engine (the oracle's `takesClearance` alike) reads "the box
-                    // takes clearance" — STRUCTURALLY, because a margin is wanted before the floats around
-                    // it are placed.
                     //
-                    // Blink has TWO regimes, keyed on the float's PROVENANCE, and this is only the first of
-                    // them. A float PLACED DURING this block's own layout clears whatever its geometry (a
-                    // zero-height one, or one lifted above the content top by a negative margin, still
-                    // does) — that is this test, and it is right. A float INHERITED from an outer block —
-                    // which a plain block container beside a float now gets, translated into its frame —
-                    // clears only when its bottom is STRICTLY BELOW the box's hypothetical position (the
-                    // flow position plus the collapsed run, the box's own margin included): Chrome keeps the
-                    // margin then, and both engines spend it (a `clear: left; margin-top: 20px` first child
-                    // of a wrapper below a 30px float belongs at 60, not 40). The general path's position
-                    // guard declines those rather than lay them out wrong; the ORACLE is wrong there too, so
-                    // it is one conformance fix for both engines (the campaign memory has the matrix).
-                    let clear_line = clearance_y(&ctx.items, f64::NEG_INFINITY, cn.clear);
+                    // WHETHER it takes clearance rides the RECORD: the walk answers it off the document — is
+                    // there a float earlier in this box's formatting context — and not from the floats in
+                    // hand. The two are the same question only for a block that can SEE every float in its
+                    // context, and the measure that decides where a box goes is handed an empty one on
+                    // purpose (it wants the margin, not the geometry), so answering from `ctx` made a box's
+                    // margin depend on which measure asked. WHERE it lands is still the geometry's answer
+                    // below, over the floats whose rectangles this pass actually has.
+                    //
+                    // Chrome asks the question two ways and this is one of them (measured, 153, ~80 shapes —
+                    // the campaign memory has the matrix): a float placed while this block was laid out
+                    // separates whatever its geometry, an INHERITED one only where it reaches below the box.
+                    // Reading the second like the first is a bounded gap both engines share on purpose: it is
+                    // the answer they can both give, and making it geometric means making the oracle's margin
+                    // HOIST geometric, which runs before a single float is placed.
                     let y0 = if first && top_open {
-                        if !clear_line.is_finite() {
+                        if !cn.takes_clearance {
                             top_m.merge(cm.top);
                         }
                         content_top_rel
@@ -1521,7 +1522,7 @@ fn measure(
                         pending.merge(cm.top_only);
                         cursor + pending.value()
                     };
-                    let y = y0.max(clear_line);   // == clearance_y(&ctx.items, y0, cn.clear)
+                    let y = clearance_y(&ctx.items, y0, cn.clear);
                     if y >= floats_bottom(&ctx.items) {
                         // Past every float, so its band is the whole content width — which is what the
                         // oracle's own `band == null` gives it, auto margins and legacy alignment included.
@@ -1648,9 +1649,14 @@ fn measure(
             let cm2 = measure(c, child_w, f64::NAN, inputs, runs, run_texts, grids, children, boxes, failed, &mut inner, 0.0, 0.0);
             // The floats were translated to the position the probe's margin gave the box; if this measure
             // would put it anywhere else, that translation is stale and so is everything laid out against it.
-            // Compare the POSITION rather than the margins: a run joins `pos` and `neg` independently, so two
-            // different margin sets can share a value and still place the box differently (a cleared
-            // descendant whose `{20, -20}` set the clear arm drops is exactly that).
+            // A BACKSTOP, and deliberately so: a margin that depends on the floats around it is the thing
+            // this design cannot have, and the one case that produced one — a cleared descendant, whose
+            // margin the clear arm dropped only when the floats were in hand — was fixed at the source by
+            // putting that answer on the record. Nothing known reaches this now; it stays because the
+            // alternative to a decline here is a box laid out against a frame nobody believes.
+            // It compares the POSITION rather than the margins on purpose: a run joins `pos` and `neg`
+            // independently, so two different margin sets can share a value and still place the box
+            // differently — reading `CMargin::value()` here was 10px of silent wrongness.
             if let Some(p) = probe {
                 let cy2 = cursor + pending.peek(cm2.top_only);
                 if cm2.collapse_through != p.collapse_through || (cy2 - cy).abs() > 0.01 {
@@ -1687,8 +1693,14 @@ fn measure(
         }
         if first && top_open {
             // The first in-flow child's top margin collapses with this node's top margin (collapse-
-            // through the open top edge): it propagates up, and the child sits AT the content top.
-            top_m.merge(cm.top);
+            // through the open top edge): it propagates up, and the child sits AT the content top —
+            // unless CLEARANCE separates the two (§8.3.1), which the record answers structurally, so that
+            // this measure and the one the float paths take agree about a box whose float neither of them
+            // can see. The margin is then no part of this block's own, and the clear arm above is where a
+            // float actually in this context pulls the box down past it.
+            if !cn.takes_clearance {
+                top_m.merge(cm.top);
+            }
             boxes[c].y = content_top_rel;
             if cm.collapse_through {
                 // …and a child that collapses THROUGH leaves the run where it put it — in the parent's own
@@ -4659,6 +4671,7 @@ mod tests {
             strut_asc: 0.0,
             float_kind: 0,
             clear: 0,
+            takes_clearance: false,
             starts_bfc: false,
             flex_justify: 0,
             flex_main_gap: 0.0,

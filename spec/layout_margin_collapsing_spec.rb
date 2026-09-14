@@ -141,6 +141,26 @@ RSpec.describe 'margin collapsing' do
     expect(plain[0]).to eq([16, 18])
   end
 
+  # WHICH float makes a `clear` a margin separator is answered STRUCTURALLY — is there a float earlier in the
+  # box's formatting context — because a margin is wanted before any float is placed. Chrome asks it two ways
+  # (measured, 153, ~80 shapes): a float placed while the box's OWN parent was laid out separates whatever its
+  # geometry, while an INHERITED one separates only where it reaches below the box. Reading the second like
+  # the first is a bounded gap this engine keeps on purpose, because the structural answer is the one both
+  # engines can give the same: a `clear: left; margin-top: 20px` first child of a wrapper that starts below a
+  # 30px float is at 40 here where Chrome says 60. Making it geometric means making the HOIST geometric, and
+  # `marginInfo` runs before a single float is placed.
+  it 'asks structurally whether a clear separates a margin' do
+    above = '<div style="float:left;width:100px;height:30px"></div><div style="height:40px"></div>' \
+            '<div id="w"><div id="c" style="clear:left;margin-top:20px;height:5px"></div></div>'
+    expect(boxes_for(above, ['#w', '#c'])).to eq([[40, 5], [40, 5]])   # Chrome: 60 / 60
+
+    # …and where the inherited float DOES reach below the box, structural and geometric agree — the box is on
+    # the clearance line and its margin is spent, which is Chrome's answer too.
+    below = '<div style="float:left;width:100px;height:61px"></div><div style="height:40px"></div>' \
+            '<div id="w"><div id="c" style="clear:left;margin-top:20px;height:5px"></div></div>'
+    expect(boxes_for(below, ['#w', '#c']).last).to eq([61, 5])
+  end
+
   # …and the clearance line REPLACES the margin rather than adding to it, even where the margin alone would
   # have put the box lower: Chrome 153 puts a `clear: left; margin-top: 20px` first child at the 5px float's
   # bottom, not at 20, and the wrapper it is in stays where it was rather than taking the margin out.

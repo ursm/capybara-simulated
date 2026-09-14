@@ -343,20 +343,71 @@ RSpec.describe 'native layout float parity', if: ENV.fetch('CSIM_JS_ENGINE', 'v8
                   '<div><div style="margin-top:-30px">one two three four five six seven eight</div></div></div></div>')
   end
 
-  # A/B bail — the box is translated into the floats at the position its FIRST (float-free) measure's margin
-  # gave it, so a margin that comes out different under the floats leaves that translation stale. The margin
-  # SET is what decides, not its value: a cleared descendant contributes `{pos: 20, neg: -20}` in the
-  # float-free measure and nothing in the float-aware one, and both come to 0 — read as a number the two
-  # agreed and the box was laid out 10px from where it belongs.
-  it 'declines a child whose collapsed margin changes under the floats' do
-    moved = '<div style="width:300px;overflow:hidden"><div style="float:left;width:100px;height:100px"></div>' \
-            '<div style="height:10px;margin-bottom:10px"></div>' \
-            '<div><div style="clear:left;margin-top:20px;height:5px"><div style="margin-top:-20px;height:1px"></div></div></div></div>'
-    expect(run_shadow(moved)['ok']).to be false
-    # …and the same shape with nothing cleared inside it stays native
+  # A box's margin must not DEPEND on the floats it is measured among, or the two measures the float paths
+  # take disagree about where it goes: the translation was made at the first one's answer, and the second
+  # one's is what places it. Whether a `clear` separates that margin from its parent's (§8.3.1) is therefore
+  # answered STRUCTURALLY, off the record, exactly as the oracle answers it — a float earlier in the box's
+  # formatting context, whether or not the measure that meets the box can see it. Derived from the floats in
+  # hand instead, a cleared descendant contributed `{pos: 20, neg: -20}` to the float-free measure and
+  # nothing to the float-aware one, which moved the box 10px and declined the page to keep it honest.
+  it 'keeps a cleared descendant\'s margin the same in both measures' do
+    expect_parity('<div style="width:300px;overflow:hidden"><div style="float:left;width:100px;height:100px"></div>' \
+                  '<div style="height:10px;margin-bottom:10px"></div>' \
+                  '<div><div style="clear:left;margin-top:20px;height:5px"><div style="margin-top:-20px;height:1px"></div></div></div></div>')
+    expect_parity('<div style="width:300px;overflow:hidden"><div style="float:left;width:100px;height:100px"></div>' \
+                  '<div style="height:10px;margin-bottom:10px"></div>' \
+                  '<div><div style="clear:left;margin-top:20px;height:5px"><div style="height:1px"></div></div></div></div>')
+    # …and the same shape with nothing cleared inside it
     expect_parity('<div style="width:300px;overflow:hidden"><div style="float:left;width:100px;height:100px"></div>' \
                   '<div style="height:10px;margin-bottom:10px"></div>' \
                   '<div><div style="margin-top:20px;height:5px"><div style="margin-top:-20px;height:1px"></div></div></div></div>')
+  end
+
+  # A/B — a float ABOVE the pass root is one the pass never places, so nothing inside can be positioned
+  # against it: a box that would CLEAR it took neither its margin nor the clearance (5 tall where the oracle
+  # says 65), one that would AVOID it kept the full width, and the pass ROOT's own used width is the band the
+  # float leaves (an `overflow: hidden` root beside a 100px float is 200 wide, and a pass that cannot see the
+  # float says 300). The walk refuses such a pass rather than answer part of it.
+  it 'refuses a sub-root pass under a float above its root' do
+    above = '<div style="width:300px;overflow:hidden"><div style="float:left;width:100px;height:100px"></div>' \
+            '<div style="height:40px"></div>'
+    [
+      '<div id="w"><div style="clear:left;margin-top:20px;height:5px"></div></div>',
+      '<div id="w"><div style="overflow:hidden;height:25px"></div></div>',
+      '<div id="w" style="overflow:hidden"><div style="height:25px"></div></div>',
+      '<div id="w"><div style="margin-top:20px;height:5px"></div></div>'
+    ].each do |inner|
+      session = simulated_session(page("#{above}#{inner}</div>"))
+      session.visit '/'
+      session.evaluate_script('document.body.offsetHeight')
+      sub = session.evaluate_script("globalThis.__csimLayoutShadowRun(document.querySelector('#w'))")
+      expect(sub).to include('ok' => false, 'reason' => 'float above the pass root'), "#{inner}: #{sub.inspect}"
+      # …and the whole-document pass, which does place that float, lays the same page out natively
+      expect(session.evaluate_script('globalThis.__csimLayoutShadowRun()')).to include('ok' => true, 'mismatches' => 0)
+    end
+
+    # …a pass whose root holds the float ITSELF places it, and lays out
+    own = simulated_session(page('<div style="width:300px;overflow:hidden"><div style="height:40px"></div>' \
+                                 '<div id="w"><div style="float:left;width:20px;height:10px"></div>' \
+                                 '<div style="clear:left;height:5px"></div></div></div>'))
+    own.visit '/'
+    own.evaluate_script('document.body.offsetHeight')
+    expect(own.evaluate_script("globalThis.__csimLayoutShadowRun(document.querySelector('#w'))"))
+      .to include('ok' => true, 'mismatches' => 0)
+  end
+
+  # …the shapes that made the structural answer necessary: a cleared box whose float is one its own measure
+  # never meets, because an ANCESTOR inherited it. Its margin is separated all the same, and the box lands on
+  # the clearance line the floats in hand give it.
+  it 'separates a cleared box from a float its own measure cannot see' do
+    %w[30px 61px].each do |h|
+      expect_parity(%(<div style="width:300px;overflow:hidden"><div style="float:left;width:100px;height:#{h}"></div>) +
+                    '<div style="height:40px"></div><div><div style="clear:left;margin-top:20px;height:5px"></div>' \
+                    '<div style="height:3px"></div></div></div>')
+    end
+    expect_parity('<div style="width:300px;overflow:hidden"><div style="float:left;width:100px;height:30px"></div>' \
+                  '<div style="height:40px;margin-bottom:10px"></div>' \
+                  '<div><div style="clear:left;margin-top:-10px;height:5px"></div></div></div>')
   end
 
   it 'still declines direct inline content beside a float, and keeps float-only' do
