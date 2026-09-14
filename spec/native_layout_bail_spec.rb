@@ -15,10 +15,22 @@ RSpec.describe 'native layout bail coverage', if: ENV.fetch('CSIM_JS_ENGINE', 'v
 
   # Whether the shadow harness laid the page out natively (true) or declined to JS (false).
   def native?(body)
+    shadow(body)['ok']
+  end
+
+  # …and laid it out to the SAME boxes. `ok` alone is what a DECLINE is asserted with; a shape that flips the
+  # other way — one this engine has just learned — has to say its geometry agrees, or the example passes on a
+  # native pass that is natively wrong.
+  def parity?(body)
+    r = shadow(body)
+    r['ok'] && r['mismatches'].zero?
+  end
+
+  def shadow(body)
     session = simulated_session(page(body))
     session.visit '/'
     session.evaluate_script('document.body.offsetHeight')
-    session.evaluate_script('globalThis.__csimLayoutShadowRun()')['ok']
+    session.evaluate_script('globalThis.__csimLayoutShadowRun()')
   end
 
   it 'lays out a horizontal auto margin (centring) and a fixed margin alike' do
@@ -34,15 +46,16 @@ RSpec.describe 'native layout bail coverage', if: ENV.fetch('CSIM_JS_ENGINE', 'v
     expect(native?('<div dir="ltr">hello world</div>')).to be true
     # An rtl block that ESTABLISHES the float context routes its TEXT children around the float natively — a
     # narrower one sits at the inline-start = right, mirroring the no-float placement.
-    expect(native?('<div dir="rtl" style="display:flow-root;width:300px"><div style="float:right;width:50px;height:20px"></div><div style="width:100px;height:20px">x</div></div>')).to be true
-    # A float whose context is a HIGHER ancestor (this div doesn't start one) still declines — for that reason,
-    # not the direction; a horizontal auto margin under rtl also declines.
-    expect(native?('<div dir="rtl" style="width:300px"><div style="float:left;width:50px;height:20px"></div><div style="width:100px;height:20px"></div></div>')).to be false
+    expect(parity?('<div dir="rtl" style="display:flow-root;width:300px"><div style="float:right;width:50px;height:20px"></div><div style="width:100px;height:20px">x</div></div>')).to be true
+    # A float whose context is a HIGHER ancestor (this div starts none) is threaded up to it now, and the
+    # plain sibling beside it keeps its full width at the inline-start = right edge — Chrome puts it at 200
+    # whichever side the float takes.
+    expect(parity?('<div dir="rtl" style="width:300px"><div style="float:left;width:50px;height:20px"></div><div style="width:100px;height:20px"></div></div>')).to be true
     # A sibling child that ESTABLISHES its own BFC (flow-root/overflow) keeps its whole border box clear of the
     # float (the media-object shift): native places it in the band the float leaves, narrowed to it, both ways
     # round. (The plain-block sibling above, whose box may overlap the float, also stays native.)
-    expect(native?('<div dir="rtl" style="display:flow-root;width:300px"><div style="float:right;width:50px;height:20px"></div><div style="display:flow-root;width:120px;height:20px">x</div></div>')).to be true
-    expect(native?('<div dir="ltr" style="display:flow-root;width:300px"><div style="float:left;width:50px;height:20px"></div><div style="display:flow-root;width:120px;height:20px">x</div></div>')).to be true
+    expect(parity?('<div dir="rtl" style="display:flow-root;width:300px"><div style="float:right;width:50px;height:20px"></div><div style="display:flow-root;width:120px;height:20px">x</div></div>')).to be true
+    expect(parity?('<div dir="ltr" style="display:flow-root;width:300px"><div style="float:left;width:50px;height:20px"></div><div style="display:flow-root;width:120px;height:20px">x</div></div>')).to be true
   end
 
   it 'lays out an inline vertical-align SHIFT (sup) natively (its runs ride the shift, growing the line)' do

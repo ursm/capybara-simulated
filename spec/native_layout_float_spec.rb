@@ -297,9 +297,70 @@ RSpec.describe 'native layout float parity', if: ENV.fetch('CSIM_JS_ENGINE', 'v8
     expect(run_shadow('<div style="overflow:hidden"><div style="float:left;width:50px;height:50px"></div></div>')['ok']).to be true
   end
 
-  it 'declines in-flow content AFTER a float (needs narrowing/clearance), keeps float-only' do
+  # An ordinary BLOCK CONTAINER beside a float keeps its full width and OVERLAPS it (§9.5) — it is the LINES
+  # inside it that route around the float, at whatever depth they sit. Native lays it out in this block's
+  # context read in the child's own frame, which needs the child's origin, which needs its collapsed top
+  # margin: so a child of a block whose context holds a float is measured once in an empty context for the
+  # margin and again in the translated one. A first child under an open top edge sits at the content top
+  # whatever its margin comes to, so it needs no such probe — and neither does any child of a block with no
+  # float in its context, which is every block on a float-free page.
+  it 'overlaps a plain block container with the float and routes the lines inside it' do
+    expect_parity('<div style="width:300px;overflow:hidden"><div style="float:left;width:50px;height:50px"></div>' \
+                  '<div style="height:20px"></div></div>')
+    expect_parity('<div style="width:200px;overflow:hidden"><div style="float:left;width:100px;height:40px"></div>' \
+                  '<div><div>one two three four five six seven eight nine</div></div></div>')
+    # …and the band opens again below the float, mid-block
+    expect_parity('<div style="width:200px;overflow:hidden"><div style="float:left;width:100px;height:20px"></div>' \
+                  '<div><div>one two three four five six seven eight nine ten</div></div></div>')
+    # …through two wrappers, a right float, and a wrapper whose own padding moves the frame
+    expect_parity('<div style="width:200px;overflow:hidden"><div style="float:right;width:100px;height:40px"></div>' \
+                  '<div><div><div>one two three four five six seven</div></div></div></div>')
+    expect_parity('<div style="width:200px;overflow:hidden"><div style="float:left;width:100px;height:40px"></div>' \
+                  '<div style="padding:5px 10px"><div>one two three four five six seven</div></div></div>')
+    # …a BFC box nested inside the overlapping wrapper still avoids the float, in the wrapper's frame
+    expect_parity('<div style="width:200px;overflow:hidden"><div style="float:left;width:100px;height:40px"></div>' \
+                  '<div><div style="overflow:hidden;height:10px"></div></div></div>')
+    # …and a second float-bearing wrapper places its float beside the first one's
+    expect_parity('<div style="width:300px;overflow:hidden"><div><div style="float:left;width:50px;height:50px"></div></div>' \
+                  '<div><div style="float:left;width:40px;height:20px"></div></div></div>')
+    # …the sibling's own margin collapses through it as ever
+    expect_parity('<div style="width:300px;overflow:hidden"><div style="float:left;width:50px;height:50px"></div>' \
+                  '<div><div style="margin-top:30px;height:10px"></div></div></div>')
+  end
+
+  # …and a descendant PULLED ABOVE the block's own top by a negative margin meets floats the block's border
+  # box never reaches, so which floats reach into a child is asked of the CONTEXT, not of the child's top: a
+  # `margin-top:-40px` pull-up under a box that starts below the float laid its text out full width where
+  # Chrome wraps it round.
+  it 'routes a descendant pulled above its own block into the floats beside it' do
+    expect_parity('<div style="width:200px;overflow:hidden"><div style="float:left;width:100px;height:40px"></div>' \
+                  '<div style="height:51px"></div><div><div style="height:1px"></div>' \
+                  '<div style="margin-top:-40px">one two three four five six seven eight</div></div></div>')
+    # …the pull-up has to be a NON-FIRST descendant to test it: on the first child the negative margin folds
+    # into the wrapper's own collapsed top, which the wrapper's position already carries.
+    expect_parity('<div style="width:200px;overflow:hidden"><div style="float:left;width:100px;height:40px"></div>' \
+                  '<div style="height:45px"></div><div><div style="height:1px"></div>' \
+                  '<div><div style="margin-top:-30px">one two three four five six seven eight</div></div></div></div>')
+  end
+
+  # A/B bail — the box is translated into the floats at the position its FIRST (float-free) measure's margin
+  # gave it, so a margin that comes out different under the floats leaves that translation stale. The margin
+  # SET is what decides, not its value: a cleared descendant contributes `{pos: 20, neg: -20}` in the
+  # float-free measure and nothing in the float-aware one, and both come to 0 — read as a number the two
+  # agreed and the box was laid out 10px from where it belongs.
+  it 'declines a child whose collapsed margin changes under the floats' do
+    moved = '<div style="width:300px;overflow:hidden"><div style="float:left;width:100px;height:100px"></div>' \
+            '<div style="height:10px;margin-bottom:10px"></div>' \
+            '<div><div style="clear:left;margin-top:20px;height:5px"><div style="margin-top:-20px;height:1px"></div></div></div></div>'
+    expect(run_shadow(moved)['ok']).to be false
+    # …and the same shape with nothing cleared inside it stays native
+    expect_parity('<div style="width:300px;overflow:hidden"><div style="float:left;width:100px;height:100px"></div>' \
+                  '<div style="height:10px;margin-bottom:10px"></div>' \
+                  '<div><div style="margin-top:20px;height:5px"><div style="margin-top:-20px;height:1px"></div></div></div></div>')
+  end
+
+  it 'still declines direct inline content beside a float, and keeps float-only' do
     expect(run_shadow('<div style="overflow:hidden"><div style="float:left;width:50px;height:50px"></div>text after</div>')['ok']).to be false
-    expect(run_shadow('<div style="overflow:hidden"><div style="float:left;width:50px;height:50px"></div><div style="height:20px"></div></div>')['ok']).to be false
     expect(run_shadow('<div style="overflow:hidden"><div style="float:left;width:50px;height:50px"></div></div>')['ok']).to be true
   end
 end

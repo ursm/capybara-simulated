@@ -1182,6 +1182,13 @@ impl CMargin {
     fn value(&self) -> f64 {
         self.pos + self.neg
     }
+    // What this run would come to with `o` joined — asked where a box's position is wanted before the run
+    // is actually advanced (a child that turns out to collapse through never joins it at all).
+    fn peek(&self, o: CMargin) -> f64 {
+        let mut c = *self;
+        c.merge(o);
+        c.value()
+    }
 }
 
 // What a measured node exposes to its parent: its collapsed top and bottom margins (each a set, so the
@@ -1456,8 +1463,9 @@ fn measure(
         // A DIRECT text-block child coexisting with floats routes its lines around them (§9.5). Its
         // collapsed top is deterministic (a text block never collapses through, top_only == of(mt)), so it
         // can be placed BEFORE measuring — which the narrowing needs, to know each line's flow position in
-        // the owner frame. Anything else in-flow beside a float (a block container, a cleared box) needs
-        // the deferred machinery, so decline the whole pass.
+        // the owner frame. A CLEARED box and a box that starts its own context are placed by their own rules
+        // below; a plain block container falls through to the general path, which lays it out in this
+        // context read in its own frame.
         if !ctx.items.is_empty() {
             // A cleared child (§9.5.2) moves DOWN to below the floats it named — its margin collapses as
             // usual, then clearance replaces its position with the float bottom. When that clears past
@@ -1487,10 +1495,22 @@ fn measure(
                     // collapsing it out both moved the wrapper and left the child below its own float).
                     // `clear` with no float on the named side is no separator: nothing changes then.
                     // The line the box is pulled to is also what decides whether its margin collapses:
-                    // seeded from -inf it is finite exactly when a float on the named side exists, which in
-                    // THIS arm is the same thing as "the box takes clearance" — the only boxes above a
-                    // `first` child under an open top edge are floats, so its hypothetical position is the
-                    // content top plus its margin and Chrome sets it to the line either way.
+                    // seeded from -inf it is finite exactly when a float on the named side exists in this
+                    // context, which is how this engine (the oracle's `takesClearance` alike) reads "the box
+                    // takes clearance" — STRUCTURALLY, because a margin is wanted before the floats around
+                    // it are placed.
+                    //
+                    // Blink has TWO regimes, keyed on the float's PROVENANCE, and this is only the first of
+                    // them. A float PLACED DURING this block's own layout clears whatever its geometry (a
+                    // zero-height one, or one lifted above the content top by a negative margin, still
+                    // does) — that is this test, and it is right. A float INHERITED from an outer block —
+                    // which a plain block container beside a float now gets, translated into its frame —
+                    // clears only when its bottom is STRICTLY BELOW the box's hypothetical position (the
+                    // flow position plus the collapsed run, the box's own margin included): Chrome keeps the
+                    // margin then, and both engines spend it (a `clear: left; margin-top: 20px` first child
+                    // of a wrapper below a 30px float belongs at 60, not 40). The general path's position
+                    // guard declines those rather than lay them out wrong; the ORACLE is wrong there too, so
+                    // it is one conformance fix for both engines (the campaign memory has the matrix).
                     let clear_line = clearance_y(&ctx.items, f64::NEG_INFINITY, cn.clear);
                     let y0 = if first && top_open {
                         if !clear_line.is_finite() {
@@ -1581,32 +1601,90 @@ fn measure(
                 has_child = true;
                 first = false;
                 continue;
-            } else {
-                // A block container beside a float (not cleared past it) needs the avoid/two-column
-                // machinery — defer to JS.
-                failed.set(true);
             }
+            // …and a plain BLOCK CONTAINER beside a float falls through to the general path: §9.5 leaves it
+            // its full width and lets the float OVERLAP it — only the lines inside it route around the float —
+            // so all it needs is this block's context, read in its own frame.
         }
         has_child = true;
-        // The child lays out in a context of its OWN FRAME — fresh, because this arm is reached only with no
-        // float placed here yet (every shape where one already is takes an arm above, or declines). What the
-        // child leaves in it are the floats that ESCAPED it, in its frame; they are shifted into this block's
-        // below, once the child's origin is settled. A child that establishes a context keeps its own floats
-        // and leaves nothing here.
+        // WHERE the child lands, and in WHICH context it is laid out, are one question: the floats of this
+        // block reach into it in ITS frame (§9.5 leaves a block container its full width and lets a float
+        // OVERLAP it — it is the LINES inside that route around the float), and its frame is where the flow
+        // puts it. Under an OPEN top edge the FIRST in-flow child answers that for free: it sits at the
+        // content top whatever its margin comes to, because the margin is hoisted into this block's own.
+        // Anywhere else the position is the collapsed run, which folds in margins only the subtree knows —
+        // so the child is measured once in an EMPTY context to learn them, and (where this block holds
+        // floats at all) again in the context read in its own frame.
+        //
+        // Asked of the CONTEXT, never of the child's own top: a descendant pulled ABOVE that top by a
+        // negative margin meets floats the child's border box never reaches (a `margin-top:-40px` pull-up
+        // under a box starting below the float laid its text out full width where Chrome wraps it round).
+        // Measured, native alone: one 1px float in a block costs ~3x over an 8191-node subtree under it
+        // (+6% of a whole shadow pass, which the JS walk dominates), ~2.5x on a page-shaped one. The factor
+        // grows with nesting DEPTH, not with how far the float reaches — a translated context stays
+        // non-empty all the way down, and a 1px float measures the same as a 3000px one — but only through
+        // NON-first children: a chain of first children under open top edges needs no probe at all and
+        // stays at ~1.4x however deep it runs. A block whose context holds no float — every block on a
+        // float-free page — pays one `Vec::is_empty` and is measured once.
+        let child_w = width_in(c, content_w);
         let mut sub = FloatCtx::new();
-        let cm = measure(c, width_in(c, content_w), f64::NAN, inputs, runs, run_texts, grids, children, boxes, failed, &mut sub, 0.0, 0.0);
-        if !cm.collapse_through {
-            all_children_through = false;
-        }
+        // The throwaway measure: only a position comes out of it, and only where one isn't known already.
+        let probe = if first && top_open {
+            None
+        } else {
+            Some(measure(c, child_w, f64::NAN, inputs, runs, run_texts, grids, children, boxes, failed, &mut sub, 0.0, 0.0))
+        };
+        let cy = match &probe {
+            None => content_top_rel,
+            Some(p) => cursor + pending.peek(p.top_only),
+        };
         // In an rtl block the in-flow children start at the RIGHT content edge (r1): the child's own right
         // edge sits at content_right - margin_right, so its left is that minus its width. A block that fills
-        // the width lands back at content_left + margin_left, so this covers both. (This is the no-float path;
-        // the float-context paths above mirror the same rtl placement for their own children.)
-        boxes[c].x = block_child_x(&n, &cn, content_left_rel, content_left_rel + content_w, boxes[c].w);
+        // the width lands back at content_left + margin_left, so this covers both.
+        let cx = block_child_x(&n, &cn, content_left_rel, content_left_rel + content_w, child_w);
+        let cm = if !ctx.items.is_empty() {
+            let mut inner = FloatCtx { items: ctx.items.iter().map(|f| f.shifted(-cx, -cy)).collect() };
+            let placed = inner.items.len();
+            let cm2 = measure(c, child_w, f64::NAN, inputs, runs, run_texts, grids, children, boxes, failed, &mut inner, 0.0, 0.0);
+            // The floats were translated to the position the probe's margin gave the box; if this measure
+            // would put it anywhere else, that translation is stale and so is everything laid out against it.
+            // Compare the POSITION rather than the margins: a run joins `pos` and `neg` independently, so two
+            // different margin sets can share a value and still place the box differently (a cleared
+            // descendant whose `{20, -20}` set the clear arm drops is exactly that).
+            if let Some(p) = probe {
+                let cy2 = cursor + pending.peek(cm2.top_only);
+                if cm2.collapse_through != p.collapse_through || (cy2 - cy).abs() > 0.01 {
+                    failed.set(true);
+                }
+            }
+            sub.items = inner.items.split_off(placed);
+            cm2
+        } else {
+            match probe {
+                Some(p) => p,
+                // The first child under an open top edge, with no float in the context: nothing was measured
+                // for the position, so this is its one measure.
+                None => measure(c, child_w, f64::NAN, inputs, runs, run_texts, grids, children, boxes, failed, &mut sub, 0.0, 0.0),
+            }
+        };
+        // A box whose used width the measure settled for itself (a replaced leaf) would be placed against a
+        // stale one — everything that reaches here with floats around it is a plain block container, whose
+        // width is the one it was given, and this says so rather than assuming it.
+        if boxes[c].w != child_w {
+            boxes[c].x = block_child_x(&n, &cn, content_left_rel, content_left_rel + content_w, boxes[c].w);
+            if !ctx.items.is_empty() {
+                failed.set(true);
+            }
+        } else {
+            boxes[c].x = cx;
+        }
         // A child that collapses THROUGH an open top edge leaves the run in this block's own top margin and
         // does not push the next sibling with it — which is also why the escaped floats below cannot wait for
         // the end of the loop body: this arm leaves it early.
         let hoisted_through = first && top_open && cm.collapse_through;
+        if !cm.collapse_through {
+            all_children_through = false;
+        }
         if first && top_open {
             // The first in-flow child's top margin collapses with this node's top margin (collapse-
             // through the open top edge): it propagates up, and the child sits AT the content top.
