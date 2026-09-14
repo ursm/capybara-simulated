@@ -22,7 +22,7 @@ RSpec.describe 'native layout web-font parity', if: ENV.fetch('CSIM_JS_ENGINE', 
         if env['PATH_INFO'] == "/f.#{ext}"
           [200, {'content-type' => ct, 'access-control-allow-origin' => '*'}, [font]]
         else
-          [200, {'content-type' => 'text/html'}, [html]]
+          [200, {'content-type' => 'text/html; charset=utf-8'}, [html]]
         end
       }
     end.to_app

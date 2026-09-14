@@ -9,8 +9,11 @@ require_relative 'support/session_teardown'
 
 RSpec.describe 'native layout bail coverage', if: ENV.fetch('CSIM_JS_ENGINE', 'v8') == 'v8' do
   def page(body)
-    html = "<!doctype html><html><head></head><body style=\"margin:0\">#{body}</body></html>"
-    Rack::Builder.new { run ->(_env) { [200, {'content-type' => 'text/html'}, [html]] } }.to_app
+    # The charset is declared: served without one, a fixture's UTF-8 bytes decode as windows-1252 and the
+    # example tests mojibake instead of what it reads as (this file's `\u65E5\u672C\u8A9E` fixture was really
+    # testing an em dash, and passed for the wrong reason).
+    html = %(<!doctype html><html><head><meta charset="utf-8"></head><body style="margin:0">#{body}</body></html>)
+    Rack::Builder.new { run ->(_env) { [200, {'content-type' => 'text/html; charset=utf-8'}, [html]] } }.to_app
   end
 
   # Whether the shadow harness laid the page out natively (true) or declined to JS (false).
@@ -68,17 +71,20 @@ RSpec.describe 'native layout bail coverage', if: ENV.fetch('CSIM_JS_ENGINE', 'v
     expect(native?('<div>text <span style="vertical-align:middle">m</span> more</div>')).to be false
   end
 
-  it 'declines a hyphen/dash break opportunity, keeps unhyphenated text' do
-    expect(native?('<div style="width:90px">well-known example text</div>')).to be false
-    expect(native?('<div style="width:90px">well known example text</div>')).to be true
+  # A HYPHEN or dash is a break opportunity native takes itself now (parity in the text spec); a SOFT one is
+  # not — where its opportunity is taken the flow draws a hyphen the text never held, changing both the line's
+  # width and the painter's runs.
+  it 'declines a soft hyphen, keeps a hard one' do
+    expect(parity?('<div style="width:90px">well-known example text</div>')).to be true
+    expect(parity?('<div style="width:90px">well known example text</div>')).to be true
+    expect(native?(%(<div style="width:90px">well\u00ADknown example text</div>))).to be false
   end
 
-  it 'lays out Latin in-word breaking natively, declines the hyphen/CJK cases it cannot reproduce' do
+  it 'lays out Latin in-word breaking natively, hyphens included' do
     # overflow-wrap / word-break break a Latin word between characters natively (parity in the text spec)…
-    expect(native?('<div style="width:50px;overflow-wrap:break-word">supercalifragilistic</div>')).to be true
-    # …but a hyphen is still a break opportunity the native breaker does not model, and a wide/CJK character
-    # breaks between characters in a way it declines — both bail even under break-word / break-all.
-    expect(native?('<div style="width:50px;overflow-wrap:break-word">super-cali-fragilistic</div>')).to be false
-    expect(native?('<div style="width:50px;word-break:break-all">日本語のテキストです</div>')).to be false
+    expect(parity?('<div style="width:50px;overflow-wrap:break-word">supercalifragilistic</div>')).to be true
+    # …and a hyphenated one breaks at its hyphens first, under either mode.
+    expect(parity?('<div style="width:50px;overflow-wrap:break-word">super-cali-fragilistic</div>')).to be true
+    expect(parity?('<div style="width:50px;word-break:break-all">super-cali-fragilistic</div>')).to be true
   end
 end

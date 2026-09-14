@@ -6,6 +6,8 @@
 require 'capybara/simulated'
 require 'rack'
 require_relative 'support/session_teardown'
+# …and the generator's own enumerator, so the drift check asks the engine exactly the way the table was built.
+require_relative '../script/gen_unicode_classes'
 
 RSpec.describe 'native layout L2 text-block parity', if: ENV.fetch('CSIM_JS_ENGINE', 'v8') == 'v8' do
   # The charset is declared because the CJK shapes below are UTF-8 in this file's own source: served without
@@ -331,8 +333,115 @@ RSpec.describe 'native layout L2 text-block parity', if: ENV.fetch('CSIM_JS_ENGI
       expect_parity('<div style="width:60px;white-space:pre-wrap">日本語の テキスト</div>')
       expect_parity('<div style="width:60px;letter-spacing:2px">日本語のテキスト</div>')
     end
+    # A HYPHEN or dash is a break opportunity of native's own now (`hyphen_breaks_after`, the oracle's
+    # `HYPHEN_BREAK_RE`): the word is cut into PIECES, each keeping its hyphen, and the pieces are what the
+    # line fits. Only a SOFT one still declines — the flow draws a hyphen the text never held.
+    it 'breaks a hyphenated word at its hyphens' do
+      expect_parity('<div style="width:90px">well-known example text</div>')
+      expect_parity('<div style="width:300px">a hyphenated word that fits stays whole: well-known</div>')
+      expect_parity('<div style="width:60px">xxxx --no-cache</div>')     # after EACH hyphen of a double one
+      expect_parity('<div style="width:60px">12-34-56-78-90</div>')      # …between digits too
+      expect_parity('<div style="width:60px">-leading trailing-</div>')  # …one that OPENS a word; none after a trailing one
+      expect_parity('<div style="width:60px">xx -55 -aa</div>')          # …and none before the digit a hyphen signs
+    end
+    it 'breaks on both sides of an em dash, never at a non-breaking hyphen' do
+      expect_parity('<div style="width:60px">foo—bar</div>')
+      expect_parity('<div style="width:60px">foo–bar</div>')
+      expect_parity('<div style="width:60px">foo&#x2012;bar</div>')
+      expect_parity('<div style="width:60px">foo&#x2011;bar</div>')
+      expect_parity('<div style="width:60px">foo/bar</div>')
+    end
+    # The PIECE is what the in-word modes ask their fit question of — a per-character break is offered only to a
+    # piece too wide for the band, not to the whole word — so `super-cali-fragilistic` breaks at its hyphens and
+    # only the piece that still overflows breaks between characters. Cutting the word per character instead laid
+    # it out in three lines against the oracle's and Chrome's four.
+    it 'cuts inside a hyphen piece only where that piece alone overflows' do
+      %w[overflow-wrap:break-word overflow-wrap:anywhere word-break:break-all].each do |mode|
+        expect_parity(%(<div style="width:50px;#{mode}">super-cali-fragilistic</div>))
+        expect_parity(%(<div style="width:100px;#{mode}"><span>aaaaaaaaaaaa-bbbbbbbbbbbbbb</span></div>))
+        expect_parity(%(<div style="width:120px;#{mode}">up-to-date info</div>))   # every piece fits: no cut at all
+      end
+      # …and `overflow-wrap` moves the piece it must cut to a fresh line where `word-break: break-all` fills the
+      # line it is on — a difference the piece loop has to make per PIECE, not once per word.
+      expect_parity('<div style="width:90px;overflow-wrap:break-word">see-alsoooooooooooooooo</div>')
+      expect_parity('<div style="width:90px;word-break:break-all">see-alsoooooooooooooooo</div>')
+    end
+    # min-content takes the pieces and nothing finer: the oracle's `addUnit` returns on its hyphen branch, so a
+    # piece is measured whole however the mode would cut it in the flow.
+    it 'measures a hyphenated word as its widest piece' do
+      ['', 'word-break:break-all', 'overflow-wrap:break-word'].each do |mode|
+        expect_parity(%(<div style="width:min-content;#{mode}">well-known example</div>))
+        expect_parity(%(<div style="width:max-content;#{mode}">well-known example</div>))
+        expect_parity(%(<div style="display:grid;grid-template-columns:min-content auto;width:400px;#{mode}"><div>e-mail-address</div><div>x</div></div>))
+      end
+    end
+    # A run that ENDS in a dash leaves the opportunity behind for the next run to take (`ends_with_break`, the
+    # oracle's `endsWithBreak`) — the hyphen of `well<b>-</b>known` is a run of its own, so the break after it
+    # is the only one that word has. Reading it as a WIDE character's rule alone left native a line short on
+    # every such shape, silently: nothing declined.
+    it 'breaks after a dash a run ends with' do
+      expect_parity('<div style="width:70px">well<b>-</b>known example</div>')
+      expect_parity('<div style="width:70px">well-<b>known</b> example</div>')
+      expect_parity('<div style="width:70px">trailing-<span style="padding:0 4px">piece</span></div>')
+      expect_parity('<div style="width:70px">x<b>&#x2014;</b>y longer text</div>')
+      expect_parity('<div style="width:70px">well<b>x</b>known example</div>')   # …and a letter leaves none
+    end
+    # …and a run BOUNDARY inside a word is not a token boundary: a word is whatever the text spells, however
+    # many nodes spell it. The walk merges adjacent same-font text into one run, so the hyphen piece would run
+    # PAST the node the oracle stops at — `well-known` + `Z` is one word to native and two tokens to the
+    # oracle. The merge stops at a glued join for that reason.
+    it 'agrees on a word spelled by more than one text node' do
+      expect_parity('<div style="width:100px">well-known<span>Z</span></div>')
+      expect_parity('<div style="width:100px">well-<span>known</span></div>')
+      expect_parity('<div style="width:100px">aa<span>-</span>bb longer text here</div>')
+      expect_parity('<div style="width:min-content">well-<span>known</span></div>')
+      expect_parity('<div style="width:min-content">aa<span>-</span>bb</div>')
+      expect_parity('<div style="width:100px">xx abcd<span>efghijklmn</span> yy</div>')   # …hyphen or not
+    end
+    # A collapsed space before a word the wrap then BREAKS grows nothing: the space's own metrics belong to the
+    # line it stays on, and the unit loop has to apply them after that break test, not before it.
+    it 'gives the line the space of a larger font only where the space stays' do
+      expect_parity('<div style="width:30px">q<span style="font-size:40px"> </span>well-known</div>')
+      expect_parity('<div style="width:30px">q<span style="font-size:40px"> </span>&#x65E5;&#x672C;&#x8A9E;</div>')
+      expect_parity('<div style="width:24px;word-break:break-all">q<span style="font-size:40px"> </span>aaaa</div>')
+      expect_parity('<div style="width:300px">q<span style="font-size:40px"> </span>well-known</div>')  # …and where it does stay
+    end
+    # A run ending in a JS `\s` that is NOT css white space — an NBSP, a thin space, a BOM — leaves an
+    # opportunity too (`BREAK_AFTER_RE`), and none of them reaches native as a space run of its own.
+    it 'breaks after a non-collapsing space a run ends with' do
+      %w[000B 00A0 2007 2009 200A 2028 2029 202F 205F 1680 2000 2003 FEFF].each do |cp|
+        expect_parity(%(<div style="width:80px">xx ab&\#x#{cp};<b>kgkgkgkg</b></div>))
+      end
+    end
+    # The regex's `\p{L}` / `\p{N}` are asked of CODE POINTS: an astral letter after a hyphen is one, and
+    # reading its lone surrogate instead lost the break.
+    it 'breaks after a hyphen an astral letter follows' do
+      expect_parity('<div style="width:70px">ab-&#x1D518;&#x1D52B;-cd more</div>')
+      expect_parity('<div style="width:70px">ab-&#x1D7D8;&#x1D7D9; more</div>')
+      expect_parity('<div style="width:70px">ab-&#x1F600; more</div>')           # …and an emoji is neither
+    end
+    # …and they are the REGEX's classes, not Rust's `is_alphanumeric`: a combining mark is Alphabetic and no
+    # letter, an enclosed one (U+24B6) is So and no letter, and reading either as one moved the boxes.
+    it 'reads a combining or enclosed character after a hyphen as no letter' do
+      # …and A7F1 / 0C5C, which Rust std calls letters and this V8 does not: asking `char::is_alphabetic`
+      # rather than the generated `\p{L}` made the answer depend on the rustc the extension was built with.
+      %w[093E 0903 064E 05B8 0345 0E31 17BB 24B6 2160 0301 00AA 2070 A7F1 0C5C].each do |cp|
+        expect_parity(%(<div style="width:30px">q abab-&\#x#{cp};cdcd more</div>))
+        # …and min-content, where the piece the break would make is the measure itself — the word-OPENING
+        # hyphen's class (`\p{L}` alone) shows up nowhere else.
+        expect_parity(%(<div style="width:min-content">abab-&\#x#{cp};cdcdcdcd</div>))
+        expect_parity(%(<div style="width:min-content">-&\#x#{cp};cdcdcdcdcdcd</div>))
+      end
+    end
+    # A hyphen inside a word that also holds a WIDE character: the pieces come first, and a piece bearing one
+    # then breaks at it — the two cuts compose, as `breakUnits` composes them.
+    it 'composes hyphen pieces with wide-character units' do
+      expect_parity('<div style="width:60px">mix-&#x65E5;&#x672C;-ed</div>')
+      expect_parity('<div style="width:60px;word-break:break-all">mix-&#x65E5;&#x672C;-ed</div>')
+      expect_parity('<div style="width:min-content">mix-&#x65E5;&#x672C;-ed</div>')
+    end
     # …and the same undecidable arm took down every OTHER character at or above U+0300, because whether one is a
-    # combining mark is the question `zero_width` could not answer. It answers it from `combining.rs` now.
+    # combining mark is the question `zero_width` could not answer. It answers it from `unicode.rs` now.
     it 'measures a space, a dash, an emoji and a combining mark' do
       expect_parity('<div style="width:400px">a&#x2003;b</div>')
       expect_parity('<div style="width:400px">a&#x2002;b</div>')
@@ -344,29 +453,23 @@ RSpec.describe 'native layout L2 text-block parity', if: ENV.fetch('CSIM_JS_ENGI
       expect_parity('<div style="width:400px">&#x1F600;&#x1F601;</div>')
     end
 
-    # The table `zero_width` answers from is GENERATED (script/gen_combining_marks.rb) from this engine's own
-    # `\p{M}`, because that is what the oracle asks. Ruby's Unicode tables are a different version and disagree
-    # (8 ranges when this was written), and either side can move on an upgrade — so re-ask the engine at every
-    # range boundary. A drift reds here instead of showing up as a character measured wider in one engine.
-    it 'agrees with the engine at every combining-mark range boundary' do
-      table = File.read(File.expand_path('../ext/csim_native/src/combining.rs', __dir__)).scan(/\(0x([0-9A-F]+), 0x([0-9A-F]+)\),/)
-                  .map {|lo, hi| [lo.to_i(16), hi.to_i(16)] }
-      expect(table.size).to be > 300, 'the generated table looks empty'
-      # Each range's edges, plus the MIDPOINT of every gap between them: a Unicode upgrade that adds a range
-      # where the table has none is invisible to an edges-only probe.
-      gaps   = table.each_cons(2).map {|(_, hi), (lo, _)| (hi + lo) / 2 }
-      probes = (table.flat_map {|lo, hi| [lo - 1, lo, hi, hi + 1] } + gaps).uniq.select {|cp| cp >= 0x300 && cp <= 0x10FFFF }
-      expected = probes.map {|cp| table.any? {|lo, hi| cp.between?(lo, hi) } }
-      session = simulated_session(page('<div>x</div>')); session.visit '/'
-      actual = session.evaluate_script(<<~JS)
-        (() => {
-          const re = new RegExp('^' + String.fromCharCode(92) + 'p{M}$', 'u');
-          return #{probes.inspect}.map((cp) => (cp >= 0xD800 && cp <= 0xDFFF) ? false : re.test(String.fromCodePoint(cp)));
-        })()
-      JS
-      drift = probes.each_index.reject {|i| expected[i] == actual[i] }
-                    .map {|i| format('U+%04X table=%s engine=%s', probes[i], expected[i], actual[i]) }
-      expect(drift).to be_empty, "regenerate ext/csim_native/src/combining.rs:\n#{drift.first(12).join("\n")}"
+    # The tables native answers these questions from are GENERATED (script/gen_unicode_classes.rb) from this
+    # engine's own `\p{M}` / `\p{L}` / `\p{N}`, because that is what the ORACLE asks — `zero_width` for the
+    # marks, `hyphen_breaks_after` for the other two. Ruby's Unicode tables are a different version and
+    # disagree (8 mark ranges when this was written), and so are Rust std's (4662 code points `is_alphabetic`
+    # calls letters that this V8 does not), and any of the three can move on an upgrade. So re-enumerate the
+    # class here and compare the WHOLE range list: one crossing of the code space costs ~0.02s, where probing
+    # the table's own boundaries missed 60% of a DELETED range (the table can lose `A-Z` and the probes go
+    # with it) — and a table that lost a range is exactly the shape an upgrade makes.
+    UnicodeClasses::CLASSES.each do |c|
+      it "agrees with the engine on every \\p{#{c[:klass]}} range" do
+        table = File.read(File.expand_path('../ext/csim_native/src/unicode.rs', __dir__))
+                    .split(/^(?:pub\(crate\) )?const /).find {|block| block.start_with?("#{c[:const]}:") }
+        expect(table).not_to be_nil, "#{c[:const]} is not in the generated file"
+        ranges = table.split('];').first.scan(/\(0x([0-9A-F]+), 0x([0-9A-F]+)\),/).map {|lo, hi| [lo.to_i(16), hi.to_i(16)] }
+        engine = with_simulated_session(page('<div>x</div>')) {|s| s.visit '/'; UnicodeClasses.ranges_of(s, c[:klass], c[:from]) }
+        expect(ranges).to eq(engine), 'regenerate ext/csim_native/src/unicode.rs'
+      end
     end
 
     # What native still cannot measure is refused by the WALK now, not discovered in Rust: a TAB needs the
@@ -467,8 +570,8 @@ end
 
 RSpec.describe 'native text valign decline', if: ENV.fetch('CSIM_JS_ENGINE', 'v8') == 'v8' do
   def page(body)
-    html = "<!doctype html><html><head></head><body style=\"margin:0;font:16px monospace\">#{body}</body></html>"
-    Rack::Builder.new { run ->(_env) { [200, {'content-type' => 'text/html'}, [html]] } }.to_app
+    html = %(<!doctype html><html><head><meta charset="utf-8"></head><body style="margin:0;font:16px monospace">#{body}</body></html>)
+    Rack::Builder.new { run ->(_env) { [200, {'content-type' => 'text/html; charset=utf-8'}, [html]] } }.to_app
   end
 
   def expect_bail(body)

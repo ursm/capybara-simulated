@@ -8,7 +8,7 @@
 // Numbers are f64) — the ASCII table, NBSP-as-space, the CJK/fullwidth full-em fallback, the zero-width
 // classes, ZWJ joining, astral full-em, and letter/word spacing. It returns None only for a run holding a TAB
 // (the advance is the BLOCK's tab stops, not the run's); the caller declines such a block to JS. Every other
-// character is decidable, the combining marks (the oracle's `\p{M}`) through `combining.rs`. Line HEIGHT is not computed here — JS pushes
+// character is decidable, the combining marks (the oracle's `\p{M}`) through `unicode.rs`. Line HEIGHT is not computed here — JS pushes
 // the resolved line-height px, so no hhea/vertical-metric parity is needed for L2.
 
 use std::cell::RefCell;
@@ -143,9 +143,9 @@ fn zero_width(cp: u32) -> Option<bool> {
         return Some(true);
     }
     // …and the one question structure cannot answer — is this a COMBINING MARK? — is answered from the table
-    // the oracle's `/^\p{M}$/u` is generated into (`combining.rs`). So every character is decidable now: a CJK
+    // the oracle's `/^\p{M}$/u` is generated into (`unicode.rs`). So every character is decidable now: a CJK
     // run, an em space, a dash, an emoji no longer reach an undecidable arm and take the whole pass with them.
-    Some(crate::combining::is_combining_mark(cp))
+    Some(crate::unicode::is_combining_mark(cp))
 }
 
 // layout.js unitOf: one character's advance in em-fractions. None when zero_width is undecidable.

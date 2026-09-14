@@ -12,8 +12,11 @@ require_relative 'support/session_teardown'
 
 RSpec.describe 'native layout inline-atomic parity', if: ENV.fetch('CSIM_JS_ENGINE', 'v8') == 'v8' do
   def page(body)
-    html = "<!doctype html><html><head></head><body style=\"margin:0\">#{body}</body></html>"
-    Rack::Builder.new { run ->(_env) { [200, {'content-type' => 'text/html'}, [html]] } }.to_app
+    # The charset is declared: served without one, a fixture's UTF-8 bytes decode as windows-1252 and the
+    # example tests mojibake instead of what it reads as (this file's `\u65E5\u672C\u8A9E` fixture was really
+    # testing an em dash, and passed for the wrong reason).
+    html = %(<!doctype html><html><head><meta charset="utf-8"></head><body style="margin:0">#{body}</body></html>)
+    Rack::Builder.new { run ->(_env) { [200, {'content-type' => 'text/html; charset=utf-8'}, [html]] } }.to_app
   end
 
   def run_shadow(body)
@@ -361,7 +364,11 @@ RSpec.describe 'native layout inline-atomic parity', if: ENV.fetch('CSIM_JS_ENGI
       [
         '<div style="width:400px">text <span style="display:inline-block"><div style="position:absolute;width:10px;height:10px"></div>ib</span> after</div>',
         '<div style="width:400px">text <span style="display:inline-block"><div style="float:left;width:10px;height:10px"></div>beside</span> after</div>',
-        '<div style="width:400px">text <span style="display:inline-block">日本語</span> after</div>',
+        # (a SOFT hyphen: the flow draws a hyphen that is not in the text where it breaks, which native models
+        # neither in the line's width nor in the painter's runs. This fixture used to read `日本語` — served
+        # with no charset, whose mojibake happens to contain an em dash, so what it actually exercised was the
+        # hyphen refusal that native has since taken over.)
+        "<div style=\"width:400px\">text <span style=\"display:inline-block\">a\u00ADb</span> after</div>",
         "<div style=\"width:400px\">text <span style=\"display:inline-block;white-space:pre\">a\tb</span> after</div>",
         '<div style="width:400px">text <span style="display:inline-block;width:max-content">bb</span> after</div>'
       ].each do |body|

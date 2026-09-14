@@ -671,12 +671,14 @@ fn line_layout(
     // wrap before it. (The BEFORE-side break is unconditional in the RUN_ATOMIC arm itself.) Reset on any word
     // placement and at a line break.
     let mut atomic_break = false;
-    // …and the same for a WIDE character: a line may break on both of its sides, so a text run ENDING in one
-    // leaves an opportunity for whatever the next run starts with (the oracle's `endsWithBreak`), and a word
-    // STARTING with one may break before it however the previous run ended (`startsWithWide`). Carried across
+    // …and the same for a text run that ENDS OPEN: a WIDE character may break on both sides, and so may a
+    // trailing hyphen or dash, so either leaves an opportunity for whatever the next run starts with (the
+    // oracle's `endsWithBreak`) — where a word STARTING with a wide character may break before it however the
+    // previous run ended (`startsWithWide`), which the unit loop's `may_break` asks for itself. Carried across
     // runs because that is where it matters: `abcdefghij<b>日本語</b>klmnopqrst` is three runs, and native
-    // merges only same-font ones — a plain `<b>` around a Japanese word already splits them.
-    let mut wide_break = false;
+    // merges only same-font ones — a plain `<b>` around a Japanese word, or around the hyphen of
+    // `well<b>-</b>known`, already splits them.
+    let mut ends_open = false;
     // Close the current line and start a fresh one. `soft_break!` is the geometry alone (a mid-word wrap, a
     // between-words wrap, a break before an atomic — where no pending space or after-atomic break carries over);
     // `break_line!` adds the resets a HARD break needs (a <br>, a preserved/pre-line newline, an empty line's
@@ -732,7 +734,7 @@ fn line_layout(
             line_has_content = false;
             pending_space = None;
             atomic_break = false;
-            wide_break = false;
+            ends_open = false;
         }};
     }
 
@@ -757,9 +759,10 @@ fn line_layout(
             }
             RUN_TEXT => {
                 let text = run_texts.get(ri).and_then(|t| t.as_ref())?;
-                // Asked ONCE per run so the per-word scan below is skipped outright on the Latin runs that are
-                // almost all of them (this is per word of every line layout).
+                // Asked ONCE per run so the per-word scans below are skipped outright on the runs that hold
+                // neither — almost all of them (these are per word of every line layout).
                 let run_has_wide = text.iter().any(|&u| is_wide_unit(u));
+                let run_has_hyphen = text.iter().any(|&u| is_hyphen_unit(u));
                 let space_w = measure_word(run, &[0x20])?;
                 let mut i = 0;
                 while i < text.len() {
@@ -844,9 +847,9 @@ fn line_layout(
                         // the run's otherwise-unused `metric` slot: 1 = break-all (fill the current line), 2 =
                         // break-word / 3 = anywhere (the over-long word moves to a FRESH line first, then breaks —
                         // alike in the flow; they differ only for the min-content measure, `text_intrinsic`).
-                        // Hyphens are declined upstream; a WIDE character takes the same loop by a different
-                        // door (below), so this is `charUnits` either way — one unit per code point under a
-                        // per-character mode, wide characters as units of their own otherwise.
+                        // A WIDE character takes the same loop by a different door (below), so this is
+                        // `charUnits` either way — one unit per code point under a per-character mode, wide
+                        // characters as units of their own otherwise.
                         let wrap_mode = run.metric as u8;
                         // A word holding a WIDE character always breaks into units — it is not a question of
                         // room, the character IS the opportunity — where an in-word Latin break is offered only
@@ -854,58 +857,101 @@ fn line_layout(
                         // is `!wide && breaksAnywhere(el)`, so a wide word takes wide units, not per-character
                         // ones, and never the fresh line `break-word` moves an over-long word to.
                         let has_wide = run_has_wide && text[start..i].iter().any(|&u| is_wide_unit(u));
-                        let per_char = wrap_mode != 0 && !has_wide;
-                        if !no_wrap && (has_wide || (per_char && width > band_w(total) + LINE_FIT_EPS)) {
+                        // …and a HYPHEN or dash inside the word is an opportunity of its own, whatever the room
+                        // (§UAX #14): `well-known` is two PIECES wherever it sits, so the word takes the unit
+                        // loop below and each piece is fit-tested against the room that is left — which is how a
+                        // hyphenated word breaks at its hyphen instead of moving whole. Not under `nowrap`, which
+                        // soft-wraps nowhere.
+                        // (`hyphen_breaks_after` can only be true where the word holds a dash, so the cheap scan
+                        // is a fast path over the same question, not a second condition.)
+                        let word_hyphen = run_has_hyphen
+                            && text[start..i].iter().any(|&u| is_hyphen_unit(u))
+                            && (start..i).any(|k| hyphen_breaks_after(text, k, i));
+                        // The band this word's units are cut against — `None` where the word has no units at
+                        // all, which is most words and skips the float-list walk `band_w` does. (Not under an
+                        // in-word mode: a container that declares one — `wrapRulesOf` names Discourse's `.cooked`
+                        // and Forem's article body — asks the band of every word, as it did before this was a
+                        // question at all.) Read ONCE for the whole word as the oracle reads it (`breakUnits(
+                        // token, owner, lineRight - lineLeft)`); the line's own fit tests below stay live,
+                        // following the band down past a float the word drops below.
+                        let split_band = (!no_wrap && (has_wide || word_hyphen || wrap_mode != 0))
+                            .then(|| band_w(total))
+                            .filter(|&a| has_wide || word_hyphen || width > a + LINE_FIT_EPS);
+                        if let Some(avail) = split_band {
                             // The over-long word's break opportunity before it (a space / atomic) is what `first`
                             // and the loop's fit tests act on; capture it before the fresh-line break clears the
                             // line, so `atomic_break` need only be consumed once, after the word is placed.
-                            let preceded = space_before || atomic_break || wide_break;
-                            // break-word / anywhere first move the word to a fresh line where that opportunity sits —
-                            // exactly the normal break-before condition, which the over-long word always satisfies.
-                            // break-all takes no fresh line: it fills the current line in place.
-                            if !has_wide && wrap_mode >= 2 && line_has_content && preceded {
-                                soft_break!();
-                            } else if space_on_line {
-                                line_asc = line_asc.max(sasc); // the space stays on this line: its run's metrics grow it
-                                line_desc = line_desc.max(sdesc);
-                            }
+                            let preceded = space_before || atomic_break || ends_open;
+                            // The space before the word stays on the line it hangs from — unless a fresh line is
+                            // taken below before anything is placed, which drops it with the line it closes.
+                            let mut space_pending = space_on_line;
                             let mut u = start;
                             let mut first = true;
                             while u < i {
-                                let ulen = break_unit_len(text, u, i, per_char);   // per_char wins: `own = perChar || isWideChar(cp)`
-                                let cw = measure_word(run, &text[u..u + ulen])?;
-                                let ow_now: f64 = open.iter().filter(|o| !o.1).map(|o| o.0).sum();
-                                // A unit boundary is always an opportunity (`u > start`); the first unit breaks only
-                                // where one already preceded the word (a space / atomic / line start) — the oracle's
-                                // `mayBreak = u > 0 || textMayBreak()`.
-                                let may_break = !first || preceded || !line_has_content || is_wide_unit(text[u]);
-                                if line_has_content && may_break && line_x + ow_now + cw > band_w(total) + LINE_FIT_EPS {
+                                // The word's next HYPHEN PIECE — `well-`, then `known`; the whole word where no
+                                // hyphen cuts it. The PIECE is what the fit question is asked of: a per-character
+                                // mode cuts inside one only where that piece alone does not fit the band, which is
+                                // how `super-cali-fragilistic` breaks at its hyphens and only `fragilistic` breaks
+                                // between characters (the oracle's `charUnits(piece, el, avail)`).
+                                let pend = if word_hyphen { hyphen_piece_end(text, u, i) } else { i };
+                                let piece_wide = has_wide && text[u..pend].iter().any(|&c| is_wide_unit(c));
+                                let piece_w = if u == start && pend == i { width } else { measure_word(run, &text[u..pend])? };
+                                let per_char = wrap_mode != 0 && !piece_wide && piece_w > avail + LINE_FIT_EPS;
+                                // break-word / anywhere first move a piece they must cut to a fresh line, where a
+                                // break opportunity sits — exactly the normal break-before condition, which the
+                                // over-long piece always satisfies. break-all takes no fresh line: it fills the
+                                // line it is on.
+                                if per_char && wrap_mode >= 2 && line_has_content && (!first || preceded) {
                                     soft_break!();
+                                    space_pending = false; // dropped with the line it closed
                                 }
-                                // An empty line still too narrow for even one character drops below the float.
-                                if !floats.is_empty() && !line_has_content && cw + ow_now > band_w(total) + LINE_FIT_EPS {
-                                    let fy = top + total;
-                                    let at = float_fit_y(floats, fy, cw + ow_now + indent_now.get(), cl, cr, strut_lh);
-                                    if at > fy {
-                                        total += at - fy;
+                                while u < pend {
+                                    let ulen = break_unit_len(text, u, pend, per_char);
+                                    let cw = measure_word(run, &text[u..u + ulen])?;
+                                    let ow_now: f64 = open.iter().filter(|o| !o.1).map(|o| o.0).sum();
+                                    // A unit boundary is always an opportunity (`u > start`); the first unit breaks only
+                                    // where one already preceded the word (a space / atomic / line start) — the oracle's
+                                    // `mayBreak = u > 0 || textMayBreak()`.
+                                    let may_break = !first || preceded || !line_has_content || is_wide_unit(text[u]);
+                                    let broke = line_has_content && may_break && line_x + ow_now + cw > band_w(total) + LINE_FIT_EPS;
+                                    if broke {
+                                        soft_break!();
                                     }
-                                }
-                                for o in open.iter_mut() {
-                                    if !o.1 {
-                                        line_x += o.0;
-                                        o.1 = true;
+                                    // The pending space's line is settled only once the first unit is placed on it or
+                                    // wraps away from it: a space the wrap DROPS grows nothing (the oracle), so the
+                                    // metrics are applied after the break test, never before it.
+                                    if space_pending {
+                                        if !broke {
+                                            line_asc = line_asc.max(sasc);
+                                            line_desc = line_desc.max(sdesc);
+                                        }
+                                        space_pending = false;
                                     }
+                                    // An empty line still too narrow for even one character drops below the float.
+                                    if !floats.is_empty() && !line_has_content && cw + ow_now > band_w(total) + LINE_FIT_EPS {
+                                        let fy = top + total;
+                                        let at = float_fit_y(floats, fy, cw + ow_now + indent_now.get(), cl, cr, strut_lh);
+                                        if at > fy {
+                                            total += at - fy;
+                                        }
+                                    }
+                                    for o in open.iter_mut() {
+                                        if !o.1 {
+                                            line_x += o.0;
+                                            o.1 = true;
+                                        }
+                                    }
+                                    line_x += cw;
+                                    hang = 0.0;
+                                    line_asc = line_asc.max(run.asc);
+                                    line_desc = line_desc.max(run.line_height - run.asc);
+                                    line_has_content = true;
+                                    first = false;
+                                    u += ulen;
                                 }
-                                line_x += cw;
-                                hang = 0.0;
-                                line_asc = line_asc.max(run.asc);
-                                line_desc = line_desc.max(run.line_height - run.asc);
-                                line_has_content = true;
-                                first = false;
-                                u += ulen;
                             }
                             atomic_break = false; // consumed the after-atomic break opportunity
-                            wide_break = is_wide_unit(text[i - 1]); // …and this word may leave one behind
+                            ends_open = ends_with_break(text[i - 1]); // …and this word may leave one behind
                         } else {
                             let ow: f64 = open.iter().filter(|o| !o.1).map(|o| o.0).sum();
                             // A break opportunity precedes this word at a collapsed space OR right after an atomic —
@@ -914,7 +960,7 @@ fn line_layout(
                             // (No `is_wide_unit(text[start])` here: under a wrapping mode a wide-bearing word took
                             // the unit loop above, and under `nowrap` — the one way one reaches this branch — the
                             // line never soft-wraps at all, so the whole test is moot.)
-                            let may_break = space_before || atomic_break || wide_break;
+                            let may_break = space_before || atomic_break || ends_open;
                             if !no_wrap && line_has_content && may_break && line_x + ow + width > band_w(total) + LINE_FIT_EPS {
                                 soft_break!(); // break: close the line (the hanging space is dropped)
                                 broke = true;
@@ -943,8 +989,8 @@ fn line_layout(
                             line_desc = line_desc.max(run.line_height - run.asc);
                             line_has_content = true;
                             atomic_break = false; // consumed the after-atomic break opportunity
-                            // …and this word leaves one behind when it ENDS in a wide character.
-                            wide_break = is_wide_unit(text[i - 1]);
+                            // …and this word leaves one behind when it ENDS in a wide character or a dash.
+                            ends_open = ends_with_break(text[i - 1]);
                             if space_on_line && !broke {
                                 line_asc = line_asc.max(sasc); // the space stayed: its run's metrics grow the line
                                 line_desc = line_desc.max(sdesc);
@@ -1031,6 +1077,90 @@ struct LineLayout {
     atomics: Vec<(usize, f64, f64, f64)>,
 }
 
+// `\p{L}\p{N}`, which is how the oracle's `HYPHEN_BREAK_RE` spells its classes — read from the table the
+// oracle's own engine generated (`unicode.rs`), never from Rust std. The three Unicode tables in this process
+// disagree and move independently: rustc's `char::is_alphabetic` knows 4662 code points this V8 does not, and
+// `char::is_alphanumeric` is Alphabetic ∪ N, which reads a COMBINING MARK as a letter where the regex does
+// not. Either one MOVES BOXES — `abab-\u{93E}cdcd` and `abab-\u{A7F1}cdcd` break after the hyphen in native
+// and not in the oracle — and an upgrade of a toolchain would move them again.
+fn letter_or_number(c: char) -> bool {
+    let cp = c as u32;
+    crate::unicode::is_letter(cp) || crate::unicode::is_number(cp)
+}
+// Is there a line-break opportunity BETWEEN `text[i]` and `text[i + 1]`, because of a hyphen or dash? UAX #14
+// as Chrome applies it, and as `HYPHEN_BREAK_RE` spells it: a hyphen, figure dash or en dash breaks AFTER
+// itself when it joins two words (or opens one, as in `-leading`), and an EM DASH breaks on both sides.
+fn hyphen_breaks_after(text: &[u16], i: usize, end: usize) -> bool {
+    const EM_DASH: u16 = 0x2014;
+    let dash = |u: u16| matches!(u, 0x2D | 0x2010 | 0x2012 | 0x2013);
+    if i + 1 >= end {
+        return false;
+    }
+    let (here, next) = (text[i], text[i + 1]);
+    if here == EM_DASH || next == EM_DASH {
+        return true;
+    }
+    if !dash(here) {
+        return false;
+    }
+    // The regex's classes are asked of CODE POINTS, so an astral letter (`ab-𝔘`) has to be decoded out of its
+    // surrogate pair to be one: reading the lone surrogate says "not a letter" and loses the break.
+    let after = cp_forward(text, i + 1, end);
+    let before = cp_back(text, i);
+    let letter_num = |c: Option<char>| c.is_some_and(letter_or_number);
+    let joins_before = letter_num(before) || matches!(before, Some('-' | '\u{2010}'));
+    if joins_before {
+        return letter_num(after) || matches!(after, Some('-' | '"' | '(' | '\u{A0}'));
+    }
+    // …and one that opens a word instead: `-leading` breaks after the hyphen, `2-3` does not (the arm above
+    // already took that one). `\p{L}` alone here, as the regex has it.
+    after.is_some_and(|c| crate::unicode::is_letter(c as u32) || c == '-')
+}
+// The code point that STARTS at `i` (a surrogate pair decoded, a lone surrogate `None`), and the one that ENDS
+// just before `i`.
+fn cp_forward(text: &[u16], i: usize, end: usize) -> Option<char> {
+    let u = *text.get(i)?;
+    if (0xD800..=0xDBFF).contains(&u) && i + 1 < end {
+        return char::decode_utf16([u, text[i + 1]]).next()?.ok();
+    }
+    char::from_u32(u as u32)
+}
+fn cp_back(text: &[u16], i: usize) -> Option<char> {
+    let u = *text.get(i.checked_sub(1)?)?;
+    if (0xDC00..=0xDFFF).contains(&u) {
+        // …only where a HIGH one really precedes it: `decode_utf16` yields the leading unit's own `Ok` for an
+        // unpaired low surrogate, which would answer with the character BEFORE it.
+        let lead = *text.get(i.checked_sub(2)?)?;
+        return if (0xD800..=0xDBFF).contains(&lead) { char::decode_utf16([lead, u]).next()?.ok() } else { None };
+    }
+    char::from_u32(u as u32)
+}
+fn is_hyphen_unit(u: u16) -> bool {
+    matches!(u, 0x2D | 0x2010 | 0x2012 | 0x2013 | 0x2014)
+}
+// A text run ENDING in this unit leaves a break opportunity for whatever the next one starts with — the
+// oracle's `endsWithBreak`: `BREAK_AFTER_RE` is a dash or a JS `\s`, and its other half is a wide character.
+// JS `\s` is WIDER than the CSS white-space set, and that difference is why the units are named here at all:
+// a U+00A0, U+000B, U+2009 or U+FEFF is not CSS white space, so none of them reaches native as a space run of
+// its own — each stays inside the word, where only this test can see it. (Which is also why, of the
+// `0x09..=0x0D | 0x20` block, only U+000B can ever be asked: the others end a word, so `is_ws_u16` cut it
+// first.) Of those, Chrome breaks after none of U+00A0, U+2007, U+202F (GL in UAX #14), U+FEFF (WJ) or
+// U+000B — which is no UAX #14 case at all: a vertical tab is neither CSS white space nor a segment break,
+// just a character, so there is no opportunity beside it to begin with. Measured over all 25 of JS `\s`:
+// those five and no others. The oracle's `\s` is therefore five characters too wide; native follows it for
+// parity, and correcting BOTH engines is a backlog item, as with the run tokenisation in `appendText`.
+fn ends_with_break(u: u16) -> bool {
+    is_hyphen_unit(u)
+        || is_wide_unit(u)
+        || matches!(u, 0x09..=0x0D | 0x20 | 0xA0 | 0x1680 | 0x2000..=0x200A | 0x2028 | 0x2029 | 0x202F | 0x205F | 0x3000 | 0xFEFF)
+}
+// Where the HYPHEN PIECE starting at `u` ends: after the first hyphen the word may break at, which the piece
+// keeps (`well-known` is `well-` then `known`), or at the word's end where there is none — the oracle's
+// `hyphenPieces`. Only hyphens cut here: a wide character inside a piece is the unit loop's business, not this
+// one's, so the two cuts compose the way `breakUnits` composes them.
+fn hyphen_piece_end(text: &[u16], u: usize, end: usize) -> usize {
+    (u..end).find(|&k| hyphen_breaks_after(text, k, end)).map_or(end, |k| k + 1)
+}
 // The next break UNIT at `u` in `text[..end]`, as the oracle's `charUnits` cuts one: a WIDE character is its
 // own — which is what makes a Japanese paragraph wrap at all, having no spaces to break at — under `per_char`
 // (`word-break: break-all`, `overflow-wrap: anywhere`) every code point is one, and otherwise a maximal run of
@@ -3997,6 +4127,7 @@ fn text_intrinsic(runs: &[Run], run_texts: &[Option<Vec<u16>>], ws_mode: u8, inp
                 let space_w = measure_word(run, &[0x20])?;
                 let unspaced = Run { ls: 0.0, ws: 0.0, ..*run };
                 let run_has_wide = text.iter().any(|&u| is_wide_unit(u)); // once per run, as in the flow arm
+                let run_has_hyphen = text.iter().any(|&u| is_hyphen_unit(u));
                 let mut i = 0;
                 while i < text.len() {
                     if is_ws_u16(text[i]) {
@@ -4045,7 +4176,28 @@ fn text_intrinsic(runs: &[Run], run_texts: &[Option<Vec<u16>>], ws_mode: u8, inp
                         // trailing space (a word glued to the previous run, nothing pending, continues that word).
                         take_pending!();
                         let word_wide = run_has_wide && text[start..i].iter().any(|&u| is_wide_unit(u));
-                        if per_char || word_wide {
+                        // A HYPHEN is an opportunity here too, or min-content would be the whole hyphenated word
+                        // where the flow can break it (`well-known` measures `known`, not both halves glued) —
+                        // and it is the ONLY one the word then has: the oracle's `addUnit` returns on its hyphen
+                        // branch, so a piece is measured whole however the mode would cut it in the flow. (Which
+                        // is right for `overflow-wrap: break-word`, whose in-word breaks min-content ignores
+                        // anyway, and is what parity asks of the other two.)
+                        let word_hyphen = run_has_hyphen
+                            && text[start..i].iter().any(|&u| is_hyphen_unit(u))
+                            && (start..i).any(|k| hyphen_breaks_after(text, k, i));
+                        if word_hyphen {
+                            let mut u = start;
+                            while u < i {
+                                let pend = hyphen_piece_end(text, u, i);
+                                let adv = measure_word(run, &text[u..pend])?;
+                                line += adv;
+                                word += adv;
+                                if pend < i {
+                                    opportunity!();
+                                }
+                                u = pend;
+                            }
+                        } else if per_char || word_wide {
                             let mut u = start;
                             while u < i {
                                 // `own = perChar || isWideChar(cp)` — the oracle's `addUnit`, and BOTH halves of

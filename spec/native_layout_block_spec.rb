@@ -9,8 +9,8 @@ require_relative 'support/session_teardown'
 
 RSpec.describe 'native layout L1 block-flow parity', if: ENV.fetch('CSIM_JS_ENGINE', 'v8') == 'v8' do
   def page(body)
-    html = "<!doctype html><html><head></head><body style=\"margin:0\">#{body}</body></html>"
-    Rack::Builder.new { run ->(_env) { [200, {'content-type' => 'text/html'}, [html]] } }.to_app
+    html = %(<!doctype html><html><head><meta charset="utf-8"></head><body style="margin:0">#{body}</body></html>)
+    Rack::Builder.new { run ->(_env) { [200, {'content-type' => 'text/html; charset=utf-8'}, [html]] } }.to_app
   end
 
   # The pass root defaults to `<body>`; naming a SELECTOR runs the pass over that subtree instead, which is how
