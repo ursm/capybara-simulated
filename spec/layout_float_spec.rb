@@ -218,6 +218,37 @@ RSpec.describe 'floats' do
     expect(margin[1][1]).to eq(30)
   end
 
+  # A float's CONTAINING BLOCK is its own parent — that is where it is placed, inside that parent's content
+  # box — while the CONTEXT it is recorded in, whose lines it shortens and whose `clear` it answers, is the
+  # nearest ancestor that establishes one. The two come apart in the shape half the web is built from:
+  # `.row > .col { float: left }`, where the row is a plain block. Chrome 153-measured in the 300px block.
+  it 'places a float in its own parent but records it in the context above' do
+    boxes, = floated(<<~HTML, ['#w', '#f', '#n'])
+      <div id="w" style="margin-left:40px;width:200px"><div id="f" style="float:right;width:50px;height:50px"></div></div>
+      <div id="n" style="clear:right;height:5px"></div>
+    HTML
+    expect(boxes[0][3]).to eq(0)      # the wrapper is empty: the float neither fills it nor grows it
+    expect(boxes[1][0]).to eq(190)    # …placed against the WRAPPER's right content edge (40 + 200 − 50)
+    expect(boxes[2][1]).to eq(50)     # …and cleared by a box two levels up, so the context above holds it
+  end
+
+  # KNOWN DIVERGENCE (the engine's, not a native one): §9.4.3 is a PAINT-time shift that changes no other
+  # box's layout, so a float inside a `position: relative; top: 10px` wrapper excludes at its UNSHIFTED
+  # rectangle — Chrome 153 puts the `clear` box below it at 50 and the owner at 55 tall. This engine lays a
+  # relative box's subtree out at the shifted origin, so the recorded rectangle carries the ancestor's offset
+  # (it cancels the float's OWN, in `placeFloat`, but nothing cancels an ancestor's) and both come out 10 too
+  # low. The native engine is already right, which is why the walk DECLINES the shape rather than mismatch —
+  # see the native float spec's guard. Fixing this pins the numbers in the comments instead.
+  it 'shifts a float rectangle by a relative ancestor (Chrome does not)' do
+    boxes, = floated(<<~HTML, ['#cb', '#f', '#n'])
+      <div style="position:relative;top:10px"><div id="f" style="float:left;width:50px;height:50px"></div></div>
+      <div id="n" style="clear:left;height:5px"></div>
+    HTML
+    expect(boxes[0][3]).to eq(65)    # Chrome: 55
+    expect(boxes[1][1]).to eq(10)    # …the float itself is where Chrome has it
+    expect(boxes[2][1]).to eq(60)    # Chrome: 50
+  end
+
   # An ordinary block, by contrast, keeps the whole width and lets the float overlap it.
   it 'leaves an ordinary block its full width beside a float' do
     boxes, = floated(<<~HTML, ['#f', '#w'])

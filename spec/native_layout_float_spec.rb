@@ -1,9 +1,10 @@
 # frozen_string_literal: true
-# Native layout — floats (§9.5), geometry shadow-parity. Slice c1: a float whose parent establishes the
-# block formatting context (overflow:hidden / flow-root) is placed in the band (left/right, dropping when
-# it doesn't fit) and CONTAINED by the owner's auto height. Cases the engine can't reproduce yet
-# (auto-width shrink-to-fit, position:relative, coexisting in-flow content) must DECLINE to JS — an A/B
-# per bail proves the guard is specific. V8 only.
+# Native layout — floats (§9.5), geometry shadow-parity. A float is placed in the band its own parent's
+# content box leaves (left/right, dropping when it doesn't fit) and is CONTAINED by the auto height of the
+# box that establishes the context — which is the nearest ancestor that does, however many plain blocks lie
+# between: native shifts the rectangle up through each of them. Cases the engine can't reproduce yet
+# (auto-width shrink-to-fit, position:relative, a relatively SHIFTED ancestor, coexisting in-flow content)
+# must DECLINE to JS — an A/B per bail proves the guard is specific. V8 only.
 require 'capybara/simulated'
 require 'rack'
 require_relative 'support/session_teardown'
@@ -181,10 +182,109 @@ RSpec.describe 'native layout float parity', if: ENV.fetch('CSIM_JS_ENGINE', 'v8
     expect(run_shadow('<div style="overflow:hidden;width:300px"><div style="float:right;width:80px;height:60px"></div><div style="clear:right;height:20px"></div></div>')['ok']).to be true
   end
 
-  # A/B bails — the feature-carrying input declines; a sibling without it stays native.
-  it 'declines a float whose parent does not establish a BFC, keeps a BFC parent' do
-    expect(run_shadow('<div><div style="float:left;width:50px;height:50px"></div></div>')['ok']).to be false
-    expect(run_shadow('<div style="overflow:hidden"><div style="float:left;width:50px;height:50px"></div></div>')['ok']).to be true
+  # A float's CONTAINING BLOCK is its own parent; the CONTEXT it is recorded in is the nearest ancestor that
+  # establishes one, however many plain blocks lie between (§9.5). Native lays the float out in its parent's
+  # frame and shifts the rectangle up through each of them, so the everyday `.row > .col { float: left }` —
+  # the single biggest decline class in the shape corpus, 123 of 360 — lays out natively.
+  it 'threads a float up through the plain blocks between it and the context that owns it' do
+    expect_parity('<div style="width:300px;overflow:hidden"><div><div style="float:left;width:100px;height:30px"></div>' \
+                  '<div style="float:left;width:100px;height:40px"></div></div></div>')
+    expect_parity('<div style="width:300px;overflow:hidden"><div><div style="float:left;width:50px;height:20px"></div></div>' \
+                  '<div>hello there world</div></div>')
+    expect_parity('<div style="width:300px;overflow:hidden"><div><div style="float:left;width:50px;height:50px"></div></div>' \
+                  '<div style="clear:left;height:5px"></div></div>')
+    # …and the float is placed in ITS OWN parent's content box, not the owner's: a narrower wrapper holds it in.
+    expect_parity('<div style="width:300px;overflow:hidden"><div style="margin-left:40px;width:200px">' \
+                  '<div style="float:right;width:50px;height:50px"></div></div>' \
+                  '<div style="clear:right;height:5px"></div></div>')
+  end
+
+  # Every hop the rectangle is shifted by: a wrapper's padding and border (the float sits at its CONTENT
+  # origin), its margin and whatever the flow above it came to (the wrapper's own y), and two wrappers rather
+  # than one. The owner contains the lot, which is what its height says.
+  it 'shifts the escaped rectangle by every frame between the float and the owner' do
+    expect_parity('<div style="width:300px;overflow:hidden"><div style="padding-left:10px"><div style="padding-left:20px">' \
+                  '<div style="float:left;width:50px;height:50px"></div></div></div></div>')
+    expect_parity('<div style="width:300px;overflow:hidden"><div style="padding:10px 20px"><div style="float:left;width:50px;height:50px"></div></div></div>')
+    expect_parity('<div style="width:300px;overflow:hidden"><div style="border:5px solid"><div style="float:left;width:50px;height:50px"></div></div></div>')
+    expect_parity('<div style="width:300px;overflow:hidden"><div style="margin:20px 0"><div style="float:left;width:50px;height:50px"></div></div></div>')
+    expect_parity('<div style="width:300px;overflow:hidden"><div style="height:10px"></div><div><div style="float:left;width:50px;height:50px"></div></div></div>')
+    expect_parity('<div style="width:300px;overflow:hidden"><div>text before<div style="height:5px"></div></div><div><div style="float:left;width:50px;height:50px"></div></div></div>')
+    # …an rtl owner puts a NARROWER wrapper at its right content edge, so the hop is 200 wide (a full-width
+    # wrapper would sit at 0 in either direction and prove nothing).
+    expect_parity('<div style="width:300px;overflow:hidden;direction:rtl"><div style="width:100px">' \
+                  '<div style="float:left;width:50px;height:50px"></div></div></div>')
+  end
+
+  # A CLEARED child is measured before it is placed (its clearance needs its own collapsed top margin), in a
+  # context of its own — and what it leaves there has to be shifted in like any other child's. Dropped, a
+  # float inside a cleared box vanished from the context: the next `clear` sibling cleared past nothing and
+  # the owner's height stopped short (native 115 where Chrome and the oracle say 155).
+  it 'keeps the floats that escape a cleared child' do
+    expect_parity('<div style="width:300px;overflow:hidden"><div style="float:left;width:100px;height:100px"></div>' \
+                  '<div style="clear:left;height:10px"><div style="float:left;width:50px;height:50px"></div></div>' \
+                  '<div style="clear:left;height:5px"></div></div>')
+    expect_parity('<div style="width:300px;overflow:hidden"><div style="float:left;width:100px;height:100px"></div>' \
+                  '<div style="clear:left;padding-top:10px"><div style="float:left;width:50px;height:50px"></div></div>' \
+                  '<div style="clear:left;height:5px"></div></div>')
+    expect_parity('<div style="width:300px;overflow:hidden"><div style="float:right;width:100px;height:100px"></div>' \
+                  '<div style="clear:right;height:10px"><div style="float:right;width:50px;height:50px"></div></div>' \
+                  '<div style="clear:right;height:5px"></div></div>')
+  end
+
+  # A cleared FIRST child under an open top edge: §8.3.1 excludes a box with clearance from collapsing into
+  # its parent, and the clearance line REPLACES its top margin rather than adding to it. Both halves were
+  # wrong the moment the walk let a float sit beside a plain wrapper (this arm had been dead code): the margin
+  # moved the wrapper AND positioned the child, so a `clear: left; margin-top: 20px` first child after a 5px
+  # float landed at 25 where Chrome puts it at 5.
+  it 'gives a cleared first child the clearance line, not its collapsed margin' do
+    %w[60px 5px].each do |h|
+      expect_parity(%(<div style="width:300px;overflow:hidden"><div><div style="float:left;width:100px;height:#{h}"></div>) +
+                    '<div style="clear:left;margin-top:20px;height:10px"></div></div></div>')
+    end
+    expect_parity('<div style="width:300px;overflow:hidden"><div><div style="float:left;width:100px;height:60px"></div>' \
+                  '<div style="clear:left;margin-top:-20px;height:10px"></div></div></div>')
+    # …the margin it folds through from its own first descendant goes the same way
+    expect_parity('<div style="width:300px;overflow:hidden"><div><div style="float:left;width:100px;height:60px"></div>' \
+                  '<div style="clear:left"><div style="margin-top:20px;height:10px"></div></div></div></div>')
+    # …a float lifted ABOVE the wrapper's content top clears to nothing, so the box stays at the top
+    expect_parity('<div style="width:300px;overflow:hidden"><div><div style="float:left;margin-top:-40px;width:100px;height:20px"></div>' \
+                  '<div style="clear:left;margin-top:20px;height:10px"></div></div></div>')
+    # …and with the float inside it, the cleared child both takes its clearance and hands the float on
+    expect_parity('<div style="width:300px;overflow:hidden"><div><div style="float:left;width:100px;height:60px"></div>' \
+                  '<div style="clear:left;margin-top:20px;height:10px"><div style="float:left;width:50px;height:50px"></div></div>' \
+                  '<div style="clear:left;height:5px"></div></div></div>')
+  end
+
+  # A/B bail — a cleared box that COLLAPSES THROUGH is placed by a different rule (§8.3.1: its own
+  # above-margin sits ON TOP of the clearance line and it does not advance the flow), which is also what makes
+  # the fresh context on that arm sound: nothing is placed, so nothing escapes unshifted. The ORACLE is wrong
+  # on this shape too — it puts the through box at 80 after a 60px float where Chrome says 60, adding the
+  # margin to the clearance line instead of spending it — so the decline is "neither engine is ready", not
+  # "the oracle is the reference".
+  it 'declines a cleared child that collapses through, keeps one with a height' do
+    through = '<div style="width:300px;overflow:hidden"><div style="float:left;width:100px;height:60px"></div>' \
+              '<div style="clear:left;margin:20px 0"></div></div>'
+    expect(run_shadow(through)['ok']).to be false
+    expect_parity('<div style="width:300px;overflow:hidden"><div style="float:left;width:100px;height:60px"></div>' \
+                  '<div style="clear:left;margin:20px 0;height:1px"></div></div>')
+  end
+
+  # A/B bail — and the one case where it is the ORACLE that is wrong. It lays a `position: relative` box's
+  # subtree out at the SHIFTED origin, so the float rectangle it records carries the ancestor's offset; §9.4.3
+  # is a paint-time shift that changes no other box's layout, and native (which applies the offset after the
+  # flow) agrees with Chrome: the `clear` box below is at 50, where the oracle says 60. Declined rather than
+  # left to mismatch. A relative ancestor with NO offset — the everyday one, a positioning context for an
+  # abspos descendant — stays native, and so does a shift on the box that OWNS the context, which moves with
+  # its own floats.
+  it 'declines a float under a relatively SHIFTED ancestor, keeps an unshifted one' do
+    shifted = '<div style="width:300px;overflow:hidden"><div style="position:relative;top:10px">' \
+              '<div style="float:left;width:50px;height:50px"></div></div><div style="clear:left;height:5px"></div></div>'
+    expect(run_shadow(shifted)['ok']).to be false
+    expect_parity('<div style="width:300px;overflow:hidden"><div style="position:relative">' \
+                  '<div style="float:left;width:50px;height:50px"></div></div><div style="clear:left;height:5px"></div></div>')
+    expect_parity('<div style="width:300px;overflow:hidden;position:relative;top:10px"><div>' \
+                  '<div style="float:left;width:50px;height:50px"></div></div><div style="clear:left;height:5px"></div></div>')
   end
 
   it 'declines an auto-width (shrink-to-fit) float, keeps an explicit width' do

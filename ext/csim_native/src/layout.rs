@@ -1043,6 +1043,12 @@ fn is_wide_unit(u: u16) -> bool {
 // it so far, in the OWNER's border-box frame (the frame `measure(owner)` lays its children in). A float
 // never crosses a `starts_bfc` boundary, so each such block gets a fresh, empty context. `side` is
 // FLOAT_LEFT / FLOAT_RIGHT.
+//
+// A float does cross every OTHER boundary: its containing block is its own parent, but the context it is
+// recorded in — the one whose lines it shortens and whose `clear` it answers — is the nearest ancestor
+// that establishes one, however many plain `<div>`s lie between (the everyday `.row > .col { float }`).
+// Each block in between hands its children a fresh context of its own and `shifted`s what they leave in it
+// into its own frame, so the rectangles arrive at the owner in the owner's frame however deep they started.
 #[derive(Clone, Copy)]
 struct FloatItem {
     side: u8,
@@ -1050,6 +1056,16 @@ struct FloatItem {
     right: f64,
     top: f64,
     bottom: f64,
+}
+impl FloatItem {
+    // The same rectangle read in the frame one level up: the frame of a block that holds the box this
+    // float was placed in. Every `measure` lays a subtree out relative to its own border box, so a float
+    // that ESCAPES its parent (the parent establishes no context of its own) arrives in the parent's frame
+    // and is shifted by where the parent itself landed.
+    fn shifted(&self, dx: f64, dy: f64) -> FloatItem {
+        FloatItem { side: self.side, left: self.left + dx, right: self.right + dx,
+                    top: self.top + dy, bottom: self.bottom + dy }
+    }
 }
 struct FloatCtx {
     items: Vec<FloatItem>,
@@ -1453,26 +1469,47 @@ fn measure(
                 // COLLAPSING top margin (cm.top_only) — its own margin joined with any a first descendant
                 // folds through its open top edge — which is what the oracle advances the flow by
                 // (collapsingTopMargin); the own declared margin alone would drop the descendant's.
-                let cm = measure(c, width_in(c, content_w), f64::NAN, inputs, runs, run_texts, grids, children, boxes, failed, &mut FloatCtx::new(), 0.0, 0.0);
+                // …in a context of its OWN, for the same reason every other child gets one: what it leaves
+                // there are the floats that ESCAPED it, and they are shifted into this block's frame once its
+                // origin is settled. (Without that they were dropped — a float inside a cleared box vanished
+                // from the context, and the next `clear` sibling cleared past nothing.)
+                let mut sub = FloatCtx::new();
+                let cm = measure(c, width_in(c, content_w), f64::NAN, inputs, runs, run_texts, grids, children, boxes, failed, &mut sub, 0.0, 0.0);
                 if cm.collapse_through {
                     // A THROUGH cleared box is placed by a different rule (§8.3.1: its own above-margin sits
                     // ON TOP of the clearance line, and it does not advance the flow) — defer to JS.
                     failed.set(true);
                 } else {
+                    // §8.3.1: a box that takes CLEARANCE does not collapse its top margin with its parent's —
+                    // the clearance line replaces the margin rather than adding to it, and the parent is not
+                    // moved by it at all (Chrome: a `clear: left; margin-top: 20px` FIRST child of a plain
+                    // wrapper after a 5px float sits at 5, its margin spent, and the wrapper stays at 0 — where
+                    // collapsing it out both moved the wrapper and left the child below its own float).
+                    // `clear` with no float on the named side is no separator: nothing changes then.
+                    // The line the box is pulled to is also what decides whether its margin collapses:
+                    // seeded from -inf it is finite exactly when a float on the named side exists, which in
+                    // THIS arm is the same thing as "the box takes clearance" — the only boxes above a
+                    // `first` child under an open top edge are floats, so its hypothetical position is the
+                    // content top plus its margin and Chrome sets it to the line either way.
+                    let clear_line = clearance_y(&ctx.items, f64::NEG_INFINITY, cn.clear);
                     let y0 = if first && top_open {
-                        top_m.merge(cm.top);
+                        if !clear_line.is_finite() {
+                            top_m.merge(cm.top);
+                        }
                         content_top_rel
                     } else {
                         pending.merge(cm.top_only);
                         cursor + pending.value()
                     };
-                    let y = y0.max(clearance_y(&ctx.items, y0, cn.clear));
+                    let y = y0.max(clear_line);   // == clearance_y(&ctx.items, y0, cn.clear)
                     if y >= floats_bottom(&ctx.items) {
                         // Past every float, so its band is the whole content width — which is what the
                         // oracle's own `band == null` gives it, auto margins and legacy alignment included.
                         boxes[c].x =
                             block_child_x(&n, &cn, content_left_rel, content_left_rel + content_w, boxes[c].w);
                         boxes[c].y = y;
+                        let (dx, dy) = (boxes[c].x, boxes[c].y);
+                        ctx.items.extend(sub.items.iter().map(|f| f.shifted(dx, dy)));
                         cursor = y + boxes[c].h;
                         pending = cm.bottom;
                         all_children_through = false;
@@ -1551,7 +1588,13 @@ fn measure(
             }
         }
         has_child = true;
-        let cm = measure(c, width_in(c, content_w), f64::NAN, inputs, runs, run_texts, grids, children, boxes, failed, ctx, 0.0, 0.0);
+        // The child lays out in a context of its OWN FRAME — fresh, because this arm is reached only with no
+        // float placed here yet (every shape where one already is takes an arm above, or declines). What the
+        // child leaves in it are the floats that ESCAPED it, in its frame; they are shifted into this block's
+        // below, once the child's origin is settled. A child that establishes a context keeps its own floats
+        // and leaves nothing here.
+        let mut sub = FloatCtx::new();
+        let cm = measure(c, width_in(c, content_w), f64::NAN, inputs, runs, run_texts, grids, children, boxes, failed, &mut sub, 0.0, 0.0);
         if !cm.collapse_through {
             all_children_through = false;
         }
@@ -1560,6 +1603,10 @@ fn measure(
         // the width lands back at content_left + margin_left, so this covers both. (This is the no-float path;
         // the float-context paths above mirror the same rtl placement for their own children.)
         boxes[c].x = block_child_x(&n, &cn, content_left_rel, content_left_rel + content_w, boxes[c].w);
+        // A child that collapses THROUGH an open top edge leaves the run in this block's own top margin and
+        // does not push the next sibling with it — which is also why the escaped floats below cannot wait for
+        // the end of the loop body: this arm leaves it early.
+        let hoisted_through = first && top_open && cm.collapse_through;
         if first && top_open {
             // The first in-flow child's top margin collapses with this node's top margin (collapse-
             // through the open top edge): it propagates up, and the child sits AT the content top.
@@ -1572,10 +1619,10 @@ fn measure(
                 // Chrome and the oracle say 20). The next sibling is still the FIRST whose top joins the
                 // parent's, exactly as the oracle's `topOnly` loop keeps joining while children come back
                 // through: leave `first` alone and `pending` empty.
-                continue;
+            } else {
+                cursor = content_top_rel + boxes[c].h;
+                pending = cm.bottom;
             }
-            cursor = content_top_rel + boxes[c].h;
-            pending = cm.bottom;
         } else {
             // Place at the run ABOVE the child's own bottom (top_only) — for a through child that is its
             // top margin only, so its bottom does not push it down; for a normal child top_only == top.
@@ -1589,7 +1636,12 @@ fn measure(
                 pending = cm.bottom;
             }
         }
-        first = false;
+        // …and now the child's origin is known, so what escaped it can be read in this block's frame.
+        let (dx, dy) = (boxes[c].x, boxes[c].y);
+        ctx.items.extend(sub.items.iter().map(|f| f.shifted(dx, dy)));
+        if !hoisted_through {
+            first = false;
+        }
     }
 
     // The block's baselines: the first / last in-flow, non-floated child that has one (`baselineCandidates`).

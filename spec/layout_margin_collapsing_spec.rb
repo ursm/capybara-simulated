@@ -141,6 +141,18 @@ RSpec.describe 'margin collapsing' do
     expect(plain[0]).to eq([16, 18])
   end
 
+  # …and the clearance line REPLACES the margin rather than adding to it, even where the margin alone would
+  # have put the box lower: Chrome 153 puts a `clear: left; margin-top: 20px` first child at the 5px float's
+  # bottom, not at 20, and the wrapper it is in stays where it was rather than taking the margin out.
+  it 'spends a cleared box margin on the clearance line' do
+    %w[60 5].each do |h|
+      boxes = boxes_for(%(<div id="w"><div style="float:left;width:100px;height:#{h}px"></div>) +
+                        '<div id="c" style="clear:left;margin-top:20px;height:10px"></div></div>', ['#w', '#c'])
+      expect([h, boxes[0]]).to eq([h, [0, h.to_i + 10]])
+      expect([h, boxes[1]]).to eq([h, [h.to_i, 10]])
+    end
+  end
+
   # `contain` and multicol establish a formatting context as surely as `overflow` does.
   it 'keeps the margin in for every kind of formatting context' do
     ['contain:layout', 'contain:paint', 'display:flow-root', 'column-count:2'].each do |style|
