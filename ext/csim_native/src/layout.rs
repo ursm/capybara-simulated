@@ -135,9 +135,19 @@ pub(crate) struct Input {
     pub(crate) flex_cross_gap: f64,
     // Main axis reversed (row-reverse / column-reverse / rtl-row): the main axis runs from the FAR
     // physical edge back toward the near one. The abstract (main-start-relative) placement is unchanged;
-    // only the final physical mapping mirrors, and the leading margin is the main-start-side one. The cross
-    // axis is always FORWARD in this increment (rtl-column / wrap-reverse / vertical are bailed).
+    // only the final physical mapping mirrors, and the leading margin is the main-start-side one.
     pub(crate) flex_main_reverse: bool,
+    // …and whether the CROSS axis runs from the far physical edge back (`plan.crossFar`). The in-flow items do
+    // not need it — `crossAlignPhysical` has already flipped each item's align onto the physical axis — but an
+    // OUT-OF-FLOW child's static position is measured ALONG the axis itself, so it does. It is its own input
+    // rather than `rtl`: those two agreed only while every non-`horizontal-tb` container was declined, and a
+    // `vertical-rl` row's cross runs right-to-left with no `rtl` in sight.
+    //
+    // It is also set for a cross axis running BOTTOM→top, which the walk declines — and the reader does not
+    // rely on that: it is read only under `!flex_main_is_x`, and a bottom cross always has main = X (the cross
+    // is then the vertical axis of a row). Anything that admits a bottom cross has to pair this with the axis,
+    // the way `along` below is paired, instead of assuming the horizontal one.
+    pub(crate) flex_cross_far: bool,
     // `position: relative` offset (§9.4.3), resolved JS-side (relativeOffset). It moves the box and its
     // subtree at PAINT time without touching the flow, so `place` adds it after the absolute origin; the
     // flow (margin collapse, sibling positions, float bands) is computed from the unshifted position. A box's
@@ -1972,7 +1982,9 @@ fn measure(
     MInfo { top: top_m, top_only: top_m, bottom: bottom_m, collapse_through: false }
 }
 
-// Native flex PLACEMENT for an LTR `row` OR `column` (§9.7), nowrap or wrap, main axis forward or reversed.
+// Native flex PLACEMENT for a `row` OR `column` (§9.7), nowrap or wrap, main axis forward or reversed, in any
+// writing mode — `flex_main_is_x` is the PLAN's answer (`flexAxisPlan`), so a vertical row arrives here as a
+// main-Y layout and needs no mode of its own.
 // The item SIZING is resolved JS-side — each item's used main and cross size rides its record (width/height,
 // swapped by `flex_main_is_x`), like a float's shrink-to-fit width — so this only DISTRIBUTES the items on
 // the MAIN axis (justify-content + gap + main-axis auto margins) and ALIGNS them on the CROSS axis
@@ -1980,8 +1992,9 @@ fn measure(
 // height by min/max-height — two-phase, so an auto-height row's items stay content-aligned). Each item's
 // subtree is laid out by the ordinary `measure` at its pushed border-box, in
 // a fresh float context (an item is its own formatting context). Mirrors layoutFlexRow / layoutFlexColumn /
-// stackFlexLines / crossAlignPhysical / autoMarginSplit. The harness bails rtl / vertical writing modes /
-// baseline / a COLUMN's min-max clamp / wrap-reverse / unsupported-nested-flex / replaced.
+// stackFlexLines / crossAlignPhysical / autoMarginSplit. The harness bails a cross axis running bottom→top,
+// one running right→left that also wraps or carries a cross auto margin, wrap-reverse, `position: sticky`, a
+// WRAPPING auto-height column with a max-height, unsupported-nested-flex and replaced.
 // CSS Flexbox §9.7, "resolve the flexible lengths" — the oracle's `resolveFlexibleLengths`: the line's free
 // space goes to (or comes from) the items in proportion to their factors, each result clamped by that item's
 // own minimum and maximum (`clamp_of`). Which way the line flexes is decided ONCE, from the HYPOTHETICAL sizes
@@ -2654,7 +2667,13 @@ fn measure_flex(
     // down (a scroll container's baseline comes from its border box), else its bottom margin edge when it has no
     // line to give. Read from the natively laid-out item where this container sizes its items itself; a pushed
     // item carries the oracle's figure (rec[42]).
-    let bl_asc: Vec<f64> = (0..cnt).map(|p| {
+    // …asked only where a member actually hangs from a baseline, which almost no page does: the scan below
+    // reads two `Box` fields per item and allocates a vector per container, on a path every flex container
+    // takes (rule 3, the `mayConstrainSize` pattern). One pass over the aligns answers it.
+    let any_baseline = kids
+        .iter()
+        .any(|&c| matches!(inputs[c].flex_cross_align, CROSS_BASELINE | CROSS_BASELINE_LAST));
+    let bl_asc: Vec<f64> = if !any_baseline { Vec::new() } else { (0..cnt).map(|p| {
         let c = kids[p];
         let k = inputs[c];
         if !n.flex_native {
@@ -2665,11 +2684,15 @@ fn measure_flex(
             Some(o) => (if k.scrolls_y { o.max(0.0).min(boxes[c].h) } else { o }) + Input::m(k.mt),
             None => boxes[c].h + Input::m(k.mt) + Input::m(k.mb),
         }
-    }).collect();
+    }).collect() };
+    // …so the table is EMPTY when no item hangs from a baseline, and the readers say so themselves rather than
+    // leaning on that (an index would panic if the two ever disagreed): every arm that uses an ascent is an
+    // arm a baseline align reached, where the table is filled.
+    let asc_of = |p: usize| bl_asc.get(p).copied().unwrap_or(0.0);
     for (li, line) in lines.iter().enumerate() {
         let (mut plain, mut fa, mut fb, mut la, mut lb) = (0.0f64, 0.0f64, 0.0f64, 0.0f64, 0.0f64);
         for &p in line {
-            let asc = bl_asc[p];
+            let asc = asc_of(p);
             match inputs[kids[p]].flex_cross_align {
                 CROSS_BASELINE => { fa = fa.max(asc); fb = fb.max(co[p] - asc); }
                 CROSS_BASELINE_LAST => { la = la.max(asc); lb = lb.max(co[p] - asc); }
@@ -2842,8 +2865,12 @@ fn measure_flex(
                     // member's own baseline coincides at line_first_asc. The FIRST-baseline group anchors at
                     // the cross-START; the LAST-baseline group anchors at the cross-END (groupTop = lc −
                     // lastExtent), both measured from their anchor.
-                    CROSS_BASELINE => line_first_asc[li] - bl_asc[p],
-                    CROSS_BASELINE_LAST => (lc - line_last_extent[li]) + line_last_asc[li] - bl_asc[p],
+                    // (Only a ROW ever arrives here with the keyword: a real COLUMN has `plan.baselineMode`
+                    // `axis`, so `crossAlignPhysical` resolved it away, and a VERTICAL writing mode's row —
+                    // which lays out along Y and has no baseline geometry to offer — is sent as `flex-start`
+                    // by the walk, for the same reason the oracle's column routine ignores the keyword there.)
+                    CROSS_BASELINE => line_first_asc[li] - asc_of(p),
+                    CROSS_BASELINE_LAST => (lc - line_last_extent[li]) + line_last_asc[li] - asc_of(p),
                     _ => 0.0,                // start / stretch
                 };
                 cs + off + cl_lead[p]
@@ -4674,11 +4701,10 @@ fn place_out_of_flow(
         } else {
             (if pn.flex_main_reverse { mb } else { mt }, h + mt + mb)
         };
-        // An rtl COLUMN's cross axis runs right-to-left (its cross-start is the right edge): the leading cross margin
-        // is the right one and the cross offset is measured back from the right edge (the oracle's `alongAxis`).
-        // `rtl` alone is the right key ONLY because the walk declines every non-`horizontal-tb` flex container
-        // (`nlFlexSupported`), where it would have to be paired with the axis as `from_right` is.
-        let cross_far = !pn.flex_main_is_x && pn.rtl != 0;
+        // A cross axis that runs from the far physical edge back — an rtl COLUMN, a `vertical-rl` ROW — puts its
+        // cross-start at the right edge: the leading cross margin is the right one and the cross offset is
+        // measured back from it (the oracle's `alongAxis`).
+        let cross_far = !pn.flex_main_is_x && pn.flex_cross_far;
         let (cross_lead, cross_item) = if pn.flex_main_is_x { (mt, h + mt + mb) } else { (if cross_far { mr } else { ml }, w + ml + mr) };
         let main = static_justify_lead(pn.flex_justify, main_size - main_item) + main_lead;
         let cross_free = cross_size - cross_item;
@@ -4885,6 +4911,7 @@ mod tests {
             flex_align_content: 6, // stretch
             flex_cross_gap: 0.0,
             flex_main_reverse: false,
+            flex_cross_far: false,
             rel_x: 0.0,
             rel_y: 0.0,
             flex_item_auto: 0,

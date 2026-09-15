@@ -3,15 +3,20 @@
 # main+cross size rides its record, like a float's shrink-to-fit width); native does only the PLACEMENT —
 # main-axis distribution (justify-content + gap + main-axis auto margins), cross-axis alignment
 # (align-items/self + cross-axis auto margins + first/last baseline), and the container's own box. Supported:
-# row / column, nowrap / wrap, main-axis reverse (row-reverse / column-reverse / rtl ROW), an rtl COLUMN (its
-# cross axis runs right→left; items pack from the right), nested flex, position:relative offsets, main- and
-# cross-axis auto item margins, row & column min/max-height (incl. declared-height wrapping columns) + a column's
-# cross min/max-width, align-items/self:baseline & last baseline, out-of-flow (absolute / fixed) items placed at
-# their oracle-resolved box. Still DECLINES to JS — vertical writing modes, an rtl column with a cross (horizontal)
-# auto margin or WRAP, a WRAPPING AUTO-height column with a max-height (it breaks its lines against that
-# capacity), wrap-reverse, inline-flex, position:sticky items, inline-block items. A REPLACED item (svg / img /
-# input …) is now replayed as a leaf box (see native_layout_replaced_spec). Each bail is an A/B: the
-# feature-carrying input declines, a sibling without it stays native. V8 only.
+# row / column in ANY writing mode (a vertical mode's row lays out along Y — `plan.mainIsX` already said so,
+# and the gate that refused it was left over from when native's flex axes were physical), nowrap / wrap,
+# main-axis reverse (row-reverse / column-reverse / rtl ROW), a cross axis running right→left (an rtl COLUMN,
+# a `*-rl` mode's ROW; items pack from the right), nested flex, position:relative offsets, main- and cross-axis
+# auto item margins, row & column min/max-height (incl. declared-height wrapping columns) + a column's cross
+# min/max-width, align-items/self:baseline & last baseline, out-of-flow (absolute / fixed) items placed at their
+# oracle-resolved box.
+#
+# Still DECLINES to JS: a cross axis running BOTTOM→top (never placed — which containers those are is a question
+# about the writing mode AND the direction together, see the measured table below), one running right→left that
+# also WRAPS or carries a cross (horizontal) auto margin, a WRAPPING AUTO-height column with a max-height (it
+# breaks its lines against that capacity), wrap-reverse, inline-flex, position:sticky, a float, inline-block
+# items. A REPLACED item (svg / img / input …) is now replayed as a leaf box (see native_layout_replaced_spec).
+# Each bail is an A/B: the feature-carrying input declines, a sibling without it stays native. V8 only.
 require 'capybara/simulated'
 require 'rack'
 require_relative 'support/session_teardown'
@@ -806,6 +811,122 @@ RSpec.describe 'native layout flex parity', if: ENV.fetch('CSIM_JS_ENGINE', 'v8'
     it 'still resolves the item sizes itself where every item allows it' do
       r = run_shadow('<div style="display:flex;width:300px"><div>a <span style="display:inline-block">ok</span></div><div style="flex:1">x</div></div>')
       expect(r).to include('ok' => true, 'mismatches' => 0, 'nativeFlexRows' => 1), r.inspect
+    end
+  end
+
+  # A VERTICAL writing mode's flex container lays out along the axes `flexAxisPlan` already computes — a `row`
+  # there runs down Y, which is the COLUMN routine on both sides — so it needed no new geometry, only the gate
+  # to stop refusing it (it was left over from when native's flex axes were physical). It came off the frozen
+  # corpus's decline list whole: 60 shapes, a quarter of what was left, all on that one line.
+  #
+  # What still declines there is the CROSS axis running backwards, which is the same rule a horizontal mode has
+  # and not a vertical one of its own — and WHICH containers those are depends on the `direction` as much as on
+  # the mode, so the table below is the statement of it rather than a sentence here.
+  describe 'a vertical writing mode' do
+    WRITING_MODES = %w[vertical-rl vertical-lr sideways-rl sideways-lr].freeze
+
+    # Which (writing-mode, direction, flex-direction) the gate places, spelled OUT rather than recomputed: a
+    # spec that re-derives the rule agrees with the implementation even when both are wrong. `+` is placed;
+    # `→` is placed only `nowrap` and only without a cross auto margin (its cross runs right→left); `-` is
+    # never placed (its cross runs bottom→top, and nothing flips an offset onto an axis starting at the far
+    # edge). Both declines are the SAME rule a horizontal mode has, not a vertical one of its own.
+    #
+    #                         row  row-rev  column  column-rev
+    VERTICAL_CROSS = {
+      %w[vertical-rl ltr] => %w[→   →        +       +],
+      %w[vertical-rl rtl] => %w[→   →        -       -],
+      %w[vertical-lr ltr] => %w[+   +        +       +],
+      %w[vertical-lr rtl] => %w[+   +        -       -],
+      %w[sideways-rl ltr] => %w[→   →        +       +],
+      %w[sideways-rl rtl] => %w[→   →        -       -],
+      %w[sideways-lr ltr] => %w[+   +        -       -],
+      %w[sideways-lr rtl] => %w[+   +        +       +]
+    }.freeze
+    FLEX_DIRECTIONS = %w[row row-reverse column column-reverse].freeze
+
+    it 'places a row and a column in every vertical mode, and declines only a backwards cross axis' do
+      VERTICAL_CROSS.each do |(wm, dir), cells|
+        FLEX_DIRECTIONS.each_with_index do |fd, i|
+          %w[nowrap wrap].each do |wrap|
+            body = %(<div style="writing-mode:#{wm};direction:#{dir};display:flex;flex-direction:#{fd};flex-wrap:#{wrap};width:200px;height:150px"><div style="width:30px;height:20px"></div><div style="width:40px;height:50px"></div></div>)
+            if cells[i] == '+' || (cells[i] == '→' && wrap == 'nowrap')
+              expect_parity(body)
+            else
+              expect(run_shadow(body)).to include('ok' => false), body
+            end
+          end
+        end
+      end
+    end
+
+    # …and an OUT-OF-FLOW child, whose static position is measured ALONG the cross axis rather than flipped
+    # onto it by `crossAlignPhysical` — so it is the one thing that needs the axis's physical direction as its
+    # own input. Native read it off `direction` alone, which is right only while every vertical container is
+    # declined: a `vertical-rl` row's cross runs right→left with no `rtl` in sight, and the box landed the
+    # whole cross free space away (x=0 against the oracle's 170). Nothing refused it.
+    it 'places an out-of-flow child against the cross axis it actually has' do
+      VERTICAL_CROSS.each do |(wm, dir), cells|
+        ['', 'align-self:center', 'align-self:flex-end'].each do |a|
+          FLEX_DIRECTIONS.each_with_index do |fd, i|
+            next if cells[i] == '-'
+
+            expect_parity(%(<div style="writing-mode:#{wm};direction:#{dir};display:flex;flex-direction:#{fd};position:relative;width:200px;height:150px"><div style="position:absolute;#{a};width:30px;height:20px"></div><div style="width:10px;height:10px"></div></div>))
+          end
+        end
+      end
+    end
+
+    # …and the other half of what `→` means: such a container is placed only WITHOUT a cross (horizontal) auto
+    # margin, which native's forward frame would take from the near edge — the wrong end of that axis.
+    it 'declines a cross auto margin where the cross axis runs right-to-left' do
+      VERTICAL_CROSS.each do |(wm, dir), cells|
+        FLEX_DIRECTIONS.each_with_index do |fd, i|
+          next unless cells[i] == '→'
+
+          shell = %(<div style="writing-mode:#{wm};direction:#{dir};display:flex;flex-direction:#{fd};width:200px;height:150px">)
+          expect(run_shadow(%(#{shell}<div style="margin-left:auto;width:30px;height:20px"></div></div>))).to include('ok' => false)
+          expect(run_shadow(%(#{shell}<div style="margin-right:auto;width:30px;height:20px"></div></div>))).to include('ok' => false)
+          # …a MAIN-axis (vertical) auto margin on the same container is fine.
+          expect_parity(%(#{shell}<div style="margin-top:auto;width:30px;height:20px"></div></div>))
+        end
+      end
+    end
+
+    it 'distributes and aligns in a vertical mode' do
+      WRITING_MODES.each do |wm|
+        %w[flex-start center space-between space-around flex-end].each do |j|
+          expect_parity(%(<div style="writing-mode:#{wm};display:flex;justify-content:#{j};gap:8px;width:200px;height:150px"><div style="width:80px;height:20px"></div><div style="width:80px;height:20px"></div></div>))
+        end
+        %w[flex-start center stretch flex-end].each do |a|
+          expect_parity(%(<div style="writing-mode:#{wm};display:flex;align-items:#{a};width:200px;height:150px"><div style="width:30px;height:20px"></div><div>ab</div></div>))
+        end
+      end
+    end
+
+    # …and the ONE thing that did need a rule. A baseline has geometry only where the cross axis is the block
+    # axis its glyphs sit on. A vertical ROW keeps the keyword (`plan.baselineMode` is `keep` — its items do
+    # sit side by side along the inline axis) and then lays out along Y, where the oracle's own column routine
+    # ignores it: `crossOffset` answers 0, and a line's cross size is its WIDEST item's margin box (where it
+    # wraps at all — a nowrap column's one line is the container's content box) rather than a shared
+    # baseline's extent. The walk
+    # sends native `flex-start` for exactly that case. Without it native did real baseline placement AND real
+    # baseline line-sizing, and NOTHING declined: 400 of a 12000-case sweep, then 96 more of an 8000-case one
+    # that varied `align-self` rather than `align-items` — the corpus held neither shape.
+    it 'gives a vertical row no baseline geometry, as the oracle does' do
+      ['baseline', 'first baseline', 'last baseline'].each do |a|
+        WRITING_MODES.each do |wm|
+          expect_parity(%(<div style="writing-mode:#{wm};display:flex;align-items:#{a};width:200px;height:150px"><div style="font-size:24px">Ag</div><div>x</div></div>))
+          expect_parity(%(<div style="writing-mode:#{wm};display:flex;width:200px;height:150px"><div style="align-self:#{a}"><div style="height:30px">a</div><div>b</div></div><div style="align-self:#{a}">y</div></div>))
+          expect_parity(%(<div style="writing-mode:#{wm};display:flex;flex-direction:row-reverse;width:150px;height:150px"><div style="align-self:#{a};width:30px;height:20px"></div><div style="align-self:#{a};width:20px;height:40px"></div></div>))
+        end
+        # …while a HORIZONTAL row still aligns on real baselines, which is the half of the rule that has one.
+        expect_parity(%(<div style="display:flex;align-items:#{a};width:200px"><div style="font-size:24px">Ag</div><div>x</div></div>))
+      end
+    end
+
+    it 'declines wrap-reverse in a vertical mode too' do
+      expect(run_shadow('<div style="writing-mode:vertical-lr;display:flex;flex-wrap:wrap-reverse;width:200px;height:150px"><div style="width:30px;height:20px"></div></div>')).to include('ok' => false)
+      expect_parity('<div style="writing-mode:vertical-lr;display:flex;flex-wrap:wrap;width:200px;height:150px"><div style="width:30px;height:20px"></div></div>')
     end
   end
 end

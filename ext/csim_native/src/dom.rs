@@ -970,6 +970,7 @@ fn layout_pass(
             flex_align_content: r[36] as u8,
             flex_cross_gap: r[37],
             flex_main_reverse: r[38] != 0.0,
+            flex_cross_far: (r[65] as u32) & 32768 != 0,
             rel_x: r[39],
             rel_y: r[40],
             flex_item_auto: r[41] as u8,
