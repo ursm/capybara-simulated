@@ -1828,7 +1828,17 @@ fn measure(
             // establishes a BFC) and its box reset to this block's origin; `place` then positions it by rel_x/rel_y
             // alone (el._lb − container._lb). Neither touches the cursor / margin / has_child state.
             if cn.native_oof() {
-                boxes[c].x = if n.from_right() { content_left_rel + content_w } else { content_left_rel };
+                // That cursor is a LINE cursor: it starts in the band a float leaves at this y — asked over a
+                // LINE BOX's height, as `line_layout` asks it and as `retakeBand` does, so a float whose band
+                // starts just below the cursor is not missed — and it carries the block's FIRST-LINE INDENT
+                // until an in-flow child spends it (an out-of-flow box is not a child that does). An rtl flow
+                // reads neither: its corner is the content's right edge.
+                boxes[c].x = if n.from_right() {
+                    content_left_rel + content_w
+                } else {
+                    let indent = if !has_child != n.indent_hanging { n.indent_px } else { 0.0 };
+                    float_band(&ctx.items, cursor, n.strut_lh, cl, cr).0 + indent
+                };
                 boxes[c].y = cursor;
                 continue;
             }

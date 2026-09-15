@@ -593,6 +593,37 @@ x</div>))
       end
     end
 
+    # …and in BLOCK flow the same cursor is a LINE cursor: it starts in the band a float leaves at that y, and
+    # it carries the block's first-line indent until an in-flow child spends it.
+    describe 'a static position taken off the block-flow cursor' do
+      let(:mark) { '<div style="position:absolute;width:10px;height:10px"></div>' }
+
+      it 'starts at the unspent indent and in the float\'s band' do
+        expect_native_oof(%(<div style="position:relative;width:200px;text-indent:12px">#{mark}<div style="height:10px">b</div></div>))
+        expect_native_oof(%(<div style="position:relative;width:200px;text-indent:12px;padding-left:9px">#{mark}<div style="height:10px">b</div></div>))
+        expect_native_oof(%(<div style="position:relative;width:200px;text-indent:12px"><div style="height:10px">b</div>#{mark}</div>))
+        expect_native_oof(%(<div style="position:relative;width:200px"><div style="float:left;width:30px;height:60px"></div>#{mark}<div style="height:10px">b</div></div>))
+        expect_native_oof(%(<div style="position:relative;width:200px"><div style="float:left;width:30px;height:60px"></div><div style="height:10px">b</div>#{mark}</div>))
+        expect_native_oof(%(<div style="position:relative;width:200px;text-indent:12px"><div style="float:left;width:30px;height:60px"></div>#{mark}<div style="height:10px">b</div></div>))
+        expect_native_oof(%(<div style="position:relative;width:200px"><div style="float:left;width:30px;height:10px"></div><div style="height:30px">b</div>#{mark}</div>))
+      end
+      # …a block holding NOTHING but out-of-flow children included: it lays out no lines, so it reads the same
+      # cursor, at the same indent and in the same band.
+      # The band is the one a LINE BOX meets, not a hairline at the cursor: a float that starts a few px below
+      # it (after a collapsed margin, or a second float that dropped past the first) still shortens that line.
+      it 'asks the band over a line box, not at the cursor' do
+        expect_native_oof(%(<div style="position:relative;width:100px;line-height:40px"><div style="height:10px;margin-bottom:15px">b</div><div style="float:left;width:30px;height:5px"></div>#{mark}</div>))
+        expect_native_oof(%(<div style="position:relative;width:100px"><div style="float:right;width:60px;height:5px"></div><div style="float:left;width:60px;height:30px"></div>#{mark}</div>))
+      end
+      it 'reads it in a block whose only children are out of flow' do
+        expect_native_oof(%(<div style="position:relative;width:200px;text-indent:12px">#{mark}</div>))
+        expect_native_oof(%(<div style="position:relative;width:200px;text-indent:12px;padding-left:7px;border-left:3px solid">#{mark}#{mark}</div>), 2)
+        expect_native_oof(%(<div style="position:relative;width:200px"><div style="float:left;width:30px;height:20px"></div>#{mark}</div>))
+      end
+      it 'leaves an rtl flow reading the content edge, whatever the band' do
+        expect_native_oof(%(<div style="position:relative;width:200px;direction:rtl;text-indent:12px"><div style="float:left;width:30px;height:60px"></div>#{mark}<div style="height:10px">b</div></div>))
+      end
+    end
   end
 
   # A block whose own BLOCK axis is the horizontal one (a vertical `writing-mode`) does not fill its containing
