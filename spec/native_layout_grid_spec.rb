@@ -433,8 +433,15 @@ RSpec.describe 'native layout grid parity', if: ENV.fetch('CSIM_JS_ENGINE', 'v8'
     it 'shifts a relative item by its insets (as Chrome does — the oracle now applies flowShift to grid items)' do
       expect_parity('<div style="display:grid;grid-template-columns:100px 100px;width:400px"><div style="position:relative;top:10px;left:5px;height:20px">rel</div><div style="height:20px">b</div></div>')
     end
-    it 'declines a non-leaf control item (a <select> with options — sized from its intrinsic size, not its children)' do
-      expect_bail('<div style="display:grid;grid-template-columns:100px;width:400px"><select><option>o</option></select></div>')
+    # A DROPDOWN is a leaf to native — the oracle takes its border box from its intrinsic size, never by
+    # stacking its `<option>`s, which have no box in Chrome at all — so it is laid out like any replaced item.
+    # A LIST BOX showing rows is a block container instead (native stacks those rows itself, see
+    # native_layout_replaced_spec), and a grid item that IS one still declines: the grid path does not take a
+    # container whose box is pinned that way. It stays on the decline census, which is where the remaining
+    # work belongs.
+    it 'lays out a dropdown item, and declines a list box item' do
+      expect_parity('<div style="display:grid;grid-template-columns:100px;width:400px"><select><option>o</option></select></div>')
+      expect_bail('<div style="display:grid;grid-template-columns:100px;width:400px"><select multiple><option>a</option><option>b</option></select></div>')
     end
     it 'floors an auto height at bare text (an anonymous item the oracle never places)' do
       expect_parity('<div style="display:grid;grid-template-columns:100px 1fr;width:400px">bare text<div style="height:10px">a</div><div style="height:20px">b</div></div>')

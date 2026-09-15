@@ -4,8 +4,10 @@
 # decoded image's natural size, a control's chrome, an svg's viewBox), and native sizes the box from it as
 # the oracle's `usedSize` does (`replaced_box`: declared sizes win, an intrinsic ratio derives the other axis,
 # min/max clamp through the ratio, a border box floors at its edges). Handled as a BLOCK-LEVEL child, a FLEX
-# ITEM (row and column, sized natively) and a GRID ITEM. Still DECLINES: an INLINE replaced element (an atomic
-# inline in a text line) and a control that lays out its own content (a child carries an `_lb`). V8 only.
+# ITEM (row and column, sized natively) and a GRID ITEM. A control that lays out CSS boxes of its own is a
+# leaf like any other — the oracle never sizes it by stacking them — EXCEPT a LIST BOX showing rows, which is
+# a block container whose box is the control's and whose rows native stacks itself. Still DECLINES: an INLINE
+# replaced element (an atomic inline in a text line), and a list box as a GRID ITEM. V8 only.
 require 'capybara/simulated'
 require 'rack'
 require_relative 'support/session_teardown'
@@ -81,10 +83,11 @@ RSpec.describe 'native layout replaced-leaf parity', if: ENV.fetch('CSIM_JS_ENGI
   it 'lays out an inline-block img in a block (atomic inline — see native_layout_inline_atomic_spec)' do
     expect_parity('<div style="width:300px"><img width="20" height="20" style="display:inline-block"></div>')
   end
-  # A control that lays out its OWN content (a display:block <select> whose options carry _lb) is NOT a leaf:
-  # the oracle sizes it from its intrinsic (one-row) size, so native must decline rather than stack the options.
-  it 'declines a display:block <select> that lays out its options (sized by intrinsic, not child flow)' do
-    expect_bail('<div style="width:300px"><select style="display:block"><option>aaaa</option><option>bb</option></select></div>')
+  # A control that lays out its OWN content (a display:block <select> whose options carry _lb) IS a leaf all the
+  # same: the oracle takes its border box from its intrinsic (one-row) size, never by stacking those options, so
+  # native pushes that box and emits no subtree — the options are inside a leaf, not children of the flow.
+  it 'pushes a display:block <select> that lays out its options (sized by intrinsic, not child flow)' do
+    expect_parity('<div style="width:300px"><select style="display:block"><option>aaaa</option><option>bb</option></select></div>')
   end
 
   # ── Sized natively from the intrinsic data ─────────────────────────────────────────────────────────────
@@ -146,6 +149,54 @@ RSpec.describe 'native layout replaced-leaf parity', if: ENV.fetch('CSIM_JS_ENGI
     it 'gives a replaced item no baseline of its own (its bottom margin edge), and skips a block-level one as a candidate' do
       expect_parity('<div style="display:flex;align-items:baseline;width:400px"><img><div style="font-size:32px">BIG</div></div>')
       expect_parity('<div style="display:flex;align-items:baseline;width:400px"><div><img style="display:block"><p style="margin:0">after img</p></div><div style="font-size:32px">BIG</div></div>')
+    end
+
+    # A `<select>` stacking its `<option>`s used to decline WHOLE, on the argument that the oracle sizes it from
+    # those boxes. It does not — a dropdown's options have no box in Chrome at all, and the oracle takes the
+    # control's border box from its INTRINSIC size — so a DROPDOWN is a leaf like any other replaced element,
+    # pushed and emitted without a subtree. A LIST BOX showing rows is a block container instead (below). That
+    # was 18 shapes of the frozen corpus's 174 declines, freed outright — and, unnamed until a sweep found it,
+    # 72 shapes that were laid out WRONG: a `<select style="display:flex">` with options reached the flex gate
+    # before the replaced one and had its options flexed as items.
+    describe 'a control that lays out boxes of its own' do
+      it 'pushes a dropdown as a leaf box, and lays a list box out as a container' do
+        # nodes: the leaf ones emit no subtree, the list boxes emit their rows.
+        {'<select style="display:block"><option>a</option><option>bbbb</option></select>' => 4,
+         '<select style="display:block"></select>'                                        => 4,
+         '<textarea style="display:block;height:30px">hello</textarea>'                    => 4,
+         '<select size="3" style="display:block"><option>a</option><option>b</option></select>'  => 6,
+         '<select multiple style="display:block"><option>a</option></select>'              => 5}.each do |control, nodes|
+          body = %(<div style="width:300px">#{control}<div style="height:10px"></div></div>)
+          expect_parity(body)
+          expect(run_shadow(body)['nodes']).to eq(nodes), body
+        end
+      end
+
+      # A LIST BOX showing rows is the one control whose inner boxes are read for something — a BASELINE, which
+      # `boxBaselineOffset` takes off its rows as any block's. Native stacks those rows ITSELF now (the box is
+      # the control's, the content is ordinary block children), so every context that reads such a baseline
+      # gets a real one instead of a rule about what to refuse. The rows are compared boxes too, which a
+      # pushed-whole control's never were.
+      it "stacks a list box's rows itself, and reads its baselines off them" do
+        listbox = '<select multiple><option>a</option><option>bbbb</option></select>'
+        empty   = '<select multiple></select>'
+        ['baseline', 'last baseline'].each do |align|
+          expect_parity(%(<div style="display:flex;align-items:#{align};width:400px"><div style="font-size:32px">BIG</div>#{listbox}</div>))
+          expect_parity(%(<div style="display:flex;align-items:#{align};width:400px"><div style="font-size:32px">BIG</div><div>#{listbox}</div></div>))
+          # …an EMPTY one has no rows and stays a leaf, its baseline the chrome's (`controlBaseline`).
+          expect_parity(%(<div style="display:flex;align-items:#{align};width:400px"><div style="font-size:32px">BIG</div>#{empty}</div>))
+        end
+        expect_parity(%(<table style="width:300px"><tr><td style="vertical-align:baseline;font-size:32px">BIG</td><td style="vertical-align:baseline">#{listbox}</td></tr></table>))
+        expect_parity(%(<div style="width:400px">text <span style="display:inline-block">#{listbox}</span> after</div>))
+        # …and the rows do not depend on the UA sheet's `overflow: scroll` surviving: declaring it away used to
+        # take the baseline scan down a different branch and nothing refused the difference.
+        ['overflow:visible', 'overflow:clip', 'overflow:hidden'].each do |ov|
+          expect_parity(%(<div style="width:400px">text <span style="display:inline-block"><select size="3" style="display:block;#{ov}"><option>a</option><option>bbbb</option></select></span> after</div>))
+        end
+        # The rows themselves are laid out where the oracle puts them (a `size=3` select's four options at
+        # y = 1 / 16 / 31 / 46), which is what makes them compared boxes at all.
+        expect_parity('<div style="width:400px"><select size="3" style="display:block"><option>a</option><option>bbbb</option><option>c</option><option>d</option></select></div>')
+      end
     end
   end
 end
