@@ -467,7 +467,7 @@ RSpec.describe 'native layout L1 block-flow parity', if: ENV.fetch('CSIM_JS_ENGI
     # discovered in Rust it would fail the whole pass instead of this one subtree.
     it 'declines a vertical block holding content native cannot measure' do
       expect_walk_declines('<div style="width:400px"><div style="writing-mode:vertical-lr"><div style="display:grid;grid-template-columns:40px"><div></div></div></div></div>')
-      expect_walk_declines('<div style="width:400px"><div style="writing-mode:vertical-lr"><select><option>a</option></select></div></div>')
+      expect_walk_declines('<div style="width:400px"><div style="writing-mode:vertical-lr"><span style="display:inline-flex"><div>f</div></span></div></div>')
     end
     # …which is also why such a child is walked as a MEASURED subtree: an atomic inline whose own box would be
     # PUSHED is not in the run stream native measures from, so the walk has to decline where it would otherwise

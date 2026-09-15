@@ -298,9 +298,13 @@ pub(crate) struct Input {
     pub(crate) ratio_only: bool,
     // The box has no content height to floor a flex column's automatic minimum at (an image, a ratio box).
     pub(crate) shrinks_to_nothing: bool,
-    // A text-drawing CONTROL's baseline (the oracle's `controlBaseline`): 0 none (an image / chromeless control —
-    // the box gives no baseline), 1 its font's — the font box (`control_font_box`) centred in the content box
-    // plus its ascent (`control_font_asc`), 2 a list box — its content box's bottom.
+    // A REPLACED box's baseline (the oracle's `controlBaseline`): 0 none — an `<img>`, the only one that has
+    // none at all; 1 a text-drawing control's font — the font box (`control_font_box`) centred in the content
+    // box plus its ascent (`control_font_asc`); 2 a list box — its content box's bottom; 4 the BORDER box's
+    // bottom, which every OTHER replaced box gives (a checkbox, a radio, a range, an image input, and the
+    // non-controls: canvas, svg, video, iframe, object, embed, meter, progress, textarea). A `file` input is
+    // not one of them — it draws text, so it is kind 1. (3 is unused; it carried a replayed list-box figure
+    // until native learned to stack the rows itself.)
     pub(crate) control_baseline: u8,
     pub(crate) control_font_box: f64,
     pub(crate) control_font_asc: f64,
@@ -1408,14 +1412,24 @@ fn measure(
         boxes[i].w = w;
         boxes[i].h = h;
         boxes[i].auto_height = false;
-        let baseline = match n.control_baseline {
+        // The oracle asks a replaced box for its baseline through TWO functions that do not agree, so native
+        // keeps the two answers apart. `boxBaselineOffset` — what a container's baseline scan takes from it —
+        // gives the CHROME's baseline where the control draws text and NOTHING otherwise. `atomicBaselineOffset`
+        // — what it hands the line it sits on — gives `controlBaseline` for any replaced box, which for one that
+        // draws no text is its border-box bottom (a checkbox, a radio, a range, an image input, and every
+        // non-control replaced box; only an `<img>` has none, and a box that SCROLLS is answered before this
+        // — which is why a `<textarea>` gives none: it scrolls, not because it draws no text).
+        let chrome = match n.control_baseline {
             1 => Some(n.pt + n.bt + ((h - n.edges_y()).max(0.0) - n.control_font_box) / 2.0 + n.control_font_asc),
             2 => Some((h - n.pb - n.bb).max(0.0)),
             _ => None,
         };
-        boxes[i].first_baseline = baseline;
-        boxes[i].last_baseline = baseline;
-        boxes[i].inline_block_baseline = baseline;
+        boxes[i].first_baseline = chrome;
+        boxes[i].last_baseline = chrome;
+        // …including what a PARENT's inline-block baseline scan takes from this box, which is the same
+        // `boxBaselineOffset` answer. The atomic's own contribution to its LINE is the other one, and only the
+        // line site asks for it (see `line_layout`'s native-atomic loop).
+        boxes[i].inline_block_baseline = chrome;
         let top = CMargin::of(Input::m(n.mt));
         return MInfo { top, top_only: top, bottom: CMargin::of(Input::m(n.mb)), collapse_through: false };
     }
@@ -1486,7 +1500,27 @@ fn measure(
                 let w = used_width(&k, auto_w);
                 measure(c, w, f64::NAN, inputs, runs, run_texts, grids, children, boxes, failed, &mut FloatCtx::new(), 0.0, 0.0);
                 let h = boxes[c].h;
-                let own = if k.scrolls_y || k.replaced { None } else { boxes[c].inline_block_baseline };
+                // The oracle's `atomicBaselineOffset`: a box that SCROLLS has no baseline of its own (CSS Align
+                // §9 reads one off its border box) except a button, which is a button however it scrolls —
+                // and everything else hands over its own. A REPLACED box is not the exception it used to look
+                // like: `inline_block_baseline` is already None for the ones that have none (an image, a
+                // chromeless control) and the CHROME's baseline for the ones that do, which is what
+                // `controlBaseline` gives the oracle. Refusing it here hung a text-drawing control from its
+                // bottom margin edge and grew every line it sat on by its descent.
+                let own = if k.scrolls_y && !k.is_button {
+                    None
+                } else if k.replaced {
+                    // `atomicBaselineOffset` asks `controlBaseline` of ANY replaced box, which is its
+                    // border-box bottom where the control draws no text (kind 4) — not the `None` that the
+                    // box-scan answer carries for one. Only an `<img>` (kind 0) has no baseline at all.
+                    match k.control_baseline {
+                        0 => None,
+                        4 => Some(boxes[c].h),
+                        _ => boxes[c].inline_block_baseline,
+                    }
+                } else {
+                    boxes[c].inline_block_baseline
+                };
                 r.metric = w + ml + mr;
                 r.asc += mt + own.unwrap_or(h + mb);
                 r.line_height = h + mt + mb;
@@ -4440,7 +4474,7 @@ fn child_baselines(order: impl Iterator<Item = usize> + Clone, inputs: &[Input],
             last = Some(boxes[c].y + b);
         }
         // A scroll container gives its bottom margin edge — except a BUTTON, which is a button however it
-        // scrolls (the oracle's exception; native never sees one today, every atomic holding a control is
+        // scrolls (the oracle's exception; a control atomic reaches native now, so this is live rather than
         // pushed, but the rule has to be the same rule).
         if cn.scrolls_y && !cn.is_button {
             inline_block = Some(boxes[c].y + boxes[c].h + Input::m(cn.mb));

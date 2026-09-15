@@ -1,8 +1,8 @@
 # frozen_string_literal: true
 # Native layout — INLINE ATOMICS, geometry shadow-parity. An atomic inline is a single box on a line. Native
-# lays out an `inline-block` / inline `<img>` at its baseline (or a baseline shift) ITSELF — see the last
-# describe; every other atomic (an inline-flex / grid / table, a control, one aligned against the parent's font
-# box) is PUSHED: the oracle resolved its box (`_lb`) and baseline (`growAtomic`), and native replays those as a
+# lays out an `inline-block` / inline `<img>` / a form CONTROL at its baseline (or a baseline shift) ITSELF —
+# see the last describe; every other atomic (an inline-flex / grid / table, a list box, one aligned against the
+# parent's font box) is PUSHED: the oracle resolved its box (`_lb`) and baseline (`growAtomic`), and native replays those as a
 # RUN_ATOMIC — the margin-box width is its advance, its ascent (+ descent) grow the line box. A pushed box is
 # not compared (like every inline fragment in a text block); what's validated is the text block's line-broken
 # HEIGHT. Still declines: a `top` / `bottom` vertical-align. V8 only.
@@ -378,13 +378,63 @@ RSpec.describe 'native layout inline-atomic parity', if: ENV.fetch('CSIM_JS_ENGI
       end
       expect_native_atomic('<div style="width:400px"><span style="display:inline-block">ok</span> and <span style="display:inline-block"><div style="float:left;width:10px;height:10px"></div>beside</span> after</div>', 1)
     end
-    it 'keeps the pushed box for a font-box-aligned atomic, an inline-flex, and a control' do
+    it 'keeps the pushed box for a font-box-aligned atomic and an inline-flex' do
       r = run_shadow('<div style="width:400px">text <span style="display:inline-block;vertical-align:middle;width:10px;height:30px"></span> x</div>')
       expect(r).to include('ok' => true, 'mismatches' => 0, 'nativeAtomics' => 0)
       r = run_shadow('<div style="width:400px">text <span style="display:inline-flex"><div>f</div></span> x</div>')
       expect(r).to include('ok' => true, 'mismatches' => 0, 'nativeAtomics' => 0)
-      r = run_shadow('<div style="width:400px">text <input> after</div>')
-      expect(r).to include('ok' => true, 'mismatches' => 0, 'nativeAtomics' => 0)
+    end
+
+    # A CONTROL is an atomic native lays out itself now. Its box is the replaced one and its baseline the
+    # chrome's — which is where the oracle keeps TWO answers that do not agree, and native keeps both:
+    # `boxBaselineOffset` (what a container's scan takes from the box) gives nothing for a control that draws
+    # no text, while `atomicBaselineOffset` (what it hands the line) gives its border-box bottom. Reading the
+    # first where the second was wanted hung a checkbox from its MARGIN box, 3px of UA sheet lower.
+    #
+    # EVERY example here puts a TALL baseline-aligned box on the line beside the control. Without one the
+    # line's ascent is just the control's own, so a wrong ascent moves nothing and the example passes — which
+    # is how a percentage-padding bug survived a 1000-case sweep and shipped (see the `%` example below).
+    MARKER = '<span style="display:inline-block;width:5px;height:60px"></span>'
+    CONTROLS = [
+      '<input>',
+      '<input type="checkbox">',
+      '<input type="radio">',
+      '<input type="range">',
+      '<input type="file">',
+      '<input type="submit" value="Go">',
+      '<select><option>a</option></select>',
+      '<textarea></textarea>',
+      '<canvas width="20" height="20"></canvas>',
+      '<img style="width:20px;height:20px">'
+    ].freeze
+
+    it 'lays out a control atomic itself, from its own chrome baseline' do
+      CONTROLS.each do |control|
+        expect_native_atomic(%(<div style="width:400px">text #{MARKER}#{control} after</div>))
+        expect_native_atomic(%(<div style="width:400px;font-size:32px">BIG #{MARKER}#{control} after</div>))
+        expect_native_atomic(%(<div style="width:400px">t #{MARKER}#{control.sub('>', ' style="margin-bottom:6px">')} u</div>))
+      end
+    end
+
+    # A PERCENTAGE vertical padding resolves against the containing block, and `controlBaseline` was reading
+    # the box's edges with no basis at all — so half of it went missing from the ascent. A symmetric padding
+    # cancelled, which is why only the one-sided spellings show it (Chrome and native agree; the oracle did
+    # not, and this is the oracle's own fix).
+    it 'resolves a percentage padding before taking a control\'s baseline' do
+      ['padding-top:10%', 'padding-bottom:10%', 'padding:10%', 'padding:10% 0 4px',
+       'padding-top:calc(10% + 2px)'].each do |pad|
+        expect_parity(%(<div style="width:400px">t #{MARKER}<input style="#{pad}"> u</div>))
+        expect_parity(%(<div style="width:200px">t #{MARKER}<input style="#{pad}"> u</div>))
+      end
+    end
+
+    # …and the THIRD bug the same increment fixed: the two baseline answers are kept apart. A block-level
+    # checkbox inside an inline-block is read by the container's SCAN, which gets nothing from it — reuniting
+    # the fields would give it the atomic answer and move the box by its bottom margin.
+    it 'gives a container\'s baseline scan nothing from a control that draws no text' do
+      ['margin-bottom:6px', 'margin-bottom:0', 'margin:4px 0'].each do |m|
+        expect_parity(%(<div style="width:400px">t <span style="display:inline-block"><input type="checkbox" style="display:block;#{m}"></span> #{MARKER} u</div>))
+      end
     end
   end
 end
