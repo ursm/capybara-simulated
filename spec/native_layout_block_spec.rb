@@ -407,6 +407,16 @@ RSpec.describe 'native layout L1 block-flow parity', if: ENV.fetch('CSIM_JS_ENGI
     # child is aligned once it HAS its height, not as a 0-tall box; an rtl column mirrors the cross axis natively;
     # a table cell's vertical-align shift moves its content, not a box anchored to the cell's padding box; a %
     # margin of a flex container's out-of-flow child resolves against the containing block.
+    # An ALIGNED static position computed from the CONTAINER's box — a flex container's, which knows nothing
+    # about the relative inlines the container sits in — takes their §9.4.3 offset; one that hands an axis back
+    # off the static position (an rtl corner's block axis) must not, or it lands twice. Both go through
+    # `placeAbsolute`'s deferred path, so one wrapper decides it for both: the corner answers `null` for the
+    # axis it does not speak for. (Measured in Chrome: y = 25, which is the answer this pins.)
+    it 'shifts a flex container\'s aligned static position by the relative inlines around it' do
+      session = simulated_session(page('<div style="width:200px;font:16px monospace"><span style="position:relative;top:10px">a<span style="display:inline-block"><div style="display:flex;width:50px;height:20px;align-items:flex-end"><i style="position:absolute;width:5px;height:5px"></i></div></span></span></div>'))
+      session.visit '/'
+      expect(parity(session)).to include('ok' => true, 'mismatches' => 0)
+    end
     it 'aligns an auto-height out-of-flow flex child by its laid-out height' do
       expect_native_oof('<div style="display:flex;position:relative;width:400px;height:100px;align-items:center"><div style="position:absolute;left:10px">row auto height</div></div>')
       expect_native_oof('<div style="display:flex;position:relative;width:400px;height:100px;align-items:flex-end"><div style="position:absolute;left:10px">row auto height</div></div>')
