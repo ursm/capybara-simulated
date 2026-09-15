@@ -148,8 +148,14 @@ RSpec.describe 'native layout inline-atomic parity', if: ENV.fetch('CSIM_JS_ENGI
   it 'declines a bottom-aligned atomic (line-box-relative)' do
     expect_bail('<div style="width:300px">x <span style="display:inline-block;width:10px;height:30px;vertical-align:bottom"></span> y</div>')
   end
-  it 'declines an absolutely-positioned atomic nested in a span (out of flow)' do
-    expect_bail('<div style="position:relative;width:300px">x <b>hi <span style="display:inline-block;position:absolute;width:10px;height:10px"></span></b> y</div>')
+  # An atomic that is OUT OF FLOW is no atomic at all: it takes no room on the line, and what the line gives it
+  # is its STATIC POSITION — the marker the run stream carries, settled where the flow had reached (see the
+  # block spec's `a static position taken off a line`). Nested inlines included.
+  it 'lays out an absolutely-positioned atomic nested in a span as an out-of-flow box' do
+    r = run_shadow('<div style="position:relative;width:300px">x <b>hi <span style="display:inline-block;position:absolute;width:10px;height:10px"></span></b> y</div>')
+    # …POSITIONED natively, not replayed: `expect_parity` alone would pass on the oracle's own box.
+    expect(r).to include('ok' => true, 'mismatches' => 0, 'nativeOutOfFlow' => 1), r.inspect
+    expect(r['compared']).to be > 0, "nothing was compared: #{r.inspect}"
   end
 
   # ── Atomic inlines laid out natively ──────────────────────────────────────────────────────────────────
@@ -363,7 +369,6 @@ RSpec.describe 'native layout inline-atomic parity', if: ENV.fetch('CSIM_JS_ENGI
     end
     it 'rolls a declined subtree back off the record stream and pushes its box' do
       [
-        '<div style="width:400px">text <span style="display:inline-block"><div style="position:absolute;width:10px;height:10px"></div>ib</span> after</div>',
         '<div style="width:400px">text <span style="display:inline-block"><div style="float:left;width:10px;height:10px"></div>beside</span> after</div>',
         # (a SOFT hyphen: the flow draws a hyphen that is not in the text where it breaks, which native models
         # neither in the line's width nor in the painter's runs. This fixture used to read `日本語` — served

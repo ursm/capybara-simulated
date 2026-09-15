@@ -971,6 +971,10 @@ fn layout_pass(
             flex_cross_gap: r[37],
             flex_main_reverse: r[38] != 0.0,
             flex_cross_far: (r[65] as u32) & 32768 != 0,
+            // A text block holding an out-of-flow child the walk REPLAYED. Those are the only children a text
+            // block has to lay out that its run stream does not name, and scanning for them costs a pass over
+            // every text block's children on a page that has none.
+            has_replayed_oof: (r[65] as u32) & 65536 != 0,
             rel_x: r[39],
             rel_y: r[40],
             flex_item_auto: r[41] as u8,

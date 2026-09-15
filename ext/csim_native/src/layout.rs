@@ -148,6 +148,8 @@ pub(crate) struct Input {
     // is then the vertical axis of a row). Anything that admits a bottom cross has to pair this with the axis,
     // the way `along` below is paired, instead of assuming the horizontal one.
     pub(crate) flex_cross_far: bool,
+    // rec[65] bit 16: this text block has an out-of-flow child the walk REPLAYED (see `measure`).
+    pub(crate) has_replayed_oof: bool,
     // `position: relative` offset (§9.4.3), resolved JS-side (relativeOffset). It moves the box and its
     // subtree at PAINT time without touching the flow, so `place` adds it after the absolute origin; the
     // flow (margin collapse, sibling positions, float bands) is computed from the unshifted position. A box's
@@ -382,6 +384,9 @@ pub(crate) const RUN_ATOMIC: u8 = 4;
 // A `<wbr>`: a zero-width soft-wrap opportunity carrying no metrics — it only lets the next word break
 // before it (modelled as a width-0 collapsed space), and its presence keeps the flanking text runs distinct.
 pub(crate) const RUN_WBR: u8 = 5;
+// An OUT-OF-FLOW child of this text block: no advance, no line growth, no break opportunity — a marker that
+// records where the flow had reached, which is that child's STATIC POSITION (§10.3.7).
+pub(crate) const RUN_OOF: u8 = 6;
 
 // One item of a text block's inline stream. For TEXT: font/size/ls/ws/line_height measure its words,
 // and `asc` is the run's ascent within its line box (baselineWithin its owner) — its descent is
@@ -672,6 +677,9 @@ fn line_layout(
     // for alignment (the oracle's `trailingHang` / `trailingPreserved`).
     let mut hang = 0.0f64;
     let mut total = 0.0f64;
+    // How many lines have CLOSED. A marker waiting on an opening edge recorded the cursor it stood at; that
+    // cursor still means something only while its line is still open — a wrap since then starts it over.
+    let mut line_no = 0usize;
     // The current line's box, seeded to the strut and grown by each placed run's ascent / descent.
     let mut line_asc = strut_asc;
     let mut line_desc = strut_desc;
@@ -704,6 +712,16 @@ fn line_layout(
     // line's top + ascent — and moved by the line's alignment — at close.
     let mut line_atomics: Vec<(usize, f64)> = Vec::new();
     let mut atomics: Vec<(usize, f64, f64, f64)> = Vec::new();
+    // …and the same for the OUT-OF-FLOW markers on the line (record index, x from the content edge): their
+    // static position is the inline offset the flow had reached and the line's TOP, both settled at close so
+    // the line's alignment moves them exactly as it moves the atomics.
+    let mut line_oofs: Vec<(usize, f64, f64)> = Vec::new();
+    let mut oofs: Vec<(usize, f64, f64)> = Vec::new();
+    // …and the markers that cannot know that yet, because an inline box around them still holds an UNPLACED
+    // opening edge: (record index, the inlines' relative offset x / y, the cursor and line to fall back on).
+    // Where the flow has reached is then wherever that edge turns out to be placed — which may be a later line
+    // — exactly the oracle's `pendingStatic`, settled from the inline's first fragment.
+    let mut pending_oofs: Vec<(usize, f64, f64, usize, f64, usize)> = Vec::new();
     // Close the current line: `$wrap` says a soft wrap closed it (its hanging white space is not part of the
     // line's extent; a hard break keeps preserved spaces before it). The line's atomics move by the alignment
     // (the oracle's `alignLine`): `right` takes the free width, `center` half — clamped at zero in ltr, where an
@@ -716,16 +734,85 @@ fn line_layout(
             last_line = Some((total, line_asc));
             let end = if $wrap { line_x - hang } else { line_x };
             let free = band_w(total) - end;
-            let dx = match align {
-                1 => if rtl { free } else { free.max(0.0) },
-                2 => if rtl { (free / 2.0).min(free) } else { (free / 2.0).max(0.0) },
-                _ => 0.0,
+            // A line the flow never put anything on is not aligned at all (the oracle's `forceBreak` calls
+            // `alignLine` only `if (linePlaced)`): a `<br>` closing a line that holds nothing but an
+            // out-of-flow marker leaves that marker at the start edge, not at the far one.
+            let dx = if !line_has_content {
+                0.0
+            } else {
+                match align {
+                    1 => if rtl { free } else { free.max(0.0) },
+                    2 => if rtl { (free / 2.0).min(free) } else { (free / 2.0).max(0.0) },
+                    _ => 0.0,
+                }
             };
             for (ri, x) in line_atomics.drain(..) {
                 atomics.push((ri, x + dx, total, line_asc));
             }
+            // A marker's Y was frozen where it was recorded (the oracle reads `staticX`/`staticY` together and
+            // only ever shifts x afterwards): a line that later DROPS below a float moves `total`, and the box
+            // does not go with it. Only the alignment reaches it here.
+            for (ci, x, y) in line_oofs.drain(..) {
+                oofs.push((ci, x + dx, y));
+            }
             total += line_asc + line_desc;
+            line_no += 1;
             next_line_indent(!$wrap); // a soft wrap is not a forced break
+        }};
+    }
+    // The opening edges just went onto the line, so every marker waiting on them now knows where the flow had
+    // reached: the cursor that follows them, on the line they landed on. The RELATIVE offset of the inlines
+    // around it is NOT re-applied here — the oracle reads this corner back off the inline's own fragment
+    // (`line.minX + ce.left`, `line.y`) and that reading discards the offset it had added to the cursor. (Which
+    // is a divergence from Chrome, but so is the whole shape: Chrome splits a block-level box out of the inline
+    // it is written in, and puts its static position on a line of its own. Native's contract is the oracle.)
+    // An inline's opening edge is PLACED: it goes onto the line at the cursor and makes the line a placed one
+    // (the oracle's `flushOpenEdges`, whose `seedStrut(); linePlaced = true` is what an alignment then reads).
+    macro_rules! flush_open_edges {
+        () => {{
+            // …asked of the SUM, as `placeOnLine`'s `if (pending)` asks `openEdgeWidth()`: a negative margin
+            // that cancels an inner padding leaves NOTHING to place, and the oracle then places nothing at all
+            // — the fragment starts where the text does, and the line is not a placed one for it.
+            let total_open: f64 = open.iter().filter(|o| !o.1).map(|o| o.0).sum();
+            if total_open != 0.0 {
+                for o in open.iter_mut() {
+                    if !o.1 {
+                        line_x += o.0;
+                        o.1 = true;
+                    }
+                }
+                line_has_content = true;
+            }
+        }};
+    }
+    macro_rules! settle_pending_oofs {
+        () => {{
+            // Asked once per placed word and atomic, and there is almost never one waiting: the length test
+            // keeps that to a load and a branch rather than building a `Drain` guard per placement.
+            if !pending_oofs.is_empty() {
+                // What the oracle settles a `pendingStatic` marker to is `line.minX + from.ce.left` — the
+                // content-left of the marker's OWN inline fragment. That is the cursor the marker STOOD at
+                // (recorded at push, the pending collapsed space counted in: the oracle places such a space
+                // where it meets it, exactly as for a marker that does not wait) plus that inline's own
+                // opening edge, and not one px more. Not the whole open stack: an inline that opened AFTER the
+                // marker has its edge past the marker, not before it, so only the first `depth` entries count.
+                // A wrap since then throws the recorded cursor away — the fragment starts the new line.
+                for (ci, rx, _, depth, at, was) in pending_oofs.drain(..) {
+                    // …measured from the BAND, not from the content edge: a line too narrow for its first word
+                    // DROPS below the float (`total` moves with no line closing), and the fragment then starts
+                    // in the wider band it landed in. Only the offset along the line survives the drop.
+                    let base = band_l(total) + if was == line_no { at } else { 0.0 };
+                    let edges: f64 = open.iter().take(depth).filter(|o| !o.1).map(|o| o.0).sum();
+                    if rtl {
+                        // …an rtl corner included. Its x is the container's edge and never was the cursor's,
+                        // but its y IS the static position — which for a marker that waited is the line the
+                        // inline's edge landed on, the relative offset dropped with it, exactly as in ltr.
+                        oofs.push((ci, content_w + rx, total));
+                    } else {
+                        line_oofs.push((ci, base + edges, total));
+                    }
+                }
+            }
         }};
     }
     // …and start a fresh one.
@@ -789,14 +876,26 @@ fn line_layout(
                             // the line and hangs at a wrap). Leading whitespace is KEPT (code indentation).
                             while i < text.len() && is_ws_u16(text[i]) {
                                 match text[i] {
-                                    0x0A => break_line!(), // newline → forced break
+                                    0x0A => {
+                                        // A preserved newline ends this line with the open edges FLUSHED onto
+                                        // it (`flushOpenEdges(); forceBreak();`): they go down here, and the
+                                        // line becomes a PLACED one, so its `text-align` moves what sits on it
+                                        // — a marker waiting on one of those edges included.
+                                        settle_pending_oofs!();
+                                        flush_open_edges!();
+                                        break_line!() // newline → forced break
+                                    }
                                     0x20 => {
                                         // A preserved space is content on the line: it grows the line box by its
                                         // run's metrics as a word would (a lone space in a larger font is a fragment
-                                        // there).
+                                        // there). It goes through the oracle's `placeOnLine` like any other run,
+                                        // so the open edges are PLACED before it — and a marker waiting on one
+                                        // settles here, on this line, rather than wherever the next word lands.
+                                        settle_pending_oofs!();
+                                        line_has_content = true; // the space itself is content on this line
+                                        flush_open_edges!();
                                         line_x += space_w;
                                         hang += space_w;
-                                        line_has_content = true;
                                         line_asc = line_asc.max(run.asc);
                                         line_desc = line_desc.max(run.line_height - run.asc);
                                         if !no_wrap {
@@ -820,10 +919,27 @@ fn line_layout(
                                 i += 1;
                             }
                             if break_nl && nl > 0 {
+                                // …and a `pre-line` newline ends its line the same way a preserved one does,
+                                // with the open edges on it — but only where the RUN carries real content, so
+                                // the oracle reaches the break through `placeTextRun` at all. A whitespace-ONLY
+                                // run takes its collapsed branch instead, which places nothing and flushes
+                                // nothing (`NON_WS_RE` / `PRESERVING_WS` in `placeInlineChild`).
+                                if text.iter().any(|&c| !is_ws_u16(c)) {
+                                    settle_pending_oofs!();
+                                    flush_open_edges!();
+                                }
                                 for _ in 0..nl {
                                     break_line!();
                                 }
                             } else if line_has_content && pending_space.is_none() {
+                                // The oracle PLACES this space where it meets it (`placeInlineChild`'s
+                                // whitespace branch, under the same `lineX > lineLeft` this `line_has_content`
+                                // stands for), and placing anything puts the open inline edges down first. So
+                                // the edges go down HERE — and a marker written after them is not waiting on
+                                // anything, which is what lets it keep the relative offset of its own inline.
+                                // The space itself still only waits: one the next wrap drops grows nothing.
+                                settle_pending_oofs!();
+                                flush_open_edges!();
                                 pending_space = Some((space_w, run.asc, run.line_height - run.asc));
                             }
                         }
@@ -949,6 +1065,7 @@ fn line_layout(
                                             total += at - fy;
                                         }
                                     }
+                                    settle_pending_oofs!();
                                     for o in open.iter_mut() {
                                         if !o.1 {
                                             line_x += o.0;
@@ -991,6 +1108,7 @@ fn line_layout(
                                 }
                             }
                             // Flush the still-open edges onto this line (once), then place the word.
+                            settle_pending_oofs!();
                             for o in open.iter_mut() {
                                 if !o.1 {
                                     line_x += o.0;
@@ -1048,6 +1166,7 @@ fn line_layout(
                         total += at - fy;
                     }
                 }
+                settle_pending_oofs!();
                 for o in open.iter_mut() {
                     if !o.1 {
                         line_x += o.0;
@@ -1061,6 +1180,48 @@ fn line_layout(
                 line_desc = line_desc.max(run.line_height - run.asc);
                 line_has_content = true;
                 atomic_break = true; // a break opportunity follows this atomic
+            }
+            RUN_OOF => {
+                // §4.1: it neither sizes nor shifts the line. `font` carries its record index (the walk's
+                // marker), and what is wanted is only WHERE the flow had reached: this x on this line. A line
+                // that holds nothing else is still a line the flow reached — `line_has_content` is untouched,
+                // so an empty block keeps its zero height and the marker settles at the line that never opens
+                // (top 0, x 0), which is what the oracle gives it.
+                //
+                // A collapsed space still PENDING is part of where the flow has reached — the oracle puts the
+                // box after it (`hello ` + an abspos is x = 35.99, not 31.99) — so its width counts here. It is
+                // only PEEKED: the space has not been placed, and the next real content still places it (and
+                // may still wrap away from it), which an out-of-flow box neither prevents nor consumes.
+                //
+                // An inline axis running from the RIGHT has no cursor to read at all: its static corner is the
+                // content's right edge less the box (`staticCornerFor`), so the position is final the moment it
+                // is taken — nothing on the line, and no alignment shift, moves it. `place_out_of_flow` reads
+                // this the same way block flow's rtl static does (the content's far edge, the box subtracted
+                // once its width is known), so what is recorded here is that edge.
+                //
+                // `size` / `ls` carry the `position: relative` offset of the inline boxes around it, which
+                // moves the content this position is a reading of (§9.4.3) and so moves the reading too.
+                let (ci, rx, ry) = (run.font as usize, run.size, run.ls);
+                // The inline box it sits DIRECTLY in, if that box has an opening edge of its own (`metric`,
+                // set by the walk) and the edges around it have not been placed — asked of their SUM, as the
+                // flush is, so a pair that CANCELS is never "unplaced" to wait for — has not told the flow
+                // where it reaches: the
+                // edge goes down when the box's first content does, which may be a later line than this one.
+                // Wait for it, keeping the cursor as the fallback for an edge that never lands. An edge further
+                // OUT is not waited on — the oracle asks only `openInlines[openInlines.length - 1]`, so a plain
+                // inner inline reads the cursor however edged the boxes around it are.
+                let unplaced: f64 = open.iter().filter(|o| !o.1).map(|o| o.0).sum();
+                if run.metric != 0.0 && unplaced != 0.0 && open.last().is_some_and(|o| !o.1) {
+                    // `open.len()` is its own inline's depth: the walk only sets `metric` where that inline
+                    // emitted a non-zero opening edge, so it is the innermost open box right now.
+                    let pending_w = pending_space.map_or(0.0, |(w, _, _)| w);
+                    pending_oofs.push((ci, rx, ry, open.len(), line_x + pending_w, line_no));
+                } else if rtl {
+                    oofs.push((ci, content_w + rx, total + ry));
+                } else {
+                    let pending_w = pending_space.map_or(0.0, |(w, _, _)| w);
+                    line_oofs.push((ci, band_l(total) + line_x + pending_w + rx, total + ry));
+                }
             }
             RUN_WBR => {
                 // `<wbr>`: a zero-width soft-wrap opportunity — exactly the oracle's `barrier = null`, the same
@@ -1077,7 +1238,28 @@ fn line_layout(
     if line_has_content {
         close_line!(false); // close the final line (a trailing <br>'s fresh empty line is NOT closed)
     }
-    Some(LineLayout { height: total, first: first_line, last: last_line, atomics })
+    // An opening edge that never landed (its inline closed holding nothing the flow placed) leaves the cursor
+    // read at the marker standing, which is what `pendingStatic` falls back to when the inline has no fragment.
+    // Believed UNREACHABLE: the walk admits an edged inline only with real content in it, and every placement
+    // of real content settles first. Kept because the alternative to a wrong answer here is no answer at all —
+    // and if it ever does fire, note that the oracle's own fallback is still moved by the line's alignment
+    // (`lineStatics`), which this is not.
+    for (ci, rx, ry, _, at, was) in pending_oofs.drain(..) {
+        let x = if rtl {
+            content_w + rx
+        } else {
+            band_l(total) + rx + if was == line_no { at } else { 0.0 }
+        };
+        oofs.push((ci, x, total + ry));
+    }
+    // …and a line that never OPENED never closed, so the markers on it are still waiting: a block whose only
+    // children are out-of-flow has no content to close a line with, and the cursor those boxes read is the one
+    // an empty line starts at — the indent, the band a float leaves. No line means no alignment, either (the
+    // oracle's `alignLine` runs at a close that does not happen here), so they settle where they stand.
+    for (ci, x, y) in line_oofs.drain(..) {
+        oofs.push((ci, x, y));
+    }
+    Some(LineLayout { height: total, first: first_line, last: last_line, atomics, oofs })
 }
 // What `line_layout` lays out: the line count, the content height, and the first / last line as (top, ascent)
 // within the content box — the baselines a box hands its container.
@@ -1089,6 +1271,9 @@ struct LineLayout {
     // the line's alignment applied — the line's top, the line's ascent): the text arm drops a natively laid-out
     // atomic onto its line's baseline from these.
     atomics: Vec<(usize, f64, f64, f64)>,
+    // Where each OUT-OF-FLOW marker's flow position fell: (record index, x from the content edge, line top).
+    // `place_out_of_flow` reads it as the static corner, exactly as block flow's cursor is read.
+    oofs: Vec<(usize, f64, f64)>,
 }
 
 // `\p{L}\p{N}`, which is how the oracle's `HYPHEN_BREAK_RE` spells its classes — read from that same regex
@@ -1542,6 +1727,16 @@ fn measure(
                         boxes[c].x = n.bl + n.pl + x + Input::m(k.ml);
                         boxes[c].y = content_top_rel + top + (line_asc - r.asc) + Input::m(k.mt);
                     }
+                    // …and each OUT-OF-FLOW child records its STATIC POSITION, which is what the flow would
+                    // have given it: the inline offset it interrupted and the top of that line (measured off
+                    // the oracle — after `hello ` on a 200px block it is x = 57.6, y = 0; wrapped onto the
+                    // second line, x = 153.6, y = 22; under `text-align: right`, the aligned offset). Same
+                    // contract as block flow's `(content_left_rel, cursor)`, which `place_out_of_flow` reads
+                    // once every box is final.
+                    for (ci, x, top) in ll.oofs {
+                        boxes[ci].x = n.bl + n.pl + x;
+                        boxes[ci].y = content_top_rel + top;
+                    }
                     ll.height
                 }
                 None => {
@@ -1553,6 +1748,22 @@ fn measure(
             failed.set(true);
             0.0
         };
+        // An out-of-flow child the walk REPLAYED (its box is the oracle's, riding the record) is laid out at
+        // that box and positioned by `place` from rec[39..40] — the same two lines block flow gives it. It has
+        // no marker on any line (the walk emits none for it), so nothing here has touched it, and a text block
+        // that never looked at its non-atomic children would have left it a 0x0 box at the origin. The record
+        // says whether there is one, so a page whose text blocks hold none pays a bit read rather than a scan.
+        if n.has_replayed_oof {
+            for &c in &children[i] {
+                let cn = inputs[c];
+                if cn.out_of_flow != 0 && !cn.native_oof() {
+                    let cw = resolve_width(&cn, content_w);
+                    measure(c, cw, f64::NAN, inputs, runs, run_texts, grids, children, boxes, failed, &mut FloatCtx::new(), 0.0, 0.0);
+                    boxes[c].x = 0.0;
+                    boxes[c].y = 0.0;
+                }
+            }
+        }
         // What the lines alone came to — the auto height, and a table cell's `natural_h` (whose declared height
         // is a FLOOR the content grows past, §17.5.3).
         let flow_h = content_top_rel + content_h + n.pb + n.bb;
@@ -4146,6 +4357,10 @@ fn text_intrinsic(runs: &[Run], run_texts: &[Option<Vec<u16>>], ws_mode: u8, inp
         match run.kind {
             RUN_BR => end_line!(),
             RUN_WBR => opportunity!(),
+            // An OUT-OF-FLOW box is not in the flow's inline stream: it contributes no advance to either
+            // intrinsic width and brings no break opportunity — it is only a marker of where the flow reached,
+            // and an intrinsic measure has no lines for that to mean anything on.
+            RUN_OOF => {}
             RUN_OPEN => {
                 // An inline's EDGES here are the BASIS-LESS ones (`Run::asc` on an edge run): an intrinsic measure
                 // has no percentage basis, so a `padding: 0 10%` inline contributes nothing where the laid-out
@@ -4946,6 +5161,7 @@ mod tests {
             flex_cross_gap: 0.0,
             flex_main_reverse: false,
             flex_cross_far: false,
+            has_replayed_oof: false,
             rel_x: 0.0,
             rel_y: 0.0,
             flex_item_auto: 0,

@@ -350,6 +350,7 @@ RSpec.describe 'native layout L1 block-flow parity', if: ENV.fetch('CSIM_JS_ENGI
     session = simulated_session(page(body)); session.visit '/'
     r = parity(session, root)
     expect(r).to include('ok' => true), "harness bailed: #{r.inspect}"
+    expect(r['compared']).to be > 0, "nothing was compared: #{r.inspect}"
     expect(r['mismatches']).to eq(0), "mismatch: #{r.inspect}"
     expect(r['nativeOutOfFlow']).to be >= count, "the out-of-flow box was replayed, not placed natively: #{r.inspect}"
   end
@@ -359,6 +360,7 @@ RSpec.describe 'native layout L1 block-flow parity', if: ENV.fetch('CSIM_JS_ENGI
     session = simulated_session(page(body)); session.visit '/'
     r = parity(session)
     expect(r).to include('ok' => true), "harness bailed: #{r.inspect}"
+    expect(r['compared']).to be > 0, "nothing was compared: #{r.inspect}"
     expect(r['mismatches']).to eq(0), "mismatch: #{r.inspect}"
     expect(r['nativeOutOfFlow']).to eq(0), "expected the oracle's box to be replayed: #{r.inspect}"
   end
@@ -443,6 +445,154 @@ RSpec.describe 'native layout L1 block-flow parity', if: ENV.fetch('CSIM_JS_ENGI
       r = parity(session)
       expect(r).to include('ok' => true, 'mismatches' => 0, 'nativeOutOfFlow' => 0)
     end
+
+    # ── The static position ON A LINE ───────────────────────────────────────────────────────────────────
+    # An out-of-flow child of a TEXT block is not content the flow skips: where the flow had REACHED it is a
+    # position on a line — the inline offset, the line's alignment applied, and that line's top. It rides the
+    # run stream as a marker (RUN_OOF) that neither sizes nor shifts the line, and the line layout settles it
+    # at the same close that settles the line's atomic inlines.
+    describe 'a static position taken off a line' do
+      let(:tb) { 'position:relative;width:200px;font:16px monospace' }
+      let(:mark) { '<div style="position:absolute;width:10px;height:10px"></div>' }
+
+      it 'reads the inline offset, the line it fell on, and the line\'s alignment' do
+        expect_native_oof(%(<div style="#{tb}">hello #{mark}</div>))
+        expect_native_oof(%(<div style="#{tb}">a long stretch of words that must wrap onto a second line #{mark} tail</div>))
+        expect_native_oof(%(<div style="#{tb}">one<br>#{mark}two</div>))
+        expect_native_oof(%(<div style="#{tb};text-align:right">hello #{mark}</div>))
+        expect_native_oof(%(<div style="#{tb};text-align:center">hello #{mark} tail</div>))
+        expect_native_oof(%(<div style="#{tb}">#{mark}hello</div>))
+      end
+      # The collapsed space before it is part of where the flow has reached — it is only PEEKED, so the word
+      # after may still wrap away from it — and an rtl flow reads no cursor at all: its corner is the content's
+      # right edge less the box, wherever the line's text sits (`staticCornerFor`).
+      it 'counts the collapsed space it interrupts, and takes the content edge in rtl' do
+        expect_native_oof(%(<div style="#{tb}">hello #{mark}world</div>))
+        expect_native_oof(%(<div style="#{tb}">hello#{mark}world</div>))
+        expect_native_oof(%(<div style="#{tb};direction:rtl">hello #{mark}</div>))
+        expect_native_oof(%(<div style="#{tb};direction:rtl;text-align:center">a long stretch of words that must wrap onto a second line #{mark}</div>))
+      end
+      # An inline box around it moves the reading: its `position: relative` offset moves the content the
+      # position is read off (§9.4.3), and its OPENING EDGE is not placed until the box's first content is, so
+      # a marker written before that content waits for the edge — on whatever line the edge turns out to land.
+      it 'moves with a relative inline and waits for an unplaced opening edge' do
+        expect_native_oof(%(<div style="#{tb}"><span style="position:relative;left:6px">x #{mark} y</span></div>))
+        expect_native_oof(%(<div style="#{tb}"><span style="position:relative;left:6px;top:3px"><span style="position:relative;left:4px">x #{mark}</span></span></div>))
+        expect_native_oof(%(<div style="#{tb}"><span style="padding-left:9px">#{mark}x</span></div>))
+        expect_native_oof(%(<div style="#{tb}">lead <span style="margin-left:9px;border-left:4px solid">#{mark}x</span></div>))
+        expect_native_oof(%(<div style="#{tb}">a long stretch of words that must wrap onto a second line <span style="padding-left:9px"><span style="padding-left:5px">#{mark}x</span></span></div>))
+      end
+      # A block whose only line content is out of flow holds nothing to open a line WITH — but the line the flow
+      # never opened is still where those boxes sit, and it starts at the indent and in the band a float leaves.
+      # (Nothing closes it, so no alignment moves them, and the block is still an empty one.)
+      it 'gives a block whose only line content is out of flow the line that never opened' do
+        expect_native_oof(%(<div style="#{tb};text-indent:12px"><span>   #{mark}   </span></div>))
+        expect_native_oof(%(<div style="#{tb};text-align:right"><span>   #{mark}   </span></div>))
+        expect_native_oof(%(<div style="#{tb};text-indent:12px"><span>#{mark}</span>x</div>))
+        expect_native_oof(%(<div style="#{tb};direction:rtl"><span>   #{mark}   </span></div>))
+      end
+      # …and a box the walk REPLAYS gets no marker at all: its record already carries the oracle's own position
+      # off this container's origin, so a static position settled over it would be applied twice (measured: a
+      # `text-indent` block holding a shrink-to-fit abspos put it at 22 where the oracle says 11, 0x0 instead of
+      # its box — found by a 4000-case fuzz, and the walk's own gate is what routes it here).
+      it 'leaves a replayed box to the oracle\'s own position' do
+        expect_replayed_oof(%(<div style="#{tb};text-indent:11px"><div style="position:absolute">shrink to fit</div>mar</div>))
+        expect_replayed_oof(%(<div style="#{tb};text-indent:11px">lead <div style="position:absolute">shrink to fit</div> tail</div>))
+      end
+      # `justify` widens the spaces between the words, and native holds no per-space positions — the offset it
+      # would record is not the one the oracle reads off its placed spaces, so the block declines. Asked of the
+      # RUN STREAM, not of the block's direct children: a marker one `<span>` deep is on the same line.
+      it 'declines a justified line, however deep the marker sits' do
+        expect_walk_declines(%(<div style="#{tb};text-align:justify">a long stretch of words that must wrap onto a second line #{mark} tail</div>))
+        expect_walk_declines(%(<div style="#{tb};text-align:justify">a long stretch of words that must wrap onto a second line <span>#{mark}</span> tail here</div>))
+        expect_walk_declines(%(<div style="#{tb};text-align:justify">a long stretch of <span>words that #{mark} must</span> wrap onto a second line tail here</div>))
+      end
+      # ── Review findings (adversarial round, 2026-09-15): each was a SILENT WRONG ANSWER ────────────────
+      # A line the flow never put anything on is not aligned: `alignLine` runs only for a line that was
+      # PLACED, so a `<br>` closing a marker-only line leaves the marker at the start edge.
+      it 'does not align a line that holds nothing but a marker' do
+        expect_native_oof(%(<div style="#{tb};text-align:right">#{mark}<br>x</div>))
+        expect_native_oof(%(<div style="#{tb};text-align:center">a<br>#{mark}<br>b</div>))
+        expect_native_oof(%(<div style="#{tb};white-space:pre;text-align:right">#{mark}
+x</div>))
+        # …inside a natively laid-out atomic too, whose own line is aligned in its own width
+        expect_native_oof(%(<div style="position:relative;width:300px">x <span style="display:inline-block;width:100px;text-align:right">#{mark}<br>y</span> z</div>))
+      end
+      # The edge a marker waits for is the one belonging to the inline it sits DIRECTLY in
+      # (`openInlines[openInlines.length - 1]`) — a plain inner inline waits for nothing, however edged the
+      # boxes around it are, and an inline whose only edge is on the END side has no opening edge to wait for.
+      it 'waits only on its own inline\'s opening edge' do
+        expect_native_oof(%(<div style="position:relative;width:400px"><span style="padding-left:12px"><span>#{mark} Menu</span></span></div>))
+        expect_native_oof(%(<div style="#{tb}">lead <span style="padding-left:9px"><span style="padding-right:5px">#{mark} x</span></span></div>))
+        expect_native_oof(%(<div style="#{tb}"><span style="padding-left:12px"><span>Menu #{mark}</span></span></div>))
+      end
+      # A marker's y is frozen where it was recorded: a line whose first word does not fit the band DROPS
+      # below the float afterwards, and the box the flow had already passed does not go down with it.
+      it 'keeps the line it was on when that line drops below a float' do
+        expect_native_oof(%(<div style="position:relative;width:100px"><div style="float:left;width:80px;height:20px"></div><div style="font:16px monospace">#{mark} aaaaaaaaaa</div></div>))
+      end
+      # Round 2. What a WAITING marker settles to is the cursor it STOOD at plus its own inline's opening edge
+      # — the oracle's `line.minX + from.ce.left`. Not the cursor at settle time: an inline that opens AFTER it
+      # puts its edge past the marker, and a collapsed space after it is the oracle's next placement, not this
+      # one. (A collapsed space BEFORE it counts: the oracle places such a space where it meets it.)
+      it 'settles a waiting marker at its own inline\'s content edge, not at whatever the cursor reached' do
+        expect_native_oof(%(<div style="#{tb}">A<span style="padding-left:6px">#{mark}<span style="padding-left:4px">x</span></span></div>))
+        expect_native_oof(%(<div style="#{tb}">A<span style="padding-left:6px">#{mark}<b style="margin-left:9px">x</b></span></div>))
+        expect_native_oof(%(<div style="#{tb}">AA<span style="padding-left:6px">#{mark} x</span></div>))
+        expect_native_oof(%(<div style="#{tb}">AA <span style="padding-left:6px">#{mark}<span style="padding-left:4px">x</span></span></div>))
+      end
+      # A forced break and a preserved space both PLACE the open edges first (`flushOpenEdges` inside
+      # `placeOnLine`, and before `forceBreak`), which both settles a marker waiting on one and makes the line
+      # a PLACED one — so the line's alignment moves it. Under `pre-line` only a run with real content reaches
+      # that path: a newline alone in its text node takes the collapsed branch, and the walk keeps such a node
+      # in a run of its own so the two stay distinguishable.
+      it 'settles a waiting marker at a preserved space and at a forced newline' do
+        pre = 'position:relative;width:200px;font:16px monospace;white-space:pre'
+        expect_native_oof(%(<div style="#{pre}">A<span style="padding-left:6px">#{mark}\nx</span></div>))
+        expect_native_oof(%(<div style="#{pre};text-align:right">A<span style="padding-left:6px">#{mark}\nx</span></div>))
+        expect_native_oof(%(<div style="#{pre}">A<span style="padding-left:6px">#{mark}  x</span></div>))
+        expect_native_oof(%(<div style="#{pre}-wrap">AA<span style="padding-left:6px">#{mark} x</span></div>))
+        expect_native_oof(%(<div style="#{pre}-line">A<span style="padding-left:6px">#{mark}\nx</span></div>))
+        expect_native_oof(%(<div style="#{pre}-line">a much longer stretch of ordinary words that will wrap <span style="padding-left:6px">#{mark}\n<span>y</span></span> tail</div>))
+      end
+      # Round 3. A waiting marker's cursor is measured from the BAND, which a float drop moves under it: a
+      # line too narrow for its first word goes down, WITHOUT closing, into the wider band it lands in.
+      it 'follows the band when its line drops below a float while it waits' do
+        expect_native_oof(%(<div style="position:relative;width:100px"><div style="float:left;width:80px;height:20px"></div><div style="font:16px monospace"><span style="padding-left:9px">#{mark}aaaaaaaaaa</span></div></div>))
+        expect_native_oof(%(<div style="position:relative;width:100px;text-align:right"><div style="float:left;width:80px;height:20px"></div><div style="font:16px monospace"><span style="padding-left:9px">#{mark}aa</span></div></div>))
+      end
+      # A COLLAPSED space inside the marker's own inline puts that inline's edge down where the oracle places
+      # the space — so a marker written after it is waiting on nothing, and keeps its own inline's relative
+      # offset. And edges that CANCEL (a negative margin outside a padding) are never placed at all, because
+      # the flush is asked of their sum: the fragment then starts where its content does.
+      it 'is not waiting once a collapsed space has put the edge down, and not fooled by cancelling edges' do
+        expect_native_oof(%(<div style="#{tb}">zz<span style="padding-left:9px;position:relative;left:2px"> #{mark}a</span></div>))
+        expect_native_oof(%(<div style="#{tb}">zz<span style="padding-left:9px;position:relative;top:3px"> #{mark}a</span></div>))
+        expect_native_oof(%(<div style="#{tb};direction:rtl">zz<span style="padding-left:9px;position:relative;top:3px"> #{mark}a</span></div>))
+        expect_native_oof(%(<div style="#{tb}"><span style="margin-left:-6px"><span style="padding-left:6px">#{mark}aa</span></span></div>))
+        expect_native_oof(%(<div style="#{tb}"><span style="margin-left:-6px"><span style="padding-left:7px">#{mark}aa</span></span></div>))
+        # …and an edge that cancels is never placed AT ALL, so nothing in that inline is ever waiting: a
+        # marker written AFTER its content reads the cursor, where holding it back would have put it at the
+        # fragment's start (measured in Chrome: 38.41, which is the cursor).
+        expect_native_oof(%(<div style="#{tb}"><span style="margin-left:-6px"><span style="padding-left:6px">word#{mark}more</span></span></div>))
+        expect_native_oof(%(<div style="#{tb}"><span style="margin-left:-6px"><span style="padding-left:6px">word #{mark}more</span></span></div>))
+      end
+      # What a held-back marker reads is where its fragment OPENED, which is not the fragment's leftmost
+      # extent: content further along the line can reach further left than the box's own start (Chrome 6).
+      it 'reads where its fragment opened, not how far left the fragment reaches' do
+        expect_native_oof(%(<div style="#{tb}"><span style="padding-left:6px">#{mark}alpha<span style="margin-left:-90px">beta</span></span></div>))
+        expect_native_oof(%(<div style="#{tb}"><span style="margin-left:6px"><span style="padding-left:6px">#{mark}alpha<span style="margin-left:-5px">beta</span></span></span></div>))
+        expect_native_oof(%(<div style="#{tb}"><span style="padding-left:6px">#{mark}alpha<span style="margin-left:-9px">beta</span></span></div>))
+      end
+      # An rtl corner is the container's, so the alignment never moves it and the cursor never reaches it —
+      # but its BLOCK axis is the static position like any other, relative inlines included.
+      it 'moves an rtl corner in the block axis only' do
+        expect_native_oof(%(<div style="#{tb};direction:rtl"><span style="position:relative;top:3px;left:4px">#{mark} x</span></div>))
+        expect_native_oof(%(<div style="#{tb};direction:rtl"><span style="position:relative;top:3px;padding-left:9px">#{mark} x</span></div>))
+        expect_native_oof(%(<div style="#{tb};direction:rtl"><span style="position:relative;top:5px"><span style="position:relative;top:2px">x #{mark}</span></span></div>))
+      end
+    end
+
   end
 
   # A block whose own BLOCK axis is the horizontal one (a vertical `writing-mode`) does not fill its containing
