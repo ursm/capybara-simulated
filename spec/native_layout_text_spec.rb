@@ -548,6 +548,142 @@ RSpec.describe 'native layout L2 text-block parity', if: ENV.fetch('CSIM_JS_ENGI
     end
   end
 
+  # ── `white-space` is the RUN's, not the block's ────────────────────────────────────────────────────────
+  # An inline may declare its own, and each of the three behaviours the property controls is then asked of the
+  # run it is about: whether THIS text's spaces are real advances, whether a break may fall at THIS space,
+  # whether THIS newline forces one. The run stream carries the mode (`Run::ws_mode`) and two runs of different
+  # modes never merge into one — the block's own mode decides nothing for them.
+  describe 'an inline carrying its own white-space' do
+    def bail(body)
+      r = shadow(body)
+      expect(r).to include('ok' => false), "expected a decline: #{body}: #{r.inspect}"
+    end
+
+    it 'lays out a WRAPPING inline whatever the block declares' do
+      expect_parity('<div style="width:80px;font:16px monospace;white-space:nowrap">aaa <span style="white-space:normal">bbb ccc</span> ddd</div>')
+      expect_parity('<div style="width:80px;font:16px monospace">aaa <span style="white-space:pre-wrap">b  c</span> ddd</div>')
+      expect_parity(%(<div style="width:200px;font:16px monospace">aaa <span style="white-space:pre-line">b
+c</span> ddd</div>))
+      expect_parity('<div style="width:80px;font:16px monospace;white-space:pre">aaa <span style="white-space:pre-wrap">b  c</span> ddd</div>')
+    end
+    # …and one whose own mode never wraps is measured under it too, as long as the line around it cannot
+    # break either — there is then nothing for the missing lookahead to decide.
+    it 'lays out a NON-wrapping inline inside a line that cannot break' do
+      expect_parity('<div style="width:80px;font:16px monospace;white-space:nowrap">aaa <span style="white-space:pre">b  c</span> ddd</div>')
+      expect_parity('<div style="width:80px;font:16px monospace;white-space:pre">aaa <span style="white-space:nowrap">bbb ccc</span></div>')
+    end
+    # A space belongs to the run that WROTE it, and so does the break opportunity behind it: the oracle leaves
+    # a `barrier` of `'hard'` after a non-wrapping run's trailing space, and everything that consumes the space
+    # — the next word, the next atomic — has to honour that rather than ask its own mode. A space also REPLACES
+    # whatever opportunity the text before it left (a hyphen, a wide character).
+    it 'keeps the break opportunity with the space that queued it' do
+      expect_parity('<div style="width:80px;font:16px monospace;white-space:nowrap">aaa <span style="white-space:normal">bbbbbbbb ccc</span></div>')
+      expect_parity('<div style="width:80px;font:16px monospace;white-space:nowrap">aaaa <span style="white-space:normal"><span style="display:inline-block;width:60px;height:9px"></span></span></div>')
+      expect_parity('<div style="width:80px;font:16px monospace;white-space:nowrap">aaaa- <span style="white-space:normal">bbbb</span></div>')
+      expect_parity('<div style="width:80px;font:16px monospace;white-space:nowrap">一二三 <span style="white-space:normal">bbbbbb</span></div>')
+      # …and without the space the opportunity is the hyphen's again
+      expect_parity('<div style="width:80px;font:16px monospace;white-space:nowrap">aaaa-<span style="white-space:normal">bbbb</span></div>')
+    end
+    # A PRESERVED space is a placement like any other: it puts the collapsed space waiting from an earlier run
+    # down first, and it hangs in a counter of its own — the oracle keeps `trailingHang` and `trailingPreserved`
+    # mutually exclusive and hangs the preserved ones only on a line that WRAPPED.
+    it 'places a waiting collapsed space before a preserved one, and hangs the two apart' do
+      expect_parity('<div style="width:400px;font:16px monospace">aaa <span style="white-space:pre-wrap"> </span><span style="display:inline-block;width:20px;height:10px"></span></div>')
+      expect_parity('<div style="width:400px;font:16px monospace">aaa <span style="white-space:pre-wrap">  </span>bbb<span style="display:inline-block;width:20px;height:10px"></span></div>')
+      expect_parity('<div style="width:200px;font:16px monospace;text-align:right"><span style="display:inline-block;width:20px;height:10px"></span>aaa<span style="white-space:pre-wrap">   </span> wwwwwwwwwwwwwwwwwwww</div>')
+      # …and a COLLAPSING whitespace-only run between two preserving ones is a space, not a no-op: the
+      # zero-width opportunity a preserved space leaves behind must not stand in for it.
+      expect_parity('<div style="width:80px;font:16px monospace;white-space:pre-wrap">aaa <span style="white-space:normal">  </span> ddd</div>')
+    end
+    # A PRESERVED space leaves a barrier behind it too — `null` where its run wraps, HARD where it does not.
+    # A `pre` run leaving none at all let a hyphen, a wide character or an atomic on the far side of it open a
+    # line the oracle keeps whole. And a wrapping run that STARTS with white space rescues the opportunity of
+    # the space already waiting, which is how a `nowrap` block's space still opens a line for the inline after it.
+    it 'leaves the right barrier behind a preserved space, and rescues one for a leading space' do
+      expect_parity('<div style="width:80px;font:16px monospace;white-space:nowrap"><span style="white-space:pre">aaaa- </span><span style="white-space:normal">bbbb</span></div>')
+      expect_parity('<div style="width:80px;font:16px monospace;white-space:pre">aaaa- <span style="white-space:normal">bbbb</span></div>')
+      expect_parity('<div style="width:80px;font:16px monospace;white-space:pre">一二三 <span style="white-space:normal">bbbb</span></div>')
+      expect_parity('<div style="width:80px;font:16px monospace;white-space:nowrap"><span style="white-space:pre">aaaa </span><span style="white-space:normal"><span style="display:inline-block;width:60px;height:9px"></span></span></div>')
+      expect_parity('<div style="width:80px;font:16px monospace;white-space:nowrap">aaa <span style="white-space:normal"> bbbbbbbb</span></div>')
+      expect_parity('<div style="width:80px;font:16px monospace;white-space:nowrap">aaa <span style="white-space:pre-line"> bbbbbbbb</span></div>')
+      expect_parity('<div style="width:80px;font:16px monospace;white-space:nowrap">一二三 <span style="white-space:normal"> bbb</span> ddd</div>')
+      # …while a space that TAKES the slot from a zero-width marker answers for itself, not for the marker
+      expect_parity('<div style="width:80px;font:16px monospace;white-space:nowrap"><span style="white-space:pre-wrap">a </span><span style="white-space:nowrap"> </span><span style="white-space:normal">bbbbbbbb</span></div>')
+      # …and the preserved hang ends where a collapsed space is placed among them
+      expect_parity('<div style="width:80px;font:16px monospace;text-align:right"><span style="display:inline-block;width:20px;height:9px"></span><span style="white-space:pre-wrap">a </span><span> </span><span style="white-space:pre-wrap"> </span>cccccccc</div>')
+    end
+    # The INTRINSIC measure asks the same questions through a content-sized box — a float, a vertical writing
+    # mode, a `min-content` / `max-content` width, a flex item — where `pin` ("this box never wraps, so its
+    # min-content IS its max-content") is the BLOCK's property however its runs are written.
+    it 'measures a mixed-mode box through every content-sized route' do
+      inner = 'aaa <span style="white-space:normal">bbb ccc</span> ddd'
+      # …a newline inside a preserved run included: each newline-SEGMENT is its own placement, so a segment
+      # after one starts over and a run that OPENS with a newline drops the space waiting for it.
+      expect_parity(%(<div style="width:max-content;font:16px monospace;white-space:nowrap"><span style="white-space:pre">a
+b</span><span style="white-space:normal"> c</span></div>))
+      expect_parity(%(<div style="width:max-content;font:16px monospace;white-space:nowrap">一二三 <span style="white-space:pre-wrap">
+  </span></div>))
+      expect_parity(%(<div style="width:min-content;font:16px monospace;white-space:nowrap">#{inner}</div>))
+      expect_parity(%(<div style="width:max-content;font:16px monospace;white-space:nowrap">#{inner}</div>))
+      expect_parity(%(<div style="width:400px;display:flow-root"><div style="float:left;font:16px monospace;white-space:nowrap">#{inner}</div></div>))
+      expect_parity(%(<div style="width:400px"><div style="writing-mode:vertical-lr;font:16px monospace;white-space:nowrap">#{inner}</div></div>))
+      expect_parity(%(<div style="display:flex;width:400px"><div style="font:16px monospace;white-space:nowrap">#{inner}</div><div>x</div></div>))
+      expect_parity(%(<div style="width:max-content;font:16px monospace">aaa <span style="white-space:pre-wrap">  </span></div>))
+      expect_parity(%(<div style="width:max-content;font:16px monospace"><span style="white-space:pre-wrap">  </span> aaa bbb</div>))
+    end
+    # A mode change at DEPTH 2 is admitted on the flow path — `nlGatherRuns` threads the owner's mode down
+    # every level — while `nlInlineMeasurable` still refuses any difference at any depth, so the INTRINSIC
+    # route declines the same subtree. The asymmetry is the safe direction (a decline, never a wrong answer);
+    # both halves are pinned here so neither drifts without an example noticing.
+    it 'admits a depth-2 mode change in the flow and declines it in an intrinsic measure' do
+      inner = 'aa <span style="white-space:normal">bb <span style="white-space:pre-wrap">cc  dd</span></span> ee'
+      expect_parity(%(<div style="width:120px;font:16px monospace">#{inner}</div>))
+      expect_parity(%(<div style="width:120px;font:16px monospace;white-space:pre-line">#{inner}</div>))
+      bail(%(<div style="width:max-content;font:16px monospace">#{inner}</div>))
+      bail(%(<div style="width:400px;display:flow-root"><div style="float:left;font:16px monospace">#{inner}</div></div>))
+    end
+    # KNOWN GAP, refused rather than answered: a non-wrapping inline inside a line that DOES wrap is one
+    # unbreakable unit, and the line has to decide BEFORE it whether the whole of it fits (Chrome puts `aaa`
+    # alone above `bbb ccc` in an 80px block). Native's breaker is greedy word by word with no lookahead to
+    # the next opportunity, so it would place the first word and overflow the rest — a wrong answer, not a
+    # decline. The walk refuses it until native can fit the unit.
+    it 'declines a non-wrapping inline inside a wrapping line' do
+      # …each paired with the sibling that IS admitted, so the decline cannot be some other refusal wearing
+      # this example's name (the harness flattens every gather reason to `unsupported subtree`).
+      bail('<div style="width:80px;font:16px monospace">aaa <span style="white-space:nowrap">bbb ccc</span> ddd</div>')
+      expect_parity('<div style="width:80px;font:16px monospace">aaa <span style="white-space:normal">bbb ccc</span> ddd</div>')
+      bail('<div style="width:80px;font:16px monospace">aaa <span style="white-space:pre">b  c</span> ddd</div>')
+      expect_parity('<div style="width:80px;font:16px monospace">aaa <span style="white-space:pre-wrap">b  c</span> ddd</div>')
+      bail('<div style="width:80px;font:16px monospace;white-space:pre-line">aaa <span style="white-space:nowrap">bbb ccc</span></div>')
+      expect_parity('<div style="width:80px;font:16px monospace;white-space:pre-line">aaa <span style="white-space:pre-wrap">bbb ccc</span></div>')
+    end
+    # An opportunity belongs to what PRECEDES the box, not to the box: a space or a `<wbr>` from a wrapping run
+    # opens the line before an atomic even inside a `nowrap` block, and a non-wrapping run's space closes it
+    # even inside a wrapping one. One `barrier`, which every space overwrites — an atomic's and a `<wbr>`'s
+    # included. And a `pre` run's preserved spaces are CONTENT on the line, never hanging off its end.
+    it 'reads the opportunity before an atomic off what precedes it' do
+      ib = 'display:inline-block;width:60px;height:9px'
+      expect_parity(%(<div style="width:80px;font:16px monospace;white-space:nowrap"><span style="white-space:normal">aaaa </span><span style="#{ib}"></span></div>))
+      expect_parity(%(<div style="width:80px;font:16px monospace;white-space:nowrap"><span style="display:inline-block;width:20px;height:9px"></span> <span style="white-space:normal">bbbbbbbb</span></div>))
+      expect_parity(%(<div style="width:80px;font:16px monospace;white-space:nowrap">aa<wbr> <span style="white-space:normal">bbbbbbbb</span></div>))
+      expect_parity(%(<div style="width:80px;font:16px monospace;text-align:right;white-space:pre"><span style="display:inline-block;width:10px;height:9px"></span>a   <wbr><span style="white-space:normal">bbbbbbbbbb</span></div>))
+      expect_parity(%(<div style="width:120px;font:16px monospace;text-align:right;white-space:nowrap"><span style="display:inline-block;width:10px;height:9px"></span>a<span style="white-space:pre-wrap">  </span><span style="white-space:pre"> </span><wbr><span style="white-space:normal">bbbbbbbbbbbb</span></div>))
+      # …and a `<wbr>` OVERWRITES the barrier, a non-wrapping run's hard space included — the ordering the
+      # examples above miss is space, then `<wbr>`, then the ATOMIC (a word after the `<wbr>` takes a different
+      # path and was already right).
+      expect_parity(%(<div style="width:80px;font:16px monospace;white-space:nowrap"><span style="white-space:pre">aaaa </span><wbr><span style="#{ib}"></span></div>))
+      expect_parity(%(<div style="width:80px;font:16px monospace;white-space:nowrap">aaaa <wbr><span style="#{ib}"></span></div>))
+    end
+    # A space that COLLAPSES AWAY against one already on the line decides nothing: it cannot take back the
+    # opportunity the space before it gave. Source indentation between two inline elements is exactly this
+    # shape, and a `nowrap` block's own newline between them was cancelling a wrapping inline's break.
+    it 'lets a space that collapses away leave the opportunity alone' do
+      expect_parity('<div style="width:80px;font:16px monospace;white-space:nowrap"><span style="white-space:normal">aaaa </span><span style="white-space:nowrap"> </span><span style="white-space:normal">bbbbbbbb</span></div>')
+      expect_parity('<div style="width:80px;font:16px monospace;white-space:nowrap">aa<em style="white-space:normal">xyz </em> <em style="white-space:normal">aaaaaaaa</em></div>')
+      expect_parity('<div style="width:80px;font:16px monospace;white-space:nowrap"><span style="white-space:pre-line">aaaa </span><span style="white-space:nowrap"> </span><span style="white-space:normal">bbbbbbbb</span></div>')
+    end
+  end
+
 end
 
 RSpec.describe 'native text valign decline', if: ENV.fetch('CSIM_JS_ENGINE', 'v8') == 'v8' do
