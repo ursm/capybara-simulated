@@ -148,7 +148,7 @@ RSpec.describe 'native layout L1 block-flow parity', if: ENV.fetch('CSIM_JS_ENGI
 
   # An out-of-flow (absolute / fixed) child is removed from flow and REPLAYED at the oracle's resolved box
   # (§4.1): native lays out its subtree and positions it by its displacement from the block's border box,
-  # neither sizing nor shifting the in-flow siblings. A `sticky` child, an abspos flex/table container, and an
+  # neither sizing nor shifting the in-flow siblings. An abspos TABLE container and an
   # abspos subtree native can't lay out still decline.
   def expect_parity(body)
     session = simulated_session(page(body)); session.visit '/'
@@ -280,7 +280,7 @@ RSpec.describe 'native layout L1 block-flow parity', if: ENV.fetch('CSIM_JS_ENGI
     # whole pass away. A measure-only gap (native's intrinsic has no `text-indent`) is refused here too.
     it 'refuses in the walk what it would have to measure and cannot' do
       expect_walk_declines('<div style="width:400px"><div style="width:max-content;text-indent:30px">aa bb</div></div>')
-      expect_walk_declines('<div style="width:400px"><div style="width:max-content"><span style="display:inline-block"><div style="position:sticky;top:0">s</div></span></div></div>')
+      expect_walk_declines('<div style="width:400px"><div style="width:max-content"><span style="display:inline-block"><span style="display:inline-flex"><div>f</div></span></span></div></div>')
       expect_walk_declines('<div style="width:400px"><table><tr><td><div style="width:max-content"><div style="display:grid;grid-template-columns:40px"><div>g</div></div></div></td></tr></table></div>')
     end
     # A keyword on any of the OTHER five size properties is not a width native has to find: the oracle resolves
@@ -317,11 +317,11 @@ RSpec.describe 'native layout L1 block-flow parity', if: ENV.fetch('CSIM_JS_ENGI
     # inherit` under a keyword parent IS a keyword width — and the cheap pre-test that keeps the question off
     # the hot path has to let it through, or the walk marks a box measured that native then measures without
     # the obligations measuring carries (it laid out a `text-indent`ed one at the wrong width, and threw a
-    # whole pass away on a sticky child).
+    # whole pass away on a subtree it cannot measure).
     it 'sees a keyword width arriving through inherit' do
       expect_walk_declines('<div style="display:flex;width:400px"><div style="width:min-content"><div style="width:inherit;text-indent:30px">aa bb cc</div></div></div>')
       expect_walk_declines('<table style="border-spacing:0"><tr><td style="padding:0;width:min-content"><div style="width:inherit;text-indent:30px">aa bb cc</div></td></tr></table>')
-      expect_walk_declines('<div style="display:flex;width:400px"><div style="width:min-content"><div style="width:inherit"><span style="display:inline-block"><div style="position:sticky;top:0">s</div></span></div></div></div>')
+      expect_walk_declines('<div style="display:flex;width:400px"><div style="width:min-content"><div style="width:inherit"><span style="display:inline-block"><span style="display:inline-flex"><div>f</div></span></span></div></div></div>')
       # …and one with nothing to refuse lays out, the inherited keyword measured like any other
       expect_parity('<div style="width:400px"><div style="width:min-content"><div style="width:inherit">aa bb cc</div></div></div>')
       expect_parity('<div style="width:400px"><span style="width:min-content"><span style="display:inline-block;width:inherit">bb cc</span></span></div>')
@@ -664,11 +664,15 @@ x</div>))
     # PUSHED is not in the run stream native measures from, so the walk has to decline where it would otherwise
     # hand Rust a subtree it cannot re-measure. Every shape here lays out natively without the writing mode.
     it 'declines a vertical block whose atomic inline is pushed, not laid out natively' do
+      # A SUBSET of `WalkRefusals::ATOMIC`, deliberately: that list is what the atomic ROUTE refuses, and
+      # this is a different route — a vertical block measures its own width, so what it declines is what it
+      # cannot MEASURE, which is not the same set (the shared list's whitespace-only and table-cell atomics
+      # are measurable here). Written out rather than filtered, so a reader sees the shapes.
       [
         'a <span style="display:inline-block;width:max-content">bb</span>',
         'a <span style="display:inline-block;width:min-content">bb cc</span>',
         'a <span style="display:inline-block;width:fit-content">t<div>x</div></span>',
-        'a <span style="display:inline-block"><div style="position:sticky;top:0">s</div></span>',
+        'a <span style="display:inline-block"><span style="display:inline-flex"><div>f</div></span></span>',
         'a <span style="display:inline-block"><div style="float:left;width:9px;height:4px"></div>t</span>',
         'a<br>b <span style="display:inline-block;width:max-content">bb</span>'
       ].each do |inner|
@@ -794,13 +798,15 @@ x</div>))
     # An out-of-flow box whose OWN width IS a shrink-to-fit needs an intrinsic measure of its content, so where
     # native cannot measure that content the box keeps the oracle's box — the pass is not declined for it. WHICH
     # it is, the WALK decides: a subtree it refuses under the measuring obligation is rolled back and the box is
-    # replayed, so content the predicate cannot judge (a `text-indent`ed atomic, a sticky child) lands here too.
+    # replayed, so content the predicate cannot judge (a `text-indent`ed atomic, an inline-flex) lands here too.
     it 'replays a shrink-to-fit box whose own content native cannot measure' do
       expect_replayed_oof(%{<div style="width:400px;position:relative"><div style="writing-mode:vertical-lr"><div style="position:absolute;left:0">#{pushed_atomic}</div><div style="width:9px;height:4px"></div></div></div>})
       expect_replayed_oof(%{<div style="width:400px;position:relative"><div style="writing-mode:vertical-lr"><div style="position:absolute">#{pushed_atomic}</div><div style="width:9px;height:4px"></div></div></div>})
+      # …again a subset, for the same reason: this route REPLAYS what it cannot measure rather than declining,
+      # and the shared list's other entries are measurable here.
       [
         '<span style="display:inline-block;width:fit-content">t<div>x</div></span>',
-        '<span style="display:inline-block"><div style="position:sticky;top:0">s</div></span>',
+        '<span style="display:inline-block"><span style="display:inline-flex"><div>f</div></span></span>',
         '<span style="display:inline-block;width:max-content">bb</span>'
       ].each do |inner|
         expect_replayed_oof(%{<div style="width:400px;position:relative"><div style="position:absolute;left:0">a #{inner}</div><p>x</p></div>})
@@ -997,6 +1003,36 @@ x</div>))
       expect_parity('<div style="width:400px"><div style="box-sizing:border-box;border:3px solid;padding:0 10px;max-width:8px;min-width:4px">x</div></div>')
       expect_parity('<div style="width:400px"><div style="box-sizing:border-box;padding:0 10px;width:100px;max-width:5px">x</div></div>')
       expect_parity('<div style="width:400px"><div style="box-sizing:border-box;padding:0 10px;max-width:5px;writing-mode:vertical-lr"><div style="width:40px;height:20px"></div></div></div>')
+    end
+  end
+
+  # `position: sticky` is IN FLOW, and its box is where a STATIC one's would be — not a relative one's. The
+  # oracle never puts the scroll-driven shift into `_lb`: `stickyDelta` is read by `scrollShift` and the
+  # `offsetTop` reader, so the shift lives entirely in the READ path and the layout knows nothing of it. Five
+  # NINE separate gates refused sticky as "a scroll-driven shift native doesn't model", which mistook where
+  # that shift is applied; native needed no new rule at all, only to stop refusing. (`nlSupported`,
+  # `nlFlexSupported`, `nlTableSupported`, `nlGridSupported`, `nlAtomicMeasurable`, the atomic and flex-item
+  # arms of `nlGatherRuns`, the block-child arm, and the float arm — the last of which a sticky float needed.)
+  describe 'a sticky box lays out where a static one would' do
+    it 'takes a sticky box in every context that refused one' do
+      expect_parity('<div style="width:400px;height:200px;overflow:auto"><div style="height:50px"></div><div style="position:sticky;top:0;width:60px;height:20px"></div><div style="height:300px"></div></div>')
+      expect_parity('<div style="display:flex;width:400px"><div style="position:sticky;top:0;width:60px;height:20px"></div><div style="width:40px;height:30px"></div></div>')
+      expect_parity('<div style="display:grid;grid-template-columns:100px auto;width:400px"><div style="position:sticky;top:0;height:20px"></div><div>x</div></div>')
+      expect_parity('<table style="border-spacing:0"><tr><td style="padding:0"><div style="position:sticky;top:0">s</div></td><td style="padding:0">b</td></tr></table>')
+      expect_parity('<div style="width:400px">aaa <span style="position:sticky;top:0;display:inline-block;width:20px;height:10px"></span> bbb</div>')
+    end
+    # …a FLOAT too: a sticky float is a float, and its box needs nothing a static one's does not. (A RELATIVE
+    # float still declines — that one carries an offset native would have to apply.)
+    it 'takes a sticky float, and still refuses a relative one' do
+      expect_parity('<div style="width:400px"><div style="position:sticky;top:0;float:left;width:40px;height:10px"></div><div>text beside it</div></div>')
+      expect_parity('<div style="width:400px;height:200px;overflow:auto"><div style="height:50px"></div><div style="position:sticky;top:0;float:left;width:40px;height:10px"></div></div>')
+      expect_walk_declines('<div style="width:400px"><div style="position:relative;top:5px;float:left;width:40px;height:10px"></div><div>text</div></div>')
+    end
+    # …and the insets it is given change nothing about the box, whichever way they point.
+    it 'ignores the insets, which are the read path' do
+      ['top:0', 'top:10px', 'bottom:0', 'left:0;top:0', 'top:-5px', 'bottom:20px;right:10px'].each do |inset|
+        expect_parity(%(<div style="width:400px;height:200px;overflow:auto"><div style="height:50px"></div><div style="position:sticky;#{inset};width:60px;height:20px"></div><div style="height:300px"></div></div>))
+      end
     end
   end
 end

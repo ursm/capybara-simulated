@@ -133,8 +133,12 @@ RSpec.describe 'native layout grid parity', if: ENV.fetch('CSIM_JS_ENGINE', 'v8'
   it 'keeps a standalone inline-grid an atomic inline (unchanged)' do
     expect_parity('<div style="width:300px">text <span style="display:inline-grid;grid-template-columns:30px 30px"><span>x</span><span>y</span></span> more text wrapping onward past the edge</div>')
   end
-  it 'declines a sticky inline-grid flex item' do
-    expect_bail('<div style="display:flex;width:300px"><div style="display:inline-grid;position:sticky;grid-template-columns:50px"><span>a</span></div></div>')
+  # …and an inline-grid FLEX ITEM is a grid: a flex item is blockified, so nothing here is inline. It used to
+  # decline for the `position: sticky` on it, which is in flow and needs nothing of its own.
+  it 'matches an inline-grid flex item, positioned or not' do
+    ['position:sticky;top:0;', 'position:relative;', ''].each do |pos|
+      expect_parity(%(<div style="display:flex;width:300px"><div style="display:inline-grid;#{pos}grid-template-columns:50px"><span>a</span></div></div>))
+    end
   end
 
   # ── Native COMPUTE path (Phase 1a) ──────────────────────────────────────────────────────────────────────

@@ -14,7 +14,7 @@
 # Still DECLINES to JS: a cross axis running BOTTOM→top (never placed — which containers those are is a question
 # about the writing mode AND the direction together, see the measured table below), one running right→left that
 # also WRAPS or carries a cross (horizontal) auto margin, a WRAPPING AUTO-height column with a max-height (it
-# breaks its lines against that capacity), wrap-reverse, inline-flex, position:sticky, a float, inline-block
+# breaks its lines against that capacity), wrap-reverse, inline-flex, a float, inline-block
 # items. A REPLACED item (svg / img / input …) is now replayed as a leaf box (see native_layout_replaced_spec).
 # Each bail is an A/B: the feature-carrying input declines, a sibling without it stays native. V8 only.
 require 'capybara/simulated'
@@ -278,8 +278,8 @@ RSpec.describe 'native layout flex parity', if: ENV.fetch('CSIM_JS_ENGINE', 'v8'
   end
 
   # An abspos / fixed flex CONTAINER is out of flow: its parent replays its oracle-resolved box (insets / static
-  # position) and native lays out its items within it — the position never enters the flex sizing. Only sticky
-  # declines. (Before this, the flex gate rejected the container's own non-static position.)
+  # position) and native lays out its items within it — the position never enters the flex sizing. A STICKY one
+  # is in flow and lays out like a static one. (Before this, the flex gate rejected any non-static position.)
   it 'matches an absolutely-positioned flex container placed by insets' do
     expect_parity('<div style="position:relative;width:300px;height:200px"><div style="position:absolute;top:10px;left:20px;display:flex;gap:8px"><div style="width:40px;height:30px"></div><div style="width:40px;height:50px"></div></div></div>')
   end
@@ -289,9 +289,8 @@ RSpec.describe 'native layout flex parity', if: ENV.fetch('CSIM_JS_ENGINE', 'v8'
   it 'matches a fixed-position flex container' do
     expect_parity('<div style="width:300px;height:100px"><div style="position:fixed;top:5px;left:5px;display:flex"><div style="width:30px;height:30px"></div><div style="width:30px;height:30px"></div></div></div>')
   end
-  it 'declines a sticky flex container' do
-    a_bails_b_native('<div style="width:300px;height:400px"><div style="position:sticky;top:0;display:flex"><div style="width:30px;height:30px"></div></div></div>',
-                     '<div style="width:300px;height:400px"><div style="display:flex"><div style="width:30px;height:30px"></div></div></div>')
+  it 'matches a sticky flex container' do
+    expect_parity('<div style="width:300px;height:400px"><div style="position:sticky;top:0;display:flex"><div style="width:30px;height:30px"></div></div></div>')
   end
   # An abspos flex container is SELF-SIZED (autoHeight true) but its oof replay pushes the clamped box + clears
   # rec[54], so measure_flex can't two-phase — a binding min/max-height would mislay the items in the clamped
@@ -512,7 +511,7 @@ RSpec.describe 'native layout flex parity', if: ENV.fetch('CSIM_JS_ENGINE', 'v8'
   # out-of-flow (abspos) one — so these lay out rather than decline.
   it('matches a replaced (img) item') { expect_parity('<div style="display:flex;width:400px"><img src="x.png" style="width:80px;height:30px"><div style="width:80px;height:30px"></div></div>') }
   it('matches an absolute replaced (img) flex child') { expect_parity('<div style="position:relative;display:flex;width:400px;height:100px"><div style="width:80px;height:30px"></div><img src="x.png" style="position:absolute;top:0;left:0;width:40px;height:30px"></div>') }
-  it('declines a position:sticky flex item') { a_bails_b_native('<div style="display:flex;width:400px"><div style="position:sticky;top:0;width:80px;height:30px"></div><div style="width:80px;height:30px"></div></div>') }
+  it('matches a position:sticky flex item') { expect_parity('<div style="display:flex;width:400px"><div style="position:sticky;top:0;width:80px;height:30px"></div><div style="width:80px;height:30px"></div></div>') }
 
   # A `position: relative` inset shifts the box and its subtree (the oracle folds it into el._lb); native
   # now applies the pushed shift in place(), so these lay out rather than decline.
