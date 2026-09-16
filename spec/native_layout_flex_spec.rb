@@ -4,17 +4,23 @@
 # main-axis distribution (justify-content + gap + main-axis auto margins), cross-axis alignment
 # (align-items/self + cross-axis auto margins + first/last baseline), and the container's own box. Supported:
 # row / column in ANY writing mode (a vertical mode's row lays out along Y — `plan.mainIsX` already said so,
-# and the gate that refused it was left over from when native's flex axes were physical), nowrap / wrap,
-# main-axis reverse (row-reverse / column-reverse / rtl ROW), a cross axis running right→left (an rtl COLUMN,
-# a `*-rl` mode's ROW; items pack from the right), nested flex, position:relative offsets, main- and cross-axis
-# auto item margins, row & column min/max-height (incl. declared-height wrapping columns) + a column's cross
-# min/max-width, align-items/self:baseline & last baseline, out-of-flow (absolute / fixed) items placed at their
+# and the gate that refused it was left over from when native's flex axes were physical), nowrap / wrap /
+# wrap-reverse, main-axis reverse (row-reverse / column-reverse / rtl ROW), a cross axis running back from the
+# far physical edge in EITHER direction (an rtl COLUMN, a `*-rl` mode's ROW, a `sideways-lr` COLUMN, anything
+# under `wrap-reverse`), nested flex, position:relative offsets, main- and cross-axis auto item margins, row &
+# column min/max-height (incl. declared-height wrapping columns) + a column's cross min/max-width,
+# align-items/self:baseline & last baseline, out-of-flow (absolute / fixed) items placed at their
 # oracle-resolved box.
 #
-# Still DECLINES to JS: a cross axis running BOTTOM→top (never placed — which containers those are is a question
-# about the writing mode AND the direction together, see the measured table below), one running right→left that
-# also WRAPS or carries a cross (horizontal) auto margin, a WRAPPING AUTO-height column with a max-height (it
-# breaks its lines against that capacity), wrap-reverse, a float, inline-block
+# A reversed cross axis is ONE mechanism: native mirrors three things within the container cross — the order
+# the lines stack in, where the stack starts, and a `stretch` line's far edge — while each line still runs
+# cross-start to cross-end inside itself, because the item keywords arrive physical from the walk. Which
+# containers have one is a question about the writing mode, the direction AND the wrap together, and the
+# measured table below is the statement of it. `wrap-reverse` is a SECOND flag, not the same one: it is what
+# the flow-relative `start` / `end` follow, and a `vertical-rl` row has a reversed cross without it.
+#
+# Still DECLINES to JS: a WRAPPING AUTO-height column with a max-height (it breaks its lines against that
+# capacity), a float, inline-block
 # items. A REPLACED item (svg / img / input …) is now replayed as a leaf box (see native_layout_replaced_spec).
 # Each bail is an A/B: the feature-carrying input declines, a sibling without it stays native. V8 only.
 require 'capybara/simulated'
@@ -28,11 +34,16 @@ RSpec.describe 'native layout flex parity', if: ENV.fetch('CSIM_JS_ENGINE', 'v8'
     Rack::Builder.new { run ->(_env) { [200, {'content-type' => 'text/html; charset=utf-8'}, [html]] } }.to_app
   end
 
+  # …in a session DISPOSED at once, not at the end of the example. These examples sweep a table of shapes,
+  # and `simulated_session` defers disposal: the align-content one held 576 live V8 isolates and took the
+  # file's peak RSS to 9.52 GB (measured), where the gate runs it under flatware beside six sweeps and has
+  # been taken down by the OOM killer once already. Same 195 examples at 229 MB.
   def run_shadow(body)
-    session = simulated_session(page(body))
-    session.visit '/'
-    session.evaluate_script('document.body.offsetHeight')
-    session.evaluate_script('globalThis.__csimLayoutShadowRun()')
+    with_simulated_session(page(body)) do |session|
+      session.visit '/'
+      session.evaluate_script('document.body.offsetHeight')
+      session.evaluate_script('globalThis.__csimLayoutShadowRun()')
+    end
   end
 
   def expect_parity(body)
@@ -49,6 +60,25 @@ RSpec.describe 'native layout flex parity', if: ENV.fetch('CSIM_JS_ENGINE', 'v8'
     expect(r['mismatches']).to eq(0), "mismatch: #{r.inspect}"
     expect(r['nativeFlexRows']).to be >= 1, "the row's item widths were pushed, not native: #{r.inspect}"
   end
+
+  # Every item's box relative to its container, for an example that has to say WHERE the boxes landed and
+  # not only that the two engines agree about it.
+  def item_boxes(body)
+    with_simulated_session(page(body)) do |session|
+      session.visit '/'
+      session.evaluate_script(<<~JS)
+        (function () {
+          var c = document.body.firstElementChild, o = c.getBoundingClientRect();
+          return Array.prototype.map.call(c.children, function (e) {
+            var r = e.getBoundingClientRect();
+            return [r.x - o.x, r.y - o.y, r.width, r.height];
+          });
+        })()
+      JS
+    end
+  end
+
+  def first_item_box(body) = item_boxes(body).first
 
   it 'matches justify-content:space-between across three items' do
     expect_parity('<div style="display:flex;justify-content:space-between;width:600px"><div style="width:100px;height:30px"></div><div style="width:100px;height:30px"></div><div style="width:100px;height:30px"></div></div>')
@@ -389,7 +419,19 @@ RSpec.describe 'native layout flex parity', if: ENV.fetch('CSIM_JS_ENGINE', 'v8'
     expect(run_shadow(plain)['ok']).to be(true), 'expected the plain flex to stay native'
   end
 
-  it('declines flex-wrap:wrap-reverse') { a_bails_b_native('<div style="display:flex;flex-wrap:wrap-reverse;width:120px"><div style="width:80px;height:30px"></div><div style="width:80px;height:30px"></div></div>') }
+  # `wrap-reverse` turns the cross axis round, which native mirrors: the stack order, where it starts, and a
+  # `stretch` line's far edge. Measured in Chrome, three 20px items one per line in a 90px container — each
+  # line grown to 30 by the default `align-content: stretch` — the first item sits at 70 where a plain `wrap`
+  # leaves it at 0. Both halves of that move: the FIRST line is the lowest (its line spans 60..90), and an
+  # unstretchable `stretch` item sits at its line's cross-START, which is that line's BOTTOM edge.
+  it('matches flex-wrap:wrap-reverse') { expect_parity('<div style="display:flex;flex-wrap:wrap-reverse;width:120px"><div style="width:80px;height:30px"></div><div style="width:80px;height:30px"></div></div>') }
+  it 'stacks a wrap-reverse row from the far edge' do
+    rows = '<div style="width:60px;height:20px"></div>' * 3
+    expect(first_item_box(%(<div style="display:flex;flex-wrap:wrap-reverse;width:100px;height:90px">#{rows}</div>))[1]).to eq(70)
+    expect(first_item_box(%(<div style="display:flex;flex-wrap:wrap;width:100px;height:90px">#{rows}</div>))[1]).to eq(0)
+    # …and `align-items: flex-start`, which follows the AXIS, puts it at the same 70 without the line grow
+    expect(first_item_box(%(<div style="display:flex;flex-wrap:wrap-reverse;align-items:flex-start;width:100px;height:90px">#{rows}</div>))[1]).to eq(70)
+  end
   # align-content:stretch with lines that MIX stretch-filled and explicit cross sizes: a natively-sized row
   # grows its lines from their NATURAL crosses, so the mix is computed (it declined while item boxes were pushed).
   it 'matches a mixed stretch/explicit wrap under align-content:stretch' do
@@ -417,8 +459,47 @@ RSpec.describe 'native layout flex parity', if: ENV.fetch('CSIM_JS_ENGINE', 'v8'
     expect_parity('<div style="display:flex;flex-direction:column;direction:rtl;width:200px;height:120px"><div style="min-width:300px;height:30px"></div></div>')
     expect_parity('<div style="display:flex;flex-direction:column;direction:rtl;align-items:stretch;width:200px;height:120px"><div style="max-width:40px;height:30px;align-self:stretch"></div></div>')
   end
-  it('declines an rtl flex column with a cross auto margin') { a_bails_b_native('<div style="display:flex;flex-direction:column;direction:rtl;width:200px;height:120px"><div style="width:50px;height:30px;margin-left:auto"></div></div>', '<div style="display:flex;flex-direction:column;direction:rtl;width:200px;height:120px"><div style="width:50px;height:30px"></div></div>') }
-  it('declines an rtl WRAPPING flex column') { a_bails_b_native('<div style="display:flex;flex-direction:column;flex-wrap:wrap;direction:rtl;width:200px;height:60px"><div style="width:40px;height:30px"></div><div style="width:50px;height:40px"></div></div>', '<div style="display:flex;flex-direction:column;direction:rtl;width:200px;height:60px"><div style="width:40px;height:30px"></div></div>') }
+  # A baseline GROUP is anchored as a whole — `baseline` at its line's cross-START, `last baseline` at its
+  # cross-END — so WHICH PHYSICAL EDGE each of those is swaps on a reversed cross. Measured in Chrome, a 90px
+  # row of a 12px and a 32px item (a 37px group): `baseline` puts them at 18/0 and, under `wrap-reverse`, at
+  # 71/53 — and `last baseline` is the same pair the other way round.
+  it 'anchors a baseline group at the end of the cross axis it actually has' do
+    items = '<div style="font-size:12px">a</div><div style="font-size:32px">A</div>'
+    ['baseline', 'last baseline'].each do |a|
+      ['', 'flex-wrap:wrap-reverse;'].each do |w|
+        expect_parity(%(<div style="display:flex;#{w}align-items:#{a};width:400px;height:90px">#{items}</div>))
+      end
+    end
+    # …and the swap itself, which parity alone cannot see: the group moves to the other edge of the line.
+    plain = first_item_box(%(<div style="display:flex;align-items:baseline;width:400px;height:90px">#{items}</div>))[1]
+    flipped = first_item_box(%(<div style="display:flex;flex-wrap:wrap-reverse;align-items:baseline;width:400px;height:90px">#{items}</div>))[1]
+    expect([plain, flipped]).to eq([18, 71])
+  end
+  # `align-content` takes a BASELINE keyword that lines have no baseline to share for, so it falls back —
+  # and the two spellings fall back differently. Chrome, three 20px lines in a 90px row: `baseline` /
+  # `first baseline` land where `flex-start` does (0/20/40, no line grow) and `last baseline` where `normal`
+  # does (0/30/60); under `wrap-reverse`, 70/50/30 against 70/40/10. The two engines disagreed here — each
+  # was right about one of the pair — for 96 shapes of a 7296-case sweep.
+  it 'falls a baseline align-content back the way each spelling does' do
+    lines = '<div style="width:60px;height:20px"></div>' * 3
+    stack = ->(wrap, k) {
+      item_boxes(%(<div style="display:flex;flex-wrap:#{wrap};width:100px;height:90px;align-content:#{k}">#{lines}</div>)).map { it[1] }
+    }
+    # Chrome, measured. The two fallbacks are different places, which is what makes the pairing below a claim.
+    {'wrap' => [[0, 20, 40], [0, 30, 60]], 'wrap-reverse' => [[70, 50, 30], [70, 40, 10]]}.each do |wrap, (first, last)|
+      expect(stack.call(wrap, 'baseline')).to eq(first), wrap
+      expect(stack.call(wrap, 'first baseline')).to eq(first), wrap
+      expect(stack.call(wrap, 'last baseline')).to eq(last), wrap
+      # …which are exactly where each spelling's twin lands
+      expect(stack.call(wrap, 'flex-start')).to eq(first), wrap
+      expect(stack.call(wrap, 'normal')).to eq(last), wrap
+      ['baseline', 'first baseline', 'last baseline'].each do |k|
+        expect_parity(%(<div style="display:flex;flex-wrap:#{wrap};width:100px;height:90px;align-content:#{k}">#{lines}</div>))
+      end
+    end
+  end
+  it('matches an rtl flex column with a cross auto margin') { expect_parity('<div style="display:flex;flex-direction:column;direction:rtl;width:200px;height:120px"><div style="width:50px;height:30px;margin-left:auto"></div></div>') }
+  it('matches an rtl WRAPPING flex column') { expect_parity('<div style="display:flex;flex-direction:column;flex-wrap:wrap;direction:rtl;width:200px;height:60px"><div style="width:40px;height:30px"></div><div style="width:50px;height:40px"></div></div>') }
   it('declines max-height on a WRAPPING column (breaks lines against the capacity)') { a_bails_b_native('<div style="display:flex;flex-direction:column;flex-wrap:wrap;max-height:40px;width:300px"><div style="width:80px;height:30px"></div><div style="width:80px;height:30px"></div></div>', '<div style="display:flex;flex-direction:column;flex-wrap:wrap;width:300px"><div style="width:80px;height:30px"></div><div style="width:80px;height:30px"></div></div>') }
   # A flex container's own % padding resolves against its CONTAINING BLOCK's width on both axes (§ CSS Box),
   # which is Chrome's rule and the oracle's now — so an explicitly-sized container carrying one lays out
@@ -453,7 +534,7 @@ RSpec.describe 'native layout flex parity', if: ENV.fetch('CSIM_JS_ENGINE', 'v8'
   it('matches a floated flex item (float ignored — laid out as an ordinary item)') { expect_parity('<div style="display:flex;width:400px"><div style="float:left;width:80px;height:30px"></div><div style="width:80px;height:40px"></div></div>') }
   it('matches a floated flex item with align-items:center (float ignored)') { expect_parity('<div style="display:flex;align-items:center;width:400px;height:100px"><div style="float:left;width:80px;height:30px"></div><div style="width:80px;height:50px"></div></div>') }
   it('matches a floated flex item with flex-grow (float ignored, grows to fill)') { expect_parity('<div style="display:flex;width:400px"><div style="float:left;flex:1;height:30px"></div><div style="width:80px;height:30px"></div></div>') }
-  it('declines a nested UNSUPPORTED flex item (wrap-reverse)') { a_bails_b_native('<div style="display:flex;width:400px"><div style="display:flex;flex-wrap:wrap-reverse;width:80px;height:30px"></div><div style="width:80px;height:30px"></div></div>') }
+  it('matches a nested wrap-reverse flex item') { expect_parity('<div style="display:flex;width:400px"><div style="display:flex;flex-wrap:wrap-reverse;width:80px;height:30px"></div><div style="width:80px;height:30px"></div></div>') }
   it('matches a flex container with min-height AND percentage vertical padding') { expect_parity('<div style="width:400px"><div style="display:flex;flex-direction:column;min-height:100px;padding-top:10%;width:100px"><div style="width:80px;height:30px"></div></div></div>') }
   it('declines a cross-stretched column clamped by max-height (oracle sizes against the pre-clamp room native lacks)') { a_bails_b_native('<div style="display:flex;height:300px;width:400px"><div style="display:flex;flex-direction:column;max-height:100px;row-gap:20%;width:100px"><div style="height:20px"></div><div style="height:30px"></div></div></div>', '<div style="display:flex;height:300px;width:400px"><div style="display:flex;flex-direction:column;row-gap:20%;width:100px"><div style="height:20px"></div><div style="height:30px"></div></div></div>') }
   # A flex-ITEM flex ROW whose min-height floors its own (auto) content lays out natively: the item's autoHeight
@@ -827,38 +908,61 @@ RSpec.describe 'native layout flex parity', if: ENV.fetch('CSIM_JS_ENGINE', 'v8'
   describe 'a vertical writing mode' do
     WRITING_MODES = %w[vertical-rl vertical-lr sideways-rl sideways-lr].freeze
 
-    # Which (writing-mode, direction, flex-direction) the gate places, spelled OUT rather than recomputed: a
-    # spec that re-derives the rule agrees with the implementation even when both are wrong. `+` is placed;
-    # `→` is placed only `nowrap` and only without a cross auto margin (its cross runs right→left); `-` is
-    # never placed (its cross runs bottom→top, and nothing flips an offset onto an axis starting at the far
-    # edge). Both declines are the SAME rule a horizontal mode has, not a vertical one of its own.
+    # WHICH WAY the cross axis runs, spelled OUT rather than recomputed: a spec that re-derives the rule
+    # agrees with the implementation even when both are wrong. `+` runs from the near physical edge; `←` runs
+    # back from the FAR one — an rtl COLUMN (cross = the inline axis), a `*-rl` mode's ROW (cross = a block
+    # axis pointing left), a `sideways-lr` ROW (pointing up). Every one of them is placed natively; the table
+    # is here because it is the input native mirrors within, and because which containers those are is a
+    # question about the mode AND the direction together, never the mode alone.
     #
     #                         row  row-rev  column  column-rev
     VERTICAL_CROSS = {
-      %w[vertical-rl ltr] => %w[→   →        +       +],
-      %w[vertical-rl rtl] => %w[→   →        -       -],
+      %w[vertical-rl ltr] => %w[←   ←        +       +],
+      %w[vertical-rl rtl] => %w[←   ←        ←       ←],
       %w[vertical-lr ltr] => %w[+   +        +       +],
-      %w[vertical-lr rtl] => %w[+   +        -       -],
-      %w[sideways-rl ltr] => %w[→   →        +       +],
-      %w[sideways-rl rtl] => %w[→   →        -       -],
-      %w[sideways-lr ltr] => %w[+   +        -       -],
+      %w[vertical-lr rtl] => %w[+   +        ←       ←],
+      %w[sideways-rl ltr] => %w[←   ←        +       +],
+      %w[sideways-rl rtl] => %w[←   ←        ←       ←],
+      %w[sideways-lr ltr] => %w[+   +        ←       ←],
       %w[sideways-lr rtl] => %w[+   +        +       +]
     }.freeze
     FLEX_DIRECTIONS = %w[row row-reverse column column-reverse].freeze
 
-    it 'places a row and a column in every vertical mode, and declines only a backwards cross axis' do
+    it 'places a row and a column in every vertical mode, whichever way the cross axis runs' do
       VERTICAL_CROSS.each do |(wm, dir), cells|
         FLEX_DIRECTIONS.each_with_index do |fd, i|
-          %w[nowrap wrap].each do |wrap|
-            body = %(<div style="writing-mode:#{wm};direction:#{dir};display:flex;flex-direction:#{fd};flex-wrap:#{wrap};width:200px;height:150px"><div style="width:30px;height:20px"></div><div style="width:40px;height:50px"></div></div>)
-            if cells[i] == '+' || (cells[i] == '→' && wrap == 'nowrap')
-              expect_parity(body)
-            else
-              expect(run_shadow(body)).to include('ok' => false), body
-            end
+          %w[nowrap wrap wrap-reverse].each do |wrap|
+            expect_parity(%(<div style="writing-mode:#{wm};direction:#{dir};display:flex;flex-direction:#{fd};flex-wrap:#{wrap};width:200px;height:150px"><div style="width:30px;height:20px"></div><div style="width:40px;height:50px"></div></div>))
           end
         end
       end
+    end
+
+    # …and the table is a GEOMETRY claim, not a description of a gate: `align-items: flex-start` follows the
+    # cross AXIS, so it puts a lone item at the far physical edge exactly where the table says `←`. Reading it
+    # off the laid-out page is what keeps the table honest — the parity example above passes whether or not
+    # either engine has the direction right.
+    it 'starts the cross axis at the edge the table names' do
+      VERTICAL_CROSS.each do |(wm, dir), cells|
+        FLEX_DIRECTIONS.each_with_index do |fd, i|
+          body = %(<div style="writing-mode:#{wm};direction:#{dir};display:flex;flex-direction:#{fd};align-items:flex-start;width:200px;height:150px"><div style="width:30px;height:20px"></div></div>)
+          x, y, = first_item_box(body)
+          # Every mode here is VERTICAL, so a row lays out along Y and its cross is X; a column the other way.
+          at, far_edge = fd.start_with?('column') ? [y, 130] : [x, 170]
+          expect(at).to eq(cells[i] == '←' ? far_edge : 0), "#{wm} #{dir} #{fd} (#{cells[i]}): #{[x, y].inspect}"
+        end
+      end
+    end
+
+    # `wrap-reverse` turns the cross axis round on top of whatever the flow already did, which is why the two
+    # cannot be one flag: a `vertical-rl` ROW's cross runs backwards with no wrap keyword in sight, and
+    # `wrap-reverse` there makes it FORWARD. Measured in Chrome over the whole table above: every cell
+    # inverts. What follows the WRAP REVERSAL rather than the physical direction is the flow-relative
+    # `start` / `end` pair, which the align-content example below is the statement of.
+    it 'takes wrap-reverse and the flow apart' do
+      shell = '<div style="writing-mode:vertical-rl;display:flex;align-items:flex-start;width:200px;height:150px'
+      expect(first_item_box(%(#{shell}"><div style="width:30px;height:20px"></div></div>))[0]).to eq(170)
+      expect(first_item_box(%(#{shell};flex-wrap:wrap-reverse"><div style="width:30px;height:20px"></div></div>))[0]).to eq(0)
     end
 
     # …and an OUT-OF-FLOW child, whose static position is measured ALONG the cross axis rather than flipped
@@ -878,18 +982,16 @@ RSpec.describe 'native layout flex parity', if: ENV.fetch('CSIM_JS_ENGINE', 'v8'
       end
     end
 
-    # …and the other half of what `→` means: such a container is placed only WITHOUT a cross (horizontal) auto
-    # margin, which native's forward frame would take from the near edge — the wrong end of that axis.
-    it 'declines a cross auto margin where the cross axis runs right-to-left' do
+    # A cross-axis auto margin is PHYSICAL on both sides — it splits the room left inside the item's own line,
+    # which has no direction — so what the walk owes native is the physical near/far pair and not the axis's.
+    # Naming the axis-start side made `margin-left: auto` on a right-to-left cross read as the trailing one.
+    it 'splits a cross auto margin on the physical sides, whichever way the axis runs' do
       VERTICAL_CROSS.each do |(wm, dir), cells|
         FLEX_DIRECTIONS.each_with_index do |fd, i|
-          next unless cells[i] == '→'
-
           shell = %(<div style="writing-mode:#{wm};direction:#{dir};display:flex;flex-direction:#{fd};width:200px;height:150px">)
-          expect(run_shadow(%(#{shell}<div style="margin-left:auto;width:30px;height:20px"></div></div>))).to include('ok' => false)
-          expect(run_shadow(%(#{shell}<div style="margin-right:auto;width:30px;height:20px"></div></div>))).to include('ok' => false)
-          # …a MAIN-axis (vertical) auto margin on the same container is fine.
-          expect_parity(%(#{shell}<div style="margin-top:auto;width:30px;height:20px"></div></div>))
+          ['margin-left:auto', 'margin-right:auto', 'margin-top:auto', 'margin-bottom:auto', 'margin:auto'].each do |m|
+            expect_parity(%(#{shell}<div style="#{m};width:30px;height:20px"></div></div>))
+          end
         end
       end
     end
@@ -926,9 +1028,23 @@ RSpec.describe 'native layout flex parity', if: ENV.fetch('CSIM_JS_ENGINE', 'v8'
       end
     end
 
-    it 'declines wrap-reverse in a vertical mode too' do
-      expect(run_shadow('<div style="writing-mode:vertical-lr;display:flex;flex-wrap:wrap-reverse;width:200px;height:150px"><div style="width:30px;height:20px"></div></div>')).to include('ok' => false)
-      expect_parity('<div style="writing-mode:vertical-lr;display:flex;flex-wrap:wrap;width:200px;height:150px"><div style="width:30px;height:20px"></div></div>')
+    # `align-content` is the other reader of the reversed cross, and its three steps each see a different
+    # keyword: a DISTRIBUTION with no free space falls back to its own alignment first (`space-between` to
+    # `flex-start`, which follows the axis; `space-around` / `-evenly` to safe centre, which is flow `start`
+    # and does not), the flow-relative pair resolves onto the axis second, and only the result is mirrored.
+    it 'stacks lines by align-content in every vertical mode, overflowing or not' do
+      %w[flex-start flex-end start end center space-between space-around space-evenly stretch].each do |ac|
+        WRITING_MODES.each do |wm|
+          %w[ltr rtl].each do |dir|
+            %w[wrap wrap-reverse].each do |wrap|
+              shell = %(<div style="writing-mode:#{wm};direction:#{dir};display:flex;flex-wrap:#{wrap};align-content:#{ac};width:100px;height:90px">)
+              expect_parity(%(#{shell}<div style="width:60px;height:20px"></div><div style="width:60px;height:20px"></div><div style="width:60px;height:20px"></div></div>))
+              # …and the same lines OVERFLOWING their container, which is where the two fallbacks part
+              expect_parity(%(#{shell}<div style="width:60px;height:40px"></div><div style="width:60px;height:40px"></div><div style="width:60px;height:40px"></div></div>))
+            end
+          end
+        end
+      end
     end
   end
 end

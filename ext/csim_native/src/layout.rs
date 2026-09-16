@@ -126,11 +126,17 @@ pub(crate) struct Input {
     // Flex main axis: true = row (main is X / width), false = column (main is Y / height). The item
     // main/cross sizes swap accordingly; both come pushed.
     pub(crate) flex_main_is_x: bool,
-    // Flex wrap: false = nowrap (one line, fills the cross), true = wrap (multi-line, align-content stacks
-    // the lines). `flex_align_content` 0 start / 1 center / 2 end / 3 space-between / 4 space-around /
-    // 5 space-evenly / 6 stretch — but stretch's GROW is already baked into the pushed item cross sizes,
-    // so native only positions the lines (lead/between). `flex_cross_gap` is the px gap between lines.
+    // Flex wrap: false = nowrap (one line, fills the cross), true = wrap or wrap-reverse (multi-line,
+    // align-content stacks the lines). `flex_align_content` 0 flex-start / 1 center / 2 flex-end /
+    // 3 space-between / 4 space-around / 5 space-evenly / 6 stretch / 7 start / 8 end — the last two kept
+    // APART from 0 and 2 because they are flow-relative and only `align_content` knows which way the axis
+    // runs. Stretch's GROW is already baked into the pushed item cross sizes, so native only positions the
+    // lines (lead/between). `flex_cross_gap` is the px gap between lines.
     pub(crate) flex_wrap: bool,
+    // `wrap-reverse`, which is NOT the same question as `flex_cross_far`: the wrap reversal is what the
+    // flow-relative `start` / `end` follow, the physical direction is what every OFFSET is measured against,
+    // and a `sideways-lr` container has one without the other.
+    pub(crate) flex_cross_flip: bool,
     pub(crate) flex_align_content: u8,
     pub(crate) flex_cross_gap: f64,
     // Main axis reversed (row-reverse / column-reverse / rtl-row): the main axis runs from the FAR
@@ -143,10 +149,11 @@ pub(crate) struct Input {
     // rather than `rtl`: those two agreed only while every non-`horizontal-tb` container was declined, and a
     // `vertical-rl` row's cross runs right-to-left with no `rtl` in sight.
     //
-    // It is also set for a cross axis running BOTTOM→top, which the walk declines — and the reader does not
-    // rely on that: it is read only under `!flex_main_is_x`, and a bottom cross always has main = X (the cross
-    // is then the vertical axis of a row). Anything that admits a bottom cross has to pair this with the axis,
-    // the way `along` below is paired, instead of assuming the horizontal one.
+    // It is set for a cross running BOTTOM→top as much as for one running right→left, and every reader pairs
+    // it with the AXIS rather than assuming the horizontal one — `along` below is the shape of that. Five
+    // readers, all in `measure_flex` and the out-of-flow static position: the order the lines stack in, where
+    // the stack starts, a `stretch` line's far edge, which edge a baseline GROUP anchors at, and which margin
+    // is the leading cross one.
     pub(crate) flex_cross_far: bool,
     // rec[65] bit 16: this text block has an out-of-flow child the walk REPLAYED (see `measure`).
     pub(crate) has_replayed_oof: bool,
@@ -3022,7 +3029,8 @@ fn flex_column_sizes(
             width[p] + Input::m(k.ml) + Input::m(k.mr)
         }).fold(0.0, f64::max)).collect();
         let stacked: f64 = crosses.iter().sum::<f64>() + cross_gap * nl.saturating_sub(1) as f64;
-        let (_, _, grow) = align_content(align_content_code, content_w - stacked, nl);
+        // …only the GROW, which is how much each line gains and so is the same whichever way they stack.
+        let (_, _, grow) = align_content(align_content_code, content_w - stacked, nl, false, false);
         *line_crosses = crosses.clone();
         for (li, line) in lines.iter().enumerate() {
             let line_cross = crosses[li] + grow;
@@ -3273,6 +3281,7 @@ fn measure_flex(
     // outers and the two group extents. line_first_asc / line_last_asc + line_last_extent feed placement.
     let mut line_cross = vec![0.0f64; nlines];
     let mut line_first_asc = vec![0.0f64; nlines];
+    let mut line_first_extent = vec![0.0f64; nlines];
     let mut line_last_asc = vec![0.0f64; nlines];
     let mut line_last_extent = vec![0.0f64; nlines];
     // Each item's baseline ASCENT within its margin box — the oracle's `baselineParts.asc`: its own first (or, for
@@ -3317,6 +3326,7 @@ fn measure_flex(
         // final item widths already fill the grown line, so measuring from them would grow it twice.
         line_cross[li] = if native_col && li < native_line_crosses.len() { native_line_crosses[li] } else { plain.max(fa + fb).max(la + lb) };
         line_first_asc[li] = fa;
+        line_first_extent[li] = fa + fb;
         line_last_asc[li] = la;
         line_last_extent[li] = la + lb;
     }
@@ -3370,6 +3380,10 @@ fn measure_flex(
     // cross fills it, an auto one is the line's own); a WRAP container stacks its lines by align-content
     // (the stretch GROW is already in the item sizes, so only the lead/between positioning is applied).
     let cross_start_base = if main_is_x { content_top_rel } else { content_left_rel };
+    // Does the cross axis run back from the far physical edge? An rtl COLUMN, a `*-rl` mode's ROW, and
+    // anything under `wrap-reverse`. The item keywords arrive resolved onto the physical cross already, and
+    // each line still runs cross-start to cross-end inside itself; what reverses here is the STACK.
+    let cross_far = n.flex_cross_far;
     let mut line_lc = vec![0.0f64; nlines];
     let mut line_cs = vec![0.0f64; nlines];
     if !n.flex_wrap {
@@ -3380,17 +3394,27 @@ fn measure_flex(
         // items already fill it (align-items stretch on an auto cross size) contributes its grown cross, so
         // free is 0 there and no grow is double-applied; a line of explicit-size items contributes its
         // natural cross, so the leftover grows the lines to position the later ones (§9.6).
-        let (ac_lead, ac_between, ac_grow) = align_content(n.flex_align_content, container_cross - lines_cross_sum, nlines);
+        let free = container_cross - lines_cross_sum;
+        // `align_content` answers a lead already measured from the container's NEAR PHYSICAL edge, reversal
+        // and all — the stretch case is not the same mirror as the others, so it is made there and not here.
+        let (ac_lead, ac_between, ac_grow) = align_content(n.flex_align_content, free, nlines, cross_far, n.flex_cross_flip);
+        // …and the lines themselves stack from the far edge: a `wrap-reverse` row's FIRST line is lowest, an
+        // rtl column's rightmost, while `ac_grow` still hands each of them the same share. Walked by index
+        // rather than through a reversed vector — this runs per wrapping flex container per pass (rule 3).
+        let placed = |k: usize| if cross_far { nlines - 1 - k } else { k };
         let mut cross_at = cross_start_base + ac_lead;
-        for li in 0..nlines {
+        for k in 0..nlines {
+            let li = placed(k);
             line_lc[li] = line_cross[li] + ac_grow;
             line_cs[li] = cross_at;
             cross_at += line_lc[li] + cross_gap + ac_between;
         }
-        // Lines that STRETCH fill the cross size exactly, so the last one is closed against the container's far
-        // edge rather than left where an equal share of the free space accumulated to (stackFlexLines).
+        // Lines that STRETCH fill the cross size exactly, so the last one PLACED is closed against the
+        // container's far edge rather than left where an equal share of the free space accumulated to
+        // (stackFlexLines).
         if ac_grow > 0.0 && nlines > 0 {
-            line_lc[nlines - 1] = (cross_start_base + container_cross - line_cs[nlines - 1]).max(0.0);
+            let last = placed(nlines - 1);
+            line_lc[last] = (cross_start_base + container_cross - line_cs[last]).max(0.0);
         }
     }
 
@@ -3476,14 +3500,21 @@ fn measure_flex(
                     2 => lc - co[p],         // end
                     // baseline: hang from the line's shared baseline (the group's deepest ascent), so every
                     // member's own baseline coincides at line_first_asc. The FIRST-baseline group anchors at
-                    // the cross-START; the LAST-baseline group anchors at the cross-END (groupTop = lc −
-                    // lastExtent), both measured from their anchor.
+                    // the cross-START and the LAST-baseline one at the cross-END — which physical edge each of
+                    // those is is what a REVERSED cross swaps (the oracle's `baselineOffset`: `atStart =
+                    // first !== crossFlip`).
                     // (Only a ROW ever arrives here with the keyword: a real COLUMN has `plan.baselineMode`
                     // `axis`, so `crossAlignPhysical` resolved it away, and a VERTICAL writing mode's row —
                     // which lays out along Y and has no baseline geometry to offer — is sent as `flex-start`
                     // by the walk, for the same reason the oracle's column routine ignores the keyword there.)
-                    CROSS_BASELINE => line_first_asc[li] - asc_of(p),
-                    CROSS_BASELINE_LAST => (lc - line_last_extent[li]) + line_last_asc[li] - asc_of(p),
+                    CROSS_BASELINE => {
+                        let group_top = if cross_far { lc - line_first_extent[li] } else { 0.0 };
+                        group_top + line_first_asc[li] - asc_of(p)
+                    }
+                    CROSS_BASELINE_LAST => {
+                        let group_top = if cross_far { 0.0 } else { lc - line_last_extent[li] };
+                        group_top + line_last_asc[li] - asc_of(p)
+                    }
                     _ => 0.0,                // start / stretch
                 };
                 cs + off + cl_lead[p]
@@ -3528,16 +3559,42 @@ fn measure_flex(
 // How the LINES of a wrap container sit in its cross size (§9.6): (lead, between, grow). `stretch` (the
 // default) hands the free space to the lines as GROW and positions them tight; the other keywords position
 // with lead/between and don't grow. A stretch line whose items already fill it contributes 0 free (see the
-// caller), so the grow is never double-applied. Mirrors alignContentLines (crossFlip / wrap-reverse bailed).
-fn align_content(code: u8, free: f64, count: usize) -> (f64, f64, f64) {
+// caller), so the grow is never double-applied.
+//
+// `cross_far` says the cross axis runs back from the far physical edge, which the returned LEAD is already
+// measured against. The oracle's `alignContentLines`, transcribed in ITS OWN ORDER, because each of its
+// three steps sees a different keyword.
+fn align_content(code: u8, free: f64, count: usize, cross_far: bool, cross_flip: bool) -> (f64, f64, f64) {
     if code == 6 {
-        return (0.0, 0.0, if free > 0.0 && count > 0 { free / count as f64 } else { 0.0 }); // stretch
+        // Growing lines fill the container, so where the stack STARTS matters only when they OVERFLOW it —
+        // and a reversed axis then starts past the container's near edge rather than at it.
+        let lead = if cross_far { free.min(0.0) } else { 0.0 };
+        return (lead, 0.0, if free > 0.0 && count > 0 { free / count as f64 } else { 0.0 }); // stretch
     }
     let mut c = code;
-    if free < 0.0 && (c == 3 || c == 4 || c == 5) {
-        c = 0; // a distribution with no free space falls back to start
+    // A DISTRIBUTION with no free space falls back to its own alignment, and the two fall back DIFFERENTLY:
+    // `space-between` to `flex-start`, which follows the axis, and `space-around` / `space-evenly` to safe
+    // `center`, which under overflow is flow `start` and does not. Measured in a 40px `wrap-reverse` row of
+    // three 20px lines: 20/0/-20 against 40/20/0.
+    if free < 0.0 {
+        if c == 3 {
+            c = 0;
+        } else if c == 4 || c == 5 {
+            c = 7;
+        }
     }
+    // …then the flow-relative pair is resolved onto the axis. It swaps for the WRAP REVERSAL and not for
+    // the axis's physical direction: `start` / `end` are writing-mode relative, so a vertical mode carries
+    // them round with everything else, and only `wrap-reverse` moves them against their `flex-*` twins.
+    c = match (c, cross_flip) {
+        (7, true) | (8, false) => 2,
+        (8, true) | (7, false) => 0,
+        _ => c,
+    };
     let (lead, between) = flex_distribution(c, free, count);
+    // …and the axis-relative offset turned into a distance from the near physical edge: a reversed axis is
+    // the mirror image of itself, so what the lines leave BEYOND the stack in axis terms sits before it.
+    let lead = if cross_far { free - lead - between * (count as f64 - 1.0) } else { lead };
     (lead, between, 0.0)
 }
 
@@ -5354,11 +5411,15 @@ fn place_out_of_flow(
         } else {
             (if pn.flex_main_reverse { mb } else { mt }, h + mt + mb)
         };
-        // A cross axis that runs from the far physical edge back — an rtl COLUMN, a `vertical-rl` ROW — puts its
-        // cross-start at the right edge: the leading cross margin is the right one and the cross offset is
-        // measured back from it (the oracle's `alongAxis`).
-        let cross_far = !pn.flex_main_is_x && pn.flex_cross_far;
-        let (cross_lead, cross_item) = if pn.flex_main_is_x { (mt, h + mt + mb) } else { (if cross_far { mr } else { ml }, w + ml + mr) };
+        // A cross axis that runs from the far physical edge back — an rtl COLUMN, a `*-rl` ROW, anything
+        // under `wrap-reverse` — puts its cross-start at the far edge: the leading cross margin is the one on
+        // that side and the cross offset is measured back from it (the oracle's `alongAxis`).
+        let cross_far = pn.flex_cross_far;
+        let (cross_lead, cross_item) = if pn.flex_main_is_x {
+            (if cross_far { mb } else { mt }, h + mt + mb)
+        } else {
+            (if cross_far { mr } else { ml }, w + ml + mr)
+        };
         let main = static_justify_lead(pn.flex_justify, main_size - main_item) + main_lead;
         let cross_free = cross_size - cross_item;
         let cross = match n.flex_cross_align {
@@ -5368,7 +5429,7 @@ fn place_out_of_flow(
         } + cross_lead;
         let along = |reversed: bool, size: f64, from_start: f64, item: f64| if reversed { size - from_start - item } else { from_start };
         if pn.flex_main_is_x {
-            (ix + along(pn.flex_main_reverse, inner_w, main, main_box), iy + cross)
+            (ix + along(pn.flex_main_reverse, inner_w, main, main_box), iy + along(cross_far, inner_h, cross, h))
         } else {
             (ix + along(cross_far, inner_w, cross, w), iy + along(pn.flex_main_reverse, inner_h, main, main_box))
         }
@@ -5567,6 +5628,7 @@ mod tests {
             flex_cross_align: 0,
             flex_main_is_x: true, // row by default
             flex_wrap: false,
+            flex_cross_flip: false,
             flex_align_content: 6, // stretch
             flex_cross_gap: 0.0,
             flex_main_reverse: false,

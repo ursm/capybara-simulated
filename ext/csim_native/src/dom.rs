@@ -967,6 +967,7 @@ fn layout_pass(
             flex_cross_align: r[33] as u8,
             flex_main_is_x: r[34] != 0.0,
             flex_wrap: r[35] != 0.0,
+            flex_cross_flip: r[35] == 2.0,
             flex_align_content: r[36] as u8,
             flex_cross_gap: r[37],
             flex_main_reverse: r[38] != 0.0,
