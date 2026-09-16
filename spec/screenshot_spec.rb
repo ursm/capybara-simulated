@@ -210,7 +210,35 @@ RSpec.describe 'save_screenshot' do
       'atomic on a baseline'  => '<div style="width:200px;font-size:24px;line-height:40px">' \
                                  '<span style="display:inline-block;font-size:10px;vertical-align:middle">at</span></div>',
       'static on a centred line' => '<div style="width:200px;text-align:center">' \
-                                    '<b>hi</b><span style="position:absolute">st</span></div>'
+                                    '<b>hi</b><span style="position:absolute">st</span></div>',
+      # …and a TABLE inside a subtree that moves. Its anonymous cell holds the runs and is in nobody's child
+      # list — `anonTableCell` wraps the table's own DOM children, so a walk over `layoutChildren` reaches
+      # those children and never the cell around them, and the cell's own box and runs stayed behind. That
+      # hole was FIVE movers wide (measured: each of the shapes below painted its text at the origin while
+      # its box sat where the mover put it); the `position: relative` one is the odd case that worked, since
+      # a relative block used to be laid out already-shifted. These are the only instrument that can see it —
+      # every one of them declines natively, so the parity harness is blind to all of them.
+      'table in a relative block' => '<div style="width:200px"><div style="position:relative;left:30px;top:10px">' \
+                                     '<div style="display:table">tt</div></div></div>',
+      'table under a relative grandparent' => '<div style="width:200px"><div style="position:relative;top:12px">' \
+                                              '<div><div style="display:table">gg</div></div></div></div>',
+      'table in an auto-height float' => '<div style="width:200px;overflow:hidden">' \
+                                         '<div style="float:left"><div style="display:table">ff</div></div></div>',
+      'table in a centred flex item' => '<div style="display:flex;align-items:center;height:60px;width:200px">' \
+                                        '<div><div style="display:table">hh</div></div></div>',
+      'table on a flex-wrap second line' => '<div style="display:flex;flex-wrap:wrap;width:100px">' \
+                                            '<div style="width:60px">a</div><div style="width:60px">' \
+                                            '<div style="display:table">bb</div></div></div>',
+      'table in a bottom-anchored abspos' => '<div style="position:relative;height:100px;width:200px">' \
+                                             '<div style="position:absolute;bottom:10px">' \
+                                             '<div style="display:table">cc</div></div></div>',
+      'table in an atomic on a baseline' => '<div style="width:200px;font-size:24px;line-height:40px">' \
+                                            '<span style="display:inline-block;font-size:10px;vertical-align:middle">' \
+                                            '<div style="display:table">dd</div></span></div>',
+      # …(the box query below is `div div`, so the table under test is wrapped in a plain div here)
+      'table in a middle-aligned cell' => '<table style="border-spacing:0"><tr style="height:60px">' \
+                                          '<td style="vertical-align:middle;padding:0"><div>' \
+                                          '<div style="display:table">jj</div></div></td></tr></table>'
     }.each do |label, body|
       s = page_with(body)
       runs = s.evaluate_script('globalThis.__csimPaintRuns()').map {|r| [r['text'], r['x'].round, r['y'].round] }

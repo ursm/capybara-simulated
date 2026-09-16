@@ -231,21 +231,20 @@ RSpec.describe 'floats' do
     expect(boxes[2][1]).to eq(50)     # …and cleared by a box two levels up, so the context above holds it
   end
 
-  # KNOWN DIVERGENCE (the engine's, not a native one): §9.4.3 is a PAINT-time shift that changes no other
-  # box's layout, so a float inside a `position: relative; top: 10px` wrapper excludes at its UNSHIFTED
-  # rectangle — Chrome 153 puts the `clear` box below it at 50 and the owner at 55 tall. This engine lays a
-  # relative box's subtree out at the shifted origin, so the recorded rectangle carries the ancestor's offset
-  # (it cancels the float's OWN, in `placeFloat`, but nothing cancels an ancestor's) and both come out 10 too
-  # low. The native engine is already right, which is why the walk DECLINES the shape rather than mismatch —
-  # see the native float spec's guard. Fixing this pins the numbers in the comments instead.
-  it 'shifts a float rectangle by a relative ancestor (Chrome does not)' do
+  # §9.4.3 is a PAINT-time shift: it changes no other box's layout, so a float inside a
+  # `position: relative; top: 10px` wrapper excludes at its UNSHIFTED rectangle even though the float itself
+  # is painted 10 lower. A relatively positioned block is therefore laid out where the flow put it and MOVED
+  # afterwards (`shiftSubtree`, the same lay-out-then-move an inline box's relative children take); laying
+  # its subtree out at the shifted origin baked the offset into everything the subtree recorded in an
+  # ancestor's coordinates, and the float rectangle above all. All three figures are Chrome's.
+  it 'excludes a float at its unshifted rectangle under a relative ancestor' do
     boxes, = floated(<<~HTML, ['#cb', '#f', '#n'])
       <div style="position:relative;top:10px"><div id="f" style="float:left;width:50px;height:50px"></div></div>
       <div id="n" style="clear:left;height:5px"></div>
     HTML
-    expect(boxes[0][3]).to eq(65)    # Chrome: 55
-    expect(boxes[1][1]).to eq(10)    # …the float itself is where Chrome has it
-    expect(boxes[2][1]).to eq(60)    # Chrome: 50
+    expect(boxes[0][3]).to eq(55)    # the owner wraps the float's own 50 + the cleared box's 5
+    expect(boxes[1][1]).to eq(10)    # …the float itself IS painted at the shift
+    expect(boxes[2][1]).to eq(50)    # …and what clears it does so at 50, where the float would have been
   end
 
   # KNOWN DIVERGENCES, both of them the SHRINK-TO-FIT route rather than floats as such — pinned here because

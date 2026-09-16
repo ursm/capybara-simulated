@@ -272,21 +272,26 @@ RSpec.describe 'native layout float parity', if: ENV.fetch('CSIM_JS_ENGINE', 'v8
                   '<div style="clear:left;margin:20px 0;height:1px"></div></div>')
   end
 
-  # A/B bail — and the one case where it is the ORACLE that is wrong. It lays a `position: relative` box's
-  # subtree out at the SHIFTED origin, so the float rectangle it records carries the ancestor's offset; §9.4.3
-  # is a paint-time shift that changes no other box's layout, and native (which applies the offset after the
-  # flow) agrees with Chrome: the `clear` box below is at 50, where the oracle says 60. Declined rather than
-  # left to mismatch. A relative ancestor with NO offset — the everyday one, a positioning context for an
-  # abspos descendant — stays native, and so does a shift on the box that OWNS the context, which moves with
-  # its own floats.
-  it 'declines a float under a relatively SHIFTED ancestor, keeps an unshifted one' do
-    shifted = '<div style="width:300px;overflow:hidden"><div style="position:relative;top:10px">' \
-              '<div style="float:left;width:50px;height:50px"></div></div><div style="clear:left;height:5px"></div></div>'
-    expect(run_shadow(shifted)['ok']).to be false
-    expect_parity('<div style="width:300px;overflow:hidden"><div style="position:relative">' \
-                  '<div style="float:left;width:50px;height:50px"></div></div><div style="clear:left;height:5px"></div></div>')
-    expect_parity('<div style="width:300px;overflow:hidden;position:relative;top:10px"><div>' \
-                  '<div style="float:left;width:50px;height:50px"></div></div><div style="clear:left;height:5px"></div></div>')
+  # §9.4.3 is a PAINT-time shift: it changes no other box's layout, so the rectangle the enclosing formatting
+  # context excludes at is the float's UNSHIFTED one even though the float is painted at the shift. Native
+  # applies the offset after the flow (rec[39..40]) and was always right; the ORACLE laid a relative block's
+  # subtree out at the shifted origin, so the rectangle it recorded carried the ancestor's offset and the
+  # `clear` box below came out at 60 where Chrome says 50. This shape was DECLINED for exactly as long as
+  # that was true. The oracle lays out then moves now (`shiftSubtree`, as it already did for an inline box's
+  # relative children) and the whole family is native.
+  it 'excludes a float at its unshifted rectangle under a relative ancestor' do
+    shell = '<div style="width:300px;overflow:hidden">'
+    float = '<div style="float:left;width:50px;height:50px"></div>'
+    clear = '<div style="clear:left;height:5px"></div>'
+    ['position:relative;top:10px', 'position:relative;left:20px', 'position:relative;top:-8px',
+     'position:relative'].each do |shift|
+      expect_parity(%(#{shell}<div style="#{shift}">#{float}</div>#{clear}</div>))
+      # …however many plain blocks lie between the shift and the float, and nested shifts too
+      expect_parity(%(#{shell}<div style="#{shift}"><div>#{float}</div></div>#{clear}</div>))
+      expect_parity(%(#{shell}<div style="#{shift}"><div style="position:relative;top:5px">#{float}</div></div>#{clear}</div>))
+    end
+    # …and a shift on the box that OWNS the context, which moves with its own floats and never diverged
+    expect_parity(%(<div style="width:300px;overflow:hidden;position:relative;top:10px"><div>#{float}</div>#{clear}</div>))
   end
 
   # §10.3.5: a float's AUTO width SHRINKS TO FIT where a block's fills — its min-content widened to the room
