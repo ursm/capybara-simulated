@@ -918,6 +918,21 @@ fn line_layout(
                     return None; // <br> inside an open inline edge (fragment) — defer to JS
                 }
                 break_line!(); // an empty line's box is the bare strut
+                // …and a `<br clear>` moves the flow past the floats it names before the next line opens
+                // (HTML's pre-CSS float break; the oracle's `brClear` / `clearanceY`). The side arrives
+                // resolved on the run — 1 left, 2 right, 3 both — because `clear: inline-start` is a
+                // question about the containing block's direction, which the walk has and this does not.
+                // Moving `total` is the whole move: `band_l` / `band_w` read it when they are called, so
+                // the band, the indent and the rtl origin all come from the new y (the oracle needs an
+                // explicit `retakeBand()` there only because it caches them).
+                let clear = run.metric as u8;
+                if clear != 0 {
+                    let fy = top + total;
+                    let below = clearance_y(floats, fy, clear);
+                    if below > fy {
+                        total += below - fy;
+                    }
+                }
             }
             RUN_TEXT => {
                 // This TEXT's own `white-space`: whether ITS spaces are real advances, whether a break may

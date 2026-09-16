@@ -506,20 +506,38 @@ RSpec.describe 'native layout L2 text-block parity', if: ENV.fetch('CSIM_JS_ENGI
       end
     end
   end
+  # A `<br clear>` CLEARS the floats before the next line — HTML's pre-CSS way of ending a float band, and
+  # still the mapping the rendering section gives the attribute. The break moves the flow past the bottom of
+  # every float on the named side and re-takes the band; native does that itself now (the side rides the BR
+  # run, resolved through the containing block's direction, because `clear: inline-start` is a question about
+  # THAT and the line layout has no direction to ask).
+  it 'clears the floats a <br> names before the next line' do
+    floats = '<div style="float:left;width:100px;height:40px"></div><div style="float:right;width:60px;height:70px"></div>'
+
+    # The ATTRIBUTE maps only the four physical spellings (`BR_CLEAR_HINTS`), `all` being HTML4 for `both`;
+    # `clear` reaches the flow-relative sides through CSS only, so those go through a declaration.
+    ['clear="left"', 'clear="right"', 'clear="both"', 'clear="all"',
+     'style="clear:inline-start"', 'style="clear:inline-end"'].each do |clear|
+      expect_parity(%(<div style="display:flow-root;width:300px">#{floats}<div>aa<br #{clear}>bb</div></div>))
+      # …and a flow-relative side resolves against the CONTAINING BLOCK's direction — so in rtl these two
+      # are the other float, and the physical four are unmoved
+      expect_parity(%(<div style="display:flow-root;width:300px;direction:rtl">#{floats}<div>aa<br #{clear}>bb</div></div>))
+    end
+    # …the block's direction, not the `<br>`'s own: an rtl inline around it changes nothing
+    expect_parity(%(<div style="display:flow-root;width:300px">#{floats}<div>aa<span style="direction:rtl"><br style="clear:inline-start"></span>bb</div></div>))
+    # …with nothing to clear it is an ordinary break, and a plain `<br>` beside floats is one too
+    expect_parity('<div style="width:300px">aa<br clear="both">bb</div>')
+    expect_parity(%(<div style="display:flow-root;width:300px">#{floats}<div>aa<br>bb</div></div>))
+    # …and a `<br>` is CONTENT whether or not it clears: an inline-block holding only one is a line tall,
+    # not empty (measured — losing that made it 0 and moved the box 14px up its line).
+    expect_parity('<div style="width:400px">text <span style="display:inline-block"><br></span> x</div>')
+    expect_parity('<div style="width:400px">text <span style="display:inline-block"><br clear="left"></span> x</div>')
+  end
+
   # `text-indent` narrows the line it is on from the START edge — the right one in rtl — rather than moving a
   # cursor inside it, so an indented empty line is still empty. Which lines take it: the first, or with
   # `hanging` every line BUT the first, and with `each-line` the first after every forced break as well. It was
   # the walk's most common decline after auto margins, and it is on BOTH figures the intrinsic measure returns.
-  # A `<br clear>` clears the floats before the next line, which native's line layout does not model — and the
-  # walk read the TAG and not the attribute, so it laid such a block out 18px short and only a Chrome comparison
-  # saw it. Declined until native models the clearance.
-  it 'declines a <br> carrying a clear' do
-    expect(shadow('<div style="display:flow-root;width:300px"><div style="float:left;width:100px;height:40px"></div><div>aa<br clear="left">bb</div></div>')).to include('ok' => false)
-    expect(shadow('<div style="width:300px">aa<br clear="both">bb</div>')).to include('ok' => false)
-    # …a plain `<br>` in the same float context stays native
-    expect_parity('<div style="display:flow-root;width:300px"><div style="float:left;width:100px;height:40px"></div><div>aa<br>bb</div></div>')
-  end
-
   describe 'text-indent narrows the lines it is on' do
     it 'indents the first line, and wraps around the narrower line' do
       expect_parity('<div style="width:200px;text-indent:40px">one two three four five six seven eight</div>')
