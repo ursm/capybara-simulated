@@ -247,6 +247,30 @@ RSpec.describe 'vertical-align' do
     expect(line[3]).to be > table[3]                            # …so the line is taller than the table
   end
 
+  # A `line-height` SMALLER than the font's own box is a real declaration, not a floor (§10.8: the line
+  # box is the declared leading). The half-leading around the font goes NEGATIVE there and a browser
+  # keeps it negative — the same LayoutUnit arithmetic `baselineWithin` floors — so the line is exactly
+  # as tall as it was told and the text hangs out of both its edges.
+  #
+  # The RULER cannot be used here, and that is the example's other half: a zero-height `inline-block` is
+  # still a box the line has to contain, so putting one on the line floors the descent at zero and takes
+  # the 6px line to its own ascent. That is correct, and it is why a marker-based instrument reads this
+  # rule as already passing whether or not the engine has it — measured in Chrome, both figures below.
+  it 'keeps a line-height below the font box, and grows only for a real box' do
+    boxes, = measure('<div id="c" style="width:400px;line-height:6px"><span id="t">text</span></div>', ['#c', '#t'])
+    line, text = boxes
+    expect(line[3]).to eq(6)                                            # Chrome: exactly the 6 it was given
+    expect(text[1] - line[1]).to eq(((6 - text[3]) / 2.0).floor)        # …negative half-leading, floored
+
+    # …and a box the line really HOLDS still floors the descent at its own: the ruler sits on the
+    # baseline, so the block is exactly its own baseline tall — no font figure in the claim.
+    marked, = measure(%(<div id="c" style="width:400px;line-height:6px">text#{ruler}</div>),
+                      ['#c', '#c > span'])
+    block, mark = marked
+    expect(block[3]).to eq(mark[1] - block[1])
+    expect(block[3]).to be > 6
+  end
+
   # HTML's own sheet raises and shrinks `<sup>` and `<sub>`, and both halves show.
   it 'gives sup and sub their UA rules' do
     body = %(<div id="c" style="width:400px">x#{ruler}<sup id="s">2</sup></div>)
