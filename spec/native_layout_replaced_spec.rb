@@ -138,8 +138,43 @@ RSpec.describe 'native layout replaced-leaf parity', if: ENV.fetch('CSIM_JS_ENGI
       expect_parity('<div style="display:flex;flex-direction:column;width:300px;height:100px"><svg viewBox="0 0 4 3" style="flex:1"></svg><div style="height:30px"></div></div>')
       expect_parity('<div style="display:flex;flex-direction:column;flex-wrap:wrap;width:300px;height:100px"><svg viewBox="0 0 4 3"></svg><div style="height:60px;width:30px"></div></div>')
     end
-    it 'declines a block-level button (the oracle shrink-wraps it to its content)' do
-      expect_bail('<div style="width:400px"><button style="display:block">a long button label</button><div style="height:10px"></div></div>')
+    # A `<button>` is as wide as its CONTENT wants, whatever room it is given -- HTML's button layout IS the
+    # shrink-to-fit algorithm. Native sizes it from its own content now, as it already did for an intrinsic-size
+    # keyword and a vertical writing mode; a block-level one used to fill its container and be refused.
+    it 'shrink-wraps a block-level button to its content' do
+      expect_parity('<div style="width:400px"><button style="display:block">a long button label</button><div style="height:10px"></div></div>')
+      expect_parity('<div style="width:50px"><button style="display:block">a long button label</button></div>')
+      expect_parity('<div style="width:400px"><button style="display:block;box-sizing:border-box;padding:6px">ab</button></div>')
+      expect_parity('<div style="width:400px"><button style="display:block;max-width:40px">a long button label</button></div>')
+    end
+    # …and it is walked as a MEASURED subtree, like every other box native sizes from its own content. Plain
+    # text is no test of that: native measures it right either way. What proves the contract is content with
+    # a measure-only gap in it, which must DECLINE rather than answer — a `text-indent` (native's
+    # `text_intrinsic` has none), a grid holding inline items. Without the contract these were 30px narrow,
+    # and one in a `<td>` took the whole table's columns with it (258 mismatches in a 12,393-case sweep).
+    it 'walks a shrink-wrapping button as a measured subtree' do
+      ['<div style="width:400px"><button style="display:block;text-indent:30px">Hi</button></div>',
+       '<div style="width:400px"><button style="display:block"><div style="text-indent:40px">Hi</div></button></div>',
+       '<div style="width:400px"><button style="display:block"><div style="display:grid"><span>aa bb</span><span>cc</span></div></button></div>',
+       '<table style="border-spacing:0"><tr><td style="padding:0"><button style="display:block;text-indent:30px">Click me</button></td><td style="padding:0">b</td></tr></table>'].each do |body|
+        expect_bail(body)
+      end
+    end
+    # …while the shrink-wrap decides nothing for a button whose width another algorithm owns, and native was
+    # always right about those: a flex or grid ITEM, an out-of-flow box, a float, a declared or keyword width.
+    # Refusing them cost 447 shapes of a 4,860-case sweep nothing but coverage.
+    it 'lays out a button whose width another algorithm owns' do
+      ['<div style="width:900px"><button style="display:flex;width:200px">Click</button></div>',
+       '<div style="width:900px;position:relative"><button style="position:absolute;left:0;display:grid">Click</button></div>',
+       '<div style="width:900px"><button style="float:left">Click</button></div>',
+       '<div style="display:flex;width:900px"><button style="display:grid">Click</button></div>',
+       '<div style="width:900px"><button style="display:flex;width:min-content">Click</button></div>'].each do |body|
+        expect_parity(body)
+      end
+      # …and an AUTO-width, in-flow flex or grid button is the one shape still refused: its own algorithm
+      # sizes it and native answered 16 where the oracle said 242.76.
+      expect_bail('<div style="width:400px"><button style="display:grid">a long button label</button></div>')
+      expect_bail('<div style="width:400px"><button style="display:flex">a long button label</button></div>')
     end
     it 'sizes replaced grid items natively, contributing their intrinsic width to intrinsic tracks' do
       expect_parity('<div style="display:grid;grid-template-columns:auto 1fr;width:400px"><img><div style="height:20px">b</div></div>')

@@ -249,7 +249,11 @@ pub(crate) struct Input {
     pub(crate) flex_basis_kw: u8,
     pub(crate) scrolls_x: bool,
     pub(crate) scrolls_y: bool,
-    // A `<button>`: its baseline is its content's however it scrolls (`child_baselines`).
+    // A `<button>`: as wide as its CONTENT wants, whatever display it has and however much room it is given
+    // (HTML's button layout IS shrink-to-fit — `block_child_width` routes an auto-width one through the
+    // A `<button>`: as wide as its CONTENT wants, whatever display it has and however much room it is given
+    // (HTML's button layout IS shrink-to-fit -- `block_child_width` routes an auto-width one through the
+    // content-sized path), and its baseline is its content's however it scrolls (`child_baselines`).
     pub(crate) is_button: bool,
     // TABLE: whether the box is the table's OWN to size — an in-flow block-level table, whose auto width
     // shrink-to-fits its columns (§17.5.2). False where the parent handed it a box (a grid area, a flex item's
@@ -5429,7 +5433,13 @@ fn block_child_width(
     failed: &std::cell::Cell<bool>,
 ) -> f64 {
     let cn = &inputs[c];
-    if cn.width_kw == 0 && !(cn.block_axis_is_x && is_auto(cn.width)) {
+    // A box sized from its OWN CONTENT here rather than from the room on offer: an intrinsic-size KEYWORD, a
+    // vertical writing mode's auto width — and a `<button>`, which is as wide as its content wants whatever
+    // display it has and however much room it is given (HTML's button layout IS the shrink-to-fit algorithm;
+    // the oracle's `shrinkWrapsToFit`). A block-level one filled its container here, which is 900px of
+    // clickable target where Chrome draws 132.
+    let content_sized = cn.width_kw != 0 || (is_auto(cn.width) && (cn.block_axis_is_x || cn.is_button));
+    if !content_sized {
         return resolve_width(cn, avail);
     }
     let room = (avail - Input::m(cn.ml) - Input::m(cn.mr)).max(0.0);
