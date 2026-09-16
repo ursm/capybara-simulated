@@ -271,6 +271,25 @@ RSpec.describe 'vertical-align' do
     expect(block[3]).to be > 6
   end
 
+  # The ONE space between two inline elements — the classic inline-block gap — belongs to the inline it
+  # is written inside, `vertical-align` and all. The flow places that space itself rather than through
+  # the text-run path, and its copy of "where does this sit" was missing the alignment: a space ALONE in
+  # a raised span put the line's deepest point at the BLOCK's baseline, so the line never grew for the
+  # raise. A span with a glyph beside the space was always right, which is what hid it.
+  it 'raises the line for a space alone in an aligned inline' do
+    plain, = measure('<div id="c" style="width:400px">a<span> </span>b</div>', ['#c'])
+    moved = %w[super sub text-top 20px].map {|value|
+      one, = measure(%(<div id="c" style="width:400px">a<span style="vertical-align:#{value}"> </span>b</div>), ['#c'])
+      glyph, = measure(%(<div id="c" style="width:400px">a<span style="vertical-align:#{value}">x</span>b</div>), ['#c'])
+      # The claim: the space is placed exactly where a glyph in the same span would be.
+      expect(one[0][3]).to eq(glyph[0][3]), value
+      one[0][3] > plain[0][3]
+    }
+    # …and that is not the same line the plain markup gives, for every value that moves a box at all
+    # (`text-top` on a span in the parent's own font aligns it where it already was — Chrome: 18 too).
+    expect(moved).to eq([true, true, false, true])
+  end
+
   # HTML's own sheet raises and shrinks `<sup>` and `<sub>`, and both halves show.
   it 'gives sup and sub their UA rules' do
     body = %(<div id="c" style="width:400px">x#{ruler}<sup id="s">2</sup></div>)
