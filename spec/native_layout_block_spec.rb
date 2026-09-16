@@ -281,7 +281,7 @@ RSpec.describe 'native layout L1 block-flow parity', if: ENV.fetch('CSIM_JS_ENGI
     it 'refuses in the walk what it would have to measure and cannot' do
       expect_walk_declines('<div style="width:400px"><div style="width:max-content;text-indent:30px">aa bb</div></div>')
       expect_walk_declines('<div style="width:400px"><div style="width:max-content"><span style="display:inline-block"><span style="display:inline-flex"><div>f</div></span></span></div></div>')
-      expect_walk_declines('<div style="width:400px"><table><tr><td><div style="width:max-content"><div style="display:grid;grid-template-columns:40px"><div>g</div></div></div></td></tr></table></div>')
+      expect_walk_declines('<div style="width:400px"><table><tr><td><div style="width:max-content"><div style="display:grid;grid-template-columns:40px"><span>g</span><span>h</span></div></div></td></tr></table></div>')
     end
     # A keyword on any of the OTHER five size properties is not a width native has to find: the oracle resolves
     # a keyword `height` to `auto` and a keyword min/max to no clamp at all, which the record already says.
@@ -441,7 +441,13 @@ RSpec.describe 'native layout L1 block-flow parity', if: ENV.fetch('CSIM_JS_ENGI
       session = simulated_session(page('<div style="width:400px"><div style="position:relative;height:100px"><div style="position:absolute;top:10px;left:10px;width:20px;height:20px"></div></div><div style="position:fixed;top:5px;left:5px;width:40px;height:40px"></div></div>')); session.visit '/'
       r = parity(session)
       expect(r).to include('ok' => true, 'mismatches' => 0, 'nativeOutOfFlow' => 2)
+      # …and an abspos GRID is native's own now: its shrink-to-fit width is an intrinsic measure, which native
+      # answers for a grid whose items are blocks (as a block, which is what the oracle does with one). One
+      # holding INLINE-LEVEL content still replays — there the oracle walks a pen the records cannot reproduce.
       session = simulated_session(page(%(<div style="#{cb}"><div style="position:absolute;top:10px;left:20px;display:grid;grid-template-columns:100px 1fr"><div style="height:10px">a</div><div style="height:20px">b</div></div></div>))); session.visit '/'
+      r = parity(session)
+      expect(r).to include('ok' => true, 'mismatches' => 0, 'nativeOutOfFlow' => 1)
+      session = simulated_session(page(%(<div style="#{cb}"><div style="position:absolute;top:10px;left:20px;display:grid;grid-template-columns:100px 1fr"><span>a</span><span>b</span></div></div>))); session.visit '/'
       r = parity(session)
       expect(r).to include('ok' => true, 'mismatches' => 0, 'nativeOutOfFlow' => 0)
     end
@@ -657,7 +663,7 @@ x</div>))
     # Native ASKS such a child's intrinsic widths, so a child it cannot measure has to be refused by the WALK —
     # discovered in Rust it would fail the whole pass instead of this one subtree.
     it 'declines a vertical block holding content native cannot measure' do
-      expect_walk_declines('<div style="width:400px"><div style="writing-mode:vertical-lr"><div style="display:grid;grid-template-columns:40px"><div></div></div></div></div>')
+      expect_walk_declines('<div style="width:400px"><div style="writing-mode:vertical-lr"><div style="display:grid;grid-template-columns:40px"><span>g</span><span>h</span></div></div></div>')
       expect_walk_declines('<div style="width:400px"><div style="writing-mode:vertical-lr"><span style="display:inline-flex"><div>f</div></span></div></div>')
     end
     # …which is also why such a child is walked as a MEASURED subtree: an atomic inline whose own box would be

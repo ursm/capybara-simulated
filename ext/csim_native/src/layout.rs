@@ -4518,7 +4518,7 @@ fn content_intrinsic(i: usize, inputs: &[Input], runs: &[Run], run_texts: &[Opti
             text_intrinsic(&runs[rs..re], &run_texts[rs..re], n.ws_mode, inputs, runs, run_texts, grids, children)
         }
         _ if n.replaced => Some((0.0, 0.0)), // a replaced box holds no CSS content (a ratio-only svg asks its container)
-        DISPLAY_BLOCK | DISPLAY_FLEX => {
+        DISPLAY_BLOCK | DISPLAY_FLEX | DISPLAY_GRID => {
             let (mut min, mut max) = (0.0f64, 0.0f64);
             let mut line = 0.0f64; // floats pack beside each other on a line, as inline boxes would
             for &c in &children[i] {

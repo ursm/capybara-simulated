@@ -746,10 +746,13 @@ RSpec.describe 'native layout flex parity', if: ENV.fetch('CSIM_JS_ENGINE', 'v8'
       expect_native_flex(%(<div style="#{base}"><div style="display:flex;flex-direction:column-reverse"><div style="font-size:24px">col a</div><div>col b</div></div><div style="font-size:32px">BIG</div></div>))
       expect_native_flex(%(<div style="#{base};direction:rtl"><div><div style="font-size:24px">rtl a</div></div><div style="font-size:32px">BIG</div></div>))
     end
-    # A grid item is not natively measurable yet, so a grid baseline item still takes the pushed path — this
-    # only guards parity there; `measure_grid`'s own baseline derivation is exercised once grids are measurable.
-    it 'keeps parity for a nested grid baseline item (pushed path)' do
+    # A grid ITEM is measurable now — a grid is measured as a block, which is what the oracle does with one —
+    # so a grid baseline item takes the NATIVE path. One holding inline-level content still pushes: there the
+    # oracle walks a pen the blockified records cannot reproduce.
+    it 'keeps parity for a nested grid baseline item' do
       r = run_shadow(%(<div style="#{base}"><div style="display:grid;grid-template-columns:1fr 1fr"><div>g1</div><div style="font-size:24px">g2</div></div><div style="font-size:32px">BIG</div></div>))
+      expect(r).to include('ok' => true, 'mismatches' => 0, 'nativeFlexRows' => 1)
+      r = run_shadow(%(<div style="#{base}"><div style="display:grid;grid-template-columns:1fr 1fr"><span>g1</span><span style="font-size:24px">g2</span></div><div style="font-size:32px">BIG</div></div>))
       expect(r).to include('ok' => true, 'mismatches' => 0, 'nativeFlexRows' => 0)
     end
     # Review findings, oracle side (native and Chrome agreed): a block holding both inline content and block

@@ -390,9 +390,13 @@ RSpec.describe 'native layout grid parity', if: ENV.fetch('CSIM_JS_ENGINE', 'v8'
       expect_native_intrinsic(%(<div style="#{mc_auto}"><div style="display:flex"><div style="flex-basis:50px;flex-grow:1;padding:0 5px">grow basis</div><div style="min-width:120px">min</div><div style="max-width:20px">capped words</div></div><div>b</div></div>))
       expect_native_intrinsic(%(<div style="#{mc_auto}"><div style="display:flex"><div style="box-sizing:border-box;flex-basis:50px;padding:0 10px">bb</div><div style="width:50%">pct</div><div style="flex-basis:50%">half</div></div><div>b</div></div>))
     end
-    it 'falls back for a flex container with a percentage main gap, and for a grid item' do
+    it 'falls back for a flex container with a percentage main gap, and for a grid holding inline content' do
       expect_resolved_fallback(%(<div style="#{mc_auto}"><div style="display:flex;column-gap:5%"><div>a</div><div>b</div></div><div>b</div></div>))
-      expect_resolved_fallback(%(<div style="#{two_auto}"><div style="display:grid;grid-template-columns:50px 50px"><div>nested grid words</div><div>x</div></div><div style="height:10px">b</div></div>))
+      # …a grid whose items are BLOCKS is measured natively now (as a block, which is what the oracle does with
+      # one); only its INLINE-LEVEL content still falls back, where the oracle walks a pen the records cannot
+      # reproduce — see `nlIntrinsicMeasurableOf`.
+      expect_resolved_fallback(%(<div style="#{two_auto}"><div style="display:grid;grid-template-columns:50px 50px"><span>nested grid words</span><span>x</span></div><div style="height:10px">b</div></div>))
+      expect_native_intrinsic(%(<div style="#{two_auto}"><div style="display:grid;grid-template-columns:50px 50px"><div>nested grid words</div><div>x</div></div><div style="height:10px">b</div></div>))
     end
   end
 
@@ -509,4 +513,75 @@ RSpec.describe 'native layout grid parity', if: ENV.fetch('CSIM_JS_ENGINE', 'v8'
       end
     end
   end
+  # A GRID has an intrinsic width of its own now — every context that asks a box what it wants can ask one.
+  # The answer is a BLOCK's, measured over the grid's item records, because that is what the ORACLE answers:
+  # `intrinsicWidths` has no grid arm (it tests flex and table only) and `contentIntrinsicWidths` blockifies
+  # only a FLEX container's children. So the tracks and the gaps enter neither figure in either engine — a
+  # conformance gap they SHARE, which the port neither widens nor closes.
+  describe 'a grid answers for its own intrinsic width' do
+    # …in every context that asks one: a shrink-to-fit float, an abspos box, a table column, a flex item both
+    # ways, an outer grid's `min-content` track, an inline-block, a vertical writing mode, and the keyword
+    # widths themselves.
+    it 'is measured wherever a box is asked what it wants' do
+      g = '<div style="display:grid;grid-template-columns:40px 60px"><div style="width:40px;height:10px"></div><div style="width:70px;height:10px"></div></div>'
+      [
+        %(<div style="width:max-content">#{g}</div>),
+        %(<div style="width:min-content">#{g}</div>),
+        %(<div style="width:fit-content">#{g}</div>),
+        %(<div style="width:400px"><div style="float:left">#{g}</div></div>),
+        %(<div style="width:400px;position:relative"><div style="position:absolute;left:0">#{g}</div><p>x</p></div>),
+        %(<table style="border-spacing:0"><tr><td style="padding:0">#{g}</td><td style="padding:0">b</td></tr></table>),
+        %(<div style="display:flex;width:400px">#{g}<div style="width:30px;height:10px"></div></div>),
+        %(<div style="display:flex;flex-direction:column;width:400px">#{g}</div>),
+        %(<div style="display:grid;grid-template-columns:min-content auto;width:400px">#{g}<div>x</div></div>),
+        %(<div style="width:400px">text <span style="display:inline-block">#{g}</span> after</div>),
+        %(<div style="width:400px"><div style="writing-mode:vertical-lr">#{g}</div></div>)
+      ].each {|body| expect_parity(body) }
+    end
+    # …and the block arm's own branches: a float packs onto a line, an out-of-flow item sizes nothing, a
+    # replaced item brings its intrinsic width, a nested grid answers in turn, a negative margin narrows.
+    it 'measures the grid items the way it measures a block child' do
+      [
+        '<div style="float:left;width:30px;height:8px"></div><div style="float:left;width:35px;height:8px"></div>',
+        '<div style="position:absolute;width:300px;height:10px"></div><div style="width:20px;height:10px"></div>',
+        %(<img src="data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7" style="display:block;width:24px;height:10px">),
+        '<div style="display:grid;grid-template-columns:25px"><div style="height:6px"></div></div>',
+        '<div style="margin-left:-6px;width:30px;height:10px"></div>'
+      ].each {|items| expect_parity(%(<div style="width:max-content"><div style="display:grid">#{items}</div></div>)) }
+      # …while a `display: contents` child is refused before this test is reached at all (the walk does not
+      # flatten one — its own arm above), and a NON-WRAPPING mode over a grid with block children is refused
+      # by the pin that predates grids (`!(hasBlock && nowrap|pre)`).
+      expect_bail('<div style="width:max-content"><div style="display:grid"><div style="display:contents"><div style="width:30px;height:10px"></div></div></div></div>')
+      expect_bail('<div style="width:max-content"><div style="display:grid;white-space:nowrap"><div style="width:20px;height:10px"></div></div></div>')
+    end
+    # …while INLINE-LEVEL content still declines, because there the two engines do different things: the
+    # oracle walks it with a PEN — two `<span>` items land on ONE line and sum for max-content (48.41 against
+    # the widest item's 34.2) — and the walk hands native one blockified record per item.
+    it 'declines a grid holding inline-level content, and takes the same grid with block items' do
+      {
+        '<span>aa bb</span><span>cc</span>'                        => '<div>aa bb</div><div>cc</div>',
+        'aa bb'                                                    => '<div>aa bb</div>',
+        '<span style="display:inline-block;width:20px;height:9px"></span>' => '<div style="width:20px;height:9px"></div>',
+        '<div style="width:9px;height:4px"></div><br>'             => '<div style="width:9px;height:4px"></div>'
+      }.each do |inline, block|
+        expect_bail(%(<div style="width:max-content"><div style="display:grid">#{inline}</div></div>))
+        expect_parity(%(<div style="width:max-content"><div style="display:grid">#{block}</div></div>))
+      end
+    end
+    # …and a run of pure SPACES is inline content too, but only where the mode PRESERVES it: the oracle
+    # measures every character of it (a grid of ten spaces under `pre` is 40 wide there and 0 to native, which
+    # has neither a record nor a run stream for the anonymous item they form), while a collapsible run sets no
+    # `inlineOnLine` and contributes nothing to either engine. This is the shape a spec written from the
+    # element side alone would miss.
+    it 'declines whitespace the mode preserves, and keeps a grid whose whitespace collapses' do
+      ['white-space:pre', 'white-space:pre-wrap'].each do |ws|
+        expect_bail(%(<div style="width:max-content"><div style="display:grid;#{ws}">          </div></div>))
+        expect_bail(%(<div style="width:max-content"><div style="display:grid;#{ws}">          <div style="width:20px;height:10px"></div></div></div>))
+      end
+      ['', 'white-space:normal'].each do |ws|
+        expect_parity(%(<div style="width:max-content"><div style="display:grid;#{ws}">          <div style="width:20px;height:10px"></div></div></div>))
+      end
+    end
+  end
+
 end
