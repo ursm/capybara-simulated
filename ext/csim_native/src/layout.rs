@@ -211,9 +211,11 @@ pub(crate) struct Input {
     // A text block's OWN `white-space` mode: 0 normal, 1 nowrap, 2 pre, 3 pre-wrap, 4 pre-line. The three
     // orthogonal behaviours it names — COLLAPSE whitespace (0/1/4) vs PRESERVE it (2/3), SOFT-WRAP at break
     // opportunities (0/3/4) vs never (1/2), a NEWLINE forcing a break (2/3/4) — belong to the RUN they are
-    // about, so `line_layout` reads them off `Run::ws_mode` and never asks for this one. What is left to the
-    // BLOCK is `pin` in `text_intrinsic` ("a box that never wraps has its max-content for a min-content", which
-    // the oracle asks of the element), and the mode an empty block and the anonymous groups are read under.
+    // about, so `line_layout` reads those off `Run::ws_mode`. What it still asks of the BLOCK is whether the
+    // LINE may break at all (`outerWraps`: a non-wrapping RUN forbids breaks inside itself, the opportunity
+    // before it is the block's to give), `pin` in `text_intrinsic` ("a box that never wraps has its
+    // max-content for a min-content", which the oracle asks of the element), and the mode an empty block and
+    // the anonymous groups are read under.
     pub(crate) ws_mode: u8,
     // A pushed flex ITEM whose OWN height is AUTO (content-derived), carried past the parent-push that
     // overwrote `height` with the item's final (oracle-clamped) box. When set, `measure_flex` recomputes a
@@ -598,6 +600,20 @@ fn is_ws_u16(u: u16) -> bool {
     matches!(u, 0x20 | 0x09 | 0x0A | 0x0D | 0x0C)
 }
 
+// What the BLOCK decides about its lines — everything the runs do not carry themselves. They travel as one
+// value because they would otherwise be a row of interchangeable scalars at a 13-argument call: `ws_mode` and
+// `align` are both `u8`, and transposing them compiles clean while quietly making every `nowrap` block wrap.
+#[derive(Clone, Copy)]
+struct LineStyle {
+    // The BLOCK's own `white-space`, which is the only thing it still decides: whether the line may break at
+    // all (`outerWraps`). A non-wrapping RUN forbids breaks inside itself; the opportunity BEFORE it is the
+    // block's to give.
+    ws_mode: u8,
+    align:   u8,
+    rtl:     bool,
+    indent:  (f64, bool, bool, bool), // `text-indent`: px, hanging, each-line, first-line-spent (Input::indent_px)
+}
+
 // Greedy line layout for a text block's run/marker STREAM (`runs` / `run_texts` parallel, this block's
 // slice). TEXT runs tokenize into words (maximal non-`[ \t\n\r\f]+` — NBSP is NOT a break), each measured
 // in its own font; a collapsible space (the first ws at a boundary, that run's spaceW) is the break
@@ -625,16 +641,18 @@ fn line_layout(
     cl: f64,
     cr: f64,
     top: f64,
-    align: u8,
-    rtl: bool,
-    indent: (f64, bool, bool, bool), // `text-indent`: px, hanging, each-line, first-line-spent (Input::indent_px)
+    style: LineStyle,
 ) -> Option<LineLayout> {
+    let LineStyle {ws_mode, align, rtl, indent} = style;
     // The three orthogonal `white-space` behaviours (see Input::ws_mode). `no_wrap` keeps the old name for the
-    // four soft-wrap gates below: a line SOFT-wraps under normal (0) / pre-wrap (3) / pre-line (4), never under
-    // nowrap (1) / pre (2). `preserve` keeps every space as a real advance (pre / pre-wrap) rather than
-    // collapsing runs of whitespace to one break-opportunity; `break_nl` makes a literal newline force a break.
+    // soft-wrap gates below: a line SOFT-wraps under normal (0) / pre-wrap (3) / pre-line (4), never under
+    // nowrap (1) / pre (2) — and it is what a space writes into its own break OPPORTUNITY, because the
+    // opportunity belongs to the run that queued the space, not to whatever meets it. `preserve` keeps every
+    // space as a real advance (pre / pre-wrap) rather than collapsing runs of whitespace to one
+    // break-opportunity; `break_nl` makes a literal newline force a break.
     // …asked of the RUN that the behaviour is about, because an inline may declare its own `white-space`
     // (`Run::ws_mode`), and every run in the stream carries its owner's — the `<br>` and edge runs included.
+    let outer_wraps = !(ws_mode == 1 || ws_mode == 2);
     let no_wrap_of = |m: u8| m == 1 || m == 2;
     let preserve_of = |m: u8| m == 2 || m == 3;
     let break_nl_of = |m: u8| m >= 2;
@@ -887,12 +905,134 @@ fn line_layout(
                 let ws_mode = run.ws_mode;
                 let (no_wrap, preserve, break_nl) = (no_wrap_of(ws_mode), preserve_of(ws_mode), break_nl_of(ws_mode));
                 let text = run_texts.get(ri).and_then(|t| t.as_ref())?;
+                // A run that does not soft-wrap is ONE token: the oracle places `collapseRun(…)` less a
+                // trailing collapsible space in a single `placeOnLine`, and the only decision the line makes
+                // about it is whether to break BEFORE it. So the fit test is asked ONCE, of the whole run,
+                // rather than word by word — which is what let a `<span style="white-space:nowrap">` place its
+                // first word and overflow the rest. Only where the LINE may break at all (`outerWraps`, the
+                // block's mode): inside an unbreakable block there is nothing to decide.
+                //
+                // The unit is the run and never more: the oracle tokenises per text NODE, so a `<b>` inside
+                // the span is a second run with a second decision. Under a PRESERVING mode the unit is the
+                // first newline-SEGMENT — a newline after it breaks the line regardless.
+                let space_w = measure_word(run, &[0x20])?;
+                // How much of the run's own leading white space the pre-pass has already placed, and whether
+                // it placed any (see below).
+                let mut lead_skip = 0usize;
+                let mut lead_space = false;
+                if no_wrap && outer_wraps {
+                    // …but only where the answer can change anything: either something OPENS the line here (a
+                    // space that breaks, a `<wbr>`/atomic, a hyphen or a wide character) so the unit may move
+                    // to the next line, or the line is EMPTY and the unit may drop below a float. Asked before
+                    // the measure, so a run glued straight to a letter — the common case — pays two branches.
+                    let breaks = line_has_content
+                        && (pending_space.is_some_and(|(_, _, _, b)| b) || atomic_break || ends_open);
+                    let may_drop = !line_has_content && !floats.is_empty();
+                    if breaks || may_drop {
+                        let end = if break_nl {
+                            text.iter().position(|&u| u == 0x0A).unwrap_or(text.len())
+                        } else {
+                            text.len()
+                        };
+                        // The oracle strips a run's LEADING white space only at a line start, which is an
+                        // empty line or one already ending in a real hanging space (`collapseRun`'s
+                        // `lineX === lineLeft || lineEndsWithSpace`). Anywhere else it stays in the body and
+                        // in the width the fit test is asked of. A PRESERVED space is not a hanging one, so
+                        // the zero-width marker does not count.
+                        // …and only a COLLAPSING run ever asks: a preserved space is kept wherever it sits,
+                        // so both readers below already stand behind `!preserve`.
+                        let at_line_start = !preserve
+                            && (!line_has_content || pending_space.is_some_and(|(w, _, _, _)| w != 0.0));
+                        // …and `body` is the oracle's string test: a run that is non-empty but zero-advance
+                        // (a U+200B) is still a body, and still asks the question.
+                        let has_body = if preserve {
+                            end > 0
+                        } else {
+                            text[..end].iter().any(|&u| !is_ws_u16(u))
+                        };
+                        let pending_w = pending_space.map_or(0.0, |(w, _, _, _)| w);
+                        let ow: f64 = open.iter().filter(|o| !o.1).map(|o| o.0).sum();
+                        let room = band_w(total) + LINE_FIT_EPS;
+                        let mut unit = 0.0f64;
+                        // A run with no BODY asks neither question below, so it measures nothing here: the
+                        // collapse branch in the main loop reaches its white space and does that work once.
+                        if has_body {
+                            let mut k = 0usize;
+                            let mut first = true;
+                            // …and the early-out only where nothing else needs the full width: the float drop
+                            // below is asked of the WHOLE run (`retakeBand(runW + openEdgeWidth())`), so a
+                            // truncated prefix would drop the line on the wrong answer.
+                            let stop_at = if floats.is_empty() { room } else { f64::INFINITY };
+                            while k < end && line_x + pending_w + ow + unit <= stop_at {
+                                if is_ws_u16(text[k]) {
+                                    let ws_start = k;
+                                    while k < end && is_ws_u16(text[k]) {
+                                        k += 1;
+                                    }
+                                    if preserve {
+                                        unit += measure_word(run, &text[ws_start..k])?;
+                                    } else if k < end && !(first && at_line_start) {
+                                        // …one space per retained gap; a TRAILING collapsible space hangs outside
+                                        // the run, so it is no part of what has to fit.
+                                        unit += space_w;
+                                    }
+                                } else {
+                                    let w_start = k;
+                                    while k < end && !is_ws_u16(text[k]) {
+                                        k += 1;
+                                    }
+                                    unit += measure_word(run, &text[w_start..k])?;
+                                }
+                                first = false;
+                            }
+                        }
+                        if breaks && has_body && line_x + pending_w + ow + unit > room {
+                            soft_break!();
+                            pending_space = None;
+                            atomic_break = false;
+                            ends_open = false;
+                            // …and the oracle decided `atLineStart` BEFORE this break, so a leading collapsible
+                            // space it kept is part of the body and goes down with it on the fresh line. The
+                            // word loop below would drop it (nothing precedes it there), so it is placed here
+                            // and the loop starts past it.
+                            if !preserve && !at_line_start {
+                                if let Some(w0) = text[..end].iter().position(|&u| !is_ws_u16(u)) {
+                                    if w0 > 0 {
+                                        lead_space = true;
+                                        lead_skip = w0;
+                                    }
+                                }
+                            }
+                        }
+                        // …and a line still too narrow for the whole unit DROPS below the float instead (the
+                        // oracle's `retakeBand(runW + openEdgeWidth())`, asked of the whole run and not of its
+                        // first word — a `nowrap` span beside a float goes under it, not through it). Asked of
+                        // the line the unit LANDS on, which is why the leading space above is only NOTED here
+                        // and placed below: putting it down first would make the line look occupied.
+                        if has_body && !floats.is_empty() && !line_has_content && unit + ow > band_w(total) + LINE_FIT_EPS {
+                            let fy = top + total;
+                            let at = float_fit_y(floats, fy, unit + ow + indent_now.get(), cl, cr, strut_lh);
+                            if at > fy {
+                                total += at - fy;
+                            }
+                        }
+                        // …and only now does the kept leading space go down (the oracle's `collapseRun` put it
+                        // inside the body, so it rides the line the body landed on).
+                        if lead_space {
+                            line_x += space_w;
+                            line_asc = line_asc.max(run.asc);
+                            line_desc = line_desc.max(run.line_height - run.asc);
+                            line_has_content = true;
+                            hang = 0.0;
+                            hang_pre = 0.0;
+                        }
+                    }
+                }
                 // Asked ONCE per run so the per-word scans below are skipped outright on the runs that hold
                 // neither — almost all of them (these are per word of every line layout).
                 let run_has_wide = text.iter().any(|&u| is_wide_unit(u));
                 let run_has_hyphen = text.iter().any(|&u| is_hyphen_unit(u));
-                let space_w = measure_word(run, &[0x20])?;
-                let mut i = 0;
+                let mut i = lead_skip;
                 while i < text.len() {
                     if is_ws_u16(text[i]) {
                         if preserve {
@@ -910,7 +1050,30 @@ fn line_layout(
                                         // — a marker waiting on one of those edges included.
                                         settle_pending_oofs!();
                                         flush_open_edges!();
-                                        break_line!() // newline → forced break
+                                        break_line!(); // newline → forced break
+                                        // …and the SEGMENT it opens drops below a float as one unit, exactly
+                                        // as the first did: the oracle runs `retakeBand(runW + …)` for every
+                                        // segment, not only the run's first (`segments.forEach`).
+                                        if no_wrap && outer_wraps && !floats.is_empty() {
+                                            let from = i + 1;
+                                            let seg_end = text[from..]
+                                                .iter()
+                                                .position(|&u| u == 0x0A)
+                                                .map_or(text.len(), |p| from + p);
+                                            // (no open edge can be pending here — the flush above emptied the
+                                            // stack and nothing opens between a newline and the segment it
+                                            // starts — so the unit is the segment alone)
+                                            if seg_end > from {
+                                                let seg_w = measure_word(run, &text[from..seg_end])?;
+                                                if seg_w > band_w(total) + LINE_FIT_EPS {
+                                                    let fy = top + total;
+                                                    let at = float_fit_y(floats, fy, seg_w + indent_now.get(), cl, cr, strut_lh);
+                                                    if at > fy {
+                                                        total += at - fy;
+                                                    }
+                                                }
+                                            }
+                                        }
                                     }
                                     0x20 => {
                                         // A preserved space is content on the line: it grows the line box by its
@@ -989,10 +1152,32 @@ fn line_layout(
                                     settle_pending_oofs!();
                                     flush_open_edges!();
                                 }
+                                // The BREAK below stays unconditional even there, though, and that is a KNOWN
+                                // divergence rather than an oversight: the oracle's collapsed branch never
+                                // breaks at all, so `<div style="white-space:pre-line">\n<b>aa</b></div>` is
+                                // 22 in the oracle and 44 in native — which is what Chrome measures. Native is
+                                // the right side; the ORACLE is the one to fix, in its own increment
+                                // (`oracle_pre_line_newline_in_inline`), so native is not bent to match it.
                                 for _ in 0..nl {
                                     break_line!();
                                 }
-                            } else if line_has_content {
+                            } else if !line_has_content {
+                                // At a line start the space itself collapses away — but the BARRIER it leaves
+                                // does not: the oracle sets `barrier` from a whitespace-only run whether or not
+                                // it placed anything (`modeWraps(owner) ? null : 'hard'`). A non-wrapping run
+                                // leaves HARD, which an atomic after it may neither break at nor drop below a
+                                // float at; a wrapping one leaves null, which CLEARS whatever stood there.
+                                // Zero metrics as well as zero width: nothing was placed, so nothing grows the
+                                // line box — a taller space that collapsed away was raising the line by its own
+                                // leading.
+                                ends_open = false;
+                                atomic_break = false;
+                                pending_space = if no_wrap {
+                                    Some((0.0, 0.0, 0.0, false))
+                                } else {
+                                    None
+                                };
+                            } else {
                                 match pending_space {
                                     // A REAL collapsed space is already waiting: a run of white space is ONE
                                     // space, so this one collapses away — but its OPPORTUNITY survives. The
@@ -1226,9 +1411,6 @@ fn line_layout(
                 }
             }
             RUN_ATOMIC => {
-                // …under the `white-space` of the inline it sits in, which decides whether the line may break
-                // before it at all.
-                let no_wrap = no_wrap_of(run.ws_mode);
                 // A single box on the line — placed like an unbreakable word of width `metric`, growing the
                 // line box by its own ascent / descent. An atomic is a break opportunity on BOTH sides
                 // regardless of whitespace: it may break BEFORE it here (unconditional, on overflow), and it
@@ -1254,10 +1436,12 @@ fn line_layout(
                 let ow: f64 = open.iter().filter(|o| !o.1).map(|o| o.0).sum();
                 // An atomic is a break opportunity before it (§ line breaking) — but not under `white-space:
                 // nowrap`, which never soft-wraps.
-                // …and whether one may fall here is what PRECEDES the atomic, not the atomic's own mode: a
-                // space or a `<wbr>` from a wrapping run opens the line even inside a `nowrap` block, and a
-                // non-wrapping run's space (`space_is_hard`) closes it even inside a wrapping one.
-                let may_break_here = (space_breaks || atomic_break || !no_wrap) && !space_is_hard;
+                // …and whether one may fall here is ONE question, and no `white-space` mode is part of it: the
+                // oracle hands the atomic `placeOnLine(need, 0, barrier === 'hard', …)`, whose break test is
+                // `!decided && lineHasContent && overflows(…)`. An atomic is a break opportunity on both
+                // sides; the only thing that takes that away is a HARD barrier, which is what a non-wrapping
+                // run's trailing space leaves. Neither the atomic's own mode nor the block's is asked.
+                let may_break_here = !space_is_hard;
                 if may_break_here && line_has_content && line_x + ow + width > band_w(total) + LINE_FIT_EPS {
                     soft_break!(); // break before the atomic (drop any hanging space)
                     broke = true;
@@ -1266,8 +1450,10 @@ fn line_layout(
                     line_asc = line_asc.max(sasc); // the space stayed: its run's metrics grow the line
                     line_desc = line_desc.max(sdesc);
                 }
-                // A nowrap line is not shortened by / dropped below a float (see the word branch above).
-                if !no_wrap && !floats.is_empty() && !line_has_content && width + ow > band_w(total) + LINE_FIT_EPS {
+                // A nowrap line is not shortened by / dropped below a float — the BLOCK's mode, that is: a
+                // non-wrapping RUN does drop, as one whole unit, which the pre-pass at the head of the text
+                // arm does for it.
+                if may_break_here && !floats.is_empty() && !line_has_content && width + ow > band_w(total) + LINE_FIT_EPS {
                     let fy = top + total;
                     let at = float_fit_y(floats, fy, width + ow + indent_now.get(), cl, cr, strut_lh);
                     if at > fy {
@@ -1826,7 +2012,7 @@ fn measure(
                 r.line_height = h + mt + mb;
             }
             let local: &[Run] = if has_native_atomic { &owned } else { &runs[rs..re] };
-            match line_layout(local, &run_texts[rs..re], n.strut_lh, n.strut_asc, content_w, &fc.items, cl, cr, bfc_top, n.text_align, n.from_right(), (n.indent_px, n.indent_hanging, n.indent_each_line, n.indent_spent)) {
+            match line_layout(local, &run_texts[rs..re], n.strut_lh, n.strut_asc, content_w, &fc.items, cl, cr, bfc_top, LineStyle {ws_mode: n.ws_mode, align: n.text_align, rtl: n.from_right(), indent: (n.indent_px, n.indent_hanging, n.indent_each_line, n.indent_spent)}) {
                 Some(ll) => {
                     boxes[i].first_baseline = ll.first.map(|(top, asc)| content_top_rel + top + asc);
                     boxes[i].last_baseline = ll.last.map(|(top, asc)| content_top_rel + top + asc);
@@ -4453,9 +4639,7 @@ fn text_intrinsic(runs: &[Run], run_texts: &[Option<Vec<u16>>], ws_mode: u8, inp
     let mut inline_on_line = false; // content has landed on this line (a space after it is pending, not dropped)
     // A collapsible space waiting for content to follow it, and whether it JOINS the word rather than opening
     // a break — which is the mode of the run that QUEUED it (the oracle's `pend(w, joins)` / `pendingJoins`),
-    // never the one that takes it. Unreachable while the walk refuses a non-wrapping inline inside a wrapping
-    // line (a non-wrapping run then implies a non-wrapping block, where `pin` discards `word` anyway), and
-    // load-bearing the moment that carve-out is lifted — so it is carried, not inferred.
+    // never the one that takes it. Live now that a non-wrapping run may sit in a wrapping box.
     let mut pending_space = 0.0f64;
     let mut pending_joins = false;
     macro_rules! opportunity {

@@ -22,6 +22,7 @@ RSpec.describe 'native layout nowrap parity', if: ENV.fetch('CSIM_JS_ENGINE', 'v
   def expect_parity(body)
     r = run_shadow(body)
     expect(r).to include('ok' => true), "harness bailed: #{r.inspect}"
+    expect(r['compared']).to be > 0, "nothing was compared: #{body}: #{r.inspect}"
     expect(r['mismatches']).to eq(0), "mismatch: #{r.inspect}"
   end
 
@@ -54,8 +55,12 @@ RSpec.describe 'native layout nowrap parity', if: ENV.fetch('CSIM_JS_ENGINE', 'v
     expect_parity('<div style="overflow:hidden;width:400px"><div style="float:left;width:360px;height:50px"></div><div style="white-space:nowrap">Supercalifragilistic wordsmith wander</div></div>')
   end
 
-  it 'declines a child that OVERRIDES the block white-space (per-run wrap difference)' do
-    expect_bail('<div style="width:80px">wraps here <span style="white-space:nowrap">but this span does not</span> more</div>')
+  # A child that OVERRIDES the block's `white-space` used to decline: native had one mode per block. Every run
+  # now carries its owner's, and a run that does not soft-wrap is fitted as the one unbreakable token it is —
+  # so the span moves to the next line whole rather than placing its first word and overflowing the rest.
+  it 'lays out a child that OVERRIDES the block white-space' do
+    expect_parity('<div style="width:80px">wraps here <span style="white-space:nowrap">but this span does not</span> more</div>')
+    expect_parity('<div style="width:80px;white-space:nowrap">no wrapping <span style="white-space:normal">but this span does</span> more</div>')
   end
   # pre / pre-wrap / pre-line are now modelled (WS_MODE code in rec[53]; the Rust tokenizer preserves whitespace
   # for pre/pre-wrap, soft-wraps for normal/pre-wrap/pre-line, and breaks on a newline for all three pre modes).
