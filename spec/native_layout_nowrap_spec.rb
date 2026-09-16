@@ -85,8 +85,10 @@ RSpec.describe 'native layout nowrap parity', if: ENV.fetch('CSIM_JS_ENGINE', 'v
   it 'matches pre-line blank lines (newlines preserved, spaces collapsed)' do
     expect_parity("<div style=\"width:200px;white-space:pre-line\">a\n\nb</div>")
   end
-  it 'declines pre with a TAB (tab stops not modelled)' do
-    expect_bail("<div style=\"width:200px;white-space:pre\">a\tb</div>")
+  # A preserved TAB advances to the block's next stop — native's own since it tracks the pen from the content
+  # edge (`Run::tab_px`); see the tab-stop describe in native_layout_text_spec for the rule.
+  it 'matches pre with a TAB' do
+    expect_parity("<div style=\"width:200px;white-space:pre\">a\tb</div>")
   end
   # A blank/whitespace pre line INSIDE an inline element (the CodeMirror blank-line shape) is ordinary content —
   # it lays out through the text path (its line box gives the block height, which propagates normally).

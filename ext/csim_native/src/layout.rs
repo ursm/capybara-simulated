@@ -416,6 +416,15 @@ pub(crate) struct Run {
     // one. (Chrome: `aaaa<span style="white-space:nowrap"> </span>bbbb` stays on one line, where the same space
     // in a wrapping span opens the line.)
     pub(crate) ws_mode: u8,
+    // The TAB STOP a tab in this run advances to, as `tabStopOf` resolves it: `tab_px` is the spacing between
+    // stops — the tab's OWN element's `tab-size`, so an inner `code { tab-size: 4 }` stops every 4 inside a
+    // `pre { tab-size: 8 }`, counted in the BLOCK's space advance where the value is a number — and `tab_min`
+    // is the block's half-space, the least a tab may advance. Stops are measured from the BLOCK's content
+    // edge, so what a tab is worth depends on where the pen stands (`measure_at`'s `from`). The pair arrives
+    // FINAL — a `tab-size` that resolved to zero took the block's letter-spacing as its spacing back in the
+    // oracle's `tabStopOf` — so a `tab_px` of 0 means there is no stop to reach and a tab advances nothing.
+    pub(crate) tab_px: f64,
+    pub(crate) tab_min: f64,
 }
 
 impl Input {
@@ -590,10 +599,19 @@ pub(crate) fn layout_block(inputs: &[Input], runs: &[Run], run_texts: &[Option<V
     Outcome::LaidOut(boxes)
 }
 
-// Measure a word (a run of code points) in a run's font (px). None on a bad handle or a tab / combining
-// mark measure_run declines.
+// Measure text in a run's font (px), at a pen standing `from` px from the BLOCK's content edge. Only a TAB
+// reads the pen, and it reads it because its advance is the gap to the next stop rather than a width of its
+// own (`Run::tab_px`). None on a bad font handle.
+fn measure_at(run: &Run, text: &[u16], from: f64) -> Option<f64> {
+    crate::font::with_font(run.font, |fm| fm.measure_run(text, run.size, run.ls, run.ws, from, run.tab_px, run.tab_min))
+}
+// …and the same for text that CANNOT hold a tab, which needs no pen. The tokenizer splits on white space and
+// a tab is white space, so every WORD is tab-free by construction; a literal space is one character that is
+// not a tab. Two names rather than one `from` argument every caller has to reason about: measuring at the
+// wrong pen is silent (a tab simply lands on a different stop), and a word site has no cheap pen to pass —
+// `band_l` scans the floats, per word of every line.
 fn measure_word(run: &Run, word: &[u16]) -> Option<f64> {
-    crate::font::with_font(run.font, |fm| fm.measure_run(word, run.size, run.ls, run.ws)).flatten()
+    measure_at(run, word, 0.0)
 }
 
 fn is_ws_u16(u: u16) -> bool {
@@ -970,7 +988,10 @@ fn line_layout(
                                         k += 1;
                                     }
                                     if preserve {
-                                        unit += measure_word(run, &text[ws_start..k])?;
+                                        // …measured where it will SIT: preserved white space may hold a tab,
+                                        // whose advance is the gap to the next stop from the block's content
+                                        // edge, so the pen this piece starts at is part of its width.
+                                        unit += measure_at(run, &text[ws_start..k], band_l(total) + line_x + pending_w + ow + unit)?;
                                     } else if k < end && !(first && at_line_start) {
                                         // …one space per retained gap; a TRAILING collapsible space hangs outside
                                         // the run, so it is no part of what has to fit.
@@ -1064,7 +1085,7 @@ fn line_layout(
                                             // stack and nothing opens between a newline and the segment it
                                             // starts — so the unit is the segment alone)
                                             if seg_end > from {
-                                                let seg_w = measure_word(run, &text[from..seg_end])?;
+                                                let seg_w = measure_at(run, &text[from..seg_end], band_l(total) + line_x)?;
                                                 if seg_w > band_w(total) + LINE_FIT_EPS {
                                                     let fy = top + total;
                                                     let at = float_fit_y(floats, fy, seg_w + indent_now.get(), cl, cr, strut_lh);
@@ -1075,7 +1096,11 @@ fn line_layout(
                                             }
                                         }
                                     }
-                                    0x20 => {
+                                    // …and a preserved TAB is the same placement with a different advance: the
+                                    // gap from the pen to the next stop rather than a width of its own. So it
+                                    // joins this arm rather than having one, and the advance is taken below,
+                                    // once the pen is where the tab actually starts.
+                                    0x20 | 0x09 => {
                                         // A preserved space is content on the line: it grows the line box by its
                                         // run's metrics as a word would (a lone space in a larger font is a fragment
                                         // there). It goes through the oracle's `placeOnLine` like any other run,
@@ -1100,7 +1125,17 @@ fn line_layout(
                                                 hang_pre = 0.0;
                                             }
                                         }
-                                        line_x += space_w;
+                                        // Measured HERE, after the waiting space and the open edges have moved
+                                        // the pen: a tab's advance is the gap to the next stop from the block's
+                                        // content edge, and everything placed before it on this line is part of
+                                        // where it stands. (The oracle reaches the same pen as
+                                        // `lineX + openEdgeWidth() - content.x`.)
+                                        let adv = if text[i] == 0x09 {
+                                            measure_at(run, &text[i..i + 1], band_l(total) + line_x)?
+                                        } else {
+                                            space_w
+                                        };
+                                        line_x += adv;
                                         hang = 0.0;              // …and it is not a COLLAPSED hang any more
                                         if no_wrap {
                                             // A `pre` run is placed WHOLE, through the oracle's non-wrapping
@@ -1110,7 +1145,7 @@ fn line_layout(
                                             // branch's alone.) It still ENDS a `pre-wrap` hang before it.
                                             hang_pre = 0.0;
                                         } else {
-                                            hang_pre += space_w;
+                                            hang_pre += adv;
                                         }
                                         line_asc = line_asc.max(run.asc);
                                         line_desc = line_desc.max(run.line_height - run.asc);
@@ -1126,7 +1161,7 @@ fn line_layout(
                                                                  // overwrites whatever stood there
                                         pending_space = Some((0.0, run.asc, run.line_height - run.asc, !no_wrap));
                                     }
-                                    _ => return None, // tab (tab stops) / \r / \f — not modelled
+                                    _ => return None, // \r / \f — not modelled
                                 }
                                 i += 1;
                             }
@@ -1221,6 +1256,9 @@ fn line_layout(
                             i += 1;
                         }
                         let word = &text[start..i];
+                        // A WORD holds no tab: the tokenizer splits on white space and a tab is white space.
+                        // So it is measured with no pen, exactly as the oracle measures it (`breakUnits` calls
+                        // `measureRun` with neither `from` nor `tab`), and so are the pieces it splits into.
                         let width = measure_word(run, word)?;
                         // `space_before` is the ADVANCE that is waiting; `space_breaks` is whether it opens a
                         // line here, which is the mode of the run that queued it.
@@ -4729,6 +4767,7 @@ fn text_intrinsic(runs: &[Run], run_texts: &[Option<Vec<u16>>], ws_mode: u8, inp
                     return None;
                 }
                 let space_w = measure_word(run, &[0x20])?;
+                // (`measure_word` only, so the tab pair it carries is never read — a word holds no tab.)
                 let unspaced = Run { ls: 0.0, ws: 0.0, ..*run };
                 let run_has_wide = text.iter().any(|&u| is_wide_unit(u)); // once per run, as in the flow arm
                 let run_has_hyphen = text.iter().any(|&u| is_hyphen_unit(u));
@@ -4740,8 +4779,8 @@ fn text_intrinsic(runs: &[Run], run_texts: &[Option<Vec<u16>>], ws_mode: u8, inp
                         while i < text.len() && is_ws_u16(text[i]) {
                             if text[i] == 0x0A {
                                 nl += 1;
-                            } else if text[i] != 0x20 {
-                                return None; // a tab (tab stops) / \r / \f — not modelled
+                            } else if text[i] != 0x20 && text[i] != 0x09 {
+                                return None; // \r / \f — not modelled
                             }
                             i += 1;
                         }
@@ -4764,12 +4803,18 @@ fn text_intrinsic(runs: &[Run], run_texts: &[Option<Vec<u16>>], ws_mode: u8, inp
                                         inline_on_line = true;
                                         seg_open = true;
                                     }
+                                    // A TAB's advance is the gap to the next stop from the pen, which here is
+                                    // `line` — the oracle passes exactly that as `measureRun`'s `from` in its
+                                    // own intrinsic arm. (It measures the whole whitespace TOKEN at once and
+                                    // takes one opportunity for it; per character is the same arithmetic and
+                                    // the same opportunities, since closing an empty word is a no-op.)
+                                    let adv = if u == 0x09 { measure_at(run, &[u], line)? } else { space_w };
                                     if wraps {
                                         opportunity!();
                                     } else {
-                                        word += space_w;
+                                        word += adv;
                                     }
-                                    line += space_w;
+                                    line += adv;
                                 }
                             }
                         } else if break_nl && nl > 0 {

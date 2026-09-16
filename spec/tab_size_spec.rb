@@ -17,7 +17,12 @@ require_relative 'support/session_teardown'
 #     the block's font
 #   - a tab sitting exactly on a stop takes the whole next one, and one whose stop is less than
 #     HALF A SPACE away takes the one after (Blink's `Font::TabWidth`)
-#   - `tab-size: 0` leaves a tab the width of the letter-spacing alone
+#   - a `tab-size` of 0 puts the stops the BLOCK's LETTER-SPACING apart — the fallback is the stop SPACING, not a
+#     flat advance, so the grid and the half-space rule go on applying to it (after one 9.6px character:
+#     `letter-spacing: 3px` lands the next box at 18, `0.5px` at 11, `1px` at 12). With no letter-spacing,
+#     a NEGATIVE one, or a `word-spacing` instead there is no stop to reach and a tab advances nothing
+#   - a `tab-size` that is neither a number nor a length is no `tab-size` at all: `auto` / `2px 3px` / a
+#     typo keep the INITIAL 8, exactly as an undeclared one does
 #
 # Every x is a formula over the space advance measured on the same page — the face is the
 # machine's, the arithmetic is not.
@@ -117,6 +122,38 @@ RSpec.describe 'tab stops' do
   it 'gives a tab no width under tab-size: 0' do
     x, = measure("<pre style=\"tab-size:0\">ab\t<span id=t>X</span></pre>")
     expect(x).to be_within(0.01).of(measure("<pre><span id=t>ab</span></pre>", '', probe: 'ab')[1])
+  end
+
+  # …because there is no stop to reach. With a LETTER-SPACING there is: the stops sit that far apart, and the
+  # grid applies to them like any other — the pen after one spaced character is `a + stop`, inside the SECOND
+  # stop, so the box lands on it. A flat advance (what this was until 2026-09-16) would put the box a whole
+  # stop further out, at `a + 2 * stop`. Four spaces is wide enough for any face this could run on: it needs
+  # only `a` to be under 3.5 spaces, so that the pen stays inside a stop and the one it reaches is not within
+  # half a space of it.
+  it 'puts the stops a letter-spacing apart under tab-size: 0' do
+    _, sp = measure('<pre><span id=t></span></pre>')
+    stop = 4 * sp
+    x, = measure("<pre style=\"tab-size:0;letter-spacing:#{stop}px\">a\t<span id=t>X</span></pre>")
+    expect(x).to be_within(0.01).of(2 * stop)
+  end
+
+  # …and it is the BLOCK's letter-spacing, like every other half of a tab stop: one on the inline the tab sits
+  # in buys it no stop at all (the box lands at the pen), and one on the BLOCK gives it stops the inline
+  # cannot cancel.
+  it 'takes the block letter-spacing, not the tab own inline' do
+    _, sp = measure('<pre><span id=t></span></pre>')
+    a = measure("<pre><span id=t>a</span></pre>", '', probe: 'a')[1]
+    stop = 4 * sp
+    x, = measure("<pre style=\"tab-size:0\">a<span style=\"letter-spacing:#{stop}px\">\t<span id=t>X</span></span></pre>")
+    expect(x).to be_within(0.01).of(a)
+    x, = measure("<pre style=\"tab-size:0;letter-spacing:#{stop}px\">a<span style=\"letter-spacing:0\">\t<span id=t>X</span></span></pre>")
+    expect(x).to be_within(0.01).of(2 * stop)
+  end
+
+  # …and a value that is neither a number nor a length is no `tab-size`, so the property keeps its initial 8.
+  it 'keeps the initial 8 for a tab-size that does not parse' do
+    x, sp = measure("<pre style=\"tab-size:auto\">ab\t<span id=t>X</span></pre>")
+    expect(x).to be_within(0.01).of(8 * sp)
   end
 
   it 'stops a pre span in the middle of a line from the block edge' do

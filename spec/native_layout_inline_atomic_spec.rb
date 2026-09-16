@@ -193,7 +193,7 @@ RSpec.describe 'native layout inline-atomic parity', if: ENV.fetch('CSIM_JS_ENGI
       expect_native_atomic('<div style="width:400px">text <b><span style="display:inline-block;width:10px;height:10px"></span> in bold</b> x</div>')
       expect_native_atomic('<div style="width:400px">text <span style="display:inline-block;position:relative;top:3px;left:4px;width:10px;height:10px"></span> x</div>')
       expect_native_atomic('<div style="width:400px;white-space:nowrap">no wrap <span style="display:inline-block;width:80px;height:10px"></span> here at all in this long line of text that keeps going</div>')
-      expect_native_atomic('<div style="width:400px;white-space:pre">pre <span style="display:inline-block;width:80px;height:10px"></span>\nnext</div>')
+      expect_native_atomic(%(<div style="width:400px;white-space:pre">pre <span style="display:inline-block;width:80px;height:10px"></span>\nnext</div>))
     end
     # A `position: relative` INLINE offsets its whole fragment at paint time (§9.4.3), the atomic inlines on its
     # lines included — and the inline boxes themselves have no records, so the atomic's own box is where that
@@ -375,13 +375,17 @@ RSpec.describe 'native layout inline-atomic parity', if: ENV.fetch('CSIM_JS_ENGI
         # with no charset, whose mojibake happens to contain an em dash, so what it actually exercised was the
         # hyphen refusal that native has since taken over.)
         "<div style=\"width:400px\">text <span style=\"display:inline-block\">a\u00ADb</span> after</div>",
-        "<div style=\"width:400px\">text <span style=\"display:inline-block;white-space:pre\">a\tb</span> after</div>",
+        # (a preserved FORM FEED, which native's pen-walk does not measure. This fixture used to hold a TAB,
+        # which native has since taken over — tab stops are its own now, so a tabbed subtree stays native.)
+        "<div style=\"width:400px\">text <span style=\"display:inline-block;white-space:pre\">a\fb</span> after</div>",
         '<div style="width:400px">text <span style="display:inline-block;width:max-content">bb</span> after</div>'
       ].each do |body|
         r = run_shadow(body)
         expect(r).to include('ok' => true, 'mismatches' => 0, 'nativeAtomics' => 0), "#{body}: #{r.inspect}"
       end
       expect_native_atomic('<div style="width:400px"><span style="display:inline-block">ok</span> and <span style="display:inline-block"><div style="float:left;width:10px;height:10px"></div>beside</span> after</div>', 1)
+      # …and the tabbed one the other way round: its subtree is native, so nothing is rolled back
+      expect_native_atomic("<div style=\"width:400px\">text <span style=\"display:inline-block;white-space:pre\">a\tb</span> after</div>", 1)
     end
     it 'keeps the pushed box for a font-box-aligned atomic and an inline-flex' do
       r = run_shadow('<div style="width:400px">text <span style="display:inline-block;vertical-align:middle;width:10px;height:30px"></span> x</div>')

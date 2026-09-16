@@ -22,16 +22,57 @@ RSpec.describe 'native layout L2 text-block parity', if: ENV.fetch('CSIM_JS_ENGI
     session.evaluate_script('globalThis.__csimLayoutShadowRun()')
   end
 
-  def shadow(body)
-    session = simulated_session(page(body)); session.visit '/'
-    parity(session)
+  # ONE session per body, DISPOSED at the end of the block rather than at the end of the example: an example
+  # that lays out ten shapes would otherwise hold ten V8 isolates at once (measured: 473 MB against 213 MB
+  # for a two-shape one, ~26 MB apiece), which is the shape of leak that has run this suite out of memory
+  # before — see spec/support/session_teardown.rb, whose `with_simulated_session` exists for exactly this.
+  def with_page(body)
+    with_simulated_session(page(body)) do |session|
+      session.visit '/'
+      yield session
+    end
   end
 
-  def expect_parity(body)
-    r = shadow(body)
-    expect(r).to include('ok' => true), "harness bailed: #{body}: #{r.inspect}"
-    expect(r['compared']).to be > 0, "nothing was compared: #{body}: #{r.inspect}"
-    expect(r['mismatches']).to eq(0), "mismatch: #{body}: #{r.inspect}"
+  def shadow(body)
+    with_page(body) {|session| parity(session) }
+  end
+
+  # Where the marker `#m` sits, which is how a shape says what it is about. Parity is blind to a rule both
+  # engines get wrong the SAME way — the harness only ever asks whether they AGREE — so a rule read out of
+  # Chrome rather than out of the oracle has to have the Chrome NUMBER asserted too, which is what the
+  # `chrome_x` argument of `expect_parity` / `expect_declined_x` below is for.
+  def marker_x(session)
+    session.evaluate_script("document.querySelector('#m').getBoundingClientRect().x")
+  end
+
+  # Within 0.05px throughout: the engines measure from the font file's own advances, so they land a hair off
+  # Chrome's rounding — 9.6 against 9.609375 per monospace character.
+  def expect_near(x, chrome_x, body)
+    expect(x).to be_within(0.05).of(chrome_x), "#{body}: #m at #{x}, Chrome #{chrome_x}"
+  end
+
+  def expect_parity(body, chrome_x = nil)
+    with_page(body) do |session|
+      r = parity(session)
+      expect(r).to include('ok' => true), "harness bailed: #{body}: #{r.inspect}"
+      expect(r['compared']).to be > 0, "nothing was compared: #{body}: #{r.inspect}"
+      expect(r['mismatches']).to eq(0), "mismatch: #{body}: #{r.inspect}"
+      expect_near(marker_x(session), chrome_x, body) unless chrome_x.nil?
+    end
+  end
+
+  # …and for a rule the walk DECLINES by design, where there is no parity to assert at all and the oracle is
+  # the only engine that answers. It still checks the decline, so a shape that quietly became native stops
+  # being tested here and says so rather than passing on.
+  def expect_declined_x(body, chrome_x, native_body)
+    with_page(body) do |session|
+      expect(parity(session)).to include('ok' => false, 'reason' => 'unsupported subtree'), "not declined: #{body}"
+      expect_near(marker_x(session), chrome_x, body)
+    end
+    # …and the decline is the thing the shape is ABOUT, not something else that crept in: the same shape
+    # without it goes native. Without this the example stays green while it silently stops covering the rule
+    # (a new walk gate anywhere in the shape would decline it just as well).
+    expect_parity(native_body)
   end
 
   it 'matches a single-line text block' do
@@ -321,10 +362,10 @@ RSpec.describe 'native layout L2 text-block parity', if: ENV.fetch('CSIM_JS_ENGI
       expect_parity('<div style="display:flex;width:50px"><div style="word-break:break-all">&#x65E5;abcdefgh</div></div>')
     end
     # A COLLAPSED tab is measured by nobody — the whitespace run never reaches `measure_run` — so tab-indented
-    # markup lays out natively; only a PRESERVED one declines.
-    it 'lays out tab-indented markup and declines only a preserved tab' do
+    # markup lays out natively whatever the mode. (A PRESERVED one is native's too now: see the tab-stop
+    # describe below. A FORM FEED still declines — `declines a preserved form feed …` covers that.)
+    it 'lays out tab-indented markup' do
       expect_parity("<div style=\"width:400px\">\n\t<span>hello</span>\n</div>")
-      expect(shadow("<div style=\"width:400px;white-space:pre\">a\tb</div>")).to include('ok' => false)
     end
     it 'keeps the wrap modes and spacing over a CJK run' do
       expect_parity('<div style="width:60px;word-break:break-all">日本語のテキスト</div>')
@@ -454,10 +495,12 @@ RSpec.describe 'native layout L2 text-block parity', if: ENV.fetch('CSIM_JS_ENGI
     end
 
 
-    # What native still cannot measure is refused by the WALK now, not discovered in Rust: a TAB needs the
-    # block's tab stops, and a ZWJ under a per-character wrap carries the previous character's advance.
-    it 'declines a tab and a per-character ZWJ in the walk' do
-      ["<div style=\"width:400px;white-space:pre\">a\tb</div>",
+    # What native still cannot measure is refused by the WALK, not discovered in Rust: a preserved FORM FEED,
+    # and a ZWJ under a per-character wrap (where the oracle's advance carries the previous character). (A CR
+    # cannot be tested from markup at all — the HTML parser normalizes every one in the input stream to a
+    # newline, so no parsed text node ever holds one.)
+    it 'declines a preserved form feed and a per-character ZWJ in the walk' do
+      ["<div style=\"width:400px;white-space:pre\">a\fb</div>",
        '<div style="width:400px;word-break:break-all">a&#x200D;b</div>'].each do |body|
         expect(shadow(body)).to include('ok' => false, 'reason' => 'unsupported subtree'), body
       end
@@ -726,6 +769,133 @@ bbbbbbbbbb</span></div></div>))
       expect_parity('<div style="width:80px;font:16px monospace"><span style="white-space:nowrap;font-size:40px"> </span><span style="white-space:pre"> b</span></div>')
       expect_parity('<div style="width:150px;font:16px monospace"><div style="float:left;width:56px;height:10px"></div><div style="width:40px;white-space:nowrap"> <span style="white-space:normal"> </span><span style="display:inline-block;width:70px;height:6px"></span></div></div>')
       expect_parity('<div style="width:150px;font:16px monospace"><div style="float:left;width:56px;height:10px"></div><div style="width:40px"><span style="white-space:nowrap"> </span><span style="white-space:normal"> </span><span style="display:inline-block;width:70px;height:6px"></span></div></div>')
+    end
+  end
+
+  # A TAB is the one character whose advance is not a width: it is the gap from where the pen stands to the
+  # next stop, stops sitting every `tab-size` from the BLOCK's content edge. So every one of these asks the
+  # same rule a different way — what precedes the tab on the line, which element's `tab-size` is read, and
+  # what the block's space advance is worth — and each was measured in Chrome (`--headless --dump-dom`)
+  # before it was written down, because the two engines agreeing on a tab stop neither of them has is the
+  # failure this cannot catch by itself.
+  describe 'a preserved tab advances to the next stop' do
+    # Two things every shape here does. It puts an inline-BLOCK where the tab lands, never a bare `<span>`:
+    # an inline box with no edges emits no OPEN / CLOSE run and so has no native box at all, which means the
+    # harness never compares where it sits (measured — with a bare span these examples pass with the
+    # half-space rule deleted outright). And it gives that marker `id="m"`, so `expect_x` can assert the
+    # CHROME number as well as the agreement: every stop rule here was read out of Chrome rather than out of
+    # the oracle, and where a fix touched both engines parity cannot see it at all.
+    it 'stops every tab-size from the block content edge, wherever the pen is' do
+      # One 16px monospace space is 9.6, so the default 8 stops every 76.8 — and nine characters of text put
+      # the pen past the first stop into the second.
+      expect_parity(%(<div style="width:400px;font:16px monospace;white-space:pre">a\t<span id="m" style="display:inline-block;width:10px;height:9px"></span></div>), 76.8125)
+      expect_parity(%(<div style="width:400px;font:16px monospace;white-space:pre">aaaaaaaaa\t<span id="m" style="display:inline-block;width:10px;height:9px"></span></div>), 153.609375)
+      expect_parity(%(<div style="width:400px;font:16px monospace;white-space:pre">a\t\t<span id="m" style="display:inline-block;width:10px;height:9px"></span></div>), 153.609375)
+      expect_parity(%(<div style="width:400px;font:16px monospace;white-space:pre">\t<span id="m" style="display:inline-block;width:10px;height:9px"></span></div>), 76.8125)
+    end
+    # …and the stop is the TAB's own element's, resolved against the BLOCK's space: an inner `tab-size` wins
+    # for the tabs inside it while the block still decides what one unit of it is worth — a 16px span's tab
+    # in a 32px block stops every 8 x 19.2, and the block's letter-spacing is part of its space advance.
+    it 'reads tab-size from the element the tab is in, counted in the block space' do
+      expect_parity(%(<div style="width:400px;font:16px monospace;white-space:pre;tab-size:4">a\t<span id="m" style="display:inline-block;width:10px;height:9px"></span></div>), 38.40625)
+      expect_parity(%(<div style="width:400px;font:16px monospace;white-space:pre">a\t<span style="tab-size:4">b\t<span id="m" style="display:inline-block;width:10px;height:9px"></span></span></div>), 115.203125)
+      # …and the same under `pre-wrap`, which is the mode that can MERGE two adjacent text nodes into one run
+      # (a non-wrapping one never does). Two stops in one run would be one stop, so the stop pair is part of
+      # what makes two runs the same — measured: without it in `nlSameFi` this shape mismatches.
+      expect_parity(%(<div style="width:400px;font:16px monospace;white-space:pre-wrap">a\t<span style="tab-size:4">b\t<span id="m" style="display:inline-block;width:10px;height:9px"></span></span></div>), 115.203125)
+      expect_parity(%(<div style="width:400px;font:16px monospace;white-space:pre;letter-spacing:2px">a\t<span id="m" style="display:inline-block;width:10px;height:9px"></span></div>), 92.8125)
+      expect_parity(%(<div style="width:400px;font:32px monospace;white-space:pre"><span style="font-size:16px">a\t<span id="m" style="display:inline-block;width:10px;height:9px"></span></span></div>), 153.609375)
+    end
+    # …and a `tab-size` that is neither a number nor a length is no `tab-size` at all: the property keeps its
+    # initial 8, exactly as an undeclared one does. Read through `parseFloat` these were 2 (`2px 3px`), 4
+    # (`4e`) and 0 (`auto`) — and a zero MEANS something now (the letter-spacing grid below), so an
+    # unparseable value read as one is a wrong answer rather than a missing one.
+    it 'keeps the initial 8 for a tab-size that does not parse' do
+      # (`4.` and `20.px` among them: CSS tokenizes a trailing bare dot as a number plus a delim, so the
+      # declaration is invalid — where `parseFloat` and a looser regex both read them as 4 and 20.)
+      ['auto', 'normal', 'none', 'red', '2px 3px', '4e', '4.', '20.px', '4.e1'].each do |ts|
+        expect_parity(%(<div style="width:400px;font:16px monospace;white-space:pre;tab-size:#{ts}">a\t<span id="m" style="display:inline-block;width:10px;height:9px"></span></div>), 76.8125)
+      end
+      # …while the ones that DO parse keep their own answer, units and all
+      expect_parity(%(<div style="width:400px;font:16px monospace;white-space:pre;tab-size:2em">a\t<span id="m" style="display:inline-block;width:10px;height:9px"></span></div>), 32)
+      # (a `px` length, whose stop width is the length itself — where a bare number would be 20 spaces)
+      expect_parity(%(<div style="width:400px;font:16px monospace;white-space:pre;tab-size:20px">aaa\t<span id="m" style="display:inline-block;width:10px;height:9px"></span></div>), 40)
+    end
+    # …a LENGTH `tab-size` brings the half-space rule with it: a stop nearer than half the block's space is
+    # skipped for the one after (Blink's `Font::TabWidth`).
+    it 'skips a stop less than half a space away' do
+      expect_parity(%(<div style="width:400px;font:16px monospace;white-space:pre;tab-size:20px">aa\t<span id="m" style="display:inline-block;width:10px;height:9px"></span></div>), 40)
+      expect_parity(%(<div style="width:400px;font:16px monospace;white-space:pre;tab-size:20px">a\t<span id="m" style="display:inline-block;width:10px;height:9px"></span></div>), 20)
+    end
+    # …and a `tab-size` of 0 puts the stops a LETTER-SPACING apart instead of turning them off. With no
+    # letter-spacing, a NEGATIVE one, or a `word-spacing` instead, there is no stop to reach and the tab
+    # advances nothing — the marker sits at the pen. Both engines read this as a flat letter-spacing advance
+    # until 2026-09-16; the numbers below are the measurements that say otherwise.
+    it 'puts the stops a letter-spacing apart at tab-size 0' do
+      {'0.5px' => 11, '1px' => 12, '2px' => 14, '3px' => 18, '6px' => 24, '10px' => 30}.each do |ls, x|
+        expect_parity(%(<div style="width:400px;font:16px monospace;white-space:pre;tab-size:0;letter-spacing:#{ls}">a\t<span id="m" style="display:inline-block;width:10px;height:9px"></span></div>), x)
+      end
+      {'letter-spacing:0' => 9.609375, 'letter-spacing:-1px' => 8.609375, 'letter-spacing:-3px' => 6.609375, 'word-spacing:5px' => 9.609375}.each do |none, x|
+        expect_parity(%(<div style="width:400px;font:16px monospace;white-space:pre;tab-size:0;#{none}">a\t<span id="m" style="display:inline-block;width:10px;height:9px"></span></div>), x)
+      end
+      # …and it is the BLOCK's letter-spacing, like every other half of a tab stop. One on the INLINE the tab
+      # sits in buys it no stop (9.61, the pen unmoved), and one on the block gives it stops the inline cannot
+      # cancel (30) — while the pen still carries whatever spacing the runs before it had (16.61 / 24).
+      expect_parity(%(<div style="width:400px;font:16px monospace;white-space:pre;tab-size:0">a<span style="letter-spacing:10px">\t<span id="m" style="display:inline-block;width:10px;height:9px"></span></span></div>), 9.609375)
+      expect_parity(%(<div style="width:400px;font:16px monospace;white-space:pre;tab-size:0;letter-spacing:10px">a<span style="letter-spacing:0">\t<span id="m" style="display:inline-block;width:10px;height:9px"></span></span></div>), 30)
+      expect_parity(%(<div style="width:400px;font:16px monospace;white-space:pre;tab-size:0"><span style="letter-spacing:7px">a</span><span style="letter-spacing:10px">\t<span id="m" style="display:inline-block;width:10px;height:9px"></span></span></div>), 16.609375)
+      expect_parity(%(<div style="width:400px;font:16px monospace;white-space:pre;tab-size:0;letter-spacing:4px"><span style="letter-spacing:7px">a</span><span style="letter-spacing:10px">\t<span id="m" style="display:inline-block;width:10px;height:9px"></span></span></div>), 24)
+    end
+    # …and a tabbed run that overflows only breaks where the line MAY break: the oracle re-measures such a run
+    # from the next line's start, and used to move it there with no opportunity to move it at.
+    # Parity, not a Chrome number, and deliberately: NATIVE never had this branch, so the two engines
+    # disagreed until the guard landed — measured, removing it reds this example. The shapes as written ARE
+    # Chrome's answer (it keeps the first on ONE line, div 80x22, the span at 38.41 overflowing), but a
+    # comparable box cannot be added to read that off: an inline with no edges has no native box, and an
+    # inline-BLOCK inside the span brings the recorded atomic-break divergence with it (Chrome keeps the
+    # marker on line 1 at 86.42, both engines move it to line 2 — `outer_wraps_gates_on_the_block`), which
+    # would make this example about that instead.
+    it 'breaks a tabbed run before it only where an opportunity stands' do
+      expect_parity(%(<div style="width:80px;font:16px monospace">xxxx<span style="white-space:pre">a\tb</span></div>))
+      expect_parity(%(<div style="width:80px;font:16px monospace">xxxx <span style="white-space:pre">a\tb</span></div>))
+      expect_parity(%(<div style="width:80px;font:16px monospace">xxxx<wbr><span style="white-space:pre">a\tb</span></div>))
+      expect_parity(%(<div style="width:80px;font:16px monospace">xxxx<span style="display:inline-block;width:10px;height:9px"></span><span style="white-space:pre">a\tb</span></div>))
+    end
+    # …and where that opportunity is a SOFT HYPHEN the break draws the hyphen, which is the difference between
+    # the oracle's `takeBreak` and a plain forced one: the hyphen is 9.6px of the first line, and a centred
+    # line without it sits 4.8 off. Native declines a soft hyphen outright, so there is no parity to assert
+    # here — the oracle is the only engine that answers and Chrome is the only check on it.
+    it 'draws the hyphen when the opportunity it breaks at is a soft one' do
+      # (`%()`, never `'…'`: a single-quoted `\t` is a backslash and a `t`, and the oracle's whole tab branch
+      # is gated on the run HOLDING one — measured, the shape without a real tab is satisfied by the ordinary
+      # break path and passes with this fix reverted.)
+      [['<span id="m" style="display:inline-block;width:10px;height:9px"></span>xx&shy;', %(<span style="white-space:pre">aaa\tbbb</span>), 30.59375],
+       ['<span id="m" style="display:inline-block;width:10px;height:9px"></span>xx&shy;xx&shy;', %(<span style="white-space:pre">aaa\tbbb</span>), 20.984375],
+       ['<span id="m" style="display:inline-block;width:10px;height:9px"></span>xx&shy;', %(<span style="padding-left:4px;white-space:pre">aaa\tbbb</span>), 30.59375]].each do |lead, tail, x|
+        head = %(<div style="width:100px;font:16px monospace;text-align:center">)
+        expect_declined_x(%(#{head}#{lead}#{tail}</div>), x, %(#{head}#{lead.gsub('&shy;', ' ')}#{tail}</div>))
+      end
+    end
+    # …and the pen a tab measures from is the BLOCK's content edge, which is what makes an INTRINSIC width
+    # (Chrome: max-content 96.015625 for `a\tbb`, min-content 19.203125) and a line inside a float band come
+    # out right — the band and the indent move the PEN, the stops stay where the block put them.
+    it 'measures from the content edge through an intrinsic width, an indent and a float band' do
+      expect_parity(%(<div style="width:max-content;font:16px monospace;white-space:pre">a\tbb</div>))
+      expect_parity(%(<div style="width:min-content;font:16px monospace;white-space:pre-wrap">aa\tbb cc</div>))
+      expect_parity(%(<div style="width:400px;font:16px monospace;white-space:pre;text-indent:20px">a\t<span id="m" style="display:inline-block;width:10px;height:9px"></span></div>), 76.8125)
+      expect_parity(%(<div style="width:400px;font:16px monospace"><div style="float:left;width:50px;height:40px"></div><div style="white-space:pre">a\t<span id="m" style="display:inline-block;width:10px;height:9px"></span></div></div>), 76.8125)
+      # …and the band moving AFTER the run was measured is the same question asked late: `retakeBand` drops an
+      # empty line below a float, and a tabbed run measured at the old band came out 90 where Chrome says
+      # 86.42 (stops from the content edge, reached from the line's own start).
+      expect_parity(%(<div style="width:200px;font:16px monospace"><div style="float:left;width:150px;height:30px"></div><div><span style="white-space:pre">a\tb</span><span id="m" style="display:inline-block;width:10px;height:9px"></span></div></div>), 86.421875)
+    end
+    # …and it is a placement like any other: it carries the line box it lands on, ends the preserved hang
+    # before it, and a `pre-wrap` line may wrap after it.
+    it 'places like a preserved space on the line it lands on' do
+      expect_parity(%(<div style="width:120px;font:16px monospace;white-space:pre-wrap">aa\tbbbb cccc dddd</div>))
+      expect_parity(%(<div style="width:400px;font:16px monospace;white-space:pre">a\t<span style="display:inline-block;width:10px;height:40px"></span></div>))
+      expect_parity(%(<div style="width:400px;font:16px monospace;white-space:pre-wrap">aa \t<span style="display:inline-block;width:10px;height:9px"></span></div>))
+      expect_parity(%(<div style="width:400px;font:16px monospace;white-space:pre">a\tb\ncc\t<span style="display:inline-block;width:10px;height:9px"></span></div>))
     end
   end
 

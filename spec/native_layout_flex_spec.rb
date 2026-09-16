@@ -770,7 +770,7 @@ RSpec.describe 'native layout flex parity', if: ENV.fetch('CSIM_JS_ENGINE', 'v8'
       expect_native_flex(%(<div style="#{base}"><div><p style="position:relative;top:10px;margin:0">a</p></div><div style="font-size:32px">BIG</div></div>))
     end
     it 'reads a baseline from the empty line a preserved newline leaves' do
-      expect_native_flex('<div style="display:flex;align-items:last baseline;width:400px"><div style="white-space:pre">a\n\n</div><div style="font-size:32px">BIG</div></div>')
+      expect_native_flex(%(<div style="display:flex;align-items:last baseline;width:400px"><div style="white-space:pre">a\n\n</div><div style="font-size:32px">BIG</div></div>))
       expect_native_flex(%(<div style="#{base}"><div style="white-space:pre">\n\na</div><div style="font-size:32px">BIG</div></div>))
       expect_native_flex(%(<div style="#{base}"><div style="white-space:pre-line">\n\na</div><div style="font-size:32px">BIG</div></div>))
     end

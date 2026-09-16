@@ -893,7 +893,7 @@ fn register_font_bytes(
 // Fields per node in the layoutPass input buffer, and per run in the runs buffer (flat Float64Arrays).
 // Order MUST match the JS packer (layout.js `__csimLayoutShadowRun`) and layout::Input / layout::Run.
 const LAYOUT_STRIDE: usize = 97;
-const RUN_STRIDE: usize = 9;
+const RUN_STRIDE: usize = 11;
 
 // Decode a V8 Float64Array argument into a Vec<f64> (native-endian raw bytes).
 fn read_f64_array(val: v8::Local<'_, v8::Value>) -> Vec<f64> {
@@ -1049,7 +1049,7 @@ fn layout_pass(
     let run_floats = read_f64_array(args.get(1));
     let mut runs: Vec<crate::layout::Run> = Vec::with_capacity(run_floats.len() / RUN_STRIDE);
     for r in run_floats.chunks_exact(RUN_STRIDE) {
-        runs.push(crate::layout::Run { kind: r[0] as u8, font: r[1] as i32, size: r[2], ls: r[3], ws: r[4], line_height: r[5], asc: r[7], metric: r[6], ws_mode: r[8] as u8 });
+        runs.push(crate::layout::Run { kind: r[0] as u8, font: r[1] as i32, size: r[2], ls: r[3], ws: r[4], line_height: r[5], asc: r[7], metric: r[6], ws_mode: r[8] as u8, tab_px: r[9], tab_min: r[10] });
     }
     // Parallel run-text channel: run_texts[r] = run r's text (a string), read as UTF-16 to iterate
     // exactly as JS does. Done before any arena borrow.

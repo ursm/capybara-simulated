@@ -59,13 +59,17 @@ impl FontMetrics {
         Some(FontMetrics { ascii, avg: total / count as f64 })
     }
 
-    // Width (px) of a UTF-16 run at `size` px with letter/word spacing, exactly as layout.js measureRun
-    // does for the common path. None ONLY when the run holds a TAB — whose advance is the block's tab stops,
-    // not the run's — and the caller declines the block to JS; every character is measurable otherwise.
+    // Width (px) of a UTF-16 run at `size` px with letter/word spacing, exactly as layout.js measureRun does.
+    // Every character is measurable — the TAB was the last one that was not, and it is measured here now that
+    // the pen reaches it. So this never answers None itself; it stays an `Option` because its one caller
+    // (`measure_at`) reaches it through `with_font`, which answers None for a font handle that is not
+    // registered, and the two Nones are indistinguishable to the caller anyway.
     // Bit-parity vs JS measureRun was validated over ~667k calls (perf log 2026-09-09) on the ASCII-and-Latin
-    // input this accepted then; the classes admitted since (wide characters, combining marks) are held to the
-    // box-level parity the shadow harness checks, not to that measurement.
-    pub(crate) fn measure_run(&self, text: &[u16], size: f64, ls: f64, ws: f64) -> Option<f64> {
+    // input this accepted then; the classes admitted since (wide characters, combining marks, tabs) are held
+    // to the box-level parity the shadow harness checks, not to that measurement.
+    // `from` is the pen's distance from the block's content edge and `tab_px` / `tab_min` the stop pair a TAB
+    // advances to (see `Run::tab_px`); every other character ignores all three.
+    pub(crate) fn measure_run(&self, text: &[u16], size: f64, ls: f64, ws: f64, from: f64, tab_px: f64, tab_min: f64) -> f64 {
         let spaced = ls != 0.0 || ws != 0.0;
         let mut units = 0.0f64;
         let mut spacing = 0.0f64;
@@ -82,7 +86,27 @@ impl FontMetrics {
                 u as u32
             };
             if cp == 0x09 {
-                return None; // a tab needs the block's tab stop — defer to JS
+                // The oracle's `tabAdvance`, on the pen this measure has reached: the distance to the next
+                // stop, or to the one AFTER it where that is nearer than half a space (Blink's `Font::TabWidth`
+                // — `tab-size: 20px` after 19.2px of text lands at 40, after 9.6px at 20). Stops are counted
+                // from the block's content edge, which `from` is measured from, and `text-indent` does not
+                // move them. It joins `spacing` rather than `units` because it is already a px advance.
+                // …and `tab_px` is already final: a `tab-size` that resolved to zero took the BLOCK's
+                // letter-spacing as its stop spacing back in `tabStopOf`, so nothing here asks this RUN
+                // anything. Zero means there is no stop to reach and a tab advances nothing.
+                spacing += if tab_px > 0.0 {
+                    let pen = from + units * size + spacing;
+                    let into = pen - (pen / tab_px + 1e-9).floor() * tab_px;
+                    let dist = tab_px - into;
+                    // `<` against a half-open epsilon, as the oracle writes it: Blink compares in float32, so
+                    // a stop exactly `tab_min` away counts as too near.
+                    if dist < tab_min + 1e-6 { dist + tab_px } else { dist }
+                } else {
+                    0.0
+                };
+                prev = cp as i64;
+                i += 1;
+                continue;
             }
             units += unit_of(cp, prev, self);
             if spaced && takes_spacing(cp, prev) {
@@ -91,7 +115,7 @@ impl FontMetrics {
             prev = cp as i64;
             i += 1;
         }
-        Some(units * size + spacing)
+        units * size + spacing
     }
 }
 
