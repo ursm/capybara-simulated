@@ -14,7 +14,7 @@
 # Still DECLINES to JS: a cross axis running BOTTOM→top (never placed — which containers those are is a question
 # about the writing mode AND the direction together, see the measured table below), one running right→left that
 # also WRAPS or carries a cross (horizontal) auto margin, a WRAPPING AUTO-height column with a max-height (it
-# breaks its lines against that capacity), wrap-reverse, inline-flex, a float, inline-block
+# breaks its lines against that capacity), wrap-reverse, a float, inline-block
 # items. A REPLACED item (svg / img / input …) is now replayed as a leaf box (see native_layout_replaced_spec).
 # Each bail is an A/B: the feature-carrying input declines, a sibling without it stays native. V8 only.
 require 'capybara/simulated'
@@ -443,7 +443,7 @@ RSpec.describe 'native layout flex parity', if: ENV.fetch('CSIM_JS_ENGINE', 'v8'
   it('matches an inline-block item with an explicit size (blockified)') { expect_parity('<div style="display:flex;width:400px"><span style="display:inline-block;width:80px;height:30px"></span><div style="width:80px;height:30px"></div></div>') }
   # An INLINE-FLEX flex item is BLOCKIFIED (§4: inline-flex → flex): it lays out as a block-level flex container
   # (its flex-resolved box pushed, its own items flexed within it), not as an atomic inline. The pervasive #1
-  # bail before this. (Atomic inline-flex NOT an item still declines — see the atomic-inline case above.)
+  # bail before this. (An atomic inline-flex is native's own now too -- see native_layout_inline_atomic_spec.)
   it('matches an inline-flex flex item (blockified to flex — items flexed within it)') { expect_parity('<div style="display:flex;width:400px"><div style="display:inline-flex;gap:8px;align-items:center"><div style="width:30px;height:30px"></div><div style="width:20px;height:40px"></div></div><div style="width:50px;height:20px"></div></div>') }
   it('matches an inline-flex flex item with justify-content:space-between') { expect_parity('<div style="display:flex;width:400px"><div style="display:inline-flex;justify-content:space-between;width:200px"><div style="width:30px;height:30px"></div><div style="width:20px;height:30px"></div></div></div>') }
   it('matches an inline-flex COLUMN flex item') { expect_parity('<div style="display:flex;width:400px"><div style="display:inline-flex;flex-direction:column"><div style="width:30px;height:30px"></div><div style="width:30px;height:20px"></div></div></div>') }
@@ -460,8 +460,8 @@ RSpec.describe 'native layout flex parity', if: ENV.fetch('CSIM_JS_ENGINE', 'v8'
   # rides rec[54] past the parent-push, so native recomputes the cross from content and two-phases the clamp —
   # the child aligns in the PRE-floor content (align-items:center in a 30px content → 0), box grows to min-height.
   it('matches an auto-height min-height ROW that is itself a flex item (two-phase floor, align in pre-floor content)') { expect_parity('<div style="display:flex;flex-direction:column;width:300px"><div style="display:flex;align-items:center;min-height:120px;width:200px"><div style="width:50px;height:30px"></div></div></div>') }
-  # An inline-flex container is an ATOMIC inline in its parent's line — native replays its oracle box (its flex
-  # items are covered via the parent), so a block holding one lays out rather than declining.
+  # An inline-flex container is an ATOMIC inline in its parent's line, and native lays it out ITSELF now -- at
+  # the line's shrink-to-fit, which is its intrinsic width.
   it('matches an inline-flex container as an atomic inline') { expect_parity('<div style="display:inline-flex;width:400px"><div style="width:80px;height:30px"></div></div>') }
   # Bare (non-whitespace) text directly in a flex container is an anonymous flex item. The oracle does not lay
   # it out as a real item (siblings ignore it), it only floors the container's AUTO cross size at the text's

@@ -1,9 +1,12 @@
 # frozen_string_literal: true
 # Native layout — INLINE ATOMICS, geometry shadow-parity. An atomic inline is a single box on a line. Native
 # lays out an `inline-block` / inline `<img>` / a form CONTROL at its baseline (or a baseline shift) ITSELF —
-# see the last describe; every other atomic (an inline-flex / grid / table, a list box, one aligned against the
-# parent's font box) is PUSHED: the oracle resolved its box (`_lb`) and baseline (`growAtomic`), and native replays those as a
-# RUN_ATOMIC — the margin-box width is its advance, its ascent (+ descent) grow the line box. A pushed box is
+# see the last describe — and an `inline-flex` / `inline-grid`, whose own container it lays out at this line's
+# shrink-to-fit. What is still PUSHED: an `inline-table` (its shrink-to-fit is the table algorithm's), an
+# auto-width WRAPPING flex container (the oracle grows one past its intrinsic figure), a list box, one aligned
+# against the parent's font box. The oracle resolved such a box (`_lb`) and its baseline (`growAtomic`), and
+# native replays those as a RUN_ATOMIC: the margin-box width is its advance, its ascent (+ descent) grow the
+# line box. A pushed box is
 # not compared (like every inline fragment in a text block); what's validated is the text block's line-broken
 # HEIGHT. Still declines: a `top` / `bottom` vertical-align. V8 only.
 require 'capybara/simulated'
@@ -387,11 +390,15 @@ RSpec.describe 'native layout inline-atomic parity', if: ENV.fetch('CSIM_JS_ENGI
       # …and the tabbed one the other way round: its subtree is native, so nothing is rolled back
       expect_native_atomic("<div style=\"width:400px\">text <span style=\"display:inline-block;white-space:pre\">a\tb</span> after</div>", 1)
     end
-    it 'keeps the pushed box for a font-box-aligned atomic and an inline-flex' do
+    it 'keeps the pushed box for a font-box-aligned atomic and an inline-table' do
       r = run_shadow('<div style="width:400px">text <span style="display:inline-block;vertical-align:middle;width:10px;height:30px"></span> x</div>')
       expect(r).to include('ok' => true, 'mismatches' => 0, 'nativeAtomics' => 0)
-      r = run_shadow('<div style="width:400px">text <span style="display:inline-flex"><div>f</div></span> x</div>')
+      # …an inline-TABLE: its shrink-to-fit is the table algorithm's, not an intrinsic measure, and admitting
+      # one moved boxes. An inline-FLEX and an inline-GRID are native's own now.
+      r = run_shadow('<div style="width:400px">text <span style="display:inline-table"><span style="display:table-row"><span style="display:table-cell">c</span></span></span> x</div>')
       expect(r).to include('ok' => true, 'mismatches' => 0, 'nativeAtomics' => 0)
+      r = run_shadow('<div style="width:400px">text <span style="display:inline-flex"><div>f</div></span> x</div>')
+      expect(r).to include('ok' => true, 'mismatches' => 0, 'nativeAtomics' => 1)
     end
 
     # A CONTROL is an atomic native lays out itself now. Its box is the replaced one and its baseline the
@@ -443,6 +450,61 @@ RSpec.describe 'native layout inline-atomic parity', if: ENV.fetch('CSIM_JS_ENGI
     it 'gives a container\'s baseline scan nothing from a control that draws no text' do
       ['margin-bottom:6px', 'margin-bottom:0', 'margin:4px 0'].each do |m|
         expect_parity(%(<div style="width:400px">t <span style="display:inline-block"><input type="checkbox" style="display:block;#{m}"></span> #{MARKER} u</div>))
+      end
+    end
+  end
+  # An `inline-flex` / `inline-grid` is an atomic whose OWN container native lays out. Both were pushed — the
+  # oracle's box marshalled onto the record — because an atomic's width is its line's SHRINK-TO-FIT and the
+  # walk had no intrinsic measure to offer for one. It has both now, so the display alone decides nothing:
+  # three gates that read it (`nlAtomicNative`, `nlFlexSupported`, `nlGridSupported`) admit an atomic one.
+  describe 'an inline-flex / inline-grid is an atomic native lays out' do
+    # `nativeAtomics` is the whole point — parity alone cannot fail here, because the PUSHED path was already
+    # parity-clean. What changed is which engine produced the box.
+    it 'lays out an atomic flex or grid container itself' do
+      [
+        '<span style="display:inline-flex"><div style="width:50px;height:30px"></div><div style="width:80px;height:40px"></div></span>',
+        '<span style="display:inline-flex;flex-direction:column"><div style="width:50px;height:30px"></div><div style="width:80px;height:40px"></div></span>',
+        '<span style="display:inline-flex;justify-content:space-between;align-items:baseline"><div style="font-size:24px">a</div><div>b</div></span>',
+        '<span style="display:inline-grid;grid-template-columns:30px 20px"><div style="height:10px"></div><div style="height:10px"></div></span>',
+        '<span style="display:inline-grid;grid-template-columns:min-content auto"><div>aa bb</div><div>x</div></span>'
+      ].each do |atom|
+        expect_native_atomic(%(<div style="width:400px">text #{atom} after</div>))
+        expect_native_atomic(%(<div style="width:400px;text-align:right">text #{atom} after</div>))
+        expect_native_atomic(%(<div style="width:90px">text #{atom} after</div>))
+      end
+    end
+    # …and what the atomic itself declares still sizes it: a width PINS the shrink-to-fit, the clamps bind it,
+    # the edges are inside it, and a `vertical-align` moves it on the line rather than off the native path.
+    it 'respects the atomic own declarations' do
+      atom = '<span style="display:inline-flex;%s"><div style="width:50px;height:30px"></div><div style="width:80px;height:40px"></div></span>'
+      ['width:120px', 'min-width:150px', 'max-width:40px', 'padding:4px', 'border:2px solid',
+       'margin:0 6px', 'box-sizing:border-box;width:120px;padding:4px', 'vertical-align:super',
+       'vertical-align:-4px', 'font-size:24px'].each do |decl|
+        expect_native_atomic(%(<div style="width:400px">text #{format(atom, decl)} after</div>))
+      end
+    end
+    # …while the two shapes deliberately left out stay PUSHED, each for a measured reason. An inline-TABLE's
+    # shrink-to-fit is the table algorithm's rather than an intrinsic measure (admitting one took the corpus
+    # 2770 -> 2768). And an auto-width WRAPPING flex container is GROWN by the oracle past its intrinsic
+    # figure, from its laid-out extent (`growAtomic`'s caller, `_lbFlowRight`) — which takes an item that
+    # cannot SHRINK to see, and is a question of neither axis nor line count: a column's lines add up, and a
+    # row's unshrinkable item overflows the line just the same.
+    it 'keeps pushing an inline-table and an auto-width wrapping flex container' do
+      r = run_shadow('<div style="width:400px">text <span style="display:inline-table"><span style="display:table-row"><span style="display:table-cell">c</span></span></span> after</div>')
+      expect(r).to include('ok' => true, 'mismatches' => 0, 'nativeAtomics' => 0), r.inspect
+      # every wrap mode, over an item that cannot shrink — both signs of `plan.mainIsX`, which is the term
+      # an earlier cut of this gate turned on and got wrong (a wrapping ROW mismatched).
+      ['flex-wrap:wrap', 'flex-wrap:wrap;flex-direction:row-reverse', 'flex-wrap:wrap-reverse',
+       'flex-wrap:wrap;flex-direction:column;height:60px', 'flex-wrap:wrap;flex-direction:column-reverse;height:60px',
+       'flex-wrap:wrap;writing-mode:vertical-rl;flex-direction:column'].each do |wrap|
+        item = '<div style="width:80px;height:10px;flex-shrink:0"></div>'
+        r = run_shadow(%(<div style="width:400px">text <span style="display:inline-flex;#{wrap};max-width:40px">#{item}</span> after</div>))
+        expect(r).to include('ok' => true, 'mismatches' => 0, 'nativeAtomics' => 0), "#{wrap}: #{r.inspect}"
+        # …and a DECLARED width is never grown, so the same shape stays native — except `wrap-reverse`,
+        # which `nlFlexSupported` refuses on its own account (the cross axis runs the other way).
+        next if wrap.include?('wrap-reverse')
+
+        expect_native_atomic(%(<div style="width:400px">text <span style="display:inline-flex;#{wrap};width:60px">#{item}</span> after</div>))
       end
     end
   end

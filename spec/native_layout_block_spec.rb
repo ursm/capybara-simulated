@@ -280,7 +280,7 @@ RSpec.describe 'native layout L1 block-flow parity', if: ENV.fetch('CSIM_JS_ENGI
     # whole pass away. A measure-only gap (native's intrinsic has no `text-indent`) is refused here too.
     it 'refuses in the walk what it would have to measure and cannot' do
       expect_walk_declines('<div style="width:400px"><div style="width:max-content;text-indent:30px">aa bb</div></div>')
-      expect_walk_declines('<div style="width:400px"><div style="width:max-content"><span style="display:inline-block"><span style="display:inline-flex"><div>f</div></span></span></div></div>')
+      expect_walk_declines('<div style="width:400px"><div style="width:max-content"><span style="display:inline-block"><span style="display:inline-table"><span style="display:table-row"><span style="display:table-cell">c</span></span></span></span></div></div>')
       expect_walk_declines('<div style="width:400px"><table><tr><td><div style="width:max-content"><div style="display:grid;grid-template-columns:40px"><span>g</span><span>h</span></div></div></td></tr></table></div>')
     end
     # A keyword on any of the OTHER five size properties is not a width native has to find: the oracle resolves
@@ -321,7 +321,7 @@ RSpec.describe 'native layout L1 block-flow parity', if: ENV.fetch('CSIM_JS_ENGI
     it 'sees a keyword width arriving through inherit' do
       expect_walk_declines('<div style="display:flex;width:400px"><div style="width:min-content"><div style="width:inherit;text-indent:30px">aa bb cc</div></div></div>')
       expect_walk_declines('<table style="border-spacing:0"><tr><td style="padding:0;width:min-content"><div style="width:inherit;text-indent:30px">aa bb cc</div></td></tr></table>')
-      expect_walk_declines('<div style="display:flex;width:400px"><div style="width:min-content"><div style="width:inherit"><span style="display:inline-block"><span style="display:inline-flex"><div>f</div></span></span></div></div></div>')
+      expect_walk_declines('<div style="display:flex;width:400px"><div style="width:min-content"><div style="width:inherit"><span style="display:inline-block"><span style="display:inline-table"><span style="display:table-row"><span style="display:table-cell">c</span></span></span></span></div></div></div>')
       # …and one with nothing to refuse lays out, the inherited keyword measured like any other
       expect_parity('<div style="width:400px"><div style="width:min-content"><div style="width:inherit">aa bb cc</div></div></div>')
       expect_parity('<div style="width:400px"><span style="width:min-content"><span style="display:inline-block;width:inherit">bb cc</span></span></div>')
@@ -664,7 +664,7 @@ x</div>))
     # discovered in Rust it would fail the whole pass instead of this one subtree.
     it 'declines a vertical block holding content native cannot measure' do
       expect_walk_declines('<div style="width:400px"><div style="writing-mode:vertical-lr"><div style="display:grid;grid-template-columns:40px"><span>g</span><span>h</span></div></div></div>')
-      expect_walk_declines('<div style="width:400px"><div style="writing-mode:vertical-lr"><span style="display:inline-flex"><div>f</div></span></div></div>')
+      expect_walk_declines('<div style="width:400px"><div style="writing-mode:vertical-lr"><span style="display:inline-table"><span style="display:table-row"><span style="display:table-cell">c</span></span></span></div></div>')
     end
     # …which is also why such a child is walked as a MEASURED subtree: an atomic inline whose own box would be
     # PUSHED is not in the run stream native measures from, so the walk has to decline where it would otherwise
@@ -678,7 +678,7 @@ x</div>))
         'a <span style="display:inline-block;width:max-content">bb</span>',
         'a <span style="display:inline-block;width:min-content">bb cc</span>',
         'a <span style="display:inline-block;width:fit-content">t<div>x</div></span>',
-        'a <span style="display:inline-block"><span style="display:inline-flex"><div>f</div></span></span>',
+        'a <span style="display:inline-block"><span style="display:inline-table"><span style="display:table-row"><span style="display:table-cell">c</span></span></span></span>',
         'a <span style="display:inline-block"><div style="float:left;width:9px;height:4px"></div>t</span>',
         'a<br>b <span style="display:inline-block;width:max-content">bb</span>'
       ].each do |inner|
@@ -812,7 +812,7 @@ x</div>))
       # and the shared list's other entries are measurable here.
       [
         '<span style="display:inline-block;width:fit-content">t<div>x</div></span>',
-        '<span style="display:inline-block"><span style="display:inline-flex"><div>f</div></span></span>',
+        '<span style="display:inline-block"><span style="display:inline-table"><span style="display:table-row"><span style="display:table-cell">c</span></span></span></span>',
         '<span style="display:inline-block;width:max-content">bb</span>'
       ].each do |inner|
         expect_replayed_oof(%{<div style="width:400px;position:relative"><div style="position:absolute;left:0">a #{inner}</div><p>x</p></div>})
