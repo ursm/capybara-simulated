@@ -515,6 +515,83 @@ RSpec.describe 'layout reuse across dynamic style state' do
       expect(diff['hit']).to be > 0, diff.inspect
     end
 
+    it 'places a box anchored to a positioned row against the row it has NOW' do
+      # A row (and a row group) gets its box only once every row is sized, at the end of `layoutTable` —
+      # so it is never in `LAYING_OUT`, and a `bottom: 0` box anchored to a `position: relative` `<tr>`
+      # resolved against whatever box the row had LAST pass: the initial containing block on the first
+      # layout, and one pass behind on every later one. Rows are registered like cells now, so the child
+      # is deferred and placed against the finished row. Chrome, the overlay's y in the table over the
+      # sibling cell 40px → 100px → 40px: 30, 90, 30.
+      %w[tr tbody].each do |tag|
+        rows = tag == 'tr' ? '<tr id="r" style="position:relative">' : '<tbody id="r" style="position:relative"><tr>'
+        close = tag == 'tr' ? '</tr>' : '</tr></tbody>'
+        body = %(<table id="t" style="width:300px;border-spacing:0">#{rows}<td style="padding:0">x) +
+               '<div id="ov" style="position:absolute;bottom:0;height:10px;width:10px"></div></td>' \
+               "<td id=\"g\" style=\"padding:0;height:40px\"></td>#{close}</table>"
+        s = session_for('', body)
+        ys = s.evaluate_script(<<~JS)
+          (() => {
+            const y = () => document.getElementById('ov').getBoundingClientRect().y - document.getElementById('t').getBoundingClientRect().y;
+            const out = [y()];
+            for (const h of ['100px', '40px']) { document.getElementById('g').style.height = h; out.push(y()); }
+            return out;
+          })()
+        JS
+        expect(ys).to eq([30, 90, 30]), tag
+      end
+
+      # …and a STATIC-position box in such a row is deferred too, and moved by the cell's vertical-align shift
+      # exactly ONCE: the shift's sweep of the pending list used to run again when the walk re-rooted on the
+      # box's own stale out-of-flow rectangle, and a box with any inset then took the shift twice (82 where
+      # the flow and native say 41). Both spellings — no inset, and a horizontal inset with a static vertical
+      # position — answer what a fresh layout does, on every pass.
+      ['', 'left:10%;'].each do |inset|
+        st = ->(h) {
+          %(<table id="t" style="width:300px;border-spacing:0"><tr style="position:relative"><td style="padding:0;vertical-align:middle">x) +
+          %(<div id="st" style="position:absolute;#{inset}height:10px;width:10px"></div></td>) +
+          "<td id=\"g\" style=\"padding:0;height:#{h}\"></td></tr></table>"
+        }
+        read = "document.getElementById('st').getBoundingClientRect().y - document.getElementById('t').getBoundingClientRect().y"
+        fresh40  = session_for('', st.call('40px')).evaluate_script(read)
+        fresh100 = session_for('', st.call('100px')).evaluate_script(read)
+        expect(fresh100).to be > fresh40
+        s2 = session_for('', st.call('40px'))
+        got = s2.evaluate_script(<<~JS)
+          (() => { const y = () => #{read}; const mm = () => globalThis.__csimLayoutShadowRun().mismatches;
+            const out = [y()]; const before = mm();
+            for (const h of ['100px', '40px', '100px']) { document.getElementById('g').style.height = h; out.push(y()); }
+            out.push(mm() - before); return out; })()
+        JS
+        # …and the sequence adds no parity mismatch (the count is a DELTA: this helper's page keeps the UA
+        # body margin, under which the two engines already disagree about the body's width)
+        expect(got).to eq([fresh40, fresh100, fresh40, fresh100, 0]), inset
+      end
+
+      # …and a box hanging OFF the row reaches every ancestor's scroll extent, this pass: a `top: 100%`
+      # dropdown under a positioned `<tr>` (implicit `<tbody>`) or `<tbody>`, and the same in an
+      # `overflow: auto` scroller. It was flushed into the row's extent after the group had stamped its own,
+      # and the cell above it had unioned the child's LAST pass's extent — so `scrollHeight` read 40 on the
+      # first pass and one pass behind after. Chrome: 240, 300, 240, 300.
+      {'tr' => ['<tr style="position:relative">', '</tr>'],
+       'tbody' => ['<tbody style="position:relative"><tr>', '</tr></tbody>']}.each do |tag, (open, close)|
+        dd = %(<table style="width:300px;border-spacing:0">#{open}<td style="padding:0">x) +
+             '<div style="position:absolute;top:100%;height:200px;width:10px"></div></td>' \
+             "<td id=\"g\" style=\"padding:0;height:40px\"></td>#{close}</table>"
+        [['', 'document.body.scrollHeight'],
+         ['<div id="sc" style="height:100px;overflow:auto">', "document.getElementById('sc').scrollHeight"]].each do |wrap, read|
+          page = wrap.empty? ? dd : "#{wrap}#{dd}</div>"
+          s3 = session_for('', page)
+          hs = s3.evaluate_script(<<~JS)
+            (() => { const h = () => #{read}; const out = [h()];
+              for (const v of ['100px', '40px', '100px']) { document.getElementById('g').style.height = v; out.push(h()); }
+              return out; })()
+          JS
+          expect(hs.map {|v| v - hs[0] + 240 }).to eq([240, 300, 240, 300]), "#{tag} #{read}"
+          expect(hs[0]).to be >= 240, "#{tag} #{read}"
+        end
+      end
+    end
+
     it 'dirties the SHADOW boxes that lay out slotted light DOM' do
       # The dirty walk goes up the FLAT tree, because that is the chain of boxes that lays a node
       # out: `#pad`'s parent box is the `<slot>`, then `#wrap`, then the host. Walking the node

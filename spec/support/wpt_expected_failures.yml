@@ -7180,16 +7180,6 @@ css/css-transforms/transform-style-stacking-context.html:
 css/css-transforms/transform-transformable-table-row.html:
 - "== css/css-transforms/transform-transformable-table-row-ref.html (both renderings
   blank)"
-css/css-transforms/transform-transformed-tbody-contains-fixed-position.html:
-- "== css/css-transforms/transform-transformed-tbody-contains-fixed-position-ref.html"
-css/css-transforms/transform-transformed-tfoot-contains-fixed-position.html:
-- "== css/css-transforms/transform-transformed-tfoot-contains-fixed-position-ref.html"
-css/css-transforms/transform-transformed-thead-contains-fixed-position.html:
-- "== css/css-transforms/transform-transformed-thead-contains-fixed-position-ref.html"
-css/css-transforms/transform-transformed-tr-contains-fixed-position.html:
-- "== css/css-transforms/transform-transformed-tr-contains-fixed-position-ref.html"
-css/css-transforms/transform-transformed-tr-percent-height-child.html:
-- "== css/css-transforms/transform-transformed-tr-percent-height-child-ref.html"
 css/css-transforms/transform-translate-background-001.html:
 - "== css/css-transforms/transform-translate-background-001-ref.html"
 css/css-transforms/transform-translate-background-002.html:
