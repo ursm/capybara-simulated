@@ -568,29 +568,41 @@ RSpec.describe 'native layout inline-atomic parity', if: ENV.fetch('CSIM_JS_ENGI
         expect_native_atomic(%(<div style="width:400px">text #{format(atom, decl)} after</div>))
       end
     end
-    # …while the two shapes deliberately left out stay PUSHED, each for a measured reason. An inline-TABLE's
-    # shrink-to-fit is the table algorithm's rather than an intrinsic measure (admitting one took the corpus
-    # 2770 -> 2768). And an auto-width WRAPPING flex container is GROWN by the oracle past its intrinsic
-    # figure, from its laid-out extent (`growAtomic`'s caller, `_lbFlowRight`) — which takes an item that
-    # cannot SHRINK to see, and is a question of neither axis nor line count: a column's lines add up, and a
-    # row's unshrinkable item overflows the line just the same.
-    it 'keeps pushing an inline-table and an auto-width wrapping flex container' do
+    # …while an inline-TABLE stays PUSHED: its shrink-to-fit is the table algorithm's rather than an intrinsic
+    # measure (admitting one took the corpus 2770 -> 2768).
+    it 'keeps pushing an inline-table' do
       r = run_shadow('<div style="width:400px">text <span style="display:inline-table"><span style="display:table-row"><span style="display:table-cell">c</span></span></span> after</div>')
       expect(r).to include('ok' => true, 'mismatches' => 0, 'nativeAtomics' => 0), r.inspect
-      # every wrap mode, over an item that cannot shrink — both signs of `plan.mainIsX`, which is the term
-      # an earlier cut of this gate turned on and got wrong (a wrapping ROW mismatched).
-      ['flex-wrap:wrap', 'flex-wrap:wrap;flex-direction:row-reverse', 'flex-wrap:wrap-reverse',
+    end
+    # An auto-width WRAPPING flex container is GROWN past its intrinsic figure once laid out — to what its own
+    # layout reached (`growAtomic`'s caller, `_lbFlowRight`; native's `flow_right`) — which takes an item that
+    # cannot SHRINK to see, and is a question of neither axis nor line count: a column's lines add up, and a
+    # row's unshrinkable item overflows the line just the same. The growth moves the pen but not the break: the
+    # line decided where it breaks on the width it reserved. Each wrap mode against a text run that follows it
+    # on a line narrow enough to care, so both halves show; and a DECLARED width, which is never grown.
+    it 'grows an auto-width wrapping flex container to what its layout reached' do
+      item = '<div style="width:80px;height:10px;flex-shrink:0"></div>'
+      ['flex-wrap:wrap', 'flex-wrap:wrap;flex-direction:row-reverse',
        'flex-wrap:wrap;flex-direction:column;height:60px', 'flex-wrap:wrap;flex-direction:column-reverse;height:60px',
        'flex-wrap:wrap;writing-mode:vertical-rl;flex-direction:column'].each do |wrap|
-        item = '<div style="width:80px;height:10px;flex-shrink:0"></div>'
-        r = run_shadow(%(<div style="width:400px">text <span style="display:inline-flex;#{wrap};max-width:40px">#{item}</span> after</div>))
-        expect(r).to include('ok' => true, 'mismatches' => 0, 'nativeAtomics' => 0), "#{wrap}: #{r.inspect}"
-        # …and a DECLARED width is never grown, so the same shape stays native — except `wrap-reverse`,
-        # which `nlFlexSupported` refuses on its own account (the cross axis runs the other way).
-        next if wrap.include?('wrap-reverse')
-
+        expect_native_atomic(%(<div style="width:400px">text <span style="display:inline-flex;#{wrap};max-width:40px">#{item}</span> after</div>))
+        expect_native_atomic(%(<div style="width:130px">text <span style="display:inline-flex;#{wrap};max-width:40px">#{item}</span> after words</div>))
+        expect_native_atomic(%(<div style="width:400px;text-align:center">t <span style="display:inline-flex;#{wrap};max-width:40px">#{item}</span></div>))
         expect_native_atomic(%(<div style="width:400px">text <span style="display:inline-flex;#{wrap};width:60px">#{item}</span> after</div>))
       end
+      # …columns that add up, and a grandchild wider than its item
+      expect_native_atomic('<div style="width:400px">a <span style="display:inline-flex;flex-flow:column wrap;height:40px"><div style="width:50px;height:30px"></div><div style="width:80px;height:30px"></div></span> b</div>')
+      expect_native_atomic('<div style="width:400px">a <span style="display:inline-flex;flex-wrap:wrap"><div style="width:50px;height:30px"><div style="width:120px;height:6px"></div></div></span> b</div>')
+      # …and only BOXES reach: an overflowing word, a `<br>` after one or a relatively shifted inline is a piece
+      # of its item's lines, which grows nothing (Chrome: 30, 30, 50 — the oracle used to union those fragments
+      # and made 85 / 85 / 108, where native has no box for any of them). An atomic inside such an inline is a box.
+      ['<div style="width:30px"><span>aaaaaaaaaaaa</span></div>', '<div style="width:30px">aaaaaaaaaaaa<br>b</div>',
+       '<div style="width:50px"><span style="position:relative;left:100px">x</span></div>',
+       '<div style="width:30px">x <span style="position:relative;left:40px"><img style="width:20px;height:5px"></span></div>'].each do |content|
+        expect_native_atomic(%(<div style="width:400px">a <span style="display:inline-flex;flex-wrap:wrap">#{content}</span> b</div>))
+      end
+      # …and nothing out of flow reaches into the growth
+      expect_native_atomic('<div style="width:400px">a <span style="display:inline-flex;flex-wrap:wrap;position:relative"><div style="width:20px;height:5px"></div><div style="position:absolute;left:0;width:300px;height:5px"></div></span> b</div>')
     end
   end
 end

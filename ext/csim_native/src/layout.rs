@@ -1538,7 +1538,7 @@ fn line_layout(
                     }
                 }
                 line_atomics.push((ri, band_l(total) + line_x)); // its margin box starts here on this line
-                line_x += width;
+                line_x += width + run.size; // …and a grown flex container's growth moves the pen, not the break
                 hang = 0.0;
                 hang_pre = 0.0;
                 line_asc = line_asc.max(run.asc);
@@ -2097,6 +2097,18 @@ fn measure(
                 };
                 r.metric = w + ml + mr;
                 r.line_height = outer;
+                // An auto-width WRAPPING flex container is then GROWN to what its own layout reached — its lines
+                // can add up past the intrinsic figure (two columns of 50 and 80 make 130) — as the oracle's
+                // atomic placement grows it from `_lbFlowRight`. After the line has decided where it breaks,
+                // which the oracle decided on the width it reserved: the growth rides `size` (a slot no atomic
+                // reads) and only moves the pen.
+                if k.display == DISPLAY_FLEX && k.flex_wrap && is_auto(k.width) && k.width_kw == 0 {
+                    let reach = flow_right(c, inputs, children, boxes);
+                    if reach > boxes[c].w {
+                        r.size = reach - boxes[c].w;
+                        boxes[c].w = reach;
+                    }
+                }
             }
             let local: &[Run] = if has_native_atomic { &owned } else { &runs[rs..re] };
             match line_layout(local, &run_texts[rs..re], n.strut_lh, n.strut_asc, content_w, &fc.items, cl, cr, bfc_top, LineStyle {ws_mode: n.ws_mode, align: n.text_align, rtl: n.from_right(), indent: (n.indent_px, n.indent_hanging, n.indent_each_line, n.indent_spent)}) {
@@ -5494,6 +5506,20 @@ fn place_out_of_flow(
 fn resolve_width(n: &Input, cb_w: f64) -> f64 {
     // auto: fill the containing block, less horizontal margins (auto margins count 0 in L1).
     used_width(n, (cb_w - Input::m(n.ml) - Input::m(n.mr)).max(0.0))
+}
+// How far right a box's IN-FLOW content reaches, off its own border-box origin, recursively — never short of the
+// box itself (the oracle's `_lbFlowRight`, which `stampExtent` unions the same way). An out-of-flow box is not
+// part of what its parent wraps, and neither is anything inside it. A relative shift is: the oracle folds it into
+// the box before the extent is stamped.
+fn flow_right(c: usize, inputs: &[Input], children: &[Vec<usize>], boxes: &[Box]) -> f64 {
+    let mut reach = boxes[c].w;
+    for &k in &children[c] {
+        if inputs[k].out_of_flow != 0 {
+            continue;
+        }
+        reach = reach.max(boxes[k].x + inputs[k].rel_x + flow_right(k, inputs, children, boxes));
+    }
+    reach
 }
 // What an AUTO width becomes for a box sized from its own CONTENT in `room` of inline space — the oracle's
 // `shrinkToFitWidth`: its min-content, widened to the room, capped at its max-content. Both figures carry the
