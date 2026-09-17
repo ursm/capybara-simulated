@@ -225,7 +225,8 @@ pub(crate) struct Input {
     // the anonymous groups are read under.
     pub(crate) ws_mode: u8,
     // A pushed flex ITEM whose OWN height is AUTO (content-derived), carried past the parent-push that
-    // overwrote `height` with the item's final (oracle-clamped) box. When set, `measure_flex` recomputes a
+    // overwrote `height` with the item's final (oracle-clamped) box. (On a GRID, the same push's word that the
+    // height was not definite when its percentage row gap was resolved — `markPushedGridHeight`.) When set, `measure_flex` recomputes a
     // ROW item's cross from its content and two-phases the min/max-height clamp (the items align in the
     // pre-clamp content, the box floors/caps around them), instead of aligning in the pushed definite box —
     // reproducing the oracle's auto-height two-phase for a nested min-height flex row (the Avo field-wrapper).
@@ -4349,6 +4350,8 @@ struct GridTrack {
     is_auto: bool,
 }
 const GRID_TRACK_STRIDE: usize = 7;
+// A grid's header in `grids`: column count, column gap (px, fraction), row gap (px, fraction), declared row height.
+const GRID_HEADER: usize = 6;
 impl GridTrack {
     fn decode(grids: &[f64], o: usize) -> GridTrack {
         GridTrack {
@@ -4362,14 +4365,18 @@ impl GridTrack {
         }
     }
     fn needs_content(&self) -> bool {
-        self.base_kind != 0 || self.limit_kind != 0
+        !matches!(self.base_kind, 0 | 4) || !matches!(self.limit_kind, 0 | 4)
     }
 }
-// One side of a track in px, given the column's (min, max) content contribution — the oracle's `resolveSideSpec`.
-fn resolve_track_side(kind: u8, val: f64, col: (f64, f64)) -> f64 {
+// One side of a track in px, given the column's (min, max) content contribution — the oracle's `resolveSideSpec` —
+// and the grid's content width, which a PERCENTAGE side is a fraction of (kind 4; kind 5 is `fit-content` capped
+// at such a fraction).
+fn resolve_track_side(kind: u8, val: f64, col: (f64, f64), content_w: f64) -> f64 {
     match kind {
         1 => col.0,
         2 => col.1,
+        4 => val * content_w,
+        5 => col.0.max((val * content_w).min(col.1)),
         3 => col.0.max(val.min(col.1)),
         _ => val,
     }
@@ -4388,8 +4395,8 @@ fn grid_column_widths(tracks: &[GridTrack], cols: Option<&[(f64, f64)]>, content
     let mut limit = vec![0.0f64; col_count];
     for (c, t) in tracks.iter().enumerate() {
         let col = cols.map(|cs| cs[c]).unwrap_or((0.0, 0.0));
-        base[c] = resolve_track_side(t.base_kind, t.base_val, col);
-        limit[c] = if t.is_fr { base[c] } else { resolve_track_side(t.limit_kind, t.limit_val, col) };
+        base[c] = resolve_track_side(t.base_kind, t.base_val, col, content_w);
+        limit[c] = if t.is_fr { base[c] } else { resolve_track_side(t.limit_kind, t.limit_val, col, content_w) };
     }
     let mut free = inner - base.iter().sum::<f64>();
     // §12.6 "maximize tracks": grow the intrinsic (non-fr, limit > base) tracks toward their limits, sharing what
@@ -5040,8 +5047,8 @@ fn text_intrinsic(runs: &[Run], run_texts: &[Option<Vec<u16>>], ws_mode: u8, inp
 // item). Bare text directly in the grid is an anonymous item the oracle never places — it only floors the auto
 // height at its line-height (`anon_cross`). An out-of-flow child joins no row: its subtree lays out at its
 // pushed box and `place` positions it by its displacement. The buffer at `grids[grid_start..]` is
-// `[col_count, col_gap, row_gap, decl_row_h (NaN = content rows), template (GRID_TRACK_STRIDE per column),
-// (col_start | -1, span) per in-flow item]`.
+// `[col_count, col_gap px, col_gap fraction, row_gap px, row_gap fraction, decl_row_h (NaN = content rows),
+// template (GRID_TRACK_STRIDE per column), (col_start | -1, span) per in-flow item]`.
 fn measure_grid(
     i: usize,
     w: f64,
@@ -5063,14 +5070,24 @@ fn measure_grid(
     let content_top_rel = n.bt + n.pt;
     let content_left = n.bl + n.pl;
     let gs = n.grid_start.max(0) as usize;
-    if gs + 4 > grids.len() {
+    if gs + GRID_HEADER > grids.len() {
         return bail(failed);
     }
     let col_count = grids[gs] as usize;
-    let col_gap = grids[gs + 1];
-    let row_gap = grids[gs + 2];
-    let decl_row_h = grids[gs + 3];
-    let tmpl_base = gs + 4;
+    // The gaps arrive as `px + fraction` of the content box along their axis (`gapSpec`): a row gap's fraction
+    // resolves against the content height where that is DEFINITE — declared or imposed — and is nothing where the
+    // height is the rows' own, as the oracle's `layoutGrid` has it.
+    let col_gap = grids[gs + 1] + grids[gs + 2] * content_w;
+    let definite_content_h = if is_auto(n.height) || n.item_auto_height {
+        None
+    } else {
+        let to_border = |v: f64| if is_auto(v) || n.border_box { v } else { v + n.edges_y() };
+        let bh = clamp_min_max(to_border(n.height), to_border(n.min_h), to_border(n.max_h)).max(n.edges_y()).max(0.0);
+        Some((bh - n.edges_y()).max(0.0))
+    };
+    let row_gap = grids[gs + 3] + if grids[gs + 4] != 0.0 { definite_content_h.map_or(0.0, |h| grids[gs + 4] * h) } else { 0.0 };
+    let decl_row_h = grids[gs + 5];
+    let tmpl_base = gs + GRID_HEADER;
     // The in-flow items, in record order — the out-of-flow children join no row.
     let kids: Vec<usize> = children[i].iter().copied().filter(|&c| inputs[c].out_of_flow == 0).collect();
     // Template is GRID_TRACK_STRIDE values per column; placement is 2 per in-flow item.

@@ -592,4 +592,52 @@ RSpec.describe 'native layout grid parity', if: ENV.fetch('CSIM_JS_ENGINE', 'v8'
     end
   end
 
+  # A grid's PERCENTAGES — track sizes, a `fit-content(%)` cap, the implicit full-width column of an empty
+  # template, the gaps — go to native unresolved and are resolved against the content box native lays the grid out
+  # in (a row gap against its content height where that is definite). The walk used to resolve them against the
+  # ORACLE's box, which every grid on the page then depended on: without it an empty template's one column came
+  # out the oracle's width poisoned. Parity for each, and no oracle box read for any.
+  describe 'percentages resolved against native\'s own box' do
+    def no_oracle(body)
+      session = simulated_session(page(body))
+      session.visit '/'
+      session.evaluate_script('document.body.offsetHeight')
+      session.evaluate_script('globalThis.__csimLayoutShadowRun(undefined, {noOracle: true})')
+    end
+
+    it 'lays out percentage tracks and gaps without the oracle box' do
+      items = '<div style="height:10px">a</div><div style="height:14px">bb cc</div><div style="height:8px"></div>'
+      [
+        ['', ''], ['none', 'gap:5% 10%'], ['50% 50%', ''], ['25% 1fr', 'column-gap:7%'], ['fit-content(30%) auto', ''],
+        ['minmax(20%, 1fr) 100px', 'gap:10px'], ['30% minmax(auto, 40%)', 'row-gap:20%;height:120px']
+      ].each do |template, extra|
+        [%(<div style="width:400px"><div style="display:grid;grid-template-columns:#{template};#{extra}">#{items}</div></div>),
+         %(<div style="display:flex;height:150px;width:500px"><div style="display:grid;flex:1;grid-template-columns:#{template};#{extra}">#{items}</div></div>)].each do |body|
+          expect_parity(body)
+          r = no_oracle(body)
+          expect(r).to include('ok' => true, 'mismatches' => 0), "#{body}: #{r.inspect}"
+          # (a flex parent still resolves its ITEMS' percentages against the oracle's box — its own dependency)
+          next if body.include?('display:flex')
+
+          expect(r['oracleReads'].keys.grep(/\AwalkRecord _lb(\.|\z)|\AwalkRecord _lbDefiniteH/)).to eq([]), body
+        end
+      end
+    end
+    # …where a parent PUSHES the grid's final box over its record, the height that box carries was not
+    # necessarily definite when the row gap was resolved — an auto-height grid's percentage row gap is nothing in
+    # the oracle — so the push says which (a replayed out-of-flow grid, an item of a flex row sized from pushed
+    # boxes).
+    # …and an IMPOSED height (a flex stretch, both insets) is clamped by the grid's own max-height before its
+    # percentage row gap resolves against it: Chrome's second row sits 10% of the CLAMPED 100px down, not of 200.
+    it 'resolves a row gap against the clamped imposed height' do
+      rows = '<div style="height:20px"></div><div style="height:20px"></div>'
+      expect_parity(%(<div style="display:flex;height:200px;width:300px"><div style="display:grid;flex:1;max-height:100px;row-gap:10%">#{rows}</div></div>))
+      expect_parity(%(<div style="position:relative;height:200px;width:300px"><div style="position:absolute;top:0;bottom:0;max-height:100px;display:grid;row-gap:10%">#{rows}</div></div>))
+    end
+    it 'resolves a row gap to nothing under a pushed auto height' do
+      rows = '<div style="height:20px"></div><div style="height:20px"></div>'
+      expect_parity(%(<div style="position:relative;padding:5%"><div style="position:absolute;top:0;left:0;right:0;display:grid;row-gap:10%">#{rows}</div></div>))
+      expect_parity(%(<div style="display:flex;align-items:flex-start;width:300px"><div style="display:grid;row-gap:10%;width:100px">#{rows}</div><div style="width:50px;height:200px"></div></div>))
+    end
+  end
 end
