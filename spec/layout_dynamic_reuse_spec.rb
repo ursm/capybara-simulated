@@ -349,6 +349,88 @@ RSpec.describe 'layout reuse across dynamic style state' do
       end
     end
 
+    it 'lets a row shrink back while its other cell is reused' do
+      # `layoutTable` stretches a cell's box to the ROW, on the same object a reuse hands back — so a reused
+      # auto-height cell answered with the row it was last stretched to, and the row could never SHRINK while
+      # any cell in it was reused. An indefinite question asked of a reused cell is answered from its
+      # CONTENT (`_lbCellContentH`, floored by a declared minimum), as a fresh layout answers it.
+      # Chrome, table height over the sequence 80px → 20px → 0 → 80px on the sibling: 80, 20, [one line], 80.
+      body = '<table id="t" style="width:300px;border-spacing:0"><tr>' \
+             '<td id="a" style="padding:0">cell</td><td id="b" style="padding:0;height:80px"></td></tr></table>'
+      line = session_for('', '<table style="width:300px;border-spacing:0"><tr><td id="a" style="padding:0">cell</td></tr></table>')
+               .evaluate_script("document.getElementById('a').getBoundingClientRect().height")
+      s = session_for('', body)
+      value, diff = stats_around(s, <<~JS)
+        const h = () => [document.getElementById('t').getBoundingClientRect().height,
+                         document.getElementById('a').getBoundingClientRect().height];
+        const out = [h()];
+        for (const v of ['20px', '0', '80px']) { document.getElementById('b').style.height = v; out.push(h()); }
+        return out;
+      JS
+      expect(value).to eq([[80, 80], [20, 20], [line, line], [80, 80]])
+      expect(diff['hit']).to be > 0                 # …and cell `a` really was reused, not laid out again
+
+      # …and the cell's scroll EXTENT follows the shorter box: `layoutTable` re-stamps only a cell the row grew
+      # or re-aligned, so a `vertical-align: top` cell (no re-align) kept a row-tall `scrollHeight` — 80 where
+      # its box, and Chrome, said 18. Read through an `overflow: auto` wrapper, which is what a page scrolls.
+      topped = %(<div id="w" style="height:10px;overflow:auto">#{body.sub('<td id="a" style="padding:0">', '<td id="a" style="padding:0;vertical-align:top">')}</div>)
+      w = session_for('', topped)
+      sh = w.evaluate_script(<<~JS)
+        (() => { const r = () => [document.getElementById('w').scrollHeight, document.getElementById('a').scrollHeight];
+          const before = r(); document.getElementById('b').style.height = '0'; return [before, r()]; })()
+      JS
+      expect(sh).to eq([[80, 80], [line, line]])
+
+      # …and the content height a cell measured is a CELL's answer: an element that was a cell and is a
+      # block now (the table around it lost its display) must not answer a later reuse with it. Chrome: the
+      # block is its 50px child tall, before and after the sibling changes again.
+      ex = session_for('', '<div id="t" style="display:table;width:300px"><div id="r" style="display:table-row">' \
+                           '<div id="a" style="display:table-cell">x</div><div id="b" style="display:table-cell;height:80px"></div></div></div>' \
+                           '<div id="after">after</div>')
+      steps = ex.evaluate_script(<<~JS)
+        (() => {
+          const r = () => [document.getElementById('a').getBoundingClientRect().height,
+                           document.getElementById('after').getBoundingClientRect().y - document.getElementById('t').getBoundingClientRect().y];
+          const out = [];
+          document.getElementById('b').style.height = '20px'; out.push(r());          // reused AS A CELL
+          for (const id of ['t', 'r', 'a', 'b']) document.getElementById(id).style.display = 'block';
+          document.getElementById('a').innerHTML = '<div style="height:50px"></div>';  // fresh, as a block
+          document.getElementById('b').style.height = '30px'; out.push(r());
+          document.getElementById('b').style.height = '40px'; out.push(r());          // reused AS A BLOCK
+          return out;
+        })()
+      JS
+      expect(steps).to eq([[20, 20], [50, 80], [50, 90]])
+
+      # …a declared cell height is a MINIMUM. (This subcase reaches a FRESH layout rather than a reuse — a
+      # declared height asks a definite question, which the row's stretch then refuses — so it pins the
+      # floor's answer, not the reuse path.)
+      floored = body.sub('<td id="a" style="padding:0">', '<td id="a" style="padding:0;height:40px">')
+      f = session_for('', floored)
+      hs = f.evaluate_script(<<~JS)
+        (() => { const h = () => document.getElementById('t').getBoundingClientRect().height;
+          const out = [h()]; for (const v of ['20px', '80px']) { document.getElementById('b').style.height = v; out.push(h()); } return out; })()
+      JS
+      expect(hs).to eq([80, 40, 80])
+
+      # …and a box ANCHORED to a cell by its insets is placed against the ROW-tall box, which only the flush
+      # inside a real layout of the cell does — so such a cell is laid out again rather than reused, or the
+      # overlay stays at the bottom of the row the cell used to fill. Chrome: `bottom: 0` at 30, then 90
+      # once the sibling grows the row from 40 to 100.
+      anchored = '<table id="t" style="width:300px;border-spacing:0"><tr>' \
+                 '<td style="padding:0;position:relative"><div id="ov" style="position:absolute;bottom:0;height:10px;width:10px"></div>x</td>' \
+                 '<td id="grow" style="padding:0;height:40px"></td></tr></table>'
+      a = session_for('', anchored)
+      value, diff = stats_around(a, <<~JS)
+        const y = () => document.getElementById('ov').getBoundingClientRect().y - document.getElementById('t').getBoundingClientRect().y;
+        const before = y();
+        document.getElementById('grow').style.height = '100px';
+        return [before, y()];
+      JS
+      expect(value).to eq([30, 90])
+      expect(diff['rowAnchored']).to be > 0
+    end
+
     it 'dirties the SHADOW boxes that lay out slotted light DOM' do
       # The dirty walk goes up the FLAT tree, because that is the chain of boxes that lays a node
       # out: `#pad`'s parent box is the `<slot>`, then `#wrap`, then the host. Walking the node
