@@ -592,6 +592,82 @@ RSpec.describe 'layout reuse across dynamic style state' do
       end
     end
 
+    it 'moves a pending box by what the host between it and the root moves' do
+      # `shiftPendingStatics` moved every entry under the root by the whole shift, but an out-of-flow HOST on
+      # the way takes the shift only on the axes it has no inset for (the rule `shiftSubtree` applies to the
+      # host itself), and an entry held under it moves with the host. A `position: fixed` box pending on a
+      # transformed ancestor, under an absolute host with both insets, inside a middle-aligned cell: the
+      # host never moves, so neither does the box. Chrome: y = 0 on every pass; a fresh layout agrees.
+      body = '<div id="w" style="transform:translateX(0)"><div style="position:relative;height:200px">' \
+             '<table style="border-spacing:0"><tr><td style="padding:0;vertical-align:middle">x' \
+             '<div style="position:absolute;top:0;left:0;width:10px;height:10px">' \
+             '<div id="b" style="position:fixed;left:0;width:10px;height:10px"></div></div></td>' \
+             '<td id="g" style="padding:0;height:40px"></td></tr></table></div></div>'
+      read = "document.getElementById('b').getBoundingClientRect().y - document.getElementById('w').getBoundingClientRect().y"
+      fresh = session_for('', body.sub('height:40px', 'height:100px')).evaluate_script(read)
+      s = session_for('', body)
+      got = s.evaluate_script(<<~JS)
+        (() => { const y = () => #{read}; const mm = () => globalThis.__csimLayoutShadowRun().mismatches;
+          const out = [y()]; const before = mm();
+          for (const h of ['100px', '40px', '100px']) { document.getElementById('g').style.height = h; out.push(y()); }
+          out.push(mm() - before); return out; })()
+      JS
+      expect(got).to eq([0, fresh, 0, fresh, 0])
+      expect(fresh).to eq(0)
+
+      # …and the walk to the host goes up the FLAT tree, as `noteEscapingAbs` does: a host inside a shadow
+      # root, with the pending box slotted through it, is not on the `_parent` chain. The light-DOM element
+      # is a plain block here, so the shadow-side absolute box is the ONLY host between the box and the cell.
+      # (Native declines a page with a shadow root, so this compares with Chrome's 0 rather than parity.)
+      plain = body.sub('<div style="position:absolute;top:0;left:0;width:10px;height:10px">' \
+                       '<div id="b" style="position:fixed;left:0;width:10px;height:10px"></div></div>', '<div></div>')
+      expect(plain).not_to eq(body)
+      s2 = session_for('', plain)
+      got2 = s2.evaluate_script(<<~JS)
+        (() => {
+          const host = document.querySelector('td > div');
+          host.attachShadow({mode: 'open'}).innerHTML = '<div style="position:absolute;top:0;left:0;width:10px;height:10px"><slot></slot></div>';
+          const b = document.createElement('div');
+          b.id = 'b';
+          b.style.cssText = 'position:fixed;left:0;width:10px;height:10px';
+          host.appendChild(b);
+          const y = () => #{read};
+          const out = [y()];
+          for (const h of ['100px', '40px']) { document.getElementById('g').style.height = h; out.push(y()); }
+          return out;
+        })()
+      JS
+      expect(got2).to eq([0, 0, 0])
+    end
+
+    it 'lays a subtree out again when it holds a fixed box anchored to an element' do
+      # `noteEscapingAbs` marks the boxes between an out-of-flow child and its containing block so none of
+      # them is reused — and skipped a FIXED box unless it took a static position, on the reasoning that a
+      # fixed box is placed from the viewport. One anchored to a transformed ELEMENT is not: its containing
+      # block's origin and size are that element's, and with every inset given (no static position) the
+      # cell holding it was reused and the box stayed where the row USED to end. Chrome and a fresh layout:
+      # the box follows the row / the block on every pass.
+      {'transformed tr' => ['<table id="t" style="border-spacing:0"><tr style="transform:translateX(0)"><td style="padding:0">x',
+                            '</td><td id="g" style="padding:0;height:40px"></td></tr></table>', 'position:fixed;top:100%;left:0;width:10px;height:200px'],
+       'transformed div' => ['<div id="t" style="transform:translateX(0)"><div><div style="height:40px">x',
+                             '</div></div><div id="g" style="height:40px"></div></div>', 'position:fixed;bottom:0;left:0;width:10px;height:10px']
+      }.each do |label, (open, close, style)|
+        page = ->(h) { "#{open}<div id=\"f\" style=\"#{style}\"></div>#{close.sub('height:40px', "height:#{h}")}" }
+        read = "document.getElementById('f').getBoundingClientRect().y - document.getElementById('t').getBoundingClientRect().y"
+        fresh40  = session_for('', page.call('40px')).evaluate_script(read)
+        fresh100 = session_for('', page.call('100px')).evaluate_script(read)
+        expect(fresh100).to be > fresh40
+        s = session_for('', page.call('40px'))
+        value, diff = stats_around(s, <<~JS)
+          const y = () => #{read}; const out = [y()];
+          for (const h of ['100px', '40px']) { document.getElementById('g').style.height = h; out.push(y()); }
+          return out;
+        JS
+        expect(value).to eq([fresh40, fresh100, fresh40]), label
+        expect(diff['escapingAbs']).to be > 0, label
+      end
+    end
+
     it 'dirties the SHADOW boxes that lay out slotted light DOM' do
       # The dirty walk goes up the FLAT tree, because that is the chain of boxes that lays a node
       # out: `#pad`'s parent box is the `<slot>`, then `#wrap`, then the host. Walking the node
