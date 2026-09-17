@@ -482,13 +482,11 @@ RSpec.describe 'native layout float parity', if: ENV.fetch('CSIM_JS_ENGINE', 'v8
   end
 
   # …and what it still declines, each beside the static float it keeps: a POSITIONED float (as a float child of a
-  # block does), an auto-width one native cannot measure, and one in the inline content of a MIXED block, whose
-  # anonymous groups hand their lines no float context.
+  # block does), and an auto-width one native cannot measure.
   it 'declines an inline float native cannot place, keeps the plain one' do
     keep = '<div style="width:300px">aaa <span style="float:left;width:50px;height:20px"></span>bbb</div>'
     expect(run_shadow(keep)['ok']).to be true
     expect(run_shadow(keep.sub('float:left;', 'float:left;position:relative;'))['ok']).to be false
     expect(run_shadow(%(<div style="width:300px">aaa <span style="float:left">#{WalkRefusals::ATOMIC.last}</span>bbb</div>))['ok']).to be false
-    expect(run_shadow('<div style="width:300px">aaa <span style="float:left;width:50px;height:20px"></span>bbb<p>block</p></div>')['ok']).to be false
   end
 end

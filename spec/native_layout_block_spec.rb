@@ -248,10 +248,19 @@ RSpec.describe 'native layout L1 block-flow parity', if: ENV.fetch('CSIM_JS_ENGI
     expect_parity('<div style="width:300px"><div style="height:20px">a</div>   <div style="height:20px">b</div></div>')
   end
 
-  # DECLINES: a float or an out-of-flow child in the mix, or a preserve white-space, are deferred.
-  it 'declines a float in a mixed block' do
-    expect_bail('<div style="width:300px;overflow:hidden">text<div style="float:left;width:50px;height:20px"></div><div style="height:20px">block</div>more</div>')
+  # A FLOAT in the mix joins the anonymous group it is written in, as a marker on that group's lines — on the line
+  # it interrupts, or where the group's first line starts — and one in a group that collapses to nothing (white
+  # space and floats between two blocks) goes where that line would have started, as a float child of the block.
+  # (A float native never placed has no record to compare, so those shapes put an atomic on the line after it.)
+  it 'matches a float in a mixed block' do
+    expect_parity('<div style="width:300px;overflow:hidden">text<div style="float:left;width:50px;height:20px"></div><div style="height:20px">block</div>more</div>')
+    expect_parity('<div style="width:300px">text <span style="float:right;width:50px;height:30px"></span>more<p>b</p>after</div>')
+    expect_parity('<div style="width:300px"><p>a</p><span>x <span style="float:left;width:40%;height:15px"></span>y</span><p>b</p></div>')
+    expect_parity('<div style="width:300px"><p style="margin:10px 0">a</p> <div style="float:left;width:50px;height:30px"></div> <p style="margin:10px 0"><i style="display:inline-block;width:5px;height:5px"></i>b</p>tail</div>')
+    expect_parity('<div style="width:300px"><p>a</p> <span style="position:relative;left:6px"><span style="float:left;width:20px;height:20px"></span></span> <p><i style="display:inline-block;width:5px;height:5px"></i>b</p></div>')
   end
+
+  # DECLINES: an out-of-flow child in the mix, or a preserve white-space, are deferred.
   it 'declines an absolutely-positioned child in a mixed block' do
     expect_bail('<div style="position:relative;width:300px">text<div style="position:absolute;top:5px;width:20px;height:20px"></div><div style="height:20px">block</div>more</div>')
   end
