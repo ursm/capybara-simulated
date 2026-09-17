@@ -23,7 +23,8 @@
 # colspan/rowspan, ragged grids, border-collapse, thead/tbody/tfoot, table-layout:fixed, colgroup/<col> widths,
 # a caption, a position:relative cell (offset ignored), an imposed table height TALLER than the grid (declared /
 # attribute / min, shared out over the rows so the tracks fill the box), and ANONYMOUS ROWS (a table-cell with
-# no table-row parent) ARE supported. Still DECLINES to JS — a caption with a MARGIN or more than one caption, an imposed height the tracks DON'T fill (a min-height's empty space, a too-small height /
+# no table-row parent) ARE supported. Still DECLINES to JS — a caption with a MARGIN or more than one caption, an
+# imposed height the tracks DON'T fill (a min-height's empty space, a too-small height /
 # max-height below the grid) or one alongside a caption / collapsed border, an anonymous CELL (stray non-cell
 # content), an rtl table with a MARGIN-offset caption (the caption's auto-margin / lead inset isn't reflected
 # yet — a full-width OR narrower rtl caption IS placed at the inline-start; an rtl border-COLLAPSE table IS
@@ -474,6 +475,23 @@ RSpec.describe 'native layout table parity', if: ENV.fetch('CSIM_JS_ENGINE', 'v8
 
   it 'matches a position:relative caption below the grid' do
     expect_parity('<table style="border-spacing:4px;caption-side:bottom"><caption style="height:16px;position:relative;left:11px">c</caption><tr><td style="width:60px;height:20px">a</td></tr></table>')
+  end
+
+  # A caption's PERCENTAGE heights resolve against nothing — the table's height is not its containing block's —
+  # whatever that height is, clamped or zero (Chrome: 18 tall, the content's, in every one of these). Parity alone
+  # was blind here once both engines agreed on a basis, so the Chrome figure is pinned too.
+  it 'keeps a percentage-height caption its content height (Chrome: 18)' do
+    [
+      '<table style="height:200px;border-spacing:2px"><caption id="c" style="height:50%">cap</caption><tr><td>a</td></tr></table>',
+      '<table style="height:200px;max-height:100px;border-spacing:2px"><caption id="c" style="height:10%">cap</caption><tr><td>a</td></tr></table>',
+      '<table style="height:0;border-spacing:2px"><caption id="c" style="height:50%;min-height:50%">cap</caption><tr><td>a</td></tr></table>',
+      '<div style="height:300px"><table style="height:100%;border-spacing:2px"><caption id="c" style="min-height:40%">cap</caption><tr><td>a</td></tr></table></div>'
+    ].each do |body|
+      expect_parity(body)
+      session = simulated_session(page(body))
+      session.visit '/'
+      expect(session.evaluate_script("document.getElementById('c').getBoundingClientRect().height")).to eq(18), body
+    end
   end
 
   # A caption is a normal block in the table's BORDER box (§17.4 wrapper box): declared height / width / min-max /

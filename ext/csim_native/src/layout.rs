@@ -201,7 +201,7 @@ pub(crate) struct Input {
     // out exactly like a separate one.)
     // Caption placement (t4), on a DISPLAY_TABLE node that has a caption child: 0 = caption-side top (the grid
     // is offset down by the caption's height), 1 = bottom (the caption sits below the grid). The caption's box
-    // is pushed like a cell; the `<table>` el._lb is then the WRAPPER (caption + grid). 0 when no caption.
+    // is laid out by `measure_table`; the `<table>` el._lb is then the WRAPPER (caption + grid). 0 when no caption.
     pub(crate) caption_side: u8,
     // `direction: rtl` (r1): the box's own INLINE axis runs backwards. 0 = ltr. Which PHYSICAL edge that
     // inline-start is depends on the writing mode, so each consumer pairs this with the axis where the oracle
@@ -3762,9 +3762,9 @@ fn flex_distribution(code: u8, free: f64, n: usize) -> (f64, f64) {
 // tableColumns / distributeColumns / fixedColumnWidths / tableIntrinsicWidths / tableGrid. Spans, captions,
 // colgroup, thead/tfoot reorder, fixed layout, rtl AND border-collapse are all IN scope (the oracle folds the
 // collapsed borders into the pushed edges, so a collapse table sizes here exactly like a separate one).
-// nlTableSupported declines only what native can't reproduce: rtl combined with a caption or a collapsed
-// border, an imposed height the oracle didn't distribute into the rows, an empty or interleaved row group, a
-// nested table, and a row whose cells all span rows (no row height to read).
+// nlTableSupported declines only what native can't reproduce: a caption margin or a second caption, a cell whose
+// percentage-height content needs a second pass, an empty or interleaved row group, a nested table, and a row
+// whose cells all span rows (no row height to read).
 // A table's ROW / COLUMN structure, recovered from the record tree the walk emitted (the oracle's `tableGrid`
 // resolved the anonymous boxes and the render order): every row in render order with the row GROUP it belongs
 // to, the caption (the table's only non-row / non-group child), and the column count: `declared_cols` (the
@@ -4318,12 +4318,11 @@ fn measure_table(
     let table_w = (grid_w + n.edges_x()).max(cap_floor);
     // The caption is a block box laid out in that BORDER box, outside the table's own border+padding (§17.4
     // wrapper box): an auto width fills it, a declared one (a `%` of it) is its own and may overflow it without
-    // growing the table, and a `%` height resolves against the table's definite height. The `<table>` el._lb is
-    // the WRAPPER (caption + grid): a caption-side:top caption offsets the whole grid down by its height; a bottom
-    // one sits below the grid (placed below).
+    // growing the table, and a `%` height resolves against nothing (Chrome keeps such a caption its content's
+    // height, whatever the table's). The `<table>` el._lb is the WRAPPER (caption + grid): a caption-side:top
+    // caption offsets the whole grid down by its height; a bottom one sits below the grid (placed below).
     if let Some(cap) = caption {
-        let h_basis = n.definite_content_h().map_or(f64::NAN, |h| h + n.edges_y());
-        let k = inputs[cap].get().with_percent_sizes(table_w, h_basis);
+        let k = inputs[cap].get().with_percent_sizes(table_w, f64::NAN);
         inputs[cap].set(k);
         measure(cap, resolve_width(&k, table_w), f64::NAN, inputs, runs, run_texts, grids, children, boxes, failed, &mut FloatCtx::new(), 0.0, 0.0);
     }
@@ -6780,8 +6779,8 @@ mod tests {
     }
 
     // A caption on a table with its OWN border sits at the WRAPPER's border box — outside the border, not inset
-    // into the content box: x=0 / y=0 at the top-left, the full border-box width, and the
-    // grid is offset DOWN past the caption and then IN by the border. (§17.4 wrapper box.)
+    // into the content box: x=0 / y=0 at the top-left, the full border-box width, and the grid is offset DOWN past
+    // the caption and then IN by the border. (§17.4 wrapper box.)
     #[test]
     fn table_caption_spans_the_border_box_outside_the_border() {
         let mut t = tbl(0.0, -1, 0.0, 0.0);
