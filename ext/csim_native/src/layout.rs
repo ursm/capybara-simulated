@@ -4058,18 +4058,33 @@ fn table_intrinsic_widths(
     let decls = table_col_decls(&n, grids);
     let g = table_grid(i, inputs, children, decls.as_ref().map_or(0, |d| d.count))?;
     let cols = table_columns(&g, n.sp_x, decls.as_ref(), inputs, runs, run_texts, grids, children)?;
-    let caption_floor = match g.caption {
-        Some(cap) if !is_auto(inputs[cap].get().cell_min_content) => inputs[cap].get().cell_min_content,
-        Some(cap) => intrinsic_widths(cap, inputs, runs, run_texts, grids, children)?.0,
-        None => 0.0,
-    };
+    let floor = caption_floor(g.caption, inputs, runs, run_texts, grids, children)?;
     // An intrinsic CONTRIBUTION reads the table's own edges basis-less, like every other box's (the oracle's
     // `tableIntrinsicWidths` uses `edgeInsets(table, null)`).
-    Some(table_min_max_with_caption(&n, &g, &cols, caption_floor, n.decl_edges_x))
+    Some(table_min_max_with_caption(&n, &g, &cols, floor, n.decl_edges_x))
 }
-// …from columns already measured: the figure `measure_table` needs, where the caption's floor is the box it laid
-// out rather than the caption's own min-content, and the frame carries the table's edges as the box uses them
-// (RESOLVED) rather than as an intrinsic contribution reads them (basis-less).
+// The border-box width a table's CAPTION requires of it (the oracle's `captionsFloor`): the caption's margin box
+// spans the table's border box (§17.4), and what it cannot be squeezed below is its own min-content contribution
+// — a declared LENGTH pinning it, a `%` one indefinite while the table's width is still being decided, the
+// min/max-width clamping it (native declines a caption margin, so the border box is the margin box). The oracle's
+// figure where native cannot measure the caption; 0 without one.
+fn caption_floor(
+    caption: Option<usize>,
+    inputs: &[Cell<Input>],
+    runs: &[Run],
+    run_texts: &[Option<Vec<u16>>],
+    grids: &[f64],
+    children: &[Vec<usize>],
+) -> Option<f64> {
+    match caption {
+        Some(cap) if !is_auto(inputs[cap].get().cell_min_content) => Some(inputs[cap].get().cell_min_content),
+        Some(cap) => Some(intrinsic_widths(cap, inputs, runs, run_texts, grids, children)?.0),
+        None => Some(0.0),
+    }
+}
+// …from columns already measured: the figure `measure_table` needs, where the frame carries the table's edges as
+// the box uses them (RESOLVED) rather than as an intrinsic contribution reads them (basis-less), and the caption's
+// floor is applied by the caller.
 fn table_min_max(n: &Input, g: &TableGrid, cols: &TableCols) -> (f64, f64) {
     table_min_max_with_caption(n, g, cols, 0.0, n.edges_x())
 }
@@ -4134,12 +4149,12 @@ fn measure_table(
         }
     };
 
-    // The CAPTION first (§17.4 — a block box spanning the table WRAPPER, sized by the oracle for now): a caption
-    // wider than the table floors its border-box width, so the columns share out what is left inside that.
-    if let Some(cap) = caption {
-        let iw = resolve_width(&inputs[cap].get(), 0.0);
-        measure(cap, iw, f64::NAN, inputs, runs, run_texts, grids, children, boxes, failed, &mut FloatCtx::new(), 0.0, 0.0);
-    }
+    // A CAPTION (§17.4 — a block box spanning the table WRAPPER) that needs more than the table floors its
+    // border-box width, so the columns share out what is left inside that.
+    let cap_floor = match caption_floor(caption, inputs, runs, run_texts, grids, children) {
+        Some(v) => v,
+        None => return bail(failed),
+    };
     // The table's own used width (§17.5.2): a declared one wins, an AUTO one SHRINK-TO-FITS its columns within
     // the room on offer — unless the box was handed to it (a grid area, a flex item, an out-of-flow inset box),
     // where `w` already is the used border box. A table whose columns then OVERFLOW that width simply grows:
@@ -4155,7 +4170,6 @@ fn measure_table(
     } else {
         w
     };
-    let cap_floor = caption.map(|cap| boxes[cap].w).unwrap_or(0.0);
     let content_w = n.content_w(border_w.max(cap_floor));
     let gaps = table_gaps(c_count, sx);
     let assignable = (content_w - gaps).max(0.0);
@@ -4294,11 +4308,26 @@ fn measure_table(
     // from `edgeInsets`) is already the outer half of its rim cells' collapsed borders, with no padding. So a
     // collapse table self-sizes from its tracks + edges exactly like a separate one — only with border-spacing
     // 0 and the halved borders the oracle pushed.
-    // The `<table>` el._lb is the WRAPPER (caption + grid). A caption-side:top caption offsets the whole grid
-    // down by its own (pushed) height; a bottom one sits below the grid (placed later). The caption is a block
-    // box spanning the table's BORDER box, outside the table's own border+padding (§17.4 wrapper box).
+    // The table (WRAPPER) SELF-sizes from its grid tracks + spacing plus its own edges — not the width its parent
+    // passed — floored by what its caption requires. (Separate: spacing > 0. Collapse: spacing is 0 and the edges
+    // are the outer-half frame.)
+    let sum_col: f64 = col_w.iter().sum();
+    let sum_row: f64 = row_h.iter().sum();
+    let grid_w = sum_col + (c_count as f64 + 1.0) * sx;
+    let grid_h = sum_row + (r_count as f64 + 1.0) * sy;
+    let table_w = (grid_w + n.edges_x()).max(cap_floor);
+    // The caption is a block box laid out in that BORDER box, outside the table's own border+padding (§17.4
+    // wrapper box): an auto width fills it, a declared one (a `%` of it) is its own and may overflow it without
+    // growing the table, and a `%` height resolves against the table's definite height. The `<table>` el._lb is
+    // the WRAPPER (caption + grid): a caption-side:top caption offsets the whole grid down by its height; a bottom
+    // one sits below the grid (placed below).
+    if let Some(cap) = caption {
+        let h_basis = n.definite_content_h().map_or(f64::NAN, |h| h + n.edges_y());
+        let k = inputs[cap].get().with_percent_sizes(table_w, h_basis);
+        inputs[cap].set(k);
+        measure(cap, resolve_width(&k, table_w), f64::NAN, inputs, runs, run_texts, grids, children, boxes, failed, &mut FloatCtx::new(), 0.0, 0.0);
+    }
     let caption_h = caption.map(|cap| boxes[cap].h).unwrap_or(0.0);
-    let caption_w = caption.map(|cap| boxes[cap].w).unwrap_or(0.0);
     let caption_top = caption.is_some() && n.caption_side == 0;
     let content_left = n.bl + n.pl;
     let content_top = n.bt + n.pt + if caption_top { caption_h } else { 0.0 };
@@ -4320,17 +4349,8 @@ fn measure_table(
     let row_x = col_x[0];
     let row_w = col_x[c_count - 1] + col_w[c_count - 1] - row_x;
 
-    // The table (WRAPPER) SELF-sizes from its grid tracks + spacing, unioned with the caption, plus its own
-    // edges — not the width its parent passed. (Separate: spacing > 0. Collapse: spacing is 0 and the edges are
-    // the outer-half frame. No caption: caption_h/_w are 0.)
-    let sum_col: f64 = col_w.iter().sum();
-    let sum_row: f64 = row_h.iter().sum();
-    let grid_w = sum_col + (c_count as f64 + 1.0) * sx;
-    let grid_h = sum_row + (r_count as f64 + 1.0) * sy;
     boxes[i].nid = n.nid;
-    // The caption spans the BORDER box (the oracle pushed that width, edges included), so union it with the
-    // grid's OWN border box rather than adding the table edges to it a second time.
-    boxes[i].w = (grid_w + n.edges_x()).max(caption_w);
+    boxes[i].w = table_w;
     boxes[i].h = grid_h + caption_h + n.edges_y();
     boxes[i].auto_height = false;
 
@@ -6697,14 +6717,20 @@ mod tests {
     }
 
     // t4 — the caption (a block box, the table's only non-row/-group child). The `<table>` box is the WRAPPER:
-    // a top caption offsets the whole grid down by its own height; a bottom one sits below the grid; the wrapper
-    // width unions the grid with a wider caption. The caption here is `item()` (a pushed fixed border box), a
-    // plain block child of the table — measure_table finds it structurally, not by a display code.
+    // a top caption offsets the whole grid down by its own height; a bottom one sits below the grid; a caption
+    // needing more than the grid floors the wrapper's width. The caption here is a plain block child of the table
+    // declaring a border-box size (`caption()`) — measure_table finds it structurally, not by a display code.
+    fn caption(nid: f64, parent: i32, w: f64, h: f64) -> Input {
+        let mut c = item(nid, parent, w, h);
+        c.decl_w = w; // what its min-content contribution — the wrapper's floor — reads
+        c.decl_border_box = true;
+        c
+    }
     #[test]
     fn table_caption_top_offsets_the_grid_down() {
         let inputs = vec![
             tbl(0.0, -1, 4.0, 4.0),            // 0 table (wrapper); caption_side top (0 = default)
-            item(1.0, 0, 100.0, 16.0),         // 1 caption (block, pushed 100x16)
+            caption(1.0, 0, 100.0, 16.0),      // 1 caption (block, 100x16)
             rowel(2.0, 0),                     // 2 tr
             cell(3.0, 2, 60.0, 20.0, 0, 1, 1), // 3 td col 0
             cell(4.0, 2, 80.0, 20.0, 1, 1, 1), // 4 td col 1
@@ -6723,7 +6749,7 @@ mod tests {
         t.caption_side = 1; // bottom
         let inputs = vec![
             t,                                 // 0 table (wrapper)
-            item(1.0, 0, 100.0, 16.0),         // 1 caption
+            caption(1.0, 0, 100.0, 16.0),      // 1 caption
             rowel(2.0, 0),                     // 2 tr
             cell(3.0, 2, 60.0, 20.0, 0, 1, 1), // 3
             cell(4.0, 2, 80.0, 20.0, 1, 1, 1), // 4
@@ -6740,7 +6766,7 @@ mod tests {
         let t = tbl(0.0, -1, 4.0, 4.0);
         let inputs = vec![
             t,                                 // 0 table
-            item(1.0, 0, 300.0, 16.0),         // 1 caption, wider than the 152 grid
+            caption(1.0, 0, 300.0, 16.0),      // 1 caption, wider than the 152 grid
             rowel(2.0, 0),                     // 2 tr
             cell(3.0, 2, 60.0, 20.0, 0, 1, 1), // 3
             cell(4.0, 2, 80.0, 20.0, 1, 1, 1), // 4
@@ -6754,7 +6780,7 @@ mod tests {
     }
 
     // A caption on a table with its OWN border sits at the WRAPPER's border box — outside the border, not inset
-    // into the content box: x=0 / y=0 at the top-left, the full border-box width (the oracle pushes it), and the
+    // into the content box: x=0 / y=0 at the top-left, the full border-box width, and the
     // grid is offset DOWN past the caption and then IN by the border. (§17.4 wrapper box.)
     #[test]
     fn table_caption_spans_the_border_box_outside_the_border() {
@@ -6765,7 +6791,7 @@ mod tests {
         t.bb = 10.0;
         let inputs = vec![
             t,                                 // 0 table (border 10, no spacing)
-            item(1.0, 0, 60.0, 16.0),          // 1 caption, pushed at the border box (40 cell + 2*10)
+            caption(1.0, 0, 60.0, 16.0),       // 1 caption, the width of the border box (40 cell + 2*10)
             rowel(2.0, 0),                     // 2 tr
             cell(3.0, 2, 40.0, 20.0, 0, 1, 1), // 3 td
         ];
@@ -6788,7 +6814,7 @@ mod tests {
         t.caption_side = 1; // bottom
         let inputs = vec![
             t,
-            item(1.0, 0, 60.0, 16.0),          // 1 caption
+            caption(1.0, 0, 60.0, 16.0),       // 1 caption
             rowel(2.0, 0),
             cell(3.0, 2, 40.0, 20.0, 0, 1, 1), // 3 td
         ];
@@ -6798,8 +6824,8 @@ mod tests {
     }
 
     // A wide caption on a bordered table floors the wrapper to the caption's border box — it does NOT add the
-    // table border on TOP of it (the over-grow this revision fixed): caption 300 → wrapper 300, not 320. The
-    // oracle floors the content box to 280 (300 - the two borders) and pushes the cell at that width.
+    // table border on TOP of it: caption 300 → wrapper 300, not 320, and the content box the columns share out is
+    // 280 (300 - the two borders).
     #[test]
     fn table_caption_wider_than_a_bordered_grid_does_not_re_add_the_border() {
         let mut t = tbl(0.0, -1, 0.0, 0.0);
@@ -6809,7 +6835,7 @@ mod tests {
         t.bb = 10.0;
         let inputs = vec![
             t,
-            item(1.0, 0, 300.0, 16.0),          // 1 caption, spans the border box the oracle grew to 300
+            caption(1.0, 0, 300.0, 16.0),       // 1 caption, spans the border box it grows to 300
             rowel(2.0, 0),
             cell(3.0, 2, 280.0, 20.0, 0, 1, 1), // 3 td filling the floored content box (300 - 2*10)
         ];
@@ -6817,6 +6843,29 @@ mod tests {
         assert_eq!(bx[0].w, 300.0); // NOT 320 — the caption border box IS the wrapper, the border is not re-added
         assert_eq!([bx[1].x, bx[1].w], [0.0, 300.0]);
         assert_eq!([bx[3].x, bx[3].w], [10.0, 280.0]);
+    }
+
+    // An AUTO-width caption fills the wrapper, and a PERCENTAGE one is a fraction of it — floor nothing (a `%` is
+    // indefinite while the table's width is being decided), so one over 100% overflows the table without growing
+    // it, and in rtl hangs off its left edge.
+    #[test]
+    fn table_caption_auto_fills_and_a_percentage_overflows_the_wrapper() {
+        for (pct, rtl, want) in [(f64::NAN, 0, [0.0, 152.0]), (1.5, 0, [0.0, 228.0]), (1.5, 1, [-76.0, 228.0])] {
+            let mut t = tbl(0.0, -1, 4.0, 4.0);
+            t.rtl = rtl;
+            let mut cap = blk(1.0, 0);
+            cap.pct_sizes[0] = pct;
+            let inputs = vec![
+                t,
+                cap,
+                rowel(2.0, 0),
+                cell(3.0, 2, 60.0, 20.0, 0, 1, 1),
+                cell(4.0, 2, 80.0, 20.0, 1, 1, 1),
+            ];
+            let bx = boxes(layout_block(&inputs, &[], &[], &[], 0.0, 0.0, 800.0));
+            assert_eq!(bx[0].w, 152.0); // the grid's own border box
+            assert_eq!([bx[1].x, bx[1].w], want);
+        }
     }
 
     // `intrinsic_widths` reads the DECLARED sizing (decl_*), never the used box a push wrote into width/min_w/

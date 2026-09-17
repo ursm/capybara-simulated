@@ -23,9 +23,7 @@
 # colspan/rowspan, ragged grids, border-collapse, thead/tbody/tfoot, table-layout:fixed, colgroup/<col> widths,
 # a caption, a position:relative cell (offset ignored), an imposed table height TALLER than the grid (declared /
 # attribute / min, shared out over the rows so the tracks fill the box), and ANONYMOUS ROWS (a table-cell with
-# no table-row parent) ARE supported. Still DECLINES to JS — a caption with a MARGIN or one that OVERFLOWS the
-# table (a %-width wider than the BORDER box; the oracle lays both out correctly, native just declines) or more than
-# one caption, an imposed height the tracks DON'T fill (a min-height's empty space, a too-small height /
+# no table-row parent) ARE supported. Still DECLINES to JS — a caption with a MARGIN or more than one caption, an imposed height the tracks DON'T fill (a min-height's empty space, a too-small height /
 # max-height below the grid) or one alongside a caption / collapsed border, an anonymous CELL (stray non-cell
 # content), an rtl table with a MARGIN-offset caption (the caption's auto-margin / lead inset isn't reflected
 # yet — a full-width OR narrower rtl caption IS placed at the inline-start; an rtl border-COLLAPSE table IS
@@ -449,6 +447,15 @@ RSpec.describe 'native layout table parity', if: ENV.fetch('CSIM_JS_ENGINE', 'v8
     expect_parity('<table style="border-spacing:0;border:10px solid"><caption style="height:16px;width:300px">Wide</caption><tr><td style="width:40px;height:20px">a</td></tr></table>')
   end
 
+  # A PERCENTAGE caption is a fraction of that border box, and floors nothing (it is indefinite while the table's
+  # width is being decided): one over 100% overflows the table without growing it — by a sub-pixel amount too,
+  # where a union with the caption's box would round the wrapper up to it.
+  it 'matches a caption overflowing the table (a %-width wider than the border box — the table does not grow)' do
+    expect_parity('<table style="border-spacing:4px"><caption style="width:120%">c</caption><tr><td style="width:40px">a</td></tr></table>')
+    expect_parity('<table style="width:200px;border-spacing:0"><caption style="height:16px;width:100.2%">c</caption><tr><td style="width:40px;height:20px">a</td></tr></table>')
+    expect_parity('<table dir="rtl" style="border-spacing:4px"><caption style="width:150%">c</caption><tr><td style="width:40px">a</td></tr></table>')
+  end
+
   it 'matches a caption on a table carrying its own padding (spans the border box)' do
     expect_parity('<table style="border-spacing:0;padding:12px"><caption style="height:16px">c</caption><tr><td style="width:60px;height:20px">a</td></tr></table>')
   end
@@ -569,16 +576,11 @@ RSpec.describe 'native layout table parity', if: ENV.fetch('CSIM_JS_ENGINE', 'v8
   end
 
   it('declines a caption with a margin (folds into the stacking)') { a_bails_b_native('<table style="border-spacing:4px"><caption style="height:16px;margin:5px">c</caption><tr><td style="width:40px">a</td></tr></table>') }
-  it('declines a caption that overflows the table (a %-width wider than the border box — the table does not grow)') { a_bails_b_native('<table style="border-spacing:4px"><caption style="width:120%">c</caption><tr><td style="width:40px">a</td></tr></table>') }
   it('declines two captions') { a_bails_b_native('<table style="border-spacing:4px"><caption>top</caption><caption style="caption-side:bottom">bottom</caption><tr><td style="width:40px">a</td></tr></table>') }
   # An inline-table is an ATOMIC inline in its parent's line — native replays its oracle box (its rows/cells are
   # covered via the parent), so a block holding one lays out rather than declining.
   it('matches an inline-table as an atomic inline') { expect_parity('<div style="width:300px">x <span style="display:inline-table"><span style="display:table-row"><span style="display:table-cell">a</span></span></span> y</div>') }
   it('declines an rtl table with a MARGIN-offset caption (its auto-margin / lead inset is not reflected yet)') { a_bails_b_native('<table dir="rtl" style="border-spacing:4px"><caption style="width:20px;height:16px;margin-left:8px">c</caption><tr><td style="width:40px;height:20px">a</td></tr></table>') }
-  # A SUB-PIXEL %-overflow caption must still decline: the oracle leaves the table at 200 (a % caption overflows
-  # without growing it), so native's wrapper union must not round it up to the caption's 200.4 — the gate uses
-  # the shadow compare epsilon, not a half-pixel slack, so this bails rather than silently mislaying the wrapper.
-  it('declines a caption that overflows the border box by a sub-pixel amount') { a_bails_b_native('<table style="width:200px;border-spacing:0"><caption style="height:16px;width:100.2%">c</caption><tr><td style="width:40px;height:20px">a</td></tr></table>') }
   it('declines an empty row group (the oracle boxes it below the grid)') { a_bails_b_native('<table style="border-spacing:4px"><tbody></tbody><tbody><tr><td style="width:40px;height:20px">a</td></tr></tbody></table>') }
   it('declines stray non-cell content in a table (the oracle wraps it in an anonymous CELL, which has no node id)') { a_bails_b_native('<div style="display:table;border-spacing:4px"><div style="display:block;width:60px;height:20px">a</div></div>') }
   it('declines a same-display group NESTED in another (its rows interleave in render order)') { a_bails_b_native('<div style="display:table;border-spacing:4px"><div style="display:table-row-group"><div style="display:table-row"><div style="display:table-cell;width:40px;height:20px">r1</div></div><div style="display:table-row-group"><div style="display:table-row"><div style="display:table-cell;height:18px">r2</div></div></div><div style="display:table-row"><div style="display:table-cell;height:36px">r3</div></div></div></div>') }
@@ -836,9 +838,9 @@ RSpec.describe 'native layout table parity', if: ENV.fetch('CSIM_JS_ENGINE', 'v8
   end
 
   describe 'a caption whose content native cannot lay out pushes its contribution' do
-    # The tally counts a contribution native was ASKED for and could not produce. A caption nobody asks about
-    # (a normal-flow table: only `table_intrinsic_widths` reads one) is therefore 0 whatever it holds, even
-    # though its figure rides the record anyway.
+    # The tally counts a contribution native was ASKED for and could not produce — and a caption's always is: its
+    # min-content floors the table's width on every layout (`caption_floor`), not only where the table's own
+    # contribution is asked.
     def expect_pushed_contribution(body, count = 1)
       r = run_shadow(body)
       expect(r).to include('ok' => true), "harness bailed: #{r.inspect}"
@@ -853,17 +855,16 @@ RSpec.describe 'native layout table parity', if: ENV.fetch('CSIM_JS_ENGINE', 'v8
       expect_pushed_contribution(%{<div style="display:grid;grid-template-columns:min-content;width:400px"><table style="border-spacing:0"><caption>#{atomic}</caption><tr><td style="padding:0">x</td></tr></table></div>})
       # …asked for and native CAN produce it, so nothing is pushed
       expect_pushed_contribution(%{<div style="display:grid;grid-template-columns:min-content;width:400px"><table style="border-spacing:0"><caption>cap</caption><tr><td style="padding:0">x</td></tr></table></div>}, 0)
-      # …and never asked for at all: a normal-flow table, either way
-      expect_pushed_contribution(%{<table style="border-spacing:0"><caption>#{atomic}</caption><tr><td style="padding:0">x</td></tr></table>}, 0)
+      # …and a normal-flow table, which asks too
+      expect_pushed_contribution(%{<table style="border-spacing:0"><caption>#{atomic}</caption><tr><td style="padding:0">x</td></tr></table>})
       expect_pushed_contribution(%{<table style="border-spacing:0"><caption>cap</caption><tr><td style="padding:0">x</td></tr></table>}, 0)
     end
-    # A caption's contribution is read ONLY where the table's own is asked, so in a normal-flow table nothing
-    # measures it — and marking it measured there declined the pass over content the walk merely refuses. Each
-    # of these is a refusal `nlIntrinsicMeasurable` does not model, so only the unmarked caption survives them.
-    it 'never measures a caption no one asks about' do
+    # Measuring the caption is TRIED (`walkAttempt`), never promised: each of these is a refusal
+    # `nlIntrinsicMeasurable` does not model, and the walk rolls the caption back to a parked subtree whose
+    # contribution the oracle pushes, rather than declining the table over it.
+    it 'parks a caption whose content the walk refuses, rather than declining the table' do
       WalkRefusals::ATOMIC.each do |inner|
-        # …parked, unmeasured, and its contribution nobody's business — which is what the tally says
-        expect_pushed_contribution(%{<div style="width:400px"><table><caption>a #{inner}</caption><tr><td>x</td></tr></table></div>}, 0)
+        expect_pushed_contribution(%{<div style="width:400px"><table><caption>a #{inner}</caption><tr><td>x</td></tr></table></div>})
       end
     end
   end

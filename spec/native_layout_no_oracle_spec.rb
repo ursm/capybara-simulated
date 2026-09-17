@@ -90,12 +90,12 @@ RSpec.describe 'native layout no-oracle run', if: ENV.fetch('CSIM_JS_ENGINE', 'v
 
   it 'computes a memo again rather than serving the oracle its answer' do
     # A memo the oracle's pass left fresh is an oracle answer no trap sees: the helper behind it is never entered,
-    # so it is never noted. A collapsing table resolves its borders over the grid `tableGrid` builds, memoised on
-    # the table — served, the walk's dependency on that machinery vanished from the record.
-    s = session_with('<table style="border-collapse:collapse"><tr><td style="border:3px solid">a</td><td>b c</td></tr></table>')
+    # so it is never noted. A grid column sized over an item holding an inline-table asks the oracle's intrinsic
+    # widths, memoised on the item — served, the walk's dependency on that machinery vanished from the record.
+    s = session_with('<div style="display:grid;grid-template-columns:min-content auto;width:400px"><div>a <span style="display:inline-table"><span style="display:table-cell">bb cc</span></span></div><div>x</div></div>')
     r = s.evaluate_script('globalThis.__csimLayoutShadowRun(undefined, {noOracle: true})')
     expect(r).to include('ok' => true, 'oracleWrites' => 0)
-    expect(r['oracleReads'].keys).to include('ensureCollapseBorders helper:tableGrid')
+    expect(r['oracleReads'].keys).to include('gridColumnContent helper:intrinsicWidths')
   end
 
   it 'gives back the ordinary answer with every stamp revealed' do
@@ -131,7 +131,10 @@ RSpec.describe 'native layout no-oracle run', if: ENV.fetch('CSIM_JS_ENGINE', 'v
       # box with length insets
       '<div style="position:relative;width:300px;height:200px;border:5px solid"><div style="position:absolute;left:10%;top:20%;width:30%;height:25%;padding:0 5%">abs</div></div>',
       '<div style="width:300px;height:200px"><div style="position:absolute;left:5%;right:5%;top:0;bottom:10%">viewport</div></div>',
-      '<div style="position:relative;left:4px;top:-3px;width:300px"><div style="position:absolute;inset:10%">rel</div><p>x</p></div>'
+      '<div style="position:relative;left:4px;top:-3px;width:300px"><div style="position:absolute;inset:10%">rel</div><p>x</p></div>',
+      # …and tables: auto and fixed layout, a caption, a span, a percentage column
+      '<table style="border-spacing:2px"><caption style="width:150%">cap</caption><tr><td>a</td><td style="width:30%">b c</td></tr><tr><td colspan="2">d</td></tr></table>',
+      '<table style="table-layout:fixed;width:50%;border-collapse:collapse"><tr><td style="border:2px solid">a</td><td>b</td></tr></table>'
     ].each do |body|
       r = session_with(body).evaluate_script('globalThis.__csimLayoutShadowRun(undefined, {noOracle: true})')
       expect(r).to include('ok' => true, 'mismatches' => 0), "#{body}: #{r.inspect}"
