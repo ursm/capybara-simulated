@@ -21,6 +21,36 @@ RSpec.describe 'native layout L1 block-flow parity', if: ENV.fetch('CSIM_JS_ENGI
     session.evaluate_script(%{globalThis.__csimLayoutShadowRun(document.querySelector(#{root.inspect}))})
   end
 
+  # The BODY with its own margin and padding. Every other example here — and every sweep and corpus page — says
+  # `margin: 0` on the body, which is exactly how the native pass taking the body's margins off TWICE went
+  # unseen while being a mismatch on nearly every real page: the oracle handed the body's OWN width as the
+  # root's containing block (a `layoutElement` call with no `cbW` defaults to the box's width), and native
+  # subtracted the margins from it again — 992 where the oracle and Chrome say 1008 under the UA's 8px. The
+  # same missing `cbW` resolved the body's percentage padding against the body's width: `padding: 0 10%` in an
+  # 800px viewport put the content at 96 where Chrome puts it at 100. And the body kept a sizing path of its
+  # own — declared width, and a margin read that fell back to 8px for whatever it could not resolve — so
+  # `margin: 0 auto` was 1008 wide where native and Chrome say 1024, and `max-width` / `min-width` were
+  # ignored. It is sized like any block in flow now.
+  it 'lays out the body against the root, under the UA margin and its own' do
+    ['', ' style="margin:20px"', ' style="margin:20px;padding:0 10%"', ' style="margin:0 5%"',
+     ' style="margin:0 auto"', ' style="max-width:600px;margin:0 auto"', ' style="margin:0 5%;max-width:500px"',
+     ' style="min-width:1200px"', ' style="margin-left:auto"'].each do |attr|
+      html = %(<!doctype html><html><head><meta charset="utf-8"></head><body#{attr}><div id="d" style="margin:0 7px">x</div><p>p</p></body></html>)
+      session = simulated_session(Rack::Builder.new { run ->(_env) { [200, {'content-type' => 'text/html; charset=utf-8'}, [html]] } }.to_app)
+      session.visit '/'
+      r = parity(session)
+      expect(r).to include('ok' => true), "#{attr}: harness bailed: #{r.inspect}"
+      expect(r['mismatches']).to eq(0), "#{attr}: mismatch: #{r.inspect}"
+    end
+    # …and the percentage padding resolves against the viewport-wide root, as Chrome's does
+    html = %(<!doctype html><html><head><meta charset="utf-8"></head><body style="margin:20px;padding:0 10%"><div id="d">x</div></body></html>)
+    session = simulated_session(Rack::Builder.new { run ->(_env) { [200, {'content-type' => 'text/html; charset=utf-8'}, [html]] } }.to_app)
+    session.current_window.resize_to(800, 600)
+    session.visit '/'
+    expect(session.evaluate_script("(() => { const r = document.getElementById('d').getBoundingClientRect(); return [r.x, r.width]; })()"))
+      .to eq([100, 600])
+  end
+
   it 'matches on stacked blocks with explicit heights' do
     session = simulated_session(page(<<~HTML))
       <div style="height:50px"></div>
