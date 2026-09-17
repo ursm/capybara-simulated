@@ -1047,4 +1047,38 @@ RSpec.describe 'native layout flex parity', if: ENV.fetch('CSIM_JS_ENGINE', 'v8'
       end
     end
   end
+
+  # Whether a flex container's height is its CONTENT's (rec[54]) needs saying only where a parent PUSHES the
+  # container's final box over its declared height; everywhere else the declaration says it, and native clears it
+  # where it imposes one. It used to be read off the oracle's box (`autoHeight`) for every flex container on the
+  # page: without that figure a vertical-mode container with a DECLARED height recomputed its cross from its
+  # content (4800 of the vflex sweep's shapes).
+  describe 'the auto-height flag' do
+    def no_oracle(body)
+      with_simulated_session(page(body)) do |session|
+        session.visit '/'
+        session.evaluate_script('document.body.offsetHeight')
+        session.evaluate_script('globalThis.__csimLayoutShadowRun(undefined, {noOracle: true})')
+      end
+    end
+
+    it 'is not read off the oracle box where nothing was pushed' do
+      items = '<div style="width:30px;height:20px"></div><div style="width:40px;height:50px"></div>'
+      [
+        %(<div style="writing-mode:vertical-rl;display:flex;align-items:flex-end;width:60px;height:60px;align-content:center">#{items}</div>),
+        %(<div style="display:flex;flex-wrap:wrap;align-content:space-between;width:60px;height:120px">#{items}</div>),
+        %(<div style="display:flex;min-height:90px;align-items:center">#{items}</div>),
+        %(<div style="display:flex;height:40px"><div style="display:flex;align-items:flex-end">#{items}</div></div>)
+      ].each do |body|
+        expect_parity(body)
+        r = no_oracle(body)
+        expect(r).to include('ok' => true, 'mismatches' => 0), "#{body}: #{r.inspect}"
+        # (a min/max-height container still asks the oracle whether a clamp binds an imposed box — a decline
+        # guard of its own, not this flag)
+        next if body.include?('min-height')
+
+        expect(r['oracleReads'].keys).not_to include('walkRecord _lb.autoHeight'), body
+      end
+    end
+  end
 end

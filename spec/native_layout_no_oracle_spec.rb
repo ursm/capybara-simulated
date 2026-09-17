@@ -63,28 +63,27 @@ RSpec.describe 'native layout no-oracle run', if: ENV.fetch('CSIM_JS_ENGINE', 'v
   end
 
   it 'really hides the stamps from the walk' do
-    # A shape that comes out WRONG without the oracle's figures today: a vertical flex container's record takes
-    # its items' content width from the oracle's box (`walkRecord` reads `_lb.width`). A trap that let the value
+    # A shape that comes out WRONG without the oracle's figures today: an inline-TABLE, which native does not lay
+    # out, is pushed onto its line with the oracle's box and its last line's baseline. A trap that let those
     # through would report it right — so this is the check that the instrument can fail at all, and revealing
-    # that one stamp is the A/B that pins the break on it rather than on the trap's mere presence. When the
-    # dependency moves into the native pass this shape stops breaking; swap in another BREAK from a
-    # `CSIM_SWEEP_NO_ORACLE=1` sweep rather than deleting the example.
-    s = session_with(<<~HTML)
-      <div style="writing-mode:vertical-rl;display:flex;align-items:flex-end;width:60px;height:60px;align-content:center"><div style="width:30px;height:20px"></div><div style="width:40px;height:50px"></div></div>
-    HTML
+    # the stamps it reads is the A/B that pins the break on them rather than on the trap's mere presence. When
+    # native lays the shape out itself it stops breaking; swap in another BREAK from a `CSIM_SWEEP_NO_ORACLE=1`
+    # sweep rather than deleting the example.
+    s = session_with('<div style="width:400px">text <span style="display:inline-table"><span style="display:table-cell">cc</span></span> after</div>')
     run = ->(opts) { s.evaluate_script("globalThis.__csimLayoutShadowRun(undefined, #{opts})") }
     expect(run.('undefined')).to include('ok' => true, 'mismatches' => 0)
 
     hidden = run.('{noOracle: true}')
     expect(hidden).to include('ok' => true, 'oracleWrites' => 0)
     expect(hidden['mismatches']).to be > 0
-    expect(hidden['oracleReads'].keys).to include('walkRecord _lb.width')
+    expect(hidden['oracleReads'].keys).to include('nlGatherRuns _lb.width', 'boxBaselineOffset _lbLastLineY')
 
-    revealed = run.("{noOracle: true, reveal: ['_lb']}")
+    read = "['_lb', '_lbLastLineY', '_lbLastLineAsc', '_lbLastLineOrder', '_lbOrder']"
+    revealed = run.("{noOracle: true, reveal: #{read}}")
     expect(revealed).to include('ok' => true, 'mismatches' => 0)
     expect(revealed['oracleReads'].keys).not_to include(a_string_matching(/ _lb(\.|$)/))
-    # …and revealing a stamp the shape does not need changes nothing
-    expect(run.("{noOracle: true, reveal: ['_lbCbH']}")['mismatches']).to eq(hidden['mismatches'])
+    # …the box alone is not enough: the baseline it hangs from is a stamp of its own
+    expect(run.("{noOracle: true, reveal: ['_lb']}")['mismatches']).to eq(hidden['mismatches'])
   end
 
   it 'computes a memo again rather than serving the oracle its answer' do
