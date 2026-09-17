@@ -3,8 +3,8 @@
 # lays out an `inline-block` / inline `<img>` / a form CONTROL at its baseline (or a baseline shift) ITSELF —
 # see the last describe — and an `inline-flex` / `inline-grid`, whose own container it lays out at this line's
 # shrink-to-fit. What is still PUSHED: an `inline-table` (its shrink-to-fit is the table algorithm's), an
-# auto-width WRAPPING flex container (the oracle grows one past its intrinsic figure), a list box, one aligned
-# against the parent's font box. The oracle resolved such a box (`_lb`) and its baseline (`growAtomic`), and
+# auto-width WRAPPING flex container (the oracle grows one past its intrinsic figure), a list box. The oracle
+# resolved such a box (`_lb`) and its baseline (`growAtomic`), and
 # native replays those as a RUN_ATOMIC: the margin-box width is its advance, its ascent (+ descent) grow the
 # line box. A pushed box is
 # not compared (like every inline fragment in a text block); what's validated is the text block's line-broken
@@ -217,9 +217,12 @@ RSpec.describe 'native layout inline-atomic parity', if: ENV.fetch('CSIM_JS_ENGI
       # An atomic's OWN inline formatting context is a different fragment: the outer offset reaches it once,
       # through the atomic it sits in, never twice.
       expect_native_atomic(%(<div style="width:200px;height:100px">a <span style="position:relative;top:10%"><span style="display:inline-block;width:60px">x <span style="position:relative;top:10%"><span style="#{ib}"></span></span></span></span></div>), 2)
-      # A PUSHED atomic (aligned against the parent's font box) already carries the oracle's offset — the shift
-      # must not be added to it a second time.
-      r = run_shadow(%(<div style="width:200px">a <span style="position:relative;left:30px"><span style="#{ib};vertical-align:middle"></span></span></div>))
+      # …one aligned against the parent's font box takes the offset the same way
+      expect_native_atomic(%(<div style="width:200px">a <span style="position:relative;left:30px;top:7px"><span style="#{ib};vertical-align:middle"></span></span></div>))
+      # A PUSHED atomic (an inline-table) already carries the oracle's offset — the shift must not be added to it
+      # a second time.
+      table = '<span style="display:inline-table"><span style="display:table-cell">c</span></span>'
+      r = run_shadow(%(<div style="width:200px">a <span style="position:relative;left:30px;top:7px">#{table}</span></div>))
       expect(r).to include('ok' => true, 'mismatches' => 0, 'nativeAtomics' => 0)
     end
     # A PERCENTAGE inset resolves against the containing block of the fragment — both axes, which needs the pair
@@ -428,9 +431,28 @@ RSpec.describe 'native layout inline-atomic parity', if: ENV.fetch('CSIM_JS_ENGI
       # …and the tabbed one the other way round: its subtree is native, so nothing is rolled back
       expect_native_atomic("<div style=\"width:400px\">text <span style=\"display:inline-block;white-space:pre\">a\tb</span> after</div>", 1)
     end
-    it 'keeps the pushed box for a font-box-aligned atomic and an inline-table' do
-      r = run_shadow('<div style="width:400px">text <span style="display:inline-block;vertical-align:middle;width:10px;height:30px"></span> x</div>')
-      expect(r).to include('ok' => true, 'mismatches' => 0, 'nativeAtomics' => 0)
+    # An atomic aligned against its PARENT's font box hangs from where that alignment puts its margin box, which
+    # is only known once native has laid it out — so the run carries the alignment and the one figure of the
+    # parent's font it reads, and native applies the rule itself. Each alignment beside a TALL baseline box, so
+    # a wrong ascent moves the line; under a parent in another font size and a raised one, so the figure is the
+    # parent's and not the block's; and inside an inline-block, which then measures it.
+    it 'lays out an atomic aligned against its parent font box itself' do
+      %w[middle text-top text-bottom -webkit-baseline-middle].each do |va|
+        box = %(<span style="display:inline-block;width:10px;height:37px;margin:3px 0 5px;vertical-align:#{va}"></span>)
+        expect_native_atomic(%(<div style="width:400px">text #{MARKER}#{box} x</div>), 2)
+        # …a box with a baseline of its own, which the alignment ignores
+        expect_native_atomic(%(<div style="width:400px">text #{MARKER}<span style="display:inline-block;font-size:24px;vertical-align:#{va}">ab<br>cd</span> x</div>), 2)
+        expect_native_atomic(%(<div style="width:400px">t #{MARKER}<span style="font-size:30px">big #{box}</span></div>), 2)
+        expect_native_atomic(%(<div style="width:400px">t #{MARKER}<span style="vertical-align:6px">up #{box}</span></div>), 2)
+        expect_native_atomic(%(<div style="width:400px">a <span style="display:inline-block">t <img style="width:9px;height:20px;vertical-align:#{va}"> x</span></div>), 2)
+      end
+      # …while `top` / `bottom` hang from the LINE, which native's line layout has no slot for: declined
+      %w[top bottom].each do |va|
+        expect_bail(%(<div style="width:400px">text <span style="display:inline-block;vertical-align:#{va};width:10px;height:30px"></span> x</div>))
+      end
+    end
+
+    it 'keeps the pushed box for an inline-table' do
       # …an inline-TABLE: its shrink-to-fit is the table algorithm's, not an intrinsic measure, and admitting
       # one moved boxes. An inline-FLEX and an inline-GRID are native's own now.
       r = run_shadow('<div style="width:400px">text <span style="display:inline-table"><span style="display:table-row"><span style="display:table-cell">c</span></span></span> x</div>')

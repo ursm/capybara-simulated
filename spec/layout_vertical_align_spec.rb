@@ -271,6 +271,33 @@ RSpec.describe 'vertical-align' do
     expect(block[3]).to be > 6
   end
 
+  # …and an ATOMIC reserves its place on the line before it is laid out, which asks nothing of the line's height:
+  # its baseline is only readable afterwards. The reservation used to grow the line by a zero-tall box, which is
+  # exactly the floor above — so a `text-top` box on a 30px font under `line-height: 8px` took the line to the
+  # font's whole ascent (27) where Chrome gives 21. What the box really asks: the line's top rises to the font
+  # box's top (where `text-top` hangs it), and its bottom stays the strut's.
+  it 'grows a short line for an aligned atomic by the box alone' do
+    plain, = measure('<div id="c" style="width:400px;line-height:8px;font-size:30px"><span id="t">x</span></div>', ['#c', '#t'])
+    line, text = plain
+    expect(line[3]).to eq(8)
+    half_leading = text[1] - line[1]                                   # negative: the font box overhangs the line
+    expect(half_leading).to be < 0
+    aligned_box = '<span id="b" style="display:inline-block;width:10px;height:15px;vertical-align:text-top"></span>'
+    boxes, = measure(%(<div id="c" style="width:400px;line-height:8px;font-size:30px"><span id="t">x</span>#{aligned_box}</div>), ['#c', '#t', '#b'])
+    line, text, box = boxes
+    expect(box[1]).to eq(text[1])                                      # text-top: the box tops out with the font box
+    expect(box[1]).to eq(line[1])                                      # …which is now the line's top
+    expect(line[3]).to be_within(0.01).of(8 - half_leading)            # …and the bottom is still the strut's
+
+    # …and a box hung from the LINE asks only that the line hold it: a short `top` box leaves the 8px line as it
+    # was told, a tall `bottom` one takes it to its own height exactly (Chrome: 8 and 40, where the floor gave
+    # the first the font's ascent).
+    top, = measure('<div id="c" style="width:400px;line-height:8px;font-size:30px">x<span style="display:inline-block;width:10px;height:5px;vertical-align:top"></span></div>', ['#c'])
+    expect(top[0][3]).to eq(8)
+    bottom, = measure('<div id="c" style="width:400px;line-height:8px;font-size:30px">x<span style="display:inline-block;width:10px;height:40px;vertical-align:bottom"></span></div>', ['#c'])
+    expect(bottom[0][3]).to eq(40)
+  end
+
   # The ONE space between two inline elements — the classic inline-block gap — belongs to the inline it
   # is written inside, `vertical-align` and all. The flow places that space itself rather than through
   # the text-run path, and its copy of "where does this sit" was missing the alignment: a space ALONE in

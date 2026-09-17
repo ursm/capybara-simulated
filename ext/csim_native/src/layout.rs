@@ -397,6 +397,12 @@ pub(crate) const RUN_BR: u8 = 3;
 // is its margin-box width (advance), `asc` its ascent above the line baseline, `line_height` its full
 // margin-box height (asc + descent). Placed like an unbreakable word; grows the line box by asc / descent.
 pub(crate) const RUN_ATOMIC: u8 = 4;
+// How a NATIVE atomic hangs on its line when not by its own baseline (`nlAtomicAlignment`'s `NL_VA_CODE`): against the
+// parent's font box, from the figure of that font its run carries.
+const VA_MIDDLE: u8 = 1;
+const VA_TEXT_TOP: u8 = 2;
+const VA_TEXT_BOTTOM: u8 = 3;
+const VA_BASELINE_MIDDLE: u8 = 4;
 // A `<wbr>`: a zero-width soft-wrap opportunity carrying no metrics — it only lets the next word break
 // before it (modelled as a width-0 collapsed space), and its presence keeps the flanking text runs distinct.
 pub(crate) const RUN_WBR: u8 = 5;
@@ -2020,7 +2026,8 @@ fn measure(
             // intrinsic widths clamped to the block's content width — a ratio-only box takes the width less its
             // margins; a declared width wins), laid out at that width, hanging from its own inline-block baseline
             // (its bottom margin edge when it has no line, or scrolls) plus its top margin, raised by the baseline
-            // SHIFT the run carries in `asc` — the oracle's `growAtomic` / `atomicBaselineOffset` / `alignedAscent`.
+            // SHIFT the run carries in `asc` — or, aligned against the parent's font box, where that alignment puts
+            // its margin box: the oracle's `growAtomic` / `atomicBaselineOffset` / `alignedAscent`.
             // The settled margin box, ascent and outer height ride a copy of the run stream (taken only when
             // there is such an atomic), which `line_layout` places like any pushed atomic.
             let has_native_atomic = runs[rs..re].iter().any(|r| r.kind == RUN_ATOMIC && r.font >= 0);
@@ -2071,9 +2078,19 @@ fn measure(
                 } else {
                     boxes[c].inline_block_baseline
                 };
+                // The run's `line_height` / `metric` slots arrive as the alignment code and the parent-font figure
+                // it reads (`nlAtomicAlignment`), and leave as the box's outer height and advance.
+                let outer = h + mt + mb;
+                let parent_figure = r.metric;
+                r.asc += match r.line_height as u8 {
+                    VA_MIDDLE => outer / 2.0 + parent_figure,
+                    VA_TEXT_TOP => parent_figure,
+                    VA_TEXT_BOTTOM => outer - parent_figure,
+                    VA_BASELINE_MIDDLE => outer / 2.0,
+                    _ => mt + own.unwrap_or(h + mb),
+                };
                 r.metric = w + ml + mr;
-                r.asc += mt + own.unwrap_or(h + mb);
-                r.line_height = h + mt + mb;
+                r.line_height = outer;
             }
             let local: &[Run] = if has_native_atomic { &owned } else { &runs[rs..re] };
             match line_layout(local, &run_texts[rs..re], n.strut_lh, n.strut_asc, content_w, &fc.items, cl, cr, bfc_top, LineStyle {ws_mode: n.ws_mode, align: n.text_align, rtl: n.from_right(), indent: (n.indent_px, n.indent_hanging, n.indent_each_line, n.indent_spent)}) {
