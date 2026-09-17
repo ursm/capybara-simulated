@@ -225,12 +225,14 @@ pub(crate) struct Input {
     // the anonymous groups are read under.
     pub(crate) ws_mode: u8,
     // A pushed flex ITEM whose OWN height is AUTO (content-derived), carried past the parent-push that
-    // overwrote `height` with the item's final (oracle-clamped) box. (On a GRID, the same push's word that the
-    // height was not definite when its percentage row gap was resolved — `markPushedGridHeight`.) When set, `measure_flex` recomputes a
+    // overwrote `height` with the item's final (oracle-clamped) box. When set, `measure_flex` recomputes a
     // ROW item's cross from its content and two-phases the min/max-height clamp (the items align in the
     // pre-clamp content, the box floors/caps around them), instead of aligning in the pushed definite box —
     // reproducing the oracle's auto-height two-phase for a nested min-height flex row (the Avo field-wrapper).
     pub(crate) item_auto_height: bool,
+    // A PUSHED box's height (its final size written over the declared one) that was NOT definite when the container
+    // resolved its percentages — a grid's row gap, a flex container's gaps and basis (`markPushedHeight`).
+    pub(crate) pushed_h_indefinite: bool,
     // A grid container's offset into the parallel `grids` buffer (see measure_grid). Read only when
     // `display == DISPLAY_GRID`; 0 (unused) for every other node.
     pub(crate) grid_start: i32,
@@ -254,6 +256,12 @@ pub(crate) struct Input {
     // than pushed from the oracle.
     pub(crate) flex_shrink: f64,
     pub(crate) flex_basis_cb: f64,
+    // A PERCENTAGE `flex-basis` as a fraction of the container's main size (NaN = none), resolved here
+    // (`flex_basis_at`) — and a container's main / cross gap percentages, over the px parts in
+    // `flex_main_gap` / `flex_cross_gap`. The walk used to resolve all three against the oracle's box.
+    pub(crate) flex_basis_frac: f64,
+    pub(crate) flex_main_gap_frac: f64,
+    pub(crate) flex_cross_gap_frac: f64,
     pub(crate) flex_basis_kw: u8,
     pub(crate) scrolls_x: bool,
     pub(crate) scrolls_y: bool,
@@ -467,6 +475,7 @@ impl Input {
         }
         n.height = if n.border_box { h } else { (h - n.edges_y()).max(0.0) };
         n.item_auto_height = false;
+        n.pushed_h_indefinite = false;
         n
     }
     // Sum of the horizontal / vertical non-content edges (padding + border), used to convert between
@@ -496,6 +505,35 @@ impl Input {
     // and `staticCornerFor` read off the PHYSICAL inline-start rather than off `direction`.
     fn from_right(&self) -> bool {
         self.rtl != 0 && !self.block_axis_is_x
+    }
+    // The CONTENT height when the box's height is definite — declared or imposed, not a pushed auto height — as
+    // the final box will be clamped (the oracle reads it back off `_lb.height` once `_lbDefiniteH` says so).
+    fn definite_content_h(&self) -> Option<f64> {
+        if is_auto(self.height) || self.item_auto_height || self.pushed_h_indefinite {
+            return None;
+        }
+        let to_border = |v: f64| if is_auto(v) || self.border_box { v } else { v + self.edges_y() };
+        Some((clamp_min_max(to_border(self.height), to_border(self.min_h), to_border(self.max_h)).max(0.0) - self.edges_y()).max(0.0))
+    }
+    // A flex COLUMN's main size as the oracle's `definiteMainHeight` has it: the definite content height, else a
+    // positive min-height FLOOR, else NaN (nothing to resolve a percentage basis against).
+    fn column_main(&self) -> f64 {
+        if let Some(h) = self.definite_content_h() {
+            return h;
+        }
+        let to_border = |v: f64| if is_auto(v) || self.border_box { v } else { v + self.edges_y() };
+        if is_auto(self.min_h) || self.min_h <= 0.0 { f64::NAN } else { (to_border(self.min_h) - self.edges_y()).max(0.0) }
+    }
+    // A flex item's resolved basis in a container whose main size is `main`: its percentage of that (auto where
+    // the main size is indefinite), else the length the walk resolved.
+    fn flex_basis_at(&self, main: f64) -> f64 {
+        if self.flex_basis_frac.is_nan() {
+            self.flex_basis_cb
+        } else if is_auto(main) {
+            f64::NAN
+        } else {
+            self.flex_basis_frac * main
+        }
     }
     fn edges_y(&self) -> f64 {
         self.pt + self.pb + self.bt + self.bb
@@ -2763,8 +2801,9 @@ fn flex_row_sizes(
         let k = inputs[c];
         let edges = k.edges_x();
         let extra = if k.border_box { 0.0 } else { edges };
-        base[p] = if !is_auto(k.flex_basis_cb) {
-            k.flex_basis_cb + extra
+        let basis = k.flex_basis_at(content_w);
+        base[p] = if !is_auto(basis) {
+            basis + extra
         } else if matches!(k.flex_basis_kw, 2 | 3 | 4) {
             content_based[p] = true;
             let (wmin, wmax) = content_intrinsic(c, inputs, runs, run_texts, grids, children)?;
@@ -2976,8 +3015,9 @@ fn flex_column_sizes(
     for &p in flow {
         let k = inputs[kids[p]];
         let extra = if k.border_box { 0.0 } else { k.edges_y() };
-        base[p] = if k.flex_basis_kw == 0 && !is_auto(k.flex_basis_cb) {
-            k.flex_basis_cb + extra
+        let basis = k.flex_basis_at(main);
+        base[p] = if k.flex_basis_kw == 0 && !is_auto(basis) {
+            basis + extra
         } else if !is_auto(decl_h[p]) && k.flex_basis_kw == 0 {
             decl_h[p]
         } else {
@@ -3151,7 +3191,12 @@ fn measure_flex(
     let content_top_rel = n.bt + n.pt;
     let edges_y = n.edges_y();
     let main_is_x = n.flex_main_is_x; // row: main = X/width; column: main = Y/height
-    let gap = n.flex_main_gap;
+    // The gaps' percentage parts resolve here: the MAIN gap against a row's content width or a column's main size
+    // (nothing where that is indefinite), the CROSS gap against a row's definite content height or a column's width.
+    let main_basis = if main_is_x { content_w } else { n.column_main() };
+    let gap = n.flex_main_gap + if n.flex_main_gap_frac != 0.0 && !is_auto(main_basis) { n.flex_main_gap_frac * main_basis } else { 0.0 };
+    let cross_basis = if main_is_x { n.definite_content_h().unwrap_or(0.0) } else { content_w };
+    let cross_gap = n.flex_cross_gap + n.flex_cross_gap_frac * cross_basis;
     let cnt = children[i].len();
 
     let kids: Vec<usize> = children[i].clone();
@@ -3172,16 +3217,11 @@ fn measure_flex(
         let to_border_y = |v: f64| if is_auto(v) || n.border_box { v } else { v + edges_y };
         // Definite as the oracle reads it: a declared or imposed height — not a PUSHED auto-height column
         // (`item_auto_height`), whose record carries its final box but whose main size is still its content.
-        let height_definite = !is_auto(n.height) && !n.item_auto_height;
-        let floor_main = if is_auto(n.min_h) || n.min_h <= 0.0 { f64::NAN } else { (to_border_y(n.min_h) - edges_y).max(0.0) };
+        let height_definite = n.definite_content_h().is_some();
         let cap_main = if is_auto(n.max_h) || n.max_h < 0.0 { f64::NAN } else { (to_border_y(n.max_h) - edges_y).max(0.0) };
-        let main = if height_definite {
-            (clamp_min_max(to_border_y(n.height), to_border_y(n.min_h), to_border_y(n.max_h)).max(0.0) - edges_y).max(0.0)
-        } else {
-            floor_main
-        };
+        let main = n.column_main();
         let capacity = if height_definite { main } else { cap_main };
-        let sizes = match flex_column_sizes(&kids, &flow, &mut native_lines, &mut native_line_crosses, content_w, main, height_definite, capacity, cap_main, gap, n.flex_cross_gap, n.flex_wrap, n.flex_align_content, inputs, runs, run_texts, grids, children, boxes, failed) {
+        let sizes = match flex_column_sizes(&kids, &flow, &mut native_lines, &mut native_line_crosses, content_w, main, height_definite, capacity, cap_main, gap, cross_gap, n.flex_wrap, n.flex_align_content, inputs, runs, run_texts, grids, children, boxes, failed) {
             Some(sz) => sz,
             None => {
                 failed.set(true);
@@ -3369,7 +3409,6 @@ fn measure_flex(
 
     // The container's CROSS content extent + its own box. The cross is a row's height (auto = the stacked
     // lines, else the declared content height) and a column's content width (always definite here).
-    let cross_gap = n.flex_cross_gap;
     let lines_cross_sum: f64 = line_cross.iter().sum::<f64>() + cross_gap * nlines.saturating_sub(1) as f64;
     let (box_w, box_h, container_cross, definite_cross) = if main_is_x {
         // A ROW's cross is its HEIGHT, clamped by min/max-height — but the clamp is TWO-PHASE and hinges on
@@ -5078,14 +5117,7 @@ fn measure_grid(
     // resolves against the content height where that is DEFINITE — declared or imposed — and is nothing where the
     // height is the rows' own, as the oracle's `layoutGrid` has it.
     let col_gap = grids[gs + 1] + grids[gs + 2] * content_w;
-    let definite_content_h = if is_auto(n.height) || n.item_auto_height {
-        None
-    } else {
-        let to_border = |v: f64| if is_auto(v) || n.border_box { v } else { v + n.edges_y() };
-        let bh = clamp_min_max(to_border(n.height), to_border(n.min_h), to_border(n.max_h)).max(n.edges_y()).max(0.0);
-        Some((bh - n.edges_y()).max(0.0))
-    };
-    let row_gap = grids[gs + 3] + if grids[gs + 4] != 0.0 { definite_content_h.map_or(0.0, |h| grids[gs + 4] * h) } else { 0.0 };
+    let row_gap = grids[gs + 3] + if grids[gs + 4] != 0.0 { n.definite_content_h().map_or(0.0, |h| grids[gs + 4] * h) } else { 0.0 };
     let decl_row_h = grids[gs + 5];
     let tmpl_base = gs + GRID_HEADER;
     // The in-flow items, in record order — the out-of-flow children join no row.
@@ -5718,6 +5750,7 @@ mod tests {
             anon_cross: 0.0,
             ws_mode: 0,
             item_auto_height: false,
+            pushed_h_indefinite: false,
             grid_start: -1,
             decl_w: f64::NAN,
             decl_min_w: f64::NAN,
@@ -5727,6 +5760,9 @@ mod tests {
             decl_border_box: false,
             flex_shrink: 1.0,
             flex_basis_cb: f64::NAN,
+            flex_basis_frac: f64::NAN,
+            flex_main_gap_frac: 0.0,
+            flex_cross_gap_frac: 0.0,
             flex_basis_kw: 0,
             scrolls_x: false,
             scrolls_y: false,

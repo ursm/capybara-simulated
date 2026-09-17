@@ -1081,4 +1081,44 @@ RSpec.describe 'native layout flex parity', if: ENV.fetch('CSIM_JS_ENGINE', 'v8'
       end
     end
   end
+
+  # A percentage FLEX-BASIS (and `flex: 1`, whose basis is 0%) and percentage GAPS go to native unresolved and are
+  # resolved against the sizes it lays the container out at: a row's content width, a column's definite main size
+  # or its min-height floor, the definite content height across a row. The walk resolved them against the ORACLE's
+  # box — without it a wrapping column of `flex: 1` items lost its basis (1280 of the colwrap sweep's shapes).
+  describe 'percentage bases and gaps' do
+    def no_oracle(body)
+      with_simulated_session(page(body)) do |session|
+        session.visit '/'
+        session.evaluate_script('document.body.offsetHeight')
+        session.evaluate_script('globalThis.__csimLayoutShadowRun(undefined, {noOracle: true})')
+      end
+    end
+
+    it 'resolves them against native\'s own sizes' do
+      items = '<div style="flex:1;width:40px;height:30px">a</div><div style="flex-basis:30%;width:60px;height:20px"></div><div style="width:50px;height:25px"></div>'
+      ['flex-direction:column;flex-wrap:wrap;height:60px;width:200px', 'flex-direction:column;min-height:90px;gap:10%;width:200px',
+       'flex-direction:row;gap:5px 12%;width:300px;height:120px', 'flex-direction:row;flex-wrap:wrap;row-gap:15%;width:120px;height:200px;max-height:100px',
+       'flex-direction:column;row-gap:20%;width:200px'].each do |container|
+        body = %(<div style="display:flex;#{container}">#{items}</div>)
+        expect_parity(body)
+        r = no_oracle(body)
+        expect(r).to include('ok' => true, 'mismatches' => 0), "#{body}: #{r.inspect}"
+        # (an item's own EDGES still resolve against the oracle's width, `contentW` — a dependency of their own)
+        expect(r['oracleReads'].keys.grep(/\AcolMain /)).to eq([]), "#{body}: #{r['oracleReads'].keys.inspect}"
+      end
+    end
+    # …where a parent PUSHES the container's final box over its record, that height was not necessarily definite
+    # when the percentages resolved (an auto-height out-of-flow box replayed from the oracle: its row gap is nothing
+    # and a percentage basis auto there), so the push says which; and a basis that is a percentage only after
+    # `inherit` resolves is still one.
+    it 'keeps a pushed auto height indefinite, and a percentage inherited' do
+      two = '<div style="width:300px;height:20px"></div><div style="width:300px;height:20px"></div>'
+      expect_parity(%(<div style="position:relative;padding:5%;width:400px;height:400px"><div style="position:absolute;display:flex;flex-wrap:wrap;row-gap:20%;width:300px">#{two}</div></div>))
+      expect_parity(%(<div style="position:relative;padding:5%;width:400px;height:400px"><div style="position:absolute;display:flex;flex-direction:column;width:300px"><div style="flex-basis:50%;height:20px"></div><div style="height:20px"></div></div></div>))
+      expect_parity('<div style="display:flex;width:400px;flex-basis:50%"><div style="flex-basis:inherit;flex-grow:0">x</div><div>y</div></div>')
+      # …while a percentage inside a math function is not a fraction of the main size (500 would be; this is 300)
+      expect_parity('<div style="display:flex;width:1000px"><div style="flex-basis:min(50%, 300px);flex-shrink:0">x</div><div>y</div></div>')
+    end
+  end
 end
