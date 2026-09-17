@@ -2415,6 +2415,17 @@ fn measure(
         boxes[i].natural_h = Some(flow_h);
         boxes[i].auto_height = is_auto(n.height);
         let top = CMargin::of(Input::m(n.mt));
+        // A text block whose stream put NOTHING on a line — only markers, an out-of-flow box's or a float's — holds
+        // a line of nothing, which is zero-height and separates no margins (§9.4.2): with no edges or height of
+        // its own it collapses THROUGH like an empty block (Chrome: a margined `<div>` holding only
+        // `<span><abs/></span>` is 0 tall and its margins join). Otherwise its margins are its own.
+        if boxes[i].first_baseline.is_none() && box_h == 0.0 && !n.starts_bfc && n.height_adjoins && n.minh_adjoins
+            && n.bt == 0.0 && n.bb == 0.0 && n.pt == 0.0 && n.pb == 0.0
+        {
+            let mut run = top;
+            run.merge(CMargin::of(Input::m(n.mb)));
+            return MInfo { top: run, top_only: top, bottom: run, collapse_through: true };
+        }
         return MInfo { top, top_only: top, bottom: CMargin::of(Input::m(n.mb)), collapse_through: false };
     }
 
@@ -2488,9 +2499,9 @@ fn measure(
             continue; // the flow cursor / first / has_child are untouched
         }
         // A DIRECT text-block child coexisting with floats routes its lines around them (§9.5). Its
-        // collapsed top is deterministic (a text block never collapses through, top_only == of(mt)), so it
-        // can be placed BEFORE measuring — which the narrowing needs, to know each line's flow position in
-        // the owner frame. A CLEARED box and a box that starts its own context are placed by their own rules
+        // collapsed top is deterministic (a text block's top_only is of(mt), whether or not it collapses
+        // through), so it can be placed BEFORE measuring — which the narrowing needs, to know each line's flow
+        // position in the owner frame. A CLEARED box and a box that starts its own context are placed by their own rules
         // below; a plain block container falls through to the general path, which lays it out in this
         // context read in its own frame.
         if !ctx.items.is_empty() {
@@ -2599,8 +2610,8 @@ fn measure(
                 continue;
             } else if cn.display == DISPLAY_TEXT_BLOCK {
                 // A DIRECT text-block child routes its lines around the floats. Its collapsed top is
-                // deterministic (a text block never collapses through, top_only == of(mt)), so it can be
-                // placed BEFORE measuring — which the narrowing needs, to know each line's owner-frame y.
+                // deterministic (a text block's top_only is of(mt), whether or not it collapses through), so it
+                // can be placed BEFORE measuring — which the narrowing needs, to know each line's owner-frame y.
                 let t_top = CMargin::of(Input::m(cn.mt));
                 let cy = if first && top_open {
                     top_m.merge(t_top);
@@ -2618,10 +2629,20 @@ fn measure(
                 boxes[c].x = cx;
                 boxes[c].y = cy;
                 let cm = measure(c, child_w, f64::NAN, inputs, runs, run_texts, grids, children, boxes, failed, ctx, cx, cy);
+                has_child = true;
+                if cm.collapse_through {
+                    // (…one that holds no line collapses through, as the general path below places such a
+                    // child: its bottom joins the run it sits in, and the flow does not move.)
+                    if first && top_open {
+                        top_m.merge(cm.bottom);
+                    } else {
+                        pending.merge(cm.bottom);
+                    }
+                    continue;
+                }
                 cursor = cy + boxes[c].h;
                 pending = cm.bottom;
                 all_children_through = false;
-                has_child = true;
                 first = false;
                 continue;
             }

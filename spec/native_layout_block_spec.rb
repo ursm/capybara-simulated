@@ -252,7 +252,11 @@ RSpec.describe 'native layout L1 block-flow parity', if: ENV.fetch('CSIM_JS_ENGI
       ['<div id="t" style="width:300px"><span></span><p style="margin:15px 0">b</p></div>', [15, 18]],
       ['<div id="t" style="width:300px"><span><span></span></span><p style="margin:15px 0">b</p></div>', [15, 18]],
       ['<div id="t" style="width:300px"><span></span></div><p>after</p>', [16, 0]],
-      ['<div id="t" style="width:300px"><span style="padding-left:5px"></span><p style="margin:15px 0">b</p></div>', [0, 51]]
+      ['<div id="t" style="width:300px"><span style="padding-left:5px"></span><p style="margin:15px 0">b</p></div>', [0, 51]],
+      # …and a block whose inline content is only such a box around an out-of-flow child: native's text block holds
+      # no line, so it collapses through like an empty block (Chrome: 0 tall, its margins joined), beside a float too
+      ['<div id="t" style="position:relative;width:200px;margin:20px 0 15px"><span><div style="position:absolute;width:10px;height:10px"></div></span></div><div style="height:12px">after</div>', [20, 0]],
+      ['<div style="overflow:hidden"><div style="float:left;width:30px;height:30px"></div><div id="t" style="position:relative;margin:20px 0"><span><div style="position:absolute;width:10px;height:10px"></div></span></div><p style="margin:15px 0"><i style="display:inline-block;width:4px;height:4px"></i>b</p></div>', [20, 0]]
     ].each do |body, (y, h)|
       session = simulated_session(page(body))
       session.visit '/'
