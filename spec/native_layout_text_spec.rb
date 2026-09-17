@@ -511,6 +511,14 @@ RSpec.describe 'native layout L2 text-block parity', if: ENV.fetch('CSIM_JS_ENGI
   # every float on the named side and re-takes the band; native does that itself now (the side rides the BR
   # run, resolved through the containing block's direction, because `clear: inline-start` is a question about
   # THAT and the line layout has no direction to ask).
+  # A collapsed space is dropped only at the START of a line — where nothing has been PLACED on it yet — and not
+  # wherever the pen happens to stand at or behind the line's left edge: a negative inline margin puts it there
+  # mid-line (Chrome keeps the space, 26.41), and so does a float placed beside a line that already holds a word.
+  it 'keeps a space the pen reaches at the line start mid-line' do
+    expect_parity('<div style="width:200px;font:16px monospace"><span style="margin-left:-12px">x y </span><span id="m" style="display:inline-block;width:10px;height:10px"></span></div>', 26.41)
+    expect_parity('<div style="width:300px">aaa <span style="float:left;width:50px;height:20px"></span>bbb <span id="m" style="display:inline-block;width:10px;height:5px"></span></div>')
+  end
+
   it 'clears the floats a <br> names before the next line' do
     floats = '<div style="float:left;width:100px;height:40px"></div><div style="float:right;width:60px;height:70px"></div>'
 

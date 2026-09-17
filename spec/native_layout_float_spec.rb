@@ -456,8 +456,33 @@ RSpec.describe 'native layout float parity', if: ENV.fetch('CSIM_JS_ENGINE', 'v8
                   '<div><div style="clear:left;margin-top:-10px;height:5px"></div></div></div>')
   end
 
-  it 'still declines direct inline content beside a float, and keeps float-only' do
-    expect(run_shadow('<div style="overflow:hidden"><div style="float:left;width:50px;height:50px"></div>text after</div>')['ok']).to be false
-    expect(run_shadow('<div style="overflow:hidden"><div style="float:left;width:50px;height:50px"></div></div>')['ok']).to be true
+  # A float written in INLINE content — beside bare text, inside a `<span>`, mid-paragraph — is a marker in the run
+  # stream: native places it where the flow reaches it (the top of the line it interrupts, beside the floats
+  # already there) and the rest of that line, and every line after it, routes around it. The pen already on the
+  # line does not move for a LEFT float placed beside it: both engines keep it where it stood, where Chrome moves
+  # the placed content past the float (a shared divergence, recorded rather than fixed during the port).
+  it 'matches a float written in inline content' do
+    [
+      '<div style="overflow:hidden"><div style="float:left;width:50px;height:50px"></div>text after</div>',
+      '<div style="width:300px"><span style="float:left">f</span>aaa bbb</div><p>after</p>',
+      '<div style="width:300px">aaa <span style="float:right;width:250px;height:10px"></span>bbb ccc</div>',
+      '<div style="width:300px">aaa <span>b<span style="float:left;width:30%;height:15px"></span>bb</span> ccc</div>',
+      '<div style="width:300px">aaa <span style="float:left;width:50px;height:20px"></span>bbb <span style="display:inline-block;width:10px;height:5px"></span></div>',
+      '<div style="width:300px">aaaa bbbb cccc dddd eeee ffff gggg hhhh iiii jjjj kkkk <div style="float:left;width:60px;height:60px;margin:4px 6px">x</div>llll mmmm nnnn</div>',
+      '<div style="width:300px;overflow:hidden">x<span style="float:left;height:80px">f</span></div><p>after</p>',
+      '<div style="width:400px"><span style="display:inline-block">aa <span style="float:left">fl oat</span>bb</span></div>',
+      '<table><tr><td>aa <span style="float:right;width:40px;height:10px"></span>bb</td></tr></table>'
+    ].each {|body| expect_parity(body) }
+  end
+
+  # …and what it still declines, each beside the static float it keeps: a POSITIONED float (as a float child of a
+  # block does), an auto-width one native cannot measure, and one in the inline content of a MIXED block, whose
+  # anonymous groups hand their lines no float context.
+  it 'declines an inline float native cannot place, keeps the plain one' do
+    keep = '<div style="width:300px">aaa <span style="float:left;width:50px;height:20px"></span>bbb</div>'
+    expect(run_shadow(keep)['ok']).to be true
+    expect(run_shadow(keep.sub('float:left;', 'float:left;position:relative;'))['ok']).to be false
+    expect(run_shadow(%(<div style="width:300px">aaa <span style="float:left">#{WalkRefusals::ATOMIC.last}</span>bbb</div>))['ok']).to be false
+    expect(run_shadow('<div style="width:300px">aaa <span style="float:left;width:50px;height:20px"></span>bbb<p>block</p></div>')['ok']).to be false
   end
 end

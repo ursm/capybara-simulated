@@ -707,7 +707,7 @@ x</div>))
       [
         'a <span style="display:inline-table"><span style="display:table-cell">bb</span></span>',
         'a <span style="display:inline-block"><span style="display:inline-table"><span style="display:table-row"><span style="display:table-cell">c</span></span></span></span>',
-        'a <span style="display:inline-block"><div style="float:left;width:9px;height:4px"></div>t</span>',
+        'a <span style="display:inline-block"><div style="float:left;position:relative;width:9px;height:4px"></div>t</span>',
         'a<br>b <span style="display:inline-table"><span style="display:table-cell">bb</span></span>'
       ].each do |inner|
         expect_walk_declines(%{<div style="width:400px"><div style="writing-mode:vertical-lr">#{inner}</div></div>})

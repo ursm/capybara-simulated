@@ -432,6 +432,10 @@ pub(crate) const RUN_WBR: u8 = 5;
 // An OUT-OF-FLOW child of this text block: no advance, no line growth, no break opportunity — a marker that
 // records where the flow had reached, which is that child's STATIC POSITION (§10.3.7).
 pub(crate) const RUN_OOF: u8 = 6;
+// A FLOAT written in this text block's inline content (`font` = its record): a block box wherever it was written,
+// placed in the float context where the flow has reached — the top of the line it interrupts — and the rest of
+// that line routes around it. No advance, no line growth, no break opportunity.
+pub(crate) const RUN_FLOAT: u8 = 7;
 
 // One item of a text block's inline stream. For TEXT: font/size/ls/ws/line_height measure its words,
 // and `asc` is the run's ascent within its line box (baselineWithin its owner) — its descent is
@@ -750,19 +754,25 @@ struct LineStyle {
 // there), queried at `strut_lh` tall (the oracle's `lineHeightOf`, not the grown line box); an empty line
 // whose first word won't fit the band DROPS below the shallowest float squeezing it (float_fit_y). When
 // `floats` is empty the width is `content_w` exactly, so the no-float path is bit-identical to before.
+// A FLOAT in the stream itself (RUN_FLOAT, its box already measured in `inline_floats`, in stream order) is
+// placed into `floats` where the flow reaches it, so every band asked for after it sees it.
+#[allow(clippy::too_many_arguments)]
 fn line_layout(
     runs: &[Run],
     run_texts: &[Option<Vec<u16>>],
     strut_lh: f64,
     strut_asc: f64,
     content_w: f64,
-    floats: &[FloatItem],
+    floats: &mut Vec<FloatItem>,
+    inline_floats: &[FloatBox],
     cl: f64,
     cr: f64,
     top: f64,
     style: LineStyle,
 ) -> Option<LineLayout> {
     let LineStyle {ws_mode, align, rtl, indent} = style;
+    // (A Cell for the same reason `indent_now` is one: the band closures read the context the float arm writes.)
+    let floats = std::cell::RefCell::new(floats);
     // The three orthogonal `white-space` behaviours (see Input::ws_mode). `no_wrap` keeps the old name for the
     // soft-wrap gates below: a line SOFT-wraps under normal (0) / pre-wrap (3) / pre-line (4), never under
     // nowrap (1) / pre (2) — and it is what a space writes into its own break OPPORTUNITY, because the
@@ -792,10 +802,10 @@ fn line_layout(
     // width when there are no floats (kept exact, not `cr - cl`, so the no-float path never drifts) — less
     // whatever the indent takes off this line.
     let raw_band_w = |t: f64| -> f64 {
-        if floats.is_empty() {
+        if floats.borrow().is_empty() {
             content_w
         } else {
-            let (bl, br) = float_band(floats, top + t, strut_lh, cl, cr);
+            let (bl, br) = float_band(&floats.borrow(), top + t, strut_lh, cl, cr);
             br - bl
         }
     };
@@ -804,10 +814,10 @@ fn line_layout(
     // only in the width — which `close_line`'s `free` already carries into the alignment shift — and adding it
     // to the origin too would move the line twice.
     let raw_band_l = |t: f64| -> f64 {
-        if floats.is_empty() {
+        if floats.borrow().is_empty() {
             0.0
         } else {
-            float_band(floats, top + t, strut_lh, cl, cr).0 - cl
+            float_band(&floats.borrow(), top + t, strut_lh, cl, cr).0 - cl
         }
     };
     let band_w = |t: f64| raw_band_w(t) - indent_now.get();
@@ -877,6 +887,9 @@ fn line_layout(
     // Where the flow has reached is then wherever that edge turns out to be placed — which may be a later line
     // — exactly the oracle's `pendingStatic`, settled from the inline's first fragment.
     let mut pending_oofs: Vec<(usize, f64, f64, usize, f64, usize)> = Vec::new();
+    // Where each inline FLOAT landed: (record index, border-box x, border-box y), in the float context's frame.
+    let mut placed_floats: Vec<(usize, f64, f64)> = Vec::new();
+    let mut next_float = 0usize;
     // Close the current line: `$wrap` says a soft wrap closed it (its hanging white space is not part of the
     // line's extent; a hard break keeps preserved spaces before it). The line's atomics move by the alignment
     // (the oracle's `alignLine`): `right` takes the free width, `center` half — clamped at zero in ltr, where an
@@ -1025,7 +1038,7 @@ fn line_layout(
                 let clear = run.metric as u8;
                 if clear != 0 {
                     let fy = top + total;
-                    let below = clearance_y(floats, fy, clear);
+                    let below = clearance_y(&floats.borrow(), fy, clear);
                     if below > fy {
                         total += below - fy;
                     }
@@ -1061,7 +1074,7 @@ fn line_layout(
                     // the measure, so a run glued straight to a letter — the common case — pays two branches.
                     let breaks = line_has_content
                         && (pending_space.is_some_and(|(_, _, _, b)| b) || atomic_break || ends_open);
-                    let may_drop = !line_has_content && !floats.is_empty();
+                    let may_drop = !line_has_content && !floats.borrow().is_empty();
                     if breaks || may_drop {
                         let end = if break_nl {
                             text.iter().position(|&u| u == 0x0A).unwrap_or(text.len())
@@ -1096,7 +1109,7 @@ fn line_layout(
                             // …and the early-out only where nothing else needs the full width: the float drop
                             // below is asked of the WHOLE run (`retakeBand(runW + openEdgeWidth())`), so a
                             // truncated prefix would drop the line on the wrong answer.
-                            let stop_at = if floats.is_empty() { room } else { f64::INFINITY };
+                            let stop_at = if floats.borrow().is_empty() { room } else { f64::INFINITY };
                             while k < end && line_x + pending_w + ow + unit <= stop_at {
                                 if is_ws_u16(text[k]) {
                                     let ws_start = k;
@@ -1146,9 +1159,9 @@ fn line_layout(
                         // first word — a `nowrap` span beside a float goes under it, not through it). Asked of
                         // the line the unit LANDS on, which is why the leading space above is only NOTED here
                         // and placed below: putting it down first would make the line look occupied.
-                        if has_body && !floats.is_empty() && !line_has_content && unit + ow > band_w(total) + LINE_FIT_EPS {
+                        if has_body && !floats.borrow().is_empty() && !line_has_content && unit + ow > band_w(total) + LINE_FIT_EPS {
                             let fy = top + total;
-                            let at = float_fit_y(floats, fy, unit + ow + indent_now.get(), cl, cr, strut_lh);
+                            let at = float_fit_y(&floats.borrow(), fy, unit + ow + indent_now.get(), cl, cr, strut_lh);
                             if at > fy {
                                 total += at - fy;
                             }
@@ -1191,7 +1204,7 @@ fn line_layout(
                                         // …and the SEGMENT it opens drops below a float as one unit, exactly
                                         // as the first did: the oracle runs `retakeBand(runW + …)` for every
                                         // segment, not only the run's first (`segments.forEach`).
-                                        if no_wrap && outer_wraps && !floats.is_empty() {
+                                        if no_wrap && outer_wraps && !floats.borrow().is_empty() {
                                             let from = i + 1;
                                             let seg_end = text[from..]
                                                 .iter()
@@ -1204,7 +1217,7 @@ fn line_layout(
                                                 let seg_w = measure_at(run, &text[from..seg_end], band_l(total) + line_x)?;
                                                 if seg_w > band_w(total) + LINE_FIT_EPS {
                                                     let fy = top + total;
-                                                    let at = float_fit_y(floats, fy, seg_w + indent_now.get(), cl, cr, strut_lh);
+                                                    let at = float_fit_y(&floats.borrow(), fy, seg_w + indent_now.get(), cl, cr, strut_lh);
                                                     if at > fy {
                                                         total += at - fy;
                                                     }
@@ -1489,9 +1502,9 @@ fn line_layout(
                                         space_pending = false;
                                     }
                                     // An empty line still too narrow for even one character drops below the float.
-                                    if !floats.is_empty() && !line_has_content && cw + ow_now > band_w(total) + LINE_FIT_EPS {
+                                    if !floats.borrow().is_empty() && !line_has_content && cw + ow_now > band_w(total) + LINE_FIT_EPS {
                                         let fy = top + total;
-                                        let at = float_fit_y(floats, fy, cw + ow_now + indent_now.get(), cl, cr, strut_lh);
+                                        let at = float_fit_y(&floats.borrow(), fy, cw + ow_now + indent_now.get(), cl, cr, strut_lh);
                                         if at > fy {
                                             total += at - fy;
                                         }
@@ -1532,9 +1545,9 @@ fn line_layout(
                             // it (§9.5, "if a shortened line box is too small…"), growing the block by the gap. A
                             // `nowrap` line is NOT shortened by a float and never drops — it overlaps it on one line
                             // (the oracle does no float handling for a nowrap block), so skip this too.
-                            if !no_wrap && !floats.is_empty() && !line_has_content && width + ow > band_w(total) + LINE_FIT_EPS {
+                            if !no_wrap && !floats.borrow().is_empty() && !line_has_content && width + ow > band_w(total) + LINE_FIT_EPS {
                                 let fy = top + total;
-                                let at = float_fit_y(floats, fy, width + ow + indent_now.get(), cl, cr, strut_lh);
+                                let at = float_fit_y(&floats.borrow(), fy, width + ow + indent_now.get(), cl, cr, strut_lh);
                                 if at > fy {
                                     total += at - fy;
                                 }
@@ -1607,9 +1620,9 @@ fn line_layout(
                 // A nowrap line is not shortened by / dropped below a float — the BLOCK's mode, that is: a
                 // non-wrapping RUN does drop, as one whole unit, which the pre-pass at the head of the text
                 // arm does for it.
-                if may_break_here && !floats.is_empty() && !line_has_content && width + ow > band_w(total) + LINE_FIT_EPS {
+                if may_break_here && !floats.borrow().is_empty() && !line_has_content && width + ow > band_w(total) + LINE_FIT_EPS {
                     let fy = top + total;
-                    let at = float_fit_y(floats, fy, width + ow + indent_now.get(), cl, cr, strut_lh);
+                    let at = float_fit_y(&floats.borrow(), fy, width + ow + indent_now.get(), cl, cr, strut_lh);
                     if at > fy {
                         total += at - fy;
                     }
@@ -1672,6 +1685,23 @@ fn line_layout(
                     line_oofs.push((ci, band_l(total) + line_x + pending_w + rx, total + ry));
                 }
             }
+            RUN_FLOAT => {
+                // Placed as block flow places a float (`place_float`), from the top of the line the flow is on —
+                // the oracle's `placeFloat(…, flowY)` — beside the floats already there, whatever this line holds
+                // so far. The line then takes the band the float leaves (`retakeBand`), which moves only its
+                // LEFT edge and never the content already on it: the pen stays where it stood, so in the band's
+                // frame it steps back by however far the band's left edge moved. (Chrome instead moves the
+                // placed content past a left float, or drops a float that does not fit beside it to the next
+                // line; both engines share this model.)
+                let f = inline_floats.get(next_float)?;
+                next_float += 1;
+                let left_before = raw_band_l(total);
+                let (x, y) = place_float(&mut floats.borrow_mut(), f, top + total, cl, cr);
+                placed_floats.push((run.font as usize, x, y));
+                if line_has_content {
+                    line_x -= raw_band_l(total) - left_before;
+                }
+            }
             RUN_WBR => {
                 // `<wbr>`: a zero-width soft-wrap opportunity — exactly the oracle's `barrier = null`, the same
                 // thing it sets after an atomic inline. So carry it on `atomic_break` (the after-atomic break
@@ -1714,7 +1744,7 @@ fn line_layout(
     for (ci, x, y) in line_oofs.drain(..) {
         oofs.push((ci, x, y));
     }
-    Some(LineLayout { height: total, first: first_line, last: last_line, atomics, oofs })
+    Some(LineLayout { height: total, first: first_line, last: last_line, atomics, oofs, floats: placed_floats })
 }
 // What `line_layout` lays out: the line count, the content height, and the first / last line as (top, ascent)
 // within the content box — the baselines a box hands its container.
@@ -1729,6 +1759,8 @@ struct LineLayout {
     // Where each OUT-OF-FLOW marker's flow position fell: (record index, x from the content edge, line top).
     // `place_out_of_flow` reads it as the static corner, exactly as block flow's cursor is read.
     oofs: Vec<(usize, f64, f64)>,
+    // Where each inline FLOAT landed: (record index, border-box x, border-box y) in the float context's frame.
+    floats: Vec<(usize, f64, f64)>,
 }
 
 // `\p{L}\p{N}`, which is how the oracle's `HYPHEN_BREAK_RE` spells its classes — read from that same regex
@@ -1940,6 +1972,81 @@ fn clearance_y(items: &[FloatItem], y: f64, clear: u8) -> f64 {
         }
     }
     out
+}
+
+// A float's laid-out box, as placing it needs it: its side and `clear`, its border box and its margins.
+struct FloatBox {
+    side: u8,
+    clear: u8,
+    w: f64,
+    h: f64,
+    ml: f64,
+    mr: f64,
+    mt: f64,
+    mb: f64,
+}
+// Lay a float's subtree out (in a fresh context — a float starts its own BFC) in `content_w` of room. §10.3.5: its
+// AUTO width SHRINKS TO FIT where a block's fills — its min-content widened to the room its containing block leaves
+// it (its own margins off, as the oracle's `avail`), capped at its max-content, and then through `used_width` for
+// its min/max and the border-box floor like any declared one. That is `block_child_width`'s own `fit-content` arm,
+// and an intrinsic-size KEYWORD on a float wants the same treatment as on any other box, so the one helper answers
+// both — reading only `is_auto` would send `width: max-content` down the fit-content path, which is the same answer
+// only while `intrinsic_widths_of` happens to PIN the keyword's figure (it returns early for a table before that
+// pin). The walk marks such a float a MEASURED subtree, so a measure that fails is that gate having a hole rather
+// than a shape to defer.
+#[allow(clippy::too_many_arguments)]
+fn measure_float(
+    c: usize,
+    content_w: f64,
+    inputs: &[Cell<Input>],
+    runs: &[Run],
+    run_texts: &[Option<Vec<u16>>],
+    grids: &[f64],
+    children: &[Vec<usize>],
+    boxes: &mut [Box],
+    failed: &std::cell::Cell<bool>,
+) -> FloatBox {
+    let cn = inputs[c].get();
+    let fw = if is_auto(cn.width) || cn.width_kw != 0 {
+        let room = (content_w - Input::m(cn.ml) - Input::m(cn.mr)).max(0.0);
+        match content_sized_width(c, room, inputs, runs, run_texts, grids, children) {
+            Some(w) => used_width(&cn, w),
+            None => {
+                failed.set(true);
+                0.0
+            }
+        }
+    } else {
+        resolve_width(&cn, content_w)
+    };
+    measure(c, fw, f64::NAN, inputs, runs, run_texts, grids, children, boxes, failed, &mut FloatCtx::new(), 0.0, 0.0);
+    FloatBox {
+        side: cn.float_kind,
+        clear: cn.clear,
+        w: boxes[c].w,
+        h: boxes[c].h,
+        ml: Input::m(cn.ml),
+        mr: Input::m(cn.mr),
+        mt: Input::m(cn.mt),
+        mb: Input::m(cn.mb),
+    }
+}
+// Place a float whose MARGIN box hangs from `top0` (§9.5.1): below the floats it clears, then at the first y where
+// the band is wide enough for it, against that band's edge on its side. The rectangle joins the context and the
+// box's border-box origin comes back. Its own margins never collapse with anything (§8.3.1).
+fn place_float(items: &mut Vec<FloatItem>, f: &FloatBox, top0: f64, cl: f64, cr: f64) -> (f64, f64) {
+    let outer = f.w + f.ml + f.mr;
+    let outer_h = f.h + f.mt + f.mb;
+    let mut mtop = top0;
+    if f.clear != 0 {
+        mtop = mtop.max(clearance_y(items, mtop, f.clear));
+    }
+    mtop = float_fit_y(items, mtop, outer, cl, cr, outer_h);
+    let top = mtop + f.mt;
+    let (band_l, band_r) = float_band(items, mtop, outer_h, cl, cr);
+    let x = if f.side == FLOAT_LEFT { band_l + f.ml } else { band_r - outer + f.ml };
+    items.push(FloatItem { side: f.side, left: x - f.ml, right: x + f.w + f.mr, top: mtop, bottom: top + f.h + f.mb });
+    (x, top)
 }
 
 // The lowest edge any float reaches — what a box that CONTAINS its floats (started the context) grows
@@ -2206,7 +2313,17 @@ fn measure(
                 }
             }
             let local: &[Run] = if has_native_atomic { &owned } else { &runs[rs..re] };
-            match line_layout(local, &run_texts[rs..re], n.strut_lh, n.strut_asc, content_w, &fc.items, cl, cr, bfc_top, LineStyle {ws_mode: n.ws_mode, align: n.text_align, rtl: n.from_right(), indent: (n.indent_px, n.indent_hanging, n.indent_each_line, n.indent_spent)}) {
+            // A FLOAT written among the runs is measured up front — its box does not depend on where it lands —
+            // and placed by the lines into this block's float context. A block that establishes its own
+            // context CONTAINS those floats (its content reaches down to their bottom) and they go no further;
+            // otherwise they stay in the context the siblings after this block route around.
+            let inline_floats: Vec<FloatBox> = local
+                .iter()
+                .filter(|r| r.kind == RUN_FLOAT)
+                .map(|r| measure_float(r.font as usize, content_w, inputs, runs, run_texts, grids, children, boxes, failed))
+                .collect();
+            let floats_before = fc.items.len();
+            match line_layout(local, &run_texts[rs..re], n.strut_lh, n.strut_asc, content_w, &mut fc.items, &inline_floats, cl, cr, bfc_top, LineStyle {ws_mode: n.ws_mode, align: n.text_align, rtl: n.from_right(), indent: (n.indent_px, n.indent_hanging, n.indent_each_line, n.indent_spent)}) {
                 Some(ll) => {
                     boxes[i].first_baseline = ll.first.map(|(top, asc)| content_top_rel + top + asc);
                     boxes[i].last_baseline = ll.last.map(|(top, asc)| content_top_rel + top + asc);
@@ -2232,7 +2349,16 @@ fn measure(
                         boxes[ci].x = n.bl + n.pl + x;
                         boxes[ci].y = content_top_rel + top;
                     }
-                    ll.height
+                    for (ci, x, y) in ll.floats {
+                        boxes[ci].x = x - bfc_x;
+                        boxes[ci].y = y - bfc_y;
+                    }
+                    if n.starts_bfc && fc.items.len() > floats_before {
+                        let own = fc.items.split_off(floats_before);
+                        ll.height.max(floats_bottom(&own) - bfc_top)
+                    } else {
+                        ll.height
+                    }
                 }
                 None => {
                     failed.set(true);
@@ -2347,49 +2473,10 @@ fn measure(
             // A FLOAT is placed where the flow has reached (top0) but does NOT advance the flow cursor and
             // never collapses margins (§9.5.1 / §8.3.1); the lines/blocks after it route around it instead.
             // Its subtree lays out in a fresh context (a float starts its own BFC).
-            let top0 = cursor + pending.value();
-            // §10.3.5: a float's AUTO width SHRINKS TO FIT where a block's fills — its min-content widened to
-            // the room its containing block leaves it (its own margins off, as the oracle's `avail`), capped
-            // at its max-content, and then through `used_width` for its min/max and the border-box floor like
-            // any declared one. That is `block_child_width`'s own `fit-content` arm, and an intrinsic-size
-            // KEYWORD on a float wants the same treatment as on any other box, so the one helper answers
-            // both — reading only `is_auto` would send `width: max-content` down the fit-content path, which
-            // is the same answer only while `intrinsic_widths_of` happens to PIN the keyword's figure (it
-            // returns early for a table before that pin). The walk marks such a float a MEASURED subtree, so
-            // a measure that fails is that gate having a hole rather than a shape to defer.
-            let fw = if is_auto(cn.width) || cn.width_kw != 0 {
-                let room = (content_w - Input::m(cn.ml) - Input::m(cn.mr)).max(0.0);
-                match content_sized_width(c, room, inputs, runs, run_texts, grids, children) {
-                    Some(w) => used_width(&cn, w),
-                    None => {
-                        failed.set(true);
-                        0.0
-                    }
-                }
-            } else {
-                resolve_width(&cn, content_w)
-            };
-            measure(c, fw, f64::NAN, inputs, runs, run_texts, grids, children, boxes, failed, &mut FloatCtx::new(), 0.0, 0.0);
-            let (fml, fmr, fmt, fmb) = (Input::m(cn.ml), Input::m(cn.mr), Input::m(cn.mt), Input::m(cn.mb));
-            let outer = boxes[c].w + fml + fmr;
-            let outer_h = boxes[c].h + fmt + fmb;
-            let mut mtop = top0;
-            if cn.clear != 0 {
-                mtop = mtop.max(clearance_y(&ctx.items, mtop, cn.clear));
-            }
-            mtop = float_fit_y(&ctx.items, mtop, outer, cl, cr, outer_h);
-            let top = mtop + fmt;
-            let (band_l, band_r) = float_band(&ctx.items, mtop, outer_h, cl, cr);
-            let x = if cn.float_kind == FLOAT_LEFT { band_l + fml } else { band_r - outer + fml };
+            let f = measure_float(c, content_w, inputs, runs, run_texts, grids, children, boxes, failed);
+            let (x, y) = place_float(&mut ctx.items, &f, cursor + pending.value(), cl, cr);
             boxes[c].x = x;
-            boxes[c].y = top;
-            ctx.items.push(FloatItem {
-                side: cn.float_kind,
-                left: x - fml,
-                right: x + boxes[c].w + fmr,
-                top: mtop,
-                bottom: top + boxes[c].h + fmb,
-            });
+            boxes[c].y = y;
             continue; // the flow cursor / first / has_child are untouched
         }
         // A DIRECT text-block child coexisting with floats routes its lines around them (§9.5). Its
@@ -4960,6 +5047,16 @@ fn text_intrinsic(runs: &[Run], run_texts: &[Option<Vec<u16>>], ws_mode: u8, inp
             // intrinsic width and brings no break opportunity — it is only a marker of where the flow reached,
             // and an intrinsic measure has no lines for that to mean anything on.
             RUN_OOF => {}
+            // A FLOAT packs beside its neighbours as an inline-level box does (a box holding two 50px floats wants
+            // 100 at max-content, 50 at min-content), its margins with it — but it is not inline CONTENT: it takes
+            // no pending space and brings no break opportunity (the oracle's float arm).
+            RUN_FLOAT => {
+                let c = run.font as usize;
+                let (imin, imax) = intrinsic_widths(c, inputs, all_runs, all_texts, grids, children)?;
+                let m = inputs[c].get().decl_margin_x;
+                line += imax + m;
+                min = min.max(imin + m);
+            }
             RUN_OPEN => {
                 // An inline's EDGES here are the BASIS-LESS ones (`Run::asc` on an edge run): an intrinsic measure
                 // has no percentage basis, so a `padding: 0 10%` inline contributes nothing where the laid-out
