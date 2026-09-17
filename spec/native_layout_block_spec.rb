@@ -258,6 +258,9 @@ RSpec.describe 'native layout L1 block-flow parity', if: ENV.fetch('CSIM_JS_ENGI
     expect_parity('<div style="width:300px"><p>a</p><span>x <span style="float:left;width:40%;height:15px"></span>y</span><p>b</p></div>')
     expect_parity('<div style="width:300px"><p style="margin:10px 0">a</p> <div style="float:left;width:50px;height:30px"></div> <p style="margin:10px 0"><i style="display:inline-block;width:5px;height:5px"></i>b</p>tail</div>')
     expect_parity('<div style="width:300px"><p>a</p> <span style="position:relative;left:6px"><span style="float:left;width:20px;height:20px"></span></span> <p><i style="display:inline-block;width:5px;height:5px"></i>b</p></div>')
+    # …its percentages against the MIXED block, not the anonymous group it sits in (Chrome: 100 tall, 100 wide)
+    expect_parity('<div style="width:300px;height:200px"><p style="margin:0">a</p>x<span style="float:left;width:20px;height:50%"></span>y</div>')
+    expect_parity('<div style="writing-mode:vertical-lr;height:300px;width:200px"><p style="margin:0">a</p>x<span style="float:left;width:50%;height:20px;margin-left:10%"></span>y</div>')
   end
 
   # DECLINES: an out-of-flow child in the mix, or a preserve white-space, are deferred.
