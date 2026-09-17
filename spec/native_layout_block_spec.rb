@@ -244,6 +244,23 @@ RSpec.describe 'native layout L1 block-flow parity', if: ENV.fetch('CSIM_JS_ENGI
   it 'matches a NESTED mixed block (a mixed block inside an anonymous-block sibling chain)' do
     expect_parity('<div style="width:300px">outer<div style="width:200px">inner text<div style="height:15px">deep</div>inner tail</div>outer tail</div>')
   end
+  # …and so does an EMPTY inline box with no horizontal edges: a line of nothing else is zero-height (§9.4.2) and
+  # separates no margins, so the `<p>`'s margin still leaves its parent (Chrome: div at 15, 18 tall; after a padded
+  # span it makes an 18px line and stays inside). The oracle read any inline element as a line.
+  it 'hoists a margin past an empty inline box, not past a padded one' do
+    [
+      ['<div id="t" style="width:300px"><span></span><p style="margin:15px 0">b</p></div>', [15, 18]],
+      ['<div id="t" style="width:300px"><span><span></span></span><p style="margin:15px 0">b</p></div>', [15, 18]],
+      ['<div id="t" style="width:300px"><span></span></div><p>after</p>', [16, 0]],
+      ['<div id="t" style="width:300px"><span style="padding-left:5px"></span><p style="margin:15px 0">b</p></div>', [0, 51]]
+    ].each do |body, (y, h)|
+      session = simulated_session(page(body))
+      session.visit '/'
+      expect(session.evaluate_script("(b => [b.y, b.height])(document.getElementById('t').getBoundingClientRect())")).to eq([y, h]), body
+      r = parity(session)
+      expect(r['mismatches']).to eq(0), "#{body}: #{r.inspect}" if r['ok']
+    end
+  end
   it 'collapses whitespace-only inline content between blocks (no anonymous block)' do
     expect_parity('<div style="width:300px"><div style="height:20px">a</div>   <div style="height:20px">b</div></div>')
   end
