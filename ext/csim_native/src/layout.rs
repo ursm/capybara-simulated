@@ -266,6 +266,11 @@ pub(crate) struct Input {
     // of the containing block (NaN = that size is a length or auto, already in its own field). The parent resolves
     // them when it lays this box out (`with_percent_sizes`), writing the result into those fields.
     pub(crate) pct_sizes: [f64; 6],
+    // …and the margins' and padding's percentage parts (margin top / right / bottom / left, padding top / right /
+    // bottom / left) as fractions of the containing-block WIDTH, 0 where there is none, beside the length parts the
+    // walk sent (`edge_px`, kept apart from the fields a resolution overwrites).
+    pub(crate) edge_frac: [f64; 8],
+    pub(crate) edge_px: [f64; 8],
     pub(crate) flex_main_gap_frac: f64,
     pub(crate) flex_cross_gap_frac: f64,
     pub(crate) flex_basis_kw: u8,
@@ -542,10 +547,15 @@ impl Input {
         n.max_w = at(max_w, cb_w, n.max_w);
         n.min_h = at(min_h, cb_h, n.min_h);
         n.max_h = at(max_h, cb_h, n.max_h);
+        let edge = |i: usize| self.edge_px[i] + self.edge_frac[i] * cb_w;
+        if self.edge_frac.iter().any(|&f| f != 0.0) {
+            (n.mt, n.mr, n.mb, n.ml) = (edge(0), edge(1), edge(2), edge(3));
+            (n.pt, n.pr, n.pb, n.pl) = (edge(4), edge(5), edge(6), edge(7));
+        }
         n
     }
     fn has_percent_sizes(&self) -> bool {
-        self.pct_sizes.iter().any(|f| !f.is_nan())
+        self.pct_sizes.iter().any(|f| !f.is_nan()) || self.edge_frac.iter().any(|&f| f != 0.0)
     }
     // A flex item's resolved basis in a container whose main size is `main`: its percentage of that (auto where
     // the main size is indefinite), else the length the walk resolved.
@@ -5801,6 +5811,8 @@ mod tests {
             flex_basis_cb: f64::NAN,
             flex_basis_frac: f64::NAN,
             pct_sizes: [f64::NAN; 6],
+            edge_frac: [0.0; 8],
+            edge_px: [0.0; 8],
             flex_main_gap_frac: 0.0,
             flex_cross_gap_frac: 0.0,
             flex_basis_kw: 0,

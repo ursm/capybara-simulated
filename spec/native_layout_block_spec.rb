@@ -1098,6 +1098,26 @@ x</div>))
       end
     end
 
+    # …and the MARGINS and PADDING, against the containing block's width on every side: the walk sends each edge's
+    # length and percentage parts apart and the parent adds them up.
+    it 'resolves percentage margins and padding against the parent native lays the box out in' do
+      [
+        '<div style="width:400px"><div style="margin:5%;padding:10% 2%">block</div></div>',
+        '<div style="width:137px;padding:0 9px"><div style="margin-left:20%;margin-right:auto;width:40%">auto beside</div></div>',
+        '<div style="width:400px"><div style="padding:calc(5% + 3px);padding-inline-start:15%;margin-inline-end:10%">logical, calc</div></div>',
+        # …a math function that bends, and a padding that goes negative and is clamped, above the probe bases
+        '<div style="width:2400px"><div style="padding:min(5%, 100px)">min</div><div style="padding:calc(10px - 0.5%)">clamped</div></div>',
+        # …an atomic on its text block's lines, and vertical margins collapsing through a parent
+        '<div style="width:400px">text <span style="display:inline-block;padding:5% 10%">ib</span> after</div>',
+        '<div style="width:300px"><div style="margin-top:10%"><div style="margin-top:5%">collapse</div></div></div>',
+        '<div style="display:flex;width:420px"><div style="box-sizing:border-box;width:60%;padding:0 10%">item</div><div style="width:30px;height:10px"></div></div>',
+        '<div style="width:260px"><div style="float:left;margin:-5% 0 0 -3%">f</div></div>'
+      ].each do |body|
+        expect_parity(body)
+        r = no_oracle(body)
+        expect(r).to include('ok' => true, 'mismatches' => 0), "#{body}: #{r.inspect}"
+      end
+    end
     # The ORACLE's basis was `content.height || null`: a definite 0 read as none, and an IMPOSED height (a grid row,
     # both insets) not yet clamped by the box's own max-height. Chrome and native: a definite 0 is 0 (the embed
     # wrapper's child is its content's height, not 0 — its percentage height resolves to 0), and the clamp comes
