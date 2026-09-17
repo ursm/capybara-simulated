@@ -15,6 +15,8 @@
 // module is pure (no V8) so the block algorithm is unit-tested here; text-block parity is validated by
 // the JS shadow harness against the live layout.
 
+use std::cell::Cell;
+
 // Sentinels in the input record: a used value that is `auto` / `none` arrives as f64::NAN (JS writes
 // NaN for auto width/height/margin and for absent min/max), distinguished from a real 0.
 fn is_auto(v: f64) -> bool {
@@ -260,6 +262,10 @@ pub(crate) struct Input {
     // (`flex_basis_at`) — and a container's main / cross gap percentages, over the px parts in
     // `flex_main_gap` / `flex_cross_gap`. The walk used to resolve all three against the oracle's box.
     pub(crate) flex_basis_frac: f64,
+    // The plain PERCENTAGES among width / height / min-width / max-width / min-height / max-height, as fractions
+    // of the containing block (NaN = that size is a length or auto, already in its own field). The parent resolves
+    // them when it lays this box out (`with_percent_sizes`), writing the result into those fields.
+    pub(crate) pct_sizes: [f64; 6],
     pub(crate) flex_main_gap_frac: f64,
     pub(crate) flex_cross_gap_frac: f64,
     pub(crate) flex_basis_kw: u8,
@@ -524,6 +530,23 @@ impl Input {
         let to_border = |v: f64| if is_auto(v) || self.border_box { v } else { v + self.edges_y() };
         if is_auto(self.min_h) || self.min_h <= 0.0 { f64::NAN } else { (to_border(self.min_h) - self.edges_y()).max(0.0) }
     }
+    // This box with its percentage sizes resolved against a containing block of `cb_w` × `cb_h` (NaN = an
+    // indefinite height: a percentage height is then `auto`, a percentage min / max-height no clamp).
+    fn with_percent_sizes(self, cb_w: f64, cb_h: f64) -> Input {
+        let mut n = self;
+        let at = |frac: f64, basis: f64, current: f64| if frac.is_nan() { current } else if is_auto(basis) { f64::NAN } else { frac * basis };
+        let [w, h, min_w, max_w, min_h, max_h] = self.pct_sizes;
+        n.width = at(w, cb_w, n.width);
+        n.height = at(h, cb_h, n.height);
+        n.min_w = at(min_w, cb_w, n.min_w);
+        n.max_w = at(max_w, cb_w, n.max_w);
+        n.min_h = at(min_h, cb_h, n.min_h);
+        n.max_h = at(max_h, cb_h, n.max_h);
+        n
+    }
+    fn has_percent_sizes(&self) -> bool {
+        self.pct_sizes.iter().any(|f| !f.is_nan())
+    }
     // A flex item's resolved basis in a container whose main size is `main`: its percentage of that (auto where
     // the main size is indefinite), else the length the walk resolved.
     fn flex_basis_at(&self, main: f64) -> f64 {
@@ -642,6 +665,10 @@ pub(crate) fn layout_block(inputs: &[Input], runs: &[Run], run_texts: &[Option<V
     // Bound to a name, never `let _`: the guard has to LIVE to the end of the pass — dropped at the semicolon
     // it would clear the memo again immediately, silently, with nothing measuring the loss.
     let _iw_guard = IwMemo::install(inputs.len());
+    // Each record in a CELL: a parent resolves its children's percentages against the box it lays them out in
+    // (`Input::with_percent_sizes`) and writes the resolved copy back before they are measured.
+    let cells: Vec<Cell<Input>> = inputs.iter().copied().map(Cell::new).collect();
+    let inputs: &[Cell<Input>] = &cells;
     let failed = std::cell::Cell::new(false);
     let mut root_fc = FloatCtx::new();
     measure(0, root_w, f64::NAN, inputs, runs, run_texts, grids, &children, &mut boxes, &failed, &mut root_fc, 0.0, 0.0);
@@ -1977,7 +2004,7 @@ fn measure(
     i: usize,
     w: f64,
     imposed_h: f64,
-    inputs: &[Input],
+    inputs: &[Cell<Input>],
     runs: &[Run],
     run_texts: &[Option<Vec<u16>>],
     grids: &[f64],
@@ -1990,9 +2017,20 @@ fn measure(
     bfc_x: f64,
     bfc_y: f64,
 ) -> MInfo {
-    let n = inputs[i].with_imposed_height(imposed_h);
+    let n = inputs[i].get().with_imposed_height(imposed_h);
     let content_top_rel = n.bt + n.pt;
     let content_w = n.content_w(w);
+    // This box is its in-flow children's containing block: their percentage sizes resolve against its content
+    // width and — where it is definite — its content height (a flex COLUMN's main size, floor included), which is
+    // what the oracle hands `usedSize` for them. Resolved afresh on every measure, so a box measured again at
+    // another width or under an imposed height hands them the box it has now.
+    let pct_h_basis = if n.display == DISPLAY_FLEX && !n.flex_main_is_x { n.column_main() } else { n.definite_content_h().unwrap_or(f64::NAN) };
+    for &c in &children[i] {
+        let k = inputs[c].get();
+        if k.has_percent_sizes() && k.out_of_flow == 0 {
+            inputs[c].set(k.with_percent_sizes(content_w, pct_h_basis));
+        }
+    }
 
     // A REPLACED leaf: its box comes from its intrinsic size (`replaced_box`) — the width the caller resolved
     // through `used_width` (or a flex size), the height derived here; no children, no baseline of its own
@@ -2076,7 +2114,7 @@ fn measure(
                     continue;
                 }
                 let c = r.font as usize;
-                let k = inputs[c];
+                let k = inputs[c].get();
                 let (ml, mr, mt, mb) = (Input::m(k.ml), Input::m(k.mr), Input::m(k.mt), Input::m(k.mb));
                 let auto_w = if k.replaced && k.ratio_only {
                     (content_w - ml - mr).max(0.0)
@@ -2162,7 +2200,7 @@ fn measure(
                             continue;
                         }
                         let c = r.font as usize;
-                        let k = inputs[c];
+                        let k = inputs[c].get();
                         boxes[c].x = n.bl + n.pl + x + Input::m(k.ml);
                         boxes[c].y = content_top_rel + top + (line_asc - r.asc) + Input::m(k.mt);
                     }
@@ -2194,7 +2232,7 @@ fn measure(
         // says whether there is one, so a page whose text blocks hold none pays a bit read rather than a scan.
         if n.has_replayed_oof {
             for &c in &children[i] {
-                let cn = inputs[c];
+                let cn = inputs[c].get();
                 if cn.out_of_flow != 0 && !cn.native_oof() {
                     let cw = resolve_width(&cn, content_w);
                     measure(c, cw, f64::NAN, inputs, runs, run_texts, grids, children, boxes, failed, &mut FloatCtx::new(), 0.0, 0.0);
@@ -2258,7 +2296,7 @@ fn measure(
     };
 
     for &c in &children[i] {
-        let cn = inputs[c];
+        let cn = inputs[c].get();
         if cn.out_of_flow != 0 {
             // §4.1: an absolute/fixed child neither sizes nor shifts the flow. Positioned NATIVELY, it only records
             // its STATIC position here — where the flow has reached (the cursor, before any margin still open; the
@@ -2760,12 +2798,12 @@ fn resolve_flexible_lengths(bases: &[f64], inner: &[f64], grow: &[f64], shrink: 
 
 // Whether a box's content is ALL out of flow — an element with children, every one absolutely positioned,
 // and no text (the oracle's `outOfFlowOnly`): its zero content width is real, not a measurement that failed.
-fn out_of_flow_only(i: usize, inputs: &[Input], children: &[Vec<usize>]) -> bool {
-    let n = inputs[i];
+fn out_of_flow_only(i: usize, inputs: &[Cell<Input>], children: &[Vec<usize>]) -> bool {
+    let n = inputs[i].get();
     if n.display == DISPLAY_TEXT_BLOCK || children[i].is_empty() {
         return false;
     }
-    children[i].iter().all(|&c| inputs[c].out_of_flow != 0 && inputs[c].nid >= 0.0)
+    children[i].iter().all(|&c| inputs[c].get().out_of_flow != 0 && inputs[c].get().nid >= 0.0)
 }
 
 // A flex ROW's item widths, resolved natively — the oracle's `flexRowMetrics` + `resolveFlexRowWidths` per
@@ -2786,7 +2824,7 @@ fn flex_row_sizes(
     content_w: f64,
     gap: f64,
     wrap: bool,
-    inputs: &[Input],
+    inputs: &[Cell<Input>],
     runs: &[Run],
     run_texts: &[Option<Vec<u16>>],
     grids: &[f64],
@@ -2798,7 +2836,7 @@ fn flex_row_sizes(
     let mut min_auto: Vec<Option<f64>> = vec![None; cnt]; // memoised automatic minimum
     for &p in flow {
         let c = kids[p];
-        let k = inputs[c];
+        let k = inputs[c].get();
         let edges = k.edges_x();
         let extra = if k.border_box { 0.0 } else { edges };
         let basis = k.flex_basis_at(content_w);
@@ -2840,18 +2878,18 @@ fn flex_row_sizes(
     // ask for it — the oracle measures lazily, at the first round that shrinks an item below its base. A
     // content-based item's base is its own maximum, so its floor is asked only once its line SHRINKS; every
     // other auto-minimum item's floor is asked by its hypothetical size.
-    let floor_of = |p: usize, inputs: &[Input]| -> Option<f64> {
+    let floor_of = |p: usize, inputs: &[Cell<Input>]| -> Option<f64> {
         let c = kids[p];
-        let k = inputs[c];
+        let k = inputs[c].get();
         Some(if k.scrolls_x { k.edges_x() } else { min_content_width(c, inputs, runs, run_texts, grids, children)? })
     };
     for &p in flow {
-        if is_auto(inputs[kids[p]].min_w) && !content_based[p] {
+        if is_auto(inputs[kids[p]].get().min_w) && !content_based[p] {
             min_auto[p] = Some(floor_of(p, inputs)?);
         }
     }
     let clamp_with = |floors: &Vec<Option<f64>>, p: usize, size: f64| -> f64 {
-        let k = inputs[kids[p]];
+        let k = inputs[kids[p]].get();
         let extra = if k.border_box { 0.0 } else { k.edges_x() };
         let mut out = size;
         if is_auto(k.min_w) && !(content_based[p] && size >= base[p]) {
@@ -2873,7 +2911,7 @@ fn flex_row_sizes(
         let mut cur: Vec<usize> = Vec::new();
         let mut used = 0.0;
         for &p in flow {
-            let k = inputs[kids[p]];
+            let k = inputs[kids[p]].get();
             let outer = clamp_of(p, base[p]) + Input::m(k.ml) + Input::m(k.mr);
             if !cur.is_empty() && used + gap + outer > content_w {
                 ls.push(std::mem::take(&mut cur));
@@ -2892,7 +2930,7 @@ fn flex_row_sizes(
         let n = line.len();
         let mut taken = gap * n.saturating_sub(1) as f64;
         for &p in line {
-            let k = inputs[kids[p]];
+            let k = inputs[kids[p]].get();
             taken += Input::m(k.ml) + Input::m(k.mr);
         }
         let avail = (content_w - taken).max(0.0);
@@ -2904,17 +2942,17 @@ fn flex_row_sizes(
         let mut floors = min_auto.clone();
         if wanted > avail {
             for &p in line {
-                if is_auto(inputs[kids[p]].min_w) && floors[p].is_none() {
+                if is_auto(inputs[kids[p]].get().min_w) && floors[p].is_none() {
                     floors[p] = Some(floor_of(p, inputs)?);
                 }
             }
         }
         let inner: Vec<f64> = line.iter().map(|&p| {
-            let k = inputs[kids[p]];
+            let k = inputs[kids[p]].get();
             (base[p] - if k.border_box { 0.0 } else { k.edges_x() }).max(0.0)
         }).collect();
-        let grow: Vec<f64> = line.iter().map(|&p| inputs[kids[p]].flex_grow).collect();
-        let shrink: Vec<f64> = line.iter().map(|&p| inputs[kids[p]].flex_shrink).collect();
+        let grow: Vec<f64> = line.iter().map(|&p| inputs[kids[p]].get().flex_grow).collect();
+        let shrink: Vec<f64> = line.iter().map(|&p| inputs[kids[p]].get().flex_shrink).collect();
         let line_clamp = |j: usize, size: f64| clamp_with(&floors, line[j], size);
         let sizes = resolve_flexible_lengths(&bases, &inner, &grow, &shrink, Some(avail), &line_clamp);
         for (j, &p) in line.iter().enumerate() {
@@ -2953,7 +2991,7 @@ fn flex_column_sizes(
     cross_gap: f64,
     wrap: bool,
     align_content_code: u8,
-    inputs: &[Input],
+    inputs: &[Cell<Input>],
     runs: &[Run],
     run_texts: &[Option<Vec<u16>>],
     grids: &[f64],
@@ -2971,7 +3009,7 @@ fn flex_column_sizes(
     let mut decl_h = vec![f64::NAN; cnt]; // the declared border-box height, NaN = auto
     for &p in flow {
         let c = kids[p];
-        let k = inputs[c];
+        let k = inputs[c].get();
         let avail_w = (content_w - Input::m(k.ml) - Input::m(k.mr)).max(0.0);
         // A stretched item fills its line — the container, single-line; a multi-line column's line is only as wide
         // as its widest item, so the item starts at its shrink-to-fit width and is re-stretched once the line has
@@ -3013,7 +3051,7 @@ fn flex_column_sizes(
     let mut base = vec![0.0f64; cnt];
     let mut base_measured = vec![false; cnt];
     for &p in flow {
-        let k = inputs[kids[p]];
+        let k = inputs[kids[p]].get();
         let extra = if k.border_box { 0.0 } else { k.edges_y() };
         let basis = k.flex_basis_at(main);
         base[p] = if k.flex_basis_kw == 0 && !is_auto(basis) {
@@ -3029,7 +3067,7 @@ fn flex_column_sizes(
     let mut auto_min: Vec<Option<f64>> = vec![None; cnt];
     let auto_min_of = |p: usize, width: &Vec<f64>, measured: &mut Vec<Option<f64>>, auto_min: &mut Vec<Option<f64>>, boxes: &mut [Box]| -> f64 {
         if auto_min[p].is_none() {
-            let k = inputs[kids[p]];
+            let k = inputs[kids[p]].get();
             auto_min[p] = Some(if k.scrolls_y {
                 0.0
             } else {
@@ -3046,7 +3084,7 @@ fn flex_column_sizes(
     // measured lazily, where a line SHRINKS it (the oracle's lazy `automaticMinHeight`), so a column of
     // fixed-height rows costs one layout per item.
     for &p in flow {
-        if is_auto(inputs[kids[p]].min_h) {
+        if is_auto(inputs[kids[p]].get().min_h) {
             let known = if base_measured[p] { measured[p] } else if is_auto(decl_h[p]) { None } else { Some(decl_h[p]) };
             if known.map_or(true, |kn| base[p] < kn) {
                 auto_min_of(p, &width, &mut measured, &mut auto_min, boxes);
@@ -3054,7 +3092,7 @@ fn flex_column_sizes(
         }
     }
     let clamp_with = |floors: &Vec<Option<f64>>, measured: &Vec<Option<f64>>, p: usize, size: f64| -> f64 {
-        let k = inputs[kids[p]];
+        let k = inputs[kids[p]].get();
         let mut out = size;
         if is_auto(k.min_h) {
             let known = if base_measured[p] { measured[p] } else if is_auto(decl_h[p]) { None } else { Some(decl_h[p]) };
@@ -3080,7 +3118,7 @@ fn flex_column_sizes(
         let mut cur: Vec<usize> = Vec::new();
         let mut used = 0.0;
         for &p in flow {
-            let k = inputs[kids[p]];
+            let k = inputs[kids[p]].get();
             let outer = clamp_of(p, base[p]) + Input::m(k.mt) + Input::m(k.mb);
             if !cur.is_empty() && used + gap + outer > capacity {
                 ls.push(std::mem::take(&mut cur));
@@ -3101,7 +3139,7 @@ fn flex_column_sizes(
     if multiline {
         let nl = lines.len();
         let crosses: Vec<f64> = lines.iter().map(|line| line.iter().map(|&p| {
-            let k = inputs[kids[p]];
+            let k = inputs[kids[p]].get();
             width[p] + Input::m(k.ml) + Input::m(k.mr)
         }).fold(0.0, f64::max)).collect();
         let stacked: f64 = crosses.iter().sum::<f64>() + cross_gap * nl.saturating_sub(1) as f64;
@@ -3111,7 +3149,7 @@ fn flex_column_sizes(
         for (li, line) in lines.iter().enumerate() {
             let line_cross = crosses[li] + grow;
             for &p in line {
-                let k = inputs[kids[p]];
+                let k = inputs[kids[p]].get();
                 if k.flex_stretch {
                     let room = (line_cross - Input::m(k.ml) - Input::m(k.mr)).max(0.0);
                     let extra = if k.border_box { 0.0 } else { k.edges_x() };
@@ -3131,16 +3169,16 @@ fn flex_column_sizes(
         let k_n = line.len();
         let mut taken = gap * k_n.saturating_sub(1) as f64;
         for &p in line {
-            let k = inputs[kids[p]];
+            let k = inputs[kids[p]].get();
             taken += Input::m(k.mt) + Input::m(k.mb);
         }
         let bases: Vec<f64> = line.iter().map(|&p| base[p]).collect();
         let inner: Vec<f64> = line.iter().map(|&p| {
-            let k = inputs[kids[p]];
+            let k = inputs[kids[p]].get();
             (base[p] - if k.border_box { 0.0 } else { k.edges_y() }).max(0.0)
         }).collect();
-        let grow_f: Vec<f64> = line.iter().map(|&p| inputs[kids[p]].flex_grow).collect();
-        let shrink_f: Vec<f64> = line.iter().map(|&p| inputs[kids[p]].flex_shrink).collect();
+        let grow_f: Vec<f64> = line.iter().map(|&p| inputs[kids[p]].get().flex_grow).collect();
+        let shrink_f: Vec<f64> = line.iter().map(|&p| inputs[kids[p]].get().flex_shrink).collect();
         let available = if height_definite { Some((main - taken).max(0.0)) } else { None };
         // A line that SHRINKS (its hypothetical sizes exceed the room — the definite height, or the cap the
         // items overrun) may take an item below its declaration, where its floor binds: measure those now.
@@ -3149,7 +3187,7 @@ fn flex_column_sizes(
         let mut floors = auto_min.clone();
         if shrinks {
             for &p in line {
-                if is_auto(inputs[kids[p]].min_h) && floors[p].is_none() {
+                if is_auto(inputs[kids[p]].get().min_h) && floors[p].is_none() {
                     floors[p] = Some(auto_min_of(p, &width, &mut measured, &mut auto_min, boxes));
                 }
             }
@@ -3177,7 +3215,7 @@ fn measure_flex(
     i: usize,
     w: f64,
     imposed_h: f64,
-    inputs: &[Input],
+    inputs: &[Cell<Input>],
     runs: &[Run],
     run_texts: &[Option<Vec<u16>>],
     grids: &[f64],
@@ -3185,7 +3223,7 @@ fn measure_flex(
     boxes: &mut [Box],
     failed: &std::cell::Cell<bool>,
 ) -> MInfo {
-    let n = inputs[i].with_imposed_height(imposed_h);
+    let n = inputs[i].get().with_imposed_height(imposed_h);
     let content_w = n.content_w(w);
     let content_left_rel = n.bl + n.pl;
     let content_top_rel = n.bt + n.pt;
@@ -3202,7 +3240,7 @@ fn measure_flex(
     let kids: Vec<usize> = children[i].clone();
     // In-flow item positions (into `kids`). OUT-OF-FLOW children (abspos/fixed, §4.1) are removed from flex
     // sizing and line breaking — their subtrees are laid out at their pushed box, and they are placed separately.
-    let flow: Vec<usize> = (0..cnt).filter(|&p| inputs[kids[p]].out_of_flow == 0).collect();
+    let flow: Vec<usize> = (0..cnt).filter(|&p| inputs[kids[p]].get().out_of_flow == 0).collect();
     // A ROW sized NATIVELY (`flex_native`): each in-flow item's width is resolved here (`flex_row_sizes` —
     // base, clamps, line breaking, grow/shrink), and its subtree laid out at that width; the pushed path lays
     // each item out at its oracle-resolved box. Either way record order == flex order (the harness sorted by
@@ -3237,8 +3275,8 @@ fn measure_flex(
             }
         }
         for &c in &kids {
-            if inputs[c].out_of_flow != 0 && !inputs[c].native_oof() {
-                let iw = resolve_width(&inputs[c], content_w);
+            if inputs[c].get().out_of_flow != 0 && !inputs[c].get().native_oof() {
+                let iw = resolve_width(&inputs[c].get(), content_w);
                 measure(c, iw, f64::NAN, inputs, runs, run_texts, grids, children, boxes, failed, &mut FloatCtx::new(), 0.0, 0.0);
             }
         }
@@ -3254,17 +3292,17 @@ fn measure_flex(
             measure(kids[p], widths[p], f64::NAN, inputs, runs, run_texts, grids, children, boxes, failed, &mut FloatCtx::new(), 0.0, 0.0);
         }
         for &c in &kids {
-            if inputs[c].out_of_flow != 0 && !inputs[c].native_oof() {
-                let iw = resolve_width(&inputs[c], content_w);
+            if inputs[c].get().out_of_flow != 0 && !inputs[c].get().native_oof() {
+                let iw = resolve_width(&inputs[c].get(), content_w);
                 measure(c, iw, f64::NAN, inputs, runs, run_texts, grids, children, boxes, failed, &mut FloatCtx::new(), 0.0, 0.0);
             }
         }
     } else {
         for &c in &kids {
-            if inputs[c].native_oof() {
+            if inputs[c].get().native_oof() {
                 continue; // sized and placed by place_out_of_flow
             }
-            let iw = resolve_width(&inputs[c], content_w);
+            let iw = resolve_width(&inputs[c].get(), content_w);
             measure(c, iw, f64::NAN, inputs, runs, run_texts, grids, children, boxes, failed, &mut FloatCtx::new(), 0.0, 0.0);
         }
     }
@@ -3276,7 +3314,7 @@ fn measure_flex(
     let main_reverse = n.flex_main_reverse;
     let (mut mo, mut co, mut ml_lead, mut cl_lead) = (Vec::with_capacity(cnt), Vec::with_capacity(cnt), Vec::with_capacity(cnt), Vec::with_capacity(cnt));
     for &c in &kids {
-        let cn = inputs[c];
+        let cn = inputs[c].get();
         // The LEADING main margin is the one on the main-START side, which a reversed axis puts on the far
         // physical side (a row-reverse item's leading margin is its right margin). The cross is forward here,
         // so the leading cross margin is the ordinary near-side one.
@@ -3370,10 +3408,10 @@ fn measure_flex(
     // takes (rule 3, the `mayConstrainSize` pattern). One pass over the aligns answers it.
     let any_baseline = kids
         .iter()
-        .any(|&c| matches!(inputs[c].flex_cross_align, CROSS_BASELINE | CROSS_BASELINE_LAST));
+        .any(|&c| matches!(inputs[c].get().flex_cross_align, CROSS_BASELINE | CROSS_BASELINE_LAST));
     let bl_asc: Vec<f64> = if !any_baseline { Vec::new() } else { (0..cnt).map(|p| {
         let c = kids[p];
-        let k = inputs[c];
+        let k = inputs[c].get();
         if !n.flex_native {
             return k.flex_baseline_asc;
         }
@@ -3391,7 +3429,7 @@ fn measure_flex(
         let (mut plain, mut fa, mut fb, mut la, mut lb) = (0.0f64, 0.0f64, 0.0f64, 0.0f64, 0.0f64);
         for &p in line {
             let asc = asc_of(p);
-            match inputs[kids[p]].flex_cross_align {
+            match inputs[kids[p]].get().flex_cross_align {
                 CROSS_BASELINE => { fa = fa.max(asc); fb = fb.max(co[p] - asc); }
                 CROSS_BASELINE_LAST => { la = la.max(asc); lb = lb.max(co[p] - asc); }
                 _ => plain = plain.max(co[p]),
@@ -3501,7 +3539,7 @@ fn measure_flex(
         for (li, line) in lines.iter().enumerate() {
             for &p in line {
                 let c = kids[p];
-                let cn = inputs[c];
+                let cn = inputs[c].get();
                 if !cn.flex_stretch {
                     continue;
                 }
@@ -3524,13 +3562,13 @@ fn measure_flex(
         let free = content_main - line_main;
         // Auto main-axis margins take the line's free space (free/autos each) BEFORE justify-content, which
         // then yields — but only when there IS free space; with none they resolve to 0 and justify runs.
-        let line_autos: usize = line.iter().map(|&p| (inputs[kids[p]].flex_item_auto & 1) as usize + ((inputs[kids[p]].flex_item_auto >> 1) & 1) as usize).sum();
+        let line_autos: usize = line.iter().map(|&p| (inputs[kids[p]].get().flex_item_auto & 1) as usize + ((inputs[kids[p]].get().flex_item_auto >> 1) & 1) as usize).sum();
         let each_auto = if line_autos > 0 && free > 0.0 { free / line_autos as f64 } else { 0.0 };
         let (m_lead, m_between) = if line_autos > 0 && free > 0.0 { (0.0, 0.0) } else { flex_distribution(n.flex_justify, free, line.len()) };
         let mut at = m_lead;
         for (k, &p) in line.iter().enumerate() {
             let c = kids[p];
-            let auto = inputs[c].flex_item_auto;
+            let auto = inputs[c].get().flex_item_auto;
             if k > 0 {
                 at += gap + m_between;
             }
@@ -3570,7 +3608,7 @@ fn measure_flex(
                 };
                 cs + lead
             } else {
-                let off = match inputs[c].flex_cross_align {
+                let off = match inputs[c].get().flex_cross_align {
                     1 => (lc - co[p]) / 2.0, // center
                     2 => lc - co[p],         // end
                     // baseline: hang from the line's shared baseline (the group's deepest ascent), so every
@@ -3609,7 +3647,7 @@ fn measure_flex(
     // justify/align static position the oracle already resolved). Reset its box to the origin so `place`
     // positions it by rel_x/rel_y alone (over the container origin); its Phase-A subtree follows.
     for &c in &kids {
-        if inputs[c].out_of_flow != 0 {
+        if inputs[c].get().out_of_flow != 0 {
             boxes[c].x = 0.0;
             boxes[c].y = 0.0;
         }
@@ -3720,12 +3758,12 @@ struct TableGrid {
     caption: Option<usize>,
     c_count: usize,
 }
-fn table_grid(i: usize, inputs: &[Input], children: &[Vec<usize>], declared_cols: usize) -> Option<TableGrid> {
+fn table_grid(i: usize, inputs: &[Cell<Input>], children: &[Vec<usize>], declared_cols: usize) -> Option<TableGrid> {
     let mut rows: Vec<usize> = Vec::new();
     let mut row_group: Vec<Option<usize>> = Vec::new();
     let mut caption = None;
     for &ch in &children[i] {
-        match inputs[ch].display {
+        match inputs[ch].get().display {
             DISPLAY_TABLE_ROW_GROUP => {
                 for &r in &children[ch] {
                     rows.push(r);
@@ -3745,7 +3783,7 @@ fn table_grid(i: usize, inputs: &[Input], children: &[Vec<usize>], declared_cols
     let mut c_count = declared_cols;
     for &r in &rows {
         for &c in &children[r] {
-            let k = inputs[c];
+            let k = inputs[c].get();
             if k.cell_colspan == 0 || k.cell_rowspan == 0 {
                 return None;
             }
@@ -3757,7 +3795,7 @@ fn table_grid(i: usize, inputs: &[Input], children: &[Vec<usize>], declared_cols
     }
     for (ri, &r) in rows.iter().enumerate() {
         for &c in &children[r] {
-            let k = inputs[c];
+            let k = inputs[c].get();
             if k.cell_col + k.cell_colspan > c_count || ri + k.cell_rowspan > rows.len() {
                 return None;
             }
@@ -3816,7 +3854,7 @@ fn table_columns(
     g: &TableGrid,
     sp_x: f64,
     col_decls: Option<&TableColumnDecls>,
-    inputs: &[Input],
+    inputs: &[Cell<Input>],
     runs: &[Run],
     run_texts: &[Option<Vec<u16>>],
     grids: &[f64],
@@ -3827,7 +3865,7 @@ fn table_columns(
     let mut spans: Vec<(usize, usize, f64, f64)> = Vec::new(); // (col, colspan, min, max)
     for &r in &g.rows {
         for &c in &children[r] {
-            let k = inputs[c];
+            let k = inputs[c].get();
             let (imin, imax) = if is_auto(k.cell_min_content) {
                 intrinsic_widths(c, inputs, runs, run_texts, grids, children)?
             } else {
@@ -3934,7 +3972,7 @@ fn fixed_column_widths(
     g: &TableGrid,
     col_decls: Option<&TableColumnDecls>,
     assignable: f64,
-    inputs: &[Input],
+    inputs: &[Cell<Input>],
     children: &[Vec<usize>],
 ) -> Vec<f64> {
     let n = g.c_count;
@@ -3951,7 +3989,7 @@ fn fixed_column_widths(
         })
         .collect();
     for &c in &children[g.rows[0]] {
-        let k = inputs[c];
+        let k = inputs[c].get();
         let declared = if !is_auto(k.cell_pct) {
             k.cell_pct * assignable
         } else if !is_auto(k.decl_w) {
@@ -3992,18 +4030,18 @@ fn fixed_column_widths(
 // caption's margin box spans the table's border box, so its min-content floors the whole figure.
 fn table_intrinsic_widths(
     i: usize,
-    inputs: &[Input],
+    inputs: &[Cell<Input>],
     runs: &[Run],
     run_texts: &[Option<Vec<u16>>],
     grids: &[f64],
     children: &[Vec<usize>],
 ) -> Option<(f64, f64)> {
-    let n = inputs[i];
+    let n = inputs[i].get();
     let decls = table_col_decls(&n, grids);
     let g = table_grid(i, inputs, children, decls.as_ref().map_or(0, |d| d.count))?;
     let cols = table_columns(&g, n.sp_x, decls.as_ref(), inputs, runs, run_texts, grids, children)?;
     let caption_floor = match g.caption {
-        Some(cap) if !is_auto(inputs[cap].cell_min_content) => inputs[cap].cell_min_content,
+        Some(cap) if !is_auto(inputs[cap].get().cell_min_content) => inputs[cap].get().cell_min_content,
         Some(cap) => intrinsic_widths(cap, inputs, runs, run_texts, grids, children)?.0,
         None => 0.0,
     };
@@ -4042,7 +4080,7 @@ fn measure_table(
     i: usize,
     w: f64,
     imposed_h: f64,
-    inputs: &[Input],
+    inputs: &[Cell<Input>],
     runs: &[Run],
     run_texts: &[Option<Vec<u16>>],
     grids: &[f64],
@@ -4050,7 +4088,7 @@ fn measure_table(
     boxes: &mut [Box],
     failed: &std::cell::Cell<bool>,
 ) -> MInfo {
-    let n = inputs[i].with_imposed_height(imposed_h);
+    let n = inputs[i].get().with_imposed_height(imposed_h);
     let (sx, sy) = (n.sp_x, n.sp_y);
     let bail = |failed: &std::cell::Cell<bool>| {
         failed.set(true);
@@ -4081,7 +4119,7 @@ fn measure_table(
     // The CAPTION first (§17.4 — a block box spanning the table WRAPPER, sized by the oracle for now): a caption
     // wider than the table floors its border-box width, so the columns share out what is left inside that.
     if let Some(cap) = caption {
-        let iw = resolve_width(&inputs[cap], 0.0);
+        let iw = resolve_width(&inputs[cap].get(), 0.0);
         measure(cap, iw, f64::NAN, inputs, runs, run_texts, grids, children, boxes, failed, &mut FloatCtx::new(), 0.0, 0.0);
     }
     // The table's own used width (§17.5.2): a declared one wins, an AUTO one SHRINK-TO-FITS its columns within
@@ -4112,7 +4150,7 @@ fn measure_table(
     // to is what the rows are sized from below — in a fresh float context. The cell's own declared width does not
     // speak here: it already did, when the column was sized.
     let span_w = |c: usize| -> f64 {
-        let k = inputs[c];
+        let k = inputs[c].get();
         let last = k.cell_col + k.cell_colspan - 1; // `table_grid` validated the span against the column count
         let mut wsum = col_w[k.cell_col];
         for ci in (k.cell_col + 1)..=last {
@@ -4152,7 +4190,7 @@ fn measure_table(
     let mut row_seen = vec![false; r_count];
     let mut pct_used = 0.0f64;
     for (ri, &r) in rows.iter().enumerate() {
-        let rn = inputs[r];
+        let rn = inputs[r].get();
         let declared = if !is_auto(rn.row_pct) && !is_auto(row_pct_basis) {
             let take = (rn.row_pct * row_pct_basis).min(row_pct_basis - pct_used).max(0.0);
             pct_used += take;
@@ -4166,7 +4204,7 @@ fn measure_table(
         let mut h = declared.unwrap_or(0.0);
         let mut baseline_cells: Vec<usize> = Vec::new();
         for &c in &children[r] {
-            let k = inputs[c];
+            let k = inputs[c].get();
             // A cell aligned on the baseline joins this row's group — a spanning one too, for the baseline alone.
             let base = if k.cell_valign == 0 { boxes[c].first_baseline } else { None };
             if let Some(b) = base {
@@ -4193,7 +4231,7 @@ fn measure_table(
         row_h[ri] = h;
         // A spanning cell that ENDS on this row grows it by whatever the rows it covers are short of.
         for &(c, start) in spans.iter() {
-            let end = (start + inputs[c].cell_rowspan - 1).min(r_count - 1);
+            let end = (start + inputs[c].get().cell_rowspan - 1).min(r_count - 1);
             if end != ri {
                 continue;
             }
@@ -4214,7 +4252,7 @@ fn measure_table(
         let grid_h: f64 = row_h.iter().sum::<f64>() + table_gaps(r_count, sy);
         let room = imposed_h - grid_h;
         if room > 0.0 {
-            let body: Vec<usize> = (0..r_count).filter(|&i| inputs[rows[i]].row_rank == 1).collect();
+            let body: Vec<usize> = (0..r_count).filter(|&i| inputs[rows[i]].get().row_rank == 1).collect();
             let body_autos: Vec<usize> = body.iter().copied().filter(|&i| !row_declared[i]).collect();
             let autos: Vec<usize> = (0..r_count).filter(|&i| !row_declared[i]).collect();
             let targets = if !body_autos.is_empty() {
@@ -4291,7 +4329,7 @@ fn measure_table(
 
     // Row-group boxes (relative to the table): span their rows across the full row width.
     for &ch in &children[i] {
-        if inputs[ch].display != DISPLAY_TABLE_ROW_GROUP {
+        if inputs[ch].get().display != DISPLAY_TABLE_ROW_GROUP {
             continue;
         }
         let mut first = None;
@@ -4305,7 +4343,7 @@ fn measure_table(
             }
         }
         if let Some(f) = first {
-            boxes[ch].nid = inputs[ch].nid;
+            boxes[ch].nid = inputs[ch].get().nid;
             boxes[ch].x = row_x;
             boxes[ch].y = row_top[f];
             boxes[ch].w = row_w;
@@ -4326,14 +4364,14 @@ fn measure_table(
             Some(g) => (boxes[g].x, boxes[g].y),
             None => (0.0, 0.0),
         };
-        boxes[r].nid = inputs[r].nid;
+        boxes[r].nid = inputs[r].get().nid;
         boxes[r].x = row_x - gx;
         boxes[r].y = row_top[ri] - gy;
         boxes[r].w = row_w;
         boxes[r].h = row_h[ri];
         boxes[r].auto_height = false;
         for &c in &children[r] {
-            let k = inputs[c];
+            let k = inputs[c].get();
             let (col, rs) = (k.cell_col, k.cell_rowspan);
             let content_h = boxes[c].natural_h.unwrap_or(boxes[c].h);
             let h = row_h[ri..ri + rs].iter().sum::<f64>() + (rs as f64 - 1.0) * sy;
@@ -4358,7 +4396,7 @@ fn measure_table(
                     // …but not a REPLAYED out-of-flow child: its box comes from the oracle's own displacement
                     // (`rel_y`, applied in `place`), which already carries the shift. One native positions itself
                     // does move with the content, since its static position is the cell's flow.
-                    let cn = inputs[ch];
+                    let cn = inputs[ch].get();
                     if cn.out_of_flow != 0 && !cn.native_oof() {
                         continue;
                     }
@@ -4545,7 +4583,7 @@ fn grid_column_content(
     kids: &[usize],
     cells: &[GridCell],
     col_count: usize,
-    inputs: &[Input],
+    inputs: &[Cell<Input>],
     runs: &[Run],
     run_texts: &[Option<Vec<u16>>],
     grids: &[f64],
@@ -4576,9 +4614,10 @@ fn grid_column_content(
 // never the used box a push may have written nor the cbW-resolved edges a laid-out box uses. Floats pack on a
 // line inside a block container as inline boxes would. `None` for what isn't measured: a replayed grid, a pushed
 // atomic inline, an unmodelled run.
-// `intrinsic_widths` is a pure function of the RECORD TREE, which no pass ever mutates (`inputs` is a shared
-// slice, and nothing under it touches `boxes` or `failed`) — so within one pass each node's answer is asked
-// once and kept. That is the memo's contract, and a pass that ever DOES adjust a record and measure again owes
+// `intrinsic_widths` is a pure function of the RECORD TREE's DECLARED sizing, which no pass ever changes (a parent
+// does write its children's USED sizes — their percentages resolved, `with_percent_sizes` — but no intrinsic
+// measure reads those; and nothing under it touches `boxes` or `failed`) — so within one pass each node's answer is
+// asked once and kept. That is the memo's contract, and a pass that ever DOES adjust a record and measure again owes
 // it a clear: park or drop the memo there, the way `IwMemo` parks an outer one. Without the memo every shrink-to-fit route re-walks the whole
 // subtree under it, and since `writing-mode` INHERITS, a vertical page asks for EVERY nested block: the walk
 // goes O(nodes × depth) (measured: 80 records nested 48 deep took 80 ms, against 17 ms for the same tree with
@@ -4604,7 +4643,7 @@ impl Drop for IwMemo {
         IW_MEMO.with(|m| *m.borrow_mut() = self.0.take());
     }
 }
-fn intrinsic_widths(i: usize, inputs: &[Input], runs: &[Run], run_texts: &[Option<Vec<u16>>], grids: &[f64], children: &[Vec<usize>]) -> Option<(f64, f64)> {
+fn intrinsic_widths(i: usize, inputs: &[Cell<Input>], runs: &[Run], run_texts: &[Option<Vec<u16>>], grids: &[f64], children: &[Vec<usize>]) -> Option<(f64, f64)> {
     // The borrow is taken and released around the recursion, never across it (`intrinsic_widths_of` recurses
     // back in here). The outer Option is "asked before"; the inner one is the answer, `None` included — a
     // subtree native cannot measure is asked about as often as a measurable one.
@@ -4621,8 +4660,8 @@ fn intrinsic_widths(i: usize, inputs: &[Input], runs: &[Run], run_texts: &[Optio
     });
     answer
 }
-fn intrinsic_widths_of(i: usize, inputs: &[Input], runs: &[Run], run_texts: &[Option<Vec<u16>>], grids: &[f64], children: &[Vec<usize>]) -> Option<(f64, f64)> {
-    let n = inputs[i];
+fn intrinsic_widths_of(i: usize, inputs: &[Cell<Input>], runs: &[Run], run_texts: &[Option<Vec<u16>>], grids: &[f64], children: &[Vec<usize>]) -> Option<(f64, f64)> {
+    let n = inputs[i].get();
     let extra = n.decl_edges_x;
     let (inner_min, inner_max) = if !is_auto(n.decl_w) {
         let w = if n.decl_border_box { (n.decl_w - extra).max(0.0) } else { n.decl_w };
@@ -4664,8 +4703,8 @@ fn intrinsic_widths_of(i: usize, inputs: &[Input], runs: &[Run], run_texts: &[Op
 // keyword `flex-basis` or its automatic minimum the oracle walks its children as block-level boxes (the same
 // widest-child answer), not along the flex axis. No declared width, no edges, no clamp: those are
 // `intrinsic_widths`' business.
-fn content_intrinsic(i: usize, inputs: &[Input], runs: &[Run], run_texts: &[Option<Vec<u16>>], grids: &[f64], children: &[Vec<usize>]) -> Option<(f64, f64)> {
-    let n = inputs[i];
+fn content_intrinsic(i: usize, inputs: &[Cell<Input>], runs: &[Run], run_texts: &[Option<Vec<u16>>], grids: &[f64], children: &[Vec<usize>]) -> Option<(f64, f64)> {
+    let n = inputs[i].get();
     match n.display {
         DISPLAY_TEXT_BLOCK => {
             let (rs, re) = (n.run_start.max(0) as usize, (n.run_start + n.run_count).max(0) as usize);
@@ -4679,7 +4718,7 @@ fn content_intrinsic(i: usize, inputs: &[Input], runs: &[Run], run_texts: &[Opti
             let (mut min, mut max) = (0.0f64, 0.0f64);
             let mut line = 0.0f64; // floats pack beside each other on a line, as inline boxes would
             for &c in &children[i] {
-                let k = inputs[c];
+                let k = inputs[c].get();
                 if k.out_of_flow != 0 {
                     continue; // out of flow: sizes nothing
                 }
@@ -4710,8 +4749,8 @@ fn content_intrinsic(i: usize, inputs: &[Input], runs: &[Run], run_texts: &[Opti
 // content's min-content plus the box's RESOLVED edges (this is a floor on a used size, not an intrinsic
 // contribution — see the body), capped by a declared width (border-box per `box-sizing`; a percentage is auto,
 // `decl_w`).
-fn min_content_width(i: usize, inputs: &[Input], runs: &[Run], run_texts: &[Option<Vec<u16>>], grids: &[f64], children: &[Vec<usize>]) -> Option<f64> {
-    let n = inputs[i];
+fn min_content_width(i: usize, inputs: &[Cell<Input>], runs: &[Run], run_texts: &[Option<Vec<u16>>], grids: &[f64], children: &[Vec<usize>]) -> Option<f64> {
+    let n = inputs[i].get();
     if n.replaced && !n.ratio_only {
         return Some(n.intrinsic_w); // the oracle's minContentWidth: the intrinsic width, edges not counted
     }
@@ -4732,14 +4771,14 @@ fn min_content_width(i: usize, inputs: &[Input], runs: &[Run], run_texts: &[Opti
 // down a COLUMN the widest wins. A row item's contribution is its intrinsic box, its `flex-basis` pinning it — or,
 // when the item may grow, only raising its max (the coarse form of §9.9) — then its own min/max-width (border-box
 // per `box-sizing`); a column item contributes the width it wants, as any block child would.
-fn flex_intrinsic_widths(i: usize, inputs: &[Input], runs: &[Run], run_texts: &[Option<Vec<u16>>], grids: &[f64], children: &[Vec<usize>]) -> Option<(f64, f64)> {
-    let n = inputs[i];
+fn flex_intrinsic_widths(i: usize, inputs: &[Cell<Input>], runs: &[Run], run_texts: &[Option<Vec<u16>>], grids: &[f64], children: &[Vec<usize>]) -> Option<(f64, f64)> {
+    let n = inputs[i].get();
     let column = !n.flex_main_is_x;
     let wrap = !column && n.flex_wrap;
     let (mut min, mut max) = (0.0f64, 0.0f64);
     let mut count = 0usize;
     for &c in &children[i] {
-        let k = inputs[c];
+        let k = inputs[c].get();
         if k.out_of_flow != 0 {
             continue; // out of flow: sizes nothing
         }
@@ -4808,7 +4847,7 @@ fn flex_intrinsic_widths(i: usize, inputs: &[Input], runs: &[Run], run_texts: &[
 // out itself contributes its own intrinsic widths (plus margins) as one unbreakable unit with an opportunity on
 // each side. `None` for a PUSHED atomic (its box is not in the stream), a tab / other control, or a ZWJ under
 // per-character breaking (the oracle's per-character advance carries the previous character).
-fn text_intrinsic(runs: &[Run], run_texts: &[Option<Vec<u16>>], ws_mode: u8, inputs: &[Input], all_runs: &[Run], all_texts: &[Option<Vec<u16>>], grids: &[f64], children: &[Vec<usize>]) -> Option<(f64, f64)> {
+fn text_intrinsic(runs: &[Run], run_texts: &[Option<Vec<u16>>], ws_mode: u8, inputs: &[Cell<Input>], all_runs: &[Run], all_texts: &[Option<Vec<u16>>], grids: &[f64], children: &[Vec<usize>]) -> Option<(f64, f64)> {
     // …per RUN, because an inline may declare its own `white-space` (`Run::ws_mode`) and every one of these is
     // about the run it belongs to. `pin` is the exception: "this box never wraps, so its min-content IS its
     // max-content" is a statement about the whole stream, true only while no run in it wraps.
@@ -5052,7 +5091,7 @@ fn text_intrinsic(runs: &[Run], run_texts: &[Option<Vec<u16>>], ws_mode: u8, inp
                 // A natively laid-out atomic: one unbreakable unit the line may break on either side of, its
                 // own intrinsic widths plus its margins (the oracle's atomic arm).
                 let c = run.font as usize;
-                let k = inputs[c];
+                let k = inputs[c].get();
                 let (imin, imax) = intrinsic_widths(c, inputs, all_runs, all_texts, grids, children)?;
                 let m = k.decl_margin_x;
                 take_pending!();
@@ -5092,7 +5131,7 @@ fn measure_grid(
     i: usize,
     w: f64,
     imposed_h: f64,
-    inputs: &[Input],
+    inputs: &[Cell<Input>],
     runs: &[Run],
     run_texts: &[Option<Vec<u16>>],
     grids: &[f64],
@@ -5100,7 +5139,7 @@ fn measure_grid(
     boxes: &mut [Box],
     failed: &std::cell::Cell<bool>,
 ) -> MInfo {
-    let n = inputs[i].with_imposed_height(imposed_h);
+    let n = inputs[i].get().with_imposed_height(imposed_h);
     let bail = |failed: &std::cell::Cell<bool>| {
         failed.set(true);
         MInfo { top: CMargin::of(0.0), top_only: CMargin::of(0.0), bottom: CMargin::of(0.0), collapse_through: false }
@@ -5121,7 +5160,7 @@ fn measure_grid(
     let decl_row_h = grids[gs + 5];
     let tmpl_base = gs + GRID_HEADER;
     // The in-flow items, in record order — the out-of-flow children join no row.
-    let kids: Vec<usize> = children[i].iter().copied().filter(|&c| inputs[c].out_of_flow == 0).collect();
+    let kids: Vec<usize> = children[i].iter().copied().filter(|&c| inputs[c].get().out_of_flow == 0).collect();
     // Template is GRID_TRACK_STRIDE values per column; placement is 2 per in-flow item.
     if col_count == 0 || tmpl_base + GRID_TRACK_STRIDE * col_count + 2 * kids.len() > grids.len() {
         return bail(failed);
@@ -5130,7 +5169,7 @@ fn measure_grid(
     let place_base = tmpl_base + GRID_TRACK_STRIDE * col_count;
     let cells = grid_placement(grids, place_base, col_count, kids.len());
     for &c in &children[i] {
-        let cn = inputs[c];
+        let cn = inputs[c].get();
         if cn.out_of_flow != 0 {
             if cn.native_oof() {
                 // §4.1: its static position is the grid's content origin (the content's right edge where the
@@ -5178,7 +5217,7 @@ fn measure_grid(
         for x in cell.col..cell.col + cell.span {
             track_w += widths[x] + if x > cell.col { col_gap } else { 0.0 };
         }
-        let item = &inputs[c];
+        let item = &inputs[c].get();
         let child_w = resolve_width(item, track_w);
         measure(c, child_w, f64::NAN, inputs, runs, run_texts, grids, children, boxes, failed, &mut FloatCtx::new(), 0.0, 0.0);
         let ih = boxes[c].h;
@@ -5216,12 +5255,12 @@ fn measure_grid(
 // A container's first / last baseline from its children in the given order — the first that has a first
 // baseline and the last that has a last baseline, each offset by the child's relative top; out-of-flow and
 // floated children give none (the oracle's `baselineCandidates`).
-fn child_baselines(order: impl Iterator<Item = usize> + Clone, inputs: &[Input], boxes: &[Box]) -> (Option<f64>, Option<f64>, Option<f64>) {
+fn child_baselines(order: impl Iterator<Item = usize> + Clone, inputs: &[Cell<Input>], boxes: &[Box]) -> (Option<f64>, Option<f64>, Option<f64>) {
     let mut first = None;
     let mut last = None;
     let mut inline_block = None;
     for c in order {
-        let cn = inputs[c];
+        let cn = inputs[c].get();
         if cn.out_of_flow != 0 || cn.float_kind != 0 {
             continue;
         }
@@ -5312,7 +5351,7 @@ fn place(
     i: usize,
     ax: f64,
     ay: f64,
-    inputs: &[Input],
+    inputs: &[Cell<Input>],
     runs: &[Run],
     run_texts: &[Option<Vec<u16>>],
     grids: &[f64],
@@ -5320,11 +5359,11 @@ fn place(
     boxes: &mut [Box],
     failed: &std::cell::Cell<bool>,
 ) {
-    boxes[i].x += ax + inputs[i].rel_x;
-    boxes[i].y += ay + inputs[i].rel_y;
+    boxes[i].x += ax + inputs[i].get().rel_x;
+    boxes[i].y += ay + inputs[i].get().rel_y;
     let (bx, by) = (boxes[i].x, boxes[i].y);
     for &c in &children[i] {
-        if inputs[c].native_oof() {
+        if inputs[c].get().native_oof() {
             place_out_of_flow(c, i, inputs, runs, run_texts, grids, children, boxes, failed);
         } else {
             place(c, bx, by, inputs, runs, run_texts, grids, children, boxes, failed);
@@ -5416,7 +5455,7 @@ fn static_justify_lead(code: u8, free: f64) -> f64 {
 fn place_out_of_flow(
     c: usize,
     parent: usize,
-    inputs: &[Input],
+    inputs: &[Cell<Input>],
     runs: &[Run],
     run_texts: &[Option<Vec<u16>>],
     grids: &[f64],
@@ -5424,7 +5463,7 @@ fn place_out_of_flow(
     boxes: &mut [Box],
     failed: &std::cell::Cell<bool>,
 ) {
-    let n = inputs[c];
+    let n = inputs[c].get();
     // The containing block's PADDING box, in document coordinates: from its record where the pass holds one
     // (its border box less its borders, final by the time `place` reaches here), else the rectangle the walk
     // pushed for a CB outside the pass (the viewport, an ancestor above the root, an inline box).
@@ -5432,7 +5471,7 @@ fn place_out_of_flow(
         (n.cb_rect[0], n.cb_rect[1], n.cb_rect[2], n.cb_rect[3])
     } else {
         let cb_i = n.cb_index as usize;
-        let cbn = inputs[cb_i];
+        let cbn = inputs[cb_i].get();
         (
             boxes[cb_i].x + cbn.bl,
             boxes[cb_i].y + cbn.bt,
@@ -5481,7 +5520,7 @@ fn place_out_of_flow(
     // The static position, in absolute coordinates: the parent's origin plus what it recorded — or, for a flex
     // container, the box aligned as the line's sole item (§4.1: justify-content along the main axis, its own
     // align-self across, its MARGIN box being what is aligned).
-    let pn = inputs[parent];
+    let pn = inputs[parent].get();
     let (px, py) = (boxes[parent].x, boxes[parent].y);
     let (static_x, static_y) = if pn.display == DISPLAY_FLEX {
         let (ix, iy) = (px + pn.bl + pn.pl, py + pn.bt + pn.pt);
@@ -5541,7 +5580,7 @@ fn place_out_of_flow(
     boxes[c].x = x;
     boxes[c].y = y;
     for &cc in &children[c] {
-        if inputs[cc].native_oof() {
+        if inputs[cc].get().native_oof() {
             place_out_of_flow(cc, c, inputs, runs, run_texts, grids, children, boxes, failed);
         } else {
             place(cc, x, y, inputs, runs, run_texts, grids, children, boxes, failed);
@@ -5560,13 +5599,13 @@ fn resolve_width(n: &Input, cb_w: f64) -> f64 {
 // box itself (the oracle's `_lbFlowRight`, which `stampExtent` unions the same way). An out-of-flow box is not
 // part of what its parent wraps, and neither is anything inside it. A relative shift is: the oracle folds it into
 // the box before the extent is stamped.
-fn flow_right(c: usize, inputs: &[Input], children: &[Vec<usize>], boxes: &[Box]) -> f64 {
+fn flow_right(c: usize, inputs: &[Cell<Input>], children: &[Vec<usize>], boxes: &[Box]) -> f64 {
     let mut reach = boxes[c].w;
     for &k in &children[c] {
-        if inputs[k].out_of_flow != 0 {
+        if inputs[k].get().out_of_flow != 0 {
             continue;
         }
-        reach = reach.max(boxes[k].x + inputs[k].rel_x + flow_right(k, inputs, children, boxes));
+        reach = reach.max(boxes[k].x + inputs[k].get().rel_x + flow_right(k, inputs, children, boxes));
     }
     reach
 }
@@ -5579,14 +5618,14 @@ fn flow_right(c: usize, inputs: &[Input], children: &[Vec<usize>], boxes: &[Box]
 fn shrink_to_fit_width(
     c: usize,
     room: f64,
-    inputs: &[Input],
+    inputs: &[Cell<Input>],
     runs: &[Run],
     run_texts: &[Option<Vec<u16>>],
     grids: &[f64],
     children: &[Vec<usize>],
 ) -> Option<f64> {
     let (imin, imax) = intrinsic_widths(c, inputs, runs, run_texts, grids, children)?;
-    let pct = inputs[c].pct_edges_x();
+    let pct = inputs[c].get().pct_edges_x();
     Some((imin + pct).max(room).min(imax + pct))
 }
 // The BORDER-BOX width an in-flow BLOCK-LEVEL child uses, given the inline room its containing block leaves it
@@ -5599,14 +5638,14 @@ fn shrink_to_fit_width(
 fn block_child_width(
     c: usize,
     avail: f64,
-    inputs: &[Input],
+    inputs: &[Cell<Input>],
     runs: &[Run],
     run_texts: &[Option<Vec<u16>>],
     grids: &[f64],
     children: &[Vec<usize>],
     failed: &std::cell::Cell<bool>,
 ) -> f64 {
-    let cn = &inputs[c];
+    let cn = &inputs[c].get();
     // A box sized from its OWN CONTENT here rather than from the room on offer: an intrinsic-size KEYWORD, a
     // vertical writing mode's auto width — and a `<button>`, which is as wide as its content wants whatever
     // display it has and however much room it is given (HTML's button layout IS the shrink-to-fit algorithm;
@@ -5635,13 +5674,13 @@ fn block_child_width(
 fn content_sized_width(
     c: usize,
     room: f64,
-    inputs: &[Input],
+    inputs: &[Cell<Input>],
     runs: &[Run],
     run_texts: &[Option<Vec<u16>>],
     grids: &[f64],
     children: &[Vec<usize>],
 ) -> Option<f64> {
-    let cn = &inputs[c];
+    let cn = &inputs[c].get();
     match cn.width_kw {
         0 => shrink_to_fit_width(c, room, inputs, runs, run_texts, grids, children),
         kw => intrinsic_widths(c, inputs, runs, run_texts, grids, children).map(|(imin, imax)| {
@@ -5761,6 +5800,7 @@ mod tests {
             flex_shrink: 1.0,
             flex_basis_cb: f64::NAN,
             flex_basis_frac: f64::NAN,
+            pct_sizes: [f64::NAN; 6],
             flex_main_gap_frac: 0.0,
             flex_cross_gap_frac: 0.0,
             flex_basis_kw: 0,
@@ -6779,12 +6819,12 @@ mod tests {
         pinned.width = 200.0; // pushed, ignored
         let inputs = [root, flex_item, child, pinned];
         let children = vec![vec![1, 3], vec![2], vec![], vec![]];
-        assert_eq!(intrinsic_widths(1, &inputs, &[], &[], &[], &children), Some((50.0, 50.0)));
-        assert_eq!(intrinsic_widths(3, &inputs, &[], &[], &[], &children), Some((70.0, 70.0)));
+        assert_eq!(intrinsic_widths(1, &inputs.map(Cell::new), &[], &[], &[], &children), Some((50.0, 50.0)));
+        assert_eq!(intrinsic_widths(3, &inputs.map(Cell::new), &[], &[], &[], &children), Some((70.0, 70.0)));
         // the row sums its items: 50 + 70, plus the main gap between them
         root.flex_main_gap = 8.0;
         let inputs = [root, flex_item, child, pinned];
-        assert_eq!(intrinsic_widths(0, &inputs, &[], &[], &[], &children), Some((128.0, 128.0)));
+        assert_eq!(intrinsic_widths(0, &inputs.map(Cell::new), &[], &[], &[], &children), Some((128.0, 128.0)));
     }
 
     // A row item's flex-basis pins its contribution, or — when the item may grow — only raises its max; the
@@ -6805,13 +6845,13 @@ mod tests {
         c.decl_max_w = 40.0; // capped
         let inputs = [root, a, b, c];
         let children = vec![vec![1, 2, 3], vec![], vec![], vec![]];
-        assert_eq!(intrinsic_widths(0, &inputs, &[], &[], &[], &children), Some((30.0 + 20.0 + 40.0, 30.0 + 50.0 + 40.0)));
+        assert_eq!(intrinsic_widths(0, &inputs.map(Cell::new), &[], &[], &[], &children), Some((30.0 + 20.0 + 40.0, 30.0 + 50.0 + 40.0)));
         root.flex_wrap = true;
         let inputs = [root, a, b, c];
-        assert_eq!(intrinsic_widths(0, &inputs, &[], &[], &[], &children), Some((40.0, 120.0)));
+        assert_eq!(intrinsic_widths(0, &inputs.map(Cell::new), &[], &[], &[], &children), Some((40.0, 120.0)));
         root.flex_wrap = false;
         root.flex_main_is_x = false; // a column: the widest item
         let inputs = [root, a, b, c];
-        assert_eq!(intrinsic_widths(0, &inputs, &[], &[], &[], &children), Some((60.0, 60.0)));
+        assert_eq!(intrinsic_widths(0, &inputs.map(Cell::new), &[], &[], &[], &children), Some((60.0, 60.0)));
     }
 }

@@ -1069,4 +1069,63 @@ x</div>))
       end
     end
   end
+
+  # PERCENTAGE SIZES on an in-flow child of a block or flex container resolve natively, against the box the
+  # parent lays the child out in (`Input::with_percent_sizes` at the parent's measure): its content width, and its
+  # content height where that is definite (a flex column's main size). The walk resolved every one against the
+  # ORACLE's stamps (`_lbCbW` / `_lbCbH`), and every page read them.
+  describe 'percentage sizes' do
+    def no_oracle(body)
+      session = simulated_session(page(body)); session.visit '/'
+      session.evaluate_script('document.body.offsetHeight')
+      session.evaluate_script('globalThis.__csimLayoutShadowRun(undefined, {noOracle: true})')
+    end
+
+    it 'resolves them against the parent native lays the box out in' do
+      [
+        '<div style="width:300px;height:200px"><div style="width:50%;height:50%">c</div></div>',
+        '<div style="width:300px;height:180px;padding:10px 20px;box-sizing:border-box;border:3px solid"><div style="width:30%;height:40%;padding:5px">c</div></div>',
+        '<div style="width:300px"><div style="height:50%;max-width:20%">auto parent: the height is auto</div></div>',
+        '<div style="display:flex;width:300px;height:150px"><div style="width:30%;height:40%"></div><div style="width:20px;height:20px"></div></div>',
+        '<div style="display:flex;flex-direction:column;width:300px;height:150px"><div style="height:50%;min-width:70%"></div></div>',
+        '<div style="width:300px;height:200px"><div style="float:left;width:25%;height:10%">f</div><div style="height:20px"></div></div>',
+        '<div style="width:300px;height:200px">t <span style="display:inline-block;width:40%;min-height:30%">ib</span></div>',
+        '<div style="width:300px;height:200px"><div style="width:50%;height:50%"><div style="height:50%;width:50%">nested</div></div></div>'
+      ].each do |body|
+        expect_parity(body)
+        r = no_oracle(body)
+        expect(r).to include('ok' => true, 'mismatches' => 0), "#{body}: #{r.inspect}"
+      end
+    end
+
+    # The ORACLE's basis was `content.height || null`: a definite 0 read as none, and an IMPOSED height (a grid row,
+    # both insets) not yet clamped by the box's own max-height. Chrome and native: a definite 0 is 0 (the embed
+    # wrapper's child is its content's height, not 0 — its percentage height resolves to 0), and the clamp comes
+    # first (`height: 50%` under a 100px row capped at 50 is 25).
+    it 'resolves against a definite zero, and against an imposed height clamped' do
+      expect_parity('<div style="width:300px;height:0"><div style="height:50%">x</div></div>')
+      expect_parity('<div style="display:grid;grid-auto-rows:100px;width:300px"><div style="max-height:50px"><div style="height:50%">x</div></div></div>')
+      expect_parity('<div style="position:relative;width:300px;height:200px"><div style="position:absolute;top:0;bottom:0;max-height:100px;width:200px"><div style="height:50%">x</div></div></div>')
+      session = simulated_session(page('<div style="display:grid;grid-auto-rows:100px;width:300px"><div style="max-height:50px"><div id="t" style="height:50%">x</div></div></div>'))
+      session.visit '/'
+      expect(session.evaluate_script("document.getElementById('t').getBoundingClientRect().height")).to eq(25)
+    end
+    # A flex item whose box is PUSHED (the inline-table inside it) keeps its min/max-height — the floor a flex
+    # container item two-phases its auto height against — and a percentage one went over as a fraction the push then
+    # cleared: the item recomputed its height from content with no floor (40 where the oracle's is 128). The push
+    # resolves it against the oracle's basis instead, as the border-box figure the rest of the push keeps.
+    it 'resolves a pushed item\'s percentage clamp in the push' do
+      table = '<span style="display:inline-table"><span style="display:table-cell">c</span></span>'
+      expect_parity(%(<div style="display:flex;height:180px;align-items:flex-start"><div style="display:flex;align-items:center;min-height:60%;padding:10px 0"><div>t #{table}</div><div style="height:20px;width:10px"></div></div></div>))
+    end
+    # A box laid out twice under two different HEIGHT bases — a flex item measured with an auto height, then
+    # stretched to its line — resolves a percentage min-height against the second. The oracle reused the first
+    # layout (it checked the width basis only) and kept the unfloored 18 where Chrome and native give 96.
+    it 'lays a percentage min-height out again once its height basis changes' do
+      expect_parity('<div style="display:flex;height:160px;width:400px"><div style="flex:1"><div style="min-height:60%">c</div></div></div>')
+      session = simulated_session(page('<div style="display:flex;height:160px;width:400px"><div style="flex:1"><div id="t" style="min-height:60%">c</div></div></div>'))
+      session.visit '/'
+      expect(session.evaluate_script("document.getElementById('t').getBoundingClientRect().height")).to eq(96)
+    end
+  end
 end
