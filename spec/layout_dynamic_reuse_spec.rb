@@ -169,8 +169,8 @@ RSpec.describe 'layout reuse across dynamic style state' do
     expect(s.evaluate_script(read)).to eq(before)
   end
 
-  # The two REFUSALS a reuse makes (`reuseSubtree`) are what keeps a reused subtree agreeing with a
-  # freshly laid-out one. Each case below drives one of them through the mutation that actually
+  # The two REFUSALS a reuse makes (`reuseSubtree`), and the one thing it CARRIES, are what keeps a reused
+  # subtree agreeing with a freshly laid-out one. Each case below drives one of them through the mutation that actually
   # reaches them: REMOVING a child marks its parent alone (`recordChildList` — a subtree mark would
   # invalidate the sibling being reused, and there would be nothing to get wrong), so this is the
   # everyday app shape, not a corner. `__csimReuseStats` says WHICH refusal fired, and the control
@@ -231,6 +231,68 @@ RSpec.describe 'layout reuse across dynamic style state' do
       # and the containing block really did shrink, so neither reading is vacuous.
       expect(value).to eq([0, 200, 0, 0])
       expect(diff['escapingAbs']).to be > 0
+    end
+
+    it 'carries a float the context above records through a reuse' do
+      # A float's RECTANGLE is pushed into the formatting context of an ancestor (`placeFloat` →
+      # `fc.items`), and a reuse returns before `layoutElementInner` ever runs — so a reused subtree
+      # pushed nothing, the context came out with no float in it, and every `clear` and every band
+      # below it lost the exclusion. It survived because the mutation has to dirty a SIBLING: the
+      # float's own subtree lays out again and is right, and one fresh layout per page is all any of
+      # this campaign's instruments ever did (`sweep2.rb`'s `CSIM_SWEEP_INCREMENTAL` exists for this).
+      #
+      # REFUSING the reuse is the obvious fix and is far too expensive — 300 `.row > .col { float: left }`
+      # rows went 2.15 ms → 66.4 ms per relayout, because every row carries a float. The rectangle is
+      # instead REMEMBERED, relative to the box holding it, and pushed again where the reuse puts it.
+      page = ->(float) {
+        '<div id="b" style="width:300px"><div id="pad" style="height:10px"></div>' \
+        "<div>#{float}</div>" \
+        '<div id="clr" style="clear:left;height:5px"></div></div>'
+      }
+      read = "document.getElementById('clr').getBoundingClientRect().y"
+      # What the answer has to be is what a layout that really ran comes to — and, so the reading is not
+      # vacuous, the SAME page without the float puts the cleared box 50 higher.
+      floated = session_for('', page.call('<div style="float:left;width:50px;height:50px"></div>')).evaluate_script(read)
+      bare    = session_for('', page.call('')).evaluate_script(read)
+      expect(floated - bare).to eq(50)
+
+      s = session_for('', page.call('<div style="float:left;width:50px;height:50px"></div>'))
+      value, diff = stats_around(s, <<~JS)
+        const before = #{read};
+        document.getElementById('pad').setAttribute('data-x', '1');
+        return [before, #{read}];
+      JS
+      expect(value).to eq([floated, floated])
+      expect(diff['floatsRepushed']).to be > 0
+      expect(diff['hit']).to be > 0                # …and it really was a REUSE, not a re-layout
+
+      # …for as many GENERATIONS as the page lives. The ancestors above a reuse root were laid out fresh,
+      # which cleared their own lists, so the reuse has to record the rectangle on them again — without
+      # that the memory survives exactly one mutation and the next one, sited anywhere else, loses the
+      # float permanently. TWO differently-sited mutations is the shortest sequence that reaches it.
+      deep = ->(pad) {
+        %(<div id="b" style="width:300px"><div id="pad" style="height:#{pad}px"></div>) +
+        '<div id="mid"><div><div style="float:left;width:50px;height:50px"></div></div></div>' \
+        '<div id="clr" style="clear:left;height:5px"></div></div>'
+      }
+      read = "document.getElementById('clr').getBoundingClientRect().y"
+      # …compared against sessions that really laid out at each pad height, not against a delta: two
+      # readings can move by the right amount and both be wrong.
+      at10 = session_for('', deep.call(10)).evaluate_script(read)
+      at30 = session_for('', deep.call(30)).evaluate_script(read)
+      expect(at30 - at10).to eq(20)
+
+      d = session_for('', deep.call(10))
+      expect(d.evaluate_script(<<~JS)).to eq([at10, at10, at30])
+        (() => {
+          const y = () => #{read};
+          const before = y();
+          document.getElementById('mid').setAttribute('data-x', '1');   // generation 1
+          const gen1 = y();
+          document.getElementById('pad').style.height = '30px';         // generation 2, a different site
+          return [before, gen1, y()];
+        })()
+      JS
     end
 
     it 'dirties the SHADOW boxes that lay out slotted light DOM' do
