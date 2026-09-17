@@ -431,6 +431,90 @@ RSpec.describe 'layout reuse across dynamic style state' do
       expect(diff['rowAnchored']).to be > 0
     end
 
+    it 'lays out a subtree again when the floats around it changed' do
+      # The other half of the float carry: a subtree's lines were laid out AGAINST the floats already in the
+      # context around it, and a reuse that did not ask handed the subtree back beside floats that were no
+      # longer there. The floats a box can meet are stamped, relative to it, when it is laid out, and a reuse
+      # whose set differs is refused. Chrome, `#f2`'s x: 50 beside the first float; 0 once the first float's
+      # wrapper contains it (`overflow: hidden`); 50 again; 120 once the first float grows to 120px.
+      body = '<div style="height:10px"></div>' \
+             '<div id="A"><div id="f1" style="float:left;width:50px;height:50px"></div></div>' \
+             '<div><div id="f2" style="float:left;width:30px;height:90px"></div></div>' \
+             '<div id="clr" style="clear:left;height:5px"></div>'
+      s = session_for('', body)
+      value, diff = stats_around(s, <<~JS)
+        // …relative to the body's edge: this helper's page keeps the UA body margin
+        const x = () => document.getElementById('f2').getBoundingClientRect().x - document.body.getBoundingClientRect().x;
+        const out = [x()];
+        document.getElementById('A').style.overflow = 'hidden'; out.push(x());
+        document.getElementById('A').style.overflow = '';       out.push(x());
+        document.getElementById('f1').style.width = '120px';    out.push(x());
+        return out;
+      JS
+      expect(value).to eq([50, 0, 50, 120])
+      expect(diff['floatBand']).to be > 0
+      # …and a subtree the floats did NOT change around is still reused, free of charge
+      expect(diff['hit']).to be > 0
+
+      # …the set reaches DOWN to the holder's own floats. A holder that starts no context does not grow to
+      # contain its float, and that float was placed (`floatFitY`) against outer floats entirely below the
+      # holder's box — so a change there is invisible to the box's own span. `#f2` drops under `#f1`; `#g`
+      # (too wide to sit beside `#f1`) drops under `#f2`; then `#f2` grows 50 → 80. Chrome: `#g` 100 → 130,
+      # the cleared box 110 → 140.
+      drop = '<div style="width:200px"><div style="float:left;width:50px;height:50px"></div>' \
+             '<div id="P"><div id="f2" style="float:left;width:160px;height:50px"></div></div>' \
+             '<div id="B"><div style="height:18px"></div><div id="g" style="float:left;width:160px;height:10px"></div></div>' \
+             '<div id="clr" style="clear:left;height:5px"></div></div>'
+      d = session_for('', drop)
+      value, diff = stats_around(d, <<~JS)
+        const y = id => document.getElementById(id).getBoundingClientRect().y - document.body.getBoundingClientRect().y;
+        const before = [y('g'), y('clr')];
+        document.getElementById('f2').style.height = '80px';
+        return before.concat([y('g'), y('clr')]);
+      JS
+      expect(value).to eq([100, 110, 130, 140])
+      expect(diff['floatBand']).to be > 0
+
+      # …and DOWN to the box's overflowing content. A holder whose declared height does not contain its
+      # lines lays them out against floats past its box just the same: a 10px holder of a long paragraph,
+      # pulled up beside a float that starts below the holder's box, kept the paragraph 80 tall when the
+      # float widened — Chrome and a fresh layout say 160.
+      over = '<div style="width:400px;font:16px/20px monospace"><div style="height:30px"></div>' \
+             '<div id="f" style="float:left;width:100px;height:100px"></div>' \
+             '<div style="height:10px;margin-top:-30px"><p id="p" style="margin:0">' + ('word ' * 40) + '</p></div>' \
+             '<div id="tail" style="clear:both;height:5px"></div></div>'
+      o = session_for('', over)
+      fresh = session_for('', over.sub('width:100px;height:100px', 'width:300px;height:100px'))
+                .evaluate_script("document.getElementById('p').getBoundingClientRect().height")
+      value, diff = stats_around(o, <<~JS)
+        const h = () => document.getElementById('p').getBoundingClientRect().height;
+        const before = h();
+        document.getElementById('f').style.width = '300px';
+        return [before, h()];
+      JS
+      expect(value[1]).to eq(fresh)
+      expect(value[1]).to be > value[0]
+      expect(diff['floatBand']).to be > 0
+
+      # …while a box with a context of ITS OWN beside a float is reused, not refused: it reads no outer
+      # float (its x and width the parent recomputes), and comparing it against the floats beside it
+      # refused an `overflow: hidden` main column next to a sidebar on every pass.
+      # (The float and the column are BODY-level siblings of the header: wrapped together they would be one
+      # reuse root and the column never asked on its own.)
+      cols = '<div id="hdr">h</div><div style="float:left;width:100px;height:300px"></div>' \
+             '<div id="main" style="overflow:hidden">' + ('<p>t</p>' * 20) + '</div>'
+      c = session_for('', cols)
+      value, diff = stats_around(c, <<~JS)
+        const x = () => document.getElementById('main').getBoundingClientRect().x;   // …laid out once BEFORE the mutation
+        const before = x();
+        document.getElementById('hdr').setAttribute('data-x', '1');
+        return [before, x()];
+      JS
+      expect(value[0]).to eq(value[1])
+      expect(diff['floatBand']).to eq(0), diff.inspect
+      expect(diff['hit']).to be > 0, diff.inspect
+    end
+
     it 'dirties the SHADOW boxes that lay out slotted light DOM' do
       # The dirty walk goes up the FLAT tree, because that is the chain of boxes that lays a node
       # out: `#pad`'s parent box is the `<slot>`, then `#wrap`, then the host. Walking the node
