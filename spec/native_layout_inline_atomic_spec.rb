@@ -270,6 +270,37 @@ RSpec.describe 'native layout inline-atomic parity', if: ENV.fetch('CSIM_JS_ENGI
       expect_native_atomic('<div style="overflow:hidden;width:400px"><div style="float:right;width:120px;height:60px"></div><div style="text-align:right">text <span style="display:inline-block;width:30px;height:10px"></span> after</div></div>')
       expect_native_atomic('<div style="overflow:hidden;width:200px"><div style="float:left;width:120px;height:30px"></div><div>aaaa bbbb cccc <span style="display:inline-block;width:30px;height:10px"></span> dddd eeee ffff gggg hhhh iiii <span style="display:inline-block;width:30px;height:10px"></span></div></div>', 2)
     end
+    # A block holding block children AND inline content wraps each run of the inline content in an anonymous
+    # block, whose lines are laid out like any text block's — atomics included. They used to be pushed there
+    # unconditionally, the anonymous record having no index yet for a subtree to hang under: the oracle's box and
+    # baseline, read off `_lb`, for every inline-block beside a block sibling.
+    it 'lays out an atomic on the lines of an anonymous block beside block siblings' do
+      ib = 'display:inline-block;width:30px;height:10px'
+      expect_native_atomic(%(<div style="width:400px">text <span style="#{ib}"></span> after<div>block</div></div>))
+      expect_native_atomic(%(<div style="width:400px"><div>block</div>a <span style="#{ib}"></span><p>para</p><span style="display:inline-block">b c</span> d</div>), 2)
+      expect_native_atomic(%(<div style="width:400px;text-align:center;direction:rtl"><div>block</div>a <b style="position:relative;top:3px">b <span style="#{ib};vertical-align:4px"></span></b></div>))
+      expect_native_atomic(%(<div style="width:90px"><div>block</div>aaa bbb <img style="width:40px;height:20px"> ccc <span style="#{ib}"></span> ddd</div>), 2)
+      # …inside a subtree native MEASURES, too: the anonymous block is part of the inline-block's shrink-to-fit
+      expect_native_atomic(%(<div style="width:400px">x <span style="display:inline-block"><div>block</div>text <span style="#{ib}"></span></span> y</div>), 2)
+      # …and a whitespace-only group still collapses to nothing, taking no record with it
+      expect_parity(%(<div style="width:400px"><div>one</div> <span></span> <div>two</div></div>))
+      # …an atomic native still cannot lay out, in a group a flex row MEASURES, takes the row's fallback rather
+      # than a pushed box the measure cannot see
+      tbl = '<span style="display:inline-table"><span style="display:table-cell">z</span></span>'
+      r = run_shadow(%(<div style="display:flex;width:300px"><div>x <span style="display:inline-block"><div>b</div>t #{tbl}</span></div><div style="flex:1">y</div></div>))
+      expect(r).to include('ok' => true, 'mismatches' => 0, 'nativeFlexRows' => 0), r.inspect
+      # …while under `justify` the group's atomics keep the pushed box, as a text block's do
+      r = run_shadow(%(<div style="width:100px;text-align:justify"><div>block</div>aaa bbb ccc <span style="#{ib}"></span> ddd eee fff ggg</div>))
+      expect(r).to include('ok' => true, 'mismatches' => 0, 'nativeAtomics' => 0), r.inspect
+    end
+    it 'reads no oracle box for an atomic on an anonymous block\'s lines' do
+      session = simulated_session(page('<div style="width:400px">text <span style="display:inline-block;width:30px;height:10px"></span> after<div>block</div></div>'))
+      session.visit '/'
+      session.evaluate_script('document.body.offsetHeight')
+      r = session.evaluate_script('globalThis.__csimLayoutShadowRun(undefined, {noOracle: true})')
+      expect(r).to include('ok' => true, 'mismatches' => 0)
+      expect(r['oracleReads'].keys.grep(/\AnlGatherRuns |\AatomicBaselineOffset |\AboxBaselineOffset /)).to eq([])
+    end
     it 'raises an atomic by its baseline shift, its own or an inline ancestor\'s' do
       expect_native_atomic('<div style="width:400px">text <span style="display:inline-block;vertical-align:super">sup</span> y</div>')
       expect_native_atomic('<div style="width:400px">text <span style="display:inline-block;vertical-align:sub"><div>a</div><div>b</div></span> y</div>')
@@ -335,19 +366,26 @@ RSpec.describe 'native layout inline-atomic parity', if: ENV.fetch('CSIM_JS_ENGI
         r = run_shadow(body)
         expect(r).to include('ok' => true, 'mismatches' => 0, 'nativeAtomics' => 0), "#{body}: #{r.inspect}"
       end
-      # A MIXED block wraps its inline content in ANONYMOUS blocks, whose atomics are all pushed (they have no
-      # record to hang a subtree on), so an atomic makes a block with any block-level child unmeasurable too.
+      # A MIXED block wraps its inline content in ANONYMOUS blocks, whose atomics are laid out like a text block's
+      # — so an atomic there leaves every one of those routes measuring, and the atomic is native.
       mixed = '<div><div>blk</div>p <span style="display:inline-block">ok</span> q</div>'
       [
-        %(<div style="width:400px;position:relative"><div style="position:absolute;left:0;top:0">#{mixed}</div><p>x</p></div>),
-        %(<div style="display:grid;grid-template-columns:min-content auto;width:400px"><div>#{mixed}</div><div>x</div></div>),
-        %(<div style="display:flex;width:300px"><div>#{mixed}</div><div style="flex:1">x</div></div>),
-        %(<div style="width:400px">a <span style="display:inline-block">#{mixed}</span> b</div>),
-        %(<div style="width:400px">#{mixed}</div>)
-      ].each do |body|
+        [%(<div style="width:400px;position:relative"><div style="position:absolute;left:0;top:0">#{mixed}</div><p>x</p></div>), 'nativeOutOfFlow'],
+        [%(<div style="display:grid;grid-template-columns:min-content auto;width:400px"><div>#{mixed}</div><div>x</div></div>), 'nativeIntrinsicGrids'],
+        [%(<div style="display:flex;width:300px"><div>#{mixed}</div><div style="flex:1">x</div></div>), 'nativeFlexRows'],
+        [%(<div style="width:400px">a <span style="display:inline-block">#{mixed}</span> b</div>), 'nativeAtomics'],
+        [%(<div style="width:400px">#{mixed}</div>), 'nativeAtomics']
+      ].each do |body, counter|
         r = run_shadow(body)
-        expect(r).to include('ok' => true, 'mismatches' => 0, 'nativeAtomics' => 0), "#{body}: #{r.inspect}"
+        expect(r).to include('ok' => true, 'mismatches' => 0), "#{body}: #{r.inspect}"
+        expect(r['nativeAtomics']).to be >= 1, "#{body}: #{r.inspect}"
+        expect(r[counter]).to be >= 1, "#{counter} fell back: #{r.inspect}"
       end
+      # …unless the mixed block JUSTIFIES its lines, where the anonymous group's atomic keeps the pushed box and
+      # the measuring route falls back as before.
+      justified = '<div style="text-align:justify"><div>blk</div>p <span style="display:inline-block">ok</span> q</div>'
+      r = run_shadow(%(<div style="display:flex;width:300px"><div>#{justified}</div><div style="flex:1">x</div></div>))
+      expect(r).to include('ok' => true, 'mismatches' => 0, 'nativeAtomics' => 0, 'nativeFlexRows' => 0), r.inspect
       # …and each of those still lays out an atomic it CAN walk.
       expect_native_atomic(%(<div style="overflow:hidden;width:400px"><div style="float:left;width:200px">f <span style="display:inline-block">ok</span> g</div></div>))
       expect_native_atomic(%(<div style="width:400px;position:relative"><div style="position:absolute;left:0;right:100px">a <span style="display:inline-block">in</span> b</div><p>x</p></div>))
