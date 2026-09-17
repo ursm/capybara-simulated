@@ -471,7 +471,13 @@ RSpec.describe 'native layout float parity', if: ENV.fetch('CSIM_JS_ENGINE', 'v8
       '<div style="width:300px">aaaa bbbb cccc dddd eeee ffff gggg hhhh iiii jjjj kkkk <div style="float:left;width:60px;height:60px;margin:4px 6px">x</div>llll mmmm nnnn</div>',
       '<div style="width:300px;overflow:hidden">x<span style="float:left;height:80px">f</span></div><p>after</p>',
       '<div style="width:400px"><span style="display:inline-block">aa <span style="float:left">fl oat</span>bb</span></div>',
-      '<table><tr><td>aa <span style="float:right;width:40px;height:10px"></span>bb</td></tr></table>'
+      '<table><tr><td>aa <span style="float:right;width:40px;height:10px"></span>bb</td></tr></table>',
+      # …a float in a RELATIVE inline moves with the inline's content (Chrome: 10, 5), the block holding nothing
+      # else included
+      '<div style="width:400px">aa <span style="position:relative;left:10px;top:5px"><span style="float:left;width:20px;height:20px"></span>bb</span></div>',
+      '<div><span style="position:relative;left:10px"><span style="float:left;width:20px;height:20px">x</span></span></div>',
+      # …and an out-of-flow box waiting on an inline's opening edge steps back with the pen a left float moved
+      '<div style="width:300px;position:relative">aa <span style="padding-left:10px"><span style="position:absolute">abs</span><span style="float:left;width:30px;height:20px"></span>bbb</span></div>'
     ].each {|body| expect_parity(body) }
   end
 

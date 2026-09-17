@@ -1699,7 +1699,15 @@ fn line_layout(
                 let (x, y) = place_float(&mut floats.borrow_mut(), f, top + total, cl, cr);
                 placed_floats.push((run.font as usize, x, y));
                 if line_has_content {
-                    line_x -= raw_band_l(total) - left_before;
+                    let shift = raw_band_l(total) - left_before;
+                    line_x -= shift;
+                    // …and a marker waiting on an opening edge stood at a cursor in that same frame, so it steps
+                    // back with the pen (one recorded on an earlier line is not read against this band at all).
+                    for p in pending_oofs.iter_mut() {
+                        if p.5 == line_no {
+                            p.4 -= shift;
+                        }
+                    }
                 }
             }
             RUN_WBR => {

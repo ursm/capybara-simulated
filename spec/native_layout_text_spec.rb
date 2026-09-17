@@ -517,6 +517,9 @@ RSpec.describe 'native layout L2 text-block parity', if: ENV.fetch('CSIM_JS_ENGI
   it 'keeps a space the pen reaches at the line start mid-line' do
     expect_parity('<div style="width:200px;font:16px monospace"><span style="margin-left:-12px">x y </span><span id="m" style="display:inline-block;width:10px;height:10px"></span></div>', 26.41)
     expect_parity('<div style="width:300px">aaa <span style="float:left;width:50px;height:20px"></span>bbb <span id="m" style="display:inline-block;width:10px;height:5px"></span></div>')
+    # …and a text node that OPENS on that space, whose leading space the run's own collapse decides (Chrome 16)
+    expect_parity('<div style="width:300px"><span style="margin-left:-10px"><span style="display:inline-block;width:10px;height:5px"></span></span> y <span id="m" style="display:inline-block;width:5px;height:5px"></span></div>', 16)
+    expect_parity('<div style="width:300px"><span style="display:inline-block;width:50px;height:5px"></span><span style="float:left;width:50px;height:20px"></span> bbb <span id="m" style="display:inline-block;width:5px;height:5px"></span></div>')
   end
 
   it 'clears the floats a <br> names before the next line' do
