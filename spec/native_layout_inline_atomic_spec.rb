@@ -344,7 +344,7 @@ RSpec.describe 'native layout inline-atomic parity', if: ENV.fetch('CSIM_JS_ENGI
       # laid out with the atomic pushed rather than declined. (A FLOAT and a STRETCHED out-of-flow box never
       # needed a measure at all.) The one route with no fallback is a vertical writing mode's block child, whose
       # width IS its content's: that still declines.
-      ib = 'display:inline-block;width:max-content'
+      ib = 'display:inline-table'
       expect_bail(%(<div style="width:400px"><div style="writing-mode:vertical-lr">a <span style="#{ib}">in</span> b</div></div>))
       # Each route with the atomic it cannot lay out, and the SAME shape with one it can — so the counter shows
       # the fallback was taken here and is not simply never taken.
@@ -421,8 +421,7 @@ RSpec.describe 'native layout inline-atomic parity', if: ENV.fetch('CSIM_JS_ENGI
         "<div style=\"width:400px\">text <span style=\"display:inline-block\">a\u00ADb</span> after</div>",
         # (a preserved FORM FEED, which native's pen-walk does not measure. This fixture used to hold a TAB,
         # which native has since taken over — tab stops are its own now, so a tabbed subtree stays native.)
-        "<div style=\"width:400px\">text <span style=\"display:inline-block;white-space:pre\">a\fb</span> after</div>",
-        '<div style="width:400px">text <span style="display:inline-block;width:max-content">bb</span> after</div>'
+        "<div style=\"width:400px\">text <span style=\"display:inline-block;white-space:pre\">a\fb</span> after</div>"
       ].each do |body|
         r = run_shadow(body)
         expect(r).to include('ok' => true, 'mismatches' => 0, 'nativeAtomics' => 0), "#{body}: #{r.inspect}"
@@ -450,6 +449,32 @@ RSpec.describe 'native layout inline-atomic parity', if: ENV.fetch('CSIM_JS_ENGI
       %w[top bottom].each do |va|
         expect_bail(%(<div style="width:400px">text <span style="display:inline-block;vertical-align:#{va};width:10px;height:30px"></span> x</div>))
       end
+    end
+
+    # An intrinsic-size KEYWORD width on an atomic takes the figure it names — `fit-content` clamped to the line's
+    # shrink-to-fit width, as the oracle's `usedSize` clamps its `autoW` — where it used to be pushed: an atomic's
+    # width was always the shrink-to-fit one. Each keyword where the three figures differ (a wrapping run in a
+    # narrow line), with edges, and inside the routes that then MEASURE it.
+    it 'lays out an atomic with an intrinsic-size keyword width itself' do
+      %w[min-content max-content fit-content].each do |kw|
+        box = %(<span style="display:inline-block;width:#{kw};padding:0 3px;border:1px solid">aa bbb cccc dd eeeeeee</span>)
+        expect_native_atomic(%(<div style="width:70px">text #{box} after</div>))
+        expect_native_atomic(%(<div style="width:400px">text <span style="display:inline-flex;width:#{kw};padding:0 5%"><span>f one</span><span>two</span></span></div>))
+        expect_native_atomic(%(<div style="display:flex;width:300px"><div>x #{box}</div><div style="flex:1">y</div></div>))
+        expect_native_atomic(%(<div style="width:400px">q <span style="display:inline-block">#{box}</span> r</div>), 2)
+      end
+      # …`fit-content` where min-content exceeds max-content (a negative margin takes the line's max under its
+      # widest piece): min-content wins, in a block and on a line alike
+      crossed = '<span style="display:inline-block;width:50px;height:5px"></span><span style="display:inline-block;margin-left:-100px"></span>'
+      expect_native_atomic(%(<div style="width:400px">a <span style="display:inline-block;width:fit-content">#{crossed}</span></div>), 3)
+      expect_native_atomic(%(<div style="width:400px"><div style="width:fit-content">#{crossed}</div></div>), 2)
+      # …and a WRAPPING inline-flex, which the oracle grows only from an auto width
+      item = '<div style="width:80px;height:10px;flex-shrink:0"></div><div style="width:30px;height:10px"></div>'
+      expect_native_atomic(%(<div style="width:400px">t <span style="display:inline-flex;flex-wrap:wrap;width:max-content">#{item}</span> u</div>))
+      expect_native_atomic(%(<div style="width:400px">t <span style="display:inline-flex;flex-wrap:wrap;width:fit-content;max-width:60px">#{item}</span> u</div>))
+      # …but not on a REPLACED atomic, whose width is its intrinsic size: the walk refuses that one
+      r = run_shadow('<div style="width:400px">a <img style="width:max-content;height:10px"> b</div>')
+      expect(r).to include('ok' => true, 'mismatches' => 0, 'nativeAtomics' => 0), r.inspect
     end
 
     it 'keeps the pushed box for an inline-table' do

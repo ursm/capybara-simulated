@@ -3,7 +3,8 @@
 # rolling back (`emitAttempt`) rather than by asking a predicate, so each route's spec sweeps the same list —
 # one list, so a new refusal is added in one place and every route is held to it. An entry LEAVES it when
 # native takes the shape over (an out-of-flow child of a text block did, with the static position it reads off
-# the line; a `position: sticky` child did, once the walk learned its box is a static one's); the routes'
+# the line; a `position: sticky` child did, once the walk learned its box is a static one's; an intrinsic-size
+# KEYWORD width did, once the atomic path took `content_sized_width`); the routes'
 # specs then sweep one shape fewer, which is the point of keeping them here.
 #
 # ONE REASON PER ENTRY — the list is a set of refusal causes, not of shapes. A replacement has to keep the
@@ -12,12 +13,9 @@
 # offset native would have to apply).
 module WalkRefusals
   ATOMIC = [
-    '<span style="display:inline-block;width:fit-content">t<div>x</div></span>',
     '<span style="display:inline-block"><div style="float:left;position:relative;width:9px;height:4px"></div>t</span>',
     '<span style="display:inline-block"><div style="float:left;width:9px;height:4px"></div>t</span>',
     '<span style="display:inline-block;white-space:pre">   </span>',
-    '<span style="display:inline-block"><div style="display:table-cell">c</div></span>',
-    '<span style="display:inline-block;width:max-content">bb</span>',
-    '<span style="display:inline-block;width:min-content">bb cc</span>'
+    '<span style="display:inline-block"><div style="display:table-cell">c</div></span>'
   ].freeze
 end

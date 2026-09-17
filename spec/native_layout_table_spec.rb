@@ -847,7 +847,7 @@ RSpec.describe 'native layout table parity', if: ENV.fetch('CSIM_JS_ENGINE', 'v8
     end
 
     it 'lays out a table whose caption holds an inline-block native cannot measure' do
-      atomic = 'a <span style="display:inline-block;width:max-content">bb</span>'
+      atomic = 'a <span style="display:inline-table"><span style="display:table-cell">bb</span></span>'
       # asked for, and native cannot produce it: a vertical-writing-mode block child and a `min-content` track
       expect_pushed_contribution(%{<div style="width:400px"><div style="writing-mode:vertical-lr"><table><caption>#{atomic}</caption><tr><td>x</td></tr></table></div></div>})
       expect_pushed_contribution(%{<div style="display:grid;grid-template-columns:min-content;width:400px"><table style="border-spacing:0"><caption>#{atomic}</caption><tr><td style="padding:0">x</td></tr></table></div>})

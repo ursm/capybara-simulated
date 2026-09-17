@@ -705,19 +705,17 @@ x</div>))
       # cannot MEASURE, which is not the same set (the shared list's whitespace-only and table-cell atomics
       # are measurable here). Written out rather than filtered, so a reader sees the shapes.
       [
-        'a <span style="display:inline-block;width:max-content">bb</span>',
-        'a <span style="display:inline-block;width:min-content">bb cc</span>',
-        'a <span style="display:inline-block;width:fit-content">t<div>x</div></span>',
+        'a <span style="display:inline-table"><span style="display:table-cell">bb</span></span>',
         'a <span style="display:inline-block"><span style="display:inline-table"><span style="display:table-row"><span style="display:table-cell">c</span></span></span></span>',
         'a <span style="display:inline-block"><div style="float:left;width:9px;height:4px"></div>t</span>',
-        'a<br>b <span style="display:inline-block;width:max-content">bb</span>'
+        'a<br>b <span style="display:inline-table"><span style="display:table-cell">bb</span></span>'
       ].each do |inner|
         expect_walk_declines(%{<div style="width:400px"><div style="writing-mode:vertical-lr">#{inner}</div></div>})
       end
       # …and through a GRID item, whose subtree is measured for the track sizes
-      expect_walk_declines('<div style="display:grid;grid-template-columns:200px;width:400px"><div><div style="writing-mode:vertical-lr">a <span style="display:inline-block;width:max-content">bb</span></div></div></div>')
+      expect_walk_declines('<div style="display:grid;grid-template-columns:200px;width:400px"><div><div style="writing-mode:vertical-lr">a <span style="display:inline-table"><span style="display:table-cell">bb</span></span></div></div></div>')
       # …and the same content in a HORIZONTAL block lays out, the atomic pushed rather than the pass declined.
-      expect_parity('<div style="width:400px"><div>a <span style="display:inline-block;width:max-content">bb</span></div></div>')
+      expect_parity('<div style="width:400px"><div>a <span style="display:inline-table"><span style="display:table-cell">bb</span></span></div></div>')
     end
     # `direction` runs the INLINE axis, which in a vertical mode is the vertical one: an rtl vertical block's
     # children still start at the LEFT content edge, where an rtl HORIZONTAL block's start at the right. Its
@@ -791,7 +789,7 @@ x</div>))
     # …and where native cannot measure such a box's shrink-to-fit content, the oracle's box is still replayed
     # rather than the pass being declined.
     it 'replays one whose content native cannot measure' do
-      expect_replayed_oof(%{<div style="width:400px;height:200px"><div style="position:absolute;left:30px">a <span style="display:inline-block;width:max-content">bb</span></div></div>})
+      expect_replayed_oof(%{<div style="width:400px;height:200px"><div style="position:absolute;left:30px">a <span style="display:inline-table"><span style="display:table-cell">bb</span></span></div></div>})
     end
     # The walk marshals the containing block the PLACEMENT resolved (`_lb.cbEl`), never its own re-derivation:
     # `containingBlockElementFor` skips an ancestor whose box did not exist yet when the placement ran, so a
@@ -810,7 +808,7 @@ x</div>))
   # cannot MEASURE inside it is nobody's problem, because nobody measures it. Before this, the flag was
   # inherited and a pushed atomic inline inside an absolute box declined the whole pass.
   describe 'an out-of-flow box leaves the measured region' do
-    pushed_atomic = 'a <span style="display:inline-block;width:max-content">bb</span>'
+    pushed_atomic = 'a <span style="display:inline-table"><span style="display:table-cell">bb</span></span>'
     it 'lays out an absolute box whose content native cannot measure, inside a subtree it does measure' do
       # …its box replayed, because its containing block is outside the pass — and the same as a `fixed` box
       expect_replayed_oof(%{<div style="width:400px"><div style="writing-mode:vertical-lr"><div style="position:absolute">#{pushed_atomic}</div><div style="width:9px;height:4px"></div></div></div>})
@@ -841,9 +839,8 @@ x</div>))
       # …again a subset, for the same reason: this route REPLAYS what it cannot measure rather than declining,
       # and the shared list's other entries are measurable here.
       [
-        '<span style="display:inline-block;width:fit-content">t<div>x</div></span>',
         '<span style="display:inline-block"><span style="display:inline-table"><span style="display:table-row"><span style="display:table-cell">c</span></span></span></span>',
-        '<span style="display:inline-block;width:max-content">bb</span>'
+        '<span style="display:inline-table"><span style="display:table-cell">bb</span></span>'
       ].each do |inner|
         expect_replayed_oof(%{<div style="width:400px;position:relative"><div style="position:absolute;left:0">a #{inner}</div><p>x</p></div>})
       end
@@ -854,14 +851,15 @@ x</div>))
 
   # A `<td>` whose content native cannot lay out itself pushes its own width CONTRIBUTION (rec[84..85]) and the
   # table is laid out around it. That needs `nlIntrinsicMeasurable` to answer what the walk will actually DO:
-  # while it ignored the walk's own refusal of an intrinsic-size keyword, such an inline-block in a cell was
-  # called measurable, the cell was walked measured, and the atomic inside then declined the whole table.
+  # while it ignored the walk's own refusal of an intrinsic-size keyword (native's own since), such an
+  # inline-block in a cell was called measurable, the cell was walked measured, and the atomic inside then
+  # declined the whole table. A pushed inline-table stands in for it now.
   describe 'a cell whose content native cannot lay out pushes its contribution' do
-    it 'lays out a table around a cell holding a keyword-sized inline-block' do
-      expect_parity(%{<table style="border-spacing:0"><tr><td style="padding:0">a <span style="display:inline-block;width:max-content">bb</span></td><td style="padding:0">cc</td></tr></table>})
-      expect_parity(%{<table style="border-spacing:0"><tr><td style="padding:0">a <span style="display:inline-block;width:max-content">bb</span></td></tr></table>})
-      expect_parity(%{<table style="border-spacing:0"><tr><td style="padding:0;width:50px">a <span style="display:inline-block;width:max-content">bb</span></td></tr></table>})
-      expect_parity(%{<div style="display:table;border-spacing:0"><div style="display:table-row"><div style="display:table-cell">a <span style="display:inline-block;width:max-content">bb</span></div></div></div>})
+    it 'lays out a table around a cell holding an atomic native does not lay out' do
+      expect_parity(%{<table style="border-spacing:0"><tr><td style="padding:0">a <span style="display:inline-table"><span style="display:table-cell">bb</span></span></td><td style="padding:0">cc</td></tr></table>})
+      expect_parity(%{<table style="border-spacing:0"><tr><td style="padding:0">a <span style="display:inline-table"><span style="display:table-cell">bb</span></span></td></tr></table>})
+      expect_parity(%{<table style="border-spacing:0"><tr><td style="padding:0;width:50px">a <span style="display:inline-table"><span style="display:table-cell">bb</span></span></td></tr></table>})
+      expect_parity(%{<div style="display:table;border-spacing:0"><div style="display:table-row"><div style="display:table-cell">a <span style="display:inline-table"><span style="display:table-cell">bb</span></span></div></div></div>})
     end
   end
 

@@ -2045,8 +2045,14 @@ fn measure(
                     0.0 // a declared width discards it — and asking would walk a subtree for nothing (see place_out_of_flow)
                 } else {
                     // …else it shrink-to-fits in the block's own content width (the oracle's inline-level path
-                    // passes that as both the room and the percentage basis).
-                    match shrink_to_fit_width(c, content_w, inputs, runs, run_texts, grids, children) {
+                    // passes that as both the room and the percentage basis) — and an intrinsic-size KEYWORD takes
+                    // the figure it names. (For min / max-content that is the figure the shrink-to-fit width was
+                    // already pinned to; `fit-content` clamps that width again as the oracle's `usedSize` clamps its
+                    // `autoW`, so the float steps are the oracle's too.)
+                    let sized = shrink_to_fit_width(c, content_w, inputs, runs, run_texts, grids, children).and_then(|stf| {
+                        if k.width_kw == 0 { Some(stf) } else { content_sized_width(c, stf, inputs, runs, run_texts, grids, children) }
+                    });
+                    match sized {
                         Some(w) => w,
                         None => {
                             failed.set(true);
@@ -5568,7 +5574,9 @@ fn content_sized_width(
             match kw {
                 1 => imin + pct,
                 2 => imax + pct,
-                _ => (room - pct).max(imin).min(imax) + pct,
+                // …min-content winning where the two figures cross (a negative margin can take max-content under
+                // the widest piece), as the oracle's `Math.max(min, Math.min(max, …))` has it.
+                _ => (room - pct).min(imax).max(imin) + pct,
             }
         }),
     }
