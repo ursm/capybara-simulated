@@ -295,6 +295,60 @@ RSpec.describe 'layout reuse across dynamic style state' do
       JS
     end
 
+    it 'keeps a vertical-aligned cell\'s content where it is across relayouts' do
+      # `layoutTable` aligns a cell's content by SHIFTING the whole subtree down and putting the box back.
+      # A cell laid out fresh starts with its content at the box, but a REUSED cell hands back content
+      # still carrying the previous pass's shift — and adding the whole shift again walked it down the
+      # page by one slack per relayout, unbounded, while the table stayed the same height. So the shift is
+      # applied as a delta from what the content already carries. Six passes, dirtying the TABLE so that
+      # the cells (not the table) are what is reused; Chrome: 17 every time.
+      body = '<table id="t" style="width:300px"><tr>' \
+             '<td style="vertical-align:baseline;font-size:32px">BIG</td>' \
+             '<td style="vertical-align:baseline"><input id="i"></td></tr></table>'
+      s = session_for('', body)
+      fresh = session_for('', body).evaluate_script("document.getElementById('i').getBoundingClientRect().y")
+      ys = s.evaluate_script(<<~JS)
+        (() => {
+          const y = () => document.getElementById('i').getBoundingClientRect().y;
+          const out = [y()];
+          for (let k = 1; k < 6; k++) { document.getElementById('t').setAttribute('data-x', String(k)); out.push(y()); }
+          return out;
+        })()
+      JS
+      expect(ys).to eq([fresh] * 6)
+      # …and a BLOCK-level child, whose baseline is read off its box rather than off a line. A line's
+      # baseline is stamped relative to the cell and immune to the carried shift; a block child's `_lb.y`
+      # carries it, and reading that as the baseline told the row the cell was already aligned — so the
+      # shift was taken back, and a `display: block` `<select>` went 18, 3, 18, 3 (Chrome: 18).
+      bsel = body.sub('<input id="i">', '<select id="i" style="display:block"><option>a</option></select>')
+      s3 = session_for('', bsel)
+      f3 = session_for('', bsel).evaluate_script("document.getElementById('i').getBoundingClientRect().y")
+      ys3 = s3.evaluate_script(<<~JS)
+        (() => {
+          const y = () => document.getElementById('i').getBoundingClientRect().y;
+          const out = [y()];
+          for (let k = 1; k < 4; k++) { document.getElementById('t').setAttribute('data-x', String(k)); out.push(y()); }
+          return out;
+        })()
+      JS
+      expect(ys3).to eq([f3] * 4)
+      # …and the same for `middle` and `bottom`, whose slack is the row less the content rather than a baseline
+      %w[middle bottom].each do |va|
+        b2 = %(<table id="t" style="width:300px"><tr><td style="height:80px"></td><td style="vertical-align:#{va}"><input id="i"></td></tr></table>)
+        s2 = session_for('', b2)
+        f2 = session_for('', b2).evaluate_script("document.getElementById('i').getBoundingClientRect().y")
+        ys2 = s2.evaluate_script(<<~JS)
+          (() => {
+            const y = () => document.getElementById('i').getBoundingClientRect().y;
+            const out = [y()];
+            for (let k = 1; k < 4; k++) { document.getElementById('t').setAttribute('data-x', String(k)); out.push(y()); }
+            return out;
+          })()
+        JS
+        expect(ys2).to eq([f2] * 4), va
+      end
+    end
+
     it 'dirties the SHADOW boxes that lay out slotted light DOM' do
       # The dirty walk goes up the FLAT tree, because that is the chain of boxes that lays a node
       # out: `#pad`'s parent box is the `<slot>`, then `#wrap`, then the host. Walking the node

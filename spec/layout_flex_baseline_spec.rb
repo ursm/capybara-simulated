@@ -158,6 +158,23 @@ RSpec.describe 'flex baseline alignment' do
       expect(ascent_of(floated)).to eq(40 + ascent_of(item('after')))
     end
 
+    # A TABLE's baseline is its first row's, which is the row's ALIGNED baseline: every baseline cell has been
+    # shifted to it by the time the table is read as an item. That read goes through each cell's content, so
+    # it has to answer the shifted position — for a block child (whose box moved) and for a line (whose stamp
+    # is box-relative and has to be moved with the content). Both cells here align on the 32px word, so the
+    # table's baseline is that word's, whichever way its first cell holds its text. A pass that subtracted
+    # the cell's carried shift inside the reader sent the block-child form 15px up (Chrome: they agree).
+    it 'reads a table item at its aligned baseline, block child or line' do
+      table = ->(first) {
+        item(%(<table style="border-spacing:0"><tr><td style="vertical-align:baseline;padding:0">#{first}</td>) +
+             '<td style="vertical-align:baseline;padding:0;font-size:32px">BIG</td></tr></table>')
+      }
+      block_form = ascent_of(table.call('<div>blk</div>'))
+      line_form  = ascent_of(table.call('blk'))
+      expect(block_form).to eq(line_form)
+      expect(block_form).to eq(ascent_of(item('BIG', 'font-size:32px')))
+    end
+
     # A line a `<br>` left empty is still a line, and still has a baseline.
     it 'reads a line a break left empty' do
       expect(ascent_of(item('<br>'))).to eq(ascent_of(item('x')))
