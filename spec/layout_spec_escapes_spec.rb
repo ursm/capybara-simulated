@@ -22,7 +22,14 @@ RSpec.describe 'layout spec markup' do
 
   it 'writes an escape in a shape only where Ruby interprets it' do
     offenders = SPECS.flat_map {|f|
-      File.readlines(f).each_with_index.filter_map {|line, i|
+      # A spec can write a fixture of its own into this directory for the length of an example
+      # (`ci_rspec_spec`), which a parallel run may delete between the glob and the read: gone, it holds no shape.
+      lines = begin
+        File.readlines(f)
+      rescue Errno::ENOENT
+        next []
+      end
+      lines.each_with_index.filter_map {|line, i|
         next if line.lstrip.start_with?('#')                    # a comment may SAY it; only code is a shape
         next unless line.match?(HELPER) && line.match?(ESCAPE_IN_SINGLE_QUOTES)
 
