@@ -126,7 +126,12 @@ RSpec.describe 'native layout no-oracle run', if: ENV.fetch('CSIM_JS_ENGINE', 'v
       '<div style="display:flex;width:300px;gap:10px"><div style="flex:1">a</div><div style="width:30%">b c d</div></div>',
       '<div style="width:300px;height:200px"><div style="height:50%;max-width:80%">half</div></div>',
       # …a percentage height that resolves to AUTO, whose bottom margin then adjoins its last child's — native's call
-      '<div style="width:300px"><div style="height:50%"><p style="margin:0 0 12px">x</p></div><div style="height:5px"></div></div>'
+      '<div style="width:300px"><div style="height:50%"><p style="margin:0 0 12px">x</p></div><div style="height:5px"></div></div>',
+      # …an OUT-OF-FLOW box against a positioned block and against the viewport, percentages and all, and a relative
+      # box with length insets
+      '<div style="position:relative;width:300px;height:200px;border:5px solid"><div style="position:absolute;left:10%;top:20%;width:30%;height:25%;padding:0 5%">abs</div></div>',
+      '<div style="width:300px;height:200px"><div style="position:absolute;left:5%;right:5%;top:0;bottom:10%">viewport</div></div>',
+      '<div style="position:relative;left:4px;top:-3px;width:300px"><div style="position:absolute;inset:10%">rel</div><p>x</p></div>'
     ].each do |body|
       r = session_with(body).evaluate_script('globalThis.__csimLayoutShadowRun(undefined, {noOracle: true})')
       expect(r).to include('ok' => true, 'mismatches' => 0), "#{body}: #{r.inspect}"

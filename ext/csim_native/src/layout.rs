@@ -271,6 +271,9 @@ pub(crate) struct Input {
     // walk sent (`edge_px`, kept apart from the fields a resolution overwrites).
     pub(crate) edge_frac: [f64; 8],
     pub(crate) edge_px: [f64; 8],
+    // An out-of-flow box's inset percentages (top / right / bottom / left) as fractions of its containing block's
+    // padding box — height for top / bottom, width for left / right — beside the length parts in `inset_*`.
+    pub(crate) inset_frac: [f64; 4],
     pub(crate) flex_main_gap_frac: f64,
     pub(crate) flex_cross_gap_frac: f64,
     pub(crate) flex_basis_kw: u8,
@@ -5478,14 +5481,14 @@ fn place_out_of_flow(
     boxes: &mut [Box],
     failed: &std::cell::Cell<bool>,
 ) {
-    let n = inputs[c].get();
     // The containing block's PADDING box, in document coordinates: from its record where the pass holds one
     // (its border box less its borders, final by the time `place` reaches here), else the rectangle the walk
     // pushed for a CB outside the pass (the viewport, an ancestor above the root, an inline box).
-    let (cb_x, cb_y, cb_w, cb_h) = if n.cb_index == CB_RECT {
-        (n.cb_rect[0], n.cb_rect[1], n.cb_rect[2], n.cb_rect[3])
+    let declared = inputs[c].get();
+    let (cb_x, cb_y, cb_w, cb_h) = if declared.cb_index == CB_RECT {
+        (declared.cb_rect[0], declared.cb_rect[1], declared.cb_rect[2], declared.cb_rect[3])
     } else {
-        let cb_i = n.cb_index as usize;
+        let cb_i = declared.cb_index as usize;
         let cbn = inputs[cb_i].get();
         (
             boxes[cb_i].x + cbn.bl,
@@ -5494,7 +5497,12 @@ fn place_out_of_flow(
             (boxes[cb_i].h - cbn.bt - cbn.bb).max(0.0),
         )
     };
-    let (top, right, bottom, left) = (n.inset_top, n.inset_right, n.inset_bottom, n.inset_left);
+    // …which is what this box's percentages resolve against — its sizes and edges (`with_percent_sizes`) and its
+    // insets — written back before it is measured.
+    let n = declared.with_percent_sizes(cb_w, cb_h);
+    inputs[c].set(n);
+    let [ft, fr, fb, fl] = n.inset_frac;
+    let (top, right, bottom, left) = (n.inset_top + ft * cb_h, n.inset_right + fr * cb_w, n.inset_bottom + fb * cb_h, n.inset_left + fl * cb_w);
     let (ml, mr, mt, mb) = (Input::m(n.ml), Input::m(n.mr), Input::m(n.mt), Input::m(n.mb));
     let stretched = !is_auto(left) && !is_auto(right);
     let stretched_v = !is_auto(top) && !is_auto(bottom);
@@ -5818,6 +5826,7 @@ mod tests {
             pct_sizes: [f64::NAN; 6],
             edge_frac: [0.0; 8],
             edge_px: [0.0; 8],
+            inset_frac: [0.0; 4],
             flex_main_gap_frac: 0.0,
             flex_cross_gap_frac: 0.0,
             flex_basis_kw: 0,

@@ -791,15 +791,26 @@ x</div>))
     it 'replays one whose content native cannot measure' do
       expect_replayed_oof(%{<div style="width:400px;height:200px"><div style="position:absolute;left:30px">a <span style="display:inline-table"><span style="display:table-cell">bb</span></span></div></div>})
     end
-    # The walk marshals the containing block the PLACEMENT resolved (`_lb.cbEl`), never its own re-derivation:
-    # `containingBlockElementFor` skips an ancestor whose box did not exist yet when the placement ran, so a
-    # positioned `<html>` reads as the viewport there and as the root here. Reading the stamp is what keeps the
-    # record and the geometry it is marshalling from being about two different boxes.
-    it 'measures against the containing block the placement resolved, not a fresh one' do
-      expect_native_oof('<style>html{position:relative}</style><div style="height:200px"><div style="position:absolute;bottom:0;left:0;width:40px;height:20px"></div></div>')
-      expect_native_oof('<style>html{position:relative;padding:20px;height:400px}</style><div style="height:200px"><div style="position:absolute;top:50%;left:0;width:40px;height:20px"></div></div>')
-      expect_native_oof('<style>html{transform:translateZ(0)}</style><div style="height:2000px"><div style="position:fixed;bottom:0;width:40px;height:20px"></div></div>')
-      expect_native_oof('<style>html{filter:invert(1)}</style><div style="height:2000px"><div style="position:fixed;bottom:0;width:40px;height:20px"></div></div>')
+    # The ROOT element is never an out-of-flow box's containing block, in either engine: the oracle assigns its box at
+    # the end of the pass, so a first layout could not see it and every later one saw last pass's — the walk, which
+    # finds the block without the oracle's boxes, took it for the viewport on the first pass and the oracle then
+    # disagreed on every relayout. SHARED divergence: Chrome positions against a positioned `<html>`'s box. Each shape
+    # is laid out TWICE, a mutation between.
+    it 'places against the viewport, not a positioned root, on every pass' do
+      [
+        '<style>html{position:relative}</style><div id="p" style="height:200px"><div style="position:absolute;bottom:0;left:0;width:40px;height:20px"></div></div>',
+        '<style>html{position:relative;padding:20px;height:400px}</style><div id="p" style="height:200px"><div style="position:absolute;top:50%;left:0;width:40px;height:20px"></div></div>',
+        '<style>html{transform:translateZ(0)}</style><div id="p" style="height:2000px"><div style="position:fixed;bottom:0;width:40px;height:20px"></div></div>',
+        '<style>html{filter:invert(1)}</style><div id="p" style="height:2000px"><div style="position:fixed;bottom:0;width:40px;height:20px"></div></div>'
+      ].each do |body|
+        session = simulated_session(page(body)); session.visit '/'
+        first = parity(session)
+        expect(first).to include('ok' => true, 'mismatches' => 0), "#{body}: #{first.inspect}"
+        expect(first['nativeOutOfFlow']).to be >= 1, "#{body}: #{first.inspect}"
+        session.execute_script("document.getElementById('p').appendChild(document.createElement('span'))")
+        again = parity(session)
+        expect(again).to include('ok' => true, 'mismatches' => 0), "#{body} (second pass): #{again.inspect}"
+      end
     end
   end
 
