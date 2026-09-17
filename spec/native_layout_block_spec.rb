@@ -1118,6 +1118,13 @@ x</div>))
         expect(r).to include('ok' => true, 'mismatches' => 0), "#{body}: #{r.inspect}"
       end
     end
+    # A text indent's percentage is of the block's CONTENT width, which the walk still takes off the oracle's box — so
+    # the padding it subtracts is the one the oracle resolved, not the length part a percentage padding leaves on the
+    # record (80 where 64 is right, with `padding: 0 10%` and `text-indent: 20%` in a 400px block).
+    it 'measures a text indent against the content width the oracle padded' do
+      # (the words fill the first line to within the 16px the wrong basis would take off it)
+      expect_parity(%(<div style="width:400px"><div style="padding:0 10%;text-indent:20%">#{(['ab'] * 27).join(' ')} cccccc</div></div>))
+    end
     # The ORACLE's basis was `content.height || null`: a definite 0 read as none, and an IMPOSED height (a grid row,
     # both insets) not yet clamped by the box's own max-height. Chrome and native: a definite 0 is 0 (the embed
     # wrapper's child is its content's height, not 0 — its percentage height resolves to 0), and the clamp comes

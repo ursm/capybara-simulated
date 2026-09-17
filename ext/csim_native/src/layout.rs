@@ -547,6 +547,11 @@ impl Input {
         n.max_w = at(max_w, cb_w, n.max_w);
         n.min_h = at(min_h, cb_h, n.min_h);
         n.max_h = at(max_h, cb_h, n.max_h);
+        // …and a percentage height that resolved to AUTO leaves the box's bottom margin adjoining its last child's,
+        // as an auto height does (the walk cannot say which without the basis).
+        if !h.is_nan() {
+            n.bottom_adjoins = is_auto(n.height);
+        }
         let edge = |i: usize| self.edge_px[i] + self.edge_frac[i] * cb_w;
         if self.edge_frac.iter().any(|&f| f != 0.0) {
             (n.mt, n.mr, n.mb, n.ml) = (edge(0), edge(1), edge(2), edge(3));

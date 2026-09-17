@@ -51,7 +51,9 @@ RSpec.describe 'native layout no-oracle run', if: ENV.fetch('CSIM_JS_ENGINE', 'v
   end
 
   it 'records where the walk read an oracle stamp' do
-    s = session_with('<div style="width:300px"><p style="width:50%">hello</p></div>')
+    # (a RELATIVE offset in percent still resolves against the oracle's basis; an image's intrinsic size is still a
+    # helper's — a plain percentage width no longer reads anything)
+    s = session_with('<div style="width:300px"><p style="position:relative;left:10%">hello</p><img style="width:20px;height:10px"></div>')
     reads = s.evaluate_script('globalThis.__csimLayoutShadowRun(undefined, {noOracle: true}).oracleReads')
     expect(reads.keys).to include('recordCbW _lbCbW')
     expect(reads.keys).to include('nlShadowRun the pass root origin and width (handed over)')
@@ -110,6 +112,25 @@ RSpec.describe 'native layout no-oracle run', if: ENV.fetch('CSIM_JS_ENGINE', 'v
       expect(s.evaluate_script('globalThis.__csimLayoutShadowRun()')).to include('ok' => true, 'mismatches' => 0)
       revealed = s.evaluate_script('globalThis.__csimLayoutShadowRun(undefined, {noOracle: true, reveal: true})')
       expect(revealed).to include('ok' => true, 'mismatches' => 0), body
+    end
+  end
+
+  # The shapes the port has already freed: block flow, text, a flex row, percentage sizes and edges on in-flow
+  # children. Their walk and native pass read NOTHING of the oracle's but what the harness hands the pass root
+  # (its origin and width) — the first shapes the oracle could be deleted for, so a read creeping back into a common
+  # path fails here rather than hiding among the thousands every other shape still makes.
+  it 'lays out plain shapes without reading the oracle' do
+    [
+      '<div style="width:300px"><p style="margin:10px">hello world</p><div style="height:20px"></div></div>',
+      '<div style="width:400px"><div style="width:50%;padding:5% 2%;margin:0 auto">centred</div></div>',
+      '<div style="display:flex;width:300px;gap:10px"><div style="flex:1">a</div><div style="width:30%">b c d</div></div>',
+      '<div style="width:300px;height:200px"><div style="height:50%;max-width:80%">half</div></div>',
+      # …a percentage height that resolves to AUTO, whose bottom margin then adjoins its last child's — native's call
+      '<div style="width:300px"><div style="height:50%"><p style="margin:0 0 12px">x</p></div><div style="height:5px"></div></div>'
+    ].each do |body|
+      r = session_with(body).evaluate_script('globalThis.__csimLayoutShadowRun(undefined, {noOracle: true})')
+      expect(r).to include('ok' => true, 'mismatches' => 0), "#{body}: #{r.inspect}"
+      expect(r['oracleReads'].keys).to eq(['nlShadowRun the pass root origin and width (handed over)']), body
     end
   end
 end

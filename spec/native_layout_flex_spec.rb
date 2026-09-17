@@ -1112,6 +1112,12 @@ RSpec.describe 'native layout flex parity', if: ENV.fetch('CSIM_JS_ENGINE', 'v8'
     # when the percentages resolved (an auto-height out-of-flow box replayed from the oracle: its row gap is nothing
     # and a percentage basis auto there), so the push says which; and a basis that is a percentage only after
     # `inherit` resolves is still one.
+    # A container whose own padding is a percentage NATIVE resolves still hands a `calc()` basis the oracle's figures
+    # (its main size off the oracle's box, less that padding) — so the padding subtracted there has to be the one the
+    # oracle resolved, not the length part the record carries.
+    it 'resolves a calc() basis against the container as the oracle padded it' do
+      expect_parity('<div style="width:400px;height:300px"><div style="display:flex;flex-direction:column;padding:5% 0;height:50%"><div style="flex-basis:calc(20% + 5px)">a</div></div></div>')
+    end
     it 'keeps a pushed auto height indefinite, and a percentage inherited' do
       two = '<div style="width:300px;height:20px"></div><div style="width:300px;height:20px"></div>'
       expect_parity(%(<div style="position:relative;padding:5%;width:400px;height:400px"><div style="position:absolute;display:flex;flex-wrap:wrap;row-gap:20%;width:300px">#{two}</div></div>))
