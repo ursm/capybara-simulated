@@ -513,6 +513,55 @@ RSpec.describe 'native layout table parity', if: ENV.fetch('CSIM_JS_ENGINE', 'v8
     expect_parity('<table style="border-spacing:4px"><caption style="width:100px;padding:10px">Cap</caption><tr><td style="width:60px;height:20px">a</td></tr></table>')
   end
 
+  # A POSITIONED or FLOATED table lays out natively. Neither enters the table's own layout — a positioned
+  # table is sized and placed by its parent's out-of-flow path (natively, not a replayed box), a floated one
+  # by its parent's float branch — so the gate that refused both, where the flex gate never did, only cost
+  # declines: 159 of 168 positioned / floated tables in four containers, 57 after, none mismatching.
+  it 'lays out a positioned or floated table' do
+    tables = [
+      '<table style="border-spacing:0;%s"><tr><td style="padding:0">a</td><td style="padding:0">bb cc</td></tr></table>',
+      '<table style="border-spacing:4px;%s"><tr><td>aaa</td><td>b</td></tr><tr><td colspan="2">wide cell</td></tr></table>',
+      '<table style="border-collapse:collapse;%s"><tr><td style="border:2px solid">a</td><td style="border:1px solid">b</td></tr></table>',
+      '<table style="%s"><caption>cap</caption><thead><tr><th>h</th></tr></thead><tbody><tr><td>row one</td></tr></tbody></table>'
+    ]
+    ['position:absolute', 'position:absolute;right:0;bottom:0', 'position:fixed;top:0;left:0',
+     'float:left', 'float:right', 'float:left;width:150px'].each do |pos|
+      tables.each do |t|
+        table = format(t, pos)
+        r = run_shadow(%(<div style="position:relative;width:300px;height:200px;overflow:hidden">#{table}<div>after</div></div>))
+        expect(r).to include('ok' => true), "#{pos}: harness bailed: #{r.inspect}"
+        expect(r['mismatches']).to eq(0), "#{pos}: mismatch: #{r.inspect}"
+      end
+    end
+  end
+
+  # …but never as the pass ROOT. The container gates do not ask a position, because an out-of-flow box is its
+  # PARENT's to size and place — and the root has no parent in the pass, so native laid it out as an in-flow
+  # block filling the width it was handed: an `absolute` table, flex or grid as the root came out 300 wide
+  # where the oracle's shrink-to-fit says 66.4. It declines instead; a floated or static root stays native.
+  it 'declines an out-of-flow container as the pass root' do
+    root_run = lambda do |body, selector|
+      session = simulated_session(page(body))
+      session.visit '/'
+      session.evaluate_script('document.body.offsetHeight')
+      session.evaluate_script(%(globalThis.__csimLayoutShadowRun(document.querySelector(#{selector.inspect}))))
+    end
+    inner = {
+      'table' => '<table id="r" style="%s"><tr><td>a</td><td>bb cc</td></tr></table>',
+      'flex'  => '<div id="r" style="display:flex;%s"><div>a</div><div>bb cc</div></div>',
+      'grid'  => '<div id="r" style="display:grid;grid-template-columns:auto auto;%s"><div>a</div><div>bb cc</div></div>'
+    }
+    inner.each do |kind, t|
+      ['position:absolute;right:10px;bottom:5px', 'position:fixed;top:0;left:0'].each do |pos|
+        r = root_run.call(%(<div style="position:relative;width:300px;height:200px">#{format(t, pos)}</div>), '#r')
+        expect(r).to include('ok' => false, 'reason' => 'root unsupported'), "#{kind} #{pos}: #{r.inspect}"
+      end
+      r = root_run.call(%(<div style="width:300px">#{format(t, 'position:relative')}</div>), '#r')
+      expect(r).to include('ok' => true), "#{kind} relative root: #{r.inspect}"
+      expect(r['mismatches']).to eq(0), "#{kind} relative root: #{r.inspect}"
+    end
+  end
+
   # A/B bails — the feature declines; a plain table stays native.
   def a_bails_b_native(feature, plain = '<table style="border-spacing:4px"><tr><td style="width:40px">a</td><td style="width:40px">b</td></tr></table>')
     expect(run_shadow(feature)['ok']).to be(false), "expected #{feature.inspect} to bail"
