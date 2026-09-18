@@ -385,7 +385,11 @@ pub(crate) struct Input {
     // first, or with `hanging` every line BUT the first, and with `each_line` the first after every forced
     // break as well. The FLOW only — an INTRINSIC measure of an indented block is declined in the walk, so
     // nothing here carries an indent into `text_intrinsic`.
+    // `text-indent`: the LENGTH part, and the percentage as a FRACTION of the block's own content width, which
+    // the flow resolves (`line_layout`) and an INTRINSIC measure does not — a percentage has nothing to resolve
+    // against before the box has been given any room (CSS Sizing 3), so `text_intrinsic` takes the length alone.
     pub(crate) indent_px: f64,
+    pub(crate) indent_frac: f64,
     pub(crate) indent_hanging: bool,
     pub(crate) indent_each_line: bool,
     // …and whether the FIRST-LINE indent is already spent: an anonymous text block in a MIXED block carries
@@ -2353,7 +2357,7 @@ fn measure(
                 .map(|r| measure_float(r.font as usize, content_w, inputs, runs, run_texts, grids, children, boxes, failed))
                 .collect();
             let floats_before = fc.items.len();
-            match line_layout(local, &run_texts[rs..re], n.strut_lh, n.strut_asc, content_w, &mut fc.items, &inline_floats, cl, cr, bfc_top, LineStyle {ws_mode: n.ws_mode, align: n.text_align, rtl: n.from_right(), indent: (n.indent_px, n.indent_hanging, n.indent_each_line, n.indent_spent)}) {
+            match line_layout(local, &run_texts[rs..re], n.strut_lh, n.strut_asc, content_w, &mut fc.items, &inline_floats, cl, cr, bfc_top, LineStyle {ws_mode: n.ws_mode, align: n.text_align, rtl: n.from_right(), indent: (n.indent_px + n.indent_frac * content_w, n.indent_hanging, n.indent_each_line, n.indent_spent)}) {
                 Some(ll) => {
                     boxes[i].first_baseline = ll.first.map(|(top, asc)| content_top_rel + top + asc);
                     boxes[i].last_baseline = ll.last.map(|(top, asc)| content_top_rel + top + asc);
@@ -2498,7 +2502,7 @@ fn measure(
                 boxes[c].x = if n.from_right() {
                     content_left_rel + content_w
                 } else {
-                    let indent = if !has_child != n.indent_hanging { n.indent_px } else { 0.0 };
+                    let indent = if !has_child != n.indent_hanging { n.indent_px + n.indent_frac * content_w } else { 0.0 };
                     float_band(&ctx.items, cursor, n.strut_lh, cl, cr).0 + indent
                 };
                 boxes[c].y = cursor;
@@ -4901,7 +4905,9 @@ fn content_intrinsic(i: usize, inputs: &[Cell<Input>], runs: &[Run], run_texts: 
             if re > runs.len() || rs > re {
                 return None;
             }
-            text_intrinsic(&runs[rs..re], &run_texts[rs..re], n.ws_mode, inputs, runs, run_texts, grids, children)
+            text_intrinsic(&runs[rs..re], &run_texts[rs..re], n.ws_mode,
+                           (n.indent_px, n.indent_hanging, n.indent_each_line),
+                           inputs, runs, run_texts, grids, children)
         }
         // …a LIST BOX excepted: its rows ARE CSS content, and the oracle's `minContentWidth` reads them (it asks
         // `contentIntrinsicWidths` for one rather than the control's own width).
@@ -5045,7 +5051,8 @@ fn flex_intrinsic_widths(i: usize, inputs: &[Cell<Input>], runs: &[Run], run_tex
 // out itself contributes its own intrinsic widths (plus margins) as one unbreakable unit with an opportunity on
 // each side. `None` for a PUSHED atomic (its box is not in the stream), a tab / other control, or a ZWJ under
 // per-character breaking (the oracle's per-character advance carries the previous character).
-fn text_intrinsic(runs: &[Run], run_texts: &[Option<Vec<u16>>], ws_mode: u8, inputs: &[Cell<Input>], all_runs: &[Run], all_texts: &[Option<Vec<u16>>], grids: &[f64], children: &[Vec<usize>]) -> Option<(f64, f64)> {
+#[allow(clippy::too_many_arguments)]
+fn text_intrinsic(runs: &[Run], run_texts: &[Option<Vec<u16>>], ws_mode: u8, indent: (f64, bool, bool), inputs: &[Cell<Input>], all_runs: &[Run], all_texts: &[Option<Vec<u16>>], grids: &[f64], children: &[Vec<usize>]) -> Option<(f64, f64)> {
     // …per RUN, because an inline may declare its own `white-space` (`Run::ws_mode`) and every one of these is
     // about the run it belongs to. `pin` is the exception: "this box never wraps, so its min-content IS its
     // max-content" is a statement about the whole stream, true only while no run in it wraps.
@@ -5068,6 +5075,21 @@ fn text_intrinsic(runs: &[Run], run_texts: &[Option<Vec<u16>>], ws_mode: u8, inp
     // for, because what Chrome's min-content does with an indent is a real break pass at zero available width —
     // see the walk's own note. The FLOW applies it, in `line_layout`.)
     let (mut line, mut word) = (0.0f64, 0.0f64);
+    // `text-indent` narrows the line it applies to, so both figures carry it — and it is TAKEN by the first thing
+    // that occupies the line (a word, an atomic, an inline box, a `<br>`, a `<wbr>`, a preserved segment), never
+    // seeded into the pen: a line nothing occupies carries none (the oracle's `takeIndent`, Chrome-measured — an
+    // empty `<td>` under an inherited indent is 0 wide). `hanging` indents every line BUT the first, and after a
+    // forced break `each-line` arms the next one (inverted again under `hanging each-line`); every line an
+    // intrinsic measure closes is a forced one, since it has no room to wrap in.
+    let (indent_px, indent_hanging, indent_each_line) = indent;
+    let mut pending_indent = if indent_hanging { 0.0 } else { indent_px };
+    macro_rules! take_indent {
+        () => {{
+            line += pending_indent;
+            word += pending_indent;
+            pending_indent = 0.0;
+        }};
+    }
     let mut inline_on_line = false; // content has landed on this line (a space after it is pending, not dropped)
     // A collapsible space waiting for content to follow it, and whether it JOINS the word rather than opening
     // a break — which is the mode of the run that QUEUED it (the oracle's `pend(w, joins)` / `pendingJoins`),
@@ -5088,6 +5110,8 @@ fn text_intrinsic(runs: &[Run], run_texts: &[Option<Vec<u16>>], ws_mode: u8, inp
             word = 0.0;
             pending_space = 0.0;
             inline_on_line = false;
+            pending_indent = if indent_each_line { if indent_hanging { 0.0 } else { indent_px } }
+                             else if indent_hanging { indent_px } else { 0.0 };
         }};
     }
     // A collapsible space after content: pending on the line, and a break opportunity unless the run never wraps
@@ -5115,8 +5139,14 @@ fn text_intrinsic(runs: &[Run], run_texts: &[Option<Vec<u16>>], ws_mode: u8, inp
         // …this run's own three behaviours, which the macros above close over.
         (wraps, preserve, break_nl) = modes(run.ws_mode)?;
         match run.kind {
-            RUN_BR => end_line!(),
-            RUN_WBR => opportunity!(),
+            RUN_BR => {
+                take_indent!(); // a `<br>` occupies its line, so the line it ends carries the indent
+                end_line!();
+            }
+            RUN_WBR => {
+                take_indent!();
+                opportunity!();
+            }
             // An OUT-OF-FLOW box is not in the flow's inline stream: it contributes no advance to either
             // intrinsic width and brings no break opportunity — it is only a marker of where the flow reached,
             // and an intrinsic measure has no lines for that to mean anything on.
@@ -5132,6 +5162,7 @@ fn text_intrinsic(runs: &[Run], run_texts: &[Option<Vec<u16>>], ws_mode: u8, inp
                 min = min.max(imin + m);
             }
             RUN_OPEN => {
+                take_indent!(); // an inline box occupies the line, edges or not
                 // An inline's EDGES here are the BASIS-LESS ones (`Run::asc` on an edge run): an intrinsic measure
                 // has no percentage basis, so a `padding: 0 10%` inline contributes nothing where the laid-out
                 // line counts its resolved px.
@@ -5197,9 +5228,11 @@ fn text_intrinsic(runs: &[Run], run_texts: &[Option<Vec<u16>>], ws_mode: u8, inp
                             // not once per run, so a segment the newline before it emptied starts over — and a
                             // run that OPENS with a newline drops the pending space with the line it ends.
                             let mut seg_open = false;
+                            take_indent!(); // this segment occupies its line, an EMPTY one too
                             for &u in &text[start..i] {
                                 if u == 0x0A {
                                     end_line!();
+                                    take_indent!();
                                     seg_open = false;
                                 } else {
                                     if !seg_open {
@@ -5239,6 +5272,8 @@ fn text_intrinsic(runs: &[Run], run_texts: &[Option<Vec<u16>>], ws_mode: u8, inp
                         }
                         // A word takes the pending space ONCE — the one before it in this run, or an earlier run's
                         // trailing space (a word glued to the previous run, nothing pending, continues that word).
+                        // …and the line's indent before it, so a TAB inside the word measures from the indented pen.
+                        take_indent!();
                         take_pending!();
                         let word_wide = run_has_wide && text[start..i].iter().any(|&u| is_wide_unit(u));
                         // A HYPHEN is an opportunity here too, or min-content would be the whole hyphenated word
@@ -5302,6 +5337,7 @@ fn text_intrinsic(runs: &[Run], run_texts: &[Option<Vec<u16>>], ws_mode: u8, inp
                 let k = inputs[c].get();
                 let (imin, imax) = intrinsic_widths(c, inputs, all_runs, all_texts, grids, children)?;
                 let m = k.decl_margin_x;
+                take_indent!();
                 take_pending!();
                 opportunity!();
                 line += imax + m;
@@ -6007,6 +6043,7 @@ mod tests {
             pushed_h_indefinite: false,
             height_from_outside: false,
             lays_out_children: false,
+            indent_frac: 0.0,
             grid_start: -1,
             decl_w: f64::NAN,
             decl_min_w: f64::NAN,

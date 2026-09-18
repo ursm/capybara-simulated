@@ -345,7 +345,7 @@ RSpec.describe 'native layout L1 block-flow parity', if: ENV.fetch('CSIM_JS_ENGI
     # WALK — where the caller can still fall back — and not discovered mid-measure in Rust, which throws the
     # whole pass away. A measure-only gap (native's intrinsic has no `text-indent`) is refused here too.
     it 'refuses in the walk what it would have to measure and cannot' do
-      expect_walk_declines('<div style="width:400px"><div style="width:max-content;text-indent:30px">aa bb</div></div>')
+      expect_parity('<div style="width:400px"><div style="width:max-content;text-indent:30px">aa bb</div></div>')
       expect_walk_declines('<div style="width:400px"><div style="width:max-content"><span style="display:inline-block"><span style="display:inline-table"><span style="display:table-row"><span style="display:table-cell">c</span></span></span></span></div></div>')
       expect_walk_declines('<div style="width:400px"><table><tr><td><div style="width:max-content"><div style="display:grid;grid-template-columns:40px"><span>g</span><span>h</span></div></div></td></tr></table></div>')
     end
@@ -385,8 +385,8 @@ RSpec.describe 'native layout L1 block-flow parity', if: ENV.fetch('CSIM_JS_ENGI
     # the obligations measuring carries (it laid out a `text-indent`ed one at the wrong width, and threw a
     # whole pass away on a subtree it cannot measure).
     it 'sees a keyword width arriving through inherit' do
-      expect_walk_declines('<div style="display:flex;width:400px"><div style="width:min-content"><div style="width:inherit;text-indent:30px">aa bb cc</div></div></div>')
-      expect_walk_declines('<table style="border-spacing:0"><tr><td style="padding:0;width:min-content"><div style="width:inherit;text-indent:30px">aa bb cc</div></td></tr></table>')
+      expect_parity('<div style="display:flex;width:400px"><div style="width:min-content"><div style="width:inherit;text-indent:30px">aa bb cc</div></div></div>')
+      expect_parity('<table style="border-spacing:0"><tr><td style="padding:0;width:min-content"><div style="width:inherit;text-indent:30px">aa bb cc</div></td></tr></table>')
       expect_walk_declines('<div style="display:flex;width:400px"><div style="width:min-content"><div style="width:inherit"><span style="display:inline-block"><span style="display:inline-table"><span style="display:table-row"><span style="display:table-cell">c</span></span></span></span></div></div></div>')
       # …and one with nothing to refuse lays out, the inherited keyword measured like any other
       expect_parity('<div style="width:400px"><div style="width:min-content"><div style="width:inherit">aa bb cc</div></div></div>')
@@ -568,8 +568,12 @@ RSpec.describe 'native layout L1 block-flow parity', if: ENV.fetch('CSIM_JS_ENGI
       # `text-indent` block holding a shrink-to-fit abspos put it at 22 where the oracle says 11, 0x0 instead of
       # its box — found by a 4000-case fuzz, and the walk's own gate is what routes it here).
       it 'leaves a replayed box to the oracle\'s own position' do
-        expect_replayed_oof(%(<div style="#{tb};text-indent:11px"><div style="position:absolute">shrink to fit</div>mar</div>))
-        expect_replayed_oof(%(<div style="#{tb};text-indent:11px">lead <div style="position:absolute">shrink to fit</div> tail</div>))
+        # (a shrink-to-fit box whose own content native cannot measure — an indented one is measured natively now)
+        unmeasurable = '<span style="display:inline-block"><div style="display:table-cell">c</div></span>'
+        expect_replayed_oof(%(<div style="#{tb};text-indent:11px"><div style="position:absolute">#{unmeasurable}</div>mar</div>))
+        expect_replayed_oof(%(<div style="#{tb};text-indent:11px">lead <div style="position:absolute">#{unmeasurable}</div> tail</div>))
+        # …and the indented ones the measure now reaches lay out natively, the static position taken off the line
+        expect_parity(%(<div style="#{tb};text-indent:11px"><div style="position:absolute">shrink to fit</div>mar</div>))
       end
       # `justify` widens the spaces between the words, and native holds no per-space positions — the offset it
       # would record is not the one the oracle reads off its placed spaces, so the block declines. Asked of the

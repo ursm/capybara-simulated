@@ -586,23 +586,24 @@ RSpec.describe 'native layout L2 text-block parity', if: ENV.fetch('CSIM_JS_ENGI
     # when the first line opens with a plain word. Four review rounds of near-miss rules came out of trying to
     # mirror it (an empty inline, a `<wbr>`, a leading space, a negative indent and a soft hyphen each broke a
     # different one), so a MEASURED indented block declines and its caller takes the fallback it already has.
-    it 'declines an indented block whose intrinsic widths native would measure' do
-      # Each pair is the same shape with and without the indent: the indented one takes its caller's FALLBACK
-      # (the oracle's contribution / box) where the plain one is measured natively, and the pass lays out either
-      # way — the decline is a route change, not a bail.
+    it 'measures an indented block natively, on the route the plain one takes' do
+      # Each pair is the same shape with and without the indent, and BOTH go down the native route: `text_intrinsic`
+      # takes the indent the way the oracle's own walk does — the first occupant of each line takes it, a forced
+      # break re-arms it under `hanging` / `each-line` — from the length on the record (a `%` resolves against
+      # nothing in an intrinsic measure, CSS Sizing 3).
       [['<div style="display:grid;grid-template-columns:min-content auto;width:400px"><div style="%s">aa bb</div><div>x</div></div>', 'nativeIntrinsicGrids'],
        ['<div style="display:grid;grid-template-columns:max-content auto;width:400px"><div style="%s">aa bb</div><div>x</div></div>', 'nativeIntrinsicGrids'],
        ['<div style="width:400px">a <span style="display:inline-block;%s">bb cc</span></div>', 'nativeAtomics']].each do |shape, key|
-        indented = shadow(format(shape, 'text-indent:20px'))
-        plain    = shadow(format(shape, ''))
-        expect(indented).to include('ok' => true, 'mismatches' => 0), shape
-        expect(indented[key]).to eq(0), "#{key} with the indent: #{indented.inspect}"
-        expect(plain[key]).to be > 0, "#{key} without it: #{plain.inspect}"
+        ['text-indent:20px', 'text-indent:20%', 'text-indent:-20px', 'text-indent:20px hanging',
+         'text-indent:20px each-line', ''].each do |indent|
+          r = shadow(format(shape, indent))
+          expect(r).to include('ok' => true, 'mismatches' => 0), "#{shape} / #{indent}"
+          expect(r[key]).to be > 0, "#{key} under #{indent.inspect}: #{r.inspect}"
+        end
       end
-      # …a `<td>` pushes its own contribution instead, and the hidden-label idiom keeps the oracle's box.
+      # …a `<td>` measures its own contribution too, where it used to push the oracle's.
       cell = shadow('<table style="border-spacing:0"><tr><td style="padding:0;text-indent:20px">aa bb</td><td style="padding:0">cc</td></tr></table>')
-      expect(cell).to include('ok' => true, 'mismatches' => 0)
-      expect(cell['pushedContributions']).to be > 0, cell.inspect
+      expect(cell).to include('ok' => true, 'mismatches' => 0, 'pushedContributions' => 0)
       expect_parity('<div style="display:inline-block;padding:0 5px;text-indent:-9999px">Label</div>')
       expect_parity('<div style="display:flex;width:400px"><div style="text-indent:30px">aa bb</div></div>')
     end
