@@ -4710,8 +4710,10 @@ struct GridTrack {
     is_auto: bool,
 }
 const GRID_TRACK_STRIDE: usize = 7;
-// A grid's header in `grids`: column count, column gap (px, fraction), row gap (px, fraction), declared row height.
-const GRID_HEADER: usize = 6;
+// A grid's header in `grids`: column count, column gap (px, fraction), row gap (px, fraction), declared row height,
+// and the `auto-fill` / `auto-fit` copies an intrinsic measure drops (first index, count; -1 / 0 when there is no
+// auto repeat) — see `gridTrackList`.
+const GRID_HEADER: usize = 8;
 impl GridTrack {
     fn decode(grids: &[f64], o: usize) -> GridTrack {
         GridTrack {
@@ -5001,6 +5003,68 @@ fn content_intrinsic(i: usize, inputs: &[Cell<Input>], runs: &[Run], run_texts: 
         // …a LIST BOX excepted: its rows ARE CSS content, and the oracle's `minContentWidth` reads them (it asks
         // `contentIntrinsicWidths` for one rather than the control's own width).
         _ if n.replaced && !n.lays_out_children => Some((0.0, 0.0)), // a replaced box holds no CSS content
+        // A GRID answers with its own algorithm: each TRACK contributes the figure its spec names — a length, or
+        // the column's content min / max where it asks for one — and the gaps between them add on (CSS Grid §12.5:
+        // the container's min-content is the sum of its columns' min-content sizes, its max-content the sum of
+        // their max-content sizes). A percentage track and a percentage gap resolve against nothing here, as every
+        // percentage does in an intrinsic measure.
+        DISPLAY_GRID if n.grid_start >= 0 => {
+            let gs = n.grid_start as usize;
+            let all_cols = *grids.get(gs)? as usize;
+            let tmpl_base = gs + GRID_HEADER;
+            let kids: Vec<usize> = children[i].iter().copied().filter(|&c| inputs[c].get().out_of_flow == 0).collect();
+            if all_cols == 0 || tmpl_base + GRID_TRACK_STRIDE * all_cols + 2 * kids.len() > grids.len() {
+                return None;
+            }
+            // An `auto-fill` / `auto-fit` repeat expanded to as many copies as the width the grid is LAID OUT at
+            // fits; a measure with no width gets one copy (§7.2.3.2), so the extra ones are cut back out here.
+            let (drop_at, drop_len) = (grids[gs + 6], grids[gs + 7] as usize);
+            let dropped = if drop_at >= 0.0 { drop_at as usize..drop_at as usize + drop_len } else { 0..0 };
+            if dropped.end > all_cols || dropped.len() == all_cols {
+                return None;
+            }
+            let col_count = all_cols - dropped.len();
+            let tracks: Vec<GridTrack> = (0..all_cols)
+                .filter(|c| !dropped.contains(c))
+                .map(|c| GridTrack::decode(grids, tmpl_base + GRID_TRACK_STRIDE * c))
+                .collect();
+            let cells = grid_placement(grids, tmpl_base + GRID_TRACK_STRIDE * all_cols, col_count, kids.len());
+            let cols = grid_column_content(&kids, &cells, col_count, inputs, runs, run_texts, grids, children)?;
+            let gaps = grids[gs + 1] * (col_count as f64 - 1.0).max(0.0);
+            let mut min = gaps;
+            let mut max = gaps;
+            // A PERCENTAGE track (kind 4, or `fit-content` of one, kind 5) has nothing to be a percentage OF
+            // here, and behaves as `auto` — the column's own content (Chrome: a `grid-template-columns: 50%` grid
+            // measures its column's min and max).
+            let side = |kind: u8, val: f64, col: (f64, f64), want_max: bool| -> f64 {
+                match kind {
+                    4 | 5 => if want_max { col.1 } else { col.0 },
+                    _ => resolve_track_side(kind, val, col, 0.0),
+                }
+            };
+            // §12.7 Expand Flexible Tracks: with no space to fill, the `fr` tracks do NOT each take their own
+            // content — they take the LARGEST share any one of them asks for, times their own flex factor. So
+            // `1fr 2fr` holding a 34px item and a 16px one measures 34 + 68, not 34 + 16. (A flex factor below
+            // one asks for its content whole — the sum it divides is floored at 1.) The MIN-content side expands
+            // nothing: every track is its base size there.
+            let base_of = |c: usize, t: &GridTrack| side(t.base_kind, t.base_val, cols[c], false);
+            let used_fr = tracks
+                .iter()
+                .enumerate()
+                .filter(|(_, t)| t.is_fr)
+                .fold(0.0f64, |acc, (c, t)| acc.max(base_of(c, t).max(cols[c].1) / t.fr_weight.max(1.0)));
+            for (c, t) in tracks.iter().enumerate() {
+                let floor = base_of(c, t);
+                if t.is_fr {
+                    min += floor;
+                    max += floor.max(used_fr * t.fr_weight);
+                } else {
+                    min += floor;
+                    max += side(t.limit_kind, t.limit_val, cols[c], true);
+                }
+            }
+            Some((min, max))
+        }
         DISPLAY_BLOCK | DISPLAY_FLEX | DISPLAY_GRID => {
             let (mut min, mut max) = (0.0f64, 0.0f64);
             let mut line = 0.0f64; // floats pack beside each other on a line, as inline boxes would

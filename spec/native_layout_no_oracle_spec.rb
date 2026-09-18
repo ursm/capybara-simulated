@@ -100,6 +100,15 @@ RSpec.describe 'native layout no-oracle run', if: ENV.fetch('CSIM_JS_ENGINE', 'v
     expect(r['oracleReads'].keys).to include('gridColumnContent helper:intrinsicWidths')
   end
 
+  it 'still asks the oracle how wide an auto-fill grid was laid out' do
+    # `repeat(auto-fill, …)` expands to as many copies as the container FITS, and how many that is is the one
+    # thing the walk cannot answer for itself — it reads the oracle's content width to count them. Pinned so the
+    # last grid dependency is a decision on the record rather than something that quietly came back.
+    s = session_with('<div style="width:max-content"><div style="display:grid;grid-template-columns:repeat(auto-fill, minmax(50px, 1fr));gap:10px"><div>bb cc</div><div>dd</div></div></div>')
+    r = s.evaluate_script('globalThis.__csimLayoutShadowRun(undefined, {noOracle: true})')
+    expect(r['oracleReads'].keys).to include('oracleContentW _lb.width')
+  end
+
   it 'gives back the ordinary answer with every stamp revealed' do
     # The run differs from an ordinary one in more than the traps — every memo is computed again, in the walk's
     # order rather than the oracle's — so revealing everything must still come out clean, or a BREAK could be
@@ -139,6 +148,10 @@ RSpec.describe 'native layout no-oracle run', if: ENV.fetch('CSIM_JS_ENGINE', 'v
       '<table style="table-layout:fixed;width:50%;border-collapse:collapse"><tr><td style="border:2px solid">a</td><td>b</td></tr></table>',
       # …whose gate asks whether a height is imposed on the table without asking the oracle's box
       '<table style="border-spacing:2px"><tr><td><div style="height:50%">x</div></td></tr></table>',
+      # …and a GRID asked for its own intrinsic width: the track list, the column contributions and the §12.7
+      # `fr` expansion are native's, so nothing asks what the oracle laid the grid out as
+      '<div style="width:max-content"><div style="display:grid;grid-template-columns:40px 1fr"><span>aa bb</span><div>cc</div></div></div>',
+      '<div style="width:400px"><div style="float:left"><div style="display:grid;grid-template-columns:min-content auto;gap:6px"><div>aa bb</div><div>cc dd</div></div></div></div>',
       # …and a LIST BOX, whose own box native derives from the control's intrinsic data and whose rows it stacks
       '<div style="width:400px">t <span style="display:inline-block"><select multiple size="3" style="display:block;width:120px"><option>a</option><option>bbbb</option></select></span> u</div>'
     ].each do |body|

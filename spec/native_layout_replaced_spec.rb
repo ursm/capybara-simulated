@@ -150,17 +150,18 @@ RSpec.describe 'native layout replaced-leaf parity', if: ENV.fetch('CSIM_JS_ENGI
     # …and it is walked as a MEASURED subtree, like every other box native sizes from its own content. Plain
     # text is no test of that: native measures it right either way. What proves the contract is content with
     # a measure-only gap in it, which must DECLINE rather than answer — a `text-indent` (native's
-    # `text_intrinsic` has none), a grid holding inline items. Without the contract these were 30px narrow,
-    # and one in a `<td>` took the whole table's columns with it (258 mismatches in a 12,393-case sweep).
+    # `text_intrinsic` has none), a grid holding an anonymous item. Without the contract these were 30px
+    # narrow, and one in a `<td>` took the whole table's columns with it (258 mismatches in a 12,393-case
+    # sweep).
     it 'walks a shrink-wrapping button as a measured subtree' do
       # …an indented one included now that `text_intrinsic` takes the indent; a measure-only gap that REMAINS
-      # (a grid holding inline items) still declines.
+      # (a grid whose own TEXT is an anonymous item neither engine gives a record) still declines.
       ['<div style="width:400px"><button style="display:block;text-indent:30px">Hi</button></div>',
        '<div style="width:400px"><button style="display:block"><div style="text-indent:40px">Hi</div></button></div>',
        '<table style="border-spacing:0"><tr><td style="padding:0"><button style="display:block;text-indent:30px">Click me</button></td><td style="padding:0">b</td></tr></table>'].each do |body|
         expect_parity(body)
       end
-      expect_bail('<div style="width:400px"><button style="display:block"><div style="display:grid"><span>aa bb</span><span>cc</span></div></button></div>')
+      expect_bail('<div style="width:400px"><button style="display:block"><div style="display:grid">aa bb<div>cc</div></div></button></div>')
     end
     # …while the shrink-wrap decides nothing for a button whose width another algorithm owns, and native was
     # always right about those: a flex or grid ITEM, an out-of-flow box, a float, a declared or keyword width.

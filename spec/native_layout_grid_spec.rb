@@ -51,6 +51,20 @@ RSpec.describe 'native layout grid parity', if: ENV.fetch('CSIM_JS_ENGINE', 'v8'
     expect(r['nativeIntrinsicGrids']).to eq(0), "expected the oracle-resolved fallback: #{r.inspect}"
   end
 
+  # Parity AND the figure Chrome measures for the box marked `id="g"`. The grid's intrinsic answer is the same
+  # algorithm in BOTH engines, so parity alone would be blind to it being the wrong one. The tolerance is for
+  # Chrome's LayoutUnit: it snaps every figure to 1/64 px, so a track carrying a fraction can land 1/128 px off
+  # ours (80.8828125 against Chrome's 80.890625) — one snap, never more, so anything wider is a real difference.
+  def expect_chrome_width(body, chrome_w)
+    session = simulated_session(page(body))
+    session.visit '/'
+    session.evaluate_script('document.body.offsetHeight')
+    r = session.evaluate_script('globalThis.__csimLayoutShadowRun()')
+    expect(r).to include('ok' => true, 'mismatches' => 0), "#{body}: #{r.inspect}"
+    w = session.evaluate_script("document.getElementById('g').getBoundingClientRect().width")
+    expect(w).to be_within(0.01).of(chrome_w), "#{body}: #{w}, Chrome #{chrome_w}"
+  end
+
   it 'matches a fixed 2-column grid with a gap' do
     expect_parity('<div style="display:grid;grid-template-columns:100px 100px;gap:10px;width:300px"><div style="height:20px">a</div><div style="height:30px">b</div></div>')
   end
@@ -135,9 +149,9 @@ RSpec.describe 'native layout grid parity', if: ENV.fetch('CSIM_JS_ENGINE', 'v8'
     r = run_shadow('<div style="width:300px">text <span style="display:inline-grid;grid-template-columns:30px 30px"><div>x</div><div>y</div></span> more text wrapping onward past the edge</div>')
     expect(r).to include('ok' => true, 'mismatches' => 0), r.inspect
     expect(r['nativeAtomics']).to be >= 1, "the inline-grid was pushed: #{r.inspect}"
-    # …while one holding INLINE-LEVEL items is still pushed: its shrink-to-fit is an intrinsic measure, and
-    # that is the measure the oracle takes with a pen and native cannot (see `nlIntrinsicMeasurableOf`).
-    r = run_shadow('<div style="width:300px">text <span style="display:inline-grid;grid-template-columns:30px 30px"><span>x</span><span>y</span></span> more text wrapping onward past the edge</div>')
+    # …while one holding an ANONYMOUS item — a contiguous run of text (CSS Grid §4) — is still pushed: its
+    # shrink-to-fit is an intrinsic measure, and the grid algorithm has no item to size a column from there.
+    r = run_shadow('<div style="width:300px">text <span style="display:inline-grid;grid-template-columns:30px 30px">x<div>y</div></span> more text wrapping onward past the edge</div>')
     expect(r).to include('ok' => true, 'mismatches' => 0, 'nativeAtomics' => 0), r.inspect
   end
   # …and an inline-grid FLEX ITEM is a grid: a flex item is blockified, so nothing here is inline. It used to
@@ -398,12 +412,11 @@ RSpec.describe 'native layout grid parity', if: ENV.fetch('CSIM_JS_ENGINE', 'v8'
       expect_native_intrinsic(%(<div style="#{mc_auto}"><div style="display:flex"><div style="flex-basis:50px;flex-grow:1;padding:0 5px">grow basis</div><div style="min-width:120px">min</div><div style="max-width:20px">capped words</div></div><div>b</div></div>))
       expect_native_intrinsic(%(<div style="#{mc_auto}"><div style="display:flex"><div style="box-sizing:border-box;flex-basis:50px;padding:0 10px">bb</div><div style="width:50%">pct</div><div style="flex-basis:50%">half</div></div><div>b</div></div>))
     end
-    it 'falls back for a flex container with a percentage main gap, and for a grid holding inline content' do
+    it 'falls back for a flex container with a percentage main gap, and measures a nested grid whatever its items declare' do
       expect_resolved_fallback(%(<div style="#{mc_auto}"><div style="display:flex;column-gap:5%"><div>a</div><div>b</div></div><div>b</div></div>))
-      # …a grid whose items are BLOCKS is measured natively now (as a block, which is what the oracle does with
-      # one); only its INLINE-LEVEL content still falls back, where the oracle walks a pen the records cannot
-      # reproduce — see `nlIntrinsicMeasurableOf`.
-      expect_resolved_fallback(%(<div style="#{two_auto}"><div style="display:grid;grid-template-columns:50px 50px"><span>nested grid words</span><span>x</span></div><div style="height:10px">b</div></div>))
+      # …a nested GRID is measured natively whether its items are blocks or inline-level: each is an item of its
+      # own either way (CSS Grid §4 blockifies them), so both engines run the grid algorithm over the same set.
+      expect_native_intrinsic(%(<div style="#{two_auto}"><div style="display:grid;grid-template-columns:50px 50px"><span>nested grid words</span><span>x</span></div><div style="height:10px">b</div></div>))
       expect_native_intrinsic(%(<div style="#{two_auto}"><div style="display:grid;grid-template-columns:50px 50px"><div>nested grid words</div><div>x</div></div><div style="height:10px">b</div></div>))
     end
   end
@@ -521,17 +534,18 @@ RSpec.describe 'native layout grid parity', if: ENV.fetch('CSIM_JS_ENGINE', 'v8'
       end
     end
   end
-  # A GRID has an intrinsic width of its own now — every context that asks a box what it wants can ask one.
-  # The answer is a BLOCK's, measured over the grid's item records, because that is what the ORACLE answers:
-  # `intrinsicWidths` has no grid arm (it tests flex and table only) and `contentIntrinsicWidths` blockifies
-  # only a FLEX container's children. So the tracks and the gaps enter neither figure in either engine — a
-  # conformance gap they SHARE, which the port neither widens nor closes.
+  # A GRID has an intrinsic width of its own now, and it is the GRID algorithm's (CSS Grid §12.5) in BOTH
+  # engines: every track contributes the figure its own spec names over its column's content, and the gaps
+  # between them add on. It used to be a BLOCK's — the oracle walked its pen over the items and native walked
+  # the same child records — which counted neither the tracks nor the gaps and put two `<span>` items on ONE
+  # line (48.41 where Chrome, and the grid's own layout, say 34.2). Chrome figures throughout: the two engines
+  # agreeing on a rule says nothing about the rule.
   describe 'a grid answers for its own intrinsic width' do
     # …in every context that asks one: a shrink-to-fit float, an abspos box, a table column, a flex item both
     # ways, an outer grid's `min-content` track, an inline-block, a vertical writing mode, and the keyword
     # widths themselves.
     it 'is measured wherever a box is asked what it wants' do
-      g = '<div style="display:grid;grid-template-columns:40px 60px"><div style="width:40px;height:10px"></div><div style="width:70px;height:10px"></div></div>'
+      g = '<div id="g" style="display:grid;grid-template-columns:40px 60px"><div style="width:40px;height:10px"></div><div style="width:70px;height:10px"></div></div>'
       [
         %(<div style="width:max-content">#{g}</div>),
         %(<div style="width:min-content">#{g}</div>),
@@ -545,6 +559,78 @@ RSpec.describe 'native layout grid parity', if: ENV.fetch('CSIM_JS_ENGINE', 'v8'
         %(<div style="width:400px">text <span style="display:inline-block">#{g}</span> after</div>),
         %(<div style="width:400px"><div style="writing-mode:vertical-lr">#{g}</div></div>)
       ].each {|body| expect_parity(body) }
+      # …and the figure itself is the TRACKS' — 40 + 60, not the items' 40 and 70 — plus the gaps.
+      expect_chrome_width(%(<div style="width:max-content">#{g}</div>), 100)
+      expect_chrome_width(%(<div style="width:max-content">#{g.sub('40px 60px', '40px 60px;gap:8px')}</div>), 108)
+    end
+    # Each track side answers as its own spec says: a length pins it, an intrinsic keyword takes the column's
+    # content, `fit-content` caps it, and a PERCENTAGE — which has nothing to be a percentage of in an intrinsic
+    # measure — behaves as `auto` and takes the column's content too.
+    it 'sizes each track side the way its own spec names it' do
+      mc = ->(tpl, items) { %(<div style="width:max-content"><div id="g" style="display:grid;grid-template-columns:#{tpl}">#{items}</div></div>) }
+      two = '<div>bb cc</div><div>dd</div>'
+      expect_chrome_width(mc.call('min-content auto', '<div>aa bb</div><div>cc dd</div>'), 50.203125)
+      expect_chrome_width(mc.call('50%', '<div>bb cc</div>'), 34.203125)
+      expect_chrome_width(mc.call('50%', '<div>bb cc</div>').sub('max-content', 'min-content'), 16)
+      expect_chrome_width(mc.call('minmax(90px, 1fr)', '<div>bb cc</div>'), 90)
+      expect_chrome_width(mc.call('fit-content(20px)', '<div>bb cc</div>'), 20)
+      # …and an `fr` track takes neither its own content nor nothing: §12.7 hands every flexible track the
+      # LARGEST share any one of them asks for, times its own flex factor, so `1fr 2fr` over a 34px item and a
+      # 16px one is 34 + 68. The MIN-content side expands nothing — there every track is its base size.
+      expect_chrome_width(mc.call('1fr 2fr', two), 102.609375)
+      expect_chrome_width(mc.call('1fr 2fr', two).sub('max-content', 'min-content'), 32)
+      # …and an `auto-fill` repeat is ONE copy here (§7.2.3.2: the available space is indefinite), so its gaps
+      # do not multiply either — the grid is laid out at four columns and measured at one.
+      expect_chrome_width(mc.call('repeat(auto-fill, minmax(25%, 1fr));gap:10px', two), 34.203125)
+      expect_chrome_width(mc.call('repeat(auto-fill, minmax(50px, 1fr));gap:10px', two), 50)
+    end
+    # …and the copies an intrinsic measure drops are the AUTO repeat's alone: the tracks written out beside it,
+    # and a literal `repeat(N, …)`, stay. Each grid is measured at one copy and laid out at as many as it fits.
+    it 'drops only the auto repeat\'s extra copies, wherever it sits in the template' do
+      [
+        ['repeat(auto-fit, minmax(50px, 1fr));gap:10px',           '<div>dd</div>',               'bb cc',  50, 400, 195],
+        ['40px repeat(auto-fill, minmax(30px, 1fr)) 20px;gap:5px', '<div>dd</div><div>ee</div>', 'bb cc', 100, 300,  40],
+        ['repeat(3, 20px) repeat(auto-fill, 25px);gap:4px',        '<div>b</div>',               'a',      97, 300,  20]
+      ].each do |tpl, rest, first, intrinsic_w, room, laid_out_first_col|
+        grid = ->(id) { %(<div #{id == :grid ? 'id="g" ' : ''}style="display:grid;grid-template-columns:#{tpl}"><div#{id == :item ? ' id="g"' : ''}>#{first}</div>#{rest}</div>) }
+        expect_chrome_width(%(<div style="width:max-content">#{grid.call(:grid)}</div>), intrinsic_w)
+        # …and the same template laid out in real room puts the first item in a track sized for the copies that
+        # DID fit, so the drop is the measure's alone and has not reached the layout.
+        expect_chrome_width(%(<div style="width:#{room}px">#{grid.call(:item)}</div>), laid_out_first_col)
+      end
+    end
+    # …and where an item is placed by a line counted from the END, the two engines cannot agree on which column
+    # that is — the walk resolved it at the laid-out track count, the oracle re-resolves it at the one copy — so
+    # such a grid is refused and the oracle's own figure stands. (Neither matches Chrome there either.)
+    it 'refuses an end-counted line under an auto repeat' do
+      cell = ->(grid) { %(<table style="width:400px;border-spacing:0"><tr><td style="padding:0">#{grid}</td><td style="padding:0">x</td></tr></table>) }
+      expect_parity(cell.call('<div style="display:grid;grid-template-columns:repeat(auto-fill,50px) auto"><div style="grid-column-start:-2">aaaaaa</div><div>b</div></div>'))
+      # …while the same line under a WRITTEN-OUT template, and a forward line under the repeat, stay native
+      expect_parity(cell.call('<div style="display:grid;grid-template-columns:50px auto"><div style="grid-column-start:-2">aaaaaa</div><div>b</div></div>'))
+      expect_parity(cell.call('<div style="display:grid;grid-template-columns:repeat(auto-fill,50px) auto"><div style="grid-column-start:2">aaaaaa</div><div>b</div></div>'))
+    end
+    # …and a template that turns out INVALID after the repeat has been counted takes the implicit single column
+    # with it: the span of copies to drop describes tracks the caller never got, and marshalling it would decline
+    # the whole pass.
+    it 'forgets the auto repeat when the template it sat in turns out invalid' do
+      ['frobnicate', 'repeat(0,10px)'].each do |tail|
+        expect_parity(%(<div style="display:grid;grid-template-columns:repeat(auto-fill,50px) #{tail};width:400px"><div>a</div><div>b</div></div>))
+      end
+    end
+    # A bare `fr` is `minmax(auto, 1fr)`, so it carries the AUTOMATIC minimum every other track has: its
+    # column's min-content, which its share cannot fall below. `minmax(0, 1fr)` is how you ask for the share
+    # alone. This is the LAYOUT figure, not an intrinsic one — the same base size feeds both.
+    it 'floors a bare fr track at its column\'s content, and takes minmax(0, 1fr) at its word' do
+      narrow = ->(tpl) { %(<div style="width:60px;display:grid;grid-template-columns:#{tpl}"><div id="g">wwwwwww</div><div>x</div></div>) }
+      expect_chrome_width(narrow.call('1fr 1fr'), 80.890625)
+      expect_chrome_width(narrow.call('minmax(0,1fr) 1fr'), 30)
+      # …and the same base is what an intrinsic measure asks for, so `minmax(0, 1fr)` measures nothing at all
+      # where a bare `1fr` measures its column
+      mc = ->(tpl) { %(<div style="width:min-content"><div id="g" style="display:grid;grid-template-columns:#{tpl}"><div>wwwwwww</div></div></div>) }
+      expect_chrome_width(mc.call('minmax(0,1fr)'), 0)
+      expect_chrome_width(mc.call('minmax(10px,1fr)'), 10)
+      expect_chrome_width(mc.call('minmax(90px,1fr)'), 90)
+      expect_chrome_width(mc.call('1fr'), 80.890625)
     end
     # …and the block arm's own branches: a float packs onto a line, an out-of-flow item sizes nothing, a
     # replaced item brings its intrinsic width, a nested grid answers in turn, a negative margin narrows.
@@ -557,37 +643,40 @@ RSpec.describe 'native layout grid parity', if: ENV.fetch('CSIM_JS_ENGINE', 'v8'
         '<div style="margin-left:-6px;width:30px;height:10px"></div>'
       ].each {|items| expect_parity(%(<div style="width:max-content"><div style="display:grid">#{items}</div></div>)) }
       # …while a `display: contents` child is refused before this test is reached at all (the walk does not
-      # flatten one — its own arm above), and a NON-WRAPPING mode over a grid with block children is refused
-      # by the pin that predates grids (`!(hasBlock && nowrap|pre)`).
+      # flatten one — its own arm above).
       expect_bail('<div style="width:max-content"><div style="display:grid"><div style="display:contents"><div style="width:30px;height:10px"></div></div></div></div>')
-      expect_bail('<div style="width:max-content"><div style="display:grid;white-space:nowrap"><div style="width:20px;height:10px"></div></div></div>')
     end
-    # …while INLINE-LEVEL content still declines, because there the two engines do different things: the
-    # oracle walks it with a PEN — two `<span>` items land on ONE line and sum for max-content (48.41 against
-    # the widest item's 34.2) — and the walk hands native one blockified record per item.
-    it 'declines a grid holding inline-level content, and takes the same grid with block items' do
+    # …and INLINE-LEVEL content is content like any other: §4 makes each inline-level child a grid item of its
+    # own (blockified), so two `<span>` items are two items in one column and the column is the WIDER of them —
+    # not the line the pen used to put them on.
+    it 'measures inline-level items as the items they are' do
       {
-        '<span>aa bb</span><span>cc</span>'                        => '<div>aa bb</div><div>cc</div>',
-        'aa bb'                                                    => '<div>aa bb</div>',
-        '<span style="display:inline-block;width:20px;height:9px"></span>' => '<div style="width:20px;height:9px"></div>',
-        '<div style="width:9px;height:4px"></div><br>'             => '<div style="width:9px;height:4px"></div>'
-      }.each do |inline, block|
-        expect_bail(%(<div style="width:max-content"><div style="display:grid">#{inline}</div></div>))
-        expect_parity(%(<div style="width:max-content"><div style="display:grid">#{block}</div></div>))
+        '<span>aa bb</span><span>cc</span>'                                => 34.203125,
+        '<span style="display:inline-block;width:20px;height:9px"></span>' => 20,
+        '<div style="width:9px;height:4px"></div><br>'                     => 9
+      }.each do |items, chrome_w|
+        expect_chrome_width(%(<div style="width:max-content"><div id="g" style="display:grid">#{items}</div></div>), chrome_w)
       end
     end
-    # …and a run of pure SPACES is inline content too, but only where the mode PRESERVES it: the oracle
-    # measures every character of it (a grid of ten spaces under `pre` is 40 wide there and 0 to native, which
-    # has neither a record nor a run stream for the anonymous item they form), while a collapsible run sets no
-    # `inlineOnLine` and contributes nothing to either engine. This is the shape a spec written from the
-    # element side alone would miss.
-    it 'declines whitespace the mode preserves, and keeps a grid whose whitespace collapses' do
-      ['white-space:pre', 'white-space:pre-wrap'].each do |ws|
-        expect_bail(%(<div style="width:max-content"><div style="display:grid;#{ws}">          </div></div>))
-        expect_bail(%(<div style="width:max-content"><div style="display:grid;#{ws}">          <div style="width:20px;height:10px"></div></div></div>))
-      end
-      ['', 'white-space:normal'].each do |ws|
-        expect_parity(%(<div style="width:max-content"><div style="display:grid;#{ws}">          <div style="width:20px;height:10px"></div></div></div>))
+    # …while a contiguous run of TEXT is where the grid algorithm runs out: it is an ANONYMOUS grid item (§4)
+    # that the walk emits neither a record nor a run stream for, so neither engine can size a column from it.
+    # `contentIntrinsicWidths` walks its pen for such a grid instead — which at least measures the text — and
+    # native, having no run stream at all, declines.
+    it 'declines a grid whose own text is an anonymous item' do
+      expect_bail('<div style="width:max-content"><div style="display:grid">aa bb</div></div>')
+      expect_bail('<div style="width:max-content"><div style="display:grid">aa bb<div>cc</div></div></div>')
+      expect_parity('<div style="width:max-content"><div style="display:grid"><div>aa bb</div><div>cc</div></div></div>')
+    end
+    # …and a run of pure SPACES is not an anonymous item at all: §4 leaves a whitespace-only run UNRENDERED
+    # whatever the `white-space` mode says, so a grid of ten spaces is 0 wide under `pre` as under `normal`.
+    # The oracle used to measure every character of it (40 under `pre`) and native declined; both are the grid
+    # algorithm's 0 now. This is the shape a spec written from the element side alone would miss.
+    it 'renders no anonymous item for whitespace, in any mode' do
+      # …every mode, `nowrap` and `pre` included: the pen's non-wrapping pin (`!(hasBlock && nowrap|pre)`) is a
+      # BLOCK's, and a grid is not measured with a pen — its items each answer under their own mode.
+      ['', 'white-space:normal', 'white-space:pre', 'white-space:pre-wrap', 'white-space:nowrap'].each do |ws|
+        expect_chrome_width(%(<div style="width:max-content"><div id="g" style="display:grid;#{ws}">          </div></div>), 0)
+        expect_chrome_width(%(<div style="width:max-content"><div id="g" style="display:grid;#{ws}">          <div style="width:20px;height:10px"></div></div></div>), 20)
       end
     end
   end
