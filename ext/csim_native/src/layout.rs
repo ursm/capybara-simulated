@@ -4710,10 +4710,10 @@ struct GridTrack {
     is_auto: bool,
 }
 const GRID_TRACK_STRIDE: usize = 7;
-// A grid's header in `grids`: column count, column gap (px, fraction), row gap (px, fraction), declared row height,
-// and the `auto-fill` / `auto-fit` copies an intrinsic measure drops (first index, count; -1 / 0 when there is no
-// auto repeat) — see `gridTrackList`.
-const GRID_HEADER: usize = 8;
+// A grid's header in `grids`: the number of track specs that follow, column gap (px, fraction), row gap (px,
+// fraction), declared row height, and the `auto-fill` / `auto-fit` repeat inside those specs — where its ONE
+// marshalled copy starts, how long it is, and its kind (1 fill, 2 fit; -1 / 0 / 0 when there is none).
+const GRID_HEADER: usize = 9;
 impl GridTrack {
     fn decode(grids: &[f64], o: usize) -> GridTrack {
         GridTrack {
@@ -4829,17 +4829,104 @@ struct GridCell {
     span: usize,
     row: usize,
 }
+// A declared grid line as a 1-based line NUMBER: a negative one counts back from the end of the track list
+// (`-1` is the line after the last track), so `1 / -1` — the full-bleed idiom — is every column there is.
+// Mirrors the oracle's `gridLine`.
+fn grid_line(n: f64, cols: usize) -> f64 {
+    if n < 0.0 { cols as f64 + 1.0 + n + 1.0 } else { n }
+}
+// Item `k`'s (start column, span) resolved against a track list `cols` long, from the LINES it declared
+// (`gridColumnPlacement`: start, end, explicit `span N` — 0 for "auto" in each). The oracle's `gridColumnStart`
+// / `gridColumnSpan` with the same count give the same answer; the count is what an `auto-fill` repeat makes
+// vary, which is why the lines cross unresolved.
+fn grid_item_columns(grids: &[f64], place_base: usize, k: usize, cols: usize) -> (Option<usize>, usize) {
+    let (start_n, end_n, span_n) = (grids[place_base + 3 * k], grids[place_base + 3 * k + 1], grids[place_base + 3 * k + 2]);
+    let span = if span_n > 0.0 {
+        span_n as usize
+    } else if start_n != 0.0 && end_n != 0.0 {
+        (grid_line(end_n, cols) - grid_line(start_n, cols)).max(1.0) as usize
+    } else {
+        1
+    };
+    let start = if start_n == 0.0 {
+        None
+    } else {
+        let idx = grid_line(start_n, cols) - 1.0;
+        if idx >= 0.0 && (idx as usize) < cols { Some(idx as usize) } else { None }
+    };
+    (start, span.clamp(1, cols.max(1)))
+}
+// How many columns the template makes in a content box `content_w` wide: the marshalled specs as they stand,
+// with the `auto-fill` / `auto-fit` repeat inside them made as many copies as fit. Mirrors the oracle's
+// `autoRepeatCount` — how many fit is decided by each body track's MINIMUM (a `minmax(200px, 1fr)` card grid
+// fits `content_w / 200` of them and the `1fr` shares out the rest), the minimum falling back to the maximum
+// where it isn't a definite length; a pattern with nothing definite in it, or no width to fit against, is ONE
+// repetition. `auto-fit` then collapses the copies placement leaves empty.
+fn grid_repeat_count(grids: &[f64], gs: usize, tmpl_base: usize, content_w: f64, gap: f64, place_base: usize, n_items: usize) -> usize {
+    let repeat_kind = grids[gs + 8] as u8;
+    let repeat_len = grids[gs + 7] as usize;
+    if repeat_kind == 0 || repeat_len == 0 || grids[gs + 6] < 0.0 {
+        return 1;
+    }
+    let repeat_start = grids[gs + 6];
+    if !content_w.is_finite() {
+        return 1; // no width to fit against — §7.2.3.2 gives it one copy
+    }
+    let fixed_of = |kind: u8, val: f64| match kind {
+        0 => Some(val),
+        4 => Some(val * content_w),
+        _ => None,
+    };
+    let mut per = 0.0f64;
+    for k in 0..repeat_len {
+        let t = GridTrack::decode(grids, tmpl_base + GRID_TRACK_STRIDE * (repeat_start as usize + k));
+        let fixed = fixed_of(t.base_kind, t.base_val).or_else(|| fixed_of(t.limit_kind, t.limit_val));
+        match fixed {
+            Some(f) if f > 0.0 => per += f + gap,
+            _ => return 1,
+        }
+    }
+    if per <= 0.0 {
+        return 1;
+    }
+    let fits = (((content_w + gap) / per).floor() as usize).max(1);
+    if repeat_kind == 2 {
+        let spanned: usize = (0..n_items)
+            .map(|k| grid_item_columns(grids, place_base, k, fits * repeat_len).1)
+            .sum();
+        if spanned > 0 {
+            return fits.min(spanned.div_ceil(repeat_len)).max(1);
+        }
+    }
+    fits
+}
+// The marshalled specs with the repeat made `count` copies — the track list both engines size, and how many
+// columns that is. Mirrors `expandTemplate`.
+fn grid_expanded_tracks(grids: &[f64], gs: usize, tmpl_base: usize, literal: usize, count: usize) -> Vec<GridTrack> {
+    let decode = |c: usize| GridTrack::decode(grids, tmpl_base + GRID_TRACK_STRIDE * c);
+    let repeat_len = grids[gs + 7] as usize;
+    if grids[gs + 8] as u8 == 0 || repeat_len == 0 || grids[gs + 6] < 0.0 || repeat_len > literal {
+        return (0..literal).map(decode).collect();
+    }
+    let start = (grids[gs + 6] as usize).min(literal - repeat_len);
+    let mut out: Vec<GridTrack> = (0..start).map(decode).collect();
+    for _ in 0..count {
+        out.extend((start..start + repeat_len).map(decode));
+    }
+    out.extend((start + repeat_len..literal).map(decode));
+    out
+}
 // Row-major auto-placement, mirroring the oracle (`layoutGrid` / `gridColumnContent` agree on the columns): an
 // explicit start that fits resets the column (a new row if the cursor already passed it); otherwise a span that
-// would overflow wraps; a filled row advances at once. `grids[place_base + 2k ..]` holds item k's (col-start or
-// -1, span). Shared by the content measure (which columns an item contributes to) and the layout (where it lands).
+// would overflow wraps; a filled row advances at once. `grids[place_base + 3k ..]` holds item k's declared lines
+// (`grid_item_columns`). Shared by the content measure (which columns an item contributes to) and the layout.
 fn grid_placement(grids: &[f64], place_base: usize, col_count: usize, n_items: usize) -> Vec<GridCell> {
     let mut cells = Vec::with_capacity(n_items);
     let mut col = 0usize;
     let mut row = 0usize;
     for k in 0..n_items {
-        let start_f = grids[place_base + 2 * k];
-        let span = (grids[place_base + 2 * k + 1] as usize).clamp(1, col_count);
+        let (start_idx, span) = grid_item_columns(grids, place_base, k, col_count);
+        let start_f = start_idx.map_or(-1.0, |i| i as f64);
         if start_f >= 0.0 && (start_f as usize) + span <= col_count {
             let start = start_f as usize;
             if start < col {
@@ -5010,25 +5097,19 @@ fn content_intrinsic(i: usize, inputs: &[Cell<Input>], runs: &[Run], run_texts: 
         // percentage does in an intrinsic measure.
         DISPLAY_GRID if n.grid_start >= 0 => {
             let gs = n.grid_start as usize;
-            let all_cols = *grids.get(gs)? as usize;
+            let literal = *grids.get(gs)? as usize;
             let tmpl_base = gs + GRID_HEADER;
             let kids: Vec<usize> = children[i].iter().copied().filter(|&c| inputs[c].get().out_of_flow == 0).collect();
-            if all_cols == 0 || tmpl_base + GRID_TRACK_STRIDE * all_cols + 2 * kids.len() > grids.len() {
+            let place_base = tmpl_base + GRID_TRACK_STRIDE * literal;
+            if literal == 0 || place_base + 3 * kids.len() > grids.len() {
                 return None;
             }
-            // An `auto-fill` / `auto-fit` repeat expanded to as many copies as the width the grid is LAID OUT at
-            // fits; a measure with no width gets one copy (§7.2.3.2), so the extra ones are cut back out here.
-            let (drop_at, drop_len) = (grids[gs + 6], grids[gs + 7] as usize);
-            let dropped = if drop_at >= 0.0 { drop_at as usize..drop_at as usize + drop_len } else { 0..0 };
-            if dropped.end > all_cols || dropped.len() == all_cols {
-                return None;
-            }
-            let col_count = all_cols - dropped.len();
-            let tracks: Vec<GridTrack> = (0..all_cols)
-                .filter(|c| !dropped.contains(c))
-                .map(|c| GridTrack::decode(grids, tmpl_base + GRID_TRACK_STRIDE * c))
-                .collect();
-            let cells = grid_placement(grids, tmpl_base + GRID_TRACK_STRIDE * all_cols, col_count, kids.len());
+            // An intrinsic measure has NO width for an `auto-fill` / `auto-fit` repeat to fit against, so it
+            // makes the one copy §7.2.3.2 gives it — where the layout makes as many as its content box holds.
+            let count = grid_repeat_count(grids, gs, tmpl_base, f64::NAN, 0.0, place_base, kids.len());
+            let tracks = grid_expanded_tracks(grids, gs, tmpl_base, literal, count);
+            let col_count = tracks.len();
+            let cells = grid_placement(grids, place_base, col_count, kids.len());
             let cols = grid_column_content(&kids, &cells, col_count, inputs, runs, run_texts, grids, children)?;
             let gaps = grids[gs + 1] * (col_count as f64 - 1.0).max(0.0);
             let mut min = gaps;
@@ -5548,7 +5629,7 @@ fn measure_grid(
     if gs + GRID_HEADER > grids.len() {
         return bail(failed);
     }
-    let col_count = grids[gs] as usize;
+    let literal = grids[gs] as usize;
     // The gaps arrive as `px + fraction` of the content box along their axis (`gapSpec`): a row gap's fraction
     // resolves against the content height where that is DEFINITE — declared or imposed — and is nothing where the
     // height is the rows' own, as the oracle's `layoutGrid` has it.
@@ -5558,12 +5639,18 @@ fn measure_grid(
     let tmpl_base = gs + GRID_HEADER;
     // The in-flow items, in record order — the out-of-flow children join no row.
     let kids: Vec<usize> = children[i].iter().copied().filter(|&c| inputs[c].get().out_of_flow == 0).collect();
-    // Template is GRID_TRACK_STRIDE values per column; placement is 2 per in-flow item.
-    if col_count == 0 || tmpl_base + GRID_TRACK_STRIDE * col_count + 2 * kids.len() > grids.len() {
+    // Template is GRID_TRACK_STRIDE values per marshalled column; placement is 3 per in-flow item.
+    let place_base = tmpl_base + GRID_TRACK_STRIDE * literal;
+    if literal == 0 || place_base + 3 * kids.len() > grids.len() {
         return bail(failed);
     }
-    let tracks: Vec<GridTrack> = (0..col_count).map(|c| GridTrack::decode(grids, tmpl_base + GRID_TRACK_STRIDE * c)).collect();
-    let place_base = tmpl_base + GRID_TRACK_STRIDE * col_count;
+    // …and how many columns those specs actually make is this box's own answer: an `auto-fill` / `auto-fit`
+    // repeat makes as many copies as THIS content box fits, with the gap between them counting toward each. The
+    // oracle counts them against its own `content_w`; the two figures are the same box, so they must agree
+    // bit-for-bit — a 1-ulp difference at an exact boundary is a whole column, not a rounding error.
+    let count = grid_repeat_count(grids, gs, tmpl_base, content_w, col_gap, place_base, kids.len());
+    let tracks = grid_expanded_tracks(grids, gs, tmpl_base, literal, count);
+    let col_count = tracks.len();
     let cells = grid_placement(grids, place_base, col_count, kids.len());
     for &c in &children[i] {
         let cn = inputs[c].get();
@@ -7292,5 +7379,82 @@ mod tests {
         root.flex_main_is_x = false; // a column: the widest item
         let inputs = [root, a, b, c];
         assert_eq!(intrinsic_widths(0, &inputs.map(Cell::new), &[], &[], &[], &children), Some((60.0, 60.0)));
+    }
+
+    // ── the grid template's auto repeat ────────────────────────────────────────────────────────────────────
+    // A marshalled grid buffer: the header, `specs` track sides (base kind/val, limit kind/val, is_fr, weight,
+    // is_auto) and `places` item placements (start line, end line, span) — the shape `nlShadowRun` writes.
+    fn grid_buffer(literal: usize, repeat: (f64, usize, u8), specs: &[[f64; 7]], places: &[[f64; 3]]) -> Vec<f64> {
+        let mut g = vec![literal as f64, 0.0, 0.0, 0.0, 0.0, f64::NAN, repeat.0, repeat.1 as f64, repeat.2 as f64];
+        for spec in specs {
+            g.extend_from_slice(spec);
+        }
+        for place in places {
+            g.extend_from_slice(place);
+        }
+        g
+    }
+    const FIXED_50: [f64; 7] = [0.0, 50.0, 0.0, 50.0, 0.0, 0.0, 0.0]; // a plain `50px` track
+    const AUTO_TRACK: [f64; 7] = [1.0, 0.0, 2.0, 0.0, 0.0, 0.0, 1.0]; // `auto`: min-content base, max-content limit
+    const NO_PLACE: [f64; 3] = [0.0, 0.0, 0.0];
+
+    #[test]
+    fn auto_fill_makes_as_many_copies_as_the_content_box_fits() {
+        let g = grid_buffer(1, (0.0, 1, 1), &[FIXED_50], &[NO_PLACE]);
+        let count = |w: f64, gap: f64| grid_repeat_count(&g, 0, GRID_HEADER, w, gap, GRID_HEADER + GRID_TRACK_STRIDE, 1);
+        assert_eq!(count(400.0, 0.0), 8);
+        assert_eq!(count(399.0, 0.0), 7);
+        assert_eq!(count(400.0, 10.0), 6); // (400 + 10) / (50 + 10)
+        assert_eq!(count(10.0, 0.0), 1); // never below one copy
+        assert_eq!(count(f64::NAN, 0.0), 1); // an intrinsic measure has no width to fit against (§7.2.3.2)
+        assert_eq!(grid_expanded_tracks(&g, 0, GRID_HEADER, 1, count(400.0, 0.0)).len(), 8);
+    }
+
+    #[test]
+    fn a_repeat_with_nothing_definite_in_it_is_one_copy() {
+        let g = grid_buffer(1, (0.0, 1, 1), &[AUTO_TRACK], &[NO_PLACE]);
+        assert_eq!(grid_repeat_count(&g, 0, GRID_HEADER, 400.0, 0.0, GRID_HEADER + GRID_TRACK_STRIDE, 1), 1);
+        // …and a template with no repeat at all keeps exactly the specs it was handed
+        let plain = grid_buffer(2, (-1.0, 0, 0), &[FIXED_50, AUTO_TRACK], &[NO_PLACE]);
+        assert_eq!(grid_repeat_count(&plain, 0, GRID_HEADER, 400.0, 0.0, GRID_HEADER + 2 * GRID_TRACK_STRIDE, 1), 1);
+        assert_eq!(grid_expanded_tracks(&plain, 0, GRID_HEADER, 2, 1).len(), 2);
+    }
+
+    #[test]
+    fn the_copies_land_between_the_tracks_written_out_beside_them() {
+        // `40px repeat(auto-fill, 50px) auto` — the repeat is track 1 of three marshalled
+        let specs = [[0.0, 40.0, 0.0, 40.0, 0.0, 0.0, 0.0], FIXED_50, AUTO_TRACK];
+        let g = grid_buffer(3, (1.0, 1, 1), &specs, &[NO_PLACE]);
+        let tracks = grid_expanded_tracks(&g, 0, GRID_HEADER, 3, 3);
+        assert_eq!(tracks.len(), 5); // 40px, three copies, auto
+        assert_eq!(tracks[0].base_val, 40.0);
+        assert!(tracks[1..4].iter().all(|t| t.base_val == 50.0));
+        assert_eq!(tracks[4].limit_kind, 2); // the `auto` suffix survives at the end
+    }
+
+    #[test]
+    fn auto_fit_collapses_the_copies_placement_leaves_empty() {
+        let places = [NO_PLACE, NO_PLACE];
+        let g = grid_buffer(1, (0.0, 1, 2), &[FIXED_50], &places);
+        let place_base = GRID_HEADER + GRID_TRACK_STRIDE;
+        // eight would fit, but two items only ever occupy two
+        assert_eq!(grid_repeat_count(&g, 0, GRID_HEADER, 400.0, 0.0, place_base, 2), 2);
+        // …and a spanning item counts for every column it covers
+        let spanning = grid_buffer(1, (0.0, 1, 2), &[FIXED_50], &[[0.0, 0.0, 3.0], NO_PLACE]);
+        assert_eq!(grid_repeat_count(&spanning, 0, GRID_HEADER, 400.0, 0.0, place_base, 2), 4);
+    }
+
+    #[test]
+    fn a_declared_line_resolves_against_the_track_count_it_is_read_with() {
+        // `grid-column-start: -2` / `grid-column: 1 / -1` / `grid-column: 2 / span 3`
+        let places = [[-2.0, 0.0, 0.0], [1.0, -1.0, 0.0], [2.0, 0.0, 3.0], [9.0, 0.0, 0.0]];
+        let g = grid_buffer(1, (-1.0, 0, 0), &[FIXED_50], &places);
+        let place_base = GRID_HEADER + GRID_TRACK_STRIDE;
+        assert_eq!(grid_item_columns(&g, place_base, 0, 5), (Some(4), 1)); // -2 is the second line from the end
+        assert_eq!(grid_item_columns(&g, place_base, 0, 2), (Some(1), 1)); // …a different column in a shorter list
+        assert_eq!(grid_item_columns(&g, place_base, 1, 5), (Some(0), 5)); // 1 / -1 is every column there is
+        assert_eq!(grid_item_columns(&g, place_base, 1, 2), (Some(0), 2));
+        assert_eq!(grid_item_columns(&g, place_base, 2, 5), (Some(1), 3)); // an end-side span keeps its start line
+        assert_eq!(grid_item_columns(&g, place_base, 3, 5), (None, 1)); // a line past the end auto-places
     }
 }

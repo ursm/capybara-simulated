@@ -599,23 +599,63 @@ RSpec.describe 'native layout grid parity', if: ENV.fetch('CSIM_JS_ENGINE', 'v8'
         expect_chrome_width(%(<div style="width:#{room}px">#{grid.call(:item)}</div>), laid_out_first_col)
       end
     end
-    # …and where an item is placed by a line counted from the END, the two engines cannot agree on which column
-    # that is — the walk resolved it at the laid-out track count, the oracle re-resolves it at the one copy — so
-    # such a grid is refused and the oracle's own figure stands. (Neither matches Chrome there either.)
-    it 'refuses an end-counted line under an auto repeat' do
+    # …and an item's declared LINES cross unresolved too, because which column a line names depends on how long
+    # the list turned out: `-2` is the second line from the END, and the end moves with the copies. Chrome
+    # figures for `[x, width]` of the item marked `id="g"` — each side of the declaration read on its OWN (an end
+    # that is a `span` does not cancel the start line, and a longhand outranks the shorthand it follows).
+    it 'resolves each declared line against its own track count' do
+      [
+        ['repeat(5, 60px)',                   'grid-column:2 / span 3',                      60, 180],
+        ['repeat(5, 60px)',                   'grid-column:-3 / span 2',                    180, 120],
+        ['repeat(5, 60px)',                   'grid-column-start:2;grid-column-end:span 2',  60, 120],
+        ['repeat(5, 60px)',                   'grid-column:1 / 3;grid-column-start:3',      120,  60],
+        ['repeat(5, 60px)',                   'grid-column:2',                               60,  60],
+        ['repeat(auto-fill, 60px)',           'grid-column:2 / SPAN 3',                      60, 180],
+        ['40px repeat(auto-fill, 60px) 20px', 'grid-column:2 / span 3',                      40, 180]
+      ].each do |tpl, place, chrome_x, chrome_w|
+        body = %(<div style="width:300px"><div style="display:grid;grid-template-columns:#{tpl}"><div id="g" style="#{place}">g</div><div>a</div></div></div>)
+        session = simulated_session(page(body))
+        session.visit '/'
+        session.evaluate_script('document.body.offsetHeight')
+        expect(session.evaluate_script('globalThis.__csimLayoutShadowRun()')).to include('ok' => true, 'mismatches' => 0), body
+        box = session.evaluate_script("(b => [b.x, b.width])(document.getElementById('g').getBoundingClientRect())")
+        expect(box).to eq([chrome_x, chrome_w]), "#{body}: #{box.inspect}, Chrome [#{chrome_x}, #{chrome_w}]"
+      end
+      # …and the same lines against a list of ANOTHER length, where the two engines have to agree on both
       cell = ->(grid) { %(<table style="width:400px;border-spacing:0"><tr><td style="padding:0">#{grid}</td><td style="padding:0">x</td></tr></table>) }
-      expect_parity(cell.call('<div style="display:grid;grid-template-columns:repeat(auto-fill,50px) auto"><div style="grid-column-start:-2">aaaaaa</div><div>b</div></div>'))
-      # …while the same line under a WRITTEN-OUT template, and a forward line under the repeat, stay native
-      expect_parity(cell.call('<div style="display:grid;grid-template-columns:50px auto"><div style="grid-column-start:-2">aaaaaa</div><div>b</div></div>'))
-      expect_parity(cell.call('<div style="display:grid;grid-template-columns:repeat(auto-fill,50px) auto"><div style="grid-column-start:2">aaaaaa</div><div>b</div></div>'))
+      ['repeat(auto-fill,50px) auto', '50px auto'].each do |tpl|
+        ['grid-column-start:-2', 'grid-column-start:2', 'grid-column:1 / -1', 'grid-column:span 2'].each do |place|
+          expect_parity(cell.call(%(<div style="display:grid;grid-template-columns:#{tpl}"><div style="#{place}">aaaaaa</div><div>b</div></div>)))
+        end
+      end
     end
-    # …and a template that turns out INVALID after the repeat has been counted takes the implicit single column
-    # with it: the span of copies to drop describes tracks the caller never got, and marshalling it would decline
-    # the whole pass.
+    # …and a template that turns out INVALID after the repeat has been read takes the implicit single column with
+    # it — there is no repeat left to count.
     it 'forgets the auto repeat when the template it sat in turns out invalid' do
       ['frobnicate', 'repeat(0,10px)'].each do |tail|
         expect_parity(%(<div style="display:grid;grid-template-columns:repeat(auto-fill,50px) #{tail};width:400px"><div>a</div><div>b</div></div>))
       end
+    end
+    # …and the COUNT itself is native's own: `auto-fill` makes as many copies as its content box fits, `auto-fit`
+    # collapses the ones placement leaves empty, and a span resolves against the list that produces. Chrome
+    # figures for the item marked `id="g"` — `[x, width]` — since both engines now run the same arithmetic.
+    it 'counts the auto repeat against its own content box' do
+      [
+        ['repeat(auto-fit, minmax(80px,1fr));gap:4px',  '<div id="g">a</div><div>b</div>',                       0, 198],
+        ['repeat(auto-fill, minmax(80px,1fr));gap:4px', '<div id="g">a</div><div>b</div>',                       0,  97],
+        ['repeat(auto-fill,90px);gap:5px',              '<div>a</div><div id="g" style="grid-column:1 / -1">wide</div>', 0, 375],
+        ['repeat(auto-fill,90px);gap:5px',              '<div>a</div><div id="g" style="grid-column:span 2">two</div>', 95, 185]
+      ].each do |tpl, items, chrome_x, chrome_w|
+        body = %(<div style="width:400px"><div style="display:grid;grid-template-columns:#{tpl}">#{items}</div></div>)
+        session = simulated_session(page(body))
+        session.visit '/'
+        session.evaluate_script('document.body.offsetHeight')
+        expect(session.evaluate_script('globalThis.__csimLayoutShadowRun()')).to include('ok' => true, 'mismatches' => 0), body
+        box = session.evaluate_script("(b => [b.x, b.width])(document.getElementById('g').getBoundingClientRect())")
+        expect(box).to eq([chrome_x, chrome_w]), "#{body}: #{box.inspect}, Chrome [#{chrome_x}, #{chrome_w}]"
+      end
+      # …and the same grid measured INTRINSICALLY makes one copy, so the `1 / -1` item spans that one column
+      expect_chrome_width('<div style="width:max-content"><div id="g" style="display:grid;grid-template-columns:repeat(auto-fill, 90px);gap:5px"><div>a</div><div style="grid-column:1 / -1">wide</div></div></div>', 90)
     end
     # A bare `fr` is `minmax(auto, 1fr)`, so it carries the AUTOMATIC minimum every other track has: its
     # column's min-content, which its share cannot fall below. `minmax(0, 1fr)` is how you ask for the share

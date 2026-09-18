@@ -100,13 +100,13 @@ RSpec.describe 'native layout no-oracle run', if: ENV.fetch('CSIM_JS_ENGINE', 'v
     expect(r['oracleReads'].keys).to include('gridColumnContent helper:intrinsicWidths')
   end
 
-  it 'still asks the oracle how wide an auto-fill grid was laid out' do
-    # `repeat(auto-fill, …)` expands to as many copies as the container FITS, and how many that is is the one
-    # thing the walk cannot answer for itself — it reads the oracle's content width to count them. Pinned so the
-    # last grid dependency is a decision on the record rather than something that quietly came back.
-    s = session_with('<div style="width:max-content"><div style="display:grid;grid-template-columns:repeat(auto-fill, minmax(50px, 1fr));gap:10px"><div>bb cc</div><div>dd</div></div></div>')
-    r = s.evaluate_script('globalThis.__csimLayoutShadowRun(undefined, {noOracle: true})')
-    expect(r['oracleReads'].keys).to include('oracleContentW _lb.width')
+  it 'reads the oracle\'s content width only where a track side is RESOLVED against it' do
+    # The resolved-px fallback — a grid holding content native cannot measure — sizes every track against the
+    # oracle's per-column contributions, which are the oracle's OWN column list at the oracle's OWN width. That
+    # is the one read the grid encode still makes.
+    s = session_with('<div style="display:grid;grid-template-columns:min-content auto;width:400px"><div>a <span style="display:inline-table"><span style="display:table-cell">bb cc</span></span></div><div>x</div></div>')
+    expect(s.evaluate_script('globalThis.__csimLayoutShadowRun(undefined, {noOracle: true})')['oracleReads'].keys)
+      .to include('oracleContentW _lb.width')
   end
 
   it 'gives back the ordinary answer with every stamp revealed' do
@@ -152,6 +152,13 @@ RSpec.describe 'native layout no-oracle run', if: ENV.fetch('CSIM_JS_ENGINE', 'v
       # `fr` expansion are native's, so nothing asks what the oracle laid the grid out as
       '<div style="width:max-content"><div style="display:grid;grid-template-columns:40px 1fr"><span>aa bb</span><div>cc</div></div></div>',
       '<div style="width:400px"><div style="float:left"><div style="display:grid;grid-template-columns:min-content auto;gap:6px"><div>aa bb</div><div>cc dd</div></div></div></div>',
+      # …an `auto-fill` repeat included: how many copies fit is native's own count against its own content box,
+      # and an intrinsic measure — which has no width to fit against — makes the one copy §7.2.3.2 gives it
+      '<div style="width:max-content"><div style="display:grid;grid-template-columns:repeat(auto-fill, minmax(50px, 1fr));gap:10px"><div>bb cc</div><div>dd</div></div></div>',
+      '<div style="width:400px"><div style="display:grid;grid-template-columns:repeat(auto-fit, minmax(80px, 1fr));gap:4px"><div>a</div><div>b</div><div style="grid-column:1 / -1">wide</div></div></div>',
+      # …and a line counted from the END under that repeat: which column it names depends on how many copies
+      # native made, so answering it without the oracle is the whole of this increment
+      '<div style="width:400px"><div style="display:grid;grid-template-columns:40px repeat(auto-fill, 60px) 20px;gap:5px"><div style="grid-column-start:-2">a</div><div style="grid-column:2 / span 3">b</div></div></div>',
       # …and a LIST BOX, whose own box native derives from the control's intrinsic data and whose rows it stacks
       '<div style="width:400px">t <span style="display:inline-block"><select multiple size="3" style="display:block;width:120px"><option>a</option><option>bbbb</option></select></span> u</div>'
     ].each do |body|
