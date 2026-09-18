@@ -50,9 +50,9 @@ require 'capybara/simulated'
 module PerfGate
   BASELINE_PATH = File.expand_path('perf_baseline.yml', __dir__)
 
-  # The single workload's key in the baseline. A Hash-of-workloads so a second
-  # shape (a form-heavy page, a deep SPA swap) can be added without reshaping.
-  WORKLOAD = 'grid_table'
+  # The workloads, each a key in the baseline. `grid_table` is the app-shaped page the gate has always
+  # run; `shadow_host` is the SAME page with one shadow host beside the table — see `workload_html`.
+  WORKLOADS = %w[grid_table shadow_host].freeze
 
   # Wall ratio may sit this fraction above baseline before the soft warning
   # fires. Generous on purpose: wall is a trend signal, not a tripwire.
@@ -81,7 +81,16 @@ module PerfGate
   # kept are font-independent). Don't introduce anything that lets geometry move
   # structure — wrapping text that changes box/line count, or a reuse refusal
   # keyed on a sub-pixel width — or the hard gate will red on CI only.
-  def self.workload_html
+  #
+  # …and `shadow_host` is that page with ONE shadow host beside the table, whose tree is a `<p>` and a
+  # three-declaration stylesheet. It is not a web-component benchmark: the point is that a host
+  # ANYWHERE on the page switches document-wide cascade gates off for EVERY element, because a shadow
+  # sheet is in no document index and those gates have to fail open. The counts below are the LIGHT
+  # DOM's — the same table — so the two workloads differ only by what the host costs it, and
+  # `ctx_gate_active` is the one bit that says whether the page still has a structural-context gate at
+  # all. Measured when this was added: the same relayout takes 51 ms without the host and 280 ms with
+  # it (see the `shadow-host-gates-fail-open` note).
+  def self.workload_html(workload)
     rows = (1..ROWS).map {|i|
       %(<tr class="row r#{i % 6}" id="row-#{i}">) +
         %(<td class="cell num">#{i}</td>) +
@@ -100,10 +109,21 @@ module PerfGate
         .badge { display: inline-block; min-width: 16px }
         #container.compact .cell { padding: 0 4px }
       </style></head><body>
+        #{'<div id="host"></div>' if workload == 'shadow_host'}
         <main id="container"><table id="grid"><tbody>#{rows}</tbody></table></main>
+        #{SHADOW_HOST_SCRIPT if workload == 'shadow_host'}
       </body></html>
     HTML
   end
+
+  # A component of the shape a design system ships: its own `<style>`, its own markup, and nothing
+  # the table can see. Written as one `innerHTML` so the tree exists before the first read.
+  SHADOW_HOST_SCRIPT = <<~HTML.freeze
+    <script>
+      document.getElementById('host').attachShadow({ mode: 'open' }).innerHTML =
+        '<style>.p { color: #333; padding: 2px; font-weight: 600 }</style><p class="p">widget</p>';
+    </script>
+  HTML
 
   # The fixed interaction, run once in the loaded page. Each mutate-then-read
   # pair forces a layout pass; the reads after a localized change are where
@@ -143,28 +163,34 @@ module PerfGate
       reuse_hit:         globalThis.__csimReuseStats().hit,
       reuse_remeasured:  globalThis.__csimReuseStats().remeasured,
       reuse_escapingAbs: globalThis.__csimReuseStats().escapingAbs,
-      ctx_sweeps:        globalThis.__csimCtxSweeps()
+      ctx_sweeps:        globalThis.__csimCtxSweeps(),
+      // …and whether the page has a structural-context gate at all, which decides whether a memoised
+      // computed value survives a mutation or every one of them dies at every write. A BIT, not a
+      // count, and the only counter here that a page can lose wholesale: a shadow host turns it off
+      // for the whole document today, and `ctx_sweeps` then reads 0 — fewer sweeps because there is
+      // nothing left to sweep, which is the opposite of an improvement and unreadable on its own.
+      ctx_gate_active:   globalThis.__csimCtxGateActive() ? 1 : 0
     })
   JS
 
-  # Run the workload and return { 'counts' => {...int}, 'wall' => {...} }. Used
+  # Run one workload and return { 'counts' => {...int}, 'wall' => {...} }. Used
   # by both the gate (install) and the regen script, so they can never diverge.
-  def self.capture
-    { 'counts' => capture_counts, 'wall' => capture_wall }
+  def self.capture(workload)
+    { 'counts' => capture_counts(workload), 'wall' => capture_wall(workload) }
   end
 
   # Counts come from a FRESH session (counters start at 0 on a new VM), so the
   # returned values are the workload's absolute op-counts, not a diff.
-  def self.capture_counts
-    with_session do |session|
+  def self.capture_counts(workload)
+    with_session(workload) do |session|
       session.visit('/')
       session.evaluate_script(INTERACTION_JS)
       session.evaluate_script(COUNTS_JS).transform_keys(&:to_s).transform_values(&:to_i)
     end
   end
 
-  def self.capture_wall
-    with_session do |session|
+  def self.capture_wall(workload)
+    with_session(workload) do |session|
       session.visit('/')   # warm the realm + JIT before timing
       workload = median_ms { session.visit('/'); session.evaluate_script(INTERACTION_JS) }
       calib    = median_ms { session.evaluate_script(CALIB_JS) }
@@ -180,46 +206,49 @@ module PerfGate
     YAML.safe_load_file(BASELINE_PATH)
   end
 
-  # Wire the gate into an RSpec example group. Captures ONCE in before(:context)
-  # (so a `--tag ~perf` run pays nothing), then asserts the two axes.
+  # Wire the gate into an RSpec example group — one describe per workload, each capturing ONCE in
+  # before(:context) (so a `--tag ~perf` run pays nothing), then asserting the two axes.
   def self.install(group)
-    base = baseline.fetch(WORKLOAD)
-    group.class_exec do
-      before(:context) do
-        @measured = PerfGate.capture
-      end
-
-      it 'layout / cascade op-counts match the baseline (hard)' do
-        expected = base.fetch('counts')
-        actual   = @measured.fetch('counts')
-        mismatches = (expected.keys | actual.keys).sort.filter_map {|k|
-          next if expected[k] == actual[k]
-          "  - #{k}: baseline #{expected[k].inspect} → now #{actual[k].inspect}"
-        }
-        expect(mismatches).to be_empty,
-          "perf op-counts changed for #{PerfGate::WORKLOAD}. This is a REGRESSION (added passes / " \
-          "dropped subtree reuse / O(n²) creep) or an IMPROVEMENT to lock in. If the shift is " \
-          "intended, regenerate the baseline:\n" \
-          "  bundle exec ruby script/regen_perf_baseline.rb\n\n" +
-          mismatches.join("\n")
-      end
-
-      it 'wall/calibration ratio within the soft budget (warn only, never reds)' do
-        expected = base.fetch('wall').fetch('ratio')
-        actual   = @measured.fetch('wall').fetch('ratio')
-        ceiling  = expected * (1 + PerfGate::WALL_WARN_TOL)
-        if actual > ceiling
-          wall = @measured.fetch('wall')
-          PerfGate.warn_soft(
-            "[perf][WARN] #{PerfGate::WORKLOAD} wall ratio #{actual} > baseline #{expected} × " \
-            "#{(1 + PerfGate::WALL_WARN_TOL).round(2)} = #{ceiling.round(3)} " \
-            "(workload #{wall['workload_ms']}ms / calib #{wall['calib_ms']}ms). A constant-factor " \
-            'slowdown the op-counts cannot see — NOT blocking. Investigate, or regen if intended.'
-          )
+    all = baseline
+    WORKLOADS.each do |workload|
+      base = all.fetch(workload)
+      group.describe(workload) do
+        before(:context) do
+          @measured = PerfGate.capture(workload)
         end
-        # Soft: the wall axis warns but never fails. The example asserts only that
-        # the measurement was taken, so the gate's pass/fail stays deterministic.
-        expect(actual).to be > 0
+
+        it 'layout / cascade op-counts match the baseline (hard)' do
+          expected = base.fetch('counts')
+          actual   = @measured.fetch('counts')
+          mismatches = (expected.keys | actual.keys).sort.filter_map {|k|
+            next if expected[k] == actual[k]
+            "  - #{k}: baseline #{expected[k].inspect} → now #{actual[k].inspect}"
+          }
+          expect(mismatches).to be_empty,
+            "perf op-counts changed for #{workload}. This is a REGRESSION (added passes / " \
+            "dropped subtree reuse / O(n²) creep) or an IMPROVEMENT to lock in. If the shift is " \
+            "intended, regenerate the baseline:\n" \
+            "  bundle exec ruby script/regen_perf_baseline.rb\n\n" +
+            mismatches.join("\n")
+        end
+
+        it 'wall/calibration ratio within the soft budget (warn only, never reds)' do
+          expected = base.fetch('wall').fetch('ratio')
+          actual   = @measured.fetch('wall').fetch('ratio')
+          ceiling  = expected * (1 + PerfGate::WALL_WARN_TOL)
+          if actual > ceiling
+            wall = @measured.fetch('wall')
+            PerfGate.warn_soft(
+              "[perf][WARN] #{workload} wall ratio #{actual} > baseline #{expected} × " \
+              "#{(1 + PerfGate::WALL_WARN_TOL).round(2)} = #{ceiling.round(3)} " \
+              "(workload #{wall['workload_ms']}ms / calib #{wall['calib_ms']}ms). A constant-factor " \
+              'slowdown the op-counts cannot see — NOT blocking. Investigate, or regen if intended.'
+            )
+          end
+          # Soft: the wall axis warns but never fails. The example asserts only that
+          # the measurement was taken, so the gate's pass/fail stays deterministic.
+          expect(actual).to be > 0
+        end
       end
     end
   end
@@ -239,9 +268,9 @@ module PerfGate
 
   # --- internals ---------------------------------------------------------------
 
-  def self.with_session
+  def self.with_session(workload)
     # `:simulated` is registered on `require 'capybara/simulated'` (lib/capybara/simulated.rb).
-    app     = workload_html.then {|html| ->(_env) { [200, {'content-type' => 'text/html'}, [html]] } }
+    app     = workload_html(workload).then {|html| ->(_env) { [200, {'content-type' => 'text/html'}, [html]] } }
     session = Capybara::Session.new(:simulated, app)
     begin
       yield session

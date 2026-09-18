@@ -6,7 +6,20 @@ grid_table:
     reuse_remeasured: 0
     reuse_escapingAbs: 0
     ctx_sweeps: 201
+    ctx_gate_active: 1
   wall:
-    workload_ms: 473.785
-    calib_ms: 2.73
-    ratio: 173.564
+    workload_ms: 458.764
+    calib_ms: 2.678
+    ratio: 171.289
+shadow_host:
+  counts:
+    passes: 3
+    reuse_hit: 202
+    reuse_remeasured: 0
+    reuse_escapingAbs: 0
+    ctx_sweeps: 0
+    ctx_gate_active: 0
+  wall:
+    workload_ms: 897.262
+    calib_ms: 2.678
+    ratio: 335.041

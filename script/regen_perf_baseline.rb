@@ -18,15 +18,16 @@ require_relative '../spec/support/perf_gate'
 
 CONFIRM_RUNS = 3
 
-counts = Array.new(CONFIRM_RUNS) { PerfGate.capture_counts }
-unless counts.uniq.size == 1
-  warn 'Refusing to write baseline: op-counts are NOT reproducible across runs.'
-  counts.each_with_index {|c, i| warn "  run #{i + 1}: #{c.inspect}" }
-  warn 'A counter in COUNTS_JS jitters — drop it or make the workload deterministic before baselining.'
-  exit 1
-end
-
-data = { PerfGate::WORKLOAD => { 'counts' => counts.first, 'wall' => PerfGate.capture_wall } }
+data = PerfGate::WORKLOADS.to_h {|workload|
+  counts = Array.new(CONFIRM_RUNS) { PerfGate.capture_counts(workload) }
+  unless counts.uniq.size == 1
+    warn "Refusing to write baseline: op-counts for #{workload} are NOT reproducible across runs."
+    counts.each_with_index {|c, i| warn "  run #{i + 1}: #{c.inspect}" }
+    warn 'A counter in COUNTS_JS jitters — drop it or make the workload deterministic before baselining.'
+    exit 1
+  end
+  [workload, { 'counts' => counts.first, 'wall' => PerfGate.capture_wall(workload) }]
+}
 File.write(PerfGate::BASELINE_PATH, data.to_yaml)
 
 puts "wrote #{PerfGate::BASELINE_PATH}"
