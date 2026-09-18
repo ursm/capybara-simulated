@@ -65,6 +65,22 @@ RSpec.describe 'native layout grid parity', if: ENV.fetch('CSIM_JS_ENGINE', 'v8'
     expect(w).to be_within(0.01).of(chrome_w), "#{body}: #{w}, Chrome #{chrome_w}"
   end
 
+  # …and a child that generates NO BOX is no grid ITEM either: a `<link>` or `<meta>` in the body is
+  # `display: none` from the UA STYLESHEET, which the hide cascade did not resolve (see the flex spec). What
+  # says so is the COLUMN the next item lands in — its WIDTH is 40 whether or not the metadata took a slot,
+  # since it would simply wrap to the next row.
+  it 'makes no grid item of a child that generates no box' do
+    ['<link rel="stylesheet">', '<meta name="x">', '<div style="display:none"></div>'].each do |boxless|
+      body = %(<div style="width:300px"><div style="display:grid;grid-template-columns:40px 40px"><div>a</div>#{boxless}<div id="g">b</div></div></div>)
+      session = simulated_session(page(body))
+      session.visit '/'
+      session.evaluate_script('document.body.offsetHeight')
+      expect(session.evaluate_script('globalThis.__csimLayoutShadowRun()')).to include('ok' => true, 'mismatches' => 0), body
+      box = session.evaluate_script("(b => [b.x, b.y])(document.getElementById('g').getBoundingClientRect())")
+      expect(box).to eq([40, 0]), "#{body}: #{box.inspect}, Chrome [40, 0]"
+    end
+  end
+
   it 'matches a fixed 2-column grid with a gap' do
     expect_parity('<div style="display:grid;grid-template-columns:100px 100px;gap:10px;width:300px"><div style="height:20px">a</div><div style="height:30px">b</div></div>')
   end

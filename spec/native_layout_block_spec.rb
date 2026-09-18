@@ -31,6 +31,32 @@ RSpec.describe 'native layout L1 block-flow parity', if: ENV.fetch('CSIM_JS_ENGI
   # own — declared width, and a margin read that fell back to 8px for whatever it could not resolve — so
   # `margin: 0 auto` was 1008 wide where native and Chrome say 1024, and `max-width` / `min-width` were
   # ignored. It is sized like any block in flow now.
+  # A `<link>` or `<meta>` written in the BODY is `display: none` from the UA stylesheet — no box, and nothing
+  # in the flow. It was neither an author rule (the hide cascade resolves those) nor one of the tags the
+  # visibility walk knows by name, so BOTH engines flowed it: it separated two margins that should have
+  # collapsed through it, and ended a line the text should have carried on. The UA's own display is part of the
+  # hide cascade now. Chrome figures — the two engines agreeing here said nothing, since they agreed while both
+  # were wrong.
+  it 'flows nothing for a child the UA stylesheet hides' do
+    [
+      ['<div style="height:10px;margin-bottom:20px">a</div><link rel="stylesheet"><div id="g" style="height:10px;margin-top:30px">b</div>', [40, 10]],
+      ['<div style="height:10px;margin-bottom:20px">a</div><meta name="x"><div id="g" style="height:10px;margin-top:30px">b</div>',        [40, 10]],
+      # …and the same shape with nothing between the two blocks, which is what the margins collapse to
+      ['<div style="height:10px;margin-bottom:20px">a</div><div id="g" style="height:10px;margin-top:30px">b</div>',                       [40, 10]]
+    ].each do |body, chrome_box|
+      session = simulated_session(page(%(<div style="width:300px">#{body}</div>)))
+      session.visit '/'
+      expect(parity(session)).to include('ok' => true, 'mismatches' => 0), body
+      box = session.evaluate_script("(b => [b.y, b.height])(document.getElementById('g').getBoundingClientRect())")
+      expect(box).to eq(chrome_box), "#{body}: #{box.inspect}, Chrome #{chrome_box.inspect}"
+    end
+    # …and it is no line breaker either: `aaa<meta>bbb` is ONE line of 18, not two of it.
+    session = simulated_session(page(%(<div style="width:300px" id="g">aaa<meta name="x">bbb</div>)))
+    session.visit '/'
+    expect(parity(session)).to include('ok' => true, 'mismatches' => 0)
+    expect(session.evaluate_script("document.getElementById('g').getBoundingClientRect().height")).to eq(18)
+  end
+
   it 'lays out the body against the root, under the UA margin and its own' do
     ['', ' style="margin:20px"', ' style="margin:20px;padding:0 10%"', ' style="margin:0 5%"',
      ' style="margin:0 auto"', ' style="max-width:600px;margin:0 auto"', ' style="margin:0 5%;max-width:500px"',

@@ -46,6 +46,32 @@ RSpec.describe 'native layout flex parity', if: ENV.fetch('CSIM_JS_ENGINE', 'v8'
     end
   end
 
+  # A child that generates NO BOX is no flex ITEM: a `<link>` or `<meta>` written in the body is
+  # `display: none` from the UA STYLESHEET, which is neither an author rule (so the hide cascade never saw it)
+  # nor one of the tags the visibility walk knows by name. The oracle laid one out as an item — the item after
+  # it moved 100px — and `visible?` said true of it. The UA's own display is part of the hide cascade now, so
+  # `boxlessChild` is the one question every child list asks. Chrome figures; native was already right.
+  it 'makes no flex item of a child that generates no box' do
+    [
+      ['<link rel="stylesheet">',                              7.109375],
+      ['<meta name="x">',                                      7.109375],
+      # …and the ones that already worked, kept as the controls that say WHICH half was missing: `<style>` is a
+      # tag the visibility walk knows, and the other two are author rules the hide cascade always resolved.
+      ['<style>.q{}</style>',                                  7.109375],
+      ['<div hidden style="width:40px;height:40px"></div>',    7.109375],
+      ['<div style="display:none;width:40px"></div>',          7.109375]
+    ].each do |boxless, chrome_x|
+      body = %(<div style="width:300px"><div style="display:flex"><div>a</div>#{boxless}<div id="g">b</div></div></div>)
+      with_simulated_session(page(body)) do |session|
+        session.visit '/'
+        session.evaluate_script('document.body.offsetHeight')
+        expect(session.evaluate_script('globalThis.__csimLayoutShadowRun()')).to include('ok' => true, 'mismatches' => 0), body
+        x = session.evaluate_script("document.getElementById('g').getBoundingClientRect().x")
+        expect(x).to be_within(0.01).of(chrome_x), "#{body}: #{x}, Chrome #{chrome_x}"
+      end
+    end
+  end
+
   def expect_parity(body)
     r = run_shadow(body)
     expect(r).to include('ok' => true), "harness bailed: #{r.inspect}"
