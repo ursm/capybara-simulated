@@ -576,12 +576,13 @@ RSpec.describe 'native layout L1 block-flow parity', if: ENV.fetch('CSIM_JS_ENGI
         expect_parity(%(<div style="#{tb};text-indent:11px"><div style="position:absolute">shrink to fit</div>mar</div>))
       end
       # `justify` widens the spaces between the words, and native holds no per-space positions — the offset it
-      # would record is not the one the oracle reads off its placed spaces, so the block declines. Asked of the
-      # RUN STREAM, not of the block's direct children: a marker one `<span>` deep is on the same line.
-      it 'declines a justified line, however deep the marker sits' do
-        expect_walk_declines(%(<div style="#{tb};text-align:justify">a long stretch of words that must wrap onto a second line #{mark} tail</div>))
-        expect_walk_declines(%(<div style="#{tb};text-align:justify">a long stretch of words that must wrap onto a second line <span>#{mark}</span> tail here</div>))
-        expect_walk_declines(%(<div style="#{tb};text-align:justify">a long stretch of <span>words that #{mark} must</span> wrap onto a second line tail here</div>))
+      # would record is not the one the oracle reads off its placed spaces. So such a box keeps the ORACLE's own
+      # box (replayed) rather than taking a static position off that line, and the pass lays out either way —
+      # where it used to decline the whole subtree. However deep the box sits: a `<span>`'s content is that line's.
+      it 'replays a box whose static position would come off a justified line' do
+        expect_replayed_oof(%(<div style="#{tb};text-align:justify">a long stretch of words that must wrap onto a second line #{mark} tail</div>))
+        expect_replayed_oof(%(<div style="#{tb};text-align:justify">a long stretch of words that must wrap onto a second line <span>#{mark}</span> tail here</div>))
+        expect_replayed_oof(%(<div style="#{tb};text-align:justify">a long stretch of <span>words that #{mark} must</span> wrap onto a second line tail here</div>))
       end
       # ── Review findings (adversarial round, 2026-09-15): each was a SILENT WRONG ANSWER ────────────────
       # A line the flow never put anything on is not aligned: `alignLine` runs only for a line that was
