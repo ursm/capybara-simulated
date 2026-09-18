@@ -4297,6 +4297,23 @@ fn measure_table(
     // Then each cell's subtree, at its COLUMN (span) width and with NO height imposed — what its content comes
     // to is what the rows are sized from below — in a fresh float context. The cell's own declared width does not
     // speak here: it already did, when the column was sized.
+    // The table's own BORDER box is settled here — its columns and spacing decide it, and the rows cannot move
+    // it — so the CAPTION, which spans that box, is laid out before the rows: the height it takes is height the
+    // rows do NOT get (a table told to be 120 tall holds its caption inside that 120, Chrome and the oracle).
+    let sum_col: f64 = col_w.iter().sum();
+    let grid_w = sum_col + (c_count as f64 + 1.0) * sx;
+    let table_w = (grid_w + n.edges_x()).max(cap_floor);
+    // The caption is a block box laid out in that BORDER box, outside the table's own border+padding (§17.4
+    // wrapper box): an auto width fills it, a declared one (a `%` of it) is its own and may overflow it without
+    // growing the table, and a `%` height resolves against nothing (Chrome keeps such a caption its content's
+    // height, whatever the table's).
+    if let Some(cap) = caption {
+        let k = inputs[cap].get().with_percent_sizes(table_w, f64::NAN);
+        inputs[cap].set(k);
+        measure(cap, resolve_width(&k, table_w), f64::NAN, inputs, runs, run_texts, grids, children, boxes, failed, &mut FloatCtx::new(), 0.0, 0.0);
+    }
+    let caption_h = caption.map(|cap| boxes[cap].h).unwrap_or(0.0);
+
     let span_w = |c: usize| -> f64 {
         let k = inputs[c].get();
         let last = k.cell_col + k.cell_colspan - 1; // `table_grid` validated the span against the column count
@@ -4328,6 +4345,8 @@ fn measure_table(
         let to_content = |v: f64| if n.border_box { (v - n.edges_y()).max(0.0) } else { v };
         let declared = if is_auto(n.height) { 0.0 } else { to_content(n.height) };
         let capped = if is_auto(n.max_h) { declared } else { declared.min(to_content(n.max_h)) };
+        // (…the CAPTION does not come out of it: a table told to be 120 tall puts 120 into its rows and stacks
+        // the caption on top of that, Chrome-measured at 138.)
         if is_auto(n.min_h) { capped } else { capped.max(to_content(n.min_h)) }
     };
     let row_pct_basis = if imposed_h > 0.0 { (imposed_h - table_gaps(r_count, sy)).max(0.0) } else { f64::NAN };
@@ -4424,25 +4443,11 @@ fn measure_table(
     // from `edgeInsets`) is already the outer half of its rim cells' collapsed borders, with no padding. So a
     // collapse table self-sizes from its tracks + edges exactly like a separate one — only with border-spacing
     // 0 and the halved borders the oracle pushed.
-    // The table (WRAPPER) SELF-sizes from its grid tracks + spacing plus its own edges — not the width its parent
-    // passed — floored by what its caption requires. (Separate: spacing > 0. Collapse: spacing is 0 and the edges
-    // are the outer-half frame.)
-    let sum_col: f64 = col_w.iter().sum();
+    // The table (WRAPPER) SELF-sizes from its grid tracks + spacing plus its own edges (`table_w`, settled with
+    // the columns above) and stacks the caption with the grid: the `<table>` el._lb is the WRAPPER, a
+    // caption-side:top caption offsetting the whole grid down by its height and a bottom one sitting below it.
     let sum_row: f64 = row_h.iter().sum();
-    let grid_w = sum_col + (c_count as f64 + 1.0) * sx;
     let grid_h = sum_row + (r_count as f64 + 1.0) * sy;
-    let table_w = (grid_w + n.edges_x()).max(cap_floor);
-    // The caption is a block box laid out in that BORDER box, outside the table's own border+padding (§17.4
-    // wrapper box): an auto width fills it, a declared one (a `%` of it) is its own and may overflow it without
-    // growing the table, and a `%` height resolves against nothing (Chrome keeps such a caption its content's
-    // height, whatever the table's). The `<table>` el._lb is the WRAPPER (caption + grid): a caption-side:top
-    // caption offsets the whole grid down by its height; a bottom one sits below the grid (placed below).
-    if let Some(cap) = caption {
-        let k = inputs[cap].get().with_percent_sizes(table_w, f64::NAN);
-        inputs[cap].set(k);
-        measure(cap, resolve_width(&k, table_w), f64::NAN, inputs, runs, run_texts, grids, children, boxes, failed, &mut FloatCtx::new(), 0.0, 0.0);
-    }
-    let caption_h = caption.map(|cap| boxes[cap].h).unwrap_or(0.0);
     let caption_top = caption.is_some() && n.caption_side == 0;
     let content_left = n.bl + n.pl;
     let content_top = n.bt + n.pt + if caption_top { caption_h } else { 0.0 };
@@ -4906,6 +4911,11 @@ fn min_content_width(i: usize, inputs: &[Cell<Input>], runs: &[Run], run_texts: 
     let n = inputs[i].get();
     if n.replaced && !n.ratio_only {
         return Some(n.intrinsic_w); // the oracle's minContentWidth: the intrinsic width, edges not counted
+    }
+    // A TABLE answers for itself, and its figure is already a BORDER box (the frame included), so no edges go
+    // on top of it — the same early return `intrinsic_widths` makes for one.
+    if n.display == DISPLAY_TABLE {
+        return Some(table_intrinsic_widths(i, inputs, runs, run_texts, grids, children)?.0);
     }
     // The box's own edges RESOLVED: this is a floor on a used size, not an intrinsic contribution, so a
     // percentage padding counts here as it does in the box (Chrome floors a `padding: 0 10%` item in a 100px row

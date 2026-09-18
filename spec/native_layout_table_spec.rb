@@ -597,6 +597,23 @@ RSpec.describe 'native layout table parity', if: ENV.fetch('CSIM_JS_ENGINE', 'v8
   it('declines two captions') { a_bails_b_native('<table style="border-spacing:4px"><caption>top</caption><caption style="caption-side:bottom">bottom</caption><tr><td style="width:40px">a</td></tr></table>') }
   # An inline-table is an ATOMIC inline in its parent's line — native replays its oracle box (its rows/cells are
   # covered via the parent), so a block holding one lays out rather than declining.
+  # A table as a FLEX ITEM: the walk declined every flex container holding one. Native sizes it like any item
+  # (its automatic minimum is the table's own min-content, a border-box figure), and a table that ends up TALLER
+  # than the main size it was given — its height is a minimum (§17.5.3), and a caption stacks on top of it —
+  # pushes the items after it down (Chrome: the table 138, the item after it at 138, the column 156).
+  it 'matches a table as a flex item' do
+    expect_parity('<div style="display:flex;width:300px"><table style="border-spacing:2px"><tr><td>a</td><td>bb cc</td></tr></table><div>y</div></div>')
+    expect_parity('<div style="display:flex;width:300px"><table style="flex:1;border-spacing:2px"><tr><td>a</td><td>bb cc</td></tr></table><div style="width:40px">y</div></div>')
+    expect_parity('<div style="display:flex;width:300px;flex-direction:column"><table style="flex:0 0 10px;border-spacing:2px"><tr><td>a</td></tr><tr><td>b</td></tr></table><div style="height:20px">y</div></div>')
+    expect_parity('<div style="display:flex;width:300px;align-items:flex-end;height:90px"><table style="table-layout:fixed;width:150px"><tr><td>aaaa</td><td>b</td></tr></table><div style="width:40px">y</div></div>')
+    body = '<div id="f" style="display:flex;width:300px;flex-direction:column"><table id="t" style="flex:0 0 120px;border-spacing:2px"><caption>cap</caption><tr><td>a</td></tr></table><div id="s" style="width:40px">y</div></div>'
+    expect_parity(body)
+    session = simulated_session(page(body))
+    session.visit '/'
+    expect(session.evaluate_script("['f', 't', 's'].map(id => { const b = document.getElementById(id).getBoundingClientRect(); return [b.y, b.height]; })"))
+      .to eq([[0, 156], [0, 138], [138, 18]])
+  end
+
   it('matches an inline-table as an atomic inline') { expect_parity('<div style="width:300px">x <span style="display:inline-table"><span style="display:table-row"><span style="display:table-cell">a</span></span></span> y</div>') }
   it('declines an rtl table with a MARGIN-offset caption (its auto-margin / lead inset is not reflected yet)') { a_bails_b_native('<table dir="rtl" style="border-spacing:4px"><caption style="width:20px;height:16px;margin-left:8px">c</caption><tr><td style="width:40px;height:20px">a</td></tr></table>') }
   it('declines an empty row group (the oracle boxes it below the grid)') { a_bails_b_native('<table style="border-spacing:4px"><tbody></tbody><tbody><tr><td style="width:40px;height:20px">a</td></tr></tbody></table>') }
