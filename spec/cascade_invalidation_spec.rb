@@ -678,6 +678,67 @@ RSpec.describe 'cascade invalidation' do
     expect(epochs.first).to eq(epochs.last), 'a paint-only shadow rule moved the LAYOUT epoch'
   end
 
+  it 'follows an element MOVED across the shadow boundary' do
+    # Whether document rules reach an element is decided by walking to its enclosing shadow root, and
+    # that walk is memoised per element against a tree generation — `cascadedProperty` makes it for
+    # every property read, and on a 400-row table beside one widget it was half of what the host still
+    # cost the page. The generation moves on every child-list record, which is the only way the answer
+    # can change; these are the two moves that prove it, and Chrome agrees with all four figures.
+    s = simulated_session(lambda {|_env|
+      [200, {'content-type' => 'text/html'},
+       [<<~HTML]]
+         <!DOCTYPE html><html><head><style>.t { letter-spacing: 5px }</style></head><body>
+           <div id="light"><span class="t" id="a">x</span></div><div id="host"></div>
+           <script>
+             document.getElementById('host').attachShadow({ mode: 'open' }).innerHTML =
+               '<style>.t { letter-spacing: 9px }</style><span class="t" id="b">y</span>';
+           </script>
+         </body></html>
+       HTML
+    })
+    s.visit '/'
+    got = s.evaluate_script(<<~JS)
+      (() => {
+        const sr = document.getElementById('host').shadowRoot;
+        const a = document.getElementById('a'), b = sr.getElementById('b');
+        const out = [getComputedStyle(a).letterSpacing, getComputedStyle(b).letterSpacing];
+        sr.appendChild(a);                                 // …a light element moved INTO the tree
+        out.push(getComputedStyle(a).letterSpacing);
+        document.getElementById('light').appendChild(b);    // …and one moved OUT of it
+        out.push(getComputedStyle(b).letterSpacing);
+        return out;
+      })()
+    JS
+    expect(got).to eq(['5px', '9px', '9px', '5px'])
+  end
+
+  it 'empties a reused DECLARATIVE shadow root as the tree mutation it is' do
+    # `attachShadow` on a host that already has a DECLARATIVE root reuses it, and HTML's reuse path
+    # runs "replace all with null within shadow". Doing that silently left the host's old boxes laid
+    # out (Chrome drops to 0, we kept 50), queued no MutationObserver record where Chrome queues a
+    # childList one, and left every memo keyed on a child-list record describing a tree that no longer
+    # exists — the enclosing-shadow-root stamp above among them. Chrome-verified: `[50, 0, 1]`.
+    s = simulated_session(lambda {|_env|
+      [200, {'content-type' => 'text/html'},
+       ['<!DOCTYPE html><html><body><div id="h"><template shadowrootmode="open">' \
+        '<div style="height:50px">y</div></template></div></body></html>']]
+    })
+    s.visit '/'
+    got = s.evaluate_script(<<~JS)
+      (() => {
+        const h = document.getElementById('h');
+        const mo = new MutationObserver(() => {});
+        mo.observe(h.shadowRoot, { childList: true, subtree: true });
+        const before = h.getBoundingClientRect().height;
+        h.attachShadow({ mode: 'open' });
+        const records = mo.takeRecords();
+        return [before, h.getBoundingClientRect().height,
+                records.length === 1 && records[0].type === 'childList' ? records[0].removedNodes.length : -1];
+      })()
+    JS
+    expect(got).to eq([50, 0, 1])
+  end
+
   it 'relays out for a ::part rule that moves a box on a dynamic state flip' do
     # The mirror of the case above, and the one thing neither list carries: a `::part()` rule lives in
     # the DOCUMENT sheet, so no shadow sheet declares it — and `collectDynamicLayoutRules` drops every

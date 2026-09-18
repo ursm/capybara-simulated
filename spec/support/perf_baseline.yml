@@ -8,9 +8,9 @@ grid_table:
     ctx_sweeps: 201
     ctx_gate_active: 1
   wall:
-    workload_ms: 400.161
-    calib_ms: 2.689
-    ratio: 148.809
+    workload_ms: 393.874
+    calib_ms: 2.693
+    ratio: 146.237
 shadow_host:
   counts:
     passes: 3
@@ -20,6 +20,6 @@ shadow_host:
     ctx_sweeps: 201
     ctx_gate_active: 1
   wall:
-    workload_ms: 486.67
-    calib_ms: 2.688
-    ratio: 181.062
+    workload_ms: 454.513
+    calib_ms: 2.681
+    ratio: 169.547
