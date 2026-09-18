@@ -434,9 +434,10 @@ RSpec.describe 'cascade invalidation' do
   # every light-DOM element paying for a component stylesheet that cannot reach it — see
   # `shadow_host_gates_fail_open` for the decomposition and why narrowing them is its own increment.
   #
-  # These examples exist AHEAD of that work: they are what the fail-open supplies for free today, and
-  # every one of them is a way a narrowed gate goes wrong. They pass now by construction; the point is
-  # that they must still pass when the gates stop answering for the whole page.
+  # The gates ask the shadow sheets themselves now — each tree is folded in once, off the PARSED sheet
+  # every component with the same stylesheet text shares. Every example here is a way that goes wrong:
+  # a property, a `@keyframes` or a transition the union has to see; a sheet that arrives after the
+  # gate has already answered once; and `::slotted`, which is why the union cannot wait to be asked.
   def shadow_page(shadow_css, shadow_body, doc_css: '', doc_body: '')
     lambda {|_env|
       [200, {'content-type' => 'text/html'},
@@ -533,6 +534,102 @@ RSpec.describe 'cascade invalidation' do
       })()
     JS
     expect(got).to eq(['rgb(255, 0, 0)', 'rgb(0, 128, 0)'])
+  end
+
+  it 'sees a shadow sheet that arrives after the gate has already answered' do
+    # The union is folded from a QUEUE — a tree is queued when it is attached and again whenever its
+    # rules are rebuilt — so an answer given before a sheet existed must not be the answer kept. Three
+    # ways a component's stylesheet lands late, each of which left the whole sheet unapplied at some
+    # point in writing this: a `<style>` one level below the root (the component builds its markup in a
+    # wrapper and attaches it whole), `adoptedStyleSheets` assigned afterwards, and a second `<style>`
+    # appended to a tree that has already been read.
+    s = simulated_session(lambda {|_env|
+      [200, {'content-type' => 'text/html'}, ['<!DOCTYPE html><html><body><div id="host"></div></body></html>']]
+    })
+    s.visit '/'
+    s.evaluate_script('document.body.offsetHeight')   # …the first read, before any shadow tree exists
+    got = s.evaluate_script(<<~JS)
+      (() => {
+        const sr = document.getElementById('host').attachShadow({ mode: 'open' });
+        const wrap = document.createElement('div');
+        wrap.innerHTML = '<style>.t { color: rgb(0, 128, 0); letter-spacing: 7px }</style><p class="t" id="t">x</p>';
+        sr.appendChild(wrap);
+        const nested = getComputedStyle(sr.getElementById('t'));
+        const first = [nested.color, nested.letterSpacing];
+
+        const sheet = new CSSStyleSheet();
+        sheet.replaceSync('.t { word-spacing: 5px }');
+        sr.adoptedStyleSheets = [sheet];
+        const adopted = getComputedStyle(sr.getElementById('t')).wordSpacing;
+
+        const late = document.createElement('style');
+        late.textContent = '.t { text-indent: 9px }';
+        sr.appendChild(late);
+        return first.concat([adopted, getComputedStyle(sr.getElementById('t')).textIndent]);
+      })()
+    JS
+    expect(got).to eq(['rgb(0, 128, 0)', '7px', '5px', '9px'])
+  end
+
+  it 'sees a ::slotted rule, which styles an element OUTSIDE the tree that declares it' do
+    # The reason the union cannot wait to be asked. `::slotted()` is written in a shadow sheet and
+    # styles a LIGHT-DOM child — exactly the element a document-wide gate is being asked about, and one
+    # whose read never goes near the shadow tree. A union folded lazily answers "nothing declares
+    # `word-spacing` here" for it, and the read that would have folded the tree never happens.
+    s = simulated_session(lambda {|_env|
+      [200, {'content-type' => 'text/html'},
+       ['<!DOCTYPE html><html><body><div id="host"><span id="light">x</span></div></body></html>']]
+    })
+    s.visit '/'
+    s.evaluate_script('document.body.offsetHeight')
+    got = s.evaluate_script(<<~JS)
+      (() => {
+        const sr = document.getElementById('host').attachShadow({ mode: 'open' });
+        sr.innerHTML = '<style>::slotted(span) { color: rgb(0, 128, 0); word-spacing: 3px }</style><slot></slot>';
+        const cs = getComputedStyle(document.getElementById('light'));
+        return [cs.color, cs.wordSpacing];
+      })()
+    JS
+    expect(got).to eq(['rgb(0, 128, 0)', '3px'])
+  end
+
+  it 'folds each distinct shadow stylesheet once, past the parse cache\'s limit' do
+    # Components share a PARSED sheet only while `parseSheetCached`'s LRU holds it — 256 texts. Past
+    # that a re-parse is a new object, so deduping on identity re-folds the sheet and re-lists it, and
+    # the context gate is rebuilt over a pile that grows with every write: 500 components with distinct
+    # sheets produced 92,610 entries and were SLOWER than not narrowing the gates at all. The dedupe
+    # keys on the sheet's cache key, which does not evict.
+    n = 300
+    s = simulated_session(lambda {|_env|
+      [200, {'content-type' => 'text/html'}, ['<!DOCTYPE html><html><body><div id="root"></div></body></html>']]
+    })
+    s.visit '/'
+    got = s.evaluate_script(<<~JS)
+      (() => {
+        const root = document.getElementById('root');
+        for (let i = 0; i < #{n}; i++) {
+          const h = document.createElement('div');
+          root.appendChild(h);
+          h.attachShadow({ mode: 'open' }).innerHTML =
+            '<style>.p' + i + ' { color: #3' + (i % 10) + '3 }</style><p class="p' + i + '">w</p>';
+        }
+        document.body.offsetHeight;
+        // …and the CHURN that makes eviction bite: a DOCUMENT stylesheet change bumps the cascade
+        // version, every tree's rules are rebuilt on the next pass, and a sheet the LRU has dropped is
+        // re-parsed into a NEW object. Nothing here changes what any tree declares, so the count must
+        // not move.
+        for (let k = 0; k < 3; k++) {
+          const st = document.createElement('style');
+          st.textContent = '.churn' + k + ' { color: #' + k + k + k + ' }';
+          document.head.appendChild(st);
+          document.body.offsetHeight;
+          st.remove();
+          document.body.offsetHeight;
+        }
+        return globalThis.__csimShadowSheetCount();
+      })()
+    JS
+    expect(got).to eq(n)
   end
 
   # …and the STRUCTURAL-CONTEXT gate, which decides whether a memoised computed value survives a
