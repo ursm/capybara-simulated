@@ -712,6 +712,87 @@ RSpec.describe 'cascade invalidation' do
     expect(got).to eq(['5px', '9px', '9px', '5px'])
   end
 
+  it 'sees a @keyframes name referenced only from inside a shadow tree' do
+    # `referencedAnimationNames` is what keeps a `@keyframes` block the page merely SHIPS — Bootstrap's
+    # `spin`, Tailwind's `ping` — from opening the transform gate for every element. A shadow host used
+    # to make it give up on the page, so every name counted again: measured 1.12x on a 400-row table
+    # beside a widget that animates nothing. The trees' own `animation` / `animation-name` declarations
+    # are folded in instead — and if they were not, a name only THEY reference would be filtered out
+    # and the two halves of one geometry would disagree: `getComputedStyle` reports the interpolated
+    # matrix (the animation model reads the keyframes directly) while `getBoundingClientRect` reports
+    # the untransformed box (layout asks the gate). That is what this pins.
+    kf = 'body { margin: 0 } @keyframes shove { from { transform: translateX(120px) } to { transform: translateX(120px) } }'
+    [
+      ['.p { animation: shove 10s linear both; width: 50px }',                                    kf],
+      ['.p { animation-name: shove; animation-duration: 10s; animation-fill-mode: both; width: 50px }', kf],
+      # …and the same thing with the keyframes in the tree too, which has no document side at all
+      ["#{kf} .p { animation: shove 10s linear both; width: 50px }",                               'body { margin: 0 }']
+    ].each do |shadow_css, doc_css|
+      s = simulated_session(shadow_page(shadow_css, '<div class="p" id="t">x</div>', doc_css: doc_css))
+      s.visit '/'
+      got = s.evaluate_script(<<~JS)
+        (() => {
+          const t = document.getElementById('host').shadowRoot.getElementById('t');
+          return [getComputedStyle(t).transform, t.getBoundingClientRect().left];
+        })()
+      JS
+      expect(got).to eq(['matrix(1, 0, 0, 1, 120, 0)', 120]), shadow_css
+    end
+    # …while one the page ships and NOTHING references still animates nothing
+    s = simulated_session(shadow_page('.p { width: 50px }', '<div class="p" id="t">x</div>', doc_css: kf))
+    s.visit '/'
+    expect(s.evaluate_script("getComputedStyle(document.getElementById('host').shadowRoot.getElementById('t')).transform")).to eq('none')
+  end
+
+  # …and the two ways the name set can be WRONG rather than merely narrow. Both were live, both on a
+  # page with no shadow DOM at all, and both show as the same split: the animation model reads the
+  # keyframes directly and reports the interpolated matrix, while layout asks the gate and reports the
+  # untransformed box. Chrome puts all of these at 120.
+  it 'keeps the keyframes gate open for an animation started INLINE after a read' do
+    # `referencedAnimationNames` answers `null` — "every name counts" — once the inline-animation latch
+    # is set, and that answer was baked into the property index. A page READ before its first
+    # `el.style.animation = …` kept the narrower index for the rest of its life, and "find, then act"
+    # is the ordinary Capybara ordering.
+    %w[cold warm].each do |order|
+      s = simulated_session(animation_page('<div id="t" style="width:50px">x</div>'))
+      s.visit '/'
+      got = s.evaluate_script(<<~JS)
+        (() => {
+          const t = document.getElementById('t');
+          #{"t.getBoundingClientRect();" if order == 'warm'}
+          t.style.animation = 'shove 10s linear both';
+          return [getComputedStyle(t).transform, t.getBoundingClientRect().left];
+        })()
+      JS
+      expect(got).to eq(['matrix(1, 0, 0, 1, 120, 0)', 120]), order
+    end
+  end
+
+  it 'gives up on the name set when a var() stands where the name goes' do
+    # The tokeniser's own comment says over-approximating is safe — and it is, except here: `animation:
+    # 10s var(--n)` yields the token `var(--n)`, so the real name never enters the set and the block it
+    # names is filtered out WHILE IT IS RUNNING. That is the one direction a "may" gate must not take.
+    [
+      '.p { animation: 10s linear both var(--n); width: 50px }',
+      '.p { animation-name: var(--n); animation-duration: 10s; animation-fill-mode: both; width: 50px }'
+    ].each do |rule|
+      s = simulated_session(animation_page('<div class="p" id="t">x</div>', ":root { --n: shove } #{rule}"))
+      s.visit '/'
+      got = s.evaluate_script("(() => { const t = document.getElementById('t'); return [getComputedStyle(t).transform, t.getBoundingClientRect().left] })()")
+      expect(got).to eq(['matrix(1, 0, 0, 1, 120, 0)', 120]), rule
+    end
+  end
+
+  # A page that SHIPS `@keyframes shove` — the Bootstrap / Tailwind shape the name filter exists for.
+  def animation_page(body, extra_css = '')
+    kf = '@keyframes shove { from { transform: translateX(120px) } to { transform: translateX(120px) } }'
+    lambda {|_env|
+      [200, {'content-type' => 'text/html'},
+       ["<!DOCTYPE html><html><head><style>body { margin: 0 } #{kf} #{extra_css}</style></head>" \
+        "<body>#{body}</body></html>"]]
+    }
+  end
+
   it 'empties a reused DECLARATIVE shadow root as the tree mutation it is' do
     # `attachShadow` on a host that already has a DECLARATIVE root reuses it, and HTML's reuse path
     # runs "replace all with null within shadow". Doing that silently left the host's old boxes laid

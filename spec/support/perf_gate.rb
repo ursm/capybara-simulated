@@ -107,6 +107,12 @@ module PerfGate
         .row.selected .cell { font-weight: bold; background: #ffe }
         .badge { display: inline-block; min-width: 16px }
         #container.compact .cell { padding: 0 4px }
+        /* A `@keyframes` block the page SHIPS and nothing references — Bootstrap's `spin`, Tailwind's
+           `ping`. `referencedAnimationNames` exists to keep it from opening the transform gate for
+           every element, and a shadow host used to make it give up on the page: 1.12x on this shape
+           for a widget that animates nothing. Without it here the ratio below cannot hold that. It
+           declares no box and matches no element, so the op-counts stay geometry-independent. */
+        @keyframes spin { from { transform: rotate(0deg) } to { transform: rotate(360deg) } }
       </style></head><body>
         #{'<div id="host"></div>' if workload == 'shadow_host'}
         <main id="container"><table id="grid"><tbody>#{rows}</tbody></table></main>
