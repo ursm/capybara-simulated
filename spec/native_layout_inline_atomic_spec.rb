@@ -263,9 +263,16 @@ RSpec.describe 'native layout inline-atomic parity', if: ENV.fetch('CSIM_JS_ENGI
       end
       expect_native_atomic(%(<div style="width:100px;text-align:center;white-space:pre-wrap">aaaa <span style="#{ib}"></span>   cccc dddd\n<span style="#{ib}"></span>   </div>), 2)
     end
-    it 'keeps the pushed box under justify (the oracle spreads the spaces)' do
-      r = run_shadow('<div style="width:100px;text-align:justify">aaa bbb ccc <span style="display:inline-block;width:30px;height:10px"></span> ddd eee fff ggg hhh iii jjj kkk lll</div>')
-      expect(r).to include('ok' => true, 'mismatches' => 0, 'nativeAtomics' => 0)
+    # `justify` used to push every atomic's box: native holds no per-space positions, the argument went. It holds
+    # the GAPS now — each space's origin on the line — and spreads a wrapped line's free space over the ones
+    # before its content ends, so an atomic on such a line is laid out like any other.
+    it 'lays out an atomic on a justified line' do
+      expect_native_atomic('<div style="width:100px;text-align:justify">aaa bbb ccc <span style="display:inline-block;width:30px;height:10px"></span> ddd eee fff ggg hhh iii jjj kkk lll</div>')
+      expect_native_atomic('<div style="width:200px;text-align:justify;direction:rtl">aaa bbb ccc <span style="display:inline-block;width:30px;height:10px"></span> ddd eee fff ggg hhh</div>')
+      expect_native_atomic('<div style="width:120px;text-align:justify;white-space:pre-wrap;font:16px monospace">aa bb <span style="display:inline-block;width:20px;height:8px"></span> cc dd ee</div>')
+      expect_native_atomic('<div style="width:160px;text-align:justify;text-indent:20px">aaa bbb ccc <span style="display:inline-block;width:30px;height:10px"></span> ddd eee fff ggg</div>')
+      # …the LAST line and one a `<br>` ends keep their natural spacing (§7.1), which is the same arithmetic
+      expect_native_atomic('<div style="width:200px;text-align:justify">aaa <span style="display:inline-block;width:30px;height:10px"></span> bbb<br>ccc</div>')
     end
     it 'places an atomic on a line shortened by a float' do
       expect_native_atomic('<div style="overflow:hidden;width:400px"><div style="float:left;width:120px;height:60px"></div><div>text <span style="display:inline-block;width:30px;height:10px"></span> after</div></div>')
@@ -292,9 +299,8 @@ RSpec.describe 'native layout inline-atomic parity', if: ENV.fetch('CSIM_JS_ENGI
       tbl = '<span style="display:inline-table"><span style="display:table-cell">z</span></span>'
       r = run_shadow(%(<div style="display:flex;width:300px"><div>x <span style="display:inline-block"><div>b</div>t #{tbl}</span></div><div style="flex:1">y</div></div>))
       expect(r).to include('ok' => true, 'mismatches' => 0, 'nativeFlexRows' => 0), r.inspect
-      # …while under `justify` the group's atomics keep the pushed box, as a text block's do
-      r = run_shadow(%(<div style="width:100px;text-align:justify"><div>block</div>aaa bbb ccc <span style="#{ib}"></span> ddd eee fff ggg</div>))
-      expect(r).to include('ok' => true, 'mismatches' => 0, 'nativeAtomics' => 0), r.inspect
+      # …and a JUSTIFIED group's atomics are native too, its lines spread the way a text block's are
+      expect_native_atomic(%(<div style="width:100px;text-align:justify"><div>block</div>aaa bbb ccc <span style="#{ib}"></span> ddd eee fff ggg</div>))
     end
     it 'reads no oracle box for an atomic on an anonymous block\'s lines' do
       session = simulated_session(page('<div style="width:400px">text <span style="display:inline-block;width:30px;height:10px"></span> after<div>block</div></div>'))
@@ -381,11 +387,11 @@ RSpec.describe 'native layout inline-atomic parity', if: ENV.fetch('CSIM_JS_ENGI
         expect(r['nativeAtomics']).to be >= 1, "#{body}: #{r.inspect}"
         expect(r[counter]).to be >= 1, "#{counter} fell back: #{r.inspect}"
       end
-      # …unless the mixed block JUSTIFIES its lines, where the anonymous group's atomic keeps the pushed box and
-      # the measuring route falls back as before.
+      # …a JUSTIFIED mixed block included, now that a justified line is native's to spread
       justified = '<div style="text-align:justify"><div>blk</div>p <span style="display:inline-block">ok</span> q</div>'
       r = run_shadow(%(<div style="display:flex;width:300px"><div>#{justified}</div><div style="flex:1">x</div></div>))
-      expect(r).to include('ok' => true, 'mismatches' => 0, 'nativeAtomics' => 0, 'nativeFlexRows' => 0), r.inspect
+      expect(r).to include('ok' => true, 'mismatches' => 0), r.inspect
+      expect(r['nativeAtomics']).to be >= 1, r.inspect
       # …and each of those still lays out an atomic it CAN walk.
       expect_native_atomic(%(<div style="overflow:hidden;width:400px"><div style="float:left;width:200px">f <span style="display:inline-block">ok</span> g</div></div>))
       expect_native_atomic(%(<div style="width:400px;position:relative"><div style="position:absolute;left:0;right:100px">a <span style="display:inline-block">in</span> b</div><p>x</p></div>))

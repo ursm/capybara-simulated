@@ -890,6 +890,12 @@ fn line_layout(
     let mut last_line: Option<(f64, f64)> = None;
     // The atomic runs placed on the current line (run index, x from the content edge), settled against the
     // line's top + ascent — and moved by the line's alignment — at close.
+    // Where each JUSTIFICATION gap sits on the current line — the origin of every space the line placed (a
+    // preserved run contributes one per character, as Chrome widens a double space twice). A wrapped line shares
+    // its free space out over the gaps BEFORE its content ends, and everything on the line moves by the gaps that
+    // precede it (the oracle's `lineGaps` / `alignLine`). Only boxes are compared, so only their offsets are
+    // settled here; the glyphs between them are the painter's business.
+    let mut line_gaps: Vec<f64> = Vec::new();
     let mut line_atomics: Vec<(usize, f64)> = Vec::new();
     let mut atomics: Vec<(usize, f64, f64, f64)> = Vec::new();
     // …and the same for the OUT-OF-FLOW markers on the line (record index, x from the content edge): their
@@ -917,6 +923,16 @@ fn line_layout(
             last_line = Some((total, line_asc));
             let end = if $wrap { line_x - hang - hang_pre } else { line_x };
             let free = band_w(total) - end;
+            // `justify` (align 3) spreads the free space over this line's gaps — only a line that WRAPPED, with
+            // room to give and a gap that is not the hanging one at its end (CSS Text 3 §7.1; the last line and
+            // one a `<br>` or a newline ends keep their natural spacing). A line it leaves alone is START-aligned.
+            let end_x = band_l(total) + end;
+            let gaps: Vec<f64> = if align == 3 && $wrap && free > 0.0 && line_has_content {
+                line_gaps.iter().copied().filter(|&g| g < end_x).collect()
+            } else {
+                Vec::new()
+            };
+            let extra = if gaps.is_empty() { 0.0 } else { free / gaps.len() as f64 };
             // A line the flow never put anything on is not aligned at all (the oracle's `forceBreak` calls
             // `alignLine` only `if (linePlaced)`): a `<br>` closing a line that holds nothing but an
             // out-of-flow marker leaves that marker at the start edge, not at the far one.
@@ -926,18 +942,24 @@ fn line_layout(
                 match align {
                     1 => if rtl { free } else { free.max(0.0) },
                     2 => if rtl { (free / 2.0).min(free) } else { (free / 2.0).max(0.0) },
+                    // …a `justify` line the spread leaves alone starts at the inline-start edge, which in rtl is
+                    // the far one (the oracle's `align = rtl ? 'right' : 'left'`).
+                    3 => if extra > 0.0 { 0.0 } else if rtl { free } else { 0.0 },
                     _ => 0.0,
                 }
             };
+            // What moves an item on a justified line is how many gaps lie BEFORE it, each widened by `extra`.
+            let shift_at = |x: f64| if extra > 0.0 { gaps.iter().filter(|&&g| g < x).count() as f64 * extra } else { dx };
             for (ri, x) in line_atomics.drain(..) {
-                atomics.push((ri, x + dx, total, line_asc));
+                atomics.push((ri, x + shift_at(x), total, line_asc));
             }
             // A marker's Y was frozen where it was recorded (the oracle reads `staticX`/`staticY` together and
             // only ever shifts x afterwards): a line that later DROPS below a float moves `total`, and the box
             // does not go with it. Only the alignment reaches it here.
             for (ci, x, y) in line_oofs.drain(..) {
-                oofs.push((ci, x + dx, y));
+                oofs.push((ci, x + shift_at(x), y));
             }
+            line_gaps.clear();
             total += line_asc + line_desc;
             line_no += 1;
             next_line_indent(!$wrap); // a soft wrap is not a forced break
@@ -1184,6 +1206,7 @@ fn line_layout(
                         // …and only now does the kept leading space go down (the oracle's `collapseRun` put it
                         // inside the body, so it rides the line the body landed on).
                         if lead_space {
+                            line_gaps.push(band_l(total) + line_x);
                             line_x += space_w;
                             line_asc = line_asc.max(run.asc);
                             line_desc = line_desc.max(run.line_height - run.asc);
@@ -1257,6 +1280,9 @@ fn line_layout(
                                         // the oracle placed it where it met it, and a preserved space is a
                                         // placement like any other, so it does not swallow the one before it.
                                         if let Some((w, a, d, _)) = pending_space.take() {
+                                            if w != 0.0 {
+                                                line_gaps.push(band_l(total) + line_x);
+                                            }
                                             line_x += w;
                                             line_asc = line_asc.max(a);
                                             line_desc = line_desc.max(d);
@@ -1279,6 +1305,7 @@ fn line_layout(
                                         } else {
                                             space_w
                                         };
+                                        line_gaps.push(band_l(total) + line_x); // …a justification gap of its own
                                         line_x += adv;
                                         hang = 0.0;              // …and it is not a COLLAPSED hang any more
                                         if no_wrap {
@@ -1424,6 +1451,10 @@ fn line_layout(
                         // native_layout_text spec), so the growth is applied once the line the space sits on is settled.
                         let space_on_line = space_before && line_has_content;
                         if space_on_line {
+                            if sw != 0.0 {
+                                // …a zero-width opportunity is no gap: nothing widens where nothing was placed
+                                line_gaps.push(band_l(total) + line_x);
+                            }
                             line_x += sw; // hanging space (after preserved ones, under pre-wrap: all of them hang)
                             hang += sw;
                             if sw != 0.0 {
@@ -1609,6 +1640,9 @@ fn line_layout(
                 let space_on_line = space_before && line_has_content;
                 let mut broke = false;
                 if space_on_line {
+                    if sw != 0.0 {
+                        line_gaps.push(band_l(total) + line_x);
+                    }
                     line_x += sw; // hanging space
                     hang += sw;
                     if sw != 0.0 {
