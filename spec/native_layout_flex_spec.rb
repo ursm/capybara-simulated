@@ -295,6 +295,18 @@ RSpec.describe 'native layout flex parity', if: ENV.fetch('CSIM_JS_ENGINE', 'v8'
     expect_parity('<div style="position:relative;display:flex;justify-content:center;align-items:center;width:300px;height:100px"><div style="width:50px;height:20px"></div><div style="position:absolute;width:40px;height:30px"></div></div>')
   end
 
+  # …and the static corner it aligns in is the one the placement is HANDED, not the content box read when the
+  # container was laid out: an inline-flex is dropped onto its line's baseline after that, and the box inside it
+  # goes down with it (Chrome: y 34, where the captured origin left it at the container's pre-drop 20).
+  it 'aligns an absolute flex child in the corner the container ended up at' do
+    body = '<div style="position:relative;margin:20px 0 15px"><span style="display:inline-flex"><div id="t" style="position:absolute;width:10px;height:10px"></div></span></div>'
+    expect_parity(body)
+    with_simulated_session(page(body)) do |session|
+      session.visit '/'
+      expect(session.evaluate_script("(b => [b.x, b.y])(document.getElementById('t').getBoundingClientRect())")).to eq([0, 34])
+    end
+  end
+
   it 'matches an absolute flex child with its own block subtree' do
     expect_parity('<div style="position:relative;display:flex;width:300px;height:100px"><div style="width:50px;height:20px"></div><div style="position:absolute;top:5px;right:5px;width:80px;height:60px"><div style="height:10px;margin:4px"></div><div style="height:20px"></div></div></div>')
   end
