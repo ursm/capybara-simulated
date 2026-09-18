@@ -273,6 +273,17 @@ RSpec.describe 'native layout inline-atomic parity', if: ENV.fetch('CSIM_JS_ENGI
       expect_native_atomic('<div style="width:160px;text-align:justify;text-indent:20px">aaa bbb ccc <span style="display:inline-block;width:30px;height:10px"></span> ddd eee fff ggg</div>')
       # …the LAST line and one a `<br>` ends keep their natural spacing (§7.1), which is the same arithmetic
       expect_native_atomic('<div style="width:200px;text-align:justify">aaa <span style="display:inline-block;width:30px;height:10px"></span> bbb<br>ccc</div>')
+      # …and the gap SOURCES that are not an ordinary space, each crossed with the box that measures them: a
+      # NO-BREAK SPACE is a gap (§8.1, Chrome widens it) though it breaks nothing, and the separators a
+      # non-wrapping run ENDS in are held back until something follows them on the line.
+      ib = '<span style="display:inline-block;width:20px;height:8px"></span>'
+      [%(xx aa&nbsp;bb #{ib} yy cc dd ee ff gg hh ii jj kk ll mm nn oo pp),
+       %(xx aa&nbsp;&nbsp;bb #{ib} yy cc dd ee ff gg hh ii jj kk ll mm nn),
+       %(xx aa <span style="white-space:nowrap">bb&nbsp;cc</span> #{ib} yy dd ee ff gg hh ii),
+       %(xx #{ib} yy <span style="white-space:pre">aa bb </span> cccccccccccccccc zz ff gg hh ii jj kk ll),
+       %(xx #{ib} yy <span style="white-space:pre">aa	bb	</span> cccccccccccccccc zz ff gg hh ii jj)].each do |content|
+        expect_native_atomic(%(<div style="width:180px;text-align:justify">#{content}</div>))
+      end
     end
     it 'places an atomic on a line shortened by a float' do
       expect_native_atomic('<div style="overflow:hidden;width:400px"><div style="float:left;width:120px;height:60px"></div><div>text <span style="display:inline-block;width:30px;height:10px"></span> after</div></div>')

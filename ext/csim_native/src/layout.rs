@@ -896,6 +896,44 @@ fn line_layout(
     // precede it (the oracle's `lineGaps` / `alignLine`). Only boxes are compared, so only their offsets are
     // settled here; the glyphs between them are the painter's business.
     let mut line_gaps: Vec<f64> = Vec::new();
+    // …and the separators a NON-WRAPPING run ENDS in, held back: they are gaps only once a placement follows them
+    // on the line (the oracle's `tailGaps` — a `pre` run's trailing space at a wrap is the line's end and takes
+    // no share, Chrome-measured). A line that closes discards them.
+    let mut tail_gaps: Vec<f64> = Vec::new();
+    // Every one of these is JUSTIFY's bookkeeping and nothing else reads it, so a block that does not justify
+    // pays nothing for it (rule 3: the hot path stays what it was).
+    let justifying = align == 3;
+    macro_rules! note_gap {
+        ($x:expr) => {{
+            if justifying {
+                line_gaps.push($x);
+            }
+        }};
+    }
+    // A NO-BREAK SPACE is no break opportunity, but it IS a justification gap — CSS Text 3 §8.1, and Chrome
+    // widens one like an ordinary space (the oracle's `noteGapsInside` on any placed unit holding one). The pen
+    // inside the placed text is where it sits.
+    macro_rules! note_nbsp_gaps {
+        ($run:expr, $slice:expr, $base:expr) => {{
+            let s: &[u16] = $slice;
+            if justifying && s.contains(&0xA0) {
+                for j in 0..s.len() {
+                    if s[j] == 0xA0 {
+                        let pen = $base + measure_at($run, &s[..j], $base)?;
+                        line_gaps.push(pen);
+                    }
+                }
+            }
+        }};
+    }
+    // A placement that is not an edge and does not hang turns the held-back separators into real gaps.
+    macro_rules! flush_tail_gaps {
+        () => {{
+            if justifying && !tail_gaps.is_empty() {
+                line_gaps.append(&mut tail_gaps);
+            }
+        }};
+    }
     let mut line_atomics: Vec<(usize, f64)> = Vec::new();
     let mut atomics: Vec<(usize, f64, f64, f64)> = Vec::new();
     // …and the same for the OUT-OF-FLOW markers on the line (record index, x from the content edge): their
@@ -926,8 +964,8 @@ fn line_layout(
             // `justify` (align 3) spreads the free space over this line's gaps — only a line that WRAPPED, with
             // room to give and a gap that is not the hanging one at its end (CSS Text 3 §7.1; the last line and
             // one a `<br>` or a newline ends keep their natural spacing). A line it leaves alone is START-aligned.
-            let end_x = band_l(total) + end;
-            let gaps: Vec<f64> = if align == 3 && $wrap && free > 0.0 && line_has_content {
+            let end_x = if justifying { band_l(total) + end } else { 0.0 };
+            let gaps: Vec<f64> = if justifying && $wrap && free > 0.0 && line_has_content {
                 line_gaps.iter().copied().filter(|&g| g < end_x).collect()
             } else {
                 Vec::new()
@@ -960,6 +998,7 @@ fn line_layout(
                 oofs.push((ci, x + shift_at(x), y));
             }
             line_gaps.clear();
+            tail_gaps.clear();
             total += line_asc + line_desc;
             line_no += 1;
             next_line_indent(!$wrap); // a soft wrap is not a forced break
@@ -1206,7 +1245,8 @@ fn line_layout(
                         // …and only now does the kept leading space go down (the oracle's `collapseRun` put it
                         // inside the body, so it rides the line the body landed on).
                         if lead_space {
-                            line_gaps.push(band_l(total) + line_x);
+                            note_gap!(band_l(total) + line_x);
+                            flush_tail_gaps!();
                             line_x += space_w;
                             line_asc = line_asc.max(run.asc);
                             line_desc = line_desc.max(run.line_height - run.asc);
@@ -1281,7 +1321,8 @@ fn line_layout(
                                         // placement like any other, so it does not swallow the one before it.
                                         if let Some((w, a, d, _)) = pending_space.take() {
                                             if w != 0.0 {
-                                                line_gaps.push(band_l(total) + line_x);
+                                                note_gap!(band_l(total) + line_x);
+                                                flush_tail_gaps!();
                                             }
                                             line_x += w;
                                             line_asc = line_asc.max(a);
@@ -1305,7 +1346,16 @@ fn line_layout(
                                         } else {
                                             space_w
                                         };
-                                        line_gaps.push(band_l(total) + line_x); // …a justification gap of its own
+                                        // …a justification gap of its own — held back while the run is placed
+                                        // WHOLE, where the separators it ENDS in are the line's end until
+                                        // something follows them (`tail_gaps`).
+                                        if justifying {
+                                            if no_wrap {
+                                                tail_gaps.push(band_l(total) + line_x);
+                                            } else {
+                                                line_gaps.push(band_l(total) + line_x);
+                                            }
+                                        }
                                         line_x += adv;
                                         hang = 0.0;              // …and it is not a COLLAPSED hang any more
                                         if no_wrap {
@@ -1453,7 +1503,7 @@ fn line_layout(
                         if space_on_line {
                             if sw != 0.0 {
                                 // …a zero-width opportunity is no gap: nothing widens where nothing was placed
-                                line_gaps.push(band_l(total) + line_x);
+                                note_gap!(band_l(total) + line_x);
                             }
                             line_x += sw; // hanging space (after preserved ones, under pre-wrap: all of them hang)
                             hang += sw;
@@ -1562,6 +1612,8 @@ fn line_layout(
                                             o.1 = true;
                                         }
                                     }
+                                    flush_tail_gaps!();
+                                    note_nbsp_gaps!(run, &text[u..u + ulen], band_l(total) + line_x);
                                     line_x += cw;
                                     hang = 0.0;
                                     hang_pre = 0.0;
@@ -1606,6 +1658,8 @@ fn line_layout(
                                     o.1 = true;
                                 }
                             }
+                            flush_tail_gaps!();
+                            note_nbsp_gaps!(run, &text[start..i], band_l(total) + line_x);
                             line_x += width;
                             hang = 0.0;
                             hang_pre = 0.0;
@@ -1641,7 +1695,7 @@ fn line_layout(
                 let mut broke = false;
                 if space_on_line {
                     if sw != 0.0 {
-                        line_gaps.push(band_l(total) + line_x);
+                        note_gap!(band_l(total) + line_x);
                     }
                     line_x += sw; // hanging space
                     hang += sw;
@@ -1684,6 +1738,7 @@ fn line_layout(
                     }
                 }
                 line_atomics.push((ri, band_l(total) + line_x)); // its margin box starts here on this line
+                flush_tail_gaps!();
                 line_x += width + run.size; // …and a grown flex container's growth moves the pen, not the break
                 hang = 0.0;
                 hang_pre = 0.0;
