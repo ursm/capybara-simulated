@@ -625,7 +625,14 @@ RSpec.describe 'native layout table parity', if: ENV.fetch('CSIM_JS_ENGINE', 'v8
       ['<div style="display:flex;width:300px;height:150px"><table id="t" style="border-spacing:2px"><caption>cap</caption><tr><td>a</td></tr></table></div>', 150],
       ['<div style="display:flex;width:300px"><table id="t" style="border-spacing:2px"><caption style="height:50%">cap</caption><tr><td>a</td><td>bb cc</td></tr></table><div>y</div></div>', 42],
       ['<table id="t" style="border-spacing:2px;height:120px"><caption>cap</caption><tr><td>a</td></tr></table>', 138],
-      ['<div style="display:flex;width:300px"><table id="t" style="border-spacing:2px;height:120px"><caption>cap</caption><tr><td>a</td></tr></table><div style="height:200px">y</div></div>', 138]
+      ['<div style="display:flex;width:300px"><table id="t" style="border-spacing:2px;height:120px"><caption>cap</caption><tr><td>a</td></tr></table><div style="height:200px">y</div></div>', 138],
+      # …a column whose height is definite leaves an unflexed item at the height its own measure produced — the
+      # caption is inside that, not stacked on it (54, not 72)
+      ['<div style="display:flex;flex-direction:column;width:300px;height:200px"><table id="t" style="border-spacing:2px"><caption>cap</caption><tr><td style="height:30px">a</td></tr></table></div>', 54],
+      # …and this table's OWN min/max-height are the ROWS', applied after the caption comes out of the imposed
+      # height: stretched to 100 under `min-height: 150px` the rows get 150 and the table is 168
+      ['<div style="display:flex;width:300px;height:100px"><table id="t" style="border-spacing:2px;min-height:150px"><caption>cap</caption><tr><td style="height:30px">a</td></tr></table><div style="width:40px">y</div></div>', 168],
+      ['<div style="display:flex;width:300px;height:100px"><table id="t" style="border-spacing:2px;max-height:40px"><caption>cap</caption><tr><td style="height:30px">a</td></tr></table><div style="width:40px">y</div></div>', 58]
     ].each do |body, height|
       expect_parity(body)
       session = simulated_session(page(body))
@@ -633,6 +640,23 @@ RSpec.describe 'native layout table parity', if: ENV.fetch('CSIM_JS_ENGINE', 'v8
       expect(session.evaluate_script("document.getElementById('t').getBoundingClientRect().height")).to eq(height), body
     end
   end
+
+  # A box anchored to a `position: relative` TABLE is placed against the WRAPPER's final padding box: its
+  # captions and its own rows grow it past the height it was given (§17.5.3), so it is deferred like any
+  # containing block whose size is not settled yet (Chrome: a `bottom: 0` box in a 120px table with an 18px
+  # caption sits at 118, where the pre-growth box put it at 100).
+  it 'anchors a box to a relative table grown by its caption' do
+    body = '<table style="position:relative;border-spacing:2px;width:200px;height:120px"><caption>cap</caption><tr><td style="height:30px"><div id="t" style="position:absolute;bottom:0;left:0;width:20px;height:20px"></div>a</td></tr></table>'
+    expect_parity(body)
+    session = simulated_session(page(body))
+    session.visit '/'
+    expect(session.evaluate_script("document.getElementById('t').getBoundingClientRect().y")).to eq(118)
+  end
+
+  # A table flex item on a BASELINE-aligned line still declines: the oracle takes a table's baseline from the
+  # first line inside it, native synthesises one from the margin box, and Chrome's figure is neither (a sibling
+  # at 9 / 22 / 19) — so the walk defers rather than picking one.
+  it('declines a table flex item aligned on the baseline') { a_bails_b_native('<div style="display:flex;width:300px;height:100px;align-items:baseline"><table style="border-spacing:2px"><tr><td style="height:30px">a</td></tr></table><div style="width:40px">y</div></div>') }
 
   it('matches an inline-table as an atomic inline') { expect_parity('<div style="width:300px">x <span style="display:inline-table"><span style="display:table-row"><span style="display:table-cell">a</span></span></span> y</div>') }
   it('declines an rtl table with a MARGIN-offset caption (its auto-margin / lead inset is not reflected yet)') { a_bails_b_native('<table dir="rtl" style="border-spacing:4px"><caption style="width:20px;height:16px;margin-left:8px">c</caption><tr><td style="width:40px;height:20px">a</td></tr></table>') }

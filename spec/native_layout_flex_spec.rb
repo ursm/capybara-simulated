@@ -307,6 +307,23 @@ RSpec.describe 'native layout flex parity', if: ENV.fetch('CSIM_JS_ENGINE', 'v8'
     end
   end
 
+  # An item that ends up LARGER than the main size it was assigned — a table, which is never smaller than its own
+  # content — is what the line distributes around: the free space `justify-content` shares, the far edge a
+  # reversed axis measures from, and where its neighbours start (Chrome: the table at 53.57 in a centred 300px
+  # row, and at y 146 in a 200px `column-reverse`).
+  it 'distributes a flex line around an item that grew past its main size' do
+    [
+      ['<div style="display:flex;justify-content:center;width:300px"><table id="t" style="flex:0 0 60px;min-width:0;border-spacing:2px"><caption style="white-space:nowrap">caption text that is wide</caption><tr><td>x</td></tr></table><div style="width:40px;height:20px">y</div></div>', 'x', 53.57],
+      ['<div style="display:flex;flex-direction:column-reverse;width:300px;height:200px"><table id="t" style="flex:0 0 10px;min-height:0;border-spacing:2px"><caption>cap</caption><tr><td style="height:30px">x</td></tr></table><div style="width:40px;height:20px">y</div></div>', 'y', 146]
+    ].each do |body, axis, at|
+      expect_parity(body)
+      with_simulated_session(page(body)) do |session|
+        session.visit '/'
+        expect(session.evaluate_script("document.getElementById('t').getBoundingClientRect().#{axis}")).to be_within(0.02).of(at), body
+      end
+    end
+  end
+
   it 'matches an absolute flex child with its own block subtree' do
     expect_parity('<div style="position:relative;display:flex;width:300px;height:100px"><div style="width:50px;height:20px"></div><div style="position:absolute;top:5px;right:5px;width:80px;height:60px"><div style="height:10px;margin:4px"></div><div style="height:20px"></div></div></div>')
   end

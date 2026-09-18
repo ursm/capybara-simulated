@@ -3344,7 +3344,11 @@ fn flex_column_sizes(
         }
         for (j, &p) in line.iter().enumerate() {
             let h = heights[j];
-            let imposed = height_definite || restretched[p] || measured[p].map_or(true, |m| m != h) || !is_auto(decl_h[p]);
+            // An item that ended up at EXACTLY the height its own measure produced is laid out at that auto
+            // height again, definite column or not — which is what the oracle does by REUSING the measuring
+            // layout. Imposing the same number instead is not a no-op for every box: a TABLE reads an imposed
+            // height as its rows' and stacks its caption on top of it (72 where Chrome and the oracle say 54).
+            let imposed = restretched[p] || measured[p].map_or(true, |m| m != h) || !is_auto(decl_h[p]);
             out[p] = (width[p], h, imposed);
         }
     }
@@ -4352,13 +4356,14 @@ fn measure_table(
     // squeezes a later one into what is left).
     let imposed_h = {
         let to_content = |v: f64| if n.border_box { (v - n.edges_y()).max(0.0) } else { v };
-        let declared = if is_auto(n.height) { 0.0 } else { to_content(n.height) };
-        let capped = if is_auto(n.max_h) { declared } else { declared.min(to_content(n.max_h)) };
-        let imposed = if is_auto(n.min_h) { capped } else { capped.max(to_content(n.min_h)) };
         // A DECLARED height is the ROWS' to share, and the caption stacks on top of it (Chrome: 120 + 18 = 138);
-        // one imposed from OUTSIDE is the WRAPPER's, so the caption comes out of it first (a stretched flex item
-        // is exactly as tall as its line: 42, not 42 + 18).
-        if n.height_from_outside { (imposed - caption_h).max(0.0) } else { imposed }
+        // one imposed from OUTSIDE is the WRAPPER's, so the caption comes out of it BEFORE this table's own
+        // min/max-height — which are the rows' too (Chrome: a table stretched to 100 under `min-height: 150px`
+        // gives its rows 150 and comes to 168).
+        let declared = if is_auto(n.height) { 0.0 } else { to_content(n.height) };
+        let declared = if n.height_from_outside { (declared - caption_h).max(0.0) } else { declared };
+        let capped = if is_auto(n.max_h) { declared } else { declared.min(to_content(n.max_h)) };
+        if is_auto(n.min_h) { capped } else { capped.max(to_content(n.min_h)) }
     };
     let row_pct_basis = if imposed_h > 0.0 { (imposed_h - table_gaps(r_count, sy)).max(0.0) } else { f64::NAN };
     let mut row_h = vec![0.0f64; r_count];
