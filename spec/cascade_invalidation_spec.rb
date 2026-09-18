@@ -425,6 +425,157 @@ RSpec.describe 'cascade invalidation' do
     }
   end
 
+  # ── What a shadow tree's own sheets reach, and the gates that answer for the WHOLE DOCUMENT ───────
+  #
+  # Several document-wide O(1) gates — "does anything here declare this property / a `@keyframes` / a
+  # transition?" — cannot see a shadow tree's sheets, which are in no document index, so they answer
+  # YES for the entire page the moment one shadow host exists. That is correct and very expensive: a
+  # 400-row table beside one `<my-widget>` relays out 5.4x slower (51 ms → 280 ms, measured), with
+  # every light-DOM element paying for a component stylesheet that cannot reach it — see
+  # `shadow_host_gates_fail_open` for the decomposition and why narrowing them is its own increment.
+  #
+  # These examples exist AHEAD of that work: they are what the fail-open supplies for free today, and
+  # every one of them is a way a narrowed gate goes wrong. They pass now by construction; the point is
+  # that they must still pass when the gates stop answering for the whole page.
+  def shadow_page(shadow_css, shadow_body, doc_css: '', doc_body: '')
+    lambda {|_env|
+      [200, {'content-type' => 'text/html'},
+       [<<~HTML]]
+         <!DOCTYPE html><html><head><style>#{doc_css}</style></head><body>
+           #{doc_body}<div id="host"></div>
+           <script>
+             document.getElementById('host').attachShadow({mode: 'open'}).innerHTML =
+               #{("<style>#{shadow_css}</style>#{shadow_body}").dump};
+           </script>
+         </body></html>
+       HTML
+    }
+  end
+
+  it 'lets a property declared only inside a shadow tree through' do
+    s = simulated_session(shadow_page('.t { color: rgb(0, 128, 0); letter-spacing: 3px }', '<p class="t" id="t">x</p>'))
+    s.visit '/'
+    got = s.evaluate_script(<<~JS)
+      (() => {
+        const t = document.getElementById('host').shadowRoot.getElementById('t');
+        const cs = getComputedStyle(t);
+        return [cs.color, cs.letterSpacing];
+      })()
+    JS
+    expect(got).to eq(['rgb(0, 128, 0)', '3px'])
+  end
+
+  it 'finds a @keyframes declared only inside a shadow tree' do
+    # …read at its FIRST frame, so the assertion needs no clock: the animation's own `from` is 25px
+    # where the element would otherwise be at the initial 0.
+    css = '@keyframes slide { from { margin-left: 25px } to { margin-left: 40px } } .t { animation: slide 10s linear both }'
+    s = simulated_session(shadow_page(css, '<p class="t" id="t">x</p>'))
+    s.visit '/'
+    margin = s.evaluate_script("getComputedStyle(document.getElementById('host').shadowRoot.getElementById('t')).marginLeft")
+    expect(margin).to eq('25px'), 'the shadow tree\'s own @keyframes was never found'
+  end
+
+  it 'runs a transition declared only inside a shadow tree' do
+    css = '.t { color: rgb(255, 0, 0); transition: color 10s linear } .t.on { color: rgb(0, 0, 255) }'
+    s = simulated_session(shadow_page(css, '<p class="t" id="t">x</p>'))
+    s.visit '/'
+    s.evaluate_script("getComputedStyle(document.getElementById('host').shadowRoot.getElementById('t')).color")
+    s.evaluate_script("document.getElementById('host').shadowRoot.getElementById('t').classList.add('on')")
+    colour = s.evaluate_script("getComputedStyle(document.getElementById('host').shadowRoot.getElementById('t')).color")
+    # …RED, not merely "not blue": a gate that ignored the shadow sheet outright would report the
+    # initial black and pass a `not_to eq(blue)`, which is the shape of the mistake this guards.
+    expect(colour).to eq('rgb(255, 0, 0)'), 'the transition jumped straight to its end, or the sheet was ignored'
+  end
+
+  it 'reaches LAYOUT with a @keyframes declared only inside a shadow tree' do
+    # `getComputedStyle` and the geometry read the same animated value through DIFFERENT gates, and a
+    # keyframes block's properties are in no document index at all. A gate narrowed on the RULES alone
+    # leaves the layout side answering "nothing animates `transform` here", and the two halves of one
+    # geometry disagree — computed style reports the interpolated matrix, gBCR the untransformed box.
+    css = '@keyframes shove { from { transform: translateX(120px) } to { transform: translateX(120px) } } ' \
+          '.t { animation: shove 10s linear both; width: 50px }'
+    s = simulated_session(shadow_page(css, '<p class="t" id="t">x</p>'))
+    s.visit '/'
+    got = s.evaluate_script(<<~JS)
+      (() => {
+        const t = document.getElementById('host').shadowRoot.getElementById('t');
+        return [getComputedStyle(t).transform, t.getBoundingClientRect().left];
+      })()
+    JS
+    expect(got.first).to eq('matrix(1, 0, 0, 1, 120, 0)')
+    expect(got.last).to eq(128), 'the geometry did not see the shadow tree\'s animation'
+  end
+
+  it 'invalidates a ::part rule written in a SHADOW sheet, one tree further in' do
+    # `exportparts`: the OUTER shadow tree styles an INNER component's part. The rule is in a shadow
+    # sheet, not the document's, so a scan that only looks at document rules misses it — and the outer
+    # tree is exactly where a component library writes one.
+    inner = '<div id="inner"></div>'
+    s = simulated_session(lambda {|_env|
+      [200, {'content-type' => 'text/html'},
+       [<<~HTML]]
+         <!DOCTYPE html><html><body><div id="host"></div>
+         <script>
+           const outer = document.getElementById('host').attachShadow({mode: 'open'});
+           outer.innerHTML = #{("<style>#inner::part(label){color:rgb(255,0,0)} .on #inner::part(label){color:rgb(0,128,0)}</style><div id=\"wrap\">#{inner}</div>").dump};
+           outer.getElementById('inner').attachShadow({mode: 'open'}).innerHTML = '<p part="label" id="t">x</p>';
+         </script></body></html>
+       HTML
+    })
+    s.visit '/'
+    got = s.evaluate_script(<<~JS)
+      (() => {
+        const outer = document.getElementById('host').shadowRoot;
+        const t = outer.getElementById('inner').shadowRoot.getElementById('t');
+        const before = getComputedStyle(t).color;
+        outer.getElementById('wrap').classList.add('on');
+        return [before, getComputedStyle(t).color];
+      })()
+    JS
+    expect(got).to eq(['rgb(255, 0, 0)', 'rgb(0, 128, 0)'])
+  end
+
+  # …and the STRUCTURAL-CONTEXT gate, which decides whether a memoised computed value survives a
+  # mutation. It used to be switched off entirely by the presence of a host — the single biggest part
+  # of that 5.4x — and now indexes the shadow sheets too, so a mutation a shadow selector reads has to
+  # still invalidate. `:host-context()` (an ancestor OF the host) and `::part()` (a rule in the OUTER
+  # sheet whose subject is inside the tree) are the two forms the index cannot model; both keep it
+  # conservative, which is what these two pin.
+  it 'invalidates a memoised value when a shadow selector\'s own input changes' do
+    s = simulated_session(shadow_page('.t { color: rgb(255, 0, 0) } .t.on { color: rgb(0, 128, 0) }', '<p class="t" id="t">x</p>'))
+    s.visit '/'
+    got = s.evaluate_script(<<~JS)
+      (() => {
+        const t = document.getElementById('host').shadowRoot.getElementById('t');
+        const before = getComputedStyle(t).color;
+        t.classList.add('on');
+        return [before, getComputedStyle(t).color];
+      })()
+    JS
+    expect(got).to eq(['rgb(255, 0, 0)', 'rgb(0, 128, 0)'])
+  end
+
+  it 'invalidates a ::part rule whose match depends on the outer tree' do
+    # A `::part()` rule lives in the OUTER sheet and styles an element INSIDE the tree, so the
+    # structural-context index — which keys on the element a rule is written against — cannot answer
+    # for it, and the gate stays conservative whenever the document has one. Without that, a memoised
+    # part value survived a class change that should have repainted it (two css-shadow/part WPT
+    # invalidation files caught it).
+    page = shadow_page('', '<p part="label" id="t">x</p>',
+                       doc_css: '#host::part(label) { color: rgb(255, 0, 0) } .on #host::part(label) { color: rgb(0, 128, 0) }')
+    s = simulated_session(page)
+    s.visit '/'
+    got = s.evaluate_script(<<~JS)
+      (() => {
+        const t = document.getElementById('host').shadowRoot.getElementById('t');
+        const before = getComputedStyle(t).color;
+        document.body.classList.add('on');
+        return [before, getComputedStyle(t).color];
+      })()
+    JS
+    expect(got).to eq(['rgb(255, 0, 0)', 'rgb(0, 128, 0)'])
+  end
+
   it 'keeps dynamic state out of the declared-value memo key, and lets a rule-set change in' do
     # The taint bracket is what keeps a CACHED value independent of focus / typing / checkedness;
     # moving the memo's key on every state write on top of it only cold-started every element's
