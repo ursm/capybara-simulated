@@ -83,13 +83,12 @@ module PerfGate
   # keyed on a sub-pixel width — or the hard gate will red on CI only.
   #
   # …and `shadow_host` is that page with ONE shadow host beside the table, whose tree is a `<p>` and a
-  # three-declaration stylesheet. It is not a web-component benchmark: the point is that a host
-  # ANYWHERE on the page switches document-wide cascade gates off for EVERY element, because a shadow
-  # sheet is in no document index and those gates have to fail open. The counts below are the LIGHT
-  # DOM's — the same table — so the two workloads differ only by what the host costs it, and
-  # `ctx_gate_active` is the one bit that says whether the page still has a structural-context gate at
-  # all. Measured when this was added: the same relayout takes 51 ms without the host and 280 ms with
-  # it (see the `shadow-host-gates-fail-open` note).
+  # three-declaration stylesheet. It is not a web-component benchmark: a shadow sheet is in no document
+  # index, so every document-wide cascade gate that cannot see it has to answer for the whole page, and
+  # a host ANYWHERE used to cost EVERY element on it. The counts below are the LIGHT DOM's — the same
+  # table — so the two workloads differ only by what the host costs it. When this was added the same
+  # relayout took 51 ms without the host and 280 ms with it; the gates ask those sheets now, and the
+  # RATIO between the two workloads below is what holds that (see `shadow-host-gates-fail-open`).
   def self.workload_html(workload)
     rows = (1..ROWS).map {|i|
       %(<tr class="row r#{i % 6}" id="row-#{i}">) +
@@ -166,8 +165,8 @@ module PerfGate
       ctx_sweeps:        globalThis.__csimCtxSweeps(),
       // …and whether the page has a structural-context gate at all, which decides whether a memoised
       // computed value survives a mutation or every one of them dies at every write. A BIT, not a
-      // count, and the only counter here that a page can lose wholesale: a shadow host turns it off
-      // for the whole document today, and `ctx_sweeps` then reads 0 — fewer sweeps because there is
+      // count, and the only counter here that a page can lose wholesale: a shadow host used to turn it
+      // off for the whole document, and `ctx_sweeps` then read 0 — fewer sweeps because there was
       // nothing left to sweep, which is the opposite of an improvement and unreadable on its own.
       ctx_gate_active:   globalThis.__csimCtxGateActive() ? 1 : 0
     })
@@ -210,12 +209,18 @@ module PerfGate
   # before(:context) (so a `--tag ~perf` run pays nothing), then asserting the two axes.
   def self.install(group)
     all = baseline
+    group.class_exec do
+      # ONE capture for every workload, in the OUTER group — the cross-workload example below needs
+      # them measured in the same run on the same machine, which is the whole reason its ratio is worth
+      # holding at all.
+      before(:context) do
+        @all = PerfGate::WORKLOADS.to_h {|w| [w, PerfGate.capture(w)] }
+      end
+    end
     WORKLOADS.each do |workload|
       base = all.fetch(workload)
       group.describe(workload) do
-        before(:context) do
-          @measured = PerfGate.capture(workload)
-        end
+        before(:context) { @measured = @all.fetch(workload) }
 
         it 'layout / cascade op-counts match the baseline (hard)' do
           expected = base.fetch('counts')
@@ -249,6 +254,36 @@ module PerfGate
           # the measurement was taken, so the gate's pass/fail stays deterministic.
           expect(actual).to be > 0
         end
+      end
+    end
+
+    # …and what neither axis above can see: a change that moves a per-element CONSTANT FACTOR. The held
+    # counters are all element / pass counts, so they are structurally blind to it — the shadow-host
+    # work that took this page from 5.4x to parity moved none of them — and the wall axis warns only
+    # UPWARD, so an improvement is never locked in and an equal giveback later sits inside tolerance.
+    #
+    # The two workloads are the SAME page modulo one shadow host, measured in the same run: their ratio
+    # cancels machine speed and load far better than the arithmetic loop does, and it is exactly the
+    # quantity three increments in a row moved. Held TWO-SIDED, and soft like the other wall axis —
+    # wall is a trend signal, and a reporter warning that fires on an improvement is how the ratchet
+    # asks to be regenerated.
+    ratio_base = all.fetch('shadow_host').fetch('wall').fetch('workload_ms') /
+                 all.fetch('grid_table').fetch('wall').fetch('workload_ms')
+    group.describe('shadow_host vs grid_table') do
+      it 'the same page with a shadow host costs about what the baseline says (warn only)' do
+        actual = @all.fetch('shadow_host').fetch('wall').fetch('workload_ms') /
+                 @all.fetch('grid_table').fetch('wall').fetch('workload_ms')
+        drift  = (actual - ratio_base).abs / ratio_base
+        if drift > PerfGate::WALL_WARN_TOL
+          PerfGate.warn_soft(
+            "[perf][WARN] shadow_host / grid_table wall ratio #{actual.round(3)} vs baseline " \
+            "#{ratio_base.round(3)} (#{(drift * 100).round(1)}% drift, tolerance " \
+            "#{(PerfGate::WALL_WARN_TOL * 100).round}%). A per-element constant factor the op-counts " \
+            'cannot see moved — a regression if UP, a win to lock in if DOWN. Regenerate the baseline ' \
+            'either way once you know which.'
+          )
+        end
+        expect(actual).to be > 0
       end
     end
   end

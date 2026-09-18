@@ -632,6 +632,82 @@ RSpec.describe 'cascade invalidation' do
     expect(got).to eq(n)
   end
 
+  it 'relays out for a DYNAMIC rule that moves a box inside a shadow tree' do
+    # Two gates are a pair here: the scoped-state hook cannot sweep a shadow rule's subjects (the
+    # subject list is the document's), so the layout EPOCH carries dynamic state instead. Both used to
+    # switch on "is there a host at all" — which cost every page with one a `styleStateGeneration()`
+    # call per element per pass, for a widget that may declare nothing dynamic. They ask the trees'
+    # own sheets now, and this is what that has to keep working. Narrowing one without the other is
+    # how a page ends up both sweeping nothing AND keying on nothing.
+    [
+      ['#t { width: 40px } #t:hover { width: 300px }',
+       "document._hoverElement = document.getElementById('host').shadowRoot.getElementById('t');", 300],
+      ['#t { width: 40px } #t:focus { width: 300px }',
+       "const el = document.getElementById('host').shadowRoot.getElementById('t'); el.setAttribute('tabindex', '0'); el.focus();", 300],
+      # …and one that only PAINTS moves no box, so it must NOT drag dynamic state into the epoch
+      ['#t { width: 40px } #t:hover { background: red }',
+       "document._hoverElement = document.getElementById('host').shadowRoot.getElementById('t');", 40]
+    ].each do |css, mutation, after|
+      s = simulated_session(shadow_page(css, '<div id="t">x</div>'))
+      s.visit '/'
+      got = s.evaluate_script(<<~JS)
+        (() => {
+          const t = document.getElementById('host').shadowRoot.getElementById('t');
+          const before = t.getBoundingClientRect().width;
+          #{mutation}
+          return [before, t.getBoundingClientRect().width];
+        })()
+      JS
+      expect(got).to eq([40, after]), css
+    end
+    # …and the paint-only case needs a barrier of its own: a width that did not move is what a rule
+    # dragging state into the epoch produces TOO (it costs work, it does not change the answer). The
+    # epoch is the observable, so ask it directly.
+    s = simulated_session(shadow_page('#t { width: 40px } #t:hover { background: red }', '<div id="t">x</div>'))
+    s.visit '/'
+    epochs = s.evaluate_script(<<~JS)
+      (() => {
+        const t = document.getElementById('host').shadowRoot.getElementById('t');
+        t.getBoundingClientRect();
+        const before = globalThis.__csimLayoutEpoch();
+        document._hoverElement = t;
+        t.getBoundingClientRect();
+        return [before, globalThis.__csimLayoutEpoch()];
+      })()
+    JS
+    expect(epochs.first).to eq(epochs.last), 'a paint-only shadow rule moved the LAYOUT epoch'
+  end
+
+  it 'relays out for a ::part rule that moves a box on a dynamic state flip' do
+    # The mirror of the case above, and the one thing neither list carries: a `::part()` rule lives in
+    # the DOCUMENT sheet, so no shadow sheet declares it — and `collectDynamicLayoutRules` drops every
+    # rule whose subject is a pseudo-element, so the document's dynamic-subject list does not carry it
+    # either. Nothing would relay out for it: the scoped hook cannot sweep a subject one tree in, and
+    # the epoch would have stopped keying on dynamic state. The document's part rules are scanned for
+    # it (`dynamicPartRule`).
+    [['#host::part(p):hover', 't'], ['#host:hover::part(p)', "document.getElementById('host')"]].each do |sel, hover|
+      s = simulated_session(lambda {|_env|
+        [200, {'content-type' => 'text/html'},
+         [<<~HTML]]
+           <!DOCTYPE html><html><head><style>#host::part(p) { width: 77px } #{sel} { width: 300px }</style></head>
+           <body><div id="host"></div><script>
+             document.getElementById('host').attachShadow({ mode: 'open' }).innerHTML = '<div part="p" id="t">x</div>';
+           </script></body></html>
+         HTML
+      })
+      s.visit '/'
+      got = s.evaluate_script(<<~JS)
+        (() => {
+          const t = document.getElementById('host').shadowRoot.getElementById('t');
+          const before = t.getBoundingClientRect().width;
+          document._hoverElement = #{hover};
+          return [before, t.getBoundingClientRect().width];
+        })()
+      JS
+      expect(got).to eq([77, 300]), sel
+    end
+  end
+
   # …and the STRUCTURAL-CONTEXT gate, which decides whether a memoised computed value survives a
   # mutation. It used to be switched off entirely by the presence of a host — the single biggest part
   # of that 5.4x — and now indexes the shadow sheets too, so a mutation a shadow selector reads has to
