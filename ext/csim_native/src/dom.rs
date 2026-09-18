@@ -977,6 +977,7 @@ fn layout_pass(
             // every text block's children on a page that has none.
             has_replayed_oof: (r[65] as u32) & 65536 != 0,
             pushed_h_indefinite: (r[65] as u32) & 131072 != 0,
+            height_from_outside: (r[65] as u32) & 262144 != 0,
             rel_x: r[39],
             rel_y: r[40],
             flex_item_auto: r[41] as u8,

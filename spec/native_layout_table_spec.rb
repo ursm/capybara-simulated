@@ -614,6 +614,26 @@ RSpec.describe 'native layout table parity', if: ENV.fetch('CSIM_JS_ENGINE', 'v8
       .to eq([[0, 156], [0, 138], [138, 18]])
   end
 
+  # A height IMPOSED on a table from outside — a flex line's cross size, a stretched item — is the WRAPPER's, so
+  # its caption comes out of it and the rows share the rest; a DECLARED height is the rows' own and the caption
+  # stacks on top of it. (Chrome: stretched to 100 the table is 100 with an 18px caption; `height: 120px` is 138,
+  # in a flex row or not.)
+  it 'holds a caption inside an imposed height and stacks it on a declared one' do
+    [
+      ['<div style="display:flex;width:300px"><table id="t" style="border-spacing:2px"><caption>cap</caption><tr><td>a</td></tr></table><div style="height:100px">y</div></div>', 100],
+      ['<div style="display:flex;width:300px"><table id="t" style="border-spacing:2px;caption-side:bottom"><caption>cap</caption><tr><td>a</td></tr></table><div style="height:100px">y</div></div>', 100],
+      ['<div style="display:flex;width:300px;height:150px"><table id="t" style="border-spacing:2px"><caption>cap</caption><tr><td>a</td></tr></table></div>', 150],
+      ['<div style="display:flex;width:300px"><table id="t" style="border-spacing:2px"><caption style="height:50%">cap</caption><tr><td>a</td><td>bb cc</td></tr></table><div>y</div></div>', 42],
+      ['<table id="t" style="border-spacing:2px;height:120px"><caption>cap</caption><tr><td>a</td></tr></table>', 138],
+      ['<div style="display:flex;width:300px"><table id="t" style="border-spacing:2px;height:120px"><caption>cap</caption><tr><td>a</td></tr></table><div style="height:200px">y</div></div>', 138]
+    ].each do |body, height|
+      expect_parity(body)
+      session = simulated_session(page(body))
+      session.visit '/'
+      expect(session.evaluate_script("document.getElementById('t').getBoundingClientRect().height")).to eq(height), body
+    end
+  end
+
   it('matches an inline-table as an atomic inline') { expect_parity('<div style="width:300px">x <span style="display:inline-table"><span style="display:table-row"><span style="display:table-cell">a</span></span></span> y</div>') }
   it('declines an rtl table with a MARGIN-offset caption (its auto-margin / lead inset is not reflected yet)') { a_bails_b_native('<table dir="rtl" style="border-spacing:4px"><caption style="width:20px;height:16px;margin-left:8px">c</caption><tr><td style="width:40px;height:20px">a</td></tr></table>') }
   it('declines an empty row group (the oracle boxes it below the grid)') { a_bails_b_native('<table style="border-spacing:4px"><tbody></tbody><tbody><tr><td style="width:40px;height:20px">a</td></tr></tbody></table>') }

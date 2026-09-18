@@ -299,6 +299,12 @@ pub(crate) struct Input {
     // figure for LAYOUT and the wrong one for an intrinsic contribution.
     pub(crate) decl_edges_x: f64,
     pub(crate) decl_margin_x: f64,
+    // Whether `height` is a USED size settled OUTSIDE this box — a flex line's cross size, an inset box's, a
+    // pushed replay — rather than its own declaration. Only a TABLE reads it, and the two differ for one: a
+    // DECLARED height is shared out over the rows with the caption stacked on top (Chrome: `height: 120px` plus
+    // an 18px caption is 138 tall), while an imposed one is the WRAPPER's, the caption inside it (a stretched
+    // flex item is exactly as tall as its line).
+    pub(crate) height_from_outside: bool,
     // TABLE CELL: the `%` fraction its `width` declared (NaN where it declares none) — a column's `pct`,
     // resolved against the width the columns share out rather than the table's own box (`distribute_columns`).
     pub(crate) cell_pct: f64,
@@ -3679,6 +3685,9 @@ fn measure_flex(
                 }
                 let room = line_lc[li] - Input::m(cn.mt) - Input::m(cn.mb);
                 if boxes[c].h != room {
+                    // The stretch is the WRAPPER's height, not a declared one: a table stretched to its line holds
+                    // its caption inside that (`height_from_outside`), where a main-axis size stacks it on top.
+                    inputs[c].set(Input { height_from_outside: true, ..cn });
                     measure(c, boxes[c].w, room, inputs, runs, run_texts, grids, children, boxes, failed, &mut FloatCtx::new(), 0.0, 0.0);
                     co[p] = boxes[c].h + Input::m(cn.mt) + Input::m(cn.mb);
                 }
@@ -4345,9 +4354,11 @@ fn measure_table(
         let to_content = |v: f64| if n.border_box { (v - n.edges_y()).max(0.0) } else { v };
         let declared = if is_auto(n.height) { 0.0 } else { to_content(n.height) };
         let capped = if is_auto(n.max_h) { declared } else { declared.min(to_content(n.max_h)) };
-        // (…the CAPTION does not come out of it: a table told to be 120 tall puts 120 into its rows and stacks
-        // the caption on top of that, Chrome-measured at 138.)
-        if is_auto(n.min_h) { capped } else { capped.max(to_content(n.min_h)) }
+        let imposed = if is_auto(n.min_h) { capped } else { capped.max(to_content(n.min_h)) };
+        // A DECLARED height is the ROWS' to share, and the caption stacks on top of it (Chrome: 120 + 18 = 138);
+        // one imposed from OUTSIDE is the WRAPPER's, so the caption comes out of it first (a stretched flex item
+        // is exactly as tall as its line: 42, not 42 + 18).
+        if n.height_from_outside { (imposed - caption_h).max(0.0) } else { imposed }
     };
     let row_pct_basis = if imposed_h > 0.0 { (imposed_h - table_gaps(r_count, sy)).max(0.0) } else { f64::NAN };
     let mut row_h = vec![0.0f64; r_count];
@@ -4912,10 +4923,11 @@ fn min_content_width(i: usize, inputs: &[Cell<Input>], runs: &[Run], run_texts: 
     if n.replaced && !n.ratio_only {
         return Some(n.intrinsic_w); // the oracle's minContentWidth: the intrinsic width, edges not counted
     }
-    // A TABLE answers for itself, and its figure is already a BORDER box (the frame included), so no edges go
-    // on top of it — the same early return `intrinsic_widths` makes for one.
+    // A TABLE answers for itself, and its figure is already a BORDER box (the frame included), so no edges go on
+    // top of it — `intrinsic_widths` returns its own algorithm's, a declared width still pinning it, exactly as
+    // the oracle's `minContentWidth` reads `intrinsicWidths(el).min` for one.
     if n.display == DISPLAY_TABLE {
-        return Some(table_intrinsic_widths(i, inputs, runs, run_texts, grids, children)?.0);
+        return Some(intrinsic_widths(i, inputs, runs, run_texts, grids, children)?.0);
     }
     // The box's own edges RESOLVED: this is a floor on a used size, not an intrinsic contribution, so a
     // percentage padding counts here as it does in the box (Chrome floors a `padding: 0 10%` item in a 100px row
@@ -5968,6 +5980,7 @@ mod tests {
             ws_mode: 0,
             item_auto_height: false,
             pushed_h_indefinite: false,
+            height_from_outside: false,
             grid_start: -1,
             decl_w: f64::NAN,
             decl_min_w: f64::NAN,
