@@ -51,9 +51,11 @@ RSpec.describe 'native layout no-oracle run', if: ENV.fetch('CSIM_JS_ENGINE', 'v
   end
 
   it 'records where the walk read an oracle stamp' do
-    # (a RELATIVE offset in percent still resolves against the oracle's basis; an image's intrinsic size is still a
-    # helper's — a plain percentage width no longer reads anything)
-    s = session_with('<div style="width:300px"><p style="position:relative;left:10%">hello</p><img style="width:20px;height:10px"></div>')
+    # (a RELATIVE offset in percent still resolves against the oracle's basis, and a cell native cannot measure
+    # still asks the oracle's intrinsic widths — a plain percentage width no longer reads anything, and neither
+    # does an intrinsic SIZE, which is data off the DOM rather than a layout the oracle ran)
+    s = session_with('<div style="width:300px"><p style="position:relative;left:10%">hello</p>' \
+                     '<table><tr><td>a <span style="display:inline-table"><span style="display:table-cell">bb</span></span></td></tr></table></div>')
     reads = s.evaluate_script('globalThis.__csimLayoutShadowRun(undefined, {noOracle: true}).oracleReads')
     expect(reads.keys).to include('recordCbW _lbCbW')
     expect(reads.keys).to include('nlShadowRun the pass root origin and width (handed over)')
@@ -136,7 +138,9 @@ RSpec.describe 'native layout no-oracle run', if: ENV.fetch('CSIM_JS_ENGINE', 'v
       '<table style="border-spacing:2px"><caption style="width:150%">cap</caption><tr><td>a</td><td style="width:30%">b c</td></tr><tr><td colspan="2">d</td></tr></table>',
       '<table style="table-layout:fixed;width:50%;border-collapse:collapse"><tr><td style="border:2px solid">a</td><td>b</td></tr></table>',
       # …whose gate asks whether a height is imposed on the table without asking the oracle's box
-      '<table style="border-spacing:2px"><tr><td><div style="height:50%">x</div></td></tr></table>'
+      '<table style="border-spacing:2px"><tr><td><div style="height:50%">x</div></td></tr></table>',
+      # …and a LIST BOX, whose own box native derives from the control's intrinsic data and whose rows it stacks
+      '<div style="width:400px">t <span style="display:inline-block"><select multiple size="3" style="display:block;width:120px"><option>a</option><option>bbbb</option></select></span> u</div>'
     ].each do |body|
       r = session_with(body).evaluate_script('globalThis.__csimLayoutShadowRun(undefined, {noOracle: true})')
       expect(r).to include('ok' => true, 'mismatches' => 0), "#{body}: #{r.inspect}"

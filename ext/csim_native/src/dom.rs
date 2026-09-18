@@ -1033,6 +1033,7 @@ fn layout_pass(
             intrinsic_w: r[68],
             intrinsic_h: r[69],
             replaced: (r[70] as u32) & 1 != 0,
+            lays_out_children: (r[70] as u32) & 16 != 0,
             ratio: (r[70] as u32) & 2 != 0,
             ratio_only: (r[70] as u32) & 4 != 0,
             shrinks_to_nothing: (r[70] as u32) & 8 != 0,

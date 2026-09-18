@@ -328,12 +328,9 @@ RSpec.describe 'native layout inline-atomic parity', if: ENV.fetch('CSIM_JS_ENGI
       expect_native_atomic('<div style="width:400px">text <span style="display:inline-block"><div>t</div><input style="display:block"></span> after</div>')
       expect_native_atomic('<div style="width:400px">text <span style="display:inline-block"><textarea style="display:block;margin-bottom:6px"></textarea></span> after</div>')
       expect_native_atomic('<div style="width:400px">text <span style="display:inline-block"><img style="display:block;width:30px;height:30px"></span> after</div>')
-      # A LIST BOX showing rows is NOT a leaf: native stacks its options itself and reads its baselines off
-      # them (see native_layout_replaced_spec). The inline-block around one is laid out to the same boxes, but
-      # as a PUSHED atomic rather than a native one — an atomic whose subtree holds such a container is not on
-      # the native atomic path yet, and that stays on the decline census rather than riding a pushed baseline.
-      r = run_shadow('<div style="width:400px">text <span style="display:inline-block"><select multiple style="display:block"><option>a</option></select></span> after</div>')
-      expect(r).to include('ok' => true, 'mismatches' => 0, 'nativeAtomics' => 0)
+      # A LIST BOX showing rows is NOT a leaf: its BOX is the control's (the intrinsic data, `lays_out_children`)
+      # and native stacks its options inside it, so the inline-block around one is a native atomic like any other.
+      expect_native_atomic('<div style="width:400px">text <span style="display:inline-block"><select multiple style="display:block"><option>a</option></select></span> after</div>')
     end
     it 'keeps the pushed box by NOT measuring the subtree it sits in' do
       # A pushed atomic's box is not in the run stream `text_intrinsic` reads, so it may only sit in a text block

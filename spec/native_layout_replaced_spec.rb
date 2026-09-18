@@ -232,6 +232,29 @@ RSpec.describe 'native layout replaced-leaf parity', if: ENV.fetch('CSIM_JS_ENGI
         # y = 1 / 16 / 31 / 46), which is what makes them compared boxes at all.
         expect_parity('<div style="width:400px"><select size="3" style="display:block"><option>a</option><option>bbbb</option><option>c</option><option>d</option></select></div>')
       end
+
+      # …and its BOX is native's own now: the control's intrinsic data rides the record (`lays_out_children`) and
+      # native applies this element's width / height / min / max and box-sizing to it (`replaced_box`), where the
+      # walk used to pin the box the oracle had already resolved. Every declaration that reshapes a control's box.
+      it 'derives a list box box from the intrinsic data, not the oracle box' do
+        rows = '<option>a</option><option>bbbb</option>'
+        ['', 'width:120px', 'height:60px', 'width:120px;height:60px', 'min-width:200px', 'max-width:30px',
+         'min-height:90px', 'max-height:20px', 'width:50%', 'padding:6px 4px;border:3px solid',
+         'box-sizing:border-box;width:120px;height:60px;padding:6px;border:2px solid',
+         'margin:5px 7px'].each do |style|
+          expect_parity(%(<div style="width:400px"><select multiple size="3" style="display:block;#{style}">#{rows}</select></div>))
+          expect_parity(%(<div style="width:400px">t <span style="display:inline-block"><select multiple size="3" style="display:block;#{style}">#{rows}</select></span> u</div>))
+        end
+        # …and the same control in the layouts that size their children themselves
+        expect_parity(%(<div style="display:flex;width:400px"><select multiple size="3" style="flex:1">#{rows}</select><div style="width:40px">y</div></div>))
+        expect_parity(%(<table style="width:300px"><tr><td><select multiple size="3">#{rows}</select></td><td>b</td></tr></table>))
+        # …the two that still decline: an intrinsic-size KEYWORD width on a replaced box (its width is its own
+        # size), and a list box as a GRID item.
+        [%(<select multiple size="3" style="display:block;width:max-content">#{rows}</select>),
+         %(<div style="display:grid;grid-template-columns:150px 1fr;width:400px"><select multiple size="3">#{rows}</select><div>y</div></div>)].each do |body|
+          expect(run_shadow(%(<div style="width:400px">#{body}</div>))).to include('ok' => false), body
+        end
+      end
     end
   end
 end

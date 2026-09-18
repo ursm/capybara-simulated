@@ -341,6 +341,11 @@ pub(crate) struct Input {
     // = the intrinsic size is a real aspect ratio (an image, a canvas, a viewBox); `ratio_only` = a ratio with no
     // intrinsic SIZE (a viewBox): the box wants what its container gives it. It lays out no children.
     pub(crate) replaced: bool,
+    // …unless it LAYS OUT CHILDREN: a `<select multiple>` showing rows is a replaced box whose SIZE is the
+    // control's chrome (`replaced_box`) and whose CONTENT is its options, stacked as ordinary blocks inside it
+    // (Chrome gives each option a box; a dropdown's have none at all). Its box is pinned from the intrinsic data
+    // and the block path lays the rows out inside it.
+    pub(crate) lays_out_children: bool,
     pub(crate) ratio: bool,
     pub(crate) ratio_only: bool,
     // The box has no content height to floor a flex column's automatic minimum at (an image, a ratio box).
@@ -2157,6 +2162,20 @@ fn measure(
     bfc_y: f64,
 ) -> MInfo {
     let n = inputs[i].get().with_imposed_height(imposed_h);
+    // A replaced box that LAYS OUT CHILDREN (a list box showing rows): its own box is the control's chrome, from
+    // the intrinsic data with its clamps spent (`replaced_box`), and everything below lays its rows out inside
+    // that box as a block container would — which is what the oracle does with a `<select multiple>`.
+    let n = if n.lays_out_children {
+        let (bw, bh) = replaced_box(&n, w);
+        let pinned = Input { width: bw, height: bh, border_box: true,
+                             min_w: f64::NAN, max_w: f64::NAN, min_h: f64::NAN, max_h: f64::NAN, ..n };
+        // …written back, so the branch this box dispatches to (a flex or grid container is still a control with
+        // that box) lays its rows out inside the control's box rather than sizing itself from them.
+        inputs[i].set(pinned);
+        pinned
+    } else {
+        n
+    };
     let content_top_rel = n.bt + n.pt;
     let content_w = n.content_w(w);
     // This box is its in-flow children's containing block: their percentage sizes resolve against its content
@@ -2174,7 +2193,7 @@ fn measure(
     // A REPLACED leaf: its box comes from its intrinsic size (`replaced_box`) — the width the caller resolved
     // through `used_width` (or a flex size), the height derived here; no children, no baseline of its own
     // (a container synthesises its bottom edge), margins that never adjoin.
-    if n.replaced {
+    if n.replaced && !n.lays_out_children {
         // Its CONTENT height, when a flex column asks for it as the automatic minimum (MEASURE_AUTO_HEIGHT →
         // `item_auto_height`): an image, or a box with an intrinsic RATIO, has none of its own to hold (Chrome:
         // an img in a 20px column shrinks to 13.33); a ratio-less control keeps its intrinsic height (an input
@@ -4887,7 +4906,9 @@ fn content_intrinsic(i: usize, inputs: &[Cell<Input>], runs: &[Run], run_texts: 
             }
             text_intrinsic(&runs[rs..re], &run_texts[rs..re], n.ws_mode, inputs, runs, run_texts, grids, children)
         }
-        _ if n.replaced => Some((0.0, 0.0)), // a replaced box holds no CSS content (a ratio-only svg asks its container)
+        // …a LIST BOX excepted: its rows ARE CSS content, and the oracle's `minContentWidth` reads them (it asks
+        // `contentIntrinsicWidths` for one rather than the control's own width).
+        _ if n.replaced && !n.lays_out_children => Some((0.0, 0.0)), // a replaced box holds no CSS content
         DISPLAY_BLOCK | DISPLAY_FLEX | DISPLAY_GRID => {
             let (mut min, mut max) = (0.0f64, 0.0f64);
             let mut line = 0.0f64; // floats pack beside each other on a line, as inline boxes would
@@ -4925,7 +4946,7 @@ fn content_intrinsic(i: usize, inputs: &[Cell<Input>], runs: &[Run], run_texts: 
 // `decl_w`).
 fn min_content_width(i: usize, inputs: &[Cell<Input>], runs: &[Run], run_texts: &[Option<Vec<u16>>], grids: &[f64], children: &[Vec<usize>]) -> Option<f64> {
     let n = inputs[i].get();
-    if n.replaced && !n.ratio_only {
+    if n.replaced && !n.ratio_only && !n.lays_out_children {
         return Some(n.intrinsic_w); // the oracle's minContentWidth: the intrinsic width, edges not counted
     }
     // A TABLE answers for itself, and its figure is already a BORDER box (the frame included), so no edges go on
@@ -5986,6 +6007,7 @@ mod tests {
             item_auto_height: false,
             pushed_h_indefinite: false,
             height_from_outside: false,
+            lays_out_children: false,
             grid_start: -1,
             decl_w: f64::NAN,
             decl_min_w: f64::NAN,
