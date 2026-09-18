@@ -241,9 +241,22 @@ RSpec.describe 'native layout replaced-leaf parity', if: ENV.fetch('CSIM_JS_ENGI
         ['', 'width:120px', 'height:60px', 'width:120px;height:60px', 'min-width:200px', 'max-width:30px',
          'min-height:90px', 'max-height:20px', 'width:50%', 'padding:6px 4px;border:3px solid',
          'box-sizing:border-box;width:120px;height:60px;padding:6px;border:2px solid',
-         'margin:5px 7px'].each do |style|
+         'box-sizing:content-box;width:50%;padding:6px;border:3px solid', 'width:50%;min-width:180px',
+         'width:50%;max-width:40px', 'margin:5px 7px'].each do |style|
           expect_parity(%(<div style="width:400px"><select multiple size="3" style="display:block;#{style}">#{rows}</select></div>))
           expect_parity(%(<div style="width:400px">t <span style="display:inline-block"><select multiple size="3" style="display:block;#{style}">#{rows}</select></span> u</div>))
+          # …and in a wrapper measured TWICE (a stretched flex line re-lays its items out): the control's box is
+          # derived from the record's declarations each time, never from the figures a previous measure produced.
+          expect_parity(%(<div style="display:flex;width:400px;height:150px;align-items:stretch"><div style="width:200px">) +
+                        %(<select multiple size="3" style="display:block;#{style}">#{rows}</select></div><div style="width:40px">y</div></div>))
+        end
+        # A replaced box keeps its INTRINSIC height between block-axis insets — §10.6.5 ignores `bottom` for one —
+        # which native stretched to the inset height (the list box 150 tall where the oracle says 53).
+        ['<select multiple size="3" style="position:absolute;top:10px;left:20px;right:30px;bottom:40px;display:block">' + rows + '</select>',
+         '<input style="position:absolute;top:0;bottom:0">',
+         '<textarea style="position:absolute;top:0;bottom:0"></textarea>',
+         '<img style="position:absolute;top:0;bottom:0;width:10px;height:10px">'].each do |box|
+          expect_parity(%(<div style="width:400px;height:200px;position:relative">#{box}</div>))
         end
         # …and the same control in the layouts that size their children themselves
         expect_parity(%(<div style="display:flex;width:400px"><select multiple size="3" style="flex:1">#{rows}</select><div style="width:40px">y</div></div>))

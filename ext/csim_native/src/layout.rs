@@ -2161,21 +2161,18 @@ fn measure(
     bfc_x: f64,
     bfc_y: f64,
 ) -> MInfo {
-    let n = inputs[i].get().with_imposed_height(imposed_h);
     // A replaced box that LAYS OUT CHILDREN (a list box showing rows): its own box is the control's chrome, from
-    // the intrinsic data with its clamps spent (`replaced_box`), and everything below lays its rows out inside
-    // that box as a block container would — which is what the oracle does with a `<select multiple>`.
-    let n = if n.lays_out_children {
-        let (bw, bh) = replaced_box(&n, w);
-        let pinned = Input { width: bw, height: bh, border_box: true,
-                             min_w: f64::NAN, max_w: f64::NAN, min_h: f64::NAN, max_h: f64::NAN, ..n };
-        // …written back, so the branch this box dispatches to (a flex or grid container is still a control with
-        // that box) lays its rows out inside the control's box rather than sizing itself from them.
-        inputs[i].set(pinned);
-        pinned
+    // the intrinsic data (`replaced_box` — this element's width / height / min / max and box-sizing applied to
+    // it), and everything below lays its rows out INSIDE that box, in whatever formatting context the control
+    // declares. The box is handed on as the width and the IMPOSED height, so the record keeps its declarations:
+    // writing the resolved figures back turned the box into its own input, and a second measure of the same node
+    // (a flex stretch, a float's two passes) then read a percentage width as a border box with no clamps left.
+    let (w, imposed_h) = if inputs[i].get().lays_out_children {
+        replaced_box(&inputs[i].get().with_imposed_height(imposed_h), w)
     } else {
-        n
+        (w, imposed_h)
     };
+    let n = inputs[i].get().with_imposed_height(imposed_h);
     let content_top_rel = n.bt + n.pt;
     let content_w = n.content_w(w);
     // This box is its in-flow children's containing block: their percentage sizes resolve against its content
@@ -5727,7 +5724,9 @@ fn place_out_of_flow(
     // A stretched AUTO height is imposed (usedSize hands it in as the box's height; the flow keeps a non-zero one) —
     // a zero one is the oracle's auto placeholder and back-fills from the content.
     let auto_h = if stretched_v { (avail_h - mt - mb).max(0.0) } else { 0.0 };
-    let imposed = if is_auto(n.height) && auto_h > 0.0 { auto_h } else { f64::NAN };
+    // …a REPLACED box excepted: its height is its own intrinsic size, which §10.6.5 keeps whatever the insets say
+    // (the oracle's `usedSize` keeps it; native stretched an inset `<input>` / list box to the inset height).
+    let imposed = if is_auto(n.height) && auto_h > 0.0 && !n.replaced { auto_h } else { f64::NAN };
     measure(c, w, imposed, inputs, runs, run_texts, grids, children, boxes, failed, &mut FloatCtx::new(), 0.0, 0.0);
     let h = boxes[c].h;
     let am = n.auto_margins;
