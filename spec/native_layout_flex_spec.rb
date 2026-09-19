@@ -586,6 +586,15 @@ RSpec.describe 'native layout flex parity', if: ENV.fetch('CSIM_JS_ENGINE', 'v8'
   it('matches an inline-flex GRID item (blockified to flex)') { expect_parity('<div style="display:grid;grid-template-columns:200px;width:200px"><div style="display:inline-flex;gap:6px;align-items:center"><div style="width:30px;height:30px"></div><div style="width:20px;height:40px"></div></div></div>') }
   # `float` does not apply to a flex item (§4): it neither floats nor goes out of flow — the item is laid out as
   # an ordinary flex item with its float ignored, so native places it as one rather than declining.
+  # The CONTAINER being floated is a different question from an ITEM being floated, and it declined until the
+  # gate refusing it was found to have no reason (see the grid spec's twin). Its auto width is §10.3.5
+  # shrink-to-fit; what has to be right beside it is the BAND, which only a box on the line beside the float
+  # and a block after it can show.
+  it 'lays out a floated flex container natively' do
+    expect_parity('<div style="width:400px"><div style="float:left;display:flex"><div style="width:35px;height:12px"></div><div style="width:25px;height:20px"></div></div>text beside it <span style="display:inline-block;width:3px;height:3px"></span></div>')
+    expect_parity('<div style="width:400px"><div style="float:right;display:flex;flex-direction:column">some floated container text</div><div style="height:9px"></div></div>')
+    expect_parity('<div style="width:400px"><div style="float:left;display:inline-flex;flex-wrap:wrap;max-width:60px"><div style="width:35px;height:12px"></div><div style="width:35px;height:12px"></div></div><div style="clear:both;height:9px"></div></div>')
+  end
   it('matches a floated flex item (float ignored — laid out as an ordinary item)') { expect_parity('<div style="display:flex;width:400px"><div style="float:left;width:80px;height:30px"></div><div style="width:80px;height:40px"></div></div>') }
   it('matches a floated flex item with align-items:center (float ignored)') { expect_parity('<div style="display:flex;align-items:center;width:400px;height:100px"><div style="float:left;width:80px;height:30px"></div><div style="width:80px;height:50px"></div></div>') }
   it('matches a floated flex item with flex-grow (float ignored, grows to fill)') { expect_parity('<div style="display:flex;width:400px"><div style="float:left;flex:1;height:30px"></div><div style="width:80px;height:30px"></div></div>') }

@@ -144,8 +144,30 @@ RSpec.describe 'native layout grid parity', if: ENV.fetch('CSIM_JS_ENGINE', 'v8'
   it 'matches an absolutely-positioned grid container in a relative parent' do
     expect_parity('<div style="position:relative;width:300px;height:200px"><div style="position:absolute;top:10px;left:10px;display:grid;grid-template-columns:50px 50px;gap:6px"><div style="height:20px">a</div><div style="height:30px">b</div></div></div>')
   end
-  it 'declines a floated grid container' do
-    expect_bail('<div style="width:400px"><div style="float:left;display:grid;grid-template-columns:50px 50px"><div style="height:20px">a</div></div><div style="height:20px"></div></div>')
+  # A FLOATED one lays out natively too, and that gate had no reason beside the two comments above it, which
+  # are about POSITION. The block arm takes a floated child before it ever reaches the display checks, then
+  # demands it be MEASURABLE — which asked this same gate, which refused it for being a float: a circular
+  # refusal that cost 2,341 shapes across four sweeps. Its auto width is §10.3.5 shrink-to-fit, which is what
+  # every other content-sized box in the walk already gets (`measuredKids`).
+  it 'lays out a floated grid container natively' do
+    expect_parity('<div style="width:400px"><div style="float:left;display:grid;grid-template-columns:50px 50px"><div style="height:20px">a</div></div><div style="height:20px"></div></div>')
+    # …an AUTO width is the case that matters — the float's own shrink-to-fit rather than the room it sits in —
+    # and the band it leaves has to be right for the line beside it, which only a box on that line can show.
+    expect_parity('<div style="width:400px"><div style="float:right;display:grid;grid-template-columns:auto auto"><div style="height:12px">aa</div><div style="height:12px">bb</div></div>text beside it <span style="display:inline-block;width:3px;height:3px"></span></div>')
+    expect_parity('<div style="width:400px"><div style="float:left;display:inline-grid;grid-template-columns:30px 30px;max-width:40px"><div style="height:9px">a</div><div style="height:9px">b</div></div><div style="clear:both;height:9px"></div></div>')
+  end
+  # …and where the line actually falls, which is NOT at the float. A grid holding BARE TEXT declines wherever
+  # its width is its own: an anonymous grid item is a column-sizing input CSS Grid §4 defines and neither
+  # engine's grid algorithm can see (no record, no run stream), so `nlIntrinsicMeasurable` refuses the
+  # measure. Both halves are here because the declining half ALONE pins nothing — it declined before the float
+  # gate went too, for the gate's own reason. It is the passing half that says the boundary moved.
+  # (That pair is the whole of what the `floatcontainer` sweep still declines: 480 of 2880, exactly the grid
+  # containers with a text payload and no declared width.)
+  it 'draws the line at an anonymous grid item, not at the float' do
+    anon = '<div style="width:400px"><div style="float:left;display:grid;grid-template-columns:auto auto">bare text<div style="height:9px">b</div></div><div style="height:9px"></div></div>'
+    item = '<div style="width:400px"><div style="float:left;display:grid;grid-template-columns:auto auto"><span>bare text</span><div style="height:9px">b</div></div><div style="height:9px"></div></div>'
+    expect_bail(anon)
+    expect_parity(item)
   end
 
   # An `inline-grid` that is a flex / grid ITEM is BLOCKIFIED to `grid` (§4), so it lays out as a block-level

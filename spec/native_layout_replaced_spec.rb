@@ -262,6 +262,28 @@ RSpec.describe 'native layout replaced-leaf parity', if: ENV.fetch('CSIM_JS_ENGI
        '<div style="display:flex;width:400px"><div id="t" style="flex:1">a long label</div><div style="width:50px;height:5px"></div></div>'].each do |body|
         expect(run_rooted(body)).to include('ok' => false, 'reason' => 'root unsupported'), body
       end
+      # …a FLOAT, whose auto width is shrink-to-fit by §10.3.5. The flex and grid ones came out 400 against the
+      # oracle's 67.97 the moment the gate refusing a floated container went, which is how the arm was found;
+      # the plain BLOCK had a second copy of the same rule inside `nlSupported`, now deleted, so this is the
+      # only thing refusing it. A float is a pass root only through an element-rooted call — no corpus tool
+      # makes one, so nothing else on the whole bar can see any of this.
+      # …and a TABLE is NOT here: §17.5.2 sizes it from its own columns wherever it sits, which is what native
+      # computes for one, so the float changes nothing (it is in the passing list below).
+      ['<div style="width:400px"><div id="t" style="float:left;display:flex"><span>hello there</span></div></div>',
+       '<div style="width:400px"><div id="t" style="float:left;display:grid"><span>hello there</span></div></div>',
+       '<div style="width:400px"><div id="t" style="float:left">hello there</div></div>'].each do |body|
+        expect(run_rooted(body)).to include('ok' => false, 'reason' => 'root unsupported'), body
+      end
+      # …and the mirror of that, which is a PRE-EXISTING mismatch this arm closes rather than one it caused: a
+      # table whose parent is a GRID. The grid-item exemption below is right for a box that fills its track and
+      # wrong for a table, which sizes itself — the oracle stretches it to the 350px track, native answers with
+      # its columns' 80.64, and every element-rooted pass of a table in a grid has read that since the
+      # exemption was written. A table FLEX item was already refused by the flex-item arm.
+      ['<div style="display:grid;grid-template-columns:350px;width:400px"><table id="t"><tr><td>a long label</td></tr></table></div>',
+       '<div style="display:grid;grid-template-columns:350px;width:400px"><div id="t" style="display:table"><div style="display:table-cell">a long label</div></div></div>',
+       '<div style="display:grid;grid-template-columns:350px;width:400px"><table id="t" style="float:left"><tr><td>a long label</td></tr></table></div>'].each do |body|
+        expect(run_rooted(body)).to include('ok' => false, 'reason' => 'root unsupported'), body
+      end
       # …while a declared width (a length, a percentage, a `calc()`) is the box's own, a plain container was
       # never the question, and a GRID item's containing width IS its track — so the room handed over is
       # already the right answer there, which is why it is the one item kind left in.
@@ -272,7 +294,11 @@ RSpec.describe 'native layout replaced-leaf parity', if: ENV.fetch('CSIM_JS_ENGI
        '<div style="width:400px"><div id="t" style="min-width:600px">ab</div></div>',
        '<div style="width:400px"><div id="t" style="display:flex"><span>lab</span></div></div>',
        '<div style="width:400px"><table id="t"><tr><td>a long label</td></tr></table></div>',
-       '<div style="display:grid;grid-template-columns:350px;width:400px"><div id="t" style="justify-self:start">a long label</div></div>'].each do |body|
+       '<div style="width:400px"><div id="t" style="float:left;display:table"><div style="display:table-cell">hello there</div></div></div>',
+       '<div style="width:120px"><table id="t" style="float:left"><tr><td>a long label</td></tr></table></div>',
+       '<div style="width:60px"><div id="t" style="float:left;display:table"><div style="display:table-cell">hello there</div></div></div>',
+       '<div style="display:grid;grid-template-columns:350px;width:400px"><div id="t" style="justify-self:start">a long label</div></div>',
+       '<div style="display:grid;grid-template-columns:350px;width:400px"><div id="t" style="display:flex"><span>lab</span></div></div>'].each do |body|
         expect(run_rooted(body)).to include('ok' => true, 'mismatches' => 0), body
       end
     end
