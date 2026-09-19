@@ -796,16 +796,38 @@ RSpec.describe 'native layout flex parity', if: ENV.fetch('CSIM_JS_ENGINE', 'v8'
       expect_native_flex(%(<div style="#{col};height:200px"><div style="flex:1;display:flex;flex-direction:column"><div style="flex:1">nested col</div><div>x</div></div><div>b</div></div>))
       expect_native_flex(%(<div style="display:flex;width:400px"><div style="flex:1;display:flex;flex-direction:column"><div style="flex:1">col in row</div><div>x</div></div><div style="width:50px;height:120px"></div></div>))
     end
-    # A descendant declaring a % height / (for a column) % width or edge keeps the item on the pushed path: native
-    # measures the item at a provisional size the records' resolved percentages don't know (review finding).
-    it 'falls back for an item whose subtree declares a percentage size the measure would misread' do
-      r = run_shadow(%(<div style="#{col};height:200px"><div style="flex:1 1 auto"><div style="height:50%">pct</div></div><div style="flex:1 1 auto">plain</div></div>))
-      expect(r).to include('ok' => true, 'mismatches' => 0, 'nativeFlexRows' => 0)
-      r = run_shadow('<div style="display:flex;width:400px"><div><div style="height:150%">pct</div></div><div style="height:40px;width:50px"></div></div>')
-      expect(r).to include('ok' => true, 'mismatches' => 0, 'nativeFlexRows' => 0)
-      r = run_shadow(%(<div style="#{col};flex-wrap:wrap"><div><div style="width:50%">some text words here to wrap</div></div><div>two</div></div>))
-      expect(r).to include('ok' => true, 'mismatches' => 0, 'nativeFlexRows' => 0)
+    # A descendant declaring a percentage kept the item on the pushed path until 2026-09-19: the records carried
+    # those percentages resolved against the item's FINAL size, where native measures it at a provisional one.
+    # Native resolves them itself now (`with_percent_sizes`, against the box it is laying the child out in,
+    # afresh on every measure), so the item is sized natively — measured over a 2,548-shape sweep on the gate's
+    # own axes (declines 516 -> 468, and the `pctsize` sweep's oracle reads 73 -> none).
+    it 'sizes an item whose subtree declares a plain percentage natively' do
+      expect_native_flex(%(<div style="#{col};height:200px"><div style="flex:1 1 auto"><div style="height:50%">pct</div></div><div style="flex:1 1 auto">plain</div></div>))
+      expect_native_flex('<div style="display:flex;width:400px"><div><div style="height:150%">pct</div></div><div style="height:40px;width:50px"></div></div>')
+      expect_native_flex(%(<div style="display:flex;width:400px"><div><div style="padding:0 10%">pct</div></div><div style="width:30px"></div></div>))
+      expect_native_flex(%(<div style="#{col};width:400px"><div><div style="width:50%;min-height:20%">pct</div></div></div>))
     end
+    # …and it FALLS BACK for a percentage the walk still resolves, which is what the narrowed test names: one
+    # inside a MATH function (there is no fraction to send, so it travels resolved wherever the box sits), or
+    # under a GRID item, a TABLE part, an OUT-OF-FLOW box or an INLINE — all routes where the record's parent
+    # is not the box the percentage resolves against, so the figure was resolved against the item's FINAL size
+    # and native measures at a provisional one. Dropping the test put 15 wrong boxes into a 2,268-case
+    # math-function sweep, 28 into a 1,200-case route sweep and 36 into a 960-case inline sweep, all 0 at the
+    # parent commit: a `height: calc(50% + 2px)` item in a wrapping row came out 55.5 where Chrome and the
+    # oracle say 58.
+    it 'falls back for a percentage the walk resolves, not for one native does' do
+      ['<div style="display:flex;width:400px"><div><div style="height:calc(50% + 2px)">pct</div></div><div style="height:40px;width:50px"></div></div>',
+       '<div style="display:flex;width:400px"><div><div style="min-height:min(50%,80px)">pct</div></div><div style="height:40px;width:50px"></div></div>',
+       '<div style="display:flex;width:400px"><div><div style="display:grid;height:100%"><div style="height:50%">pct</div></div></div><div style="height:40px;width:50px"></div></div>',
+       '<div style="display:flex;width:400px"><div><div style="position:absolute;height:50%;width:10px"></div>pct</div><div style="height:40px;width:50px"></div></div>',
+       # …and the INLINE route, whose record hangs under the TEXT BLOCK rather than under the inline
+       '<div style="display:flex;width:400px"><div><div style="height:100%">words <b>b <span style="display:inline-block;height:50%;width:20px"></span></b></div></div><div style="height:40px;width:50px"></div></div>',
+       %(<div style="#{col};height:200px"><div style="flex:1 1 auto"><div style="height:calc(50% + 2px)">pct</div></div><div style="flex:1 1 auto">plain</div></div>),
+       %(<div style="#{col};height:200px"><div style="flex:1 1 auto"><div style="display:grid;height:100%"><div style="height:50%">pct</div></div></div><div style="flex:1 1 auto">plain</div></div>)].each do |body|
+        expect(run_shadow(body)).to include('ok' => true, 'mismatches' => 0, 'nativeFlexRows' => 0), body
+      end
+    end
+
     # Review findings: a base-measured item shrunk below its measure keeps its floor; a `wrap` column that never
     # breaks still shrinks its items to fit and places its line by align-content; a multi-line column stacks its
     # lines from their NATURAL crosses (a clamped stretch item does not shrink its line); a border-box container
@@ -830,9 +852,17 @@ RSpec.describe 'native layout flex parity', if: ENV.fetch('CSIM_JS_ENGINE', 'v8'
       expect_native_flex(%(<div style="#{col}"><div style="flex-basis:20px;height:100px">a<br>b<br>c</div><div style="height:30px">b</div></div>))
       expect_native_flex(%(<div style="#{col};flex-wrap:wrap;height:70px"><div style="flex-basis:20px;height:100px">a<br>b<br>c</div><div style="height:30px">b</div></div>))
     end
-    it 'falls back for a wrap column\'s stretching item whose subtree declares any percentage (measured at a provisional width)' do
-      r = run_shadow(%(<div style="#{col};flex-wrap:wrap"><div><div style="padding-top:50%">x</div></div></div>))
-      expect(r).to include('ok' => true, 'mismatches' => 0, 'nativeFlexRows' => 0)
+    # …and a WRAP column's STRETCHING item falls back for ANY percentage, plain ones included: it is measured at
+    # its shrink-to-fit width and then RE-STRETCHED, so the BASIS itself moves between the measure and the final
+    # layout and it makes no difference who resolved it. 6 shapes of a 2,548-case sweep break without this.
+    # Closing it wants the re-stretch to re-measure.
+    it "falls back for a wrap column's stretching item whose subtree declares any percentage" do
+      [%(<div style="#{col};flex-wrap:wrap"><div><div style="padding-top:50%">x</div></div></div>),
+       %(<div style="#{col};flex-wrap:wrap"><div><div style="width:50%">some text words here to wrap</div></div><div>two</div></div>)].each do |body|
+        expect(run_shadow(body)).to include('ok' => true, 'mismatches' => 0, 'nativeFlexRows' => 0), body
+      end
+      # …and the same container with the item NOT stretching stays native, so the fallback is the stretch's
+      expect_native_flex(%(<div style="#{col};flex-wrap:wrap"><div style="align-self:flex-start"><div style="width:50%">some text words here to wrap</div></div><div>two</div></div>))
     end
     it 'floors a border-box flex container at its own border and padding' do
       expect_native_flex(%(<div style="#{col};box-sizing:border-box;height:5px;padding:10px"><div>x</div></div>))
