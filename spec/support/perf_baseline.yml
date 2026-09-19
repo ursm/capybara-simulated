@@ -8,21 +8,21 @@ grid_table:
     ctx_sweeps: 201
     ctx_gate_active: 1
   wall:
-    workload_ms: 361.145
-    calib_ms: 2.68
-    ratio: 134.772
+    workload_ms: 355.491
+    calib_ms: 2.661
+    ratio: 133.613
 shadow_host:
   counts:
     passes: 3
-    reuse_hit: 602
+    reuse_hit: 1202
     reuse_remeasured: 0
     reuse_escapingAbs: 0
     ctx_sweeps: 201
     ctx_gate_active: 1
   wall:
-    workload_ms: 453.506
-    calib_ms: 2.697
-    ratio: 168.146
+    workload_ms: 407.195
+    calib_ms: 2.687
+    ratio: 151.565
 layout_walk:
   counts:
     ok: 1

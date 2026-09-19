@@ -102,6 +102,12 @@ module PerfGate
   # table — so the two workloads differ only by what the host costs it. When this was added the same
   # relayout took 51 ms without the host and 280 ms with it; the gates ask those sheets now, and the
   # RATIO between the two workloads below is what holds that (see `shadow-host-gates-fail-open`).
+  #
+  # The COUNT axis holds what the ratio cannot. The class-write gate stayed keyed on the host count
+  # after the others were narrowed, and its cost is a subtree mark, not time: `reuse_hit` read 602
+  # here against `grid_table`'s 1200 — half the page's subtree reuse — while the wall ratio put the
+  # whole difference at ~3%, inside its own noise. It was invisible until `39267549` made the counter
+  # font-independent, and the two now differ by the widget's own two boxes.
   def self.workload_html(workload)
     rows = (1..ROWS).map {|i|
       %(<tr class="row r#{i % 6}" id="row-#{i}">) +
@@ -390,6 +396,9 @@ module PerfGate
     # quantity three increments in a row moved. Held TWO-SIDED, and soft like the other wall axis —
     # wall is a trend signal, and a reporter warning that fires on an improvement is how the ratchet
     # asks to be regenerated.
+    # …which is why these two walls are always re-recorded TOGETHER, even by a change that touches
+    # only one of them: either half on its own is not the instrument, and a `grid_table.workload_ms`
+    # that moves in a commit that never touched `grid_table` is the regen doing its job.
     ratio_base = all.fetch('shadow_host').fetch('wall').fetch('workload_ms') /
                  all.fetch('grid_table').fetch('wall').fetch('workload_ms')
     group.describe('shadow_host vs grid_table') do

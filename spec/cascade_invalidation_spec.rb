@@ -1442,9 +1442,25 @@ RSpec.describe 'cascade invalidation' do
     expect(got[1] - got[0]).to eq(200)
   end
 
-  it 'stays conservative for class writes inside (or beside) a shadow tree' do
-    # Shadow sheets are not in the page rule index: a page hosting any shadow root answers every
-    # class write with the subtree mark, or a shadow sheet's own `.open .panel` would go stale.
+  # ── …and what a SHADOW sheet does to it ──────────────────────────────────────────────────────
+  # Unlike the document-wide gates further up, this one is asked about ONE ELEMENT — so it does not
+  # need to know what the shadow sheets declare, only whether a class written on THIS element can
+  # change what any of them matches (`shadowRulesMayReach`). Keyed on the host COUNT instead, a
+  # single widget cost every light-DOM class write on the page the subtree mark: on the perf gate's
+  # 400-row table that was HALF the page's subtree reuse (`reuse_hit` 602 against 1200 for the
+  # identical page without the host), which the wall could not see.
+  #
+  # The examples below are the ways a shadow sheet crosses its boundary, and then the queue that has
+  # to carry a LATE sheet to the fold. **`__csimSubtreeMarks` is the only observable that pins the
+  # gate itself**: `reuseSubtree` refuses a subtree holding an escaping abspos or a changed
+  # containing block on its own, so geometry heals every one of these shapes either way. Where a
+  # geometry assertion appears beside the count it pins the MATCHING, not the gate; where none
+  # appears the rule either does not match here yet (`:host(.x) .y`) or does not turn on the class
+  # being written (`::part()`), and the count is the whole test.
+
+  it 'stays conservative for a class write INSIDE a shadow tree' do
+    # A shadow tree's in-tree rules are in no document index, and the document's own rules do not
+    # reach the element either — so the token gate describes nothing about it.
     s = simulated_session(gated_page('<div id="h"></div>', css: '.noop-rule { width: 1px }'))
     s.visit '/'
     got = s.evaluate_script(<<~JS)
@@ -1459,6 +1475,201 @@ RSpec.describe 'cascade invalidation' do
       })()
     JS
     expect(got).to eq([20, 120])
+  end
+
+  it "keeps a light-DOM element's memos across a paint-only flip beside a shadow host" do
+    # The win: the widget's sheet cannot match `#c` or anything under it, so the class write is the
+    # same question it would be on a page with no shadow root at all.
+    css  = '.panel { height: 20px } .red { color: rgb(255, 0, 0) }'
+    body = '<div id="h"></div><div id="c"><div class="panel" id="p">x</div></div>'
+    s    = simulated_session(gated_page(body, css: css))
+    s.visit '/'
+    got = s.evaluate_script(<<~JS)
+      (() => {
+        document.getElementById('h').attachShadow({mode: 'open'}).innerHTML =
+          '<style>.p { color: #333; padding: 2px }</style><p class="p">widget</p>';
+        const p = document.getElementById('p');
+        p.getBoundingClientRect();
+        const marks = globalThis.__csimSubtreeMarks();
+        document.getElementById('c').classList.add('red');
+        return [globalThis.__csimSubtreeMarks() - marks, p.getBoundingClientRect().height];
+      })()
+    JS
+    expect(got).to eq([0, 20])
+  end
+
+  it 'stays conservative for a light child a ::slotted rule can style' do
+    # `::slotted(.x)` is written in a shadow sheet and styles a LIGHT child of the host — an element
+    # the document's token gate otherwise answers for completely.
+    css  = '.red { color: rgb(255, 0, 0) }'
+    body = '<div id="h"><div id="c"><div id="p">x</div></div></div>'
+    s    = simulated_session(gated_page(body, css: css))
+    s.visit '/'
+    got = s.evaluate_script(<<~JS)
+      (() => {
+        document.getElementById('h').attachShadow({mode: 'open'}).innerHTML =
+          '<style>::slotted(.red) { height: 120px }</style><slot></slot>';
+        const c = document.getElementById('c');
+        c.getBoundingClientRect();
+        const marks = globalThis.__csimSubtreeMarks();
+        c.classList.add('red');
+        return [globalThis.__csimSubtreeMarks() - marks, c.getBoundingClientRect().height];
+      })()
+    JS
+    expect(got).to eq([1, 120])
+  end
+
+  it 'stays conservative for a class write on a host its own tree styles' do
+    # `:host(.x)` is the mirror of `::slotted`: written inside the tree, matching the host, which
+    # lives in the document scope. The tree carries NO bare `:host` rule on purpose — one would
+    # fill the routed host bucket by itself and the example would pass without `:host(` doing
+    # anything. And the answer comes off the sheet's TEXT rather than that bucket precisely so the
+    # `:host(.x) .y` form, which `scopedRulesFor` leaves in-tree and which does not match here yet,
+    # cannot silently make this unsound the day it starts matching.
+    # (The document's base rule is a CLASS, not `#h`: an ID would out-specify `:host(.red)` and the
+    # height would never move.)
+    css  = '.hostbase { display: block; height: 20px } .red { color: rgb(255, 0, 0) }'
+    s    = simulated_session(gated_page('<div id="h" class="hostbase"></div>', css: css))
+    s.visit '/'
+    got = s.evaluate_script(<<~JS)
+      (() => {
+        const h = document.getElementById('h');
+        h.attachShadow({mode: 'open'}).innerHTML =
+          '<style>:host(.red) { height: 120px }</style><p>w</p>';
+        h.getBoundingClientRect();
+        const marks = globalThis.__csimSubtreeMarks();
+        h.classList.add('red');
+        return [globalThis.__csimSubtreeMarks() - marks, h.getBoundingClientRect().height];
+      })()
+    JS
+    expect(got).to eq([1, 120])
+  end
+
+  it 'stays conservative for a host whose tree only uses the :host(.x) COMBINATOR form' do
+    # The landmine the sheet-text answer defuses. `scopedRulesFor`'s routing sends only the
+    # STANDALONE `:host(.x)` to the host bucket; `:host(.x) .y` stays an in-tree rule, where it
+    # fails to match at all today (`shadow_dom_cascade_gaps`). A bucket-shaped answer would call
+    # this host unreachable — correct only for as long as that bug stays unfixed, and nothing here
+    # would go red the day it is. There is no geometry to assert for the same reason: the count is
+    # the whole test.
+    css  = '.red { color: rgb(255, 0, 0) }'
+    s    = simulated_session(gated_page('<div id="h"></div>', css: css))
+    s.visit '/'
+    got = s.evaluate_script(<<~JS)
+      (() => {
+        const h = document.getElementById('h');
+        h.attachShadow({mode: 'open'}).innerHTML =
+          '<style>:host(.red) .p { height: 120px }</style><p class="p">w</p>';
+        h.getBoundingClientRect();
+        const marks = globalThis.__csimSubtreeMarks();
+        h.classList.add('red');
+        return globalThis.__csimSubtreeMarks() - marks;
+      })()
+    JS
+    expect(got).to eq(1)
+  end
+
+  it 'stays conservative for the whole page while a ::part() rule exists' do
+    # `::part()` and `:host-context()` are decided by an element the rule is not indexed against, so
+    # no per-element question can answer for them and `shadowUnsafe` latches the page instead — the
+    # same latch `ctxGateReady` reads. The class write here is on an element as far from the host as
+    # the page allows, which is the point: the answer is the PAGE's, not this element's.
+    #
+    # The rule lives in the DOCUMENT sheet, where a real `::part()` lives — that half of the latch is
+    # a scan of `state.layoutRules` keyed on `cascadeVersion`, a different invalidation story from
+    # the per-sheet flag, and the shadow-sheet half is already pinned by the `:host-context()` route
+    # of the late-arrival example below (same field, same code path).
+    css  = '.panel { height: 20px } .red { color: rgb(255, 0, 0) } #h::part(p) { height: 120px }'
+    body = '<div id="h"></div><div id="c"><div class="panel" id="p">x</div></div>'
+    s    = simulated_session(gated_page(body, css: css))
+    s.visit '/'
+    got = s.evaluate_script(<<~JS)
+      (() => {
+        document.getElementById('h').attachShadow({mode: 'open'}).innerHTML =
+          '<style>.p { color: #333 }</style><p class="p" part="p">w</p>';
+        const p = document.getElementById('p');
+        p.getBoundingClientRect();
+        const marks = globalThis.__csimSubtreeMarks();
+        document.getElementById('c').classList.add('red');
+        return globalThis.__csimSubtreeMarks() - marks;
+      })()
+    JS
+    expect(got).to eq(1)
+  end
+
+  it 'folds a shadow sheet that arrives AFTER the tree was first folded' do
+    # The hole the per-element answer opens, and the reason `stylesheetChanged` and the
+    # `adoptedStyleSheets` hook re-queue the root: `shadowSheetFacts` folds a tree once and re-folds
+    # only what the queue hands it, so a sheet edited or inserted after the first fold reached none
+    # of the gates its rules arm. The old host-COUNT bail was immune to that; this one is not, and
+    # `ctxGateReady` — which reads the same `shadowUnsafe` latch — was already exposed to it, which
+    # is why the observable here is that gate rather than a subtree mark.
+    #
+    # Two things contaminate a naive version of this example, and the control (a late sheet with
+    # nothing the latch cares about, which must leave the gate ACTIVE) is what catches both:
+    #   - writing `.textContent` on a DETACHED `<style>`, or `replaceSync` on a constructed sheet,
+    #     calls `scheduleCascadeRefresh` — `cascadeStale` then shuts every gate for a reason that
+    #     has nothing to do with folding. The document-scope read below clears it without going
+    #     near the shadow tree;
+    #   - nothing may read STYLE inside the tree between the arrival and the observation: such a
+    #     read rebuilds `scopedRulesFor`, which re-queues the root ITSELF, and the example would
+    #     pass with both queue pushes removed.
+    body     = '<div id="h"></div><div id="c"><div class="panel" id="p">x</div></div>'
+    rules    = {
+      harmful:  ':host-context(.red) .p { height: 120px }',    # the latch's own selector
+      harmless: '.p { height: 120px }'
+    }
+    arrivals = {
+      'edited <style> text' => ->(css) { "sr.getElementById('s').textContent = #{css};" },
+      'appended <style>'    => ->(css) { "const st = document.createElement('style'); sr.appendChild(st); st.textContent = #{css};" },
+      'adoptedStyleSheets'  => ->(css) { "const sheet = new CSSStyleSheet(); sheet.replaceSync(#{css}); sr.adoptedStyleSheets = [sheet];" }
+    }
+    got = arrivals.transform_values {|arrival|
+      rules.transform_values {|rule|
+        with_simulated_session(gated_page(body, css: '.panel { height: 20px }')) {|s|
+          s.visit '/'
+          s.evaluate_script(<<~JS)
+            (() => {
+              const sr = document.getElementById('h').attachShadow({mode: 'open'});
+              sr.innerHTML = '<style id="s">.p { color: #333 }</style><p class="p">w</p>';
+              document.getElementById('p').getBoundingClientRect();   // folds the tree as it is now
+              #{arrival.call(rule.to_json)}
+              getComputedStyle(document.body).color;                  // clears cascadeStale, tree untouched
+              return globalThis.__csimCtxGateActive();
+            })()
+          JS
+        }
+      }
+    }
+    expect(got).to eq(arrivals.transform_values { {harmful: false, harmless: true} })
+  end
+
+  it 'arms the :host() answer from a late sheet too, which the gate above cannot see' do
+    # The queue carries more than the `shadowUnsafe` latch — `shadowHostFn` and `shadowSlotted` ride
+    # it as well, and `__csimCtxGateActive` reads only the latch. Without this example, gating the
+    # queue push on `::part(` / `:host-context(` would read as a safe optimisation and would stop
+    # arming `:host(` with nothing going red.
+    body  = '<div id="h"></div>'
+    rules = {harmful: ':host(.red) { height: 120px }', harmless: '.q { height: 120px }'}
+    got   = rules.transform_values {|rule|
+      with_simulated_session(gated_page(body, css: '.red { color: rgb(255, 0, 0) }')) {|s|
+        s.visit '/'
+        s.evaluate_script(<<~JS)
+          (() => {
+            const h  = document.getElementById('h');
+            const sr = h.attachShadow({mode: 'open'});
+            sr.innerHTML = '<style id="s">.p { color: #333 }</style><p class="p">w</p>';
+            h.getBoundingClientRect();                             // folds the tree as it is now
+            sr.getElementById('s').textContent = #{rule.to_json};
+            getComputedStyle(document.body).color;                 // clears cascadeStale, tree untouched
+            const marks = globalThis.__csimSubtreeMarks();
+            h.classList.add('red');
+            return globalThis.__csimSubtreeMarks() - marks;
+          })()
+        JS
+      }
+    }
+    expect(got).to eq({harmful: 1, harmless: 0})
   end
 
   it 'keeps relaying out when a custom-prop rule feeds an inline var() consumer' do
