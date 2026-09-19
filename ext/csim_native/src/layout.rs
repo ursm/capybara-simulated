@@ -4656,6 +4656,10 @@ fn measure_table(
     // content by (the content's NATURAL height, not the floored box — a `middle` cell whose declared height
     // already exceeds its content still centres that content). The box stays at the row top either way, so the
     // shift moves the cell's own children (their subtrees follow through `place`).
+    let (mut table_first_base, mut table_last_base): (Option<f64>, Option<f64>) = (None, None);
+    // …and the table takes the LAST of its own top-level children that answers — a row group, or a row written
+    // outside one — each in the table's coordinates.
+    let mut atomic_by_child: Vec<(usize, Option<f64>)> = Vec::new();
     for (ri, &r) in rows.iter().enumerate() {
         let (gx, gy) = match row_group[ri] {
             Some(g) => (boxes[g].x, boxes[g].y),
@@ -4667,6 +4671,7 @@ fn measure_table(
         boxes[r].w = row_w;
         boxes[r].h = row_h[ri];
         boxes[r].auto_height = false;
+        let (mut row_first_base, mut row_last_base, mut row_atomic_base): (Option<f64>, Option<f64>, Option<f64>) = (None, None, None);
         for &c in &children[r] {
             let k = inputs[c].get();
             let (col, rs) = (k.cell_col, k.cell_rowspan);
@@ -4688,6 +4693,30 @@ fn measure_table(
             let ltr_rel = col_x[col] - row_x;
             boxes[c].x = if n.rtl != 0 { row_w - ltr_rel - boxes[c].w } else { ltr_rel };
             boxes[c].y = 0.0;
+            // …and the ROW's own baselines, for the TABLE to hand its container. NOT `row_baseline[ri]`, which
+            // is the baseline GROUP's figure and exists only for cells that align on it — every default `<td>`
+            // computes `vertical-align: inherit`, so a real table's rows have none. The oracle's
+            // `boxBaselineOffset` walks the row's CELLS whatever their alignment and takes the first answer.
+            //
+            // FIRST and LAST are different cells AND different lines inside them, because `baselineCandidates`
+            // REVERSES the children at every level of a `last = true` walk: the first is the first cell's FIRST
+            // line, the last the last cell's LAST line. An atomic on a line reads the last (`atomicBaselineOffset`
+            // asks `last = true`); a flex line and a baseline cell read the first.
+            if row_first_base.is_none() {
+                if let Some(b) = boxes[c].first_baseline {
+                    row_first_base = Some(shift + b);
+                }
+            }
+            if let Some(b) = boxes[c].last_baseline {
+                row_last_base = Some(shift + b);
+            }
+            // …and a THIRD figure, for an atomic: what this CELL hands the row under the atomic rules — its
+            // own bottom margin edge if it scrolls, else what its children gave it (a scroll container inside
+            // it gives ITS bottom margin edge, a table inside it gives nothing). The oracle reaches all of
+            // these through the same cell, because its `inlineBlock` flag carries down the whole recursion.
+            if let Some(b) = atomic_baseline_of(c, boxes[c].inline_block_baseline, inputs, boxes) {
+                row_atomic_base = Some(shift + b);
+            }
             if shift > 0.0 {
                 for &ch in &children[c] {
                     // …but not a REPLAYED out-of-flow child: its box comes from the oracle's own displacement
@@ -4701,7 +4730,38 @@ fn measure_table(
                 }
             }
         }
+        table_first_base = table_first_base.or(row_first_base.map(|b| row_top[ri] + b));
+        if let Some(b) = row_last_base {
+            table_last_base = Some(row_top[ri] + b);
+        }
+        // …the ROW's own answer, then its GROUP's: each may scroll and mask what is under it, and the row is
+        // only a top-level child of the table when it is written outside a group.
+        let row_atomic = atomic_baseline_of(r, row_atomic_base, inputs, boxes).map(|b| row_top[ri] + b);
+        let child = row_group[ri].unwrap_or(r);
+        match atomic_by_child.last_mut() {
+            Some(slot) if slot.0 == child => { if row_atomic.is_some() { slot.1 = row_atomic; } }
+            _ => atomic_by_child.push((child, row_atomic))
+        }
     }
+
+    // A table's OWN baselines, offset into its border box — read by a flex line, a baseline-aligned cell and
+    // an `inline-table` on a line. A table with no row that answers has none, and hangs from its bottom margin
+    // edge. RECORDED, not fixed (`conformance は後回し`): Chrome takes an inline-table's baseline from its
+    // FIRST row and asks a CELL for its FIRST line whatever the direction, so the first / last split below is
+    // the oracle's rule rather than the specs' (CSS 2.1 §10.8.1 / §17.5.4); and for a row whose cells are not
+    // baseline-aligned Chrome falls back to the bottom of that row's cell CONTENT box, where both engines take
+    // a cell's text baseline — a plain `<table>` inline-table is line 24 / baseline 17 here, 25 / 21 in Chrome.
+    // A SCROLLING inline-table is the same rule again: both engines hang it from its bottom margin edge
+    // (line 24 / baseline 20) where Chrome still reads its first row's first line (20 / 14).
+    boxes[i].first_baseline = table_first_base;
+    boxes[i].last_baseline = table_last_base;
+    boxes[i].inline_block_baseline = atomic_by_child
+        .iter()
+        .filter_map(|&(child, base)| {
+            let inner = base.map(|b| b - boxes[child].y);
+            atomic_baseline_of(child, inner, inputs, boxes).map(|b| boxes[child].y + b)
+        })
+        .last();
 
     let top = CMargin::of(Input::m(n.mt));
     MInfo { top, top_only: top, bottom: CMargin::of(Input::m(n.mb)), collapse_through: false }
@@ -5753,6 +5813,16 @@ fn measure_grid(
 // A container's first / last baseline from its children in the given order — the first that has a first
 // baseline and the last that has a last baseline, each offset by the child's relative top; out-of-flow and
 // floated children give none (the oracle's `baselineCandidates`).
+// What a box hands its PARENT under the ATOMIC rules — the rule `boxBaselineOffset` applies to the box it is
+// looking AT, at every level of the walk while its `inlineBlock` flag is set: a scroll container gives its
+// bottom margin edge (a BUTTON excepted, which is a button however it scrolls) and masks everything inside it,
+// anything else hands over what its own children gave it. `Box::inline_block_baseline` is only that second
+// half, so a table's CELL, ROW or ROW GROUP that is itself a scroll container needs this on top of it (120
+// shapes of a 2744-case sweep: the oracle's line 22 against native's 18).
+fn atomic_baseline_of(b: usize, inner: Option<f64>, inputs: &[Cell<Input>], boxes: &[Box]) -> Option<f64> {
+    let k = inputs[b].get();
+    if k.scrolls_y && !k.is_button { Some(boxes[b].h + Input::m(k.mb)) } else { inner }
+}
 fn child_baselines(order: impl Iterator<Item = usize> + Clone, inputs: &[Cell<Input>], boxes: &[Box]) -> (Option<f64>, Option<f64>, Option<f64>) {
     let mut first = None;
     let mut last = None;
@@ -5773,10 +5843,24 @@ fn child_baselines(order: impl Iterator<Item = usize> + Clone, inputs: &[Cell<In
         // A scroll container gives its bottom margin edge — except a BUTTON, which is a button however it
         // scrolls (the oracle's exception; a control atomic reaches native now, so this is live rather than
         // pushed, but the rule has to be the same rule).
-        if cn.scrolls_y && !cn.is_button {
-            inline_block = Some(boxes[c].y + boxes[c].h + Input::m(cn.mb));
-        } else if let Some(b) = boxes[c].inline_block_baseline {
-            inline_block = Some(boxes[c].y + b);
+        //
+        // …and a TABLE child answers NOTHING here, at every level: an atomic hangs from a LINE BOX (CSS 2.1
+        // §10.8.1) and a table generates none, so an `inline-block` whose content is a table — however deep —
+        // hangs from its bottom margin edge. That is the oracle's rule: `boxBaselineOffset` carries its
+        // `inlineBlock` flag down the whole recursion, and `baselineCandidates` skips every table-display
+        // child while it is set. The `first` / `last` answers above are untouched, because those are what a
+        // flex line and a baseline-aligned cell read, and a table does answer them.
+        //
+        // RECORDED, not fixed: Chrome asks the CONTAINER KIND instead — a box whose own baseline comes from
+        // LINE BOXES refuses a table child (inline-block, all three engines 22 / 14), but a FLEX or GRID
+        // container's baseline IS its first item's, table included (Flexbox §8.5, Align §9: Chrome 18 / 10
+        // where both engines give 22 / 14; 21 vs 25 for a `<button style="display:inline-flex">`).
+        if cn.display != DISPLAY_TABLE {
+            if cn.scrolls_y && !cn.is_button {
+                inline_block = Some(boxes[c].y + boxes[c].h + Input::m(cn.mb));
+            } else if let Some(b) = boxes[c].inline_block_baseline {
+                inline_block = Some(boxes[c].y + b);
+            }
         }
     }
     (first, last, inline_block)

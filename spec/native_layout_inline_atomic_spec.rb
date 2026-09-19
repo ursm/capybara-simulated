@@ -1,12 +1,12 @@
 # frozen_string_literal: true
 # Native layout — INLINE ATOMICS, geometry shadow-parity. An atomic inline is a single box on a line. Native
-# lays out an `inline-block`, an `inline-flex` / `inline-grid` (its own container, at this line's
-# shrink-to-fit) and every INLINE REPLACED element — an `<img>` / `<svg>` / `<canvas>`, a form control, a list
-# box whose rows it stacks inside the control's box — at its baseline or a baseline SHIFT, ITSELF (see the last
-# describe). What still keeps the PUSHED box, each measured: an `inline-table` (its shrink-to-fit is the table
-# algorithm's — `nlAtomicNative` refuses it on a plain line, `nlIntrinsicMeasurable` inside a measured subtree);
-# an intrinsic-size KEYWORD width on a replaced atomic (`width: fit-content` on an `<img>`); an `inline-grid`
-# holding an anonymous item; and any atomic whose own subtree declines, which rolls back to the pushed box.
+# lays out an `inline-block`, an `inline-flex` / `inline-grid` / `inline-table` (its own container, at that
+# container's own shrink-to-fit) and every INLINE REPLACED element — an `<img>` / `<svg>` / `<canvas>`, a form
+# control, a list box whose rows it stacks inside the control's box — at its baseline or a baseline SHIFT,
+# ITSELF (see the last describe). What still keeps the PUSHED box, each measured: an intrinsic-size KEYWORD
+# width on a replaced atomic (`width: fit-content` on an `<img>`); an `inline-grid` over bare text, whose
+# anonymous item neither engine gives a record; an inline-table whose row GROUPS render out of document order;
+# and any atomic whose own subtree the walk refuses, which rolls back to the pushed box.
 # For a pushed one the oracle resolved the box (`_lb`) and its baseline (`growAtomic`) and native replays those
 # as a RUN_ATOMIC: the margin-box width is its advance, its ascent (+ descent) grow the line box. Such a box is
 # not compared (like every inline fragment in a text block); what's validated is the text block's line-broken
@@ -170,6 +170,9 @@ RSpec.describe 'native layout inline-atomic parity', if: ENV.fetch('CSIM_JS_ENGI
   # intrinsic size on its record, laid out at that width, and dropped onto its line from its own last baseline
   # (its bottom margin edge when it has no line, or scrolls; a text-drawing control's font baseline). What still
   # keeps the PUSHED box is listed at the top of this file.
+  # `count` is a MINIMUM, so it has to be the number of atomics the shape really holds: a marker box put on
+  # the line to make the atomic's baseline observable is itself an atomic, and a count of 1 is then satisfied
+  # by the marker alone — the example passes with the subject still pushed.
   def expect_native_atomic(body, count = 1)
     r = run_shadow(body)
     expect(r).to include('ok' => true), "harness bailed: #{r.inspect}"
@@ -222,9 +225,9 @@ RSpec.describe 'native layout inline-atomic parity', if: ENV.fetch('CSIM_JS_ENGI
       expect_native_atomic(%(<div style="width:200px;height:100px">a <span style="position:relative;top:10%"><span style="display:inline-block;width:60px">x <span style="position:relative;top:10%"><span style="#{ib}"></span></span></span></span></div>), 2)
       # …one aligned against the parent's font box takes the offset the same way
       expect_native_atomic(%(<div style="width:200px">a <span style="position:relative;left:30px;top:7px"><span style="#{ib};vertical-align:middle"></span></span></div>))
-      # A PUSHED atomic (an inline-table) already carries the oracle's offset — the shift must not be added to it
+      # A PUSHED atomic already carries the oracle's offset — the shift must not be added to it
       # a second time.
-      table = '<span style="display:inline-table"><span style="display:table-cell">c</span></span>'
+      table = '<span style="display:inline-block"><div style="display:table-cell">c</div></span>'
       r = run_shadow(%(<div style="width:200px">a <span style="position:relative;left:30px;top:7px">#{table}</span></div>))
       expect(r).to include('ok' => true, 'mismatches' => 0, 'nativeAtomics' => 0)
     end
@@ -357,7 +360,7 @@ RSpec.describe 'native layout inline-atomic parity', if: ENV.fetch('CSIM_JS_ENGI
       expect_parity(%(<div style="width:400px"><div>one</div> <span></span> <div>two</div></div>))
       # …an atomic native still cannot lay out, in a group a flex row MEASURES, takes the row's fallback rather
       # than a pushed box the measure cannot see
-      tbl = '<span style="display:inline-table"><span style="display:table-cell">z</span></span>'
+      tbl = '<span style="display:inline-block"><div style="display:table-cell">c</div></span>'
       r = run_shadow(%(<div style="display:flex;width:300px"><div>x <span style="display:inline-block"><div>b</div>t #{tbl}</span></div><div style="flex:1">y</div></div>))
       expect(r).to include('ok' => true, 'mismatches' => 0, 'nativeFlexRows' => 0), r.inspect
       # …and a JUSTIFIED group's atomics are native too, its lines spread the way a text block's are
@@ -450,7 +453,7 @@ RSpec.describe 'native layout inline-atomic parity', if: ENV.fetch('CSIM_JS_ENGI
       # laid out with the atomic pushed rather than declined. (A FLOAT and a STRETCHED out-of-flow box never
       # needed a measure at all.) The one route with no fallback is a vertical writing mode's block child, whose
       # width IS its content's: that still declines.
-      ib = 'display:inline-table'
+      ib = 'display:inline-grid'   # …over BARE text, an anonymous grid item neither engine gives a record
       expect_bail(%(<div style="width:400px"><div style="writing-mode:vertical-lr">a <span style="#{ib}">in</span> b</div></div>))
       # Each route with the atomic it cannot lay out, and the SAME shape with one it can — so the counter shows
       # the fallback was taken here and is not simply never taken.
@@ -585,10 +588,84 @@ RSpec.describe 'native layout inline-atomic parity', if: ENV.fetch('CSIM_JS_ENGI
       expect(r).to include('ok' => true, 'mismatches' => 0, 'nativeAtomics' => 0), r.inspect
     end
 
-    it 'keeps the pushed box for an inline-table' do
-      # …an inline-TABLE: its shrink-to-fit is the table algorithm's, not an intrinsic measure, and admitting
-      # one moved boxes. An inline-FLEX and an inline-GRID are native's own now.
-      r = run_shadow('<div style="width:400px">text <span style="display:inline-table"><span style="display:table-row"><span style="display:table-cell">c</span></span></span> x</div>')
+    # An INLINE-TABLE is native's own too. Its width is the table algorithm's shrink-to-fit (§17.5.2 —
+    # `measure_table`'s `self_sizes`, not the line's) and its baseline the one `measure_table` now stamps on
+    # the table's box, which is THREE figures because three callers ask different questions: a flex line and a
+    # baseline cell read the first row's FIRST cell's first line; a `last baseline` flex line the last row's
+    # LAST cell's last line; and an ATOMIC the last row's last cell answered UNDER THE ATOMIC RULES (a scroll
+    # container inside it gives its bottom margin edge, a table inside it gives nothing) — which is what the
+    # oracle reaches by carrying its `inlineBlock` flag down the whole recursion. Three wrong rules got here
+    # first, each caught only by the sweep below: `row_baseline` (the figure the baseline GROUP aligns on,
+    # empty for a table whose cells are not baseline-aligned — every default `<td>`, which computes
+    # `vertical-align: inherit`) 4px out, no baseline at all 4px out, and the cell's FIRST line for the last
+    # figure, which is 18px out on a two-line cell. A fourth read the cell's own answer where the CELL itself
+    # scrolls, which is a different question again (`atomic_baseline_of`).
+    #
+    # EVERY SHAPE HERE PUTS A MARKER BOX ON THE LINE, and that is the point: a text run is not a compared box,
+    # so a line whose ascent is wrong moves nothing the harness looks at. Measured on the rule this replaced
+    # (it read the cell's FIRST line): the `inlinetable` sweep reported 240 mismatches with the markers in and
+    # 0 with every one of them stripped. It is 0 either way now, which is what the markers are there to keep
+    # meaningful — strip them and the next wrong rule is silent again.
+    it 'lays out an inline-table on a line, from the figure an atomic asks for' do
+      marker = '<span style="display:inline-block;width:4px;height:4px"></span>'
+      ['<table style="display:inline-table"><tr><td>cell</td></tr></table>',
+       '<span style="display:inline-table"><span style="display:table-row"><span style="display:table-cell">cell</span></span></span>',
+       '<span style="display:inline-table"><span style="display:table-cell">bb</span></span>',
+       '<table style="display:inline-table;padding:0 10%"><tr><td>hello</td></tr></table>',
+       # …cells whose baselines DIFFER, which is the only way first-vs-last cell shows at all
+       '<table style="display:inline-table"><tr><td style="font-size:40px">A</td><td>b</td></tr></table>',
+       '<table style="display:inline-table"><tr><td>a</td><td style="font-size:40px">B</td></tr></table>',
+       '<div style="display:inline-table"><div style="display:table-row"><div style="display:table-cell;vertical-align:middle;height:40px">t</div><div style="display:table-cell">c</div></div></div>',
+       '<table style="display:inline-table"><tr><td>a</td></tr><tr><td style="font-size:30px">B</td></tr></table>',
+       # …a MULTI-LINE last cell, which is the only way first-vs-last LINE inside that cell shows
+       '<div style="display:inline-table"><div style="display:table-row"><div style="display:table-cell">a</div><div style="display:table-cell">x<br>y</div></div></div>',
+       '<div style="display:inline-table"><div style="display:table-row"><div style="display:table-cell"><div>p</div><div>q</div></div></div></div>',
+       # …a SCROLLER in the last cell, which the atomic figure answers differently from the flex one
+       '<div style="display:inline-table"><div style="display:table-row"><div style="display:table-cell">c</div><div style="display:table-cell"><div style="overflow:hidden;height:12px">s</div></div></div></div>',
+       # …and a nested table in a cell, which gives the atomic no baseline at all (both engines)
+       '<div style="display:inline-table"><div style="display:table-row"><div style="display:table-cell"><div style="display:table"><div style="display:table-row"><div style="display:table-cell">n</div></div></div></div></div></div>'].each do |table|
+        # 2, not 1: the MARKER is an atomic too, so a count of 1 is satisfied by the marker alone and the
+        # example passes with the table still pushed — which is what it did until this comment was written.
+        expect_native_atomic(%(<div style="width:400px">x #{table}#{marker} y</div>), 2)
+      end
+      # …and a table generates no LINE BOX (CSS 2.1 §10.8.1), so an atomic holding one hangs from its bottom
+      # margin edge — the table's own baseline is for a flex line and a table cell to read.
+      expect_native_atomic(%(<div style="width:400px">x <span style="display:inline-flex"><table style="display:inline-table"><tr><td>c</td></tr></table></span>#{marker} y</div>), 2)
+    end
+    # …and it is PUSHED where the two engines would not be walking the same rows: a `<tfoot>` renders after the
+    # body whatever its position in the markup (§17.2.1), which `tableGrid` and the walk follow, while the
+    # oracle's `baselineCandidates` yields DOM order — so its "last" row is the last DOM child (marker y 28
+    # against 10). A CAPTION is in that list too and native's rows are not, so one written AFTER the rows is
+    # the oracle's first candidate in a `last = true` walk and answers before any row (js 23, native 47,
+    # Chrome 51 — neither is right). And the oracle's scroll arm adds a table-internal box's own bottom
+    # MARGIN, where the table algorithm and Chrome give it none (js 32, native 22, Chrome 18).
+    #
+    # All three want the ORACLE changed, and none of them is the first-vs-last-row rule: going to the FIRST
+    # row does not make the walk order stop mattering, because the oracle's list is DOM order at both ends —
+    # the ungated cell path proves it (nat 10, js 41, and 41 IS the first-baseline figure).
+    it 'pushes an inline-table whose baseline the two engines would not walk alike' do
+      marker = '<span style="display:inline-block;width:4px;height:4px"></span>'
+      # (1, not 2: the marker is native's, the table is pushed)
+      ['<table style="display:inline-table"><tfoot><tr><td>f</td></tr></tfoot><tbody><tr><td>b</td></tr></tbody></table>',
+       '<table style="display:inline-table"><tr><td>a</td></tr><caption style="font-size:30px">C</caption></table>',
+       '<div style="display:inline-table"><div style="display:table-row;overflow:hidden;height:12px;margin-bottom:10px"><div style="display:table-cell">s</div></div></div>'].each do |table|
+        r = run_shadow(%(<div style="width:400px">x #{table}#{marker} y</div>))
+        expect(r).to include('ok' => true, 'mismatches' => 0, 'nativeAtomics' => 1), table
+      end
+      # …and the shapes each one is the edge of still lay out: groups in document order, a caption in its
+      # normal position BEFORE the rows (the oracle reaches the rows first there), and a percentage margin,
+      # which resolves against nothing in either engine.
+      ['<table style="display:inline-table"><thead><tr><td>h</td></tr></thead><tbody><tr><td>b</td></tr></tbody></table>',
+       '<table style="display:inline-table"><caption style="font-size:30px">C</caption><tr><td>a</td></tr></table>',
+       '<div style="display:inline-table"><div style="display:table-row;overflow:hidden;height:12px;margin-bottom:10%"><div style="display:table-cell">s</div></div></div>'].each do |table|
+        r = run_shadow(%(<div style="width:400px">x #{table}#{marker} y</div>))
+        expect(r).to include('ok' => true, 'mismatches' => 0, 'nativeAtomics' => 2), table
+      end
+    end
+    it 'keeps the pushed box for an atomic whose own subtree declines' do
+      # …an atomic the walk refuses INSIDE (a bare table-cell in an inline-block) rolls back to the pushed box
+      # rather than declining the pass. An inline-FLEX, an inline-GRID and an inline-TABLE are native's own.
+      r = run_shadow('<div style="width:400px">text <span style="display:inline-block"><div style="display:table-cell">c</div></span> x</div>')
       expect(r).to include('ok' => true, 'mismatches' => 0, 'nativeAtomics' => 0)
       r = run_shadow('<div style="width:400px">text <span style="display:inline-flex"><div>f</div></span> x</div>')
       expect(r).to include('ok' => true, 'mismatches' => 0, 'nativeAtomics' => 1)
@@ -676,10 +753,10 @@ RSpec.describe 'native layout inline-atomic parity', if: ENV.fetch('CSIM_JS_ENGI
         expect_native_atomic(%(<div style="width:400px">text #{format(atom, decl)} after</div>))
       end
     end
-    # …while an inline-TABLE stays PUSHED: its shrink-to-fit is the table algorithm's rather than an intrinsic
-    # measure (admitting one took the corpus 2770 -> 2768).
-    it 'keeps pushing an inline-table' do
-      r = run_shadow('<div style="width:400px">text <span style="display:inline-table"><span style="display:table-row"><span style="display:table-cell">c</span></span></span> after</div>')
+    # …while an atomic whose own subtree the walk refuses keeps the PUSHED box — the route rolls back rather
+    # than taking the pass down with it.
+    it 'keeps pushing an atomic it cannot walk' do
+      r = run_shadow('<div style="width:400px">text <span style="display:inline-block"><div style="display:table-cell">c</div></span> after</div>')
       expect(r).to include('ok' => true, 'mismatches' => 0, 'nativeAtomics' => 0), r.inspect
     end
     # An auto-width WRAPPING flex container is GROWN past its intrinsic figure once laid out — to what its own
