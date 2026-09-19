@@ -18,11 +18,14 @@ RSpec.describe 'native layout replaced-leaf parity', if: ENV.fetch('CSIM_JS_ENGI
     Rack::Builder.new { run ->(_env) { [200, {'content-type' => 'text/html; charset=utf-8'}, [html]] } }.to_app
   end
 
-  def run_shadow(body)
+  # `opts` is the second argument of `__csimLayoutShadowRun`, as JS source: `{noOracle: true}` runs the same
+  # pass with every oracle layout stamp hidden, which is the only way to tell a box native LAID OUT from one
+  # it replayed off the oracle (a replayed box is parity-clean by construction).
+  def run_shadow(body, opts = '{}')
     session = simulated_session(page(body))
     session.visit '/'
     session.evaluate_script('document.body.offsetHeight')
-    session.evaluate_script('globalThis.__csimLayoutShadowRun()')
+    session.evaluate_script("globalThis.__csimLayoutShadowRun(undefined, #{opts})")
   end
 
   def expect_parity(body)
@@ -33,6 +36,23 @@ RSpec.describe 'native layout replaced-leaf parity', if: ENV.fetch('CSIM_JS_ENGI
 
   def expect_bail(body)
     expect(run_shadow(body)).to include('ok' => false)
+  end
+
+  # …rooted at `#t` rather than at the body: the pass root is sized from the width the harness hands it, which
+  # is a rule of its own and the only way to reach it.
+  def run_rooted(body)
+    session = simulated_session(page(body))
+    session.visit '/'
+    session.evaluate_script('document.body.offsetHeight')
+    session.evaluate_script(%(globalThis.__csimLayoutShadowRun(document.getElementById('t'), {})))
+  end
+
+  # The page-visible width of the first element matching `selector` — for the one case where parity is not the
+  # question, because both engines agree on a figure Chrome does not share.
+  def rendered_width(body, selector)
+    session = simulated_session(page(body))
+    session.visit '/'
+    session.evaluate_script(%(document.querySelector('#{selector}').getBoundingClientRect().width))
   end
 
   # BLOCK-LEVEL replaced children of a block.
@@ -174,10 +194,83 @@ RSpec.describe 'native layout replaced-leaf parity', if: ENV.fetch('CSIM_JS_ENGI
        '<div style="width:900px"><button style="display:flex;width:min-content">Click</button></div>'].each do |body|
         expect_parity(body)
       end
-      # …and an AUTO-width, in-flow flex or grid button is the one shape still refused: its own algorithm
-      # sizes it and native answered 16 where the oracle said 242.76.
-      expect_bail('<div style="width:400px"><button style="display:grid">a long button label</button></div>')
-      expect_bail('<div style="width:400px"><button style="display:flex">a long button label</button></div>')
+    end
+    # …and a button that is ITSELF a flex or grid container takes the SAME route: `block_child_width` routes
+    # any auto-width button through the content-sized path, and `intrinsic_widths` dispatches to the flex /
+    # grid algorithm from there, so the container's own sizing is what answers. The gate that refused these
+    # was written beside the block-flow shrink-wrap, before the percentage and intrinsic work that made the
+    # flex and grid arms answer for their own box; it outlived its cause and cost 924 shapes of a 12,393-case
+    # sweep (declines 2997 -> 2073, oracle-free 6904 -> 9302 — it read `_lbCbW` of every box it judged).
+    # Chrome-measured: 124.94 in 400px of room, 60 in 60px (the room, its label wrapped to three lines — the
+    # button's own min-content is 53.05), 112.17 with a `10%` padding, 26.38 for an `inline-flex` on a line.
+    it 'sizes a button that is itself a flex or grid container from its own content' do
+      ['<div style="width:400px"><button style="display:flex"><span>a long button label</span></button></div>',
+       '<div style="width:400px"><button style="display:grid"><span>a long button label</span></button></div>',
+       '<div style="width:60px"><button style="display:flex"><span>a long button label</span></button></div>',
+       '<div style="width:60px"><button style="display:grid"><span>a long button label</span></button></div>',
+       '<div style="width:400px"><button style="display:flex;padding:0 10%"><span>label</span></button></div>',
+       '<div style="width:400px"><button style="display:flex;box-sizing:border-box;max-width:40px"><span>label</span></button></div>'].each do |body|
+        expect_parity(body)
+      end
+      # …and BARE text in one, which is the commonest markup of all (`class="flex items-center"`) and the case
+      # these shapes wrap in a `<span>` to keep out of the way: a flex container's ANONYMOUS item contributes
+      # nothing, so the button is its own edges wide — 16 against Chrome's 46.39. Both engines agree, so this
+      # is parity-clean and no sweep can see it; it is the flex twin of the grid anonymous-item gap, and it is
+      # native's answer to give once the oracle is deleted. Pinned here so the day it is fixed, it is fixed in
+      # both engines at once.
+      bare = '<div style="width:400px"><button style="display:flex">Save</button></div>'
+      expect_parity(bare)
+      expect(rendered_width(bare, 'button')).to eq(16)
+    end
+    # …an `inline-flex` / `inline-grid` one included: as an ATOMIC INLINE it was pushed with the oracle's box
+    # (the same gate answers `nlAtomicNative`), and it is laid out and placed on the line natively now.
+    it 'lays out an inline-flex or inline-grid button on a line' do
+      ['<div style="width:400px">before<button style="display:inline-flex"><span>hi</span></button>after</div>',
+       '<div style="width:400px">before<button style="display:inline-grid"><span>hi</span></button>after</div>',
+       '<div style="width:400px">before<button style="display:inline-flex;vertical-align:super"><span>hi</span></button>after</div>',
+       '<div style="width:60px">before<button style="display:inline-flex"><span>a long button label</span></button>after</div>',
+       '<div style="width:60px">before<button style="display:inline-grid"><span>a long button label</span></button>after</div>'].each do |body|
+        expect_parity(body)
+        # …and it is LAID OUT, not replayed: a pushed atomic carries the oracle's box, which parity cannot tell
+        # from a native one. The whole read set is the one figure the harness HANDS the pass.
+        r = run_shadow(body, '{noOracle: true}')
+        expect(r).to include('ok' => true, 'mismatches' => 0, 'oracleWrites' => 0), r.inspect
+        expect(r['oracleReads'].keys).to eq(['nlShadowRun the pass root origin and width (handed over)']), body
+      end
+    end
+    # …and NOT as the pass ROOT. The one thing native assumes about the root is that its box is the containing
+    # width the harness hands over — what an in-flow BLOCK-LEVEL box's auto width is, and nothing else's, since
+    # the parent loop that applies every other rule is not there for a box with no parent in the pass. A
+    # `<button>` at `display: flow-root` / `table` already came out 400 wide against the oracle's 124.98 before
+    # any of this; the flex and grid cases joined them when the gate that refused those containers went. So the
+    # guard asks the question once, for every box whose auto width is not its room.
+    it 'refuses a pass root whose auto width is not the room it is handed' do
+      # a `<button>` — HTML's button layout is shrink-to-fit at every display it can carry
+      ['display:flex', 'display:grid', 'display:flow-root', 'display:table', 'display:block'].each do |display|
+        body = %(<div style="width:400px"><button id="t" style="#{display}"><span>a long button label</span></button></div>)
+        expect(run_rooted(body)).to include('ok' => false, 'reason' => 'root unsupported'), body
+      end
+      # …an ATOMIC inline, whose width is its line's shrink-to-fit (400 against the oracle's 19.55), and a FLEX
+      # ITEM, whose width is the flex algorithm's (400 against 74.64, and 400 against 350 under `flex: 1`).
+      ['<div style="width:400px"><span id="t" style="display:inline-flex"><span>lab</span></span></div>',
+       '<div style="width:400px"><span id="t" style="display:inline-grid"><span>lab</span></span></div>',
+       '<div style="display:flex;width:400px"><div id="t">a long label</div><div style="width:50px;height:5px"></div></div>',
+       '<div style="display:flex;width:400px"><div id="t" style="flex:1">a long label</div><div style="width:50px;height:5px"></div></div>'].each do |body|
+        expect(run_rooted(body)).to include('ok' => false, 'reason' => 'root unsupported'), body
+      end
+      # …while a declared width (a length, a percentage, a `calc()`) is the box's own, a plain container was
+      # never the question, and a GRID item's containing width IS its track — so the room handed over is
+      # already the right answer there, which is why it is the one item kind left in.
+      ['<div style="width:400px"><button id="t" style="display:flex;width:200px"><span>lab</span></button></div>',
+       '<div style="width:400px"><button id="t" style="display:flex;width:50%"><span>lab</span></button></div>',
+       '<div style="width:400px"><span id="t" style="display:inline-flex;width:200px"><span>lab</span></span></div>',
+       '<div style="width:400px"><div id="t" style="width:calc(50% - 10px)">ab</div></div>',
+       '<div style="width:400px"><div id="t" style="min-width:600px">ab</div></div>',
+       '<div style="width:400px"><div id="t" style="display:flex"><span>lab</span></div></div>',
+       '<div style="width:400px"><table id="t"><tr><td>a long label</td></tr></table></div>',
+       '<div style="display:grid;grid-template-columns:350px;width:400px"><div id="t" style="justify-self:start">a long label</div></div>'].each do |body|
+        expect(run_rooted(body)).to include('ok' => true, 'mismatches' => 0), body
+      end
     end
     it 'sizes replaced grid items natively, contributing their intrinsic width to intrinsic tracks' do
       expect_parity('<div style="display:grid;grid-template-columns:auto 1fr;width:400px"><img><div style="height:20px">b</div></div>')

@@ -397,9 +397,12 @@ RSpec.describe 'native layout L1 block-flow parity', if: ENV.fetch('CSIM_JS_ENGI
       expect_walk_declines('<div style="position:relative;width:400px"><div style="position:absolute;width:max-content">aa bb</div></div>')
       session = simulated_session(page('<div id="r" style="width:max-content">aa bb cc</div>')); session.visit '/'
       expect(parity(session, '#r')).to include('ok' => false, 'reason' => 'unsupported subtree')
-      # …and the vertical writing mode's root, which has no inline size to fill either (the same hole)
+      # …and the vertical writing mode's root, which has no inline size to fill either. It is the SAME hole, and
+      # the root guard in `nlShadowRun` (`nlRootAutoWidthIsNotItsRoom`) now names it rather than leaving it to
+      # be discovered mid-walk: a root's auto width has to be the room the harness hands over, which a vertical
+      # writing mode's is not — nor a `<button>`'s, an atomic inline's or a flex item's.
       session = simulated_session(page('<div id="r" style="writing-mode:vertical-lr;height:100px">aa bb cc</div>')); session.visit '/'
-      expect(parity(session, '#r')).to include('ok' => false, 'reason' => 'unsupported subtree')
+      expect(parity(session, '#r')).to include('ok' => false, 'reason' => 'root unsupported')
     end
     # …while a FLEX ITEM and a TABLE CELL carry one natively: their sizing paths ask for the box's intrinsic
     # figures, which the pin has already answered. (A `<td style="width:min-content">` is 16 wide in both

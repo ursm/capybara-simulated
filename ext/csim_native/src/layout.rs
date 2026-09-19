@@ -281,8 +281,6 @@ pub(crate) struct Input {
     pub(crate) scrolls_y: bool,
     // A `<button>`: as wide as its CONTENT wants, whatever display it has and however much room it is given
     // (HTML's button layout IS shrink-to-fit — `block_child_width` routes an auto-width one through the
-    // A `<button>`: as wide as its CONTENT wants, whatever display it has and however much room it is given
-    // (HTML's button layout IS shrink-to-fit -- `block_child_width` routes an auto-width one through the
     // content-sized path), and its baseline is its content's however it scrolls (`child_baselines`).
     pub(crate) is_button: bool,
     // TABLE: whether the box is the table's OWN to size — an in-flow block-level table, whose auto width
