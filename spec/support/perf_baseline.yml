@@ -2,27 +2,27 @@
 grid_table:
   counts:
     passes: 3
-    reuse_hit: 200
+    reuse_hit: 1200
     reuse_remeasured: 0
     reuse_escapingAbs: 0
     ctx_sweeps: 201
     ctx_gate_active: 1
   wall:
-    workload_ms: 413.304
-    calib_ms: 2.661
-    ratio: 155.327
+    workload_ms: 361.145
+    calib_ms: 2.68
+    ratio: 134.772
 shadow_host:
   counts:
     passes: 3
-    reuse_hit: 202
+    reuse_hit: 602
     reuse_remeasured: 0
     reuse_escapingAbs: 0
     ctx_sweeps: 201
     ctx_gate_active: 1
   wall:
-    workload_ms: 465.951
-    calib_ms: 2.666
-    ratio: 174.776
+    workload_ms: 453.506
+    calib_ms: 2.697
+    ratio: 168.146
 layout_walk:
   counts:
     ok: 1
@@ -36,6 +36,6 @@ layout_walk:
     nativeOutOfFlow: 0
     pushedContributions: 0
   wall:
-    workload_ms: 167.511
-    calib_ms: 2.655
-    ratio: 63.101
+    workload_ms: 166.185
+    calib_ms: 2.664
+    ratio: 62.387

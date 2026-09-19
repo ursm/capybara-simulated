@@ -81,11 +81,19 @@ module PerfGate
   #
   # INVARIANT — keep this workload's op-counts geometry-independent. Fonts are
   # resolved per machine (fc-match substitutes silently), so text width differs
-  # on CI; the held counters must not depend on it. Today they don't (passes are
-  # read-driven; reuse compares each run against its own prior pass; the counters
-  # kept are font-independent). Don't introduce anything that lets geometry move
-  # structure — wrapping text that changes box/line count, or a reuse refusal
-  # keyed on a sub-pixel width — or the hard gate will red on CI only.
+  # on CI; the held counters must not depend on it. Don't introduce anything that
+  # lets geometry move structure — wrapping text that changes box/line count, a
+  # mutation that changes text METRICS where an auto table's columns can see it,
+  # or a reuse refusal keyed on a sub-pixel width — or the hard gate will red on
+  # CI only, for a reason that is not a perf change, and the ratchet erodes into
+  # a reflex to regenerate.
+  #
+  # It was NOT true when this was written, and nothing noticed for months: see the
+  # `.row.selected` rule. Check it the way the breach was found — `capture_counts`
+  # under a `FONTCONFIG_FILE` that reassigns the families the driver actually asks
+  # fontconfig for, which are `Times New Roman` and `Arial` (browser.rb's
+  # `GENERIC_FAMILY_DEFAULTS`), NOT `serif` / `sans-serif`; overriding those two
+  # changes nothing and reads as a clean bill of health.
   #
   # …and `shadow_host` is that page with ONE shadow host beside the table, whose tree is a `<p>` and a
   # three-declaration stylesheet. It is not a web-component benchmark: a shadow sheet is in no document
@@ -109,7 +117,15 @@ module PerfGate
         .row.r3 { background: #eee }
         .cell { padding: 2px 8px; border: 1px solid #ccc }
         .row:hover .cell { background: #def }
-        .row.selected .cell { font-weight: bold; background: #ffe }
+        /* PAINT-only, and that is the invariant below rather than a style choice: this class goes on half
+           the rows mid-interaction, and a `font-weight: bold` here changed the cells' text METRICS, which
+           moved the auto table's column widths, which dirtied every row — so `reuse_hit` read 200 with the
+           default face and 600 under a fontconfig defaulting to a monospace one, where bold has the same
+           advances. A 3x swing in a HARD-held counter for no perf change. Reuse is 1200 either way now.
+           The metric-changing mutation the workload still needs is `#container.compact`'s padding, which is
+           font-independent; `table-layout: fixed` would have fixed the counter too and was NOT taken,
+           because it would have dropped the auto table algorithm — the expensive one — out of the gate. */
+        .row.selected .cell { background: #ffe }
         .badge { display: inline-block; min-width: 16px }
         #container.compact .cell { padding: 0 4px }
         /* A `@keyframes` block the page SHIPS and nothing references — Bootstrap's `spin`, Tailwind's
