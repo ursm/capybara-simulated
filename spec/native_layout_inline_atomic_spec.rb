@@ -1,14 +1,17 @@
 # frozen_string_literal: true
 # Native layout — INLINE ATOMICS, geometry shadow-parity. An atomic inline is a single box on a line. Native
-# lays out an `inline-block` / inline `<img>` / a form CONTROL at its baseline (or a baseline shift) ITSELF —
-# see the last describe — and an `inline-flex` / `inline-grid`, whose own container it lays out at this line's
-# shrink-to-fit. What is still PUSHED: an `inline-table` (its shrink-to-fit is the table algorithm's), an
-# auto-width WRAPPING flex container (the oracle grows one past its intrinsic figure), a list box. The oracle
-# resolved such a box (`_lb`) and its baseline (`growAtomic`), and
-# native replays those as a RUN_ATOMIC: the margin-box width is its advance, its ascent (+ descent) grow the
-# line box. A pushed box is
+# lays out an `inline-block`, an `inline-flex` / `inline-grid` (its own container, at this line's
+# shrink-to-fit) and every INLINE REPLACED element — an `<img>` / `<svg>` / `<canvas>`, a form control, a list
+# box whose rows it stacks inside the control's box — at its baseline or a baseline SHIFT, ITSELF (see the last
+# describe). What still keeps the PUSHED box, each measured: an `inline-table` (its shrink-to-fit is the table
+# algorithm's — `nlAtomicNative` refuses it on a plain line, `nlIntrinsicMeasurable` inside a measured subtree);
+# an intrinsic-size KEYWORD width on a replaced atomic (`width: fit-content` on an `<img>`); an `inline-grid`
+# holding an anonymous item; and any atomic whose own subtree declines, which rolls back to the pushed box.
+# For a pushed one the oracle resolved the box (`_lb`) and its baseline (`growAtomic`) and native replays those
+# as a RUN_ATOMIC: the margin-box width is its advance, its ascent (+ descent) grow the line box. Such a box is
 # not compared (like every inline fragment in a text block); what's validated is the text block's line-broken
-# HEIGHT. Still declines: a `top` / `bottom` vertical-align. V8 only.
+# HEIGHT — which is why a shape that has to prove the atomic is LAID OUT asserts `nativeAtomics` or the
+# no-oracle read set instead. Still declines: a `top` / `bottom` vertical-align. V8 only.
 require 'capybara/simulated'
 require 'rack'
 require_relative 'support/session_teardown'
@@ -162,11 +165,11 @@ RSpec.describe 'native layout inline-atomic parity', if: ENV.fetch('CSIM_JS_ENGI
   end
 
   # ── Atomic inlines laid out natively ──────────────────────────────────────────────────────────────────
-  # An `inline-block` (a block container inside) or an inline `<img>` at its baseline is native's own: its
-  # subtree is a child record of the text block, sized shrink-to-fit (its intrinsic widths clamped to the
-  # block's content width; a declared width wins), laid out at that width, and dropped onto its line from its
-  # own last baseline (its bottom margin edge when it has no line, or scrolls). A `vertical-align`, an
-  # inline-flex / grid / table, or a text-drawing control keeps the pushed box.
+  # An atomic native lays out itself: its subtree is a child record of the text block, sized shrink-to-fit (its
+  # intrinsic widths clamped to the block's content width; a declared width wins) or — a REPLACED one — from the
+  # intrinsic size on its record, laid out at that width, and dropped onto its line from its own last baseline
+  # (its bottom margin edge when it has no line, or scrolls; a text-drawing control's font baseline). What still
+  # keeps the PUSHED box is listed at the top of this file.
   def expect_native_atomic(body, count = 1)
     r = run_shadow(body)
     expect(r).to include('ok' => true), "harness bailed: #{r.inspect}"
@@ -285,6 +288,53 @@ RSpec.describe 'native layout inline-atomic parity', if: ENV.fetch('CSIM_JS_ENGI
         expect_native_atomic(%(<div style="width:180px;text-align:justify">#{content}</div>))
       end
     end
+    # …and how far a box on such a line moves is a question about ORDER — how many widened gaps PRECEDE it —
+    # which both engines answered by comparing COORDINATES. Two declarations carry a box across a gap boundary
+    # without changing which gaps come before it, and each bought it a whole extra increment: its own negative
+    # horizontal margin and its §9.4.3 `position: relative` offset. Native had the mirror bug at the other end
+    # — an atomic that OPENS the line with a negative margin counted the gap AFTER it. Both count at placement
+    # now. Adding this axis to the `justify` sweep took it from 530 mismatches to 0, all of them pre-existing:
+    # its compared box had never carried an offset of its own.
+    #
+    # Asserted as the DELTA from the no-offset twin, which is what Chrome pins — our text advances put the
+    # unshifted box at 88.160 against Chrome's 88.453.
+    it 'moves an atomic on a justified line by the gaps before it, not by where its box sits' do
+      at = ->(decl, align = 'justify') {
+        body = %(<div style="width:181px;text-align:#{align}">aaa bbb ccc ) +
+               %(<span id="t" style="display:inline-block;width:10px;height:6px;#{decl}"></span> ddd eee fff ggg hhh iii</div>)
+        expect_native_atomic(body)
+        session = simulated_session(page(body))
+        session.visit '/'
+        session.evaluate_script(%(document.getElementById('t').getBoundingClientRect().x))
+      }
+      base = at.call('')
+      # …and the line really IS justified: the `text-align: left` twin puts the same box 9.55px to the left
+      # (Chrome 78.609 against 88.453). Without this the example passes having tested nothing the day the text
+      # stops wrapping.
+      expect(at.call('', 'left')).to be < base - 5
+      # A `position: relative` offset moves the box and nothing else, so its delta IS the offset (Chrome
+      # 88.453 -> 93.453 for `left: 5px`). A MARGIN also changes the line's free space, so its delta is the
+      # margin plus what the redistribution gives back — those three figures are Chrome's too (92.453 /
+      # 85.453 / 76.453), and ours match them exactly. The 0.1px row is OURS: Chrome quantises a sub-pixel
+      # offset to 1/64px and reports +0.09375, so what it pins is only that a sub-gap offset buys no gap.
+      {'position:relative;left:0.1px'        =>   0.1,
+       'position:relative;left:5px'          =>   5,
+       'position:relative;left:40px'         =>  40,
+       'position:relative;left:-5px'         =>  -5,
+       'margin-left:8px'                     =>   4,
+       'margin-left:-6px'                    =>  -3,
+       'padding-left:12px;margin-left:-12px' => -12}.each do |decl, delta|
+        expect(at.call(decl)).to be_within(0.001).of(base + delta), decl
+      end
+      # …and one that OPENS the line, where native counted the gap that follows it instead (Chrome -12).
+      opener = %(<div style="width:181px;text-align:justify"><span id="t" style="display:inline-block;) +
+               %(margin-left:-12px;width:10px;height:6px"></span> aaa bbb ccc ddd eee fff ggg hhh iii</div>)
+      expect_native_atomic(opener)
+      session = simulated_session(page(opener))
+      session.visit '/'
+      expect(session.evaluate_script(%(document.getElementById('t').getBoundingClientRect().x))).to be_within(0.001).of(-12)
+    end
+
     it 'places an atomic on a line shortened by a float' do
       expect_native_atomic('<div style="overflow:hidden;width:400px"><div style="float:left;width:120px;height:60px"></div><div>text <span style="display:inline-block;width:30px;height:10px"></span> after</div></div>')
       expect_native_atomic('<div style="overflow:hidden;width:400px"><div style="float:left;width:120px;height:60px"></div><div style="text-align:center">text <img style="width:30px;height:10px"> after</div></div>')
@@ -320,6 +370,48 @@ RSpec.describe 'native layout inline-atomic parity', if: ENV.fetch('CSIM_JS_ENGI
       r = session.evaluate_script('globalThis.__csimLayoutShadowRun(undefined, {noOracle: true})')
       expect(r).to include('ok' => true, 'mismatches' => 0)
       expect(r['oracleReads'].keys.grep(/\AnlGatherRuns |\AatomicBaselineOffset |\AboxBaselineOffset /)).to eq([])
+    end
+    # An INLINE replaced element — `<svg>` / `<canvas>` by their own UA display, every form control forced to
+    # `display: inline`. The arm that decided this admitted only an `<img>`, because when it was written a
+    # text-drawing control's baseline was still the oracle's; `controlBaseline` made it native's soon after and
+    # the arm was never re-asked, so every other inline replaced element stayed a PUSHED atomic carrying the
+    # oracle's box and ascent. Parity cannot see that — a replayed box agrees with the oracle by construction —
+    # so these assert `nativeAtomics` and the no-oracle read set, not just the geometry. A 25,760-case sweep
+    # crossing element x `vertical-align` x own box x line context: oracle-free 1632 -> 18768, 0 mismatches.
+    it 'lays out an inline replaced element as an atomic, control chrome and all' do
+      ['<svg width="20" height="25"></svg>',
+       '<canvas width="20" height="25"></canvas>',
+       '<input style="display:inline">',
+       '<input type="checkbox" style="display:inline">',
+       '<textarea style="display:inline">hi</textarea>',
+       '<select style="display:inline"><option>aa</option></select>',
+       '<progress style="display:inline"></progress>'].each do |el|
+        expect_native_atomic(%(<div style="width:400px">text #{el} after</div>))
+      end
+      # …a LIST BOX too, whose box is the control's and whose rows native stacks inside it — the one replaced
+      # element that is not a leaf.
+      expect_native_atomic(%(<div style="width:400px">text <select multiple size="3" style="display:inline">) +
+                           %(<option>a</option><option>bb</option></select> after</div>))
+    end
+    # …and it needs NONE of the oracle's figures, which is the whole point of laying it out rather than pushing
+    # it: the read set is the one figure the harness hands the pass.
+    it 'reads no oracle box for an inline replaced atomic' do
+      ['<div style="width:400px">before <svg width="30" height="20"></svg> after</div>',
+       '<div style="width:400px">before <input style="display:inline;vertical-align:super"> after</div>',
+       '<div style="width:60px">text <select style="display:inline"><option>aa</option></select> wraps here</div>'].each do |body|
+        session = simulated_session(page(body))
+        session.visit '/'
+        session.evaluate_script('document.body.offsetHeight')
+        r = session.evaluate_script('globalThis.__csimLayoutShadowRun(undefined, {noOracle: true})')
+        expect(r).to include('ok' => true, 'mismatches' => 0, 'oracleWrites' => 0), r.inspect
+        expect(r['oracleReads'].keys).to eq(['nlShadowRun the pass root origin and width (handed over)']), body
+      end
+    end
+    # …while a LINE-relative `vertical-align` still declines, on an inline replaced element as on every other
+    # atomic: native's line ascent cannot place a box against the line it is still building.
+    it 'declines a line-relative vertical-align on an inline replaced element' do
+      expect_bail('<div style="width:400px">text <input style="display:inline;vertical-align:top"> after</div>')
+      expect_bail('<div style="width:400px">text <svg width="20" height="25" style="vertical-align:bottom"></svg> after</div>')
     end
     it 'raises an atomic by its baseline shift, its own or an inline ancestor\'s' do
       expect_native_atomic('<div style="width:400px">text <span style="display:inline-block;vertical-align:super">sup</span> y</div>')

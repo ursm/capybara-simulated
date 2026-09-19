@@ -932,7 +932,7 @@ fn line_layout(
             }
         }};
     }
-    let mut line_atomics: Vec<(usize, f64)> = Vec::new();
+    let mut line_atomics: Vec<(usize, f64, usize)> = Vec::new();
     let mut atomics: Vec<(usize, f64, f64, f64)> = Vec::new();
     // …and the same for the OUT-OF-FLOW markers on the line (record index, x from the content edge): their
     // static position is the inline offset the flow had reached and the line's TOP, both settled at close so
@@ -963,8 +963,12 @@ fn line_layout(
             // room to give and a gap that is not the hanging one at its end (CSS Text 3 §7.1; the last line and
             // one a `<br>` or a newline ends keep their natural spacing). A line it leaves alone is START-aligned.
             let end_x = if justifying { band_l(total) + end } else { 0.0 };
+            // The hanging gaps are the ones the line ENDS with, which is a question about ORDER —
+            // `line_gaps` is pushed in flow order — not about x: a negative horizontal margin can carry a
+            // later gap to a smaller coordinate, and a coordinate cut then keeps it and drops one before it.
             let gaps: Vec<f64> = if justifying && $wrap && free > 0.0 && line_has_content {
-                line_gaps.iter().copied().filter(|&g| g < end_x).collect()
+                let hangs = line_gaps.iter().position(|&g| g >= end_x).unwrap_or(line_gaps.len());
+                line_gaps[..hangs].to_vec()
             } else {
                 Vec::new()
             };
@@ -984,10 +988,20 @@ fn line_layout(
                     _ => 0.0,
                 }
             };
-            // What moves an item on a justified line is how many gaps lie BEFORE it, each widened by `extra`.
+            // What moves an item on a justified line is how many gaps lie BEFORE it, each widened by `extra` —
+            // counted when it was placed, because nothing later can recover it from a coordinate: the box's own
+            // horizontal margin and its `position: relative` offset both carry its x across gap boundaries
+            // while leaving the gaps before it exactly as they were. (Chrome puts a `margin-left: -12px`
+            // atomic that OPENS a justified line at −12; counting by x gave it a gap it comes before.)
+            let shift_box = |before: usize| if extra > 0.0 { before.min(gaps.len()) as f64 * extra } else { dx };
+            // An out-of-flow MARKER is not a box on the line — it records a static position, which may sit
+            // after a space the line has not placed yet (`pending_w`), so its gap count is not the one taken
+            // when it was recorded. It keeps the coordinate rule, which is what the oracle's `lineStatics`
+            // uses; the two engines have to ask the same question. (Where that rule is wrong, both are wrong
+            // together — see the campaign note.)
             let shift_at = |x: f64| if extra > 0.0 { gaps.iter().filter(|&&g| g < x).count() as f64 * extra } else { dx };
-            for (ri, x) in line_atomics.drain(..) {
-                atomics.push((ri, x + shift_at(x), total, line_asc));
+            for (ri, x, before) in line_atomics.drain(..) {
+                atomics.push((ri, x + shift_box(before), total, line_asc));
             }
             // A marker's Y was frozen where it was recorded (the oracle reads `staticX`/`staticY` together and
             // only ever shifts x afterwards): a line that later DROPS below a float moves `total`, and the box
@@ -1735,8 +1749,10 @@ fn line_layout(
                         o.1 = true;
                     }
                 }
-                line_atomics.push((ri, band_l(total) + line_x)); // its margin box starts here on this line
+                // …and the separators a preceding non-wrapping run ENDED in are gaps now that this box follows
+                // them, so they are flushed BEFORE the count is taken: they precede it in flow order.
                 flush_tail_gaps!();
+                line_atomics.push((ri, band_l(total) + line_x, line_gaps.len())); // its margin box starts here on this line
                 line_x += width + run.size; // …and a grown flex container's growth moves the pen, not the break
                 hang = 0.0;
                 hang_pre = 0.0;

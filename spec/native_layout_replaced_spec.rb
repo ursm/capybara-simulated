@@ -6,8 +6,9 @@
 # min/max clamp through the ratio, a border box floors at its edges). Handled as a BLOCK-LEVEL child, a FLEX
 # ITEM (row and column, sized natively) and a GRID ITEM. A control that lays out CSS boxes of its own is a
 # leaf like any other — the oracle never sizes it by stacking them — EXCEPT a LIST BOX showing rows, which is
-# a block container whose box is the control's and whose rows native stacks itself. Still DECLINES: an INLINE
-# replaced element (an atomic inline in a text line), and a list box as a GRID ITEM. V8 only.
+# a block container whose box is the control's and whose rows native stacks itself. An INLINE one is an ATOMIC
+# on a line, laid out by the same two facts — `native_layout_inline_atomic_spec.rb` holds those. Still
+# DECLINES: a list box as a GRID ITEM. V8 only.
 require 'capybara/simulated'
 require 'rack'
 require_relative 'support/session_teardown'
@@ -96,7 +97,9 @@ RSpec.describe 'native layout replaced-leaf parity', if: ENV.fetch('CSIM_JS_ENGI
     expect_parity('<div style="display:flex;align-items:center;width:200px"><svg viewBox="0 0 20 20" style="height:16px"><path d="M0 0h20v20z"/></svg><div style="width:40px;height:16px"></div></div>')
   end
 
-  # STILL DECLINES.
+  # …and as an ATOMIC on a line, whichever inline display it carries. The proof that it is laid out rather than
+  # replayed lives in `native_layout_inline_atomic_spec.rb` (`nativeAtomics` and the no-oracle read set); these
+  # two are here because the sizing is the same question as a block-level leaf's.
   it 'lays out an INLINE svg in a block (atomic inline — see native_layout_inline_atomic_spec)' do
     expect_parity('<div style="width:300px">text <svg width="16" height="16"></svg> more</div>')
   end
@@ -104,9 +107,10 @@ RSpec.describe 'native layout replaced-leaf parity', if: ENV.fetch('CSIM_JS_ENGI
     expect_parity('<div style="width:300px"><img width="20" height="20" style="display:inline-block"></div>')
   end
   # A control that lays out its OWN content (a display:block <select> whose options carry _lb) IS a leaf all the
-  # same: the oracle takes its border box from its intrinsic (one-row) size, never by stacking those options, so
-  # native pushes that box and emits no subtree — the options are inside a leaf, not children of the flow.
-  it 'pushes a display:block <select> that lays out its options (sized by intrinsic, not child flow)' do
+  # same: its border box comes from its intrinsic (one-row) size, never by stacking those options, so native
+  # emits no subtree — the options are inside a leaf, not children of the flow. Measured: the shape lays out
+  # with an EMPTY oracle read set, so the box is derived from rec[68..70] rather than replayed.
+  it 'lays out a display:block <select> as a leaf (sized by intrinsic, not child flow)' do
     expect_parity('<div style="width:300px"><select style="display:block"><option>aaaa</option><option>bb</option></select></div>')
   end
 
