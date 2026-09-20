@@ -482,6 +482,16 @@ pub(crate) struct Run {
     // oracle's `tabStopOf` — so a `tab_px` of 0 means there is no stop to reach and a tab advances nothing.
     pub(crate) tab_px: f64,
     pub(crate) tab_min: f64,
+    // How an ATOMIC hangs on its line, where that is not a question about its own ascent: 0 by its ascent
+    // (`asc`, which every other `vertical-align` has already folded into), 1 the LINE BOX's top, 2 its bottom.
+    // The two line-relative values cannot be an ascent, because the line's height is not known until every run
+    // on it is placed — so such a box contributes none, raises `line_outer_min` instead, and is placed at the
+    // line close. CSS 2.1 §10.8.1; the oracle's `growAtomic` / `forceBreak` pair.
+    // Its own field rather than one of the slots an ATOMIC leaves unread (`ls`, `ws`, `tab_px`, `tab_min`):
+    // `line_height` and `metric` are already overloaded on this kind — they arrive as the alignment code and
+    // the parent-font figure and leave as the box's outer height and advance — and a third reused slot is how
+    // that pair became hard to read. One `f64` per run in the buffer; the perf gate held.
+    pub(crate) line_mode: u8,
 }
 
 impl Input {
@@ -857,6 +867,10 @@ fn line_layout(
     // The current line's box, seeded to the strut and grown by each placed run's ascent / descent.
     let mut line_asc = strut_asc;
     let mut line_desc = strut_desc;
+    // What a LINE-RELATIVE atomic (`vertical-align: top` / `bottom`) asks of the line: not an ascent or a
+    // descent — it hangs from an edge the line does not have yet — but a HEIGHT the line must reach. The
+    // oracle's `lineOuterMin` / `growLineFor`.
+    let mut line_outer_min = 0.0f64;
     let mut line_has_content = false;
     // Open inline edges not yet closed: (pending-open width, already-flushed?). openEdgeWidth = Σ of the
     // unflushed pendings — reserved in the fit test until the first content flushes it onto the line.
@@ -933,7 +947,7 @@ fn line_layout(
         }};
     }
     let mut line_atomics: Vec<(usize, f64, usize)> = Vec::new();
-    let mut atomics: Vec<(usize, f64, f64, f64)> = Vec::new();
+    let mut atomics: Vec<PlacedAtomic> = Vec::new();
     // …and the same for the OUT-OF-FLOW markers on the line (record index, x from the content edge): their
     // static position is the inline offset the flow had reached and the line's TOP, both settled at close so
     // the line's alignment moves them exactly as it moves the atomics.
@@ -953,6 +967,38 @@ fn line_layout(
     // overflowing line stays at the start edge; in rtl the overflow hangs off the LEFT, so the shift goes negative.
     macro_rules! close_line {
         ($wrap:expr) => {{
+            // The line-relative boxes are settled FIRST, because they can move the line's own ascent — which
+            // everything below reads: the baselines this block hands its container, and where every
+            // baseline-aligned box on the line lands. The oracle does the same, in `forceBreak`, before it
+            // stamps `lastLineAsc`.
+            //
+            // The line grows AWAY from whichever edge asked for the most room (Chrome): a 40px `top` box
+            // beside a 30px `bottom` one takes the line to 40 with its baseline where it already was, where
+            // letting the `bottom` box decide dropped every word on the line by 22px. Only the LARGER of the
+            // two families moves anything, and it moves the edge it is NOT anchored to.
+            if line_has_content && line_outer_min > line_asc + line_desc {
+                let (mut max_top, mut max_bottom) = (0.0f64, 0.0f64);
+                for &(ri, ..) in &line_atomics {
+                    match runs[ri].line_mode {
+                        1 => max_top = max_top.max(runs[ri].line_height),
+                        2 => max_bottom = max_bottom.max(runs[ri].line_height),
+                        _ => {}
+                    }
+                }
+                // …which is `line_outer_min` again, by construction: both are maxima over exactly the runs
+                // with a line mode. The second test is the oracle's shape (`forceBreak`), kept so the two read
+                // alike; what the scan is actually FOR is `max_top` vs `max_bottom`, which decides which edge
+                // moves.
+                let need = max_top.max(max_bottom);
+                if need > line_asc + line_desc {
+                    if max_bottom > max_top {
+                        line_asc = need - line_desc;
+                    } else {
+                        line_desc = need - line_asc;
+                    }
+                }
+            }
+            let line_h = line_asc + line_desc;
             if first_line.is_none() {
                 first_line = Some((total, line_asc));
             }
@@ -1000,8 +1046,8 @@ fn line_layout(
             // uses; the two engines have to ask the same question. (Where that rule is wrong, both are wrong
             // together — see the campaign note.)
             let shift_at = |x: f64| if extra > 0.0 { gaps.iter().filter(|&&g| g < x).count() as f64 * extra } else { dx };
-            for (ri, x, before) in line_atomics.drain(..) {
-                atomics.push((ri, x + shift_box(before), total, line_asc));
+            for (run, x, before) in line_atomics.drain(..) {
+                atomics.push(PlacedAtomic { run, x: x + shift_box(before), line_top: total, line_asc, line_h });
             }
             // A marker's Y was frozen where it was recorded (the oracle reads `staticX`/`staticY` together and
             // only ever shifts x afterwards): a line that later DROPS below a float moves `total`, and the box
@@ -1011,7 +1057,7 @@ fn line_layout(
             }
             line_gaps.clear();
             tail_gaps.clear();
-            total += line_asc + line_desc;
+            total += line_h;
             line_no += 1;
             next_line_indent(!$wrap); // a soft wrap is not a forced break
         }};
@@ -1078,6 +1124,7 @@ fn line_layout(
             line_x = 0.0; // (`hang` is reset by the content the wrap moves onto the fresh line)
             line_asc = strut_asc;
             line_desc = strut_desc;
+            line_outer_min = 0.0;
             line_has_content = false;
         }};
     }
@@ -1089,6 +1136,7 @@ fn line_layout(
             hang_pre = 0.0;
             line_asc = strut_asc;
             line_desc = strut_desc;
+            line_outer_min = 0.0;
             line_has_content = false;
             pending_space = None;
             atomic_break = false;
@@ -1756,8 +1804,14 @@ fn line_layout(
                 line_x += width + run.size; // …and a grown flex container's growth moves the pen, not the break
                 hang = 0.0;
                 hang_pre = 0.0;
-                line_asc = line_asc.max(run.asc);
-                line_desc = line_desc.max(run.line_height - run.asc);
+                // A LINE-RELATIVE box gives the line no ascent and no descent — it is placed against an edge
+                // the line does not have yet, so all it can say is how tall the line has to be.
+                if run.line_mode != 0 {
+                    line_outer_min = line_outer_min.max(run.line_height);
+                } else {
+                    line_asc = line_asc.max(run.asc);
+                    line_desc = line_desc.max(run.line_height - run.asc);
+                }
                 line_has_content = true;
                 atomic_break = true; // a break opportunity follows this atomic
             }
@@ -1872,16 +1926,26 @@ fn line_layout(
     }
     Some(LineLayout { height: total, first: first_line, last: last_line, atomics, oofs, floats: placed_floats })
 }
+// Where one ATOMIC run landed on its line, in the frame the text arm places boxes in. `x` is its margin box
+// from the content edge, with its float band and the line's alignment already applied. The three line figures
+// are the LINE's, not the box's: a baseline-aligned box needs `line_asc`, one hanging from a line EDGE
+// (`vertical-align: top` / `bottom`) needs `line_h` instead, and neither can be recovered afterwards because
+// the line is gone by then.
+struct PlacedAtomic {
+    run: usize,
+    x: f64,
+    line_top: f64,
+    line_asc: f64,
+    line_h: f64,
+}
 // What `line_layout` lays out: the line count, the content height, and the first / last line as (top, ascent)
 // within the content box — the baselines a box hands its container.
 struct LineLayout {
     height: f64,
     first: Option<(f64, f64)>,
     last: Option<(f64, f64)>,
-    // Where each ATOMIC run landed: (run index, x of its margin box from the content edge — its float band and
-    // the line's alignment applied — the line's top, the line's ascent): the text arm drops a natively laid-out
-    // atomic onto its line's baseline from these.
-    atomics: Vec<(usize, f64, f64, f64)>,
+    // Where each ATOMIC run landed — the text arm drops a natively laid-out atomic onto its line from these.
+    atomics: Vec<PlacedAtomic>,
     // Where each OUT-OF-FLOW marker's flow position fell: (record index, x from the content edge, line top).
     // `place_out_of_flow` reads it as the static corner, exactly as block flow's cursor is read.
     oofs: Vec<(usize, f64, f64)>,
@@ -2466,15 +2530,22 @@ fn measure(
                     boxes[i].last_baseline = ll.last.map(|(top, asc)| content_top_rel + top + asc);
                     boxes[i].inline_block_baseline = boxes[i].last_baseline;
                     // Each native atomic drops from its line's top to where its own baseline meets the line's.
-                    for (ri, x, top, line_asc) in ll.atomics {
-                        let r = local[ri];
+                    for a in ll.atomics {
+                        let r = local[a.run];
                         if r.font < 0 {
                             continue;
                         }
                         let c = r.font as usize;
                         let k = inputs[c].get();
-                        boxes[c].x = n.bl + n.pl + x + Input::m(k.ml);
-                        boxes[c].y = content_top_rel + top + (line_asc - r.asc) + Input::m(k.mt);
+                        // …by its own baseline, or — `vertical-align: top` / `bottom` — against the edge of the
+                        // line box the close settled. The oracle's `dy` in `forceBreak`, exactly.
+                        let dy = match r.line_mode {
+                            1 => 0.0,
+                            2 => a.line_h - r.line_height,
+                            _ => a.line_asc - r.asc,
+                        };
+                        boxes[c].x = n.bl + n.pl + a.x + Input::m(k.ml);
+                        boxes[c].y = content_top_rel + a.line_top + dy + Input::m(k.mt);
                     }
                     // …and each OUT-OF-FLOW child records its STATIC POSITION, which is what the flow would
                     // have given it: the inline offset it interrupted and the top of that line (measured off

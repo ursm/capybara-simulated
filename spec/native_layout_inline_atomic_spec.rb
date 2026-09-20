@@ -11,7 +11,7 @@
 # as a RUN_ATOMIC: the margin-box width is its advance, its ascent (+ descent) grow the line box. Such a box is
 # not compared (like every inline fragment in a text block); what's validated is the text block's line-broken
 # HEIGHT — which is why a shape that has to prove the atomic is LAID OUT asserts `nativeAtomics` or the
-# no-oracle read set instead. Still declines: a `top` / `bottom` vertical-align. V8 only.
+# no-oracle read set instead. V8 only.
 require 'capybara/simulated'
 require 'rack'
 require_relative 'support/session_teardown'
@@ -122,8 +122,9 @@ RSpec.describe 'native layout inline-atomic parity', if: ENV.fetch('CSIM_JS_ENGI
   # A `vertical-align` that only shifts the atomic's ASCENT within the line (baseline shift — super / sub /
   # length / %, or middle / text-top / text-bottom against the parent's font box) is reproduced by pushing the
   # va-adjusted ascent (`alignedAscent`) — or, for a shifted inline-block native lays out itself, by carrying
-  # the shift on its run; the Rust line layout grows the line box around it either way. Only `top` / `bottom`,
-  # which align to the LINE box itself (height not known until the line closes), still decline.
+  # the shift on its run; the Rust line layout grows the line box around it either way. `top` / `bottom` are
+  # the other family — they align to the LINE box itself, whose height is not known until it closes — and are
+  # resolved at the close instead; see the examples below them.
   it 'matches a super-aligned atomic (baseline shift raises it and grows the line)' do
     expect_parity('<div style="width:300px">x <svg width="10" height="10" style="vertical-align:super"></svg> y</div>')
   end
@@ -148,11 +149,45 @@ RSpec.describe 'native layout inline-atomic parity', if: ENV.fetch('CSIM_JS_ENGI
   it 'matches a middle-aligned svg icon in a text line' do
     expect_parity('<div style="width:300px">label <svg viewBox="0 0 16 16" style="height:16px;vertical-align:middle"><path d="M0 0h16v16z"/></svg> here</div>')
   end
-  it 'declines a top-aligned atomic (line-box-relative — line height unknown until it closes)' do
-    expect_bail('<div style="width:300px">x <span style="display:inline-block;width:10px;height:30px;vertical-align:top"></span> y</div>')
+  # `top` / `bottom` are the other family: they hang from the LINE BOX, which does not know its own height
+  # until every run on it is placed, so such a box gives the line no ascent and no descent — only a height it
+  # has to reach — and is placed at the close. Both engines resolve it the same way, and the rule is not "how
+  # tall" but WHICH EDGE MOVES: the line grows away from whichever family asked for the most room.
+  #
+  # Every example here carries baseline-aligned boxes beside the subject, and that is not decoration: a `top`
+  # box sits at the line's top whatever the line's ascent is, so its own geometry is right even when the
+  # ascent is wrong. Only something baseline-aligned on the same line can see the difference, and a text run
+  # is not a compared box. Measured on the `valine` sweep with an ascent-only bug injected into the grow rule:
+  # 536 mismatches with the marker boxes, 80 without.
+  #
+  # …but NOT this file's 60px `MARKER`, and that distinction is the whole reason these markers are declared
+  # here. A marker taller than the subject makes the line taller than anything the subject could ask for, so
+  # `line_outer_min` never exceeds the line and the grow rule is never ENTERED — the examples then pin only
+  # the placement, and the family rule below has no test at all. (Measured: with the 60px marker, an
+  # ascent-only bug in the grow rule leaves every native-layout example green — and the oracle's own
+  # `layout_vertical_align_spec` with them, since the oracle is what the page geometry still comes from.)
+  # These are sized to LOSE to the subject, which is what puts the line's height in its hands.
+  VA_MARKS = '<span style="display:inline-block;width:3px;height:6px"></span>' \
+             '<span style="display:inline-block;width:4px;height:14px"></span>'
+  VA_TOP = ->(h) { %(<span style="display:inline-block;width:10px;height:#{h}px;vertical-align:top"></span>) }
+  VA_BOT = ->(h) { %(<span style="display:inline-block;width:10px;height:#{h}px;vertical-align:bottom"></span>) }
+
+  it 'places a top-aligned atomic against the line box' do
+    expect_parity(%(<div style="width:300px">x #{VA_MARKS}#{VA_TOP.call(30)} y</div>))
   end
-  it 'declines a bottom-aligned atomic (line-box-relative)' do
-    expect_bail('<div style="width:300px">x <span style="display:inline-block;width:10px;height:30px;vertical-align:bottom"></span> y</div>')
+  it 'places a bottom-aligned atomic against the line box' do
+    expect_parity(%(<div style="width:300px">x #{VA_MARKS}#{VA_BOT.call(30)} y</div>))
+  end
+  it 'grows the line away from whichever of the two families asks for the most room' do
+    # A 40px `top` beside a 30px `bottom` keeps the baseline where it was and takes the line to 40; the same
+    # pair the other way round moves the ASCENT instead, and the 6px marker drops from 8 to 30. Both arms of
+    # that `if`, and the tie between them.
+    [[40, 30], [30, 40], [40, 40]].each do |a, b|
+      expect_parity(%(<div style="width:300px">x #{VA_MARKS}#{VA_TOP.call(a)}#{VA_BOT.call(b)} y</div>))
+    end
+    # …and a line-relative box SHORTER than the line asks for nothing at all: the grow is not entered, which
+    # is the case the 60px marker turns every other example into.
+    expect_parity(%(<div style="width:300px;line-height:50px">x #{VA_MARKS}#{VA_TOP.call(8)}#{VA_BOT.call(6)} y</div>))
   end
   # An atomic that is OUT OF FLOW is no atomic at all: it takes no room on the line, and what the line gives it
   # is its STATIC POSITION — the marker the run stream carries, settled where the flow had reached (see the
@@ -410,11 +445,15 @@ RSpec.describe 'native layout inline-atomic parity', if: ENV.fetch('CSIM_JS_ENGI
         expect(r['oracleReads'].keys).to eq(['nlShadowRun the pass root origin and width (handed over)']), body
       end
     end
-    # …while a LINE-relative `vertical-align` still declines, on an inline replaced element as on every other
-    # atomic: native's line ascent cannot place a box against the line it is still building.
-    it 'declines a line-relative vertical-align on an inline replaced element' do
-      expect_bail('<div style="width:400px">text <input style="display:inline;vertical-align:top"> after</div>')
-      expect_bail('<div style="width:400px">text <svg width="20" height="25" style="vertical-align:bottom"></svg> after</div>')
+    # …and a LINE-relative `vertical-align` is native's too, on an inline replaced element as on every other
+    # atomic: the run carries the mode and the line close resolves it.
+    it 'places a line-relative inline replaced element against the line box' do
+      expect_parity(%(<div style="width:400px">text #{VA_MARKS}<input style="display:inline;vertical-align:top"> after</div>))
+      expect_parity(%(<div style="width:400px">text #{VA_MARKS}<svg width="20" height="25" style="vertical-align:bottom"></svg> after</div>))
+      # …and one nested in an inline, which is where the WIDTH gate that used to refuse it lives: the whole
+      # pass declined for it under any shrink-to-fit asker, long after the alignment itself went native.
+      expect_parity(%(<div style="width:fit-content">ab #{VA_MARKS}<span style="padding:0 3px">x <img width="20" height="40" style="vertical-align:top"> y</span> cd</div>))
+      expect_parity(%(<div style="width:400px"><div style="float:left">ab #{VA_MARKS}<span>x <img width="20" height="40" style="vertical-align:bottom"> y</span></div><div style="height:9px"></div></div>))
     end
     it 'raises an atomic by its baseline shift, its own or an inline ancestor\'s' do
       expect_native_atomic('<div style="width:400px">text <span style="display:inline-block;vertical-align:super">sup</span> y</div>')
@@ -556,9 +595,13 @@ RSpec.describe 'native layout inline-atomic parity', if: ENV.fetch('CSIM_JS_ENGI
         expect_native_atomic(%(<div style="width:400px">t #{MARKER}<span style="vertical-align:6px">up #{box}</span></div>), 2)
         expect_native_atomic(%(<div style="width:400px">a <span style="display:inline-block">t <img style="width:9px;height:20px;vertical-align:#{va}"> x</span></div>), 2)
       end
-      # …while `top` / `bottom` hang from the LINE, which native's line layout has no slot for: declined
+      # …while `top` / `bottom` hang from the LINE rather than from the parent's font box, so they take none of
+      # the rule above: the box goes over with the line mode instead of an alignment code, and `growAtomic`
+      # never reaches `alignedAscent` for one. A baseline SHIFT on such a box is IGNORED by both engines —
+      # that is what the `super` case here pins, and it is the one place the two families meet.
       %w[top bottom].each do |va|
-        expect_bail(%(<div style="width:400px">text <span style="display:inline-block;vertical-align:#{va};width:10px;height:30px"></span> x</div>))
+        expect_native_atomic(%(<div style="width:400px">text #{VA_MARKS}<span style="display:inline-block;vertical-align:#{va};width:10px;height:30px"></span> x</div>), 3)
+        expect_native_atomic(%(<div style="width:400px">text #{VA_MARKS}<span style="vertical-align:super">up <span style="display:inline-block;vertical-align:#{va};width:10px;height:30px"></span></span> x</div>), 3)
       end
     end
 
