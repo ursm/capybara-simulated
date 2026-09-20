@@ -45,9 +45,17 @@ RSpec.describe 'native layout inline-atomic parity', if: ENV.fetch('CSIM_JS_ENGI
   # …and the page-visible x of one element, for the cases where parity is not the whole question: a rule BOTH
   # engines share is exactly what parity cannot see, so the Chrome-measured number is pinned beside it.
   def rendered_x(body, selector)
+    rendered_rect(body, selector)['x']
+  end
+
+  def rendered_width(body, selector)
+    rendered_rect(body, selector)['width']
+  end
+
+  def rendered_rect(body, selector)
     session = simulated_session(page(body))
     session.visit '/'
-    session.evaluate_script(%(document.querySelector('#{selector}').getBoundingClientRect().x))
+    session.evaluate_script(%(JSON.parse(JSON.stringify(document.querySelector('#{selector}').getBoundingClientRect()))))
   end
 
   it 'matches an inline svg between words on one line' do
@@ -332,6 +340,47 @@ RSpec.describe 'native layout inline-atomic parity', if: ENV.fetch('CSIM_JS_ENGI
        %(xx #{ib} yy <span style="white-space:pre">aa bb </span> cccccccccccccccc zz ff gg hh ii jj kk ll),
        %(xx #{ib} yy <span style="white-space:pre">aa	bb	</span> cccccccccccccccc zz ff gg hh ii jj)].each do |content|
         expect_native_atomic(%(<div style="width:180px;text-align:justify">#{content}</div>))
+      end
+    end
+    # …and WHICH SPACES are gaps at all is a question about what the space IS, not about what it measures.
+    # Native asked the WIDTH at every one of them — eight readers across five sites — and a zero-advance
+    # pending space is normally the break OPPORTUNITY a
+    # `pre` (or `nowrap`) run leaves behind, and no separator — so a real space whose advance cancelled to
+    # zero fell through the same door: it took every gap on the line with it, broke a line in two where both
+    # engines said one, and kept a preserved run alive past the space that ends it. The oracle has no width
+    # test anywhere here; what it mirrors is "a collapsible space was PLACED", whatever it measured.
+    # (The first fix converted four of the eight. A diff cannot show "applied everywhere" — the count is here
+    # so the next reader can check it against the code rather than against the change that last touched it.)
+    #
+    # Asserted as a RELATION to the text's own advance rather than against a pixel figure, because the shape
+    # is 16px monospace and a bare number is a font metric in disguise — the face CI resolves is not the one
+    # measured here. What the rule says is: a separator takes a share of the free space and an opportunity
+    # does not. (Chrome at a 9.6px advance: 25.266 and 19.203.) The `sep` bit's two FALSE producers are
+    # guarded by the `justify` sweep, not here — mutating them to true takes it from 0 to 766 mismatches.
+    it 'gives a share to a separator whose advance cancels to zero, and none to a zero-width opportunity' do
+      atom = '<span id="t" style="display:inline-block;width:10px;height:8px"></span>'
+      line = ->(lead, style) { %(<div style="width:200px;text-align:justify;font:16px monospace;#{style}">aa#{lead}#{atom} bb cc dd eeee ffff gggg hhhh iiii jjjj</div>) }
+      # `aa` is the whole of the line before the atomic in every shape below, so its width is where the atomic
+      # would sit with no share at all — and for the `&#8203;` shape that also asserts the resolved face gives
+      # U+200B no advance, which is a font-table fact riding along rather than a layout one.
+      # …and it is the ORACLE's geometry, so the pixel relations below hold at HEAD too: what fails there is
+      # `expect_native_atomic`. These examples are a parity guard first, and a guard on the shared rule —
+      # which parity cannot see — second.
+      unshifted = rendered_width('<span id="t" style="font:16px monospace">aa</span>', '#t')
+
+      cancelled = line.call(' ', 'word-spacing:-9.6px')
+      expect_native_atomic(cancelled)
+      expect(rendered_x(cancelled, '#t')).to be > unshifted + 1
+      # …a knife edge on the advance, not a range: either side of it is an ordinary separator.
+      ['word-spacing:-9.59px', 'word-spacing:-9.61px'].each {|style| expect_native_atomic(line.call(' ', style)) }
+
+      # …while a zero-width OPPORTUNITY is no separator however the line is justified: the atomic sits exactly
+      # where the text leaves it. (These two reach neither `sep` producer — U+200B queues no pending space and
+      # `<wbr>` only rewrites one — so they pin the boundary rather than the bit.)
+      ['&#8203;', '<wbr>'].each do |opp|
+        body = line.call(opp, '')
+        expect_native_atomic(body)
+        expect(rendered_x(body, '#t')).to be_within(0.01).of(unshifted)
       end
     end
     # …and a gap that sits EXACTLY at the line's END is either cut as hanging or kept and widened, which is a
