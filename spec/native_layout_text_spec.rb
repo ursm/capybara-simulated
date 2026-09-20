@@ -66,7 +66,7 @@ RSpec.describe 'native layout L2 text-block parity', if: ENV.fetch('CSIM_JS_ENGI
   # being tested here and says so rather than passing on.
   def expect_declined_x(body, chrome_x, native_body)
     with_page(body) do |session|
-      expect(parity(session)).to include('ok' => false, 'reason' => 'unsupported subtree'), "not declined: #{body}"
+      expect(parity(session)).to include('ok' => false, 'reason' => 'text-not-measurable'), "not declined: #{body}"
       expect_near(marker_x(session), chrome_x, body)
     end
     # …and the decline is the thing the shape is ABOUT, not something else that crept in: the same shape
@@ -502,7 +502,7 @@ RSpec.describe 'native layout L2 text-block parity', if: ENV.fetch('CSIM_JS_ENGI
     it 'declines a preserved form feed and a per-character ZWJ in the walk' do
       ["<div style=\"width:400px;white-space:pre\">a\fb</div>",
        '<div style="width:400px;word-break:break-all">a&#x200D;b</div>'].each do |body|
-        expect(shadow(body)).to include('ok' => false, 'reason' => 'unsupported subtree'), body
+        expect(shadow(body)).to include('ok' => false, 'reason' => 'text-not-measurable'), body
       end
     end
   end

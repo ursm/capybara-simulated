@@ -40,7 +40,7 @@ driver bug) only when one of these holds:
 
 1. **It needs a subsystem we deliberately don't model.** A *rendering*
    engine — glyph SHAPING (kerning, ligatures, bidi, the line-BREAKING
-   algorithm), `display: contents` — a real async
+   algorithm) — a real async
    runtime, or legacy-multibyte / Unicode-version-tied
    encoding tables (ISO-2022-JP & friends; the *residual* IDNA cases where
    `uri-idna` diverges from the WPT reference — **not IDNA wholesale**: see
@@ -94,6 +94,37 @@ earned-out before as "a subsystem we don't model", then reverted):
   the same machine. So a wrong text width is a bug to diagnose, not "we don't
   have glyph metrics". What is still missing is SHAPING (kerning / ligatures /
   bidi) and the real line-breaking algorithm.
+- **`display: contents` is MODELED, with a known gap** — the clause above
+  listed it as an unmodelled *rendering* subsystem beside glyph shaping, and
+  that was retired 2026-09-20. `layout.js` has four paths for it:
+  `isBlockLevelChild` looks THROUGH one to decide what its children are,
+  `placeInlineChild` puts its inline content on the line in place,
+  `contentIntrinsicWidths` walks its children as that line's, and
+  `generatesBox` gives it no box (so it can neither float nor establish a
+  context). Ten shapes are held against headless Chrome in
+  `spec/display_contents_spec.rb` — inline content on a line, one and two
+  block children through it, a flex item, a grid item, ignored padding,
+  nested `contents`, a float through it, `max-content` across it, a table row
+  through it — with the Chrome figures in the file, because an argument that
+  lives only in a commit message is the "memory of a measurement" this list
+  exists to replace.
+  The gap is real and named: a box-less element still resolves a USED WIDTH
+  of its own, and a percentage-sized `::before` / `::after` of one resolves
+  against that instead of against the parent's content box — 40px where
+  Chrome says 50px (`css/cssom/getComputedStyle-pseudo.html`, allowlisted),
+  and likewise through `padding`, through a `margin` that is no box's edge
+  at all, and through a declared `width` that replaces the basis outright.
+  A phantom box, in other words, not a mis-subtracted edge: a bug with a
+  written-down cause, which is the "coarse-model gap to diagnose" the
+  box-layout entry above describes rather than a subsystem. The allowlist holds six
+  files / ten subtests mentioning `display: contents`; the other nine are an
+  animation inside one, a flex item's computed `min-width`, five form
+  controls' computed `display`, a wheel-event target change, and
+  `commitStyles` in a `display: none` subtree. All ten are re-tested every
+  run — the gate turns RED on an allowlisted subtest that starts passing.
+  What is NOT modeled is the native layout WALK, which declines nine of the
+  ten shapes; that is a backlog item of the oracle-abolition campaign, not a
+  scope ruling.
 - **IDNA, Streams, Workers, EventSource are MODELED** (uri-idna /
   web-streams-polyfill / thread / TCPSocket). A failing IDNA test is usually
   a driver over-/under-rejection bug to fix (e.g. an `xn--` A-label browsers

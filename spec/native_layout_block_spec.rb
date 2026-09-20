@@ -1,11 +1,16 @@
 # frozen_string_literal: true
-# Native layout L1 (block flow) — geometry shadow-parity: the native pass's border-boxes must equal the
-# JS layout's `_lb` on a pure block-flow page (explicit heights / no inline text / no float / no
-# abspos — the cases L1 models). Validates the native block algorithm against the JS oracle before it
-# becomes authoritative. V8 only.
+# Native layout, block flow — geometry shadow-parity: the native pass's border-boxes must equal the JS
+# layout's `_lb`. It started as L1's invariant, "a pure block-flow page — explicit heights, no inline
+# text, no float, no abspos", and that is no longer what the file says: floats, abspos, inline runs,
+# atomics and mixed blocks all have examples below, because each was ported in turn and its parity
+# belongs beside the block one. What is still true, and is the actual contract, is the PASS: a shape
+# either lays out natively and agrees with the oracle everywhere, or it declines and the whole pass is
+# discarded — there is no third answer, and the examples that assert a DECLINE are asserting that
+# second one on purpose. V8 only.
 require 'capybara/simulated'
 require 'rack'
 require_relative 'support/session_teardown'
+require_relative 'support/walk_refusals'
 
 RSpec.describe 'native layout L1 block-flow parity', if: ENV.fetch('CSIM_JS_ENGINE', 'v8') == 'v8' do
   def page(body)
@@ -218,11 +223,158 @@ RSpec.describe 'native layout L1 block-flow parity', if: ENV.fetch('CSIM_JS_ENGI
     expect(parity(session)).to include('ok' => false)
   end
 
-  # …and refused by the WALK in particular ('unsupported subtree'), not discovered mid-measure in Rust
-  # ('native declined', which throws the whole pass away rather than this one subtree).
-  def expect_walk_declines(body)
-    session = simulated_session(page(body)); session.visit '/'
-    expect(parity(session)).to include('ok' => false, 'reason' => 'unsupported subtree')
+  # ── WHY a pass declined ─────────────────────────────────────────────────────────────────────────────
+  # The walk's refusal sites reported ONE string for all of them, so no census could name a gate without
+  # rewriting `layout.js` first — which is how `atomic-valign-line` stayed invisible while costing 5,120
+  # shapes. A refusal that names itself latches into `nlDeclineWhy` (first writer wins: the walk aborts at
+  # the refusal that stopped it), and the pass reports that instead of the generic string. The source spells
+  # 26 distinct gate names today (`float-in-inline` is easy to miscount: it is written as a fallback beside
+  # the latch, not as an `nlNo`); of 17,481 declines across the sweeps (2026-09-20) 552 still answer
+  # `unsupported subtree`, and 192 answer `native declined`, which is RUST's own single string — the same
+  # one-string-for-everything hole on the other side of the boundary, and a porting job of its own.
+  #
+  # A REPORTED reason is not a census — a shape blocked by several gates names only the first it reached.
+  # That is the SET census's question, not this string's.
+  describe 'the reason a pass declines' do
+    # One flex container the walk refuses — a multi-line COLUMN wrap, which native does not model — in three
+    # roles below: a block's child, a mixed block's FLOATED child, and the later decline a rolled-back
+    # attempt must not be blamed for. One shape, so the three cannot drift into testing different gates.
+    FLEX_COLUMN_WRAP = '<div style="display:flex;flex-direction:column;flex-wrap:wrap;max-height:50px"><div style="height:10px"></div></div>'
+
+    # The load-bearing half is the ROLLBACK. Several routes try a subtree and fall back: a table cell that
+    # cannot be measured is re-walked as a boundary, and the pass goes on. A reason latched inside such an
+    # attempt must not survive it, or it names a decline that happened somewhere else entirely — the one
+    # failure mode a latch has, and the one nothing else would catch.
+    it 'forgets a refusal inside an attempt that was rolled back' do
+      # An ATOMIC whose subtree declines is the reachable case: `atomic.lay` walks it through `walkAttempt`,
+      # the refusal inside names itself, the attempt is rolled back and the box is PUSHED — and the pass
+      # goes on to succeed. The reason must not survive that. (A table cell re-walked as a boundary is the
+      # other rollback route and does NOT reach this: `nlIntrinsicMeasurable` refuses it as a pre-filter, so
+      # no attempt is made and nothing is latched. The first version of this example used one and passed
+      # with the restore deleted.)
+      atomic      = WalkRefusals::POSITIONED
+      prefiltered = '<span style="display:inline-block;word-break:break-all">a&zwj;b</span>'
+      measured    = ->(inner) { %(<div style="width:400px;overflow:hidden"><div style="float:left">t #{inner} a</div></div>) }
+
+      # …and FIRST the two properties the rest of this depends on, because `ok: true, nativeAtomics: 0` holds
+      # for an atomic that was never ATTEMPTED as well as for one attempted and rolled back, and only the
+      # second exercises the restore.
+      #
+      #   (i) the attempt is MADE. In a MEASURED context there is no push to fall back on, so the pass ends
+      #       on the atomic and the two routes separate: an attempted-and-declined atomic reports the gate
+      #       INSIDE it, while one `nlIntrinsicMeasurable` pre-filtered is never walked and reports the
+      #       pre-filter. Both arms, or "it was attempted" is not what is being said.
+      expect(parity(session_for(measured.(atomic)))['reason']).to eq('block-level-box-unplaceable')
+      expect(parity(session_for(measured.(prefiltered)))['reason']).to eq('shrink-to-fit-child-unmeasurable')
+      #   (ii) …and that is the SAME name the gate answers to with no atomic around it at all. A DECLINED
+      #        atomic ends the pass, so its subtree's reason is re-latched over the rollback that erased it
+      #        (`nlRolledBackWhy`); without that the whole family answers `atomic-subtree-declined`, which is
+      #        one string for many gates — the hole this latch exists to close, one level down.
+      #        `WalkRefusals::WHITESPACE` still reports `atomic-subtree-declined` and is useless here: the
+      #        gate inside it is one of those that stay generic, so nothing distinguishable is latched.
+      expect(parity(session_for(%(<div style="width:400px">#{WalkRefusals::POSITIONED_INNER}</div>))))
+        .to include('ok' => false, 'reason' => 'block-level-box-unplaceable')
+      expect(parity(session_for(measured.(WalkRefusals::WHITESPACE)))['reason']).to eq('atomic-subtree-declined')
+      expect(parity(session_for(%(<div style="width:400px">text #{atomic} after</div>))))
+        .to include('ok' => true, 'nativeAtomics' => 0)
+      # …the same rolled-back attempt, then a LATER decline in a SIBLING block. Sibling, not the same block:
+      # a block classifies all its children BEFORE walking any of them, so a flex child in the same box
+      # refuses first and the atomic is never reached — which is how the second version of this example
+      # passed with the restore deleted too.
+      expect(parity(session_for(%(<div style="width:400px"><div>text #{atomic} after</div><div>#{FLEX_COLUMN_WRAP}</div></div>)))['reason'])
+        .to eq('flex-container-unsupported')
+    end
+    # …and forgets it again before the NEXT pass. The latch is module-level state and `nlShadowRun` clears
+    # it per run; nothing else in the suite would notice if that stopped, because every other example here
+    # runs ONE pass per session — and a page NAVIGATION rebuilds the realm, which is the route every census
+    # script takes (`session.visit` per case), so the tooling this change exists to feed cannot see it
+    # either. Two passes in one realm is the only shape that can, and the element-rooted mode is how to ask
+    # for them.
+    it 'forgets the previous pass before the next one' do
+      session = session_for(
+        %(<div id="named" style="width:400px">#{FLEX_COLUMN_WRAP}</div>) +
+        %(<div id="generic" style="width:400px;overflow:hidden"><div style="float:left">t #{WalkRefusals::WHITESPACE} a</div></div>) +
+        %(<div id="fine" style="width:400px"><div style="height:10px">x</div></div>)
+      )
+      # BOTH orders. First-writer-wins means a stale latch beats the real refusal, so a single order passes
+      # whenever the value left over happens to be the one wanted — and which one that is depends on the
+      # order the roots were asked in, which is the whole bug.
+      asked = ->(order) { order.map {|sel| parity(session, sel).values_at('ok', 'reason') } }
+      expect(asked.(%w[#named #generic #fine])).to eq([
+        [false, 'flex-container-unsupported'],
+        [false, 'atomic-subtree-declined'],
+        [true, nil]
+      ])
+      expect(asked.(%w[#generic #named #fine])).to eq([
+        [false, 'atomic-subtree-declined'],
+        [false, 'flex-container-unsupported'],
+        [true, nil]
+      ])
+      # …and `#fine`'s `nil` is the key being ABSENT — a passing result carries no `reason` at all — not a
+      # latch seen clear, so it reads the same with the reset deleted and proves nothing on its own. What
+      # that row is for is this: two declines before it corrupt no pass that then succeeds.
+      expect(parity(session, '#fine')).to include('ok' => true, 'mismatches' => 0)
+    end
+    it 'names the gate that stopped it' do
+      # Pairs, not a hash: the same reason is asserted twice on purpose, through two different routes.
+      [
+        ['abspos-in-mixed-block',             '<div style="width:400px"><p>a</p>text<div style="position:absolute;width:5px;height:5px"></div><p>b</p></div>'],
+        ['flex-container-unsupported',        %(<div style="width:400px">#{FLEX_COLUMN_WRAP}</div>)],
+        ['block-level-box-in-inline-content', '<div style="width:400px">text <span><div style="height:5px">b</div></span> after</div>'],
+        ['inline-box-relative-valign',        '<div style="width:400px">text <span style="vertical-align:middle">x</span> after</div>'],
+        # …and the last one again through a MIXED block's anonymous group, which is the other propagation
+        # route — its reason has to outlive the `emitAttempt` the group is built inside.
+        ['inline-box-relative-valign',        '<div style="width:400px"><p>a</p>text <span style="vertical-align:middle">x</span> more<p>b</p></div>'],
+        # …and a FLOAT in a mixed block's inline run, which is the third: the float hook walks its subtree
+        # DIRECTLY, so the gate inside names itself while the group's `emitAttempt` is still open and about
+        # to erase it. Read at the hook site or the whole family answers `float-in-inline`. Nothing else in
+        # the repo declines this way — reverting that read leaves every other layout spec green.
+        ['flex-container-unsupported',        %(<div style="width:400px"><p>a</p>text <div style="float:left;width:30px">#{FLEX_COLUMN_WRAP}</div> more<p>b</p></div>)],
+        # …and a DECLINED atomic in a MIXED block that is itself being MEASURED, which is the fourth and the
+        # one the group's `emitAttempt` reaches: `atomic.lay` re-latches the gate over its own rollback, and
+        # the group's rollback then erases THAT — so the reason survives only on the object the hook returns.
+        # A plain measured block (no `<p>` siblings) reads the re-latch instead and passes either way, which
+        # is why this needs its own row rather than a `<p>`-less one.
+        ['block-level-box-unplaceable',       %(<div style="width:400px;overflow:hidden"><div style="float:left"><p>a</p>text #{WalkRefusals::POSITIONED} more<p>b</p></div></div>)]
+      ].each do |reason, body|
+        expect_walk_declines(body, reason)
+      end
+    end
+  end
+
+  def session_for(body)
+    session = simulated_session(page(body))
+    session.visit '/'
+    session
+  end
+
+  # Not the walk's: everything decided BEFORE it starts (no `__dom`, no root box, a root display native does
+  # not lay out, a float hanging above the pass root), everything found AFTER it succeeded while the run
+  # stream is marshalled, and everything Rust discovers mid-measure ('native declined', which throws the
+  # whole pass away rather than this one subtree). This list is the other half of what
+  # `reason == 'unsupported subtree'` used to say. That string was the walk's ONLY answer, so asserting it
+  # ruled all of these out for free and said nothing else; now that reasons are specific the exclusion has
+  # to be written down — and written WHOLE, since a caller pinning a reason that is on neither side of the
+  # line would be claiming "the walk refused" about a pass whose walk did not refuse.
+  NOT_THE_WALKS = [
+    'no __dom',
+    'no root box',
+    'root unsupported',
+    'float above the pass root',
+    'run-without-white-space',            # …marshalling, after `walk` has already returned true
+    'run-without-tab-stop',
+    'native declined'                     # …Rust's, mid-measure
+  ].freeze
+
+  # …and the reason is REQUIRED, because an example whose only claim is `ok: false` passes for any decline
+  # at all — including one that moved to a completely different gate when the shape drifted. Two callers
+  # still pass `'unsupported subtree'`: that is the generic bucket, named out loud, and the day something on
+  # their way latches a reason this goes red and the census gains a line. That is the point of it.
+  def expect_walk_declines(body, reason)
+    r = parity(session_for(body))
+    expect(r['ok']).to be(false), "not declined: #{body}"
+    expect(NOT_THE_WALKS).not_to include(r['reason']), r.inspect
+    expect(r['reason']).to eq(reason), r.inspect
   end
 
   it 'matches an absolute child positioned by insets in a relative parent' do
@@ -372,8 +524,8 @@ RSpec.describe 'native layout L1 block-flow parity', if: ENV.fetch('CSIM_JS_ENGI
     # whole pass away. A measure-only gap (native's intrinsic has no `text-indent`) is refused here too.
     it 'refuses in the walk what it would have to measure and cannot' do
       expect_parity('<div style="width:400px"><div style="width:max-content;text-indent:30px">aa bb</div></div>')
-      expect_walk_declines('<div style="width:400px"><div style="width:max-content"><span style="display:inline-block"><span style="display:inline-block"><div style="display:table-cell">c</div></span></span></div></div>')
-      expect_walk_declines('<div style="width:400px"><table><tr><td><div style="width:max-content"><div style="display:grid;grid-template-columns:40px">g<div>h</div></div></div></td></tr></table></div>')
+      expect_walk_declines('<div style="width:400px"><div style="width:max-content"><span style="display:inline-block"><span style="display:inline-block"><div style="display:table-cell">c</div></span></span></div></div>', 'block-level-box-unplaceable')
+      expect_walk_declines('<div style="width:400px"><table><tr><td><div style="width:max-content"><div style="display:grid;grid-template-columns:40px">g<div>h</div></div></div></td></tr></table></div>', 'shrink-to-fit-child-unmeasurable')
     end
     # A keyword on any of the OTHER five size properties is not a width native has to find: the oracle resolves
     # a keyword `height` to `auto` and a keyword min/max to no clamp at all, which the record already says.
@@ -393,8 +545,8 @@ RSpec.describe 'native layout L1 block-flow parity', if: ENV.fetch('CSIM_JS_ENGI
       # …the pass ROOT (sized from the width the harness hands in — native would fill its containing block and
       # report the box as laid out), an out-of-flow box (sized from its insets) and a grid item (from its
       # track). A replaced element is sized by its intrinsic size and declines the same way.
-      expect_walk_declines('<div style="display:grid;grid-template-columns:auto;width:400px"><div style="width:max-content">aa bb</div></div>')
-      expect_walk_declines('<div style="position:relative;width:400px"><div style="position:absolute;width:max-content">aa bb</div></div>')
+      expect_walk_declines('<div style="display:grid;grid-template-columns:auto;width:400px"><div style="width:max-content">aa bb</div></div>', 'unsupported subtree')
+      expect_walk_declines('<div style="position:relative;width:400px"><div style="position:absolute;width:max-content">aa bb</div></div>', 'unsupported subtree')
       session = simulated_session(page('<div id="r" style="width:max-content">aa bb cc</div>')); session.visit '/'
       expect(parity(session, '#r')).to include('ok' => false, 'reason' => 'unsupported subtree')
       # …and the vertical writing mode's root, which has no inline size to fill either. It is the SAME hole, and
@@ -416,7 +568,7 @@ RSpec.describe 'native layout L1 block-flow parity', if: ENV.fetch('CSIM_JS_ENGI
     it 'sees a keyword width arriving through inherit' do
       expect_parity('<div style="display:flex;width:400px"><div style="width:min-content"><div style="width:inherit;text-indent:30px">aa bb cc</div></div></div>')
       expect_parity('<table style="border-spacing:0"><tr><td style="padding:0;width:min-content"><div style="width:inherit;text-indent:30px">aa bb cc</div></td></tr></table>')
-      expect_walk_declines('<div style="display:flex;width:400px"><div style="width:min-content"><div style="width:inherit"><span style="display:inline-block"><span style="display:inline-block"><div style="display:table-cell">c</div></span></span></div></div></div>')
+      expect_walk_declines('<div style="display:flex;width:400px"><div style="width:min-content"><div style="width:inherit"><span style="display:inline-block"><span style="display:inline-block"><div style="display:table-cell">c</div></span></span></div></div></div>', 'block-level-box-unplaceable')
       # …and one with nothing to refuse lays out, the inherited keyword measured like any other
       expect_parity('<div style="width:400px"><div style="width:min-content"><div style="width:inherit">aa bb cc</div></div></div>')
       expect_parity('<div style="width:400px"><span style="width:min-content"><span style="display:inline-block;width:inherit">bb cc</span></span></div>')
@@ -764,8 +916,8 @@ x</div>))
     # Native ASKS such a child's intrinsic widths, so a child it cannot measure has to be refused by the WALK —
     # discovered in Rust it would fail the whole pass instead of this one subtree.
     it 'declines a vertical block holding content native cannot measure' do
-      expect_walk_declines('<div style="width:400px"><div style="writing-mode:vertical-lr"><div style="display:grid;grid-template-columns:40px">g<div>h</div></div></div></div>')
-      expect_walk_declines('<div style="width:400px"><div style="writing-mode:vertical-lr"><span style="display:inline-block"><div style="display:table-cell">c</div></span></div></div>')
+      expect_walk_declines('<div style="width:400px"><div style="writing-mode:vertical-lr"><div style="display:grid;grid-template-columns:40px">g<div>h</div></div></div></div>', 'shrink-to-fit-child-unmeasurable')
+      expect_walk_declines('<div style="width:400px"><div style="writing-mode:vertical-lr"><span style="display:inline-block"><div style="display:table-cell">c</div></span></div></div>', 'block-level-box-unplaceable')
     end
     # …which is also why such a child is walked as a MEASURED subtree: an atomic inline whose own box would be
     # PUSHED is not in the run stream native measures from, so the walk has to decline where it would otherwise
@@ -781,10 +933,10 @@ x</div>))
         'a <span style="display:inline-block"><div style="position:-webkit-sticky;width:9px;height:4px"></div>t</span>',
         'a<br>b <span style="display:inline-block"><div style="display:table-cell">c</div></span>'
       ].each do |inner|
-        expect_walk_declines(%{<div style="width:400px"><div style="writing-mode:vertical-lr">#{inner}</div></div>})
+        expect_walk_declines(%{<div style="width:400px"><div style="writing-mode:vertical-lr">#{inner}</div></div>}, 'block-level-box-unplaceable')
       end
       # …and through a GRID item, whose subtree is measured for the track sizes
-      expect_walk_declines('<div style="display:grid;grid-template-columns:200px;width:400px"><div><div style="writing-mode:vertical-lr">a <span style="display:inline-block"><div style="display:table-cell">c</div></span></div></div></div>')
+      expect_walk_declines('<div style="display:grid;grid-template-columns:200px;width:400px"><div><div style="writing-mode:vertical-lr">a <span style="display:inline-block"><div style="display:table-cell">c</div></span></div></div></div>', 'block-level-box-unplaceable')
       # …and the same content in a HORIZONTAL block lays out, the atomic pushed rather than the pass declined.
       expect_parity('<div style="width:400px"><div>a <span style="display:inline-block"><div style="display:table-cell">c</div></span></div></div>')
     end

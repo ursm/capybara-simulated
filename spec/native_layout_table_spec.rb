@@ -912,7 +912,7 @@ RSpec.describe 'native layout table parity', if: ENV.fetch('CSIM_JS_ENGINE', 'v8
       r = run_shadow('<table style="border-spacing:0"><tr><td style="padding:0">a <span style="display:inline-block">ok</span></td></tr></table>')
       expect(r).to include('ok' => true, 'mismatches' => 0, 'pushedContributions' => 0, 'nativeAtomics' => 1), r.inspect
       declined = run_shadow('<table style="border-spacing:0"><tr><td style="padding:0"><div style="display:table-cell">c</div></td></tr></table>')
-      expect(declined).to include('ok' => false, 'reason' => 'unsupported subtree'), declined.inspect
+      expect(declined).to include('ok' => false, 'reason' => 'block-level-box-unplaceable'), declined.inspect
     end
   end
 

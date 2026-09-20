@@ -25,8 +25,12 @@
 # a consumer used: dropping the head moved `.first` from the relative float to the whitespace-only
 # inline-block, and both specs went on passing while testing a different cause than their comment said.
 module WalkRefusals
-  POSITIONED  = '<span style="display:inline-block"><div style="position:-webkit-sticky;width:9px;height:4px"></div>t</span>'
-  WHITESPACE  = '<span style="display:inline-block;white-space:pre">   </span>'
-  TABLE_CELL  = '<span style="display:inline-block"><div style="display:table-cell">c</div></span>'
-  ATOMIC      = [POSITIONED, WHITESPACE, TABLE_CELL].freeze
+  # …the positioned one's CONTENT on its own, because what it declines for as a BLOCK is the property some
+  # callers actually need: an atomic whose content declines for a NAMED reason is the only kind that
+  # exercises the walk's rollback, and a caller that wants that has to be able to say so.
+  POSITIONED_INNER = '<div style="position:-webkit-sticky;width:9px;height:4px"></div>t'
+  POSITIONED       = %(<span style="display:inline-block">#{POSITIONED_INNER}</span>)
+  WHITESPACE       = '<span style="display:inline-block;white-space:pre">   </span>'
+  TABLE_CELL       = '<span style="display:inline-block"><div style="display:table-cell">c</div></span>'
+  ATOMIC           = [POSITIONED, WHITESPACE, TABLE_CELL].freeze
 end
