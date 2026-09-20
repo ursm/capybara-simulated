@@ -156,6 +156,167 @@ RSpec.describe 'native layout L2 text-block parity', if: ENV.fetch('CSIM_JS_ENGI
     expect_parity(body, 6, chrome_y: 0)
   end
 
+  # AN INLINE BOX THAT NOTHING LANDED INSIDE still shows its edges, where it opened. The oracle flushes the
+  # whole open stack at the close of any box whose own opening edge is still pending ("Chrome gives a lone
+  # padded empty `<span>` a 10x27 box on its line"); native dropped it, under a comment claiming that matched
+  # JS. It never did. Two boxes read the difference — the one AFTER the empty inline, and an out-of-flow child
+  # of it, which records where the flow had reached and so waits for that edge to land.
+  #
+  # Neither was visible: the walk refused the whole family (`edged-inline-without-content`). It refused it for
+  # a DIFFERENT divergence, and that one is real and still here — an empty inline's own font box does not grow
+  # the line in either engine (`a<span style="padding-left:6px;font-size:40px"></span>` puts the next box at
+  # y 13 where Chrome says 39). What the gate never was is a guard for it: the same error shows with NO edge
+  # at all (`a<span style="font-size:40px"></span>`, never declined), and both engines share it, so parity
+  # could not see it either way. A shared divergence is recorded, not fixed, during the port, so this was not
+  # a trade the decline could win: it hid two native parity breaks and a third in the ORACLE (a closing edge
+  # placed before the box around it had opened) to leave that one exactly where it was.
+  # Opening the family does make more SHARED divergences reachable, all of them pre-existing and none of them
+  # about an empty inline: the largest is rtl, where a padded inline puts the next box at 396 in both engines
+  # and at 390 (or 380.39 after text) in Chrome — with or without content in it, so it is the rtl line-order
+  # family and not this one. Recorded in `rtl_line_items_laid_out_ltr`, not fixed here.
+  # The refusal is gone, so the `edged` sweep went from 1,200 declines to none.
+  #
+  # Every figure is Chrome's, and the engines agree with it: an opening edge is an opening edge whether it is
+  # padding, a border or a margin, whether the box sits at the line's start or after text, and however the
+  # inlines nest. A `padding-right` is no opening edge and moves nothing — the arm that says this is about
+  # what OPENS a box and not about having any edge at all.
+  {
+    'an out-of-flow child reads the cursor past the edge'  =>
+      ['<span style="padding-left:6px"><i id="m" style="position:absolute;width:5px;height:5px"></i></span>', 6],
+    'a box after a wholly empty padded inline'             =>
+      ['<span style="padding-left:6px"></span>', 6],
+    'a border is an opening edge too'                      =>
+      ['<span style="border-left:3px solid"><i id="m" style="position:absolute;width:5px;height:5px"></i></span>', 3],
+    '…and a margin, which is outside the box'              =>
+      ['<span style="margin-left:9px"><i id="m" style="position:absolute;width:5px;height:5px"></i></span>', 9],
+    'after text, from where the text left the pen'         =>
+      ['A<span style="padding-left:6px"><i id="m" style="position:absolute;width:5px;height:5px"></i></span>', 15.609375],
+    'nested inlines flush outermost first'                 =>
+      ['<span style="padding-left:6px"><span style="padding-left:2px"><i id="m" style="position:absolute;width:5px;height:5px"></i></span></span>', 8],
+    'a CLOSING edge opens nothing, so it moves nothing'    =>
+      ['<span style="padding-right:5px"><i id="m" style="position:absolute;width:5px;height:5px"></i></span>', 0],
+    'white space inside is still nothing landing'          =>
+      ['<span style="padding-left:6px"> </span>', 6]
+  }.each do |name, (inner, chrome_x)|
+    it "places an empty inline's opening edge: #{name}" do
+      # …the marker is the `<i>` where the shape has one, and the box AFTER the inline where it does not.
+      marker = inner.include?('id="m"') ? '' : ' id="m"'
+      expect_parity(%(<div style="width:400px;font:16px monospace">#{inner}) +
+                    %(<b#{marker} style="display:inline-block;width:4px;height:4px"></b></div>), chrome_x)
+    end
+  end
+
+  # …and a pair of edges that CANCELS, which is the only shape that tells the two flushes apart. The oracle
+  # has both: `placeOnLine` asks the SUM of the pending edges and places nothing when they come to zero, a
+  # box's CLOSE asks that box's OWN edge and then places every pending one. Native folded them into one macro
+  # with the sum guard, so a cancelling pair stayed pending and the OUTER close flushed an unbalanced sum —
+  # the next box landed at -6 or +6 where Chrome and the oracle say 0. No sweep could see it: `edged.txt` has
+  # no negative inline margin in any of its 8,640 shapes (`genedgeopen.rb` now sweeps that axis).
+  {
+    'the outer margin cancels the inner padding' =>
+      ['<span style="margin-left:-6px"><span style="padding-left:6px"></span></span>', 0],
+    '…and the other way round'                   =>
+      ['<span style="padding-left:6px"><span style="margin-left:-6px"></span></span>', 0],
+    'after text, so the pen is not at the origin' =>
+      ['A<span style="margin-left:-6px"><span style="padding-left:6px"></span></span>', 9.609375],
+    # …a different property and a different magnitude, so the arithmetic is not what is being pinned
+    'a border against a margin, at another magnitude' =>
+      ['<span style="margin-left:-3px"><span style="border-left:3px solid"></span></span>', 0]
+  }.each do |name, (inner, chrome_x)|
+    it "places both edges of a cancelling pair: #{name}" do
+      expect_parity(%(<div style="width:400px;font:16px monospace">#{inner}) +
+                    %(<b id="m" style="display:inline-block;width:4px;height:4px"></b></div>), chrome_x)
+    end
+  end
+
+  # …and the same pair around a FORCED BREAK, which is the other direct flush: the oracle calls
+  # `flushOpenEdges()` outright at a preserved newline (`i > 0`), so both edges go down on the line the break
+  # ends and the close finds nothing pending. Behind the sum guard native placed neither, then placed both at
+  # the close — one line too many.
+  it 'places both edges of a cancelling pair at a preserved newline' do
+    expect_parity(%(<div style="width:400px;font:16px monospace;white-space:pre">) +
+                  %(<span style="margin-left:-6px"><span style="padding-left:6px">\n</span></span></div>) +
+                  %(<b id="m" style="display:inline-block;width:4px;height:4px"></b>), chrome_y: 32)
+  end
+
+  # …and the ORACLE's half, which had no guard at all because the only instrument that caught it was an
+  # out-of-repo sweep. An out-of-flow child of an inline records where the flow had reached INSIDE that box,
+  # and settles against the box's own fragment once the layout knows where that is. Two things could open
+  # that fragment's line before the box's opening edge had landed on it — an inner box's CLOSING edge, and a
+  # placement whose `if (pending)` sum the edge had been cancelled out of — and the reading then took the
+  # line's start for the content start: 0 where Chrome and native say 6.
+  #
+  # Both are fixed in the READING, not by putting the edge down earlier. Placing it earlier is what the
+  # waiting exists to prevent (an edge on a line its content then leaves is stranded, and the block loses a
+  # line — measured below), and it was tried: flushing for a closing edge, and flushing whatever the sum had
+  # cancelled, each fixed one of these and cost that.
+  # So the marker records what it can see AT THE TIME — the cursor it stands at, plus the edges then waiting
+  # — which is what native has always recorded. Deriving it later from the fragment's start instead is right
+  # only while nothing else has gone down inside the box on that line, and an inner box's closing edge is
+  # something else; it can come before the marker as easily as after it.
+  {
+    "an inner box whose only edge is a CLOSING one" =>
+      ['<span style="padding-left:6px"><i id="m" style="position:absolute;width:5px;height:5px"></i>' \
+       '<span style="padding-right:5px"></span></span>', 6],
+    "…and one whose OPENING margin cancels the outer's edge" =>
+      ['<span style="padding-left:6px"><i id="m" style="position:absolute;width:5px;height:5px"></i>' \
+       '<span style="margin-left:-6px">x</span></span>', 6],
+    'the same, through a border' =>
+      ['<span style="border-left:3px solid"><i id="m" style="position:absolute;width:5px;height:5px"></i>' \
+       '<span style="margin-left:-3px">x</span></span>', 3],
+    # …a sibling margin that does NOT cancel: this one was green before the fix too (the sum stayed non-zero,
+    # so the old guard let it through), and it is no longer only a control — it fails on a wrong `edges`
+    # term like every other arm here.
+    'a sibling margin that does not cancel' =>
+      ['<span style="padding-left:6px"><i id="m" style="position:absolute;width:5px;height:5px"></i>' \
+       '<span style="margin-left:-2px">x</span></span>', 6],
+    # …and an opening MARGIN, which lives outside the box and so is in neither `startX` nor `ce.left`
+    'the outer edge is a margin, not padding' =>
+      ['<span style="margin-left:9px"><i id="m" style="position:absolute;width:5px;height:5px"></i>' \
+       '<span style="padding-right:5px"></span></span>', 9],
+    # …and the MIRROR of the first two, which is what says the reading is a cursor and not the fragment's
+    # start: the inner box closes BEFORE the marker, so 5px of it are already spent when the marker is
+    # written, and every arm above has the marker first.
+    'the inner box closes before the marker' =>
+      ['<span style="padding-left:6px"><span style="padding-right:5px"></span>' \
+       '<i id="m" style="position:absolute;width:5px;height:5px"></i>aaaa</span>', 11],
+    'the same, with the outer edge a margin' =>
+      ['<span style="margin-left:9px"><span style="padding-right:5px"></span>' \
+       '<i id="m" style="position:absolute;width:5px;height:5px"></i>aaaa</span>', 14],
+    # …and a cursor is a PRE-ALIGNMENT quantity where the fragment start it replaced was shifted at line
+    # end, so it rides the same list every other static does.
+    'a centred line moves the cursor it was read at' =>
+      ['<span style="padding-left:6px"><i id="m" style="position:absolute;width:5px;height:5px"></i>' \
+       'aaaa</span>', 183.796875, ';text-align:center']
+  }.each do |name, (inner, chrome_x, outer)|
+    it "reads a marker against the edge of the box it is in: #{name}" do
+      expect_parity(%(<div style="position:relative;width:400px;font:16px monospace#{outer}">#{inner}</div>),
+                    chrome_x)
+    end
+  end
+
+  # …and the line the marker follows when its inline WRAPS is the one the opening edge landed on, which is
+  # not the fragment's first: an inner box's closing edge can open one before that. Asserted as the `y`,
+  # because that is what the lookup decides — the `x` here is 6 in both engines against Chrome's 11, which
+  # is the same content-edge re-derivation one branch over and is recorded, not fixed (both engines share
+  # it, so only a Chrome check sees it at all).
+  it 'follows its inline to the line the opening edge landed on' do
+    expect_parity(%(<div style="position:relative;width:60px;font:16px monospace">aaaa aaaa ) +
+                  %(<span style="padding-left:6px"><span style="padding-right:5px"></span>) +
+                  %(<i id="m" style="position:absolute;width:5px;height:5px"></i>aaaa</span></div>), chrome_y: 44)
+  end
+
+  # …and the edge stays WAITING, which is what the reading was fixed instead of. An inline's opening edge is
+  # not placed when the box opens: its first word may not fit, and an edge already down would be stranded on
+  # a line the content then leaves, taking that line's height with it. Flushing it for an inner box's closing
+  # edge did exactly that — this block lost a line (44 against Chrome's 66).
+  it 'leaves an opening edge waiting when the content after it wraps away' do
+    body = %(<div style="width:80px;font:16px monospace">aaaa ) +
+           %(<span style="padding-left:20px"><span style="padding-right:5px"></span>bbbbbb</span>) +
+           %(<b id="m" style="display:inline-block;width:4px;height:4px"></b></div>)
+    expect_parity(body, 0, chrome_y: 57)
+  end
+
   it 'matches a single-line text block' do
     expect_parity('<div>Hello world</div>')
   end

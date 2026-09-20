@@ -1112,20 +1112,38 @@ fn line_layout(
     // it is written in, and puts its static position on a line of its own. Native's contract is the oracle.)
     // An inline's opening edge is PLACED: it goes onto the line at the cursor and makes the line a placed one
     // (the oracle's `flushOpenEdges`, whose `seedStrut(); linePlaced = true` is what an alignment then reads).
+    // The oracle's `flushOpenEdges`: every pending edge goes down, one fragment at a time, each asked of its
+    // own width (`if (!w) continue`). A pair that cancels still places BOTH — the pen ends where it began,
+    // which is not the same thing as leaving them pending for someone else's sum to pick up later.
+    //
+    // The oracle calls this FOUR ways and two of them are different questions, which native had folded into
+    // one macro until it cost a bug: at a box's CLOSE and at a forced BREAK it calls `flushOpenEdges()`
+    // outright, while `placeOnLine` asks `if (pending)` — the SUM — first. Folded together under the sum, a
+    // cancelling pair stayed pending at a close and the OUTER close then flushed an unbalanced sum
+    // (`<span ml:-6><span pl:6></span></span>` put the next box at -6, Chrome and the oracle at 0).
+    // So: this macro at the three DIRECT sites, `flush_open_edges!` at the `placeOnLine`-shaped ones. The
+    // two are indistinguishable by every instrument we have (~28,000 sweep cases, both spec files) at the
+    // word / atomic sites, which once spelled it out by hand a third way; each is used where its ORACLE
+    // counterpart is, because that is the only thing that decides it.
+    macro_rules! flush_each_open_edge {
+        () => {{
+            for o in open.iter_mut().filter(|o| !o.1) {
+                if o.0 != 0.0 {
+                    line_x += o.0;
+                    line_has_content = true;
+                }
+                o.1 = true;
+            }
+        }};
+    }
+
+    // …and `placeOnLine`'s `if (pending)` around it, for the sites that are its counterparts: the sum is
+    // what the content has to FIT, and where the pending edges cancel there is nothing to place.
     macro_rules! flush_open_edges {
         () => {{
-            // …asked of the SUM, as `placeOnLine`'s `if (pending)` asks `openEdgeWidth()`: a negative margin
-            // that cancels an inner padding leaves NOTHING to place, and the oracle then places nothing at all
-            // — the fragment starts where the text does, and the line is not a placed one for it.
             let total_open: f64 = open.iter().filter(|o| !o.1).map(|o| o.0).sum();
             if total_open != 0.0 {
-                for o in open.iter_mut() {
-                    if !o.1 {
-                        line_x += o.0;
-                        o.1 = true;
-                    }
-                }
-                line_has_content = true;
+                flush_each_open_edge!();
             }
         }};
     }
@@ -1192,7 +1210,24 @@ fn line_layout(
                 open.push((run.metric, false));
             }
             RUN_CLOSE => {
-                open.pop(); // LIFO; an unflushed (empty-inline) open's pending is dropped, matching JS
+                // Nothing landed inside it, so the box shows its edges where it OPENED. The oracle flushes
+                // the WHOLE open stack at the close of any box whose own opening edge is still pending
+                // (`if (frag.pendingOpen) flushOpenEdges()`, "Chrome gives a lone padded empty `<span>` a
+                // 10x27 box on its line") — native dropped it instead, under a comment claiming that matched
+                // JS. It never did: `<span style="padding-left:6px"></span>` puts the next box at 6 in the
+                // oracle and in Chrome and at 0 here, and an out-of-flow child of such a box read the cursor
+                // BEFORE the edge rather than past it. Both were invisible, behind the walk's
+                // `edged-inline-without-content` refusal — which named a line-box height as its cause, and
+                // this is not that.
+                // Settled BEFORE the flush, as at every other flush site: a marker's own edges are the ones
+                // still unflushed, so reading them after would add nothing.
+                // …and flushed PER FRAGMENT, not behind the sum guard: the oracle asks `if (frag.pendingOpen)`
+                // here — this box's own edge — and then places every pending one, cancelling pairs included.
+                if open.last().is_some_and(|o| !o.1 && o.0 != 0.0) {
+                    settle_pending_oofs!();
+                    flush_each_open_edge!();
+                }
+                open.pop(); // LIFO
                 line_x += run.metric;
                 if run.metric != 0.0 {
                     line_has_content = true;
@@ -1379,7 +1414,7 @@ fn line_layout(
                                         // line becomes a PLACED one, so its `text-align` moves what sits on it
                                         // — a marker waiting on one of those edges included.
                                         settle_pending_oofs!();
-                                        flush_open_edges!();
+                                        flush_each_open_edge!();   // …DIRECT, as the oracle's `i > 0` arm is
                                         break_line!(); // newline → forced break
                                         // …and the SEGMENT it opens drops below a float as one unit, exactly
                                         // as the first did: the oracle runs `retakeBand(runW + …)` for every
@@ -1519,7 +1554,7 @@ fn line_layout(
                                 // (`<span style="padding-left:6px"><i abspos></i>\n<span>y</span></span>` put
                                 // it at y 22 where Chrome and the oracle say 0).
                                 settle_pending_oofs!();
-                                flush_open_edges!();
+                                flush_each_open_edge!();   // …DIRECT, as the oracle's `i > 0` arm is
                                 for _ in 0..nl {
                                     break_line!();
                                 }
@@ -1715,12 +1750,7 @@ fn line_layout(
                                         }
                                     }
                                     settle_pending_oofs!();
-                                    for o in open.iter_mut() {
-                                        if !o.1 {
-                                            line_x += o.0;
-                                            o.1 = true;
-                                        }
-                                    }
+                                    flush_open_edges!();
                                     flush_tail_gaps!();
                                     note_nbsp_gaps!(run, &text[u..u + ulen], band_l(total) + line_x);
                                     line_x += cw;
@@ -1761,12 +1791,7 @@ fn line_layout(
                             }
                             // Flush the still-open edges onto this line (once), then place the word.
                             settle_pending_oofs!();
-                            for o in open.iter_mut() {
-                                if !o.1 {
-                                    line_x += o.0;
-                                    o.1 = true;
-                                }
-                            }
+                            flush_open_edges!();
                             flush_tail_gaps!();
                             note_nbsp_gaps!(run, &text[start..i], band_l(total) + line_x);
                             line_x += width;
@@ -1840,12 +1865,7 @@ fn line_layout(
                     }
                 }
                 settle_pending_oofs!();
-                for o in open.iter_mut() {
-                    if !o.1 {
-                        line_x += o.0;
-                        o.1 = true;
-                    }
-                }
+                flush_open_edges!();
                 // …and the separators a preceding non-wrapping run ENDED in are gaps now that this box follows
                 // them, so they are flushed BEFORE the count is taken: they precede it in flow order.
                 flush_tail_gaps!();
@@ -1890,6 +1910,7 @@ fn line_layout(
                 // flush is, so a pair that CANCELS is never "unplaced" to wait for — has not told the flow
                 // where it reaches: the
                 // edge goes down when the box's first content does, which may be a later line than this one.
+                // (The SUM is `placeOnLine`'s question, never the close's — see the two macros above.)
                 // Wait for it, keeping the cursor as the fallback for an edge that never lands. An edge further
                 // OUT is not waited on — the oracle asks only `openInlines[openInlines.length - 1]`, so a plain
                 // inner inline reads the cursor however edged the boxes around it are.
@@ -1954,8 +1975,11 @@ fn line_layout(
     }
     // An opening edge that never landed (its inline closed holding nothing the flow placed) leaves the cursor
     // read at the marker standing, which is what `pendingStatic` falls back to when the inline has no fragment.
-    // Believed UNREACHABLE: the walk admits an edged inline only with real content in it, and every placement
-    // of real content settles first. Kept because the alternative to a wrong answer here is no answer at all —
+    // Believed UNREACHABLE, though no longer for the reason it used to be: the walk admits an edged inline
+    // holding nothing at all now, and what makes this dead is the CLOSE — an inline with a non-zero opening
+    // edge settles its waiting markers and flushes on the way out, so a marker can only still be pending if
+    // the edge it waited on was zero, and the push condition (`run.metric != 0.0`) never records one of
+    // those. Kept because the alternative to a wrong answer here is no answer at all —
     // and if it ever does fire, note that the oracle's own fallback is still moved by the line's alignment
     // (`lineStatics`), which this is not.
     for (ci, rx, ry, _, at, was) in pending_oofs.drain(..) {

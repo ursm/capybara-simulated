@@ -1,7 +1,9 @@
 # frozen_string_literal: true
 # Native layout — white-space:nowrap text, geometry shadow-parity. `nowrap` collapses whitespace exactly like
 # `normal` but NEVER soft-wraps: the line grows past the content width; only a <br> breaks it. The block's
-# height is one strut (or one per <br>). pre / pre-wrap / pre-line (which PRESERVE whitespace) still decline.
+# height is one strut (or one per <br>). A preserving block whose WHOLE content is whitespace still declines
+# (`white-space-only-block`) — its line box is one the parent's height does not pick up — but a preserving
+# block with content in it lays out, edged inlines holding nothing included.
 require 'capybara/simulated'
 require 'rack'
 require_relative 'support/session_teardown'
@@ -12,18 +14,28 @@ RSpec.describe 'native layout nowrap parity', if: ENV.fetch('CSIM_JS_ENGINE', 'v
     Rack::Builder.new { run ->(_env) { [200, {'content-type' => 'text/html; charset=utf-8'}, [html]] } }.to_app
   end
 
+  # …yielding the session, so a caller that wants to read the laid-out page as well does not build a second
+  # one: two V8 isolates per example is how this suite has run out of memory before.
   def run_shadow(body)
     session = simulated_session(page(body))
     session.visit '/'
     session.evaluate_script('document.body.offsetHeight')
-    session.evaluate_script('globalThis.__csimLayoutShadowRun()')
+    r = session.evaluate_script('globalThis.__csimLayoutShadowRun()')
+    block_given? ? yield(r, session) : r
   end
 
-  def expect_parity(body)
-    r = run_shadow(body)
-    expect(r).to include('ok' => true), "harness bailed: #{r.inspect}"
-    expect(r['compared']).to be > 0, "nothing was compared: #{body}: #{r.inspect}"
-    expect(r['mismatches']).to eq(0), "mismatch: #{r.inspect}"
+  # `chrome_x` is the page-visible x of `#m`, for a rule both engines were free to get wrong together while
+  # the walk declined the shape: parity says nothing about a shape neither engine ever laid out.
+  def expect_parity(body, chrome_x = nil)
+    run_shadow(body) do |r, session|
+      expect(r).to include('ok' => true), "harness bailed: #{r.inspect}"
+      expect(r['compared']).to be > 0, "nothing was compared: #{body}: #{r.inspect}"
+      expect(r['mismatches']).to eq(0), "mismatch: #{r.inspect}"
+      next if chrome_x.nil?
+
+      x = session.evaluate_script("document.querySelector('#m').getBoundingClientRect().x")
+      expect(x).to be_within(0.05).of(chrome_x), "#{body}: #m at x #{x}, Chrome #{chrome_x}"
+    end
   end
 
   def expect_bail(body)
@@ -107,10 +119,24 @@ RSpec.describe 'native layout nowrap parity', if: ENV.fetch('CSIM_JS_ENGINE', 'v
   it 'declines an entirely-newline pre-wrap block (direct text)' do
     expect_bail("<div style=\"width:200px;white-space:pre-wrap\">\n\n</div>")
   end
-  # A whitespace-only EDGED (padded / bordered) inline stays declined even under preserve — the edged-inline gate
-  # keys on REAL glyph content, not preserved whitespace (a padded inline's line-box height is fiddly). A padded
-  # inline with real content, and an edgeless whitespace span, both lay out fine.
-  it 'declines a whitespace-only padded inline in a pre block' do
-    expect_bail('<div style="width:200px;white-space:pre">a<b style="padding:0 5px"> </b>b</div>')
+  # A whitespace-only EDGED (padded / bordered) inline used to decline here too, on a gate that keyed on REAL
+  # glyph content and gave "a padded inline's line-box height is fiddly" as its reason. That was not the
+  # reason: what native actually got wrong was the OPENING EDGE of an inline nothing landed inside, which it
+  # dropped at the close where the oracle flushes it. Fixed, the gate is gone and the family lays out — and
+  # since both engines were free to be wrong together behind a decline, the figures are Chrome's rather than
+  # the oracle's. The marker is the box after the inline, which is what an unplaced edge would move.
+  # …the mode is a parameter of the SHAPE, never read back out of the example's name: renaming an arm would
+  # otherwise change what it lays out and say nothing about it.
+  {
+    'whitespace inside a padded inline' => ['pre',      '<b style="padding:0 5px"> </b>', 38.828125],
+    'nothing at all inside it'          => ['pre',      '<b style="padding:0 5px"></b>', 29.21875],
+    '…and real content, as before'      => ['pre',      '<b style="padding:0 5px">x</b>', 38.828125],
+    'a border under pre-wrap'           => ['pre-wrap', '<b style="border-left:3px solid"> </b>', 31.828125]
+  }.each do |name, (mode, inner, chrome_x)|
+    it "lays out a whitespace-only edged inline in a preserve block: #{name}" do
+      body = %(<div style="width:200px;font:16px monospace;white-space:#{mode}">a#{inner}b) +
+             %(<i id="m" style="display:inline-block;width:4px;height:4px"></i></div>)
+      expect_parity(body, chrome_x)
+    end
   end
 end
