@@ -338,9 +338,21 @@ RSpec.describe 'native layout float parity', if: ENV.fetch('CSIM_JS_ENGINE', 'v8
     end
   end
 
-  it 'declines a position:relative float, keeps a static one' do
-    expect(run_shadow('<div style="overflow:hidden"><div style="float:left;position:relative;width:50px;height:50px"></div></div>')['ok']).to be false
-    expect(run_shadow('<div style="overflow:hidden"><div style="float:left;width:50px;height:50px"></div></div>')['ok']).to be true
+  # A RELATIVELY SHIFTED float declined until 2026-09-20 on the argument that it "carries an offset native
+  # would have to apply" — which it does, through `rec[39..40]`, exactly as every other box's does. What makes
+  # that the right answer for a float is §9.4.3: the shift is a PAINT-time one, so the box moves and the
+  # RECTANGLE this context excludes at does not. Both halves are asserted, because the box alone would pass on
+  # an engine that moved the band with it.
+  # Each shape needs a VERTICAL component on the float's own offset for the band half to be observable at
+  # all — an `overflow:hidden` owner takes its height from `floats_bottom`, so a band that moved with the box
+  # changes it. A horizontal-only shift moves line content, which the parity compare does not look at.
+  it 'moves a relative float\'s box and leaves its band where the flow put it' do
+    expect_parity('<div style="width:300px;overflow:hidden"><div style="float:left;position:relative;left:12px;top:-7px;width:50px;height:50px"></div><div>text beside it</div><div style="clear:left;height:5px"></div></div>')
+    # (a PERCENTAGE offset needs a definite height to resolve against — against an auto one it is 0, and the
+    # shape then tests nothing at all, which is how it first shipped here.)
+    expect_parity('<div style="width:300px;height:120px;overflow:hidden"><div style="float:right;position:relative;top:25%;width:50px;height:50px"></div><div>text</div><div style="clear:both;height:5px"></div></div>')
+    # …and its own shift composes with an ancestor's, each through its own record
+    expect_parity('<div style="width:300px;overflow:hidden"><div style="position:relative;top:10px;left:20px"><div style="float:left;position:relative;left:12px;top:9px;width:50px;height:50px"></div></div><div style="clear:left;height:5px"></div></div>')
   end
 
   # An ordinary BLOCK CONTAINER beside a float keeps its full width and OVERLAPS it (§9.5) — it is the LINES
@@ -481,12 +493,20 @@ RSpec.describe 'native layout float parity', if: ENV.fetch('CSIM_JS_ENGINE', 'v8
     ].each {|body| expect_parity(body) }
   end
 
-  # …and what it still declines, each beside the static float it keeps: a POSITIONED float (as a float child of a
-  # block does), and an auto-width one native cannot measure.
+  # …and what it still declines, beside the static float it keeps: an auto-width one native cannot measure.
+  # A POSITIONED float was the other entry here and is no longer one — a relative float lays out through the
+  # same hook, which is a second gate from the block arm's and had to be opened with it.
   it 'declines an inline float native cannot place, keeps the plain one' do
     keep = '<div style="width:300px">aaa <span style="float:left;width:50px;height:20px"></span>bbb</div>'
     expect(run_shadow(keep)['ok']).to be true
-    expect(run_shadow(keep.sub('float:left;', 'float:left;position:relative;'))['ok']).to be false
-    expect(run_shadow(%(<div style="width:300px">aaa <span style="float:left">#{WalkRefusals::ATOMIC.last}</span>bbb</div>))['ok']).to be false
+    expect_parity(keep.sub('<div style="width:300px">', '<div style="width:300px;overflow:hidden">')
+                      .sub('float:left;', 'float:left;position:relative;left:9px;top:6px;'))
+    # …and what the float gates DO still refuse, which after the relative one went is a position neither
+    # engine models (`nlPositionInFlow`). Asserted here because `WalkRefusals::POSITIONED` refuses at the
+    # atomic gate rather than at either of these two, so without it the float gates have no refusing shape
+    # anywhere in the suite.
+    expect(run_shadow(keep.sub('float:left;', 'float:left;position:-webkit-sticky;'))['ok']).to be false
+    expect(run_shadow('<div style="width:300px;overflow:hidden"><div style="float:left;position:-webkit-sticky;width:50px;height:50px"></div>t</div>')['ok']).to be false
+    expect(run_shadow(%(<div style="width:300px">aaa <span style="float:left">#{WalkRefusals::TABLE_CELL}</span>bbb</div>))['ok']).to be false
   end
 end

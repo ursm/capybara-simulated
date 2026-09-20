@@ -641,9 +641,11 @@ RSpec.describe 'native layout inline-atomic parity', if: ENV.fetch('CSIM_JS_ENGI
     end
     it 'rolls a declined subtree back off the record stream and pushes its box' do
       [
-        # (a POSITIONED float, which the walk still defers. This fixture used to hold a static one, which native
-        # has since taken over as a marker on the line.)
-        '<div style="width:400px">text <span style="display:inline-block"><div style="float:left;position:relative;width:10px;height:10px"></div>beside</span> after</div>',
+        # (a POSITIONED box, which this route still refuses — but not by the value it used to be written with.
+        # This fixture held a float, first static and then `position: relative`, each taken over by native in
+        # turn; what survives is that every one of these gates tests the position as a STRING, so a vendor
+        # ident walks into them. See `WalkRefusals`, which changed hands for the same reason.)
+        '<div style="width:400px">text <span style="display:inline-block"><div style="position:-webkit-sticky;width:10px;height:10px"></div>beside</span> after</div>',
         # (a SOFT hyphen: the flow draws a hyphen that is not in the text where it breaks, which native models
         # neither in the line's width nor in the painter's runs. This fixture used to read `日本語` — served
         # with no charset, whose mojibake happens to contain an em dash, so what it actually exercised was the
@@ -656,7 +658,7 @@ RSpec.describe 'native layout inline-atomic parity', if: ENV.fetch('CSIM_JS_ENGI
         r = run_shadow(body)
         expect(r).to include('ok' => true, 'mismatches' => 0, 'nativeAtomics' => 0), "#{body}: #{r.inspect}"
       end
-      expect_native_atomic('<div style="width:400px"><span style="display:inline-block">ok</span> and <span style="display:inline-block"><div style="float:left;position:relative;width:10px;height:10px"></div>beside</span> after</div>', 1)
+      expect_native_atomic('<div style="width:400px"><span style="display:inline-block">ok</span> and <span style="display:inline-block"><div style="position:-webkit-sticky;width:10px;height:10px"></div>beside</span> after</div>', 1)
       # …and the tabbed one the other way round: its subtree is native, so nothing is rolled back
       expect_native_atomic("<div style=\"width:400px\">text <span style=\"display:inline-block;white-space:pre\">a\tb</span> after</div>", 1)
     end

@@ -778,7 +778,7 @@ x</div>))
       [
         'a <span style="display:inline-block"><div style="display:table-cell">c</div></span>',
         'a <span style="display:inline-block"><span style="display:inline-block"><div style="display:table-cell">c</div></span></span>',
-        'a <span style="display:inline-block"><div style="float:left;position:relative;width:9px;height:4px"></div>t</span>',
+        'a <span style="display:inline-block"><div style="position:-webkit-sticky;width:9px;height:4px"></div>t</span>',
         'a<br>b <span style="display:inline-block"><div style="display:table-cell">c</div></span>'
       ].each do |inner|
         expect_walk_declines(%{<div style="width:400px"><div style="writing-mode:vertical-lr">#{inner}</div></div>})
@@ -1137,12 +1137,44 @@ x</div>))
       expect_parity('<table style="border-spacing:0"><tr><td style="padding:0"><div style="position:sticky;top:0">s</div></td><td style="padding:0">b</td></tr></table>')
       expect_parity('<div style="width:400px">aaa <span style="position:sticky;top:0;display:inline-block;width:20px;height:10px"></span> bbb</div>')
     end
-    # …a FLOAT too: a sticky float is a float, and its box needs nothing a static one's does not. (A RELATIVE
-    # float still declines — that one carries an offset native would have to apply.)
-    it 'takes a sticky float, and still refuses a relative one' do
+    # …a FLOAT too: a sticky float is a float, and its box needs nothing a static one's does not.
+    it 'takes a sticky float' do
       expect_parity('<div style="width:400px"><div style="position:sticky;top:0;float:left;width:40px;height:10px"></div><div>text beside it</div></div>')
       expect_parity('<div style="width:400px;height:200px;overflow:auto"><div style="height:50px"></div><div style="position:sticky;top:0;float:left;width:40px;height:10px"></div></div>')
-      expect_walk_declines('<div style="width:400px"><div style="position:relative;top:5px;float:left;width:40px;height:10px"></div><div>text</div></div>')
+    end
+  end
+
+  # …and a RELATIVELY SHIFTED float, which declined in all three of the walk's float positions until
+  # 2026-09-20 on the argument that it "carries an offset native would have to apply". Native applies one to
+  # every other box the same way — `rec[39..40]`, added in `place` after the flow — and what makes it right
+  # for a float is that §9.4.3 is a PAINT-time shift: the box moves and the RECTANGLE the formatting context
+  # excludes at does not. That separation already existed for an ancestor's shift (the `relfloat` sweep is
+  # about exactly that); the float's OWN offset went through the same field and nothing had to change.
+  #
+  # So every example pins BOTH halves: the float's box carries the offset, and a following box that routes
+  # around the band or CLEARS it stands where the unshifted rectangle puts it.
+  describe 'a relatively shifted float' do
+    # …and every shape here has to make the BAND observable, which is not automatic and is where a first
+    # version of this example went wrong: the parity compare looks at element BOXES, so a band that moved with
+    # the box shows up only where some compared box reads it. A `clear` below a flow cursor that has already
+    # passed the float reads nothing, and a purely HORIZONTAL shift moves only line content, which is not a
+    # box at all. What works is a VERTICAL component on the float's own offset plus either an `overflow:hidden`
+    # owner (whose height is `floats_bottom`) or a `clear` the flow has not already passed. Measured against an
+    # engine deliberately broken to move the band with the box: 8 of the first 10 shapes caught nothing.
+    it 'moves the box and not the band, in each position the walk gates' do
+      # a block-level float, an auto-width one, and a percentage offset
+      expect_parity('<div style="width:400px;overflow:hidden"><div style="position:relative;left:12px;top:-7px;float:left;width:40px;height:50px"></div><div>text beside it</div><div style="clear:left;height:5px"></div></div>')
+      expect_parity('<div style="width:400px;overflow:hidden"><div style="position:relative;left:-18px;top:6px;float:left">a b c</div><div>one two three four five six</div></div>')
+      expect_parity('<div style="width:400px;height:120px;overflow:hidden"><div style="position:relative;top:25%;float:right;width:40px;height:10px"></div><div>text</div><div style="clear:both;height:5px"></div></div>')
+      # …written in INLINE content, which is a second gate (`nlGatherRuns`'s float hook)
+      expect_parity('<div style="width:200px;overflow:hidden">aaa <div style="position:relative;left:9px;top:6px;float:left;width:50px;height:20px"></div>bbb ccc ddd eee fff ggg</div>')
+      expect_parity('<div style="width:200px">aaa <div style="position:relative;left:9px;top:6px;float:left;width:50px;height:20px"></div>bbb ccc<div style="clear:left;height:5px"></div></div>')
+      # …and in a MIXED block, which is a third (the anonymous group's own hook)
+      expect_parity('<div style="width:200px;overflow:hidden"><p>a</p>text <span style="position:relative;top:8px;left:-6px;float:left;width:50px;height:30px"></span>more text<p style="clear:left">b</p></div>')
+    end
+    # …while an ancestor's shift and the float's own compose, each through its own record.
+    it 'composes with an ancestor shift' do
+      expect_parity('<div style="width:400px;overflow:hidden"><div style="position:relative;top:10px;left:20px"><div style="position:relative;left:12px;top:9px;float:left;width:40px;height:50px"></div></div><div style="clear:left;height:5px"></div></div>')
     end
     # …and the insets it is given change nothing about the box, whichever way they point.
     it 'ignores the insets, which are the read path' do

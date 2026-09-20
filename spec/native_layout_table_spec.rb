@@ -895,7 +895,7 @@ RSpec.describe 'native layout table parity', if: ENV.fetch('CSIM_JS_ENGINE', 'v8
     # where in the attempted subtree the refusal sits cannot change the outcome. A stream someone forgets to
     # restore shows up here as a differing node count or a double-counted grid.
     it 'leaves the same records behind wherever the refusal sits in the subtree' do
-      refusal = WalkRefusals::ATOMIC.first
+      refusal = WalkRefusals::POSITIONED   # (any of them; what is under test is the bookkeeping)
       inert = '<div style="width:3px;height:2px"></div>' * 4
       grid = '<div style="display:grid;grid-template-columns:min-content;width:50px"><div>g</div></div>'
       early = run_shadow(%{<div style="width:400px"><table><tr><td>#{grid}#{refusal}#{inert}</td></tr></table></div>})

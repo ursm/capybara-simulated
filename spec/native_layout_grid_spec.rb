@@ -552,7 +552,7 @@ RSpec.describe 'native layout grid parity', if: ENV.fetch('CSIM_JS_ENGINE', 'v8'
     # offset would have native reading the neighbouring table's column data as track specs, and a leaked push
     # would double or lose the grid count.
     it 'rolls its own marshalled tracks back, whatever else is in the stream' do
-      refusal = WalkRefusals::ATOMIC.first
+      refusal = WalkRefusals::POSITIONED   # (any of them; what is under test is the bookkeeping)
       nested = '<div style="display:grid;grid-template-columns:min-content;width:60px"><div>n</div></div>'
       cols = '<table style="border-spacing:0"><colgroup><col style="width:20px"><col></colgroup><tr><td style="padding:0">c</td><td style="padding:0">d</td></tr></table>'
       [
