@@ -45,34 +45,115 @@ RSpec.describe 'native layout L2 text-block parity', if: ENV.fetch('CSIM_JS_ENGI
     session.evaluate_script("document.querySelector('#m').getBoundingClientRect().x")
   end
 
-  # Within 0.05px throughout: the engines measure from the font file's own advances, so they land a hair off
-  # Chrome's rounding — 9.6 against 9.609375 per monospace character.
-  def expect_near(x, chrome_x, body)
-    expect(x).to be_within(0.05).of(chrome_x), "#{body}: #m at #{x}, Chrome #{chrome_x}"
+  # …and WHICH LINE it landed on, for a rule about a forced break: `x` says nothing there, since a break
+  # moves the marker down rather than across.
+  def marker_y(session)
+    session.evaluate_script("document.querySelector('#m').getBoundingClientRect().y")
   end
 
-  def expect_parity(body, chrome_x = nil)
+  # Within 0.05px throughout: the engines measure from the font file's own advances, so they land a hair off
+  # Chrome's rounding — 9.6 against 9.609375 per monospace character.
+  def expect_near(got, chrome, body, axis)
+    expect(got).to be_within(0.05).of(chrome), "#{body}: #m at #{axis} #{got}, Chrome #{chrome}"
+  end
+
+  def expect_parity(body, chrome_x = nil, chrome_y: nil)
     with_page(body) do |session|
       r = parity(session)
       expect(r).to include('ok' => true), "harness bailed: #{body}: #{r.inspect}"
       expect(r['compared']).to be > 0, "nothing was compared: #{body}: #{r.inspect}"
       expect(r['mismatches']).to eq(0), "mismatch: #{body}: #{r.inspect}"
-      expect_near(marker_x(session), chrome_x, body) unless chrome_x.nil?
+      expect_near(marker_x(session), chrome_x, body, 'x') unless chrome_x.nil?
+      expect_near(marker_y(session), chrome_y, body, 'y') unless chrome_y.nil?
     end
   end
 
   # …and for a rule the walk DECLINES by design, where there is no parity to assert at all and the oracle is
   # the only engine that answers. It still checks the decline, so a shape that quietly became native stops
   # being tested here and says so rather than passing on.
-  def expect_declined_x(body, chrome_x, native_body)
+  def expect_declined_x(body, chrome_x, native_body, reason: 'text-not-measurable', chrome_y: nil)
     with_page(body) do |session|
-      expect(parity(session)).to include('ok' => false, 'reason' => 'text-not-measurable'), "not declined: #{body}"
-      expect_near(marker_x(session), chrome_x, body)
+      expect(parity(session)).to include('ok' => false, 'reason' => reason), "not declined: #{body}"
+      expect_near(marker_x(session), chrome_x, body, 'x') unless chrome_x.nil?
+      expect_near(marker_y(session), chrome_y, body, 'y') unless chrome_y.nil?
     end
     # …and the decline is the thing the shape is ABOUT, not something else that crept in: the same shape
     # without it goes native. Without this the example stays green while it silently stops covering the rule
     # (a new walk gate anywhere in the shape would decline it just as well).
     expect_parity(native_body)
+  end
+
+  # `pre-line` COLLAPSES SPACES and KEEPS NEWLINES — two independent axes — and the node-level gate that
+  # decides whether a whitespace-only text node reaches the breaker at all asked only whether the mode
+  # PRESERVES, which `pre-line` does not. So a node holding nothing but a newline took the collapsing arm,
+  # where it is at most the one inline-block gap, and its forced break went missing: the oracle left the box
+  # after it on the first line where Chrome and native put it on the second. Native had recorded the
+  # divergence at its own break site rather than bending to it, so opening this closed both halves.
+  #
+  # BOTH arms, or the fix reads as "route every whitespace-only node through the breaker". The second arm is
+  # asked through MARGIN COLLAPSING, because that is one of the four places the question is put
+  # (`separatesMargins`) and it makes the difference page-visible rather than a walk-internal reason string:
+  # a block whose only content is a space is an empty one the margins around it collapse through, and one
+  # holding a newline has a line box that stops them. 42px apart, and both figures are Chrome's.
+  it 'breaks at a newline that is the whole of a pre-line text node, and not at spaces that are' do
+    marker = '<b id="m" style="display:inline-block;width:4px;height:4px"></b>'
+    line   = 'width:400px;font:16px monospace;white-space:pre-line'
+    expect_parity(%(<div style="#{line}"><span>\n</span>#{marker}</div>), chrome_y: 35)
+
+    collapse = lambda {|ws|
+      %(<div style="width:400px;font:16px monospace"><p style="margin:20px 0">a</p>) +
+        %(<div style="white-space:pre-line"><span>#{ws}</span></div>) +
+        %(<p id="m" style="margin:30px 0">b</p></div>)
+    }
+    expect_parity(collapse.(' '), chrome_y: 72)
+    expect_parity(collapse.("\n"), chrome_y: 114)
+  end
+
+  # …and the shape this is really about, which nothing in the repo had: PRETTY-PRINTED markup. A source
+  # newline between two block children of a `pre-line` block is a whitespace-only text node, so it makes a
+  # line of its own — three of them here, and the block is 110 tall where both engines used to say 44. They
+  # AGREED on 44, which is why no parity sweep could see it; only Chrome could.
+  # It costs a decline: those anonymous whitespace lines are not something native models, so the walk now
+  # refuses the shape instead of laying it out wrongly.
+  it 'gives a pre-line block a line per source newline between its block children' do
+    pretty = %(<div style="width:400px;font:16px monospace;white-space:pre-line">\n) +
+             %(  <div>a</div>\n  <div id="m">b</div>\n</div>)
+    plain  = %(<div style="width:400px;font:16px monospace;white-space:pre-line"><div>a</div><div id="m">b</div></div>)
+    expect_declined_x(pretty, nil, plain, reason: 'white-space-only-block', chrome_y: 66)
+  end
+
+  # …and `break-spaces`, whose whitespace-only block used to be an EMPTY one to native and a 22px-tall one to
+  # the oracle — 3 mismatches on a shape the unified definition now refuses outright, since `PRESERVING_WS`
+  # holds it and the classifier asks the same question the oracle's placement does. (The CLASSIFIER is what
+  # fires here, not the mode gate: a break-spaces block with content declines as `unsupported subtree`
+  # instead, the mode having no `WS_MODE` code. These two shapes never reach it.)
+  # A plain list, not `%W[…]`: that splits on whitespace, so `%W[\n  ]` is the ONE-element array `["\n"]` and
+  # the space case — half of what this example is about, and a mismatch at HEAD exactly like the newline —
+  # was silently never run.
+  ["\n", ' '].each do |ws|
+    it "refuses a break-spaces block whose only content is #{ws.inspect}, rather than mismatching on it" do
+      # …and the control is the SAME whitespace under a mode that collapses it, which is what isolates the
+      # mode rather than the shape: that one goes native.
+      expect_declined_x(%(<div style="width:400px;font:16px monospace;white-space:break-spaces">#{ws}</div>),
+                        nil,
+                        %(<div style="width:400px;font:16px monospace">#{ws}</div>),
+                        reason: 'white-space-only-block')
+    end
+  end
+
+  # …and the edges of the inline the break happens INSIDE go onto the line it ends, not onto the next one.
+  # A marker waiting on an opening edge (an out-of-flow child records where the flow had reached, and an
+  # unplaced edge means the flow has not said yet) settles when that edge lands, so an edge that landed a
+  # line late took the marker with it — 22px down, on a line it was written above. Native skipped the flush
+  # for a whitespace-only run because the ORACLE never reached its break at all; with the oracle fixed the
+  # flush is unconditional, and this is the shape that says so.
+  it 'flushes an inline opening edge onto the line a pre-line newline ends' do
+    # Concatenated, never a heredoc: under `pre-line` a heredoc's own newlines are forced breaks, so the
+    # shape would quietly become a different one — and might still pass.
+    body = %(<div style="position:relative;width:400px;font:16px monospace;white-space:pre-line">) +
+           %(<span style="padding-left:6px"><i id="m" style="position:absolute;width:5px;height:5px"></i>\n) +
+           %(<span>y</span></span> tail</div>)
+    expect_parity(body, 6, chrome_y: 0)
   end
 
   it 'matches a single-line text block' do

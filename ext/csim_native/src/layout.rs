@@ -1509,20 +1509,17 @@ fn line_layout(
                             }
                             if break_nl && nl > 0 {
                                 // …and a `pre-line` newline ends its line the same way a preserved one does,
-                                // with the open edges on it — but only where the RUN carries real content, so
-                                // the oracle reaches the break through `placeTextRun` at all. A whitespace-ONLY
-                                // run takes its collapsed branch instead, which places nothing and flushes
-                                // nothing (`NON_WS_RE` / `PRESERVING_WS` in `placeInlineChild`).
-                                if text.iter().any(|&c| !is_ws_u16(c)) {
-                                    settle_pending_oofs!();
-                                    flush_open_edges!();
-                                }
-                                // The BREAK below stays unconditional even there, though, and that is a KNOWN
-                                // divergence rather than an oversight: the oracle's collapsed branch never
-                                // breaks at all, so `<div style="white-space:pre-line">\n<b>aa</b></div>` is
-                                // 22 in the oracle and 44 in native — which is what Chrome measures. Native is
-                                // the right side; the ORACLE is the one to fix, in its own increment
-                                // (`oracle_pre_line_newline_in_inline`), so native is not bent to match it.
+                                // with the open edges on it. This used to be asked only of a run carrying REAL
+                                // content, because a whitespace-ONLY one took the oracle's collapsed branch and
+                                // never reached `placeTextRun` at all — a divergence native recorded here
+                                // rather than bending to, since Chrome breaks and the oracle did not. The
+                                // oracle routes a `pre-line` run holding a NEWLINE through the breaker now, so
+                                // the two sides agree and the flush is unconditional again. It has to be: a
+                                // marker waiting on an open edge settled on the line AFTER the break otherwise
+                                // (`<span style="padding-left:6px"><i abspos></i>\n<span>y</span></span>` put
+                                // it at y 22 where Chrome and the oracle say 0).
+                                settle_pending_oofs!();
+                                flush_open_edges!();
                                 for _ in 0..nl {
                                     break_line!();
                                 }

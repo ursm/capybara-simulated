@@ -270,11 +270,13 @@ RSpec.describe 'native layout L1 block-flow parity', if: ENV.fetch('CSIM_JS_ENGI
       #        atomic ends the pass, so its subtree's reason is re-latched over the rollback that erased it
       #        (`nlRolledBackWhy`); without that the whole family answers `atomic-subtree-declined`, which is
       #        one string for many gates — the hole this latch exists to close, one level down.
-      #        `WalkRefusals::WHITESPACE` still reports `atomic-subtree-declined` and is useless here: the
-      #        gate inside it is one of those that stay generic, so nothing distinguishable is latched.
+      #        A SECOND gate through the same route, because one name proves the carry and two prove it is
+      #        the gate's and not the route's. (This one used to be the counter-example here — it answered
+      #        `atomic-subtree-declined`, its gate being one of the ~130 that stay anonymous — until naming
+      #        that gate turned this line red and gained the census a line, which is what it is for.)
       expect(parity(session_for(%(<div style="width:400px">#{WalkRefusals::POSITIONED_INNER}</div>))))
         .to include('ok' => false, 'reason' => 'block-level-box-unplaceable')
-      expect(parity(session_for(measured.(WalkRefusals::WHITESPACE)))['reason']).to eq('atomic-subtree-declined')
+      expect(parity(session_for(measured.(WalkRefusals::WHITESPACE)))['reason']).to eq('white-space-only-block')
       expect(parity(session_for(%(<div style="width:400px">text #{atomic} after</div>))))
         .to include('ok' => true, 'nativeAtomics' => 0)
       # …the same rolled-back attempt, then a LATER decline in a SIBLING block. Sibling, not the same block:
@@ -292,21 +294,21 @@ RSpec.describe 'native layout L1 block-flow parity', if: ENV.fetch('CSIM_JS_ENGI
     # for them.
     it 'forgets the previous pass before the next one' do
       session = session_for(
-        %(<div id="named" style="width:400px">#{FLEX_COLUMN_WRAP}</div>) +
-        %(<div id="generic" style="width:400px;overflow:hidden"><div style="float:left">t #{WalkRefusals::WHITESPACE} a</div></div>) +
+        %(<div id="flex" style="width:400px">#{FLEX_COLUMN_WRAP}</div>) +
+        %(<div id="atomic" style="width:400px;overflow:hidden"><div style="float:left">t #{WalkRefusals::WHITESPACE} a</div></div>) +
         %(<div id="fine" style="width:400px"><div style="height:10px">x</div></div>)
       )
       # BOTH orders. First-writer-wins means a stale latch beats the real refusal, so a single order passes
       # whenever the value left over happens to be the one wanted — and which one that is depends on the
       # order the roots were asked in, which is the whole bug.
       asked = ->(order) { order.map {|sel| parity(session, sel).values_at('ok', 'reason') } }
-      expect(asked.(%w[#named #generic #fine])).to eq([
+      expect(asked.(%w[#flex #atomic #fine])).to eq([
         [false, 'flex-container-unsupported'],
-        [false, 'atomic-subtree-declined'],
+        [false, 'white-space-only-block'],
         [true, nil]
       ])
-      expect(asked.(%w[#generic #named #fine])).to eq([
-        [false, 'atomic-subtree-declined'],
+      expect(asked.(%w[#atomic #flex #fine])).to eq([
+        [false, 'white-space-only-block'],
         [false, 'flex-container-unsupported'],
         [true, nil]
       ])
