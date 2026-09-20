@@ -29,6 +29,18 @@ fn is_auto(v: f64) -> bool {
 // content edge — so a box whose content is EXACTLY its band wide lands on the comparison to the last bit and
 // one ULP decides whether a line wraps. "Exactly fits" is the answer both should give.
 const LINE_FIT_EPS: f64 = 1e-9;
+// …and the same slack for the justify cut, which is a DIFFERENT question — which gaps hang off the line's
+// end — asked of the same two differently-accumulated sums. Named apart so retuning the fit allowance (to
+// 1/64px, say, to match a LayoutUnit) cannot silently start swallowing gaps.
+//
+// ABSOLUTE, and that is a decision rather than an oversight. The two engines work in DIFFERENT FRAMES — the
+// oracle from the page origin, this one from the content edge — so a tolerance relative to the coordinate is
+// a different absolute slack in each, which is the asymmetry it exists to remove. The cost is a measured
+// ceiling: past 2²⁴ one ULP of the oracle's page coordinate exceeds 1e-9 and the cut decides on the bits
+// again (a 16,777,216px page offset puts this engine's atomic at 16777321.6 against the oracle's 16777360).
+// Not reachable on a real page, and the frame asymmetry behind it is wider than this line — the fit test has
+// it too — so it is recorded rather than papered over here.
+const GAP_CUT_EPS: f64 = 1e-9;
 const MEASURE_AUTO_HEIGHT: f64 = f64::NEG_INFINITY;
 
 // Display codes JS writes into the buffer. `display:none` nodes are NOT pushed (no box). A block whose
@@ -1013,7 +1025,14 @@ fn line_layout(
             // `line_gaps` is pushed in flow order — not about x: a negative horizontal margin can carry a
             // later gap to a smaller coordinate, and a coordinate cut then keeps it and drops one before it.
             let gaps: Vec<f64> = if justifying && $wrap && free > 0.0 && line_has_content {
-                let hangs = line_gaps.iter().position(|&g| g >= end_x).unwrap_or(line_gaps.len());
+                // …to a TOLERANCE, for the reason `LINE_FIT_EPS` exists beside it: a gap's origin and the
+                // line's end are the same sum in different accumulation orders — this engine forms the end as
+                // `band_l + (line_x - hang - hang_pre)` and the oracle as `(band_l + line_x) - hang` — so a gap
+                // sitting EXACTLY at the end decides on the last bit, and one ULP there costs a whole gap's
+                // share of the free space. It is the only one of this line's four float tests whose two sides
+                // travel different routes; the others compare a gap against a pen off the same running
+                // variable, and coincide bit-exactly within each engine.
+                let hangs = line_gaps.iter().position(|&g| g >= end_x - GAP_CUT_EPS).unwrap_or(line_gaps.len());
                 line_gaps[..hangs].to_vec()
             } else {
                 Vec::new()

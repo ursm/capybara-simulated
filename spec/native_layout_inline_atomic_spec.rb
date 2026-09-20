@@ -42,6 +42,14 @@ RSpec.describe 'native layout inline-atomic parity', if: ENV.fetch('CSIM_JS_ENGI
     expect(run_shadow(body)).to include('ok' => false)
   end
 
+  # …and the page-visible x of one element, for the cases where parity is not the whole question: a rule BOTH
+  # engines share is exactly what parity cannot see, so the Chrome-measured number is pinned beside it.
+  def rendered_x(body, selector)
+    session = simulated_session(page(body))
+    session.visit '/'
+    session.evaluate_script(%(document.querySelector('#{selector}').getBoundingClientRect().x))
+  end
+
   it 'matches an inline svg between words on one line' do
     expect_parity('<div style="width:300px">ab <svg width="20" height="16"></svg> cd</div>')
   end
@@ -324,6 +332,29 @@ RSpec.describe 'native layout inline-atomic parity', if: ENV.fetch('CSIM_JS_ENGI
        %(xx #{ib} yy <span style="white-space:pre">aa bb </span> cccccccccccccccc zz ff gg hh ii jj kk ll),
        %(xx #{ib} yy <span style="white-space:pre">aa	bb	</span> cccccccccccccccc zz ff gg hh ii jj)].each do |content|
         expect_native_atomic(%(<div style="width:180px;text-align:justify">#{content}</div>))
+      end
+    end
+    # …and a gap that sits EXACTLY at the line's END is either cut as hanging or kept and widened, which is a
+    # whole gap's share of the free space — decided, until now, on the last bit of two sums the two engines
+    # accumulate in different orders. That is the coincidence `LINE_FIT_EPS` was written for, never applied to
+    # this comparison. The first shape lands on it: a `white-space: pre` run's SINGLE trailing space, then a
+    # collapsible one, then the atomic, at a width where native's following gap came out 125.59999999999998
+    # against an end of 125.6 — its atomic at 133.12 where this engine and Chrome both say 140.
+    #
+    # **Parity cannot police the tolerance itself**: both engines share it, and a shared error is what parity
+    # is blind to by construction. So each shape carries CHROME's number too, which is the only instrument
+    # that would catch one wide enough to swallow a real gap. (A gap's origin is its space's START, so the
+    # least separation between a non-hanging gap and the line's end is that space's own advance — 9.6px here.
+    # There is ten orders of magnitude between that and the tolerance, and no layout can close it.)
+    it 'gives a gap that ends the line no share of the free space' do
+      line = ->(pre) { %(<div style="width:160px;text-align:justify;font:16px monospace">aaa <span style="white-space:pre">#{pre}</span> <span id="t" style="display:inline-block;width:20px;height:8px"></span> ddd eee fff ggg hhh iii jjj</div>) }
+      # 140 is not a font figure but a structural one — 160 − 20, the atomic flush at the content edge,
+      # because it ENDS the line. That holds for any monospace advance in (9.33, 12.72]; outside it " ddd"
+      # joins the line and the answer is something else, so `be_within` rather than an exact float and this
+      # note rather than a bare number.
+      {'bb cc ' => 140, 'bb cc  ' => 140, 'bb cc' => 100.203125}.each do |pre, chrome|
+        expect_native_atomic(line.call(pre))
+        expect(rendered_x(line.call(pre), '#t')).to be_within(0.05).of(chrome)
       end
     end
     # …and how far a box on such a line moves is a question about ORDER — how many widened gaps PRECEDE it —
