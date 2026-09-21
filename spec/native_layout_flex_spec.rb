@@ -818,23 +818,35 @@ RSpec.describe 'native layout flex parity', if: ENV.fetch('CSIM_JS_ENGINE', 'v8'
     end
     # …and it FALLS BACK for a percentage the walk still resolves, which is what the narrowed test names: one
     # inside a MATH function (there is no fraction to send, so it travels resolved wherever the box sits), or
-    # under a GRID item, a TABLE part, an OUT-OF-FLOW box or an INLINE — all routes where the record's parent
-    # is not the box the percentage resolves against, so the figure was resolved against the item's FINAL size
-    # and native measures at a provisional one. Dropping the test put 15 wrong boxes into a 2,268-case
-    # math-function sweep, 28 into a 1,200-case route sweep and 36 into a 960-case inline sweep, all 0 at the
-    # parent commit: a `height: calc(50% + 2px)` item in a wrapping row came out 55.5 where Chrome and the
-    # oracle say 58.
+    # under a TABLE part, an OUT-OF-FLOW box or an INLINE — routes where the record's parent is not the box the
+    # percentage resolves against, so the figure was resolved against the item's FINAL size and native measures
+    # at a provisional one. Dropping the test put 15 wrong boxes into a 2,268-case math-function sweep, 28 into
+    # a 1,200-case route sweep and 36 into a 960-case inline sweep, all 0 at the parent commit: a
+    # `height: calc(50% + 2px)` item in a wrapping row came out 55.5 where Chrome and the oracle say 58.
     it 'falls back for a percentage the walk resolves, not for one native does' do
       ['<div style="display:flex;width:400px"><div><div style="height:calc(50% + 2px)">pct</div></div><div style="height:40px;width:50px"></div></div>',
        '<div style="display:flex;width:400px"><div><div style="min-height:min(50%,80px)">pct</div></div><div style="height:40px;width:50px"></div></div>',
-       '<div style="display:flex;width:400px"><div><div style="display:grid;height:100%"><div style="height:50%">pct</div></div></div><div style="height:40px;width:50px"></div></div>',
        '<div style="display:flex;width:400px"><div><div style="position:absolute;height:50%;width:10px"></div>pct</div><div style="height:40px;width:50px"></div></div>',
        # …and the INLINE route, whose record hangs under the TEXT BLOCK rather than under the inline
        '<div style="display:flex;width:400px"><div><div style="height:100%">words <b>b <span style="display:inline-block;height:50%;width:20px"></span></b></div></div><div style="height:40px;width:50px"></div></div>',
-       %(<div style="#{col};height:200px"><div style="flex:1 1 auto"><div style="height:calc(50% + 2px)">pct</div></div><div style="flex:1 1 auto">plain</div></div>),
-       %(<div style="#{col};height:200px"><div style="flex:1 1 auto"><div style="display:grid;height:100%"><div style="height:50%">pct</div></div></div><div style="flex:1 1 auto">plain</div></div>)].each do |body|
+       %(<div style="#{col};height:200px"><div style="flex:1 1 auto"><div style="height:calc(50% + 2px)">pct</div></div><div style="flex:1 1 auto">plain</div></div>)].each do |body|
         expect(run_shadow(body)).to include('ok' => true, 'mismatches' => 0, 'nativeFlexRows' => 0), body
       end
+    end
+
+    # …and the GRID route is no longer one of them. A grid item's containing block is its GRID AREA — its
+    # TRACK across, its ROW down — which native did not have: it resolved a grid item's percentages against the
+    # GRID's content box, so the walk resolved them instead, against the size the ORACLE's final layout gave
+    # the item, and a flex item holding such a grid FELL BACK to the pushed path (it never declined — the old
+    # assertion here was `nativeFlexRows => 0`, which is the fallback, not a refusal). Native resolves them per
+    # track now, so the fraction travels and the item is sized natively.
+    # The BASIS itself is the grid spec's business and is asserted there against Chrome
+    # (`native_layout_grid_spec`, "resolves a grid item's percentages against its GRID AREA"); what these say
+    # is only that the flex path stopped falling back.
+    it 'sizes an item holding a grid whose own item declares a percentage natively' do
+      expect_native_flex('<div style="display:flex;width:400px"><div><div style="display:grid;height:100%"><div style="height:50%">pct</div></div></div><div style="height:40px;width:50px"></div></div>')
+      expect_native_flex(%(<div style="#{col};height:200px"><div style="flex:1 1 auto"><div style="display:grid;height:100%"><div style="height:50%">pct</div></div></div><div style="flex:1 1 auto">plain</div></div>))
+      expect_native_flex('<div style="display:flex;width:400px"><div><div style="display:grid;grid-template-columns:100px 1fr"><div style="padding-left:50%">a</div><div>b</div></div></div><div style="height:40px;width:50px"></div></div>')
     end
 
     # Review findings: a base-measured item shrunk below its measure keeps its floor; a `wrap` column that never

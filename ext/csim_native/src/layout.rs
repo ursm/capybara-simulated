@@ -5905,6 +5905,14 @@ fn measure_grid(
         atx += widths[c] + col_gap;
     }
 
+    // …and on the BLOCK axis its containing block is the ROW: a DECLARED row height is that basis outright,
+    // and where the rows are content-sized the grid's own definite content height stands in. Loop-invariant,
+    // so it is computed once — a grid item's sizing is a hot path (rule 3).
+    // The fallback is right for the single row a grid usually has and wrong otherwise, and the walk shares it:
+    // `grid-auto-rows` is the only row declaration either engine reads (`gridRowHeight`), a content row's
+    // height is not known until its items are measured, and a `grid-row: span` is not modelled. Recorded, not
+    // fixed here — Chrome gives a `height: 50%` item in the second of two content rows 50 where both say 150.
+    let pct_h = if is_auto(decl_row_h) { n.definite_content_h().unwrap_or(f64::NAN) } else { decl_row_h };
     // Rows advance by the tallest item placed (content rows), or by the declared row height.
     let mut row_top = 0.0f64; // relative to the content origin
     let mut row_h = 0.0f64;
@@ -5919,8 +5927,19 @@ fn measure_grid(
         for x in cell.col..cell.col + cell.span {
             track_w += widths[x] + if x > cell.col { col_gap } else { 0.0 };
         }
-        let item = &inputs[c].get();
-        let child_w = resolve_width(item, track_w);
+        // A grid item's containing block is its TRACK, not the grid's content box (§12.1): its percentage
+        // width, min/max-width and EDGES all resolve against that — all four edges against the INLINE size,
+        // as everywhere else. The generic child pass above resolved them against this box's content width,
+        // because it has no tracks to hand out, so they are re-resolved here now that the track is known.
+        // (Idempotent: `with_percent_sizes` always re-derives from `pct_sizes` / `edge_frac`, which are never
+        // written back, so a second measure at another width is clean. A SPANNING item's basis is the tracks
+        // it covers plus the gaps between them, which `track_w` already is.)
+        let mut item = inputs[c].get();
+        if item.has_percent_sizes() {
+            item = item.with_percent_sizes(track_w, pct_h);
+            inputs[c].set(item);
+        }
+        let child_w = resolve_width(&item, track_w);
         measure(c, child_w, f64::NAN, inputs, runs, run_texts, grids, children, boxes, failed, &mut FloatCtx::new(), 0.0, 0.0);
         let ih = boxes[c].h;
         boxes[c].x = content_left + offsets[cell.col] + Input::m(item.ml);

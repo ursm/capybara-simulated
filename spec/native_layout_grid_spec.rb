@@ -16,10 +16,11 @@ RSpec.describe 'native layout grid parity', if: ENV.fetch('CSIM_JS_ENGINE', 'v8'
     Rack::Builder.new { run ->(_env) { [200, {'content-type' => 'text/html; charset=utf-8'}, [html]] } }.to_app
   end
 
+  # …the pass itself, for an example that wants to read the result rather than assert it clean.
   def run_shadow(body)
     session = simulated_session(page(body))
     session.visit '/'
-    session.evaluate_script('document.body.offsetHeight')
+    session.evaluate_script 'document.body.offsetHeight'
     session.evaluate_script('globalThis.__csimLayoutShadowRun()')
   end
 
@@ -55,13 +56,34 @@ RSpec.describe 'native layout grid parity', if: ENV.fetch('CSIM_JS_ENGINE', 'v8'
   # algorithm in BOTH engines, so parity alone would be blind to it being the wrong one. The tolerance is for
   # Chrome's LayoutUnit: it snaps every figure to 1/64 px, so a track carrying a fraction can land 1/128 px off
   # ours (80.8828125 against Chrome's 80.890625) — one snap, never more, so anything wider is a real difference.
-  def expect_chrome_width(body, chrome_w)
+  # Lay `body` out, assert the two engines agree about all of it, and hand the session back for the ONE figure
+  # the example is really about — which parity cannot supply when both engines had the rule wrong together.
+  def parity_session(body)
     session = simulated_session(page(body))
     session.visit '/'
-    session.evaluate_script('document.body.offsetHeight')
+    session.evaluate_script 'document.body.offsetHeight'
     r = session.evaluate_script('globalThis.__csimLayoutShadowRun()')
     expect(r).to include('ok' => true, 'mismatches' => 0), "#{body}: #{r.inspect}"
-    w = session.evaluate_script("document.getElementById('g').getBoundingClientRect().width")
+    session
+  end
+
+  # …the marked box's own rect against CHROME's (`#m`, where `expect_chrome_width` reads the container `#g`).
+  # Within 0.01 like the width helper: these are whole-pixel answers, not sub-pixel glyph advances.
+  def expect_chrome_box(body, chrome)
+    js = <<~JS
+      (() => {
+        const b = document.getElementById('m').getBoundingClientRect();
+        return [b.x, b.y, b.width, b.height];
+      })()
+    JS
+    got = parity_session(body).evaluate_script(js)
+    got.each_with_index do |v, i|
+      expect(v).to be_within(0.01).of(chrome[i]), "#{body}: #{got.inspect}, Chrome #{chrome.inspect}"
+    end
+  end
+
+  def expect_chrome_width(body, chrome_w)
+    w = parity_session(body).evaluate_script("document.getElementById('g').getBoundingClientRect().width")
     expect(w).to be_within(0.01).of(chrome_w), "#{body}: #{w}, Chrome #{chrome_w}"
   end
 
@@ -72,11 +94,7 @@ RSpec.describe 'native layout grid parity', if: ENV.fetch('CSIM_JS_ENGINE', 'v8'
   it 'makes no grid item of a child that generates no box' do
     ['<link rel="stylesheet">', '<meta name="x">', '<div style="display:none"></div>'].each do |boxless|
       body = %(<div style="width:300px"><div style="display:grid;grid-template-columns:40px 40px"><div>a</div>#{boxless}<div id="g">b</div></div></div>)
-      session = simulated_session(page(body))
-      session.visit '/'
-      session.evaluate_script('document.body.offsetHeight')
-      expect(session.evaluate_script('globalThis.__csimLayoutShadowRun()')).to include('ok' => true, 'mismatches' => 0), body
-      box = session.evaluate_script("(b => [b.x, b.y])(document.getElementById('g').getBoundingClientRect())")
+      box = parity_session(body).evaluate_script("(b => [b.x, b.y])(document.getElementById('g').getBoundingClientRect())")
       expect(box).to eq([40, 0]), "#{body}: #{box.inspect}, Chrome [40, 0]"
     end
   end
@@ -474,6 +492,40 @@ RSpec.describe 'native layout grid parity', if: ENV.fetch('CSIM_JS_ENGINE', 'v8'
       expect_native_intrinsic('<div style="display:grid;grid-template-columns:100px 100px;width:400px"><div style="display:grid;grid-template-columns:auto auto"><div>n1</div><div>n2</div></div><div style="height:20px">b</div></div>')
       expect_native_intrinsic('<div style="position:relative;width:400px;height:200px"><div style="position:absolute;top:10px;left:20px;width:200px;display:grid;grid-template-columns:auto 1fr"><div style="height:10px">a</div><div style="height:20px">b</div></div></div>')
     end
+    # A grid item's containing block is its GRID AREA (§12.1) — its TRACK across, its ROW down — and both
+    # engines used the grid's own content box on the block axis. The whole family was shared-wrong, so parity
+    # could not see any of it and every figure here is Chrome's.
+    #
+    # All four declare `grid-auto-rows`, which is the only row declaration either engine reads. A CONTENT row
+    # cannot be anchored this way and is not: its height is not known until its items are measured, so both
+    # engines fall back to the grid's own content height and are wrong together — TWO content rows in a 300px
+    # grid shift a `position:relative;top:50%` item by 150 where Chrome shifts it by 75, the exact sibling of
+    # the `height: 50%` figure beside `rowBasis`. (With ONE row the fallback coincides with Chrome and says
+    # nothing.) Recorded beside `gridRowHeight`, not fixed — these four are the rule, not the whole family.
+    {
+      'a percentage height is the ROW\'s, not the grid\'s' =>
+        ['<div style="display:grid;grid-template-columns:100px;grid-auto-rows:40px;width:400px;height:300px">' \
+         '<div id="m" style="height:50%">a</div></div>', [0, 0, 100, 20]],
+      # …and so is a percentage INSET, which the oracle shifted by the grid's height while the walk marshalled
+      # the row's — a parity break the height fix opened, and the reason the two have to be one basis.
+      'a percentage top is the ROW\'s too' =>
+        ['<div style="display:grid;grid-template-columns:100px;grid-auto-rows:40px;width:400px;height:300px">' \
+         '<div id="m" style="position:relative;top:50%">a</div></div>', [0, 20, 100, 40]],
+      'a percentage bottom, in a grid with no height of its own' =>
+        ['<div style="display:grid;grid-template-columns:100px;grid-auto-rows:40px;width:400px">' \
+         '<div id="m" style="position:relative;bottom:25%">a</div></div>', [0, -10, 100, 40]],
+      # …and the INLINE axis, which is the track and not the grid: 50% of a 100px track is 50, and of the
+      # 400px grid around it would be 200.
+      'a percentage padding is the TRACK\'s' =>
+        ['<div style="display:grid;grid-template-columns:100px 1fr;width:400px">' \
+         '<div style="padding-left:50%"><b id="m" style="display:inline-block;width:4px;height:4px"></b></div>' \
+         '<div>b</div></div>', [50, 10, 4, 4]]
+    }.each do |name, (body, chrome)|
+      it "resolves a grid item's percentages against its GRID AREA: #{name}" do
+        expect_chrome_box(body, chrome)
+      end
+    end
+
     it 'computes grid-auto-rows: rows advance by the declared height, an auto-height item is that height' do
       expect_parity('<div style="display:grid;grid-template-columns:100px 1fr;grid-auto-rows:40px;width:400px"><div style="height:50%">pct h</div><div>b</div><div style="height:60px">tall</div><div>d</div></div>')
       expect_parity('<div style="display:grid;grid-template-columns:100px;grid-auto-rows:60px;width:400px;height:300px"><div style="height:50%">pct</div><div style="padding:5px;border:2px solid">edged auto</div><div style="box-sizing:border-box;padding:5px">bb auto</div><div style="min-height:100px">minh</div><div style="max-height:10px">maxh</div></div>')
