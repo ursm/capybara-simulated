@@ -320,7 +320,8 @@ RSpec.describe 'native layout L1 block-flow parity', if: ENV.fetch('CSIM_JS_ENGI
     it 'names the gate that stopped it' do
       # Pairs, not a hash: the same reason is asserted twice on purpose, through two different routes.
       [
-        ['abspos-in-mixed-block',             '<div style="width:400px"><p>a</p>text<div style="position:absolute;width:5px;height:5px"></div><p>b</p></div>'],
+        ['preserve-white-space-in-mixed-block',
+         '<div style="width:400px;white-space:pre"><p>a</p>text<p>b</p></div>'],
         ['flex-container-unsupported',        %(<div style="width:400px">#{FLEX_COLUMN_WRAP}</div>)],
         ['block-level-box-in-inline-content', '<div style="width:400px">text <span><div style="height:5px">b</div></span> after</div>'],
         ['inline-box-relative-valign',        '<div style="width:400px">text <span style="vertical-align:middle">x</span> after</div>'],
@@ -467,10 +468,67 @@ RSpec.describe 'native layout L1 block-flow parity', if: ENV.fetch('CSIM_JS_ENGI
     expect_parity('<div style="writing-mode:vertical-lr;height:300px;width:200px"><p style="margin:0">a</p>x<span style="float:left;width:50%;height:20px;margin-left:10%"></span>y</div>')
   end
 
-  # DECLINES: an out-of-flow child in the mix, or a preserve white-space, are deferred.
-  it 'declines an absolutely-positioned child in a mixed block' do
-    expect_bail('<div style="position:relative;width:300px">text<div style="position:absolute;top:5px;width:20px;height:20px"></div><div style="height:20px">block</div>more</div>')
+  # An OUT-OF-FLOW child of a mixed block is inline-level content of the anonymous group it sits in, so it
+  # takes the same hook a text block's does: its record is emitted where the runs reach it and the marker
+  # carries the index. It used to decline the whole pass (`abspos-in-mixed-block`, 1,393 shapes).
+  #
+  # Where the two engines agree with each other and NOT with Chrome, which the harness cannot see: an
+  # out-of-flow box is BLOCKIFIED (§9.7), so its static position is the one a block-level box would have had
+  # — the containing block's content edge, below the line it interrupts. Both engines give it the INLINE
+  # cursor instead: `text<div abspos></div>` is at x 23.99 / y 0 here and at 0 / 18 in Chrome. Both engines
+  # also drop the box's OWN margins there (§10.6.4's static position is the margin edge — Chrome puts a
+  # `margin-top: 7px; margin-left: 3px` box at 3/57 against our 0/50; the INSET path applies them), and both
+  # put it in the band a float leaves where Chrome, blockifying, does not. Shared and pre-existing, all of
+  # it, so it is recorded rather than fixed during the port — and it is why these assert PARITY.
+  # The one figure below that IS Chrome's is the one both engines had wrong, where parity says nothing.
+  it 'places an absolutely-positioned child of a mixed block' do
+    expect_parity('<div style="position:relative;width:300px">text<div style="position:absolute;top:5px;width:20px;height:20px"></div><div style="height:20px">block</div>more</div>')
+    expect_parity('<div style="position:relative;width:300px">text<div style="position:absolute;width:20px;height:20px"></div><div style="height:20px">block</div>more</div>')
+    expect_parity('<div style="position:relative;width:400px"><p>a</p>text<div style="position:absolute;width:5px;height:5px"></div><p>b</p></div>')
+    # …one BEFORE any inline content in its group, where the static position is the group's own top — and the
+    # preceding block's collapsed margin decides it. CHROME's figure, because BOTH engines had this wrong
+    # (50 against 34) and a parity assertion would have passed on the pair of them: an out-of-flow box does
+    # not end the block-margin adjacency, but its static position is where it WOULD have sat in flow, and a
+    # box in flow there sits past the margin. Held for a PLAIN block too — the same rule, the other path.
+    [
+      '<div style="width:200px;position:relative"><p>block</p><div id="g" style="position:absolute;width:10px;height:10px"></div> aaa bbb<p>tail</p></div>',
+      '<div style="width:200px;position:relative"><p>block</p><div id="g" style="position:absolute;width:10px;height:10px"></div><p>tail</p></div>'
+    ].each do |body|
+      session = simulated_session(page(body))
+      session.visit '/'
+      expect(parity(session)).to include('ok' => true, 'mismatches' => 0), body
+      y = session.evaluate_script("document.getElementById('g').getBoundingClientRect().y")
+      expect(y).to eq(50), "#{body}: #{y}, Chrome 50"
+    end
+    # …and a REPLAYED one, which carries the oracle's own displacement rather than a static position. That
+    # displacement is measured against the MIXED BLOCK (`c._lb − el._lb`), so its record's parent has to be
+    # the block's and not the anonymous group's, or native adds the group's origin on top of it. A containing
+    # block with PERCENTAGE edges is what forces the replay — native re-derives a padding box from the
+    # record's borders and cannot, so the oracle's rectangle rides instead.
+    expect_parity('<div style="position:relative;padding:10%;width:300px"><p>a</p>text<div style="position:absolute;top:5px;left:5px;width:20px;height:20px"></div><p>b</p></div>')
   end
+
+  # …and it DECLINES where the group it sits in collapses to nothing. The box's static position is the line
+  # that group never opened, and the ORACLE gives that line things a block record cannot carry: the group's
+  # `text-indent` where the box opens one (11), and the alignment shift of whatever LATER line eventually
+  # closes, the entry sitting in `lineStatics` until one does (130.8 in a centred 300px block, the shift of a
+  # `<b>` line two blocks further on). Emitting it against the block gets the container's cursor and neither.
+  # 342 shapes of `ooffuzz` against the 1,105 the whole family used to cost, and only 23 of the 342 diverge.
+  # What this replaces is a DROPPED record, which is the shape no sweep can see: the pass reports a box it
+  # never placed, the harness compares one element fewer, and the run is green.
+  #
+  # A group collapses for five reasons, not one — `hasContent` is set by text, content whitespace, a `<br>`,
+  # an atomic or an edged inline's close — so BOTH the everyday routes are here: whitespace around the box,
+  # and the box ALONE after the last block, which is where a positioned dropdown or tooltip is written.
+  it 'declines an out-of-flow child of a mixed block whose group collapses' do
+    [
+      '<div style="position:relative;width:300px"><p>a</p> <div style="position:absolute;width:20px;height:20px"></div> <p>b</p>text<p>c</p></div>',
+      '<div style="position:relative;width:300px"><p>a</p>text<p>b</p><div style="position:absolute;width:20px;height:20px"></div></div>'
+    ].each do |body|
+      expect_walk_declines(body, 'oof-in-collapsed-group')
+    end
+  end
+
   it 'declines a preserve white-space mixed block' do
     expect_bail('<div style="width:300px;white-space:pre">text<div style="height:20px">block</div>more</div>')
   end

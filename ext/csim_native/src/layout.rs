@@ -2735,9 +2735,16 @@ fn measure(
         let cn = inputs[c].get();
         if cn.out_of_flow != 0 {
             // §4.1: an absolute/fixed child neither sizes nor shifts the flow. Positioned NATIVELY, it only records
-            // its STATIC position here — where the flow has reached (the cursor, before any margin still open; the
+            // its STATIC position here — where the flow has reached, the MARGIN still open above it included (the
             // content's right edge for an rtl flow) — and is sized and placed by `place_out_of_flow` once every
-            // box is final. Replayed, its subtree is laid out at its pushed border box (in a fresh context — it
+            // box is final. The margin counts because the static position is where the box WOULD have sat in
+            // flow, and a box in flow there sits past it: the same `cursor + pending` a FLOAT is placed at a
+            // few lines up. Measured: `<p>block</p><div abspos></div><p>tail</p>` puts the box at 50 in
+            // Chrome and at 34 without this, the `<p>`'s 16px bottom margin missing.
+            // (Its OWN margins are still dropped on this path — §10.6.4's static position is the MARGIN
+            // edge, and Chrome puts a `margin-top: 7px; margin-left: 3px` box at 3/57 where both engines
+            // say 0/50. The inset path applies them correctly. Shared, so recorded rather than fixed here.)
+            // Replayed, its subtree is laid out at its pushed border box (in a fresh context — it
             // establishes a BFC) and its box reset to this block's origin; `place` then positions it by rel_x/rel_y
             // alone (el._lb − container._lb). Neither touches the cursor / margin / has_child state.
             if cn.native_oof() {
@@ -2746,13 +2753,14 @@ fn measure(
                 // starts just below the cursor is not missed — and it carries the block's FIRST-LINE INDENT
                 // until an in-flow child spends it (an out-of-flow box is not a child that does). An rtl flow
                 // reads neither: its corner is the content's right edge.
+                let at = cursor + pending.value();
                 boxes[c].x = if n.from_right() {
                     content_left_rel + content_w
                 } else {
                     let indent = if !has_child != n.indent_hanging { n.indent_px + n.indent_frac * content_w } else { 0.0 };
-                    float_band(&ctx.items, cursor, n.strut_lh, cl, cr).0 + indent
+                    float_band(&ctx.items, at, n.strut_lh, cl, cr).0 + indent
                 };
-                boxes[c].y = cursor;
+                boxes[c].y = at;
                 continue;
             }
             let cw = resolve_width(&cn, content_w);

@@ -6885,18 +6885,6 @@ css/css-transforms/patternTransform/svg-patternTransform-001.html:
 - "== css/css-transforms/patternTransform/reference/svg-patternTransform-ref.html"
 css/css-transforms/patternTransform/svg-patternTransform-combination-001.html:
 - "== css/css-transforms/patternTransform/reference/svg-patternTransform-combination-ref.html"
-css/css-transforms/perspective-origin-001.html:
-- "== css/reference/ref-filled-green-100px-square.xht"
-css/css-transforms/perspective-origin-002.html:
-- "== css/reference/ref-filled-green-100px-square.xht"
-css/css-transforms/perspective-origin-003.html:
-- "== css/reference/ref-filled-green-100px-square.xht"
-css/css-transforms/perspective-origin-004.html:
-- "== css/reference/ref-filled-green-100px-square.xht"
-css/css-transforms/perspective-origin-005.html:
-- "== css/reference/ref-filled-green-100px-square.xht"
-css/css-transforms/perspective-origin-006.html:
-- "== css/reference/ref-filled-green-100px-square.xht"
 css/css-transforms/perspective-split-by-zero-w.html:
 - "== css/css-transforms/perspective-split-by-zero-w-ref.html"
 css/css-transforms/perspective-svg-001.html:
@@ -6949,8 +6937,6 @@ css/css-transforms/rotate_45deg.html:
 - "== css/css-transforms/rotate_45deg-ref.html"
 css/css-transforms/rotate_y_45deg.html:
 - "== css/css-transforms/rotate_y_45deg-ref.html"
-css/css-transforms/rotated-clip-under-opacity.html:
-- "== css/css-transforms/reference/green.html"
 css/css-transforms/scale-animation-with-var-001.html:
 - "== css/reference/ref-filled-green-100px-square-only.html"
 css/css-transforms/scale/svg-scale-001.html:
@@ -9810,8 +9796,6 @@ html/rendering/replaced-elements/embedded-content/cross-domain-iframe.sub.html:
 html/rendering/replaced-elements/embedded-content/tall-cross-domain-iframe-in-scrolled.sub.html:
 - "== html/rendering/replaced-elements/embedded-content/tall-cross-domain-iframe-in-scrolled.sub-ref.html
   (a frame the painter never enters)"
-html/rendering/replaced-elements/embedded-content/video-controls-stacking.html:
-- "== html/rendering/replaced-elements/embedded-content/video-controls-stacking-ref.html"
 html/rendering/replaced-elements/embedded-content/video-controls-vertical-writing-mode.html:
 - "== html/rendering/replaced-elements/embedded-content/video-controls-vertical-writing-mode-ref.html
   (both renderings blank)"
