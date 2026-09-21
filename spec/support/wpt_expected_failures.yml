@@ -7765,8 +7765,6 @@ css/cssom/getComputedStyle-pseudo.html:
 - "::file-selector-button resolves to the file input button element"
 - Item-based blockification of nonexistent pseudo-elements
 - Pseudo-elements can use the full range of CSS syntax
-- 'Resolution of width is correct for ::before and ::after pseudo-elements of display:
-  contents elements'
 - 'Unknown pseudo-element with a known identifier: backdrop'
 - 'Unknown pseudo-element with a known identifier: file-selector-button'
 - 'Unknown pseudo-element with a known identifier: grammar-error'
@@ -8280,8 +8278,6 @@ dom/nodes/moveBefore/hover-style-update.html:
 - Hover works immediately after moved
 dom/nodes/moveBefore/iframe-document-preserve.window.js:
 - window.frames ordering does not change due to moveBefore()
-dom/nodes/moveBefore/moveBefore-as-flex-item.html:
-- "== css/reference/ref-filled-green-100px-square-only.html"
 dom/nodes/moveBefore/moveBefore-from-light-to-shadow.html:
 - moveBefore-from-light-to-shadow
 dom/nodes/moveBefore/moveBefore-size-query.html:
@@ -11753,8 +11749,6 @@ shadow-dom/scroll-to-the-fragment-in-shadow-tree.html:
   an open shadow tree earlier in tree order
 shadow-dom/shadow-style-invalidation-vw-units.html:
 - "== shadow-dom/shadow-style-invalidation-vw-units-ref.html"
-shadow-dom/slot-fallback-content-008.html:
-- "== shadow-dom/slot-fallback-content-008-ref.html"
 shadow-dom/untriaged/html-elements-in-shadow-trees/inert-html-elements/test-001.html:
 - A_08_01_01_T01
 web-animations/animation-model/animation-types/accumulation-per-property-001.html:

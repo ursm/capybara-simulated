@@ -212,7 +212,7 @@ RSpec.describe 'save_screenshot' do
       'static on a centred line' => '<div style="width:200px;text-align:center">' \
                                     '<b>hi</b><span style="position:absolute">st</span></div>',
       # …and a TABLE inside a subtree that moves. Its anonymous cell holds the runs and is in nobody's child
-      # list — `anonTableCell` wraps the table's own DOM children, so a walk over `layoutChildren` reaches
+      # list — `anonTableCell` wraps the table's own DOM children, so a walk over the child list reaches
       # those children and never the cell around them, and the cell's own box and runs stayed behind. That
       # hole was FIVE movers wide (measured: each of the shapes below painted its text at the origin while
       # its box sat where the mover put it); the `position: relative` one is the odd case that worked, since

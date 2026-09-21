@@ -94,37 +94,72 @@ earned-out before as "a subsystem we don't model", then reverted):
   the same machine. So a wrong text width is a bug to diagnose, not "we don't
   have glyph metrics". What is still missing is SHAPING (kerning / ligatures /
   bidi) and the real line-breaking algorithm.
-- **`display: contents` is MODELED, with a known gap** — the clause above
-  listed it as an unmodelled *rendering* subsystem beside glyph shaping, and
-  that was retired 2026-09-20. `layout.js` has four paths for it:
-  `isBlockLevelChild` looks THROUGH one to decide what its children are,
-  `placeInlineChild` puts its inline content on the line in place,
-  `contentIntrinsicWidths` walks its children as that line's, and
-  `generatesBox` gives it no box (so it can neither float nor establish a
-  context). Ten shapes are held against headless Chrome in
-  `spec/display_contents_spec.rb` — inline content on a line, one and two
-  block children through it, a flex item, a grid item, ignored padding,
-  nested `contents`, a float through it, `max-content` across it, a table row
-  through it — with the Chrome figures in the file, because an argument that
-  lives only in a commit message is the "memory of a measurement" this list
-  exists to replace.
-  The gap is real and named: a box-less element still resolves a USED WIDTH
-  of its own, and a percentage-sized `::before` / `::after` of one resolves
-  against that instead of against the parent's content box — 40px where
-  Chrome says 50px (`css/cssom/getComputedStyle-pseudo.html`, allowlisted),
-  and likewise through `padding`, through a `margin` that is no box's edge
-  at all, and through a declared `width` that replaces the basis outright.
-  A phantom box, in other words, not a mis-subtracted edge: a bug with a
-  written-down cause, which is the "coarse-model gap to diagnose" the
-  box-layout entry above describes rather than a subsystem. The allowlist holds six
-  files / ten subtests mentioning `display: contents`; the other nine are an
-  animation inside one, a flex item's computed `min-width`, five form
-  controls' computed `display`, a wheel-event target change, and
-  `commitStyles` in a `display: none` subtree. All ten are re-tested every
+- **`display: contents` is MODELED** — the clause above listed it as an
+  unmodelled *rendering* subsystem beside glyph shaping, and that was retired
+  2026-09-20. It generates NO BOX: for layout the element is replaced by its
+  children, in its place (CSS Display 3 §3.1), and `layout.js` says that in
+  three places and only three. `layoutChildren` enumerates the children the FLOW
+  lays out, looking through every box-less one to the children that stand in for
+  it, and every box-level consumer in both engines asks it — the oracle's block
+  flow, its flex and grid item collection, its margin-collapsing run, its
+  clearance scan and its baseline candidates, and the walk's pre-filters and run
+  gather. `inlineStyleOwner` carries the one thing a list cannot: a RUN spliced
+  through such an element still draws with that element's font, collapses by its
+  `white-space` and sits on its `line-height`, and a text node has no element of
+  its own to ask. INHERITED properties only, and that is the rule rather than a
+  shortcut — what a box-less element can hand its content is exactly what
+  inherits to it, so `vertical-align` (not inherited, and applying to an inline
+  BOX) is read off the nearest element that HAS one, as Chrome does.
+  `generatesBox` gives it no box at all, so it can neither float, establish a
+  context, nor answer a geometry read. The raw flat-tree list is
+  `flatTreeChildren`, and a caller that wants THAT is the exception: the plain
+  name is the looking-through one on purpose, because picking the wrong one by
+  default is how the bug below survived as long as it did.
+  Thirty-one shapes are held against headless Chrome in
+  `spec/display_contents_spec.rb`, every one of them also asserting that the
+  native walk took the shape and compared something — inline content on a line,
+  one and two block children through it, a flex item, a grid item, ignored
+  padding, nested `contents`, a float through it, `max-content` across it, a
+  table row through it, a margin collapsing through it, an out-of-flow one that
+  IS a box again, a baseline-aligned flex item, a font-size / a wrap / a
+  `white-space` / a `line-height` through one, a `vertical-align` on one (which
+  is IGNORED) and one on an inline box around one (which is not) with the boxed
+  span as the control, a styled `<slot>`'s assigned text, a float written AFTER
+  a box spliced through one, an overflowing subtree behind one, and six
+  percentage-sized pseudos — with the Chrome figures in the
+  file, because an argument that lives only in a commit message is the "memory
+  of a measurement" this list exists to replace.
+  The gap this entry used to name is CLOSED (2026-09-22). A box-less element
+  resolved a USED WIDTH of its own, so a percentage-sized `::before` / `::after`
+  of one resolved against that instead of against the parent's content box —
+  40px where Chrome says 50 — and likewise through `padding`, through a `margin`
+  that is no box's edge at all, and through a declared `width` that replaced the
+  basis outright. A phantom box, and it was the OTHER engine's block flow that
+  kept it: once one enumeration is what lays the children out, there is no box
+  for the percentage to find. `css/cssom/getComputedStyle-pseudo.html` came off
+  the allowlist with it, and the native WALK takes the shapes it used to refuse:
+  all thirty-one of the spec's, where it declined nine of the first ten, and
+  1,512 fewer cases of the 17,280-case `pseudo` sweep (4,800 declines to 3,288 —
+  `block-level-box-unplaceable` 2,640 to 1,296, the rest being `display:
+  table-row`, which is its own backlog item).
+  The cost of getting there is the lesson worth keeping: the phantom box was
+  load-bearing for every list that had NOT been converted, and the failures it
+  had been hiding were each invisible in a different way. A baseline read
+  `child._lb.y` off a box that no longer existed and killed a corpus file
+  mid-run, so a crash arrived as an ok-count ten lower. The scrollable-overflow
+  walk found no `_lbExt`, skipped the subtree and reported a scroller
+  unscrollable — no mismatch, no decline, no crash. The clearance scan's
+  identity test stopped matching and reported a float written AFTER a box as one
+  it must clear. And the runs spliced out of the element lost its font,
+  `white-space` and `line-height` in BOTH engines at once — right before the
+  flatten and wrong after it, with parity never broken and so no sweep able to
+  see it. Parity is blind to a shared error, and a single enumeration is only
+  safe when the plain name is the one that looks through.
+  The allowlist still holds nine subtests mentioning `display: contents`: an
+  animation inside one, a flex item's computed `min-width`, five form controls'
+  computed `display`, a wheel-event target change, and `commitStyles` in a
+  `display: none` subtree. None is a layout gap. All nine are re-tested every
   run — the gate turns RED on an allowlisted subtest that starts passing.
-  What is NOT modeled is the native layout WALK, which declines nine of the
-  ten shapes; that is a backlog item of the oracle-abolition campaign, not a
-  scope ruling.
 - **IDNA, Streams, Workers, EventSource are MODELED** (uri-idna /
   web-streams-polyfill / thread / TCPSocket). A failing IDNA test is usually
   a driver over-/under-rejection bug to fix (e.g. an `xn--` A-label browsers

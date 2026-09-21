@@ -1,6 +1,6 @@
 # frozen_string_literal: true
 # Native layout — GENERATED CONTENT as a BOX, geometry shadow-parity. `::before` / `::after` are nodes the
-# flow lays out like any other (`layoutChildren` puts them first and last), but they are no part of the DOM
+# flow lays out like any other (`flatTreeChildren` puts them first and last), but they are no part of the DOM
 # and had no arena node — and the harness reads every box back by `_nid` (`boxOf`), so nine separate walk
 # gates refused any pseudo that had to BE a box: a flex item, a grid item, a float, an out-of-flow box, a
 # table row or cell, an atomic inline. `makePseudoNode` registers one now, the first time the pseudo actually

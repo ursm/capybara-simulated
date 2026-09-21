@@ -64,6 +64,9 @@ RSpec.describe 'native layout grid parity', if: ENV.fetch('CSIM_JS_ENGINE', 'v8'
     session.evaluate_script 'document.body.offsetHeight'
     r = session.evaluate_script('globalThis.__csimLayoutShadowRun()')
     expect(r).to include('ok' => true, 'mismatches' => 0), "#{body}: #{r.inspect}"
+    # …and that it compared anything at all: a record the walk DROPS is indistinguishable from one that
+    # agreed, so a mismatch count of 0 on its own says nothing about a shape neither engine laid out.
+    expect(r['compared']).to be > 0, "#{body}: nothing compared: #{r.inspect}"
     session
   end
 
@@ -772,9 +775,17 @@ RSpec.describe 'native layout grid parity', if: ENV.fetch('CSIM_JS_ENGINE', 'v8'
         '<div style="display:grid;grid-template-columns:25px"><div style="height:6px"></div></div>',
         '<div style="margin-left:-6px;width:30px;height:10px"></div>'
       ].each {|items| expect_parity(%(<div style="width:max-content"><div style="display:grid">#{items}</div></div>)) }
-      # …while a `display: contents` child is refused before this test is reached at all (the walk does not
-      # flatten one — its own arm above).
-      expect_bail('<div style="width:max-content"><div style="display:grid"><div style="display:contents"><div style="width:30px;height:10px"></div></div></div></div>')
+      # …and a `display: contents` child is no item at all: its children are, one each. The walk DECLINED
+      # this shape until 2026-09-22, because it flattened where the oracle did not; both enumerate through
+      # one now, so the measure is asked of the children that stand in for it. What the WIDTH pins is that
+      # the walk takes the shape at all (`parity_session` asserts it), not how many items there are: an
+      # implicit single column is 44 wide whether the contents element is one item or its two children are,
+      # so the COLUMN the second child lands in is the figure that separates them. Chrome puts it in the
+      # SECOND (x 30), where one item would have left it under the first at x 0, y 10.
+      expect_chrome_width('<div style="width:max-content"><div id="g" style="display:grid"><div style="display:contents"><div style="width:30px;height:10px"></div></div></div></div>', 30)
+      expect_chrome_width('<div style="width:max-content"><div id="g" style="display:grid"><div style="display:contents"><div style="width:30px;height:10px"></div><div style="width:44px;height:10px"></div></div></div></div>', 44)
+      expect_chrome_box('<div style="display:grid;grid-template-columns:30px 40px;width:400px"><div style="display:contents">' \
+                        '<div style="height:10px">a</div><div id="m" style="height:12px">b</div></div></div>', [30, 0, 40, 12])
     end
     # …and INLINE-LEVEL content is content like any other: §4 makes each inline-level child a grid item of its
     # own (blockified), so two `<span>` items are two items in one column and the column is the WIDER of them —
