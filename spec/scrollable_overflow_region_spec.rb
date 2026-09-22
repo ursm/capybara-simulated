@@ -238,6 +238,21 @@ RSpec.describe 'the scrollable overflow region' do
   end
 
   # border:10 collapse over a 100x40 border box: clientLeft/Top = the 5px outer half, so 100-5 / 40-5.
+  # …and an ANONYMOUS box overflows like any other, which is a question about the ENUMERATION and not about
+  # the region: CSS Grid §4 wraps a grid's contiguous run of bare text in an anonymous block container item,
+  # and the raw child list yields the TEXT NODE, which has no box. Skipped here, the scroller reports itself
+  # UNSCROLLABLE — no mismatch, no decline and no crash, the third of the four invisible failures that the
+  # `display: contents` phantom box taught. Measured with the raw list: `scrollWidth` 60 against Chrome's 200.
+  it 'sees an anonymous grid item that overflows the scroller' do
+    html = %(<!DOCTYPE html><html><head><meta charset="utf-8"></head><body style="margin:0">
+               <div id="s" style="overflow:auto;width:60px;height:40px">
+                 <div style="display:grid;grid-template-columns:200px">wide bare text here</div>
+               </div></body></html>)
+    session = simulated_session(->(_env) { [200, {'content-type' => 'text/html; charset=utf-8'}, [html]] })
+    session.visit '/'
+    expect(session.evaluate_script("document.getElementById('s').scrollWidth")).to eq(200)
+  end
+
   it 'runs a collapse table scroll region to its border-box far corner' do
     expect(plain_table_scroll('width:100px;border:10px solid;border-collapse:collapse',
                               '<tr><td style="width:40px;height:20px;padding:0">a</td></tr>')).to eq([95, 35])

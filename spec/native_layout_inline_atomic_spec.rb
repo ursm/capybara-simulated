@@ -4,8 +4,9 @@
 # container's own shrink-to-fit) and every INLINE REPLACED element — an `<img>` / `<svg>` / `<canvas>`, a form
 # control, a list box whose rows it stacks inside the control's box — at its baseline or a baseline SHIFT,
 # ITSELF (see the last describe). What still keeps the PUSHED box, each measured: an intrinsic-size KEYWORD
-# width on a replaced atomic (`width: fit-content` on an `<img>`); an `inline-grid` over bare text, whose
-# anonymous item neither engine gives a record; an inline-table whose row GROUPS render out of document order;
+# width on a replaced atomic (`width: fit-content` on an `<img>`); an atomic whose own intrinsic MEASURE
+# neither engine has a rule for (`white-space: break-spaces`); an inline-table whose row GROUPS render out of
+# document order;
 # and any atomic whose own subtree the walk refuses, which rolls back to the pushed box.
 # For a pushed one the oracle resolved the box (`_lb`) and its baseline (`growAtomic`) and native replays those
 # as a RUN_ATOMIC: the margin-box width is its advance, its ascent (+ descent) grow the line box. Such a box is
@@ -572,7 +573,14 @@ RSpec.describe 'native layout inline-atomic parity', if: ENV.fetch('CSIM_JS_ENGI
       # laid out with the atomic pushed rather than declined. (A FLOAT and a STRETCHED out-of-flow box never
       # needed a measure at all.) The one route with no fallback is a vertical writing mode's block child, whose
       # width IS its content's: that still declines.
-      ib = 'display:inline-grid'   # …over BARE text, an anonymous grid item neither engine gives a record
+      # …an atomic whose own MEASURE native lacks a rule for. `white-space: break-spaces` is that rule: it lays
+      # a line out as `pre-wrap` does and goes native for LAYOUT, and only its intrinsic contribution is
+      # refused (every preserved space is content that never hangs, with a break after each — see
+      # `nlWsIntrinsicMeasurable`). One property against the `display:inline-block` control below, which is
+      # the same box with the same content, so what the counters show is that property and nothing else.
+      # It replaced `display:inline-grid` over bare text on 2026-09-22, when `gridItems` made a contiguous run
+      # of text an anonymous ITEM (§4) and that cause retired.
+      ib = 'display:inline-block;white-space:break-spaces'
       expect_bail(%(<div style="width:400px"><div style="writing-mode:vertical-lr">a <span style="#{ib}">in</span> b</div></div>))
       # Each route with the atomic it cannot lay out, and the SAME shape with one it can — so the counter shows
       # the fallback was taken here and is not simply never taken.

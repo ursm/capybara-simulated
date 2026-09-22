@@ -20,6 +20,24 @@ RSpec.describe 'layout reuse across dynamic style state' do
   # `isLaidOutNode` — "is this element rendered at all", the guard every geometry read runs before
   # laying out — is memoised per element on the layout gate's key. Each case below makes the answer
   # flip through a DIFFERENT input of that key, and reads geometry first so a cold cache can't pass.
+  # …and one memo whose answer is a question about TEXT, not about structure. CSS Grid §4 makes a grid's
+  # contiguous run of bare text an anonymous ITEM — but only when the run is not all white space — so an edit
+  # that turns `'   '` into `'xx'` creates a box and an edit the other way destroys one. A `characterData`
+  # mutation is NOT structural (`markLayoutDirty` with no `structural`), so a memo keyed on `_lbStruct` would
+  # survive it: measured that way, the sibling stayed in column 0 where Chrome moves it to 19.20. Keyed on the
+  # PASS stamp it does not, because `markLayoutDirty` walks up the flat tree marking `_lbDirty`.
+  # BOTH directions: the creating edit alone would pass on a memo that simply never caches.
+  it 'creates and destroys an anonymous grid item when only the text changes' do
+    s = session_for('body{margin:0}', '<div id="g" style="width:200px;display:grid;grid-template-columns:min-content min-content;' \
+                        'font:16px monospace">   <div id="b" style="width:9px;height:4px"></div></div>')
+    x = -> { s.evaluate_script("document.getElementById('b').getBoundingClientRect().x") }
+    expect(x.call).to eq(0)                     # …all white space: §4 renders it, and makes no item
+    s.evaluate_script("document.getElementById('g').firstChild.data = 'xx'")
+    expect(x.call).to be_within(0.05).of(19.2)  # …an item now, so the sibling is in column 1 (Chrome 19.203125)
+    s.evaluate_script("document.getElementById('g').firstChild.data = '   '")
+    expect(x.call).to eq(0)
+  end
+
   it 'stops reporting a rect when an ancestor is hidden between reads' do
     s = session_for('.x { width: 40px; height: 10px }', '<div id="a"><p id="x" class="x">x</p></div>')
     got = s.evaluate_script(<<~JS)

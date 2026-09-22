@@ -84,6 +84,24 @@ RSpec.describe 'save_screenshot' do
     end
   end
 
+  # …and an ANONYMOUS box has to take a shift like any other, which only a painter can say. CSS Grid §4 wraps
+  # a grid's contiguous run of bare text in an anonymous block container item; it is in nobody's child list,
+  # so the `shiftSubtree` walk reaches the TEXT NODES inside it and never the box that holds their runs.
+  # Measured, with the arm removed: the ink lands at rows 2..13 while the item's box sits at 60 — the same
+  # failure `shiftSubtree`'s table arm records for `anonTableCell` ("painted its text at the unshifted
+  # origin"), one spec over. Geometry cannot see it: `getBoundingClientRect` on the grid answers 60 either way,
+  # and the anonymous item has no element to ask.
+  it 'shifts an anonymous grid item\'s runs with the box that moved' do
+    s = page_with('<div class="rel"><div class="g">XXXXXX</div></div>',
+                  css: '.rel{position:relative;top:60px;width:300px}.g{display:grid;color:rgb(0,0,0)}')
+    shot(s) do |_img, px, _path|
+      inked = (0...120).select {|y| (0...200).any? {|x| px.call(x, y).sum < 600 } }
+      expect(inked).not_to be_empty
+      expect(inked.min).to be >= 55, "the run painted at row #{inked.min}, above the shifted box"
+      expect(inked.max).to be < 90
+    end
+  end
+
   it 'paints the whole document with full: true' do
     s = page_with('<div class="tall"></div>', css: '.tall{height:2000px;background:rgb(0,0,255)}')
     shot(s) {|img, _px, _path| expect(img.height).to eq(240) }

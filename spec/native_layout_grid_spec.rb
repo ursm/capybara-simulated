@@ -85,9 +85,14 @@ RSpec.describe 'native layout grid parity', if: ENV.fetch('CSIM_JS_ENGINE', 'v8'
     end
   end
 
-  def expect_chrome_width(body, chrome_w)
+  # …within 0.01px, which is tight enough that a real track-sizing difference cannot hide in it. `tol` is for
+  # the one case the engines cannot meet: a figure the §12.7 `fr` arithmetic MULTIPLIES. Both engines measure
+  # text from the font file's own advances and land a hair under Chrome's rounding (54.664 against 54.671875
+  # here), and doubling the share doubles the gap — 0.0156, not 0.0078. A SHARED divergence, so no sweep sees
+  # it; widen it only where the arithmetic explains the number, never to make a figure fit.
+  def expect_chrome_width(body, chrome_w, tol = 0.01)
     w = parity_session(body).evaluate_script("document.getElementById('g').getBoundingClientRect().width")
-    expect(w).to be_within(0.01).of(chrome_w), "#{body}: #{w}, Chrome #{chrome_w}"
+    expect(w).to be_within(tol).of(chrome_w), "#{body}: #{w}, Chrome #{chrome_w}"
   end
 
   # …and a child that generates NO BOX is no grid ITEM either: a `<link>` or `<meta>` in the body is
@@ -177,18 +182,20 @@ RSpec.describe 'native layout grid parity', if: ENV.fetch('CSIM_JS_ENGINE', 'v8'
     expect_parity('<div style="width:400px"><div style="float:right;display:grid;grid-template-columns:auto auto"><div style="height:12px">aa</div><div style="height:12px">bb</div></div>text beside it <span style="display:inline-block;width:3px;height:3px"></span></div>')
     expect_parity('<div style="width:400px"><div style="float:left;display:inline-grid;grid-template-columns:30px 30px;max-width:40px"><div style="height:9px">a</div><div style="height:9px">b</div></div><div style="clear:both;height:9px"></div></div>')
   end
-  # …and where the line actually falls, which is NOT at the float. A grid holding BARE TEXT declines wherever
-  # its width is its own: an anonymous grid item is a column-sizing input CSS Grid §4 defines and neither
-  # engine's grid algorithm can see (no record, no run stream), so `nlIntrinsicMeasurable` refuses the
-  # measure. Both halves are here because the declining half ALONE pins nothing — it declined before the float
-  # gate went too, for the gate's own reason. It is the passing half that says the boundary moved.
-  # (That pair is the whole of what the `floatcontainer` sweep still declines: 480 of 2880, exactly the grid
-  # containers with a text payload and no declared width.)
-  it 'draws the line at an anonymous grid item, not at the float' do
-    anon = '<div style="width:400px"><div style="float:left;display:grid;grid-template-columns:auto auto">bare text<div style="height:9px">b</div></div><div style="height:9px"></div></div>'
-    item = '<div style="width:400px"><div style="float:left;display:grid;grid-template-columns:auto auto"><span>bare text</span><div style="height:9px">b</div></div><div style="height:9px"></div></div>'
-    expect_bail(anon)
-    expect_parity(item)
+  # …and a float whose grid holds BARE TEXT is no different, since 2026-09-22: the run is an anonymous ITEM
+  # (§4) with a box of its own, so the grid algorithm sizes the column from it exactly as from a wrapped one.
+  # It used to be the largest single cause behind `shrink-to-fit-child-unmeasurable` — 480 of the
+  # `floatcontainer` sweep's 2,880 cases were this shape alone, and 1,004 across the campaign's 65 sweeps.
+  # BOTH spellings, and the same number for each: that the two agree is the whole claim, and it is a Chrome
+  # number besides (63.53125, taken at this file's own default font), so a future change that quietly sends one
+  # of them back to the oracle's pen cannot pass by the two still matching each other.
+  it 'sizes a float\'s grid from its anonymous item, exactly as from a wrapped one' do
+    anon = '<div style="width:400px"><div id="g" style="float:left;display:grid;grid-template-columns:auto auto">bare text<div style="height:9px">b</div></div><div style="height:9px"></div></div>'
+    item = anon.sub('>bare text<', '><span>bare text</span><')
+    [anon, item].each do |body|
+      expect_parity(body)
+      expect_chrome_width(body, 63.53125)
+    end
   end
 
   # An `inline-grid` that is a flex / grid ITEM is BLOCKIFIED to `grid` (§4), so it lays out as a block-level
@@ -208,10 +215,11 @@ RSpec.describe 'native layout grid parity', if: ENV.fetch('CSIM_JS_ENGINE', 'v8'
     r = run_shadow('<div style="width:300px">text <span style="display:inline-grid;grid-template-columns:30px 30px"><div>x</div><div>y</div></span> more text wrapping onward past the edge</div>')
     expect(r).to include('ok' => true, 'mismatches' => 0), r.inspect
     expect(r['nativeAtomics']).to be >= 1, "the inline-grid was pushed: #{r.inspect}"
-    # …while one holding an ANONYMOUS item — a contiguous run of text (CSS Grid §4) — is still pushed: its
-    # shrink-to-fit is an intrinsic measure, and the grid algorithm has no item to size a column from there.
+    # …one holding an ANONYMOUS item included, since 2026-09-22: its shrink-to-fit is an intrinsic measure, and
+    # the run is an item the grid algorithm sizes a column from like any other. (It was PUSHED until then.)
     r = run_shadow('<div style="width:300px">text <span style="display:inline-grid;grid-template-columns:30px 30px">x<div>y</div></span> more text wrapping onward past the edge</div>')
-    expect(r).to include('ok' => true, 'mismatches' => 0, 'nativeAtomics' => 0), r.inspect
+    expect(r).to include('ok' => true, 'mismatches' => 0), r.inspect
+    expect(r['nativeAtomics']).to be >= 1, "the inline-grid was pushed: #{r.inspect}"
   end
   # …and an inline-grid FLEX ITEM is a grid: a flex item is blockified, so nothing here is inline. It used to
   # decline for the `position: sticky` on it, which is in flow and needs nothing of its own.
@@ -484,7 +492,7 @@ RSpec.describe 'native layout grid parity', if: ENV.fetch('CSIM_JS_ENGINE', 'v8'
   # Every shape the compute path once handed to the oracle-box replay is computed now: a grid that is itself
   # a flex / grid / out-of-flow box (its parent pushes its box, the tracks compute within it), `grid-auto-rows`
   # (rows advance by the declared height; an auto-height item IS that height, clamped by its own min/max),
-  # bare text (an anonymous item that only floors the auto height), an rtl grid (the oracle lays columns out
+  # bare text (an anonymous ITEM with a box, since 2026-09-22), an rtl grid (the oracle lays columns out
   # LTR regardless), an empty / invalid template (one full-width column), and an out-of-flow item.
   describe 'computed grids that used to replay' do
     it 'computes a grid that is a flex item, stretched or not' do
@@ -565,7 +573,11 @@ RSpec.describe 'native layout grid parity', if: ENV.fetch('CSIM_JS_ENGINE', 'v8'
       expect_parity('<div style="display:grid;grid-template-columns:100px;width:400px"><select><option>o</option></select></div>')
       expect_bail('<div style="display:grid;grid-template-columns:100px;width:400px"><select multiple><option>a</option><option>b</option></select></div>')
     end
-    it 'floors an auto height at bare text (an anonymous item the oracle never places)' do
+    # …and the auto height comes from the run's own ROW now, not from a line-height floor over an unplaced
+    # run: `gridItems` gives it the box CSS Grid §4 asks for. The two shapes are unchanged because a
+    # content-sized row IS one line-height tall — see `lets a declared row height stand` for the case where
+    # the floor and the row part company, which is the one the floor was getting wrong.
+    it 'takes an auto height from the row a bare run is placed in' do
       expect_parity('<div style="display:grid;grid-template-columns:100px 1fr;width:400px">bare text<div style="height:10px">a</div><div style="height:20px">b</div></div>')
       expect_parity('<div style="display:grid;grid-template-columns:100px 1fr;width:400px">bare<div style="height:10px">a</div></div>')
     end
@@ -799,14 +811,53 @@ RSpec.describe 'native layout grid parity', if: ENV.fetch('CSIM_JS_ENGINE', 'v8'
         expect_chrome_width(%(<div style="width:max-content"><div id="g" style="display:grid">#{items}</div></div>), chrome_w)
       end
     end
-    # …while a contiguous run of TEXT is where the grid algorithm runs out: it is an ANONYMOUS grid item (§4)
-    # that the walk emits neither a record nor a run stream for, so neither engine can size a column from it.
-    # `contentIntrinsicWidths` walks its pen for such a grid instead — which at least measures the text — and
-    # native, having no run stream at all, declines.
-    it 'declines a grid whose own text is an anonymous item' do
-      expect_bail('<div style="width:max-content"><div style="display:grid">aa bb</div></div>')
-      expect_bail('<div style="width:max-content"><div style="display:grid">aa bb<div>cc</div></div></div>')
+    # …and a contiguous run of TEXT is an item like the rest of them (§4), which is what `gridItems` wraps it
+    # in. It used to be where the algorithm ran out: `contentIntrinsicWidths` fell to its own PEN for such a
+    # grid and took the pen's answer with it — 86.4 for `1fr 1fr` where Chrome says 172.81, and 76.8 for a
+    # `min-content` column where Chrome says 19.20 — while native, having no item either, declined.
+    # The WRAPPED spelling is the control on every line: `aa bb` and `<span>aa bb</span>` must give the one
+    # number, and it must be Chrome's.
+    it 'sizes a column from an anonymous item, as from a wrapped one' do
+      ['aa bb', 'aa bb<div>cc</div>'].each do |items|
+        body = %(<div style="width:max-content"><div id="g" style="display:grid">#{items}</div></div>)
+        expect_parity(body)
+        expect_chrome_width(body, 34.203125)
+        # …and the WRAPPED spelling of the same content, which must give that one number too.
+        expect_chrome_width(body.sub('>aa bb', '><span>aa bb</span>'), 34.203125)
+      end
       expect_parity('<div style="width:max-content"><div style="display:grid"><div>aa bb</div><div>cc</div></div></div>')
+    end
+    # …and the STUB the real item replaced. `anonymousItemHeight` floored a container's auto height at its
+    # line-height whenever it held bare text — a stand-in for the box §4 asks for, and now a no-op for a grid,
+    # since the item is a placed row whose height is already in the total. It was not merely redundant: with a
+    # DECLARED row it overrode one. Measured before removing it, `grid-auto-rows:5px` holding bare text came
+    # out 22 tall where Chrome says 5 — and the same grid with the text in a `<span>` gave 5, which is what
+    # says the item was never the problem. BOTH engines carried the floor (the record hands it to
+    # `anon_cross`), so the harness saw nothing; `expect_chrome_height` is what says so.
+    # FLEX still needs the stub — its bare text is no item yet — so this cannot be checked by its absence.
+    it 'lets a declared row height stand over a grid\'s anonymous item' do
+      ['text', '<span>text</span>'].each do |items|
+        body = %(<div id="g" style="display:inline-grid;grid-auto-rows:5px;font:16px monospace">#{items}</div>)
+        expect_parity(body)
+        h = parity_session(body).evaluate_script("document.getElementById('g').getBoundingClientRect().height")
+        expect(h).to eq(5), "#{body}: #{h}, Chrome 5"
+      end
+    end
+    # …and the two halves the pen used to get wrong, each against Chrome: a `1fr 1fr` grid whose second track
+    # is the run (§12.7 gives both tracks the larger share) and a `min-content` column, where the item's
+    # min-content is its longest WORD and the pen answered with the whole line.
+    it 'gives an anonymous item the fr share and the min-content of a word' do
+      # §12.7: with no space to fill, `1fr 1fr` gives BOTH tracks the larger share — the run's 54.66, not the
+      # 30px box's — so the grid is 109.34 and not the 86.4 the pen used to answer.
+      fr = '<div id="g" style="float:left;display:grid;grid-template-columns:1fr 1fr">' \
+           '<div style="width:30px;height:14px"></div>plus text</div>'
+      expect_parity(fr)
+      expect_chrome_width(fr, 109.34375, 0.02)   # …the doubled advance rounding; see `expect_chrome_width`
+      # …and a `min-content` column is the item's longest WORD (16, three lines tall), where the pen answered
+      # with the whole line.
+      mc = '<div id="g" style="display:inline-grid;grid-template-columns:min-content">aa bb cc</div>'
+      expect_parity(mc)
+      expect_chrome_width(mc, 16)
     end
     # …and a run of pure SPACES is not an anonymous item at all: §4 leaves a whitespace-only run UNRENDERED
     # whatever the `white-space` mode says, so a grid of ten spaces is 0 wide under `pre` as under `normal`.

@@ -5,11 +5,12 @@
 # encoding tables, or a spec edge no real library/app depends on. NOT "layout" wholesale:
 # box layout IS modeled (CLAUDE.md lists it as already in scope), so a failing geometry
 # or resolved-value subtest is a coarse-model gap to diagnose, not an automatic exclusion.
-# …and this header is the rule's own best example, twice: it kept naming `flex / grid track sizing` after
-# that was retired on 2026-08-31, and `display: contents` after CLAUDE.md moved it to "already in scope" on
-# 2026-09-20 (the oracle models it in four places and matches Chrome on ten shapes — see
-# `spec/display_contents_spec.rb`). No allowlist ENTRY cited either, so nothing was orphaned; only the
-# header lied about why the list exists.
+# …and this header is the rule's own best example, THREE times: it kept naming `flex / grid track sizing`
+# after that was retired on 2026-08-31, `display: contents` after CLAUDE.md moved it to "already in scope"
+# on 2026-09-20 (the oracle models it in ONE enumeration and matches Chrome on thirty-one shapes — see
+# `spec/display_contents_spec.rb`), and then it said both again: the corrections were made in the YAML by
+# hand and this TEMPLATE was not, so the next regen reverted them silently. No allowlist ENTRY cited any of
+# the three, so nothing was orphaned; only the header lied about why the list exists. Fix it HERE.
 # A REASON GOES STALE when the subsystem it names gets built, and the entry then has to move:
 # 1023 inset / used-value subtests came back on the first such sweep, and 1189 more on the
 # 2026-08-31 audit (innerText's rendered-text collection, elementFromPoint / caret-from-point,
@@ -30,6 +31,7 @@
 # regen_wpt_expected_failures.rb PRESERVES these classifications + reasons across
 # runs; to reclassify, move a line between this file and wpt_expected_failures.yml.
 #
+---
 FileAPI/file/send-file-form-iso-2022-jp.html:
 - name: "Upload file-for-upload-in-form-ABC~‾¥≈¤･・•∙·☼★星\U0001F31F星★☼·∙•・･¤≈¥‾~XYZ.txt
     (Unicode) in ISO-2022-JP form"
@@ -40348,6 +40350,22 @@ html/rendering/replaced-elements/the-textarea-element/textarea-padding-istart-mo
     specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
     path/suffix. CLAUDE.md rule 1.
 html/rendering/widgets/baseline-alignment-and-overflow.tentative.html:
+- name: '<input type="button" value="x" style="overflow: hidden; appearance: auto;">'
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: '<input type="button" value="x" style="overflow: hidden; appearance: none;">'
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: '<input type="button" value="x" style="overflow: scroll; appearance: auto;">'
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: '<input type="button" value="x" style="overflow: scroll; appearance: none;">'
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
 - name: '<input type="button" value="x" style="overflow: visible; appearance: auto;">'
   reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
     specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
@@ -40378,6 +40396,26 @@ html/rendering/widgets/baseline-alignment-and-overflow.tentative.html:
   reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
     specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
     path/suffix. CLAUDE.md rule 1.
+- name: '<input type="date" value="2020-01-01" style="overflow: hidden; appearance:
+    auto;">'
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: '<input type="date" value="2020-01-01" style="overflow: hidden; appearance:
+    none;">'
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: '<input type="date" value="2020-01-01" style="overflow: scroll; appearance:
+    auto;">'
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: '<input type="date" value="2020-01-01" style="overflow: scroll; appearance:
+    none;">'
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
 - name: '<input type="date" value="2020-01-01" style="overflow: visible; appearance:
     auto;">'
   reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
@@ -40388,6 +40426,26 @@ html/rendering/widgets/baseline-alignment-and-overflow.tentative.html:
   reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
     specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
     path/suffix. CLAUDE.md rule 1.
+- name: '<input type="datetime-local" value="2020-01-01T00:00" style="overflow: hidden;
+    appearance: auto;">'
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: '<input type="datetime-local" value="2020-01-01T00:00" style="overflow: hidden;
+    appearance: none;">'
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: '<input type="datetime-local" value="2020-01-01T00:00" style="overflow: scroll;
+    appearance: auto;">'
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: '<input type="datetime-local" value="2020-01-01T00:00" style="overflow: scroll;
+    appearance: none;">'
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
 - name: '<input type="datetime-local" value="2020-01-01T00:00" style="overflow: visible;
     appearance: auto;">'
   reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
@@ -40395,6 +40453,22 @@ html/rendering/widgets/baseline-alignment-and-overflow.tentative.html:
     path/suffix. CLAUDE.md rule 1.
 - name: '<input type="datetime-local" value="2020-01-01T00:00" style="overflow: visible;
     appearance: none;">'
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: '<input type="email" value="x" style="overflow: hidden; appearance: auto;">'
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: '<input type="email" value="x" style="overflow: hidden; appearance: none;">'
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: '<input type="email" value="x" style="overflow: scroll; appearance: auto;">'
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: '<input type="email" value="x" style="overflow: scroll; appearance: none;">'
   reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
     specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
     path/suffix. CLAUDE.md rule 1.
@@ -40470,6 +40544,26 @@ html/rendering/widgets/baseline-alignment-and-overflow.tentative.html:
   reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
     specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
     path/suffix. CLAUDE.md rule 1.
+- name: '<input type="month" value="2020-01" style="overflow: hidden; appearance:
+    auto;">'
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: '<input type="month" value="2020-01" style="overflow: hidden; appearance:
+    none;">'
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: '<input type="month" value="2020-01" style="overflow: scroll; appearance:
+    auto;">'
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: '<input type="month" value="2020-01" style="overflow: scroll; appearance:
+    none;">'
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
 - name: '<input type="month" value="2020-01" style="overflow: visible; appearance:
     auto;">'
   reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
@@ -40480,11 +40574,43 @@ html/rendering/widgets/baseline-alignment-and-overflow.tentative.html:
   reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
     specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
     path/suffix. CLAUDE.md rule 1.
+- name: '<input type="number" value="0" style="overflow: hidden; appearance: auto;">'
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: '<input type="number" value="0" style="overflow: hidden; appearance: none;">'
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: '<input type="number" value="0" style="overflow: scroll; appearance: auto;">'
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: '<input type="number" value="0" style="overflow: scroll; appearance: none;">'
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
 - name: '<input type="number" value="0" style="overflow: visible; appearance: auto;">'
   reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
     specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
     path/suffix. CLAUDE.md rule 1.
 - name: '<input type="number" value="0" style="overflow: visible; appearance: none;">'
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: '<input type="password" value="x" style="overflow: hidden; appearance: auto;">'
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: '<input type="password" value="x" style="overflow: hidden; appearance: none;">'
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: '<input type="password" value="x" style="overflow: scroll; appearance: auto;">'
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: '<input type="password" value="x" style="overflow: scroll; appearance: none;">'
   reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
     specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
     path/suffix. CLAUDE.md rule 1.
@@ -40516,11 +40642,43 @@ html/rendering/widgets/baseline-alignment-and-overflow.tentative.html:
   reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
     specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
     path/suffix. CLAUDE.md rule 1.
+- name: '<input type="reset" value="x" style="overflow: hidden; appearance: auto;">'
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: '<input type="reset" value="x" style="overflow: hidden; appearance: none;">'
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: '<input type="reset" value="x" style="overflow: scroll; appearance: auto;">'
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: '<input type="reset" value="x" style="overflow: scroll; appearance: none;">'
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
 - name: '<input type="reset" value="x" style="overflow: visible; appearance: auto;">'
   reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
     specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
     path/suffix. CLAUDE.md rule 1.
 - name: '<input type="reset" value="x" style="overflow: visible; appearance: none;">'
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: '<input type="search" value="x" style="overflow: hidden; appearance: auto;">'
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: '<input type="search" value="x" style="overflow: hidden; appearance: none;">'
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: '<input type="search" value="x" style="overflow: scroll; appearance: auto;">'
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: '<input type="search" value="x" style="overflow: scroll; appearance: none;">'
   reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
     specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
     path/suffix. CLAUDE.md rule 1.
@@ -40532,11 +40690,43 @@ html/rendering/widgets/baseline-alignment-and-overflow.tentative.html:
   reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
     specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
     path/suffix. CLAUDE.md rule 1.
+- name: '<input type="submit" value="x" style="overflow: hidden; appearance: auto;">'
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: '<input type="submit" value="x" style="overflow: hidden; appearance: none;">'
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: '<input type="submit" value="x" style="overflow: scroll; appearance: auto;">'
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: '<input type="submit" value="x" style="overflow: scroll; appearance: none;">'
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
 - name: '<input type="submit" value="x" style="overflow: visible; appearance: auto;">'
   reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
     specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
     path/suffix. CLAUDE.md rule 1.
 - name: '<input type="submit" value="x" style="overflow: visible; appearance: none;">'
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: '<input type="tel" value="x" style="overflow: hidden; appearance: auto;">'
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: '<input type="tel" value="x" style="overflow: hidden; appearance: none;">'
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: '<input type="tel" value="x" style="overflow: scroll; appearance: auto;">'
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: '<input type="tel" value="x" style="overflow: scroll; appearance: none;">'
   reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
     specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
     path/suffix. CLAUDE.md rule 1.
@@ -40548,11 +40738,43 @@ html/rendering/widgets/baseline-alignment-and-overflow.tentative.html:
   reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
     specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
     path/suffix. CLAUDE.md rule 1.
+- name: '<input type="text" value="x" style="overflow: hidden; appearance: auto;">'
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: '<input type="text" value="x" style="overflow: hidden; appearance: none;">'
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: '<input type="text" value="x" style="overflow: scroll; appearance: auto;">'
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: '<input type="text" value="x" style="overflow: scroll; appearance: none;">'
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
 - name: '<input type="text" value="x" style="overflow: visible; appearance: auto;">'
   reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
     specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
     path/suffix. CLAUDE.md rule 1.
 - name: '<input type="text" value="x" style="overflow: visible; appearance: none;">'
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: '<input type="time" value="00:00" style="overflow: hidden; appearance: auto;">'
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: '<input type="time" value="00:00" style="overflow: hidden; appearance: none;">'
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: '<input type="time" value="00:00" style="overflow: scroll; appearance: auto;">'
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: '<input type="time" value="00:00" style="overflow: scroll; appearance: none;">'
   reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
     specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
     path/suffix. CLAUDE.md rule 1.
@@ -40564,11 +40786,47 @@ html/rendering/widgets/baseline-alignment-and-overflow.tentative.html:
   reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
     specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
     path/suffix. CLAUDE.md rule 1.
+- name: '<input type="url" value="data:,x" style="overflow: hidden; appearance: auto;">'
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: '<input type="url" value="data:,x" style="overflow: hidden; appearance: none;">'
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: '<input type="url" value="data:,x" style="overflow: scroll; appearance: auto;">'
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: '<input type="url" value="data:,x" style="overflow: scroll; appearance: none;">'
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
 - name: '<input type="url" value="data:,x" style="overflow: visible; appearance: auto;">'
   reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
     specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
     path/suffix. CLAUDE.md rule 1.
 - name: '<input type="url" value="data:,x" style="overflow: visible; appearance: none;">'
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: '<input type="week" value="2020-W01" style="overflow: hidden; appearance:
+    auto;">'
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: '<input type="week" value="2020-W01" style="overflow: hidden; appearance:
+    none;">'
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: '<input type="week" value="2020-W01" style="overflow: scroll; appearance:
+    auto;">'
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: '<input type="week" value="2020-W01" style="overflow: scroll; appearance:
+    none;">'
   reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
     specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
     path/suffix. CLAUDE.md rule 1.

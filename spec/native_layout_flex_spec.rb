@@ -981,14 +981,22 @@ RSpec.describe 'native layout flex parity', if: ENV.fetch('CSIM_JS_ENGINE', 'v8'
       expect_native_flex(%(<div style="#{base}"><div style="display:flex;flex-direction:column-reverse"><div style="font-size:24px">col a</div><div>col b</div></div><div style="font-size:32px">BIG</div></div>))
       expect_native_flex(%(<div style="#{base};direction:rtl"><div><div style="font-size:24px">rtl a</div></div><div style="font-size:32px">BIG</div></div>))
     end
-    # A grid ITEM is measurable now — both engines answer for it with the grid algorithm — so a grid baseline
-    # item takes the NATIVE path. One holding a contiguous run of TEXT still pushes: that is an ANONYMOUS grid
-    # item (CSS Grid §4) neither engine gives a record, so neither can size a column from it.
+    # A grid ITEM is measurable — both engines answer for it with the grid algorithm — so a grid baseline item
+    # takes the NATIVE path, one holding a contiguous run of TEXT included: `gridItems` wraps the run in the
+    # anonymous ITEM box CSS Grid §4 asks for, and the run's own BASELINE is what the line then hangs from
+    # (`baselineCandidates` reads that list for a grid, not the raw children — measured, an `inline-grid`
+    # around bare text put the marker beside it at y 18 where Chrome says 13). It pushed until 2026-09-22.
     it 'keeps parity for a nested grid baseline item' do
-      r = run_shadow(%(<div style="#{base}"><div style="display:grid;grid-template-columns:1fr 1fr"><div>g1</div><div style="font-size:24px">g2</div></div><div style="font-size:32px">BIG</div></div>))
-      expect(r).to include('ok' => true, 'mismatches' => 0, 'nativeFlexRows' => 1)
-      r = run_shadow(%(<div style="#{base}"><div style="display:grid;grid-template-columns:1fr 1fr">g1<div style="font-size:24px">g2</div></div><div style="font-size:32px">BIG</div></div>))
-      expect(r).to include('ok' => true, 'mismatches' => 0, 'nativeFlexRows' => 0)
+      [
+        '<div>g1</div><div style="font-size:24px">g2</div>',
+        'g1<div style="font-size:24px">g2</div>'
+      ].each do |items|
+        r = run_shadow(%(<div style="#{base}"><div style="display:grid;grid-template-columns:1fr 1fr">#{items}</div><div style="font-size:32px">BIG</div></div>))
+        expect(r).to include('ok' => true, 'mismatches' => 0, 'nativeFlexRows' => 1), "#{items}: #{r.inspect}"
+      end
+      # …and an item whose own measure native lacks a rule for still pushes, so the counter is not always 1.
+      r = run_shadow(%(<div style="#{base}"><div style="display:grid;grid-template-columns:1fr min-content"><div>g1</div><div style="white-space:break-spaces">g   2</div></div><div style="font-size:32px">BIG</div></div>))
+      expect(r).to include('ok' => true, 'mismatches' => 0, 'nativeFlexRows' => 0), r.inspect
     end
     # Review findings, oracle side (native and Chrome agreed): a block holding both inline content and block
     # children reads whichever comes first / last DOWN THE FLOW; a `position: relative` child's offset moves the

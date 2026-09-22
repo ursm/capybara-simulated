@@ -228,6 +228,10 @@ pub(crate) struct Input {
     // A flex container's anonymous-item cross floor: the line-height of any bare (non-whitespace) text directly
     // inside it (0 when there is none). The oracle does not lay that text out as a real flex item, it only
     // floors the container's AUTO cross size at this line-height (`anonymousItemHeight`); native does the same.
+    // FLEX ONLY since 2026-09-22 — a GRID sends 0. Its bare run is a real anonymous ITEM in a row now (CSS
+    // Grid §4), so the row carries the height and the floor could only override a declared `grid-auto-rows`,
+    // which it did: 22 against Chrome's 5, in both engines, where the same grid with the text in a `<span>`
+    // gave 5. When flex gets its item, this field goes with it.
     pub(crate) anon_cross: f64,
     // A text block's OWN `white-space` mode: 0 normal, 1 nowrap, 2 pre, 3 pre-wrap, 4 pre-line,
     // 5 break-spaces. The three orthogonal behaviours it names — COLLAPSE whitespace (0/1/4) vs PRESERVE it
@@ -5852,8 +5856,11 @@ fn text_intrinsic(runs: &[Run], run_texts: &[Option<Vec<u16>>], ws_mode: u8, ind
 // resolved box); rows are as tall as their content (the tallest item's border box — a top margin moves the item
 // but, matching the coarse oracle, neither grows the row nor stretches a shorter item) or, under
 // `grid-auto-rows`, the declared height whatever the content (the container still reaches under an overflowing
-// item). Bare text directly in the grid is an anonymous item the oracle never places — it only floors the auto
-// height at its line-height (`anon_cross`). An out-of-flow child joins no row: its subtree lays out at its
+// item). Bare text directly in the grid is an anonymous ITEM with a box of its own (CSS Grid §4, `gridItems`
+// in `layout.js`), placed in a row like any other item and walked here as an ordinary block record with no
+// element behind it — so `anon_cross` arrives as 0 for a grid and the floor it carries is FLEX's alone. It
+// floored a grid's auto height until 2026-09-22, which overrode a declared `grid-auto-rows` (22 against
+// Chrome's 5) in both engines at once. An out-of-flow child joins no row: its subtree lays out at its
 // pushed box and `place` positions it by its displacement. The buffer at `grids[grid_start..]` is
 // `[col_count, col_gap px, col_gap fraction, row_gap px, row_gap fraction, decl_row_h (NaN = content rows),
 // template (GRID_TRACK_STRIDE per column), (col_start | -1, span) per in-flow item]`.

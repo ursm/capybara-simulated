@@ -318,11 +318,17 @@ H
 out_hdr = <<~H
   # WPT OUT-OF-SCOPE failures — subtests that fail because they need a subsystem we
   # deliberately do NOT model (per CLAUDE.md rule 1): a RENDERING engine (glyph shaping
-  # — kerning / ligatures / bidi — the line-breaking algorithm, flex / grid track sizing,
-  # `display: contents`), a real async runtime, legacy-multibyte / Unicode-version-tied
+  # — kerning / ligatures / bidi — and the line-breaking algorithm), a real async runtime,
+  # legacy-multibyte / Unicode-version-tied
   # encoding tables, or a spec edge no real library/app depends on. NOT "layout" wholesale:
   # box layout IS modeled (CLAUDE.md lists it as already in scope), so a failing geometry
   # or resolved-value subtest is a coarse-model gap to diagnose, not an automatic exclusion.
+  # …and this header is the rule's own best example, THREE times: it kept naming `flex / grid track sizing`
+  # after that was retired on 2026-08-31, `display: contents` after CLAUDE.md moved it to "already in scope"
+  # on 2026-09-20 (the oracle models it in ONE enumeration and matches Chrome on thirty-one shapes — see
+  # `spec/display_contents_spec.rb`), and then it said both again: the corrections were made in the YAML by
+  # hand and this TEMPLATE was not, so the next regen reverted them silently. No allowlist ENTRY cited any of
+  # the three, so nothing was orphaned; only the header lied about why the list exists. Fix it HERE.
   # A REASON GOES STALE when the subsystem it names gets built, and the entry then has to move:
   # 1023 inset / used-value subtests came back on the first such sweep, and 1189 more on the
   # 2026-08-31 audit (innerText's rendered-text collection, elementFromPoint / caret-from-point,
