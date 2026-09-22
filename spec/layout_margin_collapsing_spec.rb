@@ -9,7 +9,7 @@ require_relative 'support/layout_measure'
 # page's block geometry depends on: a `<div><p>text</p></div>` is as tall as the paragraph, and the
 # paragraph's margin belongs to the div.
 #
-# Every figure is Chrome 151-measured on this machine.
+# Every figure is Chrome-measured on this machine (151 for the original block, 153 for anything added since).
 RSpec.describe 'margin collapsing' do
   include LayoutMeasure
 
@@ -294,4 +294,51 @@ RSpec.describe 'margin collapsing' do
     expect(y).to eq([16, 50, 50])
   end
 
+  # The BASIS a percentage margin resolves against is the containing block's CONTENT WIDTH — and the margin
+  # run is needed before anything is laid out, so `marginBasis` has to derive that width rather than read it.
+  # Until 2026-09-22 it PREDICTED: the declared width, else `cbW − the box's own edges`, on the rule that a
+  # block fills its containing block. Three kinds of box do not, and each was wrong by the whole difference —
+  # native resolved the same percentage against the width the box actually got, so each was a parity break
+  # too (74 shapes of the `flexpctwidth` sweep, and the reason the flex pre-filter had to refuse a family of
+  # items outright). It derives the width the way `layoutBlock` derives it now.
+  # Chrome 153-measured, each in a 300px block, the inner box holding `margin: 10% 0`:
+  {
+    ''                   => [300, 30],   # …a plain block does fill, which is why the prediction survived
+    'max-width:100px'    => [100, 10],
+    'min-width:110%'     => [330, 33],
+    'width:fit-content'  => [80, 8],
+    'width:min-content'  => [80, 8]
+  }.each do |mid, (width, margin)|
+    it "resolves a percentage margin against a box sized by #{mid.empty? ? 'its containing block' : mid}" do
+      body = %(<div id="a" style="#{mid}"><div id="b" style="margin:10% 0">) +
+             '<i style="display:inline-block;width:80px;height:10px"></i></div></div>'
+      # ONE session: `measure` hands back `[x, y, w, h]`, and both halves of this example are in it — the
+      # width the box gets, and the margin that width is the basis for.
+      boxes, = measure(%(<div id="cb" style="width:300px">#{body}</div>), ['#a', '#b'])
+      (a, b) = boxes.map {|x| [x[1].round(2), x[2].round(2)] }
+      expect(a.last).to eq(width)
+      # …the margin collapses out of the block, so it is where the box ENDS UP that carries it.
+      expect([a.first, b.first]).to eq([margin, margin])
+    end
+  end
+
+  # KNOWN DIVERGENCE, both engines: in a VERTICAL writing mode a percentage edge resolves against the
+  # containing block's INLINE size — its HEIGHT there — and both engines resolve it against a width.
+  # It is ONE question, about which axis, and nothing else: Chrome 153 lays the mid box out at 80x200 and so
+  # does this engine, so the boxes agree and only the basis differs (Chrome 20, ten percent of the 200;
+  # ours 8, ten percent of the 80). Worth saying because the obvious reading — "vertical text is not
+  # modelled, so of course it differs" — would make this look like it has to wait for a whole subsystem,
+  # and it does not.
+  # Recorded rather than fixed while the port runs: it is SHARED, so the shadow harness sees nothing, and
+  # fixing it is the same rule in both engines.
+  it 'resolves a percentage margin against a WIDTH in a vertical writing mode, where Chrome uses the height' do
+    body = '<div id="a" style="writing-mode:vertical-rl;height:200px"><div id="b" style="margin:10% 0">' \
+           '<i style="display:inline-block;width:80px;height:10px"></i></div></div>'
+    boxes, = measure(%(<div id="cb" style="width:300px">#{body}</div>), ['#a', '#b'])
+    (a_w, a_h) = boxes.first.values_at(2, 3).map {|v| v.round(2) }
+    # …the BOX is Chrome's own, which is the half that says this is one question and not a subsystem: an
+    # engine that laid vertical text out differently would differ here first.
+    expect([a_w, a_h]).to eq([80, 200])
+    expect(boxes.last[1].round(2)).to eq(8)   # …10% of its WIDTH. Chrome 153: 20, ten percent of its HEIGHT.
+  end
 end
