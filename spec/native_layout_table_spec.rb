@@ -21,14 +21,18 @@
 # its columns to fill what is left inside the border, like an explicit table width) — stacked above (the grid
 # offsets down past it) or below the grid, its own block / text subtree laid out normally.
 # colspan/rowspan, ragged grids, border-collapse, thead/tbody/tfoot, table-layout:fixed, colgroup/<col> widths,
-# a caption, a position:relative cell (offset ignored), an imposed table height TALLER than the grid (declared /
-# attribute / min, shared out over the rows so the tracks fill the box), and ANONYMOUS ROWS (a table-cell with
-# no table-row parent) ARE supported. Still DECLINES to JS — a caption with a MARGIN or more than one caption, an
+# a caption — its MARGINS included since 2026-09-23: the vertical pair is height the rows do not get, the
+# LEADING horizontal one insets it from the wrapper's inline-start edge (the right edge in rtl), an `auto` pair
+# centres it, and the basis-less pair floors the table's width beside the caption's min-content —
+# a position:relative cell (offset ignored), an imposed table height TALLER than the grid (declared /
+# attribute / min, shared out over the rows so the tracks fill the box), ANONYMOUS ROWS (a table-cell with
+# no table-row parent), an OUT-OF-FLOW child of the table / a row group / a row (§9.7 takes it out of the
+# table's structure: the oracle places every one at the grid's top-left corner, so the walk emits them all
+# under the TABLE record) and an EMPTY table (no rows and no columns — the clearfix pseudo: its edges, its
+# declaration and its caption are the whole box) ARE supported. Still DECLINES to JS — more than one caption,
+# a HALF-empty table (columns with no rows), an
 # imposed height the tracks DON'T fill (a min-height's empty space, a too-small height /
 # max-height below the grid) or one alongside a caption / collapsed border,
-# an rtl table with a MARGIN-offset caption (the caption's auto-margin / lead inset isn't reflected
-# yet — a full-width OR narrower rtl caption IS placed at the inline-start; an rtl border-COLLAPSE table IS
-# reproduced, its frame resolved with the columns mirrored),
 # nested tables, an empty row group, and a column/row only
 # spanning cells cover.
 # (A column's visibility:collapse is a conformance gap the oracle itself doesn't model, so native matches it
@@ -59,6 +63,90 @@ RSpec.describe 'native layout table parity', if: ENV.fetch('CSIM_JS_ENGINE', 'v8
     expect(r).to include('ok' => true), "harness bailed: #{r.inspect}"
     expect(r['mismatches']).to eq(0), "mismatch: #{r.inspect}"
   end
+
+  # An EMPTY table — `display: table` with nothing in it, which a `::before { content: ""; display: table }`
+  # produces all over real stylesheets (the clearfix). It has no grid at all: its border box is its own edges
+  # plus whatever it declares, a caption stacks on top of that, and an imposed height still makes the empty
+  # grid REGION that tall (§17.5.3 — a table height is a minimum, with or without rows to share it out).
+  # `border-spacing` says nothing without tracks to space. The figures are headless Chrome's, measured
+  # 2026-09-22, because parity alone cannot tell a shared rule from a shared mistake.
+  it 'matches an empty table, and sizes it as Chrome does' do
+    {
+      'display:table'                         => [0, 0],
+      'display:table;border:2px solid;padding:3px' => [10, 10],
+      'display:table;border-spacing:7px'      => [0, 0],
+      'display:table;width:120px;height:30px' => [120, 30],
+      'display:table;min-height:40px'         => [0, 40]
+    }.each do |style, (w, h)|
+      body = %(<div id="t" style="#{style}"></div>)
+      expect_parity(body)
+      session = simulated_session(page(body))
+      session.visit '/'
+      box = session.evaluate_script("(() => { const r = document.getElementById('t').getBoundingClientRect(); return [r.width, r.height]; })()")
+      expect(box).to eq([w, h]), style
+    end
+  end
+
+  it 'matches an empty table with a caption (the caption is the whole box)' do
+    expect_parity('<div style="display:table"><div style="display:table-caption">cap</div></div>')
+    expect_parity('<div style="display:table;height:100px"><div style="display:table-caption">cap</div></div>')
+    expect_parity('<div style="display:table;table-layout:fixed;width:150px"></div>')
+  end
+
+  # …and an empty table on a LINE, which is the one shape where a table's BASELINE has nothing behind the
+  # caption to answer first. A caption gives its table no baseline at all (§17.4 puts it outside the table box;
+  # §10.8.1 reads an inline-table's from its first ROW), so an empty one hangs from its bottom margin edge and
+  # the line is 22 — Chrome's figure, measured 2026-09-23, and the reason the ORACLE was the engine that moved:
+  # it took the caption's baseline and made the line 18. Pinned to Chrome because both engines now agree.
+  it 'gives an empty table with a caption NO baseline (Chrome: the line is 22, not 18)' do
+    body = '<div id="l" style="width:300px">x <span style="display:inline-table"><span style="display:table-caption">cap</span></span> y</div>'
+    expect_parity(body)
+    session = simulated_session(page(body))
+    session.visit '/'
+    expect(session.evaluate_script("document.getElementById('l').getBoundingClientRect().height")).to eq(22)
+    # …and the same through a baseline-aligned CELL, which reaches the walk by a different route.
+    expect_parity('<table style="border-spacing:0"><tr><td style="vertical-align:baseline"><div style="display:table"><div style="display:table-caption;height:16px">cap</div></div></td><td style="vertical-align:baseline;font-size:30px">Y</td></tr></table>')
+    # …while a table WITH rows still answers from them (Chrome: 36 and 46).
+    expect_parity('<div style="width:300px">x <span style="display:inline-table"><span style="display:table-caption">cap</span><span style="display:table-row"><span style="display:table-cell">a</span></span></span> y</div>')
+  end
+
+  # A caption is the one block-level box in the engine that does NOT go through `block_child_width`: the oracle
+  # sizes it with `usedSize`, which honours an intrinsic-size KEYWORD and nothing else that makes a block size
+  # from its own content. Native ran it through `used_width` alone, which knows no keyword, and filled the
+  # wrapper — 300 where the oracle and Chrome say 37.33. The `auto` margins then had nothing left to centre.
+  it 'matches a caption sized by an intrinsic-size keyword (Chrome: min-content is 37.33 in a 300px table)' do
+    [
+      'width:min-content', 'width:max-content', 'width:fit-content',
+      'width:min-content;margin:0 auto', 'width:min-content;margin:0 10px',
+      'width:max-content;padding:0 10%', 'width:min-content;box-sizing:border-box;padding:0 5px',
+      'width:min-content;min-width:200px', 'width:fit-content;max-width:30px'
+    ].each do |cap|
+      ['width:300px;border-spacing:0', 'border-spacing:4px', 'width:60px;border-spacing:0'].each do |tbl|
+        expect_parity(%(<table style="#{tbl}"><caption id="c" style="#{cap}">hello world</caption><tr><td style="width:40px;height:20px">a</td></tr></table>))
+      end
+    end
+    body = '<table style="width:300px;border-spacing:0"><caption id="c" style="width:min-content;height:16px">hello world</caption><tr><td style="width:40px;height:20px">a</td></tr></table>'
+    session = simulated_session(page(body))
+    session.visit '/'
+    box = session.evaluate_script("(() => { const r = document.getElementById('c').getBoundingClientRect(); return [r.x, r.width]; })()")
+    expect(box).to eq([0, 37.328125])
+  end
+
+  # …but a VERTICAL writing mode's auto width is not one of them: `block_child_width` would shrink it and
+  # `usedSize` does not, so a vertical-rl caption fills the wrapper in both engines. A divergence from Chrome
+  # they SHARE, recorded rather than fixed while the port runs — and the reason the caption is not simply
+  # routed through `block_child_width`.
+  it 'keeps a vertical writing-mode caption filling the wrapper (shared with the oracle, not with Chrome)' do
+    expect_parity('<table style="width:300px;border-spacing:0"><caption style="writing-mode:vertical-rl">hello world</caption><tr><td style="width:40px;height:20px">a</td></tr></table>')
+  end
+
+  it 'matches an empty table as a flex item and in block flow (its margins still stack)' do
+    expect_parity('<div style="display:flex;width:300px"><div style="display:table"></div><div>y</div></div>')
+    expect_parity('<div style="width:400px"><div style="display:table;margin:10px;width:50px;height:20px"></div><p>after</p></div>')
+  end
+
+  # …and a HALF-empty table still declines: columns with no rows under them reach a grid native does not build.
+  it('declines a table with columns but no rows') { a_bails_b_native('<table style="border-spacing:4px"><colgroup><col style="width:40px"><col style="width:60px"></colgroup></table>') }
 
   it 'matches a 2x2 table with border-spacing (cells placed by prefix sums)' do
     expect_parity('<table style="border-spacing:4px"><tr><td style="width:60px;height:20px">a</td><td style="width:80px;height:30px">bb</td></tr><tr><td>ccc</td><td style="height:40px">d</td></tr></table>')
@@ -269,8 +357,7 @@ RSpec.describe 'native layout table parity', if: ENV.fetch('CSIM_JS_ENGINE', 'v8
   # mirrors each cell within the table content box, and native reflects it within its row (row_w - ltr_rel -
   # cell_width); the row / group / table boxes span the whole grid and are direction-agnostic. A FULL-WIDTH
   # caption sits at the same left edge in either direction, and native mirrors a NARROWER rtl caption to the
-  # inline-start = right (`wrapper_width - caption_width`). Only a MARGIN-offset (incl. auto-centred) caption and
-  # a collapsed frame still decline.
+  # inline-start = right (`wrapper_width - caption_width`), one LEADING margin — the right one — further in.
   it 'matches a 2-column rtl table (column 0 at the right)' do
     expect_parity('<table dir="rtl" style="border-spacing:4px"><tr><td style="width:60px;height:20px">a</td><td style="width:80px">b</td></tr></table>')
   end
@@ -494,6 +581,93 @@ RSpec.describe 'native layout table parity', if: ENV.fetch('CSIM_JS_ENGINE', 'v8
     end
   end
 
+  # A caption MARGIN (native's own since 2026-09-23). Three separate things come off it, and each of these
+  # shapes is here because it is the only one that fails when its own half is missing:
+  #   * the VERTICAL pair stacks — it is height the rows do not get, so a top caption's `margin-bottom` pushes
+  #     the grid down and the wrapper grows by the whole margin box (`caption_h`);
+  #   * the LEADING horizontal one insets the caption from the wrapper's inline-start edge, which is the right
+  #     edge in rtl — so an rtl lead is measured from the other side and a full-width caption shows nothing;
+  #   * an `auto` pair centres it in the wrapper and a single `auto` pushes it to the far side (§10.3.3), which
+  #     is `auto_margin_split` and not the margin at all.
+  # …and the basis-less pair floors the table beside the caption's min-content (`caption_floor`): the table can
+  # be no narrower than the caption's MARGIN box, so margins on a caption already at the floor WIDEN the table.
+  it 'matches a caption with a length margin (its margin box stacks, the lead insets it)' do
+    expect_parity('<table style="border-spacing:4px"><caption style="height:16px;margin:5px 9px 7px 13px">c</caption><tr><td style="width:40px;height:20px">a</td></tr></table>')
+    expect_parity('<table style="border-spacing:4px;caption-side:bottom"><caption style="height:16px;margin:5px 9px 7px 13px">c</caption><tr><td style="width:40px;height:20px">a</td></tr></table>')
+  end
+
+  it 'matches a caption whose margin box WIDENS the table (the floor is the margin box)' do
+    expect_parity('<table style="border-spacing:0"><caption style="height:16px;width:120px;margin:0 20px">c</caption><tr><td style="width:40px;height:20px">a</td></tr></table>')
+  end
+
+  it 'matches an auto-margin caption (centred, and pushed by a single auto)' do
+    expect_parity('<table style="border-spacing:4px"><caption style="width:40px;height:16px;margin:0 auto">c</caption><tr><td style="width:200px;height:20px">a</td></tr></table>')
+    expect_parity('<table style="border-spacing:4px"><caption style="width:40px;height:16px;margin-left:auto">c</caption><tr><td style="width:200px;height:20px">a</td></tr></table>')
+  end
+
+  it 'matches an rtl caption offset by a margin (the lead is the RIGHT margin)' do
+    expect_parity('<table dir="rtl" style="border-spacing:4px"><caption style="width:20px;height:16px;margin-left:8px">c</caption><tr><td style="width:40px;height:20px">a</td></tr></table>')
+    expect_parity('<table dir="rtl" style="border-spacing:4px"><caption style="width:20px;height:16px;margin-right:8px">c</caption><tr><td style="width:40px;height:20px">a</td></tr></table>')
+    expect_parity('<table dir="rtl" style="border-spacing:4px"><caption style="width:20px;height:16px;margin:0 auto">c</caption><tr><td style="width:200px;height:20px">a</td></tr></table>')
+  end
+
+  # A PERCENTAGE margin resolves against the table's border box — the block the caption spans — which is the
+  # record's own containing block either way: natively from the fraction the walk sent where the edges are
+  # AFFINE, and off the oracle's basis (`recordCbW`) where a comparison function makes them piecewise. The floor
+  # reads them basis-less (0 and 12 here), since the width they would resolve against is the one being decided.
+  it 'matches a caption with a percentage / piecewise margin' do
+    expect_parity('<table style="width:200px;border-spacing:0"><caption style="height:16px;margin:0 5%">c</caption><tr><td style="width:40px;height:20px">a</td></tr></table>')
+    expect_parity('<table style="width:200px;border-spacing:0"><caption style="height:16px;margin:0 min(10%, 12px)">c</caption><tr><td style="width:40px;height:20px">a</td></tr></table>')
+  end
+
+  # An OUT-OF-FLOW child of a table (§9.7): it is no cell, no row and no caption — it leaves the table's
+  # structure entirely — and the oracle places EVERY one at the same corner, the grid's top-left, whether it was
+  # written in the table, in a row group or in a row. So the walk emits them all under the TABLE record and
+  # `measure_table` records that one static corner; `place_out_of_flow` does the rest, as for any other box.
+  # (Three parents, because `tableGrid` gathers them at three different sites and only the table's own used to
+  # be reachable from a reading of the code.)
+  #
+  # Every shape here uses `display: table` and NOT `<table>`, and that is not a stylistic choice: HTML tree
+  # construction FOSTER-PARENTS a `<div>` written inside a `<table>`, moving it out in FRONT of the table, so
+  # `<table><div style="position:absolute">` never produces an out-of-flow table child at all. Four specs
+  # written that way passed against the unchanged engine — they were testing a sibling of the table.
+  def oof_table(inner_table: '', inner_group: '', inner_row: '', table: '', dir: nil)
+    %(<div#{dir ? %( dir="#{dir}") : ''} style="display:table;border-spacing:4px;#{table}">#{inner_table}<div style="display:table-row-group">#{inner_group}<div style="display:table-row">#{inner_row}<div style="display:table-cell;width:40px;height:20px">a</div></div></div></div>)
+  end
+
+  OOF_BOX = '<div style="position:absolute;top:2px;left:3px;width:8px;height:6px"></div>'
+
+  it 'matches an out-of-flow child of a table, of a row and of a row group' do
+    expect_parity(oof_table(inner_table: OOF_BOX))
+    expect_parity(oof_table(inner_group: OOF_BOX))
+    expect_parity(oof_table(inner_row: OOF_BOX))
+  end
+
+  # …and its STATIC position is the grid's top-left corner — inside the table's own border + padding and PAST a
+  # top caption — which only a box with no insets to override it can see. An RTL table leaves that corner at the
+  # content's LEFT edge: `layoutTable` is the one flow that places its out-of-flow children with no aligned
+  # static corner, where block flow and grid both hand `placeAbsolute` one. Chrome puts it at the right; both
+  # engines agree on the left, so this is a recorded oracle divergence, not a parity break.
+  it 'matches an out-of-flow table child at its static position (past the caption, inside the padding)' do
+    static_box = '<div style="position:absolute;width:8px;height:6px"></div>'
+    expect_parity(oof_table(table: 'border:5px solid;padding:3px',
+                            inner_table: %(<div style="display:table-caption;height:16px">c</div>#{static_box})))
+    expect_parity(oof_table(table: 'border:5px solid;padding:3px', inner_table: static_box, dir: 'rtl'))
+  end
+
+  it 'matches a shrink-to-fit out-of-flow table child (auto width, one inset)' do
+    expect_parity(oof_table(inner_table: '<div style="position:absolute;top:2px">shrink to fit</div>'))
+  end
+
+  # A containing block whose own edges are PERCENTAGES is one native cannot re-derive a padding box for, so the
+  # box is REPLAYED instead — the oracle's border box pushed with its displacement from the table's origin. The
+  # only shape here that takes that arm (`nativeOutOfFlow` stays 0), and it is a whole second code path.
+  it 'matches a REPLAYED out-of-flow table child (its containing block has percentage edges)' do
+    body = %(<div style="position:relative;padding:5%;width:300px">#{oof_table(inner_table: OOF_BOX)}</div>)
+    expect_parity(body)
+    expect(run_shadow(body)['nativeOutOfFlow']).to eq(0), 'expected the replay arm, not the native placement'
+  end
+
   # A caption is a normal block in the table's BORDER box (§17.4 wrapper box): declared height / width / min-max /
   # box-sizing / auto-margin centering honored, auto width fills the border box, and a caption with a definite
   # width wider than the grid floors the table (stretching its columns to fill what is left inside the border).
@@ -593,7 +767,6 @@ RSpec.describe 'native layout table parity', if: ENV.fetch('CSIM_JS_ENGINE', 'v8
     expect(run_shadow(plain)['ok']).to be(true), 'expected the plain table to stay native'
   end
 
-  it('declines a caption with a margin (folds into the stacking)') { a_bails_b_native('<table style="border-spacing:4px"><caption style="height:16px;margin:5px">c</caption><tr><td style="width:40px">a</td></tr></table>') }
   it('declines two captions') { a_bails_b_native('<table style="border-spacing:4px"><caption>top</caption><caption style="caption-side:bottom">bottom</caption><tr><td style="width:40px">a</td></tr></table>') }
   # An inline-table is an ATOMIC inline in its parent's line — native replays its oracle box (its rows/cells are
   # covered via the parent), so a block holding one lays out rather than declining.
@@ -659,7 +832,6 @@ RSpec.describe 'native layout table parity', if: ENV.fetch('CSIM_JS_ENGINE', 'v8
   it('declines a table flex item aligned on the baseline') { a_bails_b_native('<div style="display:flex;width:300px;height:100px;align-items:baseline"><table style="border-spacing:2px"><tr><td style="height:30px">a</td></tr></table><div style="width:40px">y</div></div>') }
 
   it('matches an inline-table as an atomic inline') { expect_parity('<div style="width:300px">x <span style="display:inline-table"><span style="display:table-row"><span style="display:table-cell">a</span></span></span> y</div>') }
-  it('declines an rtl table with a MARGIN-offset caption (its auto-margin / lead inset is not reflected yet)') { a_bails_b_native('<table dir="rtl" style="border-spacing:4px"><caption style="width:20px;height:16px;margin-left:8px">c</caption><tr><td style="width:40px;height:20px">a</td></tr></table>') }
   it('declines an empty row group (the oracle boxes it below the grid)') { a_bails_b_native('<table style="border-spacing:4px"><tbody></tbody><tbody><tr><td style="width:40px;height:20px">a</td></tr></tbody></table>') }
   # …and an ANONYMOUS CELL is laid out now, which it was not until 2026-09-22. §17.2.1 wraps a table's stray
   # non-cell content in one, `anonTableCell` builds it, and it is no part of the DOM — so it has no `_nid`, and

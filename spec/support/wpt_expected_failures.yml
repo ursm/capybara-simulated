@@ -807,7 +807,6 @@ css/css-flexbox/alignment/flex-align-baseline-overflow-003.html:
 - ".target > * 8"
 - ".target > * 9"
 css/css-flexbox/alignment/flex-align-baseline-table-001.html:
-- ".target > * 1"
 - ".target > * 3"
 - ".target > * 5"
 - ".target > * 7"

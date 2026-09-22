@@ -4224,9 +4224,10 @@ fn flex_distribution(code: u8, free: f64, n: usize) -> (f64, f64) {
 // tableColumns / distributeColumns / fixedColumnWidths / tableIntrinsicWidths / tableGrid. Spans, captions,
 // colgroup, thead/tfoot reorder, fixed layout, rtl AND border-collapse are all IN scope (the oracle folds the
 // collapsed borders into the pushed edges, so a collapse table sizes here exactly like a separate one).
-// nlTableSupported declines only what native can't reproduce: a caption margin or a second caption, a cell whose
-// percentage-height content needs a second pass, an empty or interleaved row group, a nested table, and a row
-// whose cells all span rows (no row height to read).
+// nlTableSupported declines only what native can't reproduce: a SECOND caption or a nested-table one, a cell
+// whose percentage-height content needs a second pass, an empty or interleaved row group, a nested table, a row
+// whose cells all span rows (no row height to read), and a HALF-empty table — columns with no rows under them.
+// A wholly EMPTY one is in scope: no grid at all, just the table's edges, its declaration and its caption.
 // A table's ROW / COLUMN structure, recovered from the record tree the walk emitted (the oracle's `tableGrid`
 // resolved the anonymous boxes and the render order): every row in render order with the row GROUP it belongs
 // to, the caption (the table's only non-row / non-group child), and the column count: `declared_cols` (the
@@ -4243,6 +4244,11 @@ fn table_grid(i: usize, inputs: &[Cell<Input>], children: &[Vec<usize>], declare
     let mut row_group: Vec<Option<usize>> = Vec::new();
     let mut caption = None;
     for &ch in &children[i] {
+        // An OUT-OF-FLOW child is no part of the table's structure (§9.7) — not a row, not a caption. The walk
+        // emits every one of them under the table, whichever table part it was written in.
+        if inputs[ch].get().out_of_flow != 0 {
+            continue;
+        }
         match inputs[ch].get().display {
             DISPLAY_TABLE_ROW_GROUP => {
                 for &r in &children[ch] {
@@ -4257,9 +4263,6 @@ fn table_grid(i: usize, inputs: &[Cell<Input>], children: &[Vec<usize>], declare
             _ => caption = Some(ch),
         }
     }
-    if rows.is_empty() {
-        return None;
-    }
     let mut c_count = declared_cols;
     for &r in &rows {
         for &c in &children[r] {
@@ -4270,7 +4273,11 @@ fn table_grid(i: usize, inputs: &[Cell<Input>], children: &[Vec<usize>], declare
             c_count = c_count.max(k.cell_col + k.cell_colspan);
         }
     }
-    if c_count == 0 {
+    // An EMPTY table — no rows AND no columns — is a grid of nothing, which `measure_table` sizes from the
+    // table's own edges, its declaration and its caption alone (§17.5.3 still floors that empty region at an
+    // imposed height: Chrome makes an empty `height: 100px` table 100 tall). A HALF-empty one is not: columns
+    // with no rows under them, or a row with no cells to give it a height, are `nlTableSupported`'s to decline.
+    if rows.is_empty() != (c_count == 0) {
         return None;
     }
     for (ri, &r) in rows.iter().enumerate() {
@@ -4468,7 +4475,7 @@ fn fixed_column_widths(
             }
         })
         .collect();
-    for &c in &children[g.rows[0]] {
+    for &c in g.rows.first().map_or(&[][..], |&r0| &children[r0][..]) {
         let k = inputs[c].get();
         let declared = if !is_auto(k.cell_pct) {
             k.cell_pct * assignable
@@ -4525,11 +4532,13 @@ fn table_intrinsic_widths(
     // `tableIntrinsicWidths` uses `edgeInsets(table, null)`).
     Some(table_min_max_with_caption(&n, &g, &cols, floor, n.decl_edges_x))
 }
-// The border-box width a table's CAPTION requires of it (the oracle's `captionsFloor`): the caption's margin box
+// The border-box width a table's CAPTION requires of it (the oracle's `captionsFloor`): the caption's MARGIN box
 // spans the table's border box (§17.4), and what it cannot be squeezed below is its own min-content contribution
 // — a declared LENGTH pinning it, a `%` one indefinite while the table's width is still being decided, the
-// min/max-width clamping it (native declines a caption margin, so the border box is the margin box). The oracle's
-// figure where native cannot measure the caption; 0 without one.
+// min/max-width clamping it — plus its horizontal margins. Those are read BASIS-LESS (`decl_margin_x`, an `auto`
+// one already 0), because the table's width is what a percentage among them would resolve against and it is the
+// figure being decided here; the same margins are resolved against it once it has settled, in `measure_table`.
+// The oracle's figure where native cannot measure the caption; 0 without one.
 fn caption_floor(
     caption: Option<usize>,
     inputs: &[Cell<Input>],
@@ -4538,10 +4547,28 @@ fn caption_floor(
     grids: &[f64],
     children: &[Vec<usize>],
 ) -> Option<f64> {
-    match caption {
-        Some(cap) if !is_auto(inputs[cap].get().cell_min_content) => Some(inputs[cap].get().cell_min_content),
-        Some(cap) => Some(intrinsic_widths(cap, inputs, runs, run_texts, grids, children)?.0),
-        None => Some(0.0),
+    let cap = match caption {
+        Some(cap) => cap,
+        None => return Some(0.0),
+    };
+    Some(caption_intrinsic(cap, inputs, runs, run_texts, grids, children)?.0 + inputs[cap].get().decl_margin_x)
+}
+// A caption's min/max-content: native's own measure, or — where the walk could not measure the subtree and
+// PARKED it — the oracle's pushed contribution off rec[84..85], exactly as an unmeasurable CELL travels
+// (`table_columns` reads the same pair the same way).
+fn caption_intrinsic(
+    cap: usize,
+    inputs: &[Cell<Input>],
+    runs: &[Run],
+    run_texts: &[Option<Vec<u16>>],
+    grids: &[f64],
+    children: &[Vec<usize>],
+) -> Option<(f64, f64)> {
+    let k = inputs[cap].get();
+    if is_auto(k.cell_min_content) {
+        intrinsic_widths(cap, inputs, runs, run_texts, grids, children)
+    } else {
+        Some((k.cell_min_content, k.cell_max_content))
     }
 }
 // …from columns already measured: the figure `measure_table` needs, where the frame carries the table's edges as
@@ -4647,18 +4674,56 @@ fn measure_table(
     // it — so the CAPTION, which spans that box, is laid out before the rows: the height it takes is height the
     // rows do NOT get (a table told to be 120 tall holds its caption inside that 120, Chrome and the oracle).
     let sum_col: f64 = col_w.iter().sum();
-    let grid_w = sum_col + (c_count as f64 + 1.0) * sx;
-    let table_w = (grid_w + n.edges_x()).max(cap_floor);
+    let grid_w = sum_col + table_gaps(c_count, sx);
+    // With NO columns the tracks say nothing about the width: a populated table's columns have already shared
+    // out whatever it was given (so `grid_w` carries it back), while an empty one keeps the width it resolved —
+    // its declaration, or the box it was handed — floored by its caption.
+    let table_w = if c_count == 0 { border_w.max(cap_floor) } else { (grid_w + n.edges_x()).max(cap_floor) };
     // The caption is a block box laid out in that BORDER box, outside the table's own border+padding (§17.4
-    // wrapper box): an auto width fills it, a declared one (a `%` of it) is its own and may overflow it without
-    // growing the table, and a `%` height resolves against nothing (Chrome keeps such a caption its content's
-    // height, whatever the table's).
+    // wrapper box): an auto width fills it (less its own horizontal margins, `resolve_width`), a declared one (a
+    // `%` of it) is its own and may overflow it without growing the table, and a `%` height resolves against
+    // nothing (Chrome keeps such a caption its content's height, whatever the table's). Its MARGINS resolve
+    // against that border box too — the block it spans — which is why the measure comes after `table_w`.
     if let Some(cap) = caption {
         let k = inputs[cap].get().with_percent_sizes(table_w, f64::NAN);
         inputs[cap].set(k);
-        measure(cap, resolve_width(&k, table_w), f64::NAN, inputs, runs, run_texts, grids, children, boxes, failed, &mut FloatCtx::new(), 0.0, 0.0);
+        // Its used width is the oracle's `layoutSize(caption, availW, 0, box.width, null)`, and `usedSize`
+        // sizes a box from its own content for ONE reason: an intrinsic-size KEYWORD. Not for a vertical
+        // writing mode's auto width, and not for a `<button>` — both fill the wrapper there, where
+        // `block_child_width` (every other block-level child's route) would shrink them, so this is that
+        // function minus the two arms the oracle does not have rather than a call to it.
+        let room = (table_w - Input::m(k.ml) - Input::m(k.mr)).max(0.0);
+        let cap_w = if k.width_kw == 0 {
+            used_width(&k, room)
+        } else {
+            match caption_intrinsic(cap, inputs, runs, run_texts, grids, children) {
+                Some((imin, imax)) => used_width(&k, keyword_width(k.width_kw, imin, imax, room, k.pct_edges_x())),
+                None => return bail(failed),
+            }
+        };
+        measure(cap, cap_w, f64::NAN, inputs, runs, run_texts, grids, children, boxes, failed, &mut FloatCtx::new(), 0.0, 0.0);
     }
-    let caption_h = caption.map(|cap| boxes[cap].h).unwrap_or(0.0);
+    // What the wrapper stacks is the caption's MARGIN box (the oracle's `layCaption`: `y += mt + height + mb`),
+    // so the vertical margins are height the rows do not get, and the LEADING horizontal one insets it from the
+    // wrapper's inline-start edge — an `auto` pair centring it, one `auto` pushing it to the other side (§10.3.3),
+    // exactly as `block_child_x` places a block child anywhere else.
+    let (cap_lead, cap_mt, cap_mb) = match caption {
+        Some(cap) => {
+            let k = inputs[cap].get();
+            let (ml, mr) = (Input::m(k.ml), Input::m(k.mr));
+            let from_right = n.rtl != 0;
+            let (lm, tm) = if from_right { (mr, ml) } else { (ml, mr) };
+            let (lead_auto, trail_auto) = if from_right {
+                (k.auto_margins & 2 != 0, k.auto_margins & 1 != 0)
+            } else {
+                (k.auto_margins & 1 != 0, k.auto_margins & 2 != 0)
+            };
+            let lead = auto_margin_split(lead_auto, trail_auto, lm, tm, table_w, boxes[cap].w).0;
+            (lead, Input::m(k.mt), Input::m(k.mb))
+        }
+        None => (0.0, 0.0, 0.0),
+    };
+    let caption_h = caption.map(|cap| cap_mt + boxes[cap].h + cap_mb).unwrap_or(0.0);
 
     let span_w = |c: usize| -> f64 {
         let k = inputs[c].get();
@@ -4796,7 +4861,13 @@ fn measure_table(
     // the columns above) and stacks the caption with the grid: the `<table>` el._lb is the WRAPPER, a
     // caption-side:top caption offsetting the whole grid down by its height and a bottom one sitting below it.
     let sum_row: f64 = row_h.iter().sum();
-    let grid_h = sum_row + (r_count as f64 + 1.0) * sy;
+    // …and an imposed height with NO rows to share it out still makes the grid region that tall (the
+    // distribution above had no target to give it to). It is live for a POPULATED table too, where the rows
+    // have already been grown to fill it — to within the ulp the per-row `room * (row_h[i] / weight)` shares
+    // come to — and that is fine because the ORACLE floors in exactly the same place and the same way
+    // (`layoutTable`: `if (imposedContentH > y - gridTop) y = gridTop + imposedContentH;`). Agreement, not a
+    // line that never fires.
+    let grid_h = (sum_row + table_gaps(r_count, sy)).max(imposed_h);
     let caption_top = caption.is_some() && n.caption_side == 0;
     let content_left = n.bl + n.pl;
     let content_top = n.bt + n.pt + if caption_top { caption_h } else { 0.0 };
@@ -4815,28 +4886,52 @@ fn measure_table(
         row_top[ri] = accy;
         accy += row_h[ri] + sy;
     }
-    let row_x = col_x[0];
-    let row_w = col_x[c_count - 1] + col_w[c_count - 1] - row_x;
+    let (row_x, row_w) = match c_count {
+        0 => (content_left, 0.0),
+        _ => (col_x[0], col_x[c_count - 1] + col_w[c_count - 1] - col_x[0]),
+    };
 
     boxes[i].nid = n.nid;
     boxes[i].w = table_w;
     boxes[i].h = grid_h + caption_h + n.edges_y();
     boxes[i].auto_height = false;
 
-    // Place the caption at the table WRAPPER's border box (§17.4) — OUTSIDE the table's own border+padding: a top
-    // caption at the wrapper's top edge (the grid is offset DOWN past it, via content_top), a bottom one just
-    // below the table's bottom padding+border. Along the inline axis it sits at the wrapper's inline-start: the
-    // left edge in LTR, and — for a caption NARROWER than the wrapper — the right edge in rtl (§10.3.3 balances
-    // the leading margin). Native declines a caption MARGIN, so there is no lead to inset / centre it. Its Phase-A
-    // subtree follows through `place`.
+    // Place the caption's MARGIN box at the table WRAPPER's border box (§17.4) — OUTSIDE the table's own
+    // border+padding: a top caption at the wrapper's top edge (the grid is offset DOWN past it, via content_top),
+    // a bottom one just below the table's bottom padding+border, each inset by its own top margin. Along the
+    // inline axis it sits one leading margin in from the wrapper's inline-start: the left edge in LTR, and — for
+    // a caption NARROWER than the wrapper — the right edge in rtl (§10.3.3 balances the leading margin). Its
+    // Phase-A subtree follows through `place`.
     if let Some(cap) = caption {
-        boxes[cap].x = if n.rtl != 0 { boxes[i].w - boxes[cap].w } else { 0.0 };
-        boxes[cap].y = if caption_top { 0.0 } else { n.bt + n.pt + grid_h + n.pb + n.bb };
+        boxes[cap].x = if n.rtl != 0 { boxes[i].w - boxes[cap].w - cap_lead } else { cap_lead };
+        boxes[cap].y = cap_mt + if caption_top { 0.0 } else { n.bt + n.pt + grid_h + n.pb + n.bb };
     }
 
-    // Row-group boxes (relative to the table): span their rows across the full row width.
+    // Row-group boxes (relative to the table): span their rows across the full row width — and, in the same
+    // walk of the table's children, its OUT-OF-FLOW ones (§9.7 / §4.1). The walk gathers every one of those —
+    // written in the table, in a row group or in a ROW — under the TABLE record, because that is where the
+    // oracle places them all: at the GRID's top-left corner, past a top caption and inside the table's own
+    // border+padding (`layoutTable`'s `placeAbsolute(child, pos, content.x, gridTop, ctx)`). None of them
+    // advances the flow or sizes a track; `place_out_of_flow` sizes and positions the rest from that corner.
+    // (One walk rather than two: a table with bare rows has every row in this list, so a second pass would be
+    // an O(rows) scan per layout for a feature almost no table has — block flow gates the same loop behind a
+    // bit and the grid folds it into a loop it was running anyway.)
     for &ch in &children[i] {
-        if inputs[ch].get().display != DISPLAY_TABLE_ROW_GROUP {
+        let cn = inputs[ch].get();
+        if cn.out_of_flow != 0 {
+            if cn.native_oof() {
+                boxes[ch].x = content_left;
+                boxes[ch].y = content_top;
+            } else {
+                // Replayed: lay the subtree out at its pushed border box; `place` positions it by rel_x/rel_y.
+                let cw = resolve_width(&cn, (table_w - n.edges_x()).max(0.0));
+                measure(ch, cw, f64::NAN, inputs, runs, run_texts, grids, children, boxes, failed, &mut FloatCtx::new(), 0.0, 0.0);
+                boxes[ch].x = 0.0;
+                boxes[ch].y = 0.0;
+            }
+            continue;
+        }
+        if cn.display != DISPLAY_TABLE_ROW_GROUP {
             continue;
         }
         let mut first = None;
@@ -6413,9 +6508,15 @@ fn place_out_of_flow(
         } else {
             (ix + along(cross_far, inner_w, cross, w), iy + along(pn.flex_main_reverse, inner_h, main, main_box))
         }
-    } else if pn.from_right() {
+    } else if pn.from_right() && pn.display != DISPLAY_TABLE {
         // …and an inline axis running from the RIGHT puts the static corner at the content's right edge, less
         // the box (`staticCornerFor`, which asks for that physical side — a vertical mode's rtl has none).
+        // A TABLE is the one container that does NOT: `layoutTable` places its out-of-flow children with no
+        // aligned corner at all (`placeAbsolute(child, pos, content.x, gridTop, ctx)` — it stops at `ctx`,
+        // where block flow and grid go on to pass `order` and `staticAlign`), so an rtl table leaves one at
+        // its content's LEFT edge. Chrome
+        // puts it at the right, like every other rtl container; that is an oracle divergence recorded rather
+        // than fixed while the port is running, and fixing it means giving the ORACLE the corner it skips.
         (px + static_rx - w, py + static_ry)
     } else {
         (px + static_rx, py + static_ry)
@@ -6540,16 +6641,21 @@ fn content_sized_width(
     let cn = &inputs[c].get();
     match cn.width_kw {
         0 => shrink_to_fit_width(c, room, inputs, runs, run_texts, grids, children),
-        kw => intrinsic_widths(c, inputs, runs, run_texts, grids, children).map(|(imin, imax)| {
-            let pct = cn.pct_edges_x();
-            match kw {
-                1 => imin + pct,
-                2 => imax + pct,
-                // …min-content winning where the two figures cross (a negative margin can take max-content under
-                // the widest piece), as the oracle's `Math.max(min, Math.min(max, …))` has it.
-                _ => (room - pct).min(imax).max(imin) + pct,
-            }
-        }),
+        kw => intrinsic_widths(c, inputs, runs, run_texts, grids, children)
+            .map(|(imin, imax)| keyword_width(kw, imin, imax, room, cn.pct_edges_x())),
+    }
+}
+// …the keyword arithmetic alone, over a pair already in hand: `min-content` and `max-content` take their side
+// outright and `fit-content` takes the room clamped between them — min-content winning where the two figures
+// cross (a negative margin can take max-content under the widest piece), as the oracle's
+// `Math.max(min, Math.min(max, …))` has it. Each carries back the percentage part of the box's own edges, which
+// an intrinsic CONTRIBUTION leaves out. Shared with `measure_table`'s caption, whose pair may be the ORACLE's
+// pushed one rather than a measure of its own.
+fn keyword_width(kw: u8, imin: f64, imax: f64, room: f64, pct: f64) -> f64 {
+    match kw {
+        1 => imin + pct,
+        2 => imax + pct,
+        _ => (room - pct).min(imax).max(imin) + pct,
     }
 }
 // The BORDER-BOX width a box uses given what an AUTO width would be (`auto_w` — the oracle's `usedSize` with
