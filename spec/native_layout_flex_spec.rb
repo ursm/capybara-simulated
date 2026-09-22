@@ -96,6 +96,14 @@ RSpec.describe 'native layout flex parity', if: ENV.fetch('CSIM_JS_ENGINE', 'v8'
     expect(r['nativeFlexRows']).to be >= 1, "the row's item widths were pushed, not native: #{r.inspect}"
   end
 
+  # …and a marked descendant's X, for an example whose figure is a position rather than a size.
+  def marked_box_x(body)
+    with_simulated_session(page(body)) do |session|
+      session.visit '/'
+      session.evaluate_script("document.getElementById('m').getBoundingClientRect().x")
+    end
+  end
+
   # …and one MARKED descendant's, for an example whose figure is inside an item rather than the item itself.
   def marked_box(body)
     with_simulated_session(page(body)) do |session|
@@ -1271,6 +1279,73 @@ RSpec.describe 'native layout flex parity', if: ENV.fetch('CSIM_JS_ENGINE', 'v8'
   # or its min-height floor, the definite content height across a row. The walk resolved them against the ORACLE's
   # box — without it a wrapping column of `flex: 1` items lost its basis (1280 of the colwrap sweep's shapes).
   describe 'percentage bases and gaps' do
+    # A `calc()` GAP was a silent ZERO in both engines: `lengthOrFraction` knew a bare length and a bare
+    # percentage and nothing else — `lengthPx`'s three regexes match no `calc(` at all — so `gap: calc(…)`
+    # fell through to `GAP_NONE` and the row packed its items edge to edge. Parity was green for it and always
+    # would have been, the record carrying 0 and native agreeing, which is why these assert CHROME's number.
+    # The `1rem` spelling was broken TOO and is no control: the hole was `lengthPx`'s, not the percentage's.
+    # `10%` is the control — its own arm was always there.
+    it 'opens a calc() gap, percentage or not' do
+      {
+        'calc(10% + 2px)'  => 92,     # 50 + (40 + 2)
+        'calc(1rem + 2px)' => 68,     # 50 + 18
+        '10%'              => 90
+      }.each do |gap, chrome_x|
+        body = %(<div style="display:flex;width:400px;gap:#{gap}"><div style="width:50px;height:10px"></div>) +
+               %(<div id="m" style="width:50px;height:10px"></div></div>)
+        expect_parity(body)
+        x = marked_box_x(body)
+        expect(x).to be_within(0.01).of(chrome_x), "gap:#{gap}: #m at #{x}, Chrome #{chrome_x}"
+      end
+      # …and the GRID's own gap, which reads the same `gapSpec`.
+      grid = '<div style="display:grid;width:400px;grid-template-columns:50px 50px;gap:calc(10% + 2px)">' \
+             '<div style="height:10px"></div><div id="m" style="height:10px"></div></div>'
+      expect_parity(grid)
+      expect(marked_box_x(grid)).to be_within(0.01).of(92)
+    end
+    # …and a COMPARISON function over ONE affine operand with constant bounds is `clamp(lo, px + frac x basis,
+    # hi)` — a form the record carries (the bounds beside the pair) and native evaluates, so it takes the
+    # native path like the rest. It was a silent ZERO before, and a decline for one build in between.
+    # FLEX and GRID both, because the grid's gaps travel in a different array (`gridsAll`'s header) and the
+    # bounds had to be added there separately: wiring only the flex pair left the grid 20px out with a
+    # mismatch, which is what said the two are not one path.
+    it 'evaluates a min() / clamp() gap natively, flex and grid' do
+      {
+        'min(10%, 20px)'        => 70,
+        'clamp(5px, 10%, 12px)' => 62
+      }.each do |gap, chrome_x|
+        [%(<div style="display:flex;width:400px;gap:#{gap}"><div style="width:50px;height:10px"></div>) +
+           %(<div id="m" style="width:50px;height:10px"></div></div>),
+         %(<div style="display:grid;width:400px;grid-template-columns:50px 50px;gap:#{gap}">) +
+           %(<div style="height:10px"></div><div id="m" style="height:10px"></div></div>)].each do |body|
+          expect_parity(body)
+          x = marked_box_x(body)
+          expect(x).to be_within(0.01).of(chrome_x), "gap:#{gap}: #m at #{x}, Chrome #{chrome_x}"
+        end
+      end
+    end
+    # …and a gap capped by ANOTHER LINE goes native too, because the bounds are affine as well: `min(10%, 20%)`
+    # is `10%` held under `20%`. It was the case that forced the generalisation — a bound that is a constant
+    # covers `min(10%, 20px)` and nothing more, and the form left over was a silent ZERO in both engines
+    # (a 400px row packed edge to edge) and then a decline. What is left for the oracle alone is a NESTED
+    # comparison, which is what `gap-not-linear` names now.
+    it 'evaluates a gap capped by another percentage natively' do
+      body = '<div style="display:flex;width:400px;gap:min(10%, 20%)"><div style="width:50px;height:10px"></div>' \
+             '<div id="m" style="width:50px;height:10px"></div></div>'
+      expect_parity(body)
+      expect(marked_box_x(body)).to be_within(0.01).of(90)   # Chrome 153: a 40px gap
+    end
+    # …and a DECLARED `normal` longhand is a gap of none, which stops at the longhand instead of falling
+    # through to the shorthand: `gap: 20px; column-gap: normal` opened 20px where Chrome opens nothing.
+    it 'lets a normal longhand cancel the shorthand gap' do
+      ['display:flex', 'display:grid;grid-template-columns:50px 50px'].each do |disp|
+        body = %(<div style="#{disp};width:400px;gap:20px;column-gap:normal"><div style="width:50px;height:10px"></div>) +
+               %(<div id="m" style="width:50px;height:10px"></div></div>)
+        expect_parity(body)
+        expect(marked_box_x(body)).to eq(50), disp
+      end
+    end
+
     def no_oracle(body)
       with_simulated_session(page(body)) do |session|
         session.visit '/'

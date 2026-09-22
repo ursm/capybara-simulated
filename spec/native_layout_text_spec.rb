@@ -920,6 +920,34 @@ RSpec.describe 'native layout L2 text-block parity', if: ENV.fetch('CSIM_JS_ENGI
       expect_parity('<div style="width:200px;text-indent:-30px">one two three four five six seven eight</div>')
       # …a PERCENTAGE against the block's own CONTENT width, not its border box
       expect_parity('<div style="width:200px;padding:0 20px;border-left:10px solid;text-indent:20%">one two three four five six</div>')
+      # …and a LINEAR `calc()` of one. `textIndentOf` split its value on white space and `parseFloat`'d the
+      # pieces, so `calc(10% + 1px)` arrived as `calc(10%` / `+` / `1px)` and the last of them was read as an
+      # indent of ONE PIXEL — in both engines, so no sweep could ever say so. Chrome 153 puts the marker at
+      # 60.203125 where that gave 20.2, and `shared_x` cannot cover it: the two engines agreed on 20.2 and
+      # both were wrong. The 10% shape beside it is the control the bug left passing.
+      expect_parity('<div style="width:400px;font:16px monospace;text-indent:calc(10% + 1px)">hi' \
+                    '<i id="m" style="display:inline-block;width:4px;height:4px"></i></div>', 60.203125)
+      expect_parity('<div style="width:400px;font:16px monospace;text-indent:10%">hi' \
+                    '<i id="m" style="display:inline-block;width:4px;height:4px"></i></div>', 59.203125)
+    end
+    # …and a COMPARISON function over ONE affine operand with constant bounds is `clamp(lo, px + frac x basis,
+    # hi)`, which the record carries (rec[129]/130 beside rec[96]/118) and native evaluates — so it takes the
+    # native path like a plain percentage.
+    # It was a MISMATCH for one build, and the way it got there is worth the line: the reader answered `null`
+    # for "not linear" as well as for "no indent", `nlWriteIndent` drops a null, and native laid the block out
+    # at indent 0 while the oracle indented 30. Before that both engines were right by accident — the reader
+    # could not parse a math function at all and `parseFloat`'d `30px)` out of `min(50%, 30px)`.
+    it 'evaluates a min() / clamp() text-indent natively' do
+      ['min(50%, 30px)', 'clamp(5px,50%,30px)'].each do |indent|
+        expect_parity(%(<div style="width:400px;font:16px monospace;text-indent:#{indent}">hi) +
+                      '<i id="m" style="display:inline-block;width:4px;height:4px"></i></div>', 49.203125)
+      end
+    end
+    # …and one capped by ANOTHER LINE goes native too, since the bounds are affine as well: `min(10%, 20%)` is
+    # `10%` held under `20%`. Only a NESTED comparison is left for the oracle alone.
+    it 'evaluates a text-indent capped by another percentage natively' do
+      expect_parity('<div style="width:400px;font:16px monospace;text-indent:min(10%, 20%)">hi' \
+                    '<i id="m" style="display:inline-block;width:4px;height:4px"></i></div>', 59.203125)
     end
     it 'indents every line but the first under hanging, and after a forced break under each-line' do
       expect_parity('<div style="width:200px;text-indent:40px hanging"><span style="display:inline-block;width:10px;height:10px"></span> one two three four five six seven</div>')

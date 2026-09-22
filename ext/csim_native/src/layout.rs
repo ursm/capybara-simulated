@@ -302,6 +302,19 @@ pub(crate) struct Input {
     // padding box — height for top / bottom, width for left / right — beside the length parts in `inset_*`.
     pub(crate) inset_frac: [f64; 4],
     pub(crate) flex_main_gap_frac: f64,
+    // …and the BOUNDS of a clamped-affine value, which is what a comparison function over one affine operand
+    // is: `min(10%, 20px)` is `10%` capped at 20, `clamp(5px, 10%, 12px)` is `10%` between 5 and 12. The pair
+    // alone cannot express one, and the oracle resolves them, so every figure that can be written that way
+    // carries lo/hi beside its pair and both engines evaluate `clamp(lo, px + frac * basis, hi)`.
+    // Each bound is a `(px, frac)` PAIR of its own, because a bound can vary with the basis too:
+    // `min(10%, 20%)` is one line capped by another. +-INFINITY px with a 0 fraction where there is no bound,
+    // so the clamp is the identity and a plain length is unaffected.
+    pub(crate) flex_main_gap_lo: (f64, f64),
+    pub(crate) flex_main_gap_hi: (f64, f64),
+    pub(crate) flex_cross_gap_lo: (f64, f64),
+    pub(crate) flex_cross_gap_hi: (f64, f64),
+    pub(crate) indent_lo: (f64, f64),
+    pub(crate) indent_hi: (f64, f64),
     pub(crate) flex_cross_gap_frac: f64,
     pub(crate) flex_basis_kw: u8,
     pub(crate) scrolls_x: bool,
@@ -2638,7 +2651,7 @@ fn measure(
                 .map(|r| measure_float(r.font as usize, content_w, inputs, runs, run_texts, grids, children, boxes, failed))
                 .collect();
             let floats_before = fc.items.len();
-            match line_layout(local, &run_texts[rs..re], n.strut_lh, n.strut_asc, content_w, &mut fc.items, &inline_floats, cl, cr, bfc_top, LineStyle {ws_mode: n.ws_mode, align: n.text_align, rtl: n.from_right(), indent: (n.indent_px + n.indent_frac * content_w, n.indent_hanging, n.indent_each_line, n.indent_spent)}) {
+            match line_layout(local, &run_texts[rs..re], n.strut_lh, n.strut_asc, content_w, &mut fc.items, &inline_floats, cl, cr, bfc_top, LineStyle {ws_mode: n.ws_mode, align: n.text_align, rtl: n.from_right(), indent: (clamp_affine(n.indent_px + n.indent_frac * content_w, n.indent_lo, n.indent_hi, content_w), n.indent_hanging, n.indent_each_line, n.indent_spent)}) {
                 Some(ll) => {
                     boxes[i].first_baseline = ll.first.map(|(top, asc)| content_top_rel + top + asc);
                     boxes[i].last_baseline = ll.last.map(|(top, asc)| content_top_rel + top + asc);
@@ -2798,7 +2811,7 @@ fn measure(
                 boxes[c].x = if n.from_right() {
                     content_left_rel + content_w
                 } else {
-                    let indent = if !has_child != n.indent_hanging { n.indent_px + n.indent_frac * content_w } else { 0.0 };
+                    let indent = if !has_child != n.indent_hanging { clamp_affine(n.indent_px + n.indent_frac * content_w, n.indent_lo, n.indent_hi, content_w) } else { 0.0 };
                     float_band(&ctx.items, at, n.strut_lh, cl, cr).0 + indent
                 };
                 boxes[c].y = at;
@@ -3692,9 +3705,13 @@ fn measure_flex(
     // The gaps' percentage parts resolve here: the MAIN gap against a row's content width or a column's main size
     // (nothing where that is indefinite), the CROSS gap against a row's definite content height or a column's width.
     let main_basis = if main_is_x { content_w } else { n.column_main() };
-    let gap = n.flex_main_gap + if n.flex_main_gap_frac != 0.0 && !is_auto(main_basis) { n.flex_main_gap_frac * main_basis } else { 0.0 };
+    let gap = clamp_affine(
+        n.flex_main_gap + if n.flex_main_gap_frac != 0.0 && !is_auto(main_basis) { n.flex_main_gap_frac * main_basis } else { 0.0 },
+        n.flex_main_gap_lo, n.flex_main_gap_hi,
+        if is_auto(main_basis) { 0.0 } else { main_basis });
     let cross_basis = if main_is_x { n.definite_content_h().unwrap_or(0.0) } else { content_w };
-    let cross_gap = n.flex_cross_gap + n.flex_cross_gap_frac * cross_basis;
+    let cross_gap = clamp_affine(n.flex_cross_gap + n.flex_cross_gap_frac * cross_basis,
+                                 n.flex_cross_gap_lo, n.flex_cross_gap_hi, cross_basis);
     let cnt = children[i].len();
 
     let kids: Vec<usize> = children[i].clone();
@@ -4980,7 +4997,10 @@ const GRID_TRACK_STRIDE: usize = 7;
 // A grid's header in `grids`: the number of track specs that follow, column gap (px, fraction), row gap (px,
 // fraction), declared row height, and the `auto-fill` / `auto-fit` repeat inside those specs — where its ONE
 // marshalled copy starts, how long it is, and its kind (1 fill, 2 fit; -1 / 0 / 0 when there is none).
-const GRID_HEADER: usize = 9;
+// …13 since 2026-09-22: each gap carries its clamped-affine BOUNDS (lo/hi) beside its `px + frac` pair, so a
+// `gap: min(10%, 20px)` is a figure this computes rather than one it has to be handed resolved.
+// …17 since the bounds became affine PAIRS (`min(10%, 20%)` is one line capped by another).
+const GRID_HEADER: usize = 17;
 impl GridTrack {
     fn decode(grids: &[f64], o: usize) -> GridTrack {
         GridTrack {
@@ -5351,7 +5371,12 @@ fn content_intrinsic(i: usize, inputs: &[Cell<Input>], runs: &[Run], run_texts: 
                 return None;
             }
             text_intrinsic(&runs[rs..re], &run_texts[rs..re], n.ws_mode,
-                           (n.indent_px, n.indent_hanging, n.indent_each_line),
+                           // …CLAMPED at a basis of ZERO, which is what an intrinsic measure has: a
+                           // `clamp(5px, 50%, 30px)` indent contributes its LOWER bound there, not its
+                           // constant term. Without the clamp here the measure took 0 where the oracle takes
+                           // 5, and the 39 mismatches that found it were the first cases any sweep had of an
+                           // indent inside a comparison function.
+                           (clamp_affine(n.indent_px, n.indent_lo, n.indent_hi, 0.0), n.indent_hanging, n.indent_each_line),
                            inputs, runs, run_texts, grids, children)
         }
         // …a LIST BOX excepted: its rows ARE CSS content, and the oracle's `minContentWidth` reads them (it asks
@@ -5553,6 +5578,11 @@ fn flex_intrinsic_widths(i: usize, inputs: &[Cell<Input>], runs: &[Run], run_tex
 // each side. `None` for a PUSHED atomic (its box is not in the stream), a tab / other control, or a ZWJ under
 // per-character breaking (the oracle's per-character advance carries the previous character).
 #[allow(clippy::too_many_arguments)]
+// `clamp(lo, v, hi)` where each bound is its own affine function of the basis — the one arithmetic the two
+// engines have to agree on for a comparison function (`nlClampedAt` in layout.js is the same three lines).
+fn clamp_affine(v: f64, lo: (f64, f64), hi: (f64, f64), basis: f64) -> f64 {
+    v.max(lo.0 + lo.1 * basis).min(hi.0 + hi.1 * basis)
+}
 fn text_intrinsic(runs: &[Run], run_texts: &[Option<Vec<u16>>], ws_mode: u8, indent: (f64, bool, bool), inputs: &[Cell<Input>], all_runs: &[Run], all_texts: &[Option<Vec<u16>>], grids: &[f64], children: &[Vec<usize>]) -> Option<(f64, f64)> {
     // …per RUN, because an inline may declare its own `white-space` (`Run::ws_mode`) and every one of these is
     // about the run it belongs to. `pin` is the exception: "this box never wraps, so its min-content IS its
@@ -5908,8 +5938,11 @@ fn measure_grid(
     // The gaps arrive as `px + fraction` of the content box along their axis (`gapSpec`): a row gap's fraction
     // resolves against the content height where that is DEFINITE — declared or imposed — and is nothing where the
     // height is the rows' own, as the oracle's `layoutGrid` has it.
-    let col_gap = grids[gs + 1] + grids[gs + 2] * content_w;
-    let row_gap = grids[gs + 3] + if grids[gs + 4] != 0.0 { n.definite_content_h().map_or(0.0, |h| grids[gs + 4] * h) } else { 0.0 };
+    let col_gap = clamp_affine(grids[gs + 1] + grids[gs + 2] * content_w,
+                               (grids[gs + 9], grids[gs + 10]), (grids[gs + 11], grids[gs + 12]), content_w);
+    let row_h = n.definite_content_h().unwrap_or(0.0);
+    let row_gap = clamp_affine(grids[gs + 3] + if grids[gs + 4] != 0.0 { grids[gs + 4] * row_h } else { 0.0 },
+                               (grids[gs + 13], grids[gs + 14]), (grids[gs + 15], grids[gs + 16]), row_h);
     let decl_row_h = grids[gs + 5];
     let tmpl_base = gs + GRID_HEADER;
     // The in-flow items, in record order — the out-of-flow children join no row.
@@ -6618,6 +6651,12 @@ mod tests {
             edge_px: [0.0; 8],
             inset_frac: [0.0; 4],
             flex_main_gap_frac: 0.0,
+            flex_main_gap_lo: (f64::NEG_INFINITY, 0.0),
+            flex_main_gap_hi: (f64::INFINITY, 0.0),
+            flex_cross_gap_lo: (f64::NEG_INFINITY, 0.0),
+            flex_cross_gap_hi: (f64::INFINITY, 0.0),
+            indent_lo: (f64::NEG_INFINITY, 0.0),
+            indent_hi: (f64::INFINITY, 0.0),
             flex_cross_gap_frac: 0.0,
             flex_basis_kw: 0,
             scrolls_x: false,
@@ -7704,7 +7743,12 @@ mod tests {
     // A marshalled grid buffer: the header, `specs` track sides (base kind/val, limit kind/val, is_fr, weight,
     // is_auto) and `places` item placements (start line, end line, span) — the shape `nlShadowRun` writes.
     fn grid_buffer(literal: usize, repeat: (f64, usize, u8), specs: &[[f64; 7]], places: &[[f64; 3]]) -> Vec<f64> {
-        let mut g = vec![literal as f64, 0.0, 0.0, 0.0, 0.0, f64::NAN, repeat.0, repeat.1 as f64, repeat.2 as f64];
+        // …GRID_HEADER wide, and the tail is the two gaps' clamped-affine BOUNDS (lo px/frac, hi px/frac per
+        // axis) at their identities. Built by hand here, so the header's length is one of the three places a
+        // stride change has to be made — this test file is the third, and it is the one that catches it.
+        let mut g = vec![literal as f64, 0.0, 0.0, 0.0, 0.0, f64::NAN, repeat.0, repeat.1 as f64, repeat.2 as f64,
+                         f64::NEG_INFINITY, 0.0, f64::INFINITY, 0.0,
+                         f64::NEG_INFINITY, 0.0, f64::INFINITY, 0.0];
         for spec in specs {
             g.extend_from_slice(spec);
         }

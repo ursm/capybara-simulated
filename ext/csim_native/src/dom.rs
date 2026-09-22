@@ -892,7 +892,7 @@ fn register_font_bytes(
 
 // Fields per node in the layoutPass input buffer, and per run in the runs buffer (flat Float64Arrays).
 // Order MUST match the JS packer (layout.js `__csimLayoutShadowRun`) and layout::Input / layout::Run.
-const LAYOUT_STRIDE: usize = 125;
+const LAYOUT_STRIDE: usize = 137;
 const RUN_STRIDE: usize = 12;
 
 // Decode a V8 Float64Array argument into a Vec<f64> (native-endian raw bytes).
@@ -964,12 +964,16 @@ fn layout_pass(
             starts_bfc: r[30] != 0.0,
             flex_justify: r[31] as u8,
             flex_main_gap: r[32],
+            flex_main_gap_lo: (r[125], r[126]),
+            flex_main_gap_hi: (r[127], r[128]),
             flex_cross_align: r[33] as u8,
             flex_main_is_x: r[34] != 0.0,
             flex_wrap: r[35] != 0.0,
             flex_cross_flip: r[35] == 2.0,
             flex_align_content: r[36] as u8,
             flex_cross_gap: r[37],
+            flex_cross_gap_lo: (r[129], r[130]),
+            flex_cross_gap_hi: (r[131], r[132]),
             flex_main_reverse: r[38] != 0.0,
             flex_cross_far: (r[65] as u32) & 32768 != 0,
             // A text block holding an out-of-flow child the walk REPLAYED. Those are the only children a text
@@ -1047,6 +1051,8 @@ fn layout_pass(
             auto_margins: r[76] as u8,
             legacy_align: ((r[65] as u32) >> 3 & 3) as u8,
             indent_px: r[96],
+            indent_lo: (r[133], r[134]),
+            indent_hi: (r[135], r[136]),
             indent_frac: r[118],
             indent_hanging: (r[65] as u32) & 256 != 0,
             indent_each_line: (r[65] as u32) & 512 != 0,
