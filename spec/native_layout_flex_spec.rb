@@ -96,6 +96,15 @@ RSpec.describe 'native layout flex parity', if: ENV.fetch('CSIM_JS_ENGINE', 'v8'
     expect(r['nativeFlexRows']).to be >= 1, "the row's item widths were pushed, not native: #{r.inspect}"
   end
 
+  # …and one MARKED descendant's, for an example whose figure is inside an item rather than the item itself.
+  def marked_box(body)
+    with_simulated_session(page(body)) do |session|
+      session.visit '/'
+      session.evaluate_script("(function () { var r = document.getElementById('m').getBoundingClientRect();
+                                 return [r.width, r.height]; })()")
+    end
+  end
+
   # Every item's box relative to its container, for an example that has to say WHERE the boxes landed and
   # not only that the two engines agree about it.
   def item_boxes(body)
@@ -824,21 +833,34 @@ RSpec.describe 'native layout flex parity', if: ENV.fetch('CSIM_JS_ENGINE', 'v8'
       expect_native_flex('<div style="display:flex;width:400px"><div><div style="height:150%">pct</div></div><div style="height:40px;width:50px"></div></div>')
       expect_native_flex(%(<div style="display:flex;width:400px"><div><div style="padding:0 10%">pct</div></div><div style="width:30px"></div></div>))
       expect_native_flex(%(<div style="#{col};width:400px"><div><div style="width:50%;min-height:20%">pct</div></div></div>))
+      # …and one inside a LINEAR `calc()` since 2026-09-22: the record carries it as the pair `px + frac x basis`
+      # (rec[100..105] beside rec[119..124]) and native resolves it at the basis it has, exactly as it does a
+      # plain one. It fell back until then — for want of a constant term to send, not for want of a basis.
+      # The ITEM's box is asserted beside the parity, and against CHROME, because parity alone would be green
+      # if native and the oracle agreed on a wrong figure: this increment put new arithmetic on the native
+      # side, and `nativeFlexRows >= 1` only says which path ran.
+      calc_row = '<div style="display:flex;width:400px"><div><div id="m" style="height:calc(50% + 2px)">pct</div></div><div style="height:40px;width:50px"></div></div>'
+      expect_native_flex(calc_row)
+      expect(marked_box(calc_row)).to eq([19.546875, 22])   # Chrome 153
+      calc_col = %(<div style="#{col};height:200px"><div style="flex:1 1 auto"><div id="m" style="height:calc(50% + 2px)">pct</div></div><div style="flex:1 1 auto">plain</div></div>)
+      expect_native_flex(calc_col)
+      expect(marked_box(calc_col)).to eq([300, 52])         # Chrome 153
     end
     # …and it FALLS BACK for a percentage the walk still resolves, which is what the narrowed test names: one
-    # inside a MATH function (there is no fraction to send, so it travels resolved wherever the box sits), or
-    # under a TABLE part, an OUT-OF-FLOW box or an INLINE — routes where the record's parent is not the box the
-    # percentage resolves against, so the figure was resolved against the item's FINAL size and native measures
-    # at a provisional one. Dropping the test put 15 wrong boxes into a 2,268-case math-function sweep, 28 into
-    # a 1,200-case route sweep and 36 into a 960-case inline sweep, all 0 at the parent commit: a
-    # `height: calc(50% + 2px)` item in a wrapping row came out 55.5 where Chrome and the oracle say 58.
+    # inside a NON-LINEAR math function (a `min()` / `max()` / `clamp()` that changes branch as the basis grows,
+    # so there is no `px + frac` pair to send and it travels resolved wherever the box sits), or under a TABLE
+    # part, an OUT-OF-FLOW box or an INLINE — routes where the record's parent is not the box the percentage
+    # resolves against, so the figure was resolved against the item's FINAL size and native measures at a
+    # provisional one. Dropping the test put 15 wrong boxes into a 2,268-case math-function sweep, 28 into a
+    # 1,200-case route sweep and 36 into a 960-case inline sweep, all 0 at the parent commit.
+    # A LINEAR `calc()` left this list on 2026-09-22 and is in the arm above; the figure that used to be cited
+    # here (`height: calc(50% + 2px)` in a wrapping row, 55.5 against Chrome's 58) is now 22, Chrome's own.
     it 'falls back for a percentage the walk resolves, not for one native does' do
-      ['<div style="display:flex;width:400px"><div><div style="height:calc(50% + 2px)">pct</div></div><div style="height:40px;width:50px"></div></div>',
-       '<div style="display:flex;width:400px"><div><div style="min-height:min(50%,80px)">pct</div></div><div style="height:40px;width:50px"></div></div>',
+      ['<div style="display:flex;width:400px"><div><div style="min-height:min(50%,80px)">pct</div></div><div style="height:40px;width:50px"></div></div>',
        '<div style="display:flex;width:400px"><div><div style="position:absolute;height:50%;width:10px"></div>pct</div><div style="height:40px;width:50px"></div></div>',
        # …and the INLINE route, whose record hangs under the TEXT BLOCK rather than under the inline
        '<div style="display:flex;width:400px"><div><div style="height:100%">words <b>b <span style="display:inline-block;height:50%;width:20px"></span></b></div></div><div style="height:40px;width:50px"></div></div>',
-       %(<div style="#{col};height:200px"><div style="flex:1 1 auto"><div style="height:calc(50% + 2px)">pct</div></div><div style="flex:1 1 auto">plain</div></div>)].each do |body|
+       %(<div style="#{col};height:200px"><div style="flex:1 1 auto"><div style="min-height:clamp(10px,50%,80px)">pct</div></div><div style="flex:1 1 auto">plain</div></div>)].each do |body|
         expect(run_shadow(body)).to include('ok' => true, 'mismatches' => 0, 'nativeFlexRows' => 0), body
       end
     end
