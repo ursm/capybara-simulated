@@ -80,6 +80,15 @@ RSpec.describe 'native layout flex parity', if: ENV.fetch('CSIM_JS_ENGINE', 'v8'
 
   # Parity, AND the row's item widths were resolved by the native engine (`flex_row_sizes`), not pushed —
   # `nativeFlexRows` counts the flex rows that took that path.
+  # A wrap COLUMN whose stretching item holds `mid` (the block whose used width is the percentage's basis)
+  # holding `pct`. The second item is a fixed box, which is what makes the container's pushed path
+  # unrecoverable — so where the pre-filter refuses, the whole walk declines and names itself.
+  def wrap_col_pct(mid, pct)
+    %(<div style="display:flex;flex-direction:column;width:300px;flex-wrap:wrap"><div><div style="#{mid}">) +
+      %(<div style="#{pct}">some rather longer words here to measure</div></div></div>) +
+      %(<div style="width:30px;height:20px"></div></div>)
+  end
+
   def expect_native_flex(body)
     r = run_shadow(body)
     expect(r).to include('ok' => true), "harness bailed: #{r.inspect}"
@@ -873,17 +882,88 @@ RSpec.describe 'native layout flex parity', if: ENV.fetch('CSIM_JS_ENGINE', 'v8'
       expect_native_flex(%(<div style="#{col}"><div style="flex-basis:20px;height:100px">a<br>b<br>c</div><div style="height:30px">b</div></div>))
       expect_native_flex(%(<div style="#{col};flex-wrap:wrap;height:70px"><div style="flex-basis:20px;height:100px">a<br>b<br>c</div><div style="height:30px">b</div></div>))
     end
-    # …and a WRAP column's STRETCHING item falls back for ANY percentage, plain ones included: it is measured at
-    # its shrink-to-fit width and then RE-STRETCHED, so the BASIS itself moves between the measure and the final
-    # layout and it makes no difference who resolved it. 6 shapes of a 2,548-case sweep break without this.
-    # Closing it wants the re-stretch to re-measure.
-    it "falls back for a wrap column's stretching item whose subtree declares any percentage" do
+    # …and a WRAP column's STRETCHING item is measured at its shrink-to-fit width and then RE-STRETCHED, so the
+    # BASIS of any percentage in its subtree moves between the measure and the final layout. That used to
+    # refuse EVERY such item — "it makes no difference who resolved it" — and it is a CONFORMANCE worry, not a
+    # parity one: both engines measure at the same provisional width, so both are wrong together and the
+    # harness sees nothing. Six shapes of a 2,548-case sweep did break, and they were the grid-area
+    # containing block (7f9919e8), not this.
+    it 'takes a wrap column\'s stretching item natively even when its subtree declares a percentage' do
       [%(<div style="#{col};flex-wrap:wrap"><div><div style="padding-top:50%">x</div></div></div>),
        %(<div style="#{col};flex-wrap:wrap"><div><div style="width:50%">some text words here to wrap</div></div><div>two</div></div>)].each do |body|
-        expect(run_shadow(body)).to include('ok' => true, 'mismatches' => 0, 'nativeFlexRows' => 0), body
+        expect_native_flex(body)
       end
-      # …and the same container with the item NOT stretching stays native, so the fallback is the stretch's
+      # …and the same container with the item NOT stretching was native before and stays native
       expect_native_flex(%(<div style="#{col};flex-wrap:wrap"><div style="align-self:flex-start"><div style="width:50%">some text words here to wrap</div></div><div>two</div></div>))
+    end
+    # …except where the ORACLE's margin basis is a PREDICTION. A margin run is needed before anything is laid
+    # out, so `marginBasis` cannot measure: with no declared width it answers `cbW − the box's own edges`, on
+    # the rule that a block FILLS its containing block. Native resolves the same percentage against the width
+    # the box actually got, and the two part in the three ways that prediction can be wrong — a vertical
+    # `writing-mode` (an `auto` width is a shrink-to-fit there), an intrinsic width KEYWORD (which
+    # `marginBasis` reads as no width at all), and a `min-width` / `max-width` clamp (which it never applies).
+    # Measured on this one shape, in three columns, because which engine is wrong is not the same answer for
+    # all three — mid box / oracle / native / Chrome, for the `margin: 10% 0` under it:
+    #   (plain block)               30 / 30 / 30      …the prediction is exact
+    #   `max-width: 100px`          30 / 10 / 10      …the ORACLE alone is wrong
+    #   `width: fit-content`        30 / 26.83 / 26.83  …the ORACLE alone is wrong
+    #   `writing-mode: vertical-rl` 30 / 26.83 / 26.83  …and this one agrees with Chrome BY ACCIDENT: Chrome's
+    #     figure is 10% of the mid box's HEIGHT (its inline size there, 268.34, its width being 36), and
+    #     native's is 10% of a WIDTH that only lands on 268.34 because this engine lays no vertical text out.
+    # What the refusal buys is a DECLINE and not a right answer — the
+    # pushed path for these shapes is `flex-item-pushed-cross-unrecoverable`, so the break is hidden rather
+    # than fixed, and the fix is `marginBasis` itself, booked against the oracle-removal backlog.
+    # Written as a MECHANISM: "a vertical writing mode" was the same list as measured over the five
+    # `flexpct*` sweeps and it is not the rule — those generators all put a plain `<div>` between the item and
+    # the percentage, and a plain block fills. The axis they were missing is `flexpctwidth` (3,360 shapes,
+    # built for this), where the symptom version cost 24 parity breaks and this one costs none.
+    {
+      'a vertical writing mode' => 'writing-mode:vertical-rl',
+      'a max-width clamp'       => 'max-width:100px',
+      'an intrinsic keyword'    => 'width:fit-content'
+    }.each do |name, mid|
+      it "falls back where the oracle's margin basis is predicted and wrong: #{name}" do
+        expect(run_shadow(wrap_col_pct(mid, 'margin:10% 0')))
+          .to include('ok' => false, 'reason' => 'flex-item-pushed-cross-unrecoverable'), mid
+        # …and it is the PREDICTION that refuses, not the box: the same box with no percentage under it is
+        # native, so the refusal is the pair and not either half.
+        expect_native_flex(wrap_col_pct(mid, 'margin:10px 0'))
+      end
+    end
+    # …while a declared LENGTH or PERCENTAGE width is exact, and a plain block really does fill, so the
+    # prediction is right and the percentage under them stays native. This arm catches the mechanism being
+    # WIDENED — to "any declared width", or to "any block" — and only that: narrowing it back to a vertical
+    # writing mode leaves all three native and this passes, which is what the three mechanism arms above are
+    # for. Chrome agrees with both engines on all three (30 for the plain box, 12, and 15).
+    it 'takes one whose margin basis the prediction gets right' do
+      ['width:120px', 'width:50%', ''].each {|mid| expect_native_flex(wrap_col_pct(mid, 'margin:10% 0')) }
+    end
+    # …and the refusal is asked of the ELEMENT, not of the document. `declaresLayoutProp` — the obvious
+    # spelling, and the one this shipped with for an afternoon — answers `cascadeDeclaresProperty`, a latch
+    # over the page's whole rule index: one unrelated rule mentioning `min-width` anywhere made it true of
+    # every element and put the refusal back over everything. No sweep could see it, because not one page in
+    # the corpus has a stylesheet at all.
+    it 'is not turned on by a rule that mentions min-width somewhere else on the page' do
+      ['min-width', 'max-width'].each do |prop|
+        expect_native_flex(%(<style>.unrelated{#{prop}:1px}</style>) + wrap_col_pct('', 'margin:10% 0'))
+      end
+      # …and a value that can never clamp is not a refusal either, however it is written: a zero minimum in
+      # any spelling `declaredValue` hands over as typed (it canonicalises nothing), and a CSS-WIDE keyword,
+      # which the cascade also passes through verbatim — `min-width: initial` IS `min-width: auto`, and
+      # `all: initial` is what every Web Component reset is written with.
+      ['min-width:0', 'min-width:0px', 'min-width:0.0px', 'min-width:+0%', 'max-width:none', 'min-width:auto',
+       'min-width:initial', 'max-width:unset'].each do |mid|
+        expect_native_flex(wrap_col_pct(mid, 'margin:10% 0'))
+      end
+    end
+    # …and the LOGICAL spelling is the same declaration: `min-inline-size` in a horizontal writing mode is
+    # `min-width`, the cascade merges the twins, and a box that takes one is a box whose width the prediction
+    # does not have. Chrome: the mid box 600 wide and the margin 60, against the 30 the oracle predicts. This
+    # is the only arm that fails if the read is narrowed to the physical property name.
+    it 'sees a clamp written with a logical property name' do
+      expect(run_shadow(wrap_col_pct('min-inline-size:600px', 'margin:10% 0')))
+        .to include('ok' => false, 'reason' => 'flex-item-pushed-cross-unrecoverable')
+      expect_native_flex(wrap_col_pct('min-inline-size:600px', 'margin:10px 0'))
     end
     it 'floors a border-box flex container at its own border and padding' do
       expect_native_flex(%(<div style="#{col};box-sizing:border-box;height:5px;padding:10px"><div>x</div></div>))
