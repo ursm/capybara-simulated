@@ -1,7 +1,7 @@
 # frozen_string_literal: true
 # Native layout L2 (inline/text) — geometry shadow-parity: a text-containing block's native height
 # (greedy line count × line-height, measured in-process via fontations) must equal the JS layout's `_lb`
-# on pure-text blocks (single font, white-space:normal). Validates the native line breaker + text-block
+# on pure-text blocks (single font, every `white-space` mode). Validates the native line breaker + text-block
 # height against the JS oracle. V8 only.
 require 'capybara/simulated'
 require 'rack'
@@ -57,7 +57,32 @@ RSpec.describe 'native layout L2 text-block parity', if: ENV.fetch('CSIM_JS_ENGI
     expect(got).to be_within(0.05).of(chrome), "#{body}: #m at #{axis} #{got}, Chrome #{chrome}"
   end
 
-  def expect_parity(body, chrome_x = nil, chrome_y: nil)
+  # …and its sibling for a figure the two engines AGREE on where Chrome gives another. `chrome_x` stays what
+  # it says it is — a number read out of Chrome — so a shared divergence gets a slot of its own rather than
+  # being smuggled through that one, which would put a wrong number in the failure message and make a future
+  # conformance FIX read as a regression. Chrome's own figure is named in the message instead.
+  # The two must actually DIFFER: passing the same number twice means the shape was never a divergence and
+  # belongs in `chrome_x`, and nothing else would ever say so — `chrome` is otherwise read only when the
+  # example is already failing, which is the one moment nobody is checking it.
+  def expect_shared(got, shared, chrome, body, axis)
+    expect(shared).not_to(
+      be_within(0.05).of(chrome),
+      "#{body}: shared #{shared} and Chrome #{chrome} agree — assert it as `chrome_#{axis}`, not as shared"
+    )
+    expect(got).to(
+      be_within(0.05).of(shared),
+      "#{body}: #m at #{axis} #{got}; both engines say #{shared}, Chrome says #{chrome}"
+    )
+  end
+
+  # `chrome_x` stays POSITIONAL because 294 call sites in this file spell it that way and it reads well at
+  # each of them (`expect_parity(body, 6, chrome_y: 0)`); the pair below is keyword because it only ever
+  # appears together.
+  def expect_parity(body, chrome_x = nil, chrome_y: nil, shared_x: nil, shared_x_chrome: nil)
+    # A shared divergence is only RECORDED if the number it diverges from is written down beside it, so the
+    # pair cannot be half-given.
+    raise ArgumentError, 'shared_x needs shared_x_chrome' if !shared_x.nil? && shared_x_chrome.nil?
+
     with_page(body) do |session|
       r = parity(session)
       expect(r).to include('ok' => true), "harness bailed: #{body}: #{r.inspect}"
@@ -65,6 +90,7 @@ RSpec.describe 'native layout L2 text-block parity', if: ENV.fetch('CSIM_JS_ENGI
       expect(r['mismatches']).to eq(0), "mismatch: #{body}: #{r.inspect}"
       expect_near(marker_x(session), chrome_x, body, 'x') unless chrome_x.nil?
       expect_near(marker_y(session), chrome_y, body, 'y') unless chrome_y.nil?
+      expect_shared(marker_x(session), shared_x, shared_x_chrome, body, 'x') unless shared_x.nil?
     end
   end
 
@@ -81,6 +107,101 @@ RSpec.describe 'native layout L2 text-block parity', if: ENV.fetch('CSIM_JS_ENGI
     # without it goes native. Without this the example stays green while it silently stops covering the rule
     # (a new walk gate anywhere in the shape would decline it just as well).
     expect_parity(native_body)
+  end
+
+  # `break-spaces` lays a LINE out exactly as `pre-wrap` does — `placeTextRun` asks `PRESERVING_WS` and
+  # `modeWraps`, and both answer the same for the two — and parts from it only in the INTRINSIC measure, where
+  # every preserved space is content that never hangs and carries a break after it. So the mode table gives it
+  # `pre-wrap`'s code and `nlIntrinsicMeasurableOf` refuses it, which is the disagreement fenced off where it
+  # lives rather than a whole mode refused for it.
+  # It was refused outright before 2026-09-22, and not by name: `WS_MODE` simply had no entry, so the walk
+  # declined without naming itself and the shape landed in `unsupported subtree` — 1,230 of the 1,782 that
+  # reason covered, found only by censusing which of the walk's 155 refusal sites had fired.
+  # KNOWN DIVERGENCE, both engines: `break-spaces` also breaks AFTER EVERY SPACE and lets none of them hang,
+  # so Chrome 153 carries two of them onto the second line and puts the marker at 57.609375 where both engines
+  # put it at 38.4 — the answer `pre-wrap` gives. That is what "lays a line out as pre-wrap" costs, and it is
+  # SHARED, so the harness sees nothing; the arm asserts the shared answer and names Chrome's beside it.
+  it 'lays a break-spaces line out as pre-wrap, which is all either engine distinguishes' do
+    bs = '<div style="width:80px;font:16px monospace;white-space:break-spaces">aaaa      bbbb' \
+         '<i id="m" style="display:inline-block;width:4px;height:4px"></i></div>'
+    # …through `shared_x`, not `chrome_x`: 38.4 is what both engines say and Chrome 153 says 57.609375.
+    expect_parity(bs, shared_x: 38.4, shared_x_chrome: 57.609375, chrome_y: 35)
+    # …and it really is `pre-wrap`'s answer and not a coincidence: the same shape in `pre-wrap` is the same x,
+    # and THERE it is Chrome's own, so it goes through `chrome_x`.
+    expect_parity(bs.sub('break-spaces', 'pre-wrap'), 38.40625, chrome_y: 35)
+  end
+
+  # …and THAT arm pins nothing about native, which is worth stating because it took an A/B to find out. The
+  # only native code this increment changes is `line_layout`'s mode table gaining 5 as a PRESERVING mode, and
+  # the shape above cannot see it: at 80px the collapsed reading (`aaaa bbbb`, 86.4) overflows and wraps at
+  # its one space, so preserve and collapse put the marker on the same line at the same x. Dropping 5 from the
+  # table left all 136 examples in this file green — a fourth vacuous guard, caught before it shipped.
+  # This is the shape that sees it. At 120px the preserved reading (14 chars, 134.4) does not fit and the
+  # collapsed one (9 chars, 86.4) does, so the BLOCK is two lines or one — and the block's height is a box
+  # the harness compares, where the marker on a line inside it is not. With 5 dropped from the table native
+  # makes the page 26 tall against the oracle's 48: five mismatches, `<html>` included.
+  # Chrome AGREES here (the marker's y is 44 in all three), so this one is a plain `chrome_y` — the divergence
+  # the arm above records needs the spaces to fall at a wrap, and here they do not.
+  it 'preserves a break-spaces run, which decides the line COUNT and so the block height' do
+    bs = '<div style="width:120px;font:16px monospace;white-space:break-spaces">aaaa      bbbb</div>' \
+         '<div id="m" style="height:4px"></div>'
+    expect_parity(bs, 0, chrome_y: 44)
+    # …and the collapsing control, so the example cannot pass by 120px being wide enough for either reading:
+    # the same text under `normal` IS one line, and the marker sits at 22.
+    expect_parity(bs.sub('break-spaces', 'normal'), 0, chrome_y: 22)
+  end
+  # …and the INTRINSIC half is what declines. `contentIntrinsicWidths` makes the min-content of `aa   bb` the
+  # width of `aa ` where a `pre-wrap` measure gives `aa` — 28.8 against 19.2 — and native has only the second
+  # rule, so a shape whose width comes from a min-content measure is the oracle's alone.
+  # Measured the hard way: aliasing the mode to `pre-wrap` outright passes the whole 8,640-case `wsonly` sweep
+  # with no mismatch, because not one of its shapes asks for a min-content. This arm is that missing shape —
+  # and the ORACLE's WIDTH here is Chrome's (28.8125, marker at 19.203125), so the refusal buys a right width.
+  # Not a right answer: the oracle then lays that box out by `pre-wrap`'s line rule — the shared divergence the
+  # arm above names — so it is 44 tall with the marker at y 35 where Chrome 153 says 66 and 57. One refusal,
+  # one of the two halves.
+  # …asked at FOUR gates, because the mode is inherited but it can also be declared on a `<span>`, on one
+  # inside that, or on a box-less `display: contents` element, and the block gate sees none of those. What the
+  # four buy is the REASON, not the answer: opened, all four shapes still decline, as the unnamed `native
+  # declined` from `text_intrinsic`'s `?` failing the whole pass. Shut, they decline as
+  # `shrink-to-fit-child-unmeasurable` with only the measured box off the record — which is why every arm
+  # asserts the reason and not merely that something declined.
+  it 'declines a break-spaces box whose width is a min-content measure' do
+    expect_declined_x('<div style="width:min-content;font:16px monospace;white-space:break-spaces">aa   bb' \
+                      '<i id="m" style="display:inline-block;width:4px;height:4px"></i></div>',
+                      19.203125,
+                      '<div style="width:min-content;font:16px monospace;white-space:pre-wrap">aa   bb' \
+                      '<i id="m" style="display:inline-block;width:4px;height:4px"></i></div>',
+                      reason: 'shrink-to-fit-child-unmeasurable')
+    expect_declined_x('<div style="width:min-content;font:16px monospace">aa' \
+                      '<span style="white-space:break-spaces">   </span>bb' \
+                      '<i id="m" style="display:inline-block;width:4px;height:4px"></i></div>',
+                      19.203125,
+                      '<div style="width:min-content;font:16px monospace">aa' \
+                      '<span style="white-space:pre-wrap">   </span>bb' \
+                      '<i id="m" style="display:inline-block;width:4px;height:4px"></i></div>',
+                      reason: 'shrink-to-fit-child-unmeasurable')
+    # …and the two gates the first two shapes never reach. `nlIntrinsicMeasurableOf` asks about the block and
+    # about its DIRECT inline children, so a mode declared one level further in is `nlInlineMeasurable`'s to
+    # refuse; and a mode declared on a box-less `display: contents` element is `nlSplicedTextMeasurable`'s,
+    # since `layoutChildren` hands that element's text to the block with no element of its own to ask.
+    # Both measured in Chrome at 19.203125, the same as the first two: `display: contents` generates no box,
+    # so the three spellings are one shape to the browser.
+    expect_declined_x('<div style="width:min-content;font:16px monospace">aa' \
+                      '<span><span style="white-space:break-spaces">   </span></span>bb' \
+                      '<i id="m" style="display:inline-block;width:4px;height:4px"></i></div>',
+                      19.203125,
+                      '<div style="width:min-content;font:16px monospace">aa' \
+                      '<span><span style="white-space:pre-wrap">   </span></span>bb' \
+                      '<i id="m" style="display:inline-block;width:4px;height:4px"></i></div>',
+                      reason: 'shrink-to-fit-child-unmeasurable')
+    expect_declined_x('<div style="width:min-content;font:16px monospace">aa' \
+                      '<span style="display:contents;white-space:break-spaces">   </span>bb' \
+                      '<i id="m" style="display:inline-block;width:4px;height:4px"></i></div>',
+                      19.203125,
+                      '<div style="width:min-content;font:16px monospace">aa' \
+                      '<span style="display:contents;white-space:pre-wrap">   </span>bb' \
+                      '<i id="m" style="display:inline-block;width:4px;height:4px"></i></div>',
+                      reason: 'shrink-to-fit-child-unmeasurable')
   end
 
   # `pre-line` COLLAPSES SPACES and KEEPS NEWLINES — two independent axes — and the node-level gate that
@@ -125,8 +246,9 @@ RSpec.describe 'native layout L2 text-block parity', if: ENV.fetch('CSIM_JS_ENGI
   # …and `break-spaces`, whose whitespace-only block used to be an EMPTY one to native and a 22px-tall one to
   # the oracle — 3 mismatches on a shape the unified definition now refuses outright, since `PRESERVING_WS`
   # holds it and the classifier asks the same question the oracle's placement does. (The CLASSIFIER is what
-  # fires here, not the mode gate: a break-spaces block with content declines as `unsupported subtree`
-  # instead, the mode having no `WS_MODE` code. These two shapes never reach it.)
+  # fires here, not the mode gate: a break-spaces block WITH content used to decline as `unsupported subtree`,
+  # the mode having no `WS_MODE` code at all, and since 2026-09-22 it has one and only its MEASURE declines.
+  # These two shapes never reach either.)
   # A plain list, not `%W[…]`: that splits on whitespace, so `%W[\n  ]` is the ONE-element array `["\n"]` and
   # the space case — half of what this example is about, and a mismatch at HEAD exactly like the newline —
   # was silently never run.

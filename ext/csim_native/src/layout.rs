@@ -229,14 +229,19 @@ pub(crate) struct Input {
     // inside it (0 when there is none). The oracle does not lay that text out as a real flex item, it only
     // floors the container's AUTO cross size at this line-height (`anonymousItemHeight`); native does the same.
     pub(crate) anon_cross: f64,
-    // A text block's OWN `white-space` mode: 0 normal, 1 nowrap, 2 pre, 3 pre-wrap, 4 pre-line. The three
-    // orthogonal behaviours it names — COLLAPSE whitespace (0/1/4) vs PRESERVE it (2/3), SOFT-WRAP at break
-    // opportunities (0/3/4) vs never (1/2), a NEWLINE forcing a break (2/3/4) — belong to the RUN they are
+    // A text block's OWN `white-space` mode: 0 normal, 1 nowrap, 2 pre, 3 pre-wrap, 4 pre-line,
+    // 5 break-spaces. The three orthogonal behaviours it names — COLLAPSE whitespace (0/1/4) vs PRESERVE it
+    // (2/3/5), SOFT-WRAP at break opportunities (0/3/4/5) vs never (1/2), a NEWLINE forcing a break (2/3/4/5)
+    // — belong to the RUN they are
     // about, so `line_layout` reads those off `Run::ws_mode`. What it still asks of the BLOCK is whether the
     // LINE may break at all (`outerWraps`: a non-wrapping RUN forbids breaks inside itself, the opportunity
     // before it is the block's to give), `pin` in `text_intrinsic` ("a box that never wraps has its
     // max-content for a min-content", which the oracle asks of the element), and the mode an empty block and
     // the anonymous groups are read under.
+    // 5 shares 3's triple, which is why `line_layout` needs no arm of its own for it: a line under
+    // `break-spaces` is a line under `pre-wrap`. The two part in the INTRINSIC measure alone — every
+    // preserved space is content that never hangs, with a break after each — and `text_intrinsic`'s `modes`
+    // deliberately has no 5, so a stream carrying one declines there instead of being measured by 3's rule.
     pub(crate) ws_mode: u8,
     // A pushed flex ITEM whose OWN height is AUTO (content-derived), carried past the parent-push that
     // overwrote `height` with the item's final (oracle-clamped) box. When set, `measure_flex` recomputes a
@@ -835,18 +840,34 @@ fn line_layout(
     let LineStyle {ws_mode, align, rtl, indent} = style;
     // (A Cell for the same reason `indent_now` is one: the band closures read the context the float arm writes.)
     let floats = std::cell::RefCell::new(floats);
-    // The three orthogonal `white-space` behaviours (see Input::ws_mode). `no_wrap` keeps the old name for the
-    // soft-wrap gates below: a line SOFT-wraps under normal (0) / pre-wrap (3) / pre-line (4), never under
-    // nowrap (1) / pre (2) — and it is what a space writes into its own break OPPORTUNITY, because the
-    // opportunity belongs to the run that queued the space, not to whatever meets it. `preserve` keeps every
-    // space as a real advance (pre / pre-wrap) rather than collapsing runs of whitespace to one
-    // break-opportunity; `break_nl` makes a literal newline force a break.
+    // The three orthogonal `white-space` behaviours (see Input::ws_mode), as ONE closed table rather than
+    // three predicates spelling out their own code lists. `no_wrap` keeps the old name for the soft-wrap gates
+    // below, and it is what a space writes into its own break OPPORTUNITY, because the opportunity belongs to
+    // the run that queued the space, not to whatever meets it. `preserve` keeps every space as a real advance
+    // rather than collapsing runs of whitespace to one break-opportunity; `break_nl` makes a literal newline
+    // force a break in a COLLAPSING run (the preserving branch breaks on its own newlines regardless, so 2 / 3
+    // / 5 never ask it — it is `pre-line`'s question).
     // …asked of the RUN that the behaviour is about, because an inline may declare its own `white-space`
     // (`Run::ws_mode`), and every run in the stream carries its owner's — the `<br>` and edge runs included.
-    let outer_wraps = !(ws_mode == 1 || ws_mode == 2);
-    let no_wrap_of = |m: u8| m == 1 || m == 2;
-    let preserve_of = |m: u8| m == 2 || m == 3;
-    let break_nl_of = |m: u8| m >= 2;
+    //
+    // A table, and an `Option`, for the same reason `text_intrinsic`'s `modes` is one: `WS_MODE` in `layout.js`
+    // is the only producer of these codes, and the day it grows one this has to REFUSE rather than guess. The
+    // predicates this replaced were three different shapes of guess — `m == 1 || m == 2` closed, `m >= 2` open
+    // — so a new code would have been given `pre-line`'s newline rule by an inequality nobody would have
+    // re-read. `break-spaces` (5) is 3's triple exactly; the pair that has to move together is this table and
+    // `text_intrinsic`'s.
+    let ws_modes = |m: u8| match m {
+        0 => Some((false, false, false)),   // normal      — collapse, wrap
+        1 => Some((true, false, false)),    // nowrap      — collapse, never wrap
+        2 => Some((true, true, true)),      // pre         — preserve, never wrap, newline breaks
+        3 => Some((false, true, true)),     // pre-wrap    — preserve, wrap, newline breaks
+        4 => Some((false, false, true)),    // pre-line    — collapse, wrap, newline breaks
+        5 => Some((false, true, true)),     // break-spaces— as pre-wrap for a LINE; parts only in the measure
+        _ => None,
+    };
+    // The block's own mode decides whether the LINE may break at all; a non-wrapping RUN forbids breaks inside
+    // itself, but the opportunity before it is the block's to give.
+    let outer_wraps = !ws_modes(ws_mode)?.0;
     let strut_desc = strut_lh - strut_asc;
     // `text-indent` NARROWS the line from its start edge (the oracle's `applyIndent`: `lineLeft += px` in ltr,
     // `lineRight -= px` in rtl) rather than moving a cursor inside it, so an indented empty line is still
@@ -1263,7 +1284,7 @@ fn line_layout(
                 // block's — an inline declaring `nowrap` holds its own words together inside a wrapping
                 // paragraph, and one declaring `pre` keeps its own spaces.
                 let ws_mode = run.ws_mode;
-                let (no_wrap, preserve, break_nl) = (no_wrap_of(ws_mode), preserve_of(ws_mode), break_nl_of(ws_mode));
+                let (no_wrap, preserve, break_nl) = ws_modes(ws_mode)?;
                 let text = run_texts.get(ri).and_then(|t| t.as_ref())?;
                 // A run that does not soft-wrap is ONE token: the oracle places `collapseRun(…)` less a
                 // trailing collapsible space in a single `placeOnLine`, and the only decision the line makes
@@ -5522,6 +5543,11 @@ fn text_intrinsic(runs: &[Run], run_texts: &[Option<Vec<u16>>], ws_mode: u8, ind
         2 => Some((false, true, true)),    // pre
         3 => Some((true, true, true)),     // pre-wrap
         4 => Some((true, false, true)),    // pre-line
+        // …and `break-spaces` (5) is deliberately absent: it wraps and preserves like `pre-wrap`, which is why
+        // `line_layout` takes it, but its intrinsic contribution is a rule of its own — every preserved space
+        // is content that never hangs, with a break after each, so the min-content of `aa   bb` is `aa ` wide
+        // and not `aa`. `?` below turns that into a decline for the whole stream, per RUN, which is where an
+        // inline that declares its own mode has to be caught: the block's gate never sees one.
         _ => None,
     };
     // `pin` — "this box never wraps, so its min-content IS its max-content" — is the BLOCK's, not the runs':
