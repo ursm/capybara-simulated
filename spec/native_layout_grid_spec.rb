@@ -843,6 +843,31 @@ RSpec.describe 'native layout grid parity', if: ENV.fetch('CSIM_JS_ENGINE', 'v8'
         expect(h).to eq(5), "#{body}: #{h}, Chrome 5"
       end
     end
+    # A `calc()` TRACK was `null` to `parseTrack` — `lengthPx` reads no percentage and no math function — and
+    # ONE invalid track invalidates the whole template, so `calc(25% + 10px) 1fr` was a single full-width
+    # column in BOTH engines where it is two. Parity was green for it and always would have been.
+    # Every wrapper too, because each side of a track is reduced on its own: a `minmax` floor, a `fit-content`
+    # cap, and an `auto-fill` repeat whose COUNT reads the track's fixed size.
+    it 'sizes a calc() track, through minmax, fit-content and an auto-fill repeat' do
+      # …`measured` says whether the template asks for a CONTENT measure at all, which is what
+      # `nativeIntrinsicGrids` counts: a bare `fr` carries an automatic minimum and `fit-content` a cap, while
+      # `minmax(…, 1fr)` beside a length and an all-fixed `auto-fill` repeat ask for nothing and leave the
+      # counter at 0 whatever engine ran (`minmax(25px, 1fr) 60px` does too, and has no `calc()` in it).
+      # Where it applies it is the stronger assertion: parity alone is green when a grid record rolls BACK to
+      # the oracle's column contributions.
+      {
+        'calc(25% + 10px) 1fr'                => [110, true],
+        'minmax(calc(10% + 5px), 1fr) 60px'   => [340, false],
+        'fit-content(calc(20% + 4px)) 1fr'    => [84,  true],
+        'repeat(auto-fill, calc(25% + 10px))' => [110, false]
+      }.each do |tracks, (chrome_x, measured)|
+        body = %(<div style="display:grid;width:400px;grid-template-columns:#{tracks}">) +
+               %(<div style="height:10px">wwww wwww</div><div id="g" style="height:10px"></div></div>)
+        measured ? expect_native_intrinsic(body) : expect_parity(body)
+        x = parity_session(body).evaluate_script("document.getElementById('g').getBoundingClientRect().x")
+        expect(x).to be_within(0.01).of(chrome_x), "#{tracks}: #g at #{x}, Chrome #{chrome_x}"
+      end
+    end
     # …and the two halves the pen used to get wrong, each against Chrome: a `1fr 1fr` grid whose second track
     # is the run (§12.7 gives both tracks the larger share) and a `min-content` column, where the item's
     # min-content is its longest WORD and the pen answered with the whole line.

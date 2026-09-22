@@ -4992,8 +4992,14 @@ struct GridTrack {
     is_fr: bool,
     fr_weight: f64,
     is_auto: bool,
+    // …the CONSTANT term beside each side's fraction (slots 7 and 8), for a linear `calc()` track:
+    // `calc(25% + 10px)` is `frac * content_w + px`. 0 for every other kind.
+    base_px: f64,
+    limit_px: f64,
 }
-const GRID_TRACK_STRIDE: usize = 7;
+// …9 since 2026-09-23: each side carries the CONSTANT term beside its fraction, so a `calc(25% + 10px)`
+// track is `frac * content_w + px`. A plain percentage sends 0 there.
+const GRID_TRACK_STRIDE: usize = 9;
 // A grid's header in `grids`: the number of track specs that follow, column gap (px, fraction), row gap (px,
 // fraction), declared row height, and the `auto-fill` / `auto-fit` repeat inside those specs — where its ONE
 // marshalled copy starts, how long it is, and its kind (1 fill, 2 fit; -1 / 0 / 0 when there is none).
@@ -5011,6 +5017,8 @@ impl GridTrack {
             is_fr: grids[o + 4] != 0.0,
             fr_weight: grids[o + 5],
             is_auto: grids[o + 6] != 0.0,
+            base_px: grids[o + 7],
+            limit_px: grids[o + 8],
         }
     }
     fn needs_content(&self) -> bool {
@@ -5020,12 +5028,15 @@ impl GridTrack {
 // One side of a track in px, given the column's (min, max) content contribution — the oracle's `resolveSideSpec` —
 // and the grid's content width, which a PERCENTAGE side is a fraction of (kind 4; kind 5 is `fit-content` capped
 // at such a fraction).
-fn resolve_track_side(kind: u8, val: f64, col: (f64, f64), content_w: f64) -> f64 {
+// `px` is the CONSTANT TERM beside a fraction (kinds 4 and 5): a `calc(25% + 10px)` track is
+// `frac * content_w + px`, and a plain percentage sends 0. It is no part of the other kinds — an intrinsic
+// reference has no constant and a px track carries its figure in `val`.
+fn resolve_track_side(kind: u8, val: f64, col: (f64, f64), content_w: f64, px: f64) -> f64 {
     match kind {
         1 => col.0,
         2 => col.1,
-        4 => val * content_w,
-        5 => col.0.max((val * content_w).min(col.1)),
+        4 => val * content_w + px,
+        5 => col.0.max((val * content_w + px).min(col.1)),
         3 => col.0.max(val.min(col.1)),
         _ => val,
     }
@@ -5044,8 +5055,8 @@ fn grid_column_widths(tracks: &[GridTrack], cols: Option<&[(f64, f64)]>, content
     let mut limit = vec![0.0f64; col_count];
     for (c, t) in tracks.iter().enumerate() {
         let col = cols.map(|cs| cs[c]).unwrap_or((0.0, 0.0));
-        base[c] = resolve_track_side(t.base_kind, t.base_val, col, content_w);
-        limit[c] = if t.is_fr { base[c] } else { resolve_track_side(t.limit_kind, t.limit_val, col, content_w) };
+        base[c] = resolve_track_side(t.base_kind, t.base_val, col, content_w, t.base_px);
+        limit[c] = if t.is_fr { base[c] } else { resolve_track_side(t.limit_kind, t.limit_val, col, content_w, t.limit_px) };
     }
     let mut free = inner - base.iter().sum::<f64>();
     // §12.6 "maximize tracks": grow the intrinsic (non-fr, limit > base) tracks toward their limits, sharing what
@@ -5167,7 +5178,11 @@ fn grid_repeat_count(grids: &[f64], gs: usize, tmpl_base: usize, content_w: f64,
     let mut per = 0.0f64;
     for k in 0..repeat_len {
         let t = GridTrack::decode(grids, tmpl_base + GRID_TRACK_STRIDE * (repeat_start as usize + k));
-        let fixed = fixed_of(t.base_kind, t.base_val).or_else(|| fixed_of(t.limit_kind, t.limit_val));
+        // (…the constant term beside a fraction rides along: `calc(25% + 10px)` is a DEFINITE track for the
+        // repeat count as much as `25%` is. Added to kind 0 as well, where it is always 0 — the marshaller
+        // sends a constant only beside a FRACTION — rather than repeating the kind test `fixed_of` just made.)
+        let fixed = fixed_of(t.base_kind, t.base_val).map(|f| f + t.base_px)
+            .or_else(|| fixed_of(t.limit_kind, t.limit_val).map(|f| f + t.limit_px));
         match fixed {
             Some(f) if f > 0.0 => per += f + gap,
             _ => return 1,
@@ -5412,7 +5427,7 @@ fn content_intrinsic(i: usize, inputs: &[Cell<Input>], runs: &[Run], run_texts: 
             let side = |kind: u8, val: f64, col: (f64, f64), want_max: bool| -> f64 {
                 match kind {
                     4 | 5 => if want_max { col.1 } else { col.0 },
-                    _ => resolve_track_side(kind, val, col, 0.0),
+                    _ => resolve_track_side(kind, val, col, 0.0, 0.0),
                 }
             };
             // §12.7 Expand Flexible Tracks: with no space to fill, the `fr` tracks do NOT each take their own
@@ -7741,8 +7756,8 @@ mod tests {
 
     // ── the grid template's auto repeat ────────────────────────────────────────────────────────────────────
     // A marshalled grid buffer: the header, `specs` track sides (base kind/val, limit kind/val, is_fr, weight,
-    // is_auto) and `places` item placements (start line, end line, span) — the shape `nlShadowRun` writes.
-    fn grid_buffer(literal: usize, repeat: (f64, usize, u8), specs: &[[f64; 7]], places: &[[f64; 3]]) -> Vec<f64> {
+    // is_auto, base px, limit px) and `places` item placements (start line, end line, span) — the shape `nlShadowRun` writes.
+    fn grid_buffer(literal: usize, repeat: (f64, usize, u8), specs: &[[f64; 9]], places: &[[f64; 3]]) -> Vec<f64> {
         // …GRID_HEADER wide, and the tail is the two gaps' clamped-affine BOUNDS (lo px/frac, hi px/frac per
         // axis) at their identities. Built by hand here, so the header's length is one of the three places a
         // stride change has to be made — this test file is the third, and it is the one that catches it.
@@ -7757,8 +7772,14 @@ mod tests {
         }
         g
     }
-    const FIXED_50: [f64; 7] = [0.0, 50.0, 0.0, 50.0, 0.0, 0.0, 0.0]; // a plain `50px` track
-    const AUTO_TRACK: [f64; 7] = [1.0, 0.0, 2.0, 0.0, 0.0, 0.0, 1.0]; // `auto`: min-content base, max-content limit
+    // …9 wide, spelled as a LITERAL and not as `GRID_TRACK_STRIDE`: these arrays are here to BREAK when the
+    // stride moves, so that whoever moves it has to decide what the new slots hold for each track. Tying them
+    // to the constant compiles clean and tests green through any change, which is the gate cancelling itself
+    // — it was tied for one build, with the comment above still claiming it was the thing that catches a
+    // stride change. The assert below says the same thing to anyone who tries again.
+    const _: () = assert!(GRID_TRACK_STRIDE == 9, "widen the hand-built track arrays in this file too");
+    const FIXED_50: [f64; 9] = [0.0, 50.0, 0.0, 50.0, 0.0, 0.0, 0.0, 0.0, 0.0]; // a plain `50px` track
+    const AUTO_TRACK: [f64; 9] = [1.0, 0.0, 2.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0]; // `auto`: min-content base, max-content limit
     const NO_PLACE: [f64; 3] = [0.0, 0.0, 0.0];
 
     #[test]
@@ -7786,7 +7807,7 @@ mod tests {
     #[test]
     fn the_copies_land_between_the_tracks_written_out_beside_them() {
         // `40px repeat(auto-fill, 50px) auto` — the repeat is track 1 of three marshalled
-        let specs = [[0.0, 40.0, 0.0, 40.0, 0.0, 0.0, 0.0], FIXED_50, AUTO_TRACK];
+        let specs = [[0.0, 40.0, 0.0, 40.0, 0.0, 0.0, 0.0, 0.0, 0.0], FIXED_50, AUTO_TRACK];
         let g = grid_buffer(3, (1.0, 1, 1), &specs, &[NO_PLACE]);
         let tracks = grid_expanded_tracks(&g, 0, GRID_HEADER, 3, 3);
         assert_eq!(tracks.len(), 5); // 40px, three copies, auto
