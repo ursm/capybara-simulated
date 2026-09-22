@@ -25,17 +25,17 @@
 # attribute / min, shared out over the rows so the tracks fill the box), and ANONYMOUS ROWS (a table-cell with
 # no table-row parent) ARE supported. Still DECLINES to JS — a caption with a MARGIN or more than one caption, an
 # imposed height the tracks DON'T fill (a min-height's empty space, a too-small height /
-# max-height below the grid) or one alongside a caption / collapsed border, an anonymous CELL (stray non-cell
-# content), an rtl table with a MARGIN-offset caption (the caption's auto-margin / lead inset isn't reflected
+# max-height below the grid) or one alongside a caption / collapsed border,
+# an rtl table with a MARGIN-offset caption (the caption's auto-margin / lead inset isn't reflected
 # yet — a full-width OR narrower rtl caption IS placed at the inline-start; an rtl border-COLLAPSE table IS
-# reproduced, its frame resolved with the columns mirrored), inline-table,
+# reproduced, its frame resolved with the columns mirrored),
 # nested tables, an empty row group, and a column/row only
 # spanning cells cover.
 # (A column's visibility:collapse is a conformance gap the oracle itself doesn't model, so native matches it
 # rather than bailing.) Each bail is an A/B: the feature-carrying input
 # declines, a plain table stays native. A `display:table-cell` with no `display:table-row` parent is wrapped in
-# an ANONYMOUS row (t9) and IS supported; stray NON-cell content (which a browser wraps in an anonymous CELL, a
-# box the oracle doesn't model) still declines. V8 only.
+# an ANONYMOUS row (t9) and IS supported, and so is stray NON-cell content — the anonymous CELL a browser wraps
+# it in gets the same sentinel: laid out, not compared, its real children compared as usual. V8 only.
 require 'capybara/simulated'
 require 'rack'
 require_relative 'support/session_teardown'
@@ -661,7 +661,131 @@ RSpec.describe 'native layout table parity', if: ENV.fetch('CSIM_JS_ENGINE', 'v8
   it('matches an inline-table as an atomic inline') { expect_parity('<div style="width:300px">x <span style="display:inline-table"><span style="display:table-row"><span style="display:table-cell">a</span></span></span> y</div>') }
   it('declines an rtl table with a MARGIN-offset caption (its auto-margin / lead inset is not reflected yet)') { a_bails_b_native('<table dir="rtl" style="border-spacing:4px"><caption style="width:20px;height:16px;margin-left:8px">c</caption><tr><td style="width:40px;height:20px">a</td></tr></table>') }
   it('declines an empty row group (the oracle boxes it below the grid)') { a_bails_b_native('<table style="border-spacing:4px"><tbody></tbody><tbody><tr><td style="width:40px;height:20px">a</td></tr></tbody></table>') }
-  it('declines stray non-cell content in a table (the oracle wraps it in an anonymous CELL, which has no node id)') { a_bails_b_native('<div style="display:table;border-spacing:4px"><div style="display:block;width:60px;height:20px">a</div></div>') }
+  # …and an ANONYMOUS CELL is laid out now, which it was not until 2026-09-22. §17.2.1 wraps a table's stray
+  # non-cell content in one, `anonTableCell` builds it, and it is no part of the DOM — so it has no `_nid`, and
+  # the record stream had nothing to put in a record's node slot. It gets the sentinel an anonymous ROW and an
+  # anonymous BLOCK GROUP already get: laid out, and skipped in the parity compare (its CHILDREN are real nodes
+  # and are compared). This was the largest single cause behind `table-unsupported`, the campaign's biggest
+  # decline — 1,440 sole blockers over the `pseudo` and `sticky` sweeps, and the reason the reason-string had to
+  # be censused before it could be named.
+  # The figures are Chrome 153's, and they are here because parity alone could not tell whether the box the two
+  # engines now agree on is the right one.
+  {
+    'a run of text'                => ['stray text', [0, 0, 96.015625, 22]],
+    'one atomic inline'            => ['<span style="display:inline-block;width:10px;height:9px"></span>', [0, 0, 10, 22]],
+    'runs either side of a cell'   => ['a<div style="display:table-cell">b</div>c', [0, 0, 28.828125, 22]]
+  }.each do |name, (content, chrome)|
+    it "lays out the anonymous cell around #{name}" do
+      body = %(<div style="width:400px"><div id="m" style="display:table;font:16px monospace">#{content}</div></div>)
+      session = simulated_session(page(body))
+      session.visit '/'
+      session.evaluate_script 'document.body.offsetHeight'
+      r = session.evaluate_script('globalThis.__csimLayoutShadowRun()')
+      expect(r).to include('ok' => true, 'mismatches' => 0), body
+      # …`sample` rather than `compared`, which a wrapper div alone would satisfy: nothing mismatched, and
+      # the table really was walked (a declined one comes back `ok: false`).
+      expect(r['sample']).to be_nil, "#{body}: #{r.inspect}"
+      got = session.evaluate_script("(b => [b.x, b.y, b.width, b.height])(document.getElementById('m').getBoundingClientRect())")
+      got.each_with_index do |v, i|
+        expect(v).to be_within(0.05).of(chrome[i]), "#{body}: #{got.inspect} vs Chrome #{chrome.inspect}"
+      end
+    end
+  end
+  # …and a real node INSIDE the anonymous cell is compared like any other, which is what says the cell is a box
+  # in the tree and not a hole in it. Chrome 153: the inline-block sits at 57.609375, 8 on the cell's one line.
+  it 'compares a real box inside the anonymous cell' do
+    body = '<div style="width:400px"><div style="display:table;font:16px monospace">stray ' \
+           '<span id="m" style="display:inline-block;width:10px;height:9px"></span> text</div></div>'
+    session = simulated_session(page(body))
+    session.visit '/'
+    session.evaluate_script 'document.body.offsetHeight'
+    r = session.evaluate_script('globalThis.__csimLayoutShadowRun()')
+    expect(r).to include('ok' => true, 'mismatches' => 0), body
+    got = session.evaluate_script("(b => [b.x, b.y, b.width, b.height])(document.getElementById('m').getBoundingClientRect())")
+    [57.609375, 8, 10, 9].each_with_index do |v, i|
+      expect(got[i]).to be_within(0.05).of(v), got.inspect
+    end
+  end
+
+  # …and an anonymous box is NOT an element, so it generates no content of its own (CSS Pseudo-Elements 4 §2).
+  # It matches `*` like anything else the flow enumerates, so a page carrying a universal `content` rule grew a
+  # `::before` on the cell as well as on the table: 134.4 wide against Chrome 153's 115.21875, two copies of
+  # `XX` against one. Pre-existing, and only reachable at all once the cell is laid out.
+  it 'grows no generated content on the anonymous cell' do
+    body = '<style>*::before{content:"XX"}</style>' \
+           '<div id="m" style="display:table;font:16px monospace">stray text</div>'
+    session = simulated_session(page(body))
+    session.visit '/'
+    session.evaluate_script 'document.body.offsetHeight'
+    expect(session.evaluate_script('globalThis.__csimLayoutShadowRun()')).to include('ok' => true, 'mismatches' => 0)
+    w = session.evaluate_script("document.getElementById('m').getBoundingClientRect().width")
+    expect(w).to be_within(0.05).of(115.21875), "#{w}: a second XX means the anonymous cell generated one"
+  end
+
+  # …and a PERCENTAGE inside the anonymous cell resolves against the CELL, which is Chrome's own basis: a
+  # `float: left; width: 50%` beside stray text in a 200px fixed table whose real cell takes 120 is 40 wide,
+  # not 100. Both engines already agree with Chrome here, which is worth pinning rather than assuming: the
+  # record stream currently pushes the anonymous cell as a `null` node, and the next increment — giving it an
+  # arena node so its box can be COMPARED — is exactly the kind of change that could move a percentage basis
+  # underneath this without anyone asking.
+  it 'resolves a percentage inside the anonymous cell against the cell' do
+    body = '<div id="t" style="display:table;table-layout:fixed;width:200px;font:16px monospace">t' \
+           '<div id="f" style="float:left;width:50%;height:9px"></div>' \
+           '<div style="display:table-cell;width:120px">c</div></div>'
+    session = simulated_session(page(body))
+    session.visit '/'
+    session.evaluate_script 'document.body.offsetHeight'
+    expect(session.evaluate_script('globalThis.__csimLayoutShadowRun()')).to include('ok' => true, 'mismatches' => 0), body
+    w = session.evaluate_script("document.getElementById('f').getBoundingClientRect().width")
+    expect(w).to be_within(0.05).of(40), "#{w}: 100 means it resolved against the TABLE, not the anonymous cell"
+  end
+
+  # KNOWN DIVERGENCE, both engines and older than this: an `inline-table` hangs from its FIRST row's baseline
+  # (CSS 2.1 §10.8.1) and this engine hangs it from its LAST, because `atomicBaselineOffset` asks every atomic
+  # inline for its last baseline and a table is not told apart. Chrome 153 puts the word beside a two-row
+  # inline-table at 0 when the tall row is second and 23 when it is first; both engines say 41 and 47.
+  # Pinned here because the anonymous-cell path was made to agree with the real-row path rather than
+  # half-corrected — a shared divergence moved in one engine only is a parity break, which costs more.
+  # Two of the four reach the anonymous-cell FALLBACK and two do not, which is the point: the shapes with
+  # element children (`display:table-row`) never empty the candidate list, so they go the way they always did.
+  # Written the other way round first — `<div>A</div><div>B</div>` for the anonymous pair — the fallback could
+  # be deleted outright and all four still passed: a block child is not inline-level, so it survives the
+  # filter and the list is never empty. A guard that cannot fail is the third one this campaign has shipped.
+  [
+    ['real rows, the tall one second', '<div style="display:table-row"><div style="display:table-cell">A</div></div>' \
+                                       '<div style="display:table-row"><div style="display:table-cell;font-size:40px">B</div></div>', 41, 0],
+    ['real rows, the tall one first',  '<div style="display:table-row"><div style="display:table-cell;font-size:40px">A</div></div>' \
+                                       '<div style="display:table-row"><div style="display:table-cell">B</div></div>', 47, 23],
+    ['anonymous, the tall one second', 'A<br><span style="font-size:40px">B</span>', 41, 0],
+    ['anonymous, the tall one first',  '<span style="font-size:40px">A</span><br>B', 47, 23]
+  ].each do |name, inner, ours, chrome|
+    it "hangs a two-row inline-table from its LAST row, where Chrome uses the first: #{name}" do
+      body = %(<div id="w" style="width:600px"><span style="display:inline-table;border-spacing:0">#{inner}</span><span id="p">p</span></div>)
+      session = simulated_session(page(body))
+      session.visit '/'
+      session.evaluate_script 'document.body.offsetHeight'
+      expect(session.evaluate_script('globalThis.__csimLayoutShadowRun()')).to include('ok' => true, 'mismatches' => 0), body
+      off = session.evaluate_script(
+        "document.getElementById('p').getBoundingClientRect().y - document.getElementById('w').getBoundingClientRect().y"
+      )
+      expect(off).to be_within(0.05).of(ours), "#{off}: Chrome 153 says #{chrome} — the FIRST row"
+      # …and the table's own height IS Chrome's (65), so the divergence really is the baseline alone.
+      h = session.evaluate_script("document.getElementById('w').getBoundingClientRect().height")
+      expect(h).to be_within(0.05).of(65)
+    end
+  end
+  # …and the one-line shape the fallback was written for: with no candidate at all the table had NO baseline,
+  # so it hung from its bottom margin edge and the line grew. Chrome 153 and native say 18; the oracle said 22.
+  # This is the arm that fails if the fallback goes.
+  it 'gives a one-line inline-table of stray text the line height Chrome gives it' do
+    body = '<div id="w" style="width:600px"><span style="display:inline-table;border-spacing:0">it</span><span>p</span></div>'
+    session = simulated_session(page(body))
+    session.visit '/'
+    session.evaluate_script 'document.body.offsetHeight'
+    expect(session.evaluate_script('globalThis.__csimLayoutShadowRun()')).to include('ok' => true, 'mismatches' => 0), body
+    h = session.evaluate_script("document.getElementById('w').getBoundingClientRect().height")
+    expect(h).to be_within(0.05).of(18), "#{h}: 22 means the table found no baseline and hung from its margin edge"
+  end
   it('declines a same-display group NESTED in another (its rows interleave in render order)') { a_bails_b_native('<div style="display:table;border-spacing:4px"><div style="display:table-row-group"><div style="display:table-row"><div style="display:table-cell;width:40px;height:20px">r1</div></div><div style="display:table-row-group"><div style="display:table-row"><div style="display:table-cell;height:18px">r2</div></div></div><div style="display:table-row"><div style="display:table-cell;height:36px">r3</div></div></div></div>') }
 
   # ── Native COLUMN sizing ──────────────────────────────────────────────────────────────────────────────
