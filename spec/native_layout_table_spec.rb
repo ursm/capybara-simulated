@@ -1072,4 +1072,49 @@ RSpec.describe 'native layout table parity', if: ENV.fetch('CSIM_JS_ENGINE', 'v8
     end
   end
 
+  # An ORPHAN `display: table-row` — one with no table around it — is not CSS Tables' anonymous table in this
+  # engine. `layoutBox` says so in as many words ("a browser wraps it in an anonymous table and we don't") and
+  # routes it to `layoutFlexRow` with `equalShare` and a PHYSICAL LTR plan. The walk emits it as a flex record
+  # for exactly that reason, and it is 1,296 of the `pseudo` sweep's declines: every one a
+  # `::before { display: table-row }`.
+  #
+  # ONLY AN EMPTY ONE, and the boundary is the whole of what these arms are about. For a row with content the
+  # oracle is two things at once — it MEASURES through the block-stacking arm of `contentIntrinsicWidths` (its
+  # display is `table-row`, so the flex arm there never runs) and LAYS OUT through `layoutFlexRow`, which sums
+  # along the row and drops bare text — and one record cannot say both. Taking those made 249 `pseudo` shapes
+  # mismatch. The equal-share arithmetic goes with them: not one shape in the corpus, the sweeps or these
+  # specs is an orphan row with element children, so it would ship unexecuted.
+  describe 'an orphan display: table-row' do
+    def expect_declines(body, reason)
+      r = run_shadow(body)
+      expect(r).to include('ok' => false, 'reason' => reason), body
+    end
+
+    it 'lays an empty one out natively, whatever flex properties it declares' do
+      ['', 'flex-direction:column', 'flex-wrap:wrap', 'direction:rtl', 'writing-mode:vertical-rl'].each do |extra|
+        expect_parity(%(<div style="width:400px"><div style="display:table-row;#{extra}"></div><div style="height:4px"></div></div>))
+      end
+      # …a child that generates NO BOX leaves it empty: a comment, a `display: none` element.
+      expect_parity('<div style="width:400px"><div style="display:table-row"><!--c--></div><div style="height:4px"></div></div>')
+      expect_parity('<div style="width:400px"><div style="display:table-row"><span style="display:none">x</span></div>' \
+                    '<div style="height:4px"></div></div>')
+      # …and the shape the 1,296 actually were.
+      expect_parity('<style>.p::before{content:"";display:table-row}</style>' \
+                    '<div style="width:400px"><div class="p"></div><div style="height:4px"></div></div>')
+    end
+
+    # …and REFUSES the rest, each for the reason the boundary above gives. Without these the narrowing is a
+    # silent one: the gate could widen back to "any orphan row" and nothing would fail, because no shape
+    # anywhere exercises the sizing it would then need.
+    it 'refuses one with content, bare text or element children alike' do
+      expect_declines('<div style="width:400px"><div style="display:table-row">x</div></div>', 'flex-container-unsupported')
+      expect_declines('<style>.p::before{content:"x";display:table-row}</style><div style="width:400px"><div class="p"></div></div>',
+                      'flex-container-unsupported')
+      expect_declines('<div style="width:400px"><div style="display:table-row"><div>aaaa</div><div>bbbb</div></div></div>',
+                      'flex-container-unsupported')
+      # …a `<br>` is an element and so an item: the row is not empty.
+      expect_declines('<div style="width:400px"><div style="display:table-row"><br></div></div>', 'flex-container-unsupported')
+    end
+  end
+
 end
