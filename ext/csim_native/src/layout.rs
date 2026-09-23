@@ -537,6 +537,12 @@ pub(crate) struct Run {
     // the parent-font figure and leave as the box's outer height and advance — and a third reused slot is how
     // that pair became hard to read. One `f64` per run in the buffer; the perf gate held.
     pub(crate) line_mode: u8,
+    // A CLOSE edge that LANDS on the line: either of its two halves (border + padding, then margin) is non-zero,
+    // whatever they sum to. The oracle places the halves as two edges (`placeInlineBox`: `if (ce.right)` and
+    // `if (ce.mr)`), so `padding-right:5px; margin-right:-5px` puts a line down — Chrome gives the block 22 —
+    // where a test on the SUM (`metric`) saw nothing. Carried in the buffer slot an edge leaves unread
+    // (`line_mode`'s), so the stride is unchanged; false on every other kind.
+    pub(crate) lands: bool,
 }
 
 impl Input {
@@ -996,6 +1002,15 @@ fn line_layout(
     // descent — it hangs from an edge the line does not have yet — but a HEIGHT the line must reach. The
     // oracle's `lineOuterMin` / `growLineFor`.
     let mut line_outer_min = 0.0f64;
+    // Two questions about the line, which the oracle keeps apart as `linePlaced` / `lineHasContent` and
+    // native had folded into one until it cost a parity break: whether the line EXISTS (anything at all went
+    // down on it, an inline's opening or closing edge included) and whether it holds something a break may
+    // leave BEHIND. An edge answers only the first — it is not content, so a line holding nothing but one
+    // is no line a break-before test may end: `<span style="padding-left:6px"></span><b inline-block>` on a
+    // 6px line keeps the atomic beside the edge and overflows, where asking the one flag broke before it.
+    // Every break-before test asks `line_has_content`; everything else — the line's close, its alignment,
+    // a float drop, a leading space's collapse — asks `line_placed`, each where its oracle counterpart does.
+    let mut line_placed = false;
     let mut line_has_content = false;
     // Open inline edges not yet closed: (pending-open width, already-flushed?). openEdgeWidth = Σ of the
     // unflushed pendings — reserved in the fit test until the first content flushes it onto the line.
@@ -1097,7 +1112,7 @@ fn line_layout(
             // beside a 30px `bottom` one takes the line to 40 with its baseline where it already was, where
             // letting the `bottom` box decide dropped every word on the line by 22px. Only the LARGER of the
             // two families moves anything, and it moves the edge it is NOT anchored to.
-            if line_has_content && line_outer_min > line_asc + line_desc {
+            if line_placed && line_outer_min > line_asc + line_desc {
                 let (mut max_top, mut max_bottom) = (0.0f64, 0.0f64);
                 for &(ri, ..) in &line_atomics {
                     match runs[ri].line_mode {
@@ -1133,7 +1148,7 @@ fn line_layout(
             // The hanging gaps are the ones the line ENDS with, which is a question about ORDER —
             // `line_gaps` is pushed in flow order — not about x: a negative horizontal margin can carry a
             // later gap to a smaller coordinate, and a coordinate cut then keeps it and drops one before it.
-            let gaps: Vec<f64> = if justifying && $wrap && free > 0.0 && line_has_content {
+            let gaps: Vec<f64> = if justifying && $wrap && free > 0.0 && line_placed {
                 // …to a TOLERANCE, for the reason `LINE_FIT_EPS` exists beside it: a gap's origin and the
                 // line's end are the same sum in different accumulation orders — this engine forms the end as
                 // `band_l + (line_x - hang - hang_pre)` and the oracle as `(band_l + line_x) - hang` — so a gap
@@ -1150,7 +1165,7 @@ fn line_layout(
             // A line the flow never put anything on is not aligned at all (the oracle's `forceBreak` calls
             // `alignLine` only `if (linePlaced)`): a `<br>` closing a line that holds nothing but an
             // out-of-flow marker leaves that marker at the start edge, not at the far one.
-            let dx = if !line_has_content {
+            let dx = if !line_placed {
                 0.0
             } else {
                 match align {
@@ -1216,7 +1231,7 @@ fn line_layout(
             for o in open.iter_mut().filter(|o| !o.1) {
                 if o.0 != 0.0 {
                     line_x += o.0;
-                    line_has_content = true;
+                    line_placed = true;
                 }
                 o.1 = true;
             }
@@ -1272,6 +1287,7 @@ fn line_layout(
             line_desc = strut_desc;
             line_outer_min = 0.0;
             line_has_content = false;
+            line_placed = false;
         }};
     }
     macro_rules! break_line {
@@ -1284,6 +1300,7 @@ fn line_layout(
             line_desc = strut_desc;
             line_outer_min = 0.0;
             line_has_content = false;
+            line_placed = false;
             pending_space = None;
             atomic_break = false;
             ends_open = false;
@@ -1315,11 +1332,11 @@ fn line_layout(
                 }
                 open.pop(); // LIFO
                 line_x += run.metric;
-                if run.metric != 0.0 {
-                    line_has_content = true;
-                    hang = 0.0;
-                    // (`hang_pre` is NOT cleared: an edge is `edge` to the oracle, which leaves the preserved
-                    // spaces before it hanging — only a real placement ends their run.)
+                // Neither `hang` nor `hang_pre` is cleared: an edge is `edge` to the oracle, which leaves the
+                // spaces before it hanging (`trailingHang` is reset only `if (!edge)`) — only a real placement
+                // ends their run.
+                if run.lands {
+                    line_placed = true;
                 }
             }
             RUN_BR => {
@@ -1373,7 +1390,7 @@ fn line_layout(
                     // the measure, so a run glued straight to a letter — the common case — pays two branches.
                     let breaks = line_has_content
                         && (pending_space.is_some_and(|p| p.breaks) || atomic_break || ends_open);
-                    let may_drop = !line_has_content && !floats.borrow().is_empty();
+                    let may_drop = !line_placed && !floats.borrow().is_empty();
                     if breaks || may_drop {
                         let end = if break_nl {
                             text.iter().position(|&u| u == 0x0A).unwrap_or(text.len())
@@ -1382,13 +1399,13 @@ fn line_layout(
                         };
                         // The oracle strips a run's LEADING white space only at a line start, which is an
                         // empty line or one already ending in a real hanging space (`collapseRun`'s
-                        // `lineX === lineLeft || lineEndsWithSpace`). Anywhere else it stays in the body and
+                        // `!linePlaced || lineEndsWithSpace`). Anywhere else it stays in the body and
                         // in the width the fit test is asked of. A PRESERVED space is not a hanging one, so
                         // the zero-width marker does not count.
                         // …and only a COLLAPSING run ever asks: a preserved space is kept wherever it sits,
                         // so both readers below already stand behind `!preserve`.
                         let at_line_start = !preserve
-                            && (!line_has_content || pending_space.is_some_and(|p| p.sep));
+                            && (!line_placed || pending_space.is_some_and(|p| p.sep));
                         // …and `body` is the oracle's string test: a run that is non-empty but zero-advance
                         // (a U+200B) is still a body, and still asks the question.
                         let has_body = if preserve {
@@ -1458,7 +1475,7 @@ fn line_layout(
                         // first word — a `nowrap` span beside a float goes under it, not through it). Asked of
                         // the line the unit LANDS on, which is why the leading space above is only NOTED here
                         // and placed below: putting it down first would make the line look occupied.
-                        if has_body && !floats.borrow().is_empty() && !line_has_content && unit + ow > band_w(total) + LINE_FIT_EPS {
+                        if has_body && !floats.borrow().is_empty() && !line_placed && unit + ow > band_w(total) + LINE_FIT_EPS {
                             let fy = top + total;
                             let at = float_fit_y(&floats.borrow(), fy, unit + ow + indent_now.get(), cl, cr, strut_lh);
                             if at > fy {
@@ -1474,6 +1491,7 @@ fn line_layout(
                             line_asc = line_asc.max(run.asc);
                             line_desc = line_desc.max(run.line_height - run.asc);
                             line_has_content = true;
+                            line_placed = true;
                             hang = 0.0;
                             hang_pre = 0.0;
                         }
@@ -1538,6 +1556,7 @@ fn line_layout(
                                         // settles here, on this line, rather than wherever the next word lands.
                                         settle_pending_oofs!();
                                         line_has_content = true; // the space itself is content on this line
+                                        line_placed = true;
                                         flush_open_edges!();
                                         // A COLLAPSED space still waiting from an earlier run is placed first —
                                         // the oracle placed it where it met it, and a preserved space is a
@@ -1644,7 +1663,7 @@ fn line_layout(
                                 for _ in 0..nl {
                                     break_line!();
                                 }
-                            } else if !line_has_content {
+                            } else if !line_placed {
                                 // At a line start the space itself collapses away — but the BARRIER it leaves
                                 // does not: the oracle sets `barrier` from a whitespace-only run whether or not
                                 // it placed anything (`modeWraps(owner) ? null : 'hard'`). A non-wrapping run
@@ -1679,12 +1698,16 @@ fn line_layout(
                                     // space like any other).
                                     _ => {
                                         // The oracle PLACES it where it meets it (`placeInlineChild`'s
-                                        // whitespace branch, under the same `lineX > lineLeft` this
-                                        // `line_has_content` stands for), and placing anything puts the open
-                                        // inline edges down first. So the edges go down HERE — and a marker
-                                        // written after them is not waiting on anything, which is what lets it
-                                        // keep the relative offset of its own inline. The space itself still
-                                        // only waits: one the next wrap drops grows nothing.
+                                        // whitespace branch, under the `linePlaced` this `line_placed` is),
+                                        // and placing anything puts the open inline edges down first. So the
+                                        // edges go down HERE — and a marker written after them is not waiting
+                                        // on anything, which is what lets it keep the relative offset of its
+                                        // own inline. The space's ADVANCE still only waits (one the next wrap
+                                        // drops grows nothing), but the line holds CONTENT from here on:
+                                        // `placeOnLine` sets `lineHasContent` for anything but an edge, and a
+                                        // non-wrapping run's pre-pass asks that before any word consumes the
+                                        // space — after an edge-only line, ` <nowrap>aaaa</nowrap>` in a 30px
+                                        // block stayed on the line where the oracle wraps it.
                                         settle_pending_oofs!();
                                         flush_open_edges!();
                                         // …and it REPLACES the opportunity the text before it left (a hyphen,
@@ -1694,6 +1717,7 @@ fn line_layout(
                                         ends_open = false;
                                         atomic_break = false;    // …as above: one barrier, and this is it now
                                         pending_space = Some(PendingSpace { w: space_w, asc: run.asc, desc: run.line_height - run.asc, breaks: !no_wrap, sep: true });
+                                        line_has_content = true;
                                     }
                                 }
                             }
@@ -1726,7 +1750,7 @@ fn line_layout(
                         // in a 16px block). The oracle grows it only where the space STAYS (a space the wrap drops
                         // grows nothing there; Chrome grows the line for any fragment on it — a shared gap, see the
                         // native_layout_text spec), so the growth is applied once the line the space sits on is settled.
-                        let space_on_line = space_before && line_has_content;
+                        let space_on_line = space_before && line_placed;
                         if space_on_line {
                             if space_sep {
                                 // …an OPPORTUNITY is no gap: what is asked is what the pending space IS, not
@@ -1828,7 +1852,7 @@ fn line_layout(
                                         space_pending = false;
                                     }
                                     // An empty line still too narrow for even one character drops below the float.
-                                    if !floats.borrow().is_empty() && !line_has_content && cw + ow_now > band_w(total) + LINE_FIT_EPS {
+                                    if !floats.borrow().is_empty() && !line_placed && cw + ow_now > band_w(total) + LINE_FIT_EPS {
                                         let fy = top + total;
                                         let at = float_fit_y(&floats.borrow(), fy, cw + ow_now + indent_now.get(), cl, cr, strut_lh);
                                         if at > fy {
@@ -1845,6 +1869,7 @@ fn line_layout(
                                     line_asc = line_asc.max(run.asc);
                                     line_desc = line_desc.max(run.line_height - run.asc);
                                     line_has_content = true;
+                                    line_placed = true;
                                     first = false;
                                     u += ulen;
                                 }
@@ -1868,7 +1893,7 @@ fn line_layout(
                             // it (§9.5, "if a shortened line box is too small…"), growing the block by the gap. A
                             // `nowrap` line is NOT shortened by a float and never drops — it overlaps it on one line
                             // (the oracle does no float handling for a nowrap block), so skip this too.
-                            if !no_wrap && !floats.borrow().is_empty() && !line_has_content && width + ow > band_w(total) + LINE_FIT_EPS {
+                            if !no_wrap && !floats.borrow().is_empty() && !line_placed && width + ow > band_w(total) + LINE_FIT_EPS {
                                 let fy = top + total;
                                 let at = float_fit_y(&floats.borrow(), fy, width + ow + indent_now.get(), cl, cr, strut_lh);
                                 if at > fy {
@@ -1886,6 +1911,7 @@ fn line_layout(
                             line_asc = line_asc.max(run.asc);
                             line_desc = line_desc.max(run.line_height - run.asc);
                             line_has_content = true;
+                            line_placed = true;
                             atomic_break = false; // consumed the after-atomic break opportunity
                             // …and this word leaves one behind when it ENDS in a wide character or a dash.
                             ends_open = ends_with_break(text[i - 1]);
@@ -1911,7 +1937,7 @@ fn line_layout(
                     None => (false, 0.0, 0.0, 0.0, false, false),
                 };
                 let space_is_hard = space_before && !space_breaks;
-                let space_on_line = space_before && line_has_content;
+                let space_on_line = space_before && line_placed;
                 let mut broke = false;
                 if space_on_line {
                     if space_sep {
@@ -1947,7 +1973,7 @@ fn line_layout(
                 // is 60 tall there and 82 in both engines. SHARED, so recorded rather than fixed. (This comment
                 // said the opposite until 2026-09-23 — "a nowrap line is not dropped below a float" — which is
                 // true of the text arm and was never true here.)
-                if may_break_here && !floats.borrow().is_empty() && !line_has_content && width + ow > band_w(total) + LINE_FIT_EPS {
+                if may_break_here && !floats.borrow().is_empty() && !line_placed && width + ow > band_w(total) + LINE_FIT_EPS {
                     let fy = top + total;
                     let at = float_fit_y(&floats.borrow(), fy, width + ow + indent_now.get(), cl, cr, strut_lh);
                     if at > fy {
@@ -1972,12 +1998,13 @@ fn line_layout(
                     line_desc = line_desc.max(run.line_height - run.asc);
                 }
                 line_has_content = true;
+                line_placed = true;
                 atomic_break = true; // a break opportunity follows this atomic
             }
             RUN_OOF => {
                 // §4.1: it neither sizes nor shifts the line. `font` carries its record index (the walk's
                 // marker), and what is wanted is only WHERE the flow had reached: this x on this line. A line
-                // that holds nothing else is still a line the flow reached — `line_has_content` is untouched,
+                // that holds nothing else is still a line the flow reached — `line_placed` is untouched,
                 // so an empty block keeps its zero height and the marker settles at the line that never opens
                 // (top 0, x 0), which is what the oracle gives it.
                 //
@@ -2030,7 +2057,7 @@ fn line_layout(
                 let left_before = raw_band_l(total);
                 let (x, y) = place_float(&mut floats.borrow_mut(), f, top + total, cl, cr);
                 placed_floats.push((run.font as usize, x, y));
-                if line_has_content {
+                if line_placed {
                     let shift = raw_band_l(total) - left_before;
                     line_x -= shift;
                     // …and a marker waiting on an opening edge stood at a cursor in that same frame, so it steps
@@ -2060,7 +2087,7 @@ fn line_layout(
         }
     }
 
-    if line_has_content {
+    if line_placed {
         close_line!(false); // close the final line (a trailing <br>'s fresh empty line is NOT closed)
     }
     // An opening edge that never landed (its inline closed holding nothing the flow placed) leaves the cursor

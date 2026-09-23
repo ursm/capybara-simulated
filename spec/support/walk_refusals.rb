@@ -35,20 +35,21 @@ module WalkRefusals
   ATOMIC           = [POSITIONED, WHITESPACE, TABLE_CELL].freeze
 
   # …and a separate cause, for the routes that MEASURE rather than lay out: content whose intrinsic width
-  # native has no rule for, which every shrink-to-fit route has to refuse or push. An EDGED inline (horizontal
-  # padding) holding nothing but white space is that shape — its opening edge has to land somewhere and it
-  # carries no real content to land it against. The refusal is UNNAMED on both sides, which is why it is
-  # written out here rather than pointed at a reason string: `nlInlineMeasurable`'s last arm (`!hasReal`, at
-  # the edge test in layout.js) and its twin flag in `nlGatherRuns`, which keeps a whitespace-only padded
-  # inline declined because its line box is mis-sized by a separate pre-existing bug. The walk's NAMED
-  # reasons in that region — `edged-inline-font-exceeds-line-height`, `br-in-edged-inline` — are the other
-  # two conditions on the same pair of edges, and neither is this one.
-  # It stands in for `white-space: break-spaces`, which held this role until 2026-09-23 and then went native:
-  # `text_intrinsic`'s mode table learned that a preserved space is content that joins the word and breaks
-  # AFTER itself. SIX sites across five spec files used the mode as their "native cannot measure this", and
-  # only three of them went red the day the measure shipped — the other three went on passing for an
-  # unrelated reason. That silent re-pointing is exactly what this file exists to stop, and it happened
-  # anyway because the cause lived in six string literals instead of here.
+  # native has no rule for, which every shrink-to-fit route has to refuse or push while the walk still lays the
+  # same content out when it is handed a width. A NON-WRAPPING block holding both text and a block child is
+  # that shape: the oracle measures such a block as the ONE unbreakable token its whole content forms, block
+  # children included, which the children's own records cannot reproduce — `nlIntrinsicMeasurableOf`'s last
+  # line (`!(hasBlock && NON_WRAPPING_WS.has(ws))`). The refusal is UNNAMED (it surfaces as the asker's
+  # `shrink-to-fit-child-unmeasurable`), which is why it is written out here rather than pointed at a reason.
+  # It is the FOURTH shape to hold the role. An `inline-grid` over bare text held it until `gridItems` gave the
+  # run the anonymous item §4 asks for (2026-09-22), `white-space: break-spaces` until its measure went native
+  # (2026-09-23), and then an EDGED inline holding nothing but white space, until the same day — that one was
+  # never a measure gap at all: both engines measured it alike, and the refusal was guarding a LINE rule native
+  # got wrong (an opening edge alone on a line counted as content a break could leave behind). A replacement
+  # has to be FOUND, by asking which refusals the measure gate makes that the walk does not: two candidates
+  # the sweeps turned up — a padded inline whose font box exceeds its line-height, and a soft hyphen under
+  # `break-spaces` — are refused by the WALK as well, so a route handed one declines outright instead of
+  # taking the fallback the specs hold it to.
   # If this one retires too, the cause is still real: find the next shape, do not delete the arm.
-  UNMEASURABLE_INLINE = '<span style="padding-left:6px">   </span>g'
+  UNMEASURABLE = '<div style="white-space:nowrap">a<div>b</div></div>'
 end

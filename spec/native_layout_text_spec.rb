@@ -77,12 +77,13 @@ RSpec.describe 'native layout L2 text-block parity', if: ENV.fetch('CSIM_JS_ENGI
   end
 
   # `chrome_x` stays POSITIONAL because 294 call sites in this file spell it that way and it reads well at
-  # each of them (`expect_parity(body, 6, chrome_y: 0)`); the pair below is keyword because it only ever
+  # each of them (`expect_parity(body, 6, chrome_y: 0)`); the pairs below are keyword because each only ever
   # appears together.
-  def expect_parity(body, chrome_x = nil, chrome_y: nil, shared_x: nil, shared_x_chrome: nil)
+  def expect_parity(body, chrome_x = nil, chrome_y: nil, shared_x: nil, shared_x_chrome: nil, shared_y: nil, shared_y_chrome: nil)
     # A shared divergence is only RECORDED if the number it diverges from is written down beside it, so the
     # pair cannot be half-given.
     raise ArgumentError, 'shared_x needs shared_x_chrome' if !shared_x.nil? && shared_x_chrome.nil?
+    raise ArgumentError, 'shared_y needs shared_y_chrome' if !shared_y.nil? && shared_y_chrome.nil?
 
     with_page(body) do |session|
       r = parity(session)
@@ -93,6 +94,7 @@ RSpec.describe 'native layout L2 text-block parity', if: ENV.fetch('CSIM_JS_ENGI
       expect_near(marker_x(session), chrome_x, body, 'x') unless chrome_x.nil?
       expect_near(marker_y(session), chrome_y, body, 'y') unless chrome_y.nil?
       expect_shared(marker_x(session), shared_x, shared_x_chrome, body, 'x') unless shared_x.nil?
+      expect_shared(marker_y(session), shared_y, shared_y_chrome, body, 'y') unless shared_y.nil?
     end
   end
 
@@ -377,6 +379,98 @@ RSpec.describe 'native layout L2 text-block parity', if: ENV.fetch('CSIM_JS_ENGI
     expect_parity(%(<div style="width:400px;font:16px monospace;white-space:pre">) +
                   %(<span style="margin-left:-6px"><span style="padding-left:6px">\n</span></span></div>) +
                   %(<b id="m" style="display:inline-block;width:4px;height:4px"></b>), chrome_y: 32)
+  end
+
+  # AN EDGE IS NOT CONTENT A BREAK MAY LEAVE BEHIND. The oracle keeps two questions about a line apart —
+  # `linePlaced` (anything went down on it, an edge included) and `lineHasContent` (something a break may
+  # leave behind) — and every break-before test asks the second. Native asked one flag for both, so an opening
+  # edge alone on a line counted as content and a box too narrow for edge + atomic broke BEFORE the atomic,
+  # where the oracle keeps it beside the edge and overflows — and so does Chrome, as long as nothing OFFERS a
+  # break there (with a `<wbr>` between them Chrome takes it; both engines do not, a shared gap pinned below). The walk hid it behind the measure gate's
+  # `!hasReal` arm, which refused a whitespace-only edged inline as `shrink-to-fit-child-unmeasurable` (~850
+  # sweep declines): a min-content box is exactly as narrow as the edge, so it was the only place the line got
+  # this tight. The control is the same line with an ATOMIC where the edge is, which does break (Chrome y 35).
+  {
+    'an empty edged inline on a line only as wide as its edge'     =>
+      '<div style="width:6px;font:16px monospace"><span style="padding-left:6px"></span>',
+    '…holding white space, which collapses away'                   =>
+      '<div style="width:6px;font:16px monospace"><span style="padding-left:6px">   </span>',
+    '…at min-content, the shape the measure gate used to refuse'   =>
+      '<div style="width:min-content;font:16px monospace"><span style="padding-left:6px">   </span>'
+  }.each do |name, head|
+    it "keeps an atomic beside an opening edge alone on its line: #{name}" do
+      expect_parity(%(#{head}<b id="m" style="display:inline-block;width:4px;height:4px"></b></div>), 6, chrome_y: 13)
+    end
+  end
+  it 'breaks before an atomic when what fills the line is CONTENT (the control)' do
+    expect_parity(
+      '<div style="width:6px;font:16px monospace"><b style="display:inline-block;width:6px;height:4px"></b>' \
+      '<b id="m" style="display:inline-block;width:4px;height:4px"></b></div>',
+      0,
+      chrome_y: 35
+    )
+  end
+  # …and a collapsible space the flow PLACES is content, where an edge is not: once native stopped counting
+  # the edges, the space after them had to count in their place (the oracle places it through `placeOnLine`,
+  # which sets `lineHasContent` for anything but an edge), or ` aaaa` stopped wrapping here. What the two
+  # engines share is that the space is placed at all: they call the line started once an edge is on it
+  # (`collapseRun`'s `!linePlaced`), where Chrome still sees a line START, collapses the space, and fits
+  # `aaaa` beside the edges — one line, the marker at 52.41, where both engines wrap and put it at 38.4.
+  it 'wraps text after a space placed behind edges alone on the line' do
+    expect_parity(
+      '<div style="width:60px;font:16px monospace"><span style="margin-left:9px"><span style="padding-right:5px"></span> aaaa</span>' \
+      '<b id="m" style="display:inline-block;width:4px;height:4px"></b></div>',
+      shared_x:        38.4,
+      shared_x_chrome: 52.40625
+    )
+  end
+  # …and the space is content from the moment it is PLACED, not from when a word consumes it: a
+  # NON-WRAPPING run asks its whole-run pre-pass whether the line holds content before any word arrives, and
+  # with the edges no longer answering yes, a space still only queued said no — `aaaa` stayed on a 30px line
+  # the oracle wraps it off (found by the review's 57,600-shape sweep, `edgeline_*`). Chrome wraps it too, but
+  # to the second line where both engines reach the third: the collapsed space again, which Chrome drops at
+  # what it still calls the line's start.
+  it 'wraps a non-wrapping run after a space placed behind an edge alone on the line' do
+    expect_parity(
+      '<div style="width:30px;font:16px monospace"><span style="padding-left:6px"></span> ' \
+      '<span style="white-space:nowrap">aaaa</span><b id="m" style="display:inline-block;width:4px;height:4px"></b></div>',
+      0,
+      shared_y:        57,
+      shared_y_chrome: 35
+    )
+  end
+  # …while a space the flow NEVER placed is no content at all, however it is carried: a non-wrapping
+  # white-space run at a line start collapses away and leaves only its hard barrier behind (a zero-width
+  # pending space), and when a later edge put the line down and a `<wbr>` made it breakable, native counted
+  # that phantom as content and broke before the atomic where the oracle keeps it.
+  # Chrome breaks at the `<wbr>` in both this shape and the one after it, and both engines keep the atomic
+  # beside the edge: an opportunity after an edge-only line is one neither engine takes. Shared, recorded.
+  {
+    'a collapsed non-wrapping space, then an edge'  =>
+      '<span style="padding-right:6px"><span style="white-space:nowrap"> </span></span><wbr>',
+    'an opening edge alone'                         =>
+      '<span style="padding-left:6px"></span><wbr>'
+  }.each do |name, head|
+    it "keeps an atomic beside an edge-only line across a <wbr>: #{name}" do
+      expect_parity(
+        %(<div style="width:6px;font:16px monospace">#{head}<b id="m" style="display:inline-block;width:4px;height:4px"></b></div>),
+        shared_y:        13,
+        shared_y_chrome: 35
+      )
+    end
+  end
+  # A CLOSING edge whose two halves cancel still LANDS: the oracle places `padding-right` and `margin-right`
+  # as two edges, so the line exists and the block around it is one line tall — 22, as in Chrome, which puts
+  # the marker after it at 35. The walk judged the inline edgeless by the halves' SUM and emitted no edge runs
+  # at all, so native saw no line and gave the block no height (the marker at 13). (A `<br>` after it does
+  # not show this: native's break closes a strut line of its own either way.)
+  it 'puts the line down for a closing edge whose halves cancel' do
+    expect_parity(
+      '<div style="font:16px monospace"><div style="width:100px"><span style="padding-right:5px;margin-right:-5px"></span></div>' \
+      '<b id="m" style="display:inline-block;width:4px;height:4px"></b></div>',
+      0,
+      chrome_y: 35
+    )
   end
 
   # …and the ORACLE's half, which had no guard at all because the only instrument that caught it was an

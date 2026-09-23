@@ -5,7 +5,7 @@
 # control, a list box whose rows it stacks inside the control's box — at its baseline or a baseline SHIFT,
 # ITSELF (see the last describe). What still keeps the PUSHED box, each measured: an intrinsic-size KEYWORD
 # width on a replaced atomic (`width: fit-content` on an `<img>`); an atomic whose own intrinsic MEASURE
-# neither engine has a rule for (`WalkRefusals::UNMEASURABLE_INLINE`); an inline-table holding a SCROLLING
+# native has no rule for (`WalkRefusals::UNMEASURABLE`); an inline-table holding a SCROLLING
 # row or row group that declares a px bottom margin, which the oracle's baseline arm adds and the table
 # algorithm does not (row groups out of DOCUMENT order, and a caption after the rows, were on this list until
 # 2026-09-23 — both closed in the oracle);
@@ -579,17 +579,18 @@ RSpec.describe 'native layout inline-atomic parity', if: ENV.fetch('CSIM_JS_ENGI
       # laid out with the atomic pushed rather than declined. (A FLOAT and a STRETCHED out-of-flow box never
       # needed a measure at all.) The one route with no fallback is a vertical writing mode's block child, whose
       # width IS its content's: that still declines.
-      # …an atomic whose own MEASURE native lacks a rule for: an EDGED inline (horizontal padding) holding
-      # nothing but white space, whose opening edge has to land somewhere and which carries no content to land
-      # it against (`WalkRefusals::UNMEASURABLE_INLINE`). The atomic is otherwise the same box with the same
-      # content as the control below, so what the counters show is that content and nothing else.
-      # The cause has changed hands twice: `display:inline-grid` over bare text retired 2026-09-22 when
-      # `gridItems` made a contiguous run of text an anonymous ITEM (§4), and `white-space: break-spaces`
-      # retired 2026-09-23 when `text_intrinsic`'s mode table learned its measure. Find the next shape when
-      # this one retires; the cause is real either way.
+      # …an atomic whose own MEASURE native lacks a rule for: a NON-WRAPPING block holding text and a block
+      # child, which the oracle measures as one unbreakable token (`WalkRefusals::UNMEASURABLE`). The atomic is
+      # otherwise the same box with the same content as the control below, so what the counters show is that
+      # content and nothing else.
+      # The cause has changed hands three times: `display:inline-grid` over bare text retired 2026-09-22 when
+      # `gridItems` made a contiguous run of text an anonymous ITEM (§4), `white-space: break-spaces` retired
+      # 2026-09-23 when `text_intrinsic`'s mode table learned its measure, and a whitespace-only EDGED inline
+      # the same day, when native learned an opening edge is not content a break may leave behind. Find the
+      # next shape when this one retires; the cause is real either way.
       # The atomic's own CONTENT is what the substitution swaps now (it was the atomic's `style` while the
       # cause was a `white-space`), so the fallback shape and its control are the same box either way.
-      unmeasurable = WalkRefusals::UNMEASURABLE_INLINE
+      unmeasurable = WalkRefusals::UNMEASURABLE
       expect_bail(%(<div style="width:400px"><div style="writing-mode:vertical-lr">a <span style="display:inline-block">#{unmeasurable}</span> b</div></div>))
       # Each route with the atomic it cannot lay out, and the SAME shape with one it can — so the counter shows
       # the fallback was taken here and is not simply never taken.

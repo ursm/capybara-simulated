@@ -1072,7 +1072,7 @@ fn layout_pass(
     let run_floats = read_f64_array(args.get(1));
     let mut runs: Vec<crate::layout::Run> = Vec::with_capacity(run_floats.len() / RUN_STRIDE);
     for r in run_floats.chunks_exact(RUN_STRIDE) {
-        runs.push(crate::layout::Run { kind: r[0] as u8, font: r[1] as i32, size: r[2], ls: r[3], ws: r[4], line_height: r[5], asc: r[7], metric: r[6], ws_mode: r[8] as u8, tab_px: r[9], tab_min: r[10], line_mode: r[11] as u8 });
+        runs.push(crate::layout::Run { kind: r[0] as u8, font: r[1] as i32, size: r[2], ls: r[3], ws: r[4], line_height: r[5], asc: r[7], metric: r[6], ws_mode: r[8] as u8, tab_px: r[9], tab_min: r[10], line_mode: r[11] as u8, lands: r[0] as u8 == crate::layout::RUN_CLOSE && r[11] != 0.0 });
     }
     // Parallel run-text channel: run_texts[r] = run r's text (a string), read as UTF-16 to iterate
     // exactly as JS does. Done before any arena borrow.
