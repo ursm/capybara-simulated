@@ -855,6 +855,18 @@ RSpec.describe 'native layout L2 text-block parity', if: ENV.fetch('CSIM_JS_ENGI
   # block around it — whose settle had no record of it and fell back to the cursor it was held at. The ORACLE
   # was wrong ((34.8, 22) against native's and Chrome's (10, 44)); the inline-block's settle resolves it now.
   # 6,700 of the 10,000 `nestedheld` shapes mismatched, rtl ones by the corner the atomic's shift left behind.
+  # A held marker is aligned by where it STANDS, past the edges still waiting: at the bare cursor, a NEGATIVE
+  # opening margin left it past the tab gap the `pre` run then put down before it, and the justify spread
+  # moved it by that gap (the ORACLE's 48; native and Chrome 34.4). The last of the family the review's
+  # justify / held-marker sweeps parked (`justhang`, `placedspace`, `brflush` are permanent again).
+  it 'aligns a held marker by where it stands past a negative opening margin' do
+    expect_parity(
+      %(<div style="position:relative;width:100px;font:16px monospace;text-align:justify">aaaa<span style="margin-left:-4px"><i id="m" style="position:absolute;width:2px;height:2px"></i>) +
+      %(<span style="white-space:pre">\tb</span></span> end</div>),
+      34.40625,
+      chrome_y: 0
+    )
+  end
   it 'settles a marker held inside an inline-block inside an edged inline' do
     expect_parity(
       '<div style="position:relative;width:100px;font:16px monospace">aaaa aaaa <span style="padding-left:6px">' \
