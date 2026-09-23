@@ -585,7 +585,7 @@ RSpec.describe 'native layout L1 block-flow parity', if: ENV.fetch('CSIM_JS_ENGI
     it 'refuses in the walk what it would have to measure and cannot' do
       expect_parity('<div style="width:400px"><div style="width:max-content;text-indent:30px">aa bb</div></div>')
       expect_walk_declines('<div style="width:400px"><div style="width:max-content"><span style="display:inline-block"><span style="display:inline-block"><div style="display:table-cell">c</div></span></span></div></div>', 'block-level-box-unplaceable')
-      expect_walk_declines('<div style="width:400px"><table><tr><td><div style="width:max-content"><div style="white-space:break-spaces">g   h</div></div></td></tr></table></div>', 'shrink-to-fit-child-unmeasurable')
+      expect_walk_declines(%(<div style="width:400px"><table><tr><td><div style="width:max-content"><div>#{WalkRefusals::UNMEASURABLE_INLINE}</div></div></td></tr></table></div>), 'shrink-to-fit-child-unmeasurable')
     end
     # A keyword on any of the OTHER five size properties is not a width native has to find: the oracle resolves
     # a keyword `height` to `auto` and a keyword min/max to no clamp at all, which the record already says.
@@ -758,8 +758,9 @@ RSpec.describe 'native layout L1 block-flow parity', if: ENV.fetch('CSIM_JS_ENGI
       r = parity(session)
       expect(r).to include('ok' => true, 'mismatches' => 0, 'nativeOutOfFlow' => 1)
       # …and one whose shrink-to-fit native still cannot measure DOES replay, so the counter above is not
-      # simply always 1: `white-space: break-spaces` has no intrinsic rule in either engine.
-      session = simulated_session(page(%(<div style="#{cb}"><div style="position:absolute;top:10px;left:20px;white-space:break-spaces">a   b</div></div>))); session.visit '/'
+      # simply always 1. `white-space: break-spaces` was this shape until 2026-09-23, when its measure went
+      # native; `WalkRefusals::UNMEASURABLE_INLINE` is where the cause lives now.
+      session = simulated_session(page(%(<div style="#{cb}"><div style="position:absolute;top:10px;left:20px">#{WalkRefusals::UNMEASURABLE_INLINE}</div></div>))); session.visit '/'
       r = parity(session)
       expect(r).to include('ok' => true, 'mismatches' => 0, 'nativeOutOfFlow' => 0)
     end
@@ -981,7 +982,7 @@ x</div>))
     # Native ASKS such a child's intrinsic widths, so a child it cannot measure has to be refused by the WALK —
     # discovered in Rust it would fail the whole pass instead of this one subtree.
     it 'declines a vertical block holding content native cannot measure' do
-      expect_walk_declines('<div style="width:400px"><div style="writing-mode:vertical-lr"><div style="white-space:break-spaces">g   h</div></div></div>', 'shrink-to-fit-child-unmeasurable')
+      expect_walk_declines(%(<div style="width:400px"><div style="writing-mode:vertical-lr"><div>#{WalkRefusals::UNMEASURABLE_INLINE}</div></div></div>), 'shrink-to-fit-child-unmeasurable')
       expect_walk_declines('<div style="width:400px"><div style="writing-mode:vertical-lr"><span style="display:inline-block"><div style="display:table-cell">c</div></span></div></div>', 'block-level-box-unplaceable')
     end
     # …which is also why such a child is walked as a MEASURED subtree: an atomic inline whose own box would be

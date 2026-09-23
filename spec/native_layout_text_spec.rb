@@ -152,56 +152,72 @@ RSpec.describe 'native layout L2 text-block parity', if: ENV.fetch('CSIM_JS_ENGI
   end
   # …and the INTRINSIC half is what declines. `contentIntrinsicWidths` makes the min-content of `aa   bb` the
   # width of `aa ` where a `pre-wrap` measure gives `aa` — 28.8 against 19.2 — and native has only the second
-  # rule, so a shape whose width comes from a min-content measure is the oracle's alone.
+  # rule, and native carries it since 2026-09-23: every preserved space is CONTENT that joins the word, never
+  # hangs, and takes its break opportunity AFTER it, where a `pre-wrap` space opens one BEFORE and hangs off
+  # the end. So the min-content of `aa   bb` is `aa ` wide and a `pre-wrap` one is `aa`.
   # Measured the hard way: aliasing the mode to `pre-wrap` outright passes the whole 8,640-case `wsonly` sweep
-  # with no mismatch, because not one of its shapes asks for a min-content. This arm is that missing shape —
-  # and the ORACLE's WIDTH here is Chrome's (28.8125, marker at 19.203125), so the refusal buys a right width.
-  # Not a right answer: the oracle then lays that box out by `pre-wrap`'s line rule — the shared divergence the
-  # arm above names — so it is 44 tall with the marker at y 35 where Chrome 153 says 66 and 57. One refusal,
-  # one of the two halves.
+  # with no mismatch, because not one of its shapes asks for a min-content. These arms are that missing shape.
   # …asked at FOUR gates, because the mode is inherited but it can also be declared on a `<span>`, on one
-  # inside that, or on a box-less `display: contents` element, and the block gate sees none of those. What the
-  # four buy is the REASON, not the answer: opened, all four shapes still decline, as the unnamed `native
-  # declined` from `text_intrinsic`'s `?` failing the whole pass. Shut, they decline as
-  # `shrink-to-fit-child-unmeasurable` with only the measured box off the record — which is why every arm
-  # asserts the reason and not merely that something declined.
-  it 'declines a break-spaces box whose width is a min-content measure' do
-    expect_declined_x('<div style="width:min-content;font:16px monospace;white-space:break-spaces">aa   bb' \
-                      '<i id="m" style="display:inline-block;width:4px;height:4px"></i></div>',
-                      19.203125,
-                      '<div style="width:min-content;font:16px monospace;white-space:pre-wrap">aa   bb' \
-                      '<i id="m" style="display:inline-block;width:4px;height:4px"></i></div>',
-                      reason: 'shrink-to-fit-child-unmeasurable')
-    expect_declined_x('<div style="width:min-content;font:16px monospace">aa' \
-                      '<span style="white-space:break-spaces">   </span>bb' \
-                      '<i id="m" style="display:inline-block;width:4px;height:4px"></i></div>',
-                      19.203125,
-                      '<div style="width:min-content;font:16px monospace">aa' \
-                      '<span style="white-space:pre-wrap">   </span>bb' \
-                      '<i id="m" style="display:inline-block;width:4px;height:4px"></i></div>',
-                      reason: 'shrink-to-fit-child-unmeasurable')
-    # …and the two gates the first two shapes never reach. `nlIntrinsicMeasurableOf` asks about the block and
-    # about its DIRECT inline children, so a mode declared one level further in is `nlInlineMeasurable`'s to
-    # refuse; and a mode declared on a box-less `display: contents` element is `nlSplicedTextMeasurable`'s,
-    # since `layoutChildren` hands that element's text to the block with no element of its own to ask.
-    # Both measured in Chrome at 19.203125, the same as the first two: `display: contents` generates no box,
-    # so the three spellings are one shape to the browser.
-    expect_declined_x('<div style="width:min-content;font:16px monospace">aa' \
-                      '<span><span style="white-space:break-spaces">   </span></span>bb' \
-                      '<i id="m" style="display:inline-block;width:4px;height:4px"></i></div>',
-                      19.203125,
-                      '<div style="width:min-content;font:16px monospace">aa' \
-                      '<span><span style="white-space:pre-wrap">   </span></span>bb' \
-                      '<i id="m" style="display:inline-block;width:4px;height:4px"></i></div>',
-                      reason: 'shrink-to-fit-child-unmeasurable')
-    expect_declined_x('<div style="width:min-content;font:16px monospace">aa' \
-                      '<span style="display:contents;white-space:break-spaces">   </span>bb' \
-                      '<i id="m" style="display:inline-block;width:4px;height:4px"></i></div>',
-                      19.203125,
-                      '<div style="width:min-content;font:16px monospace">aa' \
-                      '<span style="display:contents;white-space:pre-wrap">   </span>bb' \
-                      '<i id="m" style="display:inline-block;width:4px;height:4px"></i></div>',
-                      reason: 'shrink-to-fit-child-unmeasurable')
+  # inside that, or on a box-less `display: contents` element, and the block gate sees none of those. All four
+  # went native together — the gate is one CODE SET (`NL_INTRINSIC_WS_CODES`) and `text_intrinsic`'s `modes`
+  # table is its twin, so they could only move as a pair.
+  # Chrome's figures throughout, and BOTH are asserted: the box is 28.8125 wide against `pre-wrap`'s
+  # 19.203125, and the marker after `bb` sits at 19.203125 where `pre-wrap` puts it at 0 — because the extra
+  # space `break-spaces` keeps on the first line is the whole difference, and it shows in both.
+  # (Its `y` is NOT asserted: Chrome puts the marker on a third line at 57 and both engines put it on a second
+  # at 35, the shared line-rule divergence the arm above names. One refusal, one of the two halves — and this
+  # increment closed the measure half only.)
+  it 'measures a break-spaces box by its own min-content rule (Chrome: 28.8125, where pre-wrap gives 19.2)' do
+    {
+      '<div style="width:min-content;font:16px monospace;white-space:MODE">aa   bb' \
+      '<i id="m" style="display:inline-block;width:4px;height:4px"></i></div>' => :block,
+      '<div style="width:min-content;font:16px monospace">aa' \
+      '<span style="white-space:MODE">   </span>bb' \
+      '<i id="m" style="display:inline-block;width:4px;height:4px"></i></div>' => :inline,
+      '<div style="width:min-content;font:16px monospace">aa' \
+      '<span><span style="white-space:MODE">   </span></span>bb' \
+      '<i id="m" style="display:inline-block;width:4px;height:4px"></i></div>' => :nested_inline,
+      '<div style="width:min-content;font:16px monospace">aa' \
+      '<span style="display:contents;white-space:MODE">   </span>bb' \
+      '<i id="m" style="display:inline-block;width:4px;height:4px"></i></div>' => :boxless
+    }.each_key do |template|
+      {'break-spaces' => [28.8125, 19.203125], 'pre-wrap' => [19.203125, 0]}.each do |mode, (chrome_w, chrome_mx)|
+        body = template.sub('MODE', mode)
+        expect_parity(body, chrome_mx)
+        with_page(body) do |session|
+          w = session.evaluate_script("document.querySelector('div').getBoundingClientRect().width")
+          expect_near(w, chrome_w, body, 'width')
+        end
+      end
+    end
+  end
+
+  # …and the SPACING column, which is the one this example did not have when the measure shipped. A preserved
+  # space is a SPACED advance like every other piece on the line, and the oracle's own arm measured it with
+  # `charAdvances` — unspaced by contract, its internal pen carrying `letter-spacing` / `word-spacing` only so
+  # a TAB picks the right stop. Nothing added them back, so the oracle was 3px per space short of native and
+  # of Chrome. Chrome's figures, measured 2026-09-23:
+  #   plain 28.8125 · letter-spacing:3px 37.8125 · word-spacing:5px 33.8125 · letter-spacing:-1px 25.8125
+  # …and the TAB is the shape that says the two pens are the same number: `a<space><tab>b` at
+  # `letter-spacing: 3px; tab-size: 20px` is 52.609375, where an unspaced line pen reaches 49.6.
+  it 'measures a break-spaces space SPACED, and lands a tab after one on the same stop (Chrome: 37.8125)' do
+    {
+      '' => 28.8125,
+      'letter-spacing:3px' => 37.8125,
+      'word-spacing:5px' => 33.8125,
+      'letter-spacing:-1px' => 25.8125
+    }.each do |spacing, chrome_w|
+      body = %(<div style="width:min-content;font:16px monospace;white-space:break-spaces;#{spacing}">aa   bb</div>)
+      expect_parity(body)
+      with_page(body) do |session|
+        expect_near(session.evaluate_script("document.querySelector('div').getBoundingClientRect().width"), chrome_w, body, 'width')
+      end
+    end
+    tab = %(<div style="width:max-content;font:16px monospace;white-space:break-spaces;letter-spacing:3px;tab-size:20px">a &#9;b</div>)
+    expect_parity(tab)
+    with_page(tab) do |session|
+      expect_near(session.evaluate_script("document.querySelector('div').getBoundingClientRect().width"), 52.609375, tab, 'width')
+    end
   end
 
   # `pre-line` COLLAPSES SPACES and KEEPS NEWLINES — two independent axes — and the node-level gate that

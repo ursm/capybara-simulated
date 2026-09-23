@@ -33,4 +33,22 @@ module WalkRefusals
   WHITESPACE       = '<span style="display:inline-block;white-space:pre">   </span>'
   TABLE_CELL       = '<span style="display:inline-block"><div style="display:table-cell">c</div></span>'
   ATOMIC           = [POSITIONED, WHITESPACE, TABLE_CELL].freeze
+
+  # …and a separate cause, for the routes that MEASURE rather than lay out: content whose intrinsic width
+  # native has no rule for, which every shrink-to-fit route has to refuse or push. An EDGED inline (horizontal
+  # padding) holding nothing but white space is that shape — its opening edge has to land somewhere and it
+  # carries no real content to land it against. The refusal is UNNAMED on both sides, which is why it is
+  # written out here rather than pointed at a reason string: `nlInlineMeasurable`'s last arm (`!hasReal`, at
+  # the edge test in layout.js) and its twin flag in `nlGatherRuns`, which keeps a whitespace-only padded
+  # inline declined because its line box is mis-sized by a separate pre-existing bug. The walk's NAMED
+  # reasons in that region — `edged-inline-font-exceeds-line-height`, `br-in-edged-inline` — are the other
+  # two conditions on the same pair of edges, and neither is this one.
+  # It stands in for `white-space: break-spaces`, which held this role until 2026-09-23 and then went native:
+  # `text_intrinsic`'s mode table learned that a preserved space is content that joins the word and breaks
+  # AFTER itself. SIX sites across five spec files used the mode as their "native cannot measure this", and
+  # only three of them went red the day the measure shipped — the other three went on passing for an
+  # unrelated reason. That silent re-pointing is exactly what this file exists to stop, and it happened
+  # anyway because the cause lived in six string literals instead of here.
+  # If this one retires too, the cause is still real: find the next shape, do not delete the arm.
+  UNMEASURABLE_INLINE = '<span style="padding-left:6px">   </span>g'
 end

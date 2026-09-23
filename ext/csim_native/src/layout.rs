@@ -5754,25 +5754,27 @@ fn text_intrinsic(runs: &[Run], run_texts: &[Option<Vec<u16>>], ws_mode: u8, ind
     // …per RUN, because an inline may declare its own `white-space` (`Run::ws_mode`) and every one of these is
     // about the run it belongs to. `pin` is the exception: "this box never wraps, so its min-content IS its
     // max-content" is a statement about the whole stream, true only while no run in it wraps.
+    // …(wraps, preserves, a newline forces a break, and `break-spaces`' own rule for what a preserved space
+    // DOES). `break-spaces` wraps and preserves exactly as `pre-wrap` does — which is why `line_layout` takes
+    // the two together — and differs only here: a `pre-wrap` space is a gap the line may break BEFORE and that
+    // HANGS off the end, while a `break-spaces` space is CONTENT that joins the word, never hangs, and carries
+    // the opportunity AFTER it. So the min-content of `aa   bb` is `aa ` wide (28.8) where `pre-wrap` gives
+    // `aa` (19.2). Chrome-measured, and the oracle's `contentIntrinsicWidths` says the same.
     let modes = |m: u8| match m {
-        0 => Some((true, false, false)),   // normal:   wraps, collapses, no forced newline
-        1 => Some((false, false, false)),  // nowrap
-        2 => Some((false, true, true)),    // pre
-        3 => Some((true, true, true)),     // pre-wrap
-        4 => Some((true, false, true)),    // pre-line
-        // …and `break-spaces` (5) is deliberately absent: it wraps and preserves like `pre-wrap`, which is why
-        // `line_layout` takes it, but its intrinsic contribution is a rule of its own — every preserved space
-        // is content that never hangs, with a break after each, so the min-content of `aa   bb` is `aa ` wide
-        // and not `aa`. `?` below turns that into a decline for the whole stream, per RUN, which is where an
-        // inline that declares its own mode has to be caught: the block's gate never sees one.
+        0 => Some((true, false, false, false)),  // normal:   wraps, collapses, no forced newline
+        1 => Some((false, false, false, false)), // nowrap
+        2 => Some((false, true, true, false)),   // pre
+        3 => Some((true, true, true, false)),    // pre-wrap
+        4 => Some((true, false, true, false)),   // pre-line
+        5 => Some((true, true, true, true)),     // break-spaces
         _ => None,
     };
     // `pin` — "this box never wraps, so its min-content IS its max-content" — is the BLOCK's, not the runs':
     // the oracle ends `contentIntrinsicWidths` with `NON_WRAPPING_WS.has(whiteSpaceOf(el))`, asked of the
     // ELEMENT. A wrapping inline inside a `nowrap` block does not unpin it.
     let pin = !modes(ws_mode)?.0;
-    // …while the three behaviours are set from each RUN's own mode as the loop reaches it.
-    let (mut wraps, mut preserve, mut break_nl);
+    // …while the four behaviours are set from each RUN's own mode as the loop reaches it.
+    let (mut wraps, mut preserve, mut break_nl, mut brk_spaces);
     let (mut min, mut max) = (0.0f64, 0.0f64);
     // (No `text-indent` here: the WALK declines an indented block whose intrinsic widths native would be asked
     // for, because what Chrome's min-content does with an indent is a real break pass at zero available width —
@@ -5840,7 +5842,7 @@ fn text_intrinsic(runs: &[Run], run_texts: &[Option<Vec<u16>>], ws_mode: u8, ind
     }
     for (ri, run) in runs.iter().enumerate() {
         // …this run's own three behaviours, which the macros above close over.
-        (wraps, preserve, break_nl) = modes(run.ws_mode)?;
+        (wraps, preserve, break_nl, brk_spaces) = modes(run.ws_mode)?;
         match run.kind {
             RUN_BR => {
                 take_indent!(); // a `<br>` occupies its line, so the line it ends carries the indent
@@ -5949,12 +5951,18 @@ fn text_intrinsic(runs: &[Run], run_texts: &[Option<Vec<u16>>], ws_mode: u8, ind
                                     // takes one opportunity for it; per character is the same arithmetic and
                                     // the same opportunities, since closing an empty word is a no-op.)
                                     let adv = if u == 0x09 { measure_at(run, &[u], line)? } else { space_w };
-                                    if wraps {
+                                    // …and under `break-spaces` the space is CONTENT: it joins the word like a
+                                    // non-wrapping one and takes its opportunity AFTER, where a `pre-wrap` space
+                                    // opens one BEFORE and hangs outside the word it follows.
+                                    if wraps && !brk_spaces {
                                         opportunity!();
                                     } else {
                                         word += adv;
                                     }
                                     line += adv;
+                                    if brk_spaces {
+                                        opportunity!();
+                                    }
                                 }
                             }
                         } else if break_nl && nl > 0 {

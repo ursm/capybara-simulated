@@ -1025,7 +1025,8 @@ RSpec.describe 'native layout flex parity', if: ENV.fetch('CSIM_JS_ENGINE', 'v8'
         expect(r).to include('ok' => true, 'mismatches' => 0, 'nativeFlexRows' => 1), "#{items}: #{r.inspect}"
       end
       # …and an item whose own measure native lacks a rule for still pushes, so the counter is not always 1.
-      r = run_shadow(%(<div style="#{base}"><div style="display:grid;grid-template-columns:1fr min-content"><div>g1</div><div style="white-space:break-spaces">g   2</div></div><div style="font-size:32px">BIG</div></div>))
+      # (`white-space: break-spaces` was this shape until 2026-09-23, when its measure went native.)
+      r = run_shadow(%(<div style="#{base}"><div style="display:grid;grid-template-columns:1fr min-content"><div>g1</div><div>#{WalkRefusals::UNMEASURABLE_INLINE}</div></div><div style="font-size:32px">BIG</div></div>))
       expect(r).to include('ok' => true, 'mismatches' => 0, 'nativeFlexRows' => 0), r.inspect
     end
     # Review findings, oracle side (native and Chrome agreed): a block holding both inline content and block

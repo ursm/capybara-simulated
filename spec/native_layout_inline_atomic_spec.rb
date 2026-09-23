@@ -16,6 +16,7 @@
 require 'capybara/simulated'
 require 'rack'
 require_relative 'support/session_teardown'
+require_relative 'support/walk_refusals'
 
 RSpec.describe 'native layout inline-atomic parity', if: ENV.fetch('CSIM_JS_ENGINE', 'v8') == 'v8' do
   def page(body)
@@ -573,34 +574,37 @@ RSpec.describe 'native layout inline-atomic parity', if: ENV.fetch('CSIM_JS_ENGI
       # laid out with the atomic pushed rather than declined. (A FLOAT and a STRETCHED out-of-flow box never
       # needed a measure at all.) The one route with no fallback is a vertical writing mode's block child, whose
       # width IS its content's: that still declines.
-      # …an atomic whose own MEASURE native lacks a rule for. `white-space: break-spaces` is that rule: it lays
-      # a line out as `pre-wrap` does and goes native for LAYOUT, and only its intrinsic contribution is
-      # refused (every preserved space is content that never hangs, with a break after each — see
-      # `nlWsIntrinsicMeasurable`). One property against the `display:inline-block` control below, which is
-      # the same box with the same content, so what the counters show is that property and nothing else.
-      # It replaced `display:inline-grid` over bare text on 2026-09-22, when `gridItems` made a contiguous run
-      # of text an anonymous ITEM (§4) and that cause retired.
-      ib = 'display:inline-block;white-space:break-spaces'
-      expect_bail(%(<div style="width:400px"><div style="writing-mode:vertical-lr">a <span style="#{ib}">in</span> b</div></div>))
+      # …an atomic whose own MEASURE native lacks a rule for: an EDGED inline (horizontal padding) holding
+      # nothing but white space, whose opening edge has to land somewhere and which carries no content to land
+      # it against (`WalkRefusals::UNMEASURABLE_INLINE`). The atomic is otherwise the same box with the same
+      # content as the control below, so what the counters show is that content and nothing else.
+      # The cause has changed hands twice: `display:inline-grid` over bare text retired 2026-09-22 when
+      # `gridItems` made a contiguous run of text an anonymous ITEM (§4), and `white-space: break-spaces`
+      # retired 2026-09-23 when `text_intrinsic`'s mode table learned its measure. Find the next shape when
+      # this one retires; the cause is real either way.
+      # The atomic's own CONTENT is what the substitution swaps now (it was the atomic's `style` while the
+      # cause was a `white-space`), so the fallback shape and its control are the same box either way.
+      unmeasurable = WalkRefusals::UNMEASURABLE_INLINE
+      expect_bail(%(<div style="width:400px"><div style="writing-mode:vertical-lr">a <span style="display:inline-block">#{unmeasurable}</span> b</div></div>))
       # Each route with the atomic it cannot lay out, and the SAME shape with one it can — so the counter shows
       # the fallback was taken here and is not simply never taken.
       [
-        ['nativeIntrinsicGrids', %(<div style="display:grid;grid-template-columns:min-content auto;width:400px"><div>a <span style="%s">in</span> b</div><div>x</div></div>)],
-        ['nativeFlexRows',       %(<div style="display:flex;width:100px"><div>a <span style="%s">in</span> b</div><div style="flex:1">x</div></div>)],
-        ['nativeOutOfFlow',      %(<div style="width:400px;position:relative"><div style="position:absolute;left:0">a <span style="%s">in</span> b</div><p>x</p></div>)]
+        ['nativeIntrinsicGrids', %(<div style="display:grid;grid-template-columns:min-content auto;width:400px"><div>a <span style="display:inline-block">%s</span> b</div><div>x</div></div>)],
+        ['nativeFlexRows',       %(<div style="display:flex;width:100px"><div>a <span style="display:inline-block">%s</span> b</div><div style="flex:1">x</div></div>)],
+        ['nativeOutOfFlow',      %(<div style="width:400px;position:relative"><div style="position:absolute;left:0">a <span style="display:inline-block">%s</span> b</div><p>x</p></div>)]
       ].each do |counter, shape|
-        fallback = run_shadow(shape.sub('%s', ib))
+        fallback = run_shadow(shape.sub('%s', unmeasurable))
         expect(fallback).to include('ok' => true, 'mismatches' => 0, 'nativeAtomics' => 0), "#{shape}: #{fallback.inspect}"
         expect(fallback[counter]).to eq(0), "#{counter} should have fallen back: #{fallback.inspect}"
-        measured = run_shadow(shape.sub('%s', 'display:inline-block'))
+        measured = run_shadow(shape.sub('%s', 'in'))
         expect(measured).to include('ok' => true, 'mismatches' => 0), "#{shape}: #{measured.inspect}"
         expect(measured[counter]).to be >= 1, "#{counter} never measures, so the fallback pins nothing: #{measured.inspect}"
       end
       [
-        %(<div style="width:400px">x <span style="display:inline-block">a <span style="#{ib}">in</span> b</span></div>),
-        %(<div style="overflow:hidden;width:400px"><div style="float:left;width:200px">f <span style="display:inline-block">a <span style="#{ib}">x</span> b</span> g</div></div>),
-        %(<div style="width:400px;position:relative"><div style="position:absolute;left:0;right:100px">a <span style="#{ib}">in</span> b</div><p>x</p></div>),
-        %(<div style="display:grid;grid-template-columns:100px 200px;width:400px"><div>a <span style="#{ib}">in</span> b</div><div>x</div></div>)
+        %(<div style="width:400px">x <span style="display:inline-block">a <span style="display:inline-block">#{unmeasurable}</span> b</span></div>),
+        %(<div style="overflow:hidden;width:400px"><div style="float:left;width:200px">f <span style="display:inline-block">a <span style="display:inline-block">#{unmeasurable}</span> b</span> g</div></div>),
+        %(<div style="width:400px;position:relative"><div style="position:absolute;left:0;right:100px">a <span style="display:inline-block">#{unmeasurable}</span> b</div><p>x</p></div>),
+        %(<div style="display:grid;grid-template-columns:100px 200px;width:400px"><div>a <span style="display:inline-block">#{unmeasurable}</span> b</div><div>x</div></div>)
       ].each do |body|
         r = run_shadow(body)
         expect(r).to include('ok' => true, 'mismatches' => 0, 'nativeAtomics' => 0), "#{body}: #{r.inspect}"
@@ -628,9 +632,11 @@ RSpec.describe 'native layout inline-atomic parity', if: ENV.fetch('CSIM_JS_ENGI
       # …and each of those still lays out an atomic it CAN walk.
       expect_native_atomic(%(<div style="overflow:hidden;width:400px"><div style="float:left;width:200px">f <span style="display:inline-block">ok</span> g</div></div>))
       expect_native_atomic(%(<div style="width:400px;position:relative"><div style="position:absolute;left:0;right:100px">a <span style="display:inline-block">in</span> b</div><p>x</p></div>))
-      # …while a text block native only LAYS OUT keeps the pushed box: the decline cascades up to the outermost
-      # atomic, whose own text block is not measured, and THAT atomic is pushed whole.
-      r = run_shadow(%(<div style="width:400px">a <span style="display:inline-block">a <span style="#{ib}">in</span> b</span> c</div>))
+      # …while a text block native only LAYS OUT keeps the pushed box: the OUTER atomic is pushed whole, and
+      # with it the whole subtree — `nodes` drops to 2 against the control's 4, because a pushed atomic's
+      # children are no part of the record at all. (Byte-identical to what the `break-spaces` stand-in gave
+      # before 2026-09-23, so the counters here are the cause's and not this shape's.)
+      r = run_shadow(%(<div style="width:400px">a <span style="display:inline-block">a <span style="display:inline-block">#{unmeasurable}</span> b</span> c</div>))
       expect(r).to include('ok' => true, 'mismatches' => 0, 'nativeAtomics' => 0)
       expect_native_atomic('<div style="width:400px">a <span style="display:inline-block"><div style="position:relative">t <span style="display:inline-block">ok</span></div></span> c</div>', 2)
     end
