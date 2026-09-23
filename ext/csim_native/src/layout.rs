@@ -672,6 +672,22 @@ impl Input {
     fn edges_y(&self) -> f64 {
         self.pt + self.pb + self.bt + self.bb
     }
+    // A box with no `_nid`: a mixed block's anonymous text-block group, an anonymous table row or cell, an
+    // anonymous grid item. NOT "it has no element" — `anonTableCell` and `anonGridItem` build real objects the
+    // oracle stamps a real `_lb` on, and layout.js says so where they are built. What they have in common is
+    // that they are no part of the DOM, so there is no arena id to read a box back by, which is why the walk
+    // marks them `rec[0] = -1` and the parity compare skips them.
+    // Named here so a rule that depends on it says so, rather than testing the sentinel in place and leaving
+    // the next reader to work out which of the four kinds it meant — and every such rule should ask WHICH,
+    // because the four have nothing else in common (see `block_child_width`'s use).
+    //
+    // BACKLOG, and it would remove a whole class rather than exempt one member of it: the anonymous group
+    // carries `block_axis_is_x` only so `from_right` can pair it with the direction, and the WALK has already
+    // computed the answer (`startsInlineAtRight`). Send that bit instead and the group can answer `false` to
+    // the width question honestly — no exemption, and nothing for a future anonymous kind to fall into.
+    fn is_anonymous(&self) -> bool {
+        self.nid < 0.0
+    }
     // A used margin, `auto` counted as 0 for block flow's vertical stacking (horizontal auto margins
     // centre, handled in width resolution). L1 does not centre yet — auto → 0.
     fn m(v: f64) -> f64 {
@@ -3301,7 +3317,7 @@ fn out_of_flow_only(i: usize, inputs: &[Cell<Input>], children: &[Vec<usize>]) -
     if n.display == DISPLAY_TEXT_BLOCK || children[i].is_empty() {
         return false;
     }
-    children[i].iter().all(|&c| inputs[c].get().out_of_flow != 0 && inputs[c].get().nid >= 0.0)
+    children[i].iter().all(|&c| { let k = inputs[c].get(); k.out_of_flow != 0 && !k.is_anonymous() })
 }
 
 // A flex ROW's item widths, resolved natively — the oracle's `flexRowMetrics` + `resolveFlexRowWidths` per
@@ -6674,7 +6690,26 @@ fn block_child_width(
     // display it has and however much room it is given (HTML's button layout IS the shrink-to-fit algorithm;
     // the oracle's `shrinkWrapsToFit`). A block-level one filled its container here, which is 900px of
     // clickable target where Chrome draws 132.
-    let content_sized = cn.width_kw != 0 || (is_auto(cn.width) && (cn.block_axis_is_x || cn.is_button));
+    //
+    // …except for an ANONYMOUS block box, which the flow creates and the ORACLE gives its parent's content
+    // width outright. A mixed block's group inherits the parent's `writing-mode` like any anonymous box, so
+    // the vertical arm above used to catch it and shrink-to-fit it — and then a `text-align: center` had
+    // nothing to centre in: the atomic sat at 28.8 where the oracle put it at 145.5, on 400 of 4,032 shapes
+    // (`sweeps/genvwmmix.rb`, the cross of a writing mode with a mixed block, which no generator had).
+    // Reproducing the oracle here rather than the spec on purpose: NEITHER engine lays vertical text out —
+    // both put the atomic at the same `y` and move it along `x` — and Chrome, which does, says 262.5/28.81
+    // to our 145.5/19. The whole area is an approximation shared by the two engines, and the campaign's bar is
+    // that they share it. Real vertical inline layout is its own project; see the sweep.
+    // …and the exemption is the TEXT BLOCK specifically, not "anonymous". The other three anonymous kinds take
+    // their width from somewhere else entirely — a cell from its COLUMN, a grid item from its AREA — and none
+    // of them reaches block flow today (`measure` routes on `display` with no fallback, and an instrumented run
+    // over ~90k corpus shapes saw only `DISPLAY_TEXT_BLOCK` arrive here). What makes the narrow test worth
+    // writing anyway is the kind that does NOT exist yet: block-in-inline, which a real browser splits into
+    // anonymous BLOCKS and this engine does not (see layout.js's note at `placeInlineBox`). Those would arrive
+    // here as `DISPLAY_BLOCK`, and a blanket `is_anonymous()` would hand each one its parent's width without
+    // anyone deciding that it should get one.
+    let anon_group = cn.is_anonymous() && cn.display == DISPLAY_TEXT_BLOCK;
+    let content_sized = cn.width_kw != 0 || (is_auto(cn.width) && ((cn.block_axis_is_x && !anon_group) || cn.is_button));
     if !content_sized {
         return resolve_width(cn, avail);
     }

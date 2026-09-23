@@ -1003,6 +1003,51 @@ x</div>))
   # coincides with Chrome for a single block child; Chrome sums a vertical block's children along the block
   # axis, and rotates the flow, neither of which the oracle does. Parity is what these specs pin.
   describe 'a vertical writing mode shrink-to-fits its width' do
+    # …but an ANONYMOUS block box does not. A mixed block's group is created by the flow, inherits the
+    # parent's `writing-mode` like any anonymous box, and the vertical arm therefore used to shrink-to-fit
+    # it — after which a `text-align: center` had nothing to centre in and the atomic sat at 28.8 where the
+    # oracle put it at 145.5. 400 of the 4,032 shapes in `sweeps/genvwmmix.rb`, which is the cross of a
+    # writing mode with a MIXED BLOCK, and which no generator here had: `vflex`/`vflex2` cross a writing mode
+    # with FLEX and `wsmixed` crosses a mixed block with white-space, so the anonymous group — where a line's
+    # alignment and indent actually live — was never under a writing mode at all.
+    #
+    # All THREE figures are pinned, because neither engine is Chrome here and that is the point: this
+    # reproduces the ORACLE deliberately. Chrome lays vertical text out (`x` 262.5, `y` 28.81 — the atomic
+    # advances DOWN the line and the lines stack right-to-left); neither engine does, so both keep the atomic
+    # at a horizontal `y` and move it along `x`. Making native spec-correct on its own would be a parity break,
+    # and the pair is what the campaign holds. Real vertical inline layout is its own project.
+    it "gives a mixed block's anonymous group the parent width, not a shrink-to-fit (Chrome: 262.5 / 28.81)" do
+      atomic = '<span id="m" style="display:inline-block;width:9px;height:4px"></span>'
+      mixed  = %(<div style="height:120px"><div style="font:16px monospace;width:300px;writing-mode:vertical-rl;text-align:center"><div style="height:6px">B</div>aa #{atomic} bb</div></div>)
+      # …the same shape WITHOUT the block child, so the group is not anonymous: both engines already agreed
+      # there, which is what said the anonymity was the axis and not the writing mode.
+      plain  = %(<div style="height:120px"><div style="font:16px monospace;width:300px;writing-mode:vertical-rl;text-align:center">aa #{atomic} bb</div></div>)
+      # …and the horizontal twin, where all three engines agree.
+      horiz  = %(<div style="height:120px"><div style="font:16px monospace;width:300px;text-align:center"><div style="height:6px">B</div>aa #{atomic} bb</div></div>)
+      # …both axes pinned, and a tripwire on BOTH: `y` is where real vertical inline layout would show up first
+      # (Chrome advances the atomic DOWN the line, so it reads 28.81 where both engines read a horizontal 19),
+      # and a tripwire that guards only `x` would let that land unnoticed.
+      {
+        mixed => [[145.5, 19], [262.5, 28.81]],
+        plain => [[145.5, 13], [284.5, 28.81]],
+        horiz => [[145.5, 19], [145.5, 19]]
+      }.each do |body, (shared, chrome)|
+        expect_parity(body)
+        session = simulated_session(page(body))
+        session.visit '/'
+        got = session.evaluate_script("(() => { const b = document.getElementById('m').getBoundingClientRect(); return [+b.x.toFixed(2), +b.y.toFixed(2)]; })()")
+        expect(got).to eq(shared), body
+        got.each_with_index do |v, i|
+          next if shared[i] == chrome[i]
+
+          expect(v).not_to(
+            be_within(0.05).of(chrome[i]),
+            "#{body}: #{i.zero? ? 'x' : 'y'} #{v} now agrees with Chrome (#{chrome[i]}) — pin it as Chrome's, not as a shared gap"
+          )
+        end
+      end
+    end
+
     it 'sizes an auto-width vertical block from its content' do
       expect_parity('<div style="width:400px"><div style="writing-mode:vertical-lr"><div style="width:40px;height:20px"></div></div></div>')
       expect_parity('<div style="width:400px"><div style="writing-mode:vertical-rl"><div style="width:40px;height:20px"></div></div></div>')
