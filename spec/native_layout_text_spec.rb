@@ -79,7 +79,15 @@ RSpec.describe 'native layout L2 text-block parity', if: ENV.fetch('CSIM_JS_ENGI
   # `chrome_x` stays POSITIONAL because 294 call sites in this file spell it that way and it reads well at
   # each of them (`expect_parity(body, 6, chrome_y: 0)`); the pairs below are keyword because each only ever
   # appears together.
-  def expect_parity(body, chrome_x = nil, chrome_y: nil, shared_x: nil, shared_x_chrome: nil, shared_y: nil, shared_y_chrome: nil)
+  def expect_parity(
+    body,
+    chrome_x = nil,
+    chrome_y:        nil,
+    shared_x:        nil,
+    shared_x_chrome: nil,
+    shared_y:        nil,
+    shared_y_chrome: nil
+  )
     # A shared divergence is only RECORDED if the number it diverges from is written down beside it, so the
     # pair cannot be half-given.
     raise ArgumentError, 'shared_x needs shared_x_chrome' if !shared_x.nil? && shared_x_chrome.nil?
@@ -386,10 +394,10 @@ RSpec.describe 'native layout L2 text-block parity', if: ENV.fetch('CSIM_JS_ENGI
   # leave behind) — and every break-before test asks the second. Native asked one flag for both, so an opening
   # edge alone on a line counted as content and a box too narrow for edge + atomic broke BEFORE the atomic,
   # where the oracle keeps it beside the edge and overflows — and so does Chrome, as long as nothing OFFERS a
-  # break there (with a `<wbr>` between them Chrome takes it; both engines do not, a shared gap pinned below). The walk hid it behind the measure gate's
-  # `!hasReal` arm, which refused a whitespace-only edged inline as `shrink-to-fit-child-unmeasurable` (~850
-  # sweep declines): a min-content box is exactly as narrow as the edge, so it was the only place the line got
-  # this tight. The control is the same line with an ATOMIC where the edge is, which does break (Chrome y 35).
+  # break there (with a `<wbr>` between them Chrome takes it; both engines do not, a shared gap pinned below).
+  # The walk hid it behind the measure gate's `!hasReal` arm, which refused a whitespace-only edged inline as
+  # `shrink-to-fit-child-unmeasurable` (~850 sweep declines): a min-content box is exactly as narrow as the
+  # edge, so it was the only place the line got this tight. The control is the same line with an ATOMIC where the edge is, which does break (Chrome y 35).
   {
     'an empty edged inline on a line only as wide as its edge'     =>
       '<div style="width:6px;font:16px monospace"><span style="padding-left:6px"></span>',
@@ -471,6 +479,23 @@ RSpec.describe 'native layout L2 text-block parity', if: ENV.fetch('CSIM_JS_ENGI
       0,
       chrome_y: 35
     )
+  end
+  # …and a `<br>` inside an inline whose only edge is its CLOSE breaks as it would in an edgeless one: there is
+  # no opening edge for the break to strand, so the close simply lands on the line the break opened. The walk
+  # refused every edged inline holding a `<br>` (`br-in-edged-inline`), and emitting edge runs for a
+  # cancelling close pair put 360 such shapes behind that refusal; it is scoped to an OPENING edge now.
+  {
+    'a closing edge alone'           => ['padding-right:5px', 24.21875],
+    'a closing pair that cancels'    => ['padding-right:5px;margin-right:-5px', 19.21875]
+  }.each do |name, (style, chrome_x)|
+    it "breaks at a <br> inside an inline with no opening edge: #{name}" do
+      expect_parity(
+        %(<div style="width:100px;font:16px monospace">a<span style="#{style}">x<br>y</span>b) +
+        %(<b id="m" style="display:inline-block;width:4px;height:4px"></b></div>),
+        chrome_x,
+        chrome_y: 35
+      )
+    end
   end
 
   # …and the ORACLE's half, which had no guard at all because the only instrument that caught it was an

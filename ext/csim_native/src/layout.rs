@@ -1332,16 +1332,20 @@ fn line_layout(
                 }
                 open.pop(); // LIFO
                 line_x += run.metric;
-                // Neither `hang` nor `hang_pre` is cleared: an edge is `edge` to the oracle, which leaves the
-                // spaces before it hanging (`trailingHang` is reset only `if (!edge)`) — only a real placement
-                // ends their run.
+                // `hang_pre` is not cleared: an edge is `edge` to the oracle, which leaves the preserved spaces
+                // before it hanging (`trailingHang` is reset only `if (!edge)`) — only a real placement ends
+                // their run. (`hang` is always 0 here: a collapsible space is still PENDING at a close, not on
+                // the line, and `hang` holds one only between a word's placement of it and its own.)
                 if run.lands {
                     line_placed = true;
                 }
             }
             RUN_BR => {
-                if !open.is_empty() {
-                    return None; // <br> inside an open inline edge (fragment) — defer to JS
+                // …inside an inline with a non-zero OPENING edge (a fragment whose edge the break would strand)
+                // — defer to JS. The walk refuses the same (`br-in-edged-inline`); an inline whose only edge is
+                // its CLOSE breaks like an edgeless one, and its close lands on the line this opens.
+                if open.iter().any(|o| o.0 != 0.0) {
+                    return None;
                 }
                 break_line!(); // an empty line's box is the bare strut
                 // …and a `<br clear>` moves the flow past the floats it names before the next line opens
