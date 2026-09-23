@@ -320,8 +320,12 @@ RSpec.describe 'native layout L1 block-flow parity', if: ENV.fetch('CSIM_JS_ENGI
     it 'names the gate that stopped it' do
       # Pairs, not a hash: the same reason is asserted twice on purpose, through two different routes.
       [
-        ['preserve-white-space-in-mixed-block',
-         '<div style="width:400px;white-space:pre"><p>a</p>text<p>b</p></div>'],
+        # (`white-space-only-block`, not `preserve-white-space-in-mixed-block`: the second retired on
+        # 2026-09-23 when the preserving modes went native, and what is left of it is an unreachable drift
+        # guard. This is the same ROUTE — the mixed-block builder naming its own gate — through the reason
+        # that still fires there.)
+        ['white-space-only-block',
+         '<div style="width:400px;white-space:pre"><p>a</p>   <p>b</p></div>'],
         ['flex-container-unsupported',        %(<div style="width:400px">#{FLEX_COLUMN_WRAP}</div>)],
         ['block-level-box-in-inline-content', '<div style="width:400px">text <span><div style="height:5px">b</div></span> after</div>'],
         ['inline-box-relative-valign',        '<div style="width:400px">text <span style="vertical-align:middle">x</span> after</div>'],
@@ -508,29 +512,56 @@ RSpec.describe 'native layout L1 block-flow parity', if: ENV.fetch('CSIM_JS_ENGI
     expect_parity('<div style="position:relative;padding:10%;width:300px"><p>a</p>text<div style="position:absolute;top:5px;left:5px;width:20px;height:20px"></div><p>b</p></div>')
   end
 
-  # …and it DECLINES where the group it sits in collapses to nothing. The box's static position is the line
-  # that group never opened, and the ORACLE gives that line things a block record cannot carry: the group's
-  # `text-indent` where the box opens one (11), and the alignment shift of whatever LATER line eventually
-  # closes, the entry sitting in `lineStatics` until one does (130.8 in a centred 300px block, the shift of a
-  # `<b>` line two blocks further on). Emitting it against the block gets the container's cursor and neither.
-  # 342 shapes of `ooffuzz` against the 1,105 the whole family used to cost, and only 23 of the 342 diverge.
-  # What this replaces is a DROPPED record, which is the shape no sweep can see: the pass reports a box it
-  # never placed, the harness compares one element fewer, and the run is green.
+  # …and where the group it sits in COLLAPSES to nothing. That declined until 2026-09-23, on the ground that
+  # the box's static position is the line that group never opened and the ORACLE gives that line things a
+  # block record cannot carry: the group's `text-indent` where the box opens one (11), and the alignment
+  # shift of whatever LATER line eventually closes, the entry sitting in `lineStatics` until one does. The
+  # refusal's own note said "only 23 of these 342 shapes actually diverge" and that the container path
+  # already wrote two of the three fields it would need. Re-measured with it lifted: all 342 lay out, NONE
+  # diverges (batched or not), and each of the three named hazards lands where the oracle puts it. The third
+  # field had arrived and nothing re-asked.
   #
   # A group collapses for five reasons, not one — `hasContent` is set by text, content whitespace, a `<br>`,
   # an atomic or an edged inline's close — so BOTH the everyday routes are here: whitespace around the box,
-  # and the box ALONE after the last block, which is where a positioned dropdown or tooltip is written.
-  it 'declines an out-of-flow child of a mixed block whose group collapses' do
+  # and the box ALONE after the last block, which is where a positioned dropdown or tooltip is written. The
+  # three figures the refusal named are pinned beside them, since those are the reason it existed.
+  it 'places an out-of-flow child of a mixed block whose group collapses' do
     [
       '<div style="position:relative;width:300px"><p>a</p> <div style="position:absolute;width:20px;height:20px"></div> <p>b</p>text<p>c</p></div>',
       '<div style="position:relative;width:300px"><p>a</p>text<p>b</p><div style="position:absolute;width:20px;height:20px"></div></div>'
-    ].each do |body|
-      expect_walk_declines(body, 'oof-in-collapsed-group')
+    ].each { |body| expect_parity(body) }
+    oof = '<i id="o" style="position:absolute;width:5px;height:5px"></i>'
+    {
+      %(<div style="width:300px;font:16px monospace;text-indent:11px hanging"><div>blk</div>#{oof}tail<div>b</div></div>) => 11,
+      %(<div style="width:300px;font:16px monospace;text-align:center"><div>blk</div>#{oof}<div>b</div><b>bold</b></div>) => 130.8,
+      %(<div style="width:300px;font:16px monospace"><div style="float:left;width:80px;height:40px"></div><div>blk</div>#{oof}<div>b</div>tail</div>) => 80
+    }.each do |body, x|
+      expect_parity(body)
+      session = simulated_session(page(body))
+      session.visit '/'
+      expect(session.evaluate_script("document.getElementById('o').getBoundingClientRect().x")).to be_within(0.05).of(x), body
     end
   end
 
-  it 'declines a preserve white-space mixed block' do
-    expect_bail('<div style="width:300px;white-space:pre">text<div style="height:20px">block</div>more</div>')
+  # A PRESERVING white-space in a mixed block declined until 2026-09-23 too, on the scope the gate states for
+  # itself — and its note said opening it wanted "a mixed block of REAL text beside the preserved spaces to
+  # measure, which no sweep holds today". That was the whole of it: the shapes were never built, so the
+  # refusal was never re-asked. `sweeps/genmixws.rb` builds them now (2,160 cases), and with the refusal
+  # lifted all 900 lay out with nothing diverging. What still declines is a mode native has NO CODE for,
+  # which fails closed.
+  it 'matches a preserve white-space mixed block' do
+    ['pre', 'pre-wrap', 'break-spaces', 'pre-line'].each do |mode|
+      expect_parity(%(<div style="width:300px;font:16px monospace;white-space:#{mode}">text<div style="height:20px">block</div>more   here</div>))
+      expect_parity(%(<div style="width:300px;font:16px monospace;white-space:#{mode};text-indent:11px"><div>a</div>aa\tbb<div style="height:6px">b</div></div>))
+    end
+    # …and NOTHING declines here any more. The guard that is left is a DRIFT check between cascade.js's
+    # `WS_VALUES` and layout.js's `WS_MODE`, and it is unreachable by construction: `ownWhiteSpace` answers
+    # null for a value outside the first list — a vendor `-moz-pre-wrap` included, which then INHERITS — so
+    # `whiteSpaceOf` can only ever hand this a member of both.
+    session = simulated_session(page('<div style="width:300px;white-space:-moz-pre-wrap">text<div style="height:20px">block</div>more</div>'))
+    session.visit '/'
+    expect(session.evaluate_script("getComputedStyle(document.querySelector('div')).whiteSpace")).to eq('-moz-pre-wrap')
+    expect(parity(session)).to include('ok' => true, 'mismatches' => 0)
   end
   # Whitespace-only direct text between a preserve block's block children is line content (the oracle lays out
   # a line box for it), which a plain block-container record drops — decline (review finding, Phase 2b).
