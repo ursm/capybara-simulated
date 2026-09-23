@@ -1060,6 +1060,10 @@ fn layout_pass(
             width_kw: ((r[65] as u32) >> 11 & 3) as u8,
             takes_clearance: (r[65] as u32) & 8192 != 0,
             bottom_adjoins: (r[65] as u32) & 16384 != 0,
+            // rec[65] bit 19: a table CELL holding a percentage-height descendant — the one thing that makes
+            // `measure_table` lay a cell out twice (§17.5.3). Asked by the WALK because it is a question about
+            // declarations down a subtree native may not walk at all.
+            cell_pct_h_child: (r[65] as u32) & 524288 != 0,
             control_baseline: r[77] as u8,
             control_font_box: r[78],
             control_font_asc: r[79],

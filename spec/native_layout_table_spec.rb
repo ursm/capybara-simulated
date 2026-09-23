@@ -28,8 +28,10 @@
 # attribute / min, shared out over the rows so the tracks fill the box), ANONYMOUS ROWS (a table-cell with
 # no table-row parent), an OUT-OF-FLOW child of the table / a row group / a row (§9.7 takes it out of the
 # table's structure: the oracle places every one at the grid's top-left corner, so the walk emits them all
-# under the TABLE record) and an EMPTY table (no rows and no columns — the clearfix pseudo: its edges, its
-# declaration and its caption are the whole box) ARE supported. Still DECLINES to JS — more than one caption,
+# under the TABLE record), an EMPTY table (no rows and no columns — the clearfix pseudo: its edges, its
+# declaration and its caption are the whole box) and a cell laid out TWICE for its PERCENTAGE-height
+# descendants (§17.5.3: pass 1 sizes it with them treated as auto, pass 2 lays it out again at the final ROW
+# height, which is the only basis they may have) ARE supported. Still DECLINES to JS — more than one caption,
 # a HALF-empty table (columns with no rows), an
 # imposed height the tracks DON'T fill (a min-height's empty space, a too-small height /
 # max-height below the grid) or one alongside a caption / collapsed border,
@@ -1125,13 +1127,95 @@ RSpec.describe 'native layout table parity', if: ENV.fetch('CSIM_JS_ENGINE', 'v8
       expect_parity('<table style="border-collapse:collapse"><tr><td style="vertical-align:baseline;font:40px monospace;padding:0"><div>Ay</div></td><td style="vertical-align:baseline;font:16px monospace;padding:0"><div>Ay</div></td></tr></table>')
       expect_parity('<table style="border-spacing:0"><tr><td rowspan="2" style="vertical-align:bottom"><div style="height:10px"></div></td><td style="height:30px"><div style="height:30px"></div></td></tr><tr><td style="height:40px"><div style="height:40px"></div></td></tr></table>')
     end
-    it 'declines a cell the oracle lays out TWICE for its percentage-height descendants, and keeps the rest' do
-      # Only the two-pass shapes decline: a definite table height stretching the cell, or the cell's own declared
-      # height. An AUTO cell in an AUTO table resolves such a descendant against nothing in either engine.
-      a_bails_b_native('<table style="height:200px"><tr><td><div style="height:50%">a</div></td></tr></table>')
-      a_bails_b_native('<table><tr><td style="height:100px"><div style="min-height:50%">a</div></td></tr></table>')
+    # A cell holding a PERCENTAGE-height descendant is laid out TWICE (§17.5.3): its used height is the ROW's,
+    # known only once every row is placed, so pass 1 sizes it with those descendants treated as AUTO — they must
+    # not inflate the box that is supposed to contain them — and pass 2 lays it out again at the final height,
+    # where they finally have a basis. Native's own since 2026-09-23; it used to decline the shape.
+    #
+    # The bug was in pass ONE. Native handed the cell's own DECLARED height to its children as a basis, and the
+    # cell's declared height is a MINIMUM, not a containing block: a `height: 150%` child of a `height: 80px`
+    # cell came out 120 and took the row to 122 where the oracle says 82. Nothing else in the engine withholds a
+    # basis it has, which is why the test is the IMPOSED height — only `measure_table`'s second pass sends one.
+    it 'lays a cell with a percentage-height descendant out twice, at the final row height' do
+      # Definite from the TABLE's height, from the cell's OWN height, and from neither.
+      expect_parity('<table style="height:200px"><tr><td><div style="height:50%">a</div></td></tr></table>')
+      expect_parity('<table><tr><td style="height:100px"><div style="min-height:50%">a</div></td></tr></table>')
       expect_parity('<table><tr><td><div style="height:50%">a</div></td></tr></table>')
       expect_parity('<table><tr><td><div style="height:100%">a</div></td><td>b</td></tr></table>')
+      # …a child that OVERFLOWS the cell: the box stays the row's, it does not grow to fit (the shape that
+      # caught the pass-1 basis — Chrome, the oracle and native all make this table 114 tall).
+      body = '<table id="t" style="border-spacing:0"><tr><td style="height:80px"><div style="height:150%;width:20px">x</div></td></tr><tr><td style="height:30px">r2</td></tr></table>'
+      expect_parity(body)
+      session = simulated_session(page(body))
+      session.visit '/'
+      expect(session.evaluate_script("document.getElementById('t').getBoundingClientRect().height")).to eq(114)
+      # …a row that is merely TALLER because a sibling cell is does NOT make the cell definite.
+      expect_parity('<table style="border-spacing:0"><tr><td><div style="height:50%;width:20px">x</div></td><td style="height:90px">tall</td></tr></table>')
+      # …the cell's content then sits in the row-tall box per `vertical-align`, off its SECOND-pass height.
+      %w[top middle bottom baseline].each do |va|
+        expect_parity(%(<table style="border-spacing:0;height:150px"><tr><td style="vertical-align:#{va}"><div style="height:50%;width:20px">x</div></td><td style="height:70px">s</td></tr></table>))
+      end
+      # …a cell that SPANS rows resolves against the rows it covers.
+      expect_parity('<table style="border-spacing:0;height:150px"><tr><td rowspan="2"><div style="height:50%;width:20px">x</div></td><td style="height:40px">a</td></tr><tr><td style="height:50px">b</td></tr></table>')
+      # …and the three subtrees that are their OWN percentages' containing block, so the cell never asks:
+      # a definite-height child, a nested table, an out-of-flow box.
+      expect_parity('<table style="height:150px"><tr><td><div style="height:40px"><div style="height:50%;width:20px">x</div></div></td></tr></table>')
+      expect_parity('<table style="height:150px"><tr><td><table style="border-spacing:0"><tr><td style="height:50%">n</td></tr></table></td></tr></table>')
+      expect_parity('<table style="height:150px"><tr><td style="position:relative"><div style="position:absolute;height:50%;width:10px"></div>own</td></tr></table>')
+    end
+
+    # A cell's own `min-height` / `max-height` do NOT apply in the block axis (§17.5.3 leaves their effect
+    # undefined; Chrome and Firefox read both as `auto`), and native's BOX already knew that — but the content
+    # height it hands the descendants as their pass-2 basis was clamped by them anyway. A `height: 50%` child of
+    # a `max-height: 20px` cell in a 200px table came out 10, and of a `min-height: 500px` cell, 250. Chrome says
+    # 97 for all three of these, the same as the cell with no clamp at all — which is what pins it: parity alone
+    # cannot tell a shared rule from a shared mistake, and this is a figure only Chrome can settle.
+    it 'ignores a cell min/max-height when resolving its percentage-height descendants (Chrome: 97 either way)' do
+      [
+        '<table style="height:200px"><tr><td style="max-height:20px"><div id="k" style="height:50%;width:10px">x</div></td></tr></table>',
+        '<table style="height:200px"><tr><td style="min-height:500px"><div id="k" style="height:50%;width:10px">x</div></td></tr></table>',
+        '<table style="height:200px"><tr><td><div id="k" style="height:50%;width:10px">x</div></td></tr></table>'
+      ].each do |body|
+        expect_parity(body)
+        session = simulated_session(page(body))
+        session.visit '/'
+        expect(session.evaluate_script("document.getElementById('k').getBoundingClientRect().height")).to eq(97), body
+      end
+    end
+
+    # A `display: contents` wrapper between the cell and the percentage box generates NO box, so for layout the
+    # cell lays that box out directly and is its containing block (CSS Display 3 §3.1). The walk used to compare
+    # the RECORD's parent — which looks through, because the record tree is built from `layoutChildren` — with
+    # the FLAT-TREE parent, which does not; they disagreed here, the walk read that as "native has no basis for
+    # this box", and sent the percentage RESOLVED against the oracle's own `_lbCbH`: the cell's height from the
+    # PREVIOUS layout pass. Native then measured the cell against a figure derived from its own last answer.
+    # (`layoutParent` is the fix, and it is the general rule — this is just the shape that reached it.)
+    it 'resolves a percentage-height box under a box-less wrapper against the CELL' do
+      expect_parity('<table style="height:150px;border-spacing:0"><tr><td><div style="display:contents"><div style="height:50%;width:20px">x</div></div></td></tr><tr><td style="height:30px">r2</td></tr></table>')
+      expect_parity('<table style="height:150px;border-spacing:0"><tr><td><div style="display:contents"><div style="display:contents"><div style="min-height:50%;width:20px">x</div></div></div></td></tr><tr><td style="height:30px">r2</td></tr></table>')
+      expect_parity('<table style="height:150px;border-spacing:0"><tr><td style="height:60px"><div style="display:contents"><div style="height:50%;width:20px">x</div></div></td><td style="vertical-align:baseline">s</td></tr></table>')
+    end
+
+    # A `vertical-align: baseline` cell aligns its FIRST baseline to the row's — and a percentage-height box in
+    # it moves every line UNDER it when the second pass resolves that box. The oracle read the pass-1 baseline
+    # under a comment claiming it is stable across the re-layout; it is not, and Chrome agrees with the pass-2
+    # reading. Measured: an empty `height: 50%` div followed by text sits at y 1 (no shift — the cell's first
+    # line is now below the row's baseline), while the same div WITH its own text in it sits at 30, and so does
+    # a plain `height: 20px` one. The oracle is the engine that moved.
+    it 'aligns a baseline cell on its SECOND-pass baseline (Chrome: y 1 with the line pushed down, 30 without)' do
+      deep = '<td style="vertical-align:baseline;font:40px monospace">Ay</td>'
+      {
+        %(<div id="k" style="height:50%;width:20px"></div>x) => [1, 74],
+        %(<div id="k" style="height:50%;width:20px">q</div>) => [30, 74],
+        %(<div id="k" style="height:20px;width:20px">q</div>) => [30, 20]
+      }.each do |inner, (y, h)|
+        body = %(<table id="t" style="height:150px;border-spacing:0"><tr><td style="vertical-align:baseline">#{inner}</td>#{deep}</tr></table>)
+        expect_parity(body)
+        session = simulated_session(page(body))
+        session.visit '/'
+        got = session.evaluate_script("(() => { const e = document.getElementById('k'); const t = document.getElementById('t').getBoundingClientRect(); const r = e.getBoundingClientRect(); return [+(r.y - t.y).toFixed(2), +r.height.toFixed(2)]; })()")
+        expect(got).to eq([y, h]), inner
+      end
     end
 
     # A box anchored to a CELL resolves its insets against the ROW-tall box (measured: a `bottom: 0` overlay in a

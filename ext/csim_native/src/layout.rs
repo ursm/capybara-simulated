@@ -359,6 +359,11 @@ pub(crate) struct Input {
     // TABLE CELL: how its content sits in the row-tall box (§17.5.3) — 0 baseline (its first baseline meets the
     // row's), 1 top, 2 middle, 3 bottom.
     pub(crate) cell_valign: u8,
+    // TABLE CELL: it holds a PERCENTAGE-height descendant, so it may need a SECOND layout at the final row
+    // height for that descendant to have a basis (§17.5.3 — the oracle's `pass2`). The walk answers it: the
+    // question runs down a subtree of DECLARATIONS, stopping at a definite-height child and at a nested table
+    // (each is its own percentages' containing block), and native may not walk that subtree at all.
+    pub(crate) cell_pct_h_child: bool,
     // TABLE ROW: the height it declares as a MINIMUM — the px length, or the `%` fraction resolved against what
     // the rows share out (each NaN where it declares none) — and its group's rank: 0 header, 1 body, 2 footer,
     // which decides who takes a declared table height's surplus.
@@ -589,12 +594,23 @@ impl Input {
     }
     // The CONTENT height when the box's height is definite — declared or imposed, not a pushed auto height — as
     // the final box will be clamped (the oracle reads it back off `_lb.height` once `_lbDefiniteH` says so).
+    // …with the clamp skipped for a TABLE CELL, whose min/max-height do not apply in the block axis at all
+    // (CSS 2.2 §17.5.3 leaves their effect undefined; Chrome and Firefox read both as `auto`). The box says so
+    // 2,500 lines down — `box_h` skips the same clamp under `height_is_floor` — and the two have to agree,
+    // because this figure is the basis the cell's own PERCENTAGE-height descendants resolve against on its
+    // second pass. Clamping it made a `max-height: 20px` cell in a 200px table hand its `height: 50%` child a
+    // basis of 20 where the oracle and Chrome both say 97, and a `min-height: 500px` one hand it 500.
     fn definite_content_h(&self) -> Option<f64> {
         if is_auto(self.height) || self.item_auto_height || self.pushed_h_indefinite {
             return None;
         }
         let to_border = |v: f64| if is_auto(v) || self.border_box { v } else { v + self.edges_y() };
-        Some((clamp_min_max(to_border(self.height), to_border(self.min_h), to_border(self.max_h)).max(0.0) - self.edges_y()).max(0.0))
+        let border_h = if self.height_is_floor {
+            to_border(self.height)
+        } else {
+            clamp_min_max(to_border(self.height), to_border(self.min_h), to_border(self.max_h))
+        };
+        Some((border_h.max(0.0) - self.edges_y()).max(0.0))
     }
     // A flex COLUMN's main size as the oracle's `definiteMainHeight` has it: the definite content height, else a
     // positive min-height FLOOR, else NaN (nothing to resolve a percentage basis against).
@@ -2477,7 +2493,20 @@ fn measure(
     // width and — where it is definite — its content height (a flex COLUMN's main size, floor included), which is
     // what the oracle hands `usedSize` for them. Resolved afresh on every measure, so a box measured again at
     // another width or under an imposed height hands them the box it has now.
-    let pct_h_basis = if n.display == DISPLAY_FLEX && !n.flex_main_is_x { n.column_main() } else { n.definite_content_h().unwrap_or(f64::NAN) };
+    // …with ONE exception, and it is a table cell's first pass (§17.5.3). A cell holding a percentage-height
+    // descendant is laid out TWICE — first to SIZE it, with those descendants treated as AUTO so they cannot
+    // inflate the cell that is supposed to contain them, and again at the final ROW height, which is the only
+    // figure they may resolve against. The cell's own declared height is a MINIMUM, not a basis, so it must not
+    // become one here. `measure_table` marks the second pass by IMPOSING that row height: nothing else ever
+    // imposes one on a cell, so the argument is the whole test and no field is needed for it.
+    let cell_first_pass = n.cell_pct_h_child && is_auto(imposed_h);
+    let pct_h_basis = if cell_first_pass {
+        f64::NAN
+    } else if n.display == DISPLAY_FLEX && !n.flex_main_is_x {
+        n.column_main()
+    } else {
+        n.definite_content_h().unwrap_or(f64::NAN)
+    };
     for &c in &children[i] {
         let k = inputs[c].get();
         if k.has_percent_sizes() && k.out_of_flow == 0 {
@@ -4954,6 +4983,34 @@ fn measure_table(
         }
     }
 
+    // §17.5.3 PASS 2. A cell is a definite containing block for its percentage-height descendants only when its
+    // own height is definite — and they resolve against its USED height, which is the ROW's and is known only
+    // now. So such a cell was laid out INDEFINITELY above, with those descendants treated as auto so they could
+    // not inflate it, and is laid out again here at the final height (the oracle's `pass2` / `cbox2`).
+    //
+    // Which cells: one holding a percentage-height descendant (`cell_pct_h_child`, the walk's answer) AND
+    // either a definite height of its own or a table height imposed from somewhere — a row that is merely
+    // TALLER because a sibling cell is does NOT make it definite, which is why `imposed_h` is asked here and
+    // not just `h > content_h`. Its height is then definite if it declared one, or if the row stretched it past
+    // its own content; an auto-height cell whose own CONTENT drives the row stays INDEFINITE, and re-laying
+    // that one reproduces the first pass exactly — same box, same floor — so native re-measures the definite
+    // ones and no others. (The oracle re-lays it anyway; that costs it a second walk of the subtree and
+    // changes nothing.)
+    for (ri, &r) in rows.iter().enumerate() {
+        for &c in &children[r] {
+            let k = inputs[c].get();
+            if !k.cell_pct_h_child || (is_auto(k.height) && !(imposed_h > 0.0)) {
+                continue;
+            }
+            let h = row_h[ri..ri + k.cell_rowspan].iter().sum::<f64>() + (k.cell_rowspan as f64 - 1.0) * sy;
+            let content_h = boxes[c].natural_h.unwrap_or(boxes[c].h);
+            if !(h > 0.0) || (is_auto(k.height) && !(h > content_h + 0.01)) {
+                continue;
+            }
+            measure(c, boxes[c].w, h, inputs, runs, run_texts, grids, children, boxes, failed, &mut FloatCtx::new(), 0.0, 0.0);
+        }
+    }
+
     // Row boxes (relative to their parent: the group box, else the table) + cell positions (relative to the
     // row). A cell FILLS the rows it spans — that box, not its content's, is what a click has to land in — and
     // its content then sits within it per `vertical-align` (§17.5.3): `baseline` drops it so the cell's own first
@@ -6792,6 +6849,7 @@ mod tests {
             cell_max_content: f64::NAN,
             height_is_floor: false,
             cell_valign: 0,
+            cell_pct_h_child: false,
             row_height: f64::NAN,
             row_pct: f64::NAN,
             row_rank: 1,
