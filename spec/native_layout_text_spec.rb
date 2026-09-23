@@ -871,6 +871,21 @@ RSpec.describe 'native layout L2 text-block parity', if: ENV.fetch('CSIM_JS_ENGI
       chrome_y: 44
     )
   end
+  # …and a box parked with an open inline follows the atomic it sits in when that atomic is MOVED after its own
+  # layout — a flex item centred on its cross axis, a table cell's `vertical-align` — as native and Chrome have
+  # it: the entry sits in a list, which no `shiftSubtree` reached (`PARKED` is swept now), so the oracle left
+  # the marker where the flow had been (y 0). Even a plain `<span>` around the atomic parks it. The same sweep
+  # puts a reused subtree's parked boxes back after a mutation (`parkedmove` under CSIM_SWEEP_INCREMENTAL).
+  {
+    'a flex item centred on its cross axis' =>
+      '<span style="display:inline-flex;width:100px;height:50px;align-items:center"><div><i id="m" style="position:absolute;width:3px;height:3px"></i>cc</div><div style="height:40px">k</div></span>',
+    'a table cell aligned to its middle'    =>
+      '<span style="display:inline-table"><span style="display:table-cell;height:50px;vertical-align:middle"><i id="m" style="position:absolute;width:3px;height:3px"></i>cc</span></span>'
+  }.each do |name, atom|
+    it "moves a parked marker with its atomic: #{name}" do
+      expect_parity(%(<div style="position:relative;width:200px;font:16px monospace">aaaa <span>#{atom}</span> t</div>), 48.015625, chrome_y: 14)
+    end
+  end
   # …and the same shift now reaches an out-of-flow child placed directly in an inline-flex inside an edged
   # inline, whose static position is ALIGNED (centred) off the atomic's box: the oracle left it where the atomic
   # stood before the line's alignment moved it (x 82.5; native and Chrome 85.5).
