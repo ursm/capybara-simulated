@@ -828,10 +828,91 @@ RSpec.describe 'native layout table parity', if: ENV.fetch('CSIM_JS_ENGINE', 'v8
     expect(session.evaluate_script("document.getElementById('t').getBoundingClientRect().y")).to eq(118)
   end
 
-  # A table flex item on a BASELINE-aligned line still declines: the oracle takes a table's baseline from the
-  # first line inside it, native synthesises one from the margin box, and Chrome's figure is neither (a sibling
-  # at 9 / 22 / 19) — so the walk defers rather than picking one.
-  it('declines a table flex item aligned on the baseline') { a_bails_b_native('<div style="display:flex;width:300px;height:100px;align-items:baseline"><table style="border-spacing:2px"><tr><td style="height:30px">a</td></tr></table><div style="width:40px">y</div></div>') }
+  # A table flex item on a BASELINE-aligned line. This DECLINED until 2026-09-23 on a note reading "the oracle
+  # takes a table's baseline from the first line inside it, native synthesises one from the margin box, and
+  # Chrome's figure is neither (9 / 22 / 19)" — and every clause of it had stopped being true without anything
+  # re-asking. Native has stamped a table's first and last baselines in `measure_table` since 2026-09-19, and a
+  # CAPTION stopped being one of the oracle's baseline candidates the same day the refusal came out.
+  #
+  # The two engines agree on every shape below, and the page's geometry is byte-identical to what it was with
+  # the refusal in place — the ORACLE was answering either way, so lifting it moved no box, only the decline
+  # (`caption` sweep: 2,250 → 0).
+  #
+  # Chrome's figures are pinned too, because the gap is REAL and shared: a table hands a flex line a baseline
+  # ~9px higher here than in Chrome. The plain-block CONTROL agrees exactly (13 in all three), which is what
+  # says this is a table rule and not a font or a harness difference. Recorded, not fixed — moving it means
+  # moving both engines, and that is its own increment.
+  it 'matches a table flex item aligned on the baseline (Chrome: the marker is 9px lower)' do
+    marker = '<b id="m" style="display:inline-block;width:4px;height:4px"></b>'
+    row    = '<table style="border-spacing:2px"><tr><td style="height:30px">a</td></tr></table>'
+    rows2  = '<table style="border-spacing:2px"><tr><td>a</td></tr><tr><td style="height:30px">b</td></tr></table>'
+    {
+      ['align-items:baseline', row]                                                              => [20, 29],
+      ['align-items:baseline', '<table style="border-spacing:2px"><caption>cap</caption><tr><td style="height:30px">a</td></tr></table>'] => [42, 51],
+      ['align-items:baseline', '<table style="border-spacing:2px;caption-side:bottom"><caption>cap</caption><tr><td style="height:30px">a</td></tr></table>'] => [20, 29],
+      ['align-items:baseline', rows2]                                                            => [16, 21],
+      ['align-items:last baseline', rows2]                                                       => [46, 55],
+      ['align-items:baseline', '<table style="border-spacing:2px"></table>']                      => [0, 0]
+    }.each do |(align, table), (shared_y, chrome_y)|
+      body = %(<div style="display:flex;width:300px;font:16px monospace;#{align}">#{table}#{marker}</div>)
+      expect_parity(body)
+      session = simulated_session(page(body))
+      session.visit '/'
+      y = session.evaluate_script("document.getElementById('m').getBoundingClientRect().y")
+      expect(y).to be_within(0.05).of(shared_y), "#{body}: marker at #{y}, both engines say #{shared_y}, Chrome #{chrome_y}"
+      next if shared_y == chrome_y
+
+      # …and the gap is asserted on the MEASURED figure, so that the day the engines move onto Chrome this
+      # says so instead of passing. (It compared the two hard-coded literals at first, which is a statement
+      # about the source text and can never fail whatever either engine does.)
+      expect(y).not_to be_within(0.05).of(chrome_y), "#{body}: marker at #{y} now agrees with Chrome — pin it as `chrome_y`, not as a shared gap"
+    end
+    # …and a table whose ROW GROUPS are written out of source order, which is where the two engines' senses of
+    # "the table's FIRST row" came apart. `tableGrid` sorts header / body / footer the way §17.2.1 renders
+    # them and native takes its baseline off that sorted grid; `baselineCandidates` walked the DOM, so a
+    # `<tfoot>` before its `<tbody>` gave the oracle the FOOTER's baseline — 46 where native (and Chrome, to
+    # within the shared gap) say 16. HTML 4.01 REQUIRED that order, so this is legacy markup and not an edge.
+    # Only this spec's own gate was hiding it: nothing else asks a table for a baseline.
+    {
+      ['align-items:baseline', :tfoot_first]      => [16, 21],
+      ['align-items:last baseline', :tfoot_first] => [46, 55],
+      ['align-items:baseline', :thead_last]       => [20, 29],
+      ['align-items:last baseline', :thead_last]  => [50, 55],
+      ['align-items:baseline', :thead_mid]        => [20, 29],
+      ['align-items:last baseline', :thead_mid]   => [76, 81]
+    }.each do |(align, which), (shared_y, chrome_y)|
+      table = case which
+              when :tfoot_first then '<table style="border-spacing:2px"><tfoot><tr><td style="height:30px">f</td></tr></tfoot><tbody><tr><td style="height:10px">b</td></tr></tbody></table>'
+              when :thead_last  then '<table style="border-spacing:2px"><tbody><tr><td style="height:10px">b</td></tr></tbody><thead><tr><td style="height:30px">h</td></tr></thead></table>'
+              else '<table style="border-spacing:2px"><tbody><tr><td style="height:10px">b1</td></tr></tbody><thead><tr><td style="height:30px">h</td></tr></thead><tbody><tr><td style="height:20px">b2</td></tr></tbody></table>'
+              end
+      body = %(<div style="display:flex;width:300px;font:16px monospace;#{align}">#{table}#{marker}</div>)
+      expect_parity(body)
+      session = simulated_session(page(body))
+      session.visit '/'
+      y = session.evaluate_script("document.getElementById('m').getBoundingClientRect().y")
+      expect(y).to be_within(0.05).of(shared_y), "#{body}: marker at #{y}, both engines say #{shared_y}, Chrome #{chrome_y}"
+      expect(y).not_to be_within(0.05).of(chrome_y), "#{body}: marker at #{y} now agrees with Chrome — pin it as `chrome_y`"
+    end
+    # …and the same table spelled with `display: table-*` divs, where all three engines agree EXACTLY (15 and
+    # 39). That is the control that says the residual gap above is the `<td>` UA rule and not the ordering:
+    # these divs carry no UA `vertical-align`, and with it gone so is the gap.
+    divs = '<div style="display:table;border-spacing:2px"><div style="display:table-footer-group"><div style="display:table-row"><div style="display:table-cell;height:30px">f</div></div></div><div style="display:table-row-group"><div style="display:table-row"><div style="display:table-cell;height:10px">b</div></div></div></div>'
+    {'align-items:baseline' => 15, 'align-items:last baseline' => 39}.each do |align, chrome_y|
+      body = %(<div style="display:flex;width:300px;font:16px monospace;#{align}">#{divs}#{marker}</div>)
+      expect_parity(body)
+      session = simulated_session(page(body))
+      session.visit '/'
+      expect(session.evaluate_script("document.getElementById('m').getBoundingClientRect().y")).to be_within(0.05).of(chrome_y), body
+    end
+    # …and the CONTROL, where the item is a plain block: all three engines agree, so the gap above is the
+    # table's baseline and nothing else.
+    control = %(<div style="display:flex;width:300px;font:16px monospace;align-items:baseline"><div style="height:30px">a</div>#{marker}</div>)
+    expect_parity(control)
+    session = simulated_session(page(control))
+    session.visit '/'
+    expect(session.evaluate_script("document.getElementById('m').getBoundingClientRect().y")).to be_within(0.05).of(13)
+  end
 
   it('matches an inline-table as an atomic inline') { expect_parity('<div style="width:300px">x <span style="display:inline-table"><span style="display:table-row"><span style="display:table-cell">a</span></span></span> y</div>') }
   it('declines an empty row group (the oracle boxes it below the grid)') { a_bails_b_native('<table style="border-spacing:4px"><tbody></tbody><tbody><tr><td style="width:40px;height:20px">a</td></tr></tbody></table>') }

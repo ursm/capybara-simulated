@@ -5,8 +5,10 @@
 # control, a list box whose rows it stacks inside the control's box — at its baseline or a baseline SHIFT,
 # ITSELF (see the last describe). What still keeps the PUSHED box, each measured: an intrinsic-size KEYWORD
 # width on a replaced atomic (`width: fit-content` on an `<img>`); an atomic whose own intrinsic MEASURE
-# neither engine has a rule for (`white-space: break-spaces`); an inline-table whose row GROUPS render out of
-# document order;
+# neither engine has a rule for (`WalkRefusals::UNMEASURABLE_INLINE`); an inline-table holding a SCROLLING
+# row or row group that declares a px bottom margin, which the oracle's baseline arm adds and the table
+# algorithm does not (row groups out of DOCUMENT order, and a caption after the rows, were on this list until
+# 2026-09-23 — both closed in the oracle);
 # and any atomic whose own subtree the walk refuses, which rolls back to the pushed box.
 # For a pushed one the oracle resolved the box (`_lb`) and its baseline (`growAtomic`) and native replays those
 # as a RUN_ATOMIC: the margin-box width is its advance, its ascent (+ descent) grow the line box. Such a box is
@@ -771,32 +773,33 @@ RSpec.describe 'native layout inline-atomic parity', if: ENV.fetch('CSIM_JS_ENGI
       # margin edge — the table's own baseline is for a flex line and a table cell to read.
       expect_native_atomic(%(<div style="width:400px">x <span style="display:inline-flex"><table style="display:inline-table"><tr><td>c</td></tr></table></span>#{marker} y</div>), 2)
     end
-    # …and it is PUSHED where the two engines would not be walking the same rows: a `<tfoot>` renders after the
-    # body whatever its position in the markup (§17.2.1), which `tableGrid` and the walk follow, while the
-    # oracle's `baselineCandidates` yields DOM order — so its "last" row is the last DOM child (marker y 28
-    # against 10). A CAPTION is in that list too and native's rows are not, so one written AFTER the rows is
-    # the oracle's first candidate in a `last = true` walk and answers before any row (js 23, native 47,
-    # Chrome 51 — neither is right). And the oracle's scroll arm adds a table-internal box's own bottom
-    # MARGIN, where the table algorithm and Chrome give it none (js 32, native 22, Chrome 18).
-    #
-    # All three want the ORACLE changed, and none of them is the first-vs-last-row rule: going to the FIRST
-    # row does not make the walk order stop mattering, because the oracle's list is DOM order at both ends —
-    # the ungated cell path proves it (nat 10, js 41, and 41 IS the first-baseline figure).
+    # …and it is PUSHED where the two engines would not be walking the same rows. That was THREE causes until
+    # 2026-09-23; two of them were closed in the ORACLE, which is where the note here always said they would
+    # have to be, and the predicate (`nlTableBaselineWalkAgrees`) is down to the third:
+    #   * a `<tfoot>` renders after the body whatever its position in the markup (§17.2.1), which `tableGrid`
+    #     and the walk follow, while `baselineCandidates` yielded DOM order — its "last" row was the last DOM
+    #     child (marker y 28 against 10). That list is sorted by `rowGroupRankOf` now;
+    #   * a CAPTION was in that list and native's rows are not, so one written AFTER the rows was the oracle's
+    #     first candidate in a `last = true` walk (js 23, native 47, Chrome 51 — neither was right). A caption
+    #     is no longer one of a table's baseline candidates at all;
+    #   * the oracle's scroll arm still adds a table-internal box's own bottom MARGIN, where the table
+    #     algorithm and Chrome give it none (js 32, native 22, Chrome 18). This one is the whole predicate.
     it 'pushes an inline-table whose baseline the two engines would not walk alike' do
       marker = '<span style="display:inline-block;width:4px;height:4px"></span>'
       # (1, not 2: the marker is native's, the table is pushed)
-      ['<table style="display:inline-table"><tfoot><tr><td>f</td></tr></tfoot><tbody><tr><td>b</td></tr></tbody></table>',
-       '<table style="display:inline-table"><tr><td>a</td></tr><caption style="font-size:30px">C</caption></table>',
-       '<div style="display:inline-table"><div style="display:table-row;overflow:hidden;height:12px;margin-bottom:10px"><div style="display:table-cell">s</div></div></div>'].each do |table|
+      ['<div style="display:inline-table"><div style="display:table-row;overflow:hidden;height:12px;margin-bottom:10px"><div style="display:table-cell">s</div></div></div>'].each do |table|
         r = run_shadow(%(<div style="width:400px">x #{table}#{marker} y</div>))
         expect(r).to include('ok' => true, 'mismatches' => 0, 'nativeAtomics' => 1), table
       end
-      # …and the shapes each one is the edge of still lay out: groups in document order, a caption in its
-      # normal position BEFORE the rows (the oracle reaches the rows first there), and a percentage margin,
-      # which resolves against nothing in either engine.
-      ['<table style="display:inline-table"><thead><tr><td>h</td></tr></thead><tbody><tr><td>b</td></tr></tbody></table>',
-       '<table style="display:inline-table"><caption style="font-size:30px">C</caption><tr><td>a</td></tr></table>',
-       '<div style="display:inline-table"><div style="display:table-row;overflow:hidden;height:12px;margin-bottom:10%"><div style="display:table-cell">s</div></div></div>'].each do |table|
+      # …and the shapes it is the edge of still lay out — a percentage margin resolves against nothing in
+      # either engine — together with the two causes that RETIRED: row groups out of source order, and a
+      # caption written after the rows. Those two are the A/B on the oracle's side of this: they were pushed
+      # (1) and are laid out (2) now, and nothing else in this example changed.
+      ['<div style="display:inline-table"><div style="display:table-row;overflow:hidden;height:12px;margin-bottom:10%"><div style="display:table-cell">s</div></div></div>',
+       '<table style="display:inline-table"><tfoot><tr><td>f</td></tr></tfoot><tbody><tr><td>b</td></tr></tbody></table>',
+       '<table style="display:inline-table"><tr><td>a</td></tr><caption style="font-size:30px">C</caption></table>',
+       '<table style="display:inline-table"><thead><tr><td>h</td></tr></thead><tbody><tr><td>b</td></tr></tbody></table>',
+       '<table style="display:inline-table"><caption style="font-size:30px">C</caption><tr><td>a</td></tr></table>'].each do |table|
         r = run_shadow(%(<div style="width:400px">x #{table}#{marker} y</div>))
         expect(r).to include('ok' => true, 'mismatches' => 0, 'nativeAtomics' => 2), table
       end
