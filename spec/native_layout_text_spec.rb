@@ -910,6 +910,33 @@ RSpec.describe 'native layout L2 text-block parity', if: ENV.fetch('CSIM_JS_ENGI
       shared_x_chrome: 96
     )
   end
+  # NATIVE, older: a non-wrapping run that cannot fit breaks the line FIRST, and dropped the collapsed space
+  # still pending with it — where the oracle had placed it as a hang, which ends the run of PRESERVED spaces
+  # before it. Kept hanging, those aligned the wrapped line as if they still hung off its end (28.8 here, 96
+  # with a tab; the oracle and Chrome 19.2 / 23.2).
+  {
+    'a preserved space' => ['xxxxxxx ', 19.2],
+    'a preserved tab'   => ["xxxxxxx\t", 23.2]
+  }.each do |name, (prewrap, chrome_x)|
+    it "ends a preserved hang with the space a non-wrapping run's early break drops: #{name}" do
+      expect_parity(
+        %(<div style="position:relative;width:100px;font:16px monospace;text-align:right"><b id="m" style="display:inline-block;width:4px;height:4px"></b>) +
+        %(<span style="white-space:pre-wrap">#{prewrap}</span> <span style="white-space:pre">aa</span></div>),
+        chrome_x
+      )
+    end
+  end
+  # NATIVE: a `pre` run placed WHOLE is content, so the separators the `pre` run before it ENDED in become gaps
+  # there — the oracle's `placeOnLine` flushes the tail it follows; native flushed it only behind a real
+  # collapsed space. Both engines still share an older gap with Chrome on this line (43.2; Chrome 57.59).
+  it 'turns a pre run\'s trailing separators into gaps where the next pre run is placed' do
+    expect_parity(
+      '<div style="position:relative;width:100px;font:16px monospace;text-align:justify"><span style="white-space:pre">  </span><b id="m" style="display:inline-block;width:4px;height:4px"></b>' \
+      '<span style="white-space:pre"> </span><span style="white-space:pre"> </span> <span style="white-space:pre-wrap">  </span>bbbbbbbbbb end</div>',
+      shared_x:        43.2,
+      shared_x_chrome: 57.59375
+    )
+  end
 
   # A `vertical-align` baseline SHIFT (sub / super / length / %) on an inline element offsets its whole content —
   # its runs ride the shift, growing the line box the block's height reflects. Native threads the accumulated

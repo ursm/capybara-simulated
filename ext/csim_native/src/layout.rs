@@ -1521,6 +1521,13 @@ fn line_layout(
                             }
                         }
                         if breaks && has_body && line_x + pending_w + ow + unit > room {
+                            // The collapsed space still pending goes down first, as a HANG: the oracle placed it
+                            // where it met it, and that placement ends any run of preserved spaces before it
+                            // (`trailingPreserved = 0`) — dropped with the line instead, the wrapped line was
+                            // aligned as if they still hung (28.8 where the oracle and Chrome say 19.2).
+                            if let Some(p) = pending_space.filter(|p| p.sep && !p.placed) {
+                                hang_space!(true, p.w);
+                            }
                             soft_break!();
                             pending_space = None;
                             atomic_break = false;
@@ -1632,18 +1639,8 @@ fn line_layout(
                                         // placement like any other, so it does not swallow the one before it.
                                         if let Some(ps) = pending_space.take() {
                                             let (w, a, d) = (ps.w, ps.asc, ps.desc);
-                                            // (Its gap, unless it was placed and noted it already.) The separators an
-                                            // earlier non-wrapping run ENDED in become gaps only where THIS run is
-                                            // placed WHOLE — the oracle's `placeOnLine` for a `pre` run is a content
-                                            // placement — and stay held past a wrapping run's preserved spaces,
-                                            // which are white space and not content (`placePreservedSpace`).
-                                            if ps.sep {
-                                                if !ps.placed {
-                                                    note_gap!(band_l(total) + line_x);
-                                                }
-                                                if no_wrap {
-                                                    flush_tail_gaps!();
-                                                }
+                                            if ps.sep && !ps.placed {
+                                                note_gap!(band_l(total) + line_x); // (a placed one noted it)
                                             }
                                             line_x += w;
                                             line_asc = line_asc.max(a);
@@ -1662,6 +1659,14 @@ fn line_layout(
                                                 // both against Chrome's 151.578. Recorded, not fixed here.)
                                                 hang_pre = 0.0;
                                             }
+                                        }
+                                        // The separators an earlier non-wrapping run ENDED in become gaps where
+                                        // THIS run is placed WHOLE — the oracle's `placeOnLine` for a `pre` run is
+                                        // a content placement, which flushes the tail it follows — and stay held
+                                        // past a wrapping run's preserved spaces, which are white space and not
+                                        // content (`placePreservedSpace`).
+                                        if no_wrap && i == 0 {
+                                            flush_tail_gaps!();
                                         }
                                         // Measured HERE, after the waiting space and the open edges have moved
                                         // the pen: a tab's advance is the gap to the next stop from the block's
