@@ -850,23 +850,19 @@ RSpec.describe 'native layout L2 text-block parity', if: ENV.fetch('CSIM_JS_ENGI
   # ORACLE: it told its lines apart by their y, and at `line-height: 0` every line has the same one — so a
   # marker held for an inline's opening edge took the edge landing on a LATER line for its own and settled at
   # the cursor it stood at on the earlier one (x 54 where native and Chrome say 6). Lines are counted now.
+  it 'tells zero-tall lines apart when settling a marker held for an opening edge' do
+    expect_parity(
+      '<div style="position:relative;width:60px;font:16px monospace;line-height:0">aaaa aaaa ' \
+      '<span style="padding-left:6px"><i id="m" style="position:absolute;width:5px;height:5px"></i>z</span></div>',
+      6,
+      chrome_y: 0
+    )
+  end
   # A marker held for an opening edge INSIDE an inline-block that itself sits in an edged inline: the held
   # record is the inline-block's, but `placeAbsolute` parks the entry with the OUTERMOST open inline, in the
   # block around it — whose settle had no record of it and fell back to the cursor it was held at. The ORACLE
   # was wrong ((34.8, 22) against native's and Chrome's (10, 44)); the inline-block's settle resolves it now.
   # 6,700 of the 10,000 `nestedheld` shapes mismatched, rtl ones by the corner the atomic's shift left behind.
-  # A held marker is aligned by where it STANDS, past the edges still waiting: at the bare cursor, a NEGATIVE
-  # opening margin left it past the tab gap the `pre` run then put down before it, and the justify spread
-  # moved it by that gap (the ORACLE's 48; native and Chrome 34.4). The last of the family the review's
-  # justify / held-marker sweeps parked (`justhang`, `placedspace`, `brflush` are permanent again).
-  it 'aligns a held marker by where it stands past a negative opening margin' do
-    expect_parity(
-      %(<div style="position:relative;width:100px;font:16px monospace;text-align:justify">aaaa<span style="margin-left:-4px"><i id="m" style="position:absolute;width:2px;height:2px"></i>) +
-      %(<span style="white-space:pre">\tb</span></span> end</div>),
-      34.40625,
-      chrome_y: 0
-    )
-  end
   it 'settles a marker held inside an inline-block inside an edged inline' do
     expect_parity(
       '<div style="position:relative;width:100px;font:16px monospace">aaaa aaaa <span style="padding-left:6px">' \
@@ -875,11 +871,24 @@ RSpec.describe 'native layout L2 text-block parity', if: ENV.fetch('CSIM_JS_ENGI
       chrome_y: 44
     )
   end
-  # …and the two things both engines still do differently from Chrome there, recorded: an rtl block's corner
-  # is the atomic's content edge without the inner inline's opening padding (77.8; Chrome 80.8), and a held
-  # box does not follow a `position: relative` inline it waits in (22; Chrome 24 — the same without the
-  # inline-block around it).
-  it 'places a held marker in an rtl inline-block at its content corner (shared)' do
+  # …and the same shift now reaches an out-of-flow child placed directly in an inline-flex inside an edged
+  # inline, whose static position is ALIGNED (centred) off the atomic's box: the oracle left it where the atomic
+  # stood before the line's alignment moved it (x 82.5; native and Chrome 85.5).
+  it 'moves an aligned static position with the atomic around it' do
+    expect_parity(
+      '<div style="position:relative;width:120px;font:16px monospace;text-align:center">aaaa <span style="padding-left:6px">' \
+      '<span style="display:inline-flex;width:60px;height:30px;justify-content:center;align-items:center"><i id="m" style="position:absolute;width:3px;height:3px"></i>k</span></span> tt uu vv</div>',
+      85.5,
+      chrome_y: 13.5
+    )
+  end
+  # …and what both engines still do differently from Chrome there, recorded. In an rtl block with LTR text the
+  # figure is BIDI — Chrome reorders the trailing ` t` (the inline-block lands at 50 where both engines put it at
+  # 30.8) and puts the marker before the LTR run `cc` at 80.8, two divergences that nearly cancel — which is the
+  # excluded subsystem, not a box rule. And a held box does not follow a `position: relative` inline it waits
+  # in (22; Chrome 24 — the same without the inline-block around it; where an rtl CORNER decides x, the offset
+  # does reach it, in both engines and in Chrome).
+  it 'places a held marker in an rtl inline-block by the engines\' bidi-less order (shared)' do
     expect_parity(
       '<div style="position:relative;width:100px;font:16px monospace;direction:rtl"><span style="padding-left:6px">' \
       '<span style="display:inline-block;width:50px">bb <span style="padding-left:4px"><i id="m" style="position:absolute;width:3px;height:3px"></i>cc</span></span></span> t</div>',
@@ -897,12 +906,28 @@ RSpec.describe 'native layout L2 text-block parity', if: ENV.fetch('CSIM_JS_ENGI
       shared_y_chrome: 24
     )
   end
-  it 'tells zero-tall lines apart when settling a marker held for an opening edge' do
+  # A held marker is aligned by where it STANDS, past the edges still waiting: at the bare cursor, a NEGATIVE
+  # opening margin left it past the tab gap the `pre` run then put down before it, and the justify spread
+  # moved it by that gap (the ORACLE's 48; native and Chrome 34.4). The last of the family the review's
+  # justify / held-marker sweeps parked (`justhang`, `placedspace`, `brflush` are permanent again).
+  it 'aligns a held marker by where it stands past a negative opening margin' do
     expect_parity(
-      '<div style="position:relative;width:60px;font:16px monospace;line-height:0">aaaa aaaa ' \
-      '<span style="padding-left:6px"><i id="m" style="position:absolute;width:5px;height:5px"></i>z</span></div>',
-      6,
+      %(<div style="position:relative;width:100px;font:16px monospace;text-align:justify">aaaa<span style="margin-left:-4px"><i id="m" style="position:absolute;width:2px;height:2px"></i>) +
+      %(<span style="white-space:pre">\tb</span></span> end</div>),
+      34.40625,
       chrome_y: 0
+    )
+  end
+  # …but by COORDINATE, which is only right for the gaps that come AFTER the marker in flow order: a negative
+  # edge that reaches back over ordinary gaps BEFORE it leaves those uncounted, where Chrome widens them and
+  # moves the marker (both engines 77.4; Chrome 80.797 — the oracle had it before the change above). Counting
+  # a held marker's gaps in FLOW order, as an atomic's are (`gapsBefore`), matches Chrome on both; that is a
+  # conformance change for both engines, recorded rather than made during the port.
+  it 'counts a held marker\'s gaps by coordinate past a negative edge (shared)' do
+    expect_parity(
+      '<div style="position:relative;width:100px;font:16px monospace;text-align:justify">a a a a <span style="margin-left:-9.6px"><i id="m" style="position:absolute;width:3px;height:3px"></i>ww</span> t uu vv</div>',
+      shared_x:        77.4,
+      shared_x_chrome: 80.796875
     )
   end
   # A JUSTIFIED line that wraps right after `aaaa ` and an inline's closing margin: the space is still the
