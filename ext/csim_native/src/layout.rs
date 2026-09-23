@@ -1940,9 +1940,13 @@ fn line_layout(
                     line_asc = line_asc.max(sasc); // the space stayed: its run's metrics grow the line
                     line_desc = line_desc.max(sdesc);
                 }
-                // A nowrap line is not shortened by / dropped below a float — the BLOCK's mode, that is: a
-                // non-wrapping RUN does drop, as one whole unit, which the pre-pass at the head of the text
-                // arm does for it.
+                // An ATOMIC drops the line below a float here WHATEVER the block's mode — including a `nowrap` /
+                // `pre` block, whose TEXT arm above never drops (`!no_wrap`). So does the oracle's `placeOnLine`
+                // (`retakeBand(w + pending)`, no mode test), and the two agree. Chrome does not: it never drops a
+                // no-wrap line below a float, so a `nowrap` block with a 5px inline-block beside a 90px float of 80
+                // is 60 tall there and 82 in both engines. SHARED, so recorded rather than fixed. (This comment
+                // said the opposite until 2026-09-23 — "a nowrap line is not dropped below a float" — which is
+                // true of the text arm and was never true here.)
                 if may_break_here && !floats.borrow().is_empty() && !line_has_content && width + ow > band_w(total) + LINE_FIT_EPS {
                     let fy = top + total;
                     let at = float_fit_y(&floats.borrow(), fy, width + ow + indent_now.get(), cl, cr, strut_lh);

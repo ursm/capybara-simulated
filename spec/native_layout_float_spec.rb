@@ -511,4 +511,83 @@ RSpec.describe 'native layout float parity', if: ENV.fetch('CSIM_JS_ENGINE', 'v8
     expect(run_shadow('<div style="width:300px;overflow:hidden"><div style="float:left;position:-webkit-sticky;width:50px;height:50px"></div>t</div>')['ok']).to be false
     expect(run_shadow(%(<div style="width:300px">aaa <span style="float:left">#{WalkRefusals::TABLE_CELL}</span>bbb</div>))['ok']).to be false
   end
+
+  # A line too narrow for what is about to go on it DROPS below the float squeezing it (§9.5, "if a shortened
+  # line box is too small to contain any content…") — and a ZERO-width first run is still a request. The
+  # oracle asked `retakeBand(need)` with `if (need && …)`, which read 0 as "no request", so a line opening on
+  # a `<span>` that held only a ZWSP never asked; the span went down as placed and the word after it could no
+  # longer drop the line either. With a `text-indent` the band could not hold even the indent, and the line
+  # overflowed the float where native and Chrome both put it below: 22 against 82. The only red case in the
+  # checked-in sweeps for as long as `fzws` had existed (and waved through as "native is the right engine"
+  # every time, which it was — the ORACLE had to move).
+  #
+  # WITHOUT the indent the same shape is 22 in BOTH engines and 82 in Chrome, for TWO reasons, not one.
+  # `floatBand` clamps a band at zero, so a zero-width run fits even the narrowest one and neither engine yet
+  # counts the run AFTER it as what has to fit (a ZWJ, or `letter-spacing` driving a glyph to zero, show that
+  # half alone). And U+200B is not a break opportunity in EITHER engine at all — `BREAK_AFTER_RE` is built on
+  # JS `\s`, which does not match it — so `a&#8203;ddd` in a 30px block with no float anywhere is one 22px line
+  # here and two (44) in Chrome. Shared, so recorded rather than fixed; pinned so it cannot drift apart.
+  # …and the pin's tripwire is `expect_shared_gap`, which checks CHROME first: written inline it came second,
+  # behind an assertion that would have failed first on exactly the fix it was there to announce.
+  it 'drops a line whose zero-width first run leaves no room for the indent (Chrome: 82)' do
+    float = '<div style="float:right;width:90px;height:60px"></div>'
+    {
+      'text-indent:9px;' => [82, 82],
+      '' => [22, 82]
+    }.each do |indent, (shared, chrome)|
+      body = %(<div style="width:80px;font:16px monospace;#{indent}">#{float}<div id="t" style="width:40px"><span>&#8203;</span>ddd</div></div>)
+      expect_parity(body)
+      session = simulated_session(page(body))
+      session.visit '/'
+      h = session.evaluate_script("document.getElementById('t').getBoundingClientRect().height")
+      expect_shared_gap(h, shared: shared, chrome: chrome, what: "#{body}: #t height")
+    end
+  end
+
+  # …and what taking the band FIRST did for the hyphen. A soft hyphen's "show `-` or not" was decided from the
+  # room on the line BEFORE an empty line dropped below the float, so it was decided for a band the piece never
+  # sat in. It stayed invisible while a zero-width piece never asked to drop; the day it did (the fix above),
+  # `&shy;ddd` under a 9px indent decided "hyphen" against a band of no width, drew `-` on the line it dropped
+  # to, and `ddd` no longer fitted beside it — 104 where Chrome says 82, one whole extra line. It had been there
+  # for pieces WITH width all along (`aa&shy;bb` beside a 70px float drew `aa-bb`, 48 wide where Chrome's is
+  # 38.41 — the same height, so no height saw it).
+  # Native DECLINES every one of these (`text-not-measurable`), so parity cannot see them at all: this is the
+  # oracle's geometry against Chrome's and nothing else, which is why the figures here are Chrome's own.
+  it 'decides a soft hyphen on the band the piece lands on, not the one it dropped from (Chrome: 82 / 38.41)' do
+    {
+      '<div style="width:80px;font:16px monospace;text-indent:9px"><div style="float:left;width:90px;height:60px"></div>' \
+      '<div id="t" style="width:40px"><span id="s">&shy;ddd</span></div></div>' => [82, 1, 28.8],
+      '<div style="width:80px;font:16px monospace"><div style="float:left;width:70px;height:60px"></div>' \
+      '<div id="t" style="width:80px"><span id="s">aa&shy;bb</span></div></div>' => [82, 1, 38.4]
+    }.each do |body, (height, fragments, width)|
+      session = simulated_session(page(body))
+      session.visit '/'
+      got = session.evaluate_script("(() => { const s = document.getElementById('s'); return [document.getElementById('t').getBoundingClientRect().height, s.getClientRects().length, s.getBoundingClientRect().width]; })()")
+      expect(got[0]).to be_within(0.05).of(height), "#{body}: #t is #{got[0]} tall (Chrome #{height})"
+      expect(got[1]).to eq(fragments), "#{body}: #s has #{got[1]} fragments (Chrome #{fragments}) — a lone `-` line is the regression"
+      expect(got[2]).to be_within(0.05).of(width), "#{body}: #s is #{got[2]} wide (Chrome #{width}) — `aa-bb` drew a hyphen it should not"
+    end
+  end
+
+  # A `nowrap` / `pre` block's ATOMIC drops its line below a float in BOTH engines — native's atomic arm and the
+  # oracle's `placeOnLine` both test the band with no mode check — where Chrome never drops a no-wrap line: 82
+  # here, 22 there for the block. Shared, and older than anything else in this file.
+  # A ZERO-width atomic drops only where the INDENT does not fit (a band is clamped at zero, so a zero-width
+  # run fits any band on its own) — and with no indent all three engines agree, which is the control. Under the
+  # indent it used to be the exception only because the oracle never asked about a zero-width run: 22 by
+  # ACCIDENT, and a parity break against native's 82. Both engines are 82 there now.
+  it 'drops a nowrap line holding an atomic below a float, in both engines (Chrome: it does not)' do
+    [['5px', ''], ['20px', ''], ['0', 'text-indent:9px;'], ['0', '']].each do |w, indent|
+      %w[nowrap pre].each do |ws|
+        body = %(<div style="width:80px;font:16px monospace;white-space:#{ws};#{indent}"><div style="float:left;width:90px;height:60px"></div>) +
+               %(<div id="t"><span style="display:inline-block;width:#{w};height:5px"></span></div></div>)
+        expect_parity(body)
+        session = simulated_session(page(body))
+        session.visit '/'
+        h = session.evaluate_script("document.getElementById('t').getBoundingClientRect().height")
+        shared = w == '0' && indent.empty? ? 22 : 82
+        expect_shared_gap(h, shared: shared, chrome: 22, what: "#{body}: #t height")
+      end
+    end
+  end
 end

@@ -1036,14 +1036,8 @@ x</div>))
         session = simulated_session(page(body))
         session.visit '/'
         got = session.evaluate_script("(() => { const b = document.getElementById('m').getBoundingClientRect(); return [+b.x.toFixed(2), +b.y.toFixed(2)]; })()")
-        expect(got).to eq(shared), body
-        got.each_with_index do |v, i|
-          next if shared[i] == chrome[i]
-
-          expect(v).not_to(
-            be_within(0.05).of(chrome[i]),
-            "#{body}: #{i.zero? ? 'x' : 'y'} #{v} now agrees with Chrome (#{chrome[i]}) — pin it as Chrome's, not as a shared gap"
-          )
+        %w[x y].each_with_index do |axis, i|
+          expect_shared_gap(got[i], shared: shared[i], chrome: chrome[i], what: "#{body}: #{axis}")
         end
       end
     end

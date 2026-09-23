@@ -863,13 +863,7 @@ RSpec.describe 'native layout table parity', if: ENV.fetch('CSIM_JS_ENGINE', 'v8
       session = simulated_session(page(body))
       session.visit '/'
       y = session.evaluate_script("document.getElementById('m').getBoundingClientRect().y")
-      expect(y).to be_within(0.05).of(shared_y), "#{body}: marker at #{y}, both engines say #{shared_y}, Chrome #{chrome_y}"
-      next if shared_y == chrome_y
-
-      # …and the gap is asserted on the MEASURED figure, so that the day the engines move onto Chrome this
-      # says so instead of passing. (It compared the two hard-coded literals at first, which is a statement
-      # about the source text and can never fail whatever either engine does.)
-      expect(y).not_to be_within(0.05).of(chrome_y), "#{body}: marker at #{y} now agrees with Chrome — pin it as `chrome_y`, not as a shared gap"
+      expect_shared_gap(y, shared: shared_y, chrome: chrome_y, what: "#{body}: marker y")
     end
     # …and a table whose ROW GROUPS are written out of source order, which is where the two engines' senses of
     # "the table's FIRST row" came apart. `tableGrid` sorts header / body / footer the way §17.2.1 renders
@@ -895,8 +889,7 @@ RSpec.describe 'native layout table parity', if: ENV.fetch('CSIM_JS_ENGINE', 'v8
       session = simulated_session(page(body))
       session.visit '/'
       y = session.evaluate_script("document.getElementById('m').getBoundingClientRect().y")
-      expect(y).to be_within(0.05).of(shared_y), "#{body}: marker at #{y}, both engines say #{shared_y}, Chrome #{chrome_y}"
-      expect(y).not_to be_within(0.05).of(chrome_y), "#{body}: marker at #{y} now agrees with Chrome — pin it as `chrome_y`"
+      expect_shared_gap(y, shared: shared_y, chrome: chrome_y, what: "#{body}: marker y")
     end
     # …and the same table spelled with `display: table-*` divs, where all three engines agree EXACTLY (15 and
     # 39). That is the control that says the residual gap above is the `<td>` UA rule and not the ordering:
