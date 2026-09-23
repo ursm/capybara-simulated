@@ -850,6 +850,41 @@ RSpec.describe 'native layout L2 text-block parity', if: ENV.fetch('CSIM_JS_ENGI
   # ORACLE: it told its lines apart by their y, and at `line-height: 0` every line has the same one — so a
   # marker held for an inline's opening edge took the edge landing on a LATER line for its own and settled at
   # the cursor it stood at on the earlier one (x 54 where native and Chrome say 6). Lines are counted now.
+  # A marker held for an opening edge INSIDE an inline-block that itself sits in an edged inline: the held
+  # record is the inline-block's, but `placeAbsolute` parks the entry with the OUTERMOST open inline, in the
+  # block around it — whose settle had no record of it and fell back to the cursor it was held at. The ORACLE
+  # was wrong ((34.8, 22) against native's and Chrome's (10, 44)); the inline-block's settle resolves it now.
+  # 6,700 of the 10,000 `nestedheld` shapes mismatched, rtl ones by the corner the atomic's shift left behind.
+  it 'settles a marker held inside an inline-block inside an edged inline' do
+    expect_parity(
+      '<div style="position:relative;width:100px;font:16px monospace">aaaa aaaa <span style="padding-left:6px">' \
+      '<span style="display:inline-block;width:50px">bb <span style="padding-left:4px"><i id="m" style="position:absolute;width:3px;height:3px"></i>cc</span></span></span> t</div>',
+      10,
+      chrome_y: 44
+    )
+  end
+  # …and the two things both engines still do differently from Chrome there, recorded: an rtl block's corner
+  # is the atomic's content edge without the inner inline's opening padding (77.8; Chrome 80.8), and a held
+  # box does not follow a `position: relative` inline it waits in (22; Chrome 24 — the same without the
+  # inline-block around it).
+  it 'places a held marker in an rtl inline-block at its content corner (shared)' do
+    expect_parity(
+      '<div style="position:relative;width:100px;font:16px monospace;direction:rtl"><span style="padding-left:6px">' \
+      '<span style="display:inline-block;width:50px">bb <span style="padding-left:4px"><i id="m" style="position:absolute;width:3px;height:3px"></i>cc</span></span></span> t</div>',
+      chrome_y:        22,
+      shared_x:        77.8,
+      shared_x_chrome: 80.796875
+    )
+  end
+  it 'leaves a held marker where it was held, not where its relative inline moves (shared)' do
+    expect_parity(
+      '<div style="position:relative;width:100px;font:16px monospace"><span style="padding-left:6px">' \
+      '<span style="display:inline-block;width:50px">bb <span style="padding-left:4px;position:relative;top:2px"><i id="m" style="position:absolute;width:3px;height:3px"></i>cc</span></span></span> t</div>',
+      10,
+      shared_y:        22,
+      shared_y_chrome: 24
+    )
+  end
   it 'tells zero-tall lines apart when settling a marker held for an opening edge' do
     expect_parity(
       '<div style="position:relative;width:60px;font:16px monospace;line-height:0">aaaa aaaa ' \
