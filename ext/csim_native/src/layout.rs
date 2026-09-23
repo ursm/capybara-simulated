@@ -864,6 +864,11 @@ struct PendingSpace {
     breaks: bool,
     // Whether it is a word separator at all, as against a zero-width break opportunity.
     sep: bool,
+    // Already ON the line: its advance and its gap went down where an edge was placed after it (a closing or an
+    // opening edge the oracle puts down after the space it had placed where it met it), and what still waits
+    // is only what the space IS for the next word — its break opportunity, its metrics, and that a line
+    // ending in it starts the next run's white space collapsed. `w` is 0 once placed.
+    placed: bool,
 }
 
 // What the BLOCK decides about its lines — everything the runs do not carry themselves. They travel as one
@@ -996,6 +1001,11 @@ fn line_layout(
     // (`trailingPreserved`). The two are MUTUALLY EXCLUSIVE — every placement zeroes the other — and only a
     // line that WRAPPED hangs the preserved ones (`alignLine`: `trailingHang + (kind === 'wrap' ? … : 0)`).
     let mut hang_pre = 0.0f64;
+    // …and WHICH of this line's gaps the collapsible hang began at, for the justify cut: the gaps from there on
+    // hang, the ones before are between words. By ORDER, as the oracle's `hangGapIndex`: an edge after the hang
+    // (a closing margin) moves the pen without ending it, and a negative one moves it back past a real gap, so
+    // no coordinate says where the hang began.
+    let mut hang_gap: Option<usize> = None;
     let mut total = 0.0f64;
     // How many lines have CLOSED. A marker waiting on an opening edge recorded the cursor it stood at; that
     // cursor still means something only while its line is still open — a wrap since then starts it over.
@@ -1061,6 +1071,22 @@ fn line_layout(
             if justifying {
                 line_gaps.push($x);
             }
+        }};
+    }
+    // A collapsible space goes down on the line and HANGS there until content follows it: its advance, and — a
+    // real separator, not a zero-width opportunity — its justification gap, the index the hang began at, and the
+    // end of any run of preserved spaces before it (the oracle's `placeOnLine(…, hangs)`).
+    macro_rules! hang_space {
+        ($sep:expr, $w:expr) => {{
+            if $sep {
+                if hang_gap.is_none() {
+                    hang_gap = Some(line_gaps.len());
+                }
+                note_gap!(band_l(total) + line_x);
+                hang_pre = 0.0;
+            }
+            line_x += $w;
+            hang += $w;
         }};
     }
     // A NO-BREAK SPACE is no break opportunity, but it IS a justification gap — CSS Text 3 §8.1, and Chrome
@@ -1144,7 +1170,10 @@ fn line_layout(
                 first_line = Some((total, line_asc));
             }
             last_line = Some((total, line_asc));
-            let end = if $wrap { line_x - hang - hang_pre } else { line_x };
+            // The collapsible hang comes off EVERY line's end, the preserved one only a wrapped line's — the oracle's
+            // `trailingHang + (kind === 'wrap' ? trailingPreserved : 0)`. (A forced close had no collapsible hang
+            // to take off until a space pending at an edge started going down BEFORE the edge.)
+            let end = line_x - hang - if $wrap { hang_pre } else { 0.0 };
             let free = band_w(total) - end;
             // `justify` (align 3) spreads the free space over this line's gaps — only a line that WRAPPED, with
             // room to give and a gap that is not the hanging one at its end (CSS Text 3 §7.1; the last line and
@@ -1161,7 +1190,10 @@ fn line_layout(
                 // share of the free space. It is the only one of this line's four float tests whose two sides
                 // travel different routes; the others compare a gap against a pen off the same running
                 // variable, and coincide bit-exactly within each engine.
-                let hangs = line_gaps.iter().position(|&g| g >= end_x - GAP_CUT_EPS).unwrap_or(line_gaps.len());
+                let hangs = match hang_gap {
+                    Some(i) => i.min(line_gaps.len()),
+                    None => line_gaps.iter().position(|&g| g >= end_x - GAP_CUT_EPS).unwrap_or(line_gaps.len()),
+                };
                 line_gaps[..hangs].to_vec()
             } else {
                 Vec::new()
@@ -1204,6 +1236,7 @@ fn line_layout(
                 oofs.push((ci, x + shift_at(x), y));
             }
             line_gaps.clear();
+            hang_gap = None;
             tail_gaps.clear();
             total += line_h;
             line_no += 1;
@@ -1300,6 +1333,7 @@ fn line_layout(
             close_line!(false);
             line_x = 0.0;
             hang = 0.0;
+            hang_gap = None;
             hang_pre = 0.0;
             line_asc = strut_asc;
             line_desc = strut_desc;
@@ -1331,16 +1365,26 @@ fn line_layout(
                 // still unflushed, so reading them after would add nothing.
                 // …and flushed PER FRAGMENT, not behind the sum guard: the oracle asks `if (frag.pendingOpen)`
                 // here — this box's own edge — and then places every pending one, cancelling pairs included.
-                if open.last().is_some_and(|o| !o.1 && o.0 != 0.0) {
+                let flushes = open.last().is_some_and(|o| !o.1 && o.0 != 0.0);
+                // An edge put down here goes AFTER a collapsed space still pending: the oracle placed that space
+                // where it met it, so the space's advance and its justification gap come BEFORE the edge. Kept
+                // pending, native placed both after it, and a marker inside the inline — past the space, before
+                // the gap — was not moved by the spread (48 where the oracle and Chrome say 60.4).
+                if flushes || run.lands {
+                    if let Some(p) = pending_space.filter(|p| p.sep && !p.placed) {
+                        hang_space!(true, p.w);
+                        pending_space = Some(PendingSpace { w: 0.0, placed: true, ..p });
+                    }
+                }
+                if flushes {
                     settle_pending_oofs!();
                     flush_each_open_edge!();
                 }
                 open.pop(); // LIFO
                 line_x += run.metric;
-                // `hang_pre` is not cleared: an edge is `edge` to the oracle, which leaves the preserved spaces
-                // before it hanging (`trailingHang` is reset only `if (!edge)`) — only a real placement ends
-                // their run. (`hang` is always 0 here: a collapsible space is still PENDING at a close, not on
-                // the line, and `hang` holds one only between a word's placement of it and its own.)
+                // Neither `hang` nor `hang_pre` is cleared: an edge is `edge` to the oracle, which leaves the
+                // spaces before it hanging (`trailingHang` is reset only `if (!edge)`) — only a real placement
+                // ends their run.
                 // A close that LANDS is an edge PLACEMENT, and the oracle's `placeOnLine` grows the line for one
                 // like any other non-hanging placement: first by the metrics of the collapsible space hanging at
                 // the line's end — banked here, so a wrap that drops the space still leaves the line as tall —
@@ -1517,6 +1561,7 @@ fn line_layout(
                             line_has_content = true;
                             line_placed = true;
                             hang = 0.0;
+                            hang_gap = None;
                             hang_pre = 0.0;
                         }
                     }
@@ -1587,9 +1632,18 @@ fn line_layout(
                                         // placement like any other, so it does not swallow the one before it.
                                         if let Some(ps) = pending_space.take() {
                                             let (w, a, d) = (ps.w, ps.asc, ps.desc);
+                                            // (Its gap, unless it was placed and noted it already.) The separators an
+                                            // earlier non-wrapping run ENDED in become gaps only where THIS run is
+                                            // placed WHOLE — the oracle's `placeOnLine` for a `pre` run is a content
+                                            // placement — and stay held past a wrapping run's preserved spaces,
+                                            // which are white space and not content (`placePreservedSpace`).
                                             if ps.sep {
-                                                note_gap!(band_l(total) + line_x);
-                                                flush_tail_gaps!();
+                                                if !ps.placed {
+                                                    note_gap!(band_l(total) + line_x);
+                                                }
+                                                if no_wrap {
+                                                    flush_tail_gaps!();
+                                                }
                                             }
                                             line_x += w;
                                             line_asc = line_asc.max(a);
@@ -1630,7 +1684,8 @@ fn line_layout(
                                             }
                                         }
                                         line_x += adv;
-                                        hang = 0.0;              // …and it is not a COLLAPSED hang any more
+                                        hang = 0.0;
+                                        hang_gap = None;              // …and it is not a COLLAPSED hang any more
                                         if no_wrap {
                                             // A `pre` run is placed WHOLE, through the oracle's non-wrapping
                                             // branch, where `placeOnLine`'s `!edge` arm zeroes the preserved
@@ -1653,7 +1708,7 @@ fn line_layout(
                                         atomic_break = false;    // …the atomic's / `<wbr>`'s opportunity too:
                                                                  // the oracle keeps ONE `barrier`, and a space
                                                                  // overwrites whatever stood there
-                                        pending_space = Some(PendingSpace { w: 0.0, asc: run.asc, desc: run.line_height - run.asc, breaks: !no_wrap, sep: false });
+                                        pending_space = Some(PendingSpace { w: 0.0, asc: run.asc, desc: run.line_height - run.asc, breaks: !no_wrap, sep: false, placed: false });
                                     }
                                     _ => return None, // \r / \f — not modelled
                                 }
@@ -1702,7 +1757,7 @@ fn line_layout(
                                 ends_open = false;
                                 atomic_break = false;
                                 pending_space = if no_wrap {
-                                    Some(PendingSpace { w: 0.0, asc: f64::NEG_INFINITY, desc: f64::NEG_INFINITY, breaks: false, sep: false })
+                                    Some(PendingSpace { w: 0.0, asc: f64::NEG_INFINITY, desc: f64::NEG_INFINITY, breaks: false, sep: false, placed: false })
                                 } else {
                                     None
                                 };
@@ -1743,7 +1798,7 @@ fn line_layout(
                                         // whitespace-only-node arm is `modeWraps(owner) ? null : 'hard'`.
                                         ends_open = false;
                                         atomic_break = false;    // …as above: one barrier, and this is it now
-                                        pending_space = Some(PendingSpace { w: space_w, asc: run.asc, desc: run.line_height - run.asc, breaks: !no_wrap, sep: true });
+                                        pending_space = Some(PendingSpace { w: space_w, asc: run.asc, desc: run.line_height - run.asc, breaks: !no_wrap, sep: true, placed: false });
                                         line_has_content = true;
                                     }
                                 }
@@ -1761,9 +1816,9 @@ fn line_layout(
                         let width = measure_word(run, word)?;
                         // `space_before` is the ADVANCE that is waiting; `space_breaks` is whether it opens a
                         // line here, which is the mode of the run that queued it.
-                        let (space_before, sw, sasc, sdesc, space_breaks, space_sep) = match pending_space.take() {
-                            Some(p) => (true, p.w, p.asc, p.desc, p.breaks, p.sep),
-                            None => (false, 0.0, 0.0, 0.0, false, false),
+                        let (space_before, sw, sasc, sdesc, space_breaks, space_sep, space_placed) = match pending_space.take() {
+                            Some(p) => (true, p.w, p.asc, p.desc, p.breaks, p.sep, p.placed),
+                            None => (false, 0.0, 0.0, 0.0, false, false, false),
                         };
                         // A word glued to the previous one across a run boundary — no space between, a mixed-font
                         // word like `foo<b>bar</b>` or `H<sub>2</sub>O` where the edgeless inline emits no
@@ -1779,18 +1834,11 @@ fn line_layout(
                         // native_layout_text spec), so the growth is applied once the line the space sits on is settled.
                         let space_on_line = space_before && line_placed;
                         if space_on_line {
-                            if space_sep {
-                                // …an OPPORTUNITY is no gap: what is asked is what the pending space IS, not
-                                // what it measures (see `PendingSpace`). The two coincide at every producer
-                                // today — nothing queues a non-zero opportunity — which is exactly why
-                                // reading the width looked like asking the question.
-                                note_gap!(band_l(total) + line_x);
-                            }
-                            line_x += sw; // hanging space (after preserved ones, under pre-wrap: all of them hang)
-                            hang += sw;
-                            if space_sep {
-                                hang_pre = 0.0; // …a REAL space; the zero-width one is only an opportunity
-                            }
+                            // …an OPPORTUNITY is no gap: what is asked is what the pending space IS, not what it
+                            // measures (see `PendingSpace`). The two coincide at every producer today — nothing
+                            // queues a non-zero opportunity — which is exactly why reading the width looked like
+                            // asking the question. (Hanging after preserved ones, under pre-wrap: all of them hang.)
+                            hang_space!(space_sep && !space_placed, sw);
                         }
                         // IN-WORD BREAKING (`overflow-wrap: break-word|anywhere` / `word-break: break-all`): a word
                         // WIDER THAN THE BAND may break between characters (a word that fits the band stays atomic
@@ -1892,6 +1940,7 @@ fn line_layout(
                                     note_nbsp_gaps!(run, &text[u..u + ulen], band_l(total) + line_x);
                                     line_x += cw;
                                     hang = 0.0;
+                                    hang_gap = None;
                                     hang_pre = 0.0;
                                     line_asc = line_asc.max(run.asc);
                                     line_desc = line_desc.max(run.line_height - run.asc);
@@ -1934,6 +1983,7 @@ fn line_layout(
                             note_nbsp_gaps!(run, &text[start..i], band_l(total) + line_x);
                             line_x += width;
                             hang = 0.0;
+                            hang_gap = None;
                             hang_pre = 0.0;
                             line_asc = line_asc.max(run.asc);
                             line_desc = line_desc.max(run.line_height - run.asc);
@@ -1959,22 +2009,15 @@ fn line_layout(
                 // An atomic is a break opportunity on both sides — but a space that is NOT one does not
                 // become one by having an atomic after it: the oracle leaves `barrier = 'hard'` behind a
                 // non-wrapping run's trailing space and hands that to the atomic as `decided`.
-                let (space_before, sw, sasc, sdesc, space_breaks, space_sep) = match pending_space.take() {
-                    Some(p) => (true, p.w, p.asc, p.desc, p.breaks, p.sep),
-                    None => (false, 0.0, 0.0, 0.0, false, false),
+                let (space_before, sw, sasc, sdesc, space_breaks, space_sep, space_placed) = match pending_space.take() {
+                    Some(p) => (true, p.w, p.asc, p.desc, p.breaks, p.sep, p.placed),
+                    None => (false, 0.0, 0.0, 0.0, false, false, false),
                 };
                 let space_is_hard = space_before && !space_breaks;
                 let space_on_line = space_before && line_placed;
                 let mut broke = false;
                 if space_on_line {
-                    if space_sep {
-                        note_gap!(band_l(total) + line_x);   // …an OPPORTUNITY is no gap (see `PendingSpace`)
-                    }
-                    line_x += sw; // hanging space
-                    hang += sw;
-                    if space_sep {
-                        hang_pre = 0.0; // …a REAL space; the zero-width one is only an opportunity
-                    }
+                    hang_space!(space_sep && !space_placed, sw); // …an OPPORTUNITY is no gap (see `PendingSpace`)
                 }
                 let ow: f64 = open.iter().filter(|o| !o.1).map(|o| o.0).sum();
                 // An atomic is a break opportunity before it (§ line breaking) — but not under `white-space:
@@ -2015,6 +2058,7 @@ fn line_layout(
                 line_atomics.push((ri, band_l(total) + line_x, line_gaps.len())); // its margin box starts here on this line
                 line_x += width + run.size; // …and a grown flex container's growth moves the pen, not the break
                 hang = 0.0;
+                hang_gap = None;
                 hang_pre = 0.0;
                 // A LINE-RELATIVE box gives the line no ascent and no descent — it is placed against an edge
                 // the line does not have yet, so all it can say is how tall the line has to be.

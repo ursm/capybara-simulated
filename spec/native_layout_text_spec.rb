@@ -872,6 +872,44 @@ RSpec.describe 'native layout L2 text-block parity', if: ENV.fetch('CSIM_JS_ENGI
       shared_x_chrome: 0
     )
   end
+  # …and the rest of that family, found by the review's held-marker and justify sweeps, all older than this
+  # work. Each figure is Chrome's; the engines had split on each.
+  {
+    # NATIVE placed a collapsed space still pending at an edge AFTER the edge — its advance and its gap — where
+    # the oracle placed it where it met it: a marker inside the inline, past the space, was not moved by the
+    # spread (48).
+    'a pending space goes down before the closing edge after it' =>
+      ['<div style="position:relative;width:100px;font:16px monospace;text-align:justify">aaaa <span style="margin-right:30px"><i id="m" style="position:absolute;width:2px;height:2px"></i></span>b end</div>', 60.390625, 0],
+    # The ORACLE put an empty inline's edge down without the block margin still open above it, so the line
+    # sat INSIDE the previous block's bottom margin (22).
+    'an edge-only line after a block margin'                      =>
+      ['<div style="position:relative;width:100px;font:16px monospace"><p style="margin:0 0 20px">x</p><span style="padding-left:6px"><i id="m" style="position:absolute;width:2px;height:2px"></i></span> t</div>', 6, 42],
+    # …and a margin that carries the line past a float left it the float's band (56).
+    'an edge-only line a margin carries past a float'              =>
+      ['<div style="position:relative;width:100px;font:16px monospace;line-height:0"><div style="float:left;width:50px;height:10px"></div>' \
+       '<p style="margin:0 0 20px">x</p><span style="padding-left:6px"><i id="m" style="position:absolute;width:2px;height:2px"></i></span> t</div>', 6, 20],
+    # The ORACLE let a wrapping run's PRESERVED spaces turn the separator a `pre` run ended in into a gap: they
+    # are trailing white space, and Chrome spreads nothing over any of it (100).
+    'a pre run\'s separator before trailing preserved spaces'      =>
+      ['<div style="position:relative;width:100px;font:16px monospace;text-align:justify;white-space:pre-wrap">aaaa<span style="white-space:pre"> </span>' \
+       '<span><i id="m" style="position:absolute;width:2px;height:2px"></i></span>  bbbb bbbb end</div>', 48.015625, 0]
+  }.each do |name, (body, chrome_x, chrome_y)|
+    it "places a marker where Chrome does: #{name}" do
+      expect_parity(body, chrome_x, chrome_y: chrome_y)
+    end
+  end
+  # …and one the engines now SHARE: a negative closing margin pulls the line's end back past the real gap
+  # before it, and a line that ends in content (the atomic) has no hang to cut its gaps at by order, so both
+  # cut by coordinate and spread nothing (24; Chrome 96). Native used to agree with Chrome by accident — it
+  # put the space down AFTER the edge — which is the placement fixed above. Recorded.
+  it 'spreads nothing when a negative closing margin pulls the line end back past a gap (shared)' do
+    expect_parity(
+      '<div style="position:relative;width:100px;font:16px monospace;text-align:justify">aaaa <span style="margin-right:-24px"> </span>' \
+      '<b id="m" style="display:inline-block;width:4px;height:4px"></b>bbbbbbbb end</div>',
+      shared_x:        24,
+      shared_x_chrome: 96
+    )
+  end
 
   # A `vertical-align` baseline SHIFT (sub / super / length / %) on an inline element offsets its whole content —
   # its runs ride the shift, growing the line box the block's height reflects. Native threads the accumulated
