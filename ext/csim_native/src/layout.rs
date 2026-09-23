@@ -506,6 +506,8 @@ pub(crate) struct Run {
     pub(crate) size: f64,
     pub(crate) ls: f64,
     pub(crate) ws: f64,
+    // A TEXT run's line-height; on a CLOSE edge, the inline's font CONTENT height (`fontContentHeight`), the
+    // box a landing close grows the line to — a content box, not a line-height, whatever the name says.
     pub(crate) line_height: f64,
     // An ascent above the line's baseline, whatever the kind: a TEXT run's, an ATOMIC's (its own baseline plus
     // any shift), and a CLOSE edge's — the inline's own FONT box, `vertical-align` shift included, which a
@@ -1691,13 +1693,16 @@ fn line_layout(
                                 // it placed anything (`modeWraps(owner) ? null : 'hard'`). A non-wrapping run
                                 // leaves HARD, which an atomic after it may neither break at nor drop below a
                                 // float at; a wrapping one leaves null, which CLEARS whatever stood there.
-                                // Zero metrics as well as zero width: nothing was placed, so nothing grows the
+                                // No metrics as well as zero width: nothing was placed, so nothing grows the
                                 // line box — a taller space that collapsed away was raising the line by its own
-                                // leading.
+                                // leading. And NO metrics is `-inf`, the identity for a max, not zero (the
+                                // oracle's `lineHangAsc` says why): ZERO is a height, and at a line-height below
+                                // the font box the line's descent is NEGATIVE, so a word taking this placeholder
+                                // on a line an edge had started grew `line-height: 8px` to 10.
                                 ends_open = false;
                                 atomic_break = false;
                                 pending_space = if no_wrap {
-                                    Some(PendingSpace { w: 0.0, asc: 0.0, desc: 0.0, breaks: false, sep: false })
+                                    Some(PendingSpace { w: 0.0, asc: f64::NEG_INFINITY, desc: f64::NEG_INFINITY, breaks: false, sep: false })
                                 } else {
                                     None
                                 };

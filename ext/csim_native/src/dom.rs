@@ -1073,8 +1073,9 @@ fn layout_pass(
     let mut runs: Vec<crate::layout::Run> = Vec::with_capacity(run_floats.len() / RUN_STRIDE);
     for r in run_floats.chunks_exact(RUN_STRIDE) {
         // A slot may mean one thing per kind — slot 11 an ATOMIC's line mode or a CLOSE edge's `lands`, slot 3
-        // a TEXT run's letter-spacing or an edge's `plain` width — and a field that is not every kind's takes
-        // it only on its own, so none reads another's value.
+        // a TEXT run's letter-spacing or an edge's `plain` width (an OUT-OF-FLOW run's `rel.y`, read as `ls`).
+        // The fields added per kind take their slot only on their own kind; `ls` is decoded for every kind, as
+        // it always was, and is read only where it means letter-spacing or the offset.
         let kind = r[0] as u8;
         runs.push(crate::layout::Run {
             kind,

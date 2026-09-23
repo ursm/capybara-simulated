@@ -794,20 +794,31 @@ RSpec.describe 'native layout L2 text-block parity', if: ENV.fetch('CSIM_JS_ENGI
     'an empty raised inline'                =>
       ['<div style="width:100px;font:16px monospace">a<span style="vertical-align:super;padding-right:5px"></span>', 14.609375, 19.328125],
     'a taller hanging space the wrap drops' =>
-      ['<div style="width:60px;font:16px monospace"><b style="padding-right:3px">aaaa-bbbb<em style="font-size:24px"> </em></b>cccccccc', 0, 90],
-    'an OPENING edge, which grows nothing'  =>
-      ['<div style="width:200px;font:16px monospace;line-height:8px">a<span style="border-left:2px solid">x</span>b', 30.828125, 6]
+      ['<div style="width:60px;font:16px monospace"><b style="padding-right:3px">aaaa-bbbb<em style="font-size:24px"> </em></b>cccccccc', 0, 90]
   }.each do |name, (head, chrome_x, chrome_y)|
     it "grows the line to an edged inline's font box where its close lands: #{name}" do
       expect_parity(%(#{head}<i id="m" style="display:inline-block;width:4px;height:4px"></i></div>), chrome_x, chrome_y: chrome_y)
     end
   end
-  # Where the two engines share a rule Chrome does not: the CLOSE grows the line to the font box even at a
-  # line-height smaller than it, where Chrome leaves a text-holding inline at the line-height (the block 10
-  # tall, the marker at 6; both engines 13) — the case the refusal was written about, whose comment said 22
-  # was MEASURED; it was read with a `font` shorthand after the `line-height`, which resets it to `normal`.
-  # And the OPENING edge grows nothing (`flushOpenEdges` only seeds the strut), where Chrome grows an empty
-  # larger-font inline's line for either edge (28; both engines 13). Recorded, not fixed.
+  # …and an OPENING edge grows nothing (`flushOpenEdges` only seeds the strut), which with text in the inline
+  # at a tiny line-height is what Chrome does too.
+  it 'grows nothing for an opening edge with text in the inline' do
+    expect_parity(
+      '<div style="width:200px;font:16px monospace;line-height:8px">a<span style="border-left:2px solid">x</span>b' \
+      '<i id="m" style="display:inline-block;width:4px;height:4px"></i></div>',
+      30.828125,
+      chrome_y: 6
+    )
+  end
+  # Where the two engines share a rule Chrome does not. What Chrome grows the line to for an inline is its
+  # LINE-HEIGHT box (§10.8.1, the metrics its own text uses), where the oracle's close grows it to the font's
+  # CONTENT box and its opening edge grows nothing. The two boxes coincide at `line-height: normal` on a font
+  # with no line gap — monospace here, which is why the shapes above agree with Chrome — and nowhere else: at a
+  # line-height below the font box Chrome keeps the line there (the marker at 6; both engines 13 — the case the
+  # refusal was written about, whose comment said 22 was MEASURED: it was read with a `font` shorthand after the
+  # `line-height`, which resets it to `normal`), an opening edge grows an empty larger-font inline's line in
+  # Chrome (28; both engines 13), and a serif or sans face's line gap makes a `normal` line a pixel or three
+  # taller in Chrome than the content box (an empty 60px span: 69 against 67). ONE rule, recorded, not fixed.
   {
     'a close at a tiny line-height, padding' =>
       ['<div style="width:200px;font:16px monospace;line-height:8px">a<span style="padding:0 5px">x</span>b', 38.828125, 13, 6],
@@ -819,6 +830,33 @@ RSpec.describe 'native layout L2 text-block parity', if: ENV.fetch('CSIM_JS_ENGI
     it "grows the line by the oracle's edge rule, not Chrome's (shared): #{name}" do
       expect_parity(%(#{head}<i id="m" style="display:inline-block;width:4px;height:4px"></i></div>), chrome_x, shared_y: shared_y, shared_y_chrome: chrome_y)
     end
+  end
+  # Two more the refusal was hiding — it declined every edged inline at a line-height below its font box, and
+  # no sweep ran at one (the `line-height: 0` / `8px` variants of every sweep do now, 452k cases).
+  # NATIVE: a non-wrapping space collapsed at a line start leaves a zero-width placeholder for its barrier, and
+  # its metrics were ZERO — a height, where the oracle's `lineHangAsc` uses `-Infinity` for exactly this
+  # reason: the line's descent is negative at such a line-height, so a word taking the placeholder on a line
+  # an edge had started grew it (the block 10 tall where Chrome and the oracle say 8). The marker reads the
+  # block's height from BELOW it: one on the line would grow the line itself and hide the difference.
+  it 'grows nothing for a collapsed non-wrapping space after an edge at a tiny line-height' do
+    expect_parity(
+      '<div style="font:16px monospace"><div style="width:100px;line-height:8px">' \
+      '<span style="padding-left:5px;white-space:nowrap"> </span>b</div>' \
+      '<i id="m" style="display:inline-block;width:4px;height:4px"></i></div>',
+      0,
+      chrome_y: 21
+    )
+  end
+  # ORACLE: it told its lines apart by their y, and at `line-height: 0` every line has the same one — so a
+  # marker held for an inline's opening edge took the edge landing on a LATER line for its own and settled at
+  # the cursor it stood at on the earlier one (x 54 where native and Chrome say 6). Lines are counted now.
+  it 'tells zero-tall lines apart when settling a marker held for an opening edge' do
+    expect_parity(
+      '<div style="position:relative;width:60px;font:16px monospace;line-height:0">aaaa aaaa ' \
+      '<span style="padding-left:6px"><i id="m" style="position:absolute;width:5px;height:5px"></i>z</span></div>',
+      6,
+      chrome_y: 0
+    )
   end
 
   # A `vertical-align` baseline SHIFT (sub / super / length / %) on an inline element offsets its whole content —
