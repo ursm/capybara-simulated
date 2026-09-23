@@ -886,6 +886,23 @@ RSpec.describe 'native layout L2 text-block parity', if: ENV.fetch('CSIM_JS_ENGI
       expect_parity(%(<div style="position:relative;width:200px;font:16px monospace">aaaa <span>#{atom}</span> t</div>), 48.015625, chrome_y: 14)
     end
   end
+  # …and the ROOT of a shift is not moved by it: `reuseSubtree` putting a reused marker back where it now belongs
+  # shifts that marker's stale box, and a flex item laid out twice (measured, then stretched) parks its marker
+  # twice — so placing the first entry moved the SECOND by the reuse delta (57.6 after one mutation where native
+  # and Chrome say 60.6). Only after a mutation, so the spec makes one.
+  it 'leaves a parked marker\'s own entry alone when its reused box is put back' do
+    body = '<div id="o" style="position:relative;width:220px;font:16px monospace">aaaa <span style="position:relative;left:3px">' \
+           '<span style="display:inline-flex;width:100px"><div style="height:40px">Q</div>' \
+           '<div><i id="m" style="position:absolute;width:3px;height:3px"></i>cc</div></span></span> t</div>'
+    with_page(body) do |session|
+      expect(parity(session)).to include('ok' => true, 'mismatches' => 0)
+      session.evaluate_script("document.getElementById('o').setAttribute('data-x', '1')")
+      r = parity(session)
+      expect(r).to include('ok' => true, 'mismatches' => 0), r.inspect
+      expect_no_dropped_records(r, body)
+      expect_near(marker_x(session), 60.625, body, 'x')
+    end
+  end
   # …and the same shift now reaches an out-of-flow child placed directly in an inline-flex inside an edged
   # inline, whose static position is ALIGNED (centred) off the atomic's box: the oracle left it where the atomic
   # stood before the line's alignment moved it (x 82.5; native and Chrome 85.5).
