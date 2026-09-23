@@ -858,6 +858,20 @@ RSpec.describe 'native layout L2 text-block parity', if: ENV.fetch('CSIM_JS_ENGI
       chrome_y: 0
     )
   end
+  # A JUSTIFIED line that wraps right after `aaaa ` and an inline's closing margin: the space is still the
+  # line's trailing white space — an edge moves the pen without ending the hang — so nothing is spread over
+  # it. The oracle cut its gaps at `lineX - trailingHang`, which the margin pushed past the space, and spread
+  # the whole free space into it (the marker at 105.6, past the line; native 48). It cuts where the hang
+  # BEGAN now. Chrome carries the empty span and its marker to the next line with the word glued to them
+  # (0, 44) where both engines leave them at the end of this one — shared, recorded.
+  it 'spreads nothing over a trailing space an inline\'s closing edge follows on a justified line' do
+    expect_parity(
+      '<div style="position:relative;width:100px;font:16px monospace;text-align:justify">aaaa aaaa aaaa ' \
+      '<span style="margin-right:4px"><i id="m" style="position:absolute;width:2px;height:2px"></i></span>bbbbbbbb</div>',
+      shared_x:        48,
+      shared_x_chrome: 0
+    )
+  end
 
   # A `vertical-align` baseline SHIFT (sub / super / length / %) on an inline element offsets its whole content —
   # its runs ride the shift, growing the line box the block's height reflects. Native threads the accumulated
