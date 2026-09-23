@@ -46,10 +46,9 @@ module WalkRefusals
   # (2026-09-23), and then an EDGED inline holding nothing but white space, until the same day — that one was
   # never a measure gap at all: both engines measured it alike, and the refusal was guarding a LINE rule native
   # got wrong (an opening edge alone on a line counted as content a break could leave behind). A replacement
-  # has to be FOUND, by asking which refusals the measure gate makes that the walk does not: two candidates
-  # the sweeps turned up — a padded inline whose font box exceeds its line-height, and a soft hyphen under
-  # `break-spaces` — are refused by the WALK as well, so a route handed one declines outright instead of
-  # taking the fallback the specs hold it to.
+  # has to be FOUND, by asking which refusals the measure gate makes that the walk does not: a soft hyphen
+  # under `break-spaces`, which the sweeps turned up, is refused by the WALK as well, so a route handed one
+  # declines outright instead of taking the fallback the specs hold it to.
   # If this one retires too, the cause is still real: find the next shape, do not delete the arm.
   UNMEASURABLE = '<div style="white-space:nowrap">a<div>b</div></div>'
 end

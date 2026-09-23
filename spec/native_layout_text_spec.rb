@@ -779,17 +779,46 @@ RSpec.describe 'native layout L2 text-block parity', if: ENV.fetch('CSIM_JS_ENGI
     expect_parity(%(<div style="width:180px;margin:12px 0;padding:6px;border:2px solid #000">#{text}</div><div style="height:10px"></div>))
   end
 
-  # An EDGED (horizontal padding / border / margin) inline whose font CONTENT-AREA exceeds the line-height grows
-  # the block to that content-area box — the oracle makes `a<span style="padding:0 5px">x</span>` in an 8px
-  # line-height 22 tall (the font box), where a NON-edged span stays at the line-height. Native's line box uses
-  # the strut line-height and would under-size it, so it declines this until it grows an edged inline's line box
-  # to its content area. A tiny line-height forces the trigger on any host (font-independent). A non-edged span
-  # in the same block stays native.
-  it 'declines an edged inline whose content-area exceeds the line-height' do
-    expect(shadow('<div style="line-height:8px;width:200px">a<span style="padding:0 5px">x</span>b</div>')).to include('ok' => false)
+  # An EDGED inline grows the line to its own FONT box where a closing edge LANDS: the oracle places each
+  # closing half through `placeOnLine(…, ownH, …, inlineAscent)` — an edge placement grows the line like any
+  # other. Native's CLOSE only advanced the pen, so the walk declined every edged inline whose content area
+  # exceeds its line-height (`edged-inline-font-exceeds-line-height`), and where the inline holds no text of
+  # its own — so that the close is all that could grow the line — native missed it outright: an empty
+  # `font-size:30px` span makes a 16px line 41 tall in Chrome and the oracle, 22 in native; a `super` one
+  # raises it by the shift. The CLOSE run carries the box now.
+  # …and the space hanging at the line's end is banked by the same placement: the taller space in a 24px
+  # `<em>` keeps the line it ends tall even after the wrap drops it (Chrome 99; native was 11 short).
+  {
+    'an empty inline in a larger font'      =>
+      ['<div style="width:100px;font:16px monospace"><span style="font-size:30px;padding-right:5px"></span>', 5, 28],
+    'an empty raised inline'                =>
+      ['<div style="width:100px;font:16px monospace">a<span style="vertical-align:super;padding-right:5px"></span>', 14.609375, 19.328125],
+    'a taller hanging space the wrap drops' =>
+      ['<div style="width:60px;font:16px monospace"><b style="padding-right:3px">aaaa-bbbb<em style="font-size:24px"> </em></b>cccccccc', 0, 90],
+    'an OPENING edge, which grows nothing'  =>
+      ['<div style="width:200px;font:16px monospace;line-height:8px">a<span style="border-left:2px solid">x</span>b', 30.828125, 6]
+  }.each do |name, (head, chrome_x, chrome_y)|
+    it "grows the line to an edged inline's font box where its close lands: #{name}" do
+      expect_parity(%(#{head}<i id="m" style="display:inline-block;width:4px;height:4px"></i></div>), chrome_x, chrome_y: chrome_y)
+    end
   end
-  it 'declines a bordered inline whose content-area exceeds the line-height' do
-    expect(shadow('<div style="line-height:8px;width:200px">a<span style="border-left:2px solid">x</span>b</div>')).to include('ok' => false)
+  # Where the two engines share a rule Chrome does not: the CLOSE grows the line to the font box even at a
+  # line-height smaller than it, where Chrome leaves a text-holding inline at the line-height (the block 10
+  # tall, the marker at 6; both engines 13) — the case the refusal was written about, whose comment said 22
+  # was MEASURED; it was read with a `font` shorthand after the `line-height`, which resets it to `normal`.
+  # And the OPENING edge grows nothing (`flushOpenEdges` only seeds the strut), where Chrome grows an empty
+  # larger-font inline's line for either edge (28; both engines 13). Recorded, not fixed.
+  {
+    'a close at a tiny line-height, padding' =>
+      ['<div style="width:200px;font:16px monospace;line-height:8px">a<span style="padding:0 5px">x</span>b', 38.828125, 13, 6],
+    'a close at a tiny line-height, border'  =>
+      ['<div style="width:200px;font:16px monospace;line-height:8px">a<span style="border-right:2px solid">x</span>b', 30.828125, 13, 6],
+    'an empty larger-font OPENING edge'      =>
+      ['<div style="width:100px;font:16px monospace"><span style="font-size:30px;padding-left:5px"></span>', 5, 13, 28]
+  }.each do |name, (head, chrome_x, shared_y, chrome_y)|
+    it "grows the line by the oracle's edge rule, not Chrome's (shared): #{name}" do
+      expect_parity(%(#{head}<i id="m" style="display:inline-block;width:4px;height:4px"></i></div>), chrome_x, shared_y: shared_y, shared_y_chrome: chrome_y)
+    end
   end
 
   # A `vertical-align` baseline SHIFT (sub / super / length / %) on an inline element offsets its whole content —

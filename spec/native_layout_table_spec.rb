@@ -1122,9 +1122,9 @@ RSpec.describe 'native layout table parity', if: ENV.fetch('CSIM_JS_ENGINE', 'v8
       # `text_intrinsic` reads. The gate says so, and the cell's contribution comes off its record.
       expect_parity('<table><tr><td style="text-align:justify">x <span style="display:inline-block">y</span></td><td>b</td></tr></table>')
       expect_parity('<table><tr><td><div>blk</div>p <span style="display:inline-block">ok</span> q</td><td>b</td></tr></table>')
-      # …and so does an inline the WALK refuses to emit as runs: its own `white-space`, a non-shift
-      # `vertical-align`, an edged inline whose font box exceeds its line-height (`nlInlineMeasurable` mirrors
-      # the walk's checks, so the measure is never attempted).
+      # …and an inline with a `white-space` of its own, and an edged one whose font box exceeds its line-height
+      # (which the walk refused until native's CLOSE learned to grow the line to that box): measured in the
+      # cell either way, the laid-out line and the measure agreeing.
       expect_parity('<table><tr><td>x <span style="display:inline-block">a <i style="white-space:pre">b  c</i></span></td><td>b</td></tr></table>')
       expect_parity('<table><tr><td>x <span style="display:inline-block"><b style="padding:0 5px;line-height:4px">y</b></span></td><td>b</td></tr></table>')
       # The fact is ONE per inline formatting context: a nested atomic is pushed too, however deep the inline

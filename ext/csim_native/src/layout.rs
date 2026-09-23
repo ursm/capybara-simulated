@@ -507,9 +507,9 @@ pub(crate) struct Run {
     pub(crate) ls: f64,
     pub(crate) ws: f64,
     pub(crate) line_height: f64,
-    // A TEXT run's ascent above its line's baseline; an ATOMIC's too (its own baseline plus any shift). On an
-    // OPEN / CLOSE edge run this slot carries the edge width with NO percentage basis — what an INTRINSIC
-    // measure reads, where `metric` is the resolved px the laid-out line uses.
+    // An ascent above the line's baseline, whatever the kind: a TEXT run's, an ATOMIC's (its own baseline plus
+    // any shift), and a CLOSE edge's — the inline's own FONT box, `vertical-align` shift included, which a
+    // landing close grows the line to (with `line_height` its height; see `RUN_CLOSE`).
     pub(crate) asc: f64,
     pub(crate) metric: f64,
     // The `white-space` mode of the element this run belongs to — not the block's. An inline may declare its
@@ -543,6 +543,9 @@ pub(crate) struct Run {
     // where a test on the SUM (`metric`) saw nothing. Carried in the buffer slot an edge leaves unread
     // (`line_mode`'s), so the stride is unchanged; false on every other kind.
     pub(crate) lands: bool,
+    // An OPEN / CLOSE edge's width with NO percentage basis — what an INTRINSIC measure reads, where `metric` is
+    // the resolved px the laid-out line uses. 0 on every other kind.
+    pub(crate) plain: f64,
 }
 
 impl Input {
@@ -1336,8 +1339,20 @@ fn line_layout(
                 // before it hanging (`trailingHang` is reset only `if (!edge)`) — only a real placement ends
                 // their run. (`hang` is always 0 here: a collapsible space is still PENDING at a close, not on
                 // the line, and `hang` holds one only between a word's placement of it and its own.)
+                // A close that LANDS is an edge PLACEMENT, and the oracle's `placeOnLine` grows the line for one
+                // like any other non-hanging placement: first by the metrics of the collapsible space hanging at
+                // the line's end — banked here, so a wrap that drops the space still leaves the line as tall —
+                // then by the inline's own FONT box (`fontContentHeight` at `inlineAscent`), which is taller than
+                // its line-height contribution wherever the font's content area is (Chrome: an empty
+                // `font-size:30px; padding-right:5px` span makes a 16px line 41 tall, not 22).
                 if run.lands {
                     line_placed = true;
+                    if let Some(p) = pending_space.filter(|p| p.sep) {
+                        line_asc = line_asc.max(p.asc);
+                        line_desc = line_desc.max(p.desc);
+                    }
+                    line_asc = line_asc.max(run.asc);
+                    line_desc = line_desc.max(run.line_height - run.asc);
                 }
             }
             RUN_BR => {
@@ -5922,7 +5937,7 @@ fn text_intrinsic(runs: &[Run], run_texts: &[Option<Vec<u16>>], ws_mode: u8, ind
             }
             RUN_OPEN => {
                 take_indent!(); // an inline box occupies the line, edges or not
-                // An inline's EDGES here are the BASIS-LESS ones (`Run::asc` on an edge run): an intrinsic measure
+                // An inline's EDGES here are the BASIS-LESS ones (`Run::plain`): an intrinsic measure
                 // has no percentage basis, so a `padding: 0 10%` inline contributes nothing where the laid-out
                 // line counts its resolved px.
                 // The matching CLOSE (LIFO) — an inline with ANY horizontal edge takes the pending space at its open.
@@ -5932,22 +5947,22 @@ fn text_intrinsic(runs: &[Run], run_texts: &[Option<Vec<u16>>], ws_mode: u8, ind
                     match r.kind {
                         RUN_OPEN => depth += 1,
                         RUN_CLOSE if depth == 0 => {
-                            close = Some(r.asc);
+                            close = Some(r.plain);
                             break;
                         }
                         RUN_CLOSE => depth -= 1,
                         _ => {}
                     }
                 }
-                if run.asc + close? != 0.0 {
+                if run.plain + close? != 0.0 {
                     take_pending!();
                 }
-                line += run.asc;
-                word += run.asc;
+                line += run.plain;
+                word += run.plain;
             }
             RUN_CLOSE => {
-                line += run.asc;
-                word += run.asc;
+                line += run.plain;
+                word += run.plain;
             }
             RUN_TEXT => {
                 let text = run_texts.get(ri).and_then(|t| t.as_ref())?;
