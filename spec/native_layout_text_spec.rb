@@ -397,7 +397,8 @@ RSpec.describe 'native layout L2 text-block parity', if: ENV.fetch('CSIM_JS_ENGI
   # break there (with a `<wbr>` between them Chrome takes it; both engines do not, a shared gap pinned below).
   # The walk hid it behind the measure gate's `!hasReal` arm, which refused a whitespace-only edged inline as
   # `shrink-to-fit-child-unmeasurable` (~850 sweep declines): a min-content box is exactly as narrow as the
-  # edge, so it was the only place the line got this tight. The control is the same line with an ATOMIC where the edge is, which does break (Chrome y 35).
+  # edge, so it was the only place the line got this tight. The control is the same line with an ATOMIC
+  # where the edge is, which does break (Chrome y 35).
   {
     'an empty edged inline on a line only as wide as its edge'     =>
       '<div style="width:6px;font:16px monospace"><span style="padding-left:6px"></span>',
@@ -480,10 +481,9 @@ RSpec.describe 'native layout L2 text-block parity', if: ENV.fetch('CSIM_JS_ENGI
       chrome_y: 35
     )
   end
-  # …and a `<br>` inside an inline whose only edge is its CLOSE breaks as it would in an edgeless one: there is
-  # no opening edge for the break to strand, so the close simply lands on the line the break opened. The walk
-  # refused every edged inline holding a `<br>` (`br-in-edged-inline`), and emitting edge runs for a
-  # cancelling close pair put 360 such shapes behind that refusal; it is scoped to an OPENING edge now.
+  # …and a `<br>` inside an inline whose only edge is its CLOSE: the close lands on the line the break opened.
+  # The walk refused every edged inline holding a `<br>` until 2026-09-23 (see the break specs below),
+  # and emitting edge runs for a cancelling close pair had put 360 more such shapes behind that refusal.
   {
     'a closing edge alone'           => ['padding-right:5px', 24.21875],
     'a closing pair that cancels'    => ['padding-right:5px;margin-right:-5px', 19.21875]
@@ -494,6 +494,39 @@ RSpec.describe 'native layout L2 text-block parity', if: ENV.fetch('CSIM_JS_ENGI
         %(<b id="m" style="display:inline-block;width:4px;height:4px"></b></div>),
         chrome_x,
         chrome_y: 35
+      )
+    end
+  end
+  # A forced break INSIDE an inline's edges: the oracle's `<br>` puts every opening edge still pending down on
+  # the line it ends and breaks, and the box's CLOSE lands on the line the break opens. Native declined every
+  # such shape (`br-in-edged-inline`, and its `RUN_BR` arm) as a fragment it could not place; it takes the same
+  # two steps as its preserved-newline arm now. The marker sits right after the inline, so its x is the
+  # second line's content plus the closing edge.
+  {
+    'a padded inline'                                 => ['<b style="padding:0 5px">t<br>u</b>', 14.609375],
+    'a bordered inline, whose edge is all OPENING'    => ['<b style="border-left:2px solid">t<br>u</b>', 9.609375],
+    'an opening edge the break puts down on its line' => ['<b style="padding-left:20px"><br><i id="m" style="display:inline-block;width:4px;height:4px"></i></b>', 0]
+  }.each do |name, (inline, chrome_x)|
+    it "breaks inside #{name}" do
+      marker = inline.include?('id="m"') ? '' : '<i id="m" style="display:inline-block;width:4px;height:4px"></i>'
+      expect_parity(%(<div style="width:400px;font:16px monospace">x #{inline}#{marker} y</div>), chrome_x, chrome_y: 35)
+    end
+  end
+  # …and one both engines get wrong alike: Chrome keeps a CLOSING edge on the line a `<br>` ENDS when the break
+  # is the last thing in the inline — the marker after it at 0 — where both engines carry it to the next line
+  # (the oracle's two fragments, the second only the edge). Shared, recorded: it declined until the refusal
+  # above went, so no instrument could see it. With anything after the break, even an empty inline, Chrome
+  # moves the close down too and all three agree.
+  {
+    'a margin'                         => '<b style="margin:0 5px"><br></b>',
+    'padding, after text on the line'  => '<b style="padding-right:5px">t<br></b>'
+  }.each do |name, inline|
+    it "carries a closing edge past a <br> that ends the inline: #{name}" do
+      expect_parity(
+        %(<div style="width:400px;font:16px monospace">x #{inline}<i id="m" style="display:inline-block;width:4px;height:4px"></i> y</div>),
+        chrome_y:        35,
+        shared_x:        5,
+        shared_x_chrome: 0
       )
     end
   end
@@ -1475,12 +1508,6 @@ RSpec.describe 'native text valign decline', if: ENV.fetch('CSIM_JS_ENGINE', 'v8
   it('declines vertical-align:middle on an inline element') { expect_bail('<div style="width:300px">text <span style="vertical-align:middle">m</span> here</div>') }
   it('declines vertical-align:text-top on an inline element') { expect_bail('<div style="width:300px">text <span style="vertical-align:text-top">t</span> here</div>') }
 
-  # A forced break INSIDE an inline's edges splits the box into fragments whose edges native's line layout
-  # cannot place (its `RUN_BR` arm declines an open edge), so the walk declines the block rather than let the
-  # pass fail on it. An unedged inline around a `<br>` emits no edge runs and stays native.
-  it('declines a break inside a padded inline') { expect_bail('<div style="width:400px">x <b style="padding:0 5px">t<br>u</b> y</div>') }
-  it('declines a break inside a bordered inline') { expect_bail('<div style="width:400px">x <b style="border-left:2px solid">t<br>u</b> y</div>') }
-  it('declines a break inside a margined inline') { expect_bail('<div style="width:400px">x <b style="margin:0 5px"><br></b> y</div>') }
   # The classes native answers `\p{L}` / `\p{N}` / `\p{M}` from come from regex-syntax — the same regex the
   # ORACLE writes, parsed rather than reimplemented (`unicode.rs`). But regex-syntax bakes in a UCD snapshot of
   # its own and the engine has another, on separate release trains (Ruby's and Rust std's are two more: rustc

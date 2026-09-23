@@ -1341,12 +1341,15 @@ fn line_layout(
                 }
             }
             RUN_BR => {
-                // …inside an inline with a non-zero OPENING edge (a fragment whose edge the break would strand)
-                // — defer to JS. The walk refuses the same (`br-in-edged-inline`); an inline whose only edge is
-                // its CLOSE breaks like an edgeless one, and its close lands on the line this opens.
-                if open.iter().any(|o| o.0 != 0.0) {
-                    return None;
-                }
+                // The oracle's `<br>` puts every opening edge still pending down on the line it ENDS
+                // (`flushOpenEdges()` outright, then `forceBreak()` — Chrome gives `<span style="padding-left:20px">
+                // <br>b</span>` two fragments, the first that padding), which is exactly what the preserved-newline
+                // arm does: settle the markers waiting on those edges, flush them DIRECT, break. The inline then
+                // continues on the next line with its edge already down, and its CLOSE lands there. This used to
+                // decline any open edge (`br-in-edged-inline` in the walk) as a fragment native could not place;
+                // it never needed to.
+                settle_pending_oofs!();
+                flush_each_open_edge!();
                 break_line!(); // an empty line's box is the bare strut
                 // …and a `<br clear>` moves the flow past the floats it names before the next line opens
                 // (HTML's pre-CSS float break; the oracle's `brClear` / `clearanceY`). The side arrives
