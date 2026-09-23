@@ -25,6 +25,7 @@
 require 'capybara/simulated'
 require 'rack'
 require_relative 'support/session_teardown'
+require_relative 'support/shadow_parity'
 
 RSpec.describe 'display: contents' do
   def page(body)

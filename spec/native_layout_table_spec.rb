@@ -45,6 +45,7 @@
 require 'capybara/simulated'
 require 'rack'
 require_relative 'support/session_teardown'
+require_relative 'support/shadow_parity'
 require_relative 'support/walk_refusals'
 
 RSpec.describe 'native layout table parity', if: ENV.fetch('CSIM_JS_ENGINE', 'v8') == 'v8' do
@@ -64,6 +65,7 @@ RSpec.describe 'native layout table parity', if: ENV.fetch('CSIM_JS_ENGINE', 'v8
     r = run_shadow(body)
     expect(r).to include('ok' => true), "harness bailed: #{r.inspect}"
     expect(r['mismatches']).to eq(0), "mismatch: #{r.inspect}"
+    expect_no_dropped_records(r, body)
   end
 
   # An EMPTY table — `display: table` with nothing in it, which a `::before { content: ""; display: table }`
@@ -732,6 +734,7 @@ RSpec.describe 'native layout table parity', if: ENV.fetch('CSIM_JS_ENGINE', 'v8
         r = run_shadow(%(<div style="position:relative;width:300px;height:200px;overflow:hidden">#{table}<div>after</div></div>))
         expect(r).to include('ok' => true), "#{pos}: harness bailed: #{r.inspect}"
         expect(r['mismatches']).to eq(0), "#{pos}: mismatch: #{r.inspect}"
+        expect_no_dropped_records(r)
       end
     end
   end
@@ -760,6 +763,7 @@ RSpec.describe 'native layout table parity', if: ENV.fetch('CSIM_JS_ENGINE', 'v8
       r = root_run.call(%(<div style="width:300px">#{format(t, 'position:relative')}</div>), '#r')
       expect(r).to include('ok' => true), "#{kind} relative root: #{r.inspect}"
       expect(r['mismatches']).to eq(0), "#{kind} relative root: #{r.inspect}"
+      expect_no_dropped_records(r)
     end
   end
 
@@ -1054,6 +1058,7 @@ RSpec.describe 'native layout table parity', if: ENV.fetch('CSIM_JS_ENGINE', 'v8
     r = run_shadow(body)
     expect(r).to include('ok' => true), "harness bailed: #{r.inspect}"
     expect(r['mismatches']).to eq(0), "mismatch: #{r.inspect}"
+    expect_no_dropped_records(r, body)
     expect(r['nativeIntrinsicGrids']).to be >= 1, "the track took the oracle's contribution: #{r.inspect}"
   end
 
@@ -1385,6 +1390,7 @@ RSpec.describe 'native layout table parity', if: ENV.fetch('CSIM_JS_ENGINE', 'v8
       r = run_shadow(body)
       expect(r).to include('ok' => true), "harness bailed: #{r.inspect}"
       expect(r['mismatches']).to eq(0), "mismatch: #{r.inspect}"
+      expect_no_dropped_records(r, body)
       expect(r['pushedContributions']).to eq(count), "expected the oracle's contribution to be pushed: #{r.inspect}"
     end
 

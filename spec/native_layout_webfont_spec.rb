@@ -6,6 +6,7 @@
 require 'capybara/simulated'
 require 'rack'
 require_relative 'support/session_teardown'
+require_relative 'support/shadow_parity'
 
 RSpec.describe 'native layout web-font parity', if: ENV.fetch('CSIM_JS_ENGINE', 'v8') == 'v8' do
   FONT_TTF   = File.binread(File.expand_path('wpt/fonts/Ahem.ttf', __dir__))
@@ -39,6 +40,7 @@ RSpec.describe 'native layout web-font parity', if: ENV.fetch('CSIM_JS_ENGINE', 
     r = run_shadow(body, **opts)
     expect(r).to include('ok' => true), "harness bailed: #{r.inspect}"
     expect(r['mismatches']).to eq(0), "mismatch: #{r.inspect}"
+    expect_no_dropped_records(r, body)
   end
 
   it 'matches a single-line text block in a TTF web font' do
@@ -72,6 +74,7 @@ RSpec.describe 'native layout web-font parity', if: ENV.fetch('CSIM_JS_ENGINE', 
     r1 = session.evaluate_script('globalThis.__csimLayoutShadowRun()')
     expect(r1).to include('ok' => true), "harness bailed pre-add: #{r1.inspect}"
     expect(r1['mismatches']).to eq(0), "mismatch pre-add: #{r1.inspect}"
+    expect_no_dropped_records(r1)
 
     session.evaluate_script(<<~JS)
       const s = document.createElement('style');
@@ -82,5 +85,6 @@ RSpec.describe 'native layout web-font parity', if: ENV.fetch('CSIM_JS_ENGINE', 
     r2 = session.evaluate_script('globalThis.__csimLayoutShadowRun()')
     expect(r2).to include('ok' => true), "harness bailed post-add: #{r2.inspect}"
     expect(r2['mismatches']).to eq(0), "mismatch post-add (stale native font handle?): #{r2.inspect}"
+    expect_no_dropped_records(r2)
   end
 end

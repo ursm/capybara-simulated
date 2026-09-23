@@ -9,6 +9,7 @@
 require 'capybara/simulated'
 require 'rack'
 require_relative 'support/session_teardown'
+require_relative 'support/shadow_parity'
 require_relative 'support/walk_refusals'
 
 RSpec.describe 'native layout float parity', if: ENV.fetch('CSIM_JS_ENGINE', 'v8') == 'v8' do
@@ -28,6 +29,7 @@ RSpec.describe 'native layout float parity', if: ENV.fetch('CSIM_JS_ENGINE', 'v8
     r = run_shadow(body)
     expect(r).to include('ok' => true), "harness bailed: #{r.inspect}"
     expect(r['mismatches']).to eq(0), "mismatch: #{r.inspect}"
+    expect_no_dropped_records(r, body)
   end
 
   it 'matches a BFC owner containing a left float (clearfix)' do

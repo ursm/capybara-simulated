@@ -7,6 +7,7 @@
 require 'capybara/simulated'
 require 'rack'
 require_relative 'support/session_teardown'
+require_relative 'support/shadow_parity'
 
 RSpec.describe 'native layout nowrap parity', if: ENV.fetch('CSIM_JS_ENGINE', 'v8') == 'v8' do
   def page(body)
@@ -31,6 +32,7 @@ RSpec.describe 'native layout nowrap parity', if: ENV.fetch('CSIM_JS_ENGINE', 'v
       expect(r).to include('ok' => true), "harness bailed: #{r.inspect}"
       expect(r['compared']).to be > 0, "nothing was compared: #{body}: #{r.inspect}"
       expect(r['mismatches']).to eq(0), "mismatch: #{r.inspect}"
+      expect_no_dropped_records(r, body)
       next if chrome_x.nil?
 
       x = session.evaluate_script("document.querySelector('#m').getBoundingClientRect().x")

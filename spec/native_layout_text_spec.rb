@@ -6,6 +6,7 @@
 require 'capybara/simulated'
 require 'rack'
 require_relative 'support/session_teardown'
+require_relative 'support/shadow_parity'
 # …and the enumerator the Unicode drift check asks the engine with.
 require_relative 'support/unicode_classes'
 
@@ -88,6 +89,7 @@ RSpec.describe 'native layout L2 text-block parity', if: ENV.fetch('CSIM_JS_ENGI
       expect(r).to include('ok' => true), "harness bailed: #{body}: #{r.inspect}"
       expect(r['compared']).to be > 0, "nothing was compared: #{body}: #{r.inspect}"
       expect(r['mismatches']).to eq(0), "mismatch: #{body}: #{r.inspect}"
+      expect_no_dropped_records(r, body)
       expect_near(marker_x(session), chrome_x, body, 'x') unless chrome_x.nil?
       expect_near(marker_y(session), chrome_y, body, 'y') unless chrome_y.nil?
       expect_shared(marker_x(session), shared_x, shared_x_chrome, body, 'x') unless shared_x.nil?

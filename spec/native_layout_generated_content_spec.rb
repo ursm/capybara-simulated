@@ -8,6 +8,7 @@
 require 'capybara/simulated'
 require 'rack'
 require_relative 'support/session_teardown'
+require_relative 'support/shadow_parity'
 
 RSpec.describe 'native layout generated-content parity', if: ENV.fetch('CSIM_JS_ENGINE', 'v8') == 'v8' do
   def page(body)
@@ -28,6 +29,7 @@ RSpec.describe 'native layout generated-content parity', if: ENV.fetch('CSIM_JS_
     r = session.evaluate_script('globalThis.__csimLayoutShadowRun()')
     expect(r).to include('ok' => true), "harness bailed: #{body}: #{r.inspect}"
     expect(r['mismatches']).to eq(0), "mismatch: #{body}: #{r.inspect}"
+    expect_no_dropped_records(r, body)
     expect(r['compared']).to eq(boxes), "the pseudo was not a compared box: #{body}: #{r.inspect}"
 
   end

@@ -10,6 +10,7 @@
 require 'capybara/simulated'
 require 'rack'
 require_relative 'support/session_teardown'
+require_relative 'support/shadow_parity'
 require_relative 'support/walk_refusals'
 
 RSpec.describe 'native layout L1 block-flow parity', if: ENV.fetch('CSIM_JS_ENGINE', 'v8') == 'v8' do
@@ -72,6 +73,7 @@ RSpec.describe 'native layout L1 block-flow parity', if: ENV.fetch('CSIM_JS_ENGI
       r = parity(session)
       expect(r).to include('ok' => true), "#{attr}: harness bailed: #{r.inspect}"
       expect(r['mismatches']).to eq(0), "#{attr}: mismatch: #{r.inspect}"
+      expect_no_dropped_records(r)
     end
     # …and the percentage padding resolves against the viewport-wide root, as Chrome's does
     html = %(<!doctype html><html><head><meta charset="utf-8"></head><body style="margin:20px;padding:0 10%"><div id="d">x</div></body></html>)
@@ -92,6 +94,7 @@ RSpec.describe 'native layout L1 block-flow parity', if: ENV.fetch('CSIM_JS_ENGI
     r = parity(session)
     expect(r).to include('ok' => true), "harness bailed: #{r.inspect}"
     expect(r['mismatches']).to eq(0), "mismatch: #{r.inspect}"
+    expect_no_dropped_records(r)
     expect(r['compared']).to be >= 5
   end
 
@@ -106,6 +109,7 @@ RSpec.describe 'native layout L1 block-flow parity', if: ENV.fetch('CSIM_JS_ENGI
     r = parity(session)
     expect(r).to include('ok' => true), "harness bailed: #{r.inspect}"
     expect(r['mismatches']).to eq(0), "mismatch: #{r.inspect}"
+    expect_no_dropped_records(r)
   end
 
   it 'matches complex collapsing: adjacent margins, closed edges, empty block, nesting' do
@@ -124,6 +128,7 @@ RSpec.describe 'native layout L1 block-flow parity', if: ENV.fetch('CSIM_JS_ENGI
     r = parity(session)
     expect(r).to include('ok' => true), "harness bailed: #{r.inspect}"
     expect(r['mismatches']).to eq(0), "mismatch: #{r.inspect}"
+    expect_no_dropped_records(r)
   end
 
   it 'matches declared-zero-height and wrapped collapse-through' do
@@ -138,6 +143,7 @@ RSpec.describe 'native layout L1 block-flow parity', if: ENV.fetch('CSIM_JS_ENGI
     r = parity(session)
     expect(r).to include('ok' => true), "harness bailed: #{r.inspect}"
     expect(r['mismatches']).to eq(0), "mismatch: #{r.inspect}"
+    expect_no_dropped_records(r)
   end
 
   it 'matches a BFC wrapper keeping its child margin inside (no collapse-through the BFC)' do
@@ -153,6 +159,7 @@ RSpec.describe 'native layout L1 block-flow parity', if: ENV.fetch('CSIM_JS_ENGI
     r = parity(session)
     expect(r).to include('ok' => true), "harness bailed: #{r.inspect}"
     expect(r['mismatches']).to eq(0), "mismatch: #{r.inspect}"
+    expect_no_dropped_records(r)
   end
 
   it 'matches percentage and clamped widths' do
@@ -165,6 +172,7 @@ RSpec.describe 'native layout L1 block-flow parity', if: ENV.fetch('CSIM_JS_ENGI
     r = parity(session)
     expect(r).to include('ok' => true), "harness bailed: #{r.inspect}"
     expect(r['mismatches']).to eq(0), "mismatch: #{r.inspect}"
+    expect_no_dropped_records(r)
   end
 
   it 'matches box-sizing:border-box whose border+padding exceed the declared size (border box floored at its edges)' do
@@ -176,6 +184,7 @@ RSpec.describe 'native layout L1 block-flow parity', if: ENV.fetch('CSIM_JS_ENGI
     r = parity(session)
     expect(r).to include('ok' => true), "harness bailed: #{r.inspect}"
     expect(r['mismatches']).to eq(0), "mismatch: #{r.inspect}"
+    expect_no_dropped_records(r)
   end
 
   it 'matches an over-constrained (left AND right) position:relative child under rtl (§9.4.3: right wins)' do
@@ -188,6 +197,7 @@ RSpec.describe 'native layout L1 block-flow parity', if: ENV.fetch('CSIM_JS_ENGI
     r = parity(session)
     expect(r).to include('ok' => true), "harness bailed: #{r.inspect}"
     expect(r['mismatches']).to eq(0), "mismatch: #{r.inspect}"
+    expect_no_dropped_records(r)
   end
 
   it 'matches an rtl block: children start at the inline-start = right edge (r1)' do
@@ -205,6 +215,7 @@ RSpec.describe 'native layout L1 block-flow parity', if: ENV.fetch('CSIM_JS_ENGI
     r = parity(session)
     expect(r).to include('ok' => true), "harness bailed: #{r.inspect}"
     expect(r['mismatches']).to eq(0), "mismatch: #{r.inspect}"
+    expect_no_dropped_records(r)
   end
 
   # An out-of-flow (absolute / fixed) child is removed from flow and REPLAYED at the oracle's resolved box
@@ -216,6 +227,7 @@ RSpec.describe 'native layout L1 block-flow parity', if: ENV.fetch('CSIM_JS_ENGI
     r = parity(session)
     expect(r).to include('ok' => true), "harness bailed: #{r.inspect}"
     expect(r['mismatches']).to eq(0), "mismatch: #{r.inspect}"
+    expect_no_dropped_records(r, body)
   end
 
   def expect_bail(body)
@@ -322,8 +334,10 @@ RSpec.describe 'native layout L1 block-flow parity', if: ENV.fetch('CSIM_JS_ENGI
       [
         # (`white-space-only-block`, not `preserve-white-space-in-mixed-block`: the second retired on
         # 2026-09-23 when the preserving modes went native, and what is left of it is an unreachable drift
-        # guard. This is the same ROUTE — the mixed-block builder naming its own gate — through the reason
-        # that still fires there.)
+        # guard. NOT the same route — `sawPreWs && !hasInline` never enters the mixed-block branch at all,
+        # since `hasInline` is false there — so what this row covers is a gate BESIDE that branch rather
+        # than inside it. Kept for the coverage; the pairing claim above it is about the two
+        # `inline-box-relative-valign` rows, which really are one reason through two routes.)
         ['white-space-only-block',
          '<div style="width:400px;white-space:pre"><p>a</p>   <p>b</p></div>'],
         ['flex-container-unsupported',        %(<div style="width:400px">#{FLEX_COLUMN_WRAP}</div>)],
@@ -451,6 +465,7 @@ RSpec.describe 'native layout L1 block-flow parity', if: ENV.fetch('CSIM_JS_ENGI
       expect(session.evaluate_script("(b => [b.y, b.height])(document.getElementById('t').getBoundingClientRect())")).to eq([y, h]), body
       r = parity(session)
       expect(r['mismatches']).to eq(0), "#{body}: #{r.inspect}" if r['ok']
+      expect_no_dropped_records(r, body)
     end
   end
   it 'collapses whitespace-only inline content between blocks (no anonymous block)' do
@@ -512,34 +527,32 @@ RSpec.describe 'native layout L1 block-flow parity', if: ENV.fetch('CSIM_JS_ENGI
     expect_parity('<div style="position:relative;padding:10%;width:300px"><p>a</p>text<div style="position:absolute;top:5px;left:5px;width:20px;height:20px"></div><p>b</p></div>')
   end
 
-  # …and where the group it sits in COLLAPSES to nothing. That declined until 2026-09-23, on the ground that
-  # the box's static position is the line that group never opened and the ORACLE gives that line things a
-  # block record cannot carry: the group's `text-indent` where the box opens one (11), and the alignment
-  # shift of whatever LATER line eventually closes, the entry sitting in `lineStatics` until one does. The
-  # refusal's own note said "only 23 of these 342 shapes actually diverge" and that the container path
-  # already wrote two of the three fields it would need. Re-measured with it lifted: all 342 lay out, NONE
-  # diverges (batched or not), and each of the three named hazards lands where the oracle puts it. The third
-  # field had arrived and nothing re-asked.
+  # …and it DECLINES where the group it sits in collapses to nothing. The box's static position is the line
+  # that group never opened, and the ORACLE gives that line things a block record cannot carry: the group's
+  # `text-indent` where the box opens one (11), and the alignment shift of whatever LATER line eventually
+  # closes, the entry sitting in `lineStatics` until one does (130.8 in a centred 300px block, the shift of a
+  # `<b>` line two blocks further on — Chrome says 150, the centre of the empty line the box actually sits on,
+  # so the oracle is on the wrong side of this and 130.8 is NOT the figure to port). A float band is the third
+  # (80, which both engines and Chrome agree on). Emitting it against the block gets the container's cursor
+  # and none of the three.
+  #
+  # THE REFUSAL WAS LIFTED ON 2026-09-23 AND PUT BACK THE SAME DAY, and what that cost is the reason this
+  # comment is long. An audit re-measured it, read "342 shapes lay out, 0 mismatch" and called the gate stale.
+  # The rollback that precedes it had already spliced those records off the stream and nothing re-emits them,
+  # so lifting it placed no box: it DROPPED 372 of them and reported `ok: true, mismatches: 0`. Three sweeps
+  # and the parity spec that replaced this one all read clean, because a record that is not there compares as
+  # nothing. `droppedRecords` exists now (see `spec/support/shadow_parity.rb`) and this example would have
+  # failed on it.
   #
   # A group collapses for five reasons, not one — `hasContent` is set by text, content whitespace, a `<br>`,
   # an atomic or an edged inline's close — so BOTH the everyday routes are here: whitespace around the box,
-  # and the box ALONE after the last block, which is where a positioned dropdown or tooltip is written. The
-  # three figures the refusal named are pinned beside them, since those are the reason it existed.
-  it 'places an out-of-flow child of a mixed block whose group collapses' do
+  # and the box ALONE after the last block, which is where a positioned dropdown or tooltip is written.
+  it 'declines an out-of-flow child of a mixed block whose group collapses' do
     [
       '<div style="position:relative;width:300px"><p>a</p> <div style="position:absolute;width:20px;height:20px"></div> <p>b</p>text<p>c</p></div>',
       '<div style="position:relative;width:300px"><p>a</p>text<p>b</p><div style="position:absolute;width:20px;height:20px"></div></div>'
-    ].each { |body| expect_parity(body) }
-    oof = '<i id="o" style="position:absolute;width:5px;height:5px"></i>'
-    {
-      %(<div style="width:300px;font:16px monospace;text-indent:11px hanging"><div>blk</div>#{oof}tail<div>b</div></div>) => 11,
-      %(<div style="width:300px;font:16px monospace;text-align:center"><div>blk</div>#{oof}<div>b</div><b>bold</b></div>) => 130.8,
-      %(<div style="width:300px;font:16px monospace"><div style="float:left;width:80px;height:40px"></div><div>blk</div>#{oof}<div>b</div>tail</div>) => 80
-    }.each do |body, x|
-      expect_parity(body)
-      session = simulated_session(page(body))
-      session.visit '/'
-      expect(session.evaluate_script("document.getElementById('o').getBoundingClientRect().x")).to be_within(0.05).of(x), body
+    ].each do |body|
+      expect_walk_declines(body, 'oof-in-collapsed-group')
     end
   end
 
@@ -557,11 +570,10 @@ RSpec.describe 'native layout L1 block-flow parity', if: ENV.fetch('CSIM_JS_ENGI
     # …and NOTHING declines here any more. The guard that is left is a DRIFT check between cascade.js's
     # `WS_VALUES` and layout.js's `WS_MODE`, and it is unreachable by construction: `ownWhiteSpace` answers
     # null for a value outside the first list — a vendor `-moz-pre-wrap` included, which then INHERITS — so
-    # `whiteSpaceOf` can only ever hand this a member of both.
-    session = simulated_session(page('<div style="width:300px;white-space:-moz-pre-wrap">text<div style="height:20px">block</div>more</div>'))
-    session.visit '/'
-    expect(session.evaluate_script("getComputedStyle(document.querySelector('div')).whiteSpace")).to eq('-moz-pre-wrap')
-    expect(parity(session)).to include('ok' => true, 'mismatches' => 0)
+    # `whiteSpaceOf` can only ever hand this a member of both. The LAYOUT is what is asserted here; this
+    # engine's `getComputedStyle` reports `-moz-pre-wrap` where Chrome reports `normal`, and that is a
+    # cascade divergence with no business being pinned by a layout spec.
+    expect_parity('<div style="width:300px;white-space:-moz-pre-wrap">text<div style="height:20px">block</div>more</div>')
   end
   # Whitespace-only direct text between a preserve block's block children is line content (the oracle lays out
   # a line box for it), which a plain block-container record drops — decline (review finding, Phase 2b).
@@ -690,6 +702,7 @@ RSpec.describe 'native layout L1 block-flow parity', if: ENV.fetch('CSIM_JS_ENGI
     expect(r).to include('ok' => true), "harness bailed: #{r.inspect}"
     expect(r['compared']).to be > 0, "nothing was compared: #{r.inspect}"
     expect(r['mismatches']).to eq(0), "mismatch: #{r.inspect}"
+    expect_no_dropped_records(r, body)
     expect(r['nativeOutOfFlow']).to be >= count, "the out-of-flow box was replayed, not placed natively: #{r.inspect}"
   end
 
@@ -700,6 +713,7 @@ RSpec.describe 'native layout L1 block-flow parity', if: ENV.fetch('CSIM_JS_ENGI
     expect(r).to include('ok' => true), "harness bailed: #{r.inspect}"
     expect(r['compared']).to be > 0, "nothing was compared: #{r.inspect}"
     expect(r['mismatches']).to eq(0), "mismatch: #{r.inspect}"
+    expect_no_dropped_records(r, body)
     expect(r['nativeOutOfFlow']).to eq(0), "expected the oracle's box to be replayed: #{r.inspect}"
   end
 
