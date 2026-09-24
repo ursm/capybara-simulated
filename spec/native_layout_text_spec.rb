@@ -522,6 +522,18 @@ RSpec.describe 'native layout L2 text-block parity', if: ENV.fetch('CSIM_JS_ENGI
       chrome_y: 13
     )
   end
+  # …and an inline box that HOLDS content takes it where it OPENS too, which is not where its content is when a
+  # forced break comes first: a `pre-line` newline opening the box ends the indented line, and the oracle's
+  # measure has taken the indent already (50 under 50px, and Chrome). Native met no box there — an edgeless inline
+  # emitted no run — and said 19.2, the width of `aa`; every inline box is an OPEN / CLOSE pair now.
+  {
+    '<span>&#10;aa</span> under pre-line'                   => ['<div style="float:left;white-space:pre-line;text-indent:50px"><span>&#10;aa</span></div>', 50],
+    'a float, then a pre-line newline, in an inline' => ['<div style="float:left;text-indent:30px"><span><i style="float:left;width:5px;height:5px"></i><span style="white-space:pre-line">&#10;aa</span></span></div>', 35]
+  }.each do |name, (block, chrome_x)|
+    it "takes the indent at an inline box's open before a forced break: #{name}" do
+      expect_parity(%(<div style="font:16px monospace">#{block}<b id="m" style="display:inline-block;width:4px;height:4px"></b></div>), chrome_x)
+    end
+  end
   # A kept group of an EMPTY inline holding only white space is zero-height and lets a margin through, as the group
   # that collapsed did: the child's 50px top margin still collapses with the 20px paragraph margin above it
   # (Chrome: the block at 92, 50 below the paragraph's 42).

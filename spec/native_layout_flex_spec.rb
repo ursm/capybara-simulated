@@ -635,6 +635,19 @@ RSpec.describe 'native layout flex parity', if: ENV.fetch('CSIM_JS_ENGINE', 'v8'
     expect(c.values_at(0, 2, 3)).to eq([100, 20, 20])
     expect_shared_gap(c[1], shared: 0, chrome: 20, what: "#{body}: c's y")
   end
+  # …and so is one the oracle laid out with no DEFINITE height at all — a wrapping column inside a definite-height
+  # column, pushed (its items' `min()` widths keep it off native sizing): the record carries its final box, which
+  # native took for a declared height every line justified within (the third item at 10, the oracle 0). Only a
+  # definite content height is one extent for every line. SHARED with Chrome's justify-in-the-box, which says 10.
+  it 'justifies each line of a pushed wrapping column with no definite height on its own' do
+    item = '<div style="width:30px;height:20px"><div style="width:min(50%,10px);height:2px"></div></div>'
+    body = '<div style="display:flex;flex-direction:column;height:120px"><div id="c" style="display:flex;flex-direction:column;flex-wrap:wrap;' \
+           "width:70px;max-height:45px;justify-content:center\">#{item * 3}</div></div>"
+    expect(run_shadow(body)).to include('ok' => true, 'mismatches' => 0)
+    a, b, c = item_boxes(body)
+    expect([a, b]).to eq([[0, 0, 30, 20], [0, 20, 30, 20]])   # Chrome
+    expect_shared_gap(c[1], shared: 0, chrome: 10, what: "#{body}: the third item's y")
+  end
   # A min-height ABOVE the max-height wins (CSS 2 §10.7): the column has room for all three, one line of 60.
   it 'lets a min-height above the max-height set the capacity a wrapping column breaks against' do
     body = '<div style="display:flex;flex-direction:column;flex-wrap:wrap;max-height:30px;min-height:60px;width:200px"><div style="width:20px;height:20px"></div>' \

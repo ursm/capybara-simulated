@@ -4255,9 +4255,11 @@ fn measure_flex(
         let cs = line_cs[li];
         let line_main: f64 = line.iter().map(|&p| mo[p]).sum::<f64>() + gap * line.len().saturating_sub(1) as f64;
         // (…an auto-height column's line justifies within its OWN extent — see `col_extent`.)
-        // (A PUSHED auto-height column — its record's height overwritten by its final box — is auto here too:
-        // `item_auto_height`, as the content-extent arm below reads it.)
-        let line_extent = if !main_is_x && (is_auto(n.height) || n.item_auto_height) { col_extent(line_main) } else { content_main };
+        // (…and so does a PUSHED one whose record carries its final box as a height it never declared — an auto-height
+        // flex item's (`item_auto_height`), or one the oracle laid out with no definite height at all
+        // (`pushed_h_indefinite`, a wrapping column inside a definite-height column): only a DEFINITE content height
+        // is the one extent every line justifies within, the question `definite_content_h` answers.)
+        let line_extent = if !main_is_x && n.definite_content_h().is_none() { col_extent(line_main) } else { content_main };
         let free = line_extent - line_main;
         // Auto main-axis margins take the line's free space (free/autos each) BEFORE justify-content, which
         // then yields — but only when there IS free space; with none they resolve to 0 and justify runs.
