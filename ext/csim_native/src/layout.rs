@@ -621,7 +621,8 @@ impl Input {
     // agree, because this figure is the basis the cell's own PERCENTAGE-height descendants resolve against on its
     // second pass: a `max-height: 20px` cell in a 200px table hands its `height: 50%` child a basis of 97, as the
     // oracle and Chrome both say, not 20. A cell in a VERTICAL writing mode is the other way round — its height
-    // is its inline axis, and its min/max-height clamp it (80, not its 18px line).
+    // is its inline axis, and its min/max-height clamp it (80, not its 18px line; Chrome ignores the max under a
+    // declared height, which both engines share).
     fn definite_content_h(&self) -> Option<f64> {
         if is_auto(self.height) || self.item_auto_height || self.pushed_h_indefinite {
             return None;

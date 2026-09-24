@@ -54,11 +54,12 @@ RSpec.describe 'native layout table parity', if: ENV.fetch('CSIM_JS_ENGINE', 'v8
     Rack::Builder.new { run ->(_env) { [200, {'content-type' => 'text/html; charset=utf-8'}, [html]] } }.to_app
   end
 
-  def run_shadow(body)
+  # `opts` is the second argument of `__csimLayoutShadowRun`, as JS source (`{noOracle: true}` hides the oracle's stamps).
+  def run_shadow(body, opts = '{}')
     session = simulated_session(page(body))
     session.visit '/'
     session.evaluate_script('document.body.offsetHeight')
-    session.evaluate_script('globalThis.__csimLayoutShadowRun()')
+    session.evaluate_script("globalThis.__csimLayoutShadowRun(undefined, #{opts})")
   end
 
   def expect_parity(body)
@@ -1172,6 +1173,12 @@ RSpec.describe 'native layout table parity', if: ENV.fetch('CSIM_JS_ENGINE', 'v8
       body = '<table style="border-spacing:0"><tr><td id="m" style="padding:0;writing-mode:vertical-lr;min-height:80px">aa bb</td><td>x</td></tr></table>'
       expect_parity(body)
       expect(laid_out_rect(body)[3]).to eq(80)
+      # …and its max-height with it, where Chrome ignores one under a declared height — the table's block-axis max,
+      # which an ORTHOGONAL cell is the one to tell apart from its own (both engines 90, Chrome 200; the orthogonal
+      # cell is a backlog item of its own: Chrome also applies its min/max-width, which both engines skip)
+      capped = body.sub('min-height:80px', 'height:200px;max-height:90px')
+      expect_parity(capped)
+      expect_shared_gap(laid_out_rect(capped)[3], shared: 90, chrome: 200, what: "#{capped}: #m height")
       expect_parity('<table style="border-spacing:4px"><tr><td style="height:30px;box-sizing:border-box;padding:6px">x</td><td>y</td></tr></table>')
       expect_parity('<table style="border-spacing:4px"><tr><td><div style="height:10px;margin:5px"></div><div style="height:20px"></div></td><td style="height:50px">x</td></tr></table>')
     end
@@ -1476,12 +1483,15 @@ RSpec.describe 'native layout table parity', if: ENV.fetch('CSIM_JS_ENGINE', 'v8
       body = '<div style="width:200px;font:16px monospace"><div id="m" style="display:table-cell;width:50%">aa bb</div></div>'
       expect_parity(body)
       expect_shared_gap(laid_out_rect(body)[2], shared: 100, chrome: 96.03, what: "#{body}: #m width")
-      session = simulated_session(page(body))
-      session.visit '/'
-      session.evaluate_script('document.body.offsetHeight')
-      r = session.evaluate_script('globalThis.__csimLayoutShadowRun(undefined, {noOracle: true})')
-      expect(r).to include('ok' => true, 'mismatches' => 0)
-      expect(r['oracleReads'].to_h.keys.grep_v(/\(handed over\)\z/)).to be_empty, r.inspect
+      # …with no oracle box read — and an orphan ROW native lays out itself (it holds no in-flow item) likewise
+      [
+        body,
+        '<div style="width:200px"><div style="display:table-row;padding:10%;width:50%"></div><p>after</p></div>'
+      ].each do |oracle_free|
+        r = run_shadow(oracle_free, '{noOracle: true}')
+        expect(r).to include('ok' => true, 'mismatches' => 0)
+        expect(r['oracleReads'].to_h.keys.grep_v(/\(handed over\)\z/)).to be_empty, r.inspect
+      end
       %w[table-row-group table-header-group table-caption].each do |display|
         expect_parity(%(<div style="width:200px;font:16px monospace"><div style="display:#{display}">aa bb</div><p>after</p></div>))
       end

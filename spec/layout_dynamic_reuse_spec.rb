@@ -431,6 +431,21 @@ RSpec.describe 'layout reuse across dynamic style state' do
       JS
       expect(hs).to eq([80, 40, 80])
 
+      # …and a cell's own min/max-height, where they apply, clamp the reused answer as they clamp a fresh one: a
+      # VERTICAL cell's height is its inline axis, and its `min-height: 80px` held its row at 80 — on a fresh page
+      # and in Chrome — but a reuse answered its 24px content and the row fell to the sibling's 20.
+      vertical = body.sub('height:80px', 'height:20px')
+                     .sub('<td id="a" style="padding:0">', '<td id="a" style="padding:0;writing-mode:vertical-lr;min-height:80px">')
+      v = session_for('body{font:16px monospace}', vertical)
+      value, diff = stats_around(v, <<~JS)
+        const h = () => document.getElementById('t').getBoundingClientRect().height;
+        const out = [h()];
+        for (const px of ['30px', '20px']) { document.getElementById('b').style.height = px; out.push(h()); }
+        return out;
+      JS
+      expect(value).to eq([80, 80, 80])
+      expect(diff['hit']).to be > 0
+
       # …and a box ANCHORED to a cell by its insets is placed against the ROW-tall box, which only the flush
       # inside a real layout of the cell does — so such a cell is laid out again rather than reused, or the
       # overlay stays at the bottom of the row the cell used to fill. Chrome: `bottom: 0` at 30, then 90

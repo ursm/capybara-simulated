@@ -534,7 +534,8 @@ RSpec.describe 'native layout L1 block-flow parity', if: ENV.fetch('CSIM_JS_ENGI
   # stayed at 0), so a centred or right-aligned block declined (`oof-in-collapsed-group`, 1,316 of the sweeps). An
   # empty line moves nothing that waits on it now, in `breakLine` as in a text block of no line. Chrome agrees for a
   # block-level box — x 0 below — and centres an INLINE-level one (150 in a 300px block): it tells the two apart by
-  # the display the box had before it was blockified, which neither engine keeps. Shared, and pinned.
+  # the display the box had before it was blockified, which neither engine asks yet (the cascade still has it).
+  # Shared, and pinned.
   #
   # THE REFUSAL WAS LIFTED ON 2026-09-23 AND PUT BACK THE SAME DAY, and what that cost is why a REPLAYED box keeps
   # the group too. An audit re-measured it, read "342 shapes lay out, 0 mismatch" and called the gate stale. The
