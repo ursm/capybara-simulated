@@ -869,6 +869,39 @@ RSpec.describe 'native layout inline-atomic parity', if: ENV.fetch('CSIM_JS_ENGI
   # oracle's box marshalled onto the record — because an atomic's width is its line's SHRINK-TO-FIT and the
   # walk had no intrinsic measure to offer for one. It has both now, so the display alone decides nothing:
   # three gates that read it (`nlAtomicNative`, `nlFlexSupported`, `nlGridSupported`) admit an atomic one.
+  # A `display: inline` box holding a BLOCK child is an ATOMIC to the oracle — `isContinuedInline` refuses to
+  # fragment it, so the pen lays it out shrink-to-fit on the line exactly as an `inline-block` — and native lays it
+  # out the same way since 2026-09-24 (it declined as `block-level-box-in-inline-content`, 1,229 sweep shapes).
+  # SHARED with Chrome, which SPLITS the box around the block instead (CSS 2.1 §9.2.1.1): the block alone at full
+  # width on the next line (x 0, y 22, 200 wide), the text before and after in anonymous blocks around it.
+  describe 'an inline holding a block child' do
+    it 'is the atomic the oracle makes of it (shared: Chrome splits the box around the block)' do
+      body = '<div style="width:200px;font:16px monospace">text <span><div id="b" style="height:5px">b</div></span> after</div>'
+      expect_native_atomic(body)
+      rect = rendered_rect(body, '#b')
+      expect_shared_gap(rect['x'], shared: 48, chrome: 0, what: "#{body}: the block's x")
+      expect_shared_gap(rect['width'], shared: 9.6, chrome: 200, what: "#{body}: the block's width")
+      expect_native_atomic('<div style="width:200px;font:16px monospace"><a href="#"><div style="height:30px">card</div></a></div>')
+      expect_native_atomic('<div style="width:200px;font:16px monospace">aa <span style="padding:0 4px;position:relative;left:3px">bb<div style="margin:7px 0">x</div>cc</span> dd</div>')
+      # …and MEASURED so, as a float's or a `max-content` box's content
+      expect_native_atomic('<div style="font:16px monospace;width:10px"><div style="float:left">aa <span>bb<p>para</p></span></div></div>')
+    end
+    # The atomic is no BFC of its own, so what it shares with the block around it the oracle keeps and native (which
+    # lays it out as an `inline-block`) would not: a float inside it lands in the outer band and wraps the line after
+    # it, and a `clear` inside it clears the floats outside. Both still decline.
+    it 'declines where the atomic would share the float context around it' do
+      {
+        '<div style="width:200px;font:16px monospace">aaaa <span><div><div style="float:right;width:60px">bb</div>z</div></span> t uu</div>' => 'a float in it',
+        '<div style="width:200px;font:16px monospace"><div style="float:left;width:30px;height:80px"></div>aa <span><div style="clear:left">bb</div></span> t</div>' => 'a clear in it'
+      }.each do |body, what|
+        r = run_shadow(body)
+        expect(r).to include('ok' => false, 'reason' => 'block-level-box-in-inline-content'), "#{what}: #{r.inspect}"
+      end
+      # …and the same content in a box that IS a BFC of its own goes native.
+      expect_native_atomic('<div style="width:200px;font:16px monospace">aaaa <span><div style="display:flow-root"><div style="float:right;width:60px">bb</div>z</div></span> t uu</div>')
+    end
+  end
+
   describe 'an inline-flex / inline-grid is an atomic native lays out' do
     # `nativeAtomics` is the whole point — parity alone cannot fail here, because the PUSHED path was already
     # parity-clean. What changed is which engine produced the box.
