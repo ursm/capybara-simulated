@@ -181,10 +181,8 @@ RSpec.describe 'native layout replaced-leaf parity', if: ENV.fetch('CSIM_JS_ENGI
     # sweep).
     it 'walks a shrink-wrapping button as a measured subtree' do
       # …an indented one included now that `text_intrinsic` takes the indent; a measure-only gap that REMAINS
-      # still declines. That gap is `WalkRefusals::UNMEASURABLE` (a non-wrapping mixed block) since 2026-09-23 —
-      # it was a whitespace-only edged inline before that (never a measure gap: the refusal guarded a line rule
-      # native got wrong), `white-space: break-spaces` until its measure went native, and a grid holding a bare
-      # run of text before that, until `gridItems` gave the run the anonymous ITEM box §4 asks for.
+      # still declines. That gap is `WalkRefusals::UNMEASURABLE` — a flex whose main-axis gap is a percentage —
+      # whose earlier shapes (see there) each retired as native learned their measure.
       ['<div style="width:400px"><button style="display:block;text-indent:30px">Hi</button></div>',
        '<div style="width:400px"><button style="display:block"><div style="text-indent:40px">Hi</div></button></div>',
        '<table style="border-spacing:0"><tr><td style="padding:0"><button style="display:block;text-indent:30px">Click me</button></td><td style="padding:0">b</td></tr></table>'].each do |body|

@@ -1029,8 +1029,11 @@ RSpec.describe 'native layout flex parity', if: ENV.fetch('CSIM_JS_ENGINE', 'v8'
       end
       # …and an item whose own measure native lacks a rule for still pushes, so the counter is not always 1.
       # (`white-space: break-spaces` was this shape until 2026-09-23, when its measure went native.)
+      # (The fixture holds flex containers of its own, which lay out natively whatever the row around them does,
+      # so the row's own contribution is what the count shows BEYOND the fixture's.)
+      own = run_shadow(%(<div style="width:400px">#{WalkRefusals::UNMEASURABLE}</div>))['nativeFlexRows']
       r = run_shadow(%(<div style="#{base}"><div style="display:grid;grid-template-columns:1fr min-content"><div>g1</div><div>#{WalkRefusals::UNMEASURABLE}</div></div><div style="font-size:32px">BIG</div></div>))
-      expect(r).to include('ok' => true, 'mismatches' => 0, 'nativeFlexRows' => 0), r.inspect
+      expect(r).to include('ok' => true, 'mismatches' => 0, 'nativeFlexRows' => own), r.inspect
     end
     # Review findings, oracle side (native and Chrome agreed): a block holding both inline content and block
     # children reads whichever comes first / last DOWN THE FLOW; a `position: relative` child's offset moves the

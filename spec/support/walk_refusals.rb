@@ -36,19 +36,19 @@ module WalkRefusals
 
   # …and a separate cause, for the routes that MEASURE rather than lay out: content whose intrinsic width
   # native has no rule for, which every shrink-to-fit route has to refuse or push while the walk still lays the
-  # same content out when it is handed a width. A NON-WRAPPING block holding both text and a block child is
-  # that shape: the oracle measures such a block as the ONE unbreakable token its whole content forms, block
-  # children included, which the children's own records cannot reproduce — `nlIntrinsicMeasurableOf`'s last
-  # line (`!(hasBlock && NON_WRAPPING_WS.has(ws))`). The refusal is UNNAMED (it surfaces as the asker's
-  # `shrink-to-fit-child-unmeasurable`), which is why it is written out here rather than pointed at a reason.
-  # It is the FOURTH shape to hold the role. An `inline-grid` over bare text held it until `gridItems` gave the
-  # run the anonymous item §4 asks for (2026-09-22), `white-space: break-spaces` until its measure went native
-  # (2026-09-23), and then an EDGED inline holding nothing but white space, until the same day — that one was
-  # never a measure gap at all: both engines measured it alike, and the refusal was guarding a LINE rule native
-  # got wrong (an opening edge alone on a line counted as content a break could leave behind). A replacement
-  # has to be FOUND, by asking which refusals the measure gate makes that the walk does not: a soft hyphen
-  # under `break-spaces`, which the sweeps turned up, is refused by the WALK as well, so a route handed one
-  # declines outright instead of taking the fallback the specs hold it to.
+  # same content out when it is handed a width. A flex container whose MAIN-axis gap is a PERCENTAGE along the
+  # physical x axis is that shape: the gap resolves against the container's width, which an intrinsic measure
+  # does not have, and `nlFlexIntrinsicMeasurable` refuses it (`axisGap(…, null) !== axisGap(…, 1)`) — where the
+  # walk, handed a width, lays it out. TWO of them, because which one's main axis is x depends on the writing
+  # mode the fixture lands in: a row flex's in a horizontal flow, a column flex's in a vertical one. They lay
+  # out natively themselves, so a route's flex-row COUNT sees them (the flex spec subtracts the fixture's own).
+  # The refusal is UNNAMED (it surfaces as the asker's `shrink-to-fit-child-unmeasurable`).
+  # It is the FIFTH shape to hold the role — an `inline-grid` over bare text (2026-09-22), `white-space:
+  # break-spaces`, a whitespace-only EDGED inline (a line rule, never a measure gap), and a NON-WRAPPING mixed
+  # block (native pins a `nowrap` / `pre` block container's min to its max now, as the oracle does) all retired
+  # one after another. A replacement has to be FOUND, by asking which refusals the measure gate makes that the
+  # walk does not: a soft hyphen under `break-spaces` and a preserved CR are refused by the WALK as well, so a
+  # route handed one declines outright instead of taking the fallback the specs hold it to.
   # If this one retires too, the cause is still real: find the next shape, do not delete the arm.
-  UNMEASURABLE = '<div style="white-space:nowrap">a<div>b</div></div>'
+  UNMEASURABLE = '<div style="display:flex;column-gap:10%"><div>a</div><div>b</div></div><div style="display:flex;flex-direction:column;row-gap:10%"><div>a</div><div>b</div></div>'
 end

@@ -579,15 +579,11 @@ RSpec.describe 'native layout inline-atomic parity', if: ENV.fetch('CSIM_JS_ENGI
       # laid out with the atomic pushed rather than declined. (A FLOAT and a STRETCHED out-of-flow box never
       # needed a measure at all.) The one route with no fallback is a vertical writing mode's block child, whose
       # width IS its content's: that still declines.
-      # …an atomic whose own MEASURE native lacks a rule for: a NON-WRAPPING block holding text and a block
-      # child, which the oracle measures as one unbreakable token (`WalkRefusals::UNMEASURABLE`). The atomic is
-      # otherwise the same box with the same content as the control below, so what the counters show is that
-      # content and nothing else.
-      # The cause has changed hands three times: `display:inline-grid` over bare text retired 2026-09-22 when
-      # `gridItems` made a contiguous run of text an anonymous ITEM (§4), `white-space: break-spaces` retired
-      # 2026-09-23 when `text_intrinsic`'s mode table learned its measure, and a whitespace-only EDGED inline
-      # the same day, when native learned an opening edge is not content a break may leave behind. Find the
-      # next shape when this one retires; the cause is real either way.
+      # …an atomic whose own MEASURE native lacks a rule for: a flex whose main-axis gap is a percentage, which
+      # an intrinsic measure has no width to resolve (`WalkRefusals::UNMEASURABLE`). The atomic is otherwise the
+      # same box with the same content as the control below, so what the counters show is that content and
+      # nothing else. The cause has changed hands four times (see `WalkRefusals`); find the next shape when this
+      # one retires — the cause is real either way.
       # The atomic's own CONTENT is what the substitution swaps now (it was the atomic's `style` while the
       # cause was a `white-space`), so the fallback shape and its control are the same box either way.
       unmeasurable = WalkRefusals::UNMEASURABLE

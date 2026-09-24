@@ -434,9 +434,15 @@ RSpec.describe 'native layout grid parity', if: ENV.fetch('CSIM_JS_ENGINE', 'v8'
       expect_native_intrinsic(%(<div style="#{two_auto}"><div style="display:flex"><div style="padding:0 10%;min-width:50px;width:20px;height:10px"></div></div><div style="height:10px">b</div></div>))
       expect_native_intrinsic(%(<div style="#{two_auto}"><div><table style="padding:0 10%"><tr><td>hello</td></tr></table></div><div style="height:10px">b</div></div>))
     end
-    it 'falls back for a nowrap / pre block container (the oracle pins the whole box, children included)' do
-      expect_resolved_fallback(%(<div style="#{two_auto}"><div style="white-space:nowrap"><p style="margin:0">block child under nowrap</p></div><div style="height:10px">b</div></div>))
-      expect_resolved_fallback(%(<div style="#{two_auto}"><div style="white-space:pre"><p style="margin:0">block child under pre</p></div><div style="height:10px">b</div></div>))
+    # A nowrap / pre block CONTAINER is one unbreakable token, its children included — the oracle's `min = max` —
+    # and native pins it the same way now (its record carries the container's own `white-space`), where these fell
+    # back to the oracle's resolved contribution until 2026-09-24. A float pair and a `white-space: normal` child
+    # are the shapes a pin reaches that the children's own pins do not.
+    it 'measures a nowrap / pre block container itself, pinning the whole box as the oracle does' do
+      expect_native_intrinsic(%(<div style="#{two_auto}"><div style="white-space:nowrap"><p style="margin:0">block child under nowrap</p></div><div style="height:10px">b</div></div>))
+      expect_native_intrinsic(%(<div style="#{two_auto}"><div style="white-space:pre"><p style="margin:0">block child under pre</p></div><div style="height:10px">b</div></div>))
+      expect_native_intrinsic(%(<div style="#{two_auto}"><div style="white-space:nowrap"><p style="margin:0;white-space:normal">a normal child under nowrap</p></div><div style="height:10px">b</div></div>))
+      expect_native_intrinsic(%(<div style="#{two_auto}"><div style="white-space:nowrap"><div style="float:left;width:30px;height:5px"></div><div style="float:left;width:40px;height:5px"></div></div><div style="height:10px">b</div></div>))
     end
     it 'puts an edged inline\'s open / close edges on the line and in the word, taking the pending space at its open' do
       expect_native_intrinsic(%(<div style="#{mc_auto}"><div>with <span style="padding:0 8px">padded span</span> here</div><div>b</div></div>))

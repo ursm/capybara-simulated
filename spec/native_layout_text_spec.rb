@@ -389,6 +389,41 @@ RSpec.describe 'native layout L2 text-block parity', if: ENV.fetch('CSIM_JS_ENGI
                   %(<b id="m" style="display:inline-block;width:4px;height:4px"></b>), chrome_y: 32)
   end
 
+  # A NON-WRAPPING block container is one unbreakable token whatever it holds — the oracle ends its measure with
+  # `min = max` for a `nowrap` / `pre` box — and native pins it the same way now, so a `nowrap` block holding text
+  # and a block child is MEASURED where the walk declined every shrink-to-fit asker around it (216 `wsonly`
+  # shapes, and `WalkRefusals::UNMEASURABLE` until now). A float in a 10px block shrinks to its min-content, which
+  # the pin makes its max: the marker after it goes below (0, 40), as in Chrome.
+  {
+    'at its max-content'  => ['', 48.015625, 13],
+    'squeezed to its min' => [';width:10px', 0, 40]
+  }.each do |name, (outer, chrome_x, chrome_y)|
+    it "measures a non-wrapping block holding a block child: #{name}" do
+      expect_parity(
+        %(<div style="font:16px monospace#{outer}"><div style="float:left;white-space:nowrap">aa bb<div style="width:5px;height:5px"></div></div><b id="m" style="display:inline-block;width:4px;height:4px"></b></div>),
+        chrome_x,
+        chrome_y: chrome_y
+      )
+    end
+  end
+  # …and its FLOATS pinned with it, which Chrome does not do: `white-space` is about inline content, and two floats
+  # in a `nowrap` float still stack in a 10px block (Chrome 40 wide; both engines 70). Shared, recorded.
+  it 'pins a non-wrapping block\'s floats to one line (shared)' do
+    expect_parity(
+      '<div style="font:16px monospace;width:10px"><div style="float:left;white-space:nowrap"><div style="float:left;width:30px;height:5px"></div>' \
+      '<div style="float:left;width:40px;height:5px"></div></div><b id="m" style="display:inline-block;width:4px;height:4px"></b></div>',
+      0,
+      shared_y:        18,
+      shared_y_chrome: 23
+    )
+  end
+  # A CR is a collapsible space under a collapsing mode (CSS Text 3 §4.1.1), and both engines lay it out as one;
+  # only the MEASURE refused it — native's intrinsic walk and the gate asking it with `preserved` regardless of the
+  # element's mode — so every shrink-to-fit asker around `aa&#13;bb` declined. It breaks there at min-content.
+  it 'measures a CR under a collapsing white-space as a space' do
+    expect_parity('<div style="font:16px monospace;width:10px"><div style="float:left">aa&#13;bb</div><b id="m" style="display:inline-block;width:4px;height:4px"></b></div>', 0, chrome_y: 57)
+  end
+
   # AN EDGE IS NOT CONTENT A BREAK MAY LEAVE BEHIND. The oracle keeps two questions about a line apart —
   # `linePlaced` (anything went down on it, an edge included) and `lineHasContent` (something a break may
   # leave behind) — and every break-before test asks the second. Native asked one flag for both, so an opening

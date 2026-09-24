@@ -5753,7 +5753,17 @@ fn content_intrinsic(i: usize, inputs: &[Cell<Input>], runs: &[Run], run_texts: 
                 min = min.max(cmin + m);
                 max = max.max(cmax + m);
             }
-            Some((min, max.max(line)))
+            let max = max.max(line);
+            // …and a NON-WRAPPING block container is ONE unbreakable token whatever it holds, its block children
+            // and its floats' line included: the oracle ends `contentIntrinsicWidths` with `min = max` for a
+            // `nowrap` / `pre` box that does not blockify (a flex container's items are blocks of their own, so it
+            // pins nothing). Each child already pinned its OWN content, but a float packing beside another, or a
+            // child that declares `white-space: normal`, did not — and the walk declined every such box, a
+            // `nowrap` block holding text and a block child among them, as unmeasurable.
+            if n.display == DISPLAY_BLOCK && matches!(n.ws_mode, 1 | 2) {
+                return Some((max, max));
+            }
+            Some((min, max))
         }
         _ => None,
     }
@@ -6042,8 +6052,8 @@ fn text_intrinsic(runs: &[Run], run_texts: &[Option<Vec<u16>>], ws_mode: u8, ind
                         while i < text.len() && is_ws_u16(text[i]) {
                             if text[i] == 0x0A {
                                 nl += 1;
-                            } else if text[i] != 0x20 && text[i] != 0x09 {
-                                return None; // \r / \f — not modelled
+                            } else if preserve && text[i] != 0x20 && text[i] != 0x09 {
+                                return None; // a PRESERVED \r / \f — not modelled (a collapsing mode makes it a space)
                             }
                             i += 1;
                         }
