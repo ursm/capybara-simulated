@@ -582,33 +582,40 @@ RSpec.describe 'native layout L2 text-block parity', if: ENV.fetch('CSIM_JS_ENGI
       chrome_y: 35
     )
   end
-  # …and a collapsible space the flow PLACES is content, where an edge is not: once native stopped counting
-  # the edges, the space after them had to count in their place (the oracle places it through `placeOnLine`,
-  # which sets `lineHasContent` for anything but an edge), or ` aaaa` stopped wrapping here. What the two
-  # engines share is that the space is placed at all: they call the line started once an edge is on it
-  # (`collapseRun`'s `!linePlaced`), where Chrome still sees a line START, collapses the space, and fits
-  # `aaaa` beside the edges — one line, the marker at 52.41, where both engines wrap and put it at 38.4.
-  it 'wraps text after a space placed behind edges alone on the line' do
+  # …and a line holding nothing but EDGES is still at its START: a collapsible space there is deleted (CSS Text 3
+  # §4.1.2), as Chrome deletes it, and `aaaa` fits beside the edges — one line, the marker at 52.41. Both engines
+  # asked "is anything PLACED" (`linePlaced` — an edge is), kept the space, and wrapped at it (38.4); they ask "is
+  # anything that is CONTENT placed" now (`lineHasContent`), the question their MEASURE asks since it stopped
+  # making a line-start space a break opportunity — the two answering differently sized a min-content box
+  # narrower than its own lines (22 tall where Chrome is, 44 in both engines).
+  it 'deletes a space behind edges alone on the line' do
     expect_parity(
       '<div style="width:60px;font:16px monospace"><span style="margin-left:9px"><span style="padding-right:5px"></span> aaaa</span>' \
       '<b id="m" style="display:inline-block;width:4px;height:4px"></b></div>',
-      shared_x:        38.4,
-      shared_x_chrome: 52.40625
+      52.40625,
+      chrome_y: 13
     )
   end
-  # …and the space is content from the moment it is PLACED, not from when a word consumes it: a
-  # NON-WRAPPING run asks its whole-run pre-pass whether the line holds content before any word arrives, and
-  # with the edges no longer answering yes, a space still only queued said no — `aaaa` stayed on a 30px line
-  # the oracle wraps it off (found by the review's 57,600-shape sweep, `edgeline_*`). Chrome wraps it too, but
-  # to the second line where both engines reach the third: the collapsed space again, which Chrome drops at
-  # what it still calls the line's start.
-  it 'wraps a non-wrapping run after a space placed behind an edge alone on the line' do
+  # …and the MEASURE and the layout agree on it: a min-content box around a space behind a NEGATIVE edge is sized
+  # to the word (28.4) and holds it on one line, the marker after the box at 35 as in Chrome — where, measuring
+  # the space deleted and laying it out kept, both engines put the word on a second line (57).
+  it 'fits the word a min-content box was measured for, behind a negative edge and a line-start space' do
+    expect_parity(
+      '<div style="font:16px monospace"><div style="width:min-content"><b style="margin-right:-10px"></b> <span>aaaa</span></div><b id="m" style="display:inline-block;width:4px;height:4px"></b></div>',
+      0,
+      chrome_y: 35
+    )
+  end
+  # …and so a NON-WRAPPING run after such a space wraps once, to the second line, as in Chrome, where both engines
+  # used to reach the third by breaking at the space they had kept. (The space the flow does place — after real
+  # content — is content from the moment it goes down, not when a word consumes it: a non-wrapping run's pre-pass
+  # asks in between, which the review's `edgeline_*` sweep found.)
+  it 'wraps a non-wrapping run after a space behind an edge alone on the line' do
     expect_parity(
       '<div style="width:30px;font:16px monospace"><span style="padding-left:6px"></span> ' \
       '<span style="white-space:nowrap">aaaa</span><b id="m" style="display:inline-block;width:4px;height:4px"></b></div>',
       0,
-      shared_y:        57,
-      shared_y_chrome: 35
+      chrome_y: 35
     )
   end
   # …while a space the flow NEVER placed is no content at all, however it is carried: a non-wrapping

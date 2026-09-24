@@ -1473,8 +1473,10 @@ fn line_layout(
                         // the zero-width marker does not count.
                         // …and only a COLLAPSING run ever asks: a preserved space is kept wherever it sits,
                         // so both readers below already stand behind `!preserve`.
+                        // (…where no CONTENT is on the line: an inline box's edges alone leave it at its start — the
+                        // oracle's `!lineHasContent`, and what `text_intrinsic` assumes.)
                         let at_line_start = !preserve
-                            && (!line_placed || pending_space.is_some_and(|p| p.sep));
+                            && (!line_has_content || pending_space.is_some_and(|p| p.sep));
                         // …and `body` is the oracle's string test: a run that is non-empty but zero-advance
                         // (a U+200B) is still a body, and still asks the question.
                         let has_body = if preserve {
@@ -1748,9 +1750,11 @@ fn line_layout(
                                 for _ in 0..nl {
                                     break_line!();
                                 }
-                            } else if !line_placed {
-                                // At a line start the space itself collapses away — but the BARRIER it leaves
-                                // does not: the oracle sets `barrier` from a whitespace-only run whether or not
+                            } else if !line_has_content {
+                                // At a line start — no CONTENT on it yet; an inline box's edges alone do not
+                                // end it (the oracle's `lineHasContent`) — the space itself collapses away, but
+                                // the BARRIER it leaves does not: the oracle sets `barrier` from a whitespace-only
+                                // run whether or not
                                 // it placed anything (`modeWraps(owner) ? null : 'hard'`). A non-wrapping run
                                 // leaves HARD, which an atomic after it may neither break at nor drop below a
                                 // float at; a wrapping one leaves null, which CLEARS whatever stood there.
