@@ -248,10 +248,12 @@ RSpec.describe 'native layout L1 block-flow parity', if: ENV.fetch('CSIM_JS_ENGI
   # A REPORTED reason is not a census — a shape blocked by several gates names only the first it reached.
   # That is the SET census's question, not this string's.
   describe 'the reason a pass declines' do
-    # One flex container the walk refuses — a multi-line COLUMN wrap, which native does not model — in three
-    # roles below: a block's child, a mixed block's FLOATED child, and the later decline a rolled-back
-    # attempt must not be blamed for. One shape, so the three cannot drift into testing different gates.
-    FLEX_COLUMN_WRAP = '<div style="display:flex;flex-direction:column;flex-wrap:wrap;max-height:50px"><div style="height:10px"></div></div>'
+    # One flex container the walk refuses — an ORPHAN `display: table-row` holding content, which the oracle MEASURES
+    # with its pen and LAYS OUT as a flex row (see `nlFlexSupported`) — in three roles below: a block's child, a
+    # mixed block's FLOATED child, and the later decline a rolled-back attempt must not be blamed for. One shape, so
+    # the three cannot drift into testing different gates. (It was a wrapping auto-height column with a max-height
+    # until 2026-09-24, when native learned to size that one's lines.)
+    UNSUPPORTED_FLEX = '<div style="display:table-row">aa bb</div>'
 
     # The load-bearing half is the ROLLBACK. Several routes try a subtree and fall back: a table cell that
     # cannot be measured is re-walked as a boundary, and the pass goes on. A reason latched inside such an
@@ -295,7 +297,7 @@ RSpec.describe 'native layout L1 block-flow parity', if: ENV.fetch('CSIM_JS_ENGI
       # a block classifies all its children BEFORE walking any of them, so a flex child in the same box
       # refuses first and the atomic is never reached — which is how the second version of this example
       # passed with the restore deleted too.
-      expect(parity(session_for(%(<div style="width:400px"><div>text #{atomic} after</div><div>#{FLEX_COLUMN_WRAP}</div></div>)))['reason'])
+      expect(parity(session_for(%(<div style="width:400px"><div>text #{atomic} after</div><div>#{UNSUPPORTED_FLEX}</div></div>)))['reason'])
         .to eq('flex-container-unsupported')
     end
     # …and forgets it again before the NEXT pass. The latch is module-level state and `nlShadowRun` clears
@@ -306,7 +308,7 @@ RSpec.describe 'native layout L1 block-flow parity', if: ENV.fetch('CSIM_JS_ENGI
     # for them.
     it 'forgets the previous pass before the next one' do
       session = session_for(
-        %(<div id="flex" style="width:400px">#{FLEX_COLUMN_WRAP}</div>) +
+        %(<div id="flex" style="width:400px">#{UNSUPPORTED_FLEX}</div>) +
         %(<div id="atomic" style="width:400px;overflow:hidden"><div style="float:left">t #{WalkRefusals::WHITESPACE} a</div></div>) +
         %(<div id="fine" style="width:400px"><div style="height:10px">x</div></div>)
       )
@@ -340,7 +342,7 @@ RSpec.describe 'native layout L1 block-flow parity', if: ENV.fetch('CSIM_JS_ENGI
         # `inline-box-relative-valign` rows, which really are one reason through two routes.)
         ['white-space-only-block',
          '<div style="width:400px;white-space:pre"><p>a</p>   <p>b</p></div>'],
-        ['flex-container-unsupported',        %(<div style="width:400px">#{FLEX_COLUMN_WRAP}</div>)],
+        ['flex-container-unsupported',        %(<div style="width:400px">#{UNSUPPORTED_FLEX}</div>)],
         ['block-level-box-in-inline-content', '<div style="width:400px">text <span><div style="height:5px">b</div></span> after</div>'],
         ['inline-box-relative-valign',        '<div style="width:400px">text <span style="vertical-align:middle">x</span> after</div>'],
         # …and the last one again through a MIXED block's anonymous group, which is the other propagation
@@ -350,7 +352,7 @@ RSpec.describe 'native layout L1 block-flow parity', if: ENV.fetch('CSIM_JS_ENGI
         # DIRECTLY, so the gate inside names itself while the group's `emitAttempt` is still open and about
         # to erase it. Read at the hook site or the whole family answers `float-in-inline`. Nothing else in
         # the repo declines this way — reverting that read leaves every other layout spec green.
-        ['flex-container-unsupported',        %(<div style="width:400px"><p>a</p>text <div style="float:left;width:30px">#{FLEX_COLUMN_WRAP}</div> more<p>b</p></div>)],
+        ['flex-container-unsupported',        %(<div style="width:400px"><p>a</p>text <div style="float:left;width:30px">#{UNSUPPORTED_FLEX}</div> more<p>b</p></div>)],
         # …and a DECLINED atomic in a MIXED block that is itself being MEASURED, which is the fourth and the
         # one the group's `emitAttempt` reaches: `atomic.lay` re-latches the gate over its own rollback, and
         # the group's rollback then erases THAT — so the reason survives only on the object the hook returns.
