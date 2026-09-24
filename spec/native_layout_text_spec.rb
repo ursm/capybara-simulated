@@ -484,6 +484,35 @@ RSpec.describe 'native layout L2 text-block parity', if: ENV.fetch('CSIM_JS_ENGI
       chrome_y: 13
     )
   end
+  # …and the refusal is asked per GROUP, not per block: in a mixed block each run of inline content between block
+  # children is a record of its own, so text in another group gives an empty-inline group no box to take the
+  # indent with (the oracle and Chrome 50; native 9.6 — the review of d1cf5fd0 found 567 such shapes).
+  it 'refuses to measure a mixed block whose empty-inline group takes the indent, text elsewhere or not' do
+    expect_declined_x(
+      %(<div style="font:16px monospace"><div style="float:left"><div style="text-indent:50px"><span></span><div style="width:5px;height:5px"></div>a</div></div><b id="m" style="display:inline-block;width:4px;height:4px"></b></div>),
+      50,
+      %(<div style="font:16px monospace"><div style="float:left"><div><span></span><div style="width:5px;height:5px"></div>a</div></div><b id="m" style="display:inline-block;width:4px;height:4px"></b></div>),
+      reason:   'shrink-to-fit-child-unmeasurable',
+      chrome_y: 13
+    )
+  end
+  # A collapsible space at a LINE START is deleted, and no break opportunity with it (CSS Text 3 §4.1.2): both
+  # engines made one there, "harmless while the word is empty" — which an inline box's edges, or the indent an
+  # empty one took, make false. So the min-content cut them off the word after: the oracle 30 for an empty inline
+  # under a 30px indent (native, which sees no edgeless box, 39.6 — a parity break), both 19.2 for a padded one.
+  # Chrome keeps them together: 39.61 and 24.20, and so do both engines now.
+  {
+    'the indent an empty inline takes' => ['<td style="padding:0;text-indent:30px"><span></span> a</td>', 39.609375],
+    'an empty inline\'s opening edge'  => ['<td style="padding:0"><span style="padding-left:5px"></span> aa</td>', 24.203125]
+  }.each do |name, (cell, chrome_x)|
+    it "keeps #{name} on the word after a line-start space" do
+      expect_parity(
+        %(<table style="font:16px monospace;width:10px;border-spacing:0"><tr>#{cell}<td id="m" style="padding:0">t</td></tr></table>),
+        chrome_x,
+        chrome_y: 0
+      )
+    end
+  end
   # A MIXED block's anonymous group past a block child starts on a line that is not the block's first, so it takes
   # no first-line indent — in the layout (its record's `spent` bit) and now in the MEASURE, which ignored the bit
   # and indented the group anyway (59 where the oracle and Chrome say 48). That was the whole of what the walk's

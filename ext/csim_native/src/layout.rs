@@ -6109,11 +6109,11 @@ fn text_intrinsic(runs: &[Run], run_texts: &[Option<Vec<u16>>], ws_mode: u8, ind
                                 end_line!(); // pre-line: a newline is a line end, the spaces around it collapse away
                             }
                         } else if inline_on_line {
-                            // A collapsed space: pending after content on the line, nothing at line start (an
-                            // opportunity either way when the mode wraps — a no-op at line start, the word is empty).
+                            // A collapsed space: pending after content on the line, nothing at all at a line start
+                            // — deleted there (CSS Text 3 §4.1.2), and no break opportunity with it: it used to be
+                            // one, "a no-op, the word is empty", which an inline box's edges or the indent it took
+                            // made false (the oracle's pen, the same change).
                             pend!(space_w);
-                        } else if wraps {
-                            opportunity!();
                         }
                     } else {
                         let start = i;

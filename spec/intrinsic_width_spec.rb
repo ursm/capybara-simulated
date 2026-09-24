@@ -166,8 +166,9 @@ RSpec.describe 'intrinsic widths' do
   end
 
   # …and it is TAKEN by the first thing that occupies the line — a word, an atomic, an inline box, a `<br>`, a
-  # `<wbr>` — never by a line nothing occupies. Every number here is Chrome's (16px default face), and the
-  # native engine is not involved: it declines an indented block whose intrinsic widths it would be asked for.
+  # `<wbr>` — never by a line nothing occupies. Every number here is Chrome's (16px default face), and these read
+  # the ORACLE's geometry only; the native engine's parity on the same shapes is held by the native_layout specs
+  # (an empty inline box taking the indent is a shape native's measure REFUSES — its record has no box to take it).
   describe 'the first-line text-indent goes to the line\'s first occupant' do
     it 'gives it to the first word, not to a collapsible space before it' do
       (width, _), w = measure('<div id=t style="width:min-content;text-indent:40px"> aa bbbb</div>')
