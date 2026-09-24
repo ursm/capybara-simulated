@@ -187,6 +187,24 @@ RSpec.describe 'native layout L1 block-flow parity', if: ENV.fetch('CSIM_JS_ENGI
     expect_no_dropped_records(r)
   end
 
+  # A display with no arm of its own — `-webkit-box`, `-webkit-inline-box`, `ruby`, `math`, `flow`, an orphan
+  # `table-column` — is laid out by the oracle's block flow as a plain block (`layoutElementInner`'s fallthrough),
+  # and the walk takes it as one since 2026-09-25 (it declined, `block-level-box-unplaceable`). Chrome does
+  # otherwise for the WebKit pair, and both engines share it: the line-clamp idiom clamps three lines to two (44,
+  # where both say 66), and `-webkit-inline-box` is inline-level (x 28.8 on the first line, where both put it at 0
+  # on the next).
+  it 'lays out a display with no arm of its own as the block the oracle makes it' do
+    clamp = '<div style="width:300px;font:16px monospace"><div id="m" style="display:-webkit-box;-webkit-line-clamp:2;' \
+            '-webkit-box-orient:vertical;overflow:hidden">aa bb cc dd ee ff gg hh ii jj kk ll mm nn oo pp qq rr ss tt uu vv ww xx yy zz</div></div>'
+    inline = '<div style="width:300px;font:16px monospace">aa <span id="m" style="display:-webkit-inline-box">x</span> bb</div>'
+    [clamp, inline].each {|body| expect_parity(body) }
+    expect_shared_gap(laid_out_rect(clamp)[3], shared: 66, chrome: 44, what: "#{clamp}: #m height")
+    expect_shared_gap(laid_out_rect(inline)[0], shared: 0, chrome: 28.81, what: "#{inline}: #m x")
+    %w[ruby math flow table-column].each do |display|
+      expect_parity(%(<div style="width:200px;font:16px monospace">lead <div style="display:#{display};padding:0 5%">aa bb</div> tail</div>))
+    end
+  end
+
   # A PERCENTAGE relative inset goes over as its `px + frac` pair and native resolves it against the containing
   # block it lays the box out in — the oracle's box was the basis until 2026-09-24. Both engines and Chrome: 30/20
   # in a 300x200 block; a `top: 10%` of an INDEFINITE height resolves to nothing and `bottom: 4px` is used (-4); an

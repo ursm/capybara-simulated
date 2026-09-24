@@ -36,11 +36,11 @@ module WalkRefusals
   # path, and a CENTRED mixed block's out-of-flow box in a group that opens no line (`oof-in-collapsed-group`) until
   # an empty line stopped moving what waits on it — both 2026-09-24.
   ORPHAN_ROW       = '<span style="display:inline-block"><div style="display:table-row">aa bb</div></span>'
-  # (An orphan `display: table-cell` inside one was the third entry — `block-level-box-unplaceable` — until
-  # 2026-09-24, when the walk took an orphan table part as the block the oracle lays it out as. The cause it stood
-  # for is not gone: a display the block arm has no case for still reaches that reason — `-webkit-box` (the
-  # line-clamp idiom), `ruby`, `ruby-text`, `table-column`, `table-column-group`, `inline-list-item`, `math`, `flow`
-  # — beside the unmodelled position of the first entry.)
+  # (An orphan `display: table-cell` inside one was the third entry — `block-level-box-unplaceable`, a DISPLAY the
+  # block arm had no case for — until 2026-09-24, when the walk took an orphan table part as the block the oracle
+  # lays it out as; `-webkit-box`, `ruby`, `math`, `flow`, an orphan `table-column` and the rest of the oracle's
+  # block-flow fallthrough followed on 2026-09-25. What reaches that reason now is the unmodelled POSITION of the
+  # first entry.)
   ATOMIC           = [POSITIONED, ORPHAN_ROW].freeze
 
   # …and a separate cause, for the routes that MEASURE rather than lay out: content whose intrinsic width
