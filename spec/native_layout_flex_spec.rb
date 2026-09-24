@@ -587,11 +587,12 @@ RSpec.describe 'native layout flex parity', if: ENV.fetch('CSIM_JS_ENGINE', 'v8'
   # A PUSHED multi-line container whose lines mix a stretching item and a fixed one: `align-content: stretch` grew
   # each line from its NATURAL cross, and a stretched box already holds its share, so the lines cannot be rebuilt
   # from the final boxes — the walk refused the pushed path for it (`flex-item-pushed-cross-unrecoverable`, 1,363
-  # sweep declines). Each pushed item carries its line's natural cross now (rec[137]). (The percentage height
-  # inside is what keeps the container off native sizing, onto the pushed path.) Chrome's boxes.
+  # sweep declines). Each pushed item carries its line's natural cross now (rec[137]). (The `min()` percentage
+  # inside is what keeps the container off native sizing, onto the pushed path — a plain one inside an inline box
+  # did until the walk learned to send it.) Chrome's boxes.
   it 'places a pushed wrap container whose lines mix stretching and fixed items' do
     body = '<div style="display:flex;flex-wrap:wrap;width:150px;height:100px;font:16px monospace"><div><div style="height:100%">some rather longer ' \
-           'words <b>bold <span style="display:inline-block;width:20px;height:50%"></span> tail</b> more</div></div>' \
+           'words <b>bold <span style="display:inline-block;width:20px;height:min(50%,80px)"></span> tail</b> more</div></div>' \
            '<div style="width:30px;height:20px"></div></div>'
     expect(run_shadow(body)).to include('ok' => true, 'mismatches' => 0, 'nativeFlexRows' => 0)
     chrome = [[0, 0, 150, 88], [0, 88, 30, 20]]
@@ -934,19 +935,40 @@ RSpec.describe 'native layout flex parity', if: ENV.fetch('CSIM_JS_ENGINE', 'v8'
     # …and it FALLS BACK for a percentage the walk still resolves, which is what the narrowed test names: one
     # inside a NON-LINEAR math function (a `min()` / `max()` / `clamp()` that changes branch as the basis grows,
     # so there is no `px + frac` pair to send and it travels resolved wherever the box sits), or under a TABLE
-    # part, an OUT-OF-FLOW box or an INLINE — routes where the record's parent is not the box the percentage
-    # resolves against, so the figure was resolved against the item's FINAL size and native measures at a
-    # provisional one. Dropping the test put 15 wrong boxes into a 2,268-case math-function sweep, 28 into a
-    # 1,200-case route sweep and 36 into a 960-case inline sweep, all 0 at the parent commit.
+    # part or an OUT-OF-FLOW box — routes where the record's parent is not the box the percentage resolves
+    # against, so the figure was resolved against the item's FINAL size and native measures at a provisional one.
+    # Dropping the test put 15 wrong boxes into a 2,268-case math-function sweep, 28 into a 1,200-case route sweep
+    # and 36 into a 960-case inline sweep, all 0 at the parent commit.
     # A LINEAR `calc()` left this list on 2026-09-22 and is in the arm above; the figure that used to be cited
     # here (`height: calc(50% + 2px)` in a wrapping row, 55.5 against Chrome's 58) is now 22, Chrome's own.
     it 'falls back for a percentage the walk resolves, not for one native does' do
       ['<div style="display:flex;width:400px"><div><div style="min-height:min(50%,80px)">pct</div></div><div style="height:40px;width:50px"></div></div>',
        '<div style="display:flex;width:400px"><div><div style="position:absolute;height:50%;width:10px"></div>pct</div><div style="height:40px;width:50px"></div></div>',
-       # …and the INLINE route, whose record hangs under the TEXT BLOCK rather than under the inline
-       '<div style="display:flex;width:400px"><div><div style="height:100%">words <b>b <span style="display:inline-block;height:50%;width:20px"></span></b></div></div><div style="height:40px;width:50px"></div></div>',
        %(<div style="#{col};height:200px"><div style="flex:1 1 auto"><div style="min-height:clamp(10px,50%,80px)">pct</div></div><div style="flex:1 1 auto">plain</div></div>)].each do |body|
         expect(run_shadow(body)).to include('ok' => true, 'mismatches' => 0, 'nativeFlexRows' => 0), body
+      end
+    end
+
+    # …and the INLINE route is no longer one of them: an ATOMIC written inside an inline box hangs under the text
+    # block of the block around it, which is its containing block too (an inline box is none), so where that block
+    # is the record's parent — not a mixed block's anonymous group — its percentage travels as a fraction like a
+    # direct child's. Until 2026-09-24 the walk resolved it against the oracle's box, and the item holding it fell
+    # back to the pushed path: 152 of 200 sampled `flexpctinline` shapes broke with the oracle hidden, none now.
+    # Chrome: the span is 50 tall in a 100px stretched row, 20 in the 40px line an auto one gets.
+    it 'sizes an item holding an atomic whose percentage sits inside an inline box natively' do
+      {
+        '<div style="display:flex;width:400px;height:100px">' => 50,
+        '<div style="display:flex;width:400px">'              => 20
+      }.each do |open, h|
+        body = %(#{open}<div><div style="height:100%">words <b>b <span id="m" style="display:inline-block;height:50%;width:20px"></span></b></div></div><div style="height:40px;width:50px"></div></div>)
+        expect_native_flex(body)
+        expect(laid_out_rect(body)[3]).to eq(h)
+        session = simulated_session(page(body))
+        session.visit '/'
+        session.evaluate_script('document.body.offsetHeight')
+        r = session.evaluate_script('globalThis.__csimLayoutShadowRun(undefined, {noOracle: true})')
+        expect(r).to include('ok' => true, 'mismatches' => 0)
+        expect(r['oracleReads'].to_h.keys.grep(/\A(cbH|walkRecord|pushBorderBox) /)).to eq([]), r.inspect
       end
     end
 
