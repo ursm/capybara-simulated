@@ -30,15 +30,16 @@ module WalkRefusals
   # exercises the walk's rollback, and a caller that wants that has to be able to say so.
   POSITIONED_INNER = '<div style="position:-webkit-sticky;width:9px;height:4px"></div>t'
   POSITIONED       = %(<span style="display:inline-block">#{POSITIONED_INNER}</span>)
-  # …an out-of-flow box waiting in a CENTRED mixed block's group that opens no line (`oof-in-collapsed-group`:
-  # the oracle moves it by a LATER line's alignment). This entry was a `pre` inline-block of nothing but spaces
-  # (`white-space-only-block`) until 2026-09-24, when preserved white space went down the text path.
-  CENTRED_OOF      = '<span style="display:inline-block;text-align:center"><p>a</p> ' \
-                     '<div style="position:absolute;width:2px;height:2px"></div> <p>b</p>text</span>'
+  # …an orphan `display: table-row` holding content (`flex-container-unsupported`: the oracle MEASURES one through
+  # the block arm and LAYS it out as a flex row, and one record cannot say both). Its predecessors: a `pre`
+  # inline-block of nothing but spaces (`white-space-only-block`) until preserved white space went down the text
+  # path, and a CENTRED mixed block's out-of-flow box in a group that opens no line (`oof-in-collapsed-group`) until
+  # an empty line stopped moving what waits on it — both 2026-09-24.
+  ORPHAN_ROW       = '<span style="display:inline-block"><div style="display:table-row">aa bb</div></span>'
   # (An orphan `display: table-cell` inside one was the third entry — `block-level-box-unplaceable` — until
   # 2026-09-24, when the walk took an orphan table part as the block the oracle lays it out as. No display reaches
-  # that reason now; what does is a position neither engine models, which is the entry above.)
-  ATOMIC           = [POSITIONED, CENTRED_OOF].freeze
+  # that reason now; what does is a position neither engine models, which is the first entry.)
+  ATOMIC           = [POSITIONED, ORPHAN_ROW].freeze
 
   # …and a separate cause, for the routes that MEASURE rather than lay out: content whose intrinsic width
   # native has no rule for, which every shrink-to-fit route has to refuse or push while the walk still lays the

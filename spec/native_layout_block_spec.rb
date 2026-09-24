@@ -290,7 +290,7 @@ RSpec.describe 'native layout L1 block-flow parity', if: ENV.fetch('CSIM_JS_ENGI
       #        that gate turned this line red and gained the census a line, which is what it is for.)
       expect(parity(session_for(%(<div style="width:400px">#{WalkRefusals::POSITIONED_INNER}</div>))))
         .to include('ok' => false, 'reason' => 'block-level-box-unplaceable')
-      expect(parity(session_for(measured.(WalkRefusals::CENTRED_OOF)))['reason']).to eq('oof-in-collapsed-group')
+      expect(parity(session_for(measured.(WalkRefusals::ORPHAN_ROW)))['reason']).to eq('flex-container-unsupported')
       expect(parity(session_for(%(<div style="width:400px">text #{atomic} after</div>))))
         .to include('ok' => true, 'nativeAtomics' => 0)
       # …the same rolled-back attempt, then a LATER decline in a SIBLING block. Sibling, not the same block:
@@ -309,7 +309,7 @@ RSpec.describe 'native layout L1 block-flow parity', if: ENV.fetch('CSIM_JS_ENGI
     it 'forgets the previous pass before the next one' do
       session = session_for(
         %(<div id="flex" style="width:400px">#{UNSUPPORTED_FLEX}</div>) +
-        %(<div id="atomic" style="width:400px;overflow:hidden"><div style="float:left">t #{WalkRefusals::CENTRED_OOF} a</div></div>) +
+        %(<div id="atomic" style="width:400px;overflow:hidden"><div style="float:left">t #{WalkRefusals::POSITIONED} a</div></div>) +
         %(<div id="fine" style="width:400px"><div style="height:10px">x</div></div>)
       )
       # BOTH orders. First-writer-wins means a stale latch beats the real refusal, so a single order passes
@@ -318,11 +318,11 @@ RSpec.describe 'native layout L1 block-flow parity', if: ENV.fetch('CSIM_JS_ENGI
       asked = ->(order) { order.map {|sel| parity(session, sel).values_at('ok', 'reason') } }
       expect(asked.(%w[#flex #atomic #fine])).to eq([
         [false, 'flex-container-unsupported'],
-        [false, 'oof-in-collapsed-group'],
+        [false, 'block-level-box-unplaceable'],
         [true, nil]
       ])
       expect(asked.(%w[#atomic #flex #fine])).to eq([
-        [false, 'oof-in-collapsed-group'],
+        [false, 'block-level-box-unplaceable'],
         [false, 'flex-container-unsupported'],
         [true, nil]
       ])
@@ -334,12 +334,6 @@ RSpec.describe 'native layout L1 block-flow parity', if: ENV.fetch('CSIM_JS_ENGI
     it 'names the gate that stopped it' do
       # Pairs, not a hash: the same reason is asserted twice on purpose, through two different routes.
       [
-        # (A mixed block's own gate, raised AFTER its group's `emitAttempt` rolled back — the claim above is about
-        # the two `text-not-measurable` rows, which really are one reason through two routes. This
-        # row was `white-space-only-block`, a gate beside the mixed branch, until 2026-09-24, when preserved white
-        # space went down the text path.)
-        ['oof-in-collapsed-group',
-         '<div style="width:400px;text-align:center"><p>a</p> <div style="position:absolute;width:2px;height:2px"></div> <p>b</p>text</div>'],
         ['flex-container-unsupported',        %(<div style="width:400px">#{UNSUPPORTED_FLEX}</div>)],
         ['text-not-measurable',               '<div style="width:400px;white-space:pre">a&#13;b</div>'],
         # …and the last one again through a MIXED block's anonymous group, which is the other propagation
@@ -530,38 +524,50 @@ RSpec.describe 'native layout L1 block-flow parity', if: ENV.fetch('CSIM_JS_ENGI
 
   # …and where the group it sits in holds nothing a line is made of. The box's static position is the line that
   # group never opened, and the ORACLE gives that line things a block record cannot carry: the group's
-  # `text-indent` where the box opens one (11), and the alignment shift of whatever LATER line eventually
-  # closes, the entry sitting in `lineStatics` until one does (130.8 in a centred 300px block, the shift of a
-  # `<b>` line two blocks further on — Chrome says 150, the centre of the empty line the box actually sits on,
-  # so the oracle is on the wrong side of this and 130.8 is NOT the figure to port). A float band is the third
-  # (80, which both engines and Chrome agree on). Emitting it against the block gets the container's cursor
-  # and none of the three.
+  # `text-indent` where the box opens one (11) and a float band (80, which both engines and Chrome agree on).
+  # Emitting it against the block gets the container's cursor and neither.
   #
-  # So since 2026-09-24 such a group is KEPT — a text block of no line, as a block of its own with only an
-  # out-of-flow child already was — which carries the indent and the band, where the block's lines are LEFT-
-  # aligned: no later line's shift moves the box there — or run right to left, whose static corner the oracle never
-  # shifts. A centred or right-aligned ltr block still declines (`oof-in-collapsed-group`; 810 of rv6g1's and 299 of
-  # ooffuzz's declines went, and the `oofgrp` / `oofalign` sweeps cross it with every indent flavour, floats, margins,
-  # insets and every alignment that folds to left).
+  # So such a group is KEPT — a text block of no line, as a block of its own with only an out-of-flow child already
+  # was — whatever the block's alignment. Until 2026-09-24 only a left-aligned or rtl one was: the oracle left the
+  # box in `lineStatics` until SOME later line closed, and moved it by that line's alignment (80.8 in a centred
+  # 200px block, the centring of a `text` line after the next block child, where the same box with nothing after it
+  # stayed at 0), so a centred or right-aligned block declined (`oof-in-collapsed-group`, 1,316 of the sweeps). An
+  # empty line moves nothing that waits on it now, in `breakLine` as in a text block of no line. Chrome agrees for a
+  # block-level box — x 0 below — and centres an INLINE-level one (150 in a 300px block): it tells the two apart by
+  # the display the box had before it was blockified, which neither engine keeps. Shared, and pinned.
   #
-  # THE REFUSAL WAS LIFTED ON 2026-09-23 AND PUT BACK THE SAME DAY, and what that cost is the reason this
-  # comment is long. An audit re-measured it, read "342 shapes lay out, 0 mismatch" and called the gate stale.
-  # The rollback that precedes it had already spliced those records off the stream and nothing re-emits them,
-  # so lifting it placed no box: it DROPPED 372 of them and reported `ok: true, mismatches: 0`. Three sweeps
-  # and the parity spec that replaced this one all read clean, because a record that is not there compares as
-  # nothing. `droppedRecords` exists now (see `spec/support/shadow_parity.rb`), and `expect_parity` asks it.
+  # THE REFUSAL WAS LIFTED ON 2026-09-23 AND PUT BACK THE SAME DAY, and what that cost is why a REPLAYED box keeps
+  # the group too. An audit re-measured it, read "342 shapes lay out, 0 mismatch" and called the gate stale. The
+  # rollback that precedes it had already spliced those records off the stream and nothing re-emits them, so
+  # lifting it placed no box: it DROPPED 372 of them and reported `ok: true, mismatches: 0`. Three sweeps and the
+  # parity spec that replaced this one all read clean, because a record that is not there compares as nothing.
+  # `droppedRecords` exists now (see `spec/support/shadow_parity.rb`), and `expect_parity` asks it.
   #
   # A group has no content for five reasons, not one — `hasContent` is set by text, content whitespace, a `<br>`,
   # an atomic or an edged inline's close — so BOTH the everyday routes are here: whitespace around the box,
   # and the box ALONE after the last block, which is where a positioned dropdown or tooltip is written.
-  it 'keeps the group an out-of-flow child of a left-aligned mixed block sits in' do
-    [
-      '<div style="position:relative;width:300px"><p>a</p> <div style="position:absolute;width:20px;height:20px"></div> <p>b</p>text<p>c</p></div>',
-      '<div style="position:relative;width:300px"><p>a</p>text<p>b</p><div style="position:absolute;width:20px;height:20px"></div></div>'
-    ].each do |body|
-      expect_parity(body)
-      expect_walk_declines(body.sub('width:300px', 'width:300px;text-align:center'), 'oof-in-collapsed-group')
+  it 'keeps the group an out-of-flow child of a mixed block sits in, whatever its alignment' do
+    rect = lambda {|body|
+      session = simulated_session(page(body)); session.visit '/'
+      session.evaluate_script("(r => [r.x, r.y])(document.getElementById('m').getBoundingClientRect())")
+    }
+    {
+      '<div style="position:relative;width:300px;ALIGN"><p>a</p> <div id="m" style="position:absolute;width:20px;height:20px"></div> <p>b</p>text<p>c</p></div>' => [0, 50],
+      '<div style="position:relative;width:300px;ALIGN"><p>a</p>text<p>b</p><div id="m" style="position:absolute;width:20px;height:20px"></div></div>'          => [0, 118]
+    }.each do |body, xy|
+      ['', 'text-align:center', 'text-align:right', 'text-align:justify'].each do |align|
+        expect_parity(body.sub('ALIGN', align))
+        expect(rect.(body.sub('ALIGN', align))).to eq(xy)
+      end
+      expect_parity(body.sub('ALIGN', 'direction:rtl'))
     end
+    # …the pass's own containing block with a PERCENTAGE edge, which native cannot re-derive, so the box is
+    # REPLAYED — no marker in the group, and the group kept all the same.
+    expect_parity('<div style="width:300px"><div style="position:relative;padding:10%;text-align:center"><p>a</p> ' \
+                  '<div style="position:absolute;width:2px;height:2px"></div> <p>b</p>text</div></div>')
+    span = '<div style="position:relative;width:300px;text-align:center"><p>a</p> <span id="m" style="position:absolute;width:20px;height:20px"></span> <p>b</p>text<p>c</p></div>'
+    expect_parity(span)
+    expect_shared_gap(rect.(span)[0], shared: 0, chrome: 150, what: "#{span}: #m x")
   end
   # …where Chrome agrees on the plain line (x 0, below the block before it) and a float band (20), and both engines
   # share two gaps with it: a `hanging` indent re-arms past a block child in both (12, Chrome 0), and a plain one
