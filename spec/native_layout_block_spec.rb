@@ -539,9 +539,10 @@ RSpec.describe 'native layout L1 block-flow parity', if: ENV.fetch('CSIM_JS_ENGI
   #
   # So since 2026-09-24 such a group is KEPT — a text block of no line, as a block of its own with only an
   # out-of-flow child already was — which carries the indent and the band, where the block's lines are LEFT-
-  # aligned: no later line's shift moves the box there. A centred, right-aligned or rtl block still declines
-  # (`oof-in-collapsed-group`; 810 of rv6g1's and 276 of ooffuzz's declines went, and the `oofgrp` sweep crosses
-  # it with every indent flavour, floats, margins and insets).
+  # aligned: no later line's shift moves the box there — or run right to left, whose static corner the oracle never
+  # shifts. A centred or right-aligned ltr block still declines (`oof-in-collapsed-group`; 810 of rv6g1's and 299 of
+  # ooffuzz's declines went, and the `oofgrp` / `oofalign` sweeps cross it with every indent flavour, floats, margins,
+  # insets and every alignment that folds to left).
   #
   # THE REFUSAL WAS LIFTED ON 2026-09-23 AND PUT BACK THE SAME DAY, and what that cost is the reason this
   # comment is long. An audit re-measured it, read "342 shapes lay out, 0 mismatch" and called the gate stale.
@@ -550,7 +551,7 @@ RSpec.describe 'native layout L1 block-flow parity', if: ENV.fetch('CSIM_JS_ENGI
   # and the parity spec that replaced this one all read clean, because a record that is not there compares as
   # nothing. `droppedRecords` exists now (see `spec/support/shadow_parity.rb`), and `expect_parity` asks it.
   #
-  # A group collapses for five reasons, not one — `hasContent` is set by text, content whitespace, a `<br>`,
+  # A group has no content for five reasons, not one — `hasContent` is set by text, content whitespace, a `<br>`,
   # an atomic or an edged inline's close — so BOTH the everyday routes are here: whitespace around the box,
   # and the box ALONE after the last block, which is where a positioned dropdown or tooltip is written.
   it 'keeps the group an out-of-flow child of a left-aligned mixed block sits in' do
@@ -564,7 +565,8 @@ RSpec.describe 'native layout L1 block-flow parity', if: ENV.fetch('CSIM_JS_ENGI
   end
   # …where Chrome agrees on the plain line (x 0, below the block before it) and a float band (20), and both engines
   # share two gaps with it: a `hanging` indent re-arms past a block child in both (12, Chrome 0), and a plain one
-  # does not (0, Chrome 50 — it indents the first line of every anonymous block).
+  # does not (0, Chrome 50 — it indents the first line of every anonymous block). Each block holds TEXT, or it is
+  # no mixed block and its out-of-flow child goes down the plain block path, which never needed the kept group.
   it 'places the box where the group never opened a line' do
     pos = lambda {|body|
       session = simulated_session(page(%(<div style="position:relative;width:200px;font:16px monospace">#{body}</div>))); session.visit '/'
@@ -572,9 +574,9 @@ RSpec.describe 'native layout L1 block-flow parity', if: ENV.fetch('CSIM_JS_ENGI
       session.evaluate_script("(() => { const r = document.getElementById('m').getBoundingClientRect(); return [r.x, r.y]; })()")
     }
     oof = '<i id="m" style="position:absolute;width:5px;height:5px"></i>'
-    expect(pos.(%(<div><div style="height:6px"></div> #{oof} <div style="height:6px"></div></div>))).to eq([0, 6])
-    expect(pos.(%(<div><div style="float:left;width:20px;height:7px"></div>#{oof}<div style="height:6px"></div></div>))).to eq([20, 0])
-    x, = pos.(%(<div style="text-indent:12px hanging"><div style="height:6px"></div>#{oof}<div style="height:6px"></div></div>))
+    expect(pos.(%(<div><div style="height:6px"></div> #{oof} <div style="height:6px"></div>t</div>))).to eq([0, 6])
+    expect(pos.(%(<div><div style="float:left;width:20px;height:7px"></div>#{oof}<div style="height:6px"></div>t</div>))).to eq([20, 0])
+    x, = pos.(%(<div style="text-indent:12px hanging"><div style="height:6px"></div>#{oof}<div style="height:6px"></div>t</div>))
     expect_shared_gap(x, shared: 12, chrome: 0, what: 'hanging indent past a block child')
     x, = pos.(%(<div style="text-indent:50px">a<div style="width:5px;height:5px"></div>#{oof}</div>))
     expect_shared_gap(x, shared: 0, chrome: 50, what: 'plain indent past a block child')

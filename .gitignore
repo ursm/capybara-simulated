@@ -34,3 +34,5 @@ __pycache__/
 ext/*/target/
 lib/capybara/simulated/*.so
 lib/capybara/simulated/*.bundle
+*.orig
+*.rej

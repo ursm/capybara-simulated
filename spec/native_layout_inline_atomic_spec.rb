@@ -478,7 +478,8 @@ RSpec.describe 'native layout inline-atomic parity', if: ENV.fetch('CSIM_JS_ENGI
       expect_native_atomic(%(<div style="width:90px"><div>block</div>aaa bbb <img style="width:40px;height:20px"> ccc <span style="#{ib}"></span> ddd</div>), 2)
       # …inside a subtree native MEASURES, too: the anonymous block is part of the inline-block's shrink-to-fit
       expect_native_atomic(%(<div style="width:400px">x <span style="display:inline-block"><div>block</div>text <span style="#{ib}"></span></span> y</div>), 2)
-      # …and a whitespace-only group still collapses to nothing, taking no record with it
+      # …and a group of white space and an empty inline box, which is kept as a text block of no line (the box takes
+      # an indent where there is one) and lays nothing out
       expect_parity(%(<div style="width:400px"><div>one</div> <span></span> <div>two</div></div>))
       # …an atomic native still cannot lay out, in a group a flex row MEASURES, takes the row's fallback rather
       # than a pushed box the measure cannot see
