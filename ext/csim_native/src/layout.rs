@@ -5010,7 +5010,9 @@ fn measure_table(
     // against that border box too — the block it spans — which is why the measure comes after `table_w`.
     if let Some(cap) = caption {
         // …while a RELATIVE caption's percentage offset resolves against the table's own height where the table
-        // has one yet — declared or imposed, its border box; `auto` is none (the oracle's `box.height || null`).
+        // has one yet — declared or imposed, its BORDER box as the oracle's `box.height || null` has it; `auto` is
+        // none. (Chrome resolves against the table's CONTENT height after its min/max — 8.39 for a padded 100px
+        // table where both engines say 11.6 — 10% of its border box; shared, pinned in the block spec.)
         let offset_h = if is_auto(n.height) {
             f64::NAN
         } else {

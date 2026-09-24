@@ -245,10 +245,36 @@ RSpec.describe 'native layout L1 block-flow parity', if: ENV.fetch('CSIM_JS_ENGI
       %(<div style="width:300px;height:150px;display:flex"><div style="display:table;width:100%">#{caption}#{row}</div><div>x</div></div>)                                        => 15,
       %(<div style="width:300px;display:grid;grid-template-columns:100px 1fr;grid-auto-rows:80px"><div style="display:table;width:100%">#{caption}#{row}</div><div>x</div></div>) => 8
     }.each do |body, y|
-      session = simulated_session(page(body))
-      session.visit '/'
-      expect(parity(session)).to include('ok' => true, 'mismatches' => 0)
+      expect_parity(body)
       expect(laid_out_rect(body)[1]).to eq(y)
+    end
+    # …the table's BORDER box, as the oracle hands it (11.6 of the 116 a content-box `height: 100px` table with
+    # 5px padding and a 3px border comes to); Chrome's is its CONTENT box after its min/max (8.39 of that
+    # table, 12 of `height: 40px; min-height: 120px`, where both say 4). Shared.
+    {
+      'height:100px;padding:5px;border:3px solid' => [11.6, 8.39],
+      'height:40px;min-height:120px'              => [4, 12]
+    }.each do |table, (shared, chrome)|
+      wrap = ->(cap) { %(<div style="width:300px"><div style="display:table;width:100%;#{table}">#{cap}#{row}</div></div>) }
+      body = wrap.(caption)
+      expect_parity(body)
+      offset = laid_out_rect(body)[1] - laid_out_rect(wrap.(caption.sub('top:10%', 'top:0')))[1]
+      expect_shared_gap(offset, shared: shared, chrome: chrome, what: "#{body}: #m's offset")
+    end
+  end
+
+  # …but only a caption a TABLE lays out: an ORPHAN one is the oracle's plain block, whose offset resolves against
+  # its parent like any block's — where the walk has to fall back (a flex item's child, a `max()`), it read the
+  # table stamp `layCaption` never wrote and said 0 where the oracle says 20 / 12 / 20. Chrome wraps an orphan in
+  # an anonymous table of auto height and says 0; both engines share the block.
+  it 'resolves an orphan caption\'s fallback offset against its parent, as the block the oracle lays it out as' do
+    {
+      '<div style="display:flex;width:300px;height:200px"><div style="width:100px"><div id="m" style="display:table-caption;position:relative;top:10%">cap</div></div></div>' => 20,
+      '<div style="display:grid;width:300px;grid-auto-rows:120px"><div><div id="m" style="display:table-caption;position:relative;top:10%">cap</div></div></div>'          => 12,
+      '<div style="width:300px;height:200px"><div id="m" style="display:table-caption;position:relative;top:max(10%, 4px)">cap</div></div>'                            => 20
+    }.each do |body, y|
+      expect_parity(body)
+      expect_shared_gap(laid_out_rect(body)[1], shared: y, chrome: 0, what: "#{body}: #m y")
     end
   end
 
