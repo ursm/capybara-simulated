@@ -3006,6 +3006,33 @@ fn measure(
             boxes[c].y = y;
             continue; // the flow cursor / first / has_child are untouched
         }
+        // A box that starts its own context, placed at `$cy` beside the floats (§9.5): its whole border box goes in
+        // the band they leave there, sized to it (an auto width narrows to it, a declared one keeps its size); a box
+        // too WIDE for the band drops below the float instead and re-places in the widened band below it.
+        macro_rules! place_beside_floats {
+            ($cy:expr) => {{
+                let cy = $cy;
+                let (ml, mr) = (Input::m(cn.ml), Input::m(cn.mr));
+                let (bl0, br0) = float_band(&ctx.items, cy, 1.0, cl, cr);
+                let cw = width_in(c, (br0 - bl0).max(0.0));
+                let cm = measure(c, cw, f64::NAN, inputs, runs, run_texts, grids, children, boxes, failed, &mut FloatCtx::new(), 0.0, 0.0);
+                let outer = boxes[c].w + ml + mr;
+                let (y, bl, br) = if outer > br0 - bl0 {
+                    let yy = float_fit_y(&ctx.items, cy, outer, cl, cr, boxes[c].h);
+                    let (l, r) = float_band(&ctx.items, yy, boxes[c].h.max(1.0), cl, cr);
+                    (yy, l, r)
+                } else {
+                    (cy, bl0, br0)
+                };
+                boxes[c].x = block_child_x(&n, &cn, bl, br, boxes[c].w);
+                boxes[c].y = y;
+                cursor = y + boxes[c].h;
+                pending = cm.bottom;
+                all_children_through = false;
+                has_child = true;
+                first = false;
+            }};
+        }
         // A DIRECT text-block child coexisting with floats routes its lines around them (§9.5). Its
         // collapsed top is deterministic (a text block's top_only is of(mt), whether or not it collapses
         // through), so it can be placed BEFORE measuring — which the narrowing needs, to know each line's flow
@@ -3083,9 +3110,13 @@ fn measure(
                     // the line it lands on — is a block beside that float like any other: §9.5 leaves its box the
                     // full width and routes the LINES inside it round the float, which it meets translated into
                     // its own frame at the clearance line, exactly as the general path below reads the context.
-                    // (One that starts its own context would have to avoid the float instead, which is that
-                    // path's rule, not this one: it still declines.)
-                    if !cn.starts_bfc {
+                    // …and one that starts its own context AVOIDS the float instead, placed from the clearance
+                    // line exactly as the BFC arm below places one from the flow.
+                    if cn.starts_bfc {
+                        place_beside_floats!(y);
+                        continue;
+                    }
+                    {
                         let child_w = width_in(c, content_w);
                         let cx = block_child_x(&n, &cn, content_left_rel, content_left_rel + content_w, child_w);
                         let mut inner = FloatCtx { items: ctx.items.iter().map(|f| f.shifted(-cx, -y)).collect() };
@@ -3112,10 +3143,7 @@ fn measure(
                 // A child that ESTABLISHES a BFC does not OVERLAP the floats (§9.5): its whole border box is
                 // placed in the band they leave and narrowed to it — the media-object shift, where a float and
                 // a `flow-root` sibling read as two columns. The BFC barrier keeps its own top margin from
-                // folding a descendant's through, so its collapsed top is deterministic. It is sized to the band
-                // at that top (an auto width narrows to it, a declared one keeps its size); a box too WIDE for
-                // the band drops below the float instead and re-places in the widened band below it.
-                let (ml, mr) = (Input::m(cn.ml), Input::m(cn.mr));
+                // folding a descendant's through, so its collapsed top is deterministic.
                 let t_top = CMargin::of(Input::m(cn.mt));
                 let cy = if first && top_open {
                     top_m.merge(t_top);
@@ -3124,24 +3152,7 @@ fn measure(
                     pending.merge(t_top);
                     cursor + pending.value()
                 };
-                let (bl0, br0) = float_band(&ctx.items, cy, 1.0, cl, cr);
-                let cw = width_in(c, (br0 - bl0).max(0.0));
-                let cm = measure(c, cw, f64::NAN, inputs, runs, run_texts, grids, children, boxes, failed, &mut FloatCtx::new(), 0.0, 0.0);
-                let outer = boxes[c].w + ml + mr;
-                let (y, bl, br) = if outer > br0 - bl0 {
-                    let yy = float_fit_y(&ctx.items, cy, outer, cl, cr, boxes[c].h);
-                    let (l, r) = float_band(&ctx.items, yy, boxes[c].h.max(1.0), cl, cr);
-                    (yy, l, r)
-                } else {
-                    (cy, bl0, br0)
-                };
-                boxes[c].x = block_child_x(&n, &cn, bl, br, boxes[c].w);
-                boxes[c].y = y;
-                cursor = y + boxes[c].h;
-                pending = cm.bottom;
-                all_children_through = false;
-                has_child = true;
-                first = false;
+                place_beside_floats!(cy);
                 continue;
             } else if cn.display == DISPLAY_TEXT_BLOCK {
                 // A DIRECT text-block child routes its lines around the floats. Its collapsed top is

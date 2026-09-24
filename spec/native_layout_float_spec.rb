@@ -182,10 +182,12 @@ RSpec.describe 'native layout float parity', if: ENV.fetch('CSIM_JS_ENGINE', 'v8
 
   # A PARTIAL clear — a float left on the side the box does not name still reaches the line it lands on — is a
   # block beside that float like any other: its box keeps the full width and the lines inside it route round the
-  # float, read in its own frame at the clearance line. It declined (`native declined`) until 2026-09-24; one that
-  # starts its own context, which would have to avoid the float instead, still does. Chrome's figures: the text
-  # beside a right float is 44 tall, and below a 20px left float beside a 60px right one it starts at 20.
-  it 'lays out a partial clear beside the float it leaves, declines one that starts a context' do
+  # float, read in its own frame at the clearance line — and one that starts its own context AVOIDS the float,
+  # placed in the band it leaves from the clearance line down, as the flow places one. Both declined (`native
+  # declined`) until 2026-09-24. Chrome's figures: the text beside a right float is 44 tall, below a 20px left float
+  # beside a 60px right one it starts at 20; a flow-root beside the right float narrows to 150, and a 100px one
+  # beside a 150px float drops below it to 50.
+  it 'lays out a partial clear beside the float it leaves, or avoiding it where the box starts a context' do
     {
       '<div style="width:200px;font:16px monospace"><div style="float:right;width:50px;height:50px"></div><div id="m" style="clear:left">aa bb cc dd ee ff gg hh</div></div>' => [0, 44],
       '<div style="width:200px;font:16px monospace"><div style="float:left;width:40px;height:20px"></div><div style="float:right;width:50px;height:60px"></div>' \
@@ -197,8 +199,14 @@ RSpec.describe 'native layout float parity', if: ENV.fetch('CSIM_JS_ENGINE', 'v8
     end
     expect_parity('<div style="overflow:hidden;width:300px"><div style="float:right;width:80px;height:60px"></div><div style="clear:left;height:20px"></div></div>')
     expect_parity('<div style="overflow:hidden;width:300px"><div style="float:right;width:80px;height:60px"></div><div style="clear:right;height:20px"></div></div>')
-    expect(run_shadow('<div style="overflow:hidden;width:300px"><div style="float:right;width:80px;height:60px"></div><div style="clear:left;display:flow-root">x</div></div>'))
-      .to include('ok' => false, 'reason' => 'native declined')
+    {
+      '<div style="width:200px;font:16px monospace"><div style="float:right;width:50px;height:50px"></div><div id="m" style="clear:left;display:flow-root">aa bb cc dd ee ff gg hh</div></div>' => [0, 0, 150],
+      '<div style="width:200px;font:16px monospace"><div style="float:right;width:150px;height:50px"></div><div id="m" style="clear:left;display:flow-root;width:100px">x</div></div>'     => [0, 50, 100]
+    }.each do |body, rect|
+      expect_parity(body)
+      session = simulated_session(page(body)); session.visit '/'
+      expect(session.evaluate_script("(r => [r.x, r.y, r.width])(document.getElementById('m').getBoundingClientRect())")).to eq(rect)
+    end
   end
 
   # A float's CONTAINING BLOCK is its own parent; the CONTEXT it is recorded in is the nearest ancestor that
