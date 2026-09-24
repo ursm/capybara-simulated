@@ -62,14 +62,15 @@ RSpec.describe 'native layout bail coverage', if: ENV.fetch('CSIM_JS_ENGINE', 'v
     expect(parity?('<div dir="ltr" style="display:flow-root;width:300px"><div style="float:left;width:50px;height:20px"></div><div style="display:flow-root;width:120px;height:20px">x</div></div>')).to be true
   end
 
-  it 'lays out an inline vertical-align SHIFT (sup) natively (its runs ride the shift, growing the line)' do
+  it 'lays out an inline vertical-align natively (its runs ride the shift, growing the line)' do
     # A baseline shift (sub / super / length / %) offsets the element's runs; native threads the shift into the
     # run stream. (A sub/sup GLUED to a word with no space is a mixed-font word, a separate pre-existing decline.)
     expect(native?('<div>text <sup>x</sup> more text here</div>')).to be true
     expect(native?('<div>text <span style="vertical-align:sub">y</span> more text here</div>')).to be true
     expect(native?('<div>text <span>x</span> more text here</div>')).to be true
-    # middle / text-top / text-bottom place the element against a box — still declined.
-    expect(native?('<div>text <span style="vertical-align:middle">m</span> more</div>')).to be false
+    # …and middle / text-top / text-bottom, which place the element against the parent's font, ride it too: the
+    # shift is the distance that moves the box's own baseline there (declined until 2026-09-24).
+    expect(native?('<div>text <span style="vertical-align:middle">m</span> more</div>')).to be true
   end
 
   # A HYPHEN or dash is a break opportunity native takes itself now (parity in the text spec); a SOFT one is

@@ -339,15 +339,15 @@ RSpec.describe 'native layout L1 block-flow parity', if: ENV.fetch('CSIM_JS_ENGI
         # guard. NOT the same route — `sawPreWs && !hasInline` never enters the mixed-block branch at all,
         # since `hasInline` is false there — so what this row covers is a gate BESIDE that branch rather
         # than inside it. Kept for the coverage; the pairing claim above it is about the two
-        # `inline-box-relative-valign` rows, which really are one reason through two routes.)
+        # `block-level-box-in-inline-content` rows, which really are one reason through two routes.)
         ['white-space-only-block',
          '<div style="width:400px;white-space:pre"><p>a</p>   <p>b</p></div>'],
         ['flex-container-unsupported',        %(<div style="width:400px">#{UNSUPPORTED_FLEX}</div>)],
         ['block-level-box-in-inline-content', '<div style="width:400px">text <span><div style="height:5px">b</div></span> after</div>'],
-        ['inline-box-relative-valign',        '<div style="width:400px">text <span style="vertical-align:middle">x</span> after</div>'],
         # …and the last one again through a MIXED block's anonymous group, which is the other propagation
-        # route — its reason has to outlive the `emitAttempt` the group is built inside.
-        ['inline-box-relative-valign',        '<div style="width:400px"><p>a</p>text <span style="vertical-align:middle">x</span> more<p>b</p></div>'],
+        # route — its reason has to outlive the `emitAttempt` the group is built inside. (The pair was
+        # `inline-box-relative-valign` until 2026-09-24, when a `middle` inline box went native.)
+        ['block-level-box-in-inline-content', '<div style="width:400px"><p>a</p>text <span><div style="height:5px">b</div></span> more<p>b</p></div>'],
         # …and a FLOAT in a mixed block's inline run, which is the third: the float hook walks its subtree
         # DIRECTLY, so the gate inside names itself while the group's `emitAttempt` is still open and about
         # to erase it. Read at the hook site or the whole family answers `float-in-inline`. Nothing else in

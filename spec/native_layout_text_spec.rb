@@ -121,6 +121,38 @@ RSpec.describe 'native layout L2 text-block parity', if: ENV.fetch('CSIM_JS_ENGI
     expect_parity(native_body)
   end
 
+  # `vertical-align` on an INLINE BOX places the text it owns against the PARENT's font (`middle`: half an
+  # x-height above the baseline; `text-top` / `text-bottom`: the parent's ascent / descent), and the walk hands
+  # native that as the shift the box's own baseline moves by — the oracle's `inlineAscent`, which its line
+  # layout asks of the same text. It declined as `inline-box-relative-valign` until 2026-09-24 (the whole
+  # `vahang` sweep, 480). Chrome's figures, where they agree.
+  {
+    'middle, a small box in a big parent'           => ['<div style="font:30px monospace;width:300px">a<span id="m" style="vertical-align:middle;font-size:10px">x</span>c</div>', 16.953125],
+    'middle, its own line-height'                   => ['<div style="font:16px/40px monospace;width:300px">a<span id="m" style="vertical-align:middle;font-size:10px;line-height:12px">x</span>c</div>', 14.71875],
+    'text-top'                                      => ['<div style="font:30px monospace;width:300px">a<span id="m" style="vertical-align:text-top;font-size:10px">x</span>c</div>', 0],
+    'text-bottom'                                   => ['<div style="font:30px monospace;width:300px">a<span id="m" style="vertical-align:text-bottom;font-size:10px">x</span>c</div>', 27],
+    '-webkit-baseline-middle'                       => ['<div style="font:30px monospace;width:300px">a<span id="m" style="vertical-align:-webkit-baseline-middle;font-size:10px">x</span>c</div>', 25],
+    'a box of a bigger font, which grows the line'  => ['<div style="font:16px monospace;width:300px">a<span id="m" style="vertical-align:middle;font-size:30px">x</span>c</div>', 0]
+  }.each do |name, (body, chrome_y)|
+    it "aligns an inline box's own text by vertical-align: #{name}" do
+      expect_parity(body, chrome_y: chrome_y)
+    end
+  end
+  # SHARED, all three from the oracle's one rule — only the text a box OWNS moves, and only by a font figure:
+  # `top` / `bottom` leave the text on the baseline where Chrome puts it at the line's top / bottom; text in an
+  # inline NESTED inside an aligned box stays where it was (`inlineParentShift` hands down a SHIFT only), where
+  # Chrome moves it with its box; and a box with a line-height of its own lands a pixel off.
+  {
+    'top'                                  => ['<div style="font:16px/40px monospace;width:300px">a<span id="m" style="vertical-align:top;font-size:10px;line-height:12px">x</span>c</div>', 15, -1],
+    'bottom'                               => ['<div style="font:16px/40px monospace;width:300px">a<span id="m" style="vertical-align:bottom;font-size:10px;line-height:12px">x</span>c</div>', 15, 27],
+    'a nested inline'                      => ['<div style="font:16px monospace;width:300px">a<span style="vertical-align:middle;font-size:30px">x<b id="m" style="font-size:10px">b</b></span>c</div>', 13.788, 21],
+    'text-top with its own line-height'    => ['<div style="font:16px/40px monospace;width:300px">a<span id="m" style="vertical-align:text-top;font-size:10px;line-height:12px">x</span>c</div>', 9, 8]
+  }.each do |name, (body, shared, chrome)|
+    it "aligns an inline box's own text by vertical-align: #{name} (shared)" do
+      expect_parity(body, shared_y: shared, shared_y_chrome: chrome)
+    end
+  end
+
   # `break-spaces` lays a LINE out exactly as `pre-wrap` does — `placeTextRun` asks `PRESERVING_WS` and
   # `modeWraps`, and both answer the same for the two — and parts from it only in the INTRINSIC measure, where
   # every preserved space is content that never hangs and carries a break after it. So the LINE layout reads it
@@ -1945,20 +1977,11 @@ bbbbbbbbbb</span></div></div>))
 
 end
 
-RSpec.describe 'native text valign decline', if: ENV.fetch('CSIM_JS_ENGINE', 'v8') == 'v8' do
+RSpec.describe 'native text unicode classes', if: ENV.fetch('CSIM_JS_ENGINE', 'v8') == 'v8' do
   def page(body)
     html = %(<!doctype html><html><head><meta charset="utf-8"></head><body style="margin:0;font:16px monospace">#{body}</body></html>)
     Rack::Builder.new { run ->(_env) { [200, {'content-type' => 'text/html; charset=utf-8'}, [html]] } }.to_app
   end
-
-  def expect_bail(body)
-    session = simulated_session(page(body)); session.visit '/'
-    session.evaluate_script('document.body.offsetHeight')   # force a layout pass
-    expect(session.evaluate_script('globalThis.__csimLayoutShadowRun()')).to include('ok' => false)
-  end
-
-  it('declines vertical-align:middle on an inline element') { expect_bail('<div style="width:300px">text <span style="vertical-align:middle">m</span> here</div>') }
-  it('declines vertical-align:text-top on an inline element') { expect_bail('<div style="width:300px">text <span style="vertical-align:text-top">t</span> here</div>') }
 
   # The classes native answers `\p{L}` / `\p{N}` / `\p{M}` from come from regex-syntax — the same regex the
   # ORACLE writes, parsed rather than reimplemented (`unicode.rs`). But regex-syntax bakes in a UCD snapshot of
