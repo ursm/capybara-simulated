@@ -530,8 +530,8 @@ RSpec.describe 'native layout L1 block-flow parity', if: ENV.fetch('CSIM_JS_ENGI
     expect_parity('<div style="position:relative;padding:10%;width:300px"><p>a</p>text<div style="position:absolute;top:5px;left:5px;width:20px;height:20px"></div><p>b</p></div>')
   end
 
-  # …and it DECLINES where the group it sits in collapses to nothing. The box's static position is the line
-  # that group never opened, and the ORACLE gives that line things a block record cannot carry: the group's
+  # …and where the group it sits in holds nothing a line is made of. The box's static position is the line that
+  # group never opened, and the ORACLE gives that line things a block record cannot carry: the group's
   # `text-indent` where the box opens one (11), and the alignment shift of whatever LATER line eventually
   # closes, the entry sitting in `lineStatics` until one does (130.8 in a centred 300px block, the shift of a
   # `<b>` line two blocks further on — Chrome says 150, the centre of the empty line the box actually sits on,
@@ -539,24 +539,47 @@ RSpec.describe 'native layout L1 block-flow parity', if: ENV.fetch('CSIM_JS_ENGI
   # (80, which both engines and Chrome agree on). Emitting it against the block gets the container's cursor
   # and none of the three.
   #
+  # So since 2026-09-24 such a group is KEPT — a text block of no line, as a block of its own with only an
+  # out-of-flow child already was — which carries the indent and the band, where the block's lines are LEFT-
+  # aligned: no later line's shift moves the box there. A centred, right-aligned or rtl block still declines
+  # (`oof-in-collapsed-group`; 810 of rv6g1's and 276 of ooffuzz's declines went, and the `oofgrp` sweep crosses
+  # it with every indent flavour, floats, margins and insets).
+  #
   # THE REFUSAL WAS LIFTED ON 2026-09-23 AND PUT BACK THE SAME DAY, and what that cost is the reason this
   # comment is long. An audit re-measured it, read "342 shapes lay out, 0 mismatch" and called the gate stale.
   # The rollback that precedes it had already spliced those records off the stream and nothing re-emits them,
   # so lifting it placed no box: it DROPPED 372 of them and reported `ok: true, mismatches: 0`. Three sweeps
   # and the parity spec that replaced this one all read clean, because a record that is not there compares as
-  # nothing. `droppedRecords` exists now (see `spec/support/shadow_parity.rb`) and this example would have
-  # failed on it.
+  # nothing. `droppedRecords` exists now (see `spec/support/shadow_parity.rb`), and `expect_parity` asks it.
   #
   # A group collapses for five reasons, not one — `hasContent` is set by text, content whitespace, a `<br>`,
   # an atomic or an edged inline's close — so BOTH the everyday routes are here: whitespace around the box,
   # and the box ALONE after the last block, which is where a positioned dropdown or tooltip is written.
-  it 'declines an out-of-flow child of a mixed block whose group collapses' do
+  it 'keeps the group an out-of-flow child of a left-aligned mixed block sits in' do
     [
       '<div style="position:relative;width:300px"><p>a</p> <div style="position:absolute;width:20px;height:20px"></div> <p>b</p>text<p>c</p></div>',
       '<div style="position:relative;width:300px"><p>a</p>text<p>b</p><div style="position:absolute;width:20px;height:20px"></div></div>'
     ].each do |body|
-      expect_walk_declines(body, 'oof-in-collapsed-group')
+      expect_parity(body)
+      expect_walk_declines(body.sub('width:300px', 'width:300px;text-align:center'), 'oof-in-collapsed-group')
     end
+  end
+  # …where Chrome agrees on the plain line (x 0, below the block before it) and a float band (20), and both engines
+  # share two gaps with it: a `hanging` indent re-arms past a block child in both (12, Chrome 0), and a plain one
+  # does not (0, Chrome 50 — it indents the first line of every anonymous block).
+  it 'places the box where the group never opened a line' do
+    pos = lambda {|body|
+      session = simulated_session(page(%(<div style="position:relative;width:200px;font:16px monospace">#{body}</div>))); session.visit '/'
+      expect(parity(session)).to include('ok' => true, 'mismatches' => 0)
+      session.evaluate_script("(() => { const r = document.getElementById('m').getBoundingClientRect(); return [r.x, r.y]; })()")
+    }
+    oof = '<i id="m" style="position:absolute;width:5px;height:5px"></i>'
+    expect(pos.(%(<div><div style="height:6px"></div> #{oof} <div style="height:6px"></div></div>))).to eq([0, 6])
+    expect(pos.(%(<div><div style="float:left;width:20px;height:7px"></div>#{oof}<div style="height:6px"></div></div>))).to eq([20, 0])
+    x, = pos.(%(<div style="text-indent:12px hanging"><div style="height:6px"></div>#{oof}<div style="height:6px"></div></div>))
+    expect_shared_gap(x, shared: 12, chrome: 0, what: 'hanging indent past a block child')
+    x, = pos.(%(<div style="text-indent:50px">a<div style="width:5px;height:5px"></div>#{oof}</div>))
+    expect_shared_gap(x, shared: 0, chrome: 50, what: 'plain indent past a block child')
   end
 
   # A PRESERVING white-space in a mixed block declined until 2026-09-23 too, on the scope the gate states for
