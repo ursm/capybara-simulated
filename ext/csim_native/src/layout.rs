@@ -3079,6 +3079,33 @@ fn measure(
                         first = false;
                         continue;
                     }
+                    // …and one that clears only PART of them — a float on the side it does not name still reaches
+                    // the line it lands on — is a block beside that float like any other: §9.5 leaves its box the
+                    // full width and routes the LINES inside it round the float, which it meets translated into
+                    // its own frame at the clearance line, exactly as the general path below reads the context.
+                    // (One that starts its own context would have to avoid the float instead, which is that
+                    // path's rule, not this one: it still declines.)
+                    if !cn.starts_bfc {
+                        let child_w = width_in(c, content_w);
+                        let cx = block_child_x(&n, &cn, content_left_rel, content_left_rel + content_w, child_w);
+                        let mut inner = FloatCtx { items: ctx.items.iter().map(|f| f.shifted(-cx, -y)).collect() };
+                        let placed = inner.items.len();
+                        let cm2 = measure(c, child_w, f64::NAN, inputs, runs, run_texts, grids, children, boxes, failed, &mut inner, 0.0, 0.0);
+                        // (The same backstops the general path keeps: a margin the floats changed, or a used width
+                        // the measure settled for itself, and the frame the floats were read in is stale.)
+                        if cm2.collapse_through || cm2.top_only.value() != cm.top_only.value() || boxes[c].w != child_w {
+                            failed.set(true);
+                        }
+                        boxes[c].x = cx;
+                        boxes[c].y = y;
+                        ctx.items.extend(inner.items[placed..].iter().map(|f| f.shifted(cx, y)));
+                        cursor = y + boxes[c].h;
+                        pending = cm2.bottom;
+                        all_children_through = false;
+                        has_child = true;
+                        first = false;
+                        continue;
+                    }
                     failed.set(true);
                 }
             } else if cn.starts_bfc {
