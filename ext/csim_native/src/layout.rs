@@ -5667,7 +5667,7 @@ fn content_intrinsic(i: usize, inputs: &[Cell<Input>], runs: &[Run], run_texts: 
                            // constant term. Without the clamp here the measure took 0 where the oracle takes
                            // 5, and the 39 mismatches that found it were the first cases any sweep had of an
                            // indent inside a comparison function.
-                           (clamp_affine(n.indent_px, n.indent_lo, n.indent_hi, 0.0), n.indent_hanging, n.indent_each_line),
+                           (clamp_affine(n.indent_px, n.indent_lo, n.indent_hi, 0.0), n.indent_hanging, n.indent_each_line, n.indent_spent),
                            inputs, runs, run_texts, grids, children)
         }
         // …a LIST BOX excepted: its rows ARE CSS content, and the oracle's `minContentWidth` reads them (it asks
@@ -5885,7 +5885,7 @@ fn flex_intrinsic_widths(i: usize, inputs: &[Cell<Input>], runs: &[Run], run_tex
 fn clamp_affine(v: f64, lo: (f64, f64), hi: (f64, f64), basis: f64) -> f64 {
     v.max(lo.0 + lo.1 * basis).min(hi.0 + hi.1 * basis)
 }
-fn text_intrinsic(runs: &[Run], run_texts: &[Option<Vec<u16>>], ws_mode: u8, indent: (f64, bool, bool), inputs: &[Cell<Input>], all_runs: &[Run], all_texts: &[Option<Vec<u16>>], grids: &[f64], children: &[Vec<usize>]) -> Option<(f64, f64)> {
+fn text_intrinsic(runs: &[Run], run_texts: &[Option<Vec<u16>>], ws_mode: u8, indent: (f64, bool, bool, bool), inputs: &[Cell<Input>], all_runs: &[Run], all_texts: &[Option<Vec<u16>>], grids: &[f64], children: &[Vec<usize>]) -> Option<(f64, f64)> {
     // …per RUN, because an inline may declare its own `white-space` (`Run::ws_mode`) and every one of these is
     // about the run it belongs to. `pin` is the exception: "this box never wraps, so its min-content IS its
     // max-content" is a statement about the whole stream, true only while no run in it wraps.
@@ -5911,9 +5911,6 @@ fn text_intrinsic(runs: &[Run], run_texts: &[Option<Vec<u16>>], ws_mode: u8, ind
     // …while the four behaviours are set from each RUN's own mode as the loop reaches it.
     let (mut wraps, mut preserve, mut break_nl, mut brk_spaces);
     let (mut min, mut max) = (0.0f64, 0.0f64);
-    // (No `text-indent` here: the WALK declines an indented block whose intrinsic widths native would be asked
-    // for, because what Chrome's min-content does with an indent is a real break pass at zero available width —
-    // see the walk's own note. The FLOW applies it, in `line_layout`.)
     let (mut line, mut word) = (0.0f64, 0.0f64);
     // `text-indent` narrows the line it applies to, so both figures carry it — and it is TAKEN by the first thing
     // that occupies the line (a word, an atomic, an inline box, a `<br>`, a `<wbr>`, a preserved segment), never
@@ -5921,8 +5918,13 @@ fn text_intrinsic(runs: &[Run], run_texts: &[Option<Vec<u16>>], ws_mode: u8, ind
     // empty `<td>` under an inherited indent is 0 wide). `hanging` indents every line BUT the first, and after a
     // forced break `each-line` arms the next one (inverted again under `hanging each-line`); every line an
     // intrinsic measure closes is a forced one, since it has no room to wrap in.
-    let (indent_px, indent_hanging, indent_each_line) = indent;
-    let mut pending_indent = if indent_hanging { 0.0 } else { indent_px };
+    // …and the FIRST line is the block's first only where nothing SPENT it: a mixed block's anonymous group after
+    // a block child starts on a line that is not (`indent_spent`), where the oracle's pen has closed a line for
+    // the block child and re-armed the indent as any non-first line — `hanging ? px : 0`. The same test the flow
+    // makes (`line_layout`'s `indent_first != indent_hanging`); without it the measure indented a group the
+    // layout did not (30.2 where the oracle says 20.6).
+    let (indent_px, indent_hanging, indent_each_line, indent_spent) = indent;
+    let mut pending_indent = if !indent_spent != indent_hanging { indent_px } else { 0.0 };
     macro_rules! take_indent {
         () => {{
             line += pending_indent;

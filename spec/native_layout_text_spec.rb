@@ -473,6 +473,28 @@ RSpec.describe 'native layout L2 text-block parity', if: ENV.fetch('CSIM_JS_ENGI
       )
     end
   end
+  # …and past a BLOCK child the indent re-arms as a non-first line's, so under `hanging` an empty inline after
+  # one takes it (the oracle and Chrome: 7 wide; native's empty group has no box) — refused as well.
+  it 'refuses to measure a hanging-indented block of a block child and an empty inline' do
+    expect_declined_x(
+      %(<div style="font:16px monospace"><div style="float:left"><div style="text-indent:7px hanging"><div style="width:5px;height:5px"></div><span></span></div></div><b id="m" style="display:inline-block;width:4px;height:4px"></b></div>),
+      7,
+      %(<div style="font:16px monospace"><div style="float:left"><div style="text-indent:7px"><div style="width:5px;height:5px"></div><span></span></div></div><b id="m" style="display:inline-block;width:4px;height:4px"></b></div>),
+      reason:   'shrink-to-fit-child-unmeasurable',
+      chrome_y: 13
+    )
+  end
+  # A MIXED block's anonymous group past a block child starts on a line that is not the block's first, so it takes
+  # no first-line indent — in the layout (its record's `spent` bit) and now in the MEASURE, which ignored the bit
+  # and indented the group anyway (59 where the oracle and Chrome say 48). That was the whole of what the walk's
+  # `measured-subtree-under-text-indent` refusal was guarding in its 1,458 declines; it is gone.
+  it 'measures a mixed block\'s group past a block child without the first-line indent' do
+    expect_parity(
+      '<div style="font:16px monospace"><div style="float:left;text-indent:11px"><div style="height:6px">B</div>aa bb<div style="height:6px">C</div></div><b id="m" style="display:inline-block;width:4px;height:4px"></b></div>',
+      48.015625,
+      chrome_y: 13
+    )
+  end
   # …and a LONE `<wbr>` opens a line box in Chrome (the block 22 tall around its two floats) and in neither engine
   # (5): shared, recorded.
   it 'opens no line for a lone <wbr> (shared)' do
