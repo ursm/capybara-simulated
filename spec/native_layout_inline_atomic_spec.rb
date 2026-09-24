@@ -495,6 +495,26 @@ RSpec.describe 'native layout inline-atomic parity', if: ENV.fetch('CSIM_JS_ENGI
       expect(r).to include('ok' => true, 'mismatches' => 0)
       expect(r['oracleReads'].keys.grep(/\AnlGatherRuns |\AatomicBaselineOffset |\AboxBaselineOffset /)).to eq([])
     end
+    # …nor for the PERCENTAGE edges and width of a box in that group: its record hangs under the group, its containing
+    # block is the mixed block, and the group is exactly as wide as that block's content box, so native has the basis
+    # across (a percentage HEIGHT it has not — the group's height is auto). Until 2026-09-24 they were resolved against
+    # the oracle's width (`recordCbW`). Chrome: the inline-block at 20/20 and 28.45 wide, the float 140 wide.
+    it 'resolves the percentage edges and width of a box in an anonymous group natively' do
+      {
+        '<div style="width:400px"><span id="m" style="display:inline-block;margin:5%;padding:0 2%">ib</span><div style="height:5px"></div></div>' => [20, 20, 28.45],
+        '<div style="width:400px"><div id="m" style="float:left;width:25%;padding-left:10%">f</div><div style="height:5px"></div>tail</div>'        => [0, 0, 140]
+      }.each do |body, (x, y, w)|
+        expect_parity(body)
+        got = laid_out_rect(body)
+        [x, y, w].zip(got).each {|want, g| expect(g).to be_within(0.01).of(want) }
+        session = simulated_session(page(body))
+        session.visit '/'
+        session.evaluate_script('document.body.offsetHeight')
+        r = session.evaluate_script('globalThis.__csimLayoutShadowRun(undefined, {noOracle: true})')
+        expect(r).to include('ok' => true, 'mismatches' => 0)
+        expect(r['oracleReads'].to_h.keys.grep_v(/\(handed over\)\z/)).to be_empty, r.inspect
+      end
+    end
     # An INLINE replaced element — `<svg>` / `<canvas>` by their own UA display, every form control forced to
     # `display: inline`. The arm that decided this admitted only an `<img>`, because when it was written a
     # text-drawing control's baseline was still the oracle's; `controlBaseline` made it native's soon after and
