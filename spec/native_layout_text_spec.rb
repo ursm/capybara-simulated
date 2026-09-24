@@ -7,6 +7,7 @@ require 'capybara/simulated'
 require 'rack'
 require_relative 'support/session_teardown'
 require_relative 'support/shadow_parity'
+require_relative 'support/walk_refusals'
 # …and the enumerator the Unicode drift check asks the engine with.
 require_relative 'support/unicode_classes'
 

@@ -9,6 +9,7 @@ require 'capybara/simulated'
 require 'rack'
 require_relative 'support/session_teardown'
 require_relative 'support/shadow_parity'
+require_relative 'support/walk_refusals'
 
 RSpec.describe 'native layout no-oracle run', if: ENV.fetch('CSIM_JS_ENGINE', 'v8') == 'v8' do
   def session_with(body)
@@ -56,7 +57,7 @@ RSpec.describe 'native layout no-oracle run', if: ENV.fetch('CSIM_JS_ENGINE', 'v
     # still asks the oracle's intrinsic widths — a plain percentage width no longer reads anything, and neither
     # does an intrinsic SIZE, which is data off the DOM rather than a layout the oracle ran)
     s = session_with('<div style="width:300px"><p style="position:relative;left:10%">hello</p>' \
-                     %(<table><tr><td>a #{WalkRefusals::POSITIONED}</td></tr></table></div>))
+                     "<table><tr><td>a #{WalkRefusals::POSITIONED}</td></tr></table></div>")
     reads = s.evaluate_script('globalThis.__csimLayoutShadowRun(undefined, {noOracle: true}).oracleReads')
     expect(reads.keys).to include('recordCbW _lbCbW')
     expect(reads.keys).to include('nlShadowRun the pass root origin and width (handed over)')
