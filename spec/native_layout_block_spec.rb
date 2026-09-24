@@ -335,18 +335,18 @@ RSpec.describe 'native layout L1 block-flow parity', if: ENV.fetch('CSIM_JS_ENGI
       # Pairs, not a hash: the same reason is asserted twice on purpose, through two different routes.
       [
         # (A mixed block's own gate, raised AFTER its group's `emitAttempt` rolled back — the claim above is about
-        # the two `block-level-box-in-inline-content` rows, which really are one reason through two routes. This
+        # the two `text-not-measurable` rows, which really are one reason through two routes. This
         # row was `white-space-only-block`, a gate beside the mixed branch, until 2026-09-24, when preserved white
         # space went down the text path.)
         ['oof-in-collapsed-group',
          '<div style="width:400px;text-align:center"><p>a</p> <div style="position:absolute;width:2px;height:2px"></div> <p>b</p>text</div>'],
         ['flex-container-unsupported',        %(<div style="width:400px">#{UNSUPPORTED_FLEX}</div>)],
-        ['block-level-box-in-inline-content', '<div style="width:400px">text <span><div style="height:5px"><i style="float:left">f</i>b</div></span> after</div>'],
+        ['text-not-measurable',               '<div style="width:400px;white-space:pre">a&#13;b</div>'],
         # …and the last one again through a MIXED block's anonymous group, which is the other propagation
         # route — its reason has to outlive the `emitAttempt` the group is built inside. (The pair was
-        # `inline-box-relative-valign` until 2026-09-24, when a `middle` inline box went native; the block in the
-        # inline holds a FLOAT, which is what still declines it since the atomic it makes went native the same day.)
-        ['block-level-box-in-inline-content', '<div style="width:400px"><p>a</p>text <span><div style="height:5px"><i style="float:left">f</i>b</div></span> more<p>b</p></div>'],
+        # `inline-box-relative-valign`, then `block-level-box-in-inline-content`, until both went native on
+        # 2026-09-24; a preserved CR is refused by the gather on both routes alike.)
+        ['text-not-measurable',               '<div style="width:400px;white-space:pre"><p>a</p>x&#13;y<p>b</p></div>'],
         # …and a FLOAT in a mixed block's inline run, which is the third: the float hook walks its subtree
         # DIRECTLY, so the gate inside names itself while the group's `emitAttempt` is still open and about
         # to erase it. Read at the hook site or the whole family answers `float-in-inline`. Nothing else in

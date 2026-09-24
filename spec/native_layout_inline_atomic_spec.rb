@@ -886,19 +886,20 @@ RSpec.describe 'native layout inline-atomic parity', if: ENV.fetch('CSIM_JS_ENGI
       # …and MEASURED so, as a float's or a `max-content` box's content
       expect_native_atomic('<div style="font:16px monospace;width:10px"><div style="float:left">aa <span>bb<p>para</p></span></div></div>')
     end
-    # The atomic is no BFC of its own, so what it shares with the block around it the oracle keeps and native (which
-    # lays it out as an `inline-block`) would not: a float inside it lands in the outer band and wraps the line after
-    # it, and a `clear` inside it clears the floats outside. Both still decline.
-    it 'declines where the atomic would share the float context around it' do
+    # …and a formatting context of its OWN, as an `inline-block` is (`computeEstablishesBFC`). Until the review of
+    # f51ba9c7 the oracle's shared the block's: a float in it wrapped the line after it, a `clear` in it cleared
+    # the floats outside, and an outer float pushed a line of its content down past it (104 tall where native said
+    # 66) — the first two declined, the third was a parity break. Chrome splits the box around the block in all
+    # three (66, 124 and 66 tall); both engines keep one atomic (22, 22 and 66). Pinned as shared.
+    it 'is a formatting context of its own, as an inline-block is' do
       {
-        '<div style="width:200px;font:16px monospace">aaaa <span><div><div style="float:right;width:60px">bb</div>z</div></span> t uu</div>' => 'a float in it',
-        '<div style="width:200px;font:16px monospace"><div style="float:left;width:30px;height:80px"></div>aa <span><div style="clear:left">bb</div></span> t</div>' => 'a clear in it'
-      }.each do |body, what|
-        r = run_shadow(body)
-        expect(r).to include('ok' => false, 'reason' => 'block-level-box-in-inline-content'), "#{what}: #{r.inspect}"
+        '<div style="width:200px;font:16px monospace">aaaa <span><div><div style="float:right;width:60px">bb</div>z</div></span> t uu</div>'                               => [22, 66],
+        '<div style="width:200px;font:16px monospace"><div style="float:left;width:30px;height:80px"></div>aa <span><div style="clear:left">bb</div></span> t</div>' => [22, 124]
+      }.each do |body, (shared, chrome)|
+        expect_native_atomic(body)
+        expect_shared_gap(rendered_rect(body, 'div')['height'], shared: shared, chrome: chrome, what: "#{body}: the block's height")
       end
-      # …and the same content in a box that IS a BFC of its own goes native.
-      expect_native_atomic('<div style="width:200px;font:16px monospace">aaaa <span><div style="display:flow-root"><div style="float:right;width:60px">bb</div>z</div></span> t uu</div>')
+      expect_native_atomic('<div style="width:200px;font:16px monospace"><div style="float:right;width:40px;height:60px"></div>aa <span>t<div style="width:50%">half</div>u</span> cc</div>')
     end
   end
 

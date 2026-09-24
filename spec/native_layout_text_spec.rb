@@ -138,6 +138,15 @@ RSpec.describe 'native layout L2 text-block parity', if: ENV.fetch('CSIM_JS_ENGI
       expect_parity(body, chrome_y: chrome_y)
     end
   end
+  # …and text whose STYLE comes from a box-less `display: contents` element inside the aligned box lands where the
+  # oracle's `placeTextRun` puts it — `inlineAscent(box, baselineWithin(that element))`, one height whatever its own
+  # font — which the walk measures from THAT element's baseline (the review of 3bc328b2: native measured it from the
+  # box's, 41 against the oracle's 42.71 tall, and 3,683 of an 18,144-shape sweep). SHARED with Chrome, which moves
+  # it as the box's own text (41): the oracle's rule is wrong wherever a text's style element is not its box.
+  it "aligns a display:contents element's text inside an aligned inline box as the oracle does (shared)" do
+    body = '<div style="width:300px;font:16px monospace">a<span id="m" style="vertical-align:middle"><em style="display:contents;font-size:30px">x</em></span>c</div>'
+    expect_parity(body, shared_y: 1.712, shared_y_chrome: 15)
+  end
   # SHARED, all three from the oracle's one rule — only the text a box OWNS moves, and only by a font figure:
   # `top` / `bottom` leave the text on the baseline where Chrome puts it at the line's top / bottom; text in an
   # inline NESTED inside an aligned box stays where it was (`inlineParentShift` hands down a SHIFT only), where

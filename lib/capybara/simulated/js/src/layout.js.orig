@@ -1401,10 +1401,13 @@ function nlGatherRuns(children, owner, ctx, wsMode, shift, wrapMode, rel = null,
     // shrink-to-fit rectangle on the line exactly as an `inline-block` is, and native lays it out as one. Chrome
     // SPLITS the box around the block instead (CSS 2.1 §9.2.1.1: the block on its own at full width, the lines
     // before and after in anonymous blocks) — a divergence both engines now share, recorded in the text spec.
-    // …and a formatting context of its own, as an `inline-block` is (`computeEstablishesBFC`): until the review of
-    // f51ba9c7 the oracle's shared the block's float context, so a float in it wrapped the line after it, a
-    // `clear` in it cleared the floats outside, and an outer float pushed a line of its content down past it.
+    // What an `inline-block` does NOT share is the float context: the atomic `display: inline` box establishes no
+    // BFC, so a float in it lands in THIS block's band and narrows the lines after it (the oracle's line wraps
+    // under a 60px float nested two levels down; native's contains it), and a `clear` in it clears the floats
+    // OUTSIDE it (a `clear: left` block under a 30px float beside the line: 102 tall in the oracle, 22 in native).
+    // Those stay declined.
     const blockInInline = cdisp === 'inline' && intrinsicSize(c) == null && !isContinuedInline(c);
+    if (blockInInline && nlSharesFloatContext(c)) return { ok: false, reason: 'block-level-box-in-inline-content' };
     if (cdisp === 'inline-block' || cdisp === 'inline-flex' || cdisp === 'inline-table' || cdisp === 'inline-grid' ||
         (cdisp === 'inline' && intrinsicSize(c) != null) || blockInInline) {
       // `vertical-align` on an atomic, in two families. EVERY value but two only moves the atomic's ASCENT
@@ -1470,10 +1473,7 @@ function nlGatherRuns(children, owner, ctx, wsMode, shift, wrapMode, rel = null,
       hasContent = true;
       continue;
     }
-    // A block-level box in the inline content — unreachable today: a block's classifier sends every block-level
-    // child to the block flow, and an inline holding one is the atomic above, so no stream reaches a block box.
-    // A drift guard, which declines where a new route would hand one here.
-    if (cdisp !== 'inline') return { ok: false, reason: 'block-level-box-in-inline-content' };
+    if (cdisp !== 'inline') return { ok: false, reason: 'block-level-box-in-inline-content' };               // a block-level box in the IFC → JS
     // `white-space` is not the block's to decide for the whole formatting context: an inline may declare its
     // own, and its runs then collapse, wrap and break on newlines by ITS mode. Threaded down the recursion the
     // way `nlWrapMode` and the baseline shift are, and stamped on every run the subtree makes.
@@ -1550,8 +1550,19 @@ function nlGatherRuns(children, owner, ctx, wsMode, shift, wrapMode, rel = null,
   }
   return { ok: true, hasContent };
 }
+// Whether anything in a box's subtree, short of a box that establishes its own BFC, takes part in the float context
+// around it: a float, or a `clear` that waits for one. An atomic that is no BFC of its own — a `display: inline`
+// box holding a block, which the oracle lays out as one — shares that context with the block it is in.
+function nlSharesFloatContext(el) {
+  if (establishesBFC(el, displayOf(el))) return false;
+  for (const kid of layoutChildren(el)) {
+    if (kid.nodeType !== NODE_ELEMENT || boxlessChild(kid)) continue;
+    if (isFloated(kid) || clearOf(kid) || nlSharesFloatContext(kid)) return true;
+  }
+  return false;
+}
 // Whether a run stream with no CONTENT still holds something that OCCUPIES a line — an inline box, edged or not (an
-// edgeless one is a zero OPEN / CLOSE pair), or a `<wbr>` — which is what takes a first-line
+// empty edgeless one is a zero OPEN / CLOSE pair for exactly this), or a `<wbr>` — which is what takes a first-line
 // `text-indent` in the measure: `<span></span>` beside two floats under a 7px indent is 77 wide at max-content in
 // the oracle and Chrome, and a block record with no runs had nothing to take it (70). Such a stream is kept as a
 // TEXT BLOCK: it lays no line out (a zero edge lands nothing, and nothing grows the line), so the layout is the
@@ -11660,10 +11671,6 @@ function computeEstablishesBFC(el, disp) {
   if (disp === 'contents') return false;
   // The display is in hand already, so it answers before anything has to be read from the cascade:
   // every box that is not an ordinary block or inline starts a context of its own anyway.
-  // …and so does a `display: inline` box holding a BLOCK child, which this engine lays out as an ATOMIC —
-  // `isContinuedInline` refuses to fragment it and `placeInlineChild` gives it one shrink-to-fit rectangle,
-  // exactly as an `inline-block`.
-  if (disp === 'inline' && !isContinuedInline(el)) return true;
   if (disp !== 'block' && disp !== 'list-item' && disp !== 'inline') return true;
   if (isFloated(el)) return true;
   const pos = positionOf(el);
