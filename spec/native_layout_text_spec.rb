@@ -452,6 +452,38 @@ RSpec.describe 'native layout L2 text-block parity', if: ENV.fetch('CSIM_JS_ENGI
       chrome_y: 13
     )
   end
+  # …and the figure itself, where the width reaches the marker: a float around such a block (no fallback either,
+  # so it declines) is the oracle's 77 wide, the marker beside it (Chrome 77), and the same block with no indent
+  # goes native. The same holds for a `<wbr>`, which takes the indent and is no content to the walk, and an
+  # out-of-flow child inside the inline, which the walk makes a marker (the review of 5a1ab0e1: both measured 70
+  # behind a gate that counted them as content).
+  {
+    'an empty inline'                    => '<span></span>',
+    'a <wbr>'                            => '<span></span><wbr>',
+    'an out-of-flow child in the inline' => '<span><b style="position:absolute">z</b></span>'
+  }.each do |name, head|
+    it "refuses to measure an indented block of #{name} and floats, at the oracle's width" do
+      floats = '<div style="float:left;width:30px;height:5px"></div><div style="float:left;width:40px;height:5px"></div>'
+      expect_declined_x(
+        %(<div style="font:16px monospace"><div style="float:left"><div style="text-indent:7px">#{head}#{floats}</div></div><b id="m" style="display:inline-block;width:4px;height:4px"></b></div>),
+        77,
+        %(<div style="font:16px monospace"><div style="float:left"><div>#{head}#{floats}</div></div><b id="m" style="display:inline-block;width:4px;height:4px"></b></div>),
+        reason:   'shrink-to-fit-child-unmeasurable',
+        chrome_y: 13
+      )
+    end
+  end
+  # …and a LONE `<wbr>` opens a line box in Chrome (the block 22 tall around its two floats) and in neither engine
+  # (5): shared, recorded.
+  it 'opens no line for a lone <wbr> (shared)' do
+    expect_parity(
+      '<div style="font:16px monospace"><div style="text-indent:7px"><wbr><div style="float:left;width:30px;height:5px"></div>' \
+      '<div style="float:left;width:40px;height:5px"></div></div><div style="clear:both"><b id="m" style="display:inline-block;width:4px;height:4px"></b></div></div>',
+      0,
+      shared_y:        18,
+      shared_y_chrome: 35
+    )
+  end
   # A CR is a collapsible space under a collapsing mode (CSS Text 3 §4.1.1), and both engines lay it out as one;
   # only the MEASURE refused it — native's intrinsic walk and the gate asking it with `preserved` regardless of the
   # element's mode — so every shrink-to-fit asker around `aa&#13;bb` declined. It breaks there at min-content.
