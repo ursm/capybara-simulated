@@ -606,18 +606,23 @@ RSpec.describe 'native layout L2 text-block parity', if: ENV.fetch('CSIM_JS_ENGI
       chrome_y: 35
     )
   end
-  # …what that costs, shared, recorded: beside a FLOAT, Chrome keeps the edge on the first line and sends a word
-  # that does not fit the float's band below it (x 0), where both engines, their float-drop tests still asking
-  # "is anything placed" (the edge is), leave it overflowing beside the float (x 35). They used to break at the
-  # kept space, which put it there by accident; with no space at all both engines overflowed before as well. The
-  # same Chrome rule as a line-start break after a float — one increment of its own (see the backlog memory).
-  it 'leaves a word overflowing beside a float after an edge-only line (shared)' do
-    expect_parity(
-      '<div style="font:16px monospace"><div style="width:60px"><div style="float:left;width:30px;height:30px"></div>' \
-      '<span style="padding-left:5px"></span> <span id="m">aaaa</span> bb</div></div>',
-      shared_x:        35,
-      shared_x_chrome: 0
-    )
+  # …and beside a FLOAT such a line is still EMPTY of content: Chrome keeps the edge on it and sends a word that
+  # does not fit the float's band below the float, at its left (x 0). Both engines' float-drop tests asked "is
+  # anything PLACED" — the edge is — and left the word overflowing beside the float (35); they close the edge-only
+  # line and drop the next now, measuring the fit from where the pen stands (a negative edge's word still fits).
+  # With the space or without it: the break at a kept space used to move the word by accident.
+  {
+    'a space after the edge' => ' ',
+    'no space'               => ''
+  }.each do |name, gap|
+    it "sends the word below a float past an edge-only line: #{name}" do
+      expect_parity(
+        %(<div style="font:16px monospace"><div style="width:60px"><div style="float:left;width:30px;height:30px"></div>) +
+        %(<span style="padding-left:5px"></span>#{gap}<span id="m">aaaa</span> bb</div></div>),
+        0,
+        chrome_y: 30
+      )
+    end
   end
   # …and so a NON-WRAPPING run after such a space wraps once, to the second line, as in Chrome, where both engines
   # used to reach the third by breaking at the space they had kept. (The space the flow does place — after real

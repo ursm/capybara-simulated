@@ -1329,6 +1329,32 @@ fn line_layout(
             line_placed = false;
         }};
     }
+    // An EMPTY line — no CONTENT on it — too narrow for what is about to go on it drops below the float squeezing
+    // it (§9.5), growing the block by the gap: the oracle's `retakeBand(need)`. A line holding only an inline box's
+    // EDGES is such a line too, and Chrome leaves the edge on it and sends the content below the float at its left,
+    // so that line closes first (a wrap) and the fresh one drops (x 0 where both engines overflowed at 35).
+    // `$w` is what has to fit, open edges included; the indent is added here, as the band leaves it out.
+    macro_rules! drop_below_floats {
+        ($w:expr) => {{
+            let w = $w;
+            // (…from where the pen stands on an edge-only line: a negative edge moves it back, and a word behind
+            // one fits a band its width alone does not — the oracle's `used`.)
+            let used = if line_placed { line_x } else { 0.0 };
+            if !floats.borrow().is_empty() && !line_has_content && used + w > band_w(total) + LINE_FIT_EPS {
+                let fy = top + total;
+                if float_fit_y(&floats.borrow(), fy, w + indent_now.get(), cl, cr, strut_lh) > fy {
+                    if line_placed {
+                        soft_break!();
+                    }
+                    let fy = top + total;
+                    let at = float_fit_y(&floats.borrow(), fy, w + indent_now.get(), cl, cr, strut_lh);
+                    if at > fy {
+                        total += at - fy;
+                    }
+                }
+            }
+        }};
+    }
     macro_rules! break_line {
         () => {{
             close_line!(false);
@@ -1459,7 +1485,7 @@ fn line_layout(
                     // the measure, so a run glued straight to a letter — the common case — pays two branches.
                     let breaks = line_has_content
                         && (pending_space.is_some_and(|p| p.breaks) || atomic_break || ends_open);
-                    let may_drop = !line_placed && !floats.borrow().is_empty();
+                    let may_drop = !line_has_content && !floats.borrow().is_empty();
                     if breaks || may_drop {
                         let end = if break_nl {
                             text.iter().position(|&u| u == 0x0A).unwrap_or(text.len())
@@ -1553,12 +1579,8 @@ fn line_layout(
                         // first word — a `nowrap` span beside a float goes under it, not through it). Asked of
                         // the line the unit LANDS on, which is why the leading space above is only NOTED here
                         // and placed below: putting it down first would make the line look occupied.
-                        if has_body && !floats.borrow().is_empty() && !line_placed && unit + ow > band_w(total) + LINE_FIT_EPS {
-                            let fy = top + total;
-                            let at = float_fit_y(&floats.borrow(), fy, unit + ow + indent_now.get(), cl, cr, strut_lh);
-                            if at > fy {
-                                total += at - fy;
-                            }
+                        if has_body {
+                            drop_below_floats!(unit + ow);
                         }
                         // …and only now does the kept leading space go down (the oracle's `collapseRun` put it
                         // inside the body, so it rides the line the body landed on).
@@ -1937,13 +1959,7 @@ fn line_layout(
                                         space_pending = false;
                                     }
                                     // An empty line still too narrow for even one character drops below the float.
-                                    if !floats.borrow().is_empty() && !line_placed && cw + ow_now > band_w(total) + LINE_FIT_EPS {
-                                        let fy = top + total;
-                                        let at = float_fit_y(&floats.borrow(), fy, cw + ow_now + indent_now.get(), cl, cr, strut_lh);
-                                        if at > fy {
-                                            total += at - fy;
-                                        }
-                                    }
+                                    drop_below_floats!(cw + ow_now);
                                     settle_pending_oofs!();
                                     flush_open_edges!();
                                     flush_tail_gaps!();
@@ -1979,12 +1995,8 @@ fn line_layout(
                             // it (§9.5, "if a shortened line box is too small…"), growing the block by the gap. A
                             // `nowrap` line is NOT shortened by a float and never drops — it overlaps it on one line
                             // (the oracle does no float handling for a nowrap block), so skip this too.
-                            if !no_wrap && !floats.borrow().is_empty() && !line_placed && width + ow > band_w(total) + LINE_FIT_EPS {
-                                let fy = top + total;
-                                let at = float_fit_y(&floats.borrow(), fy, width + ow + indent_now.get(), cl, cr, strut_lh);
-                                if at > fy {
-                                    total += at - fy;
-                                }
+                            if !no_wrap {
+                                drop_below_floats!(width + ow);
                             }
                             // Flush the still-open edges onto this line (once), then place the word.
                             settle_pending_oofs!();
@@ -2053,12 +2065,8 @@ fn line_layout(
                 // is 60 tall there and 82 in both engines. SHARED, so recorded rather than fixed. (This comment
                 // said the opposite until 2026-09-23 — "a nowrap line is not dropped below a float" — which is
                 // true of the text arm and was never true here.)
-                if may_break_here && !floats.borrow().is_empty() && !line_placed && width + ow > band_w(total) + LINE_FIT_EPS {
-                    let fy = top + total;
-                    let at = float_fit_y(&floats.borrow(), fy, width + ow + indent_now.get(), cl, cr, strut_lh);
-                    if at > fy {
-                        total += at - fy;
-                    }
+                if may_break_here {
+                    drop_below_floats!(width + ow);
                 }
                 settle_pending_oofs!();
                 flush_open_edges!();
