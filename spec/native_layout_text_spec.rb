@@ -606,6 +606,19 @@ RSpec.describe 'native layout L2 text-block parity', if: ENV.fetch('CSIM_JS_ENGI
       chrome_y: 35
     )
   end
+  # …what that costs, shared, recorded: beside a FLOAT, Chrome keeps the edge on the first line and sends a word
+  # that does not fit the float's band below it (x 0), where both engines, their float-drop tests still asking
+  # "is anything placed" (the edge is), leave it overflowing beside the float (x 35). They used to break at the
+  # kept space, which put it there by accident; with no space at all both engines overflowed before as well. The
+  # same Chrome rule as a line-start break after a float — one increment of its own (see the backlog memory).
+  it 'leaves a word overflowing beside a float after an edge-only line (shared)' do
+    expect_parity(
+      '<div style="font:16px monospace"><div style="width:60px"><div style="float:left;width:30px;height:30px"></div>' \
+      '<span style="padding-left:5px"></span> <span id="m">aaaa</span> bb</div></div>',
+      shared_x:        35,
+      shared_x_chrome: 0
+    )
+  end
   # …and so a NON-WRAPPING run after such a space wraps once, to the second line, as in Chrome, where both engines
   # used to reach the third by breaking at the space they had kept. (The space the flow does place — after real
   # content — is content from the moment it goes down, not when a word consumes it: a non-wrapping run's pre-pass
