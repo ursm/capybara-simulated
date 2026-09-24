@@ -187,6 +187,30 @@ RSpec.describe 'native layout L1 block-flow parity', if: ENV.fetch('CSIM_JS_ENGI
     expect_no_dropped_records(r)
   end
 
+  # A PERCENTAGE relative inset goes over as its `px + frac` pair and native resolves it against the containing
+  # block it lays the box out in — the oracle's box was the basis until 2026-09-24. Both engines and Chrome: 30/20
+  # in a 300x200 block; a `top: 10%` of an INDEFINITE height resolves to nothing and `bottom: 4px` is used (-4); an
+  # over-constrained pair keeps the rtl flow's `right` (-15); a linear `calc()` on an atomic, 60.99 / -5.
+  it 'resolves a percentage relative inset natively, against the box native lays the parent out as' do
+    {
+      '<div style="width:300px;height:200px"><div id="m" style="position:relative;left:10%;top:10%;height:20px">b</div></div>'                                   => [30, 20],
+      '<div style="width:300px"><div id="m" style="position:relative;top:10%;bottom:4px;height:20px">b</div></div>'                                              => [0, -4],
+      '<div style="width:300px;direction:rtl"><div id="m" style="position:relative;left:10%;right:5%;height:20px">b</div></div>'                                 => [-15, 0],
+      '<div style="width:300px;height:100px">text <span id="m" style="display:inline-block;position:relative;left:calc(10% + 3px);top:-5%">ib</span> more</div>' => [60.99, -5]
+    }.each do |body, (x, y)|
+      session = simulated_session(page(body))
+      session.visit '/'
+      r = parity(session)
+      expect(r).to include('ok' => true, 'mismatches' => 0), r.inspect
+      got = laid_out_rect(body)
+      expect(got[0]).to be_within(0.01).of(x)
+      expect(got[1]).to be_within(0.01).of(y)
+      oracle_free = session.evaluate_script('globalThis.__csimLayoutShadowRun(undefined, {noOracle: true})')
+      expect(oracle_free).to include('ok' => true, 'mismatches' => 0)
+      expect(oracle_free['oracleReads'].to_h.keys.grep_v(/\(handed over\)\z/)).to be_empty, oracle_free.inspect
+    end
+  end
+
   it 'matches an over-constrained (left AND right) position:relative child under rtl (§9.4.3: right wins)' do
     session = simulated_session(page(<<~HTML))
       <div style="width:300px;direction:rtl">

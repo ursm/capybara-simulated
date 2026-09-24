@@ -179,6 +179,14 @@ pub(crate) struct Input {
     // it nor any inline above it is relative.
     pub(crate) rel_x: f64,
     pub(crate) rel_y: f64,
+    // …where its own inset is a PERCENTAGE, the walk sends the pairs instead and `with_percent_sizes` writes
+    // `rel_x` / `rel_y` from them: [x fraction (NaN = nothing to resolve), `top` fraction (NaN = auto), `top`
+    // length, `bottom` fraction (NaN = auto), `bottom` length, and what the record's rec[39..40] carried — the
+    // inline boxes' shift, plus the horizontal length part]. `top` wins where it resolves; a percentage one does not
+    // against an indefinite height, and `bottom` is used then — the oracle's `relativeOffset`, where such a `top`
+    // resolves to nothing. The base is kept apart because the resolved box REPLACES the input, and a box measured
+    // again must not add its offset twice.
+    pub(crate) rel_pct: [f64; 7],
     // A flex ITEM's AUTO margins. MAIN axis (§9.5): bit0 = main-start-side `auto`, bit1 = main-end-side —
     // these absorb the line's free space (free/autos each) before justify-content, which then yields
     // (ZERO_JUSTIFY). CROSS axis (§8.1): bit2 = cross-start-side `auto`, bit3 = cross-end-side — these eat
@@ -672,10 +680,28 @@ impl Input {
             (n.mt, n.mr, n.mb, n.ml) = (edge(0), edge(1), edge(2), edge(3));
             (n.pt, n.pr, n.pb, n.pl) = (edge(4), edge(5), edge(6), edge(7));
         }
+        // …and a `position: relative` box's percentage insets, onto the base the record carried.
+        let [x_frac, top_frac, top_px, bottom_frac, bottom_px, base_x, base_y] = self.rel_pct;
+        if !x_frac.is_nan() {
+            // An inset resolves to its length where it has no percentage, to the pair where the height is definite,
+            // and to nothing — `auto` (NaN) included — otherwise.
+            let at = |px: f64, frac: f64| {
+                if frac == 0.0 {
+                    Some(px)
+                } else if frac.is_nan() || is_auto(cb_h) {
+                    None
+                } else {
+                    Some(px + frac * cb_h)
+                }
+            };
+            let y = at(top_px, top_frac).or_else(|| at(bottom_px, bottom_frac).map(|b| -b)).unwrap_or(0.0);
+            n.rel_x = base_x + if x_frac == 0.0 { 0.0 } else { x_frac * cb_w };
+            n.rel_y = base_y + y;
+        }
         n
     }
     fn has_percent_sizes(&self) -> bool {
-        self.pct_sizes.iter().any(|f| !f.is_nan()) || self.edge_frac.iter().any(|&f| f != 0.0)
+        self.pct_sizes.iter().any(|f| !f.is_nan()) || self.edge_frac.iter().any(|&f| f != 0.0) || !self.rel_pct[0].is_nan()
     }
     // A flex item's resolved basis in a container whose main size is `main`: its percentage of that (auto where
     // the main size is indefinite), else the length the walk resolved.
@@ -7122,6 +7148,7 @@ mod tests {
             has_replayed_oof: false,
             rel_x: 0.0,
             rel_y: 0.0,
+            rel_pct: [f64::NAN, f64::NAN, 0.0, f64::NAN, 0.0, 0.0, 0.0],
             flex_item_auto: 0,
             flex_baseline_asc: f64::NAN,
             flex_line_nat: f64::NAN,
