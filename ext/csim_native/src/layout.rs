@@ -233,7 +233,8 @@ pub(crate) struct Input {
     // which it did: 22 against Chrome's 5, in both engines, where the same grid with the text in a `<span>`
     // gave 5. When flex gets its item, this field goes with it.
     pub(crate) anon_cross: f64,
-    // A text block's OWN `white-space` mode: 0 normal, 1 nowrap, 2 pre, 3 pre-wrap, 4 pre-line,
+    // A block's OWN `white-space` mode — a text block's, and since 2026-09-24 a block container's too, whose
+    // intrinsic measure PINS min to max under 1 / 2 (`content_intrinsic`): 0 normal, 1 nowrap, 2 pre, 3 pre-wrap, 4 pre-line,
     // 5 break-spaces. The three orthogonal behaviours it names — COLLAPSE whitespace (0/1/4) vs PRESERVE it
     // (2/3/5), SOFT-WRAP at break opportunities (0/3/4/5) vs never (1/2), a NEWLINE forcing a break (2/3/4/5)
     // — belong to the RUN they are
@@ -244,8 +245,8 @@ pub(crate) struct Input {
     // the anonymous groups are read under.
     // 5 shares 3's triple, which is why `line_layout` needs no arm of its own for it: a line under
     // `break-spaces` is a line under `pre-wrap`. The two part in the INTRINSIC measure alone — every
-    // preserved space is content that never hangs, with a break after each — and `text_intrinsic`'s `modes`
-    // deliberately has no 5, so a stream carrying one declines there instead of being measured by 3's rule.
+    // preserved space is content that never hangs, with a break after each — which `text_intrinsic`'s `modes`
+    // gives 5 a tuple of its own for, rather than measuring it by 3's rule.
     pub(crate) ws_mode: u8,
     // A pushed flex ITEM whose OWN height is AUTO (content-derived), carried past the parent-push that
     // overwrote `height` with the item's final (oracle-clamped) box. When set, `measure_flex` recomputes a
@@ -5757,9 +5758,10 @@ fn content_intrinsic(i: usize, inputs: &[Cell<Input>], runs: &[Run], run_texts: 
             // …and a NON-WRAPPING block container is ONE unbreakable token whatever it holds, its block children
             // and its floats' line included: the oracle ends `contentIntrinsicWidths` with `min = max` for a
             // `nowrap` / `pre` box that does not blockify (a flex container's items are blocks of their own, so it
-            // pins nothing). Each child already pinned its OWN content, but a float packing beside another, or a
-            // child that declares `white-space: normal`, did not — and the walk declined every such box, a
-            // `nowrap` block holding text and a block child among them, as unmeasurable.
+            // pins nothing), and parity is the bar. It is the ORACLE's rule, not Chrome's: Chrome pins only inline
+            // content, so a float, or a child that declares a wrapping mode of its own, keeps its min-content there
+            // — the only cases where this pin changes anything, each pinned as a shared gap in the specs. (A child
+            // with no mode of its own already pinned itself; the walk declined every such box until 2026-09-24.)
             if n.display == DISPLAY_BLOCK && matches!(n.ws_mode, 1 | 2) {
                 return Some((max, max));
             }
@@ -6053,7 +6055,9 @@ fn text_intrinsic(runs: &[Run], run_texts: &[Option<Vec<u16>>], ws_mode: u8, ind
                             if text[i] == 0x0A {
                                 nl += 1;
                             } else if preserve && text[i] != 0x20 && text[i] != 0x09 {
-                                return None; // a PRESERVED \r / \f — not modelled (a collapsing mode makes it a space)
+                                return None; // a PRESERVED \r / \f — not modelled (a collapsing mode collapses both,
+                                             // as the line layout does: right for CR, SHARED-wrong for FF — Chrome
+                                             // draws FF as a glyph with no break, pinned in the text spec)
                             }
                             i += 1;
                         }

@@ -123,9 +123,9 @@ RSpec.describe 'native layout L2 text-block parity', if: ENV.fetch('CSIM_JS_ENGI
 
   # `break-spaces` lays a LINE out exactly as `pre-wrap` does — `placeTextRun` asks `PRESERVING_WS` and
   # `modeWraps`, and both answer the same for the two — and parts from it only in the INTRINSIC measure, where
-  # every preserved space is content that never hangs and carries a break after it. So the mode table gives it
-  # `pre-wrap`'s code and `nlIntrinsicMeasurableOf` refuses it, which is the disagreement fenced off where it
-  # lives rather than a whole mode refused for it.
+  # every preserved space is content that never hangs and carries a break after it. So the LINE layout reads it
+  # as `pre-wrap`, and `text_intrinsic`'s mode table measures it by its own rule (since 2026-09-23; the measure
+  # was refused before, the disagreement fenced off where it lives rather than a whole mode refused for it).
   # It was refused outright before 2026-09-22, and not by name: `WS_MODE` simply had no entry, so the walk
   # declined without naming itself and the shape landed in `unsupported subtree` — 1,230 of the 1,782 that
   # reason covered, found only by censusing which of the walk's 155 refusal sites had fired.
@@ -392,8 +392,8 @@ RSpec.describe 'native layout L2 text-block parity', if: ENV.fetch('CSIM_JS_ENGI
   # A NON-WRAPPING block container is one unbreakable token whatever it holds — the oracle ends its measure with
   # `min = max` for a `nowrap` / `pre` box — and native pins it the same way now, so a `nowrap` block holding text
   # and a block child is MEASURED where the walk declined every shrink-to-fit asker around it (216 `wsonly`
-  # shapes, and `WalkRefusals::UNMEASURABLE` until now). A float in a 10px block shrinks to its min-content, which
-  # the pin makes its max: the marker after it goes below (0, 40), as in Chrome.
+  # shapes, and `WalkRefusals::UNMEASURABLE` until now). These two guard that lift: the text here is an anonymous
+  # group that pins ITSELF, so the container's own pin changes nothing (the shapes it does change follow).
   {
     'at its max-content'  => ['', 48.015625, 13],
     'squeezed to its min' => [';width:10px', 0, 40]
@@ -417,11 +417,56 @@ RSpec.describe 'native layout L2 text-block parity', if: ENV.fetch('CSIM_JS_ENGI
       shared_y_chrome: 23
     )
   end
+  # …and where the container's pin DOES change something, it is the oracle's rule and not Chrome's, which pins
+  # only inline content: a child that declares a wrapping mode of its own keeps its min-content there (the block
+  # 57.6 wide, the marker below its three lines; both engines one 259.2-wide line), and an EMPTY inline beside
+  # floats — the empty-content record, which carried no mode at all until the review of 2b98ec5b (40 where the
+  # oracle pinned 70) — pins them too. Shared, recorded.
+  it 'pins a non-wrapping container over a child with its own wrapping mode (shared)' do
+    expect_parity(
+      '<div style="font:16px monospace"><div style="width:min-content"><div style="white-space:nowrap">' \
+      '<p style="margin:0;white-space:normal">a normal child under nowrap</p></div></div><b id="m" style="display:inline-block;width:4px;height:4px"></b></div>',
+      0,
+      shared_y:        35,
+      shared_y_chrome: 123
+    )
+  end
+  it 'pins a non-wrapping block of an empty inline and floats (shared)' do
+    expect_parity(
+      '<div style="font:16px monospace"><div style="width:min-content"><div style="white-space:nowrap"><span></span>' \
+      '<div style="float:left;width:30px;height:5px"></div><div style="float:left;width:40px;height:5px"></div></div></div><b id="m" style="display:inline-block;width:4px;height:4px"></b></div>',
+      shared_x:        70,
+      shared_x_chrome: 40
+    )
+  end
+  # An empty inline box TAKES a first-line indent in the oracle (and Chrome: 77 at max-content), where native's
+  # empty-content record has nothing to take it with (70) — so the measure refuses such a block, and the
+  # `max-content` box around it, which has no fallback, declines; the same block with no indent is native.
+  it 'refuses to measure an indented block of an empty inline and floats' do
+    floats = '<span></span><div style="float:left;width:30px;height:5px"></div><div style="float:left;width:40px;height:5px"></div>'
+    expect_declined_x(
+      %(<div style="font:16px monospace"><div style="width:max-content"><div style="text-indent:7px">#{floats}</div></div><b id="m" style="display:inline-block;width:4px;height:4px"></b></div>),
+      70,
+      %(<div style="font:16px monospace"><div style="width:max-content"><div>#{floats}</div></div><b id="m" style="display:inline-block;width:4px;height:4px"></b></div>),
+      reason:   'shrink-to-fit-child-unmeasurable',
+      chrome_y: 13
+    )
+  end
   # A CR is a collapsible space under a collapsing mode (CSS Text 3 §4.1.1), and both engines lay it out as one;
   # only the MEASURE refused it — native's intrinsic walk and the gate asking it with `preserved` regardless of the
   # element's mode — so every shrink-to-fit asker around `aa&#13;bb` declined. It breaks there at min-content.
   it 'measures a CR under a collapsing white-space as a space' do
     expect_parity('<div style="font:16px monospace;width:10px"><div style="float:left">aa&#13;bb</div><b id="m" style="display:inline-block;width:4px;height:4px"></b></div>', 0, chrome_y: 57)
+  end
+  # …and FF with it in both engines, which is wrong for FF: CSS Text 3 makes only CR a space, and Chrome draws FF as
+  # a glyph with no break opportunity (`aa&#12;bb` one 48-wide line there; both engines break it at min-content).
+  it 'collapses FF as a space too (shared)' do
+    expect_parity(
+      '<div style="font:16px monospace"><div style="width:min-content">aa&#12;bb</div><b id="m" style="display:inline-block;width:4px;height:4px"></b></div>',
+      0,
+      shared_y:        57,
+      shared_y_chrome: 35
+    )
   end
 
   # AN EDGE IS NOT CONTENT A BREAK MAY LEAVE BEHIND. The oracle keeps two questions about a line apart —
