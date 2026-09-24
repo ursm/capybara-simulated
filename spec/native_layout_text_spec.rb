@@ -294,13 +294,12 @@ RSpec.describe 'native layout L2 text-block parity', if: ENV.fetch('CSIM_JS_ENGI
   # newline between two block children of a `pre-line` block is a whitespace-only text node, so it makes a
   # line of its own — three of them here, and the block is 110 tall where both engines used to say 44. They
   # AGREED on 44, which is why no parity sweep could see it; only Chrome could.
-  # It costs a decline: those anonymous whitespace lines are not something native models, so the walk now
-  # refuses the shape instead of laying it out wrongly.
+  # It cost a decline until 2026-09-24 (`white-space-only-block`); those whitespace lines are a mixed block's
+  # anonymous groups now, which native lays out as it does any other.
   it 'gives a pre-line block a line per source newline between its block children' do
     pretty = %(<div style="width:400px;font:16px monospace;white-space:pre-line">\n) +
              %(  <div>a</div>\n  <div id="m">b</div>\n</div>)
-    plain  = %(<div style="width:400px;font:16px monospace;white-space:pre-line"><div>a</div><div id="m">b</div></div>)
-    expect_declined_x(pretty, nil, plain, reason: 'white-space-only-block', chrome_y: 66)
+    expect_parity(pretty, chrome_y: 66)
   end
 
   # …and `break-spaces`, whose whitespace-only block used to be an EMPTY one to native and a 22px-tall one to
@@ -312,14 +311,13 @@ RSpec.describe 'native layout L2 text-block parity', if: ENV.fetch('CSIM_JS_ENGI
   # A plain list, not `%W[…]`: that splits on whitespace, so `%W[\n  ]` is the ONE-element array `["\n"]` and
   # the space case — half of what this example is about, and a mismatch at HEAD exactly like the newline —
   # was silently never run.
+  # It lays out as a text block of that one line since 2026-09-24 (22 tall, Chrome too).
   ["\n", ' '].each do |ws|
-    it "refuses a break-spaces block whose only content is #{ws.inspect}, rather than mismatching on it" do
-      # …and the control is the SAME whitespace under a mode that collapses it, which is what isolates the
-      # mode rather than the shape: that one goes native.
-      expect_declined_x(%(<div style="width:400px;font:16px monospace;white-space:break-spaces">#{ws}</div>),
-                        nil,
-                        %(<div style="width:400px;font:16px monospace">#{ws}</div>),
-                        reason: 'white-space-only-block')
+    it "lays out a break-spaces block whose only content is #{ws.inspect}" do
+      with_page(%(<div id="w" style="width:400px;font:16px monospace;white-space:break-spaces">#{ws}</div>)) do |session|
+        expect(parity(session)).to include('ok' => true, 'mismatches' => 0)
+        expect(session.evaluate_script("document.getElementById('w').getBoundingClientRect().height")).to eq(22)
+      end
     end
   end
 

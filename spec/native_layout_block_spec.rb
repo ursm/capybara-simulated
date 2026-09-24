@@ -290,7 +290,7 @@ RSpec.describe 'native layout L1 block-flow parity', if: ENV.fetch('CSIM_JS_ENGI
       #        that gate turned this line red and gained the census a line, which is what it is for.)
       expect(parity(session_for(%(<div style="width:400px">#{WalkRefusals::POSITIONED_INNER}</div>))))
         .to include('ok' => false, 'reason' => 'block-level-box-unplaceable')
-      expect(parity(session_for(measured.(WalkRefusals::WHITESPACE)))['reason']).to eq('white-space-only-block')
+      expect(parity(session_for(measured.(WalkRefusals::CENTRED_OOF)))['reason']).to eq('oof-in-collapsed-group')
       expect(parity(session_for(%(<div style="width:400px">text #{atomic} after</div>))))
         .to include('ok' => true, 'nativeAtomics' => 0)
       # …the same rolled-back attempt, then a LATER decline in a SIBLING block. Sibling, not the same block:
@@ -309,7 +309,7 @@ RSpec.describe 'native layout L1 block-flow parity', if: ENV.fetch('CSIM_JS_ENGI
     it 'forgets the previous pass before the next one' do
       session = session_for(
         %(<div id="flex" style="width:400px">#{UNSUPPORTED_FLEX}</div>) +
-        %(<div id="atomic" style="width:400px;overflow:hidden"><div style="float:left">t #{WalkRefusals::WHITESPACE} a</div></div>) +
+        %(<div id="atomic" style="width:400px;overflow:hidden"><div style="float:left">t #{WalkRefusals::CENTRED_OOF} a</div></div>) +
         %(<div id="fine" style="width:400px"><div style="height:10px">x</div></div>)
       )
       # BOTH orders. First-writer-wins means a stale latch beats the real refusal, so a single order passes
@@ -318,11 +318,11 @@ RSpec.describe 'native layout L1 block-flow parity', if: ENV.fetch('CSIM_JS_ENGI
       asked = ->(order) { order.map {|sel| parity(session, sel).values_at('ok', 'reason') } }
       expect(asked.(%w[#flex #atomic #fine])).to eq([
         [false, 'flex-container-unsupported'],
-        [false, 'white-space-only-block'],
+        [false, 'oof-in-collapsed-group'],
         [true, nil]
       ])
       expect(asked.(%w[#atomic #flex #fine])).to eq([
-        [false, 'white-space-only-block'],
+        [false, 'oof-in-collapsed-group'],
         [false, 'flex-container-unsupported'],
         [true, nil]
       ])
@@ -334,14 +334,12 @@ RSpec.describe 'native layout L1 block-flow parity', if: ENV.fetch('CSIM_JS_ENGI
     it 'names the gate that stopped it' do
       # Pairs, not a hash: the same reason is asserted twice on purpose, through two different routes.
       [
-        # (`white-space-only-block`, not `preserve-white-space-in-mixed-block`: the second retired on
-        # 2026-09-23 when the preserving modes went native, and what is left of it is an unreachable drift
-        # guard. NOT the same route — `sawPreWs && !hasInline` never enters the mixed-block branch at all,
-        # since `hasInline` is false there — so what this row covers is a gate BESIDE that branch rather
-        # than inside it. Kept for the coverage; the pairing claim above it is about the two
-        # `block-level-box-in-inline-content` rows, which really are one reason through two routes.)
-        ['white-space-only-block',
-         '<div style="width:400px;white-space:pre"><p>a</p>   <p>b</p></div>'],
+        # (A mixed block's own gate, raised AFTER its group's `emitAttempt` rolled back — the claim above is about
+        # the two `block-level-box-in-inline-content` rows, which really are one reason through two routes. This
+        # row was `white-space-only-block`, a gate beside the mixed branch, until 2026-09-24, when preserved white
+        # space went down the text path.)
+        ['oof-in-collapsed-group',
+         '<div style="width:400px;text-align:center"><p>a</p> <div style="position:absolute;width:2px;height:2px"></div> <p>b</p>text</div>'],
         ['flex-container-unsupported',        %(<div style="width:400px">#{UNSUPPORTED_FLEX}</div>)],
         ['block-level-box-in-inline-content', '<div style="width:400px">text <span><div style="height:5px"><i style="float:left">f</i>b</div></span> after</div>'],
         # …and the last one again through a MIXED block's anonymous group, which is the other propagation
@@ -602,10 +600,18 @@ RSpec.describe 'native layout L1 block-flow parity', if: ENV.fetch('CSIM_JS_ENGI
     expect_parity('<div style="width:300px;white-space:-moz-pre-wrap">text<div style="height:20px">block</div>more</div>')
   end
   # Whitespace-only direct text between a preserve block's block children is line content (the oracle lays out
-  # a line box for it), which a plain block-container record drops — decline (review finding, Phase 2b).
-  it 'declines a preserve block container holding whitespace-only text beside its block children' do
-    expect_bail(%(<div style="width:300px;white-space:pre-wrap"><div style="height:5px"></div>\n    <div style="height:5px"></div></div>))
-    expect_bail(%(<div style="width:300px;white-space:pre">    <div style="height:5px"></div></div>))
+  # a line box for it), which a plain block-container record would drop — so it is a MIXED block's anonymous
+  # group, as the same white space beside a word always was. It declined as `white-space-only-block` until
+  # 2026-09-24 (review finding, Phase 2b). Chrome: 54 and 27 tall.
+  it 'lays out a preserve block container holding whitespace-only text beside its block children' do
+    {
+      %(<div id="m" style="width:300px;font:16px monospace;white-space:pre-wrap"><div style="height:5px"></div>\n    <div style="height:5px"></div></div>) => 54,
+      %(<div id="m" style="width:300px;font:16px monospace;white-space:pre">    <div style="height:5px"></div></div>)                             => 27
+    }.each do |body, chrome_h|
+      expect_parity(body)
+      session = session_for(body)
+      expect(session.evaluate_script("document.getElementById('m').getBoundingClientRect().height")).to eq(chrome_h)
+    end
   end
 
   # A text node holding only a no-break space (or another non-CSS space) is CONTENT: it makes a line box the

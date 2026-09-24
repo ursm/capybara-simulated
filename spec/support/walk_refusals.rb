@@ -30,9 +30,13 @@ module WalkRefusals
   # exercises the walk's rollback, and a caller that wants that has to be able to say so.
   POSITIONED_INNER = '<div style="position:-webkit-sticky;width:9px;height:4px"></div>t'
   POSITIONED       = %(<span style="display:inline-block">#{POSITIONED_INNER}</span>)
-  WHITESPACE       = '<span style="display:inline-block;white-space:pre">   </span>'
+  # …an out-of-flow box waiting in a CENTRED mixed block's group that opens no line (`oof-in-collapsed-group`:
+  # the oracle moves it by a LATER line's alignment). This entry was a `pre` inline-block of nothing but spaces
+  # (`white-space-only-block`) until 2026-09-24, when preserved white space went down the text path.
+  CENTRED_OOF      = '<span style="display:inline-block;text-align:center"><p>a</p> ' \
+                     '<div style="position:absolute;width:2px;height:2px"></div> <p>b</p>text</span>'
   TABLE_CELL       = '<span style="display:inline-block"><div style="display:table-cell">c</div></span>'
-  ATOMIC           = [POSITIONED, WHITESPACE, TABLE_CELL].freeze
+  ATOMIC           = [POSITIONED, CENTRED_OOF, TABLE_CELL].freeze
 
   # …and a separate cause, for the routes that MEASURE rather than lay out: content whose intrinsic width
   # native has no rule for, which every shrink-to-fit route has to refuse or push while the walk still lays the

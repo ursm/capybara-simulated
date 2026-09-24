@@ -1,9 +1,8 @@
 # frozen_string_literal: true
 # Native layout — white-space:nowrap text, geometry shadow-parity. `nowrap` collapses whitespace exactly like
 # `normal` but NEVER soft-wraps: the line grows past the content width; only a <br> breaks it. The block's
-# height is one strut (or one per <br>). A preserving block whose WHOLE content is whitespace still declines
-# (`white-space-only-block`) — its line box is one the parent's height does not pick up — but a preserving
-# block with content in it lays out, edged inlines holding nothing included.
+# height is one strut (or one per <br>). A preserving block lays out whatever it holds — its WHOLE content
+# white space included (a text block of those lines, since 2026-09-24), edged inlines holding nothing too.
 require 'capybara/simulated'
 require 'rack'
 require_relative 'support/session_teardown'
@@ -112,14 +111,14 @@ RSpec.describe 'native layout nowrap parity', if: ENV.fetch('CSIM_JS_ENGINE', 'v
   it 'matches a pre-wrap line with real content and whitespace between spans' do
     expect_parity('<div style="width:400px;white-space:pre-wrap"><span>  </span><span>def</span> <span>foo</span></div>')
   end
-  # An ENTIRELY-whitespace preserve block whose whitespace is DIRECT text (no wrapping element, no real content)
-  # declines: the oracle gives it a line box the parent's height does not pick up (block 22 / body 0), a quirk
-  # native's block flow can't reproduce.
-  it 'declines an entirely-whitespace pre block (direct text — non-propagating line box)' do
-    expect_bail('<div style="width:200px;white-space:pre">     </div>')
+  # An ENTIRELY-whitespace preserve block whose whitespace is DIRECT text is a text block of those lines (22 and
+  # 44 tall, as in Chrome). It declined as `white-space-only-block` until 2026-09-24, on a note that the oracle's
+  # line box did not reach the parent's height (block 22 / body 0) — which no sweep of it reproduces.
+  it 'lays out an entirely-whitespace pre block (direct text)' do
+    expect_parity('<div style="width:200px;white-space:pre">     </div>')
   end
-  it 'declines an entirely-newline pre-wrap block (direct text)' do
-    expect_bail("<div style=\"width:200px;white-space:pre-wrap\">\n\n</div>")
+  it 'lays out an entirely-newline pre-wrap block (direct text)' do
+    expect_parity("<div style=\"width:200px;white-space:pre-wrap\">\n\n</div>")
   end
   # A whitespace-only EDGED (padded / bordered) inline used to decline here too, on a gate that keyed on REAL
   # glyph content and gave "a padded inline's line-box height is fiddly" as its reason. That was not the
