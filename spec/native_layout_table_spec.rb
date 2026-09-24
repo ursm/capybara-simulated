@@ -1457,9 +1457,10 @@ RSpec.describe 'native layout table parity', if: ENV.fetch('CSIM_JS_ENGINE', 'v8
   # lays out as a plain BLOCK (`layoutElementInner`'s fallthrough) and the walk now takes as one: 1,100 declines of
   # `rv5nw` (`block-level-box-unplaceable`) until 2026-09-24. What still makes one a cell is what the DISPLAY says:
   # its block-axis min/max do not apply (Chrome agrees, 22 tall either way), where a percentage width is its own —
-  # a table's cell hands that to its column instead. Chrome wraps each in an ANONYMOUS table: shrink-to-fit (48 for
-  # "aa bb" where both engines fill the 200) and consecutive cells side by side (the second at x 19.2, y 0, where
-  # both stack it at y 22). Shared, so pinned rather than fixed.
+  # a table's cell hands that to its column instead — and resolved against the block native lays it out in, with
+  # no oracle box read. Chrome wraps each in an ANONYMOUS table: shrink-to-fit (48 for "aa bb" where both engines
+  # fill the 200; 96.03 for the 50% cell where both say 100) and consecutive cells side by side (the second at
+  # x 19.2, y 0, where both stack it at y 22). Shared, so pinned rather than fixed.
   describe 'an orphan cell, row group or caption' do
     def rect_of(body)
       session = simulated_session(page(body))
@@ -1468,15 +1469,20 @@ RSpec.describe 'native layout table parity', if: ENV.fetch('CSIM_JS_ENGINE', 'v8
     end
 
     it 'lays one out as a block whose block-axis min/max do not apply' do
-      {
-        'min-height:40px' => [0, 0, 200, 22],
-        'max-height:5px'  => [0, 0, 200, 22],
-        'width:50%'       => [0, 0, 100, 22]
-      }.each do |style, rect|
+      %w[min-height:40px max-height:5px].each do |style|
         body = %(<div style="width:200px;font:16px monospace"><div id="m" style="display:table-cell;#{style}">aa bb</div></div>)
         expect_parity(body)
-        expect(rect_of(body)).to eq(rect)
+        expect(rect_of(body)[3]).to eq(22)
       end
+      body = '<div style="width:200px;font:16px monospace"><div id="m" style="display:table-cell;width:50%">aa bb</div></div>'
+      expect_parity(body)
+      expect_shared_gap(rect_of(body)[2], shared: 100, chrome: 96.03, what: "#{body}: #m width")
+      session = simulated_session(page(body))
+      session.visit '/'
+      session.evaluate_script('document.body.offsetHeight')
+      r = session.evaluate_script('globalThis.__csimLayoutShadowRun(undefined, {noOracle: true})')
+      expect(r).to include('ok' => true, 'mismatches' => 0)
+      expect(r['oracleReads'].to_h.keys.grep_v(/\(handed over\)\z/)).to be_empty, r.inspect
       %w[table-row-group table-header-group table-caption].each do |display|
         expect_parity(%(<div style="width:200px;font:16px monospace"><div style="display:#{display}">aa bb</div><p>after</p></div>))
       end
