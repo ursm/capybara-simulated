@@ -547,17 +547,13 @@ RSpec.describe 'native layout L1 block-flow parity', if: ENV.fetch('CSIM_JS_ENGI
   # an atomic or an edged inline's close — so BOTH the everyday routes are here: whitespace around the box,
   # and the box ALONE after the last block, which is where a positioned dropdown or tooltip is written.
   it 'keeps the group an out-of-flow child of a mixed block sits in, whatever its alignment' do
-    rect = lambda {|body|
-      session = simulated_session(page(body)); session.visit '/'
-      session.evaluate_script("(r => [r.x, r.y])(document.getElementById('m').getBoundingClientRect())")
-    }
     {
       '<div style="position:relative;width:300px;ALIGN"><p>a</p> <div id="m" style="position:absolute;width:20px;height:20px"></div> <p>b</p>text<p>c</p></div>' => [0, 50],
       '<div style="position:relative;width:300px;ALIGN"><p>a</p>text<p>b</p><div id="m" style="position:absolute;width:20px;height:20px"></div></div>'          => [0, 118]
     }.each do |body, xy|
       ['', 'text-align:center', 'text-align:right', 'text-align:justify'].each do |align|
         expect_parity(body.sub('ALIGN', align))
-        expect(rect.(body.sub('ALIGN', align))).to eq(xy)
+        expect(laid_out_rect(body.sub('ALIGN', align)).first(2)).to eq(xy)
       end
       expect_parity(body.sub('ALIGN', 'direction:rtl'))
     end
@@ -567,7 +563,7 @@ RSpec.describe 'native layout L1 block-flow parity', if: ENV.fetch('CSIM_JS_ENGI
                   '<div style="position:absolute;width:2px;height:2px"></div> <p>b</p>text</div></div>')
     span = '<div style="position:relative;width:300px;text-align:center"><p>a</p> <span id="m" style="position:absolute;width:20px;height:20px"></span> <p>b</p>text<p>c</p></div>'
     expect_parity(span)
-    expect_shared_gap(rect.(span)[0], shared: 0, chrome: 150, what: "#{span}: #m x")
+    expect_shared_gap(laid_out_rect(span)[0], shared: 0, chrome: 150, what: "#{span}: #m x")
   end
   # …where Chrome agrees on the plain line (x 0, below the block before it) and a float band (20), and both engines
   # share two gaps with it: a `hanging` indent re-arms past a block child in both (12, Chrome 0), and a plain one
@@ -667,7 +663,7 @@ RSpec.describe 'native layout L1 block-flow parity', if: ENV.fetch('CSIM_JS_ENGI
     # whole pass away. A measure-only gap (native's intrinsic has no `text-indent`) is refused here too.
     it 'refuses in the walk what it would have to measure and cannot' do
       expect_parity('<div style="width:400px"><div style="width:max-content;text-indent:30px">aa bb</div></div>')
-      expect_walk_declines('<div style="width:400px"><div style="width:max-content"><span style="display:inline-block"><span style="display:inline-block"><div style="position:-webkit-sticky">c</div></span></span></div></div>', 'block-level-box-unplaceable')
+      expect_walk_declines(%(<div style="width:400px"><div style="width:max-content"><span style="display:inline-block">#{WalkRefusals::POSITIONED}</span></div></div>), 'block-level-box-unplaceable')
       expect_walk_declines(%(<div style="width:400px"><table><tr><td><div style="width:max-content"><div>#{WalkRefusals::UNMEASURABLE}</div></div></td></tr></table></div>), 'shrink-to-fit-child-unmeasurable')
     end
     # A keyword on any of the OTHER five size properties is not a width native has to find: the oracle resolves
@@ -732,7 +728,7 @@ RSpec.describe 'native layout L1 block-flow parity', if: ENV.fetch('CSIM_JS_ENGI
     it 'sees a keyword width arriving through inherit' do
       expect_parity('<div style="display:flex;width:400px"><div style="width:min-content"><div style="width:inherit;text-indent:30px">aa bb cc</div></div></div>')
       expect_parity('<table style="border-spacing:0"><tr><td style="padding:0;width:min-content"><div style="width:inherit;text-indent:30px">aa bb cc</div></td></tr></table>')
-      expect_walk_declines('<div style="display:flex;width:400px"><div style="width:min-content"><div style="width:inherit"><span style="display:inline-block"><span style="display:inline-block"><div style="position:-webkit-sticky">c</div></span></span></div></div></div>', 'block-level-box-unplaceable')
+      expect_walk_declines(%(<div style="display:flex;width:400px"><div style="width:min-content"><div style="width:inherit"><span style="display:inline-block">#{WalkRefusals::POSITIONED}</span></div></div></div>), 'block-level-box-unplaceable')
       # …and one with nothing to refuse lays out, the inherited keyword measured like any other
       expect_parity('<div style="width:400px"><div style="width:min-content"><div style="width:inherit">aa bb cc</div></div></div>')
       expect_parity('<div style="width:400px"><span style="width:min-content"><span style="display:inline-block;width:inherit">bb cc</span></span></div>')
@@ -922,7 +918,7 @@ RSpec.describe 'native layout L1 block-flow parity', if: ENV.fetch('CSIM_JS_ENGI
       # its box — found by a 4000-case fuzz, and the walk's own gate is what routes it here).
       it 'leaves a replayed box to the oracle\'s own position' do
         # (a shrink-to-fit box whose own content native cannot measure — an indented one is measured natively now)
-        unmeasurable = '<span style="display:inline-block"><div style="position:-webkit-sticky">c</div></span>'
+        unmeasurable = WalkRefusals::POSITIONED
         expect_replayed_oof(%(<div style="#{tb};text-indent:11px"><div style="position:absolute">#{unmeasurable}</div>mar</div>))
         expect_replayed_oof(%(<div style="#{tb};text-indent:11px">lead <div style="position:absolute">#{unmeasurable}</div> tail</div>))
         # …and the indented ones the measure now reaches lay out natively, the static position taken off the line
@@ -1128,28 +1124,27 @@ x</div>))
     # discovered in Rust it would fail the whole pass instead of this one subtree.
     it 'declines a vertical block holding content native cannot measure' do
       expect_walk_declines(%(<div style="width:400px"><div style="writing-mode:vertical-lr"><div>#{WalkRefusals::UNMEASURABLE}</div></div></div>), 'shrink-to-fit-child-unmeasurable')
-      expect_walk_declines('<div style="width:400px"><div style="writing-mode:vertical-lr"><span style="display:inline-block"><div style="position:-webkit-sticky">c</div></span></div></div>', 'block-level-box-unplaceable')
+      expect_walk_declines(%(<div style="width:400px"><div style="writing-mode:vertical-lr">#{WalkRefusals::POSITIONED}</div></div>), 'block-level-box-unplaceable')
     end
     # …which is also why such a child is walked as a MEASURED subtree: an atomic inline whose own box would be
     # PUSHED is not in the run stream native measures from, so the walk has to decline where it would otherwise
     # hand Rust a subtree it cannot re-measure. Every shape here lays out natively without the writing mode.
     it 'declines a vertical block whose atomic inline is pushed, not laid out natively' do
-      # A SUBSET of `WalkRefusals::ATOMIC`, deliberately: that list is what the atomic ROUTE refuses, and
-      # this is a different route — a vertical block measures its own width, so what it declines is what it
-      # cannot MEASURE, which is not the same set (the shared list's whitespace-only atomic is measurable
-      # here). Written out rather than filtered, so a reader sees the shapes.
+      # One entry of `WalkRefusals::ATOMIC`, deliberately, where it stands on a line three ways: that list is what
+      # the atomic ROUTE refuses, and this is a different route — a vertical block measures its own width, so what
+      # it declines is what it cannot MEASURE, under the name of the gate inside. Written out rather than
+      # filtered, so a reader sees the shapes.
       [
-        'a <span style="display:inline-block"><div style="position:-webkit-sticky">c</div></span>',
-        'a <span style="display:inline-block"><span style="display:inline-block"><div style="position:-webkit-sticky">c</div></span></span>',
-        'a <span style="display:inline-block"><div style="position:-webkit-sticky;width:9px;height:4px"></div>t</span>',
-        'a<br>b <span style="display:inline-block"><div style="position:-webkit-sticky">c</div></span>'
+        %(a #{WalkRefusals::POSITIONED}),
+        %(a <span style="display:inline-block">#{WalkRefusals::POSITIONED}</span>),
+        %(a<br>b #{WalkRefusals::POSITIONED})
       ].each do |inner|
         expect_walk_declines(%{<div style="width:400px"><div style="writing-mode:vertical-lr">#{inner}</div></div>}, 'block-level-box-unplaceable')
       end
       # …and through a GRID item, whose subtree is measured for the track sizes
-      expect_walk_declines('<div style="display:grid;grid-template-columns:200px;width:400px"><div><div style="writing-mode:vertical-lr">a <span style="display:inline-block"><div style="position:-webkit-sticky">c</div></span></div></div></div>', 'block-level-box-unplaceable')
+      expect_walk_declines(%(<div style="display:grid;grid-template-columns:200px;width:400px"><div><div style="writing-mode:vertical-lr">a #{WalkRefusals::POSITIONED}</div></div></div>), 'block-level-box-unplaceable')
       # …and the same content in a HORIZONTAL block lays out, the atomic pushed rather than the pass declined.
-      expect_parity('<div style="width:400px"><div>a <span style="display:inline-block"><div style="position:-webkit-sticky">c</div></span></div></div>')
+      expect_parity(%(<div style="width:400px"><div>a #{WalkRefusals::POSITIONED}</div></div>))
     end
     # `direction` runs the INLINE axis, which in a vertical mode is the vertical one: an rtl vertical block's
     # children still start at the LEFT content edge, where an rtl HORIZONTAL block's start at the right. Its
@@ -1223,7 +1218,7 @@ x</div>))
     # …and where native cannot measure such a box's shrink-to-fit content, the oracle's box is still replayed
     # rather than the pass being declined.
     it 'replays one whose content native cannot measure' do
-      expect_replayed_oof(%{<div style="width:400px;height:200px"><div style="position:absolute;left:30px">a <span style="display:inline-block"><div style="position:-webkit-sticky">c</div></span></div></div>})
+      expect_replayed_oof(%{<div style="width:400px;height:200px"><div style="position:absolute;left:30px">a #{WalkRefusals::POSITIONED}</div></div>})
     end
     # The ROOT element is never an out-of-flow box's containing block, in either engine: the oracle assigns its box at
     # the end of the pass, so a first layout could not see it and every later one saw last pass's — the walk, which
@@ -1253,7 +1248,7 @@ x</div>))
   # cannot MEASURE inside it is nobody's problem, because nobody measures it. Before this, the flag was
   # inherited and a pushed atomic inline inside an absolute box declined the whole pass.
   describe 'an out-of-flow box leaves the measured region' do
-    pushed_atomic = 'a <span style="display:inline-block"><div style="position:-webkit-sticky">c</div></span>'
+    pushed_atomic = %(a #{WalkRefusals::POSITIONED})
     it 'lays out an absolute box whose content native cannot measure, inside a subtree it does measure' do
       # …its box replayed, because its containing block is outside the pass — and the same as a `fixed` box
       expect_replayed_oof(%{<div style="width:400px"><div style="writing-mode:vertical-lr"><div style="position:absolute">#{pushed_atomic}</div><div style="width:9px;height:4px"></div></div></div>})
@@ -1284,8 +1279,8 @@ x</div>))
       # …again a subset, for the same reason: this route REPLAYS what it cannot measure rather than declining,
       # and the shared list's whitespace-only atomic is measurable here.
       [
-        '<span style="display:inline-block"><span style="display:inline-block"><div style="position:-webkit-sticky">c</div></span></span>',
-        '<span style="display:inline-block"><div style="position:-webkit-sticky">c</div></span>'
+        %(<span style="display:inline-block">#{WalkRefusals::POSITIONED}</span>),
+        WalkRefusals::POSITIONED
       ].each do |inner|
         expect_replayed_oof(%{<div style="width:400px;position:relative"><div style="position:absolute;left:0">a #{inner}</div><p>x</p></div>})
       end
@@ -1301,10 +1296,10 @@ x</div>))
   # declined the whole table. A pushed atomic (an inline-block the walk refuses inside) stands in for it now.
   describe 'a cell whose content native cannot lay out pushes its contribution' do
     it 'lays out a table around a cell holding an atomic native does not lay out' do
-      expect_parity(%{<table style="border-spacing:0"><tr><td style="padding:0">a <span style="display:inline-block"><div style="position:-webkit-sticky">c</div></span></td><td style="padding:0">cc</td></tr></table>})
-      expect_parity(%{<table style="border-spacing:0"><tr><td style="padding:0">a <span style="display:inline-block"><div style="position:-webkit-sticky">c</div></span></td></tr></table>})
-      expect_parity(%{<table style="border-spacing:0"><tr><td style="padding:0;width:50px">a <span style="display:inline-block"><div style="position:-webkit-sticky">c</div></span></td></tr></table>})
-      expect_parity(%{<div style="display:table;border-spacing:0"><div style="display:table-row"><div style="display:table-cell">a <span style="display:inline-block"><div style="position:-webkit-sticky">c</div></span></div></div></div>})
+      expect_parity(%{<table style="border-spacing:0"><tr><td style="padding:0">a #{WalkRefusals::POSITIONED}</td><td style="padding:0">cc</td></tr></table>})
+      expect_parity(%{<table style="border-spacing:0"><tr><td style="padding:0">a #{WalkRefusals::POSITIONED}</td></tr></table>})
+      expect_parity(%{<table style="border-spacing:0"><tr><td style="padding:0;width:50px">a #{WalkRefusals::POSITIONED}</td></tr></table>})
+      expect_parity(%{<div style="display:table;border-spacing:0"><div style="display:table-row"><div style="display:table-cell">a #{WalkRefusals::POSITIONED}</div></div></div>})
     end
   end
 
@@ -1619,8 +1614,7 @@ x</div>))
     # cleared: the item recomputed its height from content with no floor (40 where the oracle's is 128). The push
     # resolves it against the oracle's basis instead, as the border-box figure the rest of the push keeps.
     it 'resolves a pushed item\'s percentage clamp in the push' do
-      table = '<span style="display:inline-block"><div style="position:-webkit-sticky">c</div></span>'
-      expect_parity(%(<div style="display:flex;height:180px;align-items:flex-start"><div style="display:flex;align-items:center;min-height:60%;padding:10px 0"><div>t #{table}</div><div style="height:20px;width:10px"></div></div></div>))
+      expect_parity(%(<div style="display:flex;height:180px;align-items:flex-start"><div style="display:flex;align-items:center;min-height:60%;padding:10px 0"><div>t #{WalkRefusals::POSITIONED}</div><div style="height:20px;width:10px"></div></div></div>))
     end
     # A box laid out twice under two different HEIGHT bases — a flex item measured with an auto height, then
     # stretched to its line — resolves a percentage min-height against the second. The oracle reused the first

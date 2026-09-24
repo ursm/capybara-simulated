@@ -1167,6 +1167,11 @@ RSpec.describe 'native layout table parity', if: ENV.fetch('CSIM_JS_ENGINE', 'v8
       # min/max-height do not apply to a cell (measured: Chrome leaves both tables 28 tall).
       expect_parity('<table style="border-spacing:4px"><tr><td style="min-height:40px">x</td><td>y</td></tr></table>')
       expect_parity('<table style="border-spacing:4px"><tr><td style="max-height:5px">x</td><td>y</td></tr></table>')
+      # …in its BLOCK axis, which in a vertical writing mode is its width: there its min-height clamps it (Chrome 80,
+      # where native skipped every cell's min/max-height by the physical axis and said 18)
+      body = '<table style="border-spacing:0"><tr><td id="m" style="padding:0;writing-mode:vertical-lr;min-height:80px">aa bb</td><td>x</td></tr></table>'
+      expect_parity(body)
+      expect(laid_out_rect(body)[3]).to eq(80)
       expect_parity('<table style="border-spacing:4px"><tr><td style="height:30px;box-sizing:border-box;padding:6px">x</td><td>y</td></tr></table>')
       expect_parity('<table style="border-spacing:4px"><tr><td><div style="height:10px;margin:5px"></div><div style="height:20px"></div></td><td style="height:50px">x</td></tr></table>')
     end
@@ -1370,7 +1375,7 @@ RSpec.describe 'native layout table parity', if: ENV.fetch('CSIM_JS_ENGINE', 'v8
     it 'still measures a cell it can, and still declines what no walk can build' do
       r = run_shadow('<table style="border-spacing:0"><tr><td style="padding:0">a <span style="display:inline-block">ok</span></td></tr></table>')
       expect(r).to include('ok' => true, 'mismatches' => 0, 'pushedContributions' => 0, 'nativeAtomics' => 1), r.inspect
-      declined = run_shadow('<table style="border-spacing:0"><tr><td style="padding:0"><div style="position:-webkit-sticky">c</div></td></tr></table>')
+      declined = run_shadow(%(<table style="border-spacing:0"><tr><td style="padding:0">#{WalkRefusals::POSITIONED_INNER}</td></tr></table>))
       expect(declined).to include('ok' => false, 'reason' => 'block-level-box-unplaceable'), declined.inspect
     end
   end
@@ -1388,7 +1393,7 @@ RSpec.describe 'native layout table parity', if: ENV.fetch('CSIM_JS_ENGINE', 'v8
     end
 
     it 'lays out a table whose caption holds an inline-block native cannot measure' do
-      atomic = 'a <span style="display:inline-block"><div style="position:-webkit-sticky">c</div></span>'
+      atomic = %(a #{WalkRefusals::POSITIONED})
       # asked for, and native cannot produce it: a vertical-writing-mode block child and a `min-content` track
       expect_pushed_contribution(%{<div style="width:400px"><div style="writing-mode:vertical-lr"><table><caption>#{atomic}</caption><tr><td>x</td></tr></table></div></div>})
       expect_pushed_contribution(%{<div style="display:grid;grid-template-columns:min-content;width:400px"><table style="border-spacing:0"><caption>#{atomic}</caption><tr><td style="padding:0">x</td></tr></table></div>})
@@ -1460,23 +1465,17 @@ RSpec.describe 'native layout table parity', if: ENV.fetch('CSIM_JS_ENGINE', 'v8
   # a table's cell hands that to its column instead — and resolved against the block native lays it out in, with
   # no oracle box read. Chrome wraps each in an ANONYMOUS table: shrink-to-fit (48 for "aa bb" where both engines
   # fill the 200; 96.03 for the 50% cell where both say 100) and consecutive cells side by side (the second at
-  # x 19.2, y 0, where both stack it at y 22). Shared, so pinned rather than fixed.
+  # x 19.2, y 0, where both stack it at y 22), with no margins. Shared, so pinned rather than fixed.
   describe 'an orphan cell, row group or caption' do
-    def rect_of(body)
-      session = simulated_session(page(body))
-      session.visit '/'
-      session.evaluate_script("(r => [r.x, r.y, r.width, r.height])(document.getElementById('m').getBoundingClientRect())")
-    end
-
     it 'lays one out as a block whose block-axis min/max do not apply' do
       %w[min-height:40px max-height:5px].each do |style|
         body = %(<div style="width:200px;font:16px monospace"><div id="m" style="display:table-cell;#{style}">aa bb</div></div>)
         expect_parity(body)
-        expect(rect_of(body)[3]).to eq(22)
+        expect(laid_out_rect(body)[3]).to eq(22)
       end
       body = '<div style="width:200px;font:16px monospace"><div id="m" style="display:table-cell;width:50%">aa bb</div></div>'
       expect_parity(body)
-      expect_shared_gap(rect_of(body)[2], shared: 100, chrome: 96.03, what: "#{body}: #m width")
+      expect_shared_gap(laid_out_rect(body)[2], shared: 100, chrome: 96.03, what: "#{body}: #m width")
       session = simulated_session(page(body))
       session.visit '/'
       session.evaluate_script('document.body.offsetHeight')
@@ -1494,12 +1493,17 @@ RSpec.describe 'native layout table parity', if: ENV.fetch('CSIM_JS_ENGINE', 'v8
 
     it 'fills the width and stacks where Chrome wraps it in an anonymous table' do
       {
-        '<div id="m" style="display:table-cell">aa bb</div>'                                    => [2, 200, 48.02],
-        '<div style="display:table-cell">aa</div><div id="m" style="display:table-cell">bb</div>' => [1, 22, 0]
+        '<div id="m" style="display:table-cell">aa bb</div>'                                      => [2, 200, 48.02],
+        '<div style="display:table-cell">aa</div><div id="m" style="display:table-cell">bb</div>' => [1, 22, 0],
+        # …a cell's margins, which a table cell does not have (Chrome: y 0; both engines let it collapse to 10)
+        '<div id="m" style="display:table-cell;margin:10px 0">aa bb</div>'                        => [1, 10, 0],
+        # …and the other parts: a caption as wide as the words it wraps (19.2 by 44), a row group shrink-to-fit
+        '<div id="m" style="display:table-caption">aa bb</div>'                                   => [2, 200, 19.2],
+        '<div id="m" style="display:table-row-group">aa bb</div>'                                 => [2, 200, 48.02]
       }.each do |cells, (index, shared, chrome)|
         body = %(<div style="width:200px;font:16px monospace">#{cells}</div>)
         expect_parity(body)
-        expect_shared_gap(rect_of(body)[index], shared: shared, chrome: chrome, what: "#{body}: #m rect[#{index}]")
+        expect_shared_gap(laid_out_rect(body)[index], shared: shared, chrome: chrome, what: "#{body}: #m rect[#{index}]")
       end
     end
   end

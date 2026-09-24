@@ -21,6 +21,14 @@ module ShadowParity
     )
   end
 
+  # `#m`'s laid-out rectangle, `[x, y, width, height]`, on a fresh page of `body` — the figure a spec holds against
+  # Chrome's. Asks the example group's own `page`, so it reads the document the parity run reads.
+  def laid_out_rect(body, id = 'm')
+    session = simulated_session(page(body))
+    session.visit '/'
+    session.evaluate_script("(r => [r.x, r.y, r.width, r.height])(document.getElementById('#{id}').getBoundingClientRect())")
+  end
+
   # A figure BOTH engines share and Chrome does not — recorded rather than fixed while the port runs, and pinned
   # so the pair cannot drift apart unnoticed.
   #

@@ -37,8 +37,9 @@ module WalkRefusals
   # an empty line stopped moving what waits on it — both 2026-09-24.
   ORPHAN_ROW       = '<span style="display:inline-block"><div style="display:table-row">aa bb</div></span>'
   # (An orphan `display: table-cell` inside one was the third entry — `block-level-box-unplaceable` — until
-  # 2026-09-24, when the walk took an orphan table part as the block the oracle lays it out as. No display reaches
-  # that reason now; what does is a position neither engine models, which is the first entry.)
+  # 2026-09-24, when the walk took an orphan table part as the block the oracle lays it out as. The cause it stood
+  # for is not gone: a display the block arm has no case for still reaches that reason — `-webkit-box` (the
+  # line-clamp idiom), `ruby`, `table-column`, `math`, `flow` — beside the unmodelled position of the first entry.)
   ATOMIC           = [POSITIONED, ORPHAN_ROW].freeze
 
   # …and a separate cause, for the routes that MEASURE rather than lay out: content whose intrinsic width

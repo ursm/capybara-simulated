@@ -615,22 +615,19 @@ impl Input {
     }
     // The CONTENT height when the box's height is definite — declared or imposed, not a pushed auto height — as
     // the final box will be clamped (the oracle reads it back off `_lb.height` once `_lbDefiniteH` says so).
-    // …with the clamp skipped for a TABLE CELL, whose min/max-height do not apply in the block axis at all
-    // (CSS 2.2 §17.5.3 leaves their effect undefined; Chrome and Firefox read both as `auto`). The box says so
-    // 2,500 lines down — `box_h` skips the same clamp under `height_is_floor` — and the two have to agree,
-    // because this figure is the basis the cell's own PERCENTAGE-height descendants resolve against on its
-    // second pass. Clamping it made a `max-height: 20px` cell in a 200px table hand its `height: 50%` child a
-    // basis of 20 where the oracle and Chrome both say 97, and a `min-height: 500px` one hand it 500.
+    // …clamped by the min/max the RECORD carries, which for a TABLE CELL are none in its block axis: they do not
+    // apply there at all (CSS 2.2 §17.5.3 leaves their effect undefined; Chrome and Firefox read both as `auto`),
+    // and the walk says so (`cellIgnoresMinMax`). The box's `box_h` clamps by the same record, and the two have to
+    // agree, because this figure is the basis the cell's own PERCENTAGE-height descendants resolve against on its
+    // second pass: a `max-height: 20px` cell in a 200px table hands its `height: 50%` child a basis of 97, as the
+    // oracle and Chrome both say, not 20. A cell in a VERTICAL writing mode is the other way round — its height
+    // is its inline axis, and its min/max-height clamp it (80, not its 18px line).
     fn definite_content_h(&self) -> Option<f64> {
         if is_auto(self.height) || self.item_auto_height || self.pushed_h_indefinite {
             return None;
         }
         let to_border = |v: f64| if is_auto(v) || self.border_box { v } else { v + self.edges_y() };
-        let border_h = if self.height_is_floor {
-            to_border(self.height)
-        } else {
-            clamp_min_max(to_border(self.height), to_border(self.min_h), to_border(self.max_h))
-        };
+        let border_h = clamp_min_max(to_border(self.height), to_border(self.min_h), to_border(self.max_h));
         Some((border_h.max(0.0) - self.edges_y()).max(0.0))
     }
     // A flex COLUMN's main size as the oracle's `definiteMainHeight` has it: the definite content height, else a
@@ -2906,9 +2903,9 @@ fn measure(
             n.height + n.edges_y()
         };
         let to_border = |v: f64| if is_auto(v) || n.border_box { v } else { v + n.edges_y() };
-        // A table CELL's min/max-height do not apply (measured: Chrome leaves a `min-height: 40px` cell at its
-        // 20px line, and a `max-height: 5px` one uncapped) — its height is a floor and its row decides the rest.
-        let box_h = if n.height_is_floor { box_h.max(0.0) } else { clamp_min_max(box_h, to_border(n.min_h), to_border(n.max_h)).max(0.0) };
+        // (A table CELL's block-axis min/max are none on the record — Chrome leaves a `min-height: 40px` cell at its
+        // 20px line, and a `max-height: 5px` one uncapped: its height is a floor and its row decides the rest.)
+        let box_h = clamp_min_max(box_h, to_border(n.min_h), to_border(n.max_h)).max(0.0);
         boxes[i].nid = n.nid;
         boxes[i].w = w;
         boxes[i].h = box_h;
@@ -3060,7 +3057,8 @@ fn measure(
                     // it — which is also why a block holding floats and a clearfix is as tall as its floats.
                     let spent = first && top_open;
                     let clear_to = clearance_y(&ctx.items, cursor, cn.clear);
-                    // (Hoisting on is a box with no float to wait for: the flow must not have moved.)
+                    // (One that does NOT take clearance keeps hoisting — which says there is no float on the side
+                    // it names earlier in this context, so its clearance line cannot be below the flow.)
                     if spent && !cn.takes_clearance && clear_to > cursor {
                         failed.set(true);
                     }
@@ -3394,8 +3392,8 @@ fn measure(
         n.height + n.edges_y()
     };
     let to_border = |v: f64| if is_auto(v) || n.border_box { v } else { v + n.edges_y() };
-    // A table CELL's min/max-height do not apply (see the text arm) — its height is a floor, its row decides.
-    let box_h = if n.height_is_floor { box_h.max(0.0) } else { clamp_min_max(box_h, to_border(n.min_h), to_border(n.max_h)).max(0.0) };
+    // (A table CELL's block-axis min/max are none on the record — see the text arm.)
+    let box_h = clamp_min_max(box_h, to_border(n.min_h), to_border(n.max_h)).max(0.0);
 
     boxes[i].nid = n.nid;
     boxes[i].w = w;
@@ -5032,12 +5030,12 @@ fn measure_table(
     }
 
     // ROW heights (§17.5.3). A row is as tall as the tallest cell that does NOT span rows — each cell's own box,
-    // its declared height already a floor and its min/max applied (`height_is_floor`) — floored by what the row
-    // itself declared. A cell aligned on the BASELINE contributes differently: the row's baseline is the deepest
-    // first-baseline among those cells, each then drops so its own baseline reaches it, and the row must hold the
-    // lowest resulting cell bottom — so those are deferred until the row's baseline is known. A cell that SPANS
-    // rows sizes none of them on its own: it joins its FIRST row's baseline group, and whatever the rows it
-    // covers come up short of grows the LAST one it touches.
+    // its declared height already a floor (`height_is_floor`) and clamped by the min/max its record carries —
+    // floored by what the row itself declared. A cell aligned on the BASELINE contributes differently: the row's
+    // baseline is the deepest first-baseline among those cells, each then drops so its own baseline reaches it, and
+    // the row must hold the lowest resulting cell bottom — so those are deferred until the row's baseline is known.
+    // A cell that SPANS rows sizes none of them on its own: it joins its FIRST row's baseline group, and whatever
+    // the rows it covers come up short of grows the LAST one it touches.
     // A PERCENTAGE row height resolves against what the rows share out — the imposed content height less the
     // spacing around and between them — and only when that height is definite; the percentages are taken in
     // RENDER order (header, body, footer — the order the rows arrive in) and cannot overflow the basis (Chrome

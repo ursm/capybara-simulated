@@ -285,8 +285,7 @@ RSpec.describe 'native layout inline-atomic parity', if: ENV.fetch('CSIM_JS_ENGI
       expect_native_atomic(%(<div style="width:200px">a <span style="position:relative;left:30px;top:7px"><span style="#{ib};vertical-align:middle"></span></span></div>))
       # A PUSHED atomic already carries the oracle's offset — the shift must not be added to it
       # a second time.
-      table = '<span style="display:inline-block"><div style="position:-webkit-sticky">c</div></span>'
-      r = run_shadow(%(<div style="width:200px">a <span style="position:relative;left:30px;top:7px">#{table}</span></div>))
+      r = run_shadow(%(<div style="width:200px">a <span style="position:relative;left:30px;top:7px">#{WalkRefusals::POSITIONED}</span></div>))
       expect(r).to include('ok' => true, 'mismatches' => 0, 'nativeAtomics' => 0)
     end
     # A PERCENTAGE inset resolves against the containing block of the fragment — both axes, which needs the pair
@@ -483,8 +482,7 @@ RSpec.describe 'native layout inline-atomic parity', if: ENV.fetch('CSIM_JS_ENGI
       expect_parity(%(<div style="width:400px"><div>one</div> <span></span> <div>two</div></div>))
       # …an atomic native still cannot lay out, in a group a flex row MEASURES, takes the row's fallback rather
       # than a pushed box the measure cannot see
-      tbl = '<span style="display:inline-block"><div style="position:-webkit-sticky">c</div></span>'
-      r = run_shadow(%(<div style="display:flex;width:300px"><div>x <span style="display:inline-block"><div>b</div>t #{tbl}</span></div><div style="flex:1">y</div></div>))
+      r = run_shadow(%(<div style="display:flex;width:300px"><div>x <span style="display:inline-block"><div>b</div>t #{WalkRefusals::POSITIONED}</span></div><div style="flex:1">y</div></div>))
       expect(r).to include('ok' => true, 'mismatches' => 0, 'nativeFlexRows' => 0), r.inspect
       # …and a JUSTIFIED group's atomics are native too, its lines spread the way a text block's are
       expect_native_atomic(%(<div style="width:100px;text-align:justify"><div>block</div>aaa bbb ccc <span style="#{ib}"></span> ddd eee fff ggg</div>))
@@ -806,9 +804,10 @@ RSpec.describe 'native layout inline-atomic parity', if: ENV.fetch('CSIM_JS_ENGI
       end
     end
     it 'keeps the pushed box for an atomic whose own subtree declines' do
-      # …an atomic the walk refuses INSIDE (an unmodelled `position` on a block in an inline-block) rolls back to the pushed box
-      # rather than declining the pass. An inline-FLEX, an inline-GRID and an inline-TABLE are native's own.
-      r = run_shadow('<div style="width:400px">text <span style="display:inline-block"><div style="position:-webkit-sticky">c</div></span> x</div>')
+      # …an atomic the walk refuses INSIDE (an unmodelled `position` on a block in an inline-block) rolls back to
+      # the pushed box rather than declining the pass. An inline-FLEX, an inline-GRID and an inline-TABLE are
+      # native's own.
+      r = run_shadow(%(<div style="width:400px">text #{WalkRefusals::POSITIONED} x</div>))
       expect(r).to include('ok' => true, 'mismatches' => 0, 'nativeAtomics' => 0)
       r = run_shadow('<div style="width:400px">text <span style="display:inline-flex"><div>f</div></span> x</div>')
       expect(r).to include('ok' => true, 'mismatches' => 0, 'nativeAtomics' => 1)
@@ -933,7 +932,7 @@ RSpec.describe 'native layout inline-atomic parity', if: ENV.fetch('CSIM_JS_ENGI
     # …while an atomic whose own subtree the walk refuses keeps the PUSHED box — the route rolls back rather
     # than taking the pass down with it.
     it 'keeps pushing an atomic it cannot walk' do
-      r = run_shadow('<div style="width:400px">text <span style="display:inline-block"><div style="position:-webkit-sticky">c</div></span> after</div>')
+      r = run_shadow(%(<div style="width:400px">text #{WalkRefusals::POSITIONED} after</div>))
       expect(r).to include('ok' => true, 'mismatches' => 0, 'nativeAtomics' => 0), r.inspect
     end
     # An auto-width WRAPPING flex container is GROWN past its intrinsic figure once laid out — to what its own

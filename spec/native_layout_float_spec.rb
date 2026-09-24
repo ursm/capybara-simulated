@@ -173,13 +173,22 @@ RSpec.describe 'native layout float parity', if: ENV.fetch('CSIM_JS_ENGINE', 'v8
   it 'places a clearfix at the clearance line and the row around it below the one before' do
     row = '<div><div style="float:left;width:200px;height:20px"></div><div style="clear:both"></div></div>'
     {
-      %(<div style="width:600px">#{row}#{row}#{row.sub('<div>', '<div id="m">')}</div>)                                                                             => [0, 40, 20],
-      '<div style="width:200px"><div style="float:left;width:50px;height:50px"></div><div style="clear:both"></div><p id="m" style="margin:16px 0">after</p></div>' => [0, 66, 18]
+      %(<div style="width:600px">#{row}#{row}#{row.sub('<div>', '<div id="m">')}</div>)                                                                             => [0, 40, 600, 20],
+      '<div style="width:200px"><div style="float:left;width:50px;height:50px"></div><div style="clear:both"></div><p id="m" style="margin:16px 0">after</p></div>' => [0, 66, 200, 18],
+      # …and the line after it takes the band there, past the float (the oracle kept the band beside it: x 50)
+      '<div style="width:200px;position:relative"><div><div style="float:left;width:50px;height:50px"></div><div style="clear:both"></div>' \
+      '<div id="m" style="position:absolute;width:5px;height:5px"></div></div></div>'                                                                               => [0, 50, 5, 5]
     }.each do |body, rect|
       expect_parity(body)
-      session = simulated_session(page(body)); session.visit '/'
-      expect(session.evaluate_script("(r                                                                                                                            => [r.x, r.y, r.height])(document.getElementById('m').getBoundingClientRect())")).to eq(rect)
+      expect(laid_out_rect(body)).to eq(rect)
     end
+    # …which it takes after a box collapsing through that held a FLOAT too — the band beside the float it placed,
+    # where Chrome puts a block-level out-of-flow box at the content edge whatever the floats (50, Chrome 0; the
+    # same gap as after a `height: 49px` sibling, shared by both engines).
+    body = '<div style="width:200px;position:relative"><div><div><div style="float:left;width:50px;height:50px"></div></div>' \
+           '<div id="m" style="position:absolute;width:5px;height:5px"></div></div></div>'
+    expect_parity(body)
+    expect_shared_gap(laid_out_rect(body)[0], shared: 50, chrome: 0, what: "#{body}: #m x")
   end
 
   # …and where the clearfix has MARGINS of its own, or a margin is still open above it, Chrome lets the clearance
@@ -193,9 +202,7 @@ RSpec.describe 'native layout float parity', if: ENV.fetch('CSIM_JS_ENGINE', 'v8
       '<div style="width:300px;overflow:hidden"><div style="float:left;width:100px;height:60px"></div><div id="m" style="clear:left;margin:20px 0"></div></div>'                   => [80, 60]
     }.each do |body, (shared, chrome)|
       expect_parity(body)
-      session = simulated_session(page(body)); session.visit '/'
-      y = session.evaluate_script("document.getElementById('m').getBoundingClientRect().y")
-      expect_shared_gap(y, shared: shared, chrome: chrome, what: "#{body}: #m y")
+      expect_shared_gap(laid_out_rect(body)[1], shared: shared, chrome: chrome, what: "#{body}: #m y")
     end
   end
 
