@@ -165,9 +165,38 @@ RSpec.describe 'native layout float parity', if: ENV.fetch('CSIM_JS_ENGINE', 'v8
     HTML
   end
 
-  it 'declines a collapse-through cleared box, keeps a non-empty cleared box' do
-    expect(run_shadow('<div style="overflow:hidden;width:300px"><div style="float:left;width:80px;height:30px"></div><div style="clear:both;margin-top:10px"></div></div>')['ok']).to be false
-    expect(run_shadow('<div style="overflow:hidden;width:300px"><div style="float:left;width:80px;height:30px"></div><div style="clear:both;height:10px"></div></div>')['ok']).to be true
+  # The everyday clearfix — an empty `clear: both` box, which COLLAPSES THROUGH — moves the flow itself to the
+  # clearance line (§8.3.1), so the block around a row of floats and one is as tall as the floats and the next row
+  # starts below it: Chrome puts the third of three such rows at 40 in a 60px column. The oracle collapsed the
+  # rows through (all three at 0, growing) and lost a margin after the clearfix (the `<p>` at 50 where Chrome says
+  # 66); native declined every one of them until 2026-09-24.
+  it 'places a clearfix at the clearance line and the row around it below the one before' do
+    row = '<div><div style="float:left;width:200px;height:20px"></div><div style="clear:both"></div></div>'
+    {
+      %(<div style="width:600px">#{row}#{row}#{row.sub('<div>', '<div id="m">')}</div>)                                                                             => [0, 40, 20],
+      '<div style="width:200px"><div style="float:left;width:50px;height:50px"></div><div style="clear:both"></div><p id="m" style="margin:16px 0">after</p></div>' => [0, 66, 18]
+    }.each do |body, rect|
+      expect_parity(body)
+      session = simulated_session(page(body)); session.visit '/'
+      expect(session.evaluate_script("(r                                                                                                                            => [r.x, r.y, r.height])(document.getElementById('m').getBoundingClientRect())")).to eq(rect)
+    end
+  end
+
+  # …and where the clearfix has MARGINS of its own, or a margin is still open above it, Chrome lets the clearance
+  # absorb them: the box sits AT the float bottom and the flow continues from there less the margin above it. Both
+  # engines add the margins past the clearance line instead — shared, so recorded rather than fixed.
+  it 'adds a clearfix\'s margins past the clearance line (Chrome: absorbs them)' do
+    {
+      '<div style="width:200px"><div style="float:left;width:50px;height:50px"></div><div style="clear:both;margin-top:12px"></div><div id="m">x</div></div>'                      => [62, 50],
+      '<div style="width:200px"><p style="margin:0 0 15px">pp</p><div style="float:left;width:40px;height:30px"></div><div id="m" style="clear:both"></div><div>x</div></div>'     => [78, 63],
+      '<div style="width:200px"><div style="float:left;width:50px;height:50px"></div><div style="clear:both;margin:10px 0 25px"></div><p id="m" style="margin:16px 0">p</p></div>' => [75, 65],
+      '<div style="width:300px;overflow:hidden"><div style="float:left;width:100px;height:60px"></div><div id="m" style="clear:left;margin:20px 0"></div></div>'                   => [80, 60]
+    }.each do |body, (shared, chrome)|
+      expect_parity(body)
+      session = simulated_session(page(body)); session.visit '/'
+      y = session.evaluate_script("document.getElementById('m').getBoundingClientRect().y")
+      expect_shared_gap(y, shared: shared, chrome: chrome, what: "#{body}: #m y")
+    end
   end
 
   # `contain` and multicol establish a formatting context of their own (css-contain-2 §2.1, css-multicol-1 §2):
@@ -304,20 +333,6 @@ RSpec.describe 'native layout float parity', if: ENV.fetch('CSIM_JS_ENGINE', 'v8
     expect_parity('<div style="width:300px;overflow:hidden"><div><div style="float:left;width:100px;height:60px"></div>' \
                   '<div style="clear:left;margin-top:20px;height:10px"><div style="float:left;width:50px;height:50px"></div></div>' \
                   '<div style="clear:left;height:5px"></div></div></div>')
-  end
-
-  # A/B bail — a cleared box that COLLAPSES THROUGH is placed by a different rule (§8.3.1: its own
-  # above-margin sits ON TOP of the clearance line and it does not advance the flow), which is also what makes
-  # the fresh context on that arm sound: nothing is placed, so nothing escapes unshifted. The ORACLE is wrong
-  # on this shape too — it puts the through box at 80 after a 60px float where Chrome says 60, adding the
-  # margin to the clearance line instead of spending it — so the decline is "neither engine is ready", not
-  # "the oracle is the reference".
-  it 'declines a cleared child that collapses through, keeps one with a height' do
-    through = '<div style="width:300px;overflow:hidden"><div style="float:left;width:100px;height:60px"></div>' \
-              '<div style="clear:left;margin:20px 0"></div></div>'
-    expect(run_shadow(through)['ok']).to be false
-    expect_parity('<div style="width:300px;overflow:hidden"><div style="float:left;width:100px;height:60px"></div>' \
-                  '<div style="clear:left;margin:20px 0;height:1px"></div></div>')
   end
 
   # §9.4.3 is a PAINT-time shift: it changes no other box's layout, so the rectangle the enclosing formatting

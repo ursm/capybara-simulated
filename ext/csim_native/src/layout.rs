@@ -3051,9 +3051,46 @@ fn measure(
                 // (collapsingTopMargin); the own declared margin alone would drop the descendant's.
                 let cm = measure(c, width_in(c, content_w), f64::NAN, inputs, runs, run_texts, grids, children, boxes, failed, &mut FloatCtx::new(), 0.0, 0.0);
                 if cm.collapse_through {
-                    // A THROUGH cleared box is placed by a different rule (§8.3.1: its own above-margin sits
-                    // ON TOP of the clearance line, and it does not advance the flow) — defer to JS.
-                    failed.set(true);
+                    // A cleared box that collapses THROUGH — the clearfix `<div style="clear: both">` — does
+                    // not advance the flow by a height of its own; the clearance line moves the flow ITSELF
+                    // (§8.3.1), from where the last border box ended, and the box sits past the margins above
+                    // it there. Its run then stays open past the line for whatever follows. Under an open top
+                    // edge one that takes clearance ends the hoisting: its run was never part of this block's
+                    // margin (`marginInfo` stops at it), so it opens here and the next child is placed below
+                    // it — which is also why a block holding floats and a clearfix is as tall as its floats.
+                    let spent = first && top_open;
+                    let clear_to = clearance_y(&ctx.items, cursor, cn.clear);
+                    // (Hoisting on is a box with no float to wait for: the flow must not have moved.)
+                    if spent && !cn.takes_clearance && clear_to > cursor {
+                        failed.set(true);
+                    }
+                    cursor = cursor.max(clear_to);
+                    let y = (cursor + if spent { 0.0 } else { pending.peek(cm.top_only) }).max(clear_to);
+                    let child_w = width_in(c, content_w);
+                    let cx = block_child_x(&n, &cn, content_left_rel, content_left_rel + content_w, child_w);
+                    let mut inner = FloatCtx { items: ctx.items.iter().map(|f| f.shifted(-cx, -y)).collect() };
+                    let placed = inner.items.len();
+                    let cm2 = measure(c, child_w, f64::NAN, inputs, runs, run_texts, grids, children, boxes, failed, &mut inner, 0.0, 0.0);
+                    if !cm2.collapse_through || cm2.top.value() != cm.top.value() || boxes[c].w != child_w {
+                        failed.set(true);
+                    }
+                    boxes[c].x = cx;
+                    boxes[c].y = y;
+                    ctx.items.extend(inner.items[placed..].iter().map(|f| f.shifted(cx, y)));
+                    has_child = true;
+                    if !spent {
+                        pending.merge(cm.top);
+                        first = false;
+                    } else if cn.takes_clearance {
+                        pending = cm.top;
+                        first = false;
+                    } else {
+                        top_m.merge(cm.top);
+                    }
+                    if cn.takes_clearance {
+                        all_children_through = false;
+                    }
+                    continue;
                 } else {
                     // §8.3.1: a box that takes CLEARANCE does not collapse its top margin with its parent's —
                     // the clearance line replaces the margin rather than adding to it, and the parent is not
@@ -3267,8 +3304,9 @@ fn measure(
         // A child that collapses THROUGH an open top edge leaves the run in this block's own top margin and
         // does not push the next sibling with it — which is also why the escaped floats below cannot wait for
         // the end of the loop body: this arm leaves it early.
-        let hoisted_through = first && top_open && cm.collapse_through;
-        if !cm.collapse_through {
+        // (…one that takes CLEARANCE ends the hoisting, as the clear arm above says, and holds this block open.)
+        let hoisted_through = first && top_open && cm.collapse_through && !cn.takes_clearance;
+        if !cm.collapse_through || cn.takes_clearance {
             all_children_through = false;
         }
         if first && top_open {
@@ -3282,7 +3320,9 @@ fn measure(
                 top_m.merge(cm.top);
             }
             boxes[c].y = content_top_rel;
-            if cm.collapse_through {
+            if cm.collapse_through && cn.takes_clearance {
+                pending = cm.top;
+            } else if cm.collapse_through {
                 // …and a child that collapses THROUGH leaves the run where it put it — in the parent's own
                 // top margin — without also pushing the next sibling with it, which counted it twice (a
                 // `margin: 20px 0` empty box followed by a `margin: 15px 0` one put the second at 40 where
