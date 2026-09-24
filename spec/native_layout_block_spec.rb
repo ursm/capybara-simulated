@@ -675,15 +675,27 @@ RSpec.describe 'native layout L1 block-flow parity', if: ENV.fetch('CSIM_JS_ENGI
       expect_parity('<div style="width:400px"><div style="max-width:min-content">aa bb</div></div>')
       expect_parity('<div style="width:400px"><div style="max-height:min-content;height:50px">aa bb</div></div>')
     end
-    # …and every OTHER sizing path keeps its own basis, so a keyword width declines there: an out-of-flow box (by
-    # its insets), a replaced element (by its intrinsic size — an inline one is pushed as an atomic instead of
-    # declining the pass). A GRID item came off this list on 2026-09-24: `measure_grid` measures it against its
-    # area (native_layout_grid_spec).
+    # …and every OTHER sizing path keeps its own basis, so a keyword width declines there: a replaced element (by
+    # its intrinsic size — an inline one is pushed as an atomic instead of declining the pass). A GRID item and an
+    # OUT-OF-FLOW box came off this list on 2026-09-24: `measure_grid` measures the one against its area
+    # (native_layout_grid_spec), `place_out_of_flow` the other against the room its insets leave — and does not
+    # stretch it between them, a keyword width being no `auto` (Chrome: 105.61 between `left:10px; right:20px`,
+    # and a `min-content` one centred by auto margins at 140.39).
+    it 'measures an out-of-flow box with a keyword width against the room its insets leave' do
+      {
+        '<div id="m" style="position:absolute;left:10px;right:20px;width:max-content">aa bb cc dd</div>'                => [10, 105.609375],
+        '<div id="m" style="position:absolute;left:0;right:0;margin:0 auto;width:min-content">aa bb cc dd</div>'         => [140.390625, 19.203125]
+      }.each do |box, (x, w)|
+        body = %(<div style="width:300px;position:relative;font:16px monospace">#{box}</div>)
+        expect_parity(body)
+        got = session_for(body).evaluate_script("(r => [r.x, r.width])(document.getElementById('m').getBoundingClientRect())")
+        expect(got[0]).to be_within(0.05).of(x)
+        expect(got[1]).to be_within(0.05).of(w)
+      end
+    end
     it 'declines a keyword width a different sizing path owns' do
       # …the pass ROOT (sized from the width the harness hands in — native would fill its containing block and
-      # report the box as laid out) and an out-of-flow box (sized from its insets). A replaced element is sized by
-      # its intrinsic size and declines the same way.
-      expect_walk_declines('<div style="position:relative;width:400px"><div style="position:absolute;width:max-content">aa bb</div></div>', 'unsupported subtree')
+      # report the box as laid out). A replaced element is sized by its intrinsic size and declines the same way.
       session = simulated_session(page('<div id="r" style="width:max-content">aa bb cc</div>')); session.visit '/'
       expect(parity(session, '#r')).to include('ok' => false, 'reason' => 'unsupported subtree')
       # …and the vertical writing mode's root, which has no inline size to fill either. It is the SAME hole, and
