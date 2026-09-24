@@ -1163,11 +1163,17 @@ RSpec.describe 'native layout flex parity', if: ENV.fetch('CSIM_JS_ENGINE', 'v8'
       expect_native_flex(%(<div style="#{base};flex-wrap:wrap"><div style="width:300px">wrapped one</div><div style="font-size:32px;width:300px">BIG</div></div>))
       expect_native_flex(%(<div style="#{base}"><div style="align-self:flex-start;height:50px">start</div><div>base</div><div style="font-size:32px">BIG</div></div>))
     end
-    it 'falls back for a baseline item holding a vertical-align or an atomic inline' do
-      r = run_shadow(%(<div style="#{base}"><div>text <sup>sup</sup> more</div><div>x</div></div>))
-      expect(r).to include('ok' => true, 'mismatches' => 0, 'nativeFlexRows' => 0)
-      r = run_shadow(%(<div style="#{base}"><div>text <span style="display:inline-block;height:30px;width:10px"></span> more</div><div>x</div></div>))
-      expect(r).to include('ok' => true, 'mismatches' => 0, 'nativeFlexRows' => 0)
+    # …and one holding a `vertical-align` shift or an atomic inline, which fell back to the pushed path — and read
+    # the ORACLE's baseline — as a "baseline hazard" until 2026-09-24, when a sweep built on those shapes showed
+    # native's own lines giving the same baseline. Chrome puts the plain item beside them at y 4.33 and 16.
+    it 'sizes a baseline item holding a vertical-align or an atomic inline natively' do
+      {
+        %(<div style="#{base}"><div>text <sup>sup</sup> more</div><div id="m">x</div></div>)                                                    => 4.33,
+        %(<div style="#{base}"><div>text <span style="display:inline-block;height:30px;width:10px"></span> more</div><div id="m">x</div></div>) => 16
+      }.each do |body, y|
+        expect_native_flex(body)
+        expect(laid_out_rect(body)[1]).to be_within(0.01).of(y)
+      end
     end
   end
   # Native sizing is a promise about every item at once, and the WALK decides whether it holds: where it declines
