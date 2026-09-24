@@ -38,11 +38,11 @@ RSpec.describe 'native layout flex parity', if: ENV.fetch('CSIM_JS_ENGINE', 'v8'
   # and `simulated_session` defers disposal: the align-content one held 576 live V8 isolates and took the
   # file's peak RSS to 9.52 GB (measured), where the gate runs it under flatware beside six sweeps and has
   # been taken down by the OOM killer once already. Same 195 examples at 229 MB.
-  def run_shadow(body)
+  def run_shadow(body, opts = '{}')
     with_simulated_session(page(body)) do |session|
       session.visit '/'
       session.evaluate_script('document.body.offsetHeight')
-      session.evaluate_script('globalThis.__csimLayoutShadowRun()')
+      session.evaluate_script("globalThis.__csimLayoutShadowRun(undefined, #{opts})")
     end
   end
 
@@ -949,6 +949,21 @@ RSpec.describe 'native layout flex parity', if: ENV.fetch('CSIM_JS_ENGINE', 'v8'
       end
     end
 
+    # …and an inline BOX's percentage EDGE, at any depth: it has no record, and `nlGatherRuns` resolves its OPEN /
+    # CLOSE runs against the oracle's `_lbCbW` — the item's FINAL width, where native measures a wrapping column's
+    # item at its natural one (54 tall in native, 36 in the oracle and Chrome). And an atomic written through a
+    # `display: contents` wrapper inside a MIXED block, whose record hangs under the anonymous group: the route is
+    # asked by BOX now (`layoutParent`), where `flatTreeParent` stopped at the wrapper (119 against 102).
+    it 'falls back for an inline box\'s percentage edge and for an atomic through `contents` in a mixed block' do
+      wrap = 'display:flex;flex-direction:column;flex-wrap:wrap;height:60px'
+      [%(<div style="#{wrap}"><div>bold <i style="padding-left:20%">inl</i> tail words</div><div style="height:40px">z</div><div style="width:170px;height:30px"></div></div>),
+       %(<div style="#{wrap}"><div><b>bold <i style="padding-left:20%">inl</i> tail</b> words</div><div style="height:40px">z</div><div style="width:170px;height:30px"></div></div>),
+       %(<div style="#{col};height:120px"><div style="flex:1"><div style="height:100%">lead<p>para</p><span style="display:contents"><span style="display:inline-block;width:20px;height:50%">a</span></span></div></div><div>z</div></div>),
+       %(<div style="#{col};height:120px"><div style="flex:1"><div style="height:100%"><p>para</p><b>b <span style="display:contents"><img style="width:12px;height:50%"></span></b></div></div><div>z</div></div>)].each do |body|
+        expect(run_shadow(body)).to include('ok' => true, 'mismatches' => 0, 'nativeFlexRows' => 0), body
+      end
+    end
+
     # …and the INLINE route is no longer one of them: an ATOMIC written inside an inline box hangs under the text
     # block of the block around it, which is its containing block too (an inline box is none), so where that block
     # is the record's parent — not a mixed block's anonymous group — its percentage travels as a fraction like a
@@ -963,10 +978,7 @@ RSpec.describe 'native layout flex parity', if: ENV.fetch('CSIM_JS_ENGINE', 'v8'
         body = %(#{open}<div><div style="height:100%">words <b>b <span id="m" style="display:inline-block;height:50%;width:20px"></span></b></div></div><div style="height:40px;width:50px"></div></div>)
         expect_native_flex(body)
         expect(laid_out_rect(body)[3]).to eq(h)
-        session = simulated_session(page(body))
-        session.visit '/'
-        session.evaluate_script('document.body.offsetHeight')
-        r = session.evaluate_script('globalThis.__csimLayoutShadowRun(undefined, {noOracle: true})')
+        r = run_shadow(body, '{noOracle: true}')
         expect(r).to include('ok' => true, 'mismatches' => 0)
         expect(r['oracleReads'].to_h.keys.grep(/\A(cbH|walkRecord|pushBorderBox) /)).to eq([]), r.inspect
       end
@@ -1173,6 +1185,10 @@ RSpec.describe 'native layout flex parity', if: ENV.fetch('CSIM_JS_ENGINE', 'v8'
       }.each do |body, y|
         expect_native_flex(body)
         expect(laid_out_rect(body)[1]).to be_within(0.01).of(y)
+        # …off its OWN lines: rec[42], the oracle's baseline ascent, is written for a pushed item only
+        r = run_shadow(body, '{noOracle: true}')
+        expect(r).to include('ok' => true, 'mismatches' => 0)
+        expect(r['oracleReads'].to_h.keys.grep(/baseline/i)).to eq([]), r.inspect
       end
     end
   end
