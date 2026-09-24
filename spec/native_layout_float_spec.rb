@@ -209,6 +209,29 @@ RSpec.describe 'native layout float parity', if: ENV.fetch('CSIM_JS_ENGINE', 'v8
     end
   end
 
+  # …and a FULL clear is laid out against the context too, not an empty one: a descendant pulled back above the
+  # clearance line by a negative margin meets the floats there, and a nested `clear` clears them (native gave the
+  # block 34 where the oracle and Chrome say 42 — the review of e69b6e66). A box that starts its own context and
+  # has to DROP below a float it is too wide for drops by its used height, not a zero auto one (y 70, Chrome too;
+  # the oracle squeezed it into a 1px gap at 20), and a `display: table` beside or between floats is placed by its
+  # USED width, which the table algorithm may grow past the declared one (x 110 for `margin-left: auto`, 55 inside
+  # `<center>`, and a 70px-wide one dropping below a 140px float to y 20 — the oracle placed all three by the
+  # declared 60).
+  it 'lays a cleared box out against the floats, and places a context-starting box by its used size' do
+    {
+      '<div style="width:200px;font:16px monospace"><div style="float:left;width:40px;height:20px"></div><div style="clear:left;padding-top:2px;"><div id="m" style="clear:left;margin-top:-10px;">nested</div></div></div>' => [0, 20],
+      '<div style="width:200px;font:16px monospace"><div style="float:left;width:150px;height:20px"></div><div style="height:50px"></div><div style="float:left;width:150px;height:20px"></div>' \
+      '<div id="m" style="display:flow-root;width:100px;margin-top:-40px"><div style="height:50px"></div></div></div>'                                                                                   => [0, 70],
+      '<div style="width:200px;font:16px monospace"><div id="m" style="display:table;width:60px;margin-left:auto"><div style="width:90px;height:10px"></div></div></div>'                                 => [110, 0],
+      '<div style="width:200px;font:16px monospace"><center><div id="m" style="display:table;width:60px"><div style="width:90px;height:10px"></div></div></center></div>'                                => [55, 0],
+      '<div style="width:200px;font:16px monospace"><div style="float:left;width:140px;height:20px"></div><div id="m" style="display:table;width:60px"><div style="width:70px;height:10px"></div></div></div>' => [0, 20]
+    }.each do |body, xy|
+      expect_parity(body)
+      session = simulated_session(page(body)); session.visit '/'
+      expect(session.evaluate_script("(r => [r.x, r.y])(document.getElementById('m').getBoundingClientRect())")).to eq(xy)
+    end
+  end
+
   # A float's CONTAINING BLOCK is its own parent; the CONTEXT it is recorded in is the nearest ancestor that
   # establishes one, however many plain blocks lie between (§9.5). Native lays the float out in its parent's
   # frame and shifts the rectangle up through each of them, so the everyday `.row > .col { float: left }` —

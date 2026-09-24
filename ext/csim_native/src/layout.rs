@@ -3041,21 +3041,15 @@ fn measure(
         // context read in its own frame.
         if !ctx.items.is_empty() {
             // A cleared child (§9.5.2) moves DOWN to below the floats it named — its margin collapses as
-            // usual, then clearance replaces its position with the float bottom. When that clears past
-            // EVERY float (all now above it), the child sees none, so it lays out normally below them; a
-            // partial clear (a float remains on an uncleared side, still overlapping) defers to JS.
+            // usual, then clearance replaces its position with the float bottom, and it is laid out there in
+            // the context like any other child: a plain block meets the floats in its own frame, one that
+            // starts its own context avoids them.
             if cn.clear != 0 {
-                // Measure FIRST: a cleared child that clears past every float meets none, so it lays out
-                // in a fresh empty context, and that layout is position-independent. The measure gives its
-                // COLLAPSING top margin (cm.top_only) — its own margin joined with any a first descendant
-                // folds through its open top edge — which is what the oracle advances the flow by
+                // Measure FIRST, in an empty context — the general path's probe: only the COLLAPSING top margin
+                // (cm.top_only) comes out of it — its own margin joined with any a first descendant folds
+                // through its open top edge — which is what the oracle advances the flow by
                 // (collapsingTopMargin); the own declared margin alone would drop the descendant's.
-                // …in a context of its OWN, for the same reason every other child gets one: what it leaves
-                // there are the floats that ESCAPED it, and they are shifted into this block's frame once its
-                // origin is settled. (Without that they were dropped — a float inside a cleared box vanished
-                // from the context, and the next `clear` sibling cleared past nothing.)
-                let mut sub = FloatCtx::new();
-                let cm = measure(c, width_in(c, content_w), f64::NAN, inputs, runs, run_texts, grids, children, boxes, failed, &mut sub, 0.0, 0.0);
+                let cm = measure(c, width_in(c, content_w), f64::NAN, inputs, runs, run_texts, grids, children, boxes, failed, &mut FloatCtx::new(), 0.0, 0.0);
                 if cm.collapse_through {
                     // A THROUGH cleared box is placed by a different rule (§8.3.1: its own above-margin sits
                     // ON TOP of the clearance line, and it does not advance the flow) — defer to JS.
@@ -3091,14 +3085,18 @@ fn measure(
                         cursor + pending.value()
                     };
                     let y = clearance_y(&ctx.items, y0, cn.clear);
-                    if y >= floats_bottom(&ctx.items) {
-                        // Past every float, so its band is the whole content width — which is what the
-                        // oracle's own `band == null` gives it, auto margins and legacy alignment included.
+                    // One that starts its own context meets the floats only as the band they leave at the
+                    // clearance line: placed there exactly as the BFC arm below places one from the flow. Past
+                    // every float that band is the whole content width — the oracle's own `band == null`, auto
+                    // margins and legacy alignment included — and the measure above already laid it out in it.
+                    if cn.starts_bfc {
+                        if y < floats_bottom(&ctx.items) {
+                            place_beside_floats!(y);
+                            continue;
+                        }
                         boxes[c].x =
                             block_child_x(&n, &cn, content_left_rel, content_left_rel + content_w, boxes[c].w);
                         boxes[c].y = y;
-                        let (dx, dy) = (boxes[c].x, boxes[c].y);
-                        ctx.items.extend(sub.items.iter().map(|f| f.shifted(dx, dy)));
                         cursor = y + boxes[c].h;
                         pending = cm.bottom;
                         all_children_through = false;
@@ -3106,38 +3104,31 @@ fn measure(
                         first = false;
                         continue;
                     }
-                    // …and one that clears only PART of them — a float on the side it does not name still reaches
-                    // the line it lands on — is a block beside that float like any other: §9.5 leaves its box the
-                    // full width and routes the LINES inside it round the float, which it meets translated into
-                    // its own frame at the clearance line, exactly as the general path below reads the context.
-                    // …and one that starts its own context AVOIDS the float instead, placed from the clearance
-                    // line exactly as the BFC arm below places one from the flow.
-                    if cn.starts_bfc {
-                        place_beside_floats!(y);
-                        continue;
+                    // A plain block keeps its full width and meets the floats in its own frame at the clearance
+                    // line, exactly as the general path below reads the context — whether or not a float on the
+                    // side it does not name still reaches that line (§9.5 routes the LINES inside it round one
+                    // that does). Past every float it still is not an empty context: a descendant a negative
+                    // margin pulls ABOVE the clearance line meets the floats there, and clears them or wraps round
+                    // them (the oracle, which lays the box out in the shared context, does both).
+                    let child_w = width_in(c, content_w);
+                    let cx = block_child_x(&n, &cn, content_left_rel, content_left_rel + content_w, child_w);
+                    let mut inner = FloatCtx { items: ctx.items.iter().map(|f| f.shifted(-cx, -y)).collect() };
+                    let placed = inner.items.len();
+                    let cm2 = measure(c, child_w, f64::NAN, inputs, runs, run_texts, grids, children, boxes, failed, &mut inner, 0.0, 0.0);
+                    // (The same backstops the general path keeps: a margin the floats changed, or a used width
+                    // the measure settled for itself, and the frame the floats were read in is stale.)
+                    if cm2.collapse_through || cm2.top_only.value() != cm.top_only.value() || boxes[c].w != child_w {
+                        failed.set(true);
                     }
-                    {
-                        let child_w = width_in(c, content_w);
-                        let cx = block_child_x(&n, &cn, content_left_rel, content_left_rel + content_w, child_w);
-                        let mut inner = FloatCtx { items: ctx.items.iter().map(|f| f.shifted(-cx, -y)).collect() };
-                        let placed = inner.items.len();
-                        let cm2 = measure(c, child_w, f64::NAN, inputs, runs, run_texts, grids, children, boxes, failed, &mut inner, 0.0, 0.0);
-                        // (The same backstops the general path keeps: a margin the floats changed, or a used width
-                        // the measure settled for itself, and the frame the floats were read in is stale.)
-                        if cm2.collapse_through || cm2.top_only.value() != cm.top_only.value() || boxes[c].w != child_w {
-                            failed.set(true);
-                        }
-                        boxes[c].x = cx;
-                        boxes[c].y = y;
-                        ctx.items.extend(inner.items[placed..].iter().map(|f| f.shifted(cx, y)));
-                        cursor = y + boxes[c].h;
-                        pending = cm2.bottom;
-                        all_children_through = false;
-                        has_child = true;
-                        first = false;
-                        continue;
-                    }
-                    failed.set(true);
+                    boxes[c].x = cx;
+                    boxes[c].y = y;
+                    ctx.items.extend(inner.items[placed..].iter().map(|f| f.shifted(cx, y)));
+                    cursor = y + boxes[c].h;
+                    pending = cm2.bottom;
+                    all_children_through = false;
+                    has_child = true;
+                    first = false;
+                    continue;
                 }
             } else if cn.starts_bfc {
                 // A child that ESTABLISHES a BFC does not OVERLAP the floats (§9.5): its whole border box is
