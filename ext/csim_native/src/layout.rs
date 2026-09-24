@@ -189,6 +189,11 @@ pub(crate) struct Input {
     // MARGIN box (the oracle's baselineParts.asc — own baseline offset + top margin, or the bottom margin
     // edge when the item has no line to give), resolved JS-side. NaN for a non-baseline item.
     pub(crate) flex_baseline_asc: f64,
+    // A PUSHED item of a MULTI-LINE flex container: its line's NATURAL cross size, before `align-content` grew it
+    // (the oracle's `stackFlexLines`). A pushed box is final, so where its line mixes stretching and fixed items
+    // the stretched boxes already contain a share of the grow and the line cannot be rebuilt from them. NaN = not
+    // sent (a natively-sized container, a nowrap one, a non-flex parent).
+    pub(crate) flex_line_nat: f64,
     // An OUT-OF-FLOW flex child (position:absolute / fixed, §4.1): 1 = out of flow. It is removed from flex
     // sizing and flow — its subtree lays out at its pushed border box, and it is placed at the container's
     // border-box origin + its resolved displacement (rel_x/rel_y = el._lb − container._lb), so the insets /
@@ -4086,7 +4091,19 @@ fn measure_flex(
         // A natively-sized multi-line COLUMN's line cross is its NATURAL one (the widest item before any stretch
         // widened it to the grown line) — `align-content` below grows it, as the oracle's stackFlexLines does; the
         // final item widths already fill the grown line, so measuring from them would grow it twice.
-        line_cross[li] = if native_col && li < native_line_crosses.len() { native_line_crosses[li] } else { plain.max(fa + fb).max(la + lb) };
+        // …and a PUSHED multi-line container's line is the natural cross its items carry (`flex_line_nat`), the
+        // oracle's own figure, where one exists: its final boxes cannot say it where the line mixes stretching and
+        // fixed items (`align-content: stretch` grew it, and the stretched boxes hold the grow).
+        let pushed_nat = if n.flex_native { f64::NAN } else {
+            line.iter().map(|&p| inputs[kids[p]].get().flex_line_nat).filter(|v| !v.is_nan()).fold(f64::NAN, f64::max)
+        };
+        line_cross[li] = if native_col && li < native_line_crosses.len() {
+            native_line_crosses[li]
+        } else if !pushed_nat.is_nan() {
+            pushed_nat
+        } else {
+            plain.max(fa + fb).max(la + lb)
+        };
         line_first_asc[li] = fa;
         line_first_extent[li] = fa + fb;
         line_last_asc[li] = la;
@@ -6990,6 +7007,7 @@ mod tests {
             rel_y: 0.0,
             flex_item_auto: 0,
             flex_baseline_asc: f64::NAN,
+            flex_line_nat: f64::NAN,
             out_of_flow: 0,
             sp_x: 0.0,
             sp_y: 0.0,

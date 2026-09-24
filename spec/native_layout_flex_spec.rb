@@ -586,6 +586,21 @@ RSpec.describe 'native layout flex parity', if: ENV.fetch('CSIM_JS_ENGINE', 'v8'
   # A WRAPPING auto-height column with a max-height breaks its lines against that capacity, and each line's main
   # extent is its OWN — the cap where its items overrun it, else its content — with the box the TALLEST line: 30
   # here, where one extent for every line made native's box the capacity (40). It declined until 2026-09-24.
+  # A PUSHED multi-line container whose lines mix a stretching item and a fixed one: `align-content: stretch` grew
+  # each line from its NATURAL cross, and a stretched box already holds its share, so the lines cannot be rebuilt
+  # from the final boxes — the walk refused the pushed path for it (`flex-item-pushed-cross-unrecoverable`, 1,363
+  # sweep declines). Each pushed item carries its line's natural cross now (rec[137]). (The percentage height
+  # inside is what keeps the container off native sizing, onto the pushed path.) Chrome's boxes.
+  it 'places a pushed wrap container whose lines mix stretching and fixed items' do
+    body = '<div style="display:flex;flex-wrap:wrap;width:150px;height:100px;font:16px monospace"><div><div style="height:100%">some rather longer ' \
+           'words <b>bold <span style="display:inline-block;width:20px;height:50%"></span> tail</b> more</div></div>' \
+           '<div style="width:30px;height:20px"></div></div>'
+    expect_parity(body)
+    chrome = [[0, 0, 150, 88], [0, 88, 30, 20]]
+    item_boxes(body).zip(chrome).each do |got, want|
+      got.zip(want).each {|g, w| expect(g).to be_within(0.05).of(w) }
+    end
+  end
   it 'places a wrapping auto-height column whose max-height breaks its lines, the box its tallest line' do
     body = '<div style="display:flex;flex-direction:column;flex-wrap:wrap;max-height:40px;width:300px"><div style="width:80px;height:30px"></div><div style="width:80px;height:30px"></div></div>'
     expect_native_flex(body)
