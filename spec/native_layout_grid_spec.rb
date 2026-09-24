@@ -493,8 +493,11 @@ RSpec.describe 'native layout grid parity', if: ENV.fetch('CSIM_JS_ENGINE', 'v8'
       expect_native_intrinsic(%(<div style="#{mc_auto}"><div style="display:flex"><div style="flex-basis:50px;flex-grow:1;padding:0 5px">grow basis</div><div style="min-width:120px">min</div><div style="max-width:20px">capped words</div></div><div>b</div></div>))
       expect_native_intrinsic(%(<div style="#{mc_auto}"><div style="display:flex"><div style="box-sizing:border-box;flex-basis:50px;padding:0 10px">bb</div><div style="width:50%">pct</div><div style="flex-basis:50%">half</div></div><div>b</div></div>))
     end
-    it 'falls back for a flex container with a percentage main gap, and measures a nested grid whatever its items declare' do
-      expect_resolved_fallback(%(<div style="#{mc_auto}"><div style="display:flex;column-gap:5%"><div>a</div><div>b</div></div><div>b</div></div>))
+    # (A flex container with a PERCENTAGE main gap fell back until 2026-09-24: native measures its gap with no basis
+    # now — the length part, clamped — as the oracle's `axisGap(el, …, null)` does.)
+    it 'measures a flex container with a percentage main gap, and a nested grid whatever its items declare' do
+      expect_native_intrinsic(%(<div style="#{mc_auto}"><div style="display:flex;column-gap:5%"><div>a</div><div>b</div></div><div>b</div></div>))
+      expect_native_intrinsic(%(<div style="#{mc_auto}"><div style="display:flex;column-gap:calc(5% + 4px)"><div>a</div><div>b</div></div><div>b</div></div>))
       # …a nested GRID is measured natively whether its items are blocks or inline-level: each is an item of its
       # own either way (CSS Grid §4 blockifies them), so both engines run the grid algorithm over the same set.
       expect_native_intrinsic(%(<div style="#{two_auto}"><div style="display:grid;grid-template-columns:50px 50px"><span>nested grid words</span><span>x</span></div><div style="height:10px">b</div></div>))

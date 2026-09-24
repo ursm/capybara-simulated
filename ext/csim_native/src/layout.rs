@@ -194,6 +194,10 @@ pub(crate) struct Input {
     // the stretched boxes already contain a share of the grow and the line cannot be rebuilt from them. NaN = not
     // sent (a natively-sized container, a nowrap one, a non-flex parent).
     pub(crate) flex_line_nat: f64,
+    // …and WHICH line the oracle put it on (its index in flow order): lines break on the items' HYPOTHETICAL
+    // sizes, which a pushed box no longer is — an item the line shrank no longer overflows, and re-breaking the
+    // final sizes kept the next item beside it. NaN = not sent.
+    pub(crate) flex_line: f64,
     // An OUT-OF-FLOW flex child (position:absolute / fixed, §4.1): 1 = out of flow. It is removed from flex
     // sizing and flow — its subtree lays out at its pushed border box, and it is placed at the container's
     // border-box origin + its resolved displacement (rel_x/rel_y = el._lb − container._lb), so the insets /
@@ -1365,7 +1369,6 @@ fn line_layout(
             close_line!(false);
             line_x = 0.0;
             hang = 0.0;
-            hang_gap = None;
             hang_pre = 0.0;
             line_asc = strut_asc;
             line_desc = strut_desc;
@@ -3903,7 +3906,10 @@ fn measure_flex(
         // Definite as the oracle reads it: a declared or imposed height — not a PUSHED auto-height column
         // (`item_auto_height`), whose record carries its final box but whose main size is still its content.
         let height_definite = n.definite_content_h().is_some();
-        let cap_main = if is_auto(n.max_h) || n.max_h < 0.0 { f64::NAN } else { (to_border_y(n.max_h) - edges_y).max(0.0) };
+        // (…never below the min-height: where the two conflict the minimum wins, CSS 2.2 §10.7 — the oracle's
+        // `maxMainHeight`.)
+        let min_main = if is_auto(n.min_h) || n.min_h < 0.0 { 0.0 } else { (to_border_y(n.min_h) - edges_y).max(0.0) };
+        let cap_main = if is_auto(n.max_h) || n.max_h < 0.0 { f64::NAN } else { (to_border_y(n.max_h) - edges_y).max(0.0).max(min_main) };
         let main = n.column_main();
         let capacity = if height_definite { main } else { cap_main };
         let sizes = match flex_column_sizes(&kids, &flow, &mut native_lines, &mut native_line_crosses, content_w, main, height_definite, capacity, cap_main, gap, cross_gap, n.flex_wrap, n.flex_align_content, inputs, runs, run_texts, grids, children, boxes, failed) {
@@ -3993,7 +3999,7 @@ fn measure_flex(
     // extents as lines, the box is the TALLEST (`contentExtent`), and each line justifies within its own — where one
     // extent for all the items made the box the capacity (30 where the oracle and Chrome say 20, the tallest line).
     let col_floor = if is_auto(n.min_h) { 0.0 } else { (to_border_y(n.min_h) - edges_y).max(0.0) };
-    let col_cap = if is_auto(n.max_h) { f64::INFINITY } else { (to_border_y(n.max_h) - edges_y).max(0.0) };
+    let col_cap = if is_auto(n.max_h) { f64::INFINITY } else { (to_border_y(n.max_h) - edges_y).max(0.0).max(col_floor) }; // (min wins, §10.7)
     let col_extent = |used: f64| if used > col_cap { col_cap } else { used.max(col_floor) };
     let content_main = if main_is_x {
         content_w
@@ -4015,8 +4021,23 @@ fn measure_flex(
     // nowrap is also one line holding everything; otherwise wrap greedily starts a new line when the next
     // item (plus the main gap) would overflow the main extent. Mirrors flexLines.
     let wrap_capacity = main_is_x || !is_auto(n.height);
+    // A PUSHED multi-line container takes the ORACLE's lines where its items carry them (`flex_line`): they broke
+    // on the hypothetical sizes, which the final boxes here are not.
+    let oracle_lines = !n.flex_native && n.flex_wrap && !flow.is_empty()
+        && flow.iter().all(|&p| !inputs[kids[p]].get().flex_line.is_nan());
     let lines: Vec<Vec<usize>> = if native_row || native_col {
         native_lines // broken on the hypothetical sizes by flex_row_sizes / flex_column_sizes
+    } else if oracle_lines {
+        let mut ls: Vec<Vec<usize>> = Vec::new();
+        for &p in &flow {
+            let li = inputs[kids[p]].get().flex_line as usize;
+            while ls.len() <= li {
+                ls.push(Vec::new());
+            }
+            ls[li].push(p);
+        }
+        ls.retain(|l| !l.is_empty());
+        ls
     } else if n.flex_wrap && wrap_capacity {
         let mut ls: Vec<Vec<usize>> = Vec::new();
         let mut cur: Vec<usize> = Vec::new();
@@ -4144,11 +4165,10 @@ fn measure_flex(
         let bh = if is_auto(n.height) {
             // The box wraps what the items consumed OR the extent a min-height floored under them, then the
             // OUTER min/max-height clamp (a max-height the content overruns caps the box at it while the
-            // items overflow — content_main holds the capped extent, used_main the overrunning content).
+            // items overflow). A ROW's is `content_main.max(used_main)`; a COLUMN's is asked per LINE — the
+            // tallest line's extent or content (`col_extent`), which for one line is that same figure.
             // A bare-text anonymous item floors the box height (a column's MAIN) at its line-height, applied
             // after the items' extent exactly as the oracle's `max(contentExtent, anonymousItemHeight)`.
-            // …per LINE for a column: the tallest line's extent or content (`col_extent`), which for one line is the
-            // same `content_main.max(used_main)` a single extent gives.
             let tallest = lines.iter().map(|line| {
                 let lm: f64 = line.iter().map(|&p| mo[p]).sum::<f64>() + gap * line.len().saturating_sub(1) as f64;
                 col_extent(lm).max(lm)
@@ -4235,7 +4255,9 @@ fn measure_flex(
         let cs = line_cs[li];
         let line_main: f64 = line.iter().map(|&p| mo[p]).sum::<f64>() + gap * line.len().saturating_sub(1) as f64;
         // (…an auto-height column's line justifies within its OWN extent — see `col_extent`.)
-        let line_extent = if !main_is_x && is_auto(n.height) { col_extent(line_main) } else { content_main };
+        // (A PUSHED auto-height column — its record's height overwritten by its final box — is auto here too:
+        // `item_auto_height`, as the content-extent arm below reads it.)
+        let line_extent = if !main_is_x && (is_auto(n.height) || n.item_auto_height) { col_extent(line_main) } else { content_main };
         let free = line_extent - line_main;
         // Auto main-axis margins take the line's free space (free/autos each) BEFORE justify-content, which
         // then yields — but only when there IS free space; with none they resolve to 0 and justify runs.
@@ -5896,7 +5918,10 @@ fn flex_intrinsic_widths(i: usize, inputs: &[Cell<Input>], runs: &[Run], run_tex
         }
     }
     if !column && count > 1 {
-        let gaps = n.flex_main_gap * (count as f64 - 1.0);
+        // The main gap with NO basis, as every percentage is in an intrinsic measure: its length part, clamped by
+        // its bounds (the oracle's `axisGap(el, …, null)`) — a percentage part is nothing here, so a `10%` gap adds
+        // 0 and a `calc(10% + 4px)` one 4, where the walk refused every such container as unmeasurable.
+        let gaps = clamp_affine(n.flex_main_gap, n.flex_main_gap_lo, n.flex_main_gap_hi, 0.0) * (count as f64 - 1.0);
         max += gaps;
         if !wrap {
             min += gaps;
@@ -7008,6 +7033,7 @@ mod tests {
             flex_item_auto: 0,
             flex_baseline_asc: f64::NAN,
             flex_line_nat: f64::NAN,
+            flex_line: f64::NAN,
             out_of_flow: 0,
             sp_x: 0.0,
             sp_y: 0.0,

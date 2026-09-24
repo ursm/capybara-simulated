@@ -19,8 +19,8 @@
 # measured table below is the statement of it. `wrap-reverse` is a SECOND flag, not the same one: it is what
 # the flow-relative `start` / `end` follow, and a `vertical-rl` row has a reversed cross without it.
 #
-# Still DECLINES to JS: a float, inline-block
-# items. A REPLACED item (svg / img / input …) is now replayed as a leaf box (see native_layout_replaced_spec).
+# What still DECLINES to JS is what `nlFlexSupported` (layout.js) refuses.
+# A REPLACED item (svg / img / input …) is now replayed as a leaf box (see native_layout_replaced_spec).
 # Each bail is an A/B: the feature-carrying input declines, a sibling without it stays native. V8 only.
 require 'capybara/simulated'
 require 'rack'
@@ -116,13 +116,14 @@ RSpec.describe 'native layout flex parity', if: ENV.fetch('CSIM_JS_ENGINE', 'v8'
   end
 
   # Every item's box relative to its container, for an example that has to say WHERE the boxes landed and
-  # not only that the two engines agree about it.
+  # not only that the two engines agree about it. The container is the body's first element, or the one marked
+  # `id="c"` where that is nested.
   def item_boxes(body)
     with_simulated_session(page(body)) do |session|
       session.visit '/'
       session.evaluate_script(<<~JS)
         (function () {
-          var c = document.body.firstElementChild, o = c.getBoundingClientRect();
+          var c = document.getElementById('c') || document.body.firstElementChild, o = c.getBoundingClientRect();
           return Array.prototype.map.call(c.children, function (e) {
             var r = e.getBoundingClientRect();
             return [r.x - o.x, r.y - o.y, r.width, r.height];
@@ -583,9 +584,6 @@ RSpec.describe 'native layout flex parity', if: ENV.fetch('CSIM_JS_ENGINE', 'v8'
   end
   it('matches an rtl flex column with a cross auto margin') { expect_parity('<div style="display:flex;flex-direction:column;direction:rtl;width:200px;height:120px"><div style="width:50px;height:30px;margin-left:auto"></div></div>') }
   it('matches an rtl WRAPPING flex column') { expect_parity('<div style="display:flex;flex-direction:column;flex-wrap:wrap;direction:rtl;width:200px;height:60px"><div style="width:40px;height:30px"></div><div style="width:50px;height:40px"></div></div>') }
-  # A WRAPPING auto-height column with a max-height breaks its lines against that capacity, and each line's main
-  # extent is its OWN — the cap where its items overrun it, else its content — with the box the TALLEST line: 30
-  # here, where one extent for every line made native's box the capacity (40). It declined until 2026-09-24.
   # A PUSHED multi-line container whose lines mix a stretching item and a fixed one: `align-content: stretch` grew
   # each line from its NATURAL cross, and a stretched box already holds its share, so the lines cannot be rebuilt
   # from the final boxes — the walk refused the pushed path for it (`flex-item-pushed-cross-unrecoverable`, 1,363
@@ -595,12 +593,24 @@ RSpec.describe 'native layout flex parity', if: ENV.fetch('CSIM_JS_ENGINE', 'v8'
     body = '<div style="display:flex;flex-wrap:wrap;width:150px;height:100px;font:16px monospace"><div><div style="height:100%">some rather longer ' \
            'words <b>bold <span style="display:inline-block;width:20px;height:50%"></span> tail</b> more</div></div>' \
            '<div style="width:30px;height:20px"></div></div>'
-    expect_parity(body)
+    expect(run_shadow(body)).to include('ok' => true, 'mismatches' => 0, 'nativeFlexRows' => 0)
     chrome = [[0, 0, 150, 88], [0, 88, 30, 20]]
     item_boxes(body).zip(chrome).each do |got, want|
       got.zip(want).each {|g, w| expect(g).to be_within(0.05).of(w) }
     end
   end
+  # …and it carries its line's INDEX too (rec[138]): the pushed boxes are the FINAL sizes, and a column whose
+  # max-height breaks its lines breaks them on the HYPOTHETICAL ones — here the absolute box's percentage width
+  # is what pushes the container, and the lines are [a b] [c]. Chrome's boxes.
+  it 'breaks a pushed wrapping column into the lines the oracle broke it into' do
+    body = '<div style="display:flex;flex-direction:column;flex-wrap:wrap;max-height:50px;width:200px"><div style="width:20px;height:20px">' \
+           '<div style="position:absolute;width:10%;height:5px"></div></div><div style="width:20px;height:20px"></div><div style="width:20px;height:20px"></div></div>'
+    expect(run_shadow(body)).to include('ok' => true, 'mismatches' => 0, 'nativeFlexRows' => 0)
+    expect(item_boxes(body)).to eq([[0, 0, 20, 20], [0, 20, 20, 20], [100, 0, 20, 20]])
+  end
+  # A WRAPPING auto-height column with a max-height breaks its lines against that capacity, and each line's main
+  # extent is its OWN — the cap where its items overrun it, else its content — with the box the TALLEST line: 30
+  # here, where one extent for every line made native's box the capacity (40). It declined until 2026-09-24.
   it 'places a wrapping auto-height column whose max-height breaks its lines, the box its tallest line' do
     body = '<div style="display:flex;flex-direction:column;flex-wrap:wrap;max-height:40px;width:300px"><div style="width:80px;height:30px"></div><div style="width:80px;height:30px"></div></div>'
     expect_native_flex(body)
@@ -608,6 +618,33 @@ RSpec.describe 'native layout flex parity', if: ENV.fetch('CSIM_JS_ENGINE', 'v8'
     body = '<div style="display:flex;flex-direction:column;flex-wrap:wrap;width:100px;max-height:50px"><div style="width:20px;height:20px"></div><div style="width:20px;height:20px"></div><div style="width:20px;height:20px"></div></div>'
     expect_native_flex(body)
     expect(item_boxes(body)).to eq([[0, 0, 20, 20], [0, 20, 20, 20], [50, 0, 20, 20]])   # Chrome: two lines of 40 and 20, the box 40
+  end
+  # …and so is one whose auto height reaches it as a PUSHED flex item's (the sibling's percentage-height absolute
+  # box keeps the row off native sizing, so the column's record carries the oracle's FINAL height and
+  # `item_auto_height` says it was auto) — native read that height as declared and gave every line one extent
+  # until a review found it (867 of 2,000 of its shapes).
+  # SHARED with Chrome's rule, not only this shape: Chrome justifies EVERY line within the box (the tallest line,
+  # 40), so the short line's third item sits at 20, where both engines justify it within its own 20 and leave it at 0.
+  it 'justifies the lines of a wrapping max-height column that is itself a pushed flex item' do
+    body = '<div style="display:flex;align-items:flex-start;width:300px"><div id="c" style="display:flex;flex-direction:column;flex-wrap:wrap;' \
+           'max-height:50px;width:200px;justify-content:flex-end"><div style="width:20px;height:20px"></div><div style="width:20px;height:20px"></div>' \
+           '<div style="width:20px;height:20px"></div></div><div style="width:10px;height:10px"><div style="position:absolute;height:10%;width:2px"></div></div></div>'
+    expect_native_flex(body)
+    a, b, c = item_boxes(body)
+    expect([a, b]).to eq([[0, 0, 20, 20], [0, 20, 20, 20]])   # Chrome
+    expect(c.values_at(0, 2, 3)).to eq([100, 20, 20])
+    expect_shared_gap(c[1], shared: 0, chrome: 20, what: "#{body}: c's y")
+  end
+  # A min-height ABOVE the max-height wins (CSS 2 §10.7): the column has room for all three, one line of 60.
+  it 'lets a min-height above the max-height set the capacity a wrapping column breaks against' do
+    body = '<div style="display:flex;flex-direction:column;flex-wrap:wrap;max-height:30px;min-height:60px;width:200px"><div style="width:20px;height:20px"></div>' \
+           '<div style="width:20px;height:20px"></div><div style="width:20px;height:20px"></div></div>'
+    expect_native_flex(body)
+    expect(item_boxes(body)).to eq([[0, 0, 20, 20], [0, 20, 20, 20], [0, 40, 20, 20]])   # Chrome
+    body = '<div style="display:flex;flex-direction:column;flex-wrap:wrap;max-height:30px;min-height:60px;width:200px;justify-content:flex-end">' \
+           '<div style="width:20px;height:20px"></div><div style="width:20px;height:20px"></div></div>'
+    expect_native_flex(body)
+    expect(item_boxes(body)).to eq([[0, 20, 20, 20], [0, 40, 20, 20]])   # Chrome
   end
   # A flex container's own % padding resolves against its CONTAINING BLOCK's width on both axes (§ CSS Box),
   # which is Chrome's rule and the oracle's now — so an explicitly-sized container carrying one lays out
@@ -1053,8 +1090,9 @@ RSpec.describe 'native layout flex parity', if: ENV.fetch('CSIM_JS_ENGINE', 'v8'
       end
       # …and an item whose own measure native lacks a rule for still pushes, so the counter is not always 1.
       # (`white-space: break-spaces` was this shape until 2026-09-23, when its measure went native.)
-      # (The fixture holds flex containers of its own, which lay out natively whatever the row around them does,
-      # so the row's own contribution is what the count shows BEYOND the fixture's.)
+      # (Whatever flex containers the fixture holds lay out natively whatever the row around them does — it held two
+      # while it was the percentage-gap shape — so the row's own contribution is what the count shows BEYOND the
+      # fixture's.)
       own = run_shadow(%(<div style="width:400px">#{WalkRefusals::UNMEASURABLE}</div>))['nativeFlexRows']
       r = run_shadow(%(<div style="#{base}"><div style="display:grid;grid-template-columns:1fr min-content"><div>g1</div><div>#{WalkRefusals::UNMEASURABLE}</div></div><div style="font-size:32px">BIG</div></div>))
       expect(r).to include('ok' => true, 'mismatches' => 0, 'nativeFlexRows' => own), r.inspect

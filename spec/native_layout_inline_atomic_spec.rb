@@ -579,10 +579,10 @@ RSpec.describe 'native layout inline-atomic parity', if: ENV.fetch('CSIM_JS_ENGI
       # laid out with the atomic pushed rather than declined. (A FLOAT and a STRETCHED out-of-flow box never
       # needed a measure at all.) The one route with no fallback is a vertical writing mode's block child, whose
       # width IS its content's: that still declines.
-      # …an atomic whose own MEASURE native lacks a rule for: a flex whose main-axis gap is a percentage, which
-      # an intrinsic measure has no width to resolve (`WalkRefusals::UNMEASURABLE`). The atomic is otherwise the
+      # …an atomic whose own MEASURE native lacks a rule for: an indented block whose only inline content is an
+      # empty inline box, which native has nothing to give the indent to (`WalkRefusals::UNMEASURABLE`). The atomic is otherwise the
       # same box with the same content as the control below, so what the counters show is that content and
-      # nothing else. The cause has changed hands four times (see `WalkRefusals`); find the next shape when this
+      # nothing else. The cause has changed hands five times (see `WalkRefusals`); find the next shape when this
       # one retires — the cause is real either way.
       # The atomic's own CONTENT is what the substitution swaps now (it was the atomic's `style` while the
       # cause was a `white-space`), so the fallback shape and its control are the same box either way.

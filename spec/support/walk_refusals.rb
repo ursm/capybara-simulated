@@ -36,19 +36,18 @@ module WalkRefusals
 
   # …and a separate cause, for the routes that MEASURE rather than lay out: content whose intrinsic width
   # native has no rule for, which every shrink-to-fit route has to refuse or push while the walk still lays the
-  # same content out when it is handed a width. A flex container whose MAIN-axis gap is a PERCENTAGE along the
-  # physical x axis is that shape: the gap resolves against the container's width, which an intrinsic measure
-  # does not have, and `nlFlexIntrinsicMeasurable` refuses it (`axisGap(…, null) !== axisGap(…, 1)`) — where the
-  # walk, handed a width, lays it out. TWO of them, because which one's main axis is x depends on the writing
-  # mode the fixture lands in: a row flex's in a horizontal flow, a column flex's in a vertical one. They lay
-  # out natively themselves, so a route's flex-row COUNT sees them (the flex spec subtracts the fixture's own).
-  # The refusal is UNNAMED (it surfaces as the asker's `shrink-to-fit-child-unmeasurable`).
-  # It is the FIFTH shape to hold the role — an `inline-grid` over bare text (2026-09-22), `white-space:
-  # break-spaces`, a whitespace-only EDGED inline (a line rule, never a measure gap), and a NON-WRAPPING mixed
-  # block (native pins a `nowrap` / `pre` block container's min to its max now, as the oracle does) all retired
-  # one after another. A replacement has to be FOUND, by asking which refusals the measure gate makes that the
-  # walk does not: a soft hyphen under `break-spaces` and a preserved CR are refused by the WALK as well, so a
-  # route handed one declines outright instead of taking the fallback the specs hold it to.
+  # same content out when it is handed a width. A block whose only inline content is an EMPTY inline box, under a
+  # first-line `text-indent`, is that shape: the oracle's pen lets the empty box take the indent (Chrome agrees),
+  # and native records such a block as a plain container with nothing to take it with, so the measure refuses it
+  # (`nlIntrinsicMeasurableOf`'s empty-inline indent arm) — where the walk lays the block out natively. The float
+  # beside it keeps the block from being empty of everything. The refusal is UNNAMED (it surfaces as the asker's
+  # `shrink-to-fit-child-unmeasurable`), which is why it is written out here rather than pointed at a reason.
+  # It is the SIXTH shape to hold the role: an `inline-grid` over bare text, `white-space: break-spaces`, a
+  # whitespace-only EDGED inline (a line rule, never a measure gap), a NON-WRAPPING mixed block, and a flex whose
+  # main gap is a PERCENTAGE (native takes its basis-less length part now, as the oracle does) all retired one
+  # after another. A replacement has to be FOUND, by asking which refusals the measure gate makes that the walk does
+  # not: a soft hyphen under `break-spaces` and a preserved CR are refused by the WALK as well, so a route handed
+  # one declines outright instead of taking the fallback the specs hold it to.
   # If this one retires too, the cause is still real: find the next shape, do not delete the arm.
-  UNMEASURABLE = '<div style="display:flex;column-gap:10%"><div>a</div><div>b</div></div><div style="display:flex;flex-direction:column;row-gap:10%"><div>a</div><div>b</div></div>'
+  UNMEASURABLE = '<div style="text-indent:7px"><span></span><div style="float:left;width:30px;height:5px"></div></div>'
 end
