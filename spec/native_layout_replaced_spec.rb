@@ -181,7 +181,7 @@ RSpec.describe 'native layout replaced-leaf parity', if: ENV.fetch('CSIM_JS_ENGI
     # sweep).
     it 'walks a shrink-wrapping button as a measured subtree' do
       # …an indented one included now that `text_intrinsic` takes the indent; a measure-only gap that REMAINS
-      # still declines. That gap is `WalkRefusals::UNMEASURABLE` — an indented block of an empty inline —
+      # still declines. That gap is `WalkRefusals::UNMEASURABLE` — a line holding an atomic native pushes —
       # whose earlier shapes (see there) each retired as native learned their measure.
       ['<div style="width:400px"><button style="display:block;text-indent:30px">Hi</button></div>',
        '<div style="width:400px"><button style="display:block"><div style="text-indent:40px">Hi</div></button></div>',

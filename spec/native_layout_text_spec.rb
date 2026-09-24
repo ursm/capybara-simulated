@@ -439,67 +439,81 @@ RSpec.describe 'native layout L2 text-block parity', if: ENV.fetch('CSIM_JS_ENGI
       shared_x_chrome: 40
     )
   end
-  # An empty inline box TAKES a first-line indent in the oracle (and Chrome: 77 at max-content), where native's
-  # empty-content record has nothing to take it with (70) — so the measure refuses such a block, and the
-  # `max-content` box around it, which has no fallback, declines; the same block with no indent is native.
-  it 'refuses to measure an indented block of an empty inline and floats' do
+  # An empty inline box TAKES a first-line indent in the oracle and Chrome (77 at max-content beside two floats), and
+  # native's record of such a block used to have nothing to take it with (70), so the measure refused it and a box
+  # around it with no fallback declined. The box is a zero OPEN / CLOSE pair in the run stream now and the block a
+  # TEXT block (`nlRunsOccupyALine`), so native measures it: a float around it is 77 wide, the marker beside it
+  # (Chrome 77). The same holds for a `<wbr>`, which takes the indent and is no content to the walk, and an
+  # out-of-flow child inside the inline, which the walk makes a marker (the review of 5a1ab0e1: both measured 70
+  # behind a gate that counted them as content). Under `max-content` the floats reach the marker's line instead.
+  it 'measures an indented block of an empty inline and floats' do
     floats = '<span></span><div style="float:left;width:30px;height:5px"></div><div style="float:left;width:40px;height:5px"></div>'
-    expect_declined_x(
+    expect_parity(
       %(<div style="font:16px monospace"><div style="width:max-content"><div style="text-indent:7px">#{floats}</div></div><b id="m" style="display:inline-block;width:4px;height:4px"></b></div>),
       70,
-      %(<div style="font:16px monospace"><div style="width:max-content"><div>#{floats}</div></div><b id="m" style="display:inline-block;width:4px;height:4px"></b></div>),
-      reason:   'shrink-to-fit-child-unmeasurable',
       chrome_y: 13
     )
   end
-  # …and the figure itself, where the width reaches the marker: a float around such a block (no fallback either,
-  # so it declines) is the oracle's 77 wide, the marker beside it (Chrome 77), and the same block with no indent
-  # goes native. The same holds for a `<wbr>`, which takes the indent and is no content to the walk, and an
-  # out-of-flow child inside the inline, which the walk makes a marker (the review of 5a1ab0e1: both measured 70
-  # behind a gate that counted them as content).
   {
     'an empty inline'                    => '<span></span>',
     'a <wbr>'                            => '<span></span><wbr>',
-    'an out-of-flow child in the inline' => '<span><b style="position:absolute">z</b></span>'
+    'an out-of-flow child in the inline' => '<span><b style="position:absolute">z</b></span>',
+    'an inline around a float'           => '<span><div style="float:left;width:1px;height:5px"></div></span>'
   }.each do |name, head|
-    it "refuses to measure an indented block of #{name} and floats, at the oracle's width" do
+    it "measures an indented block of #{name} and floats at the oracle's width" do
       floats = '<div style="float:left;width:30px;height:5px"></div><div style="float:left;width:40px;height:5px"></div>'
-      expect_declined_x(
+      expect_parity(
         %(<div style="font:16px monospace"><div style="float:left"><div style="text-indent:7px">#{head}#{floats}</div></div><b id="m" style="display:inline-block;width:4px;height:4px"></b></div>),
-        77,
-        %(<div style="font:16px monospace"><div style="float:left"><div>#{head}#{floats}</div></div><b id="m" style="display:inline-block;width:4px;height:4px"></b></div>),
-        reason:   'shrink-to-fit-child-unmeasurable',
+        name == 'an inline around a float' ? 78 : 77,
         chrome_y: 13
       )
     end
   end
   # …and past a BLOCK child the indent re-arms as a non-first line's, so under `hanging` an empty inline after
-  # one takes it (the oracle and Chrome: 7 wide; native's empty group has no box) — refused as well.
-  it 'refuses to measure a hanging-indented block of a block child and an empty inline' do
-    expect_declined_x(
+  # one takes it (the oracle and Chrome: 7 wide) — an anonymous GROUP of nothing but that box is kept as a text
+  # block for it, where it used to collapse and leave native 5. It lays no line out, so its margins adjoin and a
+  # block child's margin still collapses through it (anon[26], which no group needed while every kept one had a line).
+  it 'measures a hanging-indented block of a block child and an empty inline' do
+    expect_parity(
       %(<div style="font:16px monospace"><div style="float:left"><div style="text-indent:7px hanging"><div style="width:5px;height:5px"></div><span></span></div></div><b id="m" style="display:inline-block;width:4px;height:4px"></b></div>),
       7,
-      %(<div style="font:16px monospace"><div style="float:left"><div style="text-indent:7px"><div style="width:5px;height:5px"></div><span></span></div></div><b id="m" style="display:inline-block;width:4px;height:4px"></b></div>),
-      reason:   'shrink-to-fit-child-unmeasurable',
       chrome_y: 13
     )
   end
-  # …and the refusal is asked per GROUP, not per block: in a mixed block each run of inline content between block
-  # children is a record of its own, so text in another group gives an empty-inline group no box to take the
-  # indent with (the oracle and Chrome 50; native 9.6 — the review of d1cf5fd0 found 567 such shapes).
-  it 'refuses to measure a mixed block whose empty-inline group takes the indent, text elsewhere or not' do
-    expect_declined_x(
+  # …and the box is asked per GROUP, not per block: in a mixed block each run of inline content between block
+  # children is a record of its own, so text in another group gives an empty-inline group nothing (the oracle and
+  # Chrome 50; native 9.6 while the group collapsed — the review of d1cf5fd0 found 567 such shapes).
+  it 'measures a mixed block whose empty-inline group takes the indent, text elsewhere' do
+    expect_parity(
       %(<div style="font:16px monospace"><div style="float:left"><div style="text-indent:50px"><span></span><div style="width:5px;height:5px"></div>a</div></div><b id="m" style="display:inline-block;width:4px;height:4px"></b></div>),
       50,
-      %(<div style="font:16px monospace"><div style="float:left"><div><span></span><div style="width:5px;height:5px"></div>a</div></div><b id="m" style="display:inline-block;width:4px;height:4px"></b></div>),
-      reason:   'shrink-to-fit-child-unmeasurable',
       chrome_y: 13
+    )
+  end
+  # A kept group of an EMPTY inline holding only white space is zero-height and lets a margin through, as the group
+  # that collapsed did: the child's 50px top margin still collapses with the 20px paragraph margin above it
+  # (Chrome: the block at 92, 50 below the paragraph's 42).
+  it 'collapses a margin through a kept empty-inline group' do
+    with_page('<div style="width:200px;font:16px monospace"><p style="margin:20px 0">a</p><div><span> </span><div id="m" style="margin-top:50px;width:5px;height:5px"></div></div><p style="margin:30px 0">b</p></div>') do |session|
+      r = parity(session)
+      expect(r).to include('ok' => true, 'mismatches' => 0)
+      expect_near(marker_y(session), 92, 'kept group', 'y')
+    end
+  end
+  # SHARED: a `<wbr>` beside a float makes a LINE in Chrome (22 tall, so the marker after the block sits on the
+  # line below it, y 35), and a line of nothing in both engines (13).
+  it 'makes no line of a <wbr> beside a float (shared)' do
+    expect_parity(
+      '<div style="font:16px monospace;width:max-content"><div style="text-indent:7px"><wbr><div style="float:left;width:30px;height:5px"></div></div>' \
+      '<b id="m" style="display:inline-block;width:4px;height:4px"></b></div>',
+      shared_y:        13,
+      shared_y_chrome: 35
     )
   end
   # A collapsible space at a LINE START is deleted, and no break opportunity with it (CSS Text 3 §4.1.2): both
   # engines made one there, "harmless while the word is empty" — which an inline box's edges, or the indent an
   # empty one took, make false. So the min-content cut them off the word after: the oracle 30 for an empty inline
-  # under a 30px indent (native, which sees no edgeless box, 39.6 — a parity break), both 19.2 for a padded one.
+  # under a 30px indent (native, which saw no edgeless box then, 39.6 — a parity break), both 19.2 for a padded one.
   # Chrome keeps them together: 39.61 and 24.20, and so do both engines now.
   {
     'the indent an empty inline takes' => ['<td style="padding:0;text-indent:30px"><span></span> a</td>', 39.609375],

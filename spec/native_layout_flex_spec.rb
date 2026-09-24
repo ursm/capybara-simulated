@@ -1091,8 +1091,8 @@ RSpec.describe 'native layout flex parity', if: ENV.fetch('CSIM_JS_ENGINE', 'v8'
       # …and an item whose own measure native lacks a rule for still pushes, so the counter is not always 1.
       # (`white-space: break-spaces` was this shape until 2026-09-23, when its measure went native.)
       # (Whatever flex containers the fixture holds lay out natively whatever the row around them does — it held two
-      # while it was the percentage-gap shape — so the row's own contribution is what the count shows BEYOND the
-      # fixture's.)
+      # while it was the percentage-gap shape, and holds none today — so the row's own contribution is what the count
+      # shows BEYOND the fixture's.)
       own = run_shadow(%(<div style="width:400px">#{WalkRefusals::UNMEASURABLE}</div>))['nativeFlexRows']
       r = run_shadow(%(<div style="#{base}"><div style="display:grid;grid-template-columns:1fr min-content"><div>g1</div><div>#{WalkRefusals::UNMEASURABLE}</div></div><div style="font-size:32px">BIG</div></div>))
       expect(r).to include('ok' => true, 'mismatches' => 0, 'nativeFlexRows' => own), r.inspect

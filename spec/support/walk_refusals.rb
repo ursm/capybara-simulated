@@ -36,18 +36,20 @@ module WalkRefusals
 
   # …and a separate cause, for the routes that MEASURE rather than lay out: content whose intrinsic width
   # native has no rule for, which every shrink-to-fit route has to refuse or push while the walk still lays the
-  # same content out when it is handed a width. A block whose only inline content is an EMPTY inline box, under a
-  # first-line `text-indent`, is that shape: the oracle's pen lets the empty box take the indent (Chrome agrees),
-  # and native records such a block as a plain container with nothing to take it with, so the measure refuses it
-  # (`nlIntrinsicMeasurableOf`'s empty-inline indent arm) — where the walk lays the block out natively. The float
-  # beside it keeps the block from being empty of everything. The refusal is UNNAMED (it surfaces as the asker's
-  # `shrink-to-fit-child-unmeasurable`), which is why it is written out here rather than pointed at a reason.
-  # It is the SIXTH shape to hold the role: an `inline-grid` over bare text, `white-space: break-spaces`, a
-  # whitespace-only EDGED inline (a line rule, never a measure gap), a NON-WRAPPING mixed block, and a flex whose
-  # main gap is a PERCENTAGE (native takes its basis-less length part now, as the oracle does) all retired one
-  # after another. A replacement has to be FOUND, by asking which refusals the measure gate makes that the walk does
-  # not: a soft hyphen under `break-spaces` and a preserved CR are refused by the WALK as well, so a route handed
-  # one declines outright instead of taking the fallback the specs hold it to.
+  # same content out when it is handed a width. An ATOMIC native does not lay out itself is that shape: the walk
+  # PUSHES the oracle's box for it on a line, and a measure has no such box to read — an `inline-table` with two
+  # captions (`nlTableSupported` takes one) is refused by `nlAtomicMeasurable`, where the walk lays the line out.
+  # The refusal is UNNAMED (it surfaces as the asker's `shrink-to-fit-child-unmeasurable`), which is why it is
+  # written out here rather than pointed at a reason.
+  # It is the SEVENTH shape to hold the role: an `inline-grid` over bare text, `white-space: break-spaces`, a
+  # whitespace-only EDGED inline (a line rule, never a measure gap), a NON-WRAPPING mixed block, a flex whose main
+  # gap is a PERCENTAGE, and an indented block of an EMPTY inline box (a zero OPEN / CLOSE pair takes the indent
+  # now) all retired one after another. A replacement has to be FOUND, by asking which refusals the measure gate
+  # makes that the walk does not: a soft hyphen under `break-spaces`, a preserved CR and a block box inside an
+  # inline are refused by the WALK as well, so a route handed one declines outright instead of taking the fallback
+  # the specs hold it to. (A scrolling table ROW with a px margin, which `nlTableBaselineWalkAgrees` refuses, is the
+  # other one standing on 2026-09-24.)
   # If this one retires too, the cause is still real: find the next shape, do not delete the arm.
-  UNMEASURABLE = '<div style="text-indent:7px"><span></span><div style="float:left;width:30px;height:5px"></div></div>'
+  UNMEASURABLE = '<div>a<span style="display:inline-table"><span style="display:table-caption">c</span>' \
+                 '<span style="display:table-caption">d</span><span style="display:table-cell">x</span></span></div>'
 end
