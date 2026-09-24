@@ -126,6 +126,15 @@ RSpec.describe 'native layout grid parity', if: ENV.fetch('CSIM_JS_ENGINE', 'v8'
       expect(session.evaluate_script("document.getElementById('m').getBoundingClientRect().width")).to be_within(0.05).of(chrome_w)
     end
   end
+  # …and that makes it a MEASURED subtree whatever the template asks, so content native could lay out but not
+  # measure is refused by the WALK — not discovered mid-measure in Rust ("native declined"), which a template with no
+  # intrinsic track (whose items are otherwise walked unmeasured) reached.
+  it 'refuses in the walk a keyword-width grid item it could not measure' do
+    ['50% 50%', 'auto auto'].each do |template|
+      r = run_shadow(%(<div style="width:300px"><div style="display:grid;grid-template-columns:#{template}"><div style="width:fit-content">#{WalkRefusals::UNMEASURABLE}</div><div>zz</div></div></div>))
+      expect(r).to include('ok' => false, 'reason' => 'shrink-to-fit-child-unmeasurable'), template
+    end
+  end
   it 'matches a fixed 2-column grid with a gap' do
     expect_parity('<div style="display:grid;grid-template-columns:100px 100px;gap:10px;width:300px"><div style="height:20px">a</div><div style="height:30px">b</div></div>')
   end

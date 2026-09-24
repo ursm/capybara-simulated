@@ -684,13 +684,22 @@ RSpec.describe 'native layout L1 block-flow parity', if: ENV.fetch('CSIM_JS_ENGI
     it 'measures an out-of-flow box with a keyword width against the room its insets leave' do
       {
         '<div id="m" style="position:absolute;left:10px;right:20px;width:max-content">aa bb cc dd</div>'                => [10, 105.609375],
-        '<div id="m" style="position:absolute;left:0;right:0;margin:0 auto;width:min-content">aa bb cc dd</div>'         => [140.390625, 19.203125]
+        '<div id="m" style="position:absolute;left:0;right:0;margin:0 auto;width:min-content">aa bb cc dd</div>'         => [140.390625, 19.203125],
+        # …and the room between two insets is what they leave LESS the box's margins, as it is for an auto width
+        '<div id="m" style="position:absolute;left:10px;right:20px;margin:0 30px;width:fit-content">aa bb cc dd ee ff gg hh ii jj kk ll mm nn oo pp</div>' => [40, 210]
       }.each do |box, (x, w)|
         body = %(<div style="width:300px;position:relative;font:16px monospace">#{box}</div>)
         expect_parity(body)
         got = session_for(body).evaluate_script("(r => [r.x, r.width])(document.getElementById('m').getBoundingClientRect())")
         expect(got[0]).to be_within(0.05).of(x)
         expect(got[1]).to be_within(0.05).of(w)
+      end
+    end
+    # …and the box is a MEASURED subtree between two insets too — a keyword is no `auto` to fill them — so content
+    # native could lay out but not measure makes the WALK replay the oracle's box instead of failing the pass.
+    it 'replays a keyword-width out-of-flow box it could not measure' do
+      %w[left:0;right:0 left:0].each do |insets|
+        expect_parity(%(<div style="width:300px;position:relative"><div style="position:absolute;#{insets};width:fit-content">#{WalkRefusals::UNMEASURABLE}</div></div>))
       end
     end
     it 'declines a keyword width a different sizing path owns' do

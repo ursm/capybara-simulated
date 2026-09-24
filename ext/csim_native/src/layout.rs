@@ -6756,9 +6756,12 @@ fn place_out_of_flow(
     let avail_h = if stretched_v { (cb_h - top - bottom).max(0.0) } else { 0.0 };
     // The static position its parent recorded (relative to the parent's border box), read before the box is sized.
     let (static_rx, static_ry) = (boxes[c].x, boxes[c].y);
-    // (A keyword width is no `auto`: both insets leave it the room it measures against, not a width to fill.)
+    // Between BOTH insets the room is what they leave less the box's own margins — what an auto width fills and
+    // what an intrinsic-size keyword measures against (the oracle's stretched `autoW`, which `usedSize` hands both
+    // uses). A keyword width is no `auto`, though: it takes its own figure of that room rather than filling it.
+    let fill_w = (avail_w - ml - mr).max(0.0);
     let auto_w = if (stretched && n.width_kw == 0) || (n.replaced && n.ratio_only) {
-        (avail_w - ml - mr).max(0.0)
+        fill_w
     } else if !is_auto(n.width) {
         // A DECLARED width: `used_width` answers from the declaration and discards `auto_w`, so the
         // shrink-to-fit measure is not merely wasted work (an O(subtree) walk per out-of-flow box) — asked, it
@@ -6768,9 +6771,11 @@ fn place_out_of_flow(
         // whole pass over a figure nobody reads.
         0.0
     } else {
-        // …an AUTO width shrinks to fit that room, and an intrinsic-size KEYWORD asks its own figure of it
-        // (`content_sized_width`: `fit-content` is the same room clamped between the box's min- and max-content).
-        match content_sized_width(c, avail_w, inputs, runs, run_texts, grids, children) {
+        // …an AUTO width shrinks to fit the room its insets leave, and an intrinsic-size KEYWORD asks its own
+        // figure of it (`content_sized_width`: `fit-content` is the room clamped between the box's min- and
+        // max-content) — of `fill_w` where both insets are given, as above.
+        let room = if stretched { fill_w } else { avail_w };
+        match content_sized_width(c, room, inputs, runs, run_texts, grids, children) {
             Some(w) => w,
             None => {
                 failed.set(true);
