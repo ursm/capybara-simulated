@@ -3982,6 +3982,14 @@ fn measure_flex(
     let gap_total = gap * flow.len().saturating_sub(1) as f64;
     let sum_main: f64 = flow.iter().map(|&p| mo[p]).sum();
     let used_main = sum_main + gap_total; // the items are PUSHED (grow/shrink resolved), so this is final
+    // An AUTO-height column's main extent for a run of items `used` tall: a max-height CAPACITY the content overruns
+    // (the items overflow it), else the content floored by min-height. Asked PER LINE, as the oracle's column pass
+    // asks it (`extent = capped ?? max(used, floor)`): a wrapping column broken against a max-height has as many
+    // extents as lines, the box is the TALLEST (`contentExtent`), and each line justifies within its own — where one
+    // extent for all the items made the box the capacity (30 where the oracle and Chrome say 20, the tallest line).
+    let col_floor = if is_auto(n.min_h) { 0.0 } else { (to_border_y(n.min_h) - edges_y).max(0.0) };
+    let col_cap = if is_auto(n.max_h) { f64::INFINITY } else { (to_border_y(n.max_h) - edges_y).max(0.0) };
+    let col_extent = |used: f64| if used > col_cap { col_cap } else { used.max(col_floor) };
     let content_main = if main_is_x {
         content_w
     } else if is_auto(n.height) {
@@ -3990,9 +3998,7 @@ fn measure_flex(
         // min-height (a min-height the items underflow IS a main size for justify to distribute —
         // `min-h-screen` on a page shell). No min/max → just the stacked items. (A wrapping column with a
         // min/max-height bails in the harness — this is its single line's extent.)
-        let floor = if is_auto(n.min_h) { 0.0 } else { (to_border_y(n.min_h) - edges_y).max(0.0) };
-        let cap = if is_auto(n.max_h) { f64::INFINITY } else { (to_border_y(n.max_h) - edges_y).max(0.0) };
-        if used_main > cap { cap } else { used_main.max(floor) }
+        col_extent(used_main)
     } else {
         (clamp_min_max(to_border_y(n.height), to_border_y(n.min_h), to_border_y(n.max_h)).max(0.0) - edges_y).max(0.0)
     };
@@ -4124,7 +4130,14 @@ fn measure_flex(
             // items overflow — content_main holds the capped extent, used_main the overrunning content).
             // A bare-text anonymous item floors the box height (a column's MAIN) at its line-height, applied
             // after the items' extent exactly as the oracle's `max(contentExtent, anonymousItemHeight)`.
-            clamp_min_max(content_main.max(used_main).max(n.anon_cross) + edges_y, to_border_y(n.min_h), to_border_y(n.max_h)).max(0.0)
+            // …per LINE for a column: the tallest line's extent or content (`col_extent`), which for one line is the
+            // same `content_main.max(used_main)` a single extent gives.
+            let tallest = lines.iter().map(|line| {
+                let lm: f64 = line.iter().map(|&p| mo[p]).sum::<f64>() + gap * line.len().saturating_sub(1) as f64;
+                col_extent(lm).max(lm)
+            }).fold(0.0f64, f64::max);
+            let content_ext = if main_is_x { content_main.max(used_main) } else { tallest };
+            clamp_min_max(content_ext.max(n.anon_cross) + edges_y, to_border_y(n.min_h), to_border_y(n.max_h)).max(0.0)
         } else {
             clamp_min_max(to_border_y(n.height), to_border_y(n.min_h), to_border_y(n.max_h)).max(edges_y).max(0.0)
         };
@@ -4204,7 +4217,9 @@ fn measure_flex(
         let lc = line_lc[li];
         let cs = line_cs[li];
         let line_main: f64 = line.iter().map(|&p| mo[p]).sum::<f64>() + gap * line.len().saturating_sub(1) as f64;
-        let free = content_main - line_main;
+        // (…an auto-height column's line justifies within its OWN extent — see `col_extent`.)
+        let line_extent = if !main_is_x && is_auto(n.height) { col_extent(line_main) } else { content_main };
+        let free = line_extent - line_main;
         // Auto main-axis margins take the line's free space (free/autos each) BEFORE justify-content, which
         // then yields — but only when there IS free space; with none they resolve to 0 and justify runs.
         let line_autos: usize = line.iter().map(|&p| (inputs[kids[p]].get().flex_item_auto & 1) as usize + ((inputs[kids[p]].get().flex_item_auto >> 1) & 1) as usize).sum();
@@ -4225,7 +4240,7 @@ fn measure_flex(
             // `at` is the item's abstract border-box start (from main-start). A forward axis maps it
             // straight off the near edge; a reversed axis mirrors it within the main extent (main-start is
             // the far physical edge).
-            let main_pos = if main_reverse { main_start + (content_main - at - m_size) } else { main_start + at };
+            let main_pos = if main_reverse { main_start + (line_extent - at - m_size) } else { main_start + at };
             at += mo[p] - ml_lead[p]; // advance past the item's main size + its trailing margin
             if auto & 2 != 0 {
                 at += each_auto; // auto main-end margin

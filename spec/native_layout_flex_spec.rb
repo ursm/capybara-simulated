@@ -19,8 +19,7 @@
 # measured table below is the statement of it. `wrap-reverse` is a SECOND flag, not the same one: it is what
 # the flow-relative `start` / `end` follow, and a `vertical-rl` row has a reversed cross without it.
 #
-# Still DECLINES to JS: a WRAPPING AUTO-height column with a max-height (it breaks its lines against that
-# capacity), a float, inline-block
+# Still DECLINES to JS: a float, inline-block
 # items. A REPLACED item (svg / img / input …) is now replayed as a leaf box (see native_layout_replaced_spec).
 # Each bail is an A/B: the feature-carrying input declines, a sibling without it stays native. V8 only.
 require 'capybara/simulated'
@@ -584,7 +583,17 @@ RSpec.describe 'native layout flex parity', if: ENV.fetch('CSIM_JS_ENGINE', 'v8'
   end
   it('matches an rtl flex column with a cross auto margin') { expect_parity('<div style="display:flex;flex-direction:column;direction:rtl;width:200px;height:120px"><div style="width:50px;height:30px;margin-left:auto"></div></div>') }
   it('matches an rtl WRAPPING flex column') { expect_parity('<div style="display:flex;flex-direction:column;flex-wrap:wrap;direction:rtl;width:200px;height:60px"><div style="width:40px;height:30px"></div><div style="width:50px;height:40px"></div></div>') }
-  it('declines max-height on a WRAPPING column (breaks lines against the capacity)') { a_bails_b_native('<div style="display:flex;flex-direction:column;flex-wrap:wrap;max-height:40px;width:300px"><div style="width:80px;height:30px"></div><div style="width:80px;height:30px"></div></div>', '<div style="display:flex;flex-direction:column;flex-wrap:wrap;width:300px"><div style="width:80px;height:30px"></div><div style="width:80px;height:30px"></div></div>') }
+  # A WRAPPING auto-height column with a max-height breaks its lines against that capacity, and each line's main
+  # extent is its OWN — the cap where its items overrun it, else its content — with the box the TALLEST line: 30
+  # here, where one extent for every line made native's box the capacity (40). It declined until 2026-09-24.
+  it 'places a wrapping auto-height column whose max-height breaks its lines, the box its tallest line' do
+    body = '<div style="display:flex;flex-direction:column;flex-wrap:wrap;max-height:40px;width:300px"><div style="width:80px;height:30px"></div><div style="width:80px;height:30px"></div></div>'
+    expect_native_flex(body)
+    expect(item_boxes(body)).to eq([[0, 0, 80, 30], [150, 0, 80, 30]])   # Chrome
+    body = '<div style="display:flex;flex-direction:column;flex-wrap:wrap;width:100px;max-height:50px"><div style="width:20px;height:20px"></div><div style="width:20px;height:20px"></div><div style="width:20px;height:20px"></div></div>'
+    expect_native_flex(body)
+    expect(item_boxes(body)).to eq([[0, 0, 20, 20], [0, 20, 20, 20], [50, 0, 20, 20]])   # Chrome: two lines of 40 and 20, the box 40
+  end
   # A flex container's own % padding resolves against its CONTAINING BLOCK's width on both axes (§ CSS Box),
   # which is Chrome's rule and the oracle's now — so an explicitly-sized container carrying one lays out
   # natively, and so does an item whose own % padding joins its flex base.
