@@ -207,12 +207,17 @@ RSpec.describe 'native layout L1 block-flow parity', if: ENV.fetch('CSIM_JS_ENGI
 
   # A PERCENTAGE relative inset goes over as its `px + frac` pair and native resolves it against the containing
   # block it lays the box out in — the oracle's box was the basis until 2026-09-24. Both engines and Chrome: 30/20
-  # in a 300x200 block; a `top: 10%` of an INDEFINITE height resolves to nothing and `bottom: 4px` is used (-4); an
-  # over-constrained pair keeps the rtl flow's `right` (-15); a linear `calc()` on an atomic, 60.99 / -5.
+  # in a 300x200 block; a `top: 10%` of an INDEFINITE height resolves to nothing and `bottom: 4px` is used (-4) —
+  # and so does a `top: 0%` or a `calc(0% + 5px)`, whose fraction is zero but which is a percentage all the same
+  # (-10, -3; native read a zero fraction as "no percentage" and said 0 and 5); an over-constrained pair keeps the
+  # rtl flow's `right` (-15); a linear `calc()` on an atomic, 60.99 / -5 (Chrome 61: the text before it is 28 wide
+  # there, 27.99 here).
   it 'resolves a percentage relative inset natively, against the box native lays the parent out as' do
     {
       '<div style="width:300px;height:200px"><div id="m" style="position:relative;left:10%;top:10%;height:20px">b</div></div>'                                   => [30, 20],
       '<div style="width:300px"><div id="m" style="position:relative;top:10%;bottom:4px;height:20px">b</div></div>'                                              => [0, -4],
+      '<div style="width:300px"><div id="m" style="position:relative;top:0%;bottom:10px;height:20px">b</div></div>'                                              => [0, -10],
+      '<div style="width:300px"><div id="m" style="position:relative;top:calc(0% + 5px);bottom:3px;height:20px">b</div></div>'                                   => [0, -3],
       '<div style="width:300px;direction:rtl"><div id="m" style="position:relative;left:10%;right:5%;height:20px">b</div></div>'                                 => [-15, 0],
       '<div style="width:300px;height:100px">text <span id="m" style="display:inline-block;position:relative;left:calc(10% + 3px);top:-5%">ib</span> more</div>' => [60.99, -5]
     }.each do |body, (x, y)|
@@ -226,6 +231,24 @@ RSpec.describe 'native layout L1 block-flow parity', if: ENV.fetch('CSIM_JS_ENGI
       oracle_free = session.evaluate_script('globalThis.__csimLayoutShadowRun(undefined, {noOracle: true})')
       expect(oracle_free).to include('ok' => true, 'mismatches' => 0)
       expect(oracle_free['oracleReads'].to_h.keys.grep_v(/\(handed over\)\z/)).to be_empty, oracle_free.inspect
+    end
+  end
+
+  # …and a CAPTION's, whose offset resolves against its TABLE's height as the table stands when the caption is
+  # placed — declared (10 of 100), stretched by a flex line (15 of 150) or its grid row (8 of 80) — while its own
+  # percentage height resolves against nothing. Both engines lost that basis (0) until 2026-09-25; Chrome's figures.
+  it 'resolves a relative caption\'s percentage inset against its table\'s height' do
+    row = '<div style="display:table-row"><div style="display:table-cell">d</div></div>'
+    caption = '<div id="m" style="display:table-caption;position:relative;top:10%">cap</div>'
+    {
+      %(<div style="width:300px"><div style="display:table;width:100%;height:100px">#{caption}#{row}</div></div>)                                                                 => 10,
+      %(<div style="width:300px;height:150px;display:flex"><div style="display:table;width:100%">#{caption}#{row}</div><div>x</div></div>)                                        => 15,
+      %(<div style="width:300px;display:grid;grid-template-columns:100px 1fr;grid-auto-rows:80px"><div style="display:table;width:100%">#{caption}#{row}</div><div>x</div></div>) => 8
+    }.each do |body, y|
+      session = simulated_session(page(body))
+      session.visit '/'
+      expect(parity(session)).to include('ok' => true, 'mismatches' => 0)
+      expect(laid_out_rect(body)[1]).to eq(y)
     end
   end
 
