@@ -111,6 +111,21 @@ RSpec.describe 'native layout grid parity', if: ENV.fetch('CSIM_JS_ENGINE', 'v8'
     end
   end
 
+  # An intrinsic-size KEYWORD width on a grid item is its own content measured against its AREA — `fit-content`
+  # the area's room clamped between its min- and max-content. It declined until 2026-09-24 (native's keyword pin
+  # was measured before the tracks); `measure_grid` sizes it from the area now. Chrome's widths.
+  it 'sizes a keyword-width grid item from its content against its area' do
+    {
+      '<div style="display:grid;grid-template-columns:50% 50%"><div id="m" style="width:fit-content">aa bb cc dd ee ff</div><div>zz</div></div>' => 150,
+      '<div style="display:grid;grid-template-columns:100px auto"><div id="m" style="width:max-content">aa bb cc</div><div>zz</div></div>'      => 76.8125,
+      '<div style="display:grid;grid-template-columns:1fr 2fr"><div id="m" style="width:min-content;margin:0 5px">aa bb cc</div><div>zz</div></div>' => 19.203125
+    }.each do |grid, chrome_w|
+      body = %(<div style="width:300px;font:16px monospace">#{grid}</div>)
+      expect_parity(body)
+      session = simulated_session(page(body)); session.visit '/'
+      expect(session.evaluate_script("document.getElementById('m').getBoundingClientRect().width")).to be_within(0.05).of(chrome_w)
+    end
+  end
   it 'matches a fixed 2-column grid with a gap' do
     expect_parity('<div style="display:grid;grid-template-columns:100px 100px;gap:10px;width:300px"><div style="height:20px">a</div><div style="height:30px">b</div></div>')
   end

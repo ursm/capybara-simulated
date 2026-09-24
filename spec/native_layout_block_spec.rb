@@ -675,14 +675,14 @@ RSpec.describe 'native layout L1 block-flow parity', if: ENV.fetch('CSIM_JS_ENGI
       expect_parity('<div style="width:400px"><div style="max-width:min-content">aa bb</div></div>')
       expect_parity('<div style="width:400px"><div style="max-height:min-content;height:50px">aa bb</div></div>')
     end
-    # …and every OTHER sizing path keeps its own basis, so a keyword width declines there: a flex or grid item
-    # (sized by its line / track), an out-of-flow box (by its insets), a table cell (by its column), a replaced
-    # element (by its intrinsic size — an inline one is pushed as an atomic instead of declining the pass).
+    # …and every OTHER sizing path keeps its own basis, so a keyword width declines there: an out-of-flow box (by
+    # its insets), a replaced element (by its intrinsic size — an inline one is pushed as an atomic instead of
+    # declining the pass). A GRID item came off this list on 2026-09-24: `measure_grid` measures it against its
+    # area (native_layout_grid_spec).
     it 'declines a keyword width a different sizing path owns' do
       # …the pass ROOT (sized from the width the harness hands in — native would fill its containing block and
-      # report the box as laid out), an out-of-flow box (sized from its insets) and a grid item (from its
-      # track). A replaced element is sized by its intrinsic size and declines the same way.
-      expect_walk_declines('<div style="display:grid;grid-template-columns:auto;width:400px"><div style="width:max-content">aa bb</div></div>', 'unsupported subtree')
+      # report the box as laid out) and an out-of-flow box (sized from its insets). A replaced element is sized by
+      # its intrinsic size and declines the same way.
       expect_walk_declines('<div style="position:relative;width:400px"><div style="position:absolute;width:max-content">aa bb</div></div>', 'unsupported subtree')
       session = simulated_session(page('<div id="r" style="width:max-content">aa bb cc</div>')); session.visit '/'
       expect(parity(session, '#r')).to include('ok' => false, 'reason' => 'unsupported subtree')

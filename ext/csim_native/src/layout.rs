@@ -6452,7 +6452,21 @@ fn measure_grid(
             item = item.with_percent_sizes(track_w, pct_h);
             inputs[c].set(item);
         }
-        let child_w = resolve_width(&item, track_w);
+        // …and an intrinsic-size KEYWORD width is the item's own content measured against that AREA: `fit-content`
+        // is the room the area leaves clamped between its min- and max-content, as `block_child_width` gives a
+        // block child the room its containing block leaves.
+        let child_w = if item.width_kw != 0 {
+            let room = (track_w - Input::m(item.ml) - Input::m(item.mr)).max(0.0);
+            match content_sized_width(c, room, inputs, runs, run_texts, grids, children) {
+                Some(w) => used_width(&item, w),
+                None => {
+                    failed.set(true);
+                    0.0
+                }
+            }
+        } else {
+            resolve_width(&item, track_w)
+        };
         measure(c, child_w, f64::NAN, inputs, runs, run_texts, grids, children, boxes, failed, &mut FloatCtx::new(), 0.0, 0.0);
         let ih = boxes[c].h;
         boxes[c].x = content_left + offsets[cell.col] + Input::m(item.ml);
