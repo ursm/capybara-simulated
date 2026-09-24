@@ -35,8 +35,10 @@ module WalkRefusals
   # (`white-space-only-block`) until 2026-09-24, when preserved white space went down the text path.
   CENTRED_OOF      = '<span style="display:inline-block;text-align:center"><p>a</p> ' \
                      '<div style="position:absolute;width:2px;height:2px"></div> <p>b</p>text</span>'
-  TABLE_CELL       = '<span style="display:inline-block"><div style="display:table-cell">c</div></span>'
-  ATOMIC           = [POSITIONED, CENTRED_OOF, TABLE_CELL].freeze
+  # (An orphan `display: table-cell` inside one was the third entry — `block-level-box-unplaceable` — until
+  # 2026-09-24, when the walk took an orphan table part as the block the oracle lays it out as. No display reaches
+  # that reason now; what does is a position neither engine models, which is the entry above.)
+  ATOMIC           = [POSITIONED, CENTRED_OOF].freeze
 
   # …and a separate cause, for the routes that MEASURE rather than lay out: content whose intrinsic width
   # native has no rule for, which every shrink-to-fit route has to refuse or push while the walk still lays the

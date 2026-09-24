@@ -56,7 +56,7 @@ RSpec.describe 'native layout no-oracle run', if: ENV.fetch('CSIM_JS_ENGINE', 'v
     # still asks the oracle's intrinsic widths — a plain percentage width no longer reads anything, and neither
     # does an intrinsic SIZE, which is data off the DOM rather than a layout the oracle ran)
     s = session_with('<div style="width:300px"><p style="position:relative;left:10%">hello</p>' \
-                     '<table><tr><td>a <span style="display:inline-block"><div style="display:table-cell">c</div></span></td></tr></table></div>')
+                     '<table><tr><td>a <span style="display:inline-block"><div style="position:-webkit-sticky">c</div></span></td></tr></table></div>')
     reads = s.evaluate_script('globalThis.__csimLayoutShadowRun(undefined, {noOracle: true}).oracleReads')
     expect(reads.keys).to include('recordCbW _lbCbW')
     expect(reads.keys).to include('nlShadowRun the pass root origin and width (handed over)')
@@ -74,7 +74,7 @@ RSpec.describe 'native layout no-oracle run', if: ENV.fetch('CSIM_JS_ENGINE', 'v
     # the stamps it reads is the A/B that pins the break on them rather than on the trap's mere presence. When
     # native lays the shape out itself it stops breaking; swap in another BREAK from a `CSIM_SWEEP_NO_ORACLE=1`
     # sweep rather than deleting the example.
-    s = session_with('<div style="width:400px">text <span style="display:inline-block"><div style="display:table-cell">c</div></span> after</div>')
+    s = session_with('<div style="width:400px">text <span style="display:inline-block"><div style="position:-webkit-sticky">c</div></span> after</div>')
     run = ->(opts) { s.evaluate_script("globalThis.__csimLayoutShadowRun(undefined, #{opts})") }
     expect(run.('undefined')).to include('ok' => true, 'mismatches' => 0)
 
@@ -95,7 +95,7 @@ RSpec.describe 'native layout no-oracle run', if: ENV.fetch('CSIM_JS_ENGINE', 'v
     # A memo the oracle's pass left fresh is an oracle answer no trap sees: the helper behind it is never entered,
     # so it is never noted. A grid column sized over an item holding a PUSHED atomic asks the oracle's intrinsic
     # widths, memoised on the item — served, the walk's dependency on that machinery vanished from the record.
-    s = session_with('<div style="display:grid;grid-template-columns:min-content auto;width:400px"><div>a <span style="display:inline-block"><div style="display:table-cell">c</div></span></div><div>x</div></div>')
+    s = session_with('<div style="display:grid;grid-template-columns:min-content auto;width:400px"><div>a <span style="display:inline-block"><div style="position:-webkit-sticky">c</div></span></div><div>x</div></div>')
     r = s.evaluate_script('globalThis.__csimLayoutShadowRun(undefined, {noOracle: true})')
     expect(r).to include('ok' => true, 'oracleWrites' => 0)
     expect(r['oracleReads'].keys).to include('gridColumnContent helper:intrinsicWidths')
@@ -105,7 +105,7 @@ RSpec.describe 'native layout no-oracle run', if: ENV.fetch('CSIM_JS_ENGINE', 'v
     # The resolved-px fallback — a grid holding content native cannot measure — sizes every track against the
     # oracle's per-column contributions, which are the oracle's OWN column list at the oracle's OWN width. That
     # is the one read the grid encode still makes.
-    s = session_with('<div style="display:grid;grid-template-columns:min-content auto;width:400px"><div>a <span style="display:inline-block"><div style="display:table-cell">c</div></span></div><div>x</div></div>')
+    s = session_with('<div style="display:grid;grid-template-columns:min-content auto;width:400px"><div>a <span style="display:inline-block"><div style="position:-webkit-sticky">c</div></span></div><div>x</div></div>')
     expect(s.evaluate_script('globalThis.__csimLayoutShadowRun(undefined, {noOracle: true})')['oracleReads'].keys)
       .to include('oracleContentW _lb.width')
   end

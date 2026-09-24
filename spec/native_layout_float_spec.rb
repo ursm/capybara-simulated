@@ -570,7 +570,7 @@ RSpec.describe 'native layout float parity', if: ENV.fetch('CSIM_JS_ENGINE', 'v8
     # anywhere in the suite.
     expect(run_shadow(keep.sub('float:left;', 'float:left;position:-webkit-sticky;'))['ok']).to be false
     expect(run_shadow('<div style="width:300px;overflow:hidden"><div style="float:left;position:-webkit-sticky;width:50px;height:50px"></div>t</div>')['ok']).to be false
-    expect(run_shadow(%(<div style="width:300px">aaa <span style="float:left">#{WalkRefusals::TABLE_CELL}</span>bbb</div>))['ok']).to be false
+    expect(run_shadow(%(<div style="width:300px">aaa <span style="float:left">#{WalkRefusals::POSITIONED}</span>bbb</div>))['ok']).to be false
   end
 
   # A line too narrow for what is about to go on it DROPS below the float squeezing it (§9.5, "if a shortened
