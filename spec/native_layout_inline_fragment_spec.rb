@@ -61,11 +61,21 @@ RSpec.describe 'native layout inline box fragments', if: ENV.fetch('CSIM_JS_ENGI
       '<div style="font:16px monospace;width:400px">aa <span id="m" style="padding-left:6px"></span> cc</div>',
       chrome: [[28.8125, 0, 6, 22]]
     )
-    # …and one per line where it wraps, the opening edge on the first and the closing one on the last.
+    # …percentage edges resolved against the block's content width — by native itself, from the fractions the inline
+    # table carries (the walk used to resolve them against the oracle's basis) — and one per line where it wraps,
+    # the opening edge on the first and the closing one on the last.
     expect_fragments(
       '<div style="font:16px monospace;width:60px">x <span id="m" style="padding:0 3px">aaaa bbbb cc</span> d</div>',
       chrome: [[0, 22, 41.40625, 22], [0, 44, 38.40625, 22], [0, 66, 22.203125, 22]]
     )
+    body = '<div style="font:16px monospace;width:200px">aa <span id="m" style="padding:5% 10%;margin-left:-2%">bb cc dd ee ff gg</span> hh</div>'
+    expect_fragments(body, chrome: [[24.8125, -10, 154.40625, 42], [0, 12, 39.203125, 42]])
+    r = with_simulated_session(page(body)) do |session|
+      session.visit '/'
+      session.evaluate_script('globalThis.__csimLayoutShadowRun(undefined, {noOracle: true})')
+    end
+    expect(r).to include('ok' => true, 'mismatches' => 0)
+    expect(r['oracleReads'].keys).to eq(['nlShadowRun the pass root origin and width (handed over)'])
   end
 
   # An EMPTY box takes a fragment only where there is a line box to take it on, and the line is the one it OPENED

@@ -829,6 +829,26 @@ pub(crate) struct InlineBox {
     pub(crate) br: f64,
     pub(crate) bb: f64,
     pub(crate) bl: f64,
+    // The edges' PERCENTAGES, as fractions of the content width of the block laying the line out (§8.3/8.4: an inline
+    // box's margins and padding resolve against its containing block's width) beside the length parts above and on
+    // the OPEN run: margin-left, the opening border + padding, then the closing halves and the vertical edges.
+    pub(crate) f_ml: f64,
+    pub(crate) f_left: f64,
+    pub(crate) f_right: f64,
+    pub(crate) f_mr: f64,
+    pub(crate) f_top: f64,
+    pub(crate) f_bottom: f64,
+}
+impl InlineBox {
+    // Its edges resolved in a block `content_w` wide, the fractions folded into the lengths.
+    fn resolved(mut self, content_w: f64) -> InlineBox {
+        self.ml += self.f_ml * content_w;
+        self.right += self.f_right * content_w;
+        self.mr += self.f_mr * content_w;
+        self.top += self.f_top * content_w;
+        self.bottom += self.f_bottom * content_w;
+        self
+    }
 }
 // …and what native answers for one: [inline index, x, y, w, h] per fragment, in document coordinates.
 pub(crate) type FragRow = [f64; 5];
@@ -900,6 +920,7 @@ fn inline_box(idx: usize) -> InlineBox {
     FRAG_PASS.with(|m| m.borrow().as_ref().and_then(|p| p.table.get(idx).copied())).unwrap_or(InlineBox {
         ml: 0.0, right: 0.0, mr: 0.0, top: 0.0, bottom: 0.0, own_h: 0.0, own_asc: 0.0,
         rel_x: 0.0, rel_y: 0.0, bt: 0.0, br: 0.0, bb: 0.0, bl: 0.0,
+        f_ml: 0.0, f_left: 0.0, f_right: 0.0, f_mr: 0.0, f_top: 0.0, f_bottom: 0.0,
     })
 }
 fn store_frags(i: usize, rows: Vec<FragRow>) {
@@ -1323,7 +1344,7 @@ fn line_layout(
             let idx: usize = $idx;
             Frag {
                 idx,
-                ib: inline_box(idx),
+                ib: inline_box(idx).resolved(content_w),
                 lines: Vec::new(),
                 open_x: band_l(total) + line_x + pending_space.map_or(0.0, |p| p.w),
                 open_top: total,
@@ -1753,8 +1774,11 @@ fn line_layout(
     for (ri, run) in runs.iter().enumerate() {
         match run.kind {
             RUN_OPEN => {
-                frags.push(frag_here!(run.font as usize));
-                open.push(OpenBox { w: run.metric, placed: false, frag: frags.len() - 1 });
+                let f = frag_here!(run.font as usize);
+                // (…the opening edge: its length parts on the run, its percentages in the table.)
+                let w = run.metric + (f.ib.f_ml + f.ib.f_left) * content_w;
+                frags.push(f);
+                open.push(OpenBox { w, placed: false, frag: frags.len() - 1 });
             }
             RUN_CLOSE => {
                 // Nothing landed inside it, so the box shows its edges where it OPENED. The oracle flushes
@@ -1775,7 +1799,11 @@ fn line_layout(
                 // where it met it, so the space's advance and its justification gap come BEFORE the edge. Kept
                 // pending, native placed both after it, and a marker inside the inline — past the space, before
                 // the gap — was not moved by the spread (48 where the oracle and Chrome say 60.4).
-                if flushes || run.lands {
+                // …and whether the close LANDS: a half the walk saw a length or a percentage in, still there once it is
+                // resolved (a `calc()` cancelling to nothing in this block lands nothing, as in the oracle).
+                let closing = &frags[open.last()?.frag].ib;
+                let lands = run.lands && (closing.right != 0.0 || closing.mr != 0.0);
+                if flushes || lands {
                     if let Some(p) = place_pending_space!() {
                         pending_space = Some(PendingSpace { w: 0.0, placed: true, ..p });
                     }
@@ -1811,7 +1839,7 @@ fn line_layout(
                 // then by the inline's own FONT box (`fontContentHeight` at `inlineAscent`), which is taller than
                 // its line-height contribution wherever the font's content area is (Chrome: an empty
                 // `font-size:30px; padding-right:5px` span makes a 16px line 41 tall, not 22).
-                if run.lands {
+                if lands {
                     line_placed = true;
                     if let Some(p) = pending_space.filter(|p| p.sep) {
                         line_asc = line_asc.max(p.asc);
@@ -2583,19 +2611,18 @@ fn line_layout(
                 // `size` / `ls` carry the `position: relative` offset of the inline boxes around it, which
                 // moves the content this position is a reading of (§9.4.3) and so moves the reading too.
                 let (ci, rx, ry) = (run.font as usize, run.size, run.ls);
-                // The inline box it sits DIRECTLY in, if that box has an opening edge of its own (`metric`,
-                // set by the walk) and the edges around it have not been placed — asked of their SUM, as the
-                // flush is, so a pair that CANCELS is never "unplaced" to wait for — has not told the flow
-                // where it reaches: the
-                // edge goes down when the box's first content does, which may be a later line than this one.
+                // The inline box it sits DIRECTLY in — the innermost one open, since every inline opens one — if that
+                // box has an opening edge of its own still unplaced, and the edges around it have not been placed —
+                // asked of their SUM, as the flush is, so a pair that CANCELS is never "unplaced" to wait for — has
+                // not told the flow where it reaches: the edge goes down when the box's first content does, which
+                // may be a later line than this one.
                 // (The SUM is `placeOnLine`'s question, never the close's — see the two macros above.)
                 // Wait for it, keeping the cursor as the fallback for an edge that never lands. An edge further
                 // OUT is not waited on — the oracle asks only `openInlines[openInlines.length - 1]`, so a plain
                 // inner inline reads the cursor however edged the boxes around it are.
                 let unplaced: f64 = open.iter().filter(|o| !o.placed).map(|o| o.w).sum();
-                if run.metric != 0.0 && unplaced != 0.0 && open.last().is_some_and(|o| !o.placed) {
-                    // `open.len()` is its own inline's depth: the walk only sets `metric` where that inline
-                    // emitted a non-zero opening edge, so it is the innermost open box right now.
+                if unplaced != 0.0 && open.last().is_some_and(|o| o.w != 0.0 && !o.placed) {
+                    // (`open.len()` is its own inline's depth.)
                     let pending_w = pending_space.map_or(0.0, |p| p.w);
                     pending_oofs.push((ci, rx, ry, open.len(), line_x + pending_w, line_no));
                 } else if rtl {

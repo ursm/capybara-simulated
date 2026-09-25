@@ -895,7 +895,7 @@ fn register_font_bytes(
 const LAYOUT_STRIDE: usize = 144;
 const RUN_STRIDE: usize = 12;
 // …and per inline box in the inline table (layout.js `NL_INLINE_STRIDE` / `nlInlineEntry`, layout::InlineBox).
-const INLINE_STRIDE: usize = 13;
+const INLINE_STRIDE: usize = 19;
 
 // Decode a V8 Float64Array argument into a Vec<f64> (native-endian raw bytes).
 fn read_f64_array(val: v8::Local<'_, v8::Value>) -> Vec<f64> {
@@ -1145,6 +1145,12 @@ fn layout_pass(
             br: r[10],
             bb: r[11],
             bl: r[12],
+            f_ml: r[13],
+            f_left: r[14],
+            f_right: r[15],
+            f_mr: r[16],
+            f_top: r[17],
+            f_bottom: r[18],
         })
         .collect();
     match crate::layout::layout_block(&inputs, &runs, &run_texts, &grids, &inlines, root_x, root_y, root_cb_w) {

@@ -996,18 +996,26 @@ RSpec.describe 'native layout flex parity', if: ENV.fetch('CSIM_JS_ENGINE', 'v8'
       end
     end
 
-    # …and an inline BOX's percentage EDGE, at any depth: it has no record, and `nlGatherRuns` resolves its OPEN /
-    # CLOSE runs against the oracle's `_lbCbW` — the item's FINAL width, where native measures a wrapping column's
-    # item at its natural one (54 tall in native, 36 in the oracle and Chrome). And an atomic written through a
-    # `display: contents` wrapper inside a MIXED block, whose record hangs under the anonymous group: the route is
-    # asked by BOX now (`layoutParent`), where `flatTreeParent` stopped at the wrapper (119 against 102).
-    it 'falls back for an inline box\'s percentage edge and for an atomic through `contents` in a mixed block' do
-      wrap = 'display:flex;flex-direction:column;flex-wrap:wrap;height:60px'
-      [%(<div style="#{wrap}"><div>bold <i style="padding-left:20%">inl</i> tail words</div><div style="height:40px">z</div><div style="width:170px;height:30px"></div></div>),
-       %(<div style="#{wrap}"><div><b>bold <i style="padding-left:20%">inl</i> tail</b> words</div><div style="height:40px">z</div><div style="width:170px;height:30px"></div></div>),
-       %(<div style="#{col};height:120px"><div style="flex:1"><div style="height:100%">lead<p>para</p><span style="display:contents"><span style="display:inline-block;width:20px;height:50%">a</span></span></div></div><div>z</div></div>),
+    # An atomic written through a `display: contents` wrapper inside a MIXED block, whose record hangs under the
+    # anonymous group: the route is asked by BOX now (`layoutParent`), where `flatTreeParent` stopped at the wrapper
+    # (119 against 102).
+    it 'falls back for an atomic through `contents` in a mixed block' do
+      [%(<div style="#{col};height:120px"><div style="flex:1"><div style="height:100%">lead<p>para</p><span style="display:contents"><span style="display:inline-block;width:20px;height:50%">a</span></span></div></div><div>z</div></div>),
        %(<div style="#{col};height:120px"><div style="flex:1"><div style="height:100%"><p>para</p><b>b <span style="display:contents"><img style="width:12px;height:50%"></span></b></div></div><div>z</div></div>)].each do |body|
         expect(run_shadow(body)).to include('ok' => true, 'mismatches' => 0, 'nativeFlexRows' => 0), body
+      end
+    end
+    # …and an inline BOX's percentage EDGE no longer falls back, at any depth: it has no record, but its fractions ride
+    # the inline table and native resolves them against the content width of the block laying the line out — the
+    # item's natural one when it measures a wrapping column's item, its final one when it lays it out, which is what
+    # the oracle's `placeInlineBox` reads too. It fell back while the walk resolved the edge against the oracle's
+    # FINAL width for both (54 tall in native, 36 in the oracle and Chrome).
+    it 'measures an item holding an inline box\'s percentage edge natively' do
+      wrap = 'display:flex;flex-direction:column;flex-wrap:wrap;height:60px'
+      [%(<div style="#{wrap}"><div>bold <i style="padding-left:20%">inl</i> tail words</div><div style="height:40px">z</div><div style="width:170px;height:30px"></div></div>),
+       %(<div style="#{wrap}"><div><b>bold <i style="padding-left:20%">inl</i> tail</b> words</div><div style="height:40px">z</div><div style="width:170px;height:30px"></div></div>)].each do |body|
+        expect_native_flex(body)
+        expect(first_item_box(body)[3]).to eq(36)   # Chrome
       end
     end
 
