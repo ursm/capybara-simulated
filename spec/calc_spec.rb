@@ -130,6 +130,36 @@ RSpec.describe 'CSS math functions' do
       .not_to eq(['7px'])
   end
 
+  # `-webkit-calc()` is `calc()` under its legacy name, which Chrome parses — and serializes as
+  # `calc()` — on every surface. Kept verbatim, it was an unknown function the cascade and the layout
+  # ignored: a `-webkit-calc(100% - 10px)` width laid out 1008 wide where Chrome says 998.
+  it 'reads -webkit-calc() as calc()' do
+    expect(computed('margin-left: -webkit-calc(10px + 5px)', %w[marginLeft])).to eq(['15px'])
+    session = simulated_session(->(_env) { [200, {'content-type' => 'text/html'}, ['<!DOCTYPE html><html><body style="margin:8px"><div id="a" style="width:-webkit-calc(100% - 10px)"></div></body></html>']] })
+    session.visit '/'
+    expect(session.evaluate_script(<<~JS)).to eq(['calc(100% - 10px)', 'calc(50% - 1px)', 998, '"-webkit-calc(1px)"'])
+      (function () {
+        var a = document.getElementById('a'), e = document.createElement('div');
+        e.style.width = '-webkit-calc(50% - 1px)';
+        e.style.content = '"-webkit-calc(1px)"';
+        return [a.style.width, e.style.width, a.getBoundingClientRect().width, e.style.content];
+      })()
+    JS
+  end
+
+  # …and a COMMENT inside a style attribute is no part of the value, as it is none in a stylesheet:
+  # read as text, `calc(10px /* c */ + 20px)` was mangled and dropped, and `1px /* y */` was invalid.
+  it 'drops a comment inside a style attribute' do
+    session = simulated_session(->(_env) { [200, {'content-type' => 'text/html'}, ['<!DOCTYPE html><html><body><div id="a" style="margin-left:calc(10px /* c */ + 20px);padding-left:1px /* y */"></div></body></html>']] })
+    session.visit '/'
+    expect(session.evaluate_script(<<~JS)).to eq(['calc(30px)', '30px', '1px'])
+      (function () {
+        var a = document.getElementById('a');
+        return [a.style.marginLeft, getComputedStyle(a).marginLeft, getComputedStyle(a).paddingLeft];
+      })()
+    JS
+  end
+
   it 'reduces a math function in place, leaving the value structure alone' do
     # A property value is not one expression: the `/` in `aspect-ratio` is a separator, and
     # `background-position` has two components. Parsing the whole value as one sum ate both.
