@@ -175,6 +175,12 @@ RSpec.describe 'native layout no-oracle run', if: ENV.fetch('CSIM_JS_ENGINE', 'v
       '<div style="width:400px"><div style="display:grid;grid-template-columns:repeat(auto-fit, minmax(80px, 1fr));gap:4px"><div>a</div><div>b</div><div style="grid-column:1 / -1">wide</div></div></div>',
       # …an item a declared ROW height sizes, whose own vertical edges are lengths: no basis is asked for them
       '<div style="width:300px"><div style="display:grid;grid-template-columns:50% 50%;grid-auto-rows:30px"><div style="padding:3px">q</div><div>r</div></div></div>',
+      # …a flex item's PERCENTAGE height, which never stretches whether it resolves (a definite row) or not (an
+      # indefinite one), a grid item's under a declared row, and a CELL's, which a table lays out against no basis
+      '<div style="display:flex;width:300px"><div style="height:50%">x</div><div style="height:40px">y</div></div>',
+      '<div style="display:flex;width:300px;height:150px"><div style="height:50%"><div style="height:50%;width:50%">n</div></div><div style="width:20px;height:20px"></div></div>',
+      '<div style="width:300px"><div style="display:grid;grid-template-columns:1fr 1fr;grid-auto-rows:60px"><div style="height:50%">g</div><div>h</div></div></div>',
+      '<table style="height:200px;border-spacing:0"><tr><td style="height:50%;min-height:30px">ab cd</td><td>zz</td></tr></table>',
       # …a flex-item table's relative CAPTION, whose percentage offset resolves against the table's own height
       '<div style="display:flex;width:300px;height:150px"><table style="width:200px;min-height:120px"><caption style="position:relative;top:10%">cap</caption><tr><td style="height:40px">d</td></tr></table><div>y</div></div>',
       # …and whose vertical edges are PERCENTAGES of its track: native imposes the row once it has that track
