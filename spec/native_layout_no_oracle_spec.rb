@@ -181,6 +181,9 @@ RSpec.describe 'native layout no-oracle run', if: ENV.fetch('CSIM_JS_ENGINE', 'v
       '<div style="display:flex;width:300px;height:150px"><div style="height:50%"><div style="height:50%;width:50%">n</div></div><div style="width:20px;height:20px"></div></div>',
       '<div style="width:300px"><div style="display:grid;grid-template-columns:1fr 1fr;grid-auto-rows:60px"><div style="height:50%">g</div><div>h</div></div></div>',
       '<table style="height:200px;border-spacing:0"><tr><td style="height:50%;min-height:30px">ab cd</td><td>zz</td></tr></table>',
+      # …a table CELL's percentage padding, against the table's content box once its columns have grown it
+      '<div style="width:300px"><table><tr><td style="padding:0 10%">aa bb</td><td>cc</td></tr></table></div>',
+      '<div style="width:300px"><div style="float:left"><table style="width:80%"><tr><td style="padding:0 8%;box-sizing:border-box;width:60px">aa bb</td><td>cc</td></tr></table></div>beside</div>',
       # …a flex-item table's relative CAPTION, whose percentage offset resolves against the table's own height
       '<div style="display:flex;width:300px;height:150px"><table style="width:200px;min-height:120px"><caption style="position:relative;top:10%">cap</caption><tr><td style="height:40px">d</td></tr></table><div>y</div></div>',
       # …and whose vertical edges are PERCENTAGES of its track: native imposes the row once it has that track

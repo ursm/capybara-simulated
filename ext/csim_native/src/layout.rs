@@ -5598,6 +5598,19 @@ fn measure_table(
     // out whatever it was given (so `grid_w` carries it back), while an empty one keeps the width it resolved —
     // its declaration, or the box it was handed — floored by its caption.
     let table_w = if c_count == 0 { border_w.max(cap_floor) } else { (grid_w + n.edges_x()).max(cap_floor) };
+    // A CELL's percentage edges resolve against THAT box's content — the containing block the oracle's `layoutTable`
+    // sizes it in (`layoutSize(cell, …, content.width)`), after the columns have grown the table past a declared width
+    // they overflow — so they are resolved here, before any cell is laid out. (Its column contribution is read off the
+    // basis-less `decl_edges_x`, so the columns never asked for it.)
+    let cells_w = n.content_w(table_w);
+    for &r in rows {
+        for &c in &children[r] {
+            let k = inputs[c].get();
+            if k.out_of_flow == 0 && k.has_percent_edges() {
+                inputs[c].set(k.with_percent_sizes(cells_w, f64::NAN));
+            }
+        }
+    }
     // The caption is a block box laid out in that BORDER box, outside the table's own border+padding (§17.4
     // wrapper box): an auto width fills it (less its own horizontal margins, `resolve_width`), a declared one (a
     // `%` of it) is its own and may overflow it without growing the table, and a `%` height resolves against
