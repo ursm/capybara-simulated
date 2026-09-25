@@ -814,6 +814,16 @@ RSpec.describe 'native layout table parity', if: ENV.fetch('CSIM_JS_ENGINE', 'v8
     expect_parity(column)
     expect(laid_out_rect(column)[3]).to eq(98)   # Chrome
   end
+  # NATIVE: a captioned table in a definite flex COLUMN whose cells hold a percentage height is measured, and that
+  # measure read the indefinite basis — which (§9.8) makes a flexed item impose its height again. Not a captioned
+  # table's: the column's main size is the WRAPPER's, which `measure_table` reads as the rows' and stacks the caption
+  # on — 72 where the oracle (its `mainImposed` exemption) and Chrome keep 50.
+  it 'keeps a captioned table its measure in a definite column whose cells read a percentage height' do
+    body = '<div style="display:flex;flex-direction:column;height:200px;width:300px;font:16px monospace"><table id="m" style="border-spacing:2px">' \
+           '<caption>cap</caption><tr><td><div style="height:50%">p</div></td></tr></table><div>z</div></div>'
+    expect_parity(body)
+    expect(laid_out_rect(body)[3]).to eq(50)   # Chrome
+  end
   # An inline-table is an ATOMIC inline in its parent's line — native replays its oracle box (its rows/cells are
   # covered via the parent), so a block holding one lays out rather than declining.
   # A table as a FLEX ITEM: the walk declined every flex container holding one. Native sizes it like any item

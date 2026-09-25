@@ -57,7 +57,8 @@ module PerfGate
   # a gate predicate that rescanned a box's siblings per child, asked before the cheap test that would have
   # short-circuited it: 117 ms → 1,882 ms on a page with no percentage in it, past `perf 5/0` and into
   # review. The walk becomes the hot path the day native stops being a shadow, so it is measured now.
-  WORKLOADS = %w[grid_table shadow_host layout_walk].freeze
+  # `flex_shell` is an app shell whose flexed cards hold `height: 100%` content — see `FLEX_SHELL_HTML`.
+  WORKLOADS = %w[grid_table shadow_host layout_walk flex_shell].freeze
 
   # Wall ratio may sit this fraction above baseline before the soft warning
   # fires. Generous on purpose: wall is a trend signal, not a tripwire.
@@ -109,6 +110,8 @@ module PerfGate
   # whole difference at ~3%, inside its own noise. It was invisible until `39267549` made the counter
   # font-independent, and the two now differ by the widget's own two boxes.
   def self.workload_html(workload)
+    return FLEX_SHELL_HTML if workload == 'flex_shell'
+
     rows = (1..ROWS).map {|i|
       %(<tr class="row r#{i % 6}" id="row-#{i}">) +
         %(<td class="cell num">#{i}</td>) +
@@ -234,6 +237,38 @@ module PerfGate
     })()
   JS
 
+  # An app shell: a fixed-height flex COLUMN of flexed cards, each holding an `h-full` child. A flexed item's size
+  # is definite (§9.8), so the child's percentage resolves against it — and a layout in which that percentage read
+  # the INDEFINITE basis is no answer to the definite question, so the column measures each card and then lays it
+  # out again at the size it imposed. Measured again on the next pass, the auto layout could not be reused out of
+  # the definite one, and every card was laid out twice per relayout: `reuse_hit` 1506 → 6 and `reuse_remeasured`
+  # 0 → 1500 here, 88 ms → 188 ms, and no wall above moved, because no page above has a percentage height under a
+  # flexed item. The header toggles between two DECLARED heights, so no count here reads a font metric.
+  FLEX_SHELL_HTML = <<~HTML.freeze
+    <!doctype html><html><head><style>
+      .shell { display: flex; flex-direction: column; height: 800px }
+      .card { flex: 1 }
+      .fill { height: 100% }
+      #hdr { height: 40px }
+      #hdr.tall { height: 60px }
+    </style></head><body>
+      <div class="shell"><div id="hdr">header</div>#{(1..300).map {|i| %(<div class="card"><div class="fill"><span>card #{i}</span></div></div>) }.join}</div>
+    </body></html>
+  HTML
+  FLEX_SHELL_JS = <<~JS.freeze
+    (() => {
+      const fills = document.querySelectorAll('.fill');
+      let h = 0;
+      const readAll = () => { for (const f of fills) h += f.getBoundingClientRect().height; };
+      readAll();
+      for (let k = 0; k < 5; k++) { document.getElementById('hdr').classList.toggle('tall'); readAll(); }
+      return h;
+    })()
+  JS
+
+  # The interaction a workload's page is measured under (the walk's is `WALK_JS`, run in its own branch).
+  def self.interaction_js(workload) = workload == 'flex_shell' ? FLEX_SHELL_JS : INTERACTION_JS
+
   # A pure-V8 arithmetic loop — no DOM, no driver code. Its wall is the machine's
   # raw JS throughput this run, the denominator that normalizes the workload wall.
   CALIB_JS = 'let s = 0; for (let i = 0; i < 3000000; i++) { s += (i * 7) % 13; } s'
@@ -284,7 +319,7 @@ module PerfGate
         @walk_note = r['ok'] ? nil : "the walk DECLINED the page: #{r['reason']}" # …surfaced in the failure
         return WALK_COUNT_KEYS.to_h {|k| [k, k == 'ok' ? (r['ok'] ? 1 : 0) : r.fetch(k, 0).to_i] }
       end
-      session.evaluate_script(INTERACTION_JS)
+      session.evaluate_script(interaction_js(workload))
       session.evaluate_script(COUNTS_JS).transform_keys(&:to_s).transform_values(&:to_i)
     end
   end
@@ -314,7 +349,7 @@ module PerfGate
       # `grid_table` already holds and which diluted this axis to needing a 60% walk regression before it
       # would speak (review-measured).
       walk     = workload == 'layout_walk'
-      elapsed  = median_ms { session.visit('/') unless walk; session.evaluate_script(walk ? WALK_JS : INTERACTION_JS) }
+      elapsed  = median_ms { session.visit('/') unless walk; session.evaluate_script(walk ? WALK_JS : interaction_js(workload)) }
       calib    = median_ms { session.evaluate_script(CALIB_JS) }
       {
         'workload_ms' => elapsed.round(3),

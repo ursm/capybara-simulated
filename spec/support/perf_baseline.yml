@@ -8,9 +8,9 @@ grid_table:
     ctx_sweeps: 201
     ctx_gate_active: 1
   wall:
-    workload_ms: 388.783
-    calib_ms: 2.746
-    ratio: 141.58
+    workload_ms: 367.103
+    calib_ms: 2.673
+    ratio: 137.343
 shadow_host:
   counts:
     passes: 3
@@ -20,9 +20,9 @@ shadow_host:
     ctx_sweeps: 201
     ctx_gate_active: 1
   wall:
-    workload_ms: 434.653
-    calib_ms: 2.725
-    ratio: 159.532
+    workload_ms: 416.683
+    calib_ms: 2.685
+    ratio: 155.171
 layout_walk:
   counts:
     ok: 1
@@ -36,6 +36,18 @@ layout_walk:
     nativeOutOfFlow: 0
     pushedContributions: 0
   wall:
-    workload_ms: 203.488
-    calib_ms: 2.721
-    ratio: 74.796
+    workload_ms: 199.394
+    calib_ms: 2.676
+    ratio: 74.507
+flex_shell:
+  counts:
+    passes: 6
+    reuse_hit: 1506
+    reuse_remeasured: 0
+    reuse_escapingAbs: 0
+    ctx_sweeps: 0
+    ctx_gate_active: 1
+  wall:
+    workload_ms: 88.487
+    calib_ms: 2.684
+    ratio: 32.973

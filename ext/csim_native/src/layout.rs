@@ -4332,7 +4332,10 @@ fn flex_column_sizes(
             let c = kids[p];
             let reads = INDEF_PCT_H_READS.with(|n| n.get());
             measure(c, width[p], MEASURE_AUTO_HEIGHT, inputs, runs, run_texts, grids, children, boxes, failed, &mut FloatCtx::new(), 0.0, 0.0);
-            let read_indefinite = INDEF_PCT_H_READS.with(|n| n.get()) != reads;
+            // (…except a TABLE with captions, whose flexed main size is the WRAPPER's: imposed, `measure_table` reads it as
+            // the rows' and stacks the captions on top — 72 where the oracle and Chrome keep 50 — so the measure is its
+            // answer, as the oracle's `reuseSubtree` exempts it under `mainImposed`.)
+            let read_indefinite = INDEF_PCT_H_READS.with(|n| n.get()) != reads && !table_has_caption(c, inputs, children);
             measured[p] = Some((boxes[c].h, boxes[c].clamped_h || read_indefinite));
         }
         measured[p].unwrap().0
@@ -5120,6 +5123,15 @@ struct TableGrid {
     // …and its CAPTIONS, in document order: each is stacked above the grid or below it by its own `caption-side`.
     captions: Vec<usize>,
     c_count: usize,
+}
+// Whether record `i` is a table with a CAPTION — a child that is neither a row, a row group nor out of flow, as
+// `table_grid` classifies them.
+fn table_has_caption(i: usize, inputs: &[Cell<Input>], children: &[Vec<usize>]) -> bool {
+    inputs[i].get().display == DISPLAY_TABLE &&
+        children[i].iter().any(|&ch| {
+            let k = inputs[ch].get();
+            k.out_of_flow == 0 && k.display != DISPLAY_TABLE_ROW_GROUP && k.display != DISPLAY_TABLE_ROW
+        })
 }
 fn table_grid(i: usize, inputs: &[Cell<Input>], children: &[Vec<usize>], declared_cols: usize) -> Option<TableGrid> {
     let mut rows: Vec<usize> = Vec::new();
