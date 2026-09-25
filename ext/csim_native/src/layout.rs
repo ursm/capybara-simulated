@@ -182,7 +182,8 @@ pub(crate) struct Input {
     // …where its own inset is a PERCENTAGE, the walk sends the pairs instead and `with_percent_sizes` writes
     // `rel_x` / `rel_y` from them: [x fraction (NaN = nothing to resolve), `top` fraction (NaN = no percentage),
     // `top` length (NaN = auto), the same two for `bottom`, and what the record's rec[39..40] carried — the
-    // inline boxes' shift, plus the horizontal length part]. `top` wins where it resolves; a percentage one does not
+    // inline boxes' shift alone; the horizontal inset's length part is `rel_x_px`, clamped and negated with its
+    // fraction]. `top` wins where it resolves; a percentage one does not
     // against an indefinite height, and `bottom` is used then — the oracle's `relativeOffset`, where such a `top`
     // resolves to nothing. The base is kept apart because the resolved box REPLACES the input, and a box measured
     // again must not add its offset twice.
