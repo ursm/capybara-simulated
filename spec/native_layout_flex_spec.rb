@@ -1503,6 +1503,21 @@ RSpec.describe 'native layout flex parity', if: ENV.fetch('CSIM_JS_ENGINE', 'v8'
     it 'resolves a calc() basis against the container as the oracle padded it' do
       expect_parity('<div style="width:400px;height:300px"><div style="display:flex;flex-direction:column;padding:5% 0;height:50%"><div style="flex-basis:calc(20% + 5px)">a</div></div></div>')
     end
+    # …and resolves a LINEAR `calc()` basis itself: the constant term rides beside the fraction (rec[63] next to
+    # rec[97]) since 2026-09-25, where the record had no slot for it and the walk resolved the whole basis against
+    # the oracle's box. Chrome: 70 wide in a 300px row, 50 tall in a 200px column.
+    it 'resolves a linear calc() basis natively, with no oracle box read' do
+      {
+        '<div style="display:flex;width:300px"><div id="m" style="flex-basis:calc(20% + 10px);flex-shrink:0">a</div><div>b</div></div>'                                      => [2, 70],
+        '<div style="display:flex;flex-direction:column;width:300px;height:200px"><div id="m" style="flex-basis:calc(20% + 10px);flex-shrink:0">a</div><div>b</div></div>' => [3, 50]
+      }.each do |body, (index, size)|
+        expect_native_flex(body)
+        expect(laid_out_rect(body)[index]).to eq(size)
+        r = run_shadow(body, '{noOracle: true}')
+        expect(r).to include('ok' => true, 'mismatches' => 0)
+        expect(r['oracleReads'].to_h.keys.grep_v(/\(handed over\)\z/)).to be_empty, r.inspect
+      end
+    end
     it 'keeps a pushed auto height indefinite, and a percentage inherited' do
       two = '<div style="width:300px;height:20px"></div><div style="width:300px;height:20px"></div>'
       expect_parity(%(<div style="position:relative;padding:5%;width:400px;height:400px"><div style="position:absolute;display:flex;flex-wrap:wrap;row-gap:20%;width:300px">#{two}</div></div>))

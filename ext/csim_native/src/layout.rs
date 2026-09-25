@@ -298,7 +298,8 @@ pub(crate) struct Input {
     pub(crate) flex_shrink: f64,
     pub(crate) flex_basis_cb: f64,
     // A PERCENTAGE `flex-basis` as a fraction of the container's main size (NaN = none), resolved here
-    // (`flex_basis_at`) — and a container's main / cross gap percentages, over the px parts in
+    // (`flex_basis_at`) over the constant term `flex_basis_cb` carries beside it (a linear `calc()`'s; 0 for a
+    // plain percentage) — and a container's main / cross gap percentages, over the px parts in
     // `flex_main_gap` / `flex_cross_gap`. The walk used to resolve all three against the oracle's box.
     pub(crate) flex_basis_frac: f64,
     // The plain PERCENTAGES among width / height / min-width / max-width / min-height / max-height, as fractions
@@ -712,15 +713,15 @@ impl Input {
     fn has_percent_sizes(&self) -> bool {
         self.pct_sizes.iter().any(|f| !f.is_nan()) || self.edge_frac.iter().any(|&f| f != 0.0) || !self.rel_pct[0].is_nan()
     }
-    // A flex item's resolved basis in a container whose main size is `main`: its percentage of that (auto where
-    // the main size is indefinite), else the length the walk resolved.
+    // A flex item's resolved basis in a container whose main size is `main`: its percentage of that plus the
+    // constant beside it (auto where the main size is indefinite), else the length the walk resolved.
     fn flex_basis_at(&self, main: f64) -> f64 {
         if self.flex_basis_frac.is_nan() {
             self.flex_basis_cb
         } else if is_auto(main) {
             f64::NAN
         } else {
-            self.flex_basis_frac * main
+            self.flex_basis_frac * main + self.flex_basis_cb
         }
     }
     fn edges_y(&self) -> f64 {
