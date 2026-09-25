@@ -601,11 +601,12 @@ RSpec.describe 'native layout flex parity', if: ENV.fetch('CSIM_JS_ENGINE', 'v8'
     end
   end
   # …and it carries its line's INDEX too (rec[138]): the pushed boxes are the FINAL sizes, and a column whose
-  # max-height breaks its lines breaks them on the HYPOTHETICAL ones — here the absolute box's percentage width
-  # is what pushes the container, and the lines are [a b] [c]. Chrome's boxes.
+  # max-height breaks its lines breaks them on the HYPOTHETICAL ones — here a `max()` width inside the first item
+  # is what pushes the container (an absolute box's percentage did until native placed those itself), and the
+  # lines are [a b] [c]. Chrome's boxes.
   it 'breaks a pushed wrapping column into the lines the oracle broke it into' do
     body = '<div style="display:flex;flex-direction:column;flex-wrap:wrap;max-height:50px;width:200px"><div style="width:20px;height:20px">' \
-           '<div style="position:absolute;width:10%;height:5px"></div></div><div style="width:20px;height:20px"></div><div style="width:20px;height:20px"></div></div>'
+           '<div style="width:max(10%, 1px);height:5px"></div></div><div style="width:20px;height:20px"></div><div style="width:20px;height:20px"></div></div>'
     expect(run_shadow(body)).to include('ok' => true, 'mismatches' => 0, 'nativeFlexRows' => 0)
     expect(item_boxes(body)).to eq([[0, 0, 20, 20], [0, 20, 20, 20], [100, 0, 20, 20]])
   end
@@ -935,18 +936,20 @@ RSpec.describe 'native layout flex parity', if: ENV.fetch('CSIM_JS_ENGINE', 'v8'
     # …and it FALLS BACK for a percentage the walk still resolves, which is what the narrowed test names: one
     # inside a NON-LINEAR math function (a `min()` / `max()` / `clamp()` that changes branch as the basis grows,
     # so there is no `px + frac` pair to send and it travels resolved wherever the box sits), or under a TABLE
-    # part or an OUT-OF-FLOW box — routes where the record's parent is not the box the percentage resolves
-    # against, so the figure was resolved against the item's FINAL size and native measures at a provisional one.
+    # part — a route where the record's parent is not the box the percentage resolves against, so the figure was
+    # resolved against the item's FINAL size and native measures at a provisional one. (An OUT-OF-FLOW box's is
+    # native's since 2026-09-25: it is placed against its containing block once every size is final.)
     # Dropping the test put 15 wrong boxes into a 2,268-case math-function sweep, 28 into a 1,200-case route sweep
     # and 36 into a 960-case inline sweep, all 0 at the parent commit.
     # A LINEAR `calc()` left this list on 2026-09-22 and is in the arm above; the figure that used to be cited
     # here (`height: calc(50% + 2px)` in a wrapping row, 55.5 against Chrome's 58) is now 22, Chrome's own.
     it 'falls back for a percentage the walk resolves, not for one native does' do
       ['<div style="display:flex;width:400px"><div><div style="min-height:min(50%,80px)">pct</div></div><div style="height:40px;width:50px"></div></div>',
-       '<div style="display:flex;width:400px"><div><div style="position:absolute;height:50%;width:10px"></div>pct</div><div style="height:40px;width:50px"></div></div>',
        %(<div style="#{col};height:200px"><div style="flex:1 1 auto"><div style="min-height:clamp(10px,50%,80px)">pct</div></div><div style="flex:1 1 auto">plain</div></div>)].each do |body|
         expect(run_shadow(body)).to include('ok' => true, 'mismatches' => 0, 'nativeFlexRows' => 0), body
       end
+      expect_native_flex('<div style="position:relative;display:flex;width:400px"><div><div style="position:absolute;height:50%;width:10px"></div>pct</div>' \
+                         '<div style="height:40px;width:50px"></div></div>')
     end
 
     # …and an inline BOX's percentage EDGE, at any depth: it has no record, and `nlGatherRuns` resolves its OPEN /
