@@ -278,6 +278,10 @@ RSpec.describe 'declaration validation' do
     expect(set('transition', 'opacity calc(1s + 100ms) ease')).to eq('opacity calc(1.1s)')
     expect(set('transition', 'opacity 1s calc(1s + 100ms)')).to eq('opacity 1s calc(1.1s)')
     expect(set('listStyle', '"+ " inside')).not_to eq('')
+    # …`text-emphasis`, whose STYLE is one token or two (a fill beside a shape, either order), anything else the one
+    # colour — read one token per longhand, `filled circle red` did not decompose and was dropped (review rv50)
+    ['filled circle red', 'red open', '"x" blue', 'circle', 'none'].each {|v| expect(set('textEmphasis', v)).not_to eq(''), v }
+    ['filled filled', 'circle dot', 'red blue'].each {|v| expect(set('textEmphasis', v)).to eq(''), v }
   end
 
   # A `<flex>` is no type a math function takes, and a RESOLUTION is not a length.
