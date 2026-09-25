@@ -685,17 +685,17 @@ RSpec.describe 'native layout inline-atomic parity', if: ENV.fetch('CSIM_JS_ENGI
         # neither in the line's width nor in the painter's runs. This fixture used to read `日本語` — served
         # with no charset, whose mojibake happens to contain an em dash, so what it actually exercised was the
         # hyphen refusal that native has since taken over.)
-        "<div style=\"width:400px\">text <span style=\"display:inline-block\">a\u00ADb</span> after</div>",
-        # (a preserved FORM FEED, which native's pen-walk does not measure. This fixture used to hold a TAB,
-        # which native has since taken over — tab stops are its own now, so a tabbed subtree stays native.)
-        "<div style=\"width:400px\">text <span style=\"display:inline-block;white-space:pre\">a\fb</span> after</div>"
+        "<div style=\"width:400px\">text <span style=\"display:inline-block\">a\u00ADb</span> after</div>"
+        # (A third entry held a preserved FORM FEED, and before that a TAB — both native's since: tab stops are its own,
+        # and a preserved FF is text that is not there in both engines, 2026-09-25.)
       ].each do |body|
         r = run_shadow(body)
         expect(r).to include('ok' => true, 'mismatches' => 0, 'nativeAtomics' => 0), "#{body}: #{r.inspect}"
       end
       expect_native_atomic('<div style="width:400px"><span style="display:inline-block">ok</span> and <span style="display:inline-block"><div style="position:-webkit-sticky;width:10px;height:10px"></div>beside</span> after</div>', 1)
-      # …and the tabbed one the other way round: its subtree is native, so nothing is rolled back
+      # …and the tabbed and form-fed ones the other way round: their subtrees are native, so nothing is rolled back
       expect_native_atomic("<div style=\"width:400px\">text <span style=\"display:inline-block;white-space:pre\">a\tb</span> after</div>", 1)
+      expect_native_atomic("<div style=\"width:400px\">text <span style=\"display:inline-block;white-space:pre\">a\fb</span> after</div>", 1)
     end
     # An atomic aligned against its PARENT's font box hangs from where that alignment puts its margin box, which
     # is only known once native has laid it out — so the run carries the alignment and the one figure of the

@@ -470,12 +470,13 @@ RSpec.describe 'native layout L1 block-flow parity', if: ENV.fetch('CSIM_JS_ENGI
       # Pairs, not a hash: the same reason is asserted twice on purpose, through two different routes.
       [
         ['flex-container-unsupported',        %(<div style="width:400px">#{UNSUPPORTED_FLEX}</div>)],
-        ['text-not-measurable',               '<div style="width:400px;white-space:pre">a&#13;b</div>'],
+        ['text-not-measurable',               '<div style="width:400px">a&shy;b</div>'],
         # …and the last one again through a MIXED block's anonymous group, which is the other propagation
         # route — its reason has to outlive the `emitAttempt` the group is built inside. (The pair was
         # `inline-box-relative-valign`, then `block-level-box-in-inline-content`, until both went native on
-        # 2026-09-24; a preserved CR is refused by the gather on both routes alike.)
-        ['text-not-measurable',               '<div style="width:400px;white-space:pre"><p>a</p>x&#13;y<p>b</p></div>'],
+        # 2026-09-24; a soft hyphen is refused by the gather on both routes alike — a preserved CR was, until
+        # 2026-09-25.)
+        ['text-not-measurable',               '<div style="width:400px"><p>a</p>x&shy;y<p>b</p></div>'],
         # …and a FLOAT in a mixed block's inline run, which is the third: the float hook walks its subtree
         # DIRECTLY, so the gate inside names itself while the group's `emitAttempt` is still open and about
         # to erase it. Read at the hook site or the whole family answers `float-in-inline`. Nothing else in

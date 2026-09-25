@@ -601,6 +601,18 @@ RSpec.describe 'native layout L2 text-block parity', if: ENV.fetch('CSIM_JS_ENGI
       shared_y_chrome: 35
     )
   end
+  # …and a PRESERVED one — a CR or an FF under `pre` / `pre-wrap` / `break-spaces` — is text that is not there: zero
+  # wide, no break opportunity, no justification gap, and a node of nothing else no content (Chrome). The walk declined
+  # both until 2026-09-25, and rightly: the oracle disagreed with itself — its layout dropped a CR and its measure broke
+  # at one, it broke at an FF in both, and a CR-only node between two boxes took a space. Chrome's marker positions:
+  # `aa&#13;bb` one unbroken 38.4 line at min-content (so is `aa&#12;bb`), a box flush after a lone CR, an FF-only
+  # `pre` block 0 tall.
+  it 'lays out a preserved CR / FF as nothing' do
+    expect_parity('<div style="font:16px monospace;width:10px"><div style="float:left;white-space:pre-wrap">aa&#13;bb</div><b id="m" style="display:inline-block;width:4px;height:4px"></b></div>', 0, chrome_y: 35)
+    expect_parity('<div style="font:16px monospace;width:10px"><div style="float:left;white-space:pre-wrap">aa&#12;bb</div><b id="m" style="display:inline-block;width:4px;height:4px"></b></div>', 0, chrome_y: 35)
+    expect_parity('<div style="font:16px monospace;width:300px"><div style="white-space:pre"><span style="display:inline-block;width:6px;height:6px"></span>&#13;<b id="m" style="display:inline-block;width:4px;height:4px"></b></div></div>', 6, chrome_y: 13)
+    expect_parity('<div style="font:16px monospace"><div style="white-space:pre">&#12;</div><b id="m" style="display:inline-block;width:4px;height:4px"></b></div>', 0, chrome_y: 13)
+  end
   # A CR is a collapsible space under a collapsing mode (CSS Text 3 §4.1.1), and both engines lay it out as one;
   # only the MEASURE refused it — native's intrinsic walk and the gate asking it with `preserved` regardless of the
   # element's mode — so every shrink-to-fit asker around `aa&#13;bb` declined. It breaks there at min-content.
@@ -1599,12 +1611,11 @@ RSpec.describe 'native layout L2 text-block parity', if: ENV.fetch('CSIM_JS_ENGI
     end
 
 
-    # What native still cannot measure is refused by the WALK, not discovered in Rust: a preserved FORM FEED,
-    # and a ZWJ under a per-character wrap (where the oracle's advance carries the previous character). (A CR
-    # cannot be tested from markup at all — the HTML parser normalizes every one in the input stream to a
-    # newline, so no parsed text node ever holds one.)
-    it 'declines a preserved form feed and a per-character ZWJ in the walk' do
-      ["<div style=\"width:400px;white-space:pre\">a\fb</div>",
+    # What native still cannot measure is refused by the WALK, not discovered in Rust: a soft hyphen, and a ZWJ
+    # under a per-character wrap (where the oracle's advance carries the previous character). (A preserved form feed
+    # was the first example here until 2026-09-25, when both engines made it text that is not there.)
+    it 'declines a soft hyphen and a per-character ZWJ in the walk' do
+      ['<div style="width:400px">a&shy;b</div>',
        '<div style="width:400px;word-break:break-all">a&#x200D;b</div>'].each do |body|
         expect(shadow(body)).to include('ok' => false, 'reason' => 'text-not-measurable'), body
       end
