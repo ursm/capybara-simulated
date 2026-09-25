@@ -1208,17 +1208,6 @@ css/css-flexbox/parsing/flex-valid.html:
 css/css-flexbox/parsing/flex-wrap-invalid.html:
 - e.style['flex-wrap'] = "auto" should not set the property value
 - e.style['flex-wrap'] = "nowrap wrap" should not set the property value
-css/css-flexbox/percentage-heights-001.html:
-- ".flexbox 1"
-- ".flexbox 10"
-- ".flexbox 12"
-- ".flexbox 2"
-- ".flexbox 4"
-- ".flexbox 5"
-- ".flexbox 6"
-- ".flexbox 7"
-- ".flexbox 8"
-- ".flexbox 9"
 css/css-flexbox/percentage-heights-003.html:
 - ".flexbox 3"
 - ".flexbox 4"
@@ -1229,13 +1218,10 @@ css/css-flexbox/percentage-heights-012.html:
 css/css-flexbox/percentage-heights-013.html:
 - ".flexbox 4"
 css/css-flexbox/percentage-size-quirks-002.html:
-- ".pct 1"
 - ".pct 2"
 css/css-flexbox/percentage-size-quirks-004.html:
 - 'Quirks: column flex with definite height, deep height: 100% in flex item'
 - 'Quirks: percentage height against auto parent resolves for top: 50%'
-css/css-flexbox/position-relative-percentage-top-005.html:
-- 'Row flex, flex-end item with height:100%, auto-height container, top: 50%'
 css/css-flexbox/position-relative-stretch-height-001.html:
 - 'height: stretch against definite parent, top: 50%'
 - 'height: stretch inside stretched flex item, top: 50%'
