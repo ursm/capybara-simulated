@@ -149,13 +149,17 @@ RSpec.describe 'CSS math functions' do
 
   # …and a COMMENT inside a style attribute is no part of the value, as it is none in a stylesheet:
   # read as text, `calc(10px /* c */ + 20px)` was mangled and dropped, and `1px /* y */` was invalid.
+  # …but a CUSTOM property's value keeps its comments verbatim (Chrome), and an unquoted `url( … )` is opaque: its
+  # `/*` is part of the URL (review rv49 — stripping the whole block first took both).
   it 'drops a comment inside a style attribute' do
-    session = simulated_session(->(_env) { [200, {'content-type' => 'text/html'}, ['<!DOCTYPE html><html><body><div id="a" style="margin-left:calc(10px /* c */ + 20px);padding-left:1px /* y */"></div></body></html>']] })
+    style = 'margin-left:calc(10px /* c */ + 20px);padding-left:1px /* y */;--x: a /* c */ b;background-image:url(a/*b*/c.png)'
+    session = simulated_session(->(_env) { [200, {'content-type' => 'text/html'}, [%(<!DOCTYPE html><html><body><div id="a" style="#{style}"></div></body></html>)]] })
     session.visit '/'
-    expect(session.evaluate_script(<<~JS)).to eq(['calc(30px)', '30px', '1px'])
+    expect(session.evaluate_script(<<~JS)).to eq(['calc(30px)', '30px', '1px', 'a /* c */ b', 'url("a/*b*/c.png")'])
       (function () {
         var a = document.getElementById('a');
-        return [a.style.marginLeft, getComputedStyle(a).marginLeft, getComputedStyle(a).paddingLeft];
+        return [a.style.marginLeft, getComputedStyle(a).marginLeft, getComputedStyle(a).paddingLeft,
+                a.style.getPropertyValue('--x'), a.style.backgroundImage];
       })()
     JS
   end

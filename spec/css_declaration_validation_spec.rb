@@ -260,6 +260,34 @@ RSpec.describe 'declaration validation' do
     JS
   end
 
+  # …and a shorthand is judged whole on EVERY surface that admits a declaration — `CSS.supports` among them, and the
+  # block parse, which kept a shorthand it could not decompose (`flex: 1 2 calc(0)`: a number is never a basis).
+  # What the components are is read right: a math `<time>` is a duration (`transition: opacity calc(1s + 100ms)` fell
+  # to `transition-property` and dropped the layer), and a string is one token whatever it holds. Review rv49.
+  it 'judges a shorthand the same on every surface' do
+    session = simulated_session(->(_env) { [200, {'content-type' => 'text/html'}, ['<!DOCTYPE html><html><body></body></html>']] })
+    session.visit '/'
+    expect(session.evaluate_script(<<~JS)).to eq([false, false, '', '', true])
+      (function () {
+        var e = document.createElement('div');
+        e.setAttribute('style', 'flex: 1 2 calc(0)');
+        return [CSS.supports('padding-block', 'none'), CSS.supports('flex', '1 2 calc(3 - 3)'), e.style.cssText,
+                (e.style.flex = 'calc(1) calc(1) calc(1)', e.style.flex), CSS.supports('flex', '1 1 min(10px, 5%)')];
+      })()
+    JS
+    expect(set('transition', 'opacity calc(1s + 100ms) ease')).to eq('opacity calc(1.1s)')
+    expect(set('transition', 'opacity 1s calc(1s + 100ms)')).to eq('opacity 1s calc(1.1s)')
+    expect(set('listStyle', '"+ " inside')).not_to eq('')
+  end
+
+  # A `<flex>` is no type a math function takes, and a RESOLUTION is not a length.
+  it 'drops a flex or resolution term a math function cannot take' do
+    expect(set('gridTemplateColumns', 'calc(1fr)')).to eq('')
+    expect(set('width', 'calc(100% - 1fr)')).to eq('')
+    expect(set('width', 'calc(1x + 1px)')).to eq('')
+    expect(set('width', 'calc(1dpi * 1px)')).to eq('')
+  end
+
   # The `<position>` family has a grammar keywords alone can violate: an axis longhand takes one
   # part and only its own axis's keywords, and a pair takes at most one part per axis.
   it 'drops a position keyword on the wrong axis' do
