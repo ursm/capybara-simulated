@@ -1588,6 +1588,24 @@ RSpec.describe 'native layout table parity', if: ENV.fetch('CSIM_JS_ENGINE', 'v8
       expect(r['oracleReads'].to_h.keys.grep_v(/\(handed over\)\z/)).to be_empty, r.inspect
     end
 
+    # …and on that line in DOCUMENT order, left to right, whatever its `flex-direction` or its children's `order` say:
+    # the oracle lays it out on `PHYSICAL_ROW_PLAN`, and an orphan row's children are no flex items (Chrome keeps them
+    # in document order in its anonymous table). Review rv47: the walk sent the reverse bit and sorted by `order`, so
+    # native ran the line from the right, and hung its baseline off the `order: -1` item where the oracle read the
+    # first — body 41 against 48 in a baseline-aligned flex.
+    it 'keeps one of block children in document order' do
+      host = '<div style="display:flex;align-items:baseline;width:300px;font:16px monospace">%s<div style="font-size:30px">Z</div></div>'
+      {
+        '<div style="display:table-row;flex-direction:row-reverse"><div id="m">o1</div><div style="font-size:24px">big</div></div>' => 0,
+        '<div style="display:table-row;flex-flow:column-reverse wrap"><div id="m">o1</div><div>o2</div></div>' => 0,
+        '<div style="display:table-row"><div style="font-size:24px">big</div><div id="m" style="order:-1">o1</div></div>' => 21
+      }.each do |row, x|
+        body = format(host, row)
+        expect_parity(body)
+        expect(laid_out_rect(body)[0]).to eq(x), body
+      end
+    end
+
     # …and REFUSES one with an INLINE-level or floated element child, which the oracle's measure puts on a LINE where the
     # block walk stacks it. Without these the narrowing is a silent one: the gate could widen back to "any orphan row".
     it 'refuses one with inline-level children' do
