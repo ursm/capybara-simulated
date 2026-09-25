@@ -323,6 +323,10 @@ pub(crate) struct Input {
     // walk sent (`edge_px`, kept apart from the fields a resolution overwrites).
     pub(crate) edge_frac: [f64; 8],
     pub(crate) edge_px: [f64; 8],
+    // …and each edge's BOUNDS where it is a comparison function over affine operands (`padding: clamp(1rem, 5%,
+    // 3rem)`), as the sizes carry theirs (`pct_lo` / `pct_hi`): (-inf, 0) / (+inf, 0) where unbounded.
+    pub(crate) edge_lo: [(f64, f64); 8],
+    pub(crate) edge_hi: [(f64, f64); 8],
     // An out-of-flow box's inset percentages (top / right / bottom / left) as fractions of its containing block's
     // padding box — height for top / bottom, width for left / right — beside the length parts in `inset_*`.
     pub(crate) inset_frac: [f64; 4],
@@ -696,8 +700,8 @@ impl Input {
         if !h.is_nan() {
             n.bottom_adjoins = is_auto(n.height);
         }
-        let edge = |i: usize| self.edge_px[i] + self.edge_frac[i] * cb_w;
-        if self.edge_frac.iter().any(|&f| f != 0.0) {
+        let edge = |i: usize| clamp_affine(self.edge_px[i] + self.edge_frac[i] * cb_w, self.edge_lo[i], self.edge_hi[i], cb_w);
+        if self.has_percent_edges() {
             (n.mt, n.mr, n.mb, n.ml) = (edge(0), edge(1), edge(2), edge(3));
             (n.pt, n.pr, n.pb, n.pl) = (edge(4), edge(5), edge(6), edge(7));
         }
@@ -731,7 +735,11 @@ impl Input {
         n
     }
     fn has_percent_sizes(&self) -> bool {
-        self.pct_sizes.iter().any(|f| !f.is_nan()) || self.edge_frac.iter().any(|&f| f != 0.0) || !self.rel_pct[0].is_nan()
+        self.pct_sizes.iter().any(|f| !f.is_nan()) || self.has_percent_edges() || !self.rel_pct[0].is_nan()
+    }
+    // …an edge with a percentage in it, or with a BOUND that is one (`max(12px, 10%)` has no fraction of its own).
+    fn has_percent_edges(&self) -> bool {
+        self.edge_frac.iter().any(|&f| f != 0.0) || self.edge_lo.iter().chain(&self.edge_hi).any(|&(px, frac)| frac != 0.0 || px.is_finite())
     }
     // A flex item's resolved basis in a container whose main size is `main`: its percentage of that plus the
     // constant beside it (auto where the main size is indefinite), else the length the walk resolved.
@@ -7763,6 +7771,8 @@ mod tests {
             pct_hi: [(f64::INFINITY, 0.0); 6],
             edge_frac: [0.0; 8],
             edge_px: [0.0; 8],
+            edge_lo: [(f64::NEG_INFINITY, 0.0); 8],
+            edge_hi: [(f64::INFINITY, 0.0); 8],
             inset_frac: [0.0; 4],
             flex_main_gap_frac: 0.0,
             flex_main_gap_lo: (f64::NEG_INFINITY, 0.0),

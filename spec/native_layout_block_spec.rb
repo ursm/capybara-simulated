@@ -1738,4 +1738,15 @@ x</div>))
       expect(session.evaluate_script("document.getElementById('t').getBoundingClientRect().height")).to eq(96)
     end
   end
+
+  # A margin or padding written as a comparison function over affine operands — `max(10%, 12px)`, `clamp(4px, 5%,
+  # 30px)`, a bare calc-sum argument (`clamp(0px, 10% - 20px, 40px)`) — travels as its clamped pair
+  # (`nlClampedEdgeParts`, rec[168..199]) and native resolves it against the box's own basis; the walk resolved it
+  # against the oracle's. Chrome's box.
+  it 'resolves a margin and a padding written as comparison functions natively' do
+    body = '<div style="width:300px"><div id="m" style="margin-top:max(10%, 12px);padding:clamp(4px, 5%, 30px) clamp(0px, 10% - 20px, 40px);' \
+           'border:2px solid">x</div></div>'
+    expect_parity(body)
+    expect(laid_out_rect(body)).to eq([0, 30, 300, 52])
+  end
 end

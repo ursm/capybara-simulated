@@ -141,6 +141,8 @@ RSpec.describe 'native layout no-oracle run', if: ENV.fetch('CSIM_JS_ENGINE', 'v
       # …its items' percentage EDGES among them, whose auto margins are all the walk reads of them
       '<div style="display:flex;width:400px"><div style="padding:0 5%;margin-left:2%">a</div><div style="flex:1;padding-top:3%">b</div></div>',
       '<div style="width:300px;height:200px"><div style="height:50%;max-width:80%">half</div></div>',
+      # …a MARGIN and a PADDING written as such functions too, a bare calc-sum argument and a padding's 0 floor included
+      '<div style="width:300px"><div style="margin-top:max(10%, 12px);padding:clamp(4px, 5%, 30px) clamp(0px, 10% - 20px, 40px);border:2px solid">x</div></div>',
       # …and a comparison function over one affine operand, which travels as its clamped pair — `clamp()`'s MINIMUM
       # winning where its bounds cross, as CSS has it (100 here, not 50)
       '<div style="width:300px;height:200px"><div style="width:min(50%, 60px);height:max(20%, 10px)">x</div><div style="width:clamp(100px, 10%, 50px)">y</div></div>',
