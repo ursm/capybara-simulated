@@ -223,7 +223,12 @@ RSpec.describe 'native layout no-oracle run', if: ENV.fetch('CSIM_JS_ENGINE', 'v
       ['html{direction:rtl}body{margin:0 auto 0 0 !important;width:300px}', div]    => [0, 0, 300],
       ['html{width:500px}body{margin:0 auto !important;width:300px}', div]          => [100, 0, 300],
       ['body{margin:0 5% !important}', div]                                         => [51.188, 0, 921.625],
-      ['body{margin:5px !important}', '<p id="m" style="margin:30px 0">a</p>']        => [5, 30, 1014]
+      ['body{margin:5px !important}', '<p id="m" style="margin:30px 0">a</p>']        => [5, 30, 1014],
+      # …a TABLE body shrink-to-fit around its word, as block flow sizes any table (review rv48: the oracle filled the
+      # root with it, 1008 wide), and a FLEX body, which reads no oracle stamp for its own auto height
+      ['body{margin:8px !important;display:table}', '<div id="m">word</div>']        => [8, 8, 32.891],
+      ['html{direction:rtl}body{margin:8px !important;display:table}', '<div id="m">word</div>'] => [983.109, 8, 32.891],
+      ['body{margin:0 !important;display:flex}', '<div id="m">x</div><div>y</div>'] => [0, 0, 8]
     }.each do |(css, child), (x, y, w)|
       s = session_with("<style>#{css}</style>#{child}")
       r = s.evaluate_script('globalThis.__csimLayoutShadowRun(undefined, {noOracle: true})')
@@ -232,6 +237,21 @@ RSpec.describe 'native layout no-oracle run', if: ENV.fetch('CSIM_JS_ENGINE', 'v
       rect = s.evaluate_script("(r => [r.x, r.y, r.width])(document.getElementById('m').getBoundingClientRect())")
       expect(rect).to match([be_within(0.05).of(x), eq(y), be_within(0.05).of(w)]), css   # (Chrome's LayoutUnits)
     end
+    # …a PERCENTAGE height body, against the initial containing block's height and no `_lbCbH` stamp of its own. SHARED:
+    # Chrome resolves it against `html`'s auto height — indefinite, so the body and its 50% child are auto (18 tall),
+    # where both engines take the ICB (a 192px child of a 384px body).
+    s = session_with('<style>body{height:50%}</style><div id="m" style="height:50%">x</div>')
+    r = s.evaluate_script('globalThis.__csimLayoutShadowRun(undefined, {noOracle: true})')
+    expect(r).to include('ok' => true, 'mismatches' => 0)
+    expect(r['oracleReads'].to_h).to be_empty
+    expect_shared_gap(s.evaluate_script("document.getElementById('m').getBoundingClientRect().height"),
+                      shared: 192, chrome: 18, what: 'a 50% child of a 50% body')
+    # …and a RELATIVE body's offset, which neither engine applies (SHARED: Chrome moves it to 63.19, 19)
+    s = session_with('<style>body{position:relative;margin:12px !important;left:5%;top:7px}</style><div id="m">x</div>')
+    expect(s.evaluate_script('globalThis.__csimLayoutShadowRun(undefined, {noOracle: true})')).to include('ok' => true, 'mismatches' => 0)
+    rect = s.evaluate_script("(r => [r.x, r.y])(document.getElementById('m').getBoundingClientRect())")
+    expect_shared_gap(rect[0], shared: 12, chrome: 63.19, what: 'a relative body: x')
+    expect_shared_gap(rect[1], shared: 12, chrome: 19, what: 'a relative body: y')
     # …and a subtree root is handed its origin, the one read left
     s = session_with('<div id="m" style="width:300px"><p>x</p></div>')
     r = s.evaluate_script("globalThis.__csimLayoutShadowRun(document.getElementById('m'), {noOracle: true})")
