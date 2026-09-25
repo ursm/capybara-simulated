@@ -892,7 +892,7 @@ fn register_font_bytes(
 
 // Fields per node in the layoutPass input buffer, and per run in the runs buffer (flat Float64Arrays).
 // Order MUST match the JS packer (layout.js `__csimLayoutShadowRun`) and layout::Input / layout::Run.
-const LAYOUT_STRIDE: usize = 156;
+const LAYOUT_STRIDE: usize = 157;
 const RUN_STRIDE: usize = 12;
 // …and per inline box in the inline table (layout.js `NL_INLINE_STRIDE` / `nlInlineEntry`, layout::InlineBox).
 const INLINE_STRIDE: usize = 29;
@@ -1016,6 +1016,7 @@ fn layout_pass(
             flex_shrink: r[62],
             flex_basis_cb: r[63],
             flex_basis_frac: r[97],
+            flex_basis_math: crate::layout::math_ref(r[156]),
             pct_sizes: [r[100], r[101], r[102], r[103], r[104], r[105]],
             pct_px: [r[119], r[120], r[121], r[122], r[123], r[124]],
             pct_math: std::array::from_fn(|k| crate::layout::math_ref(r[135 + k])),
