@@ -792,6 +792,28 @@ RSpec.describe 'native layout table parity', if: ENV.fetch('CSIM_JS_ENGINE', 'v8
     expect(laid_out_rect(body)).to eq([4, 4, 52, 18])
     expect(laid_out_rect(body, 'b2')).to eq([0, 123, 60, 18])
   end
+  # ORACLE: a captioned table's box is its WRAPPER whichever height it was asked for — a DECLARED height is the rows',
+  # an imposed one the wrapper's — so a reuse that found the same number asked as the box came to did not have the same
+  # answer. A flex row measures the table at auto first; where that came to exactly the declared height (one 18px
+  # caption over two rows, 76, or three captions, 186 in a 180 row), the declared-height layout reused it and the rows
+  # kept their natural height: 76 / 120 where native and Chrome give the rows the declared height and the table 98 /
+  # 186. (A flex COLUMN's main size is the wrapper's and still reuses — see `reuseSubtree`.)
+  it 'lays a captioned table out again when its declared height meets its auto one' do
+    {
+      '<caption>t1</caption>'                                    => [76, 98],
+      '<caption style="caption-side:bottom">b1</caption>'        => [76, 98],
+      '<caption>t1</caption><caption>t2</caption><caption>t3</caption>' => [120, 186]
+    }.each do |caps, (declared, chrome)|
+      body = %(<div style="display:flex;width:300px;height:180px;font:16px monospace"><table id="m" style="height:#{declared}px;border-spacing:2px">) +
+             %(#{caps}<tr><td>a</td></tr><tr><td>c</td></tr></table></div>)
+      expect_parity(body)
+      expect(laid_out_rect(body)[3]).to eq(chrome), caps
+    end
+    column = '<div style="display:flex;flex-direction:column;width:300px;font:16px monospace"><table id="m" style="height:76px;border-spacing:2px">' \
+             '<caption>t1</caption><tr><td>a</td></tr><tr><td>c</td></tr></table></div>'
+    expect_parity(column)
+    expect(laid_out_rect(column)[3]).to eq(98)   # Chrome
+  end
   # An inline-table is an ATOMIC inline in its parent's line — native replays its oracle box (its rows/cells are
   # covered via the parent), so a block holding one lays out rather than declining.
   # A table as a FLEX ITEM: the walk declined every flex container holding one. Native sizes it like any item
