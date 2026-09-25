@@ -1331,6 +1331,25 @@ RSpec.describe 'native layout L2 text-block parity', if: ENV.fetch('CSIM_JS_ENGI
     )
   end
 
+  # ORACLE: a marker HELD for its inline's opening edge, where a later inline's opening edge CANCELS the pending sum
+  # (a negative margin against a padding): the placement after it commits the line to both edges all the same, at no
+  # width, and the marker stands there — before a space whose word wraps away (7 on the first line), or at the start
+  # of the line a word or an atomic wraps to, past the edges it waited on (-1 and 2). The oracle read it off the
+  # fragment's first line instead, never having seen the edges land (0 on the next line).
+  it 'places a marker held for an edge a later edge cancels where the placement after it commits the line' do
+    m = '<i id="m" style="position:absolute"></i>'
+    expect_parity(%(<div style="width:8px">b<span style="margin-left:-1px">#{m}<span style="padding-left:1px"> d</span></span></div>), 7, chrome_y: 0)
+    expect_parity(%(<div style="width:30px">bbb <span style="margin-left:-1px">#{m}<span style="padding-left:1px">dddd</span></span></div>), -1, chrome_y: 18)
+    expect_parity(%(<div style="width:30px">b<span style="padding-left:2px">#{m}<span style="margin-left:-2px"><b style="display:inline-block;width:30px;height:5px"></b></span></span></div>), 2, chrome_y: 18)
+    # …and the same with percentages, in the MEASURED column a `min-content` grid track lays it out in.
+    expect_parity(
+      %(<div style="display:grid;grid-template-columns:min-content 1fr"><div>b<span style="margin-left:-10%">#{m}) +
+        %(<span style="padding-left:10%"> d</span></span></div></div>),
+      7.2,
+      chrome_y: 0
+    )
+  end
+
   # NATIVE: a marker's justification shift counts the gaps before the FLOW's x — which a `position: relative`
   # inline around it does not move, since that offset is applied at paint time. Counted with the offset, a
   # `left: 3px` inline gave a marker glued to `ee` the gap right after `ee` too (64.2).

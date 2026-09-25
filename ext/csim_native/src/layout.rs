@@ -568,14 +568,16 @@ pub(crate) struct Run {
     // the parent-font figure and leave as the box's outer height and advance — and a third reused slot is how
     // that pair became hard to read. One `f64` per run in the buffer; the perf gate held.
     pub(crate) line_mode: u8,
-    // A CLOSE edge that LANDS on the line: either of its two halves (border + padding, then margin) is non-zero,
-    // whatever they sum to. The oracle places the halves as two edges (`placeInlineBox`: `if (ce.right)` and
-    // `if (ce.mr)`), so `padding-right:5px; margin-right:-5px` puts a line down — Chrome gives the block 22 —
-    // where a test on the SUM (`metric`) saw nothing. Carried in the buffer slot an edge leaves unread
+    // A CLOSE edge that MAY land on the line: either of its two halves (border + padding, then margin) has a
+    // length or a percentage in it, whatever they sum to — it lands where one of them is still non-zero once
+    // resolved in the line's block (`line_layout`). The oracle places the halves as two edges (`placeInlineBox`:
+    // `if (ce.right)` and `if (ce.mr)`), so `padding-right:5px; margin-right:-5px` puts a line down — Chrome gives
+    // the block 22 — where a test on the SUM saw nothing. Carried in the buffer slot an edge leaves unread
     // (`line_mode`'s), so the stride is unchanged; false on every other kind.
     pub(crate) lands: bool,
-    // An OPEN / CLOSE edge's width with NO percentage basis — what an INTRINSIC measure reads, where `metric` is
-    // the resolved px the laid-out line uses. 0 on every other kind.
+    // An OPEN / CLOSE edge's width with NO percentage basis — what an INTRINSIC measure reads, where an OPEN's
+    // `metric` is the LENGTH part the laid-out line adds its percentages to (their fractions ride the inline table,
+    // `InlineBox`). 0 on every other kind.
     pub(crate) plain: f64,
 }
 
@@ -1118,9 +1120,9 @@ struct LineStyle {
 // Greedy line layout for a text block's run/marker STREAM (`runs` / `run_texts` parallel, this block's
 // slice). TEXT runs tokenize into words (maximal non-`[ \t\n\r\f]+` — NBSP is NOT a break), each measured
 // in its own font; a collapsible space (the first ws at a boundary, that run's spaceW) is the break
-// opportunity. OPEN/CLOSE are an inline element's horizontal edges: OPEN reserves `metric` in the fit
-// test (openEdgeWidth) and flushes onto the first line content lands on; CLOSE adds `metric` on the
-// current line. BR forces a line break. A line's box is max(ascent)+max(descent) over the STRUT
+// opportunity. OPEN/CLOSE are an inline element's horizontal edges: OPEN reserves its opening edge (`metric` and
+// the table's percentages, resolved in this block) in the fit test (openEdgeWidth) and flushes onto the first line
+// content lands on; CLOSE adds the box's closing halves (from its `InlineBox`) on the current line. BR forces a line break. A line's box is max(ascent)+max(descent) over the STRUT
 // (`strut_lh` / `strut_asc`) and the runs on it (each run's descent = line_height - asc), §10.8 — so a
 // taller-metric run grows the box even under a fixed line-height; an empty line (a lone/leading `<br>`)
 // is the bare strut (asc + desc == strut_lh). Returns the content height (Σ line heights) and the first / last
@@ -2694,8 +2696,8 @@ fn line_layout(
     // Believed UNREACHABLE, though no longer for the reason it used to be: the walk admits an edged inline
     // holding nothing at all now, and what makes this dead is the CLOSE — an inline with a non-zero opening
     // edge settles its waiting markers and flushes on the way out, so a marker can only still be pending if
-    // the edge it waited on was zero, and the push condition (`run.metric != 0.0`) never records one of
-    // those. Kept because the alternative to a wrong answer here is no answer at all —
+    // the edge it waited on was zero, and the push condition (the innermost open box's edge `o.w != 0.0`) never
+    // records one of those. Kept because the alternative to a wrong answer here is no answer at all —
     // and if it ever does fire, note that the oracle's own fallback is still moved by the line's alignment
     // (`lineStatics`), which this is not.
     for (ci, rx, ry, _, at, was) in pending_oofs.drain(..) {
