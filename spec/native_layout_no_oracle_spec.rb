@@ -139,6 +139,9 @@ RSpec.describe 'native layout no-oracle run', if: ENV.fetch('CSIM_JS_ENGINE', 'v
       '<div style="width:400px"><div style="width:50%;padding:5% 2%;margin:0 auto">centred</div></div>',
       '<div style="display:flex;width:300px;gap:10px"><div style="flex:1">a</div><div style="width:30%">b c d</div></div>',
       '<div style="width:300px;height:200px"><div style="height:50%;max-width:80%">half</div></div>',
+      # …and a comparison function over one affine operand, which travels as its clamped pair — `clamp()`'s MINIMUM
+      # winning where its bounds cross, as CSS has it (100 here, not 50)
+      '<div style="width:300px;height:200px"><div style="width:min(50%, 60px);height:max(20%, 10px)">x</div><div style="width:clamp(100px, 10%, 50px)">y</div></div>',
       # …a percentage height that resolves to AUTO, whose bottom margin then adjoins its last child's — native's call
       '<div style="width:300px"><div style="height:50%"><p style="margin:0 0 12px">x</p></div><div style="height:5px"></div></div>',
       # …an OUT-OF-FLOW box against a positioned block and against the viewport, percentages and all, and a relative

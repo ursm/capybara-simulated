@@ -313,6 +313,11 @@ pub(crate) struct Input {
     // is run again at another basis (a grid item re-resolved at its track width) — a constant read back out of
     // the resolved field would be added once per resolve.
     pub(crate) pct_px: [f64; 6],
+    // …and the BOUNDS of each, where the size is a comparison function over affine operands (`min(50%, 60px)` is
+    // `0.5 x basis` capped at 60): `clamp(lo, px + frac x basis, hi)`, each bound a (px, frac) pair of its own —
+    // the clamped-affine value the gaps and the indent already carry. (-inf, 0) / (+inf, 0) where unbounded.
+    pub(crate) pct_lo: [(f64, f64); 6],
+    pub(crate) pct_hi: [(f64, f64); 6],
     // …and the margins' and padding's percentage parts (margin top / right / bottom / left, padding top / right /
     // bottom / left) as fractions of the containing-block WIDTH, 0 where there is none, beside the length parts the
     // walk sent (`edge_px`, kept apart from the fields a resolution overwrites).
@@ -668,7 +673,7 @@ impl Input {
             } else {
                 // …never below zero: a size is non-negative, and only a math function can produce a negative
                 // one (`calc(10% - 100px)` in 300px is a zero content box, its padding still around it).
-                (frac * basis + self.pct_px[i]).max(0.0)
+                clamp_affine(frac * basis + self.pct_px[i], self.pct_lo[i], self.pct_hi[i], basis).max(0.0)
             }
         };
         let [w, h, min_w, max_w, min_h, max_h] = self.pct_sizes;
@@ -6583,9 +6588,10 @@ fn flex_intrinsic_widths(i: usize, inputs: &[Cell<Input>], runs: &[Run], run_tex
 // per-character breaking (the oracle's per-character advance carries the previous character).
 #[allow(clippy::too_many_arguments)]
 // `clamp(lo, v, hi)` where each bound is its own affine function of the basis — the one arithmetic the two
-// engines have to agree on for a comparison function (`nlClampedAt` in layout.js is the same three lines).
+// engines have to agree on for a comparison function (`nlClampedAt` in layout.js is the same three lines) — in
+// CSS's order, `max(lo, min(v, hi))`: where the bounds cross, `clamp()`'s MINIMUM wins.
 fn clamp_affine(v: f64, lo: (f64, f64), hi: (f64, f64), basis: f64) -> f64 {
-    v.max(lo.0 + lo.1 * basis).min(hi.0 + hi.1 * basis)
+    v.min(hi.0 + hi.1 * basis).max(lo.0 + lo.1 * basis)
 }
 fn text_intrinsic(runs: &[Run], run_texts: &[Option<Vec<u16>>], ws_mode: u8, indent: (f64, bool, bool, bool), inputs: &[Cell<Input>], all_runs: &[Run], all_texts: &[Option<Vec<u16>>], grids: &[f64], children: &[Vec<usize>]) -> Option<(f64, f64)> {
     // …per RUN, because an inline may declare its own `white-space` (`Run::ws_mode`) and every one of these is
@@ -7730,6 +7736,8 @@ mod tests {
             flex_basis_frac: f64::NAN,
             pct_sizes: [f64::NAN; 6],
             pct_px: [0.0; 6],
+            pct_lo: [(f64::NEG_INFINITY, 0.0); 6],
+            pct_hi: [(f64::INFINITY, 0.0); 6],
             edge_frac: [0.0; 8],
             edge_px: [0.0; 8],
             inset_frac: [0.0; 4],
