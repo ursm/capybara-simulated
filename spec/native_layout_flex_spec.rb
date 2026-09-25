@@ -1170,6 +1170,15 @@ RSpec.describe 'native layout flex parity', if: ENV.fetch('CSIM_JS_ENGINE', 'v8'
         expect_native_flex(wrap_col_pct(mid, 'margin:10% 0'))
       end
     end
+    # …and a percentage inside an ATOMIC inline (whose children's records hang under it, so native has their basis)
+    # or on a table's CAPTION (which `measure_table` resolves): `nlWalkResolvesPct` called both the walk's until
+    # 2026-09-25, "broader than the hazard on purpose", and pushed every flex container above one — ~60 of the 279
+    # pushes the census counted, with no shape to show a hazard once they were lifted.
+    it 'sizes a wrap column natively over a percentage inside an inline-block or on a caption' do
+      expect_native_flex(%(<div style="display:flex;flex-direction:column;width:300px;height:150px;flex-wrap:wrap"><div style="align-self:flex-start"><div style="display:inline-block"><div style="width:50%">some rather longer words here to measure</div></div></div><div style="width:30px;height:20px"></div></div>))
+      expect_native_flex(%(<div style="display:flex;flex-direction:column;width:300px;height:150px;flex-wrap:wrap"><div style="align-self:flex-start"><div style="display:inline-block"><div style="min-height:50%;padding:0 10%">some rather longer words here to measure</div></div></div><div style="width:30px;height:20px"></div></div>))
+      expect_native_flex('<div style="display:flex;width:300px"><table style="border-spacing:2px"><caption style="height:50%">a caption that wraps over several words here</caption><tr><td>a</td><td>bb cc</td></tr></table><div>y</div></div>')
+    end
     it 'floors a border-box flex container at its own border and padding' do
       expect_native_flex(%(<div style="#{col};box-sizing:border-box;height:5px;padding:10px"><div>x</div></div>))
       expect_native_flex('<div style="display:flex;width:400px;box-sizing:border-box;height:5px;padding:10px"><div>x</div></div>')
@@ -1290,7 +1299,7 @@ RSpec.describe 'native layout flex parity', if: ENV.fetch('CSIM_JS_ENGINE', 'v8'
   end
   # Native sizing is a promise about every item at once, and the WALK decides whether it holds: where it declines
   # one item's subtree the whole set is rolled back and re-emitted with the oracle's boxes pushed. Each shape
-  # here holds content the walk refuses for a reason `nlFlexNativeSizable`'s predicate does not model, and under
+  # here holds content the walk refuses for a reason `nlFlexPushWhy`'s predicate does not model, and under
   # a predicate-decided gate each took the whole pass down.
   describe 'a flex container whose item the walk declines to size re-emits with pushed boxes' do
     WalkRefusals::ATOMIC.each_with_index do |inner, i|

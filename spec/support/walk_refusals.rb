@@ -1,5 +1,5 @@
 # Content the harness WALK refuses to lay out natively, for a reason the gates' `nlIntrinsicMeasurable` /
-# `nlFlexNativeSizable` pre-filters do not model. Every route with a fallback has to survive these by trying and
+# `nlFlexPushWhy` pre-filters do not model. Every route with a fallback has to survive these by trying and
 # rolling back (`emitAttempt`) rather than by asking a predicate, so each route's spec sweeps the same list —
 # one list, so a new refusal is added in one place and every route is held to it. An entry LEAVES it when
 # native takes the shape over (an out-of-flow child of a text block did, with the static position it reads off
