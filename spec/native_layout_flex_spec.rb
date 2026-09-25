@@ -950,6 +950,16 @@ RSpec.describe 'native layout flex parity', if: ENV.fetch('CSIM_JS_ENGINE', 'v8'
       end
       expect_native_flex('<div style="position:relative;display:flex;width:400px"><div><div style="position:absolute;height:50%;width:10px"></div>pct</div>' \
                          '<div style="height:40px;width:50px"></div></div>')
+      # …and neither is a NON-linear one on it, nor any percentage UNDER it: the whole subtree is laid out there.
+      # Chrome: the absolute box 30 x 10, and 100 x 18 around its child.
+      [
+        '<div style="position:relative;display:flex;flex-direction:column;width:400px"><div><div style="position:absolute;top:0;width:min(50%, 30px);height:10px"></div>pct</div>' \
+        '<div style="height:40px;width:50px"></div></div>',
+        '<div style="position:relative;display:flex;width:400px"><div><div style="position:absolute;top:0;width:100px"><div style="height:min(50%, 80px)">x</div></div>pct</div>' \
+        '<div style="height:40px;width:50px"></div></div>'
+      ].each do |body|
+        expect_native_flex(body)
+      end
     end
 
     # …and an inline BOX's percentage EDGE, at any depth: it has no record, and `nlGatherRuns` resolves its OPEN /
@@ -1519,6 +1529,22 @@ RSpec.describe 'native layout flex parity', if: ENV.fetch('CSIM_JS_ENGINE', 'v8'
         r = run_shadow(body, '{noOracle: true}')
         expect(r).to include('ok' => true, 'mismatches' => 0)
         expect(r['oracleReads'].to_h.keys.grep_v(/\(handed over\)\z/)).to be_empty, r.inspect
+      end
+    end
+    # …where three bases part from Chrome in BOTH engines alike (the review of 34298827), pinned: a negative linear
+    # basis is not floored at zero (the grown item 100 wide, Chrome 135); a column with only a `min-height` resolves
+    # a percentage basis against it (30, Chrome 18 — its main size is indefinite there); and a column stretched to
+    # its GRID row is not definite for one (18, Chrome 80).
+    it 'resolves three percentage bases as the oracle does, where Chrome does not' do
+      {
+        '<div style="display:flex;width:300px"><div id="m" style="flex-basis:calc(10% - 100px);flex-grow:1;min-width:0">a</div>' \
+        '<div style="flex:none;width:30px"></div><div style="flex:1 1 0px;min-width:0">b</div></div>'                                  => [2, 100, 135],
+        '<div style="display:flex;flex-direction:column;width:200px;min-height:150px"><div id="m" style="flex-basis:20%">a</div></div>' => [3, 30, 18],
+        '<div style="display:grid;grid-template-rows:100px;width:200px"><div style="display:flex;flex-direction:column">' \
+        '<div id="m" style="flex-basis:80%">a</div></div></div>'                                                                        => [3, 18, 80]
+      }.each do |body, (index, shared, chrome)|
+        expect_parity(body)
+        expect_shared_gap(laid_out_rect(body)[index], shared: shared, chrome: chrome, what: "#{body}: #m rect[#{index}]")
       end
     end
     it 'keeps a pushed auto height indefinite, and a percentage inherited' do

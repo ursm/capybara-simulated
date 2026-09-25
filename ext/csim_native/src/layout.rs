@@ -289,7 +289,8 @@ pub(crate) struct Input {
     pub(crate) flex_grow: f64,
     pub(crate) decl_border_box: bool,
     // Flex SIZING inputs (an item of a natively-sized container, `flex_native`): `flex-shrink`; `flex-basis`
-    // resolved against the container's main size (NaN = auto / a keyword — `flex_basis_kw` 0 none, 1 content,
+    // resolved against the container's main size, or — beside a `flex_basis_frac` — the constant term that
+    // fraction is added to (NaN = auto / a keyword — `flex_basis_kw` 0 none, 1 content,
     // 2 min-content, 3 max-content, 4 fit-content); whether the item scrolls across (its automatic minimum in
     // that axis is then zero, §4.5, and its baseline is clamped into its box); whether it STRETCHES in the
     // cross axis (`align-self: stretch` with an auto cross size and no auto cross margin). On a CONTAINER,
@@ -661,7 +662,9 @@ impl Input {
             } else if is_auto(basis) {
                 f64::NAN
             } else {
-                frac * basis + self.pct_px[i]
+                // …never below zero: a size is non-negative, and only a math function can produce a negative
+                // one (`calc(10% - 100px)` in 300px is a zero content box, its padding still around it).
+                (frac * basis + self.pct_px[i]).max(0.0)
             }
         };
         let [w, h, min_w, max_w, min_h, max_h] = self.pct_sizes;

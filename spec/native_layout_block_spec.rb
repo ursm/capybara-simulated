@@ -278,6 +278,26 @@ RSpec.describe 'native layout L1 block-flow parity', if: ENV.fetch('CSIM_JS_ENGI
     end
   end
 
+  # A size is never negative, and only a math function can make one: `width: calc(10% - 100px)` in a 300px block is
+  # a zero content box (its padding still around it, 10 wide), a negative `max-width` caps the box at nothing
+  # rather than being ignored, and a negative height is 0. The oracle kept the negative figure (-70, -60, 300 for
+  # the `max-width`) until 2026-09-25, where native and Chrome said 0; both engines and Chrome agree now.
+  it 'floors a negative calc() size at zero' do
+    {
+      'width:calc(10% - 100px);height:10px'                => [0, 10],
+      'width:calc(10% - 100px);padding:0 5px;height:10px'  => [10, 10],
+      'max-width:calc(10% - 100px);height:10px'            => [0, 10],
+      'min-width:calc(10% - 100px);width:50px;height:10px' => [50, 10]
+    }.each do |style, size|
+      body = %(<div style="width:300px"><div id="m" style="#{style}"></div></div>)
+      expect_parity(body)
+      expect(laid_out_rect(body)[2, 2]).to eq(size)
+    end
+    body = '<div style="width:300px;height:100px"><div id="m" style="height:calc(10% - 100px)">x</div></div>'
+    expect_parity(body)
+    expect(laid_out_rect(body)[3]).to eq(0)
+  end
+
   it 'matches an over-constrained (left AND right) position:relative child under rtl (§9.4.3: right wins)' do
     session = simulated_session(page(<<~HTML))
       <div style="width:300px;direction:rtl">
