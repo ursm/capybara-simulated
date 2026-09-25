@@ -448,6 +448,27 @@ RSpec.describe 'native layout flex parity', if: ENV.fetch('CSIM_JS_ENGINE', 'v8'
     expect_parity(body)
     expect_shared_gap(first_item_box(body)[1], shared: 0, chrome: 25, what: "#{body}: the item's y")
   end
+  # …but BETWEEN two insets its height is definite — the span — and the clamp comes before anything is laid out in it
+  # or an auto margin splits what it leaves (CSS 2.1 §10.6.4 / §10.7). The oracle aligned the items in the unclamped
+  # span and cut the box afterwards (85 and 10, where native and Chrome say 25 and 50), and gave an auto margin
+  # nothing to take (0 where native and Chrome say 60).
+  it 'aligns an abspos flex row between two insets in the height its max-height clamped' do
+    body = '<div style="position:relative;width:300px;height:200px"><div id="c" style="position:absolute;top:0;bottom:0;left:0;display:flex;align-items:center;max-height:80px">' \
+           '<div style="width:40px;height:30px"></div></div></div>'
+    expect_parity(body)
+    expect(first_item_box(body)).to eq([0, 25, 40, 30])   # Chrome
+  end
+  it 'aligns an abspos flex row between two insets in the height its min-height floored' do
+    body = '<div style="position:relative;width:300px;height:40px"><div id="c" style="position:absolute;top:0;bottom:0;left:0;display:flex;align-items:flex-end;min-height:80px">' \
+           '<div style="width:40px;height:30px"></div></div></div>'
+    expect_parity(body)
+    expect(first_item_box(body)).to eq([0, 50, 40, 30])   # Chrome
+  end
+  it 'centres an abspos box between two insets by auto margins around the height its max-height clamped' do
+    body = '<div id="c" style="position:relative;width:300px;height:200px"><div style="position:absolute;top:0;bottom:0;left:0;width:50px;max-height:80px;margin:auto 0"></div></div>'
+    expect_parity(body)
+    expect(first_item_box(body)).to eq([0, 60, 50, 80])   # Chrome
+  end
   it 'matches an abspos flex row with a NON-binding min-height (box on its content extent)' do
     expect_parity('<div style="position:relative;width:300px;height:200px"><div style="position:absolute;top:0;left:0;display:flex;align-items:center;min-height:20px"><div style="width:40px;height:60px"></div></div></div>')
   end

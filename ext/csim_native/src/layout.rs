@@ -474,7 +474,9 @@ pub(crate) struct Input {
     // pass's inline table (`inline_padding_box`).
     pub(crate) cb_rect: [f64; 4],
 }
-// `cb_index` for an out-of-flow box whose containing block is not in the pass but whose RECTANGLE is (cb_rect).
+// `cb_index` for a box that has no containing block of this kind — an in-flow one.
+pub(crate) const CB_NONE: i32 = -1;
+// …for an out-of-flow box whose containing block is not in the pass but whose RECTANGLE is (cb_rect).
 pub(crate) const CB_RECT: i32 = -2;
 // …and for one whose containing block is an inline box of the pass, named by its inline-table index in cb_rect[0].
 pub(crate) const CB_INLINE: i32 = -3;
@@ -575,7 +577,7 @@ pub(crate) struct Run {
 impl Input {
     // An out-of-flow box native positions from its containing block (vs one whose oracle box is replayed).
     fn native_oof(&self) -> bool {
-        self.out_of_flow != 0 && (self.cb_index >= 0 || self.cb_index == CB_RECT || self.cb_index == CB_INLINE)
+        self.out_of_flow != 0 && self.cb_index != CB_NONE
     }
     // This record with a border-box height IMPOSED on it (a flex item stretched to its line, or handed its
     // resolved main size) — the oracle's `layoutElement(child, {height, autoHeight: false})`: the declared
@@ -7769,7 +7771,7 @@ mod tests {
             control_font_asc: 0.0,
             intrinsic_w: 0.0,
             intrinsic_h: 0.0,
-            cb_index: -1,
+            cb_index: CB_NONE,
             cb_rect: [0.0, 0.0, 0.0, 0.0],
             inset_top: f64::NAN,
             inset_right: f64::NAN,
