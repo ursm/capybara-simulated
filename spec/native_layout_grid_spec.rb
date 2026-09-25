@@ -193,6 +193,22 @@ RSpec.describe 'native layout grid parity', if: ENV.fetch('CSIM_JS_ENGINE', 'v8'
     expect_parity('<div style="display:grid;grid-template-columns:100px;width:100px"><div style="display:flex;align-items:center;max-height:20px"><div style="width:30px;height:60px"></div></div></div>')
   end
 
+  # …and under a DECLARED row (`grid-auto-rows`), where the row is the auto-height item's border box: clamped by the
+  # item's min/max-height FIRST, then its items aligned in that — Chrome puts a `max-height: 20px` flex item's
+  # `flex-end` content at -2 and a `min-height: 60px` one's at 38. Native did; the oracle aligned in the 40px row and
+  # clamped after (18 both), and the walk refused every flex / grid item declaring either until 2026-09-26 — 108
+  # sweep shapes, not one of them a clamp that bites. Chrome's figures.
+  it 'clamps a row-imposed flex item by its min/max-height before aligning its items' do
+    {
+      'max-height:20px' => -2, 'min-height:60px' => 38, 'min-height:10px' => 18
+    }.each do |decl, y|
+      grid = '<div style="font:16px monospace;width:300px"><div style="display:grid;grid-template-columns:100px 1fr;grid-auto-rows:40px">'
+      body = %(#{grid}<div style="display:flex;#{decl};align-items:flex-end"><span id="m">f</span></div><div>z</div></div></div>)
+      expect_parity(body)
+      expect(laid_out_rect(body)[1]).to eq(y), decl
+    end
+  end
+
   # An absolute / fixed grid container is out of flow — its parent replays its oracle-resolved box and native
   # replays its items within it (grid is pure replay), so the position never enters layout. It lays out natively.
   it 'matches an absolutely-positioned grid container in a relative parent' do
@@ -589,8 +605,9 @@ RSpec.describe 'native layout grid parity', if: ENV.fetch('CSIM_JS_ENGINE', 'v8'
       expect_native_intrinsic('<div style="display:grid;grid-template-columns:100px;grid-auto-rows:60px;width:400px"><div style="display:grid;grid-template-columns:auto"><div>nested in row</div></div></div>')
       expect_parity('<div style="display:grid;grid-template-columns:200px;grid-auto-rows:60px;width:400px"><table><tr><td>cell</td></tr></table></div>')
     end
-    it 'declines a flex-container item with a min/max-height under declared rows' do
-      expect_bail('<div style="display:grid;grid-template-columns:100px;grid-auto-rows:60px;width:400px"><div style="display:flex;align-items:center;min-height:100px"><div style="width:10px;height:10px"></div></div></div>')
+    it 'lays out a flex-container item with a min/max-height under declared rows' do
+      expect_parity('<div style="display:grid;grid-template-columns:100px;grid-auto-rows:60px;width:400px"><div style="display:flex;align-items:center;min-height:100px"><div style="width:10px;height:10px"></div></div></div>')
+      expect_parity('<div style="display:grid;grid-template-columns:100px;grid-auto-rows:60px;width:400px"><div style="display:grid;align-items:end;max-height:30px"><div style="width:10px;height:10px"></div></div></div>')
     end
     # A row SHORTER than an item's own padding and border: the item's border box floors at those and overflows the
     # row, and the grid ends where its rows do. The oracle kept the item at the row (15, its content below the box)
