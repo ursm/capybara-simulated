@@ -30,12 +30,13 @@ module WalkRefusals
   # exercises the walk's rollback, and a caller that wants that has to be able to say so.
   POSITIONED_INNER = '<div style="position:-webkit-sticky;width:9px;height:4px"></div>t'
   POSITIONED       = %(<span style="display:inline-block">#{POSITIONED_INNER}</span>)
-  # …an orphan `display: table-row` holding content (`flex-container-unsupported`: the oracle MEASURES one through
-  # the block arm and LAYS it out as a flex row, and one record cannot say both). Its predecessors: a `pre`
-  # inline-block of nothing but spaces (`white-space-only-block`) until preserved white space went down the text
-  # path, and a CENTRED mixed block's out-of-flow box in a group that opens no line (`oof-in-collapsed-group`) until
-  # an empty line stopped moving what waits on it — both 2026-09-24.
-  ORPHAN_ROW       = '<span style="display:inline-block"><div style="display:table-row">aa bb</div></span>'
+  # …an orphan `display: table-row` holding an ELEMENT (`flex-container-unsupported`: the oracle LAYS one out as an
+  # equal-share flex row, whose sizing native has never had). Its predecessors: a `pre` inline-block of nothing but
+  # spaces (`white-space-only-block`) until preserved white space went down the text path, a CENTRED mixed block's
+  # out-of-flow box in a group that opens no line (`oof-in-collapsed-group`) until an empty line stopped moving what
+  # waits on it — both 2026-09-24 — and an orphan row of bare TEXT until a flex record could carry the run stream its
+  # measure reads, 2026-09-26.
+  ORPHAN_ROW       = '<span style="display:inline-block"><div style="display:table-row"><div>aa bb</div></div></span>'
   # (An orphan `display: table-cell` inside one was the third entry — `block-level-box-unplaceable`, a DISPLAY the
   # block arm had no case for — until 2026-09-24, when the walk took an orphan table part as the block the oracle
   # lays it out as; `-webkit-box`, `ruby`, `math`, `flow`, an orphan `table-column` and the rest of the oracle's

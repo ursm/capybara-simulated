@@ -1549,13 +1549,28 @@ RSpec.describe 'native layout table parity', if: ENV.fetch('CSIM_JS_ENGINE', 'v8
                     '<div style="width:400px"><div class="p"></div><div style="height:4px"></div></div>')
     end
 
-    # …and REFUSES the rest, each for the reason the boundary above gives. Without these the narrowing is a
+    # …and one of nothing but bare TEXT — the shape every orphan row in the sweeps is, a generated `content` — as the
+    # two things a record can say at once: the layout drops the text (no item; the line-height floor in rec[52]) and
+    # the MEASURE reads it off the record's own run stream (`NL_FLAG_MEASURES_RUNS`, the oracle's block-stacking arm).
+    # 864 `pseudo` declines until 2026-09-26. Chrome's boxes around it (a float, an inline-block, `max-content`).
+    it 'lays one of bare text out natively, measured by its text' do
+      {
+        '<style>.p::before{content:"a longer generated string";display:table-row}</style><div style="width:400px;font:16px monospace"><div id="m" class="p" style="float:left"></div></div>' => [240.016, 22],
+        '<style>.p::before{content:"xx";display:table-row}</style><div style="width:400px;font:16px monospace"><div id="m" class="p" style="display:inline-block"></div>y</div>' => [19.2, 22],
+        '<style>.p::before{content:"a longer generated string";display:table-row}</style><div style="width:400px;font:16px monospace"><div id="m" class="p" style="width:max-content">z</div></div>' => [240.016, 44]
+      }.each do |body, (w, h)|
+        expect_parity(body)
+        rect = laid_out_rect(body)
+        expect(rect[2]).to be_within(0.02).of(w), body
+        expect(rect[3]).to eq(h), body
+      end
+      expect_parity('<div style="width:400px"><div style="display:table-row">x</div><div style="height:4px"></div></div>')
+    end
+
+    # …and REFUSES one with an ELEMENT child, for the reason the boundary above gives. Without these the narrowing is a
     # silent one: the gate could widen back to "any orphan row" and nothing would fail, because no shape
-    # anywhere exercises the sizing it would then need.
-    it 'refuses one with content, bare text or element children alike' do
-      expect_declines('<div style="width:400px"><div style="display:table-row">x</div></div>', 'flex-container-unsupported')
-      expect_declines('<style>.p::before{content:"x";display:table-row}</style><div style="width:400px"><div class="p"></div></div>',
-                      'flex-container-unsupported')
+    # anywhere exercises the equal-share sizing it would then need.
+    it 'refuses one with element children' do
       expect_declines('<div style="width:400px"><div style="display:table-row"><div>aaaa</div><div>bbbb</div></div></div>',
                       'flex-container-unsupported')
       # …a `<br>` is an element and so an item: the row is not empty.

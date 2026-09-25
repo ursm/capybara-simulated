@@ -990,6 +990,7 @@ fn layout_pass(
             chain_rel: [r[153], r[154], r[155]],
             chain_math: [crate::layout::math_ref(r[161]), crate::layout::math_ref(r[162])],
             rel_x_neg: (r[65] as u32) & 8388608 != 0,
+            measures_runs: (r[65] as u32) & 16777216 != 0,
             rel_math: std::array::from_fn(|k| crate::layout::math_ref(r[149 + k])),
             flex_item_auto: r[41] as u8,
             flex_baseline_asc: r[42],

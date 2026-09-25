@@ -193,6 +193,9 @@ pub(crate) struct Input {
     // is a comparison function over affine operands (`bounded`).
     pub(crate) rel_x_px: f64,
     pub(crate) rel_x_neg: bool,
+    // A FLEX record whose run range is its content for the INTRINSIC measure alone (`content_intrinsic`): an orphan
+    // `display: table-row` of bare text, which the oracle's flex layout drops and its block-stacking measure reads.
+    pub(crate) measures_runs: bool,
     // …and the relative INLINE boxes' chain it sits in, where one is a percentage (`nlAddChainRel`): its fraction of the
     // containing block's width, of its height where definite, and the correction to the chain's length in `rel_pct[6]`
     // where that height is not. [0, 0, 0] for none.
@@ -6632,7 +6635,7 @@ fn intrinsic_widths_of(i: usize, inputs: &[Cell<Input>], runs: &[Run], run_texts
         (w, w)
     } else if n.replaced && !n.ratio_only {
         (n.intrinsic_w, n.intrinsic_w) // a replaced box wants its intrinsic width (a ratio-only one, its container's)
-    } else if n.display == DISPLAY_FLEX {
+    } else if n.display == DISPLAY_FLEX && !n.measures_runs {
         flex_intrinsic_widths(i, inputs, runs, run_texts, grids, children)?
     } else if n.display == DISPLAY_TABLE {
         // A table brings its own algorithm for the same question, and its rows are not blocks to be measured one
@@ -6670,7 +6673,9 @@ fn intrinsic_widths_of(i: usize, inputs: &[Cell<Input>], runs: &[Run], run_texts
 fn content_intrinsic(i: usize, inputs: &[Cell<Input>], runs: &[Run], run_texts: &[Option<Vec<u16>>], grids: &[f64], children: &[Vec<usize>]) -> Option<(f64, f64)> {
     let n = inputs[i].get();
     match n.display {
-        DISPLAY_TEXT_BLOCK => {
+        // (…and a FLEX record whose run stream is its content for this measure alone — an orphan table row of bare
+        // text, which the oracle lays out with none of it and measures as the block of it it would be.)
+        d if d == DISPLAY_TEXT_BLOCK || (d == DISPLAY_FLEX && n.measures_runs) => {
             let (rs, re) = (n.run_start.max(0) as usize, (n.run_start + n.run_count).max(0) as usize);
             if re > runs.len() || rs > re {
                 return None;
@@ -8095,6 +8100,7 @@ mod tests {
             rel_pct: [f64::NAN, f64::NAN, f64::NAN, f64::NAN, f64::NAN, 0.0, 0.0],
             rel_x_px: 0.0,
             rel_x_neg: false,
+            measures_runs: false,
             chain_rel: [0.0; 3],
             chain_math: [NO_MATH; 2],
             rel_math: [NO_MATH; 3],
