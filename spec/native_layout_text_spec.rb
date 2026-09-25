@@ -1620,6 +1620,16 @@ RSpec.describe 'native layout L2 text-block parity', if: ENV.fetch('CSIM_JS_ENGI
         expect(shadow(body)).to include('ok' => false, 'reason' => 'text-not-measurable'), body
       end
     end
+    # …and a preserved CR / FF node that is a block's ONLY text, under a text indent: it TAKES the indent where it is
+    # measured (Chrome: a CR-only `pre` float with `text-indent: 20px` is 20 wide, 0 tall — the oracle too), but the
+    # block reads as empty to the walk and never reaches the gather that declines it: native measured it 0 wide.
+    it 'declines a block whose only text is a preserved CR under a text indent' do
+      ['<div style="width:300px"><div style="float:left;white-space:pre;text-indent:20px">&#13;</div>x</div>',
+       '<div style="width:300px"><div style="float:left;white-space:break-spaces;text-indent:20px">&#12;</div>x</div>',
+       '<div style="width:300px"><div style="float:left;text-indent:20px"><span style="display:contents;white-space:pre">&#13;</span></div>x</div>'].each do |body|
+        expect(shadow(body)).to include('ok' => false, 'reason' => 'text-not-measurable'), body
+      end
+    end
   end
   # A `<br clear>` CLEARS the floats before the next line — HTML's pre-CSS way of ending a float band, and
   # still the mapping the rendering section gives the attribute. The break moves the flow past the bottom of
