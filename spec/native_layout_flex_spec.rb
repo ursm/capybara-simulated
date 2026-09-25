@@ -1183,6 +1183,20 @@ RSpec.describe 'native layout flex parity', if: ENV.fetch('CSIM_JS_ENGINE', 'v8'
       expect_native_flex(%(<div style="display:flex;flex-direction:column;width:300px;height:150px;flex-wrap:wrap"><div style="align-self:flex-start"><div style="display:inline-block"><div style="min-height:50%;padding:0 10%">some rather longer words here to measure</div></div></div><div style="width:30px;height:20px"></div></div>))
       expect_native_flex('<div style="display:flex;width:300px"><table style="border-spacing:2px"><caption style="height:50%">a caption that wraps over several words here</caption><tr><td>a</td><td>bb cc</td></tr></table><div>y</div></div>')
     end
+    # …and a table PART's percentage native resolves itself: a cell's `width` (its column's), `padding` (the table's,
+    # `measure_table`), `height` (no basis) and a row's `height` (its minimum) — every table part was the walk's until
+    # 2026-09-25 and pushed the container around it. A cell's `min-width` / `max-width` still is, and still pushes.
+    it 'sizes a column natively over a table whose parts declare percentages native resolves' do
+      ['width:40%', 'padding:0 10%', 'height:50%'].each do |decl|
+        expect_native_flex(%(<div style="#{col};height:200px;font:16px monospace"><table style="border-spacing:2px"><tr><td style="#{decl}">aa bb</td><td>cc</td></tr></table><div style="width:40px">y</div></div>))
+      end
+      expect_native_flex(%(<div style="#{col};height:200px;font:16px monospace"><table style="border-spacing:2px"><tr style="height:50%"><td>aa</td></tr><tr><td>bb</td></tr></table><div>y</div></div>))
+      # (…a wrap column's stretched and shrink-to-fit items, a 80% table and a clamped padding among them — the review's)
+      expect_native_flex('<div style="display:flex;flex-direction:column;flex-wrap:wrap;width:300px;height:200px;font:16px monospace"><div><table style="width:80%"><tr><td style="padding:0 10%">aa bb cc</td><td>dd</td></tr></table></div><div style="width:30px;height:20px"></div></div>')
+      expect_native_flex('<div style="display:flex;flex-direction:column;flex-wrap:wrap;width:300px;height:200px;font:16px monospace"><div style="align-self:flex-start"><table><tr><td style="padding:0 clamp(2px, 8%, 20px)">aa bb</td><td>cc</td></tr></table></div><div style="width:30px;height:20px"></div></div>')
+      pushed = %(<div style="#{col};height:200px;font:16px monospace"><table style="border-spacing:2px"><tr><td style="min-width:30%">aa bb</td><td>cc</td></tr></table><div>y</div></div>)
+      expect(run_shadow(pushed)).to include('ok' => true, 'mismatches' => 0, 'nativeFlexRows' => 0)
+    end
     it 'floors a border-box flex container at its own border and padding' do
       expect_native_flex(%(<div style="#{col};box-sizing:border-box;height:5px;padding:10px"><div>x</div></div>))
       expect_native_flex('<div style="display:flex;width:400px;box-sizing:border-box;height:5px;padding:10px"><div>x</div></div>')
