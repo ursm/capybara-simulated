@@ -637,13 +637,14 @@ RSpec.describe 'native layout flex parity', if: ENV.fetch('CSIM_JS_ENGINE', 'v8'
   # A PUSHED multi-line container whose lines mix a stretching item and a fixed one: `align-content: stretch` grew
   # each line from its NATURAL cross, and a stretched box already holds its share, so the lines cannot be rebuilt
   # from the final boxes — the walk refused the pushed path for it (`flex-item-pushed-cross-unrecoverable`, 1,363
-  # sweep declines). Each pushed item carries its line's natural cross now (rec[128]). (The comparison inside a `calc()`
-  # is what keeps the container off native sizing, onto the pushed path: no program expresses one — a plain percentage
-  # inside an inline box did until the walk learned to send it, a two-operand `min()` until native learned to clamp
-  # one, and a three-operand one until 2026-09-26, when a comparison became a program native evaluates.) Chrome's boxes.
+  # sweep declines). Each pushed item carries its line's natural cross now (rec[128]). (The HALF-EMPTY inline-table in
+  # the item — `WalkRefusals::UNMEASURABLE`'s shape, content the measure refuses — is what keeps the container off
+  # native sizing, onto the pushed path: a plain percentage inside an inline box did until the walk learned to send it,
+  # a two-operand `min()` until native learned to clamp one, a three-operand one until a comparison became a program,
+  # and one inside a `calc()` until a sum of them did, all 2026-09-26.) Chrome's boxes.
   it 'places a pushed wrap container whose lines mix stretching and fixed items' do
     body = '<div style="display:flex;flex-wrap:wrap;width:150px;height:100px;font:16px monospace"><div><div style="height:100%">some rather longer ' \
-           'words <b>bold <span style="display:inline-block;width:20px;height:calc(min(50%, calc(10% + 40px), 80px) + 0px)"></span> tail</b> more</div></div>' \
+           'words <b>bold <table style="display:inline-table"><colgroup><col style="width:20px"></colgroup></table> tail</b> more</div></div>' \
            '<div style="width:30px;height:20px"></div></div>'
     expect(run_shadow(body)).to include('ok' => true, 'mismatches' => 0, 'nativeFlexRows' => 0)
     chrome = [[0, 0, 150, 88], [0, 88, 30, 20]]
@@ -652,13 +653,13 @@ RSpec.describe 'native layout flex parity', if: ENV.fetch('CSIM_JS_ENGINE', 'v8'
     end
   end
   # …and it carries its line's INDEX too (rec[129]): the pushed boxes are the FINAL sizes, and a column whose
-  # max-height breaks its lines breaks them on the HYPOTHETICAL ones — here a `max()` inside a `calc()`, as the width of
-  # something in the first item, is what pushes the container (an absolute box's percentage did until native placed
-  # those itself, a two-operand `max()` until native clamped one, and a three-operand one until native evaluated
+  # max-height breaks its lines breaks them on the HYPOTHETICAL ones — here a half-empty inline-table in the first item
+  # is what pushes the container (an absolute box's percentage did until native placed those itself, a two-operand
+  # `max()` until native clamped one, and a three-operand one and one inside a `calc()` until native evaluated
   # programs), and the lines are [a b] [c]. Chrome's boxes.
   it 'breaks a pushed wrapping column into the lines the oracle broke it into' do
     body = '<div style="display:flex;flex-direction:column;flex-wrap:wrap;max-height:50px;width:200px"><div style="width:20px;height:20px">' \
-           '<div style="width:calc(max(10%, calc(5% + 3px), 1px) + 0px);height:5px"></div></div><div style="width:20px;height:20px"></div><div style="width:20px;height:20px"></div></div>'
+           '<table style="display:inline-table"><colgroup><col style="width:20px"></colgroup></table></div><div style="width:20px;height:20px"></div><div style="width:20px;height:20px"></div></div>'
     expect(run_shadow(body)).to include('ok' => true, 'mismatches' => 0, 'nativeFlexRows' => 0)
     expect(item_boxes(body)).to eq([[0, 0, 20, 20], [0, 20, 20, 20], [100, 0, 20, 20]])
   end
@@ -990,21 +991,25 @@ RSpec.describe 'native layout flex parity', if: ENV.fetch('CSIM_JS_ENGINE', 'v8'
       expect_native_flex(calc_col)
       expect(marked_box(calc_col)).to eq([300, 52])         # Chrome 153
     end
-    # …and it FALLS BACK for a percentage the walk still resolves, which is what the narrowed test names: one
-    # inside a math function no program expresses (a comparison inside a `calc()` — until 2026-09-26 a `min()` / `max()`
-    # of two percentage LINES that cross each other
-    # beside a constant, so there is nothing to send and it travels resolved wherever the box sits), or under a TABLE
-    # part — a route where the record's parent is not the box the percentage resolves against, so the figure was
+    # …and it FALLS BACK for a percentage the walk still resolves, which is what the narrowed test names: one under a
+    # TABLE part a route reaches — a VERTICAL table's cell here, whose inline size the walk resolves against the
+    # oracle's table — where the record's parent is not the box the percentage resolves against, so the figure was
     # resolved against the item's FINAL size and native measures at a provisional one. (An OUT-OF-FLOW box's is
-    # native's since 2026-09-25: it is placed against its containing block once every size is final.)
+    # native's since 2026-09-25: it is placed against its containing block once every size is final. And a math
+    # function is no longer one at all: every `min()` / `max()` / `clamp()` over lines, nested, crossing or inside a
+    # `calc()` sum, travels as a program since 2026-09-26.)
     # Dropping the test put 15 wrong boxes into a 2,268-case math-function sweep, 28 into a 1,200-case route sweep
     # and 36 into a 960-case inline sweep, all 0 at the parent commit.
     # A LINEAR `calc()` left this list on 2026-09-22 and is in the arm above; the figure that used to be cited
     # here (`height: calc(50% + 2px)` in a wrapping row, 55.5 against Chrome's 58) is now 22, Chrome's own.
     it 'falls back for a percentage the walk resolves, not for one native does' do
-      ['<div style="display:flex;width:400px"><div><div style="min-height:calc(min(50%, calc(10% + 40px), 80px) + 0px)">pct</div></div><div style="height:40px;width:50px"></div></div>',
-       %(<div style="#{col};height:200px"><div style="flex:1 1 auto"><div style="min-height:calc(max(10px, 50%, calc(40% + 20px)) + 0px)">pct</div></div><div style="flex:1 1 auto">plain</div></div>)].each do |body|
-        expect(run_shadow(body)).to include('ok' => true, 'mismatches' => 0, 'nativeFlexRows' => 0), body
+      route = %(<div style="#{col};flex-wrap:wrap;height:200px;font:16px monospace"><div style="align-self:flex-start">) +
+              '<table style="writing-mode:vertical-rl"><tr><td style="min-width:40%">aa</td><td>bb</td></tr></table></div><div style="width:30px;height:20px"></div></div>'
+      expect(run_shadow(route)).to include('ok' => true, 'mismatches' => 0, 'nativeFlexRows' => 0)
+      # …where a comparison inside a `calc()` sum — scaled and subtracted too — is native's as the rest are
+      [%(<div style="#{col};height:200px"><div style="flex:1 1 auto"><div style="min-height:calc(100% - 2 * min(25%, 40px))">pct</div></div><div style="flex:1 1 auto">plain</div></div>),
+       '<div style="display:flex;width:400px"><div><div style="min-height:calc(min(50%, calc(10% + 40px), 80px) / 2 + 5px)">pct</div></div><div style="height:40px;width:50px"></div></div>'].each do |body|
+        expect_native_flex(body)
       end
       # …where a comparison function over affine operands is native's: the size travels as its PROGRAM and native
       # evaluates it at whichever basis it measures at — two lines that cross beside a constant included, which fell
@@ -1025,8 +1030,8 @@ RSpec.describe 'native layout flex parity', if: ENV.fetch('CSIM_JS_ENGINE', 'v8'
       # …and one with a constant beside two percentage lines, where one line always wins: `max(10%, 5%, 1px)` is `10%`
       # floored at 1 — it took a line and DROPPED the constant once (a gap 0.5 wide where CSS says 1), and was declined
       # after that until the walk learned to drop the losing line instead. Two lines that CROSS beside a constant were
-      # no clamp of one and declined until 2026-09-26; a program is all three. Only a comparison inside a `calc()` still
-      # declines. Chrome's figures.
+      # no clamp of one and declined until 2026-09-26, and one inside a `calc()` sum too; a program is all of them.
+      # Chrome's figures.
       gap = '<div style="display:flex;column-gap:max(10%, 5%, 1px);width:5px"><div style="width:1px;height:10px"></div><div style="width:1px;height:10px"></div></div>'
       expect_native_flex(gap)
       expect(item_boxes(gap)[1][0]).to eq(2)   # Chrome
@@ -1034,7 +1039,8 @@ RSpec.describe 'native layout flex parity', if: ENV.fetch('CSIM_JS_ENGINE', 'v8'
       expect_native_flex(crossing)
       expect(item_boxes(crossing)[1][0]).to be_within(0.01).of(4.125)   # Chrome: a 3.25 gap, both items shrunk
       in_calc = gap.sub('max(10%, 5%, 1px)', 'calc(max(10%, calc(5% + 3px), 1px) + 0px)')
-      expect(run_shadow(in_calc)).to include('ok' => false, 'reason' => 'gap-not-linear')
+      expect_native_flex(in_calc)
+      expect(item_boxes(in_calc)[1][0]).to be_within(0.01).of(4.125)   # Chrome
       expect_native_flex('<div style="position:relative;display:flex;width:400px"><div><div style="position:absolute;height:50%;width:10px"></div>pct</div>' \
                          '<div style="height:40px;width:50px"></div></div>')
       # …and neither is a NON-linear one on it, nor any percentage UNDER it: the whole subtree is laid out there.
@@ -1338,9 +1344,9 @@ RSpec.describe 'native layout flex parity', if: ENV.fetch('CSIM_JS_ENGINE', 'v8'
   # back and walked again as a pushed contribution is one container, not two — a rollback takes its count with it, as
   # it takes every other stream.
   it 'counts a pushed flex container once when an attempt around it is rolled back' do
-    r = run_shadow('<table style="font:16px monospace"><tr><td><div style="display:flex"><div><div style="height:calc(min(10%, calc(5% + 20px), 90px) + 0px)">x</div></div></div><span style="display:inline-block"><div style="display:table-row">aa bb</div></span></td></tr></table>')
+    r = run_shadow('<table style="font:16px monospace"><tr><td><div style="display:flex"><div>x<table style="display:inline-table"><colgroup><col style="width:20px"></colgroup></table></div></div><span style="display:inline-block"><div style="display:table-row">aa bb</div></span></td></tr></table>')
     expect(r).to include('ok' => true, 'mismatches' => 0), r.inspect
-    expect(r['pushedFlexWhy']).to eq('descendant-walk-percentage: height math' => 1)
+    expect(r['pushedFlexWhy']).to eq('item-not-measurable' => 1)
   end
   # Native sizing is a promise about every item at once, and the WALK decides whether it holds: where it declines
   # one item's subtree the whole set is rolled back and re-emitted with the oracle's boxes pushed. Each shape
@@ -1616,8 +1622,8 @@ RSpec.describe 'native layout flex parity', if: ENV.fetch('CSIM_JS_ENGINE', 'v8'
     # at 0 and the gap opened 10 where native and Chrome open 30% of the row.
     # WALK: a PUSHED baseline item's ascent is its margin box's, on the basis its percentage margins resolve against
     # — read at none (the edges the walk reads for the item's auto margins), a `margin-top: 10%` item lost its margin
-    # from the ascent native hangs it by, 55 where the oracle and Chrome say 40. (The child's `min()` height inside a
-    # `calc()` — which no program carries — is what pushes the items.)
+    # from the ascent native hangs it by, 55 where the oracle and Chrome say 40. (The half-empty inline-table in it —
+    # content the measure refuses — is what pushes the items.)
     # A STRETCHED row item's size is definite (§9.8), so a percentage height under it resolves against it even where
     # the stretch comes to the height the item measured — both engines laid it out again only where the two differed,
     # and a `height: 10%` child stayed 0 (Chrome 2.19, overflowing the 22px item). Native reached 2.2 only where a `vw`
@@ -1634,7 +1640,7 @@ RSpec.describe 'native layout flex parity', if: ENV.fetch('CSIM_JS_ENGINE', 'v8'
     end
     it 'hangs a pushed baseline item by the ascent of its percentage-margined box' do
       body = '<div id="c" style="display:flex;align-items:baseline;width:400px;height:200px;font:16px monospace">' \
-             '<div style="margin-top:10%">a<div style="height:calc(min(10%, calc(5% + 20px), 90px) + 0px)"></div></div><div style="font-size:30px">b</div></div>'
+             '<div style="margin-top:10%">a<table style="display:inline-table"><colgroup><col style="width:20px"></colgroup></table></div><div style="font-size:30px">b</div></div>'
       expect_parity(body)
       expect(first_item_box(body)[1]).to eq(40)   # Chrome
     end

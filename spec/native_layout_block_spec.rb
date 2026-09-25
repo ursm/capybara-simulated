@@ -1789,4 +1789,24 @@ x</div>))
     expect_parity(body)
     expect(laid_out_rect(body)).to eq([0, 30, 300, 52])
   end
+  # …and a comparison inside a `calc()` SUM — subtracted, scaled by a number, divided — travels as a program too
+  # (`nlSumTerms`: terms at a top-level `+` / `-`, factors at `*` / `/`), in every carrier: a width, an edge, a gap,
+  # a text-indent, a relative inset. It was the one form no program expressed until 2026-09-26, and the walk resolved
+  # it against the oracle's basis. Chrome's boxes, and no oracle read.
+  it 'resolves a comparison inside a calc() sum natively' do
+    {
+      '<div style="width:300px"><div id="m" style="width:calc(100% - min(50%, 80px));height:10px"></div></div>'   => [0, 0, 220, 10],
+      '<div style="width:300px"><div id="m" style="width:calc(2 * min(10%, 30px) + 5px);height:10px"></div></div>' => [0, 0, 65, 10],
+      '<div style="width:300px"><div id="m" style="margin-left:calc(max(5%, 10px) / 2);height:10px"></div></div>'  => [7.5, 0, 292.5, 10],
+      '<div style="width:400px;font:16px monospace;text-indent:calc(100px - min(10%, 50px))">hi<i id="m" style="display:inline-block;width:4px;height:4px"></i></div>' => [79.2, 13, 4, 4],
+      '<div style="display:flex;width:300px;column-gap:calc(min(10%, 20px) + 2px)"><div style="width:10px;height:10px"></div><div id="m" style="width:10px;height:10px"></div></div>' => [32, 0, 10, 10],
+      '<div style="width:300px"><div id="m" style="position:relative;left:calc(50% - max(10%, 20px));height:10px"></div></div>' => [120, 0, 300, 10]
+    }.each do |body, rect|
+      expect_parity(body)
+      laid_out_rect(body).zip(rect).each {|g, w| expect(g).to be_within(0.01).of(w), body }
+      session = simulated_session(page(body)); session.visit '/'
+      reads = session.evaluate_script('globalThis.__csimLayoutShadowRun(undefined, {noOracle: true})')['oracleReads'].keys
+      expect(reads.grep_v(/\(handed over\)\z/)).to be_empty, "#{body}: #{reads.inspect}"
+    end
+  end
 end

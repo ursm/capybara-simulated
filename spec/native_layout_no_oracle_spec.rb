@@ -53,12 +53,11 @@ RSpec.describe 'native layout no-oracle run', if: ENV.fetch('CSIM_JS_ENGINE', 'v
   end
 
   it 'records where the walk read an oracle stamp' do
-    # (a RELATIVE offset no program expresses — a comparison inside a `calc()` — still resolves against the oracle's
-    # basis: a plain or a linear percentage one is native's since 2026-09-24, a comparison function over one line since
-    # 2026-09-25 and any comparison of lines since 2026-09-26 — and a cell native cannot measure still asks the oracle's
+    # (a VERTICAL table's cell width with a percentage still resolves against the oracle's basis — a relative offset
+    # did until every comparison became a program, 2026-09-26 — and a cell native cannot measure still asks the oracle's
     # intrinsic widths; a plain percentage width no longer reads anything, and neither does an intrinsic SIZE, which is
     # data off the DOM rather than a layout the oracle ran)
-    s = session_with('<div style="width:300px"><p style="position:relative;left:calc(max(10%, calc(5% + 3px), 5px) + 0px)">hello</p>' \
+    s = session_with('<div style="width:300px"><table style="writing-mode:vertical-rl;height:200px"><tr><td style="width:calc(40% + 10px)">hello</td></tr></table>' \
                      "<table><tr><td>a #{WalkRefusals::POSITIONED}</td></tr></table></div>")
     reads = s.evaluate_script('globalThis.__csimLayoutShadowRun(undefined, {noOracle: true}).oracleReads')
     expect(reads.keys).to include('recordCbW _lbCbW')

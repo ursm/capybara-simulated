@@ -6905,13 +6905,14 @@ fn bounded(v: f64, prog: u32, basis: f64) -> f64 {
 }
 // A program of the pass's math table at `at` (layout.js `nlMathProgram` / `nlPackMath`): its length in triples, then
 // `[op, a, b]` apiece in postfix — `MATH_LINE` pushes the operand `a + b x basis`, `MATH_MIN` / `MATH_MAX` / `MATH_SUM`
-// fold the top two, `MATH_NEG` negates the top. A min / max takes a NaN through as `Math.min` / `Math.max` do, which `f64::min` does not; the two
+// fold the top two, `MATH_NEG` negates the top, `MATH_SCALE` multiplies it by `a`. A min / max takes a NaN through as `Math.min` / `Math.max` do, which `f64::min` does not; the two
 // engines have to agree on every figure, an unresolvable one included. A table the walk did not write — an offset
 // past its end, a fold with nothing to fold, a stack deeper than the walk ever builds — is NaN, not a panic.
 const MATH_LINE: f64 = 0.0;
 const MATH_MIN: f64 = 1.0;
 const MATH_MAX: f64 = 2.0;
 const MATH_NEG: f64 = 4.0;
+const MATH_SCALE: f64 = 5.0;
 const MATH_DEPTH: usize = 16;
 fn math_at(table: &[f64], at: usize, basis: f64) -> f64 {
     let Some(&len) = table.get(at) else { return f64::NAN };
@@ -6928,11 +6929,11 @@ fn math_at(table: &[f64], at: usize, basis: f64) -> f64 {
             sp += 1;
             continue;
         }
-        if op == MATH_NEG {
+        if op == MATH_NEG || op == MATH_SCALE {
             if sp == 0 {
                 return f64::NAN;
             }
-            stack[sp - 1] = -stack[sp - 1];
+            stack[sp - 1] = if op == MATH_NEG { -stack[sp - 1] } else { stack[sp - 1] * a };
             continue;
         }
         if sp < 2 {
@@ -9284,6 +9285,10 @@ mod tests {
         let negated = program(&[line(0.0, 0.1), line(20.0, 0.0), fold(MATH_MAX), [MATH_NEG, 0.0, 0.0]]);
         assert_eq!(math_at(&negated, 0, 100.0), -20.0);
         assert!(math_at(&program(&[[MATH_NEG, 0.0, 0.0]]), 0, 100.0).is_nan());
+        // …`calc(100% - 2 * min(10%, 30px))`: a sum, a subtracted term, a comparison a number scales
+        let summed_min = program(&[line(0.0, 1.0), line(0.0, 0.1), line(30.0, 0.0), fold(MATH_MIN), [MATH_SCALE, 2.0, 0.0], [MATH_NEG, 0.0, 0.0], [3.0, 0.0, 0.0]]);
+        assert_eq!(math_at(&summed_min, 0, 200.0), 160.0);
+        assert_eq!(math_at(&summed_min, 0, 1000.0), 940.0);
         // …NaN through a fold, where `f64::min` would have answered the other side
         assert!(math_at(&min3, 0, f64::NAN).is_nan());
         // …and a table the walk did not write
