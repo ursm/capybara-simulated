@@ -391,6 +391,22 @@ RSpec.describe 'native layout table parity', if: ENV.fetch('CSIM_JS_ENGINE', 'v8
     expect(r['nativeFlexRows']).to eq(1), r.inspect
   end
 
+  # A PUSHED table's box is the oracle's, and where the oracle laid it out at its own AUTO height (`pushed_h_indefinite`,
+  # rec[65] bit 17) its percentage ROWS met no basis: native shared that figure out as the rows' basis, and a `height:
+  # 50%` row of a 70px flex-item table came out 35 + 46 = 81 where the oracle and Chrome say 70 (24 + 46). A min-height
+  # is still the basis, as it is an auto table's. The flex items here are pushed by the `%` row itself.
+  it 'gives a pushed auto-height table\'s percentage rows no basis' do
+    table = '<table id="m" style="border-spacing:0"><tr style="height:50%"><td>t</td></tr><tr><td>t2<br>t3</td></tr></table>'
+    [
+      %(<div style="font:16px monospace"><div style="display:flex;width:300px">#{table}</div></div>),
+      %(<div style="font:16px monospace"><div style="display:flex;flex-direction:column;width:300px">#{table}</div></div>)
+    ].each do |body|
+      expect_parity(body)
+      expect(laid_out_rect(body)[3]).to eq(70), body
+    end
+    expect_parity('<div style="font:16px monospace"><div style="display:flex;width:300px"><table style="border-spacing:2px;min-height:120px"><tr style="height:50%"><td>t</td></tr><tr><td>t2<br>t3</td></tr></table></div></div>')
+  end
+
   # r2 — rtl tables (column reversal). The columns run RIGHT-to-LEFT: column 0 is at the right edge. The oracle
   # mirrors each cell within the table content box, and native reflects it within its row (row_w - ltr_rel -
   # cell_width); the row / group / table boxes span the whole grid and are direction-agnostic. A FULL-WIDTH

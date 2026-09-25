@@ -5701,8 +5701,8 @@ fn measure_table(
     // spacing around and between them — and only when that height is definite; the percentages are taken in
     // RENDER order (header, body, footer — the order the rows arrive in) and cannot overflow the basis (Chrome
     // squeezes a later one into what is left).
+    let to_content = |v: f64| if n.border_box { (v - n.edges_y()).max(0.0) } else { v };
     let imposed_h = {
-        let to_content = |v: f64| if n.border_box { (v - n.edges_y()).max(0.0) } else { v };
         // A DECLARED height is the ROWS' to share, and the caption stacks on top of it (Chrome: 120 + 18 = 138);
         // one imposed from OUTSIDE is the WRAPPER's, so the caption comes out of it BEFORE this table's own
         // min/max-height — which are the rows' too (Chrome: a table stretched to 100 under `min-height: 150px`
@@ -5712,7 +5712,16 @@ fn measure_table(
         let capped = if is_auto(n.max_h) { declared } else { declared.min(to_content(n.max_h)) };
         if is_auto(n.min_h) { capped } else { capped.max(to_content(n.min_h)) }
     };
-    let row_pct_basis = if imposed_h > 0.0 { (imposed_h - table_gaps(r_count, sy)).max(0.0) } else { f64::NAN };
+    // …and what a percentage row resolves against is that height only where it is DEFINITE: a PUSHED box whose height
+    // the oracle laid it out at as `auto` (`pushed_h_indefinite` — a pushed flex item's content height) shares out its
+    // rows at that figure, but its percentage rows met no basis there — only its min-height, as an auto table's do
+    // (a `height: 50%` row of a pushed 70px flex-item table came out 35 + 46 = 81, where the oracle and Chrome say 70).
+    let pct_imposed_h = if n.pushed_h_indefinite {
+        if is_auto(n.min_h) { 0.0 } else { to_content(n.min_h).max(0.0) }
+    } else {
+        imposed_h
+    };
+    let row_pct_basis = if pct_imposed_h > 0.0 { (pct_imposed_h - table_gaps(r_count, sy)).max(0.0) } else { f64::NAN };
     let mut row_h = vec![0.0f64; r_count];
     let mut row_declared = vec![false; r_count];
     let mut row_baseline = vec![0.0f64; r_count];
