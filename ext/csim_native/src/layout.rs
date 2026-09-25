@@ -4571,6 +4571,9 @@ fn measure_flex(
     let native_col = n.flex_native && !main_is_x;
     let mut native_lines: Vec<Vec<usize>> = Vec::new();
     let mut native_line_crosses: Vec<f64> = Vec::new(); // a native multi-line column's NATURAL line crosses
+    // Which row items' measures read a percentage height against the indefinite basis (`INDEF_PCT_H_READS`): a stretched
+    // one's height is DEFINITE (§9.8), so it is laid out again at it even where it comes to the height it measured.
+    let mut read_indefinite = vec![false; cnt];
     if native_col {
         // The column's main size: its definite content height, else a min-height FLOOR (NaN = none); lines break
         // against the definite height or a max-height CAP (NaN = one line).
@@ -4614,7 +4617,9 @@ fn measure_flex(
             }
         };
         for &p in &flow {
+            let reads = INDEF_PCT_H_READS.with(|n| n.get());
             measure(kids[p], widths[p], f64::NAN, inputs, runs, run_texts, grids, children, boxes, failed, &mut FloatCtx::new(), 0.0, 0.0);
+            read_indefinite[p] = INDEF_PCT_H_READS.with(|n| n.get()) != reads;
         }
         for &c in &kids {
             if inputs[c].get().out_of_flow != 0 && !inputs[c].get().native_oof() {
@@ -4905,6 +4910,9 @@ fn measure_flex(
     // (§9.4 step 11): the item is laid out again at the line's cross less its margins as an IMPOSED height
     // (its min/max-height still clamp), so its own contents see the taller box. The line's cross was measured
     // from the items' natural (hypothetical) heights, as the oracle's measureLineCross does before stackFlexLines.
+    // …and where the item's measure read a percentage height against the indefinite basis it is laid out again even at
+    // the height it came to: the stretched size is definite (§9.8), and that percentage resolves against it (Chrome: a
+    // `height: 10%` child of an item stretched to its own 22 is 2.19, overflowing it).
     if native_row {
         for (li, line) in lines.iter().enumerate() {
             for &p in line {
@@ -4914,7 +4922,7 @@ fn measure_flex(
                     continue;
                 }
                 let room = line_lc[li] - Input::m(cn.mt) - Input::m(cn.mb);
-                if boxes[c].h != room {
+                if boxes[c].h != room || read_indefinite[p] {
                     // The stretch is the WRAPPER's height, not a declared one: a table stretched to its line holds
                     // its caption inside that (`height_from_outside`), where a main-axis size stacks it on top.
                     inputs[c].set(Input { height_from_outside: true, ..cn });

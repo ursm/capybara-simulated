@@ -29,7 +29,7 @@ layout_walk:
     nodes: 2329
     compared: 2329
     mismatches: 0
-    sibScans: 2
+    sibScans: 1
     nativeAtomics: 700
     nativeFlexRows: 8
     nativeIntrinsicGrids: 0

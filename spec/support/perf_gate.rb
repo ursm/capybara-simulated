@@ -155,9 +155,10 @@ module PerfGate
 
   # …and what `layout_walk` adds: FLEX CONTAINERS with many children each. The walk's per-element
   # predicates are what this gate is here to hold, and the ones that have gone quadratic are the ones that
-  # answer a question about a box by looking at its SIBLINGS — `nlComputeMixedBlock` is the one there is, and
-  # `nlSubtreeDeclaresWalkPct` reaches it per element it recurses over. A wide level INSIDE an item is what
-  # makes that N²; the table above holds the rest of the walk (rows, cells, text blocks, inline content).
+  # answer a question about a box by looking at its SIBLINGS — `nlComputeMixedBlock` was the first, reached by
+  # `nlSubtreeDeclaresWalkPct` per element it recursed over (gone on 2026-09-25 with the percentage route it
+  # answered; `nlContinuedInline` is the one there is now). A wide level INSIDE an item is what made that N²;
+  # the table above holds the rest of the walk (rows, cells, text blocks, inline content).
   # Deliberately NO percentage anywhere in it: the regression that prompted this was paid by pages that
   # declare none, which is the case a gate is most likely to stop measuring.
   # The SHAPE is the whole point, and two wrong ones went in first — each of which measured the walk
@@ -168,10 +169,10 @@ module PerfGate
   # One flex item per container, holding one block with many children, is the shape that shows it.
   #
   # …and ONE of the eight has a PERCENTAGE on all of its spans, which is not symmetry and not decoration.
-  # The route test short-circuits on the declaration, so on a page that declares none the sibling-rescanning
-  # answer is never asked and dropping its MEMO costs nothing at all — the half of the hazard the comment
-  # names first would be invisible. It has to be asked MANY times under ONE parent for the memo to be what
-  # is measured: 300 declaring siblings read `sibScans` 1 memoised and 300 without it.
+  # The route test short-circuits on the declaration, so on a page that declares none whatever it asks next is
+  # never asked at all — a sibling rescan behind it would be invisible here. It has to be asked MANY times under
+  # ONE parent for a memo to be what is measured: 300 declaring siblings read the mixed-block scan once memoised
+  # and 300 times without it, while that scan existed; the declaring item keeps the route test on the clock.
   # …and one INLINE holding many atomics, whose every record asks which box around it is not an inline box
   # (`nlInlineContainer`) — which scans that inline's children unless the answer is memoised per walk: 300 atomics
   # read `sibScans` 1 memoised and 300 without it (a 2,000-atomic span took the shadow run from 28 ms to 1.5 s).

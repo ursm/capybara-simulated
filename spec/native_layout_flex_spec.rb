@@ -1585,6 +1585,20 @@ RSpec.describe 'native layout flex parity', if: ENV.fetch('CSIM_JS_ENGINE', 'v8'
     # — read at none (the edges the walk reads for the item's auto margins), a `margin-top: 10%` item lost its margin
     # from the ascent native hangs it by, 55 where the oracle and Chrome say 40. (The child's three-operand `min()`
     # height — two lines that cross, beside a constant — is what the walk cannot carry, which pushes the items.)
+    # A STRETCHED row item's size is definite (§9.8), so a percentage height under it resolves against it even where
+    # the stretch comes to the height the item measured — both engines laid it out again only where the two differed,
+    # and a `height: 10%` child stayed 0 (Chrome 2.19, overflowing the 22px item). Native reached 2.2 only where a `vw`
+    # margin rounded the room 4e-15 off the measure. The row twin of 2c7fd42c's column rule; Chrome's figures.
+    it 'resolves a percentage height against a stretched row item that came to its own height' do
+      [
+        '<div style="display:flex;width:300px;font:16px monospace"><div>aa bb cc dd<div id="m" style="height:10%"></div></div><div>z</div></div>',
+        '<div style="display:flex;width:300px;font:16px monospace"><div><p style="margin:0">aa bb</p><div id="m" style="height:10%"></div></div><div>z</div></div>',
+        '<div style="display:flex;width:300px;font:16px monospace"><div style="margin:max(2vw, 5%) 0">aa bb cc dd<div id="m" style="height:min(10%, 20%, 30px)"></div></div><div>z</div></div>'
+      ].each do |body|
+        expect_native_flex(body)
+        expect(marked_box(body)[1]).to be_within(0.02).of(2.188), body   # Chrome
+      end
+    end
     it 'hangs a pushed baseline item by the ascent of its percentage-margined box' do
       body = '<div id="c" style="display:flex;align-items:baseline;width:400px;height:200px;font:16px monospace">' \
              '<div style="margin-top:10%">a<div style="height:min(10%, calc(5% + 20px), 90px)"></div></div><div style="font-size:30px">b</div></div>'
