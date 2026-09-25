@@ -231,16 +231,22 @@ RSpec.describe 'declaration validation' do
   end
 
   # A lone DELIMITER is no property's value — every length grammar took it for a keyword mdn omits —
-  # and a box shorthand spread one onto a side: `margin: 0 min(10px, 26%) + max(5em, 20px)`, a
-  # `calc()` written without its `calc()`, kept `margin-bottom: +` and applied `margin-left:
-  # max(5em, 20px)` (80px) where Chrome drops the declaration on every surface. Only as the WHOLE
-  # value: `grid-area: 1 / 2` and `font: 12px/1.5 serif` are components beside it.
-  it 'drops a lone delimiter' do
+  # and neither is a top-level `+`, `-` or `*` beside other components, nor a bare `( … )` block:
+  # a `calc()` written without its `calc()`. A box shorthand spread one onto a side (`margin: 0
+  # min(10px, 26%) + max(5em, 20px)` kept `margin-bottom: +` and applied `margin-left: max(5em,
+  # 20px)`, 80px), and a grammar of several components took each for a keyword. Chrome drops every
+  # one of these on every surface; `/` is a separator in `grid-area` and `font`, and stays.
+  it 'drops a math operator outside a math function' do
     [%w[marginTop +], %w[marginTop -], %w[width *], %w[paddingTop /], %w[opacity +], %w[lineHeight +], %w[top +],
      %w[zIndex -], %w[fontFamily *], %w[gridColumn /], ['margin', '0 1px + 2px'], ['padding', '0 1px - 2px'],
-     ['inset', '0 1px + 2px']].each do |prop, value|
+     ['inset', '0 1px + 2px'], ['textIndent', '10px + 5px'], ['textIndent', '10px * 2'], ['textIndent', '(10px)'],
+     ['marginLeft', '(10px)'], ['font', '12px + serif'], ['fontFamily', 'a + b'], ['transition', 'all 1s - 2s'],
+     ['content', '"a" + "b"'], ['filter', 'blur(2px) + blur(3px)']].each do |prop, value|
       expect(set(prop, value)).to eq(''), "#{prop}: #{value}"
     end
+    expect(set('textIndent', '10px hanging')).to eq('10px hanging')
+    expect(set('content', '"a + b"')).to eq('"a + b"')
+    expect(set('width', 'calc( (1px + 2px) * 2)')).to eq('calc(6px)')
     expect(set('gridArea', '1 / 2')).to eq('1 / 2')
     session = simulated_session(->(_env) { [200, {'content-type' => 'text/html'}, ['<!DOCTYPE html><html><body><div id="m" style="margin:0 min(10px, 26%) + max(5em, 20px)"></div></body></html>']] })
     session.visit '/'
