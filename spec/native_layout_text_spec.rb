@@ -1611,6 +1611,20 @@ RSpec.describe 'native layout L2 text-block parity', if: ENV.fetch('CSIM_JS_ENGI
     end
 
 
+    # A RUN of soft hyphens is ONE opportunity: the oracle splits on each and drops the empty parts between, and so does
+    # Chrome — where native cut after the first, the second became a zero-wide piece of its own that decided the hyphen
+    # against nothing (`aaa&shy;&shy;&shy;bbbb` in 35px: 66 tall in native, 44 in the oracle and Chrome). The marker
+    # positions are Chrome's.
+    it 'breaks a run of soft hyphens as one opportunity' do
+      expect_parity('<div style="font:16px monospace"><div style="width:35px">aaa&shy;&shy;&shy;bbbb</div><b id="m" style="display:inline-block;width:4px;height:4px"></b></div>', 0, chrome_y: 57)
+      expect_parity('<div style="font:16px monospace"><div style="width:25px;text-indent:13px hanging">aa&shy;&shy;bb cc</div><b id="m" style="display:inline-block;width:4px;height:4px"></b></div>', 0, chrome_y: 79)
+      expect_parity('<div style="font:16px monospace"><div style="width:49px"><span style="hyphens:none">aa&shy;&shy;bb cc</span> aa&shy;&shy;bb cc</div><b id="m" style="display:inline-block;width:4px;height:4px"></b></div>', 0, chrome_y: 101)
+    end
+    # …and a node of NOTHING but soft hyphens under `hyphens: none` is no content once the gather strips them, where the
+    # oracle places it as a zero-wide word that makes the line (Chrome: 22 tall) — so it declines.
+    it 'declines a node of soft hyphens that hyphens: none empties' do
+      expect(shadow('<div style="width:200px"><div style="hyphens:none">&shy;</div>x</div>')).to include('ok' => false, 'reason' => 'text-not-measurable')
+    end
     # What native still cannot measure is refused by the WALK, not discovered in Rust: a soft hyphen that ENDS a text
     # node (its opportunity, hyphen and all, crosses to the next run), and a ZWJ under a per-character wrap (where the
     # oracle's advance carries the previous character). (A preserved form feed was the first example here until

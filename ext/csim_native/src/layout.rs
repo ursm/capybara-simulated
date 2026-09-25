@@ -2530,7 +2530,8 @@ fn line_layout(
                                 // (…a soft hyphen ENDING the piece is no unit of its own: it rides the piece's last one,
                                 // which is the unit the oracle's `shy` flag is on — cut per character, the SHY alone was
                                 // a zero-wide unit that decided the hyphen in the 'b' of `ab&shy;cd`'s stead.)
-                                let cut_end = if word_shy && pend - u > 1 && text[pend - 1] == SOFT_HYPHEN { pend - 1 } else { pend };
+                                let tail = if word_shy { trailing_shys(&text[u..pend]) } else { 0 };
+                                let cut_end = if tail > 0 && pend - u > tail { pend - tail } else { pend };
                                 while u < pend {
                                     let mut ulen = break_unit_len(text, u, cut_end.max(u + 1), per_char);
                                     if u + ulen == cut_end && cut_end < pend {
@@ -2601,7 +2602,7 @@ fn line_layout(
                                     flush_tail_gaps!();
                                     // (…the piece's own text, a soft hyphen it ends in left out as the oracle's piece leaves
                                     // it: zero-wide and no content, it must not make an NBSP before it an inner gap.)
-                                    let gap_end = if text[u + ulen - 1] == SOFT_HYPHEN { u + ulen - 1 } else { u + ulen };
+                                    let gap_end = u + ulen - trailing_shys(&text[u..u + ulen]);
                                     note_nbsp_gaps!(run, &text[u..gap_end], band_l(total) + line_x);
                                     let (at, to) = advance!(cw);
                                     drop_hangs!(false);
@@ -3019,8 +3020,20 @@ fn ends_with_break(u: u16) -> bool {
 // keeps (`well-known` is `well-` then `known`), or at the word's end where there is none — the oracle's
 // `hyphenPieces`. Only hyphens cut here: a wide character inside a piece is the unit loop's business, not this
 // one's, so the two cuts compose the way `breakUnits` composes them.
+// A RUN of soft hyphens is ONE opportunity, ending the piece after the last of them: the oracle splits on each and
+// drops the empty parts between (`aa&shy;&shy;bb` is `aa` then `bb`), where cutting after the first made the second a
+// zero-wide piece of its own that decided the hyphen against nothing (Chrome: 88 tall where native said 66).
 fn hyphen_piece_end(text: &[u16], u: usize, end: usize) -> usize {
-    (u..end).find(|&k| text[k] == SOFT_HYPHEN || hyphen_breaks_after(text, k, end)).map_or(end, |k| k + 1)
+    match (u..end).find(|&k| text[k] == SOFT_HYPHEN || hyphen_breaks_after(text, k, end)) {
+        Some(k) if text[k] == SOFT_HYPHEN => (k..end).find(|&j| text[j] != SOFT_HYPHEN).unwrap_or(end),
+        Some(k) => k + 1,
+        None => end,
+    }
+}
+// How many soft hyphens `text` ENDS in — the zero-wide tail a piece's last unit carries (`cut_end`) and a gap test
+// leaves out (`note_nbsp_gaps`).
+fn trailing_shys(text: &[u16]) -> usize {
+    text.iter().rev().take_while(|&&c| c == SOFT_HYPHEN).count()
 }
 // A SOFT hyphen (U+00AD) is zero-wide (`font::zero_width`) and an opportunity wherever it sits; where the line breaks
 // at it, it shows a hyphen — the bare `-` advance of its run's font, no letter-spacing after it (Chrome: `aaaa&shy;bbbb`
