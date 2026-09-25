@@ -383,13 +383,13 @@ RSpec.describe 'native layout L1 block-flow parity', if: ENV.fetch('CSIM_JS_ENGI
   # A REPORTED reason is not a census — a shape blocked by several gates names only the first it reached.
   # That is the SET census's question, not this string's.
   describe 'the reason a pass declines' do
-    # One flex container the walk refuses — an ORPHAN `display: table-row` holding an ELEMENT, which the oracle LAYS
-    # OUT as an equal-share flex row native has no sizing for (see `nlFlexSupported`) — in three roles below: a block's
-    # child, a mixed block's FLOATED child, and the later decline a rolled-back attempt must not be blamed for. One
-    # shape, so the three cannot drift into testing different gates. (It was a wrapping auto-height column with a
-    # max-height until 2026-09-24, when native learned to size that one's lines, and an orphan row of bare text until
-    # 2026-09-26, when a flex record learned to carry the run stream its measure reads.)
-    UNSUPPORTED_FLEX = '<div style="display:table-row"><div>aa bb</div></div>'
+    # One flex container the walk refuses — an ORPHAN `display: table-row` holding an INLINE element, which the oracle
+    # MEASURES on a line where native's block walk would stack it (see `nlFlexSupported`) — in three roles below: a
+    # block's child, a mixed block's FLOATED child, and the later decline a rolled-back attempt must not be blamed for.
+    # One shape, so the three cannot drift into testing different gates. (It was a wrapping auto-height column with a
+    # max-height until 2026-09-24, when native learned to size that one's lines, and orphan rows of bare text and of
+    # block children until 2026-09-26.)
+    UNSUPPORTED_FLEX = '<div style="display:table-row"><span>aa bb</span></div>'
 
     # The load-bearing half is the ROLLBACK. Several routes try a subtree and fall back: a table cell that
     # cannot be measured is re-walked as a boundary, and the pass goes on. A reason latched inside such an

@@ -1567,11 +1567,31 @@ RSpec.describe 'native layout table parity', if: ENV.fetch('CSIM_JS_ENGINE', 'v8
       expect_parity('<div style="width:400px"><div style="display:table-row">x</div><div style="height:4px"></div></div>')
     end
 
-    # …and REFUSES one with an ELEMENT child, for the reason the boundary above gives. Without these the narrowing is a
-    # silent one: the gate could widen back to "any orphan row" and nothing would fail, because no shape
-    # anywhere exercises the equal-share sizing it would then need.
-    it 'refuses one with element children' do
-      expect_declines('<div style="width:400px"><div style="display:table-row"><div>aaaa</div><div>bbbb</div></div></div>',
+    # …and one of BLOCK-LEVEL element children as the oracle's EQUAL-SHARE flex row (`NL_FLAG_EQUAL_SHARE`): each item
+    # POSITIONED at `floor(available / n)` of the row — a table at its own width where that is wider — and laid out at
+    # its own used width, a declared one kept; measured as the widest child. A cell in such a row is an orphan too, a
+    # plain block. 72 `orphanpart` declines until 2026-09-26, and the 589 shapes of `rv47share` hold the multi-item
+    # arithmetic. SHARED with Chrome, which wraps the row in an anonymous table: a block child after `aa` sits at
+    # x 150 in both engines and under it (0, 22) in Chrome, a second cell at 150 where Chrome shrinks both to 19.2.
+    it 'lays one of block children out natively, each at an equal share' do
+      blocks = '<div style="width:300px;font:16px monospace"><div style="display:table-row"><div>aa</div><div id="m" style="width:50px">w</div></div></div>'
+      cells = '<div style="width:300px;font:16px monospace"><div style="display:table-row"><div style="display:table-cell">aa</div><div id="m" style="display:table-cell">bb</div></div></div>'
+      [blocks, cells].each {|body| expect_parity(body) }
+      expect_shared_gap(laid_out_rect(blocks)[0], shared: 150, chrome: 0, what: "#{blocks}: #m x")
+      expect_shared_gap(laid_out_rect(cells)[2], shared: 150, chrome: 19.2, what: "#{cells}: #m width")
+      table = '<div style="width:300px;font:16px monospace"><div style="display:table-row"><table style="border-spacing:0"><tr><td>wideunbreakabletablecontent</td></tr></table>' \
+              '<div id="m">b</div><div>c</div></div></div>'
+      expect_parity(table)
+      expect(laid_out_rect(table)[0]).to be_within(0.02).of(261.2)   # past its 100px share, at the table's own width (both engines)
+      r = run_shadow(blocks, '{noOracle: true}')
+      expect(r).to include('ok' => true, 'mismatches' => 0)
+      expect(r['oracleReads'].to_h.keys.grep_v(/\(handed over\)\z/)).to be_empty, r.inspect
+    end
+
+    # …and REFUSES one with an INLINE-level or floated element child, which the oracle's measure puts on a LINE where the
+    # block walk stacks it. Without these the narrowing is a silent one: the gate could widen back to "any orphan row".
+    it 'refuses one with inline-level children' do
+      expect_declines('<div style="width:400px"><div style="display:table-row"><span>aaaa</span><span>bbbb</span></div></div>',
                       'flex-container-unsupported')
       # …a `<br>` is an element and so an item: the row is not empty.
       expect_declines('<div style="width:400px"><div style="display:table-row"><br></div></div>', 'flex-container-unsupported')

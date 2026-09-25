@@ -193,9 +193,13 @@ pub(crate) struct Input {
     // is a comparison function over affine operands (`bounded`).
     pub(crate) rel_x_px: f64,
     pub(crate) rel_x_neg: bool,
-    // A FLEX record whose run range is its content for the INTRINSIC measure alone (`content_intrinsic`): an orphan
-    // `display: table-row` of bare text, which the oracle's flex layout drops and its block-stacking measure reads.
-    pub(crate) measures_runs: bool,
+    // A FLEX record MEASURED AS A BLOCK (`content_intrinsic`): an orphan `display: table-row`, which the oracle lays out
+    // as a flex row and measures through its block-stacking arm — by its run range where it holds bare text (which the
+    // flex layout drops), else by its children stacked.
+    pub(crate) measured_as_block: bool,
+    // …and whose items take an EQUAL SHARE of the row (the oracle's `layoutFlexRow(…, {equalShare})`): each POSITIONED
+    // at `floor(available / n)` — a table at its own width where that is wider — and laid out at its own used width.
+    pub(crate) equal_share: bool,
     // …and the relative INLINE boxes' chain it sits in, where one is a percentage (`nlAddChainRel`): its fraction of the
     // containing block's width, of its height where definite, and the correction to the chain's length in `rel_pct[6]`
     // where that height is not. [0, 0, 0] for none.
@@ -4773,13 +4777,16 @@ fn measure_flex(
     // base, clamps, line breaking, grow/shrink), and its subtree laid out at that width; the pushed path lays
     // each item out at its oracle-resolved box. Either way record order == flex order (the harness sorted by
     // `order`), each item in a fresh float context.
-    let native_row = n.flex_native && main_is_x;
+    // (…an EQUAL-SHARE row is no flex sizing: its items are sized and its one line built below, `share_pos`.)
+    let native_row = n.flex_native && main_is_x && !n.equal_share;
     let native_col = n.flex_native && !main_is_x;
     let mut native_lines: Vec<Vec<usize>> = Vec::new();
     let mut native_line_crosses: Vec<f64> = Vec::new(); // a native multi-line column's NATURAL line crosses
     // Which row items' measures read a percentage height against the indefinite basis (`INDEF_PCT_H_READS`): a stretched
     // one's height is DEFINITE (§9.8), so it is laid out again at it even where it comes to the height it measured.
     let mut read_indefinite = vec![false; cnt];
+    // …and an equal-share row's items' POSITIONING widths (their shares), which are not their boxes.
+    let mut share_pos = vec![f64::NAN; cnt];
     if native_col {
         // The column's main size: its definite content height, else a min-height FLOOR (NaN = none); lines break
         // against the definite height or a max-height CAP (NaN = one line).
@@ -4807,6 +4814,29 @@ fn measure_flex(
             if imposed || boxes[kids[p]].w != w_p {
                 measure(kids[p], w_p, if imposed { h_p } else { f64::NAN }, inputs, runs, run_texts, grids, children, boxes, failed, &mut FloatCtx::new(), 0.0, 0.0);
             }
+        }
+        for &c in &kids {
+            if inputs[c].get().out_of_flow != 0 && !inputs[c].get().native_oof() {
+                let iw = resolve_width(&inputs[c].get(), content_w);
+                measure(c, iw, f64::NAN, inputs, runs, run_texts, grids, children, boxes, failed, &mut FloatCtx::new(), 0.0, 0.0);
+            }
+        }
+    } else if n.equal_share && main_is_x {
+        // An EQUAL SHARE of the row (the oracle's `layoutFlexRow(…, {equalShare})`, an orphan table row): the gaps and
+        // the items' margins come out first, the rest is floored into equal shares, and each item is laid out at its
+        // own used width — a declared one kept, an auto one the share, both clamped by its min/max — where its
+        // POSITION takes the share (`share_pos`, read below). A TABLE is laid out at its share and positioned at
+        // whichever is wider (`growMainSizes`).
+        let taken: f64 = gap * flow.len().saturating_sub(1) as f64
+            + flow.iter().map(|&p| { let k = inputs[kids[p]].get(); Input::m(k.ml) + Input::m(k.mr) }).sum::<f64>();
+        let avail = (content_w - taken).max(0.0);
+        let share = if flow.is_empty() { avail } else { (avail / flow.len() as f64).floor() };
+        for &p in &flow {
+            let k = inputs[kids[p]].get();
+            let reads = INDEF_PCT_H_READS.with(|n| n.get());
+            measure(kids[p], used_width(&k, share), f64::NAN, inputs, runs, run_texts, grids, children, boxes, failed, &mut FloatCtx::new(), 0.0, 0.0);
+            read_indefinite[p] = INDEF_PCT_H_READS.with(|n| n.get()) != reads;
+            share_pos[p] = if k.display == DISPLAY_TABLE { share.max(boxes[kids[p]].w) } else { share };
         }
         for &c in &kids {
             if inputs[c].get().out_of_flow != 0 && !inputs[c].get().native_oof() {
@@ -4855,7 +4885,8 @@ fn measure_flex(
         // physical side (a row-reverse item's leading margin is its right margin). The cross is forward here,
         // so the leading cross margin is the ordinary near-side one.
         if main_is_x {
-            mo.push(boxes[c].w + Input::m(cn.ml) + Input::m(cn.mr));
+            let pos = share_pos[mo.len()];
+            mo.push(if pos.is_nan() { boxes[c].w } else { pos } + Input::m(cn.ml) + Input::m(cn.mr));
             co.push(boxes[c].h + Input::m(cn.mt) + Input::m(cn.mb));
             ml_lead.push(Input::m(if main_reverse { cn.mr } else { cn.ml }));
             cl_lead.push(Input::m(cn.mt));
@@ -5119,7 +5150,7 @@ fn measure_flex(
     // …and where the item's measure read a percentage height against the indefinite basis it is laid out again even at
     // the height it came to: the stretched size is definite (§9.8), and that percentage resolves against it (Chrome: a
     // `height: 10%` child of an item stretched to its own 22 is 2.19, overflowing it).
-    if native_row {
+    if native_row || n.equal_share {
         for (li, line) in lines.iter().enumerate() {
             for &p in line {
                 let c = kids[p];
@@ -6635,7 +6666,7 @@ fn intrinsic_widths_of(i: usize, inputs: &[Cell<Input>], runs: &[Run], run_texts
         (w, w)
     } else if n.replaced && !n.ratio_only {
         (n.intrinsic_w, n.intrinsic_w) // a replaced box wants its intrinsic width (a ratio-only one, its container's)
-    } else if n.display == DISPLAY_FLEX && !n.measures_runs {
+    } else if n.display == DISPLAY_FLEX && !n.measured_as_block {
         flex_intrinsic_widths(i, inputs, runs, run_texts, grids, children)?
     } else if n.display == DISPLAY_TABLE {
         // A table brings its own algorithm for the same question, and its rows are not blocks to be measured one
@@ -6675,7 +6706,7 @@ fn content_intrinsic(i: usize, inputs: &[Cell<Input>], runs: &[Run], run_texts: 
     match n.display {
         // (…and a FLEX record whose run stream is its content for this measure alone — an orphan table row of bare
         // text, which the oracle lays out with none of it and measures as the block of it it would be.)
-        d if d == DISPLAY_TEXT_BLOCK || (d == DISPLAY_FLEX && n.measures_runs) => {
+        d if d == DISPLAY_TEXT_BLOCK || (d == DISPLAY_FLEX && n.measured_as_block && n.run_count > 0) => {
             let (rs, re) = (n.run_start.max(0) as usize, (n.run_start + n.run_count).max(0) as usize);
             if re > runs.len() || rs > re {
                 return None;
@@ -8100,7 +8131,8 @@ mod tests {
             rel_pct: [f64::NAN, f64::NAN, f64::NAN, f64::NAN, f64::NAN, 0.0, 0.0],
             rel_x_px: 0.0,
             rel_x_neg: false,
-            measures_runs: false,
+            measured_as_block: false,
+            equal_share: false,
             chain_rel: [0.0; 3],
             chain_math: [NO_MATH; 2],
             rel_math: [NO_MATH; 3],
