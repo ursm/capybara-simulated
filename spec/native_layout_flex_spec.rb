@@ -1186,6 +1186,13 @@ RSpec.describe 'native layout flex parity', if: ENV.fetch('CSIM_JS_ENGINE', 'v8'
     # …and a table PART's percentage native resolves itself: a cell's `width` (its column's), `padding` (the table's,
     # `measure_table`), `height` (no basis) and a row's `height` (its minimum) — every table part was the walk's until
     # 2026-09-25 and pushed the container around it. A cell's `min-width` / `max-width` still is, and still pushes.
+    # …and a BLOCK inside a `display: inline` box, which both engines lay out as an atomic holding it: the block's record
+    # hangs under that atomic, whose basis native has — the route pushed its container "as the conservative answer"
+    # until 2026-09-25, `display: contents` between them or not.
+    it 'sizes natively over a percentage on a block inside an inline box' do
+      expect_native_flex('<div style="display:flex;width:300px;height:100px"><div><div style="height:100%">words <b>b <span style="display:contents"><div style="height:50%">blk</div></span></b></div></div><div style="width:30px;height:40px"></div></div>')
+      expect_native_flex(%(<div style="#{col};height:120px"><div style="flex:1"><div style="height:100%">words <b>b <div style="padding-left:20%;width:50%">blk</div></b></div></div><div>z</div></div>))
+    end
     it 'sizes a column natively over a table whose parts declare percentages native resolves' do
       ['width:40%', 'padding:0 10%', 'height:50%'].each do |decl|
         expect_native_flex(%(<div style="#{col};height:200px;font:16px monospace"><table style="border-spacing:2px"><tr><td style="#{decl}">aa bb</td><td>cc</td></tr></table><div style="width:40px">y</div></div>))
