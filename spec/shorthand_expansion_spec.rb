@@ -295,6 +295,23 @@ RSpec.describe 'shorthand expansion' do
                        'scroll-margin-top: 2px; scroll-margin-block-start: 3px; color: red;'])
   end
 
+  # CSSOM §6.7.2 ("serialize a CSS declaration block"): a shorthand is not used for longhands that have a
+  # declaration of the same LOGICAL PROPERTY GROUP but the other mapping between them — so `top ... left` with an
+  # `inset-block-start` in the middle stays five longhands, as margin does. This is the one place in this file
+  # that does not follow Chrome, deliberately: Chrome 153 skips the guard for every group and writes
+  # `inset: 1px; inset-block-start: 5px;` (and `margin: 1px; margin-block-start: 5px;`). The spec is the bar here
+  # (WPT pins the margin / padding half in `cssstyledeclaration-setter-logical.html`; nothing pins inset).
+  it 'keeps the longhands of a logical group whose other mapping sits between them' do
+    s = session('<!DOCTYPE html><html><body><div id="a"></div></body></html>')
+    serialize = ->(css) { s.evaluate_script("(() => { const d = document.getElementById('a'); d.style.cssText = #{css.to_json}; return d.style.cssText; })()") }
+    expect(serialize.('top:1px; inset-block-start:5px; right:1px; bottom:1px; left:1px'))
+      .to eq('top: 1px; inset-block-start: 5px; right: 1px; bottom: 1px; left: 1px;')
+    expect(serialize.('margin-top:1px; margin-block-start:5px; margin-right:1px; margin-bottom:1px; margin-left:1px'))
+      .to eq('margin-top: 1px; margin-block-start: 5px; margin-right: 1px; margin-bottom: 1px; margin-left: 1px;')
+    # …and a declaration of the other mapping AFTER them does not interleave: the shorthand stands.
+    expect(serialize.('top:1px; right:1px; bottom:1px; left:1px; inset-block-start:5px')).to eq('inset: 1px; inset-block-start: 5px;')
+  end
+
   it 'resets the longhands a shorthand does not mention to their initial' do
     # A shorthand sets EVERY longhand it names; the omitted ones take their initial rather than
     # nothing. `text-decoration` only emitted the components actually written, which left the
