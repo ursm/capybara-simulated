@@ -664,13 +664,21 @@ RSpec.describe 'native layout table parity', if: ENV.fetch('CSIM_JS_ENGINE', 'v8
     expect_parity(oof_table(inner_table: '<div style="position:absolute;top:2px">shrink to fit</div>'))
   end
 
-  # A containing block whose own edges are PERCENTAGES is one native cannot re-derive a padding box for, so the
-  # box is REPLAYED instead — the oracle's border box pushed with its displacement from the table's origin. The
-  # only shape here that takes that arm (`nativeOutOfFlow` stays 0), and it is a whole second code path.
-  it 'matches a REPLAYED out-of-flow table child (its containing block has percentage edges)' do
-    body = %(<div style="position:relative;padding:5%;width:300px">#{oof_table(inner_table: OOF_BOX)}</div>)
+  # A shrink-to-fit box whose content native cannot measure — an inline-table with two captions — is REPLAYED
+  # instead: the oracle's border box pushed with its displacement from the table's origin. The only shape here that
+  # takes that arm (`nativeOutOfFlow` stays 0), and it is a whole second code path. (A containing block with
+  # PERCENTAGE edges was the shape until native placed against one itself: its padding box is its border box less
+  # its borders, which no percentage is.)
+  it 'matches a REPLAYED out-of-flow table child (content native cannot measure)' do
+    unmeasured = '<div style="position:absolute;top:2px"><span style="display:inline-table"><span style="display:table-caption">c</span>' \
+                 '<span style="display:table-caption">d</span></span></div>'
+    body = %(<div style="position:relative;width:300px">#{oof_table(inner_table: unmeasured)}</div>)
     expect_parity(body)
     expect(run_shadow(body)['nativeOutOfFlow']).to eq(0), 'expected the replay arm, not the native placement'
+    # …and against a containing block with percentage edges, native's own now.
+    body = %(<div style="position:relative;padding:5%;width:300px">#{oof_table(inner_table: OOF_BOX)}</div>)
+    expect_parity(body)
+    expect(run_shadow(body)['nativeOutOfFlow']).to eq(1)
   end
 
   # A caption is a normal block in the table's BORDER box (§17.4 wrapper box): declared height / width / min-max /

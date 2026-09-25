@@ -148,6 +148,8 @@ RSpec.describe 'native layout no-oracle run', if: ENV.fetch('CSIM_JS_ENGINE', 'v
       # box with length insets
       '<div style="position:relative;width:300px;height:200px;border:5px solid"><div style="position:absolute;left:10%;top:20%;width:30%;height:25%;padding:0 5%">abs</div></div>',
       '<div style="width:300px;height:200px"><div style="position:absolute;left:5%;right:5%;top:0;bottom:10%">viewport</div></div>',
+      # …and against a containing block with PERCENTAGE padding, whose padding box is its border box less its borders
+      '<div style="position:relative;width:300px;padding:5% 2%;border:3px solid"><div style="position:absolute;left:10%;width:50%;top:0">abs</div><p>x</p></div>',
       '<div style="position:relative;left:4px;top:-3px;width:300px"><div style="position:absolute;inset:10%">rel</div><p>x</p></div>',
       # …and against a relatively positioned INLINE, from the fragments native lays it out as — wrapping, offset by
       # lengths, and resolving the box's percentages
