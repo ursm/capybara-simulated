@@ -1006,6 +1006,9 @@ RSpec.describe 'native layout flex parity', if: ENV.fetch('CSIM_JS_ENGINE', 'v8'
       route = %(<div style="#{col};flex-wrap:wrap;height:200px;font:16px monospace"><div style="align-self:flex-start">) +
               '<table style="writing-mode:vertical-rl"><tr><td style="min-width:40%">aa</td><td>bb</td></tr></table></div><div style="width:30px;height:20px"></div></div>'
       expect(run_shadow(route)).to include('ok' => true, 'mismatches' => 0, 'nativeFlexRows' => 0)
+      # …and a percentage the cascade cannot resolve at ANY basis (a container-query unit beside it) is no reason to push:
+      # the oracle lays that box out as `auto`, which is what the record says (SHARED with Chrome, which resolves it)
+      expect_native_flex(%(<div style="#{col};height:200px"><div style="flex:1 1 auto"><div style="height:calc(50% + 1cqh)">pct</div></div><div style="flex:1 1 auto">plain</div></div>))
       # …where a comparison inside a `calc()` sum — scaled and subtracted too — is native's as the rest are
       [%(<div style="#{col};height:200px"><div style="flex:1 1 auto"><div style="min-height:calc(100% - 2 * min(25%, 40px))">pct</div></div><div style="flex:1 1 auto">plain</div></div>),
        '<div style="display:flex;width:400px"><div><div style="min-height:calc(min(50%, calc(10% + 40px), 80px) / 2 + 5px)">pct</div></div><div style="height:40px;width:50px"></div></div>'].each do |body|
