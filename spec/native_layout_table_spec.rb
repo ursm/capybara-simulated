@@ -1593,6 +1593,25 @@ RSpec.describe 'native layout table parity', if: ENV.fetch('CSIM_JS_ENGINE', 'v8
       expect(laid_out_rect(body)[2]).to be_within(0.02).of(10.26), w
     end
   end
+  # …and a horizontal cell's `min-width` / `max-width` percentage reaches its box no more than its width does — a 60%
+  # minimum and a 10% maximum leave the column alone, in Chrome and in both engines — so the record carries none: the
+  # walk resolved them against the oracle's table until 2026-09-26, and PUSHED every flex container holding such a
+  # table for it (`descendant-walk-percentage: min-width route`). Chrome's widths.
+  it 'lays out a cell\'s percentage min-width and max-width natively, reaching nothing' do
+    {
+      '<table style="width:400px;border-spacing:0;font:16px monospace"><tr><td id="m" style="min-width:60%;padding:0">a</td><td style="padding:0">b</td></tr></table>' => 200,
+      '<table style="width:400px;border-spacing:0;font:16px monospace"><tr><td id="m" style="max-width:10%;padding:0">aaaa bbbb cccc dddd</td><td style="padding:0">b</td></tr></table>' => 379.97,
+      '<table style="width:400px;border-spacing:0;font:16px monospace"><tr><td id="m" style="min-width:max(20%, calc(10% + 50px));padding:0">a</td><td style="padding:0">b</td></tr></table>' => 200,
+      '<div style="display:flex;flex-direction:column;width:320px;height:200px;font:16px monospace"><table style="border-spacing:2px"><tr><td id="m" style="min-width:30%">aa bb</td><td>cc</td></tr>' \
+      '<tr><td colspan="2">dd ee ff</td></tr></table><div style="width:40px">y</div></div>' => 220.48
+    }.each do |body, w|
+      expect_parity(body)
+      expect(laid_out_rect(body)[2]).to be_within(0.05).of(w), body
+      r = run_shadow(body, '{noOracle: true}')
+      expect(r).to include('ok' => true, 'mismatches' => 0)
+      expect(r['oracleReads'].to_h.keys.grep_v(/\(handed over\)\z/)).to be_empty, "#{body}: #{r.inspect}"
+    end
+  end
   describe 'an orphan cell, row group or caption' do
     it 'lays one out as a block whose block-axis min/max do not apply' do
       %w[min-height:40px max-height:5px].each do |style|
