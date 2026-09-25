@@ -1451,6 +1451,9 @@ fn line_layout(
     // merges only same-font ones — a plain `<b>` around a Japanese word, or around the hyphen of
     // `well<b>-</b>known`, already splits them.
     let mut ends_open = false;
+    // A soft hyphen's piece placed WITHOUT its hyphen, whose hyphen still shows where the line breaks before the next
+    // unit (`take_break!`) — the width it would take; the oracle's `barrier.shy`.
+    let mut shy_pending: Option<f64> = None;
     // Close the current line and start a fresh one. `soft_break!` is the geometry alone (a mid-word wrap, a
     // between-words wrap, a break before an atomic — where no pending space or after-atomic break carries over);
     // `break_line!` adds the resets a HARD break needs (a <br>, a preserved/pre-line newline, an empty line's
@@ -1811,6 +1814,18 @@ fn line_layout(
             line_outer_min = 0.0;
             line_has_content = false;
             line_placed = false;
+        }};
+    }
+    // …a wrap taken where a SOFT hyphen's piece still waits for its hyphen shows it first, on the line it ends (the
+    // oracle's `takeBreak`: "aa\u00ADbb\u00ADcc" in 39px is "aa-" / "bbcc").
+    macro_rules! take_break {
+        () => {{
+            if let Some(hy) = shy_pending.take() {
+                flush_tail_gaps!(); // (…content: an NBSP held before it is a gap now, as `placeOnLine` makes it one)
+                let (at, to) = advance!(hy);
+                note_open!(at, to, false);
+            }
+            soft_break!();
         }};
     }
     // An EMPTY line — no CONTENT on it — too narrow for what is about to go on it drops below the float squeezing
@@ -2203,6 +2218,7 @@ fn line_layout(
                 // neither — almost all of them (these are per word of every line layout).
                 let run_has_wide = text.iter().any(|&u| is_wide_unit(u));
                 let run_has_hyphen = text.iter().any(|&u| is_hyphen_unit(u));
+                let run_has_shy = text.contains(&SOFT_HYPHEN);
                 let mut i = lead_skip;
                 while i < text.len() {
                     if is_ws_u16(text[i]) {
@@ -2470,6 +2486,9 @@ fn line_layout(
                         let word_hyphen = run_has_hyphen
                             && text[start..i].iter().any(|&u| is_hyphen_unit(u))
                             && (start..i).any(|k| hyphen_breaks_after(text, k, i));
+                        // …and a SOFT hyphen likewise (`hyphen_piece_end` cuts after one), whose piece shows a hyphen
+                        // only where the line breaks at it (below).
+                        let word_shy = run_has_shy && text[start..i].contains(&SOFT_HYPHEN);
                         // The band this word's units are cut against — `None` where the word has no units at
                         // all, which is most words and skips the float-list walk `band_w` does. (Not under an
                         // in-word mode: a container that declares one — `wrapRulesOf` names Discourse's `.cooked`
@@ -2477,9 +2496,9 @@ fn line_layout(
                         // question at all.) Read ONCE for the whole word as the oracle reads it (`breakUnits(
                         // token, owner, lineRight - lineLeft)`); the line's own fit tests below stay live,
                         // following the band down past a float the word drops below.
-                        let split_band = (!no_wrap && (has_wide || word_hyphen || wrap_mode != 0))
+                        let split_band = (!no_wrap && (has_wide || word_hyphen || word_shy || wrap_mode != 0))
                             .then(|| band_w(total))
-                            .filter(|&a| has_wide || word_hyphen || width > a + LINE_FIT_EPS);
+                            .filter(|&a| has_wide || word_hyphen || word_shy || width > a + LINE_FIT_EPS);
                         if let Some(avail) = split_band {
                             // The over-long word's break opportunity before it (a space / atomic) is what `first`
                             // and the loop's fit tests act on; capture it before the fresh-line break clears the
@@ -2496,7 +2515,7 @@ fn line_layout(
                                 // mode cuts inside one only where that piece alone does not fit the band, which is
                                 // how `super-cali-fragilistic` breaks at its hyphens and only `fragilistic` breaks
                                 // between characters (the oracle's `charUnits(piece, el, avail)`).
-                                let pend = if word_hyphen { hyphen_piece_end(text, u, i) } else { i };
+                                let pend = if word_hyphen || word_shy { hyphen_piece_end(text, u, i) } else { i };
                                 let piece_wide = has_wide && text[u..pend].iter().any(|&c| is_wide_unit(c));
                                 let piece_w = if u == start && pend == i { width } else { measure_word(run, &text[u..pend])? };
                                 let per_char = wrap_mode != 0 && !piece_wide && piece_w > avail + LINE_FIT_EPS;
@@ -2505,21 +2524,66 @@ fn line_layout(
                                 // over-long piece always satisfies. break-all takes no fresh line: it fills the
                                 // line it is on.
                                 if per_char && wrap_mode >= 2 && line_has_content && (!first || preceded) {
-                                    soft_break!();
+                                    take_break!();
                                     space_pending = false; // dropped with the line it closed
                                 }
+                                // (…a soft hyphen ENDING the piece is no unit of its own: it rides the piece's last one,
+                                // which is the unit the oracle's `shy` flag is on — cut per character, the SHY alone was
+                                // a zero-wide unit that decided the hyphen in the 'b' of `ab&shy;cd`'s stead.)
+                                let cut_end = if word_shy && pend - u > 1 && text[pend - 1] == SOFT_HYPHEN { pend - 1 } else { pend };
                                 while u < pend {
-                                    let ulen = break_unit_len(text, u, pend, per_char);
+                                    let mut ulen = break_unit_len(text, u, cut_end.max(u + 1), per_char);
+                                    if u + ulen == cut_end && cut_end < pend {
+                                        ulen = pend - u;
+                                    }
                                     let cw = measure_word(run, &text[u..u + ulen])?;
                                     let ow_now: f64 = open.iter().filter(|o| !o.placed).map(|o| o.w).sum();
                                     // A unit boundary is always an opportunity (`u > start`); the first unit breaks only
                                     // where one already preceded the word (a space / atomic / line start) — the oracle's
                                     // `mayBreak = u > 0 || textMayBreak()`.
                                     let may_break = !first || preceded || !line_has_content || is_wide_unit(text[u]);
-                                    let broke = line_has_content && may_break && line_x + ow_now + cw > band_w(total) + LINE_FIT_EPS;
-                                    if broke {
-                                        soft_break!();
-                                    }
+                                    // A SOFT hyphen's piece (its last unit) shows the hyphen only where the line breaks
+                                    // at it: it goes plain where the next unit fits beside it, takes the hyphen where
+                                    // that leaves room for it, and where neither fits the line ends BEFORE it — at the
+                                    // previous soft hyphen, whose hyphen shows after all (`take_break!`), or at the
+                                    // space — and the choice is made again on the fresh line, hyphen and all even where
+                                    // that overflows ("aaaabbb\u00ADcc" in 60px is "aaaabbb-" / "cc"). Decided on the
+                                    // band the piece LANDS on (an empty line too narrow for it drops first), and in the
+                                    // oracle's own comparisons, which take no tolerance (`breakUnits`' caller).
+                                    let shy_unit = word_shy && u + ulen == pend && text[pend - 1] == SOFT_HYPHEN;
+                                    let mut hyphen = None;
+                                    let broke = if shy_unit {
+                                        let hy = soft_hyphen_width(run)?;
+                                        let next_w = if pend < i {
+                                            let npend = hyphen_piece_end(text, pend, i);
+                                            let n_wide = has_wide && text[pend..npend].iter().any(|&c| is_wide_unit(c));
+                                            let npw = measure_word(run, &text[pend..npend])?;
+                                            let n_per = wrap_mode != 0 && !n_wide && npw > avail + LINE_FIT_EPS;
+                                            measure_word(run, &text[pend..pend + break_unit_len(text, pend, npend, n_per)])?
+                                        } else {
+                                            0.0
+                                        };
+                                        drop_below_floats!(cw + ow_now);
+                                        let mut ow_at = open.iter().filter(|o| !o.placed).map(|o| o.w).sum::<f64>();
+                                        let mut room = band_w(total) - line_x - ow_at;
+                                        let broke = line_has_content && may_break && cw + next_w > room && cw + hy > room;
+                                        if broke {
+                                            take_break!();
+                                            drop_below_floats!(cw + ow_at);
+                                            ow_at = open.iter().filter(|o| !o.placed).map(|o| o.w).sum::<f64>();
+                                            room = band_w(total) - line_x - ow_at;
+                                        }
+                                        if pend < i && cw + next_w > room {
+                                            hyphen = Some(hy);
+                                        }
+                                        broke
+                                    } else {
+                                        let broke = line_has_content && may_break && line_x + ow_now + cw > band_w(total) + LINE_FIT_EPS;
+                                        if broke {
+                                            take_break!();
+                                        }
+                                        broke
+                                    };
                                     // The pending space's line is settled only once the first unit is placed on it or
                                     // wraps away from it: a space the wrap DROPS grows nothing (the oracle), so the
                                     // metrics are applied after the break test, never before it.
@@ -2535,7 +2599,10 @@ fn line_layout(
                                     settle_pending_oofs!();
                                     flush_open_edges!();
                                     flush_tail_gaps!();
-                                    note_nbsp_gaps!(run, &text[u..u + ulen], band_l(total) + line_x);
+                                    // (…the piece's own text, a soft hyphen it ends in left out as the oracle's piece leaves
+                                    // it: zero-wide and no content, it must not make an NBSP before it an inner gap.)
+                                    let gap_end = if text[u + ulen - 1] == SOFT_HYPHEN { u + ulen - 1 } else { u + ulen };
+                                    note_nbsp_gaps!(run, &text[u..gap_end], band_l(total) + line_x);
                                     let (at, to) = advance!(cw);
                                     drop_hangs!(false);
                                     note_open!(at, to, false);
@@ -2547,9 +2614,23 @@ fn line_layout(
                                     line_has_content = true;
                                     line_placed = true;
                                     first = false;
+                                    // …and the soft hyphen's own piece where it shows, as in Chrome (a fragment of its
+                                    // own: `getClientRects` counts it); where it does not, it waits for the next break.
+                                    if let Some(hy) = hyphen {
+                                        flush_tail_gaps!(); // (…content, which makes an NBSP held before it a gap)
+                                        let (at, to) = advance!(hy);
+                                        note_open!(at, to, false);
+                                        shy_pending = None;
+                                    } else {
+                                        shy_pending = if shy_unit && pend < i { Some(soft_hyphen_width(run)?) } else { None };
+                                    }
                                     u += ulen;
                                 }
                             }
+                            // (…a word ends at a space or with its run, which is no break a waiting hyphen shows at: the
+                            // walk keeps a soft hyphen that ENDS a text node — whose opportunity crosses to the next run —
+                            // off the stream.)
+                            shy_pending = None;
                             atomic_break = false; // consumed the after-atomic break opportunity
                             ends_open = ends_with_break(text[i - 1]); // …and this word may leave one behind
                         } else {
@@ -2939,7 +3020,14 @@ fn ends_with_break(u: u16) -> bool {
 // `hyphenPieces`. Only hyphens cut here: a wide character inside a piece is the unit loop's business, not this
 // one's, so the two cuts compose the way `breakUnits` composes them.
 fn hyphen_piece_end(text: &[u16], u: usize, end: usize) -> usize {
-    (u..end).find(|&k| hyphen_breaks_after(text, k, end)).map_or(end, |k| k + 1)
+    (u..end).find(|&k| text[k] == SOFT_HYPHEN || hyphen_breaks_after(text, k, end)).map_or(end, |k| k + 1)
+}
+// A SOFT hyphen (U+00AD) is zero-wide (`font::zero_width`) and an opportunity wherever it sits; where the line breaks
+// at it, it shows a hyphen — the bare `-` advance of its run's font, no letter-spacing after it (Chrome: `aaaa&shy;bbbb`
+// under `letter-spacing: 2px` breaks at 56.02, not 58) — the oracle's `hyphenWidth`.
+const SOFT_HYPHEN: u16 = 0xAD;
+fn soft_hyphen_width(run: &Run) -> Option<f64> {
+    measure_word(&Run { ls: 0.0, ws: 0.0, ..*run }, &[0x2D])
 }
 // The next break UNIT at `u` in `text[..end]`, as the oracle's `charUnits` cuts one: a WIDE character is its
 // own — which is what makes a Japanese paragraph wrap at all, having no spaces to break at — under `per_char`
@@ -6904,6 +6992,7 @@ fn text_intrinsic(runs: &[Run], run_texts: &[Option<Vec<u16>>], ws_mode: u8, ind
                 let unspaced = Run { ls: 0.0, ws: 0.0, ..*run };
                 let run_has_wide = text.iter().any(|&u| is_wide_unit(u)); // once per run, as in the flow arm
                 let run_has_hyphen = text.iter().any(|&u| is_hyphen_unit(u));
+                let run_has_shy = text.contains(&SOFT_HYPHEN);
                 let mut i = 0;
                 while i < text.len() {
                     if is_ws_u16(text[i]) {
@@ -6991,13 +7080,19 @@ fn text_intrinsic(runs: &[Run], run_texts: &[Option<Vec<u16>>], ws_mode: u8, ind
                         let word_hyphen = run_has_hyphen
                             && text[start..i].iter().any(|&u| is_hyphen_unit(u))
                             && (start..i).any(|k| hyphen_breaks_after(text, k, i));
-                        if word_hyphen {
+                        // …and a SOFT hyphen, whose piece counts the hyphen it would show at the break (the oracle's
+                        // `addUnit`: `word + hyphenWidth(owner)` is a min-content candidate for every such piece).
+                        let word_shy = run_has_shy && text[start..i].contains(&SOFT_HYPHEN);
+                        if word_hyphen || word_shy {
                             let mut u = start;
                             while u < i {
                                 let pend = hyphen_piece_end(text, u, i);
                                 let adv = measure_word(run, &text[u..pend])?;
                                 line += adv;
                                 word += adv;
+                                if text[pend - 1] == SOFT_HYPHEN {
+                                    min = min.max(word + soft_hyphen_width(run)?);
+                                }
                                 if pend < i {
                                     opportunity!();
                                 }

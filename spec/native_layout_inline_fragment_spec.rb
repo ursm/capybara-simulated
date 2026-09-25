@@ -119,6 +119,22 @@ RSpec.describe 'native layout inline box fragments', if: ENV.fetch('CSIM_JS_ENGI
       expect(reads.grep_v(/\(handed over\)\z/)).to be_empty, "#{body}: #{reads.inspect}"
     end
   end
+  # A SOFT hyphen breaks the line where the next piece does not fit and shows a hyphen there — natively since
+  # 2026-09-26 (`take_break!`), where the walk declined every one before. The piece goes plain where the next one fits,
+  # takes the hyphen where that leaves room for it, and where neither fits the line ends at the soft hyphen before it,
+  # whose hyphen shows after all ("aa" / "bb" in 39px); a fresh line takes the hyphen even where it overflows; the
+  # hyphen is the bare `-` advance, no letter-spacing after it; min-content counts it. SHARED: Chrome gives the hyphen
+  # a client rect of its own, both engines fold it into the box's line.
+  it 'breaks at a soft hyphen and shows the hyphen there' do
+    {
+      '<div style="font:16px monospace;width:39px"><span id="m">aa&shy;bb&shy;cc</span></div>'                     => [[[0, 0, 28.8, 22], [0, 22, 38.4, 22]], [[0, 0, 19.2031, 22], [19.2031, 0, 9.6094, 22], [0, 22, 38.4063, 22]]],
+      '<div style="font:16px monospace;width:60px"><span id="m">aaaabbb&shy;cc</span></div>'                       => [[[0, 0, 76.8, 22], [0, 22, 19.2, 22]], [[0, 0, 67.2031, 22], [67.2031, 0, 9.6094, 22], [0, 22, 19.2031, 22]]],
+      '<div style="font:16px monospace;width:50px;letter-spacing:2px"><span id="m">aaaa&shy;bbbb</span></div>'      => [[[0, 0, 56, 22], [0, 22, 46.4, 22]], [[0, 0, 46.4063, 22], [46.4063, 0, 9.6094, 22], [0, 22, 46.4063, 22]]],
+      '<div style="font:16px monospace;width:min-content"><span id="m">aa&shy;bbbb</span></div>'                   => [[[0, 0, 28.8, 22], [0, 22, 38.4, 22]], [[0, 0, 19.2031, 22], [19.2031, 0, 9.6094, 22], [0, 22, 38.4063, 22]]]
+    }.each do |body, (shared, chrome)|
+      expect_fragments(body, shared: shared, shared_chrome: chrome)
+    end
+  end
   it 'gives an empty box the line it opened on, a forced break making that a line' do
     expect_fragments('<div style="font:16px monospace;width:400px"><span id="m"></span><br></div>', chrome: [[0, 0, 0, 22]])
     expect_fragments('<div style="font:16px monospace;width:400px">x<span id="m"><br></span></div>', chrome: [[9.609375, 0, 0, 22]])

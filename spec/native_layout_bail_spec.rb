@@ -73,13 +73,16 @@ RSpec.describe 'native layout bail coverage', if: ENV.fetch('CSIM_JS_ENGINE', 'v
     expect(native?('<div>text <span style="vertical-align:middle">m</span> more</div>')).to be true
   end
 
-  # A HYPHEN or dash is a break opportunity native takes itself now (parity in the text spec); a SOFT one is
-  # not — where its opportunity is taken the flow draws a hyphen the text never held, changing both the line's
-  # width and the painter's runs.
-  it 'declines a soft hyphen, keeps a hard one' do
+  # A HYPHEN or dash is a break opportunity native takes itself (parity in the text spec), and so is a SOFT one
+  # inside a text node since 2026-09-26 — the hyphen it draws where the line breaks at it is native's too. A soft
+  # hyphen that ENDS a node is still declined: its opportunity, and the hyphen it may draw, cross to the next run.
+  it 'lays out a soft hyphen inside a text node natively, declines one that ends the node' do
     expect(parity?('<div style="width:90px">well-known example text</div>')).to be true
     expect(parity?('<div style="width:90px">well known example text</div>')).to be true
-    expect(native?(%(<div style="width:90px">well\u00ADknown example text</div>))).to be false
+    expect(parity?(%(<div style="width:90px">well\u00ADknown example text</div>))).to be true
+    expect(native?(%(<div style="width:90px">well\u00AD<b>known</b> example text</div>))).to be false
+    # Under `hyphens: none` a soft hyphen is no opportunity at all: the word overflows whole, as in Chrome.
+    expect(parity?(%(<div style="width:40px;hyphens:none">well\u00ADknown example</div>))).to be true
   end
 
   it 'lays out Latin in-word breaking natively, hyphens included' do

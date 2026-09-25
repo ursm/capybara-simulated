@@ -1611,11 +1611,13 @@ RSpec.describe 'native layout L2 text-block parity', if: ENV.fetch('CSIM_JS_ENGI
     end
 
 
-    # What native still cannot measure is refused by the WALK, not discovered in Rust: a soft hyphen, and a ZWJ
-    # under a per-character wrap (where the oracle's advance carries the previous character). (A preserved form feed
-    # was the first example here until 2026-09-25, when both engines made it text that is not there.)
-    it 'declines a soft hyphen and a per-character ZWJ in the walk' do
-      ['<div style="width:400px">a&shy;b</div>',
+    # What native still cannot measure is refused by the WALK, not discovered in Rust: a soft hyphen that ENDS a text
+    # node (its opportunity, hyphen and all, crosses to the next run), and a ZWJ under a per-character wrap (where the
+    # oracle's advance carries the previous character). (A preserved form feed was the first example here until
+    # 2026-09-25, when both engines made it text that is not there; a soft hyphen INSIDE a node is native's since
+    # 2026-09-26.)
+    it 'declines a node-ending soft hyphen and a per-character ZWJ in the walk' do
+      ['<div style="width:400px">a&shy;<b>b</b></div>',
        '<div style="width:400px;word-break:break-all">a&#x200D;b</div>'].each do |body|
         expect(shadow(body)).to include('ok' => false, 'reason' => 'text-not-measurable'), body
       end
