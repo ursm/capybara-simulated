@@ -1072,6 +1072,8 @@ fn layout_pass(
             // `measure_table` lay a cell out twice (§17.5.3). Asked by the WALK because it is a question about
             // declarations down a subtree native may not walk at all.
             cell_pct_h_child: (r[65] as u32) & 524288 != 0,
+            anon_group: (r[65] as u32) & 1048576 != 0,
+            group_pct_h: f64::NAN,
             control_baseline: r[77] as u8,
             control_font_box: r[78],
             control_font_asc: r[79],

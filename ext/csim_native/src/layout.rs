@@ -389,6 +389,12 @@ pub(crate) struct Input {
     // question runs down a subtree of DECLARATIONS, stopping at a definite-height child and at a nested table
     // (each is its own percentages' containing block), and native may not walk that subtree at all.
     pub(crate) cell_pct_h_child: bool,
+    // A mixed block's ANONYMOUS GROUP (§9.2.1.1, the walk's record for a run of its inline content): a box the
+    // oracle has no box for, whose inline content's containing block is the mixed block itself. So the percentage
+    // HEIGHTS of what it holds resolve against the basis the mixed block hands its own children (`group_pct_h`,
+    // written by that block when it measures its children), never against the group's own auto height.
+    pub(crate) anon_group: bool,
+    pub(crate) group_pct_h: f64,
     // TABLE ROW: the height it declares as a MINIMUM — the px length, or the `%` fraction resolved against what
     // the rows share out (each NaN where it declares none) — and its group's rank: 0 header, 1 body, 2 footer,
     // which decides who takes a declared table height's surplus.
@@ -3182,7 +3188,9 @@ fn measure(
     // become one here. `measure_table` marks the second pass by IMPOSING that row height: nothing else ever
     // imposes one on a cell, so the argument is the whole test and no field is needed for it.
     let cell_first_pass = n.cell_pct_h_child && is_auto(imposed_h);
-    let pct_h_basis = if cell_first_pass {
+    let pct_h_basis = if n.anon_group {
+        n.group_pct_h
+    } else if cell_first_pass {
         f64::NAN
     } else if n.display == DISPLAY_FLEX && !n.flex_main_is_x {
         n.column_main()
@@ -3191,7 +3199,9 @@ fn measure(
     };
     for &c in &children[i] {
         let k = inputs[c].get();
-        if k.has_percent_sizes() && k.out_of_flow == 0 {
+        if k.anon_group {
+            inputs[c].set(Input { group_pct_h: pct_h_basis, ..k });
+        } else if k.has_percent_sizes() && k.out_of_flow == 0 {
             inputs[c].set(k.with_percent_sizes(content_w, pct_h_basis));
         }
     }
@@ -7776,6 +7786,8 @@ mod tests {
             height_is_floor: false,
             cell_valign: 0,
             cell_pct_h_child: false,
+            anon_group: false,
+            group_pct_h: f64::NAN,
             row_height: f64::NAN,
             row_pct: f64::NAN,
             row_rank: 1,

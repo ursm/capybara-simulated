@@ -179,6 +179,8 @@ RSpec.describe 'native layout no-oracle run', if: ENV.fetch('CSIM_JS_ENGINE', 'v
       # the box hangs under — including in a flex item native measures
       '<div style="width:300px"><b><div>blk</div><i>x <span style="display:inline-block;width:30%">a</span></i></b> words here</div>',
       '<div style="display:flex;flex-direction:column;align-items:flex-start;width:300px"><div><b><div>blk</div><i>x <span style="display:inline-block;width:30%">a</span></i></b> words here</div></div>',
+      # …and a percentage HEIGHT under a mixed block's anonymous group, against the block's own basis
+      '<div style="width:300px;height:100px">text <b><span style="display:inline-block;height:50%;width:10px"></span></b> more<div>block</div></div>',
       # …and a LIST BOX, whose own box native derives from the control's intrinsic data and whose rows it stacks
       '<div style="width:400px">t <span style="display:inline-block"><select multiple size="3" style="display:block;width:120px"><option>a</option><option>bbbb</option></select></span> u</div>'
     ].each do |body|

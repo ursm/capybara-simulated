@@ -1033,12 +1033,17 @@ RSpec.describe 'native layout flex parity', if: ENV.fetch('CSIM_JS_ENGINE', 'v8'
     end
 
     # An atomic written through a `display: contents` wrapper inside a MIXED block, whose record hangs under the
-    # anonymous group: the route is asked by BOX now (`layoutParent`), where `flatTreeParent` stopped at the wrapper
-    # (119 against 102).
-    it 'falls back for an atomic through `contents` in a mixed block' do
-      [%(<div style="#{col};height:120px"><div style="flex:1"><div style="height:100%">lead<p>para</p><span style="display:contents"><span style="display:inline-block;width:20px;height:50%">a</span></span></div></div><div>z</div></div>),
-       %(<div style="#{col};height:120px"><div style="flex:1"><div style="height:100%"><p>para</p><b>b <span style="display:contents"><img style="width:12px;height:50%"></span></b></div></div><div>z</div></div>)].each do |body|
-        expect(run_shadow(body)).to include('ok' => true, 'mismatches' => 0, 'nativeFlexRows' => 0), body
+    # anonymous group: the route is asked by BOX (`layoutParent`), where `flatTreeParent` stopped at the wrapper
+    # (119 against 102). Its percentage HEIGHT fell back while the group's auto height was its basis; native hands the
+    # group's content the mixed block's own basis now (`NL_FLAG_ANON_GROUP`), so the item is sized natively. Chrome's
+    # boxes.
+    it 'sizes an item holding an atomic through `contents` in a mixed block natively' do
+      {
+        %(<div style="#{col};height:120px"><div style="flex:1"><div style="height:100%">lead<p>para</p><span style="display:contents"><span id="m" style="display:inline-block;width:20px;height:50%">a</span></span></div></div><div>z</div></div>) => [20, 51],
+        %(<div style="#{col};height:120px"><div style="flex:1"><div style="height:100%"><p>para</p><b>b <span style="display:contents"><img id="m" style="width:12px;height:50%"></span></b></div></div><div>z</div></div>) => [12, 51]
+      }.each do |body, size|
+        expect_native_flex(body)
+        expect(marked_box(body)).to eq(size)
       end
     end
     # …and an inline BOX's percentage EDGE no longer falls back, at any depth: it has no record, but its fractions ride
