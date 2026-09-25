@@ -33,6 +33,19 @@ RSpec.describe 'vertical-align' do
     {ascent: (boxes[1][1] - boxes[0][1]).round(2), box: boxes[2][3]}
   end
 
+  # A COMPARISON function resolves its percentages against the line-height too: the walk hands it over as a program
+  # whose pair is only its figure at no basis, and read as that pair `max(50%, 2px)` raised the box by 2 (Chrome raises
+  # it by half the line-height, as plain `50%` does). Asserted against plain lengths / percentages, so it holds whatever
+  # face fontconfig serves.
+  it 'resolves a comparison function against the line-height' do
+    raise_of = ->(v) { _h, baseline, top, box = aligned(v); (baseline - (top + box)).round(2) }
+    half = raise_of.('50%')
+    expect(half).to be > 3
+    expect(raise_of.('max(50%, 2px)')).to eq(half)
+    expect(raise_of.('min(50%, 3px)')).to eq(raise_of.('3px'))
+    expect(raise_of.('clamp(1px, 50%, 900px)')).to eq(half)
+  end
+
   it 'sits a box on the baseline by default' do
     height, baseline, top, box = aligned('baseline')
     expect(top + box).to eq(baseline)
