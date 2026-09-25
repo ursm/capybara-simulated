@@ -263,6 +263,21 @@ RSpec.describe 'native layout L1 block-flow parity', if: ENV.fetch('CSIM_JS_ENGI
     end
   end
 
+  # …and in a table that is a FLEX ITEM, which the walk refused until 2026-09-25 (the offset was resolved against the
+  # oracle's stamp): natively laid out, the table's height as `layCaption` sees it is native's too — declared (10) or
+  # the stretch (15). Where the flex container is PUSHED, the push hands native the wrapper's 118, and it settles the
+  # caption's offset itself against the oracle's basis — 11.8 where the oracle and Chrome say 10. Chrome's boxes.
+  it 'resolves a flex-item table\'s caption offset against the table\'s height, pushed or not' do
+    {
+      '<div style="display:flex;width:300px;height:150px;align-items:start"><table style="width:200px;height:100px"><caption id="m" style="position:relative;top:10%">cap</caption><tr><td style="height:40px">d</td></tr></table><div>y</div></div>'             => 10,
+      '<div style="display:flex;width:300px;height:150px"><table style="width:200px;min-height:120px"><caption id="m" style="position:relative;top:10%">cap</caption><tr><td style="height:40px">d</td></tr></table><div>y</div></div>'                               => 15,
+      '<div style="display:flex;width:300px;height:150px;align-items:start"><table style="width:200px;height:100px"><caption id="m" style="position:relative;top:10%;height:50%">cap</caption><tr><td style="height:40px">d</td></tr></table><div>y</div></div>' => 10
+    }.each do |body, y|
+      expect_parity(body)
+      expect(laid_out_rect(body)[1]).to eq(y), body
+    end
+  end
+
   # …but only a caption a TABLE lays out: an ORPHAN one is the oracle's plain block, whose offset resolves against
   # its parent like any block's — where the walk has to fall back (a flex item's child, a `max()`), it read the
   # table stamp `layCaption` never wrote and said 0 where the oracle says 20 / 12 / 20. Chrome wraps an orphan in
