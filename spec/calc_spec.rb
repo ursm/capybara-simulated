@@ -118,6 +118,18 @@ RSpec.describe 'CSS math functions' do
       .to eq(['7px'])
   end
 
+  # …through a term this stage cannot PLACE, too: a percentage or an `em` has no value without an element,
+  # but it has a type, and the check goes on through it. Stopping at the first such term kept every type
+  # error beside one — each of these is dropped by Chrome, while `calc(100% - 1em)` is a length it keeps.
+  it 'finds a type error beside a term it cannot place' do
+    ['calc(min(10%, 30px) * max(1%, 2px))', 'calc(100px / min(10%, 3px))', 'calc(min(10%, 5px) + 2)',
+     'calc(1em + 1)', 'calc(10% * 10%)', 'calc(50% + 1)', 'min(1em, 2)', 'clamp(1px, 10%)'].each do |v|
+      expect(computed("margin-left: #{v}", %w[marginLeft], extra_css: 'div { margin-left: 7px }')).to eq(['7px']), v
+    end
+    expect(computed('margin-left: calc(100% - 1em)', %w[marginLeft], extra_css: 'div { margin-left: 7px }'))
+      .not_to eq(['7px'])
+  end
+
   it 'reduces a math function in place, leaving the value structure alone' do
     # A property value is not one expression: the `/` in `aspect-ratio` is a separator, and
     # `background-position` has two components. Parsing the whole value as one sum ate both.
