@@ -57,8 +57,9 @@ module PerfGate
   # a gate predicate that rescanned a box's siblings per child, asked before the cheap test that would have
   # short-circuited it: 117 ms → 1,882 ms on a page with no percentage in it, past `perf 5/0` and into
   # review. The walk becomes the hot path the day native stops being a shadow, so it is measured now.
-  # `flex_shell` is an app shell whose flexed cards hold `height: 100%` content — see `FLEX_SHELL_HTML`.
-  WORKLOADS = %w[grid_table shadow_host layout_walk flex_shell].freeze
+  # `flex_shell` is an app shell whose flexed cards hold `height: 100%` content — see `FLEX_SHELL_HTML` — and
+  # `flex_row_shell` its ROW twin, cards STRETCHED across rows of a resizing page — see `FLEX_ROW_SHELL_HTML`.
+  WORKLOADS = %w[grid_table shadow_host layout_walk flex_shell flex_row_shell].freeze
 
   # Wall ratio may sit this fraction above baseline before the soft warning
   # fires. Generous on purpose: wall is a trend signal, not a tripwire.
@@ -111,6 +112,7 @@ module PerfGate
   # font-independent, and the two now differ by the widget's own two boxes.
   def self.workload_html(workload)
     return FLEX_SHELL_HTML if workload == 'flex_shell'
+    return FLEX_ROW_SHELL_HTML if workload == 'flex_row_shell'
 
     rows = (1..ROWS).map {|i|
       %(<tr class="row r#{i % 6}" id="row-#{i}">) +
@@ -267,8 +269,41 @@ module PerfGate
     })()
   JS
 
+  # …and the ROW twin: rows of three `flex: 1` cards, each STRETCHED to its row and holding an `h-full` chain. A
+  # stretched item's size is definite (§9.8), so where its layout read a percentage height against the indefinite
+  # basis it is laid out again at the stretch even when that comes to the height it measured (de06e4de) — the price
+  # of the right answer, and Chrome pays it too: a resize relayout of this page went ~38% slower with it (the review's
+  # measure). Held here so it does not creep further. The interaction RESIZES the page, which is what lays every row
+  # out again (a header toggle, as `flex_shell` uses, reuses every row untouched and measures nothing). Font-free:
+  # the rows' widths are declared and every card one line of text in a box whose width a font does not reach.
+  FLEX_ROW_SHELL_HTML = <<~HTML.freeze
+    <!doctype html><html><head><style>
+      #root { width: 900px }
+      .row { display: flex; gap: 8px }
+      .card { flex: 1 }
+      .fill { height: 100%; padding: 4px }
+      .inner { height: 100% }
+    </style></head><body>
+      <div id="root">#{('<div class="row">' + ('<div class="card"><div class="fill"><div class="inner">t</div></div></div>' * 3) + '</div>') * 300}</div>
+    </body></html>
+  HTML
+  FLEX_ROW_SHELL_JS = <<~JS.freeze
+    (() => {
+      const root = document.getElementById('root');
+      let h = 0;
+      for (let k = 0; k < 5; k++) { root.style.width = (k & 1 ? 900 : 901) + 'px'; h += document.body.offsetHeight; }
+      return h;
+    })()
+  JS
+
   # The interaction a workload's page is measured under (the walk's is `WALK_JS`, run in its own branch).
-  def self.interaction_js(workload) = workload == 'flex_shell' ? FLEX_SHELL_JS : INTERACTION_JS
+  def self.interaction_js(workload)
+    case workload
+    when 'flex_shell' then FLEX_SHELL_JS
+    when 'flex_row_shell' then FLEX_ROW_SHELL_JS
+    else INTERACTION_JS
+    end
+  end
 
   # A pure-V8 arithmetic loop — no DOM, no driver code. Its wall is the machine's
   # raw JS throughput this run, the denominator that normalizes the workload wall.
@@ -285,6 +320,7 @@ module PerfGate
   COUNTS_JS = <<~JS.freeze
     ({
       passes:            globalThis.__csimLayoutPasses(),
+      element_layouts:   globalThis.__csimElementLayouts(),
       reuse_hit:         globalThis.__csimReuseStats().hit,
       reuse_remeasured:  globalThis.__csimReuseStats().remeasured,
       reuse_escapingAbs: globalThis.__csimReuseStats().escapingAbs,

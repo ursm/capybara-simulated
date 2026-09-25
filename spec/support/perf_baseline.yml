@@ -2,27 +2,29 @@
 grid_table:
   counts:
     passes: 3
+    element_layouts: 3209
     reuse_hit: 1200
     reuse_remeasured: 0
     reuse_escapingAbs: 0
     ctx_sweeps: 201
     ctx_gate_active: 1
   wall:
-    workload_ms: 367.103
-    calib_ms: 2.673
-    ratio: 137.343
+    workload_ms: 381.209
+    calib_ms: 2.797
+    ratio: 136.27
 shadow_host:
   counts:
     passes: 3
+    element_layouts: 3211
     reuse_hit: 1202
     reuse_remeasured: 0
     reuse_escapingAbs: 0
     ctx_sweeps: 201
     ctx_gate_active: 1
   wall:
-    workload_ms: 416.683
-    calib_ms: 2.685
-    ratio: 155.171
+    workload_ms: 436.513
+    calib_ms: 2.712
+    ratio: 160.971
 layout_walk:
   counts:
     ok: 1
@@ -36,18 +38,32 @@ layout_walk:
     nativeOutOfFlow: 0
     pushedContributions: 0
   wall:
-    workload_ms: 199.394
-    calib_ms: 2.676
-    ratio: 74.507
+    workload_ms: 211.897
+    calib_ms: 2.773
+    ratio: 76.422
 flex_shell:
   counts:
     passes: 6
+    element_layouts: 1218
     reuse_hit: 1506
     reuse_remeasured: 0
     reuse_escapingAbs: 0
     ctx_sweeps: 0
     ctx_gate_active: 1
   wall:
-    workload_ms: 88.487
-    calib_ms: 2.684
-    ratio: 32.973
+    workload_ms: 97.365
+    calib_ms: 2.716
+    ratio: 35.844
+flex_row_shell:
+  counts:
+    passes: 5
+    element_layouts: 28510
+    reuse_hit: 0
+    reuse_remeasured: 0
+    reuse_escapingAbs: 0
+    ctx_sweeps: 0
+    ctx_gate_active: 1
+  wall:
+    workload_ms: 651.236
+    calib_ms: 2.795
+    ratio: 233.01
