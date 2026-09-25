@@ -1647,6 +1647,20 @@ RSpec.describe 'native layout flex parity', if: ENV.fetch('CSIM_JS_ENGINE', 'v8'
       expect_parity(body)
       expect(first_item_box(body)[1]).to eq(40)   # Chrome
     end
+    # BOTH: a gap is never NEGATIVE — CSS clamps a math function to the property's range, and Chrome opens nothing —
+    # where both engines kept `calc(20px - min(50%, 300px))` in a 300px row at -130, and in an intrinsic measure (a
+    # float's flex) the oracle closed the row by 19 (a container -4.4 wide) while native floored it: a parity break the
+    # review of 227ffb31 found. Floored at 0 in both since 2026-09-26, flex and grid alike. Chrome's figures.
+    it 'floors a negative gap at zero' do
+      {
+        '<div style="font:16px monospace"><div style="display:flex;float:left;column-gap:calc(23% - 19px)"><div>a</div><div id="m" style="width:5px;height:5px"></div></div></div>' => 9.609375,
+        '<div style="font:16px monospace;width:300px"><div style="display:flex;column-gap:calc(20px - min(50%, 300px))"><div>a</div><div id="m" style="width:5px;height:5px"></div></div></div>' => 9.609375,
+        '<div style="font:16px monospace;width:300px"><div style="display:grid;grid-template-columns:auto auto;column-gap:calc(20px - 50%)"><div>a</div><div id="m" style="width:5px;height:5px"></div></div></div>' => 152.3
+      }.each do |body, x|
+        expect_parity(body)
+        expect(marked_box_x(body)).to be_within(0.02).of(x), body
+      end
+    end
     it 'resolves a gap whose bound is the percentage against the basis' do
       ['display:flex', 'display:grid;grid-template-columns:auto 1fr'].each do |disp|
         body = %(<div style="#{disp};width:400px;column-gap:max(10px, 30%)"><div style="width:50px;height:10px"></div>) +

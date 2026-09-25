@@ -4750,12 +4750,16 @@ fn measure_flex(
     // The gaps' percentage parts resolve here: the MAIN gap against a row's content width or a column's main size
     // (nothing where that is indefinite), the CROSS gap against a row's definite content height or a column's width.
     let main_basis = if main_is_x { content_w } else { n.column_main() };
+    // (…never below zero: a gap is non-negative, and a math function that comes out negative is clamped to it — the
+    // oracle's `axisGap`, and Chrome.)
     let gap = bounded(
         n.flex_main_gap + if n.flex_main_gap_frac != 0.0 && !is_auto(main_basis) { n.flex_main_gap_frac * main_basis } else { 0.0 },
         n.flex_main_gap_math,
-        if is_auto(main_basis) { 0.0 } else { main_basis });
+        if is_auto(main_basis) { 0.0 } else { main_basis },
+    )
+    .max(0.0);
     let cross_basis = if main_is_x { n.definite_content_h().unwrap_or(0.0) } else { content_w };
-    let cross_gap = bounded(n.flex_cross_gap + n.flex_cross_gap_frac * cross_basis, n.flex_cross_gap_math, cross_basis);
+    let cross_gap = bounded(n.flex_cross_gap + n.flex_cross_gap_frac * cross_basis, n.flex_cross_gap_math, cross_basis).max(0.0);
     let cnt = children[i].len();
 
     let kids: Vec<usize> = children[i].clone();
@@ -6704,7 +6708,7 @@ fn content_intrinsic(i: usize, inputs: &[Cell<Input>], runs: &[Run], run_texts: 
             let col_count = tracks.len();
             let cells = grid_placement(grids, place_base, col_count, kids.len());
             let cols = grid_column_content(&kids, &cells, col_count, inputs, runs, run_texts, grids, children)?;
-            let gaps = grids[gs + 1] * (col_count as f64 - 1.0).max(0.0);
+            let gaps = grids[gs + 1].max(0.0) * (col_count as f64 - 1.0).max(0.0);
             let mut min = gaps;
             let mut max = gaps;
             // A PERCENTAGE track (kind 4, or `fit-content` of one, kind 5) has nothing to be a percentage OF
@@ -6865,7 +6869,7 @@ fn flex_intrinsic_widths(i: usize, inputs: &[Cell<Input>], runs: &[Run], run_tex
         // The main gap with NO basis, as every percentage is in an intrinsic measure: its length part, or its program at
         // 0 (the oracle's `axisGap(el, …, null)`) — a percentage part is nothing here, so a `10%` gap adds 0 and a
         // `calc(10% + 4px)` one 4, where the walk refused every such container as unmeasurable.
-        let gaps = bounded(n.flex_main_gap, n.flex_main_gap_math, 0.0) * (count as f64 - 1.0);
+        let gaps = bounded(n.flex_main_gap, n.flex_main_gap_math, 0.0).max(0.0) * (count as f64 - 1.0);
         max += gaps;
         if !wrap {
             min += gaps;
@@ -7327,9 +7331,9 @@ fn measure_grid(
     // The gaps arrive as `px + fraction` of the content box along their axis (`gapSpec`): a row gap's fraction
     // resolves against the content height where that is DEFINITE — declared or imposed — and is nothing where the
     // height is the rows' own, as the oracle's `layoutGrid` has it.
-    let col_gap = bounded(grids[gs + 1] + grids[gs + 2] * content_w, math_ref(grids[gs + 9]), content_w);
+    let col_gap = bounded(grids[gs + 1] + grids[gs + 2] * content_w, math_ref(grids[gs + 9]), content_w).max(0.0);
     let row_h = n.definite_content_h().unwrap_or(0.0);
-    let row_gap = bounded(grids[gs + 3] + if grids[gs + 4] != 0.0 { grids[gs + 4] * row_h } else { 0.0 }, math_ref(grids[gs + 10]), row_h);
+    let row_gap = bounded(grids[gs + 3] + if grids[gs + 4] != 0.0 { grids[gs + 4] * row_h } else { 0.0 }, math_ref(grids[gs + 10]), row_h).max(0.0);
     let decl_row_h = grids[gs + 5];
     let row_grows = grids[gs + 11] != 0.0;
     let tmpl_base = gs + GRID_HEADER;
