@@ -1418,14 +1418,18 @@ fn line_layout(
     macro_rules! note_nbsp_gaps {
         ($run:expr, $slice:expr, $base:expr) => {{
             let s: &[u16] = $slice;
-            if justifying && s.contains(&0xA0) {
-                for j in 0..s.len() {
-                    if s[j] == 0xA0 {
-                        let pen = $base + measure_at($run, &s[..j], $base)?;
-                        tail_gaps.push(pen);
-                    } else {
-                        flush_tail_gaps!();
+            if justifying {
+                if s.contains(&0xA0) {
+                    for j in 0..s.len() {
+                        if s[j] == 0xA0 {
+                            let pen = $base + measure_at($run, &s[..j], $base)?;
+                            tail_gaps.push(pen);
+                        } else {
+                            flush_tail_gaps!();
+                        }
                     }
+                } else {
+                    flush_tail_gaps!(); // (a word is a non-separator throughout)
                 }
             }
         }};
@@ -1853,6 +1857,17 @@ fn line_layout(
                 // paragraph, and one declaring `pre` keeps its own spaces.
                 let ws_mode = run.ws_mode;
                 let (no_wrap, preserve, break_nl) = ws_modes(ws_mode)?;
+                // A run that does not wrap is placed WHOLE by the oracle, one newline segment at a time: ONE
+                // `placeOnLine` — which turns the separators held back before it into gaps — and then
+                // `noteGapsInside` over its body, which holds each separator back in turn until a non-separator of
+                // the body follows it (a body ENDING in separators leaves them held). Native places such a run piece by
+                // piece, so it keeps the same books: its first piece flushes (`body_started`), and after that a
+                // separator is held and a non-separator flushes — a collapsed space INSIDE the body included
+                // (`body_space`), which is no hang at the line's end. Counting those at once put a marker after
+                // `<span style="white-space:nowrap">?\n&nbsp;…</span>` at the end of a justified line (45 where the
+                // oracle and Chrome say 28.8).
+                let mut body_started = false;
+                let mut body_space = false;
                 let text = run_texts.get(ri).and_then(|t| t.as_ref())?;
                 // A run that does not soft-wrap is ONE token: the oracle places `collapseRun(…)` less a
                 // trailing collapsible space in a single `placeOnLine`, and the only decision the line makes
@@ -1932,6 +1947,7 @@ fn line_layout(
                                     ends_open = false;
                                     atomic_break = false;    // …as above: one barrier, and this is it now
                                     pending_space = Some(PendingSpace { w: space_w, asc: run.asc, desc: run.line_height - run.asc, breaks: !no_wrap, sep: true, placed: false });
+                                    body_space = no_wrap;
                                     line_has_content = true;
                                 }
                             }
@@ -2051,8 +2067,12 @@ fn line_layout(
                             // flushes before it places), and as CONTENT: it is part of the body.
                             settle_pending_oofs!();
                             flush_open_edges!();
-                            note_gap!(band_l(total) + line_x);
+                            // (…the body's first piece, and a separator of it.)
                             flush_tail_gaps!();
+                            if justifying {
+                                tail_gaps.push(band_l(total) + line_x);
+                            }
+                            body_started = true;
                             let (at, to) = advance!(space_w);
                             drop_hangs!(false);
                             note_open!(at, to, false);
@@ -2092,6 +2112,7 @@ fn line_layout(
                                         place_pending_space!();
                                         flush_each_open_edge!();   // …DIRECT, as the oracle's `i > 0` arm is
                                         break_line!(); // newline → forced break
+                                        body_started = false; // …and the next segment is a placement of its own
                                         // …and the SEGMENT it opens drops below a float as one unit, exactly
                                         // as the first did: the oracle runs `retakeBand(runW + …)` for every
                                         // segment, not only the run's first (`segments.forEach`).
@@ -2163,8 +2184,9 @@ fn line_layout(
                                         // a content placement, which flushes the tail it follows — and stay held
                                         // past a wrapping run's preserved spaces, which are white space and not
                                         // content (`placePreservedSpace`).
-                                        if no_wrap && i == 0 {
+                                        if no_wrap && !body_started {
                                             flush_tail_gaps!();
+                                            body_started = true;
                                         }
                                         // Measured HERE, after the waiting space and the open edges have moved
                                         // the pen: a tab's advance is the gap to the next stop from the block's
@@ -2274,6 +2296,7 @@ fn line_layout(
                             Some(p) => (true, p.w, p.asc, p.desc, p.breaks, p.sep, p.placed),
                             None => (false, 0.0, 0.0, 0.0, false, false, false),
                         };
+                        let inside_body = std::mem::take(&mut body_space) && space_sep && !space_placed;
                         // A word glued to the previous one across a run boundary — no space between, a mixed-font
                         // word like `foo<b>bar</b>` or `H<sub>2</sub>O` where the edgeless inline emits no
                         // OPEN/CLOSE run to split the fonts — has `space_before` false, so the break-before test
@@ -2292,7 +2315,21 @@ fn line_layout(
                             // measures (see `PendingSpace`). The two coincide at every producer today — nothing
                             // queues a non-zero opportunity — which is exactly why reading the width looked like
                             // asking the question. (Hanging after preserved ones, under pre-wrap: all of them hang.)
-                            hang_space!(space_sep && !space_placed, sw);
+                            // …and one INSIDE a run placed whole is a separator of its body, held like the others.
+                            if inside_body {
+                                // (…the body's FIRST piece where it leads it: what was held back before the run is
+                                // flushed then, and not with the space's own gap.)
+                                if !body_started {
+                                    flush_tail_gaps!();
+                                    body_started = true;
+                                }
+                                if justifying {
+                                    tail_gaps.push(band_l(total) + line_x);
+                                }
+                                hang_space!(false, sw);
+                            } else {
+                                hang_space!(space_sep && !space_placed, sw);
+                            }
                         }
                         // IN-WORD BREAKING (`overflow-wrap: break-word|anywhere` / `word-break: break-all`): a word
                         // WIDER THAN THE BAND may break between characters (a word that fits the band stays atomic
@@ -2425,8 +2462,12 @@ fn line_layout(
                             // Flush the still-open edges onto this line (once), then place the word.
                             settle_pending_oofs!();
                             flush_open_edges!();
-                            flush_tail_gaps!();
+                            // (…a later piece of a run placed whole flushes at its first non-separator, below.)
+                            if !(no_wrap && body_started) {
+                                flush_tail_gaps!();
+                            }
                             note_nbsp_gaps!(run, &text[start..i], band_l(total) + line_x);
+                            body_started = true;
                             let (at, to) = advance!(width);
                             drop_hangs!(false);
                             note_open!(at, to, false);

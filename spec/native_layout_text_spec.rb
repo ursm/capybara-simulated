@@ -1296,6 +1296,29 @@ RSpec.describe 'native layout L2 text-block parity', if: ENV.fetch('CSIM_JS_ENGI
     )
   end
 
+  # NATIVE: a run that does not wrap is placed WHOLE by the oracle, and the separators its body ENDS in are held back
+  # until something follows them on the line — a collapsed space inside the body, and a no-break space, included.
+  # Native counted them at once, so a line wrapping right after such a run spread its free width over its own end.
+  it 'holds back the justification gaps a non-wrapping run ends in' do
+    marker = '<i id="m" style="position:absolute;width:2px;height:2px"></i>'
+    expect_parity(
+      %(<div style="position:relative;font:16px monospace;width:30px;text-align:justify"><span>y<span style="white-space:nowrap"> &nbsp;#{marker}</span>&nbsp;</span></div>),
+      28.8125,
+      chrome_y: 0
+    )
+    expect_parity(
+      %(<div style="position:relative;font:16px monospace;width:45px;text-align:justify"><span style="white-space:nowrap">?&#10;&nbsp;#{marker}</span>dd</div>),
+      28.8125,
+      chrome_y: 0
+    )
+    # …and a `pre` run's, where Chrome spreads the line after all (80) and both engines hold the gaps back (57.6).
+    expect_parity(
+      %(<div style="position:relative;font:16px monospace;width:80px;text-align:justify"><span style="white-space:pre">ccc &nbsp; #{marker}</span> x-</div>),
+      shared_x:        57.6,
+      shared_x_chrome: 80
+    )
+  end
+
   # ORACLE: a marker HELD for an inline's opening edge on a line nothing has been placed on moves with that line's
   # start when a float after it moves the band — the edge has not gone down, so where the flow reaches inside the
   # inline is wherever the line now starts (native and Chrome 26; the oracle kept the cursor read before, 1).
