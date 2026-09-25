@@ -1552,6 +1552,40 @@ RSpec.describe 'native layout flex parity', if: ENV.fetch('CSIM_JS_ENGINE', 'v8'
       expect_parity(body)
       expect(marked_box_x(body)).to be_within(0.01).of(90)   # Chrome 153: a 40px gap
     end
+    # ORACLE: a gap whose BOUND is the percentage and whose value is not — `max(10px, 30%)`, the length floored at a
+    # line — is asked at the basis too: `axisGap` passed it only where the value had a fraction, so the floor resolved
+    # at 0 and the gap opened 10 where native and Chrome open 30% of the row.
+    it 'resolves a gap whose bound is the percentage against the basis' do
+      ['display:flex', 'display:grid;grid-template-columns:auto 1fr'].each do |disp|
+        body = %(<div style="#{disp};width:400px;column-gap:max(10px, 30%)"><div style="width:50px;height:10px"></div>) +
+               %(<div id="m" style="width:50px;height:10px"></div></div>)
+        expect_parity(body)
+        expect(marked_box_x(body)).to be_within(0.01).of(170), disp   # Chrome
+      end
+    end
+    # BOTH: a min/max-height a push resolves on the walk side (a flex item whose subtree the oracle lays out) is the pair
+    # BETWEEN its bounds — resolved as the bare pair, `min(calc(200px - 50%), 60px)` in a 120px column floored the item
+    # at 140 in native, where the oracle and Chrome say 60 — and a push takes the bounds off the record with the pair.
+    it 'resolves a pushed item\'s clamped min-height between its bounds' do
+      body = '<div id="c" style="display:flex;flex-direction:column;height:120px"><div style="min-height:min(calc(200px - 50%), 60px)">' \
+             'a<div style="max-width:30%"></div></div></div>'
+      expect_parity(body)
+      expect(first_item_box(body)[3]).to eq(60)   # Chrome
+    end
+    # BOTH: a size only the oracle can resolve (a comparison function the clamped pair cannot carry) is never below zero
+    # on the record, as `usedSize` floors it — and the oracle's flex clamp reads a NEGATIVE maximum as zero, not as none.
+    # `min(10%, calc(20% - 100px), calc(100% - 400px))` is -100 in 300px: native, handed that, gave a 2px-bordered box a
+    # border box of 0; and the oracle left a `max-width: calc(10% - 100px)` item at its 12px of content. Chrome: 4, both.
+    it 'floors a negative size at zero in both engines' do
+      block = '<div id="c" style="width:300px"><div style="width:min(10%, calc(20% - 100px), calc(100% - 400px));border:2px solid">x</div></div>'
+      expect_parity(block)
+      expect(first_item_box(block)[2]).to eq(4)   # Chrome
+      ['max-width:calc(10% - 100px)', 'max-width:min(10%, calc(20% - 100px), calc(100% - 400px))'].each do |max|
+        item = %(<div id="c" style="width:300px;display:flex"><div style="#{max};border:2px solid">x</div></div>)
+        expect_parity(item)
+        expect(first_item_box(item)[2]).to eq(4), max   # Chrome
+      end
+    end
     # …and a DECLARED `normal` longhand is a gap of none, which stops at the longhand instead of falling
     # through to the shorthand: `gap: 20px; column-gap: normal` opened 20px where Chrome opens nothing.
     it 'lets a normal longhand cancel the shorthand gap' do
