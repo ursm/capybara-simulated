@@ -589,9 +589,24 @@ RSpec.describe 'native layout grid parity', if: ENV.fetch('CSIM_JS_ENGINE', 'v8'
       expect_native_intrinsic('<div style="display:grid;grid-template-columns:100px;grid-auto-rows:60px;width:400px"><div style="display:grid;grid-template-columns:auto"><div>nested in row</div></div></div>')
       expect_parity('<div style="display:grid;grid-template-columns:200px;grid-auto-rows:60px;width:400px"><table><tr><td>cell</td></tr></table></div>')
     end
-    it 'declines a row shorter than an item\'s vertical edges, and a flex-container item with a min/max-height under declared rows' do
-      expect_bail('<div style="display:grid;grid-template-columns:100px;grid-auto-rows:20px;width:400px"><div style="padding:30px">padding taller than row</div></div>')
+    it 'declines a flex-container item with a min/max-height under declared rows' do
       expect_bail('<div style="display:grid;grid-template-columns:100px;grid-auto-rows:60px;width:400px"><div style="display:flex;align-items:center;min-height:100px"><div style="width:10px;height:10px"></div></div></div>')
+    end
+    # A row SHORTER than an item's own padding and border: the item's border box floors at those and overflows the
+    # row, and the grid ends where its rows do. The oracle kept the item at the row (15, its content below the box)
+    # and the walk declined the shape; native floored the item already, and both engines let an item taller than a
+    # declared row — this one, or a declared height — grow the grid (30 in Chrome's 20). Chrome's boxes.
+    {
+      'percentage padding'  => ['<div id="g" style="display:grid;grid-template-columns:100px 1fr;grid-auto-rows:15px;width:300px;font:16px monospace"><div id="m" style="padding:10% 0">aa</div><div>z</div><div style="padding:10% 0">aa</div></div>', [0, 0, 100, 20], 30],
+      'length padding'      => ['<div id="g" style="display:grid;grid-template-columns:100px 1fr;grid-auto-rows:15px;width:300px;font:16px monospace"><div id="m" style="padding:20px 0">aa</div><div>z</div></div>', [0, 0, 100, 40], 15],
+      'a border box'        => ['<div id="g" style="display:grid;grid-template-columns:100px 1fr;grid-auto-rows:15px;width:300px;font:16px monospace"><div id="m" style="box-sizing:border-box;padding:20px 0">aa</div><div>z</div></div>', [0, 0, 100, 40], 15],
+      'a declared height'   => ['<div id="g" style="display:grid;grid-template-columns:100px 1fr;grid-auto-rows:10px;width:300px;font:16px monospace"><div id="m" style="height:30px">aa</div><div>z</div><div>c</div></div>', [0, 0, 100, 30], 20]
+    }.each do |name, (body, chrome, grid_h)|
+      it "floors an item at its own edges in a shorter declared row, and ends the grid at its rows: #{name}" do
+        expect_parity(body)
+        expect_chrome_box(body, chrome)
+        expect(parity_session(body).evaluate_script("document.getElementById('g').getBoundingClientRect().height")).to eq(grid_h)
+      end
     end
     it 'keeps an auto-height item content-sized under grid-auto-rows: 0 (a 0 height is the oracle\'s auto placeholder)' do
       expect_parity('<div style="display:grid;grid-template-columns:100px;grid-auto-rows:0px;width:400px"><div><p style="margin:0">text</p></div><div>b</div></div>')

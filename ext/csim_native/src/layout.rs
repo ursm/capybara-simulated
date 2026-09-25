@@ -403,6 +403,9 @@ pub(crate) struct Input {
     // INDEFINITE basis as nothing, which the layout around it counts (`INDEF_PCT_H_READS`) — the oracle's own count, so
     // a flex column lays an item out again at its flexed height wherever the oracle refuses to reuse its measure.
     pub(crate) pct_h_decl: bool,
+    // An AUTO-height GRID ITEM under a declared row height: its border box IS the row, floored at its own padding and
+    // border — imposed by `measure_grid` once the track its percentage edges resolve against is known.
+    pub(crate) row_imposed: bool,
     // TABLE ROW: the height it declares as a MINIMUM — the px length, or the `%` fraction resolved against what
     // the rows share out (each NaN where it declares none) — and its group's rank: 0 header, 1 body, 2 footer,
     // which decides who takes a declared table height's surplus.
@@ -7109,6 +7112,14 @@ fn measure_grid(
             item = item.with_percent_sizes(track_w, pct_h);
             inputs[c].set(item);
         }
+        // …and an auto-height item under a declared row is that row's height, imposed as its border box on the
+        // edges just resolved — `with_imposed_height` floors the content box at zero, so a row shorter than the
+        // item's own padding and border leaves the box at those (Chrome). Derived from the row, never from the
+        // height it wrote, so it too is idempotent.
+        if item.row_imposed {
+            item = item.with_imposed_height(decl_row_h);
+            inputs[c].set(item);
+        }
         // …and an intrinsic-size KEYWORD width is the item's own content measured against that AREA: `fit-content`
         // is the room the area leaves clamped between its min- and max-content, as `block_child_width` gives a
         // block child the room its containing block leaves.
@@ -7131,8 +7142,11 @@ fn measure_grid(
         if ih > row_h {
             row_h = ih;
         }
-        if row_top + ih > bottom {
-            bottom = row_top + ih;
+        // …and the content ends where the ROWS do: an item taller than a declared row overflows it (`layoutGrid`).
+        // A zero row is the oracle's auto placeholder, and its items still size the grid.
+        let row_end = if is_auto(decl_row_h) || decl_row_h == 0.0 { ih } else { decl_row_h };
+        if row_top + row_end > bottom {
+            bottom = row_top + row_end;
         }
     }
 
@@ -7826,6 +7840,7 @@ mod tests {
             anon_group: false,
             group_pct_h: f64::NAN,
             pct_h_decl: false,
+            row_imposed: false,
             row_height: f64::NAN,
             row_pct: f64::NAN,
             row_rank: 1,

@@ -1077,6 +1077,7 @@ fn layout_pass(
             anon_group: (r[65] as u32) & 1048576 != 0,
             group_pct_h: f64::NAN,
             pct_h_decl: (r[65] as u32) & 2097152 != 0,
+            row_imposed: (r[65] as u32) & 4194304 != 0,
             control_baseline: r[77] as u8,
             control_font_box: r[78],
             control_font_asc: r[79],

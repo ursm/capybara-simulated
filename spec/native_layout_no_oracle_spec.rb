@@ -174,6 +174,8 @@ RSpec.describe 'native layout no-oracle run', if: ENV.fetch('CSIM_JS_ENGINE', 'v
       '<div style="width:400px"><div style="display:grid;grid-template-columns:repeat(auto-fit, minmax(80px, 1fr));gap:4px"><div>a</div><div>b</div><div style="grid-column:1 / -1">wide</div></div></div>',
       # …an item a declared ROW height sizes, whose own vertical edges are lengths: no basis is asked for them
       '<div style="width:300px"><div style="display:grid;grid-template-columns:50% 50%;grid-auto-rows:30px"><div style="padding:3px">q</div><div>r</div></div></div>',
+      # …and whose vertical edges are PERCENTAGES of its track: native imposes the row once it has that track
+      '<div style="width:300px"><div style="display:grid;grid-template-columns:100px 1fr;grid-auto-rows:40px"><div style="padding:10% 0">aa<div>blk</div></div><div>z</div></div></div>',
       # …and a line counted from the END under that repeat: which column it names depends on how many copies
       # native made, so answering it without the oracle is the whole of this increment
       '<div style="width:400px"><div style="display:grid;grid-template-columns:40px repeat(auto-fill, 60px) 20px;gap:5px"><div style="grid-column-start:-2">a</div><div style="grid-column:2 / span 3">b</div></div></div>',
