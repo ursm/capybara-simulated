@@ -1297,6 +1297,14 @@ RSpec.describe 'native layout flex parity', if: ENV.fetch('CSIM_JS_ENGINE', 'v8'
       end
     end
   end
+  # The push census counts each container the PASS pushes, once: a flex container inside a cell that is measured, rolled
+  # back and walked again as a pushed contribution is one container, not two — a rollback takes its count with it, as
+  # it takes every other stream.
+  it 'counts a pushed flex container once when an attempt around it is rolled back' do
+    r = run_shadow('<table style="font:16px monospace"><tr><td><div style="display:flex"><div><div style="height:min(10%, 20%, 90px)">x</div></div></div><span style="display:inline-block"><div style="display:table-row">aa bb</div></span></td></tr></table>')
+    expect(r).to include('ok' => true, 'mismatches' => 0), r.inspect
+    expect(r['pushedFlexWhy']).to eq('descendant-walk-percentage: height math' => 1)
+  end
   # Native sizing is a promise about every item at once, and the WALK decides whether it holds: where it declines
   # one item's subtree the whole set is rolled back and re-emitted with the oracle's boxes pushed. Each shape
   # here holds content the walk refuses for a reason `nlFlexPushWhy`'s predicate does not model, and under
