@@ -376,6 +376,20 @@ RSpec.describe 'native layout table parity', if: ENV.fetch('CSIM_JS_ENGINE', 'v8
       expect(got[3]).to be_within(0.01).of(h), body
     end
   end
+  # …and so does an ATOMIC in an anonymous cell's MIXED run, whose record hangs under the run's anonymous group rather
+  # than under the cell: its `height: 50%` rode the record resolved against the oracle's final cell (53.33), which the
+  # cell's first pass could not treat as auto, and native's rows came out 123.84 / 36.16 where the oracle and Chrome
+  # split 160 as 106.67 / 53.33. Chrome's boxes (53.33 tall at the row's top). Inside a flex item too, which the flex
+  # gate pushed until 2026-09-25: a stray box under a table read as the walk's.
+  it 'gives an atomic in an anonymous cell\'s mixed run the cell as its basis' do
+    run = '<div style="display:table-row"><div style="display:table-cell">c</div>tx <span id="m" style="display:inline-block;height:50%">ib</span><div>blk</div></div>'
+    body = %(<div style="font:16px monospace;width:300px"><div style="display:table;height:160px">#{run}<div style="display:table-row"><div style="display:table-cell">b</div></div></div></div>)
+    expect_parity(body)
+    expect(laid_out_rect(body)[3]).to be_within(0.01).of(53.33)
+    r = run_shadow(%(<div style="font:16px monospace;display:flex;width:300px;height:250px"><div>#{body}</div><div>y</div></div>))
+    expect(r).to include('ok' => true, 'mismatches' => 0), r.inspect
+    expect(r['nativeFlexRows']).to eq(1), r.inspect
+  end
 
   # r2 — rtl tables (column reversal). The columns run RIGHT-to-LEFT: column 0 is at the right edge. The oracle
   # mirrors each cell within the table content box, and native reflects it within its row (row_w - ltr_rel -
