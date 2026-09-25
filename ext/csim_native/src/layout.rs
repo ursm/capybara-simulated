@@ -810,11 +810,9 @@ pub(crate) enum Outcome {
 // from (the oracle's `settleInlineBoxes`).
 #[derive(Clone, Copy, Debug)]
 pub(crate) struct InlineBox {
-    pub(crate) nid: f64,
-    // The horizontal edges the line meets: the opening margin and border + padding, the closing border + padding and
-    // margin (the fragment starts after its own opening margin and holds its own closing border + padding).
+    // The horizontal edges the line meets that the OPEN run's sum does not split: the opening margin (the fragment
+    // starts past it) and the two closing halves, border + padding and margin (the fragment holds only the first).
     pub(crate) ml: f64,
-    pub(crate) left: f64,
     pub(crate) right: f64,
     pub(crate) mr: f64,
     // …and the vertical ones, which grow every fragment past the box's own font box without touching the line.
@@ -826,16 +824,14 @@ pub(crate) struct InlineBox {
     // The `position: relative` offset accumulated down the inline chain, which moves the fragments at paint time.
     pub(crate) rel_x: f64,
     pub(crate) rel_y: f64,
+    // Its borders, which its padding box — an out-of-flow descendant's containing block — lies inside.
     pub(crate) bt: f64,
     pub(crate) br: f64,
     pub(crate) bb: f64,
     pub(crate) bl: f64,
-    pub(crate) is_wbr: bool,
 }
-// …and what native answers for one: [inline index, status, x, y, w, h] per fragment, in document coordinates.
-pub(crate) type FragRow = [f64; 6];
-pub(crate) const FRAG_LAID_OUT: f64 = 0.0;
-pub(crate) const FRAG_UNMODELLED: f64 = 1.0;
+// …and what native answers for one: [inline index, x, y, w, h] per fragment, in document coordinates.
+pub(crate) type FragRow = [f64; 5];
 
 // One line an inline box's content landed on — the oracle's `frag.lines` record (`notePlacement`): the leftmost
 // extent it reached there (`minX`, which starts past the box's own opening margin), the right edge of what it
@@ -851,8 +847,7 @@ struct FragLine {
     asc: f64,
 }
 // …and the box itself as the line layout sees it: where it OPENED (the oracle's `frag.x` / `frag.y` / `frag.line`,
-// which an EMPTY box's fragment is read off), whether the line it was left empty on became a line (`onLine`), and
-// whether its geometry went somewhere this port does not follow yet (`unmodelled`), in which case it answers so.
+// which an EMPTY box's fragment is read off), and whether the line it opened on became a line (`onLine`).
 struct Frag {
     idx: usize,
     ib: InlineBox,
@@ -861,10 +856,16 @@ struct Frag {
     open_top: f64,
     open_line: usize,
     on_line: bool,
-    unmodelled: bool,
+}
+// One box still OPEN on the line layout's stack: its opening edge (margin + border + padding), whether that has gone
+// down on a line yet, and its `Frag`.
+struct OpenBox {
+    w: f64,
+    placed: bool,
+    frag: usize,
 }
 // The pass's inline table, and each record's inline fragments as its text block laid them out — [inline index,
-// status, x, y, w, h] in the block's border-box frame until `place` moves them into the document's. Pass-local
+// x, y, w, h] in the block's border-box frame until `place` moves them into the document's. Pass-local
 // (installed by `layout_block`, like `IW_MEMO`) because a text block is measured from deep inside the recursion,
 // which would otherwise carry the table through every call, and because only a block's LAST measure is its layout,
 // exactly as with `boxes`.
@@ -897,8 +898,8 @@ impl Drop for FragStore {
 // An inline box's entry — the default where no pass installed a table (a unit test's bare `line_layout`).
 fn inline_box(idx: usize) -> InlineBox {
     FRAG_PASS.with(|m| m.borrow().as_ref().and_then(|p| p.table.get(idx).copied())).unwrap_or(InlineBox {
-        nid: -1.0, ml: 0.0, left: 0.0, right: 0.0, mr: 0.0, top: 0.0, bottom: 0.0, own_h: 0.0, own_asc: 0.0,
-        rel_x: 0.0, rel_y: 0.0, bt: 0.0, br: 0.0, bb: 0.0, bl: 0.0, is_wbr: false,
+        ml: 0.0, right: 0.0, mr: 0.0, top: 0.0, bottom: 0.0, own_h: 0.0, own_asc: 0.0,
+        rel_x: 0.0, rel_y: 0.0, bt: 0.0, br: 0.0, bb: 0.0, bl: 0.0,
     })
 }
 fn store_frags(i: usize, rows: Vec<FragRow>) {
@@ -929,10 +930,10 @@ fn inline_padding_box(k: usize) -> Option<(f64, f64, f64, f64)> {
         let last = own.last().copied().unwrap_or(first);
         let ib = p.table.get(k)?;
         Some((
-            first[2] + ib.bl,
-            first[3] + ib.bt,
-            (last[2] + last[4] - first[2] - ib.bl - ib.br).max(0.0),
-            (last[3] + last[5] - first[3] - ib.bt - ib.bb).max(0.0),
+            first[1] + ib.bl,
+            first[2] + ib.bt,
+            (last[1] + last[3] - first[1] - ib.bl - ib.br).max(0.0),
+            (last[2] + last[4] - first[2] - ib.bt - ib.bb).max(0.0),
         ))
     })
 }
@@ -942,8 +943,8 @@ fn shift_frags(i: usize, dx: f64, dy: f64) {
     FRAG_PASS.with(|m| {
         if let Some(rows) = m.borrow_mut().as_mut().and_then(|p| p.rows.get_mut(i)) {
             for r in rows.iter_mut() {
-                r[2] += dx;
-                r[3] += dy;
+                r[1] += dx;
+                r[2] += dy;
             }
         }
     });
@@ -1228,15 +1229,15 @@ fn line_layout(
     // a float drop, a leading space's collapse — asks `line_placed`, each where its oracle counterpart does.
     let mut line_placed = false;
     let mut line_has_content = false;
-    // Open inline edges not yet closed: (pending-open width, already-flushed?). openEdgeWidth = Σ of the
-    // unflushed pendings — reserved in the fit test until the first content flushes it onto the line.
-    let mut open: Vec<(f64, bool)> = Vec::new();
     // The INLINE BOXES this stream opens, laid out as FRAGMENTS the way the oracle's `placeInlineBox` /
-    // `notePlacement` / `settleInlineBoxes` lay them out: every box in open order, the open ones parallel to `open`,
-    // and the boxes this line holds pieces of (`lineFrags`), left empty (`lineEmpties`) or has a hanging space in
-    // (`lineHangs`), for the close to shift and settle.
+    // `notePlacement` / `settleInlineBoxes` lay them out: every box in open order, and the boxes this line holds pieces
+    // of (`lineFrags`), left empty (`lineEmpties`) or has a hanging space in (`lineHangs`), for the close to shift and
+    // settle.
     let mut frags: Vec<Frag> = Vec::new();
-    let mut open_frags: Vec<usize> = Vec::new();
+    // …and the ones still OPEN, innermost last (the oracle's `openInlines`), each with its opening edge and whether
+    // that has gone down yet — the unplaced ones' sum is `openEdgeWidth`, reserved in the fit test until the first
+    // content flushes it onto the line.
+    let mut open: Vec<OpenBox> = Vec::new();
     let mut line_frags: Vec<usize> = Vec::new();
     let mut line_empties: Vec<usize> = Vec::new();
     let mut line_hangs: Vec<usize> = Vec::new();
@@ -1278,6 +1279,16 @@ fn line_layout(
         }};
     }
     // …and a placement every OPEN box holds (`placeOnLine`'s `for (const frag of openInlines)`).
+    macro_rules! note_open {
+        ($from:expr, $to:expr, $hangs:expr) => {{
+            if !open.is_empty() {
+                let (from, to): (f64, f64) = ($from, $to);
+                for a in 0..open.len() {
+                    note!(open[a].frag, from, to, $hangs, 0.0);
+                }
+            }
+        }};
+    }
     // Move the pen past a placement `$w` wide, and say where it began and ended — the end read as the pen's new
     // `band_l + line_x`, the very sum every justification gap is read as, never as `at + $w`: the two differ in the
     // last bit, and a piece ending exactly where the next gap begins then counted that gap as one BEFORE its end
@@ -1287,16 +1298,6 @@ fn line_layout(
             let at = band_l(total) + line_x;
             line_x += $w;
             (at, band_l(total) + line_x)
-        }};
-    }
-    macro_rules! note_open {
-        ($from:expr, $to:expr, $hangs:expr) => {{
-            if !open_frags.is_empty() {
-                let (from, to): (f64, f64) = ($from, $to);
-                for a in 0..open_frags.len() {
-                    note!(open_frags[a], from, to, $hangs, 0.0);
-                }
-            }
         }};
     }
     // The oracle's `dropHangs`: content after a hanging space keeps it on the line (`false`); a line that closes eats
@@ -1314,6 +1315,23 @@ fn line_layout(
         }};
     }
     let mut pending_space: Option<PendingSpace> = None;
+    // An inline box OPENING where the flow stands, as the oracle's `placeInlineBox` records it (`x: lineX`, past a
+    // collapsed space still pending, which the oracle has already placed where it met it): that is where an EMPTY
+    // one sits.
+    macro_rules! frag_here {
+        ($idx:expr) => {{
+            let idx: usize = $idx;
+            Frag {
+                idx,
+                ib: inline_box(idx),
+                lines: Vec::new(),
+                open_x: band_l(total) + line_x + pending_space.map_or(0.0, |p| p.w),
+                open_top: total,
+                open_line: line_no,
+                on_line: false,
+            }
+        }};
+    }
     // An atomic inline is a break opportunity on BOTH sides regardless of whitespace: this flag carries the
     // AFTER-side break (a zero-width break opportunity) to the next box, so a word glued to an atomic can still
     // wrap before it. (The BEFORE-side break is unconditional in the RUN_ATOMIC arm itself.) Reset on any word
@@ -1370,6 +1388,18 @@ fn line_layout(
             }
             line_x += $w;
             hang += $w;
+        }};
+    }
+    // A collapsed space still pending goes down now, as a HANG, before the edge or break that comes next: the oracle
+    // placed it where it met it (dropped with a break instead, it moved every edge the break puts down back by its
+    // width). The space, for a site that keeps it pending as the zero-width opportunity it leaves.
+    macro_rules! place_pending_space {
+        () => {{
+            let p = pending_space.filter(|p| p.sep && !p.placed);
+            if let Some(p) = p {
+                hang_space!(true, p.w);
+            }
+            p
         }};
     }
     // A placement that is not an edge and does not hang turns the held-back separators into real gaps.
@@ -1433,9 +1463,10 @@ fn line_layout(
             for &fi in &line_empties {
                 frags[fi].on_line = on_line;
             }
-            for &fi in &open_frags {
-                if frags[fi].lines.is_empty() && frags[fi].open_line == line_no {
-                    frags[fi].on_line = on_line;
+            for o in &open {
+                let f = &mut frags[o.frag];
+                if f.lines.is_empty() && f.open_line == line_no {
+                    f.on_line = on_line;
                 }
             }
             // The line-relative boxes are settled FIRST, because they can move the line's own ascent — which
@@ -1555,7 +1586,7 @@ fn line_layout(
                         }
                     }
                 }
-                for fi in line_empties.iter().copied().chain(open_frags.iter().copied()) {
+                for fi in line_empties.iter().copied().chain(open.iter().map(|o| o.frag)) {
                     let f = &mut frags[fi];
                     if f.lines.is_empty() && f.open_line == line_no && f.open_top == total {
                         f.open_x += shift_at(f.open_x);
@@ -1603,21 +1634,19 @@ fn line_layout(
     macro_rules! flush_each_open_edge {
         () => {{
             for k in 0..open.len() {
-                if open[k].1 {
+                if open[k].placed {
                     continue;
                 }
-                let w = open[k].0;
+                let w = open[k].w;
                 if w != 0.0 {
                     let (at, to) = advance!(w);
                     line_placed = true;
-                    if let Some(&own) = open_frags.get(k) {
-                        let ml = frags[own].ib.ml;
-                        for a in 0..=k.min(open_frags.len() - 1) {
-                            note!(open_frags[a], at, to, false, if a == k { ml } else { 0.0 });
-                        }
+                    let ml = frags[open[k].frag].ib.ml;
+                    for a in 0..=k {
+                        note!(open[a].frag, at, to, false, if a == k { ml } else { 0.0 });
                     }
                 }
-                open[k].1 = true;
+                open[k].placed = true;
             }
         }};
     }
@@ -1626,7 +1655,7 @@ fn line_layout(
     // what the content has to FIT, and where the pending edges cancel there is nothing to place.
     macro_rules! flush_open_edges {
         () => {{
-            let total_open: f64 = open.iter().filter(|o| !o.1).map(|o| o.0).sum();
+            let total_open: f64 = open.iter().filter(|o| !o.placed).map(|o| o.w).sum();
             if total_open != 0.0 {
                 flush_each_open_edge!();
             }
@@ -1649,7 +1678,7 @@ fn line_layout(
                     // DROPS below the float (`total` moves with no line closing), and the fragment then starts
                     // in the wider band it landed in. Only the offset along the line survives the drop.
                     let base = band_l(total) + if was == line_no { at } else { 0.0 };
-                    let edges: f64 = open.iter().take(depth).filter(|o| !o.1).map(|o| o.0).sum();
+                    let edges: f64 = open.iter().take(depth).filter(|o| !o.placed).map(|o| o.w).sum();
                     if rtl {
                         // …an rtl corner included. Its x is the container's edge and never was the cursor's,
                         // but its y IS the static position — which for a marker that waited is the line the
@@ -1720,20 +1749,8 @@ fn line_layout(
     for (ri, run) in runs.iter().enumerate() {
         match run.kind {
             RUN_OPEN => {
-                open.push((run.metric, false));
-                // The box starts where the flow stands — past a collapsed space still pending, which the oracle has
-                // already placed where it met it (`placeInlineBox`'s `x: lineX`); that is where an EMPTY one sits.
-                frags.push(Frag {
-                    idx: run.font as usize,
-                    ib: inline_box(run.font as usize),
-                    lines: Vec::new(),
-                    open_x: band_l(total) + line_x + pending_space.map_or(0.0, |p| p.w),
-                    open_top: total,
-                    open_line: line_no,
-                    on_line: false,
-                    unmodelled: false,
-                });
-                open_frags.push(frags.len() - 1);
+                frags.push(frag_here!(run.font as usize));
+                open.push(OpenBox { w: run.metric, placed: false, frag: frags.len() - 1 });
             }
             RUN_CLOSE => {
                 // Nothing landed inside it, so the box shows its edges where it OPENED. The oracle flushes
@@ -1749,14 +1766,13 @@ fn line_layout(
                 // still unflushed, so reading them after would add nothing.
                 // …and flushed PER FRAGMENT, not behind the sum guard: the oracle asks `if (frag.pendingOpen)`
                 // here — this box's own edge — and then places every pending one, cancelling pairs included.
-                let flushes = open.last().is_some_and(|o| !o.1 && o.0 != 0.0);
+                let flushes = open.last().is_some_and(|o| !o.placed && o.w != 0.0);
                 // An edge put down here goes AFTER a collapsed space still pending: the oracle placed that space
                 // where it met it, so the space's advance and its justification gap come BEFORE the edge. Kept
                 // pending, native placed both after it, and a marker inside the inline — past the space, before
                 // the gap — was not moved by the spread (48 where the oracle and Chrome say 60.4).
                 if flushes || run.lands {
-                    if let Some(p) = pending_space.filter(|p| p.sep && !p.placed) {
-                        hang_space!(true, p.w);
+                    if let Some(p) = place_pending_space!() {
                         pending_space = Some(PendingSpace { w: 0.0, placed: true, ..p });
                     }
                 }
@@ -1764,17 +1780,14 @@ fn line_layout(
                     settle_pending_oofs!();
                     flush_each_open_edge!();
                 }
-                open.pop(); // LIFO
+                let own = open.pop()?.frag; // LIFO (a CLOSE with nothing open is no stream the walk makes)
                 // The closing edge goes down as its two halves, as the oracle places them (`if (ce.right)`, then
                 // `if (ce.mr)`): the border and padding inside the box, which the box itself holds, then the margin
                 // outside it, which only the boxes around it do.
-                let own = open_frags.pop();
-                let (right, mr) = own.map_or((run.metric, 0.0), |f| (frags[f].ib.right, frags[f].ib.mr));
+                let (right, mr) = (frags[own].ib.right, frags[own].ib.mr);
                 if right != 0.0 {
                     let (at, to) = advance!(right);
-                    if let Some(f) = own {
-                        note!(f, at, to, false, 0.0);
-                    }
+                    note!(own, at, to, false, 0.0);
                     note_open!(at, to, false);
                 }
                 if mr != 0.0 {
@@ -1782,8 +1795,8 @@ fn line_layout(
                     note_open!(at, to, false);
                 }
                 // (…an empty one that opened on an earlier line already has its answer, from that line's close.)
-                if let Some(f) = own.filter(|&f| frags[f].lines.is_empty() && frags[f].open_line == line_no) {
-                    line_empties.push(f);
+                if frags[own].lines.is_empty() && frags[own].open_line == line_no {
+                    line_empties.push(own);
                 }
                 // Neither `hang` nor `hang_pre` is cleared: an edge is `edge` to the oracle, which leaves the
                 // spaces before it hanging (`trailingHang` is reset only `if (!edge)`) — only a real placement
@@ -1813,12 +1826,8 @@ fn line_layout(
                 // decline any open edge (`br-in-edged-inline` in the walk) as a fragment native could not place;
                 // it never needed to.
                 settle_pending_oofs!();
-                // A collapsed space still pending was PLACED where the oracle met it, so the edges this break puts
-                // down land after it — as at a close. (Dropped with the break, it moved every edge back by its width.)
-                if let Some(p) = pending_space.filter(|p| p.sep && !p.placed) {
-                    hang_space!(true, p.w);
-                    pending_space = Some(PendingSpace { w: 0.0, placed: true, ..p });
-                }
+                // …the edges this break puts down landing after a collapsed space still pending, as at a close.
+                place_pending_space!();
                 flush_each_open_edge!();
                 break_line!(); // an empty line's box is the bare strut
                 // …and a `<br clear>` moves the flow past the floats it names before the next line opens
@@ -1966,7 +1975,7 @@ fn line_layout(
                             text[..end].iter().any(|&u| !is_ws_u16(u))
                         };
                         let pending_w = pending_space.map_or(0.0, |p| p.w);
-                        let ow: f64 = open.iter().filter(|o| !o.1).map(|o| o.0).sum();
+                        let ow: f64 = open.iter().filter(|o| !o.placed).map(|o| o.w).sum();
                         let room = band_w(total) + LINE_FIT_EPS;
                         let mut unit = 0.0f64;
                         // A run with no BODY asks neither question below, so it measures nothing here: the
@@ -2009,9 +2018,7 @@ fn line_layout(
                             // where it met it, and that placement ends any run of preserved spaces before it
                             // (`trailingPreserved = 0`) — dropped with the line instead, the wrapped line was
                             // aligned as if they still hung (28.8 where the oracle and Chrome say 19.2).
-                            if let Some(p) = pending_space.filter(|p| p.sep && !p.placed) {
-                                hang_space!(true, p.w);
-                            }
+                            place_pending_space!();
                             soft_break!();
                             pending_space = None;
                             atomic_break = false;
@@ -2082,10 +2089,7 @@ fn line_layout(
                                         settle_pending_oofs!();
                                         // (…after a collapsed space still pending, which the oracle placed where
                                         // it met it — as at a `<br>`.)
-                                        if let Some(p) = pending_space.filter(|p| p.sep && !p.placed) {
-                                            hang_space!(true, p.w);
-                                            pending_space = Some(PendingSpace { w: 0.0, placed: true, ..p });
-                                        }
+                                        place_pending_space!();
                                         flush_each_open_edge!();   // …DIRECT, as the oracle's `i > 0` arm is
                                         break_line!(); // newline → forced break
                                         // …and the SEGMENT it opens drops below a float as one unit, exactly
@@ -2247,10 +2251,7 @@ fn line_layout(
                                 // (`<span style="padding-left:6px"><i abspos></i>\n<span>y</span></span>` put
                                 // it at y 22 where Chrome and the oracle say 0).
                                 settle_pending_oofs!();
-                                if let Some(p) = pending_space.filter(|p| p.sep && !p.placed) {
-                                    hang_space!(true, p.w);
-                                    pending_space = Some(PendingSpace { w: 0.0, placed: true, ..p });
-                                }
+                                place_pending_space!();
                                 flush_each_open_edge!();   // …DIRECT, as the oracle's `i > 0` arm is
                                 for _ in 0..nl {
                                     break_line!();
@@ -2360,7 +2361,7 @@ fn line_layout(
                                 while u < pend {
                                     let ulen = break_unit_len(text, u, pend, per_char);
                                     let cw = measure_word(run, &text[u..u + ulen])?;
-                                    let ow_now: f64 = open.iter().filter(|o| !o.1).map(|o| o.0).sum();
+                                    let ow_now: f64 = open.iter().filter(|o| !o.placed).map(|o| o.w).sum();
                                     // A unit boundary is always an opportunity (`u > start`); the first unit breaks only
                                     // where one already preceded the word (a space / atomic / line start) — the oracle's
                                     // `mayBreak = u > 0 || textMayBreak()`.
@@ -2402,7 +2403,7 @@ fn line_layout(
                             atomic_break = false; // consumed the after-atomic break opportunity
                             ends_open = ends_with_break(text[i - 1]); // …and this word may leave one behind
                         } else {
-                            let ow: f64 = open.iter().filter(|o| !o.1).map(|o| o.0).sum();
+                            let ow: f64 = open.iter().filter(|o| !o.placed).map(|o| o.w).sum();
                             // A break opportunity precedes this word at a collapsed space OR right after an atomic —
                             // but `white-space: nowrap` never SOFT-wraps (only <br>), so the line grows past the band.
                             let mut broke = false;
@@ -2466,7 +2467,7 @@ fn line_layout(
                 if space_on_line {
                     hang_space!(space_sep && !space_placed, sw); // …an OPPORTUNITY is no gap (see `PendingSpace`)
                 }
-                let ow: f64 = open.iter().filter(|o| !o.1).map(|o| o.0).sum();
+                let ow: f64 = open.iter().filter(|o| !o.placed).map(|o| o.w).sum();
                 // An atomic is a break opportunity before it (§ line breaking) — but not under `white-space:
                 // nowrap`, which never soft-wraps.
                 // …and whether one may fall here is ONE question, and no `white-space` mode is part of it: the
@@ -2550,8 +2551,8 @@ fn line_layout(
                 // Wait for it, keeping the cursor as the fallback for an edge that never lands. An edge further
                 // OUT is not waited on — the oracle asks only `openInlines[openInlines.length - 1]`, so a plain
                 // inner inline reads the cursor however edged the boxes around it are.
-                let unplaced: f64 = open.iter().filter(|o| !o.1).map(|o| o.0).sum();
-                if run.metric != 0.0 && unplaced != 0.0 && open.last().is_some_and(|o| !o.1) {
+                let unplaced: f64 = open.iter().filter(|o| !o.placed).map(|o| o.w).sum();
+                if run.metric != 0.0 && unplaced != 0.0 && open.last().is_some_and(|o| !o.placed) {
                     // `open.len()` is its own inline's depth: the walk only sets `metric` where that inline
                     // emitted a non-zero opening edge, so it is the innermost open box right now.
                     let pending_w = pending_space.map_or(0.0, |p| p.w);
@@ -2591,16 +2592,7 @@ fn line_layout(
             RUN_WBR => {
                 // …an inline box of its own to the oracle (`placeInlineBox`), opened and closed where the flow stands
                 // with nothing in it: an EMPTY fragment there.
-                frags.push(Frag {
-                    idx: run.font as usize,
-                    ib: inline_box(run.font as usize),
-                    lines: Vec::new(),
-                    open_x: band_l(total) + line_x + pending_space.map_or(0.0, |p| p.w),
-                    open_top: total,
-                    open_line: line_no,
-                    on_line: false,
-                    unmodelled: false,
-                });
+                frags.push(frag_here!(run.font as usize));
                 line_empties.push(frags.len() - 1);
                 // `<wbr>`: a zero-width soft-wrap opportunity — exactly the oracle's `barrier = null`, the same
                 // thing it sets after an atomic inline. So carry it on `atomic_break` (the after-atomic break
@@ -2651,7 +2643,7 @@ fn line_layout(
     // line's baseline by the box's own ascent and grown by its vertical edges — skipping a line whose only
     // placement a break ate; an EMPTY box a zero-width rect on the first line it reached, or where it opened (on
     // the line, if that line became one), and then its relative offset.
-    let mut inline_frags: Vec<(usize, bool, [f64; 4])> = Vec::new();
+    let mut inline_frags: Vec<(usize, [f64; 4])> = Vec::new();
     for f in &frags {
         let ib = f.ib;
         let h = ib.own_h + ib.top + ib.bottom;
@@ -2662,7 +2654,7 @@ fn line_layout(
             if right == f64::NEG_INFINITY {
                 continue;
             }
-            inline_frags.push((f.idx, f.unmodelled, [l.min_x, top_of(l), (right - l.min_x).max(0.0), h]));
+            inline_frags.push((f.idx, [l.min_x, top_of(l), (right - l.min_x).max(0.0), h]));
         }
         if inline_frags.len() == at {
             let r = match f.lines.first() {
@@ -2670,11 +2662,11 @@ fn line_layout(
                 None if f.on_line => [f.open_x, f.open_top - ib.top, 0.0, h],
                 None => [f.open_x, f.open_top, 0.0, 0.0],
             };
-            inline_frags.push((f.idx, f.unmodelled, r));
+            inline_frags.push((f.idx, r));
         }
         for piece in &mut inline_frags[at..] {
-            piece.2[0] += ib.rel_x;
-            piece.2[1] += ib.rel_y;
+            piece.1[0] += ib.rel_x;
+            piece.1[1] += ib.rel_y;
         }
     }
     Some(LineLayout { height: total, first: first_line, last: last_line, atomics, oofs, floats: placed_floats, frags: inline_frags })
@@ -2704,8 +2696,8 @@ struct LineLayout {
     oofs: Vec<(usize, f64, f64)>,
     // Where each inline FLOAT landed: (record index, border-box x, border-box y) in the float context's frame.
     floats: Vec<(usize, f64, f64)>,
-    // Each inline box's fragments: (inline index, left unmodelled, [x, y, w, h] from the content box's origin).
-    frags: Vec<(usize, bool, [f64; 4])>,
+    // Each inline box's fragments: (inline index, [x, y, w, h] from the content box's origin).
+    frags: Vec<(usize, [f64; 4])>,
 }
 
 // `\p{L}\p{N}`, which is how the oracle's `HYPHEN_BREAK_RE` spells its classes — read from that same regex
@@ -3296,9 +3288,7 @@ fn measure(
             match line_layout(local, &run_texts[rs..re], n.strut_lh, n.strut_asc, content_w, &mut fc.items, &inline_floats, cl, cr, bfc_top, LineStyle {ws_mode: n.ws_mode, align: n.text_align, rtl: n.from_right(), indent: (clamp_affine(n.indent_px + n.indent_frac * content_w, n.indent_lo, n.indent_hi, content_w), n.indent_hanging, n.indent_each_line, n.indent_spent)}) {
                 Some(ll) => {
                     // The inline boxes' fragments, into this box's border-box frame (`place` moves them on).
-                    store_frags(i, ll.frags.iter().map(|&(idx, unmodelled, r)| {
-                        [idx as f64, if unmodelled { FRAG_UNMODELLED } else { FRAG_LAID_OUT }, n.bl + n.pl + r[0], content_top_rel + r[1], r[2], r[3]]
-                    }).collect());
+                    store_frags(i, ll.frags.iter().map(|&(idx, r)| [idx as f64, n.bl + n.pl + r[0], content_top_rel + r[1], r[2], r[3]]).collect());
                     boxes[i].first_baseline = ll.first.map(|(top, asc)| content_top_rel + top + asc);
                     boxes[i].last_baseline = ll.last.map(|(top, asc)| content_top_rel + top + asc);
                     boxes[i].inline_block_baseline = boxes[i].last_baseline;

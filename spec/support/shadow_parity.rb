@@ -23,6 +23,9 @@ module ShadowParity
     # again, and one native returned no row for at all.
     lost = result.slice('fragsDropped', 'fragsMissing').transform_values(&:to_i)
     expect(lost.values.sum).to eq(0), "#{body}: inline fragments never laid out: #{lost.inspect} #{result['fragSample'].inspect}"
+    # …and the fragments native DID lay out, which a box's own record says nothing about: an empty `<span>` is a
+    # zero-width box either way, and whether it has a height, and where, is a fragment question.
+    expect(result['fragMismatches'].to_i).to eq(0), "#{body}: inline fragments laid out differently: #{result['fragSample'].inspect}"
   end
 
   # `#m`'s laid-out rectangle, `[x, y, width, height]`, on a fresh page of `body` — the figure a spec holds against

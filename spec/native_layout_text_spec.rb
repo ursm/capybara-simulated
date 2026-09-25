@@ -1296,6 +1296,18 @@ RSpec.describe 'native layout L2 text-block parity', if: ENV.fetch('CSIM_JS_ENGI
     )
   end
 
+  # ORACLE: a marker HELD for an inline's opening edge on a line nothing has been placed on moves with that line's
+  # start when a float after it moves the band — the edge has not gone down, so where the flow reaches inside the
+  # inline is wherever the line now starts (native and Chrome 26; the oracle kept the cursor read before, 1).
+  it 'moves a held marker with the band a float moves on an empty line' do
+    expect_parity(
+      '<div style="position:relative;font:16px monospace;width:100px"><span style="border-left:1px solid"><i id="m" style="position:absolute;width:3px;height:3px"></i>' \
+      '<i style="float:left;width:25px;height:10px"></i></span></div>',
+      26,
+      chrome_y: 0
+    )
+  end
+
   # NATIVE: a marker's justification shift counts the gaps before the FLOW's x — which a `position: relative`
   # inline around it does not move, since that offset is applied at paint time. Counted with the offset, a
   # `left: 3px` inline gave a marker glued to `ee` the gap right after `ee` too (64.2).

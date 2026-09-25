@@ -98,6 +98,27 @@ RSpec.describe 'native layout inline box fragments', if: ENV.fetch('CSIM_JS_ENGI
     )
   end
 
+  # …and at the start of the float band THERE: a float placed past that margin is beside the line the box lands on,
+  # not beside the cursor before the margin, whose band the oracle read (0 where native and Chrome say 25).
+  it 'opens an empty box beside a float placed past the margin still open above it' do
+    float = '<div style="margin-bottom:30px">p</div><i style="float:left;width:25px;height:30px"></i><span id="m"></span>x'
+    expect_fragments(%(<div style="font:16px monospace;width:90px">#{float}</div>), chrome: [[25, 52, 0, 22]])
+    expect_fragments(%(<div style="font:16px monospace;width:90px;text-align:center">#{float}</div>), chrome: [[52.6875, 52, 0, 22]])
+  end
+
+  # A `<wbr>` is an empty inline box of its own to the oracle, and its fragment takes its OWN relative offset as well
+  # as the chain's (native had only the chain's: 9.6 where the oracle says 14.6 — Chrome gives a `<wbr>` no client rect
+  # at all, a shared divergence). One with EDGES is refused, a percentage one included (at no basis `10%` read 0 and
+  # went through), and one that is not `display: inline` is no inline box: an inline-block `<wbr>` is an atomic.
+  it 'lays a <wbr> out as the inline box it is' do
+    expect_fragments('<div style="font:16px monospace;width:100px">a<wbr id="m" style="position:relative;left:5px;top:3px">b</div>')
+    r, = fragments('<div style="font:16px monospace;width:100px">a<wbr id="m" style="padding-left:10%">b</div>')
+    expect(r).to include('ok' => false, 'reason' => 'wbr-with-edges')
+    r, = fragments('<div style="font:16px monospace;width:100px">aaaa <wbr id="m" style="display:inline-block">bbbb</div>')
+    expect(r).to include('ok' => true, 'mismatches' => 0)
+    expect(r['nativeAtomics']).to be > 0, r.inspect
+  end
+
   # The space before a `pre-line` newline is a collapsible one the oracle PLACES on the line the newline ends, and
   # the break eats: a box holding it has a line record there, and hangs from that line's baseline. Native dropped
   # the space outright, so the box fell back to where it opened — the line's top.
