@@ -1571,6 +1571,28 @@ RSpec.describe 'native layout table parity', if: ENV.fetch('CSIM_JS_ENGINE', 'v8
   # no oracle box read. Chrome wraps each in an ANONYMOUS table: shrink-to-fit (48 for "aa bb" where both engines
   # fill the 200; 96.03 for the 50% cell where both say 100) and consecutive cells side by side (the second at
   # x 19.2, y 0, where both stack it at y 22), with no margins. Shared, so pinned rather than fixed.
+  # A CELL's width that is a `calc()` or a comparison of a percentage constrains no column — Chrome, the oracle and
+  # native alike split the 400 as if nothing were declared — and reaches the cell's box no more than a plain one does:
+  # the box is its column. So the walk sends none of it, with no oracle box read since 2026-09-26, where it resolved it
+  # against the oracle's containing block for a figure nothing read. Chrome's width (377.75, its LayoutUnit of 377.78),
+  # and the narrow column a wider declaration does not widen (10.27 in Chrome, 10.26 in both).
+  it 'resolves a calc() or comparison cell width natively, constraining no column' do
+    ['calc(40% + 10px)', 'clamp(30px, 50%, 200px)', 'min(90%, 250px)', 'max(60%, 40px)'].each do |w|
+      body = %(<table style="width:400px;border-spacing:0;font:16px monospace"><tr><td id="m" style="width:#{w};padding:0">lorem ipsum dolor</td>) +
+             '<td style="padding:0">x</td></tr></table>'
+      expect_parity(body)
+      expect(laid_out_rect(body)[2]).to be_within(0.05).of(377.75), w
+      r = run_shadow(body, '{noOracle: true}')
+      expect(r).to include('ok' => true, 'mismatches' => 0)
+      expect(r['oracleReads'].to_h.keys.grep_v(/\(handed over\)\z/)).to be_empty, "#{w}: #{r.inspect}"
+    end
+    ['calc(90% + 10px)', 'max(90%, 10px)'].each do |w|
+      body = %(<table style="width:400px;border-spacing:0;font:16px monospace"><tr><td id="m" style="width:#{w};padding:0">a</td>) +
+             '<td style="padding:0">lorem ipsum dolor sit amet consectetur</td></tr></table>'
+      expect_parity(body)
+      expect(laid_out_rect(body)[2]).to be_within(0.02).of(10.26), w
+    end
+  end
   describe 'an orphan cell, row group or caption' do
     it 'lays one out as a block whose block-axis min/max do not apply' do
       %w[min-height:40px max-height:5px].each do |style|
