@@ -582,6 +582,8 @@ pub(crate) struct Run {
     // edge, so what a tab is worth depends on where the pen stands (`measure_at`'s `from`). The pair arrives
     // FINAL — a `tab-size` that resolved to zero took the block's letter-spacing as its spacing back in the
     // oracle's `tabStopOf` — so a `tab_px` of 0 means there is no stop to reach and a tab advances nothing.
+    // (An OUT-OF-FLOW run has no text and reuses the pair for its relative chain's PROGRAMS, across and down — an
+    // offset into the math table, NaN for none; see its arm in `line_layout`.)
     pub(crate) tab_px: f64,
     pub(crate) tab_min: f64,
     // How an ATOMIC hangs on its line, where that is not a question about its own ascent: 0 by its ascent

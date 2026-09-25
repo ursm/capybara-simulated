@@ -212,12 +212,18 @@ RSpec.describe 'native layout inline box fragments', if: ENV.fetch('CSIM_JS_ENGI
 
   # A `<wbr>` is an empty inline box of its own to the oracle, and its fragment takes its OWN relative offset as well
   # as the chain's (native had only the chain's: 9.6 where the oracle says 14.6 — Chrome gives a `<wbr>` no client rect
-  # at all, a shared divergence). One with EDGES is refused, a percentage one included (at no basis `10%` read 0 and
-  # went through), and one that is not `display: inline` is no inline box: an inline-block `<wbr>` is an atomic.
+  # at all, a shared divergence). It has NO EDGES, whatever it declares — Chrome has no box to put them on, so
+  # `aa<wbr style="padding-left:20px;…">bb` is 38.41 wide there — where the oracle's flow placed them (71.4) and its
+  # measure did not, and native refused one; both engines place none since 2026-09-26. One that is not `display:
+  # inline` is no inline box: an inline-block `<wbr>` is an atomic.
   it 'lays a <wbr> out as the inline box it is' do
     expect_fragments('<div style="font:16px monospace;width:100px">a<wbr id="m" style="position:relative;left:5px;top:3px">b</div>')
-    r, = fragments('<div style="font:16px monospace;width:100px">a<wbr id="m" style="padding-left:10%">b</div>')
-    expect(r).to include('ok' => false, 'reason' => 'wbr-with-edges')
+    {
+      '<div style="font:16px monospace;width:300px">aa<wbr style="padding-left:20px;margin-right:10px;border-left:3px solid">bb<span id="m" style="display:inline-block;width:4px;height:4px"></span></div>' => [[38.4063, 13, 4, 4]],
+      '<div style="font:16px monospace;width:max-content">aa<wbr style="padding-left:10%;margin-right:10px">bb<span id="m" style="display:inline-block;width:4px;height:4px"></span></div>' => [[38.4063, 13, 4, 4]]
+    }.each do |body, chrome|
+      expect_fragments(body, chrome: chrome)
+    end
     r, = fragments('<div style="font:16px monospace;width:100px">aaaa <wbr id="m" style="display:inline-block">bbbb</div>')
     expect(r).to include('ok' => true, 'mismatches' => 0)
     expect(r['nativeAtomics']).to be > 0, r.inspect
