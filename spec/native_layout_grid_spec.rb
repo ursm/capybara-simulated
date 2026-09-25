@@ -595,7 +595,8 @@ RSpec.describe 'native layout grid parity', if: ENV.fetch('CSIM_JS_ENGINE', 'v8'
     # A row SHORTER than an item's own padding and border: the item's border box floors at those and overflows the
     # row, and the grid ends where its rows do. The oracle kept the item at the row (15, its content below the box)
     # and the walk declined the shape; native floored the item already, and both engines let an item taller than a
-    # declared row — this one, or a declared height — grow the grid (30 in Chrome's 20). Chrome's boxes.
+    # declared row — this one, or a declared height — grow the grid (30 where Chrome says 20) until 2026-09-25.
+    # Chrome's boxes.
     {
       'percentage padding'  => ['<div id="g" style="display:grid;grid-template-columns:100px 1fr;grid-auto-rows:15px;width:300px;font:16px monospace"><div id="m" style="padding:10% 0">aa</div><div>z</div><div style="padding:10% 0">aa</div></div>', [0, 0, 100, 20], 30],
       'length padding'      => ['<div id="g" style="display:grid;grid-template-columns:100px 1fr;grid-auto-rows:15px;width:300px;font:16px monospace"><div id="m" style="padding:20px 0">aa</div><div>z</div></div>', [0, 0, 100, 40], 15],
@@ -607,6 +608,20 @@ RSpec.describe 'native layout grid parity', if: ENV.fetch('CSIM_JS_ENGINE', 'v8'
         expect_chrome_box(body, chrome)
         expect(parity_session(body).evaluate_script("document.getElementById('g').getBoundingClientRect().height")).to eq(grid_h)
       end
+    end
+    # …and the floor is the BORDER box native imposes, a border-box one too: a table's relative caption resolves its
+    # percentage offset against that box, and native imposed the bare row there (1.5 against the oracle's 4 — Chrome
+    # resolves against the table's content box and says 0, shared).
+    it 'imposes the floored row as the border box a border-box table\'s caption offset reads' do
+      expect_parity('<div id="g" style="display:grid;grid-template-columns:200px 1fr;grid-auto-rows:15px;width:300px;font:16px monospace"><table style="box-sizing:border-box;padding:20px 0"><caption id="m" style="position:relative;top:10%">cap</caption><tr><td>t</td></tr></table><div>z</div></div>')
+    end
+    # A row whose figure is only a FLOOR (`minmax(20px, auto)`, the card-grid idiom) grows round a taller item in
+    # Chrome, so the grid does not end at the floor: 50, where ending at the rows said 20. (A LATER row still starts
+    # at the floor in both engines — 20 where Chrome says 22 — see `gridRowHeight`.) Chrome's figure.
+    it 'ends the grid round an item taller than a row that is only a floor' do
+      body = '<div id="g" style="display:grid;grid-template-columns:100px 1fr;grid-auto-rows:minmax(20px, auto);width:300px;font:16px monospace"><div id="m" style="height:50px">aa</div><div>z</div></div>'
+      expect_parity(body)
+      expect(parity_session(body).evaluate_script("document.getElementById('g').getBoundingClientRect().height")).to eq(50)
     end
     it 'keeps an auto-height item content-sized under grid-auto-rows: 0 (a 0 height is the oracle\'s auto placeholder)' do
       expect_parity('<div style="display:grid;grid-template-columns:100px;grid-auto-rows:0px;width:400px"><div><p style="margin:0">text</p></div><div>b</div></div>')

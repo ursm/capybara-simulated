@@ -6059,7 +6059,8 @@ const GRID_TRACK_STRIDE: usize = 9;
 // …13 since 2026-09-22: each gap carries its clamped-affine BOUNDS (lo/hi) beside its `px + frac` pair, so a
 // `gap: min(10%, 20px)` is a figure this computes rather than one it has to be handed resolved.
 // …17 since the bounds became affine PAIRS (`min(10%, 20%)` is one line capped by another).
-const GRID_HEADER: usize = 17;
+// …18 with whether the declared row height is only a FLOOR its items may exceed (`gridRowGrows`).
+const GRID_HEADER: usize = 18;
 impl GridTrack {
     fn decode(grids: &[f64], o: usize) -> GridTrack {
         GridTrack {
@@ -7039,6 +7040,7 @@ fn measure_grid(
     let row_gap = clamp_affine(grids[gs + 3] + if grids[gs + 4] != 0.0 { grids[gs + 4] * row_h } else { 0.0 },
                                (grids[gs + 13], grids[gs + 14]), (grids[gs + 15], grids[gs + 16]), row_h);
     let decl_row_h = grids[gs + 5];
+    let row_grows = grids[gs + 17] != 0.0;
     let tmpl_base = gs + GRID_HEADER;
     // The in-flow items, in record order — the out-of-flow children join no row.
     let kids: Vec<usize> = children[i].iter().copied().filter(|&c| inputs[c].get().out_of_flow == 0).collect();
@@ -7125,11 +7127,12 @@ fn measure_grid(
             inputs[c].set(item);
         }
         // …and an auto-height item under a declared row is that row's height, imposed as its border box on the
-        // edges just resolved — `with_imposed_height` floors the content box at zero, so a row shorter than the
-        // item's own padding and border leaves the box at those (Chrome). Derived from the row, never from the
-        // height it wrote, so it too is idempotent.
+        // edges just resolved and floored at them — a row shorter than the item's own padding and border leaves the
+        // box at those (Chrome), and the box IS that figure, a border-box one included: a table's caption resolves
+        // its percentage offset against it (`layoutGrid`'s `Math.max(declaredRowH, ce.top + ce.bottom)`). Derived
+        // from the row, never from the height it wrote, so it too is idempotent.
         if item.row_imposed {
-            item = item.with_imposed_height(decl_row_h);
+            item = item.with_imposed_height(decl_row_h.max(item.edges_y()));
             inputs[c].set(item);
         }
         // …and an intrinsic-size KEYWORD width is the item's own content measured against that AREA: `fit-content`
@@ -7154,9 +7157,10 @@ fn measure_grid(
         if ih > row_h {
             row_h = ih;
         }
-        // …and the content ends where the ROWS do: an item taller than a declared row overflows it (`layoutGrid`).
-        // A zero row is the oracle's auto placeholder, and its items still size the grid.
-        let row_end = if is_auto(decl_row_h) || decl_row_h == 0.0 { ih } else { decl_row_h };
+        // …and the content ends where the ROWS do: an item taller than a FIXED row overflows it, and one taller than
+        // a row that is only a floor grows it (`layoutGrid`). A zero row is the oracle's auto placeholder, and its
+        // items still size the grid.
+        let row_end = if is_auto(decl_row_h) || decl_row_h == 0.0 { ih } else if row_grows { decl_row_h.max(ih) } else { decl_row_h };
         if row_top + row_end > bottom {
             bottom = row_top + row_end;
         }
@@ -8935,7 +8939,7 @@ mod tests {
         // stride change has to be made — this test file is the third, and it is the one that catches it.
         let mut g = vec![literal as f64, 0.0, 0.0, 0.0, 0.0, f64::NAN, repeat.0, repeat.1 as f64, repeat.2 as f64,
                          f64::NEG_INFINITY, 0.0, f64::INFINITY, 0.0,
-                         f64::NEG_INFINITY, 0.0, f64::INFINITY, 0.0];
+                         f64::NEG_INFINITY, 0.0, f64::INFINITY, 0.0, 0.0];
         for spec in specs {
             g.extend_from_slice(spec);
         }
