@@ -1634,6 +1634,26 @@ RSpec.describe 'native layout table parity', if: ENV.fetch('CSIM_JS_ENGINE', 'v8
       expect(r['oracleReads'].to_h.keys.grep_v(/\(handed over\)\z/)).to be_empty, "#{body}: #{r.inspect}"
     end
   end
+  # A table may hold row GROUPS and BARE rows side by side (§17.2.1 wraps neither): the rows stack in render order —
+  # header, then bodies and bare rows in document order, then footers — each group's box around its own. The walk
+  # emits each group where its first row comes up and a bare row where it stands, where it declined the mix until
+  # 2026-09-26 (`table-grouped-and-bare-rows`, 400 sweep shapes). Chrome's boxes, and no oracle read.
+  it 'lays out a table holding row groups and bare rows side by side' do
+    {
+      '<div style="display:table;font:16px monospace;border-spacing:0"><div style="display:table-row-group"><div style="display:table-row"><div style="display:table-cell">a</div></div></div>' \
+      '<div style="display:table-row"><div id="m" style="display:table-cell">bb</div></div></div>' => [0, 22, 19.2, 22],
+      '<div style="display:table;font:16px monospace;border-spacing:0"><div style="display:table-footer-group"><div style="display:table-row"><div style="display:table-cell">f</div></div></div>' \
+      '<div style="display:table-row"><div id="m" style="display:table-cell">bb</div></div><div style="display:table-header-group"><div style="display:table-row"><div style="display:table-cell">h</div></div></div></div>' => [0, 22, 19.2, 22],
+      '<div style="display:table;font:16px monospace;border-spacing:2px"><div style="display:table-row"><div style="display:table-cell">x</div></div>' \
+      '<div id="m" style="display:table-row-group">tx <span style="display:inline-block;width:20px;height:5px"></span></div><div style="display:table-row"><div style="display:table-cell">b</div></div></div>' => [2, 26, 48.8, 22]
+    }.each do |body, rect|
+      expect_parity(body)
+      laid_out_rect(body).zip(rect).each {|g, w| expect(g).to be_within(0.02).of(w), body }
+      r = run_shadow(body, '{noOracle: true}')
+      expect(r).to include('ok' => true, 'mismatches' => 0)
+      expect(r['oracleReads'].to_h.keys.grep_v(/\(handed over\)\z/)).to be_empty, "#{body}: #{r.inspect}"
+    end
+  end
   describe 'an orphan cell, row group or caption' do
     it 'lays one out as a block whose block-axis min/max do not apply' do
       %w[min-height:40px max-height:5px].each do |style|
