@@ -779,6 +779,10 @@ pub(crate) struct Box {
     // declared floor or min/max raised the box and before the row stretched it — the slack `vertical-align`
     // distributes against (the oracle's `_lbCellContentH`). None for every other box.
     pub(crate) natural_h: Option<f64>,
+    // Whether an AUTO height's min/max clamp MOVED it — its content was laid out against the height it came to,
+    // not the one it was cut to (the oracle's `_lbClampedH`), so a definite question asking for that same number
+    // is not answered by laying it out at auto again (`flex_column_sizes`).
+    pub(crate) clamped_h: bool,
 }
 
 // Clamp a resolved main size by min/max (min wins over max, per CSS). `none` (NaN) bounds are skipped.
@@ -985,7 +989,7 @@ pub(crate) fn layout_block(inputs: &[Input], runs: &[Run], run_texts: &[Option<V
     }
     let mut boxes: Vec<Box> = inputs
         .iter()
-        .map(|n| Box { nid: n.nid, x: 0.0, y: 0.0, w: 0.0, h: 0.0, auto_height: false, first_baseline: None, last_baseline: None, inline_block_baseline: None, natural_h: None })
+        .map(|n| Box { nid: n.nid, x: 0.0, y: 0.0, w: 0.0, h: 0.0, auto_height: false, first_baseline: None, last_baseline: None, inline_block_baseline: None, natural_h: None, clamped_h: false })
         .collect();
     // Two phases: MEASURE lays the subtree out relative to each node's own border-box origin (so
     // collapse-through margins can propagate UP through returns without knowing final positions), then
@@ -3095,6 +3099,7 @@ fn measure(
         (w, imposed_h)
     };
     let n = inputs[i].get().with_imposed_height(imposed_h);
+    boxes[i].clamped_h = false; // (set by the arms below, where an auto height's clamp moves it)
     let content_top_rel = n.bt + n.pt;
     let content_w = n.content_w(w);
     // This box is its in-flow children's containing block: their percentage sizes resolve against its content
@@ -3376,10 +3381,12 @@ fn measure(
         let to_border = |v: f64| if is_auto(v) || n.border_box { v } else { v + n.edges_y() };
         // (A table CELL's block-axis min/max are none on the record — Chrome leaves a `min-height: 40px` cell at its
         // 20px line, and a `max-height: 5px` one uncapped: its height is a floor and its row decides the rest.)
+        let flowed = box_h;
         let box_h = clamp_min_max(box_h, to_border(n.min_h), to_border(n.max_h)).max(0.0);
         boxes[i].nid = n.nid;
         boxes[i].w = w;
         boxes[i].h = box_h;
+        boxes[i].clamped_h = is_auto(n.height) && box_h != flowed;
         boxes[i].natural_h = Some(flow_h);
         boxes[i].auto_height = is_auto(n.height);
         let top = CMargin::of(Input::m(n.mt));
@@ -3864,11 +3871,13 @@ fn measure(
     };
     let to_border = |v: f64| if is_auto(v) || n.border_box { v } else { v + n.edges_y() };
     // (A table CELL's block-axis min/max are none on the record — see the text arm.)
+    let flowed = box_h;
     let box_h = clamp_min_max(box_h, to_border(n.min_h), to_border(n.max_h)).max(0.0);
 
     boxes[i].nid = n.nid;
     boxes[i].w = w;
     boxes[i].h = box_h;
+    boxes[i].clamped_h = is_auto(n.height) && box_h != flowed;
     boxes[i].auto_height = is_auto(n.height);
     boxes[i].natural_h = if flow_h.is_nan() { None } else { Some(flow_h) };
 
@@ -4219,14 +4228,15 @@ fn flex_column_sizes(
     }
     // The content height of item `p` at its current width, measured at most once (its auto height, the
     // declared one set aside — MEASURE_AUTO_HEIGHT), memoised in `measured`.
-    let mut measured: Vec<Option<f64>> = vec![None; cnt];
-    let measure_of = |p: usize, width: &Vec<f64>, measured: &mut Vec<Option<f64>>, boxes: &mut [Box]| -> f64 {
+    // Each item's auto-height measure: its height, and whether its own min/max clamp moved it (`Box::clamped_h`).
+    let mut measured: Vec<Option<(f64, bool)>> = vec![None; cnt];
+    let measure_of = |p: usize, width: &Vec<f64>, measured: &mut Vec<Option<(f64, bool)>>, boxes: &mut [Box]| -> f64 {
         if measured[p].is_none() {
             let c = kids[p];
             measure(c, width[p], MEASURE_AUTO_HEIGHT, inputs, runs, run_texts, grids, children, boxes, failed, &mut FloatCtx::new(), 0.0, 0.0);
-            measured[p] = Some(boxes[c].h);
+            measured[p] = Some((boxes[c].h, boxes[c].clamped_h));
         }
-        measured[p].unwrap()
+        measured[p].unwrap().0
     };
     let mut base = vec![0.0f64; cnt];
     let mut base_measured = vec![false; cnt];
@@ -4245,7 +4255,7 @@ fn flex_column_sizes(
     }
     // The automatic minimum: the item's content height (zero when it scrolls down), memoised in `auto_min`.
     let mut auto_min: Vec<Option<f64>> = vec![None; cnt];
-    let auto_min_of = |p: usize, width: &Vec<f64>, measured: &mut Vec<Option<f64>>, auto_min: &mut Vec<Option<f64>>, boxes: &mut [Box]| -> f64 {
+    let auto_min_of = |p: usize, width: &Vec<f64>, measured: &mut Vec<Option<(f64, bool)>>, auto_min: &mut Vec<Option<f64>>, boxes: &mut [Box]| -> f64 {
         if auto_min[p].is_none() {
             let k = inputs[kids[p]].get();
             auto_min[p] = Some(if k.scrolls_y {
@@ -4265,17 +4275,17 @@ fn flex_column_sizes(
     // fixed-height rows costs one layout per item.
     for &p in flow {
         if is_auto(inputs[kids[p]].get().min_h) {
-            let known = if base_measured[p] { measured[p] } else if is_auto(decl_h[p]) { None } else { Some(decl_h[p]) };
+            let known = if base_measured[p] { measured[p].map(|m| m.0) } else if is_auto(decl_h[p]) { None } else { Some(decl_h[p]) };
             if known.map_or(true, |kn| base[p] < kn) {
                 auto_min_of(p, &width, &mut measured, &mut auto_min, boxes);
             }
         }
     }
-    let clamp_with = |floors: &Vec<Option<f64>>, measured: &Vec<Option<f64>>, p: usize, size: f64| -> f64 {
+    let clamp_with = |floors: &Vec<Option<f64>>, measured: &Vec<Option<(f64, bool)>>, p: usize, size: f64| -> f64 {
         let k = inputs[kids[p]].get();
         let mut out = size;
         if is_auto(k.min_h) {
-            let known = if base_measured[p] { measured[p] } else if is_auto(decl_h[p]) { None } else { Some(decl_h[p]) };
+            let known = if base_measured[p] { measured[p].map(|m| m.0) } else if is_auto(decl_h[p]) { None } else { Some(decl_h[p]) };
             if known.map_or(true, |kn| size < kn) {
                 out = out.max(floors[p].unwrap_or(0.0));
             }
@@ -4388,7 +4398,12 @@ fn flex_column_sizes(
             // height again, definite column or not — which is what the oracle does by REUSING the measuring
             // layout. Imposing the same number instead is not a no-op for every box: a TABLE reads an imposed
             // height as its rows' and stacks its caption on top of it (72 where Chrome and the oracle say 54).
-            let imposed = restretched[p] || measured[p].map_or(true, |m| m != h) || !is_auto(decl_h[p]);
+            // …unless its own min/max-height CLAMPED that measure, in a definite column: the oracle imposes the height
+            // there and will not reuse a clamped auto layout for it (`reuseSubtree`), so the content is laid out
+            // again against the height it was cut to — a `height: 50%` inside a `min-height: 60%` item resolves
+            // against the 90 it came to, not auto (Chrome 45).
+            let imposed = restretched[p] || !is_auto(decl_h[p]) ||
+                          measured[p].map_or(true, |(m, clamped)| m != h || (height_definite && clamped));
             out[p] = (width[p], h, imposed);
         }
     }
@@ -4672,6 +4687,7 @@ fn measure_flex(
     // The container's CROSS content extent + its own box. The cross is a row's height (auto = the stacked
     // lines, else the declared content height) and a column's content width (always definite here).
     let lines_cross_sum: f64 = line_cross.iter().sum::<f64>() + cross_gap * nlines.saturating_sub(1) as f64;
+    let mut clamped = false;
     let (box_w, box_h, container_cross, definite_cross) = if main_is_x {
         // A ROW's cross is its HEIGHT, clamped by min/max-height — but the clamp is TWO-PHASE and hinges on
         // whether the height is declared (the oracle: `definiteCross = box.height !== 0 || autoHeight ===
@@ -4692,7 +4708,9 @@ fn measure_flex(
             // single nowrap line grows to it and its items align WITHIN that floor — and a wrapping row shares
             // the surplus (anon − stacked) out through align-content. So container_cross carries the floor too,
             // not just box_h. (Pre-clamp, like the oracle: box.height is grown before the outer min/max clamp.)
-            let bh = clamp_min_max(lines_cross_sum.max(n.anon_cross) + edges_y, to_border_y(n.min_h), to_border_y(n.max_h)).max(0.0);
+            let flowed = lines_cross_sum.max(n.anon_cross) + edges_y;
+            let bh = clamp_min_max(flowed, to_border_y(n.min_h), to_border_y(n.max_h)).max(0.0);
+            clamped = bh != flowed;
             (w, bh, lines_cross_sum.max(n.anon_cross), false)
         } else {
             // A declared height is never smaller than the box's own border+padding (usedSize's border-box floor).
@@ -4712,7 +4730,10 @@ fn measure_flex(
                 col_extent(lm).max(lm)
             }).fold(0.0f64, f64::max);
             let content_ext = if main_is_x { content_main.max(used_main) } else { tallest };
-            clamp_min_max(content_ext.max(n.anon_cross) + edges_y, to_border_y(n.min_h), to_border_y(n.max_h)).max(0.0)
+            let flowed = content_ext.max(n.anon_cross) + edges_y;
+            let bh = clamp_min_max(flowed, to_border_y(n.min_h), to_border_y(n.max_h)).max(0.0);
+            clamped = bh != flowed;
+            bh
         } else {
             clamp_min_max(to_border_y(n.height), to_border_y(n.min_h), to_border_y(n.max_h)).max(edges_y).max(0.0)
         };
@@ -4903,6 +4924,7 @@ fn measure_flex(
     boxes[i].nid = n.nid;
     boxes[i].w = box_w;
     boxes[i].h = box_h.max(0.0);
+    boxes[i].clamped_h = clamped;
     boxes[i].auto_height = is_auto(n.height);
     let top = CMargin::of(Input::m(n.mt));
     MInfo { top, top_only: top, bottom: CMargin::of(Input::m(n.mb)), collapse_through: false }
@@ -7005,6 +7027,7 @@ fn measure_grid(
     };
     let to_border = |v: f64| if is_auto(v) || n.border_box { v } else { v + n.edges_y() };
     boxes[i].h = clamp_min_max(box_h, to_border(n.min_h), to_border(n.max_h)).max(0.0);
+    boxes[i].clamped_h = is_auto(n.height) && boxes[i].h != box_h;
     boxes[i].auto_height = is_auto(n.height);
     // A grid establishes an independent formatting context: its margins do not collapse with its items'.
     let top = CMargin::of(Input::m(n.mt));
@@ -7720,8 +7743,8 @@ mod tests {
         b.height = 30.0;
         let inputs = vec![blk(0.0, -1), a, b];
         let bx = boxes(layout_block(&inputs, &[], &[], &[], &[], 0.0, 0.0, 800.0));
-        assert_eq!(bx[1], Box { nid: 1.0, x: 0.0, y: 0.0, w: 800.0, h: 50.0, auto_height: false, first_baseline: None, last_baseline: None, inline_block_baseline: None, natural_h: None });
-        assert_eq!(bx[2], Box { nid: 2.0, x: 0.0, y: 50.0, w: 800.0, h: 30.0, auto_height: false, first_baseline: None, last_baseline: None, inline_block_baseline: None, natural_h: None });
+        assert_eq!(bx[1], Box { nid: 1.0, x: 0.0, y: 0.0, w: 800.0, h: 50.0, auto_height: false, first_baseline: None, last_baseline: None, inline_block_baseline: None, natural_h: None, clamped_h: false });
+        assert_eq!(bx[2], Box { nid: 2.0, x: 0.0, y: 50.0, w: 800.0, h: 30.0, auto_height: false, first_baseline: None, last_baseline: None, inline_block_baseline: None, natural_h: None, clamped_h: false });
         assert_eq!(bx[0].h, 80.0); // root auto height = 50 + 30
         assert!(bx[0].auto_height);
     }
@@ -7873,7 +7896,7 @@ mod tests {
         let inputs = vec![blk(0.0, -1), owner, f];
         let bx = boxes(layout_block(&inputs, &[], &[], &[], &[], 0.0, 0.0, 800.0));
         assert_eq!(bx[1].h, 120.0); // owner contains the float
-        assert_eq!(bx[2], Box { nid: 2.0, x: 0.0, y: 0.0, w: 80.0, h: 120.0, auto_height: false, first_baseline: None, last_baseline: None, inline_block_baseline: None, natural_h: None });
+        assert_eq!(bx[2], Box { nid: 2.0, x: 0.0, y: 0.0, w: 80.0, h: 120.0, auto_height: false, first_baseline: None, last_baseline: None, inline_block_baseline: None, natural_h: None, clamped_h: false });
     }
 
     #[test]

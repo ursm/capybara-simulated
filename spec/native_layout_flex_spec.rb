@@ -231,8 +231,34 @@ RSpec.describe 'native layout flex parity', if: ENV.fetch('CSIM_JS_ENGINE', 'v8'
     expect_parity('<div style="display:flex;height:90px;width:400px"><div style="width:100px;height:30px;margin:auto"></div></div>')
   end
 
+  # SHARED with Chrome: both engines align an AUTO-height row's items in its CONTENT cross and let the min-height
+  # grow the box around them; Chrome clamps the container's cross size first (css-flexbox §9.4 step 15) and
+  # centres them in the 100 (35 and 25, where both engines say 10 and 0).
   it 'matches a row whose min-height grows the cross the items align in (the app-shell min-height)' do
-    expect_parity('<div style="display:flex;align-items:center;min-height:100px;width:400px"><div style="width:80px;height:30px"></div><div style="width:80px;height:50px"></div></div>')
+    body = '<div style="display:flex;align-items:center;min-height:100px;width:400px"><div style="width:80px;height:30px"></div><div style="width:80px;height:50px"></div></div>'
+    expect_parity(body)
+    a, b = item_boxes(body)
+    expect_shared_gap(a[1], shared: 10, chrome: 35, what: "#{body}: the first item's y")
+    expect_shared_gap(b[1], shared: 0, chrome: 25, what: "#{body}: the second item's y")
+  end
+
+  # A DEFINITE height is clamped before the content is laid out in it — and the oracle handed a column item back its
+  # AUTO layout whenever the imposed number equalled it, including one its own max-height had just CUT to that
+  # number: its lines stayed aligned in the 55 they came to (y 35 and 0 against Chrome's 25 and -10), and the walk
+  # declined every such container rather than read the oracle's box to find out (`rv8g3`, 234 declines).
+  it 'lays a clamped column item out again at the height it was cut to' do
+    body = '<div style="display:flex;flex-direction:column;height:120px"><div id="c" style="display:flex;flex-wrap:wrap-reverse;width:70px;max-height:45px">' \
+           '<div style="width:30px;height:20px"></div><div style="width:45px;height:35px"></div></div></div>'
+    expect_parity(body)
+    expect(item_boxes(body)).to eq([[0, 25, 30, 20], [0, -10, 45, 35]])   # Chrome
+  end
+  # …and a percentage height inside an item a min-height floored resolves against the floor (Chrome 45), in both
+  # engines: native imposes the height there too rather than laying the item out at auto again.
+  it 'resolves a percentage height against the floor a column item\'s min-height raised it to' do
+    body = '<div style="display:flex;flex-direction:column;width:300px;height:150px"><div style="min-height:60%">' \
+           '<div id="m" style="height:50%;width:50%">nested</div></div><div style="height:20px"></div></div>'
+    expect_parity(body)
+    expect(marked_box(body)).to eq([150, 45])   # Chrome
   end
 
   it 'matches a row whose max-height caps the box while the taller content overflows it' do
@@ -315,15 +341,21 @@ RSpec.describe 'native layout flex parity', if: ENV.fetch('CSIM_JS_ENGINE', 'v8'
   it 'matches a cross-stretched flex-item row with a NON-binding min-height (box on the stretch extent)' do
     expect_parity('<div style="display:flex;height:200px;width:400px"><div style="display:flex;flex-direction:column;justify-content:space-between;min-height:100px;flex:1"><div style="width:40px;height:20px"></div><div style="width:40px;height:20px"></div></div></div>')
   end
-  # DECLINES: a box the FLOW made definite (stretch) then a clamp BINDS away from the pre-clamp extent — native
-  # holds only the post-clamp box, so it cannot recover where the items sit. A/B: drop the clamp → native.
-  it 'declines a cross-stretched flex row clamped BELOW the stretch by max-height (items placed against the pre-clamp stretch)' do
-    a_bails_b_native('<div style="display:flex;height:120px;align-items:stretch;width:400px"><div style="display:flex;max-height:80px;align-items:center"><div style="width:50px;height:20px"></div></div></div>',
-                     '<div style="display:flex;height:120px;align-items:stretch;width:400px"><div style="display:flex;align-items:center"><div style="width:50px;height:20px"></div></div></div>')
+  # A box the FLOW made definite (a stretch) whose clamp BINDS: the stretched size is clamped FIRST and the items
+  # are aligned in what is left (css-flexbox §9.4 step 11). These used to DECLINE — the oracle aligned them in the
+  # pre-clamp stretch and cut the box around them afterwards (50 and 10), which native, holding only the clamped
+  # box, could not reproduce; it now clamps before it lays the content out, and both engines give Chrome's figure.
+  it 'aligns the items of a cross-stretched flex row in the stretch its max-height clamped' do
+    body = '<div style="display:flex;height:120px;align-items:stretch;width:400px"><div id="c" style="display:flex;max-height:80px;align-items:center">' \
+           '<div style="width:50px;height:20px"></div></div></div>'
+    expect_parity(body)
+    expect(first_item_box(body)).to eq([0, 30, 50, 20])   # Chrome
   end
-  it 'declines a cross-stretched flex row whose min-height floors ABOVE the stretch (items placed against the smaller stretch)' do
-    a_bails_b_native('<div style="display:flex;height:40px;align-items:stretch;width:400px"><div style="display:flex;min-height:120px;align-items:center"><div style="width:50px;height:20px"></div></div></div>',
-                     '<div style="display:flex;height:40px;align-items:stretch;width:400px"><div style="display:flex;align-items:center"><div style="width:50px;height:20px"></div></div></div>')
+  it 'aligns the items of a cross-stretched flex row in the stretch its min-height floored' do
+    body = '<div style="display:flex;height:40px;align-items:stretch;width:400px"><div id="c" style="display:flex;min-height:120px;align-items:center">' \
+           '<div style="width:50px;height:20px"></div></div></div>'
+    expect_parity(body)
+    expect(first_item_box(body)).to eq([0, 50, 50, 20])   # Chrome
   end
 
   it 'matches percentage vertical padding on a flex container that fills its parent (width == cb, no basis divergence)' do
@@ -406,12 +438,15 @@ RSpec.describe 'native layout flex parity', if: ENV.fetch('CSIM_JS_ENGINE', 'v8'
   it 'matches a sticky flex container' do
     expect_parity('<div style="width:300px;height:400px"><div style="position:sticky;top:0;display:flex"><div style="width:30px;height:30px"></div></div></div>')
   end
-  # An abspos flex container is SELF-SIZED (autoHeight true) but its oof replay pushes the clamped box + clears
-  # rec[54], so measure_flex can't two-phase — a binding min/max-height would mislay the items in the clamped
-  # cross. Decline it (mirroring the autoHeight===false in-flow case); a NON-binding clamp stays native.
-  it 'declines an abspos flex row whose min-height binds (no two-phase after the oof replay)' do
-    a_bails_b_native('<div style="position:relative;width:300px;height:200px"><div style="position:absolute;top:0;left:0;display:flex;align-items:center;min-height:80px"><div style="width:40px;height:30px"></div></div></div>',
-                     '<div style="position:relative;width:300px;height:200px"><div style="position:absolute;top:0;left:0;display:flex;align-items:center"><div style="width:40px;height:30px"></div></div></div>')
+  # An abspos flex container is SELF-SIZED, and its binding min-height is the auto-height case: both engines align
+  # its items in the CONTENT cross and grow the box around them (0), where Chrome clamps first and centres them in
+  # the 80 (25) — the same shared gap as an in-flow auto-height row. (It used to decline, when the walk read the
+  # oracle's box to tell a binding clamp from one that did not bind.)
+  it 'aligns an abspos flex row whose min-height binds as an auto-height row (shared)' do
+    body = '<div style="position:relative;width:300px;height:200px"><div id="c" style="position:absolute;top:0;left:0;display:flex;align-items:center;min-height:80px">' \
+           '<div style="width:40px;height:30px"></div></div></div>'
+    expect_parity(body)
+    expect_shared_gap(first_item_box(body)[1], shared: 0, chrome: 25, what: "#{body}: the item's y")
   end
   it 'matches an abspos flex row with a NON-binding min-height (box on its content extent)' do
     expect_parity('<div style="position:relative;width:300px;height:200px"><div style="position:absolute;top:0;left:0;display:flex;align-items:center;min-height:20px"><div style="width:40px;height:60px"></div></div></div>')
@@ -495,12 +530,6 @@ RSpec.describe 'native layout flex parity', if: ENV.fetch('CSIM_JS_ENGINE', 'v8'
 
   it 'matches row-reverse with justify-content:left (physical keyword → the reversed main-end)' do
     expect_parity('<div style="display:flex;flex-direction:row-reverse;justify-content:left;width:500px"><div style="width:80px;height:30px"></div><div style="width:80px;height:30px"></div></div>')
-  end
-
-  # A/B bails — the feature declines; the same shape without it stays native.
-  def a_bails_b_native(feature, plain = '<div style="display:flex;width:400px"><div style="width:80px;height:30px"></div><div style="width:80px;height:30px"></div></div>')
-    expect(run_shadow(feature)['ok']).to be(false), "expected #{feature.inspect} to bail"
-    expect(run_shadow(plain)['ok']).to be(true), 'expected the plain flex to stay native'
   end
 
   # `wrap-reverse` turns the cross axis round, which native mirrors: the stack order, where it starts, and a
@@ -705,7 +734,12 @@ RSpec.describe 'native layout flex parity', if: ENV.fetch('CSIM_JS_ENGINE', 'v8'
   it('matches a floated flex item with flex-grow (float ignored, grows to fill)') { expect_parity('<div style="display:flex;width:400px"><div style="float:left;flex:1;height:30px"></div><div style="width:80px;height:30px"></div></div>') }
   it('matches a nested wrap-reverse flex item') { expect_parity('<div style="display:flex;width:400px"><div style="display:flex;flex-wrap:wrap-reverse;width:80px;height:30px"></div><div style="width:80px;height:30px"></div></div>') }
   it('matches a flex container with min-height AND percentage vertical padding') { expect_parity('<div style="width:400px"><div style="display:flex;flex-direction:column;min-height:100px;padding-top:10%;width:100px"><div style="width:80px;height:30px"></div></div></div>') }
-  it('declines a cross-stretched column clamped by max-height (oracle sizes against the pre-clamp room native lacks)') { a_bails_b_native('<div style="display:flex;height:300px;width:400px"><div style="display:flex;flex-direction:column;max-height:100px;row-gap:20%;width:100px"><div style="height:20px"></div><div style="height:30px"></div></div></div>', '<div style="display:flex;height:300px;width:400px"><div style="display:flex;flex-direction:column;row-gap:20%;width:100px"><div style="height:20px"></div><div style="height:30px"></div></div></div>') }
+  it 'lays out a cross-stretched column its max-height clamped, against the clamped room' do
+    body = '<div style="display:flex;height:300px;width:400px"><div id="c" style="display:flex;flex-direction:column;max-height:100px;row-gap:20%;width:100px">' \
+           '<div style="height:20px"></div><div style="height:30px"></div></div></div>'
+    expect_parity(body)
+    expect(item_boxes(body)).to eq([[0, 0, 100, 20], [0, 40, 100, 30]])   # Chrome
+  end
   # A flex-ITEM flex ROW whose min-height floors its own (auto) content lays out natively: the item's autoHeight
   # rides rec[54] past the parent-push, so native recomputes the cross from content and two-phases the clamp —
   # the child aligns in the PRE-floor content (align-items:center in a 30px content → 0), box grows to min-height.
