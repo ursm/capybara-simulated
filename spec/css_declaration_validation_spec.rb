@@ -230,6 +230,30 @@ RSpec.describe 'declaration validation' do
     expect(set('strokeDasharray', ',1')).to         eq('')
   end
 
+  # A lone DELIMITER is no property's value — every length grammar took it for a keyword mdn omits —
+  # and a box shorthand spread one onto a side: `margin: 0 min(10px, 26%) + max(5em, 20px)`, a
+  # `calc()` written without its `calc()`, kept `margin-bottom: +` and applied `margin-left:
+  # max(5em, 20px)` (80px) where Chrome drops the declaration on every surface. Only as the WHOLE
+  # value: `grid-area: 1 / 2` and `font: 12px/1.5 serif` are components beside it.
+  it 'drops a lone delimiter' do
+    [%w[marginTop +], %w[marginTop -], %w[width *], %w[paddingTop /], %w[opacity +], %w[lineHeight +], %w[top +],
+     %w[zIndex -], %w[fontFamily *], %w[gridColumn /], ['margin', '0 1px + 2px'], ['padding', '0 1px - 2px'],
+     ['inset', '0 1px + 2px']].each do |prop, value|
+      expect(set(prop, value)).to eq(''), "#{prop}: #{value}"
+    end
+    expect(set('gridArea', '1 / 2')).to eq('1 / 2')
+    session = simulated_session(->(_env) { [200, {'content-type' => 'text/html'}, ['<!DOCTYPE html><html><body><div id="m" style="margin:0 min(10px, 26%) + max(5em, 20px)"></div></body></html>']] })
+    session.visit '/'
+    expect(session.evaluate_script(<<~JS)).to eq(['', '', '0px'])
+      (function () {
+        var e = document.createElement('div');
+        e.setAttribute('style', 'margin: 0 1px + 2px');
+        var m = document.getElementById('m');
+        return [e.style.cssText, m.style.cssText, getComputedStyle(m).marginLeft];
+      })()
+    JS
+  end
+
   # The `<position>` family has a grammar keywords alone can violate: an axis longhand takes one
   # part and only its own axis's keywords, and a pair takes at most one part per axis.
   it 'drops a position keyword on the wrong axis' do
