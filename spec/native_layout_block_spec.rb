@@ -211,7 +211,10 @@ RSpec.describe 'native layout L1 block-flow parity', if: ENV.fetch('CSIM_JS_ENGI
   # and so does a `top: 0%` or a `calc(0% + 5px)`, whose fraction is zero but which is a percentage all the same
   # (-10, -3; native read a zero fraction as "no percentage" and said 0 and 5); an over-constrained pair keeps the
   # rtl flow's `right` (-15); a linear `calc()` on an atomic, 60.99 / -5 (Chrome 61: the text before it is 28 wide
-  # there, 27.99 here).
+  # there, 27.99 here). …and a COMPARISON function travels as its clamped pair (2026-09-25; resolved against the
+  # oracle's basis before): `max(5%, 30px)` 30, an rtl `right: min(5%, 30px)` -15, a `top: clamp(5px, 10%, 12px)` 12
+  # of 200, `bottom: max(10px, 20%)` -40, a `top: max(10px, 20%)` of an INDEFINITE height nothing, and a `right`
+  # whose bounds CROSS negated after its clamp (-40: `clamp()`'s minimum wins, then the sign) — Chrome's figures.
   it 'resolves a percentage relative inset natively, against the box native lays the parent out as' do
     {
       '<div style="width:300px;height:200px"><div id="m" style="position:relative;left:10%;top:10%;height:20px">b</div></div>'                                   => [30, 20],
@@ -219,7 +222,13 @@ RSpec.describe 'native layout L1 block-flow parity', if: ENV.fetch('CSIM_JS_ENGI
       '<div style="width:300px"><div id="m" style="position:relative;top:0%;bottom:10px;height:20px">b</div></div>'                                              => [0, -10],
       '<div style="width:300px"><div id="m" style="position:relative;top:calc(0% + 5px);bottom:3px;height:20px">b</div></div>'                                   => [0, -3],
       '<div style="width:300px;direction:rtl"><div id="m" style="position:relative;left:10%;right:5%;height:20px">b</div></div>'                                 => [-15, 0],
-      '<div style="width:300px;height:100px">text <span id="m" style="display:inline-block;position:relative;left:calc(10% + 3px);top:-5%">ib</span> more</div>' => [60.99, -5]
+      '<div style="width:300px;height:100px">text <span id="m" style="display:inline-block;position:relative;left:calc(10% + 3px);top:-5%">ib</span> more</div>' => [60.99, -5],
+      '<div style="width:300px"><div id="m" style="position:relative;left:max(5%, 30px);height:20px">b</div></div>'                                              => [30, 0],
+      '<div style="width:300px;direction:rtl"><div id="m" style="position:relative;right:min(5%, 30px);height:20px">b</div></div>'                               => [-15, 0],
+      '<div style="width:300px;height:200px"><div id="m" style="position:relative;top:clamp(5px, 10%, 12px);height:20px">b</div></div>'                         => [0, 12],
+      '<div style="width:300px;height:200px"><div id="m" style="position:relative;bottom:max(10px, 20%);height:20px">b</div></div>'                              => [0, -40],
+      '<div style="width:300px"><div id="m" style="position:relative;top:max(10px, 20%);height:20px">b</div></div>'                                             => [0, 0],
+      '<div style="width:300px"><div id="m" style="position:relative;right:clamp(40px, 10%, 20px);height:20px">b</div></div>'                                    => [-40, 0]
     }.each do |body, (x, y)|
       session = simulated_session(page(body))
       session.visit '/'

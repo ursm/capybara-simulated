@@ -187,6 +187,13 @@ pub(crate) struct Input {
     // resolves to nothing. The base is kept apart because the resolved box REPLACES the input, and a box measured
     // again must not add its offset twice.
     pub(crate) rel_pct: [f64; 7],
+    // …the horizontal inset's LENGTH part beside `rel_pct[0]`, whether that inset is `right` and so NEGATED (after its
+    // clamp: `-max(lo, min(v, hi))` is no clamp of the negated line where the bounds cross), and each inset's BOUNDS —
+    // horizontal, `top`, `bottom` — where it is a comparison function over affine operands (`clamp_affine`).
+    pub(crate) rel_x_px: f64,
+    pub(crate) rel_x_neg: bool,
+    pub(crate) rel_lo: [(f64, f64); 3],
+    pub(crate) rel_hi: [(f64, f64); 3],
     // A flex ITEM's AUTO margins. MAIN axis (§9.5): bit0 = main-start-side `auto`, bit1 = main-end-side —
     // these absorb the line's free space (free/autos each) before justify-content, which then yields
     // (ZERO_JUSTIFY). CROSS axis (§8.1): bit2 = cross-start-side `auto`, bit3 = cross-end-side — these eat
@@ -721,10 +728,14 @@ impl Input {
         let mut n = self;
         let [x_frac, top_frac, top_px, bottom_frac, bottom_px, base_x, base_y] = self.rel_pct;
         if !x_frac.is_nan() {
+            // An inset between its bounds at a basis — a zero fraction is its length at any basis, NaN included.
+            let clamped = |k: usize, px: f64, frac: f64, basis: f64| {
+                clamp_affine(if frac == 0.0 { px } else { px + frac * basis }, self.rel_lo[k], self.rel_hi[k], basis)
+            };
             // An inset resolves to nothing where it is `auto` (a NaN length), to its length where it has no
             // percentage (a NaN fraction), to the pair where the height is definite, and to nothing otherwise — a
             // `0%` included, which is why "no percentage" cannot be a zero fraction.
-            let at = |px: f64, frac: f64| {
+            let at = |k: usize, px: f64, frac: f64| {
                 if px.is_nan() {
                     None
                 } else if frac.is_nan() {
@@ -732,11 +743,12 @@ impl Input {
                 } else if is_auto(cb_h) {
                     None
                 } else {
-                    Some(px + frac * cb_h)
+                    Some(clamped(k, px, frac, cb_h))
                 }
             };
-            let y = at(top_px, top_frac).or_else(|| at(bottom_px, bottom_frac).map(|b| -b)).unwrap_or(0.0);
-            n.rel_x = base_x + if x_frac == 0.0 { 0.0 } else { x_frac * cb_w };
+            let y = at(1, top_px, top_frac).or_else(|| at(2, bottom_px, bottom_frac).map(|b| -b)).unwrap_or(0.0);
+            let x = clamped(0, self.rel_x_px, x_frac, cb_w);
+            n.rel_x = base_x + if self.rel_x_neg { -x } else { x };
             n.rel_y = base_y + y;
         }
         n
@@ -7776,6 +7788,10 @@ mod tests {
             rel_x: 0.0,
             rel_y: 0.0,
             rel_pct: [f64::NAN, f64::NAN, f64::NAN, f64::NAN, f64::NAN, 0.0, 0.0],
+            rel_x_px: 0.0,
+            rel_x_neg: false,
+            rel_lo: [(f64::NEG_INFINITY, 0.0); 3],
+            rel_hi: [(f64::INFINITY, 0.0); 3],
             flex_item_auto: 0,
             flex_baseline_asc: f64::NAN,
             flex_line_nat: f64::NAN,
