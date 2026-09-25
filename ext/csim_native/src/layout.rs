@@ -552,7 +552,7 @@ pub(crate) const RUN_FLOAT: u8 = 7;
 // One item of a text block's inline stream. For TEXT: font/size/ls/ws/line_height measure its words,
 // and `asc` is the run's ascent within its line box (baselineWithin its owner) — its descent is
 // `line_height - asc`, so a line's box height is max(asc)+max(descent) over its runs and the strut.
-// For OPEN/CLOSE: `metric` is the horizontal edge width. `kind` selects.
+// For OPEN/CLOSE: the edges are the inline table's (`InlineBox`), `plain` their basis-less width. `kind` selects.
 #[derive(Clone, Copy)]
 pub(crate) struct Run {
     pub(crate) kind: u8,
@@ -600,9 +600,8 @@ pub(crate) struct Run {
     // the block 22 — where a test on the SUM saw nothing. Carried in the buffer slot an edge leaves unread
     // (`line_mode`'s), so the stride is unchanged; false on every other kind.
     pub(crate) lands: bool,
-    // An OPEN / CLOSE edge's width with NO percentage basis — what an INTRINSIC measure reads, where an OPEN's
-    // `metric` is the LENGTH part the laid-out line adds its percentages to (their fractions ride the inline table,
-    // `InlineBox`). 0 on every other kind.
+    // An OPEN / CLOSE edge's width with NO percentage basis — what an INTRINSIC measure reads, where the laid-out
+    // line resolves the box's edges from the inline table (`InlineBox::resolved`). 0 on every other kind.
     pub(crate) plain: f64,
 }
 
@@ -881,15 +880,25 @@ pub(crate) struct InlineBox {
     pub(crate) f_mr: f64,
     pub(crate) f_top: f64,
     pub(crate) f_bottom: f64,
+    // …the opening edge's own length (border + padding), which the OPEN run carries only summed with `ml`, and each
+    // edge's BOUNDS where it is a comparison function over affine operands — ml, left, right, mr, top, bottom — which
+    // is why the two opening halves are kept apart: each clamps on its own (`clamp_affine`).
+    pub(crate) left: f64,
+    pub(crate) lo: [(f64, f64); 6],
+    pub(crate) hi: [(f64, f64); 6],
 }
 impl InlineBox {
-    // Its edges resolved in a block `content_w` wide, the fractions folded into the lengths.
+    // Its edges resolved in a block `content_w` wide: the fractions folded into the lengths, between their bounds.
     fn resolved(mut self, content_w: f64) -> InlineBox {
-        self.ml += self.f_ml * content_w;
-        self.right += self.f_right * content_w;
-        self.mr += self.f_mr * content_w;
-        self.top += self.f_top * content_w;
-        self.bottom += self.f_bottom * content_w;
+        let at = |k: usize, px: f64, frac: f64| {
+            clamp_affine(if frac == 0.0 { px } else { px + frac * content_w }, self.lo[k], self.hi[k], content_w)
+        };
+        self.ml = at(0, self.ml, self.f_ml);
+        self.left = at(1, self.left, self.f_left);
+        self.right = at(2, self.right, self.f_right);
+        self.mr = at(3, self.mr, self.f_mr);
+        self.top = at(4, self.top, self.f_top);
+        self.bottom = at(5, self.bottom, self.f_bottom);
         self
     }
 }
@@ -967,6 +976,7 @@ fn inline_box(idx: usize) -> InlineBox {
         ml: 0.0, right: 0.0, mr: 0.0, top: 0.0, bottom: 0.0, own_h: 0.0, own_asc: 0.0,
         rel_x: 0.0, rel_y: 0.0, bt: 0.0, br: 0.0, bb: 0.0, bl: 0.0,
         f_ml: 0.0, f_left: 0.0, f_right: 0.0, f_mr: 0.0, f_top: 0.0, f_bottom: 0.0,
+        left: 0.0, lo: [(f64::NEG_INFINITY, 0.0); 6], hi: [(f64::INFINITY, 0.0); 6],
     })
 }
 fn store_frags(i: usize, rows: Vec<FragRow>) {
@@ -1157,8 +1167,8 @@ struct LineStyle {
 // Greedy line layout for a text block's run/marker STREAM (`runs` / `run_texts` parallel, this block's
 // slice). TEXT runs tokenize into words (maximal non-`[ \t\n\r\f]+` — NBSP is NOT a break), each measured
 // in its own font; a collapsible space (the first ws at a boundary, that run's spaceW) is the break
-// opportunity. OPEN/CLOSE are an inline element's horizontal edges: OPEN reserves its opening edge (`metric` and
-// the table's percentages, resolved in this block) in the fit test (openEdgeWidth) and flushes onto the first line
+// opportunity. OPEN/CLOSE are an inline element's horizontal edges: OPEN reserves its opening edge (its `InlineBox`'s
+// margin and border + padding, resolved in this block) in the fit test (openEdgeWidth) and flushes onto the first line
 // content lands on; CLOSE adds the box's closing halves (from its `InlineBox`) on the current line. BR forces a line break. A line's box is max(ascent)+max(descent) over the STRUT
 // (`strut_lh` / `strut_asc`) and the runs on it (each run's descent = line_height - asc), §10.8 — so a
 // taller-metric run grows the box even under a fixed line-height; an empty line (a lone/leading `<br>`)
@@ -1821,8 +1831,8 @@ fn line_layout(
         match run.kind {
             RUN_OPEN => {
                 let f = frag_here!(run.font as usize);
-                // (…the opening edge: its length parts on the run, its percentages in the table.)
-                let w = run.metric + (f.ib.f_ml + f.ib.f_left) * content_w;
+                // (…the opening edge: margin and border + padding, each resolved in the table — and clamped apart.)
+                let w = f.ib.ml + f.ib.left;
                 frags.push(f);
                 open.push(OpenBox { w, placed: false, frag: frags.len() - 1 });
             }

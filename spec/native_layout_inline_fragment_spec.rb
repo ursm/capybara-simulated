@@ -81,6 +81,24 @@ RSpec.describe 'native layout inline box fragments', if: ENV.fetch('CSIM_JS_ENGI
   # An EMPTY box takes a fragment only where there is a line box to take it on, and the line is the one it OPENED
   # on — which a `<br>` or a preserved newline makes a line box even with nothing on it. Both engines asked the
   # line the box CLOSED on (the next one, or none at all) and gave all three of these no height.
+  # …and edges written as COMPARISON functions, which the inline table carries as pairs between their bounds since
+  # 2026-09-25 — the opening edge's margin and padding clamping apart, a `calc()` padding floored at 0 (3 - 5 here) —
+  # where the walk used to resolve them against the oracle's basis. Chrome's rects, and no oracle read.
+  it 'lays out an inline box whose edges are clamped percentages' do
+    {
+      '<div style="font:16px monospace;width:300px">aa <span id="m" style="padding:0 clamp(4px, 5%, 20px)">bb</span> cc</div>'                   => [[28.8125, 0, 49.2031, 22]],
+      '<div style="font:16px monospace;width:120px">aa <span id="m" style="margin-left:max(5%, 10px);border-left:2px solid">bb</span> cc</div>' => [[38.8125, 0, 21.2031, 22]],
+      '<div style="font:16px monospace;width:30px">x <span id="m" style="padding-right:calc(10% - 5px);border-right:2px solid">bb</span> c</div>' => [[0, 22, 21.2031, 22]]
+    }.each do |body, chrome|
+      expect_fragments(body, chrome: chrome)
+      reads = with_simulated_session(page(body)) do |session|
+        session.visit '/'
+        session.evaluate_script('document.body.offsetHeight')
+        session.evaluate_script('globalThis.__csimLayoutShadowRun(undefined, {noOracle: true})')['oracleReads'].keys
+      end
+      expect(reads.grep_v(/\(handed over\)\z/)).to be_empty, "#{body}: #{reads.inspect}"
+    end
+  end
   it 'gives an empty box the line it opened on, a forced break making that a line' do
     expect_fragments('<div style="font:16px monospace;width:400px"><span id="m"></span><br></div>', chrome: [[0, 0, 0, 22]])
     expect_fragments('<div style="font:16px monospace;width:400px">x<span id="m"><br></span></div>', chrome: [[9.609375, 0, 0, 22]])
