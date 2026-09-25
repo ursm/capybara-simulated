@@ -1612,6 +1612,28 @@ RSpec.describe 'native layout table parity', if: ENV.fetch('CSIM_JS_ENGINE', 'v8
       expect(r['oracleReads'].to_h.keys.grep_v(/\(handed over\)\z/)).to be_empty, "#{body}: #{r.inspect}"
     end
   end
+  # A FIXED-layout table's first-row cell with a percentage padding: its column is its declared width plus its
+  # horizontal edges resolved against the width being shared out, the oracle's `fixedColumnWidths` — native resolves
+  # the cell's pairs and programs at that width, where the walk declined the table until 2026-09-26
+  # (`table-fixed-pct-padding`, 72 sweep shapes). SHARED: Chrome counts a percentage padding as NOTHING in that
+  # computation (`padding: 0 10%` beside `width: 100px` is a 100px column there, 180 in both engines; `max(5%, 30px)`
+  # counts 30 in all three).
+  it 'lays out a fixed table whose first-row cell has a percentage padding natively' do
+    [
+      ['<table style="table-layout:fixed;width:400px;border-spacing:0;font:16px monospace"><tr><td id="m" style="width:100px;padding:0 10%">a</td><td>b</td></tr></table>', 180, 100],
+      ['<table style="table-layout:fixed;width:400px;border-spacing:0;font:16px monospace"><tr><td style="width:100px;padding:0 max(5%, 30px)">a</td><td id="m">b</td></tr></table>', 240, nil]
+    ].each do |body, w, chrome|
+      expect_parity(body)
+      if chrome
+        expect_shared_gap(laid_out_rect(body)[2], shared: w, chrome: chrome, what: body)
+      else
+        expect(laid_out_rect(body)[2]).to eq(w)   # Chrome
+      end
+      r = run_shadow(body, '{noOracle: true}')
+      expect(r).to include('ok' => true, 'mismatches' => 0)
+      expect(r['oracleReads'].to_h.keys.grep_v(/\(handed over\)\z/)).to be_empty, "#{body}: #{r.inspect}"
+    end
+  end
   describe 'an orphan cell, row group or caption' do
     it 'lays one out as a block whose block-axis min/max do not apply' do
       %w[min-height:40px max-height:5px].each do |style|

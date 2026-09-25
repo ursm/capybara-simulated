@@ -5601,7 +5601,9 @@ fn fixed_column_widths(
         } else {
             continue;
         };
-        let border = if k.decl_border_box { declared } else { declared + k.edges_x() };
+        // …a BORDER box, its horizontal edges resolved against the width being shared out, as the oracle's
+        // `fixedColumnWidths` resolves them (`edgeInsets(cell, assignable)`): a percentage padding is a share of THAT.
+        let border = if k.decl_border_box { declared } else { declared + k.with_percent_sizes(assignable, f64::NAN).edges_x() };
         let each = border / k.cell_colspan as f64;
         for ci in k.cell_col..(k.cell_col + k.cell_colspan).min(n) {
             if widths[ci].is_none() {
