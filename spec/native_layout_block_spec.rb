@@ -239,7 +239,7 @@ RSpec.describe 'native layout L1 block-flow parity', if: ENV.fetch('CSIM_JS_ENGI
       expect(got[1]).to be_within(0.01).of(y)
       oracle_free = session.evaluate_script('globalThis.__csimLayoutShadowRun(undefined, {noOracle: true})')
       expect(oracle_free).to include('ok' => true, 'mismatches' => 0)
-      expect(oracle_free['oracleReads'].to_h.keys.grep_v(/\(handed over\)\z/)).to be_empty, oracle_free.inspect
+      expect(oracle_free['oracleReads'].to_h).to be_empty, oracle_free.inspect
     end
   end
 
@@ -964,7 +964,7 @@ RSpec.describe 'native layout L1 block-flow parity', if: ENV.fetch('CSIM_JS_ENGI
         expect(laid_out_rect(body)[0, 2]).to eq([x, y])
         session = simulated_session(page(body)); session.visit '/'
         reads = session.evaluate_script('globalThis.__csimLayoutShadowRun(undefined, {noOracle: true})')['oracleReads'].keys
-        expect(reads.grep_v(/\(handed over\)\z/)).to be_empty, "#{body}: #{reads.inspect}"
+        expect(reads).to be_empty, "#{body}: #{reads.inspect}"
       end
     end
     # Review findings, oracle side (native was the spec-shaped one): a flex container's auto-height out-of-flow
@@ -1807,7 +1807,7 @@ x</div>))
       laid_out_rect(body).zip(rect).each {|g, w| expect(g).to be_within(0.01).of(w), body }
       session = simulated_session(page(body)); session.visit '/'
       reads = session.evaluate_script('globalThis.__csimLayoutShadowRun(undefined, {noOracle: true})')['oracleReads'].keys
-      expect(reads.grep_v(/\(handed over\)\z/)).to be_empty, "#{body}: #{reads.inspect}"
+      expect(reads).to be_empty, "#{body}: #{reads.inspect}"
     end
   end
 end

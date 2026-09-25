@@ -242,7 +242,7 @@ RSpec.describe 'native layout replaced-leaf parity', if: ENV.fetch('CSIM_JS_ENGI
         # from a native one. The whole read set is the one figure the harness HANDS the pass.
         r = run_shadow(body, '{noOracle: true}')
         expect(r).to include('ok' => true, 'mismatches' => 0, 'oracleWrites' => 0), r.inspect
-        expect(r['oracleReads'].keys).to eq(['nlShadowRun the pass root origin and width (handed over)']), body
+        expect(r['oracleReads'].to_h).to be_empty, body
       end
     end
     # …and NOT as the pass ROOT. The one thing native assumes about the root is that its box is the containing

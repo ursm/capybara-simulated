@@ -1585,7 +1585,7 @@ RSpec.describe 'native layout table parity', if: ENV.fetch('CSIM_JS_ENGINE', 'v8
       expect(laid_out_rect(table)[0]).to be_within(0.02).of(261.2)   # past its 100px share, at the table's own width (both engines)
       r = run_shadow(blocks, '{noOracle: true}')
       expect(r).to include('ok' => true, 'mismatches' => 0)
-      expect(r['oracleReads'].to_h.keys.grep_v(/\(handed over\)\z/)).to be_empty, r.inspect
+      expect(r['oracleReads'].to_h).to be_empty, r.inspect
     end
 
     # …and on that line in DOCUMENT order, left to right, whatever its `flex-direction` or its children's `order` say:
@@ -1637,7 +1637,7 @@ RSpec.describe 'native layout table parity', if: ENV.fetch('CSIM_JS_ENGINE', 'v8
       expect(laid_out_rect(body)[2]).to be_within(0.05).of(377.75), w
       r = run_shadow(body, '{noOracle: true}')
       expect(r).to include('ok' => true, 'mismatches' => 0)
-      expect(r['oracleReads'].to_h.keys.grep_v(/\(handed over\)\z/)).to be_empty, "#{w}: #{r.inspect}"
+      expect(r['oracleReads'].to_h).to be_empty, "#{w}: #{r.inspect}"
     end
     ['calc(90% + 10px)', 'max(90%, 10px)'].each do |w|
       body = %(<table style="width:400px;border-spacing:0;font:16px monospace"><tr><td id="m" style="width:#{w};padding:0">a</td>) +
@@ -1662,7 +1662,7 @@ RSpec.describe 'native layout table parity', if: ENV.fetch('CSIM_JS_ENGINE', 'v8
       expect(laid_out_rect(body)[2]).to be_within(0.05).of(w), body
       r = run_shadow(body, '{noOracle: true}')
       expect(r).to include('ok' => true, 'mismatches' => 0)
-      expect(r['oracleReads'].to_h.keys.grep_v(/\(handed over\)\z/)).to be_empty, "#{body}: #{r.inspect}"
+      expect(r['oracleReads'].to_h).to be_empty, "#{body}: #{r.inspect}"
     end
   end
   # A FIXED-layout table's first-row cell with a percentage padding: its column is its declared width plus its
@@ -1684,7 +1684,7 @@ RSpec.describe 'native layout table parity', if: ENV.fetch('CSIM_JS_ENGINE', 'v8
       end
       r = run_shadow(body, '{noOracle: true}')
       expect(r).to include('ok' => true, 'mismatches' => 0)
-      expect(r['oracleReads'].to_h.keys.grep_v(/\(handed over\)\z/)).to be_empty, "#{body}: #{r.inspect}"
+      expect(r['oracleReads'].to_h).to be_empty, "#{body}: #{r.inspect}"
     end
   end
   # A table may hold row GROUPS and BARE rows side by side (§17.2.1 wraps neither): the rows stack in render order —
@@ -1704,7 +1704,7 @@ RSpec.describe 'native layout table parity', if: ENV.fetch('CSIM_JS_ENGINE', 'v8
       laid_out_rect(body).zip(rect).each {|g, w| expect(g).to be_within(0.02).of(w), body }
       r = run_shadow(body, '{noOracle: true}')
       expect(r).to include('ok' => true, 'mismatches' => 0)
-      expect(r['oracleReads'].to_h.keys.grep_v(/\(handed over\)\z/)).to be_empty, "#{body}: #{r.inspect}"
+      expect(r['oracleReads'].to_h).to be_empty, "#{body}: #{r.inspect}"
     end
   end
   describe 'an orphan cell, row group or caption' do
@@ -1724,7 +1724,7 @@ RSpec.describe 'native layout table parity', if: ENV.fetch('CSIM_JS_ENGINE', 'v8
       ].each do |oracle_free|
         r = run_shadow(oracle_free, '{noOracle: true}')
         expect(r).to include('ok' => true, 'mismatches' => 0)
-        expect(r['oracleReads'].to_h.keys.grep_v(/\(handed over\)\z/)).to be_empty, r.inspect
+        expect(r['oracleReads'].to_h).to be_empty, r.inspect
       end
       %w[table-row-group table-header-group table-caption].each do |display|
         expect_parity(%(<div style="width:200px;font:16px monospace"><div style="display:#{display}">aa bb</div><p>after</p></div>))

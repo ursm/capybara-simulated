@@ -61,7 +61,6 @@ RSpec.describe 'native layout no-oracle run', if: ENV.fetch('CSIM_JS_ENGINE', 'v
                      "<table><tr><td>a #{WalkRefusals::POSITIONED}</td></tr></table></div>")
     reads = s.evaluate_script('globalThis.__csimLayoutShadowRun(undefined, {noOracle: true}).oracleReads')
     expect(reads.keys).to include('recordCbW _lbCbW')
-    expect(reads.keys).to include('nlShadowRun the pass root origin and width (handed over)')
     # …a helper under the walk site that called it, not under its own name
     helpers = reads.keys.grep(/ helper:/)
     expect(helpers).not_to be_empty
@@ -130,9 +129,9 @@ RSpec.describe 'native layout no-oracle run', if: ENV.fetch('CSIM_JS_ENGINE', 'v
   end
 
   # The shapes the port has already freed: block flow, text, a flex row, percentage sizes and edges on in-flow
-  # children. Their walk and native pass read NOTHING of the oracle's but what the harness hands the pass root
-  # (its origin and width) — the first shapes the oracle could be deleted for, so a read creeping back into a common
-  # path fails here rather than hiding among the thousands every other shape still makes.
+  # children. Their walk and native pass read NOTHING of the oracle's — the first shapes the oracle could be deleted
+  # for, so a read creeping back into a common path fails here rather than hiding among the thousands every other
+  # shape still makes.
   it 'lays out plain shapes without reading the oracle' do
     [
       '<div style="width:300px"><p style="margin:10px">hello world</p><div style="height:20px"></div></div>',
@@ -202,7 +201,36 @@ RSpec.describe 'native layout no-oracle run', if: ENV.fetch('CSIM_JS_ENGINE', 'v
     ].each do |body|
       r = session_with(body).evaluate_script('globalThis.__csimLayoutShadowRun(undefined, {noOracle: true})')
       expect(r).to include('ok' => true, 'mismatches' => 0), "#{body}: #{r.inspect}"
-      expect(r['oracleReads'].keys).to eq(['nlShadowRun the pass root origin and width (handed over)']), body
+      expect(r['oracleReads'].to_h).to be_empty, body
     end
+  end
+
+  # …the `<body>` pass root among them, which native places ITSELF as the oracle's document layout does: against
+  # the initial containing block — the root element's declared width, else the viewport's — at its leading margin,
+  # an `auto` pair splitting what its width leaves in the ROOT element's direction, and at its top margin collapsed
+  # with its first child's. Until 2026-09-26 every run read the oracle's box for it ("the pass root origin and width
+  # (handed over)"), the one read every shape made. Chrome's figures; a pass rooted anywhere else — an incremental
+  # relayout's subtree — is still handed its origin, and says so.
+  it 'places the body pass root itself' do
+    div = '<div id="m">x</div>'
+    {
+      ['body{margin:0 auto !important;max-width:200px}', div]                        => [412, 0, 200],
+      ['html{direction:rtl}body{margin:0 10px 0 30px !important;width:300px}', div] => [714, 0, 300],
+      ['html{direction:rtl}body{margin:0 auto 0 0 !important;width:300px}', div]    => [0, 0, 300],
+      ['html{width:500px}body{margin:0 auto !important;width:300px}', div]          => [100, 0, 300],
+      ['body{margin:0 5% !important}', div]                                         => [51.188, 0, 921.625],
+      ['body{margin:5px !important}', '<p id="m" style="margin:30px 0">a</p>']        => [5, 30, 1014]
+    }.each do |(css, child), (x, y, w)|
+      s = session_with("<style>#{css}</style>#{child}")
+      r = s.evaluate_script('globalThis.__csimLayoutShadowRun(undefined, {noOracle: true})')
+      expect(r).to include('ok' => true, 'mismatches' => 0), "#{css}: #{r.inspect}"
+      expect(r['oracleReads'].to_h).to be_empty, css
+      rect = s.evaluate_script("(r => [r.x, r.y, r.width])(document.getElementById('m').getBoundingClientRect())")
+      expect(rect).to match([be_within(0.05).of(x), eq(y), be_within(0.05).of(w)]), css   # (Chrome's LayoutUnits)
+    end
+    # …and a subtree root is handed its origin, the one read left
+    s = session_with('<div id="m" style="width:300px"><p>x</p></div>')
+    r = s.evaluate_script("globalThis.__csimLayoutShadowRun(document.getElementById('m'), {noOracle: true})")
+    expect(r['oracleReads'].to_h.keys).to eq(['nlShadowRun the pass root origin and width (handed over)'])
   end
 end

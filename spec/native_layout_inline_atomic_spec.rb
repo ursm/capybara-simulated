@@ -512,7 +512,7 @@ RSpec.describe 'native layout inline-atomic parity', if: ENV.fetch('CSIM_JS_ENGI
         session.evaluate_script('document.body.offsetHeight')
         r = session.evaluate_script('globalThis.__csimLayoutShadowRun(undefined, {noOracle: true})')
         expect(r).to include('ok' => true, 'mismatches' => 0)
-        expect(r['oracleReads'].to_h.keys.grep_v(/\(handed over\)\z/)).to be_empty, r.inspect
+        expect(r['oracleReads'].to_h).to be_empty, r.inspect
       end
     end
     # An INLINE replaced element — `<svg>` / `<canvas>` by their own UA display, every form control forced to
@@ -548,7 +548,7 @@ RSpec.describe 'native layout inline-atomic parity', if: ENV.fetch('CSIM_JS_ENGI
         session.evaluate_script('document.body.offsetHeight')
         r = session.evaluate_script('globalThis.__csimLayoutShadowRun(undefined, {noOracle: true})')
         expect(r).to include('ok' => true, 'mismatches' => 0, 'oracleWrites' => 0), r.inspect
-        expect(r['oracleReads'].keys).to eq(['nlShadowRun the pass root origin and width (handed over)']), body
+        expect(r['oracleReads'].to_h).to be_empty, body
       end
     end
     # …and a LINE-relative `vertical-align` is native's too, on an inline replaced element as on every other

@@ -1173,7 +1173,9 @@ fn layout_pass(
         .collect();
     // …and the math table: every comparison function's program, named by offset from a record, an inline entry or a grid.
     let maths = read_f64_array(args.get(8));
-    match crate::layout::layout_block(&inputs, &runs, &run_texts, &grids, &inlines, &maths, root_x, root_y, root_cb_w) {
+    // …and the root element's direction, for a pass root native places itself (a NaN origin): the BODY's lead margin.
+    let root_rtl = args.get(9).is_true();
+    match crate::layout::layout_block(&inputs, &runs, &run_texts, &grids, &inlines, &maths, root_x, root_y, root_cb_w, root_rtl) {
         crate::layout::Outcome::Unsupported => rv.set_bool(false),
         crate::layout::Outcome::LaidOut(boxes, frags) => {
             let cid = realm_id(scope, &args);

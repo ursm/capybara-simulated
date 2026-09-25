@@ -1751,7 +1751,7 @@ RSpec.describe 'native layout flex parity', if: ENV.fetch('CSIM_JS_ENGINE', 'v8'
         expect(laid_out_rect(body)[index]).to eq(size)
         r = run_shadow(body, '{noOracle: true}')
         expect(r).to include('ok' => true, 'mismatches' => 0)
-        expect(r['oracleReads'].to_h.keys.grep_v(/\(handed over\)\z/)).to be_empty, r.inspect
+        expect(r['oracleReads'].to_h).to be_empty, r.inspect
       end
     end
     # …where three bases part from Chrome in BOTH engines alike (the review of 34298827), pinned: a negative linear

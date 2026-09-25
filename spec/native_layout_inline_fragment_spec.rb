@@ -75,7 +75,7 @@ RSpec.describe 'native layout inline box fragments', if: ENV.fetch('CSIM_JS_ENGI
       session.evaluate_script('globalThis.__csimLayoutShadowRun(undefined, {noOracle: true})')
     end
     expect(r).to include('ok' => true, 'mismatches' => 0)
-    expect(r['oracleReads'].keys).to eq(['nlShadowRun the pass root origin and width (handed over)'])
+    expect(r['oracleReads'].to_h).to be_empty
   end
 
   # An EMPTY box takes a fragment only where there is a line box to take it on, and the line is the one it OPENED
@@ -96,7 +96,7 @@ RSpec.describe 'native layout inline box fragments', if: ENV.fetch('CSIM_JS_ENGI
         session.evaluate_script('document.body.offsetHeight')
         session.evaluate_script('globalThis.__csimLayoutShadowRun(undefined, {noOracle: true})')['oracleReads'].keys
       end
-      expect(reads.grep_v(/\(handed over\)\z/)).to be_empty, "#{body}: #{reads.inspect}"
+      expect(reads).to be_empty, "#{body}: #{reads.inspect}"
     end
   end
   # …and a RELATIVE inline box's percentage offsets, which travel as the chain `nlChainRel` sums (a length, a fraction
@@ -122,7 +122,7 @@ RSpec.describe 'native layout inline box fragments', if: ENV.fetch('CSIM_JS_ENGI
         session.evaluate_script('document.body.offsetHeight')
         session.evaluate_script('globalThis.__csimLayoutShadowRun(undefined, {noOracle: true})')['oracleReads'].keys
       end
-      expect(reads.grep_v(/\(handed over\)\z/)).to be_empty, "#{body}: #{reads.inspect}"
+      expect(reads).to be_empty, "#{body}: #{reads.inspect}"
     end
     # …an out-of-flow box in the chain moves by it too (SHARED: its static position is after the space before it in
     # both engines, 57.6 + 30, where Chrome's is before it, 48.02 + 30 — without the chain as well)
