@@ -103,9 +103,15 @@ RSpec.describe 'native layout inline box fragments', if: ENV.fetch('CSIM_JS_ENGI
   # of the block's width, of its height where definite, and the figure where it is not) and native resolves against the
   # block laying the line out — for the box's own fragments and for an atomic in it — where the walk resolved them
   # against the oracle's stamps until 2026-09-25. A `top: 20%` of an indefinite height is `auto`, so `bottom` is used.
-  # Chrome's rects, and no oracle read.
+  # …and a COMPARISON function's share as a program per axis beside them (`xm` / `ym`, a `right` one negated) since
+  # 2026-09-26 — two nested boxes' summed, a `top` one `auto` against an indefinite height as a percentage is. Chrome's
+  # rects, and no oracle read.
   it 'offsets a relative inline box by percentages of the block it is laid out in' do
     {
+      '<div style="width:300px;height:200px;font:16px monospace">aa <span id="m" style="position:relative;left:max(10%, 5px);top:min(10%, 3px)">bb</span></div>' => [[58.8125, 3, 19.2031, 22]],
+      '<div style="width:300px;height:200px;font:16px monospace">aa <span style="position:relative;left:max(10%, 5px);top:min(10%, 3px)">bb <span id="m" style="display:inline-block;width:4px;height:4px"></span></span></div>' => [[87.625, 16, 4, 4]],
+      '<div style="width:300px;font:16px monospace">aa <span style="position:relative;right:max(5%, 2px);top:min(10%, 3px)">bb <span id="m" style="display:inline-block;width:4px;height:4px"></span></span></div>' => [[42.625, 13, 4, 4]],
+      '<div style="width:300px;height:200px;font:16px monospace">aa <span style="position:relative;left:min(10%, 20px)"><span style="position:relative;right:max(5%, 2px)">bb <span id="m" style="display:inline-block;width:4px;height:4px"></span></span></span></div>' => [[62.625, 13, 4, 4]],
       '<div style="font:16px monospace;width:300px;height:120px">aa <span id="m" style="position:relative;left:10%;top:20%">bb</span> cc</div>' => [[58.8125, 24, 19.2031, 22]],
       '<div style="font:16px monospace;width:300px">aa <span id="m" style="position:relative;top:20%;bottom:6px">bb</span> cc</div>'           => [[28.8125, -6, 19.2031, 22]],
       '<div style="font:16px monospace;width:300px;height:120px">aa <span style="position:relative;left:10%;top:10%">bb <span id="m" style="display:inline-block;width:30px;height:12px;position:relative;left:10%"></span></span></div>' => [[117.625, 17, 30, 12]]
@@ -118,6 +124,12 @@ RSpec.describe 'native layout inline box fragments', if: ENV.fetch('CSIM_JS_ENGI
       end
       expect(reads.grep_v(/\(handed over\)\z/)).to be_empty, "#{body}: #{reads.inspect}"
     end
+    # …an out-of-flow box in the chain moves by it too (SHARED: its static position is after the space before it in
+    # both engines, 57.6 + 30, where Chrome's is before it, 48.02 + 30 — without the chain as well)
+    expect_fragments(
+      '<div style="width:300px;height:200px;font:16px monospace">aa <span style="position:relative;left:max(10%, 5px);bottom:clamp(1px, 5%, 4px)">bb <i id="m" style="position:absolute;width:2px;height:2px"></i></span></div>',
+      shared: [[87.6, -4, 2, 2]], shared_chrome: [[78.0156, -4, 2, 2]]
+    )
   end
   # A SOFT hyphen breaks the line where the next piece does not fit and shows a hyphen there — natively since
   # 2026-09-26 (`take_break!`), where the walk declined every one before. The piece goes plain where the next one fits,

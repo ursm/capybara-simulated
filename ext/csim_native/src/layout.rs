@@ -197,6 +197,8 @@ pub(crate) struct Input {
     // containing block's width, of its height where definite, and the correction to the chain's length in `rel_pct[6]`
     // where that height is not. [0, 0, 0] for none.
     pub(crate) chain_rel: [f64; 3],
+    // …and that chain's comparison functions, a PROGRAM per axis (`nlChainRel`; `NO_MATH` for none).
+    pub(crate) chain_math: [u32; 2],
     pub(crate) rel_math: [u32; 3],
     // A flex ITEM's AUTO margins. MAIN axis (§9.5): bit0 = main-start-side `auto`, bit1 = main-end-side —
     // these absorb the line's free space (free/autos each) before justify-content, which then yields
@@ -341,6 +343,8 @@ pub(crate) struct Input {
     // An out-of-flow box's inset percentages (top / right / bottom / left) as fractions of its containing block's
     // padding box — height for top / bottom, width for left / right — beside the length parts in `inset_*`.
     pub(crate) inset_frac: [f64; 4],
+    // …and each inset's PROGRAM, where it is a comparison function over affine operands (`bounded`).
+    pub(crate) inset_math: [u32; 4],
     pub(crate) flex_main_gap_frac: f64,
     // …and the PROGRAM of a value no pair can express, which is what a comparison function over affine operands is:
     // `min(10%, 20px)` is `10%` capped at 20, `clamp(5px, 10%, 12px)` is `10%` between 5 and 12, `min(10%, 5% + 20px,
@@ -725,7 +729,8 @@ impl Input {
         let mut n = self;
         let [x_frac, top_frac, top_px, bottom_frac, bottom_px, base_x, base_y] = self.rel_pct;
         let [chain_xf, chain_yf, chain_yi] = self.chain_rel;
-        let chained = chain_xf != 0.0 || chain_yf != 0.0 || chain_yi != 0.0;
+        let [chain_xm, chain_ym] = self.chain_math;
+        let chained = chain_xf != 0.0 || chain_yf != 0.0 || chain_yi != 0.0 || chain_xm != NO_MATH || chain_ym != NO_MATH;
         if x_frac.is_nan() && !chained {
             return n;
         }
@@ -756,15 +761,19 @@ impl Input {
         }
         // …and the chain of relative inline boxes around it, whose containing block is this box's too.
         if chained {
-            x += chain_xf * cb_w;
-            y += if is_auto(cb_h) { chain_yi } else { chain_yf * cb_h };
+            x += chain_xf * cb_w + bounded(0.0, chain_xm, cb_w);
+            y += if is_auto(cb_h) { chain_yi } else { chain_yf * cb_h + bounded(0.0, chain_ym, cb_h) };
         }
         n.rel_x = x;
         n.rel_y = y;
         n
     }
     fn has_percent_sizes(&self) -> bool {
-        self.pct_sizes.iter().any(|f| !f.is_nan()) || self.has_percent_edges() || !self.rel_pct[0].is_nan() || self.chain_rel != [0.0; 3]
+        self.pct_sizes.iter().any(|f| !f.is_nan())
+            || self.has_percent_edges()
+            || !self.rel_pct[0].is_nan()
+            || self.chain_rel != [0.0; 3]
+            || self.chain_math != [NO_MATH; 2]
     }
     // …an edge with a percentage in it, or with a BOUND that is one (`max(12px, 10%)` has no fraction of its own).
     fn has_percent_edges(&self) -> bool {
@@ -900,13 +909,16 @@ pub(crate) struct InlineBox {
     pub(crate) rel_xf: f64,
     pub(crate) rel_yf: f64,
     pub(crate) rel_yi: f64,
+    // …and its comparison functions' share, a PROGRAM per axis (`nlChainRel`): across, and down where the height is
+    // definite.
+    pub(crate) rel_math: [u32; 2],
 }
 impl InlineBox {
     // Its edges resolved in a block `content_w` wide: the fractions folded into the lengths, between their bounds —
     // and its relative offset, against that width and the block's height `pct_h` (NaN where indefinite).
     fn resolved(mut self, content_w: f64, pct_h: f64) -> InlineBox {
-        self.rel_x += self.rel_xf * content_w;
-        self.rel_y = if is_auto(pct_h) { self.rel_yi } else { self.rel_y + self.rel_yf * pct_h };
+        self.rel_x += self.rel_xf * content_w + bounded(0.0, self.rel_math[0], content_w);
+        self.rel_y = if is_auto(pct_h) { self.rel_yi } else { self.rel_y + self.rel_yf * pct_h + bounded(0.0, self.rel_math[1], pct_h) };
         let at = |k: usize, px: f64, frac: f64| {
             bounded(if frac == 0.0 { px } else { px + frac * content_w }, self.math[k], content_w)
         };
@@ -1020,7 +1032,7 @@ fn inline_box(idx: usize) -> InlineBox {
         rel_x: 0.0, rel_y: 0.0, bt: 0.0, br: 0.0, bb: 0.0, bl: 0.0,
         f_ml: 0.0, f_left: 0.0, f_right: 0.0, f_mr: 0.0, f_top: 0.0, f_bottom: 0.0,
         left: 0.0, math: [NO_MATH; 6],
-        rel_xf: 0.0, rel_yf: 0.0, rel_yi: 0.0,
+        rel_xf: 0.0, rel_yf: 0.0, rel_yi: 0.0, rel_math: [NO_MATH; 2],
     })
 }
 fn store_frags(i: usize, rows: Vec<FragRow>) {
@@ -2816,8 +2828,13 @@ fn line_layout(
                 // with its fractions in `metric` / `asc` and its indefinite-height figure in `line_height`, resolved as
                 // the boxes' are (`InlineBox::resolved`).
                 let ci = run.font as usize;
-                let rx = run.size + run.metric * content_w;
-                let ry = if is_auto(pct_h) { run.line_height } else { run.ls + run.asc * pct_h };
+                // (…and its programs in `tab_px` / `tab_min`, which an out-of-flow run leaves unread otherwise.)
+                let rx = run.size + run.metric * content_w + bounded(0.0, math_ref(run.tab_px), content_w);
+                let ry = if is_auto(pct_h) {
+                    run.line_height
+                } else {
+                    run.ls + run.asc * pct_h + bounded(0.0, math_ref(run.tab_min), pct_h)
+                };
                 // The inline box it sits DIRECTLY in — the innermost one open, since every inline opens one — if that
                 // box has an opening edge of its own still unplaced, and the edges around it have not been placed —
                 // asked of their SUM, as the flush is, so a pair that CANCELS is never "unplaced" to wait for — has
@@ -6884,12 +6901,13 @@ fn bounded(v: f64, prog: u32, basis: f64) -> f64 {
 }
 // A program of the pass's math table at `at` (layout.js `nlMathProgram` / `nlPackMath`): its length in triples, then
 // `[op, a, b]` apiece in postfix — `MATH_LINE` pushes the operand `a + b x basis`, `MATH_MIN` / `MATH_MAX` / `MATH_SUM`
-// fold the top two. A min / max takes a NaN through as `Math.min` / `Math.max` do, which `f64::min` does not; the two
+// fold the top two, `MATH_NEG` negates the top. A min / max takes a NaN through as `Math.min` / `Math.max` do, which `f64::min` does not; the two
 // engines have to agree on every figure, an unresolvable one included. A table the walk did not write — an offset
 // past its end, a fold with nothing to fold, a stack deeper than the walk ever builds — is NaN, not a panic.
 const MATH_LINE: f64 = 0.0;
 const MATH_MIN: f64 = 1.0;
 const MATH_MAX: f64 = 2.0;
+const MATH_NEG: f64 = 4.0;
 const MATH_DEPTH: usize = 16;
 fn math_at(table: &[f64], at: usize, basis: f64) -> f64 {
     let Some(&len) = table.get(at) else { return f64::NAN };
@@ -6904,6 +6922,13 @@ fn math_at(table: &[f64], at: usize, basis: f64) -> f64 {
             }
             stack[sp] = if b == 0.0 { a } else { a + b * basis };
             sp += 1;
+            continue;
+        }
+        if op == MATH_NEG {
+            if sp == 0 {
+                return f64::NAN;
+            }
+            stack[sp - 1] = -stack[sp - 1];
             continue;
         }
         if sp < 2 {
@@ -7715,7 +7740,13 @@ fn place_out_of_flow(
     let n = declared.with_percent_sizes(cb_w, cb_h);
     inputs[c].set(n);
     let [ft, fr, fb, fl] = n.inset_frac;
-    let (top, right, bottom, left) = (n.inset_top + ft * cb_h, n.inset_right + fr * cb_w, n.inset_bottom + fb * cb_h, n.inset_left + fl * cb_w);
+    let [top_m, right_m, bottom_m, left_m] = n.inset_math;
+    let (top, right, bottom, left) = (
+        bounded(n.inset_top + ft * cb_h, top_m, cb_h),
+        bounded(n.inset_right + fr * cb_w, right_m, cb_w),
+        bounded(n.inset_bottom + fb * cb_h, bottom_m, cb_h),
+        bounded(n.inset_left + fl * cb_w, left_m, cb_w),
+    );
     let (ml, mr, mt, mb) = (Input::m(n.ml), Input::m(n.mr), Input::m(n.mt), Input::m(n.mb));
     let stretched = !is_auto(left) && !is_auto(right);
     let stretched_v = !is_auto(top) && !is_auto(bottom);
@@ -8056,6 +8087,7 @@ mod tests {
             rel_x_px: 0.0,
             rel_x_neg: false,
             chain_rel: [0.0; 3],
+            chain_math: [NO_MATH; 2],
             rel_math: [NO_MATH; 3],
             flex_item_auto: 0,
             flex_baseline_asc: f64::NAN,
@@ -8095,6 +8127,7 @@ mod tests {
             edge_px: [0.0; 8],
             edge_math: [NO_MATH; 8],
             inset_frac: [0.0; 4],
+            inset_math: [NO_MATH; 4],
             flex_main_gap_frac: 0.0,
             flex_main_gap_math: NO_MATH,
             flex_cross_gap_math: NO_MATH,
@@ -9243,6 +9276,10 @@ mod tests {
         // …a padding's border added back (`NL_MATH_SUM`)
         let summed = program(&[line(0.0, 0.1), line(2.0, 0.0), [3.0, 0.0, 0.0]]);
         assert_eq!(math_at(&summed, 0, 100.0), 12.0);
+        // …a `right` inset's share of a relative chain, negated
+        let negated = program(&[line(0.0, 0.1), line(20.0, 0.0), fold(MATH_MAX), [MATH_NEG, 0.0, 0.0]]);
+        assert_eq!(math_at(&negated, 0, 100.0), -20.0);
+        assert!(math_at(&program(&[[MATH_NEG, 0.0, 0.0]]), 0, 100.0).is_nan());
         // …NaN through a fold, where `f64::min` would have answered the other side
         assert!(math_at(&min3, 0, f64::NAN).is_nan());
         // …and a table the walk did not write

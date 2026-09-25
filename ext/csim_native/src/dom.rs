@@ -892,10 +892,10 @@ fn register_font_bytes(
 
 // Fields per node in the layoutPass input buffer, and per run in the runs buffer (flat Float64Arrays).
 // Order MUST match the JS packer (layout.js `__csimLayoutShadowRun`) and layout::Input / layout::Run.
-const LAYOUT_STRIDE: usize = 157;
+const LAYOUT_STRIDE: usize = 163;
 const RUN_STRIDE: usize = 12;
 // …and per inline box in the inline table (layout.js `NL_INLINE_STRIDE` / `nlInlineEntry`, layout::InlineBox).
-const INLINE_STRIDE: usize = 29;
+const INLINE_STRIDE: usize = 31;
 
 // Decode a V8 Float64Array argument into a Vec<f64> (native-endian raw bytes).
 fn read_f64_array(val: v8::Local<'_, v8::Value>) -> Vec<f64> {
@@ -988,6 +988,7 @@ fn layout_pass(
             rel_pct: [r[130], r[131], r[132], r[133], r[134], r[39], r[40]],
             rel_x_px: r[152],
             chain_rel: [r[153], r[154], r[155]],
+            chain_math: [crate::layout::math_ref(r[161]), crate::layout::math_ref(r[162])],
             rel_x_neg: (r[65] as u32) & 8388608 != 0,
             rel_math: std::array::from_fn(|k| crate::layout::math_ref(r[149 + k])),
             flex_item_auto: r[41] as u8,
@@ -1024,6 +1025,7 @@ fn layout_pass(
             edge_px: [r[10], r[11], r[12], r[13], r[14], r[15], r[16], r[17]],
             edge_math: std::array::from_fn(|k| crate::layout::math_ref(r[141 + k])),
             inset_frac: [r[114], r[115], r[116], r[117]],
+            inset_math: std::array::from_fn(|k| crate::layout::math_ref(r[157 + k])),
             flex_main_gap_frac: r[98],
             flex_cross_gap_frac: r[99],
             flex_basis_kw: r[64] as u8,
@@ -1164,6 +1166,7 @@ fn layout_pass(
             rel_xf: r[26],
             rel_yf: r[27],
             rel_yi: r[28],
+            rel_math: [crate::layout::math_ref(r[29]), crate::layout::math_ref(r[30])],
         })
         .collect();
     // …and the math table: every comparison function's program, named by offset from a record, an inline entry or a grid.

@@ -951,6 +951,21 @@ RSpec.describe 'native layout L1 block-flow parity', if: ENV.fetch('CSIM_JS_ENGI
       expect_native_oof(%(<div style="#{cb}"><div style="position:absolute;top:10px;left:10px;min-width:100px;max-height:15px"><div style="height:50px"></div></div><div style="position:absolute;top:50px;box-sizing:border-box;width:50px;padding:10px;height:30px"></div></div>), 2)
       expect_native_oof(%(<div style="#{cb}"><div style="position:absolute;top:50%;left:50%;width:50%;height:25%"></div></div>))
     end
+    # A COMPARISON function in an inset is native's too: its program rides beside the pair (`NL_REC_INSET_MATH`) and
+    # native evaluates it against the containing block it places the box in — the walk resolved it against the oracle's
+    # rectangle until 2026-09-26. Chrome's boxes, and no oracle read.
+    it 'places an out-of-flow box by insets written as comparison functions' do
+      {
+        '<div style="position:relative;width:300px;height:200px"><div id="m" style="position:absolute;left:max(10%, 50px);top:min(20%, calc(10% + 5px), 30px);width:10px;height:10px"></div></div>' => [50, 25],
+        '<div style="position:relative;width:300px;height:200px"><div id="m" style="position:absolute;right:clamp(5px, 10%, 20px);bottom:max(5%, min(40px, 30%));width:10px;height:10px"></div></div>' => [270, 150]
+      }.each do |body, (x, y)|
+        expect_native_oof(body)
+        expect(laid_out_rect(body)[0, 2]).to eq([x, y])
+        session = simulated_session(page(body)); session.visit '/'
+        reads = session.evaluate_script('globalThis.__csimLayoutShadowRun(undefined, {noOracle: true})')['oracleReads'].keys
+        expect(reads.grep_v(/\(handed over\)\z/)).to be_empty, "#{body}: #{reads.inspect}"
+      end
+    end
     # Review findings, oracle side (native was the spec-shaped one): a flex container's auto-height out-of-flow
     # child is aligned once it HAS its height, not as a 0-tall box; an rtl column mirrors the cross axis natively;
     # a table cell's vertical-align shift moves its content, not a box anchored to the cell's padding box; a %
