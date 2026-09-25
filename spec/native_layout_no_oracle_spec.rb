@@ -173,6 +173,10 @@ RSpec.describe 'native layout no-oracle run', if: ENV.fetch('CSIM_JS_ENGINE', 'v
       # …and a line counted from the END under that repeat: which column it names depends on how many copies
       # native made, so answering it without the oracle is the whole of this increment
       '<div style="width:400px"><div style="display:grid;grid-template-columns:40px repeat(auto-fill, 60px) 20px;gap:5px"><div style="grid-column-start:-2">a</div><div style="grid-column:2 / span 3">b</div></div></div>',
+      # …an atomic's percentage WIDTH inside an inline that holds a block — an atomic itself, whose anonymous group
+      # the box hangs under — including in a flex item native measures
+      '<div style="width:300px"><b><div>blk</div><i>x <span style="display:inline-block;width:30%">a</span></i></b> words here</div>',
+      '<div style="display:flex;flex-direction:column;align-items:flex-start;width:300px"><div><b><div>blk</div><i>x <span style="display:inline-block;width:30%">a</span></i></b> words here</div></div>',
       # …and a LIST BOX, whose own box native derives from the control's intrinsic data and whose rows it stacks
       '<div style="width:400px">t <span style="display:inline-block"><select multiple size="3" style="display:block;width:120px"><option>a</option><option>bbbb</option></select></span> u</div>'
     ].each do |body|
