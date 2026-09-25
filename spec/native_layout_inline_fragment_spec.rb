@@ -1,0 +1,152 @@
+# frozen_string_literal: true
+
+# An inline box's FRAGMENTS — one rect per line its content reached, which is what `getClientRects` answers and
+# what a relative inline hands an out-of-flow descendant as its containing block. Native lays them out beside the
+# oracle's `settleInlineBoxes` (`fragsCompared` / `fragMismatches` off `__csimLayoutShadowRun`), and a box's own
+# record says nothing about them: an EMPTY `<span>` is a zero-width box either way, and whether it has a height,
+# and where, is a fragment question. So each shape here asserts the fragment parity AND Chrome's rects for `#m`.
+require 'capybara/simulated'
+require 'rack'
+require_relative 'support/session_teardown'
+require_relative 'support/shadow_parity'
+
+RSpec.describe 'native layout inline box fragments', if: ENV.fetch('CSIM_JS_ENGINE', 'v8') == 'v8' do
+  def page(body)
+    html = %(<!doctype html><html><head><meta charset="utf-8"></head><body style="margin:0">#{body}</body></html>)
+    Rack::Builder.new { run ->(_env) { [200, {'content-type' => 'text/html; charset=utf-8'}, [html]] } }.to_app
+  end
+
+  RECTS = "Array.from(document.getElementById('m').getClientRects()).map(r => [r.x, r.y, r.width, r.height])"
+
+  # The pass's fragment verdict and `#m`'s client rects, off one page.
+  def fragments(body)
+    with_simulated_session(page(body)) do |session|
+      session.visit '/'
+      session.evaluate_script('document.body.offsetHeight')
+      [session.evaluate_script('globalThis.__csimLayoutShadowRun()'), session.evaluate_script(RECTS)]
+    end
+  end
+
+  def rects_near?(got, want)
+    got.size == want.size && got.zip(want).all? {|g, w| g.zip(w).all? {|a, b| (a - b).abs <= 0.05 } }
+  end
+
+  # `chrome:` where both engines give Chrome's rects; `shared:` + `shared_chrome:` where both give another —
+  # checked Chrome FIRST, so the day one moves onto Chrome's figure the failure says "a fix", not "a regression".
+  def expect_fragments(body, chrome: nil, shared: nil, shared_chrome: nil)
+    raise ArgumentError, 'shared needs shared_chrome' if !shared.nil? && shared_chrome.nil?
+
+    r, rects = fragments(body)
+    expect(r).to include('ok' => true, 'mismatches' => 0), "#{body}: #{r.inspect}"
+    expect(r['fragsCompared']).to be > 0, "#{body}: no fragment was compared: #{r.inspect}"
+    expect(r['fragMismatches']).to eq(0), "#{body}: #{r['fragSample'].inspect}"
+    expect_no_dropped_records(r, body)
+    expect(rects_near?(rects, chrome)).to be(true), "#{body}: #m #{rects.inspect}, Chrome #{chrome.inspect}" unless chrome.nil?
+    return if shared.nil?
+
+    expect(rects_near?(shared, shared_chrome)).to be(false), "#{body}: shared and Chrome agree — pass it as `chrome:`"
+    expect(rects_near?(rects, shared_chrome)).to(
+      be(false),
+      "#{body}: #m #{rects.inspect} now AGREES with Chrome — a fix, not a regression: pin it as `chrome:`"
+    )
+    expect(rects_near?(rects, shared)).to be(true), "#{body}: #m #{rects.inspect}; both engines say #{shared.inspect}, Chrome #{shared_chrome.inspect}"
+  end
+
+  it 'lays out an edged box and an edge-only one on their line' do
+    expect_fragments(
+      '<div style="font:16px monospace;width:400px">aa <span id="m" style="padding:0 5px;border-left:2px solid">bb</span> cc</div>',
+      chrome: [[28.8125, 0, 31.203125, 22]]
+    )
+    expect_fragments(
+      '<div style="font:16px monospace;width:400px">aa <span id="m" style="padding-left:6px"></span> cc</div>',
+      chrome: [[28.8125, 0, 6, 22]]
+    )
+    # …and one per line where it wraps, the opening edge on the first and the closing one on the last.
+    expect_fragments(
+      '<div style="font:16px monospace;width:60px">x <span id="m" style="padding:0 3px">aaaa bbbb cc</span> d</div>',
+      chrome: [[0, 22, 41.40625, 22], [0, 44, 38.40625, 22], [0, 66, 22.203125, 22]]
+    )
+  end
+
+  # An EMPTY box takes a fragment only where there is a line box to take it on, and the line is the one it OPENED
+  # on — which a `<br>` or a preserved newline makes a line box even with nothing on it. Both engines asked the
+  # line the box CLOSED on (the next one, or none at all) and gave all three of these no height.
+  it 'gives an empty box the line it opened on, a forced break making that a line' do
+    expect_fragments('<div style="font:16px monospace;width:400px"><span id="m"></span><br></div>', chrome: [[0, 0, 0, 22]])
+    expect_fragments('<div style="font:16px monospace;width:400px">x<span id="m"><br></span></div>', chrome: [[9.609375, 0, 0, 22]])
+    expect_fragments(
+      '<div style="font:16px monospace;width:400px;white-space:pre-line">x<span id="m">&#10;</span></div>',
+      chrome: [[9.609375, 0, 0, 22]]
+    )
+    # …and a line that never became one still gives it none (Chrome: 0 tall before a block) — not even the answer
+    # of a line that closes AFTER the block child, which the oracle's `breakLine` left it waiting for (22, the
+    # height of the padded box's line below).
+    expect_fragments('<div style="font:16px monospace;width:400px"><span id="m"></span><div>b</div></div>', chrome: [[0, 0, 0, 0]])
+    expect_fragments(
+      '<div style="font:16px monospace;width:400px"><span id="m"></span><div>b</div><span style="padding-left:4px"></span></div>',
+      chrome: [[0, 0, 0, 0]]
+    )
+  end
+
+  # An empty box opens PAST the block margin still open above it, as any placement is: read at the bare cursor it
+  # sat inside a `margin-bottom: 10px` (y 22 where Chrome says 32).
+  it 'opens an empty box past the margin still open above it' do
+    expect_fragments(
+      '<div style="font:16px monospace;width:400px"><div style="margin-bottom:10px">a</div>' \
+      '<span id="m"></span><span style="padding-left:4px"></span></div>',
+      chrome: [[0, 32, 0, 22]]
+    )
+  end
+
+  # The space before a `pre-line` newline is a collapsible one the oracle PLACES on the line the newline ends, and
+  # the break eats: a box holding it has a line record there, and hangs from that line's baseline. Native dropped
+  # the space outright, so the box fell back to where it opened — the line's top.
+  it 'hangs an empty box holding the space before a pre-line newline from its baseline' do
+    expect_fragments(
+      '<div style="font:16px monospace;width:400px;line-height:0;white-space:pre-line">x<span id="m"> &#10; </span></div>',
+      chrome: [[9.609375, -11, 0, 22]]
+    )
+    # …where one with no placement at all still sits at the line's TOP in both engines (Chrome hangs it from the
+    # baseline too).
+    expect_fragments(
+      '<div style="font:16px monospace;width:400px;line-height:0">x<span id="m"></span></div>',
+      shared: [[9.6, 0, 0, 22]], shared_chrome: [[9.609375, -11, 0, 22]]
+    )
+  end
+
+  # A U+00A0 a word ENDS in is a justification gap only once something follows it on the line — the oracle holds it
+  # back like any trailing separator (`tailGaps`). Native counted it at once, so a line that wrapped right after it
+  # spread its whole free width over its own end and moved what stood past the space: 45 where the oracle and
+  # Chrome say 28.8 — for an out-of-flow marker's box, not only a fragment.
+  it 'holds back a justification gap a word ends in' do
+    expect_fragments(
+      '<div style="font:16px monospace;width:45px;text-align:justify">aa&nbsp;<span id="m"></span>bb q</div>',
+      chrome: [[28.8125, 0, 0, 22]]
+    )
+    body = '<div style="position:relative;font:16px monospace;width:45px;text-align:justify">aa&nbsp;' \
+           '<i id="m" style="position:absolute;width:2px;height:2px"></i>bb q</div>'
+    r, rects = fragments(body)
+    expect(r).to include('ok' => true, 'mismatches' => 0)
+    expect(rects_near?(rects, [[28.8125, 0, 2, 2]])).to be(true), "#m #{rects.inspect}"
+  end
+
+  # Both engines break after a U+00A0 at an inline boundary, which is no break opportunity (UAX #14: NBSP is GL);
+  # Chrome keeps `aa&nbsp;bb` on one line and overflows.
+  it 'breaks after a no-break space at an inline boundary (shared)' do
+    expect_fragments(
+      '<div style="font:16px monospace;width:45px"><b>aa&nbsp;</b><b id="m">bb</b></div>',
+      shared: [[0, 22, 19.2, 22]], shared_chrome: [[28.8125, 0, 19.203125, 22]]
+    )
+  end
+
+  # A piece's end and the gap after it are the same pen, and have to be read as the same SUM: native read the end
+  # as `at + w` and the gap as `band_l + line_x`, one ULP apart, and a piece ending exactly where the next gap began
+  # counted that gap as one before its end — a whole extra share of the spread.
+  it 'reads a piece ending at a justification gap as ending before it' do
+    expect_fragments(
+      '<div style="font:16px monospace;width:100px;text-align:justify;text-indent:8px">x<span id="m" style="white-space:pre"> </span>' \
+      '<span style="margin-right:-12px"> </span>bbbb bbbb end</div>',
+      chrome: [[17.609375, 0, 27.984375, 22]]
+    )
+  end
+end
