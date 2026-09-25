@@ -19,6 +19,10 @@ module ShadowParity
       "#{body}: the pass reports #{dropped} box(es) it never placed — a rollback with no fallback. " \
       'A dropped record compares as nothing, so this would otherwise read as a clean pass.'
     )
+    # …and the same two holes in the inline boxes' FRAGMENTS: one a rolled-back gather tabled and nothing tabled
+    # again, and one native returned no row for at all.
+    lost = result.slice('fragsDropped', 'fragsMissing').transform_values(&:to_i)
+    expect(lost.values.sum).to eq(0), "#{body}: inline fragments never laid out: #{lost.inspect} #{result['fragSample'].inspect}"
   end
 
   # `#m`'s laid-out rectangle, `[x, y, width, height]`, on a fresh page of `body` — the figure a spec holds against

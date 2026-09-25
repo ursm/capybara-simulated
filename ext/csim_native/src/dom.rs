@@ -894,6 +894,8 @@ fn register_font_bytes(
 // Order MUST match the JS packer (layout.js `__csimLayoutShadowRun`) and layout::Input / layout::Run.
 const LAYOUT_STRIDE: usize = 144;
 const RUN_STRIDE: usize = 12;
+// …and per inline box in the inline table (layout.js `NL_INLINE_STRIDE` / `nlInlineEntry`, layout::InlineBox).
+const INLINE_STRIDE: usize = 16;
 
 // Decode a V8 Float64Array argument into a Vec<f64> (native-endian raw bytes).
 fn read_f64_array(val: v8::Local<'_, v8::Value>) -> Vec<f64> {
@@ -905,11 +907,12 @@ fn read_f64_array(val: v8::Local<'_, v8::Value>) -> Vec<f64> {
     bytes.chunks_exact(8).map(|c| f64::from_ne_bytes(c.try_into().unwrap())).collect()
 }
 
-// __dom.layoutPass(inputsFlat, runsFlat, runTexts, rootX, rootY, rootCbW) -> bool. Decode the flat
-// per-node record buffer (root at record 0), the per-run buffer, and the parallel `runTexts` string
-// array (a run's text, else non-string), run native layout, and write each node's border-box into its
-// arena slot. Returns false when the subtree uses a feature the native engine doesn't model
-// (Outcome::Unsupported) — the caller then lays it out in JS. One crossing per pass.
+// __dom.layoutPass(inputsFlat, runsFlat, runTexts, rootX, rootY, rootCbW, grids, inlines) -> Float64Array | false.
+// Decode the flat per-node record buffer (root at record 0), the per-run buffer, the parallel `runTexts` string
+// array (a run's text, else non-string), the grid channel and the inline table, run native layout, and write each
+// node's border-box into its arena slot. Answers the inline boxes' FRAGMENTS as rows of [inline index, status, x,
+// y, w, h] — or false when the subtree uses a feature the native engine doesn't model (Outcome::Unsupported), and
+// the caller then lays it out in JS. One crossing per pass.
 fn layout_pass(
     scope: &mut v8::PinScope<'_, '_>,
     args: v8::FunctionCallbackArguments<'_>,
@@ -1119,9 +1122,37 @@ fn layout_pass(
     // Parallel grid channel: a computed grid container's `grid_start` indexes this buffer (parsed column
     // template + gaps + per-item placement). Empty when the pass has no computed grid.
     let grids = read_f64_array(args.get(6));
-    match crate::layout::layout_block(&inputs, &runs, &run_texts, &grids, root_x, root_y, root_cb_w) {
+    // The inline table: one entry per inline box the run stream opens, named by its runs. A buffer that does not
+    // divide by the stride is refused like the record buffer above.
+    let inline_floats = read_f64_array(args.get(7));
+    if inline_floats.len() % INLINE_STRIDE != 0 {
+        rv.set_bool(false);
+        return;
+    }
+    let inlines: Vec<crate::layout::InlineBox> = inline_floats
+        .chunks_exact(INLINE_STRIDE)
+        .map(|r| crate::layout::InlineBox {
+            nid: r[0],
+            ml: r[1],
+            left: r[2],
+            right: r[3],
+            mr: r[4],
+            top: r[5],
+            bottom: r[6],
+            own_h: r[7],
+            own_asc: r[8],
+            rel_x: r[9],
+            rel_y: r[10],
+            bt: r[11],
+            br: r[12],
+            bb: r[13],
+            bl: r[14],
+            is_wbr: (r[15] as u32) & 1 != 0,
+        })
+        .collect();
+    match crate::layout::layout_block(&inputs, &runs, &run_texts, &grids, &inlines, root_x, root_y, root_cb_w) {
         crate::layout::Outcome::Unsupported => rv.set_bool(false),
-        crate::layout::Outcome::LaidOut(boxes) => {
+        crate::layout::Outcome::LaidOut(boxes, frags) => {
             let cid = realm_id(scope, &args);
             let st = realm(scope, cid);
             for b in boxes {
@@ -1131,9 +1162,18 @@ fn layout_pass(
                     }
                 }
             }
-            rv.set_bool(true);
+            let flat: Vec<f64> = frags.iter().flatten().copied().collect();
+            rv.set(f64_array(scope, &flat).into());
         }
     }
+}
+
+// A Float64Array holding `vals` — how a pass hands a flat table back to JS in one crossing.
+fn f64_array<'s>(scope: &mut v8::PinScope<'s, '_>, vals: &[f64]) -> v8::Local<'s, v8::Float64Array> {
+    let bytes: Vec<u8> = vals.iter().flat_map(|v| v.to_ne_bytes()).collect();
+    let store = v8::ArrayBuffer::new_backing_store_from_vec(bytes).make_shared();
+    let buf = v8::ArrayBuffer::with_backing_store(scope, &store);
+    v8::Float64Array::new(scope, buf, 0, vals.len()).expect("a Float64Array over its own backing store")
 }
 
 // __dom.boxOf(nid) -> [x, y, w, h, autoHeight] (document coords, border-box) or undefined when the node
