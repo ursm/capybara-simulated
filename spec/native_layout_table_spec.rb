@@ -358,6 +358,25 @@ RSpec.describe 'native layout table parity', if: ENV.fetch('CSIM_JS_ENGINE', 'v8
     expect_parity('<div style="display:table;border-spacing:0"><div style="display:table-cell;width:30px;height:40px">a</div><div style="display:table-column"></div><div style="display:table-cell;width:30px;height:40px">b</div></div>')
   end
 
+  # …and an anonymous row TAKES ITS SHARE of a declared table height's surplus, in proportion to its height like any
+  # auto row: a `display: flex` `<tr>` is no row, so the table wraps it in an anonymous row and cell, and the rows
+  # split 154 as 77 / 77 (content 24 / 24) or 104.05 / 49.95 (50 / 24). Native gave the anonymous row its content
+  # height and the last row everything (130, 104) until 2026-09-25: the record left the row's PERCENTAGE slot at 0,
+  # a declared `0%`, which is a fixed track. Chrome's boxes, and the oracle's.
+  it 'shares a declared table height out over an anonymous row' do
+    {
+      '<tr style="display:flex"><td>c</td></tr><tr id="m"><td>b</td></tr>'                          => [81, 77],
+      '<tr style="height:50%;display:flex;align-items:end"><td>c</td></tr><tr id="m"><td>b</td></tr>' => [81, 77],
+      '<tr style="height:50px;display:flex"><td>c</td></tr><tr id="m"><td>b</td></tr>'                => [108.05, 49.95]
+    }.each do |rows, (y, h)|
+      body = %(<div style="font:16px monospace;width:300px"><table style="height:160px">#{rows}</table></div>)
+      expect_parity(body)
+      got = laid_out_rect(body)
+      expect(got[1]).to be_within(0.01).of(y), body
+      expect(got[3]).to be_within(0.01).of(h), body
+    end
+  end
+
   # r2 — rtl tables (column reversal). The columns run RIGHT-to-LEFT: column 0 is at the right edge. The oracle
   # mirrors each cell within the table content box, and native reflects it within its row (row_w - ltr_rel -
   # cell_width); the row / group / table boxes span the whole grid and are direction-agnostic. A FULL-WIDTH
