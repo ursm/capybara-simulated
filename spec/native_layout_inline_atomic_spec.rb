@@ -791,28 +791,24 @@ RSpec.describe 'native layout inline-atomic parity', if: ENV.fetch('CSIM_JS_ENGI
       # margin edge — the table's own baseline is for a flex line and a table cell to read.
       expect_native_atomic(%(<div style="width:400px">x <span style="display:inline-flex"><table style="display:inline-table"><tr><td>c</td></tr></table></span>#{marker} y</div>), 2)
     end
-    # …and it is PUSHED where the two engines would not be walking the same rows. That was THREE causes until
-    # 2026-09-23; two of them were closed in the ORACLE, which is where the note here always said they would
-    # have to be, and the predicate (`nlTableBaselineWalkAgrees`) is down to the third:
+    # …and it is laid out natively however its rows are ordered and whatever they declare. It was PUSHED where the two
+    # engines would not be walking the same rows — THREE causes until 2026-09-23, each closed in the ORACLE, which is
+    # where the note here always said they would have to be:
     #   * a `<tfoot>` renders after the body whatever its position in the markup (§17.2.1), which `tableGrid`
     #     and the walk follow, while `baselineCandidates` yielded DOM order — its "last" row was the last DOM
     #     child (marker y 28 against 10). That list is sorted by `rowGroupRankOf` now;
     #   * a CAPTION was in that list and native's rows are not, so one written AFTER the rows was the oracle's
     #     first candidate in a `last = true` walk (js 23, native 47, Chrome 51 — neither was right). A caption
     #     is no longer one of a table's baseline candidates at all;
-    #   * the oracle's scroll arm still adds a table-internal box's own bottom MARGIN, where the table
-    #     algorithm and Chrome give it none (js 32, native 22, Chrome 18). This one is the whole predicate.
-    it 'pushes an inline-table whose baseline the two engines would not walk alike' do
-      marker = '<span style="display:inline-block;width:4px;height:4px"></span>'
-      # (1, not 2: the marker is native's, the table is pushed)
-      ['<div style="display:inline-table"><div style="display:table-row;overflow:hidden;height:12px;margin-bottom:10px"><div style="display:table-cell">s</div></div></div>'].each do |table|
-        r = run_shadow(%(<div style="width:400px">x #{table}#{marker} y</div>))
-        expect(r).to include('ok' => true, 'mismatches' => 0, 'nativeAtomics' => 1), table
-      end
-      # …and the shapes it is the edge of still lay out — a percentage margin resolves against nothing in
-      # either engine — together with the two causes that RETIRED: row groups out of source order, and a
-      # caption written after the rows. Those two are the A/B on the oracle's side of this: they were pushed
-      # (1) and are laid out (2) now, and nothing else in this example changed.
+    #   * the oracle's scroll arm added a table-internal box's own bottom MARGIN, where the table algorithm and
+    #     Chrome give it none — closed 2026-09-26, and `nlTableBaselineWalkAgrees` with it. SHARED: an inline-table's
+    #     baseline sits lower than Chrome's in both engines (14 where Chrome says 10 here, the general gap).
+    it 'lays out an inline-table natively whatever order and margins its rows have' do
+      marker = '<span id="m" style="display:inline-block;width:4px;height:4px"></span>'
+      margin = '<div style="display:inline-table"><div style="display:table-row;overflow:hidden;height:12px;margin-bottom:10px"><div style="display:table-cell">s</div></div></div>'
+      body = %(<div style="width:400px">x #{margin}#{marker} y</div>)
+      expect(run_shadow(body)).to include('ok' => true, 'mismatches' => 0, 'nativeAtomics' => 2)
+      expect_shared_gap(laid_out_rect(body)[1], shared: 14, chrome: 10, what: body)
       ['<div style="display:inline-table"><div style="display:table-row;overflow:hidden;height:12px;margin-bottom:10%"><div style="display:table-cell">s</div></div></div>',
        '<table style="display:inline-table"><tfoot><tr><td>f</td></tr></tfoot><tbody><tr><td>b</td></tr></tbody></table>',
        '<table style="display:inline-table"><tr><td>a</td></tr><caption style="font-size:30px">C</caption></table>',
