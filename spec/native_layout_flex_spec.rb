@@ -1683,4 +1683,24 @@ RSpec.describe 'native layout flex parity', if: ENV.fetch('CSIM_JS_ENGINE', 'v8'
       expect_parity('<div style="display:flex;width:1000px"><div style="flex-basis:min(50%, 300px);flex-shrink:0">x</div><div>y</div></div>')
     end
   end
+
+  # A FLEXED item's size is definite (css-flexbox §9.8), so a percentage height inside it resolves against that size.
+  # The oracle reused the item's measuring layout — where the same percentage read an indefinite basis as nothing —
+  # whenever the flexed size came to the same number, and was right only where a `position: fixed` descendant happened
+  # to refuse the reuse; native mirrored the reuse. Both engines lay such an item out again now, and give Chrome's boxes.
+  it 'resolves a percentage height inside a flexed column item against its flexed size' do
+    img = '<span id="m" style="display:inline-block;width:5px;height:40%"></span>'
+    [%(<div style="display:flex;flex-direction:column;height:180px"><div>t#{img}<div>b</div></div></div>),
+     %(<div style="display:flex;flex-direction:column;height:180px"><div>t#{img}<div>b</div><i style="position:fixed"></i></div></div>)].each do |body|
+      expect_parity(body)
+      expect(marked_box(body)).to eq([5, 14.4])   # Chrome 14.39
+    end
+    body = '<div style="display:flex;flex-direction:column;height:300px"><div><div id="m" style="height:50%">x</div></div></div>'
+    expect_parity(body)
+    expect(marked_box(body)[1]).to eq(9)          # Chrome
+    body = '<span style="display:inline-flex;flex-direction:column;height:50px;justify-content:flex-end;width:80px">' \
+           '<div><div id="m" style="position:relative;top:10%;height:10%">bb bb bb bb cc</div></div></span>'
+    expect_parity(body)
+    expect(marked_box(body)[1]).to be_within(0.05).of(3.59)   # Chrome
+  end
 end

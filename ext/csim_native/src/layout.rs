@@ -399,6 +399,10 @@ pub(crate) struct Input {
     // written by that block when it measures its children), never against the group's own auto height.
     pub(crate) anon_group: bool,
     pub(crate) group_pct_h: f64,
+    // The box DECLARES a percentage height (or min- / max-height), or a vertical percentage offset: what reads an
+    // INDEFINITE basis as nothing, which the layout around it counts (`INDEF_PCT_H_READS`) — the oracle's own count, so
+    // a flex column lays an item out again at its flexed height wherever the oracle refuses to reuse its measure.
+    pub(crate) pct_h_decl: bool,
     // TABLE ROW: the height it declares as a MINIMUM — the px length, or the `%` fraction resolved against what
     // the rows share out (each NaN where it declares none) — and its group's rank: 0 header, 1 body, 2 footer,
     // which decides who takes a declared table height's surplus.
@@ -920,6 +924,9 @@ struct FragPass {
 }
 thread_local! {
     static FRAG_PASS: std::cell::RefCell<Option<FragPass>> = const { std::cell::RefCell::new(None) };
+    // How many percentage heights (and vertical relative offsets) have met an INDEFINITE basis so far — the oracle's
+    // `INDEF_PCT_H_READS`: a running count, so a measure can tell whether its own subtree read one.
+    static INDEF_PCT_H_READS: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
 }
 struct FragStore(Option<FragPass>);
 impl FragStore {
@@ -3207,6 +3214,9 @@ fn measure(
     };
     for &c in &children[i] {
         let k = inputs[c].get();
+        if k.pct_h_decl && pct_h_basis.is_nan() && k.out_of_flow == 0 {
+            INDEF_PCT_H_READS.with(|n| n.set(n.get() + 1));
+        }
         if k.anon_group {
             inputs[c].set(Input { group_pct_h: pct_h_basis, ..k });
         } else if k.has_percent_sizes() && k.out_of_flow == 0 {
@@ -4313,13 +4323,17 @@ fn flex_column_sizes(
     }
     // The content height of item `p` at its current width, measured at most once (its auto height, the
     // declared one set aside — MEASURE_AUTO_HEIGHT), memoised in `measured`.
-    // Each item's auto-height measure: its height, and whether its own min/max clamp moved it (`Box::clamped_h`).
+    // Each item's auto-height measure: its height, and whether that measure is no answer to a DEFINITE question of the
+    // same height — its own min/max clamp moved it (`Box::clamped_h`), or a percentage height in it read the
+    // indefinite basis as nothing (`INDEF_PCT_H_READS`: a flexed item's size is definite, §9.8).
     let mut measured: Vec<Option<(f64, bool)>> = vec![None; cnt];
     let measure_of = |p: usize, width: &Vec<f64>, measured: &mut Vec<Option<(f64, bool)>>, boxes: &mut [Box]| -> f64 {
         if measured[p].is_none() {
             let c = kids[p];
+            let reads = INDEF_PCT_H_READS.with(|n| n.get());
             measure(c, width[p], MEASURE_AUTO_HEIGHT, inputs, runs, run_texts, grids, children, boxes, failed, &mut FloatCtx::new(), 0.0, 0.0);
-            measured[p] = Some((boxes[c].h, boxes[c].clamped_h));
+            let read_indefinite = INDEF_PCT_H_READS.with(|n| n.get()) != reads;
+            measured[p] = Some((boxes[c].h, boxes[c].clamped_h || read_indefinite));
         }
         measured[p].unwrap().0
     };
@@ -4483,12 +4497,13 @@ fn flex_column_sizes(
             // height again, definite column or not — which is what the oracle does by REUSING the measuring
             // layout. Imposing the same number instead is not a no-op for every box: a TABLE reads an imposed
             // height as its rows' and stacks its caption on top of it (72 where Chrome and the oracle say 54).
-            // …unless its own min/max-height CLAMPED that measure, in a definite column: the oracle imposes the height
-            // there and will not reuse a clamped auto layout for it (`reuseSubtree`), so the content is laid out
-            // again against the height it was cut to — a `height: 50%` inside a `min-height: 60%` item resolves
-            // against the 90 it came to, not auto (Chrome 45).
+            // …unless that measure is no answer to a definite question (its own min/max-height CLAMPED it, or a
+            // percentage height in it read the indefinite basis as nothing), in a definite column: the oracle imposes the
+            // height there and will not reuse such a layout for it (`reuseSubtree`), so the content is laid out again
+            // against the height it came to — a `height: 50%` inside a `min-height: 60%` item resolves against the 90
+            // it was floored to (Chrome 45), and a `height: 40%` image in a flexed item against its flexed height.
             let imposed = restretched[p] || !is_auto(decl_h[p]) ||
-                          measured[p].map_or(true, |(m, clamped)| m != h || (height_definite && clamped));
+                          measured[p].map_or(true, |(m, stale)| m != h || (height_definite && stale));
             out[p] = (width[p], h, imposed);
         }
     }
@@ -7798,6 +7813,7 @@ mod tests {
             cell_pct_h_child: false,
             anon_group: false,
             group_pct_h: f64::NAN,
+            pct_h_decl: false,
             row_height: f64::NAN,
             row_pct: f64::NAN,
             row_rank: 1,
