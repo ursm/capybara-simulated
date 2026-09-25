@@ -1296,6 +1296,18 @@ RSpec.describe 'native layout L2 text-block parity', if: ENV.fetch('CSIM_JS_ENGI
     )
   end
 
+  # NATIVE: a marker's justification shift counts the gaps before the FLOW's x — which a `position: relative`
+  # inline around it does not move, since that offset is applied at paint time. Counted with the offset, a
+  # `left: 3px` inline gave a marker glued to `ee` the gap right after `ee` too (64.2).
+  it 'counts a marker\'s justification gaps before a relative inline\'s offset' do
+    expect_parity(
+      '<div style="position:relative;width:90px;font:16px monospace;text-align:justify"><span style="position:relative;left:3px">' \
+      'aa bb cc dd ee<i id="m" style="position:absolute;width:3px;height:3px"></i> ff gg hh</span> tt uu</div>',
+      57.59375,
+      chrome_y: 22
+    )
+  end
+
   # A `vertical-align` baseline SHIFT (sub / super / length / %) on an inline element offsets its whole content —
   # its runs ride the shift, growing the line box the block's height reflects. Native threads the accumulated
   # shift through the run stream. (`middle` / `text-top` / `text-bottom`, which place against a box, still decline.)

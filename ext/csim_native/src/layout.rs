@@ -466,16 +466,18 @@ pub(crate) struct Input {
     // has a basis of its own and the walk declines it there.
     pub(crate) width_kw: u8,
     // …and where that containing block is NOT a record of this pass — the viewport for a `fixed` box, an
-    // ancestor above the pass root, a relatively-positioned inline — its PADDING BOX arrives instead, in the
-    // pass's own (document) coordinates: `cb_index` is CB_RECT and these four are x / y / width / height, taken
-    // from the containing block the PLACEMENT stamped on the box (`_lb.cbEl` — the walk reads that stamp rather
-    // than resolving the question a second time). `place_out_of_flow` reads one or the other and does the same
-    // arithmetic either way, so the only difference between a viewport-positioned box and an in-pass one is
-    // where the rectangle came from.
+    // ancestor above the pass root — its PADDING BOX arrives instead, in the pass's own (document) coordinates:
+    // `cb_index` is CB_RECT and these four are x / y / width / height. `place_out_of_flow` reads one or the other
+    // and does the same arithmetic either way, so the only difference between a viewport-positioned box and an
+    // in-pass one is where the rectangle came from. A relatively-positioned INLINE of the pass is neither: it has
+    // no record, but native lays its fragments out, so `cb_index` is CB_INLINE and `cb_rect[0]` its index in the
+    // pass's inline table (`inline_padding_box`).
     pub(crate) cb_rect: [f64; 4],
 }
 // `cb_index` for an out-of-flow box whose containing block is not in the pass but whose RECTANGLE is (cb_rect).
 pub(crate) const CB_RECT: i32 = -2;
+// …and for one whose containing block is an inline box of the pass, named by its inline-table index in cb_rect[0].
+pub(crate) const CB_INLINE: i32 = -3;
 
 pub(crate) const CROSS_BASELINE: u8 = 3;
 pub(crate) const CROSS_BASELINE_LAST: u8 = 4;
@@ -573,7 +575,7 @@ pub(crate) struct Run {
 impl Input {
     // An out-of-flow box native positions from its containing block (vs one whose oracle box is replayed).
     fn native_oof(&self) -> bool {
-        self.out_of_flow != 0 && (self.cb_index >= 0 || self.cb_index == CB_RECT)
+        self.out_of_flow != 0 && (self.cb_index >= 0 || self.cb_index == CB_RECT || self.cb_index == CB_INLINE)
     }
     // This record with a border-box height IMPOSED on it (a flex item stretched to its line, or handed its
     // resolved main size) — the oracle's `layoutElement(child, {height, autoHeight: false})`: the declared
@@ -865,6 +867,8 @@ struct Frag {
 struct FragPass {
     table: Vec<InlineBox>,
     rows: Vec<Vec<FragRow>>,
+    // …and which record's rows hold each inline box's fragments (`usize::MAX`: none laid out yet).
+    owner: Vec<usize>,
 }
 thread_local! {
     static FRAG_PASS: std::cell::RefCell<Option<FragPass>> = const { std::cell::RefCell::new(None) };
@@ -872,7 +876,9 @@ thread_local! {
 struct FragStore(Option<FragPass>);
 impl FragStore {
     fn install(table: &[InlineBox], records: usize) -> Self {
-        FragStore(FRAG_PASS.with(|m| m.borrow_mut().replace(FragPass { table: table.to_vec(), rows: vec![Vec::new(); records] })))
+        FragStore(FRAG_PASS.with(|m| {
+            m.borrow_mut().replace(FragPass { table: table.to_vec(), rows: vec![Vec::new(); records], owner: vec![usize::MAX; table.len()] })
+        }))
     }
     // What the pass laid out, in record order, once `place` has put every fragment in the document's frame.
     fn take() -> Vec<FragRow> {
@@ -893,10 +899,38 @@ fn inline_box(idx: usize) -> InlineBox {
 }
 fn store_frags(i: usize, rows: Vec<FragRow>) {
     FRAG_PASS.with(|m| {
-        if let Some(slot) = m.borrow_mut().as_mut().and_then(|p| p.rows.get_mut(i)) {
-            *slot = rows;
+        if let Some(p) = m.borrow_mut().as_mut() {
+            if i < p.rows.len() {
+                for r in &rows {
+                    if let Some(o) = p.owner.get_mut(r[0] as usize) {
+                        *o = i;
+                    }
+                }
+                p.rows[i] = rows;
+            }
         }
     });
+}
+// The PADDING box of inline box `k` as a containing block (CSS 2.1 §10.1): from its FIRST fragment's top-left to
+// its LAST one's bottom-right — not their union — less its borders (the oracle's `paddingBoxOf` over
+// `inlineContainingBox`). Asked by `place_out_of_flow`, after `place` has moved the fragments into the document's
+// frame: the record that laid them out is an ancestor of every box inside the inline.
+fn inline_padding_box(k: usize) -> Option<(f64, f64, f64, f64)> {
+    FRAG_PASS.with(|m| {
+        let pass = m.borrow();
+        let p = pass.as_ref()?;
+        let rows = p.rows.get(*p.owner.get(k)?)?;
+        let mut own = rows.iter().filter(|r| r[0] as usize == k);
+        let first = *own.next()?;
+        let last = own.last().copied().unwrap_or(first);
+        let ib = p.table.get(k)?;
+        Some((
+            first[2] + ib.bl,
+            first[3] + ib.bt,
+            (last[2] + last[4] - first[2] - ib.bl - ib.br).max(0.0),
+            (last[3] + last[5] - first[3] - ib.bt - ib.bb).max(0.0),
+        ))
+    })
 }
 // …and moved with the box that holds them: by `place` into the document's frame, by a table cell's
 // `vertical-align` shift, which moves a cell's CONTENT and not its box.
@@ -1364,10 +1398,13 @@ fn line_layout(
     }
     let mut line_atomics: Vec<(usize, f64, usize)> = Vec::new();
     let mut atomics: Vec<PlacedAtomic> = Vec::new();
-    // …and the same for the OUT-OF-FLOW markers on the line (record index, x from the content edge): their
-    // static position is the inline offset the flow had reached and the line's TOP, both settled at close so
-    // the line's alignment moves them exactly as it moves the atomics.
-    let mut line_oofs: Vec<(usize, f64, f64)> = Vec::new();
+    // …and the same for the OUT-OF-FLOW markers on the line (record index, x from the content edge, the relative
+    // offset of the inlines around it, y): their static position is the inline offset the flow had reached and
+    // the line's TOP, both settled at close so the line's alignment moves them exactly as it moves the atomics —
+    // by the gaps before the FLOW's x, which the relative offset is no part of (it moves the content at paint
+    // time, after the line is laid out): counted with it, a `left: 3px` inline gave a marker glued to a word the
+    // justification gap right after that word (64.2 where the oracle and Chrome say 57.6).
+    let mut line_oofs: Vec<(usize, f64, f64, f64)> = Vec::new();
     let mut oofs: Vec<(usize, f64, f64)> = Vec::new();
     // …and the markers that cannot know that yet, because an inline box around them still holds an UNPLACED
     // opening edge: (record index, the inlines' relative offset x / y, the cursor and line to fall back on).
@@ -1495,8 +1532,8 @@ fn line_layout(
             // A marker's Y was frozen where it was recorded (the oracle reads `staticX`/`staticY` together and
             // only ever shifts x afterwards): a line that later DROPS below a float moves `total`, and the box
             // does not go with it. Only the alignment reaches it here.
-            for (ci, x, y) in line_oofs.drain(..) {
-                oofs.push((ci, x + shift_at(x), y));
+            for (ci, x, rx, y) in line_oofs.drain(..) {
+                oofs.push((ci, x + shift_at(x) + rx, y));
             }
             // …and the inline boxes' pieces on it, by the same COORDINATE rule the markers use (the oracle's
             // `moveLine` asks `shiftFor` of a piece's `minX` and right edges, not how many gaps precede it), then
@@ -1615,7 +1652,7 @@ fn line_layout(
                         // inline's edge landed on, the relative offset dropped with it, exactly as in ltr.
                         oofs.push((ci, content_w + rx, total));
                     } else {
-                        line_oofs.push((ci, base + edges, total));
+                        line_oofs.push((ci, base + edges, 0.0, total));
                     }
                 }
             }
@@ -2519,7 +2556,7 @@ fn line_layout(
                     oofs.push((ci, content_w + rx, total + ry));
                 } else {
                     let pending_w = pending_space.map_or(0.0, |p| p.w);
-                    line_oofs.push((ci, band_l(total) + line_x + pending_w + rx, total + ry));
+                    line_oofs.push((ci, band_l(total) + line_x + pending_w, rx, total + ry));
                 }
             }
             RUN_FLOAT => {
@@ -2602,8 +2639,8 @@ fn line_layout(
     // children are out-of-flow has no content to close a line with, and the cursor those boxes read is the one
     // an empty line starts at — the indent, the band a float leaves. No line means no alignment, either (the
     // oracle's `alignLine` runs at a close that does not happen here), so they settle where they stand.
-    for (ci, x, y) in line_oofs.drain(..) {
-        oofs.push((ci, x, y));
+    for (ci, x, rx, y) in line_oofs.drain(..) {
+        oofs.push((ci, x + rx, y));
     }
     // The inline boxes' fragments, as the oracle's `settleInlineBoxes` makes them: a rect per line the box's content
     // reached — from its leftmost extent to the furthest of what it placed and what still hangs there, hung from the
@@ -7211,11 +7248,20 @@ fn place_out_of_flow(
     failed: &std::cell::Cell<bool>,
 ) {
     // The containing block's PADDING box, in document coordinates: from its record where the pass holds one
-    // (its border box less its borders, final by the time `place` reaches here), else the rectangle the walk
-    // pushed for a CB outside the pass (the viewport, an ancestor above the root, an inline box).
+    // (its border box less its borders, final by the time `place` reaches here), from its fragments where it is an
+    // inline box of the pass, else the rectangle the walk pushed for a CB outside the pass (the viewport, an
+    // ancestor above the root).
     let declared = inputs[c].get();
     let (cb_x, cb_y, cb_w, cb_h) = if declared.cb_index == CB_RECT {
         (declared.cb_rect[0], declared.cb_rect[1], declared.cb_rect[2], declared.cb_rect[3])
+    } else if declared.cb_index == CB_INLINE {
+        match inline_padding_box(declared.cb_rect[0] as usize) {
+            Some(b) => b,
+            None => {
+                failed.set(true);
+                return;
+            }
+        }
     } else {
         let cb_i = declared.cb_index as usize;
         let cbn = inputs[cb_i].get();

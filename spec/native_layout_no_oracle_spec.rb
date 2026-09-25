@@ -146,6 +146,10 @@ RSpec.describe 'native layout no-oracle run', if: ENV.fetch('CSIM_JS_ENGINE', 'v
       '<div style="position:relative;width:300px;height:200px;border:5px solid"><div style="position:absolute;left:10%;top:20%;width:30%;height:25%;padding:0 5%">abs</div></div>',
       '<div style="width:300px;height:200px"><div style="position:absolute;left:5%;right:5%;top:0;bottom:10%">viewport</div></div>',
       '<div style="position:relative;left:4px;top:-3px;width:300px"><div style="position:absolute;inset:10%">rel</div><p>x</p></div>',
+      # …and against a relatively positioned INLINE, from the fragments native lays it out as — wrapping, offset by
+      # lengths, and resolving the box's percentages
+      '<div style="width:90px">aaaa <span style="position:relative;left:3px;border:2px solid">bb cc dd ee<i style="position:absolute;top:1px;left:2px;right:3px;bottom:4px"></i></span> ff</div>',
+      '<div style="width:220px">aaaa <span style="position:relative;padding-left:6px">bb <i style="position:absolute;width:50%;height:50%;top:10%;left:25%"></i>cc</span> dd</div>',
       # …and tables: auto and fixed layout, a caption, a span, a percentage column
       '<table style="border-spacing:2px"><caption style="width:150%">cap</caption><tr><td>a</td><td style="width:30%">b c</td></tr><tr><td colspan="2">d</td></tr></table>',
       '<table style="table-layout:fixed;width:50%;border-collapse:collapse"><tr><td style="border:2px solid">a</td><td>b</td></tr></table>',

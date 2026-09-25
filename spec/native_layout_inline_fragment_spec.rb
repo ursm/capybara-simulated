@@ -130,6 +130,36 @@ RSpec.describe 'native layout inline box fragments', if: ENV.fetch('CSIM_JS_ENGI
     expect(rects_near?(rects, [[28.8125, 0, 2, 2]])).to be(true), "#m #{rects.inspect}"
   end
 
+  # A relatively positioned INLINE is the containing block of an out-of-flow box inside it (CSS 2.1 §10.1): its
+  # padding box runs from the FIRST fragment's top-left to the LAST one's bottom-right — not their union — and native
+  # takes it from the fragments it lays the inline out as, where the walk used to hand over the oracle's rectangle.
+  {
+    'a wrapping inline, both insets on each axis' =>
+      ['<div style="position:relative;width:90px;font:16px monospace">aaaa <span style="position:relative;border:2px solid;padding:0 4px">' \
+       'bb cc dd ee<i id="m" style="position:absolute;top:1px;left:2px;right:3px;bottom:4px"></i></span> ff</div>',
+       [52.015625, 1, 25.796875, 39]],
+    'percentage sizes and insets, a relative offset, a centred line' =>
+      ['<div style="position:relative;width:220px;font:16px monospace;text-align:center">aaaa <span style="position:relative;left:3px;top:1px;padding-left:6px">' \
+       'bb <i id="m" style="position:absolute;width:50%;height:50%;top:10%;left:25%"></i>cc</span> dd</div>',
+       [109.09375, 3.1875, 27, 11]],
+    'from inside an inline-block' =>
+      ['<div style="position:relative;width:220px;font:16px monospace">aa <span style="position:relative">b <span style="display:inline-block;width:40px">' \
+       'c <i id="m" style="position:absolute;bottom:100%;left:0;right:0;height:4px"></i>d</span> e</span> f</div>',
+       [28.8125, -4, 78.40625, 4]]
+  }.each do |what, (body, chrome)|
+    it "places an out-of-flow box against a relative inline's fragments: #{what}" do
+      r, = fragments(body)
+      expect(r).to include('ok' => true, 'mismatches' => 0), "#{body}: #{r.inspect}"
+      expect(r['nativeOutOfFlow']).to be > 0, "#{body}: the box was not placed natively: #{r.inspect}"
+      expect_no_dropped_records(r, body)
+      rect = with_simulated_session(page(body)) do |session|
+        session.visit '/'
+        session.evaluate_script("(r => [r.x, r.y, r.width, r.height])(document.getElementById('m').getBoundingClientRect())")
+      end
+      expect(rects_near?([rect], [chrome])).to be(true), "#{body}: #m #{rect.inspect}, Chrome #{chrome.inspect}"
+    end
+  end
+
   # Both engines break after a U+00A0 at an inline boundary, which is no break opportunity (UAX #14: NBSP is GL);
   # Chrome keeps `aa&nbsp;bb` on one line and overflows.
   it 'breaks after a no-break space at an inline boundary (shared)' do
