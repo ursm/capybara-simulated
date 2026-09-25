@@ -135,6 +135,34 @@ RSpec.describe 'native layout inline box fragments', if: ENV.fetch('CSIM_JS_ENGI
       expect_fragments(body, shared: shared, shared_chrome: chrome)
     end
   end
+  # …and one that ENDS its text node leaves the opportunity, hyphen and all, to whatever comes next (the oracle's
+  # `barrier.shy`, native's `PendingHyphen` — declined by the walk until 2026-09-26): the next run's first unit breaks
+  # there and the hyphen shows on the line it ends, in the boxes that were open at the piece — a `<b>` closed since
+  # still takes it, an `<i>` opened since takes nothing on that line, and an opening edge still pending waits for the
+  # fresh line. An atomic breaks there too; a space in between replaces it, and no hyphen shows. SHARED: Chrome gives
+  # the hyphen a rect of its own, both engines fold it into the box's line — and puts it INSIDE a closing padding,
+  # where both engines put it after (the same total).
+  it 'carries a soft hyphen that ends its text node to the next run' do
+    expect_fragments('<div style="font:16px monospace;width:39px">aa&shy;<span id="m">bb&shy;cc</span></div>', chrome: [[0, 22, 38.4063, 22]])
+    expect_fragments('<div style="font:16px monospace;width:60px"><b>aaaa&shy;</b><i id="m">bbbb</i></div>', chrome: [[0, 22, 38.4063, 22]])
+    expect_fragments('<div style="font:16px monospace;width:30px"><span id="m">aa&shy;</span><span> bb</span></div>', chrome: [[0, 0, 19.2031, 22]])
+    expect_fragments('<div style="font:16px monospace;width:60px">aaaa&shy;<span id="m" style="padding-left:5px">bb</span></div>', chrome: [[0, 22, 24.2031, 22]])
+    expect_fragments('<div style="font:16px monospace;width:60px"><span id="m" style="padding-right:4px">aaaa&shy;</span>bbbb</div>', chrome: [[0, 0, 52.0156, 22]])
+    {
+      '<div style="font:16px monospace;width:60px"><b id="m">aaaa&shy;</b><i>bbbb</i></div>'                                                          => [[0, 0, 38.4063, 22], [38.4063, 0, 9.6094, 22]],
+      '<div style="font:16px monospace;width:50px"><span id="m">aaaa&shy;</span><span style="display:inline-block;width:30px">x</span></div>' => [[0, 0, 38.4063, 22], [38.4063, 0, 9.6094, 22]]
+    }.each do |body, chrome|
+      expect_fragments(body, shared: [[0, 0, 48, 22]], shared_chrome: chrome)
+    end
+    # SHARED: min-content. Chrome takes the opportunity there (48.02, `aaaa-` / `bb`); the oracle's `addUnit` counts
+    # the hyphen as a candidate but opens no opportunity after a node's LAST piece, so `bb` joins the word, and
+    # native measures what the oracle measures.
+    expect_fragments(
+      '<div id="m" style="font:16px monospace;width:min-content">aaaa&shy;<span>bb</span></div>',
+      shared: [[0, 0, 57.6, 22]], shared_chrome: [[0, 0, 48.0156, 44]]
+    )
+  end
+
   it 'gives an empty box the line it opened on, a forced break making that a line' do
     expect_fragments('<div style="font:16px monospace;width:400px"><span id="m"></span><br></div>', chrome: [[0, 0, 0, 22]])
     expect_fragments('<div style="font:16px monospace;width:400px">x<span id="m"><br></span></div>', chrome: [[9.609375, 0, 0, 22]])

@@ -1620,19 +1620,27 @@ RSpec.describe 'native layout L2 text-block parity', if: ENV.fetch('CSIM_JS_ENGI
       expect_parity('<div style="font:16px monospace"><div style="width:25px;text-indent:13px hanging">aa&shy;&shy;bb cc</div><b id="m" style="display:inline-block;width:4px;height:4px"></b></div>', 0, chrome_y: 79)
       expect_parity('<div style="font:16px monospace"><div style="width:49px"><span style="hyphens:none">aa&shy;&shy;bb cc</span> aa&shy;&shy;bb cc</div><b id="m" style="display:inline-block;width:4px;height:4px"></b></div>', 0, chrome_y: 101)
     end
+    # …and the hyphen a break shows at a soft hyphen that ENDS its node is an EDGE to the oracle (`takeBreak`'s
+    # `placeOnLine(…, edge)`): not content, so the NBSP before it stays a held separator and not a gap the justified
+    # line widens — an out-of-flow box between the two counts no gap (native flushed it, and moved the box 10.8 right).
+    # SHARED: Chrome puts that box past the hyphen, at 19.22; both engines put it where the flow stood, before it.
+    it 'shows the hyphen of a node-ending soft hyphen as an edge, no gap before it' do
+      expect_parity(
+        '<div style="position:relative;font:16px monospace;width:30px;text-align:justify">bb &nbsp;&shy;<i id="m" style="position:absolute;width:2px;height:2px"></i>ccc</div>',
+        chrome_y: 22, shared_x: 9.6, shared_x_chrome: 19.2188
+      )
+    end
     # …and a node of NOTHING but soft hyphens under `hyphens: none` is no content once the gather strips them, where the
     # oracle places it as a zero-wide word that makes the line (Chrome: 22 tall) — so it declines.
     it 'declines a node of soft hyphens that hyphens: none empties' do
       expect(shadow('<div style="width:200px"><div style="hyphens:none">&shy;</div>x</div>')).to include('ok' => false, 'reason' => 'text-not-measurable')
     end
-    # What native still cannot measure is refused by the WALK, not discovered in Rust: a soft hyphen that ENDS a text
-    # node (its opportunity, hyphen and all, crosses to the next run), and a ZWJ under a per-character wrap (where the
-    # oracle's advance carries the previous character). (A preserved form feed was the first example here until
-    # 2026-09-25, when both engines made it text that is not there; a soft hyphen INSIDE a node is native's since
-    # 2026-09-26.)
-    it 'declines a node-ending soft hyphen and a per-character ZWJ in the walk' do
-      ['<div style="width:400px">a&shy;<b>b</b></div>',
-       '<div style="width:400px;word-break:break-all">a&#x200D;b</div>'].each do |body|
+    # What native still cannot measure is refused by the WALK, not discovered in Rust: a ZWJ under a per-character
+    # wrap (where the oracle's advance carries the previous character). (A preserved form feed was the first example
+    # here until 2026-09-25, when both engines made it text that is not there, and a soft hyphen until 2026-09-26,
+    # when native took the hyphen it draws.)
+    it 'declines a per-character ZWJ in the walk' do
+      ['<div style="width:400px;word-break:break-all">a&#x200D;b</div>'].each do |body|
         expect(shadow(body)).to include('ok' => false, 'reason' => 'text-not-measurable'), body
       end
     end
@@ -2062,8 +2070,7 @@ bbbbbbbbbb</span></div></div>))
     end
     # …and where that opportunity is a SOFT HYPHEN the break draws the hyphen, which is the difference between
     # the oracle's `takeBreak` and a plain forced one: the hyphen is 9.6px of the first line, and a centred
-    # line without it sits 4.8 off. Native declines a soft hyphen outright, so there is no parity to assert
-    # here — the oracle is the only engine that answers and Chrome is the only check on it.
+    # line without it sits 4.8 off. (Declined, with the oracle the only engine answering, until 2026-09-26.)
     it 'draws the hyphen when the opportunity it breaks at is a soft one' do
       # (`%()`, never `'…'`: a single-quoted `\t` is a backslash and a `t`, and the oracle's whole tab branch
       # is gated on the run HOLDING one — measured, the shape without a real tab is satisfied by the ordinary
@@ -2071,8 +2078,7 @@ bbbbbbbbbb</span></div></div>))
       [['<span id="m" style="display:inline-block;width:10px;height:9px"></span>xx&shy;', %(<span style="white-space:pre">aaa\tbbb</span>), 30.59375],
        ['<span id="m" style="display:inline-block;width:10px;height:9px"></span>xx&shy;xx&shy;', %(<span style="white-space:pre">aaa\tbbb</span>), 20.984375],
        ['<span id="m" style="display:inline-block;width:10px;height:9px"></span>xx&shy;', %(<span style="padding-left:4px;white-space:pre">aaa\tbbb</span>), 30.59375]].each do |lead, tail, x|
-        head = %(<div style="width:100px;font:16px monospace;text-align:center">)
-        expect_declined_x(%(#{head}#{lead}#{tail}</div>), x, %(#{head}#{lead.gsub('&shy;', ' ')}#{tail}</div>))
+        expect_parity(%(<div style="width:100px;font:16px monospace;text-align:center">#{lead}#{tail}</div>), x)
       end
     end
     # …and the pen a tab measures from is the BLOCK's content edge, which is what makes an INTRINSIC width

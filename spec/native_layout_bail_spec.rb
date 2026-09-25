@@ -74,13 +74,13 @@ RSpec.describe 'native layout bail coverage', if: ENV.fetch('CSIM_JS_ENGINE', 'v
   end
 
   # A HYPHEN or dash is a break opportunity native takes itself (parity in the text spec), and so is a SOFT one
-  # inside a text node since 2026-09-26 — the hyphen it draws where the line breaks at it is native's too. A soft
-  # hyphen that ENDS a node is still declined: its opportunity, and the hyphen it may draw, cross to the next run.
-  it 'lays out a soft hyphen inside a text node natively, declines one that ends the node' do
+  # since 2026-09-26 — the hyphen it draws where the line breaks at it is native's too, one that ENDS a text node
+  # included, whose opportunity crosses to the next run.
+  it 'lays out a soft hyphen natively, one that ends its text node included' do
     expect(parity?('<div style="width:90px">well-known example text</div>')).to be true
     expect(parity?('<div style="width:90px">well known example text</div>')).to be true
     expect(parity?(%(<div style="width:90px">well\u00ADknown example text</div>))).to be true
-    expect(native?(%(<div style="width:90px">well\u00AD<b>known</b> example text</div>))).to be false
+    expect(parity?(%(<div style="width:90px">well\u00AD<b>known</b> example text</div>))).to be true
     # Under `hyphens: none` a soft hyphen is no opportunity at all: the word overflows whole, as in Chrome.
     expect(parity?(%(<div style="width:40px;hyphens:none">well\u00ADknown example</div>))).to be true
   end

@@ -681,11 +681,10 @@ RSpec.describe 'native layout inline-atomic parity', if: ENV.fetch('CSIM_JS_ENGI
         # turn; what survives is that every one of these gates tests the position as a STRING, so a vendor
         # ident walks into them. See `WalkRefusals`, which changed hands for the same reason.)
         '<div style="width:400px">text <span style="display:inline-block"><div style="position:-webkit-sticky;width:10px;height:10px"></div>beside</span> after</div>',
-        # (a SOFT hyphen that ENDS its text node: its opportunity, and the hyphen it may draw, cross to the next
-        # run, which native does not carry yet — one inside a node is native's since 2026-09-26. This fixture used
-        # to read `日本語` — served with no charset, whose mojibake happens to contain an em dash, so what it
-        # actually exercised was the hyphen refusal that native has since taken over.)
-        "<div style=\"width:400px\">text <span style=\"display:inline-block\">a\u00AD<b>b</b></span> after</div>"
+        # (a ZWJ under a per-character wrap, whose advance the oracle carries from the character before it. This
+        # fixture read `日本語` — served with no charset, whose mojibake happens to contain an em dash, so what it
+        # actually exercised was the hyphen refusal — and then a soft hyphen, both native's since.)
+        "<div style=\"width:400px\">text <span style=\"display:inline-block;word-break:break-all\">a\u200Db</span> after</div>"
         # (A third entry held a preserved FORM FEED, and before that a TAB — both native's since: tab stops are its own,
         # and a preserved FF is text that is not there in both engines, 2026-09-25.)
       ].each do |body|

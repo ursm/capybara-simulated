@@ -961,6 +961,13 @@ struct OpenBox {
     placed: bool,
     frag: usize,
 }
+// A soft hyphen's piece placed WITHOUT its hyphen: the hyphen's width, in the piece's own font, and the boxes that were
+// open at the piece — the ones that hold the hyphen where a break shows it, though they may have closed since and
+// others opened (the oracle's `barrier.shy`, `{ shy: owner, frags: openInlines.slice() }`).
+struct PendingHyphen {
+    w: f64,
+    frags: Vec<usize>,
+}
 // The pass's inline table, and each record's inline fragments as its text block laid them out — [inline index,
 // x, y, w, h] in the block's border-box frame until `place` moves them into the document's. Pass-local
 // (installed by `layout_block`, like `IW_MEMO`) because a text block is measured from deep inside the recursion,
@@ -1451,9 +1458,11 @@ fn line_layout(
     // merges only same-font ones — a plain `<b>` around a Japanese word, or around the hyphen of
     // `well<b>-</b>known`, already splits them.
     let mut ends_open = false;
-    // A soft hyphen's piece placed WITHOUT its hyphen, whose hyphen still shows where the line breaks before the next
-    // unit (`take_break!`) — the width it would take; the oracle's `barrier.shy`.
-    let mut shy_pending: Option<f64> = None;
+    // …and a SOFT hyphen's piece placed without its hyphen, which is that opportunity too (`ends_open` is set with
+    // it) and whose hyphen still shows where the line breaks at it (`take_break!`): the oracle's `barrier.shy`. Carried
+    // across runs like the rest — `aa&shy;<b>bb</b>` breaks after `aa-` — and cleared wherever the oracle's ONE
+    // `barrier` is overwritten: at a space, a word, an atomic, a `<wbr>`, a line's close.
+    let mut shy_pending: Option<PendingHyphen> = None;
     // Close the current line and start a fresh one. `soft_break!` is the geometry alone (a mid-word wrap, a
     // between-words wrap, a break before an atomic — where no pending space or after-atomic break carries over);
     // `break_line!` adds the resets a HARD break needs (a <br>, a preserved/pre-line newline, an empty line's
@@ -1814,16 +1823,22 @@ fn line_layout(
             line_outer_min = 0.0;
             line_has_content = false;
             line_placed = false;
+            shy_pending = None;
         }};
     }
     // …a wrap taken where a SOFT hyphen's piece still waits for its hyphen shows it first, on the line it ends (the
-    // oracle's `takeBreak`: "aa\u00ADbb\u00ADcc" in 39px is "aa-" / "bbcc").
+    // oracle's `takeBreak`: "aa\u00ADbb\u00ADcc" in 39px is "aa-" / "bbcc") — inside the boxes that were open at the
+    // piece, and only those (Chrome: `<b>aaaa&shy;</b><i>bbbb</i>` gives the `<b>` the hyphen and the `<i>` nothing
+    // on that line). An EDGE to the oracle (`placeOnLine(…, edge)`), which is not content: the edges still pending
+    // stay pending, to open on the fresh line, and the separators a run ended in stay held — an NBSP before the
+    // hyphen is no gap the line widens, and an out-of-flow box after it counts none.
     macro_rules! take_break {
         () => {{
             if let Some(hy) = shy_pending.take() {
-                flush_tail_gaps!(); // (…content: an NBSP held before it is a gap now, as `placeOnLine` makes it one)
-                let (at, to) = advance!(hy);
-                note_open!(at, to, false);
+                let (at, to) = advance!(hy.w);
+                for &fi in &hy.frags {
+                    note!(fi, at, to, false, 0.0);
+                }
             }
             soft_break!();
         }};
@@ -1868,6 +1883,7 @@ fn line_layout(
             pending_space = None;
             atomic_break = false;
             ends_open = false;
+            shy_pending = None;
         }};
     }
 
@@ -2026,6 +2042,7 @@ fn line_layout(
                             // the font box the line's descent is NEGATIVE, so a word taking this placeholder
                             // on a line an edge had started grew `line-height: 8px` to 10.
                             ends_open = false;
+                            shy_pending = None;
                             atomic_break = false;
                             pending_space = if no_wrap {
                                 Some(PendingSpace { w: 0.0, asc: f64::NEG_INFINITY, desc: f64::NEG_INFINITY, breaks: false, sep: false, placed: false })
@@ -2073,6 +2090,7 @@ fn line_layout(
                                     // white space. Whether it breaks is ITS OWN mode's to say — the
                                     // whitespace-only-node arm is `modeWraps(owner) ? null : 'hard'`.
                                     ends_open = false;
+                                    shy_pending = None;
                                     atomic_break = false;    // …as above: one barrier, and this is it now
                                     pending_space = Some(PendingSpace { w: space_w, asc: run.asc, desc: run.line_height - run.asc, breaks: !no_wrap, sep: true, placed: false });
                                     body_space = no_wrap;
@@ -2163,7 +2181,7 @@ fn line_layout(
                             // (`trailingPreserved = 0`) — dropped with the line instead, the wrapped line was
                             // aligned as if they still hung (28.8 where the oracle and Chrome say 19.2).
                             place_pending_space!();
-                            soft_break!();
+                            take_break!();
                             pending_space = None;
                             atomic_break = false;
                             ends_open = false;
@@ -2361,6 +2379,7 @@ fn line_layout(
                                         // character or an atomic on the far side of it open the line. Zero
                                         // width, because the advance is already on the line.
                                         ends_open = false;
+                                        shy_pending = None;
                                         atomic_break = false;    // …the atomic's / `<wbr>`'s opportunity too:
                                                                  // the oracle keeps ONE `barrier`, and a space
                                                                  // overwrites whatever stood there
@@ -2623,17 +2642,20 @@ fn line_layout(
                                         note_open!(at, to, false);
                                         shy_pending = None;
                                     } else {
-                                        shy_pending = if shy_unit && pend < i { Some(soft_hyphen_width(run)?) } else { None };
+                                        shy_pending = if shy_unit {
+                                            Some(PendingHyphen { w: soft_hyphen_width(run)?, frags: open.iter().map(|o| o.frag).collect() })
+                                        } else {
+                                            None
+                                        };
                                     }
                                     u += ulen;
                                 }
                             }
-                            // (…a word ends at a space or with its run, which is no break a waiting hyphen shows at: the
-                            // walk keeps a soft hyphen that ENDS a text node — whose opportunity crosses to the next run —
-                            // off the stream.)
-                            shy_pending = None;
                             atomic_break = false; // consumed the after-atomic break opportunity
-                            ends_open = ends_with_break(text[i - 1]); // …and this word may leave one behind
+                            // …and this word may leave one behind: a wide character or a dash it ends in, or the
+                            // soft hyphen that ends its last piece, whose hyphen waits for whatever comes next — a
+                            // space (which clears it) or the next run.
+                            ends_open = shy_pending.is_some() || ends_with_break(text[i - 1]);
                         } else {
                             let ow: f64 = open.iter().filter(|o| !o.placed).map(|o| o.w).sum();
                             // A break opportunity precedes this word at a collapsed space OR right after an atomic —
@@ -2644,7 +2666,7 @@ fn line_layout(
                             // line never soft-wraps at all, so the whole test is moot.)
                             let may_break = space_breaks || atomic_break || ends_open;
                             if !no_wrap && line_has_content && may_break && line_x + ow + width > band_w(total) + LINE_FIT_EPS {
-                                soft_break!(); // break: close the line (the hanging space is dropped)
+                                take_break!(); // break: close the line (the hanging space is dropped)
                                 broke = true;
                             }
                             // An empty line whose first word won't fit the band drops below the float squeezing
@@ -2676,6 +2698,7 @@ fn line_layout(
                             atomic_break = false; // consumed the after-atomic break opportunity
                             // …and this word leaves one behind when it ENDS in a wide character or a dash.
                             ends_open = ends_with_break(text[i - 1]);
+                            shy_pending = None;
                             if space_on_line && !broke {
                                 line_asc = line_asc.max(sasc); // the space stayed: its run's metrics grow the line
                                 line_desc = line_desc.max(sdesc);
@@ -2713,7 +2736,7 @@ fn line_layout(
                 // run's trailing space leaves. Neither the atomic's own mode nor the block's is asked.
                 let may_break_here = !space_is_hard;
                 if may_break_here && line_has_content && line_x + ow + width > band_w(total) + LINE_FIT_EPS {
-                    soft_break!(); // break before the atomic (drop any hanging space)
+                    take_break!(); // break before the atomic (drop any hanging space)
                     broke = true;
                 }
                 if space_on_line && !broke {
@@ -2756,6 +2779,7 @@ fn line_layout(
                 line_has_content = true;
                 line_placed = true;
                 atomic_break = true; // a break opportunity follows this atomic
+                shy_pending = None; // …the one opportunity: it replaces a soft hyphen's
             }
             RUN_OOF => {
                 // §4.1: it neither sizes nor shifts the line. `font` carries its record index (the walk's
@@ -2839,6 +2863,7 @@ fn line_layout(
                 // space that immediately FOLLOWS still installs its own advance (a phantom width-0 pending space
                 // would suppress that space's width). Under `nowrap` the break-before tests ignore the flag.
                 atomic_break = true;
+                shy_pending = None;
                 // …and it OVERWRITES what stood there, a non-wrapping run's hard space included: the oracle
                 // keeps ONE `barrier` and a `<wbr>` sets it to `null` outright. Without this the atomic arm's
                 // `!space_is_hard` veto cancelled the opportunity the `<wbr>` had just installed.
