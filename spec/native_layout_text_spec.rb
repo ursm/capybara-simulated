@@ -1728,11 +1728,18 @@ RSpec.describe 'native layout L2 text-block parity', if: ENV.fetch('CSIM_JS_ENGI
                       '<i id="m" style="display:inline-block;width:4px;height:4px"></i></div>', 49.203125)
       end
     end
-    # …and one capped by ANOTHER LINE goes native too, since the bounds are affine as well: `min(10%, 20%)` is
-    # `10%` held under `20%`. Only a NESTED comparison is left for the oracle alone.
+    # …and one capped by ANOTHER LINE goes native too: `min(10%, 20%)` is `10%` held under `20%` — and since 2026-09-26
+    # any comparison of lines, as a program native evaluates: two that cross beside a constant (50 of 400), a nested one
+    # (20). Only a comparison inside a `calc()` is left for the oracle alone. Chrome's figures.
     it 'evaluates a text-indent capped by another percentage natively' do
-      expect_parity('<div style="width:400px;font:16px monospace;text-indent:min(10%, 20%)">hi' \
-                    '<i id="m" style="display:inline-block;width:4px;height:4px"></i></div>', 59.203125)
+      {
+        'min(10%, 20%)'                             => 59.203125,
+        'min(20%, calc(5% + 30px), 60px)'           => 69.203125,
+        'max(0px, min(10%, calc(100px - 20%)))'     => 39.203125
+      }.each do |indent, x|
+        expect_parity(%(<div style="width:400px;font:16px monospace;text-indent:#{indent}">hi) +
+                      '<i id="m" style="display:inline-block;width:4px;height:4px"></i></div>', x)
+      end
     end
     it 'indents every line but the first under hanging, and after a forced break under each-line' do
       expect_parity('<div style="width:200px;text-indent:40px hanging"><span style="display:inline-block;width:10px;height:10px"></span> one two three four five six seven</div>')

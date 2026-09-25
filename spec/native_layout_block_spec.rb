@@ -211,7 +211,7 @@ RSpec.describe 'native layout L1 block-flow parity', if: ENV.fetch('CSIM_JS_ENGI
   # and so does a `top: 0%` or a `calc(0% + 5px)`, whose fraction is zero but which is a percentage all the same
   # (-10, -3; native read a zero fraction as "no percentage" and said 0 and 5); an over-constrained pair keeps the
   # rtl flow's `right` (-15); a linear `calc()` on an atomic, 60.99 / -5 (Chrome 61: the text before it is 28 wide
-  # there, 27.99 here). …and a COMPARISON function travels as its clamped pair (2026-09-25; resolved against the
+  # there, 27.99 here). …and a COMPARISON function travels as its program (2026-09-25; resolved against the
   # oracle's basis before): `max(5%, 30px)` 30, an rtl `right: min(5%, 30px)` -15, a `top: clamp(5px, 10%, 12px)` 12
   # of 200, `bottom: max(10px, 20%)` -40, a `top: max(10px, 20%)` of an INDEFINITE height nothing, and a `right`
   # whose bounds CROSS negated after its clamp (-40: `clamp()`'s minimum wins, then the sign) — Chrome's figures.
@@ -1765,9 +1765,9 @@ x</div>))
   end
 
   # A margin or padding written as a comparison function over affine operands — `max(10%, 12px)`, `clamp(4px, 5%,
-  # 30px)`, a bare calc-sum argument (`clamp(0px, 10% - 20px, 40px)`) — travels as its clamped pair
-  # (`nlClampedEdgeParts`, rec[168..199]) and native resolves it against the box's own basis; the walk resolved it
-  # against the oracle's. Chrome's box.
+  # 30px)`, a bare calc-sum argument (`clamp(0px, 10% - 20px, 40px)`) — travels as its program (`nlClampedEdgeParts`,
+  # `NL_REC_EDGE_MATH`) and native resolves it against the box's own basis; the walk resolved it against the oracle's.
+  # Chrome's box.
   it 'resolves a margin and a padding written as comparison functions natively' do
     body = '<div style="width:300px"><div id="m" style="margin-top:max(10%, 12px);padding:clamp(4px, 5%, 30px) clamp(0px, 10% - 20px, 40px);' \
            'border:2px solid">x</div></div>'

@@ -53,12 +53,12 @@ RSpec.describe 'native layout no-oracle run', if: ENV.fetch('CSIM_JS_ENGINE', 'v
   end
 
   it 'records where the walk read an oracle stamp' do
-    # (a RELATIVE offset that is no clamp of one line still resolves against the oracle's basis — a plain or a linear
-    # percentage one is native's since 2026-09-24, a comparison function over one since 2026-09-25, and two lines
-    # that cross each other beside a constant are no clamp of one — and a cell native cannot measure still asks the oracle's intrinsic
-    # widths; a plain percentage width no longer reads anything, and neither does an intrinsic SIZE, which is data
-    # off the DOM rather than a layout the oracle ran)
-    s = session_with('<div style="width:300px"><p style="position:relative;left:max(10%, calc(5% + 3px), 5px)">hello</p>' \
+    # (a RELATIVE offset no program expresses — a comparison inside a `calc()` — still resolves against the oracle's
+    # basis: a plain or a linear percentage one is native's since 2026-09-24, a comparison function over one line since
+    # 2026-09-25 and any comparison of lines since 2026-09-26 — and a cell native cannot measure still asks the oracle's
+    # intrinsic widths; a plain percentage width no longer reads anything, and neither does an intrinsic SIZE, which is
+    # data off the DOM rather than a layout the oracle ran)
+    s = session_with('<div style="width:300px"><p style="position:relative;left:calc(max(10%, calc(5% + 3px), 5px) + 0px)">hello</p>' \
                      "<table><tr><td>a #{WalkRefusals::POSITIONED}</td></tr></table></div>")
     reads = s.evaluate_script('globalThis.__csimLayoutShadowRun(undefined, {noOracle: true}).oracleReads')
     expect(reads.keys).to include('recordCbW _lbCbW')
@@ -144,9 +144,10 @@ RSpec.describe 'native layout no-oracle run', if: ENV.fetch('CSIM_JS_ENGINE', 'v
       '<div style="width:300px;height:200px"><div style="height:50%;max-width:80%">half</div></div>',
       # …a MARGIN and a PADDING written as such functions too, a bare calc-sum argument and a padding's 0 floor included
       '<div style="width:300px"><div style="margin-top:max(10%, 12px);padding:clamp(4px, 5%, 30px) clamp(0px, 10% - 20px, 40px);border:2px solid">x</div></div>',
-      # …and a comparison function over one affine operand, which travels as its clamped pair — `clamp()`'s MINIMUM
-      # winning where its bounds cross, as CSS has it (100 here, not 50)
+      # …and a comparison function over affine operands, which travels as its program — `clamp()`'s MINIMUM winning where
+      # its bounds cross, as CSS has it (100 here, not 50), two lines that cross beside a constant, and a nested one
       '<div style="width:300px;height:200px"><div style="width:min(50%, 60px);height:max(20%, 10px)">x</div><div style="width:clamp(100px, 10%, 50px)">y</div></div>',
+      '<div style="width:300px;height:200px"><div style="width:min(50%, calc(10% + 40px), 90px);height:max(0px, min(40%, calc(100px - 20%)))">x</div></div>',
       # …a percentage height that resolves to AUTO, whose bottom margin then adjoins its last child's — native's call
       '<div style="width:300px"><div style="height:50%"><p style="margin:0 0 12px">x</p></div><div style="height:5px"></div></div>',
       # …an OUT-OF-FLOW box against a positioned block and against the viewport, percentages and all, and a relative

@@ -892,10 +892,10 @@ fn register_font_bytes(
 
 // Fields per node in the layoutPass input buffer, and per run in the runs buffer (flat Float64Arrays).
 // Order MUST match the JS packer (layout.js `__csimLayoutShadowRun`) and layout::Input / layout::Run.
-const LAYOUT_STRIDE: usize = 216;
+const LAYOUT_STRIDE: usize = 156;
 const RUN_STRIDE: usize = 12;
 // …and per inline box in the inline table (layout.js `NL_INLINE_STRIDE` / `nlInlineEntry`, layout::InlineBox).
-const INLINE_STRIDE: usize = 47;
+const INLINE_STRIDE: usize = 29;
 
 // Decode a V8 Float64Array argument into a Vec<f64> (native-endian raw bytes).
 fn read_f64_array(val: v8::Local<'_, v8::Value>) -> Vec<f64> {
@@ -967,16 +967,14 @@ fn layout_pass(
             starts_bfc: r[30] != 0.0,
             flex_justify: r[31] as u8,
             flex_main_gap: r[32],
-            flex_main_gap_lo: (r[125], r[126]),
-            flex_main_gap_hi: (r[127], r[128]),
+            flex_main_gap_math: crate::layout::math_ref(r[125]),
             flex_cross_align: r[33] as u8,
             flex_main_is_x: r[34] != 0.0,
             flex_wrap: r[35] != 0.0,
             flex_cross_flip: r[35] == 2.0,
             flex_align_content: r[36] as u8,
             flex_cross_gap: r[37],
-            flex_cross_gap_lo: (r[129], r[130]),
-            flex_cross_gap_hi: (r[131], r[132]),
+            flex_cross_gap_math: crate::layout::math_ref(r[126]),
             flex_main_reverse: r[38] != 0.0,
             flex_cross_far: (r[65] as u32) & 32768 != 0,
             // A text block holding an out-of-flow child the walk REPLAYED. Those are the only children a text
@@ -987,16 +985,15 @@ fn layout_pass(
             height_from_outside: (r[65] as u32) & 262144 != 0,
             rel_x: r[39],
             rel_y: r[40],
-            rel_pct: [r[139], r[140], r[141], r[142], r[143], r[39], r[40]],
-            rel_x_px: r[212],
-            chain_rel: [r[213], r[214], r[215]],
+            rel_pct: [r[130], r[131], r[132], r[133], r[134], r[39], r[40]],
+            rel_x_px: r[152],
+            chain_rel: [r[153], r[154], r[155]],
             rel_x_neg: (r[65] as u32) & 8388608 != 0,
-            rel_lo: std::array::from_fn(|k| (r[200 + 4 * k], r[201 + 4 * k])),
-            rel_hi: std::array::from_fn(|k| (r[202 + 4 * k], r[203 + 4 * k])),
+            rel_math: std::array::from_fn(|k| crate::layout::math_ref(r[149 + k])),
             flex_item_auto: r[41] as u8,
             flex_baseline_asc: r[42],
-            flex_line_nat: r[137],
-            flex_line: r[138],
+            flex_line_nat: r[128],
+            flex_line: r[129],
             out_of_flow: r[43] as u8,
             sp_x: r[44],
             sp_y: r[45],
@@ -1021,12 +1018,10 @@ fn layout_pass(
             flex_basis_frac: r[97],
             pct_sizes: [r[100], r[101], r[102], r[103], r[104], r[105]],
             pct_px: [r[119], r[120], r[121], r[122], r[123], r[124]],
-            pct_lo: std::array::from_fn(|k| (r[144 + 4 * k], r[145 + 4 * k])),
-            pct_hi: std::array::from_fn(|k| (r[146 + 4 * k], r[147 + 4 * k])),
+            pct_math: std::array::from_fn(|k| crate::layout::math_ref(r[135 + k])),
             edge_frac: [r[106], r[107], r[108], r[109], r[110], r[111], r[112], r[113]],
             edge_px: [r[10], r[11], r[12], r[13], r[14], r[15], r[16], r[17]],
-            edge_lo: std::array::from_fn(|k| (r[168 + 4 * k], r[169 + 4 * k])),
-            edge_hi: std::array::from_fn(|k| (r[170 + 4 * k], r[171 + 4 * k])),
+            edge_math: std::array::from_fn(|k| crate::layout::math_ref(r[141 + k])),
             inset_frac: [r[114], r[115], r[116], r[117]],
             flex_main_gap_frac: r[98],
             flex_cross_gap_frac: r[99],
@@ -1066,8 +1061,7 @@ fn layout_pass(
             auto_margins: r[76] as u8,
             legacy_align: ((r[65] as u32) >> 3 & 3) as u8,
             indent_px: r[96],
-            indent_lo: (r[133], r[134]),
-            indent_hi: (r[135], r[136]),
+            indent_math: crate::layout::math_ref(r[127]),
             indent_frac: r[118],
             indent_hanging: (r[65] as u32) & 256 != 0,
             indent_each_line: (r[65] as u32) & 512 != 0,
@@ -1165,14 +1159,15 @@ fn layout_pass(
             f_top: r[17],
             f_bottom: r[18],
             left: r[19],
-            lo: std::array::from_fn(|k| (r[20 + 4 * k], r[21 + 4 * k])),
-            hi: std::array::from_fn(|k| (r[22 + 4 * k], r[23 + 4 * k])),
-            rel_xf: r[44],
-            rel_yf: r[45],
-            rel_yi: r[46],
+            math: std::array::from_fn(|k| crate::layout::math_ref(r[20 + k])),
+            rel_xf: r[26],
+            rel_yf: r[27],
+            rel_yi: r[28],
         })
         .collect();
-    match crate::layout::layout_block(&inputs, &runs, &run_texts, &grids, &inlines, root_x, root_y, root_cb_w) {
+    // …and the math table: every comparison function's program, named by offset from a record, an inline entry or a grid.
+    let maths = read_f64_array(args.get(8));
+    match crate::layout::layout_block(&inputs, &runs, &run_texts, &grids, &inlines, &maths, root_x, root_y, root_cb_w) {
         crate::layout::Outcome::Unsupported => rv.set_bool(false),
         crate::layout::Outcome::LaidOut(boxes, frags) => {
             let cid = realm_id(scope, &args);
