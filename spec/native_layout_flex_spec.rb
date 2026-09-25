@@ -1555,6 +1555,16 @@ RSpec.describe 'native layout flex parity', if: ENV.fetch('CSIM_JS_ENGINE', 'v8'
     # ORACLE: a gap whose BOUND is the percentage and whose value is not — `max(10px, 30%)`, the length floored at a
     # line — is asked at the basis too: `axisGap` passed it only where the value had a fraction, so the floor resolved
     # at 0 and the gap opened 10 where native and Chrome open 30% of the row.
+    # WALK: a PUSHED baseline item's ascent is its margin box's, on the basis its percentage margins resolve against
+    # — read at none (the edges the walk reads for the item's auto margins), a `margin-top: 10%` item lost its margin
+    # from the ascent native hangs it by, 55 where the oracle and Chrome say 40. (The child's three-operand `min()`
+    # height is what the walk cannot carry, which pushes the items.)
+    it 'hangs a pushed baseline item by the ascent of its percentage-margined box' do
+      body = '<div id="c" style="display:flex;align-items:baseline;width:400px;height:200px;font:16px monospace">' \
+             '<div style="margin-top:10%">a<div style="height:min(10%, 20%, 90px)"></div></div><div style="font-size:30px">b</div></div>'
+      expect_parity(body)
+      expect(first_item_box(body)[1]).to eq(40)   # Chrome
+    end
     it 'resolves a gap whose bound is the percentage against the basis' do
       ['display:flex', 'display:grid;grid-template-columns:auto 1fr'].each do |disp|
         body = %(<div style="#{disp};width:400px;column-gap:max(10px, 30%)"><div style="width:50px;height:10px"></div>) +

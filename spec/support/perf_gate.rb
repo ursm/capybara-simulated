@@ -169,11 +169,14 @@ module PerfGate
   # answer is never asked and dropping its MEMO costs nothing at all — the half of the hazard the comment
   # names first would be invisible. It has to be asked MANY times under ONE parent for the memo to be what
   # is measured: 300 declaring siblings read `sibScans` 1 memoised and 300 without it.
-  WALK_SECTION = (1..8).map {|c|
+  # …and one INLINE holding many atomics, whose every record asks which box around it is not an inline box
+  # (`nlInlineContainer`) — which scans that inline's children unless the answer is memoised per walk: 300 atomics
+  # read `sibScans` 1 memoised and 300 without it (a 2,000-atomic span took the shadow run from 28 ms to 1.5 s).
+  WALK_SECTION = ((1..8).map {|c|
     kids = (1..300).map {|k| %(<span class="fi">i#{k}</span>) }.join
     pct  = c == 1 ? ' pctitem' : ''
     %(<div class="flexrow" id="fx-#{c}"><div class="fitem#{pct}"><div>#{kids}</div></div></div>)
-  }.join.freeze
+  }.join + %(<div><span>#{(1..300).map {|k| %(<span class="ib">#{k}</span>) }.join}</span></div>)).freeze
   # Scoped to this workload: `grid_table` and `shadow_host` are documented as the same page modulo one shadow
   # host, and dead rules in their `<style>` would quietly make that false.
   WALK_STYLE = <<~CSS.freeze
@@ -181,6 +184,7 @@ module PerfGate
     .fitem { flex: 1 }
     .pctitem .fi { height: 50% }
     .fi { padding: 1px }
+    .ib { display: inline-block }
   CSS
 
   # A component of the shape a design system ships: its own `<style>`, its own markup, and nothing

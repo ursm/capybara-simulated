@@ -8,9 +8,9 @@ grid_table:
     ctx_sweeps: 201
     ctx_gate_active: 1
   wall:
-    workload_ms: 355.491
-    calib_ms: 2.661
-    ratio: 133.613
+    workload_ms: 388.783
+    calib_ms: 2.746
+    ratio: 141.58
 shadow_host:
   counts:
     passes: 3
@@ -20,22 +20,22 @@ shadow_host:
     ctx_sweeps: 201
     ctx_gate_active: 1
   wall:
-    workload_ms: 407.195
-    calib_ms: 2.687
-    ratio: 151.565
+    workload_ms: 434.653
+    calib_ms: 2.725
+    ratio: 159.532
 layout_walk:
   counts:
     ok: 1
-    nodes: 2028
-    compared: 2028
+    nodes: 2329
+    compared: 2329
     mismatches: 0
-    sibScans: 1
-    nativeAtomics: 400
+    sibScans: 2
+    nativeAtomics: 700
     nativeFlexRows: 8
     nativeIntrinsicGrids: 0
     nativeOutOfFlow: 0
     pushedContributions: 0
   wall:
-    workload_ms: 166.185
-    calib_ms: 2.664
-    ratio: 62.387
+    workload_ms: 203.488
+    calib_ms: 2.721
+    ratio: 74.796
