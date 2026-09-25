@@ -228,9 +228,9 @@ pub(crate) struct Input {
     // ordinary edges — border-spacing 0, each cell's halved borders in its pushed box, and the table's OWN border
     // set to the outer half of its rim cells' borders with no padding — so `measure_table` lays a collapse table
     // out exactly like a separate one.)
-    // Caption placement (t4), on a DISPLAY_TABLE node that has a caption child: 0 = caption-side top (the grid
-    // is offset down by the caption's height), 1 = bottom (the caption sits below the grid). The caption's box
-    // is laid out by `measure_table`; the `<table>` el._lb is then the WRAPPER (caption + grid). 0 when no caption.
+    // Caption placement (t4), on a table's CAPTION node: 0 = caption-side top (stacked above the grid, which is
+    // offset down past every top caption), 1 = bottom (stacked below the grid). The caption's box is laid out by
+    // `measure_table`; the `<table>` el._lb is then the WRAPPER (captions + grid). 0 on every other node.
     pub(crate) caption_side: u8,
     // `direction: rtl` (r1): the box's own INLINE axis runs backwards. 0 = ltr. Which PHYSICAL edge that
     // inline-start is depends on the writing mode, so each consumer pairs this with the axis where the oracle
@@ -5084,13 +5084,14 @@ fn flex_distribution(code: u8, free: f64, n: usize) -> (f64, f64) {
 struct TableGrid {
     rows: Vec<usize>,
     row_group: Vec<Option<usize>>,
-    caption: Option<usize>,
+    // …and its CAPTIONS, in document order: each is stacked above the grid or below it by its own `caption-side`.
+    captions: Vec<usize>,
     c_count: usize,
 }
 fn table_grid(i: usize, inputs: &[Cell<Input>], children: &[Vec<usize>], declared_cols: usize) -> Option<TableGrid> {
     let mut rows: Vec<usize> = Vec::new();
     let mut row_group: Vec<Option<usize>> = Vec::new();
-    let mut caption = None;
+    let mut captions = Vec::new();
     for &ch in &children[i] {
         // An OUT-OF-FLOW child is no part of the table's structure (§9.7) — not a row, not a caption. The walk
         // emits every one of them under the table, whichever table part it was written in.
@@ -5108,7 +5109,7 @@ fn table_grid(i: usize, inputs: &[Cell<Input>], children: &[Vec<usize>], declare
                 rows.push(ch);
                 row_group.push(None);
             }
-            _ => caption = Some(ch),
+            _ => captions.push(ch),
         }
     }
     let mut c_count = declared_cols;
@@ -5136,7 +5137,7 @@ fn table_grid(i: usize, inputs: &[Cell<Input>], children: &[Vec<usize>], declare
             }
         }
     }
-    Some(TableGrid { rows, row_group, caption, c_count })
+    Some(TableGrid { rows, row_group, captions, c_count })
 }
 // The border-spacing gaps around and between the columns / rows — (count + 1) of them. Zero for a
 // border-COLLAPSE table (its shared edges are the cells' own halved borders, the outer ones the table's).
@@ -5375,7 +5376,7 @@ fn table_intrinsic_widths(
     let decls = table_col_decls(&n, grids);
     let g = table_grid(i, inputs, children, decls.as_ref().map_or(0, |d| d.count))?;
     let cols = table_columns(&g, n.sp_x, decls.as_ref(), inputs, runs, run_texts, grids, children)?;
-    let floor = caption_floor(g.caption, inputs, runs, run_texts, grids, children)?;
+    let floor = caption_floor(&g.captions, inputs, runs, run_texts, grids, children)?;
     // An intrinsic CONTRIBUTION reads the table's own edges basis-less, like every other box's (the oracle's
     // `tableIntrinsicWidths` uses `edgeInsets(table, null)`).
     Some(table_min_max_with_caption(&n, &g, &cols, floor, n.decl_edges_x))
@@ -5386,20 +5387,21 @@ fn table_intrinsic_widths(
 // min/max-width clamping it — plus its horizontal margins. Those are read BASIS-LESS (`decl_margin_x`, an `auto`
 // one already 0), because the table's width is what a percentage among them would resolve against and it is the
 // figure being decided here; the same margins are resolved against it once it has settled, in `measure_table`.
-// The oracle's figure where native cannot measure the caption; 0 without one.
+// The oracle's figure where native cannot measure the caption; the widest of them where there are several (each
+// spans the same box); 0 without one.
 fn caption_floor(
-    caption: Option<usize>,
+    captions: &[usize],
     inputs: &[Cell<Input>],
     runs: &[Run],
     run_texts: &[Option<Vec<u16>>],
     grids: &[f64],
     children: &[Vec<usize>],
 ) -> Option<f64> {
-    let cap = match caption {
-        Some(cap) => cap,
-        None => return Some(0.0),
-    };
-    Some(caption_intrinsic(cap, inputs, runs, run_texts, grids, children)?.0 + inputs[cap].get().decl_margin_x)
+    let mut floor = 0.0f64;
+    for &cap in captions {
+        floor = floor.max(caption_intrinsic(cap, inputs, runs, run_texts, grids, children)?.0 + inputs[cap].get().decl_margin_x);
+    }
+    Some(floor)
 }
 // A caption's min/max-content: native's own measure, or — where the walk could not measure the subtree and
 // PARKED it — the oracle's pushed contribution off rec[84..85], exactly as an unmeasurable CELL travels
@@ -5472,7 +5474,7 @@ fn measure_table(
         Some(g) => g,
         None => return bail(failed),
     };
-    let (rows, row_group, caption, c_count) = (&g.rows, &g.row_group, g.caption, g.c_count);
+    let (rows, row_group, captions, c_count) = (&g.rows, &g.row_group, &g.captions, g.c_count);
     let r_count = rows.len();
     // `table-layout: fixed` sizes the columns from the first row's declarations alone, so it measures NO cell —
     // the per-column min/max-content pass is only for the content algorithm.
@@ -5488,7 +5490,7 @@ fn measure_table(
 
     // A CAPTION (§17.4 — a block box spanning the table WRAPPER) that needs more than the table floors its
     // border-box width, so the columns share out what is left inside that.
-    let cap_floor = match caption_floor(caption, inputs, runs, run_texts, grids, children) {
+    let cap_floor = match caption_floor(captions, inputs, runs, run_texts, grids, children) {
         Some(v) => v,
         None => return bail(failed),
     };
@@ -5532,17 +5534,17 @@ fn measure_table(
     // `%` of it) is its own and may overflow it without growing the table, and a `%` height resolves against
     // nothing (Chrome keeps such a caption its content's height, whatever the table's). Its MARGINS resolve
     // against that border box too — the block it spans — which is why the measure comes after `table_w`.
-    if let Some(cap) = caption {
-        // …while a RELATIVE caption's percentage offset resolves against the table's own height where the table
-        // has one yet — declared or imposed, its BORDER box as the oracle's `box.height || null` has it; `auto` is
-        // none. (Chrome resolves against the table's CONTENT height after its min/max — 8.39 for a padded 100px
-        // table where both engines say 11.6 — 10% of its border box; shared, pinned in the block spec.)
-        let offset_h = if is_auto(n.height) {
-            f64::NAN
-        } else {
-            let h = if n.border_box { n.height } else { n.height + n.edges_y() };
-            if h > 0.0 { h } else { f64::NAN }
-        };
+    // …while a RELATIVE caption's percentage offset resolves against the table's own height where the table has one
+    // yet — declared or imposed, its BORDER box as the oracle's `box.height || null` has it; `auto` is none. (Chrome
+    // resolves against the table's CONTENT height after its min/max — 8.39 for a padded 100px table where both
+    // engines say 11.6 — 10% of its border box; shared, pinned in the block spec.)
+    let offset_h = if is_auto(n.height) {
+        f64::NAN
+    } else {
+        let h = if n.border_box { n.height } else { n.height + n.edges_y() };
+        if h > 0.0 { h } else { f64::NAN }
+    };
+    for &cap in captions {
         let k = inputs[cap].get().with_percent_sizes(table_w, f64::NAN).with_relative_insets(table_w, offset_h);
         inputs[cap].set(k);
         // Its used width is the oracle's `layoutSize(caption, availW, 0, box.width, null)`, and `usedSize`
@@ -5561,27 +5563,34 @@ fn measure_table(
         };
         measure(cap, cap_w, f64::NAN, inputs, runs, run_texts, grids, children, boxes, failed, &mut FloatCtx::new(), 0.0, 0.0);
     }
-    // What the wrapper stacks is the caption's MARGIN box (the oracle's `layCaption`: `y += mt + height + mb`),
-    // so the vertical margins are height the rows do not get, and the LEADING horizontal one insets it from the
-    // wrapper's inline-start edge — an `auto` pair centring it, one `auto` pushing it to the other side (§10.3.3),
-    // exactly as `block_child_x` places a block child anywhere else.
-    let (cap_lead, cap_mt, cap_mb) = match caption {
-        Some(cap) => {
-            let k = inputs[cap].get();
-            let (ml, mr) = (Input::m(k.ml), Input::m(k.mr));
-            let from_right = n.rtl != 0;
-            let (lm, tm) = if from_right { (mr, ml) } else { (ml, mr) };
-            let (lead_auto, trail_auto) = if from_right {
-                (k.auto_margins & 2 != 0, k.auto_margins & 1 != 0)
-            } else {
-                (k.auto_margins & 1 != 0, k.auto_margins & 2 != 0)
-            };
-            let lead = auto_margin_split(lead_auto, trail_auto, lm, tm, table_w, boxes[cap].w).0;
-            (lead, Input::m(k.mt), Input::m(k.mb))
+    // What the wrapper stacks is each caption's MARGIN box (the oracle's `layCaption`: `y += mt + height + mb`), the
+    // top ones above the grid and the bottom ones below it, each side in document order — so the vertical margins are
+    // height the rows do not get, and the LEADING horizontal one insets it from the wrapper's inline-start edge — an
+    // `auto` pair centring it, one `auto` pushing it to the other side (§10.3.3), exactly as `block_child_x` places a
+    // block child anywhere else.
+    let mut caps: Vec<(usize, f64, f64, bool)> = Vec::with_capacity(captions.len()); // (caption, lead, top margin, below)
+    let (mut caption_top_h, mut caption_bottom_h) = (0.0f64, 0.0f64);
+    for &cap in captions {
+        let k = inputs[cap].get();
+        let (ml, mr) = (Input::m(k.ml), Input::m(k.mr));
+        let from_right = n.rtl != 0;
+        let (lm, tm) = if from_right { (mr, ml) } else { (ml, mr) };
+        let (lead_auto, trail_auto) = if from_right {
+            (k.auto_margins & 2 != 0, k.auto_margins & 1 != 0)
+        } else {
+            (k.auto_margins & 1 != 0, k.auto_margins & 2 != 0)
+        };
+        let lead = auto_margin_split(lead_auto, trail_auto, lm, tm, table_w, boxes[cap].w).0;
+        let below = k.caption_side == 1;
+        let outer = Input::m(k.mt) + boxes[cap].h + Input::m(k.mb);
+        if below {
+            caption_bottom_h += outer;
+        } else {
+            caption_top_h += outer;
         }
-        None => (0.0, 0.0, 0.0),
-    };
-    let caption_h = caption.map(|cap| cap_mt + boxes[cap].h + cap_mb).unwrap_or(0.0);
+        caps.push((cap, lead, Input::m(k.mt), below));
+    }
+    let caption_h = caption_top_h + caption_bottom_h;
 
     let span_w = |c: usize| -> f64 {
         let k = inputs[c].get();
@@ -5726,9 +5735,8 @@ fn measure_table(
     // (`layoutTable`: `if (imposedContentH > y - gridTop) y = gridTop + imposedContentH;`). Agreement, not a
     // line that never fires.
     let grid_h = (sum_row + table_gaps(r_count, sy)).max(imposed_h);
-    let caption_top = caption.is_some() && n.caption_side == 0;
     let content_left = n.bl + n.pl;
-    let content_top = n.bt + n.pt + if caption_top { caption_h } else { 0.0 };
+    let content_top = n.bt + n.pt + caption_top_h;
 
     // Prefix sums (table-relative): a track's start is one border-spacing in, plus every earlier track + its
     // trailing spacing.
@@ -5760,9 +5768,12 @@ fn measure_table(
     // inline axis it sits one leading margin in from the wrapper's inline-start: the left edge in LTR, and — for
     // a caption NARROWER than the wrapper — the right edge in rtl (§10.3.3 balances the leading margin). Its
     // Phase-A subtree follows through `place`.
-    if let Some(cap) = caption {
-        boxes[cap].x = if n.rtl != 0 { boxes[i].w - boxes[cap].w - cap_lead } else { cap_lead };
-        boxes[cap].y = cap_mt + if caption_top { 0.0 } else { n.bt + n.pt + grid_h + n.pb + n.bb };
+    let (mut top_y, mut bottom_y) = (0.0, content_top + grid_h + n.pb + n.bb);
+    for &(cap, lead, mt, below) in &caps {
+        boxes[cap].x = if n.rtl != 0 { boxes[i].w - boxes[cap].w - lead } else { lead };
+        let y = if below { &mut bottom_y } else { &mut top_y };
+        boxes[cap].y = *y + mt;
+        *y += boxes[cap].h + mt + Input::m(inputs[cap].get().mb);
     }
 
     // Row-group boxes (relative to the table): span their rows across the full row width — and, in the same
@@ -8632,7 +8643,7 @@ mod tests {
     #[test]
     fn table_caption_top_offsets_the_grid_down() {
         let inputs = vec![
-            tbl(0.0, -1, 4.0, 4.0),            // 0 table (wrapper); caption_side top (0 = default)
+            tbl(0.0, -1, 4.0, 4.0),            // 0 table (wrapper); the caption's side top (0 = default)
             caption(1.0, 0, 100.0, 16.0),      // 1 caption (block, 100x16)
             rowel(2.0, 0),                     // 2 tr
             cell(3.0, 2, 60.0, 20.0, 0, 1, 1), // 3 td col 0
@@ -8648,11 +8659,11 @@ mod tests {
 
     #[test]
     fn table_caption_bottom_sits_below_the_grid() {
-        let mut t = tbl(0.0, -1, 4.0, 4.0);
-        t.caption_side = 1; // bottom
+        let mut cap = caption(1.0, 0, 100.0, 16.0);
+        cap.caption_side = 1; // bottom
         let inputs = vec![
-            t,                                 // 0 table (wrapper)
-            caption(1.0, 0, 100.0, 16.0),      // 1 caption
+            tbl(0.0, -1, 4.0, 4.0),            // 0 table (wrapper)
+            cap,                               // 1 caption
             rowel(2.0, 0),                     // 2 tr
             cell(3.0, 2, 60.0, 20.0, 0, 1, 1), // 3
             cell(4.0, 2, 80.0, 20.0, 1, 1, 1), // 4
@@ -8714,10 +8725,11 @@ mod tests {
         t.br = 10.0;
         t.bt = 10.0;
         t.bb = 10.0;
-        t.caption_side = 1; // bottom
+        let mut cap = caption(1.0, 0, 60.0, 16.0);
+        cap.caption_side = 1; // bottom
         let inputs = vec![
             t,
-            caption(1.0, 0, 60.0, 16.0),       // 1 caption
+            cap,                               // 1 caption
             rowel(2.0, 0),
             cell(3.0, 2, 40.0, 20.0, 0, 1, 1), // 3 td
         ];

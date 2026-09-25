@@ -599,10 +599,10 @@ RSpec.describe 'native layout inline-atomic parity', if: ENV.fetch('CSIM_JS_ENGI
       # needed a measure at all.) The one route with no fallback is a vertical writing mode's block child, whose
       # width IS its content's: that still declines.
       # …an atomic whose own MEASURE native lacks a rule for: its content holds an atomic native PUSHES (an
-      # `inline-table` of two captions, `WalkRefusals::UNMEASURABLE`), whose box a measure has nothing to read. The
-      # atomic is otherwise the same box with the same content as the control below, so what the counters show is
-      # that content and nothing else. The cause has changed hands six times (see `WalkRefusals`); find the next
-      # shape when this one retires — the cause is real either way.
+      # `inline-table` whose scrolling row has a px bottom margin, `WalkRefusals::UNMEASURABLE`), whose box a measure
+      # has nothing to read. The atomic is otherwise the same box with the same content as the control below, so what
+      # the counters show is that content and nothing else. The cause has changed hands seven times (see
+      # `WalkRefusals`); find the next shape when this one retires — the cause is real either way.
       # The atomic's own CONTENT is what the substitution swaps now (it was the atomic's `style` while the
       # cause was a `white-space`), so the fallback shape and its control are the same box either way.
       unmeasurable = WalkRefusals::UNMEASURABLE

@@ -664,14 +664,13 @@ RSpec.describe 'native layout table parity', if: ENV.fetch('CSIM_JS_ENGINE', 'v8
     expect_parity(oof_table(inner_table: '<div style="position:absolute;top:2px">shrink to fit</div>'))
   end
 
-  # A shrink-to-fit box whose content native cannot measure — an inline-table with two captions — is REPLAYED
+  # A shrink-to-fit box whose content native cannot measure (`WalkRefusals::UNMEASURABLE`) is REPLAYED
   # instead: the oracle's border box pushed with its displacement from the table's origin. The only shape here that
   # takes that arm (`nativeOutOfFlow` stays 0), and it is a whole second code path. (A containing block with
   # PERCENTAGE edges was the shape until native placed against one itself: its padding box is its border box less
   # its borders, which no percentage is.)
   it 'matches a REPLAYED out-of-flow table child (content native cannot measure)' do
-    unmeasured = '<div style="position:absolute;top:2px"><span style="display:inline-table"><span style="display:table-caption">c</span>' \
-                 '<span style="display:table-caption">d</span></span></div>'
+    unmeasured = %(<div style="position:absolute;top:2px">#{WalkRefusals::UNMEASURABLE}</div>)
     body = %(<div style="position:relative;width:300px">#{oof_table(inner_table: unmeasured)}</div>)
     expect_parity(body)
     expect(run_shadow(body)['nativeOutOfFlow']).to eq(0), 'expected the replay arm, not the native placement'
@@ -782,7 +781,17 @@ RSpec.describe 'native layout table parity', if: ENV.fetch('CSIM_JS_ENGINE', 'v8
     expect(run_shadow(plain)['ok']).to be(true), 'expected the plain table to stay native'
   end
 
-  it('declines two captions') { a_bails_b_native('<table style="border-spacing:4px"><caption>top</caption><caption style="caption-side:bottom">bottom</caption><tr><td style="width:40px">a</td></tr></table>') }
+  # SEVERAL captions stack as `layoutTable`'s `layCaption` stacks them — the top ones above the grid and the bottom
+  # ones below it, each side in document order, their margin boxes the flow — and the widest floors the table. The
+  # walk declined a second one until 2026-09-25 (an inline-table holding two was PUSHED, its baseline and box the
+  # oracle's). Chrome's boxes.
+  it 'stacks several captions on either side of the grid' do
+    body = '<table style="border-spacing:4px;border:3px solid;padding:2px"><caption id="m" style="margin:4px">one</caption><caption>two two two two</caption>' \
+           '<caption style="caption-side:bottom;margin-top:5px">b1</caption><caption id="b2" style="caption-side:bottom">b2</caption><tr><td style="width:40px">a</td></tr></table>'
+    expect_parity(body)
+    expect(laid_out_rect(body)).to eq([4, 4, 52, 18])
+    expect(laid_out_rect(body, 'b2')).to eq([0, 123, 60, 18])
+  end
   # An inline-table is an ATOMIC inline in its parent's line — native replays its oracle box (its rows/cells are
   # covered via the parent), so a block holding one lays out rather than declining.
   # A table as a FLEX ITEM: the walk declined every flex container holding one. Native sizes it like any item
