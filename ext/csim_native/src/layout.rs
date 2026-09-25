@@ -193,6 +193,10 @@ pub(crate) struct Input {
     // horizontal, `top`, `bottom` — where it is a comparison function over affine operands (`clamp_affine`).
     pub(crate) rel_x_px: f64,
     pub(crate) rel_x_neg: bool,
+    // …and the relative INLINE boxes' chain it sits in, where one is a percentage (`nlAddChainRel`): its fraction of the
+    // containing block's width, of its height where definite, and the correction to the chain's length in `rel_pct[6]`
+    // where that height is not. [0, 0, 0] for none.
+    pub(crate) chain_rel: [f64; 3],
     pub(crate) rel_lo: [(f64, f64); 3],
     pub(crate) rel_hi: [(f64, f64); 3],
     // A flex ITEM's AUTO margins. MAIN axis (§9.5): bit0 = main-start-side `auto`, bit1 = main-end-side —
@@ -727,6 +731,13 @@ impl Input {
     fn with_relative_insets(self, cb_w: f64, cb_h: f64) -> Input {
         let mut n = self;
         let [x_frac, top_frac, top_px, bottom_frac, bottom_px, base_x, base_y] = self.rel_pct;
+        let [chain_xf, chain_yf, chain_yi] = self.chain_rel;
+        let chained = chain_xf != 0.0 || chain_yf != 0.0 || chain_yi != 0.0;
+        if x_frac.is_nan() && !chained {
+            return n;
+        }
+        // (…re-derived from the base every time, so a box measured again at another basis never adds a figure twice.)
+        let (mut x, mut y) = (base_x, base_y);
         if !x_frac.is_nan() {
             // An inset between its bounds at a basis — a zero fraction is its length at any basis, NaN included.
             let clamped = |k: usize, px: f64, frac: f64, basis: f64| {
@@ -746,15 +757,21 @@ impl Input {
                     Some(clamped(k, px, frac, cb_h))
                 }
             };
-            let y = at(1, top_px, top_frac).or_else(|| at(2, bottom_px, bottom_frac).map(|b| -b)).unwrap_or(0.0);
-            let x = clamped(0, self.rel_x_px, x_frac, cb_w);
-            n.rel_x = base_x + if self.rel_x_neg { -x } else { x };
-            n.rel_y = base_y + y;
+            y += at(1, top_px, top_frac).or_else(|| at(2, bottom_px, bottom_frac).map(|b| -b)).unwrap_or(0.0);
+            let own = clamped(0, self.rel_x_px, x_frac, cb_w);
+            x += if self.rel_x_neg { -own } else { own };
         }
+        // …and the chain of relative inline boxes around it, whose containing block is this box's too.
+        if chained {
+            x += chain_xf * cb_w;
+            y += if is_auto(cb_h) { chain_yi } else { chain_yf * cb_h };
+        }
+        n.rel_x = x;
+        n.rel_y = y;
         n
     }
     fn has_percent_sizes(&self) -> bool {
-        self.pct_sizes.iter().any(|f| !f.is_nan()) || self.has_percent_edges() || !self.rel_pct[0].is_nan()
+        self.pct_sizes.iter().any(|f| !f.is_nan()) || self.has_percent_edges() || !self.rel_pct[0].is_nan() || self.chain_rel != [0.0; 3]
     }
     // …an edge with a percentage in it, or with a BOUND that is one (`max(12px, 10%)` has no fraction of its own).
     fn has_percent_edges(&self) -> bool {
@@ -886,10 +903,18 @@ pub(crate) struct InlineBox {
     pub(crate) left: f64,
     pub(crate) lo: [(f64, f64); 6],
     pub(crate) hi: [(f64, f64); 6],
+    // …and the relative offset's percentages (`nlChainRel`): its fraction of the block's width, of its height where that
+    // is definite, and the vertical figure to take where it is not (`rel_y` being the definite one's length).
+    pub(crate) rel_xf: f64,
+    pub(crate) rel_yf: f64,
+    pub(crate) rel_yi: f64,
 }
 impl InlineBox {
-    // Its edges resolved in a block `content_w` wide: the fractions folded into the lengths, between their bounds.
-    fn resolved(mut self, content_w: f64) -> InlineBox {
+    // Its edges resolved in a block `content_w` wide: the fractions folded into the lengths, between their bounds —
+    // and its relative offset, against that width and the block's height `pct_h` (NaN where indefinite).
+    fn resolved(mut self, content_w: f64, pct_h: f64) -> InlineBox {
+        self.rel_x += self.rel_xf * content_w;
+        self.rel_y = if is_auto(pct_h) { self.rel_yi } else { self.rel_y + self.rel_yf * pct_h };
         let at = |k: usize, px: f64, frac: f64| {
             clamp_affine(if frac == 0.0 { px } else { px + frac * content_w }, self.lo[k], self.hi[k], content_w)
         };
@@ -977,6 +1002,7 @@ fn inline_box(idx: usize) -> InlineBox {
         rel_x: 0.0, rel_y: 0.0, bt: 0.0, br: 0.0, bb: 0.0, bl: 0.0,
         f_ml: 0.0, f_left: 0.0, f_right: 0.0, f_mr: 0.0, f_top: 0.0, f_bottom: 0.0,
         left: 0.0, lo: [(f64::NEG_INFINITY, 0.0); 6], hi: [(f64::INFINITY, 0.0); 6],
+        rel_xf: 0.0, rel_yf: 0.0, rel_yi: 0.0,
     })
 }
 fn store_frags(i: usize, rows: Vec<FragRow>) {
@@ -1162,6 +1188,9 @@ struct LineStyle {
     align:   u8,
     rtl:     bool,
     indent:  (f64, bool, bool, bool), // `text-indent`: px, hanging, each-line, first-line-spent (Input::indent_px)
+    // The block's content height where definite (NaN where not): what a relative inline box's — or an out-of-flow
+    // marker's — vertical percentage offset resolves against, as the oracle's `placeInlineBox` stamps it.
+    pct_h:   f64,
 }
 
 // Greedy line layout for a text block's run/marker STREAM (`runs` / `run_texts` parallel, this block's
@@ -1197,7 +1226,7 @@ fn line_layout(
     top: f64,
     style: LineStyle,
 ) -> Option<LineLayout> {
-    let LineStyle {ws_mode, align, rtl, indent} = style;
+    let LineStyle {ws_mode, align, rtl, indent, pct_h} = style;
     // (A Cell for the same reason `indent_now` is one: the band closures read the context the float arm writes.)
     let floats = std::cell::RefCell::new(floats);
     // The three orthogonal `white-space` behaviours (see Input::ws_mode), as ONE closed table rather than
@@ -1400,7 +1429,7 @@ fn line_layout(
             let idx: usize = $idx;
             Frag {
                 idx,
-                ib: inline_box(idx).resolved(content_w),
+                ib: inline_box(idx).resolved(content_w, pct_h),
                 lines: Vec::new(),
                 open_x: band_l(total) + line_x + pending_space.map_or(0.0, |p| p.w),
                 open_top: total,
@@ -2665,8 +2694,12 @@ fn line_layout(
                 // once its width is known), so what is recorded here is that edge.
                 //
                 // `size` / `ls` carry the `position: relative` offset of the inline boxes around it, which
-                // moves the content this position is a reading of (§9.4.3) and so moves the reading too.
-                let (ci, rx, ry) = (run.font as usize, run.size, run.ls);
+                // moves the content this position is a reading of (§9.4.3) and so moves the reading too — its lengths,
+                // with its fractions in `metric` / `asc` and its indefinite-height figure in `line_height`, resolved as
+                // the boxes' are (`InlineBox::resolved`).
+                let ci = run.font as usize;
+                let rx = run.size + run.metric * content_w;
+                let ry = if is_auto(pct_h) { run.line_height } else { run.ls + run.asc * pct_h };
                 // The inline box it sits DIRECTLY in — the innermost one open, since every inline opens one — if that
                 // box has an opening edge of its own still unplaced, and the edges around it have not been placed —
                 // asked of their SUM, as the flush is, so a pair that CANCELS is never "unplaced" to wait for — has
@@ -3416,7 +3449,7 @@ fn measure(
                 .map(|r| measure_float(r.font as usize, content_w, inputs, runs, run_texts, grids, children, boxes, failed))
                 .collect();
             let floats_before = fc.items.len();
-            match line_layout(local, &run_texts[rs..re], n.strut_lh, n.strut_asc, content_w, &mut fc.items, &inline_floats, cl, cr, bfc_top, LineStyle {ws_mode: n.ws_mode, align: n.text_align, rtl: n.from_right(), indent: (clamp_affine(n.indent_px + n.indent_frac * content_w, n.indent_lo, n.indent_hi, content_w), n.indent_hanging, n.indent_each_line, n.indent_spent)}) {
+            match line_layout(local, &run_texts[rs..re], n.strut_lh, n.strut_asc, content_w, &mut fc.items, &inline_floats, cl, cr, bfc_top, LineStyle {ws_mode: n.ws_mode, align: n.text_align, rtl: n.from_right(), indent: (clamp_affine(n.indent_px + n.indent_frac * content_w, n.indent_lo, n.indent_hi, content_w), n.indent_hanging, n.indent_each_line, n.indent_spent), pct_h: pct_h_basis}) {
                 Some(ll) => {
                     // The inline boxes' fragments, into this box's border-box frame (`place` moves them on).
                     store_frags(i, ll.frags.iter().map(|&(idx, r)| [idx as f64, n.bl + n.pl + r[0], content_top_rel + r[1], r[2], r[3]]).collect());
@@ -7835,6 +7868,7 @@ mod tests {
             rel_pct: [f64::NAN, f64::NAN, f64::NAN, f64::NAN, f64::NAN, 0.0, 0.0],
             rel_x_px: 0.0,
             rel_x_neg: false,
+            chain_rel: [0.0; 3],
             rel_lo: [(f64::NEG_INFINITY, 0.0); 3],
             rel_hi: [(f64::INFINITY, 0.0); 3],
             flex_item_auto: 0,

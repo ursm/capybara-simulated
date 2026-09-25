@@ -892,10 +892,10 @@ fn register_font_bytes(
 
 // Fields per node in the layoutPass input buffer, and per run in the runs buffer (flat Float64Arrays).
 // Order MUST match the JS packer (layout.js `__csimLayoutShadowRun`) and layout::Input / layout::Run.
-const LAYOUT_STRIDE: usize = 213;
+const LAYOUT_STRIDE: usize = 216;
 const RUN_STRIDE: usize = 12;
 // …and per inline box in the inline table (layout.js `NL_INLINE_STRIDE` / `nlInlineEntry`, layout::InlineBox).
-const INLINE_STRIDE: usize = 44;
+const INLINE_STRIDE: usize = 47;
 
 // Decode a V8 Float64Array argument into a Vec<f64> (native-endian raw bytes).
 fn read_f64_array(val: v8::Local<'_, v8::Value>) -> Vec<f64> {
@@ -989,6 +989,7 @@ fn layout_pass(
             rel_y: r[40],
             rel_pct: [r[139], r[140], r[141], r[142], r[143], r[39], r[40]],
             rel_x_px: r[212],
+            chain_rel: [r[213], r[214], r[215]],
             rel_x_neg: (r[65] as u32) & 8388608 != 0,
             rel_lo: std::array::from_fn(|k| (r[200 + 4 * k], r[201 + 4 * k])),
             rel_hi: std::array::from_fn(|k| (r[202 + 4 * k], r[203 + 4 * k])),
@@ -1166,6 +1167,9 @@ fn layout_pass(
             left: r[19],
             lo: std::array::from_fn(|k| (r[20 + 4 * k], r[21 + 4 * k])),
             hi: std::array::from_fn(|k| (r[22 + 4 * k], r[23 + 4 * k])),
+            rel_xf: r[44],
+            rel_yf: r[45],
+            rel_yi: r[46],
         })
         .collect();
     match crate::layout::layout_block(&inputs, &runs, &run_texts, &grids, &inlines, root_x, root_y, root_cb_w) {

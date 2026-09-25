@@ -99,6 +99,26 @@ RSpec.describe 'native layout inline box fragments', if: ENV.fetch('CSIM_JS_ENGI
       expect(reads.grep_v(/\(handed over\)\z/)).to be_empty, "#{body}: #{reads.inspect}"
     end
   end
+  # …and a RELATIVE inline box's percentage offsets, which travel as the chain `nlChainRel` sums (a length, a fraction
+  # of the block's width, of its height where definite, and the figure where it is not) and native resolves against the
+  # block laying the line out — for the box's own fragments and for an atomic in it — where the walk resolved them
+  # against the oracle's stamps until 2026-09-25. A `top: 20%` of an indefinite height is `auto`, so `bottom` is used.
+  # Chrome's rects, and no oracle read.
+  it 'offsets a relative inline box by percentages of the block it is laid out in' do
+    {
+      '<div style="font:16px monospace;width:300px;height:120px">aa <span id="m" style="position:relative;left:10%;top:20%">bb</span> cc</div>' => [[58.8125, 24, 19.2031, 22]],
+      '<div style="font:16px monospace;width:300px">aa <span id="m" style="position:relative;top:20%;bottom:6px">bb</span> cc</div>'           => [[28.8125, -6, 19.2031, 22]],
+      '<div style="font:16px monospace;width:300px;height:120px">aa <span style="position:relative;left:10%;top:10%">bb <span id="m" style="display:inline-block;width:30px;height:12px;position:relative;left:10%"></span></span></div>' => [[117.625, 17, 30, 12]]
+    }.each do |body, chrome|
+      expect_fragments(body, chrome: chrome)
+      reads = with_simulated_session(page(body)) do |session|
+        session.visit '/'
+        session.evaluate_script('document.body.offsetHeight')
+        session.evaluate_script('globalThis.__csimLayoutShadowRun(undefined, {noOracle: true})')['oracleReads'].keys
+      end
+      expect(reads.grep_v(/\(handed over\)\z/)).to be_empty, "#{body}: #{reads.inspect}"
+    end
+  end
   it 'gives an empty box the line it opened on, a forced break making that a line' do
     expect_fragments('<div style="font:16px monospace;width:400px"><span id="m"></span><br></div>', chrome: [[0, 0, 0, 22]])
     expect_fragments('<div style="font:16px monospace;width:400px">x<span id="m"><br></span></div>', chrome: [[9.609375, 0, 0, 22]])
