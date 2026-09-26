@@ -767,6 +767,40 @@ RSpec.describe 'layout reuse across dynamic style state' do
     end
   end
 
+  # An ANONYMOUS table cell (§17.2.1 wraps a row's stray content in one) is in no DOM, so no mutation marks it — every
+  # mutation under its content marks the content's parent instead, and that is what its stamp now follows. Kept by the
+  # table's structure stamp alone, it answered with the text it held before an edit, in both layouts. Chrome: 17.1, then
+  # 169.1 once the span's text is twenty characters long.
+  it 'relays out an anonymous table cell when its content changes' do
+    s = session_for('body { margin: 0 }', '<table id="t" style="border-spacing:0"><tr id="r"><td>a</td></tr></table>')
+    got = s.evaluate_script(<<~JS)
+      (() => {
+        const r = document.getElementById('r'), sp = document.createElement('span');
+        sp.textContent = 'x'; r.appendChild(sp);
+        const w = () => document.getElementById('t').getBoundingClientRect().width;
+        const before = w();
+        sp.firstChild.data = 'xxxxxxxxxxxxxxxxxxxx';
+        return [before, w()];
+      })()
+    JS
+    expect(got[0]).to be_within(0.05).of(17.1)
+    expect(got[1]).to be_within(0.05).of(169.1)
+  end
+
+  # …and a block inside one resizing (the anonymous cell a `display: table` div wraps its block child in): the height
+  # stayed 30 in the JS layout.
+  it 'relays out a block resized inside an anonymous table cell' do
+    s = session_for('body { margin: 0 }', '<div id="t" style="display:table"><div id="i" style="width:30px;height:30px"></div></div>')
+    got = s.evaluate_script(<<~JS)
+      (() => {
+        const i = document.getElementById('i'), before = i.offsetHeight;
+        i.style.height = '67px';
+        return [before, i.offsetHeight, document.getElementById('t').offsetHeight];
+      })()
+    JS
+    expect(got).to eq([30, 67, 67])
+  end
+
   # A border-collapse cell's border is grid-resolved — as wide as the widest of the two borders facing
   # across each shared edge — so a SIBLING's border change moves THIS cell even though the cell itself
   # was never touched. The per-cell edge / intrinsic-width memos key on the cell's own dirty stamp, which
