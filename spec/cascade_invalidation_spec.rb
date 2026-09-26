@@ -1390,19 +1390,25 @@ RSpec.describe 'cascade invalidation' do
     expect(got[2]).to be(true)
   end
 
-  it 'stays conservative when a [class^=…] layout rule exists' do
+  # A `[class^=…]` rule reads the class ATTRIBUTE, with a value condition the layout gate carries (`attrWriteMatters`):
+  # a write that satisfies it before or after moves the element's box; one that satisfies it neither time moves nothing.
+  # (The class-token gate this replaced could not place the shape and marked the writer's subtree on every class write.)
+  it 'marks a class write by the [class^=…] rule it can flip, and not otherwise' do
     css = '[class^="col-"] { width: 50px } .panel { height: 20px }'
     s = simulated_session(gated_page('<div id="c"><div class="panel" id="p">x</div></div>', css: css))
     s.visit '/'
     got = s.evaluate_script(<<~JS)
       (() => {
-        document.getElementById('p').getBoundingClientRect();
-        const marks = globalThis.__csimSubtreeMarks();
-        document.getElementById('c').classList.add('unrelated');
-        return globalThis.__csimSubtreeMarks() > marks;
+        const c = document.getElementById('c');
+        c.getBoundingClientRect();
+        const m0 = globalThis.__csimSubtreeMarks();
+        c.classList.add('unrelated');
+        const m1 = globalThis.__csimSubtreeMarks();
+        c.className = 'col-x';
+        return [m1 - m0, globalThis.__csimSubtreeMarks() > m1, c.getBoundingClientRect().width];
       })()
     JS
-    expect(got).to be(true)
+    expect(got).to eq([0, true, 50])
   end
 
   it 'relays out descendants of a subject-position box-property flip' do
