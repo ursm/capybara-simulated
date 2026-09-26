@@ -6872,12 +6872,6 @@ css/css-transforms/perspective-svg-001.html:
 - "== css/css-transforms/perspective-svg-001-ref.html (both renderings blank)"
 css/css-transforms/perspective-transforms-equivalence.html:
 - "== css/css-transforms/perspective-transforms-equivalence-ref.html"
-css/css-transforms/perspective-untransformable-no-stacking-context.html:
-- "== css/css-transforms/perspective-untransformable-no-stacking-context-ref.html"
-css/css-transforms/perspective-zero-point-five.html:
-- "== css/css-transforms/reference/green.html"
-css/css-transforms/perspective-zero.html:
-- "== css/css-transforms/reference/green.html"
 css/css-transforms/preserve-3d-flat-grouping-properties-containing-block.html:
 - Preserve-3d element with a grouping property still a containing block
 - Preserve-3d element without a grouping property still a containing block
@@ -6988,8 +6982,6 @@ css/css-transforms/skewY/svg-skewy-with-units.html:
 - "== css/css-transforms/skewY/reference/svg-skewy-ref.html"
 css/css-transforms/subpixel-perspective-translate-z-0.html:
 - "== css/css-transforms/subpixel-perspective-translate-z-0-ref.html"
-css/css-transforms/transform-3d-rotateY-stair-below-001.xht:
-- "== css/css-transforms/reference/transform-3d-rotateY-stair-above-ref-001.xht"
 css/css-transforms/transform-3d-scales-different-x-y-dynamic-001.html:
 - "== css/css-transforms/transform-3d-scales-different-x-y-dynamic-001-ref.html (never
   ready to capture)"
@@ -7139,8 +7131,6 @@ css/css-transforms/transform-root-bg-003.html:
 - "== css/css-transforms/transform-root-bg-001-ref.html (both renderings blank)"
 css/css-transforms/transform-root-bg-004.html:
 - "== css/css-transforms/transform-root-bg-004-ref.html (both renderings blank)"
-css/css-transforms/transform-stacking-001.html:
-- "== css/css-transforms/transform-lime-square-ref.html"
 css/css-transforms/transform-style-stacking-context.html:
 - "== css/css-transforms/transform-lime-square-ref.html"
 css/css-transforms/transform-transformable-table-row.html:
@@ -9467,8 +9457,6 @@ html/rendering/non-replaced-elements/tables/table-valign-baseline-ascii-case-ins
 - keyword baseline
 html/rendering/non-replaced-elements/tables/tr-transform-and-will-change.html:
 - "== html/rendering/non-replaced-elements/tables/tr-transform-and-will-change-ref.html"
-html/rendering/non-replaced-elements/the-fieldset-and-legend-elements/absolute-fixed-in-legend.html:
-- "== html/rendering/non-replaced-elements/the-fieldset-and-legend-elements/absolute-fixed-in-legend-ref.html"
 html/rendering/non-replaced-elements/the-fieldset-and-legend-elements/fieldset-block-size.html:
 - Test content's block-size
 html/rendering/non-replaced-elements/the-fieldset-and-legend-elements/fieldset-border-gap-negative-margin.html:
@@ -10242,8 +10230,6 @@ html/rendering/replaced-elements/the-option-element/option-label-whitespace.html
 - "== html/rendering/replaced-elements/the-option-element/option-label-whitespace-ref.html"
 html/rendering/replaced-elements/the-option-element/option-with-br.html:
 - "== html/rendering/replaced-elements/the-option-element/option-with-br-ref.html"
-html/rendering/replaced-elements/the-option-element/select-multiple-covered-by-abspos.html:
-- "== html/rendering/replaced-elements/the-option-element/select-multiple-covered-by-abspos-ref.html"
 html/rendering/replaced-elements/the-select-element/customizable-select/min-height-in-flex.html:
 - "== html/rendering/replaced-elements/the-select-element/customizable-select/min-height-in-flex-ref.html"
 html/rendering/replaced-elements/the-select-element/customizable-select/min-size-empty-001.html:
@@ -12023,10 +12009,6 @@ web-animations/animation-model/keyframe-effects/effect-value-transformed-distanc
 - A steps(2, start) function on a keyframe affects the resulting style
 - Linear-equivalent cubic-bezier keyframe easing applied to an effect with a easing
   function which produces values greater than 1 does not alter the result
-web-animations/animation-model/side-effects-of-animations-current.html:
-- "== web-animations/animation-model/side-effects-of-animations-current-ref.html"
-web-animations/animation-model/side-effects-of-animations-in-effect.html:
-- "== web-animations/animation-model/side-effects-of-animations-in-effect-ref.html"
 web-animations/interfaces/Animatable/animate-no-browsing-context.html:
 - Element.animate() creates an animation with the correct timeline when called on
   an element in a document without a browsing context

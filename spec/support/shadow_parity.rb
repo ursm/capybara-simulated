@@ -26,6 +26,9 @@ module ShadowParity
     # …and the fragments native DID lay out, which a box's own record says nothing about: an empty `<span>` is a
     # zero-width box either way, and whether it has a height, and where, is a fragment question.
     expect(result['fragMismatches'].to_i).to eq(0), "#{body}: inline fragments laid out differently: #{result['fragSample'].inspect}"
+    # …and what a geometry read takes off a box besides its rectangle — the basis its percentage edges resolve
+    # against and the margins its placement used — which the flip writes from native too.
+    expect(result['usedMismatches'].to_i).to eq(0), "#{body}: used edges differ: #{result['usedSample'].inspect}"
   end
 
   # `#m`'s laid-out rectangle, `[x, y, width, height]`, on a fresh page of `body` — the figure a spec holds against

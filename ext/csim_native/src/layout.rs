@@ -347,6 +347,10 @@ pub(crate) struct Input {
     // …and each edge's PROGRAM where it is a comparison function over affine operands (`padding: clamp(1rem, 5%,
     // 3rem)`), as the sizes carry theirs (`pct_math`) — a padding's floored at 0, as the walk's `edgeInsets` floors it.
     pub(crate) edge_math: [u32; 8],
+    // The containing-block width this box's percentages were last resolved against (`with_percent_sizes`) — the
+    // oracle's `_lbCbW`, which the geometry reads resolve a percentage padding / margin / inset against again.
+    // NaN for a box whose percentages nothing resolved, as for one that has none: any basis answers alike there.
+    pub(crate) basis_w: f64,
     // An out-of-flow box's inset percentages (top / right / bottom / left) as fractions of its containing block's
     // padding box — height for top / bottom, width for left / right — beside the length parts in `inset_*`.
     pub(crate) inset_frac: [f64; 4],
@@ -724,12 +728,18 @@ impl Input {
         if !h.is_nan() {
             n.bottom_adjoins = is_auto(n.height);
         }
+        n.basis_w = cb_w;
         let edge = |i: usize| bounded(self.edge_px[i] + self.edge_frac[i] * cb_w, self.edge_math[i], cb_w);
         if self.has_percent_edges() {
             (n.mt, n.mr, n.mb, n.ml) = (edge(0), edge(1), edge(2), edge(3));
             (n.pt, n.pr, n.pb, n.pl) = (edge(4), edge(5), edge(6), edge(7));
         }
         n.with_relative_insets(cb_w, cb_h)
+    }
+    // …or, for a box with no percentage to resolve, only the note of the basis it was laid out on (`basis_w`): a record
+    // whose percentages the walk already resolved still reports the width a geometry read resolves them against.
+    fn on_basis(self, cb_w: f64, cb_h: f64) -> Input {
+        if self.has_percent_sizes() { self.with_percent_sizes(cb_w, cb_h) } else { Input { basis_w: cb_w, ..self } }
     }
     // …and a `position: relative` box's percentage insets, onto the base the record carried — apart from the sizes
     // for the one box whose two bases differ: a table CAPTION, whose `%` height resolves against nothing while its
@@ -853,6 +863,12 @@ pub(crate) struct Box {
     // not the one it was cut to (the oracle's `_lbClampedH`), so a definite question asking for that same number
     // is not answered by laying it out at auto again (`flex_column_sizes`).
     pub(crate) clamped_h: bool,
+    // The basis its percentages resolved against (`Input::basis_w`), None where nothing resolved one.
+    pub(crate) cb_w: Option<f64>,
+    // The margins its placement USED (top / right / bottom / left) where they are not what the record declared —
+    // an `auto` one given the slack, an over-constrained one the remainder — as the oracle stamps `_lbMargins` for
+    // `getComputedStyle` to report. None where every side is the declared one.
+    pub(crate) used_margins: Option<[f64; 4]>,
 }
 
 // Clamp a resolved main size by min/max (min wins over max, per CSS). `none` (NaN) bounds are skipped.
@@ -1135,7 +1151,7 @@ pub(crate) fn layout_block(inputs: &[Input], runs: &[Run], run_texts: &[Option<V
     }
     let mut boxes: Vec<Box> = inputs
         .iter()
-        .map(|n| Box { nid: n.nid, x: 0.0, y: 0.0, w: 0.0, h: 0.0, auto_height: false, first_baseline: None, last_baseline: None, inline_block_baseline: None, natural_h: None, clamped_h: false })
+        .map(|n| Box { nid: n.nid, x: 0.0, y: 0.0, w: 0.0, h: 0.0, auto_height: false, first_baseline: None, last_baseline: None, inline_block_baseline: None, natural_h: None, clamped_h: false, cb_w: None, used_margins: None })
         .collect();
     // Two phases: MEASURE lays the subtree out relative to each node's own border-box origin (so
     // collapse-through margins can propagate UP through returns without knowing final positions), then
@@ -1178,6 +1194,12 @@ pub(crate) fn layout_block(inputs: &[Input], runs: &[Run], run_texts: &[Option<V
     if failed.get() {
         return Outcome::Unsupported; // an out-of-flow box sized in `place` met a construct the measure declines
     }
+    // …and the basis each box's percentages resolved against, the pass root's being the one it was handed.
+    for (b, n) in boxes.iter_mut().zip(inputs) {
+        let basis = n.get().basis_w;
+        b.cb_w = if basis.is_nan() { None } else { Some(basis) };
+    }
+    boxes[0].cb_w = Some(root_cb_w);
     // The inline boxes' fragments, each laid out by the text block its runs belong to and placed with it. A box no
     // text block answered for is left out, which the harness counts as MISSING: every tabled box belongs to a
     // committed stream, so an absent one is a bug to see, not a box to guess at.
@@ -3461,8 +3483,8 @@ fn measure(
         }
         if k.anon_group {
             inputs[c].set(Input { group_pct_h: pct_h_basis, ..k });
-        } else if k.has_percent_sizes() && k.out_of_flow == 0 {
-            inputs[c].set(k.with_percent_sizes(content_w, pct_h_basis));
+        } else if k.out_of_flow == 0 {
+            inputs[c].set(k.on_basis(content_w, pct_h_basis));
         }
     }
 
@@ -3836,7 +3858,7 @@ fn measure(
                 } else {
                     (cy, bl0, br0)
                 };
-                boxes[c].x = block_child_x(&n, &cn, bl, br, boxes[c].w);
+                boxes[c].place_across(block_child_across(&n, &cn, bl, br, boxes[c].w));
                 boxes[c].y = y;
                 cursor = y + boxes[c].h;
                 pending = cm.bottom;
@@ -3880,14 +3902,15 @@ fn measure(
                     cursor = cursor.max(clear_to);
                     let y = (cursor + if spent { 0.0 } else { pending.peek(cm.top_only) }).max(clear_to);
                     let child_w = width_in(c, content_w);
-                    let cx = block_child_x(&n, &cn, content_left_rel, content_left_rel + content_w, child_w);
+                    let across = block_child_across(&n, &cn, content_left_rel, content_left_rel + content_w, child_w);
+                    let cx = across.x;
                     let mut inner = FloatCtx { items: ctx.items.iter().map(|f| f.shifted(-cx, -y)).collect() };
                     let placed = inner.items.len();
                     let cm2 = measure(c, child_w, f64::NAN, inputs, runs, run_texts, grids, children, boxes, failed, &mut inner, 0.0, 0.0);
                     if !cm2.collapse_through || cm2.top.value() != cm.top.value() || boxes[c].w != child_w {
                         failed.set(true);
                     }
-                    boxes[c].x = cx;
+                    boxes[c].place_across(across);
                     boxes[c].y = y;
                     ctx.items.extend(inner.items[placed..].iter().map(|f| f.shifted(cx, y)));
                     has_child = true;
@@ -3944,8 +3967,7 @@ fn measure(
                             place_beside_floats!(y);
                             continue;
                         }
-                        boxes[c].x =
-                            block_child_x(&n, &cn, content_left_rel, content_left_rel + content_w, boxes[c].w);
+                        boxes[c].place_across(block_child_across(&n, &cn, content_left_rel, content_left_rel + content_w, boxes[c].w));
                         boxes[c].y = y;
                         cursor = y + boxes[c].h;
                         pending = cm.bottom;
@@ -3961,7 +3983,8 @@ fn measure(
                     // margin pulls ABOVE the clearance line meets the floats there, and clears them or wraps round
                     // them (the oracle, which lays the box out in the shared context, does both).
                     let child_w = width_in(c, content_w);
-                    let cx = block_child_x(&n, &cn, content_left_rel, content_left_rel + content_w, child_w);
+                    let across = block_child_across(&n, &cn, content_left_rel, content_left_rel + content_w, child_w);
+                    let cx = across.x;
                     let mut inner = FloatCtx { items: ctx.items.iter().map(|f| f.shifted(-cx, -y)).collect() };
                     let placed = inner.items.len();
                     let cm2 = measure(c, child_w, f64::NAN, inputs, runs, run_texts, grids, children, boxes, failed, &mut inner, 0.0, 0.0);
@@ -3970,7 +3993,7 @@ fn measure(
                     if cm2.collapse_through || cm2.top_only.value() != cm.top_only.value() || boxes[c].w != child_w {
                         failed.set(true);
                     }
-                    boxes[c].x = cx;
+                    boxes[c].place_across(across);
                     boxes[c].y = y;
                     ctx.items.extend(inner.items[placed..].iter().map(|f| f.shifted(cx, y)));
                     cursor = y + boxes[c].h;
@@ -4012,8 +4035,9 @@ fn measure(
                 // back at content_left either way. `child_w` is its border box (`boxes[c].w` isn't set until the
                 // measure below). Its lines still route around the floats through the shared `ctx`.
                 let child_w = width_in(c, content_w);
-                let cx = block_child_x(&n, &cn, content_left_rel, content_left_rel + content_w, child_w);
-                boxes[c].x = cx;
+                let across = block_child_across(&n, &cn, content_left_rel, content_left_rel + content_w, child_w);
+                let cx = across.x;
+                boxes[c].place_across(across);
                 boxes[c].y = cy;
                 let cm = measure(c, child_w, f64::NAN, inputs, runs, run_texts, grids, children, boxes, failed, ctx, cx, cy);
                 has_child = true;
@@ -4072,7 +4096,8 @@ fn measure(
         // In an rtl block the in-flow children start at the RIGHT content edge (r1): the child's own right
         // edge sits at content_right - margin_right, so its left is that minus its width. A block that fills
         // the width lands back at content_left + margin_left, so this covers both.
-        let cx = block_child_x(&n, &cn, content_left_rel, content_left_rel + content_w, child_w);
+        let across = block_child_across(&n, &cn, content_left_rel, content_left_rel + content_w, child_w);
+        let cx = across.x;
         let cm = if !ctx.items.is_empty() {
             let mut inner = FloatCtx { items: ctx.items.iter().map(|f| f.shifted(-cx, -cy)).collect() };
             let placed = inner.items.len();
@@ -4107,12 +4132,12 @@ fn measure(
         // stale one — everything that reaches here with floats around it is a plain block container, whose
         // width is the one it was given, and this says so rather than assuming it.
         if boxes[c].w != child_w {
-            boxes[c].x = block_child_x(&n, &cn, content_left_rel, content_left_rel + content_w, boxes[c].w);
+            boxes[c].place_across(block_child_across(&n, &cn, content_left_rel, content_left_rel + content_w, boxes[c].w));
             if !ctx.items.is_empty() {
                 failed.set(true);
             }
         } else {
-            boxes[c].x = cx;
+            boxes[c].place_across(across);
         }
         // A child that collapses THROUGH an open top edge leaves the run in this block's own top margin and
         // does not push the next sibling with it — which is also why the escaped floats below cannot wait for
@@ -5235,23 +5260,12 @@ fn measure_flex(
             // then has no free space left to place the item with (bit2 = cross-start-side auto, bit3 =
             // cross-end-side). `autoMarginSplit`: both auto centre, one auto pushes to the other edge, and
             // an over-constrained item (leftover <= 0) sits flush at the cross-start with a negative trail.
-            let cross_pos = if auto & 0b1100 != 0 {
+            let cross_margins = (auto & 0b1100 != 0).then(|| {
                 let cross_box = if main_is_x { boxes[c].h } else { boxes[c].w };
                 let lead_m = cl_lead[p];
-                let trail_m = co[p] - cross_box - lead_m;
-                let (lead_auto, trail_auto) = (auto & 4 != 0, auto & 8 != 0);
-                let spare = lc - cross_box
-                    - if lead_auto { 0.0 } else { lead_m }
-                    - if trail_auto { 0.0 } else { trail_m };
-                let lead = if spare <= 0.0 {
-                    if lead_auto { 0.0 } else { lead_m }
-                } else if lead_auto && trail_auto {
-                    spare / 2.0
-                } else if lead_auto {
-                    spare
-                } else {
-                    lead_m
-                };
+                auto_margin_split(auto & 4 != 0, auto & 8 != 0, lead_m, co[p] - cross_box - lead_m, lc, cross_box)
+            });
+            let cross_pos = if let Some((lead, _)) = cross_margins {
                 cs + lead
             } else {
                 let off = match inputs[c].get().flex_cross_align {
@@ -5284,6 +5298,26 @@ fn measure_flex(
             } else {
                 boxes[c].y = main_pos;
                 boxes[c].x = cross_pos;
+            }
+            // …and the margins an `auto` one resolved to (`Box::used_margins`): its share of the free space on
+            // the main axis, the slack across — each on its PHYSICAL side, the main-start one being the far side
+            // of a reversed axis.
+            if auto != 0 {
+                let cn = inputs[c].get();
+                let share = |bit: u8| if auto & bit != 0 { each_auto } else { 0.0 };
+                let (near_m, far_m) = if main_is_x { (cn.ml, cn.mr) } else { (cn.mt, cn.mb) };
+                let (near_share, far_share) = if main_reverse { (share(2), share(1)) } else { (share(1), share(2)) };
+                let (near, far) = (Input::m(near_m) + near_share, Input::m(far_m) + far_share);
+                let (cross_near, cross_far_m) = cross_margins.unwrap_or(if main_is_x {
+                    (Input::m(cn.mt), Input::m(cn.mb))
+                } else {
+                    (Input::m(cn.ml), Input::m(cn.mr))
+                });
+                boxes[c].used_margins = Some(if main_is_x {
+                    [cross_near, far, cross_far_m, near]
+                } else {
+                    [near, cross_far_m, far, cross_near]
+                });
             }
         }
     }
@@ -5867,8 +5901,8 @@ fn measure_table(
     for &r in rows {
         for &c in &children[r] {
             let k = inputs[c].get();
-            if k.out_of_flow == 0 && k.has_percent_edges() {
-                inputs[c].set(k.with_percent_sizes(cells_w, f64::NAN));
+            if k.out_of_flow == 0 {
+                inputs[c].set(if k.has_percent_edges() { k.with_percent_sizes(cells_w, f64::NAN) } else { Input { basis_w: cells_w, ..k } });
             }
         }
     }
@@ -5909,7 +5943,7 @@ fn measure_table(
     // What the wrapper stacks is each caption's MARGIN box (the oracle's `layCaption`: `y += mt + height + mb`), the
     // top ones above the grid and the bottom ones below it, each side in document order — so the vertical margins are
     // height the rows do not get, and the LEADING horizontal one insets it from the wrapper's inline-start edge — an
-    // `auto` pair centring it, one `auto` pushing it to the other side (§10.3.3), exactly as `block_child_x` places a
+    // `auto` pair centring it, one `auto` pushing it to the other side (§10.3.3), exactly as `block_child_across` places a
     // block child anywhere else.
     let mut caps: Vec<(usize, f64, f64, bool)> = Vec::with_capacity(captions.len()); // (caption, lead, top margin, below)
     let (mut caption_top_h, mut caption_bottom_h) = (0.0f64, 0.0f64);
@@ -7509,11 +7543,8 @@ fn measure_grid(
         // (Idempotent: `with_percent_sizes` always re-derives from `pct_sizes` / `edge_frac`, which are never
         // written back, so a second measure at another width is clean. A SPANNING item's basis is the tracks
         // it covers plus the gaps between them, which `track_w` already is.)
-        let mut item = inputs[c].get();
-        if item.has_percent_sizes() {
-            item = item.with_percent_sizes(track_w, pct_h);
-            inputs[c].set(item);
-        }
+        let mut item = inputs[c].get().on_basis(track_w, pct_h);
+        inputs[c].set(item);
         // …and an auto-height item under a declared row is that row's height, imposed as its border box on the
         // edges just resolved and floored at them — a row shorter than the item's own padding and border leaves the
         // box at those (Chrome), and the box IS that figure, a border-box one included: a table's caption resolves
@@ -7726,10 +7757,20 @@ fn place(
 // direction decides which margin LEADS: an `rtl` containing block balances on `margin-left`, so a 500px block
 // with `margin: 0 auto` in a 400px rtl container hangs off the LEFT. A FLOAT never distributes (§10.3.5
 // computes its auto margins to zero); it is placed by the float machinery, and the guard here says so anyway.
-// (Only the LEADING margin is returned: the trailing one is what the oracle stamps as `_lbMargins`, which is
-// what `getComputedStyle().marginLeft` resolves to on a centred box. Native produces no such output yet — one
-// of the oracle outputs still to be carried across before the JS layout can go.)
-fn block_child_x(n: &Input, cn: &Input, band_l: f64, band_r: f64, w: f64) -> f64 {
+// …and the horizontal margins that put it there, where they are not the declared ones: what an `auto` margin came
+// to is what `getComputedStyle().marginLeft` reports on a centred box (`Box::used_margins`).
+#[derive(Clone, Copy)]
+struct Across {
+    x: f64,
+    margins: Option<[f64; 4]>,
+}
+impl Box {
+    fn place_across(&mut self, a: Across) {
+        self.x = a.x;
+        self.used_margins = a.margins;
+    }
+}
+fn block_child_across(n: &Input, cn: &Input, band_l: f64, band_r: f64, w: f64) -> Across {
     let (ml, mr) = (Input::m(cn.ml), Input::m(cn.mr));
     let from_right = n.from_right();
     let (lm, tm) = if from_right { (mr, ml) } else { (ml, mr) };
@@ -7739,12 +7780,16 @@ fn block_child_x(n: &Input, cn: &Input, band_l: f64, band_r: f64, w: f64) -> f64
         (cn.auto_margins & 1 != 0, cn.auto_margins & 2 != 0)
     };
     let distributes = cn.auto_margins & 3 != 0 && cn.float_kind == 0;
-    let lead = if distributes {
-        auto_margin_split(lead_auto, trail_auto, lm, tm, band_r - band_l, w).0
-    } else {
-        lm + legacy_align_shift(n.legacy_align, from_right, band_r - band_l - w - ml - mr)
-    };
-    if from_right { band_r - w - lead } else { band_l + lead }
+    if !distributes {
+        let lead = lm + legacy_align_shift(n.legacy_align, from_right, band_r - band_l - w - ml - mr);
+        return Across { x: if from_right { band_r - w - lead } else { band_l + lead }, margins: None };
+    }
+    let (lead, trail) = auto_margin_split(lead_auto, trail_auto, lm, tm, band_r - band_l, w);
+    let (left, right) = if from_right { (trail, lead) } else { (lead, trail) };
+    Across {
+        x: if from_right { band_r - w - lead } else { band_l + lead },
+        margins: Some([Input::m(cn.mt), right, Input::m(cn.mb), left]),
+    }
 }
 
 // …the legacy half of it, as an offset ON the leading margin: `<center>` centres, `align=right` pushes to the
@@ -7964,6 +8009,7 @@ fn place_out_of_flow(
     };
     boxes[c].x = x;
     boxes[c].y = y;
+    boxes[c].used_margins = if am != 0 { Some([my_lead, mx_trail, my_trail, mx_lead]) } else { None };
     shift_frags(c, x, y);   // …and its own lines' inline fragments with it, as `place` moves a flowed box's
     for &cc in &children[c] {
         if inputs[cc].get().native_oof() {
@@ -8228,6 +8274,7 @@ mod tests {
             pct_px: [0.0; 6],
             pct_math: [NO_MATH; 6],
             edge_frac: [0.0; 8],
+            basis_w: f64::NAN,
             edge_px: [0.0; 8],
             edge_math: [NO_MATH; 8],
             inset_frac: [0.0; 4],
@@ -8303,8 +8350,8 @@ mod tests {
         b.height = 30.0;
         let inputs = vec![blk(0.0, -1), a, b];
         let bx = boxes(layout_block(&inputs, &[], &[], &[], &[], &[], 0.0, 0.0, 800.0, false));
-        assert_eq!(bx[1], Box { nid: 1.0, x: 0.0, y: 0.0, w: 800.0, h: 50.0, auto_height: false, first_baseline: None, last_baseline: None, inline_block_baseline: None, natural_h: None, clamped_h: false });
-        assert_eq!(bx[2], Box { nid: 2.0, x: 0.0, y: 50.0, w: 800.0, h: 30.0, auto_height: false, first_baseline: None, last_baseline: None, inline_block_baseline: None, natural_h: None, clamped_h: false });
+        assert_eq!(bx[1], Box { nid: 1.0, x: 0.0, y: 0.0, w: 800.0, h: 50.0, auto_height: false, first_baseline: None, last_baseline: None, inline_block_baseline: None, natural_h: None, clamped_h: false, cb_w: None, used_margins: None });
+        assert_eq!(bx[2], Box { nid: 2.0, x: 0.0, y: 50.0, w: 800.0, h: 30.0, auto_height: false, first_baseline: None, last_baseline: None, inline_block_baseline: None, natural_h: None, clamped_h: false, cb_w: None, used_margins: None });
         assert_eq!(bx[0].h, 80.0); // root auto height = 50 + 30
         assert!(bx[0].auto_height);
     }
@@ -8479,7 +8526,7 @@ mod tests {
         let inputs = vec![blk(0.0, -1), owner, f];
         let bx = boxes(layout_block(&inputs, &[], &[], &[], &[], &[], 0.0, 0.0, 800.0, false));
         assert_eq!(bx[1].h, 120.0); // owner contains the float
-        assert_eq!(bx[2], Box { nid: 2.0, x: 0.0, y: 0.0, w: 80.0, h: 120.0, auto_height: false, first_baseline: None, last_baseline: None, inline_block_baseline: None, natural_h: None, clamped_h: false });
+        assert_eq!(bx[2], Box { nid: 2.0, x: 0.0, y: 0.0, w: 80.0, h: 120.0, auto_height: false, first_baseline: None, last_baseline: None, inline_block_baseline: None, natural_h: None, clamped_h: false, cb_w: None, used_margins: None });
     }
 
     #[test]

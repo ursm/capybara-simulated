@@ -1024,6 +1024,7 @@ fn layout_pass(
             pct_px: [r[119], r[120], r[121], r[122], r[123], r[124]],
             pct_math: std::array::from_fn(|k| crate::layout::math_ref(r[135 + k])),
             edge_frac: [r[106], r[107], r[108], r[109], r[110], r[111], r[112], r[113]],
+            basis_w: f64::NAN,
             edge_px: [r[10], r[11], r[12], r[13], r[14], r[15], r[16], r[17]],
             edge_math: std::array::from_fn(|k| crate::layout::math_ref(r[141 + k])),
             inset_frac: [r[114], r[115], r[116], r[117]],
@@ -1201,8 +1202,10 @@ fn f64_array<'s>(scope: &mut v8::PinScope<'s, '_>, vals: &[f64]) -> v8::Local<'s
     v8::Float64Array::new(scope, buf, 0, vals.len()).expect("a Float64Array over its own backing store")
 }
 
-// __dom.boxOf(nid) -> [x, y, w, h, autoHeight] (document coords, border-box) or undefined when the node
-// has no native box (never laid out this pass / stale nid). The JS geometry getters read this.
+// __dom.boxOf(nid) -> [x, y, w, h, autoHeight, cbW, marginTop, marginRight, marginBottom, marginLeft] (document
+// coords, border-box) or undefined when the node has no native box (never laid out this pass / stale nid). The JS
+// geometry getters read this. `cbW` is the basis the box's percentages resolved against and the margins are the ones
+// its placement USED — each NaN where the pass had none to report (`layout::Box::cb_w` / `used_margins`).
 fn box_of(
     scope: &mut v8::PinScope<'_, '_>,
     args: v8::FunctionCallbackArguments<'_>,
@@ -1216,8 +1219,9 @@ fn box_of(
         Some(b) => b,
         None => return,
     };
-    let arr = v8::Array::new(scope, 5);
-    let vals = [b.x, b.y, b.w, b.h, if b.auto_height { 1.0 } else { 0.0 }];
+    let [mt, mr, mb, ml] = b.used_margins.unwrap_or([f64::NAN; 4]);
+    let vals = [b.x, b.y, b.w, b.h, if b.auto_height { 1.0 } else { 0.0 }, b.cb_w.unwrap_or(f64::NAN), mt, mr, mb, ml];
+    let arr = v8::Array::new(scope, vals.len() as i32);
     for (i, v) in vals.iter().enumerate() {
         let num: v8::Local<v8::Value> = v8::Number::new(scope, *v).into();
         arr.set_index(scope, i as u32, num);

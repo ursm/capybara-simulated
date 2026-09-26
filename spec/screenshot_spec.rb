@@ -156,6 +156,33 @@ RSpec.describe 'save_screenshot' do
     shot(s) {|_img, px, _path| expect(px.call(50, 50)).to eq([0, 0, 255]) }
   end
 
+  # The appendix E phases inside one context (spec/paint_order_spec.rb holds the same shapes against Chrome's
+  # `elementFromPoint`): placement order put the block laid out after a float over it, and a float laid out after
+  # an inline-block over that.
+  it 'paints a float over the blocks around it and under the inline-level content' do
+    s = page_with('<div class="f"></div><div class="b"></div>' \
+                  '<div class="line"><span class="ib"></span></div><div class="f late"></div>',
+                  css: '.f{float:left;width:100px;height:100px;background:rgb(255,0,0)}.b{height:50px;background:rgb(0,0,255)}' \
+                       '.line{clear:both;height:100px}.ib{display:inline-block;width:80px;height:40px;background:rgb(0,200,0)}' \
+                       '.late{margin-top:-100px}')
+    shot(s) do |_img, px, _path|
+      expect(px.call(50, 25)).to eq([255, 0, 0])     # the float, over the block beside it
+      expect(px.call(50, 120)).to eq([0, 200, 0])    # the inline-block, over the float placed after it
+      expect(px.call(90, 120)).to eq([255, 0, 0])    # …and the float past it
+    end
+  end
+
+  # A box's text paints with the box — in its context's inline phase — not over everything: a positioned box
+  # placed over a paragraph hides its words.
+  it 'paints text under a positioned box laid over it' do
+    s = page_with('<p>XXXXXXXX</p><div class="over"></div>',
+                  css: 'p{margin:0;font-size:32px;color:rgb(0,200,0)}' \
+                       '.over{position:absolute;left:0;top:0;width:320px;height:60px;background:rgb(0,0,255)}')
+    shot(s) do |_img, px, _path|
+      expect((0...320).step(2).all? {|x| (0...60).step(2).all? {|y| px.call(x, y) == [0, 0, 255] } }).to be(true)
+    end
+  end
+
   it 'gives each run the advance the flow reserved, so words keep their gaps' do
     # The rasteriser measures a run differently from the flow — for a system font it reports the
     # rounded ink width, where layout sums the face's own `hmtx` advances. Drawing at the
