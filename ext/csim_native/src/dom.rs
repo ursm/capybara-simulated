@@ -907,12 +907,13 @@ fn read_f64_array(val: v8::Local<'_, v8::Value>) -> Vec<f64> {
     bytes.chunks_exact(8).map(|c| f64::from_ne_bytes(c.try_into().unwrap())).collect()
 }
 
-// __dom.layoutPass(inputsFlat, runsFlat, runTexts, rootX, rootY, rootCbW, grids, inlines) -> Float64Array | false.
+// __dom.layoutPass(inputsFlat, runsFlat, runTexts, rootX, rootY, rootCbW, grids, inlines) -> [Float64Array, Float64Array] | false.
 // Decode the flat per-node record buffer (root at record 0), the per-run buffer, the parallel `runTexts` string
 // array (a run's text, else non-string), the grid channel and the inline table, run native layout, and write each
-// node's border-box into its arena slot. Answers the inline boxes' FRAGMENTS as rows of [inline index, status, x,
-// y, w, h] — or false when the subtree uses a feature the native engine doesn't model (Outcome::Unsupported), and
-// the caller then lays it out in JS. One crossing per pass.
+// node's border-box into its arena slot. Answers the inline boxes' FRAGMENTS as rows of [inline index, x, y, w, h],
+// and beside them the boxes of the records that have NO node to write into — an anonymous grid item, table cell or
+// row (nid < 0) — as rows of [record index, x, y, w, h]; or false when the subtree uses a feature the native engine
+// doesn't model (Outcome::Unsupported), and the caller then lays it out in JS. One crossing per pass.
 fn layout_pass(
     scope: &mut v8::PinScope<'_, '_>,
     args: v8::FunctionCallbackArguments<'_>,
@@ -1183,15 +1184,24 @@ fn layout_pass(
         crate::layout::Outcome::LaidOut(boxes, frags) => {
             let cid = realm_id(scope, &args);
             let st = realm(scope, cid);
-            for b in boxes {
-                if let Some(id) = NodeId::from_i64(b.nid as i64) {
-                    if let Some(node) = st.get_mut(id) {
-                        node.layout_box = Some(b);
+            let mut holes: Vec<f64> = Vec::new();
+            for (idx, b) in boxes.into_iter().enumerate() {
+                match NodeId::from_i64(b.nid as i64) {
+                    Some(id) if b.nid >= 0.0 => {
+                        if let Some(node) = st.get_mut(id) {
+                            node.layout_box = Some(b);
+                        }
                     }
+                    _ => holes.extend([idx as f64, b.x, b.y, b.w, b.h]),
                 }
             }
             let flat: Vec<f64> = frags.iter().flatten().copied().collect();
-            rv.set(f64_array(scope, &flat).into());
+            let pair = v8::Array::new(scope, 2);
+            let frag_rows: v8::Local<v8::Value> = f64_array(scope, &flat).into();
+            let hole_rows: v8::Local<v8::Value> = f64_array(scope, &holes).into();
+            pair.set_index(scope, 0, frag_rows);
+            pair.set_index(scope, 1, hole_rows);
+            rv.set(pair.into());
         }
     }
 }
