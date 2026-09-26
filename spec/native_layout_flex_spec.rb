@@ -832,6 +832,12 @@ RSpec.describe 'native layout flex parity', if: ENV.fetch('CSIM_JS_ENGINE', 'v8'
     # …and under a white-space that does not wrap, each such line is ONE unbreakable token, a wide character or a soft
     # hyphen no opportunity: the oracle's pen skipped the container's pin (its items are blocks of their own) and so
     # broke `nowrap` CJK per character — 16 where native and Chrome say 128 / 127.53 (review rv51).
+    # …and such text beside an OUT-OF-FLOW child is content, not a box all out of flow: native's `out_of_flow_only` saw
+    # the one child RECORD, the abspos, and left the item 0 wide where the oracle hands it the share (review rv52).
+    # SHARED: Chrome 38.41, the text as an item.
+    oof = '<div style="display:flex;width:20px"><div id="m" style="display:flex">ab<span style="position:absolute">oof</span>cd</div></div>'
+    expect_parity(oof)
+    expect_shared_gap(laid_out_rect(oof)[2], shared: 20, chrome: 38.41, what: "#{oof}: #m width")
     body = '<div style="display:flex;width:400px"><div id="m" style="display:flex;flex:0 0 min-content;white-space:nowrap">日本語のテキスト</div></div>'
     expect_parity(body)
     expect(laid_out_rect(body)[2]).to be_within(0.5).of(127.53)

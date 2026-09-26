@@ -3829,7 +3829,7 @@ fn measure(
                 let cw = width_in(c, (br0 - bl0).max(0.0));
                 let cm = measure(c, cw, f64::NAN, inputs, runs, run_texts, grids, children, boxes, failed, &mut FloatCtx::new(), 0.0, 0.0);
                 let outer = boxes[c].w + ml + mr;
-                let (y, bl, br) = if outer > br0 - bl0 {
+                let (y, bl, br) = if outer > br0 - bl0 + LINE_FIT_EPS { // (the tolerance `float_fit_y` takes)
                     let yy = float_fit_y(&ctx.items, cy, outer, cl, cr, boxes[c].h);
                     let (l, r) = float_band(&ctx.items, yy, boxes[c].h.max(1.0), cl, cr);
                     (yy, l, r)
@@ -4324,9 +4324,12 @@ fn resolve_flexible_lengths(bases: &[f64], inner: &[f64], grow: &[f64], shrink: 
 
 // Whether a box's content is ALL out of flow — an element with children, every one absolutely positioned,
 // and no text (the oracle's `outOfFlowOnly`): its zero content width is real, not a measurement that failed.
+// (…a FLEX container's bare text included, which rides its record as runs rather than as a child record: an
+// `ab<abs>cd` flex item came out 0 wide, its one child record out of flow, where the oracle — whose child list
+// holds the text — hands it the equal share.)
 fn out_of_flow_only(i: usize, inputs: &[Cell<Input>], children: &[Vec<usize>]) -> bool {
     let n = inputs[i].get();
-    if n.display == DISPLAY_TEXT_BLOCK || children[i].is_empty() {
+    if n.display == DISPLAY_TEXT_BLOCK || n.run_count > 0 || children[i].is_empty() {
         return false;
     }
     children[i].iter().all(|&c| { let k = inputs[c].get(); k.out_of_flow != 0 && !k.is_anonymous() })
