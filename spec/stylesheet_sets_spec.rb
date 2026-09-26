@@ -104,6 +104,29 @@ RSpec.describe 'stylesheet sets + data: CSS' do
     expect(got).to eq(['rgb(0, 0, 255)', 'rgb(0, 0, 0)', 'rgb(0, 0, 255)'])
   end
 
+  # A `<style>` whose `type` is neither empty nor `text/css` holds no sheet (HTML "update a style block"), and a `type`
+  # change runs that again — in a shadow tree too. The cascade never asked, so `type="text/plain"` applied its rules from
+  # the start. Chrome: `["rgb(0, 0, 0)","rgb(0, 128, 0)","rgb(0, 0, 0)","rgb(0, 128, 0)","rgb(0, 0, 0)","rgb(0, 0, 255)"]`;
+  # Firefox drops the rules on the switch as well (screenshot).
+  it 'applies a style element only while its type is CSS' do
+    s = session_for('<style type="text/plain">#a { color: rgb(0, 128, 0) }</style><style id=s>#b { color: rgb(0, 128, 0) }</style>')
+    got = s.evaluate_script(<<~JS)
+      (() => {
+        const c = (el) => getComputedStyle(el).color, st = document.getElementById('s'), b = document.getElementById('b');
+        const out = [c(document.getElementById('a')), c(b)];
+        st.setAttribute('type', 'text/plain'); out.push(c(b));
+        st.setAttribute('type', 'TEXT/CSS'); out.push(c(b));
+        const r = document.createElement('div'); document.body.appendChild(r);
+        const root = r.attachShadow({mode: 'open'});
+        root.innerHTML = '<style type="text/plain">p { color: rgb(0, 0, 255) }</style><p>t</p>';
+        const p = root.querySelector('p'); out.push(c(p));
+        root.querySelector('style').removeAttribute('type'); out.push(c(p));
+        return out;
+      })()
+    JS
+    expect(got).to eq(['rgb(0, 0, 0)', 'rgb(0, 128, 0)', 'rgb(0, 0, 0)', 'rgb(0, 128, 0)', 'rgb(0, 0, 0)', 'rgb(0, 0, 255)'])
+  end
+
   it 'loads percent-encoded data:text/css into the cascade' do
     s = session_for('<link rel=stylesheet href="data:text/css,%23a{display:none}">')
     expect(display(s, 'a')).to eq('none')
