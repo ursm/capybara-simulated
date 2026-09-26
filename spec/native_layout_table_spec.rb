@@ -1011,7 +1011,6 @@ RSpec.describe 'native layout table parity', if: ENV.fetch('CSIM_JS_ENGINE', 'v8
   end
 
   it('matches an inline-table as an atomic inline') { expect_parity('<div style="width:300px">x <span style="display:inline-table"><span style="display:table-row"><span style="display:table-cell">a</span></span></span> y</div>') }
-  it('declines an empty row group (the oracle boxes it below the grid)') { a_bails_b_native('<table style="border-spacing:4px"><tbody></tbody><tbody><tr><td style="width:40px;height:20px">a</td></tr></tbody></table>') }
   # …and an ANONYMOUS CELL is laid out now, which it was not until 2026-09-22. §17.2.1 wraps a table's stray
   # non-cell content in one, `anonTableCell` builds it, and it is no part of the DOM — so it has no `_nid`, and
   # the record stream had nothing to put in a record's node slot. It gets the sentinel an anonymous ROW and an
@@ -1614,6 +1613,24 @@ RSpec.describe 'native layout table parity', if: ENV.fetch('CSIM_JS_ENGINE', 'v8
       # …a `<br>` is an element and so an item: the row is not empty.
       expect_declines('<div style="width:400px"><div style="display:table-row"><br></div></div>', 'flex-container-unsupported')
     end
+  end
+
+  # An EMPTY row group (a `<tbody>` with no rows — Discourse's topic list) is laid out natively where the oracle boxes it:
+  # zero height at the grid's bottom edge, its trailing spacing included, the rows' width — the table's content box
+  # where there is no column. It declined until 2026-09-26 (`table-group-empty`). SHARED: Chrome keeps it in DOCUMENT
+  # order (y 0 before a populated `<tbody>`, where both engines say 28) and shares an imposed height out to it too.
+  it 'lays an empty row group out natively' do
+    [
+      '<table style="width:300px"><thead><tr><th>Topic</th><th>Replies</th></tr></thead><tbody id="m"></tbody></table>',
+      '<table style="width:300px"><tbody id="m"></tbody></table>',
+      '<table style="width:300px;height:100px"><thead><tr><th>T</th></tr></thead><tbody id="m">  </tbody><tfoot><tr><td>f</td></tr></tfoot></table>',
+      '<table style="width:300px;border-collapse:collapse"><caption>cap</caption><tbody id="m"></tbody><tbody><tr><td style="border:3px solid">a</td></tr></tbody></table>',
+      '<div style="display:table;width:200px"><div id="m" style="display:table-row-group"></div><div style="display:table-row"><div style="display:table-cell">x</div></div></div>'
+    ].each {|body| expect_parity(body) }
+    expect(laid_out_rect('<table style="width:300px"><tbody id="m"></tbody></table>')).to eq([0, 0, 300, 0])
+    ordered = '<table style="width:300px;border-spacing:4px"><tbody id="m"></tbody><tbody><tr><td>a</td></tr></tbody></table>'
+    expect_parity(ordered)
+    expect_shared_gap(laid_out_rect(ordered)[1], shared: 28, chrome: 0, what: "#{ordered}: #m y")
   end
 
   # …and every OTHER table part with no table to lay it out — a cell, a row group, a caption — which the oracle

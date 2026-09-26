@@ -6105,7 +6105,9 @@ fn measure_table(
         accy += row_h[ri] + sy;
     }
     let (row_x, row_w) = match c_count {
-        0 => (content_left, 0.0),
+        // (…with NO column the row spans the table's content box, as the oracle's `rowW` falls back to
+        // `content.width`: an empty `<tbody>` alone in a table is that wide in both.)
+        0 => (content_left, cells_w),
         _ => (col_x[0], col_x[c_count - 1] + col_w[c_count - 1] - col_x[0]),
     };
 
@@ -6165,13 +6167,19 @@ fn measure_table(
                 last = ri;
             }
         }
+        boxes[ch].nid = inputs[ch].get().nid;
+        boxes[ch].x = row_x;
+        boxes[ch].w = row_w;
+        boxes[ch].auto_height = false;
         if let Some(f) = first {
-            boxes[ch].nid = inputs[ch].get().nid;
-            boxes[ch].x = row_x;
             boxes[ch].y = row_top[f];
-            boxes[ch].w = row_w;
             boxes[ch].h = row_top[last] + row_h[last] - row_top[f];
-            boxes[ch].auto_height = false;
+        } else {
+            // An EMPTY group (a `<tbody>` with no rows — Discourse's topic list) is a zero-height box at the grid's
+            // bottom edge, its trailing spacing included, as the oracle's `layoutTable` settles one: where its `y`
+            // stands once the rows are placed, before an imposed height floors the grid.
+            boxes[ch].y = content_top + sum_row + table_gaps(r_count, sy);
+            boxes[ch].h = 0.0;
         }
     }
 
