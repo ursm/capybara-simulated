@@ -929,6 +929,9 @@ module Capybara
         # the arena itself (no dependency on the SHADOW find-path machinery). CSIM_NO_NATIVE_CASCADE is the
         # rollback kill switch (revert to css matching everywhere without a recompile).
         c.eval_void('globalThis.__csimNativeCascadeAuthoritative = true;') unless ENV['CSIM_NO_NATIVE_CASCADE']
+        # Native LAYOUT (the flip): the walk and the native pass lay the page out, and the JS layout runs only where
+        # they decline (layout.js `nativeLayoutPass`). Off unless asked for, until it passes the gates. Main realm only.
+        c.eval_void('globalThis.__csimNativeLayout = true;') if ENV['CSIM_NATIVE_LAYOUT'] == '1'
       end
 
       # The bridge calls `__csim_createFrameRealm(url, body, contentType, parentId)`
