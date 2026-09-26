@@ -888,6 +888,42 @@ RSpec.describe 'layout reuse across dynamic style state' do
       end
     end
 
+    # …and a slot's own children are its FALLBACK, rendered only while nothing is assigned to it. Chrome: the fallback of
+    # the slot the span is in is not visible, the other slot's is — and they trade places when the span moves.
+    it 'renders a slot fallback only while nothing is assigned to the slot' do
+      s = slotted_session(
+        '<div id="h"><span id="sa" slot="a">x</span></div>',
+        "document.getElementById('h').attachShadow({mode: 'open'}).innerHTML = " \
+          "'<slot name=\"a\"><span id=\"fb\">fallback</span></slot><slot name=\"b\"><span id=\"fb2\">fallback2</span></slot>'"
+      )
+      read = <<~JS
+        ['fb', 'fb2'].map((id) => {
+          const e = document.getElementById('h').shadowRoot.getElementById(id);
+          return [e.checkVisibility(), e.getBoundingClientRect().height, e.offsetHeight, e.getClientRects().length];
+        })
+      JS
+      expect(s.evaluate_script(read)).to eq([[false, 0, 0, 0], [true, 17, 17, 1]])
+      s.execute_script("document.getElementById('sa').slot = 'b'")
+      expect(s.evaluate_script(read)).to eq([[true, 17, 17, 1], [false, 0, 0, 0]])
+    end
+
+    # `visibility` inherits through the FLAT tree, like every inherited property: a slotted span under a `visibility:
+    # hidden` shadow box is hidden (Chrome) — though a bare `checkVisibility()`, which does not ask about `visibility`,
+    # still says true.
+    it 'inherits visibility into slotted content' do
+      s = slotted_session(
+        '<div id="h"><span id="sa">x</span></div>',
+        "document.getElementById('h').attachShadow({mode: 'open'}).innerHTML = '<div style=\"visibility:hidden\"><slot></slot></div>'"
+      )
+      got = s.evaluate_script(<<~JS)
+        (() => {
+          const e = document.getElementById('sa');
+          return [e.checkVisibility({visibilityProperty: true}), getComputedStyle(e).visibility, e.checkVisibility()];
+        })()
+      JS
+      expect(got).to eq([false, 'hidden', true])
+    end
+
     # Attaching a shadow root takes every light child out of the flat tree, with no DOM mutation to say so (Chrome: the
     # element after a 50px child moves up to 0 at once, and back down once a slot takes it).
     it 'relays out a host when a shadow root is attached to it' do
@@ -916,6 +952,19 @@ RSpec.describe 'layout reuse across dynamic style state' do
     expect(s.evaluate_script('r')).to eq([0, 68, 68, 86, 18])
   end
 
+  # …and a `dir=auto` scope the parse writes strong text into is tested where the direction is next READ — layout or
+  # getComputedStyle — against the direction the cascade last laid it out with. A `:dir()` read in between resolved it
+  # too, and when that refreshed the baseline the flip was never seen (a native pass replayed the stale box). Chrome:
+  # `[0, true, 200]`, and getComputedStyle `ltr` then `rtl` with no layout read at all.
+  it 'turns a dir=auto scope around when the parse writes strong text into it' do
+    body = ->(read) { %(<div id="d" dir="auto" style="width:300px"><p id="b" style="width:100px;margin:0">123</p><script>window.r = [#{read}]</script>&#x5e9;&#x5dc;&#x5d5;&#x5dd;</div>) }
+    s = session_for('body { margin: 0 }', body.call("document.getElementById('b').getBoundingClientRect().x"))
+    got = s.evaluate_script("[r[0], document.getElementById('d').matches(':dir(rtl)'), document.getElementById('b').getBoundingClientRect().x]")
+    expect(got).to eq([0, true, 200])
+    s = session_for('body { margin: 0 }', body.call("getComputedStyle(document.getElementById('b')).direction"))
+    expect(s.evaluate_script("[r[0], getComputedStyle(document.getElementById('b')).direction]")).to eq(%w[ltr rtl])
+  end
+
   # `dir="auto"` takes its direction from the first strong character of its text, and every box under it inherits that.
   # `markDirAutoScopes` marks the auto element's subtree when its resolved direction FLIPS — without it the sibling kept
   # its left-to-right box in both layouts.
@@ -939,6 +988,19 @@ RSpec.describe 'layout reuse across dynamic style state' do
       body = '<div id="h"><span id="a">hello</span><p id="b" style="width:100px;margin:0">x</p></div>'
       shadow = '<div style="width:300px"><slot dir="auto" style="display:block"></slot></div>'
       expect(x_after(body, "document.getElementById('a').firstChild.data = 'שלום'", shadow: shadow)).to eq([0, 200])
+    end
+
+    # A `dir=auto` INSIDE the scope resolves through its host (its slotted text) — which must not count as the host's
+    # own resolution, or the host's flip is seen as no flip. Chrome: 0 -> 200 (a native pass replayed the stale box).
+    it 'flips a dir=auto host whose shadow tree holds another dir=auto' do
+      body = '<div id="h" dir="auto" style="width:300px"><span id="a">hello</span></div>'
+      s = session_for('body { margin: 0 }', body)
+      s.execute_script("document.getElementById('h').attachShadow({mode: 'open'}).innerHTML = " \
+                       "'<div dir=\"auto\"><slot></slot></div><p id=\"b\" style=\"width:100px;margin:0\">x</p>'")
+      x = "document.getElementById('h').shadowRoot.getElementById('b').getBoundingClientRect().x"
+      expect(s.evaluate_script(x)).to eq(0)
+      s.execute_script("document.getElementById('a').firstChild.data = '\\u05e9\\u05dc\\u05d5\\u05dd'")
+      expect(s.evaluate_script(x)).to eq(200)
     end
 
     # A descendant's own `dir` takes its text out of the scan (and removing it puts the text back). (The Hebrew is written
