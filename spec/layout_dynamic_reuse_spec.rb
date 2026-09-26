@@ -1025,6 +1025,24 @@ RSpec.describe 'layout reuse across dynamic style state' do
     expect(s.find('#vh', visible: :all).text).to eq('b')
   end
 
+  # …and `visibility` comes through the FLAT tree (a slotted span inherits its slot's, not its host's); a hidden cell
+  # or row adds no separator of its own (§2 comes before the tab and the row break); and `revert` lands on
+  # inheritance, the UA origin declaring nothing for `visibility`. Chrome: `["", "S2", "b\ne\tf", "v"]`.
+  it 'takes visibility in the text walk from the flat tree, cells and revert included' do
+    s = session_for(
+      '',
+      '<div id="h1"><span>S1</span></div><div id="h2" style="visibility:hidden"><span>S2</span></div>' \
+        '<table id="t"><tr><td style="visibility:hidden">a</td><td>b</td></tr><tr style="visibility:collapse"><td>c</td><td>d</td></tr>' \
+        '<tr><td>e</td><td>f</td></tr></table>' \
+        '<div id="r" style="visibility:hidden">x<span style="visibility:revert">r</span><span style="visibility:visible">v</span></div>'
+    )
+    s.execute_script(
+      "document.getElementById('h1').attachShadow({mode: 'open'}).innerHTML = '<div style=\"visibility:hidden\"><slot></slot></div>'; " \
+        "document.getElementById('h2').attachShadow({mode: 'open'}).innerHTML = '<div style=\"visibility:visible\"><slot></slot></div>'"
+    )
+    expect(s.evaluate_script("['h1', 'h2', 't', 'r'].map((id) => document.getElementById(id).innerText)")).to eq(['', 'S2', "b\ne\tf", 'v'])
+  end
+
   # `offsetParent` is null only for an element with no layout BOX (CSSOM View). Skipped content and `visibility:
   # hidden` content both have one (Chrome and Firefox: BODY for either).
   it 'gives skipped and visibility:hidden content an offsetParent' do

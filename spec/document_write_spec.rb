@@ -27,8 +27,33 @@ RSpec.describe 'document.write during parsing' do
     expect(s.evaluate_script("[window.sync, [...document.getElementById('a').childNodes].map((n) => n.nodeName)]")).to eq(['2', %w[#text SCRIPT B #text]])
   end
 
-  # …and a script in the written markup runs after the one that wrote it, writing at ITS own insertion point.
-  it 'runs a written script after the writer, at its own insertion point' do
+  # An INLINE script in the written markup runs right there, inside `write` (the "text" insertion mode prepares and
+  # runs it at once, nesting level or not): it sees nothing the writer writes after, and its own write lands first.
+  # Chrome and Firefox: `A:false:null`, `after1:false`, `after2:true`, and "aYXc".
+  it 'runs an inline written script inside write, before the writer goes on' do
+    s = session_for('<div id="w">a<script>window.L = []; document.write("<script>L.push(\'A:\' + !!document.getElementById(\'x\') + \':\' + ' \
+                    '(document.currentScript.nextSibling && document.currentScript.nextSibling.nodeName)); document.write(\'Y\')<\\/script>"); ' \
+                    'L.push("after1:" + !!document.getElementById("x")); document.write("<i id=x>X</i>"); ' \
+                    'L.push("after2:" + !!document.getElementById("x"));</script>c</div>')
+    expect(s.evaluate_script("[L, document.getElementById('w').innerText]")).to eq([%w[A:false:null after1:false after2:true], 'aYXc'])
+  end
+
+  # A constructor the parser runs holds the throw-on-dynamic-markup-insertion counter; a template's script is inert and
+  # never runs; `document.open()` from a parser-run script does nothing; and the deferred scripts run once the document
+  # is 'interactive'. Chrome: all four.
+  it 'keeps the other parser contracts around scripts' do
+    s = session_for('<script>window.L = []; customElements.define("x-e", class extends HTMLElement { constructor() { super(); ' \
+                    'try { document.write("<b>ce</b>"); L.push("ce:wrote"); } catch (e) { L.push("ce:" + e.name); } } });</script>' \
+                    '<x-e></x-e><template><script>L.push("RAN")</script>in-tpl</template>' \
+                    '<div id="o">1<script>document.open(); document.write("w");</script>2</div>' \
+                    '<script type="module">L.push("module:" + document.readyState)</script>')
+    expect(s.evaluate_script("[L, document.getElementById('o').innerText, !!document.querySelector('b')]")).to eq(
+      [%w[ce:InvalidStateError module:interactive], '1w2', false]
+    )
+  end
+
+  # …and an inline script in the written markup runs inside the write, writing at ITS own insertion point.
+  it 'runs a written script at its own insertion point' do
     s = session_for(%(<div id="n">a<script>document.write("<script>document.write('[inner]')<\\/script>b")</script>c</div>))
     expect(s.evaluate_script("document.getElementById('n').innerText")).to eq('a[inner]bc')
   end
