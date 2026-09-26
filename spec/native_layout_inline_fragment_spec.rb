@@ -260,6 +260,21 @@ RSpec.describe 'native layout inline box fragments', if: ENV.fetch('CSIM_JS_ENGI
     end
   end
 
+  # …and the INTRINSIC width asks the same question: a block-level `<br>` is a box measured like any other, its
+  # declared width and padding (520, as Firefox measures it), where the JS layout's max-content walk took every `<br>`
+  # for a break and measured 21.3 while native said 520 — two engines, two answers.
+  it 'measures a block-level <br> into an intrinsic width' do
+    body = '<div id="p" style="display:inline-block">aaa<br id="m" style="display:block;width:500px;padding:10px">b</div>'
+    r, = fragments(body)
+    expect(r).to include('ok' => true, 'mismatches' => 0)
+    expect_no_dropped_records(r, body)
+    width = with_simulated_session(page(body)) do |session|
+      session.visit '/'
+      session.evaluate_script("document.getElementById('p').getBoundingClientRect().width")
+    end
+    expect(width).to eq(520)
+  end
+
   # …and the box it lays out is what the CSSOM reads, as for any element (Firefox): `offset*` measure it, a block-level
   # one's used width is its box's, and a `display: contents` one — which behaves as `none` on a `<br>` (css-display) —
   # breaks nothing, in `innerText` as on the line.
