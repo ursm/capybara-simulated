@@ -977,6 +977,22 @@ RSpec.describe 'layout reuse across dynamic style state' do
     expect(s.evaluate_script('r')).to eq([0, 68, 68, 86, 18])
   end
 
+  # …and innerText (and Capybara's text) key on the parser's generation too: a second parse-time read gave `"one"`
+  # again after the parse had added `two` and `three` (Chrome: `"one\n\ntwo\n\nthree"`).
+  it 'reads the text the parser added since the last read' do
+    s = session_for('', '<div id="w"><p>one</p><script>window.r = [document.getElementById("w").innerText]</script>' \
+                        '<p>two</p>three</div><script>r.push(document.getElementById("w").innerText)</script>')
+    expect(s.evaluate_script('r')).to eq(['one', "one\n\ntwo\n\nthree"])
+  end
+
+  # `offsetParent` is null only for an element with no layout BOX (CSSOM View). Skipped content and `visibility:
+  # hidden` content both have one (Chrome and Firefox: BODY for either).
+  it 'gives skipped and visibility:hidden content an offsetParent' do
+    s = session_for('body { margin: 0 }', '<details><summary>sum</summary><p id="p" style="margin:0">content</p></details>' \
+                                          '<div style="visibility:hidden"><span id="v">v</span></div>')
+    expect(s.evaluate_script("['p', 'v'].map((id) => document.getElementById(id).offsetParent.tagName)")).to eq(%w[BODY BODY])
+  end
+
   # …and a `dir=auto` scope the parse writes strong text into is tested where the direction is next READ — layout or
   # getComputedStyle — against the direction the cascade last laid it out with. A `:dir()` read in between resolved it
   # too, and when that refreshed the baseline the flip was never seen (a native pass replayed the stale box). Chrome:
