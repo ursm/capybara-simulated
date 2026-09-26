@@ -34,11 +34,39 @@ RSpec.describe 'scripts the parser runs' do
     expect(s.evaluate_script('L')).to eq(['end'])
   end
 
+  # A script a parser-run script INSERTS is not the parser's: it runs once, on insertion (or on its own task, if
+  # external) — never again in "the end", which is for the parser's own scripts. A loader snippet's injected script
+  # ran twice, and its `load` fired twice. Chrome: each once.
+  it 'runs a script inserted during the parse once' do
+    app = lambda do |env|
+      if env['PATH_INFO'] == '/blk.js'
+        [200, {'content-type' => 'text/javascript'}, ["L.push('blk')"]]
+      else
+        [200, {'content-type' => 'text/html'}, [<<~HTML]]
+          <!DOCTYPE html><head><script>window.L = []; (function () {
+            var s = document.createElement('script'); s.src = 'blk.js'; s.onload = function () { L.push('blk-load') }; document.head.appendChild(s);
+            var t = document.createElement('script'); t.text = "L.push('inline-dyn')"; document.head.appendChild(t);
+          })();</script></head><body><p>x</p></body>
+        HTML
+      end
+    end
+    s = simulated_session(app).tap {|session| session.visit '/' }
+    expect(s.evaluate_script('L')).to eq(%w[inline-dyn blk blk-load])
+  end
+
   # An exception a parser-run script throws is REPORTED — `window.onerror` and the window's `error` event — as any
   # other script's is; the parse goes on.
   it 'reports an exception a parser-run script throws' do
     s = session_for('<!DOCTYPE html><head><script>window.L = []; window.onerror = (m, src, l, c, e) => { L.push("onerror:" + e.message) };' \
                     '</script></head><body><script>throw new Error("top")</script><p id="p">after</p></body>')
     expect(s.evaluate_script("[L, !!document.getElementById('p')]")).to eq([['onerror:top'], true])
+  end
+
+  # …a COMPILE error as the SyntaxError it is (the engine hands back a plain Error whose message carries its own
+  # location), and the event's message as "Name: message" — what Chrome ("Uncaught SyntaxError: …") and Firefox share.
+  it 'reports a compile error as a SyntaxError' do
+    s = session_for('<!DOCTYPE html><head><script>window.L = []; window.onerror = (m, src, l, c, e) => { ' \
+                    'L.push([m, e instanceof SyntaxError, e.message]) };</script></head><body><script>let = = 1;</script></body>')
+    expect(s.evaluate_script('L')).to eq([["SyntaxError: Unexpected token '='", true, "Unexpected token '='"]])
   end
 end
