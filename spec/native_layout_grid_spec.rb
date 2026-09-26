@@ -1034,4 +1034,12 @@ RSpec.describe 'native layout grid parity', if: ENV.fetch('CSIM_JS_ENGINE', 'v8'
       expect_parity(%(<div style="display:flex;align-items:flex-start;width:300px"><div style="display:grid;row-gap:10%;width:100px">#{rows}</div><div style="width:50px;height:200px"></div></div>))
     end
   end
+
+  # An `auto-fill` repeat that fits EXACTLY — `20%` five times in 1008px, 4.999… copies in floating point — makes the
+  # copy Chrome's fixed point makes, in both engines (review rv56: 4 tracks, the fifth item on a second row).
+  it 'counts an auto-fill repeat that fits exactly' do
+    body = '<div style="display:grid;width:1008px;grid-template-columns:repeat(auto-fill, 20%)">' + ('<div>a</div>' * 4) + '<div id="m">e</div></div>'
+    expect_parity(body)
+    expect(laid_out_rect(body).first(2)).to match([be_within(0.05).of(806.4), eq(0)])
+  end
 end

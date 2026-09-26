@@ -4463,7 +4463,7 @@ fn flex_row_sizes(
             taken += Input::m(k.ml) + Input::m(k.mr);
         }
         let avail = (content_w - taken).max(0.0);
-        let share = if n > 0 { (avail / n as f64).floor() } else { avail };
+        let share = if n > 0 { (avail / n as f64 + LINE_FIT_EPS).floor() } else { avail }; // (the oracle's, to a line's tolerance)
         let bases: Vec<f64> = line.iter().map(|&p| base[p]).collect();
         // A line that SHRINKS (its hypothetical sizes exceed the room) may take a content-based item below its
         // base, where its floor binds — measure those floors now, before the resolution asks for them.
@@ -4852,7 +4852,7 @@ fn measure_flex(
         let taken: f64 = gap * flow.len().saturating_sub(1) as f64
             + flow.iter().map(|&p| { let k = inputs[kids[p]].get(); Input::m(k.ml) + Input::m(k.mr) }).sum::<f64>();
         let avail = (content_w - taken).max(0.0);
-        let share = if flow.is_empty() { avail } else { (avail / flow.len() as f64).floor() };
+        let share = if flow.is_empty() { avail } else { (avail / flow.len() as f64 + LINE_FIT_EPS).floor() };
         for &p in &flow {
             let k = inputs[kids[p]].get();
             let reads = INDEF_PCT_H_READS.with(|n| n.get());
@@ -6545,7 +6545,7 @@ fn grid_repeat_count(grids: &[f64], gs: usize, tmpl_base: usize, content_w: f64,
     if per <= 0.0 {
         return 1;
     }
-    let fits = (((content_w + gap) / per).floor() as usize).max(1);
+    let fits = (((content_w + gap + LINE_FIT_EPS) / per).floor() as usize).max(1); // (the oracle's `autoRepeatCount`)
     if repeat_kind == 2 {
         let spanned: usize = (0..n_items)
             .map(|k| grid_item_columns(grids, place_base, k, fits * repeat_len).1)
