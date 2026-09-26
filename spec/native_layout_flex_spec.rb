@@ -803,6 +803,33 @@ RSpec.describe 'native layout flex parity', if: ENV.fetch('CSIM_JS_ENGINE', 'v8'
   it 'matches bare text with a BASELINE-aligned short item' do
     expect_parity('<div style="display:flex;align-items:baseline;width:400px">text<div style="width:80px;height:10px"></div></div>')
   end
+  # …and a flex ITEM that is such a container is floored where the oracle floors it, at the LINES of its bare text as
+  # much as at its items: the oracle's automatic minimum walks it with the pen (`contentIntrinsicWidths`), each run of
+  # text a line between the children it blockifies, and native's walk of the children had no text to see. Avo's
+  # sortable table header (a `flex: 1 1 0%` link holding a label and a sort icon, in a nowrap cell) was floored at the
+  # icon (20) natively and the label (42) by the oracle — 46 of 456 Avo page states. The text travels as a run stream
+  # for the measure alone. SHARED with the icon: Chrome makes the text an item too and sums the two, 62.
+  it 'floors a flex item holding bare text at its text, as the oracle measures it' do
+    header = '<table style="border-spacing:0"><tr><th style="padding:0 12px;white-space:nowrap;font:16px sans-serif">' \
+             '<div style="display:flex;width:100%%"><a id="m" style="flex:1 1 0%%;display:flex;font-size:12px">Is writer%s</a></div></th></tr></table>'
+    icon = '<span style="margin-left:4px;width:16px;height:16px;display:inline-block"></span>'
+    with_icon = format(header, icon)
+    expect_parity(with_icon)
+    expect_shared_gap(laid_out_rect(with_icon)[2], shared: 42, chrome: 62, what: "#{with_icon}: #m width")
+    text_only = format(header, '')
+    expect_parity(text_only)
+    expect(laid_out_rect(text_only)[2]).to be_within(0.05).of(42)
+    # …each run of text between two children a line of its own, the indent on the first (and after a child only
+    # under `hanging`, an unforced line end), a `<br>` a forced one; a `<wbr>` — an opportunity no run carries
+    # without its element, an item here — declines.
+    ['aa bb<div style="width:30px;height:5px"></div>cc dd ee', 'aa<br>bbbbbb cc', '<span style="width:16px;height:5px;display:inline-block"></span>lead text'].each do |kids|
+      ['', 'text-indent:10px;', 'text-indent:10px each-line;', 'text-indent:-5px hanging;', 'white-space:pre;'].each do |style|
+        expect_parity(%(<div style="display:flex;width:40px;font:14px monospace"><div style="flex:1 1 0%;display:flex;#{style}">#{kids}</div><div style="width:10px;height:5px"></div></div>))
+      end
+    end
+    r = run_shadow('<div style="display:flex;width:40px"><div style="flex:1 1 0%;display:flex">aaa<wbr>bbbbbb</div></div>')
+    expect(r).to include('ok' => false, 'reason' => 'flex-text-wbr')
+  end
   it 'matches a WRAPPING row where the line-height floor exceeds the stacked line (align-content shares the surplus)' do
     expect_parity('<div style="display:flex;flex-wrap:wrap;align-content:center;width:400px">text<div style="width:60px;height:8px"></div></div>')
   end

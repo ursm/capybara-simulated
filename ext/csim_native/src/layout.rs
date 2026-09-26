@@ -6723,22 +6723,7 @@ fn intrinsic_widths_of(i: usize, inputs: &[Cell<Input>], runs: &[Run], run_texts
 fn content_intrinsic(i: usize, inputs: &[Cell<Input>], runs: &[Run], run_texts: &[Option<Vec<u16>>], grids: &[f64], children: &[Vec<usize>]) -> Option<(f64, f64)> {
     let n = inputs[i].get();
     match n.display {
-        // (…and a FLEX record whose run stream is its content for this measure alone — an orphan table row of bare
-        // text, which the oracle lays out with none of it and measures as the block of it it would be.)
-        d if d == DISPLAY_TEXT_BLOCK || (d == DISPLAY_FLEX && n.measured_as_block && n.run_count > 0) => {
-            let (rs, re) = (n.run_start.max(0) as usize, (n.run_start + n.run_count).max(0) as usize);
-            if re > runs.len() || rs > re {
-                return None;
-            }
-            text_intrinsic(&runs[rs..re], &run_texts[rs..re], n.ws_mode,
-                           // …CLAMPED at a basis of ZERO, which is what an intrinsic measure has: a
-                           // `clamp(5px, 50%, 30px)` indent contributes its LOWER bound there, not its
-                           // constant term. Without the clamp here the measure took 0 where the oracle takes
-                           // 5, and the 39 mismatches that found it were the first cases any sweep had of an
-                           // indent inside a comparison function.
-                           (bounded(n.indent_px, n.indent_math, 0.0), n.indent_hanging, n.indent_each_line, n.indent_spent),
-                           inputs, runs, run_texts, grids, children)
-        }
+        DISPLAY_TEXT_BLOCK => runs_intrinsic(&n, inputs, runs, run_texts, grids, children),
         // …a LIST BOX excepted: its rows ARE CSS content, and the oracle's `minContentWidth` reads them (it asks
         // `contentIntrinsicWidths` for one rather than the control's own width).
         _ if n.replaced && !n.lays_out_children => Some((0.0, 0.0)), // a replaced box holds no CSS content
@@ -6824,6 +6809,16 @@ fn content_intrinsic(i: usize, inputs: &[Cell<Input>], runs: &[Run], run_texts: 
                 max = max.max(cmax + m);
             }
             let max = max.max(line);
+            // …and a FLEX container's bare text, which the oracle's pen measures as LINES between the children it
+            // blockifies and the layout drops: its run stream is for this measure alone, a BR between two lines (the
+            // walk's segments), and the widest line stands beside the widest child. (An orphan table row of bare
+            // text is nothing BUT such lines.)
+            let (min, max) = if n.display == DISPLAY_FLEX && n.run_count > 0 {
+                let (tmin, tmax) = runs_intrinsic(&n, inputs, runs, run_texts, grids, children)?;
+                (min.max(tmin), max.max(tmax))
+            } else {
+                (min, max)
+            };
             // …and a NON-WRAPPING block container is ONE unbreakable token whatever it holds, its block children
             // and its floats' line included: the oracle ends `contentIntrinsicWidths` with `min = max` for a
             // `nowrap` / `pre` box that does not blockify (a flex container's items are blocks of their own, so it
@@ -6838,6 +6833,38 @@ fn content_intrinsic(i: usize, inputs: &[Cell<Input>], runs: &[Run], run_texts: 
         }
         _ => None,
     }
+}
+
+// A record's own run stream measured as INLINE content (`text_intrinsic`): a text block's lines, and a flex
+// container's bare text (`content_intrinsic`) — whose SEGMENTS, split at a BR run marked -1 (the walk's
+// `NL_BR_SEGMENT`, an unforced line end at a blockified child), are measured apart, the indent spent on every one
+// but the first, as a mixed block's anonymous groups are; the widest of each figure wins.
+fn runs_intrinsic(n: &Input, inputs: &[Cell<Input>], runs: &[Run], run_texts: &[Option<Vec<u16>>], grids: &[f64], children: &[Vec<usize>]) -> Option<(f64, f64)> {
+    let (rs, re) = (n.run_start.max(0) as usize, (n.run_start + n.run_count).max(0) as usize);
+    if re > runs.len() || rs > re {
+        return None;
+    }
+    // …the indent CLAMPED at a basis of ZERO, which is what an intrinsic measure has: a `clamp(5px, 50%, 30px)`
+    // indent contributes its LOWER bound there, not its constant term. Without the clamp here the measure took 0
+    // where the oracle takes 5, and the 39 mismatches that found it were the first cases any sweep had of an indent
+    // inside a comparison function.
+    let indent_px = bounded(n.indent_px, n.indent_math, 0.0);
+    let (mut min, mut max) = (0.0f64, 0.0f64);
+    let mut start = rs;
+    let mut spent = n.indent_spent;
+    for at in rs..=re {
+        if at < re && !(runs[at].kind == RUN_BR && runs[at].metric < 0.0) {
+            continue;
+        }
+        let (smin, smax) = text_intrinsic(&runs[start..at], &run_texts[start..at], n.ws_mode,
+                                          (indent_px, n.indent_hanging, n.indent_each_line, spent),
+                                          inputs, runs, run_texts, grids, children)?;
+        min = min.max(smin);
+        max = max.max(smax);
+        start = at + 1;
+        spent = true;
+    }
+    Some((min, max))
 }
 
 // A box's min-content WIDTH as a flex item's automatic minimum (§4.5) — the oracle's `minContentWidth`: the
