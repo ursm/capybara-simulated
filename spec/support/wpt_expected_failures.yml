@@ -8247,8 +8247,6 @@ dom/nodes/moveBefore/hover-style-update.html:
 - Hover works immediately after moved
 dom/nodes/moveBefore/iframe-document-preserve.window.js:
 - window.frames ordering does not change due to moveBefore()
-dom/nodes/moveBefore/moveBefore-from-light-to-shadow.html:
-- moveBefore-from-light-to-shadow
 dom/nodes/moveBefore/moveBefore-size-query.html:
 - moveBefore() between different size containers invalidates target
 dom/nodes/moveBefore/pointer-events.html:
@@ -11552,14 +11550,6 @@ shadow-dom/offsetParent-across-shadow-boundaries.html:
 - offsetParent must find the first offset parent which is a shadow-including ancestor
   of the context object even some shadow tree of open mode did not have any offset
   parent
-- offsetParent must return null on a child element of a shadow host for the shadow
-  tree in closed mode which is not assigned to any slot
-- offsetParent must return null on a child element of a shadow host for the shadow
-  tree in closed mode which is not in the flat tree
-- offsetParent must return null on a child element of a shadow host for the shadow
-  tree in open mode which is not assigned to any slot
-- offsetParent must return null on a child element of a shadow host for the shadow
-  tree in open mode which is not in the flat tree
 - offsetParent must return null when the context object is assigned to a slot without
   a fixed containing block in shadow tree of closed mode
 - offsetParent must return null when the context object is assigned to a slot without

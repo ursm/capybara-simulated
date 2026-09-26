@@ -230,52 +230,54 @@ RSpec.describe 'native layout inline box fragments', if: ENV.fetch('CSIM_JS_ENGI
                      shared: [[300, 0, 0, 17]], shared_chrome: [[285.796875, 0, 0, 17]])
   end
 
-  # …and a `<br>` is a LINE BREAK whatever it declares (`displayOf` / `positionOf` / `isFloated`): Chrome gives every
-  # one of these the same break and the same empty box at the end of `aa`. Native laid a `display: block` one out as a
-  # 300px block BETWEEN two anonymous groups (the break came from the groups, the box was the block's), an atomic one as
-  # a zero box and a relative one shifted; both engines hoisted a floated or absolute one out of the line — `aabb` on one
-  # line, 18 tall where Chrome says 36.
-  it 'lays a <br> out as a line break whatever it declares' do
-    [
-      'display:block',
-      'display:inline-block',
-      'display:flex',
-      'float:left',
-      'position:absolute;top:50px',
-      'position:relative;top:10px;left:5px',
-      'padding:10px;border:3px solid;margin:7px'
-    ].each do |style|
-      expect_fragments(%(<div style="width:300px">aa<br id="m" style="#{style}">bb</div>), chrome: [[14.203125, 0, 0, 17]])
+  # …and which `<br>` is that break is its `display`'s to say (`isLineBreak`). HTML's UA sheet gives it only
+  # `display-outside: newline`, so an author `display`, `float` or `position` applies as to any element: a block-level
+  # `<br>` is an empty block box, a floated or absolutely positioned one leaves the line (`aabb` on one line), a relative
+  # one is shifted — and `innerText` gives a block-level one the required breaks either side of its newline. Firefox
+  # renders every one of these that way (its block `<br>` is 0 wide, where the spec's auto width fills the line). Chrome
+  # keeps every `<br>` a break whatever it declares; where it parts from the spec, the spec is the bar. What both engines
+  # agree on beyond the letter of it holds here too: an `inline-block` `<br>` still breaks, and no edge of one shows.
+  it 'lays a <br> out by the display it declares' do
+    {
+      'display:block'                            => [[0, 18, 300, 0], 36, "aa\n\n\nbb"],
+      'display:flex'                             => [[0, 18, 300, 0], 36, "aa\n\n\nbb"],
+      'float:left;width:40px'                    => [[0, 0, 40, 0], 18, "aa\n\n\nbb"],
+      'position:absolute;top:50px'               => [[14.203125, 50, 0, 0], 18, "aa\n\n\nbb"],
+      'position:relative;top:10px;left:5px'      => [[19.203125, 10, 0, 17], 36, "aa\nbb"],
+      'display:inline-block'                     => [[14.203125, 0, 0, 17], 36, "aa\nbb"],
+      'padding:10px;border:3px solid;margin:7px' => [[14.203125, 0, 0, 17], 36, "aa\nbb"]
+    }.each do |style, (rect, height, text)|
+      body = %(<div id="p" style="width:300px;position:relative">aa<br id="m" style="#{style}">bb</div>)
+      r, rects = fragments(body)
+      expect(r).to include('ok' => true, 'mismatches' => 0), "#{style}: #{r.inspect}"
+      expect_no_dropped_records(r, body)
+      expect(rects_near?(rects, [rect])).to be(true), "#{style}: #m #{rects.inspect}, expected #{rect.inspect}"
+      got = with_simulated_session(page(body)) do |session|
+        session.visit '/'
+        session.evaluate_script("[document.getElementById('p').offsetHeight, document.getElementById('p').innerText]")
+      end
+      expect(got).to eq([height, text]), style
     end
-    expect_fragments('<div style="width:300px"><br id="m" style="display:block"></div>', chrome: [[0, 0, 0, 17]])
-    expect_fragments('<div style="width:300px"><div>x</div><br id="m" style="display:block"><div>y</div></div>', chrome: [[0, 18, 0, 17]])
   end
 
-  # …with no CSS box to read a used value, an offset or a break off. Chrome: getComputedStyle reports what the `<br>`
-  # DECLARED (`40px` for `float: left; width: 40px`, `auto` for a bare `display: block`), every `offset*` is 0 with the
-  # container still its `offsetParent`, and a `display: contents` one — which behaves as `none` on a `<br>` — breaks
-  # nothing, in `innerText` as on the line.
-  it 'answers for a <br> as the box-less break it is' do
+  # …and the box it lays out is what the CSSOM reads, as for any element (Firefox): `offset*` measure it, a block-level
+  # one's used width is its box's, and a `display: contents` one — which behaves as `none` on a `<br>` (css-display) —
+  # breaks nothing, in `innerText` as on the line.
+  it 'answers for a <br> from the box it lays out' do
     body = '<div id="p" style="width:300px;position:relative">aa<br id="a" style="display:block">bb<br id="b" style="float:left;width:40px">cc' \
-           '<br id="c" style="position:absolute;top:5px">dd<br id="d" style="display:flex;height:30px;margin:4px">ee</div>' \
-           '<div id="t">aa<br style="display:contents">bb</div><div id="u">aa<br style="float:left">bb</div>'
+           '<br id="c" style="position:relative;left:5px">dd</div><div id="t">aa<br style="display:contents">bb</div>'
     got = with_simulated_session(page(body)) do |session|
       session.visit '/'
       session.evaluate_script(<<~JS)
         (() => {
-          const style = [...'abcd'].map((k) => { const g = getComputedStyle(document.getElementById(k)); return [g.display, g.width, g.height, g.marginTop]; });
-          const b = document.getElementById('b');
-          return [style, [b.offsetTop, b.offsetLeft, b.offsetWidth, b.offsetHeight, b.offsetParent.id],
-                  document.getElementById('t').innerText, document.getElementById('u').innerText];
+          const box = (k) => { const e = document.getElementById(k), g = getComputedStyle(e);
+                               return [e.offsetLeft, e.offsetTop, e.offsetWidth, e.offsetHeight, g.display, g.width]; };
+          return [box('a'), box('b'), box('c'), document.getElementById('t').innerText];
         })()
       JS
     end
-    expect(got).to eq([
-      [['block', 'auto', 'auto', '0px'], ['block', '40px', 'auto', '0px'], ['block', 'auto', 'auto', '0px'], ['flex', 'auto', '30px', '4px']],
-      [0, 0, 0, 0, 'p'],
-      'aabb',
-      "aa\nbb"
-    ])
+    # (A zero-height float shortens no line, so `bbcc` and the shifted `<br>` share the block `<br>`'s row.)
+    expect(got).to eq([[0, 18, 300, 0, 'block', '300px'], [0, 18, 40, 0, 'block', '40px'], [35, 18, 0, 17, 'inline', 'auto'], 'aabb'])
   end
 
   it 'lays a <wbr> out as the inline box it is' do

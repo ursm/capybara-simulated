@@ -924,6 +924,31 @@ RSpec.describe 'layout reuse across dynamic style state' do
       expect(got).to eq([false, 'hidden', true])
     end
 
+    # …and Capybara asks the same question (`__csimVisible` kept its own node-tree copy of the walk), and so does the
+    # text: a light child no rendered slot takes, and a fallback beside an assigned node, are neither visible nor text.
+    # A closed `<details>`'s content is SKIPPED — laid out (a rect 17 tall) but `checkVisibility()` false. Chrome:
+    # `["I\ns", "", false, false, true, false, false, 17]`.
+    it 'hides from Capybara and innerText what no rendered slot takes' do
+      s = slotted_session(
+        '<div id="h1"><span id="unassigned" slot="nowhere">U</span><span id="hidden_slot">H</span></div>' \
+          '<div id="h3"><b id="icon" slot="icon">I</b></div><details><summary>s</summary><span id="dc">d</span></details>',
+        "document.getElementById('h1').attachShadow({mode: 'open'}).innerHTML = '<div style=\"display:none\"><slot></slot></div>'; " \
+          "document.getElementById('h3').attachShadow({mode: 'open'}).innerHTML = '<slot name=\"icon\"><i><u id=\"fb\">default</u></i></slot>'"
+      )
+      got = s.evaluate_script(<<~JS)
+        (() => {
+          const V = (e) => e.checkVisibility(), $ = (id) => document.getElementById(id), dc = $('dc');
+          return [document.body.innerText, $('h1').innerText, V($('unassigned')), V($('hidden_slot')), V($('icon')),
+                  V($('h3').shadowRoot.getElementById('fb')), V(dc), dc.getBoundingClientRect().height];
+        })()
+      JS
+      expect(got).to eq(["I\ns", '', false, false, true, false, false, 17])
+      expect(s).to have_no_css('#unassigned')
+      expect(s).to have_no_css('#hidden_slot')
+      expect(s).to have_css('#icon')
+      expect(s.find('#h3').shadow_root.all('u').size).to eq(0)
+    end
+
     # Attaching a shadow root takes every light child out of the flat tree, with no DOM mutation to say so (Chrome: the
     # element after a 50px child moves up to 0 at once, and back down once a slot takes it).
     it 'relays out a host when a shadow root is attached to it' do
