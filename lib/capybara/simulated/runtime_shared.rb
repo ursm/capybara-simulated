@@ -236,6 +236,8 @@ module Capybara
         # registerFontPath the SAME file the oracle measures advances from. nil when it can't be fetched/read.
         '__csim_webFontFile'         => ->(b, *a) { b.font_file_for(a[0]) },
         '__csim_localFontTable'      => ->(b, *a) { b.local_font_table(a[0], a[1] || '') },
+        # …and the installed file behind a `local()` source, the one that table was read from (nil when none).
+        '__csim_localFontFile'       => ->(b, *a) { b.local_font_table(a[0], a[1] || '')['file'] },
         '__csim_resourceTimingFetch' => ->(b, *a) { b.resource_timing_fetch(a[0], a[1] == true, a[2] || 'same-origin') },
         '__csim_takeModuleRt'        => ->(b, *a) { b.take_module_rt },
         '__csim_takeWorkerRt'        => ->(b, *a) { b.take_worker_rt },

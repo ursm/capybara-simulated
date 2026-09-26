@@ -56,12 +56,21 @@ RSpec.describe 'native layout web-font parity', if: ENV.fetch('CSIM_JS_ENGINE', 
     expect_parity('<div style="width:300px;font:16px AhemTest">a <b>bold</b> and <span>more</span> text</div>')
   end
 
-  # A face that ALSO lists a local() source: the oracle prefers an installed local font over the download, so
-  # native (which would register the url font) must decline rather than risk measuring the wrong font.
-  it 'declines a face carrying a local() source alongside url()' do
-    r = run_shadow('<div style="width:120px;font:20px MixFont">aa bb cc dd ee ff gg</div>',
-                   face: "@font-face{font-family:'MixFont';src:local('Arial'),url('/f.ttf')}")
-    expect(r).to include('ok' => false)
+  # A face that ALSO lists a local() source: the oracle prefers a font INSTALLED under that name to the download, so
+  # native registers the same — the installed file where one is (`__csim_localFontFile`, the file the oracle's table
+  # was read from), the url's where none is. It declined outright until 2026-09-26, which was every text block on
+  # every Mastodon page (`src: local("Roboto"), url(…)`).
+  it 'measures a face carrying a local() source with the file the oracle measures' do
+    # …no such font here: the download, Ahem's 20px squares
+    body = '<div style="width:400px;font:20px MixFont"><span id="m">XXXX</span></div>'
+    face = "@font-face{font-family:'MixFont';src:local('No Such Font Anywhere'),url('/f.ttf')}"
+    expect_parity(body, face: face)
+    session = simulated_session(page(body, face: face))
+    session.visit '/'
+    expect(session.evaluate_script("document.getElementById('m').getBoundingClientRect().width")).to eq(80)
+    # …and whatever this machine has installed under a common name, the two engines measure the same file
+    expect_parity('<div style="width:120px;font:20px MixFont">aa bb cc dd ee ff gg</div>',
+                  face: "@font-face{font-family:'MixFont';src:local('Arial'),local('Noto Sans'),url('/f.ttf')}")
   end
 
   # The native handle memo must invalidate when an @font-face is ADDED at runtime — otherwise native stays on
