@@ -216,6 +216,20 @@ RSpec.describe 'native layout inline box fragments', if: ENV.fetch('CSIM_JS_ENGI
   # `aa<wbr style="padding-left:20px;…">bb` is 38.41 wide there — where the oracle's flow placed them (71.4) and its
   # measure did not, and native refused one; both engines place none since 2026-09-26. One that is not `display:
   # inline` is no inline box: an inline-block `<wbr>` is an atomic.
+  # A `<br>` is an inline box with nothing in it, like a `<wbr>`: an EMPTY fragment where it ends its line — and that
+  # line's ALIGNMENT moves it with the content before it. The oracle placed it at the unaligned pen and left it there
+  # (19.2 for a centred `aa<br>`), where native and Chrome follow the line; an rtl line is a gap both engines share.
+  it 'gives a <br> the box where its line ends, moved with the line' do
+    {
+      '<div style="width:300px;text-align:center;font:16px monospace">aa<br id="m">bb</div>' => [[159.59375, 0, 0, 22]],
+      '<div style="position:relative;font:16px monospace;width:100px;text-align:right">a <span style="padding-right:5px;margin-right:-5px">x<br id="m">y</span> b</div>' => [[100, 0, 0, 22]]
+    }.each do |body, chrome|
+      expect_fragments(body, chrome: chrome)
+    end
+    expect_fragments('<div style="display:flow-root;width:300px;direction:rtl"><div style="float:left;width:100px;height:40px"></div><div>aa<br id="m">bb</div></div>',
+                     shared: [[300, 0, 0, 17]], shared_chrome: [[285.796875, 0, 0, 17]])
+  end
+
   it 'lays a <wbr> out as the inline box it is' do
     expect_fragments('<div style="font:16px monospace;width:100px">a<wbr id="m" style="position:relative;left:5px;top:3px">b</div>')
     {

@@ -911,9 +911,11 @@ fn read_f64_array(val: v8::Local<'_, v8::Value>) -> Vec<f64> {
 // Decode the flat per-node record buffer (root at record 0), the per-run buffer, the parallel `runTexts` string
 // array (a run's text, else non-string), the grid channel and the inline table, run native layout, and write each
 // node's border-box into its arena slot. Answers the inline boxes' FRAGMENTS as rows of [inline index, x, y, w, h],
-// and beside them the boxes of the records that have NO node to write into — an anonymous grid item, table cell or
-// row (nid < 0) — as rows of [record index, x, y, w, h]; or false when the subtree uses a feature the native engine
-// doesn't model (Outcome::Unsupported), and the caller then lays it out in JS. One crossing per pass.
+// and beside them EVERY record's box, in record order, as the rows `boxOf` answers one node at a time
+// (`BOX_ROW` numbers each: [x, y, w, h, autoHeight, cbW, mt, mr, mb, ml, relX, relY]) — which is also the only answer
+// for a record with NO node to write into (an anonymous grid item, table cell or row); or false when the subtree uses
+// a feature the native engine doesn't model (Outcome::Unsupported), and the caller then lays it out in JS. One
+// crossing per pass, where reading the boxes back one `boxOf` at a time was a crossing per box.
 fn layout_pass(
     scope: &mut v8::PinScope<'_, '_>,
     args: v8::FunctionCallbackArguments<'_>,
@@ -1184,23 +1186,21 @@ fn layout_pass(
         crate::layout::Outcome::LaidOut(boxes, frags) => {
             let cid = realm_id(scope, &args);
             let st = realm(scope, cid);
-            let mut holes: Vec<f64> = Vec::new();
-            for (idx, b) in boxes.into_iter().enumerate() {
-                match NodeId::from_i64(b.nid as i64) {
-                    Some(id) if b.nid >= 0.0 => {
-                        if let Some(node) = st.get_mut(id) {
-                            node.layout_box = Some(b);
-                        }
+            let mut rows: Vec<f64> = Vec::with_capacity(boxes.len() * 12);
+            for b in boxes {
+                rows.extend(box_row(&b));
+                if b.nid >= 0.0 {
+                    if let Some(node) = NodeId::from_i64(b.nid as i64).and_then(|id| st.get_mut(id)) {
+                        node.layout_box = Some(b);
                     }
-                    _ => holes.extend([idx as f64, b.x, b.y, b.w, b.h]),
                 }
             }
             let flat: Vec<f64> = frags.iter().flatten().copied().collect();
             let pair = v8::Array::new(scope, 2);
             let frag_rows: v8::Local<v8::Value> = f64_array(scope, &flat).into();
-            let hole_rows: v8::Local<v8::Value> = f64_array(scope, &holes).into();
+            let box_rows: v8::Local<v8::Value> = f64_array(scope, &rows).into();
             pair.set_index(scope, 0, frag_rows);
-            pair.set_index(scope, 1, hole_rows);
+            pair.set_index(scope, 1, box_rows);
             rv.set(pair.into());
         }
     }
@@ -1212,6 +1212,12 @@ fn f64_array<'s>(scope: &mut v8::PinScope<'s, '_>, vals: &[f64]) -> v8::Local<'s
     let store = v8::ArrayBuffer::new_backing_store_from_vec(bytes).make_shared();
     let buf = v8::ArrayBuffer::with_backing_store(scope, &store);
     v8::Float64Array::new(scope, buf, 0, vals.len()).expect("a Float64Array over its own backing store")
+}
+
+// One box as the JS side reads it (`boxOf`, and `layoutPass`'s box rows).
+fn box_row(b: &crate::layout::Box) -> [f64; 12] {
+    let [mt, mr, mb, ml] = b.used_margins.unwrap_or([f64::NAN; 4]);
+    [b.x, b.y, b.w, b.h, if b.auto_height { 1.0 } else { 0.0 }, b.cb_w.unwrap_or(f64::NAN), mt, mr, mb, ml, b.rel[0], b.rel[1]]
 }
 
 // __dom.boxOf(nid) -> [x, y, w, h, autoHeight, cbW, marginTop, marginRight, marginBottom, marginLeft, relX, relY]
@@ -1232,8 +1238,7 @@ fn box_of(
         Some(b) => b,
         None => return,
     };
-    let [mt, mr, mb, ml] = b.used_margins.unwrap_or([f64::NAN; 4]);
-    let vals = [b.x, b.y, b.w, b.h, if b.auto_height { 1.0 } else { 0.0 }, b.cb_w.unwrap_or(f64::NAN), mt, mr, mb, ml, b.rel[0], b.rel[1]];
+    let vals = box_row(&b);
     let arr = v8::Array::new(scope, vals.len() as i32);
     for (i, v) in vals.iter().enumerate() {
         let num: v8::Local<v8::Value> = v8::Number::new(scope, *v).into();

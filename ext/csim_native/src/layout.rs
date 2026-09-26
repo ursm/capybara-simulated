@@ -2065,6 +2065,16 @@ fn line_layout(
                 // …the edges this break puts down landing after a collapsed space still pending, as at a close.
                 place_pending_space!();
                 flush_each_open_edge!();
+                // …and a `<br>` element's own box — an inline box with nothing in it, like a `<wbr>`'s — an EMPTY
+                // fragment where the line ends (`font` names its inline entry; negative for a segment break the walk
+                // made up).
+                // (At the pen itself: the space before it is down already, so it is no gap still to come.)
+                if run.font >= 0 {
+                    let mut f = frag_here!(run.font as usize);
+                    f.open_x = band_l(total) + line_x;
+                    frags.push(f);
+                    line_empties.push(frags.len() - 1);
+                }
                 break_line!(); // an empty line's box is the bare strut
                 // …and a `<br clear>` moves the flow past the floats it names before the next line opens
                 // (HTML's pre-CSS float break; the oracle's `brClear` / `clearanceY`). The side arrives
