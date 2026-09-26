@@ -238,5 +238,38 @@ RSpec.describe 'scroll into view' do
       expect(got[2]).to eq(0)
       expect(got[3]).to be_between(0, got[4])  # the link is in the viewport it scrolled
     end
+
+    # …through every door: the body's own `scrollTo` / `scrollBy` and the window's, which forward to the scrolling
+    # element (Chrome: 400 then 650 on `scrollY` and `body.scrollTop` alike, the root 0; `window.scrollTo(0, 500)`
+    # lands at 500).
+    it 'scrolls the viewport through body.scrollTo / scrollBy and window.scrollTo in quirks mode' do
+      s = session_with('<html><body style="margin:0"><div style="height: 3000px"></div></body></html>')
+      got = s.evaluate_script(<<~JS)
+        (() => {
+          const read = () => [scrollY, document.body.scrollTop, document.documentElement.scrollTop];
+          document.body.scrollTo(0, 400);
+          const a = read();
+          document.body.scrollBy(0, 250);
+          const b = read();
+          window.scrollTo(0, 500);
+          return [a, b, read()];
+        })()
+      JS
+      expect(got).to eq([[400, 400, 0], [650, 650, 0], [500, 500, 0]])
+    end
+
+    # A body that scrolls ITSELF — its own overflow, under a root whose overflow is not `visible` — is no document
+    # scroller: `scrollingElement` is null and the body keeps its own offset (Chrome: null, then 100).
+    it 'has no scrolling element in quirks mode when the body scrolls itself' do
+      s = session_with('<html style="overflow:hidden"><body style="margin:0;overflow:auto;height:300px"><div style="height: 3000px"></div></body></html>')
+      got = s.evaluate_script(<<~JS)
+        (() => {
+          const none = document.scrollingElement === null;
+          document.body.scrollTop = 100;
+          return [none, document.body.scrollTop, scrollY];
+        })()
+      JS
+      expect(got).to eq([true, 100, 0])
+    end
   end
 end

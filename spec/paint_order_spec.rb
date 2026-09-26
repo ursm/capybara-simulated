@@ -167,13 +167,31 @@ RSpec.describe 'paint order' do
       <canvas id="c" style="display:block;width:100px;height:100px"></canvas><div
         style="float:left;width:100px;height:100px;margin-top:-100px"></div>
     HTML
-    # …which a form control is not: what an empty one shows is its chrome, and the float is over it.
-    [
-      '<input style="display:block;width:200px;height:50px;margin:0;border:0;padding:0">',
-      '<textarea style="display:block;margin:0"></textarea>'
-    ].each do |control|
-      expect(hit(%(#{control}<div id="f" style="float:left;width:100px;height:100px;margin-top:-50px"></div>))).to eq('f'), control
+    # …and so is a `<select>`'s face — but not an input, a textarea or a checkbox, where what shows is text or chrome,
+    # and the float is over it (text is not hit-tested; neither is a button's label, beside which the float wins).
+    {
+      '<select style="display:block;width:200px;height:50px;margin:0" id="c"><option>x</option></select>' => 'c',
+      '<input style="display:block;width:200px;height:50px;margin:0;border:0;padding:0">' => 'f',
+      '<textarea style="display:block;margin:0"></textarea>' => 'f',
+      '<input type="checkbox" style="display:block;width:50px;height:50px;margin:0">' => 'f',
+      '<button style="display:block;width:200px;height:50px;margin:0">go</button>' => 'f'
+    }.each do |control, want|
+      expect(hit(%(#{control}<div id="f" style="float:left;width:100px;height:100px;margin-top:-50px"></div>), x: 25)).to eq(want), control
     end
+  end
+
+  # An animation's context lasts as long as the animation: a fade-in that has run out leaves the box an ordinary one
+  # again, where a cached chain kept it a context — and a dropdown inside it trapped under whatever came later.
+  it 'drops the stacking context an animation made once it has run out' do
+    html = <<~HTML
+      <!DOCTYPE html><html><head><style>body{margin:0} @keyframes k{from{opacity:1}to{opacity:1}}</style></head><body>
+      #{with_negative_child('animation:k 1s')}</body></html>
+    HTML
+    s = simulated_session(->(_env) { [200, {'content-type' => 'text/html'}, [html]] })
+    s.visit '/'
+    probe = '(e => e && e.id)(document.elementFromPoint(50, 25))'
+    expect(s.evaluate_script(probe)).to eq('neg')
+    expect(s.evaluate_async_script("const done = arguments[0]; setTimeout(() => done(#{probe}), 1500)")).to eq('ctx')
   end
 
   # CSSOM View: the hit is RETARGETED against the tree asked — a document sees a web component's host, the shadow
