@@ -105,6 +105,15 @@ RSpec.describe 'scripts the parser runs' do
     expect(s.evaluate_script('L')).to eq(%w[dsd-inline:nocs dsd-external after])
   end
 
+  # …a NESTED one's too, in tree order: the inner template converts while its host is still inside the outer's inert
+  # content, so its scripts wait on the outer (noted before the inner leaves the tree). Chrome: outer-1, inner-1, outer-2.
+  it 'runs the scripts of a nested declarative shadow root in tree order' do
+    s = session_for('<!DOCTYPE html><body><script>window.L = []</script><div><template shadowrootmode="open">' \
+                    '<script>L.push("outer-1")</script><div><template shadowrootmode="open"><script>L.push("inner-1")</script></template></div>' \
+                    '<script>L.push("outer-2")</script></template></div></body>')
+    expect(s.evaluate_script('L')).to eq(%w[outer-1 inner-1 outer-2])
+  end
+
   # A `src` that is present but EMPTY is a failed load: `error`, and the element's text does not run. Chrome: both.
   it 'fires error for an empty src and runs nothing' do
     s = session_for('<!DOCTYPE html><body><script>window.L = []</script>' \
@@ -124,6 +133,16 @@ RSpec.describe 'scripts the parser runs' do
       d.open(); d.write('<script>parent.L.push("opened-write")<\\/script>'); d.close();
     JS
     expect(s.evaluate_script('L')).to eq(['opened-write'])
+  end
+
+  # …but only in a document with a browsing context: a DOMParser document runs no script, opened or not (Chrome).
+  it 'runs nothing written into an opened DOMParser document' do
+    s = session_for('<!DOCTYPE html><body><script>window.L = []</script></body>')
+    s.execute_script(<<~JS)
+      const d = new DOMParser().parseFromString('<p>x</p>', 'text/html');
+      d.open(); d.write('<script>L.push("ran")<\\/script><i>w</i>'); d.close();
+    JS
+    expect(s.evaluate_script('L')).to eq([])
   end
 
   # An exception a parser-run script throws is REPORTED — `window.onerror` and the window's `error` event — as any
