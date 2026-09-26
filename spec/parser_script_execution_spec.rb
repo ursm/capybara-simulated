@@ -86,6 +86,46 @@ RSpec.describe 'scripts the parser runs' do
     expect(s.evaluate_script('L')).to eq(%w[text textContent child src-set])
   end
 
+  # A DECLARATIVE shadow root's scripts are parser-inserted into a connected shadow tree and run in order (HTML attaches
+  # the root at the start tag) — with no `currentScript`, a shadow tree's script having none. This parser builds the
+  # content inert and converts it at `</template>`, so they run there; a plain template's never do. Chrome:
+  # `["dsd-inline:nocs", "dsd-external", "after"]`.
+  it 'runs the scripts of a declarative shadow root' do
+    app = lambda do |env|
+      next [200, {'content-type' => 'text/javascript'}, ["L.push('dsd-external')"]] if env['PATH_INFO'] == '/y.js'
+
+      [200, {'content-type' => 'text/html'}, [<<~HTML]]
+        <!DOCTYPE html><body><script>window.L = []</script>
+        <div id="h"><template shadowrootmode="open"><script>L.push('dsd-inline:' + (document.currentScript ? 'cs' : 'nocs'))</script>
+        <script src="y.js"></script><p>sh</p></template></div>
+        <template><script>L.push('plain-template')</script></template><script>L.push('after')</script></body>
+      HTML
+    end
+    s = simulated_session(app).tap {|session| session.visit '/' }
+    expect(s.evaluate_script('L')).to eq(%w[dsd-inline:nocs dsd-external after])
+  end
+
+  # A `src` that is present but EMPTY is a failed load: `error`, and the element's text does not run. Chrome: both.
+  it 'fires error for an empty src and runs nothing' do
+    s = session_for('<!DOCTYPE html><body><script>window.L = []</script>' \
+                    '<script src="" onerror="L.push(\'parsed-error\')">L.push("parsed-ran")</script>' \
+                    '<script>const e = document.createElement("script"); e.setAttribute("src", ""); e.onerror = () => L.push("dyn-error"); ' \
+                    'e.text = "L.push(\'dyn-ran\')"; document.body.appendChild(e);</script></body>')
+    s.evaluate_script('new Promise((resolve) => setTimeout(resolve, 50))')
+    expect(s.evaluate_script('L')).to eq(%w[parsed-error dyn-error])
+  end
+
+  # `document.open()` gives a document a SCRIPT-CREATED PARSER until `close()`: what `write` feeds it is its own
+  # markup, and its scripts run (Chrome: an opened `about:blank` frame runs a written script).
+  it 'runs a script written into an opened document' do
+    s = session_for('<!DOCTYPE html><body><script>window.L = []</script><iframe id="f"></iframe></body>')
+    s.execute_script(<<~JS)
+      const d = document.getElementById('f').contentDocument;
+      d.open(); d.write('<script>parent.L.push("opened-write")<\\/script>'); d.close();
+    JS
+    expect(s.evaluate_script('L')).to eq(['opened-write'])
+  end
+
   # An exception a parser-run script throws is REPORTED — `window.onerror` and the window's `error` event — as any
   # other script's is; the parse goes on.
   it 'reports an exception a parser-run script throws' do
