@@ -218,5 +218,25 @@ RSpec.describe 'scroll into view' do
       JS
       expect(got).to eq(['BackCompat', true, 100, 0])
     end
+
+    # …and that offset IS the viewport's: the body holds none of its own there. Kept on the body, it
+    # scrolled nothing — `scrollY` and every rect stayed put, and a `scrollIntoView` (or the scroll
+    # WebDriver's click runs first) wrote the root's setter, which quirks mode ignores, so a click on a
+    # link below the fold landed outside the viewport. Chrome: 1350 on `scrollY` and `body.scrollTop`
+    # alike after the `scrollIntoView`, 0 on the root.
+    it 'scrolls the VIEWPORT through the body in quirks mode' do
+      s = session_with('<html><body style="margin:0"><div style="height: 2000px"></div><a id="a" href="#">link</a></body></html>')
+      got = s.evaluate_script(<<~JS)
+        (() => {
+          const a = document.getElementById('a');
+          a.scrollIntoView();
+          return [scrollY, document.body.scrollTop, document.documentElement.scrollTop, a.getBoundingClientRect().y, innerHeight];
+        })()
+      JS
+      expect(got[0]).to be_positive
+      expect(got[1]).to eq(got[0])
+      expect(got[2]).to eq(0)
+      expect(got[3]).to be_between(0, got[4])  # the link is in the viewport it scrolled
+    end
   end
 end

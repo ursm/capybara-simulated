@@ -100,9 +100,16 @@ RSpec.describe 'paint order' do
     ].each do |effect|
       expect(hit(with_negative_child(effect))).to eq('neg'), effect
     end
-    # …an animation of one, still in its delay, and a `z-index` inherited from a parent that has one.
-    keyframes = '<style>@keyframes bf{from{backdrop-filter:blur(1px)}to{backdrop-filter:blur(2px)}}</style>'
-    expect(hit(with_negative_child('animation:bf 100s', before: keyframes))).to eq('neg')
+    # …a CURRENT animation of one — for these, still in its delay — and a `z-index` inherited from a parent that has one.
+    keyframes = ->(decl) { "<style>@keyframes k{from{#{decl}}to{#{decl}}}</style>" }
+    %w[backdrop-filter:blur(1px) clip-path:inset(0) opacity:1 transform:none].each do |decl|
+      expect(hit(with_negative_child('animation:k 100s 100s', before: keyframes.(decl)))).to eq('neg'), decl
+    end
+    # …where a blend mode, an isolation or a mask makes one only while its animated value is in effect.
+    %w[isolation:isolate mix-blend-mode:multiply mask-image:linear-gradient(black,black)].each do |decl|
+      expect(hit(with_negative_child('animation:k 100s', before: keyframes.(decl)))).to eq('neg'), decl
+      expect(hit(with_negative_child('animation:k 100s 100s', before: keyframes.(decl)))).to eq('ctx'), decl
+    end
     expect(hit(%(<div style="z-index:3">#{with_negative_child('position:relative;z-index:inherit')}</div>))).to eq('neg')
     # …but not an opacity a transition leaves at 1 (the transition is not running).
     expect(hit(with_negative_child('transition:opacity 100s;opacity:1'))).to eq('ctx')
@@ -143,6 +150,12 @@ RSpec.describe 'paint order' do
     expect(hit(<<~HTML, x: 50, y: 50)).to eq('s')
       <div style="font:40px/100px monospace"><span id="s" style="opacity:.9"><span style="position:relative;z-index:-1">XXXXXXX</span></span></div>
     HTML
+    %w[position:relative opacity:.9].each do |unit|
+      expect(hit(<<~HTML, x: 50, y: 20)).to eq('s'), unit
+        <div style="font:20px/40px monospace"><span id="s" style="#{unit}">XXXXXXXXXX<span
+          style="float:left;width:100px;height:100px;margin-right:-100px"></span></span></div>
+      HTML
+    end
     expect(hit(<<~HTML, x: 20, y: 10)).to eq('a')
       <p style="font:16px/20px sans-serif;margin:0"><a id="a" href="#">link text here that is long<img
         style="float:left;width:60px;height:60px;margin-right:-60px"></a></p>
@@ -154,10 +167,18 @@ RSpec.describe 'paint order' do
       <canvas id="c" style="display:block;width:100px;height:100px"></canvas><div
         style="float:left;width:100px;height:100px;margin-top:-100px"></div>
     HTML
+    # …which a form control is not: what an empty one shows is its chrome, and the float is over it.
+    [
+      '<input style="display:block;width:200px;height:50px;margin:0;border:0;padding:0">',
+      '<textarea style="display:block;margin:0"></textarea>'
+    ].each do |control|
+      expect(hit(%(#{control}<div id="f" style="float:left;width:100px;height:100px;margin-top:-50px"></div>))).to eq('f'), control
+    end
   end
 
   # CSSOM View: the hit is RETARGETED against the tree asked — a document sees a web component's host, the shadow
-  # root the element inside it; and a shadow root asked where only the canvas is hit answers nothing.
+  # root the element inside it; `elementsFromPoint` lists every element painted there, topmost first; and a point
+  # outside the viewport has none, however far a box reaches past it.
   it 'retargets the hit out of a shadow tree' do
     html = <<~HTML
       <!DOCTYPE html><body style="margin:0"><div id="host"></div><script>
@@ -172,7 +193,26 @@ RSpec.describe 'paint order' do
     expect(s.evaluate_script('sr.elementFromPoint(50, 50).id')).to eq('inner')
     expect(s.evaluate_script("(#{ids})(document.elementsFromPoint(50, 50))")).to eq(%w[host BODY HTML])
     expect(s.evaluate_script("(#{ids})(sr.elementsFromPoint(50, 50))")).to eq(%w[inner host BODY HTML])
-    expect(s.evaluate_script('sr.elementFromPoint(50, 500)')).to be_nil
-    expect(s.evaluate_script("(#{ids})(sr.elementsFromPoint(50, 500))")).to eq([])
+    expect(s.evaluate_script('sr.elementFromPoint(50, 500).tagName')).to eq('HTML')
+    expect(s.evaluate_script("(#{ids})(sr.elementsFromPoint(50, 500))")).to eq(%w[HTML])
+  end
+
+  it 'lists what is painted at a point, and nothing past the viewport' do
+    html = <<~HTML
+      <!DOCTYPE html><body style="margin:0"><div id="a" style="height:100px"></div><div id="b" style="margin-top:-100px;height:100px"></div>
+      <div id="p" style="height:0"><div id="c" style="height:50px"></div></div><div id="wide" style="width:3000px;height:20px"></div>
+      <div id="host"><div id="light" style="height:50px"></div></div><script>
+        window.sr = document.getElementById('host').attachShadow({mode: 'open'});
+        sr.innerHTML = '<div id="wrap"><slot></slot></div>';
+      </script></body>
+    HTML
+    s = simulated_session(->(_env) { [200, {'content-type' => 'text/html'}, [html]] })
+    s.visit '/'
+    ids = 'es => es.map(e => e.id || e.tagName)'
+    expect(s.evaluate_script("(#{ids})(document.elementsFromPoint(50, 50))")).to eq(%w[b a BODY HTML])
+    expect(s.evaluate_script("(#{ids})(document.elementsFromPoint(50, 110))")).to eq(%w[wide c BODY HTML])   # not `p`
+    expect(s.evaluate_script("(#{ids})(document.elementsFromPoint(50, 125))")).to eq(%w[light host c BODY HTML])
+    expect(s.evaluate_script("(#{ids})(sr.elementsFromPoint(50, 125))")).to eq(%w[light wrap host c BODY HTML])
+    expect(s.evaluate_script('document.elementFromPoint(2000, 110)')).to be_nil
   end
 end
