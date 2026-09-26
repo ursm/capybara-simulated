@@ -112,7 +112,24 @@ RSpec.describe 'layout invalidation through structural selectors' do
      "document.getElementById('o').className = 'b'", [60, 44], [60, 22]],
     ['a finite :nth-last-child() range', 'li:nth-last-child(-n+2) p { white-space: pre }',
      '<ul id="u" style="width:60px;padding:0;list-style:none"><li>P</li><li>b</li></ul>',
-     "document.getElementById('u').append(document.createElement('li'))", [60, 22], [60, 44]]
+     "document.getElementById('u').append(document.createElement('li'))", [60, 22], [60, 44]],
+    # …whose bound does not hold `of S`, which counts S's matches only;
+    ['a :nth-child(… of S) range', '#u > li:nth-child(-n+2 of .k) p { white-space: pre }',
+     '<ul id="u" style="width:60px;padding:0;list-style:none"><li>a</li><li class="k">b</li><li class="k">P</li></ul>',
+     "const k = document.createElement('li'); k.className = 'k'; document.getElementById('u').prepend(k)", [60, 22], [60, 44]],
+    # …a `:has()` answer kept across a flip of the REST of its compound (a class on the anchor), then flipped back by a
+    # tracked change — only the argument is kept, so the flip back is seen;
+    ['a :has() flipped back after its anchor changed', '.c.on:has(.f) p { white-space: pre }',
+     '<div id="c" class="c" style="width:60px">P<span id="box"></span></div>',
+     "const b = document.getElementById('box'), f = document.createElement('i'); f.className = 'f'; b.append(f); " \
+     "document.body.offsetHeight; document.getElementById('c').classList.add('on'); document.body.offsetHeight; b.replaceChildren()",
+     [60, 44], [60, 44]],
+    # …and pseudo-classes that read an attribute of the element itself.
+    ['a pseudo-class reading its own attribute', 'input:required + div p { white-space: pre }',
+     '<input id="o"><div style="width:60px">P</div>', "document.getElementById('o').required = true", [60, 44], [60, 22]],
+    ['a :has() over [open]', '.c:has(details[open]) p { white-space: pre }',
+     '<div class="c" style="width:60px">P<details id="o"><summary>s</summary></details></div>',
+     "document.getElementById('o').open = true", [60, 44], [60, 22]]
   ].map {|name, css, body, *rest| [name, css, body.sub('>P<', ">#{paragraph}<"), *rest] }
 
   def rect(session)

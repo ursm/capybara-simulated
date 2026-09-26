@@ -1575,32 +1575,33 @@ RSpec.describe 'cascade invalidation' do
     expect(got).to eq(1)
   end
 
-  it 'stays conservative for the whole page while a ::part() rule exists' do
-    # `::part()` and `:host-context()` are decided by an element the rule is not indexed against, so
-    # no per-element question can answer for them and `shadowUnsafe` latches the page instead — the
-    # same latch `ctxGateReady` reads. The class write here is on an element as far from the host as
-    # the page allows, which is the point: the answer is the PAGE's, not this element's.
-    #
-    # The rule lives in the DOCUMENT sheet, where a real `::part()` lives — that half of the latch is
-    # a scan of `state.layoutRules` keyed on `cascadeVersion`, a different invalidation story from
-    # the per-sheet flag, and the shadow-sheet half is already pinned by the `:host-context()` route
-    # of the late-arrival example below (same field, same code path).
-    css  = '.panel { height: 20px } .red { color: rgb(255, 0, 0) } #h::part(p) { height: 120px }'
-    body = '<div id="h"></div><div id="c"><div class="panel" id="p">x</div></div>'
+  it 'answers a light-DOM write from the document rules while a ::part() rule exists' do
+    # A document `::part()` rule is in the document's layout index like any other — its subject is a box one tree in,
+    # under the host its compounds name — so a light-DOM write it does not mention marks nothing more than the writer,
+    # and one it does reaches the part through the host's subtree. (It used to latch the whole page ungateable, which
+    # marked every writer's subtree and, for a child-list change, its parent's: 3x on appends.) An element INSIDE a
+    # tree still takes its subtree beside its tree's answer, since the `part` attribute a document rule reads there is
+    # in no index of that tree.
+    css  = '.panel { height: 20px } .red { color: rgb(255, 0, 0) } .on #h::part(p) { height: 120px }'
+    body = '<div id="c"><div id="h"></div></div><div class="panel" id="p">x</div>'
     s    = simulated_session(gated_page(body, css: css))
     s.visit '/'
     got = s.evaluate_script(<<~JS)
       (() => {
-        document.getElementById('h').attachShadow({mode: 'open'}).innerHTML =
-          '<style>.p { color: #333 }</style><p class="p" part="p">w</p>';
-        const p = document.getElementById('p');
-        p.getBoundingClientRect();
+        const r = document.getElementById('h').attachShadow({mode: 'open'});
+        r.innerHTML = '<p class="p" part="p" style="margin:0">w</p>';
+        const part = () => r.querySelector('.p').getBoundingClientRect().height;
+        const before = part();
         const marks = globalThis.__csimSubtreeMarks();
         document.getElementById('c').classList.add('red');
-        return globalThis.__csimSubtreeMarks() - marks;
+        const unrelated = globalThis.__csimSubtreeMarks() - marks;
+        document.getElementById('c').classList.add('on');
+        return [before, unrelated, part()];
       })()
     JS
-    expect(got).to eq(1)
+    expect(got[1]).to eq(0)
+    expect(got[2]).to eq(120)
+    expect(got[0]).not_to eq(120)
   end
 
   it 'folds a shadow sheet that arrives AFTER the tree was first folded' do
