@@ -1194,6 +1194,33 @@ RSpec.describe 'Canvas / ImageData / OffscreenCanvas' do
     expect(r['emDescent']).to eq(10)
   end
 
+  # …and one a `<style>` declares only once the canvas has already measured, in the same task: the face index is keyed
+  # on the cascade version IN FORCE, which takes the rebuild the insertion left pending before it answers. Read as it
+  # stood, the version had not moved yet and the canvas kept the fallback face it had just looked up.
+  it 'finds an @font-face font a style inserted after the first measure declares' do
+    font     = File.binread(File.expand_path('wpt/fonts/CanvasTest.ttf', __dir__))
+    face_app = lambda do |env|
+      next [200, {'content-type' => 'font/ttf'}, [font]] if env['PATH_INFO'] == '/fonts/CanvasTest.ttf'
+
+      [200, {'content-type' => 'text/html'}, ['<!doctype html><canvas id=c width=200 height=100></canvas>']]
+    end
+    session = simulated_session(face_app)
+    session.visit('/')
+    got = session.evaluate_script(<<~JS)
+      (() => {
+        const ctx = document.getElementById('c').getContext('2d');
+        ctx.font = '50px CanvasLate';
+        const before = ctx.measureText('A').width;
+        const st = document.createElement('style');
+        st.textContent = '@font-face { font-family: CanvasLate; src: url("/fonts/CanvasTest.ttf"); }';
+        document.head.appendChild(st);
+        return [before, ctx.measureText('A').width];
+      })()
+    JS
+    expect(got[0]).not_to eq(50)
+    expect(got[1]).to eq(50)
+  end
+
   it 'validates globalAlpha and supports the clear operator + whole-canvas ops' do
     session = simulated_session(app)
     session.visit('/')

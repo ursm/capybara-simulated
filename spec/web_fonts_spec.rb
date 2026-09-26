@@ -232,6 +232,26 @@ RSpec.describe 'web fonts' do
     expect(width(s, 'ins')).not_to eq(80)
   end
 
+  # …and a `<style>` declaring one inserted or removed, measured in the SAME task: the face index is keyed on the
+  # cascade version, which moves when the sheets the cascade takes do. (Keyed on the settle generation too, it saw
+  # every DOM mutation, and rebuilt itself on each of them.)
+  it 'follows a <style> declaring a face inserted and removed within one task' do
+    s = session
+    got = s.evaluate_script(<<~JS)
+      (() => {
+        const el = document.createElement('span'); el.style.fontFamily = 'Styled'; el.textContent = 'abcd'; document.body.appendChild(el);
+        const w = () => el.getBoundingClientRect().width, before = w();
+        const st = document.createElement('style'); st.textContent = '@font-face { font-family: Styled; src: url(/ahem.ttf); }';
+        document.head.appendChild(st);
+        const with_ = w();
+        st.remove();
+        return [before, with_, w()];
+      })()
+    JS
+    expect(got[0]).not_to eq(80)
+    expect(got[1..]).to eq([80, got[0]])
+  end
+
   it 'lays text out again when a face is added to the set and loaded' do
     s = session
     s.execute_script("var el = document.createElement('span'); el.id = 'late'; el.style.fontFamily = 'Late'; el.textContent = 'abcd'; document.body.appendChild(el);")
