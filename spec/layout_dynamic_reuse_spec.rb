@@ -767,6 +767,59 @@ RSpec.describe 'layout reuse across dynamic style state' do
     end
   end
 
+  # The native walk's GATES — whether a flex item's subtree is one native can measure, which percentage in it the walk
+  # still resolves — read the item's whole subtree, and are kept across passes on its stamp the way a kept subtree slice
+  # is (`nlGateHit`). Under the authoritative pass that uses them, and with every reusing pass walked again fresh and
+  # compared (`__csimNativeLayoutVerifyReuse`, which THROWS on a difference): a kept answer the subtree no longer
+  # deserves makes the two walks part.
+  describe 'native walk gates' do
+    def native_session_for(body, verify: true)
+      session_for('body { margin: 0 }', body).tap do |s|
+        s.execute_script("globalThis.__csimNativeLayout = true; globalThis.__csimNativeLayoutVerifyReuse = #{verify}")
+      end
+    end
+
+    # A COUNT, not a wall: an edit in one item recomputes that item's answers and its ancestors', not every item's.
+    # Asked afresh per pass, all fifty subtrees were read again on every edit — 43% of the walk on a Redmine page.
+    # (Unchecked: the check's fresh walk asks every gate again by design.)
+    it 'keeps the gates of the items an edit did not touch' do
+      items = (1..50).map {|i| %(<div><p><span id="s#{i}">item #{i}</span></p></div>) }.join
+      s = native_session_for(%(<div style="display:flex;flex-wrap:wrap">#{items}</div>), verify: false)
+      got = s.evaluate_script(<<~JS)
+        (() => {
+          document.body.offsetHeight;
+          const n = __csimNlGateAnswers(), passes = __csimNativeLayoutStats().native;
+          document.getElementById('s7').firstChild.data = 'item seven';
+          document.body.offsetHeight;
+          return [__csimNlGateAnswers() - n, __csimNativeLayoutStats().native - passes];
+        })()
+      JS
+      expect(got[1]).to eq(1)                 # …laid out by the native pass, or the count says nothing
+      expect(got[0]).to be_between(1, 10)
+    end
+
+    # …and computed again when the item's subtree changes. A row group's percentage `height` is one the walk still
+    # resolves (`nlTablePartResolves`) against the JS layout's basis, so a flex item holding one is pushed, and a pass
+    # that must push declines to the JS layout. Kept past the change, the answer went on declining a pass native can now
+    # take — or taking one it cannot.
+    it "recomputes an item's gate when its subtree changes" do
+      s = native_session_for('<div style="display:flex;width:300px;height:100px"><div><table><tbody id="g" style="height:50%">' \
+                             '<tr><td>x</td></tr></tbody></table></div></div>')
+      got = s.evaluate_script(<<~JS)
+        (() => {
+          const native = () => { const n = __csimNativeLayoutStats().native; document.body.offsetHeight; return __csimNativeLayoutStats().native > n; };
+          const out = [native()];
+          for (const h of ['50px', '50%', '60px']) {
+            document.getElementById('g').style.height = h;
+            out.push(native());
+          }
+          return out;
+        })()
+      JS
+      expect(got).to eq([false, true, false, true])
+    end
+  end
+
   # An ANONYMOUS table cell (§17.2.1 wraps a row's stray content in one) is in no DOM, so no mutation marks it — every
   # mutation under its content marks the content's parent instead, and that is what its stamp now follows. Kept by the
   # table's structure stamp alone, it answered with the text it held before an edit, in both layouts. Chrome: 17.1, then
