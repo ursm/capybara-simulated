@@ -861,19 +861,112 @@ RSpec.describe 'layout reuse across dynamic style state' do
       s.execute_script("document.getElementById('y1').remove()")
       expect(s.evaluate_script(tails)).to eq([36, 41])     # (Chrome: 36, 41)
     end
+
+    # …and the node that LEAVES the flat tree: nothing above it is marked (its old slot's spine is not its spine any
+    # more), and "rendered" was asked up the NODE tree, to the host — so its old box kept answering. Chrome: an empty
+    # rect, offsetHeight 0, no client rects, `checkVisibility()` false and no hit, for all three ways out.
+    it 'drops the box of a child no slot takes any more' do
+      {
+        "document.getElementById('sa').removeAttribute('slot')"      => '<div style="width:100px"><slot name="a"></slot></div>',
+        "document.getElementById('h').shadowRoot.getElementById('s').remove()" => '<div style="width:100px"><slot id="s" name="a"></slot></div>',
+        "document.getElementById('h').shadowRoot.getElementById('s').assign()" => '<div style="width:100px"><slot id="s"></slot></div>'
+      }.each do |leave, shadow|
+        manual = leave.include?('assign')
+        attach = "const sr = document.getElementById('h').attachShadow({mode: '#{manual ? "open', slotAssignment: 'manual" : 'open'}'}); " \
+                 "sr.innerHTML = '#{shadow}';"
+        attach += " sr.getElementById('s').assign(document.getElementById('sa'));" if manual
+        s = slotted_session('<div id="h"><span id="sa" slot="a">aaaa bbbb</span></div>', attach)
+        read = <<~JS
+          (() => {
+            const sa = document.getElementById('sa'), r = sa.getBoundingClientRect(), hit = document.elementFromPoint(5, 5);
+            return [[r.x, r.y, r.width, r.height], sa.offsetHeight, sa.getClientRects().length, sa.checkVisibility(), hit === sa];
+          })()
+        JS
+        expect(s.evaluate_script(read)).to eq([[0, 0, 64.40625, 17], 17, 1, true, true]), leave
+        s.execute_script(leave)
+        expect(s.evaluate_script(read)).to eq([[0, 0, 0, 0], 0, 0, false, false]), leave
+      end
+    end
+
+    # Attaching a shadow root takes every light child out of the flat tree, with no DOM mutation to say so (Chrome: the
+    # element after a 50px child moves up to 0 at once, and back down once a slot takes it).
+    it 'relays out a host when a shadow root is attached to it' do
+      s = slotted_session('<div id="h"><div style="height:50px"></div></div><div id="after"></div>', 'void 0')
+      y = "document.getElementById('after').getBoundingClientRect().y"
+      expect(s.evaluate_script(y)).to eq(50)
+      s.execute_script("window.sr = document.getElementById('h').attachShadow({mode: 'open'})")
+      expect(s.evaluate_script(y)).to eq(0)
+      s.execute_script("sr.innerHTML = '<slot></slot>'")
+      expect(s.evaluate_script(y)).to eq(50)
+    end
   end
 
-  # `dir="auto"` takes its direction from the first strong character of its text, and every box under it inherits that
-  # — so a TEXT edit in one child turns its siblings around. `markDirAutoScopes` marks the auto element's subtree;
-  # without it the sibling kept its left-to-right box in both layouts. Chrome: 0 -> 200, the 100px box at the right.
-  it "turns a dir=auto element's other children around when a text edit flips its direction" do
-    s = session_for('body { margin: 0 }', '<div dir="auto" style="width:300px"><p id="a">hello</p>' \
-      '<div><p id="b" style="width:100px">sibling</p></div></div>')
-    x = "document.getElementById('b').getBoundingClientRect().x"
-    expect(s.evaluate_script(x)).to eq(0)
-    s.execute_script("document.getElementById('a').textContent = 'שלום עולם'")
-    expect(s.evaluate_script(x)).to eq(200)
-    s.execute_script("document.getElementById('a').textContent = 'hello'")
-    expect(s.evaluate_script(x)).to eq(0)
+  # A parser-blocking script that reads geometry lays out the PARTIAL tree, and the parse goes on under the boxes it
+  # laid out — with nothing observing, the parser records no mutation, so `#c` (parsed after that read) had no box at
+  # all and the body stayed 18 tall. Chrome: y 68, offsetTop 68, the body 86, `#c` 18 tall.
+  it 'lays out what the parser inserted after a script read the layout' do
+    s = session_for(
+      'body { margin: 0 }',
+      '<div style="width:300px"><p id="b" style="margin:0">123</p>' \
+        "<script>window.r = [document.getElementById('b').getBoundingClientRect().y]</script>" \
+        '<div style="height:50px"></div><p id="c" style="margin:0">c</p>' \
+        "<script>const c = document.getElementById('c'); " \
+        'r.push(c.getBoundingClientRect().y, c.offsetTop, document.body.offsetHeight, c.getBoundingClientRect().height)</script></div>'
+    )
+    expect(s.evaluate_script('r')).to eq([0, 68, 68, 86, 18])
+  end
+
+  # `dir="auto"` takes its direction from the first strong character of its text, and every box under it inherits that.
+  # `markDirAutoScopes` marks the auto element's subtree when its resolved direction FLIPS — without it the sibling kept
+  # its left-to-right box in both layouts.
+  describe 'dir=auto' do
+    def x_after(body, change, shadow: nil)
+      s = session_for('body { margin: 0 }', body)
+      s.execute_script("document.getElementById('h').attachShadow({mode: 'open'}).innerHTML = '#{shadow}'") if shadow
+      x = "document.getElementById('b').getBoundingClientRect().x"
+      [s.evaluate_script(x), (s.execute_script(change) || s.evaluate_script(x))]
+    end
+
+    it 'turns the other children around when a text edit flips the direction' do   # Chrome: 0 -> 200
+      body = '<div dir="auto" style="width:300px"><p id="a">hello</p><div><p id="b" style="width:100px">sibling</p></div></div>'
+      expect(x_after(body, "document.getElementById('a').textContent = 'שלום עולם'")).to eq([0, 200])
+    end
+
+    # …up the FLAT tree: a `<slot dir=auto>` resolves from its ASSIGNED text, which a node-tree walk never reaches.
+    # (This one and the next the JS layout answered right by accident; a native pass REPLAYED the stale subtree, which
+    # `CSIM_NL_REUSE_VERIFY=1` turns into a throw.)
+    it 'flips a dir=auto slot when its slotted text changes' do   # Chrome: 0 -> 200
+      body = '<div id="h"><span id="a">hello</span><p id="b" style="width:100px;margin:0">x</p></div>'
+      shadow = '<div style="width:300px"><slot dir="auto" style="display:block"></slot></div>'
+      expect(x_after(body, "document.getElementById('a').firstChild.data = 'שלום'", shadow: shadow)).to eq([0, 200])
+    end
+
+    # A descendant's own `dir` takes its text out of the scan (and removing it puts the text back). (The Hebrew is written
+    # as references: the page is served with no charset.)
+    it 'flips when a descendant gains or loses a dir of its own' do   # Chrome: 200 -> 0, and 0 -> 200
+      expect(x_after('<div dir="auto" style="width:300px"><span id="a">&#x5e9;&#x5dc;&#x5d5;&#x5dd;</span><p id="b" style="width:100px;margin:0">x</p></div>',
+                     "document.getElementById('a').setAttribute('dir', 'ltr')")).to eq([200, 0])
+      expect(x_after('<div dir="auto" style="width:300px"><span id="a" dir="ltr">&#x5e9;&#x5dc;&#x5d5;&#x5dd;</span><p id="b" style="width:100px;margin:0">x</p></div>',
+                     "document.getElementById('a').removeAttribute('dir')")).to eq([0, 200])
+    end
+
+    # …and only when it FLIPS: marking every edit's auto ancestor anyway cost a `<body dir=auto>` page every memo in
+    # the document per text edit (6x on 3,000 elements). A COUNT, not a wall — `__csimSubtreeMarks`.
+    it 'leaves the subtree alone when an edit does not flip the direction' do
+      s = session_for('', '<div dir="auto"><span id="a">hello</span><p>x</p></div>')
+      marks = lambda do |change|
+        s.evaluate_script(<<~JS)
+          (() => {
+            document.body.offsetHeight;
+            const m = __csimSubtreeMarks();
+            #{change};
+            document.body.offsetHeight;
+            return __csimSubtreeMarks() - m;
+          })()
+        JS
+      end
+      expect(marks.call("document.getElementById('a').firstChild.data = 'world'")).to eq(0)
+      expect(marks.call("document.getElementById('a').firstChild.data = 'שלום'")).to be > 0
+    end
   end
 end

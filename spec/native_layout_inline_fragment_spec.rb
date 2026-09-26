@@ -251,6 +251,33 @@ RSpec.describe 'native layout inline box fragments', if: ENV.fetch('CSIM_JS_ENGI
     expect_fragments('<div style="width:300px"><div>x</div><br id="m" style="display:block"><div>y</div></div>', chrome: [[0, 18, 0, 17]])
   end
 
+  # …with no CSS box to read a used value, an offset or a break off. Chrome: getComputedStyle reports what the `<br>`
+  # DECLARED (`40px` for `float: left; width: 40px`, `auto` for a bare `display: block`), every `offset*` is 0 with the
+  # container still its `offsetParent`, and a `display: contents` one — which behaves as `none` on a `<br>` — breaks
+  # nothing, in `innerText` as on the line.
+  it 'answers for a <br> as the box-less break it is' do
+    body = '<div id="p" style="width:300px;position:relative">aa<br id="a" style="display:block">bb<br id="b" style="float:left;width:40px">cc' \
+           '<br id="c" style="position:absolute;top:5px">dd<br id="d" style="display:flex;height:30px;margin:4px">ee</div>' \
+           '<div id="t">aa<br style="display:contents">bb</div><div id="u">aa<br style="float:left">bb</div>'
+    got = with_simulated_session(page(body)) do |session|
+      session.visit '/'
+      session.evaluate_script(<<~JS)
+        (() => {
+          const style = [...'abcd'].map((k) => { const g = getComputedStyle(document.getElementById(k)); return [g.display, g.width, g.height, g.marginTop]; });
+          const b = document.getElementById('b');
+          return [style, [b.offsetTop, b.offsetLeft, b.offsetWidth, b.offsetHeight, b.offsetParent.id],
+                  document.getElementById('t').innerText, document.getElementById('u').innerText];
+        })()
+      JS
+    end
+    expect(got).to eq([
+      [['block', 'auto', 'auto', '0px'], ['block', '40px', 'auto', '0px'], ['block', 'auto', 'auto', '0px'], ['flex', 'auto', '30px', '4px']],
+      [0, 0, 0, 0, 'p'],
+      'aabb',
+      "aa\nbb"
+    ])
+  end
+
   it 'lays a <wbr> out as the inline box it is' do
     expect_fragments('<div style="font:16px monospace;width:100px">a<wbr id="m" style="position:relative;left:5px;top:3px">b</div>')
     {

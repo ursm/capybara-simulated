@@ -11539,9 +11539,6 @@ shadow-dom/focus/text-selection-with-delegatesFocus-text-control.html:
 shadow-dom/focus/text-selection-with-delegatesFocus.html:
 - shadow root has selectable text when focus is delegated
 - shadow root has selectable text when focus is not delegated
-shadow-dom/imperative-slot-fallback-clear.html:
-- Element fallback should be cleared in a subsequent layout
-- Text node fallback should be cleared in a subsequently layout
 shadow-dom/layout-slot-no-longer-assigned.html:
 - "== shadow-dom/reference/empty.html (both renderings blank)"
 shadow-dom/layout-slot-no-longer-fallback.html:
