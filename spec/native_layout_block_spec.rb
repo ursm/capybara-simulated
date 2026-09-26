@@ -633,6 +633,11 @@ RSpec.describe 'native layout L1 block-flow parity', if: ENV.fetch('CSIM_JS_ENGI
       expect_parity(body)
       expect(laid_out_rect(body).first(3)).to eq([x, y, w]), body
     end
+    # …and `float` / `clear` likewise, `inherit` from the INHERITANCE parent (review rv54): a `float: inherit` span in a
+    # right float floats right (Chrome 1014.39 of 1024), where read as an unknown side it stayed in flow.
+    body = '<div style="float:right;font:16px monospace"><span id="m" style="float:inherit">f</span><span style="display:inline-block;width:4px;height:4px"></span></div>'
+    expect_parity(body)
+    expect(laid_out_rect(body)[0]).to be_within(0.05).of(1014.39)
   end
 
   # A float EXACTLY as wide as the room its neighbours leave fits, to the tolerance a line is given: the engines add
