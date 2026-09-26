@@ -829,6 +829,12 @@ RSpec.describe 'native layout flex parity', if: ENV.fetch('CSIM_JS_ENGINE', 'v8'
     end
     r = run_shadow('<div style="display:flex;width:40px"><div style="flex:1 1 0%;display:flex">aaa<wbr>bbbbbb</div></div>')
     expect(r).to include('ok' => false, 'reason' => 'flex-text-wbr')
+    # …and under a white-space that does not wrap, each such line is ONE unbreakable token, a wide character or a soft
+    # hyphen no opportunity: the oracle's pen skipped the container's pin (its items are blocks of their own) and so
+    # broke `nowrap` CJK per character — 16 where native and Chrome say 128 / 127.53 (review rv51).
+    body = '<div style="display:flex;width:400px"><div id="m" style="display:flex;flex:0 0 min-content;white-space:nowrap">日本語のテキスト</div></div>'
+    expect_parity(body)
+    expect(laid_out_rect(body)[2]).to be_within(0.5).of(127.53)
   end
   it 'matches a WRAPPING row where the line-height floor exceeds the stacked line (align-content shares the surplus)' do
     expect_parity('<div style="display:flex;flex-wrap:wrap;align-content:center;width:400px">text<div style="width:60px;height:8px"></div></div>')
