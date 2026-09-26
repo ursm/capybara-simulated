@@ -40270,13 +40270,13 @@ html/dom/partial-updates/tentative/template-for-script-children.html:
 - name: HTML partial updates - a script inside a patch should execute
   reason: Tentative WICG declarative partial updates (DOM Parts / template instantiation);
     unshipped feature, not modeled (rule 1).
+html/dom/partial-updates/tentative/template-for-script-eval.html:
+- name: HTML partial updates - template for can create a new executable script
+  reason: Tentative WICG declarative partial updates (DOM Parts / template instantiation);
+    unshipped feature, not modeled (rule 1). (It passed only while a template's scripts
+    ran during the parse, which they must not.)
 html/dom/partial-updates/tentative/template-for-script-replace.html:
 - name: HTML partial updates - a script replaced with a patch should execute
-  reason: Tentative WICG declarative partial updates (DOM Parts / template instantiation);
-    unshipped feature, not modeled (rule 1).
-html/dom/partial-updates/tentative/template-for-scripting-nested.html:
-- name: HTML partial updates - a script inside a template inside a patch should not
-    execute
   reason: Tentative WICG declarative partial updates (DOM Parts / template instantiation);
     unshipped feature, not modeled (rule 1).
 html/dom/partial-updates/tentative/template-for-shadow-nested.html:
