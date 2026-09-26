@@ -619,6 +619,21 @@ RSpec.describe 'native layout L1 block-flow parity', if: ENV.fetch('CSIM_JS_ENGI
     expect_parity('<div style="writing-mode:vertical-lr;height:300px;width:200px"><p style="margin:0">a</p>x<span style="float:left;width:50%;height:20px;margin-left:10%"></span>y</div>')
   end
 
+  # A float EXACTLY as wide as the room its neighbours leave fits, to the tolerance a line is given: the engines add
+  # the widths in different frames — the oracle from the page origin, native from the content edge — and one ULP of
+  # the page coordinate decided it. A shrink-to-fit box around two floats is exactly that, and it is Redmine's
+  # account menu on every page (22 to 507 mismatches a page state, all of them this). Chrome fits it (977.48).
+  it 'fits a float exactly as wide as the room its neighbour leaves' do
+    [
+      '<div style="font:12px Noto Sans"><div style="float:right"><div style="float:left">Sign in</div><div id="m" style="float:left">Register</div></div></div>',
+      '<div style="font:12px Noto Sans"><div style="float:right"><ul style="margin:0;padding:0"><li style="float:left;list-style:none;margin:0 12px 0 0;white-space:nowrap"><a>Sign in</a></li>' \
+      '<li id="m" style="float:left;list-style:none;margin:0;white-space:nowrap"><a>Register</a></li></ul></div></div>'
+    ].each do |body|
+      expect_parity(body)
+      expect(laid_out_rect(body)[1]).to eq(0), body
+    end
+  end
+
   # An OUT-OF-FLOW child of a mixed block is inline-level content of the anonymous group it sits in, so it
   # takes the same hook a text block's does: its record is emitted where the runs reach it and the marker
   # carries the index. It used to decline the whole pass (`abspos-in-mixed-block`, 1,393 shapes).

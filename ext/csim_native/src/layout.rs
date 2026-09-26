@@ -3229,8 +3229,8 @@ fn float_fit_y(items: &[FloatItem], y: f64, w: f64, left: f64, right: f64, h: f6
     stops.sort_by(|a, b| a.partial_cmp(b).unwrap());
     for &at in &stops {
         let (bl, br) = float_band(items, at, h, left, right);
-        if br - bl >= w {
-            return at;
+        if br - bl >= w - LINE_FIT_EPS {
+            return at; // (…to the line's tolerance: the oracle's `floatFitY` says why)
         }
     }
     *stops.last().unwrap()
