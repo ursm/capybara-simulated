@@ -230,6 +230,27 @@ RSpec.describe 'native layout inline box fragments', if: ENV.fetch('CSIM_JS_ENGI
                      shared: [[300, 0, 0, 17]], shared_chrome: [[285.796875, 0, 0, 17]])
   end
 
+  # …and a `<br>` is a LINE BREAK whatever it declares (`displayOf` / `positionOf` / `isFloated`): Chrome gives every
+  # one of these the same break and the same empty box at the end of `aa`. Native laid a `display: block` one out as a
+  # 300px block BETWEEN two anonymous groups (the break came from the groups, the box was the block's), an atomic one as
+  # a zero box and a relative one shifted; both engines hoisted a floated or absolute one out of the line — `aabb` on one
+  # line, 18 tall where Chrome says 36.
+  it 'lays a <br> out as a line break whatever it declares' do
+    [
+      'display:block',
+      'display:inline-block',
+      'display:flex',
+      'float:left',
+      'position:absolute;top:50px',
+      'position:relative;top:10px;left:5px',
+      'padding:10px;border:3px solid;margin:7px'
+    ].each do |style|
+      expect_fragments(%(<div style="width:300px">aa<br id="m" style="#{style}">bb</div>), chrome: [[14.203125, 0, 0, 17]])
+    end
+    expect_fragments('<div style="width:300px"><br id="m" style="display:block"></div>', chrome: [[0, 0, 0, 17]])
+    expect_fragments('<div style="width:300px"><div>x</div><br id="m" style="display:block"><div>y</div></div>', chrome: [[0, 18, 0, 17]])
+  end
+
   it 'lays a <wbr> out as the inline box it is' do
     expect_fragments('<div style="font:16px monospace;width:100px">a<wbr id="m" style="position:relative;left:5px;top:3px">b</div>')
     {

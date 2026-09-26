@@ -808,4 +808,72 @@ RSpec.describe 'layout reuse across dynamic style state' do
     JS
     expect(got).to eq([100, 85])
   end
+
+  # The FLAT tree can change shape with no mutation under the boxes it moves: a slot's assigned set changes when a
+  # light child's `slot` attribute does, when `assign()` is called, or when the light child goes — and the boxes that
+  # hold the slot live in the SHADOW tree, above no node any of those mutations stamps. `signalSlotChange` marks the
+  # slot's subtree and its flat-tree spine. Without it both layouts kept the old flat tree: a span renamed out of the
+  # 100px slot stayed where it was, and a manually assigned span or a removed one never moved the box after it.
+  describe 'slot assignment' do
+    def slotted_session(body, script)
+      s = session_for('body { margin: 0 }', body)
+      s.execute_script(script)
+      s.evaluate_script('document.body.offsetHeight')   # a first layout, so a cache that never fills cannot pass
+      s
+    end
+
+    it 'relays out the shadow boxes when a slot attribute moves a child to another slot' do
+      s = slotted_session(
+        '<div id="h"><span slot="a" id="sa">aaaa bbbb cccc dddd eeee ffff</span><span slot="b" id="sb">x</span></div>',
+        "document.getElementById('h').attachShadow({mode: 'open'}).innerHTML = " \
+          "'<div style=\"width:100px\"><slot name=\"a\"></slot></div>" \
+          "<div style=\"width:400px;font-size:20px\"><slot name=\"b\"></slot></div>'"
+      )
+      rect = <<~JS
+        (() => {
+          const r = document.getElementById('sa').getBoundingClientRect();
+          return [r.x, r.y, r.height];
+        })()
+      JS
+      expect(s.evaluate_script(rect)).to eq([0, 0, 35])    # two lines in the 100px box (Chrome: 0, 0, 35)
+      s.execute_script("document.getElementById('sa').slot = 'b'")
+      expect(s.evaluate_script(rect)).to eq([0, 0, 22])    # one 20px line in the 400px box (Chrome: 0, 0, 22)
+      s.execute_script("document.getElementById('sa').slot = 'a'; document.getElementById('sb').slot = 'a'")
+      expect(s.evaluate_script(rect)).to eq([0, 0, 35])    # back in the 100px box (Chrome: 0, 0, 35)
+    end
+
+    it 'relays out after assign() and after a slotted child is removed' do
+      s = slotted_session(
+        '<div id="h"><span id="x1">aaaa bbbb cccc dddd</span></div><div id="h2"><span id="y1">aaaa bbbb cccc dddd</span></div>',
+        <<~JS
+          const sr = document.getElementById('h').attachShadow({mode: 'open', slotAssignment: 'manual'});
+          sr.innerHTML = '<div style="width:100px"><slot></slot></div><div id="tail" style="height:5px"></div>';
+          const sr2 = document.getElementById('h2').attachShadow({mode: 'open'});
+          sr2.innerHTML = '<div style="width:100px"><slot></slot></div><div id="tail" style="height:5px"></div>';
+        JS
+      )
+      tails = <<~JS
+        [document.getElementById('h'), document.getElementById('h2')].map((h) => h.shadowRoot.getElementById('tail').getBoundingClientRect().y)
+      JS
+      expect(s.evaluate_script(tails)).to eq([0, 41])      # nothing assigned yet; two lines in the second host (Chrome)
+      s.execute_script("document.getElementById('h').shadowRoot.querySelector('slot').assign(document.getElementById('x1'))")
+      expect(s.evaluate_script(tails)).to eq([36, 77])     # (Chrome: 36, 77)
+      s.execute_script("document.getElementById('y1').remove()")
+      expect(s.evaluate_script(tails)).to eq([36, 41])     # (Chrome: 36, 41)
+    end
+  end
+
+  # `dir="auto"` takes its direction from the first strong character of its text, and every box under it inherits that
+  # — so a TEXT edit in one child turns its siblings around. `markDirAutoScopes` marks the auto element's subtree;
+  # without it the sibling kept its left-to-right box in both layouts. Chrome: 0 -> 200, the 100px box at the right.
+  it "turns a dir=auto element's other children around when a text edit flips its direction" do
+    s = session_for('body { margin: 0 }', '<div dir="auto" style="width:300px"><p id="a">hello</p>' \
+      '<div><p id="b" style="width:100px">sibling</p></div></div>')
+    x = "document.getElementById('b').getBoundingClientRect().x"
+    expect(s.evaluate_script(x)).to eq(0)
+    s.execute_script("document.getElementById('a').textContent = 'שלום עולם'")
+    expect(s.evaluate_script(x)).to eq(200)
+    s.execute_script("document.getElementById('a').textContent = 'hello'")
+    expect(s.evaluate_script(x)).to eq(0)
+  end
 end
