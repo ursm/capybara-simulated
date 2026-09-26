@@ -51,6 +51,28 @@ RSpec.describe 'stylesheet sets + data: CSS' do
     expect(color(s, 'a')).to eq('rgb(0, 0, 0)')
   end
 
+  # A `<style>`'s `media` re-selects its sheet as a `<link>`'s does — its rules are its text, so there is nothing to
+  # re-obtain — and the sheet's media list follows the attribute on the same sheet object. A `print` style switched to
+  # `screen` kept applying nothing, and both elements' `sheet.media` kept the query they were built with. Chrome:
+  # `[["print","print"],"screen","screen",true,…]` and both rules applied.
+  it 'follows a media attribute change on a <style> and a <link>' do
+    s = session_for('<style id=s media=print>#a { color: rgb(0, 128, 0) }</style>' \
+                    '<link id=l rel=stylesheet media=print href="data:text/css,%23b{color:rgb(0,0,255)}">')
+    got = s.evaluate_script(<<~JS)
+      (() => {
+        const st = document.getElementById('s'), l = document.getElementById('l'), sheet = st.sheet;
+        const before = [st.sheet.media.mediaText, l.sheet.media.mediaText, getComputedStyle(document.getElementById('a')).color];
+        st.setAttribute('media', 'screen');
+        l.setAttribute('media', 'screen');
+        return [before, st.sheet.media.mediaText, l.sheet.media.mediaText, st.sheet === sheet];
+      })()
+    JS
+    expect(got).to eq([['print', 'print', 'rgb(0, 0, 0)'], 'screen', 'screen', true])
+    expect([color(s, 'a'), color(s, 'b')]).to eq(['rgb(0, 128, 0)', 'rgb(0, 0, 255)'])
+    s.evaluate_script("document.getElementById('s').removeAttribute('media')")
+    expect(s.evaluate_script("document.getElementById('s').sheet.media.mediaText")).to eq('')
+  end
+
   it 'loads percent-encoded data:text/css into the cascade' do
     s = session_for('<link rel=stylesheet href="data:text/css,%23a{display:none}">')
     expect(display(s, 'a')).to eq('none')
