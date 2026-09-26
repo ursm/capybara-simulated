@@ -9075,8 +9075,6 @@ html/dom/elements/the-innertext-and-outertext-properties/getter.html:
 - <svg><defs> text contents ignored ("<div><svg><defs><text>abc</text></defs></svg></div>")
 - <textarea> contents ignored ("<textarea>abc")
 - Blank lines around a <p> in its own block ("<div>abc<div><p>123</p></div>def")
-- Invisible <p> doesn't induce extra line breaks ("<div style='visibility:hidden'><p><span
-  style='visibility:visible'>abc</span></p>\n<div style='visibility:visible'>def</div>")
 - Leading/trailing space removal at display:inline-block boundary ("<div>123<span
   style='display:inline-block'> abc </span>def")
 - Leading/trailing space removal at display:inline-flex boundary ("<div>123<span style='display:inline-flex'>
@@ -9121,11 +9119,6 @@ html/dom/elements/the-innertext-and-outertext-properties/getter.html:
 - position:absolute induces a block boundary ("<div>abc<span style='position:absolute'>123</span>def")
 - text-transform handles Turkish casing ("<div><div lang='tr' style='text-transform:uppercase'>i
   ı")
-- visibility:collapse row with visible cell ("<table><tr style='visibility:collapse'><td
-  style='visibility:visible'>abc")
-- visibility:collapse row-group with visible cell ("<table><tbody style='visibility:collapse'><tr><td
-  style='visibility:visible'>abc")
-- visibility:visible child rendered ("<div style='visibility:hidden'>123<span style='visibility:visible'>abc")
 html/dom/elements/the-innertext-and-outertext-properties/innertext-setter.html:
 - Assigning undefined
 - Assigning undefined, detached

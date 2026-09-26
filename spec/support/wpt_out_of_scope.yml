@@ -39243,6 +39243,12 @@ html/dom/elements/global-attributes/dataset.html:
     the property exists on every element; making it per-namespace needs a per-instance
     defineProperty (hot path) and the naive return-undefined gate regresses encoding/utf-32
     (which relies on `"dataset" in foreignEl` being false). (CLAUDE.md rule 1 bounded-design-cost.)
+html/dom/elements/the-innertext-and-outertext-properties/getter.html:
+- name: <audio> contents ignored ("<audio style='display:block'>abc")
+  reason: 'The TEST contradicts the spec and both engines: HTML''s UA sheet has `audio:not([controls])
+    { display: none !important }`, so a controls-less `<audio style="display:block">` is not being
+    rendered and its innerText is its textContent — "abc" in Chrome AND Firefox (measured 2026-09-26),
+    where the test expects "". Kept out so the gate does not reward the wrong answer.'
 html/dom/historical.html:
 - name: document.all cannot find applet
   reason: document.all is the [[IsHTMLDDA]] exotic object (falsy in boolean context,
