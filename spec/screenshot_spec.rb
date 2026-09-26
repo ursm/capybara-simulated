@@ -172,6 +172,16 @@ RSpec.describe 'save_screenshot' do
     end
   end
 
+  # …and a block-level REPLACED element's image paints with the lines, over a float laid over its box (Chrome: red at
+  # the centre, where drawing the bitmap with the box put the float's blue there).
+  it 'paints a block-level image over a float laid over it' do
+    s = page_with('<canvas id="c" width="100" height="100" style="display:block"></canvas><div class="f"></div>' \
+                  '<script>const g = document.getElementById("c").getContext("2d"); g.fillStyle = "rgb(255,0,0)"; ' \
+                  'g.fillRect(0, 0, 100, 100)</script>',
+                  css: '.f{float:left;width:100px;height:100px;margin-top:-100px;background:rgb(0,0,255)}')
+    shot(s) {|_img, px, _path| expect(px.call(50, 50)).to eq([255, 0, 0]) }
+  end
+
   # A box's text paints with the box — in its context's inline phase — not over everything: a positioned box
   # placed over a paragraph hides its words.
   it 'paints text under a positioned box laid over it' do

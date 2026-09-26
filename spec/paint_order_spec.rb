@@ -8,14 +8,18 @@ require_relative 'support/session_teardown'
 # positioned boxes; a float, an atomic inline and a `z-index: auto` positioned box each paint as ONE unit, their
 # positioned descendants excepted. Placement order is not paint order — a float placed before a block still covers
 # it. Every answer below is Chrome's, read off this markup with `--headless --dump-dom` (each probe is 50px in and
-# 25px down from the shape's top-left corner). A "was" names what the placement-order ranking said, which knew
-# no phases and no stacking context but a positioned box's.
+# 25px down from the shape's top-left corner unless it says otherwise). A "was" names what the placement-order
+# ranking said, which knew no phases and no stacking context but a positioned box's.
 RSpec.describe 'paint order' do
-  def hit(body)
+  def hit(body, x: 50, y: 25)
     html = %(<!DOCTYPE html><html><head><style>body{margin:0} div,span{box-sizing:border-box}</style></head><body>#{body}</body></html>)
     s = simulated_session(->(_env) { [200, {'content-type' => 'text/html'}, [html]] })
     s.visit '/'
-    s.evaluate_script('(e => e && (e.id || e.tagName))(document.elementFromPoint(50, 25))')
+    s.evaluate_script("(e => e && (e.id || e.tagName))(document.elementFromPoint(#{x}, #{y}))")
+  end
+
+  def with_negative_child(style, before: '')
+    %(#{before}<div id="ctx" style="#{style};height:120px"><div id="neg" style="position:relative;z-index:-1;width:100px;height:100px"></div></div>)
   end
 
   it 'paints a float over the block backgrounds of its context' do
@@ -84,11 +88,91 @@ RSpec.describe 'paint order' do
     HTML
   end
 
-  it 'makes a stacking context of a transform, an opacity and an isolation' do
-    %w[transform:scale(1) opacity:0.5 isolation:isolate].each do |effect|
-      expect(hit(<<~HTML)).to eq('neg'), effect
-        <div id="ctx" style="#{effect};height:120px"><div id="neg" style="position:relative;z-index:-1;width:100px;height:100px"></div></div>
-      HTML
+  it 'makes a stacking context of every effect that composites a subtree' do
+    [
+      'transform:scale(1)',
+      'opacity:0.5',
+      'isolation:isolate',
+      'transform-style:preserve-3d',
+      'position:relative;will-change:z-index',
+      'mask:linear-gradient(black,black)',
+      'view-transition-name:foo'
+    ].each do |effect|
+      expect(hit(with_negative_child(effect))).to eq('neg'), effect
     end
+    # …an animation of one, still in its delay, and a `z-index` inherited from a parent that has one.
+    keyframes = '<style>@keyframes bf{from{backdrop-filter:blur(1px)}to{backdrop-filter:blur(2px)}}</style>'
+    expect(hit(with_negative_child('animation:bf 100s', before: keyframes))).to eq('neg')
+    expect(hit(%(<div style="z-index:3">#{with_negative_child('position:relative;z-index:inherit')}</div>))).to eq('neg')
+    # …but not an opacity a transition leaves at 1 (the transition is not running).
+    expect(hit(with_negative_child('transition:opacity 100s;opacity:1'))).to eq('ctx')
+  end
+
+  # A box-less element — `display: contents`, a `<slot>` — is no level of the paint order: nothing it declares
+  # makes a unit or a context, and the children it hands its parent are that parent's items.
+  it 'looks through a box-less element' do
+    expect(hit(<<~HTML)).to eq('b')
+      <div style="display:contents;position:relative"><div id="a" style="height:100px"></div></div><div
+        id="b" style="margin-top:-100px;height:100px"></div>
+    HTML
+    expect(hit(<<~HTML)).to eq('b')
+      <div style="display:contents;position:relative;z-index:5"><div id="a" style="position:relative;height:100px"></div></div><div
+        id="b" style="position:relative;margin-top:-100px;height:100px"></div>
+    HTML
+    expect(hit(<<~HTML)).to eq('a')
+      <div style="display:flex;width:300px"><div style="display:contents"><div id="a" style="z-index:1;width:100px;height:100px;margin-right:-100px"></div></div><div
+        id="b" style="width:100px;height:100px;position:relative"></div></div>
+    HTML
+    expect(hit(<<~HTML)).to eq('a')
+      <div id="host"><div id="a" style="width:100px;height:100px"></div></div>
+      <script>document.getElementById('host').attachShadow({mode: 'open'}).innerHTML = '<div style="display:flex;width:300px"><div id="sib" style="width:100px;height:100px;margin-right:-100px"></div><slot></slot></div>'</script>
+    HTML
+  end
+
+  it 'paints a floated flex item as the item it is' do
+    expect(hit(<<~HTML)).to eq('b')
+      <div style="display:flex;width:300px"><div id="a" style="width:100px;height:100px"></div><div
+        id="b" style="float:left;margin-left:-100px;width:100px;height:100px"></div></div>
+    HTML
+  end
+
+  # An INLINE box paints its own fragments in the inline phase — over the floats inside it, and, when it is a
+  # stacking context, over its own negative children (appendix E 7.2.1), where a block context's background is under
+  # them.
+  it 'paints a non-atomic inline over what appendix E puts under it' do
+    expect(hit(<<~HTML, x: 50, y: 50)).to eq('s')
+      <div style="font:40px/100px monospace"><span id="s" style="opacity:.9"><span style="position:relative;z-index:-1">XXXXXXX</span></span></div>
+    HTML
+    expect(hit(<<~HTML, x: 20, y: 10)).to eq('a')
+      <p style="font:16px/20px sans-serif;margin:0"><a id="a" href="#">link text here that is long<img
+        style="float:left;width:60px;height:60px;margin-right:-60px"></a></p>
+    HTML
+  end
+
+  it 'paints a replaced element with the lines, over a float' do
+    expect(hit(<<~HTML)).to eq('c')
+      <canvas id="c" style="display:block;width:100px;height:100px"></canvas><div
+        style="float:left;width:100px;height:100px;margin-top:-100px"></div>
+    HTML
+  end
+
+  # CSSOM View: the hit is RETARGETED against the tree asked — a document sees a web component's host, the shadow
+  # root the element inside it; and a shadow root asked where only the canvas is hit answers nothing.
+  it 'retargets the hit out of a shadow tree' do
+    html = <<~HTML
+      <!DOCTYPE html><body style="margin:0"><div id="host"></div><script>
+        window.sr = document.getElementById('host').attachShadow({mode: 'open'});
+        sr.innerHTML = '<div id="inner" style="width:100px;height:100px"></div>';
+      </script></body>
+    HTML
+    s = simulated_session(->(_env) { [200, {'content-type' => 'text/html'}, [html]] })
+    s.visit '/'
+    ids = 'es => es.map(e => e.id || e.tagName)'
+    expect(s.evaluate_script('document.elementFromPoint(50, 50).id')).to eq('host')
+    expect(s.evaluate_script('sr.elementFromPoint(50, 50).id')).to eq('inner')
+    expect(s.evaluate_script("(#{ids})(document.elementsFromPoint(50, 50))")).to eq(%w[host BODY HTML])
+    expect(s.evaluate_script("(#{ids})(sr.elementsFromPoint(50, 50))")).to eq(%w[inner host BODY HTML])
+    expect(s.evaluate_script('sr.elementFromPoint(50, 500)')).to be_nil
+    expect(s.evaluate_script("(#{ids})(sr.elementsFromPoint(50, 500))")).to eq([])
   end
 end

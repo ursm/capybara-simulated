@@ -7131,8 +7131,6 @@ css/css-transforms/transform-root-bg-003.html:
 - "== css/css-transforms/transform-root-bg-001-ref.html (both renderings blank)"
 css/css-transforms/transform-root-bg-004.html:
 - "== css/css-transforms/transform-root-bg-004-ref.html (both renderings blank)"
-css/css-transforms/transform-style-stacking-context.html:
-- "== css/css-transforms/transform-lime-square-ref.html"
 css/css-transforms/transform-transformable-table-row.html:
 - "== css/css-transforms/transform-transformable-table-row-ref.html (both renderings
   blank)"
@@ -11483,33 +11481,6 @@ service-workers/service-worker/xhr-response-url.https.html:
 service-workers/service-worker/xsl-base-url.https.html:
 - base URL when service worker does respondWith(fetch(responseUrl))
 shadow-dom/DocumentOrShadowRoot-prototype-elementFromPoint.html:
-- 'document.elementFromPoint and shadow.ElementFromPoint must return the shadow host
-  of the hit-tested text node when the hit-tested text node is a direct child of the
-  root and the host has display: block'
-- 'document.elementFromPoint and shadow.ElementFromPoint must return the shadow host
-  of the hit-tested text node when the hit-tested text node is a direct child of the
-  root and the host has display: inline'
-- 'document.elementFromPoint and shadow.ElementFromPoint must return the shadow host
-  of the hit-tested text node when the hit-tested text node is a direct child of the
-  root and the host has display: inline-block'
-- 'document.elementFromPoint and shadowRoot.elementFromPoint must return the element
-  assigned to a slot when hit-tested text node under an element is assigned to a slot
-  in the shadow tree and the shadow host of the slot has display: block'
-- 'document.elementFromPoint and shadowRoot.elementFromPoint must return the element
-  assigned to a slot when hit-tested text node under an element is assigned to a slot
-  in the shadow tree and the shadow host of the slot has display: inline'
-- 'document.elementFromPoint and shadowRoot.elementFromPoint must return the element
-  assigned to a slot when hit-tested text node under an element is assigned to a slot
-  in the shadow tree and the shadow host of the slot has display: inline-block'
-- 'document.elementFromPoint and shadowRoot.elementFromPoint must return the shadow
-  host when the hit-tested text node is assigned to a slot and the host has display:
-  block'
-- 'document.elementFromPoint and shadowRoot.elementFromPoint must return the shadow
-  host when the hit-tested text node is assigned to a slot and the host has display:
-  inline'
-- 'document.elementFromPoint and shadowRoot.elementFromPoint must return the shadow
-  host when the hit-tested text node is assigned to a slot and the host has display:
-  inline-block'
 - 'document.elementFromPoint must return the shadow host and shadowRoot.elementFromPoint
   must return the slot parent of the fallback text when the hit-tested text node is
   a fallback content and the host has display: block'
@@ -11519,60 +11490,6 @@ shadow-dom/DocumentOrShadowRoot-prototype-elementFromPoint.html:
 - 'document.elementFromPoint must return the shadow host and shadowRoot.elementFromPoint
   must return the slot parent of the fallback text when the hit-tested text node is
   a fallback content and the host has display: inline-block'
-- 'document.elementFromPoint must return the shadow host of the hit-tested element
-  under a shadow root and shadowRoot.elementFromPoint must return the element parent
-  of the hit-tested text node under the point when the shadow host has display: block'
-- 'document.elementFromPoint must return the shadow host of the hit-tested element
-  under a shadow root and shadowRoot.elementFromPoint must return the element parent
-  of the hit-tested text node under the point when the shadow host has display: inline'
-- 'document.elementFromPoint must return the shadow host of the hit-tested element
-  under a shadow root and shadowRoot.elementFromPoint must return the element parent
-  of the hit-tested text node under the point when the shadow host has display: inline-block'
-- 'document.elementFromPoint, shadowRoot.elementFromPoint must return a child element
-  with its own shadow tree assigned to a slot when the hit-tested text node is a child
-  of another element and innerShadow.elementFromPoint must return the parent element
-  of the hit-tested text node under it when the outer shadow host has display: block'
-- 'document.elementFromPoint, shadowRoot.elementFromPoint must return a child element
-  with its own shadow tree assigned to a slot when the hit-tested text node is a child
-  of another element and innerShadow.elementFromPoint must return the parent element
-  of the hit-tested text node under it when the outer shadow host has display: inline'
-- 'document.elementFromPoint, shadowRoot.elementFromPoint must return a child element
-  with its own shadow tree assigned to a slot when the hit-tested text node is a child
-  of another element and innerShadow.elementFromPoint must return the parent element
-  of the hit-tested text node under it when the outer shadow host has display: inline-block'
-- 'document.elementFromPoint, shadowRoot.elementFromPoint, innerShadow.elementFromPoint
-  must return a child element assigned to a slot when the hit-tested text node is
-  assigned to a slot in the shadow tree of the child element and the outer shadow
-  host has display: block'
-- 'document.elementFromPoint, shadowRoot.elementFromPoint, innerShadow.elementFromPoint
-  must return a child element assigned to a slot when the hit-tested text node is
-  assigned to a slot in the shadow tree of the child element and the outer shadow
-  host has display: inline'
-- 'document.elementFromPoint, shadowRoot.elementFromPoint, innerShadow.elementFromPoint
-  must return a child element assigned to a slot when the hit-tested text node is
-  assigned to a slot in the shadow tree of the child element and the outer shadow
-  host has display: inline-block'
-- 'document.elementFromPoint, shadowRoot.elementFromPoint, innerShadow.elementFromPoint
-  must return a child element with its own shadow tree assigned to a slot when the
-  hit-tested text node is its direct child and the outer shadow host has display:
-  block'
-- 'document.elementFromPoint, shadowRoot.elementFromPoint, innerShadow.elementFromPoint
-  must return a child element with its own shadow tree assigned to a slot when the
-  hit-tested text node is its direct child and the outer shadow host has display:
-  inline'
-- 'document.elementFromPoint, shadowRoot.elementFromPoint, innerShadow.elementFromPoint
-  must return a child element with its own shadow tree assigned to a slot when the
-  hit-tested text node is its direct child and the outer shadow host has display:
-  inline-block'
-- 'document.elementsFromPoint and shadow.elementsFromPoint must return the shadow
-  host and its ancestors of the hit-tested text node when the hit-tested text node
-  is a direct child of the root and the host has display: block'
-- 'document.elementsFromPoint and shadow.elementsFromPoint must return the shadow
-  host and its ancestors of the hit-tested text node when the hit-tested text node
-  is a direct child of the root and the host has display: inline'
-- 'document.elementsFromPoint and shadow.elementsFromPoint must return the shadow
-  host and its ancestors of the hit-tested text node when the hit-tested text node
-  is a direct child of the root and the host has display: inline-block'
 - 'document.elementsFromPoint and shadowRoot.elementsFromPoint must return the element
   assigned to a slot and its non-shadow ancestors when hit-tested text node under
   an element is assigned to a slot in the shadow tree and the shadow host of the slot
@@ -11585,15 +11502,6 @@ shadow-dom/DocumentOrShadowRoot-prototype-elementFromPoint.html:
   assigned to a slot and its non-shadow ancestors when hit-tested text node under
   an element is assigned to a slot in the shadow tree and the shadow host of the slot
   has display: inline-block'
-- 'document.elementsFromPoint and shadowRoot.elementsFromPoint must return the shadow
-  host and its ancestors when the hit-tested text node is assigned to a slot and the
-  host has display: block'
-- 'document.elementsFromPoint and shadowRoot.elementsFromPoint must return the shadow
-  host and its ancestors when the hit-tested text node is assigned to a slot and the
-  host has display: inline'
-- 'document.elementsFromPoint and shadowRoot.elementsFromPoint must return the shadow
-  host and its ancestors when the hit-tested text node is assigned to a slot and the
-  host has display: inline-block'
 - 'document.elementsFromPoint must return the shadow host and its ancestors and shadowRoot.elementsFromPoint
   must return the slot parent of the fallback text and its non-shadow ancestors when
   the hit-tested text node is a fallback content and the host has display: block'
@@ -11603,22 +11511,6 @@ shadow-dom/DocumentOrShadowRoot-prototype-elementFromPoint.html:
 - 'document.elementsFromPoint must return the shadow host and its ancestors and shadowRoot.elementsFromPoint
   must return the slot parent of the fallback text and its non-shadow ancestors when
   the hit-tested text node is a fallback content and the host has display: inline-block'
-- 'document.elementsFromPoint must return the shadow host and its ancestors of the
-  hit-tested element under a shadow root andshadowRoot.elementsFromPoint must return
-  the element parent and its non-shadow ancestors of the hit-tested text node under
-  the point when the shadow host has display: block'
-- 'document.elementsFromPoint must return the shadow host and its ancestors of the
-  hit-tested element under a shadow root andshadowRoot.elementsFromPoint must return
-  the element parent and its non-shadow ancestors of the hit-tested text node under
-  the point when the shadow host has display: inline'
-- 'document.elementsFromPoint must return the shadow host and its ancestors of the
-  hit-tested element under a shadow root andshadowRoot.elementsFromPoint must return
-  the element parent and its non-shadow ancestors of the hit-tested text node under
-  the point when the shadow host has display: inline-block'
-- elementsFromPoint should return all elements under a point, even when context object
-  is not connected
-- shadowRoot.elementsFromPoint must behave the same with document.elementsFromPoint
-  regarding HTML element
 shadow-dom/HighlightRegistry-highlightsFromPoint.html:
 - CSS.highlights.highlightsFromPoint() doesn't return Highlights that are not painted
   at the given coordinates even when they fall inside the Highlights' ranges
