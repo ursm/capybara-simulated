@@ -619,6 +619,22 @@ RSpec.describe 'native layout L1 block-flow parity', if: ENV.fetch('CSIM_JS_ENGI
     expect_parity('<div style="writing-mode:vertical-lr;height:300px;width:200px"><p style="margin:0">a</p>x<span style="float:left;width:50%;height:20px;margin-left:10%"></span>y</div>')
   end
 
+  # A CSS-WIDE `position` computes as `getComputedStyle` has it — `unset` / `initial` the initial `static`, `revert` the
+  # UA's, `inherit` the parent's — where layout handed the keyword on as an unknown position that every route of the
+  # walk refused: Discourse's user card on every page (215 of 365 page states probed). Chrome's figures.
+  it 'computes a CSS-wide position keyword' do
+    {
+      '<div style="width:300px"><div id="m" style="position:unset;height:10px">a</div><p>b</p></div>' => [0, 0, 300],
+      '<div style="width:300px;position:relative;left:5px"><div id="m" style="position:inherit;top:3px;height:10px">a</div><p>b</p></div>' => [5, 3, 300],
+      '<div style="width:300px"><div id="m" style="position:initial;top:3px;height:10px">a</div></div>' => [0, 0, 300],
+      '<div style="width:300px"><div id="m" style="position:revert;top:3px;height:10px">a</div></div>' => [0, 0, 300],
+      '<div style="width:300px;position:absolute"><div id="m" style="position:inherit;top:3px;height:10px;width:20px">a</div><p>b</p></div>' => [0, 3, 20]
+    }.each do |body, (x, y, w)|
+      expect_parity(body)
+      expect(laid_out_rect(body).first(3)).to eq([x, y, w]), body
+    end
+  end
+
   # A float EXACTLY as wide as the room its neighbours leave fits, to the tolerance a line is given: the engines add
   # the widths in different frames — the oracle from the page origin, native from the content edge — and one ULP of
   # the page coordinate decided it. A shrink-to-fit box around two floats is exactly that, and it is Redmine's
