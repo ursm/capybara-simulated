@@ -204,6 +204,11 @@ pub(crate) struct Input {
     // containing block's width, of its height where definite, and the correction to the chain's length in `rel_pct[6]`
     // where that height is not. [0, 0, 0] for none.
     pub(crate) chain_rel: [f64; 3],
+    // …and that chain's LENGTH parts (rec[163..164]), which `rel_pct[5..6]` (the base) already holds — kept apart so
+    // the chain's WHOLE shift (`chain_shift`: these plus the fractions and programs at the basis, `with_relative_insets`)
+    // can be taken back off, leaving the box's own (`Box::rel`).
+    pub(crate) chain_px: [f64; 2],
+    pub(crate) chain_shift: [f64; 2],
     // …and that chain's comparison functions, a PROGRAM per axis (`nlChainRel`; `NO_MATH` for none).
     pub(crate) chain_math: [u32; 2],
     pub(crate) rel_math: [u32; 3],
@@ -753,6 +758,7 @@ impl Input {
         if x_frac.is_nan() && !chained {
             return n;
         }
+        n.chain_shift = self.chain_px;
         // (…re-derived from the base every time, so a box measured again at another basis never adds a figure twice.)
         let (mut x, mut y) = (base_x, base_y);
         if !x_frac.is_nan() {
@@ -780,8 +786,11 @@ impl Input {
         }
         // …and the chain of relative inline boxes around it, whose containing block is this box's too.
         if chained {
-            x += chain_xf * cb_w + bounded(0.0, chain_xm, cb_w);
-            y += if is_auto(cb_h) { chain_yi } else { chain_yf * cb_h + bounded(0.0, chain_ym, cb_h) };
+            let cx = chain_xf * cb_w + bounded(0.0, chain_xm, cb_w);
+            let cy = if is_auto(cb_h) { chain_yi } else { chain_yf * cb_h + bounded(0.0, chain_ym, cb_h) };
+            x += cx;
+            y += cy;
+            n.chain_shift = [self.chain_px[0] + cx, self.chain_px[1] + cy];
         }
         n.rel_x = x;
         n.rel_y = y;
@@ -869,6 +878,11 @@ pub(crate) struct Box {
     // an `auto` one given the slack, an over-constrained one the remainder — as the oracle stamps `_lbMargins` for
     // `getComputedStyle` to report. None where every side is the declared one.
     pub(crate) used_margins: Option<[f64; 4]>,
+    // Its OWN relative shift (x, y), already in `x` / `y` — the whole less the relative inline chain's around it
+    // (`Input::chain_shift`), which the oracle keeps on those inlines: its `_lbRel`, which the scrollable overflow
+    // region reads (a shifted child extends its scroller from where it SITS, the end padding from where it was laid
+    // out). (0, 0) for a box that did not move itself.
+    pub(crate) rel: [f64; 2],
 }
 
 // Clamp a resolved main size by min/max (min wins over max, per CSS). `none` (NaN) bounds are skipped.
@@ -1151,7 +1165,7 @@ pub(crate) fn layout_block(inputs: &[Input], runs: &[Run], run_texts: &[Option<V
     }
     let mut boxes: Vec<Box> = inputs
         .iter()
-        .map(|n| Box { nid: n.nid, x: 0.0, y: 0.0, w: 0.0, h: 0.0, auto_height: false, first_baseline: None, last_baseline: None, inline_block_baseline: None, natural_h: None, clamped_h: false, cb_w: None, used_margins: None })
+        .map(|n| Box { nid: n.nid, x: 0.0, y: 0.0, w: 0.0, h: 0.0, auto_height: false, first_baseline: None, last_baseline: None, inline_block_baseline: None, natural_h: None, clamped_h: false, cb_w: None, used_margins: None, rel: [0.0; 2] })
         .collect();
     // Two phases: MEASURE lays the subtree out relative to each node's own border-box origin (so
     // collapse-through margins can propagate UP through returns without knowing final positions), then
@@ -7738,8 +7752,10 @@ fn place(
     boxes: &mut [Box],
     failed: &std::cell::Cell<bool>,
 ) {
-    boxes[i].x += ax + inputs[i].get().rel_x;
-    boxes[i].y += ay + inputs[i].get().rel_y;
+    let n = inputs[i].get();
+    boxes[i].rel = [n.rel_x - n.chain_shift[0], n.rel_y - n.chain_shift[1]];
+    boxes[i].x += ax + n.rel_x;
+    boxes[i].y += ay + n.rel_y;
     let (bx, by) = (boxes[i].x, boxes[i].y);
     shift_frags(i, bx, by);
     for &c in &children[i] {
@@ -8237,6 +8253,8 @@ mod tests {
             measured_as_block: false,
             equal_share: false,
             chain_rel: [0.0; 3],
+            chain_px: [0.0; 2],
+            chain_shift: [0.0; 2],
             chain_math: [NO_MATH; 2],
             rel_math: [NO_MATH; 3],
             flex_item_auto: 0,
@@ -8350,8 +8368,8 @@ mod tests {
         b.height = 30.0;
         let inputs = vec![blk(0.0, -1), a, b];
         let bx = boxes(layout_block(&inputs, &[], &[], &[], &[], &[], 0.0, 0.0, 800.0, false));
-        assert_eq!(bx[1], Box { nid: 1.0, x: 0.0, y: 0.0, w: 800.0, h: 50.0, auto_height: false, first_baseline: None, last_baseline: None, inline_block_baseline: None, natural_h: None, clamped_h: false, cb_w: None, used_margins: None });
-        assert_eq!(bx[2], Box { nid: 2.0, x: 0.0, y: 50.0, w: 800.0, h: 30.0, auto_height: false, first_baseline: None, last_baseline: None, inline_block_baseline: None, natural_h: None, clamped_h: false, cb_w: None, used_margins: None });
+        assert_eq!(bx[1], Box { nid: 1.0, x: 0.0, y: 0.0, w: 800.0, h: 50.0, auto_height: false, first_baseline: None, last_baseline: None, inline_block_baseline: None, natural_h: None, clamped_h: false, cb_w: Some(800.0), used_margins: None, rel: [0.0; 2] });
+        assert_eq!(bx[2], Box { nid: 2.0, x: 0.0, y: 50.0, w: 800.0, h: 30.0, auto_height: false, first_baseline: None, last_baseline: None, inline_block_baseline: None, natural_h: None, clamped_h: false, cb_w: Some(800.0), used_margins: None, rel: [0.0; 2] });
         assert_eq!(bx[0].h, 80.0); // root auto height = 50 + 30
         assert!(bx[0].auto_height);
     }
@@ -8526,7 +8544,7 @@ mod tests {
         let inputs = vec![blk(0.0, -1), owner, f];
         let bx = boxes(layout_block(&inputs, &[], &[], &[], &[], &[], 0.0, 0.0, 800.0, false));
         assert_eq!(bx[1].h, 120.0); // owner contains the float
-        assert_eq!(bx[2], Box { nid: 2.0, x: 0.0, y: 0.0, w: 80.0, h: 120.0, auto_height: false, first_baseline: None, last_baseline: None, inline_block_baseline: None, natural_h: None, clamped_h: false, cb_w: None, used_margins: None });
+        assert_eq!(bx[2], Box { nid: 2.0, x: 0.0, y: 0.0, w: 80.0, h: 120.0, auto_height: false, first_baseline: None, last_baseline: None, inline_block_baseline: None, natural_h: None, clamped_h: false, cb_w: Some(800.0), used_margins: None, rel: [0.0; 2] });
     }
 
     #[test]

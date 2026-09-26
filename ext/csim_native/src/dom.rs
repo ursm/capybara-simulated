@@ -892,7 +892,7 @@ fn register_font_bytes(
 
 // Fields per node in the layoutPass input buffer, and per run in the runs buffer (flat Float64Arrays).
 // Order MUST match the JS packer (layout.js `__csimLayoutShadowRun`) and layout::Input / layout::Run.
-const LAYOUT_STRIDE: usize = 163;
+const LAYOUT_STRIDE: usize = 165;
 const RUN_STRIDE: usize = 12;
 // …and per inline box in the inline table (layout.js `NL_INLINE_STRIDE` / `nlInlineEntry`, layout::InlineBox).
 const INLINE_STRIDE: usize = 31;
@@ -988,6 +988,8 @@ fn layout_pass(
             rel_pct: [r[130], r[131], r[132], r[133], r[134], r[39], r[40]],
             rel_x_px: r[152],
             chain_rel: [r[153], r[154], r[155]],
+            chain_px: [r[163], r[164]],
+            chain_shift: [r[163], r[164]],
             chain_math: [crate::layout::math_ref(r[161]), crate::layout::math_ref(r[162])],
             rel_x_neg: (r[65] as u32) & 8388608 != 0,
             measured_as_block: (r[65] as u32) & 16777216 != 0,
@@ -1202,10 +1204,11 @@ fn f64_array<'s>(scope: &mut v8::PinScope<'s, '_>, vals: &[f64]) -> v8::Local<'s
     v8::Float64Array::new(scope, buf, 0, vals.len()).expect("a Float64Array over its own backing store")
 }
 
-// __dom.boxOf(nid) -> [x, y, w, h, autoHeight, cbW, marginTop, marginRight, marginBottom, marginLeft] (document
-// coords, border-box) or undefined when the node has no native box (never laid out this pass / stale nid). The JS
-// geometry getters read this. `cbW` is the basis the box's percentages resolved against and the margins are the ones
-// its placement USED — each NaN where the pass had none to report (`layout::Box::cb_w` / `used_margins`).
+// __dom.boxOf(nid) -> [x, y, w, h, autoHeight, cbW, marginTop, marginRight, marginBottom, marginLeft, relX, relY]
+// (document coords, border-box) or undefined when the node has no native box (never laid out this pass / stale nid).
+// The JS geometry getters read this. `cbW` is the basis the box's percentages resolved against and the margins are the
+// ones its placement USED — each NaN where the pass had none to report (`layout::Box::cb_w` / `used_margins`) — and
+// `relX` / `relY` its relative shift, already in `x` / `y` (`layout::Box::rel`).
 fn box_of(
     scope: &mut v8::PinScope<'_, '_>,
     args: v8::FunctionCallbackArguments<'_>,
@@ -1220,7 +1223,7 @@ fn box_of(
         None => return,
     };
     let [mt, mr, mb, ml] = b.used_margins.unwrap_or([f64::NAN; 4]);
-    let vals = [b.x, b.y, b.w, b.h, if b.auto_height { 1.0 } else { 0.0 }, b.cb_w.unwrap_or(f64::NAN), mt, mr, mb, ml];
+    let vals = [b.x, b.y, b.w, b.h, if b.auto_height { 1.0 } else { 0.0 }, b.cb_w.unwrap_or(f64::NAN), mt, mr, mb, ml, b.rel[0], b.rel[1]];
     let arr = v8::Array::new(scope, vals.len() as i32);
     for (i, v) in vals.iter().enumerate() {
         let num: v8::Local<v8::Value> = v8::Number::new(scope, *v).into();
