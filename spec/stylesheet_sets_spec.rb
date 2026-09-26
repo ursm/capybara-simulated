@@ -73,6 +73,37 @@ RSpec.describe 'stylesheet sets + data: CSS' do
     expect(s.evaluate_script("document.getElementById('s').sheet.media.mediaText")).to eq('')
   end
 
+  # …whatever writes it — these are HTML's attribute change steps, not `setAttribute`'s — and in a shadow tree, whose
+  # sheet the document's refresh never reached. Each of these left the query the sheet was built with in force.
+  it 'follows a media change written through any attribute path, and in a shadow tree' do
+    s = session_for('<style id=s media=print>#a { color: rgb(0, 128, 0) }</style>')
+    got = s.evaluate_script(<<~JS)
+      (() => {
+        const st = document.getElementById('s'), a = document.getElementById('a');
+        const now = () => [st.sheet.media.mediaText, getComputedStyle(a).color];
+        st.setAttributeNS(null, 'media', 'screen');
+        const ns = now();
+        st.getAttributeNode('media').value = 'print';
+        const attr = now();
+        const m = document.createAttribute('media'); m.value = 'all';
+        st.attributes.setNamedItem(m);
+        return [ns, attr, now()];
+      })()
+    JS
+    expect(got).to eq([['screen', 'rgb(0, 128, 0)'], ['print', 'rgb(0, 0, 0)'], ['all', 'rgb(0, 128, 0)']])
+    got = s.evaluate_script(<<~JS)
+      (() => {
+        const r = document.getElementById('b').attachShadow({mode: 'open'});
+        r.innerHTML = '<style>p { color: rgb(0, 0, 255) }</style><p>t</p>';
+        const p = r.querySelector('p'), st = r.querySelector('style'), c = () => getComputedStyle(p).color, out = [c()];
+        st.setAttribute('media', 'print'); out.push(c());
+        st.removeAttribute('media'); out.push(c());
+        return out;
+      })()
+    JS
+    expect(got).to eq(['rgb(0, 0, 255)', 'rgb(0, 0, 0)', 'rgb(0, 0, 255)'])
+  end
+
   it 'loads percent-encoded data:text/css into the cascade' do
     s = session_for('<link rel=stylesheet href="data:text/css,%23a{display:none}">')
     expect(display(s, 'a')).to eq('none')

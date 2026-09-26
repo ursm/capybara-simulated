@@ -769,7 +769,7 @@ RSpec.describe 'layout reuse across dynamic style state' do
 
   # The native walk's GATES — whether a flex item's subtree is one native can measure, which percentage in it the walk
   # still resolves — read the item's whole subtree, and are kept across passes on its stamp the way a kept subtree slice
-  # is (`nlGateHit`). Under the authoritative pass that uses them, and with every reusing pass walked again fresh and
+  # is (`nlGateKept`). Under the authoritative pass that uses them, and with every reusing pass walked again fresh and
   # compared (`__csimNativeLayoutVerifyReuse`, which THROWS on a difference): a kept answer the subtree no longer
   # deserves makes the two walks part.
   describe 'native walk gates' do
