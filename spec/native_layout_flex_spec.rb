@@ -842,6 +842,19 @@ RSpec.describe 'native layout flex parity', if: ENV.fetch('CSIM_JS_ENGINE', 'v8'
     expect_parity(body)
     expect(laid_out_rect(body)[2]).to be_within(0.5).of(127.53)
   end
+  # An item EXACTLY as wide as the room its line leaves stays on that line, to a LINE's tolerance: the engines add a
+  # line's items in different orders, and Discourse's navigation bar (`width: calc(100% - 0px)` beside a zero-width
+  # clearfix `::before`, in a 368.56px wrapping row) wrapped in the oracle and not natively, on the last bit.
+  # SHARED: both give the whitespace-only `display: table` pseudo an equal share (184) where Chrome gives it 0 — the
+  # section then sits at 194.72 against Chrome's 10.72.
+  it 'keeps an item exactly as wide as its line on it' do
+    body = '<style>.c::before{display:table;content:" "}</style><div style="width:390px;padding:0 10.72px;box-sizing:border-box">' \
+           '<div class="c" style="display:flex;flex-wrap:wrap"><section id="m" style="width:calc(100% - 0px);height:5px"></section></div></div>'
+    expect_parity(body)
+    rect = laid_out_rect(body)
+    expect(rect[1]).to eq(0)
+    expect_shared_gap(rect[0], shared: 194.72, chrome: 10.72, what: "#{body}: #m x")
+  end
   it 'matches a WRAPPING row where the line-height floor exceeds the stacked line (align-content shares the surplus)' do
     expect_parity('<div style="display:flex;flex-wrap:wrap;align-content:center;width:400px">text<div style="width:60px;height:8px"></div></div>')
   end

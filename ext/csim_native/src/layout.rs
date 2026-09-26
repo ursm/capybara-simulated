@@ -4442,7 +4442,7 @@ fn flex_row_sizes(
         for &p in flow {
             let k = inputs[kids[p]].get();
             let outer = clamp_of(p, base[p]) + Input::m(k.ml) + Input::m(k.mr);
-            if !cur.is_empty() && used + gap + outer > content_w {
+            if !cur.is_empty() && used + gap + outer > content_w + LINE_FIT_EPS { // (the oracle's `flexLines`)
                 ls.push(std::mem::take(&mut cur));
                 used = 0.0;
             }
@@ -4657,7 +4657,7 @@ fn flex_column_sizes(
         for &p in flow {
             let k = inputs[kids[p]].get();
             let outer = clamp_of(p, base[p]) + Input::m(k.mt) + Input::m(k.mb);
-            if !cur.is_empty() && used + gap + outer > capacity {
+            if !cur.is_empty() && used + gap + outer > capacity + LINE_FIT_EPS { // (the oracle's `flexLines`)
                 ls.push(std::mem::take(&mut cur));
                 used = 0.0;
             }
@@ -4979,7 +4979,7 @@ fn measure_flex(
         let mut cur: Vec<usize> = Vec::new();
         let mut used = 0.0;
         for &p in &flow {
-            if !cur.is_empty() && used + gap + mo[p] > content_main {
+            if !cur.is_empty() && used + gap + mo[p] > content_main + LINE_FIT_EPS { // (the oracle's `flexLines`)
                 ls.push(std::mem::take(&mut cur));
                 used = 0.0;
             }
