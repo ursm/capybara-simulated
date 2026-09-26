@@ -964,6 +964,21 @@ RSpec.describe 'layout reuse across dynamic style state' do
       expect(%w[c3 c4 q].map {|id| s.find("##{id}", visible: :all).text }).to eq(['', '', ''])
     end
 
+    # …and the text memos move when the flat tree does with no DOM mutation behind it: an `assign()` and an
+    # `attachShadow` changed what renders, and `innerText` kept its old answer (Chrome: "M", then "" / "").
+    it 'reads the text again after assign() and attachShadow' do
+      s = slotted_session(
+        '<div id="h"><span id="n">N</span><span id="m">M</span></div><div id="g"><span>A</span></div>',
+        "window.sr = document.getElementById('h').attachShadow({mode: 'open', slotAssignment: 'manual'}); " \
+          "sr.innerHTML = '<slot id=\"s1\"></slot>'; sr.getElementById('s1').assign(document.getElementById('n'))"
+      )
+      text = "[document.getElementById('h').innerText, document.getElementById('g').innerText]"
+      expect(s.evaluate_script(text)).to eq(%w[N A])
+      s.execute_script("sr.getElementById('s1').assign(document.getElementById('m')); document.getElementById('g').attachShadow({mode: 'open'})")
+      expect(s.evaluate_script(text)).to eq(['M', ''])
+      expect(s.find('#h').text).to eq('M')
+    end
+
     # Attaching a shadow root takes every light child out of the flat tree, with no DOM mutation to say so (Chrome: the
     # element after a 50px child moves up to 0 at once, and back down once a slot takes it).
     it 'relays out a host when a shadow root is attached to it' do
@@ -998,6 +1013,16 @@ RSpec.describe 'layout reuse across dynamic style state' do
     s = session_for('', '<div id="w"><p>one</p><script>window.r = [document.getElementById("w").innerText]</script>' \
                         '<p>two</p>three</div><script>r.push(document.getElementById("w").innerText)</script>')
     expect(s.evaluate_script('r')).to eq(['one', "one\n\ntwo\n\nthree"])
+  end
+
+  # innerText §2: a node whose `visibility` is not `visible` contributes its CHILDREN's items and nothing of its own,
+  # so a `visibility: visible` child of a hidden element still reads — in innerText and in Capybara's text (WebDriver's
+  # getText is per text node). The walk returned "" for the hidden element whole. Chrome and Firefox: "b".
+  it 'reads a visibility:visible child of a visibility:hidden element' do
+    s = session_for('', '<div id="vh" style="visibility:hidden">a<span style="visibility:visible">b</span><span>c</span></div>' \
+                        '<div style="opacity:0">op</div>')
+    expect(s.evaluate_script("[document.getElementById('vh').innerText, document.body.innerText]")).to eq(['b', "b\nop"])
+    expect(s.find('#vh', visible: :all).text).to eq('b')
   end
 
   # `offsetParent` is null only for an element with no layout BOX (CSSOM View). Skipped content and `visibility:
