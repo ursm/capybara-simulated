@@ -184,10 +184,17 @@ framework array-iteration compat) forces `length` into
 `getOwnPropertyNames`. List and justify these explicitly; don't let them
 multiply.
 
-Caveat: "spec-correct" still means "what real browsers actually do."
-Where the spec is silent or browsers diverge from it, match Chromium /
-Firefox observable behavior (rule 2). A behavior real browsers *do* have,
-that an app depends on, is in scope and must work.
+Caveat: real-browser behavior is the tiebreak only where the spec does
+not say. Where the spec is silent or ambiguous, match Chromium / Firefox
+observable behavior (rule 2) — and where both engines agree on something
+the spec leaves open, follow them. Where the spec DOES say and one engine
+departs from it, the spec wins: Chrome is not the only browser, and a
+Blink quirk is not a contract (e.g. Chrome keeps a `<br>` a line break
+whatever `display` / `float` / `position` it declares; the spec, and
+Firefox, apply them). Check a second engine before calling a behavior
+"what browsers do" — Firefox is at `/usr/bin/firefox-bin` (headless
+`--screenshot`; it has no `--dump-dom`). A behavior real browsers *do*
+have, that an app depends on, is in scope and must work.
 
 ## 2. No library-shaped hacks
 
