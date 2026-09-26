@@ -54,6 +54,38 @@ RSpec.describe 'scripts the parser runs' do
     expect(s.evaluate_script('L')).to eq(%w[inline-dyn blk blk-load])
   end
 
+  # …and "the end" is for the PARSER's scripts alone: a script an innerHTML fragment made (already started, never
+  # runs) or a clone of a started one (the flag is copied) stays inert even when inserted mid-parse — swept up after the
+  # parse, both ran. Chrome: neither runs, and the original runs once.
+  it 'never runs an innerHTML script or a clone of a started one' do
+    s = session_for('<!DOCTYPE html><head><script>window.L = []; const d = document.createElement("div"); ' \
+                    'd.innerHTML = "<script>L.push(\'innerHTML\')<\\/script>"; document.head.appendChild(d.firstChild); ' \
+                    'const r = document.createElement("script"); r.text = "L.push(\'ran\')"; document.head.appendChild(r); ' \
+                    'document.head.appendChild(r.cloneNode(true));</script></head><body><p>x</p></body>')
+    expect(s.evaluate_script('L')).to eq(['ran'])
+  end
+
+  # The events that PREPARE a connected, not-yet-started script: its children changed — `appendChild`, and setting its
+  # `text` / `textContent` — and a `src` set where it had none. Only `appendChild` reached it; the others ran only when
+  # the after-parse pass swept them up by accident, and after the parse never. Chrome: all four.
+  it 'runs an empty inserted script once its text or src is set' do
+    app = lambda do |env|
+      next [200, {'content-type' => 'text/javascript'}, ["L.push('src-set')"]] if env['PATH_INFO'] == '/x.js'
+
+      [200, {'content-type' => 'text/html'}, ['<!DOCTYPE html><body><script>window.L = []</script></body>']]
+    end
+    s = simulated_session(app).tap {|session| session.visit '/' }
+    s.execute_script(<<~JS)
+      const add = () => document.body.appendChild(document.createElement('script'));
+      add().text = "L.push('text')";
+      add().textContent = "L.push('textContent')";
+      add().appendChild(document.createTextNode("L.push('child')"));
+      add().src = 'x.js';
+    JS
+    s.evaluate_script('new Promise((resolve) => setTimeout(resolve, 50))')
+    expect(s.evaluate_script('L')).to eq(%w[text textContent child src-set])
+  end
+
   # An exception a parser-run script throws is REPORTED — `window.onerror` and the window's `error` event — as any
   # other script's is; the parse goes on.
   it 'reports an exception a parser-run script throws' do

@@ -107,9 +107,6 @@ css/css-animations/animation-delay-008.html:
 - "== css/css-animations/animation-common-ref.html"
 css/css-animations/animation-delay-011.html:
 - "== css/css-animations/animation-common-ref.html"
-css/css-animations/animation-important-001.html:
-- Custom property animations appearing via setKeyframes do not override important
-  declarations
 css/css-animations/animation-important-002.html:
 - "== css/css-animations/animation-important-002-ref.html"
 css/css-animations/animation-important-with-transition.html:
