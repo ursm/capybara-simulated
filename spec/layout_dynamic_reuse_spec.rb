@@ -949,6 +949,21 @@ RSpec.describe 'layout reuse across dynamic style state' do
       expect(s.find('#h3').shadow_root.all('u').size).to eq(0)
     end
 
+    # …and "being rendered" (innerText's first step) is having a box, up the flat tree: an element no rendered slot
+    # takes answers its textContent, "ab" (Chrome and Firefox), where a node-tree walk gave the rendered "a" — and a
+    # closed `<details>`'s content is rendered but skipped, so its text is "". Capybara's text of such a node is "".
+    it 'reads innerText of a light child no rendered slot takes as its textContent' do
+      s = slotted_session(
+        '<div id="h3"><span id="c3">a<b style="display:none">b</b></span></div>' \
+          '<div id="h4"><span id="c4" slot="nope">a<b style="display:none">b</b></span></div>' \
+          '<details><summary>S</summary><p id="q">D<b style="display:none">x</b></p></details>',
+        "document.getElementById('h3').attachShadow({mode: 'open'}).innerHTML = '<div style=\"display:none\"><slot></slot></div>'; " \
+          "document.getElementById('h4').attachShadow({mode: 'open'}).innerHTML = '<slot></slot>'"
+      )
+      expect(s.evaluate_script("['c3', 'c4', 'q'].map((id) => document.getElementById(id).innerText)")).to eq(['ab', 'ab', ''])
+      expect(%w[c3 c4 q].map {|id| s.find("##{id}", visible: :all).text }).to eq(['', '', ''])
+    end
+
     # Attaching a shadow root takes every light child out of the flat tree, with no DOM mutation to say so (Chrome: the
     # element after a 50px child moves up to 0 at once, and back down once a slot takes it).
     it 'relays out a host when a shadow root is attached to it' do
