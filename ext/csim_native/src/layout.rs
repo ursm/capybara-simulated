@@ -4789,7 +4789,11 @@ fn flex_column_sizes(
             // height there and will not reuse such a layout for it (`reuseSubtree`), so the content is laid out again
             // against the height it came to — a `height: 50%` inside a `min-height: 60%` item resolves against the 90
             // it was floored to (Chrome 45), and a `height: 40%` image in a flexed item against its flexed height.
-            let imposed = restretched[p] || !is_auto(decl_h[p]) ||
+            // (A DECLARED height imposes itself only where the base came from it: a `flex-basis: content` / keyword
+            // item's base is its content's, the declaration set aside, and one that comes to exactly that is laid
+            // out at auto like any measured item — Chrome: a `height: 50%` child of a `flex: 1 1 content;
+            // height: 200px` item that flexed to its 50px content is 0 tall, not 25.)
+            let imposed = restretched[p] || (!is_auto(decl_h[p]) && !base_measured[p]) ||
                           measured[p].map_or(true, |(m, stale)| m != h || (height_definite && stale));
             out[p] = (width[p], h, imposed);
         }

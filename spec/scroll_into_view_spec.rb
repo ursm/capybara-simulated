@@ -258,6 +258,16 @@ RSpec.describe 'scroll into view' do
       expect(got).to eq([[400, 400, 0], [650, 650, 0], [500, 500, 0]])
     end
 
+    # …and the body answers the viewport's SIZES there too, so a bottom check `scrollHeight - clientHeight - scrollTop`
+    # is one question (Chrome: `body { margin: 50px }` over 3000px of content reports 3100, the viewport's height for
+    # `clientHeight`); a body with no box leaves nothing to scroll (Chrome: `window.scrollTo(0, 70)` stays at 0).
+    it 'reports the viewport sizes on the body in quirks mode' do
+      s = session_with('<html><body style="margin:50px"><div style="height: 3000px"></div></body></html>')
+      expect(s.evaluate_script('[document.body.scrollHeight, document.body.clientHeight === innerHeight]')).to eq([3100, true])
+      s = session_with('<html><body style="display:none"><div style="height: 3000px"></div></body></html>')
+      expect(s.evaluate_script('(() => { window.scrollTo(0, 70); return scrollY; })()')).to eq(0)
+    end
+
     # A body that scrolls ITSELF — its own overflow, under a root whose overflow is not `visible` — is no document
     # scroller: `scrollingElement` is null and the body keeps its own offset (Chrome: null, then 100).
     it 'has no scrolling element in quirks mode when the body scrolls itself' do

@@ -1693,6 +1693,20 @@ RSpec.describe 'native layout flex parity', if: ENV.fetch('CSIM_JS_ENGINE', 'v8'
         expect(marked_box(body)[1]).to be_within(0.02).of(2.188), body   # Chrome
       end
     end
+    # A `flex-basis: content` item's base is its CONTENT, its declared height set aside — so where it flexes to exactly
+    # that it is laid out at auto, and a percentage height under it resolves to nothing. Native imposed the declared
+    # height's claim anyway and gave the `50%` child 25 (the WPT's `flex-basis-content-percentage-height`, Chrome 0);
+    # an `auto` basis keeps the declared height definite (Chrome 100 for `height: 100%` in a `height: 100px` item).
+    it 'lays a flex-basis: content column item that came to its content out at auto' do
+      {
+        '<div style="display:flex;flex-direction:column"><div style="flex:1 1 content;height:200px;min-height:0"><div style="height:50px;width:50px"></div><div id="m" style="height:50%;width:50px"></div></div></div>' => 0,
+        '<div style="display:flex;flex-direction:column"><div style="flex:1 1 content;height:100px;min-height:0"><div id="m" style="height:100%;width:50px"></div></div></div>' => 0,
+        '<div style="display:flex;flex-direction:column"><div style="flex:1 1 auto;height:100px;min-height:0"><div id="m" style="height:100%;width:50px"></div></div></div>' => 100
+      }.each do |body, h|
+        expect_native_flex(body)
+        expect(marked_box(body)[1]).to eq(h), body   # Chrome
+      end
+    end
     it 'hangs a pushed baseline item by the ascent of its percentage-margined box' do
       body = '<div id="c" style="display:flex;align-items:baseline;width:400px;height:200px;font:16px monospace">' \
              '<div style="margin-top:10%">a<table style="display:inline-table"><colgroup><col style="width:20px"></colgroup></table></div><div style="font-size:30px">b</div></div>'
