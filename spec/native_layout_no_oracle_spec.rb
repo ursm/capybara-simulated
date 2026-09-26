@@ -150,6 +150,8 @@ RSpec.describe 'native layout no-oracle run', if: ENV.fetch('CSIM_JS_ENGINE', 'v
       # both engines whatever its `min-height` — no oracle stamp asked whether it was imposed from outside
       '<div style="height:10px"></div><div style="position:relative;top:50%"><div style="float:left;width:50px;height:50px"></div></div><div style="clear:both;height:5px"></div>',
       '<style>body{min-height:200px}</style><div style="height:10px"></div><div style="position:relative;top:50%;bottom:10px">x</div>',
+      # …a PRESENTATION HINT's percentage (`<svg width="100%">`), read as the resolver reads it — Forem's chart legend
+      '<div style="width:300px"><div style="height:16px;width:16px"><svg width="100%" height="100%"></svg></div></div>',
       # …a percentage height that resolves to AUTO, whose bottom margin then adjoins its last child's — native's call
       '<div style="width:300px"><div style="height:50%"><p style="margin:0 0 12px">x</p></div><div style="height:5px"></div></div>',
       # …an OUT-OF-FLOW box against a positioned block and against the viewport, percentages and all, and a relative
