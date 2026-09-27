@@ -897,14 +897,41 @@ const RUN_STRIDE: usize = 12;
 // …and per inline box in the inline table (layout.js `NL_INLINE_STRIDE` / `nlInlineEntry`, layout::InlineBox).
 const INLINE_STRIDE: usize = 31;
 
-// Decode a V8 Float64Array argument into a Vec<f64> (native-endian raw bytes).
-fn read_f64_array(val: v8::Local<'_, v8::Value>) -> Vec<f64> {
+// A Float64Array argument's values, read IN PLACE: a pass's records run to megabytes on a large page (1,320 bytes a
+// record), and copying them out — twice, through a byte vector — was a fifth of a pass. Copied only where the view is
+// not aligned for f64 (a view at an odd byte offset, which no caller makes). The borrow is sound because nothing between
+// here and the pass's answer runs JS or allocates on V8's heap, so nothing can move the data; the answer's arrays are
+// made after the last read.
+enum F64Arg<'a> {
+    Borrowed(&'a [f64]),
+    Owned(Vec<f64>),
+}
+impl std::ops::Deref for F64Arg<'_> {
+    type Target = [f64];
+    fn deref(&self) -> &[f64] {
+        match self {
+            F64Arg::Borrowed(s) => s,
+            F64Arg::Owned(v) => v,
+        }
+    }
+}
+fn f64_arg<'a>(val: v8::Local<'a, v8::Value>) -> F64Arg<'a> {
     let Ok(arr) = v8::Local::<v8::Float64Array>::try_from(val) else {
-        return Vec::new();
+        return F64Arg::Owned(Vec::new());
     };
-    let mut bytes = vec![0u8; arr.length() * 8];
+    let n = arr.length();
+    let ptr = arr.data() as *const f64;
+    if n == 0 || ptr.is_null() {
+        return F64Arg::Owned(Vec::new());
+    }
+    if (ptr as usize) % std::mem::align_of::<f64>() == 0 {
+        // SAFETY: `n` f64s of the view's own data (V8 hands the pointer past its byte offset), valid and unmoved for the
+        // borrow as argued above.
+        return F64Arg::Borrowed(unsafe { std::slice::from_raw_parts(ptr, n) });
+    }
+    let mut bytes = vec![0u8; n * 8];
     arr.copy_contents(&mut bytes);
-    bytes.chunks_exact(8).map(|c| f64::from_ne_bytes(c.try_into().unwrap())).collect()
+    F64Arg::Owned(bytes.chunks_exact(8).map(|c| f64::from_ne_bytes(c.try_into().unwrap())).collect())
 }
 
 // __dom.layoutPass(inputsFlat, runsFlat, runTexts, rootX, rootY, rootCbW, grids, inlines, maths, rootRtl)
@@ -923,7 +950,7 @@ fn layout_pass(
     args: v8::FunctionCallbackArguments<'_>,
     mut rv: v8::ReturnValue<'_, v8::Value>,
 ) {
-    let node_floats = read_f64_array(args.get(0));
+    let node_floats = f64_arg(args.get(0));
     if node_floats.is_empty() {
         rv.set_bool(false);
         return;
@@ -1095,7 +1122,7 @@ fn layout_pass(
             control_font_asc: r[79],
         });
     }
-    let run_floats = read_f64_array(args.get(1));
+    let run_floats = f64_arg(args.get(1));
     let mut runs: Vec<crate::layout::Run> = Vec::with_capacity(run_floats.len() / RUN_STRIDE);
     for r in run_floats.chunks_exact(RUN_STRIDE) {
         // A slot may mean one thing per kind — slot 11 an ATOMIC's line mode or a CLOSE edge's `lands`, slot 3
@@ -1141,10 +1168,10 @@ fn layout_pass(
     let root_cb_w = args.get(5).number_value(scope).unwrap_or(0.0);
     // Parallel grid channel: a computed grid container's `grid_start` indexes this buffer (parsed column
     // template + gaps + per-item placement). Empty when the pass has no computed grid.
-    let grids = read_f64_array(args.get(6));
+    let grids = f64_arg(args.get(6));
     // The inline table: one entry per inline box the run stream opens, named by its runs. A buffer that does not
     // divide by the stride is refused like the record buffer above.
-    let inline_floats = read_f64_array(args.get(7));
+    let inline_floats = f64_arg(args.get(7));
     if inline_floats.len() % INLINE_STRIDE != 0 {
         rv.set_bool(false);
         return;
@@ -1180,7 +1207,7 @@ fn layout_pass(
         })
         .collect();
     // …and the math table: every comparison function's program, named by offset from a record, an inline entry or a grid.
-    let maths = read_f64_array(args.get(8));
+    let maths = f64_arg(args.get(8));
     // …and the root element's direction, for a pass root native places itself (a NaN origin): the BODY's lead margin.
     let root_rtl = args.get(9).is_true();
     match crate::layout::layout_block(&inputs, &runs, &run_texts, &grids, &inlines, &maths, root_x, root_y, root_cb_w, root_rtl) {
