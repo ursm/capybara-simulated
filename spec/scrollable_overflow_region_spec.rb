@@ -29,6 +29,27 @@ RSpec.describe 'the scrollable overflow region' do
                               return [s.scrollWidth, s.scrollHeight]; })()")
   end
 
+  # …and a descendant that starts or stops CLIPPING changes it with no box moving at all: what the clip is is kept
+  # under the box's stamp across passes (`clipsContent`), so a class that changes nothing but `overflow` has to reach it.
+  # Chrome: 310 (the grandchild's overflow, not extended by the end padding), 170, 310.
+  it 'follows a descendant that starts and stops clipping' do
+    html = %(<!DOCTYPE html><html><head><meta charset="utf-8"><style>
+               body { margin: 0; font: 16px Arial }
+               #s { overflow: scroll; width: 100px; height: 100px; padding: 10px }
+               #w { height: 150px } .clip { overflow: hidden }
+             </style></head><body><div id="s"><div id="w"><div style="height:300px"></div></div></div></body></html>)
+    session = simulated_session(->(_env) { [200, {'content-type' => 'text/html; charset=utf-8'}, [html]] })
+    session.visit '/'
+    got = session.evaluate_script(<<~JS)
+      (() => {
+        const s = document.getElementById('s'), w = document.getElementById('w'), r = [s.scrollHeight];
+        w.classList.add('clip'); r.push(s.scrollHeight); w.classList.remove('clip'); r.push(s.scrollHeight);
+        return r;
+      })()
+    JS
+    expect(got).to eq([310, 170, 310])
+  end
+
   # §3.2: the region is the union of the box's padding box and its content, and the content half
   # reaches one END padding further — the padding is part of what scrolls past.
   it 'extends the content by the end padding' do
