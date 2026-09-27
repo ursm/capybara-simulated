@@ -3674,13 +3674,35 @@ pub(crate) struct MeasureCache {
     // again (a geometry read cannot tell a put-back layout from a fresh one).
     pub(crate) put_back: u64,
     pub(crate) kept: u64,
+    // …and how many records the kept measures hold between them (see `MEASURED_RECORDS_PER_PASS_RECORD`).
+    records: usize,
 }
 impl MeasureCache {
     pub(crate) fn retain_chunks(&mut self, keep: impl Fn(u32) -> bool) {
-        self.by_chunk.retain(|&id, _| keep(id));
+        let records = &mut self.records;
+        self.by_chunk.retain(|&id, list| {
+            let kept = keep(id);
+            if !kept {
+                *records -= list.iter().map(|k| k.boxes.len()).sum::<usize>();
+            }
+            kept
+        });
+    }
+    pub(crate) fn records(&self) -> usize {
+        self.records
+    }
+    pub(crate) fn forget(&mut self, id: u32) {
+        if let Some(list) = self.by_chunk.remove(&id) {
+            self.records -= list.iter().map(|k| k.boxes.len()).sum::<usize>();
+        }
     }
 }
 const MEASURED_PER_CHUNK: usize = 4;
+// A kept measure holds its chunk's WHOLE subtree, the chunks nested in it included, so one kept at every level of a
+// deep nest holds the records under it once per level. What the cache holds is capped at this many times the records
+// of the pass keeping one — and a chunk is not kept the pass it is first placed, since one packed afresh on every edit
+// (a wrapper on the edit's spine) never comes back: 40 wrappers over 3,000 rows held 3 GB of copies that way.
+const MEASURED_RECORDS_PER_PASS_RECORD: usize = 4;
 // Where a pass placed each chunk: the record of its root, the chunk, its records (the root's included), where its
 // runs, grid values and inline entries start, and whether the root's own run range and grid are among them.
 #[derive(Clone, Copy)]
@@ -3692,6 +3714,8 @@ pub(crate) struct ChunkRoot {
     pub(crate) inl_at: usize,
     pub(crate) root_runs: bool,
     pub(crate) root_grid: bool,
+    // …and whether this is the first pass that places it (see `MEASURED_RECORDS_PER_PASS_RECORD`).
+    pub(crate) fresh: bool,
 }
 impl Input {
     // A chunk root's record as a kept measure is keyed on it (`Measured::root`): what names a POSITION in the pass made
@@ -3857,7 +3881,10 @@ fn measure(
     }
     let indef0 = INDEF_PCT_H_READS.with(|n| n.get());
     let info = measure_uncached(i, w, imposed_h, inputs, runs, run_texts, grids, children, boxes, failed, fc, bfc_x, bfc_y);
-    if failed.get() || !fc.items.is_empty() {
+    let room = MEASURE_PASS.with(|m| {
+        m.borrow().as_ref().is_some_and(|p| p.cache.records + root.n <= MEASURED_RECORDS_PER_PASS_RECORD * inputs.len())
+    });
+    if failed.get() || !fc.items.is_empty() || root.fresh || !room {
         return info;
     }
     let kept = Measured {
@@ -3878,9 +3905,10 @@ fn measure(
     MEASURE_PASS.with(|m| {
         if let Some(p) = m.borrow_mut().as_mut() {
             p.cache.kept += 1;
+            p.cache.records += root.n;
             let list = p.cache.by_chunk.entry(root.id).or_default();
             if list.len() >= MEASURED_PER_CHUNK {
-                list.remove(0);
+                p.cache.records -= list.remove(0).boxes.len();
             }
             list.push(kept);
         }

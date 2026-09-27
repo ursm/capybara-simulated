@@ -921,6 +921,26 @@ RSpec.describe 'layout reuse across dynamic style state' do
       expect(got[1]).to be >= 4 * 90                         # …and every item not edited measured as it was
     end
 
+    # …and what native keeps of measuring nested blocks stays within a few times the page. A kept measure holds its
+    # block's whole subtree, so kept at every level of a nest it held the records under it once per level — and a
+    # wrapper on an edit's spine is packed afresh on every edit, which is why it is not kept the pass it first goes in.
+    # Kept regardless, forty wrappers over 3,000 rows held 4 GB.
+    it 'keeps no more of measuring nested blocks than a few times the page' do
+      rows = (1..100).map {|i| %(<div class="r"><p><span id="s#{i}">row #{i}</span></p></div>) }.join
+      nest = (1..12).reduce(%(<div style="display:flex;flex-wrap:wrap">#{rows}</div>)) {|inner, d| %(<div style="padding-left:1px"><span id="t#{d}">w#{d}</span>#{inner}</div>) }
+      s = native_session_for(%(<div id="top">top</div>#{nest}), verify: false)
+      got = s.evaluate_script(<<~JS)
+        (() => {
+          const edit = (id) => { document.getElementById(id).firstChild.data += '!'; document.body.offsetHeight; };
+          document.body.offsetHeight;
+          for (let i = 0; i < 36; i++) edit(['s' + (1 + (i * 7) % 100), 't' + (1 + (i * 5) % 12), 'top'][i % 3]);
+          return [__dom.layoutMeasureCounts()[2], document.body.querySelectorAll('*').length, __dom.layoutMeasureCounts()[0]];
+        })()
+      JS
+      expect(got[0]).to be <= 4 * got[1]
+      expect(got[2]).to be > 0                               # …while the rows' own are put back
+    end
+
     # …and a kept measure is keyed on where its subtree stands in the pass only as far as the subtree itself: a box
     # inserted before a kept list moves every item's record, and keyed on that, cost every item its measure.
     it 'puts back the measures of a list something was inserted before' do

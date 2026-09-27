@@ -1201,6 +1201,8 @@ pub(crate) struct Chunk {
     // …and whether the ROOT owns a run range or a grid (`CHUNK_RUNS` / `CHUNK_GRID`), whose start the pass relocates.
     root_flags: u8,
     used: u64,
+    // …and whether a pass has placed it yet.
+    placed: bool,
 }
 // A chunk's contents in the order the walk emitted them: `Own` takes the chunk's next records — `recs` of them, at
 // record `at` — and then its next runs, grid values and inline entries, each appended where its stream stands; `Child`
@@ -1294,26 +1296,30 @@ fn layout_chunk_put(
         size: Mark { rec: size[0] as usize, run: size[1] as usize, grid: size[2] as usize, inl: size[3] as usize },
         root_flags,
         used: store.pass,
+        placed: false,
     };
     // (…an id put again is another subtree's, whatever was measured of the last one it named.)
-    store.measure.retain_chunks(|kept| kept != id);
+    store.measure.forget(id);
     store.chunks.insert(id, chunk);
     rv.set_bool(true);
 }
 
-// __dom.layoutMeasureCounts() -> [put back, kept]: the realm's kept measures (`layout::MeasureCache`), for a spec.
+// __dom.layoutMeasureCounts() -> [put back, kept, records held]: the realm's kept measures (`layout::MeasureCache`),
+// for a spec.
 fn layout_measure_counts(
     scope: &mut v8::PinScope<'_, '_>,
     args: v8::FunctionCallbackArguments<'_>,
     mut rv: v8::ReturnValue<'_, v8::Value>,
 ) {
     let cid = realm_id(scope, &args);
-    let (put_back, kept) = dom(scope).layout_chunks.get(&cid).map_or((0, 0), |s| (s.measure.put_back, s.measure.kept));
-    let out = v8::Array::new(scope, 2);
-    let a: v8::Local<v8::Value> = v8::Number::new(scope, put_back as f64).into();
-    let b: v8::Local<v8::Value> = v8::Number::new(scope, kept as f64).into();
-    out.set_index(scope, 0, a);
-    out.set_index(scope, 1, b);
+    let counts = dom(scope).layout_chunks.get(&cid).map_or([0.0; 3], |s| {
+        [s.measure.put_back as f64, s.measure.kept as f64, s.measure.records() as f64]
+    });
+    let out = v8::Array::new(scope, 3);
+    for (i, n) in counts.into_iter().enumerate() {
+        let v: v8::Local<v8::Value> = v8::Number::new(scope, n).into();
+        out.set_index(scope, i as u32, v);
+    }
     rv.set(out.into());
 }
 
@@ -1453,6 +1459,7 @@ fn store_pass(
         for root in roots.values() {
             if let Some(c) = store.chunks.get_mut(&root.id) {
                 c.used = pass;
+                c.placed = true;
             }
         }
     }
@@ -1567,6 +1574,7 @@ fn emit_chunk(store: &ChunkStore, id: u32, out: &mut Assembly) -> bool {
         inl_at: base.inl,
         root_runs: c.root_flags & CHUNK_RUNS != 0,
         root_grid: c.root_flags & CHUNK_GRID != 0,
+        fresh: !c.placed,
     });
     let (mut r, mut u, mut g, mut l) = (0, 0, 0, 0);
     for step in &c.steps {
