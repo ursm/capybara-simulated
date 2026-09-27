@@ -25,6 +25,36 @@ RSpec.describe 'scripts the parser runs' do
     expect(s.evaluate_script('L')).to eq(%w[head:loading body:loading rsc:interactive DCL rsc:complete])
   end
 
+  # A parse-time script sees the tree the parse has built SO FAR, however it holds on to it — a live collection it kept,
+  # a sibling chain it walks. The parser's mutations move no settle generation, so every memo of the tree keys on the
+  # TREE generation, which they do move: on the settle generation, `document.body.children` kept the length of its first
+  # read, and a sibling index built mid-parse missed every child parsed after it, sending the 33rd item of a
+  # whitespace-separated list round to the first — a walk that never ended. Chrome: [2, 40, 5, 40].
+  it 'sees the tree the parse has built so far' do
+    items = (1..40).map {|i| "<li>i#{i}</li>" }.join("\n")
+    s = session_for(<<~HTML)
+      <!DOCTYPE html><html><body>
+      <ul id="l">
+      #{items}
+      </ul>
+      <script>
+        window.R = [];
+        window.kids = document.body.children;
+        R.push(kids.length);
+        let n = 0; for (let x = document.getElementById('l').firstElementChild; x && n < 1000; x = x.nextElementSibling) n++;
+        R.push(n);
+      </script>
+      <p>one</p><p>two</p>
+      <script>
+        R.push(kids.length);
+        let m = 0; for (let x = document.getElementById('l').lastElementChild; x && m < 1000; x = x.previousElementSibling) m++;
+        R.push(m);
+      </script>
+      </body></html>
+    HTML
+    expect(s.evaluate_script('R')).to eq([2, 40, 5, 40])
+  end
+
   # A classic script marked `nomodule` does not run where modules are supported — parsed, or inserted by script —
   # which is the other half of differential serving.
   it 'does not run a nomodule classic script' do
