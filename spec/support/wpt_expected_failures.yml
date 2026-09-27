@@ -7783,10 +7783,8 @@ css/cssom/shorthand-values.html:
 - 'The serialization of -webkit-line-clamp: none; should be canonical.'
 css/cssom/stylesheet-cross-origin-redirect-quirks.sub.html:
 - Cross-origin redirect to same-origin with wrong MIME type
-- Cross-origin stylesheet with wrong MIME type
 - Same-origin redirect to cross-origin redirect back to same-origin with wrong MIME
   type
-- Same-origin redirect to cross-origin with wrong MIME type
 css/cssom/stylesheet-same-origin.sub.html:
 - Origin-clean check in copied cross-origin CSSOM Stylesheets
 - Origin-clean check in cross-origin CSSOM Stylesheets

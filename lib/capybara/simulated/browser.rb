@@ -4841,9 +4841,10 @@ module Capybara
         # opaque response to a cors-mode request (a module script, a crossorigin
         # classic script) is a NETWORK ERROR per Handle Fetch — the bytes must
         # never compile. MIME enforcement is deliberately not added here yet: the
-        # covering css-MIME tests are still allowlisted, and a `new Response(text)`
-        # respondWith (text/plain) serving a stylesheet is load-bearing for green
-        # static-router subtests.
+        # network path enforces it (`stylesheetResponseAccepted`, css-utils.js),
+        # but a service worker's response is taken as the sheet it answers — a
+        # `new Response(text)` respondWith (text/plain) serving a stylesheet is
+        # load-bearing for green static-router subtests.
         type = r['type'].to_s
         return {'blocked' => true} if type == 'opaque' && mode.to_s != 'no-cors'
         return {'blocked' => true} unless type == 'opaque' || (200..299).cover?((r['status'] || 200).to_i)
