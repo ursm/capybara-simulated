@@ -7485,22 +7485,6 @@ css/css-transitions/properties-value-inherit-001.html:
 css/css-transitions/properties-value-inherit-002.html:
 - clip rectangle(rectangle) / events
 - clip rectangle(rectangle) / values
-- margin-left length(cm) / values
-- margin-left length(em) / values
-- margin-left length(ex) / values
-- margin-left length(in) / values
-- margin-left length(mm) / values
-- margin-left length(pc) / values
-- margin-left length(pt) / values
-- margin-left length(px) / values
-- margin-right length(cm) / values
-- margin-right length(em) / values
-- margin-right length(ex) / values
-- margin-right length(in) / values
-- margin-right length(mm) / values
-- margin-right length(pc) / values
-- margin-right length(pt) / values
-- margin-right length(px) / values
 - visibility visibility(keyword) / events
 - visibility visibility(keyword) / values
 css/css-transitions/pseudo-element-transform.html:
@@ -12148,8 +12132,6 @@ web-animations/responsive/toggle-animated-iframe-visibility.html:
 - "== web-animations/responsive/toggle-animated-iframe-visibility-ref.html"
 web-animations/responsive/translate.html:
 - Translate responsive to font size changes
-web-animations/responsive/width.html:
-- width responsive to inherited changes from keyword
 web-animations/timing-model/animation-effects/active-time.html:
 - Active time in after phase with backwards-only fill is unresolved
 - Active time in after phase with forwards fill and negative end delay greater in
