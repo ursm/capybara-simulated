@@ -262,7 +262,7 @@ RSpec.describe 'structural-context invalidation' do
     got = colors('li:first-child span { color: rgb(0, 0, 255) } .e:empty + i { color: rgb(0, 128, 0) }',
                  '<ul><li><span id="s">a</span></li></ul><div><b class="e" id="e">x</b><i id="i">i</i></div>', <<~JS)
       const s = document.getElementById('s'), e = document.getElementById('e');
-      const ctx = (el) => __csimCtxEpochOf(el);
+      const ctx = (el) => __csimCtxEpoch(el);
       const s0 = ctx(s), e0 = ctx(e);
       s.firstChild.data = 'ab'; e.firstChild.data = 'xy';
       const kept = [ctx(s) === s0, ctx(e) === e0];
