@@ -993,6 +993,54 @@ RSpec.describe 'layout reuse across dynamic style state' do
       expect(native).to eq(js)
       expect(native.uniq.size).to eq(2)                          # closed, open, closed
     end
+
+    # …and one that declares a TRANSITION likewise: the declared-value memo asks such a value again on every read, to
+    # compare it with the before-change style, but nothing short of a style change can start one — and a style change
+    # moves the stamps. Refused for it, Forem's stats page (`transition: all` under its charts) was laid out afresh on
+    # every edit: 18 ms a pass where the JS layout takes 4.
+    it 'keeps a subtree whose boxes declare a transition' do
+      items = (1..50).map {|i| %(<li><a>item #{i}</a></li>) }.join
+      s = native_session_for(%(<ul id="m">#{items}</ul><p id="p">x</p>), verify: false, css: 'li, a { transition: all 1s }')
+      got = s.evaluate_script(<<~JS)
+        (() => {
+          document.body.offsetHeight;
+          for (const t of ['y', 'z']) { document.getElementById('p').firstChild.data = t; document.body.offsetHeight; }
+          const n = __csimNlGateAnswers(), passes = __csimNativeLayoutStats().native;
+          document.getElementById('p').firstChild.data = 'w';
+          document.body.offsetHeight;
+          return [__csimNlGateAnswers() - n, __csimNativeLayoutStats().native - passes];
+        })()
+      JS
+      expect(got[1]).to eq(1)
+      expect(got[0]).to be <= 3
+    end
+
+    # …and lays it out again as a transition started in it runs: the box grows read after read and settles, each read
+    # where the JS layout reads it.
+    it 'follows a transition started inside a kept subtree' do
+      css  = 'li { width: 100px; transition: width 1s linear } li.wide { width: 300px }'
+      body = %(<ul id="m">#{(1..5).map {|i| %(<li id="l#{i}">item #{i}</li>) }.join}</ul><p id="p">x</p>)
+      run = lambda do |s|
+        width = "document.getElementById('l3').getBoundingClientRect().width"
+        s.evaluate_script(width)
+        s.execute_script("document.getElementById('p').firstChild.data = 'y'; document.body.offsetHeight")
+        s.execute_script("document.getElementById('l3').classList.add('wide')")
+        reads = [s.evaluate_script(width)]
+        while reads.last < 300 && reads.size < 30
+          s.evaluate_script('new Promise((resolve) => setTimeout(resolve, 100))')
+          reads << s.evaluate_script(width)
+        end
+        reads
+      end
+      ns = native_session_for(body, css: css)
+      native = run.call(ns)
+      js = run.call(session_for("body { margin: 0 } #{css}", body).tap {|s| s.execute_script('globalThis.__csimNativeLayout = false') })
+      expect(native).to eq(js)
+      expect(native.first).to eq(100)
+      expect(native.last).to eq(300)
+      expect(native.count {|w| w > 100 && w < 300 }).to be >= 3     # …through the run, not in one jump
+      expect(ns.evaluate_script('__csimNativeLayoutStats().native')).to be >= native.size
+    end
   end
 
   # An ANONYMOUS table cell (§17.2.1 wraps a row's stray content in one) is in no DOM, so no mutation marks it — every
