@@ -83,6 +83,30 @@ RSpec.describe 'CSS animation and transition events' do
     expect(drain(s).select {|e| e.start_with?('animationstart') }.sort).to eq(%w[animationstart:grow:0:t1:true animationstart:grow:0:t2:true animationstart:grow:0:t3:true])
   end
 
+  # …and the rules that declare an animation are looked up per rule SET: a sheet added after the page has been looked
+  # at — a scoped rule, then one whose `:has()` no scope bounds — starts what it declares.
+  it 'starts an animation a stylesheet added later declares' do
+    s = page('<div id="w"><i id="t1"></i><i id="t2"></i></div>')
+    watch(s)
+    s.execute_script(<<~JS)
+      document.body.offsetHeight;
+      const style = document.createElement('style');
+      style.textContent = '.late { animation: grow 300ms linear }';
+      document.head.appendChild(style);
+      document.body.offsetHeight;
+      document.getElementById('t1').className = 'late';
+    JS
+    expect(drain(s).select {|e| e.start_with?('animationstart') }).to eq(%w[animationstart:grow:0:t1:true])
+    s.execute_script(<<~JS)
+      const style = document.createElement('style');
+      style.textContent = '#w:has(.flag) #t2 { animation: grow 300ms linear }';
+      document.head.appendChild(style);
+      document.body.offsetHeight;
+      document.getElementById('t1').appendChild(document.createElement('b')).className = 'flag';
+    JS
+    expect(drain(s).select {|e| e.start_with?('animationstart') }).to eq(%w[animationstart:grow:0:t1:true animationstart:grow:0:t2:true])
+  end
+
   # `elapsedTime` is in SECONDS and counts the time the animation has been running, so an
   # `animationiteration` names the iteration it reached.
   it 'fires one animationiteration per boundary crossed' do
