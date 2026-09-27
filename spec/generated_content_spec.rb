@@ -162,6 +162,40 @@ RSpec.describe 'generated content' do
     expect(s.evaluate_script("document.getElementById('t').getBoundingClientRect().x")).to eq(0)
   end
 
+  it 'follows an attr() it reads, and a custom property it substitutes' do
+    _, w, s = measure('<div class=w><span id=h data-x="d" style="--c: \'ab\'"><span id=t>T</span></span></div>',
+                      '#h::before { content: attr(data-x) } #h::after { content: var(--c) }')
+    width = -> { s.evaluate_script("document.getElementById('h').getBoundingClientRect().width") }
+    expect(width.call).to be_within(0.01).of(w.call('dTab'))
+    s.execute_script("document.getElementById('h').setAttribute('data-x', 'dddd')")
+    expect(width.call).to be_within(0.01).of(w.call('ddddTab'))
+    s.execute_script("document.getElementById('h').style.setProperty('--c', '\"abcdef\"')")
+    expect(width.call).to be_within(0.01).of(w.call('ddddTabcdef'))
+  end
+
+  # A mutation anywhere starts a new cascade generation, and each re-resolves the pseudo — which must be a memo
+  # read, not a re-match of every `content` rule: a text edit on a Redmine page re-matched every icon's `::before`
+  # on the edited row, a twentieth of the relayout.
+  it 'resolves an unchanged content from the memo after a text edit' do
+    rows = (1..10).map { |i| "<li class=ic>item #{i}</li>" }.join
+    s = page("<ul id=l>#{rows}</ul>", '.ic::before { content: "x" }')
+    computes = s.evaluate_script(<<~JS)
+      (() => {
+        const text = document.getElementById('l').children[3].firstChild;
+        const out = [];
+        for (let i = 0; i < 4; i++) {
+          document.body.offsetHeight;
+          const c0 = __csimDeclaredComputes();
+          text.data += 'x';
+          document.body.offsetHeight;
+          out.push(__csimDeclaredComputes() - c0);
+        }
+        return out;
+      })()
+    JS
+    expect(computes.drop(1)).to eq([0, 0, 0])
+  end
+
   it 'follows a state flip — a checked box shows the label\'s ::before' do
     _, w, s = measure('<div class=w><input type=checkbox id=c><label id=h for=c><span id=t>L</span></label></div>', '#c:checked + label::before { content: "ck" }')
     x0 = s.evaluate_script("document.getElementById('t').getBoundingClientRect().x")
