@@ -56,6 +56,24 @@ RSpec.describe 'UA stylesheet: the form-control box' do
     expect(size(s, 'empty')).to eq([16, 21])
   end
 
+  # …and again when either changes: its label (a `value` set through the property) and the font it is measured in (a
+  # size it inherits). A label is measured once per layout stamp — measured afresh for every relayout, it was an
+  # eighth of one on Redmine's login page — so both have to reach what it keeps: each read here is the one a page
+  # loaded with the markup it ends with reads.
+  it 'sizes a button input again when its label or its font changes' do
+    s = page_with('<div id="w"><input id="go" type="submit" value="Go" style="font-size: inherit"></div>')
+    got = [size(s, 'go')]
+    s.execute_script("document.getElementById('go').value = 'Submit'")
+    got << size(s, 'go')
+    s.execute_script("document.getElementById('w').style.fontSize = '32px'")
+    got << size(s, 'go')
+    fresh = page_with('<div id="w" style="font-size: 32px"><input id="go" type="submit" value="Submit" style="font-size: inherit"></div>')
+    expect(got[0]).to eq(size(page_with('<div id="w"><input id="go" type="submit" value="Go" style="font-size: inherit"></div>'), 'go'))
+    expect(got[1]).to eq(size(page_with('<div id="w"><input id="go" type="submit" value="Submit" style="font-size: inherit"></div>'), 'go'))
+    expect(got[2]).to eq(size(fresh, 'go'))
+    expect(got.uniq.size).to eq(3)
+  end
+
   it 'gives every control family the box Chrome gives it' do
     s = page_with('<input id="t"><textarea id="a"></textarea><select id="s"><option>one</option></select>' \
                   '<input id="c" type="checkbox"><input id="f" type="file">' \
