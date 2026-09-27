@@ -907,13 +907,15 @@ fn read_f64_array(val: v8::Local<'_, v8::Value>) -> Vec<f64> {
     bytes.chunks_exact(8).map(|c| f64::from_ne_bytes(c.try_into().unwrap())).collect()
 }
 
-// __dom.layoutPass(inputsFlat, runsFlat, runTexts, rootX, rootY, rootCbW, grids, inlines) -> [Float64Array, Float64Array] | false.
+// __dom.layoutPass(inputsFlat, runsFlat, runTexts, rootX, rootY, rootCbW, grids, inlines, maths, rootRtl)
+//   -> [Float64Array, Float64Array, number] | false.
 // Decode the flat per-node record buffer (root at record 0), the per-run buffer, the parallel `runTexts` string
 // array (a run's text, else non-string), the grid channel and the inline table, run native layout, and write each
 // node's border-box into its arena slot. Answers the inline boxes' FRAGMENTS as rows of [inline index, x, y, w, h],
 // and beside them EVERY record's box, in record order, as the rows `boxOf` answers one node at a time
 // (`BOX_ROW` numbers each: [x, y, w, h, autoHeight, cbW, mt, mr, mb, ml, relX, relY]) — which is also the only answer
-// for a record with NO node to write into (an anonymous grid item, table cell or row); or false when the subtree uses
+// for a record with NO node to write into (an anonymous grid item, table cell or row), and last the margin the root
+// hands below its box (`Laid::root_bottom_margin`); or false when the subtree uses
 // a feature the native engine doesn't model (Outcome::Unsupported), and the caller then lays it out in JS. One
 // crossing per pass, where reading the boxes back one `boxOf` at a time was a crossing per box.
 fn layout_pass(
@@ -1183,11 +1185,11 @@ fn layout_pass(
     let root_rtl = args.get(9).is_true();
     match crate::layout::layout_block(&inputs, &runs, &run_texts, &grids, &inlines, &maths, root_x, root_y, root_cb_w, root_rtl) {
         crate::layout::Outcome::Unsupported => rv.set_bool(false),
-        crate::layout::Outcome::LaidOut(boxes, frags) => {
+        crate::layout::Outcome::LaidOut(laid) => {
             let cid = realm_id(scope, &args);
             let st = realm(scope, cid);
-            let mut rows: Vec<f64> = Vec::with_capacity(boxes.len() * 12);
-            for b in boxes {
+            let mut rows: Vec<f64> = Vec::with_capacity(laid.boxes.len() * 12);
+            for b in laid.boxes {
                 rows.extend(box_row(&b));
                 if b.nid >= 0.0 {
                     if let Some(node) = NodeId::from_i64(b.nid as i64).and_then(|id| st.get_mut(id)) {
@@ -1195,13 +1197,15 @@ fn layout_pass(
                     }
                 }
             }
-            let flat: Vec<f64> = frags.iter().flatten().copied().collect();
-            let pair = v8::Array::new(scope, 2);
+            let flat: Vec<f64> = laid.frags.iter().flatten().copied().collect();
+            let answer = v8::Array::new(scope, 3);
             let frag_rows: v8::Local<v8::Value> = f64_array(scope, &flat).into();
             let box_rows: v8::Local<v8::Value> = f64_array(scope, &rows).into();
-            pair.set_index(scope, 0, frag_rows);
-            pair.set_index(scope, 1, box_rows);
-            rv.set(pair.into());
+            let root_bottom_margin: v8::Local<v8::Value> = v8::Number::new(scope, laid.root_bottom_margin).into();
+            answer.set_index(scope, 0, frag_rows);
+            answer.set_index(scope, 1, box_rows);
+            answer.set_index(scope, 2, root_bottom_margin);
+            rv.set(answer.into());
         }
     }
 }

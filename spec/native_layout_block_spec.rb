@@ -84,6 +84,47 @@ RSpec.describe 'native layout L1 block-flow parity', if: ENV.fetch('CSIM_JS_ENGI
       .to eq([100, 600])
   end
 
+  # The ROOT element's auto height is the body's box and the margin collapsed out below it. Under the flip that margin
+  # is the pass's own answer (`Laid::root_bottom_margin`); the oracle's `collapsingBottomMargin` re-walked every
+  # child of the body on every pass, the body being on every edit's spine. Held against the oracle, shape by shape,
+  # over what reaches the body's bottom margin: a last child's and grandchild's, the body's own padding, height and
+  # border stopping it, negative margins, an out-of-flow or box-less last child.
+  # SHARED divergence, recorded: an empty body whose one child collapses through (`margin: 30px 0 60px`) makes the
+  # root 120 tall in both engines, where the margins are ONE collapsed 60 (§8.3.1) and Chrome says 60 — the run is
+  # counted once where the body is placed and again below it.
+  it 'hands the root the margin native collapsed out below the body' do
+    [
+      ['p{margin:0 0 40px}', '<p>a</p><div style="margin-bottom:70px"><div style="margin-bottom:90px">x</div></div>'],
+      ['body{padding-bottom:3px}', '<div style="margin-bottom:50px">x</div>'],
+      ['body{height:100px;margin-bottom:20px}', '<div style="margin-bottom:50px">x</div>'],
+      ['html{height:400px} body{height:50%;margin-bottom:20px}', '<div style="margin-bottom:50px">x</div>'],
+      ['body{min-height:10px;margin-bottom:20px}', '<div style="margin-bottom:50px">x</div>'],
+      ['body{border-bottom:1px solid}', '<div style="margin-bottom:50px">x</div>'],
+      ['body{margin-bottom:-5px}', '<div style="margin-bottom:-30px">x</div><div style="margin-bottom:12px"></div>'],
+      ['', '<div style="margin:30px 0 60px"></div>'],
+      ['', '<div style="margin-bottom:50px">x</div><div style="position:absolute">y</div>'],
+      ['', '<div style="margin-bottom:50px">x</div><div style="float:left;height:300px;margin-bottom:9px">y</div>'],
+      ['', '<div style="margin-bottom:50px">x</div><div style="display:contents"><div style="margin-bottom:77px">z</div></div>']
+    ].each do |css, body|
+      html = %(<!doctype html><html><head><meta charset="utf-8"><style>#{css}</style></head><body>#{body}</body></html>)
+      session = simulated_session(Rack::Builder.new { run ->(_env) { [200, {'content-type' => 'text/html; charset=utf-8'}, [html]] } }.to_app)
+      session.visit '/'
+      heights = session.evaluate_script(<<~JS)
+        (() => {
+          const height = (native) => {
+            globalThis.__csimNativeLayout = native;
+            document.body.appendChild(document.createComment(''));
+            return document.documentElement.getBoundingClientRect().height;
+          };
+          const oracle = height(false), passes = __csimNativeLayoutStats().native;
+          return [oracle, height(true), __csimNativeLayoutStats().native - passes];
+        })()
+      JS
+      expect(heights[2]).to eq(1), "#{css} #{body}: native did not lay the page out"
+      expect(heights[1]).to eq(heights[0]), "#{css} #{body}: root #{heights[1]} native, #{heights[0]} oracle"
+    end
+  end
+
   it 'matches on stacked blocks with explicit heights' do
     session = simulated_session(page(<<~HTML))
       <div style="height:50px"></div>

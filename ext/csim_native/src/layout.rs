@@ -901,8 +901,16 @@ fn clamp_min_max(v: f64, min: f64, max: f64) -> f64 {
 // Unsupported when the subtree uses a feature L1 doesn't model — the caller then falls back to JS for
 // the WHOLE pass (never a per-node mix).
 pub(crate) enum Outcome {
-    LaidOut(Vec<Box>, Vec<FragRow>),
+    LaidOut(Laid),
     Unsupported,
+}
+pub(crate) struct Laid {
+    pub(crate) boxes: Vec<Box>,
+    pub(crate) frags: Vec<FragRow>,
+    // The margin the pass root hands BELOW its border box: its own bottom margin joined with its last children's
+    // where they adjoin (§8.3.1) — for the document's body, what the root element's auto height takes in past the
+    // body's box. The collapse the pass already did, not a second derivation on the JS side.
+    pub(crate) root_bottom_margin: f64,
 }
 
 // An inline box the run stream opens — its entry in the walk's inline table (`nlInlineEntry`), which the OPEN /
@@ -1132,7 +1140,7 @@ fn shift_frags(i: usize, dx: f64, dy: f64) {
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn layout_block(inputs: &[Input], runs: &[Run], run_texts: &[Option<Vec<u16>>], grids: &[f64], inlines: &[InlineBox], maths: &[f64], root_x: f64, root_y: f64, root_cb_w: f64, root_rtl: bool) -> Outcome {
     if inputs.is_empty() {
-        return Outcome::LaidOut(Vec::new(), Vec::new());
+        return Outcome::LaidOut(Laid { boxes: Vec::new(), frags: Vec::new(), root_bottom_margin: 0.0 });
     }
     // Reject up front if any node uses an unmodelled display — a subtree is laid out natively only when
     // every participant is a block-flow box or a text block. This is the whole-subtree gate.
@@ -1217,7 +1225,7 @@ pub(crate) fn layout_block(inputs: &[Input], runs: &[Run], run_texts: &[Option<V
     // The inline boxes' fragments, each laid out by the text block its runs belong to and placed with it. A box no
     // text block answered for is left out, which the harness counts as MISSING: every tabled box belongs to a
     // committed stream, so an absent one is a bug to see, not a box to guess at.
-    Outcome::LaidOut(boxes, FragStore::take())
+    Outcome::LaidOut(Laid { boxes, frags: FragStore::take(), root_bottom_margin: root_margins.bottom.value() })
 }
 
 // Measure text in a run's font (px), at a pen standing `from` px from the BLOCK's content edge. Only a TAB
@@ -8368,7 +8376,7 @@ mod tests {
 
     fn boxes(o: Outcome) -> Vec<Box> {
         match o {
-            Outcome::LaidOut(b, _) => b,
+            Outcome::LaidOut(laid) => laid.boxes,
             Outcome::Unsupported => panic!("unexpected Unsupported"),
         }
     }
