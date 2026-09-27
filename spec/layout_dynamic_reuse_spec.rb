@@ -818,6 +818,33 @@ RSpec.describe 'layout reuse across dynamic style state' do
       JS
       expect(got).to eq([false, true, false, true])
     end
+
+    # An inline box native answers with the fragments it answered last time is not written again — but one whose
+    # fragments moved is: an edit elsewhere (nothing moves), an edit before it on its line (it shifts), and one that
+    # wraps it (it breaks in two). The same edits under the JS layout say where every rectangle belongs.
+    it 'writes an inline box again exactly when its fragments moved' do
+      body = '<div style="width:200px;font:16px/20px monospace"><span id="a">aaa</span> <span id="b">bbb bbb</span> ' \
+             '<span id="c">ccc</span></div><p id="p">x</p>'
+      edits = <<~JS
+        (() => {
+          const rects = () => JSON.stringify(['a', 'b', 'c'].map((id) => [...document.getElementById(id).getClientRects()].map((r) => [r.x, r.y, r.width])));
+          const out = [rects()];
+          document.getElementById('p').firstChild.data = 'y';
+          out.push(rects());
+          document.getElementById('a').firstChild.data = 'aaaaaa';
+          out.push(rects());
+          document.getElementById('a').firstChild.data = 'aaaaaaaaaaaaa';
+          out.push(rects());
+          return [out, __csimNativeLayoutStats().native];
+        })()
+      JS
+      native, passes = native_session_for(body, verify: false).evaluate_script(edits)
+      js = session_for('body { margin: 0 }', body).tap {|s| s.execute_script('globalThis.__csimNativeLayout = false') }.evaluate_script(edits).first
+      expect(passes).to be >= 4
+      expect(native).to eq(js)
+      expect(native.uniq.size).to eq(3)                          # the edit elsewhere moved nothing; the others did
+      expect(JSON.parse(native.last)[1].size).to eq(2)           # …the last one breaking `b` in two
+    end
   end
 
   # An ANONYMOUS table cell (§17.2.1 wraps a row's stray content in one) is in no DOM, so no mutation marks it — every
