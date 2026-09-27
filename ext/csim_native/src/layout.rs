@@ -570,6 +570,9 @@ pub(crate) const RUN_FLOAT: u8 = 7;
 // and `asc` is the run's ascent within its line box (baselineWithin its owner) — its descent is
 // `line_height - asc`, so a line's box height is max(asc)+max(descent) over its runs and the strut.
 // For OPEN/CLOSE: the edges are the inline table's (`InlineBox`), `plain` their basis-less width. `kind` selects.
+// A run's text, as UTF-16 code units, SHARED: a kept chunk's runs go into every pass that puts it back
+// (`dom.rs` `ChunkStore`), and a count is cheaper than a copy per run per pass.
+pub(crate) type RunText = Option<std::rc::Rc<[u16]>>;
 #[derive(Clone, Copy)]
 pub(crate) struct Run {
     pub(crate) kind: u8,
@@ -1138,7 +1141,7 @@ fn shift_frags(i: usize, dx: f64, dy: f64) {
 // A NaN origin is a pass root native places ITSELF — the document's body against the initial containing block
 // `root_cb_w` wide, in the root element's direction (`root_rtl`) — where anything else is handed its origin.
 #[allow(clippy::too_many_arguments)]
-pub(crate) fn layout_block(inputs: &[Input], runs: &[Run], run_texts: &[Option<Vec<u16>>], grids: &[f64], inlines: &[InlineBox], maths: &[f64], root_x: f64, root_y: f64, root_cb_w: f64, root_rtl: bool) -> Outcome {
+pub(crate) fn layout_block(inputs: &[Input], runs: &[Run], run_texts: &[RunText], grids: &[f64], inlines: &[InlineBox], maths: &[f64], root_x: f64, root_y: f64, root_cb_w: f64, root_rtl: bool) -> Outcome {
     if inputs.is_empty() {
         return Outcome::LaidOut(Laid { boxes: Vec::new(), frags: Vec::new(), root_bottom_margin: 0.0 });
     }
@@ -1318,7 +1321,7 @@ struct LineStyle {
 #[allow(clippy::too_many_arguments)]
 fn line_layout(
     runs: &[Run],
-    run_texts: &[Option<Vec<u16>>],
+    run_texts: &[RunText],
     strut_lh: f64,
     strut_asc: f64,
     content_w: f64,
@@ -3331,7 +3334,7 @@ fn measure_float(
     content_w: f64,
     inputs: &[Cell<Input>],
     runs: &[Run],
-    run_texts: &[Option<Vec<u16>>],
+    run_texts: &[RunText],
     grids: &[f64],
     children: &[Vec<usize>],
     boxes: &mut [Box],
@@ -3462,7 +3465,7 @@ fn measure(
     imposed_h: f64,
     inputs: &[Cell<Input>],
     runs: &[Run],
-    run_texts: &[Option<Vec<u16>>],
+    run_texts: &[RunText],
     grids: &[f64],
     children: &[Vec<usize>],
     boxes: &mut [Box],
@@ -4412,7 +4415,7 @@ fn flex_row_sizes(
     wrap: bool,
     inputs: &[Cell<Input>],
     runs: &[Run],
-    run_texts: &[Option<Vec<u16>>],
+    run_texts: &[RunText],
     grids: &[f64],
     children: &[Vec<usize>],
 ) -> Option<Vec<f64>> {
@@ -4579,7 +4582,7 @@ fn flex_column_sizes(
     align_content_code: u8,
     inputs: &[Cell<Input>],
     runs: &[Run],
-    run_texts: &[Option<Vec<u16>>],
+    run_texts: &[RunText],
     grids: &[f64],
     children: &[Vec<usize>],
     boxes: &mut [Box],
@@ -4825,7 +4828,7 @@ fn measure_flex(
     imposed_h: f64,
     inputs: &[Cell<Input>],
     runs: &[Run],
-    run_texts: &[Option<Vec<u16>>],
+    run_texts: &[RunText],
     grids: &[f64],
     children: &[Vec<usize>],
     boxes: &mut [Box],
@@ -5590,7 +5593,7 @@ fn table_columns(
     col_decls: Option<&TableColumnDecls>,
     inputs: &[Cell<Input>],
     runs: &[Run],
-    run_texts: &[Option<Vec<u16>>],
+    run_texts: &[RunText],
     grids: &[f64],
     children: &[Vec<usize>],
 ) -> Option<TableCols> {
@@ -5768,7 +5771,7 @@ fn table_intrinsic_widths(
     i: usize,
     inputs: &[Cell<Input>],
     runs: &[Run],
-    run_texts: &[Option<Vec<u16>>],
+    run_texts: &[RunText],
     grids: &[f64],
     children: &[Vec<usize>],
 ) -> Option<(f64, f64)> {
@@ -5793,7 +5796,7 @@ fn caption_floor(
     captions: &[usize],
     inputs: &[Cell<Input>],
     runs: &[Run],
-    run_texts: &[Option<Vec<u16>>],
+    run_texts: &[RunText],
     grids: &[f64],
     children: &[Vec<usize>],
 ) -> Option<f64> {
@@ -5810,7 +5813,7 @@ fn caption_intrinsic(
     cap: usize,
     inputs: &[Cell<Input>],
     runs: &[Run],
-    run_texts: &[Option<Vec<u16>>],
+    run_texts: &[RunText],
     grids: &[f64],
     children: &[Vec<usize>],
 ) -> Option<(f64, f64)> {
@@ -5854,7 +5857,7 @@ fn measure_table(
     imposed_h: f64,
     inputs: &[Cell<Input>],
     runs: &[Run],
-    run_texts: &[Option<Vec<u16>>],
+    run_texts: &[RunText],
     grids: &[f64],
     children: &[Vec<usize>],
     boxes: &mut [Box],
@@ -6683,7 +6686,7 @@ fn grid_column_content(
     col_count: usize,
     inputs: &[Cell<Input>],
     runs: &[Run],
-    run_texts: &[Option<Vec<u16>>],
+    run_texts: &[RunText],
     grids: &[f64],
     children: &[Vec<usize>],
 ) -> Option<Vec<(f64, f64)>> {
@@ -6741,7 +6744,7 @@ impl Drop for IwMemo {
         IW_MEMO.with(|m| *m.borrow_mut() = self.0.take());
     }
 }
-fn intrinsic_widths(i: usize, inputs: &[Cell<Input>], runs: &[Run], run_texts: &[Option<Vec<u16>>], grids: &[f64], children: &[Vec<usize>]) -> Option<(f64, f64)> {
+fn intrinsic_widths(i: usize, inputs: &[Cell<Input>], runs: &[Run], run_texts: &[RunText], grids: &[f64], children: &[Vec<usize>]) -> Option<(f64, f64)> {
     // The borrow is taken and released around the recursion, never across it (`intrinsic_widths_of` recurses
     // back in here). The outer Option is "asked before"; the inner one is the answer, `None` included — a
     // subtree native cannot measure is asked about as often as a measurable one.
@@ -6758,7 +6761,7 @@ fn intrinsic_widths(i: usize, inputs: &[Cell<Input>], runs: &[Run], run_texts: &
     });
     answer
 }
-fn intrinsic_widths_of(i: usize, inputs: &[Cell<Input>], runs: &[Run], run_texts: &[Option<Vec<u16>>], grids: &[f64], children: &[Vec<usize>]) -> Option<(f64, f64)> {
+fn intrinsic_widths_of(i: usize, inputs: &[Cell<Input>], runs: &[Run], run_texts: &[RunText], grids: &[f64], children: &[Vec<usize>]) -> Option<(f64, f64)> {
     let n = inputs[i].get();
     let extra = n.decl_edges_x;
     let (inner_min, inner_max) = if !is_auto(n.decl_w) {
@@ -6801,7 +6804,7 @@ fn intrinsic_widths_of(i: usize, inputs: &[Cell<Input>], runs: &[Run], run_texts
 // keyword `flex-basis` or its automatic minimum the oracle walks its children as block-level boxes (the same
 // widest-child answer), not along the flex axis. No declared width, no edges, no clamp: those are
 // `intrinsic_widths`' business.
-fn content_intrinsic(i: usize, inputs: &[Cell<Input>], runs: &[Run], run_texts: &[Option<Vec<u16>>], grids: &[f64], children: &[Vec<usize>]) -> Option<(f64, f64)> {
+fn content_intrinsic(i: usize, inputs: &[Cell<Input>], runs: &[Run], run_texts: &[RunText], grids: &[f64], children: &[Vec<usize>]) -> Option<(f64, f64)> {
     let n = inputs[i].get();
     match n.display {
         DISPLAY_TEXT_BLOCK => runs_intrinsic(&n, inputs, runs, run_texts, grids, children),
@@ -6920,7 +6923,7 @@ fn content_intrinsic(i: usize, inputs: &[Cell<Input>], runs: &[Run], run_texts: 
 // container's bare text (`content_intrinsic`) — whose SEGMENTS, split at a BR run marked -1 (the walk's
 // `NL_BR_SEGMENT`, an unforced line end at a blockified child), are measured apart, the indent spent on every one
 // but the first, as a mixed block's anonymous groups are; the widest of each figure wins.
-fn runs_intrinsic(n: &Input, inputs: &[Cell<Input>], runs: &[Run], run_texts: &[Option<Vec<u16>>], grids: &[f64], children: &[Vec<usize>]) -> Option<(f64, f64)> {
+fn runs_intrinsic(n: &Input, inputs: &[Cell<Input>], runs: &[Run], run_texts: &[RunText], grids: &[f64], children: &[Vec<usize>]) -> Option<(f64, f64)> {
     let (rs, re) = (n.run_start.max(0) as usize, (n.run_start + n.run_count).max(0) as usize);
     if re > runs.len() || rs > re {
         return None;
@@ -6952,7 +6955,7 @@ fn runs_intrinsic(n: &Input, inputs: &[Cell<Input>], runs: &[Run], run_texts: &[
 // content's min-content plus the box's RESOLVED edges (this is a floor on a used size, not an intrinsic
 // contribution — see the body), capped by a declared width (border-box per `box-sizing`; a percentage is auto,
 // `decl_w`).
-fn min_content_width(i: usize, inputs: &[Cell<Input>], runs: &[Run], run_texts: &[Option<Vec<u16>>], grids: &[f64], children: &[Vec<usize>]) -> Option<f64> {
+fn min_content_width(i: usize, inputs: &[Cell<Input>], runs: &[Run], run_texts: &[RunText], grids: &[f64], children: &[Vec<usize>]) -> Option<f64> {
     let n = inputs[i].get();
     if n.replaced && !n.ratio_only && !n.lays_out_children {
         return Some(n.intrinsic_w); // the oracle's minContentWidth: the intrinsic width, edges not counted
@@ -6980,7 +6983,7 @@ fn min_content_width(i: usize, inputs: &[Cell<Input>], runs: &[Run], run_texts: 
 // down a COLUMN the widest wins. A row item's contribution is its intrinsic box, its `flex-basis` pinning it — or,
 // when the item may grow, only raising its max (the coarse form of §9.9) — then its own min/max-width (border-box
 // per `box-sizing`); a column item contributes the width it wants, as any block child would.
-fn flex_intrinsic_widths(i: usize, inputs: &[Cell<Input>], runs: &[Run], run_texts: &[Option<Vec<u16>>], grids: &[f64], children: &[Vec<usize>]) -> Option<(f64, f64)> {
+fn flex_intrinsic_widths(i: usize, inputs: &[Cell<Input>], runs: &[Run], run_texts: &[RunText], grids: &[f64], children: &[Vec<usize>]) -> Option<(f64, f64)> {
     let n = inputs[i].get();
     let column = !n.flex_main_is_x;
     let wrap = !column && n.flex_wrap;
@@ -7120,7 +7123,7 @@ fn math_at(table: &[f64], at: usize, basis: f64) -> f64 {
     }
     if sp == 1 { stack[0] } else { f64::NAN }
 }
-fn text_intrinsic(runs: &[Run], run_texts: &[Option<Vec<u16>>], ws_mode: u8, indent: (f64, bool, bool, bool), inputs: &[Cell<Input>], all_runs: &[Run], all_texts: &[Option<Vec<u16>>], grids: &[f64], children: &[Vec<usize>]) -> Option<(f64, f64)> {
+fn text_intrinsic(runs: &[Run], run_texts: &[RunText], ws_mode: u8, indent: (f64, bool, bool, bool), inputs: &[Cell<Input>], all_runs: &[Run], all_texts: &[RunText], grids: &[f64], children: &[Vec<usize>]) -> Option<(f64, f64)> {
     // …per RUN, because an inline may declare its own `white-space` (`Run::ws_mode`) and every one of these is
     // about the run it belongs to. `pin` is the exception: "this box never wraps, so its min-content IS its
     // max-content" is a statement about the whole stream, true only while no run in it wraps.
@@ -7472,7 +7475,7 @@ fn measure_grid(
     imposed_h: f64,
     inputs: &[Cell<Input>],
     runs: &[Run],
-    run_texts: &[Option<Vec<u16>>],
+    run_texts: &[RunText],
     grids: &[f64],
     children: &[Vec<usize>],
     boxes: &mut [Box],
@@ -7768,7 +7771,7 @@ fn place(
     ay: f64,
     inputs: &[Cell<Input>],
     runs: &[Run],
-    run_texts: &[Option<Vec<u16>>],
+    run_texts: &[RunText],
     grids: &[f64],
     children: &[Vec<usize>],
     boxes: &mut [Box],
@@ -7889,7 +7892,7 @@ fn place_out_of_flow(
     parent: usize,
     inputs: &[Cell<Input>],
     runs: &[Run],
-    run_texts: &[Option<Vec<u16>>],
+    run_texts: &[RunText],
     grids: &[f64],
     children: &[Vec<usize>],
     boxes: &mut [Box],
@@ -8090,7 +8093,7 @@ fn shrink_to_fit_width(
     room: f64,
     inputs: &[Cell<Input>],
     runs: &[Run],
-    run_texts: &[Option<Vec<u16>>],
+    run_texts: &[RunText],
     grids: &[f64],
     children: &[Vec<usize>],
 ) -> Option<f64> {
@@ -8110,7 +8113,7 @@ fn block_child_width(
     avail: f64,
     inputs: &[Cell<Input>],
     runs: &[Run],
-    run_texts: &[Option<Vec<u16>>],
+    run_texts: &[RunText],
     grids: &[f64],
     children: &[Vec<usize>],
     failed: &std::cell::Cell<bool>,
@@ -8165,7 +8168,7 @@ fn content_sized_width(
     room: f64,
     inputs: &[Cell<Input>],
     runs: &[Run],
-    run_texts: &[Option<Vec<u16>>],
+    run_texts: &[RunText],
     grids: &[f64],
     children: &[Vec<usize>],
 ) -> Option<f64> {

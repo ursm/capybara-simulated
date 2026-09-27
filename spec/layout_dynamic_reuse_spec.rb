@@ -881,6 +881,25 @@ RSpec.describe 'layout reuse across dynamic style state' do
       expect(got[0]).to be_between(100, 130)                 # a root per item and the spine, not 300 records
     end
 
+    # …and the block crosses to native ONCE: native holds it (`layoutChunkPut`), and a pass that puts the subtree back
+    # names it. Sent with every pass, the kept items' records crossed again on every edit.
+    it 'sends a kept block to native once' do
+      items = (1..100).map {|i| %(<div><p><span id="s#{i}">item #{i}</span></p></div>) }.join
+      s = native_session_for(%(<div style="display:flex;flex-wrap:wrap">#{items}</div>), verify: false)
+      got = s.evaluate_script(<<~JS)
+        (() => {
+          document.body.offsetHeight;
+          for (const id of ['s7', 's8']) { document.getElementById(id).firstChild.data += '!'; document.body.offsetHeight; }
+          const n = __csimNlBlocksSent(), passes = __csimNativeLayoutStats().native;
+          document.getElementById('s9').firstChild.data += '!';
+          document.body.offsetHeight;
+          return [__csimNlBlocksSent() - n, __csimNativeLayoutStats().native - passes];
+        })()
+      JS
+      expect(got[1]).to eq(1)
+      expect(got[0]).to be <= 3                              # the items the last edits walked afresh, not all 100
+    end
+
     # An inline box native answers with the fragments it answered last time is not written again — but one whose
     # fragments moved is: an edit elsewhere (nothing moves), an edit before it on its line (it shifts), and one that
     # wraps it (it breaks in two). The same edits under the JS layout say where every rectangle belongs.

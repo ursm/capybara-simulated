@@ -391,6 +391,8 @@ pub(crate) struct Dom {
     // `hasOwnProperty`, `Object.keys`, `delete` all work against the arena in C++ — faster than a
     // JS Proxy and a faithful stand-in for the native-backed endgame.
     attrs_view_template: Option<v8::Global<v8::ObjectTemplate>>,
+    // Each realm's kept layout chunks (`ChunkStore`).
+    pub(crate) layout_chunks: std::collections::HashMap<i32, ChunkStore>,
 }
 
 // Borrow the isolate's Dom, lazily creating the slot on first touch. rusty_v8
@@ -508,6 +510,7 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_, ()>, ctx: &v8::Global<v8:
     // of per-node used values in ONE crossing, writing a border-box per node into the arena; boxOf reads
     // one back for the JS geometry getters.
     register(scope, ns, "layoutPass", layout_pass, context_id);
+    register(scope, ns, "layoutChunkPut", layout_chunk_put, context_id);
     register(scope, ns, "boxOf", box_of, context_id);
     // Native text metrics (fontations) for native inline layout (L2): register a font (fontconfig path
     // or in-memory SFNT bytes) to a handle JS puts in the layout inputs; native measures runs in-process.
@@ -934,8 +937,304 @@ fn f64_arg<'a>(val: v8::Local<'a, v8::Value>) -> F64Arg<'a> {
     F64Arg::Owned(bytes.chunks_exact(8).map(|c| f64::from_ne_bytes(c.try_into().unwrap())).collect())
 }
 
-// __dom.layoutPass(inputsFlat, runsFlat, runTexts, rootX, rootY, rootCbW, grids, inlines, maths, rootRtl)
-//   -> [Float64Array, Float64Array, number] | false.
+// One record of `layoutPass`'s input as the layout reads it — the whole of the record's contract with the JS packer
+// (`nlEncodeRecord`), in one place for the pass and for a kept chunk (`layoutChunkPut`).
+fn decode_input(r: &[f64]) -> crate::layout::Input {
+    crate::layout::Input {
+        nid: r[0],
+        parent: r[1] as i32,
+        display: r[2] as u8,
+        border_box: r[3] != 0.0,
+        width: r[4],
+        height: r[5],
+        min_w: r[6],
+        max_w: r[7],
+        min_h: r[8],
+        max_h: r[9],
+        mt: r[10],
+        mr: r[11],
+        mb: r[12],
+        ml: r[13],
+        pt: r[14],
+        pr: r[15],
+        pb: r[16],
+        pl: r[17],
+        bt: r[18],
+        br: r[19],
+        bb: r[20],
+        bl: r[21],
+        run_start: r[22] as i32,
+        run_count: r[23] as i32,
+        strut_lh: r[24],
+        height_adjoins: r[25] != 0.0,
+        minh_adjoins: r[26] != 0.0,
+        strut_asc: r[27],
+        float_kind: r[28] as u8,
+        clear: r[29] as u8,
+        starts_bfc: r[30] != 0.0,
+        flex_justify: r[31] as u8,
+        flex_main_gap: r[32],
+        flex_main_gap_math: crate::layout::math_ref(r[125]),
+        flex_cross_align: r[33] as u8,
+        flex_main_is_x: r[34] != 0.0,
+        flex_wrap: r[35] != 0.0,
+        flex_cross_flip: r[35] == 2.0,
+        flex_align_content: r[36] as u8,
+        flex_cross_gap: r[37],
+        flex_cross_gap_math: crate::layout::math_ref(r[126]),
+        flex_main_reverse: r[38] != 0.0,
+        flex_cross_far: (r[65] as u32) & 32768 != 0,
+        // A text block holding an out-of-flow child the walk REPLAYED. Those are the only children a text
+        // block has to lay out that its run stream does not name, and scanning for them costs a pass over
+        // every text block's children on a page that has none.
+        has_replayed_oof: (r[65] as u32) & 65536 != 0,
+        pushed_h_indefinite: (r[65] as u32) & 131072 != 0,
+        height_from_outside: (r[65] as u32) & 262144 != 0,
+        rel_x: r[39],
+        rel_y: r[40],
+        rel_pct: [r[130], r[131], r[132], r[133], r[134], r[39], r[40]],
+        rel_x_px: r[152],
+        chain_rel: [r[153], r[154], r[155]],
+        chain_px: [r[163], r[164]],
+        chain_shift: [r[163], r[164]],
+        chain_math: [crate::layout::math_ref(r[161]), crate::layout::math_ref(r[162])],
+        rel_x_neg: (r[65] as u32) & 8388608 != 0,
+        measured_as_block: (r[65] as u32) & 16777216 != 0,
+        equal_share: (r[65] as u32) & 33554432 != 0,
+        rel_math: std::array::from_fn(|k| crate::layout::math_ref(r[149 + k])),
+        flex_item_auto: r[41] as u8,
+        flex_baseline_asc: r[42],
+        flex_line_nat: r[128],
+        flex_line: r[129],
+        out_of_flow: r[43] as u8,
+        sp_x: r[44],
+        sp_y: r[45],
+        cell_col: r[46] as usize,
+        cell_colspan: r[47] as usize,
+        cell_rowspan: r[48] as usize,
+        caption_side: r[49] as u8,
+        rtl: r[50] as u8,
+        text_align: ((r[65] as u32) >> 5 & 3) as u8,
+        anon_cross: r[52],
+        ws_mode: r[53] as u8,
+        item_auto_height: r[54] != 0.0,
+        grid_start: r[55] as i32,
+        decl_w: r[56],
+        decl_min_w: r[57],
+        decl_max_w: r[58],
+        flex_basis: r[59],
+        flex_grow: r[60],
+        decl_border_box: r[61] != 0.0,
+        flex_shrink: r[62],
+        flex_basis_cb: r[63],
+        flex_basis_frac: r[97],
+        flex_basis_math: crate::layout::math_ref(r[156]),
+        pct_sizes: [r[100], r[101], r[102], r[103], r[104], r[105]],
+        pct_px: [r[119], r[120], r[121], r[122], r[123], r[124]],
+        pct_math: std::array::from_fn(|k| crate::layout::math_ref(r[135 + k])),
+        edge_frac: [r[106], r[107], r[108], r[109], r[110], r[111], r[112], r[113]],
+        basis_w: f64::NAN,
+        edge_px: [r[10], r[11], r[12], r[13], r[14], r[15], r[16], r[17]],
+        edge_math: std::array::from_fn(|k| crate::layout::math_ref(r[141 + k])),
+        inset_frac: [r[114], r[115], r[116], r[117]],
+        inset_math: std::array::from_fn(|k| crate::layout::math_ref(r[157 + k])),
+        flex_main_gap_frac: r[98],
+        flex_cross_gap_frac: r[99],
+        flex_basis_kw: r[64] as u8,
+        scrolls_x: (r[65] as u32) & 1 != 0,
+        scrolls_y: (r[65] as u32) & 2 != 0,
+        is_button: (r[65] as u32) & 128 != 0,
+        self_sizes: r[80] != 0.0,
+        block_axis_is_x: r[91] != 0.0,
+        decl_edges_x: r[89],
+        decl_margin_x: r[90],
+        cell_pct: r[81],
+        cell_min_content: r[84],
+        cell_max_content: r[85],
+        height_is_floor: r[82] != 0.0,
+        cell_valign: r[51] as u8,
+        row_height: r[86],
+        row_pct: r[87],
+        row_rank: r[88] as u8,
+        table_fixed: r[83] != 0.0,
+        flex_dir_reverse: (r[65] as u32) & 4 != 0,
+        flex_stretch: r[66] != 0.0,
+        flex_native: r[67] != 0.0,
+        intrinsic_w: r[68],
+        intrinsic_h: r[69],
+        replaced: (r[70] as u32) & 1 != 0,
+        lays_out_children: (r[70] as u32) & 16 != 0,
+        ratio: (r[70] as u32) & 2 != 0,
+        ratio_only: (r[70] as u32) & 4 != 0,
+        shrinks_to_nothing: (r[70] as u32) & 8 != 0,
+        cb_index: r[71] as i32,
+        cb_rect: [r[92], r[93], r[94], r[95]],
+        inset_top: r[72],
+        inset_right: r[73],
+        inset_bottom: r[74],
+        inset_left: r[75],
+        auto_margins: r[76] as u8,
+        legacy_align: ((r[65] as u32) >> 3 & 3) as u8,
+        indent_px: r[96],
+        indent_math: crate::layout::math_ref(r[127]),
+        indent_frac: r[118],
+        indent_hanging: (r[65] as u32) & 256 != 0,
+        indent_each_line: (r[65] as u32) & 512 != 0,
+        indent_spent: (r[65] as u32) & 1024 != 0,
+        width_kw: ((r[65] as u32) >> 11 & 3) as u8,
+        takes_clearance: (r[65] as u32) & 8192 != 0,
+        bottom_adjoins: (r[65] as u32) & 16384 != 0,
+        // rec[65] bit 19: a table CELL holding a percentage-height descendant — the one thing that makes
+        // `measure_table` lay a cell out twice (§17.5.3). Asked by the WALK because it is a question about
+        // declarations down a subtree native may not walk at all.
+        cell_pct_h_child: (r[65] as u32) & 524288 != 0,
+        anon_group: (r[65] as u32) & 1048576 != 0,
+        group_pct_h: f64::NAN,
+        pct_h_decl: (r[65] as u32) & 2097152 != 0,
+        row_imposed: (r[65] as u32) & 4194304 != 0,
+        control_baseline: r[77] as u8,
+        control_font_box: r[78],
+        control_font_asc: r[79],
+    }
+}
+// …one run.
+fn decode_run(r: &[f64]) -> crate::layout::Run {
+    // A slot may mean one thing per kind — slot 11 an ATOMIC's line mode or a CLOSE edge's `lands`, slot 3
+    // a TEXT run's letter-spacing or an edge's `plain` width (an OUT-OF-FLOW run's `rel.y`, read as `ls`).
+    // The fields added per kind take their slot only on their own kind; `ls` is decoded for every kind, as
+    // it always was, and is read only where it means letter-spacing or the offset.
+    let kind = r[0] as u8;
+    crate::layout::Run {
+        kind,
+        font: r[1] as i32,
+        size: r[2],
+        ls: r[3],
+        ws: r[4],
+        line_height: r[5],
+        asc: r[7],
+        metric: r[6],
+        ws_mode: r[8] as u8,
+        tab_px: r[9],
+        tab_min: r[10],
+        line_mode: if kind == crate::layout::RUN_ATOMIC { r[11] as u8 } else { 0 },
+        lands: kind == crate::layout::RUN_CLOSE && r[11] != 0.0,
+        plain: if kind == crate::layout::RUN_OPEN || kind == crate::layout::RUN_CLOSE { r[3] } else { 0.0 },
+    }
+}
+// …one inline entry.
+fn decode_inline(r: &[f64]) -> crate::layout::InlineBox {
+    crate::layout::InlineBox {
+        ml: r[0],
+        right: r[1],
+        mr: r[2],
+        top: r[3],
+        bottom: r[4],
+        own_h: r[5],
+        own_asc: r[6],
+        rel_x: r[7],
+        rel_y: r[8],
+        bt: r[9],
+        br: r[10],
+        bb: r[11],
+        bl: r[12],
+        f_ml: r[13],
+        f_left: r[14],
+        f_right: r[15],
+        f_mr: r[16],
+        f_top: r[17],
+        f_bottom: r[18],
+        left: r[19],
+        math: std::array::from_fn(|k| crate::layout::math_ref(r[20 + k])),
+        rel_xf: r[26],
+        rel_yf: r[27],
+        rel_yi: r[28],
+        rel_math: [crate::layout::math_ref(r[29]), crate::layout::math_ref(r[30])],
+    }
+}
+// A run-text channel: each entry's text (a string), read as UTF-16 to iterate exactly as JS does, else None. Read
+// BEFORE any Float64Array argument is borrowed (`f64_arg`): flattening a string can allocate on V8's heap, and a small
+// typed array lives there.
+fn read_run_texts(scope: &mut v8::PinScope<'_, '_>, val: v8::Local<'_, v8::Value>) -> Vec<crate::layout::RunText> {
+    let mut out = Vec::new();
+    if let Ok(tarr) = v8::Local::<v8::Array>::try_from(val) {
+        out.reserve(tarr.length() as usize);
+        for i in 0..tarr.length() {
+            match tarr.get_index(scope, i) {
+                Some(val) if val.is_string() => {
+                    let s = val.to_string(scope).unwrap();
+                    let mut u = vec![0u16; s.length()];
+                    s.write_v2(scope, 0, &mut u, v8::WriteFlags::empty());
+                    out.push(Some(u.into()));
+                }
+                _ => out.push(None),
+            }
+        }
+    }
+    out
+}
+
+// A KEPT subtree's inputs, held from pass to pass: what the JS walk packed once for a slice it keeps (`nlPackBlock`) —
+// every record but the root (which the pass holds, its parent writing into it), its runs and their texts, grid values
+// and inline entries — every index LOCAL to the chunk, and which records own a run range or a grid. A pass that puts
+// the subtree back names the chunk and where each of its streams now starts (`layoutPass`'s placements), and the chunk
+// goes in there relocated, never crossing from JS or being decoded again. The unit a layout cache will key on.
+pub(crate) struct Chunk {
+    inputs: Vec<crate::layout::Input>,
+    flags: Vec<u8>,
+    runs: Vec<crate::layout::Run>,
+    run_texts: Vec<crate::layout::RunText>,
+    grids: Vec<f64>,
+    inlines: Vec<crate::layout::InlineBox>,
+    used: u64,
+}
+// A realm's chunks, by the id the walk gave each. One not placed for `CHUNK_IDLE_PASSES` passes is dropped; a pass that
+// names a chunk the store no longer holds is answered with the ids it needs (`layoutPass`), which the walk still has.
+#[derive(Default)]
+pub(crate) struct ChunkStore {
+    chunks: std::collections::HashMap<u32, Chunk>,
+    pass: u64,
+}
+const CHUNK_IDLE_PASSES: u64 = 16;
+const CHUNK_RUNS: u8 = 1;
+const CHUNK_GRID: u8 = 2;
+
+// __dom.layoutChunkPut(id, records, flags, runs, runTexts, grids, inlines): hold one kept subtree's inputs (see `Chunk`).
+fn layout_chunk_put(
+    scope: &mut v8::PinScope<'_, '_>,
+    args: v8::FunctionCallbackArguments<'_>,
+    mut rv: v8::ReturnValue<'_, v8::Value>,
+) {
+    let id = args.get(0).uint32_value(scope).unwrap_or(0);
+    let run_texts = read_run_texts(scope, args.get(4));
+    let recs = f64_arg(args.get(1));
+    let flags = f64_arg(args.get(2));
+    let run_floats = f64_arg(args.get(3));
+    let grids = f64_arg(args.get(5));
+    let inline_floats = f64_arg(args.get(6));
+    if recs.len() % LAYOUT_STRIDE != 0 || run_floats.len() % RUN_STRIDE != 0 || inline_floats.len() % INLINE_STRIDE != 0
+        || run_texts.len() != run_floats.len() / RUN_STRIDE {
+        rv.set_bool(false);
+        return;
+    }
+    let chunk = Chunk {
+        inputs: recs.chunks_exact(LAYOUT_STRIDE).map(decode_input).collect(),
+        flags: flags.iter().map(|&f| f as u8).collect(),
+        runs: run_floats.chunks_exact(RUN_STRIDE).map(decode_run).collect(),
+        run_texts,
+        grids: grids.to_vec(),
+        inlines: inline_floats.chunks_exact(INLINE_STRIDE).map(decode_inline).collect(),
+        used: 0,
+    };
+    let cid = realm_id(scope, &args);
+    let store = dom(scope).layout_chunks.entry(cid).or_default();
+    let mut chunk = chunk;
+    chunk.used = store.pass;
+    store.chunks.insert(id, chunk);
+    rv.set_bool(true);
+}
+
+// __dom.layoutPass(inputsFlat, runsFlat, runTexts, rootX, rootY, rootCbW, grids, inlines, maths, rootRtl, placements,
+//                  patches) -> [Float64Array, Float64Array, number] | Float64Array | false.
 // Decode the flat per-node record buffer (root at record 0), the per-run buffer, the parallel `runTexts` string
 // array (a run's text, else non-string), the grid channel and the inline table, run native layout, and write each
 // node's border-box into its arena slot. Answers the inline boxes' FRAGMENTS as rows of [inline index, x, y, w, h],
@@ -945,275 +1244,68 @@ fn f64_arg<'a>(val: v8::Local<'a, v8::Value>) -> F64Arg<'a> {
 // hands below its box (`Laid::root_bottom_margin`); or false when the subtree uses
 // a feature the native engine doesn't model (Outcome::Unsupported), and the caller then lays it out in JS. One
 // crossing per pass, where reading the boxes back one `boxOf` at a time was a crossing per box.
+// A kept subtree is a HOLE in every buffer, filled from its chunk (`ChunkStore`): `placements` names each, in record
+// order, as [chunk id, record, run, grid and inline position] — the record being the subtree's root, which the buffer
+// holds — and `patches` sets what the walk resolves per pass in a record the chunk holds, as [record, slot, value]
+// (slot 71 the containing block's record, 92-95 its rectangle or an inline's entry). Where a chunk is not held (never
+// sent, or dropped for idling), the answer is the ids it needs, as a Float64Array, and nothing is laid out.
 fn layout_pass(
     scope: &mut v8::PinScope<'_, '_>,
     args: v8::FunctionCallbackArguments<'_>,
     mut rv: v8::ReturnValue<'_, v8::Value>,
 ) {
+    let run_texts_fresh = read_run_texts(scope, args.get(2));
+    let root_x = args.get(3).number_value(scope).unwrap_or(0.0);
+    let root_y = args.get(4).number_value(scope).unwrap_or(0.0);
+    let root_cb_w = args.get(5).number_value(scope).unwrap_or(0.0);
+    // …and the root element's direction, for a pass root native places itself (a NaN origin): the BODY's lead margin.
+    let root_rtl = args.get(9).is_true();
+    let cid = realm_id(scope, &args);
     let node_floats = f64_arg(args.get(0));
-    if node_floats.is_empty() {
-        rv.set_bool(false);
-        return;
-    }
     // The record STRIDE is a contract between two files, and a buffer that does not divide by it is not a
     // layout the pass should guess at: `chunks_exact` would silently drop the remainder and read every field at
     // the wrong offset — garbage boxes, not a decline. That is precisely what a stale `.so` (the
     // `rm -rf target/release` trap) or a half-applied stride bump produces, so check it once per pass.
-    if node_floats.len() % LAYOUT_STRIDE != 0 {
+    if node_floats.is_empty() || node_floats.len() % LAYOUT_STRIDE != 0 {
         rv.set_bool(false);
         return;
     }
-    let mut inputs: Vec<crate::layout::Input> = Vec::with_capacity(node_floats.len() / LAYOUT_STRIDE);
-    for r in node_floats.chunks_exact(LAYOUT_STRIDE) {
-        inputs.push(crate::layout::Input {
-            nid: r[0],
-            parent: r[1] as i32,
-            display: r[2] as u8,
-            border_box: r[3] != 0.0,
-            width: r[4],
-            height: r[5],
-            min_w: r[6],
-            max_w: r[7],
-            min_h: r[8],
-            max_h: r[9],
-            mt: r[10],
-            mr: r[11],
-            mb: r[12],
-            ml: r[13],
-            pt: r[14],
-            pr: r[15],
-            pb: r[16],
-            pl: r[17],
-            bt: r[18],
-            br: r[19],
-            bb: r[20],
-            bl: r[21],
-            run_start: r[22] as i32,
-            run_count: r[23] as i32,
-            strut_lh: r[24],
-            height_adjoins: r[25] != 0.0,
-            minh_adjoins: r[26] != 0.0,
-            strut_asc: r[27],
-            float_kind: r[28] as u8,
-            clear: r[29] as u8,
-            starts_bfc: r[30] != 0.0,
-            flex_justify: r[31] as u8,
-            flex_main_gap: r[32],
-            flex_main_gap_math: crate::layout::math_ref(r[125]),
-            flex_cross_align: r[33] as u8,
-            flex_main_is_x: r[34] != 0.0,
-            flex_wrap: r[35] != 0.0,
-            flex_cross_flip: r[35] == 2.0,
-            flex_align_content: r[36] as u8,
-            flex_cross_gap: r[37],
-            flex_cross_gap_math: crate::layout::math_ref(r[126]),
-            flex_main_reverse: r[38] != 0.0,
-            flex_cross_far: (r[65] as u32) & 32768 != 0,
-            // A text block holding an out-of-flow child the walk REPLAYED. Those are the only children a text
-            // block has to lay out that its run stream does not name, and scanning for them costs a pass over
-            // every text block's children on a page that has none.
-            has_replayed_oof: (r[65] as u32) & 65536 != 0,
-            pushed_h_indefinite: (r[65] as u32) & 131072 != 0,
-            height_from_outside: (r[65] as u32) & 262144 != 0,
-            rel_x: r[39],
-            rel_y: r[40],
-            rel_pct: [r[130], r[131], r[132], r[133], r[134], r[39], r[40]],
-            rel_x_px: r[152],
-            chain_rel: [r[153], r[154], r[155]],
-            chain_px: [r[163], r[164]],
-            chain_shift: [r[163], r[164]],
-            chain_math: [crate::layout::math_ref(r[161]), crate::layout::math_ref(r[162])],
-            rel_x_neg: (r[65] as u32) & 8388608 != 0,
-            measured_as_block: (r[65] as u32) & 16777216 != 0,
-            equal_share: (r[65] as u32) & 33554432 != 0,
-            rel_math: std::array::from_fn(|k| crate::layout::math_ref(r[149 + k])),
-            flex_item_auto: r[41] as u8,
-            flex_baseline_asc: r[42],
-            flex_line_nat: r[128],
-            flex_line: r[129],
-            out_of_flow: r[43] as u8,
-            sp_x: r[44],
-            sp_y: r[45],
-            cell_col: r[46] as usize,
-            cell_colspan: r[47] as usize,
-            cell_rowspan: r[48] as usize,
-            caption_side: r[49] as u8,
-            rtl: r[50] as u8,
-            text_align: ((r[65] as u32) >> 5 & 3) as u8,
-            anon_cross: r[52],
-            ws_mode: r[53] as u8,
-            item_auto_height: r[54] != 0.0,
-            grid_start: r[55] as i32,
-            decl_w: r[56],
-            decl_min_w: r[57],
-            decl_max_w: r[58],
-            flex_basis: r[59],
-            flex_grow: r[60],
-            decl_border_box: r[61] != 0.0,
-            flex_shrink: r[62],
-            flex_basis_cb: r[63],
-            flex_basis_frac: r[97],
-            flex_basis_math: crate::layout::math_ref(r[156]),
-            pct_sizes: [r[100], r[101], r[102], r[103], r[104], r[105]],
-            pct_px: [r[119], r[120], r[121], r[122], r[123], r[124]],
-            pct_math: std::array::from_fn(|k| crate::layout::math_ref(r[135 + k])),
-            edge_frac: [r[106], r[107], r[108], r[109], r[110], r[111], r[112], r[113]],
-            basis_w: f64::NAN,
-            edge_px: [r[10], r[11], r[12], r[13], r[14], r[15], r[16], r[17]],
-            edge_math: std::array::from_fn(|k| crate::layout::math_ref(r[141 + k])),
-            inset_frac: [r[114], r[115], r[116], r[117]],
-            inset_math: std::array::from_fn(|k| crate::layout::math_ref(r[157 + k])),
-            flex_main_gap_frac: r[98],
-            flex_cross_gap_frac: r[99],
-            flex_basis_kw: r[64] as u8,
-            scrolls_x: (r[65] as u32) & 1 != 0,
-            scrolls_y: (r[65] as u32) & 2 != 0,
-            is_button: (r[65] as u32) & 128 != 0,
-            self_sizes: r[80] != 0.0,
-            block_axis_is_x: r[91] != 0.0,
-            decl_edges_x: r[89],
-            decl_margin_x: r[90],
-            cell_pct: r[81],
-            cell_min_content: r[84],
-            cell_max_content: r[85],
-            height_is_floor: r[82] != 0.0,
-            cell_valign: r[51] as u8,
-            row_height: r[86],
-            row_pct: r[87],
-            row_rank: r[88] as u8,
-            table_fixed: r[83] != 0.0,
-            flex_dir_reverse: (r[65] as u32) & 4 != 0,
-            flex_stretch: r[66] != 0.0,
-            flex_native: r[67] != 0.0,
-            intrinsic_w: r[68],
-            intrinsic_h: r[69],
-            replaced: (r[70] as u32) & 1 != 0,
-            lays_out_children: (r[70] as u32) & 16 != 0,
-            ratio: (r[70] as u32) & 2 != 0,
-            ratio_only: (r[70] as u32) & 4 != 0,
-            shrinks_to_nothing: (r[70] as u32) & 8 != 0,
-            cb_index: r[71] as i32,
-            cb_rect: [r[92], r[93], r[94], r[95]],
-            inset_top: r[72],
-            inset_right: r[73],
-            inset_bottom: r[74],
-            inset_left: r[75],
-            auto_margins: r[76] as u8,
-            legacy_align: ((r[65] as u32) >> 3 & 3) as u8,
-            indent_px: r[96],
-            indent_math: crate::layout::math_ref(r[127]),
-            indent_frac: r[118],
-            indent_hanging: (r[65] as u32) & 256 != 0,
-            indent_each_line: (r[65] as u32) & 512 != 0,
-            indent_spent: (r[65] as u32) & 1024 != 0,
-            width_kw: ((r[65] as u32) >> 11 & 3) as u8,
-            takes_clearance: (r[65] as u32) & 8192 != 0,
-            bottom_adjoins: (r[65] as u32) & 16384 != 0,
-            // rec[65] bit 19: a table CELL holding a percentage-height descendant — the one thing that makes
-            // `measure_table` lay a cell out twice (§17.5.3). Asked by the WALK because it is a question about
-            // declarations down a subtree native may not walk at all.
-            cell_pct_h_child: (r[65] as u32) & 524288 != 0,
-            anon_group: (r[65] as u32) & 1048576 != 0,
-            group_pct_h: f64::NAN,
-            pct_h_decl: (r[65] as u32) & 2097152 != 0,
-            row_imposed: (r[65] as u32) & 4194304 != 0,
-            control_baseline: r[77] as u8,
-            control_font_box: r[78],
-            control_font_asc: r[79],
-        });
-    }
     let run_floats = f64_arg(args.get(1));
-    let mut runs: Vec<crate::layout::Run> = Vec::with_capacity(run_floats.len() / RUN_STRIDE);
-    for r in run_floats.chunks_exact(RUN_STRIDE) {
-        // A slot may mean one thing per kind — slot 11 an ATOMIC's line mode or a CLOSE edge's `lands`, slot 3
-        // a TEXT run's letter-spacing or an edge's `plain` width (an OUT-OF-FLOW run's `rel.y`, read as `ls`).
-        // The fields added per kind take their slot only on their own kind; `ls` is decoded for every kind, as
-        // it always was, and is read only where it means letter-spacing or the offset.
-        let kind = r[0] as u8;
-        runs.push(crate::layout::Run {
-            kind,
-            font: r[1] as i32,
-            size: r[2],
-            ls: r[3],
-            ws: r[4],
-            line_height: r[5],
-            asc: r[7],
-            metric: r[6],
-            ws_mode: r[8] as u8,
-            tab_px: r[9],
-            tab_min: r[10],
-            line_mode: if kind == crate::layout::RUN_ATOMIC { r[11] as u8 } else { 0 },
-            lands: kind == crate::layout::RUN_CLOSE && r[11] != 0.0,
-            plain: if kind == crate::layout::RUN_OPEN || kind == crate::layout::RUN_CLOSE { r[3] } else { 0.0 },
-        });
-    }
-    // Parallel run-text channel: run_texts[r] = run r's text (a string), read as UTF-16 to iterate
-    // exactly as JS does. Done before any arena borrow.
-    let mut run_texts: Vec<Option<Vec<u16>>> = Vec::with_capacity(runs.len());
-    if let Ok(tarr) = v8::Local::<v8::Array>::try_from(args.get(2)) {
-        for i in 0..tarr.length() {
-            match tarr.get_index(scope, i) {
-                Some(val) if val.is_string() => {
-                    let s = val.to_string(scope).unwrap();
-                    let mut u = vec![0u16; s.length()];
-                    s.write_v2(scope, 0, &mut u, v8::WriteFlags::empty());
-                    run_texts.push(Some(u));
-                }
-                _ => run_texts.push(None),
-            }
-        }
-    }
-    let root_x = args.get(3).number_value(scope).unwrap_or(0.0);
-    let root_y = args.get(4).number_value(scope).unwrap_or(0.0);
-    let root_cb_w = args.get(5).number_value(scope).unwrap_or(0.0);
     // Parallel grid channel: a computed grid container's `grid_start` indexes this buffer (parsed column
     // template + gaps + per-item placement). Empty when the pass has no computed grid.
-    let grids = f64_arg(args.get(6));
+    let grid_floats = f64_arg(args.get(6));
     // The inline table: one entry per inline box the run stream opens, named by its runs. A buffer that does not
     // divide by the stride is refused like the record buffer above.
     let inline_floats = f64_arg(args.get(7));
-    if inline_floats.len() % INLINE_STRIDE != 0 {
+    // …and the math table: every comparison function's program, named by offset from a record, an inline entry or a grid.
+    let maths = f64_arg(args.get(8));
+    let placements = f64_arg(args.get(10));
+    let patches = f64_arg(args.get(11));
+    if inline_floats.len() % INLINE_STRIDE != 0 || run_floats.len() % RUN_STRIDE != 0 || placements.len() % 5 != 0 || patches.len() % 3 != 0 {
         rv.set_bool(false);
         return;
     }
-    let inlines: Vec<crate::layout::InlineBox> = inline_floats
-        .chunks_exact(INLINE_STRIDE)
-        .map(|r| crate::layout::InlineBox {
-            ml: r[0],
-            right: r[1],
-            mr: r[2],
-            top: r[3],
-            bottom: r[4],
-            own_h: r[5],
-            own_asc: r[6],
-            rel_x: r[7],
-            rel_y: r[8],
-            bt: r[9],
-            br: r[10],
-            bb: r[11],
-            bl: r[12],
-            f_ml: r[13],
-            f_left: r[14],
-            f_right: r[15],
-            f_mr: r[16],
-            f_top: r[17],
-            f_bottom: r[18],
-            left: r[19],
-            math: std::array::from_fn(|k| crate::layout::math_ref(r[20 + k])),
-            rel_xf: r[26],
-            rel_yf: r[27],
-            rel_yi: r[28],
-            rel_math: [crate::layout::math_ref(r[29]), crate::layout::math_ref(r[30])],
-        })
-        .collect();
-    // …and the math table: every comparison function's program, named by offset from a record, an inline entry or a grid.
-    let maths = f64_arg(args.get(8));
-    // …and the root element's direction, for a pass root native places itself (a NaN origin): the BODY's lead margin.
-    let root_rtl = args.get(9).is_true();
+    let assembled = {
+        let store = dom(scope).layout_chunks.entry(cid).or_default();
+        store.pass += 1;
+        let missing: Vec<f64> = placements.chunks_exact(5).filter(|p| !store.chunks.contains_key(&(p[0] as u32))).map(|p| p[0]).collect();
+        if missing.is_empty() {
+            Ok(store_pass(store, &node_floats, &run_floats, run_texts_fresh, &grid_floats, &inline_floats, &placements, &patches))
+        } else {
+            Err(missing)
+        }
+    };
+    let (inputs, runs, run_texts, grids, inlines) = match assembled {
+        Ok(a) => a,
+        Err(missing) => {
+            let answer: v8::Local<v8::Value> = f64_array(scope, &missing).into();
+            rv.set(answer);
+            return;
+        }
+    };
     match crate::layout::layout_block(&inputs, &runs, &run_texts, &grids, &inlines, &maths, root_x, root_y, root_cb_w, root_rtl) {
         crate::layout::Outcome::Unsupported => rv.set_bool(false),
         crate::layout::Outcome::LaidOut(laid) => {
-            let cid = realm_id(scope, &args);
             let st = realm(scope, cid);
             let mut rows: Vec<f64> = Vec::with_capacity(laid.boxes.len() * 12);
             for b in laid.boxes {
@@ -1235,6 +1327,142 @@ fn layout_pass(
             rv.set(answer.into());
         }
     }
+}
+
+// The chunks a pass places marked used and the idle ones dropped, then its inputs assembled.
+#[allow(clippy::too_many_arguments)]
+fn store_pass(
+    store: &mut ChunkStore,
+    node_floats: &[f64],
+    run_floats: &[f64],
+    run_texts: Vec<crate::layout::RunText>,
+    grid_floats: &[f64],
+    inline_floats: &[f64],
+    placements: &[f64],
+    patches: &[f64],
+) -> PassInputs {
+    let pass = store.pass;
+    for p in placements.chunks_exact(5) {
+        if let Some(c) = store.chunks.get_mut(&(p[0] as u32)) {
+            c.used = pass;
+        }
+    }
+    if pass % CHUNK_IDLE_PASSES == 0 {
+        store.chunks.retain(|_, c| pass - c.used < CHUNK_IDLE_PASSES);
+    }
+    assemble_pass(store, node_floats, run_floats, run_texts, grid_floats, inline_floats, placements, patches)
+}
+type PassInputs = (
+    Vec<crate::layout::Input>,
+    Vec<crate::layout::Run>,
+    Vec<crate::layout::RunText>,
+    Vec<f64>,
+    Vec<crate::layout::InlineBox>,
+);
+// The pass's inputs: what the buffers hold, decoded, and each placed chunk in its holes — every local position made the
+// pass's (a record's parent, run start and grid start; a run's record or inline entry) — then the patches.
+#[allow(clippy::too_many_arguments)]
+fn assemble_pass(
+    store: &ChunkStore,
+    node_floats: &[f64],
+    run_floats: &[f64],
+    mut run_texts: Vec<crate::layout::RunText>,
+    grid_floats: &[f64],
+    inline_floats: &[f64],
+    placements: &[f64],
+    patches: &[f64],
+) -> PassInputs {
+    use crate::layout::{RUN_ATOMIC, RUN_BR, RUN_CLOSE, RUN_FLOAT, RUN_OOF, RUN_OPEN, RUN_WBR};
+    let places: Vec<(&Chunk, usize, usize, usize, usize)> = placements
+        .chunks_exact(5)
+        .map(|p| (&store.chunks[&(p[0] as u32)], p[1] as usize, p[2] as usize, p[3] as usize, p[4] as usize))
+        .collect();
+    // Records: the buffer's, a chunk's after its root.
+    let n_rec = node_floats.len() / LAYOUT_STRIDE;
+    let mut inputs = Vec::with_capacity(n_rec);
+    let mut next = places.iter().peekable();
+    let mut i = 0;
+    while i < n_rec {
+        inputs.push(decode_input(&node_floats[i * LAYOUT_STRIDE..(i + 1) * LAYOUT_STRIDE]));
+        match next.peek() {
+            Some(&&(c, at, runs_at, grids_at, _)) if at == i => {
+                for (x, &fl) in c.inputs.iter().zip(&c.flags) {
+                    let mut x = *x;
+                    x.parent += at as i32;
+                    if fl & CHUNK_RUNS != 0 {
+                        x.run_start += runs_at as i32;
+                    }
+                    if fl & CHUNK_GRID != 0 {
+                        x.grid_start += grids_at as i32;
+                    }
+                    inputs.push(x);
+                }
+                i += c.inputs.len() + 1;
+                next.next();
+            }
+            _ => i += 1,
+        }
+    }
+    // Runs and their texts: the buffer's, a chunk's where its range starts.
+    let n_runs = run_floats.len() / RUN_STRIDE;
+    let mut runs = Vec::with_capacity(n_runs);
+    run_texts.resize(n_runs, None);
+    let mut next = places.iter().filter(|p| !p.0.runs.is_empty()).peekable();
+    let mut i = 0;
+    while i < n_runs {
+        match next.peek() {
+            Some(&&(c, at, runs_at, _, inl_at)) if runs_at == i => {
+                for (k, r) in c.runs.iter().enumerate() {
+                    let mut r = *r;
+                    match r.kind {
+                        RUN_OOF | RUN_FLOAT | RUN_ATOMIC if r.font >= 0 => r.font += at as i32,
+                        RUN_OPEN | RUN_CLOSE | RUN_WBR => r.font += inl_at as i32,
+                        RUN_BR if r.font >= 0 => r.font += inl_at as i32,
+                        _ => {}
+                    }
+                    runs.push(r);
+                    run_texts[i + k] = c.run_texts[k].clone();
+                }
+                i += c.runs.len();
+                next.next();
+            }
+            _ => {
+                runs.push(decode_run(&run_floats[i * RUN_STRIDE..(i + 1) * RUN_STRIDE]));
+                i += 1;
+            }
+        }
+    }
+    // Grid values and inline entries: the buffer's, each chunk's copied over its hole.
+    let mut grids = grid_floats.to_vec();
+    let n_inl = inline_floats.len() / INLINE_STRIDE;
+    let mut inlines = Vec::with_capacity(n_inl);
+    let mut next = places.iter().filter(|p| !p.0.inlines.is_empty()).peekable();
+    let mut i = 0;
+    while i < n_inl {
+        match next.peek() {
+            Some(&&(c, _, _, _, inl_at)) if inl_at == i => {
+                inlines.extend_from_slice(&c.inlines);
+                i += c.inlines.len();
+                next.next();
+            }
+            _ => {
+                inlines.push(decode_inline(&inline_floats[i * INLINE_STRIDE..(i + 1) * INLINE_STRIDE]));
+                i += 1;
+            }
+        }
+    }
+    for &(c, _, _, grids_at, _) in &places {
+        grids[grids_at..grids_at + c.grids.len()].copy_from_slice(&c.grids);
+    }
+    for p in patches.chunks_exact(3) {
+        let x = &mut inputs[p[0] as usize];
+        match p[1] as usize {
+            71 => x.cb_index = p[2] as i32,
+            s @ 92..=95 => x.cb_rect[s - 92] = p[2],
+            _ => {}
+        }
+    }
+    (inputs, runs, run_texts, grids, inlines)
 }
 
 // A Float64Array holding `vals` — how a pass hands a flat table back to JS in one crossing.
