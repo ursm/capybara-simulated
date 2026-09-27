@@ -3701,7 +3701,9 @@ const MEASURED_PER_CHUNK: usize = 4;
 // A kept measure holds its chunk's WHOLE subtree, the chunks nested in it included, so one kept at every level of a
 // deep nest holds the records under it once per level. What the cache holds is capped at this many times the records
 // of the pass keeping one — and a chunk is not kept the pass it is first placed, since one packed afresh on every edit
-// (a wrapper on the edit's spine) never comes back: 40 wrappers over 3,000 rows held 3 GB of copies that way.
+// (a wrapper on the edit's spine) never comes back: 40 wrappers over 3,000 rows held 3 GB of copies that way. At the
+// cap, the measures of the chunks the pass does not place go first, once a pass: refusing instead, a list walked afresh
+// filled it with the measures of chunks it had just replaced, and kept nothing new until they idled out.
 const MEASURED_RECORDS_PER_PASS_RECORD: usize = 4;
 // Where a pass placed each chunk: the record of its root, the chunk, its records (the root's included), where its
 // runs, grid values and inline entries start, and whether the root's own run range and grid are among them.
@@ -3739,6 +3741,8 @@ struct MeasurePass {
     cache: MeasureCache,
     roots: std::collections::HashMap<usize, ChunkRoot>,
     check: bool,
+    // …and whether the pass has made room yet (see `MEASURED_RECORDS_PER_PASS_RECORD`).
+    evicted: bool,
 }
 thread_local! {
     static MEASURE_PASS: std::cell::RefCell<Option<MeasurePass>> = const { std::cell::RefCell::new(None) };
@@ -3748,7 +3752,7 @@ struct MeasureCacheGuard<'a>(&'a mut MeasureCache);
 impl<'a> MeasureCacheGuard<'a> {
     fn install(cache: &'a mut MeasureCache, roots: std::collections::HashMap<usize, ChunkRoot>, check: bool) -> Self {
         let taken = std::mem::take(cache);
-        MEASURE_PASS.with(|m| *m.borrow_mut() = Some(MeasurePass { cache: taken, roots, check }));
+        MEASURE_PASS.with(|m| *m.borrow_mut() = Some(MeasurePass { cache: taken, roots, check, evicted: false }));
         MeasureCacheGuard(cache)
     }
 }
@@ -3882,7 +3886,15 @@ fn measure(
     let indef0 = INDEF_PCT_H_READS.with(|n| n.get());
     let info = measure_uncached(i, w, imposed_h, inputs, runs, run_texts, grids, children, boxes, failed, fc, bfc_x, bfc_y);
     let room = MEASURE_PASS.with(|m| {
-        m.borrow().as_ref().is_some_and(|p| p.cache.records + root.n <= MEASURED_RECORDS_PER_PASS_RECORD * inputs.len())
+        let mut pass = m.borrow_mut();
+        let Some(p) = pass.as_mut() else { return false };
+        let cap = MEASURED_RECORDS_PER_PASS_RECORD * inputs.len();
+        if p.cache.records + root.n > cap && !p.evicted {
+            let placed: std::collections::HashSet<u32> = p.roots.values().map(|r| r.id).collect();
+            p.cache.retain_chunks(|id| placed.contains(&id));
+            p.evicted = true;
+        }
+        p.cache.records + root.n <= cap
     });
     if failed.get() || !fc.items.is_empty() || root.fresh || !room {
         return info;

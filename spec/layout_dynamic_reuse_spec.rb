@@ -941,6 +941,31 @@ RSpec.describe 'layout reuse across dynamic style state' do
       expect(got[2]).to be > 0                               # …while the rows' own are put back
     end
 
+    # …and a full cache makes room rather than keeping nothing: a list walked afresh again and again fills it with the
+    # measures of chunks it has just replaced, and refused past the cap, the rows' own were not kept until those idled
+    # out — no measure put back for five cycles in twelve.
+    it 'keeps measuring a list that is walked afresh again and again' do
+      rows = (1..100).map {|i| %(<div class="r"><p><span id="s#{i}">row #{i}</span> <b>x</b></p></div>) }.join
+      s = native_session_for(%(<div id="l" style="display:flex;flex-wrap:wrap">#{rows}</div>), verify: false)
+      got = s.evaluate_script(<<~JS)
+        (() => {
+          const edit = (id) => { document.getElementById(id).firstChild.data += '!'; document.body.offsetHeight; };
+          document.body.offsetHeight;
+          const put = [];
+          for (let cycle = 0; cycle < 12; cycle++) {
+            document.getElementById('l').style.paddingLeft = (cycle % 7) + 'px';
+            document.body.offsetHeight;
+            for (let e = 0; e < 5; e++) edit('s' + (1 + (cycle * 5 + e) % 100));
+            const [p0] = __dom.layoutMeasureCounts();
+            edit('s' + (50 + cycle));
+            put.push(__dom.layoutMeasureCounts()[0] - p0);
+          }
+          return put;
+        })()
+      JS
+      expect(got.min).to be >= 90
+    end
+
     # …and a kept measure is keyed on where its subtree stands in the pass only as far as the subtree itself: a box
     # inserted before a kept list moves every item's record, and keyed on that, cost every item its measure.
     it 'puts back the measures of a list something was inserted before' do
