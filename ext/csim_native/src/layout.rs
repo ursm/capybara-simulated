@@ -3639,9 +3639,9 @@ struct MInfo {
 
 // ── The measure cache ──────────────────────────────────────────────────────────────────────────────────────────────
 // A KEPT subtree — one the walk put back whole from a chunk (`dom.rs` `Chunk`), not one of whose records changed —
-// measured under the same record for its root, at the same width and imposed height and at the same place in its
-// formatting context's frame, with no float of an outer context
-// to meet and none of its own leaving, lays out exactly as it did last time: the same boxes relative to its root, the
+// measured under the same record for its root (where it stands in the pass aside: `Input::at_rest`), at the same width
+// and imposed height and at the same place in its formatting context's frame, with no float of an outer context to
+// meet and none of its own leaving, lays out exactly as it did last time: the same boxes relative to its root, the
 // same writes into its records (the percentages its boxes resolve for their children), the same fragments on its lines
 // and the same count of indefinite percentage heights read. So the first such measure of a chunk is KEPT and a later
 // one under the same conditions PUT BACK (`measure`), instead of laying the subtree out again: a text edit relaid every
@@ -3681,13 +3681,35 @@ impl MeasureCache {
     }
 }
 const MEASURED_PER_CHUNK: usize = 4;
-// Where a pass placed each chunk: the record of its root, the chunk, its records (the root's included) and where its
-// inline entries start.
+// Where a pass placed each chunk: the record of its root, the chunk, its records (the root's included), where its
+// runs, grid values and inline entries start, and whether the root's own run range and grid are among them.
 #[derive(Clone, Copy)]
 pub(crate) struct ChunkRoot {
     pub(crate) id: u32,
     pub(crate) n: usize,
+    pub(crate) runs_at: usize,
+    pub(crate) grids_at: usize,
     pub(crate) inl_at: usize,
+    pub(crate) root_runs: bool,
+    pub(crate) root_grid: bool,
+}
+impl Input {
+    // A chunk root's record as a kept measure is keyed on it (`Measured::root`): what names a POSITION in the pass made
+    // the chunk's own — its run and grid start counted from the chunk's — or cleared where a measure reads none of it —
+    // its parent (which only builds the child lists) and its containing block (which only `place` reads). Keyed on the
+    // positions themselves, anything inserted before a kept list cost every row after it its measure.
+    fn at_rest(mut self, root: &ChunkRoot) -> Input {
+        self.parent = -1;
+        if root.root_runs {
+            self.run_start -= root.runs_at as i32;
+        }
+        if root.root_grid {
+            self.grid_start -= root.grids_at as i32;
+        }
+        self.cb_index = CB_NONE;
+        self.cb_rect = [0.0; 4];
+        self
+    }
 }
 struct MeasurePass {
     cache: MeasureCache,
@@ -3783,13 +3805,14 @@ fn measure(
         return measure_uncached(i, w, imposed_h, inputs, runs, run_texts, grids, children, boxes, failed, fc, bfc_x, bfc_y);
     };
     let at_entry = inputs[i].get();
+    let at_rest = at_entry.at_rest(&root);
     let check = MEASURE_PASS.with(|m| m.borrow().as_ref().is_some_and(|p| p.check));
     let before = check.then(|| MeasureState::of(i, root.n, inputs, boxes));
     let (wb, hb, bfc) = (w.to_bits(), imposed_h.to_bits(), [bfc_x.to_bits(), bfc_y.to_bits()]);
     let hit = MEASURE_PASS.with(|m| {
         let pass = m.borrow();
         let kept = pass.as_ref()?.cache.by_chunk.get(&root.id)?;
-        let k = kept.iter().find(|k| k.w == wb && k.imposed_h == hb && k.bfc == bfc && k.root.same(&at_entry))?;
+        let k = kept.iter().find(|k| k.w == wb && k.imposed_h == hb && k.bfc == bfc && k.root.same(&at_rest))?;
         let (x, y) = (boxes[i].x, boxes[i].y);
         boxes[i..i + root.n].copy_from_slice(&k.boxes);
         boxes[i].x = x;
@@ -3838,7 +3861,7 @@ fn measure(
         return info;
     }
     let kept = Measured {
-        root: at_entry,
+        root: at_rest,
         w: wb,
         imposed_h: hb,
         bfc,

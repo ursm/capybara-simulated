@@ -900,6 +900,50 @@ RSpec.describe 'layout reuse across dynamic style state' do
       expect(got[0]).to be <= 3                              # the items the last edits walked afresh, not all 100
     end
 
+    # …and a block nested in another is held once, by its own id: an edit beside the list keeps the list whole, and the
+    # list's block names its items' blocks rather than holding their records again. Holding them again, an edit back
+    # inside the list packed and sent every item anew under a new id, and native measured each one afresh.
+    it 'keeps the blocks of a kept list through edits in and around it' do
+      items = (1..100).map {|i| %(<div><p><span id="s#{i}">item #{i}</span></p></div>) }.join
+      s = native_session_for(%(<div id="top">top</div><div style="display:flex;flex-wrap:wrap">#{items}</div>), verify: false)
+      got = s.evaluate_script(<<~JS)
+        (() => {
+          const edit = (id) => { document.getElementById(id).firstChild.data += '!'; document.body.offsetHeight; };
+          document.body.offsetHeight;
+          for (const id of ['s7', 'top', 's8', 'top']) edit(id);
+          const n = __csimNlBlocksSent(), [put0] = __dom.layoutMeasureCounts(), passes = __csimNativeLayoutStats().native;
+          for (const id of ['s9', 'top', 's10', 'top']) edit(id);
+          return [__csimNlBlocksSent() - n, __dom.layoutMeasureCounts()[0] - put0, __csimNativeLayoutStats().native - passes];
+        })()
+      JS
+      expect(got[2]).to eq(4)
+      expect(got[0]).to be <= 12                             # the items edited and the list around them, not all 100 again
+      expect(got[1]).to be >= 4 * 90                         # …and every item not edited measured as it was
+    end
+
+    # …and a kept measure is keyed on where its subtree stands in the pass only as far as the subtree itself: a box
+    # inserted before a kept list moves every item's record, and keyed on that, cost every item its measure.
+    it 'puts back the measures of a list something was inserted before' do
+      items = (1..100).map {|i| %(<div><p><span id="s#{i}">item #{i}</span></p></div>) }.join
+      s = native_session_for(%(<div id="top">top</div><div style="display:flex;flex-wrap:wrap">#{items}</div>), verify: false)
+      got = s.evaluate_script(<<~JS)
+        (() => {
+          const insert = (id) => {
+            document.getElementById('top').before(document.createElement('div'));
+            document.getElementById(id).firstChild.data += '!';
+            document.body.offsetHeight;
+          };
+          document.body.offsetHeight;
+          for (const id of ['s7', 's8']) insert(id);
+          const [put0] = __dom.layoutMeasureCounts(), passes = __csimNativeLayoutStats().native;
+          insert('s9');
+          return [__dom.layoutMeasureCounts()[0] - put0, __csimNativeLayoutStats().native - passes];
+        })()
+      JS
+      expect(got[1]).to eq(1)
+      expect(got[0]).to be >= 90
+    end
+
     # …and a kept block's subtree is not laid out again either, where it is measured as it was last time: native puts
     # the measure back (`MeasureCache`). Laid out afresh, every item of the list was measured on every edit. (Checked:
     # the check lays each put-back subtree out again and compares, so it is left off for the count.)
