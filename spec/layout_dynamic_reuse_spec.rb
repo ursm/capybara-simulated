@@ -798,6 +798,24 @@ RSpec.describe 'layout reuse across dynamic style state' do
       expect(got[0]).to be_between(1, 10)
     end
 
+    # …and a BLOCK's children likewise: what each is to the flow (`nlBlockChild`) is asked of every child of a block
+    # walked afresh, kept or not — ~2 ms a pass over a 1,500-row list one row of which an edit touched.
+    it "keeps what a block's untouched children are to its flow" do
+      rows = (1..50).map {|i| %(<div class="r"><span id="s#{i}">row #{i}</span></div>) }.join
+      s = native_session_for(%(<div>#{rows}</div>), verify: false)
+      got = s.evaluate_script(<<~JS)
+        (() => {
+          document.body.offsetHeight;
+          const n = __csimNlGateAnswers(), passes = __csimNativeLayoutStats().native;
+          document.getElementById('s7').firstChild.data = 'row seven';
+          document.body.offsetHeight;
+          return [__csimNlGateAnswers() - n, __csimNativeLayoutStats().native - passes];
+        })()
+      JS
+      expect(got[1]).to eq(1)
+      expect(got[0]).to be_between(1, 10)
+    end
+
     # …and computed again when the item's subtree changes. A row group's percentage `height` is one the walk still
     # resolves (`nlTablePartResolves`) against the JS layout's basis, so a flex item holding one is pushed, and a pass
     # that must push declines to the JS layout. Kept past the change, the answer went on declining a pass native can now
