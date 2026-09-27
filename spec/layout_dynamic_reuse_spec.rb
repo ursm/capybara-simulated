@@ -195,6 +195,11 @@ RSpec.describe 'layout reuse across dynamic style state' do
   # case says the neighbour it does not concern still got its reuse — refusing categorically
   # instead measured 2-7 % slower across Discourse / Redmine / Avo.
   describe 'the reuse refusals' do
+    # These count the JS layout's own reuse (`__csimReuseStats`), so they run it whichever layout the suite runs.
+    def session_for(css, body)
+      super.tap {|s| s.execute_script('globalThis.__csimNativeLayout = false') }
+    end
+
     def stats_around(session, script)
       session.evaluate_script(<<~JS)
         (() => {
