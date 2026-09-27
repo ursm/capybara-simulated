@@ -52,6 +52,54 @@ RSpec.describe 'css-scoping selectors' do
                        '10px 0px 1px 16px 0px 16px 0px 5px'])
   end
 
+  # …and only `:host` itself: a featureless host matches no other pseudo-class beside it (`:host:not(.q) p`,
+  # `:host(.x):not(.y) p`), and `:host()` does not take `:has()`; `:where(:host)` / `:is(:host)` are `:host`. Chrome:
+  # 0, 0, 0, 11, 12.
+  it 'takes :host alone as the host, and nothing beside it' do
+    html = '<!DOCTYPE html><body></body>'
+    s = simulated_session(->(_env) { [200, {'content-type' => 'text/html'}, [html]] })
+    s.visit '/'
+    got = s.evaluate_script(<<~JS)
+      [':host:not(.q) p { margin-left: 5px }', ':host(.x):not(.y) p { margin-left: 3px }',
+       ':host(:has(.f)) p { margin-left: 23px }', ':where(:host) p { margin-left: 11px }',
+       ':is(:host) p { margin-left: 12px }'].map((css) => {
+        const h = document.createElement('div'); h.className = 'x'; h.innerHTML = '<i class="f"></i>';
+        document.body.appendChild(h);
+        const r = h.attachShadow({mode: 'open'});
+        r.innerHTML = '<style>' + css + '</style><p id="p">x</p>';
+        return parseFloat(getComputedStyle(r.getElementById('p')).marginLeft);
+      })
+    JS
+    expect(got).to eq([0, 0, 0, 11, 12])
+  end
+
+  # A `:host()` reading the host's POSITION or `:empty` flips on a child-list change beside or under the host, with no
+  # write to the host itself: a sibling prepended (`:first-child`), appended (`:last-child`), the only light child
+  # removed (`:empty`). Chrome: 40, 40, 0, then 0, 0, 40.
+  it 'relays out the tree under a host whose position or emptiness changes' do
+    html = '<!DOCTYPE html><body style="margin:0"><div id="w1"><div id="h1"></div></div><div id="w2"><div id="h2"></div></div>' \
+           '<div id="h3"><b id="only">x</b></div></body>'
+    s = simulated_session(->(_env) { [200, {'content-type' => 'text/html'}, [html]] })
+    s.visit '/'
+    got = s.evaluate_script(<<~JS)
+      (() => {
+        const mk = (id, css) => {
+          const r = document.getElementById(id).attachShadow({mode: 'open'});
+          r.innerHTML = '<style>' + css + '</style><p id="p" style="margin-top:0">x</p><slot></slot>';
+          return () => r.getElementById('p').getBoundingClientRect().x - document.getElementById(id).getBoundingClientRect().x;
+        };
+        const a = mk('h1', ':host(:first-child) p { margin-left: 40px }'), b = mk('h2', ':host(:last-child) p { margin-left: 40px }'),
+              c = mk('h3', ':host(:empty) p { margin-left: 40px }');
+        const out = [a(), b(), c()];
+        document.getElementById('w1').prepend(document.createElement('i'));
+        document.getElementById('w2').append(document.createElement('i'));
+        document.getElementById('only').remove();
+        return out.concat([a(), b(), c()]);
+      })()
+    JS
+    expect(got).to eq([40, 40, 0, 0, 0, 40])
+  end
+
   # …and the host's class written by a PARSE-TIME script after a layout read: the layout gate had no rule set collected
   # yet, kept the write for a rebuild that was not coming, and the tree under the host kept its old padding.
   it 'relays out the tree under a host whose class a parse-time script changes' do
