@@ -773,8 +773,8 @@ RSpec.describe 'layout reuse across dynamic style state' do
   # compared (`__csimNativeLayoutVerifyReuse`, which THROWS on a difference): a kept answer the subtree no longer
   # deserves makes the two walks part.
   describe 'native walk gates' do
-    def native_session_for(body, verify: true)
-      session_for('body { margin: 0 }', body).tap do |s|
+    def native_session_for(body, verify: true, css: '')
+      session_for("body { margin: 0 } #{css}", body).tap do |s|
         s.execute_script("globalThis.__csimNativeLayout = true; globalThis.__csimNativeLayoutVerifyReuse = #{verify}")
       end
     end
@@ -945,6 +945,53 @@ RSpec.describe 'layout reuse across dynamic style state' do
       expect(native).to eq(js)
       expect(native.uniq.size).to eq(3)                          # the edit elsewhere moved nothing; the others did
       expect(JSON.parse(native.last)[1].size).to eq(2)           # …the last one breaking `b` in two
+    end
+
+    # A read that merely CONSIDERED a dynamic-state rule leaves what it walked kept: a flip that can move a box dirties
+    # every box the rule can reach (`__csimApplyScopedStateDirty`), and that is what the stamps it is kept under follow.
+    # Refused for one, Redmine's `#main-menu li:hover ul.menu-children` kept the header, and the page wrapper above it,
+    # from ever being kept: every edit walked them afresh, and asked each of their gates again.
+    it 'keeps a subtree a dynamic-state rule reaches' do
+      items = (1..50).map {|i| %(<li><a>item #{i}</a><ul class="sub"><li>sub #{i}</li></ul></li>) }.join
+      s = native_session_for(%(<ul id="m">#{items}</ul><p id="p">x</p>), verify: false,
+                             css: 'ul.sub { display: none } #m li:hover ul.sub { display: block }')
+      got = s.evaluate_script(<<~JS)
+        (() => {
+          document.body.offsetHeight;
+          for (const t of ['y', 'z']) { document.getElementById('p').firstChild.data = t; document.body.offsetHeight; }
+          const n = __csimNlGateAnswers(), passes = __csimNativeLayoutStats().native;
+          document.getElementById('p').firstChild.data = 'w';
+          document.body.offsetHeight;
+          return [__csimNlGateAnswers() - n, __csimNativeLayoutStats().native - passes];
+        })()
+      JS
+      expect(got[1]).to eq(1)
+      expect(got[0]).to be <= 3                              # the edited paragraph and the body, not the fifty items
+    end
+
+    # …and lays it out again when the rule flips: the hovered item's submenu opens and the item after it moves down,
+    # its link turns bold and wider, and all of it closes again — each read where the JS layout reads it.
+    it 'lays a kept subtree out again when a dynamic-state rule flips in it' do
+      css = 'ul.sub { display: none } #m li:hover ul.sub { display: block } #m li:hover > a { font-weight: bold } ' \
+            '#m { font: 16px/20px sans-serif }'
+      body = %(<ul id="m">#{(1..5).map {|i| %(<li id="l#{i}"><a id="a#{i}">item #{i}</a><ul class="sub"><li>sub</li></ul></li>) }.join}</ul>) +
+             '<p id="p">x</p>'
+      edits = <<~JS
+        (() => {
+          const geo = () => JSON.stringify(['a2', 'l3'].map((id) => { const r = document.getElementById(id).getBoundingClientRect(); return [r.y, r.width, r.height]; }));
+          const out = [geo()];
+          document.getElementById('p').firstChild.data = 'y'; out.push(geo());
+          document._hoverElement = document.getElementById('a2'); out.push(geo());
+          document.getElementById('p').firstChild.data = 'z'; out.push(geo());
+          document._hoverElement = null; out.push(geo());
+          return [out, __csimNativeLayoutStats().native];
+        })()
+      JS
+      native, passes = native_session_for(body, css: css).evaluate_script(edits)
+      js = session_for("body { margin: 0 } #{css}", body).tap {|s| s.execute_script('globalThis.__csimNativeLayout = false') }.evaluate_script(edits).first
+      expect(passes).to be >= 5
+      expect(native).to eq(js)
+      expect(native.uniq.size).to eq(2)                          # closed, open, closed
     end
   end
 
