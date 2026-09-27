@@ -1038,6 +1038,26 @@ RSpec.describe 'layout reuse across dynamic style state' do
       expect(native.uniq.size).to eq(2)                          # closed, open, closed
     end
 
+    # …and nor does a rule that can never match, whatever state it names: its selector did not compile
+    # (`unmatchable`), so a read that considered it depends on nothing. Named an unknown state, it counted as one some
+    # writer flips unseen, and Forem's stats page — whose sheets hold such a rule — kept nothing.
+    it 'keeps a subtree whose reads considered a rule that can never match' do
+      items = (1..50).map {|i| %(<li><a>item #{i}</a></li>) }.join
+      s = native_session_for(%(<ul id="m">#{items}</ul><p id="p">x</p>), verify: false, css: 'li:bogus-state { display: none }')
+      got = s.evaluate_script(<<~JS)
+        (() => {
+          document.body.offsetHeight;
+          for (const t of ['y', 'z']) { document.getElementById('p').firstChild.data = t; document.body.offsetHeight; }
+          const n = __csimNlGateAnswers(), passes = __csimNativeLayoutStats().native;
+          document.getElementById('p').firstChild.data = 'w';
+          document.body.offsetHeight;
+          return [__csimNlGateAnswers() - n, __csimNativeLayoutStats().native - passes];
+        })()
+      JS
+      expect(got[1]).to eq(1)
+      expect(got[0]).to be <= 3
+    end
+
     # …but only where every writer of the state is seen (`STAMP_TRACKED_PSEUDOS`). A clean checkbox's checkedness is its
     # ATTRIBUTE's, a form's validity its controls', `:dir()` follows `dir=auto` text and `:target` an `id`: each flips
     # with no state bump and dirties nothing, so a subtree that read such a rule is not kept. Kept, each read the box
