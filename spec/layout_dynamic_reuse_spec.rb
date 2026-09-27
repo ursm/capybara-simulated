@@ -819,6 +819,29 @@ RSpec.describe 'layout reuse across dynamic style state' do
       expect(got).to eq([false, true, false, true])
     end
 
+    # A COUNT, not a wall: an edit's pass copies what its spine emitted and the children those write into, not the page
+    # once per ancestor. Every ancestor of the edit is walked afresh, and a slice copied flat copied everything under
+    # each: 185 ms an edit under 80 wrapping `<div>`s over 1,500 items, against the JS layout's 12. Nested, the forty
+    # wrappers here copy one record and one child each, and the list its hundred items. (Checked: the check's fresh walk
+    # keeps nothing, so it copies nothing either.)
+    it "copies an edit's spine, not the page once per ancestor" do
+      items = (1..100).map {|i| %(<div><p><span id="s#{i}">item #{i}</span></p></div>) }.join
+      s = native_session_for(('<div>' * 40) + items + ('</div>' * 40))
+      got = s.evaluate_script(<<~JS)
+        (() => {
+          document.body.offsetHeight;
+          document.getElementById('s7').firstChild.data = 'item seven';
+          document.body.offsetHeight;
+          const n = __csimNlSliceCopies(), passes = __csimNativeLayoutStats().native;
+          document.getElementById('s8').firstChild.data = 'item eight';
+          document.body.offsetHeight;
+          return [__csimNlSliceCopies() - n, __csimNativeLayoutStats().native - passes];
+        })()
+      JS
+      expect(got[1]).to eq(1)
+      expect(got[0]).to be_between(100, 300)
+    end
+
     # An inline box native answers with the fragments it answered last time is not written again — but one whose
     # fragments moved is: an edit elsewhere (nothing moves), an edit before it on its line (it shifts), and one that
     # wraps it (it breaks in two). The same edits under the JS layout say where every rectangle belongs.
