@@ -1079,9 +1079,9 @@ RSpec.describe 'layout reuse across dynamic style state' do
     end
 
     # …but only where every writer of the state is seen (`STAMP_TRACKED_PSEUDOS`). A clean checkbox's checkedness is its
-    # ATTRIBUTE's, a form's validity its controls', `:dir()` follows `dir=auto` text and `:target` an `id`: each flips
-    # with no state bump and dirties nothing, so a subtree that read such a rule is not kept. Kept, each read the box
-    # from before its flip back.
+    # ATTRIBUTE's, a form's validity its controls', `:dir()` follows `dir=auto` text, `:target` an `id`, and a modal
+    # dialog stops being `:modal` with its `open` attribute: each flips with no state bump and dirties nothing, so a
+    # subtree that read such a rule is not kept. Kept, each read the box from before its flip back.
     it 'does not keep a subtree a state some writer flips unseen reaches' do
       shapes = [
         ['input:checked ~ p { width: 50px }', '<input id="i" type="checkbox"><p id="p"></p>', '',
@@ -1091,7 +1091,9 @@ RSpec.describe 'layout reuse across dynamic style state' do
         ['div:dir(rtl) + p { width: 50px }', '<div dir="auto"><span id="t">abc</span></div><p id="p"></p>', '',
          "document.getElementById('t').firstChild.data = 'שלום'"],
         [':target + p { width: 50px }', '<div id="d"></div><p id="p"></p>', "location.hash = '#sec'",
-         "document.getElementById('d').id = 'sec'"]
+         "document.getElementById('d').id = 'sec'"],
+        ['dialog:modal ~ p { width: 50px }', '<dialog id="d">hi</dialog><p id="p"></p>', "document.getElementById('d').showModal()",
+         "document.getElementById('d').removeAttribute('open')"]
       ]
       shapes.each do |rule, body, setup, flip|
         css = "p { width: 100px; height: 10px; margin: 0 } #{rule}"

@@ -218,9 +218,10 @@ RSpec.describe 'cascade invalidation' do
   end
 
   # …and which of them a LAYOUT STAMP follows (`STAMP_TRACKED_PSEUDOS`), so a memo kept under one need not refuse a read
-  # that considered the rule: hover and focus are found by a diff every flip goes through, and a popover, a modal, a
-  # definition and a custom state bump the style state where they change. A checkedness, a value, a validity, `:dir()`
-  # and `:target` can each flip with no bump — and so can a state this does not know.
+  # that considered the rule: hover and focus are found by a diff every flip goes through, and a popover, a definition
+  # and a custom state bump the style state where they change. A checkedness, a value, a validity, `:dir()`, `:target`
+  # and `:modal` (whose dialog's `open` attribute is its own) can each flip with no bump — and so can a state this does
+  # not know.
   it 'tells a state the layout stamps follow from one they do not' do
     app = lambda {|_env| [200, {'content-type' => 'text/html'}, ['<!DOCTYPE html><html><body></body></html>']] }
     s = simulated_session(app)
@@ -232,6 +233,7 @@ RSpec.describe 'cascade invalidation' do
           hover:       d('#t:hover'),
           focusWithin: d('.f:focus-within'),
           popover:     d('[popover]:popover-open'),
+          modal:       d('dialog:modal'),
           nested:      d(':is(.a:hover) .b'),
           checked:     d('input:checked'),
           mixed:       d('input:hover:checked'),
@@ -246,6 +248,7 @@ RSpec.describe 'cascade invalidation' do
       'hover'       => false,
       'focusWithin' => false,
       'popover'     => false,
+      'modal'       => true,
       'nested'      => false,
       'checked'     => true,
       'mixed'       => true,
@@ -887,6 +890,33 @@ RSpec.describe 'cascade invalidation' do
       JS
       expect(got).to eq([77, 300]), sel
     end
+  end
+
+  # …and a tree's OWN `:host::part(p):hover`, which is matched by rewritten copies of the rule: the rule as written holds
+  # `::part()`, which the ordinary shadow-rule walk cannot compile and flags `unmatchable` — so once that walk had run
+  # (any other element of the tree read), noting the rule as written tainted nothing, the hover was memoised away, and
+  # the part kept 77.
+  it "restyles a part on hover through its own tree's :host::part rule" do
+    s = simulated_session(lambda {|_env|
+      [200, {'content-type' => 'text/html'},
+       [<<~HTML]]
+         <!DOCTYPE html><html><body><div id="host"></div><script>
+           document.getElementById('host').attachShadow({ mode: 'open' }).innerHTML =
+             '<style>:host::part(p) { width: 77px } :host::part(p):hover { width: 300px } #o { width: 10px }</style>' +
+             '<div part="p" id="t">x</div><div id="o">o</div>';
+         </script></body></html>
+       HTML
+    })
+    s.visit '/'
+    got = s.evaluate_script(<<~JS)
+      (() => {
+        const root = document.getElementById('host').shadowRoot, t = root.getElementById('t');
+        const out = [getComputedStyle(root.getElementById('o')).width, getComputedStyle(t).width];
+        document._hoverElement = t;
+        return [...out, getComputedStyle(t).width, t.getBoundingClientRect().width];
+      })()
+    JS
+    expect(got).to eq(['10px', '77px', '300px', 300])
   end
 
   # …and the STRUCTURAL-CONTEXT gate, which decides whether a memoised computed value survives a
