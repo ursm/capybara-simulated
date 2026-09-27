@@ -521,6 +521,180 @@ pub(crate) struct Input {
     // pass's inline table (`inline_padding_box`).
     pub(crate) cb_rect: [f64; 4],
 }
+
+// Whether two records are the same to the BIT — NaN is itself and -0 is not 0 — as a layout cache has to ask of the
+// record a kept subtree is measured under (`MeasureCache`). Every field is named: a field added to `Input` and not
+// here does not compile, where a comparison that skipped it would hand back a layout the new field would have changed.
+trait BitEq {
+    fn bit_eq(&self, o: &Self) -> bool;
+}
+impl BitEq for f64 {
+    fn bit_eq(&self, o: &f64) -> bool {
+        self.to_bits() == o.to_bits()
+    }
+}
+macro_rules! bit_eq_by_eq {
+    ($($t:ty),*) => { $(impl BitEq for $t { fn bit_eq(&self, o: &$t) -> bool { self == o } })* };
+}
+bit_eq_by_eq!(bool, u8, i32, u32, usize);
+impl<T: BitEq, const N: usize> BitEq for [T; N] {
+    fn bit_eq(&self, o: &[T; N]) -> bool {
+        self.iter().zip(o).all(|(a, b)| a.bit_eq(b))
+    }
+}
+impl Input {
+    fn same(&self, o: &Input) -> bool {
+        let Input { nid, parent, display, border_box, width, height, min_w, max_w, min_h, max_h, mt, mr, mb, ml, pt, pr, pb, pl, bt, br, bb, bl, height_adjoins, minh_adjoins, bottom_adjoins, run_start, run_count, strut_lh, strut_asc, float_kind, clear, takes_clearance, starts_bfc, flex_justify, flex_main_gap, flex_cross_align, flex_main_is_x, flex_wrap, flex_cross_flip, flex_align_content, flex_cross_gap, flex_main_reverse, flex_cross_far, has_replayed_oof, rel_x, rel_y, rel_pct, rel_x_px, rel_x_neg, measured_as_block, equal_share, chain_rel, chain_px, chain_shift, chain_math, rel_math, flex_item_auto, flex_baseline_asc, flex_line_nat, flex_line, out_of_flow, sp_x, sp_y, cell_col, cell_colspan, cell_rowspan, caption_side, rtl, text_align, anon_cross, ws_mode, item_auto_height, pushed_h_indefinite, grid_start, decl_w, decl_min_w, decl_max_w, flex_basis, flex_grow, decl_border_box, flex_shrink, flex_basis_cb, flex_basis_frac, flex_basis_math, pct_sizes, pct_px, pct_math, edge_frac, edge_px, edge_math, basis_w, inset_frac, inset_math, flex_main_gap_frac, flex_main_gap_math, flex_cross_gap_math, indent_math, flex_cross_gap_frac, flex_basis_kw, scrolls_x, scrolls_y, is_button, self_sizes, block_axis_is_x, decl_edges_x, decl_margin_x, height_from_outside, cell_pct, cell_min_content, cell_max_content, height_is_floor, cell_valign, cell_pct_h_child, anon_group, group_pct_h, pct_h_decl, row_imposed, row_height, row_pct, row_rank, table_fixed, flex_stretch, flex_native, flex_dir_reverse, replaced, lays_out_children, ratio, ratio_only, shrinks_to_nothing, control_baseline, control_font_box, control_font_asc, intrinsic_w, intrinsic_h, cb_index, inset_top, inset_right, inset_bottom, inset_left, auto_margins, legacy_align, indent_px, indent_frac, indent_hanging, indent_each_line, indent_spent, width_kw, cb_rect } = self;
+        nid.bit_eq(&o.nid)
+            && parent.bit_eq(&o.parent)
+            && display.bit_eq(&o.display)
+            && border_box.bit_eq(&o.border_box)
+            && width.bit_eq(&o.width)
+            && height.bit_eq(&o.height)
+            && min_w.bit_eq(&o.min_w)
+            && max_w.bit_eq(&o.max_w)
+            && min_h.bit_eq(&o.min_h)
+            && max_h.bit_eq(&o.max_h)
+            && mt.bit_eq(&o.mt)
+            && mr.bit_eq(&o.mr)
+            && mb.bit_eq(&o.mb)
+            && ml.bit_eq(&o.ml)
+            && pt.bit_eq(&o.pt)
+            && pr.bit_eq(&o.pr)
+            && pb.bit_eq(&o.pb)
+            && pl.bit_eq(&o.pl)
+            && bt.bit_eq(&o.bt)
+            && br.bit_eq(&o.br)
+            && bb.bit_eq(&o.bb)
+            && bl.bit_eq(&o.bl)
+            && height_adjoins.bit_eq(&o.height_adjoins)
+            && minh_adjoins.bit_eq(&o.minh_adjoins)
+            && bottom_adjoins.bit_eq(&o.bottom_adjoins)
+            && run_start.bit_eq(&o.run_start)
+            && run_count.bit_eq(&o.run_count)
+            && strut_lh.bit_eq(&o.strut_lh)
+            && strut_asc.bit_eq(&o.strut_asc)
+            && float_kind.bit_eq(&o.float_kind)
+            && clear.bit_eq(&o.clear)
+            && takes_clearance.bit_eq(&o.takes_clearance)
+            && starts_bfc.bit_eq(&o.starts_bfc)
+            && flex_justify.bit_eq(&o.flex_justify)
+            && flex_main_gap.bit_eq(&o.flex_main_gap)
+            && flex_cross_align.bit_eq(&o.flex_cross_align)
+            && flex_main_is_x.bit_eq(&o.flex_main_is_x)
+            && flex_wrap.bit_eq(&o.flex_wrap)
+            && flex_cross_flip.bit_eq(&o.flex_cross_flip)
+            && flex_align_content.bit_eq(&o.flex_align_content)
+            && flex_cross_gap.bit_eq(&o.flex_cross_gap)
+            && flex_main_reverse.bit_eq(&o.flex_main_reverse)
+            && flex_cross_far.bit_eq(&o.flex_cross_far)
+            && has_replayed_oof.bit_eq(&o.has_replayed_oof)
+            && rel_x.bit_eq(&o.rel_x)
+            && rel_y.bit_eq(&o.rel_y)
+            && rel_pct.bit_eq(&o.rel_pct)
+            && rel_x_px.bit_eq(&o.rel_x_px)
+            && rel_x_neg.bit_eq(&o.rel_x_neg)
+            && measured_as_block.bit_eq(&o.measured_as_block)
+            && equal_share.bit_eq(&o.equal_share)
+            && chain_rel.bit_eq(&o.chain_rel)
+            && chain_px.bit_eq(&o.chain_px)
+            && chain_shift.bit_eq(&o.chain_shift)
+            && chain_math.bit_eq(&o.chain_math)
+            && rel_math.bit_eq(&o.rel_math)
+            && flex_item_auto.bit_eq(&o.flex_item_auto)
+            && flex_baseline_asc.bit_eq(&o.flex_baseline_asc)
+            && flex_line_nat.bit_eq(&o.flex_line_nat)
+            && flex_line.bit_eq(&o.flex_line)
+            && out_of_flow.bit_eq(&o.out_of_flow)
+            && sp_x.bit_eq(&o.sp_x)
+            && sp_y.bit_eq(&o.sp_y)
+            && cell_col.bit_eq(&o.cell_col)
+            && cell_colspan.bit_eq(&o.cell_colspan)
+            && cell_rowspan.bit_eq(&o.cell_rowspan)
+            && caption_side.bit_eq(&o.caption_side)
+            && rtl.bit_eq(&o.rtl)
+            && text_align.bit_eq(&o.text_align)
+            && anon_cross.bit_eq(&o.anon_cross)
+            && ws_mode.bit_eq(&o.ws_mode)
+            && item_auto_height.bit_eq(&o.item_auto_height)
+            && pushed_h_indefinite.bit_eq(&o.pushed_h_indefinite)
+            && grid_start.bit_eq(&o.grid_start)
+            && decl_w.bit_eq(&o.decl_w)
+            && decl_min_w.bit_eq(&o.decl_min_w)
+            && decl_max_w.bit_eq(&o.decl_max_w)
+            && flex_basis.bit_eq(&o.flex_basis)
+            && flex_grow.bit_eq(&o.flex_grow)
+            && decl_border_box.bit_eq(&o.decl_border_box)
+            && flex_shrink.bit_eq(&o.flex_shrink)
+            && flex_basis_cb.bit_eq(&o.flex_basis_cb)
+            && flex_basis_frac.bit_eq(&o.flex_basis_frac)
+            && flex_basis_math.bit_eq(&o.flex_basis_math)
+            && pct_sizes.bit_eq(&o.pct_sizes)
+            && pct_px.bit_eq(&o.pct_px)
+            && pct_math.bit_eq(&o.pct_math)
+            && edge_frac.bit_eq(&o.edge_frac)
+            && edge_px.bit_eq(&o.edge_px)
+            && edge_math.bit_eq(&o.edge_math)
+            && basis_w.bit_eq(&o.basis_w)
+            && inset_frac.bit_eq(&o.inset_frac)
+            && inset_math.bit_eq(&o.inset_math)
+            && flex_main_gap_frac.bit_eq(&o.flex_main_gap_frac)
+            && flex_main_gap_math.bit_eq(&o.flex_main_gap_math)
+            && flex_cross_gap_math.bit_eq(&o.flex_cross_gap_math)
+            && indent_math.bit_eq(&o.indent_math)
+            && flex_cross_gap_frac.bit_eq(&o.flex_cross_gap_frac)
+            && flex_basis_kw.bit_eq(&o.flex_basis_kw)
+            && scrolls_x.bit_eq(&o.scrolls_x)
+            && scrolls_y.bit_eq(&o.scrolls_y)
+            && is_button.bit_eq(&o.is_button)
+            && self_sizes.bit_eq(&o.self_sizes)
+            && block_axis_is_x.bit_eq(&o.block_axis_is_x)
+            && decl_edges_x.bit_eq(&o.decl_edges_x)
+            && decl_margin_x.bit_eq(&o.decl_margin_x)
+            && height_from_outside.bit_eq(&o.height_from_outside)
+            && cell_pct.bit_eq(&o.cell_pct)
+            && cell_min_content.bit_eq(&o.cell_min_content)
+            && cell_max_content.bit_eq(&o.cell_max_content)
+            && height_is_floor.bit_eq(&o.height_is_floor)
+            && cell_valign.bit_eq(&o.cell_valign)
+            && cell_pct_h_child.bit_eq(&o.cell_pct_h_child)
+            && anon_group.bit_eq(&o.anon_group)
+            && group_pct_h.bit_eq(&o.group_pct_h)
+            && pct_h_decl.bit_eq(&o.pct_h_decl)
+            && row_imposed.bit_eq(&o.row_imposed)
+            && row_height.bit_eq(&o.row_height)
+            && row_pct.bit_eq(&o.row_pct)
+            && row_rank.bit_eq(&o.row_rank)
+            && table_fixed.bit_eq(&o.table_fixed)
+            && flex_stretch.bit_eq(&o.flex_stretch)
+            && flex_native.bit_eq(&o.flex_native)
+            && flex_dir_reverse.bit_eq(&o.flex_dir_reverse)
+            && replaced.bit_eq(&o.replaced)
+            && lays_out_children.bit_eq(&o.lays_out_children)
+            && ratio.bit_eq(&o.ratio)
+            && ratio_only.bit_eq(&o.ratio_only)
+            && shrinks_to_nothing.bit_eq(&o.shrinks_to_nothing)
+            && control_baseline.bit_eq(&o.control_baseline)
+            && control_font_box.bit_eq(&o.control_font_box)
+            && control_font_asc.bit_eq(&o.control_font_asc)
+            && intrinsic_w.bit_eq(&o.intrinsic_w)
+            && intrinsic_h.bit_eq(&o.intrinsic_h)
+            && cb_index.bit_eq(&o.cb_index)
+            && inset_top.bit_eq(&o.inset_top)
+            && inset_right.bit_eq(&o.inset_right)
+            && inset_bottom.bit_eq(&o.inset_bottom)
+            && inset_left.bit_eq(&o.inset_left)
+            && auto_margins.bit_eq(&o.auto_margins)
+            && legacy_align.bit_eq(&o.legacy_align)
+            && indent_px.bit_eq(&o.indent_px)
+            && indent_frac.bit_eq(&o.indent_frac)
+            && indent_hanging.bit_eq(&o.indent_hanging)
+            && indent_each_line.bit_eq(&o.indent_each_line)
+            && indent_spent.bit_eq(&o.indent_spent)
+            && width_kw.bit_eq(&o.width_kw)
+            && cb_rect.bit_eq(&o.cb_rect)
+    }
+}
 // `cb_index` for a box that has no containing block of this kind — an in-flow one.
 pub(crate) const CB_NONE: i32 = -1;
 // …for an out-of-flow box whose containing block is not in the pass but whose RECTANGLE is (cb_rect).
@@ -1143,13 +1317,15 @@ fn shift_frags(i: usize, dx: f64, dy: f64) {
 #[allow(clippy::too_many_arguments)]
 #[cfg(test)]
 pub(crate) fn layout_block(inputs: &[Input], runs: &[Run], run_texts: &[RunText], grids: &[f64], inlines: &[InlineBox], maths: &[f64], root_x: f64, root_y: f64, root_cb_w: f64, root_rtl: bool) -> Outcome {
-    layout_block_in_place(&mut inputs.to_vec(), runs, run_texts, grids, inlines, maths, root_x, root_y, root_cb_w, root_rtl)
+    layout_block_in_place(&mut inputs.to_vec(), runs, run_texts, grids, inlines, maths, root_x, root_y, root_cb_w, root_rtl, None)
 }
 // …laying the records out IN PLACE: a parent resolves its children's percentages against the box it lays them out in
 // and writes the resolved record back, so the records are the pass's to change — every one is written afresh for the
 // next (`dom.rs` assembles them), and a copy into cells first was a second copy of the page's records every pass.
 #[allow(clippy::too_many_arguments)]
-pub(crate) fn layout_block_in_place(inputs: &mut [Input], runs: &[Run], run_texts: &[RunText], grids: &[f64], inlines: &[InlineBox], maths: &[f64], root_x: f64, root_y: f64, root_cb_w: f64, root_rtl: bool) -> Outcome {
+// …and with the chunks the pass placed, where each root is, and the measures kept of them (`MeasureCache`).
+pub(crate) fn layout_block_in_place(inputs: &mut [Input], runs: &[Run], run_texts: &[RunText], grids: &[f64], inlines: &[InlineBox], maths: &[f64], root_x: f64, root_y: f64, root_cb_w: f64, root_rtl: bool, kept: Option<(&mut MeasureCache, std::collections::HashMap<usize, ChunkRoot>, bool)>) -> Outcome {
+    let _measure_guard = kept.map(|(cache, roots, check)| MeasureCacheGuard::install(cache, roots, check));
     if inputs.is_empty() {
         return Outcome::LaidOut(Laid { boxes: Vec::new(), frags: Vec::new(), root_bottom_margin: 0.0 });
     }
@@ -3453,11 +3629,240 @@ impl CMargin {
 // children's, but NOT its own bottom (§8.3.1). It equals `top` for a non-through box; for a through box
 // it is where the box is PLACED (its bottom margin still folds on to the next sibling), the oracle's
 // `topOnly` — so a `margin-top:5; margin-bottom:40` empty spacer sits 5 below, not 40.
+#[derive(Clone, Copy)]
 struct MInfo {
     top: CMargin,
     top_only: CMargin,
     bottom: CMargin,
     collapse_through: bool,
+}
+
+// ── The measure cache ──────────────────────────────────────────────────────────────────────────────────────────────
+// A KEPT subtree — one the walk put back whole from a chunk (`dom.rs` `Chunk`), not one of whose records changed —
+// measured under the same record for its root, at the same width and imposed height and at the same place in its
+// formatting context's frame, with no float of an outer context
+// to meet and none of its own leaving, lays out exactly as it did last time: the same boxes relative to its root, the
+// same writes into its records (the percentages its boxes resolve for their children), the same fragments on its lines
+// and the same count of indefinite percentage heights read. So the first such measure of a chunk is KEPT and a later
+// one under the same conditions PUT BACK (`measure`), instead of laying the subtree out again: a text edit relaid every
+// row of a 1,500-row list to change one. Kept per chunk (a few conditions each: a flex item is measured at more than
+// one size in a pass) and dropped with the chunk.
+// What a put-back measure does NOT reproduce, on purpose: the intrinsic-width memo (`IW_MEMO`, pass-local — a later
+// question asks again), and in the records it writes back, every field that names a POSITION in this pass — a
+// record's parent, its run and grid start (the chunk may sit elsewhere than when it was kept) and the containing block
+// an out-of-flow box names (this pass's patch, read only by `place`).
+pub(crate) struct Measured {
+    root: Input,
+    w: u64,
+    imposed_h: u64,
+    // …and where the root stands in its formatting context's frame, which a box placed by the lines reads even with no
+    // float to place it around (an out-of-flow box's static position is taken in that frame).
+    bfc: [u64; 2],
+    info: MInfo,
+    boxes: Vec<Box>,
+    inputs: Vec<Input>,
+    frags: Vec<(usize, Vec<FragRow>)>,
+    inl_at: usize,
+    indef: u64,
+}
+#[derive(Default)]
+pub(crate) struct MeasureCache {
+    by_chunk: std::collections::HashMap<u32, Vec<Measured>>,
+    // What the last checked pass found a kept measure to differ in (see `measure`), for the caller to report.
+    pub(crate) mismatch: Option<String>,
+    // How many measures have been put back, and how many kept, for the spec that pins a kept list to not being laid out
+    // again (a geometry read cannot tell a put-back layout from a fresh one).
+    pub(crate) put_back: u64,
+    pub(crate) kept: u64,
+}
+impl MeasureCache {
+    pub(crate) fn retain_chunks(&mut self, keep: impl Fn(u32) -> bool) {
+        self.by_chunk.retain(|&id, _| keep(id));
+    }
+}
+const MEASURED_PER_CHUNK: usize = 4;
+// Where a pass placed each chunk: the record of its root, the chunk, its records (the root's included) and where its
+// inline entries start.
+#[derive(Clone, Copy)]
+pub(crate) struct ChunkRoot {
+    pub(crate) id: u32,
+    pub(crate) n: usize,
+    pub(crate) inl_at: usize,
+}
+struct MeasurePass {
+    cache: MeasureCache,
+    roots: std::collections::HashMap<usize, ChunkRoot>,
+    check: bool,
+}
+thread_local! {
+    static MEASURE_PASS: std::cell::RefCell<Option<MeasurePass>> = const { std::cell::RefCell::new(None) };
+}
+// The pass's cache, lent to the thread for the pass and handed back when the guard drops.
+struct MeasureCacheGuard<'a>(&'a mut MeasureCache);
+impl<'a> MeasureCacheGuard<'a> {
+    fn install(cache: &'a mut MeasureCache, roots: std::collections::HashMap<usize, ChunkRoot>, check: bool) -> Self {
+        let taken = std::mem::take(cache);
+        MEASURE_PASS.with(|m| *m.borrow_mut() = Some(MeasurePass { cache: taken, roots, check }));
+        MeasureCacheGuard(cache)
+    }
+}
+impl Drop for MeasureCacheGuard<'_> {
+    fn drop(&mut self) {
+        if let Some(p) = MEASURE_PASS.with(|m| m.borrow_mut().take()) {
+            *self.0 = p.cache;
+        }
+    }
+}
+// A subtree's layout state, for the check: its records, boxes, fragments and the indefinite-percentage count.
+struct MeasureState {
+    inputs: Vec<Input>,
+    boxes: Vec<Box>,
+    frags: Vec<Vec<FragRow>>,
+    indef: u64,
+}
+impl MeasureState {
+    fn of(i: usize, n: usize, inputs: &[Cell<Input>], boxes: &[Box]) -> Self {
+        MeasureState {
+            inputs: (i..i + n).map(|c| inputs[c].get()).collect(),
+            boxes: boxes[i..i + n].to_vec(),
+            frags: (i..i + n).map(frags_of).collect(),
+            indef: INDEF_PCT_H_READS.with(|c| c.get()),
+        }
+    }
+    fn restore(&self, i: usize, inputs: &[Cell<Input>], boxes: &mut [Box]) {
+        for (k, x) in self.inputs.iter().enumerate() {
+            inputs[i + k].set(*x);
+        }
+        boxes[i..i + self.boxes.len()].copy_from_slice(&self.boxes);
+        for (k, rows) in self.frags.iter().enumerate() {
+            store_frags(i + k, rows.clone());
+        }
+        INDEF_PCT_H_READS.with(|c| c.set(self.indef));
+    }
+    // (…the root's box by its SIZE only: its position is its caller's.)
+    fn differs_from(&self, o: &MeasureState) -> Option<String> {
+        for k in 0..self.boxes.len() {
+            let (a, b) = (&self.boxes[k], &o.boxes[k]);
+            if if k == 0 { a.w != b.w || a.h != b.h } else { a != b } {
+                return Some(format!("record +{k} box {a:?}, laid out {b:?}"));
+            }
+            if !self.inputs[k].same(&o.inputs[k]) {
+                return Some(format!("record +{k} written differently"));
+            }
+            if self.frags[k] != o.frags[k] {
+                return Some(format!("record +{k} fragments {:?}, laid out {:?}", self.frags[k], o.frags[k]));
+            }
+        }
+        (self.indef != o.indef).then(|| format!("indefinite percentage reads {} against {}", self.indef, o.indef))
+    }
+}
+fn frags_of(i: usize) -> Vec<FragRow> {
+    FRAG_PASS.with(|m| m.borrow().as_ref().and_then(|p| p.rows.get(i).cloned()).unwrap_or_default())
+}
+
+// Measure node `i` — put back where it is a chunk's root measured under these conditions before (see above), laid out
+// afresh (`measure_uncached`) and kept otherwise.
+#[allow(clippy::too_many_arguments)]
+fn measure(
+    i: usize,
+    w: f64,
+    imposed_h: f64,
+    inputs: &[Cell<Input>],
+    runs: &[Run],
+    run_texts: &[RunText],
+    grids: &[f64],
+    children: &[Vec<usize>],
+    boxes: &mut [Box],
+    failed: &std::cell::Cell<bool>,
+    fc: &mut FloatCtx,
+    bfc_x: f64,
+    bfc_y: f64,
+) -> MInfo {
+    let root = MEASURE_PASS.with(|m| m.borrow().as_ref().and_then(|p| p.roots.get(&i).copied()));
+    let Some(root) = root.filter(|_| fc.items.is_empty()) else {
+        return measure_uncached(i, w, imposed_h, inputs, runs, run_texts, grids, children, boxes, failed, fc, bfc_x, bfc_y);
+    };
+    let at_entry = inputs[i].get();
+    let check = MEASURE_PASS.with(|m| m.borrow().as_ref().is_some_and(|p| p.check));
+    let before = check.then(|| MeasureState::of(i, root.n, inputs, boxes));
+    let (wb, hb, bfc) = (w.to_bits(), imposed_h.to_bits(), [bfc_x.to_bits(), bfc_y.to_bits()]);
+    let hit = MEASURE_PASS.with(|m| {
+        let pass = m.borrow();
+        let kept = pass.as_ref()?.cache.by_chunk.get(&root.id)?;
+        let k = kept.iter().find(|k| k.w == wb && k.imposed_h == hb && k.bfc == bfc && k.root.same(&at_entry))?;
+        let (x, y) = (boxes[i].x, boxes[i].y);
+        boxes[i..i + root.n].copy_from_slice(&k.boxes);
+        boxes[i].x = x;
+        boxes[i].y = y;
+        for (off, kept_in) in k.inputs.iter().enumerate() {
+            let c = &inputs[i + 1 + off];
+            let now = c.get();
+            c.set(Input {
+                parent: now.parent,
+                run_start: now.run_start,
+                grid_start: now.grid_start,
+                cb_index: now.cb_index,
+                cb_rect: now.cb_rect,
+                ..*kept_in
+            });
+        }
+        let shift = root.inl_at as f64 - k.inl_at as f64;
+        for (off, rows) in &k.frags {
+            store_frags(i + off, rows.iter().map(|r| [r[0] + shift, r[1], r[2], r[3], r[4]]).collect());
+        }
+        INDEF_PCT_H_READS.with(|n| n.set(n.get() + k.indef));
+        Some(k.info)
+    });
+    if hit.is_some() {
+        MEASURE_PASS.with(|m| m.borrow_mut().as_mut().map(|p| p.cache.put_back += 1));
+    }
+    if let Some(info) = hit {
+        let Some(before) = before else { return info };
+        // The CHECK (`CSIM_NL_REUSE_VERIFY`): the subtree laid out again from the state it was put back over, and
+        // what the kept measure put back held against it — the first difference reported, the fresh answer used.
+        let kept = MeasureState::of(i, root.n, inputs, boxes);
+        before.restore(i, inputs, boxes);
+        let fresh = measure_uncached(i, w, imposed_h, inputs, runs, run_texts, grids, children, boxes, failed, fc, bfc_x, bfc_y);
+        if let Some(why) = kept.differs_from(&MeasureState::of(i, root.n, inputs, boxes)) {
+            MEASURE_PASS.with(|m| {
+                if let Some(p) = m.borrow_mut().as_mut() {
+                    p.cache.mismatch.get_or_insert_with(|| format!("[csim] kept measure of chunk {} at record {}: {}", root.id, i, why));
+                }
+            });
+        }
+        return fresh;
+    }
+    let indef0 = INDEF_PCT_H_READS.with(|n| n.get());
+    let info = measure_uncached(i, w, imposed_h, inputs, runs, run_texts, grids, children, boxes, failed, fc, bfc_x, bfc_y);
+    if failed.get() || !fc.items.is_empty() {
+        return info;
+    }
+    let kept = Measured {
+        root: at_entry,
+        w: wb,
+        imposed_h: hb,
+        bfc,
+        info,
+        boxes: boxes[i..i + root.n].to_vec(),
+        inputs: (i + 1..i + root.n).map(|c| inputs[c].get()).collect(),
+        frags: (0..root.n).filter_map(|off| {
+            let rows = frags_of(i + off);
+            (!rows.is_empty()).then_some((off, rows))
+        }).collect(),
+        inl_at: root.inl_at,
+        indef: INDEF_PCT_H_READS.with(|n| n.get()) - indef0,
+    };
+    MEASURE_PASS.with(|m| {
+        if let Some(p) = m.borrow_mut().as_mut() {
+            p.cache.kept += 1;
+            let list = p.cache.by_chunk.entry(root.id).or_default();
+            if list.len() >= MEASURED_PER_CHUNK {
+                list.remove(0);
+            }
+            list.push(kept);
+        }
+    });
+    info
 }
 
 // Measure node `i` at border-box width `w`: lay its subtree out RELATIVE to `i`'s border-box top-left
@@ -3466,7 +3871,7 @@ struct MInfo {
 // collapse; a parent's top/bottom margin collapses with its first/last in-flow child's when that edge
 // is "open" (no border, no padding — and, for the bottom, an auto height); an empty block collapses
 // through.
-fn measure(
+fn measure_uncached(
     i: usize,
     w: f64,
     imposed_h: f64,

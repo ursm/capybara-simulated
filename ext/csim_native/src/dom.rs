@@ -511,6 +511,7 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_, ()>, ctx: &v8::Global<v8:
     // one back for the JS geometry getters.
     register(scope, ns, "layoutPass", layout_pass, context_id);
     register(scope, ns, "layoutChunkPut", layout_chunk_put, context_id);
+    register(scope, ns, "layoutMeasureCounts", layout_measure_counts, context_id);
     register(scope, ns, "boxOf", box_of, context_id);
     // Native text metrics (fontations) for native inline layout (L2): register a font (fontconfig path
     // or in-memory SFNT bytes) to a handle JS puts in the layout inputs; native measures runs in-process.
@@ -1193,6 +1194,8 @@ pub(crate) struct Chunk {
 pub(crate) struct ChunkStore {
     chunks: std::collections::HashMap<u32, Chunk>,
     pass: u64,
+    // …and what the layout kept of measuring them (`layout::MeasureCache`), dropped with them.
+    measure: crate::layout::MeasureCache,
 }
 const CHUNK_IDLE_PASSES: u64 = 16;
 const CHUNK_RUNS: u8 = 1;
@@ -1233,8 +1236,24 @@ fn layout_chunk_put(
     rv.set_bool(true);
 }
 
+// __dom.layoutMeasureCounts() -> [put back, kept]: the realm's kept measures (`layout::MeasureCache`), for a spec.
+fn layout_measure_counts(
+    scope: &mut v8::PinScope<'_, '_>,
+    args: v8::FunctionCallbackArguments<'_>,
+    mut rv: v8::ReturnValue<'_, v8::Value>,
+) {
+    let cid = realm_id(scope, &args);
+    let (put_back, kept) = dom(scope).layout_chunks.get(&cid).map_or((0, 0), |s| (s.measure.put_back, s.measure.kept));
+    let out = v8::Array::new(scope, 2);
+    let a: v8::Local<v8::Value> = v8::Number::new(scope, put_back as f64).into();
+    let b: v8::Local<v8::Value> = v8::Number::new(scope, kept as f64).into();
+    out.set_index(scope, 0, a);
+    out.set_index(scope, 1, b);
+    rv.set(out.into());
+}
+
 // __dom.layoutPass(inputsFlat, runsFlat, runTexts, rootX, rootY, rootCbW, grids, inlines, maths, rootRtl, placements,
-//                  patches) -> [Float64Array, Float64Array, number] | Float64Array | false.
+//                  patches, check) -> [Float64Array, Float64Array, number] | Float64Array | string | false.
 // Decode the flat per-node record buffer (root at record 0), the per-run buffer, the parallel `runTexts` string
 // array (a run's text, else non-string), the grid channel and the inline table, run native layout, and write each
 // node's border-box into its arena slot. Answers the inline boxes' FRAGMENTS as rows of [inline index, x, y, w, h],
@@ -1248,7 +1267,8 @@ fn layout_chunk_put(
 // order, as [chunk id, record, run, grid and inline position] — the record being the subtree's root, which the buffer
 // holds — and `patches` sets what the walk resolves per pass in a record the chunk holds, as [record, slot, value]
 // (slot 71 the containing block's record, 92-95 its rectangle or an inline's entry). Where a chunk is not held (never
-// sent, or dropped for idling), the answer is the ids it needs, as a Float64Array, and nothing is laid out.
+// sent, or dropped for idling), the answer is the ids it needs, as a Float64Array, and nothing is laid out. Under
+// `check`, a kept measure that differs from laying its subtree out again is answered as the string that says where.
 fn layout_pass(
     scope: &mut v8::PinScope<'_, '_>,
     args: v8::FunctionCallbackArguments<'_>,
@@ -1260,6 +1280,8 @@ fn layout_pass(
     let root_cb_w = args.get(5).number_value(scope).unwrap_or(0.0);
     // …and the root element's direction, for a pass root native places itself (a NaN origin): the BODY's lead margin.
     let root_rtl = args.get(9).is_true();
+    // …and whether to CHECK every measure a kept chunk puts back against laying it out again (`CSIM_NL_REUSE_VERIFY`).
+    let check = args.get(12).is_true();
     let cid = realm_id(scope, &args);
     let node_floats = f64_arg(args.get(0));
     // The record STRIDE is a contract between two files, and a buffer that does not divide by it is not a
@@ -1303,7 +1325,27 @@ fn layout_pass(
             return;
         }
     };
-    match crate::layout::layout_block_in_place(&mut inputs, &runs, &run_texts, &grids, &inlines, &maths, root_x, root_y, root_cb_w, root_rtl) {
+    // Where each placed chunk's root is, for the measures kept of it — the cache lent to the pass and taken back.
+    let (mut measure, roots) = {
+        let store = dom(scope).layout_chunks.entry(cid).or_default();
+        let roots = placements
+            .chunks_exact(5)
+            .map(|p| {
+                let id = p[0] as u32;
+                (p[1] as usize, crate::layout::ChunkRoot { id, n: store.chunks[&id].inputs.len() + 1, inl_at: p[4] as usize })
+            })
+            .collect();
+        (std::mem::take(&mut store.measure), roots)
+    };
+    let out = crate::layout::layout_block_in_place(&mut inputs, &runs, &run_texts, &grids, &inlines, &maths, root_x, root_y, root_cb_w, root_rtl, Some((&mut measure, roots, check)));
+    let mismatch = measure.mismatch.take();
+    dom(scope).layout_chunks.entry(cid).or_default().measure = measure;
+    if let Some(why) = mismatch {
+        let s: v8::Local<v8::Value> = v8::String::new(scope, &why).unwrap().into();
+        rv.set(s);
+        return;
+    }
+    match out {
         crate::layout::Outcome::Unsupported => rv.set_bool(false),
         crate::layout::Outcome::LaidOut(laid) => {
             let st = realm(scope, cid);
@@ -1349,6 +1391,8 @@ fn store_pass(
     }
     if pass % CHUNK_IDLE_PASSES == 0 {
         store.chunks.retain(|_, c| pass - c.used < CHUNK_IDLE_PASSES);
+        let chunks = &store.chunks;
+        store.measure.retain_chunks(|id| chunks.contains_key(&id));
     }
     assemble_pass(store, node_floats, run_floats, run_texts, grid_floats, inline_floats, placements, patches)
 }

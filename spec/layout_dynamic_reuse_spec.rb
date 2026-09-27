@@ -900,6 +900,26 @@ RSpec.describe 'layout reuse across dynamic style state' do
       expect(got[0]).to be <= 3                              # the items the last edits walked afresh, not all 100
     end
 
+    # …and a kept block's subtree is not laid out again either, where it is measured as it was last time: native puts
+    # the measure back (`MeasureCache`). Laid out afresh, every item of the list was measured on every edit. (Checked:
+    # the check lays each put-back subtree out again and compares, so it is left off for the count.)
+    it 'puts back the measure of what an edit did not touch' do
+      items = (1..100).map {|i| %(<div><p><span id="s#{i}">item #{i}</span></p></div>) }.join
+      s = native_session_for(%(<div style="display:flex;flex-wrap:wrap">#{items}</div>), verify: false)
+      got = s.evaluate_script(<<~JS)
+        (() => {
+          document.body.offsetHeight;
+          for (const id of ['s7', 's8']) { document.getElementById(id).firstChild.data += '!'; document.body.offsetHeight; }
+          const [put0] = __dom.layoutMeasureCounts(), passes = __csimNativeLayoutStats().native;
+          document.getElementById('s9').firstChild.data += '!';
+          document.body.offsetHeight;
+          return [__dom.layoutMeasureCounts()[0] - put0, __csimNativeLayoutStats().native - passes];
+        })()
+      JS
+      expect(got[1]).to eq(1)
+      expect(got[0]).to be >= 90                             # every item but the edited one (and its neighbours)
+    end
+
     # An inline box native answers with the fragments it answered last time is not written again — but one whose
     # fragments moved is: an edit elsewhere (nothing moves), an edit before it on its line (it shifts), and one that
     # wraps it (it breaks in two). The same edits under the JS layout say where every rectangle belongs.
