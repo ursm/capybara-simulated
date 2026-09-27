@@ -804,6 +804,9 @@ fn matches_compiled(
 // __dom.resetArena() — free the CALLING REALM's nodes for a new page (a navigation). Each occupied
 // slot's gen is bumped (not zeroed), so a detached element held across the navigation can't alias a
 // new-page node that reuses its index; the freed indices feed the new page.
+// …and its kept layout chunks, which name those nodes: dead the moment the page is, rather than after the idle passes
+// that would evict them (`CHUNK_IDLE_PASSES`). A block the walk still holds is sent again when a pass names it —
+// `layoutPass` answers with the ids it no longer holds.
 fn reset_arena(
     scope: &mut v8::PinScope<'_, '_>,
     args: v8::FunctionCallbackArguments<'_>,
@@ -811,6 +814,7 @@ fn reset_arena(
 ) {
     let cid = realm_id(scope, &args);
     realm(scope, cid).reset();
+    dom(scope).layout_chunks.remove(&cid);
 }
 
 // __dom.setNodeMeta(nid, localName, ns) — update a node's localName + namespace after creation. The
@@ -864,6 +868,7 @@ fn drop_realm(
 ) {
     if let Some(id) = args.get(0).integer_value(scope) {
         dom(scope).realms.remove(&(id as i32));
+        dom(scope).layout_chunks.remove(&(id as i32));   // (…and its kept layout chunks, see `reset_arena`)
     }
 }
 
