@@ -1295,7 +1295,7 @@ fn layout_pass(
             Err(missing)
         }
     };
-    let (inputs, runs, run_texts, grids, inlines) = match assembled {
+    let (mut inputs, runs, run_texts, grids, inlines) = match assembled {
         Ok(a) => a,
         Err(missing) => {
             let answer: v8::Local<v8::Value> = f64_array(scope, &missing).into();
@@ -1303,7 +1303,7 @@ fn layout_pass(
             return;
         }
     };
-    match crate::layout::layout_block(&inputs, &runs, &run_texts, &grids, &inlines, &maths, root_x, root_y, root_cb_w, root_rtl) {
+    match crate::layout::layout_block_in_place(&mut inputs, &runs, &run_texts, &grids, &inlines, &maths, root_x, root_y, root_cb_w, root_rtl) {
         crate::layout::Outcome::Unsupported => rv.set_bool(false),
         crate::layout::Outcome::LaidOut(laid) => {
             let st = realm(scope, cid);

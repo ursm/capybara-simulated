@@ -1141,13 +1141,21 @@ fn shift_frags(i: usize, dx: f64, dy: f64) {
 // A NaN origin is a pass root native places ITSELF — the document's body against the initial containing block
 // `root_cb_w` wide, in the root element's direction (`root_rtl`) — where anything else is handed its origin.
 #[allow(clippy::too_many_arguments)]
+#[cfg(test)]
 pub(crate) fn layout_block(inputs: &[Input], runs: &[Run], run_texts: &[RunText], grids: &[f64], inlines: &[InlineBox], maths: &[f64], root_x: f64, root_y: f64, root_cb_w: f64, root_rtl: bool) -> Outcome {
+    layout_block_in_place(&mut inputs.to_vec(), runs, run_texts, grids, inlines, maths, root_x, root_y, root_cb_w, root_rtl)
+}
+// …laying the records out IN PLACE: a parent resolves its children's percentages against the box it lays them out in
+// and writes the resolved record back, so the records are the pass's to change — every one is written afresh for the
+// next (`dom.rs` assembles them), and a copy into cells first was a second copy of the page's records every pass.
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn layout_block_in_place(inputs: &mut [Input], runs: &[Run], run_texts: &[RunText], grids: &[f64], inlines: &[InlineBox], maths: &[f64], root_x: f64, root_y: f64, root_cb_w: f64, root_rtl: bool) -> Outcome {
     if inputs.is_empty() {
         return Outcome::LaidOut(Laid { boxes: Vec::new(), frags: Vec::new(), root_bottom_margin: 0.0 });
     }
     // Reject up front if any node uses an unmodelled display — a subtree is laid out natively only when
     // every participant is a block-flow box or a text block. This is the whole-subtree gate.
-    for n in inputs {
+    for n in inputs.iter() {
         if n.display == DISPLAY_UNSUPPORTED {
             return Outcome::Unsupported;
         }
@@ -1191,8 +1199,7 @@ pub(crate) fn layout_block(inputs: &[Input], runs: &[Run], run_texts: &[RunText]
     let _frag_guard = FragStore::install(inlines, inputs.len());
     // Each record in a CELL: a parent resolves its children's percentages against the box it lays them out in
     // (`Input::with_percent_sizes`) and writes the resolved copy back before they are measured.
-    let cells: Vec<Cell<Input>> = inputs.iter().copied().map(Cell::new).collect();
-    let inputs: &[Cell<Input>] = &cells;
+    let inputs: &[Cell<Input>] = Cell::from_mut(inputs).as_slice_of_cells();
     let failed = std::cell::Cell::new(false);
     let mut root_fc = FloatCtx::new();
     let root_margins = measure(0, root_w, f64::NAN, inputs, runs, run_texts, grids, &children, &mut boxes, &failed, &mut root_fc, 0.0, 0.0);
