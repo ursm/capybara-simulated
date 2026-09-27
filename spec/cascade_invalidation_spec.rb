@@ -914,6 +914,30 @@ RSpec.describe 'cascade invalidation' do
     expect(got).to eq([[200, 200], [200, 200]])
   end
 
+  # …and a run of upgrades moves it as ONE hint over their elements: a hint apiece ran past the cap of 32, so inserting
+  # 33 or more defined elements swept every dynamic layout rule's subjects over the document — every `.row` a `:hover`
+  # rule names laid out again, on a page with no `:defined` rule at all. A COUNT, not a wall.
+  it 'does not sweep the page for a run of upgraded elements' do
+    rows = (1..200).map { '<div class="row"><span>r</span><span class="actions">edit</span></div>' }.join
+    s = simulated_session(lambda {|_env|
+      [200, {'content-type' => 'text/html'},
+       ['<!DOCTYPE html><html><head><style>.actions { display: none } .row:hover .actions { display: inline } ' \
+        "x-item { display: block; height: 4px }</style></head><body><div id=\"c\"></div>#{rows}</body></html>"]]
+    })
+    s.visit '/'
+    got = s.evaluate_script(<<~JS)
+      (() => {
+        customElements.define('x-item', class extends HTMLElement {});
+        document.body.offsetHeight;
+        const n = __csimElementLayouts();
+        document.getElementById('c').innerHTML = '<x-item></x-item>'.repeat(100);
+        document.body.offsetHeight;
+        return __csimElementLayouts() - n;
+      })()
+    JS
+    expect(got).to be < 200                                  # the hundred items and what holds them, not every row
+  end
+
   # …and a tree's OWN `:host::part(p):hover`, which is matched by rewritten copies of the rule: the rule as written holds
   # `::part()`, which the ordinary shadow-rule walk cannot compile and flags `unmatchable` — so once that walk had run
   # (any other element of the tree read), noting the rule as written tainted nothing, the hover was memoised away, and
