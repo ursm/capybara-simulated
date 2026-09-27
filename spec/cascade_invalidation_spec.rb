@@ -892,6 +892,28 @@ RSpec.describe 'cascade invalidation' do
     end
   end
 
+  # `:defined` flips for each element as IT is upgraded, and a definition upgrades its elements one after another, each
+  # connected callback running before the next upgrade. Moved once per definition, before the upgrades, the first
+  # callback that read layout spent the sweep, and every element upgraded after it kept its undefined box — in both
+  # layouts.
+  it 'lays out every element a definition upgrades as defined' do
+    s = simulated_session(lambda {|_env|
+      [200, {'content-type' => 'text/html'},
+       ['<!DOCTYPE html><html><head><style>x-foo { display: block; width: 50px } x-foo:defined { width: 200px }</style>' \
+        '</head><body><x-foo id="a"></x-foo><x-foo id="b"></x-foo></body></html>']]
+    })
+    s.visit '/'
+    got = s.evaluate_script(<<~JS)
+      (() => {
+        const own = [];
+        document.body.offsetHeight;
+        customElements.define('x-foo', class extends HTMLElement { connectedCallback() { own.push(this.getBoundingClientRect().width) } });
+        return [own, ['a', 'b'].map((id) => document.getElementById(id).getBoundingClientRect().width)];
+      })()
+    JS
+    expect(got).to eq([[200, 200], [200, 200]])
+  end
+
   # …and a tree's OWN `:host::part(p):hover`, which is matched by rewritten copies of the rule: the rule as written holds
   # `::part()`, which the ordinary shadow-rule walk cannot compile and flags `unmatchable` — so once that walk had run
   # (any other element of the tree read), noting the rule as written tainted nothing, the hover was memoised away, and
