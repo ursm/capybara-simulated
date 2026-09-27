@@ -842,6 +842,27 @@ RSpec.describe 'layout reuse across dynamic style state' do
       expect(got[0]).to be_between(100, 300)
     end
 
+    # …and a kept subtree goes into the pass as the BLOCK it was packed into, once: only the records the pass holds — the
+    # spine's, and each kept item's root, which its parent writes into — are packed again. Put back record by record,
+    # every record of every kept item was copied and packed on every pass: 7 of 22 ms a pass on 1,500 flex rows.
+    it 'packs only the records an edit walked and the roots of what it kept' do
+      items = (1..100).map {|i| %(<div><p><span id="s#{i}">item #{i}</span></p></div>) }.join
+      s = native_session_for(%(<div style="display:flex;flex-wrap:wrap">#{items}</div>), verify: false)   # (the check's walk packs all)
+      got = s.evaluate_script(<<~JS)
+        (() => {
+          document.body.offsetHeight;
+          document.getElementById('s7').firstChild.data = 'item seven';
+          document.body.offsetHeight;
+          const n = __csimNlEncodedRecords(), passes = __csimNativeLayoutStats().native;
+          document.getElementById('s8').firstChild.data = 'item eight';
+          document.body.offsetHeight;
+          return [__csimNlEncodedRecords() - n, __csimNativeLayoutStats().native - passes];
+        })()
+      JS
+      expect(got[1]).to eq(1)
+      expect(got[0]).to be_between(100, 130)                 # a root per item and the spine, not 300 records
+    end
+
     # An inline box native answers with the fragments it answered last time is not written again — but one whose
     # fragments moved is: an edit elsewhere (nothing moves), an edit before it on its line (it shifts), and one that
     # wraps it (it breaks in two). The same edits under the JS layout say where every rectangle belongs.
