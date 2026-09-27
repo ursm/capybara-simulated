@@ -1038,6 +1038,39 @@ RSpec.describe 'layout reuse across dynamic style state' do
       expect(native.uniq.size).to eq(2)                          # closed, open, closed
     end
 
+    # …but only where every writer of the state is seen (`STAMP_TRACKED_PSEUDOS`). A clean checkbox's checkedness is its
+    # ATTRIBUTE's, a form's validity its controls', `:dir()` follows `dir=auto` text and `:target` an `id`: each flips
+    # with no state bump and dirties nothing, so a subtree that read such a rule is not kept. Kept, each read the box
+    # from before its flip back.
+    it 'does not keep a subtree a state some writer flips unseen reaches' do
+      shapes = [
+        ['input:checked ~ p { width: 50px }', '<input id="i" type="checkbox"><p id="p"></p>', '',
+         "document.getElementById('i').setAttribute('checked', '')"],
+        ['form:invalid p { width: 50px }', '<form><input id="i" required><p id="p"></p></form>', '',
+         "document.getElementById('i').remove()"],
+        ['div:dir(rtl) + p { width: 50px }', '<div dir="auto"><span id="t">abc</span></div><p id="p"></p>', '',
+         "document.getElementById('t').firstChild.data = 'שלום'"],
+        [':target + p { width: 50px }', '<div id="d"></div><p id="p"></p>', "location.hash = '#sec'",
+         "document.getElementById('d').id = 'sec'"]
+      ]
+      shapes.each do |rule, body, setup, flip|
+        css = "p { width: 100px; height: 10px; margin: 0 } #{rule}"
+        run = lambda do |s|
+          width = "document.getElementById('p').getBoundingClientRect().width"
+          s.execute_script(setup)
+          before = s.evaluate_script(width)
+          s.execute_script("document.getElementById('q').firstChild.data = 'y'; document.body.offsetHeight")
+          s.execute_script(flip)
+          [before, s.evaluate_script(width)]
+        end
+        page = "#{body}<p id=\"q\">x</p>"
+        native = run.call(native_session_for(page, css: css))
+        js = run.call(session_for("body { margin: 0 } #{css}", page).tap {|s| s.execute_script('globalThis.__csimNativeLayout = false') })
+        expect(native).to eq(js), rule
+        expect(native.uniq.size).to eq(2), rule
+      end
+    end
+
     # …and one that declares a TRANSITION likewise: the declared-value memo asks such a value again on every read, to
     # compare it with the before-change style, but nothing short of a style change can start one — and a style change
     # moves the stamps. Refused for it, Forem's stats page (`transition: all` under its charts) was laid out afresh on

@@ -217,6 +217,45 @@ RSpec.describe 'cascade invalidation' do
     )
   end
 
+  # …and which of them a LAYOUT STAMP follows (`STAMP_TRACKED_PSEUDOS`), so a memo kept under one need not refuse a read
+  # that considered the rule: hover and focus are found by a diff every flip goes through, and a popover, a modal, a
+  # definition and a custom state bump the style state where they change. A checkedness, a value, a validity, `:dir()`
+  # and `:target` can each flip with no bump — and so can a state this does not know.
+  it 'tells a state the layout stamps follow from one they do not' do
+    app = lambda {|_env| [200, {'content-type' => 'text/html'}, ['<!DOCTYPE html><html><body></body></html>']] }
+    s = simulated_session(app)
+    s.visit '/'
+    got = s.evaluate_script(<<~JS)
+      (() => {
+        const d = globalThis.__csimSelectorIsUntracked;
+        return {
+          hover:       d('#t:hover'),
+          focusWithin: d('.f:focus-within'),
+          popover:     d('[popover]:popover-open'),
+          nested:      d(':is(.a:hover) .b'),
+          checked:     d('input:checked'),
+          mixed:       d('input:hover:checked'),
+          hasChecked:  d('.c:has(:checked)'),
+          dir:         d('p:dir(rtl)'),
+          target:      d(':target'),
+          vendor:      d('input:-webkit-autofill')
+        };
+      })()
+    JS
+    expect(got).to eq(
+      'hover'       => false,
+      'focusWithin' => false,
+      'popover'     => false,
+      'nested'      => false,
+      'checked'     => true,
+      'mixed'       => true,
+      'hasChecked'  => true,
+      'dir'         => true,
+      'target'      => true,
+      'vendor'      => true
+    )
+  end
+
   it 'does not cache a flow-side mapping that a dynamic selector decided' do
     # `flowSides` (the writing-mode / direction resolution behind every `*-inline-*` property)
     # carries its own generation-keyed memo, and it predates the taint counter — so a `direction`
