@@ -63,6 +63,26 @@ RSpec.describe 'CSS animation and transition events' do
     ])
   end
 
+  # An animation a change DECLARES is found where the change can have moved a rule's match — under the written
+  # element's parent — not by re-running every animation rule over the page (which a text edit anywhere used to cost).
+  # So the reach has to cover what a selector can: an ancestor's class (`.on .t`), an earlier sibling's
+  # (`.x ~ div .t`), and a text edit that empties an element (`.e:empty + .t`) — each starts exactly its animation.
+  it 'starts an animation a class or text change declares through an ancestor, a sibling or :empty' do
+    s = page('<style>.on .t1 { animation: grow 300ms linear } .x ~ div .t2 { animation: grow 300ms linear } ' \
+             '.e:empty + .t3 { animation: grow 300ms linear }</style>' \
+             '<div id="w1"><div><i id="t1" class="t1"></i></div></div>' \
+             '<div id="w2"><span id="s2"></span><div><i id="t2" class="t2"></i></div></div>' \
+             '<div><span id="e" class="e">x</span><i id="t3" class="t3"></i></div>')
+    watch(s)
+    s.execute_script(<<~JS)
+      document.body.offsetHeight;
+      document.getElementById('w1').className = 'on';
+      document.getElementById('s2').className = 'x';
+      document.getElementById('e').firstChild.data = '';
+    JS
+    expect(drain(s).select {|e| e.start_with?('animationstart') }.sort).to eq(%w[animationstart:grow:0:t1:true animationstart:grow:0:t2:true animationstart:grow:0:t3:true])
+  end
+
   # `elapsedTime` is in SECONDS and counts the time the animation has been running, so an
   # `animationiteration` names the iteration it reached.
   it 'fires one animationiteration per boundary crossed' do
