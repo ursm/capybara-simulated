@@ -253,4 +253,22 @@ RSpec.describe 'structural-context invalidation' do
     JS
     expect(got).to eq(['rgb(0, 0, 0)', 'rgb(0, 128, 0)'])
   end
+
+  # A text edit can move a selector's match only through `:empty` — the one thing a selector reads of text — so one that
+  # neither empties an element nor fills an empty one re-keys nothing: every keystroke in a Redmine table cell used to
+  # re-key the cell, its whole subtree and its row's, and a relayout recomputed their declared values from the rules.
+  # Emptying it (the `.e:empty + i` flip) still re-keys, and the sibling still restyles.
+  it 'leaves the context alone for a text edit that cannot flip :empty' do
+    got = colors('li:first-child span { color: rgb(0, 0, 255) } .e:empty + i { color: rgb(0, 128, 0) }',
+                 '<ul><li><span id="s">a</span></li></ul><div><b class="e" id="e">x</b><i id="i">i</i></div>', <<~JS)
+      const s = document.getElementById('s'), e = document.getElementById('e');
+      const ctx = (el) => __csimCtxEpochOf(el);
+      const s0 = ctx(s), e0 = ctx(e);
+      s.firstChild.data = 'ab'; e.firstChild.data = 'xy';
+      const kept = [ctx(s) === s0, ctx(e) === e0];
+      e.firstChild.data = '';
+      return [kept, ctx(e) !== e0, color('i')];
+    JS
+    expect(got).to eq([[true, true], true, 'rgb(0, 128, 0)'])
+  end
 end
