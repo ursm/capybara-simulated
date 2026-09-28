@@ -317,6 +317,21 @@ RSpec.describe 'structural-context invalidation' do
     expect(got).to eq(['rgb(0, 128, 0)', 'rgb(0, 0, 0)'])
   end
 
+  # …but a memo that is NOT the declared-value one has to decline it too: the flow sides a `margin-inline-start` maps
+  # through were kept while a `:has()` flipped `direction`, and the physical margin stayed on the left (Chrome: right) —
+  # by a class write and by an insertion alike.
+  it 'maps flow-relative sides through a direction a :has() flips' do
+    css  = '.p:has(.flag) .c { direction: rtl } .c { margin-inline-start: 50px; display: block }'
+    body = '<div class="p" id="p"><i id="f"></i><div class="c" id="s">x</div></div>'
+    margins = <<~JS
+      const sides = () => { const cs = getComputedStyle(document.getElementById('s')); return [cs.direction, cs.marginLeft, cs.marginRight]; };
+    JS
+    by_class = colors(css, body, margins + "const a = sides(); document.getElementById('f').className = 'flag'; return [a, sides()];")
+    by_insert = colors(css, body, margins + "const a = sides(); const i = document.createElement('i'); i.className = 'flag'; " \
+                                            "document.getElementById('p').prepend(i); return [a, sides()];")
+    expect([by_class, by_insert]).to all(eq([['ltr', '50px', '0px'], ['rtl', '0px', '50px']]))
+  end
+
   # A `:has()` reads DOWNWARD, which no context epoch can see: a read that considered its rule is never memoised, so what
   # its argument names has nothing to re-key. Indexed anyway, the combinator Redmine nests in one
   # (`span.icon-checked:has(:not(a svg.icon-svg))`) made the whole index unsafe — every child-list change a full re-key.
