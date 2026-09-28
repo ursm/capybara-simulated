@@ -10360,8 +10360,6 @@ html/rendering/widgets/field-sizing-input-text.html:
 - 'url: Text caret is shorter than the placeholder'
 - 'url: Text caret is taller than the placeholder'
 - 'url: Update field-sizing property dynamically'
-html/rendering/widgets/field-sizing-placeholder-stretch.html:
-- "== html/rendering/widgets/field-sizing-placeholder-stretch-ref.html"
 html/rendering/widgets/field-sizing-select-contain-size.html:
 - 'listbox: The width should not depend on content when contain:size is set'
 html/rendering/widgets/field-sizing-select.html:
