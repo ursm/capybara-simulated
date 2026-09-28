@@ -6,11 +6,9 @@
 # version changes (the group set / their relative costs move) — the digest
 # guard in the capybara_shared gate is what tells you.
 #
-#   CSIM_JS_ENGINE=quickjs bundle exec ruby script/regen_capybara_group_weights.rb
+#   bundle exec ruby script/regen_capybara_group_weights.rb
 #
-# QuickJS is the engine whose job the balance binds (it runs every group ~2x
-# V8's cost with the same proportions), so record under it. The measurement
-# runs the capybara_shared gate serially with rspec's JSON formatter and sums
+# The measurement runs the capybara_shared gate serially with rspec's JSON formatter and sums
 # example run_times per registry group, matched by full-description prefix —
 # deliberately independent of the current shard partition, so regenerating
 # with a stale YAML is fine.

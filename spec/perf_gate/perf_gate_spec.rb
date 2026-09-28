@@ -5,7 +5,7 @@ require_relative '../support/perf_gate'
 # Performance regression gate: fixed workloads held to a recorded baseline —
 # deterministic op-counts (hard) + a normalized wall ratio (soft warn). See
 # spec/support/perf_gate.rb for the rationale and the regen command. Tagged
-# :perf so the QuickJS CI job skips it (the baseline is captured on V8).
+# :perf so the flatware pool skips it (CI runs it alone in its own job).
 RSpec.describe 'perf gate', :perf do
   PerfGate.install(self)
 end

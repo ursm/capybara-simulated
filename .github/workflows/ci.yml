@@ -10,9 +10,8 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  # Primary engine: V8 (rusty_racer), auto-selected when both engine gems are
-  # present. Runs the full suite including the WPT conformance gate, across the
-  # supported Ruby versions.
+  # The full suite including the WPT conformance gate, across the supported Ruby
+  # versions.
   test:
     runs-on: ubuntu-latest
     # Runs in 5-8 min; the cap is there for the runner-side hangs (an apt mirror
@@ -102,9 +101,8 @@ jobs:
   # distinct, obvious check rather than one red example buried in the functional matrix.
   # Runs SERIALLY and alone (never the flatware pool) so nothing contends with its wall
   # timing and it contends with nothing — the same reason bench/dom_scaling isn't in the
-  # default rspec run. ONE run: the op-counts are Ruby-independent AND engine-independent
-  # (verified identical on V8 and QuickJS), so there's nothing to gain from the matrix or a
-  # second engine; the wall baseline is V8, exactly as the WPT allowlist is V8-only.
+  # default rspec run. ONE run: the op-counts are Ruby-independent, so there's nothing to gain
+  # from the matrix.
   perf-gate:
     runs-on: ubuntu-latest
     timeout-minutes: 15
@@ -132,77 +130,6 @@ jobs:
       # A bare `rspec` (no ci-rspec retry): the counts are deterministic, so a red is a real
       # change to lock in. No build step — the gem needs no native extension.
       - run: bundle exec rspec spec/perf_gate
-
-  # Secondary engine: QuickJS. It shares the JS bridge but has a distinct runtime
-  # layer (value marshalling, no per-frame realms), so it needs its own coverage
-  # to catch engine-specific regressions. The WPT gate (`:wpt`) is excluded: its
-  # expected-failures allowlist is tuned to V8 (the conformance engine), and
-  # QuickJS legitimately diverges on a handful of legacy-encoding / cross-realm
-  # subtests. One Ruby suffices — the QuickJS-specific risk is in the engine
-  # layer, not the (V8-matrix-covered) Ruby driver code.
-  test-quickjs:
-    runs-on: ubuntu-latest
-    # QuickJS runs the same files ~2x slower than V8 (7-12 min), so it gets more
-    # room than the V8 matrix — same reason for having a cap at all.
-    timeout-minutes: 30
-
-    steps:
-      - uses: actions/checkout@v7
-
-      - name: Install libvips + ffmpeg
-        # `--no-install-recommends` because most of the 102 MB apt otherwise fetches
-        # is ffmpeg's recommends — a pocketsphinx speech model, OpenAL, JACK, the
-        # Intel VA drivers — and none of it is what the specs decode with: the video
-        # fixtures are h264 and vp9, both out of libavcodec60, which ffmpeg DEPENDS
-        # on. It halves this step on a good day.
-        #
-        # The bounds are for a bad one. `azure.archive.ubuntu.com` — the mirror the
-        # runner image points at — stalled for hours around GitHub's 2026-08-17
-        # incident: one leg reported `Fetched 102 MB in 24min 2s (70.7 kB/s)` against
-        # the ~9 MB/s its siblings got, and another couldn't reach the mirror at all.
-        # A bounded call plus one retry turns that into a fast, obvious failure that
-        # `gh run rerun --failed` can pick up, rather than a job that sits until its
-        # own timeout.
-        #
-        # …which stopped being enough on 2026-08-19: six jobs across three runs, every
-        # one `exit 124` on that 120 s bound, and re-running never converged. In every
-        # log the azure legs answer `Ign:` while `archive.ubuntu.com` — its sibling in
-        # the same mirrorlist — answers `Hit:` throughout, so apt spends the whole
-        # budget timing out on a mirror it does not need. Dropping the azure entry
-        # sends it straight to the one that works. The bound and the retry stay: they
-        # are what turns the NEXT bad mirror into a fast failure rather than a hang.
-        timeout-minutes: 6
-        run: |
-          sudo sed -i '/azure\.archive\.ubuntu\.com/d' /etc/apt/apt-mirrors.txt || true
-          apt_try() {
-            sudo timeout 120 apt-get -o Acquire::http::Timeout=15 -o Acquire::Retries=2 update &&
-            sudo timeout 120 apt-get -o Acquire::http::Timeout=15 -o Acquire::Retries=2 \
-                             install -y --no-install-recommends libvips42t64 ffmpeg
-          }
-          apt_try || { echo 'apt failed; retrying once' >&2; sleep 10; apt_try; }
-
-      - uses: ruby/setup-ruby@v1
-        with:
-          ruby-version: '4.0'
-          bundler-cache: true
-
-      # Engine-specific cache: QuickJS runs the same files ~2x slower than V8,
-      # so it balances from its own timing file.
-      - uses: actions/cache@v6
-        with:
-          path: tmp/rspec_examples_quickjs.txt
-          key: rspec-examples-quickjs-${{ github.sha }}
-          restore-keys: rspec-examples-quickjs-
-
-      # The tag filter reaches the workers via fork inheritance: flatware's
-      # JobBuilder applies the rspec args to the global RSpec configuration
-      # BEFORE forking (workers discard the args themselves). `~perf` joins
-      # `~wpt`: both gates' baselines are captured on V8 (the perf op-counts
-      # should match, but the wall ratio is engine-specific), so the QuickJS job
-      # skips them exactly as it skips the V8-tuned WPT allowlist.
-      - run: bin/ci-rspec spec --tag '~wpt' --tag '~perf'
-        env:
-          CSIM_JS_ENGINE: quickjs
 
   # The gem SHIPS the pre-built bundles and never runs npm, so nothing in the spec
   # run can notice a bundle that no longer matches `vendor/src` / `js/src` — or a

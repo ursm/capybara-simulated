@@ -4,7 +4,7 @@
 #
 # Why retry at all, when the specs are not marginal: every Capybara wait is bounded in REAL time
 # while the page-side timer it waits on runs on the driver's VIRTUAL clock, which the retry loop
-# advances per POLL, not per second. Measured on both engines, the two examples that have flaked
+# advances per POLL, not per second. Measured, the two examples that have flaked
 # converge in four polls and 0.02-0.05 s against a 2 s budget — forty times the headroom. Neither is
 # a slow test; both are tests a runner stalling for a couple of seconds turns red. That happened on
 # two consecutive PRs, on a different example each time, and each time the same commit went green on

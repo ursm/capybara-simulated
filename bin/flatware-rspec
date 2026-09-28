@@ -1,7 +1,7 @@
 #!/bin/sh
 # flatware with a per-run DRb sink endpoint: the gem's default is a UNIX
 # socket literally at ./flatware-sink in the checkout, so two concurrent
-# runs (e.g. a V8 and a QuickJS suite side by side) would steal each
+# runs (e.g. two worktrees' suites side by side) would steal each
 # other's jobs — workers spawn before the sink binds — and a crashed run's
 # stale socket file blocks every later run until removed by hand. A
 # per-PID socket under /tmp avoids both (and stays under the 108-byte
