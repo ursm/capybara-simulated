@@ -771,73 +771,61 @@ RSpec.describe 'native layout flex parity' do
   # An inline-flex container is an ATOMIC inline in its parent's line, and native lays it out ITSELF now -- at
   # the line's shrink-to-fit, which is its intrinsic width.
   it('matches an inline-flex container as an atomic inline') { expect_parity('<div style="display:inline-flex;width:400px"><div style="width:80px;height:30px"></div></div>') }
-  # Bare (non-whitespace) text directly in a flex container is an anonymous flex item. The oracle does not lay
-  # it out as a real item (siblings ignore it), it only floors the container's AUTO cross size at the text's
-  # line-height; native reproduces both. These lay out rather than decline.
-  it 'matches bare text beside a SHORT item (line-height floors the auto row height)' do
-    expect_parity('<div style="display:flex;width:400px">loose text<div style="width:80px;height:10px"></div></div>')
+  # Bare (non-whitespace) text directly in a flex container is an ANONYMOUS flex item (§4, `boxItems`): a box of its own
+  # on the line, which its siblings are placed beside and which the line's cross size and baseline come from. Until
+  # 2026-09-28 neither engine laid it out — it floored the container's auto cross size at a line-height and nothing
+  # else, so the text was drawn nowhere and the items took its room. Chrome's figures for `#m`: [x, y] and the
+  # container's height.
+  {
+    'beside a short item' => ['<div id="f" style="display:flex;width:400px">loose text<div id="m" style="width:80px;height:10px"></div></div>', 61.77, 0, 18],
+    'beside a tall item' => ['<div id="f" style="display:flex;width:400px">loose text<div id="m" style="width:80px;height:40px"></div></div>', 61.77, 0, 40],
+    'between two items under space-between' => ['<div id="f" style="display:flex;justify-content:space-between;width:400px"><div style="width:80px;height:20px"></div>middle<div id="m" style="width:80px;height:20px"></div></div>', 320, 0, 20],
+    'alone in a column' => ['<div id="f" style="display:flex;flex-direction:column;width:200px"><div id="m">only</div>text</div>', 0, 0, 36],
+    'under a declared height' => ['<div id="f" style="display:flex;height:50px;width:400px">text<div id="m" style="width:80px;height:10px"></div></div>', 24, 0, 50],
+    'before items with a main gap' => ['<div id="f" style="display:flex;gap:15px;width:400px">lead<div id="m" style="width:60px;height:20px"></div><div style="width:60px;height:20px"></div></div>', 41.66, 0, 20],
+    'beside a centred short item' => ['<div id="f" style="display:flex;align-items:center;width:400px">text<div id="m" style="width:80px;height:10px"></div></div>', 24, 4, 18],
+    'beside a flex-end short item' => ['<div id="f" style="display:flex;align-items:flex-end;width:400px">text<div id="m" style="width:80px;height:10px"></div></div>', 24, 8, 18],
+    'beside a baseline-aligned short item' => ['<div id="f" style="display:flex;align-items:baseline;width:400px">text<div id="m" style="width:80px;height:10px"></div></div>', 24, 4, 18]
+  }.each do |what, (body, x, y, height)|
+    it "lays bare text out as an anonymous item #{what}" do
+      expect_parity(body)
+      rect = laid_out_rect(body)
+      expect(rect.first(2)).to match([be_within(0.05).of(x), be_within(0.05).of(y)])
+      expect(laid_out_rect(body, 'f')[3]).to eq(height)
+    end
   end
-  it 'matches bare text beside a TALL item (the item, not the line-height, sets the row height)' do
-    expect_parity('<div style="display:flex;width:400px">loose text<div style="width:80px;height:40px"></div></div>')
-  end
-  it 'matches bare text BETWEEN two items with justify-content (siblings ignore the text)' do
-    expect_parity('<div style="display:flex;justify-content:space-between;width:400px"><div style="width:80px;height:20px"></div>middle<div style="width:80px;height:20px"></div></div>')
-  end
-  it 'matches bare text in an auto-height COLUMN (line-height floors the column main size)' do
-    expect_parity('<div style="display:flex;flex-direction:column;width:200px">only text</div>')
-  end
-  it 'matches bare text with a DECLARED height (line-height does not grow a fixed box)' do
-    expect_parity('<div style="display:flex;height:50px;width:400px">text<div style="width:80px;height:10px"></div></div>')
-  end
-  it 'matches bare text with a main gap between the real items' do
-    expect_parity('<div style="display:flex;gap:15px;width:400px">lead<div style="width:60px;height:20px"></div><div style="width:60px;height:20px"></div></div>')
-  end
-  # The line-height floor grows the LINE the items align within (not just the box): a short item under a
-  # non-stretch alignment sits inside that grown line, so its cross position depends on the floor.
-  it 'matches bare text taller than a CENTER-aligned short item (item centres in the grown line)' do
-    expect_parity('<div style="display:flex;align-items:center;width:400px">text<div style="width:80px;height:10px"></div></div>')
-  end
-  it 'matches bare text taller than a FLEX-END-aligned short item' do
-    expect_parity('<div style="display:flex;align-items:flex-end;width:400px">text<div style="width:80px;height:10px"></div></div>')
-  end
-  it 'matches bare text with a BASELINE-aligned short item' do
-    expect_parity('<div style="display:flex;align-items:baseline;width:400px">text<div style="width:80px;height:10px"></div></div>')
-  end
-  # …and a flex ITEM that is such a container is floored where the oracle floors it, at the LINES of its bare text as
-  # much as at its items: the oracle's automatic minimum walks it with the pen (`contentIntrinsicWidths`), each run of
-  # text a line between the children it blockifies, and native's walk of the children had no text to see. Avo's
-  # sortable table header (a `flex: 1 1 0%` link holding a label and a sort icon, in a nowrap cell) was floored at the
-  # icon (20) natively and the label (42) by the oracle — 46 of 456 Avo page states. The text travels as a run stream
-  # for the measure alone. SHARED with the icon: Chrome makes the text an item too and sums the two, 62.
-  it 'floors a flex item holding bare text at its text, as the oracle measures it' do
+  # …and a flex ITEM that is such a container is floored at what its content asks: its bare text is an anonymous item
+  # (`boxItems`), so its automatic minimum is its ITEMS' contributions summed (§9.9.1). Avo's sortable table header (a
+  # `flex: 1 1 0%` link holding a label and a sort icon, in a nowrap cell) is Chrome's 62 — the label and the icon. The
+  # JS layout's pen walked the text as LINES between the children it blockified and floored it at the label (42), and
+  # native, before the text was an item, at the icon (20).
+  it 'floors a flex item holding bare text at its items' do
     header = '<table style="border-spacing:0"><tr><th style="padding:0 12px;white-space:nowrap;font:16px sans-serif">' \
              '<div style="display:flex;width:100%%"><a id="m" style="flex:1 1 0%%;display:flex;font-size:12px">Is writer%s</a></div></th></tr></table>'
     icon = '<span style="margin-left:4px;width:16px;height:16px;display:inline-block"></span>'
     with_icon = format(header, icon)
     expect_parity(with_icon)
-    expect_shared_gap(laid_out_rect(with_icon)[2], shared: 42, chrome: 62, what: "#{with_icon}: #m width")
+    expect(laid_out_rect(with_icon)[2]).to be_within(0.05).of(62)
     text_only = format(header, '')
     expect_parity(text_only)
     expect(laid_out_rect(text_only)[2]).to be_within(0.05).of(42)
-    # …each run of text between two children a line of its own, the indent on the first (and after a child only
-    # under `hanging`, an unforced line end), a `<br>` a forced one; a `<wbr>` — an opportunity no run carries
-    # without its element, an item here — declines.
     ['aa bb<div style="width:30px;height:5px"></div>cc dd ee', 'aa<br>bbbbbb cc', '<span style="width:16px;height:5px;display:inline-block"></span>lead text'].each do |kids|
       ['', 'text-indent:10px;', 'text-indent:10px each-line;', 'text-indent:-5px hanging;', 'white-space:pre;'].each do |style|
         expect_parity(%(<div style="display:flex;width:40px;font:14px monospace"><div style="flex:1 1 0%;display:flex;#{style}">#{kids}</div><div style="width:10px;height:5px"></div></div>))
       end
     end
-    r = run_shadow('<div style="display:flex;width:40px"><div style="flex:1 1 0%;display:flex">aaa<wbr>bbbbbb</div></div>')
-    expect(r).to include('ok' => false, 'reason' => 'flex-text-wbr')
-    # …and under a white-space that does not wrap, each such line is ONE unbreakable token, a wide character or a soft
-    # hyphen no opportunity: the oracle's pen skipped the container's pin (its items are blocks of their own) and so
-    # broke `nowrap` CJK per character — 16 where native and Chrome say 128 / 127.53 (review rv51).
-    # …and such text beside an OUT-OF-FLOW child is content, not a box all out of flow: native's `out_of_flow_only` saw
-    # the one child RECORD, the abspos, and left the item 0 wide where the oracle hands it the share (review rv52).
-    # SHARED: Chrome 38.41, the text as an item.
+    # …a `<wbr>` in the run is an opportunity INSIDE the anonymous item, no item of its own (Chrome: 48, `bbbbbb`)
+    wbr = '<div style="display:flex;width:40px"><div id="m" style="flex:1 1 0%;display:flex">aaa<wbr>bbbbbb</div></div>'
+    expect_parity(wbr)
+    expect(laid_out_rect(wbr)[2]).to be_within(0.05).of(48)
+    # …and text either side of an OUT-OF-FLOW child is two items, which it separates and is no part of (Chrome: 30.22,
+    # `ab` and `cd` side by side).
     oof = '<div style="display:flex;width:20px"><div id="m" style="display:flex">ab<span style="position:absolute">oof</span>cd</div></div>'
     expect_parity(oof)
-    expect_shared_gap(laid_out_rect(oof)[2], shared: 20, chrome: 38.41, what: "#{oof}: #m width")
+    expect(laid_out_rect(oof)[2]).to be_within(0.05).of(30.22)
+    # …and under a white-space that does not wrap, an item's text is ONE unbreakable token, a wide character no
+    # opportunity: the oracle's pen skipped the container's pin and so broke `nowrap` CJK per character — 16 where
+    # native and Chrome say 128 / 127.53 (review rv51).
     body = '<div style="display:flex;width:400px"><div id="m" style="display:flex;flex:0 0 min-content;white-space:nowrap">日本語のテキスト</div></div>'
     expect_parity(body)
     expect(laid_out_rect(body)[2]).to be_within(0.5).of(127.53)

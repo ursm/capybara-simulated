@@ -219,15 +219,12 @@ RSpec.describe 'native layout replaced-leaf parity' do
        '<div style="width:400px"><button style="display:flex;box-sizing:border-box;max-width:40px"><span>label</span></button></div>'].each do |body|
         expect_parity(body)
       end
-      # …and BARE text in one, which is the commonest markup of all (`class="flex items-center"`) and the case
-      # these shapes wrap in a `<span>` to keep out of the way: a flex container's ANONYMOUS item contributes
-      # nothing, so the button is its own edges wide — 16 against Chrome's 46.39. Both engines agree, so this
-      # is parity-clean and no sweep can see it; it is the flex twin of the grid anonymous-item gap, and it is
-      # native's answer to give once the oracle is deleted. Pinned here so the day it is fixed, it is fixed in
-      # both engines at once.
+      # …and BARE text in one, which is the commonest markup of all (`class="flex items-center"`): the run is a flex
+      # container's ANONYMOUS item (`boxItems`), which contributes its text — Chrome's 46.39. It contributed nothing in
+      # both engines until 2026-09-28, the button its own edges wide (16).
       bare = '<div style="width:400px"><button style="display:flex">Save</button></div>'
       expect_parity(bare)
-      expect(rendered_width(bare, 'button')).to eq(16)
+      expect(rendered_width(bare, 'button')).to be_within(0.01).of(46.39)
     end
     # …an `inline-flex` / `inline-grid` one included: as an ATOMIC INLINE it was pushed with the oracle's box
     # (the same gate answers `nlAtomicNative`), and it is laid out and placed on the line natively now.

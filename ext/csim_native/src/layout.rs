@@ -7425,6 +7425,10 @@ fn content_intrinsic(i: usize, inputs: &[Cell<Input>], runs: &[Run], run_texts: 
             }
             Some((min, max))
         }
+        // A FLEX container with its own algorithm as well (CSS Flexbox §9.9.1): its items' contributions summed along a
+        // row, the widest down a column — its runs of text among them, as the anonymous items the walk sends them as.
+        // (An orphan table row is no flex container, and measures as the block it is laid out beside — below.)
+        DISPLAY_FLEX if !n.measured_as_block => flex_intrinsic_widths(i, inputs, runs, run_texts, grids, children),
         DISPLAY_BLOCK | DISPLAY_FLEX | DISPLAY_GRID => {
             let (mut min, mut max) = (0.0f64, 0.0f64);
             let mut line = 0.0f64; // floats pack beside each other on a line, as inline boxes would
@@ -7451,10 +7455,9 @@ fn content_intrinsic(i: usize, inputs: &[Cell<Input>], runs: &[Run], run_texts: 
                 max = max.max(cmax + m);
             }
             let max = max.max(line);
-            // …and a FLEX container's bare text, which the oracle's pen measures as LINES between the children it
+            // …and an ORPHAN ROW's bare text, which the oracle's pen measures as LINES between the children it
             // blockifies and the layout drops: its run stream is for this measure alone, a BR between two lines (the
-            // walk's segments), and the widest line stands beside the widest child. (An orphan table row of bare
-            // text is nothing BUT such lines.)
+            // walk's segments), and the widest line stands beside the widest child.
             let (min, max) = if n.display == DISPLAY_FLEX && n.run_count > 0 {
                 let (tmin, tmax) = runs_intrinsic(&n, inputs, runs, run_texts, grids, children)?;
                 (min.max(tmin), max.max(tmax))
