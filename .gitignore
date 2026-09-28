@@ -36,3 +36,4 @@ lib/capybara/simulated/*.so
 lib/capybara/simulated/*.bundle
 *.orig
 *.rej
+isolate-*.log

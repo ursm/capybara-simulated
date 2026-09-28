@@ -259,6 +259,27 @@ RSpec.describe 'web fonts' do
     expect(width(s, 'late')).to eq(80)
   end
 
+  # …but a face layout fetched itself is one the fetching pass already measures with: nothing laid out has to be measured
+  # again, and neither the rule set nor any declared value moved. Refreshing the cascade for it threw every declared
+  # value and every kept subtree away — a whole relayout per page load on a Redmine page for its Noto Sans.
+  it 'keeps the style epoch and the declared values when layout fetches a face' do
+    s = simulated_session(app)
+    s.visit 'http://www.example.com/'
+    got = s.evaluate_script(<<~JS)
+      (() => {
+        const el = document.createElement('span');
+        el.style.fontFamily = 'OnlyWoff2'; el.textContent = 'abcd';           // a face nothing has used yet
+        document.body.appendChild(el);
+        const epoch = __csimStyleEpoch();
+        const w = el.getBoundingClientRect().width;
+        const computes = __csimDeclaredComputes();
+        document.body.getBoundingClientRect();
+        return [w, __csimStyleEpoch() === epoch, __csimDeclaredComputes() - computes, document.fonts.check('12px OnlyWoff2')];
+      })()
+    JS
+    expect(got).to eq([80, true, 0, true])
+  end
+
   it 'fails a cross-origin face the server does not share' do
     s = session
     s.execute_script("var st = document.createElement('style'); st.textContent = '@font-face { font-family: Xo; src: url(http://other.example.com/ahem.ttf); }'; document.head.appendChild(st); var el = document.createElement('span'); el.id = 'xo'; el.style.fontFamily = 'Xo'; el.textContent = 'abcd'; document.body.appendChild(el);")
