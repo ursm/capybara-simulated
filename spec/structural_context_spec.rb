@@ -305,6 +305,18 @@ RSpec.describe 'structural-context invalidation' do
     expect(got).to eq(['rgb(0, 128, 0)', true, 'rgb(0, 0, 0)'])
   end
 
+  # …and a sibling run behind a position read from the END is reached from BEFORE the change point: appending after
+  # `.y` makes `.x` no longer second from the end.
+  it 'restyles a sibling run behind an :nth-last-child() when a child is appended after it' do
+    got = colors('.x:nth-last-child(2) + .y span { color: rgb(0, 128, 0) }',
+                 '<div id="d"><p class="x">x</p><div class="y"><span id="s">s</span></div></div>', <<~JS)
+      const before = color('s');
+      document.getElementById('d').append(document.createElement('i'));
+      return [before, color('s')];
+    JS
+    expect(got).to eq(['rgb(0, 128, 0)', 'rgb(0, 0, 0)'])
+  end
+
   # A `:has()` reads DOWNWARD, which no context epoch can see: a read that considered its rule is never memoised, so what
   # its argument names has nothing to re-key. Indexed anyway, the combinator Redmine nests in one
   # (`span.icon-checked:has(:not(a svg.icon-svg))`) made the whole index unsafe — every child-list change a full re-key.

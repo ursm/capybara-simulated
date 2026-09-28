@@ -47,6 +47,21 @@ RSpec.describe 'layout invalidation through structural selectors' do
     ['a keyless subject after a sibling combinator', '.a + * { width: 100px }',
      '<div id="box"><div id="t" style="height:5px"></div></div>',
      "const a = document.createElement('i'); a.className = 'a'; document.getElementById('box').prepend(a)", [300, 5], [100, 5]],
+    # …a sibling run behind a position read from the END, which an append AFTER the run flips; a position inside a nested
+    # list with a combinator of its own, read of an element the outer compound only relates to; and a token matched
+    # case-insensitively, which the reach cannot key on:
+    ['a sibling run behind an :nth-last-child()', '.x:nth-last-child(2) + .y p { white-space: pre }',
+     '<div id="box"><i class="x"></i><div class="y" style="width:60px">P</div></div>',
+     "document.getElementById('box').append(document.createElement('i'))", [60, 22], [60, 44]],
+    ['a subject after an :nth-last-child()', '.x:nth-last-child(2) ~ #t { width: 100px }',
+     '<div id="box"><i class="x"></i><div id="t" style="height:5px"></div></div>',
+     "document.getElementById('box').append(document.createElement('i'))", [100, 5], [300, 5]],
+    ['a position in a nested list with a combinator', 'p:is(li:first-child p) { white-space: pre }',
+     '<ul id="u" style="width:60px;padding:0;list-style:none"><li>P</li></ul>',
+     "document.getElementById('u').prepend(document.createElement('li'))", [60, 22], [60, 44]],
+    ['a position on a case-insensitive class', '[class~="FOO" i]:first-child p { white-space: pre }',
+     '<div id="box"><div class="foo" style="width:60px">P</div></div>',
+     "document.getElementById('box').prepend(document.createElement('i'))", [60, 22], [60, 44]],
     ['an ancestor a sibling combinator reaches', '#box > .x + div p { white-space: pre }',
      '<div id="box"><div id="q" style="width:60px"><p id="t" style="margin:0">aa bb cc</p></div></div>',
      "const x = document.createElement('i'); x.className = 'x'; document.getElementById('box').prepend(x)", [60, 44], [60, 22]],
@@ -228,6 +243,26 @@ RSpec.describe 'layout invalidation through structural selectors' do
      'label.error + * { margin: 1px }', 'tr:nth-child(odd) td { padding: 1px }', '.t li:first-child a { margin: 1px }'].each do |css|
       expect(marks.call(css)).to eq(base), css
     end
+    # …and asks no selector engine to find out: a selector list of every key, matched per positioned child, cost a
+    # 2000-row table with 120 keyed positional rules 137x.
+    many = (0...40).map {|i| ".k#{i} > .c#{i}:nth-child(odd) span { margin: 1px }" }.join(' ')
+    html = "<!DOCTYPE html><style>tr:nth-child(odd) td { padding: 1px } #{many}</style><table><tbody id=tb>" \
+           "#{'<tr><td>r</td></tr>' * 50}</tbody></table>"
+    s = simulated_session(->(_env) { [200, {'content-type' => 'text/html'}, [html]] })
+    s.visit '/'
+    calls = s.evaluate_script(<<~JS)
+      (() => {
+        const tb = document.getElementById('tb');
+        tb.getBoundingClientRect();
+        const m = Element.prototype.matches;
+        let n = 0;
+        Element.prototype.matches = function (q) { n++; return m.call(this, q); };
+        try { for (let i = 0; i < 10; i++) { const tr = document.createElement('tr'); tr.innerHTML = '<td>n</td>'; tb.prepend(tr); tb.getBoundingClientRect(); } }
+        finally { Element.prototype.matches = m; }
+        return n;
+      })()
+    JS
+    expect(calls).to eq(0)
     # …where one can, it still does: `section:last-child`, and a keyless child of `#w`.
     expect(marks.call('section:last-child { margin: 1px }')).to be > base
     expect(marks.call('#w > :last-child { margin: 1px }')).to be > base
