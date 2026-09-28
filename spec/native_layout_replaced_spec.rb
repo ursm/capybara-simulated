@@ -59,6 +59,29 @@ RSpec.describe 'native layout replaced-leaf parity' do
     session.evaluate_script(%(document.querySelector('#{selector}').getBoundingClientRect().width))
   end
 
+  # An `<svg>`'s intrinsic size is its `width` / `height` attributes where they are absolute lengths, and its `viewBox`
+  # its ratio (SVG 2 §8.2): what a flex item's basis reads. Read off the viewBox alone, every icon set's
+  # `<svg width="16" height="16">` was 300 wide in a flex row — a Tailwind icon button 36 tall. Chrome's [w, h] for the
+  # svg and the container.
+  it 'sizes an svg by its width and height attributes' do
+    {
+      '<button id="b" style="display:inline-flex;align-items:center;gap:8px"><svg id="s" width="16" height="16"></svg> Save changes</button>' => [[16, 16], 22],
+      '<div id="b" style="display:flex"><svg id="s" width="16" height="16"></svg></div>' => [[16, 16], 16],
+      '<div id="b" style="display:flex"><svg id="s" width="16" height="16" viewBox="0 0 32 32"></svg></div>' => [[16, 16], 16],
+      '<div id="b" style="display:flex;font:16px Arial"><svg id="s" width="2em" height="1em"></svg></div>' => [[32, 16], 16],
+      '<div id="b" style="display:flex"><svg id="s" width="50%"></svg></div>' => [[512, 150], 150],
+      '<div id="b" style="display:flex"><svg id="s"></svg></div>' => [[300, 150], 150]
+    }.each do |body, (svg, height)|
+      expect_parity(body)
+      session = simulated_session(page(body))
+      session.visit '/'
+      got = session.evaluate_script(<<~JS)
+        [(r => [r.width, r.height])(document.getElementById('s').getBoundingClientRect()), document.getElementById('b').getBoundingClientRect().height]
+      JS
+      expect(got).to eq([svg, height]), body
+    end
+  end
+
   # BLOCK-LEVEL replaced children of a block.
   it 'matches a block-level svg among block siblings' do
     expect_parity('<div style="width:300px"><div style="height:20px"></div><svg width="40" height="30" style="display:block"></svg><div style="height:15px"></div></div>')
