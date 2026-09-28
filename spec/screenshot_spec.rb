@@ -343,6 +343,27 @@ RSpec.describe 'save_screenshot' do
     expect(s.evaluate_script('getComputedStyle(document.querySelector("input"), "::placeholder").color')).to eq('rgb(117, 117, 117)')
   end
 
+  # …and a placeholder is a text field's or a textarea's: a button input's `placeholder` shows nothing (Chrome).
+  it 'paints no placeholder on a button input' do
+    s = page_with('<input type="submit" value="" placeholder="P1"><input type="button" placeholder="P2">')
+    expect(s.evaluate_script('globalThis.__csimPaintRuns().map((r) => r.text)')).to eq([])
+  end
+
+  # A box's OWN overflow clips its content — its text included, which the painter drew clipped only by the boxes
+  # AROUND the one that owns it: a narrow input's value, and an `overflow: hidden` line, inked far past the box.
+  it 'clips a box’s text to the box' do
+    s = page_with(<<~HTML)
+      <input style="width:60px" value="WWWWWWWWWWWWWWWWWWWWWWWWWWWWWW"><div style="width:60px;overflow:hidden;white-space:nowrap">WWWWWWWWWWWWWWWWWWWWWWW</div>
+    HTML
+    boxes = s.evaluate_script("['input', 'div'].map((q) => (r => [r.right, r.top, r.bottom])(document.querySelector(q).getBoundingClientRect()))")
+    shot(s) do |_img, px, _path|
+      boxes.each do |right, top, bottom|
+        ink = ((right.ceil + 2)...300).sum {|x| (top.ceil...bottom.floor).count {|y| px.call(x, y).max < 128 } }
+        expect(ink).to eq(0)
+      end
+    end
+  end
+
   # A cell's bare TEXT is vertically aligned in the paint like its block children (§17.5.3) — the UA default is
   # middle. Cell text carries no DOM geometry in this driver (getBoundingClientRect / Range see nothing), so the
   # alignment is observable ONLY through the painter's recorded runs.

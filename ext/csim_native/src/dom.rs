@@ -1379,6 +1379,13 @@ fn layout_pass(
     let maths = f64_arg(args.get(8));
     let placements = f64_arg(args.get(10));
     let patches = f64_arg(args.get(11));
+    // …and TEXT pieces only from a pass that placed nothing kept: a kept chunk's measure is put back without the pieces
+    // it placed, so the answer would be missing its text. The JS recorder turns reuse off (`NL_REUSE_OFF`); this is
+    // the contract, refused rather than answered short.
+    if texts && !placements.is_empty() {
+        rv.set_bool(false);
+        return;
+    }
     if inline_floats.len() % INLINE_STRIDE != 0 || run_floats.len() % RUN_STRIDE != 0 || placements.len() % 5 != 0 || patches.len() % 3 != 0 {
         rv.set_bool(false);
         return;

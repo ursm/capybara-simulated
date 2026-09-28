@@ -67,6 +67,19 @@ RSpec.describe 'scripts the parser runs' do
     expect(s.evaluate_script('R')).to eq(['null', 2, '#comment,HEAD,#text,BODY'])
   end
 
+  # …but the ROOT has a box there all the same: no body, and still an element the viewport lays out (Chrome: a head
+  # script reads `html { height: 300px }` as 300 tall and hit-tests it). With the body absent the layout returned
+  # without one, and the root read as 0x0 with nothing under any point.
+  it 'lays the root out while it parses the head' do
+    s = session_for(<<~HTML)
+      <!DOCTYPE html><html><head><style>html { height: 300px }</style><script>
+        window.R = [document.documentElement.getBoundingClientRect().height, document.documentElement.scrollHeight >= 300,
+                    String(document.elementFromPoint(5, 5) && document.elementFromPoint(5, 5).tagName)];
+      </script></head><body></body></html>
+    HTML
+    expect(s.evaluate_script('R')).to eq([300, true, 'HTML'])
+  end
+
   # …and without indexing a long list's siblings once per child: the parser reads each new node's siblings after
   # inserting it, and every insertion moves the tree generation, so an index keyed on it alone was built per child —
   # a 12,000-item list parsed in 1.7 s where it takes 76 ms. A COUNT, not a wall.
