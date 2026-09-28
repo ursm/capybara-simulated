@@ -39246,9 +39246,10 @@ html/dom/elements/global-attributes/dataset.html:
 html/dom/elements/the-innertext-and-outertext-properties/getter.html:
 - name: <audio> contents ignored ("<audio style='display:block'>abc")
   reason: 'The TEST contradicts the spec and both engines: HTML''s UA sheet has `audio:not([controls])
-    { display: none !important }`, so a controls-less `<audio style="display:block">` is not being
-    rendered and its innerText is its textContent — "abc" in Chrome AND Firefox (measured 2026-09-26),
-    where the test expects "". Kept out so the gate does not reward the wrong answer.'
+    { display: none !important }`, so a controls-less `<audio style="display:block">`
+    is not being rendered and its innerText is its textContent — "abc" in Chrome AND
+    Firefox (measured 2026-09-26), where the test expects "". Kept out so the gate
+    does not reward the wrong answer.'
 html/dom/historical.html:
 - name: document.all cannot find applet
   reason: document.all is the [[IsHTMLDDA]] exotic object (falsy in boolean context,
@@ -41000,6 +41001,11 @@ html/semantics/forms/the-select-element/customizable-select-multiple-popup/selec
       path/suffix. CLAUDE.md rule 1.
 html/semantics/forms/the-select-element/customizable-select-multiple-popup/select-multiple-popup-mouse-behavior.tentative.html:
 - name: Mouse behavior for base appearance <select multiple size=1>
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+html/semantics/forms/the-select-element/customizable-select/appearance-base-and-base-select.tentative.html:
+- name: "== html/semantics/forms/the-select-element/customizable-select/appearance-base-and-base-select-ref.html"
   reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
     specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
     path/suffix. CLAUDE.md rule 1.

@@ -980,10 +980,10 @@ css/css-flexbox/flex-one-sets-flex-basis-to-zero-px.html:
 - ".flexbox 17"
 - ".flexbox 18"
 css/css-flexbox/flex-shorthand-calc.html:
+- e.style['flex'] = "sign(1em - 1px) sibling-index()" should not set unrelated longhands
 - e.style['flex'] = "sign(1em - 1px) sibling-index()" should set flex-basis
 - e.style['flex'] = "sign(1em - 1px) sibling-index()" should set flex-grow
 - e.style['flex'] = "sign(1em - 1px) sibling-index()" should set flex-shrink
-- e.style['flex'] = "sign(1em - 1px) sibling-index()" should not set unrelated longhands
 css/css-flexbox/flex-shorthand-flex-basis-middle.html:
 - ".flexbox 1"
 - ".flexbox 2"
@@ -1506,6 +1506,8 @@ css/css-shadow/part/animation-part.html:
 - "== css/css-shadow/part/animation-part-ref.html"
 css/css-shadow/part/exportparts-layered.html:
 - "== css/css-shadow/part/exportparts-layered.ref.html"
+css/css-shadow/part/interaction-with-placeholder.html:
+- "== css/css-shadow/part/interaction-with-placeholder-ref.html"
 css/css-shadow/part/interaction-with-pseudo-elements.html:
 - "::after in selected host is styled"
 - "::before in selected host is styled"
@@ -8952,8 +8954,6 @@ html/dom/elements/global-attributes/dir_auto-textarea-N-between-Rs.html:
 - "== html/dom/elements/global-attributes/dir_auto-textarea-N-between-Rs-ref.html"
 html/dom/elements/global-attributes/dir_auto-textarea-mixed.html:
 - "== html/dom/elements/global-attributes/dir_auto-textarea-mixed-ref.html"
-html/dom/elements/global-attributes/dir_auto-textarea-script-N-EN.html:
-- "== html/dom/elements/global-attributes/dir_auto-textarea-script-N-EN-ref.html"
 html/dom/elements/global-attributes/dir_auto-textarea-script-N-between-Rs.html:
 - "== html/dom/elements/global-attributes/dir_auto-textarea-script-N-between-Rs-ref.html"
 html/dom/elements/global-attributes/dir_auto-textarea-script-mixed.html:
@@ -9270,10 +9270,6 @@ html/rendering/bidi-rendering/slot-no-isolate-001.html:
 - "== html/rendering/bidi-rendering/slot-no-isolate-001-ref.html"
 html/rendering/bindings/the-select-element-0/option-label.html:
 - "== html/rendering/bindings/the-select-element-0/option-label-ref.html"
-html/rendering/cdata-001.xhtml:
-- "== css/reference/ref-filled-green-100px-square.xht"
-html/rendering/cdata-002.xhtml:
-- "== css/reference/ref-filled-green-100px-square.xht"
 html/rendering/non-replaced-elements/flow-content-0/dialog.html:
 - 'Closed dialog in width: 538px iframe'
 - 'Closed dialog in width: 540px iframe'
@@ -10198,8 +10194,6 @@ html/rendering/replaced-elements/the-option-element/option-label-whitespace.html
 - "== html/rendering/replaced-elements/the-option-element/option-label-whitespace-ref.html"
 html/rendering/replaced-elements/the-option-element/option-with-br.html:
 - "== html/rendering/replaced-elements/the-option-element/option-with-br-ref.html"
-html/rendering/replaced-elements/the-select-element/customizable-select/min-height-in-flex.html:
-- "== html/rendering/replaced-elements/the-select-element/customizable-select/min-height-in-flex-ref.html"
 html/rendering/replaced-elements/the-select-element/customizable-select/min-size-empty-001.html:
 - "== html/rendering/replaced-elements/the-select-element/customizable-select/min-size-empty-001-ref.html"
 html/rendering/replaced-elements/the-select-element/customizable-select/min-size-empty-002.html:
@@ -10217,8 +10211,6 @@ html/rendering/replaced-elements/the-select-element/select-adopted.html:
   (a frame the painter never enters)"
 html/rendering/replaced-elements/the-select-element/select-empty.html:
 - "== html/rendering/replaced-elements/the-select-element/select-empty-ref.html"
-html/rendering/replaced-elements/the-select-element/select-intrinsic-option-font-size.html:
-- "== html/rendering/replaced-elements/the-select-element/select-intrinsic-option-font-size-ref.html"
 html/rendering/sections/headingoffset-and-headingreset.html:
 - "== html/rendering/sections/headingoffset-and-headingreset-ref.html"
 html/rendering/the-css-user-agent-style-sheet-and-presentational-hints/mouse-cursor-imagemap.html:
@@ -10369,8 +10361,7 @@ html/rendering/widgets/field-sizing-input-text.html:
 - 'url: Text caret is taller than the placeholder'
 - 'url: Update field-sizing property dynamically'
 html/rendering/widgets/field-sizing-placeholder-stretch.html:
-- "== html/rendering/widgets/field-sizing-placeholder-stretch-ref.html (both renderings
-  blank)"
+- "== html/rendering/widgets/field-sizing-placeholder-stretch-ref.html"
 html/rendering/widgets/field-sizing-select-contain-size.html:
 - 'listbox: The width should not depend on content when contain:size is set'
 html/rendering/widgets/field-sizing-select.html:
@@ -10379,8 +10370,6 @@ html/rendering/widgets/field-sizing-select.html:
 - 'listbox: Change the field-sizing value dynamically'
 - 'listbox: The size attribute value is ignored'
 - 'listbox: The size depend on the content'
-html/rendering/widgets/field-sizing-textarea-relayout.html:
-- "== html/rendering/widgets/field-sizing-textarea-relayout-ref.html"
 html/rendering/widgets/field-sizing-textarea.html:
 - Auto width and auto height with a long text
 - Empty value
@@ -10573,6 +10562,8 @@ html/semantics/forms/the-select-element/customizable-select/closed-listbox-rende
 - "== html/semantics/forms/the-select-element/customizable-select/closed-listbox-rendering-ref.html"
 html/semantics/forms/the-select-element/customizable-select/focus-ring-rendering.html:
 - "== html/semantics/forms/the-select-element/customizable-select/focus-ring-rendering-ref.html"
+html/semantics/forms/the-select-element/customizable-select/picker-and-slotted.html:
+- "== html/semantics/forms/the-select-element/customizable-select/picker-and-slotted-ref.html"
 html/semantics/forms/the-select-element/customizable-select/picker-icon-animation-002.html:
 - "== html/semantics/forms/the-select-element/customizable-select/picker-icon-animation-002-ref.html"
 html/semantics/forms/the-select-element/customizable-select/picker-icon-animation.html:
@@ -10865,12 +10856,6 @@ html/semantics/forms/the-select-element/select-listbox-touch.optional.html:
 - Using touch inputs should not deselect other options in a listbox <select multiple>.
 html/semantics/forms/the-select-element/select-multiple-resize-does-not-autoscroll.html:
 - Resizing <select multiple> should not autoscroll the listbox.
-html/semantics/forms/the-textarea-element/multiline-placeholder-cr.html:
-- "== html/semantics/forms/the-textarea-element/multiline-placeholder-ref.html"
-html/semantics/forms/the-textarea-element/multiline-placeholder-crlf.html:
-- "== html/semantics/forms/the-textarea-element/multiline-placeholder-ref.html"
-html/semantics/forms/the-textarea-element/multiline-placeholder.html:
-- "== html/semantics/forms/the-textarea-element/multiline-placeholder-ref.html"
 html/semantics/forms/the-textarea-element/textarea-placeholder-lineheight.html:
 - Bounding rect height for textarea must be the same as line-height
 html/webappapis/scripting/events/compile-event-handler-lexical-scopes.html:

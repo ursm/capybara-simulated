@@ -327,6 +327,22 @@ RSpec.describe 'save_screenshot' do
     expect(runs).to eq([['bb', 40, 12]]) # …and its glyphs went with it
   end
 
+  # A form control's text is the UA's to draw — a text field's CURRENT value (its placeholder while that is empty, in
+  # `::placeholder`'s colour, Chrome's rgb(117, 117, 117) by default), a password as bullets, a dropdown's selected
+  # option by its rendered label (an empty `label` attribute is its text), a button input's label — and no line of the
+  # page's places it. The painter drew what the JS layout happened to lay out of the controls' CHILDREN: a textarea's
+  # default text whatever had been typed, every option of a dropdown, and nothing at all for an input.
+  it 'paints the text a form control shows' do
+    s = page_with(<<~HTML)
+      <textarea id="t">default</textarea><input placeholder="ph" style="color:rgb(0,0,255)"><input type="password" value="abc">
+      <select><option>one</option><option selected label="">two</option></select><input type="submit">
+    HTML
+    s.find('#t').set('typed')
+    runs = s.evaluate_script('globalThis.__csimPaintRuns().map((r) => r.text)')
+    expect(runs).to eq(%W[typed ph ••• two Submit])
+    expect(s.evaluate_script('getComputedStyle(document.querySelector("input"), "::placeholder").color')).to eq('rgb(117, 117, 117)')
+  end
+
   # A cell's bare TEXT is vertically aligned in the paint like its block children (§17.5.3) — the UA default is
   # middle. Cell text carries no DOM geometry in this driver (getBoundingClientRect / Range see nothing), so the
   # alignment is observable ONLY through the painter's recorded runs.
