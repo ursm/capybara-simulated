@@ -318,13 +318,13 @@ impl<'a> Element for NodeRef<'a> {
 
     fn apply_selector_flags(&self, _flags: ElementSelectorFlags) {}
 
-    // A hyperlink: an HTML `<a>` / `<area>` / `<link>` with an `href` in no namespace, or an SVG `<a>` with that or an
-    // XLink `href` (SVG 1.1's `xlink:href`, or one set unprefixed by `setAttributeNS`).
+    // A hyperlink: an HTML `<a>` / `<area>` with an `href` in no namespace (HTML "selectors" — a `<link>` is none), or
+    // an SVG `<a>` with that or an XLink `href` (SVG 1.1's `xlink:href`, or one set unprefixed by `setAttributeNS`).
     fn is_link(&self) -> bool {
         let node = self.node();
         let html = node.ns.is_empty() || node.ns == HTML_NS;
         match node.local_name.as_str() {
-            "a" | "area" | "link" if html => node.plain_attr("href").is_some(),
+            "a" | "area" if html => node.plain_attr("href").is_some(),
             "a" if node.ns == SVG_NS => {
                 node.plain_attr("href").is_some() || node.ns_attr(XLINK_NS, "href").is_some()
             }
