@@ -799,7 +799,7 @@ RSpec.describe 'layout reuse across dynamic style state' do
         })()
       JS
       expect(got[1]).to eq(1)                 # …laid out by the native pass, or the count says nothing
-      expect(got[0]).to be_between(1, 10)
+      expect(got[0]).to be_between(1, 11)     # (…the item's and its ancestors', the ROOT element among them)
     end
 
     # …and a BLOCK's children likewise: what each is to the flow (`nlBlockChild`) is asked of every child of a block

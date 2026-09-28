@@ -12,12 +12,27 @@ require_relative 'support/shadow_parity'
 require_relative 'support/walk_refusals'
 
 RSpec.describe 'native layout no-oracle run' do
+  # …laid out by the JS layout: what a no-oracle run is held against, and what it must leave as it found it.
   def session_with(body)
     html = %(<!doctype html><html><head><meta charset="utf-8"></head><body style="margin:0">#{body}</body></html>)
     session = simulated_session(Rack::Builder.new { run ->(_env) { [200, {'content-type' => 'text/html; charset=utf-8'}, [html]] } }.to_app)
     session.visit '/'
+    session.execute_script('globalThis.__csimNativeLayout = false')
     session.evaluate_script('document.body.offsetHeight')
     session
+  end
+
+  # `#m`'s rectangle as the PAGE lays it out — natively, from the root element — which is the figure held against
+  # Chrome's.
+  def page_rect(session)
+    session.evaluate_script(<<~JS)
+      (() => {
+        globalThis.__csimNativeLayout = true;
+        document.body.appendChild(document.createComment(''));
+        const r = document.getElementById('m').getBoundingClientRect();
+        return [r.x, r.y, r.width, r.height];
+      })()
+    JS
   end
 
   it 'leaves every layout property exactly as it found it' do
@@ -236,24 +251,22 @@ RSpec.describe 'native layout no-oracle run' do
       r = s.evaluate_script('globalThis.__csimLayoutShadowRun(undefined, {noOracle: true})')
       expect(r).to include('ok' => true, 'mismatches' => 0), "#{css}: #{r.inspect}"
       expect(r['oracleReads'].to_h).to be_empty, css
-      rect = s.evaluate_script("(r => [r.x, r.y, r.width])(document.getElementById('m').getBoundingClientRect())")
+      rect = page_rect(s).first(3)
       expect(rect).to match([be_within(0.05).of(x), eq(y), be_within(0.05).of(w)]), css   # (Chrome's LayoutUnits)
     end
-    # …a PERCENTAGE height body, against the initial containing block's height and no `_lbCbH` stamp of its own. SHARED:
-    # Chrome resolves it against `html`'s auto height — indefinite, so the body and its 50% child are auto (18 tall),
-    # where both engines take the ICB (a 192px child of a 384px body).
+    # …a PERCENTAGE height body, against the initial containing block's height and no `_lbCbH` stamp of its own. A
+    # body-rooted pass takes the ICB in both engines (a 192px child of a 384px body); the PAGE is laid out from the root
+    # element, whose auto height is indefinite, so the body and its 50% child are auto — Chrome's 18.
     s = session_with('<style>body{height:50%}</style><div id="m" style="height:50%">x</div>')
     r = s.evaluate_script('globalThis.__csimLayoutShadowRun(undefined, {noOracle: true})')
     expect(r).to include('ok' => true, 'mismatches' => 0)
     expect(r['oracleReads'].to_h).to be_empty
-    expect_shared_gap(s.evaluate_script("document.getElementById('m').getBoundingClientRect().height"),
-                      shared: 192, chrome: 18, what: 'a 50% child of a 50% body')
-    # …and a RELATIVE body's offset, which neither engine applies (SHARED: Chrome moves it to 63.19, 19)
+    expect(page_rect(s)[3]).to eq(18)
+    # …and a RELATIVE body's offset, which a body-rooted pass applies in neither engine — and the page, laid out from
+    # the root element, does (Chrome: 63.19, 19)
     s = session_with('<style>body{position:relative;margin:12px !important;left:5%;top:7px}</style><div id="m">x</div>')
     expect(s.evaluate_script('globalThis.__csimLayoutShadowRun(undefined, {noOracle: true})')).to include('ok' => true, 'mismatches' => 0)
-    rect = s.evaluate_script("(r => [r.x, r.y])(document.getElementById('m').getBoundingClientRect())")
-    expect_shared_gap(rect[0], shared: 12, chrome: 63.19, what: 'a relative body: x')
-    expect_shared_gap(rect[1], shared: 12, chrome: 19, what: 'a relative body: y')
+    expect(page_rect(s).first(2)).to match([be_within(0.05).of(63.19), eq(19)])
     # …and a subtree root is handed its origin, the one read left
     s = session_with('<div id="m" style="width:300px"><p>x</p></div>')
     r = s.evaluate_script("globalThis.__csimLayoutShadowRun(document.getElementById('m'), {noOracle: true})")

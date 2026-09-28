@@ -84,44 +84,56 @@ RSpec.describe 'native layout L1 block-flow parity' do
       .to eq([100, 600])
   end
 
-  # The ROOT element's auto height is the body's box and the margin collapsed out below it. Under the flip that margin
-  # is the pass's own answer (`Laid::root_bottom_margin`); the oracle's `collapsingBottomMargin` re-walked every
-  # child of the body on every pass, the body being on every edit's spine. Held against the oracle, shape by shape,
-  # over what reaches the body's bottom margin: a last child's and grandchild's, the body's own padding, height and
-  # border stopping it, negative margins, an out-of-flow or box-less last child.
-  # SHARED divergence, recorded: an empty body whose one child collapses through (`margin: 30px 0 60px`) makes the
-  # root 120 tall in both engines, where the margins are ONE collapsed 60 (§8.3.1) and Chrome says 60 — the run is
-  # counted once where the body is placed and again below it.
-  it 'hands the root the margin native collapsed out below the body' do
+  # The ROOT element's auto height is its content's: the body's box and the margins it does not collapse away, since the
+  # root's own do not collapse (§8.3.1) — native lays the page out FROM the root element, so it is just that block's
+  # height. Chrome's figures, shape by shape, over what reaches the body's bottom margin: a last child's and grandchild's,
+  # the body's own padding, height and border stopping it, negative margins, an empty child collapsing through (one
+  # collapsed 60, where the JS layout counted the run twice, 120), an out-of-flow, floated or box-less last child.
+  it 'gives the root the height its content takes' do
     [
-      ['p{margin:0 0 40px}', '<p>a</p><div style="margin-bottom:70px"><div style="margin-bottom:90px">x</div></div>'],
-      ['body{padding-bottom:3px}', '<div style="margin-bottom:50px">x</div>'],
-      ['body{height:100px;margin-bottom:20px}', '<div style="margin-bottom:50px">x</div>'],
-      ['html{height:400px} body{height:50%;margin-bottom:20px}', '<div style="margin-bottom:50px">x</div>'],
-      ['body{min-height:10px;margin-bottom:20px}', '<div style="margin-bottom:50px">x</div>'],
-      ['body{border-bottom:1px solid}', '<div style="margin-bottom:50px">x</div>'],
-      ['body{margin-bottom:-5px}', '<div style="margin-bottom:-30px">x</div><div style="margin-bottom:12px"></div>'],
-      ['', '<div style="margin:30px 0 60px"></div>'],
-      ['', '<div style="margin-bottom:50px">x</div><div style="position:absolute">y</div>'],
-      ['', '<div style="margin-bottom:50px">x</div><div style="float:left;height:300px;margin-bottom:9px">y</div>'],
-      ['', '<div style="margin-bottom:50px">x</div><div style="display:contents"><div style="margin-bottom:77px">z</div></div>']
-    ].each do |css, body|
+      ['p{margin:0 0 40px}', '<p>a</p><div style="margin-bottom:70px"><div style="margin-bottom:90px">x</div></div>', 174],
+      ['body{padding-bottom:3px}', '<div style="margin-bottom:50px">x</div>', 87],
+      ['body{height:100px;margin-bottom:20px}', '<div style="margin-bottom:50px">x</div>', 128],
+      ['html{height:400px} body{height:50%;margin-bottom:20px}', '<div style="margin-bottom:50px">x</div>', 400],
+      ['body{min-height:10px;margin-bottom:20px}', '<div style="margin-bottom:50px">x</div>', 76],
+      ['body{border-bottom:1px solid}', '<div style="margin-bottom:50px">x</div>', 85],
+      ['body{margin-bottom:-5px}', '<div style="margin-bottom:-30px">x</div><div style="margin-bottom:12px"></div>', 8],
+      ['', '<div style="margin:30px 0 60px"></div>', 60],
+      ['', '<div style="margin-bottom:50px">x</div><div style="position:absolute">y</div>', 76],
+      ['', '<div style="margin-bottom:50px">x</div><div style="float:left;height:300px;margin-bottom:9px">y</div>', 385],
+      ['', '<div style="margin-bottom:50px">x</div><div style="display:contents"><div style="margin-bottom:77px">z</div></div>', 171]
+    ].each do |css, body, chrome|
       html = %(<!doctype html><html><head><meta charset="utf-8"><style>#{css}</style></head><body>#{body}</body></html>)
       session = simulated_session(Rack::Builder.new { run ->(_env) { [200, {'content-type' => 'text/html; charset=utf-8'}, [html]] } }.to_app)
       session.visit '/'
-      heights = session.evaluate_script(<<~JS)
+      height, passes = session.evaluate_script(<<~JS)
         (() => {
-          const height = (native) => {
-            globalThis.__csimNativeLayout = native;
-            document.body.appendChild(document.createComment(''));
-            return document.documentElement.getBoundingClientRect().height;
-          };
-          const oracle = height(false), passes = __csimNativeLayoutStats().native;
-          return [oracle, height(true), __csimNativeLayoutStats().native - passes];
+          const passes = __csimNativeLayoutStats().native;
+          document.body.appendChild(document.createComment(''));
+          return [document.documentElement.getBoundingClientRect().height, __csimNativeLayoutStats().native - passes];
         })()
       JS
-      expect(heights[2]).to eq(1), "#{css} #{body}: native did not lay the page out"
-      expect(heights[1]).to eq(heights[0]), "#{css} #{body}: root #{heights[1]} native, #{heights[0]} oracle"
+      expect(passes).to eq(1), "#{css} #{body}: native did not lay the page out"
+      expect(height).to eq(chrome), "#{css} #{body}: root #{height}, Chrome #{chrome}"
+    end
+  end
+
+  # …and a body of ANY box the root element can hold, laid out by native as it is: the pass starts at the root element,
+  # so the body is one more child, where a body-rooted pass declined every one of these as a root it could not place
+  # ("root unsupported"). Chrome's widths for a `<p>` beside a 50px block in it.
+  it 'lays out a body of any display or position' do
+    {
+      'display:inline-block' => 50, 'position:absolute' => 50, 'position:fixed' => 50, 'float:left' => 50,
+      'display:contents' => 1024
+    }.each do |css, chrome|
+      html = %(<!doctype html><style>body{#{css}}</style><body><p id="p">x</p><div style="width:50px">y</div></body>)
+      session = simulated_session(Rack::Builder.new { run ->(_env) { [200, {'content-type' => 'text/html'}, [html]] } }.to_app)
+      session.visit '/'
+      width, fell_back = session.evaluate_script(<<~JS)
+        [document.getElementById('p').getBoundingClientRect().width, Object.keys(__csimNativeLayoutStats().fellBack)]
+      JS
+      expect(fell_back).to eq([]), css
+      expect(width).to eq(chrome), css
     end
   end
 
