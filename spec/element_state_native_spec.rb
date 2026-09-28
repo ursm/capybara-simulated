@@ -278,4 +278,27 @@ RSpec.describe 'element state in the native arena' do
       expect(got).to eq([1, 1, 'b'])
     end
   end
+
+  # A frame's focus and hover are its container's in the parent document (HTML: the parent's focused area is the
+  # navigable container); a hover leaving the container leaves the frame's document too.
+  describe 'across a frame' do
+    let(:session) {
+      simulated_session(lambda {|env|
+        body = env['PATH_INFO'] == '/f' ? '<!DOCTYPE html><input id=inner><p id=ip>p</p>' :
+          '<!DOCTYPE html><div id=wrap><iframe id=fr src="/f"></iframe></div><input id=outer>'
+        [200, {'content-type' => 'text/html'}, [body]]
+      })
+    }
+
+    it "makes the iframe the parent's focused and hovered element" do
+      session.within_frame('fr') { session.find('#inner').click }
+      expect(session.evaluate_script('document.activeElement.id')).to eq('fr')
+      expect(native_ids('#fr:focus, #wrap:focus-within')).to eq(%w[wrap fr])
+      session.within_frame('fr') { session.find('#ip').hover }
+      expect(native_ids('#wrap:hover, #fr:hover')).to eq(%w[wrap fr])
+      session.find('#outer').hover
+      expect(native_ids('#fr:hover')).to eq([])
+      expect(session.evaluate_script("document.getElementById('fr').contentDocument.querySelectorAll(':hover').length")).to eq(0)
+    end
+  end
 end
