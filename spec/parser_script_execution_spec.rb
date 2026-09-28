@@ -55,6 +55,18 @@ RSpec.describe 'scripts the parser runs' do
     expect(s.evaluate_script('R')).to eq([2, 40, 5, 40])
   end
 
+  # …which in the head has no `<body>` yet, and the root's children in the order the parse put them there: a page loaded
+  # into a document reuses its `<html>` / `<head>` / `<body>` objects, and they used to stay attached across the reload
+  # — a head script read a connected, empty body (which the layout then had no arena node for), and the root's own
+  # comment and text landed after both. Chrome: ["null", 2, "#comment,HEAD,#text,BODY"].
+  it 'has no body while it parses the head' do
+    s = session_for(<<~HTML)
+      <!DOCTYPE html><html><!--c--><head><script>window.R = [String(document.body), document.documentElement.childNodes.length];</script></head>
+      <body><script>R.push(Array.from(document.documentElement.childNodes, (n) => n.nodeName).join(','));</script></body></html>
+    HTML
+    expect(s.evaluate_script('R')).to eq(['null', 2, '#comment,HEAD,#text,BODY'])
+  end
+
   # …and without indexing a long list's siblings once per child: the parser reads each new node's siblings after
   # inserting it, and every insertion moves the tree generation, so an index keyed on it alone was built per child —
   # a 12,000-item list parsed in 1.7 s where it takes 76 ms. A COUNT, not a wall.
