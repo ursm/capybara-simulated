@@ -136,7 +136,26 @@ pub(crate) struct NodeData {
     // geometry getters (getBoundingClientRect / offset* / scroll*). None until a pass lays it out;
     // overwritten each pass. See mod layout + the layoutPass / boxOf ops.
     pub(crate) layout_box: Option<crate::layout::Box>,
+    // An element's live STATE that no attribute carries (`state` bits, below): what a script or the user did to it.
+    pub(crate) state: u32,
+    // A shadow root's host (None for every other node): the shadow-including ancestor chain `:focus` walks.
+    pub(crate) host: Option<NodeId>,
 }
+
+// The element state bits (`NodeData::state`, native-query-shadow.js `STATE_*`): focus and hover (the realm's one
+// focused / hovered element carries its bit, see `RealmArena::set_state`), checkedness (dirty, then its value — a
+// clean one is the `checked` attribute), an option's selectedness, indeterminate, an open popover, a modal dialog, a
+// filtered option, and a form-associated custom element.
+pub(crate) const STATE_FOCUSED: u32 = 1;
+pub(crate) const STATE_HOVERED: u32 = 1 << 1;
+pub(crate) const STATE_CHECKED_DIRTY: u32 = 1 << 2;
+pub(crate) const STATE_CHECKED: u32 = 1 << 3;
+pub(crate) const STATE_SELECTED: u32 = 1 << 4;
+pub(crate) const STATE_INDETERMINATE: u32 = 1 << 5;
+pub(crate) const STATE_POPOVER_OPEN: u32 = 1 << 6;
+pub(crate) const STATE_MODAL: u32 = 1 << 7;
+pub(crate) const STATE_FILTERED: u32 = 1 << 8;
+pub(crate) const STATE_FORM_ASSOCIATED: u32 = 1 << 9;
 
 impl NodeData {
     // A node of `kind` with its character data and nothing else — the element fields are filled by the caller.
@@ -153,6 +172,8 @@ impl NodeData {
             children: Vec::new(),
             child_index: 0,
             layout_box: None,
+            state: 0,
+            host: None,
         }
     }
     pub(crate) fn get_attr(&self, name: &str) -> Option<&str> {
@@ -277,6 +298,14 @@ pub(crate) struct RealmArena {
     // Indices whose slot is free, LIFO. `importNode` pops one before growing `slots`, so a page's
     // live-node high-water mark bounds `slots.len()` even as nodes churn.
     free: Vec<u32>,
+    // The realm document's focused and hovered element — the one carrying STATE_FOCUSED / STATE_HOVERED — from which
+    // `:focus-within` and `:hover` walk up.
+    pub(crate) focus: Option<NodeId>,
+    pub(crate) hover: Option<NodeId>,
+    // Whether the focus shows NO ring (not `:focus-visible`): only after a pointer focus of a non-text control.
+    pub(crate) focus_ring_hidden: bool,
+    // Whether any shadow root has a host here — `:focus` walks out of shadow trees only then.
+    pub(crate) has_shadow_hosts: bool,
 }
 
 impl RealmArena {
@@ -344,6 +373,9 @@ impl RealmArena {
     // gen no longer matches, so it reads absent instead of ALIASING whichever new-page node reused its
     // index. Growth stays bounded because the freed indices feed the next page's allocations.
     fn reset(&mut self) {
+        self.focus = None;
+        self.hover = None;
+        self.has_shadow_hosts = false;
         for idx in 0..self.slots.len() {
             let slot = &mut self.slots[idx];
             if slot.data.is_some() {
@@ -380,6 +412,30 @@ impl RealmArena {
             self.link_child(p, id);
         }
         id
+    }
+
+    // `id`'s state bits become `bits`. The realm's focused and hovered element is whichever carries that bit last.
+    pub(crate) fn set_state(&mut self, id: NodeId, bits: u32) {
+        let Some(node) = self.get_mut(id) else { return };
+        node.state = bits;
+        for (bit, slot) in [(STATE_FOCUSED, &mut self.focus), (STATE_HOVERED, &mut self.hover)] {
+            if bits & bit != 0 {
+                *slot = Some(id);
+            } else if *slot == Some(id) {
+                *slot = None;
+            }
+        }
+    }
+
+    // `root` is the shadow root of `host`.
+    pub(crate) fn set_shadow_host(&mut self, root: NodeId, host: NodeId) {
+        if self.get(host).is_none() {
+            return;
+        }
+        if let Some(node) = self.get_mut(root) {
+            node.host = Some(host);
+            self.has_shadow_hosts = true;
+        }
     }
 
     // Take `child` out of its parent's children (its own subtree goes with it).
@@ -625,6 +681,10 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_, ()>, ctx: &v8::Global<v8:
     register(scope, ns, "insertChild", insert_child, context_id);
     register(scope, ns, "removeChild", remove_child, context_id);
     register(scope, ns, "inspectNode", inspect_node, context_id);
+    // Element state no attribute carries, for the state pseudo-classes (`:checked`, `:focus`, `:hover`, …).
+    register(scope, ns, "setState", set_state, context_id);
+    register(scope, ns, "setShadowHost", set_shadow_host, context_id);
+    register(scope, ns, "setFocusRingHidden", set_focus_ring_hidden, context_id);
     register(scope, ns, "queryIds", query_ids, context_id);
     register(scope, ns, "matchesId", matches_id, context_id);
     // Authoritative cascade matching: compile a rule's selector once to an integer handle, then match
@@ -761,8 +821,47 @@ fn insert_child(
     realm(scope, cid).insert_child(parent, child, before);
 }
 
-// __dom.inspectNode(nid) -> [kind, localName, data, parentNid, childNid, …], or null for a dead nid. The arena as
-// it stands, for the verify mode that holds it against the JS tree (`CSIM_ARENA_VERIFY`); nothing else reads it.
+// __dom.setState(nid, bits): the element's state bits (`STATE_*`) become `bits`.
+fn set_state(
+    scope: &mut v8::PinScope<'_, '_>,
+    args: v8::FunctionCallbackArguments<'_>,
+    _rv: v8::ReturnValue<'_, v8::Value>,
+) {
+    let Some(id) = nid_arg(scope, &args, 0) else {
+        return;
+    };
+    let bits = args.get(1).uint32_value(scope).unwrap_or(0);
+    let cid = realm_id(scope, &args);
+    realm(scope, cid).set_state(id, bits);
+}
+
+// __dom.setShadowHost(rootNid, hostNid): the shadow root `rootNid` is attached to `hostNid`.
+fn set_shadow_host(
+    scope: &mut v8::PinScope<'_, '_>,
+    args: v8::FunctionCallbackArguments<'_>,
+    _rv: v8::ReturnValue<'_, v8::Value>,
+) {
+    let (Some(root), Some(host)) = (nid_arg(scope, &args, 0), nid_arg(scope, &args, 1)) else {
+        return;
+    };
+    let cid = realm_id(scope, &args);
+    realm(scope, cid).set_shadow_host(root, host);
+}
+
+// __dom.setFocusRingHidden(hidden): whether the realm's focus shows no ring (`:focus-visible` does not match).
+fn set_focus_ring_hidden(
+    scope: &mut v8::PinScope<'_, '_>,
+    args: v8::FunctionCallbackArguments<'_>,
+    _rv: v8::ReturnValue<'_, v8::Value>,
+) {
+    let hidden = args.get(0).boolean_value(scope);
+    let cid = realm_id(scope, &args);
+    realm(scope, cid).focus_ring_hidden = hidden;
+}
+
+// __dom.inspectNode(nid) -> [kind, localName, data, parentNid, state, hostNid, childNid, …], or null for a dead nid.
+// The arena as it stands, for the verify mode that holds it against the JS tree (`CSIM_ARENA_VERIFY`); nothing else
+// reads it.
 fn inspect_node(
     scope: &mut v8::PinScope<'_, '_>,
     args: v8::FunctionCallbackArguments<'_>,
@@ -772,7 +871,7 @@ fn inspect_node(
         return;
     };
     let cid = realm_id(scope, &args);
-    let Some((kind, local_name, data, parent, children)) = realm(scope, cid).get(id).map(|n| {
+    let Some((kind, local_name, data, parent, state, host, children)) = realm(scope, cid).get(id).map(|n| {
         let kind = match n.kind {
             NodeKind::Element => 1,
             NodeKind::Text => 3,
@@ -781,24 +880,27 @@ fn inspect_node(
             NodeKind::Fragment => 11,
             NodeKind::Other => 0,
         };
-        (kind, n.local_name.clone(), n.data.clone(), n.parent, n.children.clone())
+        (kind, n.local_name.clone(), n.data.clone(), n.parent, n.state, n.host, n.children.clone())
     }) else {
         rv.set_null();
         return;
     };
-    let out = v8::Array::new(scope, 4 + children.len() as i32);
+    const HEAD: usize = 6;
+    let out = v8::Array::new(scope, (HEAD + children.len()) as i32);
     let vals: Vec<v8::Local<v8::Value>> = vec![
         v8::Integer::new(scope, kind).into(),
         v8::String::new(scope, &local_name).map_or_else(|| v8::undefined(scope).into(), |s| s.into()),
         v8::String::new(scope, &data).map_or_else(|| v8::undefined(scope).into(), |s| s.into()),
         v8::Number::new(scope, parent.map_or(-1.0, |p| p.to_f64())).into(),
+        v8::Integer::new_from_unsigned(scope, state).into(),
+        v8::Number::new(scope, host.map_or(-1.0, |h| h.to_f64())).into(),
     ];
     for (i, v) in vals.into_iter().enumerate() {
         out.set_index(scope, i as u32, v);
     }
     for (i, c) in children.iter().enumerate() {
         let v: v8::Local<v8::Value> = v8::Number::new(scope, c.to_f64()).into();
-        out.set_index(scope, 4 + i as u32, v);
+        out.set_index(scope, (HEAD + i) as u32, v);
     }
     rv.set(out.into());
 }

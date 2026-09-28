@@ -9,6 +9,7 @@
 // The native author cascade: a realm's static rules, and one element's winning declarations in one pass.
 mod cascade;
 mod dom;
+mod element_state;
 // Native text metrics (fontations) — used IN-PROCESS by native inline layout (L2, mod layout); JS
 // registers a font (registerFontPath) to a handle it passes in the layout inputs.
 mod font;

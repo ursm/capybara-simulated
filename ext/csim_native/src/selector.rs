@@ -310,10 +310,27 @@ impl<'a> Element for NodeRef<'a> {
         pc: &PseudoClass,
         _context: &mut MatchingContext<CsimImpl>,
     ) -> bool {
-        // State pseudo-classes depend on live element state in the JS DOM; the caller falls back to
-        // the JS engine for a selector that needs them. Only structural link state is answered here.
+        // Every name `is_native_pseudo_class` admits; the element states are element_state.rs's.
+        let (arena, id) = (self.arena, self.id);
         match pc.0.as_str() {
-            "link" | "any-link" => self.is_link(),
+            "link" | "any-link" | "-webkit-any-link" => self.is_link(),
+            "focus" => arena.is_focused(id),
+            "focus-visible" => arena.is_focus_visible(id),
+            "focus-within" => arena.has_focus_within(id),
+            "hover" => arena.is_hovered(id),
+            "checked" => arena.is_checked(id),
+            "selected" => arena.is_selected(id),
+            "indeterminate" => arena.is_indeterminate(id),
+            "disabled" => arena.is_actually_disabled(id),
+            "enabled" => arena.is_enabled(id),
+            "read-write" => arena.is_read_write(id),
+            "read-only" => !arena.is_read_write(id),
+            "default" => arena.is_default(id),
+            "open" => arena.is_open(id),
+            "popover-open" => arena.is_popover_open(id),
+            "modal" => arena.is_modal(id),
+            "filtered" => arena.is_filtered(id),
+            // No history and no pressed pointer: nothing is visited or active.
             _ => false,
         }
     }
@@ -395,7 +412,30 @@ impl<'a> Element for NodeRef<'a> {
 // css-select on a shadow-less tree; they'll need real handling — not this structural gate — when
 // shadow DOM enters the arena.
 fn is_native_pseudo_class(name: &str) -> bool {
-    matches!(name, "link" | "any-link")
+    matches!(
+        name,
+        "link"
+            | "any-link"
+            | "-webkit-any-link"
+            | "visited"
+            | "active"
+            | "focus"
+            | "focus-visible"
+            | "focus-within"
+            | "hover"
+            | "checked"
+            | "selected"
+            | "indeterminate"
+            | "disabled"
+            | "enabled"
+            | "read-write"
+            | "read-only"
+            | "default"
+            | "open"
+            | "popover-open"
+            | "modal"
+            | "filtered"
+    )
 }
 
 // A parsed selector plus whether it needs the JS fallback (it uses a non-native pseudo).

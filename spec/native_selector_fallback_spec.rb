@@ -1,8 +1,9 @@
 # frozen_string_literal: true
 
 # The native selector engine must NEVER silently answer a selector whose truth depends on
-# live element state it can't see (`:hover`, `:checked`, `:focus`, `:required`, `:lang()`,
-# a pseudo-element, …) — a structural-only match would return a wrong SUBSET. Instead it
+# live element state it can't see (`:required`, `:valid`, `:lang()`, `:target`, a pseudo-element,
+# …) — a structural-only match would return a wrong SUBSET. (The states the arena DOES carry —
+# `:checked`, `:focus`, `:hover`, `:disabled`, … — are answered; element_state_native_spec.) Instead it
 # flags such a selector at parse time and reports it as a fallback so the caller runs the JS
 # css-select engine. This spec pins that contract:
 #
@@ -91,8 +92,6 @@ RSpec.describe 'native selector engine: JS fallback for live-state selectors',
   before do
     session.visit '/'
     session.evaluate_script(FALLBACK_BUILD_JS)
-    # Two checkboxes are actually checked — live state css-select sees but the arena can't.
-    session.evaluate_script("document.getElementById('c1').checked = true; document.getElementById('c2').checked = true;")
   end
 
   it 'answers structural selectors natively, and correctly' do
@@ -124,18 +123,17 @@ RSpec.describe 'native selector engine: JS fallback for live-state selectors',
   end
 
   it 'defers a live-state selector to css-select even when elements really match' do
-    # Guard the premise: css-select DOES see the two checked boxes, so a structural-only native
+    # Guard the premise: css-select DOES see the required field, so a structural-only native
     # answer would be a wrong subset ([]). Native must decline, not guess.
-    expect(session.evaluate_script("document.querySelectorAll(':checked').length")).to eq(2)
+    expect(session.evaluate_script("document.querySelectorAll(':required').length")).to eq(1)
 
     [
-      ':checked',
-      '.cb:checked',
-      ':not(:checked)',
-      ':is(a, :checked)',
-      ':focus',
-      'input:required',
-      ':hover',
+      ':required',
+      '.tb:required',
+      ':not(:required)',
+      ':is(a, :required)',
+      ':invalid',
+      ':placeholder-shown',
       ':lang(en)',
       'p::before'
     ].each do |sel|
