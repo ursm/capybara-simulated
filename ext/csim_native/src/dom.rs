@@ -314,6 +314,9 @@ pub(crate) struct RealmArena {
     pub(crate) focus_ring_hidden: bool,
     // Whether any shadow root has a host here — `:focus` walks out of shadow trees only then.
     pub(crate) has_shadow_hosts: bool,
+    // The form the HTML parser's form element pointer gave a control it inserted (`<table><form>…<input>`: the form
+    // is no ancestor of it), until a script moves it — the few controls whose form owner the tree can't tell.
+    pub(crate) parser_form_owners: std::collections::HashMap<NodeId, NodeId>,
 }
 
 impl RealmArena {
@@ -373,6 +376,9 @@ impl RealmArena {
             slot.generation += 1;
             self.free.push(id.idx);
         }
+        if !self.parser_form_owners.is_empty() {
+            self.parser_form_owners.remove(&id);
+        }
     }
 
     // Drop every node, bumping each occupied slot's gen and listing it for reuse. This is the per-page
@@ -384,6 +390,7 @@ impl RealmArena {
         self.focus = None;
         self.hover = None;
         self.has_shadow_hosts = false;
+        self.parser_form_owners.clear();
         for idx in 0..self.slots.len() {
             let slot = &mut self.slots[idx];
             if slot.data.is_some() {
@@ -611,6 +618,10 @@ pub(crate) struct Dom {
     pub(crate) layout_chunks: std::collections::HashMap<i32, ChunkStore>,
     // Each realm's static author rules (`cascadeLoad`), which `cascadeWinners` answers from.
     pub(crate) cascades: std::collections::HashMap<i32, crate::cascade::CascadeStore>,
+    // The realms `dropRealm` freed: an op a script of one still runs lands in `graveyard` rather than bringing its
+    // arena back (context ids are never reused, so each would have stayed an entry for good).
+    dropped: std::collections::HashSet<i32>,
+    graveyard: RealmArena,
 }
 
 // Borrow the isolate's Dom, lazily creating the slot on first touch. rusty_v8
@@ -639,7 +650,11 @@ fn realm_id(scope: &mut v8::PinScope<'_, '_>, args: &v8::FunctionCallbackArgumen
 // The arena for realm `cid` (created empty on first touch). The node ops resolve this from their
 // function data instead of touching a single shared arena.
 fn realm<'s>(scope: &'s mut v8::PinScope<'_, '_>, cid: i32) -> &'s mut RealmArena {
-    dom(scope).realms.entry(cid).or_default()
+    let d = dom(scope);
+    if d.dropped.contains(&cid) {
+        return &mut d.graveyard;
+    }
+    d.realms.entry(cid).or_default()
 }
 
 // A NodeId argument off the JS wire: reads arg `i` as a Number and unpacks it, or None for a negative
@@ -706,6 +721,7 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_, ()>, ctx: &v8::Global<v8:
     register(scope, ns, "setState", set_state, context_id);
     register(scope, ns, "setShadowHost", set_shadow_host, context_id);
     register(scope, ns, "setValue", set_value, context_id);
+    register(scope, ns, "setParserFormOwner", set_parser_form_owner, context_id);
     register(scope, ns, "setFocusRingHidden", set_focus_ring_hidden, context_id);
     register(scope, ns, "queryIds", query_ids, context_id);
     register(scope, ns, "matchesId", matches_id, context_id);
@@ -896,6 +912,28 @@ fn set_value(
     let cid = realm_id(scope, &args);
     if let Some(node) = realm(scope, cid).get_mut(id) {
         node.value = value;
+    }
+}
+
+// __dom.setParserFormOwner(nid, formNid): the form the parser gave this control — or none (`formNid` -1).
+fn set_parser_form_owner(
+    scope: &mut v8::PinScope<'_, '_>,
+    args: v8::FunctionCallbackArguments<'_>,
+    _rv: v8::ReturnValue<'_, v8::Value>,
+) {
+    let Some(id) = nid_arg(scope, &args, 0) else {
+        return;
+    };
+    let form = nid_arg(scope, &args, 1);
+    let cid = realm_id(scope, &args);
+    let arena = realm(scope, cid);
+    match form {
+        Some(f) => {
+            arena.parser_form_owners.insert(id, f);
+        }
+        None => {
+            arena.parser_form_owners.remove(&id);
+        }
     }
 }
 
@@ -1379,9 +1417,13 @@ fn drop_realm(
     _rv: v8::ReturnValue<'_, v8::Value>,
 ) {
     if let Some(id) = args.get(0).integer_value(scope) {
-        dom(scope).realms.remove(&(id as i32));
-        dom(scope).layout_chunks.remove(&(id as i32));   // (…and its kept layout chunks, see `reset_arena`)
-        dom(scope).cascades.remove(&(id as i32));        // (…and its rules)
+        let d = dom(scope);
+        let id = id as i32;
+        d.dropped.insert(id);
+        d.graveyard.reset();
+        d.realms.remove(&id);
+        d.layout_chunks.remove(&id);   // (…and its kept layout chunks, see `reset_arena`)
+        d.cascades.remove(&id);        // (…and its rules)
     }
 }
 

@@ -7991,7 +7991,6 @@ custom-elements/registries/ShadowRoot-innerHTML.html:
 - innerHTML on a connected shadow root should be able to create an unknown element
 custom-elements/registries/constructor-reentry-with-different-definition.html:
 - Re-entry via direct constructor call after calling super()
-- Re-entry via upgrade before calling super()
 custom-elements/registries/global.window.js:
 - attachShadow() should throw with global registry from another document
 - createElement() should throw with global registry from another document

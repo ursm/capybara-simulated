@@ -84,7 +84,8 @@ RSpec.describe 'element state in the native arena' do
     expect(native_ids('input:read-write, textarea:read-write')).to eq(%w[in-legend ph ph-val ph-ta rw bogus-type ta req-email req-bogus])
     expect(native_ids('#ce :read-write, #ce:read-write')).to eq(%w[ce ce-kid])
     expect(native_ids('#ce-off:read-only')).to eq(%w[ce-off])
-    expect(native_ids(':default')).to eq(%w[c1 r2 c4 o2 b-submit b-odd i-submit])
+    # …and of the submit buttons, only the form's default one (the first).
+    expect(native_ids(':default')).to eq(%w[c1 r2 c4 o2 b-submit])
     session.execute_script("document.getElementById('fs').disabled = false")
     expect(native_ids('input:disabled')).to eq([])
   end
@@ -195,5 +196,86 @@ RSpec.describe 'element state in the native arena' do
       customElements.define('other-el', class extends HTMLElement { constructor() { super(); return document.createElement('div'); } });
     JS
     expect(native_ids('#nae:defined, #oe:defined')).to eq([])
+  end
+
+  # Review of the state commits, pre-existing in both engines — each against HTML, Chrome and Firefox.
+  describe 'the rules both engines had wrong' do
+    def fresh(html)
+      session.execute_script("document.body.innerHTML = #{html.to_json}")
+    end
+
+    it 'finds a radio group with nothing checked, and a progress with no value, :indeterminate' do
+      fresh('<form><input type=radio name=a id=a1><input type=radio name=a id=a2></form>' \
+            '<input type=radio name=b id=b1 checked><input type=radio name=b id=b2><input type=radio id=lone>' \
+            '<progress id=p1></progress><progress id=p2 value=1></progress>')
+      expect(native_ids(':indeterminate')).to eq(%w[a1 a2 lone p1])
+      session.execute_script("document.getElementById('a2').checked = true")
+      expect(native_ids(':indeterminate')).to eq(%w[lone p1])
+    end
+
+    it "matches only a form's default button as :default" do
+      fresh('<form id=f><button id=b1>1</button><input type=submit id=s2></form><button id=out>x</button>' \
+            '<button form=g id=b3>3</button><form id=g></form>')
+      expect(native_ids('button:default, input:default')).to eq(%w[b1 b3])
+    end
+
+    it 'takes the is value at creation only' do
+      session.execute_script(<<~JS)
+        const d = document.body.appendChild(document.createElement('div'));
+        d.id = 'late-is';
+        d.setAttribute('is', 'x-late');
+      JS
+      expect(native_ids('#late-is:defined')).to eq(%w[late-is])
+    end
+
+    it 'closes a removed popover and un-modals a removed dialog, with no toggle event' do
+      fresh('<div popover id=pp>p</div><dialog id=dd>d</dialog>')
+      toggles = session.evaluate_script(<<~JS)
+        (() => {
+          const p = document.getElementById('pp'), d = document.getElementById('dd');
+          p.showPopover(); d.showModal();
+          let n = 0;
+          p.addEventListener('toggle', () => n++);
+          p.remove(); d.remove();
+          document.body.append(p, d);
+          return n;
+        })()
+      JS
+      expect(toggles).to eq(0)
+      expect(native_ids(':popover-open, :modal')).to eq([])
+    end
+
+    it 'shows the placeholder by the sanitized value, where a placeholder applies' do
+      fresh('<input id=n type=number value=abc placeholder=p><input id=e type=email value="  " placeholder=p>' \
+            '<input id=t value="&#10;" placeholder=p><input id=c type=checkbox placeholder=p>' \
+            '<input id=d type=date placeholder=p><input id=v value=v placeholder=p>')
+      expect(native_ids(':placeholder-shown')).to eq(%w[n e t])
+    end
+
+    it 'drops focus and hover that document.open took away' do
+      fresh('<input id=gone>')
+      session.find('#gone').click
+      # …and a script that kept the element and puts it back does not find it focused again.
+      session.execute_script("const g = document.getElementById('gone'); document.open(); document.body.appendChild(g)")
+      expect(native_ids(':focus, :focus-within')).to eq([])
+    end
+
+    it 'runs adoptedCallback after the whole fragment is inserted' do
+      got = session.evaluate_script(<<~JS)
+        (() => {
+          const other = document.body.appendChild(document.createElement('div'));
+          customElements.define('x-mover', class extends HTMLElement {
+            adoptedCallback() { if (this.ownerDocument === document) other.appendChild(this); }
+          });
+          const doc = document.implementation.createHTMLDocument('');
+          const frag = doc.createDocumentFragment();
+          frag.append(doc.adoptNode(document.createElement('x-mover')), doc.createElement('b'));
+          const root = document.body.appendChild(document.createElement('div'));
+          root.appendChild(frag);
+          return [root.children.length, other.children.length, root.firstChild.localName];
+        })()
+      JS
+      expect(got).to eq([1, 1, 'b'])
+    end
   end
 end

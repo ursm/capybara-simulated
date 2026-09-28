@@ -27,6 +27,39 @@ const RESERVED_CUSTOM_ELEMENT_NAMES: [&str; 8] = [
     "font-face-name", "missing-glyph",
 ];
 
+// HTML "valid floating-point number" (dom-nodes.js `isValidFloatingPoint`): `-`?, digits with an optional fraction or
+// a fraction alone, then an optional exponent — and finite.
+fn is_valid_floating_point(s: &str) -> bool {
+    let b = s.as_bytes();
+    let mut i = usize::from(b.first() == Some(&b'-'));
+    let digits = |i: &mut usize| {
+        let start = *i;
+        while *i < b.len() && b[*i].is_ascii_digit() {
+            *i += 1;
+        }
+        *i > start
+    };
+    let int = digits(&mut i);
+    if i < b.len() && b[i] == b'.' {
+        i += 1;
+        if !digits(&mut i) {
+            return false;
+        }
+    } else if !int {
+        return false;
+    }
+    if i < b.len() && (b[i] == b'e' || b[i] == b'E') {
+        i += 1;
+        if i < b.len() && (b[i] == b'+' || b[i] == b'-') {
+            i += 1;
+        }
+        if !digits(&mut i) {
+            return false;
+        }
+    }
+    i == b.len() && s.parse::<f64>().is_ok_and(f64::is_finite)
+}
+
 // A valid custom element name (custom-elements.js `isValidCustomElementName`): a valid element local name that starts
 // with an ASCII lower alpha, has no ASCII upper alpha and a hyphen, and is not reserved.
 fn is_valid_custom_element_name(name: &str) -> bool {
@@ -149,8 +182,101 @@ impl RealmArena {
     pub(crate) fn is_selected(&self, id: NodeId) -> bool {
         self.get(id).is_some_and(|n| n.is_html_named("option") && n.state & STATE_SELECTED != 0)
     }
+    // `:indeterminate`: a checkbox whose `indeterminate` is set, a radio button whose group has nothing checked, and a
+    // `<progress>` with no value.
     pub(crate) fn is_indeterminate(&self, id: NodeId) -> bool {
-        self.has_state(id, STATE_INDETERMINATE)
+        let Some(n) = self.get(id) else { return false };
+        if n.is_html_named("progress") {
+            return n.plain_attr("value").is_none();
+        }
+        if !n.is_html_named("input") {
+            return false;
+        }
+        match n.input_type() {
+            "checkbox" => n.state & STATE_INDETERMINATE != 0,
+            "radio" => !self.radio_group_has_checked(id),
+            _ => false,
+        }
+    }
+    // Does `id`'s radio button group hold a checked radio — its own name, form owner and tree (form-helpers.js
+    // `forEachRadioInGroup`)? A nameless radio is its own group.
+    fn radio_group_has_checked(&self, id: NodeId) -> bool {
+        if self.is_checked(id) {
+            return true;
+        }
+        let Some(name) = self.get(id).and_then(|n| n.plain_attr("name")).filter(|n| !n.is_empty()) else { return false };
+        let owner = self.form_owner(id);
+        self.find_in_tree(self.root_of(id), |c, n| {
+            n.is_html_named("input")
+                && n.input_type() == "radio"
+                && n.plain_attr("name") == Some(name)
+                && self.is_checked(c)
+                && self.form_owner(c) == owner
+        })
+        .is_some()
+    }
+
+    // The root of `id`'s tree: a document, a fragment or shadow root, or a detached subtree's top.
+    fn root_of(&self, id: NodeId) -> NodeId {
+        let mut cur = id;
+        while let Some(p) = self.parent_of(cur) {
+            cur = p;
+        }
+        cur
+    }
+    // The first element of `root`'s tree (itself included, shadow trees not) that `pred` takes, in tree order.
+    fn find_in_tree(&self, root: NodeId, pred: impl Fn(NodeId, &NodeData) -> bool) -> Option<NodeId> {
+        let mut stack = vec![root];
+        while let Some(c) = stack.pop() {
+            let Some(n) = self.get(c) else { continue };
+            if n.kind == NodeKind::Element && pred(c, n) {
+                return Some(c);
+            }
+            stack.extend(n.children.iter().rev().copied());
+        }
+        None
+    }
+    // A control's form owner (form-helpers.js `formForControl`): the form its `form` attribute names in its tree
+    // when it is connected (none for an empty or unmatched one, or a non-form), else its nearest ancestor form, else
+    // the form the parser gave it while it still shares that form's tree.
+    fn form_owner(&self, id: NodeId) -> Option<NodeId> {
+        let n = self.get(id)?;
+        if let Some(form_id) = n.plain_attr("form").filter(|_| self.is_connected(id)) {
+            if form_id.is_empty() {
+                return None;
+            }
+            let hit = self.find_in_tree(self.root_of(id), |_, e| e.get_attr("id") == Some(form_id))?;
+            return self.get(hit).is_some_and(|f| f.is_html_named("form")).then_some(hit);
+        }
+        let mut cur = self.parent_of(id);
+        while let Some(c) = cur {
+            let p = self.get(c)?;
+            if p.kind != NodeKind::Element {
+                break;
+            }
+            if p.local_name == "form" {
+                return Some(c);
+            }
+            cur = self.parent_of(c);
+        }
+        let hint = *self.parser_form_owners.get(&id)?;
+        (self.get(hint).is_some() && self.root_of(hint) == self.root_of(id)).then_some(hint)
+    }
+    // A form's default button: the first submit button in tree order whose form owner is the form, not a
+    // `<select>`'s (form-helpers.js `defaultButtonOf`).
+    fn default_button_of(&self, form: NodeId) -> Option<NodeId> {
+        let root = if self.is_connected(form) { self.root_of(form) } else { form };
+        self.find_in_tree(root, |c, n| n.is_submit_button() && !self.in_select(c) && self.form_owner(c) == Some(form))
+    }
+    fn in_select(&self, id: NodeId) -> bool {
+        let mut cur = self.shadow_including_parent(id);
+        while let Some(c) = cur {
+            if self.get(c).is_some_and(|p| p.is_html_named("select")) {
+                return true;
+            }
+            cur = self.shadow_including_parent(c);
+        }
+        false
     }
     pub(crate) fn is_filtered(&self, id: NodeId) -> bool {
         self.has_state(id, STATE_FILTERED)
@@ -164,19 +290,36 @@ impl RealmArena {
     pub(crate) fn is_modal(&self, id: NodeId) -> bool {
         self.get(id).is_some_and(|n| n.state & STATE_MODAL != 0 && n.plain_attr("open").is_some()) && self.is_connected(id)
     }
-    // `:placeholder-shown`: an `<input>` or `<textarea>` with a `placeholder` and an empty live value.
+    // `:placeholder-shown`: a `<textarea>`, or an `<input>` of a type the `placeholder` applies to, with one and an
+    // empty value — the SANITIZED value, as it is shown.
     pub(crate) fn is_placeholder_shown(&self, id: NodeId) -> bool {
         let Some(n) = self.get(id) else { return false };
-        if !(n.is_html_named("input") || n.is_html_named("textarea")) || n.plain_attr("placeholder").is_none() {
+        if n.plain_attr("placeholder").is_none() {
             return false;
         }
-        match &n.value {
-            Some(v) => v.is_empty(),
-            // A clean textarea's value is its direct Text children's data; an input's, its `value` attribute.
-            None if n.local_name == "textarea" => {
-                n.children.iter().all(|&c| self.get(c).is_none_or(|t| t.kind != NodeKind::Text || t.data.is_empty()))
-            }
-            None => n.plain_attr("value").is_none_or(str::is_empty),
+        if n.is_html_named("textarea") {
+            return match &n.value {
+                Some(v) => v.is_empty(),
+                // A clean textarea's value is its direct Text children's data.
+                None => n.children.iter().all(|&c| self.get(c).is_none_or(|t| t.kind != NodeKind::Text || t.data.is_empty())),
+            };
+        }
+        if !n.is_html_named("input") {
+            return false;
+        }
+        let raw = match &n.value {
+            Some(v) => String::from_utf16_lossy(v),
+            None => n.plain_attr("value").unwrap_or("").to_string(),
+        };
+        let ascii_ws = |c: char| matches!(c, '\t' | '\n' | '\x0C' | '\r' | ' ');
+        // Empty once value sanitization has run (dom-nodes.js `sanitizeInputValue`).
+        match n.input_type() {
+            "text" | "search" | "tel" | "password" => raw.chars().all(|c| c == '\r' || c == '\n'),
+            "url" => raw.chars().all(ascii_ws),
+            "email" if n.plain_attr("multiple").is_some() => !raw.contains(',') && raw.chars().all(ascii_ws),
+            "email" => raw.chars().all(ascii_ws),
+            "number" => !is_valid_floating_point(&raw),
+            _ => false,
         }
     }
     // `:required` / `:optional`: an `<input>` the `required` attribute applies to (not a button, hidden, range or color
@@ -190,14 +333,14 @@ impl RealmArena {
         };
         requirable.then(|| n.plain_attr("required").is_some())
     }
-    // `:defined`: any element but a custom element — one with a valid custom element name or an `is` value — that is
-    // not custom yet (undefined), or never will be (its constructor threw).
+    // `:defined`: any element but a custom element — one with a valid custom element name or an `is` value (fixed at
+    // creation, not the attribute) — that is not custom yet (undefined), or never will be (its upgrade failed).
     pub(crate) fn is_defined(&self, id: NodeId) -> bool {
         let Some(n) = self.get(id) else { return false };
         if !n.is_html() || n.state & STATE_CUSTOM != 0 {
             return true;
         }
-        !(is_valid_custom_element_name(&n.local_name) || n.state & STATE_IS_VALUE != 0 || n.plain_attr("is").is_some())
+        !(is_valid_custom_element_name(&n.local_name) || n.state & STATE_IS_VALUE != 0)
     }
     // `:open`: a `<details>` or `<dialog>` with the `open` attribute.
     pub(crate) fn is_open(&self, id: NodeId) -> bool {
@@ -312,34 +455,34 @@ impl RealmArena {
         }
         false
     }
-    // `:default`: an option with the `selected` attribute, a checkbox / radio button with `checked`, and a submit
-    // button — an `<input type=submit|image>`, or a `<button>` of the Submit state that is not a `<select>`'s.
+    // `:default`: an option with the `selected` attribute, a checkbox / radio button with `checked`, and its form's
+    // default button (none for a submit button with no form owner).
     pub(crate) fn is_default(&self, id: NodeId) -> bool {
         let Some(n) = self.get(id) else { return false };
         if !n.is_html() {
             return false;
         }
-        match n.local_name.as_str() {
-            "option" => n.plain_attr("selected").is_some(),
-            "input" => match n.input_type() {
-                "checkbox" | "radio" => n.plain_attr("checked").is_some(),
-                "submit" | "image" => true,
-                _ => false,
-            },
-            "button" => {
-                if !n.is_submit_button() {
-                    return false;
-                }
-                let mut cur = self.shadow_including_parent(id);
-                while let Some(c) = cur {
-                    if self.get(c).is_some_and(|p| p.is_html_named("select")) {
-                        return false;
-                    }
-                    cur = self.shadow_including_parent(c);
-                }
-                true
-            }
-            _ => false,
+        if n.local_name == "option" {
+            return n.plain_attr("selected").is_some();
+        }
+        if n.local_name == "input" && matches!(n.input_type(), "checkbox" | "radio") {
+            return n.plain_attr("checked").is_some();
+        }
+        n.is_submit_button() && self.form_owner(id).is_some_and(|f| self.default_button_of(f) == Some(id))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::is_valid_floating_point;
+
+    #[test]
+    fn valid_floating_point_numbers() {
+        for ok in ["0", "-1", "1.5", ".5", "-.5", "1e3", "1E-3", "2.5e+10"] {
+            assert!(is_valid_floating_point(ok), "{ok}");
+        }
+        for bad in ["", "-", "1.", "+1", "abc", "1e", "1e+", " 1", "1 ", "0x10", "1e999", "Infinity"] {
+            assert!(!is_valid_floating_point(bad), "{bad}");
         }
     }
 }
