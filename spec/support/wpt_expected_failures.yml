@@ -7945,7 +7945,6 @@ custom-elements/pseudo-class-defined.html:
 - "<a-a> should not be :defined"
 - createElement("a-a") should not be :defined
 - createElementNS("http://www.w3.org/1999/xhtml", "a-a") should not be :defined
-- this.matches(:defined) should not match during an upgrade
 custom-elements/reactions/Animation.html:
 - Animation.animate must enqueue an attributeChanged reaction when it adds the observed
   style attribute

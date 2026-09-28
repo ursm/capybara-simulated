@@ -144,8 +144,6 @@ pub(crate) struct NodeData {
     // A form control's live value once dirty (a script's `.value`, typing), in UTF-16 code units; None while it is
     // its default — the `value` attribute, or a `<textarea>`'s text.
     pub(crate) value: Option<Box<[u16]>>,
-    // The JS object this node is (its wrapper), held weakly: when it is collected the slot is freed (`watch`).
-    wrapper: Option<v8::Weak<v8::Object>>,
 }
 
 // The element state bits (`NodeData::state`, native-query-shadow.js `STATE_*`): focus and hover (the realm's one
@@ -184,7 +182,6 @@ impl NodeData {
             state: 0,
             host: None,
             value: None,
-            wrapper: None,
         }
     }
     pub(crate) fn get_attr(&self, name: &str) -> Option<&str> {
@@ -780,7 +777,7 @@ fn register(
     }
 }
 
-// __dom.importNode(localName, ns, parentNid, attrsFlat, wrapper) -> nid. Adds an ELEMENT to the arena — the eager create
+// __dom.importNode(localName, ns, parentNid, attrsFlat) -> nid. Adds an ELEMENT to the arena — the eager create
 // at construction, and a spec's bulk build. `attrsFlat` is a flat [name, value, name, value, …] array;
 // `parentNid` < 0 makes a root, else the node is appended to that (live) parent.
 fn import_node(
@@ -797,31 +794,10 @@ fn import_node(
         NodeData { local_name, ns, attributes, attr_u16, ..NodeData::of_kind(NodeKind::Element, Vec::new()) },
         parent,
     );
-    watch(scope, cid, id, args.get(4));
     set_nid(scope, &mut rv, id);
 }
 
-// Hold `wrapper` — the JS node `id` mirrors — weakly, so its collection frees the slot: the arena owns its nodes'
-// lifetime, as a browser's DOM owns its wrappers', and a node dropped from every tree and every script goes with its
-// wrapper. (A slot is freed only then, or by a reset: a node in a tree has a reachable wrapper.)
-fn watch(scope: &mut v8::PinScope<'_, '_>, cid: i32, id: NodeId, wrapper: v8::Local<'_, v8::Value>) {
-    let Ok(obj) = v8::Local::<v8::Object>::try_from(wrapper) else { return };
-    let weak = v8::Weak::with_finalizer(
-        scope,
-        obj,
-        Box::new(move |isolate: &mut v8::Isolate| {
-            // A realm dropped since (`dropRealm`) has nothing left to free.
-            if let Some(arena) = isolate.get_slot_mut::<Dom>().and_then(|d| d.realms.get_mut(&cid)) {
-                arena.free_node(id);
-            }
-        }),
-    );
-    if let Some(node) = realm(scope, cid).get_mut(id) {
-        node.wrapper = Some(weak);
-    }
-}
-
-// __dom.createNode(nodeType, data, parentNid, wrapper) -> nid. Adds any other node — a Text / CDATA / Comment / PI with its
+// __dom.createNode(nodeType, data, parentNid) -> nid. Adds any other node — a Text / CDATA / Comment / PI with its
 // data, a Document, a DocumentFragment or ShadowRoot, a DocumentType — appended to `parentNid` when that is live.
 fn create_node(
     scope: &mut v8::PinScope<'_, '_>,
@@ -833,7 +809,6 @@ fn create_node(
     let parent = nid_arg(scope, &args, 2);
     let cid = realm_id(scope, &args);
     let id = realm(scope, cid).create(NodeData::of_kind(kind, data), parent);
-    watch(scope, cid, id, args.get(3));
     set_nid(scope, &mut rv, id);
 }
 

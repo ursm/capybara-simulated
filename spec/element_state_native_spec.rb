@@ -154,4 +154,46 @@ RSpec.describe 'element state in the native arena' do
     expect(native_ids('#host:focus')).to eq(%w[host])
     expect(native_ids('#host:focus-within')).to eq(%w[host])
   end
+
+  # The state lives in bits no component names: its own `_state`, `_filtered` or `_modal` stay what it stored.
+  it 'leaves a custom element its own fields' do
+    got = session.evaluate_script(<<~JS)
+      (() => {
+        class XList extends HTMLElement {
+          constructor() { super(); this._state = { open: false }; this._filtered = ['a', 'b']; this._modal = 'yes'; }
+        }
+        customElements.define('x-list', XList);
+        const el = document.body.appendChild(document.createElement('x-list'));
+        el.setAttribute('open', '');
+        el.focus();
+        return [JSON.stringify(el._state), JSON.stringify(el._filtered), el._modal, el.matches(':modal')];
+      })()
+    JS
+    expect(got).to eq(['{"open":false}', '["a","b"]', 'yes', false])
+    expect(native_ids('x-list:modal')).to eq([])
+  end
+
+  # `:optional` reads the input's type too: a hidden input is neither, so a rule on its sibling stops applying.
+  it 're-styles a sibling when a type change moves :optional' do
+    session.execute_script(<<~JS)
+      const st = document.head.appendChild(document.createElement('style'));
+      st.textContent = '#opt:optional + #opt-next { color: rgb(255, 0, 0) }';
+      document.body.insertAdjacentHTML('beforeend', '<input id="opt"><p id="opt-next">p</p>');
+    JS
+    color = -> { session.evaluate_script("getComputedStyle(document.getElementById('opt-next')).color") }
+    expect(color.call).to eq('rgb(255, 0, 0)')
+    session.execute_script("document.getElementById('opt').type = 'hidden'")
+    expect(color.call).to eq('rgb(0, 0, 0)')
+  end
+
+  # HTML "upgrade an element": a constructor that returns another object fails the upgrade — never :defined (Chrome).
+  it 'leaves an upgrade whose constructor returns another object undefined' do
+    session.execute_script(<<~JS)
+      document.body.insertAdjacentHTML('beforeend', '<not-an-element id="nae"></not-an-element><other-el id="oe"></other-el>');
+      window.onerror = () => true;
+      customElements.define('not-an-element', class extends HTMLElement { constructor() { return new Text(); } });
+      customElements.define('other-el', class extends HTMLElement { constructor() { super(); return document.createElement('div'); } });
+    JS
+    expect(native_ids('#nae:defined, #oe:defined')).to eq([])
+  end
 end
