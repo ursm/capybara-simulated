@@ -2,13 +2,13 @@
 # Native layout — WEB FONT (@font-face) text, geometry shadow-parity. Native declined text whose font had no
 # fontations handle (system fonts only); now an @font-face family resolves to the SAME decoded SFNT file the
 # oracle measures advances from (the host's font_file_for), so native (skrifa) and the oracle read identical
-# hmtx advances and a web-font text block lays out rather than bailing. V8 only.
+# hmtx advances and a web-font text block lays out rather than bailing.
 require 'capybara/simulated'
 require 'rack'
 require_relative 'support/session_teardown'
 require_relative 'support/shadow_parity'
 
-RSpec.describe 'native layout web-font parity', if: ENV.fetch('CSIM_JS_ENGINE', 'v8') == 'v8' do
+RSpec.describe 'native layout web-font parity' do
   FONT_TTF   = File.binread(File.expand_path('wpt/fonts/Ahem.ttf', __dir__))
   FONT_WOFF2 = File.binread(File.expand_path('fixtures/fonts/Ahem.woff2', __dir__))
 

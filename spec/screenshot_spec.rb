@@ -9,9 +9,8 @@ require_relative 'support/session_teardown'
 # assert that what the driver BELIEVES about a box is what lands in the pixels.
 RSpec.describe 'save_screenshot' do
   # A small viewport on purpose. Every assertion here is about a handful of pixels at known
-  # coordinates, so the raster's SIZE proves nothing — but it costs: a typed array crosses to the
-  # host as an ASCII-8BIT string under rusty_racer and as a Hash of index => byte under quickjs,
-  # and at 1024x768 that Hash is 3.1M entries, which took this file from 0.6 s to 37 s there.
+  # coordinates, so the raster's SIZE proves nothing — but every pixel of it is painted and
+  # crosses to the host.
   #
   # A METHOD, not a constant: a constant assigned inside an `RSpec.describe` block lands at TOP
   # LEVEL, so `VIEWPORT` here collided with the one in scroll_into_view_spec.rb — and did it

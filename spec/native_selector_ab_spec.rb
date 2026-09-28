@@ -10,14 +10,12 @@
 # is virtual and frozen during synchronous JS, so in-JS Date.now() can't time this.
 #
 # Not a pass/fail perf gate (it prints a table); the correctness parity IS asserted.
-# V8 only (needs css-select + the native __dom arena). Run:
-#   CSIM_JS_ENGINE=v8 bundle exec rspec spec/native_selector_ab_spec.rb
 
 require 'capybara/simulated'
 require 'rack'
 require_relative 'support/session_teardown'
 
-RSpec.describe 'native selector engine A/B vs css-select', if: ENV.fetch('CSIM_JS_ENGINE', 'v8') == 'v8' do
+RSpec.describe 'native selector engine A/B vs css-select' do
   CARDS = Integer(ENV.fetch('AB_CARDS', '500'))
   ITERS = Integer(ENV.fetch('AB_ITERS', '300'))
 

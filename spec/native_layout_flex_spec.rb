@@ -21,14 +21,14 @@
 #
 # What still DECLINES to JS is what `nlFlexSupported` (layout.js) refuses.
 # A REPLACED item (svg / img / input …) is now replayed as a leaf box (see native_layout_replaced_spec).
-# Each bail is an A/B: the feature-carrying input declines, a sibling without it stays native. V8 only.
+# Each bail is an A/B: the feature-carrying input declines, a sibling without it stays native.
 require 'capybara/simulated'
 require 'rack'
 require_relative 'support/session_teardown'
 require_relative 'support/shadow_parity'
 require_relative 'support/walk_refusals'
 
-RSpec.describe 'native layout flex parity', if: ENV.fetch('CSIM_JS_ENGINE', 'v8') == 'v8' do
+RSpec.describe 'native layout flex parity' do
   def page(body)
     html = %(<!doctype html><html><head><meta charset="utf-8"></head><body style="margin:0">#{body}</body></html>)
     Rack::Builder.new { run ->(_env) { [200, {'content-type' => 'text/html; charset=utf-8'}, [html]] } }.to_app

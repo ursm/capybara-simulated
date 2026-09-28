@@ -1,6 +1,5 @@
 require 'capybara/simulated'
 require 'rack'
-require_relative 'support/js_engine'
 require_relative 'support/session_teardown'
 
 # Resizing the window moves ONE viewport: `innerWidth` / `innerHeight`, the
@@ -129,7 +128,6 @@ RSpec.describe 'window resize' do
   end
 
   it 'carries the resize into a frame, which lays out against its container' do
-    skip 'per-frame realms need the V8 engine' unless CsimEngine.v8?
 
     frame_body = '<!DOCTYPE html><html><head><style>body{margin:0} #i{width:100%;height:10px}</style>' \
                  '</head><body><div id="i"></div></body></html>'

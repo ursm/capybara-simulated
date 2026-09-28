@@ -4,7 +4,6 @@ require 'capybara/simulated'
 require 'timeout'
 require 'zlib'
 require_relative 'support/session_teardown'
-require_relative 'support/js_engine'
 require_relative 'support/poll_until'
 
 # Resource Timing Level 2: every resource a document fetches is a `PerformanceResourceTiming`
@@ -82,7 +81,7 @@ RSpec.describe 'resource timing' do
     s = session
     by_name = entries(s).to_h {|e| [e['name'].sub('http://www.example.com', ''), e['initiatorType']] }
     expect(by_name).to include('/a.css' => 'link', '/i.css' => 'css', '/a.js' => 'script', '/i.png' => 'img')
-    expect(by_name).to include('/f.html' => 'iframe') if CsimEngine.v8?      # a frame document is a fetch of its own realm
+    expect(by_name).to include('/f.html' => 'iframe')                         # a frame document is a fetch of its own realm
     imported = entry(s, '/i.css')                                             # an @import is a real fetch, recorded once
     expect(imported['responseStatus']).to eq(200)
     expect(imported['contentType']).to eq('text/css')
@@ -168,7 +167,6 @@ RSpec.describe 'resource timing' do
   end
 
   it 'records nothing for a navigation the document submits into a frame' do
-    skip 'per-frame realms need the V8 engine' unless CsimEngine.v8?
     s = session
     s.execute_script("var f = document.createElement('form'); f.target = 'fr'; f.action = '/f.html?posted'; document.body.appendChild(f); f.submit();")
     expect(entries(s).map {|e| e['initiatorType'] }).not_to include('fetch')
@@ -306,9 +304,8 @@ RSpec.describe 'resource timing' do
     expect(s.evaluate_script('__d')).to eq(%w[ok EncodingError])
   end
 
-  # ── frames (per-frame realms: the V8 engine) ──
+  # ── frames (per-frame realms) ──
   it 'navigates an iframe again when its src is set to the same URL, with a second entry' do
-    skip 'per-frame realms need the V8 engine' unless CsimEngine.v8?
     s = session
     s.execute_script("window.__loads = 0; var f = document.getElementById('fr'); f.addEventListener('load', function () { __loads++; }); f.src = f.src;")
     expect(s.evaluate_script('__loads')).to eq(1)
@@ -316,7 +313,6 @@ RSpec.describe 'resource timing' do
   end
 
   it 'keeps the document\'s current URL when a frame reloads itself' do
-    skip 'per-frame realms need the V8 engine' unless CsimEngine.v8?
     s = session
     s.execute_script("var f = document.createElement('iframe'); f.src = '/hash.html'; document.body.appendChild(f);")
     expect(s.evaluate_script('window.__hashes')).to eq(['', '#check'])

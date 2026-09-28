@@ -1,7 +1,6 @@
 require 'capybara/simulated'
 require 'rack'
 require_relative 'support/session_teardown'
-require_relative 'support/js_engine'
 
 # Layout reuses a subtree across a bare style-state bump (focus, checkedness) when no dynamic
 # rule can target it — `subtreeDynFree` / `ancestorsDynFree` in layout.js. That optimization is

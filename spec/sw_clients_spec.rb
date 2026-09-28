@@ -1,7 +1,6 @@
 # frozen_string_literal: true
 
 require 'capybara/simulated'
-require_relative 'support/js_engine'
 require 'rack'
 require 'json'
 require_relative 'support/session_teardown'
@@ -147,8 +146,6 @@ RSpec.describe 'Service Worker client enumeration' do
       }
     }.to_app
   }
-
-  before { skip 'Service Worker clients need per-frame realms (V8 engine)' unless CsimEngine.v8? }
 
   around do |example|
     prev = ENV['CSIM_LOCAL_ALL_HOSTS']

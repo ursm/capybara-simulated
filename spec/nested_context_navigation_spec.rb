@@ -1,6 +1,5 @@
 require 'capybara/simulated'
 require 'rack'
-require_relative 'support/js_engine'
 require_relative 'support/session_teardown'
 
 # Navigation initiated INSIDE a nested browsing context — a frame realm reached
@@ -12,12 +11,6 @@ require_relative 'support/session_teardown'
 # pending-navigation/-submit slots live on the nested document's globalThis, so
 # they're routed to Ruby through realm-tagged host calls and drained there.
 RSpec.describe 'nested-context navigation' do
-  before do
-    # Nested browsing contexts are modeled as per-frame realms, a V8
-    # (rusty_racer) feature; QuickJS keeps the same-realm iframe fallback.
-    skip 'per-frame realms need the V8 engine' unless CsimEngine.v8?
-  end
-
   def session
     app = lambda do |env|
       path = env['PATH_INFO'].to_s

@@ -3,7 +3,6 @@
 require 'capybara/simulated'
 require 'zlib'
 require_relative 'support/session_teardown'
-require_relative 'support/js_engine'
 require_relative 'support/poll_until'
 
 # Web fonts: a family the document declares an `@font-face` for is FETCHED the first time text
@@ -448,7 +447,6 @@ RSpec.describe 'web fonts' do
 
   # ── the worker scope ──
   it 'exposes self.fonts in a worker and rejects a css-wide keyword as a DOMException' do
-    skip 'worker microtask delivery under the rspec poll needs the V8 engine' unless CsimEngine.v8?
     s = session
     # The worker checks `instanceof DOMException` itself and reports a string.
     s.execute_script(<<~JS)
@@ -462,7 +460,6 @@ RSpec.describe 'web fonts' do
   end
 
   it 'loads a face on demand inside a worker' do
-    skip 'worker microtask delivery under the rspec poll needs the V8 engine' unless CsimEngine.v8?
     s = session
     s.execute_script(<<~JS)
       window.__w = null;

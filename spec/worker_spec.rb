@@ -7,8 +7,7 @@ require_relative 'support/session_teardown'
 require_relative 'support/poll_until'
 
 # Web Worker round-trip coverage: spawn isolate, post messages each
-# way, terminate. The driver creates a fresh V8 Context / QuickJS VM
-# per Worker; postMessage payloads JSON-marshal across the
+# way, terminate. The driver creates a fresh V8 Context per Worker; postMessage payloads JSON-marshal across the
 # isolate boundary.
 
 RSpec.describe 'Web Worker' do

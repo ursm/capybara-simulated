@@ -1,6 +1,5 @@
 require 'capybara/simulated'
 require 'rack'
-require_relative 'support/js_engine'
 require_relative 'support/session_teardown'
 require_relative 'support/poll_until'
 
@@ -87,8 +86,6 @@ RSpec.describe 'same-document navigation' do
   end
 
   context 'inside a nested browsing context' do
-    before { skip 'per-frame realms need the V8 engine' unless CsimEngine.v8? }
-
     it 'fires hashchange in the frame that navigated' do
       s = session(frame_body: <<~HTML)
         <script>

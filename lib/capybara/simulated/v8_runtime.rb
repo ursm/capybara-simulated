@@ -3,11 +3,6 @@
 # V8 runtime on rusty_racer. The DOM lives in JS; this class owns the
 # V8 isolate/context pair, the warm snapshot, the host-fn callbacks the
 # bridge reaches back through, and the per-visit `rebuild_ctx` dance.
-#
-# `QuickJSRuntime` is the alternate implementation; both expose the same
-# surface (`eval` / `call` / `drain_timers` / `drain_microtasks` /
-# `settle_gen` / `has_ready_timer?` / `reset_timers` / `rebuild_ctx` /
-# `reset_page`). Browser picks one at construction.
 
 require 'digest'
 require 'fileutils'
@@ -20,14 +15,6 @@ require 'weakref'
 # gem's Ruby file adds its API wrappers without loading a second V8 .so.
 require 'capybara/simulated/csim_native'
 require 'rusty_racer'
-
-# The engine is a SOFT dependency (the gemspec names no version), so say what
-# we need here rather than letting it surface as a NoMethodError from inside
-# `rebuild_ctx`'s warm-reset rescue, which would report it as a failed reset.
-# 0.2.1: Context#eval_void / Script#run_void. 0.2.0: Module#graph_async?.
-unless RustyRacer::Context.method_defined?(:eval_void)
-  raise LoadError, "capybara-simulated needs rusty_racer >= 0.2.1 (found #{RustyRacer::VERSION})"
-end
 
 require_relative 'runtime_shared'
 require_relative 'script_cache'
@@ -472,19 +459,15 @@ module Capybara
         result
       end
 
+      # Ids of every live frame / window realm in this isolate (excludes the main
+      # realm, id 0). Used to fan a BroadcastChannel post out to sibling realms.
+      def frame_realm_ids = frame_realms.keys
+
       # Is `realm_id` a live frame realm? A frame removed / re-navigated
       # mid-block disposes its realm (`__csim_disposeFrameRealm`) while the
       # Browser's `@current_realm_id` may still point at it; the Browser uses
       # this to raise a stale-element instead of running a frame handle op
       # against the main registry.
-      # Per-frame browsing contexts (nested realms for iframes / aux windows) are a V8-engine
-      # feature; QuickJS keeps a same-realm fallback. `within_frame` gates on this.
-      def supports_frames? = true
-
-      # Ids of every live frame / window realm in this isolate (excludes the main
-      # realm, id 0). Used to fan a BroadcastChannel post out to sibling realms.
-      def frame_realm_ids = frame_realms.keys
-
       def frame_realm_alive?(realm_id)
         !(realm_id.nil? || realm_id.zero?) && frame_realms.key?(realm_id)
       end
@@ -646,18 +629,9 @@ module Capybara
 
       # Run pending foreground platform tasks (FinalizationRegistry cleanup callbacks) so the native
       # arena reclaims collected nodes' slots. The browser calls this once per settle; a no-op when the
-      # queue is empty (the common case). QuickJS has no equivalent — the browser guards on respond_to?.
+      # queue is empty (the common case).
       def pump_message_loop
         @ctx&.pump_message_loop
-      end
-
-      # Raw bytes pass through as-is: rusty marshals tag-driven — a
-      # BINARY-encoded Ruby String crosses as a JS Uint8Array (and
-      # Uint8Array/ArrayBuffer args come back as BINARY Strings) — one copy,
-      # no base64 / latin1 string inflation. `transfer_buffer_fetch` already
-      # returns ASCII-8BIT-tagged bytes.
-      def wrap_binary(bytes)
-        bytes
       end
 
       def settle_gen
@@ -1569,8 +1543,8 @@ module Capybara
         # JS exception at the call site — so bridge.entry.js's
         # `try { __csim_runScript(…) } catch (e)` sees it and runs its
         # normal path (console diagnostic, `_ok=false`, fire the script
-        # `error` event), exactly as the JS-side `(0, eval)` does and
-        # as the QuickJS runner does. Swallowing here would turn a
+        # `error` event), exactly as the JS-side `(0, eval)` does.
+        # Swallowing here would turn a
         # throwing leading-`const` inline script into a silent `load`.
         c.attach('__csim_runScriptEval', ->(label, body) {
           # A `<script>`'s completion value is nobody's answer, and reading it is

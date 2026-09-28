@@ -4,14 +4,14 @@
 # native measures natively where it can (`nlIntrinsicMeasurable`) and otherwise receives resolved from the
 # oracle — runs the row-major placement (content rows or `grid-auto-rows`), and lays each item out at its track
 # width; an out-of-flow item is replayed at its resolved box as a block's abspos child is. The former replay
-# path (the oracle's item boxes pushed) is retired. V8 only.
+# path (the oracle's item boxes pushed) is retired.
 require 'capybara/simulated'
 require 'rack'
 require_relative 'support/session_teardown'
 require_relative 'support/shadow_parity'
 require_relative 'support/walk_refusals'
 
-RSpec.describe 'native layout grid parity', if: ENV.fetch('CSIM_JS_ENGINE', 'v8') == 'v8' do
+RSpec.describe 'native layout grid parity' do
   def page(body)
     html = %(<!doctype html><html><head><meta charset="utf-8"></head><body style="margin:0">#{body}</body></html>)
     Rack::Builder.new { run ->(_env) { [200, {'content-type' => 'text/html; charset=utf-8'}, [html]] } }.to_app

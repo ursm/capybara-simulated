@@ -14,14 +14,14 @@
 # as a RUN_ATOMIC: the margin-box width is its advance, its ascent (+ descent) grow the line box. Such a box is
 # not compared (like every inline fragment in a text block); what's validated is the text block's line-broken
 # HEIGHT — which is why a shape that has to prove the atomic is LAID OUT asserts `nativeAtomics` or the
-# no-oracle read set instead. V8 only.
+# no-oracle read set instead.
 require 'capybara/simulated'
 require 'rack'
 require_relative 'support/session_teardown'
 require_relative 'support/shadow_parity'
 require_relative 'support/walk_refusals'
 
-RSpec.describe 'native layout inline-atomic parity', if: ENV.fetch('CSIM_JS_ENGINE', 'v8') == 'v8' do
+RSpec.describe 'native layout inline-atomic parity' do
   def page(body)
     # The charset is declared: served without one, a fixture's UTF-8 bytes decode as windows-1252 and the
     # example tests mojibake instead of what it reads as (this file's `\u65E5\u672C\u8A9E` fixture was really

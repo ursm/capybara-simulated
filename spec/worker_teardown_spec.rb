@@ -93,8 +93,8 @@ RSpec.describe 'worker teardown' do
     s.visit '/'
     # …through the DOM, so Capybara waits for the round trip rather than reading before it lands —
     # and with a wait sized for a loaded CI box, not for this one. Spawning a worker is an isolate,
-    # a blob URL and a message each way; under QuickJS on a busy 4-vCPU runner that outran the
-    # default and failed the job, which is the same racing-the-thing mistake this file is about.
+    # a blob URL and a message each way; on a busy 4-vCPU runner that outran the default and
+    # failed the job, which is the same racing-the-thing mistake this file is about.
     expect(s).to have_text('hi!', wait: 15)
     mine = worker_threads_since(before)
     expect(elapsed { s.driver.reset! }).to be < 2

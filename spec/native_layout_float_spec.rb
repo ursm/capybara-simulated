@@ -5,14 +5,14 @@
 # the nearest ancestor that does, however many plain blocks lie between: native shifts the rectangle up
 # through each of them. Cases the engine can't reproduce yet (position:relative, a relatively SHIFTED
 # ancestor, a float whose content native cannot measure) must DECLINE to JS — an A/B per bail proves the
-# guard is specific. V8 only.
+# guard is specific.
 require 'capybara/simulated'
 require 'rack'
 require_relative 'support/session_teardown'
 require_relative 'support/shadow_parity'
 require_relative 'support/walk_refusals'
 
-RSpec.describe 'native layout float parity', if: ENV.fetch('CSIM_JS_ENGINE', 'v8') == 'v8' do
+RSpec.describe 'native layout float parity' do
   def page(body)
     html = %(<!doctype html><html><head><meta charset="utf-8"></head><body style="margin:0">#{body}</body></html>)
     Rack::Builder.new { run ->(_env) { [200, {'content-type' => 'text/html; charset=utf-8'}, [html]] } }.to_app

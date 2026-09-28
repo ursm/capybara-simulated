@@ -1,16 +1,13 @@
 require 'capybara/simulated'
-require 'rusty_racer' if (ENV['CSIM_JS_ENGINE'].to_s.empty? ? Gem.loaded_specs.key?('rusty_racer') : ENV['CSIM_JS_ENGINE'] == 'v8')
-require_relative 'support/js_engine'
+require 'rusty_racer'
 require_relative 'support/session_teardown'
 
 # Same-origin `window.open()` (and same-origin iframes) live as REALMS in the
 # opener's V8 isolate (shared heap), not as separate Browsers/VMs. That makes
 # `popup.document` a real same-isolate Document (cross-window adoptNode works)
 # and lets BroadcastChannel span every same-origin browsing context in the
-# isolate. These behaviours are V8-only (QuickJS has no realm support).
+# isolate.
 RSpec.describe 'same-isolate window realms' do
-  before { skip 'same-isolate realms are a rusty_racer (V8) feature' unless CsimEngine.v8? }
-
   def session(body)
     app = ->(_env) { [200, {'content-type' => 'text/html'}, [body]] }
     simulated_session(app).tap {|s| s.visit '/' }

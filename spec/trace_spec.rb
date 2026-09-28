@@ -48,8 +48,8 @@ RSpec.describe Capybara::Simulated::Trace do
   end
 
   describe 'screenshots' do
-    # WHERE a screenshot is taken is the whole design. A paint costs ~50 ms on V8 and ~525 ms on
-    # QuickJS, so taking one on an action's failure path puts it inside Capybara's retry window —
+    # WHERE a screenshot is taken is the whole design. A paint costs ~50 ms on a small page, so
+    # taking one on an action's failure path puts it inside Capybara's retry window —
     # measured, a click waiting on an overlay went from 35 ms to 563 ms, which is enough to turn an
     # action a retry would have rescued into a failure. So the default mode paints ONCE, after the
     # example, only when it failed (`TracePersistence`), and per-step painting is `CSIM_TRACE=full`
@@ -197,7 +197,6 @@ RSpec.describe Capybara::Simulated::TracePersistence do
     def tracing?          = !@trace.nil?
     def current_trace     = @trace
     def stop_tracing(path:) = @trace.write_json(path)
-    def js_engine           = :v8
     # Counted, because WHEN this is called is the contract: a paint is ~50 ms on a small page and
     # several hundred on an app-scale one, so a passing example must not pay for one.
     def trace_screenshot
@@ -260,21 +259,6 @@ RSpec.describe Capybara::Simulated::TracePersistence do
         expect(driver.shots).to eq(1)
         meta = JSON.parse(File.read(File.join(dir, 'boom.json')))['metadata']
         expect(meta['screenshot']).to eq('data:image/png;base64,AAA')
-      end
-    end
-
-    it 'records which engine produced the trace, and omits the key when the driver cannot say' do
-      Dir.mktmpdir do |dir|
-        described_class.persist(fake_driver.new(traced), dir, title: 'engine', file: './x:1',
-                                                              outcome: 'passed', exception: nil)
-        expect(JSON.parse(File.read(File.join(dir, 'engine.json')))['metadata']['engine']).to eq('v8')
-
-        # A foreign driver — or one whose accessor raises — leaves the key out rather than
-        # writing a null, and never costs the trace file.
-        mute = fake_driver.new(traced)
-        mute.define_singleton_method(:js_engine) { raise 'no' }
-        described_class.persist(mute, dir, title: 'mute', file: './x:1', outcome: 'passed', exception: nil)
-        expect(JSON.parse(File.read(File.join(dir, 'mute.json')))['metadata']).not_to have_key('engine')
       end
     end
 

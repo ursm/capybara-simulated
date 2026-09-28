@@ -2295,7 +2295,7 @@ RSpec.describe 'Canvas / ImageData / OffscreenCanvas' do
     session = simulated_session(parse_app)
     session.visit('/')
     # WAIT for the load rather than assuming the visit's settle already decoded it: the fetch and
-    # decode of a parsed `<img src>` are asynchronous, and on a loaded CI box under QuickJS the
+    # decode of a parsed `<img src>` are asynchronous, and on a loaded CI box the
     # script could run first and read `naturalWidth: 0`. What this example is about is what is true
     # AFTER load, which is what its own title says.
     out = session.evaluate_async_script(<<~JS)

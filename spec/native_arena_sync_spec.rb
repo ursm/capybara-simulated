@@ -10,8 +10,6 @@
 # css-select over the live JS DOM is the oracle: after each mutation the native queryIds result must
 # equal document.querySelectorAll — same set, same order — for order-sensitive (:nth-child, sibling
 # combinators), attribute, and :empty selectors, so a drift in any primitive shows up immediately.
-#
-# V8 only. Run: CSIM_JS_ENGINE=v8 bundle exec rspec spec/native_arena_sync_spec.rb
 
 require 'capybara/simulated'
 require 'rack'
@@ -24,7 +22,7 @@ require_relative 'support/session_teardown'
 # primitives under test are exercised in production by the default path (and covered by WPT + the app
 # suites) anyway; this stays as a focused isolation test for the sync primitives themselves.
 RSpec.describe 'native arena incremental sync (store-flip F1a)',
-  if: ENV.fetch('CSIM_JS_ENGINE', 'v8') == 'v8' && ENV['CSIM_NO_NATIVE_CASCADE'] do
+  if: ENV['CSIM_NO_NATIVE_CASCADE'] do
   let(:app) {
     html = <<~HTML
       <!doctype html>

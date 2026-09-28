@@ -28,8 +28,8 @@ module Capybara
           # thread. Background threads (`MessageBus::TimerThread`,
           # etc.) sleep too, but their Drivers — if any — were
           # registered under a different thread, so they skip; the
-          # filter is load-bearing because rusty_racer / quickjs.rb
-          # VMs aren't thread-safe. Idle Drivers no-op
+          # filter is load-bearing because rusty_racer VMs aren't
+          # thread-safe. Idle Drivers no-op
           # (`tick_real_time` short-circuits when `@timers_active`
           # is false), so the broadcast is cheap.
           ms = (seconds.to_f * 1000).to_i
@@ -67,7 +67,7 @@ module Capybara
       # UA-based mobile detection both resolve before any document
       # loads. The Browser tracks both as "defaults" so `reset!`
       # (per-test teardown) restores them between specs.
-      def initialize(app, js_engine: nil, viewport: nil, user_agent: nil)
+      def initialize(app, viewport: nil, user_agent: nil)
         # `Capybara.disable_animation` is delivered to the real drivers by a SERVER
         # middleware (session.rb adds AnimationDisabler to the Puma stack), which
         # injects `animation-duration: 0s !important` CSS into every HTML response.
@@ -77,7 +77,6 @@ module Capybara
         # run sees, or every `await`-on-animation close path (FloatKit's menu) parks
         # on a full-length animation-fallback timer no user action waits for.
         @app             = Capybara.disable_animation ? Capybara::Server::AnimationDisabler.new(app) : app
-        @js_engine       = js_engine
         # Cookies + localStorage are origin-shared across windows
         # (real browser semantics), so we own the jars at the Driver
         # level and inject them into every per-window Browser. Each
@@ -123,7 +122,6 @@ module Capybara
       private def build_window_browser
         Browser.new(@app,
                     driver:          self,
-                    js_engine:       @js_engine,
                     cookies:         @cookies,
                     cookie_flags:    @cookie_flags,
                     auth_cache:      @auth_cache,
@@ -143,9 +141,6 @@ module Capybara
         browser.clear_trace!
         result
       end
-
-      # Which JS engine is behind this driver (`:v8` / `:quickjs`), for a trace's metadata.
-      def js_engine = browser.js_engine
 
       # The ACTIVE window's page, painted for the trace's final state (`TracePersistence`) —
       # `current_browser`, like every other user-facing read here, not the primary `browser`: a

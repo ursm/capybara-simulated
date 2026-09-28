@@ -2,7 +2,7 @@
 # Native layout L2 (inline/text) — geometry shadow-parity: a text-containing block's native height
 # (greedy line count × line-height, measured in-process via fontations) must equal the JS layout's `_lb`
 # on pure-text blocks (single font, every `white-space` mode). Validates the native line breaker + text-block
-# height against the JS oracle. V8 only.
+# height against the JS oracle.
 require 'capybara/simulated'
 require 'rack'
 require_relative 'support/session_teardown'
@@ -11,7 +11,7 @@ require_relative 'support/walk_refusals'
 # …and the enumerator the Unicode drift check asks the engine with.
 require_relative 'support/unicode_classes'
 
-RSpec.describe 'native layout L2 text-block parity', if: ENV.fetch('CSIM_JS_ENGINE', 'v8') == 'v8' do
+RSpec.describe 'native layout L2 text-block parity' do
   # The charset is declared because the CJK shapes below are UTF-8 in this file's own source: served without
   # it they would decode as windows-1252 and the specs would be testing mojibake rather than Japanese.
   def page(body)
@@ -2113,7 +2113,7 @@ bbbbbbbbbb</span></div></div>))
 
 end
 
-RSpec.describe 'native text unicode classes', if: ENV.fetch('CSIM_JS_ENGINE', 'v8') == 'v8' do
+RSpec.describe 'native text unicode classes' do
   def page(body)
     html = %(<!doctype html><html><head><meta charset="utf-8"></head><body style="margin:0;font:16px monospace">#{body}</body></html>)
     Rack::Builder.new { run ->(_env) { [200, {'content-type' => 'text/html; charset=utf-8'}, [html]] } }.to_app
@@ -2130,10 +2130,10 @@ RSpec.describe 'native text unicode classes', if: ENV.fetch('CSIM_JS_ENGINE', 'v
   describe 'the Unicode classes the oracle asks a regex for' do
     UnicodeClasses::CLASSES.each do |klass|
       it "answers \\p{#{klass}} the way the oracle's own engine does" do
-        require 'capybara/simulated/v8_runtime'   # …which is what defines the module below (v8-only, as is this)
-        engine, name = with_simulated_session(page('<div>x</div>')) {|s|
+        require 'capybara/simulated/v8_runtime'   # …which is what defines the module below
+        engine = with_simulated_session(page('<div>x</div>')) {|s|
           s.visit '/'
-          [UnicodeClasses.ranges_of(s, klass), s.driver.js_engine]
+          UnicodeClasses.ranges_of(s, klass)
         }
         native = Capybara::Simulated::Native.unicode_class_ranges(klass)
         # RSpec elides a 677-element array identically on both sides, so the difference has to be spelled out:
@@ -2144,12 +2144,12 @@ RSpec.describe 'native text unicode classes', if: ENV.fetch('CSIM_JS_ENGINE', 'v
           at = native.each_index.find {|i| native[i] != engine[i] } || [native.size, engine.size].min
           hex = ->(rs) { rs.map {|lo, hi| lo == hi ? format('U+%04X', lo) : format('U+%04X-%04X', lo, hi) }.join(' ') }
           <<~MSG
-            \\p{#{klass}} differs between regex-syntax and the #{name} engine the oracle asks
+            \\p{#{klass}} differs between regex-syntax and the V8 engine the oracle asks
             (#{native.size} ranges vs #{engine.size}), first at index #{at}:
               regex-syntax: #{hex.call(native[at, 3].to_a)}
-              #{name}:#{' ' * [13 - name.length, 1].max}#{hex.call(engine[at, 3].to_a)}
+              V8:           #{hex.call(engine[at, 3].to_a)}
               only regex-syntax has: #{hex.call((native - engine).first(5))}
-              only #{name} has: #{hex.call((engine - native).first(5))}
+              only V8 has: #{hex.call((engine - native).first(5))}
             If the ENGINE carries the extra ranges it moved to a newer Unicode first, and there is no local
             fix: native lays those code points out differently from the oracle until regex-syntax ships a
             matching snapshot. If REGEX-SYNTAX carries them, a `cargo update` moved it — revert Cargo.lock.

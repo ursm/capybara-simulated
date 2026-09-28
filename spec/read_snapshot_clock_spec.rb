@@ -65,7 +65,7 @@ RSpec.describe 'the virtual clock and element reads' do
   # under CI load the gap between two Capybara calls can cross the pre-tick
   # interval, and that tick legitimately fast-forwards to the timer horizon — a
   # browser under the same stall replaces the list before the read too. Asserting
-  # `a b c` exactly raced that boundary (one flatware test-quickjs failure,
+  # `a b c` exactly raced that boundary (one flatware CI failure,
   # 2026-08-20); a broken deferral still goes red here, because a mid-walk
   # advance yields exactly the mixed/dead-node shape both accepted values exclude.
   it 'does not advance the clock while reading the elements of one query' do

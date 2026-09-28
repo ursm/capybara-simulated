@@ -1,7 +1,6 @@
 # frozen_string_literal: true
 
 require 'capybara/simulated'
-require_relative 'support/js_engine'
 require 'rack'
 require_relative 'support/session_teardown'
 
@@ -34,8 +33,6 @@ RSpec.describe 'Service Worker history-navigation interception' do
       }
     }.to_app
   }
-
-  before { skip 'SW navigation interception needs per-frame realms (V8 engine)' unless CsimEngine.v8? }
 
   around do |example|
     prev = ENV['CSIM_LOCAL_ALL_HOSTS']

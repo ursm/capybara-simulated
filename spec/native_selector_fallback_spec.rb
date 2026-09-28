@@ -10,9 +10,6 @@
 #   * `undefined` for a live-state selector (defer to css-select) — even when real elements
 #     match, so we prove native declines rather than returning [];
 #   * `null` for an invalid selector (a SyntaxError).
-#
-# V8 only (needs the native __dom arena + css-select). Run:
-#   CSIM_JS_ENGINE=v8 bundle exec rspec spec/native_selector_fallback_spec.rb
 
 require 'capybara/simulated'
 require 'rack'
@@ -25,7 +22,7 @@ require_relative 'support/session_teardown'
 # is free and `_attrs` stays a plain JS object. The queryIds fallback contract is exercised in production
 # by the default matching path (and covered by WPT) regardless.
 RSpec.describe 'native selector engine: JS fallback for live-state selectors',
-  if: ENV.fetch('CSIM_JS_ENGINE', 'v8') == 'v8' && ENV['CSIM_NO_NATIVE_CASCADE'] do
+  if: ENV['CSIM_NO_NATIVE_CASCADE'] do
   let(:app) {
     html = <<~HTML
       <!doctype html>

@@ -15,15 +15,12 @@
 # The arena rebuilds lazily whenever the DOM changed — a CONSERVATIVE upper bound on
 # upkeep (the real migration pays no rebuild). Build time is reported apart from query
 # time so both costs are legible. Not a gate (it prints a table); parity IS asserted.
-#
-# V8 only (needs the native __dom arena + css-select). Run:
-#   CSIM_JS_ENGINE=v8 bundle exec rspec spec/native_selector_shadow_spec.rb
 
 require 'capybara/simulated'
 require 'rack'
 require_relative 'support/session_teardown'
 
-RSpec.describe 'native selector engine SHADOW A/B on the __csimQuery path', if: ENV.fetch('CSIM_JS_ENGINE', 'v8') == 'v8' do
+RSpec.describe 'native selector engine SHADOW A/B on the __csimQuery path' do
   CARDS = Integer(ENV.fetch('SHADOW_CARDS', '500'))
   ITERS = Integer(ENV.fetch('SHADOW_ITERS', '300'))
 

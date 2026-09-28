@@ -4,7 +4,6 @@ require 'timeout'
 require 'yaml'
 require 'capybara/simulated'
 require 'capybara/spec/spec_helper'
-require_relative 'js_engine'
 
 # Capybara's upstream shared-spec suite run against our `:simulated` driver.
 # The expected-pending set covers tests that need a real layout engine
@@ -34,21 +33,17 @@ module CapybaraShared
   # Capabilities our driver doesn't provide, skipped via the gem's own
   # `capybara_skip` metadata filter (the shard files pass this to their
   # top-level describe).
-  #
-  # `within_frame` routes DOM ops into a per-frame V8 realm, which only the
-  # rusty_racer engine builds; under QuickJS frames stay a same-realm fallback,
-  # so skip the `frames` capability there (same gate frame_realm_spec uses).
-  SKIPPED_TESTS = (%i[
+  SKIPPED_TESTS = %i[
     about_scheme
     server
     windows
-  ] + (CsimEngine.v8? ? [] : %i[frames])).freeze
+  ].freeze
 
   # Upstream examples we can't satisfy yet, each mapped to the reason RSpec reports as the pending
   # message. Matched as a prefix of the full description.
   STYLE_HASH = 'matcher gap: :style Hash matching'
 
-  DESCRIPTION_SKIPS = ({
+  DESCRIPTION_SKIPS = {
     # Click DOES hit-test now, but the interception predicate is deliberately narrower than
     # WebDriver's: only an unrelated obstructor covering the target AND >=80% of the viewport (the
     # modal-backdrop / page-overlay shape) refuses the click, because the coarse layout produces
@@ -60,12 +55,7 @@ module CapybaraShared
 
     "Capybara::Session Simulated #assert_matches_style should raise error if the elements style doesn't contain the given properties" => STYLE_HASH,
     'Capybara::Session Simulated #has_css? :style option should support Hash'                    => STYLE_HASH
-  }.merge(CsimEngine.v8? ? {} : {
-    # `#obscured?` in a frame composes geometry across per-frame realms, which only the rusty_racer
-    # engine builds (same gate as the `frames` capability above).
-    'Capybara::Session Simulated node #obscured? should work in frames'                          => 'needs per-frame realms (V8 only)',
-    'Capybara::Session Simulated node #obscured? should work in nested iframes'                  => 'needs per-frame realms (V8 only)'
-  })).freeze
+  }.freeze
 
   def self.session
     @session ||= Capybara::Session.new(:simulated, TestApp)
@@ -196,7 +186,7 @@ RSpec.configure do |config|
 
   # Hang backstop, not an assertion. 60 s leaves headroom for what a loaded
   # parallel runner legitimately stacks inside one example — a couple of 10 s
-  # poll_until deadlines, QuickJS VM builds competing with sibling worker
+  # poll_until deadlines, VM builds competing with sibling worker
   # processes — while still killing a genuine wedge long before CI's timeout.
   config.around(:each) do |example|
     Timeout.timeout(60, Timeout::Error, 'spec exceeded 60s timeout') { example.run }

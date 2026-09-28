@@ -1,5 +1,4 @@
 require 'capybara/simulated'
-require_relative 'support/js_engine'
 require_relative 'support/session_teardown'
 
 # What a `<select>` reports as its value, and how a user pick changes it.

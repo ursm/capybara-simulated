@@ -1,7 +1,6 @@
 require 'capybara/simulated'
 require 'rack'
 require_relative 'support/session_teardown'
-require_relative 'support/js_engine'
 
 # The cascade matches selectors LIVE on every read — that is how a DYNAMIC pseudo-class takes effect
 # at all. Anything that CACHES a cascade result therefore has to be invalidated by every input those
@@ -346,9 +345,6 @@ RSpec.describe 'cascade invalidation' do
   end
 
   it 'never caches an element another realm owns' do
-    # Per-frame realms are a V8 (rusty_racer) feature; QuickJS keeps a same-realm fallback, so there
-    # is no second realm for the cache to be confused between.
-    skip 'needs the per-frame realms only V8 provides' unless CsimEngine.v8?
     # A cross-realm read resolves against the READING realm's rules and its own generation counter,
     # and both realms' counters start at 0 — so a cached answer is handed back as current forever,
     # since nothing in the reading realm evicts it. `_ownerDoc` cannot answer the ownership

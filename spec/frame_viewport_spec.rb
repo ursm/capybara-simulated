@@ -1,6 +1,5 @@
 require 'capybara/simulated'
 require 'rack'
-require_relative 'support/js_engine'
 require_relative 'support/session_teardown'
 
 # A nested browsing context's viewport is its container's content box — not the top window's. That
@@ -8,8 +7,6 @@ require_relative 'support/session_teardown'
 # be true from the frame's very first script: everything here is what real Chrome reports for the
 # same markup (read back with `--headless --dump-dom` over http, window 1024x768).
 RSpec.describe 'frame viewport' do
-  before { skip 'per-frame realms need the V8 engine' unless CsimEngine.v8? }
-
   CHILD = <<~HTML
     <!DOCTYPE html>
     <html><head><style>

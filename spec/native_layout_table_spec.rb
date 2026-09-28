@@ -41,14 +41,14 @@
 # rather than bailing.) Each bail is an A/B: the feature-carrying input
 # declines, a plain table stays native. A `display:table-cell` with no `display:table-row` parent is wrapped in
 # an ANONYMOUS row (t9) and IS supported, and so is stray NON-cell content — the anonymous CELL a browser wraps
-# it in gets the same sentinel: laid out, not compared, its real children compared as usual. V8 only.
+# it in gets the same sentinel: laid out, not compared, its real children compared as usual.
 require 'capybara/simulated'
 require 'rack'
 require_relative 'support/session_teardown'
 require_relative 'support/shadow_parity'
 require_relative 'support/walk_refusals'
 
-RSpec.describe 'native layout table parity', if: ENV.fetch('CSIM_JS_ENGINE', 'v8') == 'v8' do
+RSpec.describe 'native layout table parity' do
   def page(body)
     html = %(<!doctype html><html><head><meta charset="utf-8"></head><body style="margin:0">#{body}</body></html>)
     Rack::Builder.new { run ->(_env) { [200, {'content-type' => 'text/html; charset=utf-8'}, [html]] } }.to_app

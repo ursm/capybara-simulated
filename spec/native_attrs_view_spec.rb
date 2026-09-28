@@ -6,14 +6,12 @@
 # so it is a faithful stand-in for the native-backed-node endgame AND drop-in for the plain `_attrs`
 # object every DOM idiom uses. This pins that its object semantics match a plain JS object exactly:
 # named read/write, `in`, hasOwnProperty, delete, `for..in` / Object.keys ORDER, Object.assign.
-#
-# V8 only. Run: CSIM_JS_ENGINE=v8 bundle exec rspec spec/native_attrs_view_spec.rb
 
 require 'capybara/simulated'
 require 'rack'
 require_relative 'support/session_teardown'
 
-RSpec.describe 'native-backed _attrs view (store-flip foundation)', if: ENV.fetch('CSIM_JS_ENGINE', 'v8') == 'v8' do
+RSpec.describe 'native-backed _attrs view (store-flip foundation)' do
   let(:app) { Rack::Builder.new { run ->(_env) { [200, {'content-type' => 'text/html'}, ['<!doctype html><title>t</title>']] } }.to_app }
   let(:session) { simulated_session(app) }
 

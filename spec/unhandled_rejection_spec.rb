@@ -1,5 +1,4 @@
 require 'capybara/simulated'
-require_relative 'support/js_engine'
 require_relative 'support/session_teardown'
 
 # A rejection with NO handler ever attached (fire-and-forget async function,
@@ -20,10 +19,7 @@ RSpec.describe 'unhandled promise rejections' do
 
   it 'fires unhandledrejection for a fire-and-forget async throw' do
     # The window event rides V8's promise-reject channel
-    # (`RustyRacer.setPromiseRejectHandler`); under QuickJS the equivalent
-    # surfaces as a Ruby-side console log (vm.on_unhandled_rejection), not
-    # a JS event.
-    skip 'native promise-reject channel needs the V8 engine' unless CsimEngine.v8?
+    # (`RustyRacer.setPromiseRejectHandler`).
     session.execute_script(<<~JS)
       window.__seen = null;
       window.addEventListener('unhandledrejection', e => {

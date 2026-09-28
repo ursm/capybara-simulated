@@ -8,14 +8,14 @@
 # leaf like any other — the oracle never sizes it by stacking them — EXCEPT a LIST BOX showing rows, which is
 # a block container whose box is the control's and whose rows native stacks itself. An INLINE one is an ATOMIC
 # on a line, laid out by the same two facts — `native_layout_inline_atomic_spec.rb` holds those. Still
-# DECLINES: a list box as a GRID ITEM. V8 only.
+# DECLINES: a list box as a GRID ITEM.
 require 'capybara/simulated'
 require 'rack'
 require_relative 'support/session_teardown'
 require_relative 'support/shadow_parity'
 require_relative 'support/walk_refusals'
 
-RSpec.describe 'native layout replaced-leaf parity', if: ENV.fetch('CSIM_JS_ENGINE', 'v8') == 'v8' do
+RSpec.describe 'native layout replaced-leaf parity' do
   def page(body)
     html = %(<!doctype html><html><head><meta charset="utf-8"></head><body style="margin:0">#{body}</body></html>)
     Rack::Builder.new { run ->(_env) { [200, {'content-type' => 'text/html; charset=utf-8'}, [html]] } }.to_app

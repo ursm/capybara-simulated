@@ -1,5 +1,4 @@
 require 'capybara/simulated'
-require_relative 'support/js_engine'
 require_relative 'support/session_teardown'
 require_relative 'support/poll_until'
 
@@ -11,12 +10,6 @@ require_relative 'support/poll_until'
 # run the frame's script against the PARENT document (regression: the
 # rusty_racer migration's realm replay did exactly that).
 RSpec.describe 'iframe inline-script realm routing' do
-  before do
-    # Per-frame realms are a V8 (rusty_racer) feature; QuickJS keeps the
-    # same-realm fallback by design.
-    skip 'per-frame realms need the V8 engine' unless CsimEngine.v8?
-  end
-
   let(:big_pad) { "// #{'x' * 70_000}\n" }
 
   let(:app) {
@@ -87,8 +80,6 @@ end
 # host) and a sandboxed frame (opaque origin) expose a WindowProxy via
 # `contentWindow` but a null `contentDocument`.
 RSpec.describe 'iframe contentDocument same-origin policy' do
-  before { skip 'per-frame realms need the V8 engine' unless CsimEngine.v8? }
-
   let(:app) {
     lambda do |env|
       body = env['PATH_INFO'] == '/child' ? '<!doctype html><html><body>CHILD</body></html>' : '<!doctype html><html><body>ROOT</body></html>'
@@ -129,8 +120,6 @@ end
 # a parent reading a cross-origin child AND a cross-origin child reading its
 # parent / top.
 RSpec.describe 'cross-origin WindowProxy same-origin policy' do
-  before { skip 'per-frame realms need the V8 engine' unless CsimEngine.v8? }
-
   let(:app) {
     lambda do |env|
       if env['PATH_INFO'].include?('child')
@@ -268,8 +257,6 @@ end
 
 # postMessage targetOrigin gating + event.origin (HTML "window post message").
 RSpec.describe 'postMessage cross-document origin' do
-  before { skip 'per-frame realms need the V8 engine' unless CsimEngine.v8? }
-
   let(:app) {
     lambda do |env|
       if env['PATH_INFO'].include?('child')
@@ -360,8 +347,6 @@ end
 # at a cross-origin parent) — that path needs the WPT service-worker corpus, which
 # is vendored but not gated, so this pins the class of bug where the suite can see it.
 RSpec.describe 'inline script with a hostile completion value' do
-  before { skip 'the Ruby-side script paths are V8-only' unless CsimEngine.v8? }
-
   # `const` first → the shared-lexical eval path. The 70KB pad pushes the second
   # one past SCRIPT_CACHE_MIN_BYTES → the compile + bytecode-cache path.
   let(:app) {

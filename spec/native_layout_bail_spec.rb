@@ -2,13 +2,13 @@
 # Native layout — bail coverage. The native engine is only correct if the shadow harness DECLINES to JS
 # (`ok:false`) for every input it cannot reproduce; a silently-native wrong answer is the dangerous class.
 # Each case is an A/B: the feature-carrying input must bail, and a sibling WITHOUT the feature must stay
-# native (`ok:true`) — so the bail is proven specific to the feature, not an unrelated decline. V8 only.
+# native (`ok:true`) — so the bail is proven specific to the feature, not an unrelated decline.
 require 'capybara/simulated'
 require 'rack'
 require_relative 'support/session_teardown'
 require_relative 'support/shadow_parity'
 
-RSpec.describe 'native layout bail coverage', if: ENV.fetch('CSIM_JS_ENGINE', 'v8') == 'v8' do
+RSpec.describe 'native layout bail coverage' do
   def page(body)
     # The charset is declared: served without one, a fixture's UTF-8 bytes decode as windows-1252 and the
     # example tests mojibake instead of what it reads as (this file's `\u65E5\u672C\u8A9E` fixture was really

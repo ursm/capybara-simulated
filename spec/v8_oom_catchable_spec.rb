@@ -1,6 +1,5 @@
 require 'capybara/simulated'
 require 'open3'
-require_relative 'support/js_engine'
 
 # A runaway script must NOT abort the whole process. rusty_racer >= 0.1.4
 # installs a near-heap-limit callback on every isolate, so exceeding
@@ -15,10 +14,6 @@ require_relative 'support/js_engine'
 # with a small `CSIM_V8_MAX_OLD_SPACE_MB` (the 4 GB default would take far too
 # long / too much RAM to trip).
 RSpec.describe 'V8 out-of-memory is catchable' do
-  before do
-    skip 'catchable heap-limit OOM is a rusty_racer (V8) feature' unless CsimEngine.v8?
-  end
-
   it 'raises a catchable error on heap exhaustion and the isolate recovers' do
     script = <<~RUBY
       require 'capybara/simulated'
@@ -36,7 +31,7 @@ RSpec.describe 'V8 out-of-memory is catchable' do
     RUBY
 
     out, status = Open3.capture2e(
-      ENV.to_h.merge('CSIM_JS_ENGINE' => 'v8', 'CSIM_V8_MAX_OLD_SPACE_MB' => '128'),
+      ENV.to_h.merge('CSIM_V8_MAX_OLD_SPACE_MB' => '128'),
       RbConfig.ruby, '-e', script
     )
 

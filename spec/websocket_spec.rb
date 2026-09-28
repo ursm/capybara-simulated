@@ -1,6 +1,5 @@
 require 'capybara/simulated'
 require 'websocket/driver'
-require_relative 'support/js_engine'
 require_relative 'support/session_teardown'
 
 # WebSocket transport: `new WebSocket(url)` rides the in-process `rack.hijack`
@@ -74,9 +73,8 @@ RSpec.describe 'WebSocket' do
     expect(session.evaluate_script('window.ws.readyState')).to eq(1)   # OPEN
   end
 
-  # Binary frames round-trip on both engines, including bytes ≥ 0x80 (200 here)
-  # which used to corrupt over QuickJS's host boundary — the send path now
-  # base64-encodes for QuickJS, the receive path already does via wrap_binary.
+  # Binary frames round-trip, including bytes ≥ 0x80 (200 here), which would
+  # corrupt if either direction crossed the host boundary as a UTF-8 string.
   it 'round-trips a binary frame as an ArrayBuffer' do
     expect(session).to have_title(/hello/)                 # connection established
     session.execute_script('window.ws.send(new Uint8Array([5, 200, 7]))')

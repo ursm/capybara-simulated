@@ -42,7 +42,6 @@ const BUILD = JSON.parse(readFileSync('package.json', 'utf8')).scripts['build:br
 const DEFINES = [...BUILD.matchAll(/--define:([A-Za-z_$][\w$]*)=/g)].map(([, name]) => name);
 
 // The JS builtins, from a bare VM context — the host's V8, which is the engine the bridge targets.
-// A name QuickJS lacks would pass here and fail there; its own gate run is what catches that.
 const builtins = runInNewContext('Object.getOwnPropertyNames(globalThis)');
 const known    = new Set([...builtins, ...BARE_GLOBALS, ...DEFINES]);
 

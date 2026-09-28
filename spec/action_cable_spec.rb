@@ -2,7 +2,6 @@ require 'capybara/simulated'
 require 'action_cable'
 require 'concurrent/timer_task'   # AC's heartbeat needs this loaded outside Rails
 require 'logger'
-require_relative 'support/js_engine'
 require_relative 'support/session_teardown'
 
 # Action Cable end-to-end, self-contained in csim (no Rails): a standalone
@@ -12,12 +11,6 @@ require_relative 'support/session_teardown'
 # rides the connection Action Cable hijacks), subscribes to a channel, and
 # receives a server-side broadcast — exercising the whole stack in-process.
 RSpec.describe 'Action Cable' do
-  before do
-    # csim's WebSocket connects via the rack.hijack socket, which only the V8
-    # engine drives reliably for this flow; gate to V8 (text protocol).
-    skip 'Action Cable end-to-end needs the V8 engine' unless CsimEngine.v8?
-  end
-
   # One process-wide Action Cable server (the `ActionCable.server` singleton),
   # configured for standalone in-process use.
   before(:all) do

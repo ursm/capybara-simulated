@@ -23,20 +23,11 @@ module Capybara
       # unless the driver actually recorded something.
       def persist(driver, dir, title:, file:, outcome:, exception:)
         return unless driver.respond_to?(:tracing?) && driver.tracing?
-        # `engine` only when the driver can say — and never at the cost of the write: this method
-        # exists to produce the trace file, so a driver call that raises must not take it down
-        # (the same reason the screenshot below is in its own rescue). A driver that has no answer
-        # leaves the key out rather than writing `null`.
-        engine = begin
-          driver.js_engine if driver.respond_to?(:js_engine)
-        rescue StandardError
-          nil
-        end
         driver.current_trace.metadata.merge!(
-          {title: title, file: file, outcome: outcome, exception: exception, engine: engine}.compact
+          {title: title, file: file, outcome: outcome, exception: exception}.compact
         )
         # The state the example ENDED in, painted once — and painted HERE, after the example,
-        # rather than per step: a paint is ~50 ms on V8 and ~525 ms on QuickJS, and doing it inside
+        # rather than per step: a paint is ~50 ms on a small page, and doing it inside
         # an action's failure path puts it inside Capybara's retry window, where it can turn an
         # action a retry would have rescued into a failure (measured: a click waiting on an overlay
         # went from 35 ms to 563 ms). Only for a failure — that is the state anyone opens the trace

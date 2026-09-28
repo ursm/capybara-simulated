@@ -1,16 +1,13 @@
 require 'capybara/simulated'
 require 'rusty_racer'
 require 'rack'
-require_relative 'support/js_engine'
 require_relative 'support/session_teardown'
 
 # Zero-copy postMessage transfer to a Worker (rusty_racer >= 0.1.6): a buffer in
 # the transfer list crosses the isolate boundary by moving its backing store
 # (no byte copy), detaching the source — and the parked store must be released
-# (no process-wide leak). V8 only; QuickJS falls back to a copy.
+# (no process-wide leak).
 RSpec.describe 'Worker postMessage zero-copy transfer' do
-  before { skip 'zero-copy transfer is a rusty_racer (V8) feature' unless CsimEngine.v8? }
-
   let(:worker_js) {
     <<~JS
       self.onmessage = function (e) {

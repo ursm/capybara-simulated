@@ -23,8 +23,7 @@ RSpec.describe 'URL parsing' do
   # point at a time turned ONE `fetch` into six seconds.
   #
   # Measured, 1 MB payload: 6-16 ms parsed in bulk vs 618-635 ms walked per code
-  # point on V8; 108-121 ms vs 968-991 ms on QuickJS. An absolute bound can't
-  # separate those across two engines and a loaded CI worker, so the parse is
+  # point. An absolute bound can't separate those on a loaded CI worker, so the parse is
   # measured against a CALIBRATION batch of short parses on the same machine, in the
   # same script: the ratio is 0.5-1.7 when it's linear-with-a-small-constant and
   # 4.6-6.2 when it isn't. The big parse allocates a million-element array, so it is

@@ -1,6 +1,5 @@
 require 'capybara/simulated'
-require 'rusty_racer' if (ENV['CSIM_JS_ENGINE'].to_s.empty? ? Gem.loaded_specs.key?('rusty_racer') : ENV['CSIM_JS_ENGINE'] == 'v8')
-require_relative 'support/js_engine'
+require 'rusty_racer'
 require_relative 'support/session_teardown'
 
 # Full multi-window: each window/tab is its own Browser + JS VM (own DOM,
@@ -115,9 +114,9 @@ RSpec.describe 'multi-window' do
   end
 
   # postMessage transfer semantics: the listed ArrayBuffer is detached on the
-  # sender (observable half of transfer; the bytes are still copied). V8 has
-  # `ArrayBuffer.prototype.transfer`; QuickJS has no JS-level detach.
-  it 'detaches a transferred ArrayBuffer on the sender', if: CsimEngine.v8? do
+  # sender (observable half of transfer; the bytes are still copied), via
+  # `ArrayBuffer.prototype.transfer`.
+  it 'detaches a transferred ArrayBuffer on the sender' do
     session.window_opened_by { session.find(:css, '#open').click }
     detached = session.evaluate_script(<<~JS)
       (() => {
@@ -131,8 +130,8 @@ RSpec.describe 'multi-window' do
 
   # Zero-copy transfer across windows: a buffer in the transfer list moves its
   # backing store by token (no copy), detaching the source; the target rebuilds
-  # it. V8 only (the transfer registry is a rusty_racer feature).
-  it 'transfers a buffer zero-copy to another window', if: CsimEngine.v8? do
+  # it (the transfer registry is a rusty_racer feature).
+  it 'transfers a buffer zero-copy to another window' do
     win = session.window_opened_by { session.find(:css, '#open').click }
     src_len_after = session.evaluate_script('window.transferBufferToPopup()')
     expect(src_len_after).to eq(0)                       # source detached by the transfer
@@ -144,9 +143,8 @@ RSpec.describe 'multi-window' do
 
   # Structured-clone fidelity: a Map crosses the window boundary as a live Map
   # (rusty_racer ≥ 0.1.8 gives JS Map a round-trippable Ruby representation;
-  # earlier it degraded to a plain object). V8 only — the QuickJS host boundary
-  # marshals through a JSON-shaped hop that has no Map.
-  it 'round-trips a Map across postMessage with fidelity', if: CsimEngine.v8? do
+  # earlier it degraded to a plain object).
+  it 'round-trips a Map across postMessage with fidelity' do
     win = session.window_opened_by { session.find(:css, '#open').click }
     session.execute_script('window.postCloneToPopup()')
     session.within_window(win) do

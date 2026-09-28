@@ -13,16 +13,13 @@
 # that reclamation actually FIRES, so this does: it forces a GC + message-loop pump (what the browser
 # does at settle) and checks that a fresh element REUSES a freed slot rather than growing the arena,
 # and that the cascade still matches correctly over the churned + reclaimed arena.
-#
-# V8 only (QuickJS has no `__dom` and no pumpable message loop — reclamation is inert there, still
-# correct). Run: CSIM_JS_ENGINE=v8 bundle exec rspec spec/native_arena_reclaim_spec.rb
 
 require 'capybara/simulated'
 require 'rack'
 require_relative 'support/session_teardown'
 
 RSpec.describe 'native arena reclamation (generational)',
-  if: ENV.fetch('CSIM_JS_ENGINE', 'v8') == 'v8' && !ENV['CSIM_NO_NATIVE_CASCADE'] do
+  unless: ENV['CSIM_NO_NATIVE_CASCADE'] do
   let(:app) {
     html = <<~HTML
       <!doctype html>

@@ -21,6 +21,7 @@ require_relative 'asset_cache'
 require_relative 'errors'
 require_relative 'stack_resolver'
 require_relative 'trace'
+require_relative 'v8_runtime'
 require_relative 'webauthn_state'
 
 module Capybara
@@ -209,16 +210,14 @@ module Capybara
         Rack::Mime.mime_type(File.extname(path.to_s), '')
       end
 
-      def initialize(app, driver: nil, js_engine: nil, cookies: nil, cookie_flags: nil, auth_cache: nil, local_storage: nil, cache_storage: nil, all_hosts_local: nil)
+      def initialize(app, driver: nil, cookies: nil, cookie_flags: nil, auth_cache: nil, local_storage: nil, cache_storage: nil, all_hosts_local: nil)
         @app                          = app
         @driver                       = driver
         @all_hosts_local_override     = all_hosts_local
-        @runtime                      = build_runtime(js_engine)
-        # Per-poll clock decisions cached at construction (CLAUDE.md rule 3 — the
-        # runtime type + env are fixed for the session): the wall-sync escape
-        # hatch and whether the runtime exposes the fast-forward timer query.
+        @runtime                      = V8Runtime.new(self)
+        # The wall-sync escape hatch, cached at construction (CLAUDE.md rule 3 — the env is fixed
+        # for the session).
         @clock_wall                   = !ENV['CSIM_CLOCK_WALL'].nil?
-        @runtime_supports_ff          = @runtime.respond_to?(:next_timer_delay_ms)
         @current_url                  = nil
         # Real browsers yield control between asynchronous URL
         # transitions (XHR-driven model loads, then `replaceWith` to a
@@ -385,7 +384,7 @@ module Capybara
         # Web Workers — per-Browser handle counter, per-worker
         # {thread, inbox} pair, and a shared outbox the main settle
         # drains via `__csim_deliverWorkerMessages`. Each worker
-        # thread owns its own V8 Context / QuickJS VM (real isolate);
+        # thread owns its own V8 Context (real isolate);
         # cross-isolate messaging is JSON-marshalled.
         @worker_seq    = 0
         @workers       = {}
@@ -655,47 +654,6 @@ module Capybara
       }.freeze
       private_constant :WORKER_POLL_INTERVAL, :WORKER_ROUND_TRIP_BUDGET, :WORKER_TERMINATE_GRACE, :WORKER_GVL_YIELD, :WORKER_QUIESCE_MAX_ROUNDS, :STREAM_FRAME_FNS
 
-      # `js_engine` picks the JS runtime: `:v8` (rusty_racer, fastest
-      # per-spec) or `:quickjs` (quickjs.rb, smaller per-VM footprint —
-      # wins on parallelism). Both gems are soft dependencies; pass nil
-      # to auto-select whichever is installed.
-      ENGINE_GEM = {v8: %w[rusty_racer], quickjs: %w[quickjs]}.freeze
-      private_constant :ENGINE_GEM
-
-      # Which JS engine this browser is running on, as a symbol. Recorded in a trace: a trace is
-      # an artifact someone reads later, and "which engine produced this" is the first thing that
-      # explains an engine-specific failure.
-      attr_reader :js_engine
-
-      def build_runtime(engine)
-        engine ||= detect_js_engine
-        @js_engine = engine
-        case engine
-        when :v8
-          require_relative 'v8_runtime'
-          V8Runtime.new(self)
-        when :quickjs
-          require_relative 'quickjs_runtime'
-          QuickJSRuntime.new(self)
-        else
-          raise ArgumentError, "unknown CSIM_JS_ENGINE #{engine.inspect}; expected one of #{JS_ENGINES.inspect}"
-        end
-      end
-
-      # `CSIM_JS_ENGINE` forces the engine (overriding auto-detect); otherwise
-      # iterate `JS_ENGINES` in preference order — V8 first because JIT wins
-      # per-spec wall time, QuickJS second when only the smaller-footprint
-      # engine is installed.
-      private def detect_js_engine
-        if (env = ENV['CSIM_JS_ENGINE'].to_s) && !env.empty?
-          sym = env.to_sym
-          return sym if JS_ENGINES.include?(sym)
-          raise ArgumentError, "unknown CSIM_JS_ENGINE #{env.inspect}; expected one of #{JS_ENGINES.inspect}"
-        end
-        JS_ENGINES.find {|e| ENGINE_GEM.fetch(e).any? {|g| Gem.loaded_specs.key?(g) } } ||
-          raise(LoadError, "capybara-simulated needs a JS engine: add one of #{ENGINE_GEM.values.map {|gems| "`gem '#{gems.first}'`" }.join(' / ')} to your Gemfile")
-      end
-
       # ── Capybara DSL surface ────────────────────────────────────
 
       # Address-bar navigation: no Referer, and relative paths resolve
@@ -882,15 +840,6 @@ module Capybara
         when :top
           reset_frame_scope
         else
-          # Per-frame realms are a V8-engine feature; QuickJS has no nested
-          # browsing context to route into. Distinguish that (unsupported
-          # engine) from a frame that simply failed to build (below), so the
-          # error doesn't misattribute a load failure to the engine.
-          unless @runtime.supports_frames?
-            raise Capybara::Simulated::FrameNotSupported,
-              'within_frame needs a per-frame browsing context, which only the ' \
-              'V8 (rusty_racer) engine provides; QuickJS keeps a same-realm fallback.'
-          end
           parent_realm = @current_realm_id
           tick_real_time
           rid = dom_call('__csimEnsureFrameRealm', target.to_i).to_i
@@ -965,7 +914,7 @@ module Capybara
         rescue StandardError => e
           # Invalid selector → empty result. Callers that genuinely
           # need the throw go through `evaluate_script`.
-          raise unless syntax_or_invalid_selector_error?(e)
+          raise unless invalid_selector_error?(e)
           []
         end
       end
@@ -976,21 +925,18 @@ module Capybara
           h = dom_call('__csimQueryOne', context_handle || current_document_handle, s).to_i
           h.zero? ? nil : h
         rescue StandardError => e
-          raise unless syntax_or_invalid_selector_error?(e)
+          raise unless invalid_selector_error?(e)
           nil
         end
       end
 
       # JS-side selector parser throws a `DOMException('csim: …',
-      # 'SyntaxError')`. The JS engine surfaces it as a `…::SyntaxError`
-      # (QuickJS via dynamic-named class) or, under V8, a
-      # `RustyRacer::RuntimeError` whose message is `"SyntaxError: csim: …"`.
-      # Match the `csim: ` marker anywhere in the message (it's no longer at
-      # the start once the DOMException name is prefixed) or the class suffix,
-      # so neither gem becomes a hard dependency.
-      def syntax_or_invalid_selector_error?(e)
-        e.class.name.to_s.end_with?('::SyntaxError') ||
-          e.message.to_s.include?('csim: ')
+      # 'SyntaxError')`, which V8 surfaces as a `RustyRacer::RuntimeError`
+      # whose message is `"SyntaxError: csim: …"`. Match the `csim: ` marker
+      # anywhere in the message (it's no longer at the start once the
+      # DOMException name is prefixed).
+      def invalid_selector_error?(e)
+        e.is_a?(RustyRacer::RuntimeError) && e.message.include?('csim: ')
       end
 
       def xpath_shaped?(s)
@@ -1299,15 +1245,13 @@ module Capybara
           # via `tick_real_time`: post-drain `@timers_active` is
           # false and it bails before its own consume_pending_*
           # drains.)
-          if @runtime.respond_to?(:drain_microtasks) && @runtime.respond_to?(:drain_timers)
-            # Most clicks don't queue any timers; bail as soon as a
-            # round drains nothing rather than burning the full 8 engine
-            # round-trips. Profile (Avo actions_spec / V8): the
-            # unconditional loop cost ~7.7 % of wall time.
-            8.times do
-              @runtime.drain_microtasks
-              break if @runtime.drain_timers(50).to_i.zero?
-            end
+          # Most clicks don't queue any timers; bail as soon as a
+          # round drains nothing rather than burning the full 8 engine
+          # round-trips. Profile (Avo actions_spec / V8): the
+          # unconditional loop cost ~7.7 % of wall time.
+          8.times do
+            @runtime.drain_microtasks
+            break if @runtime.drain_timers(50).to_i.zero?
           end
           consume_pending_download
           # Discourse's `lib/click-track.js` preventDefaults link
@@ -1377,11 +1321,9 @@ module Capybara
           # the wrong page. Loop matches the navigate branch — bail
           # as soon as a drain round fires nothing.
           submit_baseline_url = @current_url
-          if @runtime.respond_to?(:drain_microtasks) && @runtime.respond_to?(:drain_timers)
-            8.times do
-              @runtime.drain_microtasks
-              break if @runtime.drain_timers(50).to_i.zero?
-            end
+          8.times do
+            @runtime.drain_microtasks
+            break if @runtime.drain_timers(50).to_i.zero?
           end
           # If the drain queued or consumed a `location.assign`, that
           # navigation supersedes the form's default submit. Honour
@@ -1453,7 +1395,7 @@ module Capybara
         # reaches the Ruby navigate/pending drain by some other route; keep
         # the VM's location object in sync so its `location.href` getter
         # doesn't read stale.
-        @runtime.call('__csimUpdateLocation', new_url) if @runtime.respond_to?(:call)
+        @runtime.call('__csimUpdateLocation', new_url)
       end
 
       def set_value_with_events(handle, value)
@@ -1891,7 +1833,7 @@ module Capybara
         # 500 ms debounces park behind a setTimeout that hasn't fired
         # yet. Drain one 600 ms window so input → debounce → parent
         # state propagation completes before the next Capybara call.
-        @runtime.drain_timers(USER_ACTION_DRAIN_MS) if @timers_active && @runtime.respond_to?(:drain_timers)
+        @runtime.drain_timers(USER_ACTION_DRAIN_MS) if @timers_active
       end
 
       # Yield on the first observable change. Each iter (a) drains
@@ -1972,8 +1914,7 @@ module Capybara
         end
         # Reclaim arena slots for any DOM nodes the settle's churn left unreachable: pump the foreground
         # message loop so V8's FinalizationRegistry cleanup callbacks run (native-query-shadow.js frees
-        # each collected node's slot via __dom.dropNode). A no-op when nothing was collected. Only V8
-        # exposes it (QuickJS lacks a pumpable loop); guarded so it's inert there.
+        # each collected node's slot via __dom.dropNode). A no-op when nothing was collected.
         #
         # INVARIANT this relies on: the pump drains ALL pending foreground platform tasks (and runs a
         # microtask checkpoint) — safe to do here, AFTER settle has quiesced, only because this driver
@@ -1982,7 +1923,7 @@ module Capybara
         # Map.delete — no DOM mutation, no queued microtask, no app code). If either stops holding (a
         # cleanup callback with DOM/microtask side effects, or app work posted as a foreground task), its
         # effect would land post-settle and go un-settled — revisit this placement then.
-        @runtime.pump_message_loop if @runtime.respond_to?(:pump_message_loop)
+        @runtime.pump_message_loop
         @find_cache_dirty = true
       end
 
@@ -2413,17 +2354,16 @@ module Capybara
           # The DOM snapshot follows the same one-per-ACTION rule the screenshot does. Capybara
           # records a step per RETRY, and serializing on each is the expensive half of tracing:
           # measured, one click under an overlay that never clears records 183 attempts inside its
-          # 2 s wait (190 under QuickJS) — and, before this, 183 DOM serializations with it, 110 KB
+          # 2 s wait — and, before this, 183 DOM serializations with it, 110 KB
           # of JSON for ONE click on a trivial page.
           dom      = snapshot && !@trace.retrying_failure?(kind, desc) ? html : nil
           # A screenshot only in `full` mode, and there only for an action that SUCCEEDED. Painting
-          # a failure would put the paint inside Capybara's retry window — measured, 33 ms on V8
-          # and 517 ms on QuickJS for a SMALL page, 236 ms and 1.6 s for a 2000-row table — and an
-          # action a retry would have rescued starts failing because we photographed the first
-          # attempt: a click waiting on an overlay went from 35 ms to 563 ms. It is also the wrong
-          # frame: of a retried action, the interesting one is the attempt that finally worked.
-          # What a failure looks like is captured once, after the example, where no wait window is
-          # running (`TracePersistence`).
+          # a failure would put the paint inside Capybara's retry window — measured, 33 ms for a
+          # SMALL page and 236 ms for a 2000-row table — and an action a retry would have rescued
+          # starts failing because we photographed the first attempt: a click waiting on an overlay
+          # went from 35 ms to 563 ms. It is also the wrong frame: of a retried action, the
+          # interesting one is the attempt that finally worked. What a failure looks like is
+          # captured once, after the example, where no wait window is running (`TracePersistence`).
           shot     = @trace_mode == :full && error.nil? ? trace_screenshot : nil
           @trace.finish_step(url_after: @current_url, dom_after: dom, shot_after: shot, error: error)
           @recording_action = false
@@ -3029,8 +2969,6 @@ module Capybara
           @ff_transient_polls = 0
           return POLL_TICK_STEP_MS
         end
-        # No fast-forward support on this runtime (e.g. a worker realm) → fixed step.
-        return POLL_TICK_STEP_MS unless @runtime_supports_ff
         # ONE V8 crossing: `delay` = ms until the nearest timer; 0 = runnable now
         # (a rAF or a due-now timer — equivalent to `has_ready_timer?`), -1 = none.
         delay = @runtime.next_timer_delay_ms
@@ -3487,7 +3425,7 @@ module Capybara
         # SHADOW measurement: harvest this runtime's native-vs-css / cascade stats before it
         # is torn down (reset! harvests too, but a disposed session — never reset — would
         # otherwise lose its final page's stats). No-op unless CSIM_NATIVE_QUERY_SHADOW is set.
-        @runtime.harvest_shadow_stats if @runtime.respond_to?(:harvest_shadow_stats)
+        @runtime.harvest_shadow_stats
         # An aux window's background app requests are the same boundary hazard
         # reset! drains (Driver#reset! disposes aux windows BEFORE the primary's
         # reset, so without this they'd cross into the next test untouched).
@@ -3508,7 +3446,7 @@ module Capybara
         # closed window leaked a live V8 isolate (RSS climbed across a long
         # suite). Only reached on teardown, never on the per-test `reset!` path
         # (which keeps the runtime).
-        @runtime.dispose if @runtime.respond_to?(:dispose)
+        @runtime.dispose
       rescue StandardError
         nil
       end
@@ -3526,9 +3464,8 @@ module Capybara
 
       # A module the graph loader just fetched (via `rack_fetch_body`, whose facts are stashed in
       # `csim_asset_meta`) — collected so the bridge can file its 'script' Resource Timing entry.
-      # One per URL: the V8 loader's handle cache already skips a re-import before it fetches, but
-      # the QuickJS loader dedupes compilation only after the block returns, so it fetches a shared
-      # child once per importer — dedup here gives both engines the browser's one-entry-per-URL.
+      # One per URL, as the browser files it: the loader's handle cache already skips a re-import
+      # before it fetches, and the dedup here keeps that true for any path that does not.
       def note_module_fetch(url)
         meta = Thread.current[:csim_asset_meta]
         return unless meta
@@ -3726,10 +3663,8 @@ module Capybara
         body
       end
 
-      # Native ESM entry point. QuickJS uses its `vm.module_loader`;
-      # V8 uses `Context#compile_module` + `Module#instantiate` /
-      # `#evaluate` + `Context#dynamic_import_resolver=`. Both runtimes
-      # expose `eval_esm_module`.
+      # Native ESM entry point: `Context#compile_module` +
+      # `Module#instantiate` / `#evaluate` + `Context#dynamic_import_resolver=`.
       def eval_esm_module(url, src = nil)
         @runtime.eval_esm_module(url, src)
       end
@@ -3750,7 +3685,7 @@ module Capybara
       #   3. Settle's drain loop calls `deliver_event_source_events`
       #      which polls the queue and hands the batch to
       #      `__csim_deliverEventSourceEvents` for dispatch.
-      # rusty_racer / quickjs.rb VMs are single-threaded; only the main
+      # rusty_racer VMs are single-threaded; only the main
       # thread ever enters the VM. Background threads only touch the
       # Queue. `reset!` and per-visit context rebuilds kill all open
       # threads — the new VM gets a fresh handle space.
@@ -4000,16 +3935,10 @@ module Capybara
 
       # `binary` is set by the JS side (it knows whether `send` was given a
       # string or an ArrayBuffer/view) → opcode 0x2 vs the text 0x1. Action
-      # Cable is text-only (JSON). `b64` is set when the bytes arrived base64-
-      # encoded (the QuickJS binary path — raw bytes ≥0x80 don't survive its
-      # host boundary); decode before framing.
-      def ws_send(id, data, binary = false, b64 = false)
+      # Cable is text-only (JSON).
+      def ws_send(id, data, binary = false)
         sock = @websocket_sockets[id.to_i] or return
-        if binary
-          ws_write_frame(sock, 0x2, b64 ? Base64.decode64(data.to_s) : data.to_s.b)
-        else
-          ws_write_frame(sock, 0x1, data.to_s.b)
-        end
+        ws_write_frame(sock, binary ? 0x2 : 0x1, data.to_s.b)
         nil
       rescue StandardError
         nil
@@ -4124,10 +4053,10 @@ module Capybara
             queue << {id: id, type: '__close', code: code, reason: reason}
             break
           end
-          # Binary frames cross to JS as raw bytes (wrap_binary) tagged so the
-          # JS side decodes them per `binaryType`; text is UTF-8.
+          # Binary frames cross to JS as raw bytes (a BINARY String marshals to a
+          # Uint8Array) tagged so the JS side decodes them per `binaryType`; text is UTF-8.
           if opcode == 0x2
-            queue << {id: id, type: 'message', binary: true, data: @runtime.wrap_binary(payload)}
+            queue << {id: id, type: 'message', binary: true, data: payload}
           else
             queue << {id: id, type: 'message', data: RuntimeShared.utf8_text(payload)}
           end
@@ -4434,7 +4363,7 @@ module Capybara
       # ── Web Workers ────────────────────────────────────────────────
       #
       # `new Worker(url)` in JS lands in `worker_spawn`. The Ruby
-      # thread it spawns owns a fresh V8 Context / QuickJS VM (true
+      # thread it spawns owns a fresh V8 Context (true
       # isolate, separate microtask queue and timer table), evals the
       # worker script there, and runs an event loop draining timers,
       # microtasks, and the inbox queue from the main thread. Each
@@ -4468,9 +4397,8 @@ module Capybara
         if target.start_with?('blob:') && @driver.respond_to?(:cross_partition_blob?) && @driver.cross_partition_blob?(target, self)
           return worker_fail(handle, 'Worker creation from a cross-partition blob URL is blocked')
         end
-        inbox        = Thread::Queue.new
-        outbox       = @worker_outbox
-        engine_class = @runtime.class
+        inbox  = Thread::Queue.new
+        outbox = @worker_outbox
         # This worker's controlling SW (a dedicated/shared worker is a CLIENT: scope match on
         # its script URL, or the creator's controller for an opaque blob:/data: script).
         # Computed once here on the registry-owning thread; run_worker installs it into the
@@ -4488,7 +4416,7 @@ module Capybara
         # handing off to the worker. `blob:` URLs need the main VM's
         # blob registry; calling into the main runtime from a
         # non-owning thread SEGVs (V8 isolates are thread-
-        # bound; quickjs.rb's VM is similarly per-thread).
+        # bound).
         # A registration UPDATE parked the bytes it fetched and byte-checked
         # (sw_registration_update_fetch) — the new version runs exactly those. The
         # import PROBE results ride along as its script resource map (importScripts
@@ -4554,7 +4482,7 @@ module Capybara
         thread = Thread.new do
           Thread.current.report_on_exception = false
           run_worker(
-            handle, target, body, inbox, outbox, engine_class,
+            handle, target, body, inbox, outbox,
             # The record, not `@workers[handle]` looked up later: `terminate_realm_workers` and
             # `reset_workers` remove entries WITHOUT waiting for the thread, and building the
             # isolate takes long enough (a fresh context plus ~20 host-fn attaches) for a frame
@@ -5367,8 +5295,6 @@ module Capybara
       # anything that changes it has to reach all of them.
       private def broadcast_to_realms(fn, *args)
         @runtime.call(fn, *args) rescue nil
-        return nil unless @runtime.respond_to?(:frame_realm_ids)
-
         @runtime.frame_realm_ids.each do |rid|
           @runtime.realm_call(rid, fn, *args) if @runtime.frame_realm_alive?(rid)
         rescue StandardError
@@ -5911,7 +5837,7 @@ module Capybara
       # The element outlives every realm rebuild a navigation causes, so it — not the realm id —
       # is what identifies the context across one.
       private def realm_for_container(parent, container)
-        return nil if container.nil? || container.zero? || !@runtime.respond_to?(:frame_realm_ids)
+        return nil if container.nil? || container.zero?
 
         @runtime.frame_realm_ids.find do |rid|
           @runtime.frame_realm_alive?(rid) && frame_container_handle(rid, parent) == container
@@ -6016,19 +5942,11 @@ module Capybara
           # A top-level browsing context ends the chain: the main realm, and an auxiliary window
           # (whose OPENER is not its ancestor — `document.hasFocus()` is false in the opener while
           # the popup holds the focus, so its client must not be dragged in).
-          break if top_level_realm?(rid)
+          break if @runtime.top_level_realm?(rid)
 
-          rid = @runtime.respond_to?(:frame_realm_parent) ? @runtime.frame_realm_parent(rid).to_i : 0
+          rid = @runtime.frame_realm_parent(rid).to_i
         end
         ids.uniq
-      end
-
-      # A realm with no parent NAVIGABLE. Without the runtime's window/frame maps (QuickJS has no
-      # realms at all) only the main realm can be one.
-      private def top_level_realm?(realm_id)
-        return true if realm_id.to_i.zero?
-
-        @runtime.respond_to?(:top_level_realm?) ? @runtime.top_level_realm?(realm_id) : true
       end
 
       # A worker's service-worker Client id. Distinct from the realm ids below so the
@@ -6280,7 +6198,7 @@ module Capybara
       # frame's OWN scheme needs no check here: an http frame URL can't match an
       # https registration scope anyway.
       private def secure_frame_ancestors?(realm_id)
-        parent = @runtime.respond_to?(:frame_realm_parent) ? @runtime.frame_realm_parent(realm_id).to_i : 0
+        parent = @runtime.frame_realm_parent(realm_id).to_i
         while parent.positive?
           return false if frame_realm_url(parent).to_s.start_with?('http://')
           parent = @runtime.frame_realm_parent(parent).to_i
@@ -6516,8 +6434,7 @@ module Capybara
       # `Isolate#terminate` is the tool for that half — thread-safe by design, non-blocking, and
       # already how the call-timeout watchdog stops a runaway. Measured: a worker inside a 400 ms
       # spin on a repeating timer made `reset!` take 4.0 s every time; with this it is 0.0 s in 4
-      # runs out of 5. QuickJS exposes no cross-thread interrupt, so this is a V8-side improvement
-      # and a no-op there.
+      # runs out of 5.
       private def stop_worker_js(w)
         return unless w && (lock = w[:rt_lock])
         # Set the flag FIRST: it is what stops a worker that is between calls right now, and
@@ -6548,10 +6465,9 @@ module Capybara
       private def stop_worker_wait(w)
         t = w[:thread]
         return if t.nil?
-        # Nothing to re-ask — the engine cannot stop a call from another thread (QuickJS), or this
-        # worker never got as far as publishing a runtime. Waiting out the grace there is pure
-        # delay: it measured +80 ms per example on QuickJS, where `Thread#kill` does land.
-        unless terminable_worker?(w)
+        # Nothing to re-ask — this worker never got as far as publishing a runtime. Waiting out the
+        # grace there is pure delay; `Thread#kill` lands on a thread that is not inside a call.
+        unless worker_runtime_published?(w)
           t.kill if t.alive?
           return
         end
@@ -6563,8 +6479,8 @@ module Capybara
         t.kill if t.alive?
       end
 
-      private def terminable_worker?(w)
-        w[:rt_lock].synchronize { !!w[:rt]&.terminable? }
+      private def worker_runtime_published?(w)
+        w[:rt_lock].synchronize { !w[:rt].nil? }
       rescue StandardError
         false
       end
@@ -6941,7 +6857,6 @@ module Capybara
       # separate-VM aux-window path. First stage: about:blank only (a non-blank
       # same-origin URL still takes the aux path until realm URL-loading lands).
       def open_window_realm(url, name: nil, opener_realm_id: 0, about_base: nil, about_origin: nil)
-        return nil unless @runtime.respond_to?(:create_window_realm)
         return nil unless url.nil?
         @runtime.create_window_realm(
           '', '', 'text/html',
@@ -7138,8 +7053,7 @@ module Capybara
           # the main realm (0) and every live frame/window realm, skipping the realm
           # that posted (it already delivered to itself in-VM via `_bcChannels`). A nil
           # source (cross-isolate) is excluded from no realm.
-          realm_ids = @runtime.respond_to?(:frame_realm_ids) ? @runtime.frame_realm_ids : []
-          [0, *realm_ids].each do |target_id|
+          [0, *@runtime.frame_realm_ids].each do |target_id|
             batch = events.reject {|e| e['source'] == target_id }
             next if batch.empty?
             if target_id.zero?
@@ -7155,8 +7069,7 @@ module Capybara
           # The `storage` event fires at every same-origin document EXCEPT the one that changed
           # the area — deliver to the main realm (0) and every live frame realm, skipping the
           # source realm. A nil source (a cross-window fan-out) is excluded from no realm.
-          realm_ids = @runtime.respond_to?(:frame_realm_ids) ? @runtime.frame_realm_ids : []
-          [0, *realm_ids].each do |target_id|
+          [0, *@runtime.frame_realm_ids].each do |target_id|
             batch = events.reject {|e| e['source'] == target_id }
             next if batch.empty?
             if target_id.zero?
@@ -7193,7 +7106,7 @@ module Capybara
         # `frame_realms` (a BroadcastChannel posted SYNCHRONOUSLY during the frame's initial script runs
         # before the realm is registered, so `has_frames` can be false though a valid target — main —
         # exists). A MAIN post reaches the frames only when some are registered.
-        has_frames = @runtime.respond_to?(:frame_realm_ids) && @runtime.frame_realm_ids.any?
+        has_frames = @runtime.frame_realm_ids.any?
         from_frame = !from_worker && !source_realm_id.nil? && source_realm_id != 0
         enqueue_broadcast(name, data, source_realm_id, origin) if has_frames || from_worker || from_frame
       end
@@ -7234,7 +7147,7 @@ module Capybara
 
       # Is another same-isolate realm (a frame / same-isolate window) live? Only then does a post use the
       # ordered registry; a single-realm page keeps the in-VM microtask path (zero behaviour change).
-      def bc_siblings_exist? = @runtime.respond_to?(:frame_realm_ids) && @runtime.frame_realm_ids.any?
+      def bc_siblings_exist? = @runtime.frame_realm_ids.any?
 
       # A main-thread BroadcastChannel post in multi-realm mode. Snapshot the eligible target channels
       # (same name + origin, still open, excluding the poster) at POST TIME, ordered by creation seq, and
@@ -7433,7 +7346,7 @@ module Capybara
           rescue StandardError
             nil
           end
-          if !consumed && @runtime.respond_to?(:frame_realm_ids)
+          unless consumed
             @runtime.frame_realm_ids.each do |rid|
               begin
                 consumed = @runtime.realm_call(rid, '__csimApplyAsyncImage', id, payload) == true
@@ -8724,7 +8637,7 @@ module Capybara
       # (resolveBlobBytes gates on it cross-realm); the in-VM `__csimDropBlob` is a
       # same-thread V8 call, so it's skipped on a worker thread — a worker's
       # `revokeObjectURL` forwards here on the WORKER thread, and calling a
-      # thread-confined isolate from a non-owning thread SEGVs (V8/quickjs isolates
+      # thread-confined isolate from a non-owning thread SEGVs (V8 isolates
       # are thread-bound). The stale in-VM entry is harmless: resolveBlobBytes returns
       # null once the registry marker is gone.
       def drop_local_blob(url)
@@ -8757,31 +8670,14 @@ module Capybara
       # JS-side latin-1 / base64 intermediate is built. Without this
       # the 317 MB raw frames in Discourse's media-optimization-worker
       # peak >4 GB of JS strings before the worker even sees them.
-      # `encoding` is how the JS side chose to hand the bytes over: `nil` for the engine's own
-      # marshalling, `'base64'` where that marshalling is too expensive to use (see `stashTransfer`
-      # — QuickJS turns a typed array into a Hash of "index" => byte, which costs ~175x the memory
-      # of the picture it carries). Base64 decodes here in C.
-      def transfer_buffer_stash(bytes, encoding = nil)
-        s = encoding.to_s == 'base64' ? bytes.to_s.unpack1('m0') : transfer_bytes_to_binary(bytes)
+      def transfer_buffer_stash(bytes)
+        s = bytes.to_s
         s = s.dup.force_encoding(Encoding::ASCII_8BIT) unless s.encoding == Encoding::ASCII_8BIT
         @transfer_buffer_lock.synchronize {
           id = (@transfer_buffer_seq += 1)
           @transfer_buffers[id] = s
           id
         }
-      end
-
-      # A binary payload SHOULD arrive as a String — that is what rusty_racer marshals a typed array
-      # to, and what the `'base64'` arm above decodes to. The Array arm is for a caller that hands
-      # over byte values rather than bytes. (The quickjs gem's own shape for a typed array — a Hash
-      # of "index" => byte — no longer reaches here: `stashTransfer` sends base64 on that engine
-      # precisely because materialising that Hash costs ~175x the payload.)
-      private def transfer_bytes_to_binary(bytes)
-        case bytes
-        when String then bytes
-        when Array  then bytes.pack('C*')
-        else bytes.to_s
-        end
       end
 
       def transfer_buffer_fetch(id)
@@ -8805,17 +8701,6 @@ module Capybara
         toks = @transfer_tokens_lock.synchronize { ts = @transfer_tokens; @transfer_tokens = []; ts }
         return if toks.empty?
         @runtime.call('__csimTransferDropAll', toks) rescue nil
-      end
-
-      # Wraps the raw bytes in whatever binary shape the ACTIVE runtime can
-      # marshal to a JS Uint8Array (V8: the BINARY-tagged string itself —
-      # tag-driven marshalling crosses it as a Uint8Array; QuickJS: base64
-      # that the JS shim's `fetchedToBytes` atob's — it has no binary
-      # marshaller). Asked of the runtime so each engine picks its shape.
-      def transfer_buffer_fetch_for_js(id)
-        bytes = transfer_buffer_fetch(id)
-        return nil unless bytes
-        @runtime.wrap_binary(bytes)
       end
 
       # ── Video decode (ffprobe + ffmpeg) ────────────────────────────
@@ -8937,11 +8822,10 @@ module Capybara
 
       def webauthn = (@webauthn ||= WebauthnState.new)
 
-      # Worker thread entry. Builds an isolate via the engine class's
-      # `build_worker` factory, evaluates the worker script, then
-      # loops draining microtasks + timers + inbox until `:terminate`
-      # lands or an exception propagates.
-      private def run_worker(handle, url, body, inbox, outbox, engine_class, record: nil, shared: false, service: false, creator_key: nil, seed: nil, sw_scope: nil, controller: 0, sw_script: nil, creator_client: nil, module_worker: false, sw_uvc: nil, sw_imports_map: nil, sw_prev_active: nil)
+      # Worker thread entry. Builds an isolate via `V8Runtime.build_worker`,
+      # evaluates the worker script, then loops draining microtasks + timers +
+      # inbox until `:terminate` lands or an exception propagates.
+      private def run_worker(handle, url, body, inbox, outbox, record: nil, shared: false, service: false, creator_key: nil, seed: nil, sw_scope: nil, controller: 0, sw_script: nil, creator_client: nil, module_worker: false, sw_uvc: nil, sw_imports_map: nil, sw_prev_active: nil)
         # Release the spawn-time `@worker_initializing` count exactly once, however
         # this method exits (normal start, `self.close()`, or an exception), so
         # worker_pending? doesn't stay stuck true forever.
@@ -9059,7 +8943,7 @@ module Capybara
           port_endpoint:  ->(channel)       { outbox << {handle: handle, kind: 'port_endpoint', channel: channel.to_s} },
           port_post:      ->(channel, data) { outbox << {handle: handle, kind: 'port_msg', channel: channel.to_s, data: data.to_s} }
         }
-        rt        = engine_class.build_worker(self, post_back, broadcast_out, sw_hooks)
+        rt        = V8Runtime.build_worker(self, post_back, broadcast_out, sw_hooks)
         # Hand the runtime to the session boundary (`stop_worker_js`) the moment it exists.
         record[:rt_lock].synchronize { record[:rt] = rt } if record
         # A worker isolate loads the same snapshot as the main realm, so its `console.*`
@@ -9084,9 +8968,8 @@ module Capybara
         rt.eval_void("globalThis.__csimWorkerKind = #{JSON.generate(service ? 'service' : shared ? 'shared' : 'dedicated')};")
         # A MODULE worker ({type: 'module'}): the flag drives the classic-only surface
         # (importScripts throws a TypeError). A SERVICE worker's module script evaluates
-        # as a real module graph below (eval_module_graph, V8); a dedicated/shared
-        # module worker — and every QuickJS worker — still evaluates on the classic
-        # path (that ESM follow-up remains).
+        # as a real module graph below (eval_module_graph); a dedicated/shared
+        # module worker still evaluates on the classic path (that ESM follow-up remains).
         rt.eval_void('globalThis.__csimWorkerModule = true;') if module_worker
         # THIS worker is a controlled CLIENT: install its controller into the isolate BEFORE
         # the script runs, so `navigator.serviceWorker.controller` exists and its fetch()/XHR
@@ -9180,7 +9063,7 @@ module Capybara
           # this outcome — sw-client.js __csim_swEvalOutcome), and exit with no
           # lifecycle: no version was installed.
           begin
-            if module_worker && rt.module_graph?
+            if module_worker
               # A `{type: 'module'}` service worker evaluates as a REAL module graph:
               # static imports are fetched here, on this worker's own thread, and each
               # failure (404, non-JS MIME, unresolvable bare specifier) fails the whole
@@ -9606,9 +9489,8 @@ module Capybara
       # self-perpetuating timer (setInterval) yields back to the poll loop rather than
       # pinning the thread.
       # `stopping`: asked between rounds, because this loop is the other place a worker can spend
-      # seconds — 256 rounds, each a drain whose budget one long timer callback can overrun. On V8
-      # `terminate` ends whichever round is running; on QuickJS this check is the only thing that
-      # can end the loop at all.
+      # seconds — 256 rounds, each a drain whose budget one long timer callback can overrun.
+      # `terminate` ends whichever round is running; this check ends the loop between rounds.
       private def drive_worker_to_quiescence(rt, stopping = nil)
         WORKER_QUIESCE_MAX_ROUNDS.times do
           rt.drain_microtasks
@@ -9669,7 +9551,7 @@ module Capybara
 
       def resolve_against(url, base)
         return url if url =~ %r{\A[a-z]+://}i
-        # quickjs.rb's module_loader passes the importer for nested relative imports (and for a
+        # The module loader passes the importer for nested relative imports (and for a
         # dynamic `import()`, the importer is the referring script). An inline script / module has no
         # real URL — its pseudo-name is `<eval>` (no scheme, from V8) or `inline://<hash>` (from
         # `__csim_runScript`) — so a specifier must resolve against the PAGE URL, not the pseudo-name.
@@ -10323,8 +10205,8 @@ module Capybara
       # UTF-8 string that ships back to JS — base64 wouldn't add
       # anything and `Base64.strict_encode64` is ~1 % of suite wall
       # time on Discourse. Binary types (images, octet-stream,
-      # gzipped traineddata, etc.) still need `body_b64` because V8 /
-      # QuickJS mangle bytes 0x80-0xFF over the UTF-8 string boundary.
+      # gzipped traineddata, etc.) still need `body_b64` because V8
+      # mangles bytes 0x80-0xFF over the UTF-8 string boundary.
       # `fetch.js#_decodeBytes` and `xhr.js` both fall back to the
       # text body when `body_b64` is absent.
       TEXT_CONTENT_TYPE_PREFIXES = %w[text/ application/json application/javascript application/ecmascript application/xml image/svg+xml].freeze
@@ -11865,11 +11747,9 @@ module Capybara
         # still observe the state before a delayed one (smoke_spec "has run the page
         # init a browser runs during the load, but not its later timers"). Bounded by
         # the finite pending-script count.
-        if @runtime.respond_to?(:run_loop_step)
-          BOOT_SCRIPT_DRAIN_MAX_ITER.times do
-            break if @runtime.call('__csimPendingExternalScriptCount').to_i.zero?
-            @runtime.run_loop_step(0, SETTLE_MAX_ITER_TASKS, yield_on_gen: false)
-          end
+        BOOT_SCRIPT_DRAIN_MAX_ITER.times do
+          break if @runtime.call('__csimPendingExternalScriptCount').to_i.zero?
+          @runtime.run_loop_step(0, SETTLE_MAX_ITER_TASKS, yield_on_gen: false)
         end
         # The document and everything it deferred are in, so the window `load`
         # event fires — which for the MAIN document nothing ever did. Frames and
@@ -11900,10 +11780,9 @@ module Capybara
         # its opener, and consuming that one-shot here loses it entirely.
         # The window `load` this boot owes waits for the images the parse just started (HTML:
         # load fires after subresources). Give their fetch threads a short GVL-yielding window
-        # to land: on V8 they overlap the boot's JS (rusty releases the GVL) and are usually
-        # done already; QuickJS holds the GVL through eval, so without this park every image
-        # page's `load` would slip past the visit and the two engines would disagree about
-        # what a post-visit read sees. Bounded — a genuinely slow endpoint defers `load` to a
+        # to land: they overlap the boot's JS (rusty releases the GVL) and are usually done
+        # already, but one that is not would slip its page's `load` past the visit and leave
+        # what a post-visit read sees to thread timing. Bounded — a genuinely slow endpoint defers `load` to a
         # later drain instead of stalling the visit.
         # Delivery runs INSIDE the wait: `image_loads_pending?` counts undelivered results (it
         # only falls at delivery, deliberately — the tick gates key on it), so a park that only
@@ -12220,7 +12099,7 @@ module Capybara
         # stops both a popup's self-navigation (no iterations) and an iframe chain
         # inside a popup (the popup's document is compared as the chain's top, then
         # the walk ends there instead of crossing into the opener via parent 0).
-        while rid.positive? && !top_level_realm?(rid)
+        while rid.positive? && !@runtime.top_level_realm?(rid)
           parent       = @runtime.frame_realm_parent(rid).to_i
           ancestor_url = parent.positive? ? frame_realm_url(parent) : @current_url
           return true if sec_fetch_site(ancestor_url, target_url.to_s) == 'cross-site'

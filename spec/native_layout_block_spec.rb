@@ -6,14 +6,14 @@
 # belongs beside the block one. What is still true, and is the actual contract, is the PASS: a shape
 # either lays out natively and agrees with the oracle everywhere, or it declines and the whole pass is
 # discarded — there is no third answer, and the examples that assert a DECLINE are asserting that
-# second one on purpose. V8 only.
+# second one on purpose.
 require 'capybara/simulated'
 require 'rack'
 require_relative 'support/session_teardown'
 require_relative 'support/shadow_parity'
 require_relative 'support/walk_refusals'
 
-RSpec.describe 'native layout L1 block-flow parity', if: ENV.fetch('CSIM_JS_ENGINE', 'v8') == 'v8' do
+RSpec.describe 'native layout L1 block-flow parity' do
   def page(body)
     html = %(<!doctype html><html><head><meta charset="utf-8"></head><body style="margin:0">#{body}</body></html>)
     Rack::Builder.new { run ->(_env) { [200, {'content-type' => 'text/html; charset=utf-8'}, [html]] } }.to_app

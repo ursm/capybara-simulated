@@ -9,11 +9,11 @@ require_relative 'webauthn_state'
 
 module Capybara
   module Simulated
-    # Bits common to `V8Runtime` and `QuickJSRuntime` — JS asset paths,
-    # the host-fn table that bridge.js reaches back through, the
-    # error-swallowing wrapper. Each engine plugs the table into its
-    # own attach API (rusty_racer's `Context#attach` vs quickjs.rb's
-    # `Quickjs::VM#define_function`).
+    # The engine-facing constants and tables — JS asset paths, the
+    # host-fn table that bridge.js reaches back through, the
+    # error-swallowing wrapper. `V8Runtime` plugs the table into
+    # rusty_racer's `Context#attach` for the main realm and every
+    # worker isolate alike.
     module RuntimeShared
       BRIDGE_JS         = File.expand_path('js/bridge.bundle.js',                 __dir__).freeze
       SNAPSHOT_STUBS_JS = File.expand_path('js/snapshot_stubs.js',                __dir__).freeze
@@ -23,7 +23,7 @@ module Capybara
       def self.bridge_src         = File.read(BRIDGE_JS)
       def self.vendor_bundle_src  = File.read(VENDOR_BUNDLE_JS)
 
-      # Combined source baked into the V8 Snapshot / QuickJS bytecode.
+      # Combined source baked into the V8 Snapshot.
       # Order matters: stubs first (so bridge's IIFE can reference the
       # `globalThis.__rackFetch` etc. slots), then the vendor bundle
       # (so bridge can reference `globalThis.__csimVendor.cssSelect` and
@@ -110,7 +110,7 @@ module Capybara
         '__csim_eventSourceOpen'     => ->(b, *a) { b.event_source_open(a[0]) },
         '__csim_eventSourceClose'    => ->(b, *a) { b.event_source_close(a[0]); nil },
         '__csim_wsOpen'              => ->(b, *a) { b.ws_open(a[0], a[1]) },
-        '__csim_wsSend'              => ->(b, *a) { b.ws_send(a[0], a[1], a[2], a[3]); nil },
+        '__csim_wsSend'              => ->(b, *a) { b.ws_send(a[0], a[1], a[2]); nil },
         '__csim_wsClose'             => ->(b, *a) { b.ws_close(a[0], a[1], a[2]); nil },
         '__csim_rackFetchAsync'      => ->(b, *a) { b.rack_fetch_async(a[0], a[1], a[2], a[3]) },
         '__csim_rackFetchAsyncAbort' => ->(b, *a) { b.rack_fetch_async_abort(a[0]); nil },
@@ -258,8 +258,8 @@ module Capybara
         # this so it doesn't bail before an async message (e.g. a freshly-spawned
         # worker's first postMessage) has had a chance to land.
         '__csim_asyncIoPending'      => ->(b, *_a) { b.async_io_pending? },
-        '__csim_transferStash'       => ->(b, *a) { b.transfer_buffer_stash(a[0], a[1]) },
-        '__csim_transferFetch'       => ->(b, *a) { b.transfer_buffer_fetch_for_js(a[0]) },
+        '__csim_transferStash'       => ->(b, *a) { b.transfer_buffer_stash(a[0]) },
+        '__csim_transferFetch'       => ->(b, *a) { b.transfer_buffer_fetch(a[0]) },
         # Zero-copy postMessage transfer-token bookkeeping (see Browser#drop_pending_transfers).
         '__csim_transferIssued'      => ->(b, *a) { b.transfer_token_issued(a[0]); nil },
         # Universal-server context (WPT runner)? Gates cross-origin eager frame
