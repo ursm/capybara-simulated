@@ -15,9 +15,9 @@ grid_table:
     ctx_sweeps: 201
     ctx_gate_active: 1
   wall:
-    workload_ms: 488.664
-    calib_ms: 2.733
-    ratio: 178.821
+    workload_ms: 423.084
+    calib_ms: 2.793
+    ratio: 151.459
 shadow_host:
   counts:
     passes: 3
@@ -34,9 +34,9 @@ shadow_host:
     ctx_sweeps: 201
     ctx_gate_active: 1
   wall:
-    workload_ms: 523.874
-    calib_ms: 2.735
-    ratio: 191.538
+    workload_ms: 487.348
+    calib_ms: 2.699
+    ratio: 180.562
 layout_walk:
   counts:
     ok: 1
@@ -50,9 +50,9 @@ layout_walk:
     nativeOutOfFlow: 0
     pushedContributions: 0
   wall:
-    workload_ms: 231.224
-    calib_ms: 2.716
-    ratio: 85.131
+    workload_ms: 221.868
+    calib_ms: 2.94
+    ratio: 75.455
 flex_shell:
   counts:
     passes: 6
@@ -60,7 +60,7 @@ flex_shell:
     nl_declines: 0
     nl_records_copied: 2730
     nl_blocks_sent: 600
-    nl_gate_answers: 2725
+    nl_gate_answers: 613
     nl_measures_put_back: 1800
     element_layouts: 0
     reuse_hit: 0
@@ -69,9 +69,9 @@ flex_shell:
     ctx_sweeps: 0
     ctx_gate_active: 1
   wall:
-    workload_ms: 112.625
-    calib_ms: 2.739
-    ratio: 41.115
+    workload_ms: 101.922
+    calib_ms: 2.789
+    ratio: 36.544
 flex_row_shell:
   counts:
     passes: 5
@@ -79,7 +79,7 @@ flex_row_shell:
     nl_declines: 0
     nl_records_copied: 30015
     nl_blocks_sent: 0
-    nl_gate_answers: 46511
+    nl_gate_answers: 10511
     nl_measures_put_back: 0
     element_layouts: 0
     reuse_hit: 0
@@ -88,6 +88,6 @@ flex_row_shell:
     ctx_sweeps: 0
     ctx_gate_active: 1
   wall:
-    workload_ms: 592.786
-    calib_ms: 2.812
-    ratio: 210.828
+    workload_ms: 546.503
+    calib_ms: 2.773
+    ratio: 197.088
