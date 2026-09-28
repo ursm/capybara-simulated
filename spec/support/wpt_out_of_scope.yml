@@ -41102,10 +41102,6 @@ html/semantics/forms/the-select-element/select-option-display-inherit.tentative.
   reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
     specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
     path/suffix. CLAUDE.md rule 1.
-- name: option in closed single select has zero bounding client rect
-  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
-    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
-    path/suffix. CLAUDE.md rule 1.
 html/semantics/forms/the-select-element/select-option-focusable.tentative.html:
 - name: Validate <option> is focusable when is a descendant of <select>
   reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux

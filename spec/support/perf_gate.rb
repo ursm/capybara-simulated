@@ -315,22 +315,32 @@ module PerfGate
   # purpose: they shift on parse5 bumps, UA-sheet edits and conformance-driven
   # invalidation changes that are NOT perf regressions, so holding them exactly
   # would red the gate on unrelated PRs and train everyone to reflexively regen —
-  # eroding the ratchet. These five move only when the driver does more (or less)
+  # eroding the ratchet. These move only when the driver does more (or less)
   # layout work. Read as one object so a single round-trip captures the vector.
+  # The JS layout's own (`element_layouts`, `reuse_*`) read 0 where native layout — the default — laid the page out, and
+  # rise where it declined to the JS layout, which is the regression they now catch; the native layout's work is the
+  # `nl_*` group: its passes and declines, the records its walk copied afresh, the kept blocks it sent, the gates it
+  # answered again and the measures native put back.
   COUNTS_JS = <<~JS.freeze
     ({
-      passes:            globalThis.__csimLayoutPasses(),
-      element_layouts:   globalThis.__csimElementLayouts(),
-      reuse_hit:         globalThis.__csimReuseStats().hit,
-      reuse_remeasured:  globalThis.__csimReuseStats().remeasured,
-      reuse_escapingAbs: globalThis.__csimReuseStats().escapingAbs,
-      ctx_sweeps:        globalThis.__csimCtxSweeps(),
+      passes:               globalThis.__csimLayoutPasses(),
+      nl_passes:            globalThis.__csimNativeLayoutStats().native,
+      nl_declines:          Object.values(globalThis.__csimNativeLayoutStats().fellBack).reduce((a, b) => a + b, 0),
+      nl_records_copied:    globalThis.__csimNlSliceCopies(),
+      nl_blocks_sent:       globalThis.__csimNlBlocksSent(),
+      nl_gate_answers:      globalThis.__csimNlGateAnswers(),
+      nl_measures_put_back: globalThis.__dom && globalThis.__dom.layoutMeasureCounts ? globalThis.__dom.layoutMeasureCounts()[0] : 0,
+      element_layouts:      globalThis.__csimElementLayouts(),
+      reuse_hit:            globalThis.__csimReuseStats().hit,
+      reuse_remeasured:     globalThis.__csimReuseStats().remeasured,
+      reuse_escapingAbs:    globalThis.__csimReuseStats().escapingAbs,
+      ctx_sweeps:           globalThis.__csimCtxSweeps(),
       // …and whether the page has a structural-context gate at all, which decides whether a memoised
       // computed value survives a mutation or every one of them dies at every write. A BIT, not a
       // count, and the only counter here that a page can lose wholesale: a shadow host used to turn it
       // off for the whole document, and `ctx_sweeps` then read 0 — fewer sweeps because there was
       // nothing left to sweep, which is the opposite of an improvement and unreadable on its own.
-      ctx_gate_active:   globalThis.__csimCtxGateActive() ? 1 : 0
+      ctx_gate_active:      globalThis.__csimCtxGateActive() ? 1 : 0
     })
   JS
 

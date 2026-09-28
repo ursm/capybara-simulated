@@ -2,29 +2,41 @@
 grid_table:
   counts:
     passes: 3
-    element_layouts: 3209
-    reuse_hit: 1200
+    nl_passes: 3
+    nl_declines: 0
+    nl_records_copied: 8812
+    nl_blocks_sent: 1600
+    nl_gate_answers: 4806
+    nl_measures_put_back: 0
+    element_layouts: 0
+    reuse_hit: 0
     reuse_remeasured: 0
     reuse_escapingAbs: 0
     ctx_sweeps: 201
     ctx_gate_active: 1
   wall:
-    workload_ms: 381.209
-    calib_ms: 2.797
-    ratio: 136.27
+    workload_ms: 444.452
+    calib_ms: 2.992
+    ratio: 148.566
 shadow_host:
   counts:
     passes: 3
-    element_layouts: 3211
-    reuse_hit: 1202
+    nl_passes: 3
+    nl_declines: 0
+    nl_records_copied: 8815
+    nl_blocks_sent: 1602
+    nl_gate_answers: 4810
+    nl_measures_put_back: 0
+    element_layouts: 0
+    reuse_hit: 0
     reuse_remeasured: 0
     reuse_escapingAbs: 0
     ctx_sweeps: 201
     ctx_gate_active: 1
   wall:
-    workload_ms: 436.513
-    calib_ms: 2.712
-    ratio: 160.971
+    workload_ms: 500.227
+    calib_ms: 2.829
+    ratio: 176.811
 layout_walk:
   counts:
     ok: 1
@@ -38,32 +50,44 @@ layout_walk:
     nativeOutOfFlow: 0
     pushedContributions: 0
   wall:
-    workload_ms: 211.897
-    calib_ms: 2.773
-    ratio: 76.422
+    workload_ms: 224.164
+    calib_ms: 2.78
+    ratio: 80.638
 flex_shell:
   counts:
     passes: 6
-    element_layouts: 1218
-    reuse_hit: 1506
-    reuse_remeasured: 0
-    reuse_escapingAbs: 0
-    ctx_sweeps: 0
-    ctx_gate_active: 1
-  wall:
-    workload_ms: 97.365
-    calib_ms: 2.716
-    ratio: 35.844
-flex_row_shell:
-  counts:
-    passes: 5
-    element_layouts: 28510
+    nl_passes: 6
+    nl_declines: 0
+    nl_records_copied: 2718
+    nl_blocks_sent: 600
+    nl_gate_answers: 2718
+    nl_measures_put_back: 1800
+    element_layouts: 0
     reuse_hit: 0
     reuse_remeasured: 0
     reuse_escapingAbs: 0
     ctx_sweeps: 0
     ctx_gate_active: 1
   wall:
-    workload_ms: 651.236
-    calib_ms: 2.795
-    ratio: 233.01
+    workload_ms: 109.209
+    calib_ms: 2.786
+    ratio: 39.194
+flex_row_shell:
+  counts:
+    passes: 5
+    nl_passes: 5
+    nl_declines: 0
+    nl_records_copied: 30005
+    nl_blocks_sent: 0
+    nl_gate_answers: 46505
+    nl_measures_put_back: 0
+    element_layouts: 0
+    reuse_hit: 0
+    reuse_remeasured: 0
+    reuse_escapingAbs: 0
+    ctx_sweeps: 0
+    ctx_gate_active: 1
+  wall:
+    workload_ms: 558.441
+    calib_ms: 2.778
+    ratio: 201.055
