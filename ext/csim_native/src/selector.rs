@@ -95,24 +95,34 @@ impl SelectorImpl for CsimImpl {
     type PseudoElement = PseudoEl;
 }
 
-// A non-tree-structural pseudo-class carried by name (`:hover`, `:checked`, …). Parsing accepts them
-// so real selectors parse; only `:link`/`:any-link` match here (see match_non_ts_pseudo_class).
+// A non-tree-structural pseudo-class (`:hover`, `:checked`, `:state(open)`, …): its ASCII-lowercased name, and a
+// functional one's argument. Parsing accepts every one so real selectors parse; the ones `is_native_pseudo_class`
+// does not name send the selector to css-select (see match_non_ts_pseudo_class).
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct PseudoClass(String);
+pub struct PseudoClass {
+    name: String,
+    arg: Option<String>,
+}
 
 impl ToCss for PseudoClass {
     fn to_css<W: fmt::Write>(&self, dest: &mut W) -> fmt::Result {
         dest.write_char(':')?;
-        dest.write_str(&self.0)
+        dest.write_str(&self.name)?;
+        if let Some(arg) = &self.arg {
+            dest.write_char('(')?;
+            cssparser::serialize_identifier(arg, dest)?;
+            dest.write_char(')')?;
+        }
+        Ok(())
     }
 }
 impl NonTSPseudoClass for PseudoClass {
     type Impl = CsimImpl;
     fn is_active_or_hover(&self) -> bool {
-        self.0 == "active" || self.0 == "hover"
+        self.arg.is_none() && (self.name == "active" || self.name == "hover")
     }
     fn is_user_action_state(&self) -> bool {
-        matches!(self.0.as_str(), "active" | "hover" | "focus" | "focus-within" | "focus-visible")
+        self.arg.is_none() && matches!(self.name.as_str(), "active" | "hover" | "focus" | "focus-within" | "focus-visible")
     }
 }
 
@@ -171,7 +181,7 @@ impl<'i> Parser<'i> for CsimParser {
         if !is_native_pseudo_class(&name) {
             self.needs_fallback.set(true);
         }
-        Ok(PseudoClass(name))
+        Ok(PseudoClass { name, arg: None })
     }
 
     fn parse_non_ts_functional_pseudo_class<'t>(
@@ -180,13 +190,23 @@ impl<'i> Parser<'i> for CsimParser {
         arguments: &mut CssParser<'i, 't>,
         _after_part: bool,
     ) -> Result<PseudoClass, cssparser::ParseError<'i, Self::Error>> {
-        // Consume the argument tokens so parsing succeeds; the class is carried by name only.
+        let name = name.as_ref().to_ascii_lowercase();
+        // `:state(<ident>)` — a custom element's custom state — is answered here; any other functional one (and a
+        // `:state()` of anything but one ident) is css-select's: its tokens are consumed so the selector parses.
+        // (`:nth-child()` and friends are tree-structural, the crate's own, and never reach here.)
+        if name == "state" {
+            let state = arguments.try_parse(|p| {
+                let ident = p.expect_ident()?.as_ref().to_owned();
+                p.expect_exhausted()?;
+                Ok::<_, cssparser::ParseError<'i, ()>>(ident)
+            });
+            if let Ok(ident) = state {
+                return Ok(PseudoClass { name, arg: Some(ident) });
+            }
+        }
         while arguments.next().is_ok() {}
-        // Functional non-TS pseudo-classes (:lang(), :dir(), …) all need state/info the arena
-        // doesn't model — always defer. (:nth-child() & friends are tree-structural and handled
-        // by the crate, so they never reach here.)
         self.needs_fallback.set(true);
-        Ok(PseudoClass(name.as_ref().to_ascii_lowercase()))
+        Ok(PseudoClass { name, arg: None })
     }
 
     fn parse_pseudo_element(
@@ -312,7 +332,10 @@ impl<'a> Element for NodeRef<'a> {
     ) -> bool {
         // Every name `is_native_pseudo_class` admits; the element states are element_state.rs's.
         let (arena, id) = (self.arena, self.id);
-        match pc.0.as_str() {
+        if let Some(arg) = &pc.arg {
+            return pc.name == "state" && arena.has_custom_state(id, arg);
+        }
+        match pc.name.as_str() {
             "link" | "any-link" | "-webkit-any-link" => self.is_link(),
             "focus" => arena.is_focused(id),
             "focus-visible" => arena.is_focus_visible(id),
@@ -328,6 +351,7 @@ impl<'a> Element for NodeRef<'a> {
             "default" => arena.is_default(id),
             "open" => arena.is_open(id),
             "placeholder-shown" => arena.is_placeholder_shown(id),
+            "target" => arena.is_target(id),
             "defined" => arena.is_defined(id),
             "required" => arena.requiredness(id) == Some(true),
             "optional" => arena.requiredness(id) == Some(false),
@@ -379,8 +403,8 @@ impl<'a> Element for NodeRef<'a> {
             .split_ascii_whitespace()
             .any(|c| case.eq(c.as_bytes(), name.0.as_bytes()))
     }
-    fn has_custom_state(&self, _name: &CssStr) -> bool {
-        false
+    fn has_custom_state(&self, name: &CssStr) -> bool {
+        self.arena.has_custom_state(self.id, &name.0)
     }
     fn imported_part(&self, _name: &CssStr) -> Option<CssStr> {
         None
@@ -437,6 +461,7 @@ fn is_native_pseudo_class(name: &str) -> bool {
             | "default"
             | "open"
             | "placeholder-shown"
+            | "target"
             | "required"
             | "optional"
             | "defined"

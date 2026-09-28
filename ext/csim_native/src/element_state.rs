@@ -75,6 +75,12 @@ pub(crate) struct FormFacts {
     checked_groups: std::collections::HashSet<(String, Option<NodeId>)>,
     defaults: std::collections::HashMap<NodeId, NodeId>,
 }
+// …and the realm document's target element (`None` inside: none), as of `mutations` too.
+#[derive(Default)]
+pub(crate) struct TargetMemo {
+    mutations: u64,
+    element: Option<Option<NodeId>>,
+}
 // Those facts per tree root, as of the arena's `mutations` count.
 #[derive(Default)]
 pub(crate) struct FormFactsMemo {
@@ -386,6 +392,28 @@ impl RealmArena {
             return true;
         }
         !(is_valid_custom_element_name(&n.local_name) || n.state & STATE_IS_VALUE != 0)
+    }
+    // `:target`: the realm document's target element (target.js) — its indicated part for its URL's fragment, the first
+    // element of its tree (not a shadow tree) with that id, else the first HTML `<a>` with that name.
+    pub(crate) fn is_target(&self, id: NodeId) -> bool {
+        self.target_element() == Some(id)
+    }
+    fn target_element(&self) -> Option<NodeId> {
+        {
+            let memo = self.target_memo.borrow();
+            if memo.mutations == self.mutations {
+                if let Some(element) = memo.element {
+                    return element;
+                }
+            }
+        }
+        let element = self.target.as_ref().and_then(|(doc, fragment)| {
+            self.find_in_tree(*doc, |_, n| n.get_attr("id") == Some(fragment.as_str())).or_else(|| {
+                self.find_in_tree(*doc, |_, n| n.is_html_named("a") && n.plain_attr("name") == Some(fragment.as_str()))
+            })
+        });
+        *self.target_memo.borrow_mut() = TargetMemo { mutations: self.mutations, element: Some(element) };
+        element
     }
     // `:open`: a `<details>` or `<dialog>` with the `open` attribute.
     pub(crate) fn is_open(&self, id: NodeId) -> bool {

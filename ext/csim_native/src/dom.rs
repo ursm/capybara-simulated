@@ -317,10 +317,15 @@ pub(crate) struct RealmArena {
     // The form the HTML parser's form element pointer gave a control it inserted (`<table><form>…<input>`: the form
     // is no ancestor of it), until a script moves it — the few controls whose form owner the tree can't tell.
     parser_form_owners: std::collections::HashMap<NodeId, NodeId>,
+    // A custom element's custom states (`ElementInternals.states`, `:state()`), for the few elements that have any.
+    custom_states: std::collections::HashMap<NodeId, Vec<String>>,
+    // The realm document and its URL's decoded fragment, when it has one — what `:target` resolves (`is_target`).
+    pub(crate) target: Option<(NodeId, String)>,
     // Moves with every write to the arena (a node made or freed, any `get_mut`): what a memo of it keys on.
     pub(crate) mutations: u64,
     // Per tree root, the facts element_state.rs asks of every control in turn, as of `mutations` (`form_facts`).
     pub(crate) form_facts: std::cell::RefCell<crate::element_state::FormFactsMemo>,
+    pub(crate) target_memo: std::cell::RefCell<crate::element_state::TargetMemo>,
 }
 
 impl RealmArena {
@@ -387,6 +392,9 @@ impl RealmArena {
         if !self.parser_form_owners.is_empty() {
             self.parser_form_owners.remove(&id);
         }
+        if !self.custom_states.is_empty() {
+            self.custom_states.remove(&id);
+        }
     }
 
     // Drop every node, bumping each occupied slot's gen and listing it for reuse. This is the per-page
@@ -399,6 +407,8 @@ impl RealmArena {
         self.hover = None;
         self.has_shadow_hosts = false;
         self.parser_form_owners.clear();
+        self.custom_states.clear();
+        self.target = None;
         self.form_facts.get_mut().clear();
         self.mutations += 1;
         for idx in 0..self.slots.len() {
@@ -462,6 +472,22 @@ impl RealmArena {
     }
     pub(crate) fn parser_form_owner(&self, id: NodeId) -> Option<NodeId> {
         self.parser_form_owners.get(&id).copied()
+    }
+
+    // `id`'s custom states become `states`.
+    pub(crate) fn set_custom_states(&mut self, id: NodeId, states: Vec<String>) {
+        if self.get(id).is_none() {
+            return;
+        }
+        if states.is_empty() {
+            self.custom_states.remove(&id);
+        } else {
+            self.custom_states.insert(id, states);
+        }
+    }
+    // `:state(name)`.
+    pub(crate) fn has_custom_state(&self, id: NodeId, name: &str) -> bool {
+        self.custom_states.get(&id).is_some_and(|s| s.iter().any(|n| n == name))
     }
 
     // `root` is the shadow root of `host`.
@@ -744,6 +770,8 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_, ()>, ctx: &v8::Global<v8:
     register(scope, ns, "setShadowHost", set_shadow_host, context_id);
     register(scope, ns, "setValue", set_value, context_id);
     register(scope, ns, "setParserFormOwner", set_parser_form_owner, context_id);
+    register(scope, ns, "setCustomStates", set_custom_states, context_id);
+    register(scope, ns, "setTarget", set_target, context_id);
     register(scope, ns, "setFocusRingHidden", set_focus_ring_hidden, context_id);
     register(scope, ns, "queryIds", query_ids, context_id);
     register(scope, ns, "matchesId", matches_id, context_id);
@@ -949,6 +977,44 @@ fn set_parser_form_owner(
     let form = nid_arg(scope, &args, 1);
     let cid = realm_id(scope, &args);
     realm(scope, cid).set_parser_form_owner(id, form);
+}
+
+// __dom.setCustomStates(nid, names): the element's custom states (`ElementInternals.states`) become `names`.
+fn set_custom_states(
+    scope: &mut v8::PinScope<'_, '_>,
+    args: v8::FunctionCallbackArguments<'_>,
+    _rv: v8::ReturnValue<'_, v8::Value>,
+) {
+    let Some(id) = nid_arg(scope, &args, 0) else {
+        return;
+    };
+    let mut states = Vec::new();
+    if let Ok(arr) = v8::Local::<v8::Array>::try_from(args.get(1)) {
+        for i in 0..arr.length() {
+            if let Some(v) = arr.get_index(scope, i) {
+                states.push(v.to_rust_string_lossy(scope));
+            }
+        }
+    }
+    let cid = realm_id(scope, &args);
+    realm(scope, cid).set_custom_states(id, states);
+}
+
+// __dom.setTarget(docNid, fragment): the realm document's URL fragment (decoded) — `undefined` when it has none.
+fn set_target(
+    scope: &mut v8::PinScope<'_, '_>,
+    args: v8::FunctionCallbackArguments<'_>,
+    _rv: v8::ReturnValue<'_, v8::Value>,
+) {
+    let Some(doc) = nid_arg(scope, &args, 0) else {
+        return;
+    };
+    let fragment = args.get(1);
+    let target = (!fragment.is_undefined()).then(|| (doc, fragment.to_rust_string_lossy(scope)));
+    let cid = realm_id(scope, &args);
+    let arena = realm(scope, cid);
+    arena.target = target;
+    arena.mutations += 1;
 }
 
 // __dom.setShadowHost(rootNid, hostNid): the shadow root `rootNid` is attached to `hostNid`.

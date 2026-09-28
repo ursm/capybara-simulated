@@ -362,6 +362,41 @@ RSpec.describe 'element state in the native arena' do
     end
   end
 
+  # `:target` is the document's indicated part for its fragment: the first element of its tree with that id, else the
+  # first `<a name>` — not a second element with the id, not a shadow tree's (HTML; Chrome and Firefox).
+  describe ':target and :state()' do
+    it 'matches the indicated part only, and follows the fragment' do
+      session.execute_script(<<~JS)
+        document.body.innerHTML = '<p id=t1>1</p><p id=t1 class=dup>2</p><a name=n1>n</a><div id=sh></div>';
+        document.getElementById('sh').attachShadow({ mode: 'open' }).innerHTML = '<p id=t2>s</p>';
+        location.hash = '#t1';
+      JS
+      expect(native_ids(':target')).to eq(%w[t1])
+      session.execute_script("location.hash = '#n1'")
+      expect(native_ids(':target')).to eq([''])   # the <a name=n1>, which has no id
+      expect(session.evaluate_script("document.querySelector('a[name=n1]').matches(':target')")).to be true
+      session.execute_script("location.hash = '#t2'")
+      expect(native_ids(':target')).to eq([])
+      expect(session.evaluate_script("document.getElementById('sh').shadowRoot.getElementById('t2').matches(':target')")).to be false
+    end
+
+    it "answers a custom element's :state() natively" do
+      session.execute_script(<<~JS)
+        customElements.define('x-st', class extends HTMLElement {
+          constructor() { super(); this.i = this.attachInternals(); }
+        });
+        const x = document.body.appendChild(document.createElement('x-st'));
+        x.id = 'st';
+        x.i.states.add('open');
+        x.i.states.add(1);
+      JS
+      expect(native_ids(':state(open)')).to eq(%w[st])
+      expect(native_ids(':state(closed)')).to eq([])
+      session.execute_script("document.getElementById('st').i.states.delete('open')")
+      expect(native_ids(':state(open)')).to eq([])
+    end
+  end
+
   # A frame's focus and hover are its container's in the parent document (HTML: the parent's focused area is the
   # navigable container); a hover leaving the container leaves the frame's document too.
   describe 'across a frame' do
