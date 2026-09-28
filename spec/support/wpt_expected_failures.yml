@@ -11204,9 +11204,6 @@ service-workers/service-worker/fetch-request-xhr-sync-on-worker.https.html:
 - Verify SyncXHR on Worker is intercepted
 service-workers/service-worker/fetch-request-xhr-sync.https.html:
 - Verify SyncXHR is intercepted
-service-workers/service-worker/fetch-request-xhr.https.html:
-- FetchEvent#request.body contains XHR request data (blob)
-- XHR with form data
 service-workers/service-worker/http-to-https-redirect-and-register.https.html:
 - register on a non-secure page after redirect from an non-secure url
 service-workers/service-worker/immutable-prototype-serviceworker.https.html:

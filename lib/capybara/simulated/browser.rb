@@ -3112,13 +3112,12 @@ module Capybara
                 append_multipart_part(body, boundary, e['name'].to_s, File.binread(path),
                                       filename:     File.basename(path),
                                       content_type: Rack::Mime.mime_type(File.extname(path)))
-              elsif e['b64']
+              elsif e['bytes']
                 # An in-memory `new File([…])` has no on-disk slot; its bytes are
-                # carried base64-encoded from the VM. Decode them for the part body.
-                content = e['b64'].to_s.unpack1('m')
-                ct      = e['type'].to_s
-                ct      = 'application/octet-stream' if ct.empty?
-                append_multipart_part(body, boundary, e['name'].to_s, content,
+                # carried from the VM.
+                ct = e['type'].to_s
+                ct = 'application/octet-stream' if ct.empty?
+                append_multipart_part(body, boundary, e['name'].to_s, e['bytes'],
                                       filename: e['filename'].to_s, content_type: ct)
               else
                 append_multipart_part(body, boundary, e['name'].to_s, '', filename: e['filename'].to_s)
@@ -5024,13 +5023,9 @@ module Capybara
       KEEPALIVE_QUOTA = 65_536
 
       def keepalive_start(method, url, body, headers, redirect, mode, credentials, referrer_policy, referrer, cache_mode, client_url)
-        # The quota reserves the PAYLOAD size. A b64-marked body is the base64
-        # encoding of the real bytes (Request-input / stream bodies always are) —
-        # reserve the DECODED length, or a ~49KiB binary body would falsely
-        # over-quota at the ~4/3-inflated wire size.
-        raw  = body.to_s
-        b64  = headers && (headers['X-Csim-Body-B64'] || headers['x-csim-body-b64'])
-        size = b64 ? (raw.bytesize * 3 / 4) - raw[-2, 2].to_s.count('=') : raw.bytesize
+        # The quota reserves the PAYLOAD size: a text body arrives as its UTF-8 String and
+        # any other as its BINARY bytes, so either way that is the String's byte count.
+        size = body.to_s.bytesize
         id   = nil
         # ONE critical section for reserve + spawn: a reset between them would
         # leave the spawned thread unregistered for the boundary drain.
@@ -5045,7 +5040,7 @@ module Capybara
             r = nil
             begin
               r = begin
-                rack_fetch(method.to_s, url.to_s, raw, headers || {}, redirect.to_s.empty? ? 'follow' : redirect.to_s,
+                rack_fetch(method.to_s, url.to_s, body.to_s, headers || {}, redirect.to_s.empty? ? 'follow' : redirect.to_s,
                            mode, credentials: credentials || 'same-origin', referrer_policy: referrer_policy,
                            referrer: referrer, cache_mode: cache_mode || 'default', client_url: client_url)
               rescue StandardError
@@ -9725,13 +9720,6 @@ module Capybara
         # would clobber a custom method like `xUNIcorn`.
         method = (method || 'GET').to_s
         redirected = false
-        # JS-side base64-encodes Blob/File bodies (raw bytes survive
-        # the engine's UTF-8 string boundary that way); decode before
-        # handing to Rack so the upload PUT lands intact.
-        if headers.is_a?(Hash) && headers['X-Csim-Body-B64'].to_s == '1'
-          body = Base64.decode64(body.to_s)
-          headers = headers.reject {|k, _| k == 'X-Csim-Body-B64' }
-        end
         # CHALLENGE credentials for transparent HTTP Basic auth — set by the XHR authentication path
         # (open() user/password / URL userinfo), NOT a raw setRequestHeader('Authorization'). They are
         # NOT sent proactively; a 401 "Basic" challenge triggers a single re-send with them (below).
