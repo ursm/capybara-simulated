@@ -3624,6 +3624,12 @@ module Capybara
       # read-throughs the per-visit asset cache) and cached iff durably cacheable.
       # Returns nil on 4xx / fetch failure so the JS caller skips it exactly as the
       # old `__rackFetch` branch did.
+      # A document starts loading — the page's, a frame's, an auxiliary window's: the assets the last one fetched are no
+      # longer this one's to reuse (`external_asset_source`).
+      def asset_document_started
+        @page_asset_src = nil
+      end
+
       def external_asset_source(url)
         # A blob:/data:/about: document's location can't anchor an absolute-path
         # `src=/common/…` (URI.join on a `blob:` URL yields nothing usable), but its
@@ -3636,7 +3642,9 @@ module Capybara
         return nil unless key.is_a?(String)
         # One fetch per URL per DOCUMENT, whatever the response's freshness says — a browser's memory cache: the
         # cascade fetches a `<link>`'s sheet and its load task asks again, and a response with no cache headers (every
-        # asset of a Rails app in test) crossed Rack twice per page. `no-store` alone is fetched every time.
+        # asset of a Rails app in test) crossed Rack twice per page. `no-store` alone is fetched every time, and every
+        # document that starts loading — a frame's too — starts it afresh (`asset_document_started`), so a reloaded
+        # frame fetches what it fetched before.
         # (A body served from memory carries the facts of the response it came from, for whoever files its Resource
         # Timing entry — `note_module_fetch` reads them where `rack_fetch_body` would have left them.)
         if (e = @page_asset_src&.[](key))
@@ -11684,7 +11692,7 @@ module Capybara
         # a leg delivering after this point would resolve the NEW page's same-
         # numbered fetch with the old page's response.
         reset_sw_race_state
-        @page_asset_src = nil   # …and its per-document asset memo (`external_asset_source`)
+        asset_document_started
         @runtime.rebuild_ctx
         # A full page (re)build disposes every frame realm, so any active
         # `within_frame` scope is now stale — fall back to the main document.

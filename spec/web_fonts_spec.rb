@@ -50,6 +50,18 @@ RSpec.describe 'web fonts' do
       when '/css/ahem.ttf' then [200, {'content-type' => 'font/ttf'}, [AHEM]]
       when '/css/imp.css' then [200, {'content-type' => 'text/css'}, ['@font-face { font-family: Imp; src: url("ahem.ttf"); }']]
       when '/css/outer.css' then [200, {'content-type' => 'text/css'}, ['@import url(imp.css); @font-face { font-family: Outer; src: url("ahem.ttf"); } p { margin: 0 }']]
+      when '/css/p.css' then [200, {'content-type' => 'text/css'}, ['@font-face { font-family: PrintOnly; src: url("ahem.ttf"); } #q { color: rgb(255, 0, 0) }']]
+      when '/css/n.css' then [200, {'content-type' => 'text/css'}, ['@font-face { font-family: NoSupp; src: url("ahem.ttf"); } #q { color: rgb(0, 0, 255) }']]
+      when '/css/y.css' then [200, {'content-type' => 'text/css'}, ['@font-face { font-family: YesSupp; src: url("ahem.ttf"); }']]
+      when '/css/cond.css' then [200, {'content-type' => 'text/css'}, ['@import url(p.css) layer print; @import url(n.css) supports(display: nope); @import url(y.css) supports(display: grid);']]
+      when '/cond.html'
+        [200, {'content-type' => 'text/html'}, ['<!DOCTYPE html><link rel="stylesheet" href="/css/cond.css"><p id="q">q</p>']]
+      when '/dup.html'
+        [200, {'content-type' => 'text/html'}, [<<~HTML]]
+          <!DOCTYPE html><style>@font-face { font-family: Dup; src: url("/ahem.ttf"); }</style>
+          <style>@font-face { font-family: Dup; src: url("/ahem.ttf"); }</style>
+          <link rel="stylesheet" href="/cyc-a.css">
+        HTML
       when '/held.html'
         [200, {'content-type' => 'text/html'}, [<<~HTML]]
           <!DOCTYPE html><html><head><link rel="stylesheet" href="/css/outer.css"><style>body { margin: 0; font: 20px monospace }</style></head>
@@ -301,6 +313,31 @@ RSpec.describe 'web fonts' do
       })()
     JS
     expect(got).to eq([[true, 'Imp,Outer'], 'Imp,Late,Outer'])
+  end
+
+  # Each face is ONE FontFace, however many sheets share its text and however its rules were read: two `<style>`s of
+  # one text, and an import cycle, once each (Chrome: `[CycB, CycA]`); and the face a script holds stays the one
+  # `document.fonts` lists after the sheet's CSSOM is built and the cascade moves.
+  it 'lists every face once, and the same FontFace whether or not the sheet has been built' do
+    s = session('/dup.html')
+    got = s.evaluate_script(<<~JS)
+      (() => {
+        const faces = () => Array.from(document.fonts);
+        const before = faces(), linked = before[2];
+        document.querySelector('link').sheet.cssRules;
+        document.head.appendChild(document.createElement('style')).textContent = 'p { color: red }';
+        return [before.map((f) => f.family).join(','), new Set(before).size === before.length, faces()[2] === linked];
+      })()
+    JS
+    expect(got).to eq(['Dup,Dup,CycB,CycA', true, true])
+  end
+
+  # An `@import`'s conditions hold of the sheet it imports, faces and rules alike: `layer print` is a media query after
+  # a layer, `supports()` a condition (a bare declaration included).
+  it 'imports a sheet only where its media query and supports() condition hold' do
+    s = session('/cond.html')
+    got = s.evaluate_script("[Array.from(document.fonts).map((f) => f.family).join(','), getComputedStyle(document.getElementById('q')).color]")
+    expect(got).to eq(['YesSupp', 'rgb(0, 0, 0)'])
   end
 
   it 'fails a cross-origin face the server does not share' do

@@ -101,6 +101,27 @@ RSpec.describe 'one fetch per asset per document' do
     expect(hits.values_at('/s.css', '/m.js')).to eq([2, 2])
   end
 
+  # …and a frame's document is a document of its own: navigated again, it fetches its sheet again (Chrome: a reloaded
+  # frame's no-cache sheet and script are fetched anew).
+  it 'fetches a frame\'s asset again when the frame loads again' do
+    hits = Hash.new(0)
+    frame_app = ->(env) {
+      path = env['PATH_INFO']
+      hits[path] += 1
+      case path
+      when '/f.css' then [200, {'content-type' => 'text/css'}, ["p { width: #{hits[path] * 10}px }"]]
+      when '/f'     then [200, {'content-type' => 'text/html'}, ['<!DOCTYPE html><link rel="stylesheet" href="/f.css"><p id="p">p</p>']]
+      else [200, {'content-type' => 'text/html'}, ['<!DOCTYPE html><iframe id="f" src="/f"></iframe>']]
+      end
+    }
+    s = simulated_session(frame_app)
+    s.visit '/'
+    width = -> { s.within_frame('f') { s.evaluate_script("getComputedStyle(document.getElementById('p')).width") } }
+    first = width.call
+    s.execute_script("document.getElementById('f').src = '/f?again'")
+    expect([first, width.call]).to eq(['10px', '20px'])
+  end
+
   it 'fetches a no-store one every time it is asked' do
     hits = Hash.new(0)
     visit_twice(hits, 'cache-control' => 'no-store')

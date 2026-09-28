@@ -255,4 +255,24 @@ RSpec.describe 'starting a transition' do
       })()
     JS
   end
+
+  # The before-change style is what the element HAD when the change came. A value a `:focus` rule was considered for is
+  # kept under the style state it was read in, and one read before the focus moved was carried into the next style
+  # change as the before-change colour: a transition from black ran on a button that had been red since it took focus.
+  # Chrome: red, no transition.
+  it 'measures the change against the style state the element was in, not one it left' do
+    s = page('<button id="b">b</button>', '#b:focus { color: rgb(255, 0, 0) } .t { transition: color 10s linear }')
+    got = s.evaluate_script(<<~JS)
+      (() => {
+        const b = document.getElementById('b');
+        getComputedStyle(b).color;
+        b.focus();
+        document.body.offsetWidth;
+        getComputedStyle(b).width;
+        b.className = 't';
+        return [getComputedStyle(b).color, b.getAnimations().length];
+      })()
+    JS
+    expect(got).to eq(['rgb(255, 0, 0)', 0])
+  end
 end
