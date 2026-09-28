@@ -1490,9 +1490,8 @@ module Capybara
       # this to read attached file bytes on demand — ActiveStorage's
       # `DirectUpload` MD5-chunks the file via FileReader before
       # POSTing to `/rails/active_storage/direct_uploads`. Returns
-      # the requested byte range as base64 so binary content
-      # survives the engine string boundary (same approach as
-      # `__csimReadBlobBase64`).
+      # the requested byte range as a BINARY String, which reaches JS
+      # as a Uint8Array.
       def read_file_pick(handle, index, start = nil, finish = nil)
         paths = file_picks_for(handle.to_i)
         path = paths && paths[index.to_i]
@@ -1500,12 +1499,11 @@ module Capybara
         size = File.size(path)
         s = [start.to_i, 0].max
         e = finish.nil? ? size : [finish.to_i, size].min
-        return Base64.strict_encode64('') if e <= s
-        bytes = File.open(path, 'rb') do |f|
+        return ''.b if e <= s
+        File.open(path, 'rb') do |f|
           f.seek(s)
-          f.read(e - s)
+          f.read(e - s) || ''.b
         end
-        Base64.strict_encode64(bytes || '')
       end
 
       # WebDriver's obscured-click refusal, shared by the click chains that don't
@@ -1964,9 +1962,8 @@ module Capybara
         url = pending['url'].to_s
         filename = pending['filename'].to_s
         if url.start_with?('blob:')
-          b64 = @runtime.call('__csimReadBlobBase64', url)
-          return if b64.nil?
-          content = Base64.decode64(b64.to_s)
+          content = @runtime.call('__csimReadBlobBytes', url)
+          return if content.nil?
           name = filename.empty? ? 'download' : filename
           dir = downloads_directory
           FileUtils.mkdir_p(dir)
@@ -4779,10 +4776,11 @@ module Capybara
 
         body_b64 = r['body_b64'].to_s
         body_b64 = r['render_b64'].to_s if body_b64.empty? && r['render_b64']
-        # A binary consumer (video / font bytes) takes the base64 VERBATIM — the
+        bytes    = Base64.decode64(body_b64)
+        # A binary consumer (video / font bytes) takes the bytes as they are — the
         # utf8 text funnel would mangle non-UTF-8 byte sequences.
-        return {'body_b64' => body_b64, 'type' => type} if binary
-        {'body' => RuntimeShared.utf8_text(Base64.decode64(body_b64))}
+        return {'bytes' => bytes, 'type' => type} if binary
+        {'body' => RuntimeShared.utf8_text(bytes)}
       end
 
       def sw_import_script_fetch(sw_handle, url, client_handle)
@@ -5093,12 +5091,19 @@ module Capybara
         @sw_race_lock.synchronize { @sw_raced_fetches.clear }
       end
 
-      # rack_fetch's hash as the SW respondWith wire: the client reads bytes from
-      # `body_b64` only, and rack_fetch omits it for pure-ASCII text bodies. The
-      # shim's internal delay header must not leak to script on a network win.
+      # rack_fetch's hash as the SW respondWith wire, which travels as JSON text: its
+      # bytes become the wire's base64 fields (`rawFromWire` turns them back), and the
+      # body is always there — rack_fetch omits `body_bytes` for pure-ASCII text, where
+      # `body` IS the bytes. The shim's internal delay header must not leak to script
+      # on a network win.
       private def sw_race_wire(r)
-        r = r.merge('type' => r['type'] || 'basic')
-        r['body_b64'] ||= Base64.strict_encode64(r['body'].to_s.b)
+        bytes  = r['body_bytes'] || r['body'].to_s.b
+        render = r['opaque_render']
+        r = r.except('body_bytes', 'opaque_render').merge(
+          'type'     => r['type'] || 'basic',
+          'body_b64' => Base64.strict_encode64(bytes)
+        )
+        r['render_b64'] = Base64.strict_encode64(render) if render
         if r['headers'].is_a?(Hash) && (k = r['headers'].keys.find {|h| h.to_s.casecmp('x-csim-server-delay-ms').zero? })
           r['headers'] = r['headers'].reject {|h, _| h == k }
         end
@@ -7464,10 +7469,11 @@ module Capybara
         end
       end
 
-      # Decode a base64-encoded image (createImageBitmap's blob path), optionally
-      # downscaled to fit within (max_w, max_h) via its resize options.
-      def decode_image(b64_bytes, max_w = nil, max_h = nil)
-        entry = decode_or_nil(Base64.decode64(b64_bytes.to_s), max_w, max_h)
+      # Decode an encoded image's bytes (createImageBitmap's blob path, a service
+      # worker's image response), optionally downscaled to fit within (max_w, max_h)
+      # via its resize options.
+      def decode_image(bytes, max_w = nil, max_h = nil)
+        entry = decode_or_nil(bytes.to_s.b, max_w, max_h)
         # nil (broken) or :zero_size — createImageBitmap of either rejects (a zero-area
         # source is an InvalidStateError), so surface nil for the caller to reject on.
         return nil unless entry.is_a?(Hash)
@@ -8391,9 +8397,9 @@ module Capybara
       # it, so it measures with the fallback family). Content-addressed so identical bytes reuse
       # one temp file, not one per call.
       FONT_MAGIC = ["\x00\x01\x00\x00".b, 'OTTO'.b, 'true'.b, 'ttcf'.b, 'wOFF'.b, 'wOF2'.b].freeze
-      def font_advance_table_from_bytes(b64)
-        bytes = Base64.decode64(b64.to_s)
-        ok    = bytes.bytesize >= 4 && FONT_MAGIC.include?(bytes[0, 4].b)
+      def font_advance_table_from_bytes(bytes)
+        bytes = bytes.to_s.b
+        ok    = bytes.bytesize >= 4 && FONT_MAGIC.include?(bytes[0, 4])
         return {'table' => nil, 'ok' => ok} unless ok
         sfnt = woff_to_sfnt(bytes)
         return {'table' => nil, 'ok' => true} if sfnt.nil? || sfnt.bytesize < 12
@@ -8487,7 +8493,9 @@ module Capybara
         }
       end
 
-      def blob_register(url, body_b64, owner_realm = nil)
+      # `bytes` is nil when no other context could resolve the URL — the entry is
+      # then only the existence marker a revoke anywhere clears.
+      def blob_register(url, bytes, owner_realm = nil)
         # Tag the creating context so the URL is revoked when that context goes
         # away: a WORKER (separate thread, tagged via Thread.current) when it
         # terminates ("Terminating worker"), or a FRAME REALM (owner_realm passed
@@ -8499,7 +8507,7 @@ module Capybara
               elsif owner_realm && owner_realm.to_i != 0 then "r:#{owner_realm.to_i}"
               end
         @blob_registry_lock.synchronize do
-          @blob_registry[url.to_s] = body_b64.to_s
+          @blob_registry[url.to_s] = bytes.to_s.b
           # Keep ownership in sync both ways: a (re-)registration with no owner
           # (main thread / main realm) must DROP any prior owner, else revoking
           # that context would wrongly revoke a now-page-owned URL.
@@ -8579,8 +8587,8 @@ module Capybara
       # window opened by this window. Returns {bytes:, type:} or nil.
       def read_blob_for_window(url)
         r = @runtime.call('__csimReadBlobForWindow', url.to_s)
-        return nil unless r.is_a?(Hash) && r['b64']
-        { bytes: Base64.decode64(r['b64'].to_s), type: r['type'].to_s }
+        return nil unless r.is_a?(Hash) && r['bytes']
+        { bytes: r['bytes'], type: r['type'].to_s }
       rescue StandardError
         nil
       end
@@ -8600,18 +8608,18 @@ module Capybara
         # type (url-charset) is preserved so it can override <meta charset>.
         ct = "#{ct};charset=utf-8" unless ct.downcase.include?('charset')
         record_response(200, {'content-type' => ct})
-        b64 = Base64.strict_encode64(bytes.to_s.b)
+        bytes = bytes.to_s.b
         # Make the blob URL fetchable from the document we're about to load — a blob:
         # document that fetches itself (or a media `src` first-party load) snapshots
         # the bytes SYNCHRONOUSLY at fetch() time, which runs DURING boot below, so the
         # bytes must be registered in this window's @blob_registry FIRST. No partition
         # entry — the blob keeps its original storage partition; this only makes it
         # first-party-fetchable in the window it was navigated into.
-        @blob_registry_lock.synchronize { @blob_registry[url.to_s] = b64 }
+        @blob_registry_lock.synchronize { @blob_registry[url.to_s] = bytes }
         boot_response_into_ctx(bytes)
         # Adopt into the in-VM store too, so a LATER resolve keeps the correct content
-        # type (the @blob_registry b64 path resolves as application/octet-stream).
-        @runtime.call('__csimAdoptBlobBytes', url.to_s, b64, content_type.to_s) rescue nil
+        # type (a bytes-only @blob_registry entry resolves as application/octet-stream).
+        @runtime.call('__csimAdoptBlobBytes', url.to_s, bytes, content_type.to_s) rescue nil
       end
 
       # A user-initiated `URL.revokeObjectURL`. Storage-partitioned + cross-isolate:
@@ -8710,11 +8718,10 @@ module Capybara
       # ffmpeg extracts the first frame as raw RGBA. JS caches both so
       # `canvas.drawImage(video, …)` blits like any ImageBitmap. A `<video src>` that
       # points at a served file (http / relative) or a `data:` URL resolves its bytes
-      # the same way — see `video_bytes_b64` below.
-      def decode_video_frame(b64_bytes)
+      # the same way — see `video_bytes` below.
+      def decode_video_frame(bytes)
         host_image_op('decode_video_frame') {
-          bytes = Base64.decode64(b64_bytes.to_s)
-          next nil if bytes.empty?
+          next nil if bytes.nil? || bytes.empty?
           require 'tempfile'
           require 'json'
           Tempfile.create(['csim-video', '.bin'], binmode: true) do |f|
@@ -8733,28 +8740,20 @@ module Capybara
         }
       end
 
-      # Fetch a media resource (http / relative URL) and return its bytes base64-encoded,
-      # so a `<video src>` pointing at a served file decodes the same way a blob: / data:
-      # source does. Binary stays Ruby-side; only ASCII base64 crosses into V8. Returns
-      # nil when the fetch fails.
-      def video_bytes_b64(url, cors = false, credentials = 'same-origin', client_url = nil)
+      # Fetch a media resource (http / relative URL) and return its bytes, so a `<video
+      # src>` pointing at a served file decodes the same way a blob: / data: source does.
+      # Returns {'bytes', 'tainted'}, or nil when the fetch fails.
+      def video_bytes(url, cors = false, credentials = 'same-origin', client_url = nil)
         # A `crossorigin` element runs the CORS check (an ACAO refusal fails the
         # load); a plain one is a no-cors fetch whose cross-origin bytes TAINT a
         # canvas they're drawn into — the exact <img> model (image_tainted?), with
         # the fetching CLIENT's document (a frame's own, not the top window's) as
         # the origin the verdict compares against.
-        result = rack_fetch('GET', url, '', {}, 'follow', cors ? 'cors' : nil, credentials: credentials, client_url: client_url)
+        result = rack_fetch('GET', url, '', {}, 'follow', cors ? 'cors' : nil, credentials: credentials, client_url: client_url, body_raw: true)
         return nil unless result && result['status'].to_i < 400
-        # The RAW bytes ride `body_b64` (see response_hash) for any non-ASCII response;
-        # the text `body` field is a UTF-8 re-decode that corrupts binary media. Fall
-        # back to base64-of-body only for a pure-ASCII response (byte-identical there).
-        b64 = result['body_b64']
-        if b64.nil? || b64.empty?
-          body = result['body'].to_s
-          b64  = body.empty? ? nil : [body].pack('m0')
-        end
-        return nil unless b64
-        {'b64' => b64, 'tainted' => origin_tainted?(url, cors, client_url: client_url)}
+        bytes = result['body_raw'].to_s
+        return nil if bytes.empty?
+        {'bytes' => bytes, 'tainted' => origin_tainted?(url, cors, client_url: client_url)}
       end
 
       private def ffprobe_stream(path)
@@ -9448,14 +9447,14 @@ module Capybara
           if @driver.respond_to?(:blob_bytes_for) && (data = @driver.blob_bytes_for(u, self))
             return data[:bytes]
           end
-          b64 = @runtime.call('__csimReadBlobBase64', u)
+          bytes = @runtime.call('__csimReadBlobBytes', u)
           # A blob created INSIDE a frame realm lives in that realm's in-VM store, which the main
-          # runtime's `__csimReadBlobBase64` above can't see. But createObjectURL also registered its
+          # runtime's `__csimReadBlobBytes` above can't see. But createObjectURL also registered its
           # bytes in the cross-realm `@blob_registry` (crossCtx, since a frame realm is multi-realm),
           # so fall back to it — this is what makes `new Worker(blobURL)` work from a data: iframe.
-          b64 = blob_resolve(u) if b64.nil? || b64.to_s.empty?
-          return nil if b64.nil? || b64.to_s.empty?
-          return Base64.decode64(b64.to_s)
+          bytes = blob_resolve(u) if bytes.nil? || bytes.empty?
+          return nil if bytes.nil? || bytes.empty?
+          return bytes
         end
         # `data:[<mediatype>][;base64],<data>` worker scripts (a worker created
         # from a data: URL — its origin is opaque, so its blob: URLs serialize
@@ -10201,20 +10200,18 @@ module Capybara
         }
       end
 
-      # Content types whose bytes are already representable in the
-      # UTF-8 string that ships back to JS — base64 wouldn't add
-      # anything and `Base64.strict_encode64` is ~1 % of suite wall
-      # time on Discourse. Binary types (images, octet-stream,
-      # gzipped traineddata, etc.) still need `body_b64` because V8
-      # mangles bytes 0x80-0xFF over the UTF-8 string boundary.
-      # `fetch.js#_decodeBytes` and `xhr.js` both fall back to the
-      # text body when `body_b64` is absent.
+      # Content types whose pure-ASCII bytes ARE the UTF-8 `body` text
+      # that ships back to JS, so `body_bytes` (the bytes a second time)
+      # is left off for them — the dominant app JSON / HTML traffic.
+      # Anything else (images, octet-stream, gzipped traineddata, a
+      # non-ASCII text body) carries `body_bytes`; `fetch.js` and
+      # `xhr.js` both fall back to the text body when it is absent.
       TEXT_CONTENT_TYPE_PREFIXES = %w[text/ application/json application/javascript application/ecmascript application/xml image/svg+xml].freeze
 
       # `body_raw: true` is for a host-side BINARY consumer (an <img> / @font-face load
       # that decodes the bytes here and never shows them to script): the bytes ride
-      # `body_raw` untouched and the text decode + base64 are skipped — they would be
-      # ~15 ms per MB of pure waste on a path that runs for EVERY image load.
+      # `body_raw` untouched and the text decode is skipped — it would be pure waste on
+      # a path that runs for EVERY image load.
       def response_hash(status, headers, body, url, redirected, type: 'basic', body_null: false, opaque_render: nil, body_raw: false, cached: nil, encoded: nil, raw_headers: nil)
         raw     = body.to_s
         hdrs    = stringify(headers)
@@ -10251,7 +10248,7 @@ module Capybara
         # `body` crosses as TEXT — `responseText` semantics: the bytes decoded
         # as UTF-8 with invalid sequences replaced (a leading BOM selects the
         # encoding per the HTML "decode" algorithm and is removed). The real
-        # bytes for binary consumers ride `body_b64`; the Rack body arrives
+        # bytes for binary consumers ride `body_bytes`; the Rack body arrives
         # BINARY-tagged (see `RuntimeShared.utf8_text`).
         bom_charset = nil
         text =
@@ -10296,17 +10293,17 @@ module Capybara
         # XML-prolog / <meta charset>-sniffed encoding (responseText), or multibyte UTF-8
         # read as arraybuffer/blob — the client decodes them with the final encoding
         # (decodeResponseBytes). `ascii_only?` is a cheap C-level scan, so the dominant
-        # pure-ASCII app JSON/HTML traffic keeps the fast path and pays no base64.
-        out['body_b64'] = Base64.strict_encode64(raw) unless is_text && raw.ascii_only?
+        # pure-ASCII app JSON/HTML traffic keeps the fast path and ships the body once.
+        # BINARY-tagged, the bytes reach JS as a Uint8Array.
+        out['body_bytes'] = raw.b unless is_text && raw.ascii_only?
         # An OPAQUE (no-cors cross-origin) response hides its body from every script-visible read
-        # (body/body_b64 are empty). But the bytes are still needed to RENDER an <img> the response
+        # (body/body_bytes are empty). But the bytes are still needed to RENDER an <img> the response
         # backs (a cross-origin image displays, merely canvas-tainting) — carry them on a private
         # side channel the image decode path reads, never a public body accessor. Attached to EVERY
         # opaque response, not just image requests: this is `rack_fetch`, which has no request
         # destination (a SW's own no-cors `fetch()` doesn't know its eventual consumer is an <img>),
-        # so the choice is made client-side. The bytes are already in memory (`body_str`); the added
-        # cost is one base64 per opaque response, off any hot path.
-        out['opaque_render_b64'] = Base64.strict_encode64(opaque_render) if opaque_render && !opaque_render.empty?
+        # so the choice is made client-side. The bytes are already in memory (`body_str`).
+        out['opaque_render'] = opaque_render.b if opaque_render && !opaque_render.empty?
         out
       end
 
@@ -10316,7 +10313,7 @@ module Capybara
       # `respondWith(fetch(new Request(url, {redirect: 'manual'})))` and the navigation
       # follows the Location — or, a redirect-status response with NO Location, commits
       # the body as the document, as Chrome does). The unfiltered values ride private
-      # wire fields no public accessor reads (the `opaque_render_b64` pattern), so they
+      # wire fields no public accessor reads (the `opaque_render` pattern), so they
       # survive the SW respondWith wire and a Cache put/match round-trip
       # (serializeResponseWire copies them from `_raw`). Consumed by the navigation
       # normalization in service_worker_navigation_fetch.
@@ -10327,7 +10324,7 @@ module Capybara
           o_r['redirect_loc'] = resolve_against(loc, target)
         else
           o_r['redirect_ct']       = (resp_headers['content-type'] || resp_headers['Content-Type']).to_s
-          o_r['opaque_render_b64'] = Base64.strict_encode64(body_str.to_s) unless body_str.to_s.empty?
+          o_r['opaque_render'] = body_str.to_s.b unless body_str.to_s.empty?
         end
         o_r
       end

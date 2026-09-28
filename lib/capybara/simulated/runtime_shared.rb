@@ -1,6 +1,5 @@
 # frozen_string_literal: true
 
-require 'base64'
 require 'openssl'
 require 'securerandom'
 
@@ -268,7 +267,7 @@ module Capybara
         # eager-@app.calls a foreign URL (side effects: extra visit / log row).
         '__csim_allHostsLocal'       => ->(b, *a) { b.send(:all_hosts_local?) },
         '__csim_decodeVideoFrame'    => ->(b, *a) { b.decode_video_frame(a[0]) },
-        '__csim_videoBytesB64'       => ->(b, *a) { b.video_bytes_b64(a[0], !!a[1], a[2] || 'same-origin', a[3]) },
+        '__csim_videoBytes'          => ->(b, *a) { b.video_bytes(a[0], !!a[1], a[2] || 'same-origin', a[3]) },
         '__csim_encodeImage'         => ->(b, *a) { b.encode_image(a[0], a[1], a[2], a[3], a[4]) },
         # WebAuthn create / get raise `WebauthnState::Error` carrying
         # the DOMException name (`InvalidStateError`, …); rescue here
@@ -318,8 +317,6 @@ module Capybara
         },
         '__csim_randomUUID'   => ->(*_) { SecureRandom.uuid },
         '__csim_randomBytes'  => ->(*a) { SecureRandom.bytes(a[0].to_i).bytes },
-        '__csim_atob'         => ->(*a) { Base64.decode64(a[0].to_s) },
-        '__csim_btoa'         => ->(*a) { Base64.strict_encode64(a[0].to_s) },
         '__csim_utf8Encode'   => ->(*a) { a[0].to_s.b.bytes },
         '__csim_utf8Decode'   => ->(*a) { a[0].pack('C*').force_encoding('UTF-8') },
         # `__csim_parseUrl` is defined in JS now (js/src/url-parse.js, backed by

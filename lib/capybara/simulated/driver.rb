@@ -595,8 +595,8 @@ module Capybara
       # the caller falls back. A click-time `snapshot` is the navigating context's own
       # blob captured before a deferred nav could revoke it.
       private def load_blob_into_window(target, url, source, snapshot: nil)
-        data = if snapshot.is_a?(Hash) && snapshot['b64']
-          { bytes: Base64.decode64(snapshot['b64'].to_s), type: snapshot['type'].to_s }
+        data = if snapshot.is_a?(Hash) && snapshot['bytes']
+          { bytes: snapshot['bytes'], type: snapshot['type'].to_s }
         else
           blob_bytes_for(url, source)
         end
