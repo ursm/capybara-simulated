@@ -62,7 +62,8 @@ Gem::Specification.new do |spec|
   # only when compiling from source; a prebuilt (fat) gem carries the compiled extension already.
   spec.add_dependency 'rb_sys', '~> 0.9'
   # The JS engine: V8 via rusty_v8. Its native engine is linked into csim_native (above); the gem
-  # supplies the Ruby API around it. 0.2.3 carries the `install_classes` / `set_realm_init_hook`
-  # seams csim_native builds on.
-  spec.add_dependency 'rusty_racer', '~> 0.2', '>= 0.2.3'
+  # supplies the Ruby API around it. 0.2.4 is the first with the `install_classes` / `set_realm_init_hook`
+  # seams csim_native builds on — and the first whose `require 'rusty_racer'` skips loading its own `.so`
+  # once csim_native has defined the classes: an earlier one loads a SECOND V8 runtime into the process.
+  spec.add_dependency 'rusty_racer', '~> 0.2', '>= 0.2.4'
 end
