@@ -10226,8 +10226,6 @@ html/rendering/the-details-element/details-content-pseudo-attr.html:
 - "== html/rendering/the-details-element/details-content-pseudo-attr-ref.html"
 html/rendering/the-details-element/details-display-type-001.html:
 - "== html/rendering/the-details-element/details-display-type-001-ref.html"
-html/rendering/the-details-element/details-display-type-002.html:
-- "== html/rendering/the-details-element/details-display-type-002-ref.html"
 html/rendering/the-details-element/details-display.html:
 - default display of other summary element in details is block
 - default display of summary element outside details is block
