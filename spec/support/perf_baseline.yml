@@ -4,27 +4,8 @@ grid_table:
     passes: 3
     nl_passes: 3
     nl_declines: 0
-    nl_records_copied: 8812
+    nl_records_copied: 8818
     nl_blocks_sent: 1600
-    nl_gate_answers: 4806
-    nl_measures_put_back: 0
-    element_layouts: 0
-    reuse_hit: 0
-    reuse_remeasured: 0
-    reuse_escapingAbs: 0
-    ctx_sweeps: 201
-    ctx_gate_active: 1
-  wall:
-    workload_ms: 444.452
-    calib_ms: 2.992
-    ratio: 148.566
-shadow_host:
-  counts:
-    passes: 3
-    nl_passes: 3
-    nl_declines: 0
-    nl_records_copied: 8815
-    nl_blocks_sent: 1602
     nl_gate_answers: 4810
     nl_measures_put_back: 0
     element_layouts: 0
@@ -34,9 +15,28 @@ shadow_host:
     ctx_sweeps: 201
     ctx_gate_active: 1
   wall:
-    workload_ms: 500.227
-    calib_ms: 2.829
-    ratio: 176.811
+    workload_ms: 488.664
+    calib_ms: 2.733
+    ratio: 178.821
+shadow_host:
+  counts:
+    passes: 3
+    nl_passes: 3
+    nl_declines: 0
+    nl_records_copied: 8824
+    nl_blocks_sent: 1602
+    nl_gate_answers: 4814
+    nl_measures_put_back: 0
+    element_layouts: 0
+    reuse_hit: 0
+    reuse_remeasured: 0
+    reuse_escapingAbs: 0
+    ctx_sweeps: 201
+    ctx_gate_active: 1
+  wall:
+    workload_ms: 523.874
+    calib_ms: 2.735
+    ratio: 191.538
 layout_walk:
   counts:
     ok: 1
@@ -50,17 +50,17 @@ layout_walk:
     nativeOutOfFlow: 0
     pushedContributions: 0
   wall:
-    workload_ms: 224.164
-    calib_ms: 2.78
-    ratio: 80.638
+    workload_ms: 231.224
+    calib_ms: 2.716
+    ratio: 85.131
 flex_shell:
   counts:
     passes: 6
     nl_passes: 6
     nl_declines: 0
-    nl_records_copied: 2718
+    nl_records_copied: 2730
     nl_blocks_sent: 600
-    nl_gate_answers: 2718
+    nl_gate_answers: 2725
     nl_measures_put_back: 1800
     element_layouts: 0
     reuse_hit: 0
@@ -69,17 +69,17 @@ flex_shell:
     ctx_sweeps: 0
     ctx_gate_active: 1
   wall:
-    workload_ms: 109.209
-    calib_ms: 2.786
-    ratio: 39.194
+    workload_ms: 112.625
+    calib_ms: 2.739
+    ratio: 41.115
 flex_row_shell:
   counts:
     passes: 5
     nl_passes: 5
     nl_declines: 0
-    nl_records_copied: 30005
+    nl_records_copied: 30015
     nl_blocks_sent: 0
-    nl_gate_answers: 46505
+    nl_gate_answers: 46511
     nl_measures_put_back: 0
     element_layouts: 0
     reuse_hit: 0
@@ -88,6 +88,6 @@ flex_row_shell:
     ctx_sweeps: 0
     ctx_gate_active: 1
   wall:
-    workload_ms: 558.441
-    calib_ms: 2.778
-    ratio: 201.055
+    workload_ms: 592.786
+    calib_ms: 2.812
+    ratio: 210.828
