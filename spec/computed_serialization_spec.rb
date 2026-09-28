@@ -85,6 +85,18 @@ RSpec.describe 'computed value serialization' do
       .to eq(['url("http://www.example.com/a.png")'])
   end
 
+  # …and resolves a path the way the URL parser does, whichever way it gets there: a plain absolute path is the base's
+  # origin and the path, anything the parser rewrites (a dot segment, a space, a scheme-relative url) goes through it.
+  # Chrome's values.
+  it 'resolves a url() path as the URL parser does' do
+    got = ['/img/a.png', '/img/./b.png', '/img/../c.png', '"/img/d e.png"', '//cdn.test/e.png', '/img/.f.png'].map {|url|
+      computed("background-image: url(#{url})", %w[backgroundImage]).first
+    }
+    expect(got).to eq(['url("http://www.example.com/img/a.png")', 'url("http://www.example.com/img/b.png")',
+                       'url("http://www.example.com/c.png")', 'url("http://www.example.com/img/d%20e.png")',
+                       'url("http://cdn.test/e.png")', 'url("http://www.example.com/img/.f.png")'])
+  end
+
   it 'reads the same from a rule and from a style attribute' do
     app = lambda {|_env|
       [200, {'content-type' => 'text/html'}, [<<~HTML]]
