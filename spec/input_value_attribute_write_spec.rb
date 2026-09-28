@@ -52,6 +52,25 @@ RSpec.describe 'input value attribute writes' do
     expect(got).to eq(['type:null>checkbox', 'value:null>q'])
   end
 
+  # The type change is an ATTRIBUTE change step, so every path that changes the attribute takes it — not only
+  # `setAttribute`: `setAttributeNS(null, 'type')`, an `Attr`'s value, and removing it. Chrome-measured.
+  it 'runs the type change for every path that changes the attribute' do
+    s = session('<!DOCTYPE html><input id="a"><input id="b" type="text">')
+    got = s.evaluate_script(<<~JS)
+      (() => {
+        const r = [];
+        const a = document.getElementById('a');
+        a.value = 'aa'; a.setAttributeNS(null, 'type', 'checkbox'); r.push(a.getAttribute('value'), a.value);
+        const b = document.getElementById('b');
+        b.value = 'bb'; b.getAttributeNode('type').value = 'radio'; r.push(b.getAttribute('value'), b.value);
+        const c = document.createElement('input');
+        c.type = 'checkbox'; c.setAttribute('value', 'v'); c.removeAttribute('type'); r.push(c.type, c.value);
+        return r;
+      })()
+    JS
+    expect(got).to eq(%w[aa aa bb bb text v])
+  end
+
   it "records the value a checkbox's set(string) writes" do
     s = session('<!DOCTYPE html><style>input[value="foo"] { margin-left: 5px }</style><input type="checkbox" id="cb">')
     s.execute_script(<<~JS)
