@@ -40,6 +40,13 @@ RSpec.describe 'layout invalidation through structural selectors' do
     ['a subject that stops being :last-child', '#box > div:last-child { width: 100px }',
      '<div id="box"><div id="t" style="height:5px"></div></div>',
      "document.getElementById('box').append(document.createElement('div'))", [100, 5], [300, 5]],
+    # …and the keyless compounds a change still reaches: one behind a keyed parent, and one after a sibling combinator.
+    ['a keyless subject behind a keyed parent', '#box > *:last-child { width: 100px }',
+     '<div id="box"><div id="t" style="height:5px"></div></div>',
+     "document.getElementById('box').append(document.createElement('div'))", [100, 5], [300, 5]],
+    ['a keyless subject after a sibling combinator', '.a + * { width: 100px }',
+     '<div id="box"><div id="t" style="height:5px"></div></div>',
+     "const a = document.createElement('i'); a.className = 'a'; document.getElementById('box').prepend(a)", [300, 5], [100, 5]],
     ['an ancestor a sibling combinator reaches', '#box > .x + div p { white-space: pre }',
      '<div id="box"><div id="q" style="width:60px"><p id="t" style="margin:0">aa bb cc</p></div></div>',
      "const x = document.createElement('i'); x.className = 'x'; document.getElementById('box').prepend(x)", [60, 44], [60, 22]],
@@ -193,6 +200,37 @@ RSpec.describe 'layout invalidation through structural selectors' do
       expect(append).to be <= base[0] + allowance, css
       expect(toggle).to be <= 1, css
     end
+  end
+
+  # …and the children it reaches are only those a position is READ of: the change point's neighbour matching none of the
+  # compounds that read one on its side of the change keeps its subtree. jQuery's support tests append a probe to
+  # `<html>` after `<body>` and remove it, and a Redmine page's `li:last-child` then relaid the whole body out, four
+  # times a load. (`label.error + *` reads the element AFTER the change point, which a probe appended after `n` is not.)
+  it 'leaves a neighbour no positional compound can match its subtree' do
+    marks = lambda do |css|
+      html = "<!DOCTYPE html><style>#{css}</style><div id=w><section id=n><p>a <b>b</b></p><p>c</p></section></div>"
+      s = simulated_session(->(_env) { [200, {'content-type' => 'text/html'}, [html]] })
+      s.visit '/'
+      s.evaluate_script(<<~JS)
+        (() => {
+          const w = document.getElementById('w'), n = document.getElementById('n');
+          n.getBoundingClientRect();
+          const m0 = __csimSubtreeMarks();
+          const probe = document.createElement('div');
+          w.appendChild(probe); n.getBoundingClientRect();
+          probe.remove(); n.getBoundingClientRect();
+          return __csimSubtreeMarks() - m0;
+        })()
+      JS
+    end
+    base = marks.call('')
+    ['li:last-child { margin-bottom: 0 }', 'li:first-child { margin-top: 0 }', '.x > *:last-child { margin: 1px }',
+     'label.error + * { margin: 1px }', 'tr:nth-child(odd) td { padding: 1px }', '.t li:first-child a { margin: 1px }'].each do |css|
+      expect(marks.call(css)).to eq(base), css
+    end
+    # …where one can, it still does: `section:last-child`, and a keyless child of `#w`.
+    expect(marks.call('section:last-child { margin: 1px }')).to be > base
+    expect(marks.call('#w > :last-child { margin: 1px }')).to be > base
   end
 
   # …a `::part()` rule behind a `:has()`: the part is a real box one tree in, under the host the flip restyles; and one

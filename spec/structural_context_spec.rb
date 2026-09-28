@@ -289,6 +289,22 @@ RSpec.describe 'structural-context invalidation' do
     expect(got).to eq(['rgb(0, 0, 0)', true, 'rgb(0, 128, 0)', true])
   end
 
+  # A child-list change re-keys the children a position is read of, not every child beside the change point: one no
+  # compound that reads a position can match — `tr` here, or any child of a `.c` — keeps its context.
+  it 'leaves the context of a neighbour no positional compound can match' do
+    got = colors('.s tr:first-child td { color: rgb(0, 0, 255) } .c > *:last-child b { color: rgb(0, 128, 0) }',
+                 '<div id="w"><p id="p"><b id="b">b</b></p></div><div class="c" id="c"><p><b id="x">x</b></p></div>', <<~JS)
+      const b = document.getElementById('b'), w = document.getElementById('w');
+      const before = color('x'), b0 = __csimCtxEpoch(b);
+      w.prepend(document.createElement('i'));
+      w.append(document.createElement('i'));
+      const kept = __csimCtxEpoch(b) === b0;
+      document.getElementById('c').append(document.createElement('i'));
+      return [before, kept, color('x')];
+    JS
+    expect(got).to eq(['rgb(0, 128, 0)', true, 'rgb(0, 0, 0)'])
+  end
+
   # A `:has()` reads DOWNWARD, which no context epoch can see: a read that considered its rule is never memoised, so what
   # its argument names has nothing to re-key. Indexed anyway, the combinator Redmine nests in one
   # (`span.icon-checked:has(:not(a svg.icon-svg))`) made the whole index unsafe — every child-list change a full re-key.
