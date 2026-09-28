@@ -2608,8 +2608,9 @@ RSpec.describe 'Canvas / ImageData / OffscreenCanvas' do
     # An SVG <image> fetches its href just like an <img> src, so createPattern can tell a
     # BROKEN href (throw InvalidStateError) from a usable bitmap (a real pattern).
     out = session.evaluate_script(<<~JS)
-      const mk = (href, ns) => { const im = document.createElementNS('http://www.w3.org/2000/svg', 'image');
-        im.setAttribute(ns ? 'href' : 'xlink:href', href); return im; };
+      const mk = (href, plain) => { const im = document.createElementNS('http://www.w3.org/2000/svg', 'image');
+        if (plain) im.setAttribute('href', href); else im.setAttributeNS('http://www.w3.org/1999/xlink', 'xlink:href', href);
+        return im; };
       const good   = mk("data:image/svg+xml," + encodeURIComponent(
         "<svg xmlns='http://www.w3.org/2000/svg' width='8' height='8'><rect fill='red' width='8' height='8'/></svg>"), true);
       const broken = mk("data:image/png;base64,bm90LWEtcG5n", false);   // undecodable -> broken
@@ -2627,7 +2628,9 @@ RSpec.describe 'Canvas / ImageData / OffscreenCanvas' do
     expect(r['broken']).to eq('InvalidStateError')
   end
 
-  it 'reloads an SVG <image> on setAttributeNS(xlink) / removeAttribute and defers empty href to xlink:href' do
+  # The XLink href is the NAMESPACED attribute: `setAttribute('xlink:href', …)` makes an attribute in no namespace that
+  # names nothing, and an `href`, even an empty one, wins over it — Chrome and Firefox both fail that image.
+  it 'reloads an SVG <image> on setAttributeNS(xlink) / removeAttribute; an empty href still wins' do
     session = simulated_session(app)
     session.visit('/')
     out = session.evaluate_script(<<~JS)
@@ -2643,15 +2646,20 @@ RSpec.describe 'Canvas / ImageData / OffscreenCanvas' do
       // Removing the sourcing attribute discards the request.
       ns.removeAttribute('xlink:href');
       const afterRemove = ctx.createPattern(ns, 'repeat');   // null
-      // An empty href defers to a valid xlink:href rather than blanking.
-      const fb = mk(); fb.setAttribute('href', ''); fb.setAttribute('xlink:href', url);
-      const fallback = isPat(fb);
-      JSON.stringify({ nsLoaded, afterRemove, fallback });
+      const err = (fn) => { try { return fn(); } catch (e) { return e.name; } };
+      // An empty href is the href: it does not defer to a valid XLink one.
+      const fb = mk(); fb.setAttribute('href', ''); fb.setAttributeNS(XLINK, 'xlink:href', url);
+      const emptyWins = err(() => isPat(fb));
+      // …and an attribute merely NAMED `xlink:href` is no XLink href at all.
+      const plain = mk(); plain.setAttribute('xlink:href', url);
+      const plainNamed = ctx.createPattern(plain, 'repeat');
+      JSON.stringify({ nsLoaded, afterRemove, emptyWins, plainNamed });
     JS
     r = JSON.parse(out)
     expect(r['nsLoaded']).to be true
     expect(r['afterRemove']).to be_nil
-    expect(r['fallback']).to be true
+    expect(r['emptyWins']).not_to eq(true)
+    expect(r['plainNamed']).to be_nil
   end
 
   it 'parses colour keywords case-insensitively and auto-closes an unclosed function' do

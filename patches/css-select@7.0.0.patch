@@ -160,7 +160,7 @@ index 89dab0a26c12f18182e4c98b69bde2b68fc7fc2f..08071acf14b314b76c91de7e8cbf42db
              };
          }
 diff --git a/dist/general.js b/dist/general.js
-index 5d3fdf164e2a7e9612dec3cf6bdb2768a14d06ed..412149e6b64800634fec31cd1366cfeef4690cae 100644
+index 5d3fdf164e2a7e9612dec3cf6bdb2768a14d06ed..9bfb14a06c73c7ed5d5bea052dac40f1a535deee 100644
 --- a/dist/general.js
 +++ b/dist/general.js
 @@ -1,5 +1,5 @@
@@ -170,7 +170,7 @@ index 5d3fdf164e2a7e9612dec3cf6bdb2768a14d06ed..412149e6b64800634fec31cd1366cfee
  import { getElementParent } from "./helpers/querying.js";
  import { compilePseudoSelector } from "./pseudo-selectors/index.js";
  /*
-@@ -27,9 +27,22 @@ export function compileGeneralSelector(next, selector, options, context, compile
+@@ -27,9 +27,24 @@ export function compileGeneralSelector(next, selector, options, context, compile
              if (selector.namespace != null) {
                  throw new Error("Namespaced attributes are not yet supported by css-select");
              }
@@ -184,17 +184,19 @@ index 5d3fdf164e2a7e9612dec3cf6bdb2768a14d06ed..412149e6b64800634fec31cd1366cfee
 +                (!options.xmlMode || options.lowerCaseAttributeNames)) {
                  selector.name = selector.name.toLowerCase();
              }
-+            // csim patch: a list-case-insensitive value is decided per element (see `ignoresCaseForHtmlOnly`); the
-+            // adapter says which elements are HTML ones in an HTML document.
-+            if (options.adapter.isHtmlElementInHtmlDocument && ignoresCaseForHtmlOnly(selector, options)) {
-+                const insensitive = attributeRules[selector.action](next, { ...selector, ignoreCase: true }, options);
++            // csim patch: a list-case-insensitive value is so for an HTML element in an HTML document only (see
++            // `ignoresCaseForHtmlOnly`). The document's kind is fixed at compile time (`htmlDocument`, like
++            // `quirksMode`); the adapter says which elements are HTML ones.
++            if (options.adapter.isHtmlElement && ignoresCaseForHtmlOnly(selector, options)) {
 +                const sensitive = attributeRules[selector.action](next, { ...selector, ignoreCase: false }, options);
-+                return (element) => (options.adapter.isHtmlElementInHtmlDocument(element) ? insensitive : sensitive)(element);
++                if (options.htmlDocument === false) return sensitive;
++                const insensitive = attributeRules[selector.action](next, { ...selector, ignoreCase: true }, options);
++                return (element) => (options.adapter.isHtmlElement(element) ? insensitive : sensitive)(element);
 +            }
              return attributeRules[selector.action](next, selector, options);
          }
          case SelectorType.Pseudo: {
-@@ -40,12 +53,20 @@ export function compileGeneralSelector(next, selector, options, context, compile
+@@ -40,12 +55,23 @@ export function compileGeneralSelector(next, selector, options, context, compile
              if (selector.namespace != null) {
                  throw new Error("Namespaced tag names are not yet supported by css-select");
              }
@@ -204,13 +206,16 @@ index 5d3fdf164e2a7e9612dec3cf6bdb2768a14d06ed..412149e6b64800634fec31cd1366cfee
 +            const { name } = selector;
 +            // csim patch: a type selector is ASCII case-insensitive against an HTML element in an HTML document and
 +            // case-SENSITIVE against anything else (Selectors 4 §5.1 — `foreignobject` does not match an SVG
-+            // `foreignObject`; Firefox agrees). Only the adapter knows which an element is (`matchesTagName`).
++            // `foreignObject`; Firefox agrees). The document's kind is fixed at compile time (`htmlDocument`); the
++            // adapter compares the element (`matchesTagName`) — and an all-lowercase name, the common one, is the
++            // same comparison either way.
 +            const lower = !options.xmlMode || options.lowerCaseTags
 +                ? name.replace(/[A-Z]/g, (c) => String.fromCharCode(c.charCodeAt(0) + 32))
 +                : name;
 +            if (adapter.matchesTagName) {
++                const htmlDocument = options.htmlDocument !== false;
 +                return function tag(element) {
-+                    return adapter.matchesTagName(element, name, lower) && next(element);
++                    return adapter.matchesTagName(element, name, lower, htmlDocument) && next(element);
 +                };
              }
              return function tag(element) {

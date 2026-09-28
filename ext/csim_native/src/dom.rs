@@ -86,6 +86,10 @@ pub(crate) struct NodeData {
     // reads the original UTF-16 units from here when present. Empty for virtually every element; only the
     // value that actually lost data lands here, keyed by attribute name.
     pub(crate) attr_u16: Vec<(String, Vec<u16>)>,
+    // The namespace and local name of each attribute that HAS a namespace, by its store key (a qualified name, or the
+    // JS side's synthetic key for an unprefixed one): (key, namespace URL, local name). Empty for virtually every
+    // element — every other attribute is in no namespace, named by its key.
+    pub(crate) attr_ns: Vec<(String, String, String)>,
     pub(crate) parent: Option<NodeId>,
     pub(crate) children: Vec<NodeId>,
     // Position within `parent.children`, kept current on every link/unlink, so the
@@ -128,6 +132,27 @@ impl NodeData {
                     self.attr_u16.retain(|(k, _)| k != name);
                 }
             }
+        }
+    }
+
+    // The value of the attribute `local` in NO namespace — what an HTML reflection or an unprefixed selector names.
+    pub(crate) fn plain_attr(&self, local: &str) -> Option<&str> {
+        if self.attr_ns.iter().any(|(k, _, _)| k == local) {
+            return None;
+        }
+        self.get_attr(local)
+    }
+    // The value of the attribute (`ns`, `local`).
+    pub(crate) fn ns_attr(&self, ns: &str, local: &str) -> Option<&str> {
+        let (key, _, _) = self.attr_ns.iter().find(|(_, n, l)| n == ns && l == local)?;
+        self.get_attr(key)
+    }
+    // Drop the attribute stored under `name`, with what rides beside it.
+    fn remove_attr(&mut self, name: &str) {
+        self.attributes.retain(|(k, _)| k != name);
+        self.clear_attr_u16(name);
+        if !self.attr_ns.is_empty() {
+            self.attr_ns.retain(|(k, _, _)| k != name);
         }
     }
 
@@ -498,6 +523,7 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_, ()>, ctx: &v8::Global<v8:
     register(scope, ns, "setAttr", set_attr, context_id);
     register(scope, ns, "removeAttr", remove_attr, context_id);
     register(scope, ns, "syncAttrs", sync_attrs, context_id);
+    register(scope, ns, "setAttrNamespace", set_attr_namespace, context_id);
     // The store-flip's native-backed `_attrs`: __dom.attrsView(nid) -> an interceptor object over
     // that node's attributes (the Element constructor installs it in place of the JS `{}`).
     register(scope, ns, "attrsView", attrs_view, context_id);
@@ -572,6 +598,7 @@ fn import_node(
         ns,
         attributes,
         attr_u16,
+        attr_ns: Vec::new(),
         parent,
         children: Vec::new(),
         child_index: 0,
@@ -693,8 +720,7 @@ fn remove_attr(
     let name = args.get(1).to_rust_string_lossy(scope);
     let cid = realm_id(scope, &args);
     if let Some(node) = realm(scope, cid).get_mut(id) {
-        node.attributes.retain(|(k, _)| k != &name);
-        node.clear_attr_u16(&name);
+        node.remove_attr(&name);
     }
 }
 
@@ -715,6 +741,30 @@ fn sync_attrs(
     if let Some(node) = realm(scope, cid).get_mut(id) {
         node.attributes = attributes;
         node.attr_u16 = attr_u16;
+        let attrs = &node.attributes;
+        node.attr_ns.retain(|(k, _, _)| attrs.iter().any(|(a, _)| a == k));
+    }
+}
+
+// __dom.setAttrNamespace(nodeNid, key, ns, localName): the attribute stored under `key` is in namespace `ns` with that
+// local name — or, for an empty `ns`, in none (its record is dropped).
+fn set_attr_namespace(
+    scope: &mut v8::PinScope<'_, '_>,
+    args: v8::FunctionCallbackArguments<'_>,
+    _rv: v8::ReturnValue<'_, v8::Value>,
+) {
+    let Some(id) = nid_arg(scope, &args, 0) else {
+        return;
+    };
+    let key = args.get(1).to_rust_string_lossy(scope);
+    let ns = args.get(2).to_rust_string_lossy(scope);
+    let local = args.get(3).to_rust_string_lossy(scope);
+    let cid = realm_id(scope, &args);
+    if let Some(node) = realm(scope, cid).get_mut(id) {
+        node.attr_ns.retain(|(k, _, _)| k != &key);
+        if !ns.is_empty() {
+            node.attr_ns.push((key, ns, local));
+        }
     }
 }
 
@@ -1941,8 +1991,7 @@ fn attrs_delete(
         return v8::Intercepted::kNo;
     };
     if let Some(node) = realm(scope, cid).get_mut(id) {
-        node.attributes.retain(|(k, _)| k != &name);
-        node.clear_attr_u16(&name);
+        node.remove_attr(&name);
     }
     rv.set_bool(true);
     v8::Intercepted::kYes

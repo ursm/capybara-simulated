@@ -7797,9 +7797,6 @@ custom-elements/attribute-changed-callback.html:
   the set of attributes for which attributedChangedCallback is invoked
 - attributedChangedCallback must be enqueued for attributes specified in a non-Array
   iterable observedAttributes
-- setAttributeNS and removeAttributeNS must enqueue and invoke attributeChangedCallback
-- setAttributeNode and removeAttributeNS must enqueue and invoke attributeChangedCallback
-  for an SVG attribute
 custom-elements/connected-callbacks-html-fragment-parsing.html:
 - Inserting a custom element into a cloned document using HTML fragment parsing must
   enqueue a custom element upgrade reaction, not synchronously invoke its constructor
