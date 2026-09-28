@@ -1,5 +1,5 @@
 diff --git a/dist/attributes.js b/dist/attributes.js
-index 89dab0a26c12f18182e4c98b69bde2b68fc7fc2f..57c4dd20ad2094c6e6c138dbf1d26e628ae29abe 100644
+index 89dab0a26c12f18182e4c98b69bde2b68fc7fc2f..08071acf14b314b76c91de7e8cbf42db54c8be0b 100644
 --- a/dist/attributes.js
 +++ b/dist/attributes.js
 @@ -6,7 +6,14 @@ import * as boolbase from "boolbase";
@@ -18,7 +18,18 @@ index 89dab0a26c12f18182e4c98b69bde2b68fc7fc2f..57c4dd20ad2094c6e6c138dbf1d26e62
  function escapeRegex(value) {
      return value.replace(reChars, "\\$&");
  }
-@@ -67,7 +74,12 @@ function shouldIgnoreCase(selector, options) {
+@@ -62,12 +69,23 @@ const caseInsensitiveAttributes = new Set([
+     "valuetype",
+     "vlink",
+ ]);
++// csim patch: whether `selector` is case-insensitive only because its attribute is on HTML's list of case-insensitive
++// attribute values — which holds for an HTML element in an HTML document and for no other (Selectors 4 §6.3,
++// HTML "case-sensitivity of selectors": `[type=CHECKBOX]` does not match an SVG element's `type="checkbox"`).
++export function ignoresCaseForHtmlOnly(selector, options) {
++    return selector.ignoreCase == null && !options.xmlMode && caseInsensitiveAttributes.has(asciiLower(selector.name));
++}
+ function shouldIgnoreCase(selector, options) {
+     return typeof selector.ignoreCase === "boolean"
          ? selector.ignoreCase
          : selector.ignoreCase === "quirks"
              ? !!options.quirksMode
@@ -32,7 +43,7 @@ index 89dab0a26c12f18182e4c98b69bde2b68fc7fc2f..57c4dd20ad2094c6e6c138dbf1d26e62
  }
  /**
   * Attribute selectors
-@@ -78,12 +90,12 @@ export const attributeRules = {
+@@ -78,12 +96,12 @@ export const attributeRules = {
          const { name } = data;
          let { value } = data;
          if (shouldIgnoreCase(data, options)) {
@@ -47,7 +58,7 @@ index 89dab0a26c12f18182e4c98b69bde2b68fc7fc2f..57c4dd20ad2094c6e6c138dbf1d26e62
                      next(element));
              };
          }
-@@ -95,13 +107,13 @@ export const attributeRules = {
+@@ -95,13 +113,13 @@ export const attributeRules = {
          let { value } = data;
          const { length } = value;
          if (shouldIgnoreCase(data, options)) {
@@ -63,7 +74,7 @@ index 89dab0a26c12f18182e4c98b69bde2b68fc7fc2f..57c4dd20ad2094c6e6c138dbf1d26e62
                      next(element));
              };
          }
-@@ -117,15 +129,19 @@ export const attributeRules = {
+@@ -117,15 +135,19 @@ export const attributeRules = {
      element(next, data, options) {
          const { adapter } = options;
          const { name, value } = data;
@@ -86,7 +97,7 @@ index 89dab0a26c12f18182e4c98b69bde2b68fc7fc2f..57c4dd20ad2094c6e6c138dbf1d26e62
                  next(node));
          };
      },
-@@ -141,12 +157,12 @@ export const attributeRules = {
+@@ -141,12 +163,12 @@ export const attributeRules = {
              return boolbase.falseFunc;
          }
          if (shouldIgnoreCase(data, options)) {
@@ -101,7 +112,7 @@ index 89dab0a26c12f18182e4c98b69bde2b68fc7fc2f..57c4dd20ad2094c6e6c138dbf1d26e62
                      next(element));
              };
          }
-@@ -162,11 +178,11 @@ export const attributeRules = {
+@@ -162,11 +184,11 @@ export const attributeRules = {
              return boolbase.falseFunc;
          }
          if (shouldIgnoreCase(data, options)) {
@@ -118,7 +129,7 @@ index 89dab0a26c12f18182e4c98b69bde2b68fc7fc2f..57c4dd20ad2094c6e6c138dbf1d26e62
          }
          return (element) => !!adapter.getAttributeValue(element, name)?.endsWith(value) &&
              next(element);
-@@ -178,12 +194,12 @@ export const attributeRules = {
+@@ -178,12 +200,12 @@ export const attributeRules = {
              return boolbase.falseFunc;
          }
          if (shouldIgnoreCase(data, options)) {
@@ -133,7 +144,7 @@ index 89dab0a26c12f18182e4c98b69bde2b68fc7fc2f..57c4dd20ad2094c6e6c138dbf1d26e62
                      next(element));
              };
          }
-@@ -198,12 +214,12 @@ export const attributeRules = {
+@@ -198,12 +220,12 @@ export const attributeRules = {
              return (element) => !!adapter.getAttributeValue(element, name) && next(element);
          }
          if (shouldIgnoreCase(data, options)) {
@@ -149,10 +160,17 @@ index 89dab0a26c12f18182e4c98b69bde2b68fc7fc2f..57c4dd20ad2094c6e6c138dbf1d26e62
              };
          }
 diff --git a/dist/general.js b/dist/general.js
-index 5d3fdf164e2a7e9612dec3cf6bdb2768a14d06ed..39e1ac2cf7b1714e9e64fb382a9df9edb8171ca0 100644
+index 5d3fdf164e2a7e9612dec3cf6bdb2768a14d06ed..412149e6b64800634fec31cd1366cfeef4690cae 100644
 --- a/dist/general.js
 +++ b/dist/general.js
-@@ -27,7 +27,13 @@ export function compileGeneralSelector(next, selector, options, context, compile
+@@ -1,5 +1,5 @@
+ import { SelectorType } from "css-what";
+-import { attributeRules } from "./attributes.js";
++import { attributeRules, ignoresCaseForHtmlOnly } from "./attributes.js";
+ import { getElementParent } from "./helpers/querying.js";
+ import { compilePseudoSelector } from "./pseudo-selectors/index.js";
+ /*
+@@ -27,9 +27,22 @@ export function compileGeneralSelector(next, selector, options, context, compile
              if (selector.namespace != null) {
                  throw new Error("Namespaced attributes are not yet supported by css-select");
              }
@@ -166,8 +184,17 @@ index 5d3fdf164e2a7e9612dec3cf6bdb2768a14d06ed..39e1ac2cf7b1714e9e64fb382a9df9ed
 +                (!options.xmlMode || options.lowerCaseAttributeNames)) {
                  selector.name = selector.name.toLowerCase();
              }
++            // csim patch: a list-case-insensitive value is decided per element (see `ignoresCaseForHtmlOnly`); the
++            // adapter says which elements are HTML ones in an HTML document.
++            if (options.adapter.isHtmlElementInHtmlDocument && ignoresCaseForHtmlOnly(selector, options)) {
++                const insensitive = attributeRules[selector.action](next, { ...selector, ignoreCase: true }, options);
++                const sensitive = attributeRules[selector.action](next, { ...selector, ignoreCase: false }, options);
++                return (element) => (options.adapter.isHtmlElementInHtmlDocument(element) ? insensitive : sensitive)(element);
++            }
              return attributeRules[selector.action](next, selector, options);
-@@ -40,12 +46,20 @@ export function compileGeneralSelector(next, selector, options, context, compile
+         }
+         case SelectorType.Pseudo: {
+@@ -40,12 +53,20 @@ export function compileGeneralSelector(next, selector, options, context, compile
              if (selector.namespace != null) {
                  throw new Error("Namespaced tag names are not yet supported by css-select");
              }
