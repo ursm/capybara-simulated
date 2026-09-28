@@ -231,8 +231,12 @@ module PerfGate
   # starts refusing shapes shows up as coverage falling rather than as nothing at all. What they CANNOT see
   # is a gate answering the same thing more slowly, which emits the same records — `sibScans` is there for
   # that, and it is the only key here that a pure slowdown moves.
+  # …on a page the JS layout lays out: a shadow run is held against the JS layout's boxes, and on a natively laid-out
+  # page it lays that reference out itself first (`ensureOracleLayout`) — two thirds of the wall, which would bury a
+  # walk regression under it.
   WALK_JS = <<~JS.freeze
     (() => {
+      globalThis.__csimNativeLayout = false;
       document.body.offsetHeight;
       let r = null;
       for (let i = 0; i < 3; i++) r = globalThis.__csimLayoutShadowRun();
