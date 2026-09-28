@@ -1324,15 +1324,17 @@ fn layout_measure_counts(
 }
 
 // __dom.layoutPass(inputsFlat, runsFlat, runTexts, rootX, rootY, rootCbW, grids, inlines, maths, rootRtl, placements,
-//                  patches, check) -> [Float64Array, Float64Array, number, Float64Array] | Float64Array | string | false.
+//                  patches, check, texts) -> [Float64Array, Float64Array, number, Float64Array(, Float64Array)] | Float64Array
+//                  | string | false.
 // Decode the flat per-node record buffer (root at record 0), the per-run buffer, the parallel `runTexts` string
 // array (a run's text, else non-string), the grid channel and the inline table, run native layout, and write each
 // node's border-box into its arena slot. Answers the inline boxes' FRAGMENTS as rows of [inline index, x, y, w, h],
 // and beside them EVERY record's box, in record order, as the rows `boxOf` answers one node at a time
 // (`BOX_ROW` numbers each: [x, y, w, h, autoHeight, cbW, mt, mr, mb, ml, relX, relY]) — which is also the only answer
 // for a record with NO node to write into (an anonymous grid item, table cell or row), then the margin the root
-// hands below its box (`Laid::root_bottom_margin`), and last the records whose box is not the one their node held
-// before the pass (all of them without a node) — what the writer has to write; or false when the subtree uses
+// hands below its box (`Laid::root_bottom_margin`), then the records whose box is not the one their node held
+// before the pass (all of them without a node) — what the writer has to write — and, where `texts` asks, the TEXT
+// PIECES the lines placed, as rows of `TextRow`; or false when the subtree uses
 // a feature the native engine doesn't model (Outcome::Unsupported), and the caller then lays it out in JS. One
 // crossing per pass, where reading the boxes back one `boxOf` at a time was a crossing per box.
 // A kept subtree is a HOLE in every buffer, filled from its chunk (`ChunkStore`): `placements` names each, in record
@@ -1354,6 +1356,8 @@ fn layout_pass(
     let root_rtl = args.get(9).is_true();
     // …and whether to CHECK every measure a kept chunk puts back against laying it out again (`CSIM_NL_REUSE_VERIFY`).
     let check = args.get(12).is_true();
+    // …and whether to answer the TEXT PIECES the lines placed as well (`TextRow`), which only a paint asks for.
+    let texts = args.get(13).is_true();
     let cid = realm_id(scope, &args);
     let node_floats = f64_arg(args.get(0));
     // The record STRIDE is a contract between two files, and a buffer that does not divide by it is not a
@@ -1407,7 +1411,7 @@ fn layout_pass(
     };
     // The measures kept of the placed chunks, lent to the pass and taken back.
     let mut measure = std::mem::take(&mut dom(scope).layout_chunks.entry(cid).or_default().measure);
-    let out = crate::layout::layout_block_in_place(&mut inputs, &runs, &run_texts, &grids, &inlines, &maths, root_x, root_y, root_cb_w, root_rtl, Some((&mut measure, roots, check)));
+    let out = crate::layout::layout_block_in_place(&mut inputs, &runs, &run_texts, &grids, &inlines, &maths, root_x, root_y, root_cb_w, root_rtl, Some((&mut measure, roots, check)), texts);
     let mismatch = measure.mismatch.take();
     dom(scope).layout_chunks.entry(cid).or_default().measure = measure;
     if let Some(why) = mismatch {
@@ -1434,7 +1438,7 @@ fn layout_pass(
                 }
             }
             let flat: Vec<f64> = laid.frags.iter().flatten().copied().collect();
-            let answer = v8::Array::new(scope, 4);
+            let answer = v8::Array::new(scope, 5);
             let frag_rows: v8::Local<v8::Value> = f64_array(scope, &flat).into();
             let box_rows: v8::Local<v8::Value> = f64_array(scope, &rows).into();
             let root_bottom_margin: v8::Local<v8::Value> = v8::Number::new(scope, laid.root_bottom_margin).into();
@@ -1443,6 +1447,11 @@ fn layout_pass(
             answer.set_index(scope, 1, box_rows);
             answer.set_index(scope, 2, root_bottom_margin);
             answer.set_index(scope, 3, changed);
+            if texts {
+                let flat: Vec<f64> = laid.texts.iter().flatten().copied().collect();
+                let text_rows: v8::Local<v8::Value> = f64_array(scope, &flat).into();
+                answer.set_index(scope, 4, text_rows);
+            }
             rv.set(answer.into());
         }
     }

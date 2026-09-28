@@ -1084,6 +1084,8 @@ pub(crate) enum Outcome {
 pub(crate) struct Laid {
     pub(crate) boxes: Vec<Box>,
     pub(crate) frags: Vec<FragRow>,
+    // …and the text pieces, where the pass was asked for them (`TextRow`).
+    pub(crate) texts: Vec<TextRow>,
     // The margin the pass root hands BELOW its border box: its own bottom margin joined with its last children's
     // where they adjoin (§8.3.1) — for the document's body, what the root element's auto height takes in past the
     // body's box. The collapse the pass already did, not a second derivation on the JS side.
@@ -1157,6 +1159,14 @@ impl InlineBox {
 }
 // …and what native answers for one: [inline index, x, y, w, h] per fragment, in document coordinates.
 pub(crate) type FragRow = [f64; 5];
+// One TEXT PIECE a line placed, for a painter: [run, start, end, x, y, baseline, width, justify] — the run's index in
+// the pass's stream and the UTF-16 range of its text the piece draws (an EMPTY range is the HYPHEN a soft hyphen shows
+// where the line breaks at it, which is in no text — at the end of the piece the soft hyphen ends), where its advance
+// starts, the top and the baseline of its LINE
+// (the run's own `vertical-align` shift is the painter's to apply), the advance the line reserved for it, and what a
+// justified line added to each no-break space inside it. In the block's border-box frame until `place` moves it into
+// the document's, as a fragment is. Only glyph-bearing pieces: white space draws nothing.
+pub(crate) type TextRow = [f64; 8];
 
 // One line an inline box's content landed on — the oracle's `frag.lines` record (`notePlacement`): the leftmost
 // extent it reached there (`minX`, which starts past the box's own opening margin), the right edge of what it
@@ -1195,6 +1205,9 @@ struct OpenBox {
 struct PendingHyphen {
     w: f64,
     frags: Vec<usize>,
+    // (…and where it is — the run, whose font a painter draws it in, and the end of the piece the soft hyphen ends.)
+    run: usize,
+    at: usize,
 }
 // The pass's inline table, and each record's inline fragments as its text block laid them out — [inline index,
 // x, y, w, h] in the block's border-box frame until `place` moves them into the document's. Pass-local
@@ -1206,6 +1219,9 @@ struct FragPass {
     rows: Vec<Vec<FragRow>>,
     // …and which record's rows hold each inline box's fragments (`usize::MAX`: none laid out yet).
     owner: Vec<usize>,
+    // …and, while a PAINT asks for them, each record's TEXT PIECES as its lines placed them (`TextRow`), kept and moved
+    // exactly as its fragments are. None for every other pass (rule 3): a line layout then records nothing.
+    texts: Option<Vec<Vec<TextRow>>>,
 }
 // …and the pass's MATH TABLE, the programs the records, the inline table and the grids name by offset (`bounded`) —
 // pass-local for the same reason.
@@ -1234,14 +1250,26 @@ thread_local! {
 }
 struct FragStore(Option<FragPass>);
 impl FragStore {
-    fn install(table: &[InlineBox], records: usize) -> Self {
+    fn install(table: &[InlineBox], records: usize, texts: bool) -> Self {
         FragStore(FRAG_PASS.with(|m| {
-            m.borrow_mut().replace(FragPass { table: table.to_vec(), rows: vec![Vec::new(); records], owner: vec![usize::MAX; table.len()] })
+            m.borrow_mut().replace(FragPass {
+                table: table.to_vec(),
+                rows: vec![Vec::new(); records],
+                owner: vec![usize::MAX; table.len()],
+                texts: texts.then(|| vec![Vec::new(); records]),
+            })
         }))
     }
-    // What the pass laid out, in record order, once `place` has put every fragment in the document's frame.
-    fn take() -> Vec<FragRow> {
-        FRAG_PASS.with(|m| m.borrow_mut().as_mut().map(|p| p.rows.iter_mut().flat_map(std::mem::take).collect()).unwrap_or_default())
+    // What the pass laid out, in record order, once `place` has put every fragment and text piece in the document's
+    // frame.
+    fn take() -> (Vec<FragRow>, Vec<TextRow>) {
+        FRAG_PASS.with(|m| {
+            let mut pass = m.borrow_mut();
+            let Some(p) = pass.as_mut() else { return Default::default() };
+            let frags = p.rows.iter_mut().flat_map(std::mem::take).collect();
+            let texts = p.texts.as_mut().map(|t| t.iter_mut().flat_map(std::mem::take).collect()).unwrap_or_default();
+            (frags, texts)
+        })
     }
 }
 impl Drop for FragStore {
@@ -1298,11 +1326,31 @@ fn inline_padding_box(k: usize) -> Option<(f64, f64, f64, f64)> {
 // `vertical-align` shift, which moves a cell's CONTENT and not its box.
 fn shift_frags(i: usize, dx: f64, dy: f64) {
     FRAG_PASS.with(|m| {
-        if let Some(rows) = m.borrow_mut().as_mut().and_then(|p| p.rows.get_mut(i)) {
+        let mut pass = m.borrow_mut();
+        let Some(p) = pass.as_mut() else { return };
+        if let Some(rows) = p.rows.get_mut(i) {
             for r in rows.iter_mut() {
                 r[1] += dx;
                 r[2] += dy;
             }
+        }
+        if let Some(rows) = p.texts.as_mut().and_then(|t| t.get_mut(i)) {
+            for r in rows.iter_mut() {
+                r[3] += dx;
+                r[4] += dy;
+                r[5] += dy;
+            }
+        }
+    });
+}
+// Whether this pass records TEXT PIECES — asked once per line layout, never per piece.
+fn records_texts() -> bool {
+    FRAG_PASS.with(|m| m.borrow().as_ref().is_some_and(|p| p.texts.is_some()))
+}
+fn store_texts(i: usize, rows: Vec<TextRow>) {
+    FRAG_PASS.with(|m| {
+        if let Some(slot) = m.borrow_mut().as_mut().and_then(|p| p.texts.as_mut()).and_then(|t| t.get_mut(i)) {
+            *slot = rows;
         }
     });
 }
@@ -1317,17 +1365,18 @@ fn shift_frags(i: usize, dx: f64, dy: f64) {
 #[allow(clippy::too_many_arguments)]
 #[cfg(test)]
 pub(crate) fn layout_block(inputs: &[Input], runs: &[Run], run_texts: &[RunText], grids: &[f64], inlines: &[InlineBox], maths: &[f64], root_x: f64, root_y: f64, root_cb_w: f64, root_rtl: bool) -> Outcome {
-    layout_block_in_place(&mut inputs.to_vec(), runs, run_texts, grids, inlines, maths, root_x, root_y, root_cb_w, root_rtl, None)
+    layout_block_in_place(&mut inputs.to_vec(), runs, run_texts, grids, inlines, maths, root_x, root_y, root_cb_w, root_rtl, None, false)
 }
 // …laying the records out IN PLACE: a parent resolves its children's percentages against the box it lays them out in
 // and writes the resolved record back, so the records are the pass's to change — every one is written afresh for the
 // next (`dom.rs` assembles them), and a copy into cells first was a second copy of the page's records every pass.
 #[allow(clippy::too_many_arguments)]
-// …and with the chunks the pass placed, where each root is, and the measures kept of them (`MeasureCache`).
-pub(crate) fn layout_block_in_place(inputs: &mut [Input], runs: &[Run], run_texts: &[RunText], grids: &[f64], inlines: &[InlineBox], maths: &[f64], root_x: f64, root_y: f64, root_cb_w: f64, root_rtl: bool, kept: Option<(&mut MeasureCache, std::collections::HashMap<usize, ChunkRoot>, bool)>) -> Outcome {
+// …and with the chunks the pass placed, where each root is, and the measures kept of them (`MeasureCache`); `texts` asks
+// for the TEXT PIECES as well (`TextRow`), which only a paint does.
+pub(crate) fn layout_block_in_place(inputs: &mut [Input], runs: &[Run], run_texts: &[RunText], grids: &[f64], inlines: &[InlineBox], maths: &[f64], root_x: f64, root_y: f64, root_cb_w: f64, root_rtl: bool, kept: Option<(&mut MeasureCache, std::collections::HashMap<usize, ChunkRoot>, bool)>, texts: bool) -> Outcome {
     let _measure_guard = kept.map(|(cache, roots, check)| MeasureCacheGuard::install(cache, roots, check));
     if inputs.is_empty() {
-        return Outcome::LaidOut(Laid { boxes: Vec::new(), frags: Vec::new(), root_bottom_margin: 0.0 });
+        return Outcome::LaidOut(Laid { boxes: Vec::new(), frags: Vec::new(), texts: Vec::new(), root_bottom_margin: 0.0 });
     }
     // Reject up front if any node uses an unmodelled display — a subtree is laid out natively only when
     // every participant is a block-flow box or a text block. This is the whole-subtree gate.
@@ -1372,7 +1421,7 @@ pub(crate) fn layout_block_in_place(inputs: &mut [Input], runs: &[Run], run_text
     let _math_guard = MathStore::install(maths);
     let root_w = resolve_width(&inputs[0], root_cb_w);
     let _iw_guard = IwMemo::install(inputs.len());
-    let _frag_guard = FragStore::install(inlines, inputs.len());
+    let _frag_guard = FragStore::install(inlines, inputs.len(), texts);
     // Each record in a CELL: a parent resolves its children's percentages against the box it lays them out in
     // (`Input::with_percent_sizes`) and writes the resolved copy back before they are measured.
     let inputs: &[Cell<Input>] = Cell::from_mut(inputs).as_slice_of_cells();
@@ -1411,7 +1460,8 @@ pub(crate) fn layout_block_in_place(inputs: &mut [Input], runs: &[Run], run_text
     // The inline boxes' fragments, each laid out by the text block its runs belong to and placed with it. A box no
     // text block answered for is left out, which the harness counts as MISSING: every tabled box belongs to a
     // committed stream, so an absent one is a bug to see, not a box to guess at.
-    Outcome::LaidOut(Laid { boxes, frags: FragStore::take(), root_bottom_margin: root_margins.bottom.value() })
+    let (frags, texts) = FragStore::take();
+    Outcome::LaidOut(Laid { boxes, frags, texts, root_bottom_margin: root_margins.bottom.value() })
 }
 
 // Measure text in a run's font (px), at a pen standing `from` px from the BLOCK's content edge. Only a TAB
@@ -1681,6 +1731,24 @@ fn line_layout(
                 for a in 0..open.len() {
                     note!(open[a].frag, from, to, $hangs, 0.0);
                 }
+            }
+        }};
+    }
+    // The TEXT PIECES on the current line, while a paint asks for them (`TextRow`) — (run, start, end, x from the
+    // content edge, advance, the relative offset of the inlines around it) — settled at close against the line's
+    // alignment and baseline, and the pieces every closed line settled. Nothing is recorded otherwise.
+    let recording = records_texts();
+    let mut line_pieces: Vec<(usize, f64, f64, f64, f64, f64, f64)> = Vec::new();
+    let mut texts: Vec<TextRow> = Vec::new();
+    // A piece of text that DRAWS went down at `$at`, `$w` wide: text `$start..$end` of run `$ri` (empty for a soft
+    // hyphen's hyphen), inside the inline box `$inner` — whose `position: relative` offset moves its glyphs. That offset
+    // is the whole CHAIN's (`nlChainRel`), where a fragment takes only its own (the oracle's `shiftOwnedRuns` runs once
+    // per relative inline around the run).
+    macro_rules! note_text {
+        ($ri:expr, $start:expr, $end:expr, $at:expr, $w:expr, $inner:expr) => {{
+            if recording {
+                let (rx, ry) = $inner.map_or((0.0, 0.0), |fi: usize| (frags[fi].ib.rel_x, frags[fi].ib.rel_y));
+                line_pieces.push(($ri, $start as f64, $end as f64, $at, $w, rx, ry));
             }
         }};
     }
@@ -1974,6 +2042,14 @@ fn line_layout(
             for (ci, x, rx, y) in line_oofs.drain(..) {
                 oofs.push((ci, x + shift_at(x) + rx, y));
             }
+            // …and the text pieces, by the coordinate rule too (the oracle's `moveLine`): a piece with a gap INSIDE it —
+            // a no-break space — widens by that gap's share, which the painter spreads over it; every piece sits on the
+            // line's baseline.
+            for (ri, start, end, x, w, rx, ry) in line_pieces.drain(..) {
+                let inside = if extra > 0.0 { gaps.iter().filter(|&&g| g >= x && g < x + w).count() } else { 0 };
+                let justify = if inside > 0 { extra } else { 0.0 };
+                texts.push([ri as f64, start, end, x + shift_at(x) + rx, total + ry, total + line_asc + ry, w + inside as f64 * extra, justify]);
+            }
             // …and the inline boxes' pieces on it, by the same COORDINATE rule the markers use (the oracle's
             // `moveLine` asks `shiftFor` of a piece's `minX` and right edges, not how many gaps precede it), then
             // stamped with the line's ascent — which is what puts each piece on the line's baseline. A box with no
@@ -2121,6 +2197,7 @@ fn line_layout(
                 for &fi in &hy.frags {
                     note!(fi, at, to, false, 0.0);
                 }
+                note_text!(hy.run, hy.at, hy.at, at, hy.w, hy.frags.last().copied());
             }
             soft_break!();
         }};
@@ -2916,6 +2993,9 @@ fn line_layout(
                                     let gap_end = u + ulen - trailing_shys(&text[u..u + ulen]);
                                     note_nbsp_gaps!(run, &text[u..gap_end], band_l(total) + line_x);
                                     let (at, to) = advance!(cw);
+                                    if gap_end > u {
+                                        note_text!(ri, u, gap_end, at, cw, open.last().map(|o| o.frag));
+                                    }
                                     drop_hangs!(false);
                                     note_open!(at, to, false);
                                     hang = 0.0;
@@ -2931,11 +3011,12 @@ fn line_layout(
                                     if let Some(hy) = hyphen {
                                         flush_tail_gaps!(); // (…content, which makes an NBSP held before it a gap)
                                         let (at, to) = advance!(hy);
+                                        note_text!(ri, pend, pend, at, hy, open.last().map(|o| o.frag));
                                         note_open!(at, to, false);
                                         shy_pending = None;
                                     } else {
                                         shy_pending = if shy_unit {
-                                            Some(PendingHyphen { w: soft_hyphen_width(run)?, frags: open.iter().map(|o| o.frag).collect() })
+                                            Some(PendingHyphen { w: soft_hyphen_width(run)?, frags: open.iter().map(|o| o.frag).collect(), run: ri, at: pend })
                                         } else {
                                             None
                                         };
@@ -2978,6 +3059,7 @@ fn line_layout(
                             note_nbsp_gaps!(run, &text[start..i], band_l(total) + line_x);
                             body_started = true;
                             let (at, to) = advance!(width);
+                            note_text!(ri, start, i, at, width, open.last().map(|o| o.frag));
                             drop_hangs!(false);
                             note_open!(at, to, false);
                             hang = 0.0;
@@ -3230,7 +3312,7 @@ fn line_layout(
             piece.1[1] += ib.rel_y;
         }
     }
-    Some(LineLayout { height: total, first: first_line, last: last_line, atomics, oofs, floats: placed_floats, frags: inline_frags })
+    Some(LineLayout { height: total, first: first_line, last: last_line, atomics, oofs, floats: placed_floats, frags: inline_frags, texts })
 }
 // Where one ATOMIC run landed on its line, in the frame the text arm places boxes in. `x` is its margin box
 // from the content edge, with its float band and the line's alignment already applied. The three line figures
@@ -3259,6 +3341,9 @@ struct LineLayout {
     floats: Vec<(usize, f64, f64)>,
     // Each inline box's fragments: (inline index, [x, y, w, h] from the content box's origin).
     frags: Vec<(usize, [f64; 4])>,
+    // …and the text pieces, where the pass records them (`TextRow`, its run the index in the stream `line_layout` was
+    // handed, from the content box's origin).
+    texts: Vec<TextRow>,
 }
 
 // `\p{L}\p{N}`, which is how the oracle's `HYPHEN_BREAK_RE` spells its classes — read from that same regex
@@ -4168,6 +4253,8 @@ fn measure_uncached(
                 Some(ll) => {
                     // The inline boxes' fragments, into this box's border-box frame (`place` moves them on).
                     store_frags(i, ll.frags.iter().map(|&(idx, r)| [idx as f64, n.bl + n.pl + r[0], content_top_rel + r[1], r[2], r[3]]).collect());
+                    // …and the text pieces, their runs numbered in the pass's stream.
+                    store_texts(i, ll.texts.iter().map(|r| [r[0] + rs as f64, r[1], r[2], n.bl + n.pl + r[3], content_top_rel + r[4], content_top_rel + r[5], r[6], r[7]]).collect());
                     boxes[i].first_baseline = ll.first.map(|(top, asc)| content_top_rel + top + asc);
                     boxes[i].last_baseline = ll.last.map(|(top, asc)| content_top_rel + top + asc);
                     boxes[i].inline_block_baseline = boxes[i].last_baseline;
