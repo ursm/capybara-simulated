@@ -41,4 +41,31 @@ RSpec.describe 'quirks mode selectors' do
     JS
     expect(got).to eq(['CSS1Compat', 0, 'BackCompat', 1, true])
   end
+
+  # The folding is ASCII only: `.ä` does not match `class="Ä"`, and U+212A KELVIN SIGN is not `k` — on every surface,
+  # the generated-content index included, and after the load (a context bump makes the native cascade answer again).
+  # A scope root adopted into a no-quirks document is matched in ITS mode. Chrome-measured.
+  it 'folds ASCII only, on every surface, in the mode of the current document' do
+    s = session(<<~HTML)
+      <html><head><meta charset="utf-8"><style>.Foo::before { content: 'XXXXXXXX' } span { display: inline-block }
+      .Ä { cursor: pointer } .\\212A { cursor: move } #Ö { caret-color: red }</style></head>
+      <body><span class="Foo" id="f"></span><div class="Ä" id="Ö">a</div><div class="&#x212A;" id="k">k</div><p id="p" class="foo">p</p></body></html>
+    HTML
+    got = s.evaluate_script(<<~JS)
+      (() => {
+        const r = [document.getElementById('f').offsetWidth > 0];
+        const a = document.getElementById('Ö'), k = document.getElementById('k');
+        a.setAttribute('data-z', '1'); k.setAttribute('data-z', '1');
+        r.push(getComputedStyle(a).cursor, getComputedStyle(k).cursor, getComputedStyle(a).caretColor);
+        r.push(document.querySelectorAll('.ä').length, a.matches('.ä'), a.closest('.ä'), a.matches('#ö'));
+        const p = document.getElementById('p');
+        r.push(p.matches(':scope.FOO'));
+        const d = document.implementation.createHTMLDocument('');
+        d.adoptNode(p); d.body.appendChild(p);
+        r.push(p.matches(':scope.FOO'), p.matches('.FOO'));
+        return r;
+      })()
+    JS
+    expect(got).to eq([true, 'pointer', 'move', 'rgb(255, 0, 0)', 0, false, nil, false, true, false, false])
+  end
 end

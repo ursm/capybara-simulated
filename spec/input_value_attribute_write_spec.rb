@@ -30,6 +30,28 @@ RSpec.describe 'input value attribute writes' do
     expect(got).to eq([%w[type value], 'x', '5px'])
   end
 
+  # …and a customized built-in's reactions in that order too: the value's is enqueued by a step that runs after the
+  # type's was. Chrome-measured.
+  it "calls a customized built-in's attributeChangedCallback for type, then value" do
+    s = session('<!DOCTYPE html><p>x</p>')
+    got = s.evaluate_script(<<~JS)
+      (() => {
+        const log = [];
+        class XIn extends HTMLInputElement {
+          static get observedAttributes() { return ['type', 'value']; }
+          attributeChangedCallback(n, o, v) { log.push(n + ':' + o + '>' + v); }
+        }
+        customElements.define('x-in', XIn, { extends: 'input' });
+        const i = document.createElement('input', { is: 'x-in' });
+        document.body.appendChild(i);
+        i.value = 'q';
+        i.setAttribute('type', 'checkbox');
+        return log;
+      })()
+    JS
+    expect(got).to eq(['type:null>checkbox', 'value:null>q'])
+  end
+
   it "records the value a checkbox's set(string) writes" do
     s = session('<!DOCTYPE html><style>input[value="foo"] { margin-left: 5px }</style><input type="checkbox" id="cb">')
     s.execute_script(<<~JS)

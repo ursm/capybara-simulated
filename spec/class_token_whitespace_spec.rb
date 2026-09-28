@@ -28,4 +28,25 @@ RSpec.describe 'class token whitespace' do
     JS
     expect(got).to eq([1, 1, false, '0px', '0px', '0px', '7px'])
   end
+
+  # …the invalidation gates too: a class change to `a&#xA0;b` is the token `a b`, and the rules keyed on it re-key the
+  # descendant and the sibling they reach. Chrome-measured.
+  it 're-keys what a class holding a no-break space reaches' do
+    html = <<~'HTML'
+      <!DOCTYPE html>
+      <style>.a\A0 b .kid { cursor: move } .a\A0 b + .sib { cursor: help }</style>
+      <div id="p"><span class="kid" id="kid">k</span></div><span class="sib" id="sib">s</span>
+    HTML
+    s = simulated_session(->(_env) { [200, {'content-type' => 'text/html'}, [html]] })
+    s.visit '/'
+    got = s.evaluate_script(<<~JS)
+      (() => {
+        const cs = (id) => getComputedStyle(document.getElementById(id)).cursor, r = [cs('kid'), cs('sib')];
+        document.getElementById('p').className = 'a\u00A0b';
+        r.push(cs('kid'), cs('sib'));
+        return r;
+      })()
+    JS
+    expect(got).to eq(%w[auto auto move help])
+  end
 end

@@ -25,4 +25,17 @@ RSpec.describe 'SVG tag name adjustment' do
     JS
     expect(got).to eq(%w[foreignObject foreignObject clipPath 5px 3px 0px])
   end
+
+  # …and a query agrees with the cascade: `svg foreignobject` finds nothing, `svg foreignObject` the element (Firefox;
+  # Chrome finds both).
+  it 'queries the adjusted name case-sensitively too' do
+    html = '<!DOCTYPE html><svg><foreignObject id="fo"></foreignObject></svg>'
+    s = simulated_session(->(_env) { [200, {'content-type' => 'text/html'}, [html]] })
+    s.visit '/'
+    got = s.evaluate_script(<<~JS)
+      [document.querySelectorAll('svg foreignobject').length, document.querySelectorAll('svg foreignObject').length,
+       document.getElementById('fo').matches('foreignobject')]
+    JS
+    expect(got).to eq([0, 1, false])
+  end
 end

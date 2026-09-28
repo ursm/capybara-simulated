@@ -1,8 +1,8 @@
 diff --git a/dist/attributes.js b/dist/attributes.js
-index 89dab0a26c12f18182e4c98b69bde2b68fc7fc2f..68877cd73155e682cc97fe9c47c6c3aea74440ee 100644
+index 89dab0a26c12f18182e4c98b69bde2b68fc7fc2f..57c4dd20ad2094c6e6c138dbf1d26e628ae29abe 100644
 --- a/dist/attributes.js
 +++ b/dist/attributes.js
-@@ -6,7 +6,10 @@ import * as boolbase from "boolbase";
+@@ -6,7 +6,14 @@ import * as boolbase from "boolbase";
   * https://github.com/slevithan/xregexp/blob/95eeebeb8fac8754d54eafe2b4743661ac1cf028/src/xregexp.js#L794
   */
  const reChars = /[-[\]{}()*+?.,\\^$|#\s]/g;
@@ -11,10 +11,14 @@ index 89dab0a26c12f18182e4c98b69bde2b68fc7fc2f..68877cd73155e682cc97fe9c47c6c3ae
 +// CR — not by JS `\s`, which also splits on U+00A0 and the other Unicode spaces: `class="a&#xA0;b"` is ONE class
 +// (Chrome: `classList.length` 1, `.b` matches nothing).
 +const whitespaceRe = /[\t\n\f\r ]/;
++// csim patch: every case-insensitive comparison here — an `i` flag, the HTML case-insensitive attribute values,
++// quirks-mode classes and ids — is ASCII case-insensitive (Selectors 4 §6.3, DOM "quirks mode"), not a Unicode
++// lowercasing: `.ä` does not match `class="Ä"`, and U+212A KELVIN SIGN is not `k`.
++const asciiLower = (s) => s.replace(/[A-Z]/g, (c) => String.fromCharCode(c.charCodeAt(0) + 32));
  function escapeRegex(value) {
      return value.replace(reChars, "\\$&");
  }
-@@ -67,7 +70,12 @@ function shouldIgnoreCase(selector, options) {
+@@ -67,7 +74,12 @@ function shouldIgnoreCase(selector, options) {
          ? selector.ignoreCase
          : selector.ignoreCase === "quirks"
              ? !!options.quirksMode
@@ -24,11 +28,42 @@ index 89dab0a26c12f18182e4c98b69bde2b68fc7fc2f..68877cd73155e682cc97fe9c47c6c3ae
 +            // HTML "case-insensitive attribute VALUE" list is keyed by the
 +            // canonical lowercase name — fold here so `[TYPE=text]` still
 +            // value-matches case-insensitively like `[type=text]`.
-+            : !options.xmlMode && caseInsensitiveAttributes.has(selector.name.toLowerCase());
++            : !options.xmlMode && caseInsensitiveAttributes.has(asciiLower(selector.name));
  }
  /**
   * Attribute selectors
-@@ -117,10 +125,13 @@ export const attributeRules = {
+@@ -78,12 +90,12 @@ export const attributeRules = {
+         const { name } = data;
+         let { value } = data;
+         if (shouldIgnoreCase(data, options)) {
+-            value = value.toLowerCase();
++            value = asciiLower(value);
+             return (element) => {
+                 const attribute = adapter.getAttributeValue(element, name);
+                 return (attribute != null &&
+                     attribute.length === value.length &&
+-                    attribute.toLowerCase() === value &&
++                    asciiLower(attribute) === value &&
+                     next(element));
+             };
+         }
+@@ -95,13 +107,13 @@ export const attributeRules = {
+         let { value } = data;
+         const { length } = value;
+         if (shouldIgnoreCase(data, options)) {
+-            value = value.toLowerCase();
++            value = asciiLower(value);
+             return function hyphenIC(element) {
+                 const attribute = adapter.getAttributeValue(element, name);
+                 return (attribute != null &&
+                     (attribute.length === length ||
+                         attribute.charAt(length) === "-") &&
+-                    attribute.substr(0, length).toLowerCase() === value &&
++                    asciiLower(attribute.substr(0, length)) === value &&
+                     next(element));
+             };
+         }
+@@ -117,15 +129,19 @@ export const attributeRules = {
      element(next, data, options) {
          const { adapter } = options;
          const { name, value } = data;
@@ -40,12 +75,81 @@ index 89dab0a26c12f18182e4c98b69bde2b68fc7fc2f..68877cd73155e682cc97fe9c47c6c3ae
              return boolbase.falseFunc;
          }
 -        const regex = new RegExp(`(?:^|\\s)${escapeRegex(value)}(?:$|\\s)`, shouldIgnoreCase(data, options) ? "i" : "");
-+        const regex = new RegExp(`(?:^|[\\t\\n\\f\\r ])${escapeRegex(value)}(?:$|[\\t\\n\\f\\r ])`, shouldIgnoreCase(data, options) ? "i" : "");
++        const ignoreCase = shouldIgnoreCase(data, options);
++        const regex = new RegExp(`(?:^|[\\t\\n\\f\\r ])${escapeRegex(ignoreCase ? asciiLower(value) : value)}(?:$|[\\t\\n\\f\\r ])`);
          return function element(node) {
              const attribute = adapter.getAttributeValue(node, name);
              return (attribute != null &&
+                 attribute.length >= value.length &&
+-                regex.test(attribute) &&
++                regex.test(ignoreCase ? asciiLower(attribute) : attribute) &&
+                 next(node));
+         };
+     },
+@@ -141,12 +157,12 @@ export const attributeRules = {
+             return boolbase.falseFunc;
+         }
+         if (shouldIgnoreCase(data, options)) {
+-            value = value.toLowerCase();
++            value = asciiLower(value);
+             return (element) => {
+                 const attribute = adapter.getAttributeValue(element, name);
+                 return (attribute != null &&
+                     attribute.length >= length &&
+-                    attribute.substr(0, length).toLowerCase() === value &&
++                    asciiLower(attribute.substr(0, length)) === value &&
+                     next(element));
+             };
+         }
+@@ -162,11 +178,11 @@ export const attributeRules = {
+             return boolbase.falseFunc;
+         }
+         if (shouldIgnoreCase(data, options)) {
+-            value = value.toLowerCase();
+-            return (element) => adapter
+-                .getAttributeValue(element, name)
+-                ?.substr(length)
+-                .toLowerCase() === value && next(element);
++            value = asciiLower(value);
++            return (element) => {
++                const attribute = adapter.getAttributeValue(element, name);
++                return attribute != null && asciiLower(attribute.substr(length)) === value && next(element);
++            };
+         }
+         return (element) => !!adapter.getAttributeValue(element, name)?.endsWith(value) &&
+             next(element);
+@@ -178,12 +194,12 @@ export const attributeRules = {
+             return boolbase.falseFunc;
+         }
+         if (shouldIgnoreCase(data, options)) {
+-            const regex = new RegExp(escapeRegex(value), "i");
++            const lower = asciiLower(value);
+             return function anyIC(element) {
+                 const attribute = adapter.getAttributeValue(element, name);
+                 return (attribute != null &&
+                     attribute.length >= value.length &&
+-                    regex.test(attribute) &&
++                    asciiLower(attribute).includes(lower) &&
+                     next(element));
+             };
+         }
+@@ -198,12 +214,12 @@ export const attributeRules = {
+             return (element) => !!adapter.getAttributeValue(element, name) && next(element);
+         }
+         if (shouldIgnoreCase(data, options)) {
+-            value = value.toLowerCase();
++            value = asciiLower(value);
+             return (element) => {
+                 const attribute = adapter.getAttributeValue(element, name);
+                 return ((attribute == null ||
+                     attribute.length !== value.length ||
+-                    attribute.toLowerCase() !== value) &&
++                    asciiLower(attribute) !== value) &&
+                     next(element));
+             };
+         }
 diff --git a/dist/general.js b/dist/general.js
-index 5d3fdf164e2a7e9612dec3cf6bdb2768a14d06ed..e2ed9e28d75c5f51857b6e9e567fd27f82a94f13 100644
+index 5d3fdf164e2a7e9612dec3cf6bdb2768a14d06ed..39e1ac2cf7b1714e9e64fb382a9df9edb8171ca0 100644
 --- a/dist/general.js
 +++ b/dist/general.js
 @@ -27,7 +27,13 @@ export function compileGeneralSelector(next, selector, options, context, compile
@@ -63,6 +167,31 @@ index 5d3fdf164e2a7e9612dec3cf6bdb2768a14d06ed..e2ed9e28d75c5f51857b6e9e567fd27f
                  selector.name = selector.name.toLowerCase();
              }
              return attributeRules[selector.action](next, selector, options);
+@@ -40,12 +46,20 @@ export function compileGeneralSelector(next, selector, options, context, compile
+             if (selector.namespace != null) {
+                 throw new Error("Namespaced tag names are not yet supported by css-select");
+             }
+-            let { name } = selector;
+-            if (!options.xmlMode || options.lowerCaseTags) {
+-                name = name.toLowerCase();
++            const { name } = selector;
++            // csim patch: a type selector is ASCII case-insensitive against an HTML element in an HTML document and
++            // case-SENSITIVE against anything else (Selectors 4 §5.1 — `foreignobject` does not match an SVG
++            // `foreignObject`; Firefox agrees). Only the adapter knows which an element is (`matchesTagName`).
++            const lower = !options.xmlMode || options.lowerCaseTags
++                ? name.replace(/[A-Z]/g, (c) => String.fromCharCode(c.charCodeAt(0) + 32))
++                : name;
++            if (adapter.matchesTagName) {
++                return function tag(element) {
++                    return adapter.matchesTagName(element, name, lower) && next(element);
++                };
+             }
+             return function tag(element) {
+-                return adapter.getName(element) === name && next(element);
++                return adapter.getName(element) === lower && next(element);
+             };
+         }
+         // Traversal
 diff --git a/dist/pseudo-selectors/aliases.js b/dist/pseudo-selectors/aliases.js
 index 8fb6633f09e40d21d668be06182a3868f0fc8dff..b2c7529cdf1c8b2a9933f4de70fbd076e793202c 100644
 --- a/dist/pseudo-selectors/aliases.js
