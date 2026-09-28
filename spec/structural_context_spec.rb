@@ -317,6 +317,18 @@ RSpec.describe 'structural-context invalidation' do
     expect(got).to eq(['rgb(0, 128, 0)', 'rgb(0, 0, 0)'])
   end
 
+  # …and so is one behind a `:last-of-type`, whose flip the of-type walk (the nearest element of the changed type) never
+  # carries on to the run.
+  it 'restyles a sibling run behind a :last-of-type when one of its type is appended' do
+    got = colors('p.x:last-of-type ~ .y span { color: rgb(0, 128, 0) }',
+                 '<div id="d"><p class="x">x</p><div class="y"><span id="s">s</span></div></div>', <<~JS)
+      const before = color('s');
+      document.getElementById('d').append(document.createElement('p'));
+      return [before, color('s')];
+    JS
+    expect(got).to eq(['rgb(0, 128, 0)', 'rgb(0, 0, 0)'])
+  end
+
   # …but a memo that is NOT the declared-value one has to decline it too: the flow sides a `margin-inline-start` maps
   # through were kept while a `:has()` flipped `direction`, and the physical margin stayed on the left (Chrome: right) —
   # by a class write and by an insertion alike.

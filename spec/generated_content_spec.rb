@@ -229,4 +229,23 @@ RSpec.describe 'generated content' do
     expect(s).to have_text('T')
     expect(s).not_to have_text('hidden-')
   end
+
+  # An element's first style read can be its pseudo-element's, and the memos an element gains once styled are declared
+  # then (cascade.js `declareStyledMemos`) — before its generated-content slot is written, not over it: declared after,
+  # the slot was reset and the pseudo node built a second time, the first one orphaned.
+  it 'keeps the generated node made by the first style read of a new element' do
+    s = page('<div id=h></div>', '.a::before { content: "xx" }')
+    got = s.evaluate_script(<<~JS)
+      (() => {
+        const e = document.createElement('div');
+        e.className = 'a';
+        document.getElementById('h').appendChild(e);
+        const content = getComputedStyle(e, '::before').content;
+        const slot = e._pseudoNodes;
+        getComputedStyle(e, '::before').content;
+        return [content, slot !== undefined && e._pseudoNodes === slot];
+      })()
+    JS
+    expect(got).to eq(['"xx"', true])
+  end
 end
