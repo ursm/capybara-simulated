@@ -327,6 +327,7 @@ impl<'a> Element for NodeRef<'a> {
             "read-only" => !arena.is_read_write(id),
             "default" => arena.is_default(id),
             "open" => arena.is_open(id),
+            "placeholder-shown" => arena.is_placeholder_shown(id),
             "popover-open" => arena.is_popover_open(id),
             "modal" => arena.is_modal(id),
             "filtered" => arena.is_filtered(id),
@@ -432,6 +433,7 @@ fn is_native_pseudo_class(name: &str) -> bool {
             | "read-only"
             | "default"
             | "open"
+            | "placeholder-shown"
             | "popover-open"
             | "modal"
             | "filtered"

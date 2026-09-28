@@ -148,6 +148,21 @@ impl RealmArena {
     pub(crate) fn is_modal(&self, id: NodeId) -> bool {
         self.get(id).is_some_and(|n| n.state & STATE_MODAL != 0 && n.plain_attr("open").is_some()) && self.is_connected(id)
     }
+    // `:placeholder-shown`: an `<input>` or `<textarea>` with a `placeholder` and an empty live value.
+    pub(crate) fn is_placeholder_shown(&self, id: NodeId) -> bool {
+        let Some(n) = self.get(id) else { return false };
+        if !(n.is_html_named("input") || n.is_html_named("textarea")) || n.plain_attr("placeholder").is_none() {
+            return false;
+        }
+        match &n.value {
+            Some(v) => v.is_empty(),
+            // A clean textarea's value is its direct Text children's data; an input's, its `value` attribute.
+            None if n.local_name == "textarea" => {
+                n.children.iter().all(|&c| self.get(c).is_none_or(|t| t.kind != NodeKind::Text || t.data.is_empty()))
+            }
+            None => n.plain_attr("value").is_none_or(str::is_empty),
+        }
+    }
     // `:open`: a `<details>` or `<dialog>` with the `open` attribute.
     pub(crate) fn is_open(&self, id: NodeId) -> bool {
         self.get(id)

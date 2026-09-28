@@ -21,6 +21,7 @@ RSpec.describe 'element state in the native arena' do
         <input id="in-fs"><optgroup id="og"></optgroup>
       </fieldset>
       <select disabled><optgroup><option id="o-dis">x</option></optgroup></select>
+      <input id="ph" placeholder="p"><input id="ph-val" placeholder="p" value="v"><textarea id="ph-ta" placeholder="p"></textarea>
       <input id="ro" readonly><input id="rw"><input id="bogus-type" type="nonsense"><textarea id="ta"></textarea>
       <div contenteditable id="ce"><span id="ce-kid">k</span><b contenteditable="false" id="ce-off">o</b></div>
       <button id="b-submit">s</button><button type="button" id="b-button">b</button><button type="Nonsense" id="b-odd">o</button>
@@ -76,12 +77,24 @@ RSpec.describe 'element state in the native arena' do
     expect(native_ids('input:disabled')).to eq(%w[in-fs])
     # An `<optgroup>` is disabled by its own attribute only; an option by its `<select>`'s too.
     expect(native_ids('#og:disabled, #o-dis:disabled, #in-legend:enabled')).to eq(%w[in-legend o-dis])
-    expect(native_ids('input:read-write, textarea:read-write')).to eq(%w[in-legend rw bogus-type ta])
+    expect(native_ids('input:read-write, textarea:read-write')).to eq(%w[in-legend ph ph-val ph-ta rw bogus-type ta])
     expect(native_ids('#ce :read-write, #ce:read-write')).to eq(%w[ce ce-kid])
     expect(native_ids('#ce-off:read-only')).to eq(%w[ce-off])
     expect(native_ids(':default')).to eq(%w[c1 r2 c4 o2 b-submit b-odd i-submit])
     session.execute_script("document.getElementById('fs').disabled = false")
     expect(native_ids('input:disabled')).to eq([])
+  end
+
+  it 'answers :placeholder-shown from the live value' do
+    expect(native_ids(':placeholder-shown')).to eq(%w[ph ph-ta])
+    session.find('#ph').fill_in(with: 'x')
+    session.execute_script(<<~JS)
+      document.getElementById('ph-val').value = '';
+      document.getElementById('ph-ta').textContent = 'text';
+    JS
+    expect(native_ids(':placeholder-shown')).to eq(%w[ph-val])
+    session.execute_script("document.querySelector('form').reset()")
+    expect(native_ids(':placeholder-shown')).to eq(%w[ph])
   end
 
   it 'answers :open, :modal and :popover-open' do

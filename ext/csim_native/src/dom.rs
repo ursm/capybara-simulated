@@ -140,6 +140,9 @@ pub(crate) struct NodeData {
     pub(crate) state: u32,
     // A shadow root's host (None for every other node): the shadow-including ancestor chain `:focus` walks.
     pub(crate) host: Option<NodeId>,
+    // A form control's live value once dirty (a script's `.value`, typing); None while it is its default — the
+    // `value` attribute, or a `<textarea>`'s text.
+    pub(crate) value: Option<Box<str>>,
 }
 
 // The element state bits (`NodeData::state`, native-query-shadow.js `STATE_*`): focus and hover (the realm's one
@@ -174,6 +177,7 @@ impl NodeData {
             layout_box: None,
             state: 0,
             host: None,
+            value: None,
         }
     }
     pub(crate) fn get_attr(&self, name: &str) -> Option<&str> {
@@ -684,6 +688,7 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_, ()>, ctx: &v8::Global<v8:
     // Element state no attribute carries, for the state pseudo-classes (`:checked`, `:focus`, `:hover`, …).
     register(scope, ns, "setState", set_state, context_id);
     register(scope, ns, "setShadowHost", set_shadow_host, context_id);
+    register(scope, ns, "setValue", set_value, context_id);
     register(scope, ns, "setFocusRingHidden", set_focus_ring_hidden, context_id);
     register(scope, ns, "queryIds", query_ids, context_id);
     register(scope, ns, "matchesId", matches_id, context_id);
@@ -835,6 +840,23 @@ fn set_state(
     realm(scope, cid).set_state(id, bits);
 }
 
+// __dom.setValue(nid, value): a form control's live value — a string once dirty, `undefined` back to its default.
+fn set_value(
+    scope: &mut v8::PinScope<'_, '_>,
+    args: v8::FunctionCallbackArguments<'_>,
+    _rv: v8::ReturnValue<'_, v8::Value>,
+) {
+    let Some(id) = nid_arg(scope, &args, 0) else {
+        return;
+    };
+    let v = args.get(1);
+    let value = if v.is_undefined() { None } else { Some(v.to_rust_string_lossy(scope).into_boxed_str()) };
+    let cid = realm_id(scope, &args);
+    if let Some(node) = realm(scope, cid).get_mut(id) {
+        node.value = value;
+    }
+}
+
 // __dom.setShadowHost(rootNid, hostNid): the shadow root `rootNid` is attached to `hostNid`.
 fn set_shadow_host(
     scope: &mut v8::PinScope<'_, '_>,
@@ -859,7 +881,8 @@ fn set_focus_ring_hidden(
     realm(scope, cid).focus_ring_hidden = hidden;
 }
 
-// __dom.inspectNode(nid) -> [kind, localName, data, parentNid, state, hostNid, childNid, …], or null for a dead nid.
+// __dom.inspectNode(nid) -> [kind, localName, data, parentNid, state, hostNid, value, childNid, …] (`value` undefined
+// while clean), or null for a dead nid.
 // The arena as it stands, for the verify mode that holds it against the JS tree (`CSIM_ARENA_VERIFY`); nothing else
 // reads it.
 fn inspect_node(
@@ -871,7 +894,7 @@ fn inspect_node(
         return;
     };
     let cid = realm_id(scope, &args);
-    let Some((kind, local_name, data, parent, state, host, children)) = realm(scope, cid).get(id).map(|n| {
+    let Some((kind, local_name, data, parent, state, host, value, children)) = realm(scope, cid).get(id).map(|n| {
         let kind = match n.kind {
             NodeKind::Element => 1,
             NodeKind::Text => 3,
@@ -880,12 +903,12 @@ fn inspect_node(
             NodeKind::Fragment => 11,
             NodeKind::Other => 0,
         };
-        (kind, n.local_name.clone(), n.data.clone(), n.parent, n.state, n.host, n.children.clone())
+        (kind, n.local_name.clone(), n.data.clone(), n.parent, n.state, n.host, n.value.clone(), n.children.clone())
     }) else {
         rv.set_null();
         return;
     };
-    const HEAD: usize = 6;
+    const HEAD: usize = 7;
     let out = v8::Array::new(scope, (HEAD + children.len()) as i32);
     let vals: Vec<v8::Local<v8::Value>> = vec![
         v8::Integer::new(scope, kind).into(),
@@ -894,6 +917,10 @@ fn inspect_node(
         v8::Number::new(scope, parent.map_or(-1.0, |p| p.to_f64())).into(),
         v8::Integer::new_from_unsigned(scope, state).into(),
         v8::Number::new(scope, host.map_or(-1.0, |h| h.to_f64())).into(),
+        match value.as_deref().and_then(|v| v8::String::new(scope, v)) {
+            Some(s) => s.into(),
+            None => v8::undefined(scope).into(),
+        },
     ];
     for (i, v) in vals.into_iter().enumerate() {
         out.set_index(scope, i as u32, v);
