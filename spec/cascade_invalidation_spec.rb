@@ -452,6 +452,29 @@ RSpec.describe 'cascade invalidation' do
 
   # Methods, not constants, for the same reason as `cases` above: a constant assigned inside a
   # `describe` block lands at top level and collides across spec files.
+  # …but a value whose only taint is a rule naming a TRACKED state (hover, focus, …) is kept, under the style-state
+  # generation every flip of that state moves: declining it recomputed every `color` of every link on a page with an
+  # `a:hover` rule on every read. A COUNT, since the colour alone cannot tell a kept value from one recomputed equal.
+  it 'keeps a value a tracked-state rule was considered for until that state moves' do
+    app = ->(_env) { [200, {'content-type' => 'text/html'}, ['<!DOCTYPE html><style>a:hover { color: rgb(0, 128, 0) }</style><a id="t">x</a>']] }
+    s = simulated_session(app)
+    s.visit '/'
+    got = s.evaluate_script(<<~JS)
+      (() => {
+        const t = document.getElementById('t'), color = () => getComputedStyle(t).color;
+        const computes = () => __csimDeclaredComputes();
+        color();
+        let n = computes(); const a = color(); const kept = computes() - n;
+        document._hoverElement = t;
+        const b = color();
+        n = computes(); color(); const keptHovered = computes() - n;
+        document._hoverElement = null;
+        return [a, kept, b, keptHovered, color()];
+      })()
+    JS
+    expect(got).to eq(['rgb(0, 0, 0)', 0, 'rgb(0, 128, 0)', 0, 'rgb(0, 0, 0)'])
+  end
+
   def gated_css
     '.dd-content { display: none } .dd:focus-within .dd-content { display: block }'
   end
