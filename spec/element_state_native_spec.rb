@@ -329,6 +329,22 @@ RSpec.describe 'element state in the native arena' do
       expect(session.evaluate_script('window.__shadowState')).to eq([false, false])
     end
 
+    it 'carries nothing out of a conversion that threw' do
+      got = session.evaluate_script(<<~JS)
+        (() => {
+          const log = [];
+          customElements.define('x-ad2', class extends HTMLElement { adoptedCallback() { log.push('adopted'); } });
+          const e = document.implementation.createHTMLDocument('').body.appendChild(document.createElement('x-ad2'));
+          log.length = 0;
+          const root = document.body.appendChild(document.createElement('div'));
+          try { root.append(e, document); } catch (_) { log.push('threw'); }
+          document.body.appendChild(document.createElement('p'));
+          return log;
+        })()
+      JS
+      expect(got).to eq(%w[threw])
+    end
+
     it "runs a variadic insertion's adoptedCallback with the node in its new parent" do
       got = session.evaluate_script(<<~JS)
         (() => {
@@ -356,6 +372,17 @@ RSpec.describe 'element state in the native arena' do
         [200, {'content-type' => 'text/html'}, [body]]
       })
     }
+
+    it 'blurs the parent control, committing its change, as focus goes into the frame' do
+      session.execute_script(<<~JS)
+        window.__log = [];
+        const o = document.getElementById('outer');
+        for (const t of ['change', 'blur', 'focusout']) o.addEventListener(t, () => __log.push(t));
+      JS
+      session.find('#outer').send_keys('abc')
+      session.within_frame('fr') { session.find('#inner').click }
+      expect(session.evaluate_script('window.__log')).to eq(%w[change blur focusout])
+    end
 
     it "makes the iframe the parent's focused and hovered element" do
       session.within_frame('fr') { session.find('#inner').click }
