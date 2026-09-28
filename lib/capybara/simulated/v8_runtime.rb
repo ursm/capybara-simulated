@@ -1647,8 +1647,7 @@ module Capybara
       # Worker-isolate factory: fresh isolate from the shared
       # snapshot, host fns attached, `__csim_isWorker` flag set, +
       # the per-worker postMessage host fn closed over `post_back`.
-      # Returns a uniform `WorkerRuntime` adapter that
-      # `Browser#run_worker` drives.
+      # Returns the `WorkerRuntime` that `Browser#run_worker` drives.
       def self.build_worker(browser, post_back, broadcast_out = nil, sw_hooks = {})
         c = Ctx.new(snapshot: snapshot)
         attach_host_fns(c, browser)
@@ -1689,55 +1688,7 @@ module Capybara
         # the top-level-script path (same as the worker's own body eval).
         c.attach('__csim_workerImportEval', ->(src) { c.eval_void(src.to_s) })
         c.eval_void('__csim_installWorkerScope();')
-        WorkerRuntime.new(
-          eval_void_fn:      ->(s)     { c.eval_void(s.to_s) },
-          call_fn:           ->(n, *a) { c.call(n.to_s, *a) },
-          drain_microtasks:  ->        { c.perform_microtask_checkpoint },
-          drain_timers:      ->        { c.call('__drainTimers', 50) },
-          has_ready_timer:   ->        { !!c.call('__hasReadyTimer') },
-          dispose:           ->        { c.dispose rescue nil },
-          # Called from the SESSION BOUNDARY's thread, not this worker's: V8's terminate is
-          # thread-safe by design, and it is the only way to end a call that is already running.
-          terminate:         ->        { c.terminate rescue nil },
-          # A `{type: 'module'}` service worker's main script + static import graph,
-          # via V8's native module API (the same surface the main realm's
-          # eval_esm_module uses). The whole graph resolves through the root's
-          # instantiate callback (V8 calls it per unresolved edge, transitively);
-          # `fetch_import` runs on the worker's own thread and raises to fail the
-          # evaluation. Specifier resolution is PLAIN URL resolution — a worker has
-          # no document, so the page's importmap does not apply, and a bare
-          # specifier is a resolution failure per the spec.
-          eval_module_graph: lambda {|src, url, fetch_import|
-            src_text = RuntimeShared.utf8_text(src.to_s.dup)
-            handles = {}
-            root = c.compile_module(src_text, filename: url.to_s)
-            handles[url.to_s] = root
-            root.instantiate do |spec, ref|
-              s = spec.to_s
-              resolved =
-                if s.match?(%r{\A[a-z]+://}i)
-                  s
-                elsif s.start_with?('/', './', '../')
-                  URI.join((ref || url).to_s, s).to_s
-                else
-                  raise "Failed to resolve module specifier '#{s}'"
-                end
-              handles[resolved] ||= c.compile_module(RuntimeShared.utf8_text(fetch_import.call(resolved).to_s.dup), filename: resolved)
-            end
-            # Top-level await is disallowed in a service worker module ("Run Service
-            # Worker" fails the script; Chrome rejects the registration). V8's
-            # IsGraphAsync (Module#graph_async?) answers it for the WHOLE
-            # instantiated graph, which is what the spec asks: TLA hiding in an
-            # imported module fails too. Per-module `[[HasTLA]]` would name the
-            # offender but not this question — it can't see an imported module's
-            # await. This lambda serves service workers only; a dedicated module
-            # worker, where TLA is legal, would need the check parameterized.
-            raise 'Top-level await is disallowed in a service worker' if root.graph_async?
-
-            root.evaluate
-            nil
-          }
-        )
+        WorkerRuntime.new(c)
       end
     end
   end
