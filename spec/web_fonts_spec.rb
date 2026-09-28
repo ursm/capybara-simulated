@@ -49,6 +49,12 @@ RSpec.describe 'web fonts' do
       when '/css/rel.css' then [200, {'content-type' => 'text/css'}, ['@font-face { font-family: Rel; src: url(ahem.ttf); }']]
       when '/css/ahem.ttf' then [200, {'content-type' => 'font/ttf'}, [AHEM]]
       when '/css/imp.css' then [200, {'content-type' => 'text/css'}, ['@font-face { font-family: Imp; src: url("ahem.ttf"); }']]
+      when '/css/outer.css' then [200, {'content-type' => 'text/css'}, ['@import url(imp.css); @font-face { font-family: Outer; src: url("ahem.ttf"); } p { margin: 0 }']]
+      when '/held.html'
+        [200, {'content-type' => 'text/html'}, [<<~HTML]]
+          <!DOCTYPE html><html><head><link rel="stylesheet" href="/css/outer.css"><style>body { margin: 0; font: 20px monospace }</style></head>
+          <body><span id="imp" style="font-family: Imp">abcd</span><span id="outer" style="font-family: Outer">abcd</span></body></html>
+        HTML
       when '/cyc-a.css' then [200, {'content-type' => 'text/css'}, ['@import url(/cyc-b.css); @font-face { font-family: CycA; src: url(/ahem.ttf); }']]
       when '/cyc-b.css' then [200, {'content-type' => 'text/css'}, ['@import url(/cyc-a.css); @font-face { font-family: CycB; src: url(/ahem.ttf); }']]
       when '/nested.html'
@@ -278,6 +284,23 @@ RSpec.describe 'web fonts' do
       })()
     JS
     expect(got).to eq([80, true, 0, true])
+  end
+
+  # A sheet's faces are read from the cascade's own parse — its `@import`s' first, each against its own URL — and not
+  # from a CSSOM built for the purpose: the one that declared a Redmine page's Noto Sans cost 4 ms a load. A sheet a
+  # script has built the CSSOM of is read from there, since the script may have edited it.
+  it 'finds a linked sheet\'s faces, and its imports\', without building its CSSOM' do
+    s = session('/held.html')
+    expect([width(s, 'imp'), width(s, 'outer')]).to eq([80, 80])
+    got = s.evaluate_script(<<~JS)
+      (() => {
+        const link = document.querySelector('link');
+        const before = [link._sheet == null, Array.from(document.fonts).map((f) => f.family).sort().join(',')];
+        link.sheet.insertRule('@font-face { font-family: Late; src: url("ahem.ttf"); }', 1);
+        return [before, Array.from(document.fonts).map((f) => f.family).sort().join(',')];
+      })()
+    JS
+    expect(got).to eq([[true, 'Imp,Outer'], 'Imp,Late,Outer'])
   end
 
   it 'fails a cross-origin face the server does not share' do
