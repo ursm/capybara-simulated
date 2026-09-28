@@ -1060,14 +1060,27 @@ fn sync_children(
             kids.push(k);
         }
     }
-    // Detach each incoming child from a DIFFERENT current parent (a same-parent reorder skips this).
+    // Take each incoming child from a DIFFERENT current parent (a same-parent reorder skips this) — every old parent
+    // once, however many of its children arrive: a fragment handing over its whole list child by child would shift and
+    // reindex the rest per child.
+    let mut old_parents: Vec<NodeId> = Vec::new();
     for &k in &kids {
-        if st.get(k).and_then(|node| node.parent) != Some(parent) {
-            st.detach(k);
-            if let Some(kn) = st.get_mut(k) {
-                kn.parent = Some(parent);
+        let Some(kn) = st.get_mut(k) else { continue };
+        if kn.parent != Some(parent) {
+            if let Some(op) = kn.parent.replace(parent) {
+                if !old_parents.contains(&op) {
+                    old_parents.push(op);
+                }
             }
         }
+    }
+    for op in old_parents {
+        let Some(list) = st.get(op).map(|o| o.children.clone()) else { continue };
+        let kept: Vec<NodeId> = list.into_iter().filter(|&c| st.get(c).is_some_and(|n| n.parent == Some(op))).collect();
+        if let Some(o) = st.get_mut(op) {
+            o.children = kept;
+        }
+        st.reindex_children(op, 0);
     }
     // Null the .parent of children DROPPED from this parent (were here, gone now, still pointing
     // here). Otherwise a detached subtree keeps a phantom upward chain and an element-rooted query
