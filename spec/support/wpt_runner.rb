@@ -1022,6 +1022,7 @@ module WptRunner
         };
       </script>
       #{tags.join("\n")}
+      <div id=log></div>
       <script src="/#{js_rel}"></script>
     HTML
   end

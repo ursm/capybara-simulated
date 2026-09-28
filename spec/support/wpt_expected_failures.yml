@@ -8197,6 +8197,8 @@ dom/events/webkit-transition-end-event.html:
 - webkitTransitionEnd event listener should trigger for an animation
 dom/nodes/Node-appendChild-cereactions-vs-script.window.js:
 - Custom element reactions follow script execution
+dom/nodes/Node-cloneNode-document-allow-declarative-shadow-roots.window.js:
+- cloneNode() and document's allow declarative shadow roots
 dom/nodes/NodeList-live-mutations.window.js:
 - 'NodeList live mutations: NodeList ownPropertyNames'
 dom/nodes/ParentNode-querySelector-All-xht.xht:
@@ -11396,6 +11398,8 @@ service-workers/service-worker/skip-waiting-installed.https.html:
 - Test skipWaiting when a installed worker is waiting
 service-workers/service-worker/skip-waiting-using-registration.https.html:
 - Test skipWaiting while a client is using the registration
+service-workers/service-worker/skip-waiting-without-using-registration.https.html:
+- Test skipWaiting while a client is not being controlled
 service-workers/service-worker/svg-target-reftest.https.html:
 - "== service-workers/service-worker/resources/svg-target-reftest-001.html (a frame
   the painter never enters)"
