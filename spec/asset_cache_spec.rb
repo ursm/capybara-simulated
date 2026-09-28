@@ -63,3 +63,48 @@ RSpec.describe 'asset cache across reset!' do
     expect(hits['/plain-reset.js']).to eq(2)
   end
 end
+
+# One fetch per URL per DOCUMENT, as a browser's memory cache gives: the cascade fetches a `<link>`'s sheet and its load
+# task asks for it again, a module graph fetches what a `modulepreload` link fetched — and a response with no cache
+# headers (every asset of a Rails app in test) crossed Rack twice per page. A `no-store` one is fetched every time, and a
+# new document fetches afresh.
+RSpec.describe 'one fetch per asset per document' do
+  def app(hits, extra_headers = {})
+    ->(env) {
+      path = env['PATH_INFO']
+      hits[path] += 1
+      case path
+      when '/s.css' then [200, {'content-type' => 'text/css'}.merge(extra_headers), ['p { color: rgb(0, 128, 0) }']]
+      when '/m.js'  then [200, {'content-type' => 'text/javascript'}.merge(extra_headers), ['document.title = "m";']]
+      else
+        [200, {'content-type' => 'text/html'}, [<<~HTML]]
+          <!DOCTYPE html><html><head>
+            <link rel="stylesheet" href="/s.css"><link rel="modulepreload" href="/m.js">
+            <script type="module" src="/m.js"></script>
+          </head><body><p id="p">p</p></body></html>
+        HTML
+      end
+    }
+  end
+
+  def visit_twice(hits, headers = {})
+    s = simulated_session(app(hits, headers))
+    2.times do
+      s.visit '/'
+      expect(s.evaluate_script("[getComputedStyle(document.getElementById('p')).color, document.title]")).to eq(['rgb(0, 128, 0)', 'm'])
+    end
+  end
+
+  it 'fetches a stylesheet and a module once per document' do
+    hits = Hash.new(0)
+    visit_twice(hits)
+    expect(hits.values_at('/s.css', '/m.js')).to eq([2, 2])
+  end
+
+  it 'fetches a no-store one every time it is asked' do
+    hits = Hash.new(0)
+    visit_twice(hits, 'cache-control' => 'no-store')
+    expect(hits['/s.css']).to be > 2
+    expect(hits['/m.js']).to be > 2
+  end
+end

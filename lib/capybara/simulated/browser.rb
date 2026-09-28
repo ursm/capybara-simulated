@@ -3454,6 +3454,10 @@ module Capybara
         # What the asset's Resource Timing entry reports — kept beside the cached body (see
         # `external_asset_source`), since the body alone is what the loader hands back.
         Thread.current[:csim_asset_meta] = result && resource_timing_meta(result)
+        # …and whether it forbids being stored at all, which `external_asset_source`'s per-document memo honours.
+        Thread.current[:csim_asset_no_store] = result && result['headers']&.any? {|k, v|
+          k.to_s.casecmp?('cache-control') && Array(v).join(',').match?(/(?:\A|,)\s*no-store\s*(?:,|\z)/i)
+        }
         return nil unless result && result['status'].to_i < 400
         result['body'].to_s
       end
@@ -3630,10 +3634,19 @@ module Capybara
         needs_base = @current_url.to_s.start_with?('blob:', 'data:', 'about:')
         key = resolve_against_current(url.to_s, use_base: needs_base)
         return nil unless key.is_a?(String)
+        # One fetch per URL per DOCUMENT, whatever the response's freshness says — a browser's memory cache: the
+        # cascade fetches a `<link>`'s sheet and its load task asks again, and a response with no cache headers (every
+        # asset of a Rails app in test) crossed Rack twice per page. `no-store` alone is fetched every time.
+        # (A body served from memory carries the facts of the response it came from, for whoever files its Resource
+        # Timing entry — `note_module_fetch` reads them where `rack_fetch_body` would have left them.)
+        if (e = @page_asset_src&.[](key))
+          (@asset_meta ||= {})[key] = Thread.current[:csim_asset_meta] = e[1]
+          return e[0]
+        end
         @@asset_src_lock.synchronize do
           if (e = @@asset_src[key])
             if e[1].nil? || Time.now < e[1]
-              (@asset_meta ||= {})[key] = e[2]
+              (@asset_meta ||= {})[key] = Thread.current[:csim_asset_meta] = e[2]
               return e[0]
             end
             @@asset_src.delete(key)
@@ -3650,6 +3663,7 @@ module Capybara
         # Script / stylesheet source is TEXT, but the raw Rack / binread body
         # arrives BINARY-tagged (see `RuntimeShared.utf8_text`).
         body = RuntimeShared.utf8_text(body)
+        (@page_asset_src ||= {})[key] = [body, meta] unless Thread.current[:csim_asset_no_store]
         if fresh_until
           @@asset_src_lock.synchronize do
             @@asset_src.clear if @@asset_src.size >= ASSET_SRC_MAX
@@ -11670,6 +11684,7 @@ module Capybara
         # a leg delivering after this point would resolve the NEW page's same-
         # numbered fetch with the old page's response.
         reset_sw_race_state
+        @page_asset_src = nil   # …and its per-document asset memo (`external_asset_source`)
         @runtime.rebuild_ctx
         # A full page (re)build disposes every frame realm, so any active
         # `within_frame` scope is now stale — fall back to the main document.

@@ -1301,7 +1301,9 @@ module Capybara
           src = r && r['body']
         end
         if src.nil?
-          src = @browser.rack_fetch_body(url_s)
+          # …through the asset cache, like a classic script's: one fetch per URL per document (a `modulepreload`
+          # link fetched it too), none across visits while the response says it is fresh.
+          src = @browser.external_asset_source(url_s)
           @browser.note_module_fetch(url_s) if src   # its Resource Timing entry ('script')
         end
         return handles[url] = nil unless src
