@@ -26,6 +26,8 @@ RSpec.describe 'element state in the native arena' do
       <div contenteditable id="ce"><span id="ce-kid">k</span><b contenteditable="false" id="ce-off">o</b></div>
       <button id="b-submit">s</button><button type="button" id="b-button">b</button><button type="Nonsense" id="b-odd">o</button>
       <input type="submit" id="i-submit">
+      <input type="hidden" required id="req-hidden"><input type="color" required id="req-color">
+      <input type="email" required id="req-email"><input type="nonsense" required id="req-bogus">
     </form>
     <details open id="det"><summary>s</summary></details>
     <dialog id="dlg">d</dialog>
@@ -77,7 +79,7 @@ RSpec.describe 'element state in the native arena' do
     expect(native_ids('input:disabled')).to eq(%w[in-fs])
     # An `<optgroup>` is disabled by its own attribute only; an option by its `<select>`'s too.
     expect(native_ids('#og:disabled, #o-dis:disabled, #in-legend:enabled')).to eq(%w[in-legend o-dis])
-    expect(native_ids('input:read-write, textarea:read-write')).to eq(%w[in-legend ph ph-val ph-ta rw bogus-type ta])
+    expect(native_ids('input:read-write, textarea:read-write')).to eq(%w[in-legend ph ph-val ph-ta rw bogus-type ta req-email req-bogus])
     expect(native_ids('#ce :read-write, #ce:read-write')).to eq(%w[ce ce-kid])
     expect(native_ids('#ce-off:read-only')).to eq(%w[ce-off])
     expect(native_ids(':default')).to eq(%w[c1 r2 c4 o2 b-submit b-odd i-submit])
@@ -95,6 +97,13 @@ RSpec.describe 'element state in the native arena' do
     expect(native_ids(':placeholder-shown')).to eq(%w[ph-val])
     session.execute_script("document.querySelector('form').reset()")
     expect(native_ids(':placeholder-shown')).to eq(%w[ph])
+  end
+
+  # An ignored `required` makes an input neither — HTML, and Firefox (Chrome calls a hidden or color one `:optional`).
+  it 'answers :required and :optional where the attribute applies' do
+    expect(native_ids(':required')).to eq(%w[req-email req-bogus])
+    expect(native_ids('[id^=req]:optional')).to eq([])
+    expect(native_ids('#s:optional, #ta:optional')).to eq(%w[s ta])
   end
 
   it 'answers :open, :modal and :popover-open' do

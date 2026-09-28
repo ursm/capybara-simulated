@@ -43,7 +43,7 @@ RSpec.describe 'native selector engine SHADOW A/B on the __csimQuery path' do
 
   # Selectors whose truth depends on live element state the arena can't see — native
   # must DEFER these to css-select (recorded as fallbacks, never a wrong subset).
-  SHADOW_STATE_SELECTORS = ['input:required', ':invalid', 'p::before'].freeze
+  SHADOW_STATE_SELECTORS = ['input:valid', ':invalid', 'p::before'].freeze
 
   let(:app) {
     cards = (1..SHADOW_CARDS).map {|i|

@@ -163,6 +163,17 @@ impl RealmArena {
             None => n.plain_attr("value").is_none_or(str::is_empty),
         }
     }
+    // `:required` / `:optional`: an `<input>` the `required` attribute applies to (not a button, hidden, range or color
+    // one, whose `required` is ignored), a `<select>` or a `<textarea>` — `Some(required)` — or neither (`None`).
+    pub(crate) fn requiredness(&self, id: NodeId) -> Option<bool> {
+        let n = self.get(id)?;
+        let requirable = if n.is_html_named("input") {
+            !matches!(n.input_type(), "submit" | "image" | "reset" | "button" | "hidden" | "range" | "color")
+        } else {
+            n.is_html_named("select") || n.is_html_named("textarea")
+        };
+        requirable.then(|| n.plain_attr("required").is_some())
+    }
     // `:open`: a `<details>` or `<dialog>` with the `open` attribute.
     pub(crate) fn is_open(&self, id: NodeId) -> bool {
         self.get(id)

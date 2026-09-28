@@ -1,9 +1,9 @@
 # frozen_string_literal: true
 
 # The native selector engine must NEVER silently answer a selector whose truth depends on
-# live element state it can't see (`:required`, `:valid`, `:lang()`, `:target`, a pseudo-element,
+# live element state it can't see (`:valid`, `:lang()`, `:target`, `:defined`, a pseudo-element,
 # …) — a structural-only match would return a wrong SUBSET. (The states the arena DOES carry —
-# `:checked`, `:focus`, `:hover`, `:disabled`, … — are answered; element_state_native_spec.) Instead it
+# `:checked`, `:focus`, `:hover`, `:disabled`, `:required`, … — are answered; element_state_native_spec.) Instead it
 # flags such a selector at parse time and reports it as a fallback so the caller runs the JS
 # css-select engine. This spec pins that contract:
 #
@@ -16,14 +16,9 @@ require 'capybara/simulated'
 require 'rack'
 require_relative 'support/session_teardown'
 
-# Hand-drives the isolate arena (resetArena + importNode) then reads DOCUMENT elements, so it needs the
-# production cascade to NOT own the arena: with native matching on by default, cascade builds+syncs that
-# same arena and swaps each element's `_attrs` to the native attrsView (store flip), which this spec's
-# resetArena would then wipe. Run it only under the kill switch (CSIM_NO_NATIVE_CASCADE), where the arena
-# is free and `_attrs` stays a plain JS object. The queryIds fallback contract is exercised in production
-# by the default matching path (and covered by WPT) regardless.
-RSpec.describe 'native selector engine: JS fallback for live-state selectors',
-  if: ENV['CSIM_NO_NATIVE_CASCADE'] do
+# Asks the production arena — the one every node joins at construction — so what native answers is what it answers
+# for the cascade.
+RSpec.describe 'native selector engine: JS fallback for live-state selectors' do
   let(:app) {
     html = <<~HTML
       <!doctype html>
@@ -47,37 +42,15 @@ RSpec.describe 'native selector engine: JS fallback for live-state selectors',
 
   let(:session) { simulated_session(app) }
 
-  # Build the native arena from the parsed document, stamping each element with its nativeId so
-  # css-select results can be compared by id. Returns nothing; sets globalThis.__abRoot.
-  FALLBACK_BUILD_JS = <<~JS
-    (function () {
-      __dom.resetArena();
-      // Every node, text and comments included (`:empty` reads them), and <html> under a document node (`:root`).
-      function walk(el, parentNid) {
-        const attrs = [];
-        for (const n of el.getAttributeNames()) attrs.push(n, el.getAttribute(n));
-        const ns = el.namespaceURI === 'http://www.w3.org/1999/xhtml' ? '' : (el.namespaceURI || '');
-        const nid = __dom.importNode(el.localName, ns, parentNid, attrs);
-        el.__nid = nid;
-        for (const c of el.childNodes) {
-          if (c.nodeType === 1) walk(c, nid);
-          else __dom.createNode(c.nodeType, c.data == null ? '' : c.data, nid);
-        }
-        return nid;
-      }
-      globalThis.__abRoot = walk(document.documentElement, __dom.createNode(9, '', -1));
-    })();
-  JS
-
   # Classify one selector: 'FALLBACK' / 'INVALID' / 'MATCHED-parity:N' / 'MATCHED-MISMATCH …'.
   # For a natively-matched selector it also checks the id set equals css-select's, so "native
   # handled it" always means "native handled it correctly".
   CLASSIFY_JS = <<~JS
     (function (sel) {
-      const r = __dom.queryIds(globalThis.__abRoot, sel);
+      const r = __dom.queryIds(document._nid, sel, false);
       if (r === undefined) return 'FALLBACK';
       if (r === null) return 'INVALID';
-      const css = Array.from(document.querySelectorAll(sel)).map(e => e.__nid);
+      const css = Array.from(document.querySelectorAll(sel)).map(e => e._nid);
       const a = r.slice().sort((x, y) => x - y);
       const b = css.slice().sort((x, y) => x - y);
       const same = a.length === b.length && a.every((v, i) => v === b[i]);
@@ -91,7 +64,6 @@ RSpec.describe 'native selector engine: JS fallback for live-state selectors',
 
   before do
     session.visit '/'
-    session.evaluate_script(FALLBACK_BUILD_JS)
   end
 
   it 'answers structural selectors natively, and correctly' do
@@ -123,17 +95,17 @@ RSpec.describe 'native selector engine: JS fallback for live-state selectors',
   end
 
   it 'defers a live-state selector to css-select even when elements really match' do
-    # Guard the premise: css-select DOES see the required field, so a structural-only native
-    # answer would be a wrong subset ([]). Native must decline, not guess.
-    expect(session.evaluate_script("document.querySelectorAll(':required').length")).to eq(1)
+    # Guard the premise: css-select DOES see the empty required field as invalid, so a structural-only
+    # native answer would be a wrong subset ([]). Native must decline, not guess.
+    expect(session.evaluate_script("document.querySelectorAll('input:invalid').length")).to eq(1)
 
     [
-      ':required',
-      '.tb:required',
-      ':not(:required)',
-      ':is(a, :required)',
       ':invalid',
-      ':placeholder-shown',
+      '.tb:invalid',
+      ':not(:invalid)',
+      ':is(a, :invalid)',
+      ':defined',
+      ':target',
       ':lang(en)',
       'p::before'
     ].each do |sel|
@@ -155,8 +127,8 @@ RSpec.describe 'native selector engine: JS fallback for live-state selectors',
       (function () {
         const feed = document.querySelector('.feed');
         const sel = ':scope > .card';
-        const nat = (__dom.queryIds(feed.__nid, sel) || []).slice().sort((a, b) => a - b);
-        const css = Array.from(feed.querySelectorAll(sel)).map(e => e.__nid).sort((a, b) => a - b);
+        const nat = (__dom.queryIds(feed._nid, sel, false) || []).slice().sort((a, b) => a - b);
+        const css = Array.from(feed.querySelectorAll(sel)).map(e => e._nid).sort((a, b) => a - b);
         return JSON.stringify(nat) === JSON.stringify(css) ? ('OK:' + nat.length) : ('MISMATCH nat=' + JSON.stringify(nat) + ' css=' + JSON.stringify(css));
       })();
     JS
