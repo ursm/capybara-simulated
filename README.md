@@ -49,6 +49,10 @@ narrower than a real browser would.
 
 JavaScript runs on V8, via [rusty_racer](https://github.com/ursm/rusty_racer) — a rusty_v8-based Ruby binding with the native ES Module API, `ScriptCompiler::CachedData` snapshots, and per-frame realm contexts the driver builds on. It is a dependency of the gem, so there is nothing to add to your Gemfile: the V8 engine is linked into the driver's native extension, and rusty_racer supplies the Ruby API around it.
 
+That extension (`csim_native` — the V8 engine plus the native DOM) is Rust. A prebuilt gem ships it
+compiled; a source install (a platform with no prebuilt gem) compiles it during `bundle install`,
+so that machine needs a Rust toolchain (`cargo`, e.g. via [rustup](https://rustup.rs)).
+
 ## Use
 
 `require 'capybara/simulated'` registers the `:simulated` driver.

@@ -128,7 +128,8 @@ jobs:
           bundler-cache: true
 
       # A bare `rspec` (no ci-rspec retry): the counts are deterministic, so a red is a real
-      # change to lock in. No build step — the gem needs no native extension.
+      # change to lock in. The run loads the csim_native extension (V8 + the native DOM),
+      # which `bundle install` does not build for the gem's own checkout — `rake compile` does.
       - run: bundle exec rspec spec/perf_gate
 
   # The gem SHIPS the pre-built bundles and never runs npm, so nothing in the spec
