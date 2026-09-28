@@ -41,6 +41,26 @@ RSpec.describe 'SVG XLink links' do
     expect(got).to eq([true, true, true, 2, 0, false, '', '1'])
   end
 
+  # An `<a>` in NO namespace is no hyperlink — not to the native matcher (the cascade), not to css-select, and it gets
+  # no UA link colour — while `:-webkit-any-link` is Chrome's other name for `:any-link`. Chrome-measured.
+  it 'makes no hyperlink of an <a> in no namespace, and knows :-webkit-any-link' do
+    got = session.evaluate_script(<<~JS)
+      (() => {
+        const t = document.createElement('div');
+        t.className = 't';
+        document.body.append(t);
+        const st = document.createElement('style');
+        st.textContent = '.t :any-link { outline-color: rgb(1, 2, 3) }';
+        document.head.append(st);
+        const n = document.createElementNS(null, 'a'); n.setAttribute('href', '/x'); t.append(n);
+        const h = document.createElement('a'); h.href = '/y'; t.append(h);
+        return [n.matches(':any-link'), getComputedStyle(n).outlineColor, getComputedStyle(n).color,
+                getComputedStyle(h).color, h.matches(':-webkit-any-link')];
+      })()
+    JS
+    expect(got).to eq([false, 'rgb(0, 0, 0)', 'rgb(0, 0, 0)', 'rgb(0, 0, 238)', true])
+  end
+
   it 'navigates when clicked' do
     s = session
     s.find(:css, '#lnk').click

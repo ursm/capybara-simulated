@@ -28,7 +28,7 @@ use selectors::matching::{matches_selector, selector_may_match};
 use selectors::parser::AncestorHashes;
 
 use crate::dom::{NodeId, RealmArena};
-use crate::selector::{quirks_mode, with_compiled, CssStr, NodeRef, HTML_NS};
+use crate::selector::{quirks_mode, with_compiled, CssStr, NodeRef, HTML_NS, NO_NAMESPACE};
 
 // The terminal-key bucket a rule sits in, as the JS `terminalKey` put it (`bucketFor`): the element's own
 // identifiers select the buckets it could match, so an element only tests those. Any other kind (0) is universal.
@@ -340,7 +340,14 @@ fn ancestor_bloom(arena: &RealmArena, id: NodeId) -> BloomFilter {
             break;
         }
         bloom.insert_hash(hash(&node.local_name));
-        bloom.insert_hash(hash(if node.ns.is_empty() { HTML_NS } else { &node.ns }));
+        let ns = if node.ns.is_empty() {
+            HTML_NS
+        } else if node.ns == NO_NAMESPACE {
+            ""
+        } else {
+            &node.ns
+        };
+        bloom.insert_hash(hash(ns));
         if let Some(v) = node.get_attr("id") {
             if !v.is_empty() {
                 bloom.insert_hash(hash(v));

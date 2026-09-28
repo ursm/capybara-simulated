@@ -37,6 +37,8 @@ use selectors::{Element, OpaqueElement};
 use crate::dom::{NodeId, RealmArena};
 
 pub(crate) const HTML_NS: &str = "http://www.w3.org/1999/xhtml";
+// How the arena spells an element in NO namespace (native-query-shadow.js `NO_NAMESPACE`): no URL is it.
+pub(crate) const NO_NAMESPACE: &str = "\0";
 const SVG_NS: &str = "http://www.w3.org/2000/svg";
 const XLINK_NS: &str = "http://www.w3.org/1999/xlink";
 
@@ -263,9 +265,16 @@ impl<'a> Element for NodeRef<'a> {
     fn has_local_name(&self, name: &str) -> bool {
         self.node().local_name == name
     }
+    // The arena spells the HTML namespace '' and NO namespace NO_NAMESPACE.
     fn has_namespace(&self, ns: &str) -> bool {
         let n = &self.node().ns;
-        if n.is_empty() { ns == HTML_NS } else { n == ns }
+        if n.is_empty() {
+            ns == HTML_NS
+        } else if n == NO_NAMESPACE {
+            ns.is_empty()
+        } else {
+            n == ns
+        }
     }
     fn is_same_type(&self, other: &Self) -> bool {
         self.node().local_name == other.node().local_name && self.node().ns == other.node().ns

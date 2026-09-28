@@ -29,4 +29,20 @@ RSpec.describe 'namespaced attributes' do
     JS
     expect(got).to eq(['urn:x', '1', '1', false, 'right', 'left'])
   end
+
+  # Setting an attribute that exists changes its VALUE only (DOM "set an attribute value"): its prefix stays, so an
+  # unprefixed XLink `href` set again as `xlink:href` is still one attribute named `href`. Chrome-measured.
+  it 'keeps an existing attribute its prefix' do
+    s = simulated_session(->(_env) { [200, {'content-type' => 'text/html'}, ['<!DOCTYPE html><p>x</p>']] })
+    s.visit '/'
+    got = s.evaluate_script(<<~JS)
+      (() => {
+        const X = 'http://www.w3.org/1999/xlink', a = document.createElementNS('http://www.w3.org/2000/svg', 'a');
+        a.setAttributeNS(X, 'href', 'u1');
+        a.setAttributeNS(X, 'xlink:href', 'u2');
+        return [a.attributes[0].name, a.attributes[0].prefix, a.getAttributeNS(X, 'href'), a.attributes.length];
+      })()
+    JS
+    expect(got).to eq(['href', nil, 'u2', 1])
+  end
 end
