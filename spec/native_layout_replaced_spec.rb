@@ -59,6 +59,16 @@ RSpec.describe 'native layout replaced-leaf parity' do
     session.evaluate_script(%(document.querySelector('#{selector}').getBoundingClientRect().width))
   end
 
+  # …and a LIST BOX flex item, which native's flex sizing does not take: the page's own pass asks that of every item, and
+  # lays the page out with the JS layout where one is there. Sized natively, it stretched and grew nothing — 50.66 wide in
+  # both shapes. Chrome's widths.
+  it 'stretches and grows a list-box flex item in the page pass' do
+    column = '<div style="display:flex;flex-direction:column;width:200px"><select multiple size="3"><option>a</option></select></div>'
+    row    = '<div style="display:flex;width:300px"><select multiple size="3" style="flex-grow:1"><option>a</option></select><i>x</i></div>'
+    expect(rendered_width(column, 'select')).to be_within(0.01).of(200)
+    expect(rendered_width(row, 'select')).to be_within(0.05).of(292.89)
+  end
+
   # An `<svg>`'s intrinsic size is its `width` / `height` attributes where they are absolute lengths, and its `viewBox`
   # its ratio (SVG 2 §8.2): what a flex item's basis reads. Read off the viewBox alone, every icon set's
   # `<svg width="16" height="16">` was 300 wide in a flex row — a Tailwind icon button 36 tall. Chrome's [w, h] for the
