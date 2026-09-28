@@ -36,7 +36,7 @@ use selectors::{Element, OpaqueElement};
 
 use crate::dom::{NodeId, RealmArena};
 
-const HTML_NS: &str = "http://www.w3.org/1999/xhtml";
+pub(crate) const HTML_NS: &str = "http://www.w3.org/1999/xhtml";
 
 // A CSS string (idents, local names, namespaces, attribute values). Wraps String to satisfy the
 // selectors associated-type bounds (PrecomputedHash / Borrow<str>) a bare String can't.
@@ -483,6 +483,12 @@ pub fn compile_selector(text: &str) -> i32 {
     };
     COMPILED_IDX.with(|m| m.borrow_mut().insert(text.to_owned(), h));
     h
+}
+
+// The compiled selectors, by handle, for a caller that matches many against one element with one
+// MatchingContext of its own (the native cascade's per-element pass, crate::cascade).
+pub fn with_compiled<R>(f: impl FnOnce(&[SelectorList<CsimImpl>]) -> R) -> R {
+    COMPILED.with(|c| f(&c.borrow()))
 }
 
 // Match ONE element against a previously compiled selector handle. `None` when the handle is out of

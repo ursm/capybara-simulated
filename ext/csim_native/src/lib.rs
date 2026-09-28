@@ -6,6 +6,8 @@
 // DOM to be installed into every realm through rusty_racer's generic hook. The
 // engine itself stays a pure V8 binding with no DOM knowledge.
 
+// The native author cascade: a realm's static rules, and one element's winning declarations in one pass.
+mod cascade;
 mod dom;
 // Native text metrics (fontations) — used IN-PROCESS by native inline layout (L2, mod layout); JS
 // registers a font (registerFontPath) to a handle it passes in the layout inputs.

@@ -393,6 +393,8 @@ pub(crate) struct Dom {
     attrs_view_template: Option<v8::Global<v8::ObjectTemplate>>,
     // Each realm's kept layout chunks (`ChunkStore`).
     pub(crate) layout_chunks: std::collections::HashMap<i32, ChunkStore>,
+    // Each realm's static author rules (`cascadeLoad`), which `cascadeWinners` answers from.
+    pub(crate) cascades: std::collections::HashMap<i32, crate::cascade::CascadeStore>,
 }
 
 // Borrow the isolate's Dom, lazily creating the slot on first touch. rusty_v8
@@ -484,6 +486,10 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_, ()>, ctx: &v8::Global<v8:
     register(scope, ns, "compileSelector", compile_selector, context_id);
     register(scope, ns, "matchesCompiled", matches_compiled, context_id);
     register(scope, ns, "resetArena", reset_arena, context_id);
+    // The native author cascade: load a rule set's STATIC rules once (cascadeLoad), then answer one element's
+    // winning declaration per property in one pass (cascadeWinners).
+    register(scope, ns, "cascadeLoad", cascade_load, context_id);
+    register(scope, ns, "cascadeWinners", cascade_winners, context_id);
     register(scope, ns, "nowNanos", now_nanos, context_id);
     // Incremental-sync primitives (the store-flip F1 foundation): keep the arena current
     // as the DOM mutates, instead of rebuilding it. syncChildren relinks one parent's
@@ -801,6 +807,63 @@ fn matches_compiled(
     }
 }
 
+// __dom.cascadeLoad(records: Float64Array, keys: string[], propCount) -> the number of rules loaded. Replaces the
+// calling realm's rule set; the record layout is `CascadeStore::load`'s.
+fn cascade_load(
+    scope: &mut v8::PinScope<'_, '_>,
+    args: v8::FunctionCallbackArguments<'_>,
+    mut rv: v8::ReturnValue<'_, v8::Value>,
+) {
+    let prop_count = args.get(2).integer_value(scope).unwrap_or(0).max(0) as usize;
+    let mut keys = Vec::new();
+    if let Ok(arr) = v8::Local::<v8::Array>::try_from(args.get(1)) {
+        for i in 0..arr.length() {
+            let key = match arr.get_index(scope, i) {
+                Some(v) => v.to_rust_string_lossy(scope),
+                None => String::new(),
+            };
+            keys.push(key);
+        }
+    }
+    let cid = realm_id(scope, &args);
+    let store = crate::cascade::CascadeStore::load(&f64_arg(args.get(0)), &keys, prop_count);
+    let n = store.rule_count();
+    dom(scope).cascades.insert(cid, store);
+    rv.set_int32(n as i32);
+}
+
+// __dom.cascadeWinners(nid, out: Int32Array) -> the number of ints `CascadeStore::answer` wrote to `out`, or -1 when
+// there is no rule set, the node is not in the arena, or the answer does not fit — the caller then runs its own
+// cascade for this element.
+fn cascade_winners(
+    scope: &mut v8::PinScope<'_, '_>,
+    args: v8::FunctionCallbackArguments<'_>,
+    mut rv: v8::ReturnValue<'_, v8::Value>,
+) {
+    rv.set_int32(-1);
+    let Some(id) = nid_arg(scope, &args, 0) else {
+        return;
+    };
+    let Ok(out) = v8::Local::<v8::Int32Array>::try_from(args.get(1)) else {
+        return;
+    };
+    let n = out.length();
+    let ptr = out.data() as *mut i32;
+    if n == 0 || ptr.is_null() || (ptr as usize) % std::mem::align_of::<i32>() != 0 {
+        return;
+    }
+    // SAFETY: the view's own `n` i32s; nothing below runs JS or allocates on V8's heap, so nothing can move them.
+    let out = unsafe { std::slice::from_raw_parts_mut(ptr, n) };
+    let cid = realm_id(scope, &args);
+    let d = dom(scope);
+    let (Some(store), Some(arena)) = (d.cascades.get_mut(&cid), d.realms.get(&cid)) else {
+        return;
+    };
+    if let Some(count) = store.answer(arena, id, out) {
+        rv.set_int32(count as i32);
+    }
+}
+
 // __dom.resetArena() — free the CALLING REALM's nodes for a new page (a navigation). Each occupied
 // slot's gen is bumped (not zeroed), so a detached element held across the navigation can't alias a
 // new-page node that reuses its index; the freed indices feed the new page.
@@ -815,6 +878,7 @@ fn reset_arena(
     let cid = realm_id(scope, &args);
     realm(scope, cid).reset();
     dom(scope).layout_chunks.remove(&cid);
+    dom(scope).cascades.remove(&cid);
 }
 
 // __dom.setNodeMeta(nid, localName, ns) — update a node's localName + namespace after creation. The
@@ -869,6 +933,7 @@ fn drop_realm(
     if let Some(id) = args.get(0).integer_value(scope) {
         dom(scope).realms.remove(&(id as i32));
         dom(scope).layout_chunks.remove(&(id as i32));   // (…and its kept layout chunks, see `reset_arena`)
+        dom(scope).cascades.remove(&(id as i32));        // (…and its rules)
     }
 }
 
