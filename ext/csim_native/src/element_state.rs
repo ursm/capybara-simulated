@@ -69,6 +69,24 @@ fn is_valid_custom_element_name(name: &str) -> bool {
         && !RESERVED_CUSTOM_ELEMENT_NAMES.contains(&name)
 }
 
+// The radio groups holding a checked radio (name, form owner) and each form's default button, of one tree.
+#[derive(Default)]
+pub(crate) struct FormFacts {
+    checked_groups: std::collections::HashSet<(String, Option<NodeId>)>,
+    defaults: std::collections::HashMap<NodeId, NodeId>,
+}
+// Those facts per tree root, as of the arena's `mutations` count.
+#[derive(Default)]
+pub(crate) struct FormFactsMemo {
+    mutations: u64,
+    per_root: std::collections::HashMap<NodeId, FormFacts>,
+}
+impl FormFactsMemo {
+    pub(crate) fn clear(&mut self) {
+        self.per_root.clear();
+    }
+}
+
 impl NodeData {
     fn is_html(&self) -> bool {
         self.kind == NodeKind::Element && self.ns.is_empty()
@@ -198,22 +216,49 @@ impl RealmArena {
             _ => false,
         }
     }
-    // Does `id`'s radio button group hold a checked radio — its own name, form owner and tree (form-helpers.js
-    // `forEachRadioInGroup`)? A nameless radio is its own group.
+    // Does `id`'s radio button group — its name, form owner and tree — hold a checked radio (form-helpers.js
+    // `radioGroupHasChecked`)? A nameless radio is its own group.
     fn radio_group_has_checked(&self, id: NodeId) -> bool {
         if self.is_checked(id) {
             return true;
         }
         let Some(name) = self.get(id).and_then(|n| n.plain_attr("name")).filter(|n| !n.is_empty()) else { return false };
         let owner = self.form_owner(id);
-        self.find_in_tree(self.root_of(id), |c, n| {
-            n.is_html_named("input")
-                && n.input_type() == "radio"
-                && n.plain_attr("name") == Some(name)
-                && self.is_checked(c)
-                && self.form_owner(c) == owner
-        })
-        .is_some()
+        self.with_form_facts(self.root_of(id), |f| f.checked_groups.contains(&(name.to_string(), owner)))
+    }
+    // What those two ask of `root`'s tree, from ONE walk of it, kept until the arena next changes: a pseudo-class asked of
+    // every radio or submit button in turn walked the whole tree per element.
+    fn with_form_facts<R>(&self, root: NodeId, answer: impl FnOnce(&FormFacts) -> R) -> R {
+        {
+            let memo = self.form_facts.borrow();
+            if memo.mutations == self.mutations {
+                if let Some(facts) = memo.per_root.get(&root) {
+                    return answer(facts);
+                }
+            }
+        }
+        let mut facts = FormFacts::default();
+        self.find_in_tree(root, |c, n| {
+            if n.is_html_named("input") && n.input_type() == "radio" && self.is_checked(c) {
+                if let Some(name) = n.plain_attr("name").filter(|n| !n.is_empty()) {
+                    facts.checked_groups.insert((name.to_string(), self.form_owner(c)));
+                }
+            }
+            if n.is_submit_button() && !self.in_select(c) {
+                if let Some(form) = self.form_owner(c) {
+                    facts.defaults.entry(form).or_insert(c);
+                }
+            }
+            false
+        });
+        let result = answer(&facts);
+        let mut memo = self.form_facts.borrow_mut();
+        if memo.mutations != self.mutations {
+            memo.clear();
+            memo.mutations = self.mutations;
+        }
+        memo.per_root.insert(root, facts);
+        result
     }
 
     // The root of `id`'s tree: a document, a fragment or shadow root, or a detached subtree's top.
@@ -225,7 +270,7 @@ impl RealmArena {
         cur
     }
     // The first element of `root`'s tree (itself included, shadow trees not) that `pred` takes, in tree order.
-    fn find_in_tree(&self, root: NodeId, pred: impl Fn(NodeId, &NodeData) -> bool) -> Option<NodeId> {
+    fn find_in_tree(&self, root: NodeId, mut pred: impl FnMut(NodeId, &NodeData) -> bool) -> Option<NodeId> {
         let mut stack = vec![root];
         while let Some(c) = stack.pop() {
             let Some(n) = self.get(c) else { continue };
@@ -259,14 +304,14 @@ impl RealmArena {
             }
             cur = self.parent_of(c);
         }
-        let hint = *self.parser_form_owners.get(&id)?;
+        let hint = self.parser_form_owner(id)?;
         (self.get(hint).is_some() && self.root_of(hint) == self.root_of(id)).then_some(hint)
     }
     // A form's default button: the first submit button in tree order whose form owner is the form, not a
     // `<select>`'s (form-helpers.js `defaultButtonOf`).
     fn default_button_of(&self, form: NodeId) -> Option<NodeId> {
         let root = if self.is_connected(form) { self.root_of(form) } else { form };
-        self.find_in_tree(root, |c, n| n.is_submit_button() && !self.in_select(c) && self.form_owner(c) == Some(form))
+        self.with_form_facts(root, |f| f.defaults.get(&form).copied())
     }
     fn in_select(&self, id: NodeId) -> bool {
         let mut cur = self.shadow_including_parent(id);

@@ -316,7 +316,11 @@ pub(crate) struct RealmArena {
     pub(crate) has_shadow_hosts: bool,
     // The form the HTML parser's form element pointer gave a control it inserted (`<table><form>…<input>`: the form
     // is no ancestor of it), until a script moves it — the few controls whose form owner the tree can't tell.
-    pub(crate) parser_form_owners: std::collections::HashMap<NodeId, NodeId>,
+    parser_form_owners: std::collections::HashMap<NodeId, NodeId>,
+    // Moves with every write to the arena (a node made or freed, any `get_mut`): what a memo of it keys on.
+    pub(crate) mutations: u64,
+    // Per tree root, the facts element_state.rs asks of every control in turn, as of `mutations` (`form_facts`).
+    pub(crate) form_facts: std::cell::RefCell<crate::element_state::FormFactsMemo>,
 }
 
 impl RealmArena {
@@ -331,6 +335,7 @@ impl RealmArena {
         }
     }
     fn get_mut(&mut self, id: NodeId) -> Option<&mut NodeData> {
+        self.mutations += 1;
         let slot = self.slots.get_mut(id.idx as usize)?;
         if slot.generation == id.generation {
             slot.data.as_mut()
@@ -342,6 +347,7 @@ impl RealmArena {
     // Put `data` in a free slot (reusing a recycled index when one is listed, else growing), returning
     // its NodeId at the slot's CURRENT generation. A recycled slot's gen was already bumped at free.
     fn alloc(&mut self, data: NodeData) -> NodeId {
+        self.mutations += 1;
         if let Some(idx) = self.free.pop() {
             let slot = &mut self.slots[idx as usize];
             slot.data = Some(data);
@@ -371,6 +377,8 @@ impl RealmArena {
         if slot.generation != id.generation || slot.data.is_none() {
             return;
         }
+        self.mutations += 1;
+        let slot = &mut self.slots[id.idx as usize];
         slot.data = None;
         if slot.generation < GEN_MAX {
             slot.generation += 1;
@@ -391,6 +399,8 @@ impl RealmArena {
         self.hover = None;
         self.has_shadow_hosts = false;
         self.parser_form_owners.clear();
+        self.form_facts.get_mut().clear();
+        self.mutations += 1;
         for idx in 0..self.slots.len() {
             let slot = &mut self.slots[idx];
             if slot.data.is_some() {
@@ -440,6 +450,18 @@ impl RealmArena {
                 *slot = None;
             }
         }
+    }
+
+    // The form the parser gave `id`, or none.
+    pub(crate) fn set_parser_form_owner(&mut self, id: NodeId, form: Option<NodeId>) {
+        self.mutations += 1;
+        match form {
+            Some(f) => self.parser_form_owners.insert(id, f),
+            None => self.parser_form_owners.remove(&id),
+        };
+    }
+    pub(crate) fn parser_form_owner(&self, id: NodeId) -> Option<NodeId> {
+        self.parser_form_owners.get(&id).copied()
     }
 
     // `root` is the shadow root of `host`.
@@ -926,15 +948,7 @@ fn set_parser_form_owner(
     };
     let form = nid_arg(scope, &args, 1);
     let cid = realm_id(scope, &args);
-    let arena = realm(scope, cid);
-    match form {
-        Some(f) => {
-            arena.parser_form_owners.insert(id, f);
-        }
-        None => {
-            arena.parser_form_owners.remove(&id);
-        }
-    }
+    realm(scope, cid).set_parser_form_owner(id, form);
 }
 
 // __dom.setShadowHost(rootNid, hostNid): the shadow root `rootNid` is attached to `hostNid`.

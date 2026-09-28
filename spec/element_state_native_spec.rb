@@ -279,6 +279,73 @@ RSpec.describe 'element state in the native arena' do
     end
   end
 
+  # Round 2 of that review.
+  describe 'the follow-ups' do
+    def fresh(html)
+      session.execute_script("document.body.innerHTML = #{html.to_json}")
+    end
+
+    # Every radio asks its group, and every submit button its form: ONE walk of the tree answers them all (a walk per
+    # element took 6.7 s for 4,000 radios, 2.3 s for 2,000 one-button forms).
+    it 'answers a whole page of radios and forms in one walk' do
+      fresh((1..2000).map {|i| "<input type=radio name=g#{i / 2} id=r#{i}>" }.join + (1..2000).map {|i| "<form><button id=b#{i}>b</button></form>" }.join)
+      ms = session.evaluate_script(<<~JS)
+        (() => {
+          const t = performance.now();
+          const js = document.querySelectorAll(':indeterminate').length + document.querySelectorAll(':default').length;
+          const nat = __dom.queryIds(document._nid, ':indeterminate', false).length + __dom.queryIds(document._nid, ':default', false).length;
+          return [js, nat, performance.now() - t];
+        })()
+      JS
+      expect(ms.first(2)).to eq([4000, 4000])
+      expect(ms.last).to be < 1000
+    end
+
+    it 'takes the is value of an XML-parsed HTML element' do
+      got = session.evaluate_script(<<~JS)
+        (() => {
+          const x = new DOMParser().parseFromString('<root xmlns="http://www.w3.org/1999/xhtml"><div is="x-xml" id="xh"/></root>', 'application/xhtml+xml');
+          const el = document.body.appendChild(document.adoptNode(x.getElementById('xh')));
+          const before = el.matches(':defined');
+          class XXml extends HTMLDivElement {}
+          customElements.define('x-xml', XXml, { extends: 'div' });
+          return [before, el.matches(':defined'), el instanceof XXml];
+        })()
+      JS
+      expect(got).to eq([false, true, true])
+    end
+
+    it "runs the removing steps in a removed host's shadow tree" do
+      session.execute_script(<<~JS)
+        const host = document.body.appendChild(document.createElement('div'));
+        const root = host.attachShadow({ mode: 'open' });
+        root.innerHTML = '<div popover id=sp>p</div><dialog id=sd>d</dialog>';
+        root.getElementById('sp').showPopover();
+        root.getElementById('sd').showModal();
+        host.remove();
+        document.body.append(host);
+        window.__shadowState = [root.getElementById('sp').matches(':popover-open'), root.getElementById('sd').matches(':modal')];
+      JS
+      expect(session.evaluate_script('window.__shadowState')).to eq([false, false])
+    end
+
+    it "runs a variadic insertion's adoptedCallback with the node in its new parent" do
+      got = session.evaluate_script(<<~JS)
+        (() => {
+          const log = [];
+          customElements.define('x-ad', class extends HTMLElement { adoptedCallback() { log.push(this.parentNode && this.parentNode.id); } });
+          const e = document.createElement('x-ad');
+          document.implementation.createHTMLDocument('').body.appendChild(e);
+          const root = document.body.appendChild(document.createElement('div'));
+          root.id = 'rc-root';
+          root.replaceChildren(e, 'txt');
+          return log;
+        })()
+      JS
+      expect(got).to eq(['', 'rc-root'])   # into the other document's body (no id), then back under the root
+    end
+  end
+
   # A frame's focus and hover are its container's in the parent document (HTML: the parent's focused area is the
   # navigable container); a hover leaving the container leaves the frame's document too.
   describe 'across a frame' do
