@@ -228,8 +228,10 @@ impl<'a> Element for NodeRef<'a> {
         OpaqueElement::new(self.node())
     }
 
+    // The parent ELEMENT: the synthetic '#document' node the arena hangs `<html>` under is none (`* > html` and
+    // `:not(.x) > html` match nothing, as in any browser).
     fn parent_element(&self) -> Option<Self> {
-        self.arena.parent_of(self.id).map(|p| self.at(p))
+        self.arena.parent_of(self.id).filter(|&p| !self.arena.is_document(p)).map(|p| self.at(p))
     }
     fn parent_node_is_shadow_root(&self) -> bool {
         false
