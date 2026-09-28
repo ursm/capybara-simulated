@@ -55,19 +55,20 @@ RSpec.describe 'native selector engine A/B vs css-select' do
   BUILD_JS = <<~JS
     (function () {
       __dom.resetArena();
+      // Every node, text and comments included (`:empty` reads them), and <html> under a document node (`:root`).
       function walk(el, parentNid) {
-        const names = el.getAttributeNames();
         const attrs = [];
-        for (const n of names) { attrs.push(n, el.getAttribute(n)); }
-        const hasNonElementChild = el.childNodes.length > el.children.length;
+        for (const n of el.getAttributeNames()) attrs.push(n, el.getAttribute(n));
         const ns = el.namespaceURI === 'http://www.w3.org/1999/xhtml' ? '' : (el.namespaceURI || '');
-        const nid = __dom.importNode(el.tagName, el.localName, ns, hasNonElementChild, parentNid, attrs);
+        const nid = __dom.importNode(el.localName, ns, parentNid, attrs);
         el.__nid = nid;
-        const kids = el.children;
-        for (let i = 0; i < kids.length; i++) walk(kids[i], nid);
+        for (const c of el.childNodes) {
+          if (c.nodeType === 1) walk(c, nid);
+          else __dom.createNode(c.nodeType, c.data == null ? '' : c.data, nid);
+        }
         return nid;
       }
-      globalThis.__abRoot = walk(document.documentElement, -1);
+      globalThis.__abRoot = walk(document.documentElement, __dom.createNode(9, '', -1));
       return true;
     })();
   JS

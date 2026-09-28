@@ -230,10 +230,10 @@ impl<'a> Element for NodeRef<'a> {
         OpaqueElement::new(self.node())
     }
 
-    // The parent ELEMENT: the synthetic '#document' node the arena hangs `<html>` under is none (`* > html` and
-    // `:not(.x) > html` match nothing, as in any browser).
+    // The parent ELEMENT: a document, a fragment or a shadow root is none (`* > html` and `:not(.x) > html` match
+    // nothing, as in any browser).
     fn parent_element(&self) -> Option<Self> {
-        self.arena.parent_of(self.id).filter(|&p| !self.arena.is_document(p)).map(|p| self.at(p))
+        self.arena.parent_of(self.id).filter(|&p| self.arena.is_element(p)).map(|p| self.at(p))
     }
     fn parent_node_is_shadow_root(&self) -> bool {
         false
@@ -360,19 +360,12 @@ impl<'a> Element for NodeRef<'a> {
     }
 
     fn is_empty(&self) -> bool {
-        !self.arena.has_element_child(self.id) && !self.node().has_text
+        self.arena.is_empty(self.id)
     }
+    // `:root` is the DOCUMENT's element only — a detached element, or a fragment's child, is no root (the JS matcher's
+    // `isDocumentRoot`).
     fn is_root(&self) -> bool {
-        match self.arena.parent_of(self.id) {
-            None => true,
-            // A shadow-built arena hangs the tree under a synthetic '#document' node so a
-            // document-scoped query includes <html> as a candidate; an element whose parent
-            // IS that document is the document root — css-select matches `:root` as "parent
-            // is not an element", and '#document' is the arena's one non-element node. A
-            // bulk-imported arena with no document node still roots at parent == None (and a
-            // stale upward edge reads as no parent, so it too roots here).
-            Some(parent) => self.arena.is_document(parent),
-        }
+        self.arena.parent_of(self.id).is_some_and(|p| self.arena.is_document(p))
     }
 
     fn add_element_unique_hashes(&self, _filter: &mut selectors::bloom::BloomFilter) -> bool {

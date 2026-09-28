@@ -12,9 +12,9 @@
 # frozen during synchronous JS) and PARITY-CHECKED. So this is zero-risk: a native or
 # arena bug can only surface as a recorded mismatch, never a wrong find.
 #
-# The arena rebuilds lazily whenever the DOM changed — a CONSERVATIVE upper bound on
-# upkeep (the real migration pays no rebuild). Build time is reported apart from query
-# time so both costs are legible. Not a gate (it prints a table); parity IS asserted.
+# The arena mirrors every node from its construction and follows each mutation as it happens, so there is no build
+# to time: the upkeep reported is the child-list syncs a mutation cost. Not a gate (it prints a table); parity IS
+# asserted.
 
 require 'capybara/simulated'
 require 'rack'
@@ -86,11 +86,8 @@ RSpec.describe 'native selector engine SHADOW A/B on the __csimQuery path' do
     session.visit '/'
     session.evaluate_script('globalThis.__csimNativeShadow = true')
 
-    # Warm the arena once (the initial build) so per-selector deltas are steady-state
-    # QUERY time, not one build amortised into the first selector.
+    # One find first, so per-selector deltas are steady-state QUERY time.
     session.evaluate_script('__csimQuery(0, ".card")')
-    warmed = stats
-    build_ms = warmed['buildNs'] / 1_000_000.0
 
     rows = SELECTORS.map {|sel| [sel, measure(sel)] }
 
@@ -114,17 +111,14 @@ RSpec.describe 'native selector engine SHADOW A/B on the __csimQuery path' do
     STATE_SELECTORS.each {|sel| session.evaluate_script(%(__csimQuery(0, #{sel.to_json}))) }
     fallbacks = stats['fallbacks'] - before_fb
 
-    # A mutation stales the arena; the next find rebuilds it — measure that one rebuild.
-    session.evaluate_script('document.querySelectorAll(".card").forEach((c, i) => { if (i % 3 === 0) c.classList.toggle("featured"); })')
-    before_rb = stats
-    session.evaluate_script('__csimQuery(0, "article.card")')
-    after_rb = stats
-    rebuild_ms = (after_rb['buildNs'] - before_rb['buildNs']) / 1_000_000.0
-    rebuilds   = after_rb['rebuilds'] - before_rb['rebuilds']
+    # A child-list mutation is followed as it happens — count the syncs it cost.
+    before_sync = stats
+    session.evaluate_script('document.querySelectorAll(".card").forEach((c, i) => { if (i % 3 === 0) c.append(document.createElement("i")); })')
+    syncs = stats['syncCalls'] - before_sync['syncCalls']
 
     final = stats
 
-    warn format("\n  native selector SHADOW A/B — %d cards, initial arena build %.2f ms, %d iters/selector", CARDS, build_ms, ITERS)
+    warn format("\n  native selector SHADOW A/B — %d cards, %d iters/selector", CARDS, ITERS)
     warn format('  %-34s %6s %10s %10s %8s', 'selector (document-scoped)', 'n', 'css µs', 'native µs', 'speedup')
     rows.each do |sel, r|
       warn format('  %-34s %6d %10.3f %10.3f %7.1fx', sel, r[:results], r[:css_us], r[:nat_us], r[:css_us] / [r[:nat_us], 1e-9].max)
@@ -134,7 +128,7 @@ RSpec.describe 'native selector engine SHADOW A/B on the __csimQuery path' do
     total_css = rows.sum {|_, r| r[:css_us] }
     total_nat = rows.sum {|_, r| r[:nat_us] }
     warn format('  %-34s %6s %10.3f %10.3f %7.1fx', 'TOTAL (steady-state query)', '', total_css, total_nat, total_css / total_nat)
-    warn format("\n  arena upkeep: 1 rebuild after a class mutation = %.2f ms (%d rebuild(s)); state pseudos deferred = %d/%d", rebuild_ms, rebuilds, fallbacks, STATE_SELECTORS.length)
+    warn format("\n  arena upkeep: %d child-list syncs for %d appends; state pseudos deferred = %d/%d", syncs, (CARDS + 2) / 3, fallbacks, STATE_SELECTORS.length)
     warn format('  totals over the run — matched finds %d, fallbacks %d, invalid %d, mismatches %d', final['matched'], final['fallbacks'], final['invalid'], final['mismatches'])
 
     # The load-bearing correctness assertion: native NEVER disagreed with css-select

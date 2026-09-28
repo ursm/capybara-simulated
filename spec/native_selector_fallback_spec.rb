@@ -51,17 +51,20 @@ RSpec.describe 'native selector engine: JS fallback for live-state selectors',
   BUILD_JS = <<~JS
     (function () {
       __dom.resetArena();
+      // Every node, text and comments included (`:empty` reads them), and <html> under a document node (`:root`).
       function walk(el, parentNid) {
         const attrs = [];
         for (const n of el.getAttributeNames()) attrs.push(n, el.getAttribute(n));
-        const hasNonElementChild = el.childNodes.length > el.children.length;
         const ns = el.namespaceURI === 'http://www.w3.org/1999/xhtml' ? '' : (el.namespaceURI || '');
-        const nid = __dom.importNode(el.tagName, el.localName, ns, hasNonElementChild, parentNid, attrs);
+        const nid = __dom.importNode(el.localName, ns, parentNid, attrs);
         el.__nid = nid;
-        for (const kid of el.children) walk(kid, nid);
+        for (const c of el.childNodes) {
+          if (c.nodeType === 1) walk(c, nid);
+          else __dom.createNode(c.nodeType, c.data == null ? '' : c.data, nid);
+        }
         return nid;
       }
-      globalThis.__abRoot = walk(document.documentElement, -1);
+      globalThis.__abRoot = walk(document.documentElement, __dom.createNode(9, '', -1));
     })();
   JS
 

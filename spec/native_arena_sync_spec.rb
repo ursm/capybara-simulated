@@ -42,37 +42,34 @@ RSpec.describe 'native arena incremental sync (store-flip F1a)',
   let(:session) { simulated_session(app) }
 
   # Build the arena by MIRRORING the parsed document: create every element unlinked
-  # (importNode parent -1), then link each parent's children with syncChildren. A synthetic
-  # '#document' node parents <html> so a document-scoped query includes it. Nothing here rebuilds;
+  # (importNode parent -1), then link each parent's children with syncChildren. A
+  # document node parents <html> so a document-scoped query includes it. Nothing here rebuilds;
   # subsequent mutations reuse these primitives on just the affected nodes.
   SETUP = <<~JS
     globalThis.__nid = [];   // nid -> node, for mapping native results back
     globalThis.HTML_NS = 'http://www.w3.org/1999/xhtml';
-    globalThis.mirrorCreate = function (el) {
+    // Every node — text and comments too, which `:empty` reads — as an unlinked arena node.
+    globalThis.mirrorCreate = function (node) {
+      if (node.nodeType !== 1) { node.__nid = __dom.createNode(node.nodeType, node.data == null ? '' : node.data, -1); return; }
       const attrs = [];
-      const a = el._attrs; for (const k in a) attrs.push(k, a[k]);
-      const ns = el._ns && el._ns !== HTML_NS ? el._ns : '';
-      const nid = __dom.importNode(el._tag, el._localName, ns, false, -1, attrs);
-      el.__nid = nid; __nid[nid] = el;
-      for (const c of el.children) mirrorCreate(c);
+      const a = node._attrs; for (const k in a) attrs.push(k, a[k]);
+      const ns = node._ns && node._ns !== HTML_NS ? node._ns : '';
+      const nid = __dom.importNode(node._localName, ns, -1, attrs);
+      node.__nid = nid; __nid[nid] = node;
+      for (const c of node.childNodes) mirrorCreate(c);
     };
     globalThis.syncEl = function (el) {
-      const kids = []; let hasText = false;
-      const ch = el.childNodes;
-      for (let i = 0; i < ch.length; i++) {
-        const c = ch[i];
-        if (c.nodeType === 1) kids.push(c.__nid);
-        else if ((c.nodeType === 3 || c.nodeType === 4) && c.data !== '') hasText = true;
-      }
-      __dom.syncChildren(el.__nid, kids, hasText);
+      const kids = [];
+      for (const c of el.childNodes) kids.push(c.__nid);
+      __dom.syncChildren(el.__nid, kids);
     };
     globalThis.mirrorLink = function (el) { syncEl(el); for (const c of el.children) mirrorLink(c); };
     globalThis.mirrorInit = function () {
       __dom.resetArena(); __nid = [];
       const root = document.documentElement;
       mirrorCreate(root); mirrorLink(root);
-      globalThis.__docRoot = __dom.importNode('#document', '#document', '', false, -1, []);
-      __dom.syncChildren(__docRoot, [root.__nid], false);
+      globalThis.__docRoot = __dom.createNode(9, '', -1);
+      __dom.syncChildren(__docRoot, [root.__nid]);
     };
     // Create arena nodes for a freshly-inserted subtree, then link it (its own descendants too).
     globalThis.mirrorInsertedSubtree = function (el) { mirrorCreate(el); mirrorLink(el); };
@@ -184,7 +181,7 @@ RSpec.describe 'native arena incremental sync (store-flip F1a)',
         const list = document.querySelector('.list');
         const items = Array.from(list.querySelectorAll('.item')).map(e => e.__nid);
         // Feed a hostile delta: the list itself + a duplicated first item + the real items.
-        __dom.syncChildren(list.__nid, [list.__nid, items[0], items[0]].concat(items), false);
+        __dom.syncChildren(list.__nid, [list.__nid, items[0], items[0]].concat(items));
         // Must terminate (no cycle) and expose each item exactly once, list never its own child.
         const kids = (__dom.queryIds(__docRoot, '.list > *') || []).length;
         const selfChild = (__dom.queryIds(list.__nid, '.list') || []).length;   // list under itself?

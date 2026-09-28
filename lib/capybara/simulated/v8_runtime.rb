@@ -909,6 +909,8 @@ module Capybara
         c.eval_void('globalThis.__csimNativeLayout = true;') unless ENV['CSIM_NATIVE_LAYOUT'] == '0'
         # …and the check on its subtree reuse: every pass walked again without it, and any difference thrown.
         c.eval_void('globalThis.__csimNativeLayoutVerifyReuse = true;') if ENV['CSIM_NL_REUSE_VERIFY'] == '1'
+        # …and the check on the arena itself: the whole JS tree held against it at every layout and cascade entry.
+        c.eval_void('globalThis.__csimArenaVerify = true;') if ENV['CSIM_ARENA_VERIFY'] == '1'
       end
 
       # The bridge calls `__csim_createFrameRealm(url, body, contentType, parentId)`

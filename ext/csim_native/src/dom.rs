@@ -69,9 +69,43 @@ impl NodeId {
     }
 }
 
-// One arena node's data: what the selector matcher reads. Attributes are the source of truth
-// (ordered, as the DOM keeps them).
+// What kind of DOM node an arena node mirrors — the arena holds EVERY node of every tree (documents, fragments and
+// shadow roots, text and comments as well as elements), so a native reader sees the tree a script sees. The element
+// navigation (first child / siblings / element children) steps over the rest.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub(crate) enum NodeKind {
+    Element,
+    // Text and CDATA sections: character data that counts as content (`:empty`, text runs).
+    Text,
+    // Comments and processing instructions: character data that does not.
+    Comment,
+    Document,
+    // A DocumentFragment — a shadow root included.
+    Fragment,
+    // A doctype: a child of a document and nothing else.
+    Other,
+}
+
+impl NodeKind {
+    // From the DOM `nodeType`.
+    fn from_node_type(t: i64) -> NodeKind {
+        match t {
+            1 => NodeKind::Element,
+            3 | 4 => NodeKind::Text,
+            7 | 8 => NodeKind::Comment,
+            9 => NodeKind::Document,
+            11 => NodeKind::Fragment,
+            _ => NodeKind::Other,
+        }
+    }
+}
+
+// One arena node's data: what the native readers see. Attributes are the source of truth
+// (ordered, as the DOM keeps them); for a non-element, `local_name` / `ns` / the attributes are empty.
 pub(crate) struct NodeData {
+    pub(crate) kind: NodeKind,
+    // The character data of a Text / Comment node (empty for any other).
+    pub(crate) data: String,
     // The ASCII-lowercased element name the selector engine matches on (`localName`, not the
     // possibly-upper-cased `tagName` — the matcher is case-normalized).
     pub(crate) local_name: String,
@@ -98,9 +132,6 @@ pub(crate) struct NodeData {
     // css-select; O(1) flips it). It counts ALL entries (a stale edge included), so the
     // sibling walks step from it and skip any stale neighbour they land on.
     pub(crate) child_index: usize,
-    // Whether the node has any text/comment child content — so `:empty` is correct even
-    // though the arena is element-only (children holds only elements).
-    pub(crate) has_text: bool,
     // The border-box a native layout pass wrote for this node (document coords), read back by the JS
     // geometry getters (getBoundingClientRect / offset* / scroll*). None until a pass lays it out;
     // overwritten each pass. See mod layout + the layoutPass / boxOf ops.
@@ -108,6 +139,22 @@ pub(crate) struct NodeData {
 }
 
 impl NodeData {
+    // A node of `kind` with its character data and nothing else — the element fields are filled by the caller.
+    pub(crate) fn of_kind(kind: NodeKind, data: String) -> NodeData {
+        NodeData {
+            kind,
+            data,
+            local_name: String::new(),
+            ns: String::new(),
+            attributes: Vec::new(),
+            attr_u16: Vec::new(),
+            attr_ns: Vec::new(),
+            parent: None,
+            children: Vec::new(),
+            child_index: 0,
+            layout_box: None,
+        }
+    }
     pub(crate) fn get_attr(&self, name: &str) -> Option<&str> {
         self.attributes
             .iter()
@@ -325,6 +372,65 @@ impl RealmArena {
         }
     }
 
+    // A new node, appended to `parent` when that is live (a stale parent nid leaves it a detached root).
+    pub(crate) fn create(&mut self, data: NodeData, parent: Option<NodeId>) -> NodeId {
+        let parent = parent.filter(|&p| self.get(p).is_some());
+        let id = self.alloc(NodeData { parent, ..data });
+        if let Some(p) = parent {
+            self.link_child(p, id);
+        }
+        id
+    }
+
+    // Take `child` out of its parent's children (its own subtree goes with it).
+    pub(crate) fn detach(&mut self, child: NodeId) {
+        let Some(old) = self.get(child).and_then(|n| n.parent) else { return };
+        if let Some(o) = self.get_mut(old) {
+            o.children.retain(|&c| c != child);
+        }
+        self.reindex_children(old);
+        if let Some(c) = self.get_mut(child) {
+            c.parent = None;
+        }
+    }
+
+    // Move `child` under `parent`, before `before` when that is one of its children, else last. Refused when it would
+    // make a cycle (`child` is `parent` or one of its ancestors) — the matcher's ancestor walks assume none.
+    pub(crate) fn insert_child(&mut self, parent: NodeId, child: NodeId, before: Option<NodeId>) {
+        if self.get(parent).is_none() || self.get(child).is_none() {
+            return;
+        }
+        let mut p = Some(parent);
+        while let Some(a) = p {
+            if a == child {
+                return;
+            }
+            p = self.get(a).and_then(|n| n.parent);
+        }
+        self.detach(child);
+        let pos = match (before, self.get(parent)) {
+            (Some(b), Some(pn)) => pn.children.iter().position(|&c| c == b),
+            _ => None,
+        };
+        match pos {
+            Some(i) => {
+                if let Some(pn) = self.get_mut(parent) {
+                    pn.children.insert(i, child);
+                }
+                if let Some(c) = self.get_mut(child) {
+                    c.parent = Some(parent);
+                }
+                self.reindex_children(parent);
+            }
+            None => {
+                if let Some(c) = self.get_mut(child) {
+                    c.parent = Some(parent);
+                }
+                self.link_child(parent, child);
+            }
+        }
+    }
+
     // Rewrite child_index for every child of `parent` from its list position. Called after a removal,
     // which shifts the positions of the siblings that followed.
     fn reindex_children(&mut self, parent: NodeId) {
@@ -340,6 +446,8 @@ impl RealmArena {
     }
 
     // ── element-tree navigation (all gen-checked: a stale edge is skipped, never followed) ──
+    // The ELEMENT view the matcher walks: a child, a sibling, is the nearest ELEMENT one — text, comments and doctypes
+    // between elements are stepped over, as `firstElementChild` / `nextElementSibling` step over them.
 
     pub(crate) fn parent_of(&self, id: NodeId) -> Option<NodeId> {
         let parent = self.get(id)?.parent?;
@@ -349,7 +457,7 @@ impl RealmArena {
     }
     pub(crate) fn first_child(&self, id: NodeId) -> Option<NodeId> {
         let node = self.get(id)?;
-        node.children.iter().copied().find(|&c| self.get(c).is_some())
+        node.children.iter().copied().find(|&c| self.is_element(c))
     }
     pub(crate) fn prev_sibling(&self, id: NodeId) -> Option<NodeId> {
         let node = self.get(id)?;
@@ -360,7 +468,7 @@ impl RealmArena {
         while i > 0 {
             i -= 1;
             if let Some(&c) = parent.children.get(i) {
-                if self.get(c).is_some() {
+                if self.is_element(c) {
                     return Some(c);
                 }
             }
@@ -372,29 +480,36 @@ impl RealmArena {
         let parent = self.get(node.parent?)?;
         let mut i = node.child_index + 1;
         while let Some(&c) = parent.children.get(i) {
-            if self.get(c).is_some() {
+            if self.is_element(c) {
                 return Some(c);
             }
             i += 1;
         }
         None
     }
-    // Whether `id` has any LIVE element child — `:empty` (with has_text) is correct even when a stale
-    // edge lingers in `children`.
-    pub(crate) fn has_element_child(&self, id: NodeId) -> bool {
-        match self.get(id) {
-            Some(node) => node.children.iter().any(|&c| self.get(c).is_some()),
-            None => false,
-        }
-    }
-    // Is `parent`'s live node the synthetic '#document' root? (used by the matcher's `:root`.)
+    // Is `id` a Document? (the matcher's `:root` is an element whose parent is one.)
     pub(crate) fn is_document(&self, id: NodeId) -> bool {
-        self.get(id).is_some_and(|n| n.local_name == "#document")
+        self.get(id).is_some_and(|n| n.kind == NodeKind::Document)
+    }
+    pub(crate) fn is_element(&self, id: NodeId) -> bool {
+        self.get(id).is_some_and(|n| n.kind == NodeKind::Element)
+    }
+    // `:empty`: no element child and no Text child with any data (comments and processing instructions do not count).
+    pub(crate) fn is_empty(&self, id: NodeId) -> bool {
+        let Some(node) = self.get(id) else { return true };
+        node.children.iter().all(|&c| match self.get(c) {
+            Some(child) => match child.kind {
+                NodeKind::Element => false,
+                NodeKind::Text => child.data.is_empty(),
+                _ => true,
+            },
+            None => true,
+        })
     }
     // The live element children of `root`, for the matcher's descendant walk (preorder seed).
     pub(crate) fn element_children(&self, id: NodeId) -> Vec<NodeId> {
         match self.get(id) {
-            Some(node) => node.children.iter().copied().filter(|&c| self.get(c).is_some()).collect(),
+            Some(node) => node.children.iter().copied().filter(|&c| self.is_element(c)).collect(),
             None => Vec::new(),
         }
     }
@@ -504,6 +619,12 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_, ()>, ctx: &v8::Global<v8:
     // Bulk import + id-level query: build the arena from an already-parsed page (importNode /
     // syncChildren) and match over it natively (queryIds / matchesId / matchesCompiled).
     register(scope, ns, "importNode", import_node, context_id);
+    // Every other node kind, character-data changes, and the parser's per-node tree steps.
+    register(scope, ns, "createNode", create_node, context_id);
+    register(scope, ns, "setData", set_data, context_id);
+    register(scope, ns, "insertChild", insert_child, context_id);
+    register(scope, ns, "removeChild", remove_child, context_id);
+    register(scope, ns, "inspectNode", inspect_node, context_id);
     register(scope, ns, "queryIds", query_ids, context_id);
     register(scope, ns, "matchesId", matches_id, context_id);
     // Authoritative cascade matching: compile a rule's selector once to an integer handle, then match
@@ -574,45 +695,128 @@ fn register(
     }
 }
 
-// __dom.importNode(tagName, localName, ns, hasText, parentNid, attrsFlat) -> nid. Adds an arena
-// node — the bulk path that builds the arena from an already-parsed document, and the per-element
-// eager create at construction. `attrsFlat` is a flat [name, value, name, value, …] array;
-// `parentNid` < 0 makes a root, else the node is appended to that (live) parent. `tagName` (arg 0) is
-// accepted for call-site compatibility but not stored — the matcher works off the lowercased `localName`.
+// __dom.importNode(localName, ns, parentNid, attrsFlat) -> nid. Adds an ELEMENT to the arena — the eager create
+// at construction, and a spec's bulk build. `attrsFlat` is a flat [name, value, name, value, …] array;
+// `parentNid` < 0 makes a root, else the node is appended to that (live) parent.
 fn import_node(
     scope: &mut v8::PinScope<'_, '_>,
     args: v8::FunctionCallbackArguments<'_>,
     mut rv: v8::ReturnValue<'_, v8::Value>,
 ) {
-    let local_name = args.get(1).to_rust_string_lossy(scope);
-    let ns = args.get(2).to_rust_string_lossy(scope);
-    let has_text = args.get(3).boolean_value(scope);
-    let parent = nid_arg(scope, &args, 4);
-    let (attributes, attr_u16) = read_attrs_flat(scope, args.get(5));
+    let local_name = args.get(0).to_rust_string_lossy(scope);
+    let ns = args.get(1).to_rust_string_lossy(scope);
+    let parent = nid_arg(scope, &args, 2);
+    let (attributes, attr_u16) = read_attrs_flat(scope, args.get(3));
     let cid = realm_id(scope, &args);
-    let st = realm(scope, cid);
-    // Only link under a still-live parent; a stale parent nid leaves the node a detached root.
-    let parent = parent.filter(|&p| st.get(p).is_some());
-    let new_id = st.alloc(NodeData {
-        local_name,
-        ns,
-        attributes,
-        attr_u16,
-        attr_ns: Vec::new(),
+    let id = realm(scope, cid).create(
+        NodeData { local_name, ns, attributes, attr_u16, ..NodeData::of_kind(NodeKind::Element, String::new()) },
         parent,
-        children: Vec::new(),
-        child_index: 0,
-        has_text,
-        layout_box: None,
-    });
-    if let Some(p) = parent {
-        st.link_child(p, new_id);
-    }
-    set_nid(scope, &mut rv, new_id);
+    );
+    set_nid(scope, &mut rv, id);
 }
 
-// __dom.syncChildren(parentNid, childNids, hasText): make parentNid's element children EXACTLY
-// `childNids` (in document order) and set its has_text (whether it has non-empty text content).
+// __dom.createNode(nodeType, data, parentNid) -> nid. Adds any other node — a Text / CDATA / Comment / PI with its
+// data, a Document, a DocumentFragment or ShadowRoot, a DocumentType — appended to `parentNid` when that is live.
+fn create_node(
+    scope: &mut v8::PinScope<'_, '_>,
+    args: v8::FunctionCallbackArguments<'_>,
+    mut rv: v8::ReturnValue<'_, v8::Value>,
+) {
+    let kind = NodeKind::from_node_type(args.get(0).integer_value(scope).unwrap_or(0));
+    let data = if args.get(1).is_string() { args.get(1).to_rust_string_lossy(scope) } else { String::new() };
+    let parent = nid_arg(scope, &args, 2);
+    let cid = realm_id(scope, &args);
+    let id = realm(scope, cid).create(NodeData::of_kind(kind, data), parent);
+    set_nid(scope, &mut rv, id);
+}
+
+// __dom.setData(nid, data): a Text / Comment node's character data changed.
+fn set_data(
+    scope: &mut v8::PinScope<'_, '_>,
+    args: v8::FunctionCallbackArguments<'_>,
+    _rv: v8::ReturnValue<'_, v8::Value>,
+) {
+    let Some(id) = nid_arg(scope, &args, 0) else {
+        return;
+    };
+    let data = args.get(1).to_rust_string_lossy(scope);
+    let cid = realm_id(scope, &args);
+    if let Some(node) = realm(scope, cid).get_mut(id) {
+        node.data = data;
+    }
+}
+
+// __dom.insertChild(parentNid, childNid, beforeNid): the child is moved to `parentNid`, before `beforeNid` (a live child
+// of it) or at the end. The parser's per-node step — one call per inserted node instead of re-listing the parent.
+fn insert_child(
+    scope: &mut v8::PinScope<'_, '_>,
+    args: v8::FunctionCallbackArguments<'_>,
+    _rv: v8::ReturnValue<'_, v8::Value>,
+) {
+    let (Some(parent), Some(child)) = (nid_arg(scope, &args, 0), nid_arg(scope, &args, 1)) else {
+        return;
+    };
+    let before = nid_arg(scope, &args, 2);
+    let cid = realm_id(scope, &args);
+    realm(scope, cid).insert_child(parent, child, before);
+}
+
+// __dom.inspectNode(nid) -> [kind, localName, data, parentNid, childNid, …], or null for a dead nid. The arena as
+// it stands, for the verify mode that holds it against the JS tree (`CSIM_ARENA_VERIFY`); nothing else reads it.
+fn inspect_node(
+    scope: &mut v8::PinScope<'_, '_>,
+    args: v8::FunctionCallbackArguments<'_>,
+    mut rv: v8::ReturnValue<'_, v8::Value>,
+) {
+    let Some(id) = nid_arg(scope, &args, 0) else {
+        return;
+    };
+    let cid = realm_id(scope, &args);
+    let Some((kind, local_name, data, parent, children)) = realm(scope, cid).get(id).map(|n| {
+        let kind = match n.kind {
+            NodeKind::Element => 1,
+            NodeKind::Text => 3,
+            NodeKind::Comment => 8,
+            NodeKind::Document => 9,
+            NodeKind::Fragment => 11,
+            NodeKind::Other => 0,
+        };
+        (kind, n.local_name.clone(), n.data.clone(), n.parent, n.children.clone())
+    }) else {
+        rv.set_null();
+        return;
+    };
+    let out = v8::Array::new(scope, 4 + children.len() as i32);
+    let vals: Vec<v8::Local<v8::Value>> = vec![
+        v8::Integer::new(scope, kind).into(),
+        v8::String::new(scope, &local_name).map_or_else(|| v8::undefined(scope).into(), |s| s.into()),
+        v8::String::new(scope, &data).map_or_else(|| v8::undefined(scope).into(), |s| s.into()),
+        v8::Number::new(scope, parent.map_or(-1.0, |p| p.to_f64())).into(),
+    ];
+    for (i, v) in vals.into_iter().enumerate() {
+        out.set_index(scope, i as u32, v);
+    }
+    for (i, c) in children.iter().enumerate() {
+        let v: v8::Local<v8::Value> = v8::Number::new(scope, c.to_f64()).into();
+        out.set_index(scope, 4 + i as u32, v);
+    }
+    rv.set(out.into());
+}
+
+// __dom.removeChild(childNid): the child leaves its parent (and keeps its own subtree).
+fn remove_child(
+    scope: &mut v8::PinScope<'_, '_>,
+    args: v8::FunctionCallbackArguments<'_>,
+    _rv: v8::ReturnValue<'_, v8::Value>,
+) {
+    let Some(child) = nid_arg(scope, &args, 0) else {
+        return;
+    };
+    let cid = realm_id(scope, &args);
+    realm(scope, cid).detach(child);
+}
+
+// __dom.syncChildren(parentNid, childNids): make parentNid's children EXACTLY `childNids` (in tree order).
 // Each child is detached from any current parent first, so a MOVED node — still listed under its
 // old parent until that parent is itself synced — is re-homed correctly whichever order the two
 // syncs arrive in. The single structural-sync primitive the incremental (parse + mutation) arena
@@ -626,7 +830,6 @@ fn sync_children(
     let Some(parent) = nid_arg(scope, &args, 0) else {
         return;
     };
-    let has_text = args.get(2).boolean_value(scope);
     let mut raw: Vec<NodeId> = Vec::new();
     if let Ok(arr) = v8::Local::<v8::Array>::try_from(args.get(1)) {
         for i in 0..arr.length() {
@@ -686,7 +889,6 @@ fn sync_children(
     }
     if let Some(p) = st.get_mut(parent) {
         p.children = kids;
-        p.has_text = has_text;
     }
     st.reindex_children(parent);
 }
