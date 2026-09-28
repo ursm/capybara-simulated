@@ -104,7 +104,6 @@ RSpec.describe 'native selector engine: JS fallback for live-state selectors' do
       '.tb:invalid',
       ':not(:invalid)',
       ':is(a, :invalid)',
-      ':defined',
       ':target',
       ':lang(en)',
       'p::before'

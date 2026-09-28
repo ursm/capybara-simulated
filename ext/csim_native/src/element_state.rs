@@ -6,8 +6,9 @@
 // is, which every one of these rules is written against.
 
 use crate::dom::{
-    NodeData, NodeId, NodeKind, RealmArena, STATE_CHECKED, STATE_CHECKED_DIRTY, STATE_FILTERED, STATE_FOCUSED,
-    STATE_FORM_ASSOCIATED, STATE_INDETERMINATE, STATE_MODAL, STATE_POPOVER_OPEN, STATE_SELECTED,
+    NodeData, NodeId, NodeKind, RealmArena, STATE_CHECKED, STATE_CHECKED_DIRTY, STATE_CUSTOM, STATE_FILTERED,
+    STATE_FOCUSED, STATE_FORM_ASSOCIATED, STATE_INDETERMINATE, STATE_IS_VALUE, STATE_MODAL, STATE_POPOVER_OPEN,
+    STATE_SELECTED,
 };
 
 // The `<input>` types the `readonly` attribute applies to (form-helpers.js `READONLY_INPUT_TYPES`).
@@ -19,6 +20,21 @@ const INPUT_TYPES: [&str; 22] = [
     "hidden", "text", "search", "tel", "url", "email", "password", "date", "month", "week", "time", "datetime-local",
     "number", "range", "color", "checkbox", "radio", "file", "submit", "image", "reset", "button",
 ];
+
+// The names no custom element may take: the hyphenated SVG and MathML ones.
+const RESERVED_CUSTOM_ELEMENT_NAMES: [&str; 8] = [
+    "annotation-xml", "color-profile", "font-face", "font-face-src", "font-face-uri", "font-face-format",
+    "font-face-name", "missing-glyph",
+];
+
+// A valid custom element name (custom-elements.js `isValidCustomElementName`): a valid element local name that starts
+// with an ASCII lower alpha, has no ASCII upper alpha and a hyphen, and is not reserved.
+fn is_valid_custom_element_name(name: &str) -> bool {
+    name.starts_with(|c: char| c.is_ascii_lowercase())
+        && name.contains('-')
+        && !name.contains(|c: char| c.is_ascii_uppercase() || matches!(c, '\0' | '\t' | '\n' | '\x0C' | '\r' | ' ' | '/' | '>'))
+        && !RESERVED_CUSTOM_ELEMENT_NAMES.contains(&name)
+}
 
 impl NodeData {
     fn is_html(&self) -> bool {
@@ -173,6 +189,15 @@ impl RealmArena {
             n.is_html_named("select") || n.is_html_named("textarea")
         };
         requirable.then(|| n.plain_attr("required").is_some())
+    }
+    // `:defined`: any element but a custom element — one with a valid custom element name or an `is` value — that is
+    // not custom yet (undefined), or never will be (its constructor threw).
+    pub(crate) fn is_defined(&self, id: NodeId) -> bool {
+        let Some(n) = self.get(id) else { return false };
+        if !n.is_html() || n.state & STATE_CUSTOM != 0 {
+            return true;
+        }
+        !(is_valid_custom_element_name(&n.local_name) || n.state & STATE_IS_VALUE != 0 || n.plain_attr("is").is_some())
     }
     // `:open`: a `<details>` or `<dialog>` with the `open` attribute.
     pub(crate) fn is_open(&self, id: NodeId) -> bool {

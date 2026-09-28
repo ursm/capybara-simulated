@@ -328,6 +328,7 @@ impl<'a> Element for NodeRef<'a> {
             "default" => arena.is_default(id),
             "open" => arena.is_open(id),
             "placeholder-shown" => arena.is_placeholder_shown(id),
+            "defined" => arena.is_defined(id),
             "required" => arena.requiredness(id) == Some(true),
             "optional" => arena.requiredness(id) == Some(false),
             "popover-open" => arena.is_popover_open(id),
@@ -438,6 +439,7 @@ fn is_native_pseudo_class(name: &str) -> bool {
             | "placeholder-shown"
             | "required"
             | "optional"
+            | "defined"
             | "popover-open"
             | "modal"
             | "filtered"

@@ -104,8 +104,9 @@ impl NodeKind {
 // (ordered, as the DOM keeps them); for a non-element, `local_name` / `ns` / the attributes are empty.
 pub(crate) struct NodeData {
     pub(crate) kind: NodeKind,
-    // The character data of a Text / Comment node (empty for any other).
-    pub(crate) data: String,
+    // The character data of a Text / Comment node (empty for any other), as the DOM holds it: UTF-16 code units, a lone
+    // surrogate included.
+    pub(crate) data: Vec<u16>,
     // The ASCII-lowercased element name the selector engine matches on (`localName`, not the
     // possibly-upper-cased `tagName` — the matcher is case-normalized).
     pub(crate) local_name: String,
@@ -140,15 +141,18 @@ pub(crate) struct NodeData {
     pub(crate) state: u32,
     // A shadow root's host (None for every other node): the shadow-including ancestor chain `:focus` walks.
     pub(crate) host: Option<NodeId>,
-    // A form control's live value once dirty (a script's `.value`, typing); None while it is its default — the
-    // `value` attribute, or a `<textarea>`'s text.
-    pub(crate) value: Option<Box<str>>,
+    // A form control's live value once dirty (a script's `.value`, typing), in UTF-16 code units; None while it is
+    // its default — the `value` attribute, or a `<textarea>`'s text.
+    pub(crate) value: Option<Box<[u16]>>,
+    // The JS object this node is (its wrapper), held weakly: when it is collected the slot is freed (`watch`).
+    wrapper: Option<v8::Weak<v8::Object>>,
 }
 
 // The element state bits (`NodeData::state`, native-query-shadow.js `STATE_*`): focus and hover (the realm's one
 // focused / hovered element carries its bit, see `RealmArena::set_state`), checkedness (dirty, then its value — a
 // clean one is the `checked` attribute), an option's selectedness, indeterminate, an open popover, a modal dialog, a
-// filtered option, and a form-associated custom element.
+// filtered option, a form-associated custom element, a custom element that is custom (constructed or upgraded, not
+// failed), and one created with an `is` value.
 pub(crate) const STATE_FOCUSED: u32 = 1;
 pub(crate) const STATE_HOVERED: u32 = 1 << 1;
 pub(crate) const STATE_CHECKED_DIRTY: u32 = 1 << 2;
@@ -159,10 +163,12 @@ pub(crate) const STATE_POPOVER_OPEN: u32 = 1 << 6;
 pub(crate) const STATE_MODAL: u32 = 1 << 7;
 pub(crate) const STATE_FILTERED: u32 = 1 << 8;
 pub(crate) const STATE_FORM_ASSOCIATED: u32 = 1 << 9;
+pub(crate) const STATE_CUSTOM: u32 = 1 << 10;
+pub(crate) const STATE_IS_VALUE: u32 = 1 << 11;
 
 impl NodeData {
     // A node of `kind` with its character data and nothing else — the element fields are filled by the caller.
-    pub(crate) fn of_kind(kind: NodeKind, data: String) -> NodeData {
+    pub(crate) fn of_kind(kind: NodeKind, data: Vec<u16>) -> NodeData {
         NodeData {
             kind,
             data,
@@ -178,6 +184,7 @@ impl NodeData {
             state: 0,
             host: None,
             value: None,
+            wrapper: None,
         }
     }
     pub(crate) fn get_attr(&self, name: &str) -> Option<&str> {
@@ -442,13 +449,23 @@ impl RealmArena {
         }
     }
 
-    // Take `child` out of its parent's children (its own subtree goes with it).
+    // Take `child` out of its parent's children (its own subtree goes with it). Found by its `child_index`, so taking
+    // the last child is O(1) and any other costs only the shift of the ones after it.
     pub(crate) fn detach(&mut self, child: NodeId) {
-        let Some(old) = self.get(child).and_then(|n| n.parent) else { return };
+        let Some((old, at)) = self.get(child).and_then(|n| Some((n.parent?, n.child_index))) else { return };
+        let mut from = at;
         if let Some(o) = self.get_mut(old) {
-            o.children.retain(|&c| c != child);
+            match o.children.get(at) {
+                Some(&c) if c == child => {
+                    o.children.remove(at);
+                }
+                _ => {
+                    o.children.retain(|&c| c != child);
+                    from = 0;
+                }
+            }
         }
-        self.reindex_children(old);
+        self.reindex_children(old, from);
         if let Some(c) = self.get_mut(child) {
             c.parent = None;
         }
@@ -468,8 +485,12 @@ impl RealmArena {
             p = self.get(a).and_then(|n| n.parent);
         }
         self.detach(child);
-        let pos = match (before, self.get(parent)) {
-            (Some(b), Some(pn)) => pn.children.iter().position(|&c| c == b),
+        // `before`'s place, by its `child_index` when it is a child of `parent`.
+        let pos = match (before.and_then(|b| self.get(b).map(|n| (b, n))), self.get(parent)) {
+            (Some((b, bn)), Some(pn)) if bn.parent == Some(parent) => match pn.children.get(bn.child_index) {
+                Some(&c) if c == b => Some(bn.child_index),
+                _ => pn.children.iter().position(|&c| c == b),
+            },
             _ => None,
         };
         match pos {
@@ -480,7 +501,7 @@ impl RealmArena {
                 if let Some(c) = self.get_mut(child) {
                     c.parent = Some(parent);
                 }
-                self.reindex_children(parent);
+                self.reindex_children(parent, i);
             }
             None => {
                 if let Some(c) = self.get_mut(child) {
@@ -491,14 +512,12 @@ impl RealmArena {
         }
     }
 
-    // Rewrite child_index for every child of `parent` from its list position. Called after a removal,
-    // which shifts the positions of the siblings that followed.
-    fn reindex_children(&mut self, parent: NodeId) {
-        let kids: Vec<NodeId> = match self.get(parent) {
-            Some(p) => p.children.clone(),
-            None => return,
-        };
-        for (i, &c) in kids.iter().enumerate() {
+    // Rewrite child_index for the children of `parent` from position `from` on, from their list positions — after an
+    // insertion or a removal there shifted them.
+    fn reindex_children(&mut self, parent: NodeId, from: usize) {
+        let len = self.get(parent).map_or(0, |p| p.children.len());
+        for i in from..len {
+            let Some(c) = self.get(parent).and_then(|p| p.children.get(i).copied()) else { break };
             if let Some(node) = self.get_mut(c) {
                 node.child_index = i;
             }
@@ -682,6 +701,7 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_, ()>, ctx: &v8::Global<v8:
     // Every other node kind, character-data changes, and the parser's per-node tree steps.
     register(scope, ns, "createNode", create_node, context_id);
     register(scope, ns, "setData", set_data, context_id);
+    register(scope, ns, "appendData", append_data, context_id);
     register(scope, ns, "insertChild", insert_child, context_id);
     register(scope, ns, "removeChild", remove_child, context_id);
     register(scope, ns, "inspectNode", inspect_node, context_id);
@@ -760,7 +780,7 @@ fn register(
     }
 }
 
-// __dom.importNode(localName, ns, parentNid, attrsFlat) -> nid. Adds an ELEMENT to the arena — the eager create
+// __dom.importNode(localName, ns, parentNid, attrsFlat, wrapper) -> nid. Adds an ELEMENT to the arena — the eager create
 // at construction, and a spec's bulk build. `attrsFlat` is a flat [name, value, name, value, …] array;
 // `parentNid` < 0 makes a root, else the node is appended to that (live) parent.
 fn import_node(
@@ -774,13 +794,34 @@ fn import_node(
     let (attributes, attr_u16) = read_attrs_flat(scope, args.get(3));
     let cid = realm_id(scope, &args);
     let id = realm(scope, cid).create(
-        NodeData { local_name, ns, attributes, attr_u16, ..NodeData::of_kind(NodeKind::Element, String::new()) },
+        NodeData { local_name, ns, attributes, attr_u16, ..NodeData::of_kind(NodeKind::Element, Vec::new()) },
         parent,
     );
+    watch(scope, cid, id, args.get(4));
     set_nid(scope, &mut rv, id);
 }
 
-// __dom.createNode(nodeType, data, parentNid) -> nid. Adds any other node — a Text / CDATA / Comment / PI with its
+// Hold `wrapper` — the JS node `id` mirrors — weakly, so its collection frees the slot: the arena owns its nodes'
+// lifetime, as a browser's DOM owns its wrappers', and a node dropped from every tree and every script goes with its
+// wrapper. (A slot is freed only then, or by a reset: a node in a tree has a reachable wrapper.)
+fn watch(scope: &mut v8::PinScope<'_, '_>, cid: i32, id: NodeId, wrapper: v8::Local<'_, v8::Value>) {
+    let Ok(obj) = v8::Local::<v8::Object>::try_from(wrapper) else { return };
+    let weak = v8::Weak::with_finalizer(
+        scope,
+        obj,
+        Box::new(move |isolate: &mut v8::Isolate| {
+            // A realm dropped since (`dropRealm`) has nothing left to free.
+            if let Some(arena) = isolate.get_slot_mut::<Dom>().and_then(|d| d.realms.get_mut(&cid)) {
+                arena.free_node(id);
+            }
+        }),
+    );
+    if let Some(node) = realm(scope, cid).get_mut(id) {
+        node.wrapper = Some(weak);
+    }
+}
+
+// __dom.createNode(nodeType, data, parentNid, wrapper) -> nid. Adds any other node — a Text / CDATA / Comment / PI with its
 // data, a Document, a DocumentFragment or ShadowRoot, a DocumentType — appended to `parentNid` when that is live.
 fn create_node(
     scope: &mut v8::PinScope<'_, '_>,
@@ -788,14 +829,23 @@ fn create_node(
     mut rv: v8::ReturnValue<'_, v8::Value>,
 ) {
     let kind = NodeKind::from_node_type(args.get(0).integer_value(scope).unwrap_or(0));
-    let data = if args.get(1).is_string() { args.get(1).to_rust_string_lossy(scope) } else { String::new() };
+    let data = utf16_arg(scope, args.get(1));
     let parent = nid_arg(scope, &args, 2);
     let cid = realm_id(scope, &args);
     let id = realm(scope, cid).create(NodeData::of_kind(kind, data), parent);
+    watch(scope, cid, id, args.get(3));
     set_nid(scope, &mut rv, id);
 }
 
-// __dom.setData(nid, data): a Text / Comment node's character data changed.
+// A string argument's UTF-16 code units, exactly (empty for a non-string).
+fn utf16_arg(scope: &mut v8::PinScope<'_, '_>, val: v8::Local<'_, v8::Value>) -> Vec<u16> {
+    let Ok(s) = v8::Local::<v8::String>::try_from(val) else { return Vec::new() };
+    let mut u = vec![0u16; s.length()];
+    s.write_v2(scope, 0, &mut u, v8::WriteFlags::empty());
+    u
+}
+
+// __dom.setData(nid, data): a Text / Comment node's character data became `data`.
 fn set_data(
     scope: &mut v8::PinScope<'_, '_>,
     args: v8::FunctionCallbackArguments<'_>,
@@ -804,10 +854,27 @@ fn set_data(
     let Some(id) = nid_arg(scope, &args, 0) else {
         return;
     };
-    let data = args.get(1).to_rust_string_lossy(scope);
+    let data = utf16_arg(scope, args.get(1));
     let cid = realm_id(scope, &args);
     if let Some(node) = realm(scope, cid).get_mut(id) {
         node.data = data;
+    }
+}
+
+// __dom.appendData(nid, data): `data` was appended to a Text / Comment node's character data — the parser's text
+// coalescing and `appendData`, which a whole-string setData per append made quadratic.
+fn append_data(
+    scope: &mut v8::PinScope<'_, '_>,
+    args: v8::FunctionCallbackArguments<'_>,
+    _rv: v8::ReturnValue<'_, v8::Value>,
+) {
+    let Some(id) = nid_arg(scope, &args, 0) else {
+        return;
+    };
+    let data = utf16_arg(scope, args.get(1));
+    let cid = realm_id(scope, &args);
+    if let Some(node) = realm(scope, cid).get_mut(id) {
+        node.data.extend_from_slice(&data);
     }
 }
 
@@ -850,7 +917,7 @@ fn set_value(
         return;
     };
     let v = args.get(1);
-    let value = if v.is_undefined() { None } else { Some(v.to_rust_string_lossy(scope).into_boxed_str()) };
+    let value = if v.is_undefined() { None } else { Some(utf16_arg(scope, v).into_boxed_slice()) };
     let cid = realm_id(scope, &args);
     if let Some(node) = realm(scope, cid).get_mut(id) {
         node.value = value;
@@ -913,12 +980,12 @@ fn inspect_node(
     let vals: Vec<v8::Local<v8::Value>> = vec![
         v8::Integer::new(scope, kind).into(),
         v8::String::new(scope, &local_name).map_or_else(|| v8::undefined(scope).into(), |s| s.into()),
-        v8::String::new(scope, &data).map_or_else(|| v8::undefined(scope).into(), |s| s.into()),
+        utf16_value(scope, &data),
         v8::Number::new(scope, parent.map_or(-1.0, |p| p.to_f64())).into(),
         v8::Integer::new_from_unsigned(scope, state).into(),
         v8::Number::new(scope, host.map_or(-1.0, |h| h.to_f64())).into(),
-        match value.as_deref().and_then(|v| v8::String::new(scope, v)) {
-            Some(s) => s.into(),
+        match value.as_deref() {
+            Some(v) => utf16_value(scope, v),
             None => v8::undefined(scope).into(),
         },
     ];
@@ -930,6 +997,14 @@ fn inspect_node(
         out.set_index(scope, (HEAD + i) as u32, v);
     }
     rv.set(out.into());
+}
+
+// A JS string of these UTF-16 code units.
+fn utf16_value<'s>(scope: &mut v8::PinScope<'s, '_>, units: &[u16]) -> v8::Local<'s, v8::Value> {
+    match v8::String::new_from_two_byte(scope, units, v8::NewStringType::Normal) {
+        Some(s) => s.into(),
+        None => v8::undefined(scope).into(),
+    }
 }
 
 // __dom.removeChild(childNid): the child leaves its parent (and keeps its own subtree).
@@ -987,14 +1062,8 @@ fn sync_children(
     }
     // Detach each incoming child from a DIFFERENT current parent (a same-parent reorder skips this).
     for &k in &kids {
-        let old = st.get(k).and_then(|node| node.parent);
-        if old != Some(parent) {
-            if let Some(op) = old {
-                if let Some(o) = st.get_mut(op) {
-                    o.children.retain(|&c| c != k);
-                }
-                st.reindex_children(op);
-            }
+        if st.get(k).and_then(|node| node.parent) != Some(parent) {
+            st.detach(k);
             if let Some(kn) = st.get_mut(k) {
                 kn.parent = Some(parent);
             }
@@ -1019,7 +1088,7 @@ fn sync_children(
     if let Some(p) = st.get_mut(parent) {
         p.children = kids;
     }
-    st.reindex_children(parent);
+    st.reindex_children(parent, 0);
 }
 
 // __dom.setAttr(nodeNid, name, value) / __dom.removeAttr(nodeNid, name): mirror an attribute write

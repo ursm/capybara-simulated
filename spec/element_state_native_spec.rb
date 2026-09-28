@@ -34,6 +34,8 @@ RSpec.describe 'element state in the native arena' do
     <div popover id="pop">p</div>
     <div id="hover-outer"><p id="hover-inner">h</p></div>
     <div id="host"></div>
+    <x-later id="ce-later"></x-later><x-throws id="ce-throws"></x-throws><div is="x-div" id="ce-is"></div>
+    <font-face id="ce-reserved"></font-face>
   HTML
 
   let(:session) { simulated_session(->(_env) { [200, {'content-type' => 'text/html'}, [STATE_PAGE]] }) }
@@ -104,6 +106,18 @@ RSpec.describe 'element state in the native arena' do
     expect(native_ids(':required')).to eq(%w[req-email req-bogus])
     expect(native_ids('[id^=req]:optional')).to eq([])
     expect(native_ids('#s:optional, #ta:optional')).to eq(%w[s ta])
+  end
+
+  # A custom element is :defined once custom — constructed, or upgraded without its constructor throwing.
+  it 'answers :defined from each custom element state' do
+    expect(native_ids('[id^=ce-]:not(:defined)')).to eq(%w[ce-later ce-throws ce-is])
+    session.execute_script(<<~JS)
+      customElements.define('x-later', class extends HTMLElement {});
+      customElements.define('x-throws', class extends HTMLElement { constructor() { super(); throw new Error('no'); } });
+      document.body.appendChild(document.createElement('x-later')).id = 'ce-made';
+    JS
+    expect(native_ids('[id^=ce-]:not(:defined)')).to eq(%w[ce-throws ce-is])
+    expect(native_ids('#ce-made:defined, #ce-later:defined')).to eq(%w[ce-later ce-made])
   end
 
   it 'answers :open, :modal and :popover-open' do
