@@ -380,6 +380,23 @@ RSpec.describe 'element state in the native arena' do
       expect(session.evaluate_script("document.getElementById('sh').shadowRoot.getElementById('t2').matches(':target')")).to be false
     end
 
+    it 'answers :lang() from lang and XML-namespace xml:lang, through shadow trees' do
+      session.execute_script(<<~JS)
+        document.body.innerHTML = '<div lang=en-CA id=ca><p id=cap>p</p><div lang="" id=unk><p id=unkp>u</p></div></div>' +
+          '<svg lang=fr id=svgfr><text id=svgt>t</text></svg><div id=xl><p id=xlp>x</p></div><div id=nx><p id=nxp>n</p></div>' +
+          '<div lang=DE id=host></div>';
+        document.getElementById('xl').setAttributeNS('http://www.w3.org/XML/1998/namespace', 'xml:lang', 'ja');
+        document.getElementById('nx').setAttribute('xml:lang', 'ko');   // no namespace: names no language
+        document.getElementById('host').attachShadow({ mode: 'open' }).innerHTML = '<p id=sp>s</p>';
+      JS
+      expect(native_ids(':lang(en)')).to eq(%w[ca cap])
+      expect(native_ids(':lang("en-ca", fr)')).to eq(%w[ca cap])
+      expect(native_ids(':lang(ja)')).to eq(%w[xl xlp])
+      expect(native_ids(':lang(ko), :lang(fr)')).to eq([])
+      expect(native_ids('#unk:lang(\\*), #unkp:lang(\\*)')).to eq([])
+      expect(session.evaluate_script("document.getElementById('host').shadowRoot.getElementById('sp').matches(':lang(de)')")).to be true
+    end
+
     it "answers a custom element's :state() natively" do
       session.execute_script(<<~JS)
         customElements.define('x-st', class extends HTMLElement {

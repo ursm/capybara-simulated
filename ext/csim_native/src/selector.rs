@@ -204,6 +204,24 @@ impl<'i> Parser<'i> for CsimParser {
                 return Ok(PseudoClass { name, arg: Some(ident) });
             }
         }
+        // `:lang(<range>#)` — idents or strings, each ASCII-lowercased; kept comma-joined, as selectors.js `langRanges`
+        // splits its argument.
+        if name == "lang" {
+            let ranges = arguments.try_parse(|p| {
+                let ranges = p.parse_comma_separated(|p| {
+                    let t = p.next()?.clone();
+                    match t {
+                        cssparser::Token::Ident(v) | cssparser::Token::QuotedString(v) => Ok(v.as_ref().to_ascii_lowercase()),
+                        _ => Err(p.new_unexpected_token_error::<()>(t)),
+                    }
+                })?;
+                p.expect_exhausted()?;
+                Ok::<_, cssparser::ParseError<'i, ()>>(ranges.join(","))
+            });
+            if let Ok(ranges) = ranges {
+                return Ok(PseudoClass { name, arg: Some(ranges) });
+            }
+        }
         while arguments.next().is_ok() {}
         self.needs_fallback.set(true);
         Ok(PseudoClass { name, arg: None })
@@ -333,7 +351,11 @@ impl<'a> Element for NodeRef<'a> {
         // Every name `is_native_pseudo_class` admits; the element states are element_state.rs's.
         let (arena, id) = (self.arena, self.id);
         if let Some(arg) = &pc.arg {
-            return pc.name == "state" && arena.has_custom_state(id, arg);
+            return match pc.name.as_str() {
+                "state" => arena.has_custom_state(id, arg),
+                "lang" => arena.matches_lang(id, arg),
+                _ => false,
+            };
         }
         match pc.name.as_str() {
             "link" | "any-link" | "-webkit-any-link" => self.is_link(),

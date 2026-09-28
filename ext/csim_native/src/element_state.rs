@@ -11,6 +11,8 @@ use crate::dom::{
     STATE_SELECTED,
 };
 
+const XML_NS: &str = "http://www.w3.org/XML/1998/namespace";
+
 // The `<input>` types the `readonly` attribute applies to (form-helpers.js `READONLY_INPUT_TYPES`).
 const READONLY_INPUT_TYPES: [&str; 12] = [
     "text", "search", "tel", "url", "email", "password", "number", "date", "month", "week", "time", "datetime-local",
@@ -414,6 +416,32 @@ impl RealmArena {
         });
         *self.target_memo.borrow_mut() = TargetMemo { mutations: self.mutations, element: Some(element) };
         element
+    }
+    // `:lang(ranges)` (selectors.js `matchesLang`): the element's language — the nearest shadow-including inclusive
+    // ancestor's `xml:lang` (in the XML namespace), or an HTML one's `lang` — matches a range (comma-joined, lowercased)
+    // equal to it, extended by it at a subtag boundary, or `*`; an empty language (lang="") none.
+    pub(crate) fn matches_lang(&self, id: NodeId, ranges: &str) -> bool {
+        let Some(lang) = self.language_of(id).map(str::to_ascii_lowercase).filter(|l| !l.is_empty()) else { return false };
+        ranges.split(',').map(str::trim).filter(|r| !r.is_empty()).any(|r| {
+            r == "*" || r == lang || (lang.len() > r.len() && lang.starts_with(r) && lang.as_bytes()[r.len()] == b'-')
+        })
+    }
+    fn language_of(&self, id: NodeId) -> Option<&str> {
+        let mut cur = Some(id);
+        while let Some(c) = cur {
+            if let Some(n) = self.get(c).filter(|n| n.kind == NodeKind::Element) {
+                if let Some(v) = n.ns_attr(XML_NS, "lang") {
+                    return Some(v);
+                }
+                if n.is_html() {
+                    if let Some(v) = n.plain_attr("lang") {
+                        return Some(v);
+                    }
+                }
+            }
+            cur = self.shadow_including_parent(c);
+        }
+        None
     }
     // `:open`: a `<details>` or `<dialog>` with the `open` attribute.
     pub(crate) fn is_open(&self, id: NodeId) -> bool {
