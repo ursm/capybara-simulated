@@ -1001,26 +1001,19 @@ module Capybara
         # (leaving it on the snapshot's default origin) over a value we never asked
         # for. Every eval below whose value we discard is spelled the same way.
         realm.eval_void(<<~JS)
-          if (globalThis.#{HOST_NAMESPACE_NAME} && typeof globalThis.#{HOST_NAMESPACE_NAME}.contextGlobal === 'function') {
-            var __parentWin = globalThis.#{HOST_NAMESPACE_NAME}.contextGlobal(#{parent_id.to_i});
-            if (__parentWin) {
-              // Expose `parent`/`top` as THIS realm's WindowProxy for them (not the
-              // raw parent global) so `e.source === parent` holds and a frame's
-              // `parent.postMessage(...)` attributes the sender. `top` resolves
-              // through the parent's own top (already a proxy if the parent is a
-              // frame), unwrapped to its raw global then re-proxied for this realm.
-              var __NS = globalThis.#{HOST_NAMESPACE_NAME};
-              var __pf = globalThis.__csimFrameWindowProxyFor;
-              if (__pf && __NS && typeof __NS.contextOf === 'function') {
-                var __topRaw = __parentWin.top || __parentWin;
-                if (__topRaw && __topRaw.__csimRawWindow) __topRaw = __topRaw.__csimRawWindow;
-                globalThis.parent = __pf(__NS.contextOf(__parentWin)) || __parentWin;
-                globalThis.top    = __pf(__NS.contextOf(__topRaw)) || __topRaw;
-              } else {
-                globalThis.parent = __parentWin;
-                globalThis.top    = __parentWin.top || __parentWin;
-              }
-            }
+          var __NS        = globalThis.#{HOST_NAMESPACE_NAME};
+          var __parentWin = __NS.contextGlobal(#{parent_id.to_i});
+          if (__parentWin) {
+            // Expose `parent`/`top` as THIS realm's WindowProxy for them (not the
+            // raw parent global) so `e.source === parent` holds and a frame's
+            // `parent.postMessage(...)` attributes the sender. `top` resolves
+            // through the parent's own top (already a proxy if the parent is a
+            // frame), unwrapped to its raw global then re-proxied for this realm.
+            var __pf     = globalThis.__csimFrameWindowProxyFor;
+            var __topRaw = __parentWin.top || __parentWin;
+            if (__topRaw.__csimRawWindow) __topRaw = __topRaw.__csimRawWindow;
+            globalThis.parent = __pf(__NS.contextOf(__parentWin)) || __parentWin;
+            globalThis.top    = __pf(__NS.contextOf(__topRaw)) || __topRaw;
           }
         JS
         # Pass the URL + document body as call ARGUMENTS, not interpolated into
@@ -1648,12 +1641,7 @@ module Capybara
         # unhandled-rejection.js leaves registration to us. Main realm only —
         # the recorder routes per-realm via `contextGlobal` itself, and a
         # frame-realm registration would dangle once that realm is disposed.
-        c.eval_void(<<~JS)
-          if (typeof globalThis.#{HOST_NAMESPACE_NAME}.setPromiseRejectHandler === 'function' &&
-              typeof globalThis.__csimPromiseRejected === 'function') {
-            globalThis.#{HOST_NAMESPACE_NAME}.setPromiseRejectHandler(globalThis.__csimPromiseRejected);
-          }
-        JS
+        c.eval_void("globalThis.#{HOST_NAMESPACE_NAME}.setPromiseRejectHandler(globalThis.__csimPromiseRejected);")
       end
 
       # Worker-isolate factory: fresh isolate from the shared
