@@ -1,6 +1,7 @@
 require 'capybara/simulated'
 require 'rack'
 require_relative 'support/session_teardown'
+require_relative 'support/shadow_parity'
 
 # Layout reuses a subtree across a bare style-state bump (focus, checkedness) when no dynamic
 # rule can target it — `subtreeDynFree` / `ancestorsDynFree` in layout.js. That optimization is
@@ -820,25 +821,30 @@ RSpec.describe 'layout reuse across dynamic style state' do
       expect(got[0]).to be_between(1, 10)
     end
 
-    # …and computed again when the item's subtree changes. A row group's percentage `height` is one the walk still
-    # resolves (`nlTablePartResolves`) against the JS layout's basis, so a flex item holding one is pushed, and a pass
-    # that must push declines to the JS layout. Kept past the change, the answer went on declining a pass native can now
-    # take — or taking one it cannot.
-    it "recomputes an item's gate when its subtree changes" do
-      s = native_session_for('<div style="display:flex;width:300px;height:100px"><div><table><tbody id="g" style="height:50%">' \
+    # …and the page's own pass does not ask them at all: a flex item's push would be the JS layout's box, which that pass
+    # has not got, so the gate only chose between native's answer and declining (`nlFlexPushWhy`, 14% of a Redmine page
+    # load). A row group's percentage `height` pushed the item and declined the pass; native lays it out now, on every
+    # edit, and agrees with Chrome for it. SHARED with the JS layout: a row group's LENGTH height is ignored in both
+    # (Chrome grows the table to it, 54 / 64).
+    it "lays out an item its gate would have pushed, on every pass" do
+      s = native_session_for('<div style="display:flex;width:300px;height:100px"><div><table id="t"><tbody id="g" style="height:50%">' \
                              '<tr><td>x</td></tr></tbody></table></div></div>')
       got = s.evaluate_script(<<~JS)
         (() => {
-          const native = () => { const n = __csimNativeLayoutStats().native; document.body.offsetHeight; return __csimNativeLayoutStats().native > n; };
-          const out = [native()];
+          const pass = () => { const n = __csimNativeLayoutStats().native; const h = document.getElementById('t').getBoundingClientRect().height; return [__csimNativeLayoutStats().native > n, h]; };
+          const out = [pass()];
           for (const h of ['50px', '50%', '60px']) {
             document.getElementById('g').style.height = h;
-            out.push(native());
+            out.push(pass());
           }
           return out;
         })()
       JS
-      expect(got).to eq([false, true, false, true])
+      expect(got.map(&:first)).to eq([true, true, true, true])
+      expect(got[0][1]).to eq(24)                                          # Chrome
+      expect(got[2][1]).to eq(24)                                          # Chrome
+      expect_shared_gap(got[1][1], shared: 24, chrome: 54, what: 'a 50px row group')
+      expect_shared_gap(got[3][1], shared: 24, chrome: 64, what: 'a 60px row group')
     end
 
     # A COUNT, not a wall: an edit's pass copies what its spine emitted and the children those write into, not the page
