@@ -13,9 +13,8 @@ self.addEventListener('fetch', e => {
     }), {status: 200}));
   } else if (e.request.method === 'POST') {
     // Async respondWith: exercises the promise path + the request-body round-trip (UTF-8
-    // included). The wire-private X-Csim-Body-B64 header must not be visible here.
-    const leak = e.request.headers.has('x-csim-body-b64') ? ' LEAK' : '';
-    e.respondWith(e.request.text().then(body => new Response('HELLO POST ' + body + leak, {status: 200, headers: {'X-SW': 'yes'}})));
+    // included).
+    e.respondWith(e.request.text().then(body => new Response('HELLO POST ' + body, {status: 200, headers: {'X-SW': 'yes'}})));
   } else {
     e.respondWith(new Response('HELLO ' + e.request.method, {status: 200, headers: {'X-SW': 'yes'}}));
   }

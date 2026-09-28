@@ -596,7 +596,7 @@ module Capybara
       # blob captured before a deferred nav could revoke it.
       private def load_blob_into_window(target, url, source, snapshot: nil)
         data = if snapshot.is_a?(Hash) && snapshot['bytes']
-          { bytes: snapshot['bytes'], type: snapshot['type'].to_s }
+          {bytes: snapshot['bytes'], type: snapshot['type'].to_s}
         else
           blob_bytes_for(url, source)
         end

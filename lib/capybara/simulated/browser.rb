@@ -3191,7 +3191,7 @@ module Capybara
         # the network POST below. The wire Content-Type carries the same urlencoded
         # default the network path applies, so `event.request.headers` matches Chrome.
         nav_site = widen_sec_fetch_site(site_seed, sec_fetch_site(initiator, url))
-        if (sw = any_window_sw_navigation_fetch(url, method: 'POST', body_b64: Base64.strict_encode64(body.to_s),
+        if (sw = any_window_sw_navigation_fetch(url, method: 'POST', body: body,
                                                      content_type: content_type.to_s.empty? ? 'application/x-www-form-urlencoded' : content_type,
                                                      is_reload: is_reload, is_history: from_history && !is_reload,
                                                      dest: 'document', referrer_source: initiator, site_seed: site_seed))
@@ -6110,7 +6110,7 @@ module Capybara
       # re-POST). Returns __rackFetch's response wire shape (the JS frame builder
       # reads body / headers / url / redirected / charset), or nil for a failed
       # navigation (respondWith network error / redirect loop).
-      def frame_navigation_fetch(url, referrer_source, is_reload: false, secure_ancestors: true, method: 'GET', body_b64: '', content_type: nil, defer_ok: false, dest: 'iframe')
+      def frame_navigation_fetch(url, referrer_source, is_reload: false, secure_ancestors: true, method: 'GET', body: nil, content_type: nil, defer_ok: false, dest: 'iframe')
         # Handle Fetch: a navigation into a scope whose worker is still 'activating' (its
         # activate waitUntil unsettled) WAITS for activation (fetch-waits-for-activate).
         # The main thread can't block for it — the settling message is sent by this very
@@ -6125,7 +6125,7 @@ module Capybara
         target      = url.to_s
         initiator   = referrer_source
         meth        = method.to_s.empty? ? 'GET' : method.to_s.upcase
-        req_b64     = body_b64.to_s
+        req_body    = body.to_s.b
         req_ct      = content_type
         site        = nil
         origin_null = false
@@ -6145,7 +6145,7 @@ module Capybara
           # isSecureContext is hard-true) as secure by fiat. The JS caller computes
           # the ancestor chain (it IS the chain — the building realm is the parent).
           if (secure_ancestors || !target.start_with?('https://')) &&
-             (sw = any_window_sw_navigation_fetch(target, method: meth, body_b64: req_b64, content_type: req_ct, is_reload: is_reload, dest: dest,
+             (sw = any_window_sw_navigation_fetch(target, method: meth, body: req_body, content_type: req_ct, is_reload: is_reload, dest: dest,
                                                           referrer_source: initiator, site_seed: site, origin_null: origin_null, resulting_client_id: rid))
             return nil if sw['networkError']
 
@@ -6160,7 +6160,7 @@ module Capybara
               referrer_policy: nil,
               site:            widen_sec_fetch_site(site, sec_fetch_site(initiator, target)),
               origin_null:     origin_null,
-              body:            req_b64.empty? ? nil : Base64.decode64(req_b64),
+              body:            req_body.empty? ? nil : req_body,
               content_type:    req_ct,
               dest:            dest
             )
@@ -6172,9 +6172,9 @@ module Capybara
             next_url    = carry_fragment(target, resolve_against(loc, target))
             origin_null = redirect_taints_origin?(origin_null, initiator, target, next_url)
             if ([301, 302].include?(status) && meth == 'POST') || (status == 303 && !%w[GET HEAD].include?(meth))
-              meth    = 'GET'
-              req_b64 = ''
-              req_ct  = nil
+              meth     = 'GET'
+              req_body = ''.b
+              req_ct   = nil
             end
             rid         = mint_resulting_client_id if url_origin(next_url) != url_origin(target)
             target      = next_url
@@ -6233,7 +6233,7 @@ module Capybara
       # queue (sw_deliver_fetch_response), not the general outbox. Returns the parsed response
       # hash (SW served the document), or nil to load from the network (no controller, no
       # respondWith, network error, or the SW didn't answer within the round-trip budget).
-      def service_worker_navigation_fetch(url, is_reload: false, is_history: false, referrer_source: nil, referrer_policy: nil, method: 'GET', body_b64: '', content_type: nil, site_seed: nil, origin_null: false, dest: 'iframe', cookie_cross_site: false, resulting_client_id: nil)
+      def service_worker_navigation_fetch(url, is_reload: false, is_history: false, referrer_source: nil, referrer_policy: nil, method: 'GET', body: nil, content_type: nil, site_seed: nil, origin_null: false, dest: 'iframe', cookie_cross_site: false, resulting_client_id: nil)
         handle = sw_controller_for_navigation(url) or return nil
         w      = @workers[handle] or return nil
         fetch_id = (@sw_nav_seq -= 1)
@@ -6268,7 +6268,8 @@ module Capybara
           url:                 url.to_s,
           # The Accept header Fetch inserts for a navigation request (destination 'document').
           headers:             headers,
-          body_b64:            body_b64.to_s,
+          # The request wire is JSON text, so the body's bytes travel as base64 in it.
+          body_b64:            Base64.strict_encode64(body.to_s),
           mode:                'navigate',
           # The navigation's real destination — 'document' for a top-level navigation,
           # 'iframe' for a frame's (event.request.destination distinguishes them, and a
@@ -8583,7 +8584,7 @@ module Capybara
       def read_blob_for_window(url)
         r = @runtime.call('__csimReadBlobForWindow', url.to_s)
         return nil unless r.is_a?(Hash) && r['bytes']
-        { bytes: r['bytes'], type: r['type'].to_s }
+        {bytes: r['bytes'], type: r['type'].to_s}
       rescue StandardError
         nil
       end
@@ -10226,7 +10227,7 @@ module Capybara
             'statusText' => '',
             'headers'    => hdrs,
             'body'       => '',
-            'body_raw'   => raw,
+            'body_raw'   => raw.b,
             'url'        => url,
             'redirected' => redirected,
             'type'       => type
@@ -10730,7 +10731,7 @@ module Capybara
         # re-GETs. The method drives both the SW fetch event and the network fallback.
         is_post   = entry[:method] == 'POST'
         body      = entry[:body].to_s
-        post_args = is_post ? {method: 'POST', body_b64: Base64.strict_encode64(body), content_type: entry[:content_type]} : {}
+        post_args = is_post ? {method: 'POST', body: body, content_type: entry[:content_type]} : {}
         # A history TRAVERSAL restores the entry's persisted form state (bfcache); a RELOAD gives a
         # fresh document, so it must NOT restore the (possibly stale) snapshot the entry was left with.
         restore = is_reload ? nil : entry[:form_state]
@@ -10935,7 +10936,7 @@ module Capybara
         # Skipped when an https navigation sits under an insecure ancestor (see
         # frame_navigation_fetch — the http-target carve-out is the app-suite fiction).
         if (!url.to_s.start_with?('https://') || secure_frame_ancestors?(realm_id)) &&
-           (sw = any_window_sw_navigation_fetch(url, method: 'POST', body_b64: Base64.strict_encode64(body.to_s), content_type: content_type, is_reload: is_reload, is_history: is_history,
+           (sw = any_window_sw_navigation_fetch(url, method: 'POST', body: body, content_type: content_type, is_reload: is_reload, is_history: is_history,
                                                       referrer_source: frame_realm_url(realm_id), referrer_policy: frame_document_referrer_policy(realm_id),
                                                       site_seed: site_seed, origin_null: origin_null, cookie_cross_site: cookie_cross, resulting_client_id: rid))
           return if sw['networkError']
