@@ -733,7 +733,9 @@ fn query_ids(
     };
     let selector = args.get(1).to_rust_string_lossy(scope);
     let cid = realm_id(scope, &args);
-    match crate::selector::query_text(realm(scope, cid), root, &selector, false) {
+    // …in the mode of the root's document (arg 2: quirks).
+    let quirks = args.get(2).is_true();
+    match crate::selector::query_text(realm(scope, cid), root, &selector, false, quirks) {
         crate::selector::QueryOutcome::Matched(ids) => {
             let array = v8::Array::new(scope, ids.len() as i32);
             for (i, id) in ids.iter().enumerate() {
@@ -764,7 +766,8 @@ fn matches_id(
     };
     let selector = args.get(1).to_rust_string_lossy(scope);
     let cid = realm_id(scope, &args);
-    match crate::selector::matches_text(realm(scope, cid), id, &selector) {
+    let quirks = args.get(2).is_true();
+    match crate::selector::matches_text(realm(scope, cid), id, &selector, quirks) {
         crate::selector::QueryOutcome::Matched(ids) => rv.set_bool(!ids.is_empty()),
         crate::selector::QueryOutcome::NeedsJsFallback => {
             let undef: v8::Local<v8::Value> = v8::undefined(scope).into();
@@ -802,19 +805,21 @@ fn matches_compiled(
         _ => return,
     };
     let cid = realm_id(scope, &args);
-    if let Some(hit) = crate::selector::matches_compiled(realm(scope, cid), id, handle) {
+    let quirks = args.get(2).is_true();
+    if let Some(hit) = crate::selector::matches_compiled(realm(scope, cid), id, handle, quirks) {
         rv.set_bool(hit);
     }
 }
 
-// __dom.cascadeLoad(records: Float64Array, keys: string[], propCount) -> the number of rules loaded. Replaces the
-// calling realm's rule set; the record layout is `CascadeStore::load`'s.
+// __dom.cascadeLoad(records: Float64Array, keys: string[], propCount, quirks) -> the number of rules loaded. Replaces
+// the calling realm's rule set, for a document in the given mode; the record layout is `CascadeStore::load`'s.
 fn cascade_load(
     scope: &mut v8::PinScope<'_, '_>,
     args: v8::FunctionCallbackArguments<'_>,
     mut rv: v8::ReturnValue<'_, v8::Value>,
 ) {
     let prop_count = args.get(2).integer_value(scope).unwrap_or(0).max(0) as usize;
+    let quirks = args.get(3).is_true();
     let mut keys = Vec::new();
     if let Ok(arr) = v8::Local::<v8::Array>::try_from(args.get(1)) {
         for i in 0..arr.length() {
@@ -826,7 +831,7 @@ fn cascade_load(
         }
     }
     let cid = realm_id(scope, &args);
-    let store = crate::cascade::CascadeStore::load(&f64_arg(args.get(0)), &keys, prop_count);
+    let store = crate::cascade::CascadeStore::load(&f64_arg(args.get(0)), &keys, prop_count, quirks);
     let n = store.rule_count();
     dom(scope).cascades.insert(cid, store);
     rv.set_int32(n as i32);

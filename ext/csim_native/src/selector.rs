@@ -488,6 +488,16 @@ pub fn compile_selector(text: &str) -> i32 {
     h
 }
 
+// The document's mode as the matcher takes it: in a quirks-mode document a class or id selector matches ASCII
+// case-insensitively (Selectors 4 §6.6 / §6.7) — the crate hands `has_class` / `has_id` the sensitivity from this.
+pub fn quirks_mode(quirks: bool) -> QuirksMode {
+    if quirks {
+        QuirksMode::Quirks
+    } else {
+        QuirksMode::NoQuirks
+    }
+}
+
 // The compiled selectors, by handle, for a caller that matches many against one element with one
 // MatchingContext of its own (the native cascade's per-element pass, crate::cascade).
 pub fn with_compiled<R>(f: impl FnOnce(&[SelectorList<CsimImpl>]) -> R) -> R {
@@ -498,7 +508,7 @@ pub fn with_compiled<R>(f: impl FnOnce(&[SelectorList<CsimImpl>]) -> R) -> R {
 // range or the node id is stale (the caller falls back to css-select); `Some(bool)` is authoritative.
 // Like `query`, the crate's ancestor walk (for combinators) relies on the arena being acyclic — a
 // property the sync layer maintains (it mirrors the acyclic JS DOM); there is no per-call cycle cap here.
-pub fn matches_compiled(arena: &RealmArena, id: NodeId, handle: i32) -> Option<bool> {
+pub fn matches_compiled(arena: &RealmArena, id: NodeId, handle: i32, quirks: bool) -> Option<bool> {
     if handle < 0 || arena.get(id).is_none() {
         return None;
     }
@@ -510,7 +520,7 @@ pub fn matches_compiled(arena: &RealmArena, id: NodeId, handle: i32) -> Option<b
             MatchingMode::Normal,
             None,
             &mut caches,
-            QuirksMode::NoQuirks,
+            quirks_mode(quirks),
             NeedsSelectorFlags::No,
             MatchingForInvalidation::No,
         );
@@ -531,7 +541,7 @@ pub fn matches_compiled(arena: &RealmArena, id: NodeId, handle: i32) -> Option<b
 // candidate, the crate's intended usage; a fresh cache per candidate would be pure waste. The
 // matcher walks each candidate's full ancestor chain, so ancestor-dependent combinators resolve
 // correctly even above `root`.
-pub fn query(arena: &RealmArena, root: NodeId, list: &SelectorList<CsimImpl>, first_only: bool) -> Vec<NodeId> {
+pub fn query(arena: &RealmArena, root: NodeId, list: &SelectorList<CsimImpl>, first_only: bool, quirks: bool) -> Vec<NodeId> {
     let mut out = Vec::new();
     if arena.get(root).is_none() {
         return out;
@@ -544,7 +554,7 @@ pub fn query(arena: &RealmArena, root: NodeId, list: &SelectorList<CsimImpl>, fi
         MatchingMode::Normal,
         None,
         &mut caches,
-        QuirksMode::NoQuirks,
+        quirks_mode(quirks),
         NeedsSelectorFlags::No,
         MatchingForInvalidation::No,
     );
@@ -584,14 +594,14 @@ pub fn query(arena: &RealmArena, root: NodeId, list: &SelectorList<CsimImpl>, fi
 // Parse (cached) + collect. Distinguishes three outcomes: a matched id set, a request to defer to
 // the JS engine (a live-state selector), or Invalid (the caller treats it as a SyntaxError). A
 // deferred selector is NOT matched here — the arena result would be a wrong subset.
-pub fn query_text(arena: &RealmArena, root: NodeId, text: &str, first_only: bool) -> QueryOutcome {
+pub fn query_text(arena: &RealmArena, root: NodeId, text: &str, first_only: bool, quirks: bool) -> QueryOutcome {
     CACHE.with(|c| {
         let mut c = c.borrow_mut();
         let entry = c.entry(text.to_owned()).or_insert_with(|| parse(text));
         match entry {
             None => QueryOutcome::Invalid,
             Some(p) if p.needs_fallback => QueryOutcome::NeedsJsFallback,
-            Some(p) => QueryOutcome::Matched(query(arena, root, &p.list, first_only)),
+            Some(p) => QueryOutcome::Matched(query(arena, root, &p.list, first_only, quirks)),
         }
     })
 }
@@ -601,7 +611,7 @@ pub fn query_text(arena: &RealmArena, root: NodeId, text: &str, first_only: bool
 // returns Matched with the element's own id (empty = no match), so the caller reads it as a bool.
 // No scope_element — a cascade rule / bare matches() has no query root (and rules don't use :scope);
 // the matcher still walks the element's full ancestor chain for descendant/child combinators.
-pub fn matches_text(arena: &RealmArena, id: NodeId, text: &str) -> QueryOutcome {
+pub fn matches_text(arena: &RealmArena, id: NodeId, text: &str, quirks: bool) -> QueryOutcome {
     CACHE.with(|c| {
         let mut c = c.borrow_mut();
         let entry = c.entry(text.to_owned()).or_insert_with(|| parse(text));
@@ -617,7 +627,7 @@ pub fn matches_text(arena: &RealmArena, id: NodeId, text: &str) -> QueryOutcome 
                     MatchingMode::Normal,
                     None,
                     &mut caches,
-                    QuirksMode::NoQuirks,
+                    quirks_mode(quirks),
                     NeedsSelectorFlags::No,
                     MatchingForInvalidation::No,
                 );

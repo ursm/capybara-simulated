@@ -22,17 +22,16 @@ use std::collections::HashMap;
 use precomputed_hash::PrecomputedHash;
 use selectors::bloom::BloomFilter;
 use selectors::context::{
-    MatchingContext, MatchingForInvalidation, MatchingMode, NeedsSelectorFlags, QuirksMode, SelectorCaches,
+    MatchingContext, MatchingForInvalidation, MatchingMode, NeedsSelectorFlags, SelectorCaches,
 };
 use selectors::matching::{matches_selector, selector_may_match};
 use selectors::parser::AncestorHashes;
 
 use crate::dom::{NodeId, RealmArena};
-use crate::selector::{with_compiled, CssStr, NodeRef, HTML_NS};
+use crate::selector::{quirks_mode, with_compiled, CssStr, NodeRef, HTML_NS};
 
 // The terminal-key bucket a rule sits in, as the JS `terminalKey` put it (`bucketFor`): the element's own
-// identifiers select the buckets it could match, so an element only tests those.
-const TERM_UNIVERSAL: u32 = 0;
+// identifiers select the buckets it could match, so an element only tests those. Any other kind (0) is universal.
 const TERM_CLASS: u32 = 1;
 const TERM_ID: u32 = 2;
 const TERM_TAG: u32 = 3;
@@ -99,6 +98,9 @@ pub(crate) struct CascadeStore {
     best: Vec<(u32, Key, u32)>,
     touched: Vec<u32>,
     stamp: u32,
+    // The document's mode: a class or id selector matches ASCII case-insensitively in quirks mode, so the JS side
+    // keys those buckets lowercased and they are asked for lowercased here, and the matcher is told.
+    quirks: bool,
 }
 
 fn layer_priority(layer: Option<f64>, important: bool) -> f64 {
@@ -126,8 +128,12 @@ impl CascadeStore {
     //   declaration count, then per declaration: property, declaration, important (0/1)
     // — and `keys` the term-key strings it names. A record that runs past the buffer ends the load there: a
     // truncated table answers for fewer rules, which the JS side never trusts, since it checks the count.
-    pub(crate) fn load(nums: &[f64], keys: &[String], prop_count: usize) -> CascadeStore {
-        let mut store = CascadeStore { best: vec![(0, Key { important: false, layer_priority: 0.0, spec: [0; 3], source: 0.0 }, 0); prop_count], ..Default::default() };
+    pub(crate) fn load(nums: &[f64], keys: &[String], prop_count: usize, quirks: bool) -> CascadeStore {
+        let mut store = CascadeStore {
+            best: vec![(0, Key { important: false, layer_priority: 0.0, spec: [0; 3], source: 0.0 }, 0); prop_count],
+            quirks,
+            ..Default::default()
+        };
         let mut i = 0;
         while i + 10 <= nums.len() {
             let handle = nums[i] as i32;
@@ -155,7 +161,7 @@ impl CascadeStore {
                 Vec::new()
             } else {
                 with_compiled(|c| match c.get(handle as usize) {
-                    Some(list) => list.slice().iter().map(|s| AncestorHashes::new(s, QuirksMode::NoQuirks)).collect(),
+                    Some(list) => list.slice().iter().map(|s| AncestorHashes::new(s, quirks_mode(quirks))).collect(),
                     None => Vec::new(),
                 })
             };
@@ -177,6 +183,15 @@ impl CascadeStore {
         self.rules.len()
     }
 
+    // A class or id bucket, asked for as the JS side keyed it: lowercased in a quirks-mode document.
+    fn bucket_folded<'a>(&self, map: &'a HashMap<String, Vec<u32>>, key: &str) -> Option<&'a Vec<u32>> {
+        if self.quirks && key.bytes().any(|c| c.is_ascii_uppercase()) {
+            map.get(key.to_ascii_lowercase().as_str())
+        } else {
+            map.get(key)
+        }
+    }
+
     // Every candidate of `id`'s buckets, in the JS `walkIndex` order (tag, id, classes, attributes, root,
     // universal). The order decides nothing — `wins_over` is a total order on distinct rules — but keeping it
     // keeps a trace of the two comparable.
@@ -195,14 +210,14 @@ impl CascadeStore {
         }
         if let Some(v) = node.get_attr("id") {
             if !v.is_empty() {
-                if let Some(b) = self.by_id.get(v) {
+                if let Some(b) = self.bucket_folded(&self.by_id, v) {
                     out.extend_from_slice(b);
                 }
             }
         }
         if let Some(cls) = node.get_attr("class") {
             for c in cls.split_ascii_whitespace() {
-                if let Some(b) = self.by_class.get(c) {
+                if let Some(b) = self.bucket_folded(&self.by_class, c) {
                     out.extend_from_slice(b);
                 }
             }
@@ -257,7 +272,7 @@ impl CascadeStore {
                 MatchingMode::Normal,
                 None,
                 &mut caches,
-                QuirksMode::NoQuirks,
+                quirks_mode(self.quirks),
                 NeedsSelectorFlags::No,
                 MatchingForInvalidation::No,
             );
