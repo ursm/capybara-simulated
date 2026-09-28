@@ -2,18 +2,14 @@ source 'https://rubygems.org'
 
 gemspec
 
-# JS engines: both installed in dev so the spec suite exercises both
-# (CSIM_JS_ENGINE=v8 / =quickjs). Downstream apps add whichever one
-# they want — neither is a hard dependency of the gem itself.
-# Local path: the native engine is now linked INTO csim_native (ext/csim_native),
-# so this provides rusty_racer's pure-Ruby API wrappers (Isolate.new / eval / …);
-# its native require self-skips once csim_native has defined RustyRacer::*. Path
-# (not the released gem) keeps the Ruby wrappers in lockstep with the linked
-# native source during the native-DOM work.
+# The gemspec depends on rusty_racer; this points it at the local checkout. The
+# native engine is linked INTO csim_native (ext/csim_native), so the gem provides
+# rusty_racer's pure-Ruby API wrappers (Isolate.new / eval / …); its native require
+# self-skips once csim_native has defined RustyRacer::*. Path (not the released
+# gem) keeps the Ruby wrappers in lockstep with the linked native source during
+# the native-DOM work.
 gem 'rusty_racer', path: '../rusty_racer'
 gem 'nokogiri'
-gem 'quickjs', '~> 0.21.0'
-gem 'quickjs-polyfill-intl'
 
 group :development, :test do
   gem 'flatware-rspec', '~> 2.4' # multi-process spec runs (`flatware rspec spec`); the WPT / capybara-shared gates are

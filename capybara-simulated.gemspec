@@ -6,7 +6,7 @@ Gem::Specification.new do |spec|
   spec.authors     = ['Keita Urashima']
   spec.email       = ['ursm@ursm.jp']
   spec.summary     = 'Lightweight Capybara driver with an in-process JS-resident DOM, Chrome-free'
-  spec.description = 'A Capybara driver that runs JavaScript against an in-process JS-resident DOM — V8 via rusty_racer or QuickJS via quickjs.rb, whichever is installed. No Chrome, no Node toolchain. Forms submit through Rack::MockRequest, inline <script> + event handlers run, Hotwire / Stimulus / Turbo work, and Capybara DSL is unchanged. Sits between rack-test and full headless browsers.'
+  spec.description = 'A Capybara driver that runs JavaScript against an in-process JS-resident DOM on V8 (via rusty_racer). No Chrome, no Node toolchain. Forms submit through Rack::MockRequest, inline <script> + event handlers run, Hotwire / Stimulus / Turbo work, and Capybara DSL is unchanged. Sits between rack-test and full headless browsers.'
   spec.homepage    = 'https://github.com/ursm/capybara-simulated'
   spec.license     = 'MIT'
 
@@ -37,7 +37,6 @@ Gem::Specification.new do |spec|
 
   # The native extension (Rust): the V8 engine (rusty_racer, linked as a library) + the native DOM,
   # built into one cdylib. Compiled at source-install; a prebuilt (fat) gem ships it precompiled.
-  # Only the V8 runtime requires it; a QuickJS-only install never loads it.
   #
   # `spec.files` above has to carry the crate this builds — extconf.rb alone (which RubyGems adds here for
   # free) would ship a build script with nothing to build. `spec/gemspec_packaging_spec.rb` asserts that, and
@@ -59,18 +58,11 @@ Gem::Specification.new do |spec|
   spec.add_dependency 'ruby-vips', '~> 2.2'
   # Brotli, to decode WOFF2 web fonts to their real text metrics.
   spec.add_dependency 'brotli', '~> 0.5'
-  # rb-sys drives the native cascade accelerator's build (ext/native_cascade/extconf.rb). Needed
+  # rb-sys drives the native extension's build (ext/csim_native/extconf.rb). Needed
   # only when compiling from source; a prebuilt (fat) gem carries the compiled extension already.
   spec.add_dependency 'rb_sys', '~> 0.9'
-
-  # JS engine is a soft dependency — add exactly one to your Gemfile.
-  # The engine is auto-selected based on which is loadable; `:v8` wins when
-  # both are present. Override explicitly with
-  # `CSIM_JS_ENGINE=v8|quickjs` or `Driver.new(app, js_engine: :…)`.
-  #
-  #   gem 'rusty_racer', '>= 0.2.1' # V8 via rusty_v8 (JIT, fastest per spec)
-  #   gem 'quickjs', '>= 0.19'   # QuickJS (interpreter, smaller per-VM
-  #   gem 'quickjs-polyfill-intl' # footprint; wins on parallelism). Intl moved
-  #                              # to its own gem in 0.19 — the driver needs the
-  #                              # DateTimeFormat chain for bridge.js.
+  # The JS engine: V8 via rusty_v8. Its native engine is linked into csim_native (above); the gem
+  # supplies the Ruby API around it. 0.2.3 carries the `install_classes` / `set_realm_init_hook`
+  # seams csim_native builds on.
+  spec.add_dependency 'rusty_racer', '~> 0.2', '>= 0.2.3'
 end
