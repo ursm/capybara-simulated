@@ -21,12 +21,12 @@ require 'rack'
 require_relative 'support/session_teardown'
 
 RSpec.describe 'native selector engine SHADOW A/B on the __csimQuery path' do
-  CARDS = Integer(ENV.fetch('SHADOW_CARDS', '500'))
-  ITERS = Integer(ENV.fetch('SHADOW_ITERS', '300'))
+  SHADOW_CARDS = Integer(ENV.fetch('SHADOW_CARDS', '500'))
+  SHADOW_ITERS = Integer(ENV.fetch('SHADOW_ITERS', '300'))
 
   # A representative slice of what an app's finds look like: type + class compounds,
   # descendant / child combinators, attribute operators, structural pseudos, :not.
-  SELECTORS = [
+  SHADOW_SELECTORS = [
     '.card',
     'article.card',
     '.card .title',
@@ -43,10 +43,10 @@ RSpec.describe 'native selector engine SHADOW A/B on the __csimQuery path' do
 
   # Selectors whose truth depends on live element state the arena can't see — native
   # must DEFER these to css-select (recorded as fallbacks, never a wrong subset).
-  STATE_SELECTORS = ['input:checked', 'input:required', ':focus', 'p::before'].freeze
+  SHADOW_STATE_SELECTORS = ['input:checked', 'input:required', ':focus', 'p::before'].freeze
 
   let(:app) {
-    cards = (1..CARDS).map {|i|
+    cards = (1..SHADOW_CARDS).map {|i|
       <<~CARD
         <article class="card#{' featured' if (i % 10).zero?}" id="card-#{i}" data-index="#{i}">
           <header class="card-header"><h2 class="title">Card #{i}</h2><span class="badge new">new</span></header>
@@ -68,17 +68,17 @@ RSpec.describe 'native selector engine SHADOW A/B on the __csimQuery path' do
   end
 
   # Run one selector through the production find path (host fn __csimQuery, root 0 =
-  # document) ITERS times, entirely in JS — no per-call Ruby/handle marshalling — and
+  # document) SHADOW_ITERS times, entirely in JS — no per-call Ruby/handle marshalling — and
   # return the css / native time it added (µs per iteration) plus the match count.
   def measure(selector, root_expr = '0')
     before = stats
-    session.evaluate_script(%(for (let i = 0; i < #{ITERS}; i++) __csimQuery(#{root_expr}, #{selector.to_json});))
+    session.evaluate_script(%(for (let i = 0; i < #{SHADOW_ITERS}; i++) __csimQuery(#{root_expr}, #{selector.to_json});))
     after = stats
     {
-      css_us: (after['cssNs'] - before['cssNs']) / 1000.0 / ITERS,
-      nat_us: (after['natNs'] - before['natNs']) / 1000.0 / ITERS,
+      css_us: (after['cssNs'] - before['cssNs']) / 1000.0 / SHADOW_ITERS,
+      nat_us: (after['natNs'] - before['natNs']) / 1000.0 / SHADOW_ITERS,
       matched: after['matched'] - before['matched'],
-      results: (after['natResults'] - before['natResults']) / [ITERS, 1].max
+      results: (after['natResults'] - before['natResults']) / [SHADOW_ITERS, 1].max
     }
   end
 
@@ -89,7 +89,7 @@ RSpec.describe 'native selector engine SHADOW A/B on the __csimQuery path' do
     # One find first, so per-selector deltas are steady-state QUERY time.
     session.evaluate_script('__csimQuery(0, ".card")')
 
-    rows = SELECTORS.map {|sel| [sel, measure(sel)] }
+    rows = SHADOW_SELECTORS.map {|sel| [sel, measure(sel)] }
 
     # A within(card) find is the element-scoped path (root = a card handle).
     card_root = 'document.querySelector(".card")._id'
@@ -98,17 +98,17 @@ RSpec.describe 'native selector engine SHADOW A/B on the __csimQuery path' do
     # H1 guard: a selector native quietly DECLINED (fallback) or REJECTED (invalid)
     # contributes native_µs = 0 and would flatter the reported speedup while the run
     # stayed green. Every selector here is one native answers today, so it must have
-    # been answered on all ITERS — a drop to fallback/invalid means native regressed
+    # been answered on all SHADOW_ITERS — a drop to fallback/invalid means native regressed
     # on a selector it used to handle, and the measurement is no longer trustworthy.
     (rows + [['within(.card) .title', scoped]]).each do |sel, r|
-      expect(r[:matched]).to eq(ITERS), "native stopped answering #{sel.inspect} (dropped to fallback/invalid) — speedup would be inflated"
+      expect(r[:matched]).to eq(SHADOW_ITERS), "native stopped answering #{sel.inspect} (dropped to fallback/invalid) — speedup would be inflated"
     end
 
     # State pseudos must DEFER, not guess — prove native declines even though the box
     # really is `:checked` / `:required`.
     session.evaluate_script('document.getElementById("c1").checked = true')
     before_fb = stats['fallbacks']
-    STATE_SELECTORS.each {|sel| session.evaluate_script(%(__csimQuery(0, #{sel.to_json}))) }
+    SHADOW_STATE_SELECTORS.each {|sel| session.evaluate_script(%(__csimQuery(0, #{sel.to_json}))) }
     fallbacks = stats['fallbacks'] - before_fb
 
     # A child-list mutation is followed as it happens — count the syncs it cost.
@@ -118,7 +118,7 @@ RSpec.describe 'native selector engine SHADOW A/B on the __csimQuery path' do
 
     final = stats
 
-    warn format("\n  native selector SHADOW A/B — %d cards, %d iters/selector", CARDS, ITERS)
+    warn format("\n  native selector SHADOW A/B — %d cards, %d iters/selector", SHADOW_CARDS, SHADOW_ITERS)
     warn format('  %-34s %6s %10s %10s %8s', 'selector (document-scoped)', 'n', 'css µs', 'native µs', 'speedup')
     rows.each do |sel, r|
       warn format('  %-34s %6d %10.3f %10.3f %7.1fx', sel, r[:results], r[:css_us], r[:nat_us], r[:css_us] / [r[:nat_us], 1e-9].max)
@@ -128,7 +128,7 @@ RSpec.describe 'native selector engine SHADOW A/B on the __csimQuery path' do
     total_css = rows.sum {|_, r| r[:css_us] }
     total_nat = rows.sum {|_, r| r[:nat_us] }
     warn format('  %-34s %6s %10.3f %10.3f %7.1fx', 'TOTAL (steady-state query)', '', total_css, total_nat, total_css / total_nat)
-    warn format("\n  arena upkeep: %d child-list syncs for %d appends; state pseudos deferred = %d/%d", syncs, (CARDS + 2) / 3, fallbacks, STATE_SELECTORS.length)
+    warn format("\n  arena upkeep: %d child-list syncs for %d appends; state pseudos deferred = %d/%d", syncs, (SHADOW_CARDS + 2) / 3, fallbacks, SHADOW_STATE_SELECTORS.length)
     warn format('  totals over the run — matched finds %d, fallbacks %d, invalid %d, mismatches %d', final['matched'], final['fallbacks'], final['invalid'], final['mismatches'])
 
     # The load-bearing correctness assertion: native NEVER disagreed with css-select
@@ -138,7 +138,7 @@ RSpec.describe 'native selector engine SHADOW A/B on the __csimQuery path' do
     # native_µs = 0 and skew the totals).
     expect(final['invalid']).to eq(0)
     # And it really did decline the live-state selectors rather than returning a subset.
-    expect(fallbacks).to eq(STATE_SELECTORS.length)
+    expect(fallbacks).to eq(SHADOW_STATE_SELECTORS.length)
   end
 
   # Guards the two arena-CONSTRUCTION fixes that keep the parity signal honest on real

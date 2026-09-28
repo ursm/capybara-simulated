@@ -8,7 +8,7 @@ require_relative 'support/session_teardown'
 # `:any-link` / `:link` (in the native matcher, which reads the attribute's namespace, and in css-select), is
 # focusable, and navigates when clicked. A `<link href>` is no hyperlink to either (HTML "selectors"). Chrome-measured.
 RSpec.describe 'SVG XLink links' do
-  PAGE = <<~HTML
+  XLINK_LINK_PAGE = <<~HTML
     <!DOCTYPE html><link id="l" rel="help" href="/h"><style>:any-link { --m: 1 }</style>
     <svg id="s"><a id="pa" xlink:href="/x"><text>p</text></a></svg>
     <script>
@@ -23,7 +23,7 @@ RSpec.describe 'SVG XLink links' do
   HTML
 
   def session
-    app = ->(env) { [200, {'content-type' => 'text/html'}, [env['PATH_INFO'] == '/next' ? '<p>next</p>' : PAGE]] }
+    app = ->(env) { [200, {'content-type' => 'text/html'}, [env['PATH_INFO'] == '/next' ? '<p>next</p>' : XLINK_LINK_PAGE]] }
     s = simulated_session(app)
     s.visit '/'
     s

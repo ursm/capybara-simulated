@@ -48,7 +48,7 @@ RSpec.describe 'native selector engine: JS fallback for live-state selectors',
 
   # Build the native arena from the parsed document, stamping each element with its nativeId so
   # css-select results can be compared by id. Returns nothing; sets globalThis.__abRoot.
-  BUILD_JS = <<~JS
+  FALLBACK_BUILD_JS = <<~JS
     (function () {
       __dom.resetArena();
       // Every node, text and comments included (`:empty` reads them), and <html> under a document node (`:root`).
@@ -90,7 +90,7 @@ RSpec.describe 'native selector engine: JS fallback for live-state selectors',
 
   before do
     session.visit '/'
-    session.evaluate_script(BUILD_JS)
+    session.evaluate_script(FALLBACK_BUILD_JS)
     # Two checkboxes are actually checked — live state css-select sees but the arena can't.
     session.evaluate_script("document.getElementById('c1').checked = true; document.getElementById('c2').checked = true;")
   end

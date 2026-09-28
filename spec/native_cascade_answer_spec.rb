@@ -10,7 +10,7 @@ require_relative 'support/session_teardown'
 # pre-rejects, a dynamic and a `:has()` rule on the same property as a static one, the inline origin — is read with
 # the native cascade on and again with it off, and must read the same.
 RSpec.describe 'native cascade answer' do
-  PAGE = <<~HTML
+  CASCADE_ANSWER_PAGE = <<~HTML
     <!DOCTYPE html>
     <style>
       @layer base, theme;
@@ -42,7 +42,7 @@ RSpec.describe 'native cascade answer' do
     <svg><rect id="r" viewBox="0 0 1 1"></rect></svg>
   HTML
 
-  PROPS = %w[width height margin-left margin-top margin-bottom padding-top padding-left border-top-width outline-width color font-size].freeze
+  CASCADE_ANSWER_PROPS = %w[width height margin-left margin-top margin-bottom padding-top padding-left border-top-width outline-width color font-size].freeze
 
   def read_all(session)
     session.evaluate_script(<<~JS)
@@ -50,7 +50,7 @@ RSpec.describe 'native cascade answer' do
         const out = {};
         for (const el of document.querySelectorAll('[id]')) {
           const cs = getComputedStyle(el);
-          out[el.id] = #{PROPS.to_json}.map((p) => cs.getPropertyValue(p));
+          out[el.id] = #{CASCADE_ANSWER_PROPS.to_json}.map((p) => cs.getPropertyValue(p));
         }
         return JSON.stringify(out);
       })()
@@ -58,7 +58,7 @@ RSpec.describe 'native cascade answer' do
   end
 
   it 'reads what the JS cascade reads' do
-    s = simulated_session(->(_env) { [200, {'content-type' => 'text/html'}, [PAGE]] })
+    s = simulated_session(->(_env) { [200, {'content-type' => 'text/html'}, [CASCADE_ANSWER_PAGE]] })
     s.visit '/'
     s.evaluate_script('__csimCascadeTimingStats(true)')
     native = read_all(s)
@@ -73,7 +73,7 @@ RSpec.describe 'native cascade answer' do
     expect(s.evaluate_script('__csimCascadeTimingStats().cascNatAnswers')).to eq(0)
     expect(JSON.parse(native)).to eq(JSON.parse(js))
     # …and the values the shapes exist for, so both halves agreeing on a wrong answer shows too.
-    got = JSON.parse(native).transform_values {|v| PROPS.zip(v).to_h }
+    got = JSON.parse(native).transform_values {|v| CASCADE_ANSWER_PROPS.zip(v).to_h }
     expect(got['l'].values_at('width', 'height')).to eq(%w[11px 7px])
     expect(got['li']['width']).to eq('22px')
     expect(got['a'].values_at('margin-left', 'padding-top')).to eq(%w[1px 5px])
@@ -116,7 +116,7 @@ RSpec.describe 'native cascade answer' do
   # The answer holds the element's inline declarations too, kept under its context — which any write to its own
   # attributes moves, the style attribute and a CSSOM `style` write included.
   it 'sees an inline style written after the answer was kept' do
-    s = simulated_session(->(_env) { [200, {'content-type' => 'text/html'}, [PAGE]] })
+    s = simulated_session(->(_env) { [200, {'content-type' => 'text/html'}, [CASCADE_ANSWER_PAGE]] })
     s.visit '/'
     got = s.evaluate_script(<<~JS)
       (() => {
