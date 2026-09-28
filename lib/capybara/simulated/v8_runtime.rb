@@ -1082,7 +1082,6 @@ module Capybara
             @browser.sw_note_realm_controller(realm.id, ctrl)
           end
         end
-        @browser.asset_document_started
         realm.call('__csimLoadDocument', body.to_s, content_type.to_s)
         # This document now has a URL and any host-wired controller, so it can announce itself
         # as a service-worker client — an UNCONTROLLED context is still a client of its origin
@@ -1098,7 +1097,6 @@ module Capybara
         unless js_url_source.nil?
           begin
             result = realm.eval(js_url_source.to_s)
-            @browser.asset_document_started
             realm.call('__csimLoadDocument', result, 'text/html') if result.is_a?(String)
           rescue StandardError => e
             @browser.log_console('warn', "javascript: URL frame threw: #{e.message}")
@@ -1204,7 +1202,6 @@ module Capybara
         # builds a FRESH realm) can carry them across — a real popup keeps window.opener
         # and window.name through its own navigation.
         window_realm_meta[realm.id] = {opener_id: opener_id, window_name: window_name, about_base: about_base, about_origin: about_origin}
-        @browser.asset_document_started
         realm.call('__csimLoadDocument', body.to_s, content_type.to_s)
         # As in create_frame_realm: an auxiliary window is a client of its origin too.
         realm.call('__csim_swReportClient') rescue nil
@@ -1280,6 +1277,14 @@ module Capybara
         @native_module_handles
       end
 
+      # The document a realm has loading, as its bridge holds it (`__csimDocToken`): whose asset memo a module fetch
+      # reads (`Browser#external_asset_source`).
+      def asset_document_of(target)
+        target.eval('globalThis.__csimDocToken')
+      rescue StandardError
+        nil
+      end
+
       def native_module_for(url, inline_src, target, handles)
         return handles[url] if handles.key?(url)
         url_s = url.to_s
@@ -1306,7 +1311,7 @@ module Capybara
         if src.nil?
           # …through the asset cache, like a classic script's: one fetch per URL per document (a `modulepreload`
           # link fetched it too), none across visits while the response says it is fresh.
-          src = @browser.external_asset_source(url_s)
+          src = @browser.external_asset_source(url_s, asset_document_of(target))
           @browser.note_module_fetch(url_s) if src   # its Resource Timing entry ('script')
         end
         return handles[url] = nil unless src

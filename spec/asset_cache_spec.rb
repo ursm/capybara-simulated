@@ -122,6 +122,25 @@ RSpec.describe 'one fetch per asset per document' do
     expect([first, width.call]).to eq(['10px', '20px'])
   end
 
+  # …and only its OWN memo starts afresh: a frame built while the page loads leaves the page's alone, so a sheet the
+  # page links after the frame is still fetched once.
+  it 'keeps the page\'s memo while a frame of its own loads' do
+    hits = Hash.new(0)
+    page_app = ->(env) {
+      path = env['PATH_INFO']
+      hits[path] += 1
+      case path
+      when '/s.css', '/t.css' then [200, {'content-type' => 'text/css'}, ['p { color: rgb(0, 128, 0) }']]
+      when '/f' then [200, {'content-type' => 'text/html'}, ['<!DOCTYPE html><link rel="stylesheet" href="/s.css">']]
+      else [200, {'content-type' => 'text/html'}, ['<!DOCTYPE html><link rel="stylesheet" href="/s.css"><iframe src="/f"></iframe><link rel="stylesheet" href="/t.css"><p id="p">p</p>']]
+      end
+    }
+    s = simulated_session(page_app)
+    s.visit '/'
+    expect(s.evaluate_script("getComputedStyle(document.getElementById('p')).color")).to eq('rgb(0, 128, 0)')
+    expect(hits.values_at('/s.css', '/t.css')).to eq([2, 1])
+  end
+
   it 'fetches a no-store one every time it is asked' do
     hits = Hash.new(0)
     visit_twice(hits, 'cache-control' => 'no-store')

@@ -332,6 +332,23 @@ RSpec.describe 'web fonts' do
     expect(got).to eq(['Dup,Dup,CycB,CycA', true, true])
   end
 
+  # …and a face keeps its FontFace while rules are inserted and deleted around it, as a browser keys it by its rule.
+  it 'keeps a face\'s FontFace across an insertRule and a deleteRule before it' do
+    s = session('/held.html')
+    got = s.evaluate_script(<<~JS)
+      (() => {
+        const fonts = () => Array.from(document.fonts);
+        const held = fonts();
+        const sheet = document.querySelector('link').sheet;
+        sheet.insertRule('@font-face { font-family: Ins; src: url("ahem.ttf"); }', 1);
+        const inserted = fonts();
+        sheet.deleteRule(1);
+        return [inserted.map((f) => f.family).join(','), held.every((f) => inserted.includes(f)), held.every((f) => fonts().includes(f))];
+      })()
+    JS
+    expect(got).to eq(['Imp,Ins,Outer', true, true])
+  end
+
   # An `@import`'s conditions hold of the sheet it imports, faces and rules alike: `layer print` is a media query after
   # a layer, `supports()` a condition (a bare declaration included).
   it 'imports a sheet only where its media query and supports() condition hold' do

@@ -3624,13 +3624,19 @@ module Capybara
       # read-throughs the per-visit asset cache) and cached iff durably cacheable.
       # Returns nil on 4xx / fetch failure so the JS caller skips it exactly as the
       # old `__rackFetch` branch did.
-      # A document starts loading — the page's, a frame's, an auxiliary window's: the assets the last one fetched are no
-      # longer this one's to reuse (`external_asset_source`).
+      # A document starts loading — the page's, a frame's, an auxiliary window's (the bridge's `__csimLoadDocument` asks,
+      # and keeps the answer as `__csimDocToken`): a token of its own, naming its asset memo in `external_asset_source`.
+      # The last ASSET_DOCUMENTS documents' memos are kept, so a page's survives the frames it builds while it loads.
+      ASSET_DOCUMENTS = 16
       def asset_document_started
-        @page_asset_src = nil
+        @asset_document_seq = (@asset_document_seq || 0) + 1
+        memos = (@page_asset_src ||= {})
+        memos.shift while memos.size >= ASSET_DOCUMENTS
+        memos[@asset_document_seq] = {}
+        @asset_document_seq
       end
 
-      def external_asset_source(url)
+      def external_asset_source(url, document = nil)
         # A blob:/data:/about: document's location can't anchor an absolute-path
         # `src=/common/…` (URI.join on a `blob:` URL yields nothing usable), but its
         # `<base href>` points at a real http(s) origin — so for THOSE documents
@@ -3640,14 +3646,14 @@ module Capybara
         needs_base = @current_url.to_s.start_with?('blob:', 'data:', 'about:')
         key = resolve_against_current(url.to_s, use_base: needs_base)
         return nil unless key.is_a?(String)
-        # One fetch per URL per DOCUMENT, whatever the response's freshness says — a browser's memory cache: the
-        # cascade fetches a `<link>`'s sheet and its load task asks again, and a response with no cache headers (every
-        # asset of a Rails app in test) crossed Rack twice per page. `no-store` alone is fetched every time, and every
-        # document that starts loading — a frame's too — starts it afresh (`asset_document_started`), so a reloaded
-        # frame fetches what it fetched before.
+        # One fetch per URL per DOCUMENT (`document`, the asking realm's token), whatever the response's freshness says —
+        # a browser's memory cache: the cascade fetches a `<link>`'s sheet and its load task asks again, and a response
+        # with no cache headers (every asset of a Rails app in test) crossed Rack twice per page. `no-store` alone is
+        # fetched every time, and a document that loads again — a frame reloaded — has a memo of its own.
         # (A body served from memory carries the facts of the response it came from, for whoever files its Resource
         # Timing entry — `note_module_fetch` reads them where `rack_fetch_body` would have left them.)
-        if (e = @page_asset_src&.[](key))
+        memo = document && @page_asset_src&.[](document.to_i)
+        if memo && (e = memo[key])
           (@asset_meta ||= {})[key] = Thread.current[:csim_asset_meta] = e[1]
           return e[0]
         end
@@ -3671,7 +3677,7 @@ module Capybara
         # Script / stylesheet source is TEXT, but the raw Rack / binread body
         # arrives BINARY-tagged (see `RuntimeShared.utf8_text`).
         body = RuntimeShared.utf8_text(body)
-        (@page_asset_src ||= {})[key] = [body, meta] unless Thread.current[:csim_asset_no_store]
+        memo[key] = [body, meta] if memo && !Thread.current[:csim_asset_no_store]
         if fresh_until
           @@asset_src_lock.synchronize do
             @@asset_src.clear if @@asset_src.size >= ASSET_SRC_MAX
@@ -11692,7 +11698,6 @@ module Capybara
         # a leg delivering after this point would resolve the NEW page's same-
         # numbered fetch with the old page's response.
         reset_sw_race_state
-        asset_document_started
         @runtime.rebuild_ctx
         # A full page (re)build disposes every frame realm, so any active
         # `within_frame` scope is now stale — fall back to the main document.
