@@ -271,4 +271,37 @@ RSpec.describe 'structural-context invalidation' do
     JS
     expect(got).to eq([[true, true], true, 'rgb(0, 128, 0)'])
   end
+
+  # …and the same for a child-list change: all a sibling's selector reads of this child list is `:empty`. On a page with a
+  # deep one (`.e:empty ~ .d i`), every append to an element with children re-keyed its PARENT's subtree — an append to a
+  # `<body>` the whole document, which a jQuery support test's probe did four times per Redmine page load.
+  it 'leaves the siblings alone for a child-list change that cannot flip :empty' do
+    got = colors('.e:empty ~ .d i { color: rgb(0, 128, 0) }',
+                 '<div><b class="e" id="e">x</b><div class="d"><i id="i">i</i></div></div>', <<~JS)
+      const e = document.getElementById('e'), i = document.getElementById('i');
+      const before = color('i'), i0 = __csimCtxEpoch(i);
+      e.appendChild(document.createElement('u'));
+      e.lastChild.remove();
+      const kept = __csimCtxEpoch(i) === i0;
+      e.firstChild.remove();
+      return [before, kept, color('i'), __csimCtxGateActive()];
+    JS
+    expect(got).to eq(['rgb(0, 0, 0)', true, 'rgb(0, 128, 0)', true])
+  end
+
+  # A `:has()` reads DOWNWARD, which no context epoch can see: a read that considered its rule is never memoised, so what
+  # its argument names has nothing to re-key. Indexed anyway, the combinator Redmine nests in one
+  # (`span.icon-checked:has(:not(a svg.icon-svg))`) made the whole index unsafe — every child-list change a full re-key.
+  it 'leaves a :has() argument out of the index, and the :has() still restyles' do
+    got = colors('.c:has(a b) .t { color: rgb(0, 128, 0) } li:first-child span { color: rgb(0, 0, 255) }',
+                 '<div class="c"><p class="t" id="t">t</p><a id="a"></a></div><ul id="u"><li><span id="s">s</span></li></ul>', <<~JS)
+      const s = document.getElementById('s'), t = document.getElementById('t');
+      const before = [color('t'), color('s')], s0 = __csimCtxEpoch(s);
+      document.getElementById('u').appendChild(document.createElement('li'));
+      const kept = __csimCtxEpoch(s) === s0;
+      document.getElementById('a').appendChild(document.createElement('b'));
+      return [before, kept, color('t'), __csimCtxGateActive()];
+    JS
+    expect(got).to eq([['rgb(0, 0, 0)', 'rgb(0, 0, 255)'], true, 'rgb(0, 128, 0)', true])
+  end
 end
