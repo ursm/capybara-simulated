@@ -1,8 +1,20 @@
 diff --git a/dist/attributes.js b/dist/attributes.js
-index 89dab0a26c12f18182e4c98b69bde2b68fc7fc2f..de89aa6ed9ae0c2caaf1fa552a6e31b7e06064c0 100644
+index 89dab0a26c12f18182e4c98b69bde2b68fc7fc2f..68877cd73155e682cc97fe9c47c6c3aea74440ee 100644
 --- a/dist/attributes.js
 +++ b/dist/attributes.js
-@@ -67,7 +67,12 @@ function shouldIgnoreCase(selector, options) {
+@@ -6,7 +6,10 @@ import * as boolbase from "boolbase";
+  * https://github.com/slevithan/xregexp/blob/95eeebeb8fac8754d54eafe2b4743661ac1cf028/src/xregexp.js#L794
+  */
+ const reChars = /[-[\]{}()*+?.,\\^$|#\s]/g;
+-const whitespaceRe = /\s/;
++// csim patch: a `~=` list (and so a class list) is separated by CSS / HTML ASCII whitespace — space, tab, LF, FF,
++// CR — not by JS `\s`, which also splits on U+00A0 and the other Unicode spaces: `class="a&#xA0;b"` is ONE class
++// (Chrome: `classList.length` 1, `.b` matches nothing).
++const whitespaceRe = /[\t\n\f\r ]/;
+ function escapeRegex(value) {
+     return value.replace(reChars, "\\$&");
+ }
+@@ -67,7 +70,12 @@ function shouldIgnoreCase(selector, options) {
          ? selector.ignoreCase
          : selector.ignoreCase === "quirks"
              ? !!options.quirksMode
@@ -16,7 +28,7 @@ index 89dab0a26c12f18182e4c98b69bde2b68fc7fc2f..de89aa6ed9ae0c2caaf1fa552a6e31b7
  }
  /**
   * Attribute selectors
-@@ -117,7 +122,10 @@ export const attributeRules = {
+@@ -117,10 +125,13 @@ export const attributeRules = {
      element(next, data, options) {
          const { adapter } = options;
          const { name, value } = data;
@@ -27,7 +39,11 @@ index 89dab0a26c12f18182e4c98b69bde2b68fc7fc2f..de89aa6ed9ae0c2caaf1fa552a6e31b7
 +        if (value === "" || whitespaceRe.test(value)) {
              return boolbase.falseFunc;
          }
-         const regex = new RegExp(`(?:^|\\s)${escapeRegex(value)}(?:$|\\s)`, shouldIgnoreCase(data, options) ? "i" : "");
+-        const regex = new RegExp(`(?:^|\\s)${escapeRegex(value)}(?:$|\\s)`, shouldIgnoreCase(data, options) ? "i" : "");
++        const regex = new RegExp(`(?:^|[\\t\\n\\f\\r ])${escapeRegex(value)}(?:$|[\\t\\n\\f\\r ])`, shouldIgnoreCase(data, options) ? "i" : "");
+         return function element(node) {
+             const attribute = adapter.getAttributeValue(node, name);
+             return (attribute != null &&
 diff --git a/dist/general.js b/dist/general.js
 index 5d3fdf164e2a7e9612dec3cf6bdb2768a14d06ed..e2ed9e28d75c5f51857b6e9e567fd27f82a94f13 100644
 --- a/dist/general.js

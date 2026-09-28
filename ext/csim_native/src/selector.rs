@@ -332,7 +332,8 @@ impl<'a> Element for NodeRef<'a> {
         self.node()
             .get_attr("class")
             .unwrap_or("")
-            .split_whitespace()
+            // ASCII whitespace, as HTML tokenizes `class`: a U+00A0 is part of a class name, not a separator.
+            .split_ascii_whitespace()
             .any(|c| case.eq(c.as_bytes(), name.0.as_bytes()))
     }
     fn has_custom_state(&self, _name: &CssStr) -> bool {

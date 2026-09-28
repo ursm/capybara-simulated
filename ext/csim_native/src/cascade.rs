@@ -182,7 +182,15 @@ impl CascadeStore {
     // keeps a trace of the two comparable.
     fn candidates(&self, arena: &RealmArena, id: NodeId, out: &mut Vec<u32>) {
         let Some(node) = arena.get(id) else { return };
-        if let Some(b) = self.by_tag.get(node.local_name.as_str()) {
+        // The JS side keys a tag bucket on the lowercased name (`terminalKey`) and looks it up with `_tag`, which is
+        // lowercased too — so a case-preserved `foreignObject` / `clipPath` is asked for in lowercase here.
+        let tag = &node.local_name;
+        let bucket = if tag.bytes().any(|c| c.is_ascii_uppercase()) {
+            self.by_tag.get(tag.to_ascii_lowercase().as_str())
+        } else {
+            self.by_tag.get(tag.as_str())
+        };
+        if let Some(b) = bucket {
             out.extend_from_slice(b);
         }
         if let Some(v) = node.get_attr("id") {
