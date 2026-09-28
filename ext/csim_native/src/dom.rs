@@ -837,9 +837,10 @@ fn cascade_load(
     rv.set_int32(n as i32);
 }
 
-// __dom.cascadeWinners(nid, out: Int32Array) -> the number of ints `CascadeStore::answer` wrote to `out`, or -1 when
-// there is no rule set, the node is not in the arena, or the answer does not fit — the caller then runs its own
-// cascade for this element.
+// __dom.cascadeWinners(nid, out: Int32Array) -> the number of ints `CascadeStore::answer` wrote to `out`; -1 when the
+// node is not in the arena or the answer does not fit — the caller then runs its own cascade for this element — and
+// -2 when the realm holds no rule set at all (its arena was reset under the caller's store), which is the caller's
+// cue to load it again.
 fn cascade_winners(
     scope: &mut v8::PinScope<'_, '_>,
     args: v8::FunctionCallbackArguments<'_>,
@@ -861,7 +862,11 @@ fn cascade_winners(
     let out = unsafe { std::slice::from_raw_parts_mut(ptr, n) };
     let cid = realm_id(scope, &args);
     let d = dom(scope);
-    let (Some(store), Some(arena)) = (d.cascades.get_mut(&cid), d.realms.get(&cid)) else {
+    let Some(store) = d.cascades.get_mut(&cid) else {
+        rv.set_int32(-2);
+        return;
+    };
+    let Some(arena) = d.realms.get(&cid) else {
         return;
     };
     if let Some(count) = store.answer(arena, id, out) {
