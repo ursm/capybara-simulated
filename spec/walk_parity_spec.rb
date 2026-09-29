@@ -72,6 +72,20 @@ RSpec.describe 'walk parity' do
     HTML
   end
 
+  # A relative box's shift, as a length or as the pairs native resolves; an out-of-flow box as its own record naming
+  # its containing block — a positioned ancestor's record, or the viewport's rectangle — and its insets, at its place
+  # in the flow, or as a marker among the lines of a block of text.
+  it 'builds relative and out-of-flow boxes' do
+    expect_clean(parity(<<~HTML))
+      <div style="position: relative; left: 5px; top: -3px; margin: 0 auto; width: 300px">
+        <div style="position: relative; right: 10%; bottom: 2px">shifted</div>
+        <div style="position: absolute; top: 10%; left: calc(50% - 20px); width: 40px">in the box</div>
+        <p>text <span style="position: absolute; right: 0; bottom: min(5%, 8px)">marker</span> and more</p>
+      </div>
+      <div style="position: fixed; inset: 0 auto auto 0; width: 20%">on the viewport</div>
+    HTML
+  end
+
   it 'declines by name what it has not been taught' do
     stats = parity('<div style="float: left">x</div>')
     expect(stats['compared']).to eq(0)

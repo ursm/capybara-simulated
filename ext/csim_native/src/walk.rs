@@ -30,7 +30,7 @@ use style::values::specified::box_::Overflow;
 use style::values::specified::box_::{DisplayInside, DisplayOutside};
 
 use crate::dom::{NodeId, NodeKind, RealmArena};
-use crate::layout::{InlineBox, Input, Run, RunText, DISPLAY_BLOCK, DISPLAY_TEXT_BLOCK, RUN_BR, RUN_CLOSE, RUN_OPEN, RUN_TEXT, RUN_WBR};
+use crate::layout::{InlineBox, Input, Run, RunText, DISPLAY_BLOCK, DISPLAY_TEXT_BLOCK, RUN_BR, RUN_CLOSE, RUN_OOF, RUN_OPEN, RUN_TEXT, RUN_WBR};
 
 // A face the walk measures a run in, as the JS side resolved it for the family and the weight / style bucket: the
 // layout's font handle and the metrics the model rules read off it (per em — ascent, descent, line gap, and the
@@ -99,6 +99,7 @@ pub(crate) fn build(arena: &RealmArena, root: NodeId, basis: Basis, faces: &mut 
         math_index: HashMap::new(),
         inlines: Vec::new(),
         entries: Vec::new(),
+        rec_index: HashMap::new(),
     };
     match walk.root(root) {
         Ok(()) => Outcome::Built(Built {
@@ -129,6 +130,8 @@ struct Walk<'a> {
     // gathers made, which a text block tables when its runs are committed.
     inlines: Vec<InlineBox>,
     entries: Vec<InlineBox>,
+    // Each element's record, for an out-of-flow box to name its containing block by.
+    rec_index: HashMap<NodeId, i32>,
 }
 
 // A text block's inline content as its gather builds it (`nlGatherRuns`'s `ctx`): the block's style (its tab stops,
@@ -136,6 +139,8 @@ struct Walk<'a> {
 // makes a line.
 struct Gather<'s> {
     block: &'s ComputedValues,
+    // (…the text block's record, which an out-of-flow box among the lines hangs under)
+    idx: i32,
     bites: bool,
     runs: Vec<Pending>,
     makes_line: bool,
@@ -148,6 +153,8 @@ enum Pending {
     Close { plain: f64, ws: u8, entry: usize, lands: bool, own_h: f64, own_asc: f64 },
     Br { ws: u8, clear: u8, entry: usize },
     Wbr { ws: u8, entry: usize },
+    // An out-of-flow box's static position: where the flow reached it, on this line.
+    Oof { ws: u8, rec: i32 },
 }
 
 // An inline box's edges as its entry and its runs carry them (`edgeInsets` + `nlEdgeParts` / `nlClampedEdgeParts`,
@@ -297,8 +304,12 @@ impl<'a> Walk<'a> {
         self.node(id).children.iter().copied().filter(move |&c| arena.get(c).is_some())
     }
 
-    // One element's record, and its subtree's (`walkRecord`).
+    // One element's record, and its subtree's (`walkRecord`) — an in-flow box's, or an out-of-flow one's that `oof`
+    // emits.
     fn record(&mut self, id: NodeId, parent: i32) -> Step {
+        self.record_as(id, parent, false)
+    }
+    fn record_as(&mut self, id: NodeId, parent: i32, out_of_flow: bool) -> Step {
         let node = self.node(id);
         let style = self.style(id)?;
         let tag: &str = &node.local_name;
@@ -317,9 +328,10 @@ impl<'a> Walk<'a> {
         let b = style.get_box();
         let display = b.clone_display();
         if !matches!(display.outside(), DisplayOutside::Block) || !matches!(display.inside(), DisplayInside::Flow | DisplayInside::FlowRoot) {
-            return Err("display");
+            return Err(display_decline(display));
         }
-        if b.clone_position() != Position::Static {
+        let position = b.clone_position();
+        if matches!(position, Position::Absolute | Position::Fixed) != out_of_flow {
             return Err("positioned");
         }
         if b.clone_float() != Float::None {
@@ -373,7 +385,8 @@ impl<'a> Walk<'a> {
         rec.decl_w = declared(0)?;
         rec.decl_min_w = declared(2)?;
         rec.decl_max_w = declared(3)?;
-        rec.pct_h_decl = [1, 4, 5].iter().any(|&k| sizes[k].0.is_some_and(|lp| lp.has_percentage()));
+        rec.pct_h_decl = [1, 4, 5].iter().any(|&k| sizes[k].0.is_some_and(|lp| lp.has_percentage()))
+            || (position == Position::Relative && [&pos.top, &pos.bottom].iter().any(|i| inset_lp(i).ok().flatten().is_some_and(|lp| lp.has_percentage())));
         // The margins and padding, likewise — against the containing block's WIDTH, all eight.
         let (edges, auto) = edge_lps(&style)?;
         rec.auto_margins = auto;
@@ -414,11 +427,20 @@ impl<'a> Walk<'a> {
         rec.scrolls_x = scrolls(b.overflow_x);
         rec.scrolls_y = scrolls(b.overflow_y);
         rec.legacy_align = self.legacy_align(id);
+        // `position: relative` is a shift applied after the flow (§9.4.3) — not the pass root's, which is folded into
+        // the origin it is handed.
+        if parent >= 0 && position == Position::Relative {
+            self.relative(&style, &mut rec)?;
+        }
         self.inputs.push(rec);
+        self.rec_index.insert(id, idx);
 
         // What the children are to this block's flow: block-level boxes, or inline content (`walkRecord`'s classify).
         let ws_mode = ws_mode_of(&style)?;
-        let mut blocks = Vec::new();
+        // (…the block-level children and the out-of-flow ones, in document order: an out-of-flow box's static position
+        // is where the flow reached it.)
+        let mut blocks: Vec<(NodeId, bool)> = Vec::new();
+        let mut in_flow = false;
         let mut inline = false;
         for c in self.children(id) {
             let cn = self.node(c);
@@ -442,7 +464,8 @@ impl<'a> Walk<'a> {
                         return Err("display contents");
                     }
                     if matches!(cb.clone_position(), Position::Absolute | Position::Fixed) {
-                        return Err("out of flow");
+                        blocks.push((c, true));
+                        continue;
                     }
                     if cb.clone_float() != Float::None {
                         return Err("float");
@@ -451,12 +474,13 @@ impl<'a> Walk<'a> {
                         inline = true;
                         continue;
                     }
-                    blocks.push(c);
+                    blocks.push((c, false));
+                    in_flow = true;
                 }
                 _ => {}
             }
         }
-        if inline && !blocks.is_empty() {
+        if inline && in_flow {
             return Err("mixed block");
         }
         if inline {
@@ -464,9 +488,136 @@ impl<'a> Walk<'a> {
         }
         self.inputs[idx as usize].display = DISPLAY_BLOCK;
         self.inputs[idx as usize].ws_mode = ws_mode;
-        for c in blocks {
-            self.record(c, idx)?;
+        // The cursor an out-of-flow child reads is a LINE cursor: the block's first-line indent and its line height.
+        if blocks.iter().any(|&(_, oof)| oof) {
+            let (indent, bits) = indent(&style)?;
+            let math = self.math(indent.prog.as_deref());
+            let lh = self.font_info(&style, &style)?.lh;
+            let rec = &mut self.inputs[idx as usize];
+            rec.indent_px = indent.px;
+            rec.indent_frac = indent.frac;
+            rec.indent_math = math;
+            rec.indent_hanging = bits & 256 != 0;
+            rec.indent_each_line = bits & 512 != 0;
+            rec.strut_lh = lh;
         }
+        for (c, oof) in blocks {
+            if oof {
+                self.out_of_flow(c, idx)?;
+            } else {
+                self.record(c, idx)?;
+            }
+        }
+        Ok(())
+    }
+
+    // An OUT-OF-FLOW child of the container at record `parent` (`emitOutOfFlow`): its own record subtree, marked out of
+    // flow and naming its CONTAINING BLOCK — a record of this pass by index, else the viewport's rectangle — with its
+    // insets for native to resolve against that block's padding box. Its record index.
+    fn out_of_flow(&mut self, id: NodeId, parent: i32) -> Result<i32, &'static str> {
+        let style = self.style(id)?;
+        let fixed = style.get_box().clone_position() == Position::Fixed;
+        let cb = self.containing_block(id, fixed)?;
+        let at = self.inputs.len() as i32;
+        self.record_as(id, parent, true)?;
+        let mut insets = [(f64::NAN, 0.0, crate::layout::NO_MATH); 4];
+        let pos = style.get_position();
+        for (k, inset) in [&pos.top, &pos.right, &pos.bottom, &pos.left].into_iter().enumerate() {
+            if let Some(lp) = inset_lp(inset)? {
+                let s = spec(lp)?;
+                insets[k] = (s.px, s.frac, self.math(s.prog.as_deref()));
+            }
+        }
+        let r = &mut self.inputs[at as usize];
+        r.out_of_flow = 1;
+        r.item_auto_height = false;
+        match cb {
+            Some(cb) => r.cb_index = self.rec_index[&cb],
+            None => {
+                r.cb_index = crate::layout::CB_RECT;
+                r.cb_rect = [0.0, 0.0, self.basis.w, self.basis.h];
+            }
+        }
+        [r.inset_top, r.inset_right, r.inset_bottom, r.inset_left] = insets.map(|i| i.0);
+        r.inset_frac = insets.map(|i| i.1);
+        r.inset_math = insets.map(|i| i.2);
+        r.flex_cross_align = 0;
+        r.rel_x = 0.0;
+        r.rel_y = 0.0;
+        Ok(at)
+    }
+
+    // The element an out-of-flow box's insets measure against (`nlContainingBlockElement`): the nearest positioned
+    // ancestor — a fixed one's only where a transform, a filter or containment makes one its containing block — the
+    // root element never; None for the viewport. One outside this pass's records is declined.
+    fn containing_block(&self, id: NodeId, fixed: bool) -> Result<Option<NodeId>, &'static str> {
+        let mut cur = self.node(id).parent;
+        while let Some(p) = cur {
+            let node = self.node(p);
+            if node.kind != NodeKind::Element {
+                break;
+            }
+            let is_root = node.parent.and_then(|d| self.arena.get(d)).is_some_and(|d| d.kind == NodeKind::Document);
+            if is_root {
+                break;
+            }
+            let ps = self.style(p)?;
+            let pd = ps.get_box().clone_display();
+            if !pd.is_none() && !pd.is_contents() && ((!fixed && ps.get_box().clone_position() != Position::Static) || contains_out_of_flow(&ps, node)) {
+                if matches!(pd.outside(), DisplayOutside::Inline) && matches!(pd.inside(), DisplayInside::Flow) {
+                    return Err("inline containing block");
+                }
+                return if self.rec_index.contains_key(&p) { Ok(Some(p)) } else { Err("containingBlockBox") };
+            }
+            cur = node.parent;
+        }
+        Ok(None)
+    }
+
+    // A relative box's offset (`relativeOffset`), or — where a percentage is in an inset — the pairs and programs
+    // native resolves against the containing block (`nlRelativeSpec`): `left`, else `right` negated (both set, the
+    // box's own direction drops one), and `top` beside `bottom`, which native chooses between once it knows whether
+    // the height is definite.
+    fn relative(&mut self, style: &ComputedValues, rec: &mut Input) -> Step {
+        let pos = style.get_position();
+        let [top, right, bottom, left] = [inset_lp(&pos.top)?, inset_lp(&pos.right)?, inset_lp(&pos.bottom)?, inset_lp(&pos.left)?];
+        let rtl = style.get_inherited_box().direction == Direction::Rtl;
+        let keep_right = right.is_some() && (left.is_none() || rtl);
+        if ![top, right, bottom, left].iter().flatten().any(|lp| lp.has_percentage()) {
+            let px = |lp: Option<&LengthPercentage>| lp.map_or(Ok(0.0), length);
+            rec.rel_x = if keep_right { -px(right)? } else { px(left)? };
+            rec.rel_y = if top.is_some() { px(top)? } else { -px(bottom)? };
+            // (…which the record also carries as the base the pairs resolve onto: `rel_pct[5..6]` are rec[39..40])
+            rec.rel_pct[5] = rec.rel_x;
+            rec.rel_pct[6] = rec.rel_y;
+            return Ok(());
+        }
+        let x = if keep_right { right } else { left };
+        let xs = x.map(spec).transpose()?;
+        rec.rel_x_px = xs.as_ref().map_or(0.0, |s| s.px);
+        // (…a fraction that is no percentage at all rides as nothing: 0 across, NaN down, where it is what makes an
+        // indefinite height's `top` fall back to `bottom`.)
+        rec.rel_pct[0] = match (x, &xs) {
+            (Some(lp), Some(s)) if lp.has_percentage() => s.frac,
+            _ => 0.0,
+        };
+        rec.rel_x_neg = keep_right;
+        let vertical = |lp: Option<&LengthPercentage>| -> Result<(f64, f64, Option<Vec<f64>>), &'static str> {
+            Ok(match lp {
+                None => (f64::NAN, f64::NAN, None),
+                Some(lp) => {
+                    let s = spec(lp)?;
+                    (if lp.has_percentage() { s.frac } else { f64::NAN }, s.px, s.prog)
+                }
+            })
+        };
+        let (tf, tp, tprog) = vertical(top)?;
+        let (bf, bp, bprog) = vertical(bottom)?;
+        rec.rel_pct[1] = tf;
+        rec.rel_pct[2] = tp;
+        rec.rel_pct[3] = bf;
+        rec.rel_pct[4] = bp;
+        rec.rel_math = [self.math(xs.as_ref().and_then(|s| s.prog.as_deref())), self.math(tprog.as_deref()), self.math(bprog.as_deref())];
         Ok(())
     }
 
@@ -478,7 +629,7 @@ impl<'a> Walk<'a> {
         let font = self.font_info(style, style)?;
         let starts_at_right = style.get_inherited_box().direction == Direction::Rtl;
         let align = align_code(style.get_inherited_text().text_align, starts_at_right);
-        let mut g = Gather { block: style, bites, runs: Vec::new(), makes_line: false };
+        let mut g = Gather { block: style, idx, bites, runs: Vec::new(), makes_line: false };
         self.gather(id, style, &font, ws_mode, wrap_mode(style), &mut g)?;
         // (…the indent and the alignment written before the gather, as the JS walk writes them: a block whose content
         // makes no line keeps them too.)
@@ -543,6 +694,11 @@ impl<'a> Walk<'a> {
                     self.run_texts.push(None);
                     let at = self.inline(entry, &mut table);
                     edge_run(RUN_WBR, at, 0.0, ws)
+                }
+                // (…with no relative inline around it to move with, and no programs for one)
+                Pending::Oof { ws, rec } => {
+                    self.run_texts.push(None);
+                    Run { tab_px: f64::NAN, tab_min: f64::NAN, ..edge_run(RUN_OOF, rec as usize, 0.0, ws) }
                 }
             };
             self.runs.push(run);
@@ -615,7 +771,9 @@ impl<'a> Walk<'a> {
                         continue;
                     }
                     if matches!(b.clone_position(), Position::Absolute | Position::Fixed) {
-                        return Err("out of flow");
+                        let rec = self.out_of_flow(c, g.idx)?;
+                        g.runs.push(Pending::Oof { ws: ws_mode, rec });
+                        continue;
                     }
                     if b.clone_float() != Float::None {
                         return Err("float");
@@ -814,7 +972,7 @@ impl<'a> Walk<'a> {
     }
 
     // Does the element establish a block formatting context (`computeEstablishesBFC`)? Asked of a block-level
-    // in-flow `flow` / `flow-root` box, which is all this walk takes.
+    // `flow` / `flow-root` box, which is all this walk takes: in flow, floated or out of flow.
     fn establishes_bfc(&self, id: NodeId, style: &ComputedValues) -> bool {
         let node = self.node(id);
         let parent_is_element = node.parent.and_then(|p| self.arena.get(p)).is_some_and(|p| p.kind == NodeKind::Element);
@@ -826,6 +984,9 @@ impl<'a> Walk<'a> {
         }
         let b = style.get_box();
         if matches!(b.clone_display().inside(), DisplayInside::FlowRoot) {
+            return true;
+        }
+        if b.clone_float() != Float::None || matches!(b.clone_position(), Position::Absolute | Position::Fixed) {
             return true;
         }
         if self.clips_content(id, style) {
@@ -988,6 +1149,63 @@ fn font_size(style: &ComputedValues) -> f64 {
         0.0 => 16.0,
         s => s,
     }
+}
+
+// Why a display this walk has not been taught declines, by what it lays out.
+fn display_decline(d: style::values::specified::box_::Display) -> &'static str {
+    match (d.outside(), d.inside()) {
+        (DisplayOutside::Inline, _) => "atomic inline",
+        (_, DisplayInside::Flex) => "flex",
+        (_, DisplayInside::Grid) => "grid",
+        (_, DisplayInside::Table) => "table",
+        (DisplayOutside::TableCaption, _) => "table caption",
+        (DisplayOutside::InternalTable, _) => "table part",
+        (_, DisplayInside::WebkitBox) => "-webkit-box",
+        (_, DisplayInside::Ruby | DisplayInside::RubyBase | DisplayInside::RubyText | DisplayInside::RubyBaseContainer | DisplayInside::RubyTextContainer) => "ruby",
+        _ => "display",
+    }
+}
+
+// An inset's length-percentage, None for `auto`.
+fn inset_lp(v: &style::values::computed::position::Inset) -> Result<Option<&LengthPercentage>, &'static str> {
+    use style::values::generics::position::GenericInset as Inset;
+    match v {
+        Inset::LengthPercentage(lp) => Ok(Some(lp)),
+        Inset::Auto => Ok(None),
+        _ => Err("anchor inset"),
+    }
+}
+// Does the box contain its out-of-flow descendants, fixed ones included (`containsOutOfFlow`): a filter, a transform
+// on a box it applies to, layout or paint containment, `content-visibility` other than visible, or a `will-change` that
+// promises one.
+fn contains_out_of_flow(style: &ComputedValues, node: &crate::dom::NodeData) -> bool {
+    use style::values::computed::Contain;
+    let effects = style.get_effects();
+    if !effects.filter.0.is_empty() || !effects.backdrop_filter.0.is_empty() {
+        return true;
+    }
+    let b = style.get_box();
+    let d = b.clone_display();
+    let transformable = !(matches!(d.outside(), DisplayOutside::Inline) && matches!(d.inside(), DisplayInside::Flow) && !OWN_CONTEXT_TAGS.contains(&&*node.local_name))
+        && !matches!(d.inside(), DisplayInside::TableColumn | DisplayInside::TableColumnGroup);
+    if transformable
+        && (!b.transform.0.is_empty()
+            || !matches!(b.perspective, style::values::generics::box_::GenericPerspective::None)
+            || !matches!(b.translate, style::values::generics::transform::GenericTranslate::None)
+            || !matches!(b.rotate, style::values::generics::transform::GenericRotate::None)
+            || !matches!(b.scale, style::values::generics::transform::GenericScale::None))
+    {
+        return true;
+    }
+    if b.contain.intersects(Contain::LAYOUT | Contain::PAINT) {
+        return true;
+    }
+    use style::computed_values::content_visibility::T as ContentVisibility;
+    if b.content_visibility != ContentVisibility::Visible {
+        return true;
+    }
+    use style::values::specified::box_::WillChangeBits;
+    b.will_change.bits.intersects(WillChangeBits::FIXPOS_CB_NON_SVG | WillChangeBits::TRANSFORM | WillChangeBits::PERSPECTIVE | WillChangeBits::CONTAIN)
 }
 
 // A size's length-percentage, None for `auto` / `none` / a keyword.
