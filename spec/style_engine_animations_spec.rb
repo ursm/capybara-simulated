@@ -269,12 +269,22 @@ RSpec.describe 'style engine animations' do
     expect(s.evaluate_script("getComputedStyle(document.getElementById('a')).opacity")).to eq('0')
   end
 
-  # At an iteration's end exactly, the next has begun: the value is its first keyframe's.
+  # At an iteration's end exactly, the next has begun: the value is its first keyframe's — the animation's, never
+  # the element's own (1) for the frame a boundary falls on.
   it 'reads the next iteration at an iteration boundary' do
-    s = page('<div id="a"></div>')
-    s.execute_script("document.getElementById('a').style.animation = 'fade 200ms linear infinite'")
-    reads = 5.times.map { s.evaluate_script("getComputedStyle(document.getElementById('a')).opacity") }
-    expect(reads).to include('1')
+    s = page('<div id="a"></div>', '@keyframes half { from { opacity: 0.5 } to { opacity: 0.9 } }')
+    s.execute_script("document.getElementById('a').style.animation = 'half 200ms linear infinite'")
+    reads = 6.times.map { s.evaluate_script("getComputedStyle(document.getElementById('a')).opacity") }
+    expect(reads).to include('0.5')
+    expect(reads).not_to include('1')
+  end
+
+  # …and so is the end of a delay.
+  it 'reads the first keyframe where a delay ends' do
+    s = page('<div id="a"></div>', '@keyframes half { from { opacity: 0.5 } to { opacity: 0.9 } }')
+    s.execute_script("document.getElementById('a').style.animation = 'half 1s linear 200ms'")
+    reads = 4.times.map { s.evaluate_script("getComputedStyle(document.getElementById('a')).opacity") }
+    expect(reads.drop(1)).not_to include("1")
   end
 
   # A reversed transition that started part way (a negative delay) is held against a full restyle that knows only

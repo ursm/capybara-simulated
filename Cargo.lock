@@ -377,7 +377,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "39cab71617ae0d63f51a36d69f866391735b51691dbda63cf6f96d042b63efeb"
 dependencies = [
  "libc",
- "windows-sys 0.59.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -1179,7 +1179,7 @@ checksum = "94143f37725109f92c262ed2cf5e59bce7498c01bcc1502d7b9afe439a4e9f49"
 [[package]]
 name = "selectors"
 version = "0.40.0"
-source = "git+https://github.com/ursm/stylo?branch=csim#ad4f862a907cfd1dae0d2f468c3e704f22a1d810"
+source = "git+https://github.com/ursm/stylo?branch=csim#61520a28d0183bddc770bacc0be36d746062b0c0"
 dependencies = [
  "bitflags",
  "cssparser",
@@ -1250,7 +1250,7 @@ dependencies = [
 [[package]]
 name = "servo_arc"
 version = "0.4.3"
-source = "git+https://github.com/ursm/stylo?branch=csim#ad4f862a907cfd1dae0d2f468c3e704f22a1d810"
+source = "git+https://github.com/ursm/stylo?branch=csim#61520a28d0183bddc770bacc0be36d746062b0c0"
 dependencies = [
  "serde",
  "stable_deref_trait",
@@ -1369,7 +1369,7 @@ dependencies = [
 [[package]]
 name = "stylo"
 version = "0.21.0"
-source = "git+https://github.com/ursm/stylo?branch=csim#ad4f862a907cfd1dae0d2f468c3e704f22a1d810"
+source = "git+https://github.com/ursm/stylo?branch=csim#61520a28d0183bddc770bacc0be36d746062b0c0"
 dependencies = [
  "app_units",
  "arrayvec",
@@ -1425,7 +1425,7 @@ dependencies = [
 [[package]]
 name = "stylo_atoms"
 version = "0.21.0"
-source = "git+https://github.com/ursm/stylo?branch=csim#ad4f862a907cfd1dae0d2f468c3e704f22a1d810"
+source = "git+https://github.com/ursm/stylo?branch=csim#61520a28d0183bddc770bacc0be36d746062b0c0"
 dependencies = [
  "string_cache",
  "string_cache_codegen",
@@ -1434,7 +1434,7 @@ dependencies = [
 [[package]]
 name = "stylo_derive"
 version = "0.21.0"
-source = "git+https://github.com/ursm/stylo?branch=csim#ad4f862a907cfd1dae0d2f468c3e704f22a1d810"
+source = "git+https://github.com/ursm/stylo?branch=csim#61520a28d0183bddc770bacc0be36d746062b0c0"
 dependencies = [
  "darling",
  "proc-macro2",
@@ -1446,7 +1446,7 @@ dependencies = [
 [[package]]
 name = "stylo_dom"
 version = "0.21.0"
-source = "git+https://github.com/ursm/stylo?branch=csim#ad4f862a907cfd1dae0d2f468c3e704f22a1d810"
+source = "git+https://github.com/ursm/stylo?branch=csim#61520a28d0183bddc770bacc0be36d746062b0c0"
 dependencies = [
  "bitflags",
  "stylo_malloc_size_of",
@@ -1455,7 +1455,7 @@ dependencies = [
 [[package]]
 name = "stylo_malloc_size_of"
 version = "0.21.0"
-source = "git+https://github.com/ursm/stylo?branch=csim#ad4f862a907cfd1dae0d2f468c3e704f22a1d810"
+source = "git+https://github.com/ursm/stylo?branch=csim#61520a28d0183bddc770bacc0be36d746062b0c0"
 dependencies = [
  "app_units",
  "cssparser",
@@ -1472,7 +1472,7 @@ dependencies = [
 [[package]]
 name = "stylo_static_prefs"
 version = "0.21.0"
-source = "git+https://github.com/ursm/stylo?branch=csim#ad4f862a907cfd1dae0d2f468c3e704f22a1d810"
+source = "git+https://github.com/ursm/stylo?branch=csim#61520a28d0183bddc770bacc0be36d746062b0c0"
 dependencies = [
  "toml",
 ]
@@ -1480,7 +1480,7 @@ dependencies = [
 [[package]]
 name = "stylo_traits"
 version = "0.21.0"
-source = "git+https://github.com/ursm/stylo?branch=csim#ad4f862a907cfd1dae0d2f468c3e704f22a1d810"
+source = "git+https://github.com/ursm/stylo?branch=csim#61520a28d0183bddc770bacc0be36d746062b0c0"
 dependencies = [
  "app_units",
  "bitflags",
@@ -1597,7 +1597,7 @@ dependencies = [
 [[package]]
 name = "to_shmem"
 version = "0.5.0"
-source = "git+https://github.com/ursm/stylo?branch=csim#ad4f862a907cfd1dae0d2f468c3e704f22a1d810"
+source = "git+https://github.com/ursm/stylo?branch=csim#61520a28d0183bddc770bacc0be36d746062b0c0"
 dependencies = [
  "cssparser",
  "servo_arc",
@@ -1610,7 +1610,7 @@ dependencies = [
 [[package]]
 name = "to_shmem_derive"
 version = "0.1.0"
-source = "git+https://github.com/ursm/stylo?branch=csim#ad4f862a907cfd1dae0d2f468c3e704f22a1d810"
+source = "git+https://github.com/ursm/stylo?branch=csim#61520a28d0183bddc770bacc0be36d746062b0c0"
 dependencies = [
  "darling",
  "proc-macro2",
@@ -1771,7 +1771,7 @@ version = "0.1.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c2a7b1c03c876122aa43f3020e6c3c3ee5c05081c9a00739faf7503aeba10d22"
 dependencies = [
- "windows-sys 0.59.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
