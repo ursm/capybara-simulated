@@ -7639,13 +7639,14 @@ fn bounded(v: f64, prog: u32, basis: f64) -> f64 {
 // fold the top two, `MATH_NEG` negates the top, `MATH_SCALE` multiplies it by `a`. A min / max takes a NaN through as `Math.min` / `Math.max` do, which `f64::min` does not; the two
 // engines have to agree on every figure, an unresolvable one included. A table the walk did not write — an offset
 // past its end, a fold with nothing to fold, a stack deeper than the walk ever builds — is NaN, not a panic.
-const MATH_LINE: f64 = 0.0;
-const MATH_MIN: f64 = 1.0;
-const MATH_MAX: f64 = 2.0;
-const MATH_NEG: f64 = 4.0;
-const MATH_SCALE: f64 = 5.0;
-const MATH_DEPTH: usize = 16;
-fn math_at(table: &[f64], at: usize, basis: f64) -> f64 {
+pub(crate) const MATH_LINE: f64 = 0.0;
+pub(crate) const MATH_MIN: f64 = 1.0;
+pub(crate) const MATH_MAX: f64 = 2.0;
+pub(crate) const MATH_SUM: f64 = 3.0;
+pub(crate) const MATH_NEG: f64 = 4.0;
+pub(crate) const MATH_SCALE: f64 = 5.0;
+pub(crate) const MATH_DEPTH: usize = 16;
+pub(crate) fn math_at(table: &[f64], at: usize, basis: f64) -> f64 {
     let Some(&len) = table.get(at) else { return f64::NAN };
     let Some(prog) = table.get(at + 1..at + 1 + 3 * len as usize) else { return f64::NAN };
     let mut stack = [0.0; MATH_DEPTH];

@@ -30,7 +30,8 @@ use style::values::specified::box_::Overflow;
 use style::values::specified::box_::{DisplayInside, DisplayOutside};
 
 use crate::dom::{NodeId, NodeKind, RealmArena};
-use crate::layout::{InlineBox, Input, Run, RunText, DISPLAY_BLOCK, DISPLAY_TEXT_BLOCK, RUN_BR, RUN_CLOSE, RUN_OOF, RUN_OPEN, RUN_TEXT, RUN_WBR};
+use crate::layout::{MATH_DEPTH, MATH_LINE, MATH_MAX, MATH_MIN, MATH_NEG, MATH_SCALE, MATH_SUM};
+use crate::layout::{InlineBox, Input, Run, RunText, DISPLAY_BLOCK, DISPLAY_TEXT_BLOCK, RUN_BR, RUN_CLOSE, RUN_FLOAT, RUN_OOF, RUN_OPEN, RUN_TEXT, RUN_WBR};
 
 // A face the walk measures a run in, as the JS side resolved it for the family and the weight / style bucket: the
 // layout's font handle and the metrics the model rules read off it (per em — ascent, descent, line gap, and the
@@ -54,11 +55,20 @@ pub(crate) type FaceKey = (String, &'static str);
 pub(crate) struct Faces {
     known: HashMap<FaceKey, Option<Face>>,
     pub(crate) missing: Vec<FaceKey>,
+    // The generation the faces were resolved at (`natFontGen`: the rules and the FontFaceSet a family resolves by).
+    generation: String,
 }
 
 impl Faces {
     pub(crate) fn learn(&mut self, key: FaceKey, face: Option<Face>) {
         self.known.insert(key, face);
+    }
+    // Forget every face once what they resolve by has moved.
+    pub(crate) fn at_generation(&mut self, generation: &str) {
+        if self.generation != generation {
+            self.known.clear();
+            self.generation = generation.to_owned();
+        }
     }
 }
 
@@ -100,8 +110,13 @@ pub(crate) fn build(arena: &RealmArena, root: NodeId, basis: Basis, faces: &mut 
         inlines: Vec::new(),
         entries: Vec::new(),
         rec_index: HashMap::new(),
+        saw_float: (false, false),
     };
-    match walk.root(root) {
+    let done = walk.root(root);
+    if !walk.faces.missing.is_empty() {
+        return Outcome::NeedsFaces;
+    }
+    match done {
         Ok(()) => Outcome::Built(Built {
             inputs: walk.inputs,
             runs: walk.runs,
@@ -109,7 +124,6 @@ pub(crate) fn build(arena: &RealmArena, root: NodeId, basis: Basis, faces: &mut 
             inlines: walk.inlines,
             maths: walk.maths,
         }),
-        Err(_) if !walk.faces.missing.is_empty() => Outcome::NeedsFaces,
         Err(why) => Outcome::Declined(why),
     }
 }
@@ -132,6 +146,35 @@ struct Walk<'a> {
     entries: Vec<InlineBox>,
     // Each element's record, for an out-of-flow box to name its containing block by.
     rec_index: HashMap<NodeId, i32>,
+    // Whether a float has been placed on the left / right in the formatting context the walk is in.
+    saw_float: (bool, bool),
+}
+
+// What `record_as` settles about a box before its record is built (`walkFresh`): its `clear` (0 none, 1 left, 2
+// right, 3 both), whether that gives it clearance, which side it floats to (0 none, 1 left, 2 right), and whether it
+// establishes a formatting context.
+struct Fresh {
+    clear: u8,
+    separates: bool,
+    floated: u8,
+    bfc: bool,
+}
+
+// What a block's element child is to its flow.
+#[derive(Clone, Copy, PartialEq)]
+enum Kid {
+    Block,
+    Float,
+    OutOfFlow,
+}
+
+// Where the streams stood, for an attempt to be taken back to.
+#[derive(Clone, Copy)]
+struct Mark {
+    inputs: usize,
+    runs: usize,
+    entries: usize,
+    inlines: usize,
 }
 
 // A text block's inline content as its gather builds it (`nlGatherRuns`'s `ctx`): the block's style (its tab stops,
@@ -144,6 +187,8 @@ struct Gather<'s> {
     bites: bool,
     runs: Vec<Pending>,
     makes_line: bool,
+    // (…the floats among them, which an anonymous run that makes no line hands back to its block)
+    floats: Vec<NodeId>,
 }
 
 // A run before its block commits it: its inline box is named by the gather's entry, tabled at the commit.
@@ -155,6 +200,8 @@ enum Pending {
     Wbr { ws: u8, entry: usize },
     // An out-of-flow box's static position: where the flow reached it, on this line.
     Oof { ws: u8, rec: i32 },
+    // A float, placed where the lines reach it.
+    Float { ws: u8, rec: i32 },
 }
 
 // An inline box's edges as its entry and its runs carry them (`edgeInsets` + `nlEdgeParts` / `nlClampedEdgeParts`,
@@ -188,8 +235,7 @@ struct Edges {
 
 impl Edges {
     fn of(style: &ComputedValues) -> Result<Edges, &'static str> {
-        let (edges, auto) = edge_lps(style)?;
-        let _ = auto;
+        let (edges, _) = edge_lps(style)?;
         let [bt, br, bb, bl] = used_borders(style);
         let parts = if !edges.iter().flatten().any(|lp| lp.has_percentage()) {
             EdgeParts::at(&edges, 0.0)?
@@ -258,12 +304,23 @@ const WS_PRE_LINE: u8 = 4;
 const WS_BREAK_SPACES: u8 = 5;
 
 // The elements HTML gives a formatting context of their own whatever their `display` (layout.js `OWN_CONTEXT_TAGS`:
-// the widgets and the replaced elements) — and, for now, the ones this walk declines outright, since each is sized from
-// data or UA rules it has not been taught (`intrinsicSize`).
+// the widgets and the replaced elements).
 const OWN_CONTEXT_TAGS: &[&str] = &[
-    "input", "select", "textarea", "button", "meter", "progress", "img", "canvas", "video", "audio", "object", "embed",
-    "iframe", "frame", "svg",
+    "button", "input", "select", "textarea", "fieldset", "meter", "progress", "marquee", "img", "canvas", "video", "audio",
+    "object", "embed", "iframe", "frame", "svg",
 ];
+// …and the ones this walk declines for now, each sized or laid out from what it has not been taught: the replaced
+// elements and the controls (their intrinsic size is data or UA rules, `intrinsicSize`), a fieldset (its legend and
+// its anonymous content box), a `<details>` (the content its closed state hides).
+fn declined_tag(tag: &str) -> Option<&'static str> {
+    match tag {
+        "input" | "select" | "textarea" | "button" | "meter" | "progress" | "img" | "canvas" | "video" | "audio" | "object"
+        | "embed" | "iframe" | "frame" | "svg" => Some("replaced or control"),
+        "fieldset" => Some("fieldset"),
+        "details" => Some("details"),
+        _ => None,
+    }
+}
 
 impl<'a> Walk<'a> {
     fn root(&mut self, root: NodeId) -> Step {
@@ -310,14 +367,44 @@ impl<'a> Walk<'a> {
         self.record_as(id, parent, false)
     }
     fn record_as(&mut self, id: NodeId, parent: i32, out_of_flow: bool) -> Step {
+        // Whether a float is already placed in the formatting context this box is in, per side, is the walk's own
+        // document-order state (`walkFresh`): a box whose `clear` names such a side has CLEARANCE, and does not
+        // collapse its top margin with its parent's (§8.3.1). A float marks its side; a box that establishes a
+        // formatting context shows its content none of the floats around it.
+        let style = self.style(id)?;
+        let clear = self.clear_code(id, &style)?;
+        let separates = match clear {
+            1 => self.saw_float.0,
+            2 => self.saw_float.1,
+            3 => self.saw_float.0 || self.saw_float.1,
+            _ => false,
+        };
+        let floated = self.float_code(id, &style)?;
+        match floated {
+            1 => self.saw_float.0 = true,
+            2 => self.saw_float.1 = true,
+            _ => {}
+        }
+        let bfc = self.establishes_bfc(id, &style);
+        let outer = self.saw_float;
+        if bfc {
+            self.saw_float = (false, false);
+        }
+        let done = self.record_body(id, parent, out_of_flow, Fresh { clear, separates, floated, bfc });
+        if bfc {
+            self.saw_float = outer;
+        }
+        done
+    }
+    fn record_body(&mut self, id: NodeId, parent: i32, out_of_flow: bool, fresh: Fresh) -> Step {
         let node = self.node(id);
         let style = self.style(id)?;
         let tag: &str = &node.local_name;
         if !node.is_html() {
             return Err("foreign element");
         }
-        if OWN_CONTEXT_TAGS.contains(&tag) {
-            return Err("replaced or control");
+        if let Some(why) = declined_tag(tag) {
+            return Err(why);
         }
         if node.shadow_root.is_some() || tag == "slot" {
             return Err("shadow tree");
@@ -333,9 +420,6 @@ impl<'a> Walk<'a> {
         let position = b.clone_position();
         if matches!(position, Position::Absolute | Position::Fixed) != out_of_flow {
             return Err("positioned");
-        }
-        if b.clone_float() != Float::None {
-            return Err("float");
         }
         if !style.writing_mode.is_horizontal() {
             return Err("vertical writing mode");
@@ -371,6 +455,9 @@ impl<'a> Walk<'a> {
             if !lp.has_percentage() {
                 slots[k] = length(lp)?;
             } else if !native_basis {
+                if basis.is_nan() {
+                    return Err("root basis");
+                }
                 slots[k] = at(lp, *basis)?.max(0.0);
             } else {
                 let spec = spec(lp)?;
@@ -393,6 +480,9 @@ impl<'a> Walk<'a> {
         let parts = if !edges.iter().flatten().any(|lp| lp.has_percentage()) {
             EdgeParts::at(&edges, 0.0)?
         } else if !native_basis {
+            if self.basis.w.is_nan() {
+                return Err("root basis");
+            }
             EdgeParts::at(&edges, self.basis.w)?
         } else {
             EdgeParts::linear(&edges)?.map_or_else(|| EdgeParts::clamped(&edges), Ok)?
@@ -414,14 +504,10 @@ impl<'a> Walk<'a> {
         rec.height_adjoins = auto_or_zero(&pos.height);
         rec.minh_adjoins = auto_or_zero(&pos.min_height);
         rec.bottom_adjoins = rec.height.is_nan();
-        rec.clear = match b.clone_clear() {
-            Clear::None => 0,
-            Clear::Left => 1,
-            Clear::Right => 2,
-            Clear::Both => 3,
-            _ => return Err("logical clear"),
-        };
-        rec.starts_bfc = self.establishes_bfc(id, &style);
+        rec.clear = fresh.clear;
+        rec.takes_clearance = fresh.separates;
+        rec.float_kind = fresh.floated;
+        rec.starts_bfc = fresh.bfc;
         let rtl = style.get_inherited_box().direction == Direction::Rtl;
         rec.rtl = rtl as u8;
         rec.scrolls_x = scrolls(b.overflow_x);
@@ -439,7 +525,7 @@ impl<'a> Walk<'a> {
         let ws_mode = ws_mode_of(&style)?;
         // (…the block-level children and the out-of-flow ones, in document order: an out-of-flow box's static position
         // is where the flow reached it.)
-        let mut blocks: Vec<(NodeId, bool)> = Vec::new();
+        let mut blocks: Vec<(NodeId, Kid)> = Vec::new();
         let mut in_flow = false;
         let mut inline = false;
         for c in self.children(id) {
@@ -464,24 +550,25 @@ impl<'a> Walk<'a> {
                         return Err("display contents");
                     }
                     if matches!(cb.clone_position(), Position::Absolute | Position::Fixed) {
-                        blocks.push((c, true));
+                        blocks.push((c, Kid::OutOfFlow));
                         continue;
                     }
                     if cb.clone_float() != Float::None {
-                        return Err("float");
+                        blocks.push((c, Kid::Float));
+                        continue;
                     }
                     if matches!(cd.outside(), DisplayOutside::Inline) {
                         inline = true;
                         continue;
                     }
-                    blocks.push((c, false));
+                    blocks.push((c, Kid::Block));
                     in_flow = true;
                 }
                 _ => {}
             }
         }
         if inline && in_flow {
-            return Err("mixed block");
+            return self.mixed_block(id, idx, &style, ws_mode, &blocks);
         }
         if inline {
             return self.text_block(id, idx, &style, ws_mode);
@@ -489,7 +576,7 @@ impl<'a> Walk<'a> {
         self.inputs[idx as usize].display = DISPLAY_BLOCK;
         self.inputs[idx as usize].ws_mode = ws_mode;
         // The cursor an out-of-flow child reads is a LINE cursor: the block's first-line indent and its line height.
-        if blocks.iter().any(|&(_, oof)| oof) {
+        if blocks.iter().any(|&(_, kid)| kid == Kid::OutOfFlow) {
             let (indent, bits) = indent(&style)?;
             let math = self.math(indent.prog.as_deref());
             let lh = self.font_info(&style, &style)?.lh;
@@ -501,14 +588,115 @@ impl<'a> Walk<'a> {
             rec.indent_each_line = bits & 512 != 0;
             rec.strut_lh = lh;
         }
-        for (c, oof) in blocks {
-            if oof {
+        for (c, kid) in blocks {
+            if kid == Kid::OutOfFlow {
                 self.out_of_flow(c, idx)?;
             } else {
                 self.record(c, idx)?;
             }
         }
         Ok(())
+    }
+
+    // A block holding BOTH block-level boxes and inline content (§9.2.1.1): each maximal run of inline content is an
+    // ANONYMOUS block of lines — a record of no element (nid −1) — among the block children in document order. Floats
+    // and out-of-flow boxes join the run they are written in, as markers on its lines. A run that makes no line is
+    // no box: its records are taken back, and its floats go where the next line would have started — among the
+    // block's own children.
+    fn mixed_block(&mut self, id: NodeId, idx: i32, style: &ComputedValues, ws_mode: u8, blocks: &[(NodeId, Kid)]) -> Step {
+        let font = self.font_info(style, style)?;
+        let (indent, bits) = indent(style)?;
+        let bites = indent.px != 0.0 || indent.frac != 0.0 || indent.prog.is_some();
+        let starts_at_right = style.get_inherited_box().direction == Direction::Rtl;
+        let align = align_code(style.get_inherited_text().text_align, starts_at_right);
+        let wrap = wrap_mode(style);
+        self.inputs[idx as usize].display = DISPLAY_BLOCK;
+        self.inputs[idx as usize].ws_mode = ws_mode;
+        let block_kids: Vec<NodeId> = blocks.iter().filter(|&&(_, kid)| kid == Kid::Block).map(|&(c, _)| c).collect();
+        let mut unspent = true;
+        let mut group: Vec<NodeId> = Vec::new();
+        let children: Vec<NodeId> = self.children(id).collect();
+        for c in children.into_iter().chain(std::iter::once(id)) {
+            let end = c == id;
+            let is_block = !end && block_kids.contains(&c);
+            if !end && !is_block {
+                let n = self.node(c);
+                if n.kind == NodeKind::Element && self.style(c)?.get_box().clone_display().is_none() {
+                    continue;
+                }
+                if matches!(n.kind, NodeKind::Text | NodeKind::Element) {
+                    group.push(c);
+                }
+                continue;
+            }
+            // (…the white space between block children, the commonest run there is, is none without an attempt)
+            let kids = std::mem::take(&mut group);
+            let only_space = kids.iter().all(|&k| {
+                let n = self.node(k);
+                n.kind == NodeKind::Text && !has_content(&n.data) && !white_space_only_is_content(&n.data, ws_mode)
+            });
+            if !kids.is_empty() && !only_space {
+                let mark = self.mark();
+                let anon = self.inputs.len() as i32;
+                let mut rec = fresh_record();
+                rec.nid = -1.0;
+                rec.parent = idx;
+                rec.display = DISPLAY_TEXT_BLOCK;
+                self.inputs.push(rec);
+                let mut g = Gather { block: style, idx: anon, bites, runs: Vec::new(), makes_line: false, floats: Vec::new() };
+                self.gather(&kids, style, &font, ws_mode, wrap, &mut g)?;
+                let holds_oof = g.runs.iter().any(|r| matches!(r, Pending::Oof { .. }));
+                let occupies = g.runs.iter().any(|r| matches!(r, Pending::Open { .. } | Pending::Wbr { .. }));
+                if !g.makes_line && !occupies && !holds_oof {
+                    let floats: Vec<NodeId> = g.floats.clone();
+                    self.rollback(mark);
+                    for f in floats {
+                        self.record(f, idx)?;
+                    }
+                } else {
+                    let math = self.math(indent.prog.as_deref());
+                    let parent = self.inputs[idx as usize];
+                    let r = &mut self.inputs[anon as usize];
+                    [r.width, r.height, r.min_w, r.max_w, r.min_h, r.max_h] = [f64::NAN; 6];
+                    r.height_adjoins = true;
+                    r.minh_adjoins = true;
+                    r.strut_lh = font.lh;
+                    r.strut_asc = font.asc;
+                    r.ws_mode = ws_mode;
+                    r.indent_px = indent.px;
+                    r.indent_frac = indent.frac;
+                    r.indent_math = math;
+                    r.indent_hanging = bits & 256 != 0;
+                    r.indent_each_line = bits & 512 != 0;
+                    // (…a block with no indent writes none of it, the `spent` bit included: `nlWriteIndent`)
+                    r.indent_spent = !unspent && (bites || bits != 0);
+                    unspent = false;
+                    r.rtl = parent.rtl;
+                    r.block_axis_is_x = parent.block_axis_is_x;
+                    r.text_align = align;
+                    r.anon_group = true;
+                    self.commit(anon, g);
+                }
+            }
+            if is_block {
+                unspent = false;
+                self.record(c, idx)?;
+            }
+        }
+        Ok(())
+    }
+
+    // Where the streams stand, to take an attempt back to.
+    fn mark(&self) -> Mark {
+        Mark { inputs: self.inputs.len(), runs: self.runs.len(), entries: self.entries.len(), inlines: self.inlines.len() }
+    }
+    fn rollback(&mut self, m: Mark) {
+        self.inputs.truncate(m.inputs);
+        self.runs.truncate(m.runs);
+        self.run_texts.truncate(m.runs);
+        self.entries.truncate(m.entries);
+        self.inlines.truncate(m.inlines);
+        self.rec_index.retain(|_, &mut at| (at as usize) < m.inputs);
     }
 
     // An OUT-OF-FLOW child of the container at record `parent` (`emitOutOfFlow`): its own record subtree, marked out of
@@ -629,8 +817,9 @@ impl<'a> Walk<'a> {
         let font = self.font_info(style, style)?;
         let starts_at_right = style.get_inherited_box().direction == Direction::Rtl;
         let align = align_code(style.get_inherited_text().text_align, starts_at_right);
-        let mut g = Gather { block: style, idx, bites, runs: Vec::new(), makes_line: false };
-        self.gather(id, style, &font, ws_mode, wrap_mode(style), &mut g)?;
+        let mut g = Gather { block: style, idx, bites, runs: Vec::new(), makes_line: false, floats: Vec::new() };
+        let kids: Vec<NodeId> = self.children(id).collect();
+        self.gather(&kids, style, &font, ws_mode, wrap_mode(style), &mut g)?;
         // (…the indent and the alignment written before the gather, as the JS walk writes them: a block whose content
         // makes no line keeps them too.)
         let rec = &mut self.inputs[idx as usize];
@@ -648,11 +837,18 @@ impl<'a> Walk<'a> {
             return Ok(());
         }
         rec.display = DISPLAY_TEXT_BLOCK;
-        rec.run_start = self.runs.len() as i32;
-        rec.run_count = g.runs.len() as i32;
         rec.strut_lh = font.lh;
         rec.strut_asc = font.asc;
-        // The inline boxes, tabled in the order their runs open them (`commitInlines`).
+        self.commit(idx, g);
+        Ok(())
+    }
+
+    // A block of lines' runs onto the streams, its inline boxes tabled in the order its runs open them
+    // (`commitInlines`), and onto its record.
+    fn commit(&mut self, idx: i32, g: Gather) {
+        let rec = &mut self.inputs[idx as usize];
+        rec.run_start = self.runs.len() as i32;
+        rec.run_count = g.runs.len() as i32;
         let mut table: Vec<Option<usize>> = Vec::new();
         for r in g.runs {
             let run = match r {
@@ -700,10 +896,13 @@ impl<'a> Walk<'a> {
                     self.run_texts.push(None);
                     Run { tab_px: f64::NAN, tab_min: f64::NAN, ..edge_run(RUN_OOF, rec as usize, 0.0, ws) }
                 }
+                Pending::Float { ws, rec } => {
+                    self.run_texts.push(None);
+                    edge_run(RUN_FLOAT, rec as usize, 0.0, ws)
+                }
             };
             self.runs.push(run);
         }
-        Ok(())
     }
 
     // An inline box's entry in the pass's inline table, the first time a run names it.
@@ -719,27 +918,36 @@ impl<'a> Walk<'a> {
 
     // The runs of `parent`'s children in the inline formatting context `g` builds (`nlGatherRuns`): `owner` the
     // element whose font, `white-space` and wrap mode its text takes — the block, or the inline box it is in.
-    fn gather(&mut self, parent: NodeId, owner: &ComputedValues, font: &FontInfo, ws_mode: u8, wrap: u8, g: &mut Gather) -> Step {
+    fn gather(&mut self, kids: &[NodeId], owner: &ComputedValues, font: &FontInfo, ws_mode: u8, wrap: u8, g: &mut Gather) -> Step {
         let preserve = preserving(ws_mode);
         let no_shy = owner.get_inherited_text().hyphens == Hyphens::None;
         let owner_wraps = ws_mode != WS_NOWRAP && ws_mode != WS_PRE;
-        for c in self.children(parent).collect::<Vec<_>>() {
+        for &c in kids {
             let cn = self.node(c);
             match cn.kind {
                 NodeKind::Text => {
-                    let raw = &cn.data;
-                    let stripped: Vec<u16> =
-                        if preserve { raw.iter().copied().filter(|&u| u != 0x0D && u != 0x0C).collect() } else { raw.clone() };
-                    let td: Vec<u16> =
-                        if no_shy && stripped.contains(&0xAD) { stripped.iter().copied().filter(|&u| u != 0xAD).collect() } else { stripped.clone() };
+                    // (…a preserved CR / FF is text that is not there, and a soft hyphen under `hyphens: none` no
+                    // opportunity at all)
+                    use std::borrow::Cow;
+                    let raw: &[u16] = &cn.data;
+                    let stripped: Cow<[u16]> = if preserve && raw.iter().any(|&u| u == 0x0D || u == 0x0C) {
+                        Cow::Owned(raw.iter().copied().filter(|&u| u != 0x0D && u != 0x0C).collect())
+                    } else {
+                        Cow::Borrowed(raw)
+                    };
+                    let td: Cow<[u16]> = if no_shy && stripped.contains(&0xAD) {
+                        Cow::Owned(stripped.iter().copied().filter(|&u| u != 0xAD).collect())
+                    } else {
+                        stripped.clone()
+                    };
                     if td.is_empty() && !raw.is_empty() && g.bites {
                         return Err("text-not-measurable");
                     }
                     if td.is_empty() && !stripped.is_empty() {
                         return Err("text-not-measurable");
                     }
-                    if td.contains(&0x200D) {
-                        return Err("zero-width joiner");
+                    if !measurable(&td, wrap) {
+                        return Err("text-not-measurable");
                     }
                     if td.is_empty() {
                         continue;
@@ -761,7 +969,7 @@ impl<'a> Walk<'a> {
                             continue;
                         }
                     }
-                    g.runs.push(Pending::Text { font: *font, text: td, wrap, ws: ws_mode });
+                    g.runs.push(Pending::Text { font: *font, text: td.into_owned(), wrap, ws: ws_mode });
                 }
                 NodeKind::Element => {
                     let cs = self.style(c)?;
@@ -776,9 +984,13 @@ impl<'a> Walk<'a> {
                         continue;
                     }
                     if b.clone_float() != Float::None {
-                        return Err("float");
+                        let rec = self.inputs.len() as i32;
+                        self.record(c, g.idx)?;
+                        g.runs.push(Pending::Float { ws: ws_mode, rec });
+                        g.floats.push(c);
+                        continue;
                     }
-                    self.inline_child(c, &cs, font, ws_mode, g)?;
+                    self.inline_child(c, &cs, ws_mode, g)?;
                 }
                 _ => {}
             }
@@ -787,14 +999,14 @@ impl<'a> Walk<'a> {
     }
 
     // One element in the inline content: a `<br>`, a `<wbr>`, or an inline box around content of its own.
-    fn inline_child(&mut self, c: NodeId, cs: &ComputedValues, font: &FontInfo, ws_mode: u8, g: &mut Gather) -> Step {
+    fn inline_child(&mut self, c: NodeId, cs: &ComputedValues, ws_mode: u8, g: &mut Gather) -> Step {
         let node = self.node(c);
         let tag: &str = &node.local_name;
         if !node.is_html() {
             return Err("foreign element");
         }
-        if OWN_CONTEXT_TAGS.contains(&tag) {
-            return Err("replaced or control");
+        if let Some(why) = declined_tag(tag) {
+            return Err(why);
         }
         if node.shadow_root.is_some() || tag == "slot" {
             return Err("shadow tree");
@@ -809,7 +1021,8 @@ impl<'a> Walk<'a> {
         if !matches!(d.outside(), DisplayOutside::Inline) {
             return Err("block-level-box-in-inline-content");
         }
-        if !matches!(d.inside(), DisplayInside::Flow) {
+        // (…an inline-LEVEL `<br>` breaks the line whatever its inside display: `isLineBreak`)
+        if !matches!(d.inside(), DisplayInside::Flow) && tag != "br" {
             return Err("atomic inline");
         }
         if cs.get_box().clone_position() == Position::Relative {
@@ -821,16 +1034,10 @@ impl<'a> Walk<'a> {
         let cf = self.font_info(cs, g.block)?;
         // A `<br>` breaks the line, clearing the floats on the side it names; a `<wbr>` is a place it may. Each is an
         // inline box of its own with NO edges, whatever it declares (`WBR_EDGES`).
-        if tag == "br" || tag == "wbr" {
-            let entry = self.entry(cs, &cf, &Edges::default())?;
+        if tag == "br" || (tag == "wbr" && matches!(d.inside(), DisplayInside::Flow)) {
+            let entry = self.entry(cs, &Edges::default())?;
             if tag == "br" {
-                let clear = match cs.get_box().clone_clear() {
-                    Clear::None => 0,
-                    Clear::Left => 1,
-                    Clear::Right => 2,
-                    Clear::Both => 3,
-                    _ => return Err("logical clear"),
-                };
+                let clear = self.clear_code(c, cs)?;
                 g.runs.push(Pending::Br { ws: ws_mode, clear, entry });
                 g.makes_line = true;
             } else {
@@ -863,11 +1070,12 @@ impl<'a> Walk<'a> {
             || close_lands
             || plain_open != 0.0
             || plain_close != 0.0;
-        let entry = self.entry(cs, &cf, &edges)?;
+        let entry = self.entry(cs, &edges)?;
         g.runs.push(Pending::Open { plain: if edged { plain_open } else { 0.0 }, ws: c_ws, entry });
         let outer = g.makes_line;
         g.makes_line = false;
-        self.gather(c, cs, &cf, c_ws, c_wrap, g)?;
+        let kids: Vec<NodeId> = self.children(c).collect();
+        self.gather(&kids, cs, &cf, c_ws, c_wrap, g)?;
         g.makes_line = outer || g.makes_line || edged;
         let (own_h, own_asc) = if edged && close_lands { (content_height(cs, &self.face(cs)?), content_ascent(cs, &self.face(cs)?)) } else { (0.0, 0.0) };
         g.runs.push(Pending::Close {
@@ -878,31 +1086,41 @@ impl<'a> Walk<'a> {
             own_h,
             own_asc,
         });
-        let _ = font;
         Ok(())
     }
 
     // An inline box's entry (`nlInlineEntry`): its edges — lengths, fractions and programs — its own font box and
     // ascent, and no relative offset.
-    fn entry(&mut self, cs: &ComputedValues, _cf: &FontInfo, e: &Edges) -> Result<usize, &'static str> {
+    fn entry(&mut self, cs: &ComputedValues, e: &Edges) -> Result<usize, &'static str> {
         let face = self.face(cs)?;
-        let mut r = [0.0f64; crate::dom::INLINE_STRIDE];
-        r[..13].copy_from_slice(&[
-            e.ml, e.right, e.mr, e.top, e.bottom,
-            content_height(cs, &face), content_ascent(cs, &face),
-            0.0, 0.0, e.bt, e.br, e.bb, e.bl,
-        ]);
-        r[13..19].copy_from_slice(&[e.f_ml, e.f_left, e.f_right, e.f_mr, e.f_top, e.f_bottom]);
-        r[19] = e.left;
-        for k in 0..6 {
-            r[20 + k] = match &e.math[k] {
-                Some(prog) => self.math(Some(prog)) as f64,
-                None => f64::NAN,
-            };
-        }
-        r[29] = f64::NAN;
-        r[30] = f64::NAN;
-        self.entries.push(crate::dom::decode_inline(&r));
+        let math = std::array::from_fn(|k| self.math(e.math[k].as_deref()));
+        self.entries.push(InlineBox {
+            ml: e.ml,
+            right: e.right,
+            mr: e.mr,
+            top: e.top,
+            bottom: e.bottom,
+            own_h: content_height(cs, &face),
+            own_asc: content_ascent(cs, &face),
+            rel_x: 0.0,
+            rel_y: 0.0,
+            bt: e.bt,
+            br: e.br,
+            bb: e.bb,
+            bl: e.bl,
+            f_ml: e.f_ml,
+            f_left: e.f_left,
+            f_right: e.f_right,
+            f_mr: e.f_mr,
+            f_top: e.f_top,
+            f_bottom: e.f_bottom,
+            left: e.left,
+            math,
+            rel_xf: 0.0,
+            rel_yf: 0.0,
+            rel_yi: 0.0,
+            rel_math: [crate::layout::NO_MATH; 2],
+        });
         Ok(self.entries.len() - 1)
     }
 
@@ -952,11 +1170,15 @@ impl<'a> Walk<'a> {
         };
         let key = (family, bucket);
         match self.faces.known.get(&key) {
-            Some(Some(face)) if face.handle >= 0 && !face.asc.is_nan() => Ok(*face),
-            Some(_) => Err("run-font-not-system"),
+            Some(Some(face)) => Ok(*face),
+            Some(None) => Err("run-font-not-system"),
+            // (…one not asked yet is noted, and the walk goes on with a stand-in, so ONE walk names every face the pass
+            // needs: `build` answers NeedsFaces rather than records built with it)
             None => {
-                self.faces.missing.push(key);
-                Err("needs faces")
+                if !self.faces.missing.contains(&key) {
+                    self.faces.missing.push(key);
+                }
+                Ok(Face { handle: -1, asc: 0.0, desc: 0.0, gap: 0.0, space: 0.0 })
             }
         }
     }
@@ -969,6 +1191,47 @@ impl<'a> Walk<'a> {
                 !s.get_box().clone_display().is_none() && !matches!(s.get_counters().content, style::values::generics::counters::GenericContent::Normal | style::values::generics::counters::GenericContent::None)
             })
         })
+    }
+
+    // The side a box floats to (`floatSide`): 0 none, 1 left, 2 right — a flow-relative one by the direction of the
+    // block it is in.
+    fn float_code(&self, id: NodeId, style: &ComputedValues) -> Result<u8, &'static str> {
+        Ok(match style.get_box().clone_float() {
+            Float::None => 0,
+            Float::Left => 1,
+            Float::Right => 2,
+            Float::InlineStart => if self.flow_relative_rtl(id)? { 2 } else { 1 },
+            Float::InlineEnd => if self.flow_relative_rtl(id)? { 1 } else { 2 },
+        })
+    }
+    // …and the side it clears (`clearCode`): 0 none, 1 left, 2 right, 3 both.
+    fn clear_code(&self, id: NodeId, style: &ComputedValues) -> Result<u8, &'static str> {
+        Ok(match style.get_box().clone_clear() {
+            Clear::None => 0,
+            Clear::Left => 1,
+            Clear::Right => 2,
+            Clear::Both => 3,
+            Clear::InlineStart => if self.flow_relative_rtl(id)? { 2 } else { 1 },
+            Clear::InlineEnd => if self.flow_relative_rtl(id)? { 1 } else { 2 },
+        })
+    }
+    // The direction a flow-relative float or clear is read in: the nearest ancestor's that is not an inline box
+    // (`flowRelativeRtl`).
+    fn flow_relative_rtl(&self, id: NodeId) -> Result<bool, &'static str> {
+        let mut cur = self.node(id).parent;
+        while let Some(p) = cur {
+            let node = self.node(p);
+            if node.kind != NodeKind::Element {
+                return Ok(false);
+            }
+            let ps = self.style(p)?;
+            let d = ps.get_box().clone_display();
+            if !(matches!(d.outside(), DisplayOutside::Inline) && matches!(d.inside(), DisplayInside::Flow)) {
+                return Ok(ps.get_inherited_box().direction == Direction::Rtl);
+            }
+            cur = node.parent;
+        }
+        Ok(false)
     }
 
     // Does the element establish a block formatting context (`computeEstablishesBFC`)? Asked of a block-level
@@ -1131,7 +1394,7 @@ fn baseline_aligned(style: &ComputedValues) -> bool {
     use style::values::generics::box_::GenericBaselineShift as BaselineShift;
     use style::values::specified::box_::AlignmentBaseline;
     let b = style.get_box();
-    matches!(&b.baseline_shift, BaselineShift::Length(lp) if lp.to_length().is_some_and(|l| l.px() == 0.0))
+    matches!(&b.baseline_shift, BaselineShift::Length(lp) if lp.to_length().is_some_and(|l| l.px() == 0.0) || lp.to_percentage().is_some_and(|p| p.0 == 0.0))
         && b.alignment_baseline == AlignmentBaseline::Baseline
 }
 // The face's content box at the element's size (`fontContentHeight`: ascent + descent, each rounded) and its ascent
@@ -1186,7 +1449,7 @@ fn contains_out_of_flow(style: &ComputedValues, node: &crate::dom::NodeData) -> 
     }
     let b = style.get_box();
     let d = b.clone_display();
-    let transformable = !(matches!(d.outside(), DisplayOutside::Inline) && matches!(d.inside(), DisplayInside::Flow) && !OWN_CONTEXT_TAGS.contains(&&*node.local_name))
+    let transformable = !(matches!(d.outside(), DisplayOutside::Inline) && matches!(d.inside(), DisplayInside::Flow) && declined_tag(&node.local_name) != Some("replaced or control"))
         && !matches!(d.inside(), DisplayInside::TableColumn | DisplayInside::TableColumnGroup);
     if transformable
         && (!b.transform.0.is_empty()
@@ -1229,14 +1492,6 @@ fn max_size_lp(v: &style::values::computed::MaxSize) -> Result<Option<&LengthPer
 // A COMPARISON program (layout.js `nlMathProgram`, evaluated by `layout::math_at`): postfix triples `[op, a, b]` —
 // `MATH_LINE` pushes `a + b × basis`, `MATH_MIN` / `MATH_MAX` / `MATH_SUM` fold the top two, `MATH_NEG` negates the top
 // and `MATH_SCALE` multiplies it by `a`. A piece with no comparison inside is ONE line, its `px + frac × basis`.
-const MATH_LINE: f64 = 0.0;
-const MATH_MIN: f64 = 1.0;
-const MATH_MAX: f64 = 2.0;
-const MATH_SUM: f64 = 3.0;
-const MATH_NEG: f64 = 4.0;
-const MATH_SCALE: f64 = 5.0;
-// …no deeper than native's evaluation stack.
-const MATH_DEPTH: usize = 16;
 
 // A value the record carries for native to resolve at the basis it has: `px + frac × basis`, or its program (whose pair
 // is then its figure at no basis) — `nlClampedSpec`'s `{px, frac, prog}`.
@@ -1379,26 +1634,12 @@ fn emit(node: &CalcNode, prog: &mut Vec<f64>, depth: &mut usize, deepest: &mut u
     }
     Ok(())
 }
-// A program at a basis (`layout::math_at`, layout.js `nlMathAt`).
+// A program at a basis — native's own evaluation (`layout::math_at`), which is what it will come to there.
 fn math_at(prog: &[f64], basis: f64) -> f64 {
-    let mut stack: Vec<f64> = Vec::with_capacity(MATH_DEPTH);
-    for t in prog.chunks_exact(3) {
-        let (op, a, b) = (t[0], t[1], t[2]);
-        if op == MATH_LINE {
-            stack.push(if b == 0.0 { a } else { a + b * basis });
-        } else if op == MATH_NEG {
-            let v = stack.pop().unwrap_or(f64::NAN);
-            stack.push(-v);
-        } else if op == MATH_SCALE {
-            let v = stack.pop().unwrap_or(f64::NAN);
-            stack.push(v * a);
-        } else {
-            let y = stack.pop().unwrap_or(f64::NAN);
-            let x = stack.pop().unwrap_or(f64::NAN);
-            stack.push(if op == MATH_MIN { x.min(y) } else if op == MATH_MAX { x.max(y) } else { x + y });
-        }
-    }
-    stack.first().copied().unwrap_or(f64::NAN)
+    let mut table = Vec::with_capacity(prog.len() + 1);
+    table.push((prog.len() / 3) as f64);
+    table.extend_from_slice(prog);
+    crate::layout::math_at(&table, 0, basis)
 }
 
 // The bases the JS walk probes an edge at to decide it is on its line (`NL_EDGE_PROBE` / `NL_EDGE_CHECKS`).
@@ -1495,7 +1736,7 @@ fn length(lp: &LengthPercentage) -> Result<f64, &'static str> {
 }
 // A letter- or word-spacing's px.
 fn spacing(lp: &LengthPercentage) -> Result<f64, &'static str> {
-    length(lp)
+    lp.to_length().map(|l| l.px() as f64).ok_or("spacing-percentage")
 }
 // Does a height leave the box's margins adjoining — `auto`, a keyword, or a zero length (`autoOrZeroHeight`)?
 fn auto_or_zero(v: &style::values::computed::Size) -> bool {
@@ -1525,6 +1766,28 @@ fn ws_mode_of(style: &ComputedValues) -> Result<u8, &'static str> {
 }
 fn preserving(mode: u8) -> bool {
     matches!(mode, WS_PRE | WS_PRE_WRAP | WS_BREAK_SPACES)
+}
+// Can native measure `text` in a run of in-word break mode `wrap` (`nlTextMeasurable`)? Not a zero-width joiner where
+// the line breaks per character, nor one beside a wide character: the JS layout's two paths disagree with each other
+// there, and no native answer can match both.
+fn measurable(text: &[u16], wrap: u8) -> bool {
+    let mut zwj = false;
+    let mut wide = false;
+    for (i, &u) in text.iter().enumerate() {
+        if u == 0x200D {
+            zwj = true;
+        } else if u >= 0x1100 {
+            // (…as `codePointAt(i)` reads it: a surrogate pair's code point from its high half, a lone half itself)
+            let cp = match (u, text.get(i + 1)) {
+                (0xD800..=0xDBFF, Some(&lo @ 0xDC00..=0xDFFF)) => 0x10000 + (((u as u32) - 0xD800) << 10) + ((lo as u32) - 0xDC00),
+                _ => u as u32,
+            };
+            if crate::font::is_wide_char(cp) {
+                wide = true;
+            }
+        }
+    }
+    !(zwj && (wrap == 1 || wrap == 3 || wide))
 }
 // Is `text` anything but CSS white space (`CSS_CONTENT_RE`)?
 fn has_content(text: &[u16]) -> bool {
@@ -1694,9 +1957,9 @@ fn program_at(maths: &[f64], at: u32) -> Option<&[f64]> {
 fn program_diff(a_maths: &[f64], a: u32, b_maths: &[f64], b: u32) -> Option<bool> {
     match (program_at(a_maths, a), program_at(b_maths, b)) {
         (None, None) => None,
-        (Some(pa), Some(pb)) => [0.0, 50.0, 217.0, 400.0, 1531.0, 4099.0, 30011.0, EDGE_PROBE]
+        (Some(_), Some(_)) => [0.0, 50.0, 217.0, 400.0, 1531.0, 4099.0, 30011.0, EDGE_PROBE]
             .iter()
-            .map(|&basis| math_at(pa, basis).diff(&math_at(pb, basis)))
+            .map(|&basis| crate::layout::math_at(a_maths, a as usize, basis).diff(&crate::layout::math_at(b_maths, b as usize, basis)))
             .fold(None, worse),
         _ => Some(false),
     }

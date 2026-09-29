@@ -21,13 +21,15 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
 #[derive(Default)]
 pub(crate) struct Parity {
     pending: Option<Pass>,
+    // (…and whether the JS side has been asked for the pending pass's faces already: a second ask is a face it could not
+    // resolve, and the pass is counted as declined for it rather than dropped)
+    asked: bool,
     faces: Faces,
     stats: Stats,
 }
 
 impl Parity {
-    // Keep a pass's records as the JS walk sent them, for `walkParity` to hold the Rust walk's against. The faces are
-    // asked afresh each pass: a face that arrived since resolves the same family to another.
+    // Keep a pass's records as the JS walk sent them, for `walkParity` to hold the Rust walk's against.
     pub(crate) fn keep(&mut self, inputs: &[Input], runs: &[Run], run_texts: &[RunText], inlines: &[InlineBox], maths: &[f64], basis: Basis) {
         self.pending = Some(Pass {
             inputs: inputs.to_vec(),
@@ -37,7 +39,7 @@ impl Parity {
             maths: maths.to_vec(),
             basis,
         });
-        self.faces = Faces::default();
+        self.asked = false;
     }
 }
 
@@ -67,17 +69,25 @@ struct Stats {
 
 const MAX_SAMPLES: usize = 40;
 
-// __dom.walkParity() -> null (compared, declined, or no pass kept), or [family, bucket, …] — the faces the Rust walk
-// needs before it can walk the kept pass, for the JS side to resolve (`walkFace`) and ask again.
+// __dom.walkParity(generation) -> null (compared, declined, or no pass kept), or [family, bucket, …] — the faces the
+// Rust walk needs before it can walk the kept pass, for the JS side to resolve (`walkFace`) and ask again. The faces
+// learnt are kept while `generation` (what a family resolves by) holds.
 fn walk_parity(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let cid = realm_id(scope, &args);
+    let generation = args.get(0).to_rust_string_lossy(scope);
     let d = dom(scope);
     let Some(parity) = d.walk_parity.get_mut(&cid) else { return };
     let Some(pass) = parity.pending.take() else { return };
     let Some(arena) = d.realms.get(&cid) else { return };
     let Some(root) = pass.inputs.first().and_then(|r| NodeId::from_i64(r.nid as i64)) else { return };
+    parity.faces.at_generation(&generation);
     match walk::build(arena, root, pass.basis, &mut parity.faces) {
+        Outcome::NeedsFaces if parity.asked => {
+            parity.stats.passes += 1;
+            *parity.stats.declined.entry("faces-unresolved").or_default() += 1;
+        }
         Outcome::NeedsFaces => {
+            parity.asked = true;
             let wanted: Vec<(String, &'static str)> = parity.faces.missing.clone();
             parity.pending = Some(pass);
             let out = v8::Array::new(scope, (wanted.len() * 2) as i32);

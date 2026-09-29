@@ -86,9 +86,31 @@ RSpec.describe 'walk parity' do
     HTML
   end
 
+  # Floats among blocks and among lines, a box with clearance, and a block holding both block-level boxes and inline
+  # content, whose runs of inline content are anonymous blocks of lines — floats among them as markers.
+  it 'builds floats, clearance and mixed blocks' do
+    expect_clean(parity(<<~HTML))
+      <div style="width: 300px">
+        <div style="float: left; width: 50px; height: 20px"></div>
+        text beside the float <span style="float: right">right</span> more text
+        <div style="clear: left">cleared</div>
+        after the block <b>bold</b>
+        <div style="float: inline-end">end</div>
+      </div>
+    HTML
+  end
+
+  # A pass whose runs need several faces names every one of them at once, and is compared.
+  it 'resolves every face a pass needs' do
+    expect_clean(parity(<<~HTML))
+      <p style="font-weight: 599">a</p><p style="font-weight: 600">b</p><p style="font-style: oblique 10deg">c</p>
+      <p style="font-style: italic; font-weight: bolder">d</p><p style="font-family: serif">e</p>
+    HTML
+  end
+
   it 'declines by name what it has not been taught' do
-    stats = parity('<div style="float: left">x</div>')
+    stats = parity('<div style="display: flex">x</div>')
     expect(stats['compared']).to eq(0)
-    expect(stats['declined']).to include('float' => be_positive)
+    expect(stats['declined']).to include('flex' => be_positive)
   end
 end
