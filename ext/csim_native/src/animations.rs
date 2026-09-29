@@ -10,7 +10,7 @@ use std::cmp::Ordering;
 use std::collections::HashMap;
 
 use style::properties::animated_properties::{AnimationValue, AnimationValueMap};
-use style::properties::{OwnedPropertyDeclarationId, PropertyDeclarationBlock};
+use style::properties::{ComputedValues, OwnedPropertyDeclarationId, PropertyDeclarationBlock};
 use style::selector_parser::PseudoElement;
 use style::servo_arc::Arc;
 use style::shared_lock::Locked;
@@ -245,9 +245,19 @@ pub(crate) struct ComputedKeyframes {
     pub(crate) properties: Vec<(OwnedPropertyDeclarationId, Vec<ComputedFrame>, Option<AnimationValue>)>,
 }
 
+// What an effect's keyframes were computed from: its target's style as it then was, and whether they refer to anything
+// beyond that style — its parent's values (`inherit`), the root's font (`rem`), the viewport or a container (their
+// units), an attribute — which a restyle can move without moving the style.
+#[derive(Clone, Debug)]
+pub(crate) struct KeyframeInputs {
+    pub(crate) style: Arc<ComputedValues>,
+    pub(crate) contextual: bool,
+}
+
 // An effect an animation plays (§4.5, §5.3): its timing, the element it animates, its keyframes and how they
 // composite; and those keyframes computed for the target as it was last styled (None until then, or since the target
-// or the keyframes changed).
+// or the keyframes changed) — from what, and whether the target was restyled since, which computes them again only
+// where what they were computed from moved.
 #[derive(Clone, Debug)]
 pub(crate) struct Effect {
     pub(crate) timing: EffectTiming,
@@ -261,6 +271,8 @@ pub(crate) struct Effect {
     // §5.3.4).
     pub(crate) implicit_easing: Option<ComputedTimingFunction>,
     pub(crate) computed: Option<ComputedKeyframes>,
+    pub(crate) computed_from: Option<KeyframeInputs>,
+    pub(crate) restyled: bool,
     // Its handle is gone, and it goes when its animation lets it go.
     pub(crate) orphaned: bool,
 }
@@ -388,6 +400,8 @@ impl Animations {
             iteration_composite_accumulate: false,
             implicit_easing: None,
             computed: None,
+            computed_from: None,
+            restyled: false,
             orphaned: false,
         };
         self.effects.insert(self.next_effect, effect);
@@ -444,11 +458,12 @@ impl Animations {
         }
     }
 
-    // `node` was restyled: its effects' keyframes are computed again, from the style it has now.
+    // `node` was restyled: its effects' keyframes are computed again, from the style it has now — where what they were
+    // computed from moved.
     pub(crate) fn target_restyled(&mut self, node: NodeId) {
         for effect in self.by_target.get(&node).into_iter().flatten() {
             if let Some(e) = self.effects.get_mut(effect) {
-                e.computed = None;
+                e.restyled = true;
             }
         }
     }

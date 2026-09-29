@@ -1354,10 +1354,29 @@ impl StyleEngine {
         })
     }
 
+    // Whether an effect's keyframes, computed from its target's style as it was, would compute the same from the style
+    // it has now: nothing they refer to beyond it, and the same base rules and values they can refer to in it — its
+    // font (`em`), color (`currentColor`), custom properties (`var()`) and writing mode (logical properties).
+    fn keyframe_inputs_hold(&self, arena: &RealmArena, effect: &waapi::Effect) -> bool {
+        let (Some(inputs), Some(target)) = (&effect.computed_from, &effect.target) else { return false };
+        let Some(style) = target_style(arena, target).filter(|_| !inputs.contextual) else { return false };
+        let (was, now) = (&*inputs.style, &*style);
+        let rule_tree = self.stylist.rule_tree();
+        rule_tree.remove_animation_rules(was.rules()) == rule_tree.remove_animation_rules(now.rules())
+            && was.writing_mode == now.writing_mode
+            && was.custom_properties() == now.custom_properties()
+            && was.get_font() == now.get_font()
+            && was.get_inherited_text() == now.get_inherited_text()
+    }
+
     // An effect's keyframes as values of its target (web-animations §5.3.3 "computing property values"): computed
     // in the target's base style, with its parent's to inherit from — a pseudo-element's parent being its originating
-    // element; None while the target has no style.
-    fn compute_keyframes(&self, arena: &RealmArena, effect: &waapi::Effect) -> Option<waapi::ComputedKeyframes> {
+    // element — and what they were computed from; None while the target has no style.
+    fn compute_keyframes(
+        &self,
+        arena: &RealmArena,
+        effect: &waapi::Effect,
+    ) -> Option<(waapi::ComputedKeyframes, waapi::KeyframeInputs)> {
         let target = effect.target.as_ref()?;
         let style = target_style(arena, target)?;
         let base = self.base_style(arena, target, &style);
@@ -1381,8 +1400,10 @@ impl StyleEngine {
             &mut counting,
         );
         let mut computed = waapi::ComputedKeyframes::default();
+        let mut contextual = false;
         for keyframe in &effect.keyframes {
             let block = keyframe.block.read_with(&guard);
+            contextual = contextual || block.declarations().iter().any(refers_beyond_the_style);
             // (Each value is of the physical property the target's writing mode maps it to: one keyframe that sets a
             // property twice — logical and physical — sets it to the value declared last.)
             let mut values: Vec<AnimationValue> = Vec::new();
@@ -1407,7 +1428,7 @@ impl StyleEngine {
         for (id, _, base_value) in &mut computed.properties {
             *base_value = AnimationValue::from_computed_values(id.as_borrowed(), &base);
         }
-        Some(computed)
+        Some((computed, waapi::KeyframeInputs { style, contextual }))
     }
 
     // Every effect whose keyframes are not computed for its target yet (new, changed, or its target restyled) is
@@ -1418,17 +1439,25 @@ impl StyleEngine {
             .web_animations
             .effects
             .iter()
-            .filter(|(_, e)| e.computed.is_none() && e.target.is_some())
+            .filter(|(_, e)| (e.computed.is_none() || e.restyled) && e.target.is_some())
             .map(|(&id, _)| id)
             .collect();
         let mut restyle = self.web_animations.take_targets_to_restyle();
         for id in stale {
-            let computed = self.compute_keyframes(arena, &self.web_animations.effects[&id]);
+            let effect = &self.web_animations.effects[&id];
+            // (A restyle that left what they were computed from — every `color` change of an animated element that
+            // does not reach its keyframes — leaves them, and what the target shows with them.)
+            if effect.computed.is_some() && self.keyframe_inputs_hold(arena, effect) {
+                self.web_animations.effects.get_mut(&id).unwrap().restyled = false;
+                continue;
+            }
+            let computed = self.compute_keyframes(arena, effect);
             let effect = self.web_animations.effects.get_mut(&id).unwrap();
             if computed.is_some() {
                 restyle.extend(effect.target.as_ref().map(|t| t.node));
             }
-            effect.computed = computed;
+            (effect.computed, effect.computed_from) = computed.unzip();
+            effect.restyled = false;
         }
         let Some(doc) = self.doc.filter(|_| !restyle.is_empty()) else { return };
         in_arena(arena, self, || {
@@ -1997,6 +2026,43 @@ fn to_microseconds(seconds: f64) -> f64 {
 // A time of a style (seconds, single precision) in the model's milliseconds — to the microsecond, without the tail.
 fn to_milliseconds(seconds: f32) -> f64 {
     (seconds as f64 * 1e6).round() / 1e3
+}
+
+// Whether a keyframe's declaration computes from anything beyond its element's own style and rules: its parent
+// (`inherit`, `unset`, `revert`), the root's font or line (`rem`, `rlh`), the viewport or a container (their units), an
+// attribute, an environment variable, an anchor or its place among its siblings.
+fn refers_beyond_the_style(declaration: &style::properties::PropertyDeclaration) -> bool {
+    fn scan(input: &mut Parser) -> bool {
+        use cssparser::Token;
+        while let Ok(token) = input.next_including_whitespace_and_comments() {
+            let found = match token {
+                Token::Ident(ident) => ["inherit", "unset", "revert", "revert-layer"].iter().any(|k| ident.eq_ignore_ascii_case(k)),
+                Token::Dimension { unit, .. } => {
+                    let unit = unit.to_ascii_lowercase();
+                    unit == "rem" || unit == "rlh" || unit.starts_with("cq") || ["vw", "vh", "vi", "vb", "vmin", "vmax"].iter().any(|v| unit.ends_with(v))
+                },
+                Token::Function(name) => {
+                    let name = name.to_ascii_lowercase();
+                    ["attr", "env", "anchor", "anchor-size", "sibling-index", "sibling-count"].contains(&name.as_str())
+                },
+                _ => false,
+            };
+            let nested = matches!(
+                token,
+                Token::Function(_) | Token::ParenthesisBlock | Token::SquareBracketBlock | Token::CurlyBracketBlock
+            );
+            if found || (nested && input.parse_nested_block(|block| Ok::<_, cssparser::ParseError<()>>(scan(block))).unwrap_or(true)) {
+                return true;
+            }
+        }
+        false
+    }
+    let mut text = String::new();
+    if declaration.to_css(&mut text).is_err() {
+        return true;
+    }
+    let mut input = ParserInput::new(&text);
+    scan(&mut Parser::new(&mut input))
 }
 
 // The names a declaration answers to: its property's, and those of the shorthands it is part of.

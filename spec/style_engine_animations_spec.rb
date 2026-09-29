@@ -738,4 +738,43 @@ RSpec.describe 'style engine animations' do
     JS
     expect(read).to eq(%w[100px auto 100px])
   end
+
+  # A restyle computes an animation's keyframes again where what they refer to moved: its own font for an `em`, and
+  # the viewport for a `vw` — which moves nothing of the element's own style.
+  it 'computes the keyframes again where what they refer to moved' do
+    # (Without the verify mode, which parses every element's style attribute again and so moves its rules each time.)
+    ENV['CSIM_STYLE_VERIFY'] = '0'
+    s = page('<div id="c" style="font-size: 10px"></div>')
+    s.current_window.resize_to(1000, 600)
+    s.execute_script("document.getElementById('c').animate({marginLeft: ['2em', '2em'], paddingLeft: ['10vw', '10vw']}, 100000)")
+    read = s.evaluate_script(<<~JS)
+      (() => {
+        const c = document.getElementById('c');
+        const read = [getComputedStyle(c).marginLeft, getComputedStyle(c).paddingLeft];
+        c.style.fontSize = '20px';
+        read.push(getComputedStyle(c).marginLeft);
+        return read;
+      })()
+    JS
+    s.current_window.resize_to(500, 600)
+    read << s.evaluate_script("getComputedStyle(document.getElementById('c')).paddingLeft")
+    expect(read).to eq(%w[20px 100px 40px 50px])
+  end
+
+  # Keyframes set to another property reach the JS side's layout, which resolves it — though the element was animated
+  # (and its values uncacheable) already.
+  it 'lays out the property new keyframes animate' do
+    s = page('<div id="b"></div>')
+    read = s.evaluate_script(<<~JS)
+      (() => {
+        const b = document.getElementById('b');
+        const x = b.animate({marginLeft: ['5px', '5px']}, 100000);
+        const read = [getComputedStyle(b).marginLeft, getComputedStyle(b).paddingLeft];
+        x.effect.setKeyframes({paddingLeft: ['7px', '7px']});
+        read.push(getComputedStyle(b).marginLeft, getComputedStyle(b).paddingLeft);
+        return read;
+      })()
+    JS
+    expect(read).to eq(%w[5px 0px 0px 7px])
+  end
 end
