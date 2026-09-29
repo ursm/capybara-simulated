@@ -490,9 +490,25 @@ RSpec.describe 'element state in the native arena' do
       expect(native_ids(':user-invalid')).to eq(%w[ut])
       session.find('#un').fill_in(with: '3')   # kept as typed: out of range, as in a browser
       expect(native_ids('#un:user-invalid, #un:out-of-range')).to eq(%w[un])
-      # An interactive submission (Capybara's click_button submits without one) is refused, and marks every control.
-      session.execute_script("document.getElementById('uf').requestSubmit()")
+      # A submission — click_button too — is interactive: refused while a control is invalid, and marks every control.
+      session.click_button('go')
       expect(native_ids(':user-invalid')).to eq(%w[ut un uu])
+      expect(session.current_url).not_to include('?')
+    end
+
+    it 'submits once the controls are valid, and only then — by click and by Enter' do
+      session.execute_script(<<~JS)
+        document.body.innerHTML = '<form id=vf><input id=vt name=vt required><button>go</button></form>' +
+          '<form id=nv novalidate><input name=nt required><button>skip</button></form>';
+      JS
+      session.find('#vt').send_keys(:enter)
+      expect(session.current_url).not_to include('?')
+      session.find('#vt').fill_in(with: "ok\n")
+      expect(session.current_url).to include('vt=ok')
+      session.visit '/'
+      session.execute_script("document.body.innerHTML = '<form novalidate><input name=nt required><button>skip</button></form>'")
+      session.click_button('skip')
+      expect(session.current_url).to include('nt=')
     end
 
     it 'counts a form-associated custom element, and a control by its form owner' do
