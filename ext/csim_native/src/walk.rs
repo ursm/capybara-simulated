@@ -30,7 +30,7 @@ use style::values::specified::box_::Overflow;
 use style::values::specified::box_::{DisplayInside, DisplayOutside};
 
 use crate::dom::{NodeId, NodeKind, RealmArena};
-use crate::layout::{Input, Run, RunText, DISPLAY_BLOCK, DISPLAY_TEXT_BLOCK, RUN_TEXT};
+use crate::layout::{InlineBox, Input, Run, RunText, DISPLAY_BLOCK, DISPLAY_TEXT_BLOCK, RUN_BR, RUN_CLOSE, RUN_OPEN, RUN_TEXT, RUN_WBR};
 
 // A face the walk measures a run in, as the JS side resolved it for the family and the weight / style bucket: the
 // layout's font handle and the metrics the model rules read off it (per em — ascent, descent, line gap, and the
@@ -67,6 +67,7 @@ pub(crate) struct Built {
     pub(crate) inputs: Vec<Input>,
     pub(crate) runs: Vec<Run>,
     pub(crate) run_texts: Vec<RunText>,
+    pub(crate) inlines: Vec<InlineBox>,
     pub(crate) maths: Vec<f64>,
 }
 
@@ -96,9 +97,17 @@ pub(crate) fn build(arena: &RealmArena, root: NodeId, basis: Basis, faces: &mut 
         run_texts: Vec::new(),
         maths: Vec::new(),
         math_index: HashMap::new(),
+        inlines: Vec::new(),
+        entries: Vec::new(),
     };
     match walk.root(root) {
-        Ok(()) => Outcome::Built(Built { inputs: walk.inputs, runs: walk.runs, run_texts: walk.run_texts, maths: walk.maths }),
+        Ok(()) => Outcome::Built(Built {
+            inputs: walk.inputs,
+            runs: walk.runs,
+            run_texts: walk.run_texts,
+            inlines: walk.inlines,
+            maths: walk.maths,
+        }),
         Err(_) if !walk.faces.missing.is_empty() => Outcome::NeedsFaces,
         Err(why) => Outcome::Declined(why),
     }
@@ -116,6 +125,108 @@ struct Walk<'a> {
     // The programs the records name, each once (`[length, op, a, b, …]` at its offset), and where each one is.
     maths: Vec<f64>,
     math_index: HashMap<Vec<u64>, u32>,
+    // The inline table (`InlineBox` per inline box the runs open, in the order they open them), and the entries the
+    // gathers made, which a text block tables when its runs are committed.
+    inlines: Vec<InlineBox>,
+    entries: Vec<InlineBox>,
+}
+
+// A text block's inline content as its gather builds it (`nlGatherRuns`'s `ctx`): the block's style (its tab stops,
+// what an inline's font is taken against), whether its indent can bite, the runs so far, and whether any of them
+// makes a line.
+struct Gather<'s> {
+    block: &'s ComputedValues,
+    bites: bool,
+    runs: Vec<Pending>,
+    makes_line: bool,
+}
+
+// A run before its block commits it: its inline box is named by the gather's entry, tabled at the commit.
+enum Pending {
+    Text { font: FontInfo, text: Vec<u16>, wrap: u8, ws: u8 },
+    Open { plain: f64, ws: u8, entry: usize },
+    Close { plain: f64, ws: u8, entry: usize, lands: bool, own_h: f64, own_asc: f64 },
+    Br { ws: u8, clear: u8, entry: usize },
+    Wbr { ws: u8, entry: usize },
+}
+
+// An inline box's edges as its entry and its runs carry them (`edgeInsets` + `nlEdgeParts` / `nlClampedEdgeParts`,
+// arranged by `nlInlineEntry`): the margins, the border + padding sides, the borders, each side's fraction of the
+// block's width, each side's program in the table's order (ml, left, right, mr, top, bottom), and the four horizontal
+// ones at NO basis.
+#[derive(Default)]
+struct Edges {
+    ml: f64,
+    mr: f64,
+    left: f64,
+    right: f64,
+    top: f64,
+    bottom: f64,
+    bt: f64,
+    br: f64,
+    bb: f64,
+    bl: f64,
+    f_ml: f64,
+    f_left: f64,
+    f_right: f64,
+    f_mr: f64,
+    f_top: f64,
+    f_bottom: f64,
+    math: [Option<Vec<f64>>; 6],
+    plain_ml: f64,
+    plain_left: f64,
+    plain_right: f64,
+    plain_mr: f64,
+}
+
+impl Edges {
+    fn of(style: &ComputedValues) -> Result<Edges, &'static str> {
+        let (edges, auto) = edge_lps(style)?;
+        let _ = auto;
+        let [bt, br, bb, bl] = used_borders(style);
+        let parts = if !edges.iter().flatten().any(|lp| lp.has_percentage()) {
+            EdgeParts::at(&edges, 0.0)?
+        } else {
+            EdgeParts::linear(&edges)?.map_or_else(|| EdgeParts::clamped(&edges), Ok)?
+        };
+        let bare = |k: usize| match edges[k] {
+            Some(lp) if !lp.has_percentage() => length(lp).map(|v| if k >= 4 { v.max(0.0) } else { v }),
+            _ => Ok(0.0),
+        };
+        // (…a padding's program carries its border back in, as the table's sides are border + padding.)
+        let side = |k: usize, border: f64| {
+            parts.prog[k].as_ref().map(|prog| {
+                let mut prog = prog.clone();
+                if border != 0.0 {
+                    prog.extend([MATH_LINE, border, 0.0, MATH_SUM, 0.0, 0.0]);
+                }
+                prog
+            })
+        };
+        Ok(Edges {
+            ml: parts.px[3],
+            mr: parts.px[1],
+            left: parts.px[7] + bl,
+            right: parts.px[5] + br,
+            top: parts.px[4] + bt,
+            bottom: parts.px[6] + bb,
+            bt,
+            br,
+            bb,
+            bl,
+            f_ml: parts.frac[3],
+            f_left: parts.frac[7],
+            f_right: parts.frac[5],
+            f_mr: parts.frac[1],
+            f_top: parts.frac[4],
+            f_bottom: parts.frac[6],
+            math: [side(3, 0.0), side(7, bl), side(5, br), side(1, 0.0), side(4, bt), side(6, bb)],
+            plain_ml: bare(3)?,
+            plain_left: bare(7)? + bl,
+            plain_right: bare(5)? + br,
+            plain_mr: bare(1)?,
+        })
+    }
 }
 
 // A block's font as its runs and its line box take it (`nlFontInfo`).
@@ -264,20 +375,8 @@ impl<'a> Walk<'a> {
         rec.decl_max_w = declared(3)?;
         rec.pct_h_decl = [1, 4, 5].iter().any(|&k| sizes[k].0.is_some_and(|lp| lp.has_percentage()));
         // The margins and padding, likewise — against the containing block's WIDTH, all eight.
-        let m = style.get_margin();
-        let p = style.get_padding();
-        use style::values::generics::length::GenericMargin as Margin;
-        let mut edges: [Option<&LengthPercentage>; 8] = [None; 8];
-        for (k, margin) in [&m.margin_top, &m.margin_right, &m.margin_bottom, &m.margin_left].into_iter().enumerate() {
-            match margin {
-                Margin::Auto => rec.auto_margins |= [4, 2, 8, 1][k],
-                Margin::LengthPercentage(lp) => edges[k] = Some(lp),
-                _ => return Err("margin anchor"),
-            }
-        }
-        for (k, padding) in [&p.padding_top, &p.padding_right, &p.padding_bottom, &p.padding_left].into_iter().enumerate() {
-            edges[4 + k] = Some(&padding.0);
-        }
+        let (edges, auto) = edge_lps(&style)?;
+        rec.auto_margins = auto;
         let parts = if !edges.iter().flatten().any(|lp| lp.has_percentage()) {
             EdgeParts::at(&edges, 0.0)?
         } else if !native_basis {
@@ -291,18 +390,7 @@ impl<'a> Walk<'a> {
         for k in 0..8 {
             rec.edge_math[k] = self.math(parts.prog[k].as_deref());
         }
-        // The USED border widths: the computed one is a length whatever the style (css-backgrounds-3), and a `none` /
-        // `hidden` side draws none.
-        let bd = style.get_border();
-        let used = |w: &style::values::computed::BorderSideWidth, s: style::values::specified::BorderStyle| {
-            if s.none_or_hidden() { 0.0 } else { w.0.to_f64_px() }
-        };
-        [rec.bt, rec.br, rec.bb, rec.bl] = [
-            used(&bd.border_top_width, bd.border_top_style),
-            used(&bd.border_right_width, bd.border_right_style),
-            used(&bd.border_bottom_width, bd.border_bottom_style),
-            used(&bd.border_left_width, bd.border_left_style),
-        ];
+        [rec.bt, rec.br, rec.bb, rec.bl] = used_borders(&style);
         // (…and the horizontal ones at NO basis, what an intrinsic measure reads: a percentage in them is none.)
         let bare = |lp: Option<&LengthPercentage>, floor: bool| match lp {
             Some(lp) if !lp.has_percentage() => length(lp).map(|v| if floor { v.max(0.0) } else { v }),
@@ -329,7 +417,7 @@ impl<'a> Walk<'a> {
         self.inputs.push(rec);
 
         // What the children are to this block's flow: block-level boxes, or inline content (`walkRecord`'s classify).
-        let ws_mode = ws_mode(&style)?;
+        let ws_mode = ws_mode_of(&style)?;
         let mut blocks = Vec::new();
         let mut inline = false;
         for c in self.children(id) {
@@ -360,7 +448,8 @@ impl<'a> Walk<'a> {
                         return Err("float");
                     }
                     if matches!(cd.outside(), DisplayOutside::Inline) {
-                        return Err("inline content");
+                        inline = true;
+                        continue;
                     }
                     blocks.push(c);
                 }
@@ -381,68 +470,17 @@ impl<'a> Walk<'a> {
         Ok(())
     }
 
-    // A block of text alone (`walkRecord`'s text-block arm over `nlGatherRuns`).
+    // A block of inline content — text and inline boxes — laid out in lines (`walkRecord`'s text-block arm).
     fn text_block(&mut self, id: NodeId, idx: i32, style: &ComputedValues, ws_mode: u8) -> Step {
         let (indent, indent_bits) = indent(style)?;
-        let indent_bites = indent.px != 0.0 || indent.frac != 0.0 || indent.prog.is_some();
+        let bites = indent.px != 0.0 || indent.frac != 0.0 || indent.prog.is_some();
         let indent_math = self.math(indent.prog.as_deref());
         let font = self.font_info(style, style)?;
         let starts_at_right = style.get_inherited_box().direction == Direction::Rtl;
         let align = align_code(style.get_inherited_text().text_align, starts_at_right);
-        let wrap_mode = wrap_mode(style);
-        let no_shy = style.get_inherited_text().hyphens == Hyphens::None;
-        let preserve = preserving(ws_mode);
-        let owner_wraps = ws_mode != WS_NOWRAP && ws_mode != WS_PRE;
-        let run_start = self.runs.len();
-        let mut makes_line = false;
-        let mut last: Option<Vec<u16>> = None;
-        let mut texts: Vec<Vec<u16>> = Vec::new();
-        for c in self.children(id).collect::<Vec<_>>() {
-            let cn = self.node(c);
-            if cn.kind != NodeKind::Text {
-                continue;
-            }
-            let raw = &cn.data;
-            let stripped: Vec<u16> = if preserve { raw.iter().copied().filter(|&u| u != 0x0D && u != 0x0C).collect() } else { raw.clone() };
-            let td: Vec<u16> = if no_shy && stripped.contains(&0xAD) { stripped.iter().copied().filter(|&u| u != 0xAD).collect() } else { stripped.clone() };
-            if td.is_empty() && !raw.is_empty() && indent_bites {
-                return Err("text-not-measurable");
-            }
-            if td.is_empty() && !stripped.is_empty() {
-                return Err("text-not-measurable");
-            }
-            if td.contains(&0x200D) {
-                return Err("zero-width joiner");
-            }
-            if td.is_empty() {
-                continue;
-            }
-            if has_content(&td) || white_space_only_is_content(&td, ws_mode) {
-                makes_line = true;
-            }
-            // Adjacent text is one run, as the JS walk merges it (`appendText`): same font (one block here), where the
-            // mode soft-wraps, and not across a join that GLUES a word, nor across a white-space-only side of a
-            // `pre-line` join.
-            match last.as_mut() {
-                Some(prev)
-                    if owner_wraps
-                        && (is_css_ws(*prev.last().unwrap()) || is_css_ws(td[0]))
-                        && !(ws_mode == WS_PRE_LINE && has_content(prev) != has_content(&td)) =>
-                {
-                    prev.extend_from_slice(&td);
-                }
-                _ => {
-                    if let Some(prev) = last.take() {
-                        texts.push(prev);
-                    }
-                    last = Some(td);
-                }
-            }
-        }
-        if let Some(prev) = last.take() {
-            texts.push(prev);
-        }
-        // (…the indent and the alignment written before the gather, as the JS walk writes them: a block whose text
+        let mut g = Gather { block: style, bites, runs: Vec::new(), makes_line: false };
+        self.gather(id, style, &font, ws_mode, wrap_mode(style), &mut g)?;
+        // (…the indent and the alignment written before the gather, as the JS walk writes them: a block whose content
         // makes no line keeps them too.)
         let rec = &mut self.inputs[idx as usize];
         rec.indent_px = indent.px;
@@ -452,35 +490,262 @@ impl<'a> Walk<'a> {
         rec.indent_each_line = indent_bits & 512 != 0;
         rec.text_align = align;
         rec.ws_mode = ws_mode;
-        if !makes_line {
+        // Only white space: an empty block — unless an inline box or a `<wbr>` occupies a line, where a first-line
+        // indent is taken (`nlRunsOccupyALine`).
+        if !g.makes_line && !g.runs.iter().any(|r| matches!(r, Pending::Open { .. } | Pending::Wbr { .. })) {
             rec.display = DISPLAY_BLOCK;
             return Ok(());
         }
         rec.display = DISPLAY_TEXT_BLOCK;
-        rec.run_start = run_start as i32;
-        rec.run_count = texts.len() as i32;
+        rec.run_start = self.runs.len() as i32;
+        rec.run_count = g.runs.len() as i32;
         rec.strut_lh = font.lh;
         rec.strut_asc = font.asc;
-        for text in texts {
-            self.runs.push(Run {
-                kind: RUN_TEXT,
-                font: font.face,
-                size: font.size,
-                ls: font.ls,
-                ws: font.ws,
-                line_height: font.lh,
-                asc: font.asc,
-                metric: wrap_mode as f64,
-                ws_mode,
-                tab_px: font.tab_px,
-                tab_min: font.tab_min,
-                line_mode: 0,
-                lands: false,
-                plain: 0.0,
-            });
-            self.run_texts.push(Some(text.into()));
+        // The inline boxes, tabled in the order their runs open them (`commitInlines`).
+        let mut table: Vec<Option<usize>> = Vec::new();
+        for r in g.runs {
+            let run = match r {
+                Pending::Text { font, text, wrap, ws } => {
+                    self.run_texts.push(Some(text.into()));
+                    Run {
+                        kind: RUN_TEXT,
+                        font: font.face,
+                        size: font.size,
+                        ls: font.ls,
+                        ws: font.ws,
+                        line_height: font.lh,
+                        asc: font.asc,
+                        metric: wrap as f64,
+                        ws_mode: ws,
+                        tab_px: font.tab_px,
+                        tab_min: font.tab_min,
+                        line_mode: 0,
+                        lands: false,
+                        plain: 0.0,
+                    }
+                }
+                Pending::Open { plain, ws, entry } => {
+                    self.run_texts.push(None);
+                    let at = self.inline(entry, &mut table);
+                    edge_run(RUN_OPEN, at, plain, ws)
+                }
+                Pending::Close { plain, ws, entry, lands, own_h, own_asc } => {
+                    self.run_texts.push(None);
+                    let at = table[entry].expect("a CLOSE follows its OPEN");
+                    Run { lands, line_height: own_h, asc: own_asc, ..edge_run(RUN_CLOSE, at, plain, ws) }
+                }
+                Pending::Br { ws, clear, entry } => {
+                    self.run_texts.push(None);
+                    let at = self.inline(entry, &mut table);
+                    Run { metric: clear as f64, ..edge_run(RUN_BR, at, 0.0, ws) }
+                }
+                Pending::Wbr { ws, entry } => {
+                    self.run_texts.push(None);
+                    let at = self.inline(entry, &mut table);
+                    edge_run(RUN_WBR, at, 0.0, ws)
+                }
+            };
+            self.runs.push(run);
         }
         Ok(())
+    }
+
+    // An inline box's entry in the pass's inline table, the first time a run names it.
+    fn inline(&mut self, entry: usize, table: &mut Vec<Option<usize>>) -> usize {
+        if table.len() <= entry {
+            table.resize(entry + 1, None);
+        }
+        *table[entry].get_or_insert_with(|| {
+            self.inlines.push(self.entries[entry]);
+            self.inlines.len() - 1
+        })
+    }
+
+    // The runs of `parent`'s children in the inline formatting context `g` builds (`nlGatherRuns`): `owner` the
+    // element whose font, `white-space` and wrap mode its text takes — the block, or the inline box it is in.
+    fn gather(&mut self, parent: NodeId, owner: &ComputedValues, font: &FontInfo, ws_mode: u8, wrap: u8, g: &mut Gather) -> Step {
+        let preserve = preserving(ws_mode);
+        let no_shy = owner.get_inherited_text().hyphens == Hyphens::None;
+        let owner_wraps = ws_mode != WS_NOWRAP && ws_mode != WS_PRE;
+        for c in self.children(parent).collect::<Vec<_>>() {
+            let cn = self.node(c);
+            match cn.kind {
+                NodeKind::Text => {
+                    let raw = &cn.data;
+                    let stripped: Vec<u16> =
+                        if preserve { raw.iter().copied().filter(|&u| u != 0x0D && u != 0x0C).collect() } else { raw.clone() };
+                    let td: Vec<u16> =
+                        if no_shy && stripped.contains(&0xAD) { stripped.iter().copied().filter(|&u| u != 0xAD).collect() } else { stripped.clone() };
+                    if td.is_empty() && !raw.is_empty() && g.bites {
+                        return Err("text-not-measurable");
+                    }
+                    if td.is_empty() && !stripped.is_empty() {
+                        return Err("text-not-measurable");
+                    }
+                    if td.contains(&0x200D) {
+                        return Err("zero-width joiner");
+                    }
+                    if td.is_empty() {
+                        continue;
+                    }
+                    if has_content(&td) || white_space_only_is_content(&td, ws_mode) {
+                        g.makes_line = true;
+                    }
+                    // Adjacent text is one run where it is the same font, shift, wrap and mode, the mode soft-wraps, the
+                    // join does not GLUE a word, and neither side of a `pre-line` join is white space alone (`appendText`).
+                    if let Some(Pending::Text { font: lf, text, wrap: lw, ws: lws }) = g.runs.last_mut() {
+                        let joinable = *lw == wrap
+                            && *lws == ws_mode
+                            && owner_wraps
+                            && same_font(lf, font)
+                            && (is_css_ws(*text.last().unwrap()) || is_css_ws(td[0]))
+                            && !(ws_mode == WS_PRE_LINE && has_content(text) != has_content(&td));
+                        if joinable {
+                            text.extend_from_slice(&td);
+                            continue;
+                        }
+                    }
+                    g.runs.push(Pending::Text { font: *font, text: td, wrap, ws: ws_mode });
+                }
+                NodeKind::Element => {
+                    let cs = self.style(c)?;
+                    let b = cs.get_box();
+                    let d = b.clone_display();
+                    if d.is_none() {
+                        continue;
+                    }
+                    if matches!(b.clone_position(), Position::Absolute | Position::Fixed) {
+                        return Err("out of flow");
+                    }
+                    if b.clone_float() != Float::None {
+                        return Err("float");
+                    }
+                    self.inline_child(c, &cs, font, ws_mode, g)?;
+                }
+                _ => {}
+            }
+        }
+        Ok(())
+    }
+
+    // One element in the inline content: a `<br>`, a `<wbr>`, or an inline box around content of its own.
+    fn inline_child(&mut self, c: NodeId, cs: &ComputedValues, font: &FontInfo, ws_mode: u8, g: &mut Gather) -> Step {
+        let node = self.node(c);
+        let tag: &str = &node.local_name;
+        if !node.is_html() {
+            return Err("foreign element");
+        }
+        if OWN_CONTEXT_TAGS.contains(&tag) {
+            return Err("replaced or control");
+        }
+        if node.shadow_root.is_some() || tag == "slot" {
+            return Err("shadow tree");
+        }
+        if self.generates_content(c) {
+            return Err("generated content");
+        }
+        let d = cs.get_box().clone_display();
+        if d.is_contents() {
+            return Err("display contents");
+        }
+        if !matches!(d.outside(), DisplayOutside::Inline) {
+            return Err("block-level-box-in-inline-content");
+        }
+        if !matches!(d.inside(), DisplayInside::Flow) {
+            return Err("atomic inline");
+        }
+        if cs.get_box().clone_position() == Position::Relative {
+            return Err("relative inline");
+        }
+        if !baseline_aligned(cs) {
+            return Err("vertical-align");
+        }
+        let cf = self.font_info(cs, g.block)?;
+        // A `<br>` breaks the line, clearing the floats on the side it names; a `<wbr>` is a place it may. Each is an
+        // inline box of its own with NO edges, whatever it declares (`WBR_EDGES`).
+        if tag == "br" || tag == "wbr" {
+            let entry = self.entry(cs, &cf, &Edges::default())?;
+            if tag == "br" {
+                let clear = match cs.get_box().clone_clear() {
+                    Clear::None => 0,
+                    Clear::Left => 1,
+                    Clear::Right => 2,
+                    Clear::Both => 3,
+                    _ => return Err("logical clear"),
+                };
+                g.runs.push(Pending::Br { ws: ws_mode, clear, entry });
+                g.makes_line = true;
+            } else {
+                g.runs.push(Pending::Wbr { ws: ws_mode, entry });
+            }
+            return Ok(());
+        }
+        // An inline box holding a BLOCK child is laid out as one atomic box, not split around it.
+        for k in self.children(c).collect::<Vec<_>>() {
+            if self.node(k).kind == NodeKind::Element {
+                let ks = self.style(k)?;
+                let kd = ks.get_box().clone_display();
+                if !kd.is_none() && matches!(kd.outside(), DisplayOutside::Block) && !matches!(ks.get_box().clone_position(), Position::Absolute | Position::Fixed) && ks.get_box().clone_float() == Float::None {
+                    return Err("block in inline");
+                }
+            }
+        }
+        let c_ws = ws_mode_of(cs)?;
+        let c_wrap = wrap_mode(cs);
+        // Its edges, and the same with NO basis, which an intrinsic measure reads (`edgeInsets(c, null)`).
+        let edges = Edges::of(cs)?;
+        let plain_open = edges.plain_ml + edges.plain_left;
+        let plain_close = edges.plain_right + edges.plain_mr;
+        let varies = |k: usize| edges.math[k].is_some();
+        let close_lands = edges.right != 0.0 || edges.mr != 0.0 || edges.f_right != 0.0 || edges.f_mr != 0.0 || varies(2) || varies(3);
+        let edged = edges.ml + edges.left != 0.0
+            || edges.f_ml + edges.f_left != 0.0
+            || varies(0)
+            || varies(1)
+            || close_lands
+            || plain_open != 0.0
+            || plain_close != 0.0;
+        let entry = self.entry(cs, &cf, &edges)?;
+        g.runs.push(Pending::Open { plain: if edged { plain_open } else { 0.0 }, ws: c_ws, entry });
+        let outer = g.makes_line;
+        g.makes_line = false;
+        self.gather(c, cs, &cf, c_ws, c_wrap, g)?;
+        g.makes_line = outer || g.makes_line || edged;
+        let (own_h, own_asc) = if edged && close_lands { (content_height(cs, &self.face(cs)?), content_ascent(cs, &self.face(cs)?)) } else { (0.0, 0.0) };
+        g.runs.push(Pending::Close {
+            plain: if edged { plain_close } else { 0.0 },
+            ws: c_ws,
+            entry,
+            lands: edged && close_lands,
+            own_h,
+            own_asc,
+        });
+        let _ = font;
+        Ok(())
+    }
+
+    // An inline box's entry (`nlInlineEntry`): its edges — lengths, fractions and programs — its own font box and
+    // ascent, and no relative offset.
+    fn entry(&mut self, cs: &ComputedValues, _cf: &FontInfo, e: &Edges) -> Result<usize, &'static str> {
+        let face = self.face(cs)?;
+        let mut r = [0.0f64; crate::dom::INLINE_STRIDE];
+        r[..13].copy_from_slice(&[
+            e.ml, e.right, e.mr, e.top, e.bottom,
+            content_height(cs, &face), content_ascent(cs, &face),
+            0.0, 0.0, e.bt, e.br, e.bb, e.bl,
+        ]);
+        r[13..19].copy_from_slice(&[e.f_ml, e.f_left, e.f_right, e.f_mr, e.f_top, e.f_bottom]);
+        r[19] = e.left;
+        for k in 0..6 {
+            r[20 + k] = match &e.math[k] {
+                Some(prog) => self.math(Some(prog)) as f64,
+                None => f64::NAN,
+            };
+        }
+        r[29] = f64::NAN;
+        r[30] = f64::NAN;
+        self.entries.push(crate::dom::decode_inline(&r));
+        Ok(self.entries.len() - 1)
     }
 
     // `owner`'s font as a run takes it, its tab stops counted in `block`'s (`nlFontInfo` / `fontOf` / `lineHeightOf`
@@ -488,10 +753,7 @@ impl<'a> Walk<'a> {
     fn font_info(&mut self, owner: &ComputedValues, block: &ComputedValues) -> Result<FontInfo, &'static str> {
         let face = self.face(owner)?;
         let f = owner.get_font();
-        let size = match f.font_size.computed_size().px() as f64 {
-            0.0 => 16.0,
-            s => s,
-        };
+        let size = font_size(owner);
         let ls = spacing(&owner.get_inherited_text().letter_spacing.0)?;
         let ws = spacing(&owner.get_inherited_text().word_spacing)?;
         use style::values::generics::font::GenericLineHeight as LineHeight;
@@ -501,19 +763,15 @@ impl<'a> Walk<'a> {
             LineHeight::Length(l) => js_round(l.0.px() as f64),
         };
         let asc = ((lh - (js_round(face.asc * size) + js_round(face.desc * size))) / 2.0).floor() + js_round(face.asc * size);
-        // The tab stops, in the BLOCK's font.
+        // The tab stops: the BLOCK's font counts the spaces and gives the half-space minimum, the owner's `tab-size`
+        // says how many (`tabStopOf`).
         let block_face = self.face(block)?;
-        let bf = block.get_font();
-        let bsize = match bf.font_size.computed_size().px() as f64 {
-            0.0 => 16.0,
-            s => s,
-        };
         let bls = spacing(&block.get_inherited_text().letter_spacing.0)?;
         let bws = spacing(&block.get_inherited_text().word_spacing)?;
-        let bare = block_face.space * bsize;
+        let bare = block_face.space * font_size(block);
         let unit_space = bare + bls + bws;
         use style::values::generics::length::GenericLengthOrNumber as LengthOrNumber;
-        let raw = match &block.get_inherited_text().tab_size {
+        let raw = match &owner.get_inherited_text().tab_size {
             LengthOrNumber::Number(n) => n.0 as f64 * unit_space,
             LengthOrNumber::Length(l) => l.0.px() as f64,
         };
@@ -648,6 +906,88 @@ pub(crate) fn fresh_record() -> Input {
     }
     r[71] = -1.0;
     crate::dom::decode_input(&r)
+}
+
+// A box's four margins then four paddings as length-percentages (None for an `auto` margin), and which margins are
+// `auto` (rec[76]: 1 left, 2 right, 4 top, 8 bottom).
+fn edge_lps(style: &ComputedValues) -> Result<([Option<&LengthPercentage>; 8], u8), &'static str> {
+    use style::values::generics::length::GenericMargin as Margin;
+    let m = style.get_margin();
+    let p = style.get_padding();
+    let mut edges: [Option<&LengthPercentage>; 8] = [None; 8];
+    let mut auto = 0u8;
+    for (k, margin) in [&m.margin_top, &m.margin_right, &m.margin_bottom, &m.margin_left].into_iter().enumerate() {
+        match margin {
+            Margin::Auto => auto |= [4, 2, 8, 1][k],
+            Margin::LengthPercentage(lp) => edges[k] = Some(lp),
+            _ => return Err("margin anchor"),
+        }
+    }
+    for (k, padding) in [&p.padding_top, &p.padding_right, &p.padding_bottom, &p.padding_left].into_iter().enumerate() {
+        edges[4 + k] = Some(&padding.0);
+    }
+    Ok((edges, auto))
+}
+// The USED border widths, top right bottom left: the computed one is a length whatever the style (css-backgrounds-3),
+// and a `none` / `hidden` side draws none.
+fn used_borders(style: &ComputedValues) -> [f64; 4] {
+    let bd = style.get_border();
+    let used = |w: &style::values::computed::BorderSideWidth, s: style::values::specified::BorderStyle| {
+        if s.none_or_hidden() { 0.0 } else { w.0.to_f64_px() }
+    };
+    [
+        used(&bd.border_top_width, bd.border_top_style),
+        used(&bd.border_right_width, bd.border_right_style),
+        used(&bd.border_bottom_width, bd.border_bottom_style),
+        used(&bd.border_left_width, bd.border_left_style),
+    ]
+}
+// A run that is an inline box's edge or a break (`nlEncodeRun`): its entry, the edge with no basis, its mode.
+fn edge_run(kind: u8, inline: usize, plain: f64, ws: u8) -> Run {
+    Run {
+        kind,
+        font: inline as i32,
+        size: 0.0,
+        ls: plain,
+        ws: 0.0,
+        line_height: 0.0,
+        asc: 0.0,
+        metric: 0.0,
+        ws_mode: ws,
+        tab_px: 0.0,
+        tab_min: 0.0,
+        line_mode: 0,
+        lands: false,
+        plain: if kind == RUN_OPEN || kind == RUN_CLOSE { plain } else { 0.0 },
+    }
+}
+// Two runs' fonts one run can hold (`nlSameFi`).
+fn same_font(a: &FontInfo, b: &FontInfo) -> bool {
+    a.face == b.face && a.size == b.size && a.ls == b.ls && a.ws == b.ws && a.lh == b.lh && a.tab_px == b.tab_px && a.tab_min == b.tab_min
+}
+// Does the box sit on its parent's baseline — `vertical-align: baseline`, no shift?
+fn baseline_aligned(style: &ComputedValues) -> bool {
+    use style::values::generics::box_::GenericBaselineShift as BaselineShift;
+    use style::values::specified::box_::AlignmentBaseline;
+    let b = style.get_box();
+    matches!(&b.baseline_shift, BaselineShift::Length(lp) if lp.to_length().is_some_and(|l| l.px() == 0.0))
+        && b.alignment_baseline == AlignmentBaseline::Baseline
+}
+// The face's content box at the element's size (`fontContentHeight`: ascent + descent, each rounded) and its ascent
+// (`fontAscent`, what `inlineAscent` answers of a box on the baseline).
+fn content_height(style: &ComputedValues, face: &Face) -> f64 {
+    let size = font_size(style);
+    js_round(face.asc * size) + js_round(face.desc * size)
+}
+fn content_ascent(style: &ComputedValues, face: &Face) -> f64 {
+    js_round(face.asc * font_size(style))
+}
+// The used font size (`fontOf`'s `computedFontSizePx(el) || 16`).
+fn font_size(style: &ComputedValues) -> f64 {
+    match style.get_font().font_size.computed_size().px() as f64 {
+        0.0 => 16.0,
+        s => s,
+    }
 }
 
 // A size's length-percentage, None for `auto` / `none` / a keyword.
@@ -951,7 +1291,7 @@ fn scrolls(o: Overflow) -> bool {
     matches!(o, Overflow::Scroll | Overflow::Auto | Overflow::Hidden)
 }
 // The white-space mode (`WS_MODE[whiteSpaceOf(el)]`) — the six `white-space` values the longhands spell.
-fn ws_mode(style: &ComputedValues) -> Result<u8, &'static str> {
+fn ws_mode_of(style: &ComputedValues) -> Result<u8, &'static str> {
     use style::computed_values::text_wrap_mode::T as TextWrapMode;
     let t = style.get_inherited_text();
     let wrap = t.text_wrap_mode == TextWrapMode::Wrap;
@@ -1071,6 +1411,25 @@ pub(crate) fn input_diff(js: &Input, js_maths: &[f64], rust: &Input, rust_maths:
         inset_left, auto_margins, legacy_align, indent_px, indent_frac, indent_hanging, indent_each_line,
         indent_spent, width_kw,
     );
+    out
+}
+// …an inline box's entry.
+pub(crate) fn inline_diff(js: &InlineBox, js_maths: &[f64], rust: &InlineBox, rust_maths: &[f64]) -> Vec<FieldDiff> {
+    let mut out = Vec::new();
+    macro_rules! cmp {
+        ($($f:ident),* $(,)?) => {$(
+            if let Some(close) = Same::diff(&js.$f, &rust.$f) {
+                out.push(FieldDiff { field: stringify!($f), close, js: format!("{:?}", js.$f), rust: format!("{:?}", rust.$f) });
+            }
+        )*};
+    }
+    cmp!(ml, right, mr, top, bottom, own_h, own_asc, rel_x, rel_y, bt, br, bb, bl, f_ml, f_left, f_right, f_mr, f_top, f_bottom, left, rel_xf, rel_yf, rel_yi);
+    for (field, a, b) in [("math", &js.math[..], &rust.math[..]), ("rel_math", &js.rel_math[..], &rust.rel_math[..])] {
+        if let Some(close) = a.iter().zip(b).map(|(&a, &b)| program_diff(js_maths, a, rust_maths, b)).fold(None, worse) {
+            let text = |maths, refs: &[u32]| format!("{:?}", refs.iter().map(|&m| program_text(maths, m)).collect::<Vec<_>>());
+            out.push(FieldDiff { field, close, js: text(js_maths, a), rust: text(rust_maths, b) });
+        }
+    }
     out
 }
 // …and a run.

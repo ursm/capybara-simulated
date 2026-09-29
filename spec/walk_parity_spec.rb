@@ -63,6 +63,15 @@ RSpec.describe 'walk parity' do
     HTML
   end
 
+  # Inline content: text in each inline box's own font, the boxes' edges on OPEN / CLOSE runs and in the inline table
+  # (a percentage one as its fraction), a `<br>` and a `<wbr>` as edgeless boxes of their own.
+  it 'builds the runs and the inline table of text in inline boxes' do
+    expect_clean(parity(<<~HTML, 'b { font-size: 20px } .edged { padding: 0 4px 0 2%; margin-right: 3px; border-left: 2px solid }'))
+      <p>plain <b>bold <i>both</i></b> <span class="edged">edged</span> <span></span>
+         a line<br>after a break, and a long<wbr>word <span style="white-space: pre-wrap">kept   spaces</span></p>
+    HTML
+  end
+
   it 'declines by name what it has not been taught' do
     stats = parity('<div style="float: left">x</div>')
     expect(stats['compared']).to eq(0)

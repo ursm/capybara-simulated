@@ -8,7 +8,7 @@ use std::collections::BTreeMap;
 use std::fmt::Write;
 
 use crate::dom::{dom, realm_id, register, NodeId};
-use crate::layout::{Input, Run, RunText};
+use crate::layout::{InlineBox, Input, Run, RunText};
 use crate::walk::{self, Basis, Face, Faces, FieldDiff, Outcome};
 
 pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Object>, context_id: i32) {
@@ -28,8 +28,15 @@ pub(crate) struct Parity {
 impl Parity {
     // Keep a pass's records as the JS walk sent them, for `walkParity` to hold the Rust walk's against. The faces are
     // asked afresh each pass: a face that arrived since resolves the same family to another.
-    pub(crate) fn keep(&mut self, inputs: &[Input], runs: &[Run], run_texts: &[RunText], maths: &[f64], basis: Basis) {
-        self.pending = Some(Pass { inputs: inputs.to_vec(), runs: runs.to_vec(), run_texts: run_texts.to_vec(), maths: maths.to_vec(), basis });
+    pub(crate) fn keep(&mut self, inputs: &[Input], runs: &[Run], run_texts: &[RunText], inlines: &[InlineBox], maths: &[f64], basis: Basis) {
+        self.pending = Some(Pass {
+            inputs: inputs.to_vec(),
+            runs: runs.to_vec(),
+            run_texts: run_texts.to_vec(),
+            inlines: inlines.to_vec(),
+            maths: maths.to_vec(),
+            basis,
+        });
         self.faces = Faces::default();
     }
 }
@@ -38,6 +45,7 @@ struct Pass {
     inputs: Vec<Input>,
     runs: Vec<Run>,
     run_texts: Vec<RunText>,
+    inlines: Vec<InlineBox>,
     maths: Vec<f64>,
     basis: Basis,
 }
@@ -92,16 +100,18 @@ fn walk_parity(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgum
             let tag = |nid: f64| {
                 NodeId::from_i64(nid as i64).and_then(|id| arena.get(id)).map(|n| n.local_name.to_string()).unwrap_or_else(|| "anon".into())
             };
-            if built.inputs.len() != pass.inputs.len() || built.runs.len() != pass.runs.len() {
+            if built.inputs.len() != pass.inputs.len() || built.runs.len() != pass.runs.len() || built.inlines.len() != pass.inlines.len() {
                 stats.shape += 1;
                 if stats.samples.len() < MAX_SAMPLES {
                     stats.samples.push(format!(
-                        "shape at <{}>: records js {} rust {}, runs js {} rust {}",
+                        "shape at <{}>: records js {} rust {}, runs js {} rust {}, inlines js {} rust {}",
                         tag(pass.inputs[0].nid),
                         pass.inputs.len(),
                         built.inputs.len(),
                         pass.runs.len(),
-                        built.runs.len()
+                        built.runs.len(),
+                        pass.inlines.len(),
+                        built.inlines.len()
                     ));
                 }
                 return;
@@ -131,6 +141,9 @@ fn walk_parity(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgum
                     diffs.push(FieldDiff { field: "text", close: false, js: format!("{:?}", text(&pass.run_texts[i])), rust: format!("{:?}", text(&built.run_texts[i])) });
                 }
                 note(stats, format!("run {i}"), diffs);
+            }
+            for (i, (js, rust)) in pass.inlines.iter().zip(&built.inlines).enumerate() {
+                note(stats, format!("inline {i}"), walk::inline_diff(js, &pass.maths, rust, &built.maths));
             }
             if !real {
                 stats.clean += 1;

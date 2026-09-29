@@ -2113,7 +2113,7 @@ pub(crate) const MATH_SLOTS: [usize; 27] = [
 ];
 const RUN_STRIDE: usize = 12;
 // …and per inline box in the inline table (layout.js `NL_INLINE_STRIDE` / `nlInlineEntry`, layout::InlineBox).
-const INLINE_STRIDE: usize = 31;
+pub(crate) const INLINE_STRIDE: usize = 31;
 
 // A Float64Array argument's values, read IN PLACE: a pass's records run to megabytes on a large page (1,320 bytes a
 // record), and copying them out — twice, through a byte vector — was a fifth of a pass. Copied only where the view is
@@ -2337,7 +2337,7 @@ fn decode_run(r: &[f64]) -> crate::layout::Run {
     }
 }
 // …one inline entry.
-fn decode_inline(r: &[f64]) -> crate::layout::InlineBox {
+pub(crate) fn decode_inline(r: &[f64]) -> crate::layout::InlineBox {
     crate::layout::InlineBox {
         ml: r[0],
         right: r[1],
@@ -2630,7 +2630,7 @@ fn layout_pass(
         // (…and the pass root's containing block, which the ROOT's own percentages resolve against: its height is not
         // one the pass takes, so the JS side hands it beside the flag.)
         let basis = crate::walk::Basis { w: root_cb_w, h: args.get(15).number_value(scope).unwrap_or(f64::NAN) };
-        dom(scope).walk_parity.entry(cid).or_default().keep(&inputs, &runs, &run_texts, &maths, basis);
+        dom(scope).walk_parity.entry(cid).or_default().keep(&inputs, &runs, &run_texts, &inlines, &maths, basis);
     }
     // The measures kept of the placed chunks, lent to the pass and taken back.
     let mut measure = std::mem::take(&mut dom(scope).layout_chunks.entry(cid).or_default().measure);
