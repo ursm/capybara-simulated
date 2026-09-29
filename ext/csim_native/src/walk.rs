@@ -62,11 +62,20 @@ impl Faces {
     }
 }
 
-// What a walk hands the layout pass: its records, its runs and their texts.
+// What a walk hands the layout pass: its records, its runs and their texts, and the math table its programs are in.
 pub(crate) struct Built {
     pub(crate) inputs: Vec<Input>,
     pub(crate) runs: Vec<Run>,
     pub(crate) run_texts: Vec<RunText>,
+    pub(crate) maths: Vec<f64>,
+}
+
+// The pass root's containing block, which a percentage in the ROOT's own record resolves against: the viewport, for the
+// page's root element.
+#[derive(Clone, Copy)]
+pub(crate) struct Basis {
+    pub(crate) w: f64,
+    pub(crate) h: f64,
 }
 
 pub(crate) enum Outcome {
@@ -76,11 +85,20 @@ pub(crate) enum Outcome {
 }
 
 // Walk the subtree at `root` — the element the JS walk took as its pass root.
-pub(crate) fn build(arena: &RealmArena, root: NodeId, faces: &mut Faces) -> Outcome {
+pub(crate) fn build(arena: &RealmArena, root: NodeId, basis: Basis, faces: &mut Faces) -> Outcome {
     faces.missing.clear();
-    let mut walk = Walk { arena, faces, inputs: Vec::new(), runs: Vec::new(), run_texts: Vec::new() };
+    let mut walk = Walk {
+        arena,
+        faces,
+        basis,
+        inputs: Vec::new(),
+        runs: Vec::new(),
+        run_texts: Vec::new(),
+        maths: Vec::new(),
+        math_index: HashMap::new(),
+    };
     match walk.root(root) {
-        Ok(()) => Outcome::Built(Built { inputs: walk.inputs, runs: walk.runs, run_texts: walk.run_texts }),
+        Ok(()) => Outcome::Built(Built { inputs: walk.inputs, runs: walk.runs, run_texts: walk.run_texts, maths: walk.maths }),
         Err(_) if !walk.faces.missing.is_empty() => Outcome::NeedsFaces,
         Err(why) => Outcome::Declined(why),
     }
@@ -91,9 +109,13 @@ type Step = Result<(), &'static str>;
 struct Walk<'a> {
     arena: &'a RealmArena,
     faces: &'a mut Faces,
+    basis: Basis,
     inputs: Vec<Input>,
     runs: Vec<Run>,
     run_texts: Vec<RunText>,
+    // The programs the records name, each once (`[length, op, a, b, …]` at its offset), and where each one is.
+    maths: Vec<f64>,
+    math_index: HashMap<Vec<u64>, u32>,
 }
 
 // A block's font as its runs and its line box take it (`nlFontInfo`).
@@ -133,6 +155,20 @@ impl<'a> Walk<'a> {
             return Err("root unsupported");
         }
         self.record(root, -1)
+    }
+
+    // The offset of `prog` in the pass's math table, entered once; NO_MATH for none.
+    fn math(&mut self, prog: Option<&[f64]>) -> u32 {
+        let Some(prog) = prog else { return crate::layout::NO_MATH };
+        let key: Vec<u64> = prog.iter().map(|v| v.to_bits()).collect();
+        if let Some(&at) = self.math_index.get(&key) {
+            return at;
+        }
+        let at = self.maths.len() as u32;
+        self.maths.push((prog.len() / 3) as f64);
+        self.maths.extend_from_slice(prog);
+        self.math_index.insert(key, at);
+        at
     }
 
     fn style(&self, id: NodeId) -> Result<Arc<ComputedValues>, &'static str> {
@@ -190,34 +226,71 @@ impl<'a> Walk<'a> {
         let pos = style.get_position();
         rec.border_box = pos.box_sizing == BoxSizing::BorderBox;
         rec.decl_border_box = rec.border_box;
-        rec.width = size(&pos.width)?;
-        if rec.width.is_nan() && !matches!(pos.width, style::values::generics::length::GenericSize::Auto) {
+        // The six sizes: a length as itself; one with a percentage in it resolved here against the pass root's
+        // containing block where the record is the ROOT's (native is handed no basis for it), and anywhere else
+        // handed to native as the pair — or the program — it resolves at the basis it has (`walkRecord`'s `size`).
+        let native_basis = parent >= 0;
+        use style::values::generics::length::GenericSize as Size;
+        if !matches!(pos.width, Size::Auto | Size::LengthPercentage(_)) {
             return Err("width keyword");
         }
-        rec.height = size(&pos.height)?;
-        rec.min_w = size(&pos.min_width)?;
-        rec.max_w = max_size(&pos.max_width)?;
-        rec.min_h = size(&pos.min_height)?;
-        rec.max_h = max_size(&pos.max_height)?;
-        rec.decl_w = rec.width;
-        rec.decl_min_w = rec.min_w;
-        rec.decl_max_w = rec.max_w;
+        let sizes: [(Option<&LengthPercentage>, f64); 6] = [
+            (size_lp(&pos.width)?, self.basis.w),
+            (size_lp(&pos.height)?, self.basis.h),
+            (size_lp(&pos.min_width)?, self.basis.w),
+            (max_size_lp(&pos.max_width)?, self.basis.w),
+            (size_lp(&pos.min_height)?, self.basis.h),
+            (max_size_lp(&pos.max_height)?, self.basis.h),
+        ];
+        let mut slots = [f64::NAN; 6];
+        for (k, (lp, basis)) in sizes.iter().enumerate() {
+            let Some(lp) = lp else { continue };
+            if !lp.has_percentage() {
+                slots[k] = length(lp)?;
+            } else if !native_basis {
+                slots[k] = at(lp, *basis)?.max(0.0);
+            } else {
+                let spec = spec(lp)?;
+                rec.pct_sizes[k] = spec.frac;
+                rec.pct_px[k] = spec.px;
+                rec.pct_math[k] = self.math(spec.prog.as_deref());
+            }
+        }
+        [rec.width, rec.height, rec.min_w, rec.max_w, rec.min_h, rec.max_h] = slots;
+        // (…the DECLARED inline sizing, which has no basis at all: a percentage in it is none, `auto`.)
+        let declared = |k: usize| sizes[k].0.filter(|lp| !lp.has_percentage()).map_or(Ok(f64::NAN), |lp| length(lp));
+        rec.decl_w = declared(0)?;
+        rec.decl_min_w = declared(2)?;
+        rec.decl_max_w = declared(3)?;
+        rec.pct_h_decl = [1, 4, 5].iter().any(|&k| sizes[k].0.is_some_and(|lp| lp.has_percentage()));
+        // The margins and padding, likewise — against the containing block's WIDTH, all eight.
         let m = style.get_margin();
-        let margins = [&m.margin_top, &m.margin_right, &m.margin_bottom, &m.margin_left];
-        let mut auto = 0u8;
-        let mut mv = [0.0; 4];
-        for (k, margin) in margins.iter().enumerate() {
+        let p = style.get_padding();
+        use style::values::generics::length::GenericMargin as Margin;
+        let mut edges: [Option<&LengthPercentage>; 8] = [None; 8];
+        for (k, margin) in [&m.margin_top, &m.margin_right, &m.margin_bottom, &m.margin_left].into_iter().enumerate() {
             match margin {
-                style::values::generics::length::GenericMargin::Auto => auto |= [4, 2, 8, 1][k],
-                style::values::generics::length::GenericMargin::LengthPercentage(lp) => mv[k] = length(lp)?,
+                Margin::Auto => rec.auto_margins |= [4, 2, 8, 1][k],
+                Margin::LengthPercentage(lp) => edges[k] = Some(lp),
                 _ => return Err("margin anchor"),
             }
         }
-        rec.auto_margins = auto;
-        [rec.mt, rec.mr, rec.mb, rec.ml] = mv;
-        let p = style.get_padding();
-        [rec.pt, rec.pr, rec.pb, rec.pl] =
-            [length(&p.padding_top.0)?, length(&p.padding_right.0)?, length(&p.padding_bottom.0)?, length(&p.padding_left.0)?];
+        for (k, padding) in [&p.padding_top, &p.padding_right, &p.padding_bottom, &p.padding_left].into_iter().enumerate() {
+            edges[4 + k] = Some(&padding.0);
+        }
+        let parts = if !edges.iter().flatten().any(|lp| lp.has_percentage()) {
+            EdgeParts::at(&edges, 0.0)?
+        } else if !native_basis {
+            EdgeParts::at(&edges, self.basis.w)?
+        } else {
+            EdgeParts::linear(&edges)?.map_or_else(|| EdgeParts::clamped(&edges), Ok)?
+        };
+        [rec.mt, rec.mr, rec.mb, rec.ml, rec.pt, rec.pr, rec.pb, rec.pl] = parts.px;
+        rec.edge_px = parts.px;
+        rec.edge_frac = parts.frac;
+        for k in 0..8 {
+            rec.edge_math[k] = self.math(parts.prog[k].as_deref());
+        }
         // The USED border widths: the computed one is a length whatever the style (css-backgrounds-3), and a `none` /
         // `hidden` side draws none.
         let bd = style.get_border();
@@ -230,9 +303,13 @@ impl<'a> Walk<'a> {
             used(&bd.border_bottom_width, bd.border_bottom_style),
             used(&bd.border_left_width, bd.border_left_style),
         ];
-        rec.edge_px = [rec.mt, rec.mr, rec.mb, rec.ml, rec.pt, rec.pr, rec.pb, rec.pl];
-        rec.decl_edges_x = rec.pl + rec.pr + rec.bl + rec.br;
-        rec.decl_margin_x = rec.ml + rec.mr;
+        // (…and the horizontal ones at NO basis, what an intrinsic measure reads: a percentage in them is none.)
+        let bare = |lp: Option<&LengthPercentage>, floor: bool| match lp {
+            Some(lp) if !lp.has_percentage() => length(lp).map(|v| if floor { v.max(0.0) } else { v }),
+            _ => Ok(0.0),
+        };
+        rec.decl_edges_x = bare(edges[5], true)? + bare(edges[7], true)? + rec.bl + rec.br;
+        rec.decl_margin_x = bare(edges[1], false)? + bare(edges[3], false)?;
         rec.height_adjoins = auto_or_zero(&pos.height);
         rec.minh_adjoins = auto_or_zero(&pos.min_height);
         rec.bottom_adjoins = rec.height.is_nan();
@@ -306,7 +383,9 @@ impl<'a> Walk<'a> {
 
     // A block of text alone (`walkRecord`'s text-block arm over `nlGatherRuns`).
     fn text_block(&mut self, id: NodeId, idx: i32, style: &ComputedValues, ws_mode: u8) -> Step {
-        let (indent_px, indent_bits) = indent(style)?;
+        let (indent, indent_bits) = indent(style)?;
+        let indent_bites = indent.px != 0.0 || indent.frac != 0.0 || indent.prog.is_some();
+        let indent_math = self.math(indent.prog.as_deref());
         let font = self.font_info(style, style)?;
         let starts_at_right = style.get_inherited_box().direction == Direction::Rtl;
         let align = align_code(style.get_inherited_text().text_align, starts_at_right);
@@ -326,7 +405,7 @@ impl<'a> Walk<'a> {
             let raw = &cn.data;
             let stripped: Vec<u16> = if preserve { raw.iter().copied().filter(|&u| u != 0x0D && u != 0x0C).collect() } else { raw.clone() };
             let td: Vec<u16> = if no_shy && stripped.contains(&0xAD) { stripped.iter().copied().filter(|&u| u != 0xAD).collect() } else { stripped.clone() };
-            if td.is_empty() && !raw.is_empty() && indent_px != 0.0 {
+            if td.is_empty() && !raw.is_empty() && indent_bites {
                 return Err("text-not-measurable");
             }
             if td.is_empty() && !stripped.is_empty() {
@@ -366,8 +445,9 @@ impl<'a> Walk<'a> {
         // (…the indent and the alignment written before the gather, as the JS walk writes them: a block whose text
         // makes no line keeps them too.)
         let rec = &mut self.inputs[idx as usize];
-        rec.indent_px = indent_px;
-        rec.indent_frac = 0.0;
+        rec.indent_px = indent.px;
+        rec.indent_frac = indent.frac;
+        rec.indent_math = indent_math;
         rec.indent_hanging = indent_bits & 256 != 0;
         rec.indent_each_line = indent_bits & 512 != 0;
         rec.text_align = align;
@@ -570,23 +650,287 @@ pub(crate) fn fresh_record() -> Input {
     crate::dom::decode_input(&r)
 }
 
-// A size (`width`, `height`, `min-*`): its px, NaN for `auto` and the keywords.
-fn size(v: &style::values::computed::Size) -> Result<f64, &'static str> {
+// A size's length-percentage, None for `auto` / `none` / a keyword.
+fn size_lp(v: &style::values::computed::Size) -> Result<Option<&LengthPercentage>, &'static str> {
     use style::values::generics::length::GenericSize as Size;
     match v {
-        Size::LengthPercentage(lp) => length(&lp.0),
+        Size::LengthPercentage(lp) => Ok(Some(&lp.0)),
         Size::AnchorSizeFunction(_) | Size::AnchorContainingCalcFunction(_) => Err("anchor size"),
-        _ => Ok(f64::NAN),
+        _ => Ok(None),
     }
 }
-fn max_size(v: &style::values::computed::MaxSize) -> Result<f64, &'static str> {
+fn max_size_lp(v: &style::values::computed::MaxSize) -> Result<Option<&LengthPercentage>, &'static str> {
     use style::values::generics::length::GenericMaxSize as MaxSize;
     match v {
-        MaxSize::LengthPercentage(lp) => length(&lp.0),
+        MaxSize::LengthPercentage(lp) => Ok(Some(&lp.0)),
         MaxSize::AnchorSizeFunction(_) | MaxSize::AnchorContainingCalcFunction(_) => Err("anchor size"),
-        _ => Ok(f64::NAN),
+        _ => Ok(None),
     }
 }
+
+// A COMPARISON program (layout.js `nlMathProgram`, evaluated by `layout::math_at`): postfix triples `[op, a, b]` —
+// `MATH_LINE` pushes `a + b × basis`, `MATH_MIN` / `MATH_MAX` / `MATH_SUM` fold the top two, `MATH_NEG` negates the top
+// and `MATH_SCALE` multiplies it by `a`. A piece with no comparison inside is ONE line, its `px + frac × basis`.
+const MATH_LINE: f64 = 0.0;
+const MATH_MIN: f64 = 1.0;
+const MATH_MAX: f64 = 2.0;
+const MATH_SUM: f64 = 3.0;
+const MATH_NEG: f64 = 4.0;
+const MATH_SCALE: f64 = 5.0;
+// …no deeper than native's evaluation stack.
+const MATH_DEPTH: usize = 16;
+
+// A value the record carries for native to resolve at the basis it has: `px + frac × basis`, or its program (whose pair
+// is then its figure at no basis) — `nlClampedSpec`'s `{px, frac, prog}`.
+struct Spec {
+    px: f64,
+    frac: f64,
+    prog: Option<Vec<f64>>,
+}
+
+type CalcNode = style::values::computed::length_percentage::CalcNode;
+
+// `lp` as a Spec: its pair where it is affine in its basis — a length, a percentage, a `calc()` of them — and its
+// program where a comparison bends it.
+fn spec(lp: &LengthPercentage) -> Result<Spec, &'static str> {
+    use style::values::computed::length_percentage::Unpacked;
+    match lp.unpack() {
+        Unpacked::Length(l) => Ok(Spec { px: l.px() as f64, frac: 0.0, prog: None }),
+        Unpacked::Percentage(p) => Ok(Spec { px: 0.0, frac: p.0 as f64, prog: None }),
+        Unpacked::Calc(calc) => match linear(calc.node()) {
+            Some((px, frac)) => Ok(Spec { px, frac, prog: None }),
+            None => {
+                let prog = program(calc.node())?;
+                Ok(Spec { px: math_at(&prog, 0.0), frac: 0.0, prog: Some(prog) })
+            }
+        },
+    }
+}
+// …what it is at a basis.
+fn at(lp: &LengthPercentage, basis: f64) -> Result<f64, &'static str> {
+    let s = spec(lp)?;
+    Ok(spec_at(&s, basis))
+}
+fn spec_at(s: &Spec, basis: f64) -> f64 {
+    match &s.prog {
+        Some(prog) => math_at(prog, basis),
+        None if s.frac == 0.0 => s.px,
+        None => s.px + s.frac * basis,
+    }
+}
+// A calc tree with no comparison in it, as its `px + frac × basis`.
+fn linear(node: &CalcNode) -> Option<(f64, f64)> {
+    use style::values::computed::length_percentage::ComputedLeaf as Leaf;
+    use style::values::generics::calc::GenericCalcNode as Node;
+    match node {
+        Node::Leaf(Leaf::Length(l)) => Some((l.px() as f64, 0.0)),
+        Node::Leaf(Leaf::Percentage(p)) => Some((0.0, p.0 as f64)),
+        Node::Negate(n) => linear(n).map(|(px, frac)| (-px, -frac)),
+        Node::Sum(terms) => terms.iter().try_fold((0.0, 0.0), |(px, frac), t| linear(t).map(|(p, f)| (px + p, frac + f))),
+        Node::Product(factors) => {
+            let (scale, operand) = product(factors)?;
+            linear(operand).map(|(px, frac)| (px * scale, frac * scale))
+        }
+        _ => None,
+    }
+}
+// A product's NUMBERS, multiplied (a division is an inverted one), and its one operand that is not a number.
+fn product(factors: &[CalcNode]) -> Option<(f64, &CalcNode)> {
+    use style::values::computed::length_percentage::ComputedLeaf as Leaf;
+    use style::values::generics::calc::GenericCalcNode as Node;
+    let mut scale = 1.0f64;
+    let mut operand = None;
+    for f in factors {
+        match f {
+            Node::Leaf(Leaf::Number(n)) => scale *= *n as f64,
+            Node::Invert(inner) => match &**inner {
+                Node::Leaf(Leaf::Number(n)) => scale /= *n as f64,
+                _ => return None,
+            },
+            _ if operand.is_none() => operand = Some(f),
+            _ => return None,
+        }
+    }
+    scale.is_finite().then_some(())?;
+    operand.map(|o| (scale, o))
+}
+// A calc tree as its program.
+fn program(node: &CalcNode) -> Result<Vec<f64>, &'static str> {
+    let mut prog = Vec::new();
+    let mut depth = 0usize;
+    let mut deepest = 0usize;
+    emit(node, &mut prog, &mut depth, &mut deepest)?;
+    if deepest > MATH_DEPTH {
+        return Err("math too deep");
+    }
+    Ok(prog)
+}
+fn emit(node: &CalcNode, prog: &mut Vec<f64>, depth: &mut usize, deepest: &mut usize) -> Step {
+    use style::values::generics::calc::{GenericCalcNode as Node, MinMaxOp};
+    if let Some((px, frac)) = linear(node) {
+        prog.extend([MATH_LINE, px, frac]);
+        *depth += 1;
+        *deepest = (*deepest).max(*depth);
+        return Ok(());
+    }
+    let fold = |prog: &mut Vec<f64>, depth: &mut usize, op: f64| {
+        prog.extend([op, 0.0, 0.0]);
+        *depth -= 1;
+    };
+    match node {
+        Node::MinMax(args, op) => {
+            let op = if matches!(op, MinMaxOp::Min) { MATH_MIN } else { MATH_MAX };
+            for (i, a) in args.iter().enumerate() {
+                emit(a, prog, depth, deepest)?;
+                if i > 0 {
+                    fold(prog, depth, op);
+                }
+            }
+            if args.is_empty() {
+                return Err("math function");
+            }
+        }
+        // (…CSS's own `max(lo, min(v, hi))`: where the bounds cross, the minimum wins)
+        Node::Clamp { min, center, max } => {
+            emit(min, prog, depth, deepest)?;
+            emit(center, prog, depth, deepest)?;
+            emit(max, prog, depth, deepest)?;
+            fold(prog, depth, MATH_MIN);
+            fold(prog, depth, MATH_MAX);
+        }
+        Node::Sum(terms) => {
+            for (i, t) in terms.iter().enumerate() {
+                emit(t, prog, depth, deepest)?;
+                if i > 0 {
+                    fold(prog, depth, MATH_SUM);
+                }
+            }
+        }
+        Node::Negate(n) => {
+            emit(n, prog, depth, deepest)?;
+            prog.extend([MATH_NEG, 0.0, 0.0]);
+        }
+        Node::Product(factors) => {
+            let (scale, operand) = product(factors).ok_or("math function")?;
+            emit(operand, prog, depth, deepest)?;
+            if scale != 1.0 {
+                prog.extend([MATH_SCALE, scale, 0.0]);
+            }
+        }
+        _ => return Err("math function"),
+    }
+    Ok(())
+}
+// A program at a basis (`layout::math_at`, layout.js `nlMathAt`).
+fn math_at(prog: &[f64], basis: f64) -> f64 {
+    let mut stack: Vec<f64> = Vec::with_capacity(MATH_DEPTH);
+    for t in prog.chunks_exact(3) {
+        let (op, a, b) = (t[0], t[1], t[2]);
+        if op == MATH_LINE {
+            stack.push(if b == 0.0 { a } else { a + b * basis });
+        } else if op == MATH_NEG {
+            let v = stack.pop().unwrap_or(f64::NAN);
+            stack.push(-v);
+        } else if op == MATH_SCALE {
+            let v = stack.pop().unwrap_or(f64::NAN);
+            stack.push(v * a);
+        } else {
+            let y = stack.pop().unwrap_or(f64::NAN);
+            let x = stack.pop().unwrap_or(f64::NAN);
+            stack.push(if op == MATH_MIN { x.min(y) } else if op == MATH_MAX { x.max(y) } else { x + y });
+        }
+    }
+    stack.first().copied().unwrap_or(f64::NAN)
+}
+
+// The bases the JS walk probes an edge at to decide it is on its line (`NL_EDGE_PROBE` / `NL_EDGE_CHECKS`).
+const EDGE_PROBE: f64 = 1_048_576.0;
+const EDGE_CHECKS: [f64; 4] = [217.0, 1531.0, 4099.0, 30011.0];
+
+// A box's four margins and four paddings as the record carries them: each one's length part, its fraction of the
+// containing block's width, and its program where a comparison bends it (`nlEdgeParts` / `nlClampedEdgeParts`).
+struct EdgeParts {
+    px: [f64; 8],
+    frac: [f64; 8],
+    prog: [Option<Vec<f64>>; 8],
+}
+
+impl EdgeParts {
+    // Each edge at `basis` — an `auto` margin 0, a padding floored at 0 (`edgeInsets`).
+    fn values(edges: &[Option<&LengthPercentage>; 8], basis: f64) -> Result<[f64; 8], &'static str> {
+        let mut out = [0.0; 8];
+        for (k, lp) in edges.iter().enumerate() {
+            if let Some(lp) = lp {
+                let v = at(lp, basis)?;
+                out[k] = if k >= 4 { v.max(0.0) } else { v };
+            }
+        }
+        Ok(out)
+    }
+    // …all resolved at one basis, no fraction left.
+    fn at(edges: &[Option<&LengthPercentage>; 8], basis: f64) -> Result<EdgeParts, &'static str> {
+        Ok(EdgeParts { px: Self::values(edges, basis)?, frac: [0.0; 8], prog: Default::default() })
+    }
+    // …as `px + frac × basis` each, where every one is on its line: read at 0 and at the far probe, and checked at the
+    // bases between where a math function could bend one — None where one does.
+    fn linear(edges: &[Option<&LengthPercentage>; 8]) -> Result<Option<EdgeParts>, &'static str> {
+        use style::values::computed::length_percentage::Unpacked;
+        let px = Self::values(edges, 0.0)?;
+        let far = Self::values(edges, EDGE_PROBE)?;
+        let frac: [f64; 8] = std::array::from_fn(|k| (far[k] - px[k]) / EDGE_PROBE);
+        if edges.iter().flatten().any(|lp| matches!(lp.unpack(), Unpacked::Calc(_))) {
+            for basis in EDGE_CHECKS {
+                let got = Self::values(edges, basis)?;
+                if (0..8).any(|k| (got[k] - (px[k] + frac[k] * basis)).abs() > 1e-3) {
+                    return Ok(None);
+                }
+            }
+        }
+        Ok(Some(EdgeParts { px, frac, prog: Default::default() }))
+    }
+    // …and where one is not: each edge's own Spec, a padding that varies as a program floored at 0.
+    fn clamped(edges: &[Option<&LengthPercentage>; 8]) -> Result<EdgeParts, &'static str> {
+        let mut parts = EdgeParts { px: [0.0; 8], frac: [0.0; 8], prog: Default::default() };
+        for (k, lp) in edges.iter().enumerate() {
+            let Some(lp) = lp else { continue };
+            let s = spec(lp)?;
+            if k < 4 {
+                parts.px[k] = s.px;
+                parts.frac[k] = s.frac;
+                parts.prog[k] = s.prog;
+                continue;
+            }
+            let prog = if s.prog.is_none() && s.frac == 0.0 {
+                None
+            } else {
+                let mut prog = s.prog.unwrap_or_else(|| vec![MATH_LINE, s.px, s.frac]);
+                prog.extend([MATH_LINE, 0.0, 0.0, MATH_MAX, 0.0, 0.0]);
+                Some(prog)
+            };
+            parts.px[k] = match &prog {
+                Some(prog) => math_at(prog, 0.0),
+                None => s.px.max(0.0),
+            };
+            parts.prog[k] = prog;
+        }
+        // (…held to what the edges ARE at the probes, as the JS walk holds them: a shape neither form reproduces is the
+        // one it would resolve against its own layout's basis, which this walk declines.)
+        for basis in std::iter::once(EDGE_PROBE).chain(EDGE_CHECKS) {
+            let want = Self::values(edges, basis)?;
+            for k in 0..8 {
+                let got = match &parts.prog[k] {
+                    Some(prog) => math_at(prog, basis),
+                    None => parts.px[k] + parts.frac[k] * basis,
+                };
+                if !((want[k] - got).abs() <= 1e-3) {
+                    return Err("percentage-basis");
+                }
+            }
+        }
+        Ok(parts)
+    }
+}
+
 // A length's px — a value with a percentage in it is not taught yet.
 fn length(lp: &LengthPercentage) -> Result<f64, &'static str> {
     lp.to_length().map(|l: Length| l.px() as f64).ok_or("percentage")
@@ -642,14 +986,15 @@ fn white_space_only_is_content(text: &[u16], mode: u8) -> bool {
         mode == WS_PRE_LINE && text.contains(&0x0A)
     }
 }
-// The block's `text-indent` as the record takes it: its px and the hanging / each-line bits.
-fn indent(style: &ComputedValues) -> Result<(f64, u32), &'static str> {
+// The block's `text-indent` as the record takes it (`nlIndentOf`): its Spec and the hanging / each-line bits.
+fn indent(style: &ComputedValues) -> Result<(Spec, u32), &'static str> {
     let ti = &style.get_inherited_text().text_indent;
-    let px = length(&ti.length)?;
-    Ok((px, (if ti.hanging { 256 } else { 0 }) | (if ti.each_line { 512 } else { 0 })))
+    Ok((spec(&ti.length)?, (if ti.hanging { 256 } else { 0 }) | (if ti.each_line { 512 } else { 0 })))
 }
+// …and whether it can come to anything at some basis (`nlIndentMayBite`).
 fn indent_may_bite(style: &ComputedValues) -> Result<bool, &'static str> {
-    Ok(indent(style)?.0 != 0.0)
+    let (s, _) = indent(style)?;
+    Ok(s.px != 0.0 || s.frac != 0.0 || s.prog.is_some())
 }
 // The line alignment code (`nlAlignCode(textAlignOf(…))`): 0 left, 1 right, 2 center, 3 justify.
 fn align_code(align: TextAlign, starts_at_right: bool) -> u8 {
@@ -688,8 +1033,18 @@ pub(crate) struct FieldDiff {
     pub(crate) js: String,
     pub(crate) rust: String,
 }
-pub(crate) fn input_diff(js: &Input, rust: &Input) -> Vec<FieldDiff> {
+pub(crate) fn input_diff(js: &Input, js_maths: &[f64], rust: &Input, rust_maths: &[f64]) -> Vec<FieldDiff> {
     let mut out = Vec::new();
+    // (…a program by what it IS: the two walks write the same value in different shapes and at different offsets.)
+    macro_rules! cmp_math {
+        ($($f:ident),* $(,)?) => {$(
+            let (a, b) = (math_refs(&js.$f), math_refs(&rust.$f));
+            if let Some(close) = a.iter().zip(b).map(|(&a, &b)| program_diff(js_maths, a, rust_maths, b)).fold(None, worse) {
+                out.push(FieldDiff { field: stringify!($f), close, js: format!("{:?}", a.iter().map(|&m| program_text(js_maths, m)).collect::<Vec<_>>()), rust: format!("{:?}", b.iter().map(|&m| program_text(rust_maths, m)).collect::<Vec<_>>()) });
+            }
+        )*};
+    }
+    cmp_math!(flex_main_gap_math, flex_cross_gap_math, chain_math, rel_math, flex_basis_math, pct_math, edge_math, inset_math, indent_math);
     macro_rules! cmp {
         ($($f:ident),* $(,)?) => {$(
             if let Some(close) = Same::diff(&js.$f, &rust.$f) {
@@ -698,22 +1053,22 @@ pub(crate) fn input_diff(js: &Input, rust: &Input) -> Vec<FieldDiff> {
         )*};
     }
     cmp!(
-        nid, parent, display, border_box, width, height, min_w, max_w, min_h, max_h, mt, mr, mb, ml, pt, pr, pb, pl, bt, br,
-        bb, bl, height_adjoins, minh_adjoins, bottom_adjoins, run_start, run_count, strut_lh, strut_asc, float_kind, clear,
-        takes_clearance, starts_bfc, flex_justify, flex_main_gap, flex_cross_align, flex_main_is_x, flex_wrap, flex_cross_flip,
-        flex_align_content, flex_cross_gap, flex_main_reverse, flex_cross_far, has_replayed_oof, rel_x, rel_y, rel_pct,
-        rel_x_px, rel_x_neg, measured_as_block, equal_share, chain_rel, chain_px, chain_shift, chain_math, rel_math,
-        flex_item_auto, flex_baseline_asc, flex_line_nat, flex_line, out_of_flow, sp_x, sp_y, cell_col, cell_colspan,
-        cell_rowspan, caption_side, rtl, text_align, anon_cross, ws_mode, item_auto_height, pushed_h_indefinite, grid_start,
-        decl_w, decl_min_w, decl_max_w, flex_basis, flex_grow, decl_border_box, flex_shrink, flex_basis_cb, flex_basis_frac,
-        flex_basis_math, pct_sizes, pct_px, pct_math, edge_frac, edge_px, edge_math, basis_w, inset_frac, inset_math,
-        flex_main_gap_frac, flex_main_gap_math, flex_cross_gap_math, indent_math, flex_cross_gap_frac, flex_basis_kw,
-        scrolls_x, scrolls_y, is_button, self_sizes, block_axis_is_x, decl_edges_x, decl_margin_x, height_from_outside,
-        cell_pct, cell_min_content, cell_max_content, height_is_floor, cell_valign, cell_pct_h_child, anon_group,
-        group_pct_h, pct_h_decl, row_imposed, row_height, row_pct, row_rank, table_fixed, flex_stretch, flex_native,
-        flex_dir_reverse, replaced, lays_out_children, ratio, ratio_only, shrinks_to_nothing, control_baseline,
-        control_font_box, control_font_asc, intrinsic_w, intrinsic_h, cb_index, cb_rect, inset_top, inset_right,
-        inset_bottom, inset_left, auto_margins, legacy_align, indent_px, indent_frac, indent_hanging, indent_each_line,
+        nid, parent, display, border_box, width, height, min_w, max_w, min_h, max_h, mt, mr, mb, ml, pt, pr, pb, pl,
+        bt, br, bb, bl, height_adjoins, minh_adjoins, bottom_adjoins, run_start, run_count, strut_lh, strut_asc,
+        float_kind, clear, takes_clearance, starts_bfc, flex_justify, flex_main_gap, flex_cross_align, flex_main_is_x,
+        flex_wrap, flex_cross_flip, flex_align_content, flex_cross_gap, flex_main_reverse, flex_cross_far,
+        has_replayed_oof, rel_x, rel_y, rel_pct, rel_x_px, rel_x_neg, measured_as_block, equal_share, chain_rel,
+        chain_px, chain_shift, flex_item_auto, flex_baseline_asc, flex_line_nat, flex_line, out_of_flow, sp_x, sp_y,
+        cell_col, cell_colspan, cell_rowspan, caption_side, rtl, text_align, anon_cross, ws_mode, item_auto_height,
+        pushed_h_indefinite, grid_start, decl_w, decl_min_w, decl_max_w, flex_basis, flex_grow, decl_border_box,
+        flex_shrink, flex_basis_cb, flex_basis_frac, pct_sizes, pct_px, edge_frac, edge_px, basis_w, inset_frac,
+        flex_main_gap_frac, flex_cross_gap_frac, flex_basis_kw, scrolls_x, scrolls_y, is_button, self_sizes,
+        block_axis_is_x, decl_edges_x, decl_margin_x, height_from_outside, cell_pct, cell_min_content,
+        cell_max_content, height_is_floor, cell_valign, cell_pct_h_child, anon_group, group_pct_h, pct_h_decl,
+        row_imposed, row_height, row_pct, row_rank, table_fixed, flex_stretch, flex_native, flex_dir_reverse,
+        replaced, lays_out_children, ratio, ratio_only, shrinks_to_nothing, control_baseline, control_font_box,
+        control_font_asc, intrinsic_w, intrinsic_h, cb_index, cb_rect, inset_top, inset_right, inset_bottom,
+        inset_left, auto_margins, legacy_align, indent_px, indent_frac, indent_hanging, indent_each_line,
         indent_spent, width_kw,
     );
     out
@@ -730,6 +1085,57 @@ pub(crate) fn run_diff(js: &Run, rust: &Run) -> Vec<FieldDiff> {
     }
     cmp!(kind, font, size, ls, ws, line_height, asc, metric, ws_mode, tab_px, tab_min, line_mode, lands, plain);
     out
+}
+
+// A math field as its offsets, one or several.
+trait MathRefs {
+    fn refs(&self) -> &[u32];
+}
+impl MathRefs for u32 {
+    fn refs(&self) -> &[u32] {
+        std::slice::from_ref(self)
+    }
+}
+impl<const N: usize> MathRefs for [u32; N] {
+    fn refs(&self) -> &[u32] {
+        self
+    }
+}
+fn math_refs<T: MathRefs + ?Sized>(v: &T) -> &[u32] {
+    v.refs()
+}
+// The program at `at` in a math table (`[length, op, a, b, …]`), or None for NO_MATH or an offset past the table.
+fn program_at(maths: &[f64], at: u32) -> Option<&[f64]> {
+    if at == crate::layout::NO_MATH {
+        return None;
+    }
+    let at = at as usize;
+    let n = *maths.get(at)? as usize;
+    maths.get(at + 1..at + 1 + n * 3)
+}
+// Whether two programs differ in what they come to, at bases a page's width spans and past them.
+fn program_diff(a_maths: &[f64], a: u32, b_maths: &[f64], b: u32) -> Option<bool> {
+    match (program_at(a_maths, a), program_at(b_maths, b)) {
+        (None, None) => None,
+        (Some(pa), Some(pb)) => [0.0, 50.0, 217.0, 400.0, 1531.0, 4099.0, 30011.0, EDGE_PROBE]
+            .iter()
+            .map(|&basis| math_at(pa, basis).diff(&math_at(pb, basis)))
+            .fold(None, worse),
+        _ => Some(false),
+    }
+}
+fn program_text(maths: &[f64], at: u32) -> String {
+    match program_at(maths, at) {
+        Some(p) => format!("{p:?}"),
+        None => "-".into(),
+    }
+}
+fn worse(a: Option<bool>, b: Option<bool>) -> Option<bool> {
+    match (a, b) {
+        (Some(false), _) | (_, Some(false)) => Some(false),
+        (Some(true), _) | (_, Some(true)) => Some(true),
+        _ => None,
+    }
 }
 
 // Whether two field values differ: None where they are the same (two NaNs are), Some(true) where they differ only as

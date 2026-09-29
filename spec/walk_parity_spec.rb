@@ -51,9 +51,21 @@ RSpec.describe 'walk parity' do
     expect_clean(parity('<div style="border-width: 7px; border-left-style: solid">x</div>'))
   end
 
+  # A percentage travels as its pair, or as the program a comparison makes of it, for native to resolve at the basis
+  # it has; the ROOT's is resolved against the viewport, which native is handed nothing for. The programs are compared
+  # by what they come to: the two walks write the same value in different shapes.
+  it 'builds percentages, calc() and comparisons as the pairs and programs the JS walk sends' do
+    expect_clean(parity(<<~HTML, 'html { padding: 1% 2px }'))
+      <div style="width: 50%; height: 30%; padding: 2% 1% 0 calc(10% - 5px); margin: 0 5% 0 auto">
+        <div style="width: calc(100% - 2rem); max-width: min(80%, 400px); min-height: clamp(10px, 5%, 40px)">x</div>
+        <div style="padding: max(10px, 2%) 0; margin-left: min(5%, 20px); text-indent: 10%">y</div>
+      </div>
+    HTML
+  end
+
   it 'declines by name what it has not been taught' do
-    stats = parity('<div style="width: 50%">x</div>')
+    stats = parity('<div style="float: left">x</div>')
     expect(stats['compared']).to eq(0)
-    expect(stats['declined']).to include('percentage' => be_positive)
+    expect(stats['declined']).to include('float' => be_positive)
   end
 end

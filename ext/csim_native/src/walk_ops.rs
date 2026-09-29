@@ -9,7 +9,7 @@ use std::fmt::Write;
 
 use crate::dom::{dom, realm_id, register, NodeId};
 use crate::layout::{Input, Run, RunText};
-use crate::walk::{self, Face, Faces, FieldDiff, Outcome};
+use crate::walk::{self, Basis, Face, Faces, FieldDiff, Outcome};
 
 pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Object>, context_id: i32) {
     register(scope, ns, "walkParity", walk_parity, context_id);
@@ -28,8 +28,8 @@ pub(crate) struct Parity {
 impl Parity {
     // Keep a pass's records as the JS walk sent them, for `walkParity` to hold the Rust walk's against. The faces are
     // asked afresh each pass: a face that arrived since resolves the same family to another.
-    pub(crate) fn keep(&mut self, inputs: &[Input], runs: &[Run], run_texts: &[RunText]) {
-        self.pending = Some(Pass { inputs: inputs.to_vec(), runs: runs.to_vec(), run_texts: run_texts.to_vec() });
+    pub(crate) fn keep(&mut self, inputs: &[Input], runs: &[Run], run_texts: &[RunText], maths: &[f64], basis: Basis) {
+        self.pending = Some(Pass { inputs: inputs.to_vec(), runs: runs.to_vec(), run_texts: run_texts.to_vec(), maths: maths.to_vec(), basis });
         self.faces = Faces::default();
     }
 }
@@ -38,6 +38,8 @@ struct Pass {
     inputs: Vec<Input>,
     runs: Vec<Run>,
     run_texts: Vec<RunText>,
+    maths: Vec<f64>,
+    basis: Basis,
 }
 
 #[derive(Default)]
@@ -66,7 +68,7 @@ fn walk_parity(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgum
     let Some(pass) = parity.pending.take() else { return };
     let Some(arena) = d.realms.get(&cid) else { return };
     let Some(root) = pass.inputs.first().and_then(|r| NodeId::from_i64(r.nid as i64)) else { return };
-    match walk::build(arena, root, &mut parity.faces) {
+    match walk::build(arena, root, pass.basis, &mut parity.faces) {
         Outcome::NeedsFaces => {
             let wanted: Vec<(String, &'static str)> = parity.faces.missing.clone();
             parity.pending = Some(pass);
@@ -120,7 +122,7 @@ fn walk_parity(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgum
                 }
             };
             for (i, (js, rust)) in pass.inputs.iter().zip(&built.inputs).enumerate() {
-                note(stats, format!("rec {i} <{}>", tag(js.nid)), walk::input_diff(js, rust));
+                note(stats, format!("rec {i} <{}>", tag(js.nid)), walk::input_diff(js, &pass.maths, rust, &built.maths));
             }
             for (i, (js, rust)) in pass.runs.iter().zip(&built.runs).enumerate() {
                 let mut diffs = walk::run_diff(js, rust);

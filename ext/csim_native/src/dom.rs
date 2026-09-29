@@ -2627,7 +2627,10 @@ fn layout_pass(
     };
     // …kept for the walk-parity instrument (`CSIM_WALK_PARITY`) as the JS walk sent them, before the pass writes into them.
     if args.get(14).is_true() {
-        dom(scope).walk_parity.entry(cid).or_default().keep(&inputs, &runs, &run_texts);
+        // (…and the pass root's containing block, which the ROOT's own percentages resolve against: its height is not
+        // one the pass takes, so the JS side hands it beside the flag.)
+        let basis = crate::walk::Basis { w: root_cb_w, h: args.get(15).number_value(scope).unwrap_or(f64::NAN) };
+        dom(scope).walk_parity.entry(cid).or_default().keep(&inputs, &runs, &run_texts, &maths, basis);
     }
     // The measures kept of the placed chunks, lent to the pass and taken back.
     let mut measure = std::mem::take(&mut dom(scope).layout_chunks.entry(cid).or_default().measure);
