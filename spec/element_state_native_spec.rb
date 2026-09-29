@@ -390,11 +390,47 @@ RSpec.describe 'element state in the native arena' do
         document.getElementById('host').attachShadow({ mode: 'open' }).innerHTML = '<p id=sp>s</p>';
       JS
       expect(native_ids(':lang(en)')).to eq(%w[ca cap])
-      expect(native_ids(':lang("en-ca", fr)')).to eq(%w[ca cap])
+      expect(native_ids(':lang("en-ca", fr)')).to eq(%w[ca cap svgfr svgt])
       expect(native_ids(':lang(ja)')).to eq(%w[xl xlp])
-      expect(native_ids(':lang(ko), :lang(fr)')).to eq([])
+      expect(native_ids(':lang(ko)')).to eq([])
+      expect(native_ids(':lang(fr)')).to eq(%w[svgfr svgt])   # an SVG element's own lang (Chrome)
+      session.execute_script("document.getElementById('xl').setAttributeNS('http://www.w3.org/XML/1998/namespace', 'foo:lang', 'es')")
+      expect(native_ids(':lang(es)')).to eq(%w[xl xlp])       # the XML-namespace lang, whatever its prefix
       expect(native_ids('#unk:lang(\\*), #unkp:lang(\\*)')).to eq([])
       expect(session.evaluate_script("document.getElementById('host').shadowRoot.getElementById('sp').matches(':lang(de)')")).to be true
+    end
+
+    it 'keeps the target through pushState, and tries the fragment raw before decoded' do
+      session.execute_script(<<~JS)
+        document.body.innerHTML = '<p id="%62">raw</p><p id=b>decoded</p><p id=c>c</p>';
+        location.hash = '#%62';
+      JS
+      expect(native_ids(':target')).to eq(%w[%62])
+      session.execute_script("history.pushState(null, '', '#c')")
+      expect(native_ids(':target')).to eq(%w[%62])
+      session.execute_script("history.replaceState(null, '', '#b')")
+      expect(native_ids(':target')).to eq(%w[%62])
+    end
+
+    # An element can be the target only if its own id or name is the fragment: the rest answer without a walk (a walk
+    # per element per mutation took 14 ms a mutation on 20,000 elements under an SPA-style hash).
+    it 'answers :target without walking the tree for elements that cannot be it' do
+      session.execute_script(<<~JS)
+        document.body.innerHTML = Array.from({ length: 20000 }, (_, i) => '<div id=r' + i + '><span></span></div>').join('');
+        location.hash = '#/users/1';
+      JS
+      ms = session.evaluate_script(<<~JS)
+        (() => {
+          const t = performance.now();
+          for (let i = 0; i < 200; i++) {
+            const p = document.body.appendChild(document.createElement('p'));
+            p.matches(':target');
+            __dom.queryIds(p._nid, ':scope:target', false);
+          }
+          return performance.now() - t;
+        })()
+      JS
+      expect(ms).to be < 200
     end
 
     it "answers a custom element's :state() natively" do
@@ -409,6 +445,7 @@ RSpec.describe 'element state in the native arena' do
       JS
       expect(native_ids(':state(open)')).to eq(%w[st])
       expect(native_ids(':state(closed)')).to eq([])
+      expect(native_ids(':state( open )')).to eq(%w[st])
       session.execute_script("document.getElementById('st').i.states.delete('open')")
       expect(native_ids(':state(open)')).to eq([])
     end

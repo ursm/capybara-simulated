@@ -12,6 +12,7 @@ use crate::dom::{
 };
 
 const XML_NS: &str = "http://www.w3.org/XML/1998/namespace";
+const SVG_NS: &str = "http://www.w3.org/2000/svg";
 
 // The `<input>` types the `readonly` attribute applies to (form-helpers.js `READONLY_INPUT_TYPES`).
 const READONLY_INPUT_TYPES: [&str; 12] = [
@@ -76,12 +77,6 @@ fn is_valid_custom_element_name(name: &str) -> bool {
 pub(crate) struct FormFacts {
     checked_groups: std::collections::HashSet<(String, Option<NodeId>)>,
     defaults: std::collections::HashMap<NodeId, NodeId>,
-}
-// …and the realm document's target element (`None` inside: none), as of `mutations` too.
-#[derive(Default)]
-pub(crate) struct TargetMemo {
-    mutations: u64,
-    element: Option<Option<NodeId>>,
 }
 // Those facts per tree root, as of the arena's `mutations` count.
 #[derive(Default)]
@@ -395,30 +390,25 @@ impl RealmArena {
         }
         !(is_valid_custom_element_name(&n.local_name) || n.state & STATE_IS_VALUE != 0)
     }
-    // `:target`: the realm document's target element (target.js) — its indicated part for its URL's fragment, the first
-    // element of its tree (not a shadow tree) with that id, else the first HTML `<a>` with that name.
+    // `:target`: the realm document's target element (target.js) — its indicated part for its target fragments, tried
+    // in turn: the first element of its tree (not a shadow tree) with that id, else the first HTML `<a>` with that name.
+    // Only an element whose own id or name is one of them can be, so every other answers without walking the tree.
     pub(crate) fn is_target(&self, id: NodeId) -> bool {
-        self.target_element() == Some(id)
-    }
-    fn target_element(&self) -> Option<NodeId> {
-        {
-            let memo = self.target_memo.borrow();
-            if memo.mutations == self.mutations {
-                if let Some(element) = memo.element {
-                    return element;
-                }
-            }
+        let Some((doc, fragments)) = &self.target else { return false };
+        let Some(n) = self.get(id) else { return false };
+        let named = |n: &NodeData, f: &str| n.is_html_named("a") && n.plain_attr("name") == Some(f);
+        let candidate = |f: &String| n.get_attr("id") == Some(f.as_str()) || named(n, f);
+        if !fragments.iter().any(candidate) || self.root_of(id) != *doc {
+            return false;
         }
-        let element = self.target.as_ref().and_then(|(doc, fragment)| {
-            self.find_in_tree(*doc, |_, n| n.get_attr("id") == Some(fragment.as_str())).or_else(|| {
-                self.find_in_tree(*doc, |_, n| n.is_html_named("a") && n.plain_attr("name") == Some(fragment.as_str()))
-            })
+        let indicated = fragments.iter().find_map(|f| {
+            self.find_in_tree(*doc, |_, e| e.get_attr("id") == Some(f.as_str()))
+                .or_else(|| self.find_in_tree(*doc, |_, e| named(e, f)))
         });
-        *self.target_memo.borrow_mut() = TargetMemo { mutations: self.mutations, element: Some(element) };
-        element
+        indicated == Some(id)
     }
     // `:lang(ranges)` (selectors.js `matchesLang`): the element's language — the nearest shadow-including inclusive
-    // ancestor's `xml:lang` (in the XML namespace), or an HTML one's `lang` — matches a range (comma-joined, lowercased)
+    // ancestor's `lang` in the XML namespace, or an HTML or SVG one's own `lang` — matches a range (comma-joined, lowercased)
     // equal to it, extended by it at a subtag boundary, or `*`; an empty language (lang="") none.
     pub(crate) fn matches_lang(&self, id: NodeId, ranges: &str) -> bool {
         let Some(lang) = self.language_of(id).map(str::to_ascii_lowercase).filter(|l| !l.is_empty()) else { return false };
@@ -433,7 +423,7 @@ impl RealmArena {
                 if let Some(v) = n.ns_attr(XML_NS, "lang") {
                     return Some(v);
                 }
-                if n.is_html() {
+                if n.is_html() || n.ns == SVG_NS {
                     if let Some(v) = n.plain_attr("lang") {
                         return Some(v);
                     }

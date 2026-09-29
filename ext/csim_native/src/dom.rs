@@ -319,13 +319,13 @@ pub(crate) struct RealmArena {
     parser_form_owners: std::collections::HashMap<NodeId, NodeId>,
     // A custom element's custom states (`ElementInternals.states`, `:state()`), for the few elements that have any.
     custom_states: std::collections::HashMap<NodeId, Vec<String>>,
-    // The realm document and its URL's decoded fragment, when it has one — what `:target` resolves (`is_target`).
-    pub(crate) target: Option<(NodeId, String)>,
+    // The realm document and its target fragments (as it stands, then decoded), when it has any — what `:target`
+    // resolves (`is_target`).
+    pub(crate) target: Option<(NodeId, Vec<String>)>,
     // Moves with every write to the arena (a node made or freed, any `get_mut`): what a memo of it keys on.
     pub(crate) mutations: u64,
     // Per tree root, the facts element_state.rs asks of every control in turn, as of `mutations` (`form_facts`).
     pub(crate) form_facts: std::cell::RefCell<crate::element_state::FormFactsMemo>,
-    pub(crate) target_memo: std::cell::RefCell<crate::element_state::TargetMemo>,
 }
 
 impl RealmArena {
@@ -339,8 +339,14 @@ impl RealmArena {
             None
         }
     }
+    // A write to the node: it moves `mutations`, which the memos of the arena key on.
     fn get_mut(&mut self, id: NodeId) -> Option<&mut NodeData> {
         self.mutations += 1;
+        self.get_mut_quietly(id)
+    }
+    // …and one that does not — a layout pass writing its boxes: a box is no input to any of those memos, and a pass
+    // writing one per node would throw them all away every time.
+    fn get_mut_quietly(&mut self, id: NodeId) -> Option<&mut NodeData> {
         let slot = self.slots.get_mut(id.idx as usize)?;
         if slot.generation == id.generation {
             slot.data.as_mut()
@@ -1000,7 +1006,8 @@ fn set_custom_states(
     realm(scope, cid).set_custom_states(id, states);
 }
 
-// __dom.setTarget(docNid, fragment): the realm document's URL fragment (decoded) — `undefined` when it has none.
+// __dom.setTarget(docNid, fragments): the realm document's target fragments (target.js `targetFragments`) — none, one,
+// or the raw one and its decoded form.
 fn set_target(
     scope: &mut v8::PinScope<'_, '_>,
     args: v8::FunctionCallbackArguments<'_>,
@@ -1009,12 +1016,16 @@ fn set_target(
     let Some(doc) = nid_arg(scope, &args, 0) else {
         return;
     };
-    let fragment = args.get(1);
-    let target = (!fragment.is_undefined()).then(|| (doc, fragment.to_rust_string_lossy(scope)));
+    let mut fragments = Vec::new();
+    if let Ok(arr) = v8::Local::<v8::Array>::try_from(args.get(1)) {
+        for i in 0..arr.length() {
+            if let Some(v) = arr.get_index(scope, i) {
+                fragments.push(v.to_rust_string_lossy(scope));
+            }
+        }
+    }
     let cid = realm_id(scope, &args);
-    let arena = realm(scope, cid);
-    arena.target = target;
-    arena.mutations += 1;
+    realm(scope, cid).target = (!fragments.is_empty()).then_some((doc, fragments));
 }
 
 // __dom.setShadowHost(rootNid, hostNid): the shadow root `rootNid` is attached to `hostNid`.
@@ -2069,7 +2080,7 @@ fn layout_pass(
             let mut changed: Vec<f64> = Vec::new();
             for (i, b) in laid.boxes.into_iter().enumerate() {
                 rows.extend(box_row(&b));
-                let node = if b.nid >= 0.0 { NodeId::from_i64(b.nid as i64).and_then(|id| st.get_mut(id)) } else { None };
+                let node = if b.nid >= 0.0 { NodeId::from_i64(b.nid as i64).and_then(|id| st.get_mut_quietly(id)) } else { None };
                 match node {
                     Some(node) if node.layout_box == Some(b) => {}
                     Some(node) => {
