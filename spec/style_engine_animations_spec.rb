@@ -242,6 +242,53 @@ RSpec.describe 'style engine animations' do
     expect(s.evaluate_script('window.negative')).to eq([false])
   end
 
+  # …and its value goes with it, then and after.
+  it 'drops the animated value of an element that stops being rendered' do
+    s = page('<div id="a"></div>')
+    s.execute_script("document.getElementById('a').style.animation = 'fade 10s linear'")
+    drain(s, 2)
+    s.execute_script("document.getElementById('a').style.display = 'none'")
+    reads = 2.times.map { s.evaluate_script("getComputedStyle(document.getElementById('a')).opacity") }
+    expect(reads).to eq(%w[1 1])
+  end
+
+  # A paused animation is where its progress says: one paused in its delay has not started.
+  it 'starts no paused animation still in its delay' do
+    s = page('<div id="a"></div>')
+    s.execute_script("document.getElementById('a').style.animation = 'fade 1s linear 5s paused'")
+    expect(drain(s, 3)).to eq([])
+  end
+
+  # A zero-length animation paused and resumed ends where it would have, its fill holding the end.
+  it 'resumes a paused animation of zero duration' do
+    s = page('<div id="a"></div>')
+    s.execute_script("document.getElementById('a').style.animation = 'fade 0s paused forwards'")
+    drain(s, 2)
+    s.execute_script("document.getElementById('a').style.animationPlayState = 'running'")
+    drain(s, 2)
+    expect(s.evaluate_script("getComputedStyle(document.getElementById('a')).opacity")).to eq('0')
+  end
+
+  # At an iteration's end exactly, the next has begun: the value is its first keyframe's.
+  it 'reads the next iteration at an iteration boundary' do
+    s = page('<div id="a"></div>')
+    s.execute_script("document.getElementById('a').style.animation = 'fade 200ms linear infinite'")
+    reads = 5.times.map { s.evaluate_script("getComputedStyle(document.getElementById('a')).opacity") }
+    expect(reads).to include('1')
+  end
+
+  # A reversed transition that started part way (a negative delay) is held against a full restyle that knows only
+  # what is running — not the transition it replaced.
+  it 'reverses a transition with a negative delay' do
+    s = page('<div id="b" style="transition: opacity 600ms linear -100ms"></div>')
+    s.execute_script("document.getElementById('b').style.opacity = '0'")
+    2.times { s.evaluate_script('1') }
+    s.execute_script("document.getElementById('b').style.opacity = '1'")
+    expect(drain(s).map {|e| e.split(':').first }).to eq(
+      %w[transitionrun transitionstart transitioncancel transitionrun transitionstart transitionend]
+    )
+  end
+
   # A pseudo-element's values are its animations' too.
   it "reads a pseudo-element's animated value" do
     s = page('<div id="a"></div>', '#a::before { content: "b"; animation: fade 1s linear }')

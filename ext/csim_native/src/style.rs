@@ -743,9 +743,10 @@ impl StyleEngine {
         // The full restyle runs the animations' model too; it runs it on a copy, so that looking changes nothing.
         let copy = DocumentAnimationSet::default();
         copy.sets.write().extend(self.animations.sets.read().iter().map(|(key, set)| {
+            // (…without what was canceled, which the real set is rid of before its next traversal.)
             let set = ElementAnimationSet {
-                animations: set.animations.clone(),
-                transitions: set.transitions.clone(),
+                animations: set.animations.iter().filter(|a| a.state != AnimationState::Canceled).cloned().collect(),
+                transitions: set.transitions.iter().filter(|t| t.state != AnimationState::Canceled).cloned().collect(),
                 dirty: set.dirty,
                 keyframes_parent: set.keyframes_parent.clone(),
             };
@@ -1183,7 +1184,7 @@ impl StyleEngine {
             let mut observed = Vec::new();
             for new in [false, true] {
                 for t in set.transitions.iter_mut().filter(|t| t.is_new == new) {
-                    if t.state == AnimationState::Pending && t.start_time <= now {
+                    if t.state == AnimationState::Pending && t.has_started(now) {
                         t.state = AnimationState::Running;
                     }
                     if t.state == AnimationState::Running && t.has_ended(now) {
@@ -1206,7 +1207,7 @@ impl StyleEngine {
                     t.is_new = false;
                 }
                 for (position, a) in set.animations.iter_mut().enumerate().filter(|(_, a)| a.is_new == new) {
-                    if a.state == AnimationState::Pending && a.started_at <= now {
+                    if a.state == AnimationState::Pending && a.has_started(now) {
                         a.state = AnimationState::Running;
                     }
                     a.iterate_to(now);
@@ -1216,7 +1217,9 @@ impl StyleEngine {
                     // (`started_at` is where its CURRENT iteration began.)
                     let iteration = iteration_of(a);
                     let into_iteration = match a.state {
-                        AnimationState::Paused(progress) => progress * a.duration,
+                        // (…none into a zero-length one, whose paused progress is infinite once it is over.)
+                        AnimationState::Paused(progress) if a.duration > 0.0 => progress * a.duration,
+                        AnimationState::Paused(_) => 0.0,
                         _ => now - a.started_at,
                     };
                     if !rendered {
@@ -1228,8 +1231,14 @@ impl StyleEngine {
                     };
                     let run = iteration * a.duration + into_iteration;
                     let active = run.clamp(0.0, active_duration);
+                    // A paused one is where its progress says: still in its delay, over, or running.
+                    let phase = match a.state {
+                        AnimationState::Paused(progress) if progress < 0.0 => Phase::Before,
+                        AnimationState::Paused(_) if a.has_ended(now) => Phase::After,
+                        ref state => phase_of(state),
+                    };
                     let at = Observed {
-                        phase: phase_of(&a.state),
+                        phase,
                         iteration,
                         iteration_start: iteration * a.duration,
                         interval: TimeInterval::of(a.delay, active_duration),
