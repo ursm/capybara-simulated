@@ -21,7 +21,7 @@ RSpec.describe 'native-backed _attrs view (store-flip foundation)' do
     session.evaluate_script(<<~JS)
       (function () {
         __dom.resetArena();
-        const nid = __dom.importNode('div', '', -1, ['class', 'a b', 'id', 'x', 'data-i', '5']);
+        const nid = __dom.importNode('div', 'http://www.w3.org/1999/xhtml', -1, ['class', 'a b', 'id', 'x', 'data-i', '5']);
         const v = __dom.attrsView(nid);
         return (#{js});
       })()

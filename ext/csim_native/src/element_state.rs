@@ -5,6 +5,7 @@
 // The ancestor walks here are SHADOW-INCLUDING — a shadow root's parent is its host — as the JS DOM's `_parent` chain
 // is, which every one of these rules is written against.
 
+use web_atoms::{local_name, ns};
 use crate::dom::{
     NodeData, NodeId, NodeKind, RealmArena, STATE_CHECKED, STATE_CHECKED_DIRTY, STATE_CUSTOM, STATE_FILTERED,
     STATE_FOCUSED, STATE_FORM_ASSOCIATED, STATE_INDETERMINATE, STATE_IS_VALUE, STATE_MODAL, STATE_POPOVER_OPEN,
@@ -12,7 +13,6 @@ use crate::dom::{
 };
 
 const XML_NS: &str = "http://www.w3.org/XML/1998/namespace";
-const SVG_NS: &str = "http://www.w3.org/2000/svg";
 
 // The `<input>` types the `readonly` attribute applies to (form-helpers.js `READONLY_INPUT_TYPES`).
 const READONLY_INPUT_TYPES: [&str; 12] = [
@@ -95,12 +95,6 @@ impl FormFactsMemo {
 }
 
 impl NodeData {
-    fn is_html(&self) -> bool {
-        self.kind == NodeKind::Element && self.ns.is_empty()
-    }
-    fn is_html_named(&self, name: &str) -> bool {
-        self.is_html() && self.local_name == name
-    }
     // A submit button (form-helpers.js `isSubmitButton`): an `<input type=submit|image>`, or a `<button>` in the Submit
     // state — any `type` but `reset` and `button`, and a missing one unless a `command` / `commandfor` makes it a
     // Command button.
@@ -313,7 +307,7 @@ impl RealmArena {
             if p.kind != NodeKind::Element {
                 break;
             }
-            if p.local_name == "form" {
+            if p.local_name == local_name!("form") {
                 return Some(c);
             }
             cur = self.parent_of(c);
@@ -424,7 +418,7 @@ impl RealmArena {
         }
         let mut set = std::collections::HashSet::new();
         self.find_in_tree(root, |c, n| {
-            let control = matches!(n.local_name.as_str(), "input" | "select" | "textarea" | "button")
+            let control = matches!(&*n.local_name, "input" | "select" | "textarea" | "button")
                 || n.state & STATE_FORM_ASSOCIATED != 0;
             if control && self.will_validate(c) && self.validity(c) != 0 {
                 if let Some(form) = self.form_owner(c) {
@@ -483,7 +477,7 @@ impl RealmArena {
                 if let Some(v) = n.ns_attr(XML_NS, "lang") {
                     return Some(v);
                 }
-                if n.is_html() || n.ns == SVG_NS {
+                if n.is_html() || n.ns == ns!(svg) {
                     if let Some(v) = n.plain_attr("lang") {
                         return Some(v);
                     }
@@ -508,7 +502,7 @@ impl RealmArena {
         if !n.is_html() {
             return false;
         }
-        let tag = n.local_name.as_str();
+        let tag = &*n.local_name;
         let disableable = matches!(tag, "button" | "input" | "select" | "textarea" | "fieldset" | "optgroup" | "option");
         if !disableable && n.state & STATE_FORM_ASSOCIATED == 0 {
             return false;
@@ -525,7 +519,7 @@ impl RealmArena {
             while let Some(c) = cur {
                 let Some(p) = self.get(c) else { break };
                 if p.kind == NodeKind::Element {
-                    match p.local_name.as_str() {
+                    match &*p.local_name {
                         "select" => return self.is_actually_disabled(c),
                         "option" | "hr" | "datalist" => return false,
                         "optgroup" => {
@@ -566,7 +560,7 @@ impl RealmArena {
         let Some(n) = self.get(id) else { return false };
         let enableable = n.is_html()
             && (matches!(
-                n.local_name.as_str(),
+                &*n.local_name,
                 "button" | "input" | "select" | "textarea" | "optgroup" | "option" | "fieldset"
             ) || n.state & STATE_FORM_ASSOCIATED != 0);
         enableable && !self.is_actually_disabled(id)
@@ -613,10 +607,10 @@ impl RealmArena {
         if !n.is_html() {
             return false;
         }
-        if n.local_name == "option" {
+        if n.local_name == local_name!("option") {
             return n.plain_attr("selected").is_some();
         }
-        if n.local_name == "input" && matches!(n.input_type(), "checkbox" | "radio") {
+        if n.local_name == local_name!("input") && matches!(n.input_type(), "checkbox" | "radio") {
             return n.plain_attr("checked").is_some();
         }
         n.is_submit_button() && self.form_owner(id).is_some_and(|f| self.default_button_of(f) == Some(id))

@@ -53,8 +53,7 @@ RSpec.describe 'native arena incremental sync (store-flip F1a)',
       if (node.nodeType !== 1) { node.__nid = __dom.createNode(node.nodeType, node.data == null ? '' : node.data, -1); return; }
       const attrs = [];
       const a = node._attrs; for (const k in a) attrs.push(k, a[k]);
-      const ns = node._ns && node._ns !== HTML_NS ? node._ns : '';
-      const nid = __dom.importNode(node._localName, ns, -1, attrs);
+      const nid = __dom.importNode(node._localName, node._ns ?? '', -1, attrs);
       node.__nid = nid; __nid[nid] = node;
       for (const c of node.childNodes) mirrorCreate(c);
     };

@@ -28,7 +28,7 @@ use selectors::matching::{matches_selector, selector_may_match};
 use selectors::parser::AncestorHashes;
 
 use crate::dom::{NodeId, RealmArena};
-use crate::selector::{quirks_mode, with_compiled, CssStr, NodeRef, HTML_NS, NO_NAMESPACE};
+use crate::selector::{quirks_mode, with_compiled, CssStr, NodeRef};
 
 // The terminal-key bucket a rule sits in, as the JS `terminalKey` put it (`bucketFor`): the element's own
 // identifiers select the buckets it could match, so an element only tests those. Any other kind (0) is universal.
@@ -199,11 +199,11 @@ impl CascadeStore {
         let Some(node) = arena.get(id) else { return };
         // The JS side keys a tag bucket on the lowercased name (`terminalKey`) and looks it up with `_tag`, which is
         // lowercased too — so a case-preserved `foreignObject` / `clipPath` is asked for in lowercase here.
-        let tag = &node.local_name;
+        let tag: &str = &node.local_name;
         let bucket = if tag.bytes().any(|c| c.is_ascii_uppercase()) {
             self.by_tag.get(tag.to_ascii_lowercase().as_str())
         } else {
-            self.by_tag.get(tag.as_str())
+            self.by_tag.get(tag)
         };
         if let Some(b) = bucket {
             out.extend_from_slice(b);
@@ -340,14 +340,7 @@ fn ancestor_bloom(arena: &RealmArena, id: NodeId) -> BloomFilter {
             break;
         }
         bloom.insert_hash(hash(&node.local_name));
-        let ns = if node.ns.is_empty() {
-            HTML_NS
-        } else if node.ns == NO_NAMESPACE {
-            ""
-        } else {
-            &node.ns
-        };
-        bloom.insert_hash(hash(ns));
+        bloom.insert_hash(hash(&node.ns));
         if let Some(v) = node.get_attr("id") {
             if !v.is_empty() {
                 bloom.insert_hash(hash(v));

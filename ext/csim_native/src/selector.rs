@@ -34,12 +34,10 @@ use selectors::parser::{
 use selectors::visitor::SelectorVisitor;
 use selectors::{Element, OpaqueElement};
 
+use web_atoms::ns;
 use crate::dom::{NodeId, RealmArena};
 
 pub(crate) const HTML_NS: &str = "http://www.w3.org/1999/xhtml";
-// How the arena spells an element in NO namespace (native-query-shadow.js `NO_NAMESPACE`): no URL is it.
-pub(crate) const NO_NAMESPACE: &str = "\0";
-const SVG_NS: &str = "http://www.w3.org/2000/svg";
 const XLINK_NS: &str = "http://www.w3.org/1999/xlink";
 
 // A CSS string (idents, local names, namespaces, attribute values). Wraps String to satisfy the
@@ -296,23 +294,14 @@ impl<'a> Element for NodeRef<'a> {
     }
 
     fn is_html_element_in_html_document(&self) -> bool {
-        let ns = &self.node().ns;
-        ns.is_empty() || ns == HTML_NS
+        self.node().is_html()
     }
 
     fn has_local_name(&self, name: &str) -> bool {
-        self.node().local_name == name
+        &*self.node().local_name == name
     }
-    // The arena spells the HTML namespace '' and NO namespace NO_NAMESPACE.
     fn has_namespace(&self, ns: &str) -> bool {
-        let n = &self.node().ns;
-        if n.is_empty() {
-            ns == HTML_NS
-        } else if n == NO_NAMESPACE {
-            ns.is_empty()
-        } else {
-            n == ns
-        }
+        &*self.node().ns == ns
     }
     fn is_same_type(&self, other: &Self) -> bool {
         self.node().local_name == other.node().local_name && self.node().ns == other.node().ns
@@ -404,17 +393,16 @@ impl<'a> Element for NodeRef<'a> {
     // an SVG `<a>` with that or an XLink `href` (SVG 1.1's `xlink:href`, or one set unprefixed by `setAttributeNS`).
     fn is_link(&self) -> bool {
         let node = self.node();
-        let html = node.ns.is_empty() || node.ns == HTML_NS;
-        match node.local_name.as_str() {
-            "a" | "area" if html => node.plain_attr("href").is_some(),
-            "a" if node.ns == SVG_NS => {
+        match &*node.local_name {
+            "a" | "area" if node.is_html() => node.plain_attr("href").is_some(),
+            "a" if node.ns == ns!(svg) => {
                 node.plain_attr("href").is_some() || node.ns_attr(XLINK_NS, "href").is_some()
             }
             _ => false,
         }
     }
     fn is_html_slot_element(&self) -> bool {
-        self.node().local_name == "slot"
+        self.node().is_html_named("slot")
     }
 
     fn has_id(&self, id: &CssStr, case: CaseSensitivity) -> bool {

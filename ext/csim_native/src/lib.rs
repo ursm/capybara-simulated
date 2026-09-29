@@ -16,6 +16,9 @@ mod font;
 // Native layout (reader-flip endgame), stage L1 = block flow. Driven by the layoutPass / boxOf ops.
 mod layout;
 mod selector;
+// The style engine: stylo over the arena.
+mod style;
+mod style_fonts;
 // The Unicode classes the ORACLE asks a regex for, parsed out of that same regex by regex-syntax.
 mod unicode;
 mod validity;

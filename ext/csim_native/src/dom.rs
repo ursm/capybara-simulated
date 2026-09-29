@@ -27,6 +27,8 @@
 // hands it back. `attrsView(nid)` is the native-backed `_attrs` (a named interceptor over a node's
 // attributes Vec), installed by the Element constructor in place of the JS `{}`.
 
+use web_atoms::{ns, LocalName, Namespace};
+
 // How a NodeId splits across a JS Number: the low INDEX_BITS are the slot index, the rest the
 // generation. A packed nid must stay an EXACT f64, i.e. below 2^53 (NID_BITS) — so index and
 // generation share those 53 bits. 26 index bits = up to ~67M live slots (a page's high-water element
@@ -107,11 +109,10 @@ pub(crate) struct NodeData {
     // The character data of a Text / Comment node (empty for any other), as the DOM holds it: UTF-16 code units, a lone
     // surrogate included.
     pub(crate) data: Vec<u16>,
-    // The ASCII-lowercased element name the selector engine matches on (`localName`, not the
-    // possibly-upper-cased `tagName` — the matcher is case-normalized).
-    pub(crate) local_name: String,
-    // Element namespace URL ("" = HTML). Read by the selector engine's namespace matching.
-    pub(crate) ns: String,
+    // An element's local name (`localName`: a case-preserved SVG `foreignObject` stays so) and namespace (the empty
+    // one for an element in no namespace), interned — what every matcher compares.
+    pub(crate) local_name: LocalName,
+    pub(crate) ns: Namespace,
     pub(crate) attributes: Vec<(String, String)>,
     // Lossless override for the rare attribute value that carries a LONE SURROGATE (unpaired U+D800..
     // U+DFFF) — valid in a JS DOMString (UTF-16) but not in Rust's UTF-8 `String`, where it degrades to
@@ -144,6 +145,8 @@ pub(crate) struct NodeData {
     // A form control's live value once dirty (a script's `.value`, typing), in UTF-16 code units; None while it is
     // its default — the `value` attribute, or a `<textarea>`'s text.
     pub(crate) value: Option<Box<[u16]>>,
+    // What the style engine keeps on an element: its id atom, its parsed `style` attribute, its computed style.
+    pub(crate) style: crate::style::StyleSlot,
 }
 
 // The element state bits (`NodeData::state`, native-query-shadow.js `STATE_*`): focus and hover (the realm's one
@@ -177,8 +180,8 @@ impl NodeData {
         NodeData {
             kind,
             data,
-            local_name: String::new(),
-            ns: String::new(),
+            local_name: LocalName::default(),
+            ns: Namespace::default(),
             attributes: Vec::new(),
             attr_u16: Vec::new(),
             attr_ns: Vec::new(),
@@ -189,7 +192,16 @@ impl NodeData {
             state: 0,
             host: None,
             value: None,
+            style: Default::default(),
         }
+    }
+    // An element in the HTML namespace.
+    pub(crate) fn is_html(&self) -> bool {
+        self.kind == NodeKind::Element && self.ns == ns!(html)
+    }
+    // …and one of those named `name` (a lowercase local name).
+    pub(crate) fn is_html_named(&self, name: &str) -> bool {
+        self.is_html() && &*self.local_name == name
     }
     pub(crate) fn get_attr(&self, name: &str) -> Option<&str> {
         self.attributes
@@ -205,6 +217,7 @@ impl NodeData {
             Some(slot) => slot.1 = value,
             None => self.attributes.push((name.to_string(), value)),
         }
+        self.attr_changed(Some(name));
         match u16 {
             Some(u) => match self.attr_u16.iter_mut().find(|(k, _)| k == name) {
                 Some(slot) => slot.1 = u,
@@ -237,6 +250,13 @@ impl NodeData {
         if !self.attr_ns.is_empty() {
             self.attr_ns.retain(|(k, _, _)| k != name);
         }
+        self.attr_changed(Some(name));
+    }
+
+    // The attribute `name` changed (None: any may have) — what the style engine keeps of the attributes follows.
+    fn attr_changed(&mut self, name: Option<&str>) {
+        let id = self.plain_attr("id").map(str::to_owned);
+        self.style.attr_changed(name, id.as_deref());
     }
 
     fn clear_attr_u16(&mut self, name: &str) {
@@ -458,8 +478,11 @@ impl RealmArena {
     }
 
     // A new node, appended to `parent` when that is live (a stale parent nid leaves it a detached root).
-    pub(crate) fn create(&mut self, data: NodeData, parent: Option<NodeId>) -> NodeId {
+    pub(crate) fn create(&mut self, mut data: NodeData, parent: Option<NodeId>) -> NodeId {
         let parent = parent.filter(|&p| self.get(p).is_some());
+        if !data.attributes.is_empty() {
+            data.attr_changed(None);
+        }
         let id = self.alloc(NodeData { parent, ..data });
         if let Some(p) = parent {
             self.link_child(p, id);
@@ -636,6 +659,10 @@ impl RealmArena {
         }
         None
     }
+    // An element's style slot.
+    pub(crate) fn style_slot(&self, id: NodeId) -> Option<&crate::style::StyleSlot> {
+        self.get(id).filter(|n| n.kind == NodeKind::Element).map(|n| &n.style)
+    }
     // Is `id` a Document? (the matcher's `:root` is an element whose parent is one.)
     pub(crate) fn is_document(&self, id: NodeId) -> bool {
         self.get(id).is_some_and(|n| n.kind == NodeKind::Document)
@@ -684,6 +711,8 @@ pub(crate) struct Dom {
     pub(crate) layout_chunks: std::collections::HashMap<i32, ChunkStore>,
     // Each realm's static author rules (`cascadeLoad`), which `cascadeWinners` answers from.
     pub(crate) cascades: std::collections::HashMap<i32, crate::cascade::CascadeStore>,
+    // Each realm's style engine (`styleLoad`).
+    pub(crate) styles: std::collections::HashMap<i32, crate::style::StyleEngine>,
     // The realms `dropRealm` freed: an op a script of one still runs lands in `graveyard` rather than bringing its
     // arena back (context ids are never reused, so each would have stayed an entry for good).
     dropped: std::collections::HashSet<i32>,
@@ -802,6 +831,11 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_, ()>, ctx: &v8::Global<v8:
     // winning declaration per property in one pass (cascadeWinners).
     register(scope, ns, "cascadeLoad", cascade_load, context_id);
     register(scope, ns, "cascadeWinners", cascade_winners, context_id);
+    // The style engine (stylo): a document's sheets and the sheets their `@import`s ask for, and an element's computed
+    // value.
+    register(scope, ns, "styleSheets", style_sheets, context_id);
+    register(scope, ns, "styleImport", style_import, context_id);
+    register(scope, ns, "styleValue", style_value, context_id);
     register(scope, ns, "nowNanos", now_nanos, context_id);
     // Incremental-sync primitives (the store-flip F1 foundation): keep the arena current
     // as the DOM mutates, instead of rebuilding it. syncChildren relinks one parent's
@@ -869,8 +903,8 @@ fn import_node(
     args: v8::FunctionCallbackArguments<'_>,
     mut rv: v8::ReturnValue<'_, v8::Value>,
 ) {
-    let local_name = args.get(0).to_rust_string_lossy(scope);
-    let ns = args.get(1).to_rust_string_lossy(scope);
+    let local_name = LocalName::from(args.get(0).to_rust_string_lossy(scope));
+    let ns = Namespace::from(args.get(1).to_rust_string_lossy(scope));
     let parent = nid_arg(scope, &args, 2);
     let (attributes, attr_u16) = read_attrs_flat(scope, args.get(3));
     let cid = realm_id(scope, &args);
@@ -1272,6 +1306,7 @@ fn sync_attrs(
         node.attr_u16 = attr_u16;
         let attrs = &node.attributes;
         node.attr_ns.retain(|(k, _, _)| attrs.iter().any(|(a, _)| a == k));
+        node.attr_changed(None);
     }
 }
 
@@ -1294,6 +1329,7 @@ fn set_attr_namespace(
         if !ns.is_empty() {
             node.attr_ns.push((key, ns, local));
         }
+        node.attr_changed(None);
     }
 }
 
@@ -1453,6 +1489,83 @@ fn cascade_winners(
     }
 }
 
+// Strings off a JS array, a hole or a non-string read as None.
+fn string_items(scope: &mut v8::PinScope<'_, '_>, val: v8::Local<'_, v8::Value>) -> Vec<Option<String>> {
+    let Ok(arr) = v8::Local::<v8::Array>::try_from(val) else { return Vec::new() };
+    (0..arr.length())
+        .map(|i| arr.get_index(scope, i).filter(|v| v.is_string()).map(|v| v.to_rust_string_lossy(scope)))
+        .collect()
+}
+
+// A JS array of `urls`.
+fn url_array<'s>(scope: &mut v8::PinScope<'s, '_>, urls: &[String]) -> v8::Local<'s, v8::Value> {
+    let items: Vec<v8::Local<v8::Value>> =
+        urls.iter().filter_map(|u| v8::String::new(scope, u)).map(Into::into).collect();
+    v8::Array::new_with_elements(scope, &items).into()
+}
+
+// __dom.styleSheets(docNid, baseUrl, quirks, width, height, [css, baseUrl, media, css, baseUrl, media, …]) -> the
+// URLs the sheets' `@import`s wait for. The realm document's sheets, in document order, for its style engine — made
+// again only when the document's base URL, mode or viewport moved.
+fn style_sheets(
+    scope: &mut v8::PinScope<'_, '_>,
+    args: v8::FunctionCallbackArguments<'_>,
+    mut rv: v8::ReturnValue<'_, v8::Value>,
+) {
+    let Some(doc) = nid_arg(scope, &args, 0) else { return };
+    let base = args.get(1).to_rust_string_lossy(scope);
+    let quirks = args.get(2).is_true();
+    let viewport = (
+        args.get(3).number_value(scope).unwrap_or(0.0) as f32,
+        args.get(4).number_value(scope).unwrap_or(0.0) as f32,
+    );
+    let sheets: Vec<(String, String, String)> = string_items(scope, args.get(5))
+        .chunks_exact(3)
+        .map(|c| (c[0].clone().unwrap_or_default(), c[1].clone().unwrap_or_default(), c[2].clone().unwrap_or_default()))
+        .collect();
+    let cid = realm_id(scope, &args);
+    let d = dom(scope);
+    let mut engine = crate::style::StyleEngine::for_document(d.styles.remove(&cid), &base, quirks, viewport);
+    let pending = engine.set_sheets(doc, &sheets);
+    d.styles.insert(cid, engine);
+    let urls = url_array(scope, &pending);
+    rv.set(urls);
+}
+
+// __dom.styleImport(url, css) -> the URLs the imported sheet's own `@import`s wait for. The sheet at `url` arrived
+// (`css` null: it could not be fetched).
+fn style_import(
+    scope: &mut v8::PinScope<'_, '_>,
+    args: v8::FunctionCallbackArguments<'_>,
+    mut rv: v8::ReturnValue<'_, v8::Value>,
+) {
+    let url = args.get(0).to_rust_string_lossy(scope);
+    let css = args.get(1).is_string().then(|| args.get(1).to_rust_string_lossy(scope));
+    let cid = realm_id(scope, &args);
+    let Some(engine) = dom(scope).styles.get_mut(&cid) else { return };
+    let pending = engine.import(&url, css.as_deref());
+    let urls = url_array(scope, &pending);
+    rv.set(urls);
+}
+
+// __dom.styleValue(nid, property) -> the element's computed value of that longhand, or undefined (a shorthand, an
+// unknown property, an element the style engine did not style).
+fn style_value(
+    scope: &mut v8::PinScope<'_, '_>,
+    args: v8::FunctionCallbackArguments<'_>,
+    mut rv: v8::ReturnValue<'_, v8::Value>,
+) {
+    let Some(id) = nid_arg(scope, &args, 0) else { return };
+    let name = args.get(1).to_rust_string_lossy(scope);
+    let cid = realm_id(scope, &args);
+    let d = dom(scope);
+    let (Some(engine), Some(arena)) = (d.styles.get_mut(&cid), d.realms.get(&cid)) else { return };
+    let Some(value) = engine.value(arena, id, &name) else { return };
+    if let Some(s) = v8::String::new(scope, &value) {
+        rv.set(s.into());
+    }
+}
+
 // __dom.resetArena() — free the CALLING REALM's nodes for a new page (a navigation). Each occupied
 // slot's gen is bumped (not zeroed), so a detached element held across the navigation can't alias a
 // new-page node that reuses its index; the freed indices feed the new page.
@@ -1482,8 +1595,8 @@ fn set_node_meta(
     let Some(id) = nid_arg(scope, &args, 0) else {
         return;
     };
-    let local_name = args.get(1).to_rust_string_lossy(scope);
-    let ns = args.get(2).to_rust_string_lossy(scope);
+    let local_name = LocalName::from(args.get(1).to_rust_string_lossy(scope));
+    let ns = Namespace::from(args.get(2).to_rust_string_lossy(scope));
     let cid = realm_id(scope, &args);
     if let Some(node) = realm(scope, cid).get_mut(id) {
         node.local_name = local_name;

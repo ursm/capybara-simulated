@@ -10,6 +10,7 @@ use std::cell::RefCell;
 use std::collections::HashMap;
 use std::rc::Rc;
 
+use web_atoms::local_name;
 use crate::dom::{
     NodeData, NodeId, NodeKind, RealmArena, STATE_CUSTOM_ERROR, STATE_DIRTY_BY_USER, STATE_FORM_ASSOCIATED,
     STATE_HAS_FILES, STATE_USER_INTERACTED,
@@ -236,11 +237,6 @@ fn valid_email(s: &str) -> bool {
     local_ok && domain.split('.').all(label_ok)
 }
 
-impl NodeData {
-    fn is_html_element(&self, name: &str) -> bool {
-        self.kind == NodeKind::Element && self.ns.is_empty() && self.local_name == name
-    }
-}
 
 impl RealmArena {
     // A control's value as its `value` getter reads it before sanitization: the live value once dirty, else the
@@ -249,7 +245,7 @@ impl RealmArena {
         if let Some(v) = &n.value {
             return String::from_utf16_lossy(v);
         }
-        if n.local_name == "textarea" {
+        if n.local_name == local_name!("textarea") {
             let text: Vec<u16> = n
                 .children
                 .iter()
@@ -284,10 +280,10 @@ impl RealmArena {
     // Submit-state `<button>`, a `<select>`, a `<textarea>`, a form-associated custom element — that is not actually
     // disabled, not `readonly` (an input, a textarea, a form-associated custom element), and not in a `<datalist>`.
     pub(crate) fn will_validate(&self, id: NodeId) -> bool {
-        let Some(n) = self.get(id).filter(|n| n.kind == NodeKind::Element && n.ns.is_empty()) else { return false };
+        let Some(n) = self.get(id).filter(|n| n.is_html()) else { return false };
         let face = n.state & STATE_FORM_ASSOCIATED != 0;
         let candidate = face
-            || match n.local_name.as_str() {
+            || match &*n.local_name {
                 "input" => !matches!(n.input_type(), "hidden" | "reset" | "button"),
                 "button" => n.is_submit_button(),
                 "select" | "textarea" => true,
@@ -296,12 +292,12 @@ impl RealmArena {
         if !candidate || self.is_actually_disabled(id) {
             return false;
         }
-        if (face || matches!(n.local_name.as_str(), "input" | "textarea")) && n.plain_attr("readonly").is_some() {
+        if (face || matches!(&*n.local_name, "input" | "textarea")) && n.plain_attr("readonly").is_some() {
             return false;
         }
         let mut cur = self.parent_of(id);
         while let Some(c) = cur {
-            if self.get(c).is_some_and(|p| p.is_html_element("datalist")) {
+            if self.get(c).is_some_and(|p| p.is_html_named("datalist")) {
                 return false;
             }
             cur = self.parent_of(c);
@@ -311,9 +307,9 @@ impl RealmArena {
 
     // The constraints `id` suffers from (dom-nodes.js `validity`), as the flags above.
     pub(crate) fn validity(&self, id: NodeId) -> u16 {
-        let Some(n) = self.get(id).filter(|n| n.kind == NodeKind::Element && n.ns.is_empty()) else { return 0 };
+        let Some(n) = self.get(id).filter(|n| n.is_html()) else { return 0 };
         let mut v = if n.state & STATE_CUSTOM_ERROR != 0 { CUSTOM_ERROR } else { 0 };
-        let tag = n.local_name.as_str();
+        let tag = &*n.local_name;
         if !matches!(tag, "input" | "textarea" | "select") {
             return v;
         }
@@ -478,7 +474,7 @@ impl RealmArena {
         let Some(n) = self.get(node) else { return };
         for &c in &n.children {
             let Some(e) = self.get(c).filter(|e| e.kind == NodeKind::Element) else { continue };
-            match e.local_name.as_str() {
+            match &*e.local_name {
                 "option" => out.push(c),
                 "hr" | "datalist" | "select" => {}
                 "optgroup" if in_optgroup => {}
@@ -502,7 +498,7 @@ impl RealmArena {
         for &c in &n.children {
             match self.get(c) {
                 Some(t) if t.kind == NodeKind::Text => out.extend_from_slice(&t.data),
-                Some(e) if e.kind == NodeKind::Element && e.local_name != "script" => self.collect_text(c, out),
+                Some(e) if e.kind == NodeKind::Element && e.local_name != local_name!("script") => self.collect_text(c, out),
                 _ => {}
             }
         }
@@ -512,7 +508,7 @@ impl RealmArena {
     // candidate sits in it.
     pub(crate) fn is_valid_pseudo(&self, id: NodeId) -> Option<bool> {
         let n = self.get(id)?;
-        if n.is_html_element("form") || n.is_html_element("fieldset") {
+        if n.is_html_named("form") || n.is_html_named("fieldset") {
             return Some(!self.contains_invalid(id));
         }
         self.will_validate(id).then(|| self.validity(id) == 0)
@@ -528,7 +524,7 @@ impl RealmArena {
     // `:in-range` / `:out-of-range`: a candidate whose type has a range and which has a `min` or a `max`, by whether it
     // suffers an underflow or an overflow.
     pub(crate) fn is_in_range(&self, id: NodeId) -> Option<bool> {
-        let n = self.get(id).filter(|n| n.is_html_element("input"))?;
+        let n = self.get(id).filter(|n| n.is_html_named("input"))?;
         let ty = n.input_type();
         step_scale(ty)?;
         if n.plain_attr("min").is_none() && n.plain_attr("max").is_none() || !self.will_validate(id) {

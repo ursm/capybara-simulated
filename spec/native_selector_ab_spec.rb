@@ -59,8 +59,7 @@ RSpec.describe 'native selector engine A/B vs css-select' do
       function walk(el, parentNid) {
         const attrs = [];
         for (const n of el.getAttributeNames()) attrs.push(n, el.getAttribute(n));
-        const ns = el.namespaceURI === 'http://www.w3.org/1999/xhtml' ? '' : (el.namespaceURI || '');
-        const nid = __dom.importNode(el.localName, ns, parentNid, attrs);
+        const nid = __dom.importNode(el.localName, el.namespaceURI ?? '', parentNid, attrs);
         el.__nid = nid;
         for (const c of el.childNodes) {
           if (c.nodeType === 1) walk(c, nid);

@@ -1,0 +1,51 @@
+/* The user-agent style sheet: HTML § 15 Rendering. SPIKE subset. */
+@namespace url(http://www.w3.org/1999/xhtml);
+
+area, base, basefont, datalist, head, link, meta, noembed,
+noframes, param, rp, script, style, template, title { display: none; }
+[hidden]:not([hidden=until-found i]):not(embed) { display: none; }
+html, body { display: block; }
+address, blockquote, center, dialog, div, figure, figcaption, footer, form,
+header, hr, legend, listing, main, p, plaintext, pre, search, xmp { display: block; }
+article, aside, h1, h2, h3, h4, h5, h6, hgroup, nav, section { display: block; }
+dir, dd, dl, dt, menu, ol, ul { display: block; }
+li { display: list-item; }
+table { display: table; }
+caption { display: table-caption; }
+colgroup { display: table-column-group; }
+col { display: table-column; }
+thead { display: table-header-group; }
+tbody { display: table-row-group; }
+tfoot { display: table-footer-group; }
+tr { display: table-row; }
+td, th { display: table-cell; }
+fieldset { display: block; margin-inline: 2px; border: groove 2px ThreeDFace; padding-block: 0.35em 0.625em; padding-inline: 0.75em; min-inline-size: min-content; }
+body { margin: 8px; }
+p, blockquote, figure, listing, plaintext, pre, xmp, dl { margin-block: 1em; }
+blockquote, figure { margin-inline: 40px; }
+dd { margin-inline-start: 40px; }
+menu, ol, ul { padding-inline-start: 40px; margin-block: 1em; }
+h1 { margin-block: 0.67em; font-size: 2.00em; font-weight: bold; }
+h2 { margin-block: 0.83em; font-size: 1.50em; font-weight: bold; }
+h3 { margin-block: 1.00em; font-size: 1.17em; font-weight: bold; }
+h4 { margin-block: 1.33em; font-size: 1.00em; font-weight: bold; }
+h5 { margin-block: 1.67em; font-size: 0.83em; font-weight: bold; }
+h6 { margin-block: 2.33em; font-size: 0.67em; font-weight: bold; }
+b, strong, th { font-weight: bolder; }
+i, cite, em, var, dfn { font-style: italic; }
+code, kbd, samp, tt, pre, listing, plaintext, xmp { font-family: monospace; }
+pre, listing, plaintext, xmp { white-space: pre; }
+small { font-size: smaller; }
+big { font-size: larger; }
+sub { vertical-align: sub; font-size: smaller; }
+sup { vertical-align: super; font-size: smaller; }
+u, ins { text-decoration: underline; }
+s, strike, del { text-decoration: line-through; }
+a:link, a:visited { color: #0000EE; text-decoration: underline; cursor: pointer; }
+hr { color: gray; border-style: inset; border-width: 1px; margin-block: 0.5em; margin-inline: auto; overflow: hidden; }
+table { box-sizing: border-box; border-spacing: 2px; border-collapse: separate; text-indent: initial; }
+td, th { padding: 1px; }
+th { text-align: -internal-center; }
+thead, tbody, tfoot, table > tr { vertical-align: middle; }
+tr, td, th { vertical-align: inherit; }
+input, select, button, textarea { display: inline-block; }

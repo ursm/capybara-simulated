@@ -32,6 +32,18 @@ selectors = "0.40"
 cssparser = "0.37"
 precomputed-hash = "0.1"
 
+# The style engine: Servo's stylo (Firefox's style system), over the arena as its DOM. It shares cssparser and
+# selectors with the matcher above, so a selector compiled for a query and one in a stylesheet are the same kind.
+stylo = "0.21"
+stylo_dom = "0.21"
+stylo_traits = "0.21"
+stylo_static_prefs = "0.21"
+stylo_atoms = "0.21"
+web_atoms = "0.2"
+euclid = "0.22"
+app_units = "0.7"
+url = "2.5"
+
 # An `<input>`'s `pattern` is an ECMAScript regular expression (compiled with the `v` flag): regress is a JS-syntax
 # engine in pure Rust (Boa's), matched over UTF-16 as a page's string is (validity.rs).
 regress = { version = "0.12", features = ["utf16"] }
