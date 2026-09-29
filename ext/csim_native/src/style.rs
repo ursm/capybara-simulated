@@ -747,6 +747,7 @@ impl StyleEngine {
                 animations: set.animations.clone(),
                 transitions: set.transitions.clone(),
                 dirty: set.dirty,
+                keyframes_parent: set.keyframes_parent.clone(),
             };
             (key.clone(), set)
         }));
@@ -1058,14 +1059,19 @@ impl StyleEngine {
     // stands, which starts, updates and cancels them as their styles say. The events every state change owes wait,
     // in the order they happened, for the rendering update to take them.
     pub(crate) fn flush(&mut self, arena: &RealmArena, now_ms: f64) {
+        // (Nothing moved — neither the clock nor the document — nothing to do: the read that asks is a hot path.)
+        if now_ms / 1000.0 == self.now && self.styled == Some(arena.mutations) {
+            return;
+        }
         self.advance_to(arena, now_ms);
         self.ensure_styled(arena);
         self.note_animation_phases(arena);
     }
 
     // A rendering update's events: what each animation and transition moved through since the last one — its phase
-    // then against its phase now, as CSS Animations 2 §4.2 and CSS Transitions 2 §6.1 tabulate them — in composite
-    // order: transitions before animations, then by owning element in tree order, pseudo-element and position.
+    // then against its phase now, as CSS Animations 2 §4.2 and CSS Transitions 2 §6.1 tabulate them — in the order
+    // they were due, and those due together in composite order: transitions before animations, then by owning element
+    // in tree order, pseudo-element and position.
     pub(crate) fn take_animation_events(&mut self, arena: &RealmArena) -> Vec<AnimationEvent> {
         let mut events = Vec::new();
         for (id, now) in &self.phases {
@@ -1082,23 +1088,26 @@ impl StyleEngine {
                 ),
             };
             for (kind, elapsed) in moved {
+                let scheduled = to_microseconds(now.scheduled(kind, elapsed));
                 let elapsed = to_microseconds(elapsed);
-                events.push((id, now, AnimationEvent { kind, node: now.node, pseudo: now.pseudo, name: id.name.clone(), elapsed }));
+                events.push((scheduled, id, now, AnimationEvent { kind, node: now.node, pseudo: now.pseudo, name: id.name.clone(), elapsed }));
             }
         }
         if events.len() > 1 {
             let mut paths = std::collections::HashMap::new();
-            for (_, now, _) in &events {
+            for (_, _, now, _) in &events {
                 paths.entry(now.node).or_insert_with(|| tree_path(arena, now.node));
             }
             // (…and what a new one replaced before it. Stable: one animation's events keep the order its phases moved
             // in.)
-            events.sort_by(|(a, now_a, _), (b, now_b, _)| {
-                (a.kind, &paths[&now_a.node], now_a.pseudo_rank, now_a.position, &a.name, a.generation)
-                    .cmp(&(b.kind, &paths[&now_b.node], now_b.pseudo_rank, now_b.position, &b.name, b.generation))
+            events.sort_by(|(time_a, a, now_a, _), (time_b, b, now_b, _)| {
+                time_a.total_cmp(time_b).then_with(|| {
+                    (a.kind, &paths[&now_a.node], now_a.pseudo_rank, now_a.position, &a.name, a.generation)
+                        .cmp(&(b.kind, &paths[&now_b.node], now_b.pseudo_rank, now_b.position, &b.name, b.generation))
+                })
             });
         }
-        let events = events.into_iter().map(|(_, _, event)| event).collect();
+        let events = events.into_iter().map(|(.., event)| event).collect();
         // What ran out of the sets (and was no longer running) is forgotten; the rest is where the next update starts.
         self.phases.retain(|_, now| !now.departed);
         self.updated_phases = self.phases.iter().map(|(id, now)| (id.clone(), (now.phase, now.iteration))).collect();
@@ -1136,7 +1145,7 @@ impl StyleEngine {
             .map(|(key, _)| node_of(key.node.0))
             .collect();
         self.note_animation_phases(arena);
-        let Some(doc) = self.doc else { return };
+        let Some(doc) = self.doc.filter(|_| !restyle.is_empty()) else { return };
         in_arena(arena, self, || {
             for &node in &restyle {
                 if arena.existing_style_slot(node).is_some() {
@@ -1180,13 +1189,19 @@ impl StyleEngine {
                     if t.state == AnimationState::Running && t.has_ended(now) {
                         t.state = AnimationState::Finished;
                     }
-                    let active = (now - t.start_time).clamp(0.0, t.property_animation.duration);
                     if !rendered {
                         t.state = AnimationState::Canceled;
                     }
+                    // (`start_time` is where its active time is 0, the delay included.)
                     let duration = t.property_animation.duration;
-                    let interval = TimeInterval { start: (-t.delay).clamp(0.0, duration), end: duration };
-                    let at = Observed::at(node, pseudo, pseudo_rank, 0, phase_of(&t.state), 0.0, 0.0, interval, active);
+                    let interval = TimeInterval::of(t.delay, duration);
+                    let at = Observed {
+                        phase: phase_of(&t.state),
+                        interval,
+                        zero: t.start_time,
+                        active: (now - t.start_time).clamp(0.0, duration),
+                        ..Observed::of(node, pseudo, pseudo_rank, 0, now)
+                    };
                     observed.push((AnimationKind::Transition, transition_name(t), new, at));
                     t.is_new = false;
                 }
@@ -1194,11 +1209,13 @@ impl StyleEngine {
                     if a.state == AnimationState::Pending && a.started_at <= now {
                         a.state = AnimationState::Running;
                     }
-                    while a.iterate_if_necessary(now) {}
+                    a.iterate_to(now);
                     if a.state == AnimationState::Running && a.has_ended(now) {
                         a.state = AnimationState::Finished;
                     }
-                    let active = match a.state {
+                    // (`started_at` is where its CURRENT iteration began.)
+                    let iteration = iteration_of(a);
+                    let into_iteration = match a.state {
                         AnimationState::Paused(progress) => progress * a.duration,
                         _ => now - a.started_at,
                     };
@@ -1209,10 +1226,17 @@ impl StyleEngine {
                         KeyframesIterationState::Finite(_, max) => a.duration * max,
                         KeyframesIterationState::Infinite(_) => f64::INFINITY,
                     };
-                    let interval = TimeInterval { start: (-a.delay).clamp(0.0, active_duration), end: active_duration };
-                    let iteration = iteration_of(a);
-                    let phase = phase_of(&a.state);
-                    let at = Observed::at(node, pseudo, pseudo_rank, position, phase, iteration, iteration * a.duration, interval, active);
+                    let run = iteration * a.duration + into_iteration;
+                    let active = run.clamp(0.0, active_duration);
+                    let at = Observed {
+                        phase: phase_of(&a.state),
+                        iteration,
+                        iteration_start: iteration * a.duration,
+                        interval: TimeInterval::of(a.delay, active_duration),
+                        zero: now - run,
+                        active,
+                        ..Observed::of(node, pseudo, pseudo_rank, position, now)
+                    };
                     observed.push((AnimationKind::Animation, a.name.to_string(), new, at));
                     a.is_new = false;
                 }
@@ -1235,7 +1259,8 @@ impl StyleEngine {
     }
 
     // `id`'s pseudo-element `pseudo` (`before`, `placeholder`, …): its style as `getComputedStyle(el, "::before")`
-    // reads it — whether or not it generates a box, as Firefox computes it (`lazily_compute_pseudo_element_style`).
+    // reads it — whether or not it generates a box, as Firefox computes it (`lazily_compute_pseudo_element_style`) where
+    // the traversal did not.
     fn pseudo_style(&self, arena: &RealmArena, id: NodeId, pseudo: &str, originating: &ComputedValues) -> Option<Arc<ComputedValues>> {
         let pseudo = match pseudo.to_ascii_lowercase().as_str() {
             "before" => PseudoElement::Before,
@@ -1249,6 +1274,12 @@ impl StyleEngine {
             "details-content" => PseudoElement::DetailsContent,
             _ => return None,
         };
+        // An eager one the traversal styled is read as it left it — its animations and transitions applied.
+        let slot = arena.existing_style_slot(id)?;
+        let styled = unsafe { &*slot.data.get() }.as_ref().and_then(|data| data.borrow().styles.pseudos.get(&pseudo).cloned());
+        if styled.is_some() {
+            return styled;
+        }
         in_arena(arena, self, || {
             let guard = self.lock.read();
             let guards = StylesheetGuards { author: &guard, ua_or_user: &guard };
@@ -1402,38 +1433,47 @@ struct AnimationId {
     generation: u32,
 }
 
-// Where an animation or transition stood when last looked at: its phase and iteration and the times its events
-// report, where it sorts among its element's (`pseudo_rank`, and `position` in `animation-name`), and whether it has
-// left the sets since.
+// Where an animation or transition stood when last looked at (`at`): its phase and iteration, the times its events
+// report and the time its active time was 0 (`zero`), which with them says when each is scheduled; where it sorts
+// among its element's (`pseudo_rank`, and `position` in `animation-name`); and whether it has left the sets since.
 #[derive(Clone, Copy, Debug)]
 struct Observed {
     node: NodeId,
     pseudo: Option<&'static str>,
     pseudo_rank: u8,
     position: usize,
+    at: f64,
     phase: Phase,
     iteration: f64,
     iteration_start: f64,
     interval: TimeInterval,
+    zero: f64,
     active: f64,
     departed: bool,
 }
 
 impl Observed {
-    #[allow(clippy::too_many_arguments)]
-    fn at(
-        node: NodeId,
-        pseudo: Option<&'static str>,
-        pseudo_rank: u8,
-        position: usize,
-        phase: Phase,
-        iteration: f64,
-        iteration_start: f64,
-        interval: TimeInterval,
-        active: f64,
-    ) -> Observed {
-        let active = active.max(0.0);
-        Observed { node, pseudo, pseudo_rank, position, phase, iteration, iteration_start, interval, active, departed: false }
+    // Looked at `at`, and nothing more known yet: each kind sets over it what it has.
+    fn of(node: NodeId, pseudo: Option<&'static str>, pseudo_rank: u8, position: usize, at: f64) -> Observed {
+        Observed {
+            node,
+            pseudo,
+            pseudo_rank,
+            position,
+            at,
+            phase: Phase::Idle,
+            iteration: 0.0,
+            iteration_start: 0.0,
+            interval: TimeInterval { start: 0.0, end: 0.0 },
+            zero: at,
+            active: 0.0,
+            departed: false,
+        }
+    }
+
+    // When an event it owes is due: at its `elapsed` time on its own clock, and a cancellation when it was looked at.
+    fn scheduled(&self, kind: &str, elapsed: f64) -> f64 {
+        if kind.ends_with("cancel") { self.at } else { self.zero + elapsed }
     }
 }
 
@@ -1453,6 +1493,14 @@ fn phase_of(state: &AnimationState) -> Phase {
 struct TimeInterval {
     start: f64,
     end: f64,
+}
+
+impl TimeInterval {
+    // (A delay of 0 starts it at 0, not at -0.)
+    fn of(delay: f64, active_duration: f64) -> TimeInterval {
+        let start = if delay < 0.0 { (-delay).min(active_duration) } else { 0.0 };
+        TimeInterval { start, end: active_duration }
+    }
 }
 
 // The events an animation moving from phase `was` to `now` owes, with their `elapsedTime`s (CSS Animations 2 §4.2);
@@ -1475,7 +1523,7 @@ fn animation_events(
         (Active, After) => vec![("animationend", interval.end)],
         (After, Active) => vec![("animationstart", interval.end)],
         (After, Before) => vec![("animationstart", interval.end), ("animationend", interval.start)],
-        (Before | Active | After, Idle) => vec![("animationcancel", active)],
+        (Before | Active, Idle) => vec![("animationcancel", active)],
         _ => Vec::new(),
     }
 }
@@ -1497,7 +1545,7 @@ fn transition_events(was: Phase, now: Phase, interval: TimeInterval, active: f64
         (Active, Before) => vec![("transitionend", interval.start)],
         (After, Active) => vec![("transitionstart", interval.end)],
         (After, Before) => vec![("transitionstart", interval.end), ("transitionend", interval.start)],
-        (Before | Active | After, Idle) => vec![("transitioncancel", active)],
+        (Before | Active, Idle) => vec![("transitioncancel", active)],
         _ => Vec::new(),
     }
 }
@@ -1561,11 +1609,11 @@ fn node_of(bits: usize) -> NodeId {
     NodeId { idx: bits as u32, generation: (bits >> 32) as u32 }
 }
 
-// The siblings after `id` are styled again, subtrees and all, when its parent says a sibling combinator's matching
-// read what comes before them (`HAS_SLOW_SELECTOR_LATER_SIBLINGS`).
+// The siblings after `id` are styled again, subtrees and all, when its parent (a shadow root included) says a sibling
+// combinator's matching read what comes before them (`HAS_SLOW_SELECTOR_LATER_SIBLINGS`).
 fn restyle_later_siblings(arena: &RealmArena, id: NodeId) {
     let Some(parent) = arena.get(id).and_then(|n| n.parent) else { return };
-    let later = arena.existing_style_slot(parent).is_some_and(|s| {
+    let later = arena.get(parent).and_then(|p| p.style.get()).is_some_and(|s| {
         s.selector_flags.get().contains(ElementSelectorFlags::HAS_SLOW_SELECTOR_LATER_SIBLINGS)
     });
     let Some(siblings) = arena.get(parent).map(|p| &p.children).filter(|_| later) else { return };

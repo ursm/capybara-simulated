@@ -1882,7 +1882,7 @@ fn style_value_unguarded(
     let name = args.get(1).to_rust_string_lossy(scope);
     let pseudo = args.get(2).is_string().then(|| args.get(2).to_rust_string_lossy(scope));
     let cid = realm_id(scope, &args);
-    let now = args.get(3).number_value(scope).unwrap_or(0.0);
+    let now = clock_arg(scope, &args, 3);
     let d = dom(scope);
     let (Some(engine), Some(arena)) = (d.styles.get_mut(&cid), d.realms.get(&cid)) else { return };
     let value = engine.value(arena, id, &name, pseudo.as_deref(), now);
@@ -1894,6 +1894,11 @@ fn style_value_unguarded(
     if let Some(s) = v8::String::new(scope, &value) {
         rv.set(s.into());
     }
+}
+
+// The page's clock (ms) an op is given at `index`: 0 when it is not a finite number (an undefined argument reads NaN).
+fn clock_arg(scope: &mut v8::PinScope<'_, '_>, args: &v8::FunctionCallbackArguments<'_>, index: i32) -> f64 {
+    args.get(index).number_value(scope).filter(|n| n.is_finite()).unwrap_or(0.0)
 }
 
 // Under CSIM_STYLE_VERIFY, what the engine's last restyles disagreed with a full one about (`failures`), thrown as the
@@ -1920,7 +1925,7 @@ fn style_flush(
 ) {
     let cid = realm_id(scope, &args);
     style_op(scope, cid, |scope| {
-        let now = args.get(0).number_value(scope).unwrap_or(0.0);
+        let now = clock_arg(scope, &args, 0);
         let d = dom(scope);
         let (Some(engine), Some(arena)) = (d.styles.get_mut(&cid), d.realms.get(&cid)) else { return };
         engine.flush(arena, now);
@@ -1945,7 +1950,7 @@ fn style_tick_unguarded(
     args: v8::FunctionCallbackArguments<'_>,
     mut rv: v8::ReturnValue<'_, v8::Value>,
 ) {
-    let now = args.get(0).number_value(scope).unwrap_or(0.0);
+    let now = clock_arg(scope, &args, 0);
     let cid = realm_id(scope, &args);
     let d = dom(scope);
     let (Some(engine), Some(arena)) = (d.styles.get_mut(&cid), d.realms.get(&cid)) else { return };

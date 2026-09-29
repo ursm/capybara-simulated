@@ -159,6 +159,96 @@ RSpec.describe 'style engine animations' do
     expect(read).to eq(%w[20px 40px])
   end
 
+  # …and an `inherit` in them follows the parent it inherits from.
+  it 'computes keyframes again when the style they inherit changes' do
+    s = page(
+      '<div id="p"><div id="a"></div></div>',
+      '@keyframes lh { from { line-height: inherit } to { line-height: 20px } }
+       #a { animation: lh 4s linear -2s paused }'
+    )
+    read = s.evaluate_script(<<~JS)
+      (() => {
+        const p = document.getElementById('p'), a = document.getElementById('a');
+        p.style.lineHeight = '100px';
+        const first = getComputedStyle(a).lineHeight;
+        p.style.lineHeight = '50px';
+        return [first, getComputedStyle(a).lineHeight];
+      })()
+    JS
+    expect(read).to eq(%w[60px 35px])
+  end
+
+  # A second name added to an element already animating starts too (stylo stopped at the first it had).
+  it 'starts an animation added beside one already running' do
+    s = page('<div id="a"></div>', '@keyframes k2 { from { color: rgb(0, 0, 0) } to { color: rgb(100, 100, 100) } }')
+    s.execute_script("document.getElementById('a').style.animation = 'fade 100s linear'")
+    drain(s, 2)
+    s.execute_script("document.getElementById('a').style.animation = 'fade 100s linear, k2 100ms linear'")
+    expect(drain(s, 3)).to eq(%w[animationstart:fade:0:a animationstart:k2:0:a animationend:k2:0.1:a])
+  end
+
+  # A zero duration still runs: its whole active interval is the instant it starts, and its fill holds the end.
+  it 'runs an animation of zero duration' do
+    s = page('<div id="a"></div>')
+    s.execute_script("document.getElementById('a').style.animation = 'fade 0s forwards'")
+    expect(drain(s, 2)).to eq(%w[animationstart:fade:0:a animationend:fade:0:a])
+    expect(s.evaluate_script("getComputedStyle(document.getElementById('a')).opacity")).to eq('0')
+  end
+
+  # A duration too short for the clock's precision to step through is iterated in one step, not boundary by
+  # boundary (which never ended).
+  it 'iterates a vanishingly short animation in one step' do
+    s = page('<div id="a"></div>')
+    s.execute_script("document.getElementById('a').style.animation = 'fade 0.0000000001ms linear infinite'")
+    drain(s, 3)
+    expect(s.evaluate_script("getComputedStyle(document.getElementById('a')).animationName")).to eq('fade')
+  end
+
+  # An animation that is over is not canceled by being taken away (CSS Animations 2: only one not idle and not
+  # after is); one that is running reports how long it has run, all its iterations counted.
+  it 'cancels only what is running, with the time it has run' do
+    s = page('<div id="a"></div><div id="b"></div>')
+    s.execute_script(<<~JS)
+      document.getElementById('a').style.animation = 'fade 10ms forwards';
+      document.getElementById('b').style.animation = 'fade 300ms linear infinite';
+    JS
+    drain(s, 10)
+    s.execute_script("document.getElementById('a').style.animation = ''; document.getElementById('b').style.display = 'none'")
+    cancels = drain(s, 2).grep(/animationcancel/)
+    expect(cancels.size).to eq(1)
+    expect(cancels.first).to start_with('animationcancel:fade:')
+    expect(cancels.first.split(':')[2].to_f).to be > 0.6
+  end
+
+  # Events due in one frame are dispatched in the order they fell due, before composite order.
+  it 'fires the events of a frame in the order they were due' do
+    s = page('<div id="a"></div><div id="b"></div>')
+    s.execute_script(<<~JS)
+      document.getElementById('a').style.animation = 'fade 250ms linear';
+      document.getElementById('b').style.animation = 'fade 210ms linear';
+    JS
+    expect(drain(s).grep(/animationend/)).to eq(%w[animationend:fade:0.21:b animationend:fade:0.25:a])
+  end
+
+  # An elapsed time of zero is 0, not -0 (a delay of 0 is no negative one).
+  it 'reports an elapsed time of zero as 0' do
+    s = page('<div id="a"></div>')
+    s.execute_script(<<~JS)
+      window.negative = [];
+      document.getElementById('a').addEventListener('animationstart', (e) => window.negative.push(Object.is(e.elapsedTime, -0)));
+      document.getElementById('a').style.animation = 'fade 100s';
+    JS
+    drain(s, 2)
+    expect(s.evaluate_script('window.negative')).to eq([false])
+  end
+
+  # A pseudo-element's values are its animations' too.
+  it "reads a pseudo-element's animated value" do
+    s = page('<div id="a"></div>', '#a::before { content: "b"; animation: fade 1s linear }')
+    drain(s, 3)
+    expect(s.evaluate_script("getComputedStyle(document.getElementById('a'), '::before').opacity").to_f).to be < 1
+  end
+
   # Each event carries the object `getAnimations()` reports for what it is about.
   it 'carries the animation an event is about' do
     s = page('<div id="a"></div>')

@@ -91,6 +91,21 @@ RSpec.describe 'style engine invalidation' do
     expect(color(s, '#t', 'document.getElementById("e").firstChild.data = "";')).to eq('rgb(49, 50, 51)')
   end
 
+  # …a shadow tree's top level included, whose parent is the shadow root.
+  it "restyles the later siblings an emptiness reaches at a shadow tree's top level" do
+    s = visit('<div id="h"></div>', css: '')
+    read = s.evaluate_script(<<~JS)
+      (() => {
+        const sr = document.getElementById('h').attachShadow({mode: 'open'});
+        sr.innerHTML = '<style>.e:empty + .t { color: rgb(49, 50, 51) }</style><span class="e">x</span><i class="t">t</i>';
+        getComputedStyle(sr.querySelector('.t')).color;
+        sr.querySelector('.e').firstChild.data = '';
+        return getComputedStyle(sr.querySelector('.t')).color;
+      })()
+    JS
+    expect(read).to eq('rgb(49, 50, 51)')
+  end
+
   # A `<style>` rewritten after the page was styled: the engine is asked with the text it has now.
   it 'styles with the text a style element has now' do
     s = visit('<p id="p">p</p>', head: '<style id="st"></style>')
@@ -221,7 +236,8 @@ RSpec.describe 'style engine invalidation' do
   end
 
   # What a page can write is not what the engine was built for: the keywords and properties a Firefox build of the
-  # engine takes, a Servo build takes too.
+  # engine takes, a Servo build takes too — and a flow-relative `resize` computes as specified (css-ui-4, Chrome; a
+  # Firefox build makes it physical).
   it 'takes the values a Firefox build of the engine takes' do
     s = visit('<div id="d">d</div>')
     values = {
@@ -232,7 +248,8 @@ RSpec.describe 'style engine invalidation' do
       'image-rendering'       => 'smooth',
       'white-space-collapse'  => 'preserve-spaces',
       'column-height'         => '10px',
-      'column-wrap'           => 'wrap'
+      'column-wrap'           => 'wrap',
+      'resize'                => 'block'
     }
     read = s.evaluate_script(<<~JS)
       (() => {
