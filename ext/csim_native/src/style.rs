@@ -1086,6 +1086,9 @@ impl StyleEngine {
             return;
         }
         self.advance_to(arena, now_ms);
+        // (Keyframes a change made stale are computed before the traversal it restyles: their values are what that
+        // traversal's before-change and after-change styles hold, so an animation starting starts no transition.)
+        self.compute_effects(arena);
         self.ensure_styled(arena);
         self.compute_effects(arena);
         self.note_animation_phases(arena);
@@ -1209,10 +1212,13 @@ impl StyleEngine {
     }
 
     // An effect's keyframes as values of its target (web-animations §5.3.3 "computing property values"): computed
-    // in the target's base style, with its parent's to inherit from; None while the target has no style (or is a
-    // pseudo-element, which the engine does not animate yet).
+    // in the target's base style, with its parent's to inherit from; None while the target has no style, and none at
+    // all for a pseudo-element (which the engine does not animate yet).
     fn compute_keyframes(&self, arena: &RealmArena, effect: &waapi::Effect) -> Option<waapi::ComputedKeyframes> {
-        let target = effect.target.as_ref().filter(|t| t.pseudo.is_none())?;
+        let target = effect.target.as_ref()?;
+        if target.pseudo.is_some() {
+            return Some(waapi::ComputedKeyframes::default());
+        }
         let style = primary_style(arena, target.node)?;
         let base = self.base_style(arena, target.node, &style);
         let parent = in_arena(arena, self, || {

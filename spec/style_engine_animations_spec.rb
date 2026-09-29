@@ -370,6 +370,92 @@ RSpec.describe 'style engine animations' do
     expect(s.evaluate_script('window.order')).to eq(%w[AbortError cancel finished finish])
   end
 
+  # The timing a page gives is the timing the engine runs: an infinite duration never finishes, a seek or rate that
+  # is no number is a TypeError, and a play at rate 0 of a finished animation rewinds it.
+  it 'takes the timing and times a page gives' do
+    s = page('<div id="a"></div>')
+    read = s.evaluate_script(<<~JS)
+      (() => {
+        const a = document.getElementById('a');
+        const forever = a.animate({ opacity: [0, 1] }, { duration: Infinity });
+        let threw = '';
+        try { forever.finish() } catch (e) { threw = e.name }
+        let nan = '';
+        try { forever.currentTime = NaN } catch (e) { nan = e.name }
+        const done = a.animate({ opacity: [0, 1] }, 1000);
+        done.finish();
+        done.playbackRate = 0;
+        done.play();
+        return [forever.playState, forever.effect.getComputedTiming().duration, threw, nan, done.currentTime];
+      })()
+    JS
+    expect(read).to eq(['running', nil, 'InvalidStateError', 'TypeError', 0]).or eq(['running', Float::INFINITY, 'InvalidStateError', 'TypeError', 0])
+  end
+
+  # `iterationComposite: 'accumulate'` adds the last keyframe's value once per iteration run.
+  it 'accumulates iterations' do
+    s = page('<div id="a"></div>')
+    read = s.evaluate_script(<<~JS)
+      (() => {
+        const anim = document.getElementById('a').animate({ marginLeft: ['0px', '10px'] },
+                                                           { duration: 1000, iterations: 3, iterationComposite: 'accumulate' });
+        anim.pause(); anim.currentTime = 2000;
+        return getComputedStyle(document.getElementById('a')).marginLeft;
+      })()
+    JS
+    expect(read).to eq('20px')
+  end
+
+  # An animation started with a style change still unflushed is in the style that change is compared in: the
+  # before-change and after-change styles both hold its value, so the change starts no transition (WPT
+  # Animatable/animate.html "does NOT trigger a style change event").
+  it 'starts no transition by starting an animation' do
+    s = page('<div id="a"></div>')
+    s.execute_script(<<~JS)
+      const a = document.getElementById('a');
+      window.ran = false;
+      a.addEventListener('transitionrun', () => { window.ran = true });
+      a.style.transition = 'opacity 100s';
+      getComputedStyle(a).opacity;
+      a.style.opacity = '0.5';
+      a.animate({ opacity: [0, 1] }, 100000);
+    JS
+    drain(s, 3)
+    expect(s.evaluate_script('window.ran')).to be(false)
+  end
+
+  # `commitStyles()` writes the animation's own place in the stack — not what animations above it show — and its fill;
+  # a pseudo-element target is an error.
+  it 'commits what the animation composes' do
+    s = page('<div id="a"></div>')
+    read = s.evaluate_script(<<~JS)
+      (() => {
+        const a = document.getElementById('a');
+        const lower = a.animate({ opacity: [0.2, 0.2] }, 100000);
+        a.animate({ opacity: [0.7, 0.7] }, 100000);
+        lower.commitStyles();
+        const back = a.animate({ marginLeft: ['30px', '40px'] }, { duration: 1000, delay: 5000, fill: 'backwards' });
+        back.commitStyles();
+        let threw = '';
+        try { a.animate({ opacity: [0, 1] }, { duration: 1000, pseudoElement: '::before' }).commitStyles() } catch (e) { threw = e.name }
+        return [a.style.opacity, a.style.marginLeft, threw];
+      })()
+    JS
+    expect(read).to eq(%w[0.2 30px NoModificationAllowedError])
+  end
+
+  # A CSS animation's object is an Animation, and its effect a KeyframeEffect.
+  it "reports a CSS animation's object as an Animation" do
+    s = page('<div id="a" style="animation: fade 100s"></div>')
+    read = s.evaluate_script(<<~JS)
+      (() => {
+        const anim = document.getAnimations()[0];
+        return [anim instanceof Animation, anim.effect instanceof KeyframeEffect, anim.effect instanceof AnimationEffect];
+      })()
+    JS
+    expect(read).to eq([true, true, true])
+  end
+
   # Each event carries the object `getAnimations()` reports for what it is about.
   it 'carries the animation an event is about' do
     s = page('<div id="a"></div>')

@@ -255,6 +255,8 @@ pub(crate) struct Effect {
     pub(crate) composite: CompositeOperation,
     pub(crate) iteration_composite_accumulate: bool,
     pub(crate) computed: Option<ComputedKeyframes>,
+    // Its handle is gone, and it goes when its animation lets it go.
+    orphaned: bool,
 }
 
 // A task an animation has pending until its timeline's next frame (§4.4.4 – §4.4.10): a play or a pause that takes
@@ -368,9 +370,32 @@ impl Animations {
             composite: CompositeOperation::Replace,
             iteration_composite_accumulate: false,
             computed: None,
+            orphaned: false,
         };
         self.effects.insert(self.next_effect, effect);
         self.next_effect
+    }
+
+    // An animation's handle is gone (and it was idle or over, or the handle would have been kept): it goes, and its
+    // effect with it where the effect's own handle went already.
+    pub(crate) fn drop_animation(&mut self, id: AnimationId) {
+        if !self.animations.contains_key(&id) {
+            return;
+        }
+        self.touch(id);
+        self.set_effect(id, None);
+        self.animations.remove(&id);
+    }
+
+    // An effect's handle is gone: it goes now if no animation plays it, else with the animation that does.
+    pub(crate) fn drop_effect(&mut self, effect: EffectId) {
+        let Some(e) = self.effects.get_mut(&effect) else { return };
+        if e.animation.is_some() {
+            e.orphaned = true;
+            return;
+        }
+        self.set_target(effect, None);
+        self.effects.remove(&effect);
     }
 
     // An effect's target becomes `target`: its values leave the old one and reach the new one, computed anew.
@@ -443,10 +468,27 @@ impl Animations {
         self.by_target.contains_key(&node)
     }
 
+    // What `commitStyles()` writes for animation `id` (web-animations §4.4.19 step 5): its target's effect stack up to
+    // and including it, composited over the target's own values — the properties its effect animates only.
+    pub(crate) fn committed_values(&self, id: AnimationId) -> Vec<AnimationValue> {
+        let Some(effect) = self.animations.get(&id).and_then(|a| a.effect).and_then(|e| self.effects.get(&e)) else {
+            return Vec::new();
+        };
+        let (Some(target), Some(computed)) = (&effect.target, &effect.computed) else { return Vec::new() };
+        let mut values = AnimationValueMap::default();
+        self.compose_up_to(target, &mut values, self.animations[&id].sequence);
+        computed.properties.iter().filter_map(|(property, ..)| values.get(property).cloned()).collect()
+    }
+
     // Composite `underlying` (what the effects below left, keyed by property) with every effect animating `target`,
     // in composite order (§5.4.2: the order their animations were made in), at their animations' current times
     // (§5.4.4 "the effect value of a keyframe effect").
     pub(crate) fn compose(&self, target: &Target, underlying: &mut AnimationValueMap) {
+        self.compose_up_to(target, underlying, u64::MAX);
+    }
+
+    // …those of them made up to animation `sequence` only.
+    fn compose_up_to(&self, target: &Target, underlying: &mut AnimationValueMap, last: u64) {
         let Some(effects) = self.by_target.get(&target.node) else { return };
         let mut ordered: Vec<(u64, &Effect)> = effects
             .iter()
@@ -454,6 +496,7 @@ impl Animations {
             .filter(|e| e.target.as_ref() == Some(target))
             .filter_map(|e| Some((self.animations.get(&e.animation?)?.sequence, e)))
             .collect();
+        ordered.retain(|(sequence, _)| *sequence <= last);
         ordered.sort_unstable_by_key(|(sequence, _)| *sequence);
         for (_, effect) in ordered {
             let Some(computed) = &effect.computed else { continue };
@@ -519,6 +562,9 @@ impl Animations {
         }
         if let Some(e) = old.and_then(|e| self.effects.get_mut(&e)) {
             e.animation = None;
+            if e.orphaned {
+                self.drop_effect(old.unwrap());
+            }
         }
         self.animations.get_mut(&id).unwrap().effect = effect;
         self.update_finished_state(id, false, false);
@@ -658,7 +704,7 @@ impl Animations {
         let a = self.animations.get_mut(&id).unwrap();
         let aborted_pause = a.pending == Some(PendingTask::Pause);
         let mut has_pending_ready_promise = false;
-        let seek = if rate > 0.0 && auto_rewind && current.is_none_or(|t| t < 0.0 || t >= end) {
+        let seek = if rate >= 0.0 && auto_rewind && current.is_none_or(|t| t < 0.0 || t >= end) {
             Some(0.0)
         } else if rate < 0.0 && auto_rewind && current.is_none_or(|t| t <= 0.0 || t > end) {
             if end.is_infinite() {
@@ -922,7 +968,11 @@ impl Animations {
         let mut ids: Vec<AnimationId> = self.animations.keys().copied().collect();
         ids.sort_unstable();
         for id in ids {
-            let pending = self.animations[&id].pending;
+            let a = &self.animations[&id];
+            let pending = a.pending;
+            if pending.is_none() && a.start_time.is_none() && a.hold_time.is_none() {
+                continue;
+            }
             match pending {
                 Some(PendingTask::Play) => self.run_pending_play(id, now),
                 Some(PendingTask::Pause) => self.run_pending_pause(id, now),
@@ -943,17 +993,17 @@ impl Animations {
         }
         self.timeline_time = Some(now);
         // (…every animation whose current time the timeline's carries: a start time and no hold — one that has just
-        // run past its end included, which the next frame only then holds there.)
-        let moves = |a: &Animation| a.start_time.is_some() && a.hold_time.is_none();
-        let moved: Vec<NodeId> = self
-            .by_target
+        // run past its end included — and whose finished state follows, as a frame's would: held at its end.)
+        let moving: Vec<AnimationId> = self
+            .animations
             .iter()
-            .filter(|(_, effects)| {
-                effects.iter().any(|e| self.effects[e].animation.is_some_and(|a| moves(&self.animations[&a])))
-            })
-            .map(|(node, _)| *node)
+            .filter(|(_, a)| a.start_time.is_some() && a.hold_time.is_none() && a.pending.is_none())
+            .map(|(&id, _)| id)
             .collect();
-        self.dirty_targets.extend(moved);
+        for id in moving {
+            self.update_finished_state(id, false, false);
+            self.touch(id);
+        }
     }
 
     // §4.4.10, the pending play task at `ready_time`.
@@ -979,6 +1029,7 @@ impl Animations {
             a.pending_playback_rate = None;
             if rate == 0.0 {
                 a.hold_time = Some(current_to_match);
+                a.start_time = Some(ready_time);
             } else {
                 a.start_time = Some(ready_time - current_to_match / rate);
             }
@@ -989,6 +1040,9 @@ impl Animations {
 
     // §4.4.12, the pending pause task at `ready_time`.
     fn run_pending_pause(&mut self, id: AnimationId, ready_time: f64) {
+        if !self.animations[&id].has_timeline {
+            return;
+        }
         let a = self.animations.get_mut(&id).unwrap();
         a.pending = None;
         if let (Some(start), None) = (a.start_time, a.hold_time) {
@@ -1000,6 +1054,29 @@ impl Animations {
         a.start_time = None;
         self.resolve_ready(id);
         self.update_finished_state(id, false, false);
+    }
+
+    // How long (ms) until an animation next needs a frame: at once for one waiting on one (a pending task), and at
+    // the end a running one reaches next (its effect's end going forwards, zero going backwards) — the moment its
+    // finished state moves, which the page's event loop is to reach rather than fast-forward past. None: nothing
+    // runs.
+    pub(crate) fn next_frame_delay(&self) -> Option<f64> {
+        let mut best: Option<f64> = None;
+        for (&id, a) in &self.animations {
+            let due = if a.pending.is_some() {
+                Some(0.0)
+            } else if self.play_state(id) == PlayState::Running && a.playback_rate != 0.0 {
+                let current = self.current_time(id).unwrap_or(0.0);
+                let until = if a.playback_rate > 0.0 { self.effect_end(id) - current } else { current };
+                Some(until / a.playback_rate.abs()).filter(|d| d.is_finite())
+            } else {
+                None
+            };
+            if let Some(d) = due.map(|d| d.max(0.0)) {
+                best = Some(best.map_or(d, |b: f64| b.min(d)));
+            }
+        }
+        best
     }
 
     pub(crate) fn take_signals(&mut self) -> Vec<Signal> {
@@ -1044,11 +1121,16 @@ fn compose_property(
                 u.animate(&frame.value, Procedure::Accumulate { count: 1 }).unwrap_or(frame.value.clone())
             },
         };
+        // (…the last keyframe's value, or the underlying one for a neutral last keyframe, added `accumulate` times
+        // to this one: `last × count + value`.)
         if accumulate > 0.0 {
-            if let Some(Some(last)) = keys.last() {
-                if let Ok(v) = value.animate(&last.value, Procedure::Accumulate { count: accumulate as u64 }) {
-                    value = v;
-                }
+            let last = match keys.last() {
+                Some(Some(frame)) => Some(&frame.value),
+                _ => underlying,
+            };
+            let count = accumulate.min(u32::MAX as f64) as u64;
+            if let Some(Ok(v)) = last.map(|last| last.animate(&value, Procedure::Accumulate { count })) {
+                value = v;
             }
         }
         Some(value)

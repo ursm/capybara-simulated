@@ -19,6 +19,9 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     register(scope, ns, "animState", anim_state, context_id);
     register(scope, ns, "animTiming", anim_timing, context_id);
     register(scope, ns, "animSignals", anim_signals, context_id);
+    register(scope, ns, "animDrop", anim_drop, context_id);
+    register(scope, ns, "animCommitValues", anim_commit_values, context_id);
+    register(scope, ns, "animNextFrameDelay", anim_next_frame_delay, context_id);
 }
 
 // The document timeline at the page's clock `now` (an op's last argument), before an op reads or moves an animation.
@@ -312,6 +315,48 @@ fn anim_call(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgumen
                 rv.set(s.into());
             }
         }
+    });
+}
+
+// __dom.animDrop(kind, id): a handle is gone (`animation` / `effect`), and what it held with it.
+fn anim_drop(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {
+    with_engine(scope, &args, |scope, engine| {
+        let kind = string_arg(scope, args.get(0));
+        let Some(id) = number_arg(scope, args.get(1)).map(|n| n as u32) else { return };
+        engine.web_animations_op(|model| match kind.as_deref() {
+            Some("animation") => model.drop_animation(id),
+            Some("effect") => model.drop_effect(id),
+            _ => {},
+        });
+    });
+}
+
+// __dom.animCommitValues(animation, now) -> [property, value, …]: what `commitStyles()` writes (§4.4.19).
+fn anim_commit_values(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    with_engine(scope, &args, |scope, engine| {
+        let Some(id) = number_arg(scope, args.get(0)).map(|n| n as AnimationId) else { return };
+        at_time(engine, number_arg(scope, args.get(1)));
+        let mut items: Vec<v8::Local<v8::Value>> = Vec::new();
+        for value in engine.web_animations.committed_values(id) {
+            let declaration = value.uncompute();
+            let mut css = String::new();
+            if declaration.to_css(&mut css).is_err() {
+                continue;
+            }
+            items.push(string_value(scope, &declaration.id().name()));
+            items.push(string_value(scope, &css));
+        }
+        rv.set(v8::Array::new_with_elements(scope, &items).into());
+    });
+}
+
+// __dom.animNextFrameDelay(now) -> ms until an animation next needs a frame, or -1 (none runs).
+fn anim_next_frame_delay(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    rv.set(v8::Number::new(scope, -1.0).into());
+    with_engine(scope, &args, |scope, engine| {
+        at_time(engine, number_arg(scope, args.get(0)));
+        let delay = engine.web_animations.next_frame_delay().unwrap_or(-1.0);
+        rv.set(v8::Number::new(scope, delay).into());
     });
 }
 
