@@ -906,6 +906,22 @@ RSpec.describe 'native layout inline-atomic parity' do
       expect_parity(body)
       expect(rendered_rect(body, '#b')['width']).to eq(200)
     end
+    # …and an INLINE box to everything but the flow (`isSplitInline`): Chrome gives it no client box and no scrolling
+    # area, reports a percentage inset as specified, and applies no transform (a fixed box inside is the viewport's) and
+    # no overflow clip to it — each of which the block it is laid out as leaked into until the review of fef80d36.
+    it 'is an inline box to the CSSOM, and to the properties that apply to one' do
+      s = simulated_session(page(<<~HTML))
+        <p>a <span id="s" style="position:relative;top:10%;border:3px solid">x<div>blk</div></span></p>
+        <p>b <span style="transform:translateX(30px)"><div>b</div><i id="f" style="position:fixed;top:0;left:0">f</i></span></p>
+      HTML
+      s.visit '/'
+      got = s.evaluate_script(<<~JS)
+        (() => { const e = document.getElementById('s'), f = document.getElementById('f').getBoundingClientRect();
+          return [e.clientWidth, e.clientHeight, e.clientLeft, e.clientTop, e.scrollWidth, e.scrollHeight,
+                  getComputedStyle(e).top, Math.round(f.x), Math.round(f.y)]; })()
+      JS
+      expect(got).to eq([0, 0, 0, 0, 0, 0, '10%', 0, 0])
+    end
     # …and still an INLINE box to a float's flow-relative keywords, which read the direction of the block around it:
     # §9.2.1.1's split leaves the float to that block.
     it 'leaves a float inside it to the direction of the block around it' do
