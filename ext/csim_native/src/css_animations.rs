@@ -5,9 +5,11 @@
 // as Gecko's `nsAnimationManager` and `CSSAnimation` do.
 
 use bitflags::bitflags;
+use style::servo_arc::Arc;
 use style::values::computed::easing::ComputedTimingFunction;
 
 use crate::animations::{AnimationId, Animations, CompositeOperation, EffectTiming, Keyframe, Phase, PlayState, Target};
+use crate::dom::NodeId;
 
 bitflags! {
     // What of a CSS animation a script has set, and its style therefore no longer sets (css-animations-2 §4.1; Gecko's
@@ -69,19 +71,21 @@ impl Animations {
     // The CSS animations `owner`'s style made and still lists, in `animation-name` order.
     pub(crate) fn css_animations_of(&self, owner: &Target) -> Vec<AnimationId> {
         let mut out: Vec<(usize, AnimationId)> = self
-            .animations
-            .iter()
-            .filter_map(|(&id, a)| {
-                let css = a.css.as_ref()?;
-                (css.owner.as_ref() == Some(owner)).then_some((css.position, id))
-            })
+            .owned_by(owner)
+            .map(|id| (self.animations[&id].css.as_ref().unwrap().position, id))
             .collect();
         out.sort_unstable();
         out.into_iter().map(|(_, id)| id).collect()
     }
 
     pub(crate) fn has_css_animations(&self, owner: &Target) -> bool {
-        self.animations.values().any(|a| a.css.as_ref().is_some_and(|css| css.owner.as_ref() == Some(owner)))
+        self.owned_by(owner).next().is_some()
+    }
+
+    fn owned_by<'a>(&'a self, owner: &'a Target) -> impl Iterator<Item = AnimationId> + 'a {
+        self.css_by_owner.get(&owner.node).into_iter().flatten().copied().filter(move |id| {
+            self.animations[id].css.as_ref().is_some_and(|css| css.owner.as_ref() == Some(owner))
+        })
     }
 
     // The CSS animations `owner`'s style now lists (css-animations-2 §3; Gecko's `BuildAnimations`): each takes over
@@ -117,6 +121,7 @@ impl Animations {
         e.orphaned = true;
         self.set_target(effect, Some(owner.clone()));
         let id = self.new_animation(Some(effect), true);
+        self.css_by_owner.entry(owner.node).or_default().push(id);
         let a = self.animations.get_mut(&id).unwrap();
         a.handled = false;
         a.css = Some(CssAnimation {
@@ -140,6 +145,7 @@ impl Animations {
         css.position = position;
         let overridden = css.overridden;
         let was_style_paused = std::mem::replace(&mut css.style_paused, style.paused);
+        let mut keyframes_changed = false;
         if let Some(e) = a.effect.and_then(|e| self.effects.get_mut(&e)) {
             let (to, from) = (&mut e.timing, &style.timing);
             if !overridden.contains(Overrides::DURATION) {
@@ -157,16 +163,24 @@ impl Animations {
             if !overridden.contains(Overrides::FILL) {
                 to.fill = from.fill;
             }
-            if !overridden.contains(Overrides::KEYFRAMES) {
+            // (…its keyframes and composite only where they changed: a restyle that leaves them — every `color` change
+            // on an animated element — computes them again anyway, and a change is the JS side's to hear of.)
+            let implicit_easing = Some(style.implicit_easing);
+            if !overridden.contains(Overrides::KEYFRAMES)
+                && (!same_keyframes(&e.keyframes, &style.keyframes) || e.implicit_easing != implicit_easing)
+            {
                 e.keyframes = style.keyframes;
-                e.implicit_easing = Some(style.implicit_easing);
+                e.implicit_easing = implicit_easing;
+                keyframes_changed = true;
             }
-            if !overridden.contains(Overrides::COMPOSITION) {
+            if !overridden.contains(Overrides::COMPOSITION) && e.composite != style.composite {
                 e.composite = style.composite;
+                keyframes_changed = true;
             }
         }
-        if let Some(effect) = self.animations[&id].effect {
+        if let Some(effect) = self.animations[&id].effect.filter(|_| keyframes_changed) {
             self.keyframes_changed(effect);
+            self.properties_changed(effect);
         }
         self.update_finished_state(id, false, false);
         self.touch(id);
@@ -187,12 +201,22 @@ impl Animations {
         self.cancel(id);
         self.touch(id);
         let a = self.animations.get_mut(&id).unwrap();
-        if let Some(css) = a.css.as_mut() {
-            css.owner = None;
+        if let Some(owner) = a.css.as_mut().and_then(|css| css.owner.take()) {
+            if let Some(list) = self.css_by_owner.get_mut(&owner.node) {
+                list.retain(|&other| other != id);
+                if list.is_empty() {
+                    self.css_by_owner.remove(&owner.node);
+                }
+            }
         }
-        if !a.handled {
+        if !self.animations[&id].handled {
             self.drop_animation(id);
         }
+    }
+
+    // The owners of CSS animations (the elements; each pseudo-element's under its element's).
+    pub(crate) fn css_owners(&self) -> impl Iterator<Item = NodeId> + '_ {
+        self.css_by_owner.keys().copied()
     }
 
     // A script's call that played or paused CSS animation `id` (`method`, done), which was paused or not before it: its
@@ -281,4 +305,13 @@ impl Animations {
     pub(crate) fn take_css_events(&mut self) -> Vec<CssEvent> {
         std::mem::take(&mut self.css_events)
     }
+}
+
+// Whether two keyframe lists are the same: the same blocks (a `@keyframes` rule's, not merely equal ones) at the same
+// offsets, easing and compositing alike.
+fn same_keyframes(a: &[Keyframe], b: &[Keyframe]) -> bool {
+    a.len() == b.len()
+        && a.iter().zip(b).all(|(x, y)| {
+            x.offset == y.offset && x.easing == y.easing && x.composite == y.composite && Arc::ptr_eq(&x.block, &y.block)
+        })
 }

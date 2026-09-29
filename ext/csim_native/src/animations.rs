@@ -372,6 +372,8 @@ pub(crate) struct Animations {
     // The elements whose animations' properties changed — an effect came or went, or its keyframes changed — since
     // the JS side, which caches what it asks of an animated element, was last told (`take_retargeted`).
     retargeted: Vec<NodeId>,
+    // The CSS animations each element owns (its pseudo-elements' included), which style asks about every restyle.
+    pub(crate) css_by_owner: HashMap<NodeId, Vec<AnimationId>>,
 }
 
 impl Animations {
@@ -457,6 +459,12 @@ impl Animations {
         e.computed = None;
         if let Some(t) = &e.target {
             self.dirty_targets.push(t.node);
+        }
+    }
+
+    // …and the properties it sets may be others: its target is reported (`take_retargeted`).
+    pub(crate) fn properties_changed(&mut self, effect: EffectId) {
+        if let Some(t) = self.effects.get(&effect).and_then(|e| e.target.as_ref()) {
             self.retargeted.push(t.node);
         }
     }
@@ -630,6 +638,10 @@ impl Animations {
             if let Some(e) = self.effects.get_mut(&e) {
                 e.animation = Some(id);
             }
+        }
+        // (What its target's animations set is the properties of the effects an animation plays.)
+        for e in [old, effect].into_iter().flatten() {
+            self.properties_changed(e);
         }
         if let Some(e) = old.and_then(|e| self.effects.get_mut(&e)) {
             e.animation = None;

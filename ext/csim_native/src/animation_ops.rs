@@ -29,6 +29,7 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     register(scope, ns, "animKeyframes", anim_keyframes, context_id);
     register(scope, ns, "animProperties", anim_properties, context_id);
     register(scope, ns, "animActivity", anim_activity, context_id);
+    register(scope, ns, "animCompositeOrder", anim_composite_order, context_id);
 }
 
 // The document timeline at the page's clock `now` (an op's last argument), before an op reads or moves an animation.
@@ -244,6 +245,7 @@ fn anim_effect_set(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackA
                         effect.implicit_easing = None;
                     }
                     model.keyframes_changed(id);
+                    model.properties_changed(id);
                 });
             },
             Some(what @ ("composite" | "iterationComposite")) => {
@@ -496,13 +498,14 @@ fn anim_signals(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgu
     });
 }
 
-// __dom.animList(nid | -1, now) -> [animation, …]: what `element.getAnimations()` (an element) or
+// __dom.animList(nid | -1, now, subtree) -> [animation, …]: what `element.getAnimations({subtree})` (an element) or
 // `document.getAnimations()` (-1) reports — the relevant animations, in composite order.
 fn anim_list(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     with_engine(scope, &args, |scope, engine, arena| {
         let element = nid_arg(scope, &args, 0);
         at_time(engine, number_arg(scope, args.get(1)));
-        let ids = engine.relevant_animations(arena, element);
+        let subtree = args.get(2).boolean_value(scope);
+        let ids = engine.relevant_animations(arena, element, subtree);
         let items: Vec<v8::Local<v8::Value>> = ids.iter().map(|&id| v8::Number::new(scope, id as f64).into()).collect();
         rv.set(v8::Array::new_with_elements(scope, &items).into());
     });
@@ -628,5 +631,15 @@ fn anim_activity(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArg
         at_time(engine, number_arg(scope, args.get(2)));
         let (relevant, in_effect) = engine.animation_activity(element, &properties);
         rv.set(v8::Integer::new(scope, relevant as i32 | (in_effect as i32) << 1).into());
+    });
+}
+
+// __dom.animCompositeOrder([animation, …]) -> the ones the engine still has, in composite order.
+fn anim_composite_order(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    with_engine(scope, &args, |scope, engine, arena| {
+        let ids: Vec<AnimationId> = array_arg(scope, args.get(0)).iter().filter_map(Item::number).map(|n| n as AnimationId).collect();
+        let ids = engine.in_composite_order(arena, ids);
+        let items: Vec<v8::Local<v8::Value>> = ids.iter().map(|&id| v8::Number::new(scope, id as f64).into()).collect();
+        rv.set(v8::Array::new_with_elements(scope, &items).into());
     });
 }

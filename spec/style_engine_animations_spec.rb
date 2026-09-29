@@ -656,4 +656,86 @@ RSpec.describe 'style engine animations' do
     JS
     expect(read).to eq(['matrix3d(2, 0, 0, 0, 0, 2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1)', 'matrix(3, 0, 0, 3, 0, 0)'])
   end
+
+  # A restyle that leaves an element's animations as they were — a `color` change, which its keyframes are computed
+  # again for — tells the JS side nothing: what it caches of every element stays (the report is what a CSS animation
+  # made or let go, or new keyframes, owe).
+  it 'reports no change of animated properties for a restyle that leaves the animations' do
+    s = page('<div id="a" style="animation: fade 100s linear"></div>')
+    read = s.evaluate_script(<<~JS)
+      (() => {
+        const a = document.getElementById('a');
+        getComputedStyle(a).marginLeft;
+        const now = __virtualNow();
+        const before = __dom.styleFlush(now);
+        a.style.color = 'red';
+        const color = __dom.styleFlush(now);
+        a.style.animationName = 'widen';
+        const renamed = __dom.styleFlush(now);
+        return [before ?? null, color ?? null, (renamed || []).length];
+      })()
+    JS
+    expect(read).to eq([nil, nil, 1])
+  end
+
+  # `display` in `@keyframes` animates (css-display-4), holding the value that is not `none` between the ends.
+  it 'animates display from a rule' do
+    s = page('<div id="a" style="display: inline; animation: shown 100s -50s linear paused"></div>',
+             '@keyframes shown { from { display: none } to { display: block } }')
+    expect(s.evaluate_script("getComputedStyle(document.getElementById('a')).display")).to eq('block')
+  end
+
+  # `getAnimations({subtree: true})` reports its pseudo-elements' and descendants' animations too, in composite order.
+  it 'reports a subtree' do
+    s = page('<div id="p" style="animation: fade 100s"><span id="c" style="animation: widen 100s"></span></div>',
+             '#p::after { content: "x"; animation: fade 100s }')
+    read = s.evaluate_script(<<~JS)
+      (() => {
+        const p = document.getElementById('p');
+        return [p.getAnimations().length,
+                p.getAnimations({subtree: true}).map((a) => a.animationName + (a.effect.pseudoElement || '') + ':' + a.effect.target.id)];
+      })()
+    JS
+    expect(read).to eq([1, ['fade:p', 'fade::after:p', 'widen:c']])
+  end
+
+  # `finish` events due together go out in composite order: a CSS animation before a script's, whichever was made
+  # first.
+  it 'dispatches the finish events due together in composite order' do
+    s = page('<div id="a"></div>')
+    s.execute_script(<<~JS)
+      (async () => {
+        const a = document.getElementById('a');
+        const script = a.animate({opacity: [1, 0]}, 1000);
+        a.style.animation = 'widen 1s';
+        const css = a.getAnimations()[0];
+        for (const [anim, name] of [[script, 'script'], [css, 'css']]) {
+          anim.onfinish = () => window.log.push(name);
+        }
+        await css.ready;
+        css.startTime = script.startTime;
+      })();
+    JS
+    expect(drain(s, 16).grep_v(/:/)).to eq(%w[css script])
+  end
+
+  # An element an animation's effect leaves is cacheable again, and an effect given back is a value the JS side's
+  # layout (which resolves `left`) reads again.
+  it 'reads a layout value again when an effect is taken away and given back' do
+    s = page('<div id="a"></div>')
+    read = s.evaluate_script(<<~JS)
+      (() => {
+        const a = document.getElementById('a');
+        const animation = a.animate({left: ['100px', '100px']}, {fill: 'forwards'});
+        const effect = animation.effect;
+        const read = [getComputedStyle(a).left];
+        animation.effect = null;
+        read.push(getComputedStyle(a).left);
+        animation.effect = effect;
+        read.push(getComputedStyle(a).left);
+        return read;
+      })()
+    JS
+    expect(read).to eq(%w[100px auto 100px])
+  end
 end

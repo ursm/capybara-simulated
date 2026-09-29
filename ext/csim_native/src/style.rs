@@ -1103,17 +1103,42 @@ impl StyleEngine {
         self.web_animations.committed_values(id, Default::default(), &|a, b| tree_order(arena, a, b))
     }
 
-    // What `getAnimations()` reports: the relevant animations targeting `element` itself (not its pseudo-elements), or
-    // anything in the document where there is no element — in composite order.
-    pub(crate) fn relevant_animations(&self, arena: &RealmArena, element: Option<NodeId>) -> Vec<waapi::AnimationId> {
+    // What `getAnimations()` reports: the relevant animations targeting `element` itself (not its pseudo-elements) —
+    // with `subtree`, those targeting its pseudo-elements and its descendants too — or anything in the document where
+    // there is no element; in composite order.
+    pub(crate) fn relevant_animations(
+        &self,
+        arena: &RealmArena,
+        element: Option<NodeId>,
+        subtree: bool,
+    ) -> Vec<waapi::AnimationId> {
         let order = |a, b| tree_order(arena, a, b);
+        let within = |root: NodeId, node: NodeId| {
+            let mut cur = Some(node);
+            while let Some(c) = cur {
+                if c == root {
+                    return true;
+                }
+                cur = arena.get(c).and_then(|n| n.parent);
+            }
+            false
+        };
         match (element, self.doc) {
+            (Some(el), _) if subtree => self.web_animations.relevant_animations(|t| within(el, t.node), &order),
             (Some(el), _) => self.web_animations.relevant_animations(|t| t.node == el && t.pseudo.is_none(), &order),
             (None, Some(doc)) => {
                 self.web_animations.relevant_animations(|t| arena.is_inclusive_ancestor(doc, t.node), &order)
             },
             (None, None) => Vec::new(),
         }
+    }
+
+    // `ids` sorted in composite order.
+    pub(crate) fn in_composite_order(&self, arena: &RealmArena, mut ids: Vec<waapi::AnimationId>) -> Vec<waapi::AnimationId> {
+        let model = &self.web_animations;
+        ids.retain(|id| model.animations.contains_key(id));
+        ids.sort_by(|&x, &y| model.composite_order(x, y, &|a, b| tree_order(arena, a, b)));
+        ids
     }
 
     // The properties the animations on `element` itself set, as their keyframes declare them (a shorthand expanded)
@@ -1434,13 +1459,13 @@ impl StyleEngine {
                 self.web_animations.target_restyled(node);
             }
         }
-        let unrendered: Vec<waapi::AnimationId> = self
-            .web_animations
-            .animations
-            .iter()
-            .filter_map(|(&id, a)| {
-                let owner = a.css.as_ref()?.owner.as_ref()?;
-                (!target_style(arena, owner).is_some_and(|s| !s.get_box().clone_display().is_none())).then_some(id)
+        let model = &self.web_animations;
+        let unrendered: Vec<waapi::AnimationId> = model
+            .css_owners()
+            .flat_map(|node| model.css_by_owner[&node].iter().copied())
+            .filter(|id| {
+                let owner = model.animations[id].css.as_ref().and_then(|css| css.owner.as_ref());
+                owner.is_some_and(|o| !target_style(arena, o).is_some_and(|s| !s.get_box().clone_display().is_none()))
             })
             .collect();
         for id in unrendered {
