@@ -306,6 +306,70 @@ RSpec.describe 'style engine animations' do
     expect(s.evaluate_script("getComputedStyle(document.getElementById('a'), '::before').opacity").to_f).to be < 1
   end
 
+  # ── Script animations (`element.animate`), the engine's own model ──
+  # Values are composed in the engine at the page's clock; `ready` waits for a frame; a pause holds, a seek moves, and
+  # a value layout answers (`width`) follows the engine too.
+  it 'runs a script animation on the page clock' do
+    s = page('<div id="a" style="opacity: 0.5"></div>')
+    s.execute_script(<<~JS)
+      window.steps = [];
+      (async () => {
+        const a = document.getElementById('a');
+        const anim = a.animate([{ opacity: 0 }, { opacity: 1 }], 1000);
+        await anim.ready;
+        await new Promise((r) => setTimeout(r, 500));
+        steps.push(getComputedStyle(a).opacity);
+        anim.pause();
+        await anim.ready;
+        steps.push(anim.playState, getComputedStyle(a).opacity);
+        anim.currentTime = 250;
+        steps.push(getComputedStyle(a).opacity);
+        const wide = a.animate({ width: ['100px', '200px'] }, { duration: 1000, fill: 'forwards' });
+        wide.finish();
+        steps.push(getComputedStyle(a).width);
+        await wide.finished;
+        steps.push('finished', a.getAnimations().length);
+      })();
+    JS
+    drain(s, 10)
+    expect(s.evaluate_script('window.steps')).to eq(['0.5', 'paused', '0.5', '0.25', '200px', 'finished', 2])
+  end
+
+  # A keyframe list without a 0% keyframe starts from the element's own value, and `composite: 'add'` adds to it.
+  it 'composes a script animation over the value underneath' do
+    s = page('<div id="a" style="margin-left: 100px"></div>')
+    read = s.evaluate_script(<<~JS)
+      (() => {
+        const a = document.getElementById('a');
+        const to = a.animate({ marginLeft: '200px' }, 1000);
+        to.pause(); to.currentTime = 500;
+        const neutral = getComputedStyle(a).marginLeft;
+        to.cancel();
+        const add = a.animate({ marginLeft: ['10px', '20px'] }, { duration: 1000, composite: 'add' });
+        add.pause(); add.currentTime = 500;
+        return [neutral, getComputedStyle(a).marginLeft];
+      })()
+    JS
+    expect(read).to eq(%w[150px 115px])
+  end
+
+  # `finish` and `cancel` are dispatched at the rendering update after, and the promises settle before them.
+  it "settles a script animation's promises and dispatches its events" do
+    s = page('<div id="a"></div>')
+    s.execute_script(<<~JS)
+      window.order = [];
+      const anim = document.getElementById('a').animate({ opacity: [0, 1] }, 100);
+      anim.finished.then(() => order.push('finished'));
+      anim.onfinish = () => order.push('finish');
+      const other = document.getElementById('a').animate({ opacity: [0, 1] }, 1000);
+      other.finished.catch((e) => order.push(e.name));
+      other.oncancel = () => order.push('cancel');
+      other.cancel();
+    JS
+    drain(s, 4)
+    expect(s.evaluate_script('window.order')).to eq(%w[AbortError cancel finished finish])
+  end
+
   # Each event carries the object `getAnimations()` reports for what it is about.
   it 'carries the animation an event is about' do
     s = page('<div id="a"></div>')

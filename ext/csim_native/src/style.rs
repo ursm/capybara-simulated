@@ -17,18 +17,30 @@ use style::applicable_declarations::ApplicableDeclarationBlock;
 use style::bloom::each_relevant_element_hash;
 use style::context::{
     QuirksMode, RegisteredSpeculativePainter, RegisteredSpeculativePainters, SharedStyleContext, StyleContext,
+    CascadeInputs, ThreadLocalStyleContext, TreeCountingCaches,
 };
 use style::data::{ElementDataMut, ElementDataRef, ElementDataWrapper};
-use style::dom::{LayoutIterator, NodeInfo, OpaqueNode, TDocument, TElement, TNode, TShadowRoot};
+use style::dom::{DummyElementContext, LayoutIterator, NodeInfo, OpaqueNode, TDocument, TElement, TNode, TShadowRoot};
 use style::global_style_data::GLOBAL_STYLE_DATA;
 use style::device::Device;
 use style::media_queries::{MediaList, MediaType};
 use style::invalidation::element::restyle_hints::RestyleHint;
 use style::parser::ParserContext;
+use style::properties::animated_properties::AnimationValue;
 use style::properties::{
-    parse_property_declaration_list, parse_style_attribute, ComputedValues, LonghandId, PropertyDeclarationBlock,
-    PropertyDeclarationId, PropertyId, ShorthandId,
+    parse_one_declaration_into, parse_property_declaration_list, parse_style_attribute, ComputedValues, LonghandId,
+    PropertyDeclarationBlock, PropertyDeclarationId, PropertyId, ShorthandId, SourcePropertyDeclaration, StyleBuilder,
 };
+use style::rule_cache::RuleCacheConditions;
+use style::parser::Parse;
+use style::values::computed::easing::ComputedTimingFunction;
+use style::values::computed::ToComputedValue;
+use style::values::generics::easing::TimingKeyword;
+use style::values::specified::easing::TimingFunction as SpecifiedTimingFunction;
+use style::rule_tree::RuleCascadeFlags;
+use style::style_resolver::{PseudoElementResolution, StyleResolverForElement};
+use style::stylesheets::container_rule::ContainerSizeQuery;
+use style::values::computed::Context;
 use style::rule_tree::{CascadeLevel, CascadeOrigin};
 use style::stylesheets::layer_rule::LayerOrder;
 use style::selector_parser::SnapshotMap;
@@ -56,6 +68,7 @@ use style::{Atom, LocalName};
 use stylo_dom::ElementState;
 use web_atoms::{local_name, ns, LocalNameStaticSet, Namespace, NamespaceStaticSet};
 
+use crate::animations as waapi;
 use crate::dom::{NodeId, NodeKind, RealmArena};
 
 
@@ -195,6 +208,10 @@ pub(crate) struct StyleEngine {
     updated_phases: std::collections::HashMap<AnimationId, (Phase, f64)>,
     phases: std::collections::HashMap<AnimationId, Observed>,
     generations: std::collections::HashMap<(AnimationSetKey, AnimationKind, String), u32>,
+    // The Web Animations model: every script-made animation and effect, composited over the CSS ones; and the
+    // elements it animates that a normal traversal restyled, whose keyframes are computed again after it.
+    pub(crate) web_animations: waapi::Animations,
+    restyled_targets: RefCell<Vec<NodeId>>,
     // A change hook panicked (a bug): what the engine holds may be half-updated, so the next style op throws it and
     // everything it styled away (`poisoned`).
     poisoned: bool,
@@ -368,6 +385,8 @@ impl StyleEngine {
             updated_phases: std::collections::HashMap::new(),
             phases: std::collections::HashMap::new(),
             generations: std::collections::HashMap::new(),
+            web_animations: waapi::Animations::default(),
+            restyled_targets: RefCell::new(Vec::new()),
         };
         let ua = engine.parse(UA_SHEET, engine.url.clone(), "", Origin::UserAgent, AllowImportRules::No, Vec::new());
         engine.stylist.append_stylesheet(ua, &engine.lock.read());
@@ -433,6 +452,8 @@ impl StyleEngine {
         self.updated_phases.clear();
         self.phases.clear();
         self.generations.clear();
+        self.web_animations = waapi::Animations::default();
+        self.restyled_targets.borrow_mut().clear();
         self.snapshots.clear();
         self.pending.borrow_mut().clear();
         self.shadow_styles.clear();
@@ -1066,7 +1087,205 @@ impl StyleEngine {
         }
         self.advance_to(arena, now_ms);
         self.ensure_styled(arena);
+        self.compute_effects(arena);
         self.note_animation_phases(arena);
+    }
+
+    // A Web Animations op (`element.animate`, `play()`, a seek…): whatever it did, the next read styles again.
+    pub(crate) fn web_animations_op<R>(&mut self, op: impl FnOnce(&mut waapi::Animations) -> R) -> R {
+        self.styled = None;
+        op(&mut self.web_animations)
+    }
+
+    // A shorthand's value in `style`, as CSSOM's `getPropertyValue` gives it: its longhands' resolved values
+    // serialized as the shorthand — None where they do not make one.
+    fn shorthand_value(&self, style: &ComputedValues, shorthand: ShorthandId) -> Option<String> {
+        let mut block = PropertyDeclarationBlock::new();
+        let mut parsed = SourcePropertyDeclaration::default();
+        for longhand in shorthand.longhands() {
+            let value = style.computed_value_to_string(PropertyDeclarationId::Longhand(longhand));
+            parse_one_declaration_into(
+                &mut parsed,
+                PropertyId::NonCustom(longhand.into()),
+                &value,
+                Origin::Author,
+                &self.url,
+                None,
+                ParsingMode::DEFAULT,
+                self.quirks,
+                CssRuleType::Style,
+            )
+            .ok()?;
+            block.extend(parsed.drain(), style::properties::Importance::Normal);
+        }
+        let mut out = String::new();
+        block.shorthand_to_css(shorthand, &mut out).ok()?;
+        (!out.is_empty()).then_some(out)
+    }
+
+    // An easing as the page wrote it (validated and made canonical by the JS side), computed; linear where it does not
+    // parse.
+    pub(crate) fn easing(&self, text: &str) -> ComputedTimingFunction {
+        let context = ParserContext::new(
+            Origin::Author,
+            &self.url,
+            Some(CssRuleType::Style),
+            ParsingMode::DEFAULT,
+            self.quirks,
+            Default::default(),
+            None,
+            None,
+            Default::default(),
+        );
+        let mut input = ParserInput::new(text);
+        let parsed = SpecifiedTimingFunction::parse(&context, &mut Parser::new(&mut input));
+        parsed.map_or(ComputedTimingFunction::Keyword(TimingKeyword::Linear), |f| f.to_computed_value_without_context())
+    }
+
+    // A keyframe's declarations, as `element.animate` gives them (property, value): each parsed as an author
+    // declaration, a shorthand into its longhands, and one that does not parse left out (the JS side validated the
+    // keyframes' shape, not their values).
+    pub(crate) fn keyframe_block(&self, declarations: &[(String, String)]) -> Arc<Locked<PropertyDeclarationBlock>> {
+        let mut block = PropertyDeclarationBlock::new();
+        let mut parsed = SourcePropertyDeclaration::default();
+        for (name, value) in declarations {
+            let Ok(id) = PropertyId::parse_enabled_for_all_content(name) else { continue };
+            let ok = parse_one_declaration_into(
+                &mut parsed,
+                id,
+                value,
+                Origin::Author,
+                &self.url,
+                None,
+                ParsingMode::DEFAULT,
+                self.quirks,
+                CssRuleType::Keyframe,
+            );
+            if ok.is_ok() {
+                block.extend(parsed.drain(), style::properties::Importance::Normal);
+            }
+        }
+        Arc::new(self.lock.wrap(block))
+    }
+
+    // The style `id` has without its animations and transitions — its base style (web-animations §5.4.1), which a
+    // neutral keyframe and a composite other than `replace` stand on.
+    fn base_style(&self, arena: &RealmArena, id: NodeId, style: &Arc<ComputedValues>) -> Arc<ComputedValues> {
+        let rules = style.rules();
+        let base_rules = self.stylist.rule_tree().remove_animation_rules(rules);
+        if base_rules == *rules {
+            return style.clone();
+        }
+        in_arena(arena, self, || {
+            let guard = self.lock.read();
+            let shared = SharedStyleContext {
+                traversal_flags: TraversalFlags::empty(),
+                stylist: &self.stylist,
+                options: GLOBAL_STYLE_DATA.options.clone(),
+                guards: StylesheetGuards { author: &guard, ua_or_user: &guard },
+                visited_styles_enabled: false,
+                animations: self.animations.clone(),
+                current_time_for_animations: self.now,
+                snapshot_map: &self.snapshots,
+                registered_speculative_painters: &NoPainters,
+            };
+            let mut thread_local = ThreadLocalStyleContext::new();
+            let mut context = StyleContext { shared: &shared, thread_local: &mut thread_local };
+            let inputs = CascadeInputs {
+                rules: Some(base_rules),
+                visited_rules: None,
+                flags: style.flags.for_cascade_inputs(),
+                included_cascade_flags: RuleCascadeFlags::empty(),
+            };
+            StyleResolverForElement::new(
+                StyleNode::new(arena, id),
+                &mut context,
+                RuleInclusion::All,
+                PseudoElementResolution::IfApplicable,
+            )
+            .cascade_style_and_visited_with_default_parents(inputs)
+            .0
+        })
+    }
+
+    // An effect's keyframes as values of its target (web-animations §5.3.3 "computing property values"): computed
+    // in the target's base style, with its parent's to inherit from; None while the target has no style (or is a
+    // pseudo-element, which the engine does not animate yet).
+    fn compute_keyframes(&self, arena: &RealmArena, effect: &waapi::Effect) -> Option<waapi::ComputedKeyframes> {
+        let target = effect.target.as_ref().filter(|t| t.pseudo.is_none())?;
+        let style = primary_style(arena, target.node)?;
+        let base = self.base_style(arena, target.node, &style);
+        let parent = in_arena(arena, self, || {
+            StyleNode::new(arena, target.node).inheritance_parent().and_then(|p| primary_style(arena, p.id))
+        });
+        let guard = self.lock.read();
+        let device = self.stylist.device();
+        let builder = StyleBuilder::for_derived_style(device, Some(&self.stylist), &base, parent.as_deref());
+        let mut conditions = RuleCacheConditions::default();
+        let mut counting = TreeCountingCaches::default();
+        let mut context = Context::new_for_animation(
+            builder,
+            self.quirks,
+            &mut conditions,
+            ContainerSizeQuery::none(),
+            &DummyElementContext,
+            &mut counting,
+        );
+        let mut computed = waapi::ComputedKeyframes::default();
+        for keyframe in &effect.keyframes {
+            let block = keyframe.block.read_with(&guard);
+            for value in block.to_animation_value_iter(&mut context, &base, device.default_computed_values()) {
+                let id = value.id().to_owned();
+                let frame = waapi::ComputedFrame {
+                    offset: keyframe.offset,
+                    easing: keyframe.easing.clone(),
+                    composite: keyframe.composite.unwrap_or(effect.composite),
+                    value,
+                };
+                match computed.properties.iter_mut().find(|(p, ..)| *p == id) {
+                    Some((_, frames, _)) => frames.push(frame),
+                    None => computed.properties.push((id, vec![frame], None)),
+                }
+            }
+        }
+        for (id, _, base_value) in &mut computed.properties {
+            *base_value = AnimationValue::from_computed_values(id.as_borrowed(), &base);
+        }
+        Some(computed)
+    }
+
+    // Every effect whose keyframes are not computed for its target yet (new, changed, or its target restyled) is
+    // computed now its target is styled, and its target's animated values composed again.
+    fn compute_effects(&mut self, arena: &RealmArena) {
+        for node in std::mem::take(&mut *self.restyled_targets.borrow_mut()) {
+            self.web_animations.target_restyled(node);
+        }
+        let stale: Vec<waapi::EffectId> = self
+            .web_animations
+            .effects
+            .iter()
+            .filter(|(_, e)| e.computed.is_none() && e.target.is_some())
+            .map(|(&id, _)| id)
+            .collect();
+        let mut restyle = Vec::new();
+        for id in stale {
+            let computed = self.compute_keyframes(arena, &self.web_animations.effects[&id]);
+            let effect = self.web_animations.effects.get_mut(&id).unwrap();
+            if computed.is_some() {
+                restyle.extend(effect.target.as_ref().map(|t| t.node));
+            }
+            effect.computed = computed;
+        }
+        let Some(doc) = self.doc.filter(|_| !restyle.is_empty()) else { return };
+        in_arena(arena, self, || {
+            for &node in &restyle {
+                if arena.existing_style_slot(node).is_some() {
+                    hint_animated_values(StyleNode::new(arena, node));
+                }
+            }
+        });
+        let _layout = LayoutThreadState::enter();
+        self.traverse(arena, doc, false, TraversalFlags::AnimationOnly);
     }
 
     // A rendering update's events: what each animation and transition moved through since the last one — its phase
@@ -1127,25 +1346,28 @@ impl StyleEngine {
     // the next traversal compares — and a descendant transitioning the same property does not start a transition of
     // its own every frame.
     fn advance_to(&mut self, arena: &RealmArena, now_ms: f64) {
+        // (…and the elements the Web Animations' timeline, an op or a frame moved, whose values are composed again
+        // here too.)
+        self.web_animations.set_timeline_time(now_ms);
+        let mut restyle = self.web_animations.take_targets_to_restyle();
         let now = now_ms / 1000.0;
-        if now == self.now {
-            return;
+        if now != self.now {
+            self.now = now;
+            // (…those whose values the time moves — one ending now included: a finished animation holds its fill,
+            // and a paused one its place.)
+            let runs = |state: &AnimationState| matches!(state, AnimationState::Pending | AnimationState::Running);
+            restyle.extend(
+                self.animations
+                    .sets
+                    .read()
+                    .iter()
+                    .filter(|(_, set)| {
+                        set.animations.iter().any(|a| runs(&a.state)) || set.transitions.iter().any(|t| runs(&t.state))
+                    })
+                    .map(|(key, _)| node_of(key.node.0)),
+            );
+            self.note_animation_phases(arena);
         }
-        self.now = now;
-        // (…those whose values the time moves — one ending now included: a finished animation holds its fill, and a
-        // paused one its place.)
-        let runs = |state: &AnimationState| matches!(state, AnimationState::Pending | AnimationState::Running);
-        let restyle: Vec<NodeId> = self
-            .animations
-            .sets
-            .read()
-            .iter()
-            .filter(|(_, set)| {
-                set.animations.iter().any(|a| runs(&a.state)) || set.transitions.iter().any(|t| runs(&t.state))
-            })
-            .map(|(key, _)| node_of(key.node.0))
-            .collect();
-        self.note_animation_phases(arena);
         let Some(doc) = self.doc.filter(|_| !restyle.is_empty()) else { return };
         in_arena(arena, self, || {
             for &node in &restyle {
@@ -1323,7 +1545,7 @@ impl StyleEngine {
         let style = &*style;
         let property = PropertyId::parse_enabled_for_all_content(name).ok()?;
         let longhand = match property.as_shorthand() {
-            Ok(_) => return None,
+            Ok(shorthand) => return self.shorthand_value(style, shorthand),
             Err(longhand) => longhand,
         };
         let value = style.computed_value_to_string(longhand);
@@ -1766,6 +1988,10 @@ impl<'dom> DomTraversal<StyleNode<'dom>> for Recalc<'_> {
             } else {
                 el.slot().styled_state.set(el.state());
                 unsafe { el.unset_dirty_descendants() };
+                // (…and the keyframes of an element's Web Animations are its style's values: computed again.)
+                if el.engine().web_animations.animates(el.id) {
+                    el.engine().restyled_targets.borrow_mut().push(el.id);
+                }
             }
         }
     }
@@ -2344,12 +2570,27 @@ impl<'a> TElement for StyleNode<'a> {
     fn has_css_transitions(&self, context: &SharedStyleContext, pseudo: Option<PseudoElement>) -> bool {
         context.animations.has_active_transitions(&AnimationSetKey::new(TNode::opaque(self), pseudo))
     }
+    // The CSS animations' values, and the Web Animations' composited over them (web-animations §5.4.2: script
+    // animations come last in composite order).
     fn animation_rule(&self, context: &SharedStyleContext) -> Option<Arc<Locked<PropertyDeclarationBlock>>> {
-        context.animations.get_animation_declarations(
-            &AnimationSetKey::new_for_non_pseudo(TNode::opaque(self)),
-            context.current_time_for_animations,
-            &self.engine().lock,
-        )
+        let key = AnimationSetKey::new_for_non_pseudo(TNode::opaque(self));
+        let now = context.current_time_for_animations;
+        let web_animations = &self.engine().web_animations;
+        if !web_animations.animates(self.id) {
+            return context.animations.get_animation_declarations(&key, now, &self.engine().lock);
+        }
+        let mut values = context
+            .animations
+            .sets
+            .read()
+            .get(&key)
+            .and_then(|set| set.get_value_map_for_active_animations(now))
+            .unwrap_or_default();
+        web_animations.compose(&waapi::Target { node: self.id, pseudo: None }, &mut values);
+        if values.is_empty() {
+            return None;
+        }
+        Some(Arc::new(self.engine().lock.wrap(PropertyDeclarationBlock::from_animation_value_map(&values))))
     }
     fn transition_rule(&self, context: &SharedStyleContext) -> Option<Arc<Locked<PropertyDeclarationBlock>>> {
         context.animations.get_transition_declarations(

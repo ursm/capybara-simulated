@@ -6,6 +6,9 @@
 // DOM to be installed into every realm through rusty_racer's generic hook. The
 // engine itself stays a pure V8 binding with no DOM knowledge.
 
+// The Web Animations model: the timeline, animations and their effects' timing; and the ops a JS handle asks it with.
+mod animation_ops;
+mod animations;
 // The native author cascade: a realm's static rules, and one element's winning declarations in one pass.
 mod cascade;
 mod dom;

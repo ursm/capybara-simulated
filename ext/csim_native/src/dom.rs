@@ -810,7 +810,7 @@ pub(crate) struct Dom {
 // bursts (the borrow is released before any V8 call), the same discipline
 // rusty_racer's istate! macro follows — and, like it, the borrow checker enforces
 // it: get_slot_mut borrows the scope, which every V8 call also needs.
-fn dom<'s>(scope: &'s mut v8::PinScope<'_, '_>) -> &'s mut Dom {
+pub(crate) fn dom<'s>(scope: &'s mut v8::PinScope<'_, '_>) -> &'s mut Dom {
     if scope.get_slot::<Dom>().is_none() {
         scope.set_slot(Dom::default());
     }
@@ -823,7 +823,7 @@ fn dom<'s>(scope: &'s mut v8::PinScope<'_, '_>) -> &'s mut Dom {
 // function DATA (set in `install`), so a node op routes to its OWN realm's arena. `0` (main) when
 // unset. This is how the isolate-global `Dom` is partitioned per realm without threading a realm id
 // through the JS op signatures.
-fn realm_id(scope: &mut v8::PinScope<'_, '_>, args: &v8::FunctionCallbackArguments<'_>) -> i32 {
+pub(crate) fn realm_id(scope: &mut v8::PinScope<'_, '_>, args: &v8::FunctionCallbackArguments<'_>) -> i32 {
     args.data().int32_value(scope).unwrap_or(0)
 }
 
@@ -869,7 +869,7 @@ fn attribute_reads_state(name: &str) -> bool {
 
 // A NodeId argument off the JS wire: reads arg `i` as a Number and unpacks it, or None for a negative
 // sentinel / non-number. Does NOT check liveness — the op does that via `realm(...).get(id)`.
-fn nid_arg(scope: &mut v8::PinScope<'_, '_>, args: &v8::FunctionCallbackArguments<'_>, i: i32) -> Option<NodeId> {
+pub(crate) fn nid_arg(scope: &mut v8::PinScope<'_, '_>, args: &v8::FunctionCallbackArguments<'_>, i: i32) -> Option<NodeId> {
     args.get(i).integer_value(scope).and_then(NodeId::from_i64)
 }
 
@@ -955,6 +955,7 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_, ()>, ctx: &v8::Global<v8:
     register(scope, ns, "styleValue", style_value, context_id);
     register(scope, ns, "styleFlush", style_flush, context_id);
     register(scope, ns, "styleTick", style_tick, context_id);
+    crate::animation_ops::install(scope, ns, context_id);
     register(scope, ns, "nowNanos", now_nanos, context_id);
     // Incremental-sync primitives (the store-flip F1 foundation): keep the arena current
     // as the DOM mutates, instead of rebuilding it. syncChildren relinks one parent's
@@ -998,7 +999,7 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_, ()>, ctx: &v8::Global<v8:
 // Register one `__dom.<name>` for a realm, carrying the realm's `context_id` as the function's DATA so
 // `realm_id(scope, &args)` can route the op to that realm's arena (each realm gets its own `__dom` with
 // its own functions, so the data is per-realm).
-fn register(
+pub(crate) fn register(
     scope: &mut v8::PinScope<'_, '_>,
     ns: v8::Local<'_, v8::Object>,
     name: &str,
@@ -1728,7 +1729,7 @@ fn url_array<'s>(scope: &mut v8::PinScope<'s, '_>, urls: &[String]) -> v8::Local
 
 // Run a style-engine op, catching a panic (a bug) where it would otherwise unwind into V8's callback frame and abort
 // the process: the realm's engine is dropped with every style it made, so the next op starts from a clean one.
-fn style_op(scope: &mut v8::PinScope<'_, '_>, cid: i32, op: impl FnOnce(&mut v8::PinScope<'_, '_>)) {
+pub(crate) fn style_op(scope: &mut v8::PinScope<'_, '_>, cid: i32, op: impl FnOnce(&mut v8::PinScope<'_, '_>)) {
     // …and an engine a change hook left poisoned is dropped before it is asked anything.
     let poisoned = dom(scope).styles.get(&cid).is_some_and(|e| e.poisoned());
     let panicked = if poisoned {
@@ -1897,13 +1898,13 @@ fn style_value_unguarded(
 }
 
 // The page's clock (ms) an op is given at `index`: 0 when it is not a finite number (an undefined argument reads NaN).
-fn clock_arg(scope: &mut v8::PinScope<'_, '_>, args: &v8::FunctionCallbackArguments<'_>, index: i32) -> f64 {
+pub(crate) fn clock_arg(scope: &mut v8::PinScope<'_, '_>, args: &v8::FunctionCallbackArguments<'_>, index: i32) -> f64 {
     args.get(index).number_value(scope).filter(|n| n.is_finite()).unwrap_or(0.0)
 }
 
 // Under CSIM_STYLE_VERIFY, what the engine's last restyles disagreed with a full one about (`failures`), thrown as the
 // error the op ends with; whether there was any.
-fn threw_verify_failures(scope: &mut v8::PinScope<'_, '_>, failures: Vec<String>) -> bool {
+pub(crate) fn threw_verify_failures(scope: &mut v8::PinScope<'_, '_>, failures: Vec<String>) -> bool {
     if failures.is_empty() {
         return false;
     }
@@ -1954,6 +1955,8 @@ fn style_tick_unguarded(
     let cid = realm_id(scope, &args);
     let d = dom(scope);
     let (Some(engine), Some(arena)) = (d.styles.get_mut(&cid), d.realms.get(&cid)) else { return };
+    // (The Web Animations' frame first: it moves their timeline, and the flush composes what it moved.)
+    engine.web_animations_op(|animations| animations.tick(now));
     engine.flush(arena, now);
     let failures = engine.take_verify_failures();
     let events = engine.take_animation_events(arena);
