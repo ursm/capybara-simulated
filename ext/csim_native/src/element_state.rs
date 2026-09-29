@@ -410,7 +410,8 @@ impl RealmArena {
             (required || f.required_groups.contains(&group)) && !f.checked_groups.contains(&group)
         })
     }
-    // Does an invalid candidate sit in this form / fieldset (its tree descendants)?
+    // Does this form / fieldset hold an invalid candidate — a form by the controls it OWNS (a `form=` one outside it
+    // included), a fieldset by its descendants?
     pub(crate) fn contains_invalid(&self, id: NodeId) -> bool {
         let root = self.root_of(id);
         {
@@ -423,13 +424,15 @@ impl RealmArena {
         }
         let mut set = std::collections::HashSet::new();
         self.find_in_tree(root, |c, n| {
-            if matches!(n.local_name.as_str(), "input" | "select" | "textarea" | "button")
-                && self.will_validate(c)
-                && self.validity(c) != 0
-            {
+            let control = matches!(n.local_name.as_str(), "input" | "select" | "textarea" | "button")
+                || n.state & STATE_FORM_ASSOCIATED != 0;
+            if control && self.will_validate(c) && self.validity(c) != 0 {
+                if let Some(form) = self.form_owner(c) {
+                    set.insert(form);
+                }
                 let mut up = self.parent_of(c);
                 while let Some(p) = up {
-                    if self.get(p).is_some_and(|e| e.is_html_named("form") || e.is_html_named("fieldset")) {
+                    if self.get(p).is_some_and(|e| e.is_html_named("fieldset")) {
                         set.insert(p);
                     }
                     up = self.parent_of(p);

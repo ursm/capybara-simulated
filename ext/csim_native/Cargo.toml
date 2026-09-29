@@ -32,6 +32,10 @@ selectors = "0.40"
 cssparser = "0.37"
 precomputed-hash = "0.1"
 
+# An `<input>`'s `pattern` is an ECMAScript regular expression (compiled with the `v` flag): regress is a JS-syntax
+# engine in pure Rust (Boa's), matched over UTF-16 as a page's string is (validity.rs).
+regress = { version = "0.12", features = ["utf16"] }
+
 # Native text metrics for native layout (stage L2): fontations (the pure-Rust font stack Chrome & Servo
 # use). `skrifa` reads a font's cmap + hmtx advances + metrics, so native inline layout measures runs +
 # breaks lines IN-PROCESS (no per-run V8 crossing). Re-exports read-fonts as `skrifa::raw`.

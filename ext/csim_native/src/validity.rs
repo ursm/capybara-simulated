@@ -3,14 +3,16 @@
 // fieldset by its controls), `:user-valid`, `:user-invalid`, `:in-range`, `:out-of-range`. dom-nodes.js `validity`
 // is the other engine; the two answer the same, CSIM_ARENA_VERIFY holds them together.
 //
-// Everything is read from the arena but `pattern`: an ECMAScript regular expression (compiled with the `v` flag), which
-// only V8 evaluates as a page does — so the arena recomputes it with V8's own RegExp whenever an input's value or one
-// of the attributes it reads is written (dom.rs `refresh_pattern`, run by the ops that write them), and keeps the
-// answer in a state bit.
+// `pattern` is an ECMAScript regular expression, compiled with the `v` flag: regress (a JS-syntax engine in Rust)
+// evaluates it over the value's UTF-16 code units, as a page's RegExp does, from a cache of compiled patterns.
+
+use std::cell::RefCell;
+use std::collections::HashMap;
+use std::rc::Rc;
 
 use crate::dom::{
-    NodeData, NodeId, NodeKind, RealmArena, STATE_CUSTOM_ERROR, STATE_DIRTY_BY_USER, STATE_HAS_FILES,
-    STATE_PATTERN_MISMATCH, STATE_USER_INTERACTED,
+    NodeData, NodeId, NodeKind, RealmArena, STATE_CUSTOM_ERROR, STATE_DIRTY_BY_USER, STATE_FORM_ASSOCIATED,
+    STATE_HAS_FILES, STATE_USER_INTERACTED,
 };
 
 // The ValidityState flags.
@@ -279,20 +281,22 @@ impl RealmArena {
     }
 
     // `willValidate`: a submittable control of a validating kind — an `<input>` but a hidden / reset / button one, a
-    // Submit-state `<button>`, a `<select>`, a `<textarea>` — that is not actually disabled, not `readonly` (an input or
-    // a textarea), and not in a `<datalist>`.
+    // Submit-state `<button>`, a `<select>`, a `<textarea>`, a form-associated custom element — that is not actually
+    // disabled, not `readonly` (an input, a textarea, a form-associated custom element), and not in a `<datalist>`.
     pub(crate) fn will_validate(&self, id: NodeId) -> bool {
         let Some(n) = self.get(id).filter(|n| n.kind == NodeKind::Element && n.ns.is_empty()) else { return false };
-        let candidate = match n.local_name.as_str() {
-            "input" => !matches!(n.input_type(), "hidden" | "reset" | "button"),
-            "button" => n.is_submit_button(),
-            "select" | "textarea" => true,
-            _ => false,
-        };
+        let face = n.state & STATE_FORM_ASSOCIATED != 0;
+        let candidate = face
+            || match n.local_name.as_str() {
+                "input" => !matches!(n.input_type(), "hidden" | "reset" | "button"),
+                "button" => n.is_submit_button(),
+                "select" | "textarea" => true,
+                _ => false,
+            };
         if !candidate || self.is_actually_disabled(id) {
             return false;
         }
-        if matches!(n.local_name.as_str(), "input" | "textarea") && n.plain_attr("readonly").is_some() {
+        if (face || matches!(n.local_name.as_str(), "input" | "textarea")) && n.plain_attr("readonly").is_some() {
             return false;
         }
         let mut cur = self.parent_of(id);
@@ -352,7 +356,7 @@ impl RealmArena {
         if checkable || tag != "input" && tag != "textarea" || empty {
             return v;
         }
-        if tag == "input" && n.state & STATE_PATTERN_MISMATCH != 0 {
+        if tag == "input" && PATTERN_TYPES.contains(&ty) && self.pattern_mismatch(n, ty) {
             v |= PATTERN_MISMATCH;
         }
         if tag == "input" {
@@ -589,46 +593,122 @@ pub(crate) fn parse_number_field(s: &str) -> Option<f64> {
     s.parse::<f64>().ok().filter(|x| x.is_finite())
 }
 
-// Does `val` fail `pattern`, compiled as HTML says (the `v` flag, anchored; a pattern that does not compile alone is
-// ignored)? A multiple email's tokens are matched one by one, empty ones skipped.
-pub(crate) fn pattern_mismatch(
-    scope: &mut v8::PinScope<'_, '_>,
-    pattern: &str,
-    val: &str,
-    multiple_email: bool,
-) -> bool {
-    // (Inside a TryCatch: a pattern that does not compile throws, and the exception is this function's, not the page's.)
-    v8::tc_scope!(let tc, scope);
-    let flags = v8::RegExpCreationFlags::UNICODE_SETS;
-    let Some(source) = v8::String::new(tc, pattern) else { return false };
-    if v8::RegExp::new(tc, source, flags).is_none() {
-        return false;
+// The compiled form of a `pattern` (by its UTF-16 text): anchored — `^(?:pattern)$` — with the `v` flag, or None when
+// the pattern does not compile ON ITS OWN (HTML: a pattern that fails to compile is ignored — and the wrapper must not
+// balance an unbalanced one like `a)(b`). A page has a handful of patterns; the cache is dropped whole past a bound.
+thread_local! {
+    static PATTERNS: RefCell<HashMap<Vec<u16>, Option<Rc<regress::Regex>>>> = RefCell::new(HashMap::new());
+    // …and whether a value fails a pattern, by (pattern, value): a style read asks again for an unchanged field, and a
+    // backtracking pattern (`(a+)+b`) takes time exponential in the value to answer.
+    static PATTERN_RESULTS: RefCell<HashMap<(Vec<u16>, Vec<u16>), bool>> = RefCell::new(HashMap::new());
+}
+const PATTERN_CACHE_LIMIT: usize = 256;
+fn compiled_pattern(pattern: &[u16]) -> Option<Rc<regress::Regex>> {
+    if let Some(hit) = PATTERNS.with_borrow(|c| c.get(pattern).cloned()) {
+        return hit;
     }
-    let Some(anchored) = v8::String::new(tc, &format!("^(?:{pattern})$")) else { return false };
-    let Some(re) = v8::RegExp::new(tc, anchored, flags) else { return false };
-    let fails = |s: &str| -> bool {
-        let Some(subject) = v8::String::new(tc, s) else { return false };
-        // (No match is a JS `null` — a value, not an empty handle.)
-        re.exec(tc, subject).is_none_or(|m| m.is_null())
+    // Code points, a lone surrogate as itself (regress parses from u32s).
+    let points = |u: &[u16]| -> Vec<u32> {
+        char::decode_utf16(u.iter().copied()).map(|r| r.map_or_else(|e| u32::from(e.unpaired_surrogate()), u32::from)).collect()
     };
-    if multiple_email {
-        val.split(',').map(trim_ascii_ws).filter(|t| !t.is_empty()).any(fails)
-    } else {
-        fails(val)
-    }
+    let alone = points(pattern);
+    let compiled = regress::Regex::from_unicode(alone.iter().copied(), "v").ok().and_then(|_| {
+        let mut anchored: Vec<u32> = "^(?:".chars().map(u32::from).collect();
+        anchored.extend(alone.iter().copied());
+        anchored.extend(")$".chars().map(u32::from));
+        regress::Regex::from_unicode(anchored.iter().copied(), "v").ok().map(Rc::new)
+    });
+    PATTERNS.with_borrow_mut(|c| {
+        if c.len() >= PATTERN_CACHE_LIMIT {
+            c.clear();
+        }
+        c.insert(pattern.to_vec(), compiled.clone());
+    });
+    compiled
+}
+fn is_ascii_ws_unit(u: u16) -> bool {
+    matches!(u, 0x09 | 0x0A | 0x0C | 0x0D | 0x20)
+}
+fn trim_ascii_ws_units(u: &[u16]) -> &[u16] {
+    let start = u.iter().position(|&c| !is_ascii_ws_unit(c)).unwrap_or(u.len());
+    let end = u.iter().rposition(|&c| !is_ascii_ws_unit(c)).map_or(start, |e| e + 1);
+    &u[start..end]
 }
 
 impl RealmArena {
-    // Recompute `id`'s patternMismatch bit — its value, `pattern`, `type` or `multiple` may have moved. The value the
-    // pattern tests is the sanitized one, and only the types `pattern` applies to have one; an empty value has none.
-    pub(crate) fn pattern_input(&self, id: NodeId) -> Option<(String, String, bool)> {
-        let n = self.get(id).filter(|n| n.is_html_element("input"))?;
-        let pattern = n.plain_attr("pattern")?;
-        let ty = n.input_type();
-        if !PATTERN_TYPES.contains(&ty) {
-            return None;
+    // patternMismatch of a non-empty input of a type `pattern` applies to: its sanitized value — each of a multiple
+    // email's non-empty tokens — does not match the whole pattern. Over UTF-16, as the value getter returns it.
+    fn pattern_mismatch(&self, n: &NodeData, ty: &str) -> bool {
+        let Some(pattern) = n.plain_attr_units("pattern") else { return false };
+        let raw: Vec<u16> = match &n.value {
+            Some(v) => v.to_vec(),
+            None => n.plain_attr_units("value").unwrap_or_default(),
+        };
+        // (The type decides how the value is cut and trimmed, so it is part of the value's key.)
+        let mut key_value = raw.clone();
+        key_value.extend(ty.encode_utf16());
+        key_value.push(u16::from(n.plain_attr("multiple").is_some()));
+        let key = (pattern, key_value);
+        if let Some(hit) = PATTERN_RESULTS.with_borrow(|c| c.get(&key).copied()) {
+            return hit;
         }
-        let val = self.sanitized_value(n, ty);
-        (!val.is_empty()).then(|| (pattern.to_string(), val, ty == "email" && n.plain_attr("multiple").is_some()))
+        let answer = self.pattern_mismatch_uncached(n, ty, &key.0, &raw);
+        PATTERN_RESULTS.with_borrow_mut(|c| {
+            if c.len() >= PATTERN_CACHE_LIMIT {
+                c.clear();
+            }
+            c.insert(key, answer);
+        });
+        answer
+    }
+    fn pattern_mismatch_uncached(&self, n: &NodeData, ty: &str, pattern: &[u16], raw: &[u16]) -> bool {
+        let Some(re) = compiled_pattern(pattern) else { return false };
+        let fails = |s: &[u16]| re.find_from_utf16(s, 0).next().is_none();
+        let strip = |u: &[u16]| u.iter().copied().filter(|&c| c != 0x0D && c != 0x0A).collect::<Vec<u16>>();
+        match ty {
+            "email" if n.plain_attr("multiple").is_some() => raw
+                .split(|&c| c == u16::from(b','))
+                .map(trim_ascii_ws_units)
+                .filter(|t| !t.is_empty())
+                .any(fails),
+            "url" | "email" => fails(trim_ascii_ws_units(&strip(raw))),
+            _ => fails(&strip(raw)),
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::compiled_pattern;
+
+    fn units(s: &str) -> Vec<u16> {
+        s.encode_utf16().collect()
+    }
+    fn matches(pattern: &str, value: &str) -> Option<bool> {
+        compiled_pattern(&units(pattern)).map(|re| re.find_from_utf16(&units(value), 0).next().is_some())
+    }
+
+    #[test]
+    fn a_pattern_matches_the_whole_value_with_the_v_flag() {
+        assert_eq!(matches("[a-z]{3}", "abc"), Some(true));
+        assert_eq!(matches("[a-z]{3}", "abcd"), Some(false));
+        assert_eq!(matches("a|b", "ab"), Some(false)); // anchored around the whole alternation
+        assert_eq!(matches("a.b", "a\u{1D306}b"), Some(true)); // code points, not code units
+        assert_eq!(matches(r"\p{RGI_Emoji}+", "\u{1F618}\u{1F48B}"), Some(true));
+        assert_eq!(matches(r"[\p{L}--[a-z]]+", "ÄÖ"), Some(true));
+    }
+
+    #[test]
+    fn a_pattern_that_does_not_compile_alone_is_ignored() {
+        assert_eq!(matches("(", "x"), None);
+        assert_eq!(matches("a)(b", "a)(b"), None); // the anchoring wrapper would balance it
+        assert_eq!(matches("[(]", "("), None); // a reserved class-set character under `v`
+    }
+
+    #[test]
+    fn a_lone_surrogate_is_a_character_of_its_own() {
+        let value = vec![0x61, 0xD800, 0x62];
+        let re = compiled_pattern(&units("a.b")).unwrap();
+        assert!(re.find_from_utf16(&value, 0).next().is_some());
     }
 }

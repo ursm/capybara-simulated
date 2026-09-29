@@ -479,6 +479,46 @@ RSpec.describe 'element state in the native arena' do
       expect(native_ids('#pat:valid')).to eq(%w[pat])
     end
 
+    it 'sets user validity on a committed user edit and on an interactive submission' do
+      session.execute_script(<<~JS)
+        document.body.innerHTML = '<form id=uf><input id=ut required><input id=un type=number min=5>' +
+          '<input id=uu required><button id=ub>go</button></form>';
+      JS
+      expect(native_ids(':user-invalid')).to eq([])
+      session.find('#ut').fill_in(with: 'x')
+      session.find('#ut').fill_in(with: '')
+      expect(native_ids(':user-invalid')).to eq(%w[ut])
+      session.find('#un').fill_in(with: '3')   # kept as typed: out of range, as in a browser
+      expect(native_ids('#un:user-invalid, #un:out-of-range')).to eq(%w[un])
+      # An interactive submission (Capybara's click_button submits without one) is refused, and marks every control.
+      session.execute_script("document.getElementById('uf').requestSubmit()")
+      expect(native_ids(':user-invalid')).to eq(%w[ut un uu])
+    end
+
+    it 'counts a form-associated custom element, and a control by its form owner' do
+      session.execute_script(<<~JS)
+        customElements.define('x-field', class extends HTMLElement {
+          static formAssociated = true;
+          constructor() { super(); this.i = this.attachInternals(); }
+        });
+        document.body.innerHTML = '<form id=fo><x-field id=xf></x-field></form><form id=fa></form><input id=far form=fa required>';
+        document.getElementById('xf').i.setValidity({ valueMissing: true }, 'fill me');
+      JS
+      expect(native_ids(':invalid')).to eq(%w[fo xf fa far])
+      session.execute_script("document.getElementById('xf').i.setValidity({})")
+      expect(native_ids('#fo:valid, #xf:valid')).to eq(%w[fo xf])
+    end
+
+    it 'matches a pattern over UTF-16, a lone surrogate included' do
+      session.execute_script(<<~JS)
+        document.body.innerHTML = '<input id=ls>';
+        const e = document.getElementById('ls');
+        e.setAttribute('pattern', '\\\\uD800');
+        e.value = '\\uD800';
+      JS
+      expect(native_ids('#ls:valid')).to eq(%w[ls])
+    end
+
     it 'waits for the user before :user-invalid, and for a user edit before a length check' do
       session.execute_script(<<~JS)
         document.body.innerHTML = '<select id=us required><option value="">-</option><option>a</option></select>' +

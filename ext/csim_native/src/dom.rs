@@ -168,11 +168,8 @@ pub(crate) const STATE_IS_VALUE: u32 = 1 << 11;
 pub(crate) const STATE_DIRTY_BY_USER: u32 = 1 << 12;
 pub(crate) const STATE_CUSTOM_ERROR: u32 = 1 << 13;
 pub(crate) const STATE_USER_INTERACTED: u32 = 1 << 14;
-pub(crate) const STATE_HAS_FILES: u32 = 1 << 16;
-// …and the one the ARENA keeps, not the JS side: an input's value fails its `pattern` (validity.rs — V8's RegExp, run
-// by the ops that write what it reads).
-pub(crate) const STATE_PATTERN_MISMATCH: u32 = 1 << 15;
-const NATIVE_STATE_BITS: u32 = STATE_PATTERN_MISMATCH;
+pub(crate) const STATE_HAS_FILES: u32 = 1 << 15;
+
 
 impl NodeData {
     // A node of `kind` with its character data and nothing else — the element fields are filled by the caller.
@@ -253,6 +250,11 @@ impl NodeData {
             return None;
         }
         self.attr_u16.iter().find(|(k, _)| k == name).map(|(_, u)| u.as_slice())
+    }
+    // The value of the attribute `local` in no namespace as the page wrote it: UTF-16, a lone surrogate included.
+    pub(crate) fn plain_attr_units(&self, local: &str) -> Option<Vec<u16>> {
+        let value = self.plain_attr(local)?;
+        Some(self.get_attr_u16(local).map_or_else(|| value.encode_utf16().collect(), <[u16]>::to_vec))
     }
 }
 
@@ -468,7 +470,7 @@ impl RealmArena {
     // `id`'s state bits become `bits`. The realm's focused and hovered element is whichever carries that bit last.
     pub(crate) fn set_state(&mut self, id: NodeId, bits: u32) {
         let Some(node) = self.get_mut(id) else { return };
-        node.state = (bits & !NATIVE_STATE_BITS) | (node.state & NATIVE_STATE_BITS);
+        node.state = bits;
         for (bit, slot) in [(STATE_FOCUSED, &mut self.focus), (STATE_HOVERED, &mut self.hover)] {
             if bits & bit != 0 {
                 *slot = Some(id);
@@ -964,25 +966,6 @@ fn set_state(
     realm(scope, cid).set_state(id, bits);
 }
 
-// Is `name` one an input's patternMismatch reads (its value — a clean one's `value` attribute —, `pattern`, `type`,
-// `multiple`)? Then a write of it recomputes the bit.
-fn reads_pattern(node: &NodeData, name: &str) -> bool {
-    node.kind == NodeKind::Element && node.local_name == "input" && matches!(name, "pattern" | "type" | "multiple" | "value")
-}
-// Recompute `id`'s patternMismatch bit (validity.rs): with V8's RegExp, so here, where there is a scope.
-fn refresh_pattern(scope: &mut v8::PinScope<'_, '_>, cid: i32, id: NodeId) {
-    let mismatch = match realm(scope, cid).pattern_input(id) {
-        Some((pattern, val, multiple)) => crate::validity::pattern_mismatch(scope, &pattern, &val, multiple),
-        None => false,
-    };
-    let arena = realm(scope, cid);
-    if arena.get(id).is_some_and(|n| (n.state & STATE_PATTERN_MISMATCH != 0) != mismatch) {
-        if let Some(node) = arena.get_mut(id) {
-            node.state ^= STATE_PATTERN_MISMATCH;
-        }
-    }
-}
-
 // __dom.setValue(nid, value): a form control's live value — a string once dirty, `undefined` back to its default.
 fn set_value(
     scope: &mut v8::PinScope<'_, '_>,
@@ -995,13 +978,8 @@ fn set_value(
     let v = args.get(1);
     let value = if v.is_undefined() { None } else { Some(utf16_arg(scope, v).into_boxed_slice()) };
     let cid = realm_id(scope, &args);
-    let mut input = false;
     if let Some(node) = realm(scope, cid).get_mut(id) {
         node.value = value;
-        input = reads_pattern(node, "value");
-    }
-    if input {
-        refresh_pattern(scope, cid, id);
     }
 }
 
@@ -1255,13 +1233,8 @@ fn set_attr(
     let name = args.get(1).to_rust_string_lossy(scope);
     let (utf8, u16) = read_v8_value(scope, args.get(2));
     let cid = realm_id(scope, &args);
-    let mut refresh = false;
     if let Some(node) = realm(scope, cid).get_mut(id) {
         node.set_attr_full(&name, utf8, u16);
-        refresh = reads_pattern(node, &name);
-    }
-    if refresh {
-        refresh_pattern(scope, cid, id);
     }
 }
 
@@ -1275,13 +1248,8 @@ fn remove_attr(
     };
     let name = args.get(1).to_rust_string_lossy(scope);
     let cid = realm_id(scope, &args);
-    let mut refresh = false;
     if let Some(node) = realm(scope, cid).get_mut(id) {
         node.remove_attr(&name);
-        refresh = reads_pattern(node, &name);
-    }
-    if refresh {
-        refresh_pattern(scope, cid, id);
     }
 }
 
@@ -1299,16 +1267,11 @@ fn sync_attrs(
     };
     let (attributes, attr_u16) = read_attrs_flat(scope, args.get(1));
     let cid = realm_id(scope, &args);
-    let mut refresh = false;
     if let Some(node) = realm(scope, cid).get_mut(id) {
         node.attributes = attributes;
         node.attr_u16 = attr_u16;
         let attrs = &node.attributes;
         node.attr_ns.retain(|(k, _, _)| attrs.iter().any(|(a, _)| a == k));
-        refresh = reads_pattern(node, "pattern");
-    }
-    if refresh {
-        refresh_pattern(scope, cid, id);
     }
 }
 
@@ -1522,14 +1485,9 @@ fn set_node_meta(
     let local_name = args.get(1).to_rust_string_lossy(scope);
     let ns = args.get(2).to_rust_string_lossy(scope);
     let cid = realm_id(scope, &args);
-    let mut refresh = false;
     if let Some(node) = realm(scope, cid).get_mut(id) {
         node.local_name = local_name;
         node.ns = ns;
-        refresh = reads_pattern(node, "pattern");
-    }
-    if refresh {
-        refresh_pattern(scope, cid, id);
     }
 }
 
@@ -2523,13 +2481,8 @@ fn attrs_set(
         return v8::Intercepted::kNo;
     };
     let (utf8, u16) = read_v8_value(scope, value);
-    let mut refresh = false;
     if let Some(node) = realm(scope, cid).get_mut(id) {
         node.set_attr_full(&name, utf8, u16);
-        refresh = reads_pattern(node, &name);
-    }
-    if refresh {
-        refresh_pattern(scope, cid, id);
     }
     v8::Intercepted::kYes
 }
@@ -2570,13 +2523,8 @@ fn attrs_delete(
     let Some(name) = name_string(scope, key) else {
         return v8::Intercepted::kNo;
     };
-    let mut refresh = false;
     if let Some(node) = realm(scope, cid).get_mut(id) {
         node.remove_attr(&name);
-        refresh = reads_pattern(node, &name);
-    }
-    if refresh {
-        refresh_pattern(scope, cid, id);
     }
     rv.set_bool(true);
     v8::Intercepted::kYes
