@@ -100,6 +100,29 @@ RSpec.describe 'walk parity' do
     HTML
   end
 
+  # An atomic inline is its own record subtree hung by its `vertical-align`; an inline box's alignment moves the text it
+  # owns (a shift, or against the parent's font); an intrinsic-size keyword width rides the record.
+  it 'builds atomic inlines, vertical-align and keyword widths' do
+    expect_clean(parity(<<~HTML))
+      <p>a <span style="display: inline-block; width: 40px; height: 10px"></span> b
+         <span style="display: inline-block; vertical-align: middle">m</span> <span style="display: inline-block; vertical-align: top">t</span>
+         x<sup>2</sup> H<sub>2</sub>O <span style="vertical-align: 5px">up <b>more</b></span> <span style="vertical-align: 50%">half</span>
+         <span style="vertical-align: text-top; padding: 2px">tt</span></p>
+      <div style="width: max-content">shrinks to its text</div>
+      <div style="width: 200px"><div style="width: fit-content">fits</div></div>
+    HTML
+  end
+
+  # An inline box holding a block is laid out as a block; a float taken back with its anonymous run is walked again
+  # seeing only the floats before it; a mixed block with no indent writes none, whatever its alignment.
+  it 'builds the review repros of round 2' do
+    expect_clean(parity(<<~HTML))
+      <my-el><div>block inside a custom element</div></my-el> <a href="#"><div>card</div></a>
+      <div><span style="float: left; clear: left">f</span><p>x</p>text</div>
+      <div dir="rtl" style="text-align: center">a<p>x</p>b</div>
+    HTML
+  end
+
   # A pass whose runs need several faces names every one of them at once, and is compared.
   it 'resolves every face a pass needs' do
     expect_clean(parity(<<~HTML))

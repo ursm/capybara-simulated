@@ -165,7 +165,7 @@ fn walk_parity(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgum
     }
 }
 
-// __dom.walkFace(family, bucket, handle, asc, desc, gap, space): the face the JS side resolved for a family and a bucket
+// __dom.walkFace(family, bucket, handle, asc, desc, gap, space, xh): the face the JS side resolved for a family and a bucket
 // — a handle below 0 (or no metrics) where it resolves to none the layout can measure with.
 fn walk_face(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {
     let cid = realm_id(scope, &args);
@@ -178,7 +178,15 @@ fn walk_face(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgumen
     };
     let num = |scope: &mut v8::PinScope<'_, '_>, i: i32| args.get(i).number_value(scope).unwrap_or(f64::NAN);
     let handle = num(scope, 2);
-    let face = Face { handle: if handle.is_finite() { handle as i32 } else { -1 }, asc: num(scope, 3), desc: num(scope, 4), gap: num(scope, 5), space: num(scope, 6) };
+    let xh = num(scope, 7);
+    let face = Face {
+        handle: if handle.is_finite() { handle as i32 } else { -1 },
+        asc: num(scope, 3),
+        desc: num(scope, 4),
+        gap: num(scope, 5),
+        space: num(scope, 6),
+        xh: if xh > 0.0 { xh } else { 0.5 },
+    };
     let usable = face.handle >= 0 && [face.asc, face.desc, face.gap, face.space].iter().all(|v| v.is_finite());
     dom(scope).walk_parity.entry(cid).or_default().faces.learn((family, bucket), usable.then_some(face));
 }

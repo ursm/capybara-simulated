@@ -31,7 +31,7 @@ use style::values::specified::box_::{DisplayInside, DisplayOutside};
 
 use crate::dom::{NodeId, NodeKind, RealmArena};
 use crate::layout::{MATH_DEPTH, MATH_LINE, MATH_MAX, MATH_MIN, MATH_NEG, MATH_SCALE, MATH_SUM};
-use crate::layout::{InlineBox, Input, Run, RunText, DISPLAY_BLOCK, DISPLAY_TEXT_BLOCK, RUN_BR, RUN_CLOSE, RUN_FLOAT, RUN_OOF, RUN_OPEN, RUN_TEXT, RUN_WBR};
+use crate::layout::{InlineBox, Input, Run, RunText, DISPLAY_BLOCK, DISPLAY_TEXT_BLOCK, RUN_ATOMIC, RUN_BR, RUN_CLOSE, RUN_FLOAT, RUN_OOF, RUN_OPEN, RUN_TEXT, RUN_WBR};
 
 // A face the walk measures a run in, as the JS side resolved it for the family and the weight / style bucket: the
 // layout's font handle and the metrics the model rules read off it (per em — ascent, descent, line gap, and the
@@ -43,6 +43,8 @@ pub(crate) struct Face {
     pub(crate) desc: f64,
     pub(crate) gap: f64,
     pub(crate) space: f64,
+    // (…and its x-height, CSS's half an em where the face carries none)
+    pub(crate) xh: f64,
 }
 
 // Which face: the family list as the computed value serializes it, and the JS walk's bucket (`''`, `bold`, `italic`,
@@ -150,6 +152,22 @@ struct Walk<'a> {
     saw_float: (bool, bool),
 }
 
+// A resolved `vertical-align` (`verticalAlignFor`): its mode and the shift it carries.
+#[derive(Clone, Copy)]
+struct Va {
+    mode: VaMode,
+    px: f64,
+}
+#[derive(Clone, Copy, PartialEq)]
+enum VaMode {
+    Shift,
+    Top,
+    Bottom,
+    Middle,
+    TextTop,
+    TextBottom,
+}
+
 // What `record_as` settles about a box before its record is built (`walkFresh`): its `clear` (0 none, 1 left, 2
 // right, 3 both), whether that gives it clearance, which side it floats to (0 none, 1 left, 2 right), and whether it
 // establishes a formatting context.
@@ -169,12 +187,15 @@ enum Kid {
 }
 
 // Where the streams stood, for an attempt to be taken back to.
-#[derive(Clone, Copy)]
+#[derive(Clone)]
 struct Mark {
     inputs: usize,
     runs: usize,
     entries: usize,
     inlines: usize,
+    maths: usize,
+    math_index: usize,
+    saw_float: (bool, bool),
 }
 
 // A text block's inline content as its gather builds it (`nlGatherRuns`'s `ctx`): the block's style (its tab stops,
@@ -193,7 +214,7 @@ struct Gather<'s> {
 
 // A run before its block commits it: its inline box is named by the gather's entry, tabled at the commit.
 enum Pending {
-    Text { font: FontInfo, text: Vec<u16>, wrap: u8, ws: u8 },
+    Text { font: FontInfo, text: Vec<u16>, wrap: u8, ws: u8, shift: f64 },
     Open { plain: f64, ws: u8, entry: usize },
     Close { plain: f64, ws: u8, entry: usize, lands: bool, own_h: f64, own_asc: f64 },
     Br { ws: u8, clear: u8, entry: usize },
@@ -202,6 +223,9 @@ enum Pending {
     Oof { ws: u8, rec: i32 },
     // A float, placed where the lines reach it.
     Float { ws: u8, rec: i32 },
+    // An atomic inline, hung by its `vertical-align`: a baseline shift, an alignment against the parent's font (its
+    // code and the parent-font figure it reads), or a line-relative mode (1 top, 2 bottom).
+    Atomic { ws: u8, rec: i32, shift: f64, code: u8, figure: f64, line_mode: u8 },
 }
 
 // An inline box's edges as its entry and its runs carry them (`edgeInsets` + `nlEdgeParts` / `nlClampedEdgeParts`,
@@ -414,7 +438,17 @@ impl<'a> Walk<'a> {
         }
         let b = style.get_box();
         let display = b.clone_display();
-        if !matches!(display.outside(), DisplayOutside::Block) || !matches!(display.inside(), DisplayInside::Flow | DisplayInside::FlowRoot) {
+        // (…a block container: a block-level one, or an `inline-block`, which the gather walks as an ATOMIC)
+        let container = match display.outside() {
+            DisplayOutside::Block => matches!(display.inside(), DisplayInside::Flow | DisplayInside::FlowRoot),
+            DisplayOutside::Inline => match display.inside() {
+                DisplayInside::FlowRoot => true,
+                DisplayInside::Flow => self.holds_block_level(id)?,
+                _ => false,
+            },
+            _ => false,
+        };
+        if !container {
             return Err(display_decline(display));
         }
         let position = b.clone_position();
@@ -437,9 +471,18 @@ impl<'a> Walk<'a> {
         // containing block where the record is the ROOT's (native is handed no basis for it), and anywhere else
         // handed to native as the pair — or the program — it resolves at the basis it has (`walkRecord`'s `size`).
         let native_basis = parent >= 0;
+        // An intrinsic-size KEYWORD width is native's own (rec[65] bits 11-12: 1 min-content, 2 max-content, 3
+        // fit-content) — not on the pass root, sized from the width it is handed with no parent to mark it measured.
         use style::values::generics::length::GenericSize as Size;
-        if !matches!(pos.width, Size::Auto | Size::LengthPercentage(_)) {
-            return Err("width keyword");
+        rec.width_kw = match pos.width {
+            Size::Auto | Size::LengthPercentage(_) => 0,
+            Size::MinContent => 1,
+            Size::MaxContent => 2,
+            Size::FitContent => 3,
+            _ => return Err("width keyword"),
+        };
+        if rec.width_kw != 0 && parent < 0 {
+            return Err("root keyword width");
         }
         let sizes: [(Option<&LengthPercentage>, f64); 6] = [
             (size_lp(&pos.width)?, self.basis.w),
@@ -557,7 +600,7 @@ impl<'a> Walk<'a> {
                         blocks.push((c, Kid::Float));
                         continue;
                     }
-                    if matches!(cd.outside(), DisplayOutside::Inline) {
+                    if matches!(cd.outside(), DisplayOutside::Inline) && !(matches!(cd.inside(), DisplayInside::Flow) && self.holds_block_level(c)?) {
                         inline = true;
                         continue;
                     }
@@ -644,7 +687,7 @@ impl<'a> Walk<'a> {
                 rec.display = DISPLAY_TEXT_BLOCK;
                 self.inputs.push(rec);
                 let mut g = Gather { block: style, idx: anon, bites, runs: Vec::new(), makes_line: false, floats: Vec::new() };
-                self.gather(&kids, style, &font, ws_mode, wrap, &mut g)?;
+                self.gather(&kids, style, &font, ws_mode, wrap, 0.0, &mut g)?;
                 let holds_oof = g.runs.iter().any(|r| matches!(r, Pending::Oof { .. }));
                 let occupies = g.runs.iter().any(|r| matches!(r, Pending::Open { .. } | Pending::Wbr { .. }));
                 if !g.makes_line && !occupies && !holds_oof {
@@ -688,8 +731,18 @@ impl<'a> Walk<'a> {
 
     // Where the streams stand, to take an attempt back to.
     fn mark(&self) -> Mark {
-        Mark { inputs: self.inputs.len(), runs: self.runs.len(), entries: self.entries.len(), inlines: self.inlines.len() }
+        Mark {
+            inputs: self.inputs.len(),
+            runs: self.runs.len(),
+            entries: self.entries.len(),
+            inlines: self.inlines.len(),
+            maths: self.maths.len(),
+            math_index: self.math_index.len(),
+            saw_float: self.saw_float,
+        }
     }
+    // …every stream, and the float state the attempt's floats marked (`emitAttempt`): a float walked again sees only
+    // the floats before it.
     fn rollback(&mut self, m: Mark) {
         self.inputs.truncate(m.inputs);
         self.runs.truncate(m.runs);
@@ -697,6 +750,12 @@ impl<'a> Walk<'a> {
         self.entries.truncate(m.entries);
         self.inlines.truncate(m.inlines);
         self.rec_index.retain(|_, &mut at| (at as usize) < m.inputs);
+        if self.math_index.len() != m.math_index {
+            self.maths.truncate(m.maths);
+            let maths = m.maths as u32;
+            self.math_index.retain(|_, &mut at| at < maths);
+        }
+        self.saw_float = m.saw_float;
     }
 
     // An OUT-OF-FLOW child of the container at record `parent` (`emitOutOfFlow`): its own record subtree, marked out of
@@ -819,7 +878,7 @@ impl<'a> Walk<'a> {
         let align = align_code(style.get_inherited_text().text_align, starts_at_right);
         let mut g = Gather { block: style, idx, bites, runs: Vec::new(), makes_line: false, floats: Vec::new() };
         let kids: Vec<NodeId> = self.children(id).collect();
-        self.gather(&kids, style, &font, ws_mode, wrap_mode(style), &mut g)?;
+        self.gather(&kids, style, &font, ws_mode, wrap_mode(style), 0.0, &mut g)?;
         // (…the indent and the alignment written before the gather, as the JS walk writes them: a block whose content
         // makes no line keeps them too.)
         let rec = &mut self.inputs[idx as usize];
@@ -852,7 +911,7 @@ impl<'a> Walk<'a> {
         let mut table: Vec<Option<usize>> = Vec::new();
         for r in g.runs {
             let run = match r {
-                Pending::Text { font, text, wrap, ws } => {
+                Pending::Text { font, text, wrap, ws, shift } => {
                     self.run_texts.push(Some(text.into()));
                     Run {
                         kind: RUN_TEXT,
@@ -861,7 +920,7 @@ impl<'a> Walk<'a> {
                         ls: font.ls,
                         ws: font.ws,
                         line_height: font.lh,
-                        asc: font.asc,
+                        asc: font.asc + shift,
                         metric: wrap as f64,
                         ws_mode: ws,
                         tab_px: font.tab_px,
@@ -900,6 +959,10 @@ impl<'a> Walk<'a> {
                     self.run_texts.push(None);
                     edge_run(RUN_FLOAT, rec as usize, 0.0, ws)
                 }
+                Pending::Atomic { ws, rec, shift, code, figure, line_mode } => {
+                    self.run_texts.push(None);
+                    Run { asc: shift, line_height: code as f64, metric: figure, line_mode, ..edge_run(RUN_ATOMIC, rec as usize, 0.0, ws) }
+                }
             };
             self.runs.push(run);
         }
@@ -918,7 +981,7 @@ impl<'a> Walk<'a> {
 
     // The runs of `parent`'s children in the inline formatting context `g` builds (`nlGatherRuns`): `owner` the
     // element whose font, `white-space` and wrap mode its text takes — the block, or the inline box it is in.
-    fn gather(&mut self, kids: &[NodeId], owner: &ComputedValues, font: &FontInfo, ws_mode: u8, wrap: u8, g: &mut Gather) -> Step {
+    fn gather(&mut self, kids: &[NodeId], owner: &ComputedValues, font: &FontInfo, ws_mode: u8, wrap: u8, shift: f64, g: &mut Gather) -> Step {
         let preserve = preserving(ws_mode);
         let no_shy = owner.get_inherited_text().hyphens == Hyphens::None;
         let owner_wraps = ws_mode != WS_NOWRAP && ws_mode != WS_PRE;
@@ -957,8 +1020,9 @@ impl<'a> Walk<'a> {
                     }
                     // Adjacent text is one run where it is the same font, shift, wrap and mode, the mode soft-wraps, the
                     // join does not GLUE a word, and neither side of a `pre-line` join is white space alone (`appendText`).
-                    if let Some(Pending::Text { font: lf, text, wrap: lw, ws: lws }) = g.runs.last_mut() {
+                    if let Some(Pending::Text { font: lf, text, wrap: lw, ws: lws, shift: ls }) = g.runs.last_mut() {
                         let joinable = *lw == wrap
+                            && *ls == shift
                             && *lws == ws_mode
                             && owner_wraps
                             && same_font(lf, font)
@@ -969,7 +1033,7 @@ impl<'a> Walk<'a> {
                             continue;
                         }
                     }
-                    g.runs.push(Pending::Text { font: *font, text: td.into_owned(), wrap, ws: ws_mode });
+                    g.runs.push(Pending::Text { font: *font, text: td.into_owned(), wrap, ws: ws_mode, shift });
                 }
                 NodeKind::Element => {
                     let cs = self.style(c)?;
@@ -1021,21 +1085,44 @@ impl<'a> Walk<'a> {
         if !matches!(d.outside(), DisplayOutside::Inline) {
             return Err("block-level-box-in-inline-content");
         }
-        // (…an inline-LEVEL `<br>` breaks the line whatever its inside display: `isLineBreak`)
+        // An ATOMIC inline — an `inline-block` — is one box on the line: its own record subtree under the block of
+        // lines, laid out and hung from its baseline by native (`atomicHook`); an inline-LEVEL `<br>` still breaks the
+        // line whatever its inside display (`isLineBreak`).
         if !matches!(d.inside(), DisplayInside::Flow) && tag != "br" {
-            return Err("atomic inline");
+            // (…`top` / `bottom` hang it from the LINE, with no ascent of its own; the others move its ascent: a SHIFT
+            // by itself, an alignment against the parent's font by the figure native reads when the box is laid out —
+            // `nlAtomicAlignment`)
+            let va = self.vertical_align(c, cs)?;
+            let line_mode = match va {
+                Some(Va { mode: VaMode::Top, .. }) => 1,
+                Some(Va { mode: VaMode::Bottom, .. }) => 2,
+                _ => 0,
+            };
+            let code = match va {
+                Some(Va { mode: VaMode::Middle, .. }) => 1,
+                Some(Va { mode: VaMode::TextTop, .. }) => 2,
+                Some(Va { mode: VaMode::TextBottom, .. }) => 3,
+                _ => 0,
+            };
+            let figure = match va {
+                Some(va) if code != 0 => self.parent_figure(c, va.mode)?,
+                _ => 0.0,
+            };
+            let shift = if line_mode != 0 { 0.0 } else { va.map_or(0.0, |va| va.px) };
+            let rec = self.inputs.len() as i32;
+            self.record(c, g.idx)?;
+            g.runs.push(Pending::Atomic { ws: ws_mode, rec, shift, code, figure, line_mode });
+            g.makes_line = true;
+            return Ok(());
         }
         if cs.get_box().clone_position() == Position::Relative {
             return Err("relative inline");
-        }
-        if !baseline_aligned(cs) {
-            return Err("vertical-align");
         }
         let cf = self.font_info(cs, g.block)?;
         // A `<br>` breaks the line, clearing the floats on the side it names; a `<wbr>` is a place it may. Each is an
         // inline box of its own with NO edges, whatever it declares (`WBR_EDGES`).
         if tag == "br" || (tag == "wbr" && matches!(d.inside(), DisplayInside::Flow)) {
-            let entry = self.entry(cs, &Edges::default())?;
+            let entry = self.entry(c, cs, &Edges::default())?;
             if tag == "br" {
                 let clear = self.clear_code(c, cs)?;
                 g.runs.push(Pending::Br { ws: ws_mode, clear, entry });
@@ -1045,15 +1132,9 @@ impl<'a> Walk<'a> {
             }
             return Ok(());
         }
-        // An inline box holding a BLOCK child is laid out as one atomic box, not split around it.
-        for k in self.children(c).collect::<Vec<_>>() {
-            if self.node(k).kind == NodeKind::Element {
-                let ks = self.style(k)?;
-                let kd = ks.get_box().clone_display();
-                if !kd.is_none() && matches!(kd.outside(), DisplayOutside::Block) && !matches!(ks.get_box().clone_position(), Position::Absolute | Position::Fixed) && ks.get_box().clone_float() == Float::None {
-                    return Err("block in inline");
-                }
-            }
+        // (…an inline box holding a block-level box is laid out as a block, which its block's classification took)
+        if self.holds_block_level(c)? {
+            return Err("block-level-box-in-inline-content");
         }
         let c_ws = ws_mode_of(cs)?;
         let c_wrap = wrap_mode(cs);
@@ -1070,14 +1151,27 @@ impl<'a> Walk<'a> {
             || close_lands
             || plain_open != 0.0
             || plain_close != 0.0;
-        let entry = self.entry(cs, &edges)?;
+        let entry = self.entry(c, cs, &edges)?;
         g.runs.push(Pending::Open { plain: if edged { plain_open } else { 0.0 }, ws: c_ws, entry });
         let outer = g.makes_line;
         g.makes_line = false;
+        // Its `vertical-align` moves the baseline of the text it owns — a shift by itself, an alignment against the
+        // parent's font by the distance that takes its text's baseline there, a line-relative one not at all.
+        let va = self.vertical_align(c, cs)?;
+        let c_shift = match va {
+            None => 0.0,
+            Some(Va { mode: VaMode::Shift, px }) => px,
+            Some(va) => self.inline_ascent(c, cs, Some(va), cf.asc)? - cf.asc,
+        };
         let kids: Vec<NodeId> = self.children(c).collect();
-        self.gather(&kids, cs, &cf, c_ws, c_wrap, g)?;
+        self.gather(&kids, cs, &cf, c_ws, c_wrap, c_shift, g)?;
         g.makes_line = outer || g.makes_line || edged;
-        let (own_h, own_asc) = if edged && close_lands { (content_height(cs, &self.face(cs)?), content_ascent(cs, &self.face(cs)?)) } else { (0.0, 0.0) };
+        let (own_h, own_asc) = if edged && close_lands {
+            let face = self.face(cs)?;
+            (content_height(cs, &face), self.inline_ascent(c, cs, va, content_ascent(cs, &face))?)
+        } else {
+            (0.0, 0.0)
+        };
         g.runs.push(Pending::Close {
             plain: if edged { plain_close } else { 0.0 },
             ws: c_ws,
@@ -1091,8 +1185,10 @@ impl<'a> Walk<'a> {
 
     // An inline box's entry (`nlInlineEntry`): its edges — lengths, fractions and programs — its own font box and
     // ascent, and no relative offset.
-    fn entry(&mut self, cs: &ComputedValues, e: &Edges) -> Result<usize, &'static str> {
+    fn entry(&mut self, c: NodeId, cs: &ComputedValues, e: &Edges) -> Result<usize, &'static str> {
         let face = self.face(cs)?;
+        let va = self.vertical_align(c, cs)?;
+        let own_asc = self.inline_ascent(c, cs, va, content_ascent(cs, &face))?;
         let math = std::array::from_fn(|k| self.math(e.math[k].as_deref()));
         self.entries.push(InlineBox {
             ml: e.ml,
@@ -1101,7 +1197,7 @@ impl<'a> Walk<'a> {
             top: e.top,
             bottom: e.bottom,
             own_h: content_height(cs, &face),
-            own_asc: content_ascent(cs, &face),
+            own_asc,
             rel_x: 0.0,
             rel_y: 0.0,
             bt: e.bt,
@@ -1178,7 +1274,7 @@ impl<'a> Walk<'a> {
                 if !self.faces.missing.contains(&key) {
                     self.faces.missing.push(key);
                 }
-                Ok(Face { handle: -1, asc: 0.0, desc: 0.0, gap: 0.0, space: 0.0 })
+                Ok(Face { handle: -1, asc: 0.0, desc: 0.0, gap: 0.0, space: 0.0, xh: 0.5 })
             }
         }
     }
@@ -1191,6 +1287,128 @@ impl<'a> Walk<'a> {
                 !s.get_box().clone_display().is_none() && !matches!(s.get_counters().content, style::values::generics::counters::GenericContent::Normal | style::values::generics::counters::GenericContent::None)
             })
         })
+    }
+
+    // A box's `vertical-align` as the JS model resolves it (`resolveVerticalAlign`): None on the baseline, else its
+    // mode and the SHIFT it carries — its own (`sub` / `super` by the parent's font size, a length, a percentage of
+    // its own line height) plus the one the inline box it is in carries, which a box that declares nothing still
+    // takes (the shorthand's two longhands, `baseline-shift` and `alignment-baseline`, in the style engine).
+    fn vertical_align(&mut self, id: NodeId, style: &ComputedValues) -> Result<Option<Va>, &'static str> {
+        use style::values::generics::box_::{BaselineShiftKeyword, GenericBaselineShift as BaselineShift};
+        use style::values::specified::box_::AlignmentBaseline;
+        let inherited = self.inline_parent_shift(id)?;
+        let b = style.get_box();
+        let aligned = match b.alignment_baseline {
+            AlignmentBaseline::Baseline => None,
+            AlignmentBaseline::Middle => Some(VaMode::Middle),
+            AlignmentBaseline::TextTop => Some(VaMode::TextTop),
+            AlignmentBaseline::TextBottom => Some(VaMode::TextBottom),
+            _ => return Err("vertical-align"),
+        };
+        let shift = match &b.baseline_shift {
+            BaselineShift::Length(lp) if lp.to_length().is_some_and(|l| l.px() == 0.0) || lp.to_percentage().is_some_and(|p| p.0 == 0.0) => None,
+            BaselineShift::Length(lp) => {
+                let s = spec(lp)?;
+                let basis = if s.frac != 0.0 || s.prog.is_some() { self.font_info(style, style)?.lh } else { 0.0 };
+                Some(Va { mode: VaMode::Shift, px: spec_at(&s, basis) })
+            }
+            BaselineShift::Keyword(k @ (BaselineShiftKeyword::Sub | BaselineShiftKeyword::Super)) => {
+                let size = self.parent_font_size(id)?;
+                let own = if matches!(k, BaselineShiftKeyword::Super) { size / 3.0 + 1.0 } else { -(size / 5.0 + 1.0) };
+                Some(Va { mode: VaMode::Shift, px: own })
+            }
+            BaselineShift::Keyword(BaselineShiftKeyword::Top) => Some(Va { mode: VaMode::Top, px: 0.0 }),
+            BaselineShift::Keyword(BaselineShiftKeyword::Bottom) => Some(Va { mode: VaMode::Bottom, px: 0.0 }),
+            _ => return Err("vertical-align"),
+        };
+        Ok(match (aligned, shift) {
+            (Some(_), Some(_)) => return Err("vertical-align"),
+            (Some(mode), None) => Some(Va { mode, px: inherited }),
+            (None, Some(Va { mode: VaMode::Shift, px })) if px.is_finite() => Some(Va { mode: VaMode::Shift, px: px + inherited }),
+            (None, Some(Va { mode, .. })) if mode != VaMode::Shift => Some(Va { mode, px: inherited }),
+            _ if inherited != 0.0 => Some(Va { mode: VaMode::Shift, px: inherited }),
+            _ => None,
+        })
+    }
+    // The shift the inline box a box sits in carries (`inlineParentShift`): a BLOCK ends the walk.
+    fn inline_parent_shift(&mut self, id: NodeId) -> Result<f64, &'static str> {
+        let Some(p) = self.node(id).parent else { return Ok(0.0) };
+        if self.node(p).kind != NodeKind::Element {
+            return Ok(0.0);
+        }
+        let ps = self.style(p)?;
+        let d = ps.get_box().clone_display();
+        if !(matches!(d.outside(), DisplayOutside::Inline) && matches!(d.inside(), DisplayInside::Flow)) || declined_tag(&self.node(p).local_name).is_some() {
+            return Ok(0.0);
+        }
+        Ok(match self.vertical_align(p, &ps)? {
+            Some(Va { mode: VaMode::Shift, px }) => px,
+            _ => 0.0,
+        })
+    }
+    // Where an inline box's font box reaches above the baseline, `vertical-align` included (`inlineAscent` /
+    // `alignedAscent`): a shift moves it; `middle`, `text-top` and `text-bottom` place it against the PARENT's font.
+    fn inline_ascent(&mut self, id: NodeId, style: &ComputedValues, va: Option<Va>, base: f64) -> Result<f64, &'static str> {
+        let Some(va) = va else { return Ok(base) };
+        let outer = content_height(style, &self.face(style)?);
+        Ok(match va.mode {
+            VaMode::Top | VaMode::Bottom => base,
+            VaMode::Shift => base + va.px,
+            VaMode::Middle => outer / 2.0 + self.parent_figure(id, va.mode)? + va.px,
+            VaMode::TextTop => self.parent_figure(id, va.mode)? + va.px,
+            VaMode::TextBottom => outer - self.parent_figure(id, va.mode)? + va.px,
+        })
+    }
+    // The one figure of the parent's font an alignment against it reads (`vaParentFigure`): half its x-height for
+    // `middle`, its ascent for `text-top`, its descent for `text-bottom`.
+    fn parent_figure(&mut self, id: NodeId, mode: VaMode) -> Result<f64, &'static str> {
+        let p = self.node(id).parent.filter(|&p| self.node(p).kind == NodeKind::Element).unwrap_or(id);
+        let ps = self.style(p)?;
+        let face = self.face(&ps)?;
+        let size = font_size(&ps);
+        Ok(match mode {
+            VaMode::Middle => size * face.xh / 2.0,
+            VaMode::TextTop => js_round(face.asc * size),
+            VaMode::TextBottom => js_round(face.desc * size),
+            _ => 0.0,
+        })
+    }
+    // …and its font size (`sub` / `super` shift by the PARENT's font).
+    fn parent_font_size(&self, id: NodeId) -> Result<f64, &'static str> {
+        let p = self.node(id).parent.filter(|&p| self.node(p).kind == NodeKind::Element).unwrap_or(id);
+        let ps = self.style(p)?;
+        Ok(font_size(&ps))
+    }
+
+    // Does a non-replaced `display: inline` box hold a block-level box among its in-flow children — and so lay out as
+    // a BLOCK (layout.js `holdsBlockLevel`: the nearest the JS model comes to CSS 2.1 §9.2.1.1's split)?
+    fn holds_block_level(&self, id: NodeId) -> Result<bool, &'static str> {
+        if declined_tag(&self.node(id).local_name) == Some("replaced or control") {
+            return Ok(false);
+        }
+        for c in self.children(id) {
+            if self.node(c).kind == NodeKind::Element && self.is_block_level_child(c)? {
+                return Ok(true);
+            }
+        }
+        Ok(false)
+    }
+    // …a block-level box in flow (`isBlockLevelChild`): not an inline-level one, not a float, not out of flow — an
+    // inline box that itself holds one among them.
+    fn is_block_level_child(&self, id: NodeId) -> Result<bool, &'static str> {
+        let style = self.style(id)?;
+        let b = style.get_box();
+        let d = b.clone_display();
+        if d.is_none() || matches!(b.clone_position(), Position::Absolute | Position::Fixed) || b.clone_float() != Float::None {
+            return Ok(false);
+        }
+        if d.is_contents() {
+            return Err("display contents");
+        }
+        if matches!(d.outside(), DisplayOutside::Inline) {
+            return Ok(matches!(d.inside(), DisplayInside::Flow) && self.holds_block_level(id)?);
+        }
+        Ok(true)
     }
 
     // The side a box floats to (`floatSide`): 0 none, 1 left, 2 right — a flow-relative one by the direction of the
@@ -1389,14 +1607,6 @@ fn edge_run(kind: u8, inline: usize, plain: f64, ws: u8) -> Run {
 fn same_font(a: &FontInfo, b: &FontInfo) -> bool {
     a.face == b.face && a.size == b.size && a.ls == b.ls && a.ws == b.ws && a.lh == b.lh && a.tab_px == b.tab_px && a.tab_min == b.tab_min
 }
-// Does the box sit on its parent's baseline — `vertical-align: baseline`, no shift?
-fn baseline_aligned(style: &ComputedValues) -> bool {
-    use style::values::generics::box_::GenericBaselineShift as BaselineShift;
-    use style::values::specified::box_::AlignmentBaseline;
-    let b = style.get_box();
-    matches!(&b.baseline_shift, BaselineShift::Length(lp) if lp.to_length().is_some_and(|l| l.px() == 0.0) || lp.to_percentage().is_some_and(|p| p.0 == 0.0))
-        && b.alignment_baseline == AlignmentBaseline::Baseline
-}
 // The face's content box at the element's size (`fontContentHeight`: ascent + descent, each rounded) and its ascent
 // (`fontAscent`, what `inlineAscent` answers of a box on the baseline).
 fn content_height(style: &ComputedValues, face: &Face) -> f64 {
@@ -1417,7 +1627,6 @@ fn font_size(style: &ComputedValues) -> f64 {
 // Why a display this walk has not been taught declines, by what it lays out.
 fn display_decline(d: style::values::specified::box_::Display) -> &'static str {
     match (d.outside(), d.inside()) {
-        (DisplayOutside::Inline, _) => "atomic inline",
         (_, DisplayInside::Flex) => "flex",
         (_, DisplayInside::Grid) => "grid",
         (_, DisplayInside::Table) => "table",
@@ -1425,6 +1634,7 @@ fn display_decline(d: style::values::specified::box_::Display) -> &'static str {
         (DisplayOutside::InternalTable, _) => "table part",
         (_, DisplayInside::WebkitBox) => "-webkit-box",
         (_, DisplayInside::Ruby | DisplayInside::RubyBase | DisplayInside::RubyText | DisplayInside::RubyBaseContainer | DisplayInside::RubyTextContainer) => "ruby",
+        (DisplayOutside::Inline, _) => "atomic inline",
         _ => "display",
     }
 }
@@ -1451,12 +1661,15 @@ fn contains_out_of_flow(style: &ComputedValues, node: &crate::dom::NodeData) -> 
     let d = b.clone_display();
     let transformable = !(matches!(d.outside(), DisplayOutside::Inline) && matches!(d.inside(), DisplayInside::Flow) && declined_tag(&node.local_name) != Some("replaced or control"))
         && !matches!(d.inside(), DisplayInside::TableColumn | DisplayInside::TableColumnGroup);
-    if transformable
-        && (!b.transform.0.is_empty()
-            || !matches!(b.perspective, style::values::generics::box_::GenericPerspective::None)
-            || !matches!(b.translate, style::values::generics::transform::GenericTranslate::None)
-            || !matches!(b.rotate, style::values::generics::transform::GenericRotate::None)
-            || !matches!(b.scale, style::values::generics::transform::GenericScale::None))
+    // (…the rest only of a box they apply to: not a non-replaced inline, not a table column — `isTransformable`)
+    if !transformable {
+        return false;
+    }
+    if !b.transform.0.is_empty()
+        || !matches!(b.perspective, style::values::generics::box_::GenericPerspective::None)
+        || !matches!(b.translate, style::values::generics::transform::GenericTranslate::None)
+        || !matches!(b.rotate, style::values::generics::transform::GenericRotate::None)
+        || !matches!(b.scale, style::values::generics::transform::GenericScale::None)
     {
         return true;
     }
