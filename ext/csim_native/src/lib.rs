@@ -13,6 +13,8 @@ mod element_state;
 // Native text metrics (fontations) — used IN-PROCESS by native inline layout (L2, mod layout); JS
 // registers a font (registerFontPath) to a handle it passes in the layout inputs.
 mod font;
+// HTML's presentational hints: the declarations an element's attributes add to the cascade.
+mod hints;
 // Native layout (reader-flip endgame), stage L1 = block flow. Driven by the layoutPass / boxOf ops.
 mod layout;
 mod selector;

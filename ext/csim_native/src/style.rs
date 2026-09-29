@@ -25,7 +25,12 @@ use style::device::Device;
 use style::media_queries::{MediaList, MediaType};
 use style::invalidation::element::restyle_hints::RestyleHint;
 use style::parser::ParserContext;
-use style::properties::{parse_style_attribute, ComputedValues, PropertyDeclarationBlock, PropertyId};
+use style::properties::{
+    parse_property_declaration_list, parse_style_attribute, ComputedValues, LonghandId, PropertyDeclarationBlock,
+    PropertyDeclarationId, PropertyId,
+};
+use style::rule_tree::{CascadeLevel, CascadeOrigin};
+use style::stylesheets::layer_rule::LayerOrder;
 use style::selector_parser::SnapshotMap;
 use style::stylesheets::import_rule::{ImportLayer, ImportSheet, ImportSupportsCondition};
 use style::stylesheets::{ImportRule, OriginSet, StylesheetLoader};
@@ -54,10 +59,14 @@ use crate::dom::{NodeId, NodeKind, RealmArena};
 pub(crate) struct StyleSlot {
     id: Option<Atom>,
     style_attr: OnceCell<Option<Arc<Locked<PropertyDeclarationBlock>>>>,
+    // The presentational hints its own attributes give it, parsed on first read after any of them changes.
+    hints: OnceCell<Option<Arc<Locked<PropertyDeclarationBlock>>>>,
     data: UnsafeCell<Option<ElementDataWrapper>>,
     dirty_descendants: Cell<bool>,
     handled_snapshot: Cell<bool>,
     selector_flags: Cell<ElementSelectorFlags>,
+    // Its state bits (`element_state`) and the arena `mutations` they were derived at.
+    state: Cell<(u64, ElementState)>,
 }
 
 impl Default for StyleSlot {
@@ -65,10 +74,12 @@ impl Default for StyleSlot {
         StyleSlot {
             id: None,
             style_attr: OnceCell::new(),
+            hints: OnceCell::new(),
             data: UnsafeCell::new(None),
             dirty_descendants: Cell::new(false),
             handled_snapshot: Cell::new(false),
             selector_flags: Cell::new(ElementSelectorFlags::empty()),
+            state: Cell::new((u64::MAX, ElementState::empty())),
         }
     }
 }
@@ -81,6 +92,9 @@ impl StyleSlot {
         }
         if name.is_none_or(|n| n == "style") {
             self.style_attr = OnceCell::new();
+        }
+        if name.is_none_or(|n| n != "style" && n != "class") {
+            self.hints = OnceCell::new();
         }
     }
 }
@@ -156,17 +170,38 @@ impl StylesheetLoader for Loader<'_> {
     }
 }
 
-// Every property stylo can parse, whichever of Servo's layout switches it waits behind: this engine's layout is
-// its own, so a switch Servo keeps off for its own layout's sake says nothing about ours.
+// Every property stylo can parse, whichever of Servo's layout switches it waits behind — this engine's layout is
+// its own, so a switch Servo keeps off for its own layout's sake says nothing about ours — and every feature the
+// browsers ship that stylo keeps behind a switch of its own. (What stays off is what no browser ships yet: `alpha()`,
+// `progress()`, custom media, `light-dark()` images, elliptical corners, cross-document view transitions.)
 fn enable_properties() {
     static ONCE: std::sync::Once = std::sync::Once::new();
     ONCE.call_once(|| {
-        stylo_static_prefs::set_pref!("layout.unimplemented", true);
-        stylo_static_prefs::set_pref!("layout.grid.enabled", true);
-        stylo_static_prefs::set_pref!("layout.columns.enabled", true);
-        stylo_static_prefs::set_pref!("layout.variable_fonts.enabled", true);
-        stylo_static_prefs::set_pref!("layout.container-queries.enabled", true);
-        stylo_static_prefs::set_pref!("layout.writing-mode.enabled", true);
+        use stylo_static_prefs::set_pref;
+        set_pref!("layout.unimplemented", true);
+        set_pref!("layout.grid.enabled", true);
+        set_pref!("layout.columns.enabled", true);
+        set_pref!("layout.variable_fonts.enabled", true);
+        set_pref!("layout.container-queries.enabled", true);
+        set_pref!("layout.writing-mode.enabled", true);
+        set_pref!("layout.css.has-selector.enabled", true);
+        set_pref!("layout.css.nth-child-of.enabled", true);
+        set_pref!("layout.css.at-scope.enabled", true);
+        set_pref!("layout.css.starting-style-at-rules.enabled", true);
+        set_pref!("layout.css.style-queries.enabled", true);
+        set_pref!("layout.css.scroll-state.enabled", true);
+        set_pref!("layout.css.anchor-positioning.enabled", true);
+        set_pref!("layout.css.attr.enabled", true);
+        set_pref!("layout.css.tree-counting-functions.enabled", true);
+        set_pref!("layout.css.scroll-driven-animations.enabled", true);
+        set_pref!("layout.css.content.alt-text.enabled", true);
+        set_pref!("layout.css.font-palette.enabled", true);
+        set_pref!("layout.css.font-tech.enabled", true);
+        set_pref!("layout.css.margin-rules.enabled", true);
+        set_pref!("layout.css.basic-shape-shape.enabled", true);
+        set_pref!("layout.css.background-clip.border-area.enabled", true);
+        set_pref!("layout.css.appearance-base.enabled", true);
+        set_pref!("dom.select.customizable_select.enabled", true);
     });
 }
 
@@ -201,6 +236,10 @@ impl StyleEngine {
         };
         let ua = engine.parse(UA_SHEET, engine.url.clone(), "", Origin::UserAgent);
         engine.stylist.append_stylesheet(ua, &engine.lock.read());
+        if quirks == QuirksMode::Quirks {
+            let sheet = engine.parse(UA_QUIRKS_SHEET, engine.url.clone(), "", Origin::UserAgent);
+            engine.stylist.append_stylesheet(sheet, &engine.lock.read());
+        }
         engine
     }
 
@@ -229,6 +268,24 @@ impl StyleEngine {
             AllowImportRules::Yes,
         );
         DocumentStyleSheet(Arc::new(sheet))
+    }
+
+    // The declarations `css` as the user agent writes them (its internal keywords allowed), for the hint level.
+    fn hint_block(&self, css: &str) -> Arc<Locked<PropertyDeclarationBlock>> {
+        let context = ParserContext::new(
+            Origin::UserAgent,
+            &self.url,
+            Some(CssRuleType::Style),
+            ParsingMode::DEFAULT,
+            self.quirks,
+            Default::default(),
+            None,
+            None,
+            Default::default(),
+        );
+        let mut input = ParserInput::new(css);
+        let block = parse_property_declaration_list(&context, &mut Parser::new(&mut input), &[]);
+        Arc::new(self.lock.wrap(block))
     }
 
     fn media_list(&self, media: &str, url: &UrlExtraData) -> MediaList {
@@ -364,11 +421,95 @@ impl StyleEngine {
         // SAFETY: no traversal runs while the value is read.
         let data = unsafe { &*slot.data.get() }.as_ref()?.borrow();
         let style = data.styles.get_primary()?;
-        match PropertyId::parse_enabled_for_all_content(name).ok()?.as_shorthand() {
-            Ok(_) => None,
-            Err(longhand) => Some(style.computed_value_to_string(longhand)),
-        }
+        let property = PropertyId::parse_enabled_for_all_content(name).ok()?;
+        let longhand = match property.as_shorthand() {
+            Ok(_) => return None,
+            Err(longhand) => longhand,
+        };
+        let value = style.computed_value_to_string(longhand);
+        Some(match longhand {
+            // CSSOM's resolved value of an automatic minimum size: the keyword on a flex or grid item, whose layout
+            // gives it meaning, and zero on anything else.
+            PropertyDeclarationId::Longhand(
+                LonghandId::MinWidth | LonghandId::MinHeight | LonghandId::MinInlineSize | LonghandId::MinBlockSize,
+            ) if value == "auto" => {
+                let parent = in_arena(arena, self, || TElement::traversal_parent(&StyleNode::new(arena, id)).map(|p| p.id));
+                if is_flex_or_grid_item(style, parent.and_then(|p| primary_style(arena, p))) {
+                    value
+                } else {
+                    "0px".to_owned()
+                }
+            }
+            _ => value,
+        })
     }
+}
+
+// `id`'s state as stylo's bits: every state pseudo-class the arena answers, so that two elements whose bits are equal
+// match the same of them (the style-sharing cache shares on that) and a rule of a rare one is collected at all (the
+// rule map files `:link`, `:focus`, `:target`, … under the bit and asks for it).
+fn element_state(arena: &RealmArena, id: NodeId, link: bool) -> ElementState {
+    let mut s = ElementState::empty();
+    let mut set = |flag: ElementState, on: bool| {
+        if on {
+            s.insert(flag);
+        }
+    };
+    set(ElementState::UNVISITED, link);
+    set(ElementState::FOCUS, arena.is_focused(id));
+    set(ElementState::FOCUSRING, arena.is_focus_visible(id));
+    set(ElementState::FOCUS_WITHIN, arena.has_focus_within(id));
+    set(ElementState::HOVER, arena.is_hovered(id));
+    set(ElementState::CHECKED, arena.is_checked(id) || arena.is_selected(id));
+    set(ElementState::INDETERMINATE, arena.is_indeterminate(id));
+    set(ElementState::DISABLED, arena.is_actually_disabled(id));
+    set(ElementState::ENABLED, arena.is_enabled(id));
+    set(ElementState::READWRITE, arena.is_read_write(id));
+    set(ElementState::READONLY, !arena.is_read_write(id));
+    set(ElementState::DEFAULT, arena.is_default(id));
+    set(ElementState::OPEN, arena.is_open(id));
+    set(ElementState::PLACEHOLDER_SHOWN, arena.is_placeholder_shown(id));
+    set(ElementState::URLTARGET, arena.is_target(id));
+    set(ElementState::DEFINED, arena.is_defined(id));
+    set(ElementState::MODAL, arena.is_modal(id));
+    set(ElementState::POPOVER_OPEN, arena.is_popover_open(id));
+    match arena.is_valid_pseudo(id) {
+        Some(true) => set(ElementState::VALID, true),
+        Some(false) => set(ElementState::INVALID, true),
+        None => {}
+    }
+    match arena.is_user_valid_pseudo(id) {
+        Some(true) => set(ElementState::USER_VALID, true),
+        Some(false) => set(ElementState::USER_INVALID, true),
+        None => {}
+    }
+    match arena.is_in_range(id) {
+        Some(true) => set(ElementState::INRANGE, true),
+        Some(false) => set(ElementState::OUTOFRANGE, true),
+        None => {}
+    }
+    match arena.requiredness(id) {
+        Some(true) => set(ElementState::REQUIRED, true),
+        Some(false) => set(ElementState::OPTIONAL_, true),
+        None => {}
+    }
+    s
+}
+
+// The computed style the last traversal gave `id`.
+fn primary_style(arena: &RealmArena, id: NodeId) -> Option<Arc<ComputedValues>> {
+    let slot = arena.style_slot(id)?;
+    // SAFETY: no traversal runs while a style is read.
+    let data = unsafe { &*slot.data.get() }.as_ref()?.borrow();
+    data.styles.get_primary().cloned()
+}
+
+// Is a box of `style`, under a parent of `parent`, a flex or grid item: its parent a flex or grid container, and
+// itself in flow?
+fn is_flex_or_grid_item(style: &ComputedValues, parent: Option<Arc<ComputedValues>>) -> bool {
+    use style::computed_values::position::T as Position;
+    parent.is_some_and(|p| p.get_box().clone_display().is_item_container())
+        && !matches!(style.get_box().clone_position(), Position::Absolute | Position::Fixed)
 }
 
 struct NoPainters;
@@ -708,7 +849,7 @@ impl<'a> selectors::Element for StyleNode<'a> {
             NonTSPseudoClass::Target => arena.is_target(id),
             NonTSPseudoClass::UserInvalid => arena.is_user_valid_pseudo(id) == Some(false),
             NonTSPseudoClass::UserValid => arena.is_user_valid_pseudo(id) == Some(true),
-            NonTSPseudoClass::Lang(lang) => arena.matches_lang(id, &lang.to_string()),
+            NonTSPseudoClass::Lang(lang) => arena.matches_lang(id, &lang.to_ascii_lowercase()),
             NonTSPseudoClass::CustomState(state) => arena.has_custom_state(id, &state.0),
             NonTSPseudoClass::MozMeterOptimum
             | NonTSPseudoClass::MozMeterSubOptimum
@@ -737,7 +878,9 @@ impl<'a> selectors::Element for StyleNode<'a> {
         let node = self.node();
         match &*node.local_name {
             "a" | "area" if self.is_html() => node.plain_attr("href").is_some(),
-            "a" if self.node().ns == ns!(svg) => node.plain_attr("href").is_some(),
+            "a" if self.node().ns == ns!(svg) => {
+                node.plain_attr("href").is_some() || node.ns_attr("http://www.w3.org/1999/xlink", "href").is_some()
+            }
             _ => false,
         }
     }
@@ -810,7 +953,15 @@ impl<'a> TElement for StyleNode<'a> {
         parsed.as_ref().map(|a| a.borrow_arc())
     }
     fn state(&self) -> ElementState {
-        ElementState::empty()
+        let arena = self.arena();
+        let slot = self.slot();
+        let (at, bits) = slot.state.get();
+        if at == arena.mutations {
+            return bits;
+        }
+        let bits = element_state(arena, self.id, selectors::Element::is_link(self));
+        slot.state.set((arena.mutations, bits));
+        bits
     }
     fn has_part_attr(&self) -> bool {
         false
@@ -927,7 +1078,7 @@ impl<'a> TElement for StyleNode<'a> {
         None
     }
     fn match_element_lang(&self, _override_lang: Option<Option<AttrValue>>, value: &Lang) -> bool {
-        self.arena().matches_lang(self.id, &value.to_string())
+        self.arena().matches_lang(self.id, &value.to_ascii_lowercase())
     }
     fn is_html_document_body_element(&self) -> bool {
         self.is_html()
@@ -936,10 +1087,31 @@ impl<'a> TElement for StyleNode<'a> {
                 .parent_node()
                 .is_some_and(|p| p.is_element() && p.node().local_name == local_name!("html") && p.parent_node().is_some_and(|d| d.as_document().is_some()))
     }
-    fn synthesize_presentational_hints_for_legacy_attributes<V>(&self, _visited: VisitedHandlingMode, _hints: &mut V)
+    fn synthesize_presentational_hints_for_legacy_attributes<V>(&self, _visited: VisitedHandlingMode, hints: &mut V)
     where
         V: Push<ApplicableDeclarationBlock>,
     {
+        let engine = self.engine();
+        let mut push = |block: Arc<Locked<PropertyDeclarationBlock>>| {
+            hints.push(ApplicableDeclarationBlock::from_declarations(
+                block,
+                CascadeLevel::new(CascadeOrigin::PresHints),
+                LayerOrder::root(),
+            ));
+        };
+        let own = self.slot().hints.get_or_init(|| {
+            let mut css = String::new();
+            crate::hints::own_hints(self.node(), &mut css);
+            (!css.is_empty()).then(|| engine.hint_block(&css))
+        });
+        if let Some(block) = own {
+            push(block.clone());
+        }
+        let mut css = String::new();
+        crate::hints::cell_hints(self.arena(), self.id, &mut css);
+        if !css.is_empty() {
+            push(engine.hint_block(&css));
+        }
     }
     fn local_name(&self) -> &web_atoms::LocalName {
         &self.node().local_name
@@ -970,5 +1142,100 @@ impl<'a> TElement for StyleNode<'a> {
     }
 }
 
-// The user-agent style sheet.
+// The user-agent style sheet, and what it adds in quirks mode.
 const UA_SHEET: &str = include_str!("ua.css");
+const UA_QUIRKS_SHEET: &str = include_str!("ua-quirks.css");
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use style::error_reporting::{ContextualParseError, ParseErrorReporter};
+
+    struct Errors(RefCell<Vec<String>>);
+    impl ParseErrorReporter for Errors {
+        fn report_error(&self, _url: &UrlExtraData, location: SourceLocation, error: ContextualParseError) {
+            self.0.borrow_mut().push(format!("{}:{}: {error}", location.line + 1, location.column));
+        }
+    }
+
+    // Every declaration and selector of the user-agent sheet is one stylo accepts: a rule it cannot parse is dropped
+    // without a sound, and the default it carried with it.
+    #[test]
+    fn the_user_agent_sheets_parse_whole() {
+        for sheet in [UA_SHEET, UA_QUIRKS_SHEET] {
+            assert_parses_whole(sheet);
+        }
+    }
+
+    fn assert_parses_whole(sheet: &str) {
+        enable_properties();
+        let lock = SharedRwLock::new();
+        let errors = Errors(RefCell::new(Vec::new()));
+        Stylesheet::from_str(
+            sheet,
+            UrlExtraData::from(url::Url::parse("about:blank").unwrap()),
+            Origin::UserAgent,
+            Arc::new(lock.wrap(MediaList::empty())),
+            lock.clone(),
+            None,
+            Some(&errors),
+            QuirksMode::NoQuirks,
+            AllowImportRules::Yes,
+        );
+        assert_eq!(errors.0.into_inner(), Vec::<String>::new());
+    }
+
+    // Every declaration a presentational hint writes is one stylo accepts, for every mapping `hints.rs` has.
+    #[test]
+    fn every_hint_parses() {
+        use crate::dom::{NodeData, NodeKind};
+        enable_properties();
+        let cases: &[(&str, &[(&str, &str)])] = &[
+            ("body", &[("marginheight", "5"), ("leftmargin", "7"), ("text", "red"), ("bgcolor", "#abc"), ("background", "a b.png")]),
+            ("div", &[("align", "middle")]),
+            ("caption", &[("align", "bottom")]),
+            ("br", &[("clear", "all")]),
+            ("font", &[("color", "chucknorris"), ("face", "Georgia, serif"), ("size", "+2")]),
+            ("table", &[("cellspacing", "3"), ("border", "x"), ("bordercolor", "blue"), ("align", "center"), ("width", "50%"), ("height", "20")]),
+            ("td", &[("align", "justify"), ("valign", "center"), ("nowrap", ""), ("width", "10.50"), ("height", "3")]),
+            ("img", &[("width", "10"), ("height", "20"), ("hspace", "2"), ("vspace", "3"), ("border", "4"), ("align", "absmiddle")]),
+            ("img", &[("align", "middle")]),
+            ("input", &[("type", "IMAGE"), ("width", "1"), ("height", "2"), ("align", "left"), ("border", "-1")]),
+            ("canvas", &[("width", "300"), ("height", "150")]),
+            ("iframe", &[("frameborder", "0"), ("width", "100%")]),
+            ("hr", &[("align", "right"), ("size", "7"), ("color", "green"), ("width", "40")]),
+            ("hr", &[("size", "1")]),
+            ("hr", &[("size", "9")]),
+            ("li", &[("value", "4")]),
+            ("ol", &[("start", "-3")]),
+            ("ol", &[("reversed", ""), ("start", "20")]),
+            ("ol", &[("reversed", "")]),
+            ("col", &[("valign", "top"), ("width", "0")]),
+        ];
+        let engine = StyleEngine::new(QuirksMode::NoQuirks, (800.0, 600.0), UrlExtraData::from(url::Url::parse("about:blank").unwrap()));
+        for (tag, attrs) in cases {
+            let mut node = NodeData::of_kind(NodeKind::Element, Vec::new());
+            node.local_name = web_atoms::LocalName::from(*tag);
+            node.ns = ns!(html);
+            node.attributes = attrs.iter().map(|(k, v)| (k.to_string(), v.to_string())).collect();
+            let mut css = String::new();
+            crate::hints::own_hints(&node, &mut css);
+            assert!(!css.is_empty(), "<{tag}> gave no hint");
+            let errors = Errors(RefCell::new(Vec::new()));
+            let context = ParserContext::new(
+                Origin::UserAgent,
+                &engine.url,
+                Some(CssRuleType::Style),
+                ParsingMode::DEFAULT,
+                QuirksMode::NoQuirks,
+                Default::default(),
+                Some(&errors),
+                None,
+                Default::default(),
+            );
+            let mut input = ParserInput::new(&css);
+            parse_property_declaration_list(&context, &mut Parser::new(&mut input), &[]);
+            assert_eq!(errors.0.into_inner(), Vec::<String>::new(), "<{tag}>: {css}");
+        }
+    }
+}

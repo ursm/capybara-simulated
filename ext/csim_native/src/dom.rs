@@ -520,6 +520,7 @@ impl RealmArena {
         if self.get(id).is_none() {
             return;
         }
+        self.mutations += 1;
         if states.is_empty() {
             self.custom_states.remove(&id);
         } else {
@@ -529,6 +530,19 @@ impl RealmArena {
     // `:state(name)`.
     pub(crate) fn has_custom_state(&self, id: NodeId, name: &str) -> bool {
         self.custom_states.get(&id).is_some_and(|s| s.iter().any(|n| n == name))
+    }
+
+    // The document `doc`'s target fragments (none: nothing is the target).
+    pub(crate) fn set_target(&mut self, doc: NodeId, fragments: Vec<String>) {
+        self.mutations += 1;
+        self.target = (!fragments.is_empty()).then_some((doc, fragments));
+    }
+    // Whether the focus shows no ring.
+    pub(crate) fn set_focus_ring_hidden(&mut self, hidden: bool) {
+        if self.focus_ring_hidden != hidden {
+            self.mutations += 1;
+            self.focus_ring_hidden = hidden;
+        }
     }
 
     // `root` is the shadow root of `host`.
@@ -1071,7 +1085,7 @@ fn set_target(
         }
     }
     let cid = realm_id(scope, &args);
-    realm(scope, cid).target = (!fragments.is_empty()).then_some((doc, fragments));
+    realm(scope, cid).set_target(doc, fragments);
 }
 
 // __dom.setShadowHost(rootNid, hostNid): the shadow root `rootNid` is attached to `hostNid`.
@@ -1095,7 +1109,7 @@ fn set_focus_ring_hidden(
 ) {
     let hidden = args.get(0).boolean_value(scope);
     let cid = realm_id(scope, &args);
-    realm(scope, cid).focus_ring_hidden = hidden;
+    realm(scope, cid).set_focus_ring_hidden(hidden);
 }
 
 // __dom.inspectNode(nid) -> [kind, localName, data, parentNid, state, hostNid, value, childNid, …] (`value` undefined
