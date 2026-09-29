@@ -61,7 +61,7 @@ impl NodeId {
         (((self.generation as i64) << INDEX_BITS) | (self.idx as i64)) as f64
     }
     // Unpack a non-negative wire value; a negative value (the JS `-1` "no node" sentinel) is None.
-    fn from_i64(n: i64) -> Option<NodeId> {
+    pub(crate) fn from_i64(n: i64) -> Option<NodeId> {
         if n < 0 {
             return None;
         }
@@ -798,6 +798,8 @@ pub(crate) struct Dom {
     pub(crate) cascades: std::collections::HashMap<i32, crate::cascade::CascadeStore>,
     // Each realm's style engine (`styleLoad`).
     pub(crate) styles: std::collections::HashMap<i32, crate::style::StyleEngine>,
+    // Each realm's walk-parity instrument (`walk_ops`), where a pass has asked for it.
+    pub(crate) walk_parity: std::collections::HashMap<i32, crate::walk_ops::Parity>,
     // The realms `dropRealm` freed: an op a script of one still runs lands in `graveyard` rather than bringing its
     // arena back (context ids are never reused, so each would have stayed an entry for good).
     dropped: std::collections::HashSet<i32>,
@@ -956,6 +958,7 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_, ()>, ctx: &v8::Global<v8:
     register(scope, ns, "styleFlush", style_flush, context_id);
     register(scope, ns, "styleTick", style_tick, context_id);
     crate::animation_ops::install(scope, ns, context_id);
+    crate::walk_ops::install(scope, ns, context_id);
     register(scope, ns, "nowNanos", now_nanos, context_id);
     // Incremental-sync primitives (the store-flip F1 foundation): keep the arena current
     // as the DOM mutates, instead of rebuilding it. syncChildren relinks one parent's
@@ -2069,6 +2072,7 @@ fn drop_realm(
         d.layout_chunks.remove(&id);   // (…and its kept layout chunks, see `reset_arena`)
         d.cascades.remove(&id);        // (…and its rules)
         d.styles.remove(&id);          // (…and its style engine)
+        d.walk_parity.remove(&id);     // (…and its walk-parity instrument)
     }
 }
 
@@ -2101,7 +2105,12 @@ fn register_font_bytes(
 
 // Fields per node in the layoutPass input buffer, and per run in the runs buffer (flat Float64Arrays).
 // Order MUST match the JS packer (layout.js `__csimLayoutShadowRun`) and layout::Input / layout::Run.
-const LAYOUT_STRIDE: usize = 165;
+pub(crate) const LAYOUT_STRIDE: usize = 165;
+// The record slots that name a comparison PROGRAM by its offset in the math table (layout.js `NL_REC_MATH_SLOTS`).
+pub(crate) const MATH_SLOTS: [usize; 27] = [
+    125, 126, 127, 135, 136, 137, 138, 139, 140, 141, 142, 143, 144, 145, 146, 147, 148, 149, 150, 151, 156, 157, 158, 159, 160, 161,
+    162,
+];
 const RUN_STRIDE: usize = 12;
 // …and per inline box in the inline table (layout.js `NL_INLINE_STRIDE` / `nlInlineEntry`, layout::InlineBox).
 const INLINE_STRIDE: usize = 31;
@@ -2145,7 +2154,7 @@ fn f64_arg<'a>(val: v8::Local<'a, v8::Value>) -> F64Arg<'a> {
 
 // One record of `layoutPass`'s input as the layout reads it — the whole of the record's contract with the JS packer
 // (`nlEncodeRecord`), in one place for the pass and for a kept chunk (`layoutChunkPut`).
-fn decode_input(r: &[f64]) -> crate::layout::Input {
+pub(crate) fn decode_input(r: &[f64]) -> crate::layout::Input {
     crate::layout::Input {
         nid: r[0],
         parent: r[1] as i32,
@@ -2616,6 +2625,10 @@ fn layout_pass(
             return;
         }
     };
+    // …kept for the walk-parity instrument (`CSIM_WALK_PARITY`) as the JS walk sent them, before the pass writes into them.
+    if args.get(14).is_true() {
+        dom(scope).walk_parity.entry(cid).or_default().keep(&inputs, &runs, &run_texts);
+    }
     // The measures kept of the placed chunks, lent to the pass and taken back.
     let mut measure = std::mem::take(&mut dom(scope).layout_chunks.entry(cid).or_default().measure);
     let out = crate::layout::layout_block_in_place(&mut inputs, &runs, &run_texts, &grids, &inlines, &maths, root_x, root_y, root_cb_w, root_rtl, Some((&mut measure, roots, check)), texts);

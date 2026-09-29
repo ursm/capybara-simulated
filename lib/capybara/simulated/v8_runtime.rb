@@ -911,6 +911,8 @@ module Capybara
         c.eval_void('globalThis.__csimNativeLayout = true;') unless ENV['CSIM_NATIVE_LAYOUT'] == '0'
         # …and the check on its subtree reuse: every pass walked again without it, and any difference thrown.
         c.eval_void('globalThis.__csimNativeLayoutVerifyReuse = true;') if ENV['CSIM_NL_REUSE_VERIFY'] == '1'
+        # …and the Rust walk held against the JS one, record by record, after every pass (`walk_ops.rs`).
+        c.eval_void('globalThis.__csimWalkParity = true;') if ENV['CSIM_WALK_PARITY'] == '1'
         # …and the check on the arena itself: the whole JS tree held against it at every layout and cascade entry.
         c.eval_void('globalThis.__csimArenaVerify = true;') if ENV['CSIM_ARENA_VERIFY'] == '1'
       end

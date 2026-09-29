@@ -2064,11 +2064,18 @@ fn snapshot_attr(node: &crate::dom::NodeData, key: &str, value: &str) -> (AttrId
 }
 
 // The computed style the last traversal gave `id`.
-fn primary_style(arena: &RealmArena, id: NodeId) -> Option<Arc<ComputedValues>> {
+pub(crate) fn primary_style(arena: &RealmArena, id: NodeId) -> Option<Arc<ComputedValues>> {
     let slot = arena.style_slot(id)?;
     // SAFETY: no traversal runs while a style is read.
     let data = unsafe { &*slot.data.get() }.as_ref()?.borrow();
     data.styles.get_primary().cloned()
+}
+// …and the style it gave `id`'s EAGER pseudo-element `pseudo` (`::before`, `::after`, …), where it made one.
+pub(crate) fn eager_pseudo(arena: &RealmArena, id: NodeId, pseudo: &PseudoElement) -> Option<Arc<ComputedValues>> {
+    let slot = arena.style_slot(id)?;
+    // SAFETY: as above.
+    let data = unsafe { &*slot.data.get() }.as_ref()?.borrow();
+    data.styles.pseudos.get(pseudo).cloned()
 }
 
 // Is a box of `style`, under a parent of `parent`, a flex or grid item: its parent a flex or grid container, and
