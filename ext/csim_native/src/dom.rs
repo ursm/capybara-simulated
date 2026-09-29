@@ -57,7 +57,7 @@ pub(crate) struct NodeId {
 
 impl NodeId {
     // Pack into one JS Number (exact f64). gen above INDEX_BITS, index below.
-    fn to_f64(self) -> f64 {
+    pub(crate) fn to_f64(self) -> f64 {
         (((self.generation as i64) << INDEX_BITS) | (self.idx as i64)) as f64
     }
     // Unpack a non-negative wire value; a negative value (the JS `-1` "no node" sentinel) is None.
@@ -1916,13 +1916,14 @@ pub(crate) fn threw_verify_failures(scope: &mut v8::PinScope<'_, '_>, failures: 
     true
 }
 
-// __dom.styleFlush(now): a style flush at `now` (the page's clock, ms) — what a forced `getComputedStyle` or layout
-// read is in a browser: the style engine's animations move to it and the document is styled, starting the
-// transitions a change since the last one owes. The events wait for `styleTick`.
+// __dom.styleFlush(now) -> [nid, …] | undefined: a style flush at `now` (the page's clock, ms) — what a forced
+// `getComputedStyle` or layout read is in a browser: the style engine's animations move to it and the document is
+// styled, starting the animations and transitions a change since the last one owes. The events wait for `styleTick`;
+// what comes back is the elements whose animations' properties changed since the JS side was last told, if any.
 fn style_flush(
     scope: &mut v8::PinScope<'_, '_>,
     args: v8::FunctionCallbackArguments<'_>,
-    _rv: v8::ReturnValue<'_, v8::Value>,
+    mut rv: v8::ReturnValue<'_, v8::Value>,
 ) {
     let cid = realm_id(scope, &args);
     style_op(scope, cid, |scope| {
@@ -1931,13 +1932,20 @@ fn style_flush(
         let (Some(engine), Some(arena)) = (d.styles.get_mut(&cid), d.realms.get(&cid)) else { return };
         engine.flush(arena, now);
         let failures = engine.take_verify_failures();
-        threw_verify_failures(scope, failures);
+        let retargeted = engine.web_animations.take_retargeted();
+        if threw_verify_failures(scope, failures) || retargeted.is_empty() {
+            return;
+        }
+        let items: Vec<v8::Local<v8::Value>> = retargeted.iter().map(|n| v8::Number::new(scope, n.to_f64()).into()).collect();
+        rv.set(v8::Array::new_with_elements(scope, &items).into());
     });
 }
 
-// __dom.styleTick(now) -> [type, nid, pseudo, name, elapsedTime, …]: a rendering update at `now` (the page's clock,
-// ms): a style flush, and the animation / transition events the state changes since the last update owe, handed back
-// in order (`pseudo` null for an element's own).
+// __dom.styleTick(now) -> [retargeted count, nid…, then type, nid, pseudo, name, elapsedTime, animation, …]: a
+// rendering update at `now` (the page's clock, ms): a style flush — the elements whose animations' properties changed
+// first, as `styleFlush` gives them — and the animation / transition events the state changes since the last update
+// owe, handed back in order (`pseudo` null for an element's own; `animation` the engine's id of a CSS animation's,
+// 0 for a transition's).
 fn style_tick(
     scope: &mut v8::PinScope<'_, '_>,
     args: v8::FunctionCallbackArguments<'_>,
@@ -1960,10 +1968,13 @@ fn style_tick_unguarded(
     engine.flush(arena, now);
     let failures = engine.take_verify_failures();
     let events = engine.take_animation_events(arena);
+    let retargeted = engine.web_animations.take_retargeted();
     if threw_verify_failures(scope, failures) {
         return;
     }
-    let mut items: Vec<v8::Local<v8::Value>> = Vec::with_capacity(events.len() * 5);
+    let mut items: Vec<v8::Local<v8::Value>> = Vec::with_capacity(1 + retargeted.len() + events.len() * 6);
+    items.push(v8::Number::new(scope, retargeted.len() as f64).into());
+    items.extend(retargeted.iter().map(|n| -> v8::Local<v8::Value> { v8::Number::new(scope, n.to_f64()).into() }));
     for e in events {
         items.push(v8::String::new(scope, e.kind).map_or_else(|| v8::undefined(scope).into(), Into::into));
         items.push(v8::Number::new(scope, e.node.to_f64()).into());
@@ -1973,6 +1984,7 @@ fn style_tick_unguarded(
         });
         items.push(v8::String::new(scope, &e.name).map_or_else(|| v8::undefined(scope).into(), Into::into));
         items.push(v8::Number::new(scope, e.elapsed).into());
+        items.push(v8::Number::new(scope, e.animation.unwrap_or(0) as f64).into());
     }
     let array = v8::Array::new_with_elements(scope, &items);
     rv.set(array.into());

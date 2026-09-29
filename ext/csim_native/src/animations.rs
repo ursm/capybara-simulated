@@ -6,6 +6,7 @@
 // waits on — the `ready` and `finished` promises, the `finish` / `cancel` / `remove` events — is kept as state here
 // and handed to the handles as `Signal`s: a promise is settled, or an event dispatched, by whoever holds the handle.
 
+use std::cmp::Ordering;
 use std::collections::HashMap;
 
 use style::properties::animated_properties::{AnimationValue, AnimationValueMap};
@@ -17,6 +18,7 @@ use style::values::animated::{Animate, Procedure};
 use style::values::computed::easing::ComputedTimingFunction;
 use style::values::generics::easing::{BeforeFlag, TimingKeyword};
 
+use crate::css_animations::{CssAnimation, CssEvent};
 use crate::dom::NodeId;
 
 pub(crate) type AnimationId = u32;
@@ -254,9 +256,13 @@ pub(crate) struct Effect {
     pub(crate) keyframes: Vec<Keyframe>,
     pub(crate) composite: CompositeOperation,
     pub(crate) iteration_composite_accumulate: bool,
+    // The easing out of the keyframe standing in at 0 for a property no keyframe there sets: a CSS animation's
+    // `animation-timing-function` (css-animations-1 §3), linear for a script's (a neutral keyframe, web-animations
+    // §5.3.4).
+    pub(crate) implicit_easing: Option<ComputedTimingFunction>,
     pub(crate) computed: Option<ComputedKeyframes>,
     // Its handle is gone, and it goes when its animation lets it go.
-    orphaned: bool,
+    pub(crate) orphaned: bool,
 }
 
 // A task an animation has pending until its timeline's next frame (§4.4.4 – §4.4.10): a play or a pause that takes
@@ -341,6 +347,10 @@ pub(crate) struct Animation {
     pub(crate) replace_state: ReplaceState,
     // Its place in composite order among script animations (§5.4.2): the order they were made in.
     pub(crate) sequence: u64,
+    // What it is as a CSS animation, if style made it.
+    pub(crate) css: Option<CssAnimation>,
+    // A JS handle holds it: what it signals has somewhere to go.
+    pub(crate) handled: bool,
 }
 
 // The document's animations and effects, and its timeline's time.
@@ -357,6 +367,11 @@ pub(crate) struct Animations {
     // The document timeline's current time (ms), None before the page has one.
     pub(crate) timeline_time: Option<f64>,
     pub(crate) signals: Vec<Signal>,
+    // The events the CSS animations owe since the last rendering update took them.
+    pub(crate) css_events: Vec<CssEvent>,
+    // The elements whose animations' properties changed — an effect came or went, or its keyframes changed — since
+    // the JS side, which caches what it asks of an animated element, was last told (`take_retargeted`).
+    retargeted: Vec<NodeId>,
 }
 
 impl Animations {
@@ -369,6 +384,7 @@ impl Animations {
             keyframes: Vec::new(),
             composite: CompositeOperation::Replace,
             iteration_composite_accumulate: false,
+            implicit_easing: None,
             computed: None,
             orphaned: false,
         };
@@ -377,9 +393,12 @@ impl Animations {
     }
 
     // An animation's handle is gone (and it was idle or over, or the handle would have been kept): it goes, and its
-    // effect with it where the effect's own handle went already.
+    // effect with it where the effect's own handle went already — unless style still owns it, which keeps it for a
+    // handle made anew.
     pub(crate) fn drop_animation(&mut self, id: AnimationId) {
-        if !self.animations.contains_key(&id) {
+        let Some(a) = self.animations.get_mut(&id) else { return };
+        if a.css.as_ref().is_some_and(|css| css.owner.is_some()) {
+            a.handled = false;
             return;
         }
         self.touch(id);
@@ -408,6 +427,7 @@ impl Animations {
         e.computed = None;
         if let Some(old) = old {
             self.dirty_targets.push(old.node);
+            self.retargeted.push(old.node);
             if let Some(list) = self.by_target.get_mut(&old.node) {
                 list.retain(|&id| id != effect);
                 if list.is_empty() {
@@ -417,6 +437,7 @@ impl Animations {
         }
         if let Some(t) = target {
             self.dirty_targets.push(t.node);
+            self.retargeted.push(t.node);
             self.by_target.entry(t.node).or_default().push(effect);
         }
     }
@@ -436,7 +457,16 @@ impl Animations {
         e.computed = None;
         if let Some(t) = &e.target {
             self.dirty_targets.push(t.node);
+            self.retargeted.push(t.node);
         }
+    }
+
+    // The elements whose animations' properties changed since this was last asked.
+    pub(crate) fn take_retargeted(&mut self) -> Vec<NodeId> {
+        let mut out = std::mem::take(&mut self.retargeted);
+        out.sort_unstable_by_key(|n| (n.idx, n.generation));
+        out.dedup();
+        out
     }
 
     // What an animation shows moved otherwise than with the clock (a seek, a pause, a change of timing or effect):
@@ -471,46 +501,85 @@ impl Animations {
     // What `commitStyles()` writes for animation `id` (web-animations §4.4.19 step 5): its target's effect stack up to
     // and including it, composited over `values` (what the CSS animations below it show) and the target's own — the
     // properties its effect animates only.
-    pub(crate) fn committed_values(&self, id: AnimationId, mut values: AnimationValueMap) -> Vec<AnimationValue> {
+    pub(crate) fn committed_values(
+        &self,
+        id: AnimationId,
+        mut values: AnimationValueMap,
+        tree_order: &impl Fn(NodeId, NodeId) -> Ordering,
+    ) -> Vec<AnimationValue> {
         let Some(effect) = self.animations.get(&id).and_then(|a| a.effect).and_then(|e| self.effects.get(&e)) else {
             return Vec::new();
         };
         let (Some(target), Some(computed)) = (&effect.target, &effect.computed) else { return Vec::new() };
-        self.compose_up_to(target, &mut values, self.animations[&id].sequence);
+        self.compose_up_to(target, &mut values, Some(id), tree_order);
         computed.properties.iter().filter_map(|(property, ..)| values.get(property).cloned()).collect()
     }
 
-    // Composite `underlying` (what the effects below left, keyed by property) with every effect animating `target`,
-    // in composite order (§5.4.2: the order their animations were made in), at their animations' current times
-    // (§5.4.4 "the effect value of a keyframe effect").
-    pub(crate) fn compose(&self, target: &Target, underlying: &mut AnimationValueMap) {
-        self.compose_up_to(target, underlying, u64::MAX);
+    // Where two animations sort in composite order (web-animations §5.4.2, css-animations-2 §3.1): the CSS animations
+    // first — by owning element in tree order (`tree_order`), then its pseudo-elements (`::marker`, `::before`, any
+    // other, `::after`), then place in `animation-name` — and every other animation after, in the order it was made
+    // (one whose owner let it go among them).
+    pub(crate) fn composite_order(
+        &self,
+        x: AnimationId,
+        y: AnimationId,
+        tree_order: &impl Fn(NodeId, NodeId) -> Ordering,
+    ) -> Ordering {
+        let owned = |id: AnimationId| {
+            let a = &self.animations[&id];
+            a.css.as_ref().and_then(|css| Some((css.owner.as_ref()?, css.position))).ok_or(a.sequence)
+        };
+        match (owned(x), owned(y)) {
+            (Ok((a, i)), Ok((b, j))) => (if a.node == b.node { Ordering::Equal } else { tree_order(a.node, b.node) })
+                .then_with(|| pseudo_rank(&a.pseudo).cmp(&pseudo_rank(&b.pseudo)))
+                .then_with(|| i.cmp(&j)),
+            (Ok(_), Err(_)) => Ordering::Less,
+            (Err(_), Ok(_)) => Ordering::Greater,
+            (Err(a), Err(b)) => a.cmp(&b),
+        }
     }
 
-    // …those of them made up to animation `sequence` only.
-    fn compose_up_to(&self, target: &Target, underlying: &mut AnimationValueMap, last: u64) {
+    // Composite `underlying` (what the effects below left, keyed by property) with every effect animating `target`,
+    // in composite order, at their animations' current times (§5.4.4 "the effect value of a keyframe effect").
+    pub(crate) fn compose(
+        &self,
+        target: &Target,
+        underlying: &mut AnimationValueMap,
+        tree_order: &impl Fn(NodeId, NodeId) -> Ordering,
+    ) {
+        self.compose_up_to(target, underlying, None, tree_order);
+    }
+
+    // …those of them up to and including animation `last`'s only.
+    fn compose_up_to(
+        &self,
+        target: &Target,
+        underlying: &mut AnimationValueMap,
+        last: Option<AnimationId>,
+        tree_order: &impl Fn(NodeId, NodeId) -> Ordering,
+    ) {
         let Some(effects) = self.by_target.get(&target.node) else { return };
-        let mut ordered: Vec<(u64, &Effect)> = effects
+        let mut ordered: Vec<(AnimationId, &Effect)> = effects
             .iter()
             .filter_map(|id| self.effects.get(id))
             .filter(|e| e.target.as_ref() == Some(target))
-            .filter_map(|e| Some((self.animations.get(&e.animation?)?.sequence, e)))
+            .filter_map(|e| Some((e.animation?, e)))
             .collect();
-        ordered.retain(|(sequence, _)| *sequence <= last);
-        ordered.sort_unstable_by_key(|(sequence, _)| *sequence);
-        for (_, effect) in ordered {
+        ordered.sort_by(|(x, _), (y, _)| self.composite_order(*x, *y, tree_order));
+        if let Some(last) = last {
+            let Some(at) = ordered.iter().position(|(id, _)| *id == last) else { return };
+            ordered.truncate(at + 1);
+        }
+        for (animation, effect) in ordered {
             let Some(computed) = &effect.computed else { continue };
-            let Some(timing) = effect.animation.and_then(|a| {
-                let rate = self.animations[&a].playback_rate;
-                Some(effect.timing.computed(self.current_time(a), rate))
-            }) else {
-                continue;
-            };
+            let rate = self.animations[&animation].playback_rate;
+            let timing = effect.timing.computed(self.current_time(animation), rate);
             let (Some(progress), Some(iteration)) = (timing.progress, timing.current_iteration) else { continue };
             let accumulate = if effect.iteration_composite_accumulate { iteration } else { 0.0 };
+            let implicit_easing = effect.implicit_easing.as_ref();
             for (id, frames, base) in &computed.properties {
                 let below = underlying.get(id).or(base.as_ref());
-                if let Some(value) = compose_property(frames, below, progress, timing.phase, accumulate) {
+                if let Some(value) = compose_property(frames, below, progress, timing.phase, accumulate, implicit_easing) {
                     underlying.insert(id.clone(), value);
                 }
             }
@@ -538,6 +607,8 @@ impl Animations {
                 finished: PromiseState::default(),
                 replace_state: ReplaceState::Active,
                 sequence: self.next_sequence,
+                css: None,
+                handled: true,
             },
         );
         self.set_effect(id, effect);
@@ -622,7 +693,10 @@ impl Animations {
 
     // The effect's local time: the animation's current time (§4.5.1).
     pub(crate) fn computed_timing(&self, effect: EffectId) -> Option<ComputedTiming> {
-        let e = self.effects.get(&effect)?;
+        self.computed_timing_of(self.effects.get(&effect)?)
+    }
+
+    pub(crate) fn computed_timing_of(&self, e: &Effect) -> Option<ComputedTiming> {
         let (local, rate) = match e.animation {
             Some(a) => (self.current_time(a), self.animations[&a].playback_rate),
             None => (None, 1.0),
@@ -802,6 +876,7 @@ impl Animations {
     // `animation.cancel()` (§4.4.13).
     pub(crate) fn cancel(&mut self, id: AnimationId) {
         if self.play_state(id) != PlayState::Idle {
+            self.queue_css_events(id, true);
             self.reset_pending_tasks(id);
             let timeline_time = self.timeline_time_of(&self.animations[&id]);
             let a = self.animations.get_mut(&id).unwrap();
@@ -929,7 +1004,8 @@ impl Animations {
         let finished = self.play_state(id) == PlayState::Finished;
         let a = self.animations.get_mut(&id).unwrap();
         if finished && !a.finished.settled {
-            if synchronously {
+            // (…at once where no handle is to run it: one made later finds the promise as the notification left it.)
+            if synchronously || !a.handled {
                 a.finish_notification_queued = false;
                 self.finish_notification(id);
             } else if !a.finish_notification_queued {
@@ -962,13 +1038,14 @@ impl Animations {
 
     // A frame of the document timeline (§4.2 "update animations and send events", its animation part): the timeline
     // moves to `now`, what was pending becomes ready at that time (§4.4.10 / §4.4.12, the ready time), and each
-    // animation's finished state follows.
+    // animation's finished state follows — and each CSS animation not waiting on a task owes the events of where its
+    // phase moved since the last frame (css-animations-2 §4.2).
     pub(crate) fn tick(&mut self, now: f64) {
         self.set_timeline_time(now);
         let mut ids: Vec<(u64, AnimationId)> = self.animations.iter().map(|(&id, a)| (a.sequence, id)).collect();
         ids.sort_unstable();
-        let ids = ids.into_iter().map(|(_, id)| id);
-        for id in ids {
+        let ids: Vec<AnimationId> = ids.into_iter().map(|(_, id)| id).collect();
+        for &id in &ids {
             let a = &self.animations[&id];
             let pending = a.pending;
             if pending.is_none() && a.start_time.is_none() && a.hold_time.is_none() {
@@ -981,6 +1058,11 @@ impl Animations {
             }
             if pending.is_some() {
                 self.touch(id);
+            }
+        }
+        for id in ids {
+            if self.animations.get(&id).is_some_and(|a| a.css.is_some() && a.pending.is_none()) {
+                self.queue_css_events(id, false);
             }
         }
     }
@@ -1083,21 +1165,71 @@ impl Animations {
         best
     }
 
+    // Is animation `id` one `getAnimations()` reports (§5.3 "relevant")? Not idle, and current or in effect: before its
+    // active interval going forwards (after it going backwards), in it, or filling.
+    pub(crate) fn relevant(&self, id: AnimationId) -> bool {
+        if self.play_state(id) == PlayState::Idle {
+            return false;
+        }
+        let a = &self.animations[&id];
+        let Some(timing) = a.effect.and_then(|e| self.computed_timing(e)) else { return false };
+        let backwards = self.effective_playback_rate(id) < 0.0;
+        timing.progress.is_some()
+            || match timing.phase {
+                Phase::Active => true,
+                Phase::Before => !backwards,
+                Phase::After => backwards,
+                Phase::Idle => false,
+            }
+    }
+
+    // The relevant animations whose effect targets what `targets` accepts, in composite order.
+    pub(crate) fn relevant_animations(
+        &self,
+        targets: impl Fn(&Target) -> bool,
+        tree_order: &impl Fn(NodeId, NodeId) -> Ordering,
+    ) -> Vec<AnimationId> {
+        let mut out: Vec<AnimationId> = self
+            .animations
+            .iter()
+            .filter(|(_, a)| {
+                a.effect.and_then(|e| self.effects.get(&e)).and_then(|e| e.target.as_ref()).is_some_and(&targets)
+            })
+            .map(|(&id, _)| id)
+            .filter(|&id| self.relevant(id))
+            .collect();
+        out.sort_by(|&x, &y| self.composite_order(x, y, tree_order));
+        out
+    }
+
     pub(crate) fn take_signals(&mut self) -> Vec<Signal> {
         std::mem::take(&mut self.signals)
     }
 }
 
+// A pseudo-element's place after its element in composite and event order (css-animations-2 §3.1): `::marker`,
+// `::before`, any other, `::after`.
+pub(crate) fn pseudo_rank(pseudo: &Option<PseudoElement>) -> u8 {
+    match pseudo {
+        None => 0,
+        Some(PseudoElement::Marker) => 1,
+        Some(PseudoElement::Before) => 2,
+        Some(PseudoElement::After) => 4,
+        Some(_) => 3,
+    }
+}
+
 // One property's value at `progress` through an effect's iteration (§5.4.4): between the two keyframes about it — a
-// neutral one standing in at 0 and 1 where the page gave none, whose value is the underlying one — each composited
-// with `underlying` as it says, and `accumulate` iterations of the last keyframe's value added on (an iteration
-// composite of accumulate); None where a value it needs is missing.
+// neutral one standing in at 0 and 1 where the page gave none, whose value is the underlying one (and whose easing
+// out of 0 is `implicit_easing`) — each composited with `underlying` as it says, and `accumulate` iterations of the
+// last keyframe's value added on (an iteration composite of accumulate); None where a value it needs is missing.
 fn compose_property(
     frames: &[ComputedFrame],
     underlying: Option<&AnimationValue>,
     progress: f64,
     phase: Phase,
     accumulate: f64,
+    implicit_easing: Option<&ComputedTimingFunction>,
 ) -> Option<AnimationValue> {
     // (A neutral keyframe is the underlying value composited `add`: the underlying value.)
     let at = |offset: f64| frames.iter().filter(move |f| f.offset == offset);
@@ -1162,7 +1294,11 @@ fn compose_property(
     let (start_offset, end_offset) = (offset_of(&keys[start], start), offset_of(&keys[end], end));
     let distance = if end_offset > start_offset { (progress - start_offset) / (end_offset - start_offset) } else { 0.0 };
     let before_flag = if phase == Phase::Before { BeforeFlag::Set } else { BeforeFlag::Unset };
-    let eased = match keys[start].and_then(|f| f.easing.as_ref()) {
+    let easing = match keys[start] {
+        Some(frame) => frame.easing.as_ref(),
+        None => implicit_easing,
+    };
+    let eased = match easing {
         Some(easing) => easing.calculate_output(distance, before_flag, 1e-7),
         None => distance,
     };

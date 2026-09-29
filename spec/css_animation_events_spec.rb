@@ -235,8 +235,9 @@ RSpec.describe 'CSS animation and transition events' do
       sheet.insertRule('@keyframes shrink { from { flex-grow: 4 } to { flex-grow: 0 } }', sheet.cssRules.length);
       document.getElementById('a').style.animation = 'shrink 300ms linear';
     JS
-    types = drain(s, 2).map {|e| e.split(':').first }
-    expect(types.index('animationcancel')).to be < types.index('animationstart')
+    log = drain(s, 2)
+    # (…whenever the replaced one started: its start is the frame after the style that made it.)
+    expect(log.index { _1.start_with?('animationcancel:grow') }).to be < log.index { _1.start_with?('animationstart:shrink') }
   end
 
   # The event interfaces themselves: readonly attributes, a required `type`, and the WebIDL

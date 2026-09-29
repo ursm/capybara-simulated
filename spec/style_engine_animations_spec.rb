@@ -3,9 +3,9 @@
 require 'capybara/simulated'
 require_relative 'support/session_teardown'
 
-# CSS animations and transitions in the style engine: stylo's model runs them, the page's clock moves them (an
-# animation-only restyle each time it does), and a rendering update fires the events the phases they moved through
-# since the last one owe. Each example drives the clock the way a page does — a pending interval keeps it stepping,
+# CSS animations and transitions in the style engine: the engine's Web Animations model runs the animations (and
+# stylo's own model the transitions), the page's clock moves them (an animation-only restyle each time it does), and
+# a rendering update fires the events the phases they moved through owe. Each example drives the clock the way a page does — a pending interval keeps it stepping,
 # and every script evaluation is a step — with CSIM_STYLE_VERIFY holding each incremental restyle against a full one.
 RSpec.describe 'style engine animations' do
   around do |example|
@@ -279,12 +279,22 @@ RSpec.describe 'style engine animations' do
     expect(reads).not_to include('1')
   end
 
-  # …and so is the end of a delay.
+  # …and so is the end of a delay: the underlying value before it, the first keyframe from it on. (A CSS animation
+  # starts pending — its start time is the frame it becomes ready in — so each read says where it is.)
   it 'reads the first keyframe where a delay ends' do
     s = page('<div id="a"></div>', '@keyframes half { from { opacity: 0.5 } to { opacity: 0.9 } }')
     s.execute_script("document.getElementById('a').style.animation = 'half 1s linear 200ms'")
-    reads = 4.times.map { s.evaluate_script("getComputedStyle(document.getElementById('a')).opacity") }
-    expect(reads.drop(1)).not_to include("1")
+    reads = 5.times.map {
+      s.evaluate_script(<<~JS)
+        (() => {
+          const a = document.getElementById('a');
+          const opacity = getComputedStyle(a).opacity;
+          return [a.getAnimations()[0].currentTime, opacity];
+        })()
+      JS
+    }
+    expect(reads.select {|time, _| time < 200 }.map(&:last).uniq).to eq(['1'])
+    expect(reads.find {|time, _| time == 200 }&.last).to eq('0.5')
   end
 
   # A reversed transition that started part way (a negative delay) is held against a full restyle that knows only
@@ -526,5 +536,124 @@ RSpec.describe 'style engine animations' do
     JS
     drain(s, 2)
     expect(s.evaluate_script('window.same')).to be(true)
+  end
+
+  # ── CSS animations as the model's own objects ──
+  # A CSS animation is a `CSSAnimation` a page can hold: the same object each time it asks, naming its rule, its
+  # effect targeting the element with the timing and keyframes the style gives it.
+  it 'is a CSSAnimation the page can hold' do
+    s = page('<div id="a" style="animation: fade 100s linear 2s"></div>')
+    read = s.evaluate_script(<<~JS)
+      (() => {
+        const a = document.getElementById('a');
+        const [anim] = a.getAnimations();
+        const timing = anim.effect.getTiming();
+        return [anim instanceof CSSAnimation, anim === a.getAnimations()[0], anim.animationName, anim.effect.target === a,
+                timing.duration, timing.delay, anim.effect.getKeyframes().map((k) => k.opacity).join(),
+                document.getAnimations().length];
+      })()
+    JS
+    expect(read).to eq([true, true, 'fade', true, 100_000, 2000, '1,0', 1])
+  end
+
+  # A script that plays or pauses one takes its play state from the style (css-animations-2 §4.1): the style flipping
+  # `animation-play-state` after a `play()` pauses nothing.
+  it 'takes the play state from a script that played it' do
+    s = page('<div id="a" style="animation: fade 100s paused"></div>')
+    read = s.evaluate_script(<<~JS)
+      (() => {
+        const a = document.getElementById('a');
+        const [anim] = a.getAnimations();
+        const before = anim.playState;
+        anim.play();
+        a.style.animationPlayState = 'running';
+        getComputedStyle(a).opacity;
+        a.style.animationPlayState = 'paused';
+        getComputedStyle(a).opacity;
+        return [before, anim.playState];
+      })()
+    JS
+    expect(read).to eq(%w[paused running])
+  end
+
+  # A keyframe that declares no `animation-composition` takes the effect's, which is the element's: `auto`.
+  it "leaves a keyframe's composite to the effect" do
+    s = page('<div id="a" style="animation: fade 100s; animation-composition: add"></div>')
+    read = s.evaluate_script(<<~JS)
+      (() => {
+        const [anim] = document.getElementById('a').getAnimations();
+        return anim.effect.getKeyframes().map((k) => k.composite);
+      })()
+    JS
+    expect(read).to eq(%w[auto auto])
+  end
+
+  # Events are owed for where the phase moved from one frame to the next (css-animations-2 §4.2): a seek into the
+  # active interval and back within one task owes none.
+  it 'owes no events for a phase left and returned to between frames' do
+    s = page('<div id="a" style="animation: fade 1s 10s"></div>')
+    drain(s, 2)
+    s.execute_script(<<~JS)
+      window.log = [];
+      const [anim] = document.getElementById('a').getAnimations();
+      anim.currentTime = 10500;
+      anim.currentTime = 0;
+    JS
+    expect(drain(s, 2)).to eq([])
+  end
+
+  # ── What the engine computes of a keyframe ──
+  # `display` animates to or from `none` holding the other value in between (css-display-4 §2.9).
+  it 'holds the value that is not none between the ends of a display animation' do
+    s = page('<div id="a"></div><div id="b"></div>')
+    read = s.evaluate_script(<<~JS)
+      (() => {
+        const at = (el, frames, time) => {
+          const anim = el.animate({display: frames}, {duration: 1000, fill: 'forwards'});
+          anim.pause();
+          anim.currentTime = time;
+          return getComputedStyle(el).display;
+        };
+        return [at(a, ['block', 'none'], 900), at(b, ['none', 'block'], 100)];
+      })()
+    JS
+    expect(read).to eq(%w[block block])
+  end
+
+  # In one keyframe, a physical property wins over the logical one it maps to whatever order the page wrote them in
+  # (a script's keyframe), and the one declared last wins in `@keyframes` (a rule's).
+  it 'settles a physical property and its logical twin in one keyframe' do
+    s = page('<div id="a"></div><div id="b" style="animation: logical 100s -50s paused"></div>',
+             '@keyframes logical { from { margin-left: 10px; margin-inline-start: 20px } to { margin-left: 10px; margin-inline-start: 20px } }')
+    # (Half way, where a keyframe keeping both would ease from one to the other.)
+    read = s.evaluate_script(<<~JS)
+      (() => {
+        const a = document.getElementById('a');
+        const anim = a.animate({marginInlineStart: ['30px', '30px'], marginLeft: ['40px', '40px']}, 1000);
+        anim.pause();
+        anim.currentTime = 500;
+        return [getComputedStyle(a).marginLeft, getComputedStyle(document.getElementById('b')).marginLeft];
+      })()
+    JS
+    expect(read).to eq(%w[40px 20px])
+  end
+
+  # Two transform lists whose matrices cannot both be decomposed flip half way (css-transforms-2 §10), and the value
+  # is a matrix a page can read — not a function kept for layout to resolve.
+  it 'flips a transform whose matrix cannot be decomposed' do
+    s = page('<div id="a"></div><div id="b"></div>')
+    read = s.evaluate_script(<<~JS)
+      (() => {
+        const at = (el, time) => {
+          const anim = el.animate({transform: ['matrix3d(2, 0, 0, 0, 0, 2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1)', 'matrix(3, 0, 0, 3, 0, 0)']},
+                                  {duration: 1000, fill: 'forwards'});
+          anim.pause();
+          anim.currentTime = time;
+          return getComputedStyle(el).transform;
+        };
+        return [at(a, 300), at(b, 600)];
+      })()
+    JS
+    expect(read).to eq(['matrix3d(2, 0, 0, 0, 0, 2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1)', 'matrix(3, 0, 0, 3, 0, 0)'])
   end
 end

@@ -43,6 +43,7 @@ web_atoms = "0.2"
 euclid = "0.22"
 app_units = "0.7"
 url = "2.5"
+bitflags = "2"
 
 # An `<input>`'s `pattern` is an ECMAScript regular expression (compiled with the `v` flag): regress is a JS-syntax
 # engine in pure Rust (Boa's), matched over UTF-16 as a page's string is (validity.rs).

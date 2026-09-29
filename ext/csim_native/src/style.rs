@@ -17,7 +17,7 @@ use style::applicable_declarations::ApplicableDeclarationBlock;
 use style::bloom::each_relevant_element_hash;
 use style::context::{
     QuirksMode, RegisteredSpeculativePainter, RegisteredSpeculativePainters, SharedStyleContext, StyleContext,
-    CascadeInputs, ThreadLocalStyleContext, TreeCountingCaches,
+    CascadeInputs, ThreadLocalStyleContext, TreeCountingCaches, UpdateAnimationsTasks,
 };
 use style::data::{ElementDataMut, ElementDataRef, ElementDataWrapper};
 use style::dom::{DummyElementContext, LayoutIterator, NodeInfo, OpaqueNode, TDocument, TElement, TNode, TShadowRoot};
@@ -28,17 +28,17 @@ use style::invalidation::element::restyle_hints::RestyleHint;
 use style::parser::ParserContext;
 use style::properties::animated_properties::AnimationValue;
 use style::properties::{
-    parse_one_declaration_into, parse_property_declaration_list, parse_style_attribute, ComputedValues, LonghandId,
+    parse_one_declaration_into, parse_property_declaration_list, parse_style_attribute, AnimationDeclarations,
+    ComputedValues, LonghandId,
     PropertyDeclarationBlock, PropertyDeclarationId, PropertyId, ShorthandId, SourcePropertyDeclaration, StyleBuilder,
 };
 use style::rule_cache::RuleCacheConditions;
 use style::parser::Parse;
 use style::values::computed::easing::ComputedTimingFunction;
-use style::values::computed::ToComputedValue;
 use style::values::generics::easing::TimingKeyword;
 use style::values::specified::easing::TimingFunction as SpecifiedTimingFunction;
 use style::rule_tree::RuleCascadeFlags;
-use style::style_resolver::{PseudoElementResolution, StyleResolverForElement};
+use style::style_resolver::{PrimaryStyle, PseudoElementResolution, ResolvedStyle, StyleResolverForElement};
 use style::stylesheets::container_rule::ContainerSizeQuery;
 use style::values::computed::Context;
 use style::rule_tree::{CascadeLevel, CascadeOrigin};
@@ -46,6 +46,8 @@ use style::stylesheets::layer_rule::LayerOrder;
 use style::selector_parser::SnapshotMap;
 use style::servo::attr::{AttrIdentifier, AttrValue as SnapshotValue};
 use style::stylesheets::import_rule::{ImportLayer, ImportSheet, ImportSupportsCondition};
+use style::stylesheets::keyframes_rule::KeyframesStepValue;
+use style::values::specified::animation::{AnimationComposition, AnimationDirection, AnimationFillMode, AnimationPlayState};
 use style::stylesheets::{ImportRule, OriginSet, StylesheetLoader};
 use style::values::CssUrl;
 use cssparser::{Parser, ParserInput, SourceLocation};
@@ -56,9 +58,7 @@ use style::servo_arc::{Arc, ArcBorrow};
 use style::shared_lock::{Locked, SharedRwLock, StylesheetGuards};
 use style::stylesheets::scope_rule::ImplicitScopeRoot;
 use style::stylesheets::{AllowImportRules, CssRuleType, DocumentStyleSheet, Origin, Stylesheet, UrlExtraData};
-use style::animation::{
-    Animation, AnimationSetKey, AnimationState, DocumentAnimationSet, ElementAnimationSet, KeyframesIterationState, Transition,
-};
+use style::animation::{AnimationSetKey, AnimationState, DocumentAnimationSet, ElementAnimationSet, Transition};
 use style::author_styles::AuthorStyles;
 use style::stylist::{RuleInclusion, Stylist};
 use style::traversal::{recalc_style_at, DomTraversal, PerLevelTraversalData};
@@ -69,6 +69,7 @@ use stylo_dom::ElementState;
 use web_atoms::{local_name, ns, LocalNameStaticSet, Namespace, NamespaceStaticSet};
 
 use crate::animations as waapi;
+use crate::css_animations::CssAnimationStyle;
 use crate::dom::{NodeId, NodeKind, RealmArena};
 
 
@@ -199,19 +200,19 @@ pub(crate) struct StyleEngine {
     // and each element whose values differ is reported here (`take_verify_failures`).
     verify: bool,
     verify_failures: Vec<String>,
-    // The document's CSS animations and transitions, which the traversal starts, updates and cancels as styles
-    // change (stylo's own model); the animation clock as of the last flush (seconds); and where each stood at the
-    // last rendering update and stands now, which the events that update owes are the difference of
-    // (`take_animation_events`).
+    // The document's CSS transitions, which the traversal starts, updates and cancels as styles change (stylo's own
+    // model); the animation clock as of the last flush (seconds); and where each stood at the last rendering update
+    // and stands now, which the events that update owes are the difference of (`take_animation_events`).
     animations: DocumentAnimationSet,
     now: f64,
-    updated_phases: std::collections::HashMap<AnimationId, (Phase, f64)>,
-    phases: std::collections::HashMap<AnimationId, Observed>,
-    generations: std::collections::HashMap<(AnimationSetKey, AnimationKind, String), u32>,
-    // The Web Animations model: every script-made animation and effect, composited over the CSS ones; and the
-    // elements it animates that a normal traversal restyled, whose keyframes are computed again after it.
+    updated_phases: std::collections::HashMap<TransitionId, Phase>,
+    phases: std::collections::HashMap<TransitionId, Observed>,
+    generations: std::collections::HashMap<(AnimationSetKey, String), u32>,
+    // The Web Animations model: every animation on the page — a script's, and the CSS animations style makes — and
+    // what the traversal left it to do, as Gecko's does: the elements (and pseudo-elements) whose CSS animations
+    // their new style is to update, and whose keyframes are to be computed again (`update_animations`).
     pub(crate) web_animations: waapi::Animations,
-    restyled_targets: RefCell<Vec<NodeId>>,
+    animation_tasks: RefCell<Vec<(NodeId, Option<PseudoElement>, UpdateAnimationsTasks)>>,
     // A change hook panicked (a bug): what the engine holds may be half-updated, so the next style op throws it and
     // everything it styled away (`poisoned`).
     poisoned: bool,
@@ -386,7 +387,7 @@ impl StyleEngine {
             phases: std::collections::HashMap::new(),
             generations: std::collections::HashMap::new(),
             web_animations: waapi::Animations::default(),
-            restyled_targets: RefCell::new(Vec::new()),
+            animation_tasks: RefCell::new(Vec::new()),
         };
         let ua = engine.parse(UA_SHEET, engine.url.clone(), "", Origin::UserAgent, AllowImportRules::No, Vec::new());
         engine.stylist.append_stylesheet(ua, &engine.lock.read());
@@ -453,7 +454,7 @@ impl StyleEngine {
         self.phases.clear();
         self.generations.clear();
         self.web_animations = waapi::Animations::default();
-        self.restyled_targets.borrow_mut().clear();
+        self.animation_tasks.borrow_mut().clear();
         self.snapshots.clear();
         self.pending.borrow_mut().clear();
         self.shadow_styles.clear();
@@ -774,8 +775,10 @@ impl StyleEngine {
             (key.clone(), set)
         }));
         let animations = std::mem::replace(&mut self.animations, copy);
+        let tasks = std::mem::take(&mut *self.animation_tasks.borrow_mut());
         self.traverse(arena, doc, true, TraversalFlags::empty());
         self.animations = animations;
+        *self.animation_tasks.borrow_mut() = tasks;
         let after: std::collections::HashMap<NodeId, Vec<String>> = values(arena).into_iter().collect();
         let names: Vec<LonghandId> =
             ShorthandId::All.longhands().chain([LonghandId::Direction, LonghandId::UnicodeBidi]).collect();
@@ -1090,27 +1093,108 @@ impl StyleEngine {
         // traversal's before-change and after-change styles hold, so an animation starting starts no transition.)
         self.compute_effects(arena);
         self.ensure_styled(arena);
+        self.update_animations(arena);
         self.compute_effects(arena);
-        self.note_animation_phases(arena);
+        self.note_transition_phases(arena);
     }
 
-    // What `commitStyles()` writes for animation `id`: the Web Animations model's stack over the CSS animations'.
-    pub(crate) fn committed_values(&self, id: waapi::AnimationId) -> Vec<AnimationValue> {
-        let target = self
-            .web_animations
-            .animations
-            .get(&id)
-            .and_then(|a| a.effect)
-            .and_then(|e| self.web_animations.effects.get(&e))
-            .and_then(|e| e.target.clone());
-        let css = target
-            .filter(|t| t.pseudo.is_none())
-            .and_then(|t| {
-                let key = AnimationSetKey::new_for_non_pseudo(OpaqueNode(opaque_bits(t.node)));
-                self.animations.sets.read().get(&key).and_then(|set| set.get_value_map_for_active_animations(self.now))
+    // What `commitStyles()` writes for animation `id`: the model's effect stack up to it.
+    pub(crate) fn committed_values(&self, arena: &RealmArena, id: waapi::AnimationId) -> Vec<AnimationValue> {
+        self.web_animations.committed_values(id, Default::default(), &|a, b| tree_order(arena, a, b))
+    }
+
+    // What `getAnimations()` reports: the relevant animations targeting `element` itself (not its pseudo-elements), or
+    // anything in the document where there is no element — in composite order.
+    pub(crate) fn relevant_animations(&self, arena: &RealmArena, element: Option<NodeId>) -> Vec<waapi::AnimationId> {
+        let order = |a, b| tree_order(arena, a, b);
+        match (element, self.doc) {
+            (Some(el), _) => self.web_animations.relevant_animations(|t| t.node == el && t.pseudo.is_none(), &order),
+            (None, Some(doc)) => {
+                self.web_animations.relevant_animations(|t| arena.is_inclusive_ancestor(doc, t.node), &order)
+            },
+            (None, None) => Vec::new(),
+        }
+    }
+
+    // The properties the animations on `element` itself set, as their keyframes declare them (a shorthand expanded)
+    // and under the names of the shorthands those are part of — what the JS side's cascade and layout ask of an
+    // animated element, until they read the engine's styles (and whose longhand can be the engine's shorthand:
+    // `white-space`, `vertical-align`).
+    pub(crate) fn animated_properties(&self, element: NodeId) -> Vec<String> {
+        let guard = self.lock.read();
+        let mut out: Vec<String> = Vec::new();
+        for effect in self.effects_on(element) {
+            for keyframe in &effect.keyframes {
+                for declaration in keyframe.block.read_with(&guard).declarations() {
+                    for name in names_of(declaration.id()) {
+                        if !out.iter().any(|n| *n == name) {
+                            out.push(name.into_owned());
+                        }
+                    }
+                }
+            }
+        }
+        out
+    }
+
+    // Whether an animation on `element` itself that sets one of `properties` is relevant (current, or in effect), and
+    // whether one is in effect.
+    pub(crate) fn animation_activity(&self, element: NodeId, properties: &[String]) -> (bool, bool) {
+        let model = &self.web_animations;
+        let guard = self.lock.read();
+        let (mut relevant, mut in_effect) = (false, false);
+        for effect in self.effects_on(element) {
+            let sets = effect.keyframes.iter().any(|k| {
+                k.block
+                    .read_with(&guard)
+                    .declarations()
+                    .iter()
+                    .any(|d| names_of(d.id()).any(|name| properties.iter().any(|p| *p == name)))
+            });
+            let Some(animation) = effect.animation.filter(|_| sets) else { continue };
+            relevant |= model.relevant(animation);
+            in_effect |= model.computed_timing_of(effect).is_some_and(|t| t.progress.is_some());
+        }
+        (relevant, in_effect)
+    }
+
+    // The effects played by an animation that target `element` itself.
+    fn effects_on(&self, element: NodeId) -> impl Iterator<Item = &waapi::Effect> {
+        self.web_animations.effects.values().filter(move |e| {
+            e.animation.is_some() && e.target.as_ref().is_some_and(|t| t.node == element && t.pseudo.is_none())
+        })
+    }
+
+    // An effect's keyframes as `getKeyframes()` reports them: each one's offset, easing and composite (None: the
+    // effect's), and its declarations serialized.
+    #[allow(clippy::type_complexity)]
+    pub(crate) fn keyframes_text(&self, effect: waapi::EffectId) -> Vec<(f64, String, Option<&'static str>, Vec<(String, String)>)> {
+        let Some(effect) = self.web_animations.effects.get(&effect) else { return Vec::new() };
+        let guard = self.lock.read();
+        effect
+            .keyframes
+            .iter()
+            .map(|k| {
+                let easing = k.easing.as_ref().map_or_else(|| "linear".to_owned(), style_traits::ToCss::to_css_string);
+                let composite = k.composite.map(|c| match c {
+                    waapi::CompositeOperation::Replace => "replace",
+                    waapi::CompositeOperation::Add => "add",
+                    waapi::CompositeOperation::Accumulate => "accumulate",
+                });
+                let declarations = k
+                    .block
+                    .read_with(&guard)
+                    .declarations()
+                    .iter()
+                    .map(|d| {
+                        let mut value = String::new();
+                        let _ = d.to_css(&mut value);
+                        (d.id().name().to_string(), value)
+                    })
+                    .collect();
+                (k.offset, easing, composite, declarations)
             })
-            .unwrap_or_default();
-        self.web_animations.committed_values(id, css)
+            .collect()
     }
 
     // A Web Animations op (`element.animate`, `play()`, a seek…): whatever it did, the next read styles again.
@@ -1166,12 +1250,22 @@ impl StyleEngine {
 
     // A keyframe's declarations, as `element.animate` gives them (property, value): each parsed as an author
     // declaration, a shorthand into its longhands, and one that does not parse left out (the JS side validated the
-    // keyframes' shape, not their values).
+    // keyframes' shape, not their values). Whatever order the page wrote them in, a longhand wins over a shorthand
+    // that sets it, a physical property over a logical one, and a shorthand of fewer longhands over one of more
+    // (web-animations §5.3.3 "computing property values"; css-logical §4): they are taken in that order, the last
+    // one taken winning.
     pub(crate) fn keyframe_block(&self, declarations: &[(String, String)]) -> Arc<Locked<PropertyDeclarationBlock>> {
+        let mut ordered: Vec<(PropertyId, &str)> = declarations
+            .iter()
+            .filter_map(|(name, value)| Some((PropertyId::parse_enabled_for_all_content(name).ok()?, value.as_str())))
+            .collect();
+        ordered.sort_by_key(|(id, _)| match id.as_shorthand() {
+            Ok(shorthand) => (0, !shorthand.longhands().any(|l| l.is_logical()), usize::MAX - shorthand.longhands().count()),
+            Err(longhand) => (1, longhand.as_longhand().is_some_and(|l| !l.is_logical()), 0),
+        });
         let mut block = PropertyDeclarationBlock::new();
         let mut parsed = SourcePropertyDeclaration::default();
-        for (name, value) in declarations {
-            let Ok(id) = PropertyId::parse_enabled_for_all_content(name) else { continue };
+        for (id, value) in ordered {
             let ok = parse_one_declaration_into(
                 &mut parsed,
                 id,
@@ -1192,7 +1286,7 @@ impl StyleEngine {
 
     // The style `id` has without its animations and transitions — its base style (web-animations §5.4.1), which a
     // neutral keyframe and a composite other than `replace` stand on.
-    fn base_style(&self, arena: &RealmArena, id: NodeId, style: &Arc<ComputedValues>) -> Arc<ComputedValues> {
+    fn base_style(&self, arena: &RealmArena, target: &waapi::Target, style: &Arc<ComputedValues>) -> Arc<ComputedValues> {
         let rules = style.rules();
         let base_rules = self.stylist.rule_tree().remove_animation_rules(rules);
         if base_rules == *rules {
@@ -1219,30 +1313,35 @@ impl StyleEngine {
                 flags: style.flags.for_cascade_inputs(),
                 included_cascade_flags: RuleCascadeFlags::empty(),
             };
-            StyleResolverForElement::new(
-                StyleNode::new(arena, id),
+            let mut resolver = StyleResolverForElement::new(
+                StyleNode::new(arena, target.node),
                 &mut context,
                 RuleInclusion::All,
                 PseudoElementResolution::IfApplicable,
-            )
-            .cascade_style_and_visited_with_default_parents(inputs)
-            .0
+            );
+            match (&target.pseudo, primary_style(arena, target.node)) {
+                (Some(pseudo), Some(originating)) => {
+                    let originating = PrimaryStyle { style: ResolvedStyle(originating), reused_via_rule_node: false };
+                    resolver.cascade_style_and_visited_for_pseudo_with_default_parents(inputs, pseudo, &originating).0
+                },
+                _ => resolver.cascade_style_and_visited_with_default_parents(inputs).0,
+            }
         })
     }
 
     // An effect's keyframes as values of its target (web-animations §5.3.3 "computing property values"): computed
-    // in the target's base style, with its parent's to inherit from; None while the target has no style, and none at
-    // all for a pseudo-element (which the engine does not animate yet).
+    // in the target's base style, with its parent's to inherit from — a pseudo-element's parent being its originating
+    // element; None while the target has no style.
     fn compute_keyframes(&self, arena: &RealmArena, effect: &waapi::Effect) -> Option<waapi::ComputedKeyframes> {
         let target = effect.target.as_ref()?;
-        if target.pseudo.is_some() {
-            return Some(waapi::ComputedKeyframes::default());
-        }
-        let style = primary_style(arena, target.node)?;
-        let base = self.base_style(arena, target.node, &style);
-        let parent = in_arena(arena, self, || {
-            StyleNode::new(arena, target.node).inheritance_parent().and_then(|p| primary_style(arena, p.id))
-        });
+        let style = target_style(arena, target)?;
+        let base = self.base_style(arena, target, &style);
+        let parent = match target.pseudo {
+            Some(_) => primary_style(arena, target.node),
+            None => in_arena(arena, self, || {
+                StyleNode::new(arena, target.node).inheritance_parent().and_then(|p| primary_style(arena, p.id))
+            }),
+        };
         let guard = self.lock.read();
         let device = self.stylist.device();
         let builder = StyleBuilder::for_derived_style(device, Some(&self.stylist), &base, parent.as_deref());
@@ -1259,7 +1358,14 @@ impl StyleEngine {
         let mut computed = waapi::ComputedKeyframes::default();
         for keyframe in &effect.keyframes {
             let block = keyframe.block.read_with(&guard);
+            // (Each value is of the physical property the target's writing mode maps it to: one keyframe that sets a
+            // property twice — logical and physical — sets it to the value declared last.)
+            let mut values: Vec<AnimationValue> = Vec::new();
             for value in block.to_animation_value_iter(&mut context, &base, device.default_computed_values()) {
+                values.retain(|v| v.id() != value.id());
+                values.push(value);
+            }
+            for value in values {
                 let id = value.id().to_owned();
                 let frame = waapi::ComputedFrame {
                     offset: keyframe.offset,
@@ -1281,10 +1387,8 @@ impl StyleEngine {
 
     // Every effect whose keyframes are not computed for its target yet (new, changed, or its target restyled) is
     // computed now its target is styled, and its target's animated values composed again.
+    // (…and every one whose animations changed otherwise, as an op or a style made them.)
     fn compute_effects(&mut self, arena: &RealmArena) {
-        for node in std::mem::take(&mut *self.restyled_targets.borrow_mut()) {
-            self.web_animations.target_restyled(node);
-        }
         let stale: Vec<waapi::EffectId> = self
             .web_animations
             .effects
@@ -1292,7 +1396,7 @@ impl StyleEngine {
             .filter(|(_, e)| e.computed.is_none() && e.target.is_some())
             .map(|(&id, _)| id)
             .collect();
-        let mut restyle = Vec::new();
+        let mut restyle = self.web_animations.take_targets_to_restyle();
         for id in stale {
             let computed = self.compute_keyframes(arena, &self.web_animations.effects[&id]);
             let effect = self.web_animations.effects.get_mut(&id).unwrap();
@@ -1313,85 +1417,214 @@ impl StyleEngine {
         self.traverse(arena, doc, false, TraversalFlags::AnimationOnly);
     }
 
-    // A rendering update's events: what each animation and transition moved through since the last one — its phase
-    // then against its phase now, as CSS Animations 2 §4.2 and CSS Transitions 2 §6.1 tabulate them — in the order
-    // they were due, and those due together in composite order: transitions before animations, then by owning element
-    // in tree order, pseudo-element and position.
+    // What the traversal left the animations to do (`StyleNode::update_animations`, Gecko's `UpdateAnimations` tasks):
+    // the CSS animations of each element (or pseudo-element) whose new style may change them are built from it, and
+    // the keyframes of each one restyled are computed again. A CSS animation whose owner is no longer rendered —
+    // `display: none` on an ancestor, which leaves the owner's style as it was, or gone from the document — is
+    // canceled as though its style had listed none.
+    fn update_animations(&mut self, arena: &RealmArena) {
+        let tasks = std::mem::take(&mut *self.animation_tasks.borrow_mut());
+        for (node, pseudo, tasks) in tasks {
+            let target = waapi::Target { node, pseudo };
+            if tasks.contains(UpdateAnimationsTasks::CSS_ANIMATIONS) {
+                let styles = self.css_animation_styles(arena, &target);
+                self.web_animations.update_css_animations(&target, styles);
+            }
+            if tasks.contains(UpdateAnimationsTasks::EFFECT_PROPERTIES) {
+                self.web_animations.target_restyled(node);
+            }
+        }
+        let unrendered: Vec<waapi::AnimationId> = self
+            .web_animations
+            .animations
+            .iter()
+            .filter_map(|(&id, a)| {
+                let owner = a.css.as_ref()?.owner.as_ref()?;
+                (!target_style(arena, owner).is_some_and(|s| !s.get_box().clone_display().is_none())).then_some(id)
+            })
+            .collect();
+        for id in unrendered {
+            self.web_animations.cancel_from_style(id);
+        }
+    }
+
+    // What `target`'s style says of its CSS animations (css-animations-1 §3): one for each `animation-name` a
+    // `@keyframes` rule in its scope names, in `animation-name` order, the other `animation-*` lists repeating to its
+    // length. Each keyframe eases to the next by the `animation-timing-function` it declares, else the animation's,
+    // and composites by the `animation-composition` it declares, else the effect's — the animation's; the effect
+    // itself is linear. None where the target is not rendered.
+    fn css_animation_styles(&self, arena: &RealmArena, target: &waapi::Target) -> Vec<CssAnimationStyle> {
+        let Some(style) = target_style(arena, target).filter(|s| !s.get_box().clone_display().is_none()) else {
+            return Vec::new();
+        };
+        let ui = style.get_ui();
+        let guard = self.lock.read();
+        in_arena(arena, self, || {
+            let element = StyleNode::new(arena, target.node);
+            ui.animation_name_iter()
+                .enumerate()
+                .filter_map(|(i, name)| {
+                    let name = name.as_atom()?;
+                    let rule = self.stylist.lookup_keyframes(name, element)?;
+                    let easing = ui.animation_timing_function_mod(i);
+                    let composite = composite_of(ui.animation_composition_mod(i));
+                    let keyframes = rule
+                        .steps
+                        .iter()
+                        .filter_map(|step| {
+                            let KeyframesStepValue::Declarations { block } = &step.value else { return None };
+                            let declared_easing = step.get_animation_timing_function(&guard);
+                            let declared_composite = step.get_animation_composition(&guard);
+                            Some(waapi::Keyframe {
+                                offset: step.start_offset.percentage.0 as f64,
+                                easing: Some(declared_easing.map_or(easing.clone(), |e| e.to_computed_value_without_context())),
+                                composite: declared_composite.map(composite_of),
+                                block: block.clone(),
+                            })
+                        })
+                        .collect();
+                    let timing = waapi::EffectTiming {
+                        delay: to_milliseconds(ui.animation_delay_mod(i).seconds()),
+                        duration: to_milliseconds(ui.animation_duration_mod(i).seconds()),
+                        iterations: ui.animation_iteration_count_mod(i).0 as f64,
+                        direction: match ui.animation_direction_mod(i) {
+                            AnimationDirection::Normal => waapi::PlaybackDirection::Normal,
+                            AnimationDirection::Reverse => waapi::PlaybackDirection::Reverse,
+                            AnimationDirection::Alternate => waapi::PlaybackDirection::Alternate,
+                            AnimationDirection::AlternateReverse => waapi::PlaybackDirection::AlternateReverse,
+                        },
+                        fill: match ui.animation_fill_mode_mod(i) {
+                            AnimationFillMode::None => waapi::FillMode::None,
+                            AnimationFillMode::Forwards => waapi::FillMode::Forwards,
+                            AnimationFillMode::Backwards => waapi::FillMode::Backwards,
+                            AnimationFillMode::Both => waapi::FillMode::Both,
+                        },
+                        ..waapi::EffectTiming::default()
+                    };
+                    Some(CssAnimationStyle {
+                        name: name.to_string(),
+                        timing,
+                        keyframes,
+                        implicit_easing: easing,
+                        composite,
+                        paused: ui.animation_play_state_mod(i) == AnimationPlayState::Paused,
+                    })
+                })
+                .collect()
+        })
+    }
+
+    // A rendering update's events, in the order they were due and those due together in composite order:
+    // transitions before animations, then by owning element in tree order, pseudo-element, and place in
+    // `animation-name` (a transition by property, and what a new one replaced before it). A transition's are what it
+    // moved through since the last update — its phase then against its phase now, as CSS Transitions 2 §6.1
+    // tabulates them; an animation's are what the model queued as its phase moved (CSS Animations 2 §4.2).
     pub(crate) fn take_animation_events(&mut self, arena: &RealmArena) -> Vec<AnimationEvent> {
+        struct Due {
+            time: f64,
+            animation: bool,
+            node: NodeId,
+            pseudo_rank: u8,
+            position: usize,
+            generation: u32,
+            event: AnimationEvent,
+        }
         let mut events = Vec::new();
         for (id, now) in &self.phases {
-            let (was, was_iteration) = self.updated_phases.get(id).copied().unwrap_or((Phase::Idle, 0.0));
-            let moved = match id.kind {
-                AnimationKind::Transition => transition_events(was, now.phase, now.interval, now.active),
-                AnimationKind::Animation => animation_events(
-                    was,
-                    now.phase,
-                    was_iteration != now.iteration,
-                    now.iteration_start,
-                    now.interval,
-                    now.active,
-                ),
-            };
-            for (kind, elapsed) in moved {
-                let scheduled = to_microseconds(now.scheduled(kind, elapsed));
-                let elapsed = to_microseconds(elapsed);
-                events.push((scheduled, id, now, AnimationEvent { kind, node: now.node, pseudo: now.pseudo, name: id.name.clone(), elapsed }));
+            let was = self.updated_phases.get(id).copied().unwrap_or(Phase::Idle);
+            for (kind, elapsed) in transition_events(was, now.phase, now.interval, now.active) {
+                events.push(Due {
+                    time: to_microseconds(now.scheduled(kind, elapsed)),
+                    animation: false,
+                    node: now.node,
+                    pseudo_rank: now.pseudo_rank,
+                    position: 0,
+                    generation: id.generation,
+                    event: AnimationEvent {
+                        kind,
+                        node: now.node,
+                        pseudo: now.pseudo,
+                        name: id.name.clone(),
+                        elapsed: to_microseconds(elapsed),
+                        animation: None,
+                    },
+                });
             }
+        }
+        for e in self.web_animations.take_css_events() {
+            events.push(Due {
+                time: to_microseconds(e.scheduled / 1000.0),
+                animation: true,
+                node: e.owner.node,
+                pseudo_rank: waapi::pseudo_rank(&e.owner.pseudo),
+                position: e.position,
+                generation: 0,
+                event: AnimationEvent {
+                    kind: e.kind,
+                    node: e.owner.node,
+                    pseudo: e.owner.pseudo.as_ref().and_then(pseudo_name),
+                    name: e.name,
+                    elapsed: to_microseconds(e.elapsed),
+                    animation: Some(e.animation),
+                },
+            });
         }
         if events.len() > 1 {
             let mut paths = std::collections::HashMap::new();
-            for (_, _, now, _) in &events {
-                paths.entry(now.node).or_insert_with(|| tree_path(arena, now.node));
+            for due in &events {
+                paths.entry(due.node).or_insert_with(|| tree_path(arena, due.node));
             }
-            // (…and what a new one replaced before it. Stable: one animation's events keep the order its phases moved
-            // in.)
-            events.sort_by(|(time_a, a, now_a, _), (time_b, b, now_b, _)| {
-                time_a.total_cmp(time_b).then_with(|| {
-                    (a.kind, &paths[&now_a.node], now_a.pseudo_rank, now_a.position, &a.name, a.generation)
-                        .cmp(&(b.kind, &paths[&now_b.node], now_b.pseudo_rank, now_b.position, &b.name, b.generation))
+            // (Stable: one animation's events keep the order it queued them in.)
+            events.sort_by(|a, b| {
+                a.time.total_cmp(&b.time).then_with(|| {
+                    (a.animation, &paths[&a.node], a.pseudo_rank, a.position, &a.event.name, a.generation).cmp(&(
+                        b.animation,
+                        &paths[&b.node],
+                        b.pseudo_rank,
+                        b.position,
+                        &b.event.name,
+                        b.generation,
+                    ))
                 })
             });
         }
-        let events = events.into_iter().map(|(.., event)| event).collect();
+        let events = events.into_iter().map(|due| due.event).collect();
         // What ran out of the sets (and was no longer running) is forgotten; the rest is where the next update starts.
         self.phases.retain(|_, now| !now.departed);
-        self.updated_phases = self.phases.iter().map(|(id, now)| (id.clone(), (now.phase, now.iteration))).collect();
+        self.updated_phases = self.phases.iter().map(|(id, now)| (id.clone(), now.phase)).collect();
         let phases = &self.phases;
-        self.generations.retain(|(key, kind, name), &mut generation| {
-            phases.contains_key(&AnimationId { key: key.clone(), kind: *kind, name: name.clone(), generation })
+        self.generations.retain(|(key, name), &mut generation| {
+            phases.contains_key(&TransitionId { key: key.clone(), name: name.clone(), generation })
         });
         events
     }
 
-    // Move the clock to `now_ms`: each animation and transition takes the state the time gives it (started,
-    // iterated, finished — each a queued event), and every element with one the time moves takes its values at it.
+    // Move the clock to `now_ms`: each transition takes the state the time gives it (started, finished — each a
+    // queued event), and every element with an animation or transition the time moves takes its values at it.
     //
     // They move in an animation-only restyle, as Gecko's do: it cascades what they change to the descendants and
     // starts nothing, so a value a descendant inherits from an animation is already in its before-change style when
     // the next traversal compares — and a descendant transitioning the same property does not start a transition of
     // its own every frame.
     fn advance_to(&mut self, arena: &RealmArena, now_ms: f64) {
-        // (…and the elements the Web Animations' timeline, an op or a frame moved, whose values are composed again
-        // here too.)
+        // (…the elements the Web Animations' timeline, an op or a frame moved, whose values are composed again here
+        // too.)
         self.web_animations.set_timeline_time(now_ms);
         let mut restyle = self.web_animations.take_targets_to_restyle();
         let now = now_ms / 1000.0;
         if now != self.now {
             self.now = now;
-            // (…those whose values the time moves — one ending now included: a finished animation holds its fill,
-            // and a paused one its place.)
+            // (…those whose values the time moves — one ending now included: a finished transition's is gone.)
             let runs = |state: &AnimationState| matches!(state, AnimationState::Pending | AnimationState::Running);
             restyle.extend(
                 self.animations
                     .sets
                     .read()
                     .iter()
-                    .filter(|(_, set)| {
-                        set.animations.iter().any(|a| runs(&a.state)) || set.transitions.iter().any(|t| runs(&t.state))
-                    })
+                    .filter(|(_, set)| set.transitions.iter().any(|t| runs(&t.state)))
                     .map(|(key, _)| node_of(key.node.0)),
             );
-            self.note_animation_phases(arena);
+            self.note_transition_phases(arena);
         }
         let Some(doc) = self.doc.filter(|_| !restyle.is_empty()) else { return };
         in_arena(arena, self, || {
@@ -1405,12 +1638,12 @@ impl StyleEngine {
         self.traverse(arena, doc, false, TraversalFlags::AnimationOnly);
     }
 
-    // Every animation and transition takes the state the clock gives it — started, iterated (to the iteration the
-    // time is in), ended, as stylo leaves to its embedder — and one on an element that is not rendered (`display:
-    // none` on it or an ancestor, or not in the document) is canceled, which stylo leaves to it too. Where each then
-    // stands is kept for the rendering update's events; what the sets no longer hold stays with the phase it left in
-    // — `Idle` if it was still running, since only a canceled one leaves the sets then.
-    fn note_animation_phases(&mut self, arena: &RealmArena) {
+    // Every transition takes the state the clock gives it — started, ended, as stylo leaves to its embedder — and one
+    // on an element that is not rendered (`display: none` on it or an ancestor, or not in the document) is canceled,
+    // which stylo leaves to it too. Where each then stands is kept for the rendering update's events; what the sets no
+    // longer hold stays with the phase it left in — `Idle` if it was still running, since only a canceled one leaves
+    // the sets then.
+    fn note_transition_phases(&mut self, arena: &RealmArena) {
         let now = self.now;
         let mut sets = self.animations.sets.write();
         for observed in self.phases.values_mut() {
@@ -1419,12 +1652,7 @@ impl StyleEngine {
         for (key, set) in sets.iter_mut() {
             let node = node_of(key.node.0);
             let pseudo = key.pseudo_element.as_ref().and_then(pseudo_name);
-            let pseudo_rank = match pseudo {
-                None => 0,
-                Some("::marker") => 1,
-                Some("::before") => 2,
-                Some(_) => 3,
-            };
+            let pseudo_rank = waapi::pseudo_rank(&key.pseudo_element);
             let rendered = primary_style(arena, node).is_some_and(|s| !s.get_box().clone_display().is_none());
             // What the traversal just made comes after what it replaced: those are observed first, and a new one
             // takes the name's next generation.
@@ -1442,67 +1670,27 @@ impl StyleEngine {
                     }
                     // (`start_time` is where its active time is 0, the delay included.)
                     let duration = t.property_animation.duration;
-                    let interval = TimeInterval::of(t.delay, duration);
                     let at = Observed {
+                        node,
+                        pseudo,
+                        pseudo_rank,
+                        at: now,
                         phase: phase_of(&t.state),
-                        interval,
+                        interval: TimeInterval::of(t.delay, duration),
                         zero: t.start_time,
                         active: (now - t.start_time).clamp(0.0, duration),
-                        ..Observed::of(node, pseudo, pseudo_rank, 0, now)
+                        departed: false,
                     };
-                    observed.push((AnimationKind::Transition, transition_name(t), new, at));
+                    observed.push((transition_name(t), new, at));
                     t.is_new = false;
                 }
-                for (position, a) in set.animations.iter_mut().enumerate().filter(|(_, a)| a.is_new == new) {
-                    if a.state == AnimationState::Pending && a.has_started(now) {
-                        a.state = AnimationState::Running;
-                    }
-                    a.iterate_to(now);
-                    if a.state == AnimationState::Running && a.has_ended(now) {
-                        a.state = AnimationState::Finished;
-                    }
-                    // (`started_at` is where its CURRENT iteration began.)
-                    let iteration = iteration_of(a);
-                    let into_iteration = match a.state {
-                        // (…none into a zero-length one, whose paused progress is infinite once it is over.)
-                        AnimationState::Paused(progress) if a.duration > 0.0 => progress * a.duration,
-                        AnimationState::Paused(_) => 0.0,
-                        _ => now - a.started_at,
-                    };
-                    if !rendered {
-                        a.state = AnimationState::Canceled;
-                    }
-                    let active_duration = match a.iteration_state {
-                        KeyframesIterationState::Finite(_, max) => a.duration * max,
-                        KeyframesIterationState::Infinite(_) => f64::INFINITY,
-                    };
-                    let run = iteration * a.duration + into_iteration;
-                    let active = run.clamp(0.0, active_duration);
-                    // A paused one is where its progress says: still in its delay, over, or running.
-                    let phase = match a.state {
-                        AnimationState::Paused(progress) if progress < 0.0 => Phase::Before,
-                        AnimationState::Paused(_) if a.has_ended(now) => Phase::After,
-                        ref state => phase_of(state),
-                    };
-                    let at = Observed {
-                        phase,
-                        iteration,
-                        iteration_start: iteration * a.duration,
-                        interval: TimeInterval::of(a.delay, active_duration),
-                        zero: now - run,
-                        active,
-                        ..Observed::of(node, pseudo, pseudo_rank, position, now)
-                    };
-                    observed.push((AnimationKind::Animation, a.name.to_string(), new, at));
-                    a.is_new = false;
-                }
             }
-            for (kind, name, new, at) in observed {
-                let generation = self.generations.entry((key.clone(), kind, name.clone())).or_insert(0);
+            for (name, new, at) in observed {
+                let generation = self.generations.entry((key.clone(), name.clone())).or_insert(0);
                 if new {
                     *generation += 1;
                 }
-                self.phases.insert(AnimationId { key: key.clone(), kind, name, generation: *generation }, at);
+                self.phases.insert(TransitionId { key: key.clone(), name, generation: *generation }, at);
             }
             set.clear_canceled_animations();
         }
@@ -1653,17 +1841,18 @@ fn export_parts(node: &crate::dom::NodeData) -> impl Iterator<Item = (AtomIdent,
 }
 
 // An animation or transition event the page is owed: its type, the element (and pseudo-element) it concerns, the
-// animation's name or the transition's property, and its `elapsedTime` in seconds.
+// animation's name or the transition's property, its `elapsedTime` in seconds, and — an animation's — the animation.
 pub(crate) struct AnimationEvent {
     pub(crate) kind: &'static str,
     pub(crate) node: NodeId,
     pub(crate) pseudo: Option<&'static str>,
     pub(crate) name: String,
     pub(crate) elapsed: f64,
+    pub(crate) animation: Option<waapi::AnimationId>,
 }
 
-// Where an animation or transition stands against its active interval (Web Animations §4.6.10), as its events
-// compare them: `Idle` is not running at all (never started, or canceled).
+// Where a transition stands against its active interval (Web Animations §4.6.10), as its events compare them: `Idle`
+// is not running at all (never started, or canceled).
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 enum Phase {
     Idle,
@@ -1672,36 +1861,25 @@ enum Phase {
     After,
 }
 
-#[derive(Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Debug)]
-enum AnimationKind {
-    Transition,
-    Animation,
-}
-
-// An animation or transition as the events know it: its element (and pseudo-element), whether it is one or the
-// other, its name or property, and which of the ones by that name it is — a transition sent back where it came from
-// is a new one, and the one it replaced is canceled.
+// A transition as the events know it: its element (and pseudo-element), its property, and which of the ones of that
+// property it is — a transition sent back where it came from is a new one, and the one it replaced is canceled.
 #[derive(Clone, PartialEq, Eq, Hash, Debug)]
-struct AnimationId {
+struct TransitionId {
     key: AnimationSetKey,
-    kind: AnimationKind,
     name: String,
     generation: u32,
 }
 
-// Where an animation or transition stood when last looked at (`at`): its phase and iteration, the times its events
-// report and the time its active time was 0 (`zero`), which with them says when each is scheduled; where it sorts
-// among its element's (`pseudo_rank`, and `position` in `animation-name`); and whether it has left the sets since.
+// Where a transition stood when last looked at (`at`): its phase, the times its events report and the time its
+// active time was 0 (`zero`), which with them says when each is scheduled; where it sorts among its element's
+// (`pseudo_rank`); and whether it has left the sets since.
 #[derive(Clone, Copy, Debug)]
 struct Observed {
     node: NodeId,
     pseudo: Option<&'static str>,
     pseudo_rank: u8,
-    position: usize,
     at: f64,
     phase: Phase,
-    iteration: f64,
-    iteration_start: f64,
     interval: TimeInterval,
     zero: f64,
     active: f64,
@@ -1709,24 +1887,6 @@ struct Observed {
 }
 
 impl Observed {
-    // Looked at `at`, and nothing more known yet: each kind sets over it what it has.
-    fn of(node: NodeId, pseudo: Option<&'static str>, pseudo_rank: u8, position: usize, at: f64) -> Observed {
-        Observed {
-            node,
-            pseudo,
-            pseudo_rank,
-            position,
-            at,
-            phase: Phase::Idle,
-            iteration: 0.0,
-            iteration_start: 0.0,
-            interval: TimeInterval { start: 0.0, end: 0.0 },
-            zero: at,
-            active: 0.0,
-            departed: false,
-        }
-    }
-
     // When an event it owes is due: at its `elapsed` time on its own clock, and a cancellation when it was looked at.
     fn scheduled(&self, kind: &str, elapsed: f64) -> f64 {
         if kind.ends_with("cancel") { self.at } else { self.zero + elapsed }
@@ -1759,32 +1919,8 @@ impl TimeInterval {
     }
 }
 
-// The events an animation moving from phase `was` to `now` owes, with their `elapsedTime`s (CSS Animations 2 §4.2);
-// `iterated` is whether its current iteration moved inside the active phase, `iteration_start` where that one begins,
-// and `active` the time it has run, which a cancellation reports.
-fn animation_events(
-    was: Phase,
-    now: Phase,
-    iterated: bool,
-    iteration_start: f64,
-    interval: TimeInterval,
-    active: f64,
-) -> Vec<(&'static str, f64)> {
-    use Phase::*;
-    match (was, now) {
-        (Idle | Before, Active) => vec![("animationstart", interval.start)],
-        (Idle | Before, After) => vec![("animationstart", interval.start), ("animationend", interval.end)],
-        (Active, Before) => vec![("animationend", interval.start)],
-        (Active, Active) if iterated => vec![("animationiteration", iteration_start)],
-        (Active, After) => vec![("animationend", interval.end)],
-        (After, Active) => vec![("animationstart", interval.end)],
-        (After, Before) => vec![("animationstart", interval.end), ("animationend", interval.start)],
-        (Before | Active, Idle) => vec![("animationcancel", active)],
-        _ => Vec::new(),
-    }
-}
-
-// …and a transition's (CSS Transitions 2 §6.1), `transitionrun` first once it exists at all.
+// The events a transition moving from phase `was` to `now` owes, with their `elapsedTime`s (CSS Transitions 2 §6.1),
+// `transitionrun` first once it exists at all; `active` is the time it has run, which a cancellation reports.
 fn transition_events(was: Phase, now: Phase, interval: TimeInterval, active: f64) -> Vec<(&'static str, f64)> {
     use Phase::*;
     match (was, now) {
@@ -1828,10 +1964,46 @@ fn tree_path(arena: &RealmArena, id: NodeId) -> Vec<i64> {
 }
 
 // A time in seconds as an event reports it: to the microsecond a page's clock is kept in, which is also what drops
-// the tail single precision leaves on a duration (stylo keeps `0.3s` as 0.30000001192092896) and a product of one
-// leaves on an iteration's start.
+// the tail single precision leaves on a duration (stylo keeps `0.3s` as 0.30000001192092896).
 fn to_microseconds(seconds: f64) -> f64 {
     (seconds * 1e6).round() / 1e6
+}
+
+// A time of a style (seconds, single precision) in the model's milliseconds — to the microsecond, without the tail.
+fn to_milliseconds(seconds: f32) -> f64 {
+    (seconds as f64 * 1e6).round() / 1e3
+}
+
+// The names a declaration answers to: its property's, and those of the shorthands it is part of.
+fn names_of(id: PropertyDeclarationId<'_>) -> impl Iterator<Item = std::borrow::Cow<'_, str>> {
+    let shorthands = match id {
+        PropertyDeclarationId::Longhand(l) => Some(l.shorthands().map(|s| s.name().into())),
+        PropertyDeclarationId::Custom(_) => None,
+    };
+    std::iter::once(id.name()).chain(shorthands.into_iter().flatten())
+}
+
+// Whether node `a` comes before node `b` in shadow-including tree order.
+fn tree_order(arena: &RealmArena, a: NodeId, b: NodeId) -> std::cmp::Ordering {
+    tree_path(arena, a).cmp(&tree_path(arena, b))
+}
+
+// The style an effect's target has: its element's, or the pseudo-element's the traversal made for it.
+fn target_style(arena: &RealmArena, target: &waapi::Target) -> Option<Arc<ComputedValues>> {
+    let Some(pseudo) = &target.pseudo else { return primary_style(arena, target.node) };
+    let slot = arena.style_slot(target.node)?;
+    // SAFETY: no traversal runs while a style is read.
+    let data = unsafe { &*slot.data.get() }.as_ref()?.borrow();
+    data.styles.pseudos.get(pseudo).cloned()
+}
+
+// An `animation-composition` as the model composites.
+fn composite_of(composition: AnimationComposition) -> waapi::CompositeOperation {
+    match composition {
+        AnimationComposition::Replace => waapi::CompositeOperation::Replace,
+        AnimationComposition::Add => waapi::CompositeOperation::Add,
+        AnimationComposition::Accumulate => waapi::CompositeOperation::Accumulate,
+    }
 }
 
 // The property a transition's events name.
@@ -1839,13 +2011,6 @@ fn transition_name(t: &Transition) -> String {
     match t.property_animation.property_id() {
         PropertyDeclarationId::Longhand(l) => l.name().to_owned(),
         PropertyDeclarationId::Custom(n) => format!("--{n}"),
-    }
-}
-
-// The iteration an animation is in (0 for the first).
-fn iteration_of(a: &Animation) -> f64 {
-    match a.iteration_state {
-        KeyframesIterationState::Finite(current, _) | KeyframesIterationState::Infinite(current) => current,
     }
 }
 
@@ -2013,10 +2178,6 @@ impl<'dom> DomTraversal<StyleNode<'dom>> for Recalc<'_> {
             } else {
                 el.slot().styled_state.set(el.state());
                 unsafe { el.unset_dirty_descendants() };
-                // (…and the keyframes of an element's Web Animations are its style's values: computed again.)
-                if el.engine().web_animations.animates(el.id) {
-                    el.engine().restyled_targets.borrow_mut().push(el.id);
-                }
             }
         }
     }
@@ -2092,6 +2253,20 @@ impl<'a> StyleNode<'a> {
     }
     fn is_html(&self) -> bool {
         self.node().is_html()
+    }
+    // What the model's animations of this element (or its `pseudo`) show now, as a rule; None where none animates it.
+    fn composed_animations(&self, pseudo: Option<PseudoElement>) -> Option<Arc<Locked<PropertyDeclarationBlock>>> {
+        let model = &self.engine().web_animations;
+        if !model.animates(self.id) {
+            return None;
+        }
+        let mut values = Default::default();
+        let arena = self.arena();
+        model.compose(&waapi::Target { node: self.id, pseudo }, &mut values, &|a, b| tree_order(arena, a, b));
+        if values.is_empty() {
+            return None;
+        }
+        Some(Arc::new(self.engine().lock.wrap(PropertyDeclarationBlock::from_animation_value_map(&values))))
     }
 }
 
@@ -2586,39 +2761,40 @@ impl<'a> TElement for StyleNode<'a> {
     fn may_have_animations(&self) -> bool {
         true
     }
-    // (…the Web Animations' included: an element one animates shares no style with its siblings.)
+    // (…the model's included: an element one animates shares no style with its siblings.)
     fn has_animations(&self, context: &SharedStyleContext) -> bool {
-        self.has_css_animations(context, None)
-            || self.has_css_transitions(context, None)
-            || self.engine().web_animations.animates(self.id)
+        self.has_css_transitions(context, None) || self.engine().web_animations.animates(self.id)
     }
-    fn has_css_animations(&self, context: &SharedStyleContext, pseudo: Option<PseudoElement>) -> bool {
-        context.animations.has_active_animations(&AnimationSetKey::new(TNode::opaque(self), pseudo))
+    // The CSS animations run in the model (`update_animations`), as Gecko's do.
+    fn runs_css_animations(&self) -> bool {
+        true
+    }
+    // (Run after the traversal: `StyleEngine::update_animations`.)
+    fn update_animations(
+        &self,
+        pseudo: Option<PseudoElement>,
+        _before_change_style: Option<Arc<ComputedValues>>,
+        tasks: UpdateAnimationsTasks,
+    ) {
+        self.engine().animation_tasks.borrow_mut().push((self.id, pseudo, tasks));
+    }
+    fn has_css_animations(&self, _context: &SharedStyleContext, pseudo: Option<PseudoElement>) -> bool {
+        self.engine().web_animations.has_css_animations(&waapi::Target { node: self.id, pseudo })
     }
     fn has_css_transitions(&self, context: &SharedStyleContext, pseudo: Option<PseudoElement>) -> bool {
         context.animations.has_active_transitions(&AnimationSetKey::new(TNode::opaque(self), pseudo))
     }
-    // The CSS animations' values, and the Web Animations' composited over them (web-animations §5.4.2: script
-    // animations come last in composite order).
-    fn animation_rule(&self, context: &SharedStyleContext) -> Option<Arc<Locked<PropertyDeclarationBlock>>> {
-        let key = AnimationSetKey::new_for_non_pseudo(TNode::opaque(self));
+    // Its animations' values, composited in composite order (web-animations §5.4.2).
+    fn animation_rule(&self, _context: &SharedStyleContext) -> Option<Arc<Locked<PropertyDeclarationBlock>>> {
+        self.composed_animations(None)
+    }
+    fn pseudo_animation_declarations(&self, context: &SharedStyleContext, pseudo: &PseudoElement) -> AnimationDeclarations {
+        let key = AnimationSetKey::new_for_pseudo(TNode::opaque(self), pseudo.clone());
         let now = context.current_time_for_animations;
-        let web_animations = &self.engine().web_animations;
-        if !web_animations.animates(self.id) {
-            return context.animations.get_animation_declarations(&key, now, &self.engine().lock);
+        AnimationDeclarations {
+            animations: self.composed_animations(Some(pseudo.clone())),
+            transitions: context.animations.get_transition_declarations(&key, now, &self.engine().lock),
         }
-        let mut values = context
-            .animations
-            .sets
-            .read()
-            .get(&key)
-            .and_then(|set| set.get_value_map_for_active_animations(now))
-            .unwrap_or_default();
-        web_animations.compose(&waapi::Target { node: self.id, pseudo: None }, &mut values);
-        if values.is_empty() {
-            return None;
-        }
-        Some(Arc::new(self.engine().lock.wrap(PropertyDeclarationBlock::from_animation_value_map(&values))))
     }
     fn transition_rule(&self, context: &SharedStyleContext) -> Option<Arc<Locked<PropertyDeclarationBlock>>> {
         context.animations.get_transition_declarations(

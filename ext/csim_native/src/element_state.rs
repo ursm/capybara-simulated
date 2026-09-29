@@ -124,7 +124,7 @@ impl RealmArena {
         node.parent.or(node.host).filter(|&p| self.get(p).is_some())
     }
     // Is `node` `ancestor` or a shadow-including descendant of it?
-    fn is_inclusive_ancestor(&self, ancestor: NodeId, node: NodeId) -> bool {
+    pub(crate) fn is_inclusive_ancestor(&self, ancestor: NodeId, node: NodeId) -> bool {
         let mut cur = Some(node);
         while let Some(c) = cur {
             if c == ancestor {
