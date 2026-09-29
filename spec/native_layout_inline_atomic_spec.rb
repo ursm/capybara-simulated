@@ -884,37 +884,34 @@ RSpec.describe 'native layout inline-atomic parity' do
   # oracle's box marshalled onto the record — because an atomic's width is its line's SHRINK-TO-FIT and the
   # walk had no intrinsic measure to offer for one. It has both now, so the display alone decides nothing:
   # three gates that read it (`nlAtomicNative`, `nlFlexSupported`, `nlGridSupported`) admit an atomic one.
-  # A `display: inline` box holding a BLOCK child is an ATOMIC to the oracle — `isContinuedInline` refuses to
-  # fragment it, so the pen lays it out shrink-to-fit on the line exactly as an `inline-block` — and native lays it
-  # out the same way since 2026-09-24 (it declined as `block-level-box-in-inline-content`, 1,229 sweep shapes).
-  # SHARED with Chrome, which SPLITS the box around the block instead (CSS 2.1 §9.2.1.1): the block alone at full
-  # width on the next line (x 0, y 22, 200 wide), the text before and after in anonymous blocks around it.
+  # A `display: inline` box holding a BLOCK child is laid out as a BLOCK (`holdsBlockLevel`). CSS 2.1 §9.2.1.1 SPLITS
+  # it around the block — the block alone at full width, the inline content before and after it in anonymous blocks,
+  # the inline box's fragments around them — which neither engine models; a block holding the same content is what
+  # comes nearest. It was an ATOMIC until 2026-09-30, one shrink-to-fit rectangle on the line (the block 9.6 wide at
+  # x 48, where Chrome has it 200 wide at x 0), and every custom element that wraps blocks became one once an element
+  # the UA sheet does not name was the inline box it is.
   describe 'an inline holding a block child' do
-    it 'is the atomic the oracle makes of it (shared: Chrome splits the box around the block)' do
+    it 'is laid out as a block, its block child at full width' do
       body = '<div style="width:200px;font:16px monospace">text <span><div id="b" style="height:5px">b</div></span> after</div>'
-      expect_native_atomic(body)
+      expect_parity(body)
       rect = rendered_rect(body, '#b')
-      expect_shared_gap(rect['x'], shared: 48, chrome: 0, what: "#{body}: the block's x")
-      expect_shared_gap(rect['width'], shared: 9.6, chrome: 200, what: "#{body}: the block's width")
-      expect_native_atomic('<div style="width:200px;font:16px monospace"><a href="#"><div style="height:30px">card</div></a></div>')
-      expect_native_atomic('<div style="width:200px;font:16px monospace">aa <span style="padding:0 4px;position:relative;left:3px">bb<div style="margin:7px 0">x</div>cc</span> dd</div>')
+      expect([rect['x'], rect['width']]).to eq([0, 200])
+      expect_parity('<div style="width:200px;font:16px monospace"><a href="#"><div style="height:30px">card</div></a></div>')
+      expect_parity('<div style="width:200px;font:16px monospace">aa <span style="padding:0 4px;position:relative;left:3px">bb<div style="margin:7px 0">x</div>cc</span> dd</div>')
       # …and MEASURED so, as a float's or a `max-content` box's content
-      expect_native_atomic('<div style="font:16px monospace;width:10px"><div style="float:left">aa <span>bb<p>para</p></span></div></div>')
+      expect_parity('<div style="font:16px monospace;width:10px"><div style="float:left">aa <span>bb<p>para</p></span></div></div>')
     end
-    # …and a formatting context of its OWN, as an `inline-block` is (`computeEstablishesBFC`). Until the review of
-    # f51ba9c7 the oracle's shared the block's: a float in it wrapped the line after it, a `clear` in it cleared
-    # the floats outside, and an outer float pushed a line of its content down past it (104 tall where native said
-    # 66) — the first two declined, the third was a parity break. Chrome splits the box around the block in all
-    # three (66, 124 and 66 tall); both engines keep one atomic (22, 22 and 66). Pinned as shared.
-    it 'is a formatting context of its own, as an inline-block is' do
+    # …and so no formatting context of its own, as the split leaves none: a float in it is the block's, a `clear` in
+    # it clears the floats outside, an outer float shortens its lines. Chrome: 66 and 124 tall.
+    it 'is no formatting context of its own' do
       {
-        '<div style="width:200px;font:16px monospace">aaaa <span><div><div style="float:right;width:60px">bb</div>z</div></span> t uu</div>'                               => [22, 66],
-        '<div style="width:200px;font:16px monospace"><div style="float:left;width:30px;height:80px"></div>aa <span><div style="clear:left">bb</div></span> t</div>' => [22, 124]
-      }.each do |body, (shared, chrome)|
-        expect_native_atomic(body)
-        expect_shared_gap(rendered_rect(body, 'div')['height'], shared: shared, chrome: chrome, what: "#{body}: the block's height")
+        '<div style="width:200px;font:16px monospace">aaaa <span><div><div style="float:right;width:60px">bb</div>z</div></span> t uu</div>'                               => 66,
+        '<div style="width:200px;font:16px monospace"><div style="float:left;width:30px;height:80px"></div>aa <span><div style="clear:left">bb</div></span> t</div>' => 124
+      }.each do |body, chrome|
+        expect_parity(body)
+        expect(rendered_rect(body, 'div')['height']).to eq(chrome), "#{body}: the block's height"
       end
-      expect_native_atomic('<div style="width:200px;font:16px monospace"><div style="float:right;width:40px;height:60px"></div>aa <span>t<div style="width:50%">half</div>u</span> cc</div>')
+      expect_parity('<div style="width:200px;font:16px monospace"><div style="float:right;width:40px;height:60px"></div>aa <span>t<div style="width:50%">half</div>u</span> cc</div>')
     end
   end
 

@@ -9022,8 +9022,6 @@ html/dom/elements/the-innertext-and-outertext-properties/getter.html:
 - <optgroup> containing <optgroup> ("<select><optgroup class='poke-optgroup'></select>")
 - <optgroup> in <div> ("<div>a<optgroup>123</optgroup>bc")
 - <option> in <div> ("<div>a<option>123</option>bc")
-- <rp> ("<div><ruby>abc<rp>(</rp><rt>def</rt><rp>)</rp></ruby>")
-- <rp> in a <select> ("<div><select class='poke-rp'></select>")
 - <select size='1'> contents of options preserved ("<div><select size='1'><option>abc</option><option>def")
 - <select size='1'> contents of options preserved ("<select size='1'><option>abc</option><option>def")
 - <select size='2'> contents of options preserved ("<div><select size='2'><option>abc</option><option>def")
@@ -9039,7 +9037,6 @@ html/dom/elements/the-innertext-and-outertext-properties/getter.html:
   abc </span>def")
 - Leading/trailing space removal at display:inline-grid boundary ("<div>123<span style='display:inline-grid'>
   abc </span>def")
-- Lone <rp> ("<div><rp>abc</rp>")
 - Newline at display:block boundary ("<div>123<span style='display:block'>abc</span>def")
 - Newline-separated table rows ("<div><div class='itable'><span class='row'><span
   class='cell'>abc</span></span>\n<span class='row'><span class='cell'>def</span></span></div>")
@@ -9286,18 +9283,8 @@ html/rendering/non-replaced-elements/form-controls/input-line-height-computed.ht
 html/rendering/non-replaced-elements/form-controls/text-transform.html:
 - "== html/rendering/non-replaced-elements/form-controls/text-transform-ref.html"
 html/rendering/non-replaced-elements/hidden-elements.html:
-- area should be hidden
-- base should be hidden
-- basefont should be hidden
-- datalist should be hidden
 - embed[hidden=''] element should be inline 0x0
 - embed[hidden='until-found'] element should be inline 0x0
-- noembed should be hidden
-- noframes should be hidden
-- param should be hidden
-- rp should be hidden
-- source should not be hidden
-- track should not be hidden
 html/rendering/non-replaced-elements/phrasing-content-0/b-strong-styles.html:
 - "== html/rendering/non-replaced-elements/phrasing-content-0/b-strong-styles-ref.html"
 html/rendering/non-replaced-elements/phrasing-content-0/font-element-text-decoration-color/001-a.html:
@@ -9521,8 +9508,6 @@ html/rendering/non-replaced-elements/the-hr-element-0/align.html:
 - "== html/rendering/non-replaced-elements/the-hr-element-0/align-ref.html"
 html/rendering/non-replaced-elements/the-hr-element-0/color.html:
 - "== html/rendering/non-replaced-elements/the-hr-element-0/color-ref.html"
-html/rendering/non-replaced-elements/the-hr-element-0/width.html:
-- "== html/rendering/non-replaced-elements/the-hr-element-0/width-ref.html"
 html/rendering/non-replaced-elements/the-page/body-margin-1a.html:
 - "== html/rendering/non-replaced-elements/the-page/body-margin-1-ref.html (a frame
   the painter never enters)"
@@ -10352,8 +10337,6 @@ html/semantics/forms/customizable-combobox/customizable-combobox-option-attribut
 - Choosing options with value and label attributes.
 html/semantics/forms/the-button-element/active-onblur.html:
 - Buttons should clear :active when the user tabs away from them while holding spacebar.
-html/semantics/forms/the-datalist-element/input-text-datalist-removal.html:
-- "== html/semantics/forms/the-datalist-element/input-text-focused-ref.html"
 html/semantics/forms/the-input-element/checkable-active-onblur-with-click.html:
 - Checkboxes should clear :active when the user tabs away from them while pressing
   it with a pointing device
