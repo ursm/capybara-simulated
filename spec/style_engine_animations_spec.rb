@@ -485,6 +485,25 @@ RSpec.describe 'style engine animations' do
     expect(read).to eq('110px')
   end
 
+  # An effect taken over by another animation leaves the first one's target readable — layout and all (its entry
+  # went with it).
+  it 'takes an effect from a playing animation' do
+    s = page('<div id="a"></div>')
+    read = s.evaluate_script(<<~JS)
+      (() => {
+        const a = document.getElementById('a');
+        const first = a.animate({ opacity: [0.3, 0.3] }, 100000);
+        const second = new Animation(first.effect);
+        a.getBoundingClientRect();
+        getComputedStyle(a).marginLeft;
+        const idle = getComputedStyle(a).opacity;
+        second.play();
+        return [idle, first.effect, getComputedStyle(a).opacity, a.getAnimations().length];
+      })()
+    JS
+    expect(read).to eq(['1', nil, '0.3', 1])
+  end
+
   # A CSS animation's object is an Animation, and its effect a KeyframeEffect.
   it "reports a CSS animation's object as an Animation" do
     s = page('<div id="a" style="animation: fade 100s"></div>')
