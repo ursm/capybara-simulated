@@ -3,9 +3,9 @@
 require 'capybara/simulated'
 require_relative 'support/session_teardown'
 
-# CSS animations and transitions in the style engine: the engine's Web Animations model runs the animations (and
-# stylo's own model the transitions), the page's clock moves them (an animation-only restyle each time it does), and
-# a rendering update fires the events the phases they moved through owe. Each example drives the clock the way a page does — a pending interval keeps it stepping,
+# CSS animations and transitions in the style engine: its Web Animations model runs them, the page's clock moves them
+# (an animation-only restyle each time it does), and a rendering update fires the events the phases they moved through
+# owe. Each example drives the clock the way a page does — a pending interval keeps it stepping,
 # and every script evaluation is a step — with CSIM_STYLE_VERIFY holding each incremental restyle against a full one.
 RSpec.describe 'style engine animations' do
   around do |example|
@@ -81,16 +81,17 @@ RSpec.describe 'style engine animations' do
     )
   end
 
-  # A value an element inherits from its parent's transition is that transition's, arriving through inheritance: the
-  # element transitioning the same property starts no run of its own, frame after frame (css-transitions §3).
-  it 'starts no transition under a parent transitioning the same property' do
+  # An element that inherits a property its parent starts transitioning transitions it too — to the value its after-
+  # change style inherits, the parent's own after-change value (css-transitions-1 §3; WPT
+  # after-change-style-inherited) — once, not again frame after frame as the parent's value moves.
+  it 'transitions once under a parent transitioning the same property' do
     s = page(
       '<div id="p" class="c"><div id="k" class="kid">x</div></div>',
       '.c { color: rgb(0, 0, 0); transition: color 300ms linear } .c.to { color: rgb(100, 100, 100) }
        .kid { color: inherit; transition: color 300ms linear }'
     )
     s.execute_script("getComputedStyle(document.getElementById('k')).color; document.getElementById('p').classList.add('to')")
-    expect(drain(s).grep(/:k$/)).to eq([])
+    expect(drain(s).grep(/:k$/)).to eq(%w[transitionrun:color:0:k transitionstart:color:0:k transitionend:color:0.3:k])
   end
 
   # A read of a value another model answers (`direction` is still the JS side's) is a style flush all the same, and
@@ -815,5 +816,42 @@ RSpec.describe 'style engine animations' do
     read << s.evaluate_script("getComputedStyle(document.getElementById('c')).marginLeft")
     read << s.evaluate_script("document.getElementById('c').getBoundingClientRect().left")
     expect(read).to eq(['0px', 8, '7px', '30px', 38])
+  end
+
+  # ── CSS transitions as the model's own objects ──
+  # A CSS transition is a `CSSTransition` naming its property, before the CSS animations in composite order, and the
+  # object its events carry.
+  it 'is a CSSTransition the page can hold' do
+    s = page('<div id="a" style="transition: opacity 100s linear; animation: widen 100s"></div>')
+    s.execute_script(<<~JS)
+      const a = document.getElementById('a');
+      getComputedStyle(a).opacity;
+      a.addEventListener('transitionrun', (e) => { window.carried = e.animation === a.getAnimations()[0]; });
+      a.style.opacity = '0';
+    JS
+    drain(s, 3)
+    read = s.evaluate_script(<<~JS)
+      (() => {
+        const list = document.getElementById('a').getAnimations();
+        return [list.map((x) => x.constructor.name).join(), list[0].transitionProperty, window.carried];
+      })()
+    JS
+    expect(read).to eq(['CSSTransition,CSSAnimation', 'opacity', true])
+  end
+
+  # A style change an animation frame callback makes starts its transitions in that frame's style update, so the
+  # events they owe are the next frame's, sent before its callbacks (HTML "update the rendering").
+  it 'sends the events of a transition a frame callback started before the next frame callback' do
+    s = page('<div id="a" style="transition: opacity 3s -1s linear"></div>')
+    s.execute_script(<<~JS)
+      window.seen = null;
+      document.body.offsetLeft;
+      requestAnimationFrame(() => {
+        document.getElementById('a').style.opacity = '0';
+        requestAnimationFrame(() => { window.seen = window.log.slice(); });
+      });
+    JS
+    drain(s, 4)
+    expect(s.evaluate_script('window.seen')).to eq(%w[transitionrun:opacity:1:a transitionstart:opacity:1:a])
   end
 end

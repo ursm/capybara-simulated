@@ -8,8 +8,8 @@ use bitflags::bitflags;
 use style::servo_arc::Arc;
 use style::values::computed::easing::ComputedTimingFunction;
 
-use crate::animations::{AnimationId, Animations, CompositeOperation, EffectTiming, Keyframe, Phase, PlayState, Target};
-use crate::dom::NodeId;
+use crate::animations::{AnimationId, Animations, CompositeOperation, EffectTiming, Keyframe, PlayState, Target};
+use crate::css::CssKind;
 
 bitflags! {
     // What of a CSS animation a script has set, and its style therefore no longer sets (css-animations-2 §4.1; Gecko's
@@ -27,18 +27,15 @@ bitflags! {
     }
 }
 
-// What a CSS animation is besides an animation: the `@keyframes` name it runs; the element (or pseudo-element) whose
-// style owns it — none once that style no longer lists it — and its place in that style's `animation-name`; what of
-// it a script has set; whether `animation-play-state` paused it, as the style last said; and where its phase and
-// iteration stood when last looked at, which the events it owes are told from (§4.2).
+// What a CSS animation is besides an animation and its owner (css.rs): the `@keyframes` name it runs and its place in
+// its owner's `animation-name`; what of it a script has set; and whether `animation-play-state` paused it, as the
+// style last said.
 #[derive(Clone, Debug)]
 pub(crate) struct CssAnimation {
     pub(crate) name: String,
-    pub(crate) owner: Option<Target>,
     pub(crate) position: usize,
     pub(crate) overridden: Overrides,
     style_paused: bool,
-    previous: (Phase, Option<f64>),
 }
 
 // What an element's style says of one of its CSS animations (css-animations-1 §3): the name, its effect's timing,
@@ -53,39 +50,27 @@ pub(crate) struct CssAnimationStyle {
     pub(crate) paused: bool,
 }
 
-// An event a CSS animation owes (§4.2): its type and `elapsedTime` (seconds); the element (and pseudo-element) it is
-// about, the animation's name and place in `animation-name` as they were when it was queued; and when it was due on
-// the timeline (ms) — which, then the composite order, is the order a rendering update dispatches them in.
-#[derive(Clone, Debug)]
-pub(crate) struct CssEvent {
-    pub(crate) animation: AnimationId,
-    pub(crate) kind: &'static str,
-    pub(crate) elapsed: f64,
-    pub(crate) owner: Target,
-    pub(crate) name: String,
-    pub(crate) position: usize,
-    pub(crate) scheduled: f64,
-}
-
 impl Animations {
     // The CSS animations `owner`'s style made and still lists, in `animation-name` order.
     pub(crate) fn css_animations_of(&self, owner: &Target) -> Vec<AnimationId> {
         let mut out: Vec<(usize, AnimationId)> = self
             .owned_by(owner)
-            .map(|id| (self.animations[&id].css.as_ref().unwrap().position, id))
+            .filter_map(|id| Some((self.css_animation(id)?.position, id)))
             .collect();
         out.sort_unstable();
         out.into_iter().map(|(_, id)| id).collect()
     }
 
     pub(crate) fn has_css_animations(&self, owner: &Target) -> bool {
-        self.owned_by(owner).next().is_some()
+        self.owned_by(owner).any(|id| self.css_animation(id).is_some())
     }
 
-    fn owned_by<'a>(&'a self, owner: &'a Target) -> impl Iterator<Item = AnimationId> + 'a {
-        self.css_by_owner.get(&owner.node).into_iter().flatten().copied().filter(move |id| {
-            self.animations[id].css.as_ref().is_some_and(|css| css.owner.as_ref() == Some(owner))
-        })
+    fn css_animation(&self, id: AnimationId) -> Option<&CssAnimation> {
+        self.animations.get(&id)?.css.as_ref()?.animation()
+    }
+
+    fn css_animation_mut(&mut self, id: AnimationId) -> Option<&mut CssAnimation> {
+        self.animations.get_mut(&id)?.css.as_mut()?.animation_mut()
     }
 
     // The CSS animations `owner`'s style now lists (css-animations-2 §3; Gecko's `BuildAnimations`): each takes over
@@ -94,7 +79,7 @@ impl Animations {
     pub(crate) fn update_css_animations(&mut self, owner: &Target, styles: Vec<CssAnimationStyle>) {
         let mut old = self.css_animations_of(owner);
         for (position, style) in styles.into_iter().enumerate().rev() {
-            let same_name = old.iter().rposition(|id| self.animations[id].css.as_ref().unwrap().name == style.name);
+            let same_name = old.iter().rposition(|&id| self.css_animation(id).is_some_and(|a| a.name == style.name));
             match same_name {
                 Some(at) => {
                     let id = old.remove(at);
@@ -118,20 +103,11 @@ impl Animations {
         e.keyframes = style.keyframes;
         e.composite = style.composite;
         e.implicit_easing = Some(style.implicit_easing);
-        e.orphaned = true;
         self.set_target(effect, Some(owner.clone()));
         let id = self.new_animation(Some(effect), true);
-        self.css_by_owner.entry(owner.node).or_default().push(id);
-        let a = self.animations.get_mut(&id).unwrap();
-        a.handled = false;
-        a.css = Some(CssAnimation {
-            name: style.name,
-            owner: Some(owner.clone()),
-            position,
-            overridden: Overrides::empty(),
-            style_paused: style.paused,
-            previous: (Phase::Idle, None),
-        });
+        let animation =
+            CssAnimation { name: style.name, position, overridden: Overrides::empty(), style_paused: style.paused };
+        self.own(id, owner, CssKind::Animation(animation));
         let _ = if style.paused { self.pause(id) } else { self.play(id, true) };
         id
     }
@@ -140,13 +116,12 @@ impl Animations {
     // otherwise (Gecko's `UpdateOldAnimationPropertiesWithNew`), and a change of its play state followed — unless it
     // is idle, which a change of `animation-play-state` does not restart.
     fn restyle_css_animation(&mut self, id: AnimationId, style: CssAnimationStyle, position: usize) {
-        let a = self.animations.get_mut(&id).unwrap();
-        let css = a.css.as_mut().unwrap();
+        let css = self.css_animation_mut(id).unwrap();
         css.position = position;
         let overridden = css.overridden;
         let was_style_paused = std::mem::replace(&mut css.style_paused, style.paused);
         let mut keyframes_changed = false;
-        if let Some(e) = a.effect.and_then(|e| self.effects.get_mut(&e)) {
+        if let Some(e) = self.animations[&id].effect.and_then(|e| self.effects.get_mut(&e)) {
             let (to, from) = (&mut e.timing, &style.timing);
             if !overridden.contains(Overrides::DURATION) {
                 to.duration = from.duration;
@@ -195,30 +170,6 @@ impl Animations {
         };
     }
 
-    // A CSS animation its owner's style no longer lists (or no longer renders): canceled while it is still the owner's
-    // — its `animationcancel` is the owner's — and let go, to be what a script holding it makes of it.
-    pub(crate) fn cancel_from_style(&mut self, id: AnimationId) {
-        self.cancel(id);
-        self.touch(id);
-        let a = self.animations.get_mut(&id).unwrap();
-        if let Some(owner) = a.css.as_mut().and_then(|css| css.owner.take()) {
-            if let Some(list) = self.css_by_owner.get_mut(&owner.node) {
-                list.retain(|&other| other != id);
-                if list.is_empty() {
-                    self.css_by_owner.remove(&owner.node);
-                }
-            }
-        }
-        if !self.animations[&id].handled {
-            self.drop_animation(id);
-        }
-    }
-
-    // The owners of CSS animations (the elements; each pseudo-element's under its element's).
-    pub(crate) fn css_owners(&self) -> impl Iterator<Item = NodeId> + '_ {
-        self.css_by_owner.keys().copied()
-    }
-
     // A script's call that played or paused CSS animation `id` (`method`, done), which was paused or not before it: its
     // play state is the script's from now on — for `play()` and `pause()` whatever they did, for `reverse()` and a
     // start time where they turned it from paused to running or back (css-animations-2 §4.1).
@@ -229,81 +180,16 @@ impl Animations {
             "reverse" | "startTime" => paused != was_paused,
             _ => false,
         };
-        if let Some(css) = self.animations.get_mut(&id).and_then(|a| a.css.as_mut()).filter(|_| takes_over) {
+        if let Some(css) = self.css_animation_mut(id).filter(|_| takes_over) {
             css.overridden |= Overrides::PLAY_STATE;
         }
     }
 
     // A script set `what` of the CSS animation playing `effect`: its style no longer does.
     pub(crate) fn override_css(&mut self, effect: crate::animations::EffectId, what: Overrides) {
-        let animation = self.effects.get(&effect).and_then(|e| e.animation);
-        if let Some(css) = animation.and_then(|a| self.animations.get_mut(&a)).and_then(|a| a.css.as_mut()) {
+        if let Some(css) = self.effects.get(&effect).and_then(|e| e.animation).and_then(|a| self.css_animation_mut(a)) {
             css.overridden |= what;
         }
-    }
-
-    // The events CSS animation `id` owes for where its phase moved since it was last looked at — at the last frame
-    // (css-animations-2 §4.2), or `canceling` it, from where it stands to idle, which is looked at now — while its
-    // owner owns it. Each is due when its `elapsedTime` falls on the animation's own clock; a cancellation, now.
-    pub(crate) fn queue_css_events(&mut self, id: AnimationId, canceling: bool) {
-        let Some(a) = self.animations.get(&id) else { return };
-        let Some(css) = a.css.as_ref() else { return };
-        let Some(owner) = css.owner.clone() else { return };
-        let timing = a.effect.and_then(|e| self.effects.get(&e)).map(|e| e.timing.clone());
-        let current = self.current_time(id);
-        let (phase, iteration) = match &timing {
-            Some(t) if !canceling => {
-                let computed = t.computed(current, a.playback_rate);
-                (computed.phase, computed.current_iteration)
-            },
-            _ => (Phase::Idle, None),
-        };
-        let (was, was_iteration) = css.previous;
-        if (was, was_iteration) == (phase, iteration) {
-            return;
-        }
-        let timing = timing.unwrap_or_default();
-        let active_duration = timing.active_duration();
-        // (The interval its events report, a negative delay having run part of it before it started.)
-        let start = (-timing.delay).min(active_duration).max(0.0);
-        let end = (timing.end_time() - timing.delay).min(active_duration).max(0.0);
-        let into_iteration = (iteration.unwrap_or(0.0) - timing.iteration_start).max(0.0) * timing.duration;
-        let ran = current.map_or(0.0, |t| (t - timing.delay).clamp(0.0, active_duration));
-        use Phase::*;
-        let events: &[(&'static str, f64)] = match (was, phase) {
-            (Idle | Before, Active) => &[("animationstart", start)],
-            (Idle | Before, After) => &[("animationstart", start), ("animationend", end)],
-            (Active, Before) => &[("animationend", start)],
-            (Active, Active) => &[("animationiteration", into_iteration)],
-            (Active, After) => &[("animationend", end)],
-            (After, Active) => &[("animationstart", end)],
-            (After, Before) => &[("animationstart", end), ("animationend", start)],
-            (Before | Active, Idle) => &[("animationcancel", ran)],
-            _ => &[],
-        };
-        let timeline = self.timeline_time.filter(|_| a.has_timeline).unwrap_or(0.0);
-        let due = |kind: &str, elapsed: f64| match (a.start_time, a.playback_rate) {
-            (Some(start), rate) if rate != 0.0 && kind != "animationcancel" => start + (timing.delay + elapsed) / rate,
-            _ => timeline,
-        };
-        let queued: Vec<CssEvent> = events
-            .iter()
-            .map(|&(kind, elapsed)| CssEvent {
-                animation: id,
-                kind,
-                elapsed: elapsed / 1000.0,
-                owner: owner.clone(),
-                name: css.name.clone(),
-                position: css.position,
-                scheduled: due(kind, elapsed),
-            })
-            .collect();
-        self.css_events.extend(queued);
-        self.animations.get_mut(&id).unwrap().css.as_mut().unwrap().previous = (phase, iteration);
-    }
-
-    pub(crate) fn take_css_events(&mut self) -> Vec<CssEvent> {
-        std::mem::take(&mut self.css_events)
     }
 }
 

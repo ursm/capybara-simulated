@@ -243,6 +243,7 @@ fn anim_effect_set(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackA
                     if let Some(effect) = model.effects.get_mut(&id) {
                         effect.keyframes = keyframes;
                         effect.implicit_easing = None;
+                        effect.given = false;
                     }
                     model.keyframes_changed(id);
                     model.properties_changed(id);
@@ -320,7 +321,7 @@ fn anim_call(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgumen
                     model.touch(id);
                     model.set_effect(id, arg.map(|n| n as EffectId).filter(|&e| e != 0));
                     // (A CSS animation playing an effect of the page's is the page's to time and fill.)
-                    if let Some(css) = model.animations.get_mut(&id).unwrap().css.as_mut() {
+                    if let Some(css) = model.animations.get_mut(&id).unwrap().css.as_mut().and_then(|c| c.animation_mut()) {
                         css.overridden = Overrides::all();
                     }
                     Ok(())
@@ -511,16 +512,20 @@ fn anim_list(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgumen
     });
 }
 
-// __dom.animAdopt(animation) -> [effect | 0, target nid | -1, pseudo | null, name | null, sequence]: a handle is made
-// for an animation the engine made (a CSS animation's `animationName` its name), and for its effect — what they signal
-// has somewhere to go from now on.
+// __dom.animAdopt(animation) -> [effect | 0, target nid | -1, pseudo | null, name | null, sequence, kind]: a handle is
+// made for an animation the engine made — `animation` (a CSS animation, its `animationName` the name) or `transition`
+// (a CSS transition, its `transitionProperty`) — and for its effect: what they signal has somewhere to go from now on.
 fn anim_adopt(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     with_engine(scope, &args, |scope, engine, _arena| {
         let Some(id) = number_arg(scope, args.get(0)).map(|n| n as AnimationId) else { return };
         let model = &mut engine.web_animations;
         let Some(a) = model.animations.get_mut(&id) else { return };
         a.handled = true;
-        let (effect, name, sequence) = (a.effect, a.css.as_ref().map(|css| css.name.clone()), a.sequence);
+        let (effect, sequence) = (a.effect, a.sequence);
+        let (name, kind) = match &a.css {
+            Some(css) => (Some(css.name()), if css.transition().is_some() { "transition" } else { "animation" }),
+            None => (None, "script"),
+        };
         let target = effect.and_then(|e| model.effects.get_mut(&e)).and_then(|e| {
             e.orphaned = false;
             e.target.clone()
@@ -537,6 +542,7 @@ fn anim_adopt(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgume
                 None => v8::null(scope).into(),
             },
             v8::Number::new(scope, sequence as f64).into(),
+            string_value(scope, kind),
         ];
         rv.set(v8::Array::new_with_elements(scope, &items).into());
     });

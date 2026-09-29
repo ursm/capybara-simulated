@@ -1944,8 +1944,8 @@ fn style_flush(
 // __dom.styleTick(now) -> [retargeted count, nid…, then type, nid, pseudo, name, elapsedTime, animation, …]: a
 // rendering update at `now` (the page's clock, ms): a style flush — the elements whose animations' properties changed
 // first, as `styleFlush` gives them — and the animation / transition events the state changes since the last update
-// owe, handed back in order (`pseudo` null for an element's own; `animation` the engine's id of a CSS animation's,
-// 0 for a transition's).
+// owe, handed back in order (`pseudo` null for an element's own; `animation` the engine's id of the CSS animation or
+// transition it is about).
 fn style_tick(
     scope: &mut v8::PinScope<'_, '_>,
     args: v8::FunctionCallbackArguments<'_>,
@@ -1984,7 +1984,7 @@ fn style_tick_unguarded(
         });
         items.push(v8::String::new(scope, &e.name).map_or_else(|| v8::undefined(scope).into(), Into::into));
         items.push(v8::Number::new(scope, e.elapsed).into());
-        items.push(v8::Number::new(scope, e.animation.unwrap_or(0) as f64).into());
+        items.push(v8::Number::new(scope, e.animation as f64).into());
     }
     let array = v8::Array::new_with_elements(scope, &items);
     rv.set(array.into());

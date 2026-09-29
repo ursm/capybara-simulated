@@ -9,7 +9,9 @@
 // The Web Animations model: the timeline, animations and their effects' timing; and the ops a JS handle asks it with.
 mod animation_ops;
 mod animations;
+mod css;
 mod css_animations;
+mod css_transitions;
 // The native author cascade: a realm's static rules, and one element's winning declarations in one pass.
 mod cascade;
 mod dom;

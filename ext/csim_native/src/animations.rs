@@ -18,7 +18,7 @@ use style::values::animated::{Animate, Procedure};
 use style::values::computed::easing::ComputedTimingFunction;
 use style::values::generics::easing::{BeforeFlag, TimingKeyword};
 
-use crate::css_animations::{CssAnimation, CssEvent};
+use crate::css::{Css, CssEvent, CssKind};
 use crate::dom::NodeId;
 
 pub(crate) type AnimationId = u32;
@@ -275,6 +275,8 @@ pub(crate) struct Effect {
     pub(crate) computed: Option<ComputedKeyframes>,
     pub(crate) computed_from: Option<KeyframeInputs>,
     pub(crate) restyled: bool,
+    // Its keyframes' values were given rather than declared (a CSS transition's from and to): nothing computes them.
+    pub(crate) given: bool,
     // Its handle is gone, and it goes when its animation lets it go.
     pub(crate) orphaned: bool,
 }
@@ -285,6 +287,14 @@ pub(crate) struct Effect {
 pub(crate) enum PendingTask {
     Play,
     Pause,
+}
+
+// The cascade origin an animation's values are declared in (css-cascade-5 §6.1): a CSS transition's its own, above
+// the important author declarations; every other animation's the animations origin, below them.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub(crate) enum AnimationOrigin {
+    Animations,
+    Transitions,
 }
 
 // §4.4.16.
@@ -362,7 +372,7 @@ pub(crate) struct Animation {
     // Its place in composite order among script animations (§5.4.2): the order they were made in.
     pub(crate) sequence: u64,
     // What it is as a CSS animation, if style made it.
-    pub(crate) css: Option<CssAnimation>,
+    pub(crate) css: Option<Css>,
     // A JS handle holds it: what it signals has somewhere to go.
     pub(crate) handled: bool,
 }
@@ -388,6 +398,8 @@ pub(crate) struct Animations {
     retargeted: Vec<NodeId>,
     // The CSS animations each element owns (its pseudo-elements' included), which style asks about every restyle.
     pub(crate) css_by_owner: HashMap<NodeId, Vec<AnimationId>>,
+    // Style change events that started transitions, counted: a transition's place among its owner's.
+    pub(crate) style_changes: u64,
 }
 
 impl Animations {
@@ -404,6 +416,7 @@ impl Animations {
             computed: None,
             computed_from: None,
             restyled: false,
+            given: false,
             orphaned: false,
         };
         self.effects.insert(self.next_effect, effect);
@@ -536,59 +549,81 @@ impl Animations {
             return Vec::new();
         };
         let (Some(target), Some(computed)) = (&effect.target, &effect.computed) else { return Vec::new() };
-        self.compose_up_to(target, &mut values, Some(id), tree_order);
+        self.compose_up_to(target, None, &mut values, Some(id), tree_order);
         computed.properties.iter().filter_map(|(property, ..)| values.get(property).cloned()).collect()
     }
 
-    // Where two animations sort in composite order (web-animations §5.4.2, css-animations-2 §3.1): the CSS animations
-    // first — by owning element in tree order (`tree_order`), then its pseudo-elements (`::marker`, `::before`, any
-    // other, `::after`), then place in `animation-name` — and every other animation after, in the order it was made
-    // (one whose owner let it go among them).
+    // Where two animations sort in composite order (web-animations §5.4.2): the CSS transitions first — by owning
+    // element in tree order (`tree_order`), its pseudo-elements after it (`::marker`, `::before`, any other, `::after`),
+    // then the style change that started each and its property's name (css-transitions-2 §4.1) — then the CSS animations
+    // — by owning element as those, then place in `animation-name` (css-animations-2 §3.1) — and every other animation
+    // after, in the order it was made (a CSS animation or transition whose owner let it go among them).
     pub(crate) fn composite_order(
         &self,
         x: AnimationId,
         y: AnimationId,
         tree_order: &impl Fn(NodeId, NodeId) -> Ordering,
     ) -> Ordering {
-        let owned = |id: AnimationId| {
+        // (class, owner, place among the owner's, name — or the order it was made in)
+        let key = |id: AnimationId| {
             let a = &self.animations[&id];
-            a.css.as_ref().and_then(|css| Some((css.owner.as_ref()?, css.position))).ok_or(a.sequence)
+            let css = a.css.as_ref().filter(|css| css.owner.is_some());
+            match css.map(|css| (css.owner.as_ref().unwrap(), &css.kind)) {
+                Some((owner, CssKind::Transition(t))) => (0, Some(owner), t.generation, css.unwrap().name()),
+                Some((owner, CssKind::Animation(anim))) => (1, Some(owner), anim.position as u64, String::new()),
+                None => (2, None, a.sequence, String::new()),
+            }
         };
-        match (owned(x), owned(y)) {
-            (Ok((a, i)), Ok((b, j))) => (if a.node == b.node { Ordering::Equal } else { tree_order(a.node, b.node) })
+        let ((class_x, owner_x, place_x, name_x), (class_y, owner_y, place_y, name_y)) = (key(x), key(y));
+        class_x.cmp(&class_y).then_with(|| match (owner_x, owner_y) {
+            (Some(a), Some(b)) => (if a.node == b.node { Ordering::Equal } else { tree_order(a.node, b.node) })
                 .then_with(|| pseudo_rank(&a.pseudo).cmp(&pseudo_rank(&b.pseudo)))
-                .then_with(|| i.cmp(&j)),
-            (Ok(_), Err(_)) => Ordering::Less,
-            (Err(_), Ok(_)) => Ordering::Greater,
-            (Err(a), Err(b)) => a.cmp(&b),
-        }
+                .then_with(|| place_x.cmp(&place_y))
+                .then_with(|| name_x.cmp(&name_y)),
+            _ => place_x.cmp(&place_y),
+        })
     }
 
-    // Composite `underlying` (what the effects below left, keyed by property) with every effect animating `target`,
-    // in composite order, at their animations' current times (§5.4.4 "the effect value of a keyframe effect").
+    // Is animation `id` one of the transitions origin (css-cascade-5 §6.1): a CSS transition its owner owns? Every
+    // other is of the animations origin.
+    fn of_transitions_origin(&self, id: AnimationId) -> bool {
+        self.animations[&id].css.as_ref().is_some_and(|css| css.owner.is_some() && css.transition().is_some())
+    }
+
+    // Composite `underlying` (what the effects below left, keyed by property) with every effect of `origin` animating
+    // `target`, in composite order, at their animations' current times (§5.4.4 "the effect value of a keyframe
+    // effect").
     pub(crate) fn compose(
         &self,
         target: &Target,
+        origin: AnimationOrigin,
         underlying: &mut AnimationValueMap,
         tree_order: &impl Fn(NodeId, NodeId) -> Ordering,
     ) {
-        self.compose_up_to(target, underlying, None, tree_order);
+        self.compose_up_to(target, Some(origin), underlying, None, tree_order);
     }
 
-    // …those of them up to and including animation `last`'s only.
+    // …of either origin (None), those up to and including animation `last`'s only.
     fn compose_up_to(
         &self,
         target: &Target,
+        origin: Option<AnimationOrigin>,
         underlying: &mut AnimationValueMap,
         last: Option<AnimationId>,
         tree_order: &impl Fn(NodeId, NodeId) -> Ordering,
     ) {
         let Some(effects) = self.by_target.get(&target.node) else { return };
+        let wanted = |id: AnimationId| match origin {
+            Some(AnimationOrigin::Transitions) => self.of_transitions_origin(id),
+            Some(AnimationOrigin::Animations) => !self.of_transitions_origin(id),
+            None => true,
+        };
         let mut ordered: Vec<(AnimationId, &Effect)> = effects
             .iter()
             .filter_map(|id| self.effects.get(id))
             .filter(|e| e.target.as_ref() == Some(target))
             .filter_map(|e| Some((e.animation?, e)))
+            .filter(|&(id, _)| wanted(id))
             .collect();
         ordered.sort_by(|(x, _), (y, _)| self.composite_order(*x, *y, tree_order));
         if let Some(last) = last {
@@ -596,19 +631,32 @@ impl Animations {
             ordered.truncate(at + 1);
         }
         for (animation, effect) in ordered {
-            let Some(computed) = &effect.computed else { continue };
-            let rate = self.animations[&animation].playback_rate;
-            let timing = effect.timing.computed(self.current_time(animation), rate);
-            let (Some(progress), Some(iteration)) = (timing.progress, timing.current_iteration) else { continue };
-            let accumulate = if effect.iteration_composite_accumulate { iteration } else { 0.0 };
-            let implicit_easing = effect.implicit_easing.as_ref();
-            for (id, frames, base) in &computed.properties {
-                let below = underlying.get(id).or(base.as_ref());
-                if let Some(value) = compose_property(frames, below, progress, timing.phase, accumulate, implicit_easing) {
-                    underlying.insert(id.clone(), value);
-                }
+            self.compose_effect(animation, effect, underlying);
+        }
+    }
+
+    // One effect's values at its animation's current time, composited over `underlying`.
+    fn compose_effect(&self, animation: AnimationId, effect: &Effect, underlying: &mut AnimationValueMap) {
+        let Some(computed) = &effect.computed else { return };
+        let rate = self.animations[&animation].playback_rate;
+        let timing = effect.timing.computed(self.current_time(animation), rate);
+        let (Some(progress), Some(iteration)) = (timing.progress, timing.current_iteration) else { return };
+        let accumulate = if effect.iteration_composite_accumulate { iteration } else { 0.0 };
+        let implicit_easing = effect.implicit_easing.as_ref();
+        for (id, frames, base) in &computed.properties {
+            let below = underlying.get(id).or(base.as_ref());
+            if let Some(value) = compose_property(frames, below, progress, timing.phase, accumulate, implicit_easing) {
+                underlying.insert(id.clone(), value);
             }
         }
+    }
+
+    // What animation `id` alone shows of `property` now — a running transition's current value (css-transitions-1 §3).
+    pub(crate) fn current_value(&self, id: AnimationId, property: &OwnedPropertyDeclarationId) -> Option<AnimationValue> {
+        let effect = self.animations.get(&id)?.effect.and_then(|e| self.effects.get(&e))?;
+        let mut values = AnimationValueMap::default();
+        self.compose_effect(id, effect, &mut values);
+        values.get(property).cloned()
     }
 
     // `new Animation(effect, timeline)` (§4.4 constructor): idle, its ready promise settled.

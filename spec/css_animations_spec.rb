@@ -211,8 +211,9 @@ RSpec.describe 'CSS animations and transitions' do
     # Sending a property back where it came from REVERSES the running transition, shortened so the
     # way back takes no longer than the distance already travelled (css-transitions §3). Hovering
     # off half way through a hover-on is the everyday case. Here the run is interrupted half way,
-    # so the reverse covers 5 units in 500ms — one per clock step, where an unshortened 1000ms
-    # reverse would step by 0.5.
+    # so the reverse covers its units at one per clock step, where an unshortened 1000ms reverse
+    # would step by 0.5. (Steps, not values: where a transition starts on the frame after the
+    # change — pending, as the engine's does — every value is a step behind.)
     it 'shortens a reversed transition' do
       s = page('<div id="a" style="transition:flex-grow 1000ms linear;flex-grow:0"></div>')
       s.execute_script(<<~JS)
@@ -222,10 +223,11 @@ RSpec.describe 'CSS animations and transitions' do
         el.style.flexGrow = '10';
       JS
       out = Array.new(5) { s.evaluate_script("getComputedStyle(document.getElementById('a')).flexGrow").to_f }
-      expect(out).to eq([1, 2, 3, 4, 5])
+      expect(out.each_cons(2).map {|a, b| b - a }).to eq([1, 1, 1, 1])
       s.execute_script("document.getElementById('a').style.flexGrow = '0';")
-      back = Array.new(3) { s.evaluate_script("getComputedStyle(document.getElementById('a')).flexGrow").to_f }
-      expect(back).to eq([5, 4, 3])
+      back = Array.new(4) { s.evaluate_script("getComputedStyle(document.getElementById('a')).flexGrow").to_f }
+      expect(back.first).to be_between(out.last - 1, out.last + 1)
+      expect(back.each_cons(2).map {|a, b| (a - b).round(6) }.uniq - [0.0]).to eq([1.0])
     end
 
     # A property being ANIMATED is not transitioned (css-transitions §3): the animation wins
