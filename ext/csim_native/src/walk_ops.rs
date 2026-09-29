@@ -30,12 +30,13 @@ pub(crate) struct Parity {
 
 impl Parity {
     // Keep a pass's records as the JS walk sent them, for `walkParity` to hold the Rust walk's against.
-    pub(crate) fn keep(&mut self, inputs: &[Input], runs: &[Run], run_texts: &[RunText], inlines: &[InlineBox], maths: &[f64], basis: Basis) {
+    pub(crate) fn keep(&mut self, inputs: &[Input], runs: &[Run], run_texts: &[RunText], inlines: &[InlineBox], grids: &[f64], maths: &[f64], basis: Basis) {
         self.pending = Some(Pass {
             inputs: inputs.to_vec(),
             runs: runs.to_vec(),
             run_texts: run_texts.to_vec(),
             inlines: inlines.to_vec(),
+            grids: grids.to_vec(),
             maths: maths.to_vec(),
             basis,
         });
@@ -48,6 +49,7 @@ struct Pass {
     runs: Vec<Run>,
     run_texts: Vec<RunText>,
     inlines: Vec<InlineBox>,
+    grids: Vec<f64>,
     maths: Vec<f64>,
     basis: Basis,
 }
@@ -110,18 +112,24 @@ fn walk_parity(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgum
             let tag = |nid: f64| {
                 NodeId::from_i64(nid as i64).and_then(|id| arena.get(id)).map(|n| n.local_name.to_string()).unwrap_or_else(|| "anon".into())
             };
-            if built.inputs.len() != pass.inputs.len() || built.runs.len() != pass.runs.len() || built.inlines.len() != pass.inlines.len() {
+            if built.inputs.len() != pass.inputs.len()
+                || built.runs.len() != pass.runs.len()
+                || built.inlines.len() != pass.inlines.len()
+                || built.grids.len() != pass.grids.len()
+            {
                 stats.shape += 1;
                 if stats.samples.len() < MAX_SAMPLES {
                     stats.samples.push(format!(
-                        "shape at <{}>: records js {} rust {}, runs js {} rust {}, inlines js {} rust {}",
+                        "shape at <{}>: records js {} rust {}, runs js {} rust {}, inlines js {} rust {}, grids js {} rust {}",
                         tag(pass.inputs[0].nid),
                         pass.inputs.len(),
                         built.inputs.len(),
                         pass.runs.len(),
                         built.runs.len(),
                         pass.inlines.len(),
-                        built.inlines.len()
+                        built.inlines.len(),
+                        pass.grids.len(),
+                        built.grids.len()
                     ));
                 }
                 return;
@@ -154,6 +162,10 @@ fn walk_parity(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgum
             }
             for (i, (js, rust)) in pass.inlines.iter().zip(&built.inlines).enumerate() {
                 note(stats, format!("inline {i}"), walk::inline_diff(js, &pass.maths, rust, &built.maths));
+            }
+            // (…the grid stream by its numbers: a table's column count, then each column's declared px and fraction)
+            for (i, (js, rust)) in pass.grids.iter().zip(&built.grids).enumerate() {
+                note(stats, format!("grid {i}"), walk::grid_diff(*js, *rust));
             }
             if !real {
                 stats.clean += 1;

@@ -80,6 +80,7 @@ pub(crate) struct Built {
     pub(crate) runs: Vec<Run>,
     pub(crate) run_texts: Vec<RunText>,
     pub(crate) inlines: Vec<InlineBox>,
+    pub(crate) grids: Vec<f64>,
     pub(crate) maths: Vec<f64>,
 }
 
@@ -107,6 +108,7 @@ pub(crate) fn build(arena: &RealmArena, root: NodeId, basis: Basis, faces: &mut 
         inputs: Vec::new(),
         runs: Vec::new(),
         run_texts: Vec::new(),
+        grids: Vec::new(),
         maths: Vec::new(),
         math_index: HashMap::new(),
         inlines: Vec::new(),
@@ -128,6 +130,7 @@ pub(crate) fn build(arena: &RealmArena, root: NodeId, basis: Basis, faces: &mut 
             runs: walk.runs,
             run_texts: walk.run_texts,
             inlines: walk.inlines,
+            grids: walk.grids,
             maths: walk.maths,
         }),
         Err(why) => Outcome::Declined(why),
@@ -143,6 +146,8 @@ struct Walk<'a> {
     inputs: Vec<Input>,
     runs: Vec<Run>,
     run_texts: Vec<RunText>,
+    // The grid stream a table's (or a grid's) record names its columns in (`grid_start`).
+    grids: Vec<f64>,
     // The programs the records name, each once (`[length, op, a, b, …]` at its offset), and where each one is.
     maths: Vec<f64>,
     math_index: HashMap<Vec<u64>, u32>,
@@ -446,16 +451,6 @@ struct Intrinsic {
     ratio: bool,
     ratio_only: bool,
 }
-// HTML's rules for parsing a non-negative integer (`parseHtmlNonneg`).
-fn html_nonneg(v: &str) -> Option<u64> {
-    let t = v.trim_start_matches(|c: char| matches!(c, ' ' | '\t' | '\n' | '\x0c' | '\r'));
-    let t = t.strip_prefix('+').unwrap_or(t);
-    let digits: String = t.chars().take_while(|c| c.is_ascii_digit()).collect();
-    if digits.is_empty() {
-        return None;
-    }
-    digits.parse().ok()
-}
 // A label's lines, at each line break it holds (CR LF, CR or LF: `LABEL_BREAK_RE`).
 fn split_label_lines(label: &[u16]) -> Vec<&[u16]> {
     let mut lines = Vec::new();
@@ -517,6 +512,93 @@ fn view_box(v: &str) -> Option<(f64, f64)> {
     (n.len() == 4 && n.iter().all(|v| v.is_finite()) && n[2] > 0.0 && n[3] > 0.0).then_some((n[2], n[3]))
 }
 
+// A table's structure (`tableGrid`): its rows in render order, its groups, captions, columns and out-of-flow children,
+// and how many columns it has.
+struct TableGrid {
+    table: NodeId,
+    rows: Vec<GridRow>,
+    groups: Vec<GridGroup>,
+    captions: Vec<NodeId>,
+    columns: Vec<NodeId>,
+    oof: Vec<NodeId>,
+    col_count: usize,
+}
+// A row — an element's, or an anonymous one around stray content — its group, its content, and its cells placed.
+struct GridRow {
+    el: Option<NodeId>,
+    group: Option<usize>,
+    nodes: Vec<NodeId>,
+    pending: Vec<CellEl>,
+    cells: Vec<GridCell>,
+}
+struct GridGroup {
+    el: NodeId,
+    index: usize,
+    first: i32,
+    last: i32,
+    // (…0 header, 1 body, 2 footer: the order a table renders its groups in, `rowGroupRankOf`)
+    rank: u8,
+}
+#[derive(Clone)]
+enum CellEl {
+    El(NodeId),
+    Anon(Vec<NodeId>),
+}
+struct GridCell {
+    el: CellEl,
+    col: usize,
+    col_span: usize,
+    row_span: usize,
+}
+// A `span` / `colspan` / `rowspan` attribute (`spanAttr`): its integer, clamped to at least `min` (1 where `min` is 0 and
+// there is none) and at most 1000.
+fn span_attr(raw: Option<&str>, min: usize) -> usize {
+    let fallback = if min > 0 { min } else { 1 };
+    let Some(raw) = raw else { return fallback };
+    // (…JavaScript's `parseInt`: leading white space and a sign, then digits)
+    let t = raw.trim_start();
+    let (neg, t) = match t.as_bytes().first() {
+        Some(b'-') => (true, &t[1..]),
+        Some(b'+') => (false, &t[1..]),
+        _ => (false, t),
+    };
+    let digits = t.bytes().take_while(u8::is_ascii_digit).count();
+    if digits == 0 {
+        return fallback;
+    }
+    // (…past 1000 the count is 1000, however many digits say so)
+    let significant = t[..digits].trim_start_matches('0');
+    let n = if significant.len() > 4 { usize::MAX } else { significant.parse::<usize>().unwrap_or(0) };
+    if neg && n > 0 {
+        return fallback;
+    }
+    n.max(min).min(1000)
+}
+// A plain percentage — `50%`, no math function — as its fraction (`declaredPctFraction`).
+fn plain_percentage(lp: &LengthPercentage) -> Option<f64> {
+    use style::values::computed::length_percentage::Unpacked;
+    match lp.unpack() {
+        Unpacked::Percentage(p) => Some(p.0 as f64),
+        _ => None,
+    }
+}
+// How a cell's content sits in its row-tall box (`cellVAlign`): 0 baseline, 1 top, 2 middle, 3 bottom.
+fn cell_valign(style: &ComputedValues) -> u8 {
+    use style::values::generics::box_::{BaselineShiftKeyword, GenericBaselineShift as BaselineShift};
+    use style::values::specified::box_::AlignmentBaseline;
+    let b = style.get_box();
+    match (&b.baseline_shift, b.alignment_baseline) {
+        (BaselineShift::Keyword(BaselineShiftKeyword::Top), _) => 1,
+        (BaselineShift::Keyword(BaselineShiftKeyword::Bottom), _) => 3,
+        (_, AlignmentBaseline::Middle) => 2,
+        _ => 0,
+    }
+}
+// Is a text node white space alone to JavaScript's `trim` (the white space and line terminators it strips)?
+fn js_trim_empty(text: &[u16]) -> bool {
+    text.iter().all(|&u| matches!(u, 0x09 | 0x0A | 0x0B | 0x0C | 0x0D | 0x20 | 0xA0 | 0x1680 | 0x2000..=0x200A | 0x2028 | 0x2029 | 0x202F | 0x205F | 0x3000 | 0xFEFF))
+}
+
 // A flex item: an element, or an anonymous one around a run of bare text.
 enum FlexItem {
     Element(NodeId),
@@ -549,6 +631,15 @@ struct Fresh {
     separates: bool,
     floated: u8,
     bfc: bool,
+}
+
+// What a record is to the box that walks it: a box in flow, an out-of-flow one, a cell or a caption a table lays out.
+#[derive(Clone, Copy, PartialEq)]
+enum Role {
+    Flow,
+    OutOfFlow,
+    Cell,
+    Caption,
 }
 
 // What a block's element child is to its flow.
@@ -748,11 +839,10 @@ fn replaced_or_control(tag: &str) -> bool {
             | "iframe" | "frame" | "svg"
     )
 }
-// …and the ones this walk declines for now, each laid out from what it has not been taught: a fieldset (its legend and
-// its anonymous content box), a `<details>` (the content its closed state hides).
+// …and the ones this walk declines for now, each laid out from what it has not been taught: a `<details>` (the content
+// its closed state hides). (A fieldset is a flow-root block to the JS model, its legend an ordinary block in it.)
 fn declined_tag(tag: &str) -> Option<&'static str> {
     match tag {
-        "fieldset" => Some("fieldset"),
         "details" => Some("details"),
         _ => None,
     }
@@ -805,9 +895,9 @@ impl<'a> Walk<'a> {
     // One element's record, and its subtree's (`walkRecord`) — an in-flow box's, or an out-of-flow one's that `oof`
     // emits.
     fn record(&mut self, id: NodeId, parent: i32) -> Step {
-        self.record_as(id, parent, false)
+        self.record_as(id, parent, Role::Flow)
     }
-    fn record_as(&mut self, id: NodeId, parent: i32, out_of_flow: bool) -> Step {
+    fn record_as(&mut self, id: NodeId, parent: i32, role: Role) -> Step {
         // Whether a float is already placed in the formatting context this box is in, per side, is the walk's own
         // document-order state (`walkFresh`): a box whose `clear` names such a side has CLEARANCE, and does not
         // collapse its top margin with its parent's (§8.3.1). A float marks its side; a box that establishes a
@@ -831,13 +921,14 @@ impl<'a> Walk<'a> {
         if bfc {
             self.saw_float = (false, false);
         }
-        let done = self.record_body(id, parent, out_of_flow, Fresh { clear, separates, floated, bfc });
+        let done = self.record_body(id, parent, role, Fresh { clear, separates, floated, bfc });
         if bfc {
             self.saw_float = outer;
         }
         done
     }
-    fn record_body(&mut self, id: NodeId, parent: i32, out_of_flow: bool, fresh: Fresh) -> Step {
+    fn record_body(&mut self, id: NodeId, parent: i32, role: Role, fresh: Fresh) -> Step {
+        let out_of_flow = role == Role::OutOfFlow;
         let node = self.node(id);
         let style = self.style(id)?;
         let tag: &str = &node.local_name;
@@ -863,10 +954,13 @@ impl<'a> Walk<'a> {
             && !matches!(display.inside(), DisplayInside::Flex | DisplayInside::Grid);
         // (…and a REPLACED element — a control, an image, a frame — is a box of its own intrinsic size, whatever it holds)
         let intrinsic = self.intrinsic(id)?;
-        let container = intrinsic.is_some() || widget_block || match display.outside() {
-            DisplayOutside::Block => matches!(display.inside(), DisplayInside::Flow | DisplayInside::FlowRoot | DisplayInside::Flex),
-            DisplayOutside::Inline => match display.inside() {
-                DisplayInside::FlowRoot | DisplayInside::Flex => true,
+        // (…a cell or a caption only where a table lays it out, as the walk's role for it says)
+        let container = intrinsic.is_some() || widget_block || match (role, display.outside()) {
+            (Role::Cell, _) => matches!(display.inside(), DisplayInside::TableCell),
+            (Role::Caption, _) => matches!(display.outside(), DisplayOutside::TableCaption),
+            (_, DisplayOutside::Block) => matches!(display.inside(), DisplayInside::Flow | DisplayInside::FlowRoot | DisplayInside::Flex | DisplayInside::Table),
+            (_, DisplayOutside::Inline) => match display.inside() {
+                DisplayInside::FlowRoot | DisplayInside::Flex | DisplayInside::Table => true,
                 DisplayInside::Flow => self.holds_block_level(id)?,
                 _ => false,
             },
@@ -890,7 +984,7 @@ impl<'a> Walk<'a> {
         rec.flex_shrink = 1.0;
         // A FLEX ITEM's own sizing declarations (rec[59..62]): its `flex-basis` as a length (none at no basis), its
         // factors.
-        if !out_of_flow && self.flex_item(id)? {
+        if role == Role::Flow && self.flex_item(id)? {
             let p = style.get_position();
             use style::values::generics::flex::GenericFlexBasis as FlexBasis;
             use style::values::generics::length::GenericSize as Size;
@@ -907,7 +1001,10 @@ impl<'a> Walk<'a> {
         // The six sizes: a length as itself; one with a percentage in it resolved here against the pass root's
         // containing block where the record is the ROOT's (native is handed no basis for it), and anywhere else
         // handed to native as the pair — or the program — it resolves at the basis it has (`walkRecord`'s `size`).
-        let native_basis = parent >= 0;
+        // (…a CELL's percentage sizes are none of its box's: its column takes a width's, a height's resolves against no
+        // basis until its row does — `size`'s table-cell rule, and `cbH`'s null for a part a table lays out)
+        let native_basis = parent >= 0 && role != Role::Cell;
+        let edge_basis = parent >= 0;
         // An intrinsic-size KEYWORD width is native's own (rec[65] bits 11-12: 1 min-content, 2 max-content, 3
         // fit-content) — not on the pass root, sized from the width it is handed with no parent to mark it measured.
         use style::values::generics::length::GenericSize as Size;
@@ -938,6 +1035,8 @@ impl<'a> Walk<'a> {
             let Some(lp) = lp else { continue };
             if !lp.has_percentage() {
                 slots[k] = length(lp)?;
+            } else if role == Role::Cell {
+                slots[k] = f64::NAN;
             } else if !native_basis {
                 if basis.is_nan() {
                     return Err("root basis");
@@ -951,6 +1050,11 @@ impl<'a> Walk<'a> {
             }
         }
         [rec.width, rec.height, rec.min_w, rec.max_w, rec.min_h, rec.max_h] = slots;
+        // (…and a cell's min / max in its block axis are none: its row sizes it — `cellMinMaxFreeAxis`)
+        if role == Role::Cell {
+            rec.min_h = f64::NAN;
+            rec.max_h = f64::NAN;
+        }
         // (…the DECLARED inline sizing, which has no basis at all: a percentage in it is none, `auto`.)
         let declared = |k: usize| sizes[k].0.filter(|lp| !lp.has_percentage()).map_or(Ok(f64::NAN), |lp| length(lp));
         rec.decl_w = declared(0)?;
@@ -963,7 +1067,7 @@ impl<'a> Walk<'a> {
         rec.auto_margins = auto;
         let parts = if !edges.iter().flatten().any(|lp| lp.has_percentage()) {
             EdgeParts::at(&edges, 0.0)?
-        } else if !native_basis {
+        } else if !edge_basis {
             if self.basis.w.is_nan() {
                 return Err("root basis");
             }
@@ -999,7 +1103,7 @@ impl<'a> Walk<'a> {
         rec.legacy_align = self.legacy_align(id);
         // `position: relative` is a shift applied after the flow (§9.4.3) — not the pass root's, which is folded into
         // the origin it is handed.
-        if parent >= 0 && position == Position::Relative {
+        if parent >= 0 && position == Position::Relative && role != Role::Cell {
             self.relative(id, &style, &mut rec)?;
         }
         self.inputs.push(rec);
@@ -1010,22 +1114,31 @@ impl<'a> Walk<'a> {
         if matches!(display.inside(), DisplayInside::Flex) && !widget_block {
             return self.flex(id, idx, &style);
         }
+        if matches!(display.inside(), DisplayInside::Table) && !widget_block {
+            return self.table(id, idx, &style, role, parent);
+        }
+        let kids: Vec<NodeId> = self.children(id).collect();
+        self.block_contents(&kids, idx, &style)
+    }
 
+    // A block container's children (`walkRecord`'s classify, then its text-block, mixed or container arm): block-level
+    // boxes, floats, out-of-flow boxes, or inline content.
+    fn block_contents(&mut self, kids: &[NodeId], idx: i32, style: &ComputedValues) -> Step {
         // What the children are to this block's flow: block-level boxes, or inline content (`walkRecord`'s classify).
-        let ws_mode = ws_mode_of(&style)?;
+        let ws_mode = ws_mode_of(style)?;
         // (…the block-level children and the out-of-flow ones, in document order: an out-of-flow box's static position
         // is where the flow reached it.)
         let mut blocks: Vec<(NodeId, Kid)> = Vec::new();
         let mut in_flow = false;
         let mut inline = false;
-        for c in self.children(id) {
+        for &c in kids {
             let cn = self.node(c);
             match cn.kind {
                 NodeKind::Text => {
                     let child_mode = ws_mode;
                     if has_content(&cn.data) || white_space_only_is_content(&cn.data, child_mode) {
                         inline = true;
-                    } else if !cn.data.is_empty() && preserving(child_mode) && indent_may_bite(&style)? {
+                    } else if !cn.data.is_empty() && preserving(child_mode) && indent_may_bite(style)? {
                         return Err("text-not-measurable");
                     }
                 }
@@ -1058,19 +1171,18 @@ impl<'a> Walk<'a> {
             }
         }
         if inline && in_flow {
-            return self.mixed_block(id, idx, &style, ws_mode, &blocks);
+            return self.mixed_block(kids, idx, style, ws_mode, &blocks);
         }
         if inline {
-            let kids: Vec<NodeId> = self.children(id).collect();
-            return self.text_block(&kids, idx, &style, ws_mode);
+            return self.text_block(kids, idx, style, ws_mode);
         }
         self.inputs[idx as usize].display = DISPLAY_BLOCK;
         self.inputs[idx as usize].ws_mode = ws_mode;
         // The cursor an out-of-flow child reads is a LINE cursor: the block's first-line indent and its line height.
         if blocks.iter().any(|&(_, kid)| kid == Kid::OutOfFlow) {
-            let (indent, bits) = indent(&style)?;
+            let (indent, bits) = indent(style)?;
             let math = self.math(indent.prog.as_deref());
-            let lh = self.font_info(&style, &style)?.lh;
+            let lh = self.font_info(style, style)?.lh;
             let rec = &mut self.inputs[idx as usize];
             rec.indent_px = indent.px;
             rec.indent_frac = indent.frac;
@@ -1094,7 +1206,7 @@ impl<'a> Walk<'a> {
     // and out-of-flow boxes join the run they are written in, as markers on its lines. A run that makes no line is
     // no box: its records are taken back, and its floats go where the next line would have started — among the
     // block's own children.
-    fn mixed_block(&mut self, id: NodeId, idx: i32, style: &ComputedValues, ws_mode: u8, blocks: &[(NodeId, Kid)]) -> Step {
+    fn mixed_block(&mut self, kids: &[NodeId], idx: i32, style: &ComputedValues, ws_mode: u8, blocks: &[(NodeId, Kid)]) -> Step {
         let font = self.font_info(style, style)?;
         let (indent, bits) = indent(style)?;
         let bites = indent.px != 0.0 || indent.frac != 0.0 || indent.prog.is_some();
@@ -1106,9 +1218,9 @@ impl<'a> Walk<'a> {
         let block_kids: Vec<NodeId> = blocks.iter().filter(|&&(_, kid)| kid == Kid::Block).map(|&(c, _)| c).collect();
         let mut unspent = true;
         let mut group: Vec<NodeId> = Vec::new();
-        let children: Vec<NodeId> = self.children(id).collect();
-        for c in children.into_iter().chain(std::iter::once(id)) {
-            let end = c == id;
+        for c in kids.iter().copied().map(Some).chain(std::iter::once(None)) {
+            let end = c.is_none();
+            let c = c.unwrap_or(NodeId::from_i64(0).expect("a placeholder"));
             let is_block = !end && block_kids.contains(&c);
             if !end && !is_block {
                 let n = self.node(c);
@@ -1190,7 +1302,7 @@ impl<'a> Walk<'a> {
             "iframe" | "frame" | "embed" | "video" => sized(300.0, 150.0),
             "object" => return Err("object"),
             "canvas" => {
-                let dim = |name: &str, default: f64| node.get_attr(name).and_then(html_nonneg).map_or(default, |n| n as f64);
+                let dim = |name: &str, default: f64| node.get_attr(name).and_then(crate::validity::parse_non_negative).map_or(default, |n| n as f64);
                 Intrinsic { ratio: true, ..sized(dim("width", 300.0), dim("height", 150.0)) }
             }
             "img" => match node.natural_size {
@@ -1224,8 +1336,7 @@ impl<'a> Walk<'a> {
             }
             "svg" => self.svg_intrinsic(id)?,
             "select" => {
-                let size = node.get_attr("size").and_then(html_nonneg).filter(|&n| n > 0);
-                if size.map_or(node.get_attr("multiple").is_some(), |n| n > 1) {
+                if self.arena.is_list_box(id) {
                     return Err("list box");
                 }
                 let widest = self.widest_option(id, id, 0.0, 0.0)?;
@@ -1504,6 +1615,455 @@ impl<'a> Walk<'a> {
         Ok(())
     }
 
+    // A TABLE (`walkRecord`'s table arm): its structure as the JS walk builds it (`tableGrid`) — its record, the
+    // column declarations on the grids stream, a record per row group and row, its cells walked under their rows (an
+    // anonymous one around each run of stray content), its captions and its out-of-flow children.
+    fn table(&mut self, id: NodeId, idx: i32, style: &ComputedValues, role: Role, parent: i32) -> Step {
+        use style::computed_values::border_collapse::T as BorderCollapse;
+        if style.get_inherited_table().border_collapse == BorderCollapse::Collapse {
+            return Err("collapse table");
+        }
+        let grid = self.table_grid(id)?;
+        let empty = grid.rows.is_empty() && grid.col_count == 0;
+        if !empty && (grid.rows.is_empty() || grid.col_count == 0) {
+            return Err("table-half-empty");
+        }
+        if grid.rows.is_empty() && grid.captions.is_empty() && self.children(id).any(|c| self.node(c).kind == NodeKind::Text && has_content(&self.node(c).data)) {
+            return Err("table of bare text");
+        }
+        for g in &grid.groups {
+            if g.first >= 0 && (g.first..=g.last).any(|i| grid.rows[i as usize].group != Some(g.index)) {
+                return Err("table-group-interleaved");
+            }
+        }
+        for row in &grid.rows {
+            let mut single = false;
+            for cell in &row.cells {
+                if cell.col + cell.col_span > grid.col_count {
+                    return Err("table-span-past-columns");
+                }
+                single |= cell.row_span == 1;
+            }
+            if !single {
+                return Err("table-row-without-single-cell");
+            }
+        }
+        let spacing = style.get_inherited_table().border_spacing.clone();
+        let parent_display = if parent >= 0 { Some(self.inputs[parent as usize].display) } else { None };
+        {
+            use style::computed_values::table_layout::T as TableLayout;
+            let r = &mut self.inputs[idx as usize];
+            r.display = crate::layout::DISPLAY_TABLE;
+            r.sp_x = spacing.horizontal().to_f64_px();
+            r.sp_y = spacing.vertical().to_f64_px();
+            r.self_sizes = role != Role::OutOfFlow && parent_display.is_none_or(|d| d == DISPLAY_BLOCK);
+            r.table_fixed = style.get_table().table_layout == TableLayout::Fixed;
+            r.grid_start = self.grids.len() as i32;
+        }
+        // The columns: each's declared width, a plain percentage apart, spread over the span it covers.
+        let n = grid.col_count;
+        let (mut spec, mut pct) = (vec![f64::NAN; n], vec![0.0f64; n]);
+        let mut at = 0usize;
+        for &col in &grid.columns {
+            let span = span_attr(self.node(col).get_attr("span"), 1);
+            let cs = self.style(col)?;
+            let (frac, px) = match size_lp(&cs.get_position().width)? {
+                Some(lp) => match plain_percentage(lp) {
+                    Some(f) => (Some(f), None),
+                    None if !lp.has_percentage() => (None, Some(length(lp)?)),
+                    None => (None, None),
+                },
+                None => (None, None),
+            };
+            for k in 0..span {
+                if at + k >= n {
+                    break;
+                }
+                match (frac, px) {
+                    (Some(f), _) => pct[at + k] = pct[at + k].max(f),
+                    (None, Some(px)) => spec[at + k] = if spec[at + k].is_nan() { px.max(0.0) } else { spec[at + k].max(px) },
+                    _ => {}
+                }
+            }
+            at += span;
+        }
+        self.grids.push(n as f64);
+        for k in 0..n {
+            self.grids.push(spec[k]);
+            self.grids.push(pct[k]);
+        }
+        // The rows, grouped as their groups hold them, in render order (header, body, footer).
+        let mut i = 0;
+        while i < grid.rows.len() {
+            let Some(gi) = grid.rows[i].group else {
+                self.table_row(&grid, i, idx, style)?;
+                i += 1;
+                continue;
+            };
+            let g = grid.groups[gi].el;
+            let at = self.table_part(g, idx, crate::layout::DISPLAY_TABLE_ROW_GROUP)?;
+            while i < grid.rows.len() && grid.rows[i].group == Some(gi) {
+                self.table_row(&grid, i, at, style)?;
+                i += 1;
+            }
+        }
+        for g in grid.groups.iter().filter(|g| g.first < 0) {
+            self.table_part(g.el, idx, crate::layout::DISPLAY_TABLE_ROW_GROUP)?;
+        }
+        for &cap in &grid.captions {
+            let at = self.inputs.len() as i32;
+            self.record_as(cap, idx, Role::Caption)?;
+            use style::computed_values::caption_side::T as CaptionSide;
+            let bottom = self.style(cap)?.get_inherited_table().caption_side == CaptionSide::Bottom;
+            self.inputs[at as usize].caption_side = bottom as u8;
+        }
+        for &c in &grid.oof {
+            self.out_of_flow(c, idx)?;
+        }
+        Ok(())
+    }
+    // A row group's or a row's record (`emitRow` and the group arm): its element, its parent, its display, whether it
+    // scrolls.
+    fn table_part(&mut self, el: NodeId, parent: i32, display: u8) -> Result<i32, &'static str> {
+        let at = self.inputs.len() as i32;
+        let style = self.style(el)?;
+        let mut r = fresh_record();
+        r.nid = el.to_f64();
+        r.parent = parent;
+        r.display = display;
+        r.run_start = -1;
+        r.scrolls_y = scrolls(style.get_box().overflow_y);
+        self.inputs.push(r);
+        Ok(at)
+    }
+    // A row and its cells (`emitRow`).
+    fn table_row(&mut self, grid: &TableGrid, i: usize, parent: i32, table_style: &ComputedValues) -> Step {
+        let row = &grid.rows[i];
+        let at = match row.el {
+            Some(el) => {
+                let at = self.table_part(el, parent, crate::layout::DISPLAY_TABLE_ROW)?;
+                let style = self.style(el)?;
+                let r = &mut self.inputs[at as usize];
+                r.row_pct = size_lp(&style.get_position().height)?.and_then(plain_percentage).unwrap_or(f64::NAN);
+                r.row_height = if r.row_pct.is_nan() {
+                    size_lp(&style.get_position().height)?.filter(|lp| !lp.has_percentage()).map_or(Ok(f64::NAN), length)?
+                } else {
+                    f64::NAN
+                };
+                at
+            }
+            None => {
+                let at = self.inputs.len() as i32;
+                let mut r = fresh_record();
+                r.nid = -1.0;
+                r.parent = parent;
+                r.display = crate::layout::DISPLAY_TABLE_ROW;
+                r.run_start = -1;
+                self.inputs.push(r);
+                at
+            }
+        };
+        let rank = match row.group {
+            Some(g) => grid.groups[g].rank,
+            None => 1,
+        };
+        self.inputs[at as usize].row_rank = rank;
+        for cell in &row.cells {
+            let ci = self.inputs.len() as i32;
+            let (valign, pct, pct_h_child) = match &cell.el {
+                CellEl::El(c) => {
+                    self.record_as(*c, at, Role::Cell)?;
+                    let cs = self.style(*c)?;
+                    (cell_valign(&cs), size_lp(&cs.get_position().width)?.and_then(plain_percentage).unwrap_or(f64::NAN), self.pct_height_child(*c)?)
+                }
+                CellEl::Anon(run) => {
+                    self.anonymous_cell(grid.table, at, table_style, run)?;
+                    let mut any = false;
+                    for &k in run {
+                        any |= self.pct_height_in(k)?;
+                    }
+                    (0, f64::NAN, any)
+                }
+            };
+            let r = &mut self.inputs[ci as usize];
+            r.cell_valign = valign;
+            r.cell_pct = pct;
+            r.height_is_floor = true;
+            r.cell_pct_h_child = pct_h_child;
+            r.cell_col = cell.col;
+            r.cell_colspan = cell.col_span;
+            r.cell_rowspan = cell.row_span;
+        }
+        Ok(())
+    }
+    // An ANONYMOUS cell around a run of a row's stray content (`anonTableCell`): no element, the TABLE's inherited
+    // style, and the run as its children.
+    fn anonymous_cell(&mut self, table: NodeId, parent: i32, style: &ComputedValues, run: &[NodeId]) -> Step {
+        let at = self.inputs.len() as i32;
+        let mut rec = fresh_record();
+        rec.nid = -1.0;
+        rec.parent = parent;
+        rec.run_start = -1;
+        rec.flex_shrink = 1.0;
+        [rec.width, rec.height, rec.min_w, rec.max_w, rec.min_h, rec.max_h] = [f64::NAN; 6];
+        rec.height_adjoins = true;
+        rec.minh_adjoins = true;
+        rec.bottom_adjoins = true;
+        rec.starts_bfc = true;
+        rec.rtl = (style.get_inherited_box().direction == Direction::Rtl) as u8;
+        rec.legacy_align = self.legacy_align(table);
+        self.inputs.push(rec);
+        self.block_contents(run, at, style)
+    }
+    // Does a cell hold a box whose height is a percentage — what makes a table lay it out twice (`cellHasPctHeightChild`):
+    // down its in-flow boxes, past none with a definite height of its own or a table.
+    fn pct_height_child(&self, cell: NodeId) -> Result<bool, &'static str> {
+        for c in self.children(cell) {
+            if self.pct_height_in(c)? {
+                return Ok(true);
+            }
+        }
+        Ok(false)
+    }
+    fn pct_height_in(&self, c: NodeId) -> Result<bool, &'static str> {
+        if self.node(c).kind != NodeKind::Element {
+            return Ok(false);
+        }
+        let cs = self.style(c)?;
+        let b = cs.get_box();
+        if b.clone_display().is_none() || matches!(b.clone_position(), Position::Absolute | Position::Fixed) {
+            return Ok(false);
+        }
+        // (…and a box-less one is its children, in its place)
+        if b.clone_display().is_contents() {
+            return self.pct_height_child(c);
+        }
+        let pos = cs.get_position();
+        if [size_lp(&pos.height)?, size_lp(&pos.min_height)?, max_size_lp(&pos.max_height)?].iter().flatten().any(|lp| lp.has_percentage()) {
+            return Ok(true);
+        }
+        if size_lp(&pos.height)?.is_some() || matches!(b.clone_display().inside(), DisplayInside::Table) {
+            return Ok(false);
+        }
+        self.pct_height_child(c)
+    }
+    // A table's structure (`tableGrid` / `placeCells`).
+    fn table_grid(&self, table: NodeId) -> Result<TableGrid, &'static str> {
+        let mut grid = TableGrid { table, rows: Vec::new(), groups: Vec::new(), captions: Vec::new(), columns: Vec::new(), oof: Vec::new(), col_count: 0 };
+        self.collect_table(table, None, &mut grid)?;
+        // Each row's content as cells: a run of anything but a cell is an anonymous one.
+        for row in &mut grid.rows {
+            let mut cells = Vec::new();
+            let mut run: Vec<NodeId> = Vec::new();
+            for &n in &row.nodes {
+                let is_cell = self.node(n).kind == NodeKind::Element && matches!(self.style(n)?.get_box().clone_display().inside(), DisplayInside::TableCell);
+                if is_cell {
+                    if !run.is_empty() {
+                        cells.push(CellEl::Anon(std::mem::take(&mut run)));
+                    }
+                    cells.push(CellEl::El(n));
+                } else {
+                    run.push(n);
+                }
+            }
+            if !run.is_empty() {
+                cells.push(CellEl::Anon(run));
+            }
+            row.pending = cells;
+        }
+        // Render order: header groups, then bodies (and rows of no group), then footers.
+        let ranks: Vec<u8> = grid.rows.iter().map(|r| r.group.map_or(1, |g| grid.groups[g].rank)).collect();
+        let mut order: Vec<usize> = (0..grid.rows.len()).collect();
+        order.sort_by_key(|&i| ranks[i]);
+        let mut rows: Vec<GridRow> = Vec::with_capacity(grid.rows.len());
+        let mut taken: Vec<Option<GridRow>> = std::mem::take(&mut grid.rows).into_iter().map(Some).collect();
+        for i in order {
+            rows.push(taken[i].take().unwrap());
+        }
+        grid.rows = rows;
+        for (gi, g) in grid.groups.iter_mut().enumerate() {
+            g.first = grid.rows.iter().position(|r| r.group == Some(gi)).map_or(-1, |p| p as i32);
+            g.last = grid.rows.iter().rposition(|r| r.group == Some(gi)).map_or(-1, |p| p as i32);
+        }
+        let mut col_defs = 0usize;
+        for &col in &grid.columns {
+            col_defs += span_attr(self.node(col).get_attr("span"), 1);
+        }
+        let spanned = self.place_cells(&mut grid, usize::MAX);
+        let mut count = col_defs;
+        for row in &grid.rows {
+            for cell in &row.cells {
+                if cell.col_span == 1 && cell.col + 1 > count {
+                    count = cell.col + 1;
+                }
+            }
+        }
+        grid.col_count = count.max(if grid.rows.iter().any(|r| !r.cells.is_empty()) { 1 } else { 0 });
+        if spanned {
+            let n = grid.col_count;
+            self.place_cells(&mut grid, n);
+        }
+        Ok(grid)
+    }
+    fn collect_table(&self, parent: NodeId, group: Option<usize>, grid: &mut TableGrid) -> Step {
+        let mut anon: Option<usize> = None;
+        for c in self.children(parent).collect::<Vec<_>>() {
+            let n = self.node(c);
+            match n.kind {
+                NodeKind::Text => {
+                    if js_trim_empty(&n.data) {
+                        continue;
+                    }
+                    let at = *anon.get_or_insert_with(|| {
+                        grid.rows.push(GridRow { el: None, group, nodes: Vec::new(), pending: Vec::new(), cells: Vec::new() });
+                        grid.rows.len() - 1
+                    });
+                    grid.rows[at].nodes.push(c);
+                }
+                NodeKind::Element => {
+                    let cs = self.style(c)?;
+                    let b = cs.get_box();
+                    let d = b.clone_display();
+                    if d.is_none() {
+                        continue;
+                    }
+                    if d.is_contents() {
+                        return Err("display contents");
+                    }
+                    if matches!(b.clone_position(), Position::Absolute | Position::Fixed) {
+                        grid.oof.push(c);
+                        continue;
+                    }
+                    match (d.outside(), d.inside()) {
+                        (DisplayOutside::InternalTable, DisplayInside::TableRow) => {
+                            anon = None;
+                            let nodes = self.row_content(c, grid)?;
+                            grid.rows.push(GridRow { el: Some(c), group, nodes, pending: Vec::new(), cells: Vec::new() });
+                        }
+                        (DisplayOutside::InternalTable, inside @ (DisplayInside::TableRowGroup | DisplayInside::TableHeaderGroup | DisplayInside::TableFooterGroup)) => {
+                            anon = None;
+                            let rank = match inside {
+                                DisplayInside::TableHeaderGroup => 0,
+                                DisplayInside::TableFooterGroup => 2,
+                                _ => 1,
+                            };
+                            grid.groups.push(GridGroup { el: c, index: grid.groups.len(), first: -1, last: -1, rank });
+                            let gi = grid.groups.len() - 1;
+                            self.collect_table(c, Some(gi), grid)?;
+                        }
+                        (DisplayOutside::TableCaption, _) => {
+                            anon = None;
+                            grid.captions.push(c);
+                        }
+                        (DisplayOutside::InternalTable, DisplayInside::TableColumn) => {
+                            anon = None;
+                            grid.columns.push(c);
+                        }
+                        (DisplayOutside::InternalTable, DisplayInside::TableColumnGroup) => {
+                            anon = None;
+                            let cols: Vec<NodeId> = self
+                                .children(c)
+                                .filter(|&k| {
+                                    self.node(k).kind == NodeKind::Element
+                                        && self.style(k).is_ok_and(|ks| matches!(ks.get_box().clone_display().inside(), DisplayInside::TableColumn))
+                                })
+                                .collect();
+                            if cols.is_empty() {
+                                grid.columns.push(c);
+                            } else {
+                                grid.columns.extend(cols);
+                            }
+                        }
+                        _ => {
+                            let at = *anon.get_or_insert_with(|| {
+                                grid.rows.push(GridRow { el: None, group, nodes: Vec::new(), pending: Vec::new(), cells: Vec::new() });
+                                grid.rows.len() - 1
+                            });
+                            grid.rows[at].nodes.push(c);
+                        }
+                    }
+                }
+                _ => {}
+            }
+        }
+        Ok(())
+    }
+    // A row's content (`rowContent`): its non-blank text and its elements, an out-of-flow one set apart.
+    fn row_content(&self, row: NodeId, grid: &mut TableGrid) -> Result<Vec<NodeId>, &'static str> {
+        let mut out = Vec::new();
+        for c in self.children(row).collect::<Vec<_>>() {
+            let n = self.node(c);
+            match n.kind {
+                NodeKind::Text => {
+                    if !js_trim_empty(&n.data) {
+                        out.push(c);
+                    }
+                }
+                NodeKind::Element => {
+                    let cs = self.style(c)?;
+                    let b = cs.get_box();
+                    let d = b.clone_display();
+                    if d.is_none() {
+                        continue;
+                    }
+                    if d.is_contents() {
+                        return Err("display contents");
+                    }
+                    if matches!(b.clone_position(), Position::Absolute | Position::Fixed) {
+                        grid.oof.push(c);
+                        continue;
+                    }
+                    out.push(c);
+                }
+                _ => {}
+            }
+        }
+        Ok(out)
+    }
+    // Each row's cells placed in the grid (`placeCells`): a column past those rows above still take, a `colspan` capped
+    // at `limit`, a `rowspan` at its group's last row (`rowspan=0` fills it). Whether any spans.
+    fn place_cells(&self, grid: &mut TableGrid, limit: usize) -> bool {
+        let mut taken: Vec<std::collections::HashSet<usize>> = vec![Default::default(); grid.rows.len()];
+        let mut spanned = false;
+        let n_rows = grid.rows.len();
+        for r in 0..n_rows {
+            let pending = std::mem::take(&mut grid.rows[r].pending);
+            let group_last = grid.rows[r].group.map(|g| grid.groups[g].last).filter(|&l| l >= 0);
+            let last_row = group_last.map_or(n_rows as i32 - 1, |l| l);
+            let mut cells = Vec::new();
+            let mut c = 0usize;
+            for cell in &pending {
+                while taken[r].contains(&c) {
+                    c += 1;
+                }
+                let spans = matches!(cell, CellEl::El(e) if matches!(&*self.node(*e).local_name, "td" | "th"));
+                let attr = |name: &str| match cell {
+                    CellEl::El(e) => self.node(*e).get_attr(name).map(str::to_owned),
+                    CellEl::Anon(_) => None,
+                };
+                let col_span = if spans { span_attr(attr("colspan").as_deref(), 1).min(limit.saturating_sub(c)).max(1) } else { 1 };
+                let room = ((last_row - r as i32 + 1).max(1)) as usize;
+                let declared = if spans { span_attr(attr("rowspan").as_deref(), 0) } else { 1 };
+                let row_span = if declared == 0 { room } else { declared.min(room) };
+                if col_span > 1 || row_span > 1 {
+                    spanned = true;
+                }
+                cells.push(GridCell { el: cell.clone(), col: c, col_span, row_span });
+                for dr in 0..row_span {
+                    if r + dr < n_rows {
+                        for dc in 0..col_span {
+                            taken[r + dr].insert(c + dc);
+                        }
+                    }
+                }
+                c += col_span;
+            }
+            grid.rows[r].pending = pending;
+            grid.rows[r].cells = cells;
+        }
+        spanned
+    }
+
     // An ANONYMOUS flex item (`anonBoxItem`): a block of no element around a run of the container's bare text, which
     // takes the container's inherited style and every other property's initial value — its record (nid −1), and its
     // lines.
@@ -1588,7 +2148,7 @@ impl<'a> Walk<'a> {
         let fixed = style.get_box().clone_position() == Position::Fixed;
         let cb = self.containing_block(id, fixed)?;
         let at = self.inputs.len() as i32;
-        self.record_as(id, parent, true)?;
+        self.record_as(id, parent, Role::OutOfFlow)?;
         let mut insets = [(f64::NAN, 0.0, crate::layout::NO_MATH); 4];
         let pos = style.get_position();
         for (k, inset) in [&pos.top, &pos.right, &pos.bottom, &pos.left].into_iter().enumerate() {
@@ -1930,10 +2490,11 @@ impl<'a> Walk<'a> {
         if d.is_contents() {
             return Err("display contents");
         }
-        // (…a `<br>` a flex or grid container's run of bare text holds is still a line break in the anonymous item: the
-        // style engine blockifies it as the container's child, where the JS model keeps it the inline it is)
-        let blockified_br = tag == "br" && self.parent_is_item_container(c)?;
-        if !matches!(d.outside(), DisplayOutside::Inline) && !blockified_br {
+        // (…a `<br>` or a `<wbr>` a flex or grid container's run of bare text holds is still a line break, or a place for
+        // one, in the anonymous item: the style engine blockifies it as the container's child, where the JS model keeps
+        // it the inline it is)
+        let blockified_break = matches!(tag, "br" | "wbr") && self.parent_is_item_container(c)?;
+        if !matches!(d.outside(), DisplayOutside::Inline) && !blockified_break {
             return Err("block-level-box-in-inline-content");
         }
         // An ATOMIC inline — an `inline-block` — is one box on the line: its own record subtree under the block of
@@ -2373,7 +2934,9 @@ impl<'a> Walk<'a> {
             return true;
         }
         let b = style.get_box();
-        if !matches!(b.clone_display().inside(), DisplayInside::Flow) {
+        // (…every box but an ordinary block or inline one: a caption's flow is its own too)
+        let d = b.clone_display();
+        if !matches!(d.inside(), DisplayInside::Flow) || !matches!(d.outside(), DisplayOutside::Block | DisplayOutside::Inline) {
             return true;
         }
         if b.clone_float() != Float::None || matches!(b.clone_position(), Position::Absolute | Position::Fixed) {
@@ -3091,6 +3654,10 @@ pub(crate) fn inline_diff(js: &InlineBox, js_maths: &[f64], rust: &InlineBox, ru
         }
     }
     out
+}
+// …a number on the grid stream.
+pub(crate) fn grid_diff(js: f64, rust: f64) -> Vec<FieldDiff> {
+    Same::diff(&js, &rust).map(|close| FieldDiff { field: "grids", close, js: format!("{js:?}"), rust: format!("{rust:?}") }).into_iter().collect()
 }
 // …and a run.
 pub(crate) fn run_diff(js: &Run, rust: &Run) -> Vec<FieldDiff> {

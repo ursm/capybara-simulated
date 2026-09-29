@@ -315,7 +315,7 @@ select {
   overflow: clip;
   overflow-clip-margin: content-box;
 }
-select:is([multiple], [size]:not([size="1"], [size="0"])) {
+select:-servo-list-box {
   background-color: rgb(255, 255, 255);
   overflow-x: hidden;
   overflow-y: scroll;

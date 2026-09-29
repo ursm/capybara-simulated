@@ -439,4 +439,13 @@ RSpec.describe 'native layout replaced-leaf parity' do
     expect_parity(body)
     expect(laid_out_rect(body)[2]).to be_within(0.05).of(16)
   end
+
+  # …`svg:not(:root)`: the ROOT of an SVG document keeps `overflow: visible`, which would otherwise go to the viewport
+  # and stop the document scrolling (Chrome and Firefox).
+  it 'leaves the root of an SVG document unclipped' do
+    svg = '<svg xmlns="http://www.w3.org/2000/svg" width="2000" height="2000"><svg id="inner" width="10" height="10"/></svg>'
+    s = simulated_session(->(_env) { [200, {'content-type' => 'image/svg+xml'}, [svg]] })
+    s.visit '/'
+    expect(s.evaluate_script('[document.documentElement, document.getElementById("inner")].map((e) => getComputedStyle(e).overflow).join(" ")')).to eq('visible hidden')
+  end
 end

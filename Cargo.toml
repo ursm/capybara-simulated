@@ -6,7 +6,8 @@ members  = ["ext/csim_native"]
 resolver = "2"
 
 # The style engine is stylo from a fork (github.com/ursm/stylo, branch `csim`): the published crate plus the longhands
-# Servo builds leave to Gecko, enabled for Servo builds. Every crate of the stylo workspace comes from the fork, so
+# and the grammar Servo builds leave to Gecko, enabled for Servo builds, and the UA-only pseudo-class its sheet keys a
+# list-box `<select>` on (`:-servo-list-box`). Every crate of the stylo workspace comes from the fork, so
 # stylo and the selector matcher share ONE selectors / cssparser, as they must.
 [patch.crates-io]
 stylo                = {git = "https://github.com/ursm/stylo", branch = "csim"}

@@ -1732,6 +1732,7 @@ fn element_state(arena: &RealmArena, id: NodeId, link: bool) -> ElementState {
     set(ElementState::DEFINED, arena.is_defined(id));
     set(ElementState::MODAL, arena.is_modal(id));
     set(ElementState::POPOVER_OPEN, arena.is_popover_open(id));
+    set(ElementState::SERVO_LIST_BOX, arena.is_list_box(id));
     match arena.is_valid_pseudo(id) {
         Some(true) => set(ElementState::VALID, true),
         Some(false) => set(ElementState::INVALID, true),
@@ -2465,6 +2466,7 @@ impl<'a> selectors::Element for StyleNode<'a> {
             NonTSPseudoClass::OutOfRange => arena.is_in_range(id) == Some(false),
             NonTSPseudoClass::PlaceholderShown => arena.is_placeholder_shown(id),
             NonTSPseudoClass::PopoverOpen => arena.is_popover_open(id),
+            NonTSPseudoClass::ServoListBox => arena.is_list_box(id),
             NonTSPseudoClass::ReadOnly => !arena.is_read_write(id),
             NonTSPseudoClass::ReadWrite => arena.is_read_write(id),
             NonTSPseudoClass::Target => arena.is_target(id),

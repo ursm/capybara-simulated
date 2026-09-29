@@ -334,6 +334,17 @@ impl RealmArena {
     pub(crate) fn is_filtered(&self, id: NodeId) -> bool {
         self.has_state(id, STATE_FILTERED)
     }
+    // A `<select>` shown as a LIST BOX rather than a drop-down (HTML rendering §15.5.15): `multiple`, or a display size
+    // above 1 — its `size` PARSED as a non-negative integer, so ` 1 ` and junk are drop-downs as they are to
+    // `selectDisplaySize`. What the UA sheet's `:-servo-list-box` asks, and the walk's.
+    pub(crate) fn is_list_box(&self, id: NodeId) -> bool {
+        self.get(id).is_some_and(|n| {
+            n.is_html_named("select") && {
+                let size = n.get_attr("size").and_then(crate::validity::parse_non_negative).filter(|&s| s > 0);
+                size.map_or(n.get_attr("multiple").is_some(), |s| s > 1)
+            }
+        })
+    }
     // `:popover-open`: a showing popover, in a document.
     pub(crate) fn is_popover_open(&self, id: NodeId) -> bool {
         self.has_state(id, STATE_POPOVER_OPEN) && self.is_connected(id)

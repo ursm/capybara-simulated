@@ -243,6 +243,16 @@ RSpec.describe 'style engine invalidation' do
     expect(read).to eq('0px inset')
   end
 
+  # A `<select>` is a list box by its `multiple` and its `size` PARSED as a non-negative integer (HTML rendering
+  # §15.5.15) — ` 1 ` and junk are drop-downs — which is a state the UA sheet asks, not an attribute string; and a
+  # size set later moves it (CSIM_STYLE_VERIFY holds the restyle against a full one).
+  it 'styles a list box by its parsed display size' do
+    s = visit(%w[1 \ 1\  0 x 2 +3].map {|v| %(<select size="#{v}"></select>) }.join + '<select multiple></select><select multiple size="1"></select><select id="late"></select>')
+    read = s.evaluate_script('[...document.querySelectorAll("select")].map((e) => getComputedStyle(e).overflowY).join(" ")')
+    expect(read).to eq('clip clip clip clip scroll scroll scroll clip clip')
+    expect(s.evaluate_script('(() => { document.getElementById("late").size = 4; return getComputedStyle(document.getElementById("late")).overflowY })()')).to eq('scroll')
+  end
+
   # What a page can write is not what the engine was built for: the keywords and properties a Firefox build of the
   # engine takes, a Servo build takes too — and a flow-relative `resize` computes as specified (css-ui-4, Chrome; a
   # Firefox build makes it physical).
@@ -257,7 +267,8 @@ RSpec.describe 'style engine invalidation' do
       'white-space-collapse'  => 'preserve-spaces',
       'column-height'         => '10px',
       'column-wrap'           => 'wrap',
-      'resize'                => 'block'
+      'resize'                => 'block',
+      'text-indent'           => '10px hanging each-line'
     }
     read = s.evaluate_script(<<~JS)
       (() => {

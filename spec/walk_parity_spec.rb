@@ -186,12 +186,59 @@ RSpec.describe 'walk parity' do
     HTML
   end
 
+  # An image keeps the size it decoded when it is adopted into another realm's tree, whose arena the walk reads.
+  it 'reads the decoded size of an image adopted from a frame' do
+    gif = 'data:image/gif;base64,R0lGODlhAgADAIAAAP///wAAACH5BAEAAAAALAAAAAACAAMAAAICjF8AOw=='
+    pages = {
+      '/'  => '<!DOCTYPE html><html><body><iframe id="f" src="/f"></iframe><div id="host"></div></body></html>',
+      '/f' => %(<!DOCTYPE html><html><body><img id="i" src="#{gif}"></body></html>)
+    }
+    s = simulated_session(->(env) { [200, {'content-type' => 'text/html'}, [pages.fetch(env['PATH_INFO'], '')]] })
+    s.visit '/'
+    s.evaluate_script('document.body.offsetHeight')
+    s.evaluate_script('__csimWalkParityStats()')
+    s.execute_script(<<~JS)
+      const img = document.getElementById('f').contentDocument.getElementById('i');
+      document.getElementById('host').appendChild(document.adoptNode(img));
+    JS
+    s.evaluate_script('document.body.offsetHeight')
+    expect_clean(s.evaluate_script('__csimWalkParityStats()'))
+  end
+
   # A run of bare text in a flex container is an ANONYMOUS item of its own, a `<br>` in it a break.
   it 'builds anonymous flex items' do
     expect_clean(parity(<<~HTML))
       <div style="display: flex; align-items: center; text-align: center; direction: rtl">bare text <b>bold item</b> more <br> text</div>
       <div style="display: flex; flex-direction: column">   <span>x</span>   </div>
+      <div align="right" style="display: flex">aligned by the attribute its container carries</div>
+      <div style="display: flex"><wbr><div>after a lone wbr</div>a<wbr>b</div>
     HTML
+  end
+
+  # A table is its record, its columns' declarations on the grid stream, a record per row group and row (an anonymous
+  # one around stray cells), its cells walked under their rows with their placement in the grid (an anonymous cell
+  # around stray content), its captions and its out-of-flow children.
+  it 'builds tables' do
+    expect_clean(parity(<<~HTML))
+      <table style="border-spacing: 4px 2px; width: 300px">
+        <caption>top</caption>
+        <colgroup><col style="width: 50px"><col span="2" style="width: 20%"></colgroup>
+        <tfoot><tr><td colspan="3">foot</td></tr></tfoot>
+        <thead><tr style="height: 30px"><th>a</th><th style="vertical-align: top">b</th><td rowspan="2">c</td></tr></thead>
+        <tbody><tr><td style="width: 25%">d <b>bold</b></td><td><div style="height: 50%">pct</div></td></tr>
+          <tr><td>e</td><td style="position: relative">f<span style="position: absolute">abs</span></td></tr></tbody>
+        <tbody></tbody>
+        <caption style="caption-side: bottom">bottom</caption>
+      </table>
+      <div style="display: table; table-layout: fixed; width: 200px">stray text<div style="display: table-cell">cell</div><p>block</p></div>
+      <div style="display: table"><div style="display: table-row">x<div style="display: table-cell; vertical-align: middle">y</div></div></div>
+      <p>inline <span style="display: inline-table"><span style="display: table-cell">t</span></span></p>
+    HTML
+  end
+
+  it 'declines a collapsing table by name' do
+    stats = parity('<table style="border-collapse: collapse"><tr><td>x</td></tr></table>')
+    expect(stats['declined']).to include('collapse table' => be_positive)
   end
 
   # A pass whose runs need several faces names every one of them at once, and is compared.

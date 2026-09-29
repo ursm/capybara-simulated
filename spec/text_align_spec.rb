@@ -408,6 +408,12 @@ RSpec.describe "text-align lines a block's lines up" do
     expect(r['b'][0]).to eq(200)
   end
 
+  # The attribute is a declaration like any other, so what it sets INHERITS: a box under it computes the alignment too.
+  it 'hands the align attribute of a block down to what it holds' do
+    s = page('<div align=right><p><span id=t>ab</span></p></div>')
+    expect(s.evaluate_script("getComputedStyle(document.getElementById('t')).textAlign")).to eq('right')
+  end
+
   it 'reads the align attribute of a cell, over the UA centring of a header' do
     r = lay('<table style="border-spacing:0"><tr><td align=center style="width:100px;padding:0"><span id=t>ab</span></td>' \
             '<th align=left style="width:100px;padding:0"><span id=u>ab</span></th></tr></table>')
