@@ -7545,6 +7545,8 @@ css/css-transitions/transitioncancel-001.html:
   transition
 css/css-transitions/transitioncancel-002.html:
 - Removing a transitioning property from transition-property should trigger transitioncancel
+css/css-transitions/transitionevent-interface.html:
+- TransitionEventInit animation property sets value
 css/css-transitions/transitions-retarget.html:
 - Retargeting a transition should cause the old transition to be cancelled
 css/css-transitions/unregistered-custom-property-transition.html:
