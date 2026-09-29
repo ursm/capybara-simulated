@@ -1355,14 +1355,20 @@ impl StyleEngine {
     }
 
     // Whether an effect's keyframes, computed from its target's style as it was, would compute the same from the style
-    // it has now: nothing they refer to beyond it, and the same base rules and values they can refer to in it — its
-    // font (`em`), color (`currentColor`), custom properties (`var()`) and writing mode (logical properties).
+    // it has now: nothing they refer to beyond it, the very style it inherits from, and the same base rules and values
+    // they can refer to in it — its font (`em`), color (`currentColor`), custom properties (`var()`) and writing mode
+    // (logical properties).
     fn keyframe_inputs_hold(&self, arena: &RealmArena, effect: &waapi::Effect) -> bool {
         let (Some(inputs), Some(target)) = (&effect.computed_from, &effect.target) else { return false };
         let Some(style) = target_style(arena, target).filter(|_| !inputs.contextual) else { return false };
+        let same_parent = match (&inputs.parent, self.target_parent_style(arena, target)) {
+            (Some(was), Some(now)) => Arc::ptr_eq(was, &now),
+            (was, now) => was.is_none() && now.is_none(),
+        };
         let (was, now) = (&*inputs.style, &*style);
         let rule_tree = self.stylist.rule_tree();
-        rule_tree.remove_animation_rules(was.rules()) == rule_tree.remove_animation_rules(now.rules())
+        same_parent
+            && rule_tree.remove_animation_rules(was.rules()) == rule_tree.remove_animation_rules(now.rules())
             && was.writing_mode == now.writing_mode
             && was.custom_properties() == now.custom_properties()
             && was.get_font() == now.get_font()
@@ -1380,12 +1386,7 @@ impl StyleEngine {
         let target = effect.target.as_ref()?;
         let style = target_style(arena, target)?;
         let base = self.base_style(arena, target, &style);
-        let parent = match target.pseudo {
-            Some(_) => primary_style(arena, target.node),
-            None => in_arena(arena, self, || {
-                StyleNode::new(arena, target.node).inheritance_parent().and_then(|p| primary_style(arena, p.id))
-            }),
-        };
+        let parent = self.target_parent_style(arena, target);
         let guard = self.lock.read();
         let device = self.stylist.device();
         let builder = StyleBuilder::for_derived_style(device, Some(&self.stylist), &base, parent.as_deref());
@@ -1428,7 +1429,18 @@ impl StyleEngine {
         for (id, _, base_value) in &mut computed.properties {
             *base_value = AnimationValue::from_computed_values(id.as_borrowed(), &base);
         }
-        Some((computed, waapi::KeyframeInputs { style, contextual }))
+        Some((computed, waapi::KeyframeInputs { style, parent: parent.clone(), contextual }))
+    }
+
+    // The style an effect's target inherits from: its parent's in the flat tree — a pseudo-element's, its originating
+    // element's.
+    fn target_parent_style(&self, arena: &RealmArena, target: &waapi::Target) -> Option<Arc<ComputedValues>> {
+        match target.pseudo {
+            Some(_) => primary_style(arena, target.node),
+            None => in_arena(arena, self, || {
+                StyleNode::new(arena, target.node).inheritance_parent().and_then(|p| primary_style(arena, p.id))
+            }),
+        }
     }
 
     // Every effect whose keyframes are not computed for its target yet (new, changed, or its target restyled) is

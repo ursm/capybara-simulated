@@ -245,12 +245,14 @@ pub(crate) struct ComputedKeyframes {
     pub(crate) properties: Vec<(OwnedPropertyDeclarationId, Vec<ComputedFrame>, Option<AnimationValue>)>,
 }
 
-// What an effect's keyframes were computed from: its target's style as it then was, and whether they refer to anything
-// beyond that style — its parent's values (`inherit`), the root's font (`rem`), the viewport or a container (their
-// units), an attribute — which a restyle can move without moving the style.
+// What an effect's keyframes were computed from: its target's style as it then was, the style it inherits from (the
+// base values a neutral keyframe stands on inherit from it, as does anything the keyframes say `inherit` to), and
+// whether they refer to anything beyond those — the root's font (`rem`), the viewport or a container (their units), an
+// attribute — which a restyle can move without moving either.
 #[derive(Clone, Debug)]
 pub(crate) struct KeyframeInputs {
     pub(crate) style: Arc<ComputedValues>,
+    pub(crate) parent: Option<Arc<ComputedValues>>,
     pub(crate) contextual: bool,
 }
 

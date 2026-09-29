@@ -777,4 +777,22 @@ RSpec.describe 'style engine animations' do
     JS
     expect(read).to eq(%w[5px 0px 0px 7px])
   end
+
+  # …and where the style it inherits from moved: a neutral keyframe stands on a base value its own style inherits,
+  # which a change of its parent moves without moving its own rules or font.
+  it 'computes the keyframes again when the style they inherit from moves' do
+    ENV['CSIM_STYLE_VERIFY'] = '0'
+    s = page('<div id="p" style="padding-left: 0px"><div id="c" style="padding-left: inherit; animation: pad 100s -50s linear paused"></div></div>',
+             '@keyframes pad { to { padding-left: 100px } }')
+    read = s.evaluate_script(<<~JS)
+      (() => {
+        const p = document.getElementById('p'), c = document.getElementById('c');
+        const read = [getComputedStyle(c).paddingLeft];
+        p.style.paddingLeft = '50px';
+        read.push(getComputedStyle(c).paddingLeft);
+        return read;
+      })()
+    JS
+    expect(read).to eq(%w[50px 75px])
+  end
 end
