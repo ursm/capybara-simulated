@@ -900,6 +900,19 @@ RSpec.describe 'native layout inline-atomic parity' do
       expect_parity('<div style="width:200px;font:16px monospace">aa <span style="padding:0 4px;position:relative;left:3px">bb<div style="margin:7px 0">x</div>cc</span> dd</div>')
       # …and MEASURED so, as a float's or a `max-content` box's content
       expect_parity('<div style="font:16px monospace;width:10px"><div style="float:left">aa <span>bb<p>para</p></span></div></div>')
+      # …whichever door its `display` came in by: one given `display: inline` in its own style attribute had no box at
+      # all (0 x 0, and nothing to hit)
+      body = '<div style="width:200px"><div id="i" style="display:inline"><div id="b" style="height:5px">b</div></div></div>'
+      expect_parity(body)
+      expect(rendered_rect(body, '#b')['width']).to eq(200)
+    end
+    # …and still an INLINE box to a float's flow-relative keywords, which read the direction of the block around it:
+    # §9.2.1.1's split leaves the float to that block.
+    it 'leaves a float inside it to the direction of the block around it' do
+      body = '<div dir="rtl" style="width:300px;overflow:hidden"><div style="display:inline;direction:ltr">' \
+             '<div id="f" style="float:inline-start;width:100px;height:3px"></div><div style="height:3px"></div></div></div>'
+      expect_parity(body)
+      expect(rendered_rect(body, '#f')['x']).to eq(200)
     end
     # …and so no formatting context of its own, as the split leaves none: a float in it is the block's, a `clear` in
     # it clears the floats outside, an outer float shortens its lines. Chrome: 66 and 124 tall.
