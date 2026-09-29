@@ -430,11 +430,13 @@ RSpec.describe 'native layout replaced-leaf parity' do
     end
   end
 
-  # SHARED with Chrome (2026-09-26): an `<svg width="100%" height="100%">` as the flex item of a 16px flex container is 300
-  # wide in both engines — the default object size, its percentage width no basis — where Chrome says 16.
-  it 'shares a flex item svg of percentage attributes at the default width' do
+  # An `<svg width="100%" height="100%">` as the flex item of a 16px flex container is 16 wide, as in Chrome: SVG's UA
+  # sheet gives an `<svg>` in HTML `overflow: hidden`, whose automatic minimum size is then zero, so the item shrinks
+  # to its line from the default object size its percentage width has no basis against. (Both engines left it 300 wide
+  # until the UA rule was carried, 2026-09-30.)
+  it 'shrinks a flex item svg of percentage attributes to its line, as its overflow lets it' do
     body = '<div style="width:300px"><span style="display:flex;height:16px;width:16px"><svg id="m" width="100%" height="100%"></svg></span></div>'
     expect_parity(body)
-    expect_shared_gap(laid_out_rect(body)[2], shared: 300, chrome: 16, what: "#{body}: #m width")
+    expect(laid_out_rect(body)[2]).to be_within(0.05).of(16)
   end
 end

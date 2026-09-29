@@ -112,6 +112,7 @@ pub(crate) fn build(arena: &RealmArena, root: NodeId, basis: Basis, faces: &mut 
         inlines: Vec::new(),
         entries: Vec::new(),
         rec_index: HashMap::new(),
+        root,
         saw_float: (false, false),
         entry_el: Vec::new(),
         inline_of: HashMap::new(),
@@ -151,7 +152,8 @@ struct Walk<'a> {
     entries: Vec<InlineBox>,
     // Each element's record, for an out-of-flow box to name its containing block by.
     rec_index: HashMap<NodeId, i32>,
-    // Whether a float has been placed on the left / right in the formatting context the walk is in.
+    // The pass root, and whether a float has been placed on the left / right in the formatting context the walk is in.
+    root: NodeId,
     saw_float: (bool, bool),
     // The element each gathered entry is of, each tabled inline box's entry by element, and the out-of-flow records whose
     // containing block is an inline box (`NL_CB_INLINE`), named by its entry once the pass has tabled it.
@@ -326,19 +328,18 @@ impl FlexPlan {
             _ => 0,
         }
     }
-    // An item's cross alignment (`crossAlign`, and `crossAlignPhysical` where `physical`): its `align-self`, else the
-    // container's `align-items`, as a keyword along the cross axis.
-    fn cross_align(&self, items: Kw, child: &ComputedValues, mode: BaselineMode, physical: bool) -> Kw {
-        let own = align_kw(child.get_position().align_self.0);
+    // An item's cross alignment (`crossAlign`, and `crossAlignPhysical` where `physical`): its `align-self` (`own`),
+    // else the container's `align-items`, as a keyword along the cross axis — `self-start` / `self-end` by the item's
+    // own direction.
+    fn cross_align(&self, items: Kw, own: Kw, own_rtl: bool, mode: BaselineMode, physical: bool) -> Kw {
         let align = if own != Kw::Auto { own } else { items };
         let (at_start, at_end) = if self.cross_flip { (Kw::FlexEnd, Kw::FlexStart) } else { (Kw::FlexStart, Kw::FlexEnd) };
         let a = match align {
             Kw::Normal | Kw::Auto | Kw::Left | Kw::Right | Kw::Other => Kw::Stretch,
             Kw::SelfStart | Kw::SelfEnd => {
                 // (…by the item's OWN flow: its inline-start where that runs along the cross axis, else its block-start)
-                let rtl = child.get_inherited_box().direction == Direction::Rtl;
                 let cross_is_x = matches!(self.cross_start, Side::Left | Side::Right);
-                let mut side = if cross_is_x { if rtl { Side::Right } else { Side::Left } } else { Side::Top };
+                let mut side = if cross_is_x { if own_rtl { Side::Right } else { Side::Left } } else { Side::Top };
                 if align == Kw::SelfEnd {
                     side = match side {
                         Side::Left => Side::Right,
@@ -430,6 +431,96 @@ impl FlexBasisSpec {
             _ => return Err("flex-basis"),
         })
     }
+}
+
+// An `<svg>` element — the replaced box an svg drawing is to the HTML around it.
+fn is_outer_svg(node: &crate::dom::NodeData) -> bool {
+    node.kind == NodeKind::Element && node.ns == web_atoms::ns!(svg) && &*node.local_name == "svg"
+}
+// A replaced element's intrinsic size: its figures, whether they carry a ratio, and whether ONLY the ratio does (an
+// svg with a viewBox and no size).
+#[derive(Clone, Copy)]
+struct Intrinsic {
+    w: f64,
+    h: f64,
+    ratio: bool,
+    ratio_only: bool,
+}
+// HTML's rules for parsing a non-negative integer (`parseHtmlNonneg`).
+fn html_nonneg(v: &str) -> Option<u64> {
+    let t = v.trim_start_matches(|c: char| matches!(c, ' ' | '\t' | '\n' | '\x0c' | '\r'));
+    let t = t.strip_prefix('+').unwrap_or(t);
+    let digits: String = t.chars().take_while(|c| c.is_ascii_digit()).collect();
+    if digits.is_empty() {
+        return None;
+    }
+    digits.parse().ok()
+}
+// A label's lines, at each line break it holds (CR LF, CR or LF: `LABEL_BREAK_RE`).
+fn split_label_lines(label: &[u16]) -> Vec<&[u16]> {
+    let mut lines = Vec::new();
+    let mut start = 0;
+    let mut i = 0;
+    while i < label.len() {
+        if label[i] == 0x0D || label[i] == 0x0A {
+            lines.push(&label[start..i]);
+            i += if label[i] == 0x0D && label.get(i + 1) == Some(&0x0A) { 2 } else { 1 };
+            start = i;
+        } else {
+            i += 1;
+        }
+    }
+    lines.push(&label[start..]);
+    lines
+}
+// Text collapsed as a line start (`collapseRun(text, el, true)`): a preserving mode drops its newlines, any other runs
+// of white space to one space, none leading.
+fn collapse_run(text: &[u16], mode: u8) -> Vec<u16> {
+    if preserving(mode) {
+        return text.iter().copied().filter(|&u| !matches!(u, 0x0A | 0x0D | 0x0C)).collect();
+    }
+    let mut out = Vec::with_capacity(text.len());
+    for &u in text {
+        if matches!(u, 0x20 | 0x09 | 0x0A | 0x0D | 0x0C) {
+            if !out.is_empty() && out.last() != Some(&0x20) {
+                out.push(0x20);
+            } else if out.is_empty() {
+                continue;
+            }
+        } else {
+            out.push(u);
+        }
+    }
+    out
+}
+// An svg `width` / `height` attribute: a number of px, `em` or `rem` (`svgAttrLength`).
+fn svg_length(v: &str, em: f64, rem: f64) -> Option<f64> {
+    let t = v.trim();
+    let (num, unit) = match t.find(|c: char| c.is_ascii_alphabetic()) {
+        Some(i) => (&t[..i], t[i..].to_ascii_lowercase()),
+        None => (t, String::new()),
+    };
+    if num.is_empty() || !num.chars().all(|c| c.is_ascii_digit() || c == '.') || num.matches('.').count() > 1 || num.ends_with('.') {
+        return None;
+    }
+    let n: f64 = num.parse().ok()?;
+    match unit.as_str() {
+        "" | "px" => Some(n),
+        "em" => Some(n * em),
+        "rem" => Some(n * rem),
+        _ => None,
+    }
+}
+// An svg `viewBox`: its width and height, where all four numbers are and both are positive (`parseViewBox`).
+fn view_box(v: &str) -> Option<(f64, f64)> {
+    let n: Vec<f64> = v.trim().split(|c: char| c.is_whitespace() || c == ',').filter(|p| !p.is_empty()).map(|p| p.parse::<f64>()).collect::<Result<_, _>>().ok()?;
+    (n.len() == 4 && n.iter().all(|v| v.is_finite()) && n[2] > 0.0 && n[3] > 0.0).then_some((n[2], n[3]))
+}
+
+// A flex item: an element, or an anonymous one around a run of bare text.
+enum FlexItem {
+    Element(NodeId),
+    Anonymous(Vec<NodeId>),
 }
 
 // A resolved `vertical-align` (`verticalAlignFor`): its mode and the shift it carries.
@@ -653,20 +744,23 @@ const OWN_CONTEXT_TAGS: &[&str] = &[
 fn replaced_or_control(tag: &str) -> bool {
     matches!(
         tag,
-        "input" | "select" | "textarea" | "button" | "meter" | "progress" | "img" | "canvas" | "video" | "audio" | "object"
-            | "embed" | "iframe" | "frame" | "svg"
+        "input" | "select" | "textarea" | "meter" | "progress" | "img" | "canvas" | "video" | "audio" | "object" | "embed"
+            | "iframe" | "frame" | "svg"
     )
 }
-// …and the ones this walk declines for now, each sized or laid out from what it has not been taught: the replaced
-// elements and the controls, a fieldset (its legend and its anonymous content box), a `<details>` (the content its
-// closed state hides).
+// …and the ones this walk declines for now, each laid out from what it has not been taught: a fieldset (its legend and
+// its anonymous content box), a `<details>` (the content its closed state hides).
 fn declined_tag(tag: &str) -> Option<&'static str> {
     match tag {
-        t if replaced_or_control(t) => Some("replaced or control"),
         "fieldset" => Some("fieldset"),
         "details" => Some("details"),
         _ => None,
     }
+}
+// …and HTML's WIDGETS, whose box the UA decides however the page spells a block-level `display` (layout.js
+// `WIDGET_TAGS` / `WIDGET_BLOCK_DISPLAYS`: a `<button style="display: table">` is a flow-root block).
+fn widget_tag(tag: &str) -> bool {
+    matches!(tag, "button" | "input" | "select" | "textarea" | "fieldset" | "meter" | "progress" | "marquee")
 }
 
 impl<'a> Walk<'a> {
@@ -747,7 +841,8 @@ impl<'a> Walk<'a> {
         let node = self.node(id);
         let style = self.style(id)?;
         let tag: &str = &node.local_name;
-        if !node.is_html() {
+        // (…an `<svg>` in HTML is a replaced element here; the SVG inside it is its own business, and MathML declines)
+        if !node.is_html() && !is_outer_svg(node) {
             return Err("foreign element");
         }
         if let Some(why) = declined_tag(tag) {
@@ -762,7 +857,13 @@ impl<'a> Walk<'a> {
         let b = style.get_box();
         let display = b.clone_display();
         // (…a block container: a block-level one, or an `inline-block`, which the gather walks as an ATOMIC)
-        let container = match display.outside() {
+        // (…a widget's block-level displays other than flex and grid are a flow-root block's, `WIDGET_BLOCK_DISPLAYS`)
+        let widget_block = widget_tag(tag)
+            && !matches!(display.outside(), DisplayOutside::Inline)
+            && !matches!(display.inside(), DisplayInside::Flex | DisplayInside::Grid);
+        // (…and a REPLACED element — a control, an image, a frame — is a box of its own intrinsic size, whatever it holds)
+        let intrinsic = self.intrinsic(id)?;
+        let container = intrinsic.is_some() || widget_block || match display.outside() {
             DisplayOutside::Block => matches!(display.inside(), DisplayInside::Flow | DisplayInside::FlowRoot | DisplayInside::Flex),
             DisplayOutside::Inline => match display.inside() {
                 DisplayInside::FlowRoot | DisplayInside::Flex => true,
@@ -820,6 +921,10 @@ impl<'a> Walk<'a> {
         if rec.width_kw != 0 && parent < 0 {
             return Err("root keyword width");
         }
+        if rec.width_kw != 0 && intrinsic.is_some() {
+            return Err("replaced keyword width");
+        }
+        rec.is_button = tag == "button";
         let sizes: [(Option<&LengthPercentage>, f64); 6] = [
             (size_lp(&pos.width)?, self.basis.w),
             (size_lp(&pos.height)?, self.basis.h),
@@ -899,7 +1004,10 @@ impl<'a> Walk<'a> {
         }
         self.inputs.push(rec);
         self.rec_index.insert(id, idx);
-        if matches!(display.inside(), DisplayInside::Flex) {
+        if let Some(intrinsic) = intrinsic {
+            return self.replaced(id, idx, &style, intrinsic);
+        }
+        if matches!(display.inside(), DisplayInside::Flex) && !widget_block {
             return self.flex(id, idx, &style);
         }
 
@@ -953,7 +1061,8 @@ impl<'a> Walk<'a> {
             return self.mixed_block(id, idx, &style, ws_mode, &blocks);
         }
         if inline {
-            return self.text_block(id, idx, &style, ws_mode);
+            let kids: Vec<NodeId> = self.children(id).collect();
+            return self.text_block(&kids, idx, &style, ws_mode);
         }
         self.inputs[idx as usize].display = DISPLAY_BLOCK;
         self.inputs[idx as usize].ws_mode = ws_mode;
@@ -1068,6 +1177,199 @@ impl<'a> Walk<'a> {
         Ok(())
     }
 
+    // A replaced element's or a control's INTRINSIC size (`intrinsicSize`) — None for any other: the decoded image's,
+    // a frame's default object size, a canvas's or an svg's from its attributes, a control's from the UA's chrome
+    // or, for a button `<input>` and a `<select>`, from the label it draws measured in its own font.
+    fn intrinsic(&mut self, id: NodeId) -> Result<Option<Intrinsic>, &'static str> {
+        let node = self.node(id);
+        if !node.is_html() && !is_outer_svg(node) {
+            return Ok(None);
+        }
+        let sized = |w: f64, h: f64| Intrinsic { w, h, ratio: false, ratio_only: false };
+        Ok(Some(match &*node.local_name {
+            "iframe" | "frame" | "embed" | "video" => sized(300.0, 150.0),
+            "object" => return Err("object"),
+            "canvas" => {
+                let dim = |name: &str, default: f64| node.get_attr(name).and_then(html_nonneg).map_or(default, |n| n as f64);
+                Intrinsic { ratio: true, ..sized(dim("width", 300.0), dim("height", 150.0)) }
+            }
+            "img" => match node.natural_size {
+                Some((w, h)) => Intrinsic { ratio: true, ..sized(w, h) },
+                None => sized(16.0, 16.0),
+            },
+            "input" => {
+                let ty = node.get_attr("type").map(|t| t.to_ascii_lowercase()).filter(|t| !t.is_empty()).unwrap_or_else(|| "text".into());
+                match ty.as_str() {
+                    "checkbox" | "radio" => sized(13.0, 13.0),
+                    "file" => sized(253.0, 21.0),
+                    "range" => sized(129.0, 16.0),
+                    "color" => sized(44.0, 23.0),
+                    "image" => sized(0.0, 0.0),
+                    "date" => sized(118.33, 20.0),
+                    "time" => sized(97.0, 20.0),
+                    "datetime-local" => sized(204.33, 20.0),
+                    "month" => sized(148.33, 20.0),
+                    "week" => sized(140.33, 20.0),
+                    "submit" | "reset" | "button" => {
+                        let default = match ty.as_str() {
+                            "submit" => "Submit",
+                            "reset" => "Reset",
+                            _ => "",
+                        };
+                        let label: Vec<u16> = node.plain_attr_units("value").unwrap_or_else(|| default.encode_utf16().collect());
+                        self.label_size(id, &label)?
+                    }
+                    _ => sized(177.0, 15.0),
+                }
+            }
+            "svg" => self.svg_intrinsic(id)?,
+            "select" => {
+                let size = node.get_attr("size").and_then(html_nonneg).filter(|&n| n > 0);
+                if size.map_or(node.get_attr("multiple").is_some(), |n| n > 1) {
+                    return Err("list box");
+                }
+                let widest = self.widest_option(id, id, 0.0, 0.0)?;
+                sized((widest + 20.0).ceil(), 17.0)
+            }
+            "textarea" => sized(195.0, 36.0),
+            "audio" => sized(300.0, 54.0),
+            "meter" => sized(80.0, 16.0),
+            "progress" => sized(160.0, 16.0),
+            _ => return Ok(None),
+        }))
+    }
+    // A button `<input>`'s content box: its label, a line per line of it, measured in its font (`buttonInputSize`).
+    fn label_size(&mut self, id: NodeId, label: &[u16]) -> Result<Intrinsic, &'static str> {
+        let style = self.style(id)?;
+        let font = self.font_info(&style, &style)?;
+        let sized = |w: f64, h: f64| Intrinsic { w, h, ratio: false, ratio_only: false };
+        if label.is_empty() {
+            return Ok(sized(0.0, font.lh));
+        }
+        let lines: Vec<&[u16]> = split_label_lines(label);
+        let mut width = 0.0f64;
+        for line in &lines {
+            width = width.max(self.measure(&font, line));
+        }
+        Ok(sized(width, lines.len() as f64 * font.lh))
+    }
+    // A run of text's advance in a font (`measureRun`).
+    fn measure(&self, font: &FontInfo, text: &[u16]) -> f64 {
+        crate::font::with_font(font.face, |fm| fm.measure_run(text, font.size, font.ls, font.ws, 0.0, font.tab_px, font.tab_min)).unwrap_or(f64::NAN)
+    }
+    // The widest option of a `<select>`, an optgroup's indented 15px (`widestOptionWidth`): its `label`, else its text,
+    // collapsed by the select's `white-space` and measured in the select's font.
+    fn widest_option(&mut self, node: NodeId, select: NodeId, widest: f64, indent: f64) -> Result<f64, &'static str> {
+        let mut widest = widest;
+        for c in self.children(node).collect::<Vec<_>>() {
+            let n = self.node(c);
+            if n.kind != NodeKind::Element {
+                continue;
+            }
+            if &*n.local_name != "option" {
+                let inner = if &*n.local_name == "optgroup" { indent + 15.0 } else { indent };
+                widest = self.widest_option(c, select, widest, inner)?;
+                continue;
+            }
+            let label: Vec<u16> = match n.plain_attr_units("label") {
+                Some(l) if !l.is_empty() => l,
+                _ => {
+                    let mut out = Vec::new();
+                    self.collect_text(c, &mut out);
+                    out
+                }
+            };
+            let style = self.style(select)?;
+            let font = self.font_info(&style, &style)?;
+            let text = collapse_run(&label, ws_mode_of(&style)?);
+            widest = widest.max(indent + self.measure(&font, &text));
+        }
+        Ok(widest)
+    }
+    fn collect_text(&self, node: NodeId, out: &mut Vec<u16>) {
+        for c in self.children(node) {
+            let n = self.node(c);
+            match n.kind {
+                NodeKind::Text => out.extend_from_slice(&n.data),
+                NodeKind::Element => self.collect_text(c, out),
+                _ => {}
+            }
+        }
+    }
+    // An `<svg>`'s intrinsic size from its `width` / `height` attributes and its `viewBox` ratio (`svgIntrinsic`).
+    fn svg_intrinsic(&self, id: NodeId) -> Result<Intrinsic, &'static str> {
+        let node = self.node(id);
+        let em = font_size(&*self.style(id)?);
+        let root = self.root_font_size()?;
+        let length = |name: &str| node.get_attr(name).and_then(|v| svg_length(v, em, root));
+        let vb = node.get_attr("viewBox").and_then(view_box);
+        let (w, h) = (length("width"), length("height"));
+        let i = |w: f64, h: f64, ratio: bool, ratio_only: bool| Intrinsic { w, h, ratio, ratio_only };
+        Ok(match (w, h) {
+            (Some(w), Some(h)) => i(w, h, true, false),
+            (Some(w), None) => i(w, vb.map_or(150.0, |(vw, vh)| w * vh / vw), vb.is_some(), false),
+            (None, Some(h)) => i(vb.map_or(300.0, |(vw, vh)| h * vw / vh), h, vb.is_some(), false),
+            (None, None) => match vb {
+                Some((vw, vh)) => i(vw, vh, true, true),
+                None => i(300.0, 150.0, false, false),
+            },
+        })
+    }
+    // The root element's font size, which an `rem` resolves against.
+    fn root_font_size(&self) -> Result<f64, &'static str> {
+        let mut cur = self.root;
+        while let Some(p) = self.node(cur).parent.filter(|&p| self.node(p).kind == NodeKind::Element) {
+            cur = p;
+        }
+        Ok(font_size(&*self.style(cur)?))
+    }
+
+    // A REPLACED leaf's record (`walkRecord`'s replaced arm): a childless block sized from its intrinsic figures, its
+    // margins never adjoining, and — for a control that draws text — where its baseline sits in its font.
+    fn replaced(&mut self, id: NodeId, idx: i32, style: &ComputedValues, intrinsic: Intrinsic) -> Step {
+        let node = self.node(id);
+        let tag: &str = &node.local_name;
+        let draws_text = tag == "select"
+            || (tag == "input"
+                && !matches!(
+                    node.get_attr("type").map(|t| t.to_ascii_lowercase()).as_deref(),
+                    Some("checkbox" | "radio" | "range" | "image")
+                ));
+        let baseline = if draws_text {
+            let face = self.face(style)?;
+            Some((content_height(style, &face), content_ascent(style, &face)))
+        } else {
+            None
+        };
+        let r = &mut self.inputs[idx as usize];
+        r.display = DISPLAY_BLOCK;
+        r.height_adjoins = false;
+        r.minh_adjoins = false;
+        r.bottom_adjoins = false;
+        r.intrinsic_w = intrinsic.w;
+        r.intrinsic_h = intrinsic.h;
+        r.replaced = true;
+        r.ratio = intrinsic.ratio;
+        r.ratio_only = intrinsic.ratio_only;
+        r.shrinks_to_nothing = intrinsic.ratio || tag == "img";
+        match baseline {
+            Some((font_box, asc)) => {
+                r.control_baseline = 1;
+                r.control_font_box = font_box;
+                r.control_font_asc = asc;
+            }
+            None if tag != "img" => r.control_baseline = 4,
+            None => {}
+        }
+        Ok(())
+    }
+
+    // Is the element's parent a flex or grid container?
+    fn parent_is_item_container(&self, id: NodeId) -> Result<bool, &'static str> {
+        let Some(p) = self.node(id).parent.filter(|&p| self.node(p).kind == NodeKind::Element) else { return Ok(false) };
+        Ok(self.style(p)?.get_box().clone_display().is_item_container())
+    }
+
     // Is the element an item of a flex container — its parent one, and itself in flow?
     fn flex_item(&self, id: NodeId) -> Result<bool, &'static str> {
         let Some(p) = self.node(id).parent.filter(|&p| self.node(p).kind == NodeKind::Element) else { return Ok(false) };
@@ -1083,32 +1385,47 @@ impl<'a> Walk<'a> {
         let items_align = align_kw(pos.align_items.0);
         let cross_gap = gap(if plan.column { &pos.column_gap } else { &pos.row_gap })?;
         let main_gap = gap(if plan.column { &pos.row_gap } else { &pos.column_gap })?;
-        // The items: every in-flow element child, the out-of-flow ones apart; a run of bare text would be an
-        // ANONYMOUS item (`boxItems`), which this walk has not been taught.
-        let mut items: Vec<(i32, NodeId)> = Vec::new();
+        // The items: every in-flow element child, the out-of-flow ones apart — and each run of bare text (with any
+        // `<br>` / `<wbr>` in it) between two of them an ANONYMOUS item of its own (`boxItems`), where it holds anything
+        // but white space.
+        let mut items: Vec<(i32, FlexItem)> = Vec::new();
         let mut oof: Vec<NodeId> = Vec::new();
+        let mut run: Vec<NodeId> = Vec::new();
+        let flush = |walk: &Self, run: &mut Vec<NodeId>, items: &mut Vec<(i32, FlexItem)>| {
+            let kept = run.iter().any(|&k| {
+                let n = walk.node(k);
+                n.kind == NodeKind::Element || has_content(&n.data)
+            });
+            let run = std::mem::take(run);
+            if kept {
+                items.push((0, FlexItem::Anonymous(run)));
+            }
+        };
         for c in self.children(id).collect::<Vec<_>>() {
             let n = self.node(c);
             match n.kind {
-                NodeKind::Text if has_content(&n.data) => return Err("flex bare text"),
+                NodeKind::Text => run.push(c),
                 NodeKind::Element => {
                     let cs = self.style(c)?;
                     let b = cs.get_box();
                     if b.clone_display().is_none() {
                         continue;
                     }
-                    if matches!(&*n.local_name, "br" | "wbr") {
-                        return Err("flex bare text");
+                    if n.is_html() && matches!(&*n.local_name, "br" | "wbr") {
+                        run.push(c);
+                        continue;
                     }
+                    flush(self, &mut run, &mut items);
                     if matches!(b.clone_position(), Position::Absolute | Position::Fixed) {
                         oof.push(c);
                     } else {
-                        items.push((cs.get_position().order, c));
+                        items.push((cs.get_position().order, FlexItem::Element(c)));
                     }
                 }
                 _ => {}
             }
         }
+        flush(self, &mut run, &mut items);
         items.sort_by_key(|&(order, _)| order);
         let r = &mut self.inputs[idx as usize];
         r.display = crate::layout::DISPLAY_FLEX;
@@ -1132,17 +1449,30 @@ impl<'a> Walk<'a> {
             r.flex_main_gap_frac = main_gap.frac;
             r.flex_main_gap_math = main_gap_math;
         }
-        for (_, c) in items {
+        for (_, item) in items {
             let at = self.inputs.len() as i32;
-            self.record(c, idx)?;
-            let cs = self.style(c)?;
-            let (_, auto) = edge_lps(&cs)?;
-            let align = plan.cross_align(items_align, &cs, BaselineMode::of(&plan), true);
-            let basis = FlexBasisSpec::of(&cs)?;
+            let (own_align, own_rtl, basis, cross_auto, auto) = match item {
+                FlexItem::Element(c) => {
+                    self.record(c, idx)?;
+                    let cs = self.style(c)?;
+                    let (_, auto) = edge_lps(&cs)?;
+                    let cpos = cs.get_position();
+                    use style::values::generics::length::GenericSize as Size;
+                    // (…across a ROW, a replaced item with a RATIO keeps it rather than stretching: an image, where a
+                    // control takes the line's height)
+                    let keeps_ratio = plan.main_is_x && self.intrinsic(c)?.is_some_and(|i| i.ratio);
+                    let cross_auto = !keeps_ratio && if plan.main_is_x { matches!(cpos.height, Size::Auto) } else { matches!(cpos.width, Size::Auto) };
+                    let rtl = cs.get_inherited_box().direction == Direction::Rtl;
+                    (align_kw(cpos.align_self.0), rtl, FlexBasisSpec::of(&cs)?, cross_auto, auto)
+                }
+                FlexItem::Anonymous(run) => {
+                    self.anonymous_item(id, idx, style, &run)?;
+                    let rtl = style.get_inherited_box().direction == Direction::Rtl;
+                    (Kw::Auto, rtl, FlexBasisSpec { px: f64::NAN, frac: f64::NAN, prog: None, keyword: 0 }, true, 0)
+                }
+            };
+            let align = plan.cross_align(items_align, own_align, own_rtl, BaselineMode::of(&plan), true);
             let basis_math = self.math(basis.prog.as_deref());
-            let cpos = cs.get_position();
-            use style::values::generics::length::GenericSize as Size;
-            let cross_auto = if plan.main_is_x { matches!(cpos.height, Size::Auto) } else { matches!(cpos.width, Size::Auto) };
             let cross_auto_margin = if plan.main_is_x { auto & (4 | 8) != 0 } else { auto & (1 | 2) != 0 };
             let r = &mut self.inputs[at as usize];
             r.flex_basis_frac = basis.frac;
@@ -1162,7 +1492,8 @@ impl<'a> Walk<'a> {
         }
         for c in oof {
             let cs = self.style(c)?;
-            let code = match plan.cross_align(items_align, &cs, BaselineMode::Flow, false) {
+            let rtl = cs.get_inherited_box().direction == Direction::Rtl;
+            let code = match plan.cross_align(items_align, align_kw(cs.get_position().align_self.0), rtl, BaselineMode::Flow, false) {
                 Kw::Center => 1,
                 Kw::FlexEnd => 2,
                 _ => 0,
@@ -1171,6 +1502,38 @@ impl<'a> Walk<'a> {
             self.inputs[at as usize].flex_cross_align = code;
         }
         Ok(())
+    }
+
+    // An ANONYMOUS flex item (`anonBoxItem`): a block of no element around a run of the container's bare text, which
+    // takes the container's inherited style and every other property's initial value — its record (nid −1), and its
+    // lines.
+    fn anonymous_item(&mut self, container: NodeId, parent: i32, style: &ComputedValues, run: &[NodeId]) -> Step {
+        let at = self.inputs.len() as i32;
+        let mut rec = fresh_record();
+        rec.nid = -1.0;
+        rec.parent = parent;
+        rec.run_start = -1;
+        rec.flex_shrink = 1.0;
+        [rec.width, rec.height, rec.min_w, rec.max_w, rec.min_h, rec.max_h] = [f64::NAN; 6];
+        rec.height_adjoins = true;
+        rec.minh_adjoins = true;
+        rec.bottom_adjoins = true;
+        rec.starts_bfc = true;
+        rec.rtl = (style.get_inherited_box().direction == Direction::Rtl) as u8;
+        rec.legacy_align = self.legacy_align(container);
+        self.inputs.push(rec);
+        let ws_mode = ws_mode_of(style)?;
+        let inline = run.iter().any(|&k| {
+            let n = self.node(k);
+            n.kind == NodeKind::Element || has_content(&n.data) || white_space_only_is_content(&n.data, ws_mode)
+        });
+        if !inline {
+            let r = &mut self.inputs[at as usize];
+            r.display = DISPLAY_BLOCK;
+            r.ws_mode = ws_mode;
+            return Ok(());
+        }
+        self.text_block(run, at, style, ws_mode)
     }
 
     // Where the streams stand, to take an attempt back to.
@@ -1337,7 +1700,7 @@ impl<'a> Walk<'a> {
     }
 
     // A block of inline content — text and inline boxes — laid out in lines (`walkRecord`'s text-block arm).
-    fn text_block(&mut self, id: NodeId, idx: i32, style: &ComputedValues, ws_mode: u8) -> Step {
+    fn text_block(&mut self, kids: &[NodeId], idx: i32, style: &ComputedValues, ws_mode: u8) -> Step {
         let (indent, indent_bits) = indent(style)?;
         let bites = indent.px != 0.0 || indent.frac != 0.0 || indent.prog.is_some();
         let indent_math = self.math(indent.prog.as_deref());
@@ -1345,8 +1708,7 @@ impl<'a> Walk<'a> {
         let starts_at_right = style.get_inherited_box().direction == Direction::Rtl;
         let align = align_code(style.get_inherited_text().text_align, starts_at_right);
         let mut g = Gather { block: style, idx, bites, runs: Vec::new(), makes_line: false, floats: Vec::new(), rel: None };
-        let kids: Vec<NodeId> = self.children(id).collect();
-        self.gather(&kids, style, &font, ws_mode, wrap_mode(style), 0.0, &mut g)?;
+        self.gather(kids, style, &font, ws_mode, wrap_mode(style), 0.0, &mut g)?;
         // (…the indent and the alignment written before the gather, as the JS walk writes them: a block whose content
         // makes no line keeps them too.)
         let rec = &mut self.inputs[idx as usize];
@@ -1551,7 +1913,8 @@ impl<'a> Walk<'a> {
     fn inline_child(&mut self, c: NodeId, cs: &ComputedValues, ws_mode: u8, g: &mut Gather) -> Step {
         let node = self.node(c);
         let tag: &str = &node.local_name;
-        if !node.is_html() {
+        // (…an `<svg>` in HTML is a replaced element here; the SVG inside it is its own business, and MathML declines)
+        if !node.is_html() && !is_outer_svg(node) {
             return Err("foreign element");
         }
         if let Some(why) = declined_tag(tag) {
@@ -1567,13 +1930,16 @@ impl<'a> Walk<'a> {
         if d.is_contents() {
             return Err("display contents");
         }
-        if !matches!(d.outside(), DisplayOutside::Inline) {
+        // (…a `<br>` a flex or grid container's run of bare text holds is still a line break in the anonymous item: the
+        // style engine blockifies it as the container's child, where the JS model keeps it the inline it is)
+        let blockified_br = tag == "br" && self.parent_is_item_container(c)?;
+        if !matches!(d.outside(), DisplayOutside::Inline) && !blockified_br {
             return Err("block-level-box-in-inline-content");
         }
         // An ATOMIC inline — an `inline-block` — is one box on the line: its own record subtree under the block of
         // lines, laid out and hung from its baseline by native (`atomicHook`); an inline-LEVEL `<br>` still breaks the
         // line whatever its inside display (`isLineBreak`).
-        if !matches!(d.inside(), DisplayInside::Flow) && tag != "br" {
+        if (!matches!(d.inside(), DisplayInside::Flow) && tag != "br") || replaced_or_control(tag) {
             // (…`top` / `bottom` hang it from the LINE, with no ascent of its own; the others move its ascent: a SHIFT
             // by itself, an alignment against the parent's font by the figure native reads when the box is laid out —
             // `nlAtomicAlignment`)

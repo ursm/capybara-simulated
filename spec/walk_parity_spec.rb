@@ -172,6 +172,28 @@ RSpec.describe 'walk parity' do
     HTML
   end
 
+  # A replaced element or a control is a leaf of its intrinsic size — an image's decoded one (the arena holds it), a
+  # frame's default, an svg's or a canvas's attributes, a button input's or a select's label measured in its font —
+  # and a text-drawing control carries where its baseline sits; a `<button>` is a box of its content.
+  it 'builds replaced elements and controls' do
+    expect_clean(parity(<<~HTML))
+      <p>text <img src="data:image/gif;base64,R0lGODlhAQABAAAAACw=" width="20"> <input value="x"> <input type="submit">
+         <input type="checkbox"> <input type="button" value="Go
+      now"> <select><option>one</option><option>a longer option</option><optgroup label="g"><option>x</option></optgroup></select>
+         <textarea></textarea> <button>click <b>me</b></button></p>
+      <div><img style="display: block"><svg width="40" viewBox="0 0 10 5"></svg><canvas width="50"></canvas>
+        <iframe></iframe> <progress></progress> <meter></meter></div>
+    HTML
+  end
+
+  # A run of bare text in a flex container is an ANONYMOUS item of its own, a `<br>` in it a break.
+  it 'builds anonymous flex items' do
+    expect_clean(parity(<<~HTML))
+      <div style="display: flex; align-items: center; text-align: center; direction: rtl">bare text <b>bold item</b> more <br> text</div>
+      <div style="display: flex; flex-direction: column">   <span>x</span>   </div>
+    HTML
+  end
+
   # A pass whose runs need several faces names every one of them at once, and is compared.
   it 'resolves every face a pass needs' do
     expect_clean(parity(<<~HTML))
