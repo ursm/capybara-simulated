@@ -795,4 +795,25 @@ RSpec.describe 'style engine animations' do
     JS
     expect(read).to eq(%w[50px 75px])
   end
+
+  # A property an element's animations newly set reaches the JS side's layout, whatever was animated there already and
+  # whatever made the change: a script's second animation, or a state (`:hover`) that switches a CSS one.
+  it 'lays out a property an animated element newly animates' do
+    s = page('<div id="p"><div id="c"></div></div>',
+             '@keyframes shift { from { margin-left: 30px } to { margin-left: 30px } }' \
+             '#c { animation: fade 100s paused } #p:hover #c { animation-name: shift }')
+    read = s.evaluate_script(<<~JS)
+      (() => {
+        const c = document.getElementById('c');
+        const read = [getComputedStyle(c).marginLeft, c.getBoundingClientRect().left];
+        c.animate({paddingLeft: ['7px', '7px']}, 100000);
+        read.push(getComputedStyle(c).paddingLeft);
+        return read;
+      })()
+    JS
+    s.find('#p').hover
+    read << s.evaluate_script("getComputedStyle(document.getElementById('c')).marginLeft")
+    read << s.evaluate_script("document.getElementById('c').getBoundingClientRect().left")
+    expect(read).to eq(['0px', 8, '7px', '30px', 38])
+  end
 end
