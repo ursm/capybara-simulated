@@ -225,4 +225,20 @@ RSpec.describe 'style sheet order' do
       ENV['CSIM_STYLO'] = saved
     end
   end
+
+  # An SVG `STYLE` is no style element (the local name is case-sensitive outside HTML), whatever its lowercase is.
+  it 'applies no sheet from an element that is no style element' do
+    html = '<!DOCTYPE html><svg id="s"></svg><p id="p">p</p>'
+    s = simulated_session(->(_env) { [200, {'content-type' => 'text/html'}, [html]] })
+    s.visit '/'
+    color = s.evaluate_script(<<~JS)
+      (() => {
+        const st = document.createElementNS('http://www.w3.org/2000/svg', 'STYLE');
+        st.textContent = 'p { color: rgb(1, 2, 3) }';
+        document.getElementById('s').append(st);
+        return getComputedStyle(document.getElementById('p')).color;
+      })()
+    JS
+    expect(color).to eq('rgb(0, 0, 0)')
+  end
 end

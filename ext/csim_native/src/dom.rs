@@ -853,14 +853,18 @@ fn arena_and_engine<'s>(
 // An attribute write to `id` of the attributes `names`, about to land: the style engine hears of it first, and a name
 // a state can read moves the state epoch (a class, a style and data / ARIA attributes are read by none).
 fn before_attribute_write(arena: &mut RealmArena, engine: Option<&mut crate::style::StyleEngine>, id: NodeId, names: &[&str]) {
-    // (An id is read by states: `:target` names one, and `<input form=…>` finds its form owner by one.)
-    let reads_state = |n: &&str| !(matches!(*n, "class" | "style") || n.starts_with("data-") || n.starts_with("aria-"));
-    if names.iter().any(reads_state) {
+    if names.iter().any(|n| attribute_reads_state(n)) {
         arena.state_epoch += 1;
     }
     if let Some(engine) = engine {
         engine.attributes_will_change(arena, id, names);
     }
+}
+
+// Can an element's state read the attribute `name`? Any but a class, a style and data / ARIA attributes can — an id
+// included: `:target` names one, and `<input form=…>` finds its form owner by one.
+fn attribute_reads_state(name: &str) -> bool {
+    !(matches!(name, "class" | "style") || name.starts_with("data-") || name.starts_with("aria-"))
 }
 
 // A NodeId argument off the JS wire: reads arg `i` as a Number and unpacks it, or None for a negative
@@ -1508,18 +1512,21 @@ fn sync_attrs(
     let cid = realm_id(scope, &args);
     let (arena, engine) = arena_and_engine(scope, cid);
     // Every name the element had or will have — a wholesale write can add, drop or change any of them — listed only
-    // for an engine to hear of (this is the parser's per-element write).
-    let names: Vec<String> = match &engine {
-        None => attributes.iter().map(|(k, _)| k.clone()).collect(),
-        Some(_) => {
-            let mut names: Vec<String> =
-                arena.get(id).map_or(Vec::new(), |n| n.attributes.iter().map(|(k, _)| k.clone()).collect());
-            let set: std::collections::HashSet<String> = names.iter().cloned().collect();
-            names.extend(attributes.iter().map(|(k, _)| k.clone()).filter(|k| !set.contains(k)));
-            names
+    // for an engine to hear of: this is the parser's per-element write, which allocates nothing more without one.
+    match engine {
+        None => {
+            if attributes.iter().any(|(k, _)| attribute_reads_state(k)) {
+                arena.state_epoch += 1;
+            }
         }
-    };
-    before_attribute_write(arena, engine, id, &names.iter().map(String::as_str).collect::<Vec<_>>());
+        Some(engine) => {
+            let old: Vec<String> =
+                arena.get(id).map_or(Vec::new(), |n| n.attributes.iter().map(|(k, _)| k.clone()).collect());
+            let mut names: Vec<&str> = old.iter().map(String::as_str).collect();
+            names.extend(attributes.iter().map(|(k, _)| k.as_str()).filter(|k| !old.iter().any(|o| o == k)));
+            before_attribute_write(arena, Some(engine), id, &names);
+        }
+    }
     if let Some(node) = arena.get_mut(id) {
         node.attributes = attributes;
         node.attr_u16 = attr_u16;
