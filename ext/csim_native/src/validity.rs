@@ -612,12 +612,12 @@ fn compiled_pattern(pattern: &[u16]) -> Option<Rc<regress::Regex>> {
         char::decode_utf16(u.iter().copied()).map(|r| r.map_or_else(|e| u32::from(e.unpaired_surrogate()), u32::from)).collect()
     };
     let alone = points(pattern);
-    let compiled = regress::Regex::from_unicode(alone.iter().copied(), "v").ok().and_then(|_| {
+    let compiled = (strict_unicode_syntax(&alone) && regress::Regex::from_unicode(alone.iter().copied(), "v").is_ok()).then(|| {
         let mut anchored: Vec<u32> = "^(?:".chars().map(u32::from).collect();
         anchored.extend(alone.iter().copied());
         anchored.extend(")$".chars().map(u32::from));
         regress::Regex::from_unicode(anchored.iter().copied(), "v").ok().map(Rc::new)
-    });
+    }).flatten();
     PATTERNS.with_borrow_mut(|c| {
         if c.len() >= PATTERN_CACHE_LIMIT {
             c.clear();
@@ -626,6 +626,125 @@ fn compiled_pattern(pattern: &[u16]) -> Option<Rc<regress::Regex>> {
     });
     compiled
 }
+// The Unicode-mode rules (the `u` / `v` flags) regress lets through and V8 enforces — each a SyntaxError there, so a
+// pattern breaking one is ignored (HTML). Outside a character class: an identity escape of anything but a syntax
+// character (`\-`, `\a`), a legacy octal escape (`\101`, `\0` then a digit), a backreference past the last group,
+// `\k` with no named group of that name, `\q` (a class-only escape), and a `{` / `}` / `]` that is no quantifier or
+// class. Classes are left to regress, which checks the `v` class syntax.
+fn strict_unicode_syntax(p: &[u32]) -> bool {
+    let ch = |i: usize| p.get(i).copied().and_then(char::from_u32);
+    // First pass: the capturing groups, and the names of the named ones.
+    let (mut groups, mut names) = (0usize, Vec::<Vec<u32>>::new());
+    let mut i = 0;
+    let mut depth = 0usize; // class nesting (the `v` flag nests classes)
+    while i < p.len() {
+        match ch(i) {
+            Some('\\') => i += 1,
+            Some('[') => depth += 1,
+            Some(']') if depth > 0 => depth -= 1,
+            Some('(') if depth == 0 => {
+                if ch(i + 1) != Some('?') {
+                    groups += 1;
+                } else if ch(i + 2) == Some('<') && !matches!(ch(i + 3), Some('=' | '!')) {
+                    groups += 1;
+                    let end = p[i + 3..].iter().position(|&c| c == u32::from('>')).map(|e| i + 3 + e);
+                    if let Some(end) = end {
+                        names.push(p[i + 3..end].to_vec());
+                    }
+                }
+            }
+            _ => {}
+        }
+        i += 1;
+    }
+    // Second pass: the escapes and braces outside classes.
+    let (mut i, mut depth) = (0usize, 0usize);
+    let quantifier_end = |from: usize| -> Option<usize> {
+        // `{n}`, `{n,}`, `{n,m}` starting at `from` (the `{`): the index of its `}`.
+        let mut j = from + 1;
+        let digits = |j: &mut usize| {
+            let s = *j;
+            while ch(*j).is_some_and(|c| c.is_ascii_digit()) {
+                *j += 1;
+            }
+            *j > s
+        };
+        if !digits(&mut j) {
+            return None;
+        }
+        if ch(j) == Some(',') {
+            j += 1;
+            digits(&mut j);
+        }
+        (ch(j) == Some('}')).then_some(j)
+    };
+    while i < p.len() {
+        let c = ch(i);
+        if depth > 0 {
+            match c {
+                Some('\\') => i += 1,
+                Some('[') => depth += 1,
+                Some(']') => depth -= 1,
+                _ => {}
+            }
+            i += 1;
+            continue;
+        }
+        match c {
+            Some('[') => depth += 1,
+            Some(']' | '}') => return false,
+            Some('{') => match quantifier_end(i) {
+                Some(end) => i = end,
+                None => return false,
+            },
+            Some('\\') => {
+                let Some(e) = ch(i + 1) else { return false };
+                match e {
+                    '1'..='9' => {
+                        let mut j = i + 1;
+                        let mut n = 0usize;
+                        while let Some(d) = ch(j).and_then(|d| d.to_digit(10)) {
+                            n = n.saturating_mul(10).saturating_add(d as usize);
+                            j += 1;
+                        }
+                        if n > groups {
+                            return false;
+                        }
+                        i = j - 1;
+                    }
+                    '0' if ch(i + 2).is_some_and(|d| d.is_ascii_digit()) => return false,
+                    'k' => {
+                        if ch(i + 2) != Some('<') {
+                            return false;
+                        }
+                        let Some(end) = p[i + 3..].iter().position(|&c| c == u32::from('>')).map(|e| i + 3 + e) else {
+                            return false;
+                        };
+                        if !names.iter().any(|n| n.as_slice() == &p[i + 3..end]) {
+                            return false;
+                        }
+                        i = end;
+                    }
+                    // (`\\p{…}`, `\\P{…}` and `\\u{…}` carry a braced body — no quantifier.)
+                    'p' | 'P' | 'u' if ch(i + 2) == Some('{') => {
+                        let Some(end) = p[i + 2..].iter().position(|&c| c == u32::from('}')).map(|e| i + 2 + e) else {
+                            return false;
+                        };
+                        i = end;
+                    }
+                    'd' | 'D' | 's' | 'S' | 'w' | 'W' | 'b' | 'B' | 'f' | 'n' | 'r' | 't' | 'v' | 'c' | 'p' | 'P'
+                    | 'u' | 'x' | '0' => i += 1,
+                    '^' | '$' | '\\' | '.' | '*' | '+' | '?' | '(' | ')' | '[' | ']' | '{' | '}' | '|' | '/' => i += 1,
+                    _ => return false,
+                }
+            }
+            _ => {}
+        }
+        i += 1;
+    }
+    true
+}
+
 fn is_ascii_ws_unit(u: u16) -> bool {
     matches!(u, 0x09 | 0x0A | 0x0C | 0x0D | 0x20)
 }
@@ -703,6 +822,35 @@ mod tests {
         assert_eq!(matches("(", "x"), None);
         assert_eq!(matches("a)(b", "a)(b"), None); // the anchoring wrapper would balance it
         assert_eq!(matches("[(]", "("), None); // a reserved class-set character under `v`
+    }
+
+    // Each a SyntaxError to V8 under `v` (Chrome ignores the pattern), and each one regress alone accepts.
+    #[test]
+    fn a_pattern_v8_rejects_is_ignored() {
+        for bad in [r"\d{3}\-\d{4}", "a{,3}", r"\101", r"\a", r"\q{a}", r"[a-z]{2}\1", r"\k<x>", "a}", "a]", r"\01"] {
+            assert_eq!(matches(bad, "x"), None, "{bad}");
+        }
+    }
+
+    // …and what V8 accepts stays accepted.
+    #[test]
+    fn a_pattern_v8_accepts_is_kept() {
+        for good in [
+            r"\d{3}-\d{4}",
+            "a{2,3}",
+            "a{2,}",
+            r"(a)\1",
+            r"(?<y>b)\k<y>",
+            r"[\-a]",
+            r"[\q{ab|c}]",
+            r"\p{L}+",
+            r"\u{1F600}",
+            r"\x41\cJ\0",
+            r"(?:a)(?=b)(?!c)(?<=d)(?<!e)",
+            r"\^\$\\\.\*\+\?\(\)\[\]\{\}\|\/",
+        ] {
+            assert!(compiled_pattern(&units(good)).is_some(), "{good}");
+        }
     }
 
     #[test]

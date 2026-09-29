@@ -496,6 +496,31 @@ RSpec.describe 'element state in the native arena' do
       expect(session.current_url).not_to include('?')
     end
 
+    it 'ignores a pattern V8 rejects, as the page does' do
+      session.execute_script(<<~JS)
+        document.body.innerHTML = '<input id=ph pattern="\\\\d{3}\\\\-\\\\d{4}" value=abc><input id=ok pattern="\\\\d{3}-\\\\d{4}" value=abc>';
+      JS
+      expect(native_ids('#ph:valid, #ok:invalid')).to eq(%w[ph ok])
+    end
+
+    it 'focuses the first control whose invalid event is not canceled when a submission is refused' do
+      session.execute_script(<<~JS)
+        document.body.innerHTML = '<form><input id=f1 required><input id=f2 required><button>go</button></form>';
+        document.getElementById('f1').addEventListener('invalid', (e) => e.preventDefault());
+      JS
+      session.click_button('go')
+      expect(session.evaluate_script('document.activeElement.id')).to eq('f2')
+    end
+
+    it 'submits implicitly by clicking the default button, which a click listener can cancel' do
+      session.execute_script(<<~JS)
+        document.body.innerHTML = '<form><input id=it name=it><button id=db>go</button></form>';
+        document.getElementById('db').addEventListener('click', (e) => e.preventDefault());
+      JS
+      session.find('#it').fill_in(with: "x\n")
+      expect(session.current_url).not_to include('it=')
+    end
+
     it 'submits once the controls are valid, and only then — by click and by Enter' do
       session.execute_script(<<~JS)
         document.body.innerHTML = '<form id=vf><input id=vt name=vt required><button>go</button></form>' +
