@@ -7759,9 +7759,6 @@ css/cssom/rule-restrictions.html:
 - "@page"
 css/cssom/selectorSerialize.html:
 - escaped character as code point in attribute name
-css/cssom/selectorText-modification-restyle-002.html:
-- 'Check that color changes correctly after shadow stylesheet selector and #container
-  class is changed.'
 css/cssom/serialize-values.html:
 - 'content: counter(par-num, decimal)'
 - 'font-family: ''Lucida Grande'''
