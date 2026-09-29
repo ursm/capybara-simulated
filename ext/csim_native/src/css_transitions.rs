@@ -31,6 +31,16 @@ pub(crate) struct CssTransition {
     pub(crate) reversing_shortening_factor: f64,
 }
 
+// A transition that ran to its end with nothing holding it (css-transitions-1 §3 "completed transition"): all that is
+// left of it to matter is its end value — whether a later change starts another — so that is all that is kept of it, not
+// an animation every frame walks.
+#[derive(Clone, Debug)]
+pub(crate) struct CompletedTransition {
+    pub(crate) owner: Target,
+    pub(crate) property: OwnedPropertyDeclarationId,
+    pub(crate) end_value: AnimationValue,
+}
+
 // What a style change did to one property the after-change style's `transition-property` lists (css-transitions-1 §3):
 // its value before and after, whether the two transition (an animatable property, and one that interpolates between
 // them or is allowed to animate discretely — the same question of the running transition's current value), and the
@@ -66,18 +76,76 @@ impl Animations {
         self.animations.get(&id)?.css.as_ref()?.transition()
     }
 
+    // The properties `owner` has a transition of: running, completed, or canceled by a script.
+    pub(crate) fn transitioning_properties(&self, owner: &Target) -> Vec<OwnedPropertyDeclarationId> {
+        let owned = self.css_transitions_of(owner).into_iter().map(|id| self.css_transition(id).unwrap().property.clone());
+        owned.chain(self.completed_of(owner).map(|c| c.property.clone())).collect()
+    }
+
+    fn completed_of<'a>(&'a self, owner: &'a Target) -> impl Iterator<Item = &'a CompletedTransition> + 'a {
+        self.completed_transitions.get(&owner.node).into_iter().flatten().filter(move |c| c.owner == *owner)
+    }
+
+    // …and a completed one of `property` is gone.
+    fn forget_completed(&mut self, owner: &Target, property: &OwnedPropertyDeclarationId) {
+        if let Some(list) = self.completed_transitions.get_mut(&owner.node) {
+            list.retain(|c| !(c.owner == *owner && c.property == *property));
+            if list.is_empty() {
+                self.completed_transitions.remove(&owner.node);
+            }
+        }
+    }
+
+    // The CSS transitions a frame found over — and its events sent — with no handle to hold them: kept as their end
+    // values from now on (`CompletedTransition`), and the animations let go.
+    pub(crate) fn retire_completed_transitions(&mut self, ids: &[AnimationId]) {
+        for &id in ids {
+            let Some(a) = self.animations.get(&id) else { continue };
+            let Some((owner, transition)) = a.css.as_ref().and_then(|css| Some((css.owner.clone()?, css.transition()?)))
+            else {
+                continue;
+            };
+            let over = a.css.as_ref().unwrap().last_phase() == crate::animations::Phase::After;
+            if a.handled || !over || self.play_state(id) != PlayState::Finished {
+                continue;
+            }
+            let record = CompletedTransition { owner: owner.clone(), property: transition.property.clone(), end_value: transition.end_value.clone() };
+            self.completed_transitions.entry(owner.node).or_default().push(record);
+            self.let_go(id);
+        }
+    }
+
+    // Every completed transition whose owner `keep` no longer keeps (not rendered, gone) is forgotten.
+    pub(crate) fn forget_completed_transitions(&mut self, mut keep: impl FnMut(&Target) -> bool) {
+        self.completed_transitions.retain(|_, list| {
+            list.retain(|c| keep(&c.owner));
+            !list.is_empty()
+        });
+    }
+
     // A style change event on `owner` (css-transitions-1 §3 "Starting of transitions"): each property its after-change
-    // style lists (`changes`) starts, reverses, replaces or cancels its transition as the change says; a transition of
-    // any other property is canceled, or let go where it is over. With no changes at all — the owner no longer
-    // rendered, or gone — every one is.
-    pub(crate) fn update_css_transitions(&mut self, owner: &Target, changes: Vec<TransitionChange>, lock: &SharedRwLock) {
+    // style lists (`listed`) and the change can have moved (`changes`) starts, reverses, replaces or cancels its
+    // transition as the change says; a transition of a property it does not list is canceled, or let go where it is
+    // over. With none listed — the owner no longer rendered, or gone — every one is.
+    pub(crate) fn update_css_transitions(
+        &mut self,
+        owner: &Target,
+        listed: &[OwnedPropertyDeclarationId],
+        changes: Vec<TransitionChange>,
+        lock: &SharedRwLock,
+    ) {
         self.style_changes += 1;
         let generation = self.style_changes;
         for id in self.css_transitions_of(owner) {
             let property = &self.css_transition(id).unwrap().property;
-            if !changes.iter().any(|c| c.property == *property) {
+            if !listed.contains(property) {
                 self.end_css_transition(id);
             }
+        }
+        let unlisted: Vec<OwnedPropertyDeclarationId> =
+            self.completed_of(owner).map(|c| c.property.clone()).filter(|p| !listed.contains(p)).collect();
+        for property in unlisted {
+            self.forget_completed(owner, &property);
         }
         for change in changes {
             self.consider_transition(owner, change, generation, lock);
@@ -100,33 +168,44 @@ impl Animations {
             .into_iter()
             .filter(|&id| self.css_transition(id).is_some_and(|t| t.property == change.property))
             .collect();
-        // (A running transition is one not over; a completed one is over; one a script canceled is neither, and goes.)
-        let (mut running, mut completed) = (None, None);
+        // (A running transition is one not over; a completed one is over — one a page still holds, or the end value
+        // kept of it; one a script canceled is neither, and goes.)
+        let (mut running, mut held) = (None, None);
         for id in existing {
             match self.play_state(id) {
                 PlayState::Running | PlayState::Paused => running = Some(id),
-                PlayState::Finished => completed = Some(id),
+                PlayState::Finished => held = Some(id),
                 PlayState::Idle => self.let_go(id),
             }
         }
+        let completed_end = match held {
+            Some(id) => Some(self.css_transition(id).unwrap().end_value.clone()),
+            None => self.completed_of(owner).find(|c| c.property == change.property).map(|c| c.end_value.clone()),
+        };
+        let mut forget_completed = |model: &mut Animations| {
+            match held {
+                Some(id) => model.let_go(id),
+                None => model.forget_completed(owner, &change.property),
+            }
+        };
         let combined_duration = change.duration.max(0.0) + change.delay;
         // Step 1: none running, a change, one that transitions, not the end of a completed one, and time to run in.
         if running.is_none()
             && change.before != change.after
             && change.transitionable(&change.before)
-            && completed.is_none_or(|id| self.css_transition(id).unwrap().end_value != change.after)
+            && completed_end.as_ref().is_none_or(|end| *end != change.after)
             && combined_duration > 0.0
         {
-            if let Some(id) = completed.take() {
-                self.let_go(id);
+            if completed_end.is_some() {
+                forget_completed(self);
             }
             let (from, to) = (change.before.clone(), change.after.clone());
             self.start_transition(owner, &change, from, to, None, generation, lock);
             return;
         }
         // Step 2: a completed transition to another value is gone.
-        if let Some(id) = completed.filter(|&id| self.css_transition(id).unwrap().end_value != change.after) {
-            self.let_go(id);
+        if completed_end.is_some_and(|end| end != change.after) {
+            forget_completed(self);
         }
         // Step 4: a running transition to another value.
         let Some(id) = running else { return };

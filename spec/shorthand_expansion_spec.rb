@@ -50,6 +50,23 @@ RSpec.describe 'shorthand expansion' do
       .to eq(['opacity, transform', '1s, 2s', '0.5s, 0s'])
   end
 
+  # A delay is the SECOND time of a layer, so a written delay keeps the duration before it, whatever it is: `opacity
+  # 0.2s` reads back as a 0.2s duration. Chrome serializes `opacity 0s 0.2s` so — its own serialization parsing as
+  # something else — which rewrote the style attribute into a different transition on the next inline write.
+  it 'keeps a transition duration a delay follows' do
+    s = session('<!DOCTYPE html><div id="a" style="transition: opacity 0s 0.2s"></div>')
+    read = s.evaluate_script(<<~JS)
+      (() => {
+        const a = document.getElementById('a');
+        const text = a.style.transition;
+        a.style.opacity = '1';
+        const c = getComputedStyle(a);
+        return [text, c.transitionDuration, c.transitionDelay];
+      })()
+    JS
+    expect(read).to eq(['opacity 0s 0.2s', '0s', '0.2s'])
+  end
+
   it 'expands transition-behavior, the component transition-property would otherwise swallow' do
     # `transition: display .3s allow-discrete` is the popover / dialog idiom. `transition-property`
     # is a catch-all matcher, so `allow-discrete` matched nothing and the whole declaration was

@@ -29,7 +29,7 @@ use style::parser::ParserContext;
 use style::properties::animated_properties::AnimationValue;
 use style::properties::{
     parse_one_declaration_into, parse_property_declaration_list, parse_style_attribute, AnimationDeclarations,
-    ComputedValues, LonghandId,
+    ComputedValues, LonghandId, OwnedPropertyDeclarationId,
     PropertyDeclarationBlock, PropertyDeclarationId, PropertyId, ShorthandId, SourcePropertyDeclaration, StyleBuilder,
 };
 use style::rule_cache::RuleCacheConditions;
@@ -1161,8 +1161,8 @@ impl StyleEngine {
 
     // The effects played by an animation that target `element` itself.
     fn effects_on(&self, element: NodeId) -> impl Iterator<Item = &waapi::Effect> {
-        self.web_animations.effects.values().filter(move |e| {
-            e.animation.is_some() && e.target.as_ref().is_some_and(|t| t.node == element && t.pseudo.is_none())
+        self.web_animations.effects_targeting(element).filter(move |e| {
+            e.animation.is_some() && e.target.as_ref().is_some_and(|t| t.pseudo.is_none())
         })
     }
 
@@ -1474,13 +1474,14 @@ impl StyleEngine {
                 self.web_animations.update_css_animations(&target, styles);
             }
             if task.tasks.contains(UpdateAnimationsTasks::CSS_TRANSITIONS) {
-                let changes = match (&task.before_change_style, &task.after_change_style) {
-                    (Some(before), Some(after)) if !after.get_box().clone_display().is_none() => {
-                        transition_changes(before, after)
+                let running = self.web_animations.transitioning_properties(&target);
+                let (listed, changes) = match (&task.before_change_style, &task.after_change_style) {
+                    (Some(before), Some(after)) if rendered_style(arena, &target).is_some() => {
+                        transition_changes(before, after, &running)
                     },
-                    _ => Vec::new(),
+                    _ => (Vec::new(), Vec::new()),
                 };
-                self.web_animations.update_css_transitions(&target, changes, &self.lock);
+                self.web_animations.update_css_transitions(&target, &listed, changes, &self.lock);
             }
             if task.tasks.contains(UpdateAnimationsTasks::EFFECT_PROPERTIES) {
                 self.web_animations.target_restyled(task.node);
@@ -1492,12 +1493,13 @@ impl StyleEngine {
             .flat_map(|node| model.css_by_owner[&node].iter().copied())
             .filter(|id| {
                 let owner = model.animations[id].css.as_ref().and_then(|css| css.owner.as_ref());
-                owner.is_some_and(|o| !target_style(arena, o).is_some_and(|s| !s.get_box().clone_display().is_none()))
+                owner.is_some_and(|o| rendered_style(arena, o).is_none())
             })
             .collect();
         for id in unrendered {
             self.web_animations.unrendered(id);
         }
+        self.web_animations.forget_completed_transitions(|owner| rendered_style(arena, owner).is_some());
     }
 
     // What `target`'s style says of its CSS animations (css-animations-1 §3): one for each `animation-name` a
@@ -1506,9 +1508,7 @@ impl StyleEngine {
     // and composites by the `animation-composition` it declares, else the effect's — the animation's; the effect
     // itself is linear. None where the target is not rendered.
     fn css_animation_styles(&self, arena: &RealmArena, target: &waapi::Target) -> Vec<CssAnimationStyle> {
-        let Some(style) = target_style(arena, target).filter(|s| !s.get_box().clone_display().is_none()) else {
-            return Vec::new();
-        };
+        let Some(style) = rendered_style(arena, target) else { return Vec::new() };
         let ui = style.get_ui();
         let guard = self.lock.read();
         in_arena(arena, self, || {
@@ -1818,17 +1818,28 @@ struct AnimationTask {
     tasks: UpdateAnimationsTasks,
 }
 
-// What a style change did to each property the after-change style's `transition-property` lists (css-transitions-1 §3):
-// the physical property, the last item of the list naming it deciding its duration, delay, timing function and
-// behavior; its values before and after the change.
-fn transition_changes(before: &ComputedValues, after: &ComputedValues) -> Vec<TransitionChange> {
+// The properties the after-change style's `transition-property` lists (physical, the last item naming each deciding
+// its duration, delay, timing function and behavior), and what the style change did to each (css-transitions-1 §3):
+// its values before and after — asked only where the change can have moved it or the element transitions it already
+// (`transitioning`), for `transition: all` names every property there is.
+fn transition_changes(
+    before: &ComputedValues,
+    after: &ComputedValues,
+    transitioning: &[OwnedPropertyDeclarationId],
+) -> (Vec<OwnedPropertyDeclarationId>, Vec<TransitionChange>) {
     let ui = after.get_ui();
     let mut items: Vec<_> = after.transition_properties().collect();
     items.reverse();
+    let mut listed: Vec<OwnedPropertyDeclarationId> = Vec::new();
     let mut changes: Vec<TransitionChange> = Vec::new();
     for item in items {
         let property = item.property.as_borrowed().to_physical(after.writing_mode);
-        if changes.iter().any(|c| c.property.as_borrowed() == property) {
+        if listed.iter().any(|p| p.as_borrowed() == property) {
+            continue;
+        }
+        listed.push(property.to_owned());
+        if AnimationValue::same_in(property, before, after) && !transitioning.iter().any(|p| p.as_borrowed() == property)
+        {
             continue;
         }
         let (Some(from), Some(to)) =
@@ -1842,14 +1853,18 @@ fn transition_changes(before: &ComputedValues, after: &ComputedValues) -> Vec<Tr
             property: property.to_owned(),
             before: from,
             after: to,
-            animatable: property.is_animatable() && (allow_discrete || !property.is_discrete_animatable()),
+            // (A custom property's values say whether they interpolate: a registered one's do, per its syntax.)
+            animatable: property.is_animatable()
+                && (allow_discrete
+                    || matches!(property, PropertyDeclarationId::Custom(_))
+                    || !property.is_discrete_animatable()),
             allow_discrete,
             duration: to_milliseconds(ui.transition_duration_mod(i).seconds()),
             delay: to_milliseconds(ui.transition_delay_mod(i).seconds()),
             easing: ui.transition_timing_function_mod(i),
         });
     }
-    changes
+    (listed, changes)
 }
 
 // Whether a keyframe's declaration computes from anything beyond its element's own style and rules: its parent
@@ -1910,6 +1925,16 @@ fn target_style(arena: &RealmArena, target: &waapi::Target) -> Option<Arc<Comput
     // SAFETY: no traversal runs while a style is read.
     let data = unsafe { &*slot.data.get() }.as_ref()?.borrow();
     data.styles.pseudos.get(pseudo).cloned()
+}
+
+// The style an effect's target has where it is rendered: neither it nor — a pseudo-element's — its originating element
+// `display: none` (whose pseudo-elements generate no box, whatever styles they were last given).
+fn rendered_style(arena: &RealmArena, target: &waapi::Target) -> Option<Arc<ComputedValues>> {
+    let shown = |style: &Arc<ComputedValues>| !style.get_box().clone_display().is_none();
+    if target.pseudo.is_some() && !primary_style(arena, target.node).is_some_and(|s| shown(&s)) {
+        return None;
+    }
+    target_style(arena, target).filter(shown)
 }
 
 // An `animation-composition` as the model composites.

@@ -854,4 +854,40 @@ RSpec.describe 'style engine animations' do
     drain(s, 4)
     expect(s.evaluate_script('window.seen')).to eq(%w[transitionrun:opacity:1:a transitionstart:opacity:1:a])
   end
+
+  # A pseudo-element whose element stops being rendered stops too: its transitions and animations are canceled, and
+  # none starts — its styles are what they were, but it generates no box.
+  it "cancels a pseudo-element's transitions and animations when its element is not rendered" do
+    s = page('<div id="a"></div><div id="b"></div>',
+             '#a::before { content: "x"; opacity: 0; transition: opacity 1s linear } #a.on::before { opacity: 1 }' \
+             '#b::after { content: "y"; animation: fade 1s linear }')
+    s.execute_script(<<~JS)
+      getComputedStyle(document.getElementById('a'), '::before').opacity;
+      document.getElementById('a').classList.add('on');
+    JS
+    drain(s, 3)
+    s.execute_script(<<~JS)
+      const a = document.getElementById('a');
+      a.classList.remove('on');
+      a.style.display = 'none';
+      document.getElementById('b').style.display = 'none';
+    JS
+    events = drain(s, 12)
+    expect(events.grep(/cancel/).map {|e| e.split(':').first }.sort).to eq(%w[animationcancel transitioncancel])
+    expect(events.grep(/end:/)).to eq([])
+    expect(s.evaluate_script('document.getAnimations().length')).to eq(0)
+  end
+
+  # A registered custom property whose syntax interpolates transitions without `allow-discrete`.
+  it 'transitions a registered custom property' do
+    s = page('<div id="a" style="transition: --x 1s linear"></div>',
+             '@property --x { syntax: "<length>"; inherits: false; initial-value: 0px }')
+    s.execute_script(<<~JS)
+      const a = document.getElementById('a');
+      getComputedStyle(a).getPropertyValue('--x');
+      a.style.setProperty('--x', '100px');
+    JS
+    values = 6.times.map { s.evaluate_script("getComputedStyle(document.getElementById('a')).getPropertyValue('--x')") }
+    expect(values.map(&:to_f).uniq.size).to be > 2
+  end
 end

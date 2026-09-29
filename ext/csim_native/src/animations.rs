@@ -400,6 +400,8 @@ pub(crate) struct Animations {
     pub(crate) css_by_owner: HashMap<NodeId, Vec<AnimationId>>,
     // Style change events that started transitions, counted: a transition's place among its owner's.
     pub(crate) style_changes: u64,
+    // The transitions that ran to their end with nothing holding them, by owning element (css_transitions.rs).
+    pub(crate) completed_transitions: HashMap<NodeId, Vec<crate::css_transitions::CompletedTransition>>,
 }
 
 impl Animations {
@@ -534,6 +536,11 @@ impl Animations {
     // Does any effect animate `node`?
     pub(crate) fn animates(&self, node: NodeId) -> bool {
         self.by_target.contains_key(&node)
+    }
+
+    // The effects targeting `node` or one of its pseudo-elements.
+    pub(crate) fn effects_targeting(&self, node: NodeId) -> impl Iterator<Item = &Effect> {
+        self.by_target.get(&node).into_iter().flatten().filter_map(|id| self.effects.get(id))
     }
 
     // What `commitStyles()` writes for animation `id` (web-animations §4.4.19 step 5): its target's effect stack up to
@@ -1137,11 +1144,12 @@ impl Animations {
                 self.touch(id);
             }
         }
-        for id in ids {
+        for &id in &ids {
             if self.animations.get(&id).is_some_and(|a| a.css.is_some() && a.pending.is_none()) {
                 self.queue_css_events(id, false);
             }
         }
+        self.retire_completed_transitions(&ids);
     }
 
     // The document timeline's time becomes `now` — the page's clock, read whenever an animation is asked about or

@@ -38,6 +38,11 @@ impl Css {
         if let CssKind::Transition(t) = &self.kind { Some(t) } else { None }
     }
 
+    // The phase it stood in at the last frame, whose events it owed then.
+    pub(crate) fn last_phase(&self) -> Phase {
+        self.previous.0
+    }
+
     // What its events and `getAnimations()` name it by: an animation's `@keyframes` name, a transition's property.
     pub(crate) fn name(&self) -> String {
         match &self.kind {
