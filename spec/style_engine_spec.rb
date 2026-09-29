@@ -18,6 +18,8 @@ RSpec.describe 'style engine invalidation' do
   end
 
   CSS = <<~CSS
+    div:has(> input:checked) { color: rgb(40, 41, 42); }
+    li:nth-child(2 of .x) { color: rgb(43, 44, 45); }
     .on .kid { color: rgb(1, 2, 3); }
     #target { color: rgb(4, 5, 6); }
     li:nth-child(2) { color: rgb(7, 8, 9); }
@@ -31,9 +33,12 @@ RSpec.describe 'style engine invalidation' do
     li:first-child { font-style: italic; }
   CSS
 
-  def visit(body)
-    html = "<!DOCTYPE html><html><head><style>#{CSS}</style></head><body>#{body}</body></html>"
-    app = ->(_env) { [200, {'content-type' => 'text/html'}, [html]] }
+  def visit(body, head: '', assets: {})
+    html = "<!DOCTYPE html><html><head>#{head}<style>#{CSS}</style></head><body>#{body}</body></html>"
+    app = lambda {|env|
+      css = assets[env['PATH_INFO']]
+      css ? [200, {'content-type' => 'text/css'}, [css]] : [200, {'content-type' => 'text/html'}, [html]]
+    }
     session = simulated_session(app)
     session.visit '/'
     session
@@ -110,5 +115,75 @@ RSpec.describe 'style engine invalidation' do
   it 'restyles an element moved to where other rules match it' do
     s = visit('<div id="box"></div><span class="moved" id="m">m</span>')
     expect(color(s, '#m', 'document.getElementById("box").append(document.getElementById("m"));')).to eq('rgb(28, 29, 30)')
+  end
+
+  it 'restyles a node taken out and put back where other rules match it' do
+    s = visit('<div id="box"></div><span class="moved" id="m">m</span>')
+    script = 'const m = document.getElementById("m"); m.remove(); document.getElementById("box").append(m);'
+    expect(color(s, '#m', script)).to eq('rgb(28, 29, 30)')
+  end
+
+  it 'restyles what a `:has()` reaches when a state inside it changes' do
+    s = visit('<div id="d"><input type="checkbox" id="c"></div>')
+    expect(color(s, '#d', 'document.getElementById("c").checked = true;')).to eq('rgb(40, 41, 42)')
+  end
+
+  it 'restyles the siblings an `:nth-child(… of S)` counts when one starts matching S' do
+    s = visit('<ul><li id="a" class="x">a</li><li id="b">b</li><li id="c" class="x">c</li></ul>')
+    expect(color(s, '#c', 'document.getElementById("b").className = "x";')).to eq('rgb(0, 0, 0)')
+    expect(s.evaluate_script('getComputedStyle(document.getElementById("b")).color')).to eq('rgb(43, 44, 45)')
+  end
+
+  # (The padding itself is layout's to report; any read after the change runs the verify pass, which compares it.)
+  it "restyles a table's cells when its cellpadding changes" do
+    s = visit('<table id="t" cellpadding="3"><tr><td id="c">c</td></tr></table>')
+    expect(color(s, '#c', 'document.getElementById("t").setAttribute("cellpadding", "9");')).to eq('rgb(0, 0, 0)')
+  end
+
+  it "restyles a shadow tree's top-level children when one is inserted before them" do
+    s = visit('<div id="h"></div>')
+    first = s.evaluate_script(<<~JS)
+      (() => {
+        const sr = document.getElementById('h').attachShadow({mode: 'open'});
+        sr.innerHTML = '<style>span:first-of-type { color: rgb(46, 47, 48) }</style><span id="s">s</span>';
+        getComputedStyle(sr.getElementById('s')).color;
+        sr.prepend(document.createElement('span'));
+        return getComputedStyle(sr.getElementById('s')).color;
+      })()
+    JS
+    expect(first).to eq('rgb(0, 0, 0)')
+  end
+
+  it 'keeps styling after the document URL changes (one lock for the realm)' do
+    s = visit('<div id="d" style="color: rgb(1, 2, 3)">d</div>')
+    script = <<~JS
+      history.pushState({}, '', '/other/path/x');
+      const st = document.createElement('style'); st.textContent = 'p {}'; document.head.append(st);
+    JS
+    expect(color(s, '#d', script)).to eq('rgb(1, 2, 3)')
+  end
+
+  it 'sets no declaration from a font face that is no family list' do
+    s = visit('<font id="f" face="x; color: rgb(1, 2, 3)">f</font>')
+    expect(color(s, '#f')).to eq('rgb(0, 0, 0)')
+  end
+end
+
+# The cascade's own order of sheets, in both engines: a `<style>` written after a `<link>` wins over it.
+RSpec.describe 'style sheet order' do
+  [nil, '1'].each do |stylo|
+    it "cascades <style> and <link> in tree order#{stylo ? ' (stylo)' : ''}" do
+      saved = ENV['CSIM_STYLO']
+      ENV['CSIM_STYLO'] = stylo
+      html = '<!DOCTYPE html><link rel="stylesheet" href="/b.css"><style>.ord { color: rgb(0, 128, 0) }</style><p class="ord" id="p">p</p>'
+      app = lambda {|env|
+        env['PATH_INFO'] == '/b.css' ? [200, {'content-type' => 'text/css'}, ['.ord { color: rgb(255, 0, 0) }']] : [200, {'content-type' => 'text/html'}, [html]]
+      }
+      s = simulated_session(app)
+      s.visit '/'
+      expect(s.evaluate_script('getComputedStyle(document.getElementById("p")).color')).to eq('rgb(0, 128, 0)')
+    ensure
+      ENV['CSIM_STYLO'] = saved
+    end
   end
 end

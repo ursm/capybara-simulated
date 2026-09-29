@@ -10,18 +10,22 @@ use web_atoms::ns;
 
 use crate::dom::{NodeData, NodeId, RealmArena};
 
-// `id`'s hints that its own attributes decide, appended to `out` as declarations. `input_image` says whether it is an
-// `<input type=image>` (the one input that is embedded content).
-pub(crate) fn own_hints(node: &NodeData, out: &mut String) {
+// One declaration a hint makes: the property and its value as CSS text. The engine parses each ALONE, so a value
+// that is no value of its property — or text that would be more than one declaration — is dropped whole.
+pub(crate) type Hint = (&'static str, String);
+
+// The hints an element's own attributes give it, appended to `out`. An SVG element's are its presentation attributes.
+pub(crate) fn own_hints(node: &NodeData, out: &mut Vec<Hint>) {
+    if node.ns == ns!(svg) {
+        return svg_presentation_attributes(node, out);
+    }
     if !node.is_html() {
         return;
     }
     let attr = |name: &str| node.plain_attr(name);
     let tag: &str = &node.local_name;
     let input_image = tag == "input" && attr("type").is_some_and(|t| t.eq_ignore_ascii_case("image"));
-    let mut decl = |prop: &str, value: &str| {
-        let _ = write!(out, "{prop}: {value};");
-    };
+    let mut decl = |prop: &'static str, value: &str| out.push((prop, value.to_owned()));
 
     // §15.3.2 The page: `<body>`'s margins, colours and background.
     if tag == "body" {
@@ -84,6 +88,7 @@ pub(crate) fn own_hints(node: &NodeData, out: &mut String) {
         if let Some(c) = attr("color").and_then(legacy_color) {
             decl("color", &c);
         }
+        // …a family list, parsed as `font-family` is: `face="x; display: none"` is no family list, and sets nothing.
         if let Some(face) = attr("face") {
             decl("font-family", face);
         }
@@ -97,11 +102,12 @@ pub(crate) fn own_hints(node: &NodeData, out: &mut String) {
         if let Some(px) = attr("cellspacing").and_then(pixel_length) {
             decl("border-spacing", &px);
         }
+        // `border` is the frame's width — zero included, and 1px for a value that is no number — and an outset one
+        // when there is any.
         if let Some(b) = attr("border") {
-            // Absent or zero draws no frame; present but no number draws a 1px one.
             let px = pixel_length(b).unwrap_or_else(|| "1px".into());
+            decl("border-width", &px);
             if px != "0px" {
-                decl("border-width", &px);
                 decl("border-style", "outset");
             }
         }
@@ -226,7 +232,10 @@ pub(crate) fn own_hints(node: &NodeData, out: &mut String) {
             }
             _ => {}
         }
-        let size = attr("size").and_then(integer).filter(|&s| s > 0);
+        // HTML § 15.3.11: a solid `<hr>` (`color` / `noshade`) is a block of `size` split into four half-borders;
+        // an etched one keeps its 1px borders and `size` is the height between them — none left at 1, the bottom
+        // border dropped with it.
+        let size = attr("size").and_then(integer);
         let color = attr("color").and_then(legacy_color);
         if color.is_some() || attr("noshade").is_some() {
             decl("border-style", "solid");
@@ -234,15 +243,14 @@ pub(crate) fn own_hints(node: &NodeData, out: &mut String) {
                 decl("border-color", c);
                 decl("background-color", c);
             }
-            if let Some(s) = size {
+            if let Some(s) = size.filter(|&s| s >= 0) {
                 decl("border-width", &format!("{}px", s as f64 / 2.0));
             }
-        } else if let Some(s) = size {
+        } else if let Some(s) = size.filter(|&s| s > 0) {
             if s == 1 {
                 decl("border-bottom-width", "0");
             } else {
-                decl("box-sizing", "border-box");
-                decl("height", &format!("{s}px"));
+                decl("height", &format!("{}px", s - 2));
             }
         }
     }
@@ -266,7 +274,7 @@ pub(crate) fn own_hints(node: &NodeData, out: &mut String) {
 }
 
 // The hints a table cell takes from its TABLE: `cellpadding` pads every cell of it.
-pub(crate) fn cell_hints(arena: &RealmArena, id: NodeId, out: &mut String) {
+pub(crate) fn cell_hints(arena: &RealmArena, id: NodeId, out: &mut Vec<Hint>) {
     let Some(node) = arena.get(id) else { return };
     if !(node.is_html_named("td") || node.is_html_named("th")) {
         return;
@@ -279,7 +287,7 @@ pub(crate) fn cell_hints(arena: &RealmArena, id: NodeId, out: &mut String) {
         }
         if &*n.local_name == "table" {
             if let Some(px) = n.plain_attr("cellpadding").and_then(pixel_length) {
-                let _ = write!(out, "padding: {px};");
+                out.push(("padding", px));
             }
             return;
         }
@@ -287,6 +295,41 @@ pub(crate) fn cell_hints(arena: &RealmArena, id: NodeId, out: &mut String) {
             return;
         }
         cur = arena.parent_of(p);
+    }
+}
+
+// SVG 2 § 6.6's presentation attributes: an SVG element's attribute named for a property is a declaration of it, in
+// the property's own grammar (the engine parses it in SVG's mode, where a length can be a bare number). The geometry
+// properties are presentation attributes only on the elements they size.
+fn svg_presentation_attributes(node: &NodeData, out: &mut Vec<Hint>) {
+    const PROPERTIES: &[&str] = &[
+        "alignment-baseline", "baseline-shift", "clip-path", "clip-rule", "color", "color-interpolation",
+        "color-interpolation-filters", "cursor", "direction", "display", "dominant-baseline", "fill", "fill-opacity",
+        "fill-rule", "filter", "flood-color", "flood-opacity", "font-family", "font-size", "font-size-adjust",
+        "font-stretch", "font-style", "font-variant", "font-weight", "image-rendering", "letter-spacing",
+        "lighting-color", "marker-end", "marker-mid", "marker-start", "mask", "mask-type", "opacity", "overflow",
+        "paint-order", "pointer-events", "shape-rendering", "stop-color", "stop-opacity", "stroke", "stroke-dasharray",
+        "stroke-dashoffset", "stroke-linecap", "stroke-linejoin", "stroke-miterlimit", "stroke-opacity",
+        "stroke-width", "text-anchor", "text-decoration", "text-overflow", "text-rendering", "transform-origin",
+        "unicode-bidi", "vector-effect", "visibility", "white-space", "word-spacing", "writing-mode",
+    ];
+    let tag: &str = &node.local_name;
+    let geometry: &[&'static str] = match tag {
+        "circle" => &["cx", "cy", "r"],
+        "ellipse" => &["cx", "cy", "rx", "ry"],
+        "rect" => &["x", "y", "width", "height", "rx", "ry"],
+        "image" | "foreignObject" | "svg" | "symbol" | "use" => &["x", "y", "width", "height"],
+        "path" => &["d"],
+        _ => &[],
+    };
+    for (key, value) in &node.attributes {
+        if node.attr_ns.iter().any(|(k, _, _)| k == key) {
+            continue;
+        }
+        let name = PROPERTIES.iter().chain(geometry).find(|p| **p == key.as_str());
+        if let Some(name) = name {
+            out.push((name, value.clone()));
+        }
     }
 }
 

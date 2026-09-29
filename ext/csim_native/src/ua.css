@@ -18,6 +18,9 @@ input[type=hidden i] { display: none !important; }
   noscript { display: none !important; }
 }
 
+/* 15.4.2 Embedded content: an `<audio>` with no controls renders nothing. */
+audio:not([controls]) { display: none !important; }
+
 /* 15.3.2 The page */
 html, body { display: block; }
 
@@ -30,6 +33,7 @@ blockquote, figure, listing, p, plaintext, pre, xmp { margin-block: 1em; }
 blockquote, figure { margin-inline: 40px; }
 address { font-style: italic; }
 listing, plaintext, pre, xmp { font-family: monospace; white-space: pre; }
+pre[wrap] { white-space: pre-wrap; }
 
 dialog:not([open]) { display: none; }
 dialog {
