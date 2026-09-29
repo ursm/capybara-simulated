@@ -202,8 +202,8 @@ table[rules=cols i], table[rules=all i] {
   border-style: hidden;
   border-collapse: collapse;
 }
-table[border] > tr > :is(td, th),
-table[border] > :is(thead, tbody, tfoot) > tr > :is(td, th) {
+table[border]:-servo-nonzero-border > tr > :is(td, th),
+table[border]:-servo-nonzero-border > :is(thead, tbody, tfoot) > tr > :is(td, th) {
   border-width: 1px;
   border-style: inset;
 }

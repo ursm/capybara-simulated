@@ -236,6 +236,17 @@ RSpec.describe 'walk parity' do
     HTML
   end
 
+  # A table's attributes are declarations in both style systems: its frame and its cells' (none where the border is
+  # zero), their padding, its float or centring, and a row's `valign` its cells inherit.
+  it 'builds tables from their attributes' do
+    expect_clean(parity(<<~HTML))
+      <table border="0"><tr><td>a</td></tr></table>
+      <table border="1" cellpadding="6" align="center"><tr valign="top"><td>b</td><td>c</td></tr></table>
+      <table align="right" border="x"><tbody style="vertical-align: bottom"><tr><td>d</td></tr></tbody></table>
+      <p>after</p>
+    HTML
+  end
+
   it 'declines a collapsing table by name' do
     stats = parity('<table style="border-collapse: collapse"><tr><td>x</td></tr></table>')
     expect(stats['declined']).to include('collapse table' => be_positive)

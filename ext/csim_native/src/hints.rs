@@ -104,8 +104,7 @@ pub(crate) fn own_hints(node: &NodeData, out: &mut Vec<Hint>) {
         }
         // `border` is the frame's width — zero included, and 1px for a value that is no number — and an outset one
         // when there is any.
-        if let Some(b) = attr("border") {
-            let px = pixel_length(b).unwrap_or_else(|| "1px".into());
+        if let Some(px) = table_border(node) {
             decl("border-width", &px);
             if px != "0px" {
                 decl("border-style", "outset");
@@ -275,6 +274,12 @@ pub(crate) fn own_hints(node: &NodeData, out: &mut Vec<Hint>) {
             (false, None) => {}
         }
     }
+}
+
+// A `<table>`'s `border` as the frame width it maps to — zero included, 1px for a value that is no number — or None
+// for none. What `:-servo-nonzero-border` asks too: the UA frames the cells of a table whose border is not zero.
+pub(crate) fn table_border(node: &NodeData) -> Option<String> {
+    node.plain_attr("border").map(|b| pixel_length(b).unwrap_or_else(|| "1px".into()))
 }
 
 // The hints a table cell takes from its TABLE: `cellpadding` pads every cell of it.

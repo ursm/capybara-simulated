@@ -183,6 +183,35 @@ RSpec.describe 'UA stylesheet: the rendering tables' do
     expect(computed(s, 'm', 'display')).to eq('inline-block')
   end
 
+  # A table's own attributes (§15.3.8): `border` frames it `outset` and its cells 1px `inset` — the cells not where it
+  # parses to zero — `cellpadding` pads every cell, and `align` floats it or centres it. And the cells take their
+  # row's `vertical-align` (`td, th { vertical-align: inherit }`), a `valign` included. Chrome, all of it.
+  it 'maps the table attributes' do
+    s = page(<<~HTML)
+      <div id="box" style="width: 800px">
+      <table id="t1" border="1" cellpadding="6"><tr><td id="c1">x</td></tr></table>
+      <table id="t0" border="0"><tr><td id="c0">x</td></tr></table>
+      <table id="tc" align="center"><tr><td>x</td></tr></table>
+      <table id="tr" align="right"><tr><td>x</td></tr></table>
+      <table><tbody style="vertical-align: bottom"><tr><td id="vb">x</td></tr><tr valign="top"><td id="vt">y</td></tr></tbody>
+        <tr style="vertical-align: top"><td id="vr">z</td></tr></table>
+      </div>
+    HTML
+    expect(%w[t1 c1 t0 c0].map {|id| "#{computed(s, id, 'borderTopWidth')} #{computed(s, id, 'borderTopStyle')}" })
+      .to eq(['1px outset', '1px inset', '0px none', '0px none'])
+    expect(computed(s, 'c1', 'paddingTop')).to eq('6px')
+    x = ->(id) { s.evaluate_script("document.getElementById('#{id}').getBoundingClientRect()").values_at('x', 'width') }
+    left = x['box'][0]
+    tc, tr = x['tc'], x['tr']
+    expect(tc[0] - left).to be_within(0.01).of((800 - tc[1]) / 2)
+    expect(tr[0] + tr[1] - left).to be_within(0.01).of(800)
+    expect(computed(s, 'tr', 'cssFloat')).to eq('right')
+    expect(%w[vb vt vr].map {|id| computed(s, id, 'verticalAlign') }).to eq(%w[bottom top top])
+    # …and a `cellpadding` written later pads the cells again.
+    s.execute_script("document.getElementById('t1').setAttribute('cellpadding', '9')")
+    expect(computed(s, 'c1', 'paddingTop')).to eq('9px')
+  end
+
   # `<hr>`'s own attributes: `size` is how thick the line is, and `color` / `noshade` turn the
   # etched groove into a solid block whose border is half that size on every side.
   it 'sizes an hr from its attributes' do

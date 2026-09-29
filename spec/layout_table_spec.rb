@@ -98,6 +98,23 @@ RSpec.describe 'table layout' do
     expect(t[2]).to be_within(0.01).of(each * 2 + SPACING * 3)
   end
 
+  # A span written AFTER the table was laid out is its grid all the same: the spanning cell takes both rows (or both
+  # columns), and the cell after it moves over — Chrome: 46 tall, the second row's cell at 15.6 rather than at 2.
+  it 'lays the table out again when a span changes' do
+    s = simulated_session(->(_env) { [200, {'content-type' => 'text/html'}, [<<~HTML]] })
+      <!DOCTYPE html><table><tr><td id="a">a</td><td id="b">b</td></tr><tr><td id="c">c</td><td>d</td></tr></table>
+    HTML
+    s.visit '/'
+    rect = ->(id) { s.evaluate_script("(() => { const r = document.getElementById('#{id}').getBoundingClientRect(); return [r.x, r.width, r.height] })()") }
+    a, c = rect['a'], rect['c']
+    s.execute_script("document.getElementById('a').rowSpan = 2")
+    expect(rect['a'][2]).to eq(a[2] * 2 + SPACING)
+    expect(rect['c'][0]).to be > c[0]
+    s.execute_script("document.getElementById('a').rowSpan = 1; document.getElementById('a').colSpan = 2")
+    expect(rect['a'][1]).to be > a[1] + rect['b'][1]
+    expect(rect['c'][0]).to eq(c[0])
+  end
+
   it 'stretches a rowspan cell over the rows it covers' do
     body = <<~HTML
       <table id="t"><tr><td id="tall" rowspan="2">tall</td><td id="one">one</td></tr>

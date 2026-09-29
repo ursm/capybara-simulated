@@ -2477,7 +2477,10 @@ impl<'a> selectors::Element for StyleNode<'a> {
             NonTSPseudoClass::MozMeterOptimum
             | NonTSPseudoClass::MozMeterSubOptimum
             | NonTSPseudoClass::MozMeterSubSubOptimum
-            | NonTSPseudoClass::ServoNonZeroBorder => false,
+            => false,
+            NonTSPseudoClass::ServoNonZeroBorder => {
+                arena.get(id).is_some_and(|n| n.is_html_named("table") && crate::hints::table_border(n).is_some_and(|px| px != "0px"))
+            }
         }
     }
     fn match_pseudo_element(&self, _pe: &PseudoElement, _context: &mut MatchingContext<SelectorImpl>) -> bool {

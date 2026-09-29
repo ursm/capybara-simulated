@@ -9251,8 +9251,6 @@ html/rendering/non-replaced-elements/flow-content-0/dialog.html:
 - 'Modal dialog in width: 540px iframe'
 - 'Open dialog in width: 538px iframe'
 - 'Open dialog in width: 540px iframe'
-html/rendering/non-replaced-elements/flow-content-0/div-align.html:
-- "== html/rendering/non-replaced-elements/flow-content-0/div-align-ref.html"
 html/rendering/non-replaced-elements/flow-content-0/form-margin-quirk.html:
 - form margin quirk
 html/rendering/non-replaced-elements/form-controls/input-line-height-computed.html:
@@ -9344,13 +9342,10 @@ html/rendering/non-replaced-elements/tables/hidden-attr.html:
 - Computed display and visibility of tfoot
 - Computed display and visibility of thead
 - Computed display and visibility of tr
-html/rendering/non-replaced-elements/tables/table-align-float.xhtml:
-- "== html/rendering/non-replaced-elements/tables/table-align-float-ref.xhtml"
 html/rendering/non-replaced-elements/tables/table-attribute.html:
 - table background attribute is correct
 - table bgcolor attribute is correct
 - table bordercolor attribute is correct
-- table cellpadding attribute is correct
 - table cellspacing attribute is correct
 - table_td height attribute percentage is correct
 - table_th height attribute percentage is correct
@@ -9367,8 +9362,6 @@ html/rendering/non-replaced-elements/tables/table-attribute.html:
 - thead bgcolor attribute is correct
 - tr background attribute is correct
 - tr bgcolor attribute is correct
-html/rendering/non-replaced-elements/tables/table-border-1.html:
-- "== html/rendering/non-replaced-elements/tables/table-border-1-ref.html"
 html/rendering/non-replaced-elements/tables/table-cell-nowrap-with-fixed-width.html:
 - "== html/rendering/non-replaced-elements/tables/table-cell-nowrap-with-fixed-width-ref.html"
 html/rendering/non-replaced-elements/tables/table-direction.html:
@@ -9381,8 +9374,6 @@ html/rendering/non-replaced-elements/tables/table-row-pagination-001-print.html:
 - "== html/rendering/non-replaced-elements/tables/table-row-pagination-001-print-ref.html"
 html/rendering/non-replaced-elements/tables/table-row-pagination-002-print.html:
 - "== html/rendering/non-replaced-elements/tables/table-row-pagination-002-print-ref.html"
-html/rendering/non-replaced-elements/tables/table-valign-baseline-ascii-case-insensitive.html:
-- keyword baseline
 html/rendering/non-replaced-elements/tables/tr-transform-and-will-change.html:
 - "== html/rendering/non-replaced-elements/tables/tr-transform-and-will-change-ref.html"
 html/rendering/non-replaced-elements/the-fieldset-and-legend-elements/fieldset-block-size.html:
