@@ -71,9 +71,10 @@ impl Default for StyleLock {
 // a shadow root's and a document's slot hold only the flags matching leaves on a parent.
 pub(crate) struct StyleSlot {
     id: Option<Atom>,
-    style_attr: OnceCell<Option<Arc<Locked<PropertyDeclarationBlock>>>>,
+    // (Both in an UnsafeCell: the verify pass empties them through a shared reference, between traversals.)
+    style_attr: UnsafeCell<OnceCell<Option<Arc<Locked<PropertyDeclarationBlock>>>>>,
     // The presentational hints its own attributes give it, parsed on first read after any of them changes.
-    hints: OnceCell<Option<Arc<Locked<PropertyDeclarationBlock>>>>,
+    hints: UnsafeCell<OnceCell<Option<Arc<Locked<PropertyDeclarationBlock>>>>>,
     data: UnsafeCell<Option<ElementDataWrapper>>,
     dirty_descendants: Cell<bool>,
     handled_snapshot: Cell<bool>,
@@ -91,8 +92,8 @@ impl StyleSlot {
     pub(crate) fn of(node: &crate::dom::NodeData) -> StyleSlot {
         StyleSlot {
             id: node.plain_attr("id").filter(|v| !v.is_empty()).map(Atom::from),
-            style_attr: OnceCell::new(),
-            hints: OnceCell::new(),
+            style_attr: UnsafeCell::new(OnceCell::new()),
+            hints: UnsafeCell::new(OnceCell::new()),
             data: UnsafeCell::new(None),
             dirty_descendants: Cell::new(false),
             handled_snapshot: Cell::new(false),
@@ -117,11 +118,10 @@ impl StyleSlot {
 
     // Forget what was parsed and derived of the node, so the next read makes it again (the verify mode's full pass).
     fn clear_caches(&self) {
-        // SAFETY: nothing borrows a cached block across this — no traversal runs.
+        // SAFETY: called between traversals — nothing holds a borrow of either cell's contents.
         unsafe {
-            let this = self as *const StyleSlot as *mut StyleSlot;
-            (*this).style_attr = OnceCell::new();
-            (*this).hints = OnceCell::new();
+            *self.style_attr.get() = OnceCell::new();
+            *self.hints.get() = OnceCell::new();
         }
         self.state.set((u64::MAX, ElementState::empty()));
     }
@@ -132,10 +132,10 @@ impl StyleSlot {
             self.id = id.filter(|v| !v.is_empty());
         }
         if name.is_none_or(|n| n == "style") {
-            self.style_attr = OnceCell::new();
+            *self.style_attr.get_mut() = OnceCell::new();
         }
         if name.is_none_or(|n| n != "style" && n != "class") {
-            self.hints = OnceCell::new();
+            *self.hints.get_mut() = OnceCell::new();
         }
     }
 }
@@ -172,11 +172,14 @@ pub(crate) struct StyleEngine {
     quirks_sheet: Option<DocumentStyleSheet>,
     // Every presentational-hint block made, by its text: elements with equal hints share one block (the style-sharing
     // cache compares blocks by identity).
-    hint_blocks: RefCell<std::collections::HashMap<String, Arc<Locked<PropertyDeclarationBlock>>>>,
+    hint_blocks: RefCell<std::collections::HashMap<HintKey, Arc<Locked<PropertyDeclarationBlock>>>>,
     // CSIM_STYLE_VERIFY: every restyle that styled only what the changes reached is held against styling everything,
     // and each element whose values differ is reported here (`take_verify_failures`).
     verify: bool,
     verify_failures: Vec<String>,
+    // A change hook panicked (a bug): what the engine holds may be half-updated, so the next style op throws it and
+    // everything it styled away (`poisoned`).
+    poisoned: bool,
 }
 
 // A sheet as the page hands it over: its text, the base URL its `url()`s resolve against, the media list it applies
@@ -340,6 +343,7 @@ impl StyleEngine {
             hint_blocks: Default::default(),
             verify: std::env::var_os("CSIM_STYLE_VERIFY").is_some_and(|v| v != "0"),
             verify_failures: Vec::new(),
+            poisoned: false,
         };
         let ua = engine.parse(UA_SHEET, engine.url.clone(), "", Origin::UserAgent, AllowImportRules::No, Vec::new());
         engine.stylist.append_stylesheet(ua, &engine.lock.read());
@@ -363,9 +367,15 @@ impl StyleEngine {
         if engine.quirks != quirks || engine.viewport != viewport {
             engine.quirks = quirks;
             engine.viewport = viewport;
+            // …and the origins whose media queries now answer differently are rebuilt (the stylist says which).
             let guard = engine.lock.read();
-            engine.stylist.set_device(device(quirks, viewport), &StylesheetGuards { author: &guard, ua_or_user: &guard });
+            let changed =
+                engine.stylist.set_device(device(quirks, viewport), &StylesheetGuards { author: &guard, ua_or_user: &guard });
             drop(guard);
+            engine.stylist.force_stylesheet_origins_dirty(changed);
+            for shadow in engine.shadow_styles.values_mut() {
+                shadow.dirty = true;
+            }
             engine.set_quirks(quirks);
             engine.styled = None;
             engine.restyle_all = true;
@@ -445,7 +455,9 @@ impl StyleEngine {
         if hints.is_empty() {
             return None;
         }
-        let key: String = hints.iter().map(|(p, v)| format!("{p}\u{1}{v}\u{2}")).chain([svg.to_string()]).collect();
+        // Keyed on everything its parse read: the declarations, the SVG mode, and the base URL a `url()` resolved
+        // against and the mode (both of which can change in place, `for_document`).
+        let key = (hints.to_vec(), svg, self.url.0.as_str().to_owned(), self.quirks == QuirksMode::Quirks);
         if let Some(block) = self.hint_blocks.borrow().get(&key) {
             return Some(block.clone());
         }
@@ -622,7 +634,7 @@ impl StyleEngine {
             return;
         }
         let Some(doc) = self.doc else { return };
-        style::thread_state::enter(style::thread_state::ThreadState::LAYOUT);
+        let _layout = LayoutThreadState::enter();
         {
             let guard = self.lock.read();
             self.stylist.flush(&StylesheetGuards { author: &guard, ua_or_user: &guard });
@@ -647,7 +659,6 @@ impl StyleEngine {
         if self.verify && !restyle_all {
             self.verify_against_restyling_everything(arena, doc);
         }
-        style::thread_state::exit(style::thread_state::ThreadState::LAYOUT);
         self.styled = Some(arena.mutations);
     }
 
@@ -782,6 +793,9 @@ impl StyleEngine {
     // (which of a shadow tree's parts an outer `::part()` reaches) reach its whole subtree, and a table's
     // `cellpadding` its cells.
     pub(crate) fn attributes_will_change(&mut self, arena: &RealmArena, id: NodeId, names: &[&str]) {
+        self.guarded(|engine| engine.attributes_will_change_unguarded(arena, id, names));
+    }
+    fn attributes_will_change_unguarded(&mut self, arena: &RealmArena, id: NodeId, names: &[&str]) {
         let Some(node) = arena.get(id) else { return };
         let Some(slot) = arena.existing_style_slot(id) else { return };
         if unsafe { &*slot.data.get() }.is_none() {
@@ -823,6 +837,9 @@ impl StyleEngine {
     // parent is next visited. A shadow root's are its host's flat-tree children; a document's is the root, which
     // restyles everything.
     pub(crate) fn children_changed(&mut self, arena: &RealmArena, parent: NodeId) {
+        self.guarded(|engine| engine.children_changed_unguarded(arena, parent));
+    }
+    fn children_changed_unguarded(&mut self, arena: &RealmArena, parent: NodeId) {
         let Some(p) = arena.get(parent) else { return };
         if p.kind == NodeKind::Document {
             self.restyle_all = true;
@@ -876,6 +893,9 @@ impl StyleEngine {
     // `id` leaves where it was — out of the document, out of its slot, or on its way somewhere else — and its subtree's
     // styles go with it (Firefox clears them on unbind): what it is styled as next is decided where it lands.
     pub(crate) fn node_left(&mut self, arena: &RealmArena, id: NodeId) {
+        self.guarded(|engine| engine.node_left_unguarded(arena, id));
+    }
+    fn node_left_unguarded(&mut self, arena: &RealmArena, id: NodeId) {
         let mut stack = vec![id];
         while let Some(n) = stack.pop() {
             let Some(node) = arena.get(n) else { continue };
@@ -895,6 +915,9 @@ impl StyleEngine {
     // `id` gained or lost a custom state (`:state()`), which no snapshot records: it and everything a combinator can
     // reach from it — its parent's children — are styled again.
     pub(crate) fn custom_states_changed(&mut self, arena: &RealmArena, id: NodeId) {
+        self.guarded(|engine| engine.custom_states_changed_unguarded(arena, id));
+    }
+    fn custom_states_changed_unguarded(&mut self, arena: &RealmArena, id: NodeId) {
         in_arena(arena, self, || {
             let el = StyleNode::new(arena, id);
             match TElement::traversal_parent(&el) {
@@ -905,9 +928,32 @@ impl StyleEngine {
         self.restyle_all |= self.has_relative;
     }
 
+    // `host` has a shadow root now: its light children leave the flat tree (a slot may take them back, and style them
+    // then), and what it renders is its shadow tree.
+    pub(crate) fn shadow_attached(&mut self, arena: &RealmArena, host: NodeId) {
+        self.guarded(|engine| engine.shadow_attached_unguarded(arena, host));
+    }
+    fn shadow_attached_unguarded(&mut self, arena: &RealmArena, host: NodeId) {
+        let Some(node) = arena.get(host) else { return };
+        for &c in &node.children {
+            self.node_left(arena, c);
+        }
+        in_arena(arena, self, || {
+            if arena.existing_style_slot(host).is_some() {
+                let h = StyleNode::new(arena, host);
+                hint_element(h, RestyleHint::restyle_subtree());
+                unsafe { h.set_dirty_descendants() };
+            }
+        });
+        self.restyle_all |= self.has_relative;
+    }
+
     // `slot`'s assigned nodes changed (the ones that came or went have left where they were, `node_left`): its
     // flat-tree children are new.
     pub(crate) fn slot_assignment_changed(&mut self, arena: &RealmArena, slot: NodeId) {
+        self.guarded(|engine| engine.slot_assignment_changed_unguarded(arena, slot));
+    }
+    fn slot_assignment_changed_unguarded(&mut self, arena: &RealmArena, slot: NodeId) {
         in_arena(arena, self, || {
             if arena.existing_style_slot(slot).is_some() {
                 let s = StyleNode::new(arena, slot);
@@ -932,6 +978,26 @@ impl StyleEngine {
             }
             None
         })
+    }
+
+    // Run a change hook, catching a panic (a bug) where it would unwind into V8's callback frame and abort the process:
+    // the engine is marked `poisoned`, and the next style op drops it.
+    fn guarded(&mut self, hook: impl FnOnce(&mut StyleEngine)) {
+        if self.poisoned {
+            return;
+        }
+        let this = &mut *self;
+        if std::panic::catch_unwind(std::panic::AssertUnwindSafe(move || hook(this))).is_err() {
+            self.poisoned = true;
+        }
+    }
+
+    pub(crate) fn poisoned(&self) -> bool {
+        self.poisoned
+    }
+
+    pub(crate) fn verifies(&self) -> bool {
+        self.verify
     }
 
     // `id`'s pseudo-element `pseudo` (`before`, `placeholder`, …): its style as `getComputedStyle(el, "::before")`
@@ -1135,6 +1201,20 @@ fn is_flex_or_grid_item(style: &ComputedValues, parent: Option<Arc<ComputedValue
     use style::computed_values::position::T as Position;
     parent.is_some_and(|p| p.get_box().clone_display().is_item_container())
         && !matches!(style.get_box().clone_position(), Position::Absolute | Position::Fixed)
+}
+
+// Stylo's thread state is LAYOUT while it styles, and back when it stops — a panic included.
+struct LayoutThreadState;
+impl LayoutThreadState {
+    fn enter() -> LayoutThreadState {
+        style::thread_state::enter(style::thread_state::ThreadState::LAYOUT);
+        LayoutThreadState
+    }
+}
+impl Drop for LayoutThreadState {
+    fn drop(&mut self) {
+        style::thread_state::exit(style::thread_state::ThreadState::LAYOUT);
+    }
 }
 
 struct NoPainters;
@@ -1603,7 +1683,8 @@ impl<'a> TElement for StyleNode<'a> {
         self.node().ns == ns!(svg)
     }
     fn style_attribute(&self) -> Option<ArcBorrow<'_, Locked<PropertyDeclarationBlock>>> {
-        let parsed = self.slot().style_attr.get_or_init(|| {
+        // SAFETY: the cell is only emptied between traversals (`clear_caches`, `attr_changed` through `&mut`).
+        let parsed = unsafe { &*self.slot().style_attr.get() }.get_or_init(|| {
             let css = self.node().plain_attr("style")?;
             let engine = self.engine();
             let block = parse_style_attribute(css, &engine.url, None, engine.quirks, CssRuleType::Style);
@@ -1777,7 +1858,8 @@ impl<'a> TElement for StyleNode<'a> {
             ));
         };
         let svg = self.node().ns == ns!(svg);
-        let own = self.slot().hints.get_or_init(|| {
+        // SAFETY: as `style_attribute`'s.
+        let own = unsafe { &*self.slot().hints.get() }.get_or_init(|| {
             let mut list = Vec::new();
             crate::hints::own_hints(self.node(), &mut list);
             engine.hint_block(&list, svg)
@@ -1819,6 +1901,9 @@ impl<'a> TElement for StyleNode<'a> {
         RestyleDamage::empty()
     }
 }
+
+// What a hint block is cached under (`hint_block`).
+type HintKey = (Vec<crate::hints::Hint>, bool, String, bool);
 
 // How many distinct hint blocks the engine keeps before it starts over (a page has a handful).
 const HINT_BLOCK_LIMIT: usize = 4096;

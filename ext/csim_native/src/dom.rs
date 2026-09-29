@@ -851,10 +851,10 @@ fn arena_and_engine<'s>(
 }
 
 // An attribute write to `id` of the attributes `names`, about to land: the style engine hears of it first, and a name
-// a state can read moves the state epoch (a class, a style, an id and data / ARIA attributes are read by none).
+// a state can read moves the state epoch (a class, a style and data / ARIA attributes are read by none).
 fn before_attribute_write(arena: &mut RealmArena, engine: Option<&mut crate::style::StyleEngine>, id: NodeId, names: &[&str]) {
-    let reads_state =
-        |n: &&str| !(matches!(*n, "class" | "style" | "id") || n.starts_with("data-") || n.starts_with("aria-"));
+    // (An id is read by states: `:target` names one, and `<input form=…>` finds its form owner by one.)
+    let reads_state = |n: &&str| !(matches!(*n, "class" | "style") || n.starts_with("data-") || n.starts_with("aria-"));
     if names.iter().any(reads_state) {
         arena.state_epoch += 1;
     }
@@ -1071,6 +1071,8 @@ fn set_data(
     let data = utf16_arg(scope, args.get(1));
     let cid = realm_id(scope, &args);
     let (arena, engine) = arena_and_engine(scope, cid);
+    // (Text is a state input: a textarea's default value, an option's.)
+    arena.state_epoch += 1;
     if let Some(node) = arena.get_mut(id) {
         node.data = data;
     }
@@ -1092,6 +1094,7 @@ fn append_data(
     let data = utf16_arg(scope, args.get(1));
     let cid = realm_id(scope, &args);
     let (arena, engine) = arena_and_engine(scope, cid);
+    arena.state_epoch += 1;
     if let Some(node) = arena.get_mut(id) {
         node.data.extend_from_slice(&data);
     }
@@ -1230,7 +1233,11 @@ fn set_shadow_host(
         return;
     };
     let cid = realm_id(scope, &args);
-    realm(scope, cid).set_shadow_host(root, host);
+    let (arena, engine) = arena_and_engine(scope, cid);
+    arena.set_shadow_host(root, host);
+    if let Some(engine) = engine {
+        engine.shadow_attached(arena, host);
+    }
 }
 
 // __dom.setAssignedNodes(slotNid, [nid, …]): the slot's assigned nodes are these now (HTML's "assign slottables").
@@ -1500,9 +1507,18 @@ fn sync_attrs(
     let (attributes, attr_u16) = read_attrs_flat(scope, args.get(1));
     let cid = realm_id(scope, &args);
     let (arena, engine) = arena_and_engine(scope, cid);
-    // Every name the element had or will have: a wholesale write can add, drop or change any of them.
-    let mut names: Vec<String> = arena.get(id).map_or(Vec::new(), |n| n.attributes.iter().map(|(k, _)| k.clone()).collect());
-    names.extend(attributes.iter().map(|(k, _)| k.clone()).filter(|k| !names.contains(k)).collect::<Vec<_>>());
+    // Every name the element had or will have — a wholesale write can add, drop or change any of them — listed only
+    // for an engine to hear of (this is the parser's per-element write).
+    let names: Vec<String> = match &engine {
+        None => attributes.iter().map(|(k, _)| k.clone()).collect(),
+        Some(_) => {
+            let mut names: Vec<String> =
+                arena.get(id).map_or(Vec::new(), |n| n.attributes.iter().map(|(k, _)| k.clone()).collect());
+            let set: std::collections::HashSet<String> = names.iter().cloned().collect();
+            names.extend(attributes.iter().map(|(k, _)| k.clone()).filter(|k| !set.contains(k)));
+            names
+        }
+    };
     before_attribute_write(arena, engine, id, &names.iter().map(String::as_str).collect::<Vec<_>>());
     if let Some(node) = arena.get_mut(id) {
         node.attributes = attributes;
@@ -1702,13 +1718,19 @@ fn url_array<'s>(scope: &mut v8::PinScope<'s, '_>, urls: &[String]) -> v8::Local
 }
 
 // Run a style-engine op, catching a panic (a bug) where it would otherwise unwind into V8's callback frame and abort
-// the process: it becomes a JS error naming it, and the realm's engine is dropped with every style it made, so the
-// next op starts from a clean one.
+// the process: the realm's engine is dropped with every style it made, so the next op starts from a clean one.
 fn style_op(scope: &mut v8::PinScope<'_, '_>, cid: i32, op: impl FnOnce(&mut v8::PinScope<'_, '_>)) {
-    let panicked = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| op(scope))).err();
+    // …and an engine a change hook left poisoned is dropped before it is asked anything.
+    let poisoned = dom(scope).styles.get(&cid).is_some_and(|e| e.poisoned());
+    let panicked = if poisoned {
+        Some(Box::new("a change hook panicked") as Box<dyn std::any::Any + Send>)
+    } else {
+        std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| op(scope))).err()
+    };
     let Some(panic) = panicked else { return };
     let what = panic.downcast_ref::<&str>().map(|s| s.to_string()).or_else(|| panic.downcast_ref::<String>().cloned());
     let d = dom(scope);
+    let verifies = d.styles.get(&cid).is_some_and(|e| e.verifies());
     d.styles.remove(&cid);
     if let Some(arena) = d.realms.get(&cid) {
         for id in arena.element_ids().collect::<Vec<_>>() {
@@ -1717,7 +1739,13 @@ fn style_op(scope: &mut v8::PinScope<'_, '_>, cid: i32, op: impl FnOnce(&mut v8:
             }
         }
     }
+    // Loud where the engine is being verified; elsewhere the page is answered as it was before the engine (by the JS
+    // side), with the bug on stderr.
     let message = format!("style engine panicked: {}", what.unwrap_or_default());
+    if !verifies {
+        eprintln!("csim: {message}");
+        return;
+    }
     if let Some(m) = v8::String::new(scope, &message) {
         let error = v8::Exception::error(scope, m);
         scope.throw_exception(error);

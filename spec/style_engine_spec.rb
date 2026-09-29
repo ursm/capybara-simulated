@@ -163,6 +163,45 @@ RSpec.describe 'style engine invalidation' do
     expect(color(s, '#d', script)).to eq('rgb(1, 2, 3)')
   end
 
+  it 'answers the media queries of the viewport it has now' do
+    s = visit('<p id="p">p</p>', head: '<style>@media (max-width: 500px) { p { color: rgb(1, 1, 1) } }</style>')
+    expect(color(s, '#p')).to eq('rgb(0, 0, 0)')
+    s.current_window.resize_to(400, 600)
+    expect(color(s, '#p')).to eq('rgb(1, 1, 1)')
+  end
+
+  # An id is a state input: `:target` names one, and `<input form=…>` finds its form owner by one. (These three hold
+  # the behaviour; on this path the JS side's own writes moved the state epoch too, so they passed before the fix.)
+  it 'restyles the target when an id makes it one' do
+    s = visit('<div id="d">d</div>', head: '<style>:target { color: rgb(2, 2, 2) }</style>')
+    expect(color(s, 'div', 'location.hash = "#x"; getComputedStyle(document.getElementById("d")).color; document.getElementById("d").id = "x";')).to eq('rgb(2, 2, 2)')
+  end
+
+  it 'restyles the forms whose controls an id change moves' do
+    s = visit('<form id="f"></form><form id="g"></form><input form="f" required>',
+              head: '<style>form:invalid { color: rgb(4, 5, 6) }</style>')
+    script = 'const f = document.getElementById("f"), g = document.getElementById("g"); f.id = "z"; g.id = "f";'
+    expect(color(s, '#f', script)).to eq('rgb(4, 5, 6)')
+    expect(s.evaluate_script('getComputedStyle(document.getElementById("z")).color')).to eq('rgb(0, 0, 0)')
+  end
+
+  it 'restyles a textarea whose text is its value when the text changes' do
+    s = visit('<textarea id="t" required placeholder="p">x</textarea>',
+              head: '<style>textarea:invalid { color: rgb(4, 5, 6) }</style>')
+    expect(color(s, '#t', 'document.getElementById("t").firstChild.data = "";')).to eq('rgb(4, 5, 6)')
+  end
+
+  it 'lets the light children of a host that gains a shadow root go' do
+    s = visit('<div id="h" class="h"><span id="s">s</span></div>', head: '<style>.h span { color: rgb(1, 2, 3) }</style>')
+    script = <<~JS
+      getComputedStyle(document.getElementById('s')).color;
+      const sr = document.getElementById('h').attachShadow({mode: 'open'});
+      sr.innerHTML = '<b>x</b>';
+      document.getElementById('h').className = '';
+    JS
+    expect(color(s, '#s', script)).to eq('rgb(0, 0, 0)')
+  end
+
   it 'sets no declaration from a font face that is no family list' do
     s = visit('<font id="f" face="x; color: rgb(1, 2, 3)">f</font>')
     expect(color(s, '#f')).to eq('rgb(0, 0, 0)')
