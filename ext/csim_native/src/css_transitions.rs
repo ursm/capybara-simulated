@@ -68,8 +68,9 @@ impl Animations {
         self.owned_by(owner).filter(|&id| self.css_transition(id).is_some()).collect()
     }
 
+    // (…a completed one kept as its end value included: a style change that no longer lists it is what forgets it.)
     pub(crate) fn has_css_transitions(&self, owner: &Target) -> bool {
-        self.owned_by(owner).any(|id| self.css_transition(id).is_some())
+        self.owned_by(owner).any(|id| self.css_transition(id).is_some()) || self.completed_of(owner).next().is_some()
     }
 
     fn css_transition(&self, id: AnimationId) -> Option<&CssTransition> {

@@ -1493,13 +1493,13 @@ impl StyleEngine {
             .flat_map(|node| model.css_by_owner[&node].iter().copied())
             .filter(|id| {
                 let owner = model.animations[id].css.as_ref().and_then(|css| css.owner.as_ref());
-                owner.is_some_and(|o| rendered_style(arena, o).is_none())
+                owner.is_some_and(|o| !is_rendered(arena, o))
             })
             .collect();
         for id in unrendered {
             self.web_animations.unrendered(id);
         }
-        self.web_animations.forget_completed_transitions(|owner| rendered_style(arena, owner).is_some());
+        self.web_animations.forget_completed_transitions(|owner| is_rendered(arena, owner));
     }
 
     // What `target`'s style says of its CSS animations (css-animations-1 §3): one for each `animation-name` a
@@ -1930,11 +1930,21 @@ fn target_style(arena: &RealmArena, target: &waapi::Target) -> Option<Arc<Comput
 // The style an effect's target has where it is rendered: neither it nor — a pseudo-element's — its originating element
 // `display: none` (whose pseudo-elements generate no box, whatever styles they were last given).
 fn rendered_style(arena: &RealmArena, target: &waapi::Target) -> Option<Arc<ComputedValues>> {
-    let shown = |style: &Arc<ComputedValues>| !style.get_box().clone_display().is_none();
-    if target.pseudo.is_some() && !primary_style(arena, target.node).is_some_and(|s| shown(&s)) {
-        return None;
+    is_rendered(arena, target).then(|| target_style(arena, target)).flatten()
+}
+
+// …asked without taking the style, as a sweep over every completed transition asks it on every flush.
+fn is_rendered(arena: &RealmArena, target: &waapi::Target) -> bool {
+    let Some(slot) = arena.style_slot(target.node) else { return false };
+    // SAFETY: no traversal runs while a style is read.
+    let Some(data) = unsafe { &*slot.data.get() }.as_ref() else { return false };
+    let data = data.borrow();
+    let shown = |style: &ComputedValues| !style.get_box().clone_display().is_none();
+    match (&target.pseudo, data.styles.get_primary()) {
+        (_, None) => false,
+        (None, Some(primary)) => shown(primary),
+        (Some(pseudo), Some(primary)) => shown(primary) && data.styles.pseudos.get(pseudo).is_some_and(|s| shown(s)),
     }
-    target_style(arena, target).filter(shown)
 }
 
 // An `animation-composition` as the model composites.

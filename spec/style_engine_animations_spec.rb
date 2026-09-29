@@ -890,4 +890,24 @@ RSpec.describe 'style engine animations' do
     values = 6.times.map { s.evaluate_script("getComputedStyle(document.getElementById('a')).getPropertyValue('--x')") }
     expect(values.map(&:to_f).uniq.size).to be > 2
   end
+
+  # A completed transition a style change no longer lists is gone (css-transitions-1 §3 step 3), even kept only as its
+  # end value: transitioning to that value again later starts a transition.
+  it 'forgets a completed transition its style no longer lists' do
+    s = page('<div id="a" style="transition: opacity 0.2s linear; opacity: 0"></div>')
+    s.execute_script("getComputedStyle(document.getElementById('a')).opacity; document.getElementById('a').style.opacity = '1'")
+    drain(s, 5)
+    read = s.evaluate_script(<<~JS)
+      (() => {
+        const a = document.getElementById('a');
+        a.style.transition = 'none';
+        a.style.opacity = '0';
+        getComputedStyle(a).opacity;
+        a.style.transition = 'opacity 0.2s linear';
+        a.style.opacity = '1';
+        return [a.getAnimations().length, getComputedStyle(a).opacity];
+      })()
+    JS
+    expect(read).to eq([1, '0'])
+  end
 end
