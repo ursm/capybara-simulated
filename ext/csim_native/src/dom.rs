@@ -140,8 +140,13 @@ pub(crate) struct NodeData {
     pub(crate) layout_box: Option<crate::layout::Box>,
     // An element's live STATE that no attribute carries (`state` bits, below): what a script or the user did to it.
     pub(crate) state: u32,
-    // A shadow root's host (None for every other node): the shadow-including ancestor chain `:focus` walks.
+    // A shadow root's host (None for every other node): the shadow-including ancestor chain `:focus` walks…
     pub(crate) host: Option<NodeId>,
+    // …and a host's shadow root, the other way.
+    pub(crate) shadow_root: Option<NodeId>,
+    // A slot's assigned nodes, in tree order, and a slotted node's slot: the flat tree the style engine walks.
+    pub(crate) assigned: Vec<NodeId>,
+    pub(crate) assigned_slot: Option<NodeId>,
     // A form control's live value once dirty (a script's `.value`, typing), in UTF-16 code units; None while it is
     // its default — the `value` attribute, or a `<textarea>`'s text.
     pub(crate) value: Option<Box<[u16]>>,
@@ -191,6 +196,9 @@ impl NodeData {
             layout_box: None,
             state: 0,
             host: None,
+            shadow_root: None,
+            assigned: Vec::new(),
+            assigned_slot: None,
             value: None,
             style: Default::default(),
         }
@@ -554,6 +562,29 @@ impl RealmArena {
             node.host = Some(host);
             self.has_shadow_hosts = true;
         }
+        if let Some(node) = self.get_mut(host) {
+            node.shadow_root = Some(root);
+        }
+    }
+
+    // `slot`'s assigned nodes are `nodes` now; the ones it had and no longer has leave it. Returns the ones it had.
+    pub(crate) fn set_assigned_nodes(&mut self, slot: NodeId, nodes: Vec<NodeId>) -> Vec<NodeId> {
+        let Some(old) = self.get_mut(slot).map(|s| std::mem::take(&mut s.assigned)) else { return Vec::new() };
+        for &n in &old {
+            if let Some(node) = self.get_mut(n).filter(|node| node.assigned_slot == Some(slot)) {
+                node.assigned_slot = None;
+            }
+        }
+        let nodes: Vec<NodeId> = nodes.into_iter().filter(|&n| self.get(n).is_some()).collect();
+        for &n in &nodes {
+            if let Some(node) = self.get_mut(n) {
+                node.assigned_slot = Some(slot);
+            }
+        }
+        if let Some(s) = self.get_mut(slot) {
+            s.assigned = nodes;
+        }
+        old
     }
 
     // Take `child` out of its parent's children (its own subtree goes with it). Found by its `child_index`, so taking
@@ -673,6 +704,13 @@ impl RealmArena {
         }
         None
     }
+    // Every element of the realm, whichever tree it is in.
+    pub(crate) fn element_ids(&self) -> impl Iterator<Item = NodeId> + '_ {
+        self.slots.iter().enumerate().filter_map(|(i, slot)| {
+            let node = slot.data.as_ref()?;
+            (node.kind == NodeKind::Element).then_some(NodeId { idx: i as u32, generation: slot.generation })
+        })
+    }
     // An element's style slot.
     pub(crate) fn style_slot(&self, id: NodeId) -> Option<&crate::style::StyleSlot> {
         self.get(id).filter(|n| n.kind == NodeKind::Element).map(|n| &n.style)
@@ -766,6 +804,19 @@ fn realm<'s>(scope: &'s mut v8::PinScope<'_, '_>, cid: i32) -> &'s mut RealmAren
     d.realms.entry(cid).or_default()
 }
 
+// The arena for realm `cid` and its style engine, for a change the engine has to hear of — the engine's change hooks
+// (`attribute_will_change`, `children_changed`, …) are Firefox's restyle manager, called where the DOM changes.
+fn arena_and_engine<'s>(
+    scope: &'s mut v8::PinScope<'_, '_>,
+    cid: i32,
+) -> (&'s mut RealmArena, Option<&'s mut crate::style::StyleEngine>) {
+    let d = dom(scope);
+    if d.dropped.contains(&cid) {
+        return (&mut d.graveyard, None);
+    }
+    (d.realms.entry(cid).or_default(), d.styles.get_mut(&cid))
+}
+
 // A NodeId argument off the JS wire: reads arg `i` as a Number and unpacks it, or None for a negative
 // sentinel / non-number. Does NOT check liveness — the op does that via `realm(...).get(id)`.
 fn nid_arg(scope: &mut v8::PinScope<'_, '_>, args: &v8::FunctionCallbackArguments<'_>, i: i32) -> Option<NodeId> {
@@ -829,6 +880,7 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_, ()>, ctx: &v8::Global<v8:
     // Element state no attribute carries, for the state pseudo-classes (`:checked`, `:focus`, `:hover`, …).
     register(scope, ns, "setState", set_state, context_id);
     register(scope, ns, "setShadowHost", set_shadow_host, context_id);
+    register(scope, ns, "setAssignedNodes", set_assigned_nodes, context_id);
     register(scope, ns, "setValue", set_value, context_id);
     register(scope, ns, "setParserFormOwner", set_parser_form_owner, context_id);
     register(scope, ns, "setCustomStates", set_custom_states, context_id);
@@ -849,6 +901,7 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_, ()>, ctx: &v8::Global<v8:
     // value.
     register(scope, ns, "styleSheets", style_sheets, context_id);
     register(scope, ns, "styleImport", style_import, context_id);
+    register(scope, ns, "styleShadowSheets", style_shadow_sheets, context_id);
     register(scope, ns, "styleValue", style_value, context_id);
     register(scope, ns, "nowNanos", now_nanos, context_id);
     // Incremental-sync primitives (the store-flip F1 foundation): keep the arena current
@@ -922,10 +975,14 @@ fn import_node(
     let parent = nid_arg(scope, &args, 2);
     let (attributes, attr_u16) = read_attrs_flat(scope, args.get(3));
     let cid = realm_id(scope, &args);
-    let id = realm(scope, cid).create(
+    let (arena, engine) = arena_and_engine(scope, cid);
+    let id = arena.create(
         NodeData { local_name, ns, attributes, attr_u16, ..NodeData::of_kind(NodeKind::Element, Vec::new()) },
         parent,
     );
+    if let (Some(engine), Some(p)) = (engine, parent) {
+        engine.children_changed(arena, p, &[]);
+    }
     set_nid(scope, &mut rv, id);
 }
 
@@ -940,7 +997,11 @@ fn create_node(
     let data = utf16_arg(scope, args.get(1));
     let parent = nid_arg(scope, &args, 2);
     let cid = realm_id(scope, &args);
-    let id = realm(scope, cid).create(NodeData::of_kind(kind, data), parent);
+    let (arena, engine) = arena_and_engine(scope, cid);
+    let id = arena.create(NodeData::of_kind(kind, data), parent);
+    if let (Some(engine), Some(p)) = (engine, parent) {
+        engine.children_changed(arena, p, &[]);
+    }
     set_nid(scope, &mut rv, id);
 }
 
@@ -963,8 +1024,12 @@ fn set_data(
     };
     let data = utf16_arg(scope, args.get(1));
     let cid = realm_id(scope, &args);
-    if let Some(node) = realm(scope, cid).get_mut(id) {
+    let (arena, engine) = arena_and_engine(scope, cid);
+    if let Some(node) = arena.get_mut(id) {
         node.data = data;
+    }
+    if let (Some(engine), Some(p)) = (engine, arena.parent_of(id)) {
+        engine.children_changed(arena, p, &[]);
     }
 }
 
@@ -980,8 +1045,12 @@ fn append_data(
     };
     let data = utf16_arg(scope, args.get(1));
     let cid = realm_id(scope, &args);
-    if let Some(node) = realm(scope, cid).get_mut(id) {
+    let (arena, engine) = arena_and_engine(scope, cid);
+    if let Some(node) = arena.get_mut(id) {
         node.data.extend_from_slice(&data);
+    }
+    if let (Some(engine), Some(p)) = (engine, arena.parent_of(id)) {
+        engine.children_changed(arena, p, &[]);
     }
 }
 
@@ -997,7 +1066,16 @@ fn insert_child(
     };
     let before = nid_arg(scope, &args, 2);
     let cid = realm_id(scope, &args);
-    realm(scope, cid).insert_child(parent, child, before);
+    let (arena, engine) = arena_and_engine(scope, cid);
+    let old = arena.parent_of(child);
+    arena.insert_child(parent, child, before);
+    if let Some(engine) = engine {
+        if let Some(o) = old.filter(|&o| o != parent) {
+            engine.children_changed(arena, o, &[]);
+        }
+        let arrived: &[NodeId] = if old.is_some() { &[child] } else { &[] };
+        engine.children_changed(arena, parent, arrived);
+    }
 }
 
 // __dom.setState(nid, bits): the element's state bits (`STATE_*`) become `bits`.
@@ -1063,7 +1141,11 @@ fn set_custom_states(
         }
     }
     let cid = realm_id(scope, &args);
-    realm(scope, cid).set_custom_states(id, states);
+    let (arena, engine) = arena_and_engine(scope, cid);
+    arena.set_custom_states(id, states);
+    if let Some(engine) = engine {
+        engine.custom_states_changed(arena, id);
+    }
 }
 
 // __dom.setTarget(docNid, fragments): the realm document's target fragments (target.js `targetFragments`) — none, one,
@@ -1099,6 +1181,30 @@ fn set_shadow_host(
     };
     let cid = realm_id(scope, &args);
     realm(scope, cid).set_shadow_host(root, host);
+}
+
+// __dom.setAssignedNodes(slotNid, [nid, …]): the slot's assigned nodes are these now (HTML's "assign slottables").
+fn set_assigned_nodes(
+    scope: &mut v8::PinScope<'_, '_>,
+    args: v8::FunctionCallbackArguments<'_>,
+    _rv: v8::ReturnValue<'_, v8::Value>,
+) {
+    let Some(slot) = nid_arg(scope, &args, 0) else { return };
+    let mut nodes = Vec::new();
+    if let Ok(arr) = v8::Local::<v8::Array>::try_from(args.get(1)) {
+        for i in 0..arr.length() {
+            if let Some(id) = arr.get_index(scope, i).and_then(|v| v.integer_value(scope)).and_then(NodeId::from_i64) {
+                nodes.push(id);
+            }
+        }
+    }
+    let cid = realm_id(scope, &args);
+    let (arena, engine) = arena_and_engine(scope, cid);
+    let old = arena.set_assigned_nodes(slot, nodes);
+    if let Some(engine) = engine {
+        let now = arena.get(slot).map_or(Vec::new(), |s| s.assigned.clone());
+        engine.slot_assignment_changed(arena, slot, &old, &now);
+    }
 }
 
 // __dom.setFocusRingHidden(hidden): whether the realm's focus shows no ring (`:focus-visible` does not match).
@@ -1181,7 +1287,12 @@ fn remove_child(
         return;
     };
     let cid = realm_id(scope, &args);
-    realm(scope, cid).detach(child);
+    let (arena, engine) = arena_and_engine(scope, cid);
+    let old = arena.parent_of(child);
+    arena.detach(child);
+    if let (Some(engine), Some(o)) = (engine, old) {
+        engine.children_changed(arena, o, &[]);
+    }
 }
 
 // __dom.syncChildren(parentNid, childNids): make parentNid's children EXACTLY `childNids` (in tree order).
@@ -1207,7 +1318,7 @@ fn sync_children(
         }
     }
     let cid = realm_id(scope, &args);
-    let st = realm(scope, cid);
+    let (st, engine) = arena_and_engine(scope, cid);
     if st.get(parent).is_none() {
         return;
     }
@@ -1228,17 +1339,19 @@ fn sync_children(
     // once, however many of its children arrive: a fragment handing over its whole list child by child would shift and
     // reindex the rest per child.
     let mut old_parents: Vec<NodeId> = Vec::new();
+    let mut arrived: Vec<NodeId> = Vec::new();
     for &k in &kids {
         let Some(kn) = st.get_mut(k) else { continue };
         if kn.parent != Some(parent) {
             if let Some(op) = kn.parent.replace(parent) {
+                arrived.push(k);
                 if !old_parents.contains(&op) {
                     old_parents.push(op);
                 }
             }
         }
     }
-    for op in old_parents {
+    for &op in &old_parents {
         let Some(list) = st.get(op).map(|o| o.children.clone()) else { continue };
         let kept: Vec<NodeId> = list.into_iter().filter(|&c| st.get(c).is_some_and(|n| n.parent == Some(op))).collect();
         if let Some(o) = st.get_mut(op) {
@@ -1266,6 +1379,12 @@ fn sync_children(
         p.children = kids;
     }
     st.reindex_children(parent, 0);
+    if let Some(engine) = engine {
+        for op in old_parents {
+            engine.children_changed(st, op, &[]);
+        }
+        engine.children_changed(st, parent, &arrived);
+    }
 }
 
 // __dom.setAttr(nodeNid, name, value) / __dom.removeAttr(nodeNid, name): mirror an attribute write
@@ -1281,7 +1400,11 @@ fn set_attr(
     let name = args.get(1).to_rust_string_lossy(scope);
     let (utf8, u16) = read_v8_value(scope, args.get(2));
     let cid = realm_id(scope, &args);
-    if let Some(node) = realm(scope, cid).get_mut(id) {
+    let (arena, engine) = arena_and_engine(scope, cid);
+    if let Some(engine) = engine {
+        engine.attribute_will_change(arena, id, Some(&name));
+    }
+    if let Some(node) = arena.get_mut(id) {
         node.set_attr_full(&name, utf8, u16);
     }
 }
@@ -1296,7 +1419,11 @@ fn remove_attr(
     };
     let name = args.get(1).to_rust_string_lossy(scope);
     let cid = realm_id(scope, &args);
-    if let Some(node) = realm(scope, cid).get_mut(id) {
+    let (arena, engine) = arena_and_engine(scope, cid);
+    if let Some(engine) = engine {
+        engine.attribute_will_change(arena, id, Some(&name));
+    }
+    if let Some(node) = arena.get_mut(id) {
         node.remove_attr(&name);
     }
 }
@@ -1315,7 +1442,11 @@ fn sync_attrs(
     };
     let (attributes, attr_u16) = read_attrs_flat(scope, args.get(1));
     let cid = realm_id(scope, &args);
-    if let Some(node) = realm(scope, cid).get_mut(id) {
+    let (arena, engine) = arena_and_engine(scope, cid);
+    if let Some(engine) = engine {
+        engine.attribute_will_change(arena, id, None);
+    }
+    if let Some(node) = arena.get_mut(id) {
         node.attributes = attributes;
         node.attr_u16 = attr_u16;
         let attrs = &node.attributes;
@@ -1338,7 +1469,11 @@ fn set_attr_namespace(
     let ns = args.get(2).to_rust_string_lossy(scope);
     let local = args.get(3).to_rust_string_lossy(scope);
     let cid = realm_id(scope, &args);
-    if let Some(node) = realm(scope, cid).get_mut(id) {
+    let (arena, engine) = arena_and_engine(scope, cid);
+    if let Some(engine) = engine {
+        engine.attribute_will_change(arena, id, None);
+    }
+    if let Some(node) = arena.get_mut(id) {
         node.attr_ns.retain(|(k, _, _)| k != &key);
         if !ns.is_empty() {
             node.attr_ns.push((key, ns, local));
@@ -1503,14 +1638,6 @@ fn cascade_winners(
     }
 }
 
-// Strings off a JS array, a hole or a non-string read as None.
-fn string_items(scope: &mut v8::PinScope<'_, '_>, val: v8::Local<'_, v8::Value>) -> Vec<Option<String>> {
-    let Ok(arr) = v8::Local::<v8::Array>::try_from(val) else { return Vec::new() };
-    (0..arr.length())
-        .map(|i| arr.get_index(scope, i).filter(|v| v.is_string()).map(|v| v.to_rust_string_lossy(scope)))
-        .collect()
-}
-
 // A JS array of `urls`.
 fn url_array<'s>(scope: &mut v8::PinScope<'s, '_>, urls: &[String]) -> v8::Local<'s, v8::Value> {
     let items: Vec<v8::Local<v8::Value>> =
@@ -1518,7 +1645,22 @@ fn url_array<'s>(scope: &mut v8::PinScope<'s, '_>, urls: &[String]) -> v8::Local
     v8::Array::new_with_elements(scope, &items).into()
 }
 
-// __dom.styleSheets(docNid, baseUrl, quirks, width, height, [css, baseUrl, media, css, baseUrl, media, …]) -> the
+// Sheets off a JS array of [css, baseUrl, media, constructed, css, …] (`StyleEngine::set_sheets` takes them).
+fn sheet_sources(scope: &mut v8::PinScope<'_, '_>, val: v8::Local<'_, v8::Value>) -> Vec<crate::style::SheetSource> {
+    let Ok(arr) = v8::Local::<v8::Array>::try_from(val) else { return Vec::new() };
+    let mut out = Vec::new();
+    let mut i = 0;
+    while i + 3 < arr.length() {
+        let text = |k: u32| arr.get_index(scope, i + k).filter(|v| v.is_string()).map_or(String::new(), |v| v.to_rust_string_lossy(scope));
+        let (css, base, media) = (text(0), text(1), text(2));
+        let constructed = arr.get_index(scope, i + 3).is_some_and(|v| v.is_true());
+        out.push(crate::style::SheetSource { css, base, media, constructed });
+        i += 4;
+    }
+    out
+}
+
+// __dom.styleSheets(docNid, baseUrl, quirks, width, height, [css, baseUrl, media, constructed, …]) -> the
 // URLs the sheets' `@import`s wait for. The realm document's sheets, in document order, for its style engine — made
 // again only when the document's base URL, mode or viewport moved.
 fn style_sheets(
@@ -1533,15 +1675,29 @@ fn style_sheets(
         args.get(3).number_value(scope).unwrap_or(0.0) as f32,
         args.get(4).number_value(scope).unwrap_or(0.0) as f32,
     );
-    let sheets: Vec<(String, String, String)> = string_items(scope, args.get(5))
-        .chunks_exact(3)
-        .map(|c| (c[0].clone().unwrap_or_default(), c[1].clone().unwrap_or_default(), c[2].clone().unwrap_or_default()))
-        .collect();
+    let sheets = sheet_sources(scope, args.get(5));
     let cid = realm_id(scope, &args);
     let d = dom(scope);
     let mut engine = crate::style::StyleEngine::for_document(d.styles.remove(&cid), &base, quirks, viewport);
     let pending = engine.set_sheets(doc, &sheets);
     d.styles.insert(cid, engine);
+    let urls = url_array(scope, &pending);
+    rv.set(urls);
+}
+
+// __dom.styleShadowSheets(rootNid, [css, baseUrl, media, constructed, …]) -> the URLs the sheets' `@import`s wait for: a shadow
+// root's own sheets, in its tree order.
+fn style_shadow_sheets(
+    scope: &mut v8::PinScope<'_, '_>,
+    args: v8::FunctionCallbackArguments<'_>,
+    mut rv: v8::ReturnValue<'_, v8::Value>,
+) {
+    let Some(root) = nid_arg(scope, &args, 0) else { return };
+    let sheets = sheet_sources(scope, args.get(1));
+    let cid = realm_id(scope, &args);
+    let (arena, engine) = arena_and_engine(scope, cid);
+    let Some(engine) = engine else { return };
+    let pending = engine.set_shadow_sheets(arena, root, &sheets);
     let urls = url_array(scope, &pending);
     rv.set(urls);
 }
@@ -1574,7 +1730,17 @@ fn style_value(
     let cid = realm_id(scope, &args);
     let d = dom(scope);
     let (Some(engine), Some(arena)) = (d.styles.get_mut(&cid), d.realms.get(&cid)) else { return };
-    let Some(value) = engine.value(arena, id, &name) else { return };
+    let value = engine.value(arena, id, &name);
+    let failures = engine.take_verify_failures();
+    if !failures.is_empty() {
+        let message = format!("style verify: {}", failures.join("; "));
+        if let Some(m) = v8::String::new(scope, &message) {
+            let error = v8::Exception::error(scope, m);
+            scope.throw_exception(error);
+        }
+        return;
+    }
+    let Some(value) = value else { return };
     if let Some(s) = v8::String::new(scope, &value) {
         rv.set(s.into());
     }
@@ -2608,7 +2774,11 @@ fn attrs_set(
         return v8::Intercepted::kNo;
     };
     let (utf8, u16) = read_v8_value(scope, value);
-    if let Some(node) = realm(scope, cid).get_mut(id) {
+    let (arena, engine) = arena_and_engine(scope, cid);
+    if let Some(engine) = engine {
+        engine.attribute_will_change(arena, id, Some(&name));
+    }
+    if let Some(node) = arena.get_mut(id) {
         node.set_attr_full(&name, utf8, u16);
     }
     v8::Intercepted::kYes
@@ -2650,7 +2820,11 @@ fn attrs_delete(
     let Some(name) = name_string(scope, key) else {
         return v8::Intercepted::kNo;
     };
-    if let Some(node) = realm(scope, cid).get_mut(id) {
+    let (arena, engine) = arena_and_engine(scope, cid);
+    if let Some(engine) = engine {
+        engine.attribute_will_change(arena, id, Some(&name));
+    }
+    if let Some(node) = arena.get_mut(id) {
         node.remove_attr(&name);
     }
     rv.set_bool(true);

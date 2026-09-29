@@ -27,11 +27,12 @@ use style::invalidation::element::restyle_hints::RestyleHint;
 use style::parser::ParserContext;
 use style::properties::{
     parse_property_declaration_list, parse_style_attribute, ComputedValues, LonghandId, PropertyDeclarationBlock,
-    PropertyDeclarationId, PropertyId,
+    PropertyDeclarationId, PropertyId, ShorthandId,
 };
 use style::rule_tree::{CascadeLevel, CascadeOrigin};
 use style::stylesheets::layer_rule::LayerOrder;
 use style::selector_parser::SnapshotMap;
+use style::servo::attr::{AttrIdentifier, AttrValue as SnapshotValue};
 use style::stylesheets::import_rule::{ImportLayer, ImportSheet, ImportSupportsCondition};
 use style::stylesheets::{ImportRule, OriginSet, StylesheetLoader};
 use style::values::CssUrl;
@@ -43,6 +44,7 @@ use style::servo_arc::{Arc, ArcBorrow};
 use style::shared_lock::{Locked, SharedRwLock, StylesheetGuards};
 use style::stylesheets::scope_rule::ImplicitScopeRoot;
 use style::stylesheets::{AllowImportRules, CssRuleType, DocumentStyleSheet, Origin, Stylesheet, UrlExtraData};
+use style::author_styles::AuthorStyles;
 use style::stylist::Stylist;
 use style::traversal::{recalc_style_at, DomTraversal, PerLevelTraversalData};
 use style::traversal_flags::TraversalFlags;
@@ -65,8 +67,12 @@ pub(crate) struct StyleSlot {
     dirty_descendants: Cell<bool>,
     handled_snapshot: Cell<bool>,
     selector_flags: Cell<ElementSelectorFlags>,
-    // Its state bits (`element_state`) and the arena `mutations` they were derived at.
+    // Its state bits (`element_state`) and the arena `mutations` they were derived at…
     state: Cell<(u64, ElementState)>,
+    // …and the bits its computed style was matched with, which a restyle compares the current ones against.
+    styled_state: Cell<ElementState>,
+    // Whether the engine holds a snapshot of it from before a change (`StyleEngine::snapshots`).
+    has_snapshot: Cell<bool>,
 }
 
 impl Default for StyleSlot {
@@ -80,6 +86,8 @@ impl Default for StyleSlot {
             handled_snapshot: Cell::new(false),
             selector_flags: Cell::new(ElementSelectorFlags::empty()),
             state: Cell::new((u64::MAX, ElementState::empty())),
+            styled_state: Cell::new(ElementState::empty()),
+            has_snapshot: Cell::new(false),
         }
     }
 }
@@ -114,28 +122,69 @@ pub(crate) struct StyleEngine {
     pending: RefCell<Vec<PendingImport>>,
     // The arena's `mutations` when it was last styled; None while it has to be styled again whatever they are.
     styled: Option<u64>,
+    // Each element changed since then, as it was before the first change: its attributes (and its state, which a
+    // restyle fills in when it finds that moved) — what stylo's invalidation holds against it now to tell which
+    // elements' selectors may have started or stopped matching.
+    snapshots: SnapshotMap,
+    // Everything is styled again next time: the sheets changed, or a change reached a `:has()`.
+    restyle_all: bool,
+    // Each shadow root's own sheets (its `<style>` elements and adopted sheets), and whether they changed since
+    // their cascade data was built.
+    shadow_styles: std::collections::HashMap<NodeId, ShadowStyles>,
+    // CSIM_STYLE_VERIFY: every restyle that styled only what the changes reached is held against styling everything,
+    // and each element whose values differ is reported here (`take_verify_failures`).
+    verify: bool,
+    verify_failures: Vec<String>,
 }
 
+// A sheet as the page hands it over: its text, the base URL its `url()`s resolve against, the media list it applies
+// under, and whether it is a constructed sheet (`new CSSStyleSheet()`), whose `@import`s are ignored.
+pub(crate) struct SheetSource {
+    pub(crate) css: String,
+    pub(crate) base: String,
+    pub(crate) media: String,
+    pub(crate) constructed: bool,
+}
+
+// What a parsed sheet was made from, so a set of sheets that keeps one keeps its parse.
 #[derive(PartialEq)]
 struct SheetKey {
     css_hash: u64,
     css_len: usize,
     base: String,
     media: String,
+    constructed: bool,
 }
 
 impl SheetKey {
-    fn of(css: &str, base: &str, media: &str) -> SheetKey {
+    fn of(source: &SheetSource) -> SheetKey {
         let mut hasher = std::hash::DefaultHasher::new();
-        css.hash(&mut hasher);
+        source.css.hash(&mut hasher);
         SheetKey {
             css_hash: hasher.finish(),
-            css_len: css.len(),
-            base: base.to_owned(),
-            media: media.to_owned(),
+            css_len: source.css.len(),
+            base: source.base.clone(),
+            media: source.media.clone(),
+            constructed: source.constructed,
         }
     }
 }
+
+// One shadow root's sheets, as the page last gave them, and the cascade data stylo built of them.
+struct ShadowStyles {
+    sheets: Vec<(SheetKey, DocumentStyleSheet)>,
+    styles: AuthorStyles<DocumentStyleSheet>,
+    dirty: bool,
+}
+
+impl Default for ShadowStyles {
+    fn default() -> Self {
+        ShadowStyles { sheets: Vec::new(), styles: AuthorStyles::new(), dirty: false }
+    }
+}
+
+// The `@custom-media` a shadow root's sheets can see: none, as no browser ships them (`enable_properties`).
+static NO_CUSTOM_MEDIA: std::sync::LazyLock<style::stylesheets::CustomMediaMap> = std::sync::LazyLock::new(Default::default);
 
 // An `@import` whose sheet has not arrived: the rule, the absolute URL it asked for, and the media list its sheet
 // will be made with.
@@ -233,11 +282,16 @@ impl StyleEngine {
             author: Vec::new(),
             pending: RefCell::new(Vec::new()),
             styled: None,
+            snapshots: SnapshotMap::new(),
+            restyle_all: true,
+            shadow_styles: Default::default(),
+            verify: std::env::var_os("CSIM_STYLE_VERIFY").is_some_and(|v| v != "0"),
+            verify_failures: Vec::new(),
         };
-        let ua = engine.parse(UA_SHEET, engine.url.clone(), "", Origin::UserAgent);
+        let ua = engine.parse(UA_SHEET, engine.url.clone(), "", Origin::UserAgent, AllowImportRules::No);
         engine.stylist.append_stylesheet(ua, &engine.lock.read());
         if quirks == QuirksMode::Quirks {
-            let sheet = engine.parse(UA_QUIRKS_SHEET, engine.url.clone(), "", Origin::UserAgent);
+            let sheet = engine.parse(UA_QUIRKS_SHEET, engine.url.clone(), "", Origin::UserAgent, AllowImportRules::No);
             engine.stylist.append_stylesheet(sheet, &engine.lock.read());
         }
         engine
@@ -254,7 +308,7 @@ impl StyleEngine {
         }
     }
 
-    fn parse(&self, css: &str, url: UrlExtraData, media: &str, origin: Origin) -> DocumentStyleSheet {
+    fn parse(&self, css: &str, url: UrlExtraData, media: &str, origin: Origin, imports: AllowImportRules) -> DocumentStyleSheet {
         let media = Arc::new(self.lock.wrap(self.media_list(media, &url)));
         let sheet = Stylesheet::from_str(
             css,
@@ -265,9 +319,16 @@ impl StyleEngine {
             Some(&Loader(&self.pending)),
             None,
             self.quirks,
-            AllowImportRules::Yes,
+            imports,
         );
         DocumentStyleSheet(Arc::new(sheet))
+    }
+
+    // `source` parsed as an author sheet.
+    fn parse_source(&self, source: &SheetSource) -> DocumentStyleSheet {
+        let url = url::Url::parse(&source.base).map(UrlExtraData::from).unwrap_or_else(|_| self.url.clone());
+        let imports = if source.constructed { AllowImportRules::No } else { AllowImportRules::Yes };
+        self.parse(&source.css, url, &source.media, Origin::Author, imports)
     }
 
     // The declarations `css` as the user agent writes them (its internal keywords allowed), for the hint level.
@@ -309,7 +370,7 @@ impl StyleEngine {
 
     // The document `doc`'s sheets become `sheets` — (text, base URL, media) each, in document order — and the URLs
     // their `@import`s wait for are returned (`import` supplies each).
-    pub(crate) fn set_sheets(&mut self, doc: NodeId, sheets: &[(String, String, String)]) -> Vec<String> {
+    pub(crate) fn set_sheets(&mut self, doc: NodeId, sheets: &[SheetSource]) -> Vec<String> {
         self.doc = Some(doc);
         let mut kept = std::mem::take(&mut self.author);
         let guard = self.lock.read();
@@ -318,19 +379,51 @@ impl StyleEngine {
         }
         drop(guard);
         let before = self.pending.borrow().len();
-        for (css, base, media) in sheets {
-            let key = SheetKey::of(css, base, media);
+        for source in sheets {
+            let key = SheetKey::of(source);
             let sheet = match kept.iter().position(|(k, _)| *k == key) {
                 Some(i) => kept.swap_remove(i).1,
-                None => {
-                    let url = url::Url::parse(base).map(UrlExtraData::from).unwrap_or_else(|_| self.url.clone());
-                    self.parse(css, url, media, Origin::Author)
-                }
+                None => self.parse_source(source),
             };
             self.stylist.append_stylesheet(sheet.clone(), &self.lock.read());
             self.author.push((key, sheet));
         }
         self.styled = None;
+        self.restyle_all = true;
+        self.pending.borrow()[before..].iter().map(|p| p.url.clone()).collect()
+    }
+
+    // The shadow root `root`'s sheets become `sheets` (as `set_sheets` takes them), in its tree order; its host and
+    // everything under it is styled again.
+    pub(crate) fn set_shadow_sheets(&mut self, arena: &RealmArena, root: NodeId, sheets: &[SheetSource]) -> Vec<String> {
+        let mut shadow = self.shadow_styles.remove(&root).unwrap_or_default();
+        let mut kept = std::mem::take(&mut shadow.sheets);
+        let guard = self.lock.read();
+        for (_, sheet) in &kept {
+            shadow.styles.stylesheets.remove_stylesheet(Some(self.stylist.device()), &NO_CUSTOM_MEDIA, sheet.clone(), &guard);
+        }
+        drop(guard);
+        let before = self.pending.borrow().len();
+        for source in sheets {
+            let key = SheetKey::of(source);
+            let sheet = match kept.iter().position(|(k, _)| *k == key) {
+                Some(i) => kept.swap_remove(i).1,
+                None => self.parse_source(source),
+            };
+            shadow.styles.stylesheets.append_stylesheet(
+                Some(self.stylist.device()),
+                &NO_CUSTOM_MEDIA,
+                sheet.clone(),
+                &self.lock.read(),
+            );
+            shadow.sheets.push((key, sheet));
+        }
+        shadow.dirty = true;
+        self.shadow_styles.insert(root, shadow);
+        self.styled = None;
+        if let Some(host) = arena.get(root).and_then(|r| r.host) {
+            in_arena(arena, self, || hint_element(StyleNode::new(arena, host), RestyleHint::restyle_subtree()));
+        }
         self.pending.borrow()[before..].iter().map(|p| p.url.clone()).collect()
     }
 
@@ -368,10 +461,13 @@ impl StyleEngine {
         }
         self.stylist.force_stylesheet_origins_dirty(OriginSet::all());
         self.styled = None;
+        self.restyle_all = true;
         self.pending.borrow()[before..].iter().map(|p| p.url.clone()).collect()
     }
 
-    // Style the document as it stands in `arena`, when anything moved since it last was.
+    // Style the document as it stands in `arena`, when anything moved since it last was: what the changes since
+    // then reached (the snapshots and hints the change hooks below left, and the elements whose state moved), or
+    // everything when the sheets changed.
     fn ensure_styled(&mut self, arena: &RealmArena) {
         if self.styled == Some(arena.mutations) {
             return;
@@ -381,18 +477,81 @@ impl StyleEngine {
         {
             let guard = self.lock.read();
             self.stylist.flush(&StylesheetGuards { author: &guard, ua_or_user: &guard });
+            self.shadow_styles.retain(|&root, _| arena.get(root).is_some());
+            for shadow in self.shadow_styles.values_mut().filter(|s| s.dirty) {
+                shadow.styles.flush(&mut self.stylist, &guard);
+                shadow.dirty = false;
+            }
         }
+        self.snapshot_moved_states(arena);
+        let restyle_all = std::mem::take(&mut self.restyle_all);
+        self.traverse(arena, doc, restyle_all);
+        for opaque in self.snapshots.keys() {
+            if let Some(slot) = arena.style_slot(node_of(opaque.0)) {
+                slot.has_snapshot.set(false);
+                slot.handled_snapshot.set(false);
+            }
+        }
+        self.snapshots.clear();
+        if self.verify && !restyle_all {
+            self.verify_against_restyling_everything(arena, doc);
+        }
+        style::thread_state::exit(style::thread_state::ThreadState::LAYOUT);
+        self.styled = Some(arena.mutations);
+    }
+
+    // Every element's computed values, as `getComputedStyle` serializes them, and then everything styled again from
+    // the sheets: an element whose values differ was one the changes reached that the restyle before did not reach.
+    fn verify_against_restyling_everything(&mut self, arena: &RealmArena, doc: NodeId) {
+        let values = |arena: &RealmArena| -> Vec<(NodeId, Vec<String>)> {
+            arena
+                .element_ids()
+                .filter_map(|id| Some((id, primary_style(arena, id)?)))
+                .map(|(id, style)| {
+                    let longhands = ShorthandId::All
+                        .longhands()
+                        .chain([LonghandId::Direction, LonghandId::UnicodeBidi])
+                        .map(|l| style.computed_value_to_string(PropertyDeclarationId::Longhand(l)));
+                    (id, longhands.collect())
+                })
+                .collect()
+        };
+        let before = values(arena);
+        self.traverse(arena, doc, true);
+        let after: std::collections::HashMap<NodeId, Vec<String>> = values(arena).into_iter().collect();
+        let names: Vec<LonghandId> =
+            ShorthandId::All.longhands().chain([LonghandId::Direction, LonghandId::UnicodeBidi]).collect();
+        for (id, old) in before {
+            let Some(new) = after.get(&id) else { continue };
+            if let Some(i) = (0..old.len()).find(|&i| old[i] != new[i]) {
+                let node = arena.get(id).map_or(String::new(), |n| n.local_name.to_string());
+                self.verify_failures.push(format!(
+                    "<{node}> {}: restyled {:?}, everything restyled {:?}",
+                    names[i].name(),
+                    old[i],
+                    new[i]
+                ));
+            }
+        }
+    }
+
+    // What the verify mode found since it was last asked.
+    pub(crate) fn take_verify_failures(&mut self) -> Vec<String> {
+        std::mem::take(&mut self.verify_failures)
+    }
+
+    // One traversal over the document: what the hints and snapshots reach, or everything.
+    fn traverse(&self, arena: &RealmArena, doc: NodeId, restyle_all: bool) {
         let engine: &StyleEngine = self;
         in_arena(arena, engine, || {
             let guard = engine.lock.read();
             let guards = StylesheetGuards { author: &guard, ua_or_user: &guard };
             let Some(root) = StyleNode::new(arena, doc).first_child_element() else { return };
-            // Everything is styled again: a mutation can reach anything until the invalidation that says what it
-            // reached is in place.
-            if let Some(mut data) = root.mutate_data() {
-                data.hint.insert(RestyleHint::restyle_subtree());
+            if restyle_all {
+                if let Some(mut data) = root.mutate_data() {
+                    data.hint.insert(RestyleHint::restyle_subtree());
+                }
             }
-            let snapshots = SnapshotMap::new();
             let context = SharedStyleContext {
                 traversal_flags: TraversalFlags::empty(),
                 stylist: &engine.stylist,
@@ -401,7 +560,7 @@ impl StyleEngine {
                 visited_styles_enabled: false,
                 animations: Default::default(),
                 current_time_for_animations: 0.0,
-                snapshot_map: &snapshots,
+                snapshot_map: &engine.snapshots,
                 registered_speculative_painters: &NoPainters,
             };
             let token = Recalc::pre_traverse(root, &context);
@@ -409,8 +568,141 @@ impl StyleEngine {
                 style::driver::traverse_dom(&Recalc { context }, token, None);
             }
         });
-        style::thread_state::exit(style::thread_state::ThreadState::LAYOUT);
-        self.styled = Some(arena.mutations);
+    }
+
+    // A styled element whose state bits moved since its style was matched is held against its old bits.
+    fn snapshot_moved_states(&mut self, arena: &RealmArena) {
+        let this: *const StyleEngine = self;
+        let snapshots = &mut self.snapshots;
+        in_arena(arena, this, || {
+            for id in arena.element_ids() {
+                let Some(slot) = arena.style_slot(id) else { continue };
+                if unsafe { &*slot.data.get() }.is_none() {
+                    continue;
+                }
+                let el = StyleNode::new(arena, id);
+                let before = slot.styled_state.get();
+                if el.state() == before {
+                    continue;
+                }
+                snapshots.entry(TNode::opaque(&el)).or_default().state.get_or_insert(before);
+                slot.has_snapshot.set(true);
+                mark_ancestors_dirty(el);
+            }
+        });
+    }
+
+    // The attribute `name` of `id` is about to change (None: any of them may): the element is snapshotted as it
+    // stands, the level its change lands on is hinted (a `style` attribute re-cascades that one block, any other may
+    // be a presentational hint), and a language or direction reaches its whole subtree.
+    pub(crate) fn attribute_will_change(&mut self, arena: &RealmArena, id: NodeId, name: Option<&str>) {
+        let Some(node) = arena.get(id) else { return };
+        let Some(slot) = arena.style_slot(id) else { return };
+        if unsafe { &*slot.data.get() }.is_none() {
+            return;
+        }
+        let this: *const StyleEngine = self;
+        let snapshots = &mut self.snapshots;
+        in_arena(arena, this, || {
+            let el = StyleNode::new(arena, id);
+            let snapshot = snapshots.entry(TNode::opaque(&el)).or_default();
+            if snapshot.attrs.is_none() {
+                snapshot.attrs = Some(node.attributes.iter().map(|(k, v)| snapshot_attr(node, k, v)).collect());
+            }
+            match name {
+                Some(n) => snapshot.changed_attrs.push(LocalName::from(n)),
+                None => snapshot.changed_attrs.extend(node.attributes.iter().map(|(k, _)| LocalName::from(k.as_str()))),
+            }
+            snapshot.id_changed |= name.is_none_or(|n| n == "id");
+            snapshot.class_changed |= name.is_none_or(|n| n == "class");
+            snapshot.other_attributes_changed |= name.is_none_or(|n| n != "id" && n != "class");
+            slot.has_snapshot.set(true);
+            slot.handled_snapshot.set(false);
+            mark_ancestors_dirty(el);
+            let hint = match name {
+                Some("style") => RestyleHint::RESTYLE_STYLE_ATTRIBUTE,
+                // …a language or a direction inherits, and `exportparts` decides which of a shadow tree's parts an
+                // outer tree's `::part()` reaches.
+                Some("lang" | "dir" | "xml:lang" | "exportparts") | None => RestyleHint::restyle_subtree(),
+                Some("class" | "id") => RestyleHint::empty(),
+                Some(_) => RestyleHint::RESTYLE_SELF,
+            };
+            hint_element(el, hint);
+        });
+        self.restyle_all |= self.uses_has();
+    }
+
+    // `parent`'s children changed (an insertion, a removal, a text node's data): what its children's selectors
+    // depend on is in the flags matching left on it — a structural pseudo-class or a sibling combinator somewhere
+    // restyles the children, an edge-child one the edges, `:empty` the parent itself. `arrived` are the children
+    // that came in from elsewhere, which carry the style of where they were.
+    pub(crate) fn children_changed(&mut self, arena: &RealmArena, parent: NodeId, arrived: &[NodeId]) {
+        in_arena(arena, self, || {
+            for &c in arrived {
+                if arena.style_slot(c).is_some_and(|s| unsafe { &*s.data.get() }.is_some()) {
+                    hint_element(StyleNode::new(arena, c), RestyleHint::restyle_subtree());
+                }
+            }
+            let Some(slot) = arena.style_slot(parent) else { return };
+            if unsafe { &*slot.data.get() }.is_none() {
+                return;
+            }
+            let p = StyleNode::new(arena, parent);
+            let flags = slot.selector_flags.get();
+            let mut hint = RestyleHint::empty();
+            if flags.intersects(
+                ElementSelectorFlags::HAS_SLOW_SELECTOR
+                    | ElementSelectorFlags::HAS_SLOW_SELECTOR_LATER_SIBLINGS
+                    | ElementSelectorFlags::HAS_SLOW_SELECTOR_NTH
+                    | ElementSelectorFlags::HAS_SLOW_SELECTOR_NTH_OF
+                    | ElementSelectorFlags::HAS_EDGE_CHILD_SELECTOR,
+            ) {
+                hint |= RestyleHint::RESTYLE_DESCENDANTS;
+            }
+            if flags.contains(ElementSelectorFlags::HAS_EMPTY_SELECTOR) {
+                hint |= RestyleHint::RESTYLE_SELF;
+            }
+            hint_element(p, hint);
+            // …and a child that has never been styled is styled when its parent is next visited.
+            mark_ancestors_dirty(p);
+            unsafe { p.set_dirty_descendants() };
+        });
+        self.restyle_all |= self.uses_has();
+    }
+
+    // `id` gained or lost a custom state (`:state()`), which no snapshot records: it and everything a combinator can
+    // reach from it — its parent's children — are styled again.
+    pub(crate) fn custom_states_changed(&mut self, arena: &RealmArena, id: NodeId) {
+        in_arena(arena, self, || {
+            let el = StyleNode::new(arena, id);
+            match TElement::traversal_parent(&el) {
+                Some(p) => hint_element(p, RestyleHint::restyle_subtree()),
+                None => hint_element(el, RestyleHint::restyle_subtree()),
+            }
+        });
+    }
+
+    // `slot`'s assigned nodes went from `old` to `now`: its flat-tree children changed, and each node that came or
+    // went carries the style of where it was.
+    pub(crate) fn slot_assignment_changed(&mut self, arena: &RealmArena, slot: NodeId, old: &[NodeId], now: &[NodeId]) {
+        in_arena(arena, self, || {
+            for &n in old.iter().chain(now) {
+                if arena.style_slot(n).is_some_and(|s| unsafe { &*s.data.get() }.is_some()) {
+                    hint_element(StyleNode::new(arena, n), RestyleHint::restyle_subtree());
+                }
+            }
+            if arena.style_slot(slot).is_some() {
+                let s = StyleNode::new(arena, slot);
+                hint_element(s, RestyleHint::restyle_subtree());
+                unsafe { s.set_dirty_descendants() };
+            }
+        });
+        self.restyle_all |= self.uses_has();
+    }
+
+    // Does any sheet have a `:has()`? Its invalidation is not done yet, so a change anywhere restyles everything.
+    fn uses_has(&self) -> bool {
+        self.stylist.iter_origins().any(|(data, _)| data.relative_selector_invalidation_map().len() != 0)
     }
 
     // The computed value of the longhand `name` on `id`, as `getComputedStyle` serializes a computed value; None for
@@ -496,6 +788,69 @@ fn element_state(arena: &RealmArena, id: NodeId, link: bool) -> ElementState {
     s
 }
 
+// An element's `exportparts` mappings, as (inner name, outer name): `inner: outer`, or a bare `name` for both.
+fn export_parts(node: &crate::dom::NodeData) -> impl Iterator<Item = (AtomIdent, AtomIdent)> + '_ {
+    node.plain_attr("exportparts").unwrap_or("").split(',').filter_map(|entry| {
+        let mut halves = entry.splitn(2, ':').map(str::trim);
+        let inner = halves.next().filter(|s| !s.is_empty())?;
+        let outer = halves.next().unwrap_or(inner);
+        (!outer.is_empty()).then(|| (AtomIdent::from(inner), AtomIdent::from(outer)))
+    })
+}
+
+// The node an `OpaqueNode` stands for (`opaque_bits`).
+fn node_of(bits: usize) -> NodeId {
+    let bits = bits - 1;
+    NodeId { idx: bits as u32, generation: (bits >> 32) as u32 }
+}
+
+// `el` is styled again as `hint` says, and the traversal is told the way down to it.
+fn hint_element(el: StyleNode, hint: RestyleHint) {
+    if hint.is_empty() {
+        return;
+    }
+    if let Some(mut data) = el.mutate_data() {
+        data.hint.insert(hint);
+    }
+    mark_ancestors_dirty(el);
+}
+
+// Every flat-tree ancestor of `el` has a dirty descendant, up to the first that already knew.
+fn mark_ancestors_dirty(el: StyleNode) {
+    let mut cur = TElement::traversal_parent(&el);
+    while let Some(p) = cur {
+        if p.has_dirty_descendants() {
+            break;
+        }
+        unsafe { p.set_dirty_descendants() };
+        cur = TElement::traversal_parent(&p);
+    }
+}
+
+// One attribute of `node` as a snapshot holds it: its name and namespace, and its value — the id an atom and the
+// class list its tokens, as the matcher asks for them.
+fn snapshot_attr(node: &crate::dom::NodeData, key: &str, value: &str) -> (AttrIdentifier, SnapshotValue) {
+    let (ns, local) = match node.attr_ns.iter().find(|(k, _, _)| k == key) {
+        Some((_, ns, local)) => (web_atoms::Namespace::from(ns.as_str()), local.as_str()),
+        None => (web_atoms::Namespace::default(), key),
+    };
+    let ident = AttrIdentifier {
+        local_name: LocalName::from(local),
+        name: LocalName::from(key),
+        namespace: GenericAtomIdent(ns),
+        prefix: None,
+    };
+    let value = match local {
+        "id" => SnapshotValue::Atom(Atom::from(value)),
+        "class" => SnapshotValue::TokenList(
+            std::sync::OnceLock::from(value.to_owned()),
+            value.split_ascii_whitespace().map(Atom::from).collect(),
+        ),
+        _ => SnapshotValue::String(value.to_owned()),
+    };
+    (ident, value)
+}
+
 // The computed style the last traversal gave `id`.
 fn primary_style(arena: &RealmArena, id: NodeId) -> Option<Arc<ComputedValues>> {
     let slot = arena.style_slot(id)?;
@@ -534,6 +889,7 @@ impl<'dom> DomTraversal<StyleNode<'dom>> for Recalc<'_> {
         if let Some(el) = node.as_element() {
             let mut data = unsafe { el.ensure_data() };
             recalc_style_at(self, traversal_data, context, el, &mut data, note_child);
+            el.slot().styled_state.set(el.state());
             unsafe { el.unset_dirty_descendants() };
         }
     }
@@ -558,21 +914,23 @@ thread_local! {
     static CONTEXT: Cell<(*const RealmArena, *const StyleEngine)> = const { Cell::new((std::ptr::null(), std::ptr::null())) };
 }
 
-// Run `f` with `arena` and `engine` as the ones every `StyleNode` reads.
-fn in_arena<R>(arena: &RealmArena, engine: &StyleEngine, f: impl FnOnce() -> R) -> R {
+// Run `f` with `arena` and `engine` as the ones every `StyleNode` reads. The engine is a pointer, as the change hooks
+// write its snapshots while a handle may read it.
+fn in_arena<R>(arena: &RealmArena, engine: *const StyleEngine, f: impl FnOnce() -> R) -> R {
     struct Restore((*const RealmArena, *const StyleEngine));
     impl Drop for Restore {
         fn drop(&mut self) {
             CONTEXT.with(|c| c.set(self.0));
         }
     }
-    let _restore = Restore(CONTEXT.with(|c| c.replace((arena, engine))));
+    let _restore = Restore(CONTEXT.with(|c| c.replace((arena as *const RealmArena, engine))));
     f()
 }
 
 // Stylo's handle on an arena node — for a node, an element, a document and a shadow root alike, as the crate lets
 // one type be all four. Only ever made for a live node, inside the `in_arena` call of the arena the lifetime borrows.
 #[derive(Clone, Copy)]
+#[repr(transparent)]
 pub(crate) struct StyleNode<'a> {
     id: NodeId,
     arena: std::marker::PhantomData<&'a RealmArena>,
@@ -666,7 +1024,7 @@ impl<'a> TShadowRoot for StyleNode<'a> {
     where
         Self: 'b,
     {
-        None
+        self.engine().shadow_styles.get(&self.id).map(|s| &*s.styles.data)
     }
 }
 
@@ -708,12 +1066,18 @@ impl<'a> TNode for StyleNode<'a> {
     fn is_in_document(&self) -> bool {
         self.owner_doc().node().kind == NodeKind::Document
     }
+    // The FLAT-tree parent: a slotted node's slot, a shadow tree's top-level node's host — and none for a host's
+    // child no slot takes, which is in no flat tree.
     fn traversal_parent(&self) -> Option<Self::ConcreteElement> {
         let p = self.parent_node()?;
+        let pn = p.node();
+        if pn.shadow_root.is_some() {
+            return self.node().assigned_slot.filter(|&s| self.arena().get(s).is_some()).map(|s| self.at(s));
+        }
         if p.is_element() {
             return Some(p);
         }
-        p.node().host.map(|h| self.at(h))
+        pn.host.map(|h| self.at(h))
     }
     fn opaque(&self) -> OpaqueNode {
         OpaqueNode(opaque_bits(self.id))
@@ -737,17 +1101,18 @@ fn opaque_bits(id: NodeId) -> usize {
     ((id.generation as usize) << 32 | id.idx as usize) + 1
 }
 
+// An element's flat-tree children: a host's shadow root's children, a slot's assigned nodes (its own children are
+// its fallback, shown only when nothing is assigned), anything else's own children — the live ones.
 pub(crate) struct Children<'a> {
     node: StyleNode<'a>,
-    next: usize,
+    list: &'a [NodeId],
 }
 
 impl<'a> Iterator for Children<'a> {
     type Item = StyleNode<'a>;
     fn next(&mut self) -> Option<Self::Item> {
-        let children = &self.node.node().children;
-        while let Some(&c) = children.get(self.next) {
-            self.next += 1;
+        while let Some((&c, rest)) = self.list.split_first() {
+            self.list = rest;
             if self.node.arena().get(c).is_some() {
                 return Some(self.node.at(c));
             }
@@ -887,6 +1252,9 @@ impl<'a> selectors::Element for StyleNode<'a> {
     fn is_html_slot_element(&self) -> bool {
         self.is_html() && self.node().local_name == local_name!("slot")
     }
+    fn assigned_slot(&self) -> Option<Self> {
+        self.node().assigned_slot.filter(|&s| self.arena().get(s).is_some()).map(|s| self.at(s))
+    }
     fn has_id(&self, id: &AtomIdent, case: CaseSensitivity) -> bool {
         self.slot().id.as_ref().is_some_and(|own| case.eq(own.as_bytes(), id.as_bytes()))
     }
@@ -900,11 +1268,12 @@ impl<'a> selectors::Element for StyleNode<'a> {
     fn has_custom_state(&self, name: &AtomIdent) -> bool {
         self.arena().has_custom_state(self.id, name)
     }
-    fn imported_part(&self, _name: &AtomIdent) -> Option<AtomIdent> {
-        None
+    // `exportparts` read the other way: the inner part an outer name `name` stands for here.
+    fn imported_part(&self, name: &AtomIdent) -> Option<AtomIdent> {
+        export_parts(self.node()).find(|(_, outer)| **outer == **name).map(|(inner, _)| inner)
     }
-    fn is_part(&self, _name: &AtomIdent) -> bool {
-        false
+    fn is_part(&self, name: &AtomIdent) -> bool {
+        self.node().plain_attr("part").unwrap_or("").split_ascii_whitespace().any(|p| p == &**name)
     }
     fn is_empty(&self) -> bool {
         self.arena().is_empty(self.id)
@@ -925,14 +1294,33 @@ impl<'a> TElement for StyleNode<'a> {
     fn as_node(&self) -> Self::ConcreteNode {
         *self
     }
+    // An `@scope` with no prelude in a shadow root's sheet is scoped to the host — the owner `<style>`'s parent when
+    // that is the shadow root itself, which is where a component's sheet sits.
     fn implicit_scope_for_sheet_in_shadow_root(
-        _opaque_host: OpaqueElement,
+        opaque_host: OpaqueElement,
         _sheet_index: usize,
     ) -> Option<ImplicitScopeRoot> {
-        None
+        Some(ImplicitScopeRoot::ShadowHost(opaque_host))
+    }
+    // An element inherits from its flat-tree parent (a shadow tree's top-level element from its host, a slotted one
+    // from its slot) — not from its DOM parent element, which a shadow tree's top-level element does not have.
+    fn inheritance_parent(&self) -> Option<Self> {
+        TElement::traversal_parent(self)
     }
     fn traversal_children(&self) -> LayoutIterator<Self::TraversalChildrenIterator> {
-        LayoutIterator(Children { node: *self, next: 0 })
+        let node = self.node();
+        let arena = self.arena();
+        let list: &'a [NodeId] = match node.shadow_root.and_then(|r| arena.get(r)) {
+            Some(root) => &root.children,
+            None if !node.assigned.is_empty() => &node.assigned,
+            None => &node.children,
+        };
+        LayoutIterator(Children { node: *self, list })
+    }
+    fn slotted_nodes(&self) -> &[StyleNode<'a>] {
+        let assigned: &'a [NodeId] = &self.node().assigned;
+        // SAFETY: `StyleNode` is `repr(transparent)` over its `NodeId` (the rest is a zero-sized marker).
+        unsafe { std::slice::from_raw_parts(assigned.as_ptr().cast::<StyleNode<'a>>(), assigned.len()) }
     }
     fn is_html_element(&self) -> bool {
         self.is_html()
@@ -964,10 +1352,10 @@ impl<'a> TElement for StyleNode<'a> {
         bits
     }
     fn has_part_attr(&self) -> bool {
-        false
+        self.node().plain_attr("part").is_some()
     }
     fn exports_any_part(&self) -> bool {
-        false
+        self.node().plain_attr("exportparts").is_some()
     }
     fn id(&self) -> Option<&Atom> {
         self.slot().id.as_ref()
@@ -986,6 +1374,24 @@ impl<'a> TElement for StyleNode<'a> {
         F: FnMut(&AtomIdent),
     {
     }
+    fn each_part<F>(&self, mut callback: F)
+    where
+        F: FnMut(&AtomIdent),
+    {
+        for part in self.node().plain_attr("part").unwrap_or("").split_ascii_whitespace() {
+            callback(&AtomIdent::from(part));
+        }
+    }
+    fn each_exported_part<F>(&self, name: &AtomIdent, mut callback: F)
+    where
+        F: FnMut(&AtomIdent),
+    {
+        for (inner, outer) in export_parts(self.node()) {
+            if inner == *name {
+                callback(&outer);
+            }
+        }
+    }
     fn each_attr_name<F>(&self, mut callback: F)
     where
         F: FnMut(&LocalName),
@@ -998,7 +1404,7 @@ impl<'a> TElement for StyleNode<'a> {
         self.slot().dirty_descendants.get()
     }
     fn has_snapshot(&self) -> bool {
-        false
+        self.slot().has_snapshot.get()
     }
     fn handled_snapshot(&self) -> bool {
         self.slot().handled_snapshot.get()
@@ -1062,7 +1468,7 @@ impl<'a> TElement for StyleNode<'a> {
         if ns.0.is_empty() { node.plain_attr(&attr.0) } else { node.ns_attr(&ns.0, &attr.0) }.map(str::to_owned)
     }
     fn shadow_root(&self) -> Option<StyleNode<'a>> {
-        None
+        self.node().shadow_root.filter(|&r| self.arena().get(r).is_some()).map(|r| self.at(r))
     }
     fn containing_shadow(&self) -> Option<StyleNode<'a>> {
         let mut cur = self.parent_node();
