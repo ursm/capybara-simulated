@@ -7866,16 +7866,6 @@ custom-elements/form-associated/ElementInternals-reportValidity-bubble.html:
 - "!= custom-elements/form-associated/ElementInternals-reportValidity-bubble-notref.html"
 custom-elements/form-associated/ElementInternals-reportValidity-delegatesFocus.html:
 - "!= custom-elements/form-associated/ElementInternals-reportValidity-delegatesFocus-notref.html"
-custom-elements/form-associated/ElementInternals-validation.html:
-- '"anchor" argument of setValidity()'
-- Custom control affects :valid :invalid for FORM and FIELDSET
-- Custom control affects validation at the owner form
-- checkValidity()
-- reportValidity()
-- validity and setValidity()
-- validity.customError should be false if not explicitly set via setValidity()
-- willValidate
-- willValidate after upgrade
 custom-elements/form-associated/disabled-delegatesFocus.html:
 - Focus events fire on disabled form-associated custom elements with delegatesFocus
 custom-elements/form-associated/focusability.html:
