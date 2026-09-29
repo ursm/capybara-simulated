@@ -33,8 +33,8 @@ RSpec.describe 'style engine invalidation' do
     li:first-child { font-style: italic; }
   CSS
 
-  def visit(body, head: '', assets: {})
-    html = "<!DOCTYPE html><html><head>#{head}<style>#{CSS}</style></head><body>#{body}</body></html>"
+  def visit(body, head: '', assets: {}, css: CSS)
+    html = "<!DOCTYPE html><html><head>#{head}<style>#{css}</style></head><body>#{body}</body></html>"
     app = lambda {|env|
       css = assets[env['PATH_INFO']]
       css ? [200, {'content-type' => 'text/css'}, [css]] : [200, {'content-type' => 'text/html'}, [html]]
@@ -82,6 +82,19 @@ RSpec.describe 'style engine invalidation' do
     s = visit('<p id="p">text</p>')
     expect(color(s, '#p', 'document.getElementById("p").firstChild.data = "";')).to eq('rgb(13, 14, 15)')
     expect(color(s, '#p', 'document.getElementById("p").append("more");')).to eq('rgb(0, 0, 0)')
+  end
+
+  # …and so is every sibling a combinator reads it from (Firefox's `RestyleForEmptyChange`). (On a page of its own: a
+  # `:has()` anywhere styles everything again after any change.)
+  it 'restyles the later siblings an emptiness reaches through a sibling combinator' do
+    s = visit('<div><span class="e" id="e">text</span><i class="t" id="t">t</i></div>', css: '.e:empty + .t { color: rgb(49, 50, 51); }')
+    expect(color(s, '#t', 'document.getElementById("e").firstChild.data = "";')).to eq('rgb(49, 50, 51)')
+  end
+
+  # A `<style>` rewritten after the page was styled: the engine is asked with the text it has now.
+  it 'styles with the text a style element has now' do
+    s = visit('<p id="p">p</p>', head: '<style id="st"></style>')
+    expect(color(s, '#p', 'document.getElementById("st").textContent = "#p { color: rgb(3, 3, 3) }";')).to eq('rgb(3, 3, 3)')
   end
 
   it 'restyles what an element state reaches' do
@@ -205,6 +218,31 @@ RSpec.describe 'style engine invalidation' do
   it 'sets no declaration from a font face that is no family list' do
     s = visit('<font id="f" face="x; color: rgb(1, 2, 3)">f</font>')
     expect(color(s, '#f')).to eq('rgb(0, 0, 0)')
+  end
+
+  # What a page can write is not what the engine was built for: the keywords and properties a Firefox build of the
+  # engine takes, a Servo build takes too.
+  it 'takes the values a Firefox build of the engine takes' do
+    s = visit('<div id="d">d</div>')
+    values = {
+      'background-attachment' => 'local',
+      'background-clip'       => 'text',
+      'font-variant-caps'     => 'all-small-caps',
+      'pointer-events'        => 'visiblepainted',
+      'image-rendering'       => 'smooth',
+      'white-space-collapse'  => 'preserve-spaces',
+      'column-height'         => '10px',
+      'column-wrap'           => 'wrap'
+    }
+    read = s.evaluate_script(<<~JS)
+      (() => {
+        const d = document.getElementById('d');
+        const values = #{values.to_json};
+        for (const [p, v] of Object.entries(values)) d.style.setProperty(p, v);
+        return Object.fromEntries(Object.keys(values).map((p) => [p, getComputedStyle(d).getPropertyValue(p)]));
+      })()
+    JS
+    expect(read).to eq(values)
   end
 end
 

@@ -953,6 +953,8 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_, ()>, ctx: &v8::Global<v8:
     register(scope, ns, "styleImport", style_import, context_id);
     register(scope, ns, "styleShadowSheets", style_shadow_sheets, context_id);
     register(scope, ns, "styleValue", style_value, context_id);
+    register(scope, ns, "styleFlush", style_flush, context_id);
+    register(scope, ns, "styleTick", style_tick, context_id);
     register(scope, ns, "nowNanos", now_nanos, context_id);
     // Incremental-sync primitives (the store-flip F1 foundation): keep the arena current
     // as the DOM mutates, instead of rebuilding it. syncChildren relinks one parent's
@@ -1860,7 +1862,7 @@ fn style_import_unguarded(
     rv.set(urls);
 }
 
-// __dom.styleValue(nid, property, pseudo) -> the element's (or, with `pseudo` — `before`, `placeholder`, … — its
+// __dom.styleValue(nid, property, pseudo, now) — `now` the page's animation clock (ms) — the element's (or, with `pseudo` — `before`, `placeholder`, … — its
 // pseudo-element's) computed value of that longhand, or undefined (a shorthand, an unknown property, an element the
 // style engine did not style).
 fn style_value(
@@ -1880,22 +1882,92 @@ fn style_value_unguarded(
     let name = args.get(1).to_rust_string_lossy(scope);
     let pseudo = args.get(2).is_string().then(|| args.get(2).to_rust_string_lossy(scope));
     let cid = realm_id(scope, &args);
+    let now = args.get(3).number_value(scope).unwrap_or(0.0);
     let d = dom(scope);
     let (Some(engine), Some(arena)) = (d.styles.get_mut(&cid), d.realms.get(&cid)) else { return };
-    let value = engine.value(arena, id, &name, pseudo.as_deref());
+    let value = engine.value(arena, id, &name, pseudo.as_deref(), now);
     let failures = engine.take_verify_failures();
-    if !failures.is_empty() {
-        let message = format!("style verify: {}", failures.join("; "));
-        if let Some(m) = v8::String::new(scope, &message) {
-            let error = v8::Exception::error(scope, m);
-            scope.throw_exception(error);
-        }
+    if threw_verify_failures(scope, failures) {
         return;
     }
     let Some(value) = value else { return };
     if let Some(s) = v8::String::new(scope, &value) {
         rv.set(s.into());
     }
+}
+
+// Under CSIM_STYLE_VERIFY, what the engine's last restyles disagreed with a full one about (`failures`), thrown as the
+// error the op ends with; whether there was any.
+fn threw_verify_failures(scope: &mut v8::PinScope<'_, '_>, failures: Vec<String>) -> bool {
+    if failures.is_empty() {
+        return false;
+    }
+    let message = format!("style verify: {}", failures.join("; "));
+    if let Some(m) = v8::String::new(scope, &message) {
+        let error = v8::Exception::error(scope, m);
+        scope.throw_exception(error);
+    }
+    true
+}
+
+// __dom.styleFlush(now): a style flush at `now` (the page's clock, ms) — what a forced `getComputedStyle` or layout
+// read is in a browser: the style engine's animations move to it and the document is styled, starting the
+// transitions a change since the last one owes. The events wait for `styleTick`.
+fn style_flush(
+    scope: &mut v8::PinScope<'_, '_>,
+    args: v8::FunctionCallbackArguments<'_>,
+    _rv: v8::ReturnValue<'_, v8::Value>,
+) {
+    let cid = realm_id(scope, &args);
+    style_op(scope, cid, |scope| {
+        let now = args.get(0).number_value(scope).unwrap_or(0.0);
+        let d = dom(scope);
+        let (Some(engine), Some(arena)) = (d.styles.get_mut(&cid), d.realms.get(&cid)) else { return };
+        engine.flush(arena, now);
+        let failures = engine.take_verify_failures();
+        threw_verify_failures(scope, failures);
+    });
+}
+
+// __dom.styleTick(now) -> [type, nid, pseudo, name, elapsedTime, …]: a rendering update at `now` (the page's clock,
+// ms): a style flush, and the animation / transition events the state changes since the last update owe, handed back
+// in order (`pseudo` null for an element's own).
+fn style_tick(
+    scope: &mut v8::PinScope<'_, '_>,
+    args: v8::FunctionCallbackArguments<'_>,
+    rv: v8::ReturnValue<'_, v8::Value>,
+) {
+    let cid = realm_id(scope, &args);
+    style_op(scope, cid, |scope| style_tick_unguarded(scope, args, rv));
+}
+fn style_tick_unguarded(
+    scope: &mut v8::PinScope<'_, '_>,
+    args: v8::FunctionCallbackArguments<'_>,
+    mut rv: v8::ReturnValue<'_, v8::Value>,
+) {
+    let now = args.get(0).number_value(scope).unwrap_or(0.0);
+    let cid = realm_id(scope, &args);
+    let d = dom(scope);
+    let (Some(engine), Some(arena)) = (d.styles.get_mut(&cid), d.realms.get(&cid)) else { return };
+    engine.flush(arena, now);
+    let failures = engine.take_verify_failures();
+    let events = engine.take_animation_events(arena);
+    if threw_verify_failures(scope, failures) {
+        return;
+    }
+    let mut items: Vec<v8::Local<v8::Value>> = Vec::with_capacity(events.len() * 5);
+    for e in events {
+        items.push(v8::String::new(scope, e.kind).map_or_else(|| v8::undefined(scope).into(), Into::into));
+        items.push(v8::Number::new(scope, e.node.to_f64()).into());
+        items.push(match e.pseudo.and_then(|p| v8::String::new(scope, p)) {
+            Some(p) => p.into(),
+            None => v8::null(scope).into(),
+        });
+        items.push(v8::String::new(scope, &e.name).map_or_else(|| v8::undefined(scope).into(), Into::into));
+        items.push(v8::Number::new(scope, e.elapsed).into());
+    }
+    let array = v8::Array::new_with_elements(scope, &items);
+    rv.set(array.into());
 }
 
 // __dom.resetArena() — free the CALLING REALM's nodes for a new page (a navigation). Each occupied
