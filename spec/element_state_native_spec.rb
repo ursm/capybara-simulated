@@ -451,6 +451,47 @@ RSpec.describe 'element state in the native arena' do
     end
   end
 
+  # Constraint validation in the arena (validity.rs): each constraint, a form by its controls, and the user-/range
+  # pseudo-classes — answered natively, held against css-select and against the HTML rule.
+  describe 'constraint validation' do
+    it 'answers :valid / :invalid by every constraint' do
+      session.execute_script(<<~JS)
+        document.body.innerHTML =
+          '<form id=f><input id=req required><input id=reqok required value=x>' +
+          '<input id=em type=email value="a@b"><input id=embad type=email value="a@"><input id=emidn type=email value="u@お.com">' +
+          '<input id=pat pattern="[a-z]{3}" value=abcd><input id=patok pattern="[a-z]{3}" value=abc><input id=patbad pattern="(" value=x>' +
+          '<input id=num type=number min=1 max=5 step=2 value=4><input id=numok type=number min=1 max=5 step=2 value=3>' +
+          '<input id=dt type=date min=2020-01-10 value=2020-01-01><input id=rng type=range min=0 max=10 value=50>' +
+          '<input id=url type=url value=nope><input id=file type=file required>' +
+          '<input type=radio name=g id=g1 required><input type=radio name=g id=g2>' +
+          '<select id=sel required><option value="">choose</option><option>a</option></select>' +
+          '<input id=cust value=x></form><form id=ok><input id=fine></form>';
+        document.getElementById('cust').setCustomValidity('nope');
+      JS
+      expect(native_ids(':invalid')).to eq(%w[f req embad pat num dt url file g1 g2 sel cust])
+      expect(native_ids('#ok:valid, #reqok:valid, #em:valid, #emidn:valid, #patok:valid, #patbad:valid, #numok:valid, #rng:valid'))
+        .to eq(%w[reqok em emidn patok patbad numok rng ok])
+      expect(native_ids(':out-of-range')).to eq(%w[dt])
+      expect(native_ids('#num:in-range, #rng:in-range')).to eq(%w[num rng])
+      session.execute_script("document.getElementById('g2').checked = true; document.getElementById('sel').value = 'a'")
+      expect(native_ids('#g1:invalid, #sel:invalid')).to eq([])
+      session.execute_script("document.getElementById('pat').value = 'xyz'")
+      expect(native_ids('#pat:valid')).to eq(%w[pat])
+    end
+
+    it 'waits for the user before :user-invalid, and for a user edit before a length check' do
+      session.execute_script(<<~JS)
+        document.body.innerHTML = '<select id=us required><option value="">-</option><option>a</option></select>' +
+          '<input id=len maxlength=3 value=abcdef>';
+      JS
+      expect(native_ids(':user-invalid, :invalid')).to eq(%w[us])
+      session.find('#us').select('-')
+      expect(native_ids(':user-invalid')).to eq(%w[us])
+      session.find('#len').fill_in(with: 'abcde')
+      expect(session.evaluate_script("document.getElementById('len').value")).to eq('abc')
+    end
+  end
+
   # A frame's focus and hover are its container's in the parent document (HTML: the parent's focused area is the
   # navigable container); a hover leaving the container leaves the frame's document too.
   describe 'across a frame' do

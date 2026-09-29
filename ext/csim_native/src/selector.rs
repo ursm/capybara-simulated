@@ -374,13 +374,19 @@ impl<'a> Element for NodeRef<'a> {
             "open" => arena.is_open(id),
             "placeholder-shown" => arena.is_placeholder_shown(id),
             "target" => arena.is_target(id),
+            "valid" => arena.is_valid_pseudo(id) == Some(true),
+            "invalid" => arena.is_valid_pseudo(id) == Some(false),
+            "user-valid" => arena.is_user_valid_pseudo(id) == Some(true),
+            "user-invalid" => arena.is_user_valid_pseudo(id) == Some(false),
+            "in-range" => arena.is_in_range(id) == Some(true),
+            "out-of-range" => arena.is_in_range(id) == Some(false),
             "defined" => arena.is_defined(id),
             "required" => arena.requiredness(id) == Some(true),
             "optional" => arena.requiredness(id) == Some(false),
             "popover-open" => arena.is_popover_open(id),
             "modal" => arena.is_modal(id),
             "filtered" => arena.is_filtered(id),
-            // No history and no pressed pointer: nothing is visited or active.
+            // No history, no pressed pointer and no autofill: nothing is visited, active or autofilled.
             _ => false,
         }
     }
@@ -469,6 +475,8 @@ fn is_native_pseudo_class(name: &str) -> bool {
             | "-webkit-any-link"
             | "visited"
             | "active"
+            | "autofill"
+            | "-webkit-autofill"
             | "focus"
             | "focus-visible"
             | "focus-within"
@@ -484,6 +492,12 @@ fn is_native_pseudo_class(name: &str) -> bool {
             | "open"
             | "placeholder-shown"
             | "target"
+            | "valid"
+            | "invalid"
+            | "user-valid"
+            | "user-invalid"
+            | "in-range"
+            | "out-of-range"
             | "required"
             | "optional"
             | "defined"

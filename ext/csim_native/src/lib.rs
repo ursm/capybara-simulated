@@ -18,6 +18,7 @@ mod layout;
 mod selector;
 // The Unicode classes the ORACLE asks a regex for, parsed out of that same regex by regex-syntax.
 mod unicode;
+mod validity;
 
 use magnus::{Error, Module, Ruby};
 

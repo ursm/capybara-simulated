@@ -1,9 +1,9 @@
 # frozen_string_literal: true
 
 # The native selector engine must NEVER silently answer a selector whose truth depends on
-# live element state it can't see (`:valid`, `:lang()`, `:target`, `:defined`, a pseudo-element,
-# …) — a structural-only match would return a wrong SUBSET. (The states the arena DOES carry —
-# `:checked`, `:focus`, `:hover`, `:disabled`, `:required`, … — are answered; element_state_native_spec.) Instead it
+# live element state it can't see (`:dir()`, which reads the flat tree's slot assignment; a pseudo-element,
+# …) — a structural-only match would return a wrong SUBSET. (The states the arena DOES carry — `:checked`, `:focus`,
+# `:hover`, `:disabled`, `:valid`, `:target`, `:lang()`, … — are answered; element_state_native_spec.) Instead it
 # flags such a selector at parse time and reports it as a fallback so the caller runs the JS
 # css-select engine. This spec pins that contract:
 #
@@ -95,17 +95,15 @@ RSpec.describe 'native selector engine: JS fallback for live-state selectors' do
   end
 
   it 'defers a live-state selector to css-select even when elements really match' do
-    # Guard the premise: css-select DOES see the empty required field as invalid, so a structural-only
-    # native answer would be a wrong subset ([]). Native must decline, not guess.
-    expect(session.evaluate_script("document.querySelectorAll('input:invalid').length")).to eq(1)
+    # Guard the premise: css-select DOES see the ltr elements, so a structural-only native answer would be a wrong
+    # subset ([]). Native must decline, not guess.
+    expect(session.evaluate_script("document.querySelectorAll('input:dir(ltr)').length")).to be > 0
 
     [
-      ':invalid',
-      '.tb:invalid',
-      ':not(:invalid)',
-      ':is(a, :invalid)',
-      ':target',
-      ':lang(en)',
+      ':dir(ltr)',
+      'input:dir(ltr)',
+      ':not(:dir(rtl))',
+      ':is(a, :dir(ltr))',
       'p::before'
     ].each do |sel|
       expect(classify(sel)).to eq('FALLBACK'), "selector #{sel.inspect} must defer to css-select"

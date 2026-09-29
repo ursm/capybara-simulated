@@ -32,7 +32,7 @@ const RESERVED_CUSTOM_ELEMENT_NAMES: [&str; 8] = [
 
 // HTML "valid floating-point number" (dom-nodes.js `isValidFloatingPoint`): `-`?, digits with an optional fraction or
 // a fraction alone, then an optional exponent — and finite.
-fn is_valid_floating_point(s: &str) -> bool {
+pub(crate) fn is_valid_floating_point(s: &str) -> bool {
     let b = s.as_bytes();
     let mut i = usize::from(b.first() == Some(&b'-'));
     let digits = |i: &mut usize| {
@@ -76,17 +76,21 @@ fn is_valid_custom_element_name(name: &str) -> bool {
 #[derive(Default)]
 pub(crate) struct FormFacts {
     checked_groups: std::collections::HashSet<(String, Option<NodeId>)>,
+    required_groups: std::collections::HashSet<(String, Option<NodeId>)>,
     defaults: std::collections::HashMap<NodeId, NodeId>,
 }
-// Those facts per tree root, as of the arena's `mutations` count.
+// Those facts per tree root, as of the arena's `mutations` count — and, from a second walk that reads them (a radio's
+// validity is its group's), the forms and fieldsets holding an invalid candidate for constraint validation.
 #[derive(Default)]
 pub(crate) struct FormFactsMemo {
     mutations: u64,
     per_root: std::collections::HashMap<NodeId, FormFacts>,
+    invalid_containers: std::collections::HashMap<NodeId, std::rc::Rc<std::collections::HashSet<NodeId>>>,
 }
 impl FormFactsMemo {
     pub(crate) fn clear(&mut self) {
         self.per_root.clear();
+        self.invalid_containers.clear();
     }
 }
 
@@ -100,7 +104,7 @@ impl NodeData {
     // A submit button (form-helpers.js `isSubmitButton`): an `<input type=submit|image>`, or a `<button>` in the Submit
     // state — any `type` but `reset` and `button`, and a missing one unless a `command` / `commandfor` makes it a
     // Command button.
-    fn is_submit_button(&self) -> bool {
+    pub(crate) fn is_submit_button(&self) -> bool {
         if self.is_html_named("input") {
             return matches!(self.input_type(), "submit" | "image");
         }
@@ -113,7 +117,7 @@ impl NodeData {
         }
     }
     // An `<input>`'s type state: its `type` attribute, ASCII-lowercased, when that names one; else Text.
-    fn input_type(&self) -> &'static str {
+    pub(crate) fn input_type(&self) -> &'static str {
         let raw = self.plain_attr("type").unwrap_or("");
         INPUT_TYPES.iter().copied().find(|t| t.eq_ignore_ascii_case(raw)).unwrap_or("text")
     }
@@ -242,11 +246,18 @@ impl RealmArena {
         }
         let mut facts = FormFacts::default();
         self.find_in_tree(root, |c, n| {
-            if n.is_html_named("input") && n.input_type() == "radio" && self.is_checked(c) {
+            if n.is_html_named("input") && n.input_type() == "radio" {
                 if let Some(name) = n.plain_attr("name").filter(|n| !n.is_empty()) {
-                    facts.checked_groups.insert((name.to_string(), self.form_owner(c)));
+                    let group = (name.to_string(), self.form_owner(c));
+                    if n.plain_attr("required").is_some() {
+                        facts.required_groups.insert(group.clone());
+                    }
+                    if self.is_checked(c) {
+                        facts.checked_groups.insert(group);
+                    }
                 }
             }
+
             if n.is_submit_button() && !self.in_select(c) {
                 if let Some(form) = self.form_owner(c) {
                     facts.defaults.entry(form).or_insert(c);
@@ -390,6 +401,52 @@ impl RealmArena {
         }
         !(is_valid_custom_element_name(&n.local_name) || n.state & STATE_IS_VALUE != 0)
     }
+    // Does `id`'s radio group — some member `required` — have nothing checked (valueMissing for every member)?
+    pub(crate) fn radio_group_misses_required(&self, id: NodeId) -> bool {
+        let Some(name) = self.get(id).and_then(|n| n.plain_attr("name")).filter(|n| !n.is_empty()) else { return false };
+        let group = (name.to_string(), self.form_owner(id));
+        let required = self.get(id).is_some_and(|n| n.plain_attr("required").is_some());
+        self.with_form_facts(self.root_of(id), |f| {
+            (required || f.required_groups.contains(&group)) && !f.checked_groups.contains(&group)
+        })
+    }
+    // Does an invalid candidate sit in this form / fieldset (its tree descendants)?
+    pub(crate) fn contains_invalid(&self, id: NodeId) -> bool {
+        let root = self.root_of(id);
+        {
+            let memo = self.form_facts.borrow();
+            if memo.mutations == self.mutations {
+                if let Some(set) = memo.invalid_containers.get(&root) {
+                    return set.contains(&id);
+                }
+            }
+        }
+        let mut set = std::collections::HashSet::new();
+        self.find_in_tree(root, |c, n| {
+            if matches!(n.local_name.as_str(), "input" | "select" | "textarea" | "button")
+                && self.will_validate(c)
+                && self.validity(c) != 0
+            {
+                let mut up = self.parent_of(c);
+                while let Some(p) = up {
+                    if self.get(p).is_some_and(|e| e.is_html_named("form") || e.is_html_named("fieldset")) {
+                        set.insert(p);
+                    }
+                    up = self.parent_of(p);
+                }
+            }
+            false
+        });
+        let answer = set.contains(&id);
+        let mut memo = self.form_facts.borrow_mut();
+        if memo.mutations != self.mutations {
+            memo.clear();
+            memo.mutations = self.mutations;
+        }
+        memo.invalid_containers.insert(root, std::rc::Rc::new(set));
+        answer
+    }
+
     // `:target`: the realm document's target element (target.js) — its indicated part for its target fragments, tried
     // in turn: the first element of its tree (not a shadow tree) with that id, else the first HTML `<a>` with that name.
     // Only an element whose own id or name is one of them can be, so every other answers without walking the tree.
