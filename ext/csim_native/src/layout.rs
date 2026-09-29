@@ -8700,10 +8700,11 @@ fn block_child_width(
     // their width from somewhere else entirely — a cell from its COLUMN, a grid item from its AREA — and none
     // of them reaches block flow today (`measure` routes on `display` with no fallback, and an instrumented run
     // over ~90k corpus shapes saw only `DISPLAY_TEXT_BLOCK` arrive here). What makes the narrow test worth
-    // writing anyway is the kind that does NOT exist yet: block-in-inline, which a real browser splits into
-    // anonymous BLOCKS and this engine does not (see layout.js's note at `placeInlineBox`). Those would arrive
-    // here as `DISPLAY_BLOCK`, and a blanket `is_anonymous()` would hand each one its parent's width without
-    // anyone deciding that it should get one.
+    // writing anyway is the kind that does NOT exist yet: block-in-inline's split, which a real browser makes into
+    // anonymous BLOCKS and this engine does not — it lays a block-holding inline out as an ordinary block record of
+    // its element (layout.js `holdsBlockLevel`). The split's pieces would arrive here as anonymous `DISPLAY_BLOCK`s,
+    // and a blanket `is_anonymous()` would hand each one its parent's width without anyone deciding that it should
+    // get one.
     let anon_group = cn.is_anonymous() && cn.display == DISPLAY_TEXT_BLOCK;
     let content_sized = cn.width_kw != 0 || (is_auto(cn.width) && ((cn.block_axis_is_x && !anon_group) || cn.is_button));
     if !content_sized {

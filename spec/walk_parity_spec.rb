@@ -123,6 +123,29 @@ RSpec.describe 'walk parity' do
     HTML
   end
 
+  # A relative inline box moves its fragments and everything on them — an atomic, a float, an out-of-flow box's static
+  # position — as a chain the boxes inside it add to; an out-of-flow box whose containing block is such an inline box
+  # names it by its entry in the inline table.
+  it 'builds relative inline chains and inline containing blocks' do
+    expect_clean(parity(<<~HTML))
+      <p>x <span style="position: relative; left: 10%; top: 2px">rel <b style="position: absolute; left: 0">abs</b>
+         <span style="display: inline-block">ib</span> <i style="position: relative; right: min(5%, 4px)">in
+         <span style="float: left">fl</span></i></span></p>
+    HTML
+  end
+
+  # Round 3: `<nobr>` keeps its words on one line, a block-holding inline carries no shift down and is a transformed
+  # box's containing block, and `-webkit-baseline-middle` puts a box's middle on the baseline.
+  it 'builds the review repros of round 3' do
+    expect_clean(parity(<<~HTML))
+      <p>a <nobr>n b</nobr></p>
+      <div><span style="vertical-align: 5px">aa<b>x</b><div>blk</div></span></div>
+      <div><span style="transform: translateX(1px)"><div>b</div><i style="position: absolute; top: 0">o</i></span></div>
+      <p>a <span style="vertical-align: -webkit-baseline-middle">b</span>
+         <span style="display: inline-block; vertical-align: -webkit-baseline-middle">c</span></p>
+    HTML
+  end
+
   # A pass whose runs need several faces names every one of them at once, and is compared.
   it 'resolves every face a pass needs' do
     expect_clean(parity(<<~HTML))
