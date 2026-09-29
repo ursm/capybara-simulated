@@ -7338,8 +7338,6 @@ css/css-transitions/non-rendered-element-002.html:
   is cleared
 css/css-transitions/parsing/starting-style-parsing.html:
 - "@starting-style is valid"
-css/css-transitions/parsing/transition-computed.html:
-- Transition with a delay but no duration
 css/css-transitions/parsing/transition-delay-invalid.html:
 - e.style['transition-delay'] = "-3s, initial" should not set the property value
 - e.style['transition-delay'] = "500ms 0.5s" should not set the property value

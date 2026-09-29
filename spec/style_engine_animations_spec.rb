@@ -910,4 +910,18 @@ RSpec.describe 'style engine animations' do
     JS
     expect(read).to eq([1, '0'])
   end
+
+  # The object an event carries reaches a handler however it is registered — an event handler property as much as a
+  # listener — and read whenever it is.
+  it 'carries the transition to an event handler property' do
+    s = page('<div id="a" style="transition: opacity 0.2s linear"></div>')
+    s.execute_script(<<~JS)
+      const a = document.getElementById('a');
+      getComputedStyle(a).opacity;
+      a.ontransitionend = (e) => { window.ended = e; };
+      a.style.opacity = '0';
+    JS
+    drain(s, 8)
+    expect(s.evaluate_script('window.ended && window.ended.animation && window.ended.animation.transitionProperty')).to eq('opacity')
+  end
 end
