@@ -235,6 +235,14 @@ RSpec.describe 'style engine invalidation' do
     expect(color(s, '#f')).to eq('rgb(0, 0, 0)')
   end
 
+  # `<iframe frameborder="0">` (or one no integer: `no`) takes the border's width away, not its inset style (HTML
+  # §15.4.3).
+  it 'takes the border width, not the style, of an iframe with no frame border' do
+    s = visit('<iframe id="f" frameborder="no"></iframe>')
+    read = s.evaluate_script('["borderTopWidth", "borderTopStyle"].map((p) => getComputedStyle(document.getElementById("f"))[p]).join(" ")')
+    expect(read).to eq('0px inset')
+  end
+
   # What a page can write is not what the engine was built for: the keywords and properties a Firefox build of the
   # engine takes, a Servo build takes too — and a flow-relative `resize` computes as specified (css-ui-4, Chrome; a
   # Firefox build makes it physical).

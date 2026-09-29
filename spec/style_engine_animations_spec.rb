@@ -444,6 +444,47 @@ RSpec.describe 'style engine animations' do
     expect(read).to eq(%w[0.2 30px NoModificationAllowedError])
   end
 
+  # An element a script animates shares no style with its siblings (stylo's sharing cache asks `has_animations`).
+  it "keeps a script animation's values off the element's siblings" do
+    s = page('<div id="p"><div class="x" id="a"></div><div class="x"></div><div class="x"></div></div>', '.y .x { color: blue }')
+    read = s.evaluate_script(<<~JS)
+      (() => {
+        document.getElementById('a').animate({ opacity: [0.2, 0.2] }, 100000).pause();
+        document.getElementById('p').className = 'y';
+        return [...document.querySelectorAll('.x')].map((x) => getComputedStyle(x).opacity).join(',');
+      })()
+    JS
+    expect(read).to eq('0.2,1,1')
+  end
+
+  # Animations finishing in one frame dispatch `finish` in the order they were made.
+  it 'dispatches the finish events of one frame in composite order' do
+    s = page('<div id="a"></div>')
+    s.execute_script(<<~JS)
+      window.order = [];
+      for (let i = 0; i < 8; i++) {
+        document.getElementById('a').animate({ opacity: [0, 1] }, 150).onfinish = () => order.push(i);
+      }
+    JS
+    drain(s, 4)
+    expect(s.evaluate_script('window.order')).to eq((0..7).to_a)
+  end
+
+  # `commitStyles()` stands on what the CSS animations below it show.
+  it 'commits a script animation over a CSS one' do
+    s = page('<div id="a"></div>', '@keyframes hold { from, to { margin-left: 100px } } #a { animation: hold 100s }')
+    read = s.evaluate_script(<<~JS)
+      (() => {
+        const a = document.getElementById('a');
+        getComputedStyle(a).marginLeft;
+        const add = a.animate({ marginLeft: ['10px', '10px'] }, { duration: 100000, composite: 'add' });
+        add.commitStyles();
+        return a.style.marginLeft;
+      })()
+    JS
+    expect(read).to eq('110px')
+  end
+
   # A CSS animation's object is an Animation, and its effect a KeyframeEffect.
   it "reports a CSS animation's object as an Animation" do
     s = page('<div id="a" style="animation: fade 100s"></div>')

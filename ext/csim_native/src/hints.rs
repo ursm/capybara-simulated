@@ -211,8 +211,12 @@ pub(crate) fn own_hints(node: &NodeData, out: &mut Vec<Hint>) {
             decl("aspect-ratio", &format!("auto {w} / {h}"));
         }
     }
-    if tag == "iframe" && attr("frameborder").is_some_and(|f| f == "0" || f.eq_ignore_ascii_case("no")) {
-        decl("border", "none");
+    // `<iframe frameborder>` that parses as zero, or does not parse as an integer at all (`no`), takes the border's
+    // width away — its style stays the UA's inset (HTML §15.4.3).
+    if tag == "iframe" && attr("frameborder").is_some_and(|f| integer(f).is_none_or(|n| n == 0)) {
+        for side in ["border-top-width", "border-right-width", "border-bottom-width", "border-left-width"] {
+            decl(side, "0");
+        }
     }
 
     // `<hr>`: `align` places it, `color` / `noshade` make it a solid block, `size` is its thickness.

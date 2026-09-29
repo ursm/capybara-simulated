@@ -469,13 +469,13 @@ impl Animations {
     }
 
     // What `commitStyles()` writes for animation `id` (web-animations §4.4.19 step 5): its target's effect stack up to
-    // and including it, composited over the target's own values — the properties its effect animates only.
-    pub(crate) fn committed_values(&self, id: AnimationId) -> Vec<AnimationValue> {
+    // and including it, composited over `values` (what the CSS animations below it show) and the target's own — the
+    // properties its effect animates only.
+    pub(crate) fn committed_values(&self, id: AnimationId, mut values: AnimationValueMap) -> Vec<AnimationValue> {
         let Some(effect) = self.animations.get(&id).and_then(|a| a.effect).and_then(|e| self.effects.get(&e)) else {
             return Vec::new();
         };
         let (Some(target), Some(computed)) = (&effect.target, &effect.computed) else { return Vec::new() };
-        let mut values = AnimationValueMap::default();
         self.compose_up_to(target, &mut values, self.animations[&id].sequence);
         computed.properties.iter().filter_map(|(property, ..)| values.get(property).cloned()).collect()
     }
@@ -965,8 +965,9 @@ impl Animations {
     // animation's finished state follows.
     pub(crate) fn tick(&mut self, now: f64) {
         self.set_timeline_time(now);
-        let mut ids: Vec<AnimationId> = self.animations.keys().copied().collect();
+        let mut ids: Vec<(u64, AnimationId)> = self.animations.iter().map(|(&id, a)| (a.sequence, id)).collect();
         ids.sort_unstable();
+        let ids = ids.into_iter().map(|(_, id)| id);
         for id in ids {
             let a = &self.animations[&id];
             let pending = a.pending;
@@ -994,12 +995,15 @@ impl Animations {
         self.timeline_time = Some(now);
         // (…every animation whose current time the timeline's carries: a start time and no hold — one that has just
         // run past its end included — and whose finished state follows, as a frame's would: held at its end.)
-        let moving: Vec<AnimationId> = self
+        // (In composite order: what each queues — a finish notification — goes out in it.)
+        let mut moving: Vec<(u64, AnimationId)> = self
             .animations
             .iter()
             .filter(|(_, a)| a.start_time.is_some() && a.hold_time.is_none() && a.pending.is_none())
-            .map(|(&id, _)| id)
+            .map(|(&id, a)| (a.sequence, id))
             .collect();
+        moving.sort_unstable();
+        let moving = moving.into_iter().map(|(_, id)| id);
         for id in moving {
             self.update_finished_state(id, false, false);
             self.touch(id);
@@ -1063,7 +1067,7 @@ impl Animations {
     pub(crate) fn next_frame_delay(&self) -> Option<f64> {
         let mut best: Option<f64> = None;
         for (&id, a) in &self.animations {
-            let due = if a.pending.is_some() {
+            let due = if a.pending.is_some() && a.has_timeline {
                 Some(0.0)
             } else if self.play_state(id) == PlayState::Running && a.playback_rate != 0.0 {
                 let current = self.current_time(id).unwrap_or(0.0);

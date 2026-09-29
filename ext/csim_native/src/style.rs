@@ -1094,6 +1094,25 @@ impl StyleEngine {
         self.note_animation_phases(arena);
     }
 
+    // What `commitStyles()` writes for animation `id`: the Web Animations model's stack over the CSS animations'.
+    pub(crate) fn committed_values(&self, id: waapi::AnimationId) -> Vec<AnimationValue> {
+        let target = self
+            .web_animations
+            .animations
+            .get(&id)
+            .and_then(|a| a.effect)
+            .and_then(|e| self.web_animations.effects.get(&e))
+            .and_then(|e| e.target.clone());
+        let css = target
+            .filter(|t| t.pseudo.is_none())
+            .and_then(|t| {
+                let key = AnimationSetKey::new_for_non_pseudo(OpaqueNode(opaque_bits(t.node)));
+                self.animations.sets.read().get(&key).and_then(|set| set.get_value_map_for_active_animations(self.now))
+            })
+            .unwrap_or_default();
+        self.web_animations.committed_values(id, css)
+    }
+
     // A Web Animations op (`element.animate`, `play()`, a seek…): whatever it did, the next read styles again.
     pub(crate) fn web_animations_op<R>(&mut self, op: impl FnOnce(&mut waapi::Animations) -> R) -> R {
         self.styled = None;
@@ -2567,8 +2586,11 @@ impl<'a> TElement for StyleNode<'a> {
     fn may_have_animations(&self) -> bool {
         true
     }
+    // (…the Web Animations' included: an element one animates shares no style with its siblings.)
     fn has_animations(&self, context: &SharedStyleContext) -> bool {
-        self.has_css_animations(context, None) || self.has_css_transitions(context, None)
+        self.has_css_animations(context, None)
+            || self.has_css_transitions(context, None)
+            || self.engine().web_animations.animates(self.id)
     }
     fn has_css_animations(&self, context: &SharedStyleContext, pseudo: Option<PseudoElement>) -> bool {
         context.animations.has_active_animations(&AnimationSetKey::new(TNode::opaque(self), pseudo))

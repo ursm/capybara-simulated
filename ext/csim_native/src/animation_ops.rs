@@ -337,7 +337,7 @@ fn anim_commit_values(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallba
         let Some(id) = number_arg(scope, args.get(0)).map(|n| n as AnimationId) else { return };
         at_time(engine, number_arg(scope, args.get(1)));
         let mut items: Vec<v8::Local<v8::Value>> = Vec::new();
-        for value in engine.web_animations.committed_values(id) {
+        for value in engine.committed_values(id) {
             let declaration = value.uncompute();
             let mut css = String::new();
             if declaration.to_css(&mut css).is_err() {
