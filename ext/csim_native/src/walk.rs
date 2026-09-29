@@ -119,6 +119,7 @@ pub(crate) fn build(arena: &RealmArena, root: NodeId, basis: Basis, faces: &mut 
         entry_el: Vec::new(),
         inline_of: HashMap::new(),
         inline_cbs: Vec::new(),
+        collapse: HashMap::new(),
     };
     let done = walk.root(root).and_then(|()| walk.resolve_inline_cbs());
     if !walk.faces.missing.is_empty() {
@@ -165,6 +166,9 @@ struct Walk<'a> {
     entry_el: Vec<NodeId>,
     inline_of: HashMap<NodeId, usize>,
     inline_cbs: Vec<(i32, NodeId)>,
+    // A collapsing table's cells, each with the half-borders the grid resolved for it (`ensureCollapseBorders`), top
+    // right bottom left: what its record carries in place of its own borders.
+    collapse: HashMap<NodeId, [f64; 4]>,
 }
 
 // An alignment keyword as the JS walk reads it (`alignKeyword`): `safe` / `unsafe` dropped, `first baseline` the
@@ -520,6 +524,9 @@ struct TableGrid {
     groups: Vec<GridGroup>,
     captions: Vec<NodeId>,
     columns: Vec<NodeId>,
+    // (…and each `<colgroup>` that defines its columns through `<col>` children, with them: its own border collapses
+    // at the group's rim)
+    column_groups: Vec<(NodeId, Vec<NodeId>)>,
     oof: Vec<NodeId>,
     col_count: usize,
 }
@@ -549,6 +556,8 @@ struct GridCell {
     col: usize,
     col_span: usize,
     row_span: usize,
+    // (…in a collapsing table, the half-borders the grid resolves for it, top right bottom left)
+    halves: Option<[f64; 4]>,
 }
 // A `span` / `colspan` / `rowspan` attribute (`spanAttr`): its integer, clamped to at least `min` (1 where `min` is 0 and
 // there is none) and at most 1000.
@@ -573,6 +582,31 @@ fn span_attr(raw: Option<&str>, min: usize) -> usize {
         return fallback;
     }
     n.max(min).min(1000)
+}
+// A box's four sides as a collapsing table weighs them (`collapseSideW`), top right bottom left: the used width, 0 for
+// `none`, and -1 for `hidden`, which suppresses whatever edge it meets on.
+fn collapse_sides(style: &ComputedValues) -> [f64; 4] {
+    use style::values::specified::BorderStyle;
+    let bd = style.get_border();
+    let side = |w: &style::values::computed::BorderSideWidth, s: BorderStyle| match s {
+        BorderStyle::Hidden => -1.0,
+        BorderStyle::None => 0.0,
+        _ => w.0.to_f64_px(),
+    };
+    [
+        side(&bd.border_top_width, bd.border_top_style),
+        side(&bd.border_right_width, bd.border_right_style),
+        side(&bd.border_bottom_width, bd.border_bottom_style),
+        side(&bd.border_left_width, bd.border_left_style),
+    ]
+}
+// Two borders meeting on one edge (`combineW`): a `hidden` either side suppresses it, else the wider wins.
+fn combine(a: f64, b: f64) -> f64 {
+    if a < 0.0 || b < 0.0 { -1.0 } else { a.max(b) }
+}
+// The half of an edge a box owns: none of a suppressed one.
+fn half(w: f64) -> f64 {
+    if w < 0.0 { 0.0 } else { w / 2.0 }
 }
 // A plain percentage — `50%`, no math function — as its fraction (`declaredPctFraction`).
 fn plain_percentage(lp: &LengthPercentage) -> Option<f64> {
@@ -1081,7 +1115,7 @@ impl<'a> Walk<'a> {
         for k in 0..8 {
             rec.edge_math[k] = self.math(parts.prog[k].as_deref());
         }
-        [rec.bt, rec.br, rec.bb, rec.bl] = used_borders(&style);
+        [rec.bt, rec.br, rec.bb, rec.bl] = self.collapse.get(&id).copied().unwrap_or_else(|| used_borders(&style));
         // (…and the horizontal ones at NO basis, what an intrinsic measure reads: a percentage in them is none.)
         let bare = |lp: Option<&LengthPercentage>, floor: bool| match lp {
             Some(lp) if !lp.has_percentage() => length(lp).map(|v| if floor { v.max(0.0) } else { v }),
@@ -1620,10 +1654,8 @@ impl<'a> Walk<'a> {
     // anonymous one around each run of stray content), its captions and its out-of-flow children.
     fn table(&mut self, id: NodeId, idx: i32, style: &ComputedValues, role: Role, parent: i32) -> Step {
         use style::computed_values::border_collapse::T as BorderCollapse;
-        if style.get_inherited_table().border_collapse == BorderCollapse::Collapse {
-            return Err("collapse table");
-        }
-        let grid = self.table_grid(id)?;
+        let collapses = style.get_inherited_table().border_collapse == BorderCollapse::Collapse;
+        let mut grid = self.table_grid(id)?;
         let empty = grid.rows.is_empty() && grid.col_count == 0;
         if !empty && (grid.rows.is_empty() || grid.col_count == 0) {
             return Err("table-half-empty");
@@ -1648,14 +1680,26 @@ impl<'a> Walk<'a> {
                 return Err("table-row-without-single-cell");
             }
         }
+        // A COLLAPSING table (§17.6.2) spaces nothing, and where it has a grid its border is the outer half of its rim
+        // cells' collapsed borders and it keeps no padding: the cells hold the inner halves (`edgeInsets`).
+        if collapses && !grid.rows.is_empty() && grid.col_count > 0 {
+            let [top, right, bottom, left] = self.collapse_borders(&mut grid, style)?;
+            let r = &mut self.inputs[idx as usize];
+            if r.edge_frac[4..].iter().any(|&f| f != 0.0) || r.edge_math[4..].iter().any(|&m| m != crate::layout::NO_MATH) {
+                return Err("collapse table percentage padding");
+            }
+            [r.pt, r.pr, r.pb, r.pl] = [0.0; 4];
+            r.edge_px[4..].fill(0.0);
+            [r.bt, r.br, r.bb, r.bl] = [top, right, bottom, left];
+            r.decl_edges_x = left + right;
+        }
         let spacing = style.get_inherited_table().border_spacing.clone();
         let parent_display = if parent >= 0 { Some(self.inputs[parent as usize].display) } else { None };
         {
             use style::computed_values::table_layout::T as TableLayout;
             let r = &mut self.inputs[idx as usize];
             r.display = crate::layout::DISPLAY_TABLE;
-            r.sp_x = spacing.horizontal().to_f64_px();
-            r.sp_y = spacing.vertical().to_f64_px();
+            [r.sp_x, r.sp_y] = if collapses { [0.0; 2] } else { [spacing.horizontal().to_f64_px(), spacing.vertical().to_f64_px()] };
             r.self_sizes = role != Role::OutOfFlow && parent_display.is_none_or(|d| d == DISPLAY_BLOCK);
             r.table_fixed = style.get_table().table_layout == TableLayout::Fixed;
             r.grid_start = self.grids.len() as i32;
@@ -1722,6 +1766,176 @@ impl<'a> Walk<'a> {
         }
         Ok(())
     }
+    // Every collapsed border of a table (`ensureCollapseBorders`, CSS 2.1 §17.6.2): each edge of the grid is as wide as
+    // the widest border meeting on it — the cells' either side, a row's, a group's, a column's, and at the rim the
+    // table's own — unless one of them is `hidden`, which suppresses it; the two boxes sharing it own half each. Each
+    // cell's halves go on the grid, and the table's own border — the widest outer half on each rim — comes back.
+    fn collapse_borders(&self, grid: &mut TableGrid, table_style: &ComputedValues) -> Result<[f64; 4], &'static str> {
+        const T: usize = 0;
+        const R: usize = 1;
+        const B: usize = 2;
+        const L: usize = 3;
+        let (n, rows) = (grid.col_count, grid.rows.len());
+        // The columns run right to left in an rtl table: its physical left rim is the LAST column.
+        let rtl = table_style.get_inherited_box().direction == Direction::Rtl;
+        let tb = collapse_sides(table_style);
+        // Each cell's own four sides, and which cell covers each slot of the grid (a span, every slot it covers).
+        let mut raw: Vec<Vec<[f64; 4]>> = Vec::with_capacity(rows);
+        let mut occ: Vec<Option<(usize, usize)>> = vec![None; rows * n];
+        for (r, row) in grid.rows.iter().enumerate() {
+            let mut own = Vec::with_capacity(row.cells.len());
+            for (k, cell) in row.cells.iter().enumerate() {
+                own.push(match &cell.el {
+                    CellEl::El(c) => collapse_sides(&*self.style(*c)?),
+                    CellEl::Anon(_) => [0.0; 4],
+                });
+                for dr in 0..cell.row_span.min(rows - r) {
+                    for dc in 0..cell.col_span.min(n - cell.col) {
+                        occ[(r + dr) * n + cell.col + dc] = Some((r, k));
+                    }
+                }
+            }
+            raw.push(own);
+        }
+        // The rows' borders, their groups' (the sides at the rim on every row, the top on the first, the bottom on the
+        // last), and the columns'.
+        let (mut row_b, mut grp_top, mut grp_bot, mut grp_side) = (vec![[0.0; 4]; rows], vec![0.0; rows], vec![0.0; rows], vec![[0.0; 2]; rows]);
+        for (r, row) in grid.rows.iter().enumerate() {
+            if let Some(el) = row.el {
+                row_b[r] = collapse_sides(&*self.style(el)?);
+            }
+        }
+        for g in &grid.groups {
+            if g.first < 0 {
+                continue;
+            }
+            let sides = collapse_sides(&*self.style(g.el)?);
+            for r in g.first as usize..=g.last as usize {
+                grp_side[r] = [sides[L], sides[R]];
+            }
+            grp_top[g.first as usize] = sides[T];
+            grp_bot[g.last as usize] = sides[B];
+        }
+        let mut col_b = vec![[0.0f64; 4]; n];
+        let mut col_start: HashMap<NodeId, usize> = HashMap::new();
+        let mut at = 0usize;
+        for &col in &grid.columns {
+            col_start.insert(col, at);
+            let span = span_attr(self.node(col).get_attr("span"), 1);
+            let cs = self.style(col)?;
+            // (…a `<col span=N>` is N column boxes, each with the whole border; a childless `<colgroup span=N>` ONE,
+            // whose sides land only at its rim)
+            let group = matches!(cs.get_box().clone_display().inside(), DisplayInside::TableColumnGroup);
+            let sides = collapse_sides(&cs);
+            for i in 0..span {
+                if at + i >= n {
+                    break;
+                }
+                let c = &mut col_b[at + i];
+                if !group || i == if rtl { span - 1 } else { 0 } {
+                    c[L] = combine(c[L], sides[L]);
+                }
+                if !group || i == if rtl { 0 } else { span - 1 } {
+                    c[R] = combine(c[R], sides[R]);
+                }
+                c[T] = combine(c[T], sides[T]);
+                c[B] = combine(c[B], sides[B]);
+            }
+            at += span;
+        }
+        for (cg, cols) in &grid.column_groups {
+            let (Some(&first), Some(&last_col)) = (col_start.get(&cols[0]), cols.last()) else { continue };
+            let last = col_start[&last_col] + span_attr(self.node(last_col).get_attr("span"), 1) - 1;
+            if last >= n {
+                continue;
+            }
+            let sides = collapse_sides(&*self.style(*cg)?);
+            let (l, r) = if rtl { (last, first) } else { (first, last) };
+            col_b[l][L] = combine(col_b[l][L], sides[L]);
+            col_b[r][R] = combine(col_b[r][R], sides[R]);
+            for c in &mut col_b[first..=last] {
+                c[T] = combine(c[T], sides[T]);
+                c[B] = combine(c[B], sides[B]);
+            }
+        }
+        let col = |c: usize, side: usize| col_b.get(c).map_or(0.0, |b| b[side]);
+        let row_side = |r: usize, side: usize| row_b.get(r).map_or(0.0, |b| b[side]);
+        let at_slot = |r: usize, c: usize, side: usize| occ[r * n + c].map_or(0.0, |(rr, k)| raw[rr][k][side]);
+        // An INTERNAL edge, one segment per cell faced across it, each collapsed on its own; an OUTER edge, one segment
+        // per track it spans. The widest surviving half is the box's.
+        let widest = |segments: &mut dyn Iterator<Item = f64>| segments.map(half).fold(0.0, f64::max);
+        let (mut out_t, mut out_r, mut out_b, mut out_l) = (0.0f64, 0.0f64, 0.0f64, 0.0f64);
+        let mut halves: Vec<Vec<[f64; 4]>> = Vec::with_capacity(rows);
+        for (r, row) in grid.rows.iter().enumerate() {
+            let mut out = Vec::with_capacity(row.cells.len());
+            for (k, cell) in row.cells.iter().enumerate() {
+                let own = raw[r][k];
+                let (c0, cs, rs) = (cell.col, cell.col_span, cell.row_span);
+                let (c_last, r_last) = (c0 + cs - 1, r + rs - 1);
+                let spanned_rows = r..(r + rs).min(rows);
+                let spanned_cols = c0..(c0 + cs).min(n);
+                let at_left = if rtl { c0 + cs >= n } else { c0 == 0 };
+                let at_right = if rtl { c0 == 0 } else { c0 + cs >= n };
+                let (at_top, at_bottom) = (r == 0, r + rs >= rows);
+                // A vertical edge: the column beyond it is one past the span on that physical side.
+                let vertical = |own: f64, facing: usize, beyond: usize, cols_extra: f64| {
+                    let seed = combine(own, cols_extra);
+                    widest(&mut spanned_rows.clone().map(|rr| combine(seed, at_slot(rr, beyond, facing))))
+                };
+                let bl = if at_left {
+                    let seed = combine(combine(own[L], tb[L]), col(if rtl { n - 1 } else { 0 }, L));
+                    widest(&mut spanned_rows.clone().map(|rr| combine(combine(seed, row_side(rr, L)), grp_side[rr][0])))
+                } else if rtl {
+                    vertical(own[L], R, c_last + 1, combine(col(c_last + 1, R), col(c_last, L)))
+                } else {
+                    vertical(own[L], R, c0 - 1, combine(col(c0 - 1, R), col(c0, L)))
+                };
+                let br = if at_right {
+                    let seed = combine(combine(own[R], tb[R]), col(if rtl { 0 } else { n - 1 }, R));
+                    widest(&mut spanned_rows.clone().map(|rr| combine(combine(seed, row_side(rr, R)), grp_side[rr][1])))
+                } else if rtl {
+                    vertical(own[R], L, c0 - 1, combine(col(c0, R), col(c0 - 1, L)))
+                } else {
+                    vertical(own[R], L, c0 + cs, combine(col(c_last, R), col(c0 + cs, L)))
+                };
+                let bt = if at_top {
+                    let seed = combine(combine(combine(own[T], tb[T]), row_side(r, T)), grp_top[r]);
+                    widest(&mut spanned_cols.clone().map(|c| combine(seed, col(c, T))))
+                } else {
+                    let seed = combine(own[T], combine(combine(row_side(r - 1, B), row_side(r, T)), combine(grp_bot[r - 1], grp_top[r])));
+                    widest(&mut spanned_cols.clone().map(|c| combine(seed, at_slot(r - 1, c, B))))
+                };
+                let bb = if at_bottom {
+                    let seed = combine(combine(combine(own[B], tb[B]), row_side(r_last, B)), grp_bot[r_last]);
+                    widest(&mut spanned_cols.clone().map(|c| combine(seed, col(c, B))))
+                } else {
+                    let below = r + rs;
+                    let seed = combine(own[B], combine(combine(row_side(r_last, B), row_side(below, T)), combine(grp_bot[r_last], grp_top[below])));
+                    widest(&mut spanned_cols.clone().map(|c| combine(seed, at_slot(below, c, T))))
+                };
+                if at_left {
+                    out_l = out_l.max(bl);
+                }
+                if at_right {
+                    out_r = out_r.max(br);
+                }
+                if at_top {
+                    out_t = out_t.max(bt);
+                }
+                if at_bottom {
+                    out_b = out_b.max(bb);
+                }
+                out.push([bt, br, bb, bl]);
+            }
+            halves.push(out);
+        }
+        for (row, out) in grid.rows.iter_mut().zip(halves) {
+            for (cell, h) in row.cells.iter_mut().zip(out) {
+                cell.halves = Some(h);
+            }
+        }
+        Ok([out_t, out_r, out_b, out_l])
+    }
     // A row group's or a row's record (`emitRow` and the group arm): its element, its parent, its display, whether it
     // scrolls.
     fn table_part(&mut self, el: NodeId, parent: i32, display: u8) -> Result<i32, &'static str> {
@@ -1772,12 +1986,17 @@ impl<'a> Walk<'a> {
             let ci = self.inputs.len() as i32;
             let (valign, pct, pct_h_child) = match &cell.el {
                 CellEl::El(c) => {
+                    // (…a cell collapses by its OWN `border-collapse`, which it inherits but may declare apart)
+                    use style::computed_values::border_collapse::T as BorderCollapse;
+                    if let Some(halves) = cell.halves.filter(|_| self.style(*c).is_ok_and(|cs| cs.get_inherited_table().border_collapse == BorderCollapse::Collapse)) {
+                        self.collapse.insert(*c, halves);
+                    }
                     self.record_as(*c, at, Role::Cell)?;
                     let cs = self.style(*c)?;
                     (cell_valign(&cs), size_lp(&cs.get_position().width)?.and_then(plain_percentage).unwrap_or(f64::NAN), self.pct_height_child(*c)?)
                 }
                 CellEl::Anon(run) => {
-                    self.anonymous_cell(grid.table, at, table_style, run)?;
+                    self.anonymous_cell(grid.table, at, table_style, run, cell.halves)?;
                     let mut any = false;
                     for &k in run {
                         any |= self.pct_height_in(k)?;
@@ -1798,7 +2017,8 @@ impl<'a> Walk<'a> {
     }
     // An ANONYMOUS cell around a run of a row's stray content (`anonTableCell`): no element, the TABLE's inherited
     // style, and the run as its children.
-    fn anonymous_cell(&mut self, table: NodeId, parent: i32, style: &ComputedValues, run: &[NodeId]) -> Step {
+    // (…in a collapsing table it is a collapse cell with no borders of its own, holding the halves the grid gave it)
+    fn anonymous_cell(&mut self, table: NodeId, parent: i32, style: &ComputedValues, run: &[NodeId], halves: Option<[f64; 4]>) -> Step {
         let at = self.inputs.len() as i32;
         let mut rec = fresh_record();
         rec.nid = -1.0;
@@ -1812,6 +2032,10 @@ impl<'a> Walk<'a> {
         rec.starts_bfc = true;
         rec.rtl = (style.get_inherited_box().direction == Direction::Rtl) as u8;
         rec.legacy_align = self.legacy_align(table);
+        if let Some(halves) = halves {
+            [rec.bt, rec.br, rec.bb, rec.bl] = halves;
+            rec.decl_edges_x = rec.bl + rec.br;
+        }
         self.inputs.push(rec);
         self.block_contents(run, at, style)
     }
@@ -1849,7 +2073,7 @@ impl<'a> Walk<'a> {
     }
     // A table's structure (`tableGrid` / `placeCells`).
     fn table_grid(&self, table: NodeId) -> Result<TableGrid, &'static str> {
-        let mut grid = TableGrid { table, rows: Vec::new(), groups: Vec::new(), captions: Vec::new(), columns: Vec::new(), oof: Vec::new(), col_count: 0 };
+        let mut grid = TableGrid { table, rows: Vec::new(), groups: Vec::new(), captions: Vec::new(), columns: Vec::new(), column_groups: Vec::new(), oof: Vec::new(), col_count: 0 };
         self.collect_table(table, None, &mut grid)?;
         // Each row's content as cells: a run of anything but a cell is an anonymous one.
         for row in &mut grid.rows {
@@ -1971,7 +2195,8 @@ impl<'a> Walk<'a> {
                             if cols.is_empty() {
                                 grid.columns.push(c);
                             } else {
-                                grid.columns.extend(cols);
+                                grid.columns.extend(cols.iter().copied());
+                                grid.column_groups.push((c, cols));
                             }
                         }
                         _ => {
@@ -2048,7 +2273,7 @@ impl<'a> Walk<'a> {
                 if col_span > 1 || row_span > 1 {
                     spanned = true;
                 }
-                cells.push(GridCell { el: cell.clone(), col: c, col_span, row_span });
+                cells.push(GridCell { el: cell.clone(), col: c, col_span, row_span, halves: None });
                 for dr in 0..row_span {
                     if r + dr < n_rows {
                         for dc in 0..col_span {

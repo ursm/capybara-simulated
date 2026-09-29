@@ -184,24 +184,20 @@ tr, td, th { vertical-align: inherit; }
 thead, tbody, tfoot, tr { border-color: inherit; }
 th { text-align: -moz-center-or-inherit; }
 
-table[frame=void i], table[frame=above i], table[frame=below i],
-table[frame=hsides i], table[frame=lhs i], table[frame=rhs i],
-table[frame=vsides i], table[frame=box i], table[frame=border i] {
-  border-style: outset;
-}
-table[frame=above i] { border-bottom-style: hidden; border-left-style: hidden; border-right-style: hidden; }
-table[frame=below i] { border-top-style: hidden; border-left-style: hidden; border-right-style: hidden; }
-table[frame=hsides i] { border-left-style: hidden; border-right-style: hidden; }
-table[frame=lhs i] { border-top-style: hidden; border-bottom-style: hidden; border-right-style: hidden; }
-table[frame=rhs i] { border-top-style: hidden; border-bottom-style: hidden; border-left-style: hidden; }
-table[frame=vsides i] { border-top-style: hidden; border-bottom-style: hidden; }
-table[frame=void i] { border-style: hidden; }
-
 table[rules=none i], table[rules=groups i], table[rules=rows i],
 table[rules=cols i], table[rules=all i] {
   border-style: hidden;
   border-collapse: collapse;
 }
+table[border]:-servo-nonzero-border { border-style: outset; }
+table[frame=void i] { border-style: hidden; }
+table[frame=above i] { border-style: outset hidden hidden hidden; }
+table[frame=below i] { border-style: hidden hidden outset hidden; }
+table[frame=hsides i] { border-style: outset hidden outset hidden; }
+table[frame=lhs i] { border-style: hidden hidden hidden outset; }
+table[frame=rhs i] { border-style: hidden outset hidden hidden; }
+table[frame=vsides i] { border-style: hidden outset; }
+table[frame=box i], table[frame=border i] { border-style: outset; }
 table[border]:-servo-nonzero-border > tr > :is(td, th),
 table[border]:-servo-nonzero-border > :is(thead, tbody, tfoot) > tr > :is(td, th) {
   border-width: 1px;

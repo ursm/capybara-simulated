@@ -102,13 +102,10 @@ pub(crate) fn own_hints(node: &NodeData, out: &mut Vec<Hint>) {
         if let Some(px) = attr("cellspacing").and_then(pixel_length) {
             decl("border-spacing", &px);
         }
-        // `border` is the frame's width — zero included, and 1px for a value that is no number — and an outset one
-        // when there is any.
+        // `border` is the frame's width — zero included, and 1px for a value that is no number. (Its `outset` style is
+        // the UA sheet's, below the `frame` rules: `:-servo-nonzero-border`.)
         if let Some(px) = table_border(node) {
             decl("border-width", &px);
-            if px != "0px" {
-                decl("border-style", "outset");
-            }
         }
         if let Some(c) = attr("bordercolor").and_then(legacy_color) {
             decl("border-color", &c);

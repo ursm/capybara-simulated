@@ -1733,6 +1733,7 @@ fn element_state(arena: &RealmArena, id: NodeId, link: bool) -> ElementState {
     set(ElementState::MODAL, arena.is_modal(id));
     set(ElementState::POPOVER_OPEN, arena.is_popover_open(id));
     set(ElementState::SERVO_LIST_BOX, arena.is_list_box(id));
+    set(ElementState::SERVO_NONZERO_BORDER, arena.has_nonzero_border(id));
     match arena.is_valid_pseudo(id) {
         Some(true) => set(ElementState::VALID, true),
         Some(false) => set(ElementState::INVALID, true),
@@ -2478,9 +2479,7 @@ impl<'a> selectors::Element for StyleNode<'a> {
             | NonTSPseudoClass::MozMeterSubOptimum
             | NonTSPseudoClass::MozMeterSubSubOptimum
             => false,
-            NonTSPseudoClass::ServoNonZeroBorder => {
-                arena.get(id).is_some_and(|n| n.is_html_named("table") && crate::hints::table_border(n).is_some_and(|px| px != "0px"))
-            }
+            NonTSPseudoClass::ServoNonZeroBorder => arena.has_nonzero_border(id),
         }
     }
     fn match_pseudo_element(&self, _pe: &PseudoElement, _context: &mut MatchingContext<SelectorImpl>) -> bool {

@@ -247,9 +247,32 @@ RSpec.describe 'walk parity' do
     HTML
   end
 
-  it 'declines a collapsing table by name' do
-    stats = parity('<table style="border-collapse: collapse"><tr><td>x</td></tr></table>')
-    expect(stats['declined']).to include('collapse table' => be_positive)
+  # A `border` written later frames the cells, or stops framing them, in the style engine too.
+  it 'restyles the cells of a table whose border is written' do
+    s = simulated_session(->(_env) { [200, {'content-type' => 'text/html'}, ['<table id="t" border="2"><tbody><tr><td>a</td><td>b</td></tr></tbody></table>']] })
+    s.visit '/'
+    s.evaluate_script('document.body.offsetHeight')
+    s.evaluate_script('__csimWalkParityStats()')
+    ['removeAttribute("border")', 'setAttribute("border", "0")', 'setAttribute("border", "1")', 'setAttribute("border", "0")'].each do |write|
+      s.execute_script(%(document.getElementById("t").#{write}))
+      s.evaluate_script('document.body.offsetHeight')
+      expect_clean(s.evaluate_script('__csimWalkParityStats()'))
+    end
+  end
+
+  # A COLLAPSING table resolves every edge of its grid to the widest border meeting on it — cells, rows, groups,
+  # columns and its own, a `hidden` one suppressing it — and each box sharing an edge keeps half; the table's own
+  # border is the outer half at its rim, with no padding and no spacing. Columns mirror in an rtl table.
+  it 'builds collapsing tables' do
+    expect_clean(parity(<<~HTML))
+      <table style="border-collapse: collapse; border: 4px solid; padding: 9px">
+        <tr><td style="border: 2px solid">a</td><td style="border-left: 6px solid; border-right: hidden">b</td></tr>
+        <tr><td colspan="2" style="border: 1px solid">c</td></tr></table>
+      <table style="border-collapse: collapse" dir="rtl"><colgroup style="border: 1px solid"><col style="border-left: 3px solid"><col></colgroup>
+        <tbody style="border-top: 5px solid"><tr style="border-bottom: 7px solid"><td>x</td><td rowspan="2">y</td></tr><tr><td>z</td></tr></tbody></table>
+      <table style="border-collapse: collapse; border: 2px solid">stray<tr><td>q</td></tr></table>
+      <table border="1" rules="all" frame="void"><tr><td>r</td><td>s</td></tr></table>
+    HTML
   end
 
   # A pass whose runs need several faces names every one of them at once, and is compared.

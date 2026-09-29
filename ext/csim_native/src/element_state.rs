@@ -345,6 +345,10 @@ impl RealmArena {
             }
         })
     }
+    // A `<table>` whose `border` maps to a non-zero width, whose cells the UA sheet frames (`:-servo-nonzero-border`).
+    pub(crate) fn has_nonzero_border(&self, id: NodeId) -> bool {
+        self.get(id).is_some_and(|n| n.is_html_named("table") && crate::hints::table_border(n).is_some_and(|px| px != "0px"))
+    }
     // `:popover-open`: a showing popover, in a document.
     pub(crate) fn is_popover_open(&self, id: NodeId) -> bool {
         self.has_state(id, STATE_POPOVER_OPEN) && self.is_connected(id)

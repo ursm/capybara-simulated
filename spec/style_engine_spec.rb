@@ -168,6 +168,16 @@ RSpec.describe 'style engine invalidation' do
     expect(color(s, '#c', 'document.getElementById("t").setAttribute("cellpadding", "9");')).to eq('rgb(0, 0, 0)')
   end
 
+  # A bordered table frames its cells only while its border is not zero (`:-servo-nonzero-border`): writing the border
+  # restyles them, through the table's state.
+  it "restyles a table's cells when its border changes" do
+    s = visit('<table id="t" border="2"><tbody><tr><td id="c">c</td></tr></tbody></table>')
+    %w[0 1].each do |border|
+      expect(color(s, '#c', %(document.getElementById("t").setAttribute("border", "#{border}");))).to eq('rgb(0, 0, 0)')
+    end
+    expect(color(s, '#c', 'document.getElementById("t").removeAttribute("border");')).to eq('rgb(0, 0, 0)')
+  end
+
   it "restyles a shadow tree's top-level children when one is inserted before them" do
     s = visit('<div id="h"></div>')
     first = s.evaluate_script(<<~JS)
