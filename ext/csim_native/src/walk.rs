@@ -160,6 +160,278 @@ struct Walk<'a> {
     inline_cbs: Vec<(i32, NodeId)>,
 }
 
+// An alignment keyword as the JS walk reads it (`alignKeyword`): `safe` / `unsafe` dropped, `first baseline` the
+// baseline.
+#[derive(Clone, Copy, PartialEq, Debug)]
+enum Kw {
+    Auto,
+    Normal,
+    Start,
+    End,
+    FlexStart,
+    FlexEnd,
+    Center,
+    Left,
+    Right,
+    Baseline,
+    LastBaseline,
+    Stretch,
+    SelfStart,
+    SelfEnd,
+    SpaceBetween,
+    SpaceAround,
+    SpaceEvenly,
+    Other,
+}
+fn align_kw(flags: style::values::specified::align::AlignFlags) -> Kw {
+    use style::values::specified::align::AlignFlags as F;
+    match flags.value() {
+        F::AUTO => Kw::Auto,
+        F::NORMAL => Kw::Normal,
+        F::START => Kw::Start,
+        F::END => Kw::End,
+        F::FLEX_START => Kw::FlexStart,
+        F::FLEX_END => Kw::FlexEnd,
+        F::CENTER => Kw::Center,
+        F::LEFT => Kw::Left,
+        F::RIGHT => Kw::Right,
+        F::BASELINE => Kw::Baseline,
+        F::LAST_BASELINE => Kw::LastBaseline,
+        F::STRETCH => Kw::Stretch,
+        F::SELF_START => Kw::SelfStart,
+        F::SELF_END => Kw::SelfEnd,
+        F::SPACE_BETWEEN => Kw::SpaceBetween,
+        F::SPACE_AROUND => Kw::SpaceAround,
+        F::SPACE_EVENLY => Kw::SpaceEvenly,
+        _ => Kw::Other,
+    }
+}
+// `align-content` as the code native reads (`flexAlignContentCode`).
+fn align_content_code(flags: style::values::specified::align::AlignFlags) -> u8 {
+    match align_kw(flags) {
+        Kw::FlexStart | Kw::Baseline => 0,
+        Kw::Center => 1,
+        Kw::FlexEnd => 2,
+        Kw::SpaceBetween => 3,
+        Kw::SpaceAround => 4,
+        Kw::SpaceEvenly => 5,
+        Kw::Start => 7,
+        Kw::End => 8,
+        _ => 6,
+    }
+}
+
+// A physical side.
+#[derive(Clone, Copy, PartialEq)]
+enum Side {
+    Left,
+    Right,
+    Top,
+    Bottom,
+}
+
+// Where a line's baseline alignment is asked: a row keeps it, a column reads it along the axis, an out-of-flow box's
+// static position in the flow (`crossAlign`'s `baselineMode`).
+#[derive(Clone, Copy, PartialEq)]
+enum BaselineMode {
+    Keep,
+    Axis,
+    Flow,
+}
+impl BaselineMode {
+    fn of(plan: &FlexPlan) -> BaselineMode {
+        if plan.column { BaselineMode::Axis } else { BaselineMode::Keep }
+    }
+}
+
+// A flex container's axes (`flexAxisPlan` / `axisPlan`), in a horizontal writing mode: where the main axis starts, the
+// cross axis starts, whether that is the far edge, and how the lines wrap (0 nowrap, 1 wrap, 2 wrap-reverse).
+struct FlexPlan {
+    column: bool,
+    flex_reverse: bool,
+    main_start: Side,
+    cross_start: Side,
+    main_is_x: bool,
+    main_reverse: bool,
+    cross_far: bool,
+    cross_flip: bool,
+    wrap: u8,
+}
+impl FlexPlan {
+    fn of(style: &ComputedValues) -> FlexPlan {
+        use style::computed_values::flex_direction::T as Dir;
+        use style::computed_values::flex_wrap::T as Wrap;
+        let pos = style.get_position();
+        let rtl = style.get_inherited_box().direction == Direction::Rtl;
+        let (inline_start, inline_end) = if rtl { (Side::Right, Side::Left) } else { (Side::Left, Side::Right) };
+        let column = matches!(pos.flex_direction, Dir::Column | Dir::ColumnReverse);
+        let flex_reverse = matches!(pos.flex_direction, Dir::RowReverse | Dir::ColumnReverse);
+        let wrap = match pos.flex_wrap {
+            Wrap::Nowrap => 0,
+            Wrap::Wrap => 1,
+            Wrap::WrapReverse => 2,
+        };
+        let cross_flip = wrap == 2;
+        let main_start = match (column, flex_reverse) {
+            (true, false) => Side::Top,
+            (true, true) => Side::Bottom,
+            (false, false) => inline_start,
+            (false, true) => inline_end,
+        };
+        let cross_start = match (column, cross_flip) {
+            (true, false) => inline_start,
+            (true, true) => inline_end,
+            (false, false) => Side::Top,
+            (false, true) => Side::Bottom,
+        };
+        FlexPlan {
+            column,
+            flex_reverse,
+            main_start,
+            cross_start,
+            main_is_x: matches!(main_start, Side::Left | Side::Right),
+            main_reverse: matches!(main_start, Side::Right | Side::Bottom),
+            cross_far: matches!(cross_start, Side::Right | Side::Bottom),
+            cross_flip,
+            wrap,
+        }
+    }
+    // `justify-content` as the code native reads (`flexJustifyCode`): physical `left` / `right` resolved against the
+    // main axis, a flow-relative keyword turned by a reversed direction.
+    fn justify_code(&self, flags: style::values::specified::align::AlignFlags) -> u8 {
+        let mut k = align_kw(flags);
+        let mut physical = false;
+        if matches!(k, Kw::Left | Kw::Right) {
+            if self.main_is_x {
+                let target = if k == Kw::Left { Side::Left } else { Side::Right };
+                k = if target == self.main_start { Kw::FlexStart } else { Kw::FlexEnd };
+                physical = true;
+            } else {
+                k = Kw::Start;
+            }
+        }
+        if self.flex_reverse && !physical {
+            k = match k {
+                Kw::Start => Kw::FlexEnd,
+                Kw::End => Kw::FlexStart,
+                k => k,
+            };
+        }
+        match k {
+            Kw::Center => 1,
+            Kw::End | Kw::FlexEnd | Kw::Right => 2,
+            Kw::SpaceBetween => 3,
+            Kw::SpaceAround => 4,
+            Kw::SpaceEvenly => 5,
+            _ => 0,
+        }
+    }
+    // An item's cross alignment (`crossAlign`, and `crossAlignPhysical` where `physical`): its `align-self`, else the
+    // container's `align-items`, as a keyword along the cross axis.
+    fn cross_align(&self, items: Kw, child: &ComputedValues, mode: BaselineMode, physical: bool) -> Kw {
+        let own = align_kw(child.get_position().align_self.0);
+        let align = if own != Kw::Auto { own } else { items };
+        let (at_start, at_end) = if self.cross_flip { (Kw::FlexEnd, Kw::FlexStart) } else { (Kw::FlexStart, Kw::FlexEnd) };
+        let a = match align {
+            Kw::Normal | Kw::Auto | Kw::Left | Kw::Right | Kw::Other => Kw::Stretch,
+            Kw::SelfStart | Kw::SelfEnd => {
+                // (…by the item's OWN flow: its inline-start where that runs along the cross axis, else its block-start)
+                let rtl = child.get_inherited_box().direction == Direction::Rtl;
+                let cross_is_x = matches!(self.cross_start, Side::Left | Side::Right);
+                let mut side = if cross_is_x { if rtl { Side::Right } else { Side::Left } } else { Side::Top };
+                if align == Kw::SelfEnd {
+                    side = match side {
+                        Side::Left => Side::Right,
+                        Side::Right => Side::Left,
+                        Side::Top => Side::Bottom,
+                        Side::Bottom => Side::Top,
+                    };
+                }
+                if side == self.cross_start { Kw::FlexStart } else { Kw::FlexEnd }
+            }
+            Kw::Start => at_start,
+            Kw::End => at_end,
+            Kw::LastBaseline => match mode {
+                BaselineMode::Keep => Kw::LastBaseline,
+                BaselineMode::Axis => Kw::FlexEnd,
+                BaselineMode::Flow => at_end,
+            },
+            Kw::Baseline => match mode {
+                BaselineMode::Keep => Kw::Baseline,
+                BaselineMode::Axis => Kw::FlexStart,
+                BaselineMode::Flow => at_start,
+            },
+            a => a,
+        };
+        if physical && self.cross_far {
+            return match a {
+                Kw::FlexStart => Kw::FlexEnd,
+                Kw::FlexEnd => Kw::FlexStart,
+                a => a,
+            };
+        }
+        a
+    }
+    // An item's `auto` margins as native reads them (rec[41]): 1 main-lead, 2 main-trail, 4 cross-lead, 8 cross-trail —
+    // the main pair along the axis, the cross pair PHYSICALLY (top / bottom across a row, left / right across a column).
+    fn auto_margin_bits(&self, auto: u8) -> u8 {
+        // (`auto` is rec[76]'s mask: 1 left, 2 right, 4 top, 8 bottom)
+        let bit = |side: Side| match side {
+            Side::Left => auto & 1 != 0,
+            Side::Right => auto & 2 != 0,
+            Side::Top => auto & 4 != 0,
+            Side::Bottom => auto & 8 != 0,
+        };
+        let (lead, trail) = if self.main_is_x {
+            if self.main_reverse { (Side::Right, Side::Left) } else { (Side::Left, Side::Right) }
+        } else if self.main_reverse {
+            (Side::Bottom, Side::Top)
+        } else {
+            (Side::Top, Side::Bottom)
+        };
+        let (cross_lead, cross_trail) = if self.main_is_x { (Side::Top, Side::Bottom) } else { (Side::Left, Side::Right) };
+        (bit(lead) as u8) | (bit(trail) as u8) << 1 | (bit(cross_lead) as u8) << 2 | (bit(cross_trail) as u8) << 3
+    }
+}
+
+// A gap as native resolves it (`gapSpec`): `normal` none, else its pair or program.
+fn gap(v: &style::values::computed::length::NonNegativeLengthPercentageOrNormal) -> Result<Spec, &'static str> {
+    use style::values::generics::length::GenericLengthPercentageOrNormal as OrNormal;
+    match v {
+        OrNormal::Normal => Ok(Spec { px: 0.0, frac: 0.0, prog: None }),
+        OrNormal::LengthPercentage(lp) => spec(&lp.0),
+    }
+}
+
+// An item's `flex-basis` as native resolves it against the main size (rec[63] / rec[97] / its program / rec[64]): none
+// for `auto`, a keyword by its code (1 content, 2 min-content, 3 max-content, 4 fit-content), else its pair.
+struct FlexBasisSpec {
+    px: f64,
+    frac: f64,
+    prog: Option<Vec<f64>>,
+    keyword: u8,
+}
+impl FlexBasisSpec {
+    fn of(style: &ComputedValues) -> Result<FlexBasisSpec, &'static str> {
+        use style::values::generics::flex::GenericFlexBasis as FlexBasis;
+        use style::values::generics::length::GenericSize as Size;
+        let none = |keyword| FlexBasisSpec { px: f64::NAN, frac: f64::NAN, prog: None, keyword };
+        Ok(match &style.get_position().flex_basis {
+            FlexBasis::Content => none(1),
+            FlexBasis::Size(Size::MinContent) => none(2),
+            FlexBasis::Size(Size::MaxContent) => none(3),
+            FlexBasis::Size(Size::FitContent) => none(4),
+            FlexBasis::Size(Size::LengthPercentage(lp)) if lp.0.has_percentage() => {
+                let s = spec(&lp.0)?;
+                FlexBasisSpec { px: s.px, frac: s.frac, prog: s.prog, keyword: 0 }
+            }
+            FlexBasis::Size(Size::LengthPercentage(lp)) => FlexBasisSpec { px: length(&lp.0)?, frac: f64::NAN, prog: None, keyword: 0 },
+            FlexBasis::Size(Size::Auto) => none(0),
+            _ => return Err("flex-basis"),
+        })
+    }
+}
+
 // A resolved `vertical-align` (`verticalAlignFor`): its mode and the shift it carries.
 #[derive(Clone, Copy)]
 struct Va {
@@ -491,9 +763,9 @@ impl<'a> Walk<'a> {
         let display = b.clone_display();
         // (…a block container: a block-level one, or an `inline-block`, which the gather walks as an ATOMIC)
         let container = match display.outside() {
-            DisplayOutside::Block => matches!(display.inside(), DisplayInside::Flow | DisplayInside::FlowRoot),
+            DisplayOutside::Block => matches!(display.inside(), DisplayInside::Flow | DisplayInside::FlowRoot | DisplayInside::Flex),
             DisplayOutside::Inline => match display.inside() {
-                DisplayInside::FlowRoot => true,
+                DisplayInside::FlowRoot | DisplayInside::Flex => true,
                 DisplayInside::Flow => self.holds_block_level(id)?,
                 _ => false,
             },
@@ -515,6 +787,19 @@ impl<'a> Walk<'a> {
         rec.parent = parent;
         rec.run_start = -1;
         rec.flex_shrink = 1.0;
+        // A FLEX ITEM's own sizing declarations (rec[59..62]): its `flex-basis` as a length (none at no basis), its
+        // factors.
+        if !out_of_flow && self.flex_item(id)? {
+            let p = style.get_position();
+            use style::values::generics::flex::GenericFlexBasis as FlexBasis;
+            use style::values::generics::length::GenericSize as Size;
+            rec.flex_basis = match &p.flex_basis {
+                FlexBasis::Size(Size::LengthPercentage(lp)) if !lp.0.has_percentage() => length(&lp.0)?,
+                _ => f64::NAN,
+            };
+            rec.flex_grow = p.flex_grow.0 as f64;
+            rec.flex_shrink = p.flex_shrink.0 as f64;
+        }
         let pos = style.get_position();
         rec.border_box = pos.box_sizing == BoxSizing::BorderBox;
         rec.decl_border_box = rec.border_box;
@@ -610,10 +895,13 @@ impl<'a> Walk<'a> {
         // `position: relative` is a shift applied after the flow (§9.4.3) — not the pass root's, which is folded into
         // the origin it is handed.
         if parent >= 0 && position == Position::Relative {
-            self.relative(&style, &mut rec)?;
+            self.relative(id, &style, &mut rec)?;
         }
         self.inputs.push(rec);
         self.rec_index.insert(id, idx);
+        if matches!(display.inside(), DisplayInside::Flex) {
+            return self.flex(id, idx, &style);
+        }
 
         // What the children are to this block's flow: block-level boxes, or inline content (`walkRecord`'s classify).
         let ws_mode = ws_mode_of(&style)?;
@@ -780,6 +1068,111 @@ impl<'a> Walk<'a> {
         Ok(())
     }
 
+    // Is the element an item of a flex container — its parent one, and itself in flow?
+    fn flex_item(&self, id: NodeId) -> Result<bool, &'static str> {
+        let Some(p) = self.node(id).parent.filter(|&p| self.node(p).kind == NodeKind::Element) else { return Ok(false) };
+        Ok(matches!(self.style(p)?.get_box().clone_display().inside(), DisplayInside::Flex))
+    }
+
+    // A FLEX container (`walkRecord`'s flex arm): its axes as the codes native reads, its gaps, and its items — in
+    // `order`, each its own record with what native sizes it from — then its out-of-flow children, placed by its
+    // alignment.
+    fn flex(&mut self, id: NodeId, idx: i32, style: &ComputedValues) -> Step {
+        let plan = FlexPlan::of(style);
+        let pos = style.get_position();
+        let items_align = align_kw(pos.align_items.0);
+        let cross_gap = gap(if plan.column { &pos.column_gap } else { &pos.row_gap })?;
+        let main_gap = gap(if plan.column { &pos.row_gap } else { &pos.column_gap })?;
+        // The items: every in-flow element child, the out-of-flow ones apart; a run of bare text would be an
+        // ANONYMOUS item (`boxItems`), which this walk has not been taught.
+        let mut items: Vec<(i32, NodeId)> = Vec::new();
+        let mut oof: Vec<NodeId> = Vec::new();
+        for c in self.children(id).collect::<Vec<_>>() {
+            let n = self.node(c);
+            match n.kind {
+                NodeKind::Text if has_content(&n.data) => return Err("flex bare text"),
+                NodeKind::Element => {
+                    let cs = self.style(c)?;
+                    let b = cs.get_box();
+                    if b.clone_display().is_none() {
+                        continue;
+                    }
+                    if matches!(&*n.local_name, "br" | "wbr") {
+                        return Err("flex bare text");
+                    }
+                    if matches!(b.clone_position(), Position::Absolute | Position::Fixed) {
+                        oof.push(c);
+                    } else {
+                        items.push((cs.get_position().order, c));
+                    }
+                }
+                _ => {}
+            }
+        }
+        items.sort_by_key(|&(order, _)| order);
+        let r = &mut self.inputs[idx as usize];
+        r.display = crate::layout::DISPLAY_FLEX;
+        r.flex_main_is_x = plan.main_is_x;
+        r.flex_justify = plan.justify_code(pos.justify_content.primary());
+        r.flex_wrap = plan.wrap != 0;
+        r.flex_cross_flip = plan.wrap == 2;
+        r.flex_align_content = align_content_code(pos.align_content.primary());
+        r.flex_main_reverse = plan.main_reverse;
+        r.flex_dir_reverse = plan.flex_reverse;
+        r.flex_cross_far = plan.cross_far;
+        r.flex_native = true;
+        [r.flex_cross_gap, r.flex_cross_gap_frac] = [cross_gap.px, cross_gap.frac];
+        let cross_gap_math = self.math(cross_gap.prog.as_deref());
+        self.inputs[idx as usize].flex_cross_gap_math = cross_gap_math;
+        // (…and the main gap only between two items or more, as the JS walk sends it)
+        if items.len() > 1 {
+            let main_gap_math = self.math(main_gap.prog.as_deref());
+            let r = &mut self.inputs[idx as usize];
+            r.flex_main_gap = main_gap.px;
+            r.flex_main_gap_frac = main_gap.frac;
+            r.flex_main_gap_math = main_gap_math;
+        }
+        for (_, c) in items {
+            let at = self.inputs.len() as i32;
+            self.record(c, idx)?;
+            let cs = self.style(c)?;
+            let (_, auto) = edge_lps(&cs)?;
+            let align = plan.cross_align(items_align, &cs, BaselineMode::of(&plan), true);
+            let basis = FlexBasisSpec::of(&cs)?;
+            let basis_math = self.math(basis.prog.as_deref());
+            let cpos = cs.get_position();
+            use style::values::generics::length::GenericSize as Size;
+            let cross_auto = if plan.main_is_x { matches!(cpos.height, Size::Auto) } else { matches!(cpos.width, Size::Auto) };
+            let cross_auto_margin = if plan.main_is_x { auto & (4 | 8) != 0 } else { auto & (1 | 2) != 0 };
+            let r = &mut self.inputs[at as usize];
+            r.flex_basis_frac = basis.frac;
+            r.flex_basis_cb = basis.px;
+            r.flex_basis_math = basis_math;
+            r.flex_basis_kw = basis.keyword;
+            r.flex_stretch = align == Kw::Stretch && cross_auto && !cross_auto_margin;
+            let align = if align == Kw::Stretch && plan.cross_far { Kw::FlexEnd } else { align };
+            r.flex_cross_align = match align {
+                Kw::Center => 1,
+                Kw::FlexEnd => 2,
+                Kw::Baseline => 3,
+                Kw::LastBaseline => 4,
+                _ => 0,
+            };
+            r.flex_item_auto = plan.auto_margin_bits(auto);
+        }
+        for c in oof {
+            let cs = self.style(c)?;
+            let code = match plan.cross_align(items_align, &cs, BaselineMode::Flow, false) {
+                Kw::Center => 1,
+                Kw::FlexEnd => 2,
+                _ => 0,
+            };
+            let at = self.out_of_flow(c, idx)?;
+            self.inputs[at as usize].flex_cross_align = code;
+        }
+        Ok(())
+    }
+
     // Where the streams stand, to take an attempt back to.
     fn mark(&self) -> Mark {
         Mark {
@@ -885,7 +1278,7 @@ impl<'a> Walk<'a> {
             let pd = ps.get_box().clone_display();
             let inline_flow = matches!(pd.outside(), DisplayOutside::Inline) && matches!(pd.inside(), DisplayInside::Flow);
             let block = inline_flow && self.holds_block_level(p)?;
-            if !pd.is_none() && !pd.is_contents() && ((!fixed && ps.get_box().clone_position() != Position::Static) || contains_out_of_flow(&ps, node, block)) {
+            if !pd.is_none() && !pd.is_contents() && ((!fixed && ps.get_box().clone_position() != Position::Static) || contains_out_of_flow(&ps, node)) {
                 // (…an inline box is no record: native lays its fragments out, and names it by its inline table entry)
                 let inline = inline_flow && !block;
                 return if inline || self.rec_index.contains_key(&p) { Ok(Some(p)) } else { Err("containingBlockBox") };
@@ -897,12 +1290,13 @@ impl<'a> Walk<'a> {
 
     // A relative box's offset (`relativeOffset`), or — where a percentage is in an inset — the pairs and programs
     // native resolves against the containing block (`nlRelativeSpec`): `left`, else `right` negated (both set, the
-    // box's own direction drops one), and `top` beside `bottom`, which native chooses between once it knows whether
+    // containing block's direction drops one), and `top` beside `bottom`, which native chooses between once it knows whether
     // the height is definite.
-    fn relative(&mut self, style: &ComputedValues, rec: &mut Input) -> Step {
+    fn relative(&mut self, id: NodeId, style: &ComputedValues, rec: &mut Input) -> Step {
         let pos = style.get_position();
         let [top, right, bottom, left] = [inset_lp(&pos.top)?, inset_lp(&pos.right)?, inset_lp(&pos.bottom)?, inset_lp(&pos.left)?];
-        let rtl = style.get_inherited_box().direction == Direction::Rtl;
+        // (…the CONTAINING BLOCK's direction drops one of an over-constrained pair, §9.4.3)
+        let rtl = self.flow_relative_rtl(id)?;
         let keep_right = right.is_some() && (left.is_none() || rtl);
         if ![top, right, bottom, left].iter().flatten().any(|lp| lp.has_percentage()) {
             let px = |lp: Option<&LengthPercentage>| lp.map_or(Ok(0.0), length);
@@ -1209,7 +1603,7 @@ impl<'a> Walk<'a> {
             return Ok(());
         }
         // (…its own `position: relative` offset joins the chain of the boxes it is in)
-        let rel = self.chain_rel(cs, g.rel.as_ref())?;
+        let rel = self.chain_rel(c, cs, g.rel.as_ref())?;
         let cf = self.font_info(cs, g.block)?;
         // A `<br>` breaks the line, clearing the floats on the side it names; a `<wbr>` is a place it may. Each is an
         // inline box of its own with NO edges, whatever it declares (`WBR_EDGES`).
@@ -1486,11 +1880,11 @@ impl<'a> Walk<'a> {
 
     // The chain of relative offsets an inline box's content moves with: the boxes' around it, and its own where it is
     // `position: relative` (`nlChainRel`).
-    fn chain_rel(&self, style: &ComputedValues, base: Option<&Rel>) -> Result<Option<Rel>, &'static str> {
+    fn chain_rel(&self, id: NodeId, style: &ComputedValues, base: Option<&Rel>) -> Result<Option<Rel>, &'static str> {
         if style.get_box().clone_position() != Position::Relative {
             return Ok(base.cloned());
         }
-        Ok(match inline_rel_spec(style)? {
+        Ok(match inline_rel_spec(style, self.flow_relative_rtl(id)?)? {
             None => base.cloned(),
             Some(own) => Some(base.cloned().unwrap_or_default().plus(&own)),
         })
@@ -1613,7 +2007,7 @@ impl<'a> Walk<'a> {
             return true;
         }
         let b = style.get_box();
-        if matches!(b.clone_display().inside(), DisplayInside::FlowRoot) {
+        if !matches!(b.clone_display().inside(), DisplayInside::Flow) {
             return true;
         }
         if b.clone_float() != Float::None || matches!(b.clone_position(), Position::Absolute | Position::Fixed) {
@@ -1641,6 +2035,11 @@ impl<'a> Walk<'a> {
     // where the root has none of its own (`clipsContent` / `propagatedOverflow`)?
     fn clips_content(&self, id: NodeId, style: &ComputedValues) -> bool {
         let node = self.node(id);
+        // (…`overflow` applies to no inline box — one laid out as a block for the block it holds among them)
+        let d = style.get_box().clone_display();
+        if matches!(d.outside(), DisplayOutside::Inline) && matches!(d.inside(), DisplayInside::Flow) {
+            return false;
+        }
         let visible = |s: &ComputedValues| s.get_box().overflow_x == Overflow::Visible && s.get_box().overflow_y == Overflow::Visible;
         let parent = node.parent.and_then(|p| self.arena.get(p).map(|n| (p, n)));
         match parent {
@@ -1791,11 +2190,11 @@ fn display_decline(d: style::values::specified::box_::Display) -> &'static str {
 // An inline box's own relative offset as the chain carries it (`nlInlineRelSpec`): None where it moves nothing.
 // Where no inset has a percentage, it is its lengths; else each side's share — its pair (a fraction of `None` where
 // there is no percentage in it: `top` then falls back to `bottom` nowhere) or its program — `left`, else `right`
-// negated by the box's own direction, `top`, else `bottom` negated, with `yi` what an indefinite height leaves.
-fn inline_rel_spec(style: &ComputedValues) -> Result<Option<Rel>, &'static str> {
+// negated by the containing block's direction (`rtl`), `top`, else `bottom` negated, with `yi` what an indefinite height
+// leaves.
+fn inline_rel_spec(style: &ComputedValues, rtl: bool) -> Result<Option<Rel>, &'static str> {
     let pos = style.get_position();
     let [top, right, bottom, left] = [inset_lp(&pos.top)?, inset_lp(&pos.right)?, inset_lp(&pos.bottom)?, inset_lp(&pos.left)?];
-    let rtl = style.get_inherited_box().direction == Direction::Rtl;
     let keep_right = right.is_some() && (left.is_none() || rtl);
     if ![top, right, bottom, left].iter().flatten().any(|lp| lp.has_percentage()) {
         let px = |lp: Option<&LengthPercentage>| lp.map_or(Ok(0.0), length);
@@ -1823,9 +2222,11 @@ fn inline_rel_spec(style: &ComputedValues) -> Result<Option<Rel>, &'static str> 
     };
     let x = if keep_right { share(side(right.unwrap())?, true) } else if let Some(l) = left { share(side(l)?, false) } else { (0.0, 0.0, None) };
     let (top_s, bottom_s) = (top.map(side).transpose()?, bottom.map(side).transpose()?);
+    // (…what an INDEFINITE height leaves: a length `top`, else — a percentage `top` being `auto` there — a length
+    // `bottom`)
     let yi = match (&top_s, &bottom_s) {
         (Some((px, None, _)), _) => *px,
-        (None, Some((px, None, _))) => -px,
+        (_, Some((px, None, _))) => -px,
         _ => 0.0,
     };
     let y = match (top_s, bottom_s) {
@@ -1848,9 +2249,7 @@ fn inset_lp(v: &style::values::computed::position::Inset) -> Result<Option<&Leng
 // Does the box contain its out-of-flow descendants, fixed ones included (`containsOutOfFlow`): a filter, a transform
 // on a box it applies to, layout or paint containment, `content-visibility` other than visible, or a `will-change` that
 // promises one.
-// (`block` says the box is laid out as a block although its display is `inline`: a block-holding inline, which
-// transforms apply to as to any block — `isTransformable` asks the USED display.)
-fn contains_out_of_flow(style: &ComputedValues, node: &crate::dom::NodeData, block: bool) -> bool {
+fn contains_out_of_flow(style: &ComputedValues, node: &crate::dom::NodeData) -> bool {
     use style::values::computed::Contain;
     let effects = style.get_effects();
     if !effects.filter.0.is_empty() || !effects.backdrop_filter.0.is_empty() {
@@ -1858,7 +2257,9 @@ fn contains_out_of_flow(style: &ComputedValues, node: &crate::dom::NodeData, blo
     }
     let b = style.get_box();
     let d = b.clone_display();
-    let transformable = !(matches!(d.outside(), DisplayOutside::Inline) && matches!(d.inside(), DisplayInside::Flow) && !replaced_or_control(&node.local_name) && !block)
+    // (…a block-holding inline among the inline boxes it does not apply to: it is laid out as a block, and is an
+    // inline box to everything but the flow — `isSplitInline`)
+    let transformable = !(matches!(d.outside(), DisplayOutside::Inline) && matches!(d.inside(), DisplayInside::Flow) && !replaced_or_control(&node.local_name))
         && !matches!(d.inside(), DisplayInside::TableColumn | DisplayInside::TableColumnGroup);
     // (…the rest only of a box they apply to: not a non-replaced inline, not a table column — `isTransformable`)
     if !transformable {

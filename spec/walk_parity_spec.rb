@@ -146,6 +146,32 @@ RSpec.describe 'walk parity' do
     HTML
   end
 
+  # A flex container carries its axes as codes, its gaps as pairs, and its items in `order` — each with its basis, its
+  # stretch and its cross alignment — and places its out-of-flow children by its alignment; an inline-flex is an atomic.
+  it 'builds flex containers and their items' do
+    expect_clean(parity(<<~HTML))
+      <div style="display: flex; gap: 10px 5%; justify-content: space-between; align-items: center">
+        <div style="flex: 1 1 30%">a</div><div style="order: -1; flex-basis: 50px; margin-left: auto">b</div>
+        <div style="align-self: flex-end; flex-grow: 2">c</div><span style="position: absolute; top: 0">abs</span>
+      </div>
+      <div style="display: flex; flex-direction: column-reverse; flex-wrap: wrap; align-content: space-around; direction: rtl; height: 200px">
+        <p style="margin: 0">x</p><p style="margin: 0; align-self: self-start; width: 50px">y</p>
+        <div style="display: flex"><b style="display: block">nested</b></div>
+      </div>
+      <p>text <span style="display: inline-flex; justify-content: right"><i style="display: block">i</i></span></p>
+    HTML
+  end
+
+  # Round 4: a percentage `top` falls back to a length `bottom` where the height is indefinite, and an over-constrained
+  # relative box drops the side its CONTAINING BLOCK's direction says.
+  it 'builds the review repros of round 4' do
+    expect_clean(parity(<<~HTML))
+      <p>a <span style="position: relative; top: 10%; bottom: 5px">b</span></p>
+      <div dir="rtl"><span dir="ltr" style="position: relative; left: 5px; right: 9px">rl</span></div>
+      <div dir="rtl"><div dir="ltr" style="position: relative; left: 5px; right: 9px">block</div></div>
+    HTML
+  end
+
   # A pass whose runs need several faces names every one of them at once, and is compared.
   it 'resolves every face a pass needs' do
     expect_clean(parity(<<~HTML))
@@ -155,8 +181,8 @@ RSpec.describe 'walk parity' do
   end
 
   it 'declines by name what it has not been taught' do
-    stats = parity('<div style="display: flex">x</div>')
+    stats = parity('<div style="display: grid">x</div>')
     expect(stats['compared']).to eq(0)
-    expect(stats['declined']).to include('flex' => be_positive)
+    expect(stats['declined']).to include('grid' => be_positive)
   end
 end
