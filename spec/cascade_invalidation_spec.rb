@@ -1,6 +1,7 @@
 require 'capybara/simulated'
 require 'rack'
 require_relative 'support/session_teardown'
+require_relative 'support/js_cascade_machinery'
 
 # The cascade matches selectors LIVE on every read — that is how a DYNAMIC pseudo-class takes effect
 # at all. Anything that CACHES a cascade result therefore has to be invalidated by every input those
@@ -1213,7 +1214,7 @@ RSpec.describe 'cascade invalidation' do
   end
 
   # …and such a rule whose subject is ABSENT arms nothing: no epoch move and no dirtying sweep.
-  it 'does not arm for a custom-property-only rule whose subject is absent' do
+  it 'does not arm for a custom-property-only rule whose subject is absent', js_cascade: true do
     css = '.absent:focus { --w: 200px }'
     s = simulated_session(gated_page('<div id="t" tabindex="0" style="width: var(--w, 50px)">x</div>', css: css))
     s.visit '/'
@@ -1372,7 +1373,7 @@ RSpec.describe 'cascade invalidation' do
 
   # An `animation` declaration moves no box in this engine, so a dynamic rule that only animates
   # is paint-only: no epoch move, no dirtying.
-  it 'does not relay out for a dynamic rule that only animates' do
+  it 'does not relay out for a dynamic rule that only animates', js_cascade: true do
     css = '#t:focus { animation: spin 1s linear infinite }'
     s = simulated_session(gated_page('<div id="t" tabindex="0">x</div><p id="after">after</p>', css: css))
     s.visit '/'
@@ -1487,7 +1488,7 @@ RSpec.describe 'cascade invalidation' do
     expect(got).to eq([20, 120])
   end
 
-  it 'keeps descendant layout memos across a paint-only class flip' do
+  it 'keeps descendant layout memos across a paint-only class flip', js_cascade: true do
     css = '.panel { height: 20px } .red { color: rgb(255, 0, 0) }'
     s = simulated_session(gated_page('<div id="c"><div class="panel" id="p">x</div></div>', css: css))
     s.visit '/'
@@ -1527,7 +1528,7 @@ RSpec.describe 'cascade invalidation' do
   # A `[class^=…]` rule reads the class ATTRIBUTE, with a value condition the layout gate carries (`attrWriteMatters`):
   # a write that satisfies it before or after moves the element's box; one that satisfies it neither time moves nothing.
   # (The class-token gate this replaced could not place the shape and marked the writer's subtree on every class write.)
-  it 'marks a class write by the [class^=…] rule it can flip, and not otherwise' do
+  it 'marks a class write by the [class^=…] rule it can flip, and not otherwise', js_cascade: true do
     css = '[class^="col-"] { width: 50px } .panel { height: 20px }'
     s = simulated_session(gated_page('<div id="c"><div class="panel" id="p">x</div></div>', css: css))
     s.visit '/'
@@ -1617,7 +1618,7 @@ RSpec.describe 'cascade invalidation' do
     expect(got).to eq([20, 120])
   end
 
-  it "keeps a light-DOM element's memos across a paint-only flip beside a shadow host" do
+  it "keeps a light-DOM element's memos across a paint-only flip beside a shadow host", js_cascade: true do
     # The win: the widget's sheet cannot match `#c` or anything under it, so the class write is the
     # same question it would be on a page with no shadow root at all.
     css  = '.panel { height: 20px } .red { color: rgb(255, 0, 0) }'
@@ -1710,7 +1711,7 @@ RSpec.describe 'cascade invalidation' do
     expect(got).to eq(1)
   end
 
-  it 'answers a light-DOM write from the document rules while a ::part() rule exists' do
+  it 'answers a light-DOM write from the document rules while a ::part() rule exists', js_cascade: true do
     # A document `::part()` rule is in the document's layout index like any other — its subject is a box one tree in,
     # under the host its compounds name — so a light-DOM write it does not mention marks nothing more than the writer,
     # and one it does reaches the part through the host's subtree. (It used to latch the whole page ungateable, which
@@ -1739,7 +1740,7 @@ RSpec.describe 'cascade invalidation' do
     expect(got[0]).not_to eq(120)
   end
 
-  it 'folds a shadow sheet that arrives AFTER the tree was first folded' do
+  it 'folds a shadow sheet that arrives AFTER the tree was first folded', js_cascade: true do
     # The hole the per-element answer opens, and the reason `stylesheetChanged` and the
     # `adoptedStyleSheets` hook re-queue the root: `shadowSheetFacts` folds a tree once and re-folds
     # only what the queue hands it, so a sheet edited or inserted after the first fold reached none
@@ -1786,7 +1787,7 @@ RSpec.describe 'cascade invalidation' do
     expect(got).to eq(arrivals.transform_values { {harmful: false, harmless: true} })
   end
 
-  it 'arms the :host() answer from a late sheet too, which the gate above cannot see' do
+  it 'arms the :host() answer from a late sheet too, which the gate above cannot see', js_cascade: true do
     # The queue carries more than the `shadowUnsafe` latch — `shadowHostFn` and `shadowSlotted` ride
     # it as well, and `__csimCtxGateActive` reads only the latch. Without this example, gating the
     # queue push on `::part(` / `:host-context(` would read as a safe optimisation and would stop
@@ -1866,7 +1867,7 @@ RSpec.describe 'cascade invalidation' do
     expect(got[1]).to be > got[0]
   end
 
-  it 'scopes a non-subject flip on <body> to the matching subjects' do
+  it 'scopes a non-subject flip on <body> to the matching subjects', js_cascade: true do
     # The os-pc shape: widget CSS mentions a body-level class in ancestor position; stamping it
     # must not cost the whole page its layout memos — exactly one subject takes the subtree mark.
     css = '.host { height: 20px } body.chrome-x .host { height: 120px }'

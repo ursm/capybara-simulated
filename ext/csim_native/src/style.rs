@@ -2284,14 +2284,14 @@ impl<'dom> DomTraversal<StyleNode<'dom>> for Recalc<'_> {
         if let Some(el) = node.as_element() {
             let mut data = unsafe { el.ensure_data() };
             // (…an element whose values the restyle REPLACED — its own, or its `::before` / `::after` box's — is a change a
-            // layout walk reads: `stamp_change`, as a DOM write is)
+            // layout walk reads, stamped as a DOM write is, and one the JS side's memos hear of: `note_restyled`)
             let styles_of = |data: &style::data::ElementData| {
                 [data.styles.get_primary().map(Arc::raw_ptr), pseudo_ptr(data, &PSEUDOS_GENERATED[0]), pseudo_ptr(data, &PSEUDOS_GENERATED[1])]
             };
             let before = styles_of(&data);
             recalc_style_at(self, traversal_data, context, el, &mut data, note_child);
             if styles_of(&data) != before {
-                el.arena().stamp_change(el.id);
+                el.arena().note_restyled(el.id);
             }
             if self.context.traversal_flags.for_animation_only() {
                 unsafe { el.unset_animation_only_dirty_descendants() };

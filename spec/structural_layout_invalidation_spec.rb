@@ -2,6 +2,7 @@
 
 require 'capybara/simulated'
 require_relative 'support/session_teardown'
+require_relative 'support/js_cascade_machinery'
 
 # A mutation that flips a selector match on an element OTHER than the one written — a `:has()` above it, a position
 # among siblings, `:empty`, an attribute left of a sibling combinator — moves that element's boxes and, through what
@@ -188,7 +189,7 @@ RSpec.describe 'layout invalidation through structural selectors' do
   # out per appended row (6.6x on 600 rows), under `* + *` every sibling, and a `:has()` with a combinator in its
   # argument turned it on for every rule. A class left of a sibling combinator reaches that sibling, not its parent's
   # subtree (21x on 200 toggles beside a 500-row table).
-  it 'reaches no more than the change point on an append or a sibling toggle' do
+  it 'reaches no more than the change point on an append or a sibling toggle', js_cascade: true do
     marks = lambda do |css|
       html = "<!DOCTYPE html><style>#{css}</style><div><p class=t id=t>t</p><p class=small>s</p>" \
              '<table><tbody id=tb></tbody></table><p id=foot>f</p></div>'
@@ -227,7 +228,7 @@ RSpec.describe 'layout invalidation through structural selectors' do
   # compounds that read one on its side of the change keeps its subtree. jQuery's support tests append a probe to
   # `<html>` after `<body>` and remove it, and a Redmine page's `li:last-child` then relaid the whole body out, four
   # times a load. (`label.error + *` reads the element AFTER the change point, which a probe appended after `n` is not.)
-  it 'leaves a neighbour no positional compound can match its subtree' do
+  it 'leaves a neighbour no positional compound can match its subtree', js_cascade: true do
     marks = lambda do |css|
       html = "<!DOCTYPE html><style>#{css}</style><div id=w><section id=n><p>a <b>b</b></p><p>c</p></section></div>"
       s = simulated_session(->(_env) { [200, {'content-type' => 'text/html'}, [html]] })

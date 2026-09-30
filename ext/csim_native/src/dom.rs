@@ -404,7 +404,12 @@ pub(crate) struct RealmArena {
     // The layout walks' clock: a walk moves it on as it begins, and a change is stamped with where it stands
     // (`NodeData::stamp`), so a stamp past the epoch a walk began at is a change since that walk.
     pub(crate) layout_epoch: std::cell::Cell<u64>,
+    // The elements whose style a restyle REPLACED since this side last took them (`note_restyled`, `styleRestyled`):
+    // what the JS layout's memos and its early return have to hear of, now that the engine — not the JS cascade's rule
+    // gates — decides what a change restyles. Past `RESTYLED_CAP` only that it overflowed is kept: then everything is.
+    pub(crate) restyled: std::cell::RefCell<(Vec<NodeId>, bool)>,
 }
+pub(crate) const RESTYLED_CAP: usize = 4096;
 
 impl RealmArena {
     // `id` changed in a way a layout walk reads: it and every node its flat subtree is part of — its parent, a shadow
@@ -422,6 +427,20 @@ impl RealmArena {
             stack.extend(node.parent);
             stack.extend(node.host);
             stack.extend(node.assigned_slot);
+        }
+    }
+    // …and one the style engine RESTYLED: stamped, as a write is, and kept for this side to take.
+    pub(crate) fn note_restyled(&self, id: NodeId) {
+        self.stamp_change(id);
+        let mut restyled = self.restyled.borrow_mut();
+        if restyled.1 {
+            return;
+        }
+        if restyled.0.len() == RESTYLED_CAP {
+            restyled.0.clear();
+            restyled.1 = true;
+        } else {
+            restyled.0.push(id);
         }
     }
     // The start of a layout walk: the epoch it walks at, the clock moved on past it.
@@ -1027,6 +1046,7 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_, ()>, ctx: &v8::Global<v8:
     register(scope, ns, "styleShadowSheets", style_shadow_sheets, context_id);
     register(scope, ns, "styleValue", style_value, context_id);
     register(scope, ns, "styleShown", style_shown, context_id);
+    register(scope, ns, "styleRestyled", style_restyled, context_id);
     register(scope, ns, "styleFlush", style_flush, context_id);
     register(scope, ns, "styleTick", style_tick, context_id);
     crate::animation_ops::install(scope, ns, context_id);
@@ -2058,6 +2078,20 @@ fn style_shown(
             rv.set_int32(shown as i32);
         }
     });
+}
+
+// __dom.styleRestyled() -> Float64Array: the elements whose style a restyle replaced since the last call
+// (`RealmArena::note_restyled`), taken — or [-1] where more were than it keeps, and every element has to be taken for one.
+fn style_restyled(
+    scope: &mut v8::PinScope<'_, '_>,
+    args: v8::FunctionCallbackArguments<'_>,
+    mut rv: v8::ReturnValue<'_, v8::Value>,
+) {
+    let cid = realm_id(scope, &args);
+    let Some(arena) = dom(scope).realms.get(&cid) else { return };
+    let (ids, overflowed) = std::mem::take(&mut *arena.restyled.borrow_mut());
+    let nids: Vec<f64> = if overflowed { vec![-1.0] } else { ids.iter().map(|id| id.to_f64()).collect() };
+    rv.set(f64_array(scope, &nids).into());
 }
 
 // The page's clock (ms) an op is given at `index`: 0 when it is not a finite number (an undefined argument reads NaN).

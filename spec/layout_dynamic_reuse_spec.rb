@@ -1,6 +1,7 @@
 require 'capybara/simulated'
 require 'rack'
 require_relative 'support/session_teardown'
+require_relative 'support/js_cascade_machinery'
 require_relative 'support/shadow_parity'
 
 # Layout reuses a subtree across a bare style-state bump (focus, checkedness) when no dynamic
@@ -213,7 +214,7 @@ RSpec.describe 'layout reuse across dynamic style state' do
       JS
     end
 
-    it 'measures a stretched flex item again when its line shrinks' do
+    it 'measures a stretched flex item again when its line shrinks', js_cascade: true do
       # `align-items: stretch` lays an item out twice: once with an auto height to measure it,
       # once at the line's cross size. Once the tall sibling holding the line open is gone, the
       # measure call has to be answered from the item's own content — handing back the stretched
@@ -236,7 +237,7 @@ RSpec.describe 'layout reuse across dynamic style state' do
       expect(diff['remeasured']).to be > 0
     end
 
-    it 'lays out a subtree again when it holds an out-of-flow box anchored above it' do
+    it 'lays out a subtree again when it holds an out-of-flow box anchored above it', js_cascade: true do
       # The anchor is placed against `.box`, not against the auto-height wrapper it sits in, so
       # the wrapper's subtree cannot simply be moved — `placeAbsolute` runs only inside an
       # ancestor that is really laid out, and a shift would take the anchor along with it.
@@ -748,7 +749,7 @@ RSpec.describe 'layout reuse across dynamic style state' do
       expect(got).to eq([20, 20, 200, 200])
     end
 
-    it 'still reuses the subtree the change does not reach' do
+    it 'still reuses the subtree the change does not reach', js_cascade: true do
       # The control: a sibling with no imposed height and no escaping out-of-flow box hands its
       # boxes back whole when a node is removed beside it. ONE hit is the whole assertion —
       # `reuseSubtree` does not recurse, so a `#keep` that was really laid out again would grant
@@ -979,7 +980,7 @@ RSpec.describe 'layout reuse across dynamic style state' do
 
     # …and a kept measure is keyed on where its subtree stands in the pass only as far as the subtree itself: a box
     # inserted before a kept list moves every item's record, and keyed on that, cost every item its measure.
-    it 'puts back the measures of a list something was inserted before' do
+    it 'puts back the measures of a list something was inserted before', js_cascade: true do
       items = (1..100).map {|i| %(<div><p><span id="s#{i}">item #{i}</span></p></div>) }.join
       s = native_session_for(%(<div id="top">top</div><div style="display:flex;flex-wrap:wrap">#{items}</div>), verify: false)
       got = s.evaluate_script(<<~JS)
@@ -1580,9 +1581,7 @@ RSpec.describe 'layout reuse across dynamic style state' do
     # the document per text edit (6x on 3,000 elements). A COUNT, not a wall — `__csimSubtreeMarks`. The marks are the
     # JS walk's (the probe flips only a scope this side laid out from its answer, `_autoDirLaid`): under the style engine
     # the Rust walk takes the direction off the engine, and nothing on this side asks it.
-    it 'leaves the subtree alone when an edit does not flip the direction' do
-      saved = ENV['CSIM_STYLO']
-      ENV['CSIM_STYLO'] = nil
+    it 'leaves the subtree alone when an edit does not flip the direction', js_cascade: true do
       s = session_for('', '<div dir="auto"><span id="a">hello</span><p>x</p></div>')
       marks = lambda do |change|
         s.evaluate_script(<<~JS)
@@ -1597,8 +1596,6 @@ RSpec.describe 'layout reuse across dynamic style state' do
       end
       expect(marks.call("document.getElementById('a').firstChild.data = 'world'")).to eq(0)
       expect(marks.call("document.getElementById('a').firstChild.data = 'שלום'")).to be > 0
-    ensure
-      ENV['CSIM_STYLO'] = saved
     end
   end
 end
