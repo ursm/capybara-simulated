@@ -3031,11 +3031,12 @@ pub(crate) fn f64_array<'s>(scope: &mut v8::PinScope<'s, '_>, vals: &[f64]) -> v
     v8::Float64Array::new(scope, buf, 0, vals.len()).expect("a Float64Array over its own backing store")
 }
 
-// One box as the JS side reads it (`boxOf`, and `layoutPass`'s box rows): `BOX_ROW` numbers, the last fourteen its
+// One box as the JS side reads it (`boxOf`, and `layoutPass`'s box rows): `BOX_ROW` numbers — the twelve above, then its
 // edges as the pass used them (`layout::Box::edges`, NaN where it has none), which `auto` margins it has in the JS
 // side's mask (1 top, 2 right, 4 bottom, 8 left — `AUTO_MARGIN_BIT`) with 16 beside them where an edge resolved a
-// percentage, and 1 where it is out of flow.
-pub(crate) const BOX_ROW: usize = 26;
+// percentage, and where it is out of flow what placed it: `Box::out_of_flow`, `cb` (the record, or −1 the viewport,
+// −2 the inline entry after it, −3 nothing: a replayed box), `cb_inline` and `static_axes`.
+pub(crate) const BOX_ROW: usize = 29;
 fn box_row(b: &crate::layout::Box) -> [f64; BOX_ROW] {
     let [mt, mr, mb, ml] = b.used_margins.unwrap_or([f64::NAN; 4]);
     let am = b.auto_margins;
@@ -3044,7 +3045,15 @@ fn box_row(b: &crate::layout::Box) -> [f64; BOX_ROW] {
     row[..12].copy_from_slice(&[b.x, b.y, b.w, b.h, if b.auto_height { 1.0 } else { 0.0 }, b.cb_w.unwrap_or(f64::NAN), mt, mr, mb, ml, b.rel[0], b.rel[1]]);
     row[12..24].copy_from_slice(&b.edges.unwrap_or([f64::NAN; 12]));
     row[24] = (auto | if b.percent_edges { 16 } else { 0 }) as f64;
-    row[25] = if b.out_of_flow { 1.0 } else { 0.0 };
+    row[25] = b.out_of_flow as f64;
+    row[26] = match b.cb {
+        at if at >= 0 => at as f64,
+        crate::layout::CB_RECT => -1.0,
+        crate::layout::CB_INLINE => -2.0,
+        _ => -3.0,
+    };
+    row[27] = b.cb_inline as f64;
+    row[28] = b.static_axes as f64;
     row
 }
 

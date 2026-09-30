@@ -231,7 +231,8 @@ pub(crate) struct Input {
     // sizes, which a pushed box no longer is — an item the line shrank no longer overflows, and re-breaking the
     // final sizes kept the next item beside it. NaN = not sent.
     pub(crate) flex_line: f64,
-    // An OUT-OF-FLOW flex child (position:absolute / fixed, §4.1): 1 = out of flow. It is removed from flex
+    // An OUT-OF-FLOW flex child (position:absolute / fixed, §4.1): 1 = out of flow, 2 = out of flow as `position:
+    // fixed` (`OOF_FIXED`, which only the answer reads: `Box::out_of_flow`). It is removed from flex
     // sizing and flow — its subtree lays out at its pushed border box, and it is placed at the container's
     // border-box origin + its resolved displacement (rel_x/rel_y = el._lb − container._lb), so the insets /
     // static position the oracle already resolved are replayed. 0 = an ordinary in-flow item.
@@ -732,6 +733,11 @@ pub(crate) const CB_NONE: i32 = -1;
 pub(crate) const CB_RECT: i32 = -2;
 // …and for one whose containing block is an inline box of the pass, named by its inline-table index in cb_rect[0].
 pub(crate) const CB_INLINE: i32 = -3;
+// …an out-of-flow box that is `position: fixed` (`Input::out_of_flow`), and the axes one takes its static position in
+// (`Box::static_axes`).
+pub(crate) const OOF_FIXED: u8 = 2;
+pub(crate) const STATIC_BLOCK: u8 = 1;
+pub(crate) const STATIC_INLINE: u8 = 2;
 
 pub(crate) const CROSS_BASELINE: u8 = 3;
 pub(crate) const CROSS_BASELINE_LAST: u8 = 4;
@@ -1100,10 +1106,17 @@ pub(crate) struct Box {
     pub(crate) edges: Option<[f64; 12]>,
     // …which of its margins are `auto` (`Input::auto_margins`: 1 left, 2 right, 4 top, 8 bottom), whether any of them
     // resolved a PERCENTAGE (`Input::has_percent_edges` — edges that hold for one basis only), and whether it is OUT
-    // OF FLOW.
+    // OF FLOW (`Input::out_of_flow`, `OOF_FIXED` for `position: fixed`) — and where it is, what placed it: its
+    // containing block (`Input::cb_index`: a record, `CB_RECT` the viewport, `CB_INLINE` the inline entry `cb_inline`
+    // names, `CB_NONE` a box replayed rather than placed) and the axes it takes its static position in
+    // (`STATIC_BLOCK` / `STATIC_INLINE`: no inset on either side). `cb_inline` is −1 where there is none: no field of
+    // a box may be NaN, which compares unequal to itself and makes every box of the pass a changed one.
     pub(crate) auto_margins: u8,
     pub(crate) percent_edges: bool,
-    pub(crate) out_of_flow: bool,
+    pub(crate) out_of_flow: u8,
+    pub(crate) cb: i32,
+    pub(crate) cb_inline: i32,
+    pub(crate) static_axes: u8,
 }
 
 // Clamp a resolved main size by min/max (min wins over max, per CSS). `none` (NaN) bounds are skipped.
@@ -1449,7 +1462,7 @@ pub(crate) fn layout_block_in_place(inputs: &mut [Input], runs: &[Run], run_text
     }
     let mut boxes: Vec<Box> = inputs
         .iter()
-        .map(|n| Box { nid: n.nid, x: 0.0, y: 0.0, w: 0.0, h: 0.0, auto_height: false, first_baseline: None, last_baseline: None, inline_block_baseline: None, natural_h: None, clamped_h: false, cb_w: None, used_margins: None, rel: [0.0; 2], edges: None, auto_margins: 0, percent_edges: false, out_of_flow: false })
+        .map(|n| Box { nid: n.nid, x: 0.0, y: 0.0, w: 0.0, h: 0.0, auto_height: false, first_baseline: None, last_baseline: None, inline_block_baseline: None, natural_h: None, clamped_h: false, cb_w: None, used_margins: None, rel: [0.0; 2], edges: None, auto_margins: 0, percent_edges: false, out_of_flow: 0, cb: CB_NONE, cb_inline: -1, static_axes: 0 })
         .collect();
     // Two phases: MEASURE lays the subtree out relative to each node's own border-box origin (so
     // collapse-through margins can propagate UP through returns without knowing final positions), then
@@ -1500,7 +1513,13 @@ pub(crate) fn layout_block_in_place(inputs: &mut [Input], runs: &[Run], run_text
             .then(|| [n.pt, n.pr, n.pb, n.pl, n.bt, n.br, n.bb, n.bl, Input::m(n.mt), Input::m(n.mr), Input::m(n.mb), Input::m(n.ml)]);
         b.auto_margins = n.auto_margins;
         b.percent_edges = n.has_percent_edges();
-        b.out_of_flow = n.out_of_flow != 0;
+        b.out_of_flow = n.out_of_flow;
+        if n.out_of_flow != 0 {
+            b.cb = n.cb_index;
+            b.cb_inline = if n.cb_index == CB_INLINE { n.cb_rect[0] as i32 } else { -1 };
+            b.static_axes = if is_auto(n.inset_top) && is_auto(n.inset_bottom) { STATIC_BLOCK } else { 0 }
+                | if is_auto(n.inset_left) && is_auto(n.inset_right) { STATIC_INLINE } else { 0 };
+        }
     }
     boxes[0].cb_w = Some(root_cb_w);
     // The inline boxes' fragments, each laid out by the text block its runs belong to and placed with it. A box no
@@ -9001,8 +9020,8 @@ mod tests {
         b.height = 30.0;
         let inputs = vec![blk(0.0, -1), a, b];
         let bx = boxes(layout_block(&inputs, &[], &[], &[], &[], &[], 0.0, 0.0, 800.0, false));
-        assert_eq!(bx[1], Box { nid: 1.0, x: 0.0, y: 0.0, w: 800.0, h: 50.0, auto_height: false, first_baseline: None, last_baseline: None, inline_block_baseline: None, natural_h: None, clamped_h: false, cb_w: Some(800.0), used_margins: None, rel: [0.0; 2], edges: Some([0.0; 12]), auto_margins: 0, percent_edges: false, out_of_flow: false });
-        assert_eq!(bx[2], Box { nid: 2.0, x: 0.0, y: 50.0, w: 800.0, h: 30.0, auto_height: false, first_baseline: None, last_baseline: None, inline_block_baseline: None, natural_h: None, clamped_h: false, cb_w: Some(800.0), used_margins: None, rel: [0.0; 2], edges: Some([0.0; 12]), auto_margins: 0, percent_edges: false, out_of_flow: false });
+        assert_eq!(bx[1], Box { nid: 1.0, x: 0.0, y: 0.0, w: 800.0, h: 50.0, auto_height: false, first_baseline: None, last_baseline: None, inline_block_baseline: None, natural_h: None, clamped_h: false, cb_w: Some(800.0), used_margins: None, rel: [0.0; 2], edges: Some([0.0; 12]), auto_margins: 0, percent_edges: false, out_of_flow: 0, cb: CB_NONE, cb_inline: -1, static_axes: 0 });
+        assert_eq!(bx[2], Box { nid: 2.0, x: 0.0, y: 50.0, w: 800.0, h: 30.0, auto_height: false, first_baseline: None, last_baseline: None, inline_block_baseline: None, natural_h: None, clamped_h: false, cb_w: Some(800.0), used_margins: None, rel: [0.0; 2], edges: Some([0.0; 12]), auto_margins: 0, percent_edges: false, out_of_flow: 0, cb: CB_NONE, cb_inline: -1, static_axes: 0 });
         assert_eq!(bx[0].h, 80.0); // root auto height = 50 + 30
         assert!(bx[0].auto_height);
     }
@@ -9177,7 +9196,7 @@ mod tests {
         let inputs = vec![blk(0.0, -1), owner, f];
         let bx = boxes(layout_block(&inputs, &[], &[], &[], &[], &[], 0.0, 0.0, 800.0, false));
         assert_eq!(bx[1].h, 120.0); // owner contains the float
-        assert_eq!(bx[2], Box { nid: 2.0, x: 0.0, y: 0.0, w: 80.0, h: 120.0, auto_height: false, first_baseline: None, last_baseline: None, inline_block_baseline: None, natural_h: None, clamped_h: false, cb_w: Some(800.0), used_margins: None, rel: [0.0; 2], edges: Some([0.0; 12]), auto_margins: 0, percent_edges: false, out_of_flow: false });
+        assert_eq!(bx[2], Box { nid: 2.0, x: 0.0, y: 0.0, w: 80.0, h: 120.0, auto_height: false, first_baseline: None, last_baseline: None, inline_block_baseline: None, natural_h: None, clamped_h: false, cb_w: Some(800.0), used_margins: None, rel: [0.0; 2], edges: Some([0.0; 12]), auto_margins: 0, percent_edges: false, out_of_flow: 0, cb: CB_NONE, cb_inline: -1, static_axes: 0 });
     }
 
     #[test]

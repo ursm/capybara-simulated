@@ -3191,7 +3191,7 @@ impl<'a> Walk<'a> {
             }
         }
         let r = &mut self.inputs[at as usize];
-        r.out_of_flow = 1;
+        r.out_of_flow = if fixed { crate::layout::OOF_FIXED } else { 1 };
         r.item_auto_height = false;
         match cb {
             Some(cb) => match self.rec_index.get(&cb) {
