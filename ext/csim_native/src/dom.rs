@@ -1047,6 +1047,7 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_, ()>, ctx: &v8::Global<v8:
     register(scope, ns, "styleValue", style_value, context_id);
     register(scope, ns, "styleShown", style_shown, context_id);
     register(scope, ns, "styleGenerated", style_generated, context_id);
+    register(scope, ns, "styleSkips", style_skips, context_id);
     register(scope, ns, "styleRestyled", style_restyled, context_id);
     register(scope, ns, "styleFlush", style_flush, context_id);
     register(scope, ns, "styleTick", style_tick, context_id);
@@ -2077,6 +2078,27 @@ fn style_shown(
         let failures = engine.take_verify_failures();
         if !threw_verify_failures(scope, failures) {
             rv.set_int32(shown as i32);
+        }
+    });
+}
+
+// __dom.styleSkips(nid, now) -> bool: whether the element skips its contents as the style engine styled it
+// (`StyleEngine::skips`) — shown itself, nothing under it. Undefined where the realm has no engine.
+fn style_skips(
+    scope: &mut v8::PinScope<'_, '_>,
+    args: v8::FunctionCallbackArguments<'_>,
+    mut rv: v8::ReturnValue<'_, v8::Value>,
+) {
+    let cid = realm_id(scope, &args);
+    let Some(id) = nid_arg(scope, &args, 0) else { return };
+    let now = clock_arg(scope, &args, 1);
+    style_op(scope, cid, |scope| {
+        let d = dom(scope);
+        let (Some(engine), Some(arena)) = (d.styles.get_mut(&cid), d.realms.get(&cid)) else { return };
+        let skips = engine.skips(arena, id, now);
+        let failures = engine.take_verify_failures();
+        if !threw_verify_failures(scope, failures) {
+            rv.set_bool(skips);
         }
     });
 }

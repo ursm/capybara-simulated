@@ -657,7 +657,7 @@ RSpec.describe 'cascade invalidation' do
     expect(got).to eq(['rgb(0, 128, 0)', '3px'])
   end
 
-  it 'folds each distinct shadow stylesheet once, past the parse cache\'s limit' do
+  it 'folds each distinct shadow stylesheet once, past the parse cache\'s limit', js_cascade: true do
     # Components share a PARSED sheet only while `parseSheetCached`'s LRU holds it — 256 texts. Past
     # that a re-parse is a new object, so deduping on identity re-folds the sheet and re-lists it, and
     # the context gate is rebuilt over a pile that grows with every write: 500 components with distinct

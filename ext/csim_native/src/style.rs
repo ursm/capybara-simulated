@@ -1837,35 +1837,20 @@ impl StyleEngine {
 
     // Whether `id` is SHOWN, as the engine styled it: 0 where no box is — it has no style (an ancestor is `display:
     // none`, which styles none of its descendants, or no slot takes it into the flat tree) or its own `display` is
-    // `none` — or where it is SKIPPED, an ancestor's `content-visibility: hidden` (a `hidden=until-found` one's, in the
-    // UA sheet) keeping its contents from rendering (CSS Contain 2 §4: not painted, not hit, not found — Chrome and
+    // `none` — or where it is SKIPPED, an ancestor's `content-visibility: hidden` (`skips_contents`) keeping its contents from rendering (CSS Contain 2 §4: not painted, not hit, not found — Chrome and
     // Firefox answer `checkVisibility()` false); 1 where it is displayed and visible, 2 where it is displayed but its
     // `visibility` hides it. One question for what the JS cascade answered by matching the hide rules of every ancestor
     // (`isVisibleNodeImpl`).
     pub(crate) fn shown(&mut self, arena: &RealmArena, id: NodeId, now_ms: f64) -> u8 {
-        use style::computed_values::content_visibility::T as ContentVisibility;
-        use style::values::specified::box_::{DisplayInside, DisplayOutside};
         self.flush(arena, now_ms);
         let Some(style) = primary_style(arena, id) else { return 0 };
         if style.get_box().clone_display().is_none() {
             return 0;
         }
-        // (…an ancestor whose box can take size containment, which is what `content-visibility` applies to (CSS Contain 2
-        // §3.1): not one with no principal box, a non-atomic inline (a `ruby` container among them), a table, or an
-        // internal table or ruby box — a hidden `<span>`, `<tr>`, `<td>` or `<rt>` skips nothing, as Firefox shows.)
-        let skips = |s: &ComputedValues| {
-            let d = s.get_box().clone_display();
-            s.get_box().content_visibility == ContentVisibility::Hidden
-                && !d.is_contents()
-                && !matches!(d.outside(), DisplayOutside::InternalTable | DisplayOutside::InternalRuby)
-                && !matches!(d.inside(), DisplayInside::Table)
-                && !(matches!(d.outside(), DisplayOutside::Inline)
-                    && matches!(d.inside(), DisplayInside::Flow | DisplayInside::Ruby))
-        };
         let skipped = in_arena(arena, self, || {
             let mut cur = TElement::traversal_parent(&StyleNode::new(arena, id));
             while let Some(p) = cur {
-                if primary_style(arena, p.id).is_some_and(|s| skips(&s)) {
+                if primary_style(arena, p.id).is_some_and(|s| skips_contents(&s)) {
                     return true;
                 }
                 cur = TElement::traversal_parent(&p);
@@ -1876,6 +1861,12 @@ impl StyleEngine {
             return 0;
         }
         if style.get_inherited_box().visibility == style::computed_values::visibility::T::Visible { 1 } else { 2 }
+    }
+
+    // Whether `id` SKIPS its contents (`skips_contents`), as the document is styled now — shown itself, and nothing under it.
+    pub(crate) fn skips(&mut self, arena: &RealmArena, id: NodeId, now_ms: f64) -> bool {
+        self.flush(arena, now_ms);
+        primary_style(arena, id).is_some_and(|s| skips_contents(&s))
     }
 
     // The computed value of the longhand `name` on `id`, as `getComputedStyle` serializes a computed value; None for
@@ -2290,6 +2281,21 @@ pub(crate) fn primary_style(arena: &RealmArena, id: NodeId) -> Option<Arc<Comput
     data.styles.get_primary().cloned()
 }
 // …and the style it gave `id`'s EAGER pseudo-element `pseudo` (`::before`, `::after`, …), where it made one.
+// Whether a box of `style` skips its contents: `content-visibility: hidden` (a `hidden=until-found`'s, in the UA sheet) on
+// a box that can take size containment, which is what `content-visibility` applies to (CSS Contain 2 §3.1) — not one
+// with no principal box, a non-atomic inline (a `ruby` container among them), a table, or an internal table or ruby box:
+// a hidden `<span>`, `<tr>`, `<td>` or `<rt>` skips nothing, as Firefox shows.
+fn skips_contents(style: &ComputedValues) -> bool {
+    use style::computed_values::content_visibility::T as ContentVisibility;
+    use style::values::specified::box_::{DisplayInside, DisplayOutside};
+    let d = style.get_box().clone_display();
+    style.get_box().content_visibility == ContentVisibility::Hidden
+        && !d.is_contents()
+        && !matches!(d.outside(), DisplayOutside::InternalTable | DisplayOutside::InternalRuby)
+        && !matches!(d.inside(), DisplayInside::Table)
+        && !(matches!(d.outside(), DisplayOutside::Inline) && matches!(d.inside(), DisplayInside::Flow | DisplayInside::Ruby))
+}
+
 pub(crate) fn eager_pseudo(arena: &RealmArena, id: NodeId, pseudo: &PseudoElement) -> Option<Arc<ComputedValues>> {
     let slot = arena.style_slot(id)?;
     // SAFETY: as above.

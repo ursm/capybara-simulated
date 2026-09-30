@@ -110,23 +110,27 @@ RSpec.describe 'style engine invalidation' do
     expect(got).to eq([true, true, true, true, false, true, true, true])
   end
 
-  # The JS cascade's rules, built when this side first reads them, are the sheets' as they stand THEN — which may be
-  # another text than the rebuild that owed them keyed: a `<style>` edited, read, edited to something else and back.
-  # The next rebuild must not find its key unchanged and keep the rules of the text in between (the closed `<details>`
-  # reads them: Chrome, false).
-  it 'keeps no JS rules of a sheet text the rebuilds never keyed' do
-    s = visit('<details><summary>s</summary><div class="c" id="c">c</div></details><p class="q" id="q">q</p>', css: '.q { color: red }')
+  # The JS cascade's rules, built when this side first reads them, follow the sheets through every edit: a `<style>`
+  # edited, read, edited to something else and back. The JS walk reads them (`withJsCascade`): one box fewer while `.c`
+  # is hidden, as many as the final text's once it is back. (The stale-key half of `ensureJsCascade` — rules built from a
+  # text the owing rebuild did not key — needs a reader that does not freshen the cascade first, and no page script
+  # reaches one any more: the closed-`<details>` check was the last, and this example guarded it through that.)
+  it 'keeps the JS rules in step with the sheets they are built from' do
+    boxes = 'globalThis.__csimLayoutShadowRun().nodes'
+    body = '<div class="c" id="c">c</div><p class="q" id="q">q</p>'
+    s = visit(body, css: '.q { color: red }')
     got = s.evaluate_script(<<~JS)
       (() => {
         const st = document.querySelector('style'), q = document.getElementById('q');
         st.textContent = '.q { color: blue }';
         getComputedStyle(q).color;
-        st.textContent = '.c { display: block }';
+        st.textContent = '.c { display: none }';
+        const hidden = #{boxes};
         st.textContent = '.q { color: blue }';
-        return document.getElementById('c').checkVisibility();
+        return [hidden, #{boxes}];
       })()
     JS
-    expect(got).to be(false)
+    expect(got).to eq([2, 3])
   end
 
   # A page's text, its geometry and its generated content are the engine's to answer, and none of them builds the JS
@@ -160,6 +164,16 @@ RSpec.describe 'style engine invalidation' do
     (width, height), *rest = got
     expect(width).to be_within(0.02).of(30.23)
     expect([height, *rest]).to eq([18, '"B"', '3px', 36, 31])
+    expect(s.evaluate_script('__csimJsCascadeDemands().builds')).to eq(0)
+  end
+
+  # …and a box that skips its contents renders no text of them, nor the breaks around it — `hidden=until-found` and an
+  # author `content-visibility: hidden` alike — and a shadow host asks the JS rules nothing either. Chrome: "A||", "C||".
+  it 'reads no text from skipped contents, and no JS rules for a shadow host' do
+    s = visit('<div id="a">A|<div hidden="until-found">uf <b>bb</b></div>|</div><div id="c">C|<div style="content-visibility:hidden">cv</div>|</div>' \
+              '<div id="h"></div>', css: '')
+    s.execute_script("const h = document.getElementById('h'); h.attachShadow({mode: 'open'}).innerHTML = '<pre><slot></slot></pre>'; h.append('x')")
+    expect(s.evaluate_script("['a', 'c'].map((id) => document.getElementById(id).innerText)")).to eq(['A||', 'C||'])
     expect(s.evaluate_script('__csimJsCascadeDemands().builds')).to eq(0)
   end
 

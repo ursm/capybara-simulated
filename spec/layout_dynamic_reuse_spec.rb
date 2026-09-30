@@ -1415,6 +1415,22 @@ RSpec.describe 'layout reuse across dynamic style state' do
       expect(s.find('#h3').shadow_root.all('u').size).to eq(0)
     end
 
+    # …whatever `display` an author gives it: the content slot is `content-visibility: hidden` (HTML §15.3.x), which a
+    # child's own display does not undo. Chrome and Firefox: hidden, then shown once the `<details>` opens — the way
+    # Discourse's select-kit shows its body.
+    it 'skips a closed details element’s content whatever display it declares' do
+      s = slotted_session(
+        '<style>.body { display: flex }</style><details id="d"><summary>s</summary><div class="body" id="b">B</div>' \
+          '<div id="i" style="display:block">I</div></details>',
+        ''
+      )
+      expect(s.evaluate_script("['b', 'i'].map((id) => document.getElementById(id).checkVisibility())")).to eq([false, false])
+      expect(s).to have_no_css('#b')
+      s.execute_script("document.getElementById('d').open = true")
+      expect(s.evaluate_script("['b', 'i'].map((id) => document.getElementById(id).checkVisibility())")).to eq([true, true])
+      expect(s).to have_css('#b', text: 'B')
+    end
+
     # …and "being rendered" (innerText's first step) is having a box, up the flat tree: an element no rendered slot
     # takes answers its textContent, "ab" (Chrome and Firefox), where a node-tree walk gave the rendered "a" — and a
     # closed `<details>`'s content is rendered but skipped, so its text is "". Capybara's text of such a node is "".
