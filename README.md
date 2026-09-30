@@ -1,6 +1,6 @@
 # capybara-simulated
 
-*A simulated browser environment with DOM, JavaScript, and CSS cascade—without a rendering engine.*
+*A simulated browser environment with DOM, JavaScript, CSS cascade, and coarse layout—without pixel-accurate rendering.*
 
 capybara-simulated is an in-process Capybara driver. You shouldn't have to drop a system test down to a lower layer just because a real browser is expensive — a test written from the user's point of view should describe what the user actually does, not the HTTP requests your test code assembles.
 
@@ -22,7 +22,7 @@ capybara-simulated is not a complete replacement for real-browser testing. But i
 - **Drop-in**: the Capybara DSL is unchanged — register `:simulated` and go. Just this gem plus one JS-engine gem.
 - **Held to spec**: a vendored [web-platform-tests](https://github.com/web-platform-tests/wpt) conformance gate — the same DOM / HTML tests Chromium and Firefox hold themselves to, their reference tests included (the driver renders both the test and its reference and compares the two images) — plus the full system suites of five real apps — Redmine / Forem / Avo / Mastodon / Discourse — run against the driver in [capybara-simulated-vs-world](https://github.com/ursm/capybara-simulated-vs-world).
 
-**Reach for a real browser** (Selenium / Cuprite) **when** your tests need what this driver doesn't simulate **by design** — there's no rendering engine, so **pixel-accurate rendering** (glyph shaping — kerning, ligatures, bidi — the real line-breaking algorithm, multi-line `flex-wrap`) is out. `save_screenshot` does paint a real PNG, but it paints what the layout engine believes — enough to see what a test saw, not a visual-regression baseline. There *is* a coarse box-layout engine — enough that `getBoundingClientRect()`, `elementFromPoint()`, `obscured?`, the spatial selectors, scrolling, and drag-and-drop all work against real boxes — but it answers "where is this, roughly, and what's on top", not "how would this render".
+**Reach for a real browser** (Selenium / Cuprite) **when** your tests need what this driver doesn't simulate **by design** — it does no glyph-level rendering, so **pixel-accurate rendering** (glyph shaping — kerning, ligatures, bidi — the real line-breaking algorithm, multi-line `flex-wrap`) is out. `save_screenshot` does paint a real PNG, but it paints what the layout engine believes — enough to see what a test saw, not a visual-regression baseline. There *is* a coarse box-layout engine — enough that `getBoundingClientRect()`, `elementFromPoint()`, `obscured?`, the spatial selectors, scrolling, and drag-and-drop all work against real boxes — but it answers "where is this, roughly, and what's on top", not "how would this render".
 
 Most of the rest runs in-process — including the things that usually mean "you need a real browser": **`within_frame`**, **multiple windows / tabs**, **WebSocket + Action Cable**, **EventSource**, and **Web Workers** all work. Each has constraints (JS engine, settle-timing, coarse layout); see [Capabilities & limits](#capabilities--limits).
 
