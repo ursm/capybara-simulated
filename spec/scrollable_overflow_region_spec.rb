@@ -314,4 +314,25 @@ RSpec.describe 'the scrollable overflow region' do
     JS
     expect(got).to eq([100, 140])
   end
+
+  # …and an element with NO box has no region at all, whatever a pass left it: not rendered, detached, or
+  # `display: contents`. (Chrome: 100, then 0 every time.)
+  it 'reports no region for an element without a box' do
+    html = '<!DOCTYPE html><body><div id="d" style="width:100px;height:10px"></div>' \
+           '<div id="c" style="display:contents"><i>x</i></div></body>'
+    s = simulated_session(->(_env) { [200, {'content-type' => 'text/html'}, [html]] })
+    s.visit '/'
+    got = s.evaluate_script(<<~JS)
+      (() => {
+        const d = document.getElementById('d'), out = [d.scrollWidth];
+        d.style.width = '300px'; document.body.offsetHeight;
+        d.style.display = 'none'; document.body.offsetHeight;
+        out.push(d.scrollWidth, d.scrollHeight);
+        d.style.display = ''; d.remove();
+        out.push(d.scrollWidth, document.getElementById('c').scrollWidth);
+        return out;
+      })()
+    JS
+    expect(got).to eq([100, 0, 0, 0, 0])
+  end
 end
