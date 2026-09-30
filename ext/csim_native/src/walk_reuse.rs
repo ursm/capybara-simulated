@@ -34,8 +34,9 @@ pub(crate) struct WalkReuse {
     used: HashMap<u32, u64>,
     pub(crate) measure: MeasureCache,
     // The realm's programs (`walk::MathTable`), whose offsets the records name — the same program at the same offset
-    // from pass to pass, which is what makes an offset compared as a number compared as a program.
-    maths: MathTable,
+    // from pass to pass, which is what makes an offset compared as a number compared as a program. Lent to the walk
+    // (`maths_for_pass`) and to the layout, which takes it and puts it back.
+    pub(crate) maths: MathTable,
 }
 
 // What `WalkReuse::chunks` makes of a pass.
@@ -78,8 +79,11 @@ pub(crate) struct Streams<'a> {
 const MATH_TABLE_CAP: usize = 1 << 20;
 
 impl WalkReuse {
-    // The realm's math table for a pass: started afresh past its cap, and the last pass forgotten with it.
-    pub(crate) fn maths(&mut self) -> &mut MathTable {
+    // The realm's math table for the walk to build a pass with: started afresh past its cap, the last pass forgotten
+    // with it — asked ONCE, at the start of the pass. (Asked again after the walk had pushed the table past the cap, it
+    // handed the layout an empty table under records naming offsets into the full one, and every `min()`-sized box of
+    // that pass came out 0.)
+    pub(crate) fn maths_for_pass(&mut self) -> &mut MathTable {
         if self.maths.values.len() > MATH_TABLE_CAP {
             self.maths = MathTable::default();
             self.last = None;
@@ -295,4 +299,20 @@ fn run_rel(r: &Run, b: &Base) -> Run {
         _ => {}
     }
     r
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // A table the walk grew past the cap is the one the layout reads that pass — started afresh only when the NEXT pass
+    // asks for it, with the last pass forgotten then.
+    #[test]
+    fn a_table_grown_past_the_cap_holds_until_the_next_pass() {
+        let mut reuse = WalkReuse::default();
+        reuse.maths_for_pass().values.resize(MATH_TABLE_CAP + 10, 1.0);
+        assert_eq!(std::mem::take(&mut reuse.maths).values.len(), MATH_TABLE_CAP + 10);
+        reuse.maths.values.resize(MATH_TABLE_CAP + 10, 1.0);
+        assert!(reuse.maths_for_pass().values.is_empty());
+    }
 }

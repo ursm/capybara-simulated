@@ -202,7 +202,7 @@ fn layout_build(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgu
     let check = args.get(6).is_true();
     let d = dom(scope);
     let Some(arena) = d.realms.get(&cid) else { return };
-    let maths = d.walk_reuse.entry(cid).or_default().maths();
+    let maths = d.walk_reuse.entry(cid).or_default().maths_for_pass();
     let built = arena.faces.with(|faces| {
         faces.at_generation(&generation);
         walk::build(arena, root, basis, faces, maths)
@@ -238,13 +238,13 @@ fn layout_build(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgu
     let walk_reuse::Pass { roots, ends, ids, unchanged } = reuse.chunks(&streams, &generation);
     let built_inputs = inputs.clone();
     let mut measure = std::mem::take(&mut reuse.measure);
-    let maths = std::mem::take(reuse.maths());
+    let maths = std::mem::take(&mut reuse.maths);
     let cache = (!texts).then_some((&mut measure, roots, check));
     let out = crate::layout::layout_block_in_place(&mut inputs, &runs, &run_texts, &grids, &inlines, &maths.values, f64::NAN, f64::NAN, root_cb_w, root_rtl, cache, texts);
     let mismatch = measure.mismatch.take();
     let reuse = dom(scope).walk_reuse.entry(cid).or_default();
     reuse.measure = measure;
-    *reuse.maths() = maths;
+    reuse.maths = maths;
     reuse.keep(built_inputs, runs, run_texts, grids, inlines, marks, ends, ids);
     if let Some(why) = mismatch {
         let s = v8::String::new(scope, &format!("reuse mismatch: {why}")).unwrap();
