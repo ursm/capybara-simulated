@@ -584,6 +584,12 @@ impl StyleEngine {
         Some(block)
     }
 
+    // Whether the media query list `media` matches the document's device now (a `<source media>`).
+    fn media_matches(&self, media: &str) -> bool {
+        let list = self.media_list(media, &self.url);
+        list.evaluate(self.stylist.device(), self.stylist.quirks_mode(), &mut style::stylesheets::CustomMediaEvaluator::none())
+    }
+
     fn media_list(&self, media: &str, url: &UrlExtraData) -> MediaList {
         if media.is_empty() {
             return MediaList::empty();
@@ -914,6 +920,11 @@ impl StyleEngine {
         let styled = arena.existing_style_slot(id).is_some_and(|slot| unsafe { &*slot.data.get() }.is_some());
         self.restyle_all |= self.relative_reads_attributes(names, !styled);
         let Some(node) = arena.get(id) else { return };
+        if node.is_html_named("source") {
+            if let Some(picture) = arena.parent_of(id) {
+                self.restyle_picture_images(arena, picture);
+            }
+        }
         let Some(slot) = arena.existing_style_slot(id).filter(|_| styled) else { return };
         let this: *const StyleEngine = self;
         let snapshots = &mut self.snapshots;
@@ -941,6 +952,22 @@ impl StyleEngine {
             mark_ancestors_dirty(el);
             hint_element(el, hint);
             restyle_nth_of_siblings(el);
+        });
+    }
+
+    // `picture`'s images, where it is a `<picture>`: which `<source>` each selects — and so the dimensions its hints map
+    // (`hints::picture_hints`) — reads its siblings, whose writes restyle nothing of the img's own.
+    fn restyle_picture_images(&self, arena: &RealmArena, picture: NodeId) {
+        let Some(p) = arena.get(picture).filter(|p| p.is_html_named("picture")) else { return };
+        in_arena(arena, self, || {
+            for &c in &p.children {
+                let styled = arena.existing_style_slot(c).is_some_and(|s| unsafe { &*s.data.get() }.is_some());
+                if styled && arena.get(c).is_some_and(|n| n.is_html_named("img")) {
+                    let el = StyleNode::new(arena, c);
+                    mark_ancestors_dirty(el);
+                    hint_element(el, RestyleHint::RESTYLE_SELF);
+                }
+            }
         });
     }
 
@@ -986,6 +1013,7 @@ impl StyleEngine {
     }
     fn children_changed_unguarded(&mut self, arena: &RealmArena, parent: NodeId) {
         let Some(p) = arena.get(parent) else { return };
+        self.restyle_picture_images(arena, parent);
         if p.kind == NodeKind::Document {
             self.restyle_all = true;
             return;
@@ -1392,6 +1420,34 @@ impl StyleEngine {
         Arc::new(self.lock.wrap(block))
     }
 
+    // The style of a connected element the traversal did not style — one under a `display: none`, whose descendants no
+    // traversal styles — resolved on its own, its unstyled ancestors with it, and kept nowhere (Gecko's
+    // `ResolveStyleLazily`): what `getComputedStyle` reports of it, and what a script reading a hidden element's
+    // style (jQuery's `.css()` on a closed dialog) asks for.
+    fn undisplayed_style(&self, arena: &RealmArena, id: NodeId) -> Option<Arc<ComputedValues>> {
+        if !arena.is_element(id) || !arena.is_connected(id) {
+            return None;
+        }
+        in_arena(arena, self, || {
+            let guard = self.lock.read();
+            let shared = SharedStyleContext {
+                traversal_flags: TraversalFlags::empty(),
+                stylist: &self.stylist,
+                options: GLOBAL_STYLE_DATA.options.clone(),
+                guards: StylesheetGuards::same(&guard),
+                visited_styles_enabled: false,
+                animations: self.animations.clone(),
+                current_time_for_animations: self.clock / 1000.0,
+                snapshot_map: &self.snapshots,
+                registered_speculative_painters: &NoPainters,
+            };
+            let mut thread_local = ThreadLocalStyleContext::new();
+            let mut context = StyleContext { shared: &shared, thread_local: &mut thread_local };
+            let styles = style::traversal::resolve_style(&mut context, StyleNode::new(arena, id), RuleInclusion::All, None, None);
+            Some(styles.primary().clone())
+        })
+    }
+
     // The style `id` has without its animations and transitions — its base style (web-animations §5.4.1), which a
     // neutral keyframe and a composite other than `replace` stand on.
     fn base_style(&self, arena: &RealmArena, target: &waapi::Target, style: &Arc<ComputedValues>) -> Arc<ComputedValues> {
@@ -1772,8 +1828,6 @@ impl StyleEngine {
         })
     }
 
-    // The computed value of the longhand `name` on `id`, as `getComputedStyle` serializes a computed value; None for
-    // a shorthand, an unknown property, or an element the document's traversal did not style.
     // Whether `id` is SHOWN, as the engine styled it: 0 where no box is — it has no style (an ancestor is `display:
     // none`, which styles none of its descendants, or no slot takes it into the flat tree) or its own `display` is
     // `none` — or where it is SKIPPED, an ancestor's `content-visibility: hidden` (a `hidden=until-found` one's, in the
@@ -1817,6 +1871,8 @@ impl StyleEngine {
         if style.get_inherited_box().visibility == style::computed_values::visibility::T::Visible { 1 } else { 2 }
     }
 
+    // The computed value of the longhand `name` on `id`, as `getComputedStyle` serializes a computed value; None for
+    // a shorthand, an unknown property, or an element not in the document.
     pub(crate) fn value(
         &mut self,
         arena: &RealmArena,
@@ -1826,7 +1882,7 @@ impl StyleEngine {
         now_ms: f64,
     ) -> Option<String> {
         self.flush(arena, now_ms);
-        let primary = primary_style(arena, id)?;
+        let primary = primary_style(arena, id).or_else(|| self.undisplayed_style(arena, id))?;
         let style = match pseudo {
             None => primary,
             Some(pseudo) => self.pseudo_style(arena, id, pseudo, &primary)?,
@@ -2988,6 +3044,7 @@ impl<'a> TElement for StyleNode<'a> {
         }
         let mut list = Vec::new();
         crate::hints::cell_hints(self.arena(), self.id, &mut list);
+        crate::hints::picture_hints(self.arena(), self.id, &|media| engine.media_matches(media), &mut list);
         if let Some(block) = engine.hint_block(&list, false) {
             push(block);
         }

@@ -129,6 +129,18 @@ RSpec.describe 'style engine invalidation' do
     expect(got).to be(false)
   end
 
+  # An element under a `display: none` — styled by no traversal — is resolved on its own, its unstyled ancestors with it
+  # (Gecko's `ResolveStyleLazily`): its colour, its em-relative lengths and its percentages as Chrome reports them
+  # (rgb(1, 2, 3), 0px, 30px, auto, 10px, block; then 50% and none), where it was answered by the JS cascade.
+  it 'resolves the style of an element no traversal styled' do
+    s = visit('<div class="d" style="display:none"><p id="p">x</p></div><div id="x" style="display:none;width:50%"></div>',
+              css: '.d { color: rgb(1, 2, 3); padding: 2em; font-size: 10px } .d p { margin-left: 3em }')
+    got = s.evaluate_script(<<~JS)
+      ['p', 'x'].map((id) => { const g = getComputedStyle(document.getElementById(id)); return [g.color, g.paddingLeft, g.marginLeft, g.width, g.fontSize, g.display]; })
+    JS
+    expect(got).to eq([['rgb(1, 2, 3)', '0px', '30px', 'auto', '10px', 'block'], ['rgb(0, 0, 0)', '0px', '0px', '50%', '16px', 'none']])
+  end
+
   it 'restyles an element whose id changed' do
     s = visit('<div id="x">x</div>')
     expect(color(s, 'div', 'document.getElementById("x").id = "target";')).to eq('rgb(4, 5, 6)')

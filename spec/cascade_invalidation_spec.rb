@@ -88,7 +88,9 @@ RSpec.describe 'cascade invalidation' do
   end
 
   cases.each do |name, body, css, mutate, expected|
-    it "updates style when :#{name} changes" do
+    # (`:filtered` is the customizable-select explainer's, which the style engine does not parse — an unratified
+    # pseudo-class the JS cascade models alone.)
+    it "updates style when :#{name} changes", js_cascade: name == 'filtered' do
       html = "<!DOCTYPE html><html><head><style>#{css}</style></head><body>#{body}</body></html>"
       app = lambda {|_env| [200, {'content-type' => 'text/html'}, [html]] }
       s = simulated_session(app)

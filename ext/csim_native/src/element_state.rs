@@ -149,7 +149,7 @@ impl RealmArena {
         false
     }
     // Is `id` in a document (shadow-including)?
-    fn is_connected(&self, id: NodeId) -> bool {
+    pub(crate) fn is_connected(&self, id: NodeId) -> bool {
         let mut cur = Some(id);
         while let Some(c) = cur {
             if self.is_document(c) {
