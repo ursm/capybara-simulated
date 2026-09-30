@@ -177,6 +177,19 @@ RSpec.describe 'style engine invalidation' do
     expect(s.evaluate_script('__csimJsCascadeDemands().builds')).to eq(0)
   end
 
+  # …nor for the flow a box's sides follow: a `dir` attribute turns `margin-inline-start` to the right edge, and a scroll
+  # extent asks which way its content overflows (Mastodon's `scrollHeight` reads built the rule set for it). Chrome:
+  # 0px / 10px, and 100.
+  it 'answers the flow sides without the JS cascade' do
+    s = visit('<div dir="rtl" id="d" style="width:100px;height:50px;overflow:auto"><p id="p" style="margin:0;margin-inline-start:10px;height:100px">x</p></div>',
+              css: '')
+    got = s.evaluate_script(<<~JS)
+      (() => { const p = getComputedStyle(document.getElementById('p')); return [p.marginLeft, p.marginRight, document.getElementById('d').scrollHeight]; })()
+    JS
+    expect(got).to eq(['0px', '10px', 100])
+    expect(s.evaluate_script('__csimJsCascadeDemands().builds')).to eq(0)
+  end
+
   # An element under a `display: none` — styled by no traversal — is resolved on its own, its unstyled ancestors with it
   # (Gecko's `ResolveStyleLazily`): its colour, its em-relative lengths and its percentages as Chrome reports them
   # (rgb(1, 2, 3), 0px, 30px, auto, 10px, block; then 50% and none), where it was answered by the JS cascade.
