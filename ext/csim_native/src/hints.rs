@@ -283,6 +283,15 @@ pub(crate) fn table_border(node: &NodeData) -> Option<String> {
 }
 
 // The hints a table cell takes from its TABLE: `cellpadding` pads every cell of it.
+// A customizable combobox's FILTERED option: the UA sheet's `option:filtered { display: none }` (the tentative open-ui
+// combobox), whose `:filtered` stylo's selectors do not know — given as the declaration that rule would give, at the
+// presentational-hint level just above the UA's, where an author's `display` still wins as it does over a UA rule.
+pub(crate) fn filtered_option_hints(arena: &RealmArena, id: NodeId, out: &mut Vec<Hint>) {
+    if arena.is_filtered(id) && arena.get(id).is_some_and(|n| n.is_html_named("option")) {
+        out.push(("display", "none".to_owned()));
+    }
+}
+
 pub(crate) fn cell_hints(arena: &RealmArena, id: NodeId, out: &mut Vec<Hint>) {
     let Some(node) = arena.get(id) else { return };
     if !(node.is_html_named("td") || node.is_html_named("th")) {

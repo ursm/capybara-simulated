@@ -227,6 +227,24 @@ RSpec.describe 'style engine invalidation' do
     File.delete(path) if path && File.exist?(path)
   end
 
+  # A FILTERED option is `display: none` to every reader — its style, its visibility, its box and the text — as the
+  # tentative UA rule `option:filtered { display: none }` makes it, whose `:filtered` the engine's selectors do not know
+  # (a presentational hint instead, restyled as the state moves). The default mode's figures, and its own again once the
+  # filter is cleared.
+  it 'hides a filtered option everywhere, and shows it again' do
+    s = visit('<input filter="s"><select id="s" size="4"><option>apple</option><option id="o2">banana</option></select>', css: '')
+    got = s.evaluate_script(<<~JS)
+      (() => {
+        const i = document.querySelector('input'), o = document.getElementById('o2');
+        i.value = 'ap';
+        const r = [getComputedStyle(o).display, o.checkVisibility(), o.offsetHeight, document.getElementById('s').innerText];
+        i.value = '';
+        return r.concat([getComputedStyle(o).display, o.checkVisibility()]);
+      })()
+    JS
+    expect(got).to eq(['none', false, 0, 'apple', 'block', true])
+  end
+
   # An element under a `display: none` — styled by no traversal — is resolved on its own, its unstyled ancestors with it
   # (Gecko's `ResolveStyleLazily`): its colour, its em-relative lengths and its percentages as Chrome reports them
   # (rgb(1, 2, 3), 0px, 30px, auto, 10px, block; then 50% and none), where it was answered by the JS cascade.

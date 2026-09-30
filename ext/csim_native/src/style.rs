@@ -109,6 +109,9 @@ pub(crate) struct StyleSlot {
     // …and, for an element an `:empty` was matched against, whether it WAS empty then — what a child-list change is
     // held against, so only a change that flips it restyles what read it (`children_changed`).
     styled_empty: Cell<Option<bool>>,
+    // …and whether it was a FILTERED option then (`hints::filtered_option_hints`): a state stylo's `ElementState` does
+    // not hold, so no state snapshot sees it move.
+    styled_filtered: Cell<bool>,
 }
 
 impl StyleSlot {
@@ -126,6 +129,7 @@ impl StyleSlot {
             state: Cell::new((u64::MAX, ElementState::empty())),
             styled_state: Cell::new(ElementState::empty()),
             styled_empty: Cell::new(None),
+            styled_filtered: Cell::new(false),
             has_snapshot: Cell::new(false),
         }
     }
@@ -807,15 +811,18 @@ impl StyleEngine {
         // incremental restyles keep of each element to compare with next time, its state and its emptiness, which a
         // full restyle rewrites everywhere and so would hide every change the next incremental one missed.)
         let tasks = std::mem::take(&mut *self.animation_tasks.borrow_mut());
-        let kept: Vec<(NodeId, ElementState, Option<bool>)> = arena
+        let kept: Vec<(NodeId, ElementState, Option<bool>, bool)> = arena
             .element_ids()
-            .filter_map(|id| arena.existing_style_slot(id).map(|s| (id, s.styled_state.get(), s.styled_empty.get())))
+            .filter_map(|id| {
+                arena.existing_style_slot(id).map(|s| (id, s.styled_state.get(), s.styled_empty.get(), s.styled_filtered.get()))
+            })
             .collect();
         self.traverse(arena, doc, true, TraversalFlags::empty());
-        for (id, state, empty) in kept {
+        for (id, state, empty, filtered) in kept {
             if let Some(slot) = arena.existing_style_slot(id) {
                 slot.styled_state.set(state);
                 slot.styled_empty.set(empty);
+                slot.styled_filtered.set(filtered);
             }
         }
         *self.animation_tasks.borrow_mut() = tasks;
@@ -888,6 +895,13 @@ impl StyleEngine {
                     continue;
                 }
                 let el = StyleNode::new(arena, id);
+                // (…a filtered option's hint moved: its own style is all it reaches)
+                let filtered = arena.is_filtered(id);
+                if filtered != slot.styled_filtered.get() {
+                    slot.styled_filtered.set(filtered);
+                    mark_ancestors_dirty(el);
+                    hint_element(el, RestyleHint::RESTYLE_SELF);
+                }
                 let before = slot.styled_state.get();
                 if el.state() == before {
                     continue;
@@ -2389,6 +2403,7 @@ impl<'dom> DomTraversal<StyleNode<'dom>> for Recalc<'_> {
             } else {
                 let slot = el.slot();
                 slot.styled_state.set(el.state());
+                slot.styled_filtered.set(el.arena().is_filtered(el.id));
                 if slot.selector_flags.get().contains(ElementSelectorFlags::HAS_EMPTY_SELECTOR) {
                     slot.styled_empty.set(Some(el.arena().is_empty(el.id)));
                 }
@@ -3080,6 +3095,7 @@ impl<'a> TElement for StyleNode<'a> {
         let mut list = Vec::new();
         crate::hints::cell_hints(self.arena(), self.id, &mut list);
         crate::hints::picture_hints(self.arena(), self.id, &|media| engine.media_matches(media), &mut list);
+        crate::hints::filtered_option_hints(self.arena(), self.id, &mut list);
         if let Some(block) = engine.hint_block(&list, false) {
             push(block);
         }
