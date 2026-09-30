@@ -23,6 +23,32 @@ RSpec.describe 'css-scoping selectors' do
     expect(got).to eq([0, 0])
   end
 
+  # A `:host` or `::slotted()` rule is written in the tree one boundary IN from the element it styles, and the cascade
+  # sorts on that CONTEXT before specificity or order (css-cascade-5 §6.1): the document's NORMAL declaration beats it,
+  # its `!important` one beats the document's. Chrome and Firefox: 20px, 120px, red — where the shadow rule won all three.
+  [nil, '1'].each do |stylo|
+    it "sorts a :host and a ::slotted() rule on context against the document's#{stylo ? ' (stylo)' : ''}" do
+      saved = ENV['CSIM_STYLO']
+      ENV['CSIM_STYLO'] = stylo
+      html = '<!DOCTYPE html><style>#a { display: block; height: 20px } #b { display: block; height: 20px !important } ' \
+             '#c { color: rgb(255, 0, 0) }</style><div id="a"></div><div id="b"></div><div id="h"><span id="c">c</span></div>'
+      s = simulated_session(->(_env) { [200, {'content-type' => 'text/html'}, [html]] })
+      s.visit '/'
+      got = s.evaluate_script(<<~JS)
+        (() => {
+          document.getElementById('a').attachShadow({mode: 'open'}).innerHTML = '<style>:host { height: 120px }</style>';
+          document.getElementById('b').attachShadow({mode: 'open'}).innerHTML = '<style>:host { height: 120px !important }</style>';
+          document.getElementById('h').attachShadow({mode: 'open'}).innerHTML = '<style>::slotted(#c) { color: rgb(0, 128, 0) }</style><slot></slot>';
+          const cs = (id) => getComputedStyle(document.getElementById(id));
+          return [cs('a').height, cs('b').height, cs('c').color, document.getElementById('a').getBoundingClientRect().height];
+        })()
+      JS
+      expect(got).to eq(['20px', '120px', 'rgb(255, 0, 0)', 20])
+    ensure
+      ENV['CSIM_STYLO'] = saved
+    end
+  end
+
   # A `:host` compound LEFT of a combinator matches the host as every in-tree element's shadow-including ancestor
   # (§3.2.1): `:host p` is the tree's `p`, `:host > p` its top-level one, `:host(.x) p` the tree's `p` while the host is
   # `.x`; the host has no sibling in its tree and no ancestor in it, so `:host + p` and `.a :host p` match nothing. None

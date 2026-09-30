@@ -120,4 +120,31 @@ RSpec.describe 'layout insets' do
     # The point of a backdrop: content beneath it is no longer reachable.
     expect(s.find('#rel', visible: :all)).to be_obscured
   end
+
+  # An intrinsic-size KEYWORD height is no `auto`: between both vertical insets the box is its content's height and
+  # its auto margins centre it in the rest (CSS Sizing 3 §3.1). Chrome: `e` 291 18 (centred in 200 from 200) and `f`
+  # at the top, 18 tall — where stretching them both reported 200 tall.
+  it 'gives an out-of-flow box with a keyword height its content height between both insets' do
+    html = '<!DOCTYPE html><body style="margin:0"><div style="position:relative;height:200px;margin-top:200px">' \
+           '<div id="e" style="position:absolute;top:0;bottom:0;height:fit-content;margin:auto">e</div>' \
+           '<div id="f" style="position:absolute;top:0;bottom:0;height:min-content">f</div></div>'
+    s = simulated_session(->(_env) { [200, {'content-type' => 'text/html'}, [html]] })
+    s.visit '/'
+    expect(%w[e f].map {|id| rect_of(s, id).values_at(1, 3) }).to eq([[291, 18], [200, 18]])
+  end
+
+  # …which is how a MODAL `<dialog>` sits in the middle of the viewport: HTML's UA sheet makes it `position: fixed;
+  # inset-block: 0; height: fit-content; margin: auto`, and a non-modal open one `position: absolute` at its static
+  # position. Chrome, at its 681px viewport: the modal at 473 312.5 78 56 — (681 - 56) / 2 down — and the open one at
+  # 455 50 113.98 56 (its width `fit-content`, its box the UA's `padding: 1em` and 3px `border: solid`). The modal's
+  # 77.99 is its text's width measured here, where Chrome's shaping rounds it to 78.
+  it 'centres a modal dialog in the viewport and leaves an open one at its static position' do
+    html = '<!DOCTYPE html><body style="margin:0"><p>before</p><dialog id="d" open>hello dialog</dialog><dialog id="m">modal</dialog>'
+    s = simulated_session(->(_env) { [200, {'content-type' => 'text/html'}, [html]] })
+    s.visit '/'
+    s.execute_script("document.getElementById('m').showModal()")
+    height = s.evaluate_script('innerHeight')
+    expect(rect_of(s, 'm').map {|v| v.round(2) }).to eq([473, (height - 56) / 2.0, 77.99, 56])
+    expect(rect_of(s, 'd').map {|v| v.round(2) }).to eq([455.01, 50, 113.98, 56])
+  end
 end

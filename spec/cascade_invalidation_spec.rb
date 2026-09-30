@@ -1666,16 +1666,17 @@ RSpec.describe 'cascade invalidation' do
     # anything. And the answer comes off the sheet's TEXT rather than that bucket precisely so the
     # `:host(.x) .y` form, which `scopedRulesFor` leaves in-tree and which does not match here yet,
     # cannot silently make this unsound the day it starts matching.
-    # (The document's base rule is a CLASS, not `#h`: an ID would out-specify `:host(.red)` and the
-    # height would never move.)
-    css  = '.hostbase { display: block; height: 20px } .red { color: rgb(255, 0, 0) }'
+    # (The document declares no HEIGHT for the host: its normal declaration would beat `:host(.red)`
+    # outright — the outer context wins, Chrome and Firefox both leave such a host at the document's
+    # figure — and the height would never move. The host's 20 before is its content's.)
+    css  = '.hostbase { display: block } .red { color: rgb(255, 0, 0) }'
     s    = simulated_session(gated_page('<div id="h" class="hostbase"></div>', css: css))
     s.visit '/'
     got = s.evaluate_script(<<~JS)
       (() => {
         const h = document.getElementById('h');
         h.attachShadow({mode: 'open'}).innerHTML =
-          '<style>:host(.red) { height: 120px }</style><p>w</p>';
+          '<style>:host(.red) { height: 120px }</style><p style="margin: 0; height: 20px">w</p>';
         h.getBoundingClientRect();
         const marks = globalThis.__csimSubtreeMarks();
         h.classList.add('red');
@@ -2112,7 +2113,8 @@ RSpec.describe 'cascade invalidation' do
         return [modal, t.getBoundingClientRect().height];
       })()
     JS
-    expect(got).to eq([120, 20])
+    # (Border boxes: the dialog UA's `padding: 1em` and 3px `border: solid` add 38 — Chrome reports 158 and 58.)
+    expect(got).to eq([158, 58])
   end
 
   # KNOWN GAPS, all pre-existing — each measured identically on the commit before any of this work,

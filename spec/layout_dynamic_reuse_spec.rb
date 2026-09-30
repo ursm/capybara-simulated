@@ -776,11 +776,12 @@ RSpec.describe 'layout reuse across dynamic style state' do
   # still resolves — read the item's whole subtree, and are kept across passes on its stamp the way a kept subtree slice
   # is (`nlGateKept`). Under the authoritative pass that uses them, and with every reusing pass walked again fresh and
   # compared (`__csimNativeLayoutVerifyReuse`, which THROWS on a difference): a kept answer the subtree no longer
-  # deserves makes the two walks part.
+  # deserves makes the two walks part. They are the JS WALK's gates, so it is the walk these sessions run: under the style
+  # engine the Rust walk builds the pass instead (`nlRustPass`) and asks none of them.
   describe 'native walk gates' do
     def native_session_for(body, verify: true, css: '')
       session_for("body { margin: 0 } #{css}", body).tap do |s|
-        s.execute_script("globalThis.__csimNativeLayout = true; globalThis.__csimNativeLayoutVerifyReuse = #{verify}")
+        s.execute_script("globalThis.__csimNativeLayout = true; globalThis.__csimNativeLayoutVerifyReuse = #{verify}; globalThis.__csimRustWalk = false")
       end
     end
 

@@ -163,6 +163,13 @@ RSpec.describe 'style engine invalidation' do
   end
 
   # (The padding itself is layout's to report; any read after the change runs the verify pass, which compares it.)
+  # A `:has()` whose argument is a TYPE alone is noted in the engine's additional relative-selector map, which is what
+  # says to restyle on an insertion anywhere under it.
+  it 'restyles what a :has() of a type reaches when one is inserted under it' do
+    s = visit('<div class="h"><p id="t">t</p><span id="o">o</span></div>', css: '.h:has(i) p { color: rgb(46, 47, 48) }')
+    expect(color(s, '#t', 'document.getElementById("o").appendChild(document.createElement("i"));')).to eq('rgb(46, 47, 48)')
+  end
+
   it "restyles a table's cells when its cellpadding changes" do
     s = visit('<table id="t" cellpadding="3"><tr><td id="c">c</td></tr></table>')
     expect(color(s, '#c', 'document.getElementById("t").setAttribute("cellpadding", "9");')).to eq('rgb(0, 0, 0)')
@@ -289,6 +296,42 @@ RSpec.describe 'style engine invalidation' do
       })()
     JS
     expect(read).to eq(values)
+  end
+
+  # `:dir()` is the element's HTML DIRECTIONALITY, a state the engine matches like any other — a `dir=auto` scope's
+  # from the first strong character of its text — and HTML's UA sheet sets `direction` from it (`[dir]:dir(rtl)`). So
+  # a text edit that flips the scope restyles what matches, and what inherits from it (Chrome: ltr, then rtl).
+  it 'matches :dir() by a dir=auto scope and restyles it when its text flips it' do
+    s = visit('<div id="d" dir="auto"><p id="p">hello</p></div>', css: 'p:dir(rtl) { color: rgb(1, 2, 3) }')
+    got = s.evaluate_script(<<~JS)
+      (() => {
+        const p = document.getElementById('p');
+        const read = () => [getComputedStyle(p).color, getComputedStyle(document.getElementById('d')).direction, getComputedStyle(p).direction];
+        const before = read();
+        p.firstChild.data = '\u05e9\u05dc\u05d5\u05dd';
+        return before.concat(read());
+      })()
+    JS
+    expect(got).to eq(['rgb(0, 0, 0)', 'ltr', 'ltr', 'rgb(1, 2, 3)', 'rtl', 'rtl'])
+  end
+end
+
+# HTML's directionality steps an element takes by ITSELF, in both engines: a telephone `<input>` with no valid `dir`
+# is ltr in an rtl scope (a number reads left to right in any script), and a `<bdi>` whose `dir` is INVALID is auto —
+# as one with none (Chrome and Firefox: `ltr` and `rtl`).
+RSpec.describe 'directionality' do
+  [nil, '1'].each do |stylo|
+    it "takes a telephone input's and an invalid-dir bdi's own direction#{stylo ? ' (stylo)' : ''}" do
+      saved = ENV['CSIM_STYLO']
+      ENV['CSIM_STYLO'] = stylo
+      html = '<!DOCTYPE html><div dir="rtl"><input id="t" type="tel"></div><div><bdi id="b" dir="foo">&#x5e9;&#x5dc;</bdi></div>'
+      s = simulated_session(->(_env) { [200, {'content-type' => 'text/html'}, [html]] })
+      s.visit '/'
+      got = s.evaluate_script("['t', 'b'].map((id) => { const e = document.getElementById(id); return [getComputedStyle(e).direction, e.matches(':dir(rtl)')]; })")
+      expect(got).to eq([['ltr', false], ['rtl', true]])
+    ensure
+      ENV['CSIM_STYLO'] = saved
+    end
   end
 end
 

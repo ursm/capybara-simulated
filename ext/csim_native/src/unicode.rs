@@ -1,7 +1,7 @@
 // The Unicode general categories the ORACLE asks a regex for, and that native therefore has to answer the
 // same way: `\p{M}`, which `font::zero_width` needs to decide whether a character at or above U+0300 is
 // zero-width, and `\p{L}` / `\p{N}`, which `layout::hyphen_breaks_after` needs because the oracle's
-// `HYPHEN_BREAK_RE` spells its classes that way.
+// `HYPHEN_BREAK_RE` spells its classes that way — and the strong right-to-left class `dir=auto` scans text for.
 //
 // The classes come from regex-syntax — the SAME regex the oracle writes, parsed rather than reimplemented —
 // and NOT from Rust std's `char::is_alphabetic` / `is_numeric`. FOUR Unicode versions live in this process
@@ -12,7 +12,7 @@
 // as a letter where `\p{L}` does not.
 //
 // WHAT THIS PINS US TO, plainly: the classes are now regex-syntax's UCD snapshot (16.0.0 as vendored), not
-// the engine's. They agree today — every range, all three classes — and `class_ranges` below exists so that
+// the engine's. They agree today — every range of every class — and `class_ranges` below exists so that
 // `spec/native_layout_text_spec.rb` can keep proving it against the engine's own answer. But when the engine
 // picks up a Unicode release first, there is no local fix: the two disagree on every code point the release
 // added (4699 of them for Unicode 17), and until regex-syntax ships a matching snapshot native LAYS OUT
@@ -28,6 +28,12 @@ use std::sync::LazyLock;
 static MARKS: LazyLock<Vec<(u32, u32)>> = LazyLock::new(|| ranges(r"\p{M}"));
 static LETTERS: LazyLock<Vec<(u32, u32)>> = LazyLock::new(|| ranges(r"\p{L}"));
 static NUMBERS: LazyLock<Vec<(u32, u32)>> = LazyLock::new(|| ranges(r"\p{N}"));
+// …and what the oracle's `dir=auto` calls a strong RIGHT-TO-LEFT character (dom-nodes.js `DIR_STRONG_RTL`, the same
+// pattern): the right-to-left scripts and the five right-to-left marks and embeddings, a strong LEFT-TO-RIGHT one being
+// any other letter (`\p{L}`). Both engines approximate Bidi_Class by script — R / AL are what HTML's "strong
+// directional character" means — and share the approximation.
+pub(crate) const DIR_RTL_PATTERN: &str = r"[\p{Script=Hebrew}\p{Script=Arabic}\p{Script=Syriac}\p{Script=Thaana}\p{Script=Nko}\p{Script=Samaritan}\p{Script=Mandaic}\x{200F}\x{061C}\x{202B}\x{202E}\x{2067}]";
+static DIR_RTL: LazyLock<Vec<(u32, u32)>> = LazyLock::new(|| ranges(DIR_RTL_PATTERN));
 
 // A class's code-point ranges: ascending and disjoint, which is what `in_ranges`' binary search needs, and
 // non-adjacent besides — regex-syntax canonicalises a `ClassUnicode` on construction (`Interval::canonicalize`
@@ -35,7 +41,7 @@ static NUMBERS: LazyLock<Vec<(u32, u32)>> = LazyLock::new(|| ranges(r"\p{N}"));
 fn ranges(pattern: &'static str) -> Vec<(u32, u32)> {
     // The pattern is a literal above, so a failure here means the crate was built without
     // `regex-syntax/unicode-gencat` — a build misconfiguration, not an input a caller can recover from. `init`
-    // forces all three so that it lands at `require`, where magnus catches the unwind and Ruby reports the
+    // forces every table so that it lands at `require`, where magnus catches the unwind and Ruby reports the
     // message with a backtrace (measured: a `fatal` naming the missing feature). Left to the LAYOUT path it
     // would instead unwind through a V8 `extern "C"` callback, which aborts the process with no Ruby frame.
     let hir = regex_syntax::parse(pattern)
@@ -46,11 +52,12 @@ fn ranges(pattern: &'static str) -> Vec<(u32, u32)> {
     }
 }
 
-// Build all three now, while a panic is still a load-time failure the caller can read. ~4.4µs.
+// Build them all now, while a panic is still a load-time failure the caller can read. ~4.4µs.
 pub(crate) fn init() {
     LazyLock::force(&MARKS);
     LazyLock::force(&LETTERS);
     LazyLock::force(&NUMBERS);
+    LazyLock::force(&DIR_RTL);
 }
 
 pub(crate) fn is_combining_mark(cp: u32) -> bool {
@@ -61,6 +68,18 @@ pub(crate) fn is_letter(cp: u32) -> bool {
 }
 pub(crate) fn is_number(cp: u32) -> bool {
     in_ranges(&NUMBERS, cp)
+}
+
+// A character's strong direction for `dir=auto` (dom-nodes.js `firstStrongDir`): Some(true) right-to-left, Some(false)
+// left-to-right, None not a strong one.
+pub(crate) fn strong_direction(cp: u32) -> Option<bool> {
+    if in_ranges(&DIR_RTL, cp) {
+        Some(true)
+    } else if in_ranges(&LETTERS, cp) {
+        Some(false)
+    } else {
+        None
+    }
 }
 
 fn in_ranges(table: &[(u32, u32)], cp: u32) -> bool {
@@ -86,10 +105,11 @@ pub(crate) fn class_ranges(ruby: &magnus::Ruby, klass: String) -> Result<Vec<(u3
         "M" => &MARKS,
         "L" => &LETTERS,
         "N" => &NUMBERS,
+        "DirRTL" => &DIR_RTL,
         other => {
             return Err(magnus::Error::new(
                 ruby.exception_arg_error(),
-                format!("unknown general category {other:?} (M, L or N)"),
+                format!("unknown class {other:?} (M, L, N or DirRTL)"),
             ));
         }
     };

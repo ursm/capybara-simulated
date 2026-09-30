@@ -387,6 +387,10 @@ pub(crate) struct RealmArena {
     pub(crate) style_lock: crate::style::StyleLock,
     // Per tree root, the facts element_state.rs asks of every control in turn, as of `mutations` (`form_facts`).
     pub(crate) form_facts: std::cell::RefCell<crate::element_state::FormFactsMemo>,
+    // The faces its families resolve to, which its walks and its style engine's font metrics read (`SharedFaces`).
+    pub(crate) faces: crate::walk::SharedFaces,
+    // Each `dir=auto` element's (and bare `<bdi>`'s) resolved direction, true for rtl, as of `mutations` (`is_rtl`).
+    pub(crate) dir_auto: std::cell::RefCell<(u64, std::collections::HashMap<NodeId, bool>)>,
 }
 
 impl RealmArena {
@@ -482,6 +486,9 @@ impl RealmArena {
         self.custom_states.clear();
         self.target = None;
         self.form_facts.get_mut().clear();
+        self.dir_auto.get_mut().1.clear();
+        // (…in place: the style engine holds the same table, and outlives the page)
+        self.faces.with(|faces| *faces = Default::default());
         self.mutations += 1;
         for idx in 0..self.slots.len() {
             let slot = &mut self.slots[idx];
@@ -2340,6 +2347,7 @@ pub(crate) fn decode_input(r: &[f64]) -> crate::layout::Input {
         indent_each_line: (r[65] as u32) & 512 != 0,
         indent_spent: (r[65] as u32) & 1024 != 0,
         width_kw: ((r[65] as u32) >> 11 & 3) as u8,
+        height_kw: (r[65] as u32) & 67108864 != 0,
         takes_clearance: (r[65] as u32) & 8192 != 0,
         bottom_adjoins: (r[65] as u32) & 16384 != 0,
         // rec[65] bit 19: a table CELL holding a percentage-height descendant — the one thing that makes

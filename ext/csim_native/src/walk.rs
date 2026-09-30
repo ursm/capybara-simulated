@@ -36,7 +36,7 @@ use crate::layout::{InlineBox, Input, Run, RunText, DISPLAY_BLOCK, DISPLAY_TEXT_
 // A face the walk measures a run in, as the JS side resolved it for the family and the weight / style bucket: the
 // layout's font handle and the metrics the model rules read off it (per em — ascent, descent, line gap, and the
 // advance of a space, or the face's average where it has none).
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug)]
 pub(crate) struct Face {
     pub(crate) handle: i32,
     pub(crate) asc: f64,
@@ -51,19 +51,64 @@ pub(crate) struct Face {
 // `bold:italic`).
 pub(crate) type FaceKey = (String, &'static str);
 
-// The faces a walk has been told of, and the ones it asked for and was not — which it names by declining with
-// `Outcome::NeedsFaces`, for the caller to resolve and walk again. None is a face the family does not resolve to.
-#[derive(Default)]
+// The faces a realm has been told of — ONE table, which the walk and the style engine's font metrics (`ex`, `ch`) both
+// read — and the ones asked for and not told: the walk's, which it names by declining with `Outcome::NeedsFaces` for the
+// caller to resolve and walk again, and the style engine's, which a walk names as well and whose styles are computed
+// again once they are told (`learn`). None is a face the family does not resolve to.
+#[derive(Default, Debug)]
 pub(crate) struct Faces {
     known: HashMap<FaceKey, Option<Face>>,
     pub(crate) missing: Vec<FaceKey>,
+    metrics_missing: Vec<FaceKey>,
     // The generation the faces were resolved at (`natFontGen`: the rules and the FontFaceSet a family resolves by).
     generation: String,
 }
 
+// A realm's faces, held by its arena and shared with its style engine's font metrics, which ask from inside a style
+// traversal with no scope to find the arena by. The REALM's and nothing wider: a table keyed by realm id alone was one
+// every isolate shared, so a second session's realm 1 found the first one's faces known and never fetched its web fonts.
+#[derive(Default, Clone, Debug)]
+pub(crate) struct SharedFaces(std::sync::Arc<std::sync::Mutex<Faces>>);
+impl SharedFaces {
+    pub(crate) fn with<R>(&self, f: impl FnOnce(&mut Faces) -> R) -> R {
+        f(&mut self.0.lock().unwrap_or_else(|e| e.into_inner()))
+    }
+}
+
+// A style's face key (`fontKeyOf`): its family list as it serializes, and the bucket its weight and style fall in.
+pub(crate) fn face_key(f: &style::properties::style_structs::Font) -> FaceKey {
+    use style_traits::ToCss;
+    let bold = f.font_weight.value() >= 600.0;
+    let italic = f.font_style != style::values::computed::font::FontStyle::NORMAL;
+    let bucket = match (bold, italic) {
+        (false, false) => "",
+        (true, false) => "bold",
+        (false, true) => "italic",
+        (true, true) => "bold:italic",
+    };
+    (f.font_family.to_css_string(), bucket)
+}
+
 impl Faces {
-    pub(crate) fn learn(&mut self, key: FaceKey, face: Option<Face>) {
+    // A face the JS side resolved — and whether the style engine had asked for it and computed with a stand-in, for
+    // its styles to be computed again.
+    pub(crate) fn learn(&mut self, key: FaceKey, face: Option<Face>) -> bool {
+        let asked = self.metrics_missing.iter().position(|k| *k == key).map(|at| self.metrics_missing.remove(at)).is_some();
         self.known.insert(key, face);
+        asked
+    }
+    // The face the style engine's font metrics are read from: its own where it is known, else None — noted, where it has
+    // not been asked for yet, for the next walk to name.
+    pub(crate) fn for_metrics(&mut self, key: FaceKey) -> Option<Face> {
+        match self.known.get(&key) {
+            Some(face) => *face,
+            None => {
+                if !self.metrics_missing.contains(&key) {
+                    self.metrics_missing.push(key);
+                }
+                None
+            }
+        }
     }
     // Forget every face once what they resolve by has moved.
     pub(crate) fn at_generation(&mut self, generation: &str) {
@@ -100,14 +145,17 @@ pub(crate) enum Outcome {
     Built(Built),
     Declined(&'static str),
     NeedsFaces,
+    // …and the generated boxes that render with no node linked for them yet — each as its element's nid and 0 for
+    // `::before`, 1 for `::after` — for the JS side to make (`pseudoNodeFor`) and walk again.
+    NeedsBoxes(Vec<f64>),
 }
 
 // Walk the subtree at `root` — the element the JS walk took as its pass root.
 pub(crate) fn build(arena: &RealmArena, root: NodeId, basis: Basis, faces: &mut Faces) -> Outcome {
     faces.missing.clear();
     let generated = Generated::of(arena, root);
-    if generated.unlinked {
-        return Outcome::Declined("generated content unlinked");
+    if !generated.unlinked.is_empty() {
+        return Outcome::NeedsBoxes(generated.unlinked);
     }
     let mut walk = Walk {
         arena,
@@ -132,6 +180,12 @@ pub(crate) fn build(arena: &RealmArena, root: NodeId, basis: Basis, faces: &mut 
         anon: Vec::new(),
     };
     let done = walk.root(root).and_then(|()| walk.resolve_inline_cbs());
+    // (…and the faces the style engine computed a font metric with a stand-in for, which it computes again once told)
+    for key in walk.faces.metrics_missing.clone() {
+        if !walk.faces.missing.contains(&key) {
+            walk.faces.missing.push(key);
+        }
+    }
     if !walk.faces.missing.is_empty() {
         return Outcome::NeedsFaces;
     }
@@ -177,8 +231,9 @@ struct Generated {
     // …and each box's element, which of the two it is, and its text (none for an empty one).
     boxes: HashMap<NodeId, (NodeId, usize, Option<NodeId>)>,
     texts: Vec<crate::dom::NodeData>,
-    // Whether a box renders that the JS side has not linked to its element: none to name its record by.
-    unlinked: bool,
+    // The boxes that render which the JS side has not linked to their element — none to name the record by — as
+    // `[element nid, 0 before / 1 after, …]`.
+    unlinked: Vec<f64>,
 }
 const GENERATED_TEXT: u32 = u32::MAX;
 const PSEUDOS: [style::selector_parser::PseudoElement; 2] =
@@ -206,7 +261,7 @@ impl Generated {
                     continue;
                 };
                 let Some(at) = node.pseudo_boxes[which].filter(|&b| arena.get(b).is_some()) else {
-                    g.unlinked = true;
+                    g.unlinked.extend([id.to_f64(), which as f64]);
                     continue;
                 };
                 let text = (!text.is_empty()).then(|| {
@@ -1262,6 +1317,14 @@ impl<'a> Walk<'a> {
         }
     }
     // Is `c` an element that generates no box of its own, but whose children stand in for it (`display: contents`)?
+    // The `white-space` a text node collapses by: the box-less element's it is spliced out of where it is (the one
+    // property `inlineStyleOwner` hands it that decides whether its white space is content), else `ws_mode`, its box's.
+    fn text_ws_mode(&self, c: NodeId, ws_mode: u8) -> Result<u8, &'static str> {
+        match self.parent_of(c).filter(|&p| self.boxless(p)) {
+            Some(p) => ws_mode_of(&*self.style(p)?),
+            None => Ok(ws_mode),
+        }
+    }
     fn boxless(&self, c: NodeId) -> bool {
         self.node(c).kind == NodeKind::Element && self.style(c).is_ok_and(|s| s.get_box().clone_display().is_contents())
     }
@@ -1393,6 +1456,7 @@ impl<'a> Walk<'a> {
             Size::FitContent => 3,
             _ => return Err("width keyword"),
         };
+        rec.height_kw = matches!(pos.height, Size::MinContent | Size::MaxContent | Size::FitContent);
         if rec.width_kw != 0 && parent < 0 {
             return Err("root keyword width");
         }
@@ -1518,7 +1582,7 @@ impl<'a> Walk<'a> {
             let cn = self.node(c);
             match cn.kind {
                 NodeKind::Text => {
-                    let child_mode = ws_mode;
+                    let child_mode = self.text_ws_mode(c, ws_mode)?;
                     if has_content(&cn.data) || white_space_only_is_content(&cn.data, child_mode) {
                         inline = true;
                     } else if !cn.data.is_empty() && preserving(child_mode) && indent_may_bite(style)? {
@@ -1613,10 +1677,14 @@ impl<'a> Walk<'a> {
             }
             // (…the white space between block children, the commonest run there is, is none without an attempt)
             let kids = std::mem::take(&mut group);
-            let only_space = kids.iter().all(|&k| {
+            let mut only_space = true;
+            for &k in &kids {
                 let n = self.node(k);
-                n.kind == NodeKind::Text && !has_content(&n.data) && !white_space_only_is_content(&n.data, ws_mode)
-            });
+                if n.kind != NodeKind::Text || has_content(&n.data) || white_space_only_is_content(&n.data, self.text_ws_mode(k, ws_mode)?) {
+                    only_space = false;
+                    break;
+                }
+            }
             if !kids.is_empty() && !only_space {
                 let mark = self.mark();
                 let anon = self.inputs.len() as i32;
@@ -2011,7 +2079,10 @@ impl<'a> Walk<'a> {
                     let own = align_kw(cs.get_position().align_self.0);
                     let align = if own == Kw::Auto { align_kw(pos.align_items.0) } else { own };
                     let auto = size_lp(&cs.get_position().height)?.is_none() && self.intrinsic(*c)?.is_none();
-                    (auto, matches!(align, Kw::Normal | Kw::Stretch | Kw::Auto | Kw::Left | Kw::Right))
+                    // (…an `auto` margin in the block axis takes the room instead)
+                    let m = cs.get_margin();
+                    let auto_margin = m.margin_top.is_auto() || m.margin_bottom.is_auto();
+                    (auto, !auto_margin && matches!(align, Kw::Normal | Kw::Stretch | Kw::Auto | Kw::Left | Kw::Right))
                 }
                 FlexItem::Anonymous(..) => (true, matches!(align_kw(pos.align_items.0), Kw::Normal | Kw::Stretch | Kw::Auto | Kw::Left | Kw::Right)),
             };
@@ -2789,10 +2860,14 @@ impl<'a> Walk<'a> {
         rec.legacy_align = self.legacy_align(container);
         self.inputs.push(rec);
         let ws_mode = ws_mode_of(style)?;
-        let inline = run.iter().any(|&k| {
+        let mut inline = false;
+        for &k in run {
             let n = self.node(k);
-            n.kind == NodeKind::Element || has_content(&n.data) || white_space_only_is_content(&n.data, ws_mode)
-        });
+            if n.kind == NodeKind::Element || has_content(&n.data) || white_space_only_is_content(&n.data, self.text_ws_mode(k, ws_mode)?) {
+                inline = true;
+                break;
+            }
+        }
         if !inline {
             let r = &mut self.inputs[at as usize];
             r.display = DISPLAY_BLOCK;
@@ -3386,18 +3461,7 @@ impl<'a> Walk<'a> {
 
     // The face `style`'s font resolves to, as the JS side bucketed and resolved it.
     fn face(&mut self, style: &ComputedValues) -> Result<Face, &'static str> {
-        use style_traits::ToCss;
-        let f = style.get_font();
-        let family = f.font_family.to_css_string();
-        let bold = f.font_weight.value() >= 600.0;
-        let italic = f.font_style != style::values::computed::font::FontStyle::NORMAL;
-        let bucket = match (bold, italic) {
-            (false, false) => "",
-            (true, false) => "bold",
-            (false, true) => "italic",
-            (true, true) => "bold:italic",
-        };
-        let key = (family, bucket);
+        let key = face_key(style.get_font());
         match self.faces.known.get(&key) {
             Some(Some(face)) => Ok(*face),
             Some(None) => Err("run-font-not-system"),
@@ -4333,7 +4397,7 @@ pub(crate) fn input_diff(js: &Input, js_maths: &[f64], rust: &Input, rust_maths:
         replaced, lays_out_children, ratio, ratio_only, shrinks_to_nothing, control_baseline, control_font_box,
         control_font_asc, intrinsic_w, intrinsic_h, cb_index, cb_rect, inset_top, inset_right, inset_bottom,
         inset_left, auto_margins, legacy_align, indent_px, indent_frac, indent_hanging, indent_each_line,
-        indent_spent, width_kw,
+        indent_spent, width_kw, height_kw,
     );
     out
 }

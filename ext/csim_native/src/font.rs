@@ -27,6 +27,10 @@ pub(crate) struct FontMetrics {
 }
 
 impl FontMetrics {
+    // The advance of its `0`, in ems — what a `ch` is — else its mean advance, as the JS model's `chFactor` falls back.
+    pub(crate) fn zero_advance(&self) -> f64 {
+        self.ascii[b'0' as usize].filter(|&a| a > 0.0).unwrap_or(self.avg)
+    }
     // Build from font file bytes (SFNT: TTF/OTF; WOFF/WOFF2 decoded host-side). None when the file can't
     // be parsed, has no units-per-em, or maps no printable ASCII with a positive advance.
     fn from_bytes(bytes: &[u8]) -> Option<FontMetrics> {

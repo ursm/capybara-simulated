@@ -94,6 +94,20 @@ impl FormFactsMemo {
     }
 }
 
+// A `dir` attribute's state: an enumerated attribute, its keyword matched ASCII-case-insensitively with no trimming, so
+// `dir=" rtl "` is none and sets no direction.
+enum Dir {
+    Ltr,
+    Rtl,
+    Auto,
+}
+fn dir_keyword(raw: &str) -> Option<Dir> {
+    [("ltr", Dir::Ltr), ("rtl", Dir::Rtl), ("auto", Dir::Auto)].into_iter().find(|(k, _)| raw.eq_ignore_ascii_case(k)).map(|(_, d)| d)
+}
+// The `<input>` types whose value is no directional text: `dir=auto` on one is ltr (dom-nodes.js `DIR_NO_VALUE_INPUT_TYPES`).
+const DIR_NO_VALUE_INPUT_TYPES: [&str; 12] =
+    ["date", "month", "week", "time", "datetime-local", "number", "range", "color", "checkbox", "radio", "image", "file"];
+
 impl NodeData {
     // A submit button (form-helpers.js `isSubmitButton`): an `<input type=submit|image>`, or a `<button>` in the Submit
     // state — any `type` but `reset` and `button`, and a missing one unless a `command` / `commandfor` makes it a
@@ -506,6 +520,107 @@ impl RealmArena {
             cur = self.shadow_including_parent(c);
         }
         None
+    }
+    // HTML's DIRECTIONALITY (§3.2.6.4, dom-nodes.js `_directionality`) — what `:dir()` matches, true for rtl: the
+    // nearest shadow-including inclusive ancestor's valid `dir` (a keyword matched ASCII-case-insensitively and NOT
+    // trimmed), `auto` or a `<bdi>` with none resolving by its content, a telephone `<input>` with none ltr (a number is
+    // written left to right in any script), the root's ltr where nothing says.
+    pub(crate) fn is_rtl(&self, id: NodeId) -> bool {
+        let mut cur = Some(id);
+        while let Some(c) = cur {
+            if let Some(n) = self.get(c).filter(|n| n.kind == NodeKind::Element) {
+                match n.plain_attr("dir").and_then(dir_keyword) {
+                    Some(Dir::Ltr) => return false,
+                    Some(Dir::Rtl) => return true,
+                    Some(Dir::Auto) => return self.auto_is_rtl(c),
+                    None if n.is_html_named("input") && n.input_type() == "tel" => return false,
+                    None if n.is_html_named("bdi") => return self.auto_is_rtl(c),
+                    None => {}
+                }
+            }
+            cur = self.shadow_including_parent(c);
+        }
+        false
+    }
+    // `dir=auto`'s answer for `id`, as of `mutations`: a scan of its content, which every descendant inheriting it asks.
+    fn auto_is_rtl(&self, id: NodeId) -> bool {
+        {
+            let memo = self.dir_auto.borrow();
+            if memo.0 == self.mutations {
+                if let Some(&rtl) = memo.1.get(&id) {
+                    return rtl;
+                }
+            }
+        }
+        let rtl = self.resolve_auto(id);
+        let mut memo = self.dir_auto.borrow_mut();
+        if memo.0 != self.mutations {
+            *memo = (self.mutations, Default::default());
+        }
+        memo.1.insert(id, rtl);
+        rtl
+    }
+    // A text control's from its VALUE (`controlAutoDir` — an `<input>` of a type whose value is no text, ltr), anything
+    // else's from the first strong character of its text (`autoDirectionality`): in tree order, skipping what sets its
+    // own direction (a valid `dir`, a `<bdi>`, an HTML `<script>` / `<style>` / `<textarea>`), a `<slot>` ending the scan
+    // with its shadow HOST's directionality — and a `<slot>` itself scanning its ASSIGNED nodes, and those alone.
+    fn resolve_auto(&self, id: NodeId) -> bool {
+        let Some(n) = self.get(id) else { return false };
+        let strong = |units: &[u16]| {
+            char::decode_utf16(units.iter().copied())
+                .find_map(|c| c.ok().and_then(|c| crate::unicode::strong_direction(c as u32)))
+        };
+        if n.is_html_named("textarea") {
+            return match &n.value {
+                Some(v) => strong(v),
+                None => n.children.iter().filter_map(|&c| self.get(c)).filter(|t| t.kind == NodeKind::Text).find_map(|t| strong(&t.data)),
+            }
+            .unwrap_or(false);
+        }
+        if n.is_html_named("input") {
+            if DIR_NO_VALUE_INPUT_TYPES.contains(&n.input_type()) {
+                return false;
+            }
+            return match &n.value {
+                Some(v) => strong(v),
+                None => n.plain_attr_units("value").and_then(|v| strong(&v)),
+            }
+            .unwrap_or(false);
+        }
+        let first: &[NodeId] = if n.is_html_named("slot") { &n.assigned } else { &n.children };
+        let mut stack: Vec<NodeId> = first.iter().rev().copied().collect();
+        while let Some(c) = stack.pop() {
+            let Some(k) = self.get(c) else { continue };
+            match k.kind {
+                NodeKind::Text => {
+                    if let Some(rtl) = strong(&k.data) {
+                        return rtl;
+                    }
+                }
+                NodeKind::Element => {
+                    let own = k.is_html_named("bdi")
+                        || (k.is_html() && ["script", "style", "textarea"].iter().any(|t| k.is_html_named(t)))
+                        || k.plain_attr("dir").and_then(dir_keyword).is_some();
+                    if own {
+                        continue;
+                    }
+                    if k.is_html_named("slot") {
+                        return self.slot_host(c).is_some_and(|host| self.is_rtl(host));
+                    }
+                    stack.extend(k.children.iter().rev().copied());
+                }
+                _ => {}
+            }
+        }
+        false
+    }
+    // The shadow host of the tree `id` is in, if it is in one.
+    fn slot_host(&self, id: NodeId) -> Option<NodeId> {
+        let mut cur = id;
+        while let Some(p) = self.get(cur)?.parent {
+            cur = p;
+        }
+        self.get(cur)?.host
     }
     // `:open`: a `<details>` or `<dialog>` with the `open` attribute.
     pub(crate) fn is_open(&self, id: NodeId) -> bool {

@@ -167,6 +167,8 @@ impl StyleSlot {
 // the page's, the document's base URL and mode (what a `style` attribute is parsed with), and the imports its sheets
 // are still waiting for.
 pub(crate) struct StyleEngine {
+    // (…the faces of the realm it styles, which its font metrics read)
+    faces: crate::walk::SharedFaces,
     lock: SharedRwLock,
     stylist: Stylist,
     url: UrlExtraData,
@@ -339,14 +341,14 @@ fn enable_properties() {
     });
 }
 
-fn device(quirks: QuirksMode, (width, height): (f32, f32)) -> Device {
+fn device(faces: crate::walk::SharedFaces, quirks: QuirksMode, (width, height): (f32, f32)) -> Device {
     Device::new(
         MediaType::screen(),
         quirks,
         euclid::Size2D::new(width, height),
         euclid::Size2D::new(width, height),
         euclid::Scale::new(1.0),
-        Box::new(crate::style_fonts::Metrics),
+        Box::new(crate::style_fonts::Metrics { faces }),
         ComputedValues::initial_values_with_font_override(style::properties::style_structs::Font::initial_values()),
         PrefersColorScheme::Light,
         Default::default(),
@@ -358,8 +360,9 @@ impl StyleEngine {
     fn new(arena: &RealmArena, quirks: QuirksMode, viewport: (f32, f32), url: UrlExtraData) -> StyleEngine {
         enable_properties();
         let mut engine = StyleEngine {
+            faces: arena.faces.clone(),
             lock: arena.style_lock.0.clone(),
-            stylist: Stylist::new(device(quirks, viewport), quirks),
+            stylist: Stylist::new(device(arena.faces.clone(), quirks, viewport), quirks),
             url,
             quirks,
             viewport,
@@ -408,7 +411,7 @@ impl StyleEngine {
             // …and the origins whose media queries now answer differently are rebuilt (the stylist says which).
             let guard = engine.lock.read();
             let changed =
-                engine.stylist.set_device(device(quirks, viewport), &StylesheetGuards { author: &guard, ua_or_user: &guard });
+                engine.stylist.set_device(device(engine.faces.clone(), quirks, viewport), &StylesheetGuards { author: &guard, ua_or_user: &guard });
             drop(guard);
             engine.stylist.force_stylesheet_origins_dirty(changed);
             for shadow in engine.shadow_styles.values_mut() {
@@ -420,6 +423,13 @@ impl StyleEngine {
             engine.rules_changed = true;
         }
         engine
+    }
+
+    // Every element's style computed again at the next flush: a font metric (`ex`, `ch`) it was computed with a stand-in
+    // for is known now.
+    pub(crate) fn restyle_everything(&mut self) {
+        self.styled = None;
+        self.restyle_all = true;
     }
 
     // The user-agent sheet's quirks-mode half goes in or out with the mode.
@@ -688,8 +698,12 @@ impl StyleEngine {
                 shadow.styles.flush(&mut self.stylist, &guard);
                 shadow.dirty = false;
             }
-            self.has_relative = self.stylist.iter_origins().any(|(data, _)| data.relative_selector_invalidation_map().len() != 0)
-                || self.shadow_styles.values().any(|s| s.styles.data.relative_selector_invalidation_map().len() != 0);
+            // (…a `:has()` whose argument is a type or `*` alone is noted in the ADDITIONAL map only, and `used` says so)
+            let relative = |data: &style::stylist::CascadeData| {
+                data.relative_selector_invalidation_map().len() != 0 || data.relative_invalidation_map_attributes().used
+            };
+            self.has_relative = self.stylist.iter_origins().any(|(data, _)| relative(data))
+                || self.shadow_styles.values().any(|s| relative(&s.styles.data));
         }
         self.snapshot_moved_states(arena);
         let restyle_all = std::mem::take(&mut self.restyle_all);
@@ -919,8 +933,10 @@ impl StyleEngine {
                 if restyle_children {
                     hint |= RestyleHint::RESTYLE_DESCENDANTS;
                 }
+                // …an emptiness a DESCENDANT's selector read too (`:empty p`, and a shadow tree's `:host(:empty) p`): its
+                // whole subtree, as Firefox's `RestyleForEmptyChange` posts it.
                 if restyle_self {
-                    hint |= RestyleHint::RESTYLE_SELF;
+                    hint |= RestyleHint::restyle_subtree();
                 }
                 hint_element(el, hint);
                 mark_ancestors_dirty(el);
@@ -1734,6 +1750,9 @@ fn element_state(arena: &RealmArena, id: NodeId, link: bool) -> ElementState {
     set(ElementState::POPOVER_OPEN, arena.is_popover_open(id));
     set(ElementState::SERVO_LIST_BOX, arena.is_list_box(id));
     set(ElementState::SERVO_NONZERO_BORDER, arena.has_nonzero_border(id));
+    let rtl = arena.is_rtl(id);
+    set(ElementState::RTL, rtl);
+    set(ElementState::LTR, !rtl);
     match arena.is_valid_pseudo(id) {
         Some(true) => set(ElementState::VALID, true),
         Some(false) => set(ElementState::INVALID, true),
@@ -2449,6 +2468,8 @@ impl<'a> selectors::Element for StyleNode<'a> {
             NonTSPseudoClass::Checked => arena.is_checked(id) || arena.is_selected(id),
             NonTSPseudoClass::Default => arena.is_default(id),
             NonTSPseudoClass::Defined => arena.is_defined(id),
+            // (…a direction other than `ltr` / `rtl` is valid and matches nothing: its state is empty)
+            NonTSPseudoClass::Dir(dir) => !dir.element_state().is_empty() && self.state().intersects(dir.element_state()),
             NonTSPseudoClass::Disabled => arena.is_actually_disabled(id),
             NonTSPseudoClass::Enabled => arena.is_enabled(id),
             NonTSPseudoClass::Focus => arena.is_focused(id),

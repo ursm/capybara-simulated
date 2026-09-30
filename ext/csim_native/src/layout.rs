@@ -508,10 +508,16 @@ pub(crate) struct Input {
     // every line of the third group too.
     pub(crate) indent_spent: bool,
     // An INTRINSIC-SIZE KEYWORD on `width` (0 none, 1 min-content, 2 max-content, 3 fit-content): the box is as
-    // wide as its own content asks rather than as wide as the room it is given. Only an in-flow BLOCK-LEVEL box
-    // carries one here — every other sizing path (a flex or grid item, an out-of-flow box, a replaced element)
-    // has a basis of its own and the walk declines it there.
+    // wide as its own content asks rather than as wide as the room it is given — a block child, a flex or grid
+    // item and an out-of-flow box alike. The pass ROOT and a REPLACED element have a basis of their own (the width
+    // handed in, the intrinsic size) and the walk declines the keyword there.
     pub(crate) width_kw: u8,
+    // …and one on `height` (rec[65] bit 26), which is the content height wherever a height is `auto` — so the one
+    // place it differs is where an auto height would NOT be its content: an out-of-flow box between both vertical
+    // insets, which an auto height stretches over and a keyword does not (CSS Sizing 3 §3.1 — the dialog UA's
+    // `height: fit-content; inset-block: 0; margin: auto` is how a modal centres itself). A flex or grid item's
+    // cross-axis stretch asks a DECLARED height, which a keyword already is not `auto` for.
+    pub(crate) height_kw: bool,
     // …and where that containing block is NOT a record of this pass — the viewport for a `fixed` box, an
     // ancestor above the pass root — its PADDING BOX arrives instead, in the pass's own (document) coordinates:
     // `cb_index` is CB_RECT and these four are x / y / width / height. `place_out_of_flow` reads one or the other
@@ -544,7 +550,7 @@ impl<T: BitEq, const N: usize> BitEq for [T; N] {
 }
 impl Input {
     fn same(&self, o: &Input) -> bool {
-        let Input { nid, parent, display, border_box, width, height, min_w, max_w, min_h, max_h, mt, mr, mb, ml, pt, pr, pb, pl, bt, br, bb, bl, height_adjoins, minh_adjoins, bottom_adjoins, run_start, run_count, strut_lh, strut_asc, float_kind, clear, takes_clearance, starts_bfc, flex_justify, flex_main_gap, flex_cross_align, flex_main_is_x, flex_wrap, flex_cross_flip, flex_align_content, flex_cross_gap, flex_main_reverse, flex_cross_far, has_replayed_oof, rel_x, rel_y, rel_pct, rel_x_px, rel_x_neg, measured_as_block, equal_share, chain_rel, chain_px, chain_shift, chain_math, rel_math, flex_item_auto, flex_baseline_asc, flex_line_nat, flex_line, out_of_flow, sp_x, sp_y, cell_col, cell_colspan, cell_rowspan, caption_side, rtl, text_align, anon_cross, ws_mode, item_auto_height, pushed_h_indefinite, grid_start, decl_w, decl_min_w, decl_max_w, flex_basis, flex_grow, decl_border_box, flex_shrink, flex_basis_cb, flex_basis_frac, flex_basis_math, pct_sizes, pct_px, pct_math, edge_frac, edge_px, edge_math, basis_w, inset_frac, inset_math, flex_main_gap_frac, flex_main_gap_math, flex_cross_gap_math, indent_math, flex_cross_gap_frac, flex_basis_kw, scrolls_x, scrolls_y, is_button, self_sizes, block_axis_is_x, decl_edges_x, decl_margin_x, height_from_outside, cell_pct, cell_min_content, cell_max_content, height_is_floor, cell_valign, cell_pct_h_child, anon_group, group_pct_h, pct_h_decl, row_imposed, row_height, row_pct, row_rank, table_fixed, flex_stretch, flex_native, flex_dir_reverse, replaced, lays_out_children, ratio, ratio_only, shrinks_to_nothing, control_baseline, control_font_box, control_font_asc, intrinsic_w, intrinsic_h, cb_index, inset_top, inset_right, inset_bottom, inset_left, auto_margins, legacy_align, indent_px, indent_frac, indent_hanging, indent_each_line, indent_spent, width_kw, cb_rect } = self;
+        let Input { nid, parent, display, border_box, width, height, min_w, max_w, min_h, max_h, mt, mr, mb, ml, pt, pr, pb, pl, bt, br, bb, bl, height_adjoins, minh_adjoins, bottom_adjoins, run_start, run_count, strut_lh, strut_asc, float_kind, clear, takes_clearance, starts_bfc, flex_justify, flex_main_gap, flex_cross_align, flex_main_is_x, flex_wrap, flex_cross_flip, flex_align_content, flex_cross_gap, flex_main_reverse, flex_cross_far, has_replayed_oof, rel_x, rel_y, rel_pct, rel_x_px, rel_x_neg, measured_as_block, equal_share, chain_rel, chain_px, chain_shift, chain_math, rel_math, flex_item_auto, flex_baseline_asc, flex_line_nat, flex_line, out_of_flow, sp_x, sp_y, cell_col, cell_colspan, cell_rowspan, caption_side, rtl, text_align, anon_cross, ws_mode, item_auto_height, pushed_h_indefinite, grid_start, decl_w, decl_min_w, decl_max_w, flex_basis, flex_grow, decl_border_box, flex_shrink, flex_basis_cb, flex_basis_frac, flex_basis_math, pct_sizes, pct_px, pct_math, edge_frac, edge_px, edge_math, basis_w, inset_frac, inset_math, flex_main_gap_frac, flex_main_gap_math, flex_cross_gap_math, indent_math, flex_cross_gap_frac, flex_basis_kw, scrolls_x, scrolls_y, is_button, self_sizes, block_axis_is_x, decl_edges_x, decl_margin_x, height_from_outside, cell_pct, cell_min_content, cell_max_content, height_is_floor, cell_valign, cell_pct_h_child, anon_group, group_pct_h, pct_h_decl, row_imposed, row_height, row_pct, row_rank, table_fixed, flex_stretch, flex_native, flex_dir_reverse, replaced, lays_out_children, ratio, ratio_only, shrinks_to_nothing, control_baseline, control_font_box, control_font_asc, intrinsic_w, intrinsic_h, cb_index, inset_top, inset_right, inset_bottom, inset_left, auto_margins, legacy_align, indent_px, indent_frac, indent_hanging, indent_each_line, indent_spent, width_kw, height_kw, cb_rect } = self;
         nid.bit_eq(&o.nid)
             && parent.bit_eq(&o.parent)
             && display.bit_eq(&o.display)
@@ -692,6 +698,7 @@ impl Input {
             && indent_each_line.bit_eq(&o.indent_each_line)
             && indent_spent.bit_eq(&o.indent_spent)
             && width_kw.bit_eq(&o.width_kw)
+            && height_kw.bit_eq(&o.height_kw)
             && cb_rect.bit_eq(&o.cb_rect)
     }
 }
@@ -4940,19 +4947,6 @@ fn resolve_flexible_lengths(bases: &[f64], inner: &[f64], grow: &[f64], shrink: 
     sizes
 }
 
-// Whether a box's content is ALL out of flow — an element with children, every one absolutely positioned,
-// and no text (the oracle's `outOfFlowOnly`): its zero content width is real, not a measurement that failed.
-// (…a FLEX container's bare text included, which rides its record as runs rather than as a child record: an
-// `ab<abs>cd` flex item came out 0 wide, its one child record out of flow, where the oracle — whose child list
-// holds the text — hands it the equal share.)
-fn out_of_flow_only(i: usize, inputs: &[Cell<Input>], children: &[Vec<usize>]) -> bool {
-    let n = inputs[i].get();
-    if n.display == DISPLAY_TEXT_BLOCK || n.run_count > 0 || children[i].is_empty() {
-        return false;
-    }
-    children[i].iter().all(|&c| { let k = inputs[c].get(); k.out_of_flow != 0 && !k.is_anonymous() })
-}
-
 // A flex ROW's item widths, resolved natively — the oracle's `flexRowMetrics` + `resolveFlexRowWidths` per
 // line. `flow` indexes the in-flow items (positions into `kids`); `lines` groups them. Each item's flex BASE is,
 // in the spec's order, its `flex-basis` (a length, or an intrinsic keyword answered from its content), else its
@@ -4960,9 +4954,8 @@ fn out_of_flow_only(i: usize, inputs: &[Cell<Input>], children: &[Vec<usize>]) -
 // whether that base came FROM the content, in which case it is its own minimum and no floor can bind. The
 // automatic minimum (`min-width: auto`) is the item's min-content — zero when it scrolls in the main axis —
 // applied only where it can bind; a declared min/max-width clamps on top (max first, §4.5). What an item's
-// lines have left is shared by `resolve_flexible_lengths`; an item that measured NOTHING (a wrapper around
-// blocks, no basis / width / text) takes an equal share of the line instead of collapsing to zero — unless its
-// content is all out of flow, where zero is real. Returns the per-position width, or None when an item's
+// lines have left is shared by `resolve_flexible_lengths` — an item that measured nothing being 0 wide, as in Chrome
+// and Firefox (the oracle's `resolveFlexRowWidths`). Returns the per-position width, or None when an item's
 // content isn't natively measurable (the JS gate should have routed the container to the pushed path).
 fn flex_row_sizes(
     kids: &[usize],
@@ -5081,7 +5074,6 @@ fn flex_row_sizes(
             taken += Input::m(k.ml) + Input::m(k.mr);
         }
         let avail = (content_w - taken).max(0.0);
-        let share = if n > 0 { (avail / n as f64 + LINE_FIT_EPS).floor() } else { avail }; // (the oracle's, to a line's tolerance)
         let bases: Vec<f64> = line.iter().map(|&p| base[p]).collect();
         // A line that SHRINKS (its hypothetical sizes exceed the room) may take a content-based item below its
         // base, where its floor binds — measure those floors now, before the resolution asks for them.
@@ -5103,8 +5095,7 @@ fn flex_row_sizes(
         let line_clamp = |j: usize, size: f64| clamp_with(&floors, line[j], size);
         let sizes = resolve_flexible_lengths(&bases, &inner, &grow, &shrink, Some(avail), &line_clamp);
         for (j, &p) in line.iter().enumerate() {
-            let w = sizes[j];
-            widths[p] = if w > 0.0 || !content_based[p] || out_of_flow_only(kids[p], inputs, children) { w } else { share };
+            widths[p] = sizes[j];
         }
     }
     Some(widths)
@@ -8543,7 +8534,9 @@ fn place_out_of_flow(
     let w = used_width(&n, auto_w);
     // A stretched AUTO height is imposed (usedSize hands it in as the box's height; the flow keeps a non-zero one) —
     // a zero one is the oracle's auto placeholder and back-fills from the content.
-    let auto_h = if stretched_v { (avail_h - mt - mb).max(0.0) } else { 0.0 };
+    // (…an intrinsic-size KEYWORD height is no `auto`: it is the content's, between the insets or not, and the auto
+    // margins centre it in what is left.)
+    let auto_h = if stretched_v && !n.height_kw { (avail_h - mt - mb).max(0.0) } else { 0.0 };
     // …a REPLACED box excepted: its height is its own intrinsic size, which §10.6.5 keeps whatever the insets say
     // (the oracle's `usedSize` keeps it; native stretched an inset `<input>` / list box to the inset height).
     let imposed = if is_auto(n.height) && auto_h > 0.0 && !n.replaced { auto_h } else { f64::NAN };
@@ -8945,6 +8938,7 @@ mod tests {
             indent_each_line: false,
             indent_spent: false,
             width_kw: 0,
+            height_kw: false,
         }
     }
 

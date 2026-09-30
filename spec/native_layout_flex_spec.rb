@@ -832,16 +832,16 @@ RSpec.describe 'native layout flex parity' do
   end
   # An item EXACTLY as wide as the room its line leaves stays on that line, to a LINE's tolerance: the engines add a
   # line's items in different orders, and Discourse's navigation bar (`width: calc(100% - 0px)` beside a zero-width
-  # clearfix `::before`, in a 368.56px wrapping row) wrapped in the oracle and not natively, on the last bit.
-  # SHARED: both give the whitespace-only `display: table` pseudo an equal share (184) where Chrome gives it 0 — the
-  # section then sits at 194.72 against Chrome's 10.72.
+  # clearfix `::before`, in a 368.56px wrapping row) wrapped in the oracle and not natively, on the last bit. The
+  # whitespace-only `display: table` pseudo is 0 wide, as in Chrome (both engines gave it an EQUAL SHARE, 184, until
+  # 2026-09-30), so the section sits at Chrome's 10.72.
   it 'keeps an item exactly as wide as its line on it' do
     body = '<style>.c::before{display:table;content:" "}</style><div style="width:390px;padding:0 10.72px;box-sizing:border-box">' \
            '<div class="c" style="display:flex;flex-wrap:wrap"><section id="m" style="width:calc(100% - 0px);height:5px"></section></div></div>'
     expect_parity(body)
     rect = laid_out_rect(body)
     expect(rect[1]).to eq(0)
-    expect_shared_gap(rect[0], shared: 194.72, chrome: 10.72, what: "#{body}: #m x")
+    expect(rect[0]).to be_within(0.05).of(10.72)
   end
   it 'matches a WRAPPING row where the line-height floor exceeds the stacked line (align-content shares the surplus)' do
     expect_parity('<div style="display:flex;flex-wrap:wrap;align-content:center;width:400px">text<div style="width:60px;height:8px"></div></div>')
@@ -930,7 +930,7 @@ RSpec.describe 'native layout flex parity' do
       expect_native_flex(%(<div style="#{row};height:100px"><div style="flex:1"><div style="height:10px"></div></div><div style="flex:1;max-height:30px"><div style="height:50px"></div></div></div>))
       expect_native_flex(%(<div style="#{row}"><div style="flex:1;display:flex;align-items:center;min-height:50px"><div style="width:10px;height:10px"></div></div><div style="width:50px;height:80px">y</div></div>))
     end
-    it 'gives an item that measured nothing an equal share, but an all-out-of-flow item its real zero' do
+    it 'gives an item that measured nothing, or whose content is all out of flow, its zero' do
       expect_native_flex(%(<div style="#{row}"><div style="flex:1"></div><div style="flex:1"><div></div></div><div style="width:50px">y</div></div>))
       expect_native_flex(%(<div style="#{row}"><div style="flex:1"><div style="position:absolute;width:30px;height:30px"></div></div><div style="width:50px">y</div></div>))
     end

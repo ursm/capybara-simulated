@@ -10,7 +10,7 @@ use std::fmt::Write;
 
 use crate::dom::{dom, f64_array, laid_answer, realm_id, register, NodeId};
 use crate::layout::{InlineBox, Input, Run, RunText};
-use crate::walk::{self, Basis, Face, Faces, FieldDiff, Outcome};
+use crate::walk::{self, Basis, Face, FieldDiff, Outcome};
 
 pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Object>, context_id: i32) {
     register(scope, ns, "layoutBuild", layout_build, context_id);
@@ -19,14 +19,13 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     register(scope, ns, "walkParityStats", walk_parity_stats, context_id);
 }
 
-// A realm's instrument: the pass the JS walk last sent, the faces it has resolved for the Rust walk, and the tally.
+// A realm's instrument: the pass the JS walk last sent, and the tally.
 #[derive(Default)]
 pub(crate) struct Parity {
     pending: Option<Pass>,
     // (…and whether the JS side has been asked for the pending pass's faces already: a second ask is a face it could not
     // resolve, and the pass is counted as declined for it rather than dropped)
     asked: bool,
-    faces: Faces,
     stats: Stats,
 }
 
@@ -84,21 +83,29 @@ fn walk_parity(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgum
     let Some(pass) = parity.pending.take() else { return };
     let Some(arena) = d.realms.get(&cid) else { return };
     let Some(root) = pass.inputs.first().and_then(|r| NodeId::from_i64(r.nid as i64)) else { return };
-    parity.faces.at_generation(&generation);
-    match walk::build(arena, root, pass.basis, &mut parity.faces) {
+    let built = arena.faces.with(|faces| {
+        faces.at_generation(&generation);
+        walk::build(arena, root, pass.basis, faces)
+    });
+    match built {
         Outcome::NeedsFaces if parity.asked => {
             parity.stats.passes += 1;
             *parity.stats.declined.entry("faces-unresolved").or_default() += 1;
         }
         Outcome::NeedsFaces => {
             parity.asked = true;
-            let wanted: Vec<(String, &'static str)> = parity.faces.missing.clone();
+            let wanted = arena.faces.with(|faces| faces.missing.clone());
             parity.pending = Some(pass);
             rv.set(faces_answer(scope, &wanted).into());
         }
         Outcome::Declined(why) => {
             parity.stats.passes += 1;
             *parity.stats.declined.entry(why).or_default() += 1;
+        }
+        // (…the JS walk makes and links every box it lays out: one not linked yet is one it did not)
+        Outcome::NeedsBoxes(_) => {
+            parity.stats.passes += 1;
+            *parity.stats.declined.entry("generated content unlinked").or_default() += 1;
         }
         Outcome::Built(built) => {
             let stats = &mut parity.stats;
@@ -189,9 +196,11 @@ fn layout_build(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgu
     let texts = args.get(5).is_true();
     let d = dom(scope);
     let Some(arena) = d.realms.get(&cid) else { return };
-    let faces = &mut d.walk_parity.entry(cid).or_default().faces;
-    faces.at_generation(&generation);
-    let built = match walk::build(arena, root, basis, faces) {
+    let built = arena.faces.with(|faces| {
+        faces.at_generation(&generation);
+        walk::build(arena, root, basis, faces)
+    });
+    let built = match built {
         Outcome::Built(built) => built,
         Outcome::Declined(why) => {
             let s = v8::String::new(scope, why).unwrap();
@@ -199,8 +208,17 @@ fn layout_build(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgu
             return;
         }
         Outcome::NeedsFaces => {
-            let wanted = faces.missing.clone();
+            let wanted = arena.faces.with(|faces| faces.missing.clone());
             rv.set(faces_answer(scope, &wanted).into());
+            return;
+        }
+        Outcome::NeedsBoxes(boxes) => {
+            // (…as `{boxes: [nid, which, …]}`)
+            let out = v8::Object::new(scope);
+            let key = v8::String::new(scope, "boxes").unwrap();
+            let list: v8::Local<v8::Value> = f64_array(scope, &boxes).into();
+            out.set(scope, key.into(), list);
+            rv.set(out.into());
             return;
         }
     };
@@ -256,7 +274,14 @@ fn walk_face(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgumen
         xh: if xh > 0.0 { xh } else { 0.5 },
     };
     let usable = face.handle >= 0 && [face.asc, face.desc, face.gap, face.space].iter().all(|v| v.is_finite());
-    dom(scope).walk_parity.entry(cid).or_default().faces.learn((family, bucket), usable.then_some(face));
+    // (…a face the style engine computed a font metric without: its styles are computed again, `ex` and `ch` from it)
+    let d = dom(scope);
+    let Some(arena) = d.realms.get(&cid) else { return };
+    if arena.faces.with(|faces| faces.learn((family, bucket), usable.then_some(face))) {
+        if let Some(engine) = d.styles.get_mut(&cid) {
+            engine.restyle_everything();
+        }
+    }
 }
 
 // __dom.walkParityStats() -> the tally as JSON, and a fresh one.

@@ -1,7 +1,8 @@
 # frozen_string_literal: true
 
-# The Unicode general categories native has to agree with the ORACLE about — `\p{M}` for `font::zero_width`,
-# `\p{L}` / `\p{N}` for `layout::hyphen_breaks_after`, whose classes are the oracle's `HYPHEN_BREAK_RE`.
+# The Unicode classes native has to agree with the ORACLE about — `\p{M}` for `font::zero_width`, `\p{L}` / `\p{N}`
+# for `layout::hyphen_breaks_after`, whose classes are the oracle's `HYPHEN_BREAK_RE`, and `DirRTL`, the strong
+# right-to-left characters `dir=auto` looks for (the oracle's own `DIR_STRONG_RTL`, asked as itself).
 #
 # Native answers them from regex-syntax, which bakes in a UCD snapshot of its own; the oracle answers them
 # from the JS ENGINE's tables. Those are two of the FOUR Unicode versions in this process — Ruby's and Rust
@@ -10,7 +11,7 @@
 # own engine, and `native_layout_text_spec` compares every range against what
 # `Capybara::Simulated::Native.unicode_class_ranges` compiled in.
 module UnicodeClasses
-  CLASSES = %w[M L N].freeze
+  CLASSES = %w[M L N DirRTL].freeze
 
   # Every range of `\p{klass}`, asked of the session's own engine. ONE crossing walks the whole code space in
   # ~0.02s, so there is no reason to sample boundaries — and sampling was actively wrong here: probes derived
@@ -18,7 +19,7 @@ module UnicodeClasses
   def self.ranges_of(session, klass)
     session.evaluate_script(<<~JS)
       (() => {
-        const RE = new RegExp('^' + String.fromCharCode(92) + 'p{#{klass}}$', 'u');  // a literal escape would be eaten by the heredoc
+        const RE = #{klass == 'DirRTL' ? "new RegExp('^' + __csimDirStrongRtl.source + '$', 'u')" : "new RegExp('^' + String.fromCharCode(92) + 'p{#{klass}}$', 'u')"};  // a literal escape would be eaten by the heredoc
         const out = [];
         let start = null;
         for (let cp = 0; cp <= 0x10FFFF; cp++) {
