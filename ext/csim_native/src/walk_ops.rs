@@ -11,6 +11,7 @@ use std::fmt::Write;
 use crate::dom::{dom, f64_array, laid_answer, realm_id, register, NodeId};
 use crate::layout::{InlineBox, Input, Run, RunText};
 use crate::walk::{self, Basis, Face, FieldDiff, Outcome};
+use crate::walk_reuse;
 
 pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Object>, context_id: i32) {
     register(scope, ns, "layoutBuild", layout_build, context_id);
@@ -195,6 +196,8 @@ fn layout_build(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgu
     let basis = Basis { w: root_cb_w, h: args.get(3).number_value(scope).unwrap_or(f64::NAN) };
     let root_rtl = args.get(4).is_true();
     let texts = args.get(5).is_true();
+    // …and whether to CHECK every measure put back against laying it out again (`CSIM_NL_REUSE_VERIFY`).
+    let check = args.get(6).is_true();
     let d = dom(scope);
     let Some(arena) = d.realms.get(&cid) else { return };
     let built = arena.faces.with(|faces| {
@@ -223,9 +226,26 @@ fn layout_build(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgu
             return;
         }
     };
-    let walk::Built { mut inputs, runs, run_texts, inlines, grids, maths, anon, inline_nids } = built;
+    let walk::Built { mut inputs, runs, run_texts, inlines, grids, maths, anon, inline_nids, marks } = built;
     let nids: Vec<f64> = inputs.iter().map(|r| r.nid).collect();
-    let out = crate::layout::layout_block_in_place(&mut inputs, &runs, &run_texts, &grids, &inlines, &maths, f64::NAN, f64::NAN, root_cb_w, root_rtl, None, texts);
+    // The layout of every subtree built as the last pass built it is the measure cache's to put back (`walk_reuse`) —
+    // except for a pass that answers its text pieces, which a put-back measure does not hold.
+    let reuse = dom(scope).walk_reuse.entry(cid).or_default();
+    let streams = walk_reuse::Streams { inputs: &inputs, runs: &runs, run_texts: &run_texts, grids: &grids, inlines: &inlines, marks: &marks };
+    let walk_reuse::Pass { roots, ends, ids, unchanged } = reuse.chunks(&streams, &generation);
+    let built_inputs = inputs.clone();
+    let mut measure = std::mem::take(&mut reuse.measure);
+    let cache = (!texts).then_some((&mut measure, roots, check));
+    let out = crate::layout::layout_block_in_place(&mut inputs, &runs, &run_texts, &grids, &inlines, &maths, f64::NAN, f64::NAN, root_cb_w, root_rtl, cache, texts);
+    let mismatch = measure.mismatch.take();
+    let reuse = dom(scope).walk_reuse.entry(cid).or_default();
+    reuse.measure = measure;
+    reuse.keep(built_inputs, runs, run_texts, grids, inlines, marks, ends, ids);
+    if let Some(why) = mismatch {
+        let s = v8::String::new(scope, &format!("reuse mismatch: {why}")).unwrap();
+        rv.set(s.into());
+        return;
+    }
     let crate::layout::Outcome::LaidOut(laid) = out else {
         let s = v8::String::new(scope, "native declined").unwrap();
         rv.set(s.into());
@@ -233,7 +253,7 @@ fn layout_build(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgu
     };
     let answer = laid_answer(scope, cid, laid, texts);
     let anon: Vec<f64> = anon.iter().flatten().copied().collect();
-    for (at, list) in [(4, &nids), (5, &anon), (6, &inline_nids)] {
+    for (at, list) in [(4, &nids), (5, &anon), (6, &inline_nids), (7, &unchanged)] {
         let v: v8::Local<v8::Value> = f64_array(scope, list).into();
         answer.set_index(scope, at, v);
     }

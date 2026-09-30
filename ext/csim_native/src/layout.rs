@@ -548,8 +548,32 @@ impl<T: BitEq, const N: usize> BitEq for [T; N] {
         self.iter().zip(o).all(|(a, b)| a.bit_eq(b))
     }
 }
+impl Run {
+    // Bit for bit, the NaNs a run carries included (`walk_reuse` holds a pass's runs against the last pass's).
+    pub(crate) fn same(&self, o: &Run) -> bool {
+        let Run { kind, font, size, ls, ws, line_height, asc, metric, ws_mode, tab_px, tab_min, line_mode, lands, plain } = self;
+        kind.bit_eq(&o.kind) && font.bit_eq(&o.font) && size.bit_eq(&o.size) && ls.bit_eq(&o.ls) && ws.bit_eq(&o.ws)
+            && line_height.bit_eq(&o.line_height) && asc.bit_eq(&o.asc) && metric.bit_eq(&o.metric)
+            && ws_mode.bit_eq(&o.ws_mode) && tab_px.bit_eq(&o.tab_px) && tab_min.bit_eq(&o.tab_min)
+            && line_mode.bit_eq(&o.line_mode) && lands.bit_eq(&o.lands) && plain.bit_eq(&o.plain)
+    }
+}
+impl InlineBox {
+    pub(crate) fn same(&self, o: &InlineBox) -> bool {
+        let InlineBox {
+            ml, right, mr, top, bottom, own_h, own_asc, rel_x, rel_y, bt, br, bb, bl, f_ml, f_left, f_right, f_mr, f_top,
+            f_bottom, left, math, rel_xf, rel_yf, rel_yi, rel_math,
+        } = self;
+        ml.bit_eq(&o.ml) && right.bit_eq(&o.right) && mr.bit_eq(&o.mr) && top.bit_eq(&o.top) && bottom.bit_eq(&o.bottom)
+            && own_h.bit_eq(&o.own_h) && own_asc.bit_eq(&o.own_asc) && rel_x.bit_eq(&o.rel_x) && rel_y.bit_eq(&o.rel_y)
+            && bt.bit_eq(&o.bt) && br.bit_eq(&o.br) && bb.bit_eq(&o.bb) && bl.bit_eq(&o.bl) && f_ml.bit_eq(&o.f_ml)
+            && f_left.bit_eq(&o.f_left) && f_right.bit_eq(&o.f_right) && f_mr.bit_eq(&o.f_mr) && f_top.bit_eq(&o.f_top)
+            && f_bottom.bit_eq(&o.f_bottom) && left.bit_eq(&o.left) && math.bit_eq(&o.math) && rel_xf.bit_eq(&o.rel_xf)
+            && rel_yf.bit_eq(&o.rel_yf) && rel_yi.bit_eq(&o.rel_yi) && rel_math.bit_eq(&o.rel_math)
+    }
+}
 impl Input {
-    fn same(&self, o: &Input) -> bool {
+    pub(crate) fn same(&self, o: &Input) -> bool {
         let Input { nid, parent, display, border_box, width, height, min_w, max_w, min_h, max_h, mt, mr, mb, ml, pt, pr, pb, pl, bt, br, bb, bl, height_adjoins, minh_adjoins, bottom_adjoins, run_start, run_count, strut_lh, strut_asc, float_kind, clear, takes_clearance, starts_bfc, flex_justify, flex_main_gap, flex_cross_align, flex_main_is_x, flex_wrap, flex_cross_flip, flex_align_content, flex_cross_gap, flex_main_reverse, flex_cross_far, has_replayed_oof, rel_x, rel_y, rel_pct, rel_x_px, rel_x_neg, measured_as_block, equal_share, chain_rel, chain_px, chain_shift, chain_math, rel_math, flex_item_auto, flex_baseline_asc, flex_line_nat, flex_line, out_of_flow, sp_x, sp_y, cell_col, cell_colspan, cell_rowspan, caption_side, rtl, text_align, anon_cross, ws_mode, item_auto_height, pushed_h_indefinite, grid_start, decl_w, decl_min_w, decl_max_w, flex_basis, flex_grow, decl_border_box, flex_shrink, flex_basis_cb, flex_basis_frac, flex_basis_math, pct_sizes, pct_px, pct_math, edge_frac, edge_px, edge_math, basis_w, inset_frac, inset_math, flex_main_gap_frac, flex_main_gap_math, flex_cross_gap_math, indent_math, flex_cross_gap_frac, flex_basis_kw, scrolls_x, scrolls_y, is_button, self_sizes, block_axis_is_x, decl_edges_x, decl_margin_x, height_from_outside, cell_pct, cell_min_content, cell_max_content, height_is_floor, cell_valign, cell_pct_h_child, anon_group, group_pct_h, pct_h_decl, row_imposed, row_height, row_pct, row_rank, table_fixed, flex_stretch, flex_native, flex_dir_reverse, replaced, lays_out_children, ratio, ratio_only, shrinks_to_nothing, control_baseline, control_font_box, control_font_asc, intrinsic_w, intrinsic_h, cb_index, inset_top, inset_right, inset_bottom, inset_left, auto_margins, legacy_align, indent_px, indent_frac, indent_hanging, indent_each_line, indent_spent, width_kw, height_kw, cb_rect } = self;
         nid.bit_eq(&o.nid)
             && parent.bit_eq(&o.parent)

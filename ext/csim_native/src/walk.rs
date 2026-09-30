@@ -135,6 +135,9 @@ pub(crate) struct Built {
     // the element each inline table entry is of, by nid.
     pub(crate) anon: Vec<[f64; 4]>,
     pub(crate) inline_nids: Vec<f64>,
+    // …and where the run, grid and inline streams stood as each record went in: a subtree emits all it emits between
+    // its root and the next record that is not its own, so these are where its streams start (`walk_reuse`).
+    pub(crate) marks: Vec<[usize; 3]>,
 }
 
 // The pass root's containing block, which a percentage in the ROOT's own record resolves against: the viewport, for the
@@ -182,6 +185,7 @@ pub(crate) fn build(arena: &RealmArena, root: NodeId, basis: Basis, faces: &mut 
         inline_cbs: Vec::new(),
         collapse: HashMap::new(),
         anon: Vec::new(),
+        marks: Vec::new(),
     };
     let done = walk.root(root).and_then(|()| walk.resolve_inline_cbs());
     // (…and the faces the style engine computed a font metric with a stand-in for, which it computes again once told)
@@ -207,6 +211,7 @@ pub(crate) fn build(arena: &RealmArena, root: NodeId, basis: Basis, faces: &mut 
             maths: walk.maths,
             inline_nids,
             anon: walk.anon,
+            marks: walk.marks,
         }),
         Err(why) => Outcome::Declined(why),
     }
@@ -340,6 +345,8 @@ struct Walk<'a> {
     // container's item), its container, and which of the container's anonymous ones it is: what names it to the JS
     // side, whose memoised object it is (`tableGrid` / `boxItems`).
     anon: Vec<[f64; 4]>,
+    // Where the run, grid and inline streams stood as each record went in (`Built::marks`).
+    marks: Vec<[usize; 3]>,
 }
 
 // An alignment keyword as the JS walk reads it (`alignKeyword`): `safe` / `unsafe` dropped, `first baseline` the
@@ -1235,6 +1242,12 @@ fn widget_tag(tag: &str) -> bool {
 }
 
 impl<'a> Walk<'a> {
+    // A record goes in — and where each stream stands as it does (`Built::marks`).
+    fn push_record(&mut self, rec: Input) {
+        self.marks.push([self.runs.len(), self.grids.len(), self.inlines.len()]);
+        self.inputs.push(rec);
+    }
+
     fn root(&mut self, root: NodeId) -> Step {
         let style = self.style(root)?;
         let b = style.get_box();
@@ -1561,7 +1574,7 @@ impl<'a> Walk<'a> {
         if parent >= 0 && position == Position::Relative && role != Role::Cell {
             self.relative(id, &style, &mut rec)?;
         }
-        self.inputs.push(rec);
+        self.push_record(rec);
         self.rec_index.insert(id, idx);
         if let Some(intrinsic) = intrinsic {
             return self.replaced(id, idx, &style, intrinsic);
@@ -1703,7 +1716,7 @@ impl<'a> Walk<'a> {
                 rec.nid = -1.0;
                 rec.parent = idx;
                 rec.display = DISPLAY_TEXT_BLOCK;
-                self.inputs.push(rec);
+                self.push_record(rec);
                 let mut g = Gather { block: style, idx: anon, bites, runs: Vec::new(), makes_line: false, floats: Vec::new(), rel: None };
                 self.gather(&kids, style, &font, ws_mode, wrap, 0.0, &mut g)?;
                 let holds_oof = g.runs.iter().any(|r| matches!(r, Pending::Oof { .. }));
@@ -2516,7 +2529,7 @@ impl<'a> Walk<'a> {
         r.display = display;
         r.run_start = -1;
         r.scrolls_y = scrolls(style.get_box().overflow_y);
-        self.inputs.push(r);
+        self.push_record(r);
         Ok(at)
     }
     // A row and its cells (`emitRow`).
@@ -2542,7 +2555,7 @@ impl<'a> Walk<'a> {
                 r.parent = parent;
                 r.display = crate::layout::DISPLAY_TABLE_ROW;
                 r.run_start = -1;
-                self.inputs.push(r);
+                self.push_record(r);
                 at
             }
         };
@@ -2608,7 +2621,7 @@ impl<'a> Walk<'a> {
             [rec.bt, rec.br, rec.bb, rec.bl] = halves;
             rec.decl_edges_x = rec.bl + rec.br;
         }
-        self.inputs.push(rec);
+        self.push_record(rec);
         self.block_contents(run, at, style)
     }
     // Does a cell hold a box whose height is a percentage — what makes a table lay it out twice (`cellHasPctHeightChild`):
@@ -2870,7 +2883,7 @@ impl<'a> Walk<'a> {
         rec.rtl = (style.get_inherited_box().direction == Direction::Rtl) as u8;
         rec.block_axis_is_x = !style.writing_mode.is_horizontal();
         rec.legacy_align = self.legacy_align(container);
-        self.inputs.push(rec);
+        self.push_record(rec);
         let ws_mode = ws_mode_of(style)?;
         let mut inline = false;
         for &k in run {
@@ -2906,6 +2919,7 @@ impl<'a> Walk<'a> {
     // the floats before it.
     fn rollback(&mut self, m: Mark) {
         self.inputs.truncate(m.inputs);
+        self.marks.truncate(m.inputs);
         self.anon.truncate(m.anon);
         self.runs.truncate(m.runs);
         self.run_texts.truncate(m.runs);

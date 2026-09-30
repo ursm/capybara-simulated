@@ -32,6 +32,7 @@ mod unicode;
 mod validity;
 mod walk;
 mod walk_ops;
+mod walk_reuse;
 
 use magnus::{Error, Module, Ruby};
 

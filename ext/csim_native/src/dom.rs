@@ -821,6 +821,8 @@ pub(crate) struct Dom {
     pub(crate) styles: std::collections::HashMap<i32, crate::style::StyleEngine>,
     // Each realm's walk-parity instrument (`walk_ops`), where a pass has asked for it.
     pub(crate) walk_parity: std::collections::HashMap<i32, crate::walk_ops::Parity>,
+    // Each realm's Rust walk's last pass and the measures kept of it (`walk_reuse`).
+    pub(crate) walk_reuse: std::collections::HashMap<i32, crate::walk_reuse::WalkReuse>,
     // The realms `dropRealm` freed: an op a script of one still runs lands in `graveyard` rather than bringing its
     // arena back (context ids are never reused, so each would have stayed an entry for good).
     dropped: std::collections::HashSet<i32>,
@@ -1117,8 +1119,21 @@ fn set_data(
     let (arena, engine) = arena_and_engine(scope, cid);
     // (Text is a state input: a textarea's default value, an option's.)
     arena.state_epoch += 1;
+    let mut had_text = false;
     if let Some(node) = arena.get_mut(id) {
+        had_text = !node.data.is_empty();
         node.data = data;
+    }
+    text_changed(arena, engine, id, had_text);
+}
+
+// A text node's data moved: all a selector can see of it is whether there is any (`:empty`, and a `:has()` asking
+// that), so only a change between none and some is a change to its parent's children as the style engine counts them.
+// Anything else restyles nothing — a text edit under a page with a `:has()` rule anywhere restyled the whole document.
+fn text_changed(arena: &mut RealmArena, engine: Option<&mut crate::style::StyleEngine>, id: NodeId, had_text: bool) {
+    let has_text = arena.get(id).is_some_and(|n| !n.data.is_empty());
+    if has_text == had_text {
+        return;
     }
     if let (Some(engine), Some(p)) = (engine, arena.parent_of(id)) {
         engine.children_changed(arena, p);
@@ -1139,12 +1154,12 @@ fn append_data(
     let cid = realm_id(scope, &args);
     let (arena, engine) = arena_and_engine(scope, cid);
     arena.state_epoch += 1;
+    let mut had_text = false;
     if let Some(node) = arena.get_mut(id) {
+        had_text = !node.data.is_empty();
         node.data.extend_from_slice(&data);
     }
-    if let (Some(engine), Some(p)) = (engine, arena.parent_of(id)) {
-        engine.children_changed(arena, p);
-    }
+    text_changed(arena, engine, id, had_text);
 }
 
 // __dom.insertChild(parentNid, childNid, beforeNid): the child is moved to `parentNid`, before `beforeNid` (a live child
@@ -2094,6 +2109,7 @@ fn reset_arena(
     let cid = realm_id(scope, &args);
     realm(scope, cid).reset();
     dom(scope).layout_chunks.remove(&cid);
+    dom(scope).walk_reuse.remove(&cid);
     dom(scope).cascades.remove(&cid);
     // …and the style engine forgets the nodes it held (its sheets stay until the new page sets its own).
     if let Some(engine) = dom(scope).styles.get_mut(&cid) {
@@ -2163,6 +2179,7 @@ fn drop_realm(
         d.cascades.remove(&id);        // (…and its rules)
         d.styles.remove(&id);          // (…and its style engine)
         d.walk_parity.remove(&id);     // (…and its walk-parity instrument)
+        d.walk_reuse.remove(&id);      // (…and its Rust walk's last pass)
     }
 }
 
@@ -2604,17 +2621,22 @@ fn layout_chunk_put(
     rv.set_bool(true);
 }
 
-// __dom.layoutMeasureCounts() -> [put back, kept, records held]: the realm's kept measures (`layout::MeasureCache`),
-// for a spec.
+// __dom.layoutMeasureCounts() -> [put back, kept, records held]: the realm's kept measures (`layout::MeasureCache`) —
+// the JS walk's chunks' and the Rust walk's (`walk_reuse`) together — for a spec.
 fn layout_measure_counts(
     scope: &mut v8::PinScope<'_, '_>,
     args: v8::FunctionCallbackArguments<'_>,
     mut rv: v8::ReturnValue<'_, v8::Value>,
 ) {
     let cid = realm_id(scope, &args);
-    let counts = dom(scope).layout_chunks.get(&cid).map_or([0.0; 3], |s| {
-        [s.measure.put_back as f64, s.measure.kept as f64, s.measure.records() as f64]
-    });
+    let d = dom(scope);
+    let caches = [d.layout_chunks.get(&cid).map(|s| &s.measure), d.walk_reuse.get(&cid).map(|r| &r.measure)];
+    let mut counts = [0.0; 3];
+    for m in caches.into_iter().flatten() {
+        counts[0] += m.put_back as f64;
+        counts[1] += m.kept as f64;
+        counts[2] += m.records() as f64;
+    }
     let out = v8::Array::new(scope, 3);
     for (i, n) in counts.into_iter().enumerate() {
         let v: v8::Local<v8::Value> = v8::Number::new(scope, n).into();

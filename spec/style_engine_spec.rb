@@ -84,6 +84,16 @@ RSpec.describe 'style engine invalidation' do
     expect(color(s, '#p', 'document.getElementById("p").append("more");')).to eq('rgb(0, 0, 0)')
   end
 
+  # …and a `:has()` that asks it — the one way a text edit reaches beyond its parent. An edit that leaves some text
+  # there changes nothing a selector sees, and restyles nothing (a `:has()` rule anywhere used to restyle the whole page
+  # on every keystroke).
+  it 'restyles through a :has() when a text edit empties an element, and not otherwise' do
+    s = visit('<div id="d"><p id="p">text</p></div>', css: '#d:has(p:empty) { color: rgb(61, 62, 63); }')
+    expect(color(s, '#d', 'document.getElementById("p").firstChild.data = "more text";')).to eq('rgb(0, 0, 0)')
+    expect(color(s, '#d', 'document.getElementById("p").firstChild.data = "";')).to eq('rgb(61, 62, 63)')
+    expect(color(s, '#d', 'document.getElementById("p").firstChild.appendData("x");')).to eq('rgb(0, 0, 0)')
+  end
+
   # …and so is every sibling a combinator reads it from (Firefox's `RestyleForEmptyChange`). (On a page of its own: a
   # `:has()` anywhere styles everything again after any change.)
   it 'restyles the later siblings an emptiness reaches through a sibling combinator' do
