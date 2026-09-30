@@ -129,6 +129,40 @@ RSpec.describe 'style engine invalidation' do
     expect(got).to be(false)
   end
 
+  # A page's text, its geometry and its generated content are the engine's to answer, and none of them builds the JS
+  # cascade's rules: a `display: none` / `visibility: hidden` / `text-transform` / `white-space` / flex container read for
+  # the visible text, the `::before` / `::after` a box lays out, a table's anonymous cell, a `border` shorthand under a
+  # border width, and a `<br>` a flex container holds, which still breaks its line. Chrome: the text below (as Capybara
+  # normalises its `innerText`), 30.23 × 18, `"B"`, 3px, 36 and 31.
+  it 'answers text, geometry and generated content without the JS cascade' do
+    s = visit(<<~HTML, css: <<~CSS)
+      <div class="flex"><span>one</span><span>two</span></div>
+      <p class="up">up <span class="hide">gone</span><span class="vis">vis</span></p>
+      <p class="pre">a  b</p>
+      <p><span id="g" class="gen" data-x="A" style="display:inline-block">g</span></p>
+      <div id="fb" style="display:flex">a<br>b</div>
+      <div id="t" style="display:table">stray</div>
+      <div id="bd" class="bd">b</div>
+    HTML
+      .hide { display: none } .vis { visibility: hidden } .up { text-transform: uppercase } .pre { white-space: pre }
+      .flex { display: flex } .gen::before { content: "B" } .gen::after { content: attr(data-x) } .bd { border: 3px solid }
+    CSS
+    expect(s.text).to eq("one\ntwo\nUP\na b\ng\na\nb\nstray\nb")
+    got = s.evaluate_script(<<~JS)
+      [
+        (r => [r.width, r.height])(document.getElementById('g').getBoundingClientRect()),
+        getComputedStyle(document.getElementById('g'), '::before').content,
+        getComputedStyle(document.getElementById('bd')).borderTopWidth,
+        document.getElementById('fb').offsetHeight,
+        document.getElementById('t').offsetWidth
+      ]
+    JS
+    (width, height), *rest = got
+    expect(width).to be_within(0.02).of(30.23)
+    expect([height, *rest]).to eq([18, '"B"', '3px', 36, 31])
+    expect(s.evaluate_script('__csimJsCascadeDemands().builds')).to eq(0)
+  end
+
   # An element under a `display: none` — styled by no traversal — is resolved on its own, its unstyled ancestors with it
   # (Gecko's `ResolveStyleLazily`): its colour, its em-relative lengths and its percentages as Chrome reports them
   # (rgb(1, 2, 3), 0px, 30px, auto, 10px, block; then 50% and none), where it was answered by the JS cascade.

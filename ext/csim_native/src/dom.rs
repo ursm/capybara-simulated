@@ -1046,6 +1046,7 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_, ()>, ctx: &v8::Global<v8:
     register(scope, ns, "styleShadowSheets", style_shadow_sheets, context_id);
     register(scope, ns, "styleValue", style_value, context_id);
     register(scope, ns, "styleShown", style_shown, context_id);
+    register(scope, ns, "styleGenerated", style_generated, context_id);
     register(scope, ns, "styleRestyled", style_restyled, context_id);
     register(scope, ns, "styleFlush", style_flush, context_id);
     register(scope, ns, "styleTick", style_tick, context_id);
@@ -2076,6 +2077,33 @@ fn style_shown(
         let failures = engine.take_verify_failures();
         if !threw_verify_failures(scope, failures) {
             rv.set_int32(shown as i32);
+        }
+    });
+}
+
+// __dom.styleGenerated(nid, which, now) -> string | null: what the element's `::before` (0) or `::after` (1) renders as
+// the style engine styled it (`StyleEngine::generated`) — its text, empty for a box holding none — or null where it
+// generates no box. Undefined where the realm has no engine.
+fn style_generated(
+    scope: &mut v8::PinScope<'_, '_>,
+    args: v8::FunctionCallbackArguments<'_>,
+    mut rv: v8::ReturnValue<'_, v8::Value>,
+) {
+    let cid = realm_id(scope, &args);
+    let Some(id) = nid_arg(scope, &args, 0) else { return };
+    let which = args.get(1).int32_value(scope).unwrap_or(0).clamp(0, 1) as usize;
+    let now = clock_arg(scope, &args, 2);
+    style_op(scope, cid, |scope| {
+        let d = dom(scope);
+        let (Some(engine), Some(arena)) = (d.styles.get_mut(&cid), d.realms.get(&cid)) else { return };
+        let text = engine.generated(arena, id, which, now);
+        let failures = engine.take_verify_failures();
+        if threw_verify_failures(scope, failures) {
+            return;
+        }
+        match text.and_then(|u| v8::String::new_from_two_byte(scope, &u, v8::NewStringType::Normal)) {
+            Some(js) => rv.set(js.into()),
+            None => rv.set_null(),
         }
     });
 }

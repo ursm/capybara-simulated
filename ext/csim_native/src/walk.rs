@@ -369,12 +369,9 @@ impl<'a> Generated<'a> {
             return boxes;
         }
         let mut boxes = [None, None];
-        let node = self.arena.get(id).filter(|n| n.kind == NodeKind::Element && !NO_GENERATED_CONTENT.contains(&&*n.local_name));
-        if let Some(node) = node {
-            for (which, pseudo) in PSEUDOS.iter().enumerate() {
-                let Some(text) = crate::style::eager_pseudo(self.arena, id, pseudo).and_then(|style| generated_text(&style, node)) else {
-                    continue;
-                };
+        if let Some(node) = self.arena.get(id) {
+            for which in 0..PSEUDOS.len() {
+                let Some(text) = generated_text_of(self.arena, id, which) else { continue };
                 let mut st = self.state.borrow_mut();
                 let Some(at) = node.pseudo_boxes[which].filter(|&b| self.arena.get(b).is_some()) else {
                     st.unlinked.extend([id.to_f64(), which as f64]);
@@ -401,6 +398,12 @@ impl<'a> Generated<'a> {
     fn text(&self, id: NodeId) -> Option<&'a crate::dom::NodeData> {
         self.state.borrow().texts.get(id.idx as usize).copied()
     }
+}
+// What `id`'s `::before` (0) or `::after` (1) renders as the style engine styled it: its text (empty for a box that
+// holds none), or None where it generates no box.
+pub(crate) fn generated_text_of(arena: &RealmArena, id: NodeId, which: usize) -> Option<Vec<u16>> {
+    let node = arena.get(id).filter(|n| n.kind == NodeKind::Element && !NO_GENERATED_CONTENT.contains(&&*n.local_name))?;
+    crate::style::eager_pseudo(arena, id, &PSEUDOS[which]).and_then(|style| generated_text(&style, node))
 }
 // What a generated box's `content` renders (`generatedContentOf`), or None for none: its strings, an `attr()` of its
 // element (its fallback where the element has none), the quote marks `quotes` gives — and nothing for a counter or an

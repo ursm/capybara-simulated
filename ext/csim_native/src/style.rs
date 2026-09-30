@@ -1828,6 +1828,13 @@ impl StyleEngine {
         })
     }
 
+    // What `id`'s `::before` (0) or `::after` (1) renders as the document is styled now — the answer the walk lays out
+    // (`walk::generated_text_of`): its text, or None where it generates no box.
+    pub(crate) fn generated(&mut self, arena: &RealmArena, id: NodeId, which: usize, now_ms: f64) -> Option<Vec<u16>> {
+        self.flush(arena, now_ms);
+        crate::walk::generated_text_of(arena, id, which)
+    }
+
     // Whether `id` is SHOWN, as the engine styled it: 0 where no box is — it has no style (an ancestor is `display:
     // none`, which styles none of its descendants, or no slot takes it into the flat tree) or its own `display` is
     // `none` — or where it is SKIPPED, an ancestor's `content-visibility: hidden` (a `hidden=until-found` one's, in the
