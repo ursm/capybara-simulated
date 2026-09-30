@@ -111,6 +111,22 @@ RSpec.describe 'style engine invalidation' do
     expect(got).to eq('rgb(1, 1, 1)')
   end
 
+  # …and an attribute that moves a STATE a `:has()` reads (`disabled` → `:disabled`), and a namespaced attribute by its
+  # local name (`xlink:href` → `[xlink|href]`), on such an element.
+  it 'restyles through a :has() when an unstyled element gains a state or a namespaced attribute it reads' do
+    s = visit('<div id="d"><div style="display: none"><button id="b">b</button><svg><a id="a"></a></svg></div></div>',
+              css: '@namespace xl url(http://www.w3.org/1999/xlink); #d:has(:disabled) { color: rgb(67, 68, 69); } ' \
+                   '#d:has([xl|href]) { background-color: rgb(2, 2, 2); }')
+    expect(color(s, '#d', 'document.getElementById("b").setAttribute("disabled", "");')).to eq('rgb(67, 68, 69)')
+    got = s.evaluate_script(<<~JS)
+      (() => {
+        document.getElementById('a').setAttributeNS('http://www.w3.org/1999/xlink', 'xlink:href', '#x');
+        return getComputedStyle(document.getElementById('d')).backgroundColor;
+      })()
+    JS
+    expect(got).to eq('rgb(2, 2, 2)')
+  end
+
   # …and so is every sibling a combinator reads it from (Firefox's `RestyleForEmptyChange`). (On a page of its own: a
   # `:has()` anywhere styles everything again after any change.)
   it 'restyles the later siblings an emptiness reaches through a sibling combinator' do

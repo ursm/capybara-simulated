@@ -895,12 +895,10 @@ impl StyleEngine {
     fn attributes_will_change_unguarded(&mut self, arena: &RealmArena, id: NodeId, names: &[&str]) {
         // (…a `:has()` reads it styled or not: an element nothing styles — under a `display: none`, or a host's light
         // child no slot takes — still decides the match of one above it)
-        self.restyle_all |= self.relative_reads_attributes(names);
+        let styled = arena.existing_style_slot(id).is_some_and(|slot| unsafe { &*slot.data.get() }.is_some());
+        self.restyle_all |= self.relative_reads_attributes(names, !styled);
         let Some(node) = arena.get(id) else { return };
-        let Some(slot) = arena.existing_style_slot(id) else { return };
-        if unsafe { &*slot.data.get() }.is_none() {
-            return;
-        }
+        let Some(slot) = arena.existing_style_slot(id).filter(|_| styled) else { return };
         let this: *const StyleEngine = self;
         let snapshots = &mut self.snapshots;
         in_arena(arena, this, || {
@@ -931,11 +929,14 @@ impl StyleEngine {
     }
 
     // Whether a `:has()` can read an attribute named in `names`: a class or an id where its argument names any, another
-    // attribute where one names THAT one (`relative_selector_invalidation_map`), a `lang` / `dir` always (`:lang()` and
-    // `:dir()` read them through no attribute selector), and anything under a `:host(:has(…))`, which no map records.
+    // attribute where one names THAT one (`relative_selector_invalidation_map`, by its LOCAL name — `xlink:href` is
+    // `[xlink|href]`'s `href`), a `lang` / `dir` always (`:lang()` and `:dir()` read them through no attribute
+    // selector), and anything under a `:host(:has(…))`, which no map records. And on an element nothing styles
+    // (`unstyled`), any attribute where an argument reads an element STATE: `checked`, `disabled`, `placeholder`,
+    // `form`… move one, and `snapshot_moved_states` sees a moved state only on an element it styled before.
     // Every write restyled the whole document on a page with any `:has()` — a `data-*` attribute written under a
     // `display: none` 300 times was 4x the page's time — though no argument can read one it does not name.
-    fn relative_reads_attributes(&self, names: &[&str]) -> bool {
+    fn relative_reads_attributes(&self, names: &[&str], unstyled: bool) -> bool {
         if !self.has_relative {
             return false;
         }
@@ -944,12 +945,16 @@ impl StyleEngine {
         }
         let reads = |data: &style::stylist::CascadeData| {
             let map = data.relative_selector_invalidation_map();
-            names.iter().any(|&name| match name {
-                "class" => !map.class_to_selector.is_empty(),
-                "id" => !map.id_to_selector.is_empty(),
-                "lang" | "xml:lang" | "dir" => true,
-                _ => map.other_attribute_affecting_selectors.contains_key(&LocalName::from(name)),
-            })
+            (unstyled && !map.state_affecting_selectors.is_empty())
+                || names.iter().any(|&name| match name {
+                    "class" => !map.class_to_selector.is_empty(),
+                    "id" => !map.id_to_selector.is_empty(),
+                    "lang" | "xml:lang" | "dir" => true,
+                    _ => {
+                        let local = name.rsplit(':').next().unwrap_or(name);
+                        map.other_attribute_affecting_selectors.contains_key(&LocalName::from(local))
+                    }
+                })
         };
         self.stylist.iter_origins().any(|(data, _)| reads(data)) || self.shadow_styles.values().any(|s| reads(&s.styles.data))
     }
