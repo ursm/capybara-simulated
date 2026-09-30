@@ -406,9 +406,22 @@ RSpec.describe 'walk parity' do
     expect_clean(s.evaluate_script('__csimWalkParityStats()'))
   end
 
+  # A `-webkit-box` is a plain block to both (the JS model's fallthrough, `nlBlockDisplay`) — its children in its flow,
+  # a context of its own — and a `<details>` lays its content out closed or open: laid out, skipped only for painting.
+  # (Chrome lays a `-webkit-box` out as a legacy flex box and clamps it by `-webkit-line-clamp`: shared, recorded.)
+  it 'builds a -webkit-box as a block and a details element with its content' do
+    expect_clean(parity(<<~HTML))
+      <div style="display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; width: 120px">one two three four five six seven</div>
+      <div style="display: -webkit-box; margin: 10px 0"><span>a</span><p style="margin: 20px 0">b</p></div>
+      aa <span style="display: -webkit-inline-box">x</span> bb
+      <details><summary>Sum</summary><p>closed content</p></details>
+      <details open><summary>Sum</summary>open content</details>
+    HTML
+  end
+
   it 'declines by name what it has not been taught' do
-    stats = parity('<div style="display: -webkit-box">x</div>')
+    stats = parity('<div style="display: ruby">x</div>')
     expect(stats['compared']).to eq(0)
-    expect(stats['declined']).to include('-webkit-box' => be_positive)
+    expect(stats['declined']).to include('ruby' => be_positive)
   end
 end
