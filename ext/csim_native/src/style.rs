@@ -1863,6 +1863,28 @@ impl StyleEngine {
         if style.get_inherited_box().visibility == style::computed_values::visibility::T::Visible { 1 } else { 2 }
     }
 
+    // `id`'s `transform` as the 4x4 its computed list composes to, about a reference box `width` x `height` (its border
+    // box, which a percentage resolves against), in CSS `matrix3d()` order — at the engine's own precision, where the
+    // value it serializes rounds every angle to six figures. None where it has no style; Some(None) for `none`.
+    pub(crate) fn transform_matrix(
+        &mut self,
+        arena: &RealmArena,
+        id: NodeId,
+        width: f32,
+        height: f32,
+        now_ms: f64,
+    ) -> Option<Option<[f64; 16]>> {
+        use style::values::computed::Length;
+        self.flush(arena, now_ms);
+        let style = primary_style(arena, id).or_else(|| self.undisplayed_style(arena, id))?;
+        let transform = &style.get_box().transform;
+        if transform.0.is_empty() {
+            return Some(None);
+        }
+        let reference = euclid::default::Rect::new(euclid::default::Point2D::origin(), euclid::default::Size2D::new(Length::new(width), Length::new(height)));
+        Some(transform.to_transform_3d_matrix_f64(Some(&reference)).ok().map(|(m, _)| m.to_array()))
+    }
+
     // Whether `id` SKIPS its contents (`skips_contents`), as the document is styled now — shown itself, and nothing under it.
     pub(crate) fn skips(&mut self, arena: &RealmArena, id: NodeId, now_ms: f64) -> bool {
         self.flush(arena, now_ms);

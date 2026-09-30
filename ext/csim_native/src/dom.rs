@@ -1048,6 +1048,7 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_, ()>, ctx: &v8::Global<v8:
     register(scope, ns, "styleShown", style_shown, context_id);
     register(scope, ns, "styleGenerated", style_generated, context_id);
     register(scope, ns, "styleSkips", style_skips, context_id);
+    register(scope, ns, "styleTransformMatrix", style_transform_matrix, context_id);
     register(scope, ns, "styleRestyled", style_restyled, context_id);
     register(scope, ns, "styleFlush", style_flush, context_id);
     register(scope, ns, "styleTick", style_tick, context_id);
@@ -2078,6 +2079,35 @@ fn style_shown(
         let failures = engine.take_verify_failures();
         if !threw_verify_failures(scope, failures) {
             rv.set_int32(shown as i32);
+        }
+    });
+}
+
+// __dom.styleTransformMatrix(nid, width, height, now) -> Float64Array(16) | null: the element's `transform` composed
+// about a `width` x `height` reference box (`StyleEngine::transform_matrix`), null for `none`. Undefined where the
+// element has no style or the realm no engine.
+fn style_transform_matrix(
+    scope: &mut v8::PinScope<'_, '_>,
+    args: v8::FunctionCallbackArguments<'_>,
+    mut rv: v8::ReturnValue<'_, v8::Value>,
+) {
+    let cid = realm_id(scope, &args);
+    let Some(id) = nid_arg(scope, &args, 0) else { return };
+    let width = args.get(1).number_value(scope).unwrap_or(0.0) as f32;
+    let height = args.get(2).number_value(scope).unwrap_or(0.0) as f32;
+    let now = clock_arg(scope, &args, 3);
+    style_op(scope, cid, |scope| {
+        let d = dom(scope);
+        let (Some(engine), Some(arena)) = (d.styles.get_mut(&cid), d.realms.get(&cid)) else { return };
+        let matrix = engine.transform_matrix(arena, id, width, height, now);
+        let failures = engine.take_verify_failures();
+        if threw_verify_failures(scope, failures) {
+            return;
+        }
+        match matrix {
+            None => {}
+            Some(None) => rv.set_null(),
+            Some(Some(m)) => rv.set(f64_array(scope, &m).into()),
         }
     });
 }

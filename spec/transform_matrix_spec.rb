@@ -54,10 +54,13 @@ RSpec.describe 'a transform list composes into one matrix' do
       .to eq('matrix3d(0.853553, 0.146447, -0.5, 0, 0.146447, 0.853553, 0.5, 0, 0.5, -0.5, 0.707107, 0, 0, 0, 0, 1)')
   end
 
+  # …to the sixth figure, where the two engines part on the last one: Chrome composes in doubles (0.0714286), Firefox's
+  # style engine from single-precision angles (0.0714287), and the spec names no precision.
   it 'composes an arbitrary axis' do
-    expect(computed(styled('rotate3d(1,2,3,90deg)')))
-      .to eq('matrix3d(0.0714286, 0.944641, -0.320237, 0, -0.658927, 0.285714, 0.695833, 0, ' \
-             '0.748808, 0.16131, 0.642857, 0, 0, 0, 0, 1)')
+    got = computed(styled('rotate3d(1,2,3,90deg)'))
+    expect(got).to start_with('matrix3d(')
+    expected = [0.0714286, 0.944641, -0.320237, 0, -0.658927, 0.285714, 0.695833, 0, 0.748808, 0.16131, 0.642857, 0, 0, 0, 0, 1]
+    got[/\((.*)\)/, 1].split(',').map(&:to_f).zip(expected).each {|(a, e)| expect(a).to be_within(2e-7).of(e) }
   end
 
   # TWO 3D functions. The old projector flattened one and gave up on the second, so this list — the
