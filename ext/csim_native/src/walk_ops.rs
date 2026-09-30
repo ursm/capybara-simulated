@@ -8,6 +8,8 @@
 use std::collections::BTreeMap;
 use std::fmt::Write;
 
+use style::computed_values::direction::T as Direction;
+
 use crate::dom::{dom, f64_array, laid_answer, realm_id, register, NodeId};
 use crate::layout::{InlineBox, Input, Run, RunText};
 use crate::walk::{self, Basis, Face, FieldDiff, Outcome};
@@ -183,7 +185,7 @@ fn walk_parity(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgum
     }
 }
 
-// __dom.layoutBuild(rootNid, fontGeneration, rootCbW, rootCbH, rootRtl, texts): a whole layout pass the Rust walk builds
+// __dom.layoutBuild(rootNid, fontGeneration, rootCbW, rootCbH, texts, check): a whole layout pass the Rust walk builds
 // from the arena and the style engine — the records, runs and tables the JS walk would have sent — laid out as
 // `layoutPass` lays those out (the root placed natively). Answers the pass as `layoutPass` does, `[fragRows, boxRows,
 // changed, textRows?]`, with what names its boxes to the JS side beside it: `[…, recordNids, anonymous, inlineNids]`
@@ -196,12 +198,13 @@ fn layout_build(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgu
     let generation = args.get(1).to_rust_string_lossy(scope);
     let root_cb_w = args.get(2).number_value(scope).unwrap_or(0.0);
     let basis = Basis { w: root_cb_w, h: args.get(3).number_value(scope).unwrap_or(f64::NAN) };
-    let root_rtl = args.get(4).is_true();
-    let texts = args.get(5).is_true();
+    let texts = args.get(4).is_true();
     // …and whether to CHECK every measure put back against laying it out again (`CSIM_NL_REUSE_VERIFY`).
-    let check = args.get(6).is_true();
+    let check = args.get(5).is_true();
     let d = dom(scope);
     let Some(arena) = d.realms.get(&cid) else { return };
+    // (…the root's direction, which places it — the style engine's, as every other value the walk reads)
+    let root_rtl = crate::style::primary_style(arena, root).is_some_and(|s| s.get_inherited_box().direction == Direction::Rtl);
     // (…splicing back from the last kept pass what did not change since it: `Walk::splice`; under the check, the pass is
     // walked whole as well, and the two held against each other)
     let (maths, prior) = d.walk_reuse.entry(cid).or_default().for_walk(&generation);
