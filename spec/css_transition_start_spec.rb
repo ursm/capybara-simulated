@@ -140,6 +140,25 @@ RSpec.describe 'starting a transition' do
     JS
   end
 
+  # `getAnimations()` lists transitions in composite order: by the style change event that started each — older first —
+  # and by property name within one (Chrome, Firefox and the style engine alike).
+  it 'lists transitions by the event that started them, then by name' do
+    s = page('<div id="e"></div><div id="f"></div>',
+             '#e, #f { transition: all 100s linear; color: rgb(0, 0, 0); width: 10px; opacity: 1 }')
+    expect(s.evaluate_script(<<~JS)).to eq(%w[width opacity color color opacity width])
+      (function () {
+        const e = document.getElementById('e'), f = document.getElementById('f');
+        getComputedStyle(e).width; getComputedStyle(f).width;
+        e.style.width = '20px'; getComputedStyle(e).width;
+        e.style.opacity = '0.5'; getComputedStyle(e).opacity;
+        e.style.color = 'rgb(9, 9, 9)'; getComputedStyle(e).color;
+        f.style.width = '20px'; f.style.opacity = '0.5'; f.style.color = 'rgb(9, 9, 9)';
+        getComputedStyle(f).width; getComputedStyle(f).opacity; getComputedStyle(f).color;
+        return e.getAnimations().concat(f.getAnimations()).map((a) => a.transitionProperty);
+      })()
+    JS
+  end
+
   # An element that has just appeared has no before-change style, so it lands on its value rather
   # than transitioning to it — the flush must not invent a baseline for one that was not rendered.
   it 'does not transition an element that has just appeared' do

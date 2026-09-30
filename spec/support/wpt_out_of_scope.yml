@@ -29933,10 +29933,6 @@ css/css-transitions/Element-getAnimations.tentative.html:
   reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
     specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
     path/suffix. CLAUDE.md rule 1.
-- name: getAnimations sorts transitions by when they were generated
-  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
-    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
-    path/suffix. CLAUDE.md rule 1.
 css/css-transitions/KeyframeEffect-getKeyframes-width-and-height-transition.tentative.html:
 - name: getKeyframes() output for a height transition
   reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
