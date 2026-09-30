@@ -295,6 +295,16 @@ RSpec.describe 'walk parity' do
     CSS
   end
 
+  # A `<q>` quotes itself (HTML's sheet), an `attr()` falls back to its string where the attribute is missing, and a
+  # `<progress>` / `<meter>` generates nothing.
+  it 'builds the review repros of round 10' do
+    expect_clean(parity(<<~HTML, <<~'CSS'))
+      <p><q>a <q>b</q></q> <span class="x">y</span> <span class="x" data-m="v">z</span></p><progress></progress><meter></meter>
+    HTML
+      .x::after { content: attr(data-m, "fb") } progress::before, meter::before { content: "no" }
+    CSS
+  end
+
   # A pass whose runs need several faces names every one of them at once, and is compared.
   it 'resolves every face a pass needs' do
     expect_clean(parity(<<~HTML))
@@ -303,9 +313,27 @@ RSpec.describe 'walk parity' do
     HTML
   end
 
+  # A GRID container carries its gaps, its column template — an auto repeat left as one copy for native to count — its
+  # auto rows' height, each track's base and limit, and each item's declared column lines on the grid stream; its items
+  # (an anonymous one around bare text) are records of their own, an auto one imposed its row.
+  it 'builds grid containers' do
+    expect_clean(parity(<<~HTML, <<~'CSS'))
+      <div class="g1"><div>a</div><div>b</div><div>c</div></div>
+      <div class="g2">text <b>x</b> more<div style="grid-column: 1 / -1">full</div></div>
+      <div class="g3"><div>1</div><div>2</div><div>3</div><div>4</div></div><span style="display: inline-grid">ig</span>
+      <div class="g4"><div style="grid-column: span 2">s</div><div style="grid-column-start: 3">t</div><p>u</p><span style="position: absolute">o</span></div>
+    HTML
+      .g1 { display: grid; grid-template-columns: 100px 1fr 20%; gap: 10px 5% }
+      .g2 { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); grid-auto-rows: 40px }
+      .g3 { display: grid; grid-template-columns: repeat(auto-fill, minmax(120px, 1fr)) fit-content(50px); column-gap: 1em }
+      .g4 { display: grid; grid-template-columns: min-content max-content auto fit-content(20%) calc(10% + 5px);
+            grid-auto-rows: minmax(30px, auto); position: relative }
+    CSS
+  end
+
   it 'declines by name what it has not been taught' do
-    stats = parity('<div style="display: grid">x</div>')
+    stats = parity('<div style="writing-mode: vertical-rl">x</div>')
     expect(stats['compared']).to eq(0)
-    expect(stats['declined']).to include('grid' => be_positive)
+    expect(stats['declined']).to include('vertical writing mode' => be_positive)
   end
 end

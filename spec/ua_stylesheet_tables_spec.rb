@@ -228,6 +228,20 @@ RSpec.describe 'UA stylesheet: the rendering tables' do
     expect([size['all'], size['void'], size['box']]).to eq([[41, 20], [26, 26], [22, 22]])
     expect(computed(s, 'all', 'borderCollapse')).to eq('collapse')
     expect([computed(s, 'void', 'borderTopWidth'), computed(s, 'void', 'borderTopStyle')]).to eq(['0px', 'hidden'])
+    # …a cell's border width is what it COMPUTES to — a collapsed cell's own, not the half of the edge its box keeps, and
+    # 0 where its style draws nothing (Chrome: `1px` and `0px`).
+    s2 = page('<table rules="all"><tr><td id="c">x</td></tr></table><table rules="rows"><tr><td id="r">x</td></tr></table>')
+    expect([computed(s2, 'c', 'borderTopWidth'), computed(s2, 'r', 'borderTopWidth')]).to eq(%w[1px 0px])
+  end
+
+  # …and a `rules` or `frame` written later frames and rules the table again (Chrome: 26.22 and 24.22 wide).
+  it 'follows rules and frame written after load' do
+    s = page('<div style="font: 16px monospace"><table id="t" border="1"><tr><td>a</td><td>b</td></tr></table></div>')
+    width = -> { s.evaluate_script("document.getElementById('t').getBoundingClientRect().width") }
+    s.execute_script("document.getElementById('t').setAttribute('rules', 'cols')")
+    expect(width.call).to be_within(0.05).of(26.22)
+    s.execute_script("document.getElementById('t').setAttribute('frame', 'void')")
+    expect(width.call).to be_within(0.05).of(24.22)
   end
 
   # `<hr>`'s own attributes: `size` is how thick the line is, and `color` / `noshade` turn the

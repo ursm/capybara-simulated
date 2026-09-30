@@ -163,9 +163,12 @@ const GENERATED_TEXT: u32 = u32::MAX;
 const PSEUDOS: [style::selector_parser::PseudoElement; 2] =
     [style::selector_parser::PseudoElement::Before, style::selector_parser::PseudoElement::After];
 // The elements that generate no content whatever they declare (`NO_GENERATED_CONTENT`): the replaced ones, the
-// controls, and the breaks.
-const NO_GENERATED_CONTENT: [&str; 14] =
-    ["img", "input", "textarea", "select", "iframe", "video", "audio", "canvas", "object", "embed", "svg", "br", "wbr", "frame"];
+// controls, and the breaks — and a `<progress>` / `<meter>`, which the JS walk lays out as a leaf of its own size, so
+// no box it could generate is ever there (Chrome draws none either).
+const NO_GENERATED_CONTENT: [&str; 16] = [
+    "img", "input", "textarea", "select", "iframe", "video", "audio", "canvas", "object", "embed", "svg", "br", "wbr", "frame",
+    "progress", "meter",
+];
 
 impl Generated {
     fn of(arena: &RealmArena, root: NodeId) -> Generated {
@@ -692,6 +695,157 @@ fn combine(a: f64, b: f64) -> f64 {
 fn half(w: f64) -> f64 {
     if w < 0.0 { 0.0 } else { w / 2.0 }
 }
+// A grid's column template as the JS walk marshals it (`gridTemplateOf`): the tracks with an `auto-fill` / `auto-fit`
+// repeat left as ONE copy — where it starts, how long it is, and 1 fill / 2 fit (-1, 0, 0 for none) — and a literal
+// `repeat(N, …)` expanded. `none` is one implicit column the full width.
+struct GridTemplate {
+    tracks: Vec<GridTrack>,
+    repeat_start: f64,
+    repeat_len: f64,
+    repeat_kind: f64,
+}
+// One track (`parseTrack`): a length and / or a percentage (a linear `calc()` is both), an `fr`, a keyword, a
+// `fit-content()` cap, and the floor a `minmax()` gives it.
+#[derive(Default)]
+struct GridTrack {
+    px: Option<f64>,
+    frac: Option<f64>,
+    fr: Option<f64>,
+    auto: bool,
+    min: bool,
+    max: bool,
+    fit: Option<Box<GridTrack>>,
+    floor: Option<Box<GridTrack>>,
+}
+impl GridTemplate {
+    fn of(v: &style::values::computed::GridTemplateComponent) -> Result<GridTemplate, &'static str> {
+        use style::values::generics::grid::{GenericGridTemplateComponent as Template, RepeatCount, TrackListValue};
+        let implicit = || GridTemplate {
+            tracks: vec![GridTrack { frac: Some(1.0), ..Default::default() }],
+            repeat_start: -1.0,
+            repeat_len: 0.0,
+            repeat_kind: 0.0,
+        };
+        let list = match v {
+            Template::None => return Ok(implicit()),
+            Template::TrackList(list) => list,
+            _ => return Err("grid template"),
+        };
+        let mut out = GridTemplate { tracks: Vec::new(), repeat_start: -1.0, repeat_len: 0.0, repeat_kind: 0.0 };
+        for value in list.values.iter() {
+            match value {
+                TrackListValue::TrackSize(size) => match GridTrack::of(size) {
+                    Some(t) => out.tracks.push(t),
+                    None => return Ok(implicit()),
+                },
+                TrackListValue::TrackRepeat(repeat) => {
+                    let body: Option<Vec<GridTrack>> = repeat.track_sizes.iter().map(GridTrack::of).collect();
+                    let Some(body) = body else { return Ok(implicit()) };
+                    let copies = match repeat.count {
+                        RepeatCount::Number(n) => n.max(1) as usize,
+                        RepeatCount::AutoFill | RepeatCount::AutoFit => {
+                            out.repeat_start = out.tracks.len() as f64;
+                            out.repeat_len = body.len() as f64;
+                            out.repeat_kind = if matches!(repeat.count, RepeatCount::AutoFill) { 1.0 } else { 2.0 };
+                            1
+                        }
+                    };
+                    for _ in 1..copies {
+                        out.tracks.extend(repeat.track_sizes.iter().filter_map(GridTrack::of));
+                    }
+                    out.tracks.extend(body);
+                }
+            }
+        }
+        Ok(if out.tracks.is_empty() { implicit() } else { out })
+    }
+}
+impl GridTrack {
+    fn of(size: &style::values::computed::TrackSize) -> Option<GridTrack> {
+        use style::values::generics::grid::GenericTrackSize as Size;
+        match size {
+            Size::Breadth(b) => GridTrack::breadth(b),
+            Size::Minmax(min, max) => {
+                let mut t = GridTrack::breadth(max)?;
+                t.floor = Some(Box::new(GridTrack::breadth(min)?));
+                Some(t)
+            }
+            Size::FitContent(cap) => Some(GridTrack { fit: Some(Box::new(GridTrack::breadth(cap)?)), ..Default::default() }),
+        }
+    }
+    fn breadth(b: &style::values::computed::TrackBreadth) -> Option<GridTrack> {
+        use style::values::generics::grid::GenericTrackBreadth as Breadth;
+        Some(match b {
+            Breadth::Breadth(lp) => {
+                // (…a comparison function is no track size the JS walk reads, which invalidates the whole template)
+                let s = spec(lp).ok().filter(|s| s.prog.is_none())?;
+                if lp.has_percentage() {
+                    GridTrack { px: Some(s.px), frac: Some(s.frac), ..Default::default() }
+                } else {
+                    GridTrack { px: Some(s.px), ..Default::default() }
+                }
+            }
+            Breadth::Flex(fr) => GridTrack { fr: Some(fr.0 as f64), ..Default::default() },
+            Breadth::Auto => GridTrack { auto: true, ..Default::default() },
+            Breadth::MinContent => GridTrack { min: true, ..Default::default() },
+            Breadth::MaxContent => GridTrack { max: true, ..Default::default() },
+        })
+    }
+    // One side of the track as native resolves it (`nlTrackSideSpec`), `[kind, value, px]`: 0 a length, 1 the
+    // column's min-content, 2 its max-content, 3 `fit-content` capped at a length, 4 a fraction of the grid's content
+    // width beside a length, 5 `fit-content` capped at such a fraction. `min` asks the base's question, else the
+    // limit's.
+    fn side(&self, min: bool) -> [f64; 3] {
+        const SIDE_MIN: [f64; 3] = [1.0, 0.0, 0.0];
+        const SIDE_MAX: [f64; 3] = [2.0, 0.0, 0.0];
+        if let Some(frac) = self.frac {
+            return [4.0, frac, self.px.unwrap_or(0.0)];
+        }
+        if let Some(px) = self.px {
+            return [0.0, px, 0.0];
+        }
+        if let Some(cap) = &self.fit {
+            if min {
+                return SIDE_MIN;
+            }
+            return match (cap.frac, cap.px) {
+                (Some(frac), px) => [5.0, frac, px.unwrap_or(0.0)],
+                (None, Some(px)) => [3.0, px, 0.0],
+                (None, None) => [3.0, f64::INFINITY, 0.0],
+            };
+        }
+        if self.min {
+            return SIDE_MIN;
+        }
+        if self.max {
+            return SIDE_MAX;
+        }
+        if min { SIDE_MIN } else { SIDE_MAX }
+    }
+}
+// The height of a grid's auto rows (`gridRowHeight`): the first px length its `grid-auto-rows` names, or None.
+fn grid_row_height(rows: &style::values::computed::ImplicitGridTracks) -> Option<f64> {
+    use style_traits::ToCss;
+    let text = rows.to_css_string();
+    let at = text.find("px")?;
+    let digits = text[..at].rfind(|c: char| !(c.is_ascii_digit() || c == '.' || c == '-')).map_or(0, |i| i + 1);
+    text[digits..at].parse().ok()
+}
+// …and whether that row is only a FLOOR its items may exceed (`gridRowGrows`): anything but one plain length.
+fn grid_row_grows(rows: &style::values::computed::ImplicitGridTracks) -> bool {
+    use style_traits::ToCss;
+    let text = rows.to_css_string();
+    !(text.ends_with("px") && text[..text.len() - 2].parse::<f64>().is_ok_and(|v| v >= 0.0))
+}
+// An item's declared column lines (`gridColumnPlacement`): its start and end LINE numbers (0 for `auto` or a name) and
+// an explicit `span N` (0 for none).
+fn grid_column_placement(style: &ComputedValues) -> [f64; 3] {
+    let pos = style.get_position();
+    let line = |l: &style::values::computed::GridLine| if l.is_span || !l.ident.0.is_empty() { 0.0 } else { l.line_num as f64 };
+    let span = |l: &style::values::computed::GridLine| if l.is_span { l.line_num.max(1) as f64 } else { 0.0 };
+    let (start, end) = (&pos.grid_column_start, &pos.grid_column_end);
+    [line(start), line(end), if span(start) != 0.0 { span(start) } else { span(end) }]
+}
 // A plain percentage — `50%`, no math function — as its fraction (`declaredPctFraction`).
 fn plain_percentage(lp: &LengthPercentage) -> Option<f64> {
     use style::values::computed::length_percentage::Unpacked;
@@ -1099,9 +1253,9 @@ impl<'a> Walk<'a> {
         let container = intrinsic.is_some() || widget_block || match (role, display.outside()) {
             (Role::Cell, _) => matches!(display.inside(), DisplayInside::TableCell),
             (Role::Caption, _) => matches!(display.outside(), DisplayOutside::TableCaption),
-            (_, DisplayOutside::Block) => matches!(display.inside(), DisplayInside::Flow | DisplayInside::FlowRoot | DisplayInside::Flex | DisplayInside::Table),
+            (_, DisplayOutside::Block) => matches!(display.inside(), DisplayInside::Flow | DisplayInside::FlowRoot | DisplayInside::Flex | DisplayInside::Grid | DisplayInside::Table),
             (_, DisplayOutside::Inline) => match display.inside() {
-                DisplayInside::FlowRoot | DisplayInside::Flex | DisplayInside::Table => true,
+                DisplayInside::FlowRoot | DisplayInside::Flex | DisplayInside::Grid | DisplayInside::Table => true,
                 DisplayInside::Flow => self.holds_block_level(id)?,
                 _ => false,
             },
@@ -1254,6 +1408,9 @@ impl<'a> Walk<'a> {
         }
         if matches!(display.inside(), DisplayInside::Flex) && !widget_block {
             return self.flex(id, idx, &style);
+        }
+        if matches!(display.inside(), DisplayInside::Grid) && !widget_block {
+            return self.grid(id, idx, &style, parent);
         }
         if matches!(display.inside(), DisplayInside::Table) && !widget_block {
             return self.table(id, idx, &style, role, parent);
@@ -1628,18 +1785,11 @@ impl<'a> Walk<'a> {
         Ok(matches!(self.style(p)?.get_box().clone_display().inside(), DisplayInside::Flex))
     }
 
-    // A FLEX container (`walkRecord`'s flex arm): its axes as the codes native reads, its gaps, and its items — in
-    // `order`, each its own record with what native sizes it from — then its out-of-flow children, placed by its
-    // alignment.
-    fn flex(&mut self, id: NodeId, idx: i32, style: &ComputedValues) -> Step {
-        let plan = FlexPlan::of(style);
-        let pos = style.get_position();
-        let items_align = align_kw(pos.align_items.0);
-        let cross_gap = gap(if plan.column { &pos.column_gap } else { &pos.row_gap })?;
-        let main_gap = gap(if plan.column { &pos.row_gap } else { &pos.column_gap })?;
-        // The items: every in-flow element child, the out-of-flow ones apart — and each run of bare text (with any
-        // `<br>` / `<wbr>` in it) between two of them an ANONYMOUS item of its own (`boxItems`), where it holds anything
-        // but white space.
+    // A flex or grid container's items (`boxItems`), in document order with each one's `order`: every in-flow element
+    // child, the out-of-flow ones apart — and each run of bare text (with any `<br>` / `<wbr>` in it) between two of
+    // them an ANONYMOUS item of its own, where it holds anything but white space.
+    #[allow(clippy::type_complexity)]
+    fn box_items(&self, id: NodeId) -> Result<(Vec<(i32, FlexItem)>, Vec<NodeId>), &'static str> {
         let mut items: Vec<(i32, FlexItem)> = Vec::new();
         let mut oof: Vec<NodeId> = Vec::new();
         let mut run: Vec<NodeId> = Vec::new();
@@ -1678,6 +1828,96 @@ impl<'a> Walk<'a> {
             }
         }
         flush(self, &mut run, &mut items);
+        Ok((items, oof))
+    }
+
+    // A GRID container (`walkRecord`'s grid arm): its gaps, its column template with an auto repeat left for native to
+    // count, its auto rows' height, each track's base and limit as the side specs native resolves, and each item's
+    // declared column lines — then its items, each its own record, and its out-of-flow children.
+    fn grid(&mut self, id: NodeId, idx: i32, style: &ComputedValues, parent: i32) -> Step {
+        let pos = style.get_position();
+        let (col_gap, row_gap) = (gap(&pos.column_gap)?, gap(&pos.row_gap)?);
+        // (…a comparison gap names its program by its offset in the math table, which the parity instrument compares
+        // on the grid stream as a number)
+        if col_gap.prog.is_some() || row_gap.prog.is_some() {
+            return Err("grid gap program");
+        }
+        // (…the pass ROOT's percentage row gap resolves against a height its parent imposed, which the pass has not)
+        if parent < 0 && row_gap.frac != 0.0 && self.inputs[idx as usize].height.is_nan() {
+            return Err("grid root row gap");
+        }
+        let template = GridTemplate::of(&pos.grid_template_columns)?;
+        let (items, oof) = self.box_items(id)?;
+        let row_h = grid_row_height(&pos.grid_auto_rows);
+        let grows = row_h.is_some_and(|h| h != 0.0) && grid_row_grows(&pos.grid_auto_rows);
+        let grid_start = self.grids.len() as i32;
+        self.grids.extend([
+            template.tracks.len() as f64,
+            col_gap.px,
+            col_gap.frac,
+            row_gap.px,
+            row_gap.frac,
+            row_h.unwrap_or(f64::NAN),
+            template.repeat_start,
+            template.repeat_len,
+            template.repeat_kind,
+            f64::NAN,
+            f64::NAN,
+            grows as u8 as f64,
+        ]);
+        for t in &template.tracks {
+            let base = t.floor.as_deref().unwrap_or(t).side(true);
+            let limit = if t.fr.is_some() { base } else { t.side(false) };
+            let is_auto = t.auto || t.floor.as_deref().is_some_and(|f| f.auto);
+            self.grids.extend([base[0], base[1], limit[0], limit[1], t.fr.is_some() as u8 as f64, t.fr.unwrap_or(0.0), is_auto as u8 as f64, base[2], limit[2]]);
+        }
+        for (_, item) in &items {
+            let [start, end, span] = match item {
+                FlexItem::Element(c) => grid_column_placement(&*self.style(*c)?),
+                FlexItem::Anonymous(_) => [0.0; 3],
+            };
+            self.grids.extend([start, end, span]);
+        }
+        {
+            let r = &mut self.inputs[idx as usize];
+            r.display = crate::layout::DISPLAY_GRID;
+            r.anon_cross = 0.0;
+            r.grid_start = grid_start;
+        }
+        for (_, item) in &items {
+            let at = self.inputs.len() as i32;
+            match item {
+                FlexItem::Element(c) => self.record(*c, idx)?,
+                FlexItem::Anonymous(run) => self.anonymous_item(id, idx, style, run)?,
+            }
+            // Under `grid-auto-rows`, an AUTO-height item IS the row height: native imposes the row on it as a definite
+            // border-box height (a replaced one keeps its own, and an anonymous one is auto).
+            let auto = match item {
+                FlexItem::Element(c) => size_lp(&self.style(*c)?.get_position().height)?.is_none() && self.intrinsic(*c)?.is_none(),
+                FlexItem::Anonymous(_) => true,
+            };
+            if row_h.is_some_and(|h| h != 0.0) && auto {
+                let r = &mut self.inputs[at as usize];
+                r.row_imposed = true;
+                r.item_auto_height = false;
+            }
+        }
+        for &c in &oof {
+            self.out_of_flow(c, idx)?;
+        }
+        Ok(())
+    }
+
+    // A FLEX container (`walkRecord`'s flex arm): its axes as the codes native reads, its gaps, and its items — in
+    // `order`, each its own record with what native sizes it from — then its out-of-flow children, placed by its
+    // alignment.
+    fn flex(&mut self, id: NodeId, idx: i32, style: &ComputedValues) -> Step {
+        let plan = FlexPlan::of(style);
+        let pos = style.get_position();
+        let items_align = align_kw(pos.align_items.0);
+        let cross_gap = gap(if plan.column { &pos.column_gap } else { &pos.row_gap })?;
+        let main_gap = gap(if plan.column { &pos.row_gap } else { &pos.column_gap })?;
+        let (mut items, oof) = self.box_items(id)?;
         items.sort_by_key(|&(order, _)| order);
         let r = &mut self.inputs[idx as usize];
         r.display = crate::layout::DISPLAY_FLEX;

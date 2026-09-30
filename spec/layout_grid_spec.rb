@@ -31,6 +31,13 @@ RSpec.describe 'grid track sizing' do
     boxes.map {|b| b[2].round }
   end
 
+  # An auto repeat makes the template an `<auto-track-list>` (§7.2.3), every track of which is a FIXED size: a
+  # `fit-content()` beside one invalidates the whole declaration, which is then `none` — one column the full width.
+  it 'takes a template whose auto repeat sits beside an intrinsic track as none' do
+    expect(widths_of('repeat(auto-fill, 100px) fit-content(50px)')).to eq([1000, 1000])
+    expect(widths_of('repeat(auto-fill, 100px) 50px', items: 1)).to eq([100])
+  end
+
   it 'gives a fixed track its size and the rest to fr' do
     # Chrome: 250 / 750. The percentage resolves against the container, and `1fr`
     # takes what is left — not half each.

@@ -69,6 +69,18 @@ RSpec.describe 'generated content' do
     expect(s.evaluate_script("getComputedStyle(document.getElementById('h'), '::before').content")).to eq('"shown" / "alt"')
   end
 
+  # HTML's sheet quotes a `<q>` (`q::before { content: open-quote }`), and an `attr()` falls back to the string it names
+  # where the element has no such attribute (Chrome: `yfb` 28.81 wide, `yv` 19.22).
+  it 'quotes a q and falls back from an attr()' do
+    (x, _), w, s = measure('<div class=w><q id=t>T</q></div>')
+    expect(x).to eq(0)
+    expect(s.evaluate_script("document.getElementById('t').getBoundingClientRect().width")).to be_within(0.01).of(w.call("\u201CT\u201D"))
+    _, w, s = measure('<div class=w><span id=t class=x>y</span><span id=u class=x data-m=v>y</span></div>', '.x::after { content: attr(data-m, "fb") }')
+    widths = %w[t u].map {|id| s.evaluate_script("document.getElementById('#{id}').getBoundingClientRect().width") }
+    expect(widths[0]).to be_within(0.01).of(w.call('yfb'))
+    expect(widths[1]).to be_within(0.01).of(w.call('yv'))
+  end
+
   it 'generates nothing for none, normal, or no content at all' do
     %w[none normal].each do |v|
       (x, _), _, s = measure('<div class=w id=h><span id=t>T</span></div>', "#h::before { content: #{v} }")
