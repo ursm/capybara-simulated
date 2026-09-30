@@ -349,6 +349,19 @@ RSpec.describe 'walk parity' do
     HTML
   end
 
+  # Rounds 12-13: a vertical flex row aligns its baseline items at the start (it has no baseline geometry to align on),
+  # and a span of one — named or not — is no span.
+  it 'builds the review repros of rounds 12 and 13' do
+    expect_clean(parity(<<~HTML))
+      <div style="writing-mode: vertical-lr; height: 200px"><div style="display: flex; align-items: baseline">
+        <div style="font-size: 20px">a</div><div style="align-self: last baseline">b</div></div></div>
+      <div style="display: grid; grid-template-columns: [a] 50px [b] 50px [c] 50px">
+        <div style="grid-column: span b">1</div><div style="grid-column: span 2 b">2</div>
+        <div style="grid-column: span 1 b">3</div><div style="grid-column: 2 / span 1">4</div></div>
+      <div style="display: grid; grid-auto-rows: minmax(1em, auto)"><div>c<br>c2</div></div>
+    HTML
+  end
+
   # A VERTICAL writing mode: its block axis the horizontal one (a block's auto width is its content's), its UA margins
   # flow-relative, a flex container's axes its flow's, and a line's alignment never from the right.
   it 'builds vertical writing modes' do

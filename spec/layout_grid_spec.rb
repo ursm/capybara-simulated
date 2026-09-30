@@ -45,6 +45,15 @@ RSpec.describe 'grid track sizing' do
     expect(boxes[0][3]).to eq(40)
   end
 
+  # …but `minmax(<length>, auto)` keeps its length as a FLOOR: rows at least that tall, a one-line item stretched to it,
+  # a taller item growing its row (Chrome: 100 around one line, 120 around six 20px lines, and 220 for the grid).
+  it 'keeps a minmax() row floor and grows past it' do
+    body = '<div id="g" style="display:grid;grid-template-columns:1fr 1fr;grid-auto-rows:minmax(100px,auto);font:16px/20px monospace">' \
+           '<div id="a">a</div><div>b</div><div>c<br>c<br>c<br>c<br>c<br>c</div><div>d</div></div>'
+    boxes, = measure(body, ['#g', '#a'], style: 'margin:0')
+    expect(boxes.map {|b| b[3] }).to eq([220, 100])
+  end
+
   it 'gives a fixed track its size and the rest to fr' do
     # Chrome: 250 / 750. The percentage resolves against the container, and `1fr`
     # takes what is left — not half each.

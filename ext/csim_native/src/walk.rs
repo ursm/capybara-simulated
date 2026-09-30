@@ -365,8 +365,7 @@ enum BaselineMode {
 }
 impl BaselineMode {
     fn of(plan: &FlexPlan) -> BaselineMode {
-        // (…physically, as the JS walk decides it: a row whose main axis runs down reads as a column there)
-        if !plan.main_is_x { BaselineMode::Axis } else { BaselineMode::Keep }
+        if plan.column { BaselineMode::Axis } else { BaselineMode::Keep }
     }
 }
 
@@ -858,18 +857,24 @@ fn grid_row_height(rows: &style::values::computed::ImplicitGridTracks) -> Option
     let text = rows.to_css_string();
     text.strip_suffix("px").and_then(|v| v.parse::<f64>().ok()).filter(|&v| v >= 0.0)
 }
+// …and the floor a content row keeps (`gridRowFloor`): the length a single `minmax(<length>, <anything else>)` names.
+fn grid_row_floor(rows: &style::values::computed::ImplicitGridTracks) -> Option<f64> {
+    use style::values::generics::grid::{GenericTrackBreadth as Breadth, GenericTrackSize as Size};
+    let [Size::Minmax(Breadth::Breadth(min), max)] = &rows.0[..] else { return None };
+    if min.has_percentage() || matches!(max, Breadth::Breadth(lp) if !lp.has_percentage()) {
+        return None;
+    }
+    min.to_length().map(|l| l.px() as f64)
+}
 // An item's declared column lines (`gridColumnPlacement`): its start and end LINE numbers (0 for `auto` or a name) and
 // an explicit `span N` (0 for none).
 fn grid_column_placement(style: &ComputedValues) -> [f64; 3] {
     let pos = style.get_position();
     let line = |l: &style::values::computed::GridLine| if l.is_span || !l.ident.0.is_empty() { 0.0 } else { l.line_num as f64 };
     // (…a span to a NAMED line is none: `span b` counts no lines here, in either walk)
-    // (…`span b` counts no lines here, in either walk; `span 2 b` counts its two)
-    let span = |l: &style::values::computed::GridLine| match (l.is_span, l.ident.0.is_empty()) {
-        (true, true) => l.line_num.max(1) as f64,
-        (true, false) if l.line_num > 1 => l.line_num as f64,
-        _ => 0.0,
-    };
+    // (…a span of ONE is no span, whatever line it names — it places the item as one column either way, and `span b` is
+    // `span 1 b` to the style engine)
+    let span = |l: &style::values::computed::GridLine| if l.is_span && l.line_num > 1 { l.line_num as f64 } else { 0.0 };
     let (start, end) = (&pos.grid_column_start, &pos.grid_column_end);
     [line(start), line(end), if span(start) != 0.0 { span(start) } else { span(end) }]
 }
@@ -1936,6 +1941,7 @@ impl<'a> Walk<'a> {
         let template = GridTemplate::of(&pos.grid_template_columns)?;
         let (items, oof) = self.box_items(id)?;
         let row_h = grid_row_height(&pos.grid_auto_rows);
+        let row_floor = if row_h.is_none() { grid_row_floor(&pos.grid_auto_rows) } else { None };
         let grid_start = self.grids.len() as i32;
         self.grids.extend([
             template.tracks.len() as f64,
@@ -1949,6 +1955,7 @@ impl<'a> Walk<'a> {
             template.repeat_kind,
             f64::NAN,
             f64::NAN,
+            row_floor.unwrap_or(f64::NAN),
         ]);
         for t in &template.tracks {
             let base = t.floor.as_deref().unwrap_or(t).side(true);
@@ -1977,14 +1984,18 @@ impl<'a> Walk<'a> {
             }
             // Under `grid-auto-rows`, an AUTO-height item IS the row height: native imposes the row on it as a definite
             // border-box height (a replaced one keeps its own, and an anonymous one is auto).
+            // (…and under a row that is only a FLOOR, stretched to it where it is shorter — its height still its own)
             let auto = match item {
                 FlexItem::Element(c) => size_lp(&self.style(*c)?.get_position().height)?.is_none() && self.intrinsic(*c)?.is_none(),
                 FlexItem::Anonymous(_) => true,
             };
-            if row_h.is_some_and(|h| h != 0.0) && auto {
+            let fixed = row_h.is_some_and(|h| h != 0.0);
+            if auto && (fixed || row_floor.is_some()) {
                 let r = &mut self.inputs[at as usize];
                 r.row_imposed = true;
-                r.item_auto_height = false;
+                if fixed {
+                    r.item_auto_height = false;
+                }
             }
         }
         for &c in &oof {
@@ -2057,7 +2068,13 @@ impl<'a> Walk<'a> {
                     (Kw::Auto, rtl, FlexBasisSpec { px: f64::NAN, frac: f64::NAN, prog: None, keyword: 0 }, true, 0)
                 }
             };
-            let align = plan.cross_align(items_align, own_align, own_rtl, BaselineMode::of(&plan), true);
+            let mode = BaselineMode::of(&plan);
+            let align = match plan.cross_align(items_align, own_align, own_rtl, mode, true) {
+                // (…a row whose main axis runs DOWN has no baseline geometry to align its items on: they sit at the start,
+                // as `nlCrossAlign` puts them)
+                Kw::Baseline | Kw::LastBaseline if mode == BaselineMode::Keep && !plan.main_is_x => Kw::FlexStart,
+                align => align,
+            };
             let basis_math = self.math(basis.prog.as_deref());
             let cross_auto_margin = if plan.main_is_x { auto & (4 | 8) != 0 } else { auto & (1 | 2) != 0 };
             let r = &mut self.inputs[at as usize];

@@ -6989,8 +6989,9 @@ const GRID_TRACK_STRIDE: usize = 9;
 // marshalled copy starts, how long it is, and its kind (1 fill, 2 fit; -1 / 0 / 0 when there is none).
 // …then each gap's PROGRAM where it is a comparison function (an offset into the pass's math table, NaN = none: its
 // `px + frac` pair is the gap), so a `gap: min(10%, 20px)` is a figure this computes rather than one it has to be
-// handed resolved — bounds beside the pair from 2026-09-22, a program since 2026-09-26.
-const GRID_HEADER: usize = 11;
+// handed resolved — bounds beside the pair from 2026-09-22, a program since 2026-09-26 — and the FLOOR a content row
+// keeps (`minmax(<length>, auto)`: at least that tall, taller round a taller item; NaN = none).
+const GRID_HEADER: usize = 12;
 impl GridTrack {
     fn decode(grids: &[f64], o: usize) -> GridTrack {
         GridTrack {
@@ -8062,6 +8063,7 @@ fn measure_grid(
     let row_h = n.definite_content_h().unwrap_or(0.0);
     let row_gap = bounded(grids[gs + 3] + if grids[gs + 4] != 0.0 { grids[gs + 4] * row_h } else { 0.0 }, math_ref(grids[gs + 10]), row_h).max(0.0);
     let decl_row_h = grids[gs + 5];
+    let row_floor = if grids[gs + 11].is_nan() { 0.0 } else { grids[gs + 11] };
     let tmpl_base = gs + GRID_HEADER;
     // The in-flow items, in record order — the out-of-flow children join no row.
     let kids: Vec<usize> = children[i].iter().copied().filter(|&c| inputs[c].get().out_of_flow == 0).collect();
@@ -8128,7 +8130,7 @@ fn measure_grid(
     for (k, &c) in kids.iter().enumerate() {
         let cell = cells[k];
         if k > 0 && cell.row != cells[k - 1].row {
-            row_top += if is_auto(decl_row_h) { row_h } else { decl_row_h } + row_gap;
+            row_top += if is_auto(decl_row_h) { row_h.max(row_floor) } else { decl_row_h } + row_gap;
             row_h = 0.0;
         }
         let mut track_w = 0.0;
@@ -8149,7 +8151,7 @@ fn measure_grid(
         // box at those (Chrome), and the box IS that figure, a border-box one included: a table's caption resolves
         // its percentage offset against it (`layoutGrid`'s `Math.max(declaredRowH, ce.top + ce.bottom)`). Derived
         // from the row, never from the height it wrote, so it too is idempotent.
-        if item.row_imposed {
+        if item.row_imposed && !is_auto(decl_row_h) {
             item = item.with_imposed_height(decl_row_h.max(item.edges_y()));
             inputs[c].set(item);
         }
@@ -8169,7 +8171,16 @@ fn measure_grid(
             resolve_width(&item, track_w)
         };
         measure(c, child_w, f64::NAN, inputs, runs, run_texts, grids, children, boxes, failed, &mut FloatCtx::new(), 0.0, 0.0);
-        let ih = boxes[c].h;
+        let mut ih = boxes[c].h;
+        // …and one under a row that is only a FLOOR is at least that tall: an item shorter than it stretches to it, laid
+        // out again at that height as a declared row's would be (Chrome: a one-line item in a `minmax(100px, auto)` row
+        // is 100).
+        if item.row_imposed && is_auto(decl_row_h) && ih < row_floor {
+            item = item.with_imposed_height(row_floor.max(item.edges_y()));
+            inputs[c].set(item);
+            measure(c, child_w, f64::NAN, inputs, runs, run_texts, grids, children, boxes, failed, &mut FloatCtx::new(), 0.0, 0.0);
+            ih = boxes[c].h;
+        }
         boxes[c].x = content_left + offsets[cell.col] + Input::m(item.ml);
         boxes[c].y = content_top_rel + row_top + Input::m(item.mt);
         if ih > row_h {
@@ -8177,7 +8188,7 @@ fn measure_grid(
         }
         // …and the content ends where the ROWS do: an item taller than a FIXED row overflows it (`layoutGrid`). A zero
         // row is the oracle's auto placeholder, and its items still size the grid.
-        let row_end = if is_auto(decl_row_h) || decl_row_h == 0.0 { ih } else { decl_row_h };
+        let row_end = if is_auto(decl_row_h) || decl_row_h == 0.0 { ih.max(row_floor) } else { decl_row_h };
         if row_top + row_end > bottom {
             bottom = row_top + row_end;
         }
@@ -10001,11 +10012,11 @@ mod tests {
     // A marshalled grid buffer: the header, `specs` track sides (base kind/val, limit kind/val, is_fr, weight,
     // is_auto, base px, limit px) and `places` item placements (start line, end line, span) — the shape `nlShadowRun` writes.
     fn grid_buffer(literal: usize, repeat: (f64, usize, u8), specs: &[[f64; 9]], places: &[[f64; 3]]) -> Vec<f64> {
-        // …GRID_HEADER wide, and the tail is the two gaps' PROGRAMS (none). Built by hand here,
+        // …GRID_HEADER wide, and the tail is the two gaps' PROGRAMS (none) and the row floor (none). Built by hand here,
         // so the header's length is one of the three places a stride change has to be made — this test file is the
         // third, and it is the one that catches it.
         let mut g = vec![literal as f64, 0.0, 0.0, 0.0, 0.0, f64::NAN, repeat.0, repeat.1 as f64, repeat.2 as f64,
-                         f64::NAN, f64::NAN];
+                         f64::NAN, f64::NAN, f64::NAN];
         for spec in specs {
             g.extend_from_slice(spec);
         }
