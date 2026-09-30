@@ -103,9 +103,12 @@ pub(crate) fn own_hints(node: &NodeData, out: &mut Vec<Hint>) {
             decl("border-spacing", &px);
         }
         // `border` is the frame's width — zero included, and 1px for a value that is no number. (Its `outset` style is
-        // the UA sheet's, below the `frame` rules: `:-servo-nonzero-border`.)
+        // the UA sheet's, below the `frame` rules: `:-servo-nonzero-border`.) A `frame` with no `border` draws 1px, in
+        // Chrome and Firefox alike, where the spec leaves the width at its initial `medium`.
         if let Some(px) = table_border(node) {
             decl("border-width", &px);
+        } else if attr("frame").is_some() {
+            decl("border-width", "1px");
         }
         if let Some(c) = attr("bordercolor").and_then(legacy_color) {
             decl("border-color", &c);

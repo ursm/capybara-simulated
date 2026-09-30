@@ -10,9 +10,9 @@
 // difference there is the two style systems disagreeing (stylo's lengths are f32; it snaps a border width), which the
 // instrument tallies apart from a record the walks built differently.
 //
-// It builds only what it has been taught, and DECLINES the rest by name — a percentage, a float, a positioned box,
-// inline elements, a replaced element, generated content, a shadow tree — as the JS walk declines what native cannot
-// lay out: the JS walk then lays the page out as before. It mirrors that walk's FLIP mode, where every branch that
+// It builds only what it has been taught, and DECLINES the rest by name — a grid, a vertical writing mode, a list-box
+// `<select>`, a shadow tree, a `display: contents` element — as the JS walk declines what native cannot lay out: the JS
+// walk then lays the page out as before. It mirrors that walk's FLIP mode, where every branch that
 // would read the JS layout's own boxes (a pushed size, a replayed box, a percentage resolved against the JS layout's
 // basis) declines the pass instead: so a shape it takes is one whose records say only what the page declares.
 
@@ -101,8 +101,13 @@ pub(crate) enum Outcome {
 // Walk the subtree at `root` — the element the JS walk took as its pass root.
 pub(crate) fn build(arena: &RealmArena, root: NodeId, basis: Basis, faces: &mut Faces) -> Outcome {
     faces.missing.clear();
+    let generated = Generated::of(arena, root);
+    if generated.unlinked {
+        return Outcome::Declined("generated content unlinked");
+    }
     let mut walk = Walk {
         arena,
+        generated: &generated,
         faces,
         basis,
         inputs: Vec::new(),
@@ -140,8 +145,87 @@ pub(crate) fn build(arena: &RealmArena, root: NodeId, basis: Basis, faces: &mut 
 
 type Step = Result<(), &'static str>;
 
+// A pass's GENERATED CONTENT (`pseudoNodeFor`): each `::before` / `::after` box that renders, the element it is of, and
+// the text its `content` makes of the style engine's value. The box is the node the JS side registered for it
+// (`linkPseudoBox`), so both walks' records name the same box; its text is the one node the walk makes itself, since no
+// tree holds one — an id of its own generation, which no arena node has.
+#[derive(Default)]
+struct Generated {
+    // Each element's rendering boxes, `::before` and `::after`…
+    of: HashMap<NodeId, [Option<NodeId>; 2]>,
+    // …and each box's element, which of the two it is, and its text (none for an empty one).
+    boxes: HashMap<NodeId, (NodeId, usize, Option<NodeId>)>,
+    texts: Vec<crate::dom::NodeData>,
+    // Whether a box renders that the JS side has not linked to its element: none to name its record by.
+    unlinked: bool,
+}
+const GENERATED_TEXT: u32 = u32::MAX;
+const PSEUDOS: [style::selector_parser::PseudoElement; 2] =
+    [style::selector_parser::PseudoElement::Before, style::selector_parser::PseudoElement::After];
+// The elements that generate no content whatever they declare (`NO_GENERATED_CONTENT`): the replaced ones, the
+// controls, and the breaks.
+const NO_GENERATED_CONTENT: [&str; 14] =
+    ["img", "input", "textarea", "select", "iframe", "video", "audio", "canvas", "object", "embed", "svg", "br", "wbr", "frame"];
+
+impl Generated {
+    fn of(arena: &RealmArena, root: NodeId) -> Generated {
+        let mut g = Generated::default();
+        let mut stack = vec![root];
+        while let Some(id) = stack.pop() {
+            let Some(node) = arena.get(id) else { continue };
+            stack.extend(node.children.iter().copied());
+            if node.kind != NodeKind::Element || NO_GENERATED_CONTENT.contains(&&*node.local_name) {
+                continue;
+            }
+            for (which, pseudo) in PSEUDOS.iter().enumerate() {
+                let Some(text) = crate::style::eager_pseudo(arena, id, pseudo).and_then(|style| generated_text(&style, node)) else {
+                    continue;
+                };
+                let Some(at) = node.pseudo_boxes[which].filter(|&b| arena.get(b).is_some()) else {
+                    g.unlinked = true;
+                    continue;
+                };
+                let text = (!text.is_empty()).then(|| {
+                    let tid = NodeId { idx: g.texts.len() as u32, generation: GENERATED_TEXT };
+                    g.texts.push(crate::dom::NodeData { parent: Some(at), ..crate::dom::NodeData::of_kind(NodeKind::Text, text) });
+                    tid
+                });
+                g.of.entry(id).or_default()[which] = Some(at);
+                g.boxes.insert(at, (id, which, text));
+            }
+        }
+        g
+    }
+}
+// What a generated box's `content` renders (`generatedContentOf`), or None for none: its strings, an `attr()` of its
+// element (its fallback where the element has none), the quote marks `quotes` gives — and nothing for a counter or an
+// image, nor for the alternative text past `/`.
+fn generated_text(style: &ComputedValues, element: &crate::dom::NodeData) -> Option<Vec<u16>> {
+    use style::values::generics::counters::{GenericContent, GenericContentItem as Item};
+    use style::values::specified::list::Quotes;
+    let GenericContent::Items(items) = &style.get_counters().content else { return None };
+    let quote = |open: bool| -> String {
+        match &style.get_list().quotes {
+            Quotes::Auto => (if open { "\u{201C}" } else { "\u{201D}" }).to_owned(),
+            Quotes::QuoteList(list) => list.0.first().map_or_else(String::new, |q| (if open { &q.opening } else { &q.closing }).to_string()),
+        }
+    };
+    let mut out = String::new();
+    for item in &items.items[..items.alt_start.min(items.items.len())] {
+        match item {
+            Item::String(s) => out.push_str(s),
+            Item::Attr(attr) => out.push_str(element.get_attr(&attr.attribute).unwrap_or(&attr.fallback)),
+            Item::OpenQuote => out.push_str(&quote(true)),
+            Item::CloseQuote => out.push_str(&quote(false)),
+            _ => {}
+        }
+    }
+    Some(out.encode_utf16().collect())
+}
+
 struct Walk<'a> {
     arena: &'a RealmArena,
+    generated: &'a Generated,
     faces: &'a mut Faces,
     basis: Basis,
     inputs: Vec<Input>,
@@ -911,19 +995,45 @@ impl<'a> Walk<'a> {
         at
     }
 
+    // A node's style: an element's, or a generated box's — its element's `::before` / `::after`.
     fn style(&self, id: NodeId) -> Result<Arc<ComputedValues>, &'static str> {
-        crate::style::primary_style(self.arena, id).ok_or("unstyled")
+        match self.generated.boxes.get(&id) {
+            Some(&(origin, which, _)) => crate::style::eager_pseudo(self.arena, origin, &PSEUDOS[which]).ok_or("unstyled"),
+            None => crate::style::primary_style(self.arena, id).ok_or("unstyled"),
+        }
     }
 
+    // A node the walk lays out: the arena's, or the text a generated box holds.
+    fn get(&self, id: NodeId) -> Option<&'a crate::dom::NodeData> {
+        if id.generation == GENERATED_TEXT {
+            return self.generated.texts.get(id.idx as usize);
+        }
+        self.arena.get(id)
+    }
     fn node(&self, id: NodeId) -> &'a crate::dom::NodeData {
-        self.arena.get(id).expect("a walked node is live")
+        self.get(id).expect("a walked node is live")
+    }
+    // …and its parent: a generated box's is the element it is of, which no tree says.
+    fn parent_of(&self, id: NodeId) -> Option<NodeId> {
+        match self.generated.boxes.get(&id) {
+            Some(&(origin, ..)) => Some(origin),
+            None => self.node(id).parent,
+        }
     }
 
     // The element's children the flow lays out, in order — the DOM's, since this walk declines a shadow tree, a slot
-    // and a box-less `display: contents` element (`layoutChildren` looks through them).
+    // and a box-less `display: contents` element (`layoutChildren` looks through them) — its `::before` box first
+    // and its `::after` box last; and a generated box's, its text.
     fn children(&self, id: NodeId) -> impl Iterator<Item = NodeId> + 'a {
         let arena = self.arena;
-        self.node(id).children.iter().copied().filter(move |&c| arena.get(c).is_some())
+        let (first, kids, last) = match self.generated.boxes.get(&id) {
+            Some(&(.., text)) => (text, &[][..], None),
+            None => {
+                let [before, after] = self.generated.of.get(&id).copied().unwrap_or_default();
+                (before, &self.node(id).children[..], after)
+            }
+        };
+        first.into_iter().chain(kids.iter().copied().filter(move |&c| arena.get(c).is_some())).chain(last)
     }
 
     // One element's record, and its subtree's (`walkRecord`) — an in-flow box's, or an out-of-flow one's that `oof`
@@ -975,9 +1085,6 @@ impl<'a> Walk<'a> {
         }
         if node.shadow_root.is_some() || tag == "slot" {
             return Err("shadow tree");
-        }
-        if self.generates_content(id) {
-            return Err("generated content");
         }
         let b = style.get_box();
         let display = b.clone_display();
@@ -1463,7 +1570,7 @@ impl<'a> Walk<'a> {
     // The root element's font size, which an `rem` resolves against.
     fn root_font_size(&self) -> Result<f64, &'static str> {
         let mut cur = self.root;
-        while let Some(p) = self.node(cur).parent.filter(|&p| self.node(p).kind == NodeKind::Element) {
+        while let Some(p) = self.parent_of(cur).filter(|&p| self.node(p).kind == NodeKind::Element) {
             cur = p;
         }
         Ok(font_size(&*self.style(cur)?))
@@ -1511,13 +1618,13 @@ impl<'a> Walk<'a> {
 
     // Is the element's parent a flex or grid container?
     fn parent_is_item_container(&self, id: NodeId) -> Result<bool, &'static str> {
-        let Some(p) = self.node(id).parent.filter(|&p| self.node(p).kind == NodeKind::Element) else { return Ok(false) };
+        let Some(p) = self.parent_of(id).filter(|&p| self.node(p).kind == NodeKind::Element) else { return Ok(false) };
         Ok(self.style(p)?.get_box().clone_display().is_item_container())
     }
 
     // Is the element an item of a flex container — its parent one, and itself in flow?
     fn flex_item(&self, id: NodeId) -> Result<bool, &'static str> {
-        let Some(p) = self.node(id).parent.filter(|&p| self.node(p).kind == NodeKind::Element) else { return Ok(false) };
+        let Some(p) = self.parent_of(id).filter(|&p| self.node(p).kind == NodeKind::Element) else { return Ok(false) };
         Ok(matches!(self.style(p)?.get_box().clone_display().inside(), DisplayInside::Flex))
     }
 
@@ -2412,13 +2519,13 @@ impl<'a> Walk<'a> {
     // ancestor — a fixed one's only where a transform, a filter or containment makes one its containing block — the
     // root element never; None for the viewport. One outside this pass's records is declined.
     fn containing_block(&self, id: NodeId, fixed: bool) -> Result<Option<NodeId>, &'static str> {
-        let mut cur = self.node(id).parent;
+        let mut cur = self.parent_of(id);
         while let Some(p) = cur {
             let node = self.node(p);
             if node.kind != NodeKind::Element {
                 break;
             }
-            let is_root = node.parent.and_then(|d| self.arena.get(d)).is_some_and(|d| d.kind == NodeKind::Document);
+            let is_root = self.parent_of(p).and_then(|d| self.get(d)).is_some_and(|d| d.kind == NodeKind::Document);
             if is_root {
                 break;
             }
@@ -2431,7 +2538,7 @@ impl<'a> Walk<'a> {
                 let inline = inline_flow && !block;
                 return if inline || self.rec_index.contains_key(&p) { Ok(Some(p)) } else { Err("containingBlockBox") };
             }
-            cur = node.parent;
+            cur = self.parent_of(p);
         }
         Ok(None)
     }
@@ -2708,9 +2815,6 @@ impl<'a> Walk<'a> {
         if node.shadow_root.is_some() || tag == "slot" {
             return Err("shadow tree");
         }
-        if self.generates_content(c) {
-            return Err("generated content");
-        }
         let d = cs.get_box().clone_display();
         if d.is_contents() {
             return Err("display contents");
@@ -2925,15 +3029,6 @@ impl<'a> Walk<'a> {
     }
 
     // Does `id` have a `::before` / `::after` that generates a box? (Not laid out here yet.)
-    fn generates_content(&self, id: NodeId) -> bool {
-        use style::selector_parser::PseudoElement;
-        [PseudoElement::Before, PseudoElement::After].iter().any(|pseudo| {
-            crate::style::eager_pseudo(self.arena, id, pseudo).is_some_and(|s| {
-                !s.get_box().clone_display().is_none() && !matches!(s.get_counters().content, style::values::generics::counters::GenericContent::Normal | style::values::generics::counters::GenericContent::None)
-            })
-        })
-    }
-
     // A box's `vertical-align` as the JS model resolves it (`resolveVerticalAlign`): None on the baseline, else its
     // mode and the SHIFT it carries — its own (`sub` / `super` by the parent's font size, a length, a percentage of
     // its own line height) plus the one the inline box it is in carries, which a box that declares nothing still
@@ -2978,7 +3073,7 @@ impl<'a> Walk<'a> {
     }
     // The shift the inline box a box sits in carries (`inlineParentShift`): a BLOCK ends the walk.
     fn inline_parent_shift(&mut self, id: NodeId) -> Result<f64, &'static str> {
-        let Some(p) = self.node(id).parent else { return Ok(0.0) };
+        let Some(p) = self.parent_of(id) else { return Ok(0.0) };
         if self.node(p).kind != NodeKind::Element {
             return Ok(0.0);
         }
@@ -3012,7 +3107,7 @@ impl<'a> Walk<'a> {
     // The one figure of the parent's font an alignment against it reads (`vaParentFigure`): half its x-height for
     // `middle`, its ascent for `text-top`, its descent for `text-bottom`.
     fn parent_figure(&mut self, id: NodeId, mode: VaMode) -> Result<f64, &'static str> {
-        let p = self.node(id).parent.filter(|&p| self.node(p).kind == NodeKind::Element).unwrap_or(id);
+        let p = self.parent_of(id).filter(|&p| self.node(p).kind == NodeKind::Element).unwrap_or(id);
         let ps = self.style(p)?;
         let face = self.face(&ps)?;
         let size = font_size(&ps);
@@ -3025,7 +3120,7 @@ impl<'a> Walk<'a> {
     }
     // …and its font size (`sub` / `super` shift by the PARENT's font).
     fn parent_font_size(&self, id: NodeId) -> Result<f64, &'static str> {
-        let p = self.node(id).parent.filter(|&p| self.node(p).kind == NodeKind::Element).unwrap_or(id);
+        let p = self.parent_of(id).filter(|&p| self.node(p).kind == NodeKind::Element).unwrap_or(id);
         let ps = self.style(p)?;
         Ok(font_size(&ps))
     }
@@ -3131,7 +3226,7 @@ impl<'a> Walk<'a> {
     // The direction a flow-relative float or clear is read in: the nearest ancestor's that is not an inline box
     // (`flowRelativeRtl`).
     fn flow_relative_rtl(&self, id: NodeId) -> Result<bool, &'static str> {
-        let mut cur = self.node(id).parent;
+        let mut cur = self.parent_of(id);
         while let Some(p) = cur {
             let node = self.node(p);
             if node.kind != NodeKind::Element {
@@ -3142,7 +3237,7 @@ impl<'a> Walk<'a> {
             if !(matches!(d.outside(), DisplayOutside::Inline) && matches!(d.inside(), DisplayInside::Flow)) {
                 return Ok(ps.get_inherited_box().direction == Direction::Rtl);
             }
-            cur = node.parent;
+            cur = self.parent_of(p);
         }
         Ok(false)
     }
@@ -3151,7 +3246,7 @@ impl<'a> Walk<'a> {
     // `flow` / `flow-root` box, which is all this walk takes: in flow, floated or out of flow.
     fn establishes_bfc(&self, id: NodeId, style: &ComputedValues) -> bool {
         let node = self.node(id);
-        let parent_is_element = node.parent.and_then(|p| self.arena.get(p)).is_some_and(|p| p.kind == NodeKind::Element);
+        let parent_is_element = self.parent_of(id).and_then(|p| self.get(p)).is_some_and(|p| p.kind == NodeKind::Element);
         if !parent_is_element {
             return true;
         }
@@ -3170,7 +3265,7 @@ impl<'a> Walk<'a> {
         if self.clips_content(id, style) {
             return true;
         }
-        if let Some(p) = node.parent {
+        if let Some(p) = self.parent_of(id) {
             if let Ok(ps) = self.style(p) {
                 if ps.get_box().clone_display().is_item_container() {
                     return true;
@@ -3195,10 +3290,10 @@ impl<'a> Walk<'a> {
             return false;
         }
         let visible = |s: &ComputedValues| s.get_box().overflow_x == Overflow::Visible && s.get_box().overflow_y == Overflow::Visible;
-        let parent = node.parent.and_then(|p| self.arena.get(p).map(|n| (p, n)));
+        let parent = self.parent_of(id).and_then(|p| self.get(p).map(|n| (p, n)));
         match parent {
             Some((_, pn)) if pn.kind == NodeKind::Document => return false,
-            Some((p, pn)) if &*node.local_name == "body" && &*pn.local_name == "html" && pn.parent.and_then(|d| self.arena.get(d)).is_some_and(|d| d.kind == NodeKind::Document) => {
+            Some((p, pn)) if &*node.local_name == "body" && &*pn.local_name == "html" && self.parent_of(p).and_then(|d| self.get(d)).is_some_and(|d| d.kind == NodeKind::Document) => {
                 if self.style(p).is_ok_and(|ps| visible(&ps)) {
                     return false;
                 }
@@ -3214,7 +3309,7 @@ impl<'a> Walk<'a> {
     fn legacy_align(&self, id: NodeId) -> u8 {
         let mut cur = Some(id);
         while let Some(at) = cur {
-            let Some(node) = self.arena.get(at) else { break };
+            let Some(node) = self.get(at) else { break };
             if node.kind != NodeKind::Element {
                 break;
             }
@@ -3230,7 +3325,7 @@ impl<'a> Walk<'a> {
                     _ => {}
                 }
             }
-            cur = node.parent;
+            cur = self.parent_of(at);
         }
         0
     }

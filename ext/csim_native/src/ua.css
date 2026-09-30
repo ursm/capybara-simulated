@@ -189,7 +189,7 @@ table[rules=cols i], table[rules=all i] {
   border-style: hidden;
   border-collapse: collapse;
 }
-table[border]:-servo-nonzero-border { border-style: outset; }
+table[border]:where(:-servo-nonzero-border) { border-style: outset; }
 table[frame=void i] { border-style: hidden; }
 table[frame=above i] { border-style: outset hidden hidden hidden; }
 table[frame=below i] { border-style: hidden hidden outset hidden; }
@@ -198,8 +198,8 @@ table[frame=lhs i] { border-style: hidden hidden hidden outset; }
 table[frame=rhs i] { border-style: hidden outset hidden hidden; }
 table[frame=vsides i] { border-style: hidden outset; }
 table[frame=box i], table[frame=border i] { border-style: outset; }
-table[border]:-servo-nonzero-border > tr > :is(td, th),
-table[border]:-servo-nonzero-border > :is(thead, tbody, tfoot) > tr > :is(td, th) {
+table[border]:where(:-servo-nonzero-border) > tr > :is(td, th),
+table[border]:where(:-servo-nonzero-border) > :is(thead, tbody, tfoot) > tr > :is(td, th) {
   border-width: 1px;
   border-style: inset;
 }

@@ -212,6 +212,24 @@ RSpec.describe 'UA stylesheet: the rendering tables' do
     expect(computed(s, 'c1', 'paddingTop')).to eq('9px')
   end
 
+  # `rules` collapses the table and hides its frame, drawing its lines between the cells; `frame` picks the frame's
+  # sides over what `border` gives it, and draws 1px where there is no `border` at all. Chrome and Firefox measure the
+  # same boxes: 41x20 for two 20px cells ruled `all` (one 1px rule between them, the rim suppressed), 26x26 for a
+  # `border=1 frame=void` table's one cell (its 1px inset frame, the table's hidden), 22x22 for a spacing-less
+  # `frame=box` table's.
+  it 'maps rules and frame' do
+    cell = '<td style="width: 20px; height: 20px; padding: 0"></td>'
+    s = page(<<~HTML)
+      <table id="all" rules="all"><tr>#{cell}#{cell}</tr></table>
+      <table id="void" border="1" frame="void"><tr>#{cell}</tr></table>
+      <table id="box" frame="box" style="border-spacing: 0"><tr>#{cell}</tr></table>
+    HTML
+    size = ->(id) { s.evaluate_script("document.getElementById('#{id}').getBoundingClientRect()").values_at('width', 'height') }
+    expect([size['all'], size['void'], size['box']]).to eq([[41, 20], [26, 26], [22, 22]])
+    expect(computed(s, 'all', 'borderCollapse')).to eq('collapse')
+    expect([computed(s, 'void', 'borderTopWidth'), computed(s, 'void', 'borderTopStyle')]).to eq(['0px', 'hidden'])
+  end
+
   # `<hr>`'s own attributes: `size` is how thick the line is, and `color` / `noshade` turn the
   # etched groove into a solid block whose border is half that size on every side.
   it 'sizes an hr from its attributes' do

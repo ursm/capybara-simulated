@@ -275,6 +275,26 @@ RSpec.describe 'walk parity' do
     HTML
   end
 
+  # GENERATED CONTENT: an element's `::before` / `::after` box — the node the JS side registered for it — is its first /
+  # last child, holding the text the style engine's `content` makes: strings, `attr()`, the quote marks, nothing for a
+  # counter nor for the alternative text; as an inline, a block, a float, an out-of-flow box, a flex item, in a table.
+  it 'builds generated content' do
+    expect_clean(parity(<<~HTML, <<~'CSS'))
+      <p class="a" data-x="attr!">text</p><div class="b">x</div><span class="q">q</span>
+      <div class="f">item</div><table class="t"><tr><td>c</td></tr></table><p class="fl">text beside</p>
+      <div class="ab" style="position: relative">abs</div><p class="e">e</p><p class="n">n</p><ol><li class="cn">c</li></ol>
+      <span class="ib">ib</span><p class="none">z</p>
+    HTML
+      .a::before { content: "Hi " } .a::after { content: attr(data-x) "!" / "alt" }
+      .b::before { content: "blk"; display: block } .q::before { content: open-quote } .q::after { content: close-quote }
+      .f { display: flex } .f::before { content: "B" } .f::after { content: "A"; flex: 1 } .t::before { content: "tb" }
+      .fl::before { content: "F"; float: left; width: 20px } .ab::after { content: "X"; position: absolute; right: 0 }
+      .e::before { content: "" } .n::before { content: "\f00c\A x"; white-space: pre }
+      .cn::before { content: counter(list-item) ". " } .ib::before { content: "I"; display: inline-block; padding: 3px }
+      .none::before { content: "hidden"; display: none }
+    CSS
+  end
+
   # A pass whose runs need several faces names every one of them at once, and is compared.
   it 'resolves every face a pass needs' do
     expect_clean(parity(<<~HTML))

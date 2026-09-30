@@ -61,6 +61,14 @@ RSpec.describe 'generated content' do
     expect(s.evaluate_script("getComputedStyle(document.getElementById('h'), '::before').content")).to eq('"dd-e"')
   end
 
+  # The text past a `/` is the ALTERNATIVE text (CSS Content 3 §2), for assistive technology: it renders nothing, and
+  # the computed value keeps it apart (Chrome: `"shown" / "alt"`, the box as wide as `shown`).
+  it 'renders none of the alternative text' do
+    (x, _), w, s = measure('<div class=w id=h><span id=t>T</span></div>', '#h::before { content: "shown" / "alt" }')
+    expect(x).to be_within(0.01).of(w.call('shown'))
+    expect(s.evaluate_script("getComputedStyle(document.getElementById('h'), '::before').content")).to eq('"shown" / "alt"')
+  end
+
   it 'generates nothing for none, normal, or no content at all' do
     %w[none normal].each do |v|
       (x, _), _, s = measure('<div class=w id=h><span id=t>T</span></div>', "#h::before { content: #{v} }")

@@ -154,6 +154,9 @@ pub(crate) struct NodeData {
     // An `<img>`'s natural size once its image has decoded (`naturalWidth` / `naturalHeight`); None while it has not —
     // no source, still loading, broken.
     pub(crate) natural_size: Option<(f64, f64)>,
+    // An element's generated-content boxes, `::before` and `::after` — the nodes the JS side registered for them, which
+    // no tree holds (`linkPseudoBox`) — for the walk to lay out as its first and last children.
+    pub(crate) pseudo_boxes: [Option<NodeId>; 2],
     // What the style engine keeps on a node (an element's id atom, parsed `style` attribute and computed style; a
     // parent's selector flags): made the first time the engine asks, so a realm with no style engine pays a pointer.
     pub(crate) style: std::cell::OnceCell<Box<crate::style::StyleSlot>>,
@@ -206,6 +209,7 @@ impl NodeData {
             assigned_slot: None,
             value: None,
             natural_size: None,
+            pseudo_boxes: [None; 2],
             style: std::cell::OnceCell::new(),
         }
     }
@@ -936,6 +940,7 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_, ()>, ctx: &v8::Global<v8:
     // Element state no attribute carries, for the state pseudo-classes (`:checked`, `:focus`, `:hover`, …).
     register(scope, ns, "setState", set_state, context_id);
     register(scope, ns, "setNaturalSize", set_natural_size, context_id);
+    register(scope, ns, "linkPseudoBox", link_pseudo_box, context_id);
     register(scope, ns, "setShadowHost", set_shadow_host, context_id);
     register(scope, ns, "setAssignedNodes", set_assigned_nodes, context_id);
     register(scope, ns, "setValue", set_value, context_id);
@@ -1191,6 +1196,22 @@ fn set_natural_size(
     let cid = realm_id(scope, &args);
     if let Some(node) = realm(scope, cid).get_mut(id) {
         node.natural_size = (w > 0.0 && h > 0.0).then_some((w, h));
+    }
+}
+
+// __dom.linkPseudoBox(nid, which, boxNid): the box an element's `::before` (0) or `::after` (1) generates.
+fn link_pseudo_box(
+    scope: &mut v8::PinScope<'_, '_>,
+    args: v8::FunctionCallbackArguments<'_>,
+    _rv: v8::ReturnValue<'_, v8::Value>,
+) {
+    let (Some(id), Some(pseudo)) = (nid_arg(scope, &args, 0), nid_arg(scope, &args, 2)) else {
+        return;
+    };
+    let which = args.get(1).number_value(scope).unwrap_or(0.0) as usize;
+    let cid = realm_id(scope, &args);
+    if let Some(node) = realm(scope, cid).get_mut(id) {
+        node.pseudo_boxes[which.min(1)] = Some(pseudo);
     }
 }
 
