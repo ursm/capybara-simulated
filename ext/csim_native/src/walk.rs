@@ -82,6 +82,10 @@ pub(crate) struct Built {
     pub(crate) inlines: Vec<InlineBox>,
     pub(crate) grids: Vec<f64>,
     pub(crate) maths: Vec<f64>,
+    // …and what names each box to the JS side: the anonymous ones as `[record, kind, container nid, ordinal]`, and
+    // the element each inline table entry is of, by nid.
+    pub(crate) anon: Vec<[f64; 4]>,
+    pub(crate) inline_nids: Vec<f64>,
 }
 
 // The pass root's containing block, which a percentage in the ROOT's own record resolves against: the viewport, for the
@@ -125,10 +129,15 @@ pub(crate) fn build(arena: &RealmArena, root: NodeId, basis: Basis, faces: &mut 
         inline_of: HashMap::new(),
         inline_cbs: Vec::new(),
         collapse: HashMap::new(),
+        anon: Vec::new(),
     };
     let done = walk.root(root).and_then(|()| walk.resolve_inline_cbs());
     if !walk.faces.missing.is_empty() {
         return Outcome::NeedsFaces;
+    }
+    let mut inline_nids = vec![-1.0; walk.inlines.len()];
+    for (el, &at) in &walk.inline_of {
+        inline_nids[at] = el.to_f64();
     }
     match done {
         Ok(()) => Outcome::Built(Built {
@@ -138,6 +147,8 @@ pub(crate) fn build(arena: &RealmArena, root: NodeId, basis: Basis, faces: &mut 
             inlines: walk.inlines,
             grids: walk.grids,
             maths: walk.maths,
+            inline_nids,
+            anon: walk.anon,
         }),
         Err(why) => Outcome::Declined(why),
     }
@@ -266,6 +277,10 @@ struct Walk<'a> {
     // A collapsing table's cells, each with the half-borders the grid resolved for it (`ensureCollapseBorders`), top
     // right bottom left: what its record carries in place of its own borders.
     collapse: HashMap<NodeId, [f64; 4]>,
+    // The ANONYMOUS cells and items the pass holds, each by its record — which kind (1 a table's cell, 2 a flex or grid
+    // container's item), its container, and which of the container's anonymous ones it is: what names it to the JS
+    // side, whose memoised object it is (`tableGrid` / `boxItems`).
+    anon: Vec<[f64; 4]>,
 }
 
 // An alignment keyword as the JS walk reads it (`alignKeyword`): `safe` / `unsafe` dropped, `first baseline` the
@@ -906,7 +921,9 @@ fn js_trim_empty(text: &[u16]) -> bool {
 // A flex item: an element, or an anonymous one around a run of bare text.
 enum FlexItem {
     Element(NodeId),
-    Anonymous(Vec<NodeId>),
+    // (…and which of the container's anonymous items it is, counted in document order: what names it to the JS side,
+    // whose `boxItems` made the same one)
+    Anonymous(Vec<NodeId>, u32),
 }
 
 // A resolved `vertical-align` (`verticalAlignFor`): its mode and the shift it carries.
@@ -958,6 +975,7 @@ enum Kid {
 #[derive(Clone)]
 struct Mark {
     inputs: usize,
+    anon: usize,
     runs: usize,
     entries: usize,
     inlines: usize,
@@ -1892,7 +1910,8 @@ impl<'a> Walk<'a> {
             });
             let run = std::mem::take(run);
             if kept {
-                items.push((0, FlexItem::Anonymous(run)));
+                let ordinal = items.iter().filter(|(_, it)| matches!(it, FlexItem::Anonymous(..))).count() as u32;
+                items.push((0, FlexItem::Anonymous(run, ordinal)));
             }
         };
         for c in self.children(id).collect::<Vec<_>>() {
@@ -1966,7 +1985,7 @@ impl<'a> Walk<'a> {
         for (_, item) in &items {
             let [start, end, span] = match item {
                 FlexItem::Element(c) => grid_column_placement(&*self.style(*c)?),
-                FlexItem::Anonymous(_) => [0.0; 3],
+                FlexItem::Anonymous(..) => [0.0; 3],
             };
             self.grids.extend([start, end, span]);
         }
@@ -1980,17 +1999,24 @@ impl<'a> Walk<'a> {
             let at = self.inputs.len() as i32;
             match item {
                 FlexItem::Element(c) => self.record(*c, idx)?,
-                FlexItem::Anonymous(run) => self.anonymous_item(id, idx, style, run)?,
+                FlexItem::Anonymous(run, ordinal) => self.anonymous_item(id, idx, style, run, *ordinal)?,
             }
             // Under `grid-auto-rows`, an AUTO-height item IS the row height: native imposes the row on it as a definite
             // border-box height (a replaced one keeps its own, and an anonymous one is auto).
-            // (…and under a row that is only a FLOOR, stretched to it where it is shorter — its height still its own)
-            let auto = match item {
-                FlexItem::Element(c) => size_lp(&self.style(*c)?.get_position().height)?.is_none() && self.intrinsic(*c)?.is_none(),
-                FlexItem::Anonymous(_) => true,
+            // (…and under a row that is only a FLOOR, stretched to it where it is shorter — its height still its own —
+            // where it STRETCHES across its row at all: `align-self`, else the grid's `align-items`, `gridItemFloored`)
+            let (auto, stretches) = match item {
+                FlexItem::Element(c) => {
+                    let cs = self.style(*c)?;
+                    let own = align_kw(cs.get_position().align_self.0);
+                    let align = if own == Kw::Auto { align_kw(pos.align_items.0) } else { own };
+                    let auto = size_lp(&cs.get_position().height)?.is_none() && self.intrinsic(*c)?.is_none();
+                    (auto, matches!(align, Kw::Normal | Kw::Stretch | Kw::Auto | Kw::Left | Kw::Right))
+                }
+                FlexItem::Anonymous(..) => (true, matches!(align_kw(pos.align_items.0), Kw::Normal | Kw::Stretch | Kw::Auto | Kw::Left | Kw::Right)),
             };
             let fixed = row_h.is_some_and(|h| h != 0.0);
-            if auto && (fixed || row_floor.is_some()) {
+            if auto && (fixed || (row_floor.is_some() && stretches)) {
                 let r = &mut self.inputs[at as usize];
                 r.row_imposed = true;
                 if fixed {
@@ -2062,8 +2088,8 @@ impl<'a> Walk<'a> {
                     let rtl = cs.get_inherited_box().direction == Direction::Rtl;
                     (align_kw(cpos.align_self.0), rtl, FlexBasisSpec::of(&cs)?, cross_auto, auto)
                 }
-                FlexItem::Anonymous(run) => {
-                    self.anonymous_item(id, idx, style, &run)?;
+                FlexItem::Anonymous(run, ordinal) => {
+                    self.anonymous_item(id, idx, style, &run, ordinal)?;
                     let rtl = style.get_inherited_box().direction == Direction::Rtl;
                     (Kw::Auto, rtl, FlexBasisSpec { px: f64::NAN, frac: f64::NAN, prog: None, keyword: 0 }, true, 0)
                 }
@@ -2194,18 +2220,20 @@ impl<'a> Walk<'a> {
             self.grids.push(spec[k]);
             self.grids.push(pct[k]);
         }
-        // The rows, grouped as their groups hold them, in render order (header, body, footer).
+        // The rows, grouped as their groups hold them, in render order (header, body, footer) — the anonymous cells among
+        // them counted in that order, as `tableGrid` lists them.
+        let mut anon_cells = 0u32;
         let mut i = 0;
         while i < grid.rows.len() {
             let Some(gi) = grid.rows[i].group else {
-                self.table_row(&grid, i, idx, style)?;
+                self.table_row(&grid, i, idx, style, &mut anon_cells)?;
                 i += 1;
                 continue;
             };
             let g = grid.groups[gi].el;
             let at = self.table_part(g, idx, crate::layout::DISPLAY_TABLE_ROW_GROUP)?;
             while i < grid.rows.len() && grid.rows[i].group == Some(gi) {
-                self.table_row(&grid, i, at, style)?;
+                self.table_row(&grid, i, at, style, &mut anon_cells)?;
                 i += 1;
             }
         }
@@ -2409,7 +2437,7 @@ impl<'a> Walk<'a> {
         Ok(at)
     }
     // A row and its cells (`emitRow`).
-    fn table_row(&mut self, grid: &TableGrid, i: usize, parent: i32, table_style: &ComputedValues) -> Step {
+    fn table_row(&mut self, grid: &TableGrid, i: usize, parent: i32, table_style: &ComputedValues, anon_cells: &mut u32) -> Step {
         let row = &grid.rows[i];
         let at = match row.el {
             Some(el) => {
@@ -2454,7 +2482,8 @@ impl<'a> Walk<'a> {
                     (cell_valign(&cs), size_lp(&cs.get_position().width)?.and_then(plain_percentage).unwrap_or(f64::NAN), self.pct_height_child(*c)?)
                 }
                 CellEl::Anon(run) => {
-                    self.anonymous_cell(grid.table, at, table_style, run, cell.halves)?;
+                    self.anonymous_cell(grid.table, at, table_style, run, cell.halves, *anon_cells)?;
+                    *anon_cells += 1;
                     let mut any = false;
                     for &k in run {
                         any |= self.pct_height_in(k)?;
@@ -2476,8 +2505,9 @@ impl<'a> Walk<'a> {
     // An ANONYMOUS cell around a run of a row's stray content (`anonTableCell`): no element, the TABLE's inherited
     // style, and the run as its children.
     // (…in a collapsing table it is a collapse cell with no borders of its own, holding the halves the grid gave it)
-    fn anonymous_cell(&mut self, table: NodeId, parent: i32, style: &ComputedValues, run: &[NodeId], halves: Option<[f64; 4]>) -> Step {
+    fn anonymous_cell(&mut self, table: NodeId, parent: i32, style: &ComputedValues, run: &[NodeId], halves: Option<[f64; 4]>, ordinal: u32) -> Step {
         let at = self.inputs.len() as i32;
+        self.anon.push([at as f64, 1.0, table.to_f64(), ordinal as f64]);
         let mut rec = fresh_record();
         rec.nid = -1.0;
         rec.parent = parent;
@@ -2741,8 +2771,9 @@ impl<'a> Walk<'a> {
     // An ANONYMOUS flex item (`anonBoxItem`): a block of no element around a run of the container's bare text, which
     // takes the container's inherited style and every other property's initial value — its record (nid −1), and its
     // lines.
-    fn anonymous_item(&mut self, container: NodeId, parent: i32, style: &ComputedValues, run: &[NodeId]) -> Step {
+    fn anonymous_item(&mut self, container: NodeId, parent: i32, style: &ComputedValues, run: &[NodeId], ordinal: u32) -> Step {
         let at = self.inputs.len() as i32;
+        self.anon.push([at as f64, 2.0, container.to_f64(), ordinal as f64]);
         let mut rec = fresh_record();
         rec.nid = -1.0;
         rec.parent = parent;
@@ -2775,6 +2806,7 @@ impl<'a> Walk<'a> {
     fn mark(&self) -> Mark {
         Mark {
             inputs: self.inputs.len(),
+            anon: self.anon.len(),
             runs: self.runs.len(),
             entries: self.entries.len(),
             inlines: self.inlines.len(),
@@ -2787,6 +2819,7 @@ impl<'a> Walk<'a> {
     // the floats before it.
     fn rollback(&mut self, m: Mark) {
         self.inputs.truncate(m.inputs);
+        self.anon.truncate(m.anon);
         self.runs.truncate(m.runs);
         self.run_texts.truncate(m.runs);
         self.entries.truncate(m.entries);

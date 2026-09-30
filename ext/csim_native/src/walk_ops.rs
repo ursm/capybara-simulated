@@ -1,5 +1,6 @@
-// The walk-parity ops (`__dom.walkParity*`): the instrument that holds the Rust walk (`walk.rs`) against the JS one
-// while both exist. A `layoutPass` made under it (`CSIM_WALK_PARITY=1`) keeps the records the JS walk sent; the JS side
+// The Rust walk's ops: `layoutBuild`, the layout pass the Rust walk builds on its own (the style engine's values, no JS
+// walk), and the walk-parity ops (`__dom.walkParity*`): the instrument that holds the Rust walk (`walk.rs`) against the
+// JS one while both exist. A `layoutPass` made under it (`CSIM_WALK_PARITY=1`) keeps the records the JS walk sent; the JS side
 // then asks `walkParity`, which walks the same pass root here and compares the two field by field — asking back for the
 // faces it has not been told of (`walkFace`), which only the JS side can resolve today. `walkParityStats` answers the
 // tally as JSON and starts a new one.
@@ -7,11 +8,12 @@
 use std::collections::BTreeMap;
 use std::fmt::Write;
 
-use crate::dom::{dom, realm_id, register, NodeId};
+use crate::dom::{dom, f64_array, laid_answer, realm_id, register, NodeId};
 use crate::layout::{InlineBox, Input, Run, RunText};
 use crate::walk::{self, Basis, Face, Faces, FieldDiff, Outcome};
 
 pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Object>, context_id: i32) {
+    register(scope, ns, "layoutBuild", layout_build, context_id);
     register(scope, ns, "walkParity", walk_parity, context_id);
     register(scope, ns, "walkFace", walk_face, context_id);
     register(scope, ns, "walkParityStats", walk_parity_stats, context_id);
@@ -92,14 +94,7 @@ fn walk_parity(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgum
             parity.asked = true;
             let wanted: Vec<(String, &'static str)> = parity.faces.missing.clone();
             parity.pending = Some(pass);
-            let out = v8::Array::new(scope, (wanted.len() * 2) as i32);
-            for (i, (family, bucket)) in wanted.iter().enumerate() {
-                let f = v8::String::new(scope, family).unwrap();
-                let b = v8::String::new(scope, bucket).unwrap();
-                out.set_index(scope, (i * 2) as u32, f.into());
-                out.set_index(scope, (i * 2 + 1) as u32, b.into());
-            }
-            rv.set(out.into());
+            rv.set(faces_answer(scope, &wanted).into());
         }
         Outcome::Declined(why) => {
             parity.stats.passes += 1;
@@ -175,6 +170,67 @@ fn walk_parity(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgum
             }
         }
     }
+}
+
+// __dom.layoutBuild(rootNid, fontGeneration, rootCbW, rootCbH, rootRtl, texts): a whole layout pass the Rust walk builds
+// from the arena and the style engine — the records, runs and tables the JS walk would have sent — laid out as
+// `layoutPass` lays those out (the root placed natively). Answers the pass as `layoutPass` does, `[fragRows, boxRows,
+// changed, textRows?]`, with what names its boxes to the JS side beside it: `[…, recordNids, anonymous, inlineNids]`
+// (an anonymous cell or item as `[record, kind, container nid, ordinal]`, flat). Or `[family, bucket, …]` — the faces
+// the walk needs first, for the JS side to resolve (`walkFace`) and ask again — or the walk's decline, a string, for
+// the JS walk to take the pass.
+fn layout_build(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let cid = realm_id(scope, &args);
+    let Some(root) = NodeId::from_i64(args.get(0).number_value(scope).unwrap_or(-1.0) as i64) else { return };
+    let generation = args.get(1).to_rust_string_lossy(scope);
+    let root_cb_w = args.get(2).number_value(scope).unwrap_or(0.0);
+    let basis = Basis { w: root_cb_w, h: args.get(3).number_value(scope).unwrap_or(f64::NAN) };
+    let root_rtl = args.get(4).is_true();
+    let texts = args.get(5).is_true();
+    let d = dom(scope);
+    let Some(arena) = d.realms.get(&cid) else { return };
+    let faces = &mut d.walk_parity.entry(cid).or_default().faces;
+    faces.at_generation(&generation);
+    let built = match walk::build(arena, root, basis, faces) {
+        Outcome::Built(built) => built,
+        Outcome::Declined(why) => {
+            let s = v8::String::new(scope, why).unwrap();
+            rv.set(s.into());
+            return;
+        }
+        Outcome::NeedsFaces => {
+            let wanted = faces.missing.clone();
+            rv.set(faces_answer(scope, &wanted).into());
+            return;
+        }
+    };
+    let walk::Built { mut inputs, runs, run_texts, inlines, grids, maths, anon, inline_nids } = built;
+    let nids: Vec<f64> = inputs.iter().map(|r| r.nid).collect();
+    let out = crate::layout::layout_block_in_place(&mut inputs, &runs, &run_texts, &grids, &inlines, &maths, f64::NAN, f64::NAN, root_cb_w, root_rtl, None, texts);
+    let crate::layout::Outcome::LaidOut(laid) = out else {
+        let s = v8::String::new(scope, "native declined").unwrap();
+        rv.set(s.into());
+        return;
+    };
+    let answer = laid_answer(scope, cid, laid, texts);
+    let anon: Vec<f64> = anon.iter().flatten().copied().collect();
+    for (at, list) in [(4, &nids), (5, &anon), (6, &inline_nids)] {
+        let v: v8::Local<v8::Value> = f64_array(scope, list).into();
+        answer.set_index(scope, at, v);
+    }
+    rv.set(answer.into());
+}
+
+// The faces a walk needs, `[family, bucket, …]`, for the JS side to resolve.
+fn faces_answer<'s>(scope: &mut v8::PinScope<'s, '_>, wanted: &[(String, &'static str)]) -> v8::Local<'s, v8::Array> {
+    let out = v8::Array::new(scope, (wanted.len() * 2) as i32);
+    for (i, (family, bucket)) in wanted.iter().enumerate() {
+        let f = v8::String::new(scope, family).unwrap();
+        let b = v8::String::new(scope, bucket).unwrap();
+        out.set_index(scope, (i * 2) as u32, f.into());
+        out.set_index(scope, (i * 2 + 1) as u32, b.into());
+    }
+    out
 }
 
 // __dom.walkFace(family, bucket, handle, asc, desc, gap, space, xh): the face the JS side resolved for a family and a bucket

@@ -2688,37 +2688,44 @@ fn layout_pass(
     match out {
         crate::layout::Outcome::Unsupported => rv.set_bool(false),
         crate::layout::Outcome::LaidOut(laid) => {
-            let st = realm(scope, cid);
-            let mut rows: Vec<f64> = Vec::with_capacity(laid.boxes.len() * 12);
-            let mut changed: Vec<f64> = Vec::new();
-            for (i, b) in laid.boxes.into_iter().enumerate() {
-                rows.extend(box_row(&b));
-                let node = if b.nid >= 0.0 { NodeId::from_i64(b.nid as i64).and_then(|id| st.get_mut_quietly(id)) } else { None };
-                match node {
-                    Some(node) if node.layout_box == Some(b) => {}
-                    Some(node) => {
-                        node.layout_box = Some(b);
-                        changed.push(i as f64);
-                    }
-                    None => changed.push(i as f64),
-                }
-            }
-            let flat: Vec<f64> = laid.frags.iter().flatten().copied().collect();
-            let answer = v8::Array::new(scope, 4);
-            let frag_rows: v8::Local<v8::Value> = f64_array(scope, &flat).into();
-            let box_rows: v8::Local<v8::Value> = f64_array(scope, &rows).into();
-            let changed: v8::Local<v8::Value> = f64_array(scope, &changed).into();
-            answer.set_index(scope, 0, frag_rows);
-            answer.set_index(scope, 1, box_rows);
-            answer.set_index(scope, 2, changed);
-            if texts {
-                let flat: Vec<f64> = laid.texts.iter().flatten().copied().collect();
-                let text_rows: v8::Local<v8::Value> = f64_array(scope, &flat).into();
-                answer.set_index(scope, 3, text_rows);
-            }
+            let answer = laid_answer(scope, cid, laid, texts);
             rv.set(answer.into());
         }
     }
+}
+
+// A laid-out pass as the JS side takes it: `[fragRows, boxRows, changed, textRows?]` — each box stored on its node as
+// well (`layout_box`, what `boxOf` reads), and `changed` naming the records whose box moved from the one stored.
+pub(crate) fn laid_answer<'s>(scope: &mut v8::PinScope<'s, '_>, cid: i32, laid: crate::layout::Laid, texts: bool) -> v8::Local<'s, v8::Array> {
+    let st = realm(scope, cid);
+    let mut rows: Vec<f64> = Vec::with_capacity(laid.boxes.len() * 12);
+    let mut changed: Vec<f64> = Vec::new();
+    for (i, b) in laid.boxes.into_iter().enumerate() {
+        rows.extend(box_row(&b));
+        let node = if b.nid >= 0.0 { NodeId::from_i64(b.nid as i64).and_then(|id| st.get_mut_quietly(id)) } else { None };
+        match node {
+            Some(node) if node.layout_box == Some(b) => {}
+            Some(node) => {
+                node.layout_box = Some(b);
+                changed.push(i as f64);
+            }
+            None => changed.push(i as f64),
+        }
+    }
+    let flat: Vec<f64> = laid.frags.iter().flatten().copied().collect();
+    let answer = v8::Array::new(scope, 4);
+    let frag_rows: v8::Local<v8::Value> = f64_array(scope, &flat).into();
+    let box_rows: v8::Local<v8::Value> = f64_array(scope, &rows).into();
+    let changed: v8::Local<v8::Value> = f64_array(scope, &changed).into();
+    answer.set_index(scope, 0, frag_rows);
+    answer.set_index(scope, 1, box_rows);
+    answer.set_index(scope, 2, changed);
+    if texts {
+        let flat: Vec<f64> = laid.texts.iter().flatten().copied().collect();
+        let text_rows: v8::Local<v8::Value> = f64_array(scope, &flat).into();
+        answer.set_index(scope, 3, text_rows);
+    }
+    answer
 }
 
 // The pass's inputs assembled, then the chunks it placed marked used and the idle ones dropped. None where a chunk
@@ -2910,7 +2917,7 @@ fn emit_chunk(store: &ChunkStore, id: u32, out: &mut Assembly) -> bool {
 }
 
 // A Float64Array holding `vals` — how a pass hands a flat table back to JS in one crossing.
-fn f64_array<'s>(scope: &mut v8::PinScope<'s, '_>, vals: &[f64]) -> v8::Local<'s, v8::Float64Array> {
+pub(crate) fn f64_array<'s>(scope: &mut v8::PinScope<'s, '_>, vals: &[f64]) -> v8::Local<'s, v8::Float64Array> {
     let bytes: Vec<u8> = vals.iter().flat_map(|v| v.to_ne_bytes()).collect();
     let store = v8::ArrayBuffer::new_backing_store_from_vec(bytes).make_shared();
     let buf = v8::ArrayBuffer::with_backing_store(scope, &store);
