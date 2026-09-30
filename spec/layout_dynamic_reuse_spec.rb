@@ -1577,8 +1577,12 @@ RSpec.describe 'layout reuse across dynamic style state' do
     end
 
     # …and only when it FLIPS: marking every edit's auto ancestor anyway cost a `<body dir=auto>` page every memo in
-    # the document per text edit (6x on 3,000 elements). A COUNT, not a wall — `__csimSubtreeMarks`.
+    # the document per text edit (6x on 3,000 elements). A COUNT, not a wall — `__csimSubtreeMarks`. The marks are the
+    # JS walk's (the probe flips only a scope this side laid out from its answer, `_autoDirLaid`): under the style engine
+    # the Rust walk takes the direction off the engine, and nothing on this side asks it.
     it 'leaves the subtree alone when an edit does not flip the direction' do
+      saved = ENV['CSIM_STYLO']
+      ENV['CSIM_STYLO'] = nil
       s = session_for('', '<div dir="auto"><span id="a">hello</span><p>x</p></div>')
       marks = lambda do |change|
         s.evaluate_script(<<~JS)
@@ -1593,6 +1597,8 @@ RSpec.describe 'layout reuse across dynamic style state' do
       end
       expect(marks.call("document.getElementById('a').firstChild.data = 'world'")).to eq(0)
       expect(marks.call("document.getElementById('a').firstChild.data = 'שלום'")).to be > 0
+    ensure
+      ENV['CSIM_STYLO'] = saved
     end
   end
 end

@@ -291,4 +291,27 @@ RSpec.describe 'the scrollable overflow region' do
     expect(plain_table_scroll('width:100px;border-style:solid;border-width:6px 20px 2px 4px;border-collapse:collapse',
                               '<tr><td style="width:40px;height:20px;padding:0">a</td></tr>')).to eq([98, 25])
   end
+
+  # The region is stamped when something READS it, not after every pass — so a box one pass MOVED and the next left
+  # alone still reaches its scroller from where it went: the first pass grows `#a` and pushes `#b` down (`#b` itself
+  # unchanged), the second touches only a box outside, and only then is the region asked. (Chrome: 100, 140.)
+  it 'follows a box two passes back when nothing read the region between them' do
+    html = %(<!DOCTYPE html><html><head><style>body { margin: 0 } #s { overflow: auto; width: 100px; height: 100px }
+               #a { height: 10px } #b { height: 80px } #o { height: 10px }</style></head>
+             <body><div id="s"><div id="a"></div><div id="b"></div></div><div id="o"></div></body></html>)
+    s = simulated_session(->(_env) { [200, {'content-type' => 'text/html'}, [html]] })
+    s.visit '/'
+    got = s.evaluate_script(<<~JS)
+      (() => {
+        const sc = document.getElementById('s'), out = [sc.scrollHeight];
+        document.getElementById('a').style.height = '60px';
+        document.body.offsetHeight;
+        document.getElementById('o').style.height = '20px';
+        document.body.offsetHeight;
+        out.push(sc.scrollHeight);
+        return out;
+      })()
+    JS
+    expect(got).to eq([100, 140])
+  end
 end
