@@ -3058,8 +3058,9 @@ pub(crate) fn f64_array<'s>(scope: &mut v8::PinScope<'s, '_>, vals: &[f64]) -> v
 // edges as the pass used them (`layout::Box::edges`, NaN where it has none), which `auto` margins it has in the JS
 // side's mask (1 top, 2 right, 4 bottom, 8 left — `AUTO_MARGIN_BIT`) with 16 beside them where an edge resolved a
 // percentage, and where it is out of flow what placed it: `Box::out_of_flow`, `cb` (the record, or −1 the viewport,
-// −2 the inline entry after it, −3 nothing: a replayed box), `cb_inline` and `static_axes`.
-pub(crate) const BOX_ROW: usize = 29;
+// −2 the inline entry after it, −3 nothing: a replayed box), `cb_inline` and `static_axes` — and its `position`
+// where the pass says (`Box::position`).
+pub(crate) const BOX_ROW: usize = 30;
 fn box_row(b: &crate::layout::Box) -> [f64; BOX_ROW] {
     let [mt, mr, mb, ml] = b.used_margins.unwrap_or([f64::NAN; 4]);
     let am = b.auto_margins;
@@ -3077,6 +3078,7 @@ fn box_row(b: &crate::layout::Box) -> [f64; BOX_ROW] {
     };
     row[27] = b.cb_inline as f64;
     row[28] = b.static_axes as f64;
+    row[29] = b.position as f64;
     row
 }
 

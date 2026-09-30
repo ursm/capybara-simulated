@@ -235,6 +235,17 @@ pub(crate) fn principal_rtl(arena: &RealmArena, root: NodeId) -> bool {
     crate::style::primary_style(arena, body.unwrap_or(root)).is_some_and(|s| s.get_inherited_box().direction == Direction::Rtl)
 }
 
+// A computed `position` as a box answers it (`layout::Box::position`).
+pub(crate) fn position_code(position: Position) -> u8 {
+    match position {
+        Position::Static => crate::layout::POSITION_STATIC,
+        Position::Relative => crate::layout::POSITION_RELATIVE,
+        Position::Absolute => crate::layout::POSITION_ABSOLUTE,
+        Position::Fixed => crate::layout::POSITION_FIXED,
+        Position::Sticky => crate::layout::POSITION_STICKY,
+    }
+}
+
 pub(crate) fn build(arena: &RealmArena, root: NodeId, basis: Basis, faces: &mut Faces, maths: &mut MathTable, prior: Option<&Prior>) -> Outcome {
     faces.missing.clear();
     let walked = arena.begin_layout_walk();

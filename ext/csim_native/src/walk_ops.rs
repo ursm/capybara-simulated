@@ -279,11 +279,20 @@ fn layout_build(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgu
         rv.set(s.into());
         return;
     }
-    let crate::layout::Outcome::LaidOut(laid) = out else {
+    let crate::layout::Outcome::LaidOut(mut laid) = out else {
         let s = v8::String::new(scope, "native declined").unwrap();
         rv.set(s.into());
         return;
     };
+    // (…and each box's `position`, which the walk read off the same style: the writer's own question of it, asked of
+    // the style engine here rather than of the JS cascade there)
+    if let Some(arena) = dom(scope).realms.get(&cid) {
+        for b in laid.boxes.iter_mut().filter(|b| b.nid >= 0.0) {
+            b.position = NodeId::from_i64(b.nid as i64)
+                .and_then(|id| crate::style::primary_style(arena, id))
+                .map_or(0, |s| walk::position_code(s.get_box().clone_position()));
+        }
+    }
     let answer = laid_answer(scope, cid, laid, texts);
     let anon: Vec<f64> = anon.iter().flatten().copied().collect();
     for (at, list) in [(4, &nids), (5, &anon), (6, &inline_nids), (7, &unchanged)] {
