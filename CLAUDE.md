@@ -50,6 +50,15 @@ driver bug) only when one of these holds:
    *measured* performance regression (rule 3).** Examples: attribute /
    property names around the 2³² index boundary; `Object.freeze` on a
    platform exotic object.
+3. **The test holds text the spec has since WITHDRAWN, and the current
+   draft says the opposite.** The current draft wins over a stale test,
+   as it does over Blink. The reason must quote both texts, so the entry
+   can be re-checked when the test is updated. "It's only a draft" is
+   no argument either way: most CSS specs never leave Working Draft, and
+   the latest draft is the spec. Example: css-transitions inherited
+   transitions — the 2013 WD's "must not start a transition" vs the
+   current WD / ED §3 "both transitions will run" (Firefox);
+   `properties-value-inherit-001/003` `events` subtests.
 
 Everything else is in scope — fix it, favouring spec over app-quirk.
 Cost and risk decide **priority and approach (incremental, perf-safe,
