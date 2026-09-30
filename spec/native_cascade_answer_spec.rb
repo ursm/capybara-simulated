@@ -2,6 +2,7 @@
 
 require 'capybara/simulated'
 require_relative 'support/session_teardown'
+require_relative 'support/js_cascade_machinery'
 
 # The native author cascade (csim_native cascade.rs) answers an element's winning declaration of every property its
 # STATIC rules declare in one pass, and hands the rest back for the JS cascade to match per read. What an element
@@ -57,7 +58,7 @@ RSpec.describe 'native cascade answer' do
     JS
   end
 
-  it 'reads what the JS cascade reads' do
+  it 'reads what the JS cascade reads', js_cascade: true do
     s = simulated_session(->(_env) { [200, {'content-type' => 'text/html'}, [CASCADE_ANSWER_PAGE]] })
     s.visit '/'
     s.evaluate_script('__csimCascadeTimingStats(true)')

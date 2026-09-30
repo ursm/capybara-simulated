@@ -81,6 +81,9 @@ RSpec.describe 'CSSOM resolved values' do
     s = session_for('<span id="i" style="width:10em">x</span>' \
                     '<div id="c" style="display:contents; width:10em"></div>')
     expect([read(s, 'i', 'width'), read(s, 'c', 'width')]).to eq([['160px'], ['160px']])
+    # …a keyword or a percentage likewise, declared or not: Chrome, `auto` and `50%`.
+    s = session_for('<span id="k" style="width:auto;height:50%">x</span>')
+    expect(read(s, 'k', 'width', 'height')).to eq(['auto', '50%'])
   end
 
   # `min-*` / `max-*` clamp the size the box actually took, which for an AUTO height is only known
