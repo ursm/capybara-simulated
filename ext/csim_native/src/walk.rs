@@ -130,7 +130,6 @@ pub(crate) struct Built {
     pub(crate) run_texts: Vec<RunText>,
     pub(crate) inlines: Vec<InlineBox>,
     pub(crate) grids: Vec<f64>,
-    pub(crate) maths: Vec<f64>,
     // …and what names each box to the JS side: the anonymous ones as `[record, kind, container nid, ordinal]`, and
     // the element each inline table entry is of, by nid.
     pub(crate) anon: Vec<[f64; 4]>,
@@ -157,8 +156,19 @@ pub(crate) enum Outcome {
     NeedsBoxes(Vec<f64>),
 }
 
+// The programs a pass's records name (`[length, op, a, b, …]` at each one's offset), each once — the REALM's, kept
+// from pass to pass so a program keeps its offset: an offset then names one program for good, which is what lets a
+// record be held against the last pass's by its offsets alone, and a measure be keyed on one (`walk_reuse`). Built
+// afresh per pass, `min(50%, 100px)` edited to `min(50%, 120px)` sat at the same offset with other constants, and the
+// width measured for the first was put back for the second.
+#[derive(Default)]
+pub(crate) struct MathTable {
+    pub(crate) values: Vec<f64>,
+    index: HashMap<Vec<u64>, u32>,
+}
+
 // Walk the subtree at `root` — the element the JS walk took as its pass root.
-pub(crate) fn build(arena: &RealmArena, root: NodeId, basis: Basis, faces: &mut Faces) -> Outcome {
+pub(crate) fn build(arena: &RealmArena, root: NodeId, basis: Basis, faces: &mut Faces, maths: &mut MathTable) -> Outcome {
     faces.missing.clear();
     let generated = Generated::of(arena, root);
     if !generated.unlinked.is_empty() {
@@ -173,8 +183,8 @@ pub(crate) fn build(arena: &RealmArena, root: NodeId, basis: Basis, faces: &mut 
         runs: Vec::new(),
         run_texts: Vec::new(),
         grids: Vec::new(),
-        maths: Vec::new(),
-        math_index: HashMap::new(),
+        maths: &mut maths.values,
+        math_index: &mut maths.index,
         inlines: Vec::new(),
         entries: Vec::new(),
         rec_index: HashMap::new(),
@@ -208,7 +218,6 @@ pub(crate) fn build(arena: &RealmArena, root: NodeId, basis: Basis, faces: &mut 
             run_texts: walk.run_texts,
             inlines: walk.inlines,
             grids: walk.grids,
-            maths: walk.maths,
             inline_nids,
             anon: walk.anon,
             marks: walk.marks,
@@ -321,9 +330,10 @@ struct Walk<'a> {
     run_texts: Vec<RunText>,
     // The grid stream a table's (or a grid's) record names its columns in (`grid_start`).
     grids: Vec<f64>,
-    // The programs the records name, each once (`[length, op, a, b, …]` at its offset), and where each one is.
-    maths: Vec<f64>,
-    math_index: HashMap<Vec<u64>, u32>,
+    // The programs the records name, each once (`[length, op, a, b, …]` at its offset), and where each one is — the
+    // realm's table (`MathTable`).
+    maths: &'a mut Vec<f64>,
+    math_index: &'a mut HashMap<Vec<u64>, u32>,
     // The inline table (`InlineBox` per inline box the runs open, in the order they open them), and the entries the
     // gathers made, which a text block tables when its runs are committed.
     inlines: Vec<InlineBox>,

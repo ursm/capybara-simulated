@@ -54,14 +54,46 @@ RSpec.describe 'the Rust walk puts back what did not change' do
         const edit = (id) => { document.getElementById(id).firstChild.data += '!'; document.body.offsetHeight; };
         document.body.offsetHeight;
         for (const id of ['s3', 'top', 's4', 'top']) edit(id);
+        // (…put back, and how many measures the pass had to keep afresh: a row put back whole keeps none, where a row
+        // measured again keeps its own — and puts back its paragraph, which counts the same as the row would)
+        const delta = (edit_id) => {
+          const [p0, k0] = __dom.layoutMeasureCounts();
+          edit(edit_id);
+          const [p1, k1] = __dom.layoutMeasureCounts();
+          return [p1 - p0, k1 - k0];
+        };
         document.getElementById('top').after(document.createElement('hr'));
         document.body.offsetHeight;
-        const [p0] = __dom.layoutMeasureCounts();
-        edit('s6');
-        return __dom.layoutMeasureCounts()[0] - p0;
+        const hr = delta('s6');
+        // …a GRID too, which puts values in the grid stream every later record's key must not depend on (a record that
+        // is no grid's or table's names no place in it)
+        const t = document.createElement('div');
+        t.style.cssText = 'display: grid; grid-template-columns: 1fr 2fr';
+        t.innerHTML = '<i>a</i><i>b</i>';
+        document.getElementById('top').after(t);
+        document.body.offsetHeight;
+        return [hr, delta('s7')];
       })()
     JS
-    expect(got).to be >= 55
+    expect(got.map(&:first).min).to be >= 55
+    expect(got.map(&:last).max).to be <= 10                  # …the rows' own measures, not their paragraphs'
+  end
+
+  # A record names its comparison functions by their offset in the realm's math table, and the offset has to name the
+  # same program from pass to pass: a table built afresh per pass put `min(50%, 150px)` where `min(50%, 120px)` had
+  # been, the record looked unchanged, and the width measured for the one was put back for the other (Chrome: 100,
+  # 120, 100, 120, 150; the put-back said 120 three times over).
+  it 'measures a box again when only the constants of its min() moved' do
+    s = session(%(<div style="width:400px"><div id="r"><div id="b" style="width:min(50%, 100px)">b</div><span>t</span></div></div>))
+    got = s.evaluate_script(<<~JS)
+      (() => {
+        const b = document.getElementById('b'), w = () => b.getBoundingClientRect().width;
+        const out = [w()];
+        for (const v of ['min(50%, 120px)', 'min(50%, 100px)', 'min(50%, 120px)', 'min(50%, 150px)']) { b.style.width = v; out.push(w()); }
+        return out;
+      })()
+    JS
+    expect(got).to eq([100, 120, 100, 120, 150])
   end
 
   # What is put back is what laying it out afresh gives: every row's box after a run of edits, against a page that

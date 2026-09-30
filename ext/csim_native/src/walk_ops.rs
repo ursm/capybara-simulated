@@ -85,9 +85,11 @@ fn walk_parity(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgum
     let Some(pass) = parity.pending.take() else { return };
     let Some(arena) = d.realms.get(&cid) else { return };
     let Some(root) = pass.inputs.first().and_then(|r| NodeId::from_i64(r.nid as i64)) else { return };
+    // (…its programs by content, beside the JS walk's: a table of its own, whose offsets need not last)
+    let mut maths = walk::MathTable::default();
     let built = arena.faces.with(|faces| {
         faces.at_generation(&generation);
-        walk::build(arena, root, pass.basis, faces)
+        walk::build(arena, root, pass.basis, faces, &mut maths)
     });
     match built {
         Outcome::NeedsFaces if parity.asked => {
@@ -154,7 +156,7 @@ fn walk_parity(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgum
                 }
             };
             for (i, (js, rust)) in pass.inputs.iter().zip(&built.inputs).enumerate() {
-                note(stats, format!("rec {i} <{}>", tag(js.nid)), walk::input_diff(js, &pass.maths, rust, &built.maths));
+                note(stats, format!("rec {i} <{}>", tag(js.nid)), walk::input_diff(js, &pass.maths, rust, &maths.values));
             }
             for (i, (js, rust)) in pass.runs.iter().zip(&built.runs).enumerate() {
                 let mut diffs = walk::run_diff(js, rust);
@@ -165,7 +167,7 @@ fn walk_parity(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgum
                 note(stats, format!("run {i}"), diffs);
             }
             for (i, (js, rust)) in pass.inlines.iter().zip(&built.inlines).enumerate() {
-                note(stats, format!("inline {i}"), walk::inline_diff(js, &pass.maths, rust, &built.maths));
+                note(stats, format!("inline {i}"), walk::inline_diff(js, &pass.maths, rust, &maths.values));
             }
             // (…the grid stream by its numbers: a table's column count, then each column's declared px and fraction)
             for (i, (js, rust)) in pass.grids.iter().zip(&built.grids).enumerate() {
@@ -200,9 +202,10 @@ fn layout_build(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgu
     let check = args.get(6).is_true();
     let d = dom(scope);
     let Some(arena) = d.realms.get(&cid) else { return };
+    let maths = d.walk_reuse.entry(cid).or_default().maths();
     let built = arena.faces.with(|faces| {
         faces.at_generation(&generation);
-        walk::build(arena, root, basis, faces)
+        walk::build(arena, root, basis, faces, maths)
     });
     let built = match built {
         Outcome::Built(built) => built,
@@ -226,7 +229,7 @@ fn layout_build(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgu
             return;
         }
     };
-    let walk::Built { mut inputs, runs, run_texts, inlines, grids, maths, anon, inline_nids, marks } = built;
+    let walk::Built { mut inputs, runs, run_texts, inlines, grids, anon, inline_nids, marks } = built;
     let nids: Vec<f64> = inputs.iter().map(|r| r.nid).collect();
     // The layout of every subtree built as the last pass built it is the measure cache's to put back (`walk_reuse`) —
     // except for a pass that answers its text pieces, which a put-back measure does not hold.
@@ -235,11 +238,13 @@ fn layout_build(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgu
     let walk_reuse::Pass { roots, ends, ids, unchanged } = reuse.chunks(&streams, &generation);
     let built_inputs = inputs.clone();
     let mut measure = std::mem::take(&mut reuse.measure);
+    let maths = std::mem::take(reuse.maths());
     let cache = (!texts).then_some((&mut measure, roots, check));
-    let out = crate::layout::layout_block_in_place(&mut inputs, &runs, &run_texts, &grids, &inlines, &maths, f64::NAN, f64::NAN, root_cb_w, root_rtl, cache, texts);
+    let out = crate::layout::layout_block_in_place(&mut inputs, &runs, &run_texts, &grids, &inlines, &maths.values, f64::NAN, f64::NAN, root_cb_w, root_rtl, cache, texts);
     let mismatch = measure.mismatch.take();
     let reuse = dom(scope).walk_reuse.entry(cid).or_default();
     reuse.measure = measure;
+    *reuse.maths() = maths;
     reuse.keep(built_inputs, runs, run_texts, grids, inlines, marks, ends, ids);
     if let Some(why) = mismatch {
         let s = v8::String::new(scope, &format!("reuse mismatch: {why}")).unwrap();

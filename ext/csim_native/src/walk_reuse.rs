@@ -17,7 +17,8 @@
 use std::collections::HashMap;
 
 use crate::layout::{ChunkRoot, InlineBox, Input, MeasureCache, Run, RunText};
-use crate::layout::{RUN_ATOMIC, RUN_BR, RUN_CLOSE, RUN_FLOAT, RUN_OOF, RUN_OPEN, RUN_WBR};
+use crate::walk::MathTable;
+use crate::layout::{DISPLAY_GRID, DISPLAY_TABLE, RUN_ATOMIC, RUN_BR, RUN_CLOSE, RUN_FLOAT, RUN_OOF, RUN_OPEN, RUN_WBR};
 
 // A chunk not placed for this many passes is forgotten, its measures with it (as `dom.rs`'s JS chunks are).
 const IDLE_PASSES: u64 = 16;
@@ -32,6 +33,9 @@ pub(crate) struct WalkReuse {
     // The chunk ids in play, each by the pass that last placed it.
     used: HashMap<u32, u64>,
     pub(crate) measure: MeasureCache,
+    // The realm's programs (`walk::MathTable`), whose offsets the records name — the same program at the same offset
+    // from pass to pass, which is what makes an offset compared as a number compared as a program.
+    maths: MathTable,
 }
 
 // What `WalkReuse::chunks` makes of a pass.
@@ -69,7 +73,20 @@ pub(crate) struct Streams<'a> {
     pub(crate) marks: &'a [[usize; 3]],
 }
 
+// How many values the math table grows to before it is started afresh — every offset moved, so nothing of the last pass
+// holds (the JS walk's table is capped alike).
+const MATH_TABLE_CAP: usize = 1 << 20;
+
 impl WalkReuse {
+    // The realm's math table for a pass: started afresh past its cap, and the last pass forgotten with it.
+    pub(crate) fn maths(&mut self) -> &mut MathTable {
+        if self.maths.values.len() > MATH_TABLE_CAP {
+            self.maths = MathTable::default();
+            self.last = None;
+        }
+        &mut self.maths
+    }
+
     // The chunks of this pass, by root record, for the layout to key its measures on — what `keep` needs of it — and
     // the records built as the last pass built them, as `[start, end)` ranges: every record under a subtree root but
     // the root, where the subtree is the same (`Pass::unchanged`).
@@ -113,7 +130,7 @@ impl WalkReuse {
                 grids_at,
                 inl_at,
                 root_runs: s.inputs[i].run_count > 0,
-                root_grid: s.inputs[i].grid_start >= 0,
+                root_grid: has_grid(&s.inputs[i]),
                 fresh: kept.is_none(),
             });
         }
@@ -252,7 +269,7 @@ fn input_rel(x: &Input, b: &Base) -> Input {
     if x.run_count > 0 {
         x.run_start -= b.streams[0] as i32;
     }
-    if x.grid_start >= 0 {
+    if has_grid(&x) {
         x.grid_start -= b.streams[1] as i32;
     }
     if x.cb_index >= 0 {
@@ -260,6 +277,12 @@ fn input_rel(x: &Input, b: &Base) -> Input {
         x.cb_index = if (b.rec..b.end).contains(&cb) { (cb - b.rec) as i32 } else { i32::MIN };
     }
     x
+}
+
+// Whether a record names a place in the grid stream: a grid's or a table's. (Every other record carries a `grid_start`
+// of 0 as it was made, which is no position — rebased as one, a table put in anywhere before a subtree moved its key.)
+fn has_grid(x: &Input) -> bool {
+    matches!(x.display, DISPLAY_GRID | DISPLAY_TABLE) && x.grid_start >= 0
 }
 
 // A run with the record or inline entry it names made the subtree's own (as `dom.rs` `emit_chunk` relocates them).
