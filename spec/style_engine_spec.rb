@@ -94,6 +94,23 @@ RSpec.describe 'style engine invalidation' do
     expect(color(s, '#d', 'document.getElementById("p").firstChild.appendData("x");')).to eq('rgb(0, 0, 0)')
   end
 
+  # …and an attribute a `:has()` names, written on an element nothing styles (under a `display: none`): it still
+  # decides the match above it, so it restyles — where an attribute no argument names does not have to.
+  it 'restyles through a :has() when an unstyled element gains a class or an attribute it names' do
+    s = visit('<div id="d"><div style="display: none"><i id="i"></i></div></div>',
+              css: '#d:has(.flag) { color: rgb(64, 65, 66); } #d:has([data-x]) { background-color: rgb(1, 1, 1); }')
+    expect(color(s, '#d', 'document.getElementById("i").className = "flag";')).to eq('rgb(64, 65, 66)')
+    expect(color(s, '#d', 'document.getElementById("i").setAttribute("data-k", "1");')).to eq('rgb(64, 65, 66)')
+    expect(color(s, '#d', 'document.getElementById("i").className = "";')).to eq('rgb(0, 0, 0)')
+    got = s.evaluate_script(<<~JS)
+      (() => {
+        document.getElementById('i').setAttribute('data-x', '');
+        return getComputedStyle(document.getElementById('d')).backgroundColor;
+      })()
+    JS
+    expect(got).to eq('rgb(1, 1, 1)')
+  end
+
   # …and so is every sibling a combinator reads it from (Firefox's `RestyleForEmptyChange`). (On a page of its own: a
   # `:has()` anywhere styles everything again after any change.)
   it 'restyles the later siblings an emptiness reaches through a sibling combinator' do

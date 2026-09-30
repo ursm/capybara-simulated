@@ -271,14 +271,25 @@ impl Default for ShadowStyles {
     }
 }
 
-// Whether `css` holds a `:has()` inside a `:host()` — read off the text, as the JS cascade's `HOST_HAS_RE` reads it: a
-// `:host(` with a `:has(` after it before the declaration block opens (ASCII case-insensitively).
+// Whether `css` holds a `:has()` inside a `:host()` ARGUMENT — read off the text, as the JS cascade's
+// `hostReadsDescendants` reads it: between a `:host(` and the parenthesis that closes it (ASCII case-insensitively).
 fn host_reads_descendants(css: &str) -> bool {
     let lower = css.to_ascii_lowercase();
     lower.match_indices(":host(").any(|(at, _)| {
-        let rest = &lower[at..];
-        let block = rest.find('{').unwrap_or(rest.len());
-        rest[..block].contains(":has(")
+        let arg = &lower[at + ":host".len()..];
+        let mut depth = 0;
+        let end = arg
+            .bytes()
+            .position(|b| {
+                depth += match b {
+                    b'(' => 1,
+                    b')' => -1,
+                    _ => 0,
+                };
+                depth == 0
+            })
+            .unwrap_or(arg.len());
+        arg[..end].contains(":has(")
     })
 }
 
@@ -884,7 +895,7 @@ impl StyleEngine {
     fn attributes_will_change_unguarded(&mut self, arena: &RealmArena, id: NodeId, names: &[&str]) {
         // (…a `:has()` reads it styled or not: an element nothing styles — under a `display: none`, or a host's light
         // child no slot takes — still decides the match of one above it)
-        self.restyle_all |= self.has_relative;
+        self.restyle_all |= self.relative_reads_attributes(names);
         let Some(node) = arena.get(id) else { return };
         let Some(slot) = arena.existing_style_slot(id) else { return };
         if unsafe { &*slot.data.get() }.is_none() {
@@ -917,6 +928,30 @@ impl StyleEngine {
             hint_element(el, hint);
             restyle_nth_of_siblings(el);
         });
+    }
+
+    // Whether a `:has()` can read an attribute named in `names`: a class or an id where its argument names any, another
+    // attribute where one names THAT one (`relative_selector_invalidation_map`), a `lang` / `dir` always (`:lang()` and
+    // `:dir()` read them through no attribute selector), and anything under a `:host(:has(…))`, which no map records.
+    // Every write restyled the whole document on a page with any `:has()` — a `data-*` attribute written under a
+    // `display: none` 300 times was 4x the page's time — though no argument can read one it does not name.
+    fn relative_reads_attributes(&self, names: &[&str]) -> bool {
+        if !self.has_relative {
+            return false;
+        }
+        if self.shadow_styles.values().any(|s| s.host_has) {
+            return true;
+        }
+        let reads = |data: &style::stylist::CascadeData| {
+            let map = data.relative_selector_invalidation_map();
+            names.iter().any(|&name| match name {
+                "class" => !map.class_to_selector.is_empty(),
+                "id" => !map.id_to_selector.is_empty(),
+                "lang" | "xml:lang" | "dir" => true,
+                _ => map.other_attribute_affecting_selectors.contains_key(&LocalName::from(name)),
+            })
+        };
+        self.stylist.iter_origins().any(|(data, _)| reads(data)) || self.shadow_styles.values().any(|s| reads(&s.styles.data))
     }
 
     // `parent`'s children changed (an insertion, a removal, a text node's data): what its children's selectors
@@ -2959,6 +2994,8 @@ mod tests {
         assert!(host_reads_descendants("p {} :HOST(.x:HAS(> b)) { color: red }"));
         assert!(!host_reads_descendants(":host(.x) p { color: red } .a:has(.b) { color: red }"));
         assert!(!host_reads_descendants(":host p:has(b) { color: red }"));
+        assert!(!host_reads_descendants(":host(.x) p:has(b) { color: red }"));
+        assert!(host_reads_descendants(":host(:is(.a, .b):has(i)) p { color: red }"));
     }
 
     fn assert_parses_whole(sheet: &str) {
