@@ -265,12 +265,13 @@ files.each do |rel|
         in_list << name
       end
     end
-    # An unratified file (`.tentative` / WICG / proposal) is out-of-scope WHOLE — a subtest
-    # of it that happens to PASS on this machine (a rasterization-sensitive reftest that
-    # renders differently on the CI image) must keep its out-of-scope entry, or it re-enters
-    # in-scope and reds the gate on the machine where it fails. Re-emit the prior entries the
-    # failing-loop above did not consume.
-    if in_list.empty? && (tentative_path?(rel) || WICG_OUT.key?(rel) || PROPOSAL_OUT.key?(rel))
+    # An unratified file (`.tentative` / WICG / proposal) is out-of-scope WHOLE — a REFTEST of
+    # it that happens to PASS on this machine (rasterization-sensitive, rendering differently on
+    # the CI image) must keep its out-of-scope entry, or it re-enters in-scope and reds the gate
+    # on the machine where it fails. Re-emit the prior entries the failing-loop above did not
+    # consume. Only a reftest's: a testharness subtest passes or fails the same everywhere, and
+    # keeping one that now passes reds the gate here (`allowlisted subtests now PASS`).
+    if in_list.empty? && WptRunner.reftest?(rel) && (tentative_path?(rel) || WICG_OUT.key?(rel) || PROPOSAL_OUT.key?(rel))
       leftover = (out_existing[rel] || {}).flat_map {|name, reasons| reasons.map {|r| { 'name' => name, 'reason' => r.to_s } } }
       leftover.each {|e| out_list << e unless out_list.any? {|o| o['name'] == e['name'] && o['reason'] == e['reason'] } }
       (out_existing[rel] || {}).each_value(&:clear)

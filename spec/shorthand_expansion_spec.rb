@@ -59,6 +59,13 @@ RSpec.describe 'shorthand expansion' do
               'border-box', 'border-box', 'match-source', 'add'])
   end
 
+  # …and a fragment-only `url()` is a reference into the document, kept as written rather than resolved against the
+  # base (Chrome and Firefox alike, for `mask-image` and `background-image` both).
+  it 'keeps a fragment-only url in mask and background images' do
+    expect(both('mask: url(#m); background-image: url(#b)', %w[maskImage backgroundImage]))
+      .to eq(['url("#m")', 'url("#b")'])
+  end
+
   # A fill written alone takes the shape of the writing mode, and `filled` is not written (CSS Text Decoration 3 §3.1;
   # Firefox — Chrome gives it a `dot`).
   it 'computes text-emphasis with the shape a lone fill takes' do

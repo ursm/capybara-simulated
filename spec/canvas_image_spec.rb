@@ -139,6 +139,18 @@ RSpec.describe 'Canvas / ImageData / OffscreenCanvas' do
     expect(seen['stroke']).to eq('#00ff00')
   end
 
+  # The canvas keeps an alpha BYTE, and a colour reads back from it: opaque is what rounds to 255, the rest is that
+  # byte's shortest decimal (Chrome and Firefox alike).
+  it 'serializes a colour from the alpha byte it keeps' do
+    session = simulated_session(app)
+    session.visit('/')
+    out = session.evaluate_script(<<~JS)
+      const ctx = new OffscreenCanvas(1, 1).getContext('2d');
+      ['rgba(1,2,3,0.123456)', 'rgba(10,20,30,0.999)', '#ff000080'].map((c) => { ctx.fillStyle = c; return ctx.fillStyle; })
+    JS
+    expect(out).to eq(['rgba(1, 2, 3, 0.12)', '#0a141e', 'rgba(255, 0, 0, 0.5)'])
+  end
+
   it 'clearRect erases a region back to transparent black' do
     session = simulated_session(app)
     session.visit('/')

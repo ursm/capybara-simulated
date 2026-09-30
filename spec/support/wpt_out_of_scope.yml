@@ -29078,10 +29078,6 @@ css/css-animations/Element-getAnimations-dynamic-changes.tentative.html:
     specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
     path/suffix. CLAUDE.md rule 1.
 css/css-animations/Element-getAnimations.tentative.html:
-- name: getAnimations for CSS Animations follows animation-name order
-  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
-    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
-    path/suffix. CLAUDE.md rule 1.
 - name: getAnimations for CSS Animations that are canceled
   reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
     specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
@@ -29798,95 +29794,6 @@ css/css-transforms/transform-singular-001.html:
     zero, so css-transforms says the element and its content do not get displayed
     — and the reference is an EMPTY document. Both sides being white is the assertion,
     not a painter that drew neither.'
-css/css-transitions/AnimationEffect-getComputedTiming.tentative.html:
-- name: Negative delay of a new transition
-  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
-    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
-    path/suffix. CLAUDE.md rule 1.
-- name: Positive delay of a new transition
-  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
-    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
-    path/suffix. CLAUDE.md rule 1.
-- name: activeDuration of a new transition
-  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
-    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
-    path/suffix. CLAUDE.md rule 1.
-- name: currentIteration of a finished transition
-  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
-    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
-    path/suffix. CLAUDE.md rule 1.
-- name: currentIteration of a new transition
-  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
-    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
-    path/suffix. CLAUDE.md rule 1.
-- name: currentIteration of a new transition with positive delay in before phase
-  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
-    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
-    path/suffix. CLAUDE.md rule 1.
-- name: delay of a new tranisition
-  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
-    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
-    path/suffix. CLAUDE.md rule 1.
-- name: direction of a new transition
-  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
-    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
-    path/suffix. CLAUDE.md rule 1.
-- name: duration of a new transition
-  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
-    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
-    path/suffix. CLAUDE.md rule 1.
-- name: easing of a new transition
-  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
-    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
-    path/suffix. CLAUDE.md rule 1.
-- name: endDelay of a new transition
-  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
-    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
-    path/suffix. CLAUDE.md rule 1.
-- name: endTime of a new transition
-  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
-    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
-    path/suffix. CLAUDE.md rule 1.
-- name: fill of a new transition
-  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
-    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
-    path/suffix. CLAUDE.md rule 1.
-- name: iterationStart of a new transition
-  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
-    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
-    path/suffix. CLAUDE.md rule 1.
-- name: iterations of a new transition
-  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
-    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
-    path/suffix. CLAUDE.md rule 1.
-- name: localTime is always equal to currentTime
-  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
-    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
-    path/suffix. CLAUDE.md rule 1.
-- name: localTime of a new transition
-  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
-    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
-    path/suffix. CLAUDE.md rule 1.
-- name: localTime reflects playbackRate immediately
-  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
-    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
-    path/suffix. CLAUDE.md rule 1.
-- name: non-default easing of a new transition
-  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
-    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
-    path/suffix. CLAUDE.md rule 1.
-- name: progress of a finished transition
-  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
-    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
-    path/suffix. CLAUDE.md rule 1.
-- name: progress of a new transition
-  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
-    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
-    path/suffix. CLAUDE.md rule 1.
-- name: progress of a new transition with positive delay in before phase
-  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
-    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
-    path/suffix. CLAUDE.md rule 1.
 css/css-transitions/CSSTransition-canceling.tentative.html:
 - name: After canceling a finished transition, it can still be re-used
   reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
@@ -29906,30 +29813,6 @@ css/css-transitions/CSSTransition-canceling.tentative.html:
     specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
     path/suffix. CLAUDE.md rule 1.
 - name: Removing a property from transition-property cancels transitions on that property
-  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
-    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
-    path/suffix. CLAUDE.md rule 1.
-- name: An after-change style value can't be interpolated
-  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
-    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
-    path/suffix. CLAUDE.md rule 1.
-- name: Changing style to another interpolable value cancels the original transition
-  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
-    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
-    path/suffix. CLAUDE.md rule 1.
-- name: Reversing a running transition cancels the original transition
-  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
-    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
-    path/suffix. CLAUDE.md rule 1.
-- name: Setting display:none cancels transitions on a child element
-  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
-    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
-    path/suffix. CLAUDE.md rule 1.
-- name: Setting display:none on an element cancels its transitions
-  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
-    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
-    path/suffix. CLAUDE.md rule 1.
-- name: Setting zero combined duration
   reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
     specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
     path/suffix. CLAUDE.md rule 1.
@@ -29974,50 +29857,6 @@ css/css-transitions/CSSTransition-effect.tentative.html:
   reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
     specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
     path/suffix. CLAUDE.md rule 1.
-- name: After setting a new keyframe effect targeting different properties, the transition
-    continues to report the original transition property
-  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
-    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
-    path/suffix. CLAUDE.md rule 1.
-- name: After setting a new keyframe effect with a shorter duration, the transition
-    becomes finished
-  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
-    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
-    path/suffix. CLAUDE.md rule 1.
-- name: After setting a transition's effect to null, a new transition can be started
-  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
-    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
-    path/suffix. CLAUDE.md rule 1.
-- name: After setting a transition's effect to null, it becomes finished
-  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
-    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
-    path/suffix. CLAUDE.md rule 1.
-- name: After setting a transition's effect to null, it should be possible to interrupt
-    that transition
-  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
-    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
-    path/suffix. CLAUDE.md rule 1.
-- name: After setting a transition's effect to null, it still reports the original
-    transition property
-  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
-    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
-    path/suffix. CLAUDE.md rule 1.
-css/css-transitions/CSSTransition-finished.tentative.html:
-- name: Restarting a finished transition rewinds playback
-  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
-    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
-    path/suffix. CLAUDE.md rule 1.
-css/css-transitions/CSSTransition-not-canceling.tentative.html:
-- name: 'Setting "display: none" with "display" set to transition using "display 100s
-    allow-discrete" does not cancel running transitions'
-  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
-    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
-    path/suffix. CLAUDE.md rule 1.
-- name: 'Setting "display: none" with "display" set to transition using "display 100s,
-    all allow-discrete 100s" does not cancel running transitions'
-  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
-    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
-    path/suffix. CLAUDE.md rule 1.
 css/css-transitions/CSSTransition-ready.tentative.html:
 - name: ready promise is rejected when a transition is canceled by changing the transition
     property to something not interpolable
@@ -30042,10 +29881,6 @@ css/css-transitions/CSSTransition-startTime.tentative.html:
     specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
     path/suffix. CLAUDE.md rule 1.
 - name: The start time of transitions is based on when they are generated
-  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
-    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
-    path/suffix. CLAUDE.md rule 1.
-- name: The start time of a transition can be set
   reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
     specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
     path/suffix. CLAUDE.md rule 1.
@@ -30277,37 +30112,6 @@ css/css-transitions/event-dispatch.tentative.html:
     specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
     path/suffix. CLAUDE.md rule 1.
 - name: Set timeline and play transition after clear the timeline
-  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
-    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
-    path/suffix. CLAUDE.md rule 1.
-- name: 'Before -> Idle (display: none)'
-  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
-    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
-    path/suffix. CLAUDE.md rule 1.
-- name: Call Animation.cancel after canceling transition.
-  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
-    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
-    path/suffix. CLAUDE.md rule 1.
-- name: Call Animation.cancel after restarting transition immediately
-  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
-    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
-    path/suffix. CLAUDE.md rule 1.
-- name: Idle -> Before
-  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
-    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
-    path/suffix. CLAUDE.md rule 1.
-- name: Replacing a running transition and forcing to flush the style together should
-    get the correct event order
-  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
-    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
-    path/suffix. CLAUDE.md rule 1.
-- name: Replacing a running transition should get transitioncancel earlier than transitionrun
-    and transitionstart
-  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
-    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
-    path/suffix. CLAUDE.md rule 1.
-- name: Replacing two running transitions on the same target should get two transitioncancel
-    events earlier than two transitionrun events, per transition generation
   reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
     specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
     path/suffix. CLAUDE.md rule 1.
