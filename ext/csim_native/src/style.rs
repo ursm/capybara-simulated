@@ -1758,6 +1758,19 @@ impl StyleEngine {
 
     // The computed value of the longhand `name` on `id`, as `getComputedStyle` serializes a computed value; None for
     // a shorthand, an unknown property, or an element the document's traversal did not style.
+    // Whether `id` is SHOWN, as the engine styled it: 0 where no box is — it has no style (an ancestor is `display:
+    // none`, which styles none of its descendants, or no slot takes it into the flat tree) or its own `display` is
+    // `none` — 1 where it is displayed and visible, 2 where it is displayed but its `visibility` hides it. One question
+    // for what the JS cascade answered by matching the hide rules of every ancestor (`isVisibleNodeImpl`).
+    pub(crate) fn shown(&mut self, arena: &RealmArena, id: NodeId, now_ms: f64) -> u8 {
+        self.flush(arena, now_ms);
+        let Some(style) = primary_style(arena, id) else { return 0 };
+        if style.get_box().clone_display().is_none() {
+            return 0;
+        }
+        if style.get_inherited_box().visibility == style::computed_values::visibility::T::Visible { 1 } else { 2 }
+    }
+
     pub(crate) fn value(
         &mut self,
         arena: &RealmArena,

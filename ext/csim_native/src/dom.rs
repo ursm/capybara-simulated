@@ -1026,6 +1026,7 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_, ()>, ctx: &v8::Global<v8:
     register(scope, ns, "styleImport", style_import, context_id);
     register(scope, ns, "styleShadowSheets", style_shadow_sheets, context_id);
     register(scope, ns, "styleValue", style_value, context_id);
+    register(scope, ns, "styleShown", style_shown, context_id);
     register(scope, ns, "styleFlush", style_flush, context_id);
     register(scope, ns, "styleTick", style_tick, context_id);
     crate::animation_ops::install(scope, ns, context_id);
@@ -2035,6 +2036,28 @@ fn style_value_unguarded(
     if let Some(s) = v8::String::new(scope, &value) {
         rv.set(s.into());
     }
+}
+
+// __dom.styleShown(nid, now) -> 0 | 1 | 2: whether the element is shown as the style engine styled it
+// (`StyleEngine::shown`): no box, displayed and visible, displayed with its visibility hiding it. Undefined where the
+// realm has no engine.
+fn style_shown(
+    scope: &mut v8::PinScope<'_, '_>,
+    args: v8::FunctionCallbackArguments<'_>,
+    mut rv: v8::ReturnValue<'_, v8::Value>,
+) {
+    let cid = realm_id(scope, &args);
+    let Some(id) = nid_arg(scope, &args, 0) else { return };
+    let now = clock_arg(scope, &args, 1);
+    style_op(scope, cid, |scope| {
+        let d = dom(scope);
+        let (Some(engine), Some(arena)) = (d.styles.get_mut(&cid), d.realms.get(&cid)) else { return };
+        let shown = engine.shown(arena, id, now);
+        let failures = engine.take_verify_failures();
+        if !threw_verify_failures(scope, failures) {
+            rv.set_int32(shown as i32);
+        }
+    });
 }
 
 // The page's clock (ms) an op is given at `index`: 0 when it is not a finite number (an undefined argument reads NaN).

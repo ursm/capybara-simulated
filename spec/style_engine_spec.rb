@@ -59,6 +59,21 @@ RSpec.describe 'style engine invalidation' do
     expect(color(s, '.kid', 'document.getElementById("p").className = "on";')).to eq('rgb(1, 2, 3)')
   end
 
+  # What is SHOWN is the engine's to say (`__dom.styleShown`): a `display: none` anywhere up the flat tree, the element's
+  # own `visibility`, and the UA's rules with them — a popover not showing is `display: none` (HTML §15.3.1), unless an
+  # author rule displays it, and so is an SVG `clipPath` (SVG 2 Appendix A's `!important` rule). Chrome and Firefox:
+  # false / false / true / false / true, then true / true — and both report the `clipPath` `inline` and visible, which
+  # the appendix does not. (The JS cascade has no popover rule: recorded.)
+  it 'answers what is shown off the engine' do
+    s = visit('<div style="display:none"><p id="a">a</p></div><p id="b" style="visibility:hidden">b</p><p id="c">c</p>' \
+              '<div id="pop" popover>p</div><div id="shown" popover style="display:block">s</div><svg><clipPath id="cp"/></svg>',
+              css: '')
+    got = s.evaluate_script("['a', 'b', 'c', 'pop', 'shown', 'cp'].map((id) => document.getElementById(id).checkVisibility({visibilityProperty: true}))")
+    expect(got).to eq([false, false, true, false, true, false])
+    s.execute_script("document.getElementById('pop').showPopover(); document.querySelector('div').style.display = 'block'")
+    expect(s.evaluate_script("['a', 'pop'].map((id) => document.getElementById(id).checkVisibility())")).to eq([true, true])
+  end
+
   it 'restyles an element whose id changed' do
     s = visit('<div id="x">x</div>')
     expect(color(s, 'div', 'document.getElementById("x").id = "target";')).to eq('rgb(4, 5, 6)')
