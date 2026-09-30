@@ -190,6 +190,24 @@ RSpec.describe 'style engine invalidation' do
     expect(s.evaluate_script('__csimJsCascadeDemands().builds')).to eq(0)
   end
 
+  # …nor for an element not in the document, which the engine never styles: its client box, its styles, and an
+  # IntersectionObserver still watching it once it left (Avo's pages built the rule set for these). Chrome: 0 and "".
+  it 'answers an element out of the document without the JS cascade' do
+    s = visit('<div id="a">a</div>', css: 'div { color: red; margin-left: 5px }')
+    got = s.evaluate_script(<<~JS)
+      (() => {
+        const d = document.createElement('div'), a = document.getElementById('a');
+        new IntersectionObserver(() => {}).observe(a);
+        a.remove();
+        const g = getComputedStyle(d);
+        return [d.clientWidth, g.display, g.color, g.marginLeft];
+      })()
+    JS
+    expect(got).to eq([0, '', '', ''])
+    s.evaluate_script('new Promise((resolve) => requestAnimationFrame(() => resolve(true)))')
+    expect(s.evaluate_script('__csimJsCascadeDemands().builds')).to eq(0)
+  end
+
   # An element under a `display: none` — styled by no traversal — is resolved on its own, its unstyled ancestors with it
   # (Gecko's `ResolveStyleLazily`): its colour, its em-relative lengths and its percentages as Chrome reports them
   # (rgb(1, 2, 3), 0px, 30px, auto, 10px, block; then 50% and none), where it was answered by the JS cascade.
