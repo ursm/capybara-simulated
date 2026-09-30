@@ -1634,11 +1634,14 @@ impl<'a> Walk<'a> {
             }
             "svg" => self.svg_intrinsic(id)?,
             "select" => {
-                if self.arena.is_list_box(id) {
-                    return Err("list box");
-                }
+                // (…a drop-down is its widest option and an arrow, in whole px; a LIST BOX has no arrow and no rounding,
+                // and a row per displayed row)
                 let widest = self.widest_option(id, id, 0.0, 0.0)?;
-                sized((widest + 20.0).ceil(), 17.0)
+                if self.arena.is_list_box(id) {
+                    sized(widest + 19.0, 17.0 * self.arena.select_display_size(id) as f64)
+                } else {
+                    sized((widest + 20.0).ceil(), 17.0)
+                }
             }
             "textarea" => sized(195.0, 36.0),
             "audio" => sized(300.0, 54.0),
@@ -1738,6 +1741,21 @@ impl<'a> Walk<'a> {
     fn replaced(&mut self, id: NodeId, idx: i32, style: &ComputedValues, intrinsic: Intrinsic) -> Step {
         let node = self.node(id);
         let tag: &str = &node.local_name;
+        let list_box = tag == "select" && self.arena.is_list_box(id);
+        // A LIST BOX showing rows is the control's box with its options stacked in it as ordinary block children
+        // (`nlListBoxWithRows`): its box from the intrinsic data like any replaced one's, its rows laid out inside it —
+        // and its baseline read off them, not off the control.
+        if list_box && self.lays_out_rows(id)? {
+            let r = &mut self.inputs[idx as usize];
+            r.intrinsic_w = intrinsic.w;
+            r.intrinsic_h = intrinsic.h;
+            r.replaced = true;
+            r.lays_out_children = true;
+            r.ratio = intrinsic.ratio;
+            r.ratio_only = intrinsic.ratio_only;
+            let kids: Vec<NodeId> = self.children(id).collect();
+            return self.block_contents(&kids, idx, style);
+        }
         let draws_text = tag == "select"
             || (tag == "input"
                 && !matches!(
@@ -1763,7 +1781,8 @@ impl<'a> Walk<'a> {
         r.shrinks_to_nothing = intrinsic.ratio || tag == "img";
         match baseline {
             Some((font_box, asc)) => {
-                r.control_baseline = 1;
+                // (…a list box's baseline is its content box's bottom, a text control's its font box's)
+                r.control_baseline = if list_box { 2 } else { 1 };
                 r.control_font_box = font_box;
                 r.control_font_asc = asc;
             }
@@ -1771,6 +1790,16 @@ impl<'a> Walk<'a> {
             None => {}
         }
         Ok(())
+    }
+
+    // Does a replaced box lay CSS boxes out inside itself (`replacedLaysOutChildren`): a rendered element child?
+    fn lays_out_rows(&self, id: NodeId) -> Result<bool, &'static str> {
+        for c in self.children(id) {
+            if self.node(c).kind == NodeKind::Element && !self.style(c)?.get_box().clone_display().is_none() {
+                return Ok(true);
+            }
+        }
+        Ok(false)
     }
 
     // Is the element's parent a flex or grid container?
@@ -1918,6 +1947,15 @@ impl<'a> Walk<'a> {
         let cross_gap = gap(if plan.column { &pos.column_gap } else { &pos.row_gap })?;
         let main_gap = gap(if plan.column { &pos.row_gap } else { &pos.column_gap })?;
         let (mut items, oof) = self.box_items(id)?;
+        // (…a LIST BOX item is a container rather than a leaf, which native's flex sizing does not take:
+        // `nlFlexItemsUnsizable`)
+        for (_, item) in &items {
+            if let FlexItem::Element(c) = item {
+                if self.node(*c).is_html_named("select") && self.arena.is_list_box(*c) && self.lays_out_rows(*c)? {
+                    return Err("list-box-item");
+                }
+            }
+        }
         items.sort_by_key(|&(order, _)| order);
         let r = &mut self.inputs[idx as usize];
         r.display = crate::layout::DISPLAY_FLEX;

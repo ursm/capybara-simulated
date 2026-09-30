@@ -205,6 +205,16 @@ RSpec.describe 'walk parity' do
     expect_clean(s.evaluate_script('__csimWalkParityStats()'))
   end
 
+  # A LIST BOX is the control's box — its widest option and the list box's padding, a row per displayed row — with its
+  # options stacked inside it as blocks where it has any, and a leaf of its own where it has none.
+  it 'builds list boxes' do
+    expect_clean(parity(<<~HTML))
+      <p>a <select multiple><option>one</option><option>a longer one</option><optgroup label="g"><option>x</option></optgroup></select> b</p>
+      <select size="3"></select>
+      <div><select size="2" style="width: 100px; display: block"><option>q</option><option style="display: none">h</option></select></div>
+    HTML
+  end
+
   # A run of bare text in a flex container is an ANONYMOUS item of its own, a `<br>` in it a break.
   it 'builds anonymous flex items' do
     expect_clean(parity(<<~HTML))

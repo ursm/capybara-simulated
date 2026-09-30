@@ -338,12 +338,17 @@ impl RealmArena {
     // above 1 — its `size` PARSED as a non-negative integer, so ` 1 ` and junk are drop-downs as they are to
     // `selectDisplaySize`. What the UA sheet's `:-servo-list-box` asks, and the walk's.
     pub(crate) fn is_list_box(&self, id: NodeId) -> bool {
-        self.get(id).is_some_and(|n| {
-            n.is_html_named("select") && {
-                let size = n.get_attr("size").and_then(crate::validity::parse_non_negative).filter(|&s| s > 0);
-                size.map_or(n.get_attr("multiple").is_some(), |s| s > 1)
-            }
-        })
+        self.get(id).is_some_and(|n| n.is_html_named("select")) && self.select_display_size(id) > 1
+    }
+    // …a `<select>`'s DISPLAY SIZE (`selectDisplaySize`): its `size` where that parses above 0, else 4 for a `multiple`
+    // one and 1 for a drop-down.
+    pub(crate) fn select_display_size(&self, id: NodeId) -> u64 {
+        let Some(n) = self.get(id) else { return 1 };
+        match n.get_attr("size").and_then(crate::validity::parse_non_negative).filter(|&s| s > 0) {
+            Some(size) => size,
+            None if n.get_attr("multiple").is_some() => 4,
+            None => 1,
+        }
     }
     // A `<table>` whose `border` maps to a non-zero width, whose cells the UA sheet frames (`:-servo-nonzero-border`).
     pub(crate) fn has_nonzero_border(&self, id: NodeId) -> bool {
