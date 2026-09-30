@@ -160,6 +160,11 @@ pub(crate) struct NodeData {
     // What the style engine keeps on a node (an element's id atom, parsed `style` attribute and computed style; a
     // parent's selector flags): made the first time the engine asks, so a realm with no style engine pays a pointer.
     pub(crate) style: std::cell::OnceCell<Box<crate::style::StyleSlot>>,
+    // The layout epoch (`RealmArena::layout_epoch`) at which this node's FLAT SUBTREE — it, or anything the flat tree
+    // puts under it — last changed in a way a layout walk reads: its data, children, attributes, state or style. A
+    // subtree stamped no later than the epoch the last walk began at is built as that walk built it (`walk_reuse`).
+    // Kept current up the flat tree by `stamp_change`.
+    pub(crate) stamp: std::cell::Cell<u64>,
 }
 
 // The element state bits (`NodeData::state`, native-query-shadow.js `STATE_*`): focus and hover (the realm's one
@@ -211,6 +216,7 @@ impl NodeData {
             natural_size: None,
             pseudo_boxes: [None; 2],
             style: std::cell::OnceCell::new(),
+            stamp: std::cell::Cell::new(0),
         }
     }
     // An element in the HTML namespace.
@@ -395,9 +401,35 @@ pub(crate) struct RealmArena {
     // written, a `<bdi>` or an `<input>` made (`notes_direction`): every other page is ltr throughout, and asking
     // cost the state scan a walk per element (a 1500-row append, 626 → 1150 ms).
     pub(crate) direction_sources: bool,
+    // The layout walks' clock: a walk moves it on as it begins, and a change is stamped with where it stands
+    // (`NodeData::stamp`), so a stamp past the epoch a walk began at is a change since that walk.
+    pub(crate) layout_epoch: std::cell::Cell<u64>,
 }
 
 impl RealmArena {
+    // `id` changed in a way a layout walk reads: it and every node its flat subtree is part of — its parent, a shadow
+    // root's host, a slotted node's slot, and theirs — are stamped with the current layout epoch, up to the first
+    // stamped already, whose own ancestors are too.
+    pub(crate) fn stamp_change(&self, id: NodeId) {
+        let epoch = self.layout_epoch.get();
+        let mut stack = vec![id];
+        while let Some(n) = stack.pop() {
+            let Some(node) = self.get(n) else { continue };
+            if node.stamp.get() == epoch {
+                continue;
+            }
+            node.stamp.set(epoch);
+            stack.extend(node.parent);
+            stack.extend(node.host);
+            stack.extend(node.assigned_slot);
+        }
+    }
+    // The start of a layout walk: the epoch it walks at, the clock moved on past it.
+    pub(crate) fn begin_layout_walk(&self) -> u64 {
+        let walked = self.layout_epoch.get();
+        self.layout_epoch.set(walked + 1);
+        walked
+    }
     // The live node for `id`, or None if the slot was freed / reused (its gen moved past id.generation) or the
     // index is out of range. The one deref both the ops and the matcher route through.
     pub(crate) fn get(&self, id: NodeId) -> Option<&NodeData> {
@@ -408,9 +440,11 @@ impl RealmArena {
             None
         }
     }
-    // A write to the node: it moves `mutations`, which the memos of the arena key on.
+    // A write to the node: it moves `mutations`, which the memos of the arena key on, and stamps its flat subtree's
+    // change for the layout walk (`stamp_change`).
     fn get_mut(&mut self, id: NodeId) -> Option<&mut NodeData> {
         self.mutations += 1;
+        self.stamp_change(id);
         self.get_mut_quietly(id)
     }
     // …and one that does not — a layout pass writing its boxes: a box is no input to any of those memos, and a pass
@@ -428,6 +462,7 @@ impl RealmArena {
     // its NodeId at the slot's CURRENT generation. A recycled slot's gen was already bumped at free.
     fn alloc(&mut self, data: NodeData) -> NodeId {
         self.mutations += 1;
+        data.stamp.set(self.layout_epoch.get());
         if let Some(idx) = self.free.pop() {
             let slot = &mut self.slots[idx as usize];
             slot.data = Some(data);
@@ -471,8 +506,8 @@ impl RealmArena {
         if !self.custom_states.is_empty() {
             self.custom_states.remove(&id);
         }
-        // …and the slot it was assigned to no longer lists it.
-        if let Some(s) = assigned_slot.and_then(|s| self.get_mut_quietly(s)) {
+        // …and the slot it was assigned to no longer lists it: a change to the slot's flat children.
+        if let Some(s) = assigned_slot.and_then(|s| self.get_mut(s)) {
             s.assigned.retain(|&n| n != id);
         }
     }
@@ -2621,8 +2656,9 @@ fn layout_chunk_put(
     rv.set_bool(true);
 }
 
-// __dom.layoutMeasureCounts() -> [put back, kept, records held]: the realm's kept measures (`layout::MeasureCache`) —
-// the JS walk's chunks' and the Rust walk's (`walk_reuse`) together — for a spec.
+// __dom.layoutMeasureCounts() -> [put back, kept, records held, records spliced]: the realm's kept measures
+// (`layout::MeasureCache`) — the JS walk's chunks' and the Rust walk's (`walk_reuse`) together — and the records the Rust
+// walk spliced back rather than built (`Walk::splice`), for a spec.
 fn layout_measure_counts(
     scope: &mut v8::PinScope<'_, '_>,
     args: v8::FunctionCallbackArguments<'_>,
@@ -2631,13 +2667,14 @@ fn layout_measure_counts(
     let cid = realm_id(scope, &args);
     let d = dom(scope);
     let caches = [d.layout_chunks.get(&cid).map(|s| &s.measure), d.walk_reuse.get(&cid).map(|r| &r.measure)];
-    let mut counts = [0.0; 3];
+    let mut counts = [0.0; 4];
     for m in caches.into_iter().flatten() {
         counts[0] += m.put_back as f64;
         counts[1] += m.kept as f64;
         counts[2] += m.records() as f64;
     }
-    let out = v8::Array::new(scope, 3);
+    counts[3] = d.walk_reuse.get(&cid).map_or(0.0, |r| r.spliced_records as f64);
+    let out = v8::Array::new(scope, 4);
     for (i, n) in counts.into_iter().enumerate() {
         let v: v8::Local<v8::Value> = v8::Number::new(scope, n).into();
         out.set_index(scope, i as u32, v);

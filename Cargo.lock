@@ -204,6 +204,7 @@ dependencies = [
  "stylo_dom",
  "stylo_static_prefs",
  "stylo_traits",
+ "typed-arena",
  "url",
  "v8",
  "web_atoms",
@@ -1659,6 +1660,12 @@ name = "toml_writer"
 version = "1.1.2+spec-1.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7d56353a2a665ad0f41a421187180aab746c8c325620617ad883a99a1cbe66d2"
+
+[[package]]
+name = "typed-arena"
+version = "2.0.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6af6ae20167a9ece4bcb41af5b80f8a1f1df981f6391189ce00fd257af04126a"
 
 [[package]]
 name = "uluru"

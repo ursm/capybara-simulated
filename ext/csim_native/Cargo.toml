@@ -65,4 +65,7 @@ regex-syntax = { version = "0.8", default-features = false, features = ["unicode
 # …and the Bidi_Class HTML's `dir=auto` scans text by (a "strong directional character" is L, R or AL): ICU4X's
 # compiled data, which `url`'s IDNA links in already.
 icu_properties = "2"
+# The text of the generated boxes a walk meets, allocated as it meets them and read back for the rest of the walk
+# (`walk::Generated`): an arena hands out references from `&self`.
+typed-arena = "2"
 

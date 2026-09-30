@@ -43,6 +43,25 @@ RSpec.describe 'the Rust walk puts back what did not change' do
     expect(got[0]).to be >= 55
   end
 
+  # …and not WALKED again either: a row whose flat subtree nothing changed in since the last pass (its stamp), whose
+  # walk reads nothing outside it that moved, is spliced back from that pass — each of the rows but the edited one, two
+  # records apiece.
+  it 'splices back the rows an edit did not touch' do
+    s = session(%(<div id="top">top</div><div id="l">#{ROWS}</div>))
+    got = s.evaluate_script(<<~JS)
+      (() => {
+        const edit = (id) => { document.getElementById(id).firstChild.data += '!'; document.body.offsetHeight; };
+        document.body.offsetHeight;
+        for (const id of ['s3', 'top']) edit(id);
+        const spliced = () => __dom.layoutMeasureCounts()[3];
+        const n0 = spliced();
+        edit('s5');
+        return spliced() - n0;
+      })()
+    JS
+    expect(got).to be >= 2 * 58
+  end
+
   # …and a box inserted before the list moves every row's records, which is no change to any row: each keeps its chunk
   # through the insertion — and is measured afresh there only because it now stands elsewhere in its formatting context
   # (a measure is keyed on that) — so the next edit in the list puts every other row back. (A row that lost its chunk

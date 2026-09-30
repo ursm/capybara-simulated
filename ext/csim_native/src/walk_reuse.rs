@@ -11,13 +11,16 @@
 // is the same is skipped whole, so a record is compared once however deep the subtrees nest: a subtree is the same
 // when its own records and streams are, and each of its children is, where it was.
 //
-// A subtree's streams are where the walk put them: everything it emits comes after its root goes in and before the
-// next record that is not its own (`Built::marks`). An ancestor's that lands in between — the text an inline-block is
-// followed by — is held against its last pass along with the subtree's, which can only keep less.
+// A subtree's streams are where the walk put them: everything it emits comes after its root goes in and before the walk
+// returns from it (`walk::Extent`) — or, for a record no subtree was walked from, before the next record that is not its
+// own goes in.
+//
+// Where the walk SPLICED a subtree back from the last pass (`Walk::splice`), it is the same by construction: kept, and
+// never compared.
 use std::collections::HashMap;
 
 use crate::layout::{ChunkRoot, InlineBox, Input, MeasureCache, Run, RunText};
-use crate::walk::MathTable;
+use crate::walk::{Extent, MathTable, Prior, Splice};
 use crate::layout::{DISPLAY_GRID, DISPLAY_TABLE, RUN_ATOMIC, RUN_BR, RUN_CLOSE, RUN_FLOAT, RUN_OOF, RUN_OPEN, RUN_WBR};
 
 // A chunk not placed for this many passes is forgotten, its measures with it (as `dom.rs`'s JS chunks are).
@@ -25,17 +28,19 @@ const IDLE_PASSES: u64 = 16;
 
 #[derive(Default)]
 pub(crate) struct WalkReuse {
-    last: Option<Last>,
+    last: Option<Prior>,
     // What the faces were resolved as when the last pass was built: a pass under another generation keeps nothing.
     generation: String,
     pass: u64,
     next_id: u32,
     // The chunk ids in play, each by the pass that last placed it.
     used: HashMap<u32, u64>,
+    // How many records the walks have spliced back rather than built (`Walk::splice`), for a spec.
+    pub(crate) spliced_records: u64,
     pub(crate) measure: MeasureCache,
     // The realm's programs (`walk::MathTable`), whose offsets the records name — the same program at the same offset
     // from pass to pass, which is what makes an offset compared as a number compared as a program. Lent to the walk
-    // (`maths_for_pass`) and to the layout, which takes it and puts it back.
+    // (`for_walk`) and to the layout, which takes it and puts it back.
     pub(crate) maths: MathTable,
 }
 
@@ -50,20 +55,6 @@ pub(crate) struct Pass {
     pub(crate) unchanged: Vec<f64>,
 }
 
-// The last pass as the walk built it — before the layout wrote into its records.
-struct Last {
-    inputs: Vec<Input>,
-    runs: Vec<Run>,
-    run_texts: Vec<RunText>,
-    grids: Vec<f64>,
-    inlines: Vec<InlineBox>,
-    marks: Vec<[usize; 3]>,
-    ends: Vec<usize>,
-    // Each element's record, by nid, and the chunk each record was the root of (0: none).
-    by_nid: HashMap<u64, usize>,
-    ids: Vec<u32>,
-}
-
 // A pass's streams, as the walk built them.
 pub(crate) struct Streams<'a> {
     pub(crate) inputs: &'a [Input],
@@ -71,7 +62,8 @@ pub(crate) struct Streams<'a> {
     pub(crate) run_texts: &'a [RunText],
     pub(crate) grids: &'a [f64],
     pub(crate) inlines: &'a [InlineBox],
-    pub(crate) marks: &'a [[usize; 3]],
+    pub(crate) extents: &'a [Extent],
+    pub(crate) spliced: &'a [Splice],
 }
 
 // How many values the math table grows to before it is started afresh — every offset moved, so nothing of the last pass
@@ -79,16 +71,20 @@ pub(crate) struct Streams<'a> {
 const MATH_TABLE_CAP: usize = 1 << 20;
 
 impl WalkReuse {
-    // The realm's math table for the walk to build a pass with: started afresh past its cap, the last pass forgotten
-    // with it — asked ONCE, at the start of the pass. (Asked again after the walk had pushed the table past the cap, it
-    // handed the layout an empty table under records naming offsets into the full one, and every `min()`-sized box of
-    // that pass came out 0.)
-    pub(crate) fn maths_for_pass(&mut self) -> &mut MathTable {
+    // The last kept pass dropped: nothing is spliced back from it, nor held against it.
+    pub(crate) fn forget(&mut self) {
+        self.last = None;
+    }
+    // The realm's math table for the walk to build a pass with — started afresh past its cap, the last pass forgotten
+    // with it — and the last kept pass, for the walk to splice unchanged subtrees back from: asked ONCE, at the start of
+    // the pass. (Asked again after the walk had pushed the table past the cap, it handed the layout an empty table under
+    // records naming offsets into the full one, and every `min()`-sized box of that pass came out 0.)
+    pub(crate) fn for_walk(&mut self) -> (&mut MathTable, Option<&Prior>) {
         if self.maths.values.len() > MATH_TABLE_CAP {
             self.maths = MathTable::default();
             self.last = None;
         }
-        &mut self.maths
+        (&mut self.maths, self.last.as_ref())
     }
 
     // The chunks of this pass, by root record, for the layout to key its measures on — what `keep` needs of it — and
@@ -105,14 +101,26 @@ impl WalkReuse {
         let mut same = vec![false; n];
         let mut ids = vec![0u32; n];
         let mut roots = HashMap::new();
+        // (…each record of a spliced subtree, by the one it was in the last pass)
+        let mut spliced_from: Vec<Option<usize>> = vec![None; n];
+        self.spliced_records += s.spliced.iter().map(|sp| sp.n as u64).sum::<u64>();
+        for sp in s.spliced {
+            for k in 0..sp.n {
+                spliced_from[sp.at + k] = Some(sp.was + k);
+            }
+        }
         // (…children first: a child's record comes after its parent's)
         for i in (0..n).rev() {
             let nid = s.inputs[i].nid;
             if nid < 0.0 {
                 continue;
             }
-            let was = self.last.as_ref().and_then(|l| l.by_nid.get(&nid.to_bits()).copied());
+            let was = match spliced_from[i] {
+                Some(j) => Some(j),
+                None => self.last.as_ref().and_then(|l| l.by_nid.get(&nid.to_bits()).copied()),
+            };
             same[i] = match (&self.last, was) {
+                (Some(_), Some(_)) if spliced_from[i].is_some() => true,
                 (Some(last), Some(j)) => same_subtree(s, &ends, &same, last, i, j),
                 _ => false,
             };
@@ -126,7 +134,7 @@ impl WalkReuse {
             });
             ids[i] = id;
             self.used.insert(id, self.pass);
-            let [runs_at, grids_at, inl_at] = s.marks[i];
+            let [runs_at, grids_at, inl_at] = s.extents[i].start;
             roots.insert(i, ChunkRoot {
                 id,
                 n: ends[i] - i,
@@ -161,26 +169,85 @@ impl WalkReuse {
         Pass { roots, ends, ids, unchanged }
     }
 
-    // This pass, kept for the next to be held against.
-    #[allow(clippy::too_many_arguments)]
-    pub(crate) fn keep(
-        &mut self,
-        inputs: Vec<Input>,
-        runs: Vec<Run>,
-        run_texts: Vec<RunText>,
-        grids: Vec<f64>,
-        inlines: Vec<InlineBox>,
-        marks: Vec<[usize; 3]>,
-        ends: Vec<usize>,
-        ids: Vec<u32>,
-    ) {
-        if ends.len() != inputs.len() {
+    // This pass, kept for the next to be held against — and spliced from (`Prior`).
+    pub(crate) fn keep(&mut self, built: KeptPass, ends: Vec<usize>, ids: Vec<u32>) {
+        if ends.len() != built.inputs.len() {
             self.last = None;
             return;
         }
-        let by_nid = inputs.iter().enumerate().filter(|(_, r)| r.nid >= 0.0).map(|(i, r)| (r.nid.to_bits(), i)).collect();
-        self.last = Some(Last { inputs, runs, run_texts, grids, inlines, marks, ends, by_nid, ids });
+        let by_nid = built.inputs.iter().enumerate().filter(|(_, r)| r.nid >= 0.0).map(|(i, r)| (r.nid.to_bits(), i)).collect();
+        let spliceable = spliceable(&built.inputs, &built.extents, &ends);
+        let KeptPass { inputs, runs, run_texts, grids, inlines, extents, anon, inline_nids, walked } = built;
+        self.last = Some(Prior { inputs, runs, run_texts, grids, inlines, extents, anon, inline_nids, by_nid, ends, ids, spliceable, walked });
     }
+}
+
+// What of a pass `keep` keeps: the walk's streams as it built them, what it knew of each record, the anonymous boxes and
+// inline boxes it named to the JS side, and the epoch it walked at.
+pub(crate) struct KeptPass {
+    pub(crate) inputs: Vec<Input>,
+    pub(crate) runs: Vec<Run>,
+    pub(crate) run_texts: Vec<RunText>,
+    pub(crate) grids: Vec<f64>,
+    pub(crate) inlines: Vec<InlineBox>,
+    pub(crate) extents: Vec<Extent>,
+    pub(crate) anon: Vec<[f64; 4]>,
+    pub(crate) inline_nids: Vec<f64>,
+    pub(crate) walked: u64,
+}
+
+// Which subtrees a later walk can splice back (`Walk::splice`): none holding an out-of-flow box whose containing block
+// is outside it — a record it names by index, or an inline box's entry — which a splice would name where it no longer is.
+// Each such box rules out the subtrees it is in up to the first that holds its containing block too.
+fn spliceable(inputs: &[Input], extents: &[Extent], ends: &[usize]) -> Vec<bool> {
+    let mut ok = vec![true; inputs.len()];
+    for (k, x) in inputs.iter().enumerate() {
+        let holds: Box<dyn Fn(usize) -> bool> = if x.cb_index >= 0 {
+            let cb = x.cb_index as usize;
+            Box::new(move |i: usize| (i..ends[i]).contains(&cb))
+        } else if x.cb_index == crate::layout::CB_INLINE {
+            let entry = x.cb_rect[0] as usize;
+            Box::new(move |i: usize| {
+                let e = extents[i];
+                e.end.is_some_and(|q| (e.start[2]..q[3]).contains(&entry))
+            })
+        } else {
+            continue;
+        };
+        let mut up = inputs[k].parent;
+        while up >= 0 && !holds(up as usize) {
+            ok[up as usize] = false;
+            up = inputs[up as usize].parent;
+        }
+    }
+    ok
+}
+
+// Where a walk that spliced subtrees back differs from one that walked them all (`CSIM_NL_REUSE_VERIFY`): None where
+// it does not, in anything the layout or the JS side reads.
+pub(crate) fn splice_mismatch(a: &crate::walk::Built, b: &crate::walk::Built) -> Option<String> {
+    if a.inputs.len() != b.inputs.len() || a.runs.len() != b.runs.len() || a.grids.len() != b.grids.len() || a.inlines.len() != b.inlines.len() {
+        return Some(format!(
+            "streams {}/{}/{}/{} spliced, {}/{}/{}/{} walked",
+            a.inputs.len(), a.runs.len(), a.grids.len(), a.inlines.len(), b.inputs.len(), b.runs.len(), b.grids.len(), b.inlines.len()
+        ));
+    }
+    if let Some(k) = (0..a.inputs.len()).find(|&k| !a.inputs[k].same(&b.inputs[k])) {
+        return Some(format!("record {k} (nid {}) spliced differently", a.inputs[k].nid));
+    }
+    if let Some(k) = (0..a.runs.len()).find(|&k| !a.runs[k].same(&b.runs[k]) || a.run_texts[k] != b.run_texts[k]) {
+        return Some(format!("run {k} spliced differently"));
+    }
+    if let Some(k) = (0..a.grids.len()).find(|&k| a.grids[k].to_bits() != b.grids[k].to_bits()) {
+        return Some(format!("grid value {k} spliced differently"));
+    }
+    if let Some(k) = (0..a.inlines.len()).find(|&k| !a.inlines[k].same(&b.inlines[k])) {
+        return Some(format!("inline entry {k} spliced differently"));
+    }
+    if a.anon != b.anon || a.inline_nids.iter().map(|v| v.to_bits()).ne(b.inline_nids.iter().map(|v| v.to_bits())) {
+        return Some("anonymous boxes or inline boxes named differently".to_owned());
+    }
+    None
 }
 
 // Where each record's subtree ends — the records of a subtree are its root and those after it up to the next that is
@@ -205,23 +272,27 @@ fn subtree_ends(inputs: &[Input]) -> Option<Vec<usize>> {
     Some(ends)
 }
 
-// Where a subtree's streams end: where the next record not its own went in, or where the streams stand.
-fn stream_end(marks: &[[usize; 3]], ends: &[usize], i: usize, runs: usize, grids: usize, inls: usize) -> [usize; 3] {
-    marks.get(ends[i]).copied().unwrap_or([runs, grids, inls])
+// Where a subtree's streams end: where they stood when the walk returned from it, or — for a record no subtree was
+// walked from — where the next record not its own went in, or where the streams stand.
+fn stream_end(extents: &[Extent], ends: &[usize], i: usize, runs: usize, grids: usize, inls: usize) -> [usize; 3] {
+    match extents[i].end {
+        Some([_, r, g, l]) => [r, g, l],
+        None => extents.get(ends[i]).map_or([runs, grids, inls], |e| e.start),
+    }
 }
 
 // Whether the subtree at record `i` is the one at record `j` of the last pass: the same records after its root, each
 // child subtree the same where it was, and the same runs, grid values and inline entries — every position made the
 // subtree's own.
-fn same_subtree(s: &Streams, ends: &[usize], same: &[bool], last: &Last, i: usize, j: usize) -> bool {
+fn same_subtree(s: &Streams, ends: &[usize], same: &[bool], last: &Prior, i: usize, j: usize) -> bool {
     let (end, end_j) = (ends[i], last.ends[j]);
     if end - i != end_j - j {
         return false;
     }
-    let base = Base { rec: i, end, streams: s.marks[i] };
-    let base_j = Base { rec: j, end: end_j, streams: last.marks[j] };
-    let s_end = stream_end(s.marks, ends, i, s.runs.len(), s.grids.len(), s.inlines.len());
-    let l_end = stream_end(&last.marks, &last.ends, j, last.runs.len(), last.grids.len(), last.inlines.len());
+    let base = Base { rec: i, end, streams: s.extents[i].start };
+    let base_j = Base { rec: j, end: end_j, streams: last.extents[j].start };
+    let s_end = stream_end(s.extents, ends, i, s.runs.len(), s.grids.len(), s.inlines.len());
+    let l_end = stream_end(&last.extents, &last.ends, j, last.runs.len(), last.grids.len(), last.inlines.len());
     if (0..3).any(|k| s_end[k] - base.streams[k] != l_end[k] - base_j.streams[k]) {
         return false;
     }
@@ -234,10 +305,10 @@ fn same_subtree(s: &Streams, ends: &[usize], same: &[bool], last: &Last, i: usiz
         }) && (at[1]..to[1]).all(|g| s.grids[g].to_bits() == last.grids[shift(1, g)].to_bits())
             && (at[2]..to[2]).all(|l| s.inlines[l].same(&last.inlines[shift(2, l)]))
     };
-    let mut cursor = s.marks[i];
+    let mut cursor = s.extents[i].start;
     let mut k = i + 1;
     while k < end {
-        if !streams_same(cursor, s.marks[k]) {
+        if !streams_same(cursor, s.extents[k].start) {
             return false;
         }
         let kj = k - i + j;
@@ -249,10 +320,10 @@ fn same_subtree(s: &Streams, ends: &[usize], same: &[bool], last: &Last, i: usiz
             if !same[k] || last.by_nid.get(&s.inputs[k].nid.to_bits()) != Some(&kj) {
                 return false;
             }
-            cursor = stream_end(s.marks, ends, k, s.runs.len(), s.grids.len(), s.inlines.len());
+            cursor = stream_end(s.extents, ends, k, s.runs.len(), s.grids.len(), s.inlines.len());
             k = ends[k];
         } else {
-            cursor = s.marks[k];
+            cursor = s.extents[k].start;
             k += 1;
         }
     }
@@ -285,7 +356,7 @@ fn input_rel(x: &Input, b: &Base) -> Input {
 
 // Whether a record names a place in the grid stream: a grid's or a table's. (Every other record carries a `grid_start`
 // of 0 as it was made, which is no position — rebased as one, a table put in anywhere before a subtree moved its key.)
-fn has_grid(x: &Input) -> bool {
+pub(crate) fn has_grid(x: &Input) -> bool {
     matches!(x.display, DISPLAY_GRID | DISPLAY_TABLE) && x.grid_start >= 0
 }
 
@@ -310,9 +381,9 @@ mod tests {
     #[test]
     fn a_table_grown_past_the_cap_holds_until_the_next_pass() {
         let mut reuse = WalkReuse::default();
-        reuse.maths_for_pass().values.resize(MATH_TABLE_CAP + 10, 1.0);
+        reuse.for_walk().0.values.resize(MATH_TABLE_CAP + 10, 1.0);
         assert_eq!(std::mem::take(&mut reuse.maths).values.len(), MATH_TABLE_CAP + 10);
         reuse.maths.values.resize(MATH_TABLE_CAP + 10, 1.0);
-        assert!(reuse.maths_for_pass().values.is_empty());
+        assert!(reuse.for_walk().0.values.is_empty());
     }
 }

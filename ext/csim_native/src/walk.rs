@@ -134,9 +134,65 @@ pub(crate) struct Built {
     // the element each inline table entry is of, by nid.
     pub(crate) anon: Vec<[f64; 4]>,
     pub(crate) inline_nids: Vec<f64>,
-    // …and where the run, grid and inline streams stood as each record went in: a subtree emits all it emits between
-    // its root and the next record that is not its own, so these are where its streams start (`walk_reuse`).
-    pub(crate) marks: Vec<[usize; 3]>,
+    // …and what each record's subtree was (`Extent`), the subtrees spliced back from the last pass rather than walked
+    // (`Splice`), and the layout epoch the walk began at (`RealmArena::begin_layout_walk`) — for `walk_reuse`.
+    pub(crate) extents: Vec<Extent>,
+    pub(crate) spliced: Vec<Splice>,
+    pub(crate) walked: u64,
+}
+
+// What the walk knows of a record beyond the record: where the run, grid and inline streams stood as it went in, and —
+// for one a subtree was walked from — where its records and streams ended when the walk returned from it; for a block
+// child of a block container, what its walk read from outside it (`Ctx`) and the floats its formatting context had
+// placed when it was done. A subtree emits all it emits between its root going in and the walk returning from it.
+#[derive(Clone, Copy)]
+pub(crate) struct Extent {
+    pub(crate) start: [usize; 3],
+    pub(crate) end: Option<[usize; 4]>,
+    pub(crate) ctx: Option<Ctx>,
+    pub(crate) saw_out: (bool, bool),
+}
+
+// What the walk of a block container's block child reads from outside the child's subtree — which splicing it back
+// from the last pass needs to be what it was (`Walk::splice`): the floats its formatting context had placed on each side
+// when it began (whether its `clear` separates it), the parent's `align` / `<center>` (`legacy_align`) and direction
+// (an inline-start float's side), the viewport (a fixed box's containing block) and the root font size (an `<svg>`'s em
+// attributes).
+#[derive(Clone, Copy, PartialEq)]
+pub(crate) struct Ctx {
+    saw_in: (bool, bool),
+    legacy_align: u8,
+    parent_rtl: bool,
+    basis: [u64; 2],
+    root_font_size: u64,
+}
+
+// A subtree spliced back: the record it went in at, the record it was at in the last pass, and how many records it holds.
+#[derive(Clone, Copy)]
+pub(crate) struct Splice {
+    pub(crate) at: usize,
+    pub(crate) was: usize,
+    pub(crate) n: usize,
+}
+
+// The last kept pass (`walk_reuse`) as a walk splices from it and `walk_reuse` holds the next against it: its streams
+// as the walk built them — before the layout wrote into its records — what it knew of each record, each element's
+// record by nid, where each record's subtree ends, the chunk each was the root of (0: none), which subtrees can be spliced
+// (none whose out-of-flow box names a containing block outside it), and the epoch it was walked at.
+pub(crate) struct Prior {
+    pub(crate) inputs: Vec<Input>,
+    pub(crate) runs: Vec<Run>,
+    pub(crate) run_texts: Vec<RunText>,
+    pub(crate) grids: Vec<f64>,
+    pub(crate) inlines: Vec<InlineBox>,
+    pub(crate) extents: Vec<Extent>,
+    pub(crate) anon: Vec<[f64; 4]>,
+    pub(crate) inline_nids: Vec<f64>,
+    pub(crate) by_nid: HashMap<u64, usize>,
+    pub(crate) ends: Vec<usize>,
+    pub(crate) ids: Vec<u32>,
+    pub(crate) spliceable: Vec<bool>,
+    pub(crate) walked: u64,
 }
 
 // The pass root's containing block, which a percentage in the ROOT's own record resolves against: the viewport, for the
@@ -168,12 +224,11 @@ pub(crate) struct MathTable {
 }
 
 // Walk the subtree at `root` — the element the JS walk took as its pass root.
-pub(crate) fn build(arena: &RealmArena, root: NodeId, basis: Basis, faces: &mut Faces, maths: &mut MathTable) -> Outcome {
+pub(crate) fn build(arena: &RealmArena, root: NodeId, basis: Basis, faces: &mut Faces, maths: &mut MathTable, prior: Option<&Prior>) -> Outcome {
     faces.missing.clear();
-    let generated = Generated::of(arena, root);
-    if !generated.unlinked.is_empty() {
-        return Outcome::NeedsBoxes(generated.unlinked);
-    }
+    let walked = arena.begin_layout_walk();
+    let texts = typed_arena::Arena::new();
+    let generated = Generated { arena, texts: &texts, state: Default::default() };
     let mut walk = Walk {
         arena,
         generated: &generated,
@@ -195,9 +250,18 @@ pub(crate) fn build(arena: &RealmArena, root: NodeId, basis: Basis, faces: &mut 
         inline_cbs: Vec::new(),
         collapse: HashMap::new(),
         anon: Vec::new(),
-        marks: Vec::new(),
+        extents: Vec::new(),
+        prior,
+        attempts: 0,
+        spliced: Vec::new(),
+        root_font_size: None,
     };
     let done = walk.root(root).and_then(|()| walk.resolve_inline_cbs());
+    // (…the generated boxes it met that render with no node to name them by: made, and the pass walked again)
+    let unlinked = std::mem::take(&mut generated.state.borrow_mut().unlinked);
+    if !unlinked.is_empty() {
+        return Outcome::NeedsBoxes(unlinked);
+    }
     // (…and the faces the style engine computed a font metric with a stand-in for, which it computes again once told)
     for key in walk.faces.metrics_missing.clone() {
         if !walk.faces.missing.contains(&key) {
@@ -220,7 +284,9 @@ pub(crate) fn build(arena: &RealmArena, root: NodeId, basis: Basis, faces: &mut 
             grids: walk.grids,
             inline_nids,
             anon: walk.anon,
-            marks: walk.marks,
+            extents: walk.extents,
+            spliced: walk.spliced,
+            walked,
         }),
         Err(why) => Outcome::Declined(why),
     }
@@ -242,13 +308,23 @@ fn flat_children<'a>(arena: &'a RealmArena, node: &'a crate::dom::NodeData) -> &
 // the text its `content` makes of the style engine's value. The box is the node the JS side registered for it
 // (`linkPseudoBox`), so both walks' records name the same box; its text is the one node the walk makes itself, since no
 // tree holds one — an id of its own generation, which no arena node has.
+//
+// An element's boxes are resolved the first time the walk asks for its children (`boxes_of`, from `push_children`) —
+// never for a subtree the walk does not enter — and a box that renders with no node linked for it is noted then, for the
+// pass to answer once the walk is done (`Outcome::NeedsBoxes`). The whole flat tree was scanned before every walk.
+struct Generated<'a> {
+    arena: &'a RealmArena,
+    // (…the texts' home, which hands out references for as long as the walk runs)
+    texts: &'a typed_arena::Arena<crate::dom::NodeData>,
+    state: std::cell::RefCell<GeneratedState<'a>>,
+}
 #[derive(Default)]
-struct Generated {
-    // Each element's rendering boxes, `::before` and `::after`…
+struct GeneratedState<'a> {
+    // Each element resolved so far, with its rendering boxes, `::before` and `::after`…
     of: HashMap<NodeId, [Option<NodeId>; 2]>,
     // …and each box's element, which of the two it is, and its text (none for an empty one).
     boxes: HashMap<NodeId, (NodeId, usize, Option<NodeId>)>,
-    texts: Vec<crate::dom::NodeData>,
+    texts: Vec<&'a crate::dom::NodeData>,
     // The boxes that render which the JS side has not linked to their element — none to name the record by — as
     // `[element nid, 0 before / 1 after, …]`.
     unlinked: Vec<f64>,
@@ -264,34 +340,44 @@ const NO_GENERATED_CONTENT: [&str; 16] = [
     "progress", "meter",
 ];
 
-impl Generated {
-    fn of(arena: &RealmArena, root: NodeId) -> Generated {
-        let mut g = Generated::default();
-        let mut stack = vec![root];
-        while let Some(id) = stack.pop() {
-            let Some(node) = arena.get(id) else { continue };
-            stack.extend(flat_children(arena, node).iter().copied());
-            if node.kind != NodeKind::Element || NO_GENERATED_CONTENT.contains(&&*node.local_name) {
-                continue;
-            }
+impl<'a> Generated<'a> {
+    // An element's rendering boxes, `::before` and `::after`, resolved the first time it is asked.
+    fn boxes_of(&self, id: NodeId) -> [Option<NodeId>; 2] {
+        if let Some(&boxes) = self.state.borrow().of.get(&id) {
+            return boxes;
+        }
+        let mut boxes = [None, None];
+        let node = self.arena.get(id).filter(|n| n.kind == NodeKind::Element && !NO_GENERATED_CONTENT.contains(&&*n.local_name));
+        if let Some(node) = node {
             for (which, pseudo) in PSEUDOS.iter().enumerate() {
-                let Some(text) = crate::style::eager_pseudo(arena, id, pseudo).and_then(|style| generated_text(&style, node)) else {
+                let Some(text) = crate::style::eager_pseudo(self.arena, id, pseudo).and_then(|style| generated_text(&style, node)) else {
                     continue;
                 };
-                let Some(at) = node.pseudo_boxes[which].filter(|&b| arena.get(b).is_some()) else {
-                    g.unlinked.extend([id.to_f64(), which as f64]);
+                let mut st = self.state.borrow_mut();
+                let Some(at) = node.pseudo_boxes[which].filter(|&b| self.arena.get(b).is_some()) else {
+                    st.unlinked.extend([id.to_f64(), which as f64]);
                     continue;
                 };
                 let text = (!text.is_empty()).then(|| {
-                    let tid = NodeId { idx: g.texts.len() as u32, generation: GENERATED_TEXT };
-                    g.texts.push(crate::dom::NodeData { parent: Some(at), ..crate::dom::NodeData::of_kind(NodeKind::Text, text) });
+                    let tid = NodeId { idx: st.texts.len() as u32, generation: GENERATED_TEXT };
+                    st.texts.push(self.texts.alloc(crate::dom::NodeData { parent: Some(at), ..crate::dom::NodeData::of_kind(NodeKind::Text, text) }));
                     tid
                 });
-                g.of.entry(id).or_default()[which] = Some(at);
-                g.boxes.insert(at, (id, which, text));
+                boxes[which] = Some(at);
+                st.boxes.insert(at, (id, which, text));
             }
         }
-        g
+        self.state.borrow_mut().of.insert(id, boxes);
+        boxes
+    }
+    // A generated box's element, which of the two it is and its text — None for any other node. (A box is only ever
+    // met through its element's children, by when its element is resolved.)
+    fn box_info(&self, id: NodeId) -> Option<(NodeId, usize, Option<NodeId>)> {
+        self.state.borrow().boxes.get(&id).copied()
+    }
+    // A generated box's text node.
+    fn text(&self, id: NodeId) -> Option<&'a crate::dom::NodeData> {
+        self.state.borrow().texts.get(id.idx as usize).copied()
     }
 }
 // What a generated box's `content` renders (`generatedContentOf`), or None for none: its strings, an `attr()` of its
@@ -322,7 +408,7 @@ fn generated_text(style: &ComputedValues, element: &crate::dom::NodeData) -> Opt
 
 struct Walk<'a> {
     arena: &'a RealmArena,
-    generated: &'a Generated,
+    generated: &'a Generated<'a>,
     faces: &'a mut Faces,
     basis: Basis,
     inputs: Vec<Input>,
@@ -355,8 +441,16 @@ struct Walk<'a> {
     // container's item), its container, and which of the container's anonymous ones it is: what names it to the JS
     // side, whose memoised object it is (`tableGrid` / `boxItems`).
     anon: Vec<[f64; 4]>,
-    // Where the run, grid and inline streams stood as each record went in (`Built::marks`).
-    marks: Vec<[usize; 3]>,
+    // What each record's subtree was (`Built::extents`).
+    extents: Vec<Extent>,
+    // The last kept pass, which an unchanged subtree is spliced back from (`splice`) — None where there is none, or
+    // where the pass has to be walked whole (the walk-parity instrument, the reuse check's second walk).
+    prior: Option<&'a Prior>,
+    // How deep in an ATTEMPT the walk is — `mixed_block`'s group, taken back if it makes no line: nothing is spliced in
+    // one, whose taking back would have to take the splice back too.
+    attempts: u32,
+    spliced: Vec<Splice>,
+    root_font_size: Option<f64>,
 }
 
 // An alignment keyword as the JS walk reads it (`alignKeyword`): `safe` / `unsafe` dropped, `first baseline` the
@@ -1254,8 +1348,12 @@ fn widget_tag(tag: &str) -> bool {
 impl<'a> Walk<'a> {
     // A record goes in — and where each stream stands as it does (`Built::marks`).
     fn push_record(&mut self, rec: Input) {
-        self.marks.push([self.runs.len(), self.grids.len(), self.inlines.len()]);
+        self.extents.push(Extent { start: self.stream_ends(), end: None, ctx: None, saw_out: (false, false) });
         self.inputs.push(rec);
+    }
+    // Where the run, grid and inline streams stand.
+    fn stream_ends(&self) -> [usize; 3] {
+        [self.runs.len(), self.grids.len(), self.inlines.len()]
     }
 
     fn root(&mut self, root: NodeId) -> Step {
@@ -1283,8 +1381,8 @@ impl<'a> Walk<'a> {
 
     // A node's style: an element's, or a generated box's — its element's `::before` / `::after`.
     fn style(&self, id: NodeId) -> Result<Arc<ComputedValues>, &'static str> {
-        match self.generated.boxes.get(&id) {
-            Some(&(origin, which, _)) => crate::style::eager_pseudo(self.arena, origin, &PSEUDOS[which]).ok_or("unstyled"),
+        match self.generated.box_info(id) {
+            Some((origin, which, _)) => crate::style::eager_pseudo(self.arena, origin, &PSEUDOS[which]).ok_or("unstyled"),
             None => crate::style::primary_style(self.arena, id).ok_or("unstyled"),
         }
     }
@@ -1292,7 +1390,7 @@ impl<'a> Walk<'a> {
     // A node the walk lays out: the arena's, or the text a generated box holds.
     fn get(&self, id: NodeId) -> Option<&'a crate::dom::NodeData> {
         if id.generation == GENERATED_TEXT {
-            return self.generated.texts.get(id.idx as usize);
+            return self.generated.text(id);
         }
         self.arena.get(id)
     }
@@ -1303,7 +1401,7 @@ impl<'a> Walk<'a> {
     // a shadow tree's top-level node's host — none for a host's child no slot takes — and a generated box's the
     // element it is of, which no tree says.
     fn parent_of(&self, id: NodeId) -> Option<NodeId> {
-        if let Some(&(origin, ..)) = self.generated.boxes.get(&id) {
+        if let Some((origin, ..)) = self.generated.box_info(id) {
             return Some(origin);
         }
         let p = self.node(id).parent?;
@@ -1328,10 +1426,10 @@ impl<'a> Walk<'a> {
         out.into_iter()
     }
     fn push_children(&self, id: NodeId, out: &mut Vec<NodeId>) {
-        let (first, kids, last) = match self.generated.boxes.get(&id) {
-            Some(&(.., text)) => (text, &[][..], None),
+        let (first, kids, last) = match self.generated.box_info(id) {
+            Some((.., text)) => (text, &[][..], None),
             None => {
-                let [before, after] = self.generated.of.get(&id).copied().unwrap_or_default();
+                let [before, after] = self.generated.boxes_of(id);
                 (before, flat_children(self.arena, self.node(id)), after)
             }
         };
@@ -1393,9 +1491,15 @@ impl<'a> Walk<'a> {
         if bfc {
             self.saw_float = (false, false);
         }
+        let at = self.inputs.len();
         let done = self.record_body(id, parent, role, Fresh { clear, separates, floated, bfc });
         if bfc {
             self.saw_float = outer;
+        }
+        if done.is_ok() && at < self.inputs.len() {
+            let [runs, grids, inls] = self.stream_ends();
+            self.extents[at].end = Some([self.inputs.len(), runs, grids, inls]);
+            self.extents[at].saw_out = self.saw_float;
         }
         done
     }
@@ -1672,11 +1776,118 @@ impl<'a> Walk<'a> {
         for (c, kid) in blocks {
             if kid == Kid::OutOfFlow {
                 self.out_of_flow(c, idx)?;
+            } else if kid == Kid::Block {
+                self.block_child(c, idx, style)?;
             } else {
                 self.record(c, idx)?;
             }
         }
         Ok(())
+    }
+
+    // A block child `c` of the block container at record `parent`: spliced back from the last pass where it can be
+    // (`splice`), walked otherwise — with what its walk read from outside it kept beside its record, for the next pass.
+    fn block_child(&mut self, c: NodeId, parent: i32, parent_style: &ComputedValues) -> Step {
+        let ctx = self.child_ctx(parent, parent_style)?;
+        if self.splice(c, parent, ctx) {
+            return Ok(());
+        }
+        let at = self.inputs.len();
+        self.record(c, parent)?;
+        if at < self.inputs.len() {
+            self.extents[at].ctx = Some(ctx);
+        }
+        Ok(())
+    }
+    fn child_ctx(&mut self, parent: i32, parent_style: &ComputedValues) -> Result<Ctx, &'static str> {
+        let root_font_size = match self.root_font_size {
+            Some(v) => v,
+            None => *self.root_font_size.insert(self.root_font_size()?),
+        };
+        let parent_node = NodeId::from_i64(self.inputs[parent as usize].nid as i64);
+        Ok(Ctx {
+            saw_in: self.saw_float,
+            legacy_align: parent_node.map_or(0, |p| self.legacy_align(p)),
+            parent_rtl: parent_style.get_inherited_box().direction == Direction::Rtl,
+            basis: [self.basis.w.to_bits(), self.basis.h.to_bits()],
+            root_font_size: root_font_size.to_bits(),
+        })
+    }
+
+    // The block child `c` of the block container at record `parent` SPLICED back from the last kept pass instead of
+    // walked, where nothing in its flat subtree has changed since that pass began (`NodeData::stamp`) and nothing its walk
+    // read from outside it has either (`Ctx`): its records, runs, grid values and inline entries as they were, every
+    // position moved to where they go now — its records' parents, run and grid starts and containing blocks inside it, its
+    // runs' records and inline entries — the anonymous boxes and inline boxes it holds named to the JS side again, and the
+    // floats its formatting context had placed when it was done. False where it cannot be, for the caller to walk it.
+    // (Never in an attempt, never the `<body>`, whose formatting context reads the root's `overflow`.)
+    fn splice(&mut self, c: NodeId, parent: i32, ctx: Ctx) -> bool {
+        let Some(prior) = self.prior else { return false };
+        let Some(node) = self.arena.get(c) else { return false };
+        if self.attempts > 0 || node.stamp.get() > prior.walked || &*node.local_name == "body" {
+            return false;
+        }
+        let Some(&j) = prior.by_nid.get(&c.to_f64().to_bits()) else { return false };
+        let was = prior.extents[j];
+        let (Some(end), Some(was_ctx)) = (was.end, was.ctx) else { return false };
+        if was_ctx != ctx || !prior.spliceable[j] {
+            return false;
+        }
+        let [end, runs_end, grids_end, inls_end] = end;
+        let [runs_at, grids_at, inls_at] = was.start;
+        let at = self.inputs.len();
+        let d_rec = at as i32 - j as i32;
+        let d_run = self.runs.len() as i32 - runs_at as i32;
+        let d_grid = self.grids.len() as i32 - grids_at as i32;
+        let d_inl = self.inlines.len() as i32 - inls_at as i32;
+        for k in j..end {
+            let mut x = prior.inputs[k];
+            x.parent = if k == j { parent } else { x.parent + d_rec };
+            if x.run_count > 0 {
+                x.run_start += d_run;
+            }
+            if crate::walk_reuse::has_grid(&x) {
+                x.grid_start += d_grid;
+            }
+            if x.cb_index >= 0 {
+                x.cb_index += d_rec;
+            } else if x.cb_index == crate::layout::CB_INLINE {
+                x.cb_rect[0] += d_inl as f64;
+            }
+            let e = prior.extents[k];
+            let shift3 = |p: [usize; 3]| [(p[0] as i32 + d_run) as usize, (p[1] as i32 + d_grid) as usize, (p[2] as i32 + d_inl) as usize];
+            self.extents.push(Extent {
+                start: shift3(e.start),
+                end: e.end.map(|q| [(q[0] as i32 + d_rec) as usize, (q[1] as i32 + d_run) as usize, (q[2] as i32 + d_grid) as usize, (q[3] as i32 + d_inl) as usize]),
+                ..e
+            });
+            self.inputs.push(x);
+        }
+        for u in runs_at..runs_end {
+            let mut r = prior.runs[u];
+            match r.kind {
+                RUN_OOF | RUN_FLOAT | RUN_ATOMIC if r.font >= 0 => r.font += d_rec,
+                RUN_OPEN | RUN_CLOSE | RUN_WBR => r.font += d_inl,
+                RUN_BR if r.font >= 0 => r.font += d_inl,
+                _ => {}
+            }
+            self.runs.push(r);
+            self.run_texts.push(prior.run_texts[u].clone());
+        }
+        self.grids.extend_from_slice(&prior.grids[grids_at..grids_end]);
+        self.inlines.extend_from_slice(&prior.inlines[inls_at..inls_end]);
+        for l in inls_at..inls_end {
+            if let Some(el) = NodeId::from_i64(prior.inline_nids[l] as i64).filter(|_| prior.inline_nids[l] >= 0.0) {
+                self.inline_of.insert(el, (l as i32 + d_inl) as usize);
+            }
+        }
+        for row in prior.anon.iter().filter(|r| (j..end).contains(&(r[0] as usize))) {
+            self.anon.push([row[0] + d_rec as f64, row[1], row[2], row[3]]);
+        }
+        self.rec_index.insert(c, at as i32);
+        self.saw_float = was.saw_out;
+        self.spliced.push(Splice { at, was: j, n: end - j });
+        true
     }
 
     // A block holding BOTH block-level boxes and inline content (§9.2.1.1): each maximal run of inline content is an
@@ -1728,7 +1939,10 @@ impl<'a> Walk<'a> {
                 rec.display = DISPLAY_TEXT_BLOCK;
                 self.push_record(rec);
                 let mut g = Gather { block: style, idx: anon, bites, runs: Vec::new(), makes_line: false, floats: Vec::new(), rel: None };
-                self.gather(&kids, style, &font, ws_mode, wrap, 0.0, &mut g)?;
+                self.attempts += 1;
+                let gathered = self.gather(&kids, style, &font, ws_mode, wrap, 0.0, &mut g);
+                self.attempts -= 1;
+                gathered?;
                 let holds_oof = g.runs.iter().any(|r| matches!(r, Pending::Oof { .. }));
                 let occupies = g.runs.iter().any(|r| matches!(r, Pending::Open { .. } | Pending::Wbr { .. }));
                 if !g.makes_line && !occupies && !holds_oof {
@@ -1764,7 +1978,7 @@ impl<'a> Walk<'a> {
             }
             if is_block {
                 unspent = false;
-                self.record(c, idx)?;
+                self.block_child(c, idx, style)?;
             }
         }
         Ok(())
@@ -2929,7 +3143,7 @@ impl<'a> Walk<'a> {
     // the floats before it.
     fn rollback(&mut self, m: Mark) {
         self.inputs.truncate(m.inputs);
-        self.marks.truncate(m.inputs);
+        self.extents.truncate(m.inputs);
         self.anon.truncate(m.anon);
         self.runs.truncate(m.runs);
         self.run_texts.truncate(m.runs);

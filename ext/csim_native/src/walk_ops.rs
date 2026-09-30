@@ -89,7 +89,7 @@ fn walk_parity(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgum
     let mut maths = walk::MathTable::default();
     let built = arena.faces.with(|faces| {
         faces.at_generation(&generation);
-        walk::build(arena, root, pass.basis, faces, &mut maths)
+        walk::build(arena, root, pass.basis, faces, &mut maths, None)
     });
     match built {
         Outcome::NeedsFaces if parity.asked => {
@@ -202,11 +202,22 @@ fn layout_build(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgu
     let check = args.get(6).is_true();
     let d = dom(scope);
     let Some(arena) = d.realms.get(&cid) else { return };
-    let maths = d.walk_reuse.entry(cid).or_default().maths_for_pass();
-    let built = arena.faces.with(|faces| {
+    // (…splicing back from the last kept pass what did not change since it: `Walk::splice`; under the check, the pass is
+    // walked whole as well, and the two held against each other)
+    let (maths, prior) = d.walk_reuse.entry(cid).or_default().for_walk();
+    let (built, whole) = arena.faces.with(|faces| {
         faces.at_generation(&generation);
-        walk::build(arena, root, basis, faces, maths)
+        let built = walk::build(arena, root, basis, faces, maths, prior);
+        let whole = (check && prior.is_some()).then(|| walk::build(arena, root, basis, faces, maths, None));
+        (built, whole)
     });
+    if let (Outcome::Built(spliced), Some(Outcome::Built(whole))) = (&built, &whole) {
+        if let Some(why) = walk_reuse::splice_mismatch(spliced, whole) {
+            let s = v8::String::new(scope, &format!("reuse mismatch: {why}")).unwrap();
+            rv.set(s.into());
+            return;
+        }
+    }
     let built = match built {
         Outcome::Built(built) => built,
         Outcome::Declined(why) => {
@@ -229,12 +240,12 @@ fn layout_build(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgu
             return;
         }
     };
-    let walk::Built { mut inputs, runs, run_texts, inlines, grids, anon, inline_nids, marks } = built;
+    let walk::Built { mut inputs, runs, run_texts, inlines, grids, anon, inline_nids, extents, spliced, walked } = built;
     let nids: Vec<f64> = inputs.iter().map(|r| r.nid).collect();
     // The layout of every subtree built as the last pass built it is the measure cache's to put back (`walk_reuse`) —
     // except for a pass that answers its text pieces, which a put-back measure does not hold.
     let reuse = dom(scope).walk_reuse.entry(cid).or_default();
-    let streams = walk_reuse::Streams { inputs: &inputs, runs: &runs, run_texts: &run_texts, grids: &grids, inlines: &inlines, marks: &marks };
+    let streams = walk_reuse::Streams { inputs: &inputs, runs: &runs, run_texts: &run_texts, grids: &grids, inlines: &inlines, extents: &extents, spliced: &spliced };
     let walk_reuse::Pass { roots, ends, ids, unchanged } = reuse.chunks(&streams, &generation);
     let built_inputs = inputs.clone();
     let mut measure = std::mem::take(&mut reuse.measure);
@@ -245,7 +256,18 @@ fn layout_build(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgu
     let reuse = dom(scope).walk_reuse.entry(cid).or_default();
     reuse.measure = measure;
     reuse.maths = maths;
-    reuse.keep(built_inputs, runs, run_texts, grids, inlines, marks, ends, ids);
+    let kept = walk_reuse::KeptPass {
+        inputs: built_inputs,
+        runs,
+        run_texts,
+        grids,
+        inlines,
+        extents,
+        anon: anon.clone(),
+        inline_nids: inline_nids.clone(),
+        walked,
+    };
+    reuse.keep(kept, ends, ids);
     if let Some(why) = mismatch {
         let s = v8::String::new(scope, &format!("reuse mismatch: {why}")).unwrap();
         rv.set(s.into());
@@ -327,6 +349,10 @@ fn walk_face(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgumen
     if arena.faces.with(|faces| faces.learn((family, bucket), usable.then_some(face))) {
         if let Some(engine) = d.styles.get_mut(&cid) {
             engine.restyle_everything();
+        }
+        // (…and nothing a walk built before is spliced back: its font metrics were a stand-in's)
+        if let Some(reuse) = d.walk_reuse.get_mut(&cid) {
+            reuse.forget();
         }
     }
 }
