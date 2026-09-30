@@ -4,6 +4,7 @@
 
 @namespace url(http://www.w3.org/1999/xhtml);
 @namespace svg url(http://www.w3.org/2000/svg);
+@namespace mathml url(http://www.w3.org/1998/Math/MathML);
 
 /* 15.3.1 Hidden elements */
 area, base, basefont, datalist, head, link, meta, noembed,
@@ -111,6 +112,9 @@ nobr wbr { white-space: normal; }
 /* 15.3.5 Bidirectional text */
 [dir]:dir(ltr), bdi:dir(ltr), input[type=tel i]:dir(ltr) { direction: ltr; }
 [dir]:dir(rtl), bdi:dir(rtl) { direction: rtl; }
+/* …and MathML Core's own sheet maps a MathML element's `dir` (no HTML directionality: `:dir()` does not see it) */
+mathml|*[dir=ltr i] { direction: ltr; }
+mathml|*[dir=rtl i] { direction: rtl; }
 address, blockquote, center, div, figure, figcaption, footer, form, header, hr,
 legend, listing, main, p, plaintext, pre, summary, xmp, article, aside, h1, h2,
 h3, h4, h5, h6, hgroup, nav, section, search, table, caption, colgroup, col,

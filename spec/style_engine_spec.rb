@@ -333,6 +333,42 @@ RSpec.describe 'directionality' do
       ENV['CSIM_STYLO'] = saved
     end
   end
+
+  # `dir=auto` by the first character of Bidi_Class L, R or AL — an Arabic-Indic digit (AN) and a Hebrew point (NSM)
+  # are none, a leading LRM is L, Adlam R — skipping only an HTML element with a valid `dir` of its own (an SVG or MathML
+  # `dir` is no such attribute, and sets no directionality); a shadow tree's `<slot>` ends the scan with its host's, a
+  # `<slot>` in no shadow tree is scanned like any element, and an unassigned `<slot dir=auto>` reads its fallback.
+  # Chrome and Firefox, every row: L L L R L L R R R L (the first scope's `x` is its first strong character).
+  [nil, '1'].each do |stylo|
+    it "resolves dir=auto by Bidi_Class and HTML's own steps#{stylo ? ' (stylo)' : ''}" do
+      saved = ENV['CSIM_STYLO']
+      ENV['CSIM_STYLO'] = stylo
+      html = '<!DOCTYPE html><meta charset="utf-8">' \
+             '<div dir="auto"><span id="a">x</span>&#x5e9;&#x5dc;</div>' \
+             '<div dir="auto">&#x663; abc<span id="b">x</span></div>' \
+             '<div dir="auto">&#x200e;&#x5e9;&#x5dc;<span id="c">x</span></div>' \
+             '<div dir="auto">&#x1e900;<span id="d">x</span></div>' \
+             '<div dir="auto">&#x591;abc<span id="e">x</span></div>' \
+             '<div dir="auto"><slot><span id="f">x</span>&#x5e9;&#x5dc;</slot></div>' \
+             '<div dir="auto"><slot>&#x5e9;&#x5dc;</slot><span id="g">x</span></div>' \
+             '<div dir="auto"><svg><text dir="ltr">&#x5e9;&#x5dc;</text></svg><span id="h">x</span></div>' \
+             '<div dir="rtl"><svg><g id="i" dir="ltr"></g></svg></div>' \
+             '<div id="host"></div>'
+      s = simulated_session(->(_env) { [200, {'content-type' => 'text/html; charset=utf-8'}, [html]] })
+      s.visit '/'
+      got = s.evaluate_script(<<~JS)
+        (() => {
+          const sr = document.getElementById('host').attachShadow({mode: 'open'});
+          sr.innerHTML = '<slot id="j" dir="auto">abc</slot>';
+          const at = (e) => (e.matches(':dir(rtl)') ? 'R' : 'L');
+          return ['a', 'b', 'c', 'd', 'e', 'f', 'g', 'h', 'i'].map((id) => at(document.getElementById(id))).concat([at(sr.getElementById('j'))]).join(' ');
+        })()
+      JS
+      expect(got).to eq('L L L R L L R R R L')
+    ensure
+      ENV['CSIM_STYLO'] = saved
+    end
+  end
 end
 
 # The cascade's own order of sheets, in both engines: a `<style>` written after a `<link>` wins over it.

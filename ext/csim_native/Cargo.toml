@@ -57,8 +57,12 @@ skrifa = "0.31"
 # The Unicode general categories the ORACLE asks a regex for (`\p{L}` / `\p{N}` / `\p{M}`) — the classes
 # `layout::hyphen_breaks_after` and `font::zero_width` have to agree with it about. regex-syntax bakes in a
 # UCD snapshot of its own, so its answers are CHECKED against the driver's own engine (native_layout_text_spec)
-# rather than assumed. `unicode-gencat` answers those, and `unicode-script` the scripts the oracle's `dir=auto`
-# calls strong right-to-left (`\p{Script=Hebrew}` …); they are the ONLY ones enabled, so any other pattern —
-# `\p{Alphabetic}`, `\w` — does not parse and reaches `unicode.rs`'s panic. Porting something that needs one
-# means enabling its feature here first.
-regex-syntax = { version = "0.8", default-features = false, features = ["unicode-gencat", "unicode-script"] }
+# rather than assumed. `unicode-gencat` is the narrowest feature that answers them — it brings all 38 general
+# categories plus the property name/value tables — and it is also the ONLY one enabled, so a pattern outside
+# `\p{<general category>}` does not parse: `\p{Alphabetic}`, `\p{Script=Hebrew}` and `\w` would all reach
+# `unicode.rs`'s panic. Porting something that needs one means enabling its feature here first.
+regex-syntax = { version = "0.8", default-features = false, features = ["unicode-gencat"] }
+# …and the Bidi_Class HTML's `dir=auto` scans text by (a "strong directional character" is L, R or AL): ICU4X's
+# compiled data, which `url`'s IDNA links in already.
+icu_properties = "2"
+

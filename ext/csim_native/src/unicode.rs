@@ -1,7 +1,7 @@
 // The Unicode general categories the ORACLE asks a regex for, and that native therefore has to answer the
 // same way: `\p{M}`, which `font::zero_width` needs to decide whether a character at or above U+0300 is
 // zero-width, and `\p{L}` / `\p{N}`, which `layout::hyphen_breaks_after` needs because the oracle's
-// `HYPHEN_BREAK_RE` spells its classes that way — and the strong right-to-left class `dir=auto` scans text for.
+// `HYPHEN_BREAK_RE` spells its classes that way.
 //
 // The classes come from regex-syntax — the SAME regex the oracle writes, parsed rather than reimplemented —
 // and NOT from Rust std's `char::is_alphabetic` / `is_numeric`. FOUR Unicode versions live in this process
@@ -28,12 +28,6 @@ use std::sync::LazyLock;
 static MARKS: LazyLock<Vec<(u32, u32)>> = LazyLock::new(|| ranges(r"\p{M}"));
 static LETTERS: LazyLock<Vec<(u32, u32)>> = LazyLock::new(|| ranges(r"\p{L}"));
 static NUMBERS: LazyLock<Vec<(u32, u32)>> = LazyLock::new(|| ranges(r"\p{N}"));
-// …and what the oracle's `dir=auto` calls a strong RIGHT-TO-LEFT character (dom-nodes.js `DIR_STRONG_RTL`, the same
-// pattern): the right-to-left scripts and the five right-to-left marks and embeddings, a strong LEFT-TO-RIGHT one being
-// any other letter (`\p{L}`). Both engines approximate Bidi_Class by script — R / AL are what HTML's "strong
-// directional character" means — and share the approximation.
-pub(crate) const DIR_RTL_PATTERN: &str = r"[\p{Script=Hebrew}\p{Script=Arabic}\p{Script=Syriac}\p{Script=Thaana}\p{Script=Nko}\p{Script=Samaritan}\p{Script=Mandaic}\x{200F}\x{061C}\x{202B}\x{202E}\x{2067}]";
-static DIR_RTL: LazyLock<Vec<(u32, u32)>> = LazyLock::new(|| ranges(DIR_RTL_PATTERN));
 
 // A class's code-point ranges: ascending and disjoint, which is what `in_ranges`' binary search needs, and
 // non-adjacent besides — regex-syntax canonicalises a `ClassUnicode` on construction (`Interval::canonicalize`
@@ -57,7 +51,6 @@ pub(crate) fn init() {
     LazyLock::force(&MARKS);
     LazyLock::force(&LETTERS);
     LazyLock::force(&NUMBERS);
-    LazyLock::force(&DIR_RTL);
 }
 
 pub(crate) fn is_combining_mark(cp: u32) -> bool {
@@ -70,16 +63,19 @@ pub(crate) fn is_number(cp: u32) -> bool {
     in_ranges(&NUMBERS, cp)
 }
 
-// A character's strong direction for `dir=auto` (dom-nodes.js `firstStrongDir`): Some(true) right-to-left, Some(false)
-// left-to-right, None not a strong one.
-pub(crate) fn strong_direction(cp: u32) -> Option<bool> {
-    if in_ranges(&DIR_RTL, cp) {
-        Some(true)
-    } else if in_ranges(&LETTERS, cp) {
-        Some(false)
-    } else {
-        None
-    }
+// The first STRONG directional character of a text (HTML §3.2.6.4, `dir=auto`): Some(true) for one of Bidi_Class R or AL,
+// Some(false) for L, None where there is none. The Unicode Bidi_Class itself — both engines ask it here
+// (`__dom.firstStrongDirection`), so the answer is the spec's and there is one: an Arabic-Indic digit (AN), a Hebrew
+// point (NSM) and a leading LRM (L) are what Chrome and Firefox make of them, where a script approximation called
+// the first two right-to-left and the third nothing.
+pub(crate) fn first_strong_direction(units: &[u16]) -> Option<bool> {
+    use icu_properties::props::BidiClass;
+    let classes = icu_properties::CodePointMapData::<BidiClass>::new();
+    char::decode_utf16(units.iter().copied()).find_map(|c| match classes.get(c.ok()?) {
+        BidiClass::LeftToRight => Some(false),
+        BidiClass::RightToLeft | BidiClass::ArabicLetter => Some(true),
+        _ => None,
+    })
 }
 
 fn in_ranges(table: &[(u32, u32)], cp: u32) -> bool {
@@ -105,11 +101,10 @@ pub(crate) fn class_ranges(ruby: &magnus::Ruby, klass: String) -> Result<Vec<(u3
         "M" => &MARKS,
         "L" => &LETTERS,
         "N" => &NUMBERS,
-        "DirRTL" => &DIR_RTL,
         other => {
             return Err(magnus::Error::new(
                 ruby.exception_arg_error(),
-                format!("unknown class {other:?} (M, L, N or DirRTL)"),
+                format!("unknown general category {other:?} (M, L or N)"),
             ));
         }
     };

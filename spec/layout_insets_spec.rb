@@ -146,5 +146,7 @@ RSpec.describe 'layout insets' do
     height = s.evaluate_script('innerHeight')
     expect(rect_of(s, 'm').map {|v| v.round(2) }).to eq([473, (height - 56) / 2.0, 77.99, 56])
     expect(rect_of(s, 'd').map {|v| v.round(2) }).to eq([455.01, 50, 113.98, 56])
+    # (…and its UA `max-height` computes to its canonical sum: Chrome, `calc(100% - 38px)`)
+    expect(s.evaluate_script("getComputedStyle(document.getElementById('m')).maxHeight")).to eq('calc(100% - 38px)')
   end
 end

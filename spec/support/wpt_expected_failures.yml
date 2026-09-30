@@ -7715,7 +7715,6 @@ css/cssom/getComputedStyle-pseudo-with-argument.html:
 - 'This pseudo-element should parse: ::highlight(name)'
 css/cssom/getComputedStyle-pseudo.html:
 - "::file-selector-button resolves to the file input button element"
-- Item-based blockification of nonexistent pseudo-elements
 - Pseudo-elements can use the full range of CSS syntax
 - 'Unknown pseudo-element with a known identifier: backdrop'
 - 'Unknown pseudo-element with a known identifier: file-selector-button'
@@ -8909,10 +8908,6 @@ html/canvas/element/text/direction-inherit-rtl.html:
 - "== html/canvas/element/text/reference/direction-rtl-ref.html"
 html/canvas/element/text/direction-rtl.html:
 - "== html/canvas/element/text/reference/direction-rtl-ref.html"
-html/dom/directionality/bdi-element-invalid-dir.html:
-- "== html/dom/directionality/bdi-element-invalid-dir-ref.html"
-html/dom/elements/global-attributes/dir-auto-dynamic-changes.window.js:
-- dir=auto changes for slot reassignment
 html/dom/elements/global-attributes/dir-auto-dynamic-simple-dataChange.html:
 - "== html/dom/elements/global-attributes/dir-auto-dynamic-simple-ref.html (never
   ready to capture)"
@@ -8926,8 +8921,6 @@ html/dom/elements/global-attributes/dir-shadow-37.html:
 - "== html/dom/elements/global-attributes/dir-shadow-37-ref.html"
 html/dom/elements/global-attributes/dir-shadow-39.html:
 - "== html/dom/elements/global-attributes/dir-shadow-39-ref.html"
-html/dom/elements/global-attributes/dir-shadow-40.html:
-- "== html/dom/elements/global-attributes/dir-shadow-40-ref.html"
 html/dom/elements/global-attributes/dir_auto-isolate.html:
 - "== html/dom/elements/global-attributes/dir_auto-isolate-ref.html"
 html/dom/elements/global-attributes/dir_auto-pre-N-between-Rs.html:
@@ -9247,10 +9240,6 @@ html/rendering/bindings/the-select-element-0/option-label.html:
 html/rendering/non-replaced-elements/flow-content-0/dialog.html:
 - 'Closed dialog in width: 538px iframe'
 - 'Closed dialog in width: 540px iframe'
-- 'Modal dialog in width: 538px iframe'
-- 'Modal dialog in width: 540px iframe'
-- 'Open dialog in width: 538px iframe'
-- 'Open dialog in width: 540px iframe'
 html/rendering/non-replaced-elements/flow-content-0/form-margin-quirk.html:
 - form margin quirk
 html/rendering/non-replaced-elements/form-controls/input-line-height-computed.html:
@@ -10125,8 +10114,6 @@ html/rendering/the-css-user-agent-style-sheet-and-presentational-hints/mouse-cur
 html/rendering/the-details-element/auto-expand-details-text-fragment.html:
 - Verifies that the target page has scrolled as a result of a ScrollToTextFragment
   navigation.
-html/rendering/the-details-element/details-blockification.html:
-- Summary and content should have display:block computed value
 html/rendering/the-details-element/details-content-pseudo-attr.html:
 - "== html/rendering/the-details-element/details-content-pseudo-attr-ref.html"
 html/rendering/the-details-element/details-display-type-001.html:

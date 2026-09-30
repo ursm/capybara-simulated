@@ -108,9 +108,11 @@ RSpec.describe 'native layout L1 block-flow parity' do
       session.visit '/'
       height, passes = session.evaluate_script(<<~JS)
         (() => {
-          const passes = __csimNativeLayoutStats().native;
+          // (…a native pass either walk built: the JS walk's, or the Rust walk's under the style engine)
+          const count = () => { const s = __csimNativeLayoutStats(); return s.native + s.rust; };
+          const passes = count();
           document.body.appendChild(document.createComment(''));
-          return [document.documentElement.getBoundingClientRect().height, __csimNativeLayoutStats().native - passes];
+          return [document.documentElement.getBoundingClientRect().height, count() - passes];
         })()
       JS
       expect(passes).to eq(1), "#{css} #{body}: native did not lay the page out"

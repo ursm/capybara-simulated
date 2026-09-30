@@ -389,8 +389,12 @@ pub(crate) struct RealmArena {
     pub(crate) form_facts: std::cell::RefCell<crate::element_state::FormFactsMemo>,
     // The faces its families resolve to, which its walks and its style engine's font metrics read (`SharedFaces`).
     pub(crate) faces: crate::walk::SharedFaces,
-    // Each `dir=auto` element's (and bare `<bdi>`'s) resolved direction, true for rtl, as of `mutations` (`is_rtl`).
-    pub(crate) dir_auto: std::cell::RefCell<(u64, std::collections::HashMap<NodeId, bool>)>,
+    // Each element's resolved directionality asked so far, true for rtl, as of `mutations` (`is_rtl`)…
+    pub(crate) directionality: std::cell::RefCell<(u64, std::collections::HashMap<NodeId, bool>)>,
+    // …which nothing need be asked about until an element has ever been able to decide one of its own — a `dir`
+    // written, a `<bdi>` or an `<input>` made (`notes_direction`): every other page is ltr throughout, and asking
+    // cost the state scan a walk per element (a 1500-row append, 626 → 1150 ms).
+    pub(crate) direction_sources: bool,
 }
 
 impl RealmArena {
@@ -486,7 +490,8 @@ impl RealmArena {
         self.custom_states.clear();
         self.target = None;
         self.form_facts.get_mut().clear();
-        self.dir_auto.get_mut().1.clear();
+        self.directionality.get_mut().1.clear();
+        self.direction_sources = false;
         // (…in place: the style engine holds the same table, and outlives the page)
         self.faces.with(|faces| *faces = Default::default());
         self.mutations += 1;
@@ -520,6 +525,7 @@ impl RealmArena {
 
     // A new node, appended to `parent` when that is live (a stale parent nid leaves it a detached root).
     pub(crate) fn create(&mut self, data: NodeData, parent: Option<NodeId>) -> NodeId {
+        self.direction_sources |= notes_direction(&data);
         let parent = parent.filter(|&p| self.get(p).is_some());
         if parent.is_some() {
             self.state_epoch += 1;
@@ -869,7 +875,14 @@ fn arena_and_engine<'s>(
 
 // An attribute write to `id` of the attributes `names`, about to land: the style engine hears of it first, and a name
 // a state can read moves the state epoch (a class, a style and data / ARIA attributes are read by none).
+// Whether a node can decide a directionality of its own (`is_rtl`): a `dir` on it, or its being a `<bdi>` or an `<input>`
+// (whose `type` may be `tel`).
+fn notes_direction(n: &NodeData) -> bool {
+    n.kind == NodeKind::Element && (n.plain_attr("dir").is_some() || n.is_html_named("bdi") || n.is_html_named("input"))
+}
+
 fn before_attribute_write(arena: &mut RealmArena, engine: Option<&mut crate::style::StyleEngine>, id: NodeId, names: &[&str]) {
+    arena.direction_sources |= names.contains(&"dir");
     if names.iter().any(|n| attribute_reads_state(n)) {
         arena.state_epoch += 1;
     }
@@ -948,6 +961,7 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_, ()>, ctx: &v8::Global<v8:
     register(scope, ns, "setState", set_state, context_id);
     register(scope, ns, "setNaturalSize", set_natural_size, context_id);
     register(scope, ns, "linkPseudoBox", link_pseudo_box, context_id);
+    register(scope, ns, "firstStrongDirection", first_strong_direction, context_id);
     register(scope, ns, "setShadowHost", set_shadow_host, context_id);
     register(scope, ns, "setAssignedNodes", set_assigned_nodes, context_id);
     register(scope, ns, "setValue", set_value, context_id);
@@ -1203,6 +1217,23 @@ fn set_natural_size(
     let cid = realm_id(scope, &args);
     if let Some(node) = realm(scope, cid).get_mut(id) {
         node.natural_size = (w > 0.0 && h > 0.0).then_some((w, h));
+    }
+}
+
+// __dom.firstStrongDirection(text) -> 'rtl' | 'ltr' | null: the direction of the text's first STRONG character, by its
+// Bidi_Class (`unicode::first_strong_direction`) — what `dir=auto` asks, answered for both engines in one place.
+fn first_strong_direction(
+    scope: &mut v8::PinScope<'_, '_>,
+    args: v8::FunctionCallbackArguments<'_>,
+    mut rv: v8::ReturnValue<'_, v8::Value>,
+) {
+    let text = utf16_arg(scope, args.get(0));
+    match crate::unicode::first_strong_direction(&text) {
+        Some(rtl) => {
+            let s = v8::String::new(scope, if rtl { "rtl" } else { "ltr" }).unwrap();
+            rv.set(s.into());
+        }
+        None => rv.set_null(),
     }
 }
 
@@ -1589,6 +1620,9 @@ fn sync_attrs(
         let attrs = &node.attributes;
         node.attr_ns.retain(|(k, _, _)| attrs.iter().any(|(a, _)| a == k));
         node.attr_changed(None);
+        // (…with or without an engine to hear of it: the parser's `dir` is what `is_rtl` must not miss)
+        let notes = notes_direction(node);
+        arena.direction_sources |= notes;
     }
 }
 
@@ -2079,9 +2113,12 @@ fn set_node_meta(
     let local_name = LocalName::from(args.get(1).to_rust_string_lossy(scope));
     let ns = Namespace::from(args.get(2).to_rust_string_lossy(scope));
     let cid = realm_id(scope, &args);
-    if let Some(node) = realm(scope, cid).get_mut(id) {
+    let arena = realm(scope, cid);
+    if let Some(node) = arena.get_mut(id) {
         node.local_name = local_name;
         node.ns = ns;
+        let notes = notes_direction(node);
+        arena.direction_sources |= notes;
     }
 }
 

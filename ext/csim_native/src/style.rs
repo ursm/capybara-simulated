@@ -106,6 +106,9 @@ pub(crate) struct StyleSlot {
     styled_state: Cell<ElementState>,
     // Whether the engine holds a snapshot of it from before a change (`StyleEngine::snapshots`).
     has_snapshot: Cell<bool>,
+    // …and, for an element an `:empty` was matched against, whether it WAS empty then — what a child-list change is
+    // held against, so only a change that flips it restyles what read it (`children_changed`).
+    styled_empty: Cell<Option<bool>>,
 }
 
 impl StyleSlot {
@@ -122,6 +125,7 @@ impl StyleSlot {
             selector_flags: Cell::new(ElementSelectorFlags::empty()),
             state: Cell::new((u64::MAX, ElementState::empty())),
             styled_state: Cell::new(ElementState::empty()),
+            styled_empty: Cell::new(None),
             has_snapshot: Cell::new(false),
         }
     }
@@ -922,7 +926,11 @@ impl StyleEngine {
                         | ElementSelectorFlags::HAS_EDGE_CHILD_SELECTOR,
                 )
             });
-            let restyle_self = flags.is_some_and(|f| f.contains(ElementSelectorFlags::HAS_EMPTY_SELECTOR));
+            // (…an `:empty` read of it restyles only where the change FLIPPED what it read: a row appended to a list that
+            // already had rows changes nothing an `:empty` selector saw — Firefox's `RestyleForEmptyChange` is posted
+            // on a flip alone. One never seen empty or not is taken as flipped.)
+            let restyle_self = flags.is_some_and(|f| f.contains(ElementSelectorFlags::HAS_EMPTY_SELECTOR))
+                && arena.existing_style_slot(parent).is_none_or(|s| s.styled_empty.get() != Some(arena.is_empty(parent)));
             if p.kind == NodeKind::Element {
                 let Some(slot) = arena.existing_style_slot(parent) else { return };
                 if unsafe { &*slot.data.get() }.is_none() {
@@ -2146,7 +2154,11 @@ impl<'dom> DomTraversal<StyleNode<'dom>> for Recalc<'_> {
             if self.context.traversal_flags.for_animation_only() {
                 unsafe { el.unset_animation_only_dirty_descendants() };
             } else {
-                el.slot().styled_state.set(el.state());
+                let slot = el.slot();
+                slot.styled_state.set(el.state());
+                if slot.selector_flags.get().contains(ElementSelectorFlags::HAS_EMPTY_SELECTOR) {
+                    slot.styled_empty.set(Some(el.arena().is_empty(el.id)));
+                }
                 unsafe { el.unset_dirty_descendants() };
             }
         }

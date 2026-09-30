@@ -882,7 +882,7 @@ impl GridTrack {
                     GridTrack { px: Some(s.px), ..Default::default() }
                 }
             }
-            Breadth::Flex(fr) => GridTrack { fr: Some(fr.0 as f64), ..Default::default() },
+            Breadth::Flex(fr) => GridTrack { fr: Some(f32_exact(fr.0)), ..Default::default() },
             Breadth::Auto => GridTrack { auto: true, ..Default::default() },
             Breadth::MinContent => GridTrack { min: true, ..Default::default() },
             Breadth::MaxContent => GridTrack { max: true, ..Default::default() },
@@ -934,7 +934,7 @@ fn grid_row_floor(rows: &style::values::computed::ImplicitGridTracks) -> Option<
     if min.has_percentage() || matches!(max, Breadth::Breadth(lp) if !lp.has_percentage()) {
         return None;
     }
-    min.to_length().map(|l| l.px() as f64)
+    min.to_length().map(|l| f32_exact(l.px()))
 }
 // An item's declared column lines (`gridColumnPlacement`): its start and end LINE numbers (0 for `auto` or a name) and
 // an explicit `span N` (0 for none).
@@ -952,7 +952,7 @@ fn grid_column_placement(style: &ComputedValues) -> [f64; 3] {
 fn plain_percentage(lp: &LengthPercentage) -> Option<f64> {
     use style::values::computed::length_percentage::Unpacked;
     match lp.unpack() {
-        Unpacked::Percentage(p) => Some(p.0 as f64),
+        Unpacked::Percentage(p) => Some(f32_exact(p.0)),
         _ => None,
     }
 }
@@ -1433,8 +1433,8 @@ impl<'a> Walk<'a> {
                 FlexBasis::Size(Size::LengthPercentage(lp)) if !lp.0.has_percentage() => length(&lp.0)?,
                 _ => f64::NAN,
             };
-            rec.flex_grow = p.flex_grow.0 as f64;
-            rec.flex_shrink = p.flex_shrink.0 as f64;
+            rec.flex_grow = f32_exact(p.flex_grow.0);
+            rec.flex_shrink = f32_exact(p.flex_shrink.0);
         }
         let pos = style.get_position();
         rec.border_box = pos.box_sizing == BoxSizing::BorderBox;
@@ -1492,10 +1492,15 @@ impl<'a> Walk<'a> {
             }
         }
         [rec.width, rec.height, rec.min_w, rec.max_w, rec.min_h, rec.max_h] = slots;
-        // (…and a cell's min / max in its block axis are none: its row sizes it — `cellMinMaxFreeAxis`)
-        if role == Role::Cell {
-            rec.min_h = f64::NAN;
-            rec.max_h = f64::NAN;
+        // (…and a cell's min / max in its BLOCK axis are none: its row sizes it — `cellMinMaxFreeAxis`. Asked of the
+        // display, so an orphan cell ignores them too; a flex or grid item's is blockified and none. The block axis is
+        // the WIDTH in a vertical writing mode, where a `min-height` does clamp: Chrome, 80.)
+        if matches!(display.inside(), DisplayInside::TableCell) {
+            if style.writing_mode.is_horizontal() {
+                (rec.min_h, rec.max_h) = (f64::NAN, f64::NAN);
+            } else {
+                (rec.min_w, rec.max_w) = (f64::NAN, f64::NAN);
+            }
         }
         // (…the DECLARED inline sizing, which has no basis at all: a percentage in it is none, `auto`.)
         let declared = |k: usize| sizes[k].0.filter(|lp| !lp.has_percentage()).map_or(Ok(f64::NAN), |lp| length(lp));
@@ -2072,7 +2077,8 @@ impl<'a> Walk<'a> {
             // Under `grid-auto-rows`, an AUTO-height item IS the row height: native imposes the row on it as a definite
             // border-box height (a replaced one keeps its own, and an anonymous one is auto).
             // (…and under a row that is only a FLOOR, stretched to it where it is shorter — its height still its own —
-            // where it STRETCHES across its row at all: `align-self`, else the grid's `align-items`, `gridItemFloored`)
+            // where it STRETCHES across its row at all: `align-self`, else the grid's `align-items`, `gridItemFloored` —
+            // whose SHARED gap this is too: where an unstretched item then sits in its row is not modelled)
             let (auto, stretches) = match item {
                 FlexItem::Element(c) => {
                     let cs = self.style(*c)?;
@@ -3439,8 +3445,8 @@ impl<'a> Walk<'a> {
         use style::values::generics::font::GenericLineHeight as LineHeight;
         let lh = match &f.line_height {
             LineHeight::Normal => js_round(face.asc * size) + js_round(face.desc * size) + js_round(face.gap * size),
-            LineHeight::Number(n) => js_round(n.0 as f64 * size),
-            LineHeight::Length(l) => js_round(l.0.px() as f64),
+            LineHeight::Number(n) => js_round(f32_exact(n.0) * size),
+            LineHeight::Length(l) => js_round(f32_exact(l.0.px())),
         };
         let asc = ((lh - (js_round(face.asc * size) + js_round(face.desc * size))) / 2.0).floor() + js_round(face.asc * size);
         // The tab stops: the BLOCK's font counts the spaces and gives the half-space minimum, the owner's `tab-size`
@@ -3452,8 +3458,8 @@ impl<'a> Walk<'a> {
         let unit_space = bare + bls + bws;
         use style::values::generics::length::GenericLengthOrNumber as LengthOrNumber;
         let raw = match &owner.get_inherited_text().tab_size {
-            LengthOrNumber::Number(n) => n.0 as f64 * unit_space,
-            LengthOrNumber::Length(l) => l.0.px() as f64,
+            LengthOrNumber::Number(n) => f32_exact(n.0) * unit_space,
+            LengthOrNumber::Length(l) => f32_exact(l.0.px()),
         };
         let tab = if raw.is_finite() { if raw > 0.0 { raw } else { bls } } else { 8.0 * unit_space };
         Ok(FontInfo { face: face.handle, size, ls, ws, lh, asc, tab_px: tab.max(0.0), tab_min: bare / 2.0 })
@@ -3860,7 +3866,7 @@ fn content_ascent(style: &ComputedValues, face: &Face) -> f64 {
 }
 // The used font size (`fontOf`'s `computedFontSizePx(el) || 16`).
 fn font_size(style: &ComputedValues) -> f64 {
-    match style.get_font().font_size.computed_size().px() as f64 {
+    match f32_exact(style.get_font().font_size.computed_size().px()) {
         0.0 => 16.0,
         s => s,
     }
@@ -4015,8 +4021,8 @@ type CalcNode = style::values::computed::length_percentage::CalcNode;
 fn spec(lp: &LengthPercentage) -> Result<Spec, &'static str> {
     use style::values::computed::length_percentage::Unpacked;
     match lp.unpack() {
-        Unpacked::Length(l) => Ok(Spec { px: l.px() as f64, frac: 0.0, prog: None }),
-        Unpacked::Percentage(p) => Ok(Spec { px: 0.0, frac: p.0 as f64, prog: None }),
+        Unpacked::Length(l) => Ok(Spec { px: f32_exact(l.px()), frac: 0.0, prog: None }),
+        Unpacked::Percentage(p) => Ok(Spec { px: 0.0, frac: f32_exact(p.0), prog: None }),
         Unpacked::Calc(calc) => match linear(calc.node()) {
             Some((px, frac)) => Ok(Spec { px, frac, prog: None }),
             None => {
@@ -4043,8 +4049,8 @@ fn linear(node: &CalcNode) -> Option<(f64, f64)> {
     use style::values::computed::length_percentage::ComputedLeaf as Leaf;
     use style::values::generics::calc::GenericCalcNode as Node;
     match node {
-        Node::Leaf(Leaf::Length(l)) => Some((l.px() as f64, 0.0)),
-        Node::Leaf(Leaf::Percentage(p)) => Some((0.0, p.0 as f64)),
+        Node::Leaf(Leaf::Length(l)) => Some((f32_exact(l.px()), 0.0)),
+        Node::Leaf(Leaf::Percentage(p)) => Some((0.0, f32_exact(p.0))),
         Node::Negate(n) => linear(n).map(|(px, frac)| (-px, -frac)),
         Node::Sum(terms) => terms.iter().try_fold((0.0, 0.0), |(px, frac), t| linear(t).map(|(p, f)| (px + p, frac + f))),
         Node::Product(factors) => {
@@ -4062,9 +4068,9 @@ fn product(factors: &[CalcNode]) -> Option<(f64, &CalcNode)> {
     let mut operand = None;
     for f in factors {
         match f {
-            Node::Leaf(Leaf::Number(n)) => scale *= *n as f64,
+            Node::Leaf(Leaf::Number(n)) => scale *= f32_exact(*n),
             Node::Invert(inner) => match &**inner {
-                Node::Leaf(Leaf::Number(n)) => scale /= *n as f64,
+                Node::Leaf(Leaf::Number(n)) => scale /= f32_exact(*n),
                 _ => return None,
             },
             _ if operand.is_none() => operand = Some(f),
@@ -4238,12 +4244,36 @@ impl EdgeParts {
 }
 
 // A length's px — a value with a percentage in it is not taught yet.
+// A style value as the page wrote it: the style engine keeps lengths, percentages and numbers as f32, where the JS side
+// reads the declaration's decimal into an f64 — `40%` is 0.4000000059604645 one way and 0.4 the other, and a table row
+// came out 40.00000059 against Chrome's 40. The f32's SHORTEST decimal (the one that reads back as it) is the value
+// written wherever the page wrote one that f32 can hold, so that is what goes over. Allocation-free.
+pub(crate) fn f32_exact(v: f32) -> f64 {
+    struct Buf([u8; 48], usize);
+    impl std::fmt::Write for Buf {
+        fn write_str(&mut self, s: &str) -> std::fmt::Result {
+            let end = self.1 + s.len();
+            self.0.get_mut(self.1..end).ok_or(std::fmt::Error)?.copy_from_slice(s.as_bytes());
+            self.1 = end;
+            Ok(())
+        }
+    }
+    // (…an integer below 2^24 is every f32 in its range, so it IS the written one: the commonest value, skipped)
+    if !v.is_finite() || (v == v.trunc() && v.abs() < 16_777_216.0) {
+        return v as f64;
+    }
+    let mut buf = Buf([0; 48], 0);
+    match std::fmt::write(&mut buf, format_args!("{v}")) {
+        Ok(()) => std::str::from_utf8(&buf.0[..buf.1]).ok().and_then(|t| t.parse().ok()).unwrap_or(v as f64),
+        Err(_) => v as f64,
+    }
+}
 fn length(lp: &LengthPercentage) -> Result<f64, &'static str> {
-    lp.to_length().map(|l: Length| l.px() as f64).ok_or("percentage")
+    lp.to_length().map(|l: Length| f32_exact(l.px())).ok_or("percentage")
 }
 // A letter- or word-spacing's px.
 fn spacing(lp: &LengthPercentage) -> Result<f64, &'static str> {
-    lp.to_length().map(|l| l.px() as f64).ok_or("spacing-percentage")
+    lp.to_length().map(|l| f32_exact(l.px())).ok_or("spacing-percentage")
 }
 // Does a height leave the box's margins adjoining — `auto`, a keyword, or a zero length (`autoOrZeroHeight`)?
 fn auto_or_zero(v: &style::values::computed::Size) -> bool {
@@ -4524,5 +4554,26 @@ impl<T: Same, const N: usize> Same for [T; N] {
             }
         }
         worst
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::f32_exact;
+
+    // The decimal a page writes comes back as that decimal, not as the f32 nearest it; a value an f32 holds exactly
+    // (an integer, a binary fraction) and one past its range pass through.
+    #[test]
+    fn f32_exact_reads_the_written_decimal() {
+        assert_eq!(f32_exact(0.4), 0.4);
+        assert_eq!(f32_exact(0.6), 0.6);
+        assert_eq!(f32_exact(10.1), 10.1);
+        assert_eq!(f32_exact(1.0 / 3.0), 0.33333334);
+        assert_eq!(f32_exact(0.25), 0.25);
+        assert_eq!(f32_exact(-37.5), -37.5);
+        assert_eq!(f32_exact(1e-7), 1e-7);
+        assert_eq!(f32_exact(3.0e38), 3.0e38);
+        assert!(f32_exact(f32::NAN).is_nan());
+        assert_eq!(f32_exact(f32::INFINITY), f64::INFINITY);
     }
 }

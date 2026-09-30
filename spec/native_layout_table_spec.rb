@@ -1590,19 +1590,22 @@ RSpec.describe 'native layout table parity' do
     # …and on that line in DOCUMENT order, left to right, whatever its `flex-direction` or its children's `order` say:
     # the oracle lays it out on `PHYSICAL_ROW_PLAN`, and an orphan row's children are no flex items (Chrome keeps them
     # in document order in its anonymous table). Review rv47: the walk sent the reverse bit and sorted by `order`, so
-    # native ran the line from the right, and hung its baseline off the `order: -1` item where the oracle read the
-    # first — body 41 against 48 in a baseline-aligned flex.
+    # native ran the line from the right. (In a BLOCK: a `display: table-row` flex item is blockified — no row at all.)
+    # SHARED: Chrome wraps consecutive block children in ONE anonymous cell (CSS 2.1 §17.2.1) and stacks them, where
+    # both engines share the row out between them — the third `#m` at 150 where Chrome has it at 0.
     it 'keeps one of block children in document order' do
-      host = '<div style="display:flex;align-items:baseline;width:300px;font:16px monospace">%s<div style="font-size:30px">Z</div></div>'
+      host = '<div style="width:300px;font:16px monospace">%s</div>'
       {
         '<div style="display:table-row;flex-direction:row-reverse"><div id="m">o1</div><div style="font-size:24px">big</div></div>' => 0,
-        '<div style="display:table-row;flex-flow:column-reverse wrap"><div id="m">o1</div><div>o2</div></div>' => 0,
-        '<div style="display:table-row"><div style="font-size:24px">big</div><div id="m" style="order:-1">o1</div></div>' => 21
+        '<div style="display:table-row;flex-flow:column-reverse wrap"><div id="m">o1</div><div>o2</div></div>' => 0
       }.each do |row, x|
         body = format(host, row)
         expect_parity(body)
         expect(laid_out_rect(body)[0]).to eq(x), body
       end
+      body = format(host, '<div style="display:table-row"><div style="font-size:24px">big</div><div id="m" style="order:-1">o1</div></div>')
+      expect_parity(body)
+      expect_shared_gap(laid_out_rect(body)[0], shared: 150, chrome: 0, what: "#{body}: #m x")
     end
 
     # …and REFUSES one with an INLINE-level or floated element child, which the oracle's measure puts on a LINE where the

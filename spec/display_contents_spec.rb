@@ -315,4 +315,13 @@ RSpec.describe 'display: contents' do
       expect(shadow['compared']).to be > 0, "#{body}: nothing compared: #{shadow.inspect}"
     end
   end
+
+  # A POSITIONED one is still no box, and so no `offsetParent` either: the offsets run to the positioned box past it
+  # (Chrome and Firefox: `#w`, and 5 down — the absolute child's own `top`).
+  it 'is no offsetParent when it is positioned' do
+    session = simulated_session(page('<div id="w" style="position:relative;margin-top:90px"><div style="display:contents;position:relative">' \
+                                     '<div id="m" style="position:absolute;top:5px;left:5px;width:10px;height:10px"></div></div></div>'))
+    session.visit '/'
+    expect(session.evaluate_script("(() => { const m = document.getElementById('m'); return [m.offsetParent.id, m.offsetTop]; })()")).to eq(['w', 5])
+  end
 end

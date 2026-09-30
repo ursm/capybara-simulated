@@ -522,54 +522,64 @@ impl RealmArena {
         None
     }
     // HTML's DIRECTIONALITY (§3.2.6.4, dom-nodes.js `_directionality`) — what `:dir()` matches, true for rtl: the
-    // nearest shadow-including inclusive ancestor's valid `dir` (a keyword matched ASCII-case-insensitively and NOT
-    // trimmed), `auto` or a `<bdi>` with none resolving by its content, a telephone `<input>` with none ltr (a number is
-    // written left to right in any script), the root's ltr where nothing says.
+    // nearest shadow-including inclusive ancestor that decides by ITSELF (`own_directionality`), the root's ltr where
+    // none does. Every element on the walk up is remembered as of `mutations`, so a page's state scan asks each once:
+    // a descendant stops at its parent's answer.
     pub(crate) fn is_rtl(&self, id: NodeId) -> bool {
+        if !self.direction_sources {
+            return false;
+        }
+        {
+            let mut memo = self.directionality.borrow_mut();
+            if memo.0 != self.mutations {
+                *memo = (self.mutations, Default::default());
+            }
+        }
+        let mut path = Vec::new();
         let mut cur = Some(id);
+        let mut rtl = false;
         while let Some(c) = cur {
-            if let Some(n) = self.get(c).filter(|n| n.kind == NodeKind::Element) {
-                match n.plain_attr("dir").and_then(dir_keyword) {
-                    Some(Dir::Ltr) => return false,
-                    Some(Dir::Rtl) => return true,
-                    Some(Dir::Auto) => return self.auto_is_rtl(c),
-                    None if n.is_html_named("input") && n.input_type() == "tel" => return false,
-                    None if n.is_html_named("bdi") => return self.auto_is_rtl(c),
-                    None => {}
-                }
+            if let Some(&known) = self.directionality.borrow().1.get(&c) {
+                rtl = known;
+                break;
+            }
+            path.push(c);
+            if let Some(own) = self.own_directionality(c) {
+                rtl = own;
+                break;
             }
             cur = self.shadow_including_parent(c);
         }
-        false
-    }
-    // `dir=auto`'s answer for `id`, as of `mutations`: a scan of its content, which every descendant inheriting it asks.
-    fn auto_is_rtl(&self, id: NodeId) -> bool {
-        {
-            let memo = self.dir_auto.borrow();
-            if memo.0 == self.mutations {
-                if let Some(&rtl) = memo.1.get(&id) {
-                    return rtl;
-                }
-            }
+        let mut memo = self.directionality.borrow_mut();
+        for c in path {
+            memo.1.insert(c, rtl);
         }
-        let rtl = self.resolve_auto(id);
-        let mut memo = self.dir_auto.borrow_mut();
-        if memo.0 != self.mutations {
-            *memo = (self.mutations, Default::default());
-        }
-        memo.1.insert(id, rtl);
         rtl
+    }
+    // The steps an element decides its directionality by ITSELF (`ownDirectionalityStep`), None where it inherits: an
+    // HTML element's valid `dir` (an enumerated attribute, its keyword matched ASCII-case-insensitively and NOT
+    // trimmed — a `dir` on an SVG or MathML element is no such attribute, Chrome and Firefox), `auto` or a `<bdi>`
+    // with none resolving by its content, a telephone `<input>` with none ltr (a number is written left to right in
+    // any script).
+    fn own_directionality(&self, id: NodeId) -> Option<bool> {
+        let n = self.get(id).filter(|n| n.kind == NodeKind::Element && n.is_html())?;
+        match n.plain_attr("dir").and_then(dir_keyword) {
+            Some(Dir::Ltr) => Some(false),
+            Some(Dir::Rtl) => Some(true),
+            Some(Dir::Auto) => Some(self.resolve_auto(id)),
+            None if n.is_html_named("input") && n.input_type() == "tel" => Some(false),
+            None if n.is_html_named("bdi") => Some(self.resolve_auto(id)),
+            None => None,
+        }
     }
     // A text control's from its VALUE (`controlAutoDir` — an `<input>` of a type whose value is no text, ltr), anything
     // else's from the first strong character of its text (`autoDirectionality`): in tree order, skipping what sets its
-    // own direction (a valid `dir`, a `<bdi>`, an HTML `<script>` / `<style>` / `<textarea>`), a `<slot>` ending the scan
-    // with its shadow HOST's directionality — and a `<slot>` itself scanning its ASSIGNED nodes, and those alone.
+    // own direction (an HTML element's valid `dir`, a `<bdi>`, an HTML `<script>` / `<style>` / `<textarea>`), a
+    // shadow tree's `<slot>` ending the scan with its HOST's directionality — and a `<slot>` itself scanning its
+    // ASSIGNED nodes where it has any, its own children where it has none.
     fn resolve_auto(&self, id: NodeId) -> bool {
         let Some(n) = self.get(id) else { return false };
-        let strong = |units: &[u16]| {
-            char::decode_utf16(units.iter().copied())
-                .find_map(|c| c.ok().and_then(|c| crate::unicode::strong_direction(c as u32)))
-        };
+        let strong = crate::unicode::first_strong_direction;
         if n.is_html_named("textarea") {
             return match &n.value {
                 Some(v) => strong(v),
@@ -587,7 +597,7 @@ impl RealmArena {
             }
             .unwrap_or(false);
         }
-        let first: &[NodeId] = if n.is_html_named("slot") { &n.assigned } else { &n.children };
+        let first: &[NodeId] = if n.is_html_named("slot") && !n.assigned.is_empty() { &n.assigned } else { &n.children };
         let mut stack: Vec<NodeId> = first.iter().rev().copied().collect();
         while let Some(c) = stack.pop() {
             let Some(k) = self.get(c) else { continue };
@@ -598,14 +608,16 @@ impl RealmArena {
                     }
                 }
                 NodeKind::Element => {
-                    let own = k.is_html_named("bdi")
-                        || (k.is_html() && ["script", "style", "textarea"].iter().any(|t| k.is_html_named(t)))
-                        || k.plain_attr("dir").and_then(dir_keyword).is_some();
+                    let own = k.is_html()
+                        && (["bdi", "script", "style", "textarea"].iter().any(|t| k.is_html_named(t))
+                            || k.plain_attr("dir").and_then(dir_keyword).is_some());
                     if own {
                         continue;
                     }
                     if k.is_html_named("slot") {
-                        return self.slot_host(c).is_some_and(|host| self.is_rtl(host));
+                        if let Some(host) = self.slot_host(c) {
+                            return self.is_rtl(host);
+                        }
                     }
                     stack.extend(k.children.iter().rev().copied());
                 }

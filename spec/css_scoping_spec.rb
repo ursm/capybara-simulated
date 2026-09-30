@@ -47,6 +47,33 @@ RSpec.describe 'css-scoping selectors' do
     ensure
       ENV['CSIM_STYLO'] = saved
     end
+
+    # …CONTEXT before the style attribute, between a property's logical and physical spellings too: a `:host` rule's
+    # `!important` beats the host's inline `!important`, whichever of the two writes `margin-left` and which
+    # `margin-inline-start`, and a `::part()` rule's normal one beats the part's inline style. Chrome and Firefox: 50px,
+    # 50px, 40px.
+    it "sorts a :host and a ::part() rule on context against inline style across spellings#{stylo ? ' (stylo)' : ''}" do
+      saved = ENV['CSIM_STYLO']
+      ENV['CSIM_STYLO'] = stylo
+      html = '<!DOCTYPE html><style>x-a::part(q) { margin-inline-start: 40px }</style>' \
+             '<div id="a" style="margin-left: 5px !important"></div><div id="b" style="margin-inline-start: 5px !important"></div>' \
+             '<x-a id="x"></x-a>'
+      s = simulated_session(->(_env) { [200, {'content-type' => 'text/html'}, [html]] })
+      s.visit '/'
+      got = s.evaluate_script(<<~JS)
+        (() => {
+          document.getElementById('a').attachShadow({mode: 'open'}).innerHTML = '<style>:host { margin-inline-start: 50px !important }</style>';
+          document.getElementById('b').attachShadow({mode: 'open'}).innerHTML = '<style>:host { margin-left: 50px !important }</style>';
+          const sr = document.getElementById('x').attachShadow({mode: 'open'});
+          sr.innerHTML = '<span id="q" part="q" style="margin-left: 3px">q</span>';
+          return [getComputedStyle(document.getElementById('a')).marginLeft, getComputedStyle(document.getElementById('b')).marginLeft,
+                  getComputedStyle(sr.getElementById('q')).marginLeft];
+        })()
+      JS
+      expect(got).to eq(%w[50px 50px 40px])
+    ensure
+      ENV['CSIM_STYLO'] = saved
+    end
   end
 
   # A `:host` compound LEFT of a combinator matches the host as every in-tree element's shadow-including ancestor
