@@ -5326,8 +5326,6 @@ html/rendering/replaced-elements/attributes-for-embedded-content-and-images/img-
 - 'Loaded images test: Error image with width, height and alt attributes'
 html/rendering/replaced-elements/attributes-for-embedded-content-and-images/img-empty-alt-replaced.html:
 - Images with an empty alt attribute have an intrinsic size of zero
-html/rendering/replaced-elements/attributes-for-embedded-content-and-images/img_border_percent.xhtml:
-- "== html/rendering/replaced-elements/attributes-for-embedded-content-and-images/img_border-ref.xhtml"
 html/rendering/replaced-elements/attributes-for-embedded-content-and-images/input-align-right-1.html:
 - "== html/rendering/replaced-elements/attributes-for-embedded-content-and-images/input-align-right-ref.html
   (both renderings blank)"
@@ -5338,10 +5336,6 @@ html/rendering/replaced-elements/attributes-for-embedded-content-and-images/inpu
 - "!= html/rendering/replaced-elements/attributes-for-embedded-content-and-images/input-border-radius-notref.html"
 html/rendering/replaced-elements/attributes-for-embedded-content-and-images/input-image-inline-alt.html:
 - "== html/rendering/replaced-elements/attributes-for-embedded-content-and-images/input-image-inline-alt-ref.html"
-html/rendering/replaced-elements/attributes-for-embedded-content-and-images/object_border_perc.xhtml:
-- "== html/rendering/replaced-elements/attributes-for-embedded-content-and-images/object_border-ref.xhtml"
-html/rendering/replaced-elements/attributes-for-embedded-content-and-images/object_border_pixel.xhtml:
-- "== html/rendering/replaced-elements/attributes-for-embedded-content-and-images/object_border-ref.xhtml"
 html/rendering/replaced-elements/attributes-for-embedded-content-and-images/picture-aspect-ratio.html:
 - Changing which <source> matches should change computed style
 - Computed style for width/height/aspect-ratio
