@@ -19,6 +19,9 @@
 # test_driver input shim discarding coordinates). Re-read the reasons here whenever an engine
 # lands. These are NOT a backlog; each carries the reason it is earned out-of-scope. The
 # in-scope roadmap is wpt_expected_failures.yml.
+# One more kind is earned: a test that holds text the spec has since WITHDRAWN, where the
+# current draft says the opposite (spec over a stale test, as over Blink — CLAUDE.md rule 1).
+# Its reason quotes both texts, so it can be re-checked the day the test is updated.
 #
 # The gate (spec/support/wpt_gate.rb) merges this with the in-scope file and checks the union
 # symmetrically, so an out-of-scope subtest that starts PASSing still turns RED (move
@@ -29898,19 +29901,19 @@ css/css-transitions/CSSTransition-canceling.tentative.html:
   reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
     specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
     path/suffix. CLAUDE.md rule 1.
-- name: An after-change style value can't be interpolated
-  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
-    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
-    path/suffix. CLAUDE.md rule 1.
 - name: Animated style is cleared after canceling a running CSS transition
   reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
     specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
     path/suffix. CLAUDE.md rule 1.
-- name: Changing style to another interpolable value cancels the original transition
+- name: Removing a property from transition-property cancels transitions on that property
   reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
     specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
     path/suffix. CLAUDE.md rule 1.
-- name: Removing a property from transition-property cancels transitions on that property
+- name: An after-change style value can't be interpolated
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: Changing style to another interpolable value cancels the original transition
   reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
     specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
     path/suffix. CLAUDE.md rule 1.
@@ -29967,6 +29970,10 @@ css/css-transitions/CSSTransition-effect.tentative.html:
   reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
     specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
     path/suffix. CLAUDE.md rule 1.
+- name: After setting a transition's effect to null, style is updated
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
 - name: After setting a new keyframe effect targeting different properties, the transition
     continues to report the original transition property
   reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
@@ -29992,10 +29999,6 @@ css/css-transitions/CSSTransition-effect.tentative.html:
     path/suffix. CLAUDE.md rule 1.
 - name: After setting a transition's effect to null, it still reports the original
     transition property
-  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
-    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
-    path/suffix. CLAUDE.md rule 1.
-- name: After setting a transition's effect to null, style is updated
   reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
     specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
     path/suffix. CLAUDE.md rule 1.
@@ -30038,11 +30041,11 @@ css/css-transitions/CSSTransition-startTime.tentative.html:
   reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
     specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
     path/suffix. CLAUDE.md rule 1.
-- name: The start time of a transition can be set
+- name: The start time of transitions is based on when they are generated
   reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
     specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
     path/suffix. CLAUDE.md rule 1.
-- name: The start time of transitions is based on when they are generated
+- name: The start time of a transition can be set
   reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
     specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
     path/suffix. CLAUDE.md rule 1.
@@ -30241,23 +30244,11 @@ css/css-transitions/event-dispatch.tentative.html:
   reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
     specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
     path/suffix. CLAUDE.md rule 1.
-- name: 'Before -> Idle (display: none)'
-  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
-    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
-    path/suffix. CLAUDE.md rule 1.
 - name: Calculating the interval start and end time with negative end delay.
   reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
     specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
     path/suffix. CLAUDE.md rule 1.
 - name: Calculating the interval start and end time with negative start delay.
-  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
-    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
-    path/suffix. CLAUDE.md rule 1.
-- name: Call Animation.cancel after canceling transition.
-  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
-    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
-    path/suffix. CLAUDE.md rule 1.
-- name: Call Animation.cancel after restarting transition immediately
   reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
     specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
     path/suffix. CLAUDE.md rule 1.
@@ -30269,15 +30260,39 @@ css/css-transitions/event-dispatch.tentative.html:
   reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
     specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
     path/suffix. CLAUDE.md rule 1.
-- name: Idle -> Before
-  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
-    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
-    path/suffix. CLAUDE.md rule 1.
 - name: Idle or Pending -> Active
   reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
     specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
     path/suffix. CLAUDE.md rule 1.
 - name: Idle or Pending -> After
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: Restart transition after canceling transition immediately
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: Set null target effect after canceling the transition
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: Set timeline and play transition after clear the timeline
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: 'Before -> Idle (display: none)'
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: Call Animation.cancel after canceling transition.
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: Call Animation.cancel after restarting transition immediately
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: Idle -> Before
   reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
     specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
     path/suffix. CLAUDE.md rule 1.
@@ -30296,24 +30311,2494 @@ css/css-transitions/event-dispatch.tentative.html:
   reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
     specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
     path/suffix. CLAUDE.md rule 1.
-- name: Restart transition after canceling transition immediately
-  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
-    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
-    path/suffix. CLAUDE.md rule 1.
-- name: Set null target effect after canceling the transition
-  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
-    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
-    path/suffix. CLAUDE.md rule 1.
-- name: Set timeline and play transition after clear the timeline
-  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
-    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
-    path/suffix. CLAUDE.md rule 1.
 css/css-transitions/non-rendered-element-004.tentative.html:
 - name: Transitions on ::marker pseudo-elements are canceled when the parent display
     type is no longer list-item
   reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
     specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
     path/suffix. CLAUDE.md rule 1.
+css/css-transitions/properties-value-inherit-001.html:
+- name: background-color color(rgba) / events
+  reason: 'Holds the 2013 css3-transitions draft ("must not start a transition when
+    the computed value changes because it is inherited ... from another element that
+    is transitioning the same property"), which the spec has withdrawn: the current
+    draft (W3C WD 2026-01-08 and the ED, css-transitions-1 §3) says "both transitions
+    will run" — the descendant transitions to its after-change value, which inherits
+    from the parent''s after-change style. Firefox follows it; Chrome keeps the 2013
+    rule.'
+- name: background-position-x length(cm) / events
+  reason: 'Holds the 2013 css3-transitions draft ("must not start a transition when
+    the computed value changes because it is inherited ... from another element that
+    is transitioning the same property"), which the spec has withdrawn: the current
+    draft (W3C WD 2026-01-08 and the ED, css-transitions-1 §3) says "both transitions
+    will run" — the descendant transitions to its after-change value, which inherits
+    from the parent''s after-change style. Firefox follows it; Chrome keeps the 2013
+    rule.'
+- name: background-position-x length(em) / events
+  reason: 'Holds the 2013 css3-transitions draft ("must not start a transition when
+    the computed value changes because it is inherited ... from another element that
+    is transitioning the same property"), which the spec has withdrawn: the current
+    draft (W3C WD 2026-01-08 and the ED, css-transitions-1 §3) says "both transitions
+    will run" — the descendant transitions to its after-change value, which inherits
+    from the parent''s after-change style. Firefox follows it; Chrome keeps the 2013
+    rule.'
+- name: background-position-x length(ex) / events
+  reason: 'Holds the 2013 css3-transitions draft ("must not start a transition when
+    the computed value changes because it is inherited ... from another element that
+    is transitioning the same property"), which the spec has withdrawn: the current
+    draft (W3C WD 2026-01-08 and the ED, css-transitions-1 §3) says "both transitions
+    will run" — the descendant transitions to its after-change value, which inherits
+    from the parent''s after-change style. Firefox follows it; Chrome keeps the 2013
+    rule.'
+- name: background-position-x length(in) / events
+  reason: 'Holds the 2013 css3-transitions draft ("must not start a transition when
+    the computed value changes because it is inherited ... from another element that
+    is transitioning the same property"), which the spec has withdrawn: the current
+    draft (W3C WD 2026-01-08 and the ED, css-transitions-1 §3) says "both transitions
+    will run" — the descendant transitions to its after-change value, which inherits
+    from the parent''s after-change style. Firefox follows it; Chrome keeps the 2013
+    rule.'
+- name: background-position-x length(mm) / events
+  reason: 'Holds the 2013 css3-transitions draft ("must not start a transition when
+    the computed value changes because it is inherited ... from another element that
+    is transitioning the same property"), which the spec has withdrawn: the current
+    draft (W3C WD 2026-01-08 and the ED, css-transitions-1 §3) says "both transitions
+    will run" — the descendant transitions to its after-change value, which inherits
+    from the parent''s after-change style. Firefox follows it; Chrome keeps the 2013
+    rule.'
+- name: background-position-x length(pc) / events
+  reason: 'Holds the 2013 css3-transitions draft ("must not start a transition when
+    the computed value changes because it is inherited ... from another element that
+    is transitioning the same property"), which the spec has withdrawn: the current
+    draft (W3C WD 2026-01-08 and the ED, css-transitions-1 §3) says "both transitions
+    will run" — the descendant transitions to its after-change value, which inherits
+    from the parent''s after-change style. Firefox follows it; Chrome keeps the 2013
+    rule.'
+- name: background-position-x length(pt) / events
+  reason: 'Holds the 2013 css3-transitions draft ("must not start a transition when
+    the computed value changes because it is inherited ... from another element that
+    is transitioning the same property"), which the spec has withdrawn: the current
+    draft (W3C WD 2026-01-08 and the ED, css-transitions-1 §3) says "both transitions
+    will run" — the descendant transitions to its after-change value, which inherits
+    from the parent''s after-change style. Firefox follows it; Chrome keeps the 2013
+    rule.'
+- name: background-position-x length(px) / events
+  reason: 'Holds the 2013 css3-transitions draft ("must not start a transition when
+    the computed value changes because it is inherited ... from another element that
+    is transitioning the same property"), which the spec has withdrawn: the current
+    draft (W3C WD 2026-01-08 and the ED, css-transitions-1 §3) says "both transitions
+    will run" — the descendant transitions to its after-change value, which inherits
+    from the parent''s after-change style. Firefox follows it; Chrome keeps the 2013
+    rule.'
+- name: background-position-x percentage(%) / events
+  reason: 'Holds the 2013 css3-transitions draft ("must not start a transition when
+    the computed value changes because it is inherited ... from another element that
+    is transitioning the same property"), which the spec has withdrawn: the current
+    draft (W3C WD 2026-01-08 and the ED, css-transitions-1 §3) says "both transitions
+    will run" — the descendant transitions to its after-change value, which inherits
+    from the parent''s after-change style. Firefox follows it; Chrome keeps the 2013
+    rule.'
+- name: border-bottom-color color(rgba) / events
+  reason: 'Holds the 2013 css3-transitions draft ("must not start a transition when
+    the computed value changes because it is inherited ... from another element that
+    is transitioning the same property"), which the spec has withdrawn: the current
+    draft (W3C WD 2026-01-08 and the ED, css-transitions-1 §3) says "both transitions
+    will run" — the descendant transitions to its after-change value, which inherits
+    from the parent''s after-change style. Firefox follows it; Chrome keeps the 2013
+    rule.'
+- name: border-bottom-width length(cm) / events
+  reason: 'Holds the 2013 css3-transitions draft ("must not start a transition when
+    the computed value changes because it is inherited ... from another element that
+    is transitioning the same property"), which the spec has withdrawn: the current
+    draft (W3C WD 2026-01-08 and the ED, css-transitions-1 §3) says "both transitions
+    will run" — the descendant transitions to its after-change value, which inherits
+    from the parent''s after-change style. Firefox follows it; Chrome keeps the 2013
+    rule.'
+- name: border-bottom-width length(em) / events
+  reason: 'Holds the 2013 css3-transitions draft ("must not start a transition when
+    the computed value changes because it is inherited ... from another element that
+    is transitioning the same property"), which the spec has withdrawn: the current
+    draft (W3C WD 2026-01-08 and the ED, css-transitions-1 §3) says "both transitions
+    will run" — the descendant transitions to its after-change value, which inherits
+    from the parent''s after-change style. Firefox follows it; Chrome keeps the 2013
+    rule.'
+- name: border-bottom-width length(ex) / events
+  reason: 'Holds the 2013 css3-transitions draft ("must not start a transition when
+    the computed value changes because it is inherited ... from another element that
+    is transitioning the same property"), which the spec has withdrawn: the current
+    draft (W3C WD 2026-01-08 and the ED, css-transitions-1 §3) says "both transitions
+    will run" — the descendant transitions to its after-change value, which inherits
+    from the parent''s after-change style. Firefox follows it; Chrome keeps the 2013
+    rule.'
+- name: border-bottom-width length(in) / events
+  reason: 'Holds the 2013 css3-transitions draft ("must not start a transition when
+    the computed value changes because it is inherited ... from another element that
+    is transitioning the same property"), which the spec has withdrawn: the current
+    draft (W3C WD 2026-01-08 and the ED, css-transitions-1 §3) says "both transitions
+    will run" — the descendant transitions to its after-change value, which inherits
+    from the parent''s after-change style. Firefox follows it; Chrome keeps the 2013
+    rule.'
+- name: border-bottom-width length(mm) / events
+  reason: 'Holds the 2013 css3-transitions draft ("must not start a transition when
+    the computed value changes because it is inherited ... from another element that
+    is transitioning the same property"), which the spec has withdrawn: the current
+    draft (W3C WD 2026-01-08 and the ED, css-transitions-1 §3) says "both transitions
+    will run" — the descendant transitions to its after-change value, which inherits
+    from the parent''s after-change style. Firefox follows it; Chrome keeps the 2013
+    rule.'
+- name: border-bottom-width length(pc) / events
+  reason: 'Holds the 2013 css3-transitions draft ("must not start a transition when
+    the computed value changes because it is inherited ... from another element that
+    is transitioning the same property"), which the spec has withdrawn: the current
+    draft (W3C WD 2026-01-08 and the ED, css-transitions-1 §3) says "both transitions
+    will run" — the descendant transitions to its after-change value, which inherits
+    from the parent''s after-change style. Firefox follows it; Chrome keeps the 2013
+    rule.'
+- name: border-bottom-width length(pt) / events
+  reason: 'Holds the 2013 css3-transitions draft ("must not start a transition when
+    the computed value changes because it is inherited ... from another element that
+    is transitioning the same property"), which the spec has withdrawn: the current
+    draft (W3C WD 2026-01-08 and the ED, css-transitions-1 §3) says "both transitions
+    will run" — the descendant transitions to its after-change value, which inherits
+    from the parent''s after-change style. Firefox follows it; Chrome keeps the 2013
+    rule.'
+- name: border-bottom-width length(px) / events
+  reason: 'Holds the 2013 css3-transitions draft ("must not start a transition when
+    the computed value changes because it is inherited ... from another element that
+    is transitioning the same property"), which the spec has withdrawn: the current
+    draft (W3C WD 2026-01-08 and the ED, css-transitions-1 §3) says "both transitions
+    will run" — the descendant transitions to its after-change value, which inherits
+    from the parent''s after-change style. Firefox follows it; Chrome keeps the 2013
+    rule.'
+- name: border-left-color color(rgba) / events
+  reason: 'Holds the 2013 css3-transitions draft ("must not start a transition when
+    the computed value changes because it is inherited ... from another element that
+    is transitioning the same property"), which the spec has withdrawn: the current
+    draft (W3C WD 2026-01-08 and the ED, css-transitions-1 §3) says "both transitions
+    will run" — the descendant transitions to its after-change value, which inherits
+    from the parent''s after-change style. Firefox follows it; Chrome keeps the 2013
+    rule.'
+- name: border-left-width length(cm) / events
+  reason: 'Holds the 2013 css3-transitions draft ("must not start a transition when
+    the computed value changes because it is inherited ... from another element that
+    is transitioning the same property"), which the spec has withdrawn: the current
+    draft (W3C WD 2026-01-08 and the ED, css-transitions-1 §3) says "both transitions
+    will run" — the descendant transitions to its after-change value, which inherits
+    from the parent''s after-change style. Firefox follows it; Chrome keeps the 2013
+    rule.'
+- name: border-left-width length(em) / events
+  reason: 'Holds the 2013 css3-transitions draft ("must not start a transition when
+    the computed value changes because it is inherited ... from another element that
+    is transitioning the same property"), which the spec has withdrawn: the current
+    draft (W3C WD 2026-01-08 and the ED, css-transitions-1 §3) says "both transitions
+    will run" — the descendant transitions to its after-change value, which inherits
+    from the parent''s after-change style. Firefox follows it; Chrome keeps the 2013
+    rule.'
+- name: border-left-width length(ex) / events
+  reason: 'Holds the 2013 css3-transitions draft ("must not start a transition when
+    the computed value changes because it is inherited ... from another element that
+    is transitioning the same property"), which the spec has withdrawn: the current
+    draft (W3C WD 2026-01-08 and the ED, css-transitions-1 §3) says "both transitions
+    will run" — the descendant transitions to its after-change value, which inherits
+    from the parent''s after-change style. Firefox follows it; Chrome keeps the 2013
+    rule.'
+- name: border-left-width length(in) / events
+  reason: 'Holds the 2013 css3-transitions draft ("must not start a transition when
+    the computed value changes because it is inherited ... from another element that
+    is transitioning the same property"), which the spec has withdrawn: the current
+    draft (W3C WD 2026-01-08 and the ED, css-transitions-1 §3) says "both transitions
+    will run" — the descendant transitions to its after-change value, which inherits
+    from the parent''s after-change style. Firefox follows it; Chrome keeps the 2013
+    rule.'
+- name: border-left-width length(mm) / events
+  reason: 'Holds the 2013 css3-transitions draft ("must not start a transition when
+    the computed value changes because it is inherited ... from another element that
+    is transitioning the same property"), which the spec has withdrawn: the current
+    draft (W3C WD 2026-01-08 and the ED, css-transitions-1 §3) says "both transitions
+    will run" — the descendant transitions to its after-change value, which inherits
+    from the parent''s after-change style. Firefox follows it; Chrome keeps the 2013
+    rule.'
+- name: border-left-width length(pc) / events
+  reason: 'Holds the 2013 css3-transitions draft ("must not start a transition when
+    the computed value changes because it is inherited ... from another element that
+    is transitioning the same property"), which the spec has withdrawn: the current
+    draft (W3C WD 2026-01-08 and the ED, css-transitions-1 §3) says "both transitions
+    will run" — the descendant transitions to its after-change value, which inherits
+    from the parent''s after-change style. Firefox follows it; Chrome keeps the 2013
+    rule.'
+- name: border-left-width length(pt) / events
+  reason: 'Holds the 2013 css3-transitions draft ("must not start a transition when
+    the computed value changes because it is inherited ... from another element that
+    is transitioning the same property"), which the spec has withdrawn: the current
+    draft (W3C WD 2026-01-08 and the ED, css-transitions-1 §3) says "both transitions
+    will run" — the descendant transitions to its after-change value, which inherits
+    from the parent''s after-change style. Firefox follows it; Chrome keeps the 2013
+    rule.'
+- name: border-left-width length(px) / events
+  reason: 'Holds the 2013 css3-transitions draft ("must not start a transition when
+    the computed value changes because it is inherited ... from another element that
+    is transitioning the same property"), which the spec has withdrawn: the current
+    draft (W3C WD 2026-01-08 and the ED, css-transitions-1 §3) says "both transitions
+    will run" — the descendant transitions to its after-change value, which inherits
+    from the parent''s after-change style. Firefox follows it; Chrome keeps the 2013
+    rule.'
+- name: border-right-color color(rgba) / events
+  reason: 'Holds the 2013 css3-transitions draft ("must not start a transition when
+    the computed value changes because it is inherited ... from another element that
+    is transitioning the same property"), which the spec has withdrawn: the current
+    draft (W3C WD 2026-01-08 and the ED, css-transitions-1 §3) says "both transitions
+    will run" — the descendant transitions to its after-change value, which inherits
+    from the parent''s after-change style. Firefox follows it; Chrome keeps the 2013
+    rule.'
+- name: border-right-width length(cm) / events
+  reason: 'Holds the 2013 css3-transitions draft ("must not start a transition when
+    the computed value changes because it is inherited ... from another element that
+    is transitioning the same property"), which the spec has withdrawn: the current
+    draft (W3C WD 2026-01-08 and the ED, css-transitions-1 §3) says "both transitions
+    will run" — the descendant transitions to its after-change value, which inherits
+    from the parent''s after-change style. Firefox follows it; Chrome keeps the 2013
+    rule.'
+- name: border-right-width length(em) / events
+  reason: 'Holds the 2013 css3-transitions draft ("must not start a transition when
+    the computed value changes because it is inherited ... from another element that
+    is transitioning the same property"), which the spec has withdrawn: the current
+    draft (W3C WD 2026-01-08 and the ED, css-transitions-1 §3) says "both transitions
+    will run" — the descendant transitions to its after-change value, which inherits
+    from the parent''s after-change style. Firefox follows it; Chrome keeps the 2013
+    rule.'
+- name: border-right-width length(ex) / events
+  reason: 'Holds the 2013 css3-transitions draft ("must not start a transition when
+    the computed value changes because it is inherited ... from another element that
+    is transitioning the same property"), which the spec has withdrawn: the current
+    draft (W3C WD 2026-01-08 and the ED, css-transitions-1 §3) says "both transitions
+    will run" — the descendant transitions to its after-change value, which inherits
+    from the parent''s after-change style. Firefox follows it; Chrome keeps the 2013
+    rule.'
+- name: border-right-width length(in) / events
+  reason: 'Holds the 2013 css3-transitions draft ("must not start a transition when
+    the computed value changes because it is inherited ... from another element that
+    is transitioning the same property"), which the spec has withdrawn: the current
+    draft (W3C WD 2026-01-08 and the ED, css-transitions-1 §3) says "both transitions
+    will run" — the descendant transitions to its after-change value, which inherits
+    from the parent''s after-change style. Firefox follows it; Chrome keeps the 2013
+    rule.'
+- name: border-right-width length(mm) / events
+  reason: 'Holds the 2013 css3-transitions draft ("must not start a transition when
+    the computed value changes because it is inherited ... from another element that
+    is transitioning the same property"), which the spec has withdrawn: the current
+    draft (W3C WD 2026-01-08 and the ED, css-transitions-1 §3) says "both transitions
+    will run" — the descendant transitions to its after-change value, which inherits
+    from the parent''s after-change style. Firefox follows it; Chrome keeps the 2013
+    rule.'
+- name: border-right-width length(pc) / events
+  reason: 'Holds the 2013 css3-transitions draft ("must not start a transition when
+    the computed value changes because it is inherited ... from another element that
+    is transitioning the same property"), which the spec has withdrawn: the current
+    draft (W3C WD 2026-01-08 and the ED, css-transitions-1 §3) says "both transitions
+    will run" — the descendant transitions to its after-change value, which inherits
+    from the parent''s after-change style. Firefox follows it; Chrome keeps the 2013
+    rule.'
+- name: border-right-width length(pt) / events
+  reason: 'Holds the 2013 css3-transitions draft ("must not start a transition when
+    the computed value changes because it is inherited ... from another element that
+    is transitioning the same property"), which the spec has withdrawn: the current
+    draft (W3C WD 2026-01-08 and the ED, css-transitions-1 §3) says "both transitions
+    will run" — the descendant transitions to its after-change value, which inherits
+    from the parent''s after-change style. Firefox follows it; Chrome keeps the 2013
+    rule.'
+- name: border-right-width length(px) / events
+  reason: 'Holds the 2013 css3-transitions draft ("must not start a transition when
+    the computed value changes because it is inherited ... from another element that
+    is transitioning the same property"), which the spec has withdrawn: the current
+    draft (W3C WD 2026-01-08 and the ED, css-transitions-1 §3) says "both transitions
+    will run" — the descendant transitions to its after-change value, which inherits
+    from the parent''s after-change style. Firefox follows it; Chrome keeps the 2013
+    rule.'
+- name: border-top-color color(rgba) / events
+  reason: 'Holds the 2013 css3-transitions draft ("must not start a transition when
+    the computed value changes because it is inherited ... from another element that
+    is transitioning the same property"), which the spec has withdrawn: the current
+    draft (W3C WD 2026-01-08 and the ED, css-transitions-1 §3) says "both transitions
+    will run" — the descendant transitions to its after-change value, which inherits
+    from the parent''s after-change style. Firefox follows it; Chrome keeps the 2013
+    rule.'
+- name: border-top-width length(cm) / events
+  reason: 'Holds the 2013 css3-transitions draft ("must not start a transition when
+    the computed value changes because it is inherited ... from another element that
+    is transitioning the same property"), which the spec has withdrawn: the current
+    draft (W3C WD 2026-01-08 and the ED, css-transitions-1 §3) says "both transitions
+    will run" — the descendant transitions to its after-change value, which inherits
+    from the parent''s after-change style. Firefox follows it; Chrome keeps the 2013
+    rule.'
+- name: border-top-width length(em) / events
+  reason: 'Holds the 2013 css3-transitions draft ("must not start a transition when
+    the computed value changes because it is inherited ... from another element that
+    is transitioning the same property"), which the spec has withdrawn: the current
+    draft (W3C WD 2026-01-08 and the ED, css-transitions-1 §3) says "both transitions
+    will run" — the descendant transitions to its after-change value, which inherits
+    from the parent''s after-change style. Firefox follows it; Chrome keeps the 2013
+    rule.'
+- name: border-top-width length(ex) / events
+  reason: 'Holds the 2013 css3-transitions draft ("must not start a transition when
+    the computed value changes because it is inherited ... from another element that
+    is transitioning the same property"), which the spec has withdrawn: the current
+    draft (W3C WD 2026-01-08 and the ED, css-transitions-1 §3) says "both transitions
+    will run" — the descendant transitions to its after-change value, which inherits
+    from the parent''s after-change style. Firefox follows it; Chrome keeps the 2013
+    rule.'
+- name: border-top-width length(in) / events
+  reason: 'Holds the 2013 css3-transitions draft ("must not start a transition when
+    the computed value changes because it is inherited ... from another element that
+    is transitioning the same property"), which the spec has withdrawn: the current
+    draft (W3C WD 2026-01-08 and the ED, css-transitions-1 §3) says "both transitions
+    will run" — the descendant transitions to its after-change value, which inherits
+    from the parent''s after-change style. Firefox follows it; Chrome keeps the 2013
+    rule.'
+- name: border-top-width length(mm) / events
+  reason: 'Holds the 2013 css3-transitions draft ("must not start a transition when
+    the computed value changes because it is inherited ... from another element that
+    is transitioning the same property"), which the spec has withdrawn: the current
+    draft (W3C WD 2026-01-08 and the ED, css-transitions-1 §3) says "both transitions
+    will run" — the descendant transitions to its after-change value, which inherits
+    from the parent''s after-change style. Firefox follows it; Chrome keeps the 2013
+    rule.'
+- name: border-top-width length(pc) / events
+  reason: 'Holds the 2013 css3-transitions draft ("must not start a transition when
+    the computed value changes because it is inherited ... from another element that
+    is transitioning the same property"), which the spec has withdrawn: the current
+    draft (W3C WD 2026-01-08 and the ED, css-transitions-1 §3) says "both transitions
+    will run" — the descendant transitions to its after-change value, which inherits
+    from the parent''s after-change style. Firefox follows it; Chrome keeps the 2013
+    rule.'
+- name: border-top-width length(pt) / events
+  reason: 'Holds the 2013 css3-transitions draft ("must not start a transition when
+    the computed value changes because it is inherited ... from another element that
+    is transitioning the same property"), which the spec has withdrawn: the current
+    draft (W3C WD 2026-01-08 and the ED, css-transitions-1 §3) says "both transitions
+    will run" — the descendant transitions to its after-change value, which inherits
+    from the parent''s after-change style. Firefox follows it; Chrome keeps the 2013
+    rule.'
+- name: border-top-width length(px) / events
+  reason: 'Holds the 2013 css3-transitions draft ("must not start a transition when
+    the computed value changes because it is inherited ... from another element that
+    is transitioning the same property"), which the spec has withdrawn: the current
+    draft (W3C WD 2026-01-08 and the ED, css-transitions-1 §3) says "both transitions
+    will run" — the descendant transitions to its after-change value, which inherits
+    from the parent''s after-change style. Firefox follows it; Chrome keeps the 2013
+    rule.'
+- name: bottom length(cm) / events
+  reason: 'Holds the 2013 css3-transitions draft ("must not start a transition when
+    the computed value changes because it is inherited ... from another element that
+    is transitioning the same property"), which the spec has withdrawn: the current
+    draft (W3C WD 2026-01-08 and the ED, css-transitions-1 §3) says "both transitions
+    will run" — the descendant transitions to its after-change value, which inherits
+    from the parent''s after-change style. Firefox follows it; Chrome keeps the 2013
+    rule.'
+- name: bottom length(em) / events
+  reason: 'Holds the 2013 css3-transitions draft ("must not start a transition when
+    the computed value changes because it is inherited ... from another element that
+    is transitioning the same property"), which the spec has withdrawn: the current
+    draft (W3C WD 2026-01-08 and the ED, css-transitions-1 §3) says "both transitions
+    will run" — the descendant transitions to its after-change value, which inherits
+    from the parent''s after-change style. Firefox follows it; Chrome keeps the 2013
+    rule.'
+- name: bottom length(ex) / events
+  reason: 'Holds the 2013 css3-transitions draft ("must not start a transition when
+    the computed value changes because it is inherited ... from another element that
+    is transitioning the same property"), which the spec has withdrawn: the current
+    draft (W3C WD 2026-01-08 and the ED, css-transitions-1 §3) says "both transitions
+    will run" — the descendant transitions to its after-change value, which inherits
+    from the parent''s after-change style. Firefox follows it; Chrome keeps the 2013
+    rule.'
+- name: bottom length(in) / events
+  reason: 'Holds the 2013 css3-transitions draft ("must not start a transition when
+    the computed value changes because it is inherited ... from another element that
+    is transitioning the same property"), which the spec has withdrawn: the current
+    draft (W3C WD 2026-01-08 and the ED, css-transitions-1 §3) says "both transitions
+    will run" — the descendant transitions to its after-change value, which inherits
+    from the parent''s after-change style. Firefox follows it; Chrome keeps the 2013
+    rule.'
+- name: bottom length(mm) / events
+  reason: 'Holds the 2013 css3-transitions draft ("must not start a transition when
+    the computed value changes because it is inherited ... from another element that
+    is transitioning the same property"), which the spec has withdrawn: the current
+    draft (W3C WD 2026-01-08 and the ED, css-transitions-1 §3) says "both transitions
+    will run" — the descendant transitions to its after-change value, which inherits
+    from the parent''s after-change style. Firefox follows it; Chrome keeps the 2013
+    rule.'
+- name: bottom length(pc) / events
+  reason: 'Holds the 2013 css3-transitions draft ("must not start a transition when
+    the computed value changes because it is inherited ... from another element that
+    is transitioning the same property"), which the spec has withdrawn: the current
+    draft (W3C WD 2026-01-08 and the ED, css-transitions-1 §3) says "both transitions
+    will run" — the descendant transitions to its after-change value, which inherits
+    from the parent''s after-change style. Firefox follows it; Chrome keeps the 2013
+    rule.'
+- name: bottom length(pt) / events
+  reason: 'Holds the 2013 css3-transitions draft ("must not start a transition when
+    the computed value changes because it is inherited ... from another element that
+    is transitioning the same property"), which the spec has withdrawn: the current
+    draft (W3C WD 2026-01-08 and the ED, css-transitions-1 §3) says "both transitions
+    will run" — the descendant transitions to its after-change value, which inherits
+    from the parent''s after-change style. Firefox follows it; Chrome keeps the 2013
+    rule.'
+- name: bottom length(px) / events
+  reason: 'Holds the 2013 css3-transitions draft ("must not start a transition when
+    the computed value changes because it is inherited ... from another element that
+    is transitioning the same property"), which the spec has withdrawn: the current
+    draft (W3C WD 2026-01-08 and the ED, css-transitions-1 §3) says "both transitions
+    will run" — the descendant transitions to its after-change value, which inherits
+    from the parent''s after-change style. Firefox follows it; Chrome keeps the 2013
+    rule.'
+- name: bottom percentage(%) / events
+  reason: 'Holds the 2013 css3-transitions draft ("must not start a transition when
+    the computed value changes because it is inherited ... from another element that
+    is transitioning the same property"), which the spec has withdrawn: the current
+    draft (W3C WD 2026-01-08 and the ED, css-transitions-1 §3) says "both transitions
+    will run" — the descendant transitions to its after-change value, which inherits
+    from the parent''s after-change style. Firefox follows it; Chrome keeps the 2013
+    rule.'
+- name: clip rectangle(rectangle) / events
+  reason: 'Holds the 2013 css3-transitions draft ("must not start a transition when
+    the computed value changes because it is inherited ... from another element that
+    is transitioning the same property"), which the spec has withdrawn: the current
+    draft (W3C WD 2026-01-08 and the ED, css-transitions-1 §3) says "both transitions
+    will run" — the descendant transitions to its after-change value, which inherits
+    from the parent''s after-change style. Firefox follows it; Chrome keeps the 2013
+    rule.'
+- name: color color(rgba) / events
+  reason: 'Holds the 2013 css3-transitions draft ("must not start a transition when
+    the computed value changes because it is inherited ... from another element that
+    is transitioning the same property"), which the spec has withdrawn: the current
+    draft (W3C WD 2026-01-08 and the ED, css-transitions-1 §3) says "both transitions
+    will run" — the descendant transitions to its after-change value, which inherits
+    from the parent''s after-change style. Firefox follows it; Chrome keeps the 2013
+    rule.'
+- name: font-size length(cm) / events
+  reason: 'Holds the 2013 css3-transitions draft ("must not start a transition when
+    the computed value changes because it is inherited ... from another element that
+    is transitioning the same property"), which the spec has withdrawn: the current
+    draft (W3C WD 2026-01-08 and the ED, css-transitions-1 §3) says "both transitions
+    will run" — the descendant transitions to its after-change value, which inherits
+    from the parent''s after-change style. Firefox follows it; Chrome keeps the 2013
+    rule.'
+- name: font-size length(em) / events
+  reason: 'Holds the 2013 css3-transitions draft ("must not start a transition when
+    the computed value changes because it is inherited ... from another element that
+    is transitioning the same property"), which the spec has withdrawn: the current
+    draft (W3C WD 2026-01-08 and the ED, css-transitions-1 §3) says "both transitions
+    will run" — the descendant transitions to its after-change value, which inherits
+    from the parent''s after-change style. Firefox follows it; Chrome keeps the 2013
+    rule.'
+- name: font-size length(ex) / events
+  reason: 'Holds the 2013 css3-transitions draft ("must not start a transition when
+    the computed value changes because it is inherited ... from another element that
+    is transitioning the same property"), which the spec has withdrawn: the current
+    draft (W3C WD 2026-01-08 and the ED, css-transitions-1 §3) says "both transitions
+    will run" — the descendant transitions to its after-change value, which inherits
+    from the parent''s after-change style. Firefox follows it; Chrome keeps the 2013
+    rule.'
+- name: font-size length(in) / events
+  reason: 'Holds the 2013 css3-transitions draft ("must not start a transition when
+    the computed value changes because it is inherited ... from another element that
+    is transitioning the same property"), which the spec has withdrawn: the current
+    draft (W3C WD 2026-01-08 and the ED, css-transitions-1 §3) says "both transitions
+    will run" — the descendant transitions to its after-change value, which inherits
+    from the parent''s after-change style. Firefox follows it; Chrome keeps the 2013
+    rule.'
+- name: font-size length(mm) / events
+  reason: 'Holds the 2013 css3-transitions draft ("must not start a transition when
+    the computed value changes because it is inherited ... from another element that
+    is transitioning the same property"), which the spec has withdrawn: the current
+    draft (W3C WD 2026-01-08 and the ED, css-transitions-1 §3) says "both transitions
+    will run" — the descendant transitions to its after-change value, which inherits
+    from the parent''s after-change style. Firefox follows it; Chrome keeps the 2013
+    rule.'
+- name: font-size length(pc) / events
+  reason: 'Holds the 2013 css3-transitions draft ("must not start a transition when
+    the computed value changes because it is inherited ... from another element that
+    is transitioning the same property"), which the spec has withdrawn: the current
+    draft (W3C WD 2026-01-08 and the ED, css-transitions-1 §3) says "both transitions
+    will run" — the descendant transitions to its after-change value, which inherits
+    from the parent''s after-change style. Firefox follows it; Chrome keeps the 2013
+    rule.'
+- name: font-size length(pt) / events
+  reason: 'Holds the 2013 css3-transitions draft ("must not start a transition when
+    the computed value changes because it is inherited ... from another element that
+    is transitioning the same property"), which the spec has withdrawn: the current
+    draft (W3C WD 2026-01-08 and the ED, css-transitions-1 §3) says "both transitions
+    will run" — the descendant transitions to its after-change value, which inherits
+    from the parent''s after-change style. Firefox follows it; Chrome keeps the 2013
+    rule.'
+- name: font-size length(px) / events
+  reason: 'Holds the 2013 css3-transitions draft ("must not start a transition when
+    the computed value changes because it is inherited ... from another element that
+    is transitioning the same property"), which the spec has withdrawn: the current
+    draft (W3C WD 2026-01-08 and the ED, css-transitions-1 §3) says "both transitions
+    will run" — the descendant transitions to its after-change value, which inherits
+    from the parent''s after-change style. Firefox follows it; Chrome keeps the 2013
+    rule.'
+- name: font-size percentage(%) / events
+  reason: 'Holds the 2013 css3-transitions draft ("must not start a transition when
+    the computed value changes because it is inherited ... from another element that
+    is transitioning the same property"), which the spec has withdrawn: the current
+    draft (W3C WD 2026-01-08 and the ED, css-transitions-1 §3) says "both transitions
+    will run" — the descendant transitions to its after-change value, which inherits
+    from the parent''s after-change style. Firefox follows it; Chrome keeps the 2013
+    rule.'
+- name: font-weight font-weight(keyword) / events
+  reason: 'Holds the 2013 css3-transitions draft ("must not start a transition when
+    the computed value changes because it is inherited ... from another element that
+    is transitioning the same property"), which the spec has withdrawn: the current
+    draft (W3C WD 2026-01-08 and the ED, css-transitions-1 §3) says "both transitions
+    will run" — the descendant transitions to its after-change value, which inherits
+    from the parent''s after-change style. Firefox follows it; Chrome keeps the 2013
+    rule.'
+- name: font-weight font-weight(numeric) / events
+  reason: 'Holds the 2013 css3-transitions draft ("must not start a transition when
+    the computed value changes because it is inherited ... from another element that
+    is transitioning the same property"), which the spec has withdrawn: the current
+    draft (W3C WD 2026-01-08 and the ED, css-transitions-1 §3) says "both transitions
+    will run" — the descendant transitions to its after-change value, which inherits
+    from the parent''s after-change style. Firefox follows it; Chrome keeps the 2013
+    rule.'
+- name: height length(cm) / events
+  reason: 'Holds the 2013 css3-transitions draft ("must not start a transition when
+    the computed value changes because it is inherited ... from another element that
+    is transitioning the same property"), which the spec has withdrawn: the current
+    draft (W3C WD 2026-01-08 and the ED, css-transitions-1 §3) says "both transitions
+    will run" — the descendant transitions to its after-change value, which inherits
+    from the parent''s after-change style. Firefox follows it; Chrome keeps the 2013
+    rule.'
+- name: height length(em) / events
+  reason: 'Holds the 2013 css3-transitions draft ("must not start a transition when
+    the computed value changes because it is inherited ... from another element that
+    is transitioning the same property"), which the spec has withdrawn: the current
+    draft (W3C WD 2026-01-08 and the ED, css-transitions-1 §3) says "both transitions
+    will run" — the descendant transitions to its after-change value, which inherits
+    from the parent''s after-change style. Firefox follows it; Chrome keeps the 2013
+    rule.'
+- name: height length(ex) / events
+  reason: 'Holds the 2013 css3-transitions draft ("must not start a transition when
+    the computed value changes because it is inherited ... from another element that
+    is transitioning the same property"), which the spec has withdrawn: the current
+    draft (W3C WD 2026-01-08 and the ED, css-transitions-1 §3) says "both transitions
+    will run" — the descendant transitions to its after-change value, which inherits
+    from the parent''s after-change style. Firefox follows it; Chrome keeps the 2013
+    rule.'
+- name: height length(in) / events
+  reason: 'Holds the 2013 css3-transitions draft ("must not start a transition when
+    the computed value changes because it is inherited ... from another element that
+    is transitioning the same property"), which the spec has withdrawn: the current
+    draft (W3C WD 2026-01-08 and the ED, css-transitions-1 §3) says "both transitions
+    will run" — the descendant transitions to its after-change value, which inherits
+    from the parent''s after-change style. Firefox follows it; Chrome keeps the 2013
+    rule.'
+- name: height length(mm) / events
+  reason: 'Holds the 2013 css3-transitions draft ("must not start a transition when
+    the computed value changes because it is inherited ... from another element that
+    is transitioning the same property"), which the spec has withdrawn: the current
+    draft (W3C WD 2026-01-08 and the ED, css-transitions-1 §3) says "both transitions
+    will run" — the descendant transitions to its after-change value, which inherits
+    from the parent''s after-change style. Firefox follows it; Chrome keeps the 2013
+    rule.'
+- name: height length(pc) / events
+  reason: 'Holds the 2013 css3-transitions draft ("must not start a transition when
+    the computed value changes because it is inherited ... from another element that
+    is transitioning the same property"), which the spec has withdrawn: the current
+    draft (W3C WD 2026-01-08 and the ED, css-transitions-1 §3) says "both transitions
+    will run" — the descendant transitions to its after-change value, which inherits
+    from the parent''s after-change style. Firefox follows it; Chrome keeps the 2013
+    rule.'
+- name: height length(pt) / events
+  reason: 'Holds the 2013 css3-transitions draft ("must not start a transition when
+    the computed value changes because it is inherited ... from another element that
+    is transitioning the same property"), which the spec has withdrawn: the current
+    draft (W3C WD 2026-01-08 and the ED, css-transitions-1 §3) says "both transitions
+    will run" — the descendant transitions to its after-change value, which inherits
+    from the parent''s after-change style. Firefox follows it; Chrome keeps the 2013
+    rule.'
+- name: height length(px) / events
+  reason: 'Holds the 2013 css3-transitions draft ("must not start a transition when
+    the computed value changes because it is inherited ... from another element that
+    is transitioning the same property"), which the spec has withdrawn: the current
+    draft (W3C WD 2026-01-08 and the ED, css-transitions-1 §3) says "both transitions
+    will run" — the descendant transitions to its after-change value, which inherits
+    from the parent''s after-change style. Firefox follows it; Chrome keeps the 2013
+    rule.'
+- name: height percentage(%) / events
+  reason: 'Holds the 2013 css3-transitions draft ("must not start a transition when
+    the computed value changes because it is inherited ... from another element that
+    is transitioning the same property"), which the spec has withdrawn: the current
+    draft (W3C WD 2026-01-08 and the ED, css-transitions-1 §3) says "both transitions
+    will run" — the descendant transitions to its after-change value, which inherits
+    from the parent''s after-change style. Firefox follows it; Chrome keeps the 2013
+    rule.'
+- name: left length(cm) / events
+  reason: 'Holds the 2013 css3-transitions draft ("must not start a transition when
+    the computed value changes because it is inherited ... from another element that
+    is transitioning the same property"), which the spec has withdrawn: the current
+    draft (W3C WD 2026-01-08 and the ED, css-transitions-1 §3) says "both transitions
+    will run" — the descendant transitions to its after-change value, which inherits
+    from the parent''s after-change style. Firefox follows it; Chrome keeps the 2013
+    rule.'
+- name: left length(em) / events
+  reason: 'Holds the 2013 css3-transitions draft ("must not start a transition when
+    the computed value changes because it is inherited ... from another element that
+    is transitioning the same property"), which the spec has withdrawn: the current
+    draft (W3C WD 2026-01-08 and the ED, css-transitions-1 §3) says "both transitions
+    will run" — the descendant transitions to its after-change value, which inherits
+    from the parent''s after-change style. Firefox follows it; Chrome keeps the 2013
+    rule.'
+- name: left length(ex) / events
+  reason: 'Holds the 2013 css3-transitions draft ("must not start a transition when
+    the computed value changes because it is inherited ... from another element that
+    is transitioning the same property"), which the spec has withdrawn: the current
+    draft (W3C WD 2026-01-08 and the ED, css-transitions-1 §3) says "both transitions
+    will run" — the descendant transitions to its after-change value, which inherits
+    from the parent''s after-change style. Firefox follows it; Chrome keeps the 2013
+    rule.'
+- name: left length(in) / events
+  reason: 'Holds the 2013 css3-transitions draft ("must not start a transition when
+    the computed value changes because it is inherited ... from another element that
+    is transitioning the same property"), which the spec has withdrawn: the current
+    draft (W3C WD 2026-01-08 and the ED, css-transitions-1 §3) says "both transitions
+    will run" — the descendant transitions to its after-change value, which inherits
+    from the parent''s after-change style. Firefox follows it; Chrome keeps the 2013
+    rule.'
+- name: left length(mm) / events
+  reason: 'Holds the 2013 css3-transitions draft ("must not start a transition when
+    the computed value changes because it is inherited ... from another element that
+    is transitioning the same property"), which the spec has withdrawn: the current
+    draft (W3C WD 2026-01-08 and the ED, css-transitions-1 §3) says "both transitions
+    will run" — the descendant transitions to its after-change value, which inherits
+    from the parent''s after-change style. Firefox follows it; Chrome keeps the 2013
+    rule.'
+- name: left length(pc) / events
+  reason: 'Holds the 2013 css3-transitions draft ("must not start a transition when
+    the computed value changes because it is inherited ... from another element that
+    is transitioning the same property"), which the spec has withdrawn: the current
+    draft (W3C WD 2026-01-08 and the ED, css-transitions-1 §3) says "both transitions
+    will run" — the descendant transitions to its after-change value, which inherits
+    from the parent''s after-change style. Firefox follows it; Chrome keeps the 2013
+    rule.'
+- name: left length(pt) / events
+  reason: 'Holds the 2013 css3-transitions draft ("must not start a transition when
+    the computed value changes because it is inherited ... from another element that
+    is transitioning the same property"), which the spec has withdrawn: the current
+    draft (W3C WD 2026-01-08 and the ED, css-transitions-1 §3) says "both transitions
+    will run" — the descendant transitions to its after-change value, which inherits
+    from the parent''s after-change style. Firefox follows it; Chrome keeps the 2013
+    rule.'
+- name: left length(px) / events
+  reason: 'Holds the 2013 css3-transitions draft ("must not start a transition when
+    the computed value changes because it is inherited ... from another element that
+    is transitioning the same property"), which the spec has withdrawn: the current
+    draft (W3C WD 2026-01-08 and the ED, css-transitions-1 §3) says "both transitions
+    will run" — the descendant transitions to its after-change value, which inherits
+    from the parent''s after-change style. Firefox follows it; Chrome keeps the 2013
+    rule.'
+- name: left percentage(%) / events
+  reason: 'Holds the 2013 css3-transitions draft ("must not start a transition when
+    the computed value changes because it is inherited ... from another element that
+    is transitioning the same property"), which the spec has withdrawn: the current
+    draft (W3C WD 2026-01-08 and the ED, css-transitions-1 §3) says "both transitions
+    will run" — the descendant transitions to its after-change value, which inherits
+    from the parent''s after-change style. Firefox follows it; Chrome keeps the 2013
+    rule.'
+- name: letter-spacing length(cm) / events
+  reason: 'Holds the 2013 css3-transitions draft ("must not start a transition when
+    the computed value changes because it is inherited ... from another element that
+    is transitioning the same property"), which the spec has withdrawn: the current
+    draft (W3C WD 2026-01-08 and the ED, css-transitions-1 §3) says "both transitions
+    will run" — the descendant transitions to its after-change value, which inherits
+    from the parent''s after-change style. Firefox follows it; Chrome keeps the 2013
+    rule.'
+- name: letter-spacing length(em) / events
+  reason: 'Holds the 2013 css3-transitions draft ("must not start a transition when
+    the computed value changes because it is inherited ... from another element that
+    is transitioning the same property"), which the spec has withdrawn: the current
+    draft (W3C WD 2026-01-08 and the ED, css-transitions-1 §3) says "both transitions
+    will run" — the descendant transitions to its after-change value, which inherits
+    from the parent''s after-change style. Firefox follows it; Chrome keeps the 2013
+    rule.'
+- name: letter-spacing length(ex) / events
+  reason: 'Holds the 2013 css3-transitions draft ("must not start a transition when
+    the computed value changes because it is inherited ... from another element that
+    is transitioning the same property"), which the spec has withdrawn: the current
+    draft (W3C WD 2026-01-08 and the ED, css-transitions-1 §3) says "both transitions
+    will run" — the descendant transitions to its after-change value, which inherits
+    from the parent''s after-change style. Firefox follows it; Chrome keeps the 2013
+    rule.'
+- name: letter-spacing length(in) / events
+  reason: 'Holds the 2013 css3-transitions draft ("must not start a transition when
+    the computed value changes because it is inherited ... from another element that
+    is transitioning the same property"), which the spec has withdrawn: the current
+    draft (W3C WD 2026-01-08 and the ED, css-transitions-1 §3) says "both transitions
+    will run" — the descendant transitions to its after-change value, which inherits
+    from the parent''s after-change style. Firefox follows it; Chrome keeps the 2013
+    rule.'
+- name: letter-spacing length(mm) / events
+  reason: 'Holds the 2013 css3-transitions draft ("must not start a transition when
+    the computed value changes because it is inherited ... from another element that
+    is transitioning the same property"), which the spec has withdrawn: the current
+    draft (W3C WD 2026-01-08 and the ED, css-transitions-1 §3) says "both transitions
+    will run" — the descendant transitions to its after-change value, which inherits
+    from the parent''s after-change style. Firefox follows it; Chrome keeps the 2013
+    rule.'
+- name: letter-spacing length(pc) / events
+  reason: 'Holds the 2013 css3-transitions draft ("must not start a transition when
+    the computed value changes because it is inherited ... from another element that
+    is transitioning the same property"), which the spec has withdrawn: the current
+    draft (W3C WD 2026-01-08 and the ED, css-transitions-1 §3) says "both transitions
+    will run" — the descendant transitions to its after-change value, which inherits
+    from the parent''s after-change style. Firefox follows it; Chrome keeps the 2013
+    rule.'
+- name: letter-spacing length(pt) / events
+  reason: 'Holds the 2013 css3-transitions draft ("must not start a transition when
+    the computed value changes because it is inherited ... from another element that
+    is transitioning the same property"), which the spec has withdrawn: the current
+    draft (W3C WD 2026-01-08 and the ED, css-transitions-1 §3) says "both transitions
+    will run" — the descendant transitions to its after-change value, which inherits
+    from the parent''s after-change style. Firefox follows it; Chrome keeps the 2013
+    rule.'
+- name: letter-spacing length(px) / events
+  reason: 'Holds the 2013 css3-transitions draft ("must not start a transition when
+    the computed value changes because it is inherited ... from another element that
+    is transitioning the same property"), which the spec has withdrawn: the current
+    draft (W3C WD 2026-01-08 and the ED, css-transitions-1 §3) says "both transitions
+    will run" — the descendant transitions to its after-change value, which inherits
+    from the parent''s after-change style. Firefox follows it; Chrome keeps the 2013
+    rule.'
+- name: line-height length(cm) / events
+  reason: 'Holds the 2013 css3-transitions draft ("must not start a transition when
+    the computed value changes because it is inherited ... from another element that
+    is transitioning the same property"), which the spec has withdrawn: the current
+    draft (W3C WD 2026-01-08 and the ED, css-transitions-1 §3) says "both transitions
+    will run" — the descendant transitions to its after-change value, which inherits
+    from the parent''s after-change style. Firefox follows it; Chrome keeps the 2013
+    rule.'
+- name: line-height length(em) / events
+  reason: 'Holds the 2013 css3-transitions draft ("must not start a transition when
+    the computed value changes because it is inherited ... from another element that
+    is transitioning the same property"), which the spec has withdrawn: the current
+    draft (W3C WD 2026-01-08 and the ED, css-transitions-1 §3) says "both transitions
+    will run" — the descendant transitions to its after-change value, which inherits
+    from the parent''s after-change style. Firefox follows it; Chrome keeps the 2013
+    rule.'
+- name: line-height length(ex) / events
+  reason: 'Holds the 2013 css3-transitions draft ("must not start a transition when
+    the computed value changes because it is inherited ... from another element that
+    is transitioning the same property"), which the spec has withdrawn: the current
+    draft (W3C WD 2026-01-08 and the ED, css-transitions-1 §3) says "both transitions
+    will run" — the descendant transitions to its after-change value, which inherits
+    from the parent''s after-change style. Firefox follows it; Chrome keeps the 2013
+    rule.'
+- name: line-height length(in) / events
+  reason: 'Holds the 2013 css3-transitions draft ("must not start a transition when
+    the computed value changes because it is inherited ... from another element that
+    is transitioning the same property"), which the spec has withdrawn: the current
+    draft (W3C WD 2026-01-08 and the ED, css-transitions-1 §3) says "both transitions
+    will run" — the descendant transitions to its after-change value, which inherits
+    from the parent''s after-change style. Firefox follows it; Chrome keeps the 2013
+    rule.'
+- name: line-height length(mm) / events
+  reason: 'Holds the 2013 css3-transitions draft ("must not start a transition when
+    the computed value changes because it is inherited ... from another element that
+    is transitioning the same property"), which the spec has withdrawn: the current
+    draft (W3C WD 2026-01-08 and the ED, css-transitions-1 §3) says "both transitions
+    will run" — the descendant transitions to its after-change value, which inherits
+    from the parent''s after-change style. Firefox follows it; Chrome keeps the 2013
+    rule.'
+- name: line-height length(pc) / events
+  reason: 'Holds the 2013 css3-transitions draft ("must not start a transition when
+    the computed value changes because it is inherited ... from another element that
+    is transitioning the same property"), which the spec has withdrawn: the current
+    draft (W3C WD 2026-01-08 and the ED, css-transitions-1 §3) says "both transitions
+    will run" — the descendant transitions to its after-change value, which inherits
+    from the parent''s after-change style. Firefox follows it; Chrome keeps the 2013
+    rule.'
+- name: line-height length(pt) / events
+  reason: 'Holds the 2013 css3-transitions draft ("must not start a transition when
+    the computed value changes because it is inherited ... from another element that
+    is transitioning the same property"), which the spec has withdrawn: the current
+    draft (W3C WD 2026-01-08 and the ED, css-transitions-1 §3) says "both transitions
+    will run" — the descendant transitions to its after-change value, which inherits
+    from the parent''s after-change style. Firefox follows it; Chrome keeps the 2013
+    rule.'
+- name: line-height length(px) / events
+  reason: 'Holds the 2013 css3-transitions draft ("must not start a transition when
+    the computed value changes because it is inherited ... from another element that
+    is transitioning the same property"), which the spec has withdrawn: the current
+    draft (W3C WD 2026-01-08 and the ED, css-transitions-1 §3) says "both transitions
+    will run" — the descendant transitions to its after-change value, which inherits
+    from the parent''s after-change style. Firefox follows it; Chrome keeps the 2013
+    rule.'
+- name: line-height number(decimal) / events
+  reason: 'Holds the 2013 css3-transitions draft ("must not start a transition when
+    the computed value changes because it is inherited ... from another element that
+    is transitioning the same property"), which the spec has withdrawn: the current
+    draft (W3C WD 2026-01-08 and the ED, css-transitions-1 §3) says "both transitions
+    will run" — the descendant transitions to its after-change value, which inherits
+    from the parent''s after-change style. Firefox follows it; Chrome keeps the 2013
+    rule.'
+- name: line-height number(integer) / events
+  reason: 'Holds the 2013 css3-transitions draft ("must not start a transition when
+    the computed value changes because it is inherited ... from another element that
+    is transitioning the same property"), which the spec has withdrawn: the current
+    draft (W3C WD 2026-01-08 and the ED, css-transitions-1 §3) says "both transitions
+    will run" — the descendant transitions to its after-change value, which inherits
+    from the parent''s after-change style. Firefox follows it; Chrome keeps the 2013
+    rule.'
+- name: line-height percentage(%) / events
+  reason: 'Holds the 2013 css3-transitions draft ("must not start a transition when
+    the computed value changes because it is inherited ... from another element that
+    is transitioning the same property"), which the spec has withdrawn: the current
+    draft (W3C WD 2026-01-08 and the ED, css-transitions-1 §3) says "both transitions
+    will run" — the descendant transitions to its after-change value, which inherits
+    from the parent''s after-change style. Firefox follows it; Chrome keeps the 2013
+    rule.'
+- name: margin-bottom length(cm) / events
+  reason: 'Holds the 2013 css3-transitions draft ("must not start a transition when
+    the computed value changes because it is inherited ... from another element that
+    is transitioning the same property"), which the spec has withdrawn: the current
+    draft (W3C WD 2026-01-08 and the ED, css-transitions-1 §3) says "both transitions
+    will run" — the descendant transitions to its after-change value, which inherits
+    from the parent''s after-change style. Firefox follows it; Chrome keeps the 2013
+    rule.'
+- name: margin-bottom length(em) / events
+  reason: 'Holds the 2013 css3-transitions draft ("must not start a transition when
+    the computed value changes because it is inherited ... from another element that
+    is transitioning the same property"), which the spec has withdrawn: the current
+    draft (W3C WD 2026-01-08 and the ED, css-transitions-1 §3) says "both transitions
+    will run" — the descendant transitions to its after-change value, which inherits
+    from the parent''s after-change style. Firefox follows it; Chrome keeps the 2013
+    rule.'
+- name: margin-bottom length(ex) / events
+  reason: 'Holds the 2013 css3-transitions draft ("must not start a transition when
+    the computed value changes because it is inherited ... from another element that
+    is transitioning the same property"), which the spec has withdrawn: the current
+    draft (W3C WD 2026-01-08 and the ED, css-transitions-1 §3) says "both transitions
+    will run" — the descendant transitions to its after-change value, which inherits
+    from the parent''s after-change style. Firefox follows it; Chrome keeps the 2013
+    rule.'
+- name: margin-bottom length(in) / events
+  reason: 'Holds the 2013 css3-transitions draft ("must not start a transition when
+    the computed value changes because it is inherited ... from another element that
+    is transitioning the same property"), which the spec has withdrawn: the current
+    draft (W3C WD 2026-01-08 and the ED, css-transitions-1 §3) says "both transitions
+    will run" — the descendant transitions to its after-change value, which inherits
+    from the parent''s after-change style. Firefox follows it; Chrome keeps the 2013
+    rule.'
+- name: margin-bottom length(mm) / events
+  reason: 'Holds the 2013 css3-transitions draft ("must not start a transition when
+    the computed value changes because it is inherited ... from another element that
+    is transitioning the same property"), which the spec has withdrawn: the current
+    draft (W3C WD 2026-01-08 and the ED, css-transitions-1 §3) says "both transitions
+    will run" — the descendant transitions to its after-change value, which inherits
+    from the parent''s after-change style. Firefox follows it; Chrome keeps the 2013
+    rule.'
+- name: margin-bottom length(pc) / events
+  reason: 'Holds the 2013 css3-transitions draft ("must not start a transition when
+    the computed value changes because it is inherited ... from another element that
+    is transitioning the same property"), which the spec has withdrawn: the current
+    draft (W3C WD 2026-01-08 and the ED, css-transitions-1 §3) says "both transitions
+    will run" — the descendant transitions to its after-change value, which inherits
+    from the parent''s after-change style. Firefox follows it; Chrome keeps the 2013
+    rule.'
+- name: margin-bottom length(pt) / events
+  reason: 'Holds the 2013 css3-transitions draft ("must not start a transition when
+    the computed value changes because it is inherited ... from another element that
+    is transitioning the same property"), which the spec has withdrawn: the current
+    draft (W3C WD 2026-01-08 and the ED, css-transitions-1 §3) says "both transitions
+    will run" — the descendant transitions to its after-change value, which inherits
+    from the parent''s after-change style. Firefox follows it; Chrome keeps the 2013
+    rule.'
+- name: margin-bottom length(px) / events
+  reason: 'Holds the 2013 css3-transitions draft ("must not start a transition when
+    the computed value changes because it is inherited ... from another element that
+    is transitioning the same property"), which the spec has withdrawn: the current
+    draft (W3C WD 2026-01-08 and the ED, css-transitions-1 §3) says "both transitions
+    will run" — the descendant transitions to its after-change value, which inherits
+    from the parent''s after-change style. Firefox follows it; Chrome keeps the 2013
+    rule.'
+- name: margin-left length(cm) / events
+  reason: 'Holds the 2013 css3-transitions draft ("must not start a transition when
+    the computed value changes because it is inherited ... from another element that
+    is transitioning the same property"), which the spec has withdrawn: the current
+    draft (W3C WD 2026-01-08 and the ED, css-transitions-1 §3) says "both transitions
+    will run" — the descendant transitions to its after-change value, which inherits
+    from the parent''s after-change style. Firefox follows it; Chrome keeps the 2013
+    rule.'
+- name: margin-left length(em) / events
+  reason: 'Holds the 2013 css3-transitions draft ("must not start a transition when
+    the computed value changes because it is inherited ... from another element that
+    is transitioning the same property"), which the spec has withdrawn: the current
+    draft (W3C WD 2026-01-08 and the ED, css-transitions-1 §3) says "both transitions
+    will run" — the descendant transitions to its after-change value, which inherits
+    from the parent''s after-change style. Firefox follows it; Chrome keeps the 2013
+    rule.'
+- name: margin-left length(ex) / events
+  reason: 'Holds the 2013 css3-transitions draft ("must not start a transition when
+    the computed value changes because it is inherited ... from another element that
+    is transitioning the same property"), which the spec has withdrawn: the current
+    draft (W3C WD 2026-01-08 and the ED, css-transitions-1 §3) says "both transitions
+    will run" — the descendant transitions to its after-change value, which inherits
+    from the parent''s after-change style. Firefox follows it; Chrome keeps the 2013
+    rule.'
+- name: margin-left length(in) / events
+  reason: 'Holds the 2013 css3-transitions draft ("must not start a transition when
+    the computed value changes because it is inherited ... from another element that
+    is transitioning the same property"), which the spec has withdrawn: the current
+    draft (W3C WD 2026-01-08 and the ED, css-transitions-1 §3) says "both transitions
+    will run" — the descendant transitions to its after-change value, which inherits
+    from the parent''s after-change style. Firefox follows it; Chrome keeps the 2013
+    rule.'
+- name: margin-left length(mm) / events
+  reason: 'Holds the 2013 css3-transitions draft ("must not start a transition when
+    the computed value changes because it is inherited ... from another element that
+    is transitioning the same property"), which the spec has withdrawn: the current
+    draft (W3C WD 2026-01-08 and the ED, css-transitions-1 §3) says "both transitions
+    will run" — the descendant transitions to its after-change value, which inherits
+    from the parent''s after-change style. Firefox follows it; Chrome keeps the 2013
+    rule.'
+- name: margin-left length(pc) / events
+  reason: 'Holds the 2013 css3-transitions draft ("must not start a transition when
+    the computed value changes because it is inherited ... from another element that
+    is transitioning the same property"), which the spec has withdrawn: the current
+    draft (W3C WD 2026-01-08 and the ED, css-transitions-1 §3) says "both transitions
+    will run" — the descendant transitions to its after-change value, which inherits
+    from the parent''s after-change style. Firefox follows it; Chrome keeps the 2013
+    rule.'
+- name: margin-left length(pt) / events
+  reason: 'Holds the 2013 css3-transitions draft ("must not start a transition when
+    the computed value changes because it is inherited ... from another element that
+    is transitioning the same property"), which the spec has withdrawn: the current
+    draft (W3C WD 2026-01-08 and the ED, css-transitions-1 §3) says "both transitions
+    will run" — the descendant transitions to its after-change value, which inherits
+    from the parent''s after-change style. Firefox follows it; Chrome keeps the 2013
+    rule.'
+- name: margin-left length(px) / events
+  reason: 'Holds the 2013 css3-transitions draft ("must not start a transition when
+    the computed value changes because it is inherited ... from another element that
+    is transitioning the same property"), which the spec has withdrawn: the current
+    draft (W3C WD 2026-01-08 and the ED, css-transitions-1 §3) says "both transitions
+    will run" — the descendant transitions to its after-change value, which inherits
+    from the parent''s after-change style. Firefox follows it; Chrome keeps the 2013
+    rule.'
+- name: margin-right length(cm) / events
+  reason: 'Holds the 2013 css3-transitions draft ("must not start a transition when
+    the computed value changes because it is inherited ... from another element that
+    is transitioning the same property"), which the spec has withdrawn: the current
+    draft (W3C WD 2026-01-08 and the ED, css-transitions-1 §3) says "both transitions
+    will run" — the descendant transitions to its after-change value, which inherits
+    from the parent''s after-change style. Firefox follows it; Chrome keeps the 2013
+    rule.'
+- name: margin-right length(em) / events
+  reason: 'Holds the 2013 css3-transitions draft ("must not start a transition when
+    the computed value changes because it is inherited ... from another element that
+    is transitioning the same property"), which the spec has withdrawn: the current
+    draft (W3C WD 2026-01-08 and the ED, css-transitions-1 §3) says "both transitions
+    will run" — the descendant transitions to its after-change value, which inherits
+    from the parent''s after-change style. Firefox follows it; Chrome keeps the 2013
+    rule.'
+- name: margin-right length(ex) / events
+  reason: 'Holds the 2013 css3-transitions draft ("must not start a transition when
+    the computed value changes because it is inherited ... from another element that
+    is transitioning the same property"), which the spec has withdrawn: the current
+    draft (W3C WD 2026-01-08 and the ED, css-transitions-1 §3) says "both transitions
+    will run" — the descendant transitions to its after-change value, which inherits
+    from the parent''s after-change style. Firefox follows it; Chrome keeps the 2013
+    rule.'
+- name: margin-right length(in) / events
+  reason: 'Holds the 2013 css3-transitions draft ("must not start a transition when
+    the computed value changes because it is inherited ... from another element that
+    is transitioning the same property"), which the spec has withdrawn: the current
+    draft (W3C WD 2026-01-08 and the ED, css-transitions-1 §3) says "both transitions
+    will run" — the descendant transitions to its after-change value, which inherits
+    from the parent''s after-change style. Firefox follows it; Chrome keeps the 2013
+    rule.'
+- name: margin-right length(mm) / events
+  reason: 'Holds the 2013 css3-transitions draft ("must not start a transition when
+    the computed value changes because it is inherited ... from another element that
+    is transitioning the same property"), which the spec has withdrawn: the current
+    draft (W3C WD 2026-01-08 and the ED, css-transitions-1 §3) says "both transitions
+    will run" — the descendant transitions to its after-change value, which inherits
+    from the parent''s after-change style. Firefox follows it; Chrome keeps the 2013
+    rule.'
+- name: margin-right length(pc) / events
+  reason: 'Holds the 2013 css3-transitions draft ("must not start a transition when
+    the computed value changes because it is inherited ... from another element that
+    is transitioning the same property"), which the spec has withdrawn: the current
+    draft (W3C WD 2026-01-08 and the ED, css-transitions-1 §3) says "both transitions
+    will run" — the descendant transitions to its after-change value, which inherits
+    from the parent''s after-change style. Firefox follows it; Chrome keeps the 2013
+    rule.'
+- name: margin-right length(pt) / events
+  reason: 'Holds the 2013 css3-transitions draft ("must not start a transition when
+    the computed value changes because it is inherited ... from another element that
+    is transitioning the same property"), which the spec has withdrawn: the current
+    draft (W3C WD 2026-01-08 and the ED, css-transitions-1 §3) says "both transitions
+    will run" — the descendant transitions to its after-change value, which inherits
+    from the parent''s after-change style. Firefox follows it; Chrome keeps the 2013
+    rule.'
+- name: margin-right length(px) / events
+  reason: 'Holds the 2013 css3-transitions draft ("must not start a transition when
+    the computed value changes because it is inherited ... from another element that
+    is transitioning the same property"), which the spec has withdrawn: the current
+    draft (W3C WD 2026-01-08 and the ED, css-transitions-1 §3) says "both transitions
+    will run" — the descendant transitions to its after-change value, which inherits
+    from the parent''s after-change style. Firefox follows it; Chrome keeps the 2013
+    rule.'
+- name: margin-top length(cm) / events
+  reason: 'Holds the 2013 css3-transitions draft ("must not start a transition when
+    the computed value changes because it is inherited ... from another element that
+    is transitioning the same property"), which the spec has withdrawn: the current
+    draft (W3C WD 2026-01-08 and the ED, css-transitions-1 §3) says "both transitions
+    will run" — the descendant transitions to its after-change value, which inherits
+    from the parent''s after-change style. Firefox follows it; Chrome keeps the 2013
+    rule.'
+- name: margin-top length(em) / events
+  reason: 'Holds the 2013 css3-transitions draft ("must not start a transition when
+    the computed value changes because it is inherited ... from another element that
+    is transitioning the same property"), which the spec has withdrawn: the current
+    draft (W3C WD 2026-01-08 and the ED, css-transitions-1 §3) says "both transitions
+    will run" — the descendant transitions to its after-change value, which inherits
+    from the parent''s after-change style. Firefox follows it; Chrome keeps the 2013
+    rule.'
+- name: margin-top length(ex) / events
+  reason: 'Holds the 2013 css3-transitions draft ("must not start a transition when
+    the computed value changes because it is inherited ... from another element that
+    is transitioning the same property"), which the spec has withdrawn: the current
+    draft (W3C WD 2026-01-08 and the ED, css-transitions-1 §3) says "both transitions
+    will run" — the descendant transitions to its after-change value, which inherits
+    from the parent''s after-change style. Firefox follows it; Chrome keeps the 2013
+    rule.'
+- name: margin-top length(in) / events
+  reason: 'Holds the 2013 css3-transitions draft ("must not start a transition when
+    the computed value changes because it is inherited ... from another element that
+    is transitioning the same property"), which the spec has withdrawn: the current
+    draft (W3C WD 2026-01-08 and the ED, css-transitions-1 §3) says "both transitions
+    will run" — the descendant transitions to its after-change value, which inherits
+    from the parent''s after-change style. Firefox follows it; Chrome keeps the 2013
+    rule.'
+- name: margin-top length(mm) / events
+  reason: 'Holds the 2013 css3-transitions draft ("must not start a transition when
+    the computed value changes because it is inherited ... from another element that
+    is transitioning the same property"), which the spec has withdrawn: the current
+    draft (W3C WD 2026-01-08 and the ED, css-transitions-1 §3) says "both transitions
+    will run" — the descendant transitions to its after-change value, which inherits
+    from the parent''s after-change style. Firefox follows it; Chrome keeps the 2013
+    rule.'
+- name: margin-top length(pc) / events
+  reason: 'Holds the 2013 css3-transitions draft ("must not start a transition when
+    the computed value changes because it is inherited ... from another element that
+    is transitioning the same property"), which the spec has withdrawn: the current
+    draft (W3C WD 2026-01-08 and the ED, css-transitions-1 §3) says "both transitions
+    will run" — the descendant transitions to its after-change value, which inherits
+    from the parent''s after-change style. Firefox follows it; Chrome keeps the 2013
+    rule.'
+- name: margin-top length(pt) / events
+  reason: 'Holds the 2013 css3-transitions draft ("must not start a transition when
+    the computed value changes because it is inherited ... from another element that
+    is transitioning the same property"), which the spec has withdrawn: the current
+    draft (W3C WD 2026-01-08 and the ED, css-transitions-1 §3) says "both transitions
+    will run" — the descendant transitions to its after-change value, which inherits
+    from the parent''s after-change style. Firefox follows it; Chrome keeps the 2013
+    rule.'
+- name: margin-top length(px) / events
+  reason: 'Holds the 2013 css3-transitions draft ("must not start a transition when
+    the computed value changes because it is inherited ... from another element that
+    is transitioning the same property"), which the spec has withdrawn: the current
+    draft (W3C WD 2026-01-08 and the ED, css-transitions-1 §3) says "both transitions
+    will run" — the descendant transitions to its after-change value, which inherits
+    from the parent''s after-change style. Firefox follows it; Chrome keeps the 2013
+    rule.'
+- name: max-height length(cm) / events
+  reason: 'Holds the 2013 css3-transitions draft ("must not start a transition when
+    the computed value changes because it is inherited ... from another element that
+    is transitioning the same property"), which the spec has withdrawn: the current
+    draft (W3C WD 2026-01-08 and the ED, css-transitions-1 §3) says "both transitions
+    will run" — the descendant transitions to its after-change value, which inherits
+    from the parent''s after-change style. Firefox follows it; Chrome keeps the 2013
+    rule.'
+- name: max-height length(em) / events
+  reason: 'Holds the 2013 css3-transitions draft ("must not start a transition when
+    the computed value changes because it is inherited ... from another element that
+    is transitioning the same property"), which the spec has withdrawn: the current
+    draft (W3C WD 2026-01-08 and the ED, css-transitions-1 §3) says "both transitions
+    will run" — the descendant transitions to its after-change value, which inherits
+    from the parent''s after-change style. Firefox follows it; Chrome keeps the 2013
+    rule.'
+- name: max-height length(ex) / events
+  reason: 'Holds the 2013 css3-transitions draft ("must not start a transition when
+    the computed value changes because it is inherited ... from another element that
+    is transitioning the same property"), which the spec has withdrawn: the current
+    draft (W3C WD 2026-01-08 and the ED, css-transitions-1 §3) says "both transitions
+    will run" — the descendant transitions to its after-change value, which inherits
+    from the parent''s after-change style. Firefox follows it; Chrome keeps the 2013
+    rule.'
+- name: max-height length(in) / events
+  reason: 'Holds the 2013 css3-transitions draft ("must not start a transition when
+    the computed value changes because it is inherited ... from another element that
+    is transitioning the same property"), which the spec has withdrawn: the current
+    draft (W3C WD 2026-01-08 and the ED, css-transitions-1 §3) says "both transitions
+    will run" — the descendant transitions to its after-change value, which inherits
+    from the parent''s after-change style. Firefox follows it; Chrome keeps the 2013
+    rule.'
+- name: max-height length(mm) / events
+  reason: 'Holds the 2013 css3-transitions draft ("must not start a transition when
+    the computed value changes because it is inherited ... from another element that
+    is transitioning the same property"), which the spec has withdrawn: the current
+    draft (W3C WD 2026-01-08 and the ED, css-transitions-1 §3) says "both transitions
+    will run" — the descendant transitions to its after-change value, which inherits
+    from the parent''s after-change style. Firefox follows it; Chrome keeps the 2013
+    rule.'
+- name: max-height length(pc) / events
+  reason: 'Holds the 2013 css3-transitions draft ("must not start a transition when
+    the computed value changes because it is inherited ... from another element that
+    is transitioning the same property"), which the spec has withdrawn: the current
+    draft (W3C WD 2026-01-08 and the ED, css-transitions-1 §3) says "both transitions
+    will run" — the descendant transitions to its after-change value, which inherits
+    from the parent''s after-change style. Firefox follows it; Chrome keeps the 2013
+    rule.'
+- name: max-height length(pt) / events
+  reason: 'Holds the 2013 css3-transitions draft ("must not start a transition when
+    the computed value changes because it is inherited ... from another element that
+    is transitioning the same property"), which the spec has withdrawn: the current
+    draft (W3C WD 2026-01-08 and the ED, css-transitions-1 §3) says "both transitions
+    will run" — the descendant transitions to its after-change value, which inherits
+    from the parent''s after-change style. Firefox follows it; Chrome keeps the 2013
+    rule.'
+- name: max-height length(px) / events
+  reason: 'Holds the 2013 css3-transitions draft ("must not start a transition when
+    the computed value changes because it is inherited ... from another element that
+    is transitioning the same property"), which the spec has withdrawn: the current
+    draft (W3C WD 2026-01-08 and the ED, css-transitions-1 §3) says "both transitions
+    will run" — the descendant transitions to its after-change value, which inherits
+    from the parent''s after-change style. Firefox follows it; Chrome keeps the 2013
+    rule.'
+- name: max-height percentage(%) / events
+  reason: 'Holds the 2013 css3-transitions draft ("must not start a transition when
+    the computed value changes because it is inherited ... from another element that
+    is transitioning the same property"), which the spec has withdrawn: the current
+    draft (W3C WD 2026-01-08 and the ED, css-transitions-1 §3) says "both transitions
+    will run" — the descendant transitions to its after-change value, which inherits
+    from the parent''s after-change style. Firefox follows it; Chrome keeps the 2013
+    rule.'
+- name: max-width length(cm) / events
+  reason: 'Holds the 2013 css3-transitions draft ("must not start a transition when
+    the computed value changes because it is inherited ... from another element that
+    is transitioning the same property"), which the spec has withdrawn: the current
+    draft (W3C WD 2026-01-08 and the ED, css-transitions-1 §3) says "both transitions
+    will run" — the descendant transitions to its after-change value, which inherits
+    from the parent''s after-change style. Firefox follows it; Chrome keeps the 2013
+    rule.'
+- name: max-width length(em) / events
+  reason: 'Holds the 2013 css3-transitions draft ("must not start a transition when
+    the computed value changes because it is inherited ... from another element that
+    is transitioning the same property"), which the spec has withdrawn: the current
+    draft (W3C WD 2026-01-08 and the ED, css-transitions-1 §3) says "both transitions
+    will run" — the descendant transitions to its after-change value, which inherits
+    from the parent''s after-change style. Firefox follows it; Chrome keeps the 2013
+    rule.'
+- name: max-width length(ex) / events
+  reason: 'Holds the 2013 css3-transitions draft ("must not start a transition when
+    the computed value changes because it is inherited ... from another element that
+    is transitioning the same property"), which the spec has withdrawn: the current
+    draft (W3C WD 2026-01-08 and the ED, css-transitions-1 §3) says "both transitions
+    will run" — the descendant transitions to its after-change value, which inherits
+    from the parent''s after-change style. Firefox follows it; Chrome keeps the 2013
+    rule.'
+- name: max-width length(in) / events
+  reason: 'Holds the 2013 css3-transitions draft ("must not start a transition when
+    the computed value changes because it is inherited ... from another element that
+    is transitioning the same property"), which the spec has withdrawn: the current
+    draft (W3C WD 2026-01-08 and the ED, css-transitions-1 §3) says "both transitions
+    will run" — the descendant transitions to its after-change value, which inherits
+    from the parent''s after-change style. Firefox follows it; Chrome keeps the 2013
+    rule.'
+- name: max-width length(mm) / events
+  reason: 'Holds the 2013 css3-transitions draft ("must not start a transition when
+    the computed value changes because it is inherited ... from another element that
+    is transitioning the same property"), which the spec has withdrawn: the current
+    draft (W3C WD 2026-01-08 and the ED, css-transitions-1 §3) says "both transitions
+    will run" — the descendant transitions to its after-change value, which inherits
+    from the parent''s after-change style. Firefox follows it; Chrome keeps the 2013
+    rule.'
+- name: max-width length(pc) / events
+  reason: 'Holds the 2013 css3-transitions draft ("must not start a transition when
+    the computed value changes because it is inherited ... from another element that
+    is transitioning the same property"), which the spec has withdrawn: the current
+    draft (W3C WD 2026-01-08 and the ED, css-transitions-1 §3) says "both transitions
+    will run" — the descendant transitions to its after-change value, which inherits
+    from the parent''s after-change style. Firefox follows it; Chrome keeps the 2013
+    rule.'
+- name: max-width length(pt) / events
+  reason: 'Holds the 2013 css3-transitions draft ("must not start a transition when
+    the computed value changes because it is inherited ... from another element that
+    is transitioning the same property"), which the spec has withdrawn: the current
+    draft (W3C WD 2026-01-08 and the ED, css-transitions-1 §3) says "both transitions
+    will run" — the descendant transitions to its after-change value, which inherits
+    from the parent''s after-change style. Firefox follows it; Chrome keeps the 2013
+    rule.'
+- name: max-width length(px) / events
+  reason: 'Holds the 2013 css3-transitions draft ("must not start a transition when
+    the computed value changes because it is inherited ... from another element that
+    is transitioning the same property"), which the spec has withdrawn: the current
+    draft (W3C WD 2026-01-08 and the ED, css-transitions-1 §3) says "both transitions
+    will run" — the descendant transitions to its after-change value, which inherits
+    from the parent''s after-change style. Firefox follows it; Chrome keeps the 2013
+    rule.'
+- name: max-width percentage(%) / events
+  reason: 'Holds the 2013 css3-transitions draft ("must not start a transition when
+    the computed value changes because it is inherited ... from another element that
+    is transitioning the same property"), which the spec has withdrawn: the current
+    draft (W3C WD 2026-01-08 and the ED, css-transitions-1 §3) says "both transitions
+    will run" — the descendant transitions to its after-change value, which inherits
+    from the parent''s after-change style. Firefox follows it; Chrome keeps the 2013
+    rule.'
+- name: min-height length(cm) / events
+  reason: 'Holds the 2013 css3-transitions draft ("must not start a transition when
+    the computed value changes because it is inherited ... from another element that
+    is transitioning the same property"), which the spec has withdrawn: the current
+    draft (W3C WD 2026-01-08 and the ED, css-transitions-1 §3) says "both transitions
+    will run" — the descendant transitions to its after-change value, which inherits
+    from the parent''s after-change style. Firefox follows it; Chrome keeps the 2013
+    rule.'
+- name: min-height length(em) / events
+  reason: 'Holds the 2013 css3-transitions draft ("must not start a transition when
+    the computed value changes because it is inherited ... from another element that
+    is transitioning the same property"), which the spec has withdrawn: the current
+    draft (W3C WD 2026-01-08 and the ED, css-transitions-1 §3) says "both transitions
+    will run" — the descendant transitions to its after-change value, which inherits
+    from the parent''s after-change style. Firefox follows it; Chrome keeps the 2013
+    rule.'
+- name: min-height length(ex) / events
+  reason: 'Holds the 2013 css3-transitions draft ("must not start a transition when
+    the computed value changes because it is inherited ... from another element that
+    is transitioning the same property"), which the spec has withdrawn: the current
+    draft (W3C WD 2026-01-08 and the ED, css-transitions-1 §3) says "both transitions
+    will run" — the descendant transitions to its after-change value, which inherits
+    from the parent''s after-change style. Firefox follows it; Chrome keeps the 2013
+    rule.'
+- name: min-height length(in) / events
+  reason: 'Holds the 2013 css3-transitions draft ("must not start a transition when
+    the computed value changes because it is inherited ... from another element that
+    is transitioning the same property"), which the spec has withdrawn: the current
+    draft (W3C WD 2026-01-08 and the ED, css-transitions-1 §3) says "both transitions
+    will run" — the descendant transitions to its after-change value, which inherits
+    from the parent''s after-change style. Firefox follows it; Chrome keeps the 2013
+    rule.'
+- name: min-height length(mm) / events
+  reason: 'Holds the 2013 css3-transitions draft ("must not start a transition when
+    the computed value changes because it is inherited ... from another element that
+    is transitioning the same property"), which the spec has withdrawn: the current
+    draft (W3C WD 2026-01-08 and the ED, css-transitions-1 §3) says "both transitions
+    will run" — the descendant transitions to its after-change value, which inherits
+    from the parent''s after-change style. Firefox follows it; Chrome keeps the 2013
+    rule.'
+- name: min-height length(pc) / events
+  reason: 'Holds the 2013 css3-transitions draft ("must not start a transition when
+    the computed value changes because it is inherited ... from another element that
+    is transitioning the same property"), which the spec has withdrawn: the current
+    draft (W3C WD 2026-01-08 and the ED, css-transitions-1 §3) says "both transitions
+    will run" — the descendant transitions to its after-change value, which inherits
+    from the parent''s after-change style. Firefox follows it; Chrome keeps the 2013
+    rule.'
+- name: min-height length(pt) / events
+  reason: 'Holds the 2013 css3-transitions draft ("must not start a transition when
+    the computed value changes because it is inherited ... from another element that
+    is transitioning the same property"), which the spec has withdrawn: the current
+    draft (W3C WD 2026-01-08 and the ED, css-transitions-1 §3) says "both transitions
+    will run" — the descendant transitions to its after-change value, which inherits
+    from the parent''s after-change style. Firefox follows it; Chrome keeps the 2013
+    rule.'
+- name: min-height length(px) / events
+  reason: 'Holds the 2013 css3-transitions draft ("must not start a transition when
+    the computed value changes because it is inherited ... from another element that
+    is transitioning the same property"), which the spec has withdrawn: the current
+    draft (W3C WD 2026-01-08 and the ED, css-transitions-1 §3) says "both transitions
+    will run" — the descendant transitions to its after-change value, which inherits
+    from the parent''s after-change style. Firefox follows it; Chrome keeps the 2013
+    rule.'
+- name: min-height percentage(%) / events
+  reason: 'Holds the 2013 css3-transitions draft ("must not start a transition when
+    the computed value changes because it is inherited ... from another element that
+    is transitioning the same property"), which the spec has withdrawn: the current
+    draft (W3C WD 2026-01-08 and the ED, css-transitions-1 §3) says "both transitions
+    will run" — the descendant transitions to its after-change value, which inherits
+    from the parent''s after-change style. Firefox follows it; Chrome keeps the 2013
+    rule.'
+- name: min-width length(cm) / events
+  reason: 'Holds the 2013 css3-transitions draft ("must not start a transition when
+    the computed value changes because it is inherited ... from another element that
+    is transitioning the same property"), which the spec has withdrawn: the current
+    draft (W3C WD 2026-01-08 and the ED, css-transitions-1 §3) says "both transitions
+    will run" — the descendant transitions to its after-change value, which inherits
+    from the parent''s after-change style. Firefox follows it; Chrome keeps the 2013
+    rule.'
+- name: min-width length(em) / events
+  reason: 'Holds the 2013 css3-transitions draft ("must not start a transition when
+    the computed value changes because it is inherited ... from another element that
+    is transitioning the same property"), which the spec has withdrawn: the current
+    draft (W3C WD 2026-01-08 and the ED, css-transitions-1 §3) says "both transitions
+    will run" — the descendant transitions to its after-change value, which inherits
+    from the parent''s after-change style. Firefox follows it; Chrome keeps the 2013
+    rule.'
+- name: min-width length(ex) / events
+  reason: 'Holds the 2013 css3-transitions draft ("must not start a transition when
+    the computed value changes because it is inherited ... from another element that
+    is transitioning the same property"), which the spec has withdrawn: the current
+    draft (W3C WD 2026-01-08 and the ED, css-transitions-1 §3) says "both transitions
+    will run" — the descendant transitions to its after-change value, which inherits
+    from the parent''s after-change style. Firefox follows it; Chrome keeps the 2013
+    rule.'
+- name: min-width length(in) / events
+  reason: 'Holds the 2013 css3-transitions draft ("must not start a transition when
+    the computed value changes because it is inherited ... from another element that
+    is transitioning the same property"), which the spec has withdrawn: the current
+    draft (W3C WD 2026-01-08 and the ED, css-transitions-1 §3) says "both transitions
+    will run" — the descendant transitions to its after-change value, which inherits
+    from the parent''s after-change style. Firefox follows it; Chrome keeps the 2013
+    rule.'
+- name: min-width length(mm) / events
+  reason: 'Holds the 2013 css3-transitions draft ("must not start a transition when
+    the computed value changes because it is inherited ... from another element that
+    is transitioning the same property"), which the spec has withdrawn: the current
+    draft (W3C WD 2026-01-08 and the ED, css-transitions-1 §3) says "both transitions
+    will run" — the descendant transitions to its after-change value, which inherits
+    from the parent''s after-change style. Firefox follows it; Chrome keeps the 2013
+    rule.'
+- name: min-width length(pc) / events
+  reason: 'Holds the 2013 css3-transitions draft ("must not start a transition when
+    the computed value changes because it is inherited ... from another element that
+    is transitioning the same property"), which the spec has withdrawn: the current
+    draft (W3C WD 2026-01-08 and the ED, css-transitions-1 §3) says "both transitions
+    will run" — the descendant transitions to its after-change value, which inherits
+    from the parent''s after-change style. Firefox follows it; Chrome keeps the 2013
+    rule.'
+- name: min-width length(pt) / events
+  reason: 'Holds the 2013 css3-transitions draft ("must not start a transition when
+    the computed value changes because it is inherited ... from another element that
+    is transitioning the same property"), which the spec has withdrawn: the current
+    draft (W3C WD 2026-01-08 and the ED, css-transitions-1 §3) says "both transitions
+    will run" — the descendant transitions to its after-change value, which inherits
+    from the parent''s after-change style. Firefox follows it; Chrome keeps the 2013
+    rule.'
+- name: min-width length(px) / events
+  reason: 'Holds the 2013 css3-transitions draft ("must not start a transition when
+    the computed value changes because it is inherited ... from another element that
+    is transitioning the same property"), which the spec has withdrawn: the current
+    draft (W3C WD 2026-01-08 and the ED, css-transitions-1 §3) says "both transitions
+    will run" — the descendant transitions to its after-change value, which inherits
+    from the parent''s after-change style. Firefox follows it; Chrome keeps the 2013
+    rule.'
+- name: min-width percentage(%) / events
+  reason: 'Holds the 2013 css3-transitions draft ("must not start a transition when
+    the computed value changes because it is inherited ... from another element that
+    is transitioning the same property"), which the spec has withdrawn: the current
+    draft (W3C WD 2026-01-08 and the ED, css-transitions-1 §3) says "both transitions
+    will run" — the descendant transitions to its after-change value, which inherits
+    from the parent''s after-change style. Firefox follows it; Chrome keeps the 2013
+    rule.'
+- name: opacity number[0,1](zero-to-one) / events
+  reason: 'Holds the 2013 css3-transitions draft ("must not start a transition when
+    the computed value changes because it is inherited ... from another element that
+    is transitioning the same property"), which the spec has withdrawn: the current
+    draft (W3C WD 2026-01-08 and the ED, css-transitions-1 §3) says "both transitions
+    will run" — the descendant transitions to its after-change value, which inherits
+    from the parent''s after-change style. Firefox follows it; Chrome keeps the 2013
+    rule.'
+- name: outline-color color(rgba) / events
+  reason: 'Holds the 2013 css3-transitions draft ("must not start a transition when
+    the computed value changes because it is inherited ... from another element that
+    is transitioning the same property"), which the spec has withdrawn: the current
+    draft (W3C WD 2026-01-08 and the ED, css-transitions-1 §3) says "both transitions
+    will run" — the descendant transitions to its after-change value, which inherits
+    from the parent''s after-change style. Firefox follows it; Chrome keeps the 2013
+    rule.'
+- name: outline-offset length(cm) / events
+  reason: 'Holds the 2013 css3-transitions draft ("must not start a transition when
+    the computed value changes because it is inherited ... from another element that
+    is transitioning the same property"), which the spec has withdrawn: the current
+    draft (W3C WD 2026-01-08 and the ED, css-transitions-1 §3) says "both transitions
+    will run" — the descendant transitions to its after-change value, which inherits
+    from the parent''s after-change style. Firefox follows it; Chrome keeps the 2013
+    rule.'
+- name: outline-offset length(em) / events
+  reason: 'Holds the 2013 css3-transitions draft ("must not start a transition when
+    the computed value changes because it is inherited ... from another element that
+    is transitioning the same property"), which the spec has withdrawn: the current
+    draft (W3C WD 2026-01-08 and the ED, css-transitions-1 §3) says "both transitions
+    will run" — the descendant transitions to its after-change value, which inherits
+    from the parent''s after-change style. Firefox follows it; Chrome keeps the 2013
+    rule.'
+- name: outline-offset length(ex) / events
+  reason: 'Holds the 2013 css3-transitions draft ("must not start a transition when
+    the computed value changes because it is inherited ... from another element that
+    is transitioning the same property"), which the spec has withdrawn: the current
+    draft (W3C WD 2026-01-08 and the ED, css-transitions-1 §3) says "both transitions
+    will run" — the descendant transitions to its after-change value, which inherits
+    from the parent''s after-change style. Firefox follows it; Chrome keeps the 2013
+    rule.'
+- name: outline-offset length(in) / events
+  reason: 'Holds the 2013 css3-transitions draft ("must not start a transition when
+    the computed value changes because it is inherited ... from another element that
+    is transitioning the same property"), which the spec has withdrawn: the current
+    draft (W3C WD 2026-01-08 and the ED, css-transitions-1 §3) says "both transitions
+    will run" — the descendant transitions to its after-change value, which inherits
+    from the parent''s after-change style. Firefox follows it; Chrome keeps the 2013
+    rule.'
+- name: outline-offset length(mm) / events
+  reason: 'Holds the 2013 css3-transitions draft ("must not start a transition when
+    the computed value changes because it is inherited ... from another element that
+    is transitioning the same property"), which the spec has withdrawn: the current
+    draft (W3C WD 2026-01-08 and the ED, css-transitions-1 §3) says "both transitions
+    will run" — the descendant transitions to its after-change value, which inherits
+    from the parent''s after-change style. Firefox follows it; Chrome keeps the 2013
+    rule.'
+- name: outline-offset length(pc) / events
+  reason: 'Holds the 2013 css3-transitions draft ("must not start a transition when
+    the computed value changes because it is inherited ... from another element that
+    is transitioning the same property"), which the spec has withdrawn: the current
+    draft (W3C WD 2026-01-08 and the ED, css-transitions-1 §3) says "both transitions
+    will run" — the descendant transitions to its after-change value, which inherits
+    from the parent''s after-change style. Firefox follows it; Chrome keeps the 2013
+    rule.'
+- name: outline-offset length(pt) / events
+  reason: 'Holds the 2013 css3-transitions draft ("must not start a transition when
+    the computed value changes because it is inherited ... from another element that
+    is transitioning the same property"), which the spec has withdrawn: the current
+    draft (W3C WD 2026-01-08 and the ED, css-transitions-1 §3) says "both transitions
+    will run" — the descendant transitions to its after-change value, which inherits
+    from the parent''s after-change style. Firefox follows it; Chrome keeps the 2013
+    rule.'
+- name: outline-offset length(px) / events
+  reason: 'Holds the 2013 css3-transitions draft ("must not start a transition when
+    the computed value changes because it is inherited ... from another element that
+    is transitioning the same property"), which the spec has withdrawn: the current
+    draft (W3C WD 2026-01-08 and the ED, css-transitions-1 §3) says "both transitions
+    will run" — the descendant transitions to its after-change value, which inherits
+    from the parent''s after-change style. Firefox follows it; Chrome keeps the 2013
+    rule.'
+- name: outline-width length(cm) / events
+  reason: 'Holds the 2013 css3-transitions draft ("must not start a transition when
+    the computed value changes because it is inherited ... from another element that
+    is transitioning the same property"), which the spec has withdrawn: the current
+    draft (W3C WD 2026-01-08 and the ED, css-transitions-1 §3) says "both transitions
+    will run" — the descendant transitions to its after-change value, which inherits
+    from the parent''s after-change style. Firefox follows it; Chrome keeps the 2013
+    rule.'
+- name: outline-width length(em) / events
+  reason: 'Holds the 2013 css3-transitions draft ("must not start a transition when
+    the computed value changes because it is inherited ... from another element that
+    is transitioning the same property"), which the spec has withdrawn: the current
+    draft (W3C WD 2026-01-08 and the ED, css-transitions-1 §3) says "both transitions
+    will run" — the descendant transitions to its after-change value, which inherits
+    from the parent''s after-change style. Firefox follows it; Chrome keeps the 2013
+    rule.'
+- name: outline-width length(ex) / events
+  reason: 'Holds the 2013 css3-transitions draft ("must not start a transition when
+    the computed value changes because it is inherited ... from another element that
+    is transitioning the same property"), which the spec has withdrawn: the current
+    draft (W3C WD 2026-01-08 and the ED, css-transitions-1 §3) says "both transitions
+    will run" — the descendant transitions to its after-change value, which inherits
+    from the parent''s after-change style. Firefox follows it; Chrome keeps the 2013
+    rule.'
+- name: outline-width length(in) / events
+  reason: 'Holds the 2013 css3-transitions draft ("must not start a transition when
+    the computed value changes because it is inherited ... from another element that
+    is transitioning the same property"), which the spec has withdrawn: the current
+    draft (W3C WD 2026-01-08 and the ED, css-transitions-1 §3) says "both transitions
+    will run" — the descendant transitions to its after-change value, which inherits
+    from the parent''s after-change style. Firefox follows it; Chrome keeps the 2013
+    rule.'
+- name: outline-width length(mm) / events
+  reason: 'Holds the 2013 css3-transitions draft ("must not start a transition when
+    the computed value changes because it is inherited ... from another element that
+    is transitioning the same property"), which the spec has withdrawn: the current
+    draft (W3C WD 2026-01-08 and the ED, css-transitions-1 §3) says "both transitions
+    will run" — the descendant transitions to its after-change value, which inherits
+    from the parent''s after-change style. Firefox follows it; Chrome keeps the 2013
+    rule.'
+- name: outline-width length(pc) / events
+  reason: 'Holds the 2013 css3-transitions draft ("must not start a transition when
+    the computed value changes because it is inherited ... from another element that
+    is transitioning the same property"), which the spec has withdrawn: the current
+    draft (W3C WD 2026-01-08 and the ED, css-transitions-1 §3) says "both transitions
+    will run" — the descendant transitions to its after-change value, which inherits
+    from the parent''s after-change style. Firefox follows it; Chrome keeps the 2013
+    rule.'
+- name: outline-width length(pt) / events
+  reason: 'Holds the 2013 css3-transitions draft ("must not start a transition when
+    the computed value changes because it is inherited ... from another element that
+    is transitioning the same property"), which the spec has withdrawn: the current
+    draft (W3C WD 2026-01-08 and the ED, css-transitions-1 §3) says "both transitions
+    will run" — the descendant transitions to its after-change value, which inherits
+    from the parent''s after-change style. Firefox follows it; Chrome keeps the 2013
+    rule.'
+- name: outline-width length(px) / events
+  reason: 'Holds the 2013 css3-transitions draft ("must not start a transition when
+    the computed value changes because it is inherited ... from another element that
+    is transitioning the same property"), which the spec has withdrawn: the current
+    draft (W3C WD 2026-01-08 and the ED, css-transitions-1 §3) says "both transitions
+    will run" — the descendant transitions to its after-change value, which inherits
+    from the parent''s after-change style. Firefox follows it; Chrome keeps the 2013
+    rule.'
+- name: padding-bottom length(cm) / events
+  reason: 'Holds the 2013 css3-transitions draft ("must not start a transition when
+    the computed value changes because it is inherited ... from another element that
+    is transitioning the same property"), which the spec has withdrawn: the current
+    draft (W3C WD 2026-01-08 and the ED, css-transitions-1 §3) says "both transitions
+    will run" — the descendant transitions to its after-change value, which inherits
+    from the parent''s after-change style. Firefox follows it; Chrome keeps the 2013
+    rule.'
+- name: padding-bottom length(em) / events
+  reason: 'Holds the 2013 css3-transitions draft ("must not start a transition when
+    the computed value changes because it is inherited ... from another element that
+    is transitioning the same property"), which the spec has withdrawn: the current
+    draft (W3C WD 2026-01-08 and the ED, css-transitions-1 §3) says "both transitions
+    will run" — the descendant transitions to its after-change value, which inherits
+    from the parent''s after-change style. Firefox follows it; Chrome keeps the 2013
+    rule.'
+- name: padding-bottom length(ex) / events
+  reason: 'Holds the 2013 css3-transitions draft ("must not start a transition when
+    the computed value changes because it is inherited ... from another element that
+    is transitioning the same property"), which the spec has withdrawn: the current
+    draft (W3C WD 2026-01-08 and the ED, css-transitions-1 §3) says "both transitions
+    will run" — the descendant transitions to its after-change value, which inherits
+    from the parent''s after-change style. Firefox follows it; Chrome keeps the 2013
+    rule.'
+- name: padding-bottom length(in) / events
+  reason: 'Holds the 2013 css3-transitions draft ("must not start a transition when
+    the computed value changes because it is inherited ... from another element that
+    is transitioning the same property"), which the spec has withdrawn: the current
+    draft (W3C WD 2026-01-08 and the ED, css-transitions-1 §3) says "both transitions
+    will run" — the descendant transitions to its after-change value, which inherits
+    from the parent''s after-change style. Firefox follows it; Chrome keeps the 2013
+    rule.'
+- name: padding-bottom length(mm) / events
+  reason: 'Holds the 2013 css3-transitions draft ("must not start a transition when
+    the computed value changes because it is inherited ... from another element that
+    is transitioning the same property"), which the spec has withdrawn: the current
+    draft (W3C WD 2026-01-08 and the ED, css-transitions-1 §3) says "both transitions
+    will run" — the descendant transitions to its after-change value, which inherits
+    from the parent''s after-change style. Firefox follows it; Chrome keeps the 2013
+    rule.'
+- name: padding-bottom length(pc) / events
+  reason: 'Holds the 2013 css3-transitions draft ("must not start a transition when
+    the computed value changes because it is inherited ... from another element that
+    is transitioning the same property"), which the spec has withdrawn: the current
+    draft (W3C WD 2026-01-08 and the ED, css-transitions-1 §3) says "both transitions
+    will run" — the descendant transitions to its after-change value, which inherits
+    from the parent''s after-change style. Firefox follows it; Chrome keeps the 2013
+    rule.'
+- name: padding-bottom length(pt) / events
+  reason: 'Holds the 2013 css3-transitions draft ("must not start a transition when
+    the computed value changes because it is inherited ... from another element that
+    is transitioning the same property"), which the spec has withdrawn: the current
+    draft (W3C WD 2026-01-08 and the ED, css-transitions-1 §3) says "both transitions
+    will run" — the descendant transitions to its after-change value, which inherits
+    from the parent''s after-change style. Firefox follows it; Chrome keeps the 2013
+    rule.'
+- name: padding-bottom length(px) / events
+  reason: 'Holds the 2013 css3-transitions draft ("must not start a transition when
+    the computed value changes because it is inherited ... from another element that
+    is transitioning the same property"), which the spec has withdrawn: the current
+    draft (W3C WD 2026-01-08 and the ED, css-transitions-1 §3) says "both transitions
+    will run" — the descendant transitions to its after-change value, which inherits
+    from the parent''s after-change style. Firefox follows it; Chrome keeps the 2013
+    rule.'
+- name: padding-left length(cm) / events
+  reason: 'Holds the 2013 css3-transitions draft ("must not start a transition when
+    the computed value changes because it is inherited ... from another element that
+    is transitioning the same property"), which the spec has withdrawn: the current
+    draft (W3C WD 2026-01-08 and the ED, css-transitions-1 §3) says "both transitions
+    will run" — the descendant transitions to its after-change value, which inherits
+    from the parent''s after-change style. Firefox follows it; Chrome keeps the 2013
+    rule.'
+- name: padding-left length(em) / events
+  reason: 'Holds the 2013 css3-transitions draft ("must not start a transition when
+    the computed value changes because it is inherited ... from another element that
+    is transitioning the same property"), which the spec has withdrawn: the current
+    draft (W3C WD 2026-01-08 and the ED, css-transitions-1 §3) says "both transitions
+    will run" — the descendant transitions to its after-change value, which inherits
+    from the parent''s after-change style. Firefox follows it; Chrome keeps the 2013
+    rule.'
+- name: padding-left length(ex) / events
+  reason: 'Holds the 2013 css3-transitions draft ("must not start a transition when
+    the computed value changes because it is inherited ... from another element that
+    is transitioning the same property"), which the spec has withdrawn: the current
+    draft (W3C WD 2026-01-08 and the ED, css-transitions-1 §3) says "both transitions
+    will run" — the descendant transitions to its after-change value, which inherits
+    from the parent''s after-change style. Firefox follows it; Chrome keeps the 2013
+    rule.'
+- name: padding-left length(in) / events
+  reason: 'Holds the 2013 css3-transitions draft ("must not start a transition when
+    the computed value changes because it is inherited ... from another element that
+    is transitioning the same property"), which the spec has withdrawn: the current
+    draft (W3C WD 2026-01-08 and the ED, css-transitions-1 §3) says "both transitions
+    will run" — the descendant transitions to its after-change value, which inherits
+    from the parent''s after-change style. Firefox follows it; Chrome keeps the 2013
+    rule.'
+- name: padding-left length(mm) / events
+  reason: 'Holds the 2013 css3-transitions draft ("must not start a transition when
+    the computed value changes because it is inherited ... from another element that
+    is transitioning the same property"), which the spec has withdrawn: the current
+    draft (W3C WD 2026-01-08 and the ED, css-transitions-1 §3) says "both transitions
+    will run" — the descendant transitions to its after-change value, which inherits
+    from the parent''s after-change style. Firefox follows it; Chrome keeps the 2013
+    rule.'
+- name: padding-left length(pc) / events
+  reason: 'Holds the 2013 css3-transitions draft ("must not start a transition when
+    the computed value changes because it is inherited ... from another element that
+    is transitioning the same property"), which the spec has withdrawn: the current
+    draft (W3C WD 2026-01-08 and the ED, css-transitions-1 §3) says "both transitions
+    will run" — the descendant transitions to its after-change value, which inherits
+    from the parent''s after-change style. Firefox follows it; Chrome keeps the 2013
+    rule.'
+- name: padding-left length(pt) / events
+  reason: 'Holds the 2013 css3-transitions draft ("must not start a transition when
+    the computed value changes because it is inherited ... from another element that
+    is transitioning the same property"), which the spec has withdrawn: the current
+    draft (W3C WD 2026-01-08 and the ED, css-transitions-1 §3) says "both transitions
+    will run" — the descendant transitions to its after-change value, which inherits
+    from the parent''s after-change style. Firefox follows it; Chrome keeps the 2013
+    rule.'
+- name: padding-left length(px) / events
+  reason: 'Holds the 2013 css3-transitions draft ("must not start a transition when
+    the computed value changes because it is inherited ... from another element that
+    is transitioning the same property"), which the spec has withdrawn: the current
+    draft (W3C WD 2026-01-08 and the ED, css-transitions-1 §3) says "both transitions
+    will run" — the descendant transitions to its after-change value, which inherits
+    from the parent''s after-change style. Firefox follows it; Chrome keeps the 2013
+    rule.'
+- name: padding-right length(cm) / events
+  reason: 'Holds the 2013 css3-transitions draft ("must not start a transition when
+    the computed value changes because it is inherited ... from another element that
+    is transitioning the same property"), which the spec has withdrawn: the current
+    draft (W3C WD 2026-01-08 and the ED, css-transitions-1 §3) says "both transitions
+    will run" — the descendant transitions to its after-change value, which inherits
+    from the parent''s after-change style. Firefox follows it; Chrome keeps the 2013
+    rule.'
+- name: padding-right length(em) / events
+  reason: 'Holds the 2013 css3-transitions draft ("must not start a transition when
+    the computed value changes because it is inherited ... from another element that
+    is transitioning the same property"), which the spec has withdrawn: the current
+    draft (W3C WD 2026-01-08 and the ED, css-transitions-1 §3) says "both transitions
+    will run" — the descendant transitions to its after-change value, which inherits
+    from the parent''s after-change style. Firefox follows it; Chrome keeps the 2013
+    rule.'
+- name: padding-right length(ex) / events
+  reason: 'Holds the 2013 css3-transitions draft ("must not start a transition when
+    the computed value changes because it is inherited ... from another element that
+    is transitioning the same property"), which the spec has withdrawn: the current
+    draft (W3C WD 2026-01-08 and the ED, css-transitions-1 §3) says "both transitions
+    will run" — the descendant transitions to its after-change value, which inherits
+    from the parent''s after-change style. Firefox follows it; Chrome keeps the 2013
+    rule.'
+- name: padding-right length(in) / events
+  reason: 'Holds the 2013 css3-transitions draft ("must not start a transition when
+    the computed value changes because it is inherited ... from another element that
+    is transitioning the same property"), which the spec has withdrawn: the current
+    draft (W3C WD 2026-01-08 and the ED, css-transitions-1 §3) says "both transitions
+    will run" — the descendant transitions to its after-change value, which inherits
+    from the parent''s after-change style. Firefox follows it; Chrome keeps the 2013
+    rule.'
+- name: padding-right length(mm) / events
+  reason: 'Holds the 2013 css3-transitions draft ("must not start a transition when
+    the computed value changes because it is inherited ... from another element that
+    is transitioning the same property"), which the spec has withdrawn: the current
+    draft (W3C WD 2026-01-08 and the ED, css-transitions-1 §3) says "both transitions
+    will run" — the descendant transitions to its after-change value, which inherits
+    from the parent''s after-change style. Firefox follows it; Chrome keeps the 2013
+    rule.'
+- name: padding-right length(pc) / events
+  reason: 'Holds the 2013 css3-transitions draft ("must not start a transition when
+    the computed value changes because it is inherited ... from another element that
+    is transitioning the same property"), which the spec has withdrawn: the current
+    draft (W3C WD 2026-01-08 and the ED, css-transitions-1 §3) says "both transitions
+    will run" — the descendant transitions to its after-change value, which inherits
+    from the parent''s after-change style. Firefox follows it; Chrome keeps the 2013
+    rule.'
+- name: padding-right length(pt) / events
+  reason: 'Holds the 2013 css3-transitions draft ("must not start a transition when
+    the computed value changes because it is inherited ... from another element that
+    is transitioning the same property"), which the spec has withdrawn: the current
+    draft (W3C WD 2026-01-08 and the ED, css-transitions-1 §3) says "both transitions
+    will run" — the descendant transitions to its after-change value, which inherits
+    from the parent''s after-change style. Firefox follows it; Chrome keeps the 2013
+    rule.'
+- name: padding-right length(px) / events
+  reason: 'Holds the 2013 css3-transitions draft ("must not start a transition when
+    the computed value changes because it is inherited ... from another element that
+    is transitioning the same property"), which the spec has withdrawn: the current
+    draft (W3C WD 2026-01-08 and the ED, css-transitions-1 §3) says "both transitions
+    will run" — the descendant transitions to its after-change value, which inherits
+    from the parent''s after-change style. Firefox follows it; Chrome keeps the 2013
+    rule.'
+- name: padding-top length(cm) / events
+  reason: 'Holds the 2013 css3-transitions draft ("must not start a transition when
+    the computed value changes because it is inherited ... from another element that
+    is transitioning the same property"), which the spec has withdrawn: the current
+    draft (W3C WD 2026-01-08 and the ED, css-transitions-1 §3) says "both transitions
+    will run" — the descendant transitions to its after-change value, which inherits
+    from the parent''s after-change style. Firefox follows it; Chrome keeps the 2013
+    rule.'
+- name: padding-top length(em) / events
+  reason: 'Holds the 2013 css3-transitions draft ("must not start a transition when
+    the computed value changes because it is inherited ... from another element that
+    is transitioning the same property"), which the spec has withdrawn: the current
+    draft (W3C WD 2026-01-08 and the ED, css-transitions-1 §3) says "both transitions
+    will run" — the descendant transitions to its after-change value, which inherits
+    from the parent''s after-change style. Firefox follows it; Chrome keeps the 2013
+    rule.'
+- name: padding-top length(ex) / events
+  reason: 'Holds the 2013 css3-transitions draft ("must not start a transition when
+    the computed value changes because it is inherited ... from another element that
+    is transitioning the same property"), which the spec has withdrawn: the current
+    draft (W3C WD 2026-01-08 and the ED, css-transitions-1 §3) says "both transitions
+    will run" — the descendant transitions to its after-change value, which inherits
+    from the parent''s after-change style. Firefox follows it; Chrome keeps the 2013
+    rule.'
+- name: padding-top length(in) / events
+  reason: 'Holds the 2013 css3-transitions draft ("must not start a transition when
+    the computed value changes because it is inherited ... from another element that
+    is transitioning the same property"), which the spec has withdrawn: the current
+    draft (W3C WD 2026-01-08 and the ED, css-transitions-1 §3) says "both transitions
+    will run" — the descendant transitions to its after-change value, which inherits
+    from the parent''s after-change style. Firefox follows it; Chrome keeps the 2013
+    rule.'
+- name: padding-top length(mm) / events
+  reason: 'Holds the 2013 css3-transitions draft ("must not start a transition when
+    the computed value changes because it is inherited ... from another element that
+    is transitioning the same property"), which the spec has withdrawn: the current
+    draft (W3C WD 2026-01-08 and the ED, css-transitions-1 §3) says "both transitions
+    will run" — the descendant transitions to its after-change value, which inherits
+    from the parent''s after-change style. Firefox follows it; Chrome keeps the 2013
+    rule.'
+- name: padding-top length(pc) / events
+  reason: 'Holds the 2013 css3-transitions draft ("must not start a transition when
+    the computed value changes because it is inherited ... from another element that
+    is transitioning the same property"), which the spec has withdrawn: the current
+    draft (W3C WD 2026-01-08 and the ED, css-transitions-1 §3) says "both transitions
+    will run" — the descendant transitions to its after-change value, which inherits
+    from the parent''s after-change style. Firefox follows it; Chrome keeps the 2013
+    rule.'
+- name: padding-top length(pt) / events
+  reason: 'Holds the 2013 css3-transitions draft ("must not start a transition when
+    the computed value changes because it is inherited ... from another element that
+    is transitioning the same property"), which the spec has withdrawn: the current
+    draft (W3C WD 2026-01-08 and the ED, css-transitions-1 §3) says "both transitions
+    will run" — the descendant transitions to its after-change value, which inherits
+    from the parent''s after-change style. Firefox follows it; Chrome keeps the 2013
+    rule.'
+- name: padding-top length(px) / events
+  reason: 'Holds the 2013 css3-transitions draft ("must not start a transition when
+    the computed value changes because it is inherited ... from another element that
+    is transitioning the same property"), which the spec has withdrawn: the current
+    draft (W3C WD 2026-01-08 and the ED, css-transitions-1 §3) says "both transitions
+    will run" — the descendant transitions to its after-change value, which inherits
+    from the parent''s after-change style. Firefox follows it; Chrome keeps the 2013
+    rule.'
+- name: right length(cm) / events
+  reason: 'Holds the 2013 css3-transitions draft ("must not start a transition when
+    the computed value changes because it is inherited ... from another element that
+    is transitioning the same property"), which the spec has withdrawn: the current
+    draft (W3C WD 2026-01-08 and the ED, css-transitions-1 §3) says "both transitions
+    will run" — the descendant transitions to its after-change value, which inherits
+    from the parent''s after-change style. Firefox follows it; Chrome keeps the 2013
+    rule.'
+- name: right length(em) / events
+  reason: 'Holds the 2013 css3-transitions draft ("must not start a transition when
+    the computed value changes because it is inherited ... from another element that
+    is transitioning the same property"), which the spec has withdrawn: the current
+    draft (W3C WD 2026-01-08 and the ED, css-transitions-1 §3) says "both transitions
+    will run" — the descendant transitions to its after-change value, which inherits
+    from the parent''s after-change style. Firefox follows it; Chrome keeps the 2013
+    rule.'
+- name: right length(ex) / events
+  reason: 'Holds the 2013 css3-transitions draft ("must not start a transition when
+    the computed value changes because it is inherited ... from another element that
+    is transitioning the same property"), which the spec has withdrawn: the current
+    draft (W3C WD 2026-01-08 and the ED, css-transitions-1 §3) says "both transitions
+    will run" — the descendant transitions to its after-change value, which inherits
+    from the parent''s after-change style. Firefox follows it; Chrome keeps the 2013
+    rule.'
+- name: right length(in) / events
+  reason: 'Holds the 2013 css3-transitions draft ("must not start a transition when
+    the computed value changes because it is inherited ... from another element that
+    is transitioning the same property"), which the spec has withdrawn: the current
+    draft (W3C WD 2026-01-08 and the ED, css-transitions-1 §3) says "both transitions
+    will run" — the descendant transitions to its after-change value, which inherits
+    from the parent''s after-change style. Firefox follows it; Chrome keeps the 2013
+    rule.'
+- name: right length(mm) / events
+  reason: 'Holds the 2013 css3-transitions draft ("must not start a transition when
+    the computed value changes because it is inherited ... from another element that
+    is transitioning the same property"), which the spec has withdrawn: the current
+    draft (W3C WD 2026-01-08 and the ED, css-transitions-1 §3) says "both transitions
+    will run" — the descendant transitions to its after-change value, which inherits
+    from the parent''s after-change style. Firefox follows it; Chrome keeps the 2013
+    rule.'
+- name: right length(pc) / events
+  reason: 'Holds the 2013 css3-transitions draft ("must not start a transition when
+    the computed value changes because it is inherited ... from another element that
+    is transitioning the same property"), which the spec has withdrawn: the current
+    draft (W3C WD 2026-01-08 and the ED, css-transitions-1 §3) says "both transitions
+    will run" — the descendant transitions to its after-change value, which inherits
+    from the parent''s after-change style. Firefox follows it; Chrome keeps the 2013
+    rule.'
+- name: right length(pt) / events
+  reason: 'Holds the 2013 css3-transitions draft ("must not start a transition when
+    the computed value changes because it is inherited ... from another element that
+    is transitioning the same property"), which the spec has withdrawn: the current
+    draft (W3C WD 2026-01-08 and the ED, css-transitions-1 §3) says "both transitions
+    will run" — the descendant transitions to its after-change value, which inherits
+    from the parent''s after-change style. Firefox follows it; Chrome keeps the 2013
+    rule.'
+- name: right length(px) / events
+  reason: 'Holds the 2013 css3-transitions draft ("must not start a transition when
+    the computed value changes because it is inherited ... from another element that
+    is transitioning the same property"), which the spec has withdrawn: the current
+    draft (W3C WD 2026-01-08 and the ED, css-transitions-1 §3) says "both transitions
+    will run" — the descendant transitions to its after-change value, which inherits
+    from the parent''s after-change style. Firefox follows it; Chrome keeps the 2013
+    rule.'
+- name: right percentage(%) / events
+  reason: 'Holds the 2013 css3-transitions draft ("must not start a transition when
+    the computed value changes because it is inherited ... from another element that
+    is transitioning the same property"), which the spec has withdrawn: the current
+    draft (W3C WD 2026-01-08 and the ED, css-transitions-1 §3) says "both transitions
+    will run" — the descendant transitions to its after-change value, which inherits
+    from the parent''s after-change style. Firefox follows it; Chrome keeps the 2013
+    rule.'
+- name: text-indent length(cm) / events
+  reason: 'Holds the 2013 css3-transitions draft ("must not start a transition when
+    the computed value changes because it is inherited ... from another element that
+    is transitioning the same property"), which the spec has withdrawn: the current
+    draft (W3C WD 2026-01-08 and the ED, css-transitions-1 §3) says "both transitions
+    will run" — the descendant transitions to its after-change value, which inherits
+    from the parent''s after-change style. Firefox follows it; Chrome keeps the 2013
+    rule.'
+- name: text-indent length(em) / events
+  reason: 'Holds the 2013 css3-transitions draft ("must not start a transition when
+    the computed value changes because it is inherited ... from another element that
+    is transitioning the same property"), which the spec has withdrawn: the current
+    draft (W3C WD 2026-01-08 and the ED, css-transitions-1 §3) says "both transitions
+    will run" — the descendant transitions to its after-change value, which inherits
+    from the parent''s after-change style. Firefox follows it; Chrome keeps the 2013
+    rule.'
+- name: text-indent length(ex) / events
+  reason: 'Holds the 2013 css3-transitions draft ("must not start a transition when
+    the computed value changes because it is inherited ... from another element that
+    is transitioning the same property"), which the spec has withdrawn: the current
+    draft (W3C WD 2026-01-08 and the ED, css-transitions-1 §3) says "both transitions
+    will run" — the descendant transitions to its after-change value, which inherits
+    from the parent''s after-change style. Firefox follows it; Chrome keeps the 2013
+    rule.'
+- name: text-indent length(in) / events
+  reason: 'Holds the 2013 css3-transitions draft ("must not start a transition when
+    the computed value changes because it is inherited ... from another element that
+    is transitioning the same property"), which the spec has withdrawn: the current
+    draft (W3C WD 2026-01-08 and the ED, css-transitions-1 §3) says "both transitions
+    will run" — the descendant transitions to its after-change value, which inherits
+    from the parent''s after-change style. Firefox follows it; Chrome keeps the 2013
+    rule.'
+- name: text-indent length(mm) / events
+  reason: 'Holds the 2013 css3-transitions draft ("must not start a transition when
+    the computed value changes because it is inherited ... from another element that
+    is transitioning the same property"), which the spec has withdrawn: the current
+    draft (W3C WD 2026-01-08 and the ED, css-transitions-1 §3) says "both transitions
+    will run" — the descendant transitions to its after-change value, which inherits
+    from the parent''s after-change style. Firefox follows it; Chrome keeps the 2013
+    rule.'
+- name: text-indent length(pc) / events
+  reason: 'Holds the 2013 css3-transitions draft ("must not start a transition when
+    the computed value changes because it is inherited ... from another element that
+    is transitioning the same property"), which the spec has withdrawn: the current
+    draft (W3C WD 2026-01-08 and the ED, css-transitions-1 §3) says "both transitions
+    will run" — the descendant transitions to its after-change value, which inherits
+    from the parent''s after-change style. Firefox follows it; Chrome keeps the 2013
+    rule.'
+- name: text-indent length(pt) / events
+  reason: 'Holds the 2013 css3-transitions draft ("must not start a transition when
+    the computed value changes because it is inherited ... from another element that
+    is transitioning the same property"), which the spec has withdrawn: the current
+    draft (W3C WD 2026-01-08 and the ED, css-transitions-1 §3) says "both transitions
+    will run" — the descendant transitions to its after-change value, which inherits
+    from the parent''s after-change style. Firefox follows it; Chrome keeps the 2013
+    rule.'
+- name: text-indent length(px) / events
+  reason: 'Holds the 2013 css3-transitions draft ("must not start a transition when
+    the computed value changes because it is inherited ... from another element that
+    is transitioning the same property"), which the spec has withdrawn: the current
+    draft (W3C WD 2026-01-08 and the ED, css-transitions-1 §3) says "both transitions
+    will run" — the descendant transitions to its after-change value, which inherits
+    from the parent''s after-change style. Firefox follows it; Chrome keeps the 2013
+    rule.'
+- name: text-indent percentage(%) / events
+  reason: 'Holds the 2013 css3-transitions draft ("must not start a transition when
+    the computed value changes because it is inherited ... from another element that
+    is transitioning the same property"), which the spec has withdrawn: the current
+    draft (W3C WD 2026-01-08 and the ED, css-transitions-1 §3) says "both transitions
+    will run" — the descendant transitions to its after-change value, which inherits
+    from the parent''s after-change style. Firefox follows it; Chrome keeps the 2013
+    rule.'
+- name: text-shadow shadow(shadow) / events
+  reason: 'Holds the 2013 css3-transitions draft ("must not start a transition when
+    the computed value changes because it is inherited ... from another element that
+    is transitioning the same property"), which the spec has withdrawn: the current
+    draft (W3C WD 2026-01-08 and the ED, css-transitions-1 §3) says "both transitions
+    will run" — the descendant transitions to its after-change value, which inherits
+    from the parent''s after-change style. Firefox follows it; Chrome keeps the 2013
+    rule.'
+- name: top length(cm) / events
+  reason: 'Holds the 2013 css3-transitions draft ("must not start a transition when
+    the computed value changes because it is inherited ... from another element that
+    is transitioning the same property"), which the spec has withdrawn: the current
+    draft (W3C WD 2026-01-08 and the ED, css-transitions-1 §3) says "both transitions
+    will run" — the descendant transitions to its after-change value, which inherits
+    from the parent''s after-change style. Firefox follows it; Chrome keeps the 2013
+    rule.'
+- name: top length(em) / events
+  reason: 'Holds the 2013 css3-transitions draft ("must not start a transition when
+    the computed value changes because it is inherited ... from another element that
+    is transitioning the same property"), which the spec has withdrawn: the current
+    draft (W3C WD 2026-01-08 and the ED, css-transitions-1 §3) says "both transitions
+    will run" — the descendant transitions to its after-change value, which inherits
+    from the parent''s after-change style. Firefox follows it; Chrome keeps the 2013
+    rule.'
+- name: top length(ex) / events
+  reason: 'Holds the 2013 css3-transitions draft ("must not start a transition when
+    the computed value changes because it is inherited ... from another element that
+    is transitioning the same property"), which the spec has withdrawn: the current
+    draft (W3C WD 2026-01-08 and the ED, css-transitions-1 §3) says "both transitions
+    will run" — the descendant transitions to its after-change value, which inherits
+    from the parent''s after-change style. Firefox follows it; Chrome keeps the 2013
+    rule.'
+- name: top length(in) / events
+  reason: 'Holds the 2013 css3-transitions draft ("must not start a transition when
+    the computed value changes because it is inherited ... from another element that
+    is transitioning the same property"), which the spec has withdrawn: the current
+    draft (W3C WD 2026-01-08 and the ED, css-transitions-1 §3) says "both transitions
+    will run" — the descendant transitions to its after-change value, which inherits
+    from the parent''s after-change style. Firefox follows it; Chrome keeps the 2013
+    rule.'
+- name: top length(mm) / events
+  reason: 'Holds the 2013 css3-transitions draft ("must not start a transition when
+    the computed value changes because it is inherited ... from another element that
+    is transitioning the same property"), which the spec has withdrawn: the current
+    draft (W3C WD 2026-01-08 and the ED, css-transitions-1 §3) says "both transitions
+    will run" — the descendant transitions to its after-change value, which inherits
+    from the parent''s after-change style. Firefox follows it; Chrome keeps the 2013
+    rule.'
+- name: top length(pc) / events
+  reason: 'Holds the 2013 css3-transitions draft ("must not start a transition when
+    the computed value changes because it is inherited ... from another element that
+    is transitioning the same property"), which the spec has withdrawn: the current
+    draft (W3C WD 2026-01-08 and the ED, css-transitions-1 §3) says "both transitions
+    will run" — the descendant transitions to its after-change value, which inherits
+    from the parent''s after-change style. Firefox follows it; Chrome keeps the 2013
+    rule.'
+- name: top length(pt) / events
+  reason: 'Holds the 2013 css3-transitions draft ("must not start a transition when
+    the computed value changes because it is inherited ... from another element that
+    is transitioning the same property"), which the spec has withdrawn: the current
+    draft (W3C WD 2026-01-08 and the ED, css-transitions-1 §3) says "both transitions
+    will run" — the descendant transitions to its after-change value, which inherits
+    from the parent''s after-change style. Firefox follows it; Chrome keeps the 2013
+    rule.'
+- name: top length(px) / events
+  reason: 'Holds the 2013 css3-transitions draft ("must not start a transition when
+    the computed value changes because it is inherited ... from another element that
+    is transitioning the same property"), which the spec has withdrawn: the current
+    draft (W3C WD 2026-01-08 and the ED, css-transitions-1 §3) says "both transitions
+    will run" — the descendant transitions to its after-change value, which inherits
+    from the parent''s after-change style. Firefox follows it; Chrome keeps the 2013
+    rule.'
+- name: top percentage(%) / events
+  reason: 'Holds the 2013 css3-transitions draft ("must not start a transition when
+    the computed value changes because it is inherited ... from another element that
+    is transitioning the same property"), which the spec has withdrawn: the current
+    draft (W3C WD 2026-01-08 and the ED, css-transitions-1 §3) says "both transitions
+    will run" — the descendant transitions to its after-change value, which inherits
+    from the parent''s after-change style. Firefox follows it; Chrome keeps the 2013
+    rule.'
+- name: vertical-align length(cm) / events
+  reason: 'Holds the 2013 css3-transitions draft ("must not start a transition when
+    the computed value changes because it is inherited ... from another element that
+    is transitioning the same property"), which the spec has withdrawn: the current
+    draft (W3C WD 2026-01-08 and the ED, css-transitions-1 §3) says "both transitions
+    will run" — the descendant transitions to its after-change value, which inherits
+    from the parent''s after-change style. Firefox follows it; Chrome keeps the 2013
+    rule.'
+- name: vertical-align length(em) / events
+  reason: 'Holds the 2013 css3-transitions draft ("must not start a transition when
+    the computed value changes because it is inherited ... from another element that
+    is transitioning the same property"), which the spec has withdrawn: the current
+    draft (W3C WD 2026-01-08 and the ED, css-transitions-1 §3) says "both transitions
+    will run" — the descendant transitions to its after-change value, which inherits
+    from the parent''s after-change style. Firefox follows it; Chrome keeps the 2013
+    rule.'
+- name: vertical-align length(ex) / events
+  reason: 'Holds the 2013 css3-transitions draft ("must not start a transition when
+    the computed value changes because it is inherited ... from another element that
+    is transitioning the same property"), which the spec has withdrawn: the current
+    draft (W3C WD 2026-01-08 and the ED, css-transitions-1 §3) says "both transitions
+    will run" — the descendant transitions to its after-change value, which inherits
+    from the parent''s after-change style. Firefox follows it; Chrome keeps the 2013
+    rule.'
+- name: vertical-align length(in) / events
+  reason: 'Holds the 2013 css3-transitions draft ("must not start a transition when
+    the computed value changes because it is inherited ... from another element that
+    is transitioning the same property"), which the spec has withdrawn: the current
+    draft (W3C WD 2026-01-08 and the ED, css-transitions-1 §3) says "both transitions
+    will run" — the descendant transitions to its after-change value, which inherits
+    from the parent''s after-change style. Firefox follows it; Chrome keeps the 2013
+    rule.'
+- name: vertical-align length(mm) / events
+  reason: 'Holds the 2013 css3-transitions draft ("must not start a transition when
+    the computed value changes because it is inherited ... from another element that
+    is transitioning the same property"), which the spec has withdrawn: the current
+    draft (W3C WD 2026-01-08 and the ED, css-transitions-1 §3) says "both transitions
+    will run" — the descendant transitions to its after-change value, which inherits
+    from the parent''s after-change style. Firefox follows it; Chrome keeps the 2013
+    rule.'
+- name: vertical-align length(pc) / events
+  reason: 'Holds the 2013 css3-transitions draft ("must not start a transition when
+    the computed value changes because it is inherited ... from another element that
+    is transitioning the same property"), which the spec has withdrawn: the current
+    draft (W3C WD 2026-01-08 and the ED, css-transitions-1 §3) says "both transitions
+    will run" — the descendant transitions to its after-change value, which inherits
+    from the parent''s after-change style. Firefox follows it; Chrome keeps the 2013
+    rule.'
+- name: vertical-align length(pt) / events
+  reason: 'Holds the 2013 css3-transitions draft ("must not start a transition when
+    the computed value changes because it is inherited ... from another element that
+    is transitioning the same property"), which the spec has withdrawn: the current
+    draft (W3C WD 2026-01-08 and the ED, css-transitions-1 §3) says "both transitions
+    will run" — the descendant transitions to its after-change value, which inherits
+    from the parent''s after-change style. Firefox follows it; Chrome keeps the 2013
+    rule.'
+- name: vertical-align length(px) / events
+  reason: 'Holds the 2013 css3-transitions draft ("must not start a transition when
+    the computed value changes because it is inherited ... from another element that
+    is transitioning the same property"), which the spec has withdrawn: the current
+    draft (W3C WD 2026-01-08 and the ED, css-transitions-1 §3) says "both transitions
+    will run" — the descendant transitions to its after-change value, which inherits
+    from the parent''s after-change style. Firefox follows it; Chrome keeps the 2013
+    rule.'
+- name: vertical-align percentage(%) / events
+  reason: 'Holds the 2013 css3-transitions draft ("must not start a transition when
+    the computed value changes because it is inherited ... from another element that
+    is transitioning the same property"), which the spec has withdrawn: the current
+    draft (W3C WD 2026-01-08 and the ED, css-transitions-1 §3) says "both transitions
+    will run" — the descendant transitions to its after-change value, which inherits
+    from the parent''s after-change style. Firefox follows it; Chrome keeps the 2013
+    rule.'
+- name: visibility visibility(keyword) / events
+  reason: 'Holds the 2013 css3-transitions draft ("must not start a transition when
+    the computed value changes because it is inherited ... from another element that
+    is transitioning the same property"), which the spec has withdrawn: the current
+    draft (W3C WD 2026-01-08 and the ED, css-transitions-1 §3) says "both transitions
+    will run" — the descendant transitions to its after-change value, which inherits
+    from the parent''s after-change style. Firefox follows it; Chrome keeps the 2013
+    rule.'
+- name: width length(cm) / events
+  reason: 'Holds the 2013 css3-transitions draft ("must not start a transition when
+    the computed value changes because it is inherited ... from another element that
+    is transitioning the same property"), which the spec has withdrawn: the current
+    draft (W3C WD 2026-01-08 and the ED, css-transitions-1 §3) says "both transitions
+    will run" — the descendant transitions to its after-change value, which inherits
+    from the parent''s after-change style. Firefox follows it; Chrome keeps the 2013
+    rule.'
+- name: width length(em) / events
+  reason: 'Holds the 2013 css3-transitions draft ("must not start a transition when
+    the computed value changes because it is inherited ... from another element that
+    is transitioning the same property"), which the spec has withdrawn: the current
+    draft (W3C WD 2026-01-08 and the ED, css-transitions-1 §3) says "both transitions
+    will run" — the descendant transitions to its after-change value, which inherits
+    from the parent''s after-change style. Firefox follows it; Chrome keeps the 2013
+    rule.'
+- name: width length(ex) / events
+  reason: 'Holds the 2013 css3-transitions draft ("must not start a transition when
+    the computed value changes because it is inherited ... from another element that
+    is transitioning the same property"), which the spec has withdrawn: the current
+    draft (W3C WD 2026-01-08 and the ED, css-transitions-1 §3) says "both transitions
+    will run" — the descendant transitions to its after-change value, which inherits
+    from the parent''s after-change style. Firefox follows it; Chrome keeps the 2013
+    rule.'
+- name: width length(in) / events
+  reason: 'Holds the 2013 css3-transitions draft ("must not start a transition when
+    the computed value changes because it is inherited ... from another element that
+    is transitioning the same property"), which the spec has withdrawn: the current
+    draft (W3C WD 2026-01-08 and the ED, css-transitions-1 §3) says "both transitions
+    will run" — the descendant transitions to its after-change value, which inherits
+    from the parent''s after-change style. Firefox follows it; Chrome keeps the 2013
+    rule.'
+- name: width length(mm) / events
+  reason: 'Holds the 2013 css3-transitions draft ("must not start a transition when
+    the computed value changes because it is inherited ... from another element that
+    is transitioning the same property"), which the spec has withdrawn: the current
+    draft (W3C WD 2026-01-08 and the ED, css-transitions-1 §3) says "both transitions
+    will run" — the descendant transitions to its after-change value, which inherits
+    from the parent''s after-change style. Firefox follows it; Chrome keeps the 2013
+    rule.'
+- name: width length(pc) / events
+  reason: 'Holds the 2013 css3-transitions draft ("must not start a transition when
+    the computed value changes because it is inherited ... from another element that
+    is transitioning the same property"), which the spec has withdrawn: the current
+    draft (W3C WD 2026-01-08 and the ED, css-transitions-1 §3) says "both transitions
+    will run" — the descendant transitions to its after-change value, which inherits
+    from the parent''s after-change style. Firefox follows it; Chrome keeps the 2013
+    rule.'
+- name: width length(pt) / events
+  reason: 'Holds the 2013 css3-transitions draft ("must not start a transition when
+    the computed value changes because it is inherited ... from another element that
+    is transitioning the same property"), which the spec has withdrawn: the current
+    draft (W3C WD 2026-01-08 and the ED, css-transitions-1 §3) says "both transitions
+    will run" — the descendant transitions to its after-change value, which inherits
+    from the parent''s after-change style. Firefox follows it; Chrome keeps the 2013
+    rule.'
+- name: width length(px) / events
+  reason: 'Holds the 2013 css3-transitions draft ("must not start a transition when
+    the computed value changes because it is inherited ... from another element that
+    is transitioning the same property"), which the spec has withdrawn: the current
+    draft (W3C WD 2026-01-08 and the ED, css-transitions-1 §3) says "both transitions
+    will run" — the descendant transitions to its after-change value, which inherits
+    from the parent''s after-change style. Firefox follows it; Chrome keeps the 2013
+    rule.'
+- name: width percentage(%) / events
+  reason: 'Holds the 2013 css3-transitions draft ("must not start a transition when
+    the computed value changes because it is inherited ... from another element that
+    is transitioning the same property"), which the spec has withdrawn: the current
+    draft (W3C WD 2026-01-08 and the ED, css-transitions-1 §3) says "both transitions
+    will run" — the descendant transitions to its after-change value, which inherits
+    from the parent''s after-change style. Firefox follows it; Chrome keeps the 2013
+    rule.'
+- name: word-spacing length(cm) / events
+  reason: 'Holds the 2013 css3-transitions draft ("must not start a transition when
+    the computed value changes because it is inherited ... from another element that
+    is transitioning the same property"), which the spec has withdrawn: the current
+    draft (W3C WD 2026-01-08 and the ED, css-transitions-1 §3) says "both transitions
+    will run" — the descendant transitions to its after-change value, which inherits
+    from the parent''s after-change style. Firefox follows it; Chrome keeps the 2013
+    rule.'
+- name: word-spacing length(em) / events
+  reason: 'Holds the 2013 css3-transitions draft ("must not start a transition when
+    the computed value changes because it is inherited ... from another element that
+    is transitioning the same property"), which the spec has withdrawn: the current
+    draft (W3C WD 2026-01-08 and the ED, css-transitions-1 §3) says "both transitions
+    will run" — the descendant transitions to its after-change value, which inherits
+    from the parent''s after-change style. Firefox follows it; Chrome keeps the 2013
+    rule.'
+- name: word-spacing length(ex) / events
+  reason: 'Holds the 2013 css3-transitions draft ("must not start a transition when
+    the computed value changes because it is inherited ... from another element that
+    is transitioning the same property"), which the spec has withdrawn: the current
+    draft (W3C WD 2026-01-08 and the ED, css-transitions-1 §3) says "both transitions
+    will run" — the descendant transitions to its after-change value, which inherits
+    from the parent''s after-change style. Firefox follows it; Chrome keeps the 2013
+    rule.'
+- name: word-spacing length(in) / events
+  reason: 'Holds the 2013 css3-transitions draft ("must not start a transition when
+    the computed value changes because it is inherited ... from another element that
+    is transitioning the same property"), which the spec has withdrawn: the current
+    draft (W3C WD 2026-01-08 and the ED, css-transitions-1 §3) says "both transitions
+    will run" — the descendant transitions to its after-change value, which inherits
+    from the parent''s after-change style. Firefox follows it; Chrome keeps the 2013
+    rule.'
+- name: word-spacing length(mm) / events
+  reason: 'Holds the 2013 css3-transitions draft ("must not start a transition when
+    the computed value changes because it is inherited ... from another element that
+    is transitioning the same property"), which the spec has withdrawn: the current
+    draft (W3C WD 2026-01-08 and the ED, css-transitions-1 §3) says "both transitions
+    will run" — the descendant transitions to its after-change value, which inherits
+    from the parent''s after-change style. Firefox follows it; Chrome keeps the 2013
+    rule.'
+- name: word-spacing length(pc) / events
+  reason: 'Holds the 2013 css3-transitions draft ("must not start a transition when
+    the computed value changes because it is inherited ... from another element that
+    is transitioning the same property"), which the spec has withdrawn: the current
+    draft (W3C WD 2026-01-08 and the ED, css-transitions-1 §3) says "both transitions
+    will run" — the descendant transitions to its after-change value, which inherits
+    from the parent''s after-change style. Firefox follows it; Chrome keeps the 2013
+    rule.'
+- name: word-spacing length(pt) / events
+  reason: 'Holds the 2013 css3-transitions draft ("must not start a transition when
+    the computed value changes because it is inherited ... from another element that
+    is transitioning the same property"), which the spec has withdrawn: the current
+    draft (W3C WD 2026-01-08 and the ED, css-transitions-1 §3) says "both transitions
+    will run" — the descendant transitions to its after-change value, which inherits
+    from the parent''s after-change style. Firefox follows it; Chrome keeps the 2013
+    rule.'
+- name: word-spacing length(px) / events
+  reason: 'Holds the 2013 css3-transitions draft ("must not start a transition when
+    the computed value changes because it is inherited ... from another element that
+    is transitioning the same property"), which the spec has withdrawn: the current
+    draft (W3C WD 2026-01-08 and the ED, css-transitions-1 §3) says "both transitions
+    will run" — the descendant transitions to its after-change value, which inherits
+    from the parent''s after-change style. Firefox follows it; Chrome keeps the 2013
+    rule.'
+- name: word-spacing percentage(%) / events
+  reason: 'Holds the 2013 css3-transitions draft ("must not start a transition when
+    the computed value changes because it is inherited ... from another element that
+    is transitioning the same property"), which the spec has withdrawn: the current
+    draft (W3C WD 2026-01-08 and the ED, css-transitions-1 §3) says "both transitions
+    will run" — the descendant transitions to its after-change value, which inherits
+    from the parent''s after-change style. Firefox follows it; Chrome keeps the 2013
+    rule.'
+- name: z-index integer(integer) / events
+  reason: 'Holds the 2013 css3-transitions draft ("must not start a transition when
+    the computed value changes because it is inherited ... from another element that
+    is transitioning the same property"), which the spec has withdrawn: the current
+    draft (W3C WD 2026-01-08 and the ED, css-transitions-1 §3) says "both transitions
+    will run" — the descendant transitions to its after-change value, which inherits
+    from the parent''s after-change style. Firefox follows it; Chrome keeps the 2013
+    rule.'
+css/css-transitions/properties-value-inherit-003.html:
+- name: background-position-x length-em(em) / events
+  reason: 'Holds the 2013 css3-transitions draft ("must not start a transition when
+    the computed value changes because it is inherited ... from another element that
+    is transitioning the same property"), which the spec has withdrawn: the current
+    draft (W3C WD 2026-01-08 and the ED, css-transitions-1 §3) says "both transitions
+    will run" — the descendant transitions to its after-change value, which inherits
+    from the parent''s after-change style. Firefox follows it; Chrome keeps the 2013
+    rule.'
+- name: border-bottom-width length-em(em) / events
+  reason: 'Holds the 2013 css3-transitions draft ("must not start a transition when
+    the computed value changes because it is inherited ... from another element that
+    is transitioning the same property"), which the spec has withdrawn: the current
+    draft (W3C WD 2026-01-08 and the ED, css-transitions-1 §3) says "both transitions
+    will run" — the descendant transitions to its after-change value, which inherits
+    from the parent''s after-change style. Firefox follows it; Chrome keeps the 2013
+    rule.'
+- name: border-left-width length-em(em) / events
+  reason: 'Holds the 2013 css3-transitions draft ("must not start a transition when
+    the computed value changes because it is inherited ... from another element that
+    is transitioning the same property"), which the spec has withdrawn: the current
+    draft (W3C WD 2026-01-08 and the ED, css-transitions-1 §3) says "both transitions
+    will run" — the descendant transitions to its after-change value, which inherits
+    from the parent''s after-change style. Firefox follows it; Chrome keeps the 2013
+    rule.'
+- name: border-right-width length-em(em) / events
+  reason: 'Holds the 2013 css3-transitions draft ("must not start a transition when
+    the computed value changes because it is inherited ... from another element that
+    is transitioning the same property"), which the spec has withdrawn: the current
+    draft (W3C WD 2026-01-08 and the ED, css-transitions-1 §3) says "both transitions
+    will run" — the descendant transitions to its after-change value, which inherits
+    from the parent''s after-change style. Firefox follows it; Chrome keeps the 2013
+    rule.'
+- name: border-top-width length-em(em) / events
+  reason: 'Holds the 2013 css3-transitions draft ("must not start a transition when
+    the computed value changes because it is inherited ... from another element that
+    is transitioning the same property"), which the spec has withdrawn: the current
+    draft (W3C WD 2026-01-08 and the ED, css-transitions-1 §3) says "both transitions
+    will run" — the descendant transitions to its after-change value, which inherits
+    from the parent''s after-change style. Firefox follows it; Chrome keeps the 2013
+    rule.'
+- name: bottom length-em(em) / events
+  reason: 'Holds the 2013 css3-transitions draft ("must not start a transition when
+    the computed value changes because it is inherited ... from another element that
+    is transitioning the same property"), which the spec has withdrawn: the current
+    draft (W3C WD 2026-01-08 and the ED, css-transitions-1 §3) says "both transitions
+    will run" — the descendant transitions to its after-change value, which inherits
+    from the parent''s after-change style. Firefox follows it; Chrome keeps the 2013
+    rule.'
+- name: height length-em(em) / events
+  reason: 'Holds the 2013 css3-transitions draft ("must not start a transition when
+    the computed value changes because it is inherited ... from another element that
+    is transitioning the same property"), which the spec has withdrawn: the current
+    draft (W3C WD 2026-01-08 and the ED, css-transitions-1 §3) says "both transitions
+    will run" — the descendant transitions to its after-change value, which inherits
+    from the parent''s after-change style. Firefox follows it; Chrome keeps the 2013
+    rule.'
+- name: left length-em(em) / events
+  reason: 'Holds the 2013 css3-transitions draft ("must not start a transition when
+    the computed value changes because it is inherited ... from another element that
+    is transitioning the same property"), which the spec has withdrawn: the current
+    draft (W3C WD 2026-01-08 and the ED, css-transitions-1 §3) says "both transitions
+    will run" — the descendant transitions to its after-change value, which inherits
+    from the parent''s after-change style. Firefox follows it; Chrome keeps the 2013
+    rule.'
+- name: letter-spacing length-em(em) / events
+  reason: 'Holds the 2013 css3-transitions draft ("must not start a transition when
+    the computed value changes because it is inherited ... from another element that
+    is transitioning the same property"), which the spec has withdrawn: the current
+    draft (W3C WD 2026-01-08 and the ED, css-transitions-1 §3) says "both transitions
+    will run" — the descendant transitions to its after-change value, which inherits
+    from the parent''s after-change style. Firefox follows it; Chrome keeps the 2013
+    rule.'
+- name: line-height length-em(em) / events
+  reason: 'Holds the 2013 css3-transitions draft ("must not start a transition when
+    the computed value changes because it is inherited ... from another element that
+    is transitioning the same property"), which the spec has withdrawn: the current
+    draft (W3C WD 2026-01-08 and the ED, css-transitions-1 §3) says "both transitions
+    will run" — the descendant transitions to its after-change value, which inherits
+    from the parent''s after-change style. Firefox follows it; Chrome keeps the 2013
+    rule.'
+- name: margin-bottom length-em(em) / events
+  reason: 'Holds the 2013 css3-transitions draft ("must not start a transition when
+    the computed value changes because it is inherited ... from another element that
+    is transitioning the same property"), which the spec has withdrawn: the current
+    draft (W3C WD 2026-01-08 and the ED, css-transitions-1 §3) says "both transitions
+    will run" — the descendant transitions to its after-change value, which inherits
+    from the parent''s after-change style. Firefox follows it; Chrome keeps the 2013
+    rule.'
+- name: margin-left length-em(em) / events
+  reason: 'Holds the 2013 css3-transitions draft ("must not start a transition when
+    the computed value changes because it is inherited ... from another element that
+    is transitioning the same property"), which the spec has withdrawn: the current
+    draft (W3C WD 2026-01-08 and the ED, css-transitions-1 §3) says "both transitions
+    will run" — the descendant transitions to its after-change value, which inherits
+    from the parent''s after-change style. Firefox follows it; Chrome keeps the 2013
+    rule.'
+- name: margin-right length-em(em) / events
+  reason: 'Holds the 2013 css3-transitions draft ("must not start a transition when
+    the computed value changes because it is inherited ... from another element that
+    is transitioning the same property"), which the spec has withdrawn: the current
+    draft (W3C WD 2026-01-08 and the ED, css-transitions-1 §3) says "both transitions
+    will run" — the descendant transitions to its after-change value, which inherits
+    from the parent''s after-change style. Firefox follows it; Chrome keeps the 2013
+    rule.'
+- name: margin-top length-em(em) / events
+  reason: 'Holds the 2013 css3-transitions draft ("must not start a transition when
+    the computed value changes because it is inherited ... from another element that
+    is transitioning the same property"), which the spec has withdrawn: the current
+    draft (W3C WD 2026-01-08 and the ED, css-transitions-1 §3) says "both transitions
+    will run" — the descendant transitions to its after-change value, which inherits
+    from the parent''s after-change style. Firefox follows it; Chrome keeps the 2013
+    rule.'
+- name: max-height length-em(em) / events
+  reason: 'Holds the 2013 css3-transitions draft ("must not start a transition when
+    the computed value changes because it is inherited ... from another element that
+    is transitioning the same property"), which the spec has withdrawn: the current
+    draft (W3C WD 2026-01-08 and the ED, css-transitions-1 §3) says "both transitions
+    will run" — the descendant transitions to its after-change value, which inherits
+    from the parent''s after-change style. Firefox follows it; Chrome keeps the 2013
+    rule.'
+- name: max-width length-em(em) / events
+  reason: 'Holds the 2013 css3-transitions draft ("must not start a transition when
+    the computed value changes because it is inherited ... from another element that
+    is transitioning the same property"), which the spec has withdrawn: the current
+    draft (W3C WD 2026-01-08 and the ED, css-transitions-1 §3) says "both transitions
+    will run" — the descendant transitions to its after-change value, which inherits
+    from the parent''s after-change style. Firefox follows it; Chrome keeps the 2013
+    rule.'
+- name: min-height length-em(em) / events
+  reason: 'Holds the 2013 css3-transitions draft ("must not start a transition when
+    the computed value changes because it is inherited ... from another element that
+    is transitioning the same property"), which the spec has withdrawn: the current
+    draft (W3C WD 2026-01-08 and the ED, css-transitions-1 §3) says "both transitions
+    will run" — the descendant transitions to its after-change value, which inherits
+    from the parent''s after-change style. Firefox follows it; Chrome keeps the 2013
+    rule.'
+- name: min-width length-em(em) / events
+  reason: 'Holds the 2013 css3-transitions draft ("must not start a transition when
+    the computed value changes because it is inherited ... from another element that
+    is transitioning the same property"), which the spec has withdrawn: the current
+    draft (W3C WD 2026-01-08 and the ED, css-transitions-1 §3) says "both transitions
+    will run" — the descendant transitions to its after-change value, which inherits
+    from the parent''s after-change style. Firefox follows it; Chrome keeps the 2013
+    rule.'
+- name: outline-offset length-em(em) / events
+  reason: 'Holds the 2013 css3-transitions draft ("must not start a transition when
+    the computed value changes because it is inherited ... from another element that
+    is transitioning the same property"), which the spec has withdrawn: the current
+    draft (W3C WD 2026-01-08 and the ED, css-transitions-1 §3) says "both transitions
+    will run" — the descendant transitions to its after-change value, which inherits
+    from the parent''s after-change style. Firefox follows it; Chrome keeps the 2013
+    rule.'
+- name: outline-width length-em(em) / events
+  reason: 'Holds the 2013 css3-transitions draft ("must not start a transition when
+    the computed value changes because it is inherited ... from another element that
+    is transitioning the same property"), which the spec has withdrawn: the current
+    draft (W3C WD 2026-01-08 and the ED, css-transitions-1 §3) says "both transitions
+    will run" — the descendant transitions to its after-change value, which inherits
+    from the parent''s after-change style. Firefox follows it; Chrome keeps the 2013
+    rule.'
+- name: padding-bottom length-em(em) / events
+  reason: 'Holds the 2013 css3-transitions draft ("must not start a transition when
+    the computed value changes because it is inherited ... from another element that
+    is transitioning the same property"), which the spec has withdrawn: the current
+    draft (W3C WD 2026-01-08 and the ED, css-transitions-1 §3) says "both transitions
+    will run" — the descendant transitions to its after-change value, which inherits
+    from the parent''s after-change style. Firefox follows it; Chrome keeps the 2013
+    rule.'
+- name: padding-left length-em(em) / events
+  reason: 'Holds the 2013 css3-transitions draft ("must not start a transition when
+    the computed value changes because it is inherited ... from another element that
+    is transitioning the same property"), which the spec has withdrawn: the current
+    draft (W3C WD 2026-01-08 and the ED, css-transitions-1 §3) says "both transitions
+    will run" — the descendant transitions to its after-change value, which inherits
+    from the parent''s after-change style. Firefox follows it; Chrome keeps the 2013
+    rule.'
+- name: padding-right length-em(em) / events
+  reason: 'Holds the 2013 css3-transitions draft ("must not start a transition when
+    the computed value changes because it is inherited ... from another element that
+    is transitioning the same property"), which the spec has withdrawn: the current
+    draft (W3C WD 2026-01-08 and the ED, css-transitions-1 §3) says "both transitions
+    will run" — the descendant transitions to its after-change value, which inherits
+    from the parent''s after-change style. Firefox follows it; Chrome keeps the 2013
+    rule.'
+- name: padding-top length-em(em) / events
+  reason: 'Holds the 2013 css3-transitions draft ("must not start a transition when
+    the computed value changes because it is inherited ... from another element that
+    is transitioning the same property"), which the spec has withdrawn: the current
+    draft (W3C WD 2026-01-08 and the ED, css-transitions-1 §3) says "both transitions
+    will run" — the descendant transitions to its after-change value, which inherits
+    from the parent''s after-change style. Firefox follows it; Chrome keeps the 2013
+    rule.'
+- name: right length-em(em) / events
+  reason: 'Holds the 2013 css3-transitions draft ("must not start a transition when
+    the computed value changes because it is inherited ... from another element that
+    is transitioning the same property"), which the spec has withdrawn: the current
+    draft (W3C WD 2026-01-08 and the ED, css-transitions-1 §3) says "both transitions
+    will run" — the descendant transitions to its after-change value, which inherits
+    from the parent''s after-change style. Firefox follows it; Chrome keeps the 2013
+    rule.'
+- name: text-indent length-em(em) / events
+  reason: 'Holds the 2013 css3-transitions draft ("must not start a transition when
+    the computed value changes because it is inherited ... from another element that
+    is transitioning the same property"), which the spec has withdrawn: the current
+    draft (W3C WD 2026-01-08 and the ED, css-transitions-1 §3) says "both transitions
+    will run" — the descendant transitions to its after-change value, which inherits
+    from the parent''s after-change style. Firefox follows it; Chrome keeps the 2013
+    rule.'
+- name: top length-em(em) / events
+  reason: 'Holds the 2013 css3-transitions draft ("must not start a transition when
+    the computed value changes because it is inherited ... from another element that
+    is transitioning the same property"), which the spec has withdrawn: the current
+    draft (W3C WD 2026-01-08 and the ED, css-transitions-1 §3) says "both transitions
+    will run" — the descendant transitions to its after-change value, which inherits
+    from the parent''s after-change style. Firefox follows it; Chrome keeps the 2013
+    rule.'
+- name: vertical-align length-em(em) / events
+  reason: 'Holds the 2013 css3-transitions draft ("must not start a transition when
+    the computed value changes because it is inherited ... from another element that
+    is transitioning the same property"), which the spec has withdrawn: the current
+    draft (W3C WD 2026-01-08 and the ED, css-transitions-1 §3) says "both transitions
+    will run" — the descendant transitions to its after-change value, which inherits
+    from the parent''s after-change style. Firefox follows it; Chrome keeps the 2013
+    rule.'
+- name: width length-em(em) / events
+  reason: 'Holds the 2013 css3-transitions draft ("must not start a transition when
+    the computed value changes because it is inherited ... from another element that
+    is transitioning the same property"), which the spec has withdrawn: the current
+    draft (W3C WD 2026-01-08 and the ED, css-transitions-1 §3) says "both transitions
+    will run" — the descendant transitions to its after-change value, which inherits
+    from the parent''s after-change style. Firefox follows it; Chrome keeps the 2013
+    rule.'
+- name: word-spacing length-em(em) / events
+  reason: 'Holds the 2013 css3-transitions draft ("must not start a transition when
+    the computed value changes because it is inherited ... from another element that
+    is transitioning the same property"), which the spec has withdrawn: the current
+    draft (W3C WD 2026-01-08 and the ED, css-transitions-1 §3) says "both transitions
+    will run" — the descendant transitions to its after-change value, which inherits
+    from the parent''s after-change style. Firefox follows it; Chrome keeps the 2013
+    rule.'
 css/cssom/CSSContainerRule.tentative.html:
 - name: "@container (min-width: 100px) {}"
   reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux

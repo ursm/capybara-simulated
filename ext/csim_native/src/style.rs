@@ -415,7 +415,7 @@ impl StyleEngine {
             // …and the origins whose media queries now answer differently are rebuilt (the stylist says which).
             let guard = engine.lock.read();
             let changed =
-                engine.stylist.set_device(device(engine.faces.clone(), quirks, viewport), &StylesheetGuards { author: &guard, ua_or_user: &guard });
+                engine.stylist.set_device(device(engine.faces.clone(), quirks, viewport), &StylesheetGuards::same(&guard));
             drop(guard);
             engine.stylist.force_stylesheet_origins_dirty(changed);
             for shadow in engine.shadow_styles.values_mut() {
@@ -696,7 +696,7 @@ impl StyleEngine {
         let _layout = LayoutThreadState::enter();
         {
             let guard = self.lock.read();
-            self.stylist.flush(&StylesheetGuards { author: &guard, ua_or_user: &guard });
+            self.stylist.flush(&StylesheetGuards::same(&guard));
             self.shadow_styles.retain(|&root, _| arena.get(root).is_some());
             for shadow in self.shadow_styles.values_mut().filter(|s| s.dirty) {
                 shadow.styles.flush(&mut self.stylist, &guard);
@@ -801,7 +801,7 @@ impl StyleEngine {
         let engine: &StyleEngine = self;
         in_arena(arena, engine, || {
             let guard = engine.lock.read();
-            let guards = StylesheetGuards { author: &guard, ua_or_user: &guard };
+            let guards = StylesheetGuards::same(&guard);
             let Some(root) = StyleNode::new(arena, doc).first_child_element() else { return };
             if restyle_all {
                 if let Some(mut data) = root.mutate_data() {
@@ -1331,7 +1331,7 @@ impl StyleEngine {
                 traversal_flags: TraversalFlags::empty(),
                 stylist: &self.stylist,
                 options: GLOBAL_STYLE_DATA.options.clone(),
-                guards: StylesheetGuards { author: &guard, ua_or_user: &guard },
+                guards: StylesheetGuards::same(&guard),
                 visited_styles_enabled: false,
                 animations: self.animations.clone(),
                 current_time_for_animations: self.clock / 1000.0,
@@ -1440,31 +1440,6 @@ impl StyleEngine {
         Some((computed, waapi::KeyframeInputs { style, parent: parent.clone(), contextual }))
     }
 
-    // Whether `change` is a value `target` INHERITS from an ancestor transitioning the same property, which starts no
-    // transition of its own (css-transitions-1 §3: "not … when the computed value changes because it is inherited
-    // (directly or indirectly) from another element that is transitioning the same property" — Chrome: a `color:
-    // inherit` child under a parent transitioning `color` runs none; Firefox runs a second). Up the inheritance chain
-    // while each ancestor holds the value it comes to: the ancestors' transitions have started, their tasks coming first.
-    fn inherited_from_transition(&self, arena: &RealmArena, target: &waapi::Target, change: &TransitionChange) -> bool {
-        let property = change.property.as_borrowed();
-        let mut node = match target.pseudo {
-            Some(_) => Some(target.node),
-            None => in_arena(arena, self, || StyleNode::new(arena, target.node).inheritance_parent().map(|p| p.id)),
-        };
-        while let Some(id) = node {
-            let Some(style) = primary_style(arena, id) else { return false };
-            if AnimationValue::from_computed_values(property, &style).as_ref() != Some(&change.after) {
-                return false;
-            }
-            let ancestor = waapi::Target { node: id, pseudo: None };
-            if self.web_animations.transitioning_properties(&ancestor).iter().any(|p| p.as_borrowed() == property) {
-                return true;
-            }
-            node = in_arena(arena, self, || StyleNode::new(arena, id).inheritance_parent().map(|p| p.id));
-        }
-        false
-    }
-
     // The style an effect's target inherits from: its parent's in the flat tree — a pseudo-element's, its originating
     // element's.
     fn target_parent_style(&self, arena: &RealmArena, target: &waapi::Target) -> Option<Arc<ComputedValues>> {
@@ -1532,13 +1507,12 @@ impl StyleEngine {
             }
             if task.tasks.contains(UpdateAnimationsTasks::CSS_TRANSITIONS) {
                 let running = self.web_animations.transitioning_properties(&target);
-                let (listed, mut changes) = match (&task.before_change_style, &task.after_change_style) {
+                let (listed, changes) = match (&task.before_change_style, &task.after_change_style) {
                     (Some(before), Some(after)) if rendered_style(arena, &target).is_some() => {
                         transition_changes(before, after, &running)
                     },
                     _ => (Vec::new(), Vec::new()),
                 };
-                changes.retain(|change| !self.inherited_from_transition(arena, &target, change));
                 self.web_animations.update_css_transitions(&target, &listed, changes, &self.lock);
             }
             if task.tasks.contains(UpdateAnimationsTasks::EFFECT_PROPERTIES) {
@@ -1569,13 +1543,14 @@ impl StyleEngine {
         let Some(style) = rendered_style(arena, target) else { return Vec::new() };
         let ui = style.get_ui();
         let guard = self.lock.read();
+        let guards = StylesheetGuards::same(&guard);
         in_arena(arena, self, || {
             let element = StyleNode::new(arena, target.node);
             ui.animation_name_iter()
                 .enumerate()
                 .filter_map(|(i, name)| {
                     let name = name.as_atom()?;
-                    let rule = self.stylist.lookup_keyframes(name, element)?;
+                    let rule = self.stylist.lookup_keyframes(name, element, style.rules(), &guards)?;
                     let easing = ui.animation_timing_function_mod(i);
                     let composite = composite_of(ui.animation_composition_mod(i));
                     let keyframes = rule
@@ -1709,7 +1684,7 @@ impl StyleEngine {
         }
         in_arena(arena, self, || {
             let guard = self.lock.read();
-            let guards = StylesheetGuards { author: &guard, ua_or_user: &guard };
+            let guards = StylesheetGuards::same(&guard);
             self.stylist.lazily_compute_pseudo_element_style(
                 &guards,
                 StyleNode::new(arena, id),

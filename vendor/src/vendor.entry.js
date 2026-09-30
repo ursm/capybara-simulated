@@ -117,10 +117,11 @@ function cssColorToHex(str) {
   if (!parsed) return null;
   try { return culoriFormatHex(culoriRgb(parsed)) || null; } catch (_) { return null; }
 }
-// The getComputedStyle-canonical serialization of an sRGB-family colour: a named
-// colour / hex / rgb() / hsl() / hwb() → "rgb(r, g, b)" (opaque) or
-// "rgba(r, g, b, a)". Returns null for an unparseable value OR a value browsers
-// PRESERVE verbatim in computed style rather than flattening to legacy rgb():
+// An sRGB-family colour — a named colour / hex / rgb() / hsl() / hwb() — as the
+// channels a computed value is written from: `{ r, g, b }` bytes and `a` the alpha
+// as it is (the bridge's `normalizeColor` writes it). Returns null for an
+// unparseable value OR a value browsers PRESERVE verbatim in computed style rather
+// than flattening to legacy rgb():
 //   - the CSS `color()` function — `color(srgb …)`, `color(display-p3 …)`,
 //     `color(srgb-linear …)`, … — Chrome/Firefox keep these as-is. culori
 //     parses `color(srgb …)` to mode 'rgb', so the syntax must be excluded
@@ -128,7 +129,7 @@ function cssColorToHex(str) {
 //   - non-sRGB colour spaces (lab / oklch / …), which culori doesn't register
 //     here and so fail to parse.
 // The caller passes those through unchanged.
-function cssColorComputed(str) {
+function cssColorSrgb(str) {
   if (typeof str !== 'string') return null;
   const s = str.trim();
   if (/^color\(/i.test(s)) return null;
@@ -139,10 +140,8 @@ function cssColorComputed(str) {
   try { c = culoriRgb(p); } catch (_) { return null; }
   if (!c) return null;
   const byte = x => Math.max(0, Math.min(255, Math.round((x || 0) * 255)));
-  const r = byte(c.r), g = byte(c.g), b = byte(c.b);
-  const a = c.alpha == null ? 1 : c.alpha;
-  return a >= 1 ? `rgb(${r}, ${g}, ${b})` : `rgba(${r}, ${g}, ${b}, ${+a.toFixed(3)})`;
+  return { r: byte(c.r), g: byte(c.g), b: byte(c.b), a: c.alpha == null ? 1 : Math.max(0, Math.min(1, c.alpha)) };
 }
-const color = { toHex: cssColorToHex, computed: cssColorComputed };
+const color = { toHex: cssColorToHex, srgb: cssColorSrgb };
 
 export { cssSelect, cssWhat, xpathway, cssTree, urlEngine, mimeType, streams, parse5, color, URLPattern };

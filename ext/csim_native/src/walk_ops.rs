@@ -254,13 +254,16 @@ fn faces_answer<'s>(scope: &mut v8::PinScope<'s, '_>, wanted: &[(String, &'stati
 
 // __dom.styleFaces(generation) -> null, or [family, bucket, …]: the faces the style engine computed a font metric (`ex`,
 // `ch`) without since it was last told — asked after a style flush, so a value read before any layout is not the
-// stand-in's (`flushStyleEngine`). The faces are the realm's as of `generation`, as the walk's are.
+// stand-in's (`flushStyleEngine`). The faces are the realm's as of `generation`, as the walk's are; an undefined one is
+// the generation last given (asked on every style-engine read, it crosses only when it moves).
 fn style_faces(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let cid = realm_id(scope, &args);
-    let generation = args.get(0).to_rust_string_lossy(scope);
+    let generation = (!args.get(0).is_undefined()).then(|| args.get(0).to_rust_string_lossy(scope));
     let Some(arena) = dom(scope).realms.get(&cid) else { return };
     let wanted = arena.faces.with(|faces| {
-        faces.at_generation(&generation);
+        if let Some(generation) = &generation {
+            faces.at_generation(generation);
+        }
         faces.metrics_missing().to_vec()
     });
     if wanted.is_empty() {

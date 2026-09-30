@@ -50,6 +50,24 @@ RSpec.describe 'shorthand expansion' do
       .to eq(['opacity, transform', '1s, 2s', '0.5s, 0s'])
   end
 
+  # `mask` is `background`'s twin: a layer's size follows its position after a `/`, a lone size is the pair it stands
+  # for, and an image computes as `background-image` does.
+  it 'expands mask into its layer longhands' do
+    expect(both('mask: linear-gradient(red, blue) center / 30px no-repeat',
+                %w[maskImage maskPosition maskSize maskRepeat maskOrigin maskClip maskMode maskComposite]))
+      .to eq(['linear-gradient(rgb(255, 0, 0), rgb(0, 0, 255))', '50% 50%', '30px auto', 'no-repeat',
+              'border-box', 'border-box', 'match-source', 'add'])
+  end
+
+  # A fill written alone takes the shape of the writing mode, and `filled` is not written (CSS Text Decoration 3 §3.1;
+  # Firefox — Chrome gives it a `dot`).
+  it 'computes text-emphasis with the shape a lone fill takes' do
+    expect(both('text-emphasis: filled red', %w[textEmphasisStyle textEmphasis]))
+      .to eq(['circle', 'circle rgb(255, 0, 0)'])
+    expect(both('text-emphasis-style: dot open', %w[textEmphasisStyle])).to eq(['open dot'])
+    expect(both('text-emphasis-style: open; writing-mode: vertical-rl', %w[textEmphasisStyle])).to eq(['open sesame'])
+  end
+
   # A delay is the SECOND time of a layer, so a written delay keeps the duration before it, whatever it is: `opacity
   # 0.2s` reads back as a 0.2s duration. Chrome serializes `opacity 0s 0.2s` so — its own serialization parsing as
   # something else — which rewrote the style attribute into a different transition on the next inline write.

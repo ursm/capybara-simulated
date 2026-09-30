@@ -45,6 +45,14 @@ RSpec.describe 'CSS math functions' do
     expect(computed('font-size: 16px; margin-left: clamp(5px, 3em, 40px)', %w[marginLeft])).to eq(['40px'])
   end
 
+  # A `calc()` around one math function that cannot resolve yet — a percentage in it, and no box to resolve it
+  # against — is that function (Chrome and Firefox alike), and a linear `calc()` is not taken for one: a `min()` can be
+  # linear at every basis a probe tries without being linear.
+  it 'unwraps a calc() around a single unresolved math function' do
+    expect(computed('display: none; max-width: calc(max(10%, 20px)); max-height: calc(min(10%, 50px))',
+                    %w[maxWidth maxHeight])).to eq(['max(10%, 20px)', 'min(10%, 50px)'])
+  end
+
   it 'treats units case-insensitively and ignores surrounding space' do
     expect(computed('margin-left: calc(10PX + 5Px)',   %w[marginLeft])).to eq(['15px'])
     expect(computed('margin-left: calc( 10px  +  5px )', %w[marginLeft])).to eq(['15px'])

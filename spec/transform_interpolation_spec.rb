@@ -148,6 +148,14 @@ RSpec.describe 'interpolating a transform list' do
     expect(midpoint('scale(2,)', 'scale(3)')).to eq('matrix(2, 0, 0, 2, 0, 0)')
   end
 
+  # Two 2D matrices take the 2D decomposition the engines use — an X scale, an XY shear, a Y scale, a rotation — not
+  # the css-transforms-1 algorithm: that one gives a skew as `0.394338` / `1.47169` and turns `scale(-1, 1)` into a
+  # half turn. Chrome and Firefox agree on both.
+  it 'interpolates two 2D matrices through a shear and a one-axis flip' do
+    expect(midpoint('skewX(30deg)', 'scale(2)')).to eq('matrix(1.5, 0, 0.433013, 1.5, 0, 0)')
+    expect(midpoint('scale(-1, 1)', 'rotate(90deg)')).to eq('matrix(0, 0, -0.707107, 0.707107, 0, 0)')
+  end
+
   # A singular matrix has no rotation to take apart, so a pair holding one flips discretely — to the second end at
   # the midpoint — in Chrome and Firefox alike (WPT interpolation-per-property-002, "non-invertible matrices").
   it 'flips a pair holding a singular matrix discretely' do

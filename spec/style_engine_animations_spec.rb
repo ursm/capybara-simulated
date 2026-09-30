@@ -81,19 +81,18 @@ RSpec.describe 'style engine animations' do
     )
   end
 
-  # An element whose after-change value is only the one it inherits from an ancestor transitioning that property starts
-  # no transition of its own: it inherits the ancestor's animated value frame by frame (Chrome: no animation on `#k`,
-  # no event). One that changes to that value from a value of ITS OWN still does (WPT after-change-style-inherited).
-  it 'starts no transition under a parent transitioning the same property to the value it inherits' do
+  # An element that inherits a property its parent starts transitioning transitions it too — to the value its after-
+  # change style inherits, the parent's own after-change value — once, not again frame after frame as the parent's value
+  # moves. The current draft says so ("both transitions will run", css-transitions-1 §3) and Firefox does; Chrome and
+  # WPT properties-value-inherit-001/003 still hold the 2013 draft's rule, which started none.
+  it 'transitions once under a parent transitioning the same property' do
     s = page(
       '<div id="p" class="c"><div id="k" class="kid">x</div></div>',
       '.c { color: rgb(0, 0, 0); transition: color 300ms linear } .c.to { color: rgb(100, 100, 100) }
        .kid { color: inherit; transition: color 300ms linear }'
     )
     s.execute_script("getComputedStyle(document.getElementById('k')).color; document.getElementById('p').classList.add('to')")
-    events = drain(s)
-    expect(events.grep(/:p$/)).to eq(%w[transitionrun:color:0:p transitionstart:color:0:p transitionend:color:0.3:p])
-    expect(events.grep(/:k$/)).to eq([])
+    expect(drain(s).grep(/:k$/)).to eq(%w[transitionrun:color:0:k transitionstart:color:0:k transitionend:color:0.3:k])
   end
 
   # A read of a value another model answers (`direction` is still the JS side's) is a style flush all the same, and

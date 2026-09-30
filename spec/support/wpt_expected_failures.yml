@@ -114,10 +114,6 @@ css/css-animations/animation-important-with-transition.html:
 - "!important overrides animation but not transition on the same element"
 - "!important overrides animation even when a CSS transition is concurrently running"
 - "!important overrides multiple animated properties even with a concurrent transition"
-css/css-animations/animation-name-in-nested-shadow.html:
-- "== css/css-animations/animation-name-in-nested-shadow-ref.html"
-css/css-animations/animation-name-in-shadow-part-outer-match.html:
-- "== css/css-animations/animation-name-in-shadow-part-ref.html"
 css/css-animations/animation-pseudo-dynamic-001.html:
 - "== css/css-animations/animation-pseudo-dynamic-001-ref.html (both renderings blank)"
 css/css-animations/animation-restarted-after-changing-iteration-count-after-completion.html:
@@ -607,8 +603,6 @@ css/css-animations/text-decoration-inset-auto.html:
 - 'Web Animations: property <text-decoration-inset> from [auto] to [10px -20px] at
   (1.5) should be [NaNpx NaNpx]'
 - "`auto` computes to a length when interpolating with length values"
-css/css-animations/transition-ready-time-offscreen.html:
-- Transitions start at the same time regardless of on-screen status
 css/css-animations/translation-animation-subpixel-offset.html:
 - "== css/css-animations/translation-animation-subpixel-offset-ref.html"
 css/css-flexbox/align-content-rounding.html:
@@ -1334,8 +1328,6 @@ css/css-logical/parsing/padding-block-inline-computed.html:
 - Property padding-block-start value 'calc(10% + 40px)'
 - Property padding-inline-end value 'calc(10% + 40px)'
 - Property padding-inline-start value 'calc(10% - 40px)'
-css/css-shadow/part/animation-part.html:
-- "== css/css-shadow/part/animation-part-ref.html"
 css/css-shadow/part/exportparts-layered.html:
 - "== css/css-shadow/part/exportparts-layered.ref.html"
 css/css-shadow/part/interaction-with-placeholder.html:
@@ -1969,152 +1961,6 @@ css/css-transforms/animation/transform-interpolation-001.html:
   at (-1) should be [perspective(none)]'
 - 'CSS Transitions: property <transform> from [perspective(none)] to [perspective(500px)]
   at (0) should be [perspective(none)]'
-css/css-transforms/animation/transform-interpolation-005.html:
-- 'CSS Animations: property <transform> from [matrix(1, 0, 0, 7, 0, 0)] to [matrix(7,
-  0, 1, 1, 0, 0)] at (-1) should be [matrix(-5, 0, -13, 13, 0, 0)]'
-- 'CSS Animations: property <transform> from [matrix(1, 0, 0, 7, 0, 0)] to [matrix(7,
-  0, 1, 1, 0, 0)] at (0.3333333333333333) should be [matrix(3, 0, 1.6667, 5, 0, 0)]'
-- 'CSS Animations: property <transform> from [matrix(1, 0, 0, 7, 0, 0)] to [matrix(7,
-  0, 1, 1, 0, 0)] at (0.5) should be [matrix(4, 0, 2, 4, 0, 0)]'
-- 'CSS Animations: property <transform> from [matrix(1, 0, 0, 7, 0, 0)] to [matrix(7,
-  0, 1, 1, 0, 0)] at (0.6666666666666666) should be [matrix(5, 0, 2, 3, 0, 0)]'
-- 'CSS Animations: property <transform> from [matrix(1, 0, 0, 7, 0, 0)] to [matrix(7,
-  0, 1, 1, 0, 0)] at (2) should be [matrix(13, 0, -10, -5, 0, 0)]'
-- 'CSS Animations: property <transform> from [matrix(1, 0.36, 0, 1, 200, 200)] to
-  [matrix(1, 0, 0, 1, 200, 200)] at (-1) should be [matrix(0.87, 0.72, -0.07, 1.08,
-  200, 200)]'
-- 'CSS Animations: property <transform> from [matrix(1, 0.36, 0, 1, 200, 200)] to
-  [matrix(1, 0, 0, 1, 200, 200)] at (0.25) should be [matrix(1.01, 0.27, 0, 0.99,
-  200, 200)]'
-- 'CSS Animations: property <transform> from [matrix(1, 0.36, 0, 1, 200, 200)] to
-  [matrix(1, 0, 0, 1, 200, 200)] at (0.5) should be [matrix(1.02, 0.18, 0.01, 0.99,
-  200, 200)]'
-- 'CSS Animations: property <transform> from [matrix(1, 0.36, 0, 1, 200, 200)] to
-  [matrix(1, 0, 0, 1, 200, 200)] at (0.75) should be [matrix(1.01, 0.09, 0, 0.99,
-  200, 200)]'
-- 'CSS Animations: property <transform> from [matrix(1, 0.36, 0, 1, 200, 200)] to
-  [matrix(1, 0, 0, 1, 200, 200)] at (2) should be [matrix(0.88, -0.32, 0, 1.13, 200,
-  200)]'
-- 'CSS Animations: property <transform> from [none] to [matrix(7, 0, 2, 2, 6, 0)]
-  at (-1) should be [matrix(-5, 0, 0, 0, -6, 0)]'
-- 'CSS Animations: property <transform> from [none] to [matrix(7, 0, 2, 2, 6, 0)]
-  at (0.25) should be [matrix(2.5, 0, 0.31, 1.25, 1.5, 0)]'
-- 'CSS Animations: property <transform> from [none] to [matrix(7, 0, 2, 2, 6, 0)]
-  at (0.5) should be [matrix(4, 0, 0.75, 1.5, 3, 0)]'
-- 'CSS Animations: property <transform> from [none] to [matrix(7, 0, 2, 2, 6, 0)]
-  at (0.75) should be [matrix(5.5, 0, 1.31, 1.75, 4.5, 0)]'
-- 'CSS Animations: property <transform> from [none] to [matrix(7, 0, 2, 2, 6, 0)]
-  at (2) should be [matrix(13, 0, 6, 3, 12, 0)]'
-- 'CSS Transitions with transition: all: property <transform> from [matrix(1, 0, 0,
-  7, 0, 0)] to [matrix(7, 0, 1, 1, 0, 0)] at (-1) should be [matrix(-5, 0, -13, 13,
-  0, 0)]'
-- 'CSS Transitions with transition: all: property <transform> from [matrix(1, 0, 0,
-  7, 0, 0)] to [matrix(7, 0, 1, 1, 0, 0)] at (0.3333333333333333) should be [matrix(3,
-  0, 1.6667, 5, 0, 0)]'
-- 'CSS Transitions with transition: all: property <transform> from [matrix(1, 0, 0,
-  7, 0, 0)] to [matrix(7, 0, 1, 1, 0, 0)] at (0.5) should be [matrix(4, 0, 2, 4, 0,
-  0)]'
-- 'CSS Transitions with transition: all: property <transform> from [matrix(1, 0, 0,
-  7, 0, 0)] to [matrix(7, 0, 1, 1, 0, 0)] at (0.6666666666666666) should be [matrix(5,
-  0, 2, 3, 0, 0)]'
-- 'CSS Transitions with transition: all: property <transform> from [matrix(1, 0, 0,
-  7, 0, 0)] to [matrix(7, 0, 1, 1, 0, 0)] at (2) should be [matrix(13, 0, -10, -5,
-  0, 0)]'
-- 'CSS Transitions with transition: all: property <transform> from [matrix(1, 0.36,
-  0, 1, 200, 200)] to [matrix(1, 0, 0, 1, 200, 200)] at (-1) should be [matrix(0.87,
-  0.72, -0.07, 1.08, 200, 200)]'
-- 'CSS Transitions with transition: all: property <transform> from [matrix(1, 0.36,
-  0, 1, 200, 200)] to [matrix(1, 0, 0, 1, 200, 200)] at (0.25) should be [matrix(1.01,
-  0.27, 0, 0.99, 200, 200)]'
-- 'CSS Transitions with transition: all: property <transform> from [matrix(1, 0.36,
-  0, 1, 200, 200)] to [matrix(1, 0, 0, 1, 200, 200)] at (0.5) should be [matrix(1.02,
-  0.18, 0.01, 0.99, 200, 200)]'
-- 'CSS Transitions with transition: all: property <transform> from [matrix(1, 0.36,
-  0, 1, 200, 200)] to [matrix(1, 0, 0, 1, 200, 200)] at (0.75) should be [matrix(1.01,
-  0.09, 0, 0.99, 200, 200)]'
-- 'CSS Transitions with transition: all: property <transform> from [matrix(1, 0.36,
-  0, 1, 200, 200)] to [matrix(1, 0, 0, 1, 200, 200)] at (2) should be [matrix(0.88,
-  -0.32, 0, 1.13, 200, 200)]'
-- 'CSS Transitions with transition: all: property <transform> from [none] to [matrix(7,
-  0, 2, 2, 6, 0)] at (-1) should be [matrix(-5, 0, 0, 0, -6, 0)]'
-- 'CSS Transitions with transition: all: property <transform> from [none] to [matrix(7,
-  0, 2, 2, 6, 0)] at (0.25) should be [matrix(2.5, 0, 0.31, 1.25, 1.5, 0)]'
-- 'CSS Transitions with transition: all: property <transform> from [none] to [matrix(7,
-  0, 2, 2, 6, 0)] at (0.5) should be [matrix(4, 0, 0.75, 1.5, 3, 0)]'
-- 'CSS Transitions with transition: all: property <transform> from [none] to [matrix(7,
-  0, 2, 2, 6, 0)] at (0.75) should be [matrix(5.5, 0, 1.31, 1.75, 4.5, 0)]'
-- 'CSS Transitions with transition: all: property <transform> from [none] to [matrix(7,
-  0, 2, 2, 6, 0)] at (2) should be [matrix(13, 0, 6, 3, 12, 0)]'
-- 'CSS Transitions: property <transform> from [matrix(1, 0, 0, 7, 0, 0)] to [matrix(7,
-  0, 1, 1, 0, 0)] at (-1) should be [matrix(-5, 0, -13, 13, 0, 0)]'
-- 'CSS Transitions: property <transform> from [matrix(1, 0, 0, 7, 0, 0)] to [matrix(7,
-  0, 1, 1, 0, 0)] at (0.3333333333333333) should be [matrix(3, 0, 1.6667, 5, 0, 0)]'
-- 'CSS Transitions: property <transform> from [matrix(1, 0, 0, 7, 0, 0)] to [matrix(7,
-  0, 1, 1, 0, 0)] at (0.5) should be [matrix(4, 0, 2, 4, 0, 0)]'
-- 'CSS Transitions: property <transform> from [matrix(1, 0, 0, 7, 0, 0)] to [matrix(7,
-  0, 1, 1, 0, 0)] at (0.6666666666666666) should be [matrix(5, 0, 2, 3, 0, 0)]'
-- 'CSS Transitions: property <transform> from [matrix(1, 0, 0, 7, 0, 0)] to [matrix(7,
-  0, 1, 1, 0, 0)] at (2) should be [matrix(13, 0, -10, -5, 0, 0)]'
-- 'CSS Transitions: property <transform> from [matrix(1, 0.36, 0, 1, 200, 200)] to
-  [matrix(1, 0, 0, 1, 200, 200)] at (-1) should be [matrix(0.87, 0.72, -0.07, 1.08,
-  200, 200)]'
-- 'CSS Transitions: property <transform> from [matrix(1, 0.36, 0, 1, 200, 200)] to
-  [matrix(1, 0, 0, 1, 200, 200)] at (0.25) should be [matrix(1.01, 0.27, 0, 0.99,
-  200, 200)]'
-- 'CSS Transitions: property <transform> from [matrix(1, 0.36, 0, 1, 200, 200)] to
-  [matrix(1, 0, 0, 1, 200, 200)] at (0.5) should be [matrix(1.02, 0.18, 0.01, 0.99,
-  200, 200)]'
-- 'CSS Transitions: property <transform> from [matrix(1, 0.36, 0, 1, 200, 200)] to
-  [matrix(1, 0, 0, 1, 200, 200)] at (0.75) should be [matrix(1.01, 0.09, 0, 0.99,
-  200, 200)]'
-- 'CSS Transitions: property <transform> from [matrix(1, 0.36, 0, 1, 200, 200)] to
-  [matrix(1, 0, 0, 1, 200, 200)] at (2) should be [matrix(0.88, -0.32, 0, 1.13, 200,
-  200)]'
-- 'CSS Transitions: property <transform> from [none] to [matrix(7, 0, 2, 2, 6, 0)]
-  at (-1) should be [matrix(-5, 0, 0, 0, -6, 0)]'
-- 'CSS Transitions: property <transform> from [none] to [matrix(7, 0, 2, 2, 6, 0)]
-  at (0.25) should be [matrix(2.5, 0, 0.31, 1.25, 1.5, 0)]'
-- 'CSS Transitions: property <transform> from [none] to [matrix(7, 0, 2, 2, 6, 0)]
-  at (0.5) should be [matrix(4, 0, 0.75, 1.5, 3, 0)]'
-- 'CSS Transitions: property <transform> from [none] to [matrix(7, 0, 2, 2, 6, 0)]
-  at (0.75) should be [matrix(5.5, 0, 1.31, 1.75, 4.5, 0)]'
-- 'CSS Transitions: property <transform> from [none] to [matrix(7, 0, 2, 2, 6, 0)]
-  at (2) should be [matrix(13, 0, 6, 3, 12, 0)]'
-- 'Web Animations: property <transform> from [matrix(1, 0, 0, 7, 0, 0)] to [matrix(7,
-  0, 1, 1, 0, 0)] at (-1) should be [matrix(-5, 0, -13, 13, 0, 0)]'
-- 'Web Animations: property <transform> from [matrix(1, 0, 0, 7, 0, 0)] to [matrix(7,
-  0, 1, 1, 0, 0)] at (0.3333333333333333) should be [matrix(3, 0, 1.6667, 5, 0, 0)]'
-- 'Web Animations: property <transform> from [matrix(1, 0, 0, 7, 0, 0)] to [matrix(7,
-  0, 1, 1, 0, 0)] at (0.5) should be [matrix(4, 0, 2, 4, 0, 0)]'
-- 'Web Animations: property <transform> from [matrix(1, 0, 0, 7, 0, 0)] to [matrix(7,
-  0, 1, 1, 0, 0)] at (0.6666666666666666) should be [matrix(5, 0, 2, 3, 0, 0)]'
-- 'Web Animations: property <transform> from [matrix(1, 0, 0, 7, 0, 0)] to [matrix(7,
-  0, 1, 1, 0, 0)] at (2) should be [matrix(13, 0, -10, -5, 0, 0)]'
-- 'Web Animations: property <transform> from [matrix(1, 0.36, 0, 1, 200, 200)] to
-  [matrix(1, 0, 0, 1, 200, 200)] at (-1) should be [matrix(0.87, 0.72, -0.07, 1.08,
-  200, 200)]'
-- 'Web Animations: property <transform> from [matrix(1, 0.36, 0, 1, 200, 200)] to
-  [matrix(1, 0, 0, 1, 200, 200)] at (0.25) should be [matrix(1.01, 0.27, 0, 0.99,
-  200, 200)]'
-- 'Web Animations: property <transform> from [matrix(1, 0.36, 0, 1, 200, 200)] to
-  [matrix(1, 0, 0, 1, 200, 200)] at (0.5) should be [matrix(1.02, 0.18, 0.01, 0.99,
-  200, 200)]'
-- 'Web Animations: property <transform> from [matrix(1, 0.36, 0, 1, 200, 200)] to
-  [matrix(1, 0, 0, 1, 200, 200)] at (0.75) should be [matrix(1.01, 0.09, 0, 0.99,
-  200, 200)]'
-- 'Web Animations: property <transform> from [matrix(1, 0.36, 0, 1, 200, 200)] to
-  [matrix(1, 0, 0, 1, 200, 200)] at (2) should be [matrix(0.88, -0.32, 0, 1.13, 200,
-  200)]'
-- 'Web Animations: property <transform> from [none] to [matrix(7, 0, 2, 2, 6, 0)]
-  at (-1) should be [matrix(-5, 0, 0, 0, -6, 0)]'
-- 'Web Animations: property <transform> from [none] to [matrix(7, 0, 2, 2, 6, 0)]
-  at (0.25) should be [matrix(2.5, 0, 0.31, 1.25, 1.5, 0)]'
-- 'Web Animations: property <transform> from [none] to [matrix(7, 0, 2, 2, 6, 0)]
-  at (0.5) should be [matrix(4, 0, 0.75, 1.5, 3, 0)]'
-- 'Web Animations: property <transform> from [none] to [matrix(7, 0, 2, 2, 6, 0)]
-  at (0.75) should be [matrix(5.5, 0, 1.31, 1.75, 4.5, 0)]'
-- 'Web Animations: property <transform> from [none] to [matrix(7, 0, 2, 2, 6, 0)]
-  at (2) should be [matrix(13, 0, 6, 3, 12, 0)]'
 css/css-transforms/animation/transform-interpolation-computed-value.html:
 - Interpolation between matrix(2, 0, 0, 2, 10, 30) and matrix(4, 0, 0, 6, 14, 10)
   gives the correct computed value halfway according to computedStyleMap with zoom
@@ -2599,130 +2445,6 @@ css/css-transforms/animation/transform-skew-composition.html:
 css/css-transforms/animation/translate-animation-on-svg.html:
 - "== css/css-transforms/animation/translate-animation-on-svg-ref.html (never ready
   to capture)"
-css/css-transforms/animation/translate-composition.html:
-- 'Compositing CSS Animations: property <translate> underlying [100px 200px 300px]
-  from add [-50px 50%] to add [100%] at (-1) should be [-100% calc(200px + 100%) 300px]'
-- 'Compositing CSS Animations: property <translate> underlying [100px 200px 300px]
-  from add [-50px 50%] to add [100%] at (0) should be [calc(50px + 0%) calc(200px
-  + 50%) 300px]'
-- 'Compositing CSS Animations: property <translate> underlying [100px 200px 300px]
-  from add [-50px 50%] to add [100%] at (0.25) should be [calc(62.5px + 25%) calc(200px
-  + 37.5%) 300px]'
-- 'Compositing CSS Animations: property <translate> underlying [100px 200px 300px]
-  from add [-50px 50%] to add [100%] at (0.75) should be [calc(87.5px + 75%) calc(200px
-  + 12.5%) 300px]'
-- 'Compositing CSS Animations: property <translate> underlying [100px 200px 300px]
-  from add [-50px 50%] to add [100%] at (1) should be [calc(100px + 100%) calc(200px
-  + 0%) 300px]'
-- 'Compositing CSS Animations: property <translate> underlying [100px 200px 300px]
-  from add [-50px 50%] to add [100%] at (2) should be [calc(150px + 200%) calc(200px
-  - 50%) 300px]'
-- 'Compositing CSS Animations: property <translate> underlying [100px 200px 300px]
-  from add [50% 100px] to replace [200px 50% 100px] at (-1) should be [100% calc(600px
-  - 50%) 500px]'
-- 'Compositing CSS Animations: property <translate> underlying [100px 200px 300px]
-  from add [50% 100px] to replace [200px 50% 100px] at (0) should be [calc(100px +
-  50%) calc(300px + 0%) 300px]'
-- 'Compositing CSS Animations: property <translate> underlying [100px 200px 300px]
-  from add [50% 100px] to replace [200px 50% 100px] at (0.25) should be [calc(125px
-  + 37.5%) calc(225px + 12.5%) 250px]'
-- 'Compositing CSS Animations: property <translate> underlying [100px 200px 300px]
-  from add [50% 100px] to replace [200px 50% 100px] at (0.75) should be [calc(175px
-  + 12.5%) calc(75px + 37.5%) 150px]'
-- 'Compositing CSS Animations: property <translate> underlying [100px 200px 300px]
-  from add [50% 100px] to replace [200px 50% 100px] at (1) should be [calc(200px +
-  0%) 50% 100px]'
-- 'Compositing CSS Animations: property <translate> underlying [100px 200px 300px]
-  from add [50% 100px] to replace [200px 50% 100px] at (2) should be [calc(300px -
-  50%) calc(-300px + 100%) -100px]'
-- 'Compositing CSS Animations: property <translate> underlying [100px 200px 300px]
-  from replace [50% 100px] to add [200px 50% 100px] at (-1) should be [calc(-300px
-  + 100%) -50% -400px]'
-- 'Compositing CSS Animations: property <translate> underlying [100px 200px 300px]
-  from replace [50% 100px] to add [200px 50% 100px] at (0) should be [50%  calc(100px
-  + 0%)]'
-- 'Compositing CSS Animations: property <translate> underlying [100px 200px 300px]
-  from replace [50% 100px] to add [200px 50% 100px] at (0.25) should be [calc(75px
-  + 37.5%) calc(125px + 12.5%) 100px]'
-- 'Compositing CSS Animations: property <translate> underlying [100px 200px 300px]
-  from replace [50% 100px] to add [200px 50% 100px] at (0.75) should be [calc(225px
-  + 12.5%) calc(175px + 37.5%) 300px]'
-- 'Compositing CSS Animations: property <translate> underlying [100px 200px 300px]
-  from replace [50% 100px] to add [200px 50% 100px] at (1) should be [calc(300px +
-  0%) calc(200px + 50%) 400px]'
-- 'Compositing CSS Animations: property <translate> underlying [100px 200px 300px]
-  from replace [50% 100px] to add [200px 50% 100px] at (2) should be [calc(600px -
-  50%) calc(300px + 100%) 800px]'
-- 'Compositing Web Animations: property <translate> underlying [100px 200px 300px]
-  from add [-50px 50%] to add [100%] at (-1) should be [-100% calc(200px + 100%) 300px]'
-- 'Compositing Web Animations: property <translate> underlying [100px 200px 300px]
-  from add [-50px 50%] to add [100%] at (0) should be [calc(50px + 0%) calc(200px
-  + 50%) 300px]'
-- 'Compositing Web Animations: property <translate> underlying [100px 200px 300px]
-  from add [-50px 50%] to add [100%] at (0.25) should be [calc(62.5px + 25%) calc(200px
-  + 37.5%) 300px]'
-- 'Compositing Web Animations: property <translate> underlying [100px 200px 300px]
-  from add [-50px 50%] to add [100%] at (0.75) should be [calc(87.5px + 75%) calc(200px
-  + 12.5%) 300px]'
-- 'Compositing Web Animations: property <translate> underlying [100px 200px 300px]
-  from add [-50px 50%] to add [100%] at (1) should be [calc(100px + 100%) calc(200px
-  + 0%) 300px]'
-- 'Compositing Web Animations: property <translate> underlying [100px 200px 300px]
-  from add [-50px 50%] to add [100%] at (2) should be [calc(150px + 200%) calc(200px
-  - 50%) 300px]'
-- 'Compositing Web Animations: property <translate> underlying [100px 200px 300px]
-  from add [50% 100px] to replace [200px 50% 100px] at (-1) should be [100% calc(600px
-  - 50%) 500px]'
-- 'Compositing Web Animations: property <translate> underlying [100px 200px 300px]
-  from add [50% 100px] to replace [200px 50% 100px] at (0) should be [calc(100px +
-  50%) calc(300px + 0%) 300px]'
-- 'Compositing Web Animations: property <translate> underlying [100px 200px 300px]
-  from add [50% 100px] to replace [200px 50% 100px] at (0.25) should be [calc(125px
-  + 37.5%) calc(225px + 12.5%) 250px]'
-- 'Compositing Web Animations: property <translate> underlying [100px 200px 300px]
-  from add [50% 100px] to replace [200px 50% 100px] at (0.75) should be [calc(175px
-  + 12.5%) calc(75px + 37.5%) 150px]'
-- 'Compositing Web Animations: property <translate> underlying [100px 200px 300px]
-  from add [50% 100px] to replace [200px 50% 100px] at (1) should be [calc(200px +
-  0%) 50% 100px]'
-- 'Compositing Web Animations: property <translate> underlying [100px 200px 300px]
-  from add [50% 100px] to replace [200px 50% 100px] at (2) should be [calc(300px -
-  50%) calc(-300px + 100%) -100px]'
-- 'Compositing Web Animations: property <translate> underlying [100px 200px 300px]
-  from replace [50% 100px] to add [200px 50% 100px] at (-1) should be [calc(-300px
-  + 100%) -50% -400px]'
-- 'Compositing Web Animations: property <translate> underlying [100px 200px 300px]
-  from replace [50% 100px] to add [200px 50% 100px] at (0) should be [50%  calc(100px
-  + 0%)]'
-- 'Compositing Web Animations: property <translate> underlying [100px 200px 300px]
-  from replace [50% 100px] to add [200px 50% 100px] at (0.25) should be [calc(75px
-  + 37.5%) calc(125px + 12.5%) 100px]'
-- 'Compositing Web Animations: property <translate> underlying [100px 200px 300px]
-  from replace [50% 100px] to add [200px 50% 100px] at (0.75) should be [calc(225px
-  + 12.5%) calc(175px + 37.5%) 300px]'
-- 'Compositing Web Animations: property <translate> underlying [100px 200px 300px]
-  from replace [50% 100px] to add [200px 50% 100px] at (1) should be [calc(300px +
-  0%) calc(200px + 50%) 400px]'
-- 'Compositing Web Animations: property <translate> underlying [100px 200px 300px]
-  from replace [50% 100px] to add [200px 50% 100px] at (2) should be [calc(600px -
-  50%) calc(300px + 100%) 800px]'
-css/css-transforms/animation/translate-interpolation.html:
-- 'CSS Animations: property <translate> from [480px 400px 320px] to [240% 160%] at
-  (-1) should be [calc(960px - 240%) calc(800px - 160%) 640px]'
-- 'CSS Animations: property <translate> from [480px 400px 320px] to [240% 160%] at
-  (0.125) should be [calc(420px + 30%) calc(350px + 20%) 280px]'
-- 'CSS Transitions with transition: all: property <translate> from [480px 400px 320px]
-  to [240% 160%] at (-1) should be [calc(960px - 240%) calc(800px - 160%) 640px]'
-- 'CSS Transitions with transition: all: property <translate> from [480px 400px 320px]
-  to [240% 160%] at (0.125) should be [calc(420px + 30%) calc(350px + 20%) 280px]'
-- 'CSS Transitions: property <translate> from [480px 400px 320px] to [240% 160%] at
-  (-1) should be [calc(960px - 240%) calc(800px - 160%) 640px]'
-- 'CSS Transitions: property <translate> from [480px 400px 320px] to [240% 160%] at
-  (0.125) should be [calc(420px + 30%) calc(350px + 20%) 280px]'
-- 'Web Animations: property <translate> from [480px 400px 320px] to [240% 160%] at
-  (-1) should be [calc(960px - 240%) calc(800px - 160%) 640px]'
-- 'Web Animations: property <translate> from [480px 400px 320px] to [240% 160%] at
-  (0.125) should be [calc(420px + 30%) calc(350px + 20%) 280px]'
 css/css-transforms/backface-visibility-hidden-002.html:
 - "== css/css-transforms/backface-visibility-hidden-002-ref.html"
 css/css-transforms/backface-visibility-hidden-003.html:
@@ -2809,76 +2531,20 @@ css/css-transforms/parsing/perspective-origin-valid.html:
 - e.style['perspective-origin'] = "center left" should set the property value
 - e.style['perspective-origin'] = "right 30% top 60px" should set the property value
 - e.style['perspective-origin'] = "top center" should set the property value
-css/css-transforms/parsing/rotate-parsing-computed.html:
-- Property rotate value '400grad 100 200 300'
-- Property rotate value '400grad x'
-- Property rotate value '400grad y'
-- Property rotate value '400grad z'
-css/css-transforms/parsing/rotate-parsing-invalid.html:
-- e.style['rotate'] = "1 2 3" should not set the property value
-- e.style['rotate'] = "1 2" should not set the property value
-- e.style['rotate'] = "100 200 300 500 400deg" should not set the property value
-- e.style['rotate'] = "100 200 400deg" should not set the property value
-- e.style['rotate'] = "100 400deg" should not set the property value
-- e.style['rotate'] = "100px" should not set the property value
-- e.style['rotate'] = "45deg x y" should not set the property value
-- e.style['rotate'] = "x y 45deg" should not set the property value
-- e.style['rotate'] = "z" should not set the property value
-css/css-transforms/parsing/rotate-parsing-valid.html:
-- e.style['rotate'] = "-0.5 0 0 400grad" should set the property value
-- e.style['rotate'] = "-1 0 0 400grad" should set the property value
-- e.style['rotate'] = "0 -0.5 0 400grad" should set the property value
-- e.style['rotate'] = "0 -1 0 400grad" should set the property value
-- e.style['rotate'] = "0 0 -0.5 400grad" should set the property value
-- e.style['rotate'] = "0 0 -1 400grad" should set the property value
-- e.style['rotate'] = "0 0 0.5 400grad" should set the property value
-- e.style['rotate'] = "0 0 1 400grad" should set the property value
-- e.style['rotate'] = "0 0.5 0 400grad" should set the property value
-- e.style['rotate'] = "0 1 0 400grad" should set the property value
-- e.style['rotate'] = "0.5 0 0 400grad" should set the property value
-- e.style['rotate'] = "1 0 0 400grad" should set the property value
-- e.style['rotate'] = "400grad 100 200 300" should set the property value
-- e.style['rotate'] = "400grad x" should set the property value
-- e.style['rotate'] = "400grad y" should set the property value
-- e.style['rotate'] = "400grad z" should set the property value
 css/css-transforms/parsing/scale-parsing-computed.html:
 - Property scale value '2 calc(300% * sign(1em - 1px)'
-- Property scale value '2 calc(300%)'
 - Property scale value 'calc(1 + sign(1em - 1px))'
 - Property scale value 'calc(2 * sign(1em - 1px)) calc(3)'
 - Property scale value 'calc(2 * sign(1em - 1px))'
 - Property scale value 'calc(200% * sign(1em - 1px)) 3'
 - Property scale value 'calc(200% * sign(1em - 1px))'
-- Property scale value 'calc(200%) 3'
 - Property scale value 'calc(200%) calc(300% * sign(1em - 1px))'
 - Property scale value 'calc(200%) calc(300%) calc(400% * sign(1em - 1px))'
-- Property scale value 'calc(200%) calc(300%) calc(400%)'
-- Property scale value 'calc(200%) calc(300%)'
 css/css-transforms/parsing/scale-parsing-invalid.html:
-- e.style['scale'] = "1 2 3 junk" should not set the property value
-- e.style['scale'] = "1 2 junk" should not set the property value
-- e.style['scale'] = "1 junk" should not set the property value
-- e.style['scale'] = "100 200 300 400" should not set the property value
-- e.style['scale'] = "100px" should not set the property value
 - e.style['scale'] = "calc(100px)" should not set the property value
 - e.style['scale'] = "calc(180deg) 2 3" should not set the property value
 - e.style['scale'] = "calc(1s) 2" should not set the property value
 css/css-transforms/parsing/scale-parsing-valid.html:
-- e.style['scale'] = "-100 -100 1" should set the property value
-- e.style['scale'] = "-100 -100" should set the property value
-- e.style['scale'] = "-100% -100% 1" should set the property value
-- e.style['scale'] = "-100% -100%" should set the property value
-- e.style['scale'] = "-100%" should set the property value
-- e.style['scale'] = "1%" should set the property value
-- e.style['scale'] = "100 100 1" should set the property value
-- e.style['scale'] = "100 100" should set the property value
-- e.style['scale'] = "100 200 1" should set the property value
-- e.style['scale'] = "100% 100% 1" should set the property value
-- e.style['scale'] = "100% 100%" should set the property value
-- e.style['scale'] = "100% 200% 1" should set the property value
-- e.style['scale'] = "100% 200% 300%" should set the property value
-- e.style['scale'] = "100% 200%" should set the property value
-- e.style['scale'] = "100%" should set the property value
 - e.style['scale'] = "calc(2 * 1) 3 calc(4 * 100%)" should set the property value
 - e.style['scale'] = "calc(2 * sign(1em - 1px)) 3 calc(4 * 100%)" should set the property
   value
@@ -2934,22 +2600,11 @@ css/css-transforms/parsing/transform-valid.html:
 - e.style['transform'] = "skewX(90deg)" should set the property value
 - e.style['transform'] = "skewY(-90deg)" should set the property value
 - e.style['transform'] = "skewY(0)" should set the property value
-css/css-transforms/parsing/translate-parsing-computed.html:
-- Property translate value '100px calc(10px - 10%)'
 css/css-transforms/parsing/translate-parsing-invalid.html:
-- e.style['translate'] = "100deg" should not set the property value
-- e.style['translate'] = "100px 200px 300%" should not set the property value
-- e.style['translate'] = "100px 200px 300px junk" should not set the property value
 - e.style['translate'] = "100px 200px calc(30px + 30%)" should not set the property
   value
-- e.style['translate'] = "100px 200px junk" should not set the property value
-- e.style['translate'] = "100px junk" should not set the property value
 css/css-transforms/parsing/translate-parsing-valid.html:
-- e.style['translate'] = "100px 0px 0px" should set the property value
-- e.style['translate'] = "100px 0px" should set the property value
-- e.style['translate'] = "100px 200px 0px" should set the property value
 - e.style['translate'] = "100px calc(10px - 10%)" should set the property value
-- e.style['translate'] = "1px 2px 0" should set the property value
 css/css-transforms/patternTransform/svg-patternTransform-001.html:
 - "== css/css-transforms/patternTransform/reference/svg-patternTransform-ref.html"
 css/css-transforms/patternTransform/svg-patternTransform-combination-001.html:
@@ -3276,10 +2931,6 @@ css/css-transforms/transforms-skewX.html:
 - "== css/css-transforms/reference/transforms-skewX-ref.html"
 css/css-transforms/transforms-skewY.html:
 - "== css/css-transforms/reference/transforms-skewY-ref.html"
-css/css-transforms/transforms-support-calc.html:
-- translate supports calc
-css/css-transforms/translate-getComputedStyle.html:
-- computed style for translate
 css/css-transforms/ttwf-css-3d-polygon-cycle.html:
 - "== css/css-transforms/reference/ttwf-css-3d-polygon-cycle-ref.html"
 css/css-transforms/ttwf-transform-skewx-001.html:
@@ -3418,9 +3069,6 @@ css/css-transitions/events-008.html:
   object
 - transitionstart event has animation property and its value is the corresponding
   CSSTransition object
-css/css-transitions/inherit-background-color-transition.html:
-- "== css/css-transitions/inherit-background-color-transition-ref.html (never ready
-  to capture)"
 css/css-transitions/non-rendered-element-002.html:
 - Transitions on ::before/::after pseudo-elements are canceled when the content property
   is cleared
@@ -3565,10 +3213,7 @@ css/css-transitions/properties-value-003.html:
 - position position(static to absolute) / events
 - position position(static to absolute) / values
 css/css-transitions/properties-value-inherit-001.html:
-- clip rectangle(rectangle) / events
 - clip rectangle(rectangle) / values
-- font-weight font-weight(keyword) / events
-- visibility visibility(keyword) / events
 - visibility visibility(keyword) / values
 css/css-transitions/properties-value-inherit-002.html:
 - clip rectangle(rectangle) / events
@@ -3586,8 +3231,6 @@ css/css-transitions/pseudo-elements-002.html:
 - Check that transitions run on a pseudo element whose ancestor changes display type.
 css/css-transitions/retargetted-transition-with-box-sizing.html:
 - Retargeting transitions on box size relative transitions should work.
-css/css-transitions/root-color-transition.html:
-- "== css/css-transitions/root-color-transition-ref.html (never ready to capture)"
 css/css-transitions/starting-of-transitions-001.html:
 - changes to transition-property should cancel in-flight transitions
 css/css-transitions/starting-style-name-defining-rules.html:
@@ -3617,8 +3260,6 @@ css/css-transitions/transition-base-response-003.html:
 - Identical elements are all responsive to font-size transition
 css/css-transitions/transition-behavior.html:
 - transition-behavior changed to normal should stop the running discrete transitions.
-- transition-behavior:allow-discrete overlaps the previous normal value.
-- transition-behavior:allow-discrete should animate discrete properties.
 - transition-behavior:normal should cancel the running transitions whose animation
   values are not interpolatable
 css/css-transitions/transition-events-with-document-change.html:
@@ -3633,8 +3274,6 @@ css/css-transitions/transitioncancel-001.html:
   transition
 css/css-transitions/transitioncancel-002.html:
 - Removing a transitioning property from transition-property should trigger transitioncancel
-css/css-transitions/transitionevent-interface.html:
-- TransitionEventInit animation property sets value
 css/css-transitions/transitions-retarget.html:
 - Retargeting a transition should cause the old transition to be cancelled
 css/css-transitions/unregistered-custom-property-transition.html:
@@ -7801,9 +7440,6 @@ web-animations/interfaces/Animatable/getAnimations.html:
 - Does not return animations with zero playback rate in before phase
 - Does not return finished animations that do not fill forwards
 - Does not return reversed finished animations that do not fill backwards
-- 'Finished animation with fill: both is not lost after yielding to event loop'
-- 'Finished animation with fill: both on disconnected element is not lost after yielding
-  to event loop'
 - 'Finished animation with fill: none is not returned'
 - Returns animations based on dynamic changes to individual animations' current time
 - Returns animations based on dynamic changes to individual animations' duration
@@ -7818,7 +7454,6 @@ web-animations/interfaces/Animatable/getAnimations.html:
 - The legacy Selectors Level 2 single-colon selectors can be used
 - Throws SyntaxError for an empty selector
 - Throws SyntaxError for an invalid pseudo-element selector
-- Triggers a style change event
 web-animations/interfaces/Animation/cancel.html:
 - After cancelling an animation, it can still be seeked
 web-animations/interfaces/Animation/commitStyles.html:
@@ -7926,7 +7561,6 @@ web-animations/interfaces/DocumentOrShadowRoot/getAnimations.html:
 - Document.getAnimations() returns script-generated animations
 - Document.getAnimations() returns script-generated animations in the order they were
   created
-- Document.getAnimations() triggers a style change event
 - ShadowRoot.getAnimations() return all animations in the shadow tree
 - iframe.contentDocument.getAnimations() returns animations on elements inside same-origin
   Document
@@ -8047,8 +7681,6 @@ web-animations/responsive/to-style-change.html:
 - Lengths responsive to style changes
 web-animations/responsive/toggle-animated-iframe-visibility.html:
 - "== web-animations/responsive/toggle-animated-iframe-visibility-ref.html"
-web-animations/responsive/translate.html:
-- Translate responsive to font size changes
 web-animations/timing-model/animation-effects/active-time.html:
 - Active time in after phase with backwards-only fill is unresolved
 - Active time in after phase with forwards fill and negative end delay greater in
@@ -8282,7 +7914,6 @@ web-animations/timing-model/timelines/update-and-send-events-replacement.html:
 - Dispatches an event when removing
 - Dispatches remove events after finish events
 - Does NOT dispatch a remove event twice
-- Does NOT remove a CSS transition tied to markup
 - Does NOT remove an animation after making a redundant change to another animation's
   current time
 - Does NOT remove an animation after making a redundant change to another animation's

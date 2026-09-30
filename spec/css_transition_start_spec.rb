@@ -116,11 +116,11 @@ RSpec.describe 'starting a transition' do
     JS
   end
 
-  # …and a change that is inherited from an element ALREADY TRANSITIONING the same property starts
-  # nothing (css-transitions §3): what this element shows is that transition's value, arriving
-  # through inheritance, and a second run would go alongside it. WPT
-  # `properties-value-inherit-001` is the case.
-  it 'does not start a second run under a transitioning parent' do
+  # …and a change inherited from an element that is transitioning the same property starts a run of its OWN, to the
+  # parent's end value: the after-change style inherits from the parent's after-change style, and "both transitions
+  # will run" (css-transitions-1 §3; Firefox). Chrome, and WPT properties-value-inherit-001, keep the 2013 draft's rule,
+  # which started none.
+  it 'starts a run of its own under a transitioning parent' do
     s = page('<div id="p" class="c"><div id="k" class="kid">x</div></div>', <<~CSS)
       .c       { color: rgb(0,0,0) }
       .c.to    { color: rgb(100,100,100) }
@@ -128,7 +128,7 @@ RSpec.describe 'starting a transition' do
       .kid     { color: inherit }
       .kid.how { transition: color 2s linear }
     CSS
-    expect(s.evaluate_script(<<~JS)).to eq(['rgb(0, 0, 0)', 1, 0])
+    expect(s.evaluate_script(<<~JS)).to eq(['rgb(0, 0, 0)', 1, 1])
       (function () {
         const p = document.getElementById('p'), k = document.getElementById('k');
         p.classList.add('how');

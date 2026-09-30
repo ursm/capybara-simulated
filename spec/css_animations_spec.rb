@@ -125,8 +125,8 @@ RSpec.describe 'CSS animations and transitions' do
       expect(animated('animation-name:grow;flex-grow:2 !important', 'flex-grow')).to eq('2')
     end
 
-    # An animation name resolves in the TREE the animated element lives in (css-scoping §3.3), so a
-    # component's `@keyframes` travel with the component.
+    # An animation name resolves in the TREE it is declared in (css-shadow-1 §4.2), so a component's
+    # `@keyframes` travel with the component.
     it 'finds keyframes declared in the element own shadow tree' do
       s = page('<div id="host"></div>')
       value = s.evaluate_script(<<~JS)
@@ -138,6 +138,33 @@ RSpec.describe 'CSS animations and transitions' do
         })()
       JS
       expect(value).to eq('2')
+    end
+
+    # …and the tree it resolves in is the DECLARATION's (css-shadow-1 §4.2), searched outward from there: a document
+    # rule on a host names the document's `@keyframes` though the host's own shadow tree has one of that name (Chrome;
+    # Firefox takes the shadow tree's), and a `:host` rule whose tree has none finds the document's (Firefox; Chrome
+    # animates nothing). The two engines each keep half of the rule.
+    it 'finds keyframes in the tree the animation-name was declared in, then outward' do
+      s = page(<<~HTML)
+        <style>#h1 { animation: grow 100s linear -50s }</style>
+        <div id="h1"></div><div id="h2"></div><div id="h3"></div>
+      HTML
+      value = s.evaluate_script(<<~JS)
+        (function () {
+          document.getElementById('h1').attachShadow({mode: 'open'}).innerHTML =
+            '<style>@keyframes grow { from { flex-grow: 10 } to { flex-grow: 10 } }</style>';
+          document.getElementById('h2').attachShadow({mode: 'open'}).innerHTML =
+            '<style>:host { animation: grow 100s linear -50s }</style>';
+          // …and a `:host` rule of a component nested in another resolves in ITS tree, not in the tree around it.
+          const outer = document.getElementById('h3').attachShadow({mode: 'open'});
+          outer.innerHTML = '<div id="in"></div>';
+          outer.getElementById('in').attachShadow({mode: 'open'}).innerHTML =
+            '<style>:host { animation: own 100s linear -50s } @keyframes own { from { flex-grow: 0 } to { flex-grow: 6 } }</style>';
+          return ['h1', 'h2'].map((id) => getComputedStyle(document.getElementById(id)).flexGrow)
+            .concat(getComputedStyle(outer.getElementById('in')).flexGrow);
+        })()
+      JS
+      expect(value).to eq(%w[2 2 3])
     end
 
     # A length and a percentage have no common unit, so the interpolation is a `calc()` — and the

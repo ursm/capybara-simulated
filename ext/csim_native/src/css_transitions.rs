@@ -183,7 +183,7 @@ impl Animations {
             Some(id) => Some(self.css_transition(id).unwrap().end_value.clone()),
             None => self.completed_of(owner).find(|c| c.property == change.property).map(|c| c.end_value.clone()),
         };
-        let mut forget_completed = |model: &mut Animations| {
+        let forget_completed = |model: &mut Animations| {
             match held {
                 Some(id) => model.let_go(id),
                 None => model.forget_completed(owner, &change.property),

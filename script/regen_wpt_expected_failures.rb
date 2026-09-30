@@ -337,6 +337,9 @@ out_hdr = <<~H
   # test_driver input shim discarding coordinates). Re-read the reasons here whenever an engine
   # lands. These are NOT a backlog; each carries the reason it is earned out-of-scope. The
   # in-scope roadmap is wpt_expected_failures.yml.
+  # One more kind is earned: a test that holds text the spec has since WITHDRAWN, where the
+  # current draft says the opposite (spec over a stale test, as over Blink — CLAUDE.md rule 1).
+  # Its reason quotes both texts, so it can be re-checked the day the test is updated.
   #
   # The gate (spec/support/wpt_gate.rb) merges this with the in-scope file and checks the union
   # symmetrically, so an out-of-scope subtest that starts PASSing still turns RED (move
