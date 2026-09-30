@@ -97,6 +97,15 @@ RSpec.describe 'style engine invalidation' do
     s = visit('<div id="uf" hidden="until-found"><p id="ufp">x</p></div><div id="cv" style="content-visibility:hidden"><p id="cvp">y</p></div>',
               css: '')
     expect(s.evaluate_script("['uf', 'ufp', 'cv', 'cvp'].map((id) => document.getElementById(id).checkVisibility())")).to eq([true, false, true, false])
+
+    # …only where the ancestor's box can take size containment, which is what `content-visibility` applies to (CSS
+    # Contain 2 §3.1): a non-atomic inline, a table row, group or cell, and a box-less `display: contents` skip nothing;
+    # an inline-block does. Firefox: true × 4, then false (Chrome skips under the cell too).
+    s = visit('<p><span class="h"><b id="spb">b</b></span></p><table><tbody class="h"><tr class="h"><td class="h"><i id="tdi">i</i></td></tr></tbody></table>' \
+              '<div class="h" style="display:contents"><div id="dc">d</div></div><div class="h" style="display:table"><div id="tb">t</div></div>' \
+              '<span class="h" style="display:inline-block"><b id="ibb">b</b></span>',
+              css: '.h { content-visibility: hidden }')
+    expect(s.evaluate_script("['spb', 'tdi', 'dc', 'tb', 'ibb'].map((id) => document.getElementById(id).checkVisibility())")).to eq([true, true, true, true, false])
   end
 
   # The JS cascade's rules, built when this side first reads them, are the sheets' as they stand THEN — which may be

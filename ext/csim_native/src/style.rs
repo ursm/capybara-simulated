@@ -1783,15 +1783,27 @@ impl StyleEngine {
     // (`isVisibleNodeImpl`).
     pub(crate) fn shown(&mut self, arena: &RealmArena, id: NodeId, now_ms: f64) -> u8 {
         use style::computed_values::content_visibility::T as ContentVisibility;
+        use style::values::specified::box_::{DisplayInside, DisplayOutside};
         self.flush(arena, now_ms);
         let Some(style) = primary_style(arena, id) else { return 0 };
         if style.get_box().clone_display().is_none() {
             return 0;
         }
+        // (…an ancestor whose box can take size containment, which is what `content-visibility` applies to (CSS Contain 2
+        // §3.1): not one with no principal box, a non-atomic inline, a table or an internal table box — a hidden `<span>`,
+        // `<tr>` or `<td>` skips nothing, as Firefox shows.)
+        let skips = |s: &ComputedValues| {
+            let d = s.get_box().clone_display();
+            s.get_box().content_visibility == ContentVisibility::Hidden
+                && !d.is_contents()
+                && !matches!(d.outside(), DisplayOutside::InternalTable)
+                && !matches!(d.inside(), DisplayInside::Table)
+                && !(matches!(d.outside(), DisplayOutside::Inline) && matches!(d.inside(), DisplayInside::Flow))
+        };
         let skipped = in_arena(arena, self, || {
             let mut cur = TElement::traversal_parent(&StyleNode::new(arena, id));
             while let Some(p) = cur {
-                if primary_style(arena, p.id).is_some_and(|s| s.get_box().content_visibility == ContentVisibility::Hidden) {
+                if primary_style(arena, p.id).is_some_and(|s| skips(&s)) {
                     return true;
                 }
                 cur = TElement::traversal_parent(&p);
