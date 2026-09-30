@@ -1185,4 +1185,31 @@ RSpec.describe 'table layout' do
     expect(flow_top).to be > 40                              # the alignment really did shift the content
     expect(fixed_top).to be_within(0.01).of(flow_top)
   end
+
+  # A collapsed border is shared across ROWS too: widening a cell's bottom border widens the top half of the cell below
+  # it, whose own style never changed, and its client box follows the pass that laid it out. Chrome: 4 / 20 after.
+  [nil, '1'].each do |stylo|
+    it "follows a facing cell in another row into a collapsed cell's client box#{stylo ? ' (stylo)' : ''}" do
+      saved = ENV['CSIM_STYLO']
+      ENV['CSIM_STYLO'] = stylo
+      html = '<!DOCTYPE html><body><table style="border-collapse: collapse">' \
+             '<tr><td id="a" style="border: 2px solid; width: 50px; height: 20px">a</td><td style="border: 2px solid; width: 50px; height: 20px">b</td></tr>' \
+             '<tr><td id="c" style="border: 2px solid">c</td><td style="border: 2px solid">d</td></tr></table></body>'
+      s = simulated_session(->(_env) { [200, {'content-type' => 'text/html'}, [html]] })
+      s.visit '/'
+      got = s.evaluate_script(<<~JS)
+        (() => {
+          const c = document.getElementById('c'), out = [];
+          out.push(c.clientTop);
+          document.getElementById('a').style.borderBottom = '8px solid';
+          out.push(c.clientTop, c.clientHeight);
+          return out;
+        })()
+      JS
+      expect(got[0]).to eq(1)
+      expect(got[1..]).to eq([4, 20])
+    ensure
+      ENV['CSIM_STYLO'] = saved
+    end
+  end
 end

@@ -130,6 +130,14 @@ RSpec.describe 'UA stylesheet: the rendering tables' do
     expect(computed(s, 'l2', 'counterSet')).to eq('list-item 7')
   end
 
+  # An `<img border>` maps a BORDER and nothing else: no margin, and `hspace` / `vspace` keep theirs. Chrome: 0px / 0px /
+  # 3px, then 0px / 5px / 3px.
+  it 'gives an image border no margin' do
+    s = page('<img id="a" border="3"><img id="b" border="3" hspace="0" vspace="5">')
+    expect(%w[marginLeft marginTop borderLeftWidth].map {|prop| computed(s, 'a', prop) }).to eq(%w[0px 0px 3px])
+    expect(%w[marginLeft marginTop borderLeftWidth].map {|prop| computed(s, 'b', prop) }).to eq(%w[0px 5px 3px])
+  end
+
   # A stray `<li>` shows its marker INSIDE its box in quirks mode, and outside once it is in a list.
   it 'moves a quirks-mode list marker inside' do
     quirks = page('<li id="a">x</li><ul><li id="b">y</li></ul>', doctype: '')

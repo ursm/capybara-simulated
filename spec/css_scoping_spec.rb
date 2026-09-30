@@ -127,6 +127,37 @@ RSpec.describe 'css-scoping selectors' do
     expect(got).to eq([0, 0, 23, 11, 12])
   end
 
+  # …and follows what decides it: a class written on a light child or a grandchild of the host, and one taken off, flip
+  # the host's `:has()` and restyle and relay out its tree — the grandchild is no element anything styles, as no slot
+  # takes the host's light children. (Chrome never matches the rule; Firefox matches it but re-matches on none of these.)
+  [nil, '1'].each do |stylo|
+    it "restyles a host's tree when its :has() flips under it#{stylo ? ' (stylo)' : ''}" do
+      saved = ENV['CSIM_STYLO']
+      ENV['CSIM_STYLO'] = stylo
+      html = '<!DOCTYPE html><body style="margin: 0"><div id="h"><i><b></b></i></div></body>'
+      s = simulated_session(->(_env) { [200, {'content-type' => 'text/html'}, [html]] })
+      s.visit '/'
+      got = s.evaluate_script(<<~JS)
+        (() => {
+          const h = document.getElementById('h'), i = h.firstChild, b = i.firstChild;
+          const r = h.attachShadow({mode: 'open'});
+          r.innerHTML = '<style>:host(:has(> .f)) p { padding-left: 7px } :host(:has(.g)) p { margin-left: 23px }</style><p id="p">x</p>';
+          const p = r.getElementById('p'), out = [];
+          const read = () => out.push([getComputedStyle(p).paddingLeft, p.getBoundingClientRect().x].join(' '));
+          read();
+          i.className = 'f'; read();
+          i.className = ''; read();
+          b.className = 'g'; read();
+          b.remove(); read();
+          return out;
+        })()
+      JS
+      expect(got).to eq(['0px 0', '7px 0', '0px 0', '0px 23', '0px 0'])
+    ensure
+      ENV['CSIM_STYLO'] = saved
+    end
+  end
+
   # A `:host()` reading the host's POSITION or `:empty` flips on a child-list change beside or under the host, with no
   # write to the host itself: a sibling prepended (`:first-child`), appended (`:last-child`), the only light child
   # removed (`:empty`). Chrome: 40, 40, 0, then 0, 0, 40.

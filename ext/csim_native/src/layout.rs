@@ -1098,9 +1098,11 @@ pub(crate) struct Box {
     // apply to it (CSS 2.1 §17.5), and a border it declares is its cells' to draw, so what it declares is not what the
     // pass used, and it is what a read of it asks.
     pub(crate) edges: Option<[f64; 12]>,
-    // …which of its margins are `auto` (`Input::auto_margins`: 1 left, 2 right, 4 top, 8 bottom), and whether it is
-    // OUT OF FLOW.
+    // …which of its margins are `auto` (`Input::auto_margins`: 1 left, 2 right, 4 top, 8 bottom), whether any of them
+    // resolved a PERCENTAGE (`Input::has_percent_edges` — edges that hold for one basis only), and whether it is OUT
+    // OF FLOW.
     pub(crate) auto_margins: u8,
+    pub(crate) percent_edges: bool,
     pub(crate) out_of_flow: bool,
 }
 
@@ -1447,7 +1449,7 @@ pub(crate) fn layout_block_in_place(inputs: &mut [Input], runs: &[Run], run_text
     }
     let mut boxes: Vec<Box> = inputs
         .iter()
-        .map(|n| Box { nid: n.nid, x: 0.0, y: 0.0, w: 0.0, h: 0.0, auto_height: false, first_baseline: None, last_baseline: None, inline_block_baseline: None, natural_h: None, clamped_h: false, cb_w: None, used_margins: None, rel: [0.0; 2], edges: None, auto_margins: 0, out_of_flow: false })
+        .map(|n| Box { nid: n.nid, x: 0.0, y: 0.0, w: 0.0, h: 0.0, auto_height: false, first_baseline: None, last_baseline: None, inline_block_baseline: None, natural_h: None, clamped_h: false, cb_w: None, used_margins: None, rel: [0.0; 2], edges: None, auto_margins: 0, percent_edges: false, out_of_flow: false })
         .collect();
     // Two phases: MEASURE lays the subtree out relative to each node's own border-box origin (so
     // collapse-through margins can propagate UP through returns without knowing final positions), then
@@ -1497,6 +1499,7 @@ pub(crate) fn layout_block_in_place(inputs: &mut [Input], runs: &[Run], run_text
         b.edges = (!matches!(n.display, DISPLAY_TABLE_ROW | DISPLAY_TABLE_ROW_GROUP))
             .then(|| [n.pt, n.pr, n.pb, n.pl, n.bt, n.br, n.bb, n.bl, Input::m(n.mt), Input::m(n.mr), Input::m(n.mb), Input::m(n.ml)]);
         b.auto_margins = n.auto_margins;
+        b.percent_edges = n.has_percent_edges();
         b.out_of_flow = n.out_of_flow != 0;
     }
     boxes[0].cb_w = Some(root_cb_w);
@@ -8998,8 +9001,8 @@ mod tests {
         b.height = 30.0;
         let inputs = vec![blk(0.0, -1), a, b];
         let bx = boxes(layout_block(&inputs, &[], &[], &[], &[], &[], 0.0, 0.0, 800.0, false));
-        assert_eq!(bx[1], Box { nid: 1.0, x: 0.0, y: 0.0, w: 800.0, h: 50.0, auto_height: false, first_baseline: None, last_baseline: None, inline_block_baseline: None, natural_h: None, clamped_h: false, cb_w: Some(800.0), used_margins: None, rel: [0.0; 2], edges: Some([0.0; 12]), auto_margins: 0, out_of_flow: false });
-        assert_eq!(bx[2], Box { nid: 2.0, x: 0.0, y: 50.0, w: 800.0, h: 30.0, auto_height: false, first_baseline: None, last_baseline: None, inline_block_baseline: None, natural_h: None, clamped_h: false, cb_w: Some(800.0), used_margins: None, rel: [0.0; 2], edges: Some([0.0; 12]), auto_margins: 0, out_of_flow: false });
+        assert_eq!(bx[1], Box { nid: 1.0, x: 0.0, y: 0.0, w: 800.0, h: 50.0, auto_height: false, first_baseline: None, last_baseline: None, inline_block_baseline: None, natural_h: None, clamped_h: false, cb_w: Some(800.0), used_margins: None, rel: [0.0; 2], edges: Some([0.0; 12]), auto_margins: 0, percent_edges: false, out_of_flow: false });
+        assert_eq!(bx[2], Box { nid: 2.0, x: 0.0, y: 50.0, w: 800.0, h: 30.0, auto_height: false, first_baseline: None, last_baseline: None, inline_block_baseline: None, natural_h: None, clamped_h: false, cb_w: Some(800.0), used_margins: None, rel: [0.0; 2], edges: Some([0.0; 12]), auto_margins: 0, percent_edges: false, out_of_flow: false });
         assert_eq!(bx[0].h, 80.0); // root auto height = 50 + 30
         assert!(bx[0].auto_height);
     }
@@ -9174,7 +9177,7 @@ mod tests {
         let inputs = vec![blk(0.0, -1), owner, f];
         let bx = boxes(layout_block(&inputs, &[], &[], &[], &[], &[], 0.0, 0.0, 800.0, false));
         assert_eq!(bx[1].h, 120.0); // owner contains the float
-        assert_eq!(bx[2], Box { nid: 2.0, x: 0.0, y: 0.0, w: 80.0, h: 120.0, auto_height: false, first_baseline: None, last_baseline: None, inline_block_baseline: None, natural_h: None, clamped_h: false, cb_w: Some(800.0), used_margins: None, rel: [0.0; 2], edges: Some([0.0; 12]), auto_margins: 0, out_of_flow: false });
+        assert_eq!(bx[2], Box { nid: 2.0, x: 0.0, y: 0.0, w: 80.0, h: 120.0, auto_height: false, first_baseline: None, last_baseline: None, inline_block_baseline: None, natural_h: None, clamped_h: false, cb_w: Some(800.0), used_margins: None, rel: [0.0; 2], edges: Some([0.0; 12]), auto_margins: 0, percent_edges: false, out_of_flow: false });
     }
 
     #[test]

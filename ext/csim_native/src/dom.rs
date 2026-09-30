@@ -3033,7 +3033,8 @@ pub(crate) fn f64_array<'s>(scope: &mut v8::PinScope<'s, '_>, vals: &[f64]) -> v
 
 // One box as the JS side reads it (`boxOf`, and `layoutPass`'s box rows): `BOX_ROW` numbers, the last fourteen its
 // edges as the pass used them (`layout::Box::edges`, NaN where it has none), which `auto` margins it has in the JS
-// side's mask (1 top, 2 right, 4 bottom, 8 left — `AUTO_MARGIN_BIT`) and 1 where it is out of flow.
+// side's mask (1 top, 2 right, 4 bottom, 8 left — `AUTO_MARGIN_BIT`) with 16 beside them where an edge resolved a
+// percentage, and 1 where it is out of flow.
 pub(crate) const BOX_ROW: usize = 26;
 fn box_row(b: &crate::layout::Box) -> [f64; BOX_ROW] {
     let [mt, mr, mb, ml] = b.used_margins.unwrap_or([f64::NAN; 4]);
@@ -3042,7 +3043,7 @@ fn box_row(b: &crate::layout::Box) -> [f64; BOX_ROW] {
     let mut row = [0.0; BOX_ROW];
     row[..12].copy_from_slice(&[b.x, b.y, b.w, b.h, if b.auto_height { 1.0 } else { 0.0 }, b.cb_w.unwrap_or(f64::NAN), mt, mr, mb, ml, b.rel[0], b.rel[1]]);
     row[12..24].copy_from_slice(&b.edges.unwrap_or([f64::NAN; 12]));
-    row[24] = auto as f64;
+    row[24] = (auto | if b.percent_edges { 16 } else { 0 }) as f64;
     row[25] = if b.out_of_flow { 1.0 } else { 0.0 };
     row
 }

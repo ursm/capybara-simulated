@@ -259,12 +259,27 @@ struct ShadowStyles {
     sheets: Vec<(SheetKey, DocumentStyleSheet)>,
     styles: AuthorStyles<DocumentStyleSheet>,
     dirty: bool,
+    // Whether a sheet reads the host's light DESCENDANTS through `:host(:has(…))` (`host_reads_descendants`), which the
+    // relative-selector invalidation maps do not record: a `:has()` inside `:host()` is collected nowhere, so a class
+    // written under the host restyled nothing in its tree.
+    host_has: bool,
 }
 
 impl Default for ShadowStyles {
     fn default() -> Self {
-        ShadowStyles { sheets: Vec::new(), styles: AuthorStyles::new(), dirty: false }
+        ShadowStyles { sheets: Vec::new(), styles: AuthorStyles::new(), dirty: false, host_has: false }
     }
+}
+
+// Whether `css` holds a `:has()` inside a `:host()` — read off the text, as the JS cascade's `HOST_HAS_RE` reads it: a
+// `:host(` with a `:has(` after it before the declaration block opens (ASCII case-insensitively).
+fn host_reads_descendants(css: &str) -> bool {
+    let lower = css.to_ascii_lowercase();
+    lower.match_indices(":host(").any(|(at, _)| {
+        let rest = &lower[at..];
+        let block = rest.find('{').unwrap_or(rest.len());
+        rest[..block].contains(":has(")
+    })
 }
 
 // The `@custom-media` a shadow root's sheets can see: none, as no browser ships them (`enable_properties`).
@@ -622,6 +637,7 @@ impl StyleEngine {
         }
         drop(guard);
         let before = self.pending.borrow().len();
+        shadow.host_has = sheets.iter().any(|source| host_reads_descendants(&source.css));
         for source in sheets {
             let key = SheetKey::of(source);
             let sheet = match kept.iter().position(|(k, _)| *k == key) {
@@ -707,7 +723,7 @@ impl StyleEngine {
                 data.relative_selector_invalidation_map().len() != 0 || data.relative_invalidation_map_attributes().used
             };
             self.has_relative = self.stylist.iter_origins().any(|(data, _)| relative(data))
-                || self.shadow_styles.values().any(|s| relative(&s.styles.data));
+                || self.shadow_styles.values().any(|s| s.host_has || relative(&s.styles.data));
         }
         self.snapshot_moved_states(arena);
         let restyle_all = std::mem::take(&mut self.restyle_all);
@@ -866,6 +882,9 @@ impl StyleEngine {
         self.guarded(|engine| engine.attributes_will_change_unguarded(arena, id, names));
     }
     fn attributes_will_change_unguarded(&mut self, arena: &RealmArena, id: NodeId, names: &[&str]) {
+        // (…a `:has()` reads it styled or not: an element nothing styles — under a `display: none`, or a host's light
+        // child no slot takes — still decides the match of one above it)
+        self.restyle_all |= self.has_relative;
         let Some(node) = arena.get(id) else { return };
         let Some(slot) = arena.existing_style_slot(id) else { return };
         if unsafe { &*slot.data.get() }.is_none() {
@@ -898,7 +917,6 @@ impl StyleEngine {
             hint_element(el, hint);
             restyle_nth_of_siblings(el);
         });
-        self.restyle_all |= self.has_relative;
     }
 
     // `parent`'s children changed (an insertion, a removal, a text node's data): what its children's selectors
@@ -2932,6 +2950,15 @@ mod tests {
         for sheet in [UA_SHEET, UA_QUIRKS_SHEET] {
             assert_parses_whole(sheet);
         }
+    }
+
+    // A `:has()` inside a `:host()` is found, and one beside it (or a `:host` with no argument) is not.
+    #[test]
+    fn a_host_condition_reading_descendants_is_found_in_the_text() {
+        assert!(host_reads_descendants(":host(:has(.f)) p { margin: 1px }"));
+        assert!(host_reads_descendants("p {} :HOST(.x:HAS(> b)) { color: red }"));
+        assert!(!host_reads_descendants(":host(.x) p { color: red } .a:has(.b) { color: red }"));
+        assert!(!host_reads_descendants(":host p:has(b) { color: red }"));
     }
 
     fn assert_parses_whole(sheet: &str) {
