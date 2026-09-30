@@ -224,6 +224,17 @@ pub(crate) struct MathTable {
 }
 
 // Walk the subtree at `root` — the element the JS walk took as its pass root.
+// The direction the ROOT element USES — the principal writing mode's (CSS Writing Modes 3 §8): its `<body>` child's where
+// it has one, else its own. `<body dir=rtl>` in an ltr document lays the body out from the right, and scrolls the
+// viewport from there (Chrome and Firefox alike); the root's COMPUTED `direction`, which `getComputedStyle` reports, is
+// its own either way.
+pub(crate) fn principal_rtl(arena: &RealmArena, root: NodeId) -> bool {
+    let body = arena.get(root).filter(|r| &*r.local_name == "html").and_then(|r| {
+        r.children.iter().copied().find(|&c| arena.get(c).is_some_and(|n| n.kind == NodeKind::Element && matches!(&*n.local_name, "body" | "frameset")))
+    });
+    crate::style::primary_style(arena, body.unwrap_or(root)).is_some_and(|s| s.get_inherited_box().direction == Direction::Rtl)
+}
+
 pub(crate) fn build(arena: &RealmArena, root: NodeId, basis: Basis, faces: &mut Faces, maths: &mut MathTable, prior: Option<&Prior>) -> Outcome {
     faces.missing.clear();
     let walked = arena.begin_layout_walk();
@@ -1676,7 +1687,8 @@ impl<'a> Walk<'a> {
         rec.takes_clearance = fresh.separates;
         rec.float_kind = fresh.floated;
         rec.starts_bfc = fresh.bfc;
-        let rtl = style.get_inherited_box().direction == Direction::Rtl;
+        // (…the pass root's the direction it USES, the principal writing mode's: `principal_rtl`)
+        let rtl = if parent < 0 { principal_rtl(self.arena, id) } else { style.get_inherited_box().direction == Direction::Rtl };
         rec.rtl = rtl as u8;
         // (…and whether its BLOCK axis is the horizontal one: a vertical writing mode, whose auto width is its content's)
         rec.block_axis_is_x = !style.writing_mode.is_horizontal();

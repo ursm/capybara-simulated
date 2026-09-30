@@ -8,8 +8,6 @@
 use std::collections::BTreeMap;
 use std::fmt::Write;
 
-use style::computed_values::direction::T as Direction;
-
 use crate::dom::{dom, f64_array, laid_answer, realm_id, register, NodeId};
 use crate::layout::{InlineBox, Input, Run, RunText};
 use crate::walk::{self, Basis, Face, FieldDiff, Outcome};
@@ -203,8 +201,8 @@ fn layout_build(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgu
     let check = args.get(5).is_true();
     let d = dom(scope);
     let Some(arena) = d.realms.get(&cid) else { return };
-    // (…the root's direction, which places it — the style engine's, as every other value the walk reads)
-    let root_rtl = crate::style::primary_style(arena, root).is_some_and(|s| s.get_inherited_box().direction == Direction::Rtl);
+    // (…the direction the root USES, which places it: `walk::principal_rtl`)
+    let root_rtl = walk::principal_rtl(arena, root);
     // (…splicing back from the last kept pass what did not change since it: `Walk::splice`; under the check, the pass is
     // walked whole as well, and the two held against each other)
     let (maths, prior) = d.walk_reuse.entry(cid).or_default().for_walk(&generation);
