@@ -106,8 +106,9 @@ RSpec.describe 'css-scoping selectors' do
   end
 
   # …and only `:host` itself: a featureless host matches no other pseudo-class beside it (`:host:not(.q) p`,
-  # `:host(.x):not(.y) p`), and `:host()` does not take `:has()`; `:where(:host)` / `:is(:host)` are `:host`. Chrome:
-  # 0, 0, 0, 11, 12.
+  # `:host(.x):not(.y) p`); `:where(:host)` / `:is(:host)` are `:host`. A `:has()` in `:host()` is one more pseudo-class
+  # of its compound, which the host holding a `.f` matches (css-shadow-1). Firefox: 0, 0, 23, 11, 12; Chrome takes no
+  # `:has()` there and says 0 for the third.
   it 'takes :host alone as the host, and nothing beside it' do
     html = '<!DOCTYPE html><body></body>'
     s = simulated_session(->(_env) { [200, {'content-type' => 'text/html'}, [html]] })
@@ -123,7 +124,7 @@ RSpec.describe 'css-scoping selectors' do
         return parseFloat(getComputedStyle(r.getElementById('p')).marginLeft);
       })
     JS
-    expect(got).to eq([0, 0, 0, 11, 12])
+    expect(got).to eq([0, 0, 23, 11, 12])
   end
 
   # A `:host()` reading the host's POSITION or `:empty` flips on a child-list change beside or under the host, with no

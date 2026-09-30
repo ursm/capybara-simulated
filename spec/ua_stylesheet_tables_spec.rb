@@ -140,6 +140,15 @@ RSpec.describe 'UA stylesheet: the rendering tables' do
     expect(computed(standards, 'a', 'listStylePosition')).to eq('outside')
   end
 
+  # …and a `<form>` ends in a `1em` margin in quirks mode alone. Chrome: 16px, 0px.
+  it 'gives a quirks-mode form its bottom margin' do
+    quirks = page('<form id="f"><input></form>', doctype: '')
+    expect(computed(quirks, 'f', 'marginBottom')).to eq('16px')
+
+    standards = page('<form id="f"><input></form>')
+    expect(computed(standards, 'f', 'marginBottom')).to eq('0px')
+  end
+
   # HTML's bidi rules: the block elements isolate, `<bdo>` overrides, a valid `dir` isolates
   # whatever the element is, and `dir=auto` asks for `plaintext` on the elements that hold plain
   # text.

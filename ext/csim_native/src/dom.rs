@@ -2689,9 +2689,9 @@ fn layout_measure_counts(
 // array (a run's text, else non-string), the grid channel and the inline table, run native layout, and write each
 // node's border-box into its arena slot. Answers the inline boxes' FRAGMENTS as rows of [inline index, x, y, w, h],
 // and beside them EVERY record's box, in record order, as the rows `boxOf` answers one node at a time
-// (`BOX_ROW` numbers each: [x, y, w, h, autoHeight, cbW, mt, mr, mb, ml, relX, relY]) — which is also the only answer
-// for a record with NO node to write into (an anonymous grid item, table cell or row), then the records whose box is
-// not the one their node held
+// (`BOX_ROW` numbers each: [x, y, w, h, autoHeight, cbW, mt, mr, mb, ml, relX, relY], then its edges — see `box_row`)
+// — which is also the only answer for a record with NO node to write into (an anonymous grid item, table cell or row),
+// then the records whose box is not the one their node held
 // before the pass (all of them without a node) — what the writer has to write — and, where `texts` asks, the TEXT
 // PIECES the lines placed, as rows of `TextRow`; or false when the subtree uses
 // a feature the native engine doesn't model (Outcome::Unsupported), and the caller then lays it out in JS. One
@@ -2805,7 +2805,7 @@ fn layout_pass(
 // well (`layout_box`, what `boxOf` reads), and `changed` naming the records whose box moved from the one stored.
 pub(crate) fn laid_answer<'s>(scope: &mut v8::PinScope<'s, '_>, cid: i32, laid: crate::layout::Laid, texts: bool) -> v8::Local<'s, v8::Array> {
     let st = realm(scope, cid);
-    let mut rows: Vec<f64> = Vec::with_capacity(laid.boxes.len() * 12);
+    let mut rows: Vec<f64> = Vec::with_capacity(laid.boxes.len() * BOX_ROW);
     let mut changed: Vec<f64> = Vec::new();
     for (i, b) in laid.boxes.into_iter().enumerate() {
         rows.extend(box_row(&b));
@@ -3031,13 +3031,23 @@ pub(crate) fn f64_array<'s>(scope: &mut v8::PinScope<'s, '_>, vals: &[f64]) -> v
     v8::Float64Array::new(scope, buf, 0, vals.len()).expect("a Float64Array over its own backing store")
 }
 
-// One box as the JS side reads it (`boxOf`, and `layoutPass`'s box rows).
-fn box_row(b: &crate::layout::Box) -> [f64; 12] {
+// One box as the JS side reads it (`boxOf`, and `layoutPass`'s box rows): `BOX_ROW` numbers, the last fourteen its
+// edges as the pass used them (`layout::Box::edges`, NaN where it has none), which `auto` margins it has in the JS
+// side's mask (1 top, 2 right, 4 bottom, 8 left — `AUTO_MARGIN_BIT`) and 1 where it is out of flow.
+pub(crate) const BOX_ROW: usize = 26;
+fn box_row(b: &crate::layout::Box) -> [f64; BOX_ROW] {
     let [mt, mr, mb, ml] = b.used_margins.unwrap_or([f64::NAN; 4]);
-    [b.x, b.y, b.w, b.h, if b.auto_height { 1.0 } else { 0.0 }, b.cb_w.unwrap_or(f64::NAN), mt, mr, mb, ml, b.rel[0], b.rel[1]]
+    let am = b.auto_margins;
+    let auto = [(4, 1), (2, 2), (8, 4), (1, 8)].iter().fold(0, |m, &(from, to)| if am & from != 0 { m | to } else { m });
+    let mut row = [0.0; BOX_ROW];
+    row[..12].copy_from_slice(&[b.x, b.y, b.w, b.h, if b.auto_height { 1.0 } else { 0.0 }, b.cb_w.unwrap_or(f64::NAN), mt, mr, mb, ml, b.rel[0], b.rel[1]]);
+    row[12..24].copy_from_slice(&b.edges.unwrap_or([f64::NAN; 12]));
+    row[24] = auto as f64;
+    row[25] = if b.out_of_flow { 1.0 } else { 0.0 };
+    row
 }
 
-// __dom.boxOf(nid) -> [x, y, w, h, autoHeight, cbW, marginTop, marginRight, marginBottom, marginLeft, relX, relY]
+// __dom.boxOf(nid) -> [x, y, w, h, autoHeight, cbW, marginTop, marginRight, marginBottom, marginLeft, relX, relY, …edges]
 // (document coords, border-box) or undefined when the node has no native box (never laid out this pass / stale nid).
 // The JS geometry getters read this. `cbW` is the basis the box's percentages resolved against and the margins are the
 // ones its placement USED — each NaN where the pass had none to report (`layout::Box::cb_w` / `used_margins`) — and
