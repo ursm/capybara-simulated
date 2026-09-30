@@ -327,6 +327,23 @@ enum Side {
     Top,
     Bottom,
 }
+// An element's flow as the physical sides it runs between (`flowSides` / `FLOW_SIDES`): block-start, block-end,
+// inline-start, inline-end — the inline pair turned round by `direction: rtl`.
+fn flow_sides(style: &ComputedValues) -> [Side; 4] {
+    use style::computed_values::writing_mode::T as WritingMode;
+    let [bs, be, is, ie] = match style.get_inherited_box().writing_mode {
+        WritingMode::HorizontalTb => [Side::Top, Side::Bottom, Side::Left, Side::Right],
+        WritingMode::VerticalRl | WritingMode::SidewaysRl => [Side::Right, Side::Left, Side::Top, Side::Bottom],
+        WritingMode::VerticalLr => [Side::Left, Side::Right, Side::Top, Side::Bottom],
+        WritingMode::SidewaysLr => [Side::Left, Side::Right, Side::Bottom, Side::Top],
+    };
+    if style.get_inherited_box().direction == Direction::Rtl { [bs, be, ie, is] } else { [bs, be, is, ie] }
+}
+// Does the element's inline axis start at the RIGHT (`startsInlineAtRight`) — what moves a line's alignment: `rtl` in a
+// horizontal writing mode, never in a vertical one, whose lines run down.
+fn starts_at_right(style: &ComputedValues) -> bool {
+    matches!(flow_sides(style)[2], Side::Right)
+}
 
 // Where a line's baseline alignment is asked: a row keeps it, a column reads it along the axis, an out-of-flow box's
 // static position in the flow (`crossAlign`'s `baselineMode`).
@@ -360,8 +377,8 @@ impl FlexPlan {
         use style::computed_values::flex_direction::T as Dir;
         use style::computed_values::flex_wrap::T as Wrap;
         let pos = style.get_position();
-        let rtl = style.get_inherited_box().direction == Direction::Rtl;
-        let (inline_start, inline_end) = if rtl { (Side::Right, Side::Left) } else { (Side::Left, Side::Right) };
+        // (…`row` is the INLINE axis and `column` the BLOCK one, whichever physical way the flow runs: `flowSides`)
+        let [block_start, block_end, inline_start, inline_end] = flow_sides(style);
         let column = matches!(pos.flex_direction, Dir::Column | Dir::ColumnReverse);
         let flex_reverse = matches!(pos.flex_direction, Dir::RowReverse | Dir::ColumnReverse);
         let wrap = match pos.flex_wrap {
@@ -371,16 +388,16 @@ impl FlexPlan {
         };
         let cross_flip = wrap == 2;
         let main_start = match (column, flex_reverse) {
-            (true, false) => Side::Top,
-            (true, true) => Side::Bottom,
+            (true, false) => block_start,
+            (true, true) => block_end,
             (false, false) => inline_start,
             (false, true) => inline_end,
         };
         let cross_start = match (column, cross_flip) {
             (true, false) => inline_start,
             (true, true) => inline_end,
-            (false, false) => Side::Top,
-            (false, true) => Side::Bottom,
+            (false, false) => block_start,
+            (false, true) => block_end,
         };
         FlexPlan {
             column,
@@ -842,7 +859,8 @@ fn grid_row_grows(rows: &style::values::computed::ImplicitGridTracks) -> bool {
 fn grid_column_placement(style: &ComputedValues) -> [f64; 3] {
     let pos = style.get_position();
     let line = |l: &style::values::computed::GridLine| if l.is_span || !l.ident.0.is_empty() { 0.0 } else { l.line_num as f64 };
-    let span = |l: &style::values::computed::GridLine| if l.is_span { l.line_num.max(1) as f64 } else { 0.0 };
+    // (…a span to a NAMED line is none: `span b` counts no lines here, in either walk)
+    let span = |l: &style::values::computed::GridLine| if l.is_span && l.ident.0.is_empty() { l.line_num.max(1) as f64 } else { 0.0 };
     let (start, end) = (&pos.grid_column_start, &pos.grid_column_end);
     [line(start), line(end), if span(start) != 0.0 { span(start) } else { span(end) }]
 }
@@ -1268,8 +1286,10 @@ impl<'a> Walk<'a> {
         if matches!(position, Position::Absolute | Position::Fixed) != out_of_flow {
             return Err("positioned");
         }
-        if !style.writing_mode.is_horizontal() {
-            return Err("vertical writing mode");
+        // (…the pass ROOT in a vertical writing mode takes its width from its content, which native sizes it by only
+        // where it declares one: `resolve_width` would fill the room instead)
+        if parent < 0 && !style.writing_mode.is_horizontal() && size_lp(&style.get_position().width)?.is_none_or(|lp| lp.has_percentage()) {
+            return Err("vertical root");
         }
         let idx = self.inputs.len() as i32;
         let mut rec = fresh_record();
@@ -1393,6 +1413,8 @@ impl<'a> Walk<'a> {
         rec.starts_bfc = fresh.bfc;
         let rtl = style.get_inherited_box().direction == Direction::Rtl;
         rec.rtl = rtl as u8;
+        // (…and whether its BLOCK axis is the horizontal one: a vertical writing mode, whose auto width is its content's)
+        rec.block_axis_is_x = !style.writing_mode.is_horizontal();
         rec.scrolls_x = scrolls(b.overflow_x);
         rec.scrolls_y = scrolls(b.overflow_y);
         rec.legacy_align = self.legacy_align(id);
@@ -1508,8 +1530,7 @@ impl<'a> Walk<'a> {
         let font = self.font_info(style, style)?;
         let (indent, bits) = indent(style)?;
         let bites = indent.px != 0.0 || indent.frac != 0.0 || indent.prog.is_some();
-        let starts_at_right = style.get_inherited_box().direction == Direction::Rtl;
-        let align = align_code(style.get_inherited_text().text_align, starts_at_right);
+        let align = align_code(style.get_inherited_text().text_align, starts_at_right(style));
         let wrap = wrap_mode(style);
         self.inputs[idx as usize].display = DISPLAY_BLOCK;
         self.inputs[idx as usize].ws_mode = ws_mode;
@@ -2416,6 +2437,7 @@ impl<'a> Walk<'a> {
         rec.bottom_adjoins = true;
         rec.starts_bfc = true;
         rec.rtl = (style.get_inherited_box().direction == Direction::Rtl) as u8;
+        rec.block_axis_is_x = !style.writing_mode.is_horizontal();
         rec.legacy_align = self.legacy_align(table);
         if let Some(halves) = halves {
             [rec.bt, rec.br, rec.bb, rec.bl] = halves;
@@ -2690,6 +2712,7 @@ impl<'a> Walk<'a> {
         rec.bottom_adjoins = true;
         rec.starts_bfc = true;
         rec.rtl = (style.get_inherited_box().direction == Direction::Rtl) as u8;
+        rec.block_axis_is_x = !style.writing_mode.is_horizontal();
         rec.legacy_align = self.legacy_align(container);
         self.inputs.push(rec);
         let ws_mode = ws_mode_of(style)?;
@@ -2875,8 +2898,7 @@ impl<'a> Walk<'a> {
         let bites = indent.px != 0.0 || indent.frac != 0.0 || indent.prog.is_some();
         let indent_math = self.math(indent.prog.as_deref());
         let font = self.font_info(style, style)?;
-        let starts_at_right = style.get_inherited_box().direction == Direction::Rtl;
-        let align = align_code(style.get_inherited_text().text_align, starts_at_right);
+        let align = align_code(style.get_inherited_text().text_align, starts_at_right(style));
         let mut g = Gather { block: style, idx, bites, runs: Vec::new(), makes_line: false, floats: Vec::new(), rel: None };
         self.gather(kids, style, &font, ws_mode, wrap_mode(style), 0.0, &mut g)?;
         // (…the indent and the alignment written before the gather, as the JS walk writes them: a block whose content

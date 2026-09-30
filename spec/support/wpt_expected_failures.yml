@@ -10122,8 +10122,6 @@ html/rendering/sections/headingoffset-and-headingreset.html:
 - "== html/rendering/sections/headingoffset-and-headingreset-ref.html"
 html/rendering/the-css-user-agent-style-sheet-and-presentational-hints/mouse-cursor-imagemap.html:
 - Only clickable areas should show the link cursor.
-html/rendering/the-css-user-agent-style-sheet-and-presentational-hints/pre-margin-block.html:
-- "== html/rendering/the-css-user-agent-style-sheet-and-presentational-hints/pre-margin-block-ref.html"
 html/rendering/the-details-element/auto-expand-details-text-fragment.html:
 - Verifies that the target page has scrolled as a result of a ScrollToTextFragment
   navigation.

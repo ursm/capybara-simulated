@@ -341,9 +341,28 @@ RSpec.describe 'walk parity' do
     CSS
   end
 
+  # Round 11: a `grid-auto-rows` in any unit is the auto rows' height, and a span to a NAMED line counts none.
+  it 'builds the review repros of round 11' do
+    expect_clean(parity(<<~HTML))
+      <div style="display: grid; grid-template-columns: [a] 50px [b] 50px [c] 50px; grid-auto-rows: 2em">
+        <div>a</div><div>bb</div><div style="grid-column: span b">sn</div></div>
+    HTML
+  end
+
+  # A VERTICAL writing mode: its block axis the horizontal one (a block's auto width is its content's), its UA margins
+  # flow-relative, a flex container's axes its flow's, and a line's alignment never from the right.
+  it 'builds vertical writing modes' do
+    expect_clean(parity(<<~HTML))
+      <div style="writing-mode: vertical-rl; height: 200px"><p>text in a vertical block</p><div style="width: 50px">w</div></div>
+      <div style="writing-mode: vertical-lr; display: flex; height: 100px"><span>a</span><span>b</span></div>
+      <div style="display: flex; flex-direction: column; writing-mode: vertical-rl; direction: rtl"><i>x</i><i>y</i></div>
+      <p style="writing-mode: vertical-rl; text-align: end">al</p><blockquote style="writing-mode: vertical-lr">q</blockquote>
+    HTML
+  end
+
   it 'declines by name what it has not been taught' do
-    stats = parity('<div style="writing-mode: vertical-rl">x</div>')
+    stats = parity('<div><span style="display: contents">x</span></div>')
     expect(stats['compared']).to eq(0)
-    expect(stats['declined']).to include('vertical writing mode' => be_positive)
+    expect(stats['declined']).to include('display contents' => be_positive)
   end
 end
