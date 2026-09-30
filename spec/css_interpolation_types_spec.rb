@@ -106,12 +106,10 @@ RSpec.describe 'CSS interpolation types' do
         .to eq('matrix(0.707107, 0.707107, -0.707107, 0.707107, 0, 0)')
     end
 
-    # Two lists naming DIFFERENT functions are the gap: the spec decomposes each into translate /
-    # rotate / scale / skew and interpolates those. `transformMatrix` already composes the matrix,
-    # so what is missing is the DECOMPOSITION — a backlog item, not a wall — and until it lands
-    # these flip discretely. Chrome reports `matrix(2, 0, 0, 2, 0, 0)` here.
-    it 'flips a mismatched function list discretely (a listed gap)' do
-      expect(midpoint('transform', 'translateX(0px)', 'scale(3)')).to eq('matrix(3, 0, 0, 3, 0, 0)')
+    # Two lists naming DIFFERENT functions interpolate as MATRICES: each is decomposed into translate / rotate /
+    # scale / skew, those are mixed and recomposed (Chrome and Firefox: `matrix(2, 0, 0, 2, 0, 0)`).
+    it 'interpolates a mismatched function list as matrices' do
+      expect(midpoint('transform', 'translateX(0px)', 'scale(3)')).to eq('matrix(2, 0, 0, 2, 0, 0)')
     end
   end
 
@@ -182,12 +180,12 @@ RSpec.describe 'CSS interpolation types' do
   end
 
   describe 'serialization' do
-    # Alpha lives in eight bits like every other channel, and reports as the SHORTEST decimal that
-    # rounds back to its byte — 128 is `0.5`, 192 is `0.753`, and a shadow is no different.
-    it 'reports the shortest alpha that rounds back to its byte' do
+    # Alpha is the number it comes to, as CSS Color 4 keeps it — `0.5`, and `0.75` half way to a half-transparent
+    # colour (Firefox; Chrome quantizes it to a byte and reports `0.753`) — and a shadow is no different.
+    it 'reports the alpha an interpolation comes to' do
       expect(midpoint('backgroundColor', 'rgba(255,0,0,1)', 'rgba(0,0,255,0)')).to eq('rgba(255, 0, 0, 0.5)')
       expect(midpoint('boxShadow', 'rgba(255,0,0,1) 0px 0px', 'rgba(0,0,255,0.5) 10px 10px'))
-        .to eq('rgba(170, 0, 85, 0.753) 5px 5px 0px 0px')
+        .to eq('rgba(170, 0, 85, 0.75) 5px 5px 0px 0px')
     end
 
     # Six SIGNIFICANT digits, which is what a browser reports for a third of a hundred pixels.
@@ -300,12 +298,12 @@ RSpec.describe 'CSS interpolation types' do
                       composite: 'accumulate', style: 'filter: blur(2px)')).to eq('blur(5px) brightness(3)')
     end
 
-    # Two colours whose alphas MATCH add channel by channel and keep that alpha; two whose alphas
-    # differ add premultiplied and take the sum (Chrome-measured, both).
-    it 'adds two colours by their alphas' do
+    # Two colours add PREMULTIPLIED and take the summed alpha, whatever their alphas (Firefox, both; Chrome adds two
+    # of EQUAL alpha channel by channel, `rgba(50, 70, 90, 0.5)`).
+    it 'adds two colours premultiplied' do
       expect(midpoint('backgroundColor', 'rgba(40,50,60,0.5)', 'rgba(40,50,60,0.5)',
                       composite: 'add', style: 'background-color: rgba(10,20,30,0.5)'))
-        .to eq('rgba(50, 70, 90, 0.5)')
+        .to eq('rgb(25, 35, 45)')
       expect(midpoint('backgroundColor', 'rgba(255,0,0,0.3)', 'rgba(255,0,0,0.3)',
                       composite: 'add', style: 'background-color: rgba(0,0,255,0.2)'))
         .to eq('rgba(153, 0, 102, 0.5)')

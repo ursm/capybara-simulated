@@ -11,6 +11,16 @@ require_relative 'support/session_teardown'
 # gate (every write re-keyed the whole subtree); the two "leaves … alone" examples are the contract
 # the gate adds.
 RSpec.describe 'structural-context invalidation' do
+  # The JS cascade's memo machinery, counted (sweeps, epochs, the gate): so the JS cascade is what these sessions run.
+  # The style engine has invalidation of its own, which `style_engine_spec` holds against a full restyle.
+  around do |example|
+    saved = ENV['CSIM_STYLO']
+    ENV['CSIM_STYLO'] = nil
+    example.run
+  ensure
+    ENV['CSIM_STYLO'] = saved
+  end
+
   def page(css, body)
     lambda {|_env|
       [200, {'content-type' => 'text/html'},

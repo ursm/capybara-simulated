@@ -61,18 +61,19 @@ RSpec.describe 'invalid declaration values' do
     # `-webkit-line-clamp`, and every browser keeps it.
     expect(after_setting("d.style.setProperty('--state', 'collapsed');")).to eq('--state: collapsed;')
     expect(after_setting("d.style.display = '-webkit-box';")).to eq('display: -webkit-box;')
-    expect(after_setting("d.style.setProperty('-webkit-font-smoothing', 'antialiased');"))
-      .to eq('-webkit-font-smoothing: antialiased;')
+    expect(after_setting("d.style.setProperty('-webkit-text-fill-color', 'red');"))
+      .to eq('-webkit-text-fill-color: red;')
   end
 
   it 'does not treat a vendor prefix as a blank cheque' do
     app = lambda {|_env| [200, {'content-type' => 'text/html'}, ['<!DOCTYPE html><html><body></body></html>']] }
     s = simulated_session(app)
     s.visit '/'
-    # An unknown `-webkit-…` is not a property — Chrome says false — while the handful of prefixed
-    # names browsers DO implement and mdn omits are listed explicitly.
-    expect(s.evaluate_script("[CSS.supports('-webkit-nope', 'x'), CSS.supports('-webkit-font-smoothing', 'antialiased')]"))
-      .to eq([false, true])
+    # An unknown `-webkit-…` is not a property, and neither is a macOS-only one no specification defines
+    # (`-webkit-font-smoothing`: Firefox false) — while the Compat Standard's own are listed explicitly.
+    expect(s.evaluate_script("[CSS.supports('-webkit-nope', 'x'), CSS.supports('-webkit-font-smoothing', 'antialiased'), " \
+                             "CSS.supports('-webkit-text-fill-color', 'red')]"))
+      .to eq([false, false, true])
   end
 
   it 'keeps a shipped value mdn has no entry for yet' do

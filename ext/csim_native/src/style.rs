@@ -1228,13 +1228,21 @@ impl StyleEngine {
         op(&mut self.web_animations)
     }
 
-    // A shorthand's value in `style`, as CSSOM's `getPropertyValue` gives it: its longhands' resolved values
-    // serialized as the shorthand — None where they do not make one.
+    // A shorthand's value in `style`, as CSSOM's `getPropertyValue` gives it: its longhands' resolved values serialized
+    // as the shorthand — None where they do not make one. …except `text-decoration`'s colour, which Chrome and Firefox
+    // both leave out while it is `currentcolor` (`<del>`'s is `line-through`), however it resolves: taken COMPUTED, it is
+    // the initial the shortest serialization omits. (`text-emphasis` keeps its resolved one in both: `none rgb(0, 0, 0)`.)
     fn shorthand_value(&self, style: &ComputedValues, shorthand: ShorthandId) -> Option<String> {
         let mut block = PropertyDeclarationBlock::new();
         let mut parsed = SourcePropertyDeclaration::default();
         for longhand in shorthand.longhands() {
-            let value = style.computed_value_to_string(PropertyDeclarationId::Longhand(longhand));
+            let value = if longhand == LonghandId::TextDecorationColor {
+                let mut computed = String::new();
+                style.computed_or_resolved_value(longhand, None, &mut computed).ok()?;
+                computed
+            } else {
+                style.computed_value_to_string(PropertyDeclarationId::Longhand(longhand))
+            };
             parse_one_declaration_into(
                 &mut parsed,
                 PropertyId::NonCustom(longhand.into()),
@@ -1432,6 +1440,31 @@ impl StyleEngine {
         Some((computed, waapi::KeyframeInputs { style, parent: parent.clone(), contextual }))
     }
 
+    // Whether `change` is a value `target` INHERITS from an ancestor transitioning the same property, which starts no
+    // transition of its own (css-transitions-1 §3: "not … when the computed value changes because it is inherited
+    // (directly or indirectly) from another element that is transitioning the same property" — Chrome: a `color:
+    // inherit` child under a parent transitioning `color` runs none; Firefox runs a second). Up the inheritance chain
+    // while each ancestor holds the value it comes to: the ancestors' transitions have started, their tasks coming first.
+    fn inherited_from_transition(&self, arena: &RealmArena, target: &waapi::Target, change: &TransitionChange) -> bool {
+        let property = change.property.as_borrowed();
+        let mut node = match target.pseudo {
+            Some(_) => Some(target.node),
+            None => in_arena(arena, self, || StyleNode::new(arena, target.node).inheritance_parent().map(|p| p.id)),
+        };
+        while let Some(id) = node {
+            let Some(style) = primary_style(arena, id) else { return false };
+            if AnimationValue::from_computed_values(property, &style).as_ref() != Some(&change.after) {
+                return false;
+            }
+            let ancestor = waapi::Target { node: id, pseudo: None };
+            if self.web_animations.transitioning_properties(&ancestor).iter().any(|p| p.as_borrowed() == property) {
+                return true;
+            }
+            node = in_arena(arena, self, || StyleNode::new(arena, id).inheritance_parent().map(|p| p.id));
+        }
+        false
+    }
+
     // The style an effect's target inherits from: its parent's in the flat tree — a pseudo-element's, its originating
     // element's.
     fn target_parent_style(&self, arena: &RealmArena, target: &waapi::Target) -> Option<Arc<ComputedValues>> {
@@ -1499,12 +1532,13 @@ impl StyleEngine {
             }
             if task.tasks.contains(UpdateAnimationsTasks::CSS_TRANSITIONS) {
                 let running = self.web_animations.transitioning_properties(&target);
-                let (listed, changes) = match (&task.before_change_style, &task.after_change_style) {
+                let (listed, mut changes) = match (&task.before_change_style, &task.after_change_style) {
                     (Some(before), Some(after)) if rendered_style(arena, &target).is_some() => {
                         transition_changes(before, after, &running)
                     },
                     _ => (Vec::new(), Vec::new()),
                 };
+                changes.retain(|change| !self.inherited_from_transition(arena, &target, change));
                 self.web_animations.update_css_transitions(&target, &listed, changes, &self.lock);
             }
             if task.tasks.contains(UpdateAnimationsTasks::EFFECT_PROPERTIES) {

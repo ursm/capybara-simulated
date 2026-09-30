@@ -875,14 +875,17 @@ fn arena_and_engine<'s>(
 
 // An attribute write to `id` of the attributes `names`, about to land: the style engine hears of it first, and a name
 // a state can read moves the state epoch (a class, a style and data / ARIA attributes are read by none).
-// Whether a node can decide a directionality of its own (`is_rtl`): a `dir` on it, or its being a `<bdi>` or an `<input>`
-// (whose `type` may be `tel`).
+// Whether a node can decide a directionality of its own (`is_rtl`): a `dir` on it, or its being a `<bdi>` or a telephone
+// `<input>` — a telephone one only: almost every app page has an input, and each one latched the whole realm into the
+// per-element walk (a 1500-row append 290 → 530 ms).
 fn notes_direction(n: &NodeData) -> bool {
-    n.kind == NodeKind::Element && (n.plain_attr("dir").is_some() || n.is_html_named("bdi") || n.is_html_named("input"))
+    n.kind == NodeKind::Element
+        && (n.plain_attr("dir").is_some() || n.is_html_named("bdi") || (n.is_html_named("input") && n.input_type() == "tel"))
 }
 
 fn before_attribute_write(arena: &mut RealmArena, engine: Option<&mut crate::style::StyleEngine>, id: NodeId, names: &[&str]) {
-    arena.direction_sources |= names.contains(&"dir");
+    // (…and a `type` written may make an input a telephone one: latched on the write, as the value lands after this)
+    arena.direction_sources |= names.contains(&"dir") || (names.contains(&"type") && arena.get(id).is_some_and(|n| n.is_html_named("input")));
     if names.iter().any(|n| attribute_reads_state(n)) {
         arena.state_epoch += 1;
     }

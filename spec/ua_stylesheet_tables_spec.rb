@@ -120,11 +120,13 @@ RSpec.describe 'UA stylesheet: the rendering tables' do
   it 'numbers a list through the counter properties' do
     s = page('<ol id="o1"><li id="l1">a</li></ol><ol id="o2" start="10"><li>a</li></ol>' \
              '<ol id="o3" reversed start="20"><li>a</li></ol><ul id="u"><li id="l2" value="7">a</li></ul>')
-    expect(computed(s, 'o1', 'counterReset')).to eq('list-item')
+    # (Firefox, every one — a counter list computes to name-and-integer pairs, and HTML's sheet gives a `<li>` no
+    # `counter-increment`; Chrome reports `none` throughout, keeping list counters natively.)
+    expect(computed(s, 'o1', 'counterReset')).to eq('list-item 0')
     expect(computed(s, 'o2', 'counterReset')).to eq('list-item 9')
     expect(computed(s, 'o3', 'counterReset')).to eq('reversed(list-item) 21')
-    expect(computed(s, 'u',  'counterReset')).to eq('list-item')
-    expect(computed(s, 'l1', 'counterIncrement')).to eq('list-item')
+    expect(computed(s, 'u',  'counterReset')).to eq('list-item 0')
+    expect(computed(s, 'l1', 'counterIncrement')).to eq('none')
     expect(computed(s, 'l2', 'counterSet')).to eq('list-item 7')
   end
 
@@ -249,7 +251,10 @@ RSpec.describe 'UA stylesheet: the rendering tables' do
   it 'sizes an hr from its attributes' do
     s = page('<hr id="a" size="50"><hr id="b" size="1"><hr id="c" size="50" noshade>')
     expect(s.evaluate_script("document.getElementById('a').getBoundingClientRect().height")).to eq(50)
-    expect(computed(s, 'a', 'boxSizing')).to eq('border-box')
+    # (…the border box: its content box, where the `height` the size maps to goes, is the size less the two borders —
+    # HTML §15.3.11, Chrome `48px` in `content-box`)
+    expect(computed(s, 'a', 'boxSizing')).to eq('content-box')
+    expect(computed(s, 'a', 'height')).to eq('48px')
     # A one-pixel rule is the top border alone.
     expect(computed(s, 'b', 'borderBottomWidth')).to eq('0px')
     expect(s.evaluate_script("document.getElementById('b').getBoundingClientRect().height")).to eq(1)

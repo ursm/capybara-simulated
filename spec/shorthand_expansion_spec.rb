@@ -196,10 +196,10 @@ RSpec.describe 'shorthand expansion' do
 
   it 'reports the shorthand a plain element has' do
     got = both('color: black', %w[animation transition flexFlow textEmphasis placeItems columns columnRule borderRadius gap])
-    # All Chrome measured. `animation` is `none` and `transition` is `all` — the shorthand's own
-    # "nothing set" token, not whichever component happens to be listed first.
-    expect(got).to eq(['none', 'all', 'row nowrap', 'none rgb(0, 0, 0)', 'normal', 'auto',
-                       '3px rgb(0, 0, 0)', '0px', 'normal'])
+    # All Firefox measured (Chrome lists `row nowrap` and drops `column-rule`'s `none`). `animation` is `none` and
+    # `transition` is `all` — the shorthand's own "nothing set" token, not whichever component happens to be listed first.
+    expect(got).to eq(['none', 'all', 'row', 'none rgb(0, 0, 0)', 'normal', 'auto',
+                       '3px none rgb(0, 0, 0)', '0px', 'normal'])
   end
 
   it 'drops a transform a browser would reject' do
@@ -228,10 +228,11 @@ RSpec.describe 'shorthand expansion' do
                 getComputedStyle(ff).flexFlow, getComputedStyle(te).textEmphasis];
       })()
     JS
-    # Chrome uses DIFFERENT rules for the two: a computed `flex-flow` is `row nowrap`, but the
-    # style attribute keeps only what isn't at its initial. One `serialize` feeds both paths.
+    # The two surfaces serialize by their own rules — the style attribute keeps only what isn't at its initial, a
+    # computed `text-emphasis` lists its style — and a computed `flex-flow` is the shortest form too (Firefox; Chrome
+    # `row nowrap`). One `serialize` feeds both paths.
     expect(got).to eq(['flex-flow: row; color: red;', 'text-emphasis: red; color: red;',
-                       'row nowrap', 'none rgb(255, 0, 0)'])
+                       'row', 'none rgb(255, 0, 0)'])
   end
 
   it 'keeps a shorthand whose whole value is a substitution' do

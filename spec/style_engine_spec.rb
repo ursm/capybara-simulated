@@ -338,12 +338,13 @@ RSpec.describe 'directionality' do
   # are none, a leading LRM is L, Adlam R — skipping only an HTML element with a valid `dir` of its own (an SVG or MathML
   # `dir` is no such attribute, and sets no directionality); a shadow tree's `<slot>` ends the scan with its host's, a
   # `<slot>` in no shadow tree is scanned like any element, and an unassigned `<slot dir=auto>` reads its fallback.
-  # Chrome and Firefox, every row: L L L R L L R R R L (the first scope's `x` is its first strong character).
+  # Read through a `:dir()` RULE, so the style engine's own directionality answers in its mode (`matches()` is the JS
+  # side's in both). Chrome and Firefox, every row: L L L R L L R R R R.
   [nil, '1'].each do |stylo|
     it "resolves dir=auto by Bidi_Class and HTML's own steps#{stylo ? ' (stylo)' : ''}" do
       saved = ENV['CSIM_STYLO']
       ENV['CSIM_STYLO'] = stylo
-      html = '<!DOCTYPE html><meta charset="utf-8">' \
+      html = '<!DOCTYPE html><meta charset="utf-8"><style>:dir(rtl) { color: rgb(255, 0, 0) } :dir(ltr) { color: rgb(0, 128, 0) }</style>' \
              '<div dir="auto"><span id="a">x</span>&#x5e9;&#x5dc;</div>' \
              '<div dir="auto">&#x663; abc<span id="b">x</span></div>' \
              '<div dir="auto">&#x200e;&#x5e9;&#x5dc;<span id="c">x</span></div>' \
@@ -359,12 +360,12 @@ RSpec.describe 'directionality' do
       got = s.evaluate_script(<<~JS)
         (() => {
           const sr = document.getElementById('host').attachShadow({mode: 'open'});
-          sr.innerHTML = '<slot id="j" dir="auto">abc</slot>';
-          const at = (e) => (e.matches(':dir(rtl)') ? 'R' : 'L');
+          sr.innerHTML = '<style>:dir(rtl) { color: rgb(255, 0, 0) } :dir(ltr) { color: rgb(0, 128, 0) }</style><slot id="j" dir="auto">&#x5e9;&#x5dc;</slot>';
+          const at = (e) => (getComputedStyle(e).color === 'rgb(255, 0, 0)' ? 'R' : 'L');
           return ['a', 'b', 'c', 'd', 'e', 'f', 'g', 'h', 'i'].map((id) => at(document.getElementById(id))).concat([at(sr.getElementById('j'))]).join(' ');
         })()
       JS
-      expect(got).to eq('L L L R L L R R R L')
+      expect(got).to eq('L L L R L L R R R R')
     ensure
       ENV['CSIM_STYLO'] = saved
     end

@@ -114,14 +114,14 @@ RSpec.describe 'transition value types' do
       .to eq('20px, 30px, 30px, 25px, 25px, 35px')
   end
 
-  # A background list is reported — and animated — per LAYER: the count comes from the element's
-  # `background-image`, so a three-entry value on an element with no image keeps its first entry
-  # alone, and a one-entry value on a three-image element is repeated to three.
-  it 'repeats a background list to its layer count' do
-    expect(midpoint('background-position-x', '0px, 10px, 20px', '30px, 60px')).to eq('15px')
-    expect(computed('background-position-x', '0px, 10px, 20px')).to             eq('0px')
-    expect(computed('background-position-x', '10px', THREE_LAYERS)).to          eq('10px, 10px, 10px')
-    expect(midpoint('background-position-x', '10px', '40px', THREE_LAYERS)).to  eq('25px, 25px, 25px')
+  # A background list is reported — and animated — as it was WRITTEN, whatever layers the element's `background-image`
+  # makes: the computed value is the list (CSS Backgrounds), and two lists of different lengths interpolate over their
+  # least common multiple (Firefox: six entries). Chrome cuts or repeats both to the image's layer count.
+  it 'keeps a background list as long as it was written' do
+    expect(midpoint('background-position-x', '0px, 10px, 20px', '30px, 60px')).to eq('15px, 35px, 25px, 30px, 20px, 40px')
+    expect(computed('background-position-x', '0px, 10px, 20px')).to             eq('0px, 10px, 20px')
+    expect(computed('background-position-x', '10px', THREE_LAYERS)).to          eq('10px')
+    expect(midpoint('background-position-x', '10px', '40px', THREE_LAYERS)).to  eq('25px')
   end
 
   # A `<position>` keyword is an OFFSET once computed, and only the offsets interpolate.

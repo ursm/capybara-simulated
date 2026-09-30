@@ -44,10 +44,10 @@ RSpec.describe 'CSS animations and transitions' do
       expect(animated('animation-name:pad', 'padding-left')).to eq('30px')
     end
 
-    # A colour is eight bits per channel, alpha included, and interpolates with its alpha
-    # PREMULTIPLIED — so a fade to a translucent colour doesn't drag through black.
-    it 'interpolates a colour premultiplied, at eight bits' do
-      expect(animated('animation-name:col', 'background-color')).to eq('rgba(67, 33, 0, 0.753)')
+    # A colour interpolates with its alpha PREMULTIPLIED — so a fade to a translucent colour doesn't drag through
+    # black — and its alpha is the number it comes to (Firefox `0.75`; Chrome quantizes it to a byte, `0.753`).
+    it 'interpolates a colour premultiplied' do
+      expect(animated('animation-name:col', 'background-color')).to eq('rgba(67, 33, 0, 0.75)')
     end
 
     # A keyframe list that doesn't reach the ends takes the UNDERLYING value there — the one the

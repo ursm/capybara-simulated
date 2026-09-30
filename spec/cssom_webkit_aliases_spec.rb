@@ -3,10 +3,10 @@
 require 'capybara/simulated'
 require_relative 'support/session_teardown'
 
-# A `-webkit-…` name is one of two things, and browsers are precise about which. Measured in Chrome
-# 151.0.7922.169: of the 151 webkit-cased IDL attributes on a declaration, 42 are properties in
-# their own right (`-webkit-line-clamp`, `-webkit-text-fill-color`) and 109 are ALIASES — another
-# name for an unprefixed property, resolved the moment a declaration is parsed. What we had instead
+# A `-webkit-…` name is one of two things, and the Compat Standard is precise about which: a few are properties in their
+# own right (`-webkit-line-clamp`, `-webkit-text-fill-color`) and the rest ALIASES — another name for an unprefixed
+# property, resolved the moment a declaration is parsed. The set is the standard's, which is Firefox's; Chrome carries
+# some 50 more of each that no specification defines, and those are refused here (ursm 2026-09-30). What we had instead
 # was a rule: `-webkit-` plus any supported name, accepted as a property OF ITS OWN. So
 # `-webkit-transform` in a real stylesheet stored a declaration nothing ever read rather than
 # setting `transform`, some 600 invented spellings answered `CSS.supports` with true, and every one
@@ -57,11 +57,12 @@ RSpec.describe 'the -webkit- property surface' do
     JS
   end
 
-  # A third of the aliases RENAME rather than just drop the prefix — the flow-relative family and
-  # the logical sizes — which is why this is a measured table and not a rule.
-  it 'follows an alias that renames the property' do
+  # Blink's RENAMING aliases — the flow-relative family and the logical sizes — are in no specification, and Firefox
+  # refuses them: they are no properties here either (Chrome stores `margin-inline-start`, `border-block-end-width`,
+  # `inline-size`).
+  it 'refuses the Blink-only aliases that rename a property' do
     s = page('<div id="a"></div>')
-    renamed = [['margin-inline-start'], '3px', 'border-block-end-width: 2px;', 'inline-size: 4px;']
+    renamed = [[], '', nil, nil]
     expect(s.evaluate_script(<<~JS)).to eq(renamed)
       (() => { const made = (write) => { const d = document.createElement('div'); write(d.style); return d; };
                const a = made(st => st.setProperty('-webkit-margin-start', '3px'));
@@ -108,7 +109,8 @@ RSpec.describe 'the -webkit- property surface' do
   # and then accepted anything property-SHAPED, so every prefixed spelling was "supported". The bias
   # exists for standard properties mdn's table lags behind — it was never meant to cover a prefix
   # whose surface we now measure, and stripping applied iOS-only blocks while dropping the `not (…)`
-  # fallbacks a real browser keeps. All six of these match Chrome 151.0.7922.169 exactly.
+  # fallbacks a real browser keeps. All six of these are the Compat Standard's (and Chrome's; Firefox alone takes
+  # its own `-moz-appearance`).
   it 'answers @supports about a prefixed name from the same table' do
     s = page(<<~HTML)
       <style>
@@ -156,13 +158,13 @@ RSpec.describe 'the -webkit- property surface' do
     JS
   end
 
-  # …and it reaches LAYOUT, which is the whole point of resolving rather than storing a second name:
-  # the border-box width stays 100, and the inline-start margin moves the box (46 = the body's own
-  # 8px plus 38). Both measured identical to Chrome.
+  # …and it reaches LAYOUT, which is the whole point of resolving rather than storing a second name: the border-box
+  # width stays 100. (`-webkit-margin-start` is Blink's alone, and moves nothing: Firefox leaves `#b` at the body's 8,
+  # where Chrome puts it at 46.)
   it 'feeds layout through the property the alias names' do
     s = page('<style>#a { -webkit-box-sizing: border-box; width: 100px; padding: 10px; border: 5px solid } ' \
              '#b { -webkit-margin-start: 38px }</style><div id="a"></div><div id="b"></div>')
-    expect(s.evaluate_script(<<~JS)).to eq([100, 46])
+    expect(s.evaluate_script(<<~JS)).to eq([100, 8])
       (() => [document.getElementById('a').getBoundingClientRect().width,
               document.getElementById('b').getBoundingClientRect().x])()
     JS

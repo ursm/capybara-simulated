@@ -16,6 +16,7 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     register(scope, ns, "layoutBuild", layout_build, context_id);
     register(scope, ns, "walkParity", walk_parity, context_id);
     register(scope, ns, "walkFace", walk_face, context_id);
+    register(scope, ns, "styleFaces", style_faces, context_id);
     register(scope, ns, "walkParityStats", walk_parity_stats, context_id);
 }
 
@@ -249,6 +250,24 @@ fn faces_answer<'s>(scope: &mut v8::PinScope<'s, '_>, wanted: &[(String, &'stati
         out.set_index(scope, (i * 2 + 1) as u32, b.into());
     }
     out
+}
+
+// __dom.styleFaces(generation) -> null, or [family, bucket, …]: the faces the style engine computed a font metric (`ex`,
+// `ch`) without since it was last told — asked after a style flush, so a value read before any layout is not the
+// stand-in's (`flushStyleEngine`). The faces are the realm's as of `generation`, as the walk's are.
+fn style_faces(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let cid = realm_id(scope, &args);
+    let generation = args.get(0).to_rust_string_lossy(scope);
+    let Some(arena) = dom(scope).realms.get(&cid) else { return };
+    let wanted = arena.faces.with(|faces| {
+        faces.at_generation(&generation);
+        faces.metrics_missing().to_vec()
+    });
+    if wanted.is_empty() {
+        rv.set_null();
+    } else {
+        rv.set(faces_answer(scope, &wanted).into());
+    }
 }
 
 // __dom.walkFace(family, bucket, handle, asc, desc, gap, space, xh): the face the JS side resolved for a family and a bucket

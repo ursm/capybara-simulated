@@ -110,6 +110,10 @@ impl Faces {
             }
         }
     }
+    // The faces the style engine asked for and has not been told of (`__dom.styleFaces`).
+    pub(crate) fn metrics_missing(&self) -> &[FaceKey] {
+        &self.metrics_missing
+    }
     // Forget every face once what they resolve by has moved.
     pub(crate) fn at_generation(&mut self, generation: &str) {
         if self.generation != generation {
@@ -1495,18 +1499,20 @@ impl<'a> Walk<'a> {
         // (…and a cell's min / max in its BLOCK axis are none: its row sizes it — `cellMinMaxFreeAxis`. Asked of the
         // display, so an orphan cell ignores them too; a flex or grid item's is blockified and none. The block axis is
         // the WIDTH in a vertical writing mode, where a `min-height` does clamp: Chrome, 80.)
+        let cell_free_x = matches!(display.inside(), DisplayInside::TableCell) && !style.writing_mode.is_horizontal();
         if matches!(display.inside(), DisplayInside::TableCell) {
-            if style.writing_mode.is_horizontal() {
-                (rec.min_h, rec.max_h) = (f64::NAN, f64::NAN);
-            } else {
+            if cell_free_x {
                 (rec.min_w, rec.max_w) = (f64::NAN, f64::NAN);
+            } else {
+                (rec.min_h, rec.max_h) = (f64::NAN, f64::NAN);
             }
         }
-        // (…the DECLARED inline sizing, which has no basis at all: a percentage in it is none, `auto`.)
+        // (…the DECLARED inline sizing, which has no basis at all: a percentage in it is none, `auto` — and a vertical
+        // cell's min / max width none either, its block axis's, as the record's are)
         let declared = |k: usize| sizes[k].0.filter(|lp| !lp.has_percentage()).map_or(Ok(f64::NAN), |lp| length(lp));
         rec.decl_w = declared(0)?;
-        rec.decl_min_w = declared(2)?;
-        rec.decl_max_w = declared(3)?;
+        rec.decl_min_w = if cell_free_x { f64::NAN } else { declared(2)? };
+        rec.decl_max_w = if cell_free_x { f64::NAN } else { declared(3)? };
         rec.pct_h_decl = [1, 4, 5].iter().any(|&k| sizes[k].0.is_some_and(|lp| lp.has_percentage()))
             || (position == Position::Relative && [&pos.top, &pos.bottom].iter().any(|i| inset_lp(i).ok().flatten().is_some_and(|lp| lp.has_percentage())));
         // The margins and padding, likewise — against the containing block's WIDTH, all eight.
@@ -4246,27 +4252,26 @@ impl EdgeParts {
 // A length's px — a value with a percentage in it is not taught yet.
 // A style value as the page wrote it: the style engine keeps lengths, percentages and numbers as f32, where the JS side
 // reads the declaration's decimal into an f64 — `40%` is 0.4000000059604645 one way and 0.4 the other, and a table row
-// came out 40.00000059 against Chrome's 40. The f32's SHORTEST decimal (the one that reads back as it) is the value
-// written wherever the page wrote one that f32 can hold, so that is what goes over. Allocation-free.
+// came out 40.00000059 against Chrome's 40. The f32's SHORTEST decimal (the fewest significant digits that read back as
+// it) is the value written wherever the page wrote one an f32 can hold, so that is what goes over. Found by rounding,
+// not by formatting: this runs for every length of every record, and a format and a parse per value cost a relayout
+// of fractional lengths 8-17%. (A value DERIVED from one — an `em`, a `calc()` — is only the f32 the engine computed,
+// which this cannot make the JS side's f64: those still agree to f32 precision, and no closer.)
 pub(crate) fn f32_exact(v: f32) -> f64 {
-    struct Buf([u8; 48], usize);
-    impl std::fmt::Write for Buf {
-        fn write_str(&mut self, s: &str) -> std::fmt::Result {
-            let end = self.1 + s.len();
-            self.0.get_mut(self.1..end).ok_or(std::fmt::Error)?.copy_from_slice(s.as_bytes());
-            self.1 = end;
-            Ok(())
-        }
-    }
     // (…an integer below 2^24 is every f32 in its range, so it IS the written one: the commonest value, skipped)
     if !v.is_finite() || (v == v.trunc() && v.abs() < 16_777_216.0) {
         return v as f64;
     }
-    let mut buf = Buf([0; 48], 0);
-    match std::fmt::write(&mut buf, format_args!("{v}")) {
-        Ok(()) => std::str::from_utf8(&buf.0[..buf.1]).ok().and_then(|t| t.parse().ok()).unwrap_or(v as f64),
-        Err(_) => v as f64,
+    let x = v as f64;
+    let magnitude = x.abs().log10().floor() as i32;
+    for digits in 1..=9 {
+        let scale = 10f64.powi(digits - 1 - magnitude);
+        let rounded = (x * scale).round() / scale;
+        if rounded as f32 == v {
+            return rounded;
+        }
     }
+    x
 }
 fn length(lp: &LengthPercentage) -> Result<f64, &'static str> {
     lp.to_length().map(|l: Length| f32_exact(l.px())).ok_or("percentage")

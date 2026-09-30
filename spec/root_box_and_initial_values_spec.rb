@@ -356,7 +356,7 @@ RSpec.describe 'root box + computed initial values' do
     expect(got).to eq(['none', 'none'])
   end
 
-  it 'says nothing rather than guessing when an unexpanded shorthand sets the longhand' do
+  it 'reads a longhand the mask shorthand sets' do
     s = session(<<~HTML)
       <!DOCTYPE html>
       <html><head><style>#m { mask: url(#a) luminance } #p { color: red }</style></head>
@@ -368,11 +368,10 @@ RSpec.describe 'root box + computed initial values' do
         return [g('m').maskMode, g('p').maskMode];
       })()
     JS
-    # `mask` has no expander, so the cascade never sees `mask-mode`. Reporting the initial there
-    # would be the confident-wrong-answer failure again (Chrome: `luminance`); an empty string at
-    # least doesn't claim the element leaves it alone. An element nothing touches still reports the
-    # initial. (`transition` / `animation` used to be the example here — they are expanded now.)
-    expect(got).to eq(['', 'match-source'])
+    # `mask` is expanded layer by layer as `background` is, so its `mask-mode` is the one it names (Chrome and Firefox:
+    # `luminance`) — it had no expander, and answered `''` rather than the confidently wrong initial. An element
+    # nothing touches still reports the initial.
+    expect(got).to eq(['luminance', 'match-source'])
   end
 
   it 'normalises a colour initial the way a cascaded colour is normalised' do
@@ -626,9 +625,11 @@ RSpec.describe 'root box + computed initial values' do
       })()
     JS
     # The UA origin sits BELOW author rules and ABOVE inheritance, so an ancestor's declaration
-    # never beats it (all Chrome measured). An explicit `initial` asks for the CSS initial and so
-    # skips the UA origin — which is what makes the last one `normal`, not `pre`.
-    expect(got).to eq(['rgb(0, 0, 238)', 'pre', 'decimal', 'center', 'normal'])
+    # never beats it (Chrome and Firefox). An explicit `initial` asks for the CSS initial and so
+    # skips the UA origin — which is what makes the last one `normal`, not `pre`. The `<th>` is the
+    # exception that proves it: HTML centres one only under a parent whose `text-align` is still the
+    # initial, so under the body's `left` it inherits `left` (both browsers).
+    expect(got).to eq(['rgb(0, 0, 238)', 'pre', 'decimal', 'left', 'normal'])
   end
 
   it 'inherits a longhand a stylesheet set through a shorthand' do

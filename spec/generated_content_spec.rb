@@ -58,7 +58,8 @@ RSpec.describe 'generated content' do
   it 'joins the strings of a content and resolves attr()' do
     (x, _), w, s = measure('<div class=w id=h data-x="dd"><span id=t>T</span></div>', '#h::before { content: attr(data-x) "-" "e" }')
     expect(x).to be_within(0.01).of(w.call('dd-e'))
-    expect(s.evaluate_script("getComputedStyle(document.getElementById('h'), '::before').content")).to eq('"dd-e"')
+    # (…the computed value keeps the items apart, each `attr()` its string: Firefox; Chrome joins them into `"dd-e"`)
+    expect(s.evaluate_script("getComputedStyle(document.getElementById('h'), '::before').content")).to eq('"dd" "-" "e"')
   end
 
   # The text past a `/` is the ALTERNATIVE text (CSS Content 3 §2), for assistive technology: it renders nothing, and

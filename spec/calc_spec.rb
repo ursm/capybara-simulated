@@ -130,14 +130,14 @@ RSpec.describe 'CSS math functions' do
       .not_to eq(['7px'])
   end
 
-  # `-webkit-calc()` is `calc()` under its legacy name, which Chrome parses — and serializes as
-  # `calc()` — on every surface. Kept verbatim, it was an unknown function the cascade and the layout
-  # ignored: a `-webkit-calc(100% - 10px)` width laid out 1008 wide where Chrome says 998.
-  it 'reads -webkit-calc() as calc()' do
-    expect(computed('margin-left: -webkit-calc(10px + 5px)', %w[marginLeft])).to eq(['15px'])
+  # `-webkit-calc()` is no function of any specification — Blink parses it as `calc()`, Firefox refuses it — so a
+  # declaration using one is invalid on every surface, and the property keeps what it had (Firefox: `0px`, 1008 wide,
+  # nothing stored; the string in `content` is text).
+  it 'refuses -webkit-calc()' do
+    expect(computed('margin-left: -webkit-calc(10px + 5px)', %w[marginLeft])).to eq(['0px'])
     session = simulated_session(->(_env) { [200, {'content-type' => 'text/html'}, ['<!DOCTYPE html><html><body style="margin:8px"><div id="a" style="width:-webkit-calc(100% - 10px)"></div></body></html>']] })
     session.visit '/'
-    expect(session.evaluate_script(<<~JS)).to eq(['calc(100% - 10px)', 'calc(50% - 1px)', 998, '"-webkit-calc(1px)"'])
+    expect(session.evaluate_script(<<~JS)).to eq(['', '', 1008, '"-webkit-calc(1px)"'])
       (function () {
         var a = document.getElementById('a'), e = document.createElement('div');
         e.style.width = '-webkit-calc(50% - 1px)';
@@ -286,12 +286,12 @@ RSpec.describe 'CSS math functions' do
     # var(--x))` with `--x: -10px` became `calc(100% - 0px)`, i.e. plain `100%`.
     #
     # A leftover mixture of a length and a percentage HAS a canonical computed form — the
-    # percentage first, a negative length subtracted — and a value that is only that mixture takes
-    # it (Chrome-measured: `calc(-10px + 100%)` computes to `calc(100% - 10px)`). A value with more
-    # in it than the mixture is still handed back as the substitution wrote it: same expression,
-    # different spelling, and simplifying an arbitrary unresolved calc is a separate open gap.
+    # percentage first, a negative length subtracted, a term's own sign folded in — and a value that is
+    # only that mixture takes it (Chrome and Firefox: `calc(-10px + 100%)` computes to `calc(100% - 10px)`,
+    # and the substitution's `calc(100% - -10px)` to `calc(100% + 10px)`, a lone `background-size` being
+    # the pair it stands for).
     expect(computed('background-size: calc(100% - var(--neg))', %w[backgroundSize],
-                    extra_css: ':root { --neg: -10px }')).to eq(['calc(100% - -10px)'])
+                    extra_css: ':root { --neg: -10px }')).to eq(['calc(100% + 10px) auto'])
     expect(computed('flex-basis: calc(-10px + 100%)', %w[flexBasis])).to eq(['calc(100% - 10px)'])
   end
 

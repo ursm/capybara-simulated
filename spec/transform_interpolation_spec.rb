@@ -59,14 +59,11 @@ RSpec.describe 'interpolating a transform list' do
     expect(midpoint('skewX(0deg) rotate(0deg)', 'skewY(0deg) rotate(360deg)')).to eq('matrix(1, 0, 0, 1, 0, 0)')
   end
 
-  # NOT Chrome's answer, and deliberately so. Chrome interpolates a pair with no shared primitive as
-  # MATRICES — it decomposes both into translate / rotate / scale / skew, mixes those and recomposes
-  # — and reports `matrix(2, 0, 0, 1, 25, 0)` here (measured). This driver has no decomposition, so
-  # the pair flips discretely and reports the end the easing is nearer. What this example pins is
-  # that the primitive table does not INVENT a pairing for two functions that share nothing; the
-  # value it asserts is the driver's, and it changes the day decomposition lands.
-  it 'leaves a pair with no shared primitive discrete (driver behaviour, not Chrome)' do
-    expect(midpoint('translateX(50px)', 'scaleX(3)')).to eq('matrix(3, 0, 0, 1, 0, 0)')
+  # A pair with no shared primitive interpolates as MATRICES — both decomposed into translate / rotate / scale /
+  # skew, those mixed and recomposed (Chrome and Firefox: `matrix(2, 0, 0, 1, 25, 0)`), where the primitive table must
+  # not INVENT a pairing for two functions that share nothing.
+  it 'interpolates a pair with no shared primitive as matrices' do
+    expect(midpoint('translateX(50px)', 'scaleX(3)')).to eq('matrix(2, 0, 0, 1, 25, 0)')
   end
 
   # The arguments compute before they are mixed.
@@ -143,14 +140,18 @@ RSpec.describe 'interpolating a transform list' do
     expect(midpoint('translateX(10pt)', 'translateX(1in)')).to eq('matrix(1, 0, 0, 1, 54.6667, 0)')
   end
 
-  # `scale(2,)` is an invalid declaration. Rewriting the endpoint's text to absolutize its lengths
-  # dropped the empty argument and handed the parser a `scale(2)` it accepts, so an invalid keyframe
-  # started interpolating (2.5 half way). Chrome drops the keyframe outright and interpolates from
-  # the underlying value instead, reporting 2 — this driver flips discretely to the other end, which
-  # is a gap of its own (an invalid keyframe should be dropped where it is captured), but it must at
-  # least not treat the invalid value as a value.
-  it 'does not launder an invalid keyframe into an interpolable one (driver behaviour, not Chrome)' do
-    expect(midpoint('scale(2,)', 'scale(3)')).to eq('matrix(3, 0, 0, 3, 0, 0)')
+  # `scale(2,)` is an invalid declaration, so the keyframe has no transform at all: it is dropped where it is captured
+  # and the animation runs from the UNDERLYING value, `none` — half way to `scale(3)` is `scale(2)` (Chrome and Firefox).
+  # Rewriting the endpoint's text to absolutize its lengths once dropped the empty argument and handed the parser a
+  # `scale(2)` it accepts (2.5 half way).
+  it 'drops an invalid keyframe and runs from the underlying value' do
+    expect(midpoint('scale(2,)', 'scale(3)')).to eq('matrix(2, 0, 0, 2, 0, 0)')
+  end
+
+  # A singular matrix has no rotation to take apart, so a pair holding one flips discretely — to the second end at
+  # the midpoint — in Chrome and Firefox alike (WPT interpolation-per-property-002, "non-invertible matrices").
+  it 'flips a pair holding a singular matrix discretely' do
+    expect(midpoint('matrix(1, 1, 0, 0, 0, 100)', 'matrix(1, 0, 0, 1, 200, 0)')).to eq('matrix(1, 0, 0, 1, 200, 0)')
   end
 
   # The computed value of a 3D list is the matrix, which is where this driver now agrees with Chrome.
