@@ -797,9 +797,21 @@ impl StyleEngine {
                 slot.clear_caches();
             }
         }
-        // (What the full restyle leaves the animations to do is not done: looking changes nothing.)
+        // (What the full restyle leaves the animations to do is not done: looking changes nothing — nor what the
+        // incremental restyles keep of each element to compare with next time, its state and its emptiness, which a
+        // full restyle rewrites everywhere and so would hide every change the next incremental one missed.)
         let tasks = std::mem::take(&mut *self.animation_tasks.borrow_mut());
+        let kept: Vec<(NodeId, ElementState, Option<bool>)> = arena
+            .element_ids()
+            .filter_map(|id| arena.existing_style_slot(id).map(|s| (id, s.styled_state.get(), s.styled_empty.get())))
+            .collect();
         self.traverse(arena, doc, true, TraversalFlags::empty());
+        for (id, state, empty) in kept {
+            if let Some(slot) = arena.existing_style_slot(id) {
+                slot.styled_state.set(state);
+                slot.styled_empty.set(empty);
+            }
+        }
         *self.animation_tasks.borrow_mut() = tasks;
         let after: std::collections::HashMap<NodeId, Vec<String>> = values(arena).into_iter().collect();
         let names: Vec<LonghandId> =
@@ -876,6 +888,10 @@ impl StyleEngine {
                 }
                 moved = true;
                 snapshots.entry(TNode::opaque(&el)).or_default().state.get_or_insert(before);
+                // (…and the state it is now is the one the snapshot is held against from here: the restyle that follows
+                // may not reach the element itself — a `:checked ~ .panel` restyles its sibling alone — and a state left
+                // at its old value reads as unmoved when it flips BACK, so nothing is restyled for that)
+                slot.styled_state.set(el.state());
                 slot.has_snapshot.set(true);
                 mark_ancestors_dirty(el);
                 restyle_nth_of_siblings(el);
@@ -1760,12 +1776,29 @@ impl StyleEngine {
     // a shorthand, an unknown property, or an element the document's traversal did not style.
     // Whether `id` is SHOWN, as the engine styled it: 0 where no box is — it has no style (an ancestor is `display:
     // none`, which styles none of its descendants, or no slot takes it into the flat tree) or its own `display` is
-    // `none` — 1 where it is displayed and visible, 2 where it is displayed but its `visibility` hides it. One question
-    // for what the JS cascade answered by matching the hide rules of every ancestor (`isVisibleNodeImpl`).
+    // `none` — or where it is SKIPPED, an ancestor's `content-visibility: hidden` (a `hidden=until-found` one's, in the
+    // UA sheet) keeping its contents from rendering (CSS Contain 2 §4: not painted, not hit, not found — Chrome and
+    // Firefox answer `checkVisibility()` false); 1 where it is displayed and visible, 2 where it is displayed but its
+    // `visibility` hides it. One question for what the JS cascade answered by matching the hide rules of every ancestor
+    // (`isVisibleNodeImpl`).
     pub(crate) fn shown(&mut self, arena: &RealmArena, id: NodeId, now_ms: f64) -> u8 {
+        use style::computed_values::content_visibility::T as ContentVisibility;
         self.flush(arena, now_ms);
         let Some(style) = primary_style(arena, id) else { return 0 };
         if style.get_box().clone_display().is_none() {
+            return 0;
+        }
+        let skipped = in_arena(arena, self, || {
+            let mut cur = TElement::traversal_parent(&StyleNode::new(arena, id));
+            while let Some(p) = cur {
+                if primary_style(arena, p.id).is_some_and(|s| s.get_box().content_visibility == ContentVisibility::Hidden) {
+                    return true;
+                }
+                cur = TElement::traversal_parent(&p);
+            }
+            false
+        });
+        if skipped {
             return 0;
         }
         if style.get_inherited_box().visibility == style::computed_values::visibility::T::Visible { 1 } else { 2 }

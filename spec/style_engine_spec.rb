@@ -71,7 +71,51 @@ RSpec.describe 'style engine invalidation' do
     got = s.evaluate_script("['a', 'b', 'c', 'pop', 'shown', 'cp'].map((id) => document.getElementById(id).checkVisibility({visibilityProperty: true}))")
     expect(got).to eq([false, false, true, false, true, false])
     s.execute_script("document.getElementById('pop').showPopover(); document.querySelector('div').style.display = 'block'")
-    expect(s.evaluate_script("['a', 'pop'].map((id) => document.getElementById(id).checkVisibility())")).to eq([true, true])
+    expect(s.evaluate_script("['a', 'pop'].map((id) => document.getElementById(id).checkVisibility({visibilityProperty: true}))")).to eq([true, true])
+  end
+
+  # …and whatever moves it: a state the element's OWN restyle does not reach — `:checked ~ .panel` restyles the sibling —
+  # flipped there and BACK (the engine held the state against the one it had styled, and never updated it: the second
+  # click read as no change), and a hover left; and an ancestor's `content-visibility: hidden` (`hidden=until-found`'s,
+  # in the UA sheet) skips what is under it, though it is shown itself. Chrome and Firefox: true, false, true; false,
+  # then true; true, false, true, false.
+  it 'answers what is shown after a state flips back, and under skipped contents' do
+    s = visit('<input type="checkbox" id="cb"><div class="panel" id="p">P</div>',
+              css: '.panel { display: none } #cb:checked ~ .panel { display: block }')
+    got = Array.new(3) do
+      s.find('#cb').click
+      s.evaluate_script("document.getElementById('p').checkVisibility()")
+    end
+    expect(got).to eq([true, false, true])
+
+    s = visit('<div id="hov">h</div><div id="victim">v</div><div id="other">o</div>', css: '#hov:hover + #victim { display: none }')
+    s.find('#hov').hover
+    expect(s.evaluate_script("document.getElementById('victim').checkVisibility()")).to be(false)
+    s.find('#other').hover
+    expect(s.evaluate_script("document.getElementById('victim').checkVisibility()")).to be(true)
+
+    s = visit('<div id="uf" hidden="until-found"><p id="ufp">x</p></div><div id="cv" style="content-visibility:hidden"><p id="cvp">y</p></div>',
+              css: '')
+    expect(s.evaluate_script("['uf', 'ufp', 'cv', 'cvp'].map((id) => document.getElementById(id).checkVisibility())")).to eq([true, false, true, false])
+  end
+
+  # The JS cascade's rules, built when this side first reads them, are the sheets' as they stand THEN — which may be
+  # another text than the rebuild that owed them keyed: a `<style>` edited, read, edited to something else and back.
+  # The next rebuild must not find its key unchanged and keep the rules of the text in between (the closed `<details>`
+  # reads them: Chrome, false).
+  it 'keeps no JS rules of a sheet text the rebuilds never keyed' do
+    s = visit('<details><summary>s</summary><div class="c" id="c">c</div></details><p class="q" id="q">q</p>', css: '.q { color: red }')
+    got = s.evaluate_script(<<~JS)
+      (() => {
+        const st = document.querySelector('style'), q = document.getElementById('q');
+        st.textContent = '.q { color: blue }';
+        getComputedStyle(q).color;
+        st.textContent = '.c { display: block }';
+        st.textContent = '.q { color: blue }';
+        return document.getElementById('c').checkVisibility();
+      })()
+    JS
+    expect(got).to be(false)
   end
 
   it 'restyles an element whose id changed' do
