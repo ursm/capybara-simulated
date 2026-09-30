@@ -932,8 +932,9 @@ impl StyleEngine {
     // attribute where one names THAT one (`relative_selector_invalidation_map`, by its LOCAL name — `xlink:href` is
     // `[xlink|href]`'s `href`), a `lang` / `dir` always (`:lang()` and `:dir()` read them through no attribute
     // selector), and anything under a `:host(:has(…))`, which no map records. And on an element nothing styles
-    // (`unstyled`), any attribute where an argument reads an element STATE: `checked`, `disabled`, `placeholder`,
-    // `form`… move one, and `snapshot_moved_states` sees a moved state only on an element it styled before.
+    // (`unstyled`), any attribute a state can read (`dom::attribute_reads_state` — not a class, a style, a `data-*` or
+    // an `aria-*`) where an argument reads an element STATE: `checked`, `disabled`, `placeholder`, `form`… move one,
+    // and `snapshot_moved_states` sees a moved state only on an element it styled before.
     // Every write restyled the whole document on a page with any `:has()` — a `data-*` attribute written under a
     // `display: none` 300 times was 4x the page's time — though no argument can read one it does not name.
     fn relative_reads_attributes(&self, names: &[&str], unstyled: bool) -> bool {
@@ -945,7 +946,7 @@ impl StyleEngine {
         }
         let reads = |data: &style::stylist::CascadeData| {
             let map = data.relative_selector_invalidation_map();
-            (unstyled && !map.state_affecting_selectors.is_empty())
+            (unstyled && !map.state_affecting_selectors.is_empty() && names.iter().any(|&name| crate::dom::attribute_reads_state(name)))
                 || names.iter().any(|&name| match name {
                     "class" => !map.class_to_selector.is_empty(),
                     "id" => !map.id_to_selector.is_empty(),

@@ -933,7 +933,7 @@ fn before_attribute_write(arena: &mut RealmArena, engine: Option<&mut crate::sty
 
 // Can an element's state read the attribute `name`? Any but a class, a style and data / ARIA attributes can — an id
 // included: `:target` names one, and `<input form=…>` finds its form owner by one.
-fn attribute_reads_state(name: &str) -> bool {
+pub(crate) fn attribute_reads_state(name: &str) -> bool {
     !(matches!(name, "class" | "style") || name.starts_with("data-") || name.starts_with("aria-"))
 }
 
