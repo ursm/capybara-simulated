@@ -6989,9 +6989,8 @@ const GRID_TRACK_STRIDE: usize = 9;
 // marshalled copy starts, how long it is, and its kind (1 fill, 2 fit; -1 / 0 / 0 when there is none).
 // …then each gap's PROGRAM where it is a comparison function (an offset into the pass's math table, NaN = none: its
 // `px + frac` pair is the gap), so a `gap: min(10%, 20px)` is a figure this computes rather than one it has to be
-// handed resolved — bounds beside the pair from 2026-09-22, a program since 2026-09-26 — and whether the declared row
-// height is only a FLOOR its items may exceed (`gridRowGrows`).
-const GRID_HEADER: usize = 12;
+// handed resolved — bounds beside the pair from 2026-09-22, a program since 2026-09-26.
+const GRID_HEADER: usize = 11;
 impl GridTrack {
     fn decode(grids: &[f64], o: usize) -> GridTrack {
         GridTrack {
@@ -8063,7 +8062,6 @@ fn measure_grid(
     let row_h = n.definite_content_h().unwrap_or(0.0);
     let row_gap = bounded(grids[gs + 3] + if grids[gs + 4] != 0.0 { grids[gs + 4] * row_h } else { 0.0 }, math_ref(grids[gs + 10]), row_h).max(0.0);
     let decl_row_h = grids[gs + 5];
-    let row_grows = grids[gs + 11] != 0.0;
     let tmpl_base = gs + GRID_HEADER;
     // The in-flow items, in record order — the out-of-flow children join no row.
     let kids: Vec<usize> = children[i].iter().copied().filter(|&c| inputs[c].get().out_of_flow == 0).collect();
@@ -8177,10 +8175,9 @@ fn measure_grid(
         if ih > row_h {
             row_h = ih;
         }
-        // …and the content ends where the ROWS do: an item taller than a FIXED row overflows it, and one taller than
-        // a row that is only a floor grows it (`layoutGrid`). A zero row is the oracle's auto placeholder, and its
-        // items still size the grid.
-        let row_end = if is_auto(decl_row_h) || decl_row_h == 0.0 { ih } else if row_grows { decl_row_h.max(ih) } else { decl_row_h };
+        // …and the content ends where the ROWS do: an item taller than a FIXED row overflows it (`layoutGrid`). A zero
+        // row is the oracle's auto placeholder, and its items still size the grid.
+        let row_end = if is_auto(decl_row_h) || decl_row_h == 0.0 { ih } else { decl_row_h };
         if row_top + row_end > bottom {
             bottom = row_top + row_end;
         }
@@ -10004,11 +10001,11 @@ mod tests {
     // A marshalled grid buffer: the header, `specs` track sides (base kind/val, limit kind/val, is_fr, weight,
     // is_auto, base px, limit px) and `places` item placements (start line, end line, span) — the shape `nlShadowRun` writes.
     fn grid_buffer(literal: usize, repeat: (f64, usize, u8), specs: &[[f64; 9]], places: &[[f64; 3]]) -> Vec<f64> {
-        // …GRID_HEADER wide, and the tail is the two gaps' PROGRAMS (none) and the row floor flag. Built by hand here,
+        // …GRID_HEADER wide, and the tail is the two gaps' PROGRAMS (none). Built by hand here,
         // so the header's length is one of the three places a stride change has to be made — this test file is the
         // third, and it is the one that catches it.
         let mut g = vec![literal as f64, 0.0, 0.0, 0.0, 0.0, f64::NAN, repeat.0, repeat.1 as f64, repeat.2 as f64,
-                         f64::NAN, f64::NAN, 0.0];
+                         f64::NAN, f64::NAN];
         for spec in specs {
             g.extend_from_slice(spec);
         }

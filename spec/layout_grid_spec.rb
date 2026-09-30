@@ -38,6 +38,13 @@ RSpec.describe 'grid track sizing' do
     expect(widths_of('repeat(auto-fill, 100px) 50px', items: 1)).to eq([100])
   end
 
+  # A `grid-auto-rows` that is not one length — `minmax(1em, auto)` — is a content row: its literal is only a floor,
+  # and advancing by it clipped a taller item (Chrome: a two-line item is 40 tall at 20px lines, not 16).
+  it 'sizes a minmax() auto row by its content' do
+    boxes, = measure('<div id="g" style="display:grid;grid-auto-rows:minmax(1em,auto);font:16px/20px monospace"><div>c<br>c2</div></div>', ['#g'], style: 'margin:0')
+    expect(boxes[0][3]).to eq(40)
+  end
+
   it 'gives a fixed track its size and the rest to fr' do
     # Chrome: 250 / 750. The percentage resolves against the container, and `1fr`
     # takes what is left — not half each.

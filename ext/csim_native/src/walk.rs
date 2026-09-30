@@ -145,6 +145,16 @@ pub(crate) fn build(arena: &RealmArena, root: NodeId, basis: Basis, faces: &mut 
 
 type Step = Result<(), &'static str>;
 
+// A node's children in the FLAT tree (the style engine's `traversal_children`): a host's are its shadow root's, a slot
+// its assigned nodes where it has any, anything else its own.
+fn flat_children<'a>(arena: &'a RealmArena, node: &'a crate::dom::NodeData) -> &'a [NodeId] {
+    match node.shadow_root.and_then(|r| arena.get(r)) {
+        Some(root) => &root.children,
+        None if !node.assigned.is_empty() => &node.assigned,
+        None => &node.children,
+    }
+}
+
 // A pass's GENERATED CONTENT (`pseudoNodeFor`): each `::before` / `::after` box that renders, the element it is of, and
 // the text its `content` makes of the style engine's value. The box is the node the JS side registered for it
 // (`linkPseudoBox`), so both walks' records name the same box; its text is the one node the walk makes itself, since no
@@ -176,7 +186,7 @@ impl Generated {
         let mut stack = vec![root];
         while let Some(id) = stack.pop() {
             let Some(node) = arena.get(id) else { continue };
-            stack.extend(node.children.iter().copied());
+            stack.extend(flat_children(arena, node).iter().copied());
             if node.kind != NodeKind::Element || NO_GENERATED_CONTENT.contains(&&*node.local_name) {
                 continue;
             }
@@ -355,7 +365,8 @@ enum BaselineMode {
 }
 impl BaselineMode {
     fn of(plan: &FlexPlan) -> BaselineMode {
-        if plan.column { BaselineMode::Axis } else { BaselineMode::Keep }
+        // (…physically, as the JS walk decides it: a row whose main axis runs down reads as a column there)
+        if !plan.main_is_x { BaselineMode::Axis } else { BaselineMode::Keep }
     }
 }
 
@@ -840,19 +851,12 @@ impl GridTrack {
         if min { SIDE_MIN } else { SIDE_MAX }
     }
 }
-// The height of a grid's auto rows (`gridRowHeight`): the first px length its `grid-auto-rows` names, or None.
+// The height of a grid's auto rows (`gridRowHeight`): its `grid-auto-rows` where that is one plain length, else None —
+// a `minmax()`, a `fit-content()`, a list and a percentage are content rows here.
 fn grid_row_height(rows: &style::values::computed::ImplicitGridTracks) -> Option<f64> {
     use style_traits::ToCss;
     let text = rows.to_css_string();
-    let at = text.find("px")?;
-    let digits = text[..at].rfind(|c: char| !(c.is_ascii_digit() || c == '.' || c == '-')).map_or(0, |i| i + 1);
-    text[digits..at].parse().ok()
-}
-// …and whether that row is only a FLOOR its items may exceed (`gridRowGrows`): anything but one plain length.
-fn grid_row_grows(rows: &style::values::computed::ImplicitGridTracks) -> bool {
-    use style_traits::ToCss;
-    let text = rows.to_css_string();
-    !(text.ends_with("px") && text[..text.len() - 2].parse::<f64>().is_ok_and(|v| v >= 0.0))
+    text.strip_suffix("px").and_then(|v| v.parse::<f64>().ok()).filter(|&v| v >= 0.0)
 }
 // An item's declared column lines (`gridColumnPlacement`): its start and end LINE numbers (0 for `auto` or a name) and
 // an explicit `span N` (0 for none).
@@ -860,7 +864,12 @@ fn grid_column_placement(style: &ComputedValues) -> [f64; 3] {
     let pos = style.get_position();
     let line = |l: &style::values::computed::GridLine| if l.is_span || !l.ident.0.is_empty() { 0.0 } else { l.line_num as f64 };
     // (…a span to a NAMED line is none: `span b` counts no lines here, in either walk)
-    let span = |l: &style::values::computed::GridLine| if l.is_span && l.ident.0.is_empty() { l.line_num.max(1) as f64 } else { 0.0 };
+    // (…`span b` counts no lines here, in either walk; `span 2 b` counts its two)
+    let span = |l: &style::values::computed::GridLine| match (l.is_span, l.ident.0.is_empty()) {
+        (true, true) => l.line_num.max(1) as f64,
+        (true, false) if l.line_num > 1 => l.line_num as f64,
+        _ => 0.0,
+    };
     let (start, end) = (&pos.grid_column_start, &pos.grid_column_end);
     [line(start), line(end), if span(start) != 0.0 { span(start) } else { span(end) }]
 }
@@ -1185,27 +1194,61 @@ impl<'a> Walk<'a> {
     fn node(&self, id: NodeId) -> &'a crate::dom::NodeData {
         self.get(id).expect("a walked node is live")
     }
-    // …and its parent: a generated box's is the element it is of, which no tree says.
+    // …and its parent in the FLAT tree (`flatTreeParent`, the style engine's `traversal_parent`): a slotted node's slot,
+    // a shadow tree's top-level node's host — none for a host's child no slot takes — and a generated box's the
+    // element it is of, which no tree says.
     fn parent_of(&self, id: NodeId) -> Option<NodeId> {
-        match self.generated.boxes.get(&id) {
-            Some(&(origin, ..)) => Some(origin),
-            None => self.node(id).parent,
+        if let Some(&(origin, ..)) = self.generated.boxes.get(&id) {
+            return Some(origin);
+        }
+        let p = self.node(id).parent?;
+        let pn = self.get(p)?;
+        if pn.shadow_root.is_some() {
+            return self.node(id).assigned_slot.filter(|&s| self.arena.get(s).is_some());
+        }
+        match pn.host {
+            Some(host) if pn.kind != NodeKind::Element => Some(host),
+            _ => Some(p),
         }
     }
 
-    // The element's children the flow lays out, in order — the DOM's, since this walk declines a shadow tree, a slot
-    // and a box-less `display: contents` element (`layoutChildren` looks through them) — its `::before` box first
-    // and its `::after` box last; and a generated box's, its text.
-    fn children(&self, id: NodeId) -> impl Iterator<Item = NodeId> + 'a {
-        let arena = self.arena;
+    // The element's children the flow lays out, in order (`layoutChildren`) — its FLAT tree's: a host's shadow tree, a
+    // slot's assigned nodes (its own children where it has none) — its `::before` box first and its `::after` box last,
+    // and a generated box's, its text. A
+    // `display: contents` child generates NO box: it is replaced by its own children, in its place (CSS Display 3
+    // §3.1), so the plain name is the one that looks through — every box-level enumeration asks it.
+    fn children(&self, id: NodeId) -> std::vec::IntoIter<NodeId> {
+        let mut out = Vec::new();
+        self.push_children(id, &mut out);
+        out.into_iter()
+    }
+    fn push_children(&self, id: NodeId, out: &mut Vec<NodeId>) {
         let (first, kids, last) = match self.generated.boxes.get(&id) {
             Some(&(.., text)) => (text, &[][..], None),
             None => {
                 let [before, after] = self.generated.of.get(&id).copied().unwrap_or_default();
-                (before, &self.node(id).children[..], after)
+                (before, flat_children(self.arena, self.node(id)), after)
             }
         };
-        first.into_iter().chain(kids.iter().copied().filter(move |&c| arena.get(c).is_some())).chain(last)
+        for c in first.into_iter().chain(kids.iter().copied().filter(|&c| self.arena.get(c).is_some())).chain(last) {
+            if self.boxless(c) {
+                self.push_children(c, out);
+            } else {
+                out.push(c);
+            }
+        }
+    }
+    // Is `c` an element that generates no box of its own, but whose children stand in for it (`display: contents`)?
+    fn boxless(&self, c: NodeId) -> bool {
+        self.node(c).kind == NodeKind::Element && self.style(c).is_ok_and(|s| s.get_box().clone_display().is_contents())
+    }
+    // …and the box that lays an element out: its nearest ancestor that generates one (`layoutParent`).
+    fn layout_parent(&self, id: NodeId) -> Option<NodeId> {
+        let mut p = self.parent_of(id);
+        while let Some(at) = p.filter(|&at| self.boxless(at)) {
+            p = self.parent_of(at);
+        }
+        p
     }
 
     // One element's record, and its subtree's (`walkRecord`) — an in-flow box's, or an out-of-flow one's that `oof`
@@ -1254,9 +1297,6 @@ impl<'a> Walk<'a> {
         }
         if let Some(why) = declined_tag(tag) {
             return Err(why);
-        }
-        if node.shadow_root.is_some() || tag == "slot" {
-            return Err("shadow tree");
         }
         let b = style.get_box();
         let display = b.clone_display();
@@ -1468,9 +1508,6 @@ impl<'a> Walk<'a> {
                     let cd = cb.clone_display();
                     if cd.is_none() {
                         continue;
-                    }
-                    if cd.is_contents() {
-                        return Err("display contents");
                     }
                     if matches!(cb.clone_position(), Position::Absolute | Position::Fixed) {
                         blocks.push((c, Kid::OutOfFlow));
@@ -1825,13 +1862,13 @@ impl<'a> Walk<'a> {
 
     // Is the element's parent a flex or grid container?
     fn parent_is_item_container(&self, id: NodeId) -> Result<bool, &'static str> {
-        let Some(p) = self.parent_of(id).filter(|&p| self.node(p).kind == NodeKind::Element) else { return Ok(false) };
+        let Some(p) = self.layout_parent(id).filter(|&p| self.node(p).kind == NodeKind::Element) else { return Ok(false) };
         Ok(self.style(p)?.get_box().clone_display().is_item_container())
     }
 
     // Is the element an item of a flex container — its parent one, and itself in flow?
     fn flex_item(&self, id: NodeId) -> Result<bool, &'static str> {
-        let Some(p) = self.parent_of(id).filter(|&p| self.node(p).kind == NodeKind::Element) else { return Ok(false) };
+        let Some(p) = self.layout_parent(id).filter(|&p| self.node(p).kind == NodeKind::Element) else { return Ok(false) };
         Ok(matches!(self.style(p)?.get_box().clone_display().inside(), DisplayInside::Flex))
     }
 
@@ -1899,7 +1936,6 @@ impl<'a> Walk<'a> {
         let template = GridTemplate::of(&pos.grid_template_columns)?;
         let (items, oof) = self.box_items(id)?;
         let row_h = grid_row_height(&pos.grid_auto_rows);
-        let grows = row_h.is_some_and(|h| h != 0.0) && grid_row_grows(&pos.grid_auto_rows);
         let grid_start = self.grids.len() as i32;
         self.grids.extend([
             template.tracks.len() as f64,
@@ -1913,7 +1949,6 @@ impl<'a> Walk<'a> {
             template.repeat_kind,
             f64::NAN,
             f64::NAN,
-            grows as u8 as f64,
         ]);
         for t in &template.tracks {
             let base = t.floor.as_deref().unwrap_or(t).side(true);
@@ -2465,10 +2500,6 @@ impl<'a> Walk<'a> {
         if b.clone_display().is_none() || matches!(b.clone_position(), Position::Absolute | Position::Fixed) {
             return Ok(false);
         }
-        // (…and a box-less one is its children, in its place)
-        if b.clone_display().is_contents() {
-            return self.pct_height_child(c);
-        }
         let pos = cs.get_position();
         if [size_lp(&pos.height)?, size_lp(&pos.min_height)?, max_size_lp(&pos.max_height)?].iter().flatten().any(|lp| lp.has_percentage()) {
             return Ok(true);
@@ -2558,9 +2589,6 @@ impl<'a> Walk<'a> {
                     if d.is_none() {
                         continue;
                     }
-                    if d.is_contents() {
-                        return Err("display contents");
-                    }
                     if matches!(b.clone_position(), Position::Absolute | Position::Fixed) {
                         grid.oof.push(c);
                         continue;
@@ -2637,9 +2665,6 @@ impl<'a> Walk<'a> {
                     let d = b.clone_display();
                     if d.is_none() {
                         continue;
-                    }
-                    if d.is_contents() {
-                        return Err("display contents");
                     }
                     if matches!(b.clone_position(), Position::Absolute | Position::Fixed) {
                         grid.oof.push(c);
@@ -3020,13 +3045,28 @@ impl<'a> Walk<'a> {
     // The runs of `parent`'s children in the inline formatting context `g` builds (`nlGatherRuns`): `owner` the
     // element whose font, `white-space` and wrap mode its text takes — the block, or the inline box it is in.
     fn gather(&mut self, kids: &[NodeId], owner: &ComputedValues, font: &FontInfo, ws_mode: u8, wrap: u8, shift: f64, g: &mut Gather) -> Step {
-        let preserve = preserving(ws_mode);
-        let no_shy = owner.get_inherited_text().hyphens == Hyphens::None;
-        let owner_wraps = ws_mode != WS_NOWRAP && ws_mode != WS_PRE;
         for &c in kids {
             let cn = self.node(c);
             match cn.kind {
                 NodeKind::Text => {
+                    // (…a run spliced out of a box-less element still draws with THAT element's font, collapses by its
+                    // `white-space` and wraps by its rules — the inherited properties it hands its content, and only
+                    // those: `inlineStyleOwner`. Its `vertical-align` is none, so the shift stays the box's.)
+                    let spliced = match self.parent_of(c).filter(|&p| self.boxless(p)) {
+                        Some(p) => Some(self.style(p)?),
+                        None => None,
+                    };
+                    let spliced_font = match &spliced {
+                        Some(ps) => Some(self.font_info(ps, g.block)?),
+                        None => None,
+                    };
+                    let (owner, font, ws_mode, wrap) = match (&spliced, &spliced_font) {
+                        (Some(ps), Some(pf)) => (&**ps, pf, ws_mode_of(ps)?, wrap_mode(ps)),
+                        _ => (owner, font, ws_mode, wrap),
+                    };
+                    let preserve = preserving(ws_mode);
+                    let no_shy = owner.get_inherited_text().hyphens == Hyphens::None;
+                    let owner_wraps = ws_mode != WS_NOWRAP && ws_mode != WS_PRE;
                     // (…a preserved CR / FF is text that is not there, and a soft hyphen under `hyphens: none` no
                     // opportunity at all)
                     use std::borrow::Cow;
@@ -3112,13 +3152,7 @@ impl<'a> Walk<'a> {
         if let Some(why) = declined_tag(tag) {
             return Err(why);
         }
-        if node.shadow_root.is_some() || tag == "slot" {
-            return Err("shadow tree");
-        }
         let d = cs.get_box().clone_display();
-        if d.is_contents() {
-            return Err("display contents");
-        }
         // (…a `<br>` or a `<wbr>` a flex or grid container's run of bare text holds is still a line break, or a place for
         // one, in the anonymous item: the style engine blockifies it as the container's child, where the JS model keeps
         // it the inline it is)
@@ -3492,9 +3526,6 @@ impl<'a> Walk<'a> {
         if d.is_none() || matches!(b.clone_position(), Position::Absolute | Position::Fixed) || b.clone_float() != Float::None {
             return Ok(false);
         }
-        if d.is_contents() {
-            return Err("display contents");
-        }
         if matches!(d.outside(), DisplayOutside::Inline) {
             return Ok(matches!(d.inside(), DisplayInside::Flow) && self.holds_block_level(id)?);
         }
@@ -3565,7 +3596,7 @@ impl<'a> Walk<'a> {
         if self.clips_content(id, style) {
             return true;
         }
-        if let Some(p) = self.parent_of(id) {
+        if let Some(p) = self.layout_parent(id) {
             if let Ok(ps) = self.style(p) {
                 if ps.get_box().clone_display().is_item_container() {
                     return true;

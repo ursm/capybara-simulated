@@ -360,9 +360,42 @@ RSpec.describe 'walk parity' do
     HTML
   end
 
+  # A box-less `display: contents` element is replaced by its children, in its place, in every enumeration — a block's
+  # lines and blocks, a flex or grid container's items (each a formatting context of its own), a table's rows — and a
+  # run spliced out of one still draws with its font and collapses by its `white-space`; its edges and its
+  # `vertical-align` are nothing.
+  it 'builds through display: contents' do
+    expect_clean(parity(<<~HTML, '.ps::before { content: "gen"; display: block }'))
+      <p>a <span style="display: contents; font-size: 24px">big <b>bold</b></span> c</p>
+      <div><div style="display: contents"><div>block1</div>text<div>block2</div></div></div>
+      <div style="display: flex"><div style="display: contents"><div>i1</div><div>i2</div></div></div>
+      <div style="display: grid; grid-template-columns: 1fr 1fr"><span style="display: contents"><i>g1</i><i>g2</i></span></div>
+      <table><tr style="display: contents"><td>x</td></tr></table>
+      <p style="width: 80px"><span style="display: contents; white-space: nowrap">no wrap here at all</span></p>
+      <div class="ps" style="display: contents"></div>
+      <div><span style="display: contents; padding: 20px; vertical-align: 10px">pad</span></div>
+    HTML
+  end
+
+  # A SHADOW TREE is walked in the flat tree: a host's children are its shadow root's, a slot's its assigned nodes (its
+  # own fallback where none are assigned), and a slot — `display: contents` in the UA sheet — is replaced by them.
+  it 'builds shadow trees through their slots' do
+    s = simulated_session(->(_env) { [200, {'content-type' => 'text/html'}, [<<~HTML]] })
+      <!DOCTYPE html><body><div id="h"><span>light a</span><b slot="s">named</b> tail</div><p id="h2">x</p><script>
+        const r = document.getElementById('h').attachShadow({mode: 'open'});
+        r.innerHTML = '<style>p { margin: 4px; font-size: 20px }</style><p>before <slot name="s"></slot> after</p>' +
+                      '<div><slot>fallback</slot></div><slot name="none">fb text</slot>';
+        document.getElementById('h2').attachShadow({mode: 'open'}).innerHTML = '<div style="display: flex"><slot></slot><i>y</i></div>';
+      </script></body>
+    HTML
+    s.visit '/'
+    s.evaluate_script('document.body.offsetHeight')
+    expect_clean(s.evaluate_script('__csimWalkParityStats()'))
+  end
+
   it 'declines by name what it has not been taught' do
-    stats = parity('<div><span style="display: contents">x</span></div>')
+    stats = parity('<div style="display: -webkit-box">x</div>')
     expect(stats['compared']).to eq(0)
-    expect(stats['declined']).to include('display contents' => be_positive)
+    expect(stats['declined']).to include('-webkit-box' => be_positive)
   end
 end
