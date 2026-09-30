@@ -1790,15 +1790,16 @@ impl StyleEngine {
             return 0;
         }
         // (…an ancestor whose box can take size containment, which is what `content-visibility` applies to (CSS Contain 2
-        // §3.1): not one with no principal box, a non-atomic inline, a table or an internal table box — a hidden `<span>`,
-        // `<tr>` or `<td>` skips nothing, as Firefox shows.)
+        // §3.1): not one with no principal box, a non-atomic inline (a `ruby` container among them), a table, or an
+        // internal table or ruby box — a hidden `<span>`, `<tr>`, `<td>` or `<rt>` skips nothing, as Firefox shows.)
         let skips = |s: &ComputedValues| {
             let d = s.get_box().clone_display();
             s.get_box().content_visibility == ContentVisibility::Hidden
                 && !d.is_contents()
-                && !matches!(d.outside(), DisplayOutside::InternalTable)
+                && !matches!(d.outside(), DisplayOutside::InternalTable | DisplayOutside::InternalRuby)
                 && !matches!(d.inside(), DisplayInside::Table)
-                && !(matches!(d.outside(), DisplayOutside::Inline) && matches!(d.inside(), DisplayInside::Flow))
+                && !(matches!(d.outside(), DisplayOutside::Inline)
+                    && matches!(d.inside(), DisplayInside::Flow | DisplayInside::Ruby))
         };
         let skipped = in_arena(arena, self, || {
             let mut cur = TElement::traversal_parent(&StyleNode::new(arena, id));
