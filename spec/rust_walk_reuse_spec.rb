@@ -98,6 +98,29 @@ RSpec.describe 'the Rust walk puts back what did not change' do
     expect(got.map(&:last).max).to be <= 10                  # …the rows' own measures, not their paragraphs'
   end
 
+  # A web font arriving through `document.fonts` changes no node and no style — what it moves is the face generation —
+  # so a subtree nothing else changed in would be spliced back with its text measured in the fallback face: a pass under
+  # another generation splices nothing from the last. (Ahem: every glyph 1em, 20 glyphs at 16px.)
+  it 'measures an untouched subtree in a web font that arrives through document.fonts' do
+    ahem = File.binread(File.expand_path('wpt/fonts/Ahem.ttf', __dir__))
+    html = <<~HTML
+      <!DOCTYPE html><html><body style="margin:0;font:16px/20px sans-serif">
+      <div><div><span id="s" style="font-family: 'Webby', serif">mmmmmmmmmm iiiiiiiii</span></div></div>
+      <div id="other">o</div></body></html>
+    HTML
+    s = simulated_session(->(env) { env['PATH_INFO'] == '/f.ttf' ? [200, {'content-type' => 'font/ttf'}, [ahem]] : [200, {'content-type' => 'text/html'}, [html]] })
+    s.visit '/'
+    got = s.evaluate_async_script(<<~JS)
+      const done = arguments[0];
+      const warm = () => { for (let i = 0; i < 3; i++) { document.getElementById('other').firstChild.data += '!'; document.body.offsetHeight; } };
+      document.body.offsetHeight; warm();
+      const f = new FontFace('Webby', 'url(/f.ttf)');
+      document.fonts.add(f);
+      f.load().then(() => { warm(); done(document.getElementById('s').getBoundingClientRect().width); });
+    JS
+    expect(got).to eq(320)
+  end
+
   # A record names its comparison functions by their offset in the realm's math table, and the offset has to name the
   # same program from pass to pass: a table built afresh per pass put `min(50%, 150px)` where `min(50%, 120px)` had
   # been, the record looked unchanged, and the width measured for the one was put back for the other (Chrome: 100,

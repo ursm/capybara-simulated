@@ -204,19 +204,24 @@ fn layout_build(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgu
     let Some(arena) = d.realms.get(&cid) else { return };
     // (…splicing back from the last kept pass what did not change since it: `Walk::splice`; under the check, the pass is
     // walked whole as well, and the two held against each other)
-    let (maths, prior) = d.walk_reuse.entry(cid).or_default().for_walk();
+    let (maths, prior) = d.walk_reuse.entry(cid).or_default().for_walk(&generation);
     let (built, whole) = arena.faces.with(|faces| {
         faces.at_generation(&generation);
         let built = walk::build(arena, root, basis, faces, maths, prior);
         let whole = (check && prior.is_some()).then(|| walk::build(arena, root, basis, faces, maths, None));
         (built, whole)
     });
-    if let (Outcome::Built(spliced), Some(Outcome::Built(whole))) = (&built, &whole) {
-        if let Some(why) = walk_reuse::splice_mismatch(spliced, whole) {
-            let s = v8::String::new(scope, &format!("reuse mismatch: {why}")).unwrap();
-            rv.set(s.into());
-            return;
-        }
+    // (…a whole walk that could not build what the spliced one built — it asked for a face, a box, or declined — is a
+    // difference as much as a record that differs: the spliced one got past what the whole walk met)
+    let mismatch = match (&built, &whole) {
+        (Outcome::Built(spliced), Some(Outcome::Built(whole))) => walk_reuse::splice_mismatch(spliced, whole),
+        (Outcome::Built(_), Some(_)) => Some("the whole walk built no pass".to_owned()),
+        _ => None,
+    };
+    if let Some(why) = mismatch {
+        let s = v8::String::new(scope, &format!("reuse mismatch: {why}")).unwrap();
+        rv.set(s.into());
+        return;
     }
     let built = match built {
         Outcome::Built(built) => built,
@@ -246,7 +251,7 @@ fn layout_build(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgu
     // except for a pass that answers its text pieces, which a put-back measure does not hold.
     let reuse = dom(scope).walk_reuse.entry(cid).or_default();
     let streams = walk_reuse::Streams { inputs: &inputs, runs: &runs, run_texts: &run_texts, grids: &grids, inlines: &inlines, extents: &extents, spliced: &spliced };
-    let walk_reuse::Pass { roots, ends, ids, unchanged } = reuse.chunks(&streams, &generation);
+    let walk_reuse::Pass { roots, ends, ids, unchanged } = reuse.chunks(&streams);
     let built_inputs = inputs.clone();
     let mut measure = std::mem::take(&mut reuse.measure);
     let maths = std::mem::take(&mut reuse.maths);

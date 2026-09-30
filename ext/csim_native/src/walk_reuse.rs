@@ -78,8 +78,14 @@ impl WalkReuse {
     // The realm's math table for the walk to build a pass with — started afresh past its cap, the last pass forgotten
     // with it — and the last kept pass, for the walk to splice unchanged subtrees back from: asked ONCE, at the start of
     // the pass. (Asked again after the walk had pushed the table past the cap, it handed the layout an empty table under
-    // records naming offsets into the full one, and every `min()`-sized box of that pass came out 0.)
-    pub(crate) fn for_walk(&mut self) -> (&mut MathTable, Option<&Prior>) {
+    // records naming offsets into the full one, and every `min()`-sized box of that pass came out 0.) A pass under another
+    // face GENERATION (`natFontGen`: a web font arriving through `document.fonts` moves it and no node) keeps nothing
+    // of the last: a subtree spliced back from it would measure its text in the face it was measured in then.
+    pub(crate) fn for_walk(&mut self, generation: &str) -> (&mut MathTable, Option<&Prior>) {
+        if generation != self.generation {
+            self.generation = generation.to_owned();
+            self.last = None;
+        }
         if self.maths.values.len() > MATH_TABLE_CAP {
             self.maths = MathTable::default();
             self.last = None;
@@ -90,12 +96,8 @@ impl WalkReuse {
     // The chunks of this pass, by root record, for the layout to key its measures on — what `keep` needs of it — and
     // the records built as the last pass built them, as `[start, end)` ranges: every record under a subtree root but
     // the root, where the subtree is the same (`Pass::unchanged`).
-    pub(crate) fn chunks(&mut self, s: &Streams, generation: &str) -> Pass {
+    pub(crate) fn chunks(&mut self, s: &Streams) -> Pass {
         self.pass += 1;
-        if generation != self.generation {
-            self.generation = generation.to_owned();
-            self.last = None;
-        }
         let Some(ends) = subtree_ends(s.inputs) else { return Pass::default() };
         let n = s.inputs.len();
         let mut same = vec![false; n];
@@ -381,9 +383,9 @@ mod tests {
     #[test]
     fn a_table_grown_past_the_cap_holds_until_the_next_pass() {
         let mut reuse = WalkReuse::default();
-        reuse.for_walk().0.values.resize(MATH_TABLE_CAP + 10, 1.0);
+        reuse.for_walk("").0.values.resize(MATH_TABLE_CAP + 10, 1.0);
         assert_eq!(std::mem::take(&mut reuse.maths).values.len(), MATH_TABLE_CAP + 10);
         reuse.maths.values.resize(MATH_TABLE_CAP + 10, 1.0);
-        assert!(reuse.for_walk().0.values.is_empty());
+        assert!(reuse.for_walk("").0.values.is_empty());
     }
 }
