@@ -4037,31 +4037,6 @@ html/rendering/non-replaced-elements/the-fieldset-and-legend-elements/legend-blo
 - Legend's border-box should be centere on the fieldset border
 html/rendering/non-replaced-elements/the-fieldset-and-legend-elements/legend-display-rendering.html:
 - "== html/rendering/non-replaced-elements/the-fieldset-and-legend-elements/legend-display-rendering-ref.html"
-html/rendering/non-replaced-elements/the-fieldset-and-legend-elements/legend-display.html:
-- 'rendered legend with display: inline'
-- 'rendered legend with display: inline-block'
-- 'rendered legend with display: inline-block; columns:1'
-- 'rendered legend with display: inline-block; overflow:hidden'
-- 'rendered legend with display: inline-block; overflow:hidden;columns:1'
-- 'rendered legend with display: inline-flex'
-- 'rendered legend with display: inline-flex; columns:1'
-- 'rendered legend with display: inline-flex; overflow:hidden'
-- 'rendered legend with display: inline-flex; overflow:hidden;columns:1'
-- 'rendered legend with display: inline-grid'
-- 'rendered legend with display: inline-grid; columns:1'
-- 'rendered legend with display: inline-grid; overflow:hidden'
-- 'rendered legend with display: inline-grid; overflow:hidden;columns:1'
-- 'rendered legend with display: inline-table'
-- 'rendered legend with display: inline-table; columns:1'
-- 'rendered legend with display: inline-table; overflow:hidden'
-- 'rendered legend with display: inline-table; overflow:hidden;columns:1'
-- 'rendered legend with display: inline; columns:1'
-- 'rendered legend with display: inline; overflow:hidden'
-- 'rendered legend with display: inline; overflow:hidden;columns:1'
-- 'rendered legend with display: table'
-- 'rendered legend with display: table; columns:1'
-- 'rendered legend with display: table; overflow:hidden'
-- 'rendered legend with display: table; overflow:hidden;columns:1'
 html/rendering/non-replaced-elements/the-fieldset-and-legend-elements/legend-float-abspos.html:
 - dynamic changes to float
 - dynamic changes to position
@@ -4078,8 +4053,6 @@ html/rendering/non-replaced-elements/the-fieldset-and-legend-elements/legend-san
 - ".ruby"
 html/rendering/non-replaced-elements/the-fieldset-and-legend-elements/legend-tall.html:
 - "== html/rendering/non-replaced-elements/the-fieldset-and-legend-elements/legend-tall-ref.html"
-html/rendering/non-replaced-elements/the-fieldset-and-legend-elements/legend.html:
-- 'rendered-legend: width'
 html/rendering/non-replaced-elements/the-fieldset-and-legend-elements/min-inline-size.html:
 - 'horizontal-tb '
 - 'vertical-lr '

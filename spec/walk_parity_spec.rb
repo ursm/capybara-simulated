@@ -433,6 +433,19 @@ RSpec.describe 'walk parity' do
     HTML
   end
 
+  # A fieldset's RENDERED LEGEND is shrink-to-fit (`fit-content`) whatever its display, placed by its `justify-self`
+  # (`align`) or else by its margins, and never by a legacy `align` around it — the same record from both walks.
+  it 'builds a rendered legend as the JS walk does' do
+    expect_clean(parity(<<~HTML))
+      <fieldset><legend>plain</legend>body</fieldset>
+      <fieldset><legend align="center">centred</legend></fieldset>
+      <fieldset><legend align="right" style="display: flex">right</legend></fieldset>
+      <div align="center"><fieldset><legend>not moved</legend><p style="width: 50px">moved</p></fieldset></div>
+      <fieldset dir="rtl"><legend style="margin: 0 auto">auto</legend></fieldset>
+      <fieldset><legend style="float: left">floated</legend><legend>second</legend></fieldset>
+    HTML
+  end
+
   it 'declines by name what it has not been taught' do
     stats = parity('<div style="display: ruby">x</div>')
     expect(stats['compared']).to eq(0)

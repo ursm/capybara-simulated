@@ -1510,6 +1510,44 @@ impl<'a> Walk<'a> {
         p
     }
 
+    // How a rendered legend sits across its fieldset (`Input::legend_align`, `legendAlignOf`): by its `justify-self`
+    // where that is `left` / `center` / `right`, by its margins otherwise; 0 for any other element.
+    fn legend_align(&self, id: NodeId, style: &ComputedValues) -> u8 {
+        use style::values::specified::align::AlignFlags;
+        if !self.rendered_legend(id) {
+            return 0;
+        }
+        match style.get_position().justify_self.0.value() {
+            AlignFlags::LEFT => 2,
+            AlignFlags::CENTER => 3,
+            AlignFlags::RIGHT => 4,
+            _ => 1,
+        }
+    }
+
+    // Whether `id` is a fieldset's RENDERED LEGEND (HTML §15.3.13, `isRenderedLegend`): its first child `<legend>` that
+    // is neither floated nor absolutely positioned.
+    fn rendered_legend(&self, id: NodeId) -> bool {
+        let node = self.node(id);
+        if !node.is_html_named("legend") {
+            return false;
+        }
+        let Some(fieldset) = node.parent.and_then(|p| self.get(p)).filter(|p| p.is_html_named("fieldset")) else { return false };
+        for &c in &fieldset.children {
+            if !self.get(c).is_some_and(|n| n.is_html_named("legend")) {
+                continue;
+            }
+            let out_of_flow = self.style(c).is_ok_and(|cs| {
+                let b = cs.get_box();
+                b.clone_float() != Float::None || matches!(b.clone_position(), Position::Absolute | Position::Fixed)
+            });
+            if !out_of_flow {
+                return c == id;
+            }
+        }
+        false
+    }
+
     // Whether a table-internal box is an ORPHAN this walk lays out as a plain block (`nlOrphanTablePart`): no table
     // lays it out — none above it through nothing but row groups, by box (`nlUnderATable`) — and it is no row, nor a
     // row's cell.
@@ -1659,6 +1697,9 @@ impl<'a> Walk<'a> {
         // fit-content) — not on the pass root, sized from the width it is handed with no parent to mark it measured.
         use style::values::generics::length::GenericSize as Size;
         rec.width_kw = match pos.width {
+            // (…a fieldset's RENDERED LEGEND sizes an auto width as `fit-content`, shrink-to-fit whatever its display —
+            // `isRenderedLegend`)
+            Size::Auto if self.rendered_legend(id) => 3,
             Size::Auto | Size::LengthPercentage(_) => 0,
             Size::MinContent => 1,
             Size::MaxContent => 2,
@@ -1762,6 +1803,7 @@ impl<'a> Walk<'a> {
         rec.scrolls_x = scrolls(b.overflow_x);
         rec.scrolls_y = scrolls(b.overflow_y);
         rec.legacy_align = self.legacy_align(id);
+        rec.legend_align = self.legend_align(id, &style);
         // `position: relative` is a shift applied after the flow (§9.4.3) — not the pass root's, which is folded into
         // the origin it is handed.
         if parent >= 0 && position == Position::Relative && role != Role::Cell {
@@ -4758,7 +4800,7 @@ pub(crate) fn input_diff(js: &Input, js_maths: &[f64], rust: &Input, rust_maths:
         row_imposed, row_height, row_pct, row_rank, table_fixed, flex_stretch, flex_native, flex_dir_reverse,
         replaced, lays_out_children, ratio, ratio_only, shrinks_to_nothing, control_baseline, control_font_box,
         control_font_asc, intrinsic_w, intrinsic_h, cb_index, cb_rect, inset_top, inset_right, inset_bottom,
-        inset_left, auto_margins, legacy_align, indent_px, indent_frac, indent_hanging, indent_each_line,
+        inset_left, auto_margins, legacy_align, legend_align, indent_px, indent_frac, indent_hanging, indent_each_line,
         indent_spent, width_kw, height_kw,
     );
     out

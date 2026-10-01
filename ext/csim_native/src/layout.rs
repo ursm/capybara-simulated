@@ -491,6 +491,9 @@ pub(crate) struct Input {
     // HTML's LEGACY alignment on this box AS A CONTAINER (0 none, 1 center, 2 right, 3 left): `<center>` and
     // the `align` attribute move a narrower block-level descendant in its band the way `margin: auto` would.
     pub(crate) legacy_align: u8,
+    // …and, on a fieldset's RENDERED LEGEND, how it sits across its fieldset (`legendAlignOf`): 0 not one, 1 by its own
+    // margins as a block does, 2 left, 3 center, 4 right (its `justify-self`) — never by its container's legacy alignment.
+    pub(crate) legend_align: u8,
     // `text-indent` on a TEXT BLOCK: the px the indent narrows a line by, from the line's START edge (the
     // right one in rtl), resolved by the walk against the block's own content width. Which LINES take it: the
     // first, or with `hanging` every line BUT the first, and with `each_line` the first after every forced
@@ -575,7 +578,7 @@ impl InlineBox {
 }
 impl Input {
     pub(crate) fn same(&self, o: &Input) -> bool {
-        let Input { nid, parent, display, border_box, width, height, min_w, max_w, min_h, max_h, mt, mr, mb, ml, pt, pr, pb, pl, bt, br, bb, bl, height_adjoins, minh_adjoins, bottom_adjoins, run_start, run_count, strut_lh, strut_asc, float_kind, clear, takes_clearance, starts_bfc, flex_justify, flex_main_gap, flex_cross_align, flex_main_is_x, flex_wrap, flex_cross_flip, flex_align_content, flex_cross_gap, flex_main_reverse, flex_cross_far, has_replayed_oof, rel_x, rel_y, rel_pct, rel_x_px, rel_x_neg, measured_as_block, equal_share, chain_rel, chain_px, chain_shift, chain_math, rel_math, flex_item_auto, flex_baseline_asc, flex_line_nat, flex_line, out_of_flow, sp_x, sp_y, cell_col, cell_colspan, cell_rowspan, caption_side, rtl, text_align, anon_cross, ws_mode, item_auto_height, pushed_h_indefinite, grid_start, decl_w, decl_min_w, decl_max_w, flex_basis, flex_grow, decl_border_box, flex_shrink, flex_basis_cb, flex_basis_frac, flex_basis_math, pct_sizes, pct_px, pct_math, edge_frac, edge_px, edge_math, basis_w, inset_frac, inset_math, flex_main_gap_frac, flex_main_gap_math, flex_cross_gap_math, indent_math, flex_cross_gap_frac, flex_basis_kw, scrolls_x, scrolls_y, is_button, self_sizes, block_axis_is_x, decl_edges_x, decl_margin_x, height_from_outside, cell_pct, cell_min_content, cell_max_content, height_is_floor, cell_valign, cell_pct_h_child, anon_group, group_pct_h, pct_h_decl, row_imposed, row_height, row_pct, row_rank, table_fixed, flex_stretch, flex_native, flex_dir_reverse, replaced, lays_out_children, ratio, ratio_only, shrinks_to_nothing, control_baseline, control_font_box, control_font_asc, intrinsic_w, intrinsic_h, cb_index, inset_top, inset_right, inset_bottom, inset_left, auto_margins, legacy_align, indent_px, indent_frac, indent_hanging, indent_each_line, indent_spent, width_kw, height_kw, cb_rect } = self;
+        let Input { nid, parent, display, border_box, width, height, min_w, max_w, min_h, max_h, mt, mr, mb, ml, pt, pr, pb, pl, bt, br, bb, bl, height_adjoins, minh_adjoins, bottom_adjoins, run_start, run_count, strut_lh, strut_asc, float_kind, clear, takes_clearance, starts_bfc, flex_justify, flex_main_gap, flex_cross_align, flex_main_is_x, flex_wrap, flex_cross_flip, flex_align_content, flex_cross_gap, flex_main_reverse, flex_cross_far, has_replayed_oof, rel_x, rel_y, rel_pct, rel_x_px, rel_x_neg, measured_as_block, equal_share, chain_rel, chain_px, chain_shift, chain_math, rel_math, flex_item_auto, flex_baseline_asc, flex_line_nat, flex_line, out_of_flow, sp_x, sp_y, cell_col, cell_colspan, cell_rowspan, caption_side, rtl, text_align, anon_cross, ws_mode, item_auto_height, pushed_h_indefinite, grid_start, decl_w, decl_min_w, decl_max_w, flex_basis, flex_grow, decl_border_box, flex_shrink, flex_basis_cb, flex_basis_frac, flex_basis_math, pct_sizes, pct_px, pct_math, edge_frac, edge_px, edge_math, basis_w, inset_frac, inset_math, flex_main_gap_frac, flex_main_gap_math, flex_cross_gap_math, indent_math, flex_cross_gap_frac, flex_basis_kw, scrolls_x, scrolls_y, is_button, self_sizes, block_axis_is_x, decl_edges_x, decl_margin_x, height_from_outside, cell_pct, cell_min_content, cell_max_content, height_is_floor, cell_valign, cell_pct_h_child, anon_group, group_pct_h, pct_h_decl, row_imposed, row_height, row_pct, row_rank, table_fixed, flex_stretch, flex_native, flex_dir_reverse, replaced, lays_out_children, ratio, ratio_only, shrinks_to_nothing, control_baseline, control_font_box, control_font_asc, intrinsic_w, intrinsic_h, cb_index, inset_top, inset_right, inset_bottom, inset_left, auto_margins, legacy_align, legend_align, indent_px, indent_frac, indent_hanging, indent_each_line, indent_spent, width_kw, height_kw, cb_rect } = self;
         nid.bit_eq(&o.nid)
             && parent.bit_eq(&o.parent)
             && display.bit_eq(&o.display)
@@ -717,6 +720,7 @@ impl Input {
             && inset_left.bit_eq(&o.inset_left)
             && auto_margins.bit_eq(&o.auto_margins)
             && legacy_align.bit_eq(&o.legacy_align)
+            && legend_align.bit_eq(&o.legend_align)
             && indent_px.bit_eq(&o.indent_px)
             && indent_frac.bit_eq(&o.indent_frac)
             && indent_hanging.bit_eq(&o.indent_hanging)
@@ -8451,9 +8455,16 @@ fn block_child_across(n: &Input, cn: &Input, band_l: f64, band_r: f64, w: f64) -
     } else {
         (cn.auto_margins & 1 != 0, cn.auto_margins & 2 != 0)
     };
+    // (…a rendered legend with a `justify-self` sits by it, physically, its margins kept — `placeAcross`)
+    if (2..=4).contains(&cn.legend_align) {
+        let spare = (band_r - band_l - w - ml - mr).max(0.0);
+        let lead = ml + match cn.legend_align { 3 => spare / 2.0, 4 => spare, _ => 0.0 };
+        return Across { x: band_l + lead, margins: None };
+    }
     let distributes = cn.auto_margins & 3 != 0 && cn.float_kind == 0;
     if !distributes {
-        let lead = lm + legacy_align_shift(n.legacy_align, from_right, band_r - band_l - w - ml - mr);
+        let legacy = if cn.legend_align == 0 { n.legacy_align } else { 0 };
+        let lead = lm + legacy_align_shift(legacy, from_right, band_r - band_l - w - ml - mr);
         return Across { x: if from_right { band_r - w - lead } else { band_l + lead }, margins: None };
     }
     let (lead, trail) = auto_margin_split(lead_auto, trail_auto, lm, tm, band_r - band_l, w);
@@ -9003,6 +9014,7 @@ mod tests {
             inset_left: f64::NAN,
             auto_margins: 0,
             legacy_align: 0,
+            legend_align: 0,
             indent_px: 0.0,
             indent_hanging: false,
             indent_each_line: false,
