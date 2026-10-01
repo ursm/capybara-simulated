@@ -174,6 +174,25 @@ RSpec.describe 'letter-spacing and word-spacing reach the flow' do
     expect(width(js)).to eq(width(rust))
   end
 
+  # …and a `min()` / `max()` / `clamp()` of a percentage is no line through the font size: it is resolved at each size,
+  # whether the element declares it or inherits it. Chrome, 4 glyphs at 32px: `max(10%, 2px)` 12.8 declared and
+  # inherited from a 16px block, `clamp(1px, 10%, 2px)` 8, `min(10%, 2px)` inherited 8.
+  it 'resolves a min() / max() / clamp() of a percentage at each element\'s own font size, in both walks' do
+    plain = '<div><span id=t style="font-size:32px">abcd</span></div>'
+    {
+      '<div><span id=t style="font-size:32px;letter-spacing:max(10%, 2px)">abcd</span></div>'      => 12.8,
+      '<div><span id=t style="font-size:32px;letter-spacing:clamp(1px, 10%, 2px)">abcd</span></div>' => 8,
+      '<div style="letter-spacing:max(10%, 2px)"><span id=t style="font-size:32px">abcd</span></div>' => 12.8,
+      '<div style="letter-spacing:min(10%, 2px)"><span id=t style="font-size:32px">abcd</span></div>' => 8
+    }.each do |body, expected|
+      rust = page(body)
+      js = page(body)
+      js.execute_script('globalThis.__csimRustWalk = false')
+      base = width(page(plain))
+      expect([width(rust) - base, width(js) - base]).to all(be_within(0.01).of(expected)), body
+    end
+  end
+
   # ── what takes no spacing ──
   # Blink adds letter-spacing once per grapheme cluster and never after a character with no width
   # of its own: a soft hyphen, a zero-width space, a combining mark, and whatever follows a zero

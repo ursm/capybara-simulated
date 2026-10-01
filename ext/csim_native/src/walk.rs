@@ -1684,7 +1684,7 @@ impl<'a> Walk<'a> {
         }
         // (…the pass ROOT in a vertical writing mode takes its width from its content, which native sizes it by only
         // where it declares one: `resolve_width` would fill the room instead)
-        if parent < 0 && !style.writing_mode.is_horizontal() && size_lp(&style.get_position().width)?.is_none_or(|lp| lp.has_percentage()) {
+        if parent < 0 && !style.writing_mode.is_horizontal() && size_lp(&style.get_position().width).is_none_or(|lp| lp.has_percentage()) {
             return Err("vertical root");
         }
         let idx = self.inputs.len() as i32;
@@ -1739,12 +1739,12 @@ impl<'a> Walk<'a> {
         }
         rec.is_button = tag == "button";
         let sizes: [(Option<&LengthPercentage>, f64); 6] = [
-            (size_lp(&pos.width)?, self.basis.w),
-            (size_lp(&pos.height)?, self.basis.h),
-            (size_lp(&pos.min_width)?, self.basis.w),
-            (max_size_lp(&pos.max_width)?, self.basis.w),
-            (size_lp(&pos.min_height)?, self.basis.h),
-            (max_size_lp(&pos.max_height)?, self.basis.h),
+            (size_lp(&pos.width), self.basis.w),
+            (size_lp(&pos.height), self.basis.h),
+            (size_lp(&pos.min_width), self.basis.w),
+            (max_size_lp(&pos.max_width), self.basis.w),
+            (size_lp(&pos.min_height), self.basis.h),
+            (max_size_lp(&pos.max_height), self.basis.h),
         ];
         let mut slots = [f64::NAN; 6];
         for (k, (lp, basis)) in sizes.iter().enumerate() {
@@ -2473,7 +2473,7 @@ impl<'a> Walk<'a> {
                     let cs = self.style(*c)?;
                     let own = align_kw(cs.get_position().align_self.0);
                     let align = if own == Kw::Auto { align_kw(pos.align_items.0) } else { own };
-                    let auto = size_lp(&cs.get_position().height)?.is_none() && self.intrinsic(*c)?.is_none();
+                    let auto = size_lp(&cs.get_position().height).is_none() && self.intrinsic(*c)?.is_none();
                     // (…an `auto` margin in the block axis takes the room instead)
                     let m = cs.get_margin();
                     let auto_margin = m.margin_top.is_auto() || m.margin_bottom.is_auto();
@@ -2658,7 +2658,7 @@ impl<'a> Walk<'a> {
         for &col in &grid.columns {
             let span = span_attr(self.node(col).get_attr("span"), 1);
             let cs = self.style(col)?;
-            let (frac, px) = match size_lp(&cs.get_position().width)? {
+            let (frac, px) = match size_lp(&cs.get_position().width) {
                 Some(lp) => match plain_percentage(lp) {
                     Some(f) => (Some(f), None),
                     None if !lp.has_percentage() => (None, Some(length(lp)?)),
@@ -2907,9 +2907,9 @@ impl<'a> Walk<'a> {
                 let at = self.table_part(el, parent, crate::layout::DISPLAY_TABLE_ROW)?;
                 let style = self.style(el)?;
                 let r = &mut self.inputs[at as usize];
-                r.row_pct = size_lp(&style.get_position().height)?.and_then(plain_percentage).unwrap_or(f64::NAN);
+                r.row_pct = size_lp(&style.get_position().height).and_then(plain_percentage).unwrap_or(f64::NAN);
                 r.row_height = if r.row_pct.is_nan() {
-                    size_lp(&style.get_position().height)?.filter(|lp| !lp.has_percentage()).map_or(Ok(f64::NAN), length)?
+                    size_lp(&style.get_position().height).filter(|lp| !lp.has_percentage()).map_or(Ok(f64::NAN), length)?
                 } else {
                     f64::NAN
                 };
@@ -2942,7 +2942,7 @@ impl<'a> Walk<'a> {
                     }
                     self.record_as(*c, at, Role::Cell)?;
                     let cs = self.style(*c)?;
-                    (cell_valign(&cs), size_lp(&cs.get_position().width)?.and_then(plain_percentage).unwrap_or(f64::NAN), self.pct_height_child(*c)?)
+                    (cell_valign(&cs), size_lp(&cs.get_position().width).and_then(plain_percentage).unwrap_or(f64::NAN), self.pct_height_child(*c)?)
                 }
                 CellEl::Anon(run) => {
                     self.anonymous_cell(grid.table, at, table_style, run, cell.halves, *anon_cells)?;
@@ -3011,10 +3011,10 @@ impl<'a> Walk<'a> {
             return Ok(false);
         }
         let pos = cs.get_position();
-        if [size_lp(&pos.height)?, size_lp(&pos.min_height)?, max_size_lp(&pos.max_height)?].iter().flatten().any(|lp| lp.has_percentage()) {
+        if [size_lp(&pos.height), size_lp(&pos.min_height), max_size_lp(&pos.max_height)].iter().flatten().any(|lp| lp.has_percentage()) {
             return Ok(true);
         }
-        if size_lp(&pos.height)?.is_some() || matches!(b.walk_display().inside(), DisplayInside::Table) {
+        if size_lp(&pos.height).is_some() || matches!(b.walk_display().inside(), DisplayInside::Table) {
             return Ok(false);
         }
         self.pct_height_child(c)
@@ -4384,18 +4384,18 @@ fn contains_out_of_flow(style: &ComputedValues, node: &crate::dom::NodeData) -> 
 // A size's length-percentage, None for `auto` / `none` / a keyword — and for an `anchor-size()`, which takes the size of
 // an anchor neither layout models (CSS Anchor Positioning): the JS layout reads such a declaration as no size at all,
 // and so does this, alike (a shared gap — the fallback a function carries, and a real anchor's size, are backlog).
-fn size_lp(v: &style::values::computed::Size) -> Result<Option<&LengthPercentage>, &'static str> {
+fn size_lp(v: &style::values::computed::Size) -> Option<&LengthPercentage> {
     use style::values::generics::length::GenericSize as Size;
     match v {
-        Size::LengthPercentage(lp) => Ok(Some(&lp.0)),
-        _ => Ok(None),
+        Size::LengthPercentage(lp) => Some(&lp.0),
+        _ => None,
     }
 }
-fn max_size_lp(v: &style::values::computed::MaxSize) -> Result<Option<&LengthPercentage>, &'static str> {
+fn max_size_lp(v: &style::values::computed::MaxSize) -> Option<&LengthPercentage> {
     use style::values::generics::length::GenericMaxSize as MaxSize;
     match v {
-        MaxSize::LengthPercentage(lp) => Ok(Some(&lp.0)),
-        _ => Ok(None),
+        MaxSize::LengthPercentage(lp) => Some(&lp.0),
+        _ => None,
     }
 }
 
