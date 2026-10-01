@@ -5631,14 +5631,28 @@ module Capybara
       # The registration handle controlling `url` — the one whose serialized scope is the longest
       # prefix of `url` (spec "Match Service Worker Registration"; the scope embeds the origin, so
       # a cross-origin scope can't prefix-match). nil when no registration's scope matches.
-      private def sw_scope_match(url)
+      #
+      # …a registration whose worker has ACTIVATED counts from its activated marker on, before the
+      # client-side step that mirrors its scope into @sw_registrations (`sw_register_scope`) has
+      # resumed: from the marker on a navigation no longer waits for it (`sw_activating_controller_for`),
+      # and matched against the mirror alone, one landing in between went to the network uncontrolled.
+      # With `activating:`, one whose worker is still ACTIVATING counts too — what a client's CONTROLLER
+      # is (Handle Fetch sets a reserved client's active service worker to the registration's active
+      # worker before it asks whether that worker handles fetches at all, let alone waits for it).
+      private def sw_scope_match(url, activating: false)
         u = url.to_s
+        activated = @sw_activating_scopes.select do |_scope, handle|
+          activating || ((w = @workers[handle]) && @worker_init_lock.synchronize { w[:sw_activated] })
+        end
         best = nil
         best_len = -1
-        @sw_registrations.each do |scope, handle|
-          next unless u.start_with?(scope) && scope.length > best_len
-          best     = [handle, scope]
-          best_len = scope.length
+        [@sw_registrations, activated].each do |registrations|
+          registrations.each do |scope, handle|
+            next unless u.start_with?(scope) && scope.length > best_len
+
+            best     = [handle, scope]
+            best_len = scope.length
+          end
         end
         best
       end
@@ -5649,8 +5663,13 @@ module Capybara
       # still UNKNOWN (nil, racing the SW's initial eval) — resolved to `true` here so the frame
       # is controlled and routes; a controlled subresource fetch simply falls through to the
       # network if no handler materializes. Only a KNOWN-false (messaging/push-only) SW skips.
+      #
+      # A registration whose worker is still ACTIVATING controls the frame too: a navigation into it waits for the
+      # activation only where the worker handles fetches (`sw_activating_controller_for`), and one that does not —
+      # a worker with no fetch handler — was built at once, matched against the active registrations alone, and left
+      # uncontrolled (WPT unregister-then-register "does not resurrect the registration", 2 runs in 10).
       def sw_client_controller_for(url)
-        match = sw_scope_match(url) or return nil
+        match = sw_scope_match(url, activating: true) or return nil
         handle, scope = match
         w = @workers[handle] or return nil
         return nil unless w[:thread]&.alive?
