@@ -179,9 +179,8 @@ const TREES = [
                                        // are not something this driver can ever answer.
   'css/css-animations',                // `@keyframes` + `animation-*` — the timing model, the keyframe
   'css/css-transitions',               // cascade, the events, and the transition's own start / reverse /
-                                       // cancel rules. The driver models both as a VALUE (`js/src/
-                                       // animation.js`: at the moment a property is asked for, the
-                                       // animation's local time says where between its keyframes it is), and
+                                       // cancel rules. The style engine runs both, on the driver's virtual
+                                       // clock (`js/src/web-animations-engine.js`), and
                                        // until these were vendored the only thing measuring that was the
                                        // css-flexbox interpolation harness — which seeks with a negative
                                        // delay and so exercises exactly one point of the timing model.
