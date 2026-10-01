@@ -15,7 +15,7 @@ RSpec.describe 'structural-context invalidation' do
   # The style engine has invalidation of its own, which `style_engine_spec` holds against a full restyle.
   around do |example|
     saved = ENV['CSIM_STYLO']
-    ENV['CSIM_STYLO'] = nil
+    ENV['CSIM_STYLO'] = '0'
     example.run
   ensure
     ENV['CSIM_STYLO'] = saved

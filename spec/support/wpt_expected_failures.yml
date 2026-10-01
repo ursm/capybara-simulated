@@ -61,8 +61,6 @@ WebCryptoAPI/sign_verify/eddsa_small_order_points.https.any.js:
 - Ed25519 Verification checks with small-order key of order - Test 12
 - Ed25519 Verification checks with small-order key of order - Test 13
 - Ed25519 Verification checks with small-order key of order - Test 2
-css/css-animations/animate-with-background-color-hsla-to-legacy-rgb.html:
-- "== css/css-animations/animate-with-background-color-hsla-to-legacy-rgb-ref.html"
 css/css-animations/animate-with-background-color-oklch-001.html:
 - "== css/css-animations/animate-with-background-color-oklch-001-ref.html"
 css/css-animations/animate-with-background-color-oklch-002.html:
@@ -80,72 +78,23 @@ css/css-animations/animate-with-color-mix.html:
 css/css-animations/animate-with-relative-color.html:
 - Animate from absolute oklch to relative oklch
 - Animate from color keyword to relative rgb
-css/css-animations/animation-base-response-001.html:
-- var() references respond to custom property animation
-css/css-animations/animation-base-response-004.html:
-- Base is responsive to font-affecting appearing via setKeyframes
-css/css-animations/animation-composition-keyframes.html:
-- 'animation-composition: accumulate of property filter'
-- 'animation-composition: accumulate of property width'
-- 'animation-composition: add of property filter'
-- 'animation-composition: add of property width'
-- 'animation-composition: replace of property filter'
-- 'animation-composition: replace of property width'
-css/css-animations/animation-composition.html:
-- 'animation-composition: accumulate of property filter'
-- 'animation-composition: accumulate of property width'
-- 'animation-composition: add of property filter'
-- 'animation-composition: add of property width'
-- 'animation-composition: replace of property filter'
-- 'animation-composition: replace of property width'
-css/css-animations/animation-css-variable-dependent-property.html:
-- Dependent property updates correctly
-css/css-animations/animation-css-variable-in-keyframe-adjusted.html:
-- Animations reflect changes to variables on element
-- Animations reflect changes to variables on parent element
-css/css-animations/animation-delay-008.html:
-- "== css/css-animations/animation-common-ref.html"
 css/css-animations/animation-delay-011.html:
 - "== css/css-animations/animation-common-ref.html"
 css/css-animations/animation-important-002.html:
 - "== css/css-animations/animation-important-002-ref.html"
-css/css-animations/animation-important-with-transition.html:
-- "!important does not override a running CSS transition"
-- "!important overrides animation but not transition on the same element"
-- "!important overrides animation even when a CSS transition is concurrently running"
-- "!important overrides multiple animated properties even with a concurrent transition"
 css/css-animations/animation-pseudo-dynamic-001.html:
 - "== css/css-animations/animation-pseudo-dynamic-001-ref.html (both renderings blank)"
-css/css-animations/animation-restarted-after-changing-iteration-count-after-completion.html:
-- 'Setting ''animation-iteration-count: infinite'' after a CSS Animation is completed
-  restarts the animation.'
+css/css-animations/animation-restarted-after-changing-iteration-count-after-completion.html: HARNESS_ERROR
 css/css-animations/animationevent-marker-pseudoelement.html:
-- AnimationEvent should have the correct pseudoElement memeber
-css/css-animations/animationevent-pseudoelement.html:
 - AnimationEvent should have the correct pseudoElement memeber
 css/css-animations/cancel-animation-shadow-slot-invalidation.html:
 - "== css/reference/pass_if_pass_below.html (reference not vendored)"
-css/css-animations/computed-style-animation-parsing.html:
-- Test an animation name that is the same as a possible animation direction.
-- Test an animation name that is the same as a possible animation fill-mode.
-- Test an animation name that is the same as a possible animation timing-function.
-- Test an animation name that is the same as a possible running state.
-css/css-animations/dialog-animation.html:
-- CSS Animations tied to <dialog open> are canceled and restarted as the dialog is
-  hidden and shown
 css/css-animations/dialog-backdrop-animation.html:
 - CSS Animations on a <dialog> ::backdrop are canceled and restarted as the dialog
   is hidden and shown
-css/css-animations/display-contents-animates.html:
-- Animations inside of display:contents should work properly.
 css/css-animations/display-interpolation.html:
 - 'CSS Animations: property <display> from [block] to [none] at (1) should be [none]'
 - 'CSS Animations: property <display> from [block] to [none] at (1.5) should be [none]'
-- 'CSS Animations: property <display> from [inline] to [block] at (-0.3) should be
-  [inline]'
-- 'CSS Animations: property <display> from [inline] to [block] at (0) should be [inline]'
-- 'CSS Animations: property <display> from [inline] to [block] at (0.3) should be
-  [inline]'
 - 'CSS Animations: property <display> from [none] to [block] at (-1) should be [none]'
 - 'CSS Animations: property <display> from [none] to [block] at (0) should be [none]'
 - 'CSS Animations: property <display> from [none] to [none] at (-1) should be [none]'
@@ -154,18 +103,6 @@ css/css-animations/display-interpolation.html:
 - 'CSS Animations: property <display> from [none] to [none] at (0.9) should be [none]'
 - 'CSS Animations: property <display> from [none] to [none] at (1) should be [none]'
 - 'CSS Animations: property <display> from [none] to [none] at (1.5) should be [none]'
-- 'CSS Transitions with transition-behavior:allow-discrete: property <display> from
-  [inline] to [block] at (-0.3) should be [inline]'
-- 'CSS Transitions with transition-behavior:allow-discrete: property <display> from
-  [inline] to [block] at (0) should be [inline]'
-- 'CSS Transitions with transition-behavior:allow-discrete: property <display> from
-  [inline] to [block] at (0.3) should be [inline]'
-- 'CSS Transitions with transition-property:all and transition-behavor:allow-discrete:
-  property <display> from [inline] to [block] at (-0.3) should be [inline]'
-- 'CSS Transitions with transition-property:all and transition-behavor:allow-discrete:
-  property <display> from [inline] to [block] at (0) should be [inline]'
-- 'CSS Transitions with transition-property:all and transition-behavor:allow-discrete:
-  property <display> from [inline] to [block] at (0.3) should be [inline]'
 - 'CSS Transitions with transition: all: property <display> from [block] to [none]
   at (-1) should be [block]'
 - 'CSS Transitions with transition: all: property <display> from [block] to [none]
@@ -178,40 +115,11 @@ css/css-animations/display-interpolation.html:
 - 'CSS Transitions: property <display> from [block] to [none] at (0) should be [block]'
 - 'CSS Transitions: property <display> from [block] to [none] at (0.1) should be [block]'
 - 'CSS Transitions: property <display> from [block] to [none] at (0.9) should be [block]'
-- 'Web Animations: property <display> from [block] to [none] at (1) should be [none]'
-- 'Web Animations: property <display> from [block] to [none] at (1.5) should be [none]'
-- 'Web Animations: property <display> from [inline] to [block] at (-0.3) should be
-  [inline]'
-- 'Web Animations: property <display> from [inline] to [block] at (0) should be [inline]'
-- 'Web Animations: property <display> from [inline] to [block] at (0.3) should be
-  [inline]'
-- 'Web Animations: property <display> from [none] to [block] at (-1) should be [none]'
-- 'Web Animations: property <display> from [none] to [block] at (0) should be [none]'
-- 'Web Animations: property <display> from [none] to [none] at (-1) should be [none]'
-- 'Web Animations: property <display> from [none] to [none] at (0) should be [none]'
-- 'Web Animations: property <display> from [none] to [none] at (0.1) should be [none]'
-- 'Web Animations: property <display> from [none] to [none] at (0.9) should be [none]'
-- 'Web Animations: property <display> from [none] to [none] at (1) should be [none]'
-- 'Web Animations: property <display> from [none] to [none] at (1.5) should be [none]'
-css/css-animations/display-none-prevents-starting-in-subtree.html:
-- 'Elements in a "display: none" tree cannot start CSS Animations.'
 css/css-animations/inheritance-pseudo-element.html:
 - "== css/css-animations/inheritance-pseudo-element-ref.html (both renderings blank)"
-css/css-animations/jump-start-animation-before-phase.html:
-- "== css/css-animations/jump-start-animation-before-phase-ref.html"
-css/css-animations/keyframes-unrelated-custom-property.html:
-- Unrelated custom properties do not conflict with each other
-css/css-animations/missing-values-first-keyframe.html:
-- Missing property values in the first keyframe are correctly interpolated from a
-  neutral keyframe value
-css/css-animations/missing-values-last-keyframe.html:
-- Missing property values in the last keyframe are correctly interpolated from a neutral
-  keyframe value
 css/css-animations/parent-after-change-style-pseudo-element-flicker.html:
 - "== css/css-animations/parent-after-change-style-pseudo-element-flicker-ref.html
   (both renderings blank)"
-css/css-animations/parsing/animation-computed.html:
-- Animation with a delay but no duration
 css/css-animations/parsing/animation-delay-computed.html:
 - Property animation-delay value 'calc(10s + (sign(2cqw - 10px) * 5s))'
 css/css-animations/parsing/animation-delay-invalid.html:
@@ -227,10 +135,7 @@ css/css-animations/parsing/animation-direction-invalid.html:
 - e.style['animation-direction'] = "reverse, initial" should not set the property
   value
 css/css-animations/parsing/animation-duration-computed.html:
-- Property animation-duration value 'auto'
-- Property animation-duration value 'auto, auto'
 - Property animation-duration value 'calc(10s + (sign(2cqw - 10px) * 5s))'
-- Resolved value of animation-duration:auto with animation-timeline:auto
 css/css-animations/parsing/animation-duration-invalid.html:
 - e.style['animation-duration'] = "1s 2s" should not set the property value
 - e.style['animation-duration'] = "1s, initial" should not set the property value
@@ -253,12 +158,6 @@ css/css-animations/parsing/animation-iteration-count-invalid.html:
 - e.style['animation-iteration-count'] = "auto" should not set the property value
 - e.style['animation-iteration-count'] = "initial, 4" should not set the property
   value
-css/css-animations/parsing/animation-name-computed.html:
-- Property animation-name value '"---\22---"'
-- Property animation-name value '"multi word string"'
-- Property animation-name value '"something"'
-css/css-animations/parsing/animation-name-edge-cases.html:
-- "== css/css-animations/parsing/animation-name-edge-cases-ref.html"
 css/css-animations/parsing/animation-name-invalid.html:
 - e.style['animation-name'] = "\"\"" should not set the property value
 - e.style['animation-name'] = "default, two" should not set the property value
@@ -279,11 +178,6 @@ css/css-animations/parsing/animation-play-state-invalid.html:
 - e.style['animation-play-state'] = "paused running" should not set the property value
 - e.style['animation-play-state'] = "paused, initial" should not set the property
   value
-css/css-animations/parsing/animation-range-end-computed.html:
-- Property animation-range-end value 'COVER 100%'
-- Property animation-range-end value 'cover 100%'
-- Property animation-range-end value 'exit 1%, cover 2%, contain 100%'
-- Property animation-range-end value 'exit calc(41% + 1%)'
 css/css-animations/parsing/animation-range-end-invalid.html:
 - e.style['animation-range-end'] = "1s / 2s" should not set the property value
 - e.style['animation-range-end'] = "1s 2s" should not set the property value
@@ -404,11 +298,6 @@ css/css-animations/parsing/animation-range-shorthand.html:
 - e.style['animation-range'] = "thing 100%" should not set the property value
 - e.style['animation-range'] = "thing 100px" should not set the property value
 - e.style['animation-range'] = "thing 42%" should not set the property value
-css/css-animations/parsing/animation-range-start-computed.html:
-- Property animation-range-start value 'COVER 0%'
-- Property animation-range-start value 'cover 0%'
-- Property animation-range-start value 'exit 1%, cover 2%, contain 0%'
-- Property animation-range-start value 'exit calc(41% + 1%)'
 css/css-animations/parsing/animation-range-start-invalid.html:
 - e.style['animation-range-start'] = "50% contain" should not set the property value
 - e.style['animation-range-start'] = "50% cover" should not set the property value
@@ -505,10 +394,6 @@ css/css-animations/parsing/keyframes-name-invalid.html:
 - 'invalid: @keyframes revert-layer { }'
 - 'invalid: @keyframes revert-layer, four { }'
 - 'invalid: @keyframes unset { }'
-css/css-animations/pending-style-changes-001.html:
-- Document::getAnimations() should be able to see a style-created CSS animation immediately
-css/css-animations/responsive/column-rule-color-001.html:
-- column-rule-color responds to currentColor changes
 css/css-animations/responsive/fill-forwards-viewport-units.html:
 - 'fill: forwards with viewport units updates on viewport resize'
 css/css-animations/revert-rule-keyframes-dynamic.html:
@@ -517,94 +402,26 @@ css/css-animations/revert-rule-keyframes-dynamic.html:
 css/css-animations/revert-rule-keyframes.html:
 - revert-rule in keyframes (--x)
 - revert-rule in keyframes (width)
-css/css-animations/stability/animation-event-destroy-renderer.html:
-- Triggering the cancel of an animation during event handling does not crash.
-- Triggering the cancel of an animation during event handling does not crash.
 css/css-animations/svg-transform-animation.html:
 - "== css/css-animations/svg-transform-animation-ref.html"
 css/css-animations/svg-use-transform-keyframes-custom-property-override.html:
 - "== css/css-animations/svg-use-transform-keyframes-custom-property-override-ref.html
   (both renderings blank)"
-css/css-animations/text-decoration-inset-auto.html:
-- 'CSS Animations: property <text-decoration-inset> from [0px] to [10px -20px] at
-  (-1) should be [-10px 20px]'
-- 'CSS Animations: property <text-decoration-inset> from [0px] to [10px -20px] at
-  (0.125) should be [1.25px -2.5px]'
-- 'CSS Animations: property <text-decoration-inset> from [0px] to [10px -20px] at
-  (0.875) should be [8.75px -17.5px]'
-- 'CSS Animations: property <text-decoration-inset> from [0px] to [10px -20px] at
-  (1.5) should be [15px -30px]'
-- 'CSS Animations: property <text-decoration-inset> from [auto] to [10px -20px] at
-  (-1) should be [NaNpx NaNpx]'
-- 'CSS Animations: property <text-decoration-inset> from [auto] to [10px -20px] at
-  (0) should be [NaNpx]'
-- 'CSS Animations: property <text-decoration-inset> from [auto] to [10px -20px] at
-  (0.125) should be [NaNpx NaNpx]'
-- 'CSS Animations: property <text-decoration-inset> from [auto] to [10px -20px] at
-  (0.875) should be [NaNpx NaNpx]'
-- 'CSS Animations: property <text-decoration-inset> from [auto] to [10px -20px] at
-  (1.5) should be [NaNpx NaNpx]'
-- 'CSS Transitions with transition: all: property <text-decoration-inset> from [0px]
-  to [10px -20px] at (-1) should be [-10px 20px]'
-- 'CSS Transitions with transition: all: property <text-decoration-inset> from [0px]
-  to [10px -20px] at (0) should be [0px]'
-- 'CSS Transitions with transition: all: property <text-decoration-inset> from [0px]
-  to [10px -20px] at (0.125) should be [1.25px -2.5px]'
-- 'CSS Transitions with transition: all: property <text-decoration-inset> from [0px]
-  to [10px -20px] at (0.875) should be [8.75px -17.5px]'
-- 'CSS Transitions with transition: all: property <text-decoration-inset> from [0px]
-  to [10px -20px] at (1.5) should be [15px -30px]'
-- 'CSS Transitions with transition: all: property <text-decoration-inset> from [auto]
-  to [10px -20px] at (-1) should be [NaNpx NaNpx]'
-- 'CSS Transitions with transition: all: property <text-decoration-inset> from [auto]
-  to [10px -20px] at (0) should be [NaNpx]'
-- 'CSS Transitions with transition: all: property <text-decoration-inset> from [auto]
-  to [10px -20px] at (0.125) should be [NaNpx NaNpx]'
-- 'CSS Transitions with transition: all: property <text-decoration-inset> from [auto]
-  to [10px -20px] at (0.875) should be [NaNpx NaNpx]'
-- 'CSS Transitions with transition: all: property <text-decoration-inset> from [auto]
-  to [10px -20px] at (1.5) should be [NaNpx NaNpx]'
-- 'CSS Transitions: property <text-decoration-inset> from [0px] to [10px -20px] at
-  (-1) should be [-10px 20px]'
-- 'CSS Transitions: property <text-decoration-inset> from [0px] to [10px -20px] at
-  (0) should be [0px]'
-- 'CSS Transitions: property <text-decoration-inset> from [0px] to [10px -20px] at
-  (0.125) should be [1.25px -2.5px]'
-- 'CSS Transitions: property <text-decoration-inset> from [0px] to [10px -20px] at
-  (0.875) should be [8.75px -17.5px]'
-- 'CSS Transitions: property <text-decoration-inset> from [0px] to [10px -20px] at
-  (1.5) should be [15px -30px]'
-- 'CSS Transitions: property <text-decoration-inset> from [auto] to [10px -20px] at
-  (-1) should be [NaNpx NaNpx]'
-- 'CSS Transitions: property <text-decoration-inset> from [auto] to [10px -20px] at
-  (0) should be [NaNpx]'
-- 'CSS Transitions: property <text-decoration-inset> from [auto] to [10px -20px] at
-  (0.125) should be [NaNpx NaNpx]'
-- 'CSS Transitions: property <text-decoration-inset> from [auto] to [10px -20px] at
-  (0.875) should be [NaNpx NaNpx]'
-- 'CSS Transitions: property <text-decoration-inset> from [auto] to [10px -20px] at
-  (1.5) should be [NaNpx NaNpx]'
-- 'Web Animations: property <text-decoration-inset> from [0px] to [10px -20px] at
-  (-1) should be [-10px 20px]'
-- 'Web Animations: property <text-decoration-inset> from [0px] to [10px -20px] at
-  (0.125) should be [1.25px -2.5px]'
-- 'Web Animations: property <text-decoration-inset> from [0px] to [10px -20px] at
-  (0.875) should be [8.75px -17.5px]'
-- 'Web Animations: property <text-decoration-inset> from [0px] to [10px -20px] at
-  (1.5) should be [15px -30px]'
-- 'Web Animations: property <text-decoration-inset> from [auto] to [10px -20px] at
-  (-1) should be [NaNpx NaNpx]'
-- 'Web Animations: property <text-decoration-inset> from [auto] to [10px -20px] at
-  (0) should be [NaNpx]'
-- 'Web Animations: property <text-decoration-inset> from [auto] to [10px -20px] at
-  (0.125) should be [NaNpx NaNpx]'
-- 'Web Animations: property <text-decoration-inset> from [auto] to [10px -20px] at
-  (0.875) should be [NaNpx NaNpx]'
-- 'Web Animations: property <text-decoration-inset> from [auto] to [10px -20px] at
-  (1.5) should be [NaNpx NaNpx]'
-- "`auto` computes to a length when interpolating with length values"
 css/css-animations/translation-animation-subpixel-offset.html:
 - "== css/css-animations/translation-animation-subpixel-offset-ref.html"
+css/css-flexbox/abspos/flex-abspos-staticpos-align-self-vertWM-001.html:
+- ".container > div 10"
+- ".container > div 23"
+- ".container > div 24"
+- ".container > div 9"
+css/css-flexbox/abspos/flex-abspos-staticpos-align-self-vertWM-004.html:
+- ".container > div 10"
+- ".container > div 21"
+- ".container > div 22"
+- ".container > div 9"
+css/css-flexbox/abspos/flex-abspos-staticpos-justify-content-vertWM-001.html:
+- ".container > div 12"
+- ".container > div 24"
 css/css-flexbox/align-content-rounding.html:
 - The last item should match the end edge.
 css/css-flexbox/align-items-baseline-column-horz.html:
@@ -855,7 +672,9 @@ css/css-flexbox/balance/flex-line-count-valid.html:
 css/css-flexbox/balance/flex-wrap-computed.html:
 - Property flex-wrap value 'balance wrap'
 - Property flex-wrap value 'balance wrap-reverse'
+- Property flex-wrap value 'balance'
 - Property flex-wrap value 'wrap balance'
+- Property flex-wrap value 'wrap-reverse balance'
 css/css-flexbox/balance/flex-wrap-invalid.html:
 - e.style['flex-wrap'] = "2 balance wrap" should not set the property value
 - e.style['flex-wrap'] = "auto" should not set the property value
@@ -978,19 +797,16 @@ css/css-flexbox/flex-shorthand-calc.html:
 - e.style['flex'] = "sign(1em - 1px) sibling-index()" should set flex-basis
 - e.style['flex'] = "sign(1em - 1px) sibling-index()" should set flex-grow
 - e.style['flex'] = "sign(1em - 1px) sibling-index()" should set flex-shrink
-css/css-flexbox/flex-shorthand-flex-basis-middle.html:
-- ".flexbox 1"
-- ".flexbox 2"
 css/css-flexbox/flex-wrap-column-grow.html:
 - Single flex-grow item fills multi-line column container height
 - flex-grow distributes space proportionally
 - flex-grow respects max-height on individual items
+css/css-flexbox/flexbox-justify-content-wmvert-003.html:
+- ".flexitem 3"
+- ".flexitem 4"
 css/css-flexbox/flexitem-stretch-image.html:
 - ".flexbox 1"
 css/css-flexbox/getcomputedstyle/flexbox_computedstyle_min-auto-size.html:
-- Computed min-width/min-height of specified auto for flex item inside display:contents.
-- Computed min-width/min-height of specified auto inside display:none which would
-  otherwise have been a flex item.
 - Computed min-width/min-height of specified auto with display:none which would otherwise
   have been a flex item.
 css/css-flexbox/image-as-flexitem-size-001.html:
@@ -1172,7 +988,6 @@ css/css-flexbox/parsing/flex-basis-invalid.html:
 - e.style['flex-basis'] = "none" should not set the property value
 css/css-flexbox/parsing/flex-computed.html:
 - Property flex value '1 1 calc(10px + (sign(20cqw - 10px) * 5px))'
-- Property flex value 'calc(-1) calc(-1) 0'
 - Property flex value 'calc(10 + (sign(20cqw - 10px) * 5)) calc(10 + (sign(20cqw -
   10px) * 5)) 1px'
 css/css-flexbox/parsing/flex-direction-invalid.html:
@@ -1221,39 +1036,6 @@ css/css-font-loading/fontface-font-variation-settings-persisted-js-api.html:
 - Test FontFace variationSettings property
 css/css-font-loading/fontface-from-arraybuffer.html:
 - "== css/css-font-loading/fontface-from-arraybuffer-ref.html"
-css/css-logical/animation-001.html:
-- Animations update when the writing-mode is changed through a CSS variable
-- Logical longhands win over physical shorthands
-css/css-logical/animation-002.html:
-- Animations update when the writing-mode is changed through a CSS variable
-- Logical shorthand with variable references animates correctly
-css/css-logical/animation-004.html:
-- The number of interpolating properties can be decreased when the writing-mode is
-  changed
-- The number of interpolating properties can be increased when the writing-mode is
-  changed
-- Transitions from logical to physical update when the direction is changed
-- Transitions from physical to logical update when the direction is changed
-- Transitions update when the writing-mode is changed through a CSS variable
-css/css-logical/inheritance.html:
-- Property block-size has initial value 0px
-- Property border-block-end-width has initial value 3px
-- Property border-block-start-width has initial value 3px
-- Property border-inline-end-width has initial value 3px
-- Property border-inline-start-width has initial value 3px
-- Property inline-size has initial value 294px
-css/css-logical/logicalprops-with-deferred-writing-mode.html:
-- Writing mode with 'initial'
-- Writing mode with 'revert-layer'
-- Writing mode with nested variables
-- Writing mode with variable
-css/css-logical/logicalprops-with-variables-revert.html:
-- margin-inline - margin-left
-- margin-inline - margin-right
-- padding-block - padding-bottom
-- padding-block - padding-top
-- padding-block-two - padding-bottom
-- padding-block-two - padding-top
 css/css-logical/logicalprops-with-variables.html:
 - Logical longhands with variables - margin-inline
 - Logical longhands with variables - margin-inline-end
@@ -1267,11 +1049,6 @@ css/css-logical/parsing/border-block-style-invalid.html:
 css/css-logical/parsing/border-block-valid.html:
 - e.style['border-block-end'] = "calc(10px - 0.5em) dotted red" should set the property
   value
-css/css-logical/parsing/border-block-width-computed.html:
-- Property border-block-end-width value 'thick'
-- Property border-block-start-width value 'medium'
-- Property border-block-start-width value 'thin'
-- width is zero if the border block style is none or hidden
 css/css-logical/parsing/border-block-width-invalid.html:
 - e.style['border-block-end-width'] = "10" should not set the property value
 - e.style['border-block-end-width'] = "30%" should not set the property value
@@ -1295,11 +1072,6 @@ css/css-logical/parsing/border-inline-style-invalid.html:
 css/css-logical/parsing/border-inline-valid.html:
 - e.style['border-inline-end'] = "calc(10px - 0.5em) dotted red" should set the property
   value
-css/css-logical/parsing/border-inline-width-computed.html:
-- Property border-inline-end-width value 'thick'
-- Property border-inline-start-width value 'medium'
-- Property border-inline-start-width value 'thin'
-- width is zero if the border block style is none or hidden
 css/css-logical/parsing/border-inline-width-invalid.html:
 - e.style['border-inline-end-width'] = "10" should not set the property value
 - e.style['border-inline-end-width'] = "30%" should not set the property value
@@ -1330,14 +1102,9 @@ css/css-logical/parsing/padding-block-inline-computed.html:
 - Property padding-inline-start value 'calc(10% - 40px)'
 css/css-shadow/part/exportparts-layered.html:
 - "== css/css-shadow/part/exportparts-layered.ref.html"
-css/css-shadow/part/interaction-with-placeholder.html:
-- "== css/css-shadow/part/interaction-with-placeholder-ref.html"
 css/css-shadow/part/interaction-with-pseudo-elements.html:
-- "::after in selected host is styled"
-- "::before in selected host is styled"
 - "::first-letter in selected host is styled"
 - "::first-line in selected host is styled"
-- "::placeholder in selected host is styled"
 - "::selection in selected host is styled"
 css/css-shadow/part/invalidation-part-pseudo.html:
 - Invalidation of nested part on hover
@@ -1350,8 +1117,6 @@ css/css-shadow/part/multiple-scopes.html:
 - pseudo-element selector alone matches from inner scope
 - selector with ::part(exported name) does not match from inner scope that exports
   the part
-css/css-shadow/part/part-mutation-pseudo.html:
-- Part in selected host changed color
 css/css-shadow/part/pseudo-classes-after-part.html:
 - '"::part(mypart):active" should be a valid selector'
 - '"::part(mypart):active-view-transition" should be a valid selector'
@@ -1455,18 +1220,6 @@ css/css-shadow/part/pseudo-elements-after-part.html:
                     font-size: 86px;
                   } and <div part=mypart>X<br>X</div>
 - |-
-  ::part styles with ::part(mypart)::after {
-                    display: block;
-                    content: "";
-                    height: 77px;
-                  } and <div part='mypart'></div>
-- |-
-  ::part styles with ::part(mypart)::before {
-                    display: block;
-                    content: "";
-                    height: 46px;
-                  } and <div part='mypart'></div>
-- |-
   ::part styles with ::part(mypart)::details-content {
                     height: 371px;
                   } and <details part='mypart'><summary style="height:47px">summary</summary>details</details>
@@ -1483,16 +1236,13 @@ css/css-shadow/part/pseudo-elements-after-part.html:
                     font: 63px/1.0 Ahem;
                     content: "X";
                   } and <li style="list-style-position: inside" part="mypart"></li>
-- computed style for ::part()::after
 - computed style for ::part()::backdrop
-- computed style for ::part()::before
 - computed style for ::part()::details-content
 - computed style for ::part()::file-selector-button
 - computed style for ::part()::first-letter
 - computed style for ::part()::first-line
 - computed style for ::part()::grammar-error
 - computed style for ::part()::highlight(myhighlight)
-- computed style for ::part()::placeholder
 - computed style for ::part()::search-text
 - computed style for ::part()::selection
 - computed style for ::part()::spelling-error
@@ -1527,109 +1277,7 @@ css/css-transforms/3dtransform-and-filter-no-perspective-001.html:
 css/css-transforms/animation/canvas-webgl-translate-in-animation.html:
 - "== css/css-transforms/animation/canvas-webgl-translate-in-animation-ref.html (both
   renderings blank)"
-css/css-transforms/animation/list-interpolation.html:
-- 'CSS Animations: property <transform> from [rotate3d(1, 1, 1, -60deg) translateX(100px)]
-  to [rotate3d(2, 2, 2, 60deg) translateY(200px)] at (0.25) should be [rotate3d(1,
-  1, 1, -30deg) translate(75px, 50px)]'
-- 'CSS Animations: property <transform> from [rotateX(90deg) translateX(100px)] to
-  [rotate3d(50, 0, 0, 180deg) translateY(200px)] at (0.25) should be [rotateX(112.5deg)
-  translate(75px, 50px)]'
-- 'CSS Transitions with transition: all: property <transform> from [rotate3d(1, 1,
-  1, -60deg) translateX(100px)] to [rotate3d(2, 2, 2, 60deg) translateY(200px)] at
-  (0.25) should be [rotate3d(1, 1, 1, -30deg) translate(75px, 50px)]'
-- 'CSS Transitions with transition: all: property <transform> from [rotateX(90deg)
-  translateX(100px)] to [rotate3d(50, 0, 0, 180deg) translateY(200px)] at (0.25) should
-  be [rotateX(112.5deg) translate(75px, 50px)]'
-- 'CSS Transitions: property <transform> from [rotate3d(1, 1, 1, -60deg) translateX(100px)]
-  to [rotate3d(2, 2, 2, 60deg) translateY(200px)] at (0.25) should be [rotate3d(1,
-  1, 1, -30deg) translate(75px, 50px)]'
-- 'CSS Transitions: property <transform> from [rotateX(90deg) translateX(100px)] to
-  [rotate3d(50, 0, 0, 180deg) translateY(200px)] at (0.25) should be [rotateX(112.5deg)
-  translate(75px, 50px)]'
-- 'Web Animations: property <transform> from [rotate3d(1, 1, 1, -60deg) translateX(100px)]
-  to [rotate3d(2, 2, 2, 60deg) translateY(200px)] at (0.25) should be [rotate3d(1,
-  1, 1, -30deg) translate(75px, 50px)]'
-- 'Web Animations: property <transform> from [rotateX(90deg) translateX(100px)] to
-  [rotate3d(50, 0, 0, 180deg) translateY(200px)] at (0.25) should be [rotateX(112.5deg)
-  translate(75px, 50px)]'
-css/css-transforms/animation/perspective-interpolation.html:
-- 'CSS Animations: property <perspective> from [0px] to [10px] at (-0.3) should be
-  [0px]'
-- 'CSS Animations: property <perspective> from [0px] to [10px] at (-1) should be [0px]'
-- 'CSS Animations: property <perspective> from [0px] to [10px] at (-20) should be
-  [0px]'
-- 'CSS Animations: property <perspective> from [50px] to [100px] at (-20) should be
-  [0px]'
-- 'CSS Animations: property <perspective> from neutral to [20px] at (-20) should be
-  [0px]'
-- 'CSS Transitions with transition: all: property <perspective> from [0px] to [10px]
-  at (-0.3) should be [0px]'
-- 'CSS Transitions with transition: all: property <perspective> from [0px] to [10px]
-  at (-1) should be [0px]'
-- 'CSS Transitions with transition: all: property <perspective> from [0px] to [10px]
-  at (-20) should be [0px]'
-- 'CSS Transitions with transition: all: property <perspective> from [50px] to [100px]
-  at (-20) should be [0px]'
-- 'CSS Transitions with transition: all: property <perspective> from neutral to [20px]
-  at (-20) should be [0px]'
-- 'CSS Transitions: property <perspective> from [0px] to [10px] at (-0.3) should be
-  [0px]'
-- 'CSS Transitions: property <perspective> from [0px] to [10px] at (-1) should be
-  [0px]'
-- 'CSS Transitions: property <perspective> from [0px] to [10px] at (-20) should be
-  [0px]'
-- 'CSS Transitions: property <perspective> from [50px] to [100px] at (-20) should
-  be [0px]'
-- 'CSS Transitions: property <perspective> from neutral to [20px] at (-20) should
-  be [0px]'
-- 'Web Animations: property <perspective> from [0px] to [10px] at (-0.3) should be
-  [0px]'
-- 'Web Animations: property <perspective> from [0px] to [10px] at (-1) should be [0px]'
-- 'Web Animations: property <perspective> from [0px] to [10px] at (-20) should be
-  [0px]'
-- 'Web Animations: property <perspective> from [50px] to [100px] at (-20) should be
-  [0px]'
-- 'Web Animations: property <perspective> from neutral to [20px] at (-20) should be
-  [0px]'
 css/css-transforms/animation/perspective-origin-composition.html:
-- 'Compositing CSS Animations: property <perspective-origin> underlying [40px 60px]
-  from add [60px 140px] to replace [200px 100px] at (-0.25) should be [75px 225px]'
-- 'Compositing CSS Animations: property <perspective-origin> underlying [40px 60px]
-  from add [60px 140px] to replace [200px 100px] at (0) should be [100px 200px]'
-- 'Compositing CSS Animations: property <perspective-origin> underlying [40px 60px]
-  from add [60px 140px] to replace [200px 100px] at (0.25) should be [125px 175px]'
-- 'Compositing CSS Animations: property <perspective-origin> underlying [40px 60px]
-  from add [60px 140px] to replace [200px 100px] at (0.5) should be [150px 150px]'
-- 'Compositing CSS Animations: property <perspective-origin> underlying [40px 60px]
-  from add [60px 140px] to replace [200px 100px] at (0.75) should be [175px 125px]'
-- 'Compositing CSS Animations: property <perspective-origin> underlying [40px 60px]
-  from add [60px 140px] to replace [200px 100px] at (1.25) should be [225px 75px]'
-- 'Compositing CSS Animations: property <perspective-origin> underlying [40px 60px]
-  from add [60px 40px] to add [160px 140px] at (-0.25) should be [75px 75px]'
-- 'Compositing CSS Animations: property <perspective-origin> underlying [40px 60px]
-  from add [60px 40px] to add [160px 140px] at (0) should be [100px 100px]'
-- 'Compositing CSS Animations: property <perspective-origin> underlying [40px 60px]
-  from add [60px 40px] to add [160px 140px] at (0.25) should be [125px 125px]'
-- 'Compositing CSS Animations: property <perspective-origin> underlying [40px 60px]
-  from add [60px 40px] to add [160px 140px] at (0.5) should be [150px 150px]'
-- 'Compositing CSS Animations: property <perspective-origin> underlying [40px 60px]
-  from add [60px 40px] to add [160px 140px] at (0.75) should be [175px 175px]'
-- 'Compositing CSS Animations: property <perspective-origin> underlying [40px 60px]
-  from add [60px 40px] to add [160px 140px] at (1) should be [200px 200px]'
-- 'Compositing CSS Animations: property <perspective-origin> underlying [40px 60px]
-  from add [60px 40px] to add [160px 140px] at (1.25) should be [225px 225px]'
-- 'Compositing CSS Animations: property <perspective-origin> underlying [40px 60px]
-  from replace [100px 200px] to add [160px 40px] at (-0.25) should be [75px 225px]'
-- 'Compositing CSS Animations: property <perspective-origin> underlying [40px 60px]
-  from replace [100px 200px] to add [160px 40px] at (0.25) should be [125px 175px]'
-- 'Compositing CSS Animations: property <perspective-origin> underlying [40px 60px]
-  from replace [100px 200px] to add [160px 40px] at (0.5) should be [150px 150px]'
-- 'Compositing CSS Animations: property <perspective-origin> underlying [40px 60px]
-  from replace [100px 200px] to add [160px 40px] at (0.75) should be [175px 125px]'
-- 'Compositing CSS Animations: property <perspective-origin> underlying [40px 60px]
-  from replace [100px 200px] to add [160px 40px] at (1) should be [200px 100px]'
-- 'Compositing CSS Animations: property <perspective-origin> underlying [40px 60px]
-  from replace [100px 200px] to add [160px 40px] at (1.25) should be [225px 75px]'
 - 'Compositing CSS Animations: property <perspective-origin> underlying [top 20% left
   40%] from add [left 60% top 80%] to add [right 80% bottom 40%] at (-0.25) should
   be [220px 210px]'
@@ -1651,44 +1299,6 @@ css/css-transforms/animation/perspective-origin-composition.html:
 - 'Compositing CSS Animations: property <perspective-origin> underlying [top 20% left
   40%] from add [left 60% top 80%] to add [right 80% bottom 40%] at (1.25) should
   be [100px 150px]'
-- 'Compositing Web Animations: property <perspective-origin> underlying [40px 60px]
-  from add [60px 140px] to replace [200px 100px] at (-0.25) should be [75px 225px]'
-- 'Compositing Web Animations: property <perspective-origin> underlying [40px 60px]
-  from add [60px 140px] to replace [200px 100px] at (0) should be [100px 200px]'
-- 'Compositing Web Animations: property <perspective-origin> underlying [40px 60px]
-  from add [60px 140px] to replace [200px 100px] at (0.25) should be [125px 175px]'
-- 'Compositing Web Animations: property <perspective-origin> underlying [40px 60px]
-  from add [60px 140px] to replace [200px 100px] at (0.5) should be [150px 150px]'
-- 'Compositing Web Animations: property <perspective-origin> underlying [40px 60px]
-  from add [60px 140px] to replace [200px 100px] at (0.75) should be [175px 125px]'
-- 'Compositing Web Animations: property <perspective-origin> underlying [40px 60px]
-  from add [60px 140px] to replace [200px 100px] at (1.25) should be [225px 75px]'
-- 'Compositing Web Animations: property <perspective-origin> underlying [40px 60px]
-  from add [60px 40px] to add [160px 140px] at (-0.25) should be [75px 75px]'
-- 'Compositing Web Animations: property <perspective-origin> underlying [40px 60px]
-  from add [60px 40px] to add [160px 140px] at (0) should be [100px 100px]'
-- 'Compositing Web Animations: property <perspective-origin> underlying [40px 60px]
-  from add [60px 40px] to add [160px 140px] at (0.25) should be [125px 125px]'
-- 'Compositing Web Animations: property <perspective-origin> underlying [40px 60px]
-  from add [60px 40px] to add [160px 140px] at (0.5) should be [150px 150px]'
-- 'Compositing Web Animations: property <perspective-origin> underlying [40px 60px]
-  from add [60px 40px] to add [160px 140px] at (0.75) should be [175px 175px]'
-- 'Compositing Web Animations: property <perspective-origin> underlying [40px 60px]
-  from add [60px 40px] to add [160px 140px] at (1) should be [200px 200px]'
-- 'Compositing Web Animations: property <perspective-origin> underlying [40px 60px]
-  from add [60px 40px] to add [160px 140px] at (1.25) should be [225px 225px]'
-- 'Compositing Web Animations: property <perspective-origin> underlying [40px 60px]
-  from replace [100px 200px] to add [160px 40px] at (-0.25) should be [75px 225px]'
-- 'Compositing Web Animations: property <perspective-origin> underlying [40px 60px]
-  from replace [100px 200px] to add [160px 40px] at (0.25) should be [125px 175px]'
-- 'Compositing Web Animations: property <perspective-origin> underlying [40px 60px]
-  from replace [100px 200px] to add [160px 40px] at (0.5) should be [150px 150px]'
-- 'Compositing Web Animations: property <perspective-origin> underlying [40px 60px]
-  from replace [100px 200px] to add [160px 40px] at (0.75) should be [175px 125px]'
-- 'Compositing Web Animations: property <perspective-origin> underlying [40px 60px]
-  from replace [100px 200px] to add [160px 40px] at (1) should be [200px 100px]'
-- 'Compositing Web Animations: property <perspective-origin> underlying [40px 60px]
-  from replace [100px 200px] to add [160px 40px] at (1.25) should be [225px 75px]'
 - 'Compositing Web Animations: property <perspective-origin> underlying [top 20% left
   40%] from add [left 60% top 80%] to add [right 80% bottom 40%] at (-0.25) should
   be [220px 210px]'
@@ -1711,52 +1321,11 @@ css/css-transforms/animation/perspective-origin-composition.html:
   40%] from add [left 60% top 80%] to add [right 80% bottom 40%] at (1.25) should
   be [100px 150px]'
 css/css-transforms/animation/rotate-animation-on-svg.html:
-- "== css/css-transforms/animation/rotate-animation-on-svg-ref.html (never ready to
-  capture)"
-css/css-transforms/animation/rotate-composition.html:
-- 'Compositing CSS Animations: property <rotate> underlying [1 0 0 0deg] from add
-  [1 1 0 90deg] to replace [0 1 1 135deg] at (2) should be [-0.52 0.29 0.81 208.96deg]'
-- 'Compositing CSS Animations: property <rotate> underlying [1 2 3 270deg] from add
-  [1 2 3 90deg] to replace [0 1 0 100deg] at (0.25) should be [y 25deg]'
-- 'Compositing CSS Animations: property <rotate> underlying [1 2 3 270deg] from add
-  [1 2 3 90deg] to replace [0 1 0 100deg] at (0.75) should be [y 75deg]'
-- 'Compositing CSS Animations: property <rotate> underlying [1 2 3 270deg] from add
-  [1 2 3 90deg] to replace [0 1 0 100deg] at (2) should be [y 200deg]'
-- 'Compositing CSS Animations: property <rotate> underlying [1 2 3 90deg] from add
-  [2 4 6 270deg] to replace [0 1 0 100deg] at (0.25) should be [y 25deg]'
-- 'Compositing CSS Animations: property <rotate> underlying [1 2 3 90deg] from add
-  [2 4 6 270deg] to replace [0 1 0 100deg] at (0.75) should be [y 75deg]'
-- 'Compositing CSS Animations: property <rotate> underlying [1 2 3 90deg] from add
-  [2 4 6 270deg] to replace [0 1 0 100deg] at (2) should be [y 200deg]'
-- 'Compositing Web Animations: property <rotate> underlying [1 0 0 0deg] from add
-  [1 1 0 90deg] to replace [0 1 1 135deg] at (2) should be [-0.52 0.29 0.81 208.96deg]'
-- 'Compositing Web Animations: property <rotate> underlying [1 2 3 270deg] from add
-  [1 2 3 90deg] to replace [0 1 0 100deg] at (0.25) should be [y 25deg]'
-- 'Compositing Web Animations: property <rotate> underlying [1 2 3 270deg] from add
-  [1 2 3 90deg] to replace [0 1 0 100deg] at (0.75) should be [y 75deg]'
-- 'Compositing Web Animations: property <rotate> underlying [1 2 3 270deg] from add
-  [1 2 3 90deg] to replace [0 1 0 100deg] at (2) should be [y 200deg]'
-- 'Compositing Web Animations: property <rotate> underlying [1 2 3 90deg] from add
-  [2 4 6 270deg] to replace [0 1 0 100deg] at (0.25) should be [y 25deg]'
-- 'Compositing Web Animations: property <rotate> underlying [1 2 3 90deg] from add
-  [2 4 6 270deg] to replace [0 1 0 100deg] at (0.75) should be [y 75deg]'
-- 'Compositing Web Animations: property <rotate> underlying [1 2 3 90deg] from add
-  [2 4 6 270deg] to replace [0 1 0 100deg] at (2) should be [y 200deg]'
+- "== css/css-transforms/animation/rotate-animation-on-svg-ref.html (both renderings
+  blank)"
 css/css-transforms/animation/rotate-interpolation-math-functions-tentative.html:
-- 'CSS Animations: property <rotate> from [100deg] to [calc(sign(20rem - 20px) * 180deg)]
-  at (-1) should be [20deg]'
-- 'CSS Animations: property <rotate> from [100deg] to [calc(sign(20rem - 20px) * 180deg)]
-  at (0.125) should be [110deg]'
-- 'CSS Animations: property <rotate> from [100deg] to [calc(sign(20rem - 20px) * 180deg)]
-  at (0.875) should be [170deg]'
-- 'CSS Animations: property <rotate> from [100deg] to [calc(sign(20rem - 20px) * 180deg)]
-  at (1) should be [180deg]'
-- 'CSS Animations: property <rotate> from [100deg] to [calc(sign(20rem - 20px) * 180deg)]
-  at (2) should be [260deg]'
 - 'CSS Animations: property <rotate> from [calc(sign(20rem - 20px) * 100deg)] to [calc(progress(10rem,
   20px, 100px) * 180deg)] at (-1) should be [20deg]'
-- 'CSS Animations: property <rotate> from [calc(sign(20rem - 20px) * 100deg)] to [calc(progress(10rem,
-  20px, 100px) * 180deg)] at (0) should be [100deg]'
 - 'CSS Animations: property <rotate> from [calc(sign(20rem - 20px) * 100deg)] to [calc(progress(10rem,
   20px, 100px) * 180deg)] at (0.125) should be [110deg]'
 - 'CSS Animations: property <rotate> from [calc(sign(20rem - 20px) * 100deg)] to [calc(progress(10rem,
@@ -1765,24 +1334,9 @@ css/css-transforms/animation/rotate-interpolation-math-functions-tentative.html:
   20px, 100px) * 180deg)] at (1) should be [180deg]'
 - 'CSS Animations: property <rotate> from [calc(sign(20rem - 20px) * 100deg)] to [calc(progress(10rem,
   20px, 100px) * 180deg)] at (2) should be [260deg]'
-- 'CSS Transitions with transition: all: property <rotate> from [100deg] to [calc(sign(20rem
-  - 20px) * 180deg)] at (-1) should be [20deg]'
-- 'CSS Transitions with transition: all: property <rotate> from [100deg] to [calc(sign(20rem
-  - 20px) * 180deg)] at (0) should be [100deg]'
-- 'CSS Transitions with transition: all: property <rotate> from [100deg] to [calc(sign(20rem
-  - 20px) * 180deg)] at (0.125) should be [110deg]'
-- 'CSS Transitions with transition: all: property <rotate> from [100deg] to [calc(sign(20rem
-  - 20px) * 180deg)] at (0.875) should be [170deg]'
-- 'CSS Transitions with transition: all: property <rotate> from [100deg] to [calc(sign(20rem
-  - 20px) * 180deg)] at (1) should be [180deg]'
-- 'CSS Transitions with transition: all: property <rotate> from [100deg] to [calc(sign(20rem
-  - 20px) * 180deg)] at (2) should be [260deg]'
 - 'CSS Transitions with transition: all: property <rotate> from [calc(sign(20rem -
   20px) * 100deg)] to [calc(progress(10rem, 20px, 100px) * 180deg)] at (-1) should
   be [20deg]'
-- 'CSS Transitions with transition: all: property <rotate> from [calc(sign(20rem -
-  20px) * 100deg)] to [calc(progress(10rem, 20px, 100px) * 180deg)] at (0) should
-  be [100deg]'
 - 'CSS Transitions with transition: all: property <rotate> from [calc(sign(20rem -
   20px) * 100deg)] to [calc(progress(10rem, 20px, 100px) * 180deg)] at (0.125) should
   be [110deg]'
@@ -1795,22 +1349,8 @@ css/css-transforms/animation/rotate-interpolation-math-functions-tentative.html:
 - 'CSS Transitions with transition: all: property <rotate> from [calc(sign(20rem -
   20px) * 100deg)] to [calc(progress(10rem, 20px, 100px) * 180deg)] at (2) should
   be [260deg]'
-- 'CSS Transitions: property <rotate> from [100deg] to [calc(sign(20rem - 20px) *
-  180deg)] at (-1) should be [20deg]'
-- 'CSS Transitions: property <rotate> from [100deg] to [calc(sign(20rem - 20px) *
-  180deg)] at (0) should be [100deg]'
-- 'CSS Transitions: property <rotate> from [100deg] to [calc(sign(20rem - 20px) *
-  180deg)] at (0.125) should be [110deg]'
-- 'CSS Transitions: property <rotate> from [100deg] to [calc(sign(20rem - 20px) *
-  180deg)] at (0.875) should be [170deg]'
-- 'CSS Transitions: property <rotate> from [100deg] to [calc(sign(20rem - 20px) *
-  180deg)] at (1) should be [180deg]'
-- 'CSS Transitions: property <rotate> from [100deg] to [calc(sign(20rem - 20px) *
-  180deg)] at (2) should be [260deg]'
 - 'CSS Transitions: property <rotate> from [calc(sign(20rem - 20px) * 100deg)] to
   [calc(progress(10rem, 20px, 100px) * 180deg)] at (-1) should be [20deg]'
-- 'CSS Transitions: property <rotate> from [calc(sign(20rem - 20px) * 100deg)] to
-  [calc(progress(10rem, 20px, 100px) * 180deg)] at (0) should be [100deg]'
 - 'CSS Transitions: property <rotate> from [calc(sign(20rem - 20px) * 100deg)] to
   [calc(progress(10rem, 20px, 100px) * 180deg)] at (0.125) should be [110deg]'
 - 'CSS Transitions: property <rotate> from [calc(sign(20rem - 20px) * 100deg)] to
@@ -1819,20 +1359,8 @@ css/css-transforms/animation/rotate-interpolation-math-functions-tentative.html:
   [calc(progress(10rem, 20px, 100px) * 180deg)] at (1) should be [180deg]'
 - 'CSS Transitions: property <rotate> from [calc(sign(20rem - 20px) * 100deg)] to
   [calc(progress(10rem, 20px, 100px) * 180deg)] at (2) should be [260deg]'
-- 'Web Animations: property <rotate> from [100deg] to [calc(sign(20rem - 20px) * 180deg)]
-  at (-1) should be [20deg]'
-- 'Web Animations: property <rotate> from [100deg] to [calc(sign(20rem - 20px) * 180deg)]
-  at (0.125) should be [110deg]'
-- 'Web Animations: property <rotate> from [100deg] to [calc(sign(20rem - 20px) * 180deg)]
-  at (0.875) should be [170deg]'
-- 'Web Animations: property <rotate> from [100deg] to [calc(sign(20rem - 20px) * 180deg)]
-  at (1) should be [180deg]'
-- 'Web Animations: property <rotate> from [100deg] to [calc(sign(20rem - 20px) * 180deg)]
-  at (2) should be [260deg]'
 - 'Web Animations: property <rotate> from [calc(sign(20rem - 20px) * 100deg)] to [calc(progress(10rem,
   20px, 100px) * 180deg)] at (-1) should be [20deg]'
-- 'Web Animations: property <rotate> from [calc(sign(20rem - 20px) * 100deg)] to [calc(progress(10rem,
-  20px, 100px) * 180deg)] at (0) should be [100deg]'
 - 'Web Animations: property <rotate> from [calc(sign(20rem - 20px) * 100deg)] to [calc(progress(10rem,
   20px, 100px) * 180deg)] at (0.125) should be [110deg]'
 - 'Web Animations: property <rotate> from [calc(sign(20rem - 20px) * 100deg)] to [calc(progress(10rem,
@@ -1841,30 +1369,9 @@ css/css-transforms/animation/rotate-interpolation-math-functions-tentative.html:
   20px, 100px) * 180deg)] at (1) should be [180deg]'
 - 'Web Animations: property <rotate> from [calc(sign(20rem - 20px) * 100deg)] to [calc(progress(10rem,
   20px, 100px) * 180deg)] at (2) should be [260deg]'
-css/css-transforms/animation/rotate-interpolation.html:
-- 'CSS Animations: property <rotate> from [1 1 0 90deg] to [0 1 1 135deg] at (2) should
-  be [-0.52 0.29 0.81 208.96deg]'
-- 'CSS Transitions with transition: all: property <rotate> from [1 1 0 90deg] to [0
-  1 1 135deg] at (2) should be [-0.52 0.29 0.81 208.96deg]'
-- 'CSS Transitions: property <rotate> from [1 1 0 90deg] to [0 1 1 135deg] at (2)
-  should be [-0.52 0.29 0.81 208.96deg]'
-- 'Web Animations: property <rotate> from [1 1 0 90deg] to [0 1 1 135deg] at (2) should
-  be [-0.52 0.29 0.81 208.96deg]'
 css/css-transforms/animation/scale-animation-math-functions-tentative.html:
-- 'CSS Animations: property <scale> from [100] to [calc(sign(20rem - 20px) * 180)]
-  at (-1) should be [20]'
-- 'CSS Animations: property <scale> from [100] to [calc(sign(20rem - 20px) * 180)]
-  at (0.125) should be [110]'
-- 'CSS Animations: property <scale> from [100] to [calc(sign(20rem - 20px) * 180)]
-  at (0.875) should be [170]'
-- 'CSS Animations: property <scale> from [100] to [calc(sign(20rem - 20px) * 180)]
-  at (1) should be [180]'
-- 'CSS Animations: property <scale> from [100] to [calc(sign(20rem - 20px) * 180)]
-  at (2) should be [260]'
 - 'CSS Animations: property <scale> from [calc(sign(20rem - 20px) * 100)] to [calc(progress(10rem,
   20px, 100px) * 180)] at (-1) should be [20]'
-- 'CSS Animations: property <scale> from [calc(sign(20rem - 20px) * 100)] to [calc(progress(10rem,
-  20px, 100px) * 180)] at (0) should be [100]'
 - 'CSS Animations: property <scale> from [calc(sign(20rem - 20px) * 100)] to [calc(progress(10rem,
   20px, 100px) * 180)] at (0.125) should be [110]'
 - 'CSS Animations: property <scale> from [calc(sign(20rem - 20px) * 100)] to [calc(progress(10rem,
@@ -1873,22 +1380,8 @@ css/css-transforms/animation/scale-animation-math-functions-tentative.html:
   20px, 100px) * 180)] at (1) should be [180]'
 - 'CSS Animations: property <scale> from [calc(sign(20rem - 20px) * 100)] to [calc(progress(10rem,
   20px, 100px) * 180)] at (2) should be [260]'
-- 'CSS Transitions with transition: all: property <scale> from [100] to [calc(sign(20rem
-  - 20px) * 180)] at (-1) should be [20]'
-- 'CSS Transitions with transition: all: property <scale> from [100] to [calc(sign(20rem
-  - 20px) * 180)] at (0) should be [100]'
-- 'CSS Transitions with transition: all: property <scale> from [100] to [calc(sign(20rem
-  - 20px) * 180)] at (0.125) should be [110]'
-- 'CSS Transitions with transition: all: property <scale> from [100] to [calc(sign(20rem
-  - 20px) * 180)] at (0.875) should be [170]'
-- 'CSS Transitions with transition: all: property <scale> from [100] to [calc(sign(20rem
-  - 20px) * 180)] at (1) should be [180]'
-- 'CSS Transitions with transition: all: property <scale> from [100] to [calc(sign(20rem
-  - 20px) * 180)] at (2) should be [260]'
 - 'CSS Transitions with transition: all: property <scale> from [calc(sign(20rem -
   20px) * 100)] to [calc(progress(10rem, 20px, 100px) * 180)] at (-1) should be [20]'
-- 'CSS Transitions with transition: all: property <scale> from [calc(sign(20rem -
-  20px) * 100)] to [calc(progress(10rem, 20px, 100px) * 180)] at (0) should be [100]'
 - 'CSS Transitions with transition: all: property <scale> from [calc(sign(20rem -
   20px) * 100)] to [calc(progress(10rem, 20px, 100px) * 180)] at (0.125) should be
   [110]'
@@ -1899,22 +1392,8 @@ css/css-transforms/animation/scale-animation-math-functions-tentative.html:
   20px) * 100)] to [calc(progress(10rem, 20px, 100px) * 180)] at (1) should be [180]'
 - 'CSS Transitions with transition: all: property <scale> from [calc(sign(20rem -
   20px) * 100)] to [calc(progress(10rem, 20px, 100px) * 180)] at (2) should be [260]'
-- 'CSS Transitions: property <scale> from [100] to [calc(sign(20rem - 20px) * 180)]
-  at (-1) should be [20]'
-- 'CSS Transitions: property <scale> from [100] to [calc(sign(20rem - 20px) * 180)]
-  at (0) should be [100]'
-- 'CSS Transitions: property <scale> from [100] to [calc(sign(20rem - 20px) * 180)]
-  at (0.125) should be [110]'
-- 'CSS Transitions: property <scale> from [100] to [calc(sign(20rem - 20px) * 180)]
-  at (0.875) should be [170]'
-- 'CSS Transitions: property <scale> from [100] to [calc(sign(20rem - 20px) * 180)]
-  at (1) should be [180]'
-- 'CSS Transitions: property <scale> from [100] to [calc(sign(20rem - 20px) * 180)]
-  at (2) should be [260]'
 - 'CSS Transitions: property <scale> from [calc(sign(20rem - 20px) * 100)] to [calc(progress(10rem,
   20px, 100px) * 180)] at (-1) should be [20]'
-- 'CSS Transitions: property <scale> from [calc(sign(20rem - 20px) * 100)] to [calc(progress(10rem,
-  20px, 100px) * 180)] at (0) should be [100]'
 - 'CSS Transitions: property <scale> from [calc(sign(20rem - 20px) * 100)] to [calc(progress(10rem,
   20px, 100px) * 180)] at (0.125) should be [110]'
 - 'CSS Transitions: property <scale> from [calc(sign(20rem - 20px) * 100)] to [calc(progress(10rem,
@@ -1923,20 +1402,8 @@ css/css-transforms/animation/scale-animation-math-functions-tentative.html:
   20px, 100px) * 180)] at (1) should be [180]'
 - 'CSS Transitions: property <scale> from [calc(sign(20rem - 20px) * 100)] to [calc(progress(10rem,
   20px, 100px) * 180)] at (2) should be [260]'
-- 'Web Animations: property <scale> from [100] to [calc(sign(20rem - 20px) * 180)]
-  at (-1) should be [20]'
-- 'Web Animations: property <scale> from [100] to [calc(sign(20rem - 20px) * 180)]
-  at (0.125) should be [110]'
-- 'Web Animations: property <scale> from [100] to [calc(sign(20rem - 20px) * 180)]
-  at (0.875) should be [170]'
-- 'Web Animations: property <scale> from [100] to [calc(sign(20rem - 20px) * 180)]
-  at (1) should be [180]'
-- 'Web Animations: property <scale> from [100] to [calc(sign(20rem - 20px) * 180)]
-  at (2) should be [260]'
 - 'Web Animations: property <scale> from [calc(sign(20rem - 20px) * 100)] to [calc(progress(10rem,
   20px, 100px) * 180)] at (-1) should be [20]'
-- 'Web Animations: property <scale> from [calc(sign(20rem - 20px) * 100)] to [calc(progress(10rem,
-  20px, 100px) * 180)] at (0) should be [100]'
 - 'Web Animations: property <scale> from [calc(sign(20rem - 20px) * 100)] to [calc(progress(10rem,
   20px, 100px) * 180)] at (0.125) should be [110]'
 - 'Web Animations: property <scale> from [calc(sign(20rem - 20px) * 100)] to [calc(progress(10rem,
@@ -1946,21 +1413,12 @@ css/css-transforms/animation/scale-animation-math-functions-tentative.html:
 - 'Web Animations: property <scale> from [calc(sign(20rem - 20px) * 100)] to [calc(progress(10rem,
   20px, 100px) * 180)] at (2) should be [260]'
 css/css-transforms/animation/scale-animation-on-svg.html:
-- "== css/css-transforms/animation/scale-animation-on-svg-ref.html (never ready to
-  capture)"
+- "== css/css-transforms/animation/scale-animation-on-svg-ref.html (both renderings
+  blank)"
 css/css-transforms/animation/transform-box-will-change-transform-layer.html:
 - "== css/css-transforms/animation/transform-box-ref.html"
 css/css-transforms/animation/transform-box.html:
 - "== css/css-transforms/animation/transform-box-ref.html"
-css/css-transforms/animation/transform-interpolation-001.html:
-- 'CSS Transitions with transition: all: property <transform> from [perspective(none)]
-  to [perspective(500px)] at (-1) should be [perspective(none)]'
-- 'CSS Transitions with transition: all: property <transform> from [perspective(none)]
-  to [perspective(500px)] at (0) should be [perspective(none)]'
-- 'CSS Transitions: property <transform> from [perspective(none)] to [perspective(500px)]
-  at (-1) should be [perspective(none)]'
-- 'CSS Transitions: property <transform> from [perspective(none)] to [perspective(500px)]
-  at (0) should be [perspective(none)]'
 css/css-transforms/animation/transform-interpolation-computed-value.html:
 - Interpolation between matrix(2, 0, 0, 2, 10, 30) and matrix(4, 0, 0, 6, 14, 10)
   gives the correct computed value halfway according to computedStyleMap with zoom
@@ -2132,319 +1590,21 @@ css/css-transforms/animation/transform-interpolation-computed-value.html:
 - Interpolation between translateZ(50px) and translateX(50px) gives the correct computed
   value halfway according to computedStyleMap.
 css/css-transforms/animation/transform-interpolation-inline-value.html:
-- Interpolation between perspective(10px) and perspective(none) gives the correct
-  computed value halfway according to commitStyles.
 - Interpolation between rotate(0deg) and rotateZ(90deg) gives the correct computed
   value halfway according to commitStyles.
 - Interpolation between scaleX(2) and scaleY(2) gives the correct computed value halfway
   according to commitStyles.
-- Interpolation between translate(0%) and translate(50%) gives the correct computed
-  value halfway according to commitStyles.
-- Interpolation between translate(0%, 50%) and translate(50%, 100%) gives the correct
-  computed value halfway according to commitStyles.
-- Interpolation between translate(50%) and translate(100%, 50%) gives the correct
-  computed value halfway according to commitStyles.
-- Interpolation between translate(50px, -50px) and translate(100px, 50px) gives the
-  correct computed value halfway according to commitStyles.
-- Interpolation between translate(50px, 0px) and translate(100px, 0px) gives the correct
-  computed value halfway according to commitStyles.
-- Interpolation between translateX(0%) and translateX(50%) gives the correct computed
+- Interpolation between scaleX(2) and scaleY(3) gives the correct computed value halfway
+  according to commitStyles.
+- Interpolation between translateX(50px) and translateY(50px) gives the correct computed
   value halfway according to commitStyles.
 - Interpolation between translateY(0%) and translateX(50%) gives the correct computed
   value halfway according to commitStyles.
-css/css-transforms/animation/transform-interpolation-matrix.html:
-- "== css/css-transforms/animation/transform-interpolation-ref.html?matrix"
-css/css-transforms/animation/transform-interpolation-perspective.html:
-- "== css/css-transforms/animation/transform-interpolation-ref.html?perspective"
-css/css-transforms/animation/transform-interpolation-verify-reftests.html:
-- 'CSS Animations: property <transform> from [matrix(1,0,0,1,0,0) rotate(0deg)] to
-  [matrix(2,0,0,2,0,0) rotate(360deg)] at (0.5) should be [matrix(1.5,0,0,1.5,0,0)
-  rotate(180deg)]'
-- 'CSS Animations: property <transform> from [perspective(100px) translateZ(50px)]
-  to [perspective(none) translateZ(50px)] at (0.5) should be [perspective(200px) translateZ(50px)]'
-- 'CSS Animations: property <transform> from [perspective(none) translateZ(15px)]
-  to [perspective(25px) translateZ(15px)] at (0.5) should be [perspective(50px) translateZ(15px)]'
-- 'CSS Transitions with transition: all: property <transform> from [matrix(1,0,0,1,0,0)
-  rotate(0deg)] to [matrix(2,0,0,2,0,0) rotate(360deg)] at (0.5) should be [matrix(1.5,0,0,1.5,0,0)
-  rotate(180deg)]'
-- 'CSS Transitions with transition: all: property <transform> from [perspective(100px)
-  translateZ(50px)] to [perspective(none) translateZ(50px)] at (0.5) should be [perspective(200px)
-  translateZ(50px)]'
-- 'CSS Transitions with transition: all: property <transform> from [perspective(none)
-  translateZ(15px)] to [perspective(25px) translateZ(15px)] at (0.5) should be [perspective(50px)
-  translateZ(15px)]'
-- 'CSS Transitions: property <transform> from [matrix(1,0,0,1,0,0) rotate(0deg)] to
-  [matrix(2,0,0,2,0,0) rotate(360deg)] at (0.5) should be [matrix(1.5,0,0,1.5,0,0)
-  rotate(180deg)]'
-- 'CSS Transitions: property <transform> from [perspective(100px) translateZ(50px)]
-  to [perspective(none) translateZ(50px)] at (0.5) should be [perspective(200px) translateZ(50px)]'
-- 'CSS Transitions: property <transform> from [perspective(none) translateZ(15px)]
-  to [perspective(25px) translateZ(15px)] at (0.5) should be [perspective(50px) translateZ(15px)]'
-- 'Web Animations: property <transform> from [matrix(1,0,0,1,0,0) rotate(0deg)] to
-  [matrix(2,0,0,2,0,0) rotate(360deg)] at (0.5) should be [matrix(1.5,0,0,1.5,0,0)
-  rotate(180deg)]'
-- 'Web Animations: property <transform> from [perspective(100px) translateZ(50px)]
-  to [perspective(none) translateZ(50px)] at (0.5) should be [perspective(200px) translateZ(50px)]'
-- 'Web Animations: property <transform> from [perspective(none) translateZ(15px)]
-  to [perspective(25px) translateZ(15px)] at (0.5) should be [perspective(50px) translateZ(15px)]'
-css/css-transforms/animation/transform-matrix-composition.html:
-- 'Compositing CSS Animations: property <transform> underlying [matrix(0, 1, -1, 0,
-  100, 0)] from accumulate [matrix(1, 0, 0, 1, 100, 0)] to accumulate [matrix(1, 0,
-  0, 1, 200, 0)] at (-0.5) should be [matrix(0, 1, -1, 0, 150, 0)]'
-- 'Compositing CSS Animations: property <transform> underlying [matrix(0, 1, -1, 0,
-  100, 0)] from accumulate [matrix(1, 0, 0, 1, 100, 0)] to accumulate [matrix(1, 0,
-  0, 1, 200, 0)] at (0) should be [matrix(0, 1, -1, 0, 200, 0)]'
-- 'Compositing CSS Animations: property <transform> underlying [matrix(0, 1, -1, 0,
-  100, 0)] from accumulate [matrix(1, 0, 0, 1, 100, 0)] to accumulate [matrix(1, 0,
-  0, 1, 200, 0)] at (0.25) should be [matrix(0, 1, -1, 0, 225, 0)]'
-- 'Compositing CSS Animations: property <transform> underlying [matrix(0, 1, -1, 0,
-  100, 0)] from accumulate [matrix(1, 0, 0, 1, 100, 0)] to accumulate [matrix(1, 0,
-  0, 1, 200, 0)] at (0.5) should be [matrix(0, 1, -1, 0, 250, 0)]'
-- 'Compositing CSS Animations: property <transform> underlying [matrix(0, 1, -1, 0,
-  100, 0)] from accumulate [matrix(1, 0, 0, 1, 100, 0)] to accumulate [matrix(1, 0,
-  0, 1, 200, 0)] at (0.75) should be [matrix(0, 1, -1, 0, 275, 0)]'
-- 'Compositing CSS Animations: property <transform> underlying [matrix(0, 1, -1, 0,
-  100, 0)] from accumulate [matrix(1, 0, 0, 1, 100, 0)] to accumulate [matrix(1, 0,
-  0, 1, 200, 0)] at (1) should be [matrix(0, 1, -1, 0, 300, 0)]'
-- 'Compositing CSS Animations: property <transform> underlying [matrix(0, 1, -1, 0,
-  100, 0)] from accumulate [matrix(1, 0, 0, 1, 100, 0)] to accumulate [matrix(1, 0,
-  0, 1, 200, 0)] at (1.5) should be [matrix(0, 1, -1, 0, 350, 0)]'
-- 'Compositing CSS Animations: property <transform> underlying [matrix3d(0.8535533905932737,0.1464466094067262,-0.5,0,0.1464466094067262,0.8535533905932737,0.5,0,0.5,-0.5,0.7071067811865476,0,100,0,0,1)]
-  from accumulate [matrix3d(1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 100, 0, 0, 1)] to
-  accumulate [matrix3d(1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 200, 0, 0, 1)] at (-0.5)
-  should be [translateX(150px) rotate3d(1, 1, 0, 45deg)]'
-- 'Compositing CSS Animations: property <transform> underlying [matrix3d(0.8535533905932737,0.1464466094067262,-0.5,0,0.1464466094067262,0.8535533905932737,0.5,0,0.5,-0.5,0.7071067811865476,0,100,0,0,1)]
-  from accumulate [matrix3d(1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 100, 0, 0, 1)] to
-  accumulate [matrix3d(1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 200, 0, 0, 1)] at (0) should
-  be [translateX(200px) rotate3d(1, 1, 0, 45deg)]'
-- 'Compositing CSS Animations: property <transform> underlying [matrix3d(0.8535533905932737,0.1464466094067262,-0.5,0,0.1464466094067262,0.8535533905932737,0.5,0,0.5,-0.5,0.7071067811865476,0,100,0,0,1)]
-  from accumulate [matrix3d(1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 100, 0, 0, 1)] to
-  accumulate [matrix3d(1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 200, 0, 0, 1)] at (0.25)
-  should be [translateX(225px) rotate3d(1, 1, 0, 45deg)]'
-- 'Compositing CSS Animations: property <transform> underlying [matrix3d(0.8535533905932737,0.1464466094067262,-0.5,0,0.1464466094067262,0.8535533905932737,0.5,0,0.5,-0.5,0.7071067811865476,0,100,0,0,1)]
-  from accumulate [matrix3d(1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 100, 0, 0, 1)] to
-  accumulate [matrix3d(1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 200, 0, 0, 1)] at (0.5)
-  should be [translateX(250px) rotate3d(1, 1, 0, 45deg)]'
-- 'Compositing CSS Animations: property <transform> underlying [matrix3d(0.8535533905932737,0.1464466094067262,-0.5,0,0.1464466094067262,0.8535533905932737,0.5,0,0.5,-0.5,0.7071067811865476,0,100,0,0,1)]
-  from accumulate [matrix3d(1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 100, 0, 0, 1)] to
-  accumulate [matrix3d(1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 200, 0, 0, 1)] at (0.75)
-  should be [translateX(275px) rotate3d(1, 1, 0, 45deg)]'
-- 'Compositing CSS Animations: property <transform> underlying [matrix3d(0.8535533905932737,0.1464466094067262,-0.5,0,0.1464466094067262,0.8535533905932737,0.5,0,0.5,-0.5,0.7071067811865476,0,100,0,0,1)]
-  from accumulate [matrix3d(1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 100, 0, 0, 1)] to
-  accumulate [matrix3d(1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 200, 0, 0, 1)] at (1) should
-  be [translateX(300px) rotate3d(1, 1, 0, 45deg)]'
-- 'Compositing CSS Animations: property <transform> underlying [matrix3d(0.8535533905932737,0.1464466094067262,-0.5,0,0.1464466094067262,0.8535533905932737,0.5,0,0.5,-0.5,0.7071067811865476,0,100,0,0,1)]
-  from accumulate [matrix3d(1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 100, 0, 0, 1)] to
-  accumulate [matrix3d(1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 200, 0, 0, 1)] at (1.5)
-  should be [translateX(350px) rotate3d(1, 1, 0, 45deg)]'
-- 'Compositing Web Animations: property <transform> underlying [matrix(0, 1, -1, 0,
-  100, 0)] from accumulate [matrix(1, 0, 0, 1, 100, 0)] to accumulate [matrix(1, 0,
-  0, 1, 200, 0)] at (-0.5) should be [matrix(0, 1, -1, 0, 150, 0)]'
-- 'Compositing Web Animations: property <transform> underlying [matrix(0, 1, -1, 0,
-  100, 0)] from accumulate [matrix(1, 0, 0, 1, 100, 0)] to accumulate [matrix(1, 0,
-  0, 1, 200, 0)] at (0) should be [matrix(0, 1, -1, 0, 200, 0)]'
-- 'Compositing Web Animations: property <transform> underlying [matrix(0, 1, -1, 0,
-  100, 0)] from accumulate [matrix(1, 0, 0, 1, 100, 0)] to accumulate [matrix(1, 0,
-  0, 1, 200, 0)] at (0.25) should be [matrix(0, 1, -1, 0, 225, 0)]'
-- 'Compositing Web Animations: property <transform> underlying [matrix(0, 1, -1, 0,
-  100, 0)] from accumulate [matrix(1, 0, 0, 1, 100, 0)] to accumulate [matrix(1, 0,
-  0, 1, 200, 0)] at (0.5) should be [matrix(0, 1, -1, 0, 250, 0)]'
-- 'Compositing Web Animations: property <transform> underlying [matrix(0, 1, -1, 0,
-  100, 0)] from accumulate [matrix(1, 0, 0, 1, 100, 0)] to accumulate [matrix(1, 0,
-  0, 1, 200, 0)] at (0.75) should be [matrix(0, 1, -1, 0, 275, 0)]'
-- 'Compositing Web Animations: property <transform> underlying [matrix(0, 1, -1, 0,
-  100, 0)] from accumulate [matrix(1, 0, 0, 1, 100, 0)] to accumulate [matrix(1, 0,
-  0, 1, 200, 0)] at (1) should be [matrix(0, 1, -1, 0, 300, 0)]'
-- 'Compositing Web Animations: property <transform> underlying [matrix(0, 1, -1, 0,
-  100, 0)] from accumulate [matrix(1, 0, 0, 1, 100, 0)] to accumulate [matrix(1, 0,
-  0, 1, 200, 0)] at (1.5) should be [matrix(0, 1, -1, 0, 350, 0)]'
-- 'Compositing Web Animations: property <transform> underlying [matrix3d(0.8535533905932737,0.1464466094067262,-0.5,0,0.1464466094067262,0.8535533905932737,0.5,0,0.5,-0.5,0.7071067811865476,0,100,0,0,1)]
-  from accumulate [matrix3d(1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 100, 0, 0, 1)] to
-  accumulate [matrix3d(1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 200, 0, 0, 1)] at (-0.5)
-  should be [translateX(150px) rotate3d(1, 1, 0, 45deg)]'
-- 'Compositing Web Animations: property <transform> underlying [matrix3d(0.8535533905932737,0.1464466094067262,-0.5,0,0.1464466094067262,0.8535533905932737,0.5,0,0.5,-0.5,0.7071067811865476,0,100,0,0,1)]
-  from accumulate [matrix3d(1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 100, 0, 0, 1)] to
-  accumulate [matrix3d(1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 200, 0, 0, 1)] at (0) should
-  be [translateX(200px) rotate3d(1, 1, 0, 45deg)]'
-- 'Compositing Web Animations: property <transform> underlying [matrix3d(0.8535533905932737,0.1464466094067262,-0.5,0,0.1464466094067262,0.8535533905932737,0.5,0,0.5,-0.5,0.7071067811865476,0,100,0,0,1)]
-  from accumulate [matrix3d(1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 100, 0, 0, 1)] to
-  accumulate [matrix3d(1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 200, 0, 0, 1)] at (0.25)
-  should be [translateX(225px) rotate3d(1, 1, 0, 45deg)]'
-- 'Compositing Web Animations: property <transform> underlying [matrix3d(0.8535533905932737,0.1464466094067262,-0.5,0,0.1464466094067262,0.8535533905932737,0.5,0,0.5,-0.5,0.7071067811865476,0,100,0,0,1)]
-  from accumulate [matrix3d(1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 100, 0, 0, 1)] to
-  accumulate [matrix3d(1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 200, 0, 0, 1)] at (0.5)
-  should be [translateX(250px) rotate3d(1, 1, 0, 45deg)]'
-- 'Compositing Web Animations: property <transform> underlying [matrix3d(0.8535533905932737,0.1464466094067262,-0.5,0,0.1464466094067262,0.8535533905932737,0.5,0,0.5,-0.5,0.7071067811865476,0,100,0,0,1)]
-  from accumulate [matrix3d(1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 100, 0, 0, 1)] to
-  accumulate [matrix3d(1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 200, 0, 0, 1)] at (0.75)
-  should be [translateX(275px) rotate3d(1, 1, 0, 45deg)]'
-- 'Compositing Web Animations: property <transform> underlying [matrix3d(0.8535533905932737,0.1464466094067262,-0.5,0,0.1464466094067262,0.8535533905932737,0.5,0,0.5,-0.5,0.7071067811865476,0,100,0,0,1)]
-  from accumulate [matrix3d(1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 100, 0, 0, 1)] to
-  accumulate [matrix3d(1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 200, 0, 0, 1)] at (1) should
-  be [translateX(300px) rotate3d(1, 1, 0, 45deg)]'
-- 'Compositing Web Animations: property <transform> underlying [matrix3d(0.8535533905932737,0.1464466094067262,-0.5,0,0.1464466094067262,0.8535533905932737,0.5,0,0.5,-0.5,0.7071067811865476,0,100,0,0,1)]
-  from accumulate [matrix3d(1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 100, 0, 0, 1)] to
-  accumulate [matrix3d(1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 200, 0, 0, 1)] at (1.5)
-  should be [translateX(350px) rotate3d(1, 1, 0, 45deg)]'
 css/css-transforms/animation/transform-non-invertible-discrete-interpolation.html:
 - "== css/css-transforms/animation/transform-non-invertible-discrete-interpolation-ref.html"
-css/css-transforms/animation/transform-origin-composition.html:
-- 'Compositing CSS Animations: property <transform-origin> underlying [40px 60px 100px]
-  from replace [100px 200px 20px] to add [160px 40px] at (-0.25) should be [75px 225px]'
-- 'Compositing CSS Animations: property <transform-origin> underlying [40px 60px 100px]
-  from replace [100px 200px 20px] to add [160px 40px] at (0.25) should be [125px 175px
-  40px]'
-- 'Compositing CSS Animations: property <transform-origin> underlying [40px 60px 100px]
-  from replace [100px 200px 20px] to add [160px 40px] at (0.5) should be [150px 150px
-  60px]'
-- 'Compositing CSS Animations: property <transform-origin> underlying [40px 60px 100px]
-  from replace [100px 200px 20px] to add [160px 40px] at (0.75) should be [175px 125px
-  80px]'
-- 'Compositing CSS Animations: property <transform-origin> underlying [40px 60px 100px]
-  from replace [100px 200px 20px] to add [160px 40px] at (1) should be [200px 100px
-  100px]'
-- 'Compositing CSS Animations: property <transform-origin> underlying [40px 60px 100px]
-  from replace [100px 200px 20px] to add [160px 40px] at (1.25) should be [225px 75px
-  120px]'
-- 'Compositing CSS Animations: property <transform-origin> underlying [40px 60px 80px]
-  from add [60px 140px 20px] to replace [200px 100px] at (-0.25) should be [75px 225px
-  125px]'
-- 'Compositing CSS Animations: property <transform-origin> underlying [40px 60px 80px]
-  from add [60px 140px 20px] to replace [200px 100px] at (0) should be [100px 200px
-  100px]'
-- 'Compositing CSS Animations: property <transform-origin> underlying [40px 60px 80px]
-  from add [60px 140px 20px] to replace [200px 100px] at (0.25) should be [125px 175px
-  75px]'
-- 'Compositing CSS Animations: property <transform-origin> underlying [40px 60px 80px]
-  from add [60px 140px 20px] to replace [200px 100px] at (0.5) should be [150px 150px
-  50px]'
-- 'Compositing CSS Animations: property <transform-origin> underlying [40px 60px 80px]
-  from add [60px 140px 20px] to replace [200px 100px] at (0.75) should be [175px 125px
-  25px]'
-- 'Compositing CSS Animations: property <transform-origin> underlying [40px 60px 80px]
-  from add [60px 140px 20px] to replace [200px 100px] at (1.25) should be [225px 75px
-  -25px]'
-- 'Compositing CSS Animations: property <transform-origin> underlying [40px 60px]
-  from add [60px 40px] to add [160px 140px 40px] at (-0.25) should be [75px 75px -10px]'
-- 'Compositing CSS Animations: property <transform-origin> underlying [40px 60px]
-  from add [60px 40px] to add [160px 140px 40px] at (0) should be [100px 100px]'
-- 'Compositing CSS Animations: property <transform-origin> underlying [40px 60px]
-  from add [60px 40px] to add [160px 140px 40px] at (0.25) should be [125px 125px
-  10px]'
-- 'Compositing CSS Animations: property <transform-origin> underlying [40px 60px]
-  from add [60px 40px] to add [160px 140px 40px] at (0.5) should be [150px 150px 20px]'
-- 'Compositing CSS Animations: property <transform-origin> underlying [40px 60px]
-  from add [60px 40px] to add [160px 140px 40px] at (0.75) should be [175px 175px
-  30px]'
-- 'Compositing CSS Animations: property <transform-origin> underlying [40px 60px]
-  from add [60px 40px] to add [160px 140px 40px] at (1) should be [200px 200px 40px]'
-- 'Compositing CSS Animations: property <transform-origin> underlying [40px 60px]
-  from add [60px 40px] to add [160px 140px 40px] at (1.25) should be [225px 225px
-  50px]'
-- 'Compositing CSS Animations: property <transform-origin> underlying [top right 20px]
-  from add [left top 80px] to add [right bottom 20px] at (-0.25) should be [150px
-  -50px 115px]'
-- 'Compositing CSS Animations: property <transform-origin> underlying [top right 20px]
-  from add [left top 80px] to add [right bottom 20px] at (0) should be [200px 0px
-  100px]'
-- 'Compositing CSS Animations: property <transform-origin> underlying [top right 20px]
-  from add [left top 80px] to add [right bottom 20px] at (0.25) should be [250px 50px
-  85px]'
-- 'Compositing CSS Animations: property <transform-origin> underlying [top right 20px]
-  from add [left top 80px] to add [right bottom 20px] at (0.5) should be [300px 100px
-  70px]'
-- 'Compositing CSS Animations: property <transform-origin> underlying [top right 20px]
-  from add [left top 80px] to add [right bottom 20px] at (0.75) should be [350px 150px
-  55px]'
-- 'Compositing CSS Animations: property <transform-origin> underlying [top right 20px]
-  from add [left top 80px] to add [right bottom 20px] at (1) should be [400px 200px
-  40px]'
-- 'Compositing CSS Animations: property <transform-origin> underlying [top right 20px]
-  from add [left top 80px] to add [right bottom 20px] at (1.25) should be [450px 250px
-  25px]'
-- 'Compositing Web Animations: property <transform-origin> underlying [40px 60px 100px]
-  from replace [100px 200px 20px] to add [160px 40px] at (-0.25) should be [75px 225px]'
-- 'Compositing Web Animations: property <transform-origin> underlying [40px 60px 100px]
-  from replace [100px 200px 20px] to add [160px 40px] at (0.25) should be [125px 175px
-  40px]'
-- 'Compositing Web Animations: property <transform-origin> underlying [40px 60px 100px]
-  from replace [100px 200px 20px] to add [160px 40px] at (0.5) should be [150px 150px
-  60px]'
-- 'Compositing Web Animations: property <transform-origin> underlying [40px 60px 100px]
-  from replace [100px 200px 20px] to add [160px 40px] at (0.75) should be [175px 125px
-  80px]'
-- 'Compositing Web Animations: property <transform-origin> underlying [40px 60px 100px]
-  from replace [100px 200px 20px] to add [160px 40px] at (1) should be [200px 100px
-  100px]'
-- 'Compositing Web Animations: property <transform-origin> underlying [40px 60px 100px]
-  from replace [100px 200px 20px] to add [160px 40px] at (1.25) should be [225px 75px
-  120px]'
-- 'Compositing Web Animations: property <transform-origin> underlying [40px 60px 80px]
-  from add [60px 140px 20px] to replace [200px 100px] at (-0.25) should be [75px 225px
-  125px]'
-- 'Compositing Web Animations: property <transform-origin> underlying [40px 60px 80px]
-  from add [60px 140px 20px] to replace [200px 100px] at (0) should be [100px 200px
-  100px]'
-- 'Compositing Web Animations: property <transform-origin> underlying [40px 60px 80px]
-  from add [60px 140px 20px] to replace [200px 100px] at (0.25) should be [125px 175px
-  75px]'
-- 'Compositing Web Animations: property <transform-origin> underlying [40px 60px 80px]
-  from add [60px 140px 20px] to replace [200px 100px] at (0.5) should be [150px 150px
-  50px]'
-- 'Compositing Web Animations: property <transform-origin> underlying [40px 60px 80px]
-  from add [60px 140px 20px] to replace [200px 100px] at (0.75) should be [175px 125px
-  25px]'
-- 'Compositing Web Animations: property <transform-origin> underlying [40px 60px 80px]
-  from add [60px 140px 20px] to replace [200px 100px] at (1.25) should be [225px 75px
-  -25px]'
-- 'Compositing Web Animations: property <transform-origin> underlying [40px 60px]
-  from add [60px 40px] to add [160px 140px 40px] at (-0.25) should be [75px 75px -10px]'
-- 'Compositing Web Animations: property <transform-origin> underlying [40px 60px]
-  from add [60px 40px] to add [160px 140px 40px] at (0) should be [100px 100px]'
-- 'Compositing Web Animations: property <transform-origin> underlying [40px 60px]
-  from add [60px 40px] to add [160px 140px 40px] at (0.25) should be [125px 125px
-  10px]'
-- 'Compositing Web Animations: property <transform-origin> underlying [40px 60px]
-  from add [60px 40px] to add [160px 140px 40px] at (0.5) should be [150px 150px 20px]'
-- 'Compositing Web Animations: property <transform-origin> underlying [40px 60px]
-  from add [60px 40px] to add [160px 140px 40px] at (0.75) should be [175px 175px
-  30px]'
-- 'Compositing Web Animations: property <transform-origin> underlying [40px 60px]
-  from add [60px 40px] to add [160px 140px 40px] at (1) should be [200px 200px 40px]'
-- 'Compositing Web Animations: property <transform-origin> underlying [40px 60px]
-  from add [60px 40px] to add [160px 140px 40px] at (1.25) should be [225px 225px
-  50px]'
-- 'Compositing Web Animations: property <transform-origin> underlying [top right 20px]
-  from add [left top 80px] to add [right bottom 20px] at (-0.25) should be [150px
-  -50px 115px]'
-- 'Compositing Web Animations: property <transform-origin> underlying [top right 20px]
-  from add [left top 80px] to add [right bottom 20px] at (0) should be [200px 0px
-  100px]'
-- 'Compositing Web Animations: property <transform-origin> underlying [top right 20px]
-  from add [left top 80px] to add [right bottom 20px] at (0.25) should be [250px 50px
-  85px]'
-- 'Compositing Web Animations: property <transform-origin> underlying [top right 20px]
-  from add [left top 80px] to add [right bottom 20px] at (0.5) should be [300px 100px
-  70px]'
-- 'Compositing Web Animations: property <transform-origin> underlying [top right 20px]
-  from add [left top 80px] to add [right bottom 20px] at (0.75) should be [350px 150px
-  55px]'
-- 'Compositing Web Animations: property <transform-origin> underlying [top right 20px]
-  from add [left top 80px] to add [right bottom 20px] at (1) should be [400px 200px
-  40px]'
-- 'Compositing Web Animations: property <transform-origin> underlying [top right 20px]
-  from add [left top 80px] to add [right bottom 20px] at (1.25) should be [450px 250px
-  25px]'
-css/css-transforms/animation/transform-skew-composition.html:
-- 'Compositing CSS Animations: property <transform> underlying [skewX(45deg)] from
-  accumulate [skewY(45deg)] to accumulate [skewY(45deg)] at (0.5) should be [matrix(1,
-  1, 0.5, 1.5, 0, 0)]'
-- 'Compositing Web Animations: property <transform> underlying [skewX(45deg)] from
-  accumulate [skewY(45deg)] to accumulate [skewY(45deg)] at (0.5) should be [matrix(1,
-  1, 0.5, 1.5, 0, 0)]'
 css/css-transforms/animation/translate-animation-on-svg.html:
-- "== css/css-transforms/animation/translate-animation-on-svg-ref.html (never ready
-  to capture)"
+- "== css/css-transforms/animation/translate-animation-on-svg-ref.html (both renderings
+  blank)"
 css/css-transforms/backface-visibility-hidden-002.html:
 - "== css/css-transforms/backface-visibility-hidden-002-ref.html"
 css/css-transforms/backface-visibility-hidden-003.html:
@@ -2533,13 +1693,6 @@ css/css-transforms/parsing/perspective-origin-valid.html:
 - e.style['perspective-origin'] = "top center" should set the property value
 css/css-transforms/parsing/scale-parsing-computed.html:
 - Property scale value '2 calc(300% * sign(1em - 1px)'
-- Property scale value 'calc(1 + sign(1em - 1px))'
-- Property scale value 'calc(2 * sign(1em - 1px)) calc(3)'
-- Property scale value 'calc(2 * sign(1em - 1px))'
-- Property scale value 'calc(200% * sign(1em - 1px)) 3'
-- Property scale value 'calc(200% * sign(1em - 1px))'
-- Property scale value 'calc(200%) calc(300% * sign(1em - 1px))'
-- Property scale value 'calc(200%) calc(300%) calc(400% * sign(1em - 1px))'
 css/css-transforms/parsing/scale-parsing-invalid.html:
 - e.style['scale'] = "calc(100px)" should not set the property value
 - e.style['scale'] = "calc(180deg) 2 3" should not set the property value
@@ -2570,9 +1723,6 @@ css/css-transforms/parsing/transform-invalid.html:
 - e.style['transform'] = "translate(1px, 2px, 3px)" should not set the property value
 - e.style['transform'] = "translateX(-4px, 5px)" should not set the property value
 - e.style['transform'] = "translateY(4%, 5%)" should not set the property value
-css/css-transforms/parsing/transform-origin-computed.html:
-- Property transform-origin value 'calc(-100% + 10px - 0.5em) calc(10px - 0.5em) calc(10px
-  - 0.5em)'
 css/css-transforms/parsing/transform-origin-valid.html:
 - e.style['transform-origin'] = "bottom right 7px" should set the property value
 - e.style['transform-origin'] = "center left 6px" should set the property value
@@ -2654,8 +1804,6 @@ css/css-transforms/rotate_45deg.html:
 - "== css/css-transforms/rotate_45deg-ref.html"
 css/css-transforms/rotate_y_45deg.html:
 - "== css/css-transforms/rotate_y_45deg-ref.html"
-css/css-transforms/scale-animation-with-var-001.html:
-- "== css/reference/ref-filled-green-100px-square-only.html"
 css/css-transforms/scale/svg-scale-001.html:
 - "== css/css-transforms/scale/reference/svg-scale-ref.html"
 css/css-transforms/scale/svg-scale-002.html:
@@ -2844,10 +1992,6 @@ css/css-transforms/transform-iframe-scroll-position.html:
 - "== css/css-transforms/transform-iframe-scroll-position-ref.html"
 css/css-transforms/transform-image-001.html:
 - "== css/css-transforms/transform-image-ref.html"
-css/css-transforms/transform-inherit-002.html:
-- "== css/css-transforms/transform-inherit-ref.html"
-css/css-transforms/transform-inherit-origin-001.html:
-- "== css/css-transforms/transform-inherit-origin-ref.html"
 css/css-transforms/transform-origin-013.html:
 - "== css/css-transforms/transform-origin-013-ref.html"
 css/css-transforms/transform-origin-014.html:
@@ -2880,29 +2024,6 @@ css/css-transforms/transform-translate-background-001.html:
 - "== css/css-transforms/transform-translate-background-001-ref.html"
 css/css-transforms/transform-translate-background-002.html:
 - "== css/css-transforms/transform-translate-background-001-ref.html"
-css/css-transforms/transform-with-sign-function.html:
-- calc(sign(1em - 1px) * 2) calc(sign(1em - 1px) * 2) calc(sign(1em - 1px) * 2) calc(sign(1em
-  - 1px) * 2deg) should be used-value-equivalent to 2 2 2 2deg
-- calc(sign(1em - 1px) * 2) calc(sign(1em - 1px) * 2) calc(sign(1em - 1px) * 2) should
-  be used-value-equivalent to 2 2 2
-- matrix(calc(sign(1em - 1px) * 2), calc(sign(1em - 1px) * 2), calc(sign(1em - 1px)
-  * 2), calc(sign(1em - 1px) * 2), calc(sign(1em - 1px) * 2), calc(sign(1em - 1px)
-  * 2)) should be used-value-equivalent to matrix(2, 2, 2, 2, 2, 2)
-- matrix3d(calc(sign(1em - 1px) * 2), calc(sign(1em - 1px) * 2), calc(sign(1em - 1px)
-  * 2), calc(sign(1em - 1px) * 2), calc(sign(1em - 1px) * 2), calc(sign(1em - 1px)
-  * 2), calc(sign(1em - 1px) * 2), calc(sign(1em - 1px) * 2),calc(sign(1em - 1px)
-  * 2), calc(sign(1em - 1px) * 2), calc(sign(1em - 1px) * 2), calc(sign(1em - 1px)
-  * 2), calc(sign(1em - 1px) * 2), calc(sign(1em - 1px) * 2), calc(sign(1em - 1px)
-  * 2), calc(sign(1em - 1px) * 2)) should be used-value-equivalent to matrix3d(2,
-  2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2)
-- rotate(calc(sign(1em - 1px) * 2deg)) should be used-value-equivalent to rotate(2deg)
-- rotateX(calc(sign(1em - 1px) * 2deg)) should be used-value-equivalent to rotateX(2deg)
-- rotateY(calc(sign(1em - 1px) * 2deg)) should be used-value-equivalent to rotateY(2deg)
-- rotateZ(calc(sign(1em - 1px) * 2deg)) should be used-value-equivalent to rotateZ(2deg)
-- skew(calc(sign(1em - 1px) * 2deg), calc(sign(1em - 1px) * 2deg)) should be used-value-equivalent
-  to skew(2deg, 2deg)
-- skewX(calc(sign(1em - 1px) * 2deg)) should be used-value-equivalent to skewX(2deg)
-- skewY(calc(sign(1em - 1px) * 2deg)) should be used-value-equivalent to skewY(2deg)
 css/css-transforms/transform3d-backface-visibility-001.html:
 - "== css/css-transforms/transform-lime-square-ref.html"
 css/css-transforms/transform3d-backface-visibility-002.html:
@@ -2941,14 +2062,6 @@ css/css-transitions/after-change-style-inherited-try-fallback.html:
 - Position fallback correctly applied to after-change style
 css/css-transitions/after-change-style-inherited.html:
 - "@container rules apply to after-change style"
-- "@starting-style rules should not apply to after-change style"
-- Start .inner transition based on inherited after-change background-color from .outer
-  (lime)
-- Start .inner transition based on inherited after-change color from .outer (lime)
-- Start inner transitions based on inherited after-change color and word-spacing from
-  two different ancestors
-css/css-transitions/all-interpolates-same-as-explicit-property.html:
-- transition:all interpolates the same as transition:the-actual-property 9
 css/css-transitions/animations/animate-with-color-mix.html:
 - Transition from color-mix to legacy rgb
 - Transition from color-mix to srgb
@@ -2956,122 +2069,16 @@ css/css-transitions/animations/animate-with-color-mix.html:
 - Transition from legacy rgb to color-mix
 - Transition from legacy rgba to color-mix with transparency
 - Transition from srgb to color-mix
-css/css-transitions/animations/change-duration-during-transition.html:
-- Transition duration change should not affect transition in progress
-css/css-transitions/animations/move-after-transition.html:
-- Move after transition.
-css/css-transitions/animations/transition-end-event-shorthands.html:
-- Transition end events generated for transition on shorthand property
 css/css-transitions/animations/transition-timing-function.html:
 - Ensure that transition easing functions are properly applied.
-css/css-transitions/animations/vertical-align-interpolation.html:
-- 'CSS Animations: property <vertical-align> from [initial] to [100px] at (-0.5) should
-  be [-50px]'
-- 'CSS Animations: property <vertical-align> from [initial] to [100px] at (0) should
-  be [0px]'
-- 'CSS Animations: property <vertical-align> from [initial] to [100px] at (0.3) should
-  be [30px]'
-- 'CSS Animations: property <vertical-align> from [initial] to [100px] at (0.6) should
-  be [60px]'
-- 'CSS Animations: property <vertical-align> from [initial] to [100px] at (1.5) should
-  be [150px]'
-- 'CSS Animations: property <vertical-align> from [unset] to [100px] at (-0.5) should
-  be [-50px]'
-- 'CSS Animations: property <vertical-align> from [unset] to [100px] at (0) should
-  be [0px]'
-- 'CSS Animations: property <vertical-align> from [unset] to [100px] at (0.3) should
-  be [30px]'
-- 'CSS Animations: property <vertical-align> from [unset] to [100px] at (0.6) should
-  be [60px]'
-- 'CSS Animations: property <vertical-align> from [unset] to [100px] at (1.5) should
-  be [150px]'
-- 'CSS Transitions with transition: all: property <vertical-align> from [initial]
-  to [100px] at (-0.5) should be [-50px]'
-- 'CSS Transitions with transition: all: property <vertical-align> from [initial]
-  to [100px] at (0) should be [0px]'
-- 'CSS Transitions with transition: all: property <vertical-align> from [initial]
-  to [100px] at (0.3) should be [30px]'
-- 'CSS Transitions with transition: all: property <vertical-align> from [initial]
-  to [100px] at (0.6) should be [60px]'
-- 'CSS Transitions with transition: all: property <vertical-align> from [initial]
-  to [100px] at (1.5) should be [150px]'
-- 'CSS Transitions with transition: all: property <vertical-align> from [unset] to
-  [100px] at (-0.5) should be [-50px]'
-- 'CSS Transitions with transition: all: property <vertical-align> from [unset] to
-  [100px] at (0) should be [0px]'
-- 'CSS Transitions with transition: all: property <vertical-align> from [unset] to
-  [100px] at (0.3) should be [30px]'
-- 'CSS Transitions with transition: all: property <vertical-align> from [unset] to
-  [100px] at (0.6) should be [60px]'
-- 'CSS Transitions with transition: all: property <vertical-align> from [unset] to
-  [100px] at (1.5) should be [150px]'
-- 'CSS Transitions: property <vertical-align> from [initial] to [100px] at (-0.5)
-  should be [-50px]'
-- 'CSS Transitions: property <vertical-align> from [initial] to [100px] at (0) should
-  be [0px]'
-- 'CSS Transitions: property <vertical-align> from [initial] to [100px] at (0.3) should
-  be [30px]'
-- 'CSS Transitions: property <vertical-align> from [initial] to [100px] at (0.6) should
-  be [60px]'
-- 'CSS Transitions: property <vertical-align> from [initial] to [100px] at (1.5) should
-  be [150px]'
-- 'CSS Transitions: property <vertical-align> from [unset] to [100px] at (-0.5) should
-  be [-50px]'
-- 'CSS Transitions: property <vertical-align> from [unset] to [100px] at (0) should
-  be [0px]'
-- 'CSS Transitions: property <vertical-align> from [unset] to [100px] at (0.3) should
-  be [30px]'
-- 'CSS Transitions: property <vertical-align> from [unset] to [100px] at (0.6) should
-  be [60px]'
-- 'CSS Transitions: property <vertical-align> from [unset] to [100px] at (1.5) should
-  be [150px]'
-- 'Web Animations: property <vertical-align> from [initial] to [100px] at (-0.5) should
-  be [-50px]'
-- 'Web Animations: property <vertical-align> from [initial] to [100px] at (0) should
-  be [0px]'
-- 'Web Animations: property <vertical-align> from [initial] to [100px] at (0.3) should
-  be [30px]'
-- 'Web Animations: property <vertical-align> from [initial] to [100px] at (0.6) should
-  be [60px]'
-- 'Web Animations: property <vertical-align> from [initial] to [100px] at (1.5) should
-  be [150px]'
-- 'Web Animations: property <vertical-align> from [unset] to [100px] at (-0.5) should
-  be [-50px]'
-- 'Web Animations: property <vertical-align> from [unset] to [100px] at (0) should
-  be [0px]'
-- 'Web Animations: property <vertical-align> from [unset] to [100px] at (0.3) should
-  be [30px]'
-- 'Web Animations: property <vertical-align> from [unset] to [100px] at (0.6) should
-  be [60px]'
-- 'Web Animations: property <vertical-align> from [unset] to [100px] at (1.5) should
-  be [150px]'
 css/css-transitions/before-load-001.html:
 - 'CSS Transitions Test: Transitioning before load event'
-css/css-transitions/custom-property-and-allow-discrete.html:
-- 'It is possible to transition an unregistered custom property using "transition-behavior:
-  allows-discrete"'
-- 'It is possible to transition an unregistered custom property using "transition-behavior:
-  allows-discrete" when setting "transition-property" in the style change that yields
-  the transition'
 css/css-transitions/disconnected-element-001.html:
 - Transitions are canceled when an element is re-parented
 - Transitions are canceled when an element is re-parented to the same node
 - Transitions are canceled when an element is removed from the document
 css/css-transitions/dynamic-root-element.html:
 - Transitions don't incorrectly start on dynamic document element insertion
-css/css-transitions/events-006.html:
-- transition padding-left on ::after
-- transition padding-left on ::before
-css/css-transitions/events-008.html:
-- transitionend event has animation property and its value is the corresponding CSSTransition
-  object
-- transitionrun event has animation property and its value is the corresponding CSSTransition
-  object
-- transitionstart event has animation property and its value is the corresponding
-  CSSTransition object
-css/css-transitions/non-rendered-element-002.html:
-- Transitions on ::before/::after pseudo-elements are canceled when the content property
-  is cleared
 css/css-transitions/parsing/starting-style-parsing.html:
 - "@starting-style is valid"
 css/css-transitions/parsing/transition-delay-invalid.html:
@@ -3102,10 +2109,6 @@ css/css-transitions/parsing/transition-property-invalid.html:
 - e.style['transition-property'] = "top, unset" should not set the property value
 - e.style['transition-property'] = "unset, top" should not set the property value
 css/css-transitions/parsing/transition-timing-function-computed.html:
-- Property transition-timing-function value 'step-end'
-- Property transition-timing-function value 'step-start'
-- Property transition-timing-function value 'steps(2, end)'
-- Property transition-timing-function value 'steps(2, jump-end)'
 - Property transition-timing-function value 'steps(calc(2 * sibling-index()), jump-none)'
 - Property transition-timing-function value 'steps(calc(2 * sign(1em - 1000px)), jump-none)'
 - Property transition-timing-function value 'steps(calc(2 * sign(1em - 1000px)), start)'
@@ -3168,12 +2171,15 @@ css/css-transitions/parsing/transition-timing-function-valid.html:
 - e.style['transition-timing-function'] = "steps(2, jump-end)" should set the property
   value
 css/css-transitions/properties-value-001.html:
-- clip rectangle(rectangle) / events
-- clip rectangle(rectangle) / values
-- font-weight font-weight(keyword) / events
-- font-weight font-weight(keyword) / values
-- visibility visibility(keyword) / events
-- visibility visibility(keyword) / values
+- vertical-align length(cm) / events
+- vertical-align length(em) / events
+- vertical-align length(ex) / events
+- vertical-align length(in) / events
+- vertical-align length(mm) / events
+- vertical-align length(pc) / events
+- vertical-align length(pt) / events
+- vertical-align length(px) / events
+- vertical-align percentage(%) / events
 css/css-transitions/properties-value-002.html:
 - vertical-align vertical(keyword) / events
 - vertical-align vertical(keyword) / values
@@ -3186,20 +2192,10 @@ css/css-transitions/properties-value-003.html:
 - background-image image(url) / values
 - background-size background-size(keyword) / events
 - background-size background-size(keyword) / values
-- border-bottom-left-radius border-radius(px-px) / events
-- border-bottom-left-radius border-radius(px-px) / values
-- border-bottom-right-radius border-radius(px-px) / events
-- border-bottom-right-radius border-radius(px-px) / values
-- border-top-left-radius border-radius(px-px) / events
-- border-top-left-radius border-radius(px-px) / values
-- border-top-right-radius border-radius(px-px) / events
-- border-top-right-radius border-radius(px-px) / values
 - display display(block to inline-block) / events
 - display display(block to inline-block) / values
 - display display(static to absolute) / events
 - display display(static to absolute) / values
-- font-stretch font-stretch(keyword) / events
-- font-stretch font-stretch(keyword) / values
 - object-view-box object-view-box(inset) / events
 - object-view-box object-view-box(inset) / values
 - object-view-box object-view-box(rect) / events
@@ -3212,29 +2208,19 @@ css/css-transitions/properties-value-003.html:
 - position position(relative to absolute) / values
 - position position(static to absolute) / events
 - position position(static to absolute) / values
-css/css-transitions/properties-value-inherit-001.html:
-- clip rectangle(rectangle) / values
-- visibility visibility(keyword) / values
+css/css-transitions/properties-value-implicit-001.html:
+- vertical-align length-em(em) / events
 css/css-transitions/properties-value-inherit-002.html:
-- clip rectangle(rectangle) / events
-- clip rectangle(rectangle) / values
-- visibility visibility(keyword) / events
-- visibility visibility(keyword) / values
-css/css-transitions/pseudo-element-transform.html:
-- "== css/css-transitions/pseudo-element-transform-ref.html (never ready to capture)"
-css/css-transitions/pseudo-elements-001.html:
-- transition padding-left on :after / values
-- transition padding-left on :after, changing content / values
-- transition padding-left on :before / values
-- transition padding-left on :before, changing content / values
-css/css-transitions/pseudo-elements-002.html:
-- Check that transitions run on a pseudo element whose ancestor changes display type.
-css/css-transitions/retargetted-transition-with-box-sizing.html:
-- Retargeting transitions on box size relative transitions should work.
-css/css-transitions/starting-of-transitions-001.html:
-- changes to transition-property should cancel in-flight transitions
+- vertical-align length(cm) / events
+- vertical-align length(em) / events
+- vertical-align length(ex) / events
+- vertical-align length(in) / events
+- vertical-align length(mm) / events
+- vertical-align length(pc) / events
+- vertical-align length(pt) / events
+- vertical-align length(px) / events
+- vertical-align percentage(%) / events
 css/css-transitions/starting-style-name-defining-rules.html:
-- "@keyframes and @layer in @starting-style apply"
 - Load @font-face from @starting-style rule
 css/css-transitions/starting-style-rule-basic.html:
 - Triggered transition from display:none to display:block
@@ -3247,39 +2233,15 @@ css/css-transitions/starting-style-rule-pseudo-elements.html:
 css/css-transitions/starting-style-size-container.html:
 - Triggered transition from first style update based on up-to-date container query
 - Triggered transition from the display change inside the up-to-date container query
-css/css-transitions/transition-001.html:
-- parse '1s width linear(0, .5 10% 20%, 1, .5 50%, 1) 2s'
-css/css-transitions/transition-after-animation-001.html:
-- Starting transition after animation has ended
-css/css-transitions/transition-base-response-001.html:
-- em units respond to font-size transition
-- ex units respond to font-size transition
-css/css-transitions/transition-base-response-002.html:
-- Transitioning font-size on root affects rem units
-css/css-transitions/transition-base-response-003.html:
-- Identical elements are all responsive to font-size transition
-css/css-transitions/transition-behavior.html:
-- transition-behavior changed to normal should stop the running discrete transitions.
-- transition-behavior:normal should cancel the running transitions whose animation
-  values are not interpolatable
 css/css-transitions/transition-events-with-document-change.html:
 - transition events for an element changing document
-css/css-transitions/transition-property-002.html:
-- parse 'all, none'
-- parse 'none, all'
 css/css-transitions/transition-reparented.html:
 - When an element is reparented, any CSS Transition on it should be cancelled
 css/css-transitions/transitioncancel-001.html:
 - transitioncancel should be fired if the element is made display:none during the
   transition
-css/css-transitions/transitioncancel-002.html:
-- Removing a transitioning property from transition-property should trigger transitioncancel
-css/css-transitions/transitions-retarget.html:
-- Retargeting a transition should cause the old transition to be cancelled
 css/css-transitions/unregistered-custom-property-transition.html:
 - first value -> unset transition with allow-discrete
-- retargeting a running transition with allow-discrete
-- unset -> first value transition with allow-discrete
 css/cssom/CSSStyleSheet-constructable-insertRule-base-uri.html:
 - "== css/cssom/CSSStyleSheet-constructable-insertRule-base-uri-ref.html"
 css/cssom/CSSStyleSheet-constructable.html:
@@ -3323,9 +2285,6 @@ css/cssom/cssimportrule-parent.html:
 - "@import stylesheet is properly unlinked from parent after removal"
 css/cssom/cssom-fontfacerule-constructors.html:
 - The style attribute must return a CSSFontFaceDescriptors block
-css/cssom/cssom-getPropertyValue-common-checks.html:
-- All shorthands (except 'all') can serialize their longhands set to their initial
-  value
 css/cssom/cssstyledeclaration-nested.html:
 - CSSNestedDeclarationBlock cssom interactions
 css/cssom/cssstyledeclaration-registered-custom-properties.html:
@@ -3334,9 +2293,9 @@ css/cssom/cssstyledeclaration-registered-custom-properties.html:
 css/cssom/flex-serialization.html:
 - Single value flex with non-CSS-wide value should serialize correctly.
 css/cssom/font-family-serialization-001.html:
-- 'Computed: mixed font-family list serialization'
-- 'Computed: multi-word family name serializes unquoted'
 - 'Computed: quoted multi-word name normalizes to unquoted'
+- Serialization of <generic-family>
+- Serialization of prefixed -webkit-<generic-family>
 - 'Specified: mixed font-family list serialization'
 - 'Specified: multi-word family name serializes unquoted'
 - 'Specified: quoted multi-word name normalizes to unquoted'
@@ -3464,10 +2423,6 @@ css/cssom/getComputedStyle-resolved-min-size-auto.html:
   with id="block-with-two-part-valid-aspect-ratio"
 - Resolved value of min-width & min-height 'auto' keyword behaves as expected on element
   with id="block-with-valid-aspect-ratio"
-- Resolved value of min-width & min-height 'auto' keyword behaves as expected on element
-  with id="display-none-subtree-flex-item"
-- Resolved value of min-width & min-height 'auto' keyword behaves as expected on element
-  with id="display-none-subtree-grid-item"
 - Resolved value of min-width & min-height 'auto' keyword behaves as expected on element
   with id="inline-with-degenerate-aspect-ratio"
 - Resolved value of min-width & min-height 'auto' keyword behaves as expected on element
@@ -3923,12 +2878,6 @@ dom/nodes/insertion-removing-steps/insertion-removing-steps-iframe.window.js:
 - 'Removing steps (remove): script does not run synchronously during iframe destruction'
 - 'Removing steps (replaceChildren): script does not run synchronously during iframe
   destruction'
-dom/nodes/moveBefore/continue-css-transition-left-pseudo.html:
-- Node.moveBefore should preserve CSS transition state on pseudo-elements (left)
-dom/nodes/moveBefore/continue-css-transition-transform-pseudo.html:
-- Node.moveBefore should preserve CSS transition state on pseudo-elements (transform)
-dom/nodes/moveBefore/continue-css-transition-transform.html:
-- Node.moveBefore should preserve CSS transition state (transform)
 dom/nodes/moveBefore/css-transition-trigger.html:
 - Node.moveBefore should trigger CSS transition state (left) if needed
 dom/nodes/moveBefore/hover-style-update.html:
@@ -4660,8 +3609,6 @@ html/dom/elements/global-attributes/dir_auto-textarea-script-N-between-Rs.html:
 - "== html/dom/elements/global-attributes/dir_auto-textarea-script-N-between-Rs-ref.html"
 html/dom/elements/global-attributes/dir_auto-textarea-script-mixed.html:
 - "== html/dom/elements/global-attributes/dir_auto-textarea-script-mixed-ref.html"
-html/dom/elements/global-attributes/style-01.html:
-- "== html/dom/elements/global-attributes/style-01-ref.html"
 html/dom/elements/global-attributes/the-lang-attribute-003.html:
 - The browser will recognize a language declared in the HTTP header, when there is
   no internal language declaration.
@@ -4748,7 +3695,6 @@ html/dom/elements/the-innertext-and-outertext-properties/getter.html:
 - <select size='2'> contents of options preserved ("<select size='2'><option>abc</option><option>def")
 - <select> containing text node child ("<select class='poke'></select>")
 - <svg> non-rendered text ignored ("<div><svg><stop>abc</stop></svg></div>")
-- <svg><defs> text contents ignored ("<div><svg><defs><text>abc</text></defs></svg></div>")
 - <textarea> contents ignored ("<textarea>abc")
 - Blank lines around a <p> in its own block ("<div>abc<div><p>123</p></div>def")
 - Leading/trailing space removal at display:inline-block boundary ("<div>123<span
@@ -4964,9 +3910,6 @@ html/rendering/bidi-rendering/slot-no-isolate-001.html:
 - "== html/rendering/bidi-rendering/slot-no-isolate-001-ref.html"
 html/rendering/bindings/the-select-element-0/option-label.html:
 - "== html/rendering/bindings/the-select-element-0/option-label-ref.html"
-html/rendering/non-replaced-elements/flow-content-0/dialog.html:
-- 'Closed dialog in width: 538px iframe'
-- 'Closed dialog in width: 540px iframe'
 html/rendering/non-replaced-elements/form-controls/input-line-height-computed.html:
 - "<input type=email>.computedStyleMap().get('line-height') should not be affected
   by the used value clamping"
@@ -4992,52 +3935,10 @@ html/rendering/non-replaced-elements/form-controls/input-line-height-computed.ht
   no smaller than 'normal' (but should not literally be 'normal')
 - getComputedStyle(<input type=url>).lineHeight should return a used value that is
   no smaller than 'normal' (but should not literally be 'normal')
+html/rendering/non-replaced-elements/form-controls/resets.html:
+- "<textarea> - overflow"
 html/rendering/non-replaced-elements/form-controls/text-transform.html:
 - "== html/rendering/non-replaced-elements/form-controls/text-transform-ref.html"
-html/rendering/non-replaced-elements/hidden-elements.html:
-- embed[hidden=''] element should be inline 0x0
-- embed[hidden='until-found'] element should be inline 0x0
-html/rendering/non-replaced-elements/phrasing-content-0/b-strong-styles.html:
-- "== html/rendering/non-replaced-elements/phrasing-content-0/b-strong-styles-ref.html"
-html/rendering/non-replaced-elements/phrasing-content-0/font-element-text-decoration-color/001-a.html:
-- "== html/rendering/non-replaced-elements/phrasing-content-0/font-element-text-decoration-color/001-ref.html"
-html/rendering/non-replaced-elements/phrasing-content-0/font-element-text-decoration-color/001-q.html:
-- "== html/rendering/non-replaced-elements/phrasing-content-0/font-element-text-decoration-color/001-ref.html"
-html/rendering/non-replaced-elements/phrasing-content-0/font-element-text-decoration-color/001-s.html:
-- "== html/rendering/non-replaced-elements/phrasing-content-0/font-element-text-decoration-color/001-ref.html"
-html/rendering/non-replaced-elements/phrasing-content-0/font-element-text-decoration-color/001-x.xhtml:
-- "== html/rendering/non-replaced-elements/phrasing-content-0/font-element-text-decoration-color/001-ref.html"
-html/rendering/non-replaced-elements/phrasing-content-0/font-element-text-decoration-color/font-face.html:
-- font face attribute cursive is correct
-- font face attribute fantasy is correct
-- font face attribute monospace is correct
-- font face attribute sans-serif is correct
-- font face attribute serif is correct
-html/rendering/non-replaced-elements/phrasing-content-0/font-element-text-decoration-color/font-size.html:
-- font size attribute +1 is correct
-- font size attribute +2 is correct
-- font size attribute +3 is correct
-- font size attribute +4 is correct
-- font size attribute +5 is correct
-- font size attribute +6 is correct
-- font size attribute +7 is correct
-- font size attribute +8 is correct
-- font size attribute -1 is correct
-- font size attribute -2 is correct
-- font size attribute -3 is correct
-- font size attribute -4 is correct
-- font size attribute -5 is correct
-- font size attribute -6 is correct
-- font size attribute -7 is correct
-- font size attribute -8 is correct
-- font size attribute 0 is correct
-- font size attribute 1 is correct
-- font size attribute 2 is correct
-- font size attribute 4 is correct
-- font size attribute 5 is correct
-- font size attribute 6 is correct
-- font size attribute 7 is correct
-- font size attribute 8 is correct
 html/rendering/non-replaced-elements/tables/form-in-tables.html:
 - Computed display of form inside TABLE should be 'none'
 - Computed display of form inside TABLE should be 'none' (!important UA style))
@@ -5057,25 +3958,9 @@ html/rendering/non-replaced-elements/tables/hidden-attr.html:
 - Computed display and visibility of thead
 - Computed display and visibility of tr
 html/rendering/non-replaced-elements/tables/table-attribute.html:
-- table background attribute is correct
-- table bgcolor attribute is correct
-- table bordercolor attribute is correct
-- table cellspacing attribute is correct
 - table_td height attribute percentage is correct
 - table_th height attribute percentage is correct
-- tbody background attribute is correct
-- tbody bgcolor attribute is correct
-- td background attribute is correct
-- td bgcolor attribute is correct
 - td height attribute pixel is correct
-- tfoot background attribute is correct
-- tfoot bgcolor attribute is correct
-- th background attribute is correct
-- th bgcolor attribute is correct
-- thead background attribute is correct
-- thead bgcolor attribute is correct
-- tr background attribute is correct
-- tr bgcolor attribute is correct
 html/rendering/non-replaced-elements/tables/table-cell-nowrap-with-fixed-width.html:
 - "== html/rendering/non-replaced-elements/tables/table-cell-nowrap-with-fixed-width-ref.html"
 html/rendering/non-replaced-elements/tables/table-direction.html:
@@ -5086,8 +3971,6 @@ html/rendering/non-replaced-elements/tables/table-row-group-direction.html:
 - "== html/rendering/non-replaced-elements/tables/table-row-group-direction-ref.html"
 html/rendering/non-replaced-elements/tables/table-row-pagination-001-print.html:
 - "== html/rendering/non-replaced-elements/tables/table-row-pagination-001-print-ref.html"
-html/rendering/non-replaced-elements/tables/table-row-pagination-002-print.html:
-- "== html/rendering/non-replaced-elements/tables/table-row-pagination-002-print-ref.html"
 html/rendering/non-replaced-elements/tables/tr-transform-and-will-change.html:
 - "== html/rendering/non-replaced-elements/tables/tr-transform-and-will-change-ref.html"
 html/rendering/non-replaced-elements/the-fieldset-and-legend-elements/fieldset-block-size.html:
@@ -5140,13 +4023,6 @@ html/rendering/non-replaced-elements/the-fieldset-and-legend-elements/flex-legen
 - no dynamic changes
 html/rendering/non-replaced-elements/the-fieldset-and-legend-elements/grid-template-propagation.html:
 - "== html/rendering/non-replaced-elements/the-fieldset-and-legend-elements/grid-template-propagation-ref.html"
-html/rendering/non-replaced-elements/the-fieldset-and-legend-elements/legend-align-justify-self.html:
-- <fieldset><legend align="cEnTeR">x</legend></fieldset>
-- <fieldset><legend align="center">x</legend></fieldset>
-- <fieldset><legend align="lEfT">x</legend></fieldset>
-- <fieldset><legend align="left">x</legend></fieldset>
-- <fieldset><legend align="rIgHt">x</legend></fieldset>
-- <fieldset><legend align="right">x</legend></fieldset>
 html/rendering/non-replaced-elements/the-fieldset-and-legend-elements/legend-auto-margins.html:
 - "== html/rendering/non-replaced-elements/the-fieldset-and-legend-elements/legend-auto-margins-ref.html"
 html/rendering/non-replaced-elements/the-fieldset-and-legend-elements/legend-block-formatting-context.html:
@@ -5162,10 +4038,30 @@ html/rendering/non-replaced-elements/the-fieldset-and-legend-elements/legend-blo
 html/rendering/non-replaced-elements/the-fieldset-and-legend-elements/legend-display-rendering.html:
 - "== html/rendering/non-replaced-elements/the-fieldset-and-legend-elements/legend-display-rendering-ref.html"
 html/rendering/non-replaced-elements/the-fieldset-and-legend-elements/legend-display.html:
-- 'rendered legend with display: flow'
-- 'rendered legend with display: flow; columns:1'
-- 'rendered legend with display: flow; overflow:hidden'
-- 'rendered legend with display: flow; overflow:hidden;columns:1'
+- 'rendered legend with display: inline'
+- 'rendered legend with display: inline-block'
+- 'rendered legend with display: inline-block; columns:1'
+- 'rendered legend with display: inline-block; overflow:hidden'
+- 'rendered legend with display: inline-block; overflow:hidden;columns:1'
+- 'rendered legend with display: inline-flex'
+- 'rendered legend with display: inline-flex; columns:1'
+- 'rendered legend with display: inline-flex; overflow:hidden'
+- 'rendered legend with display: inline-flex; overflow:hidden;columns:1'
+- 'rendered legend with display: inline-grid'
+- 'rendered legend with display: inline-grid; columns:1'
+- 'rendered legend with display: inline-grid; overflow:hidden'
+- 'rendered legend with display: inline-grid; overflow:hidden;columns:1'
+- 'rendered legend with display: inline-table'
+- 'rendered legend with display: inline-table; columns:1'
+- 'rendered legend with display: inline-table; overflow:hidden'
+- 'rendered legend with display: inline-table; overflow:hidden;columns:1'
+- 'rendered legend with display: inline; columns:1'
+- 'rendered legend with display: inline; overflow:hidden'
+- 'rendered legend with display: inline; overflow:hidden;columns:1'
+- 'rendered legend with display: table'
+- 'rendered legend with display: table; columns:1'
+- 'rendered legend with display: table; overflow:hidden'
+- 'rendered legend with display: table; overflow:hidden;columns:1'
 html/rendering/non-replaced-elements/the-fieldset-and-legend-elements/legend-float-abspos.html:
 - dynamic changes to float
 - dynamic changes to position
@@ -5209,10 +4105,6 @@ html/rendering/non-replaced-elements/the-frameset-and-frame-elements/large-rows-
 - "== html/rendering/non-replaced-elements/the-frameset-and-frame-elements/reference/green-ref.html"
 html/rendering/non-replaced-elements/the-frameset-and-frame-elements/large-rows-relsize.html:
 - A large relative value should not produce weird sizes.
-html/rendering/non-replaced-elements/the-hr-element-0/align.html:
-- "== html/rendering/non-replaced-elements/the-hr-element-0/align-ref.html"
-html/rendering/non-replaced-elements/the-hr-element-0/color.html:
-- "== html/rendering/non-replaced-elements/the-hr-element-0/color-ref.html"
 html/rendering/non-replaced-elements/the-page/body-margin-1a.html:
 - "== html/rendering/non-replaced-elements/the-page/body-margin-1-ref.html (a frame
   the painter never enters)"
@@ -5294,11 +4186,7 @@ html/rendering/non-replaced-elements/the-page/iframe-scrolling-attribute.html:
 - "== html/rendering/non-replaced-elements/the-page/iframe-scrolling-attribute-ref.html
   (a frame the painter never enters)"
 html/rendering/replaced-elements/attributes-for-embedded-content-and-images/canvas-aspect-ratio.html:
-- 'Computed style test: canvas with {"width":"0","height":"0"}'
-- 'Computed style test: canvas with {"width":"0","height":"1"}'
 - 'Computed style test: canvas with {"width":"0.5","height":"1.5"}'
-- 'Computed style test: canvas with {"width":"1","height":"0"}'
-- 'Computed style test: canvas with {"width":"10","height":"20"}'
 - 'Computed style test: canvas with {"width":"10%","height":"20"}'
 html/rendering/replaced-elements/attributes-for-embedded-content-and-images/canvas-dimension-attributes.html:
 - "== css/reference/ref-filled-green-200px-square.html"
@@ -5306,16 +4194,6 @@ html/rendering/replaced-elements/attributes-for-embedded-content-and-images/img-
 - Image width and height attributes are used to infer aspect-ratio for lazy-loaded
   images
 html/rendering/replaced-elements/attributes-for-embedded-content-and-images/img-aspect-ratio.html:
-- 'Computed style test: img with {"width":"0","height":"0"}'
-- 'Computed style test: img with {"width":"0","height":"1"}'
-- 'Computed style test: img with {"width":"0.5","height":"1.5"}'
-- 'Computed style test: img with {"width":"1","height":"0"}'
-- 'Computed style test: img with {"width":"10","height":"20"}'
-- 'Computed style test: input with {"type":"image","width":"0","height":"0"}'
-- 'Computed style test: input with {"type":"image","width":"0","height":"1"}'
-- 'Computed style test: input with {"type":"image","width":"0.5","height":"1.5"}'
-- 'Computed style test: input with {"type":"image","width":"1","height":"0"}'
-- 'Computed style test: input with {"type":"image","width":"10","height":"20"}'
 - 'Create, append and test immediately: <img> with attributes width=0.8, height=0.2'
 - 'Create, append and test immediately: <img> with attributes width=250, height=100'
 - 'Create, append and test immediately: <img> with attributes width=50% height=25%'
@@ -5323,7 +4201,6 @@ html/rendering/replaced-elements/attributes-for-embedded-content-and-images/img-
   height=25xx'
 - 'Loaded images test: <img> with width, height and empty src attributes'
 - 'Loaded images test: Error image with width and height attributes'
-- 'Loaded images test: Error image with width, height and alt attributes'
 html/rendering/replaced-elements/attributes-for-embedded-content-and-images/img-empty-alt-replaced.html:
 - Images with an empty alt attribute have an intrinsic size of zero
 html/rendering/replaced-elements/attributes-for-embedded-content-and-images/input-align-right-1.html:
@@ -5340,8 +4217,12 @@ html/rendering/replaced-elements/attributes-for-embedded-content-and-images/pict
 - Changing which <source> matches should change computed style
 - Computed style for width/height/aspect-ratio
 - Dynamically changing width/height should change computed style
-- If we don't have width/height on the source, we fall back to width/height on the
-  <img>.
+- If the <source> has only one of width/height, we don't get an aspect ratio, even
+  if the <img> has both.
+- If we only have height attribute, we should get height mapped but no aspect ratio,
+  even if <img> has attributes.
+- If we only have one width attribute, we should get width mapped but no aspect ratio,
+  even if <img> has attributes.
 - 'Loaded picture test: <source> with width and height attributes, <img> without width
   and height attributes'
 - 'Loaded picture test: Both <source> and <img> are with width and height attributes'
@@ -5357,11 +4238,6 @@ html/rendering/replaced-elements/attributes-for-embedded-content-and-images/vide
 - Aspect ratio for regular video
 - Aspect ratio for regular video with width:auto
 - Aspect ratio for video with contain:size
-- 'Computed style test: video with {"width":"0","height":"0"}'
-- 'Computed style test: video with {"width":"0","height":"1"}'
-- 'Computed style test: video with {"width":"0.5","height":"1.5"}'
-- 'Computed style test: video with {"width":"1","height":"0"}'
-- 'Computed style test: video with {"width":"10","height":"20"}'
 ? html/rendering/replaced-elements/attributes-for-embedded-content-and-images/video-default-object-height-constrained-by-max-width.html
 : - "== css/reference/ref-filled-green-100px-square.xht"
 ? html/rendering/replaced-elements/attributes-for-embedded-content-and-images/video-default-object-width-constrained-by-max-height.html
@@ -5828,8 +4704,6 @@ html/rendering/replaced-elements/the-select-element/select-empty.html:
 - "== html/rendering/replaced-elements/the-select-element/select-empty-ref.html"
 html/rendering/sections/headingoffset-and-headingreset.html:
 - "== html/rendering/sections/headingoffset-and-headingreset-ref.html"
-html/rendering/the-css-user-agent-style-sheet-and-presentational-hints/mouse-cursor-imagemap.html:
-- Only clickable areas should show the link cursor.
 html/rendering/the-details-element/auto-expand-details-text-fragment.html:
 - Verifies that the target page has scrolled as a result of a ScrollToTextFragment
   navigation.
@@ -5837,9 +4711,6 @@ html/rendering/the-details-element/details-content-pseudo-attr.html:
 - "== html/rendering/the-details-element/details-content-pseudo-attr-ref.html"
 html/rendering/the-details-element/details-display-type-001.html:
 - "== html/rendering/the-details-element/details-display-type-001-ref.html"
-html/rendering/the-details-element/details-display.html:
-- default display of other summary element in details is block
-- default display of summary element outside details is block
 html/rendering/the-details-element/details-focus-steps.html:
 - Focus flows into third when details is closed
 html/rendering/the-details-element/details-pseudo-elements-001.html:
@@ -5863,56 +4734,20 @@ html/rendering/widgets/appearance/appearance-animation-002.html:
 html/rendering/widgets/appearance/appearance-transition-003.html:
 - "== html/rendering/widgets/appearance/appearance-animation-002-ref.html"
 html/rendering/widgets/appearance/default-styles.html:
-- "<button>"
-- <input type="TEXT">
-- <input type="button">
-- <input type="checkbox">
-- <input type="color">
-- <input type="date">
-- <input type="datetime-local">
-- <input type="email">
-- <input type="month">
-- <input type="number">
-- <input type="password">
-- <input type="radio">
-- <input type="range">
-- <input type="reset">
-- <input type="search">
-- <input type="submit">
-- <input type="tel">
-- <input type="text">
-- <input type="time">
-- <input type="unknowntype">
-- <input type="url">
-- <input type="week">
-- "<input>"
 - "<meter>"
 - "<progress>"
-- <select multiple="">
-- <select size="2">
-- "<select>"
-- "<textarea>"
 html/rendering/widgets/button-layout/anonymous-button-content-box.html:
 - "== html/rendering/widgets/button-layout/anonymous-button-content-box-ref.html"
 html/rendering/widgets/button-layout/block-in-inline.html:
 - "== html/rendering/widgets/button-layout/block-in-inline-ref.html"
 html/rendering/widgets/button-layout/computed-style.html:
-- "<input type=button> overflow/overflow-clip-margin"
-- "<input type=color> overflow/overflow-clip-margin"
-- "<input type=image> overflow/overflow-clip-margin"
-- "<input type=reset> overflow/overflow-clip-margin"
-- "<input type=submit> overflow/overflow-clip-margin"
-- 'computed display of <button type=submit> with display: flow'
 - 'computed display of <input type=button> with display: contents'
-- 'computed display of <input type=button> with display: flow'
 - 'computed display of <input type=color> with display: contents'
-- 'computed display of <input type=color> with display: flow'
 - 'computed display of <input type=image> with display: contents'
-- 'computed display of <input type=image> with display: flow'
 - 'computed display of <input type=reset> with display: contents'
-- 'computed display of <input type=reset> with display: flow'
 - 'computed display of <input type=submit> with display: contents'
-- 'computed display of <input type=submit> with display: flow'
+html/rendering/widgets/button-layout/display-other.html:
+- 'display: run-in'
 html/rendering/widgets/button-layout/inline-level.html:
 - "== html/rendering/widgets/button-layout/inline-level-ref.html"
 html/rendering/widgets/button-layout/input-type-button-clip.html:
@@ -6167,8 +5002,6 @@ html/semantics/forms/the-select-element/customizable-select/closed-listbox-rende
 - "== html/semantics/forms/the-select-element/customizable-select/closed-listbox-rendering-ref.html"
 html/semantics/forms/the-select-element/customizable-select/focus-ring-rendering.html:
 - "== html/semantics/forms/the-select-element/customizable-select/focus-ring-rendering-ref.html"
-html/semantics/forms/the-select-element/customizable-select/picker-and-slotted.html:
-- "== html/semantics/forms/the-select-element/customizable-select/picker-and-slotted-ref.html"
 html/semantics/forms/the-select-element/customizable-select/picker-icon-animation-002.html:
 - "== html/semantics/forms/the-select-element/customizable-select/picker-icon-animation-002-ref.html"
 html/semantics/forms/the-select-element/customizable-select/picker-icon-animation.html:
@@ -7125,6 +5958,9 @@ shadow-dom/offsetParent-across-shadow-boundaries.html:
   to a slot in nested shadow trees of closed mode
 - offsetParent must skip offset parents of an element when the context object is assigned
   to a slot in nested shadow trees of open mode
+shadow-dom/offsetTop-offsetLeft-across-shadow-boundaries.html:
+- Verifies that HTMLElement.offsetTop accounts for shadow boundaries when nested in
+  multiple shadow roots.
 shadow-dom/scroll-to-the-fragment-in-shadow-tree.html:
 - The user agent scroll to the fragment when there is an anchor element with a name
   attribute exactly equal to the decoded fragid
@@ -7147,256 +5983,101 @@ shadow-dom/shadow-style-invalidation-vw-units.html:
 shadow-dom/untriaged/html-elements-in-shadow-trees/inert-html-elements/test-001.html:
 - A_08_01_01_T01
 web-animations/animation-model/animation-types/accumulation-per-property-001.html:
-- background-color supports animating as color of rgb() with overflowed  from and
-  to values
-- border-bottom-color supports animating as color of rgb() with overflowed  from and
-  to values
-- border-left-color supports animating as color of rgb() with overflowed  from and
-  to values
-- border-right-color supports animating as color of rgb() with overflowed  from and
-  to values
-- 'border-spacing: length pair'
-- 'border-spacing: length pair of rem'
-- border-top-color supports animating as color of rgb() with overflowed  from and
-  to values
-- caret-color supports animating as color of rgb() with overflowed  from and to values
-- 'clip: rect'
-- color supports animating as color of rgb() with overflowed  from and to values
-- column-rule-color supports animating as color of rgb() with overflowed  from and
-  to values
-- 'flex-basis: calc'
-- 'flex-basis: units "calc" onto "px"'
-- flood-color supports animating as color of rgb() with overflowed  from and to values
-- 'flood-opacity: [0, 1] number (clamped)'
-- font-variation-settings with composite type accumulate
+- 'font-width: percentage'
 - 'grid-template: "". . a b" ". . a b"" onto "none"'
-- 'grid-template: "none" onto "". . a b" ". . a b""'
+- 'hanging-punctuation: "first last" onto "none"'
 web-animations/animation-model/animation-types/accumulation-per-property-002.html:
-- 'letter-spacing: calc'
-- 'letter-spacing: units "calc" onto "px"'
-- lighting-color supports animating as color of rgb() with overflowed  from and to
-  values
 - 'list-style: "outside url("http://localhost/test-2") square" onto "inside url("http://localhost/test-1")
   circle"'
-- 'mask: "url("http://localhost/test-1")" onto "url("http://localhost/test-2")"'
-- 'mask: "url("http://localhost/test-2")" onto "url("http://localhost/test-1")"'
-- 'offset-distance: calc'
-- 'offset-distance: units "calc" onto "px"'
-- outline-color supports animating as color of rgb() with overflowed  from and to
-  values
-- 'perspective-origin: length pair'
-- 'perspective-origin: length pair of rem'
-- 'perspective-origin: position of percentage'
-- 'scrollbar-color supports animating as color pair of #RGB'
-- 'scrollbar-color supports animating as color pair of #RGBa'
-- scrollbar-color supports animating as color pair of hsl()
-- scrollbar-color supports animating as color pair of hsla()
-- scrollbar-color supports animating as color pair of rgb() with overflowed  from
-  and to values
-- scrollbar-color supports animating as color pair of rgba()
-- stop-color supports animating as color of rgb() with overflowed  from and to values
+- 'stroke-color supports animating as color of #RGB'
+- 'stroke-color supports animating as color of #RGBa'
+- stroke-color supports animating as color of hsl()
+- stroke-color supports animating as color of hsla()
 - stroke-color supports animating as color of rgb() with overflowed  from and to values
-- text-decoration-color supports animating as color of rgb() with overflowed  from
-  and to values
-- text-emphasis-color supports animating as color of rgb() with overflowed  from and
-  to values
+- stroke-color supports animating as color of rgba()
+- 'text-decoration-skip: "auto" onto "none"'
+- 'text-decoration-skip: "none" onto "auto"'
+- 'text-decoration: "overline" onto "underline"'
+- 'text-decoration: "underline" onto "overline"'
+- 'text-spacing-trim: "space-all" onto "normal"'
 - 'text-wrap: "nowrap" onto "wrap"'
-- 'text-wrap: "wrap" onto "nowrap"'
-- 'transform: matrix'
-- 'transform: translate on rotate'
-- 'visibility: onto "hidden"'
-- 'visibility: onto "visible"'
-- 'word-spacing: calc'
-- 'word-spacing: units "calc" onto "px"'
 web-animations/animation-model/animation-types/addition-per-property-001.html:
-- background-color supports animating as color of rgb() with overflowed  from and
-  to values
-- border-bottom-color supports animating as color of rgb() with overflowed  from and
-  to values
-- border-left-color supports animating as color of rgb() with overflowed  from and
-  to values
-- border-right-color supports animating as color of rgb() with overflowed  from and
-  to values
-- 'border-spacing: length pair'
-- 'border-spacing: length pair of rem'
-- border-top-color supports animating as color of rgb() with overflowed  from and
-  to values
-- caret-color supports animating as color of rgb() with overflowed  from and to values
-- 'clip: rect'
-- color supports animating as color of rgb() with overflowed  from and to values
-- column-rule-color supports animating as color of rgb() with overflowed  from and
-  to values
-- 'flex-basis: calc'
-- 'flex-basis: units "calc" onto "px"'
-- flood-color supports animating as color of rgb() with overflowed  from and to values
-- 'flood-opacity: [0, 1] number (clamped)'
-- font-variation-settings with composite type add
+- 'font-width: percentage'
 - 'grid-template: "". . a b" ". . a b"" onto "none"'
-- 'grid-template: "none" onto "". . a b" ". . a b""'
+- 'hanging-punctuation: "first last" onto "none"'
 web-animations/animation-model/animation-types/addition-per-property-002.html:
-- 'letter-spacing: calc'
-- 'letter-spacing: units "calc" onto "px"'
-- lighting-color supports animating as color of rgb() with overflowed  from and to
-  values
 - 'list-style: "outside url("http://localhost/test-2") square" onto "inside url("http://localhost/test-1")
   circle"'
-- 'mask: "url("http://localhost/test-1")" onto "url("http://localhost/test-2")"'
-- 'mask: "url("http://localhost/test-2")" onto "url("http://localhost/test-1")"'
-- 'offset-distance: calc'
-- 'offset-distance: units "calc" onto "px"'
-- outline-color supports animating as color of rgb() with overflowed  from and to
-  values
-- 'perspective-origin: length pair'
-- 'perspective-origin: length pair of rem'
-- 'perspective-origin: position of percentage'
-- 'scrollbar-color supports animating as color pair of #RGB'
-- 'scrollbar-color supports animating as color pair of #RGBa'
-- scrollbar-color supports animating as color pair of hsl()
-- scrollbar-color supports animating as color pair of hsla()
-- scrollbar-color supports animating as color pair of rgb() with overflowed  from
-  and to values
-- scrollbar-color supports animating as color pair of rgba()
-- stop-color supports animating as color of rgb() with overflowed  from and to values
+- 'stroke-color supports animating as color of #RGB'
+- 'stroke-color supports animating as color of #RGBa'
+- stroke-color supports animating as color of hsl()
+- stroke-color supports animating as color of hsla()
 - stroke-color supports animating as color of rgb() with overflowed  from and to values
-- text-decoration-color supports animating as color of rgb() with overflowed  from
-  and to values
-- text-emphasis-color supports animating as color of rgb() with overflowed  from and
-  to values
+- stroke-color supports animating as color of rgba()
+- 'text-decoration-skip: "auto" onto "none"'
+- 'text-decoration-skip: "none" onto "auto"'
+- 'text-decoration: "overline" onto "underline"'
+- 'text-decoration: "underline" onto "overline"'
+- 'text-spacing-trim: "space-all" onto "normal"'
 - 'text-wrap: "nowrap" onto "wrap"'
-- 'text-wrap: "wrap" onto "nowrap"'
-- 'visibility: onto "hidden"'
-- 'visibility: onto "visible"'
-- 'word-spacing: calc'
-- 'word-spacing: units "calc" onto "px"'
 web-animations/animation-model/animation-types/interpolation-per-property-001.html:
-- clip supports animating as a rect
-- flex-basis supports animating as a calc
-- flex-basis supports animating as combination units "px" and "calc"
-- font-variation-settings supports animation as float
-- font-variation-settings supports animation as float with multiple duplicate tags
-- font-variation-settings supports animation as float with multiple tags
-- grid-auto-columns uses discrete animation when animating between "1px" and "5px"
-  with effect easing
-- grid-auto-columns uses discrete animation when animating between "1px" and "5px"
-  with keyframe easing
-- grid-auto-columns uses discrete animation when animating between "1px" and "5px"
-  with linear easing
-- grid-auto-rows uses discrete animation when animating between "1px" and "5px" with
-  effect easing
-- grid-auto-rows uses discrete animation when animating between "1px" and "5px" with
-  keyframe easing
-- grid-auto-rows uses discrete animation when animating between "1px" and "5px" with
-  linear easing
+- font-width supports animating as a percentage
 - grid-template uses discrete animation when animating between "". . a b" ". . a b""
   and "none" with effect easing
 - grid-template uses discrete animation when animating between "". . a b" ". . a b""
   and "none" with keyframe easing
 - grid-template uses discrete animation when animating between "". . a b" ". . a b""
   and "none" with linear easing
+- hanging-punctuation uses discrete animation when animating between "none" and "first
+  last" with effect easing
+- hanging-punctuation uses discrete animation when animating between "none" and "first
+  last" with keyframe easing
+- hanging-punctuation uses discrete animation when animating between "none" and "first
+  last" with linear easing
 web-animations/animation-model/animation-types/interpolation-per-property-002.html:
-- letter-spacing supports animating as a calc
-- letter-spacing supports animating as combination units "px" and "calc"
 - list-style uses discrete animation when animating between "inside url("http://localhost/test-1")
   circle" and "outside url("http://localhost/test-2") square" with effect easing
 - list-style uses discrete animation when animating between "inside url("http://localhost/test-1")
   circle" and "outside url("http://localhost/test-2") square" with keyframe easing
 - list-style uses discrete animation when animating between "inside url("http://localhost/test-1")
   circle" and "outside url("http://localhost/test-2") square" with linear easing
-- mask uses discrete animation when animating between "url("http://localhost/test-1")"
-  and "url("http://localhost/test-2")" with effect easing
-- mask uses discrete animation when animating between "url("http://localhost/test-1")"
-  and "url("http://localhost/test-2")" with keyframe easing
-- mask uses discrete animation when animating between "url("http://localhost/test-1")"
-  and "url("http://localhost/test-2")" with linear easing
-- offset-distance supports animating as a calc
-- offset-distance supports animating as combination units "px" and "calc"
-- 'scrollbar-color supports animating as color pair of #RGB'
-- 'scrollbar-color supports animating as color pair of #RGBa'
-- scrollbar-color supports animating as color pair of hsl()
-- scrollbar-color supports animating as color pair of hsla()
-- scrollbar-color supports animating as color pair of rgb()
-- scrollbar-color supports animating as color pair of rgba()
+- 'stroke-color supports animating as color of #RGB'
+- 'stroke-color supports animating as color of #RGBa'
+- stroke-color supports animating as color of hsl()
+- stroke-color supports animating as color of hsla()
+- stroke-color supports animating as color of rgb()
+- stroke-color supports animating as color of rgba()
+- text-decoration uses discrete animation when animating between "underline" and "overline"
+  with effect easing
+- text-decoration uses discrete animation when animating between "underline" and "overline"
+  with keyframe easing
+- text-decoration uses discrete animation when animating between "underline" and "overline"
+  with linear easing
+- text-decoration-skip uses discrete animation when animating between "auto" and "none"
+  with effect easing
+- text-decoration-skip uses discrete animation when animating between "auto" and "none"
+  with keyframe easing
+- text-decoration-skip uses discrete animation when animating between "auto" and "none"
+  with linear easing
+- text-spacing-trim uses discrete animation when animating between "normal" and "space-all"
+  with effect easing
+- text-spacing-trim uses discrete animation when animating between "normal" and "space-all"
+  with keyframe easing
+- text-spacing-trim uses discrete animation when animating between "normal" and "space-all"
+  with linear easing
 - text-wrap uses discrete animation when animating between "wrap" and "nowrap" with
   effect easing
 - text-wrap uses discrete animation when animating between "wrap" and "nowrap" with
   keyframe easing
 - text-wrap uses discrete animation when animating between "wrap" and "nowrap" with
   linear easing
-- visibility uses visibility animation when animating from "hidden" to "collapse"
-- visibility uses visibility animation when animating from "hidden" to "visible"
-- visibility uses visibility animation when animating from "visible" to "hidden"
-- visibility uses visibility animation when animating from "visible" to "hidden" with
-  easeInOutBack easing
-- word-spacing supports animating as a calc
-- word-spacing supports animating as combination units "px" and "calc"
-web-animations/animation-model/animation-types/scrollbar-interpolation.html:
-- Verify scrollbar-color-interpolation
-web-animations/animation-model/animation-types/visibility.html:
-- Visibility clamping behavior
-- Visibility clamping behavior with an easing that has a negative component
-web-animations/animation-model/combining-effects/applying-interpolated-transform.html:
-- " apply interpolated transform on multiple keyframes"
-web-animations/animation-model/combining-effects/clamping-001.html:
-- 11. opacity keyframes should not clamp before compositing, replace 200% + add -100%
-  = 1
-- 7. opacity keyframes should not clamp before compositing, replace -100% + add 100%
-  = 0
-- 9. opacity keyframes should not clamp before compositing, replace -200% + add 200%
-  = 0
-web-animations/animation-model/keyframe-effects/background-shorthand.html:
-- Shorthand properties expand to longhand counterparts in computed keyframes.
-web-animations/animation-model/keyframe-effects/computed-keyframes-shorthands.html:
-- It should be possible to animate the all shorthand
-web-animations/animation-model/keyframe-effects/effect-value-context-filling.html:
-- Filling effect values reflect changes to the animation's iteration composite mode
 web-animations/animation-model/keyframe-effects/effect-value-iteration-composite-operation.html:
-- duration changes with an iteration composition operation of accumulate
-- iteration composition of <calc()> value animation
-- iteration composition of <calc()> value animation that the values can'tbe reduced
-- iteration composition of <color> type animation
-- iteration composition of <color> type animation that green component is decreasing
-- iteration composition of <length> type animation
-- iteration composition of <number> type animation
-- iteration composition of <percentage> type animation
-- iteration composition of <shape> type animation
-- iteration composition of animation non-additive units
-- iteration composition of box-shadow animation
-- iteration composition of different length filter list animation
-- iteration composition of discrete filter list because of mismatch of the order
-- iteration composition of filter blur animation
-- iteration composition of filter brightness for different unit animation
-- iteration composition of filter drop-shadow animation
 - iteration composition of incompatible calc-size() bases (accumulation skipped at
   0%, allowed at 50%)
-- iteration composition of opacity animation
-- iteration composition of same filter list animation
-- iteration composition of transform from none to translate
-- iteration composition of transform list animation
-- iteration composition of transform list animation whose order is mismatched
-- iteration composition of transform list animation whose order is mismatched because
-  of missing functions
-- iteration composition of transform of matrix function
-- iteration composition of transform of matrix3d function
-- iteration composition of transform of rotate3d function
-- 'iteration composition of transform: [ scale(1), scale(2) ] animation'
-- 'iteration composition of transform: scale(2) animation'
-- iteration composition starts with non-zero value animation
-- iteration composition with negative final value animation
-web-animations/animation-model/keyframe-effects/effect-value-overlapping-keyframes.html:
-- Overlapping keyframes at 0 and 1 use the appropriate value when the progress is
-  outside the range [0, 1]
-- Overlapping keyframes between 0 and 1 use the appropriate value on each side of
-  the overlap point
 web-animations/animation-model/keyframe-effects/effect-value-replaced-animations.html:
 - Persisted animations contribute to the effect stack
 - Removed animations do not contribute to animated style
 - Removed animations do not contribute to the effect stack
-web-animations/animation-model/keyframe-effects/effect-value-transformed-distance.html:
-- A step-start function on a keyframe affects the resulting style
-- A steps(1, start) function on a keyframe affects the resulting style
-- A steps(2, start) function on a keyframe affects the resulting style
-- Linear-equivalent cubic-bezier keyframe easing applied to an effect with a easing
-  function which produces values greater than 1 does not alter the result
 web-animations/interfaces/Animatable/animate-no-browsing-context.html:
 - Element.animate() creates an animation with the correct timeline when called on
   an element in a document without a browsing context
@@ -7424,75 +6105,34 @@ web-animations/interfaces/Animatable/getAnimations-iframe.html:
 web-animations/interfaces/Animatable/getAnimations-pseudoElement-option-on-view-transition.html:
 - Returns view transition animations with pseudoElement option
 web-animations/interfaces/Animatable/getAnimations.html:
-- 'Does NOT cross shadow-tree boundaries when subtree: true is specified'
 - Does not return an animation that has been removed
-- Does not return an animation that has recently been made not current by setting
-  the playback rate
-- Does not return animations with zero playback rate in after phase
 - Does not return animations with zero playback rate in before phase
-- Does not return finished animations that do not fill forwards
-- Does not return reversed finished animations that do not fill backwards
-- 'Finished animation with fill: none is not returned'
-- Returns animations based on dynamic changes to individual animations' current time
-- Returns animations based on dynamic changes to individual animations' duration
-- Returns animations based on dynamic changes to individual animations' end delay
-- Returns animations based on dynamic changes to individual animations' iteration
-  count
-- 'Returns animations on descendants when subtree: true is specified'
 - Returns animations on functional pseudo-element when it is specified
 - Returns animations on pseudo-element when it is specified
-- 'Returns animations on pseudo-element when it is specified with subtree: true'
-- 'Returns animations on pseudo-elements when subtree: true is specified'
 - The legacy Selectors Level 2 single-colon selectors can be used
 - Throws SyntaxError for an empty selector
 - Throws SyntaxError for an invalid pseudo-element selector
-web-animations/interfaces/Animation/cancel.html:
-- After cancelling an animation, it can still be seeked
 web-animations/interfaces/Animation/commitStyles.html:
-- Checks the pseudo element condition before the not rendered condition
 - Commit composites on top of the underlying value
 - Commit styles of an animation when another animation runs with a different prop
 - Commits custom variables
 - Commits em units as pixel values
 - Commits logical properties
 - Commits logical properties as physical properties
+- Commits matrix-interpolated relative transforms
 - Commits relative line-height
 - Commits shorthand styles
 - Commits styles
 - Commits styles for an animation that has been removed
+- Commits styles for backwards animation
 - Commits styles for individual transform properties
 - Commits the intermediate value of an animation in the middle of stack
 - Commits the intermediate value of an animation up to the middle of the stack
 - Commits transforms
 - Commits transforms as a transform list
 - Commits variable references as their computed values
-- Throws if the target effect is disconnected
-- Throws if the target effect is display:none
-- Throws if the target effect's ancestor is display:none
-- Throws if the target element is a pseudo element
 - Throws if the target element is not something with a style attribute
-- Treats display:contents in a display:none subtree as not rendered
 - Triggers mutation observers when updating style
-web-animations/interfaces/Animation/constructor.html:
-- Animation created with an affect associated with another animation.
-web-animations/interfaces/Animation/finished.html:
-- Finished promise should be rejected after the ready promise is rejected
-- Test finished promise changes for animation duration changes
-- Test finished promise changes when a prior finished promise resolved and the animation
-  falls out finished state
-- Test finished promise is not resolved once the animation falls out finished state
-  even though the current finished promise is generated soon after animation state
-  became finished
-- Test finished promise is not resolved when the animation falls out finished state
-  immediately
-- Test new finished promise generated when finished state is checked synchronously
-- Test restarting a reversed finished animation
-- canceling an already-finished animation replaces the finished promise
-- finished promise is rejected when an animation is canceled by calling cancel()
-web-animations/interfaces/Animation/oncancel.html:
-- oncancel event is fired when animation.cancel() is called.
-web-animations/interfaces/Animation/onfinish.html:
-- onfinish event is fired when the currentTime < 0 and the playbackRate < 0
 web-animations/interfaces/Animation/onremove.html:
 - onremove event is fired when replaced animation is removed.
 - onremove events are fired in the correct order
@@ -7505,54 +6145,15 @@ web-animations/interfaces/Animation/overallProgress.html:
   is non-negative.
 - overallProgress of an animation whose effect's endTime is zero is zero if its currentTime
   is negative.
-web-animations/interfaces/Animation/pause.html:
-- pause() from idle
-- pause() from idle with a negative playbackRate and endless effect
-web-animations/interfaces/Animation/pending.html:
-- reports true -> false when initially played
-- reports true -> false when paused
-- reports true -> true when paused without a timeline
-- reports true -> true when played without a timeline
 web-animations/interfaces/Animation/persist.html:
 - Allows an animation to be persisted after being removed
-- Allows an animation to be persisted before being removed
-web-animations/interfaces/Animation/play.html:
-- play() throws when seeking an infinite-duration animation played in reverse
-web-animations/interfaces/Animation/ready.html:
-- A new ready promise is created when play()/pause() is called
-- Redundant calls to play() do not generate new ready promise objects
 web-animations/interfaces/Animation/startTime.html:
 - startTime is resolved when running
-- startTime of a play-pending animation created using Element.animate shortcut is
-  unresolved
-- startTime of a play-pending animation is unresolved
 web-animations/interfaces/Animation/style-change-events.html:
 - All property keys are recognized
-web-animations/interfaces/AnimationEffect/getComputedTiming.html:
-- getComputedTiming().activeDuration for a zero duration and infinite iteration count
-- getComputedTiming().activeDuration for an infinite duration and default iteration
-  count
-- getComputedTiming().activeDuration for an infinite duration and fractional iteration
-  count
-- getComputedTiming().activeDuration for an infinite duration and infinite iteration
-  count
-- getComputedTiming().endTime for an infinite duration
-- getComputedTiming().endTime for an infinite duration and delay
-- getComputedTiming().endTime for an infinite duration and negative delay
-- values of getComputedTiming() when a KeyframeEffect is constructed by +Infinity
-- values of getComputedTiming() when a KeyframeEffect is constructed by an Infinity
-  duration
-web-animations/interfaces/AnimationEffect/updateTiming.html:
-- Allows setting the duration to Infinity
-- Allows setting the iterations of an animation in progress
 web-animations/interfaces/DocumentOrShadowRoot/getAnimations.html:
 - Document.getAnimations() does NOT return animations in shadow trees
-- Document.getAnimations() does not return a disconnected node
-- Document.getAnimations() does not return an animation with a null target
 - Document.getAnimations() returns animations on elements inside same-origin iframes
-- Document.getAnimations() returns script-generated animations
-- Document.getAnimations() returns script-generated animations in the order they were
-  created
 - ShadowRoot.getAnimations() return all animations in the shadow tree
 - iframe.contentDocument.getAnimations() returns animations on elements inside same-origin
   Document
@@ -7561,44 +6162,25 @@ web-animations/interfaces/DocumentTimeline/constructor.html:
   default document timeline
 - A positive origin time makes the document timeline's current time lag behind the
   default document timeline
-web-animations/interfaces/KeyframeEffect/constructor.html:
-- A KeyframeEffect constructed without any KeyframeEffectOptions object
-web-animations/interfaces/KeyframeEffect/copy-constructor.html:
-- Copied KeyframeEffect does not expose UA-shadow DOM
-- Copied KeyframeEffect has the same keyframes
-- Copied KeyframeEffect has the same target
-- Copied KeyframeEffect has the same timing content
 web-animations/interfaces/KeyframeEffect/getKeyframes.html:
 - getKeyframes() should serialize its css values with a on keyframe sequence which
   requires value serilaization of its values
-web-animations/interfaces/KeyframeEffect/iterationComposite.html:
-- iterationComposite can be updated while an animation is in progress
 web-animations/interfaces/KeyframeEffect/processing-a-keyframes-argument-001.html:
 - A list of values returned from a custom iterator should be ignored
 - Reading from a custom iterator that returns a non-object keyframe should throw
 web-animations/interfaces/KeyframeEffect/style-change-events.html:
 - All property keys are recognized
 web-animations/interfaces/KeyframeEffect/target.html:
-- Change target from a non-existing to a different existing pseudo-element by setting
-  pseudoElement.
-- Change target from a non-existing to a different existing pseudo-element by setting
-  target.
 - Change target from a non-existing to a different non-existing pseudo-element by
   setting pseudoElement.
 - Change target from a non-existing to a different non-existing pseudo-element by
   setting target.
-- Change target from an existing to a different existing pseudo-element by setting
-  pseudoElement.
-- Change target from an existing to a different existing pseudo-element by setting
-  target.
 - Change target from an existing to a different non-existing pseudo-element by setting
   pseudoElement.
 - Change target from an existing to a different non-existing pseudo-element by setting
   target.
 - Change target from null to a non-existing pseudoElement setting pseudoElement first.
 - Change target from null to a non-existing pseudoElement setting target first.
-- Change target from null to an existing pseudoElement setting pseudoElement first.
-- Change target from null to an existing pseudoElement setting target first.
 - Changing pseudoElement to ::placeHOLDER works
 - Changing pseudoElement to a non-null invalid pseudo-selector '' throws a SyntaxError
 - Changing pseudoElement to a non-null invalid pseudo-selector '::abc' throws a SyntaxError
@@ -7624,230 +6206,32 @@ web-animations/responsive/background-position-responsive.html:
   parent
 web-animations/responsive/backgroundPosition.html:
 - Background position responsive to style changes
-web-animations/responsive/borderImageWidth.html:
-- Border image width responsive to font size changes
-web-animations/responsive/borderRadius.html:
-- Border radius lengths respond to style changes
-- Border radius percentages are supported
-web-animations/responsive/clip.html:
-- clip responsive to inherited clip changes
-- clip responsive to inherited clip changes from auto
-web-animations/responsive/d.html:
-- d responsive to inherited d changes
 web-animations/responsive/fill-forwards-viewport-units.html:
 - 'fill: forwards with viewport units updates on viewport resize'
 web-animations/responsive/fontSize.html:
 - Font size initial responsive to style changes
-- Font size medium responsive to style changes
-web-animations/responsive/lineHeight.html:
-- lineHeight clamped to 0px on keyframes
-web-animations/responsive/offset-path.html:
-- offset-path responsive to inherited offset-path changes
-web-animations/responsive/offsetRotate.html:
-- offsetRotate responsive to inherited offsetRotate changes
-web-animations/responsive/opacity.html:
-- fillOpacity responsive to inherited changes
-- floodOpacity responsive to inherited changes
-- shapeImageThreshold responsive to inherited changes
-- stopOpacity responsive to inherited changes
-- strokeOpacity responsive to inherited changes
-web-animations/responsive/perspective.html:
-- perspective clamped to 0px on keyframes
 web-animations/responsive/shapeOutside.html:
 - Neutral path() keyframes invalidate when the underlying <shape-box> changes
-- shapeOutside responsive to inherited shapeOutside changes
-web-animations/responsive/textIndent.html:
-- textIndent responsive to inherited textIndent changes
-web-animations/responsive/to-color-change.html:
-- Background color responsive to currentColor changes
-- Border color responsive to currentColor changes
-- Border color responsive to currentColor changes again
-- Color interpolation uses pre-multiplied colors
-- Color responsive to parent currentColor changes
-- Color responsive to repeated parent currentColor changes
-- Fill color responsive to currentColor changes
-- Outline color responsive to currentColor changes
-- Stroke color responsive to currentColor changes
-- Text decoration color responsive to currentColor changes
-web-animations/responsive/to-style-change.html:
-- Lengths responsive to style changes
+web-animations/responsive/text-size-adjust.html:
+- text-size-adjust responsive to inherited text-size-adjust changes
 web-animations/responsive/toggle-animated-iframe-visibility.html:
 - "== web-animations/responsive/toggle-animated-iframe-visibility-ref.html"
-web-animations/timing-model/animation-effects/active-time.html:
-- Active time in after phase with backwards-only fill is unresolved
-- Active time in after phase with forwards fill and negative end delay greater in
-  magnitude than the active duration is zero
-- Active time in after phase with forwards fill and negative end delay greater in
-  magnitude than the sum of the active duration and start delay is zero
-- Active time in after phase with no fill is unresolved
-web-animations/timing-model/animation-effects/current-iteration.html:
-- 'Test fractional iterations: iterations:3.5 iterationStart:0 duration:Infinity delay:1
-  fill:both'
-- 'Test fractional iterations: iterations:3.5 iterationStart:2.5 duration:Infinity
-  delay:1 fill:both'
-- 'Test fractional iterations: iterations:3.5 iterationStart:3 duration:Infinity delay:1
-  fill:both'
-- 'Test infinity iterations: iterations:Infinity iterationStart:0 duration:0 delay:1
-  fill:both'
-- 'Test infinity iterations: iterations:Infinity iterationStart:0 duration:Infinity
-  delay:1 fill:both'
-- 'Test infinity iterations: iterations:Infinity iterationStart:2.5 duration:0 delay:1
-  fill:both'
-- 'Test infinity iterations: iterations:Infinity iterationStart:2.5 duration:Infinity
-  delay:1 fill:both'
-- 'Test infinity iterations: iterations:Infinity iterationStart:3 duration:0 delay:1
-  fill:both'
-- 'Test infinity iterations: iterations:Infinity iterationStart:3 duration:Infinity
-  delay:1 fill:both'
-- 'Test integer iterations: iterations:3 iterationStart:0 duration:Infinity delay:1
-  fill:both'
-- 'Test integer iterations: iterations:3 iterationStart:2.5 duration:Infinity delay:1
-  fill:both'
-- 'Test integer iterations: iterations:3 iterationStart:3 duration:Infinity delay:1
-  fill:both'
-- 'Test zero iterations: iterations:0 iterationStart:3 duration:0 delay:1 fill:both'
-- 'Test zero iterations: iterations:0 iterationStart:3 duration:100 delay:1 fill:both'
-- 'Test zero iterations: iterations:0 iterationStart:3 duration:Infinity delay:1 fill:both'
-web-animations/timing-model/animation-effects/phases-and-states.html:
-- Phase calculation for a simple animation effect with negative playback rate
-- Phase calculation for an animation effect with a negative end delay equal in magnitude
-  to the active duration
-- Phase calculation for an animation effect with a negative end delay greater in magnitude
-  than the active duration
-- Phase calculation for an animation effect with a negative end delay lesser in magnitude
-  than the active duration
-- Phase calculation for an animation effect with a negative start delay
-- Phase calculation for an animation effect with a negative start delay and a negative
-  end delay equal greater in magnitude than the active duration
-- Phase calculation for an animation effect with a negative start delay and a negative
-  end delay equal in magnitude to the active duration
-- Phase calculation for an animation effect with a positive start delay and a negative
-  end delay lesser in magnitude than the active duration
-web-animations/timing-model/animation-effects/simple-iteration-progress.html:
-- 'Test fractional iterations: iterations:3.5 iterationStart:0 duration:Infinity delay:1
-  fill:both'
-- 'Test fractional iterations: iterations:3.5 iterationStart:2.5 duration:Infinity
-  delay:1 fill:both'
-- 'Test fractional iterations: iterations:3.5 iterationStart:3 duration:Infinity delay:1
-  fill:both'
-- 'Test infinity iterations: iterations:Infinity iterationStart:0 duration:0 delay:1
-  fill:both'
-- 'Test infinity iterations: iterations:Infinity iterationStart:0 duration:Infinity
-  delay:1 fill:both'
-- 'Test infinity iterations: iterations:Infinity iterationStart:2.5 duration:0 delay:1
-  fill:both'
-- 'Test infinity iterations: iterations:Infinity iterationStart:2.5 duration:Infinity
-  delay:1 fill:both'
-- 'Test infinity iterations: iterations:Infinity iterationStart:3 duration:0 delay:1
-  fill:both'
-- 'Test infinity iterations: iterations:Infinity iterationStart:3 duration:Infinity
-  delay:1 fill:both'
-- 'Test integer iterations: iterations:3 iterationStart:0 duration:Infinity delay:1
-  fill:both'
-- 'Test integer iterations: iterations:3 iterationStart:2.5 duration:Infinity delay:1
-  fill:both'
-- 'Test integer iterations: iterations:3 iterationStart:3 duration:Infinity delay:1
-  fill:both'
-- 'Test negative playback rate: duration:0 delay:1 fill:both playbackRate:-1'
-- 'Test negative playback rate: duration:0 iterations:0 delay:1 fill:both playbackRate:-1'
-- 'Test zero iterations: iterations:0 iterationStart:0 duration:0 delay:1 fill:both'
-- 'Test zero iterations: iterations:0 iterationStart:0 duration:100 delay:1 fill:both'
-- 'Test zero iterations: iterations:0 iterationStart:0 duration:Infinity delay:1 fill:both'
-- 'Test zero iterations: iterations:0 iterationStart:3 duration:0 delay:1 fill:both'
-- 'Test zero iterations: iterations:0 iterationStart:3 duration:100 delay:1 fill:both'
-- 'Test zero iterations: iterations:0 iterationStart:3 duration:Infinity delay:1 fill:both'
-web-animations/timing-model/animations/canceling-an-animation.html:
-- A pause-pending ready promise should be rejected when the animation is canceled
-- A play-pending ready promise should be rejected when the animation is canceled
-- Canceling an animation should fire cancel event on orphaned element
-- The finished promise should NOT be rejected if the animation is already idle
-web-animations/timing-model/animations/finishing-an-animation.html:
-- A pending playback rate should be applied immediately when an animation is finished
-- A pending ready promise is resolved and not replaced when the animation is finished
-- An exception should be thrown if the effective playback rate is zero
-- An exception should be thrown when finishing if the effective playback rate is positive
-  and the target effect end is infinity
-- Finishing a canceled animation sets the current and start times
-- Finishing a reversed animation jumps to zero time
-- Finishing a reversed animation with a current time less than zero makes it jump
-  back to zero
-- Finishing an animation with a zero playback rate throws
-- Finishing an infinite animation throws
 web-animations/timing-model/animations/invalidating-animation-before-start-time-synced.html:
 - Animation invalidated before startTime is set doesn't affect startTime
-web-animations/timing-model/animations/pausing-an-animation.html:
-- A pending ready promise should be resolved and not replaced when the animation is
-  paused
-- Aborting a pause preserves the start time
-- Pausing a canceled animation sets the current time
-- Pausing clears the start time
 web-animations/timing-model/animations/play-states.html:
 - reports 'finished' for a finished-pending animation
 - reports 'finished' when playback rate > 0 and current time = target effect end and
   there is a pending play task
-- reports 'paused' for a pause-pending animation
-- reports 'paused' for an animation with a resolved current time and unresolved start
-  time
-- reports 'running' for a play-pending animation
-- reports 'running' when playback rate > 0 and current time < target effect end and
-  there is a pending play task
-- reports the play state based on the pending playback rate
-web-animations/timing-model/animations/playing-an-animation.html:
-- A pending playback rate is used when determining auto-rewind behavior
-- A pending ready promise should be resolved and not replaced when the animation enters
-  the running state
-- If a pause operation is interrupted, the ready promise is reused
-- Playing a canceled animation backwards sets the start time
-- Playing a canceled animation sets the start time
-- Playing a finished animation clears the start time
 web-animations/timing-model/animations/reversing-an-animation.html:
-- Reversing an animation does not cause it to leave the pending state
-- Reversing an animation does not cause it to resolve the ready promise
-- Reversing an animation inverts the playback rate
-- Reversing an animation when playbackRate < 0 and currentTime < 0 and the target
-  effect end is positive infinity should make it play from the start
-- Reversing an animation when playbackRate < 0 and currentTime < 0 should make it
-  play from the start
-- Reversing an animation when playbackRate > 0 and currentTime < 0 and the target
-  effect end is positive infinity should throw an exception
-- Reversing an animation when playbackRate > 0 and currentTime > effect end should
-  make it play from the end
-- Reversing an animation without an active timeline throws an InvalidStateError
 - Reversing when when playbackRate == 0 should preserve the current time and playback
   rate
-- When reversing fails, it should restore any previous pending playback rate
-- When reversing throws an exception, the playback rate remains unchanged
 web-animations/timing-model/animations/seamlessly-updating-the-playback-rate-of-an-animation.html:
-- If a pending playback rate is set multiple times, the latest wins
 - Updating the negative playback rate with the unresolved current time and a positive
   infinite associated effect end should not throw an exception
-- Updating the playback rate on a play-pending animation maintains the current time
-- Updating the playback rate while running makes the animation pending
 web-animations/timing-model/animations/setting-the-current-time-of-an-animation.html:
-- Setting a negative current time with a positive playback rate
-- Setting the current time of a paused animation to unresolved throws a TypeError
-- Setting the current time of a pausing animation applies a pending playback rate
-- Setting the current time of a playing animation to unresolved throws a TypeError
 - Validate different value types that can be used to set current time
 web-animations/timing-model/animations/setting-the-start-time-of-an-animation.html:
-- Setting an unresolved start time on a play-pending animation makes it paused
-- Setting an unresolved start time sets the hold time
-- Setting the start time of a play-pending animation applies a pending playback rate
-- Setting the start time of a playing animation applies a pending playback rate
-- Setting the start time resolves a pending pause task
-- Setting the start time resolves a pending ready promise
 - Validate different value types that can be used to set start time
-web-animations/timing-model/animations/setting-the-target-effect-of-an-animation.html:
-- If animation has a pending pause task, reschedule that task to run as soon as animation
-  is ready.
-- If animation has a pending play task, reschedule that task to run as soon as animation
-  is ready to play new effect.
-- If new effect is null and old effect is not null the animation becomes finish-pending
-- Setting the target effect to null causes a pending playback rate to be applied
-- The pending play task should be rescheduled even after temporarily setting the effect
-  to null
-- When setting the effect of an animation to the effect of an existing animation,
-  the existing animation's target effect should be set to null.
 web-animations/timing-model/animations/setting-the-timeline-of-an-animation.html:
 - After clearing and re-setting timeline on a pause-pending animation it completes
   pausing
@@ -7869,33 +6253,11 @@ web-animations/timing-model/animations/setting-the-timeline-of-an-animation.html
   still running
 - After transitioning from a null timeline on an animation with a sufficiently ancient
   start time it is finished
+web-animations/timing-model/animations/start-time-compat.html:
+- Checking the start time of animations started at various times between two page
+  rendering updates
 web-animations/timing-model/animations/sync-start-times.html:
 - "== web-animations/timing-model/animations/sync-start-times-ref.html"
-web-animations/timing-model/animations/updating-the-finished-state.html:
-- Animation finish event is fired again after seeking back to start
-- Animation finished promise is replaced after seeking back to start
-- Finish notification steps don't run when the animation seeks to finish and then
-  seeks back again
-- Updating the finished state when playing in reverse past zero
-- Updating the finished state when playing past end
-- Updating the finished state when seeking a reversed animation exactly to zero
-- Updating the finished state when seeking a reversed animation past zero
-- Updating the finished state when seeking exactly to end
-- Updating the finished state when seeking past end
-web-animations/timing-model/time-transformations/transformed-progress.html:
-- Test bounds point of step(4, start) easing with iterationStart 0.75 and delay
-- Test bounds point of step-end easing with iterationStart and delay
-- Test bounds point of step-start easing
-- Test bounds point of step-start easing with alternate direction
-- Test bounds point of step-start easing with alternate-reverse direction
-- Test bounds point of step-start easing with iterationStart and delay
-- Test bounds point of step-start easing with iterationStart and reverse direction
-- Test bounds point of step-start easing with reverse direction
-- Test bounds point of steps(jump-both) easing
-- Test bounds point of steps(jump-both) easing with iterationStart and delay
-- Test bounds point of steps(jump-none) easing
-- Test bounds point of steps(jump-none) easing with iterationStart and delay
-- Test start bounds of step-start easing with no delay
 web-animations/timing-model/timelines/sibling-iframe-timeline.html:
 - animation tied to another frame's timeline runs properly
 web-animations/timing-model/timelines/timelines.html:
@@ -7952,11 +6314,10 @@ web-animations/timing-model/timelines/update-and-send-events-replacement.html:
 - Updates ALL timelines before checking for replacement
 web-animations/timing-model/timelines/update-and-send-events.html:
 - Fires cancel event before requestAnimationFrame
-- Playback events with the same timeline retain the order in which they arequeued
+- Fires finish event before requestAnimationFrame
 - Queues a cancel event in transitionstart event callback
 - Sorts cancel events by composite order
 - Sorts events for the same transition
-- Sorts finish events by composite order
 webmessaging/Channel_postMessage_transfer_xsite_incoming_messages.window.js:
 - |-
   Tasks enqueued on the port-message-queue of an enabled port,

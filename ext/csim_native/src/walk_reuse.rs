@@ -35,8 +35,10 @@ pub(crate) struct WalkReuse {
     next_id: u32,
     // The chunk ids in play, each by the pass that last placed it.
     used: HashMap<u32, u64>,
-    // How many records the walks have spliced back rather than built (`Walk::splice`), for a spec.
+    // How many records the walks have spliced back rather than built (`Walk::splice`), and built afresh — for a spec, and
+    // the perf gate's count of the walk's own work.
     pub(crate) spliced_records: u64,
+    pub(crate) walked_records: u64,
     pub(crate) measure: MeasureCache,
     // The realm's programs (`walk::MathTable`), whose offsets the records name — the same program at the same offset
     // from pass to pass, which is what makes an offset compared as a number compared as a program. Lent to the walk
@@ -105,7 +107,9 @@ impl WalkReuse {
         let mut roots = HashMap::new();
         // (…each record of a spliced subtree, by the one it was in the last pass)
         let mut spliced_from: Vec<Option<usize>> = vec![None; n];
-        self.spliced_records += s.spliced.iter().map(|sp| sp.n as u64).sum::<u64>();
+        let spliced = s.spliced.iter().map(|sp| sp.n as u64).sum::<u64>();
+        self.spliced_records += spliced;
+        self.walked_records += n as u64 - spliced;
         for sp in s.spliced {
             for k in 0..sp.n {
                 spliced_from[sp.at + k] = Some(sp.was + k);

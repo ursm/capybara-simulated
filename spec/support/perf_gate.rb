@@ -324,7 +324,9 @@ module PerfGate
   # The JS layout's own (`element_layouts`, `reuse_*`) read 0 where native layout — the default — laid the page out, and
   # rise where it declined to the JS layout, which is the regression they now catch; the native layout's work is the
   # `nl_*` group: its passes and declines, the records its walk copied afresh, the kept blocks it sent, the gates it
-  # answered again and the measures native put back.
+  # answered again and the measures native put back. Under the style engine — the default — the Rust walk builds the
+  # pass and those read 0 where it did: its own are the `rust_*` group, its passes and declines (each a pass the JS walk
+  # took instead), and the records it walked afresh and spliced back from the last pass.
   COUNTS_JS = <<~JS.freeze
     ({
       passes:               globalThis.__csimLayoutPasses(),
@@ -334,6 +336,10 @@ module PerfGate
       nl_blocks_sent:       globalThis.__csimNlBlocksSent(),
       nl_gate_answers:      globalThis.__csimNlGateAnswers(),
       nl_measures_put_back: globalThis.__dom && globalThis.__dom.layoutMeasureCounts ? globalThis.__dom.layoutMeasureCounts()[0] : 0,
+      rust_passes:          globalThis.__csimNativeLayoutStats().rust,
+      rust_declines:        Object.values(globalThis.__csimNativeLayoutStats().rustFellBack).reduce((a, b) => a + b, 0),
+      rust_records_walked:  globalThis.__dom && globalThis.__dom.layoutMeasureCounts ? globalThis.__dom.layoutMeasureCounts()[4] : 0,
+      rust_records_spliced: globalThis.__dom && globalThis.__dom.layoutMeasureCounts ? globalThis.__dom.layoutMeasureCounts()[3] : 0,
       element_layouts:      globalThis.__csimElementLayouts(),
       reuse_hit:            globalThis.__csimReuseStats().hit,
       reuse_remeasured:     globalThis.__csimReuseStats().remeasured,

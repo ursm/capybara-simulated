@@ -2804,14 +2804,15 @@ fn layout_measure_counts(
     let cid = realm_id(scope, &args);
     let d = dom(scope);
     let caches = [d.layout_chunks.get(&cid).map(|s| &s.measure), d.walk_reuse.get(&cid).map(|r| &r.measure)];
-    let mut counts = [0.0; 4];
+    let mut counts = [0.0; 5];
     for m in caches.into_iter().flatten() {
         counts[0] += m.put_back as f64;
         counts[1] += m.kept as f64;
         counts[2] += m.records() as f64;
     }
     counts[3] = d.walk_reuse.get(&cid).map_or(0.0, |r| r.spliced_records as f64);
-    let out = v8::Array::new(scope, 4);
+    counts[4] = d.walk_reuse.get(&cid).map_or(0.0, |r| r.walked_records as f64);
+    let out = v8::Array::new(scope, 5);
     for (i, n) in counts.into_iter().enumerate() {
         let v: v8::Local<v8::Value> = v8::Number::new(scope, n).into();
         out.set_index(scope, i as u32, v);

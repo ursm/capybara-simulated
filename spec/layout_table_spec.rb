@@ -1188,8 +1188,8 @@ RSpec.describe 'table layout' do
 
   # A collapsed border is shared across ROWS too: widening a cell's bottom border widens the top half of the cell below
   # it, whose own style never changed, and its client box follows the pass that laid it out. Chrome: 4 / 20 after.
-  [nil, '1'].each do |stylo|
-    it "follows a facing cell in another row into a collapsed cell's client box#{stylo ? ' (stylo)' : ''}" do
+  %w[0 1].each do |stylo|
+    it "follows a facing cell in another row into a collapsed cell's client box#{stylo == '1' ? ' (stylo)' : ''}" do
       saved = ENV['CSIM_STYLO']
       ENV['CSIM_STYLO'] = stylo
       html = '<!DOCTYPE html><body><table style="border-collapse: collapse">' \

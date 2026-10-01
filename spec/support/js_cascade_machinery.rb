@@ -7,7 +7,7 @@
 RSpec.configure do |config|
   config.around(:example, :js_cascade) do |example|
     saved = ENV['CSIM_STYLO']
-    ENV['CSIM_STYLO'] = nil
+    ENV['CSIM_STYLO'] = '0'
     example.run
   ensure
     ENV['CSIM_STYLO'] = saved

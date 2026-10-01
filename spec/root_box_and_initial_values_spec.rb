@@ -878,8 +878,8 @@ RSpec.describe 'root box + computed initial values' do
   # in an ltr document sits at the right and scrolls the viewport from there, a `<body dir=ltr>` under `<html dir=rtl>`
   # at the left — while the root's COMPUTED direction stays its own. Chrome and Firefox: 516 / 8, `ltr`, then 3008 and
   # -1984 once the rtl body is 3000px wide.
-  [nil, '1'].each do |stylo|
-    it "places the body by its own direction, the principal writing mode#{stylo ? ' (stylo)' : ''}" do
+  %w[0 1].each do |stylo|
+    it "places the body by its own direction, the principal writing mode#{stylo == '1' ? ' (stylo)' : ''}" do
       saved = ENV['CSIM_STYLO']
       ENV['CSIM_STYLO'] = stylo
       page = lambda do |html_attrs, body_attrs|

@@ -9,8 +9,8 @@ require_relative 'support/session_teardown'
 # with it (CSS Transforms 1 §2). The pass the style engine's walk builds says all three itself, off its own records.
 # Chrome: 2050, 10, 10, 2010, then 10, -90, 1910 after scrolling 100.
 RSpec.describe 'the placement an out-of-flow box keeps' do
-  [nil, '1'].each do |stylo|
-    it "keeps a fixed box, moves an absolute one and a fixed one under a transform#{stylo ? ' (stylo)' : ''}" do
+  %w[0 1].each do |stylo|
+    it "keeps a fixed box, moves an absolute one and a fixed one under a transform#{stylo == '1' ? ' (stylo)' : ''}" do
       saved = ENV['CSIM_STYLO']
       ENV['CSIM_STYLO'] = stylo
       html = <<~HTML
@@ -42,8 +42,8 @@ RSpec.describe 'the placement an out-of-flow box keeps' do
 
   # …and a containing block REPLACED by an element that takes its place leaves every number of the box's answer as it
   # was — the same record, the same box — while the element it is placed against is another. (Chrome: 190px.)
-  [nil, '1'].each do |stylo|
-    it "follows a containing block replaced in place#{stylo ? ' (stylo)' : ''}" do
+  %w[0 1].each do |stylo|
+    it "follows a containing block replaced in place#{stylo == '1' ? ' (stylo)' : ''}" do
       saved = ENV['CSIM_STYLO']
       ENV['CSIM_STYLO'] = stylo
       html = '<!DOCTYPE html><body><div id="A" style="position:relative;height:100px"><div><p>one</p>' \

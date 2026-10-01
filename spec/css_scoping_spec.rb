@@ -26,8 +26,8 @@ RSpec.describe 'css-scoping selectors' do
   # A `:host` or `::slotted()` rule is written in the tree one boundary IN from the element it styles, and the cascade
   # sorts on that CONTEXT before specificity or order (css-cascade-5 §6.1): the document's NORMAL declaration beats it,
   # its `!important` one beats the document's. Chrome and Firefox: 20px, 120px, red — where the shadow rule won all three.
-  [nil, '1'].each do |stylo|
-    it "sorts a :host and a ::slotted() rule on context against the document's#{stylo ? ' (stylo)' : ''}" do
+  %w[0 1].each do |stylo|
+    it "sorts a :host and a ::slotted() rule on context against the document's#{stylo == '1' ? ' (stylo)' : ''}" do
       saved = ENV['CSIM_STYLO']
       ENV['CSIM_STYLO'] = stylo
       html = '<!DOCTYPE html><style>#a { display: block; height: 20px } #b { display: block; height: 20px !important } ' \
@@ -52,7 +52,7 @@ RSpec.describe 'css-scoping selectors' do
     # `!important` beats the host's inline `!important`, whichever of the two writes `margin-left` and which
     # `margin-inline-start`, and a `::part()` rule's normal one beats the part's inline style. Chrome and Firefox: 50px,
     # 50px, 40px.
-    it "sorts a :host and a ::part() rule on context against inline style across spellings#{stylo ? ' (stylo)' : ''}" do
+    it "sorts a :host and a ::part() rule on context against inline style across spellings#{stylo == '1' ? ' (stylo)' : ''}" do
       saved = ENV['CSIM_STYLO']
       ENV['CSIM_STYLO'] = stylo
       html = '<!DOCTYPE html><style>x-a::part(q) { margin-inline-start: 40px }</style>' \
@@ -130,8 +130,8 @@ RSpec.describe 'css-scoping selectors' do
   # …and follows what decides it: a class written on a light child or a grandchild of the host, and one taken off, flip
   # the host's `:has()` and restyle and relay out its tree — the grandchild is no element anything styles, as no slot
   # takes the host's light children. (Chrome never matches the rule; Firefox matches it but re-matches on none of these.)
-  [nil, '1'].each do |stylo|
-    it "restyles a host's tree when its :has() flips under it#{stylo ? ' (stylo)' : ''}" do
+  %w[0 1].each do |stylo|
+    it "restyles a host's tree when its :has() flips under it#{stylo == '1' ? ' (stylo)' : ''}" do
       saved = ENV['CSIM_STYLO']
       ENV['CSIM_STYLO'] = stylo
       html = '<!DOCTYPE html><body style="margin: 0"><div id="h"><i><b></b></i></div></body>'

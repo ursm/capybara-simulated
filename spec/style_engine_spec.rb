@@ -576,8 +576,8 @@ end
 # is ltr in an rtl scope (a number reads left to right in any script), and a `<bdi>` whose `dir` is INVALID is auto —
 # as one with none (Chrome and Firefox: `ltr` and `rtl`).
 RSpec.describe 'directionality' do
-  [nil, '1'].each do |stylo|
-    it "takes a telephone input's and an invalid-dir bdi's own direction#{stylo ? ' (stylo)' : ''}" do
+  %w[0 1].each do |stylo|
+    it "takes a telephone input's and an invalid-dir bdi's own direction#{stylo == '1' ? ' (stylo)' : ''}" do
       saved = ENV['CSIM_STYLO']
       ENV['CSIM_STYLO'] = stylo
       html = '<!DOCTYPE html><div dir="rtl"><input id="t" type="tel"></div><div><bdi id="b" dir="foo">&#x5e9;&#x5dc;</bdi></div>'
@@ -596,8 +596,8 @@ RSpec.describe 'directionality' do
   # `<slot>` in no shadow tree is scanned like any element, and an unassigned `<slot dir=auto>` reads its fallback.
   # Read through a `:dir()` RULE, so the style engine's own directionality answers in its mode (`matches()` is the JS
   # side's in both). Chrome and Firefox, every row: L L L R L L R R R R.
-  [nil, '1'].each do |stylo|
-    it "resolves dir=auto by Bidi_Class and HTML's own steps#{stylo ? ' (stylo)' : ''}" do
+  %w[0 1].each do |stylo|
+    it "resolves dir=auto by Bidi_Class and HTML's own steps#{stylo == '1' ? ' (stylo)' : ''}" do
       saved = ENV['CSIM_STYLO']
       ENV['CSIM_STYLO'] = stylo
       html = '<!DOCTYPE html><meta charset="utf-8"><style>:dir(rtl) { color: rgb(255, 0, 0) } :dir(ltr) { color: rgb(0, 128, 0) }</style>' \
@@ -630,8 +630,8 @@ end
 
 # The cascade's own order of sheets, in both engines: a `<style>` written after a `<link>` wins over it.
 RSpec.describe 'style sheet order' do
-  [nil, '1'].each do |stylo|
-    it "cascades <style> and <link> in tree order#{stylo ? ' (stylo)' : ''}" do
+  %w[0 1].each do |stylo|
+    it "cascades <style> and <link> in tree order#{stylo == '1' ? ' (stylo)' : ''}" do
       saved = ENV['CSIM_STYLO']
       ENV['CSIM_STYLO'] = stylo
       html = '<!DOCTYPE html><link rel="stylesheet" href="/b.css"><style>.ord { color: rgb(0, 128, 0) }</style><p class="ord" id="p">p</p>'

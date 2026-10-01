@@ -2,41 +2,49 @@
 grid_table:
   counts:
     passes: 3
-    nl_passes: 3
+    nl_passes: 0
     nl_declines: 0
-    nl_records_copied: 8818
-    nl_blocks_sent: 1600
-    nl_gate_answers: 4810
-    nl_measures_put_back: 0
+    nl_records_copied: 0
+    nl_blocks_sent: 0
+    nl_gate_answers: 0
+    nl_measures_put_back: 1200
+    rust_passes: 3
+    rust_declines: 0
+    rust_records_walked: 6015
+    rust_records_spliced: 0
     element_layouts: 0
     reuse_hit: 0
     reuse_remeasured: 0
     reuse_escapingAbs: 0
-    ctx_sweeps: 201
-    ctx_gate_active: 1
+    ctx_sweeps: 0
+    ctx_gate_active: 0
   wall:
-    workload_ms: 423.084
-    calib_ms: 2.793
-    ratio: 151.459
+    workload_ms: 113.982
+    calib_ms: 2.729
+    ratio: 41.773
 shadow_host:
   counts:
     passes: 3
-    nl_passes: 3
+    nl_passes: 0
     nl_declines: 0
-    nl_records_copied: 8824
-    nl_blocks_sent: 1602
-    nl_gate_answers: 4814
-    nl_measures_put_back: 0
+    nl_records_copied: 0
+    nl_blocks_sent: 0
+    nl_gate_answers: 0
+    nl_measures_put_back: 1201
+    rust_passes: 3
+    rust_declines: 0
+    rust_records_walked: 6017
+    rust_records_spliced: 4
     element_layouts: 0
     reuse_hit: 0
     reuse_remeasured: 0
     reuse_escapingAbs: 0
-    ctx_sweeps: 201
-    ctx_gate_active: 1
+    ctx_sweeps: 0
+    ctx_gate_active: 0
   wall:
-    workload_ms: 487.348
-    calib_ms: 2.699
-    ratio: 180.562
+    workload_ms: 116.872
+    calib_ms: 2.757
+    ratio: 42.392
 layout_walk:
   counts:
     ok: 1
@@ -50,44 +58,52 @@ layout_walk:
     nativeOutOfFlow: 0
     pushedContributions: 0
   wall:
-    workload_ms: 221.868
-    calib_ms: 2.94
-    ratio: 75.455
+    workload_ms: 218.06
+    calib_ms: 2.973
+    ratio: 73.346
 flex_shell:
   counts:
     passes: 6
-    nl_passes: 6
+    nl_passes: 0
     nl_declines: 0
-    nl_records_copied: 2730
-    nl_blocks_sent: 600
-    nl_gate_answers: 613
-    nl_measures_put_back: 1800
+    nl_records_copied: 0
+    nl_blocks_sent: 0
+    nl_gate_answers: 0
+    nl_measures_put_back: 2406
+    rust_passes: 6
+    rust_declines: 0
+    rust_records_walked: 2124
+    rust_records_spliced: 1500
     element_layouts: 0
     reuse_hit: 0
     reuse_remeasured: 0
     reuse_escapingAbs: 0
     ctx_sweeps: 0
-    ctx_gate_active: 1
+    ctx_gate_active: 0
   wall:
-    workload_ms: 101.922
-    calib_ms: 2.789
-    ratio: 36.544
+    workload_ms: 37.374
+    calib_ms: 2.743
+    ratio: 13.623
 flex_row_shell:
   counts:
     passes: 5
-    nl_passes: 5
+    nl_passes: 0
     nl_declines: 0
-    nl_records_copied: 30015
+    nl_records_copied: 0
     nl_blocks_sent: 0
-    nl_gate_answers: 10511
-    nl_measures_put_back: 0
+    nl_gate_answers: 0
+    nl_measures_put_back: 262
+    rust_passes: 5
+    rust_declines: 0
+    rust_records_walked: 7815
+    rust_records_spliced: 7200
     element_layouts: 0
     reuse_hit: 0
     reuse_remeasured: 0
     reuse_escapingAbs: 0
     ctx_sweeps: 0
-    ctx_gate_active: 1
+    ctx_gate_active: 0
   wall:
-    workload_ms: 546.503
-    calib_ms: 2.773
-    ratio: 197.088
+    workload_ms: 81.881
+    calib_ms: 2.771
+    ratio: 29.545
