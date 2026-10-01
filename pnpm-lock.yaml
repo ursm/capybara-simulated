@@ -8,7 +8,6 @@ patchedDependencies:
   css-select@7.0.0: b6947837d6af196db7be8c0b671a0708ecf88c74e08824b43ec8c64a7c1d127f
   css-tree@3.2.1: adf9cf27fafbb61aade81ede6b969b85d38fa9253dbf4eb38a17ee8776c942a8
   css-what@8.0.0: 53222faccb4d5bbacfef85d16fc9a23d88f52dd7321b662eedd704abc7525596
-  whatwg-url@16.0.1: 0970475774f1059d1b0db08186faf8680f2ed0be57fc82c97bda14092b5707b0
 
 importers:
 
@@ -51,12 +50,6 @@ importers:
       eslint-scope:
         specifier: ^9.1.2
         version: 9.1.2
-      url-polyfill:
-        specifier: ^1.1.14
-        version: 1.1.14
-      whatwg-url:
-        specifier: ^16.0.1
-        version: 16.0.1(patch_hash=0970475774f1059d1b0db08186faf8680f2ed0be57fc82c97bda14092b5707b0)
 
 packages:
 
@@ -216,15 +209,6 @@ packages:
     cpu: [x64]
     os: [win32]
 
-  '@exodus/bytes@1.15.1':
-    resolution: {integrity: sha512-S6mL0yNB/Abt9Ei4tq8gDhcczc4S3+vQ4ra7vxnAf+YHC02srtqxKKZghx2Dq6p0e66THKwR6r8N6P95wEty7Q==}
-    engines: {node: ^20.19.0 || ^22.12.0 || >=24.0.0}
-    peerDependencies:
-      '@noble/hashes': ^1.8.0 || ^2.0.0
-    peerDependenciesMeta:
-      '@noble/hashes':
-        optional: true
-
   '@types/esrecurse@4.3.1':
     resolution: {integrity: sha512-xJBAbDifo5hpffDBuHl0Y8ywswbiAp/Wi7Y/GtAgSlZyIABppyurxVueOPE8LUQOxdlgi6Zqce7uoEpqNTeiUw==}
 
@@ -305,20 +289,9 @@ packages:
     resolution: {integrity: sha512-GX0gsdbGVCgnRgbeGaubfjpBXyYRWOOCVeYh08bSQvDZqxz5ndXs1OTfAt/h36G1xvI94YIspsI0sVFqAV9+RQ==}
     engines: {node: '>=20.19.0'}
 
-  punycode@2.3.1:
-    resolution: {integrity: sha512-vYt7UD1U9Wg6138shLtLOvdAu+8DsC/ilFtEVHcH+wydcSpNE20AfSOduf6MkRFahL5FY7X1oU7nKVZFtfq8Fg==}
-    engines: {node: '>=6'}
-
   source-map-js@1.2.1:
     resolution: {integrity: sha512-UXWMKhLOwVKb728IUtQPXxfYU+usdybtUrK/8uGE8CQMvrhOpwvzDBwj0QhSL7MQc7vIsISBG8VQ8+IDQxpfQA==}
     engines: {node: '>=0.10.0'}
-
-  tr46@6.0.0:
-    resolution: {integrity: sha512-bLVMLPtstlZ4iMQHpFHTR7GAGj2jxi8Dg0s2h2MafAE4uSWF98FC/3MomU51iQAMf8/qDUbKWf5GxuvvVcXEhw==}
-    engines: {node: '>=20'}
-
-  url-polyfill@1.1.14:
-    resolution: {integrity: sha512-p4f3TTAG6ADVF3mwbXw7hGw+QJyw5CnNGvYh5fCuQQZIiuKUswqcznyV3pGDP9j0TSmC4UvRKm8kl1QsX1diiQ==}
 
   urlpattern-polyfill@10.1.0:
     resolution: {integrity: sha512-IGjKp/o0NL3Bso1PymYURCJxMPNAf/ILOpendP9f5B6e1rTJgdgiOvgfoT8VxCAdY+Wisb9uhGaJJf3yZ2V9nw==}
@@ -327,10 +300,6 @@ packages:
     resolution: {integrity: sha512-/Gnggvj9oSrEvJbDyyPtAnxBt5fGQM2iWOKQNu7ie1OxDgK40iZpyV3TKaRiEzVj1oA1UxKnEy9XPXh6PW3eVw==}
     engines: {node: '>= 8'}
 
-  webidl-conversions@8.0.1:
-    resolution: {integrity: sha512-BMhLD/Sw+GbJC21C/UgyaZX41nPt8bUTg+jWyDeg7e7YN4xOM05YPSIXceACnXVtqyEw/LMClUQMtMZ+PGGpqQ==}
-    engines: {node: '>=20'}
-
   webidl2@24.5.0:
     resolution: {integrity: sha512-fxOigKkIem1iAgQ9t4cFOP+kWEA8y6Be/uh50FpJh0FijoeeT/VMrOyJzNLUgjy0rGMEcHeReKDCqj0g9dIe9A==}
     engines: {node: '>= 18'}
@@ -338,10 +307,6 @@ packages:
   whatwg-mimetype@5.0.0:
     resolution: {integrity: sha512-sXcNcHOC51uPGF0P/D4NVtrkjSU2fNsm9iog4ZvZJsL3rjoDAzXZhkm2MWt1y+PUdggKAYVoMAIYcs78wJ51Cw==}
     engines: {node: '>=20'}
-
-  whatwg-url@16.0.1:
-    resolution: {integrity: sha512-1to4zXBxmXHV3IiSSEInrreIlu02vUOvrhxJJH5vcxYTBDAx51cqZiKdyTxlecdKNSjj8EcxGBxNf6Vg+945gw==}
-    engines: {node: ^20.19.0 || ^22.12.0 || >=24.0.0}
 
   xpathway@1.0.4:
     resolution: {integrity: sha512-Q6bNwst6gcxc3/H9KAL+Gy8TaQaP3x71WZwIS2Y5vC3NY5uAI4B9VmekBwP5ppV3iK5sDNjkt5tPrPp0/smlig==}
@@ -426,8 +391,6 @@ snapshots:
 
   '@esbuild/win32-x64@0.28.1':
     optional: true
-
-  '@exodus/bytes@1.15.1': {}
 
   '@types/esrecurse@4.3.1': {}
 
@@ -526,32 +489,14 @@ snapshots:
     dependencies:
       boolbase: 2.0.0
 
-  punycode@2.3.1: {}
-
   source-map-js@1.2.1: {}
-
-  tr46@6.0.0:
-    dependencies:
-      punycode: 2.3.1
-
-  url-polyfill@1.1.14: {}
 
   urlpattern-polyfill@10.1.0: {}
 
   web-streams-polyfill@4.3.0: {}
 
-  webidl-conversions@8.0.1: {}
-
   webidl2@24.5.0: {}
 
   whatwg-mimetype@5.0.0: {}
-
-  whatwg-url@16.0.1(patch_hash=0970475774f1059d1b0db08186faf8680f2ed0be57fc82c97bda14092b5707b0):
-    dependencies:
-      '@exodus/bytes': 1.15.1
-      tr46: 6.0.0
-      webidl-conversions: 8.0.1
-    transitivePeerDependencies:
-      - '@noble/hashes'
 
   xpathway@1.0.4: {}

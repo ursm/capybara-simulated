@@ -43,6 +43,11 @@ web_atoms = "0.2"
 euclid = "0.22"
 app_units = "0.7"
 url = "2.5"
+# The URL parser the page's `URL` and every URL it resolves are parsed by (url_ops.rs): Ada, Node.js's — it passes the
+# URL Standard's tests, where `url` (above, Servo's, which stylo resolves its sheets' URLs with) fails some 300. And the
+# legacy encodings HTML's "encoding-parse a URL" percent-encodes a query in: every WHATWG encoding, multibyte included.
+ada-url = "4"
+encoding_rs = "0.8"
 bitflags = "2"
 
 # An `<input>`'s `pattern` is an ECMAScript regular expression (compiled with the `v` flag): regress is a JS-syntax

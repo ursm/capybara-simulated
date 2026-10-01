@@ -55209,25 +55209,6 @@ shadow-dom/wheel-event-related-target.html:
   reason: Drives test_driver.Actions().scroll over an overflow:scroll container; depends
     on the test_driver wheel input driver, which the runner does not drive (the scroll
     geometry beside it IS modelled).
-url/percent-encoding.window.js:
-- name: "Input \x0EA with encoding iso-2022-jp"
-  reason: query percent-encoding per iso-2022-jp needs a legacy (non-utf-8) encoder
-    table plus the .py CGI endpoint; not modeled
-- name: Input † with encoding big5
-  reason: query percent-encoding per big5 needs a legacy (non-utf-8) encoder table
-    plus the .py CGI endpoint; not modeled
-- name: Input † with encoding euc-kr
-  reason: query percent-encoding per euc-kr needs a legacy (non-utf-8) encoder table
-    plus the .py CGI endpoint; not modeled
-- name: Input ‾\ with encoding iso-2022-jp
-  reason: query percent-encoding per iso-2022-jp needs a legacy (non-utf-8) encoder
-    table plus the .py CGI endpoint; not modeled
-- name: Input − with encoding shift_jis
-  reason: query percent-encoding per shift_jis needs a legacy (non-utf-8) encoder
-    table plus the .py CGI endpoint; not modeled
-- name: Input  with encoding gb18030
-  reason: query percent-encoding per gb18030 needs a legacy (non-utf-8) encoder table
-    plus the .py CGI endpoint; not modeled
 web-animations/animation-trigger/event-trigger-before-handlers.tentative.html:
 - name: Animation triggers are handled before registered event listeners
   reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux

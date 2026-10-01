@@ -10,15 +10,13 @@
 // The output (`vendor/js/vendor.bundle.js`) is checked in and shipped
 // in the gem; consumers never need npm.
 //
-// Four of these deps are LOCALLY PATCHED (pnpm patches, registered in
+// Three of these deps are LOCALLY PATCHED (pnpm patches, registered in
 // pnpm-workspace.yaml, sources under `patches/`). Read the patch file to see an
 // edit in full; the newer ones also mark themselves `// csim patch:` in the
 // dependency's own source:
 //   css-select  — attribute-name casing, `:any-link`/`:root` scoping
 //   css-what    — selector-escape parsing (`\<EOF>` → U+FFFD, non-ASCII names)
 //   css-tree    — attribute-selector recovery at EOF (`[foo` parses as `[foo]`)
-//   whatwg-url  — parser speed only (bulk opaque-path append, hoisted state
-//                 handler); byte-identical output, differential-fuzzed
 
 import * as cssSelect from 'css-select';
 import * as cssWhat   from 'css-what';
@@ -43,25 +41,12 @@ import cssTreeGenerate from 'css-tree/generator';
 import cssTreeWalk     from 'css-tree/walker';
 const cssTree = { parse: cssTreeParse, generate: cssTreeGenerate, walk: cssTreeWalk };
 
-// whatwg-url's URL state machine: the jsdom reference WHATWG URL parser (npm,
-// MIT). Backs `__csim_parseUrl` (the old Ruby `URI` delegation was RFC 3986,
-// ASCII-strict, NOT WHATWG) — so URL parsing is spec-correct AND in-VM (no
-// V8↔Ruby boundary per parse). We import the bare state machine, NOT the
-// `whatwg-url` barrel: the barrel's `URL` WebIDL wrapper pulls in
-// webidl-conversions/utils.js, which capture `ArrayBuffer.prototype.resizable` /
-// `SharedArrayBuffer` descriptors at load time — features unavailable during
-// V8 snapshot build, so they throw there. The state machine needs none of
-// that (just tr46, aliased to an ASCII-only shim, and TextEncoder — stubbed in
-// snapshot_stubs.js). url-parse.js assembles the component shape from it exactly
-// as whatwg-url's URL-impl does.
-import * as urlEngine from 'whatwg-url/lib/url-state-machine.js';
-
 // whatwg-mimetype: the WHATWG MIME-type parser + serializer (npm, MIT — the jsdom
 // reference impl). Backs XHR send()'s "fix the charset to UTF-8" step, which needs a
 // real parser (quoted strings, backslash escapes, duplicate-parameter dedup) and the
 // canonical serializer (lowercases type/subtype + parameter names). Pure regex
 // parse/serialize — no WebIDL / ArrayBuffer descriptors — so it's safe in the V8
-// snapshot build (unlike whatwg-url's URL wrapper).
+// snapshot build.
 import { MIMEType } from 'whatwg-mimetype';
 const mimeType = { MIMEType };
 
@@ -147,4 +132,4 @@ function cssColorRaster(str) {
 }
 const color = { toHex: cssColorToHex, srgb: cssColorSrgb, raster: cssColorRaster };
 
-export { cssSelect, cssWhat, xpathway, cssTree, urlEngine, mimeType, streams, color, URLPattern };
+export { cssSelect, cssWhat, xpathway, cssTree, mimeType, streams, color, URLPattern };

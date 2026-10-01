@@ -48,10 +48,6 @@ Gem::Specification.new do |spec|
 
   spec.add_dependency 'capybara', '>= 3.37'
   spec.add_dependency 'rack',     '>= 2.2'
-  # WHATWG/UTS46 IDNA (domain-to-ASCII/Unicode) for the URL parser's host
-  # processing — the JS tr46 stub delegates non-ASCII / xn-- hosts here so the V8
-  # snapshot doesn't carry the ~600KB Unicode IDNA mapping table.
-  spec.add_dependency 'uri-idna', '~> 0.3'
   # The rasteriser: image decoding (an `<img>`'s intrinsic size, which LAYOUT sizes the box from),
   # the canvas surface, and `save_screenshot`. Binds to the libvips SYSTEM library — Debian/Ubuntu
   # `libvips42`, Homebrew `vips`, Gentoo `media-libs/vips`.
