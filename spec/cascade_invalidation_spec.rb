@@ -1406,11 +1406,13 @@ RSpec.describe 'cascade invalidation' do
       (() => {
         const p = document.getElementById('p');
         const before = p.getBoundingClientRect().height;
+        const marks = globalThis.__csimSubtreeMarks();
         p.className = 'b a';
-        return [before, p.getBoundingClientRect().height];
+        return [before, p.getBoundingClientRect().height, globalThis.__csimSubtreeMarks() > marks];
       })()
     JS
-    expect(got).to eq([120, 20])
+    # (…the height is the writer's own box, marked whatever happens to its subtree; the count pins the subtree mark)
+    expect(got).to eq([120, 20, true])
   end
 
   it 'relays out descendants of a subject-position box-property flip' do

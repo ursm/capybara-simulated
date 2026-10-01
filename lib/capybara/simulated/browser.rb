@@ -5188,6 +5188,16 @@ module Capybara
         (h.positive? && @workers.dig(h, :script_type)) || 'classic'
       end
 
+      # Whether the worker `handle` has reached 'activated': false only while a registration still activates it (its
+      # activated marker not yet processed).
+      def sw_worker_activated?(handle)
+        h = handle.to_i
+        return true unless @sw_activating_scopes.value?(h)
+
+        w = @workers[h]
+        !w || @worker_init_lock.synchronize { w[:sw_activated] } ? true : false
+      end
+
       # Does `handle` still control any client? HTML's "try activate" holds an installed worker in
       # the WAITING slot for exactly as long as the outgoing worker has controllees — that is what
       # makes `registration.waiting` non-null, which is how every "a new version is available"
@@ -5646,13 +5656,19 @@ module Capybara
         end
         best = nil
         best_len = -1
-        [@sw_registrations, activated].each do |registrations|
-          registrations.each do |scope, handle|
-            next unless u.start_with?(scope) && scope.length > best_len
+        @sw_registrations.each do |scope, handle|
+          next unless u.start_with?(scope) && scope.length > best_len
 
-            best     = [handle, scope]
-            best_len = scope.length
-          end
+          best     = [handle, scope]
+          best_len = scope.length
+        end
+        # (…and one activating at the SAME scope as an active one is an update: Activate has made the new worker the
+        # registration's active worker, so it wins the tie over the outgoing one)
+        activated.each do |scope, handle|
+          next unless u.start_with?(scope) && scope.length >= best_len
+
+          best     = [handle, scope]
+          best_len = scope.length
         end
         best
       end

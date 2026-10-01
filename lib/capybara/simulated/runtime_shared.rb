@@ -212,6 +212,9 @@ module Capybara
         # The committed script type at that scope — the synthesized registration's
         # reg._workerType (module SWs observed from a second realm).
         '__csim_swScopeWorkerType'      => ->(b, *a) { b.sw_scope_worker_type(a[0]) },
+        # Whether a worker has reached 'activated' — false while its registration still activates it — for a realm
+        # minting a worker it never saw the lifecycle of (a frame a still-activating worker controls).
+        '__csim_swWorkerActivated'      => ->(b, *a) { b.sw_worker_activated?(a[0]) },
         # HTML "try activate" in one atomic verdict: may `candidate` (installed, in the waiting
         # slot) take over from `outgoing`? Extended work / controllees / skipWaiting are all
         # host state — see sw_may_activate? and _scheduleLifecycle.
