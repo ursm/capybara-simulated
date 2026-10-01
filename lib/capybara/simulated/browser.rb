@@ -2552,6 +2552,10 @@ module Capybara
         # long-poll) keeps the settle loop alive even when settle_gen
         # is otherwise idle.
         return true if worker_pending? || event_source_pending? || hijack_fetch_pending? || window_message_pending? || websocket_pending?
+        # …and a worker whose own timers are still to fire: it runs on its own thread, on its own clock, and what it posts
+        # when they do is what a wait is for — `setTimeout(() => postMessage('w2'), 300)` arrived after the wait had
+        # given up, because nothing on THIS page was pending.
+        return true if worker_timers_pending?
         if @timers_active
           gen = @runtime.settle_gen
           if @last_polled_gen.nil? || gen != @last_polled_gen
@@ -6835,6 +6839,8 @@ module Capybara
         events.size
       end
 
+      def worker_timers_pending? = @workers.each_value.any? {|r| r[:timers_due] && !r[:stopping] }
+
       def worker_pending? = !@worker_outbox.empty? || !@worker_outbox_head.nil? || @worker_in_flight > 0 || @worker_broadcast_pending > 0 || @sw_message_pending > 0 || @sw_fetch_pending > 0 || @worker_init_lock.synchronize { @worker_initializing + @worker_busy } > 0
 
       # The subset of worker pendings whose outbox reply is CONTRACTUAL (bcack / swack /
@@ -9411,7 +9417,10 @@ module Capybara
             # callbacks, and one callback is as long as it is — so a stop that arrived while we
             # were deciding must not buy another one. What lands once the call is already running
             # is `terminate`'s job; between the two, the window is a few instructions wide.
-            if !stopping.call && rt.call('__nextTimerDelay').to_f >= 0
+            # (…and whether it has one is told to the main thread, whose waits go on while it does: `polling?`.)
+            timers_due = !stopping.call && rt.call('__nextTimerDelay').to_f >= 0
+            record[:timers_due] = timers_due if record
+            if timers_due
               rt.drain_microtasks
               rt.drain_timers
             end
@@ -9461,6 +9470,7 @@ module Capybara
         # holding the lock: terminating a disposed isolate is a use-after-free, and the two calls
         # are on different threads. Whoever holds the lock owns the pointer for that moment.
         if record
+          record[:timers_due] = false
           record[:rt_lock].synchronize { record[:rt] = nil; rt&.dispose }
         else
           rt&.dispose

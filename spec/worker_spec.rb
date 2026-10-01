@@ -59,6 +59,19 @@ RSpec.describe 'Web Worker' do
     expect(session.evaluate_script('window.__r')).to eq({'echo' => 'hello'})
   end
 
+  # A worker's own timers keep a wait going: it runs on its own thread and clock, and what it posts when they fire is
+  # what the wait is for. With nothing pending on the page itself, the driver said it had nothing to wait for, and a
+  # matcher gave up after the first message — the second, posted 300ms in, never arrived in time.
+  it 'keeps waiting for what a worker posts from its timers' do
+    html = '<html><body><div id="w"></div><script>' \
+           'const wk = new Worker(URL.createObjectURL(new Blob(["setTimeout(() => postMessage(\'w1\'), 100); ' \
+           'setTimeout(() => postMessage(\'w2\'), 300)"], {type: "text/javascript"})));' \
+           'wk.onmessage = (e) => document.getElementById("w").append(e.data + " ");</script></body></html>'
+    session = simulated_session(->(_env) { [200, {'content-type' => 'text/html'}, [html]] })
+    session.visit('/')
+    expect(session).to have_css('#w', text: 'w1 w2', wait: 3)
+  end
+
   it 'runs computation in the worker and returns the result' do
     session = simulated_session(app)
     session.visit('/')
