@@ -2393,6 +2393,7 @@ fn drop_realm(
         d.styles.remove(&id);          // (…and its style engine)
         d.walk_parity.remove(&id);     // (…and its walk-parity instrument)
         d.walk_reuse.remove(&id);      // (…and its Rust walk's last pass)
+        crate::text_codec::drop_realm(scope, id);   // (…and the stream decoders it left open)
     }
 }
 

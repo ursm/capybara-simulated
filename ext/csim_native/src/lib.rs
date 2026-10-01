@@ -59,5 +59,7 @@ fn init(ruby: &Ruby) -> Result<(), Error> {
         .define_module("Simulated")?
         .define_module("Native")?;
     native.define_module_function("unicode_class_ranges", magnus::function!(unicode::class_ranges, 1))?;
+    // HTML's "encode" for a form the host submits in its legacy submission encoding.
+    native.define_module_function("form_encode", magnus::function!(text_codec::form_encode, 2))?;
     Ok(())
 }

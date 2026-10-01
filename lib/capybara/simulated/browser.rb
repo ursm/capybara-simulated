@@ -3051,6 +3051,7 @@ module Capybara
         method  = 'GET' if method.empty?
         enctype = spec['enctype'].to_s.empty? ? 'application/x-www-form-urlencoded' : spec['enctype'].to_s.downcase
         entries = entry_list.is_a?(Array) ? entry_list : (spec['entries'] || [])
+        encoding = spec['encoding'] || 'UTF-8'
         action_url = action.empty? ? (current_browsing_context_url || @default_host) : resolve_against_current(action)
         # A form submitted inside a frame whose target is that frame (self, or a
         # `_parent` of a ≥2-deep frame) navigates the FRAME, not the top page.
@@ -3080,7 +3081,7 @@ module Capybara
         @runtime.call('__csimConsumeTransientActivation') if new_window rescue nil
         if method == 'GET'
           # GET ignores enctype: the entry list is always the urlencoded query.
-          query, = encode_entry_list(entries, 'application/x-www-form-urlencoded')
+          query, = encode_entry_list(entries, 'application/x-www-form-urlencoded', encoding)
           uri = URI.parse(action_url)
           # HTML "mutate action URL" for GET: SET the query to the entry list
           # unconditionally — an empty list clears any query the action already
@@ -3095,7 +3096,7 @@ module Capybara
             navigate(uri.to_s)
           end
         else
-          body, content_type = encode_entry_list(entries, enctype)
+          body, content_type = encode_entry_list(entries, enctype, encoding)
           if new_window
             @driver.open_aux_window(action_url, name: window_name, source: self,
                                     opener: keep_opener, referrer: referrer,
@@ -3108,50 +3109,50 @@ module Capybara
         end
       end
 
-      # HTML "encode the entry list" by enctype → [body, exact Content-Type]. The
-      # Content-Type is sent verbatim (no charset suffix), which the spec's
-      # form-submission resources compare exactly. text/plain is `name=value\r\n`
-      # per entry (NOT urlencoded); urlencoded (and GET) merge each file entry as
-      # its bare filename. `entries` is the ordered entry list — string
-      # {'name','value'} or file {'name','file'=>true,'filename','handle','index'}
-      # entries; a file's bytes resolve through the `@file_picks` slot.
-      def encode_entry_list(entries, enctype)
+      # HTML "encode the entry list" by enctype, in the form's submission character `encoding` → [body, exact
+      # Content-Type]. The Content-Type is sent verbatim (no charset suffix), which the spec's form-submission resources
+      # compare exactly. text/plain is `name=value\r\n` per entry (NOT urlencoded); urlencoded (and GET) merge each file
+      # entry as its bare filename. Every name, value and filename is encoded in `encoding` — natively in a legacy one
+      # (encoding_rs, a character it cannot encode written `&#N;`). `entries` is the ordered entry list — string
+      # {'name','value'} or file {'name','file'=>true,'filename','handle','index'} entries; a file's bytes resolve
+      # through the `@file_picks` slot.
+      def encode_entry_list(entries, enctype, encoding)
+        # The encoders normalize CR/LF → CRLF in each name and value (a file entry's filename is the value) — the entry
+        # list itself stays raw, matching the JS encoders and real browsers (newline-normalization.html).
+        encode = ->(s) {
+          s = normalize_form_newlines(s)
+          encoding == 'UTF-8' ? s.b : Native.form_encode(encoding, s)
+        }
         if enctype.start_with?('multipart/form-data')
           boundary = "csim-#{SecureRandom.hex(8)}"
           body     = String.new.force_encoding(Encoding::ASCII_8BIT)
           entries.each do |e|
+            name = encode.(e['name'])
             if e['file']
               path = entry_file_path(e)
               if path
-                append_multipart_part(body, boundary, e['name'].to_s, File.binread(path),
-                                      filename:     File.basename(path),
+                append_multipart_part(body, boundary, name, File.binread(path),
+                                      filename:     encode.(File.basename(path)),
                                       content_type: Rack::Mime.mime_type(File.extname(path)))
               elsif e['bytes']
                 # An in-memory `new File([…])` has no on-disk slot; its bytes are
                 # carried from the VM.
                 ct = e['type'].to_s
                 ct = 'application/octet-stream' if ct.empty?
-                append_multipart_part(body, boundary, e['name'].to_s, e['bytes'],
-                                      filename: e['filename'].to_s, content_type: ct)
+                append_multipart_part(body, boundary, name, e['bytes'], filename: encode.(e['filename']), content_type: ct)
               else
-                append_multipart_part(body, boundary, e['name'].to_s, '', filename: e['filename'].to_s)
+                append_multipart_part(body, boundary, name, '', filename: encode.(e['filename']))
               end
             else
-              append_multipart_part(body, boundary, e['name'].to_s, e['value'].to_s)
+              append_multipart_part(body, boundary, name, encode.(e['value']))
             end
           end
           body << "--#{boundary}--\r\n"
           [body, "multipart/form-data; boundary=#{boundary}"]
         else
-          # The urlencoded / text-plain encoders normalize CR/LF → CRLF in each entry's
-          # name and value (a file entry's filename is the value) — the entry list itself
-          # stays raw, so normalization lives here, matching the JS encoders and real
-          # browsers (newline-normalization.html).
-          pairs = entries.map {|e|
-            [normalize_form_newlines(e['name']), normalize_form_newlines(e['file'] ? e['filename'] : e['value'])]
-          }
+          pairs = entries.map {|e| [encode.(e['name']), encode.(e['file'] ? e['filename'] : e['value'])] }
           if enctype == 'text/plain'
-            [pairs.map {|name, value| "#{name}=#{value}\r\n" }.join, 'text/plain']
+            [pairs.map {|name, value| name + '=' + value + "\r\n" }.join.b, 'text/plain']
           else
             [URI.encode_www_form(pairs), 'application/x-www-form-urlencoded']
           end
@@ -3177,10 +3178,13 @@ module Capybara
         picks && picks[entry['index'].to_i]
       end
 
+      # One part of a multipart/form-data body. `name` and `filename` are bytes, already encoded; a LF, CR or `"` in
+      # them is escaped `%0A` / `%0D` / `%22`, as HTML's multipart encoding has it.
       def append_multipart_part(body, boundary, name, content, filename: nil, content_type: nil)
+        escape = ->(s) { s.b.gsub(/[\n\r"]/n) {|c| format('%%%02X', c.ord) } }
         body << "--#{boundary}\r\n"
-        disposition = %[form-data; name="#{name}"]
-        disposition += %[; filename="#{filename}"] if filename
+        disposition = %[form-data; name="#{escape.(name)}"].b
+        disposition << %[; filename="#{escape.(filename)}"].b if filename
         body << "Content-Disposition: #{disposition}\r\n"
         body << "Content-Type: #{content_type}\r\n" if content_type
         body << "\r\n"
@@ -10787,14 +10791,15 @@ module Capybara
         action = spec['action'].to_s
         enctype = spec['enctype'].to_s.empty? ? 'application/x-www-form-urlencoded' : spec['enctype'].to_s.downcase
         entries = entry_list.is_a?(Array) ? entry_list : (spec['entries'] || [])
+        encoding = spec['encoding'] || 'UTF-8'
         # GET → urlencoded query (enctype ignored); POST → enctype-encoded body.
-        get_query, = encode_entry_list(entries, 'application/x-www-form-urlencoded')
+        get_query, = encode_entry_list(entries, 'application/x-www-form-urlencoded', encoding)
         get_url = form_get_url(action, get_query)
         if frame_self_target?(target)
           if method == 'GET'
             navigate_realm_self_get(realm_id, get_url)
           else
-            body, content_type = encode_entry_list(entries, enctype)
+            body, content_type = encode_entry_list(entries, enctype, encoding)
             navigate_realm_self_post(realm_id, resolve_against_current(action), body, content_type)
           end
         elsif %w[_parent _top _blank].include?(target.downcase)

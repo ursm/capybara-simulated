@@ -5,7 +5,7 @@
 
 use encoding_rs::{CoderResult, Decoder, DecoderResult, Encoding};
 
-use crate::dom::register;
+use crate::dom::{realm_id, register};
 
 pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Object>, context_id: i32) {
     register(scope, ns, "encodingName", encoding_name, context_id);
@@ -37,27 +37,53 @@ fn encoding_name(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArg
     }
 }
 
-// The bytes of a BufferSource argument (a copy: the page may change the buffer after the call).
-fn bytes_arg(value: v8::Local<'_, v8::Value>) -> Vec<u8> {
-    if let Ok(view) = v8::Local::<v8::ArrayBufferView>::try_from(value) {
-        let mut out = vec![0u8; view.byte_length()];
-        view.copy_contents(&mut out);
-        return out;
+// A view whose buffer the page may resize — which no BufferSource argument here takes (WebIDL: none is
+// `[AllowResizable]`). An on-heap view has no buffer of its own yet, and is never resizable.
+fn resizable_view(view: v8::Local<'_, v8::ArrayBufferView>) -> bool {
+    view.has_buffer() && view.get_backing_store().is_some_and(|store| store.is_resizable_by_user_javascript())
+}
+
+// The bytes of an `[AllowShared] BufferSource` argument (a copy: the page may change the buffer after the call), or
+// None — after throwing the TypeError WebIDL's conversion throws — for anything else, a resizable buffer included.
+// `undefined` is no bytes (an omitted argument).
+fn bytes_arg(scope: &mut v8::PinScope<'_, '_>, value: v8::Local<'_, v8::Value>) -> Option<Vec<u8>> {
+    if value.is_undefined() {
+        return Some(Vec::new());
     }
-    let (data, len) = if let Ok(buffer) = v8::Local::<v8::ArrayBuffer>::try_from(value) {
-        (buffer.data(), buffer.byte_length())
+    let (data, len) = if let Ok(view) = v8::Local::<v8::ArrayBufferView>::try_from(value) {
+        if !resizable_view(view) {
+            let mut out = vec![0u8; view.byte_length()];
+            view.copy_contents(&mut out);
+            return Some(out);
+        }
+        (None, None)
+    } else if let Ok(buffer) = v8::Local::<v8::ArrayBuffer>::try_from(value) {
+        let store = buffer.get_backing_store();
+        (store.data(), (!store.is_resizable_by_user_javascript()).then(|| buffer.byte_length()))
     } else if let Ok(buffer) = v8::Local::<v8::SharedArrayBuffer>::try_from(value) {
         // (…a SharedArrayBuffer too — the WPT harness makes one of a WebAssembly.Memory)
-        (buffer.get_backing_store().data(), buffer.byte_length())
+        let store = buffer.get_backing_store();
+        (store.data(), (!store.is_resizable_by_user_javascript()).then(|| buffer.byte_length()))
     } else {
-        (None, 0)
+        (None, None)
+    };
+    let Some(len) = len else {
+        throw_type_error(scope, "The provided value is not an ArrayBuffer or ArrayBufferView, or is a resizable one.");
+        return None;
     };
     let mut out = vec![0u8; len];
     if let Some(data) = data {
         // SAFETY: `data` points at the buffer's `len` bytes, which nothing frees while this callback runs.
         out.copy_from_slice(unsafe { std::slice::from_raw_parts(data.as_ptr() as *const u8, len) });
     }
-    out
+    Some(out)
+}
+
+fn throw_type_error(scope: &mut v8::PinScope<'_, '_>, message: &str) {
+    if let Some(message) = v8::String::new(scope, message) {
+        let error = v8::Exception::type_error(scope, message);
+        scope.throw_exception(error);
+    }
 }
 
 fn utf16_string<'s>(scope: &mut v8::PinScope<'s, '_>, units: &[u16]) -> v8::Local<'s, v8::Value> {
@@ -95,7 +121,7 @@ fn new_decoder(encoding: &'static Encoding, ignore_bom: bool) -> Decoder {
 // decode of a whole input.
 fn text_decode(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let Some(encoding) = encoding_arg(scope, args.get(0)) else { return rv.set_null() };
-    let bytes = bytes_arg(args.get(1));
+    let Some(bytes) = bytes_arg(scope, args.get(1)) else { return };
     let mut decoder = new_decoder(encoding, args.get(2).boolean_value(scope));
     match decode_with(&mut decoder, &bytes, true, args.get(3).boolean_value(scope)) {
         Some(units) => {
@@ -106,12 +132,12 @@ fn text_decode(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgum
     }
 }
 
-// The decoders a streaming `TextDecoder` keeps between its calls, by id (the page side closes one when its stream ends,
-// or when the decoder is collected).
+// The decoders a streaming `TextDecoder` keeps between its calls, by realm and id (the page side closes one when its
+// stream ends, or when the decoder is collected; a frame realm's go with it, `drop_realm`).
 #[derive(Default)]
 struct Decoders {
     next: u32,
-    live: std::collections::HashMap<u32, Decoder>,
+    live: std::collections::HashMap<(i32, u32), Decoder>,
 }
 
 fn decoders<'s>(scope: &'s mut v8::PinScope<'_, '_>) -> &'s mut Decoders {
@@ -121,28 +147,37 @@ fn decoders<'s>(scope: &'s mut v8::PinScope<'_, '_>) -> &'s mut Decoders {
     scope.get_slot_mut::<Decoders>().expect("Decoders slot was just set")
 }
 
+// Every decoder realm `realm` left open (it is being disposed).
+pub(crate) fn drop_realm(scope: &mut v8::PinScope<'_, '_>, realm: i32) {
+    if let Some(all) = scope.get_slot_mut::<Decoders>() {
+        all.live.retain(|&(owner, _), _| owner != realm);
+    }
+}
+
 // __dom.textDecoderOpen(encoding, ignoreBOM) -> a streaming decoder's id.
 fn text_decoder_open(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let Some(encoding) = encoding_arg(scope, args.get(0)) else { return rv.set_int32(0) };
     let decoder = new_decoder(encoding, args.get(1).boolean_value(scope));
+    let realm = realm_id(scope, &args);
     let all = decoders(scope);
     all.next += 1;
     let id = all.next;
-    all.live.insert(id, decoder);
+    all.live.insert((realm, id), decoder);
     rv.set_uint32(id);
 }
 
-// __dom.textDecoderPush(id, bytes, last, fatal) -> the text, or null where `fatal` met an error (the decoder is then
-// spent, as it is after `last`).
+// __dom.textDecoderPush(id, bytes, last, fatal) -> the text, or null where `fatal` met an error. The decoder is spent
+// after `last`; after an error mid-stream it carries on at the next call with the state it had — an ISO-2022-JP mode
+// switch holds — and without the rest of this input (WPT textdecoder-mistakes "fatal stream", both halves).
 fn text_decoder_push(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
-    let id = args.get(0).uint32_value(scope).unwrap_or(0);
-    let bytes = bytes_arg(args.get(1));
+    let key = (realm_id(scope, &args), args.get(0).uint32_value(scope).unwrap_or(0));
+    let Some(bytes) = bytes_arg(scope, args.get(1)) else { return };
     let last = args.get(2).boolean_value(scope);
     let fatal = args.get(3).boolean_value(scope);
-    let Some(decoder) = decoders(scope).live.get_mut(&id) else { return rv.set_null() };
+    let Some(decoder) = decoders(scope).live.get_mut(&key) else { return rv.set_null() };
     let units = decode_with(decoder, &bytes, last, fatal);
-    if last || units.is_none() {
-        decoders(scope).live.remove(&id);
+    if last {
+        decoders(scope).live.remove(&key);
     }
     match units {
         Some(units) => {
@@ -155,8 +190,8 @@ fn text_decoder_push(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbac
 
 // __dom.textDecoderClose(id): a streaming decoder the page side is done with.
 fn text_decoder_close(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {
-    let id = args.get(0).uint32_value(scope).unwrap_or(0);
-    decoders(scope).live.remove(&id);
+    let key = (realm_id(scope, &args), args.get(0).uint32_value(scope).unwrap_or(0));
+    decoders(scope).live.remove(&key);
 }
 
 // A string argument as UTF-8, a lone surrogate U+FFFD (the Encoding Standard's UTF-8 encoder).
@@ -182,7 +217,11 @@ fn utf8_encode(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgum
 // fit, `read` counted in UTF-16 code units.
 fn utf8_encode_into(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let text = utf8(scope, args.get(0));
-    let Ok(destination) = v8::Local::<v8::Uint8Array>::try_from(args.get(1)) else { return };
+    // (…a Uint8Array of any realm, and on a shared buffer — `[AllowShared] Uint8Array` — but not a resizable one)
+    let destination = match v8::Local::<v8::Uint8Array>::try_from(args.get(1)) {
+        Ok(destination) if !resizable_view(destination.into()) => destination,
+        _ => return throw_type_error(scope, "The provided value is not a Uint8Array, or is a resizable one."),
+    };
     let capacity = destination.byte_length();
     let mut read = 0u32;
     let mut out = Vec::with_capacity(capacity.min(text.len()));
@@ -204,12 +243,23 @@ fn utf8_encode_into(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallback
     rv.set(pair.into());
 }
 
-// __dom.legacyEncode(encoding, string) -> its bytes in `encoding` as a byte string (a character per byte): HTML's
-// "encode" for a form submitted in a legacy encoding, a character the encoding cannot encode written `&#N;`.
+// HTML's "encode" for a form submitted in a legacy encoding: `text`'s bytes in `encoding`, a character the encoding
+// cannot encode written `&#N;` (an unknown encoding is UTF-8).
+fn form_bytes(encoding: Option<&'static Encoding>, text: &str) -> Vec<u8> {
+    encoding.map_or_else(|| text.as_bytes().to_vec(), |encoding| encoding.encode(text).0.into_owned())
+}
+
+// Capybara::Simulated::Native.form_encode(encoding, text) -> the bytes (BINARY): a form the host submits.
+pub(crate) fn form_encode(ruby: &magnus::Ruby, encoding: String, text: String) -> magnus::RString {
+    ruby.str_from_slice(&form_bytes(Encoding::for_label(encoding.as_bytes()), &text))
+}
+
+// __dom.legacyEncode(encoding, string) -> the bytes as a byte string (a character per byte): a form submitted from
+// the page side.
 fn legacy_encode(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let Some(encoding) = encoding_arg(scope, args.get(0)) else { return rv.set_null() };
     let text = utf8(scope, args.get(1));
-    let (bytes, _, _) = encoding.encode(&text);
+    let bytes = form_bytes(Some(encoding), &text);
     if let Some(s) = v8::String::new_from_one_byte(scope, &bytes, v8::NewStringType::Normal) {
         rv.set(s.into());
     }

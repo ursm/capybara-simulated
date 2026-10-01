@@ -12,7 +12,7 @@ require_relative 'support/session_teardown'
 RSpec.describe 'Document encoding' do
   def app(pages)
     lambda {|env|
-      body, type = pages.fetch(env['PATH_INFO'])
+      type, body = pages.fetch(env['PATH_INFO'])
       [200, {'content-type' => type}, [body.b]]
     }
   end
@@ -26,10 +26,10 @@ RSpec.describe 'Document encoding' do
              '<iframe id="meta" src="/meta"></iframe>' \
              '<iframe id="xml" src="/xml"></iframe>'
     s = simulated_session(app(
-      '/'      => [parent, 'text/html'],
-      '/child' => ["<!DOCTYPE html><p>z\x82\xA0</p>", 'text/html'],
-      '/meta'  => ["<!DOCTYPE html><meta charset=euc-jp><p>\xA4\xA2</p>", 'text/html'],
-      '/xml'   => ["<?xml version='1.0' encoding='Shift_JIS'?><r>\x82\xA0</r>", 'application/xml']
+      '/'      => ['text/html', parent],
+      '/child' => ['text/html', "<!DOCTYPE html><p>z\x82\xA0</p>"],
+      '/meta'  => ['text/html', "<!DOCTYPE html><meta charset=euc-jp><p>\xA4\xA2</p>"],
+      '/xml'   => ['application/xml', "<?xml version=\"1.0\" encoding=\"Shift_JIS\"?><r>\x82\xA0</r>"]
     ))
     s.visit '/'
     got = s.evaluate_script(<<~JS)
@@ -50,9 +50,9 @@ RSpec.describe 'Document encoding' do
 
   it 'reads a BOM over the Content-Type, and the Content-Type over a meta' do
     s = simulated_session(app(
-      '/bom'  => ["\xEF\xBB\xBF<!DOCTYPE html><meta charset=euc-jp><p>\xE3\x81\x82</p>", 'text/html; charset=shift_jis'],
-      '/http' => ["<!DOCTYPE html><meta charset=euc-jp><p>\x82\xA0</p>", 'text/html; charset=shift_jis'],
-      '/none' => ["<!DOCTYPE html><p>\xE9</p>", 'text/html']
+      '/bom'  => ['text/html; charset=shift_jis', "\xEF\xBB\xBF<!DOCTYPE html><meta charset=euc-jp><p>\xE3\x81\x82</p>"],
+      '/http' => ['text/html; charset=shift_jis', "<!DOCTYPE html><meta charset=euc-jp><p>\x82\xA0</p>"],
+      '/none' => ['text/html', "<!DOCTYPE html><p>\xE9</p>"]
     ))
     got = %w[/bom /http /none].map {|path|
       s.visit path

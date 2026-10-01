@@ -33,74 +33,6 @@
 # runs; to reclassify, move a line between this file and wpt_expected_failures.yml.
 #
 ---
-FileAPI/file/send-file-form-iso-2022-jp.html:
-- name: "Upload file-for-upload-in-form-ABC~‾¥≈¤･・•∙·☼★星\U0001F31F星★☼·∙•・･¤≈¥‾~XYZ.txt
-    (Unicode) in ISO-2022-JP form"
-  reason: multipart/form-data with a legacy ISO-2022-JP charset; legacy multibyte
-    encoder not modeled (rule 1).
-- name: Upload file-for-upload-in-form-â˜ºðŸ˜‚.txt (windows-1252) in ISO-2022-JP form
-  reason: multipart/form-data with a legacy ISO-2022-JP charset; legacy multibyte
-    encoder not modeled (rule 1).
-- name: Upload file-for-upload-in-form-★星★.txt (JIS X 0201 and JIS X 0208) in ISO-2022-JP
-    form
-  reason: multipart/form-data with a legacy ISO-2022-JP charset; legacy multibyte
-    encoder not modeled (rule 1).
-- name: "Upload file-for-upload-in-form-☺\U0001F602.txt (Unicode) in ISO-2022-JP form"
-  reason: multipart/form-data with a legacy ISO-2022-JP charset; legacy multibyte
-    encoder not modeled (rule 1).
-- name: Upload file-for-upload-in-form-.txt (x-user-defined) in ISO-2022-JP form
-  reason: multipart/form-data with a legacy ISO-2022-JP charset; legacy multibyte
-    encoder not modeled (rule 1).
-- name: Upload file-for-upload-in-form.txt (ASCII) in ISO-2022-JP form
-  reason: multipart/form-data with a legacy ISO-2022-JP charset; legacy multibyte
-    encoder not modeled (rule 1).
-FileAPI/file/send-file-form-windows-1252.html:
-- name: "Upload file-for-upload-in-form-ABC~‾¥≈¤･・•∙·☼★星\U0001F31F星★☼·∙•・･¤≈¥‾~XYZ.txt
-    (Unicode) in windows-1252 form"
-  reason: multipart/form-data submitted in a windows-1252 form; legacy non-UTF-8 form
-    encoder not modeled (rule 1).
-- name: Upload file-for-upload-in-form-â˜ºðŸ˜‚.txt (windows-1252) in windows-1252
-    form
-  reason: multipart/form-data submitted in a windows-1252 form; legacy non-UTF-8 form
-    encoder not modeled (rule 1).
-- name: Upload file-for-upload-in-form-★星★.txt (JIS X 0201 and JIS X 0208) in windows-1252
-    form
-  reason: multipart/form-data submitted in a windows-1252 form; legacy non-UTF-8 form
-    encoder not modeled (rule 1).
-- name: "Upload file-for-upload-in-form-☺\U0001F602.txt (Unicode) in windows-1252
-    form"
-  reason: multipart/form-data submitted in a windows-1252 form; legacy non-UTF-8 form
-    encoder not modeled (rule 1).
-- name: Upload file-for-upload-in-form-.txt (x-user-defined) in windows-1252 form
-  reason: multipart/form-data submitted in a windows-1252 form; legacy non-UTF-8 form
-    encoder not modeled (rule 1).
-- name: Upload file-for-upload-in-form.txt (ASCII) in windows-1252 form
-  reason: multipart/form-data submitted in a windows-1252 form; legacy non-UTF-8 form
-    encoder not modeled (rule 1).
-FileAPI/file/send-file-form-x-user-defined.html:
-- name: "Upload file-for-upload-in-form-ABC~‾¥≈¤･・•∙·☼★星\U0001F31F星★☼·∙•・･¤≈¥‾~XYZ.txt
-    (Unicode) in x-user-defined form"
-  reason: multipart/form-data in an x-user-defined form; legacy encoder not modeled
-    (rule 1).
-- name: Upload file-for-upload-in-form-â˜ºðŸ˜‚.txt (windows-1252) in x-user-defined
-    form
-  reason: multipart/form-data in an x-user-defined form; legacy encoder not modeled
-    (rule 1).
-- name: Upload file-for-upload-in-form-★星★.txt (JIS X 0201 and JIS X 0208) in x-user-defined
-    form
-  reason: multipart/form-data in an x-user-defined form; legacy encoder not modeled
-    (rule 1).
-- name: "Upload file-for-upload-in-form-☺\U0001F602.txt (Unicode) in x-user-defined
-    form"
-  reason: multipart/form-data in an x-user-defined form; legacy encoder not modeled
-    (rule 1).
-- name: Upload file-for-upload-in-form-.txt (x-user-defined) in x-user-defined
-    form
-  reason: multipart/form-data in an x-user-defined form; legacy encoder not modeled
-    (rule 1).
-- name: Upload file-for-upload-in-form.txt (ASCII) in x-user-defined form
-  reason: multipart/form-data in an x-user-defined form; legacy encoder not modeled
-    (rule 1).
 FileAPI/url/multi-global-origin-serialization.sub.html:
 - name: Blob URL serialization (specifically the origin) in multi-global situations
   reason: Needs cross-origin iframes + document.domain + per-settings-object (incumbent
@@ -38238,9 +38170,6 @@ encoding/streams/realms.window.js:
     these tests assert. Surfaced once the WindowProxy event.source fix unblocked the
     test's iframe handshake (`event.source === window.parent`); the realm-attribution
     of polyfilled streams is out of scope (rule 1).
-encoding/textdecoder-mistakes.any.js:
-- name: 'fatal stream: iso-2022-jp'
-  reason: iso-2022-jp legacy escape-state decoder + streaming fatal not modeled.
 fetch/api/abort/general.any.js:
 - name: Fetch aborted & connection closed when aborted after calling response.arrayBuffer()
   reason: Server-side connection-close detection on abort (infinite-slow-response.py
