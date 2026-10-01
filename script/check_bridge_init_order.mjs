@@ -76,6 +76,12 @@ for (let i = 0; i < lines.length; i++) {
   const defines = stmt.some((line) => /\bfunction\b|=>/.test(line) || METHOD.test(line));
   const reached = new Set();
   if (!defines) for (const line of stmt) for (const [, n] of line.matchAll(CALLED)) reach(n, reached);
+  else {
+    // …but the call it STARTS with runs all the same — and passing a callback is what registering a hook looks like
+    // (`onX((e) => …)`, `setX(function …)`): the registration's own write is the one to see.
+    const lead = new RegExp(`^  (?:var ${IDENT}\\s*=\\s*)?(${IDENT})\\(`).exec(stmt[0]);
+    if (lead) reach(lead[1], reached);
+  }
   for (const fn of reached) {
     const at = declaredAt.get(fn);
     if (at !== undefined && at > i) {
