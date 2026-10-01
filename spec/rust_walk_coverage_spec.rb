@@ -85,6 +85,28 @@ RSpec.describe 'Rust walk coverage' do
     expect(rust).to eq(js)
   end
 
+  # A fixed box inside a TRANSFORMED row or row group has that part for its containing block (Chrome: 11,115 and
+  # 53.2,152 for these two), which the walk could not name: a table part's record was in no index.
+  it 'lays out a fixed box inside a transformed table part' do
+    rust, js = both_walks(
+      '<body style="margin: 0; font: 16px monospace"><div style="height: 50px"></div><table style="border-spacing: 4px"><thead><tr><td>head</td></tr></thead>' \
+      '<tbody style="transform: translate(0)"><tr><td>row one</td></tr><tr style="transform: translateX(0)"><td>two' \
+      '<div id="f1" style="position: fixed; top: 5px; left: 7px; width: 20px; height: 10px"></div></td></tr></tbody>' \
+      '<tfoot style="transform: translate(0)"><tr><td>foot<div id="f2" style="position: fixed; bottom: 0; right: 0; width: 20px; height: 10px"></div>' \
+      '</td></tr></tfoot></table></body>'
+    )
+    expect(rust).to eq(js)
+    fixed = rust.select {|b| b[0] == 'div' && b[3] == 20 }
+    expect(fixed.map {|b| b[1..2] }).to eq([[11, 115], [53.2, 152]])
+  end
+
+  # A `<ruby>` is an inline box, its annotation on the line beside its base, as the JS layout has it (Chrome puts the
+  # annotation above: a divergence both share).
+  it 'lays out ruby markup' do
+    rust, js = both_walks('<p style="font: 16px monospace; width: 120px">some text <ruby>漢字<rp>(</rp><rt>かんじ</rt><rp>)</rp></ruby> more text</p>')
+    expect(rust).to eq(js)
+  end
+
   # A face the page adds through the `FontFace` API is measured natively: its `size-adjust` reads 100% — the identity —
   # where it sets none, which was taken for a metric descriptor and declined every such face.
   it 'lays out text in a FontFace face' do

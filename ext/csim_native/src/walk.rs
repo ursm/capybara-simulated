@@ -31,15 +31,28 @@ use style::values::specified::box_::{Display, DisplayInside, DisplayOutside};
 
 // The display the walk lays a box out by: the style engine's, with a `-webkit-box` / `-webkit-inline-box` a plain
 // BLOCK — as the JS model lays out every display it has no arm of its own for (layout.js `nlBlockDisplay`), its
-// children in its flow rather than items. (Chrome lays them out as a legacy flex box, and clamps lines by
-// `-webkit-line-clamp`: a divergence both engines share, recorded.)
+// children in its flow rather than items — and a RUBY display an inline box, its annotation on the line beside its base
+// (as the JS model lays the `<ruby>` and `<rt>` elements out; a `block ruby` is a block). Chrome lays the first out as a
+// legacy flex box, clamping lines by `-webkit-line-clamp`, and a ruby with its annotation above its base: divergences
+// both engines share, recorded. (The JS model makes a ruby display an AUTHOR gives any other element a block, its
+// fallthrough; inline-level is what the spec and Chrome say, and which origin a display came from is no computed value.)
 trait WalkDisplay {
     fn walk_display(&self) -> Display;
 }
 impl WalkDisplay for style::properties::style_structs::Box {
     fn walk_display(&self) -> Display {
         let d = self.clone_display();
-        if matches!(d.inside(), DisplayInside::WebkitBox) { Display::Block } else { d }
+        match d.inside() {
+            DisplayInside::WebkitBox => Display::Block,
+            DisplayInside::Ruby
+            | DisplayInside::RubyBase
+            | DisplayInside::RubyText
+            | DisplayInside::RubyBaseContainer
+            | DisplayInside::RubyTextContainer => {
+                if matches!(d.outside(), DisplayOutside::Block) { Display::Block } else { Display::Inline }
+            }
+            _ => d,
+        }
     }
 }
 
@@ -3008,6 +3021,8 @@ impl<'a> Walk<'a> {
         r.run_start = -1;
         r.scrolls_y = scrolls(style.get_box().overflow_y);
         self.push_record(r);
+        // (…indexed as any element's record: a transformed row or group is an out-of-flow descendant's containing block)
+        self.rec_index.insert(el, at);
         Ok(at)
     }
     // A row and its cells (`emitRow`).
@@ -4390,7 +4405,6 @@ fn display_decline(d: style::values::specified::box_::Display) -> &'static str {
         (_, DisplayInside::Table) => "table",
         (DisplayOutside::TableCaption, _) => "table caption",
         (DisplayOutside::InternalTable, _) => "table part",
-        (_, DisplayInside::Ruby | DisplayInside::RubyBase | DisplayInside::RubyText | DisplayInside::RubyBaseContainer | DisplayInside::RubyTextContainer) => "ruby",
         (DisplayOutside::Inline, _) => "atomic inline",
         _ => "display",
     }
