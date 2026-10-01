@@ -246,9 +246,11 @@ RSpec.describe 'style engine invalidation' do
   end
 
   # A screenshot's recording pass is the Rust walk's too: each text piece comes back with its text and the element it was
-  # written in (`layoutBuild`'s paint rows), where the walk declined it for the JS walk — which read the JS rules.
+  # written in (`layoutBuild`'s paint rows), where the walk declined it for the JS walk — which read the JS rules. And a
+  # control's text is drawn by its computed alignment, indent and spacing, where the document-wide gates asked them.
   it 'records a paint with the Rust walk' do
-    s = visit('<p>Hello <b>bold</b> <span style="vertical-align: super">sup</span></p><div style="display: table-cell">orphan</div>', css: '')
+    s = visit('<p>Hello <b>bold</b> <span style="vertical-align: super">sup</span></p><div style="display: table-cell">orphan</div>' \
+              '<input value="hello"><button>Go</button>', css: '')
     path = File.join(Dir.tmpdir, "csim-rustpaint-#{Process.pid}.png")
     s.driver.save_screenshot(path)
     stats = s.evaluate_script('__csimNativeLayoutStats()')
