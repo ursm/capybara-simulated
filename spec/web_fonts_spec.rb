@@ -349,6 +349,26 @@ RSpec.describe 'web fonts' do
     expect(got).to eq(['Imp,Ins,Outer', true, true])
   end
 
+  # CSS Font Loading §2.2: a CSS-connected face's attributes are its rule's descriptors — rewritten, the rule is read
+  # again by the same FontFace, whether the sheet's text changed or its CSSOM did.
+  it 'reflects a rule\'s rewritten descriptors on its FontFace' do
+    s = session('/held.html')
+    got = s.evaluate_script(<<~JS)
+      (() => {
+        const v = () => Array.from(document.fonts).find((f) => f.family === 'V');
+        const desc = () => { const f = v(); return [f.weight, f.style, f.stretch].join(':'); };
+        const style = document.head.appendChild(document.createElement('style'));
+        style.textContent = '@font-face { font-family: V; src: url(/ahem.ttf); font-weight: 400 }';
+        const before = [desc(), v()];
+        style.textContent = '@font-face { font-family: V; src: url(/ahem.ttf); font-weight: 700; font-style: italic; font-stretch: 75% }';
+        const rewritten = desc();
+        style.sheet.cssRules[0].style.fontWeight = '300';
+        return [before[0], rewritten, desc(), v() === before[1]];
+      })()
+    JS
+    expect(got).to eq(['400:normal:normal', '700:italic:75%', '300:italic:75%', true])
+  end
+
   # An `@import`'s conditions hold of the sheet it imports, faces and rules alike: `layer print` is a media query after
   # a layer, `supports()` a condition (a bare declaration included).
   it 'imports a sheet only where its media query and supports() condition hold' do
