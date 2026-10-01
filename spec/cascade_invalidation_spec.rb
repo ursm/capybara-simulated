@@ -1365,11 +1365,10 @@ RSpec.describe 'cascade invalidation' do
     expect(moved).to be(false)
   end
 
-  # ── the class-TOKEN layout gate ──────────────────────────────────────────────────────────────
-  # A class write used to mark the whole subtree layout-dirty unconditionally. Now only a flipped
-  # token that some box-moving rule mentions does; a paint-utility flip or a same-set rewrite
-  # keeps every descendant's box memo. `__csimSubtreeMarks` is the observable for the "kept"
-  # side — geometry cannot distinguish a surviving memo from an equal recompute.
+  # ── class writes ────────────────────────────────────────────────────────────────────────────
+  # A class write marks the writer's subtree, and the style engine's restyle marks whatever else the
+  # flipped tokens reach. `__csimSubtreeMarks` is the observable for what is kept — geometry cannot
+  # distinguish a surviving memo from an equal recompute.
 
   it 'relays out a descendant when a container gains a class a descendant rule reads' do
     css = '.panel { height: 20px } .open .panel { height: 120px }'
@@ -1637,10 +1636,9 @@ RSpec.describe 'cascade invalidation' do
     expect(got[1]).to be > got[0]
   end
 
-  # ── scoped dynamic-state dirtying ────────────────────────────────────────────────────────────
-  # An ARMED dynamic layout rule used to put the style-state generation into the layout epoch:
-  # every focus/hover/checked flip killed every box memo on the page. Now the flip dirties
-  # exactly the armed rules' subject matches (at ensureLayout entry), and the epoch stays still.
+  # ── dynamic-state flips ─────────────────────────────────────────────────────────────────────
+  # A focus / hover / checked flip must not move the layout epoch — that killed every box memo on
+  # the page — and the boxes it restyles are marked by the restyle (layout.js `markRestyles`).
 
   it 'keeps the epoch still on an ARMED page: a state flip dirties only the subjects' do
     body = '<div class="dd" tabindex="0"><div class="dd-content">content</div></div>' \
