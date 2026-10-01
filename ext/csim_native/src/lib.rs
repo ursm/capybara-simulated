@@ -21,6 +21,7 @@ mod element_state;
 mod font;
 // HTML's presentational hints: the declarations an element's attributes add to the cascade.
 mod hints;
+mod html_parse;
 // Native layout (reader-flip endgame), stage L1 = block flow. Driven by the layoutPass / boxOf ops.
 mod layout;
 mod selector;

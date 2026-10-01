@@ -26,9 +26,6 @@ importers:
       culori:
         specifier: ^4.0.2
         version: 4.0.2
-      parse5:
-        specifier: ^8.0.0
-        version: 8.0.1
       urlpattern-polyfill:
         specifier: ^10.1.0
         version: 10.1.0
@@ -308,9 +305,6 @@ packages:
     resolution: {integrity: sha512-GX0gsdbGVCgnRgbeGaubfjpBXyYRWOOCVeYh08bSQvDZqxz5ndXs1OTfAt/h36G1xvI94YIspsI0sVFqAV9+RQ==}
     engines: {node: '>=20.19.0'}
 
-  parse5@8.0.1:
-    resolution: {integrity: sha512-z1e/HMG90obSGeidlli3hj7cbocou0/wa5HacvI3ASx34PecNjNQeaHNo5WIZpWofN9kgkqV1q5YvXe3F0FoPw==}
-
   punycode@2.3.1:
     resolution: {integrity: sha512-vYt7UD1U9Wg6138shLtLOvdAu+8DsC/ilFtEVHcH+wydcSpNE20AfSOduf6MkRFahL5FY7X1oU7nKVZFtfq8Fg==}
     engines: {node: '>=6'}
@@ -531,10 +525,6 @@ snapshots:
   nth-check@3.0.1:
     dependencies:
       boolbase: 2.0.0
-
-  parse5@8.0.1:
-    dependencies:
-      entities: 8.0.0
 
   punycode@2.3.1: {}
 

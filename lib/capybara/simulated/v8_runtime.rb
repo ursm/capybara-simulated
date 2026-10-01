@@ -142,7 +142,7 @@ module Capybara
           if t['parsePages'].to_i.positive?
             bringup   = t['parseNs'].to_f / 1e6
             construct = t['constructNs'].to_f / 1e6
-            # bring-up = parse5 algo + node construction + connect/upgrade + INLINE APP SCRIPTS + cascade.
+            # bring-up = the parse + node construction + connect/upgrade + INLINE APP SCRIPTS + cascade.
             # Only the node-construction subset is what a native store reclaims; scripts/cascade are not.
             warn format('[native-parse] page bring-up %.1f ms over %d page(s); node construction %.1f ms in %d nodes = %.1f%% of bring-up (the store-reclaimable part)',
                         bringup, t['parsePages'].to_i, construct, t['constructNodes'].to_i, bringup.positive? ? construct / bringup * 100 : 0.0)

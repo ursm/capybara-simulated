@@ -73,24 +73,6 @@ const mimeType = { MIMEType };
 // TransformStream + our existing TextDecoder/TextEncoder).
 import * as streams from 'web-streams-polyfill';
 
-// parse5: spec-compliant HTML parser (npm, MIT). We drive its `Parser` directly
-// (not the `parse5-parser-stream` Writable wrapper — that's just Node-stream
-// plumbing): `new Parser({treeAdapter, scriptingEnabled})` plus
-// `parser.tokenizer.write/pause/resume/insertHtmlAtCurrentPos` and a
-// `parser.scriptHandler` give incremental parsing with script-blocking and
-// document.write — the streaming behavior our hand-rolled parser lacks. A custom
-// tree adapter (js/src/parse5-adapter.js) maps parse5's node ops onto our live
-// DOM nodes. Pure JS, no runtime deps; safe in the V8 snapshot build.
-//
-// Import ONLY the `Parser` class, NOT the `parse5` barrel: re-exporting the
-// whole namespace (accessed dynamically as `__csimVendor.parse5.x`) would defeat
-// tree-shaking and also pull in parse5's serializer. The named `Parser` import
-// lets esbuild drop the serializer. (The default tree adapter is NOT dropped —
-// `Parser`'s constructor default-initialises `options.treeAdapter` to it — but
-// it's small; our custom adapter is what actually drives the parse.)
-import { Parser as Parse5Parser } from 'parse5';
-const parse5 = { Parser: Parse5Parser };
-
 // culori: CSS Color 4 parser + converters (npm, MIT). Backs `<input type=color>`
 // value sanitization and the canvas's colours. Imported via the TREE-SHAKEABLE
 // `culori/fn` entry (the barrel registers every colour mode + formatter); here we
@@ -165,4 +147,4 @@ function cssColorRaster(str) {
 }
 const color = { toHex: cssColorToHex, srgb: cssColorSrgb, raster: cssColorRaster };
 
-export { cssSelect, cssWhat, xpathway, cssTree, urlEngine, mimeType, streams, parse5, color, URLPattern };
+export { cssSelect, cssWhat, xpathway, cssTree, urlEngine, mimeType, streams, color, URLPattern };

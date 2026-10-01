@@ -7,8 +7,7 @@ require_relative 'support/session_teardown'
 # insertion modes were removed, so a `<select>`'s content is parsed with the
 # in-body rules. Flow content (`<div>`, `<button>`, …) and `<textarea>` /
 # `<keygen>` are KEPT inside the select; only `<input>` and a nested `<select>`
-# still break out. We emulate this over parse5@8 (parse5-adapter.js
-# RelaxedSelectParser); each expectation below mirrors Google Chrome 149's
+# still break out. html5ever implements it; each expectation below mirrors Google Chrome 149's
 # observable parse. The DOM-side select machinery already collects options via
 # `querySelectorAll('option')`, so options nested under wrappers still work.
 RSpec.describe 'customizable-select content model' do
