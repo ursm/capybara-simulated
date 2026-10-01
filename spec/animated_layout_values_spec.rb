@@ -59,6 +59,7 @@ RSpec.describe 'a value an animation declares reaches layout' do
         [{ transform: 'translateX(0)' }, { transform: 'translateX(200px)' }],
         { duration: 10000, fill: 'forwards' }
       );
+      a.pause();
       a.currentTime = 5000;
     JS
     expect(computed(s, 'transform')).to eq('matrix(1, 0, 0, 1, 100, 0)')
@@ -84,6 +85,7 @@ RSpec.describe 'a value an animation declares reaches layout' do
         [{ transform: 'translateX(0)' }, { transform: 'translateX(200px)' }],
         { duration: 10000, fill: 'forwards' }
       );
+      globalThis.__a.pause();
       globalThis.__a.currentTime = 5000;
     JS
     expect(rect(s)).to eq([100, 0, 100, 50])
@@ -124,13 +126,15 @@ RSpec.describe 'a value an animation declares reaches layout' do
   end
 
   # Every mutation of an effect is a style change for the element it targets — and for the one it
-  # STOPS targeting. Each figure below is Chrome-measured on the same markup.
+  # STOPS targeting. Each figure below is Chrome-measured on the same markup. (The animations here are
+  # PAUSED where they are measured: time passes for a running one, as in a browser.)
   def midpoint_animation(session, id, to)
     session.execute_script(<<~JS)
       globalThis.__a = document.getElementById(#{id.to_json}).animate(
         [{ transform: 'translateX(0)' }, { transform: 'translateX(#{to})' }],
         { easing: 'cubic-bezier(0,1,1,0)', duration: 1000, delay: -500, fill: 'both' }
       );
+      globalThis.__a.pause();
     JS
   end
 
@@ -185,6 +189,7 @@ RSpec.describe 'a value an animation declares reaches layout' do
       globalThis.__a = document.getElementById('t').animate(
         [{ opacity: '1' }, { opacity: '0' }], { duration: 10000, fill: 'forwards' }
       );
+      globalThis.__a.pause();
       globalThis.__a.currentTime = 5000;
     JS
     expect(rect(s)).to eq([0, 0, 100, 50])

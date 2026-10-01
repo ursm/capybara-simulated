@@ -23,10 +23,10 @@ RSpec.describe 'interpolating a transform list' do
         </style></head><body><div id=t></div><script>
           document.getElementById('t').animate(
             { transform: [#{from.to_json}, #{to.to_json}] },
-            // The easing is flat at its own midpoint, so the value under test does not depend on
-            // where the clock happens to be — the shape WPT's own interpolation reftests use.
+            // The easing is flat at its own midpoint — the shape WPT's own interpolation reftests use —
+            // and the animation is held there: it runs once the page has loaded, as in a browser.
             { easing: 'cubic-bezier(0,1,1,0)', duration: 1000, delay: -500, fill: 'both' }
-          );
+          ).pause();
         </script></body></html>
       HTML
     })
@@ -86,7 +86,7 @@ RSpec.describe 'interpolating a transform list' do
           document.getElementById('t').animate(
             { transform: [#{from.to_json}, #{to.to_json}] },
             { easing: 'cubic-bezier(0,1,1,0)', duration: 1000, delay: -500, fill: 'both' }
-          );
+          ).pause();
         </script></body></html>
       HTML
     })

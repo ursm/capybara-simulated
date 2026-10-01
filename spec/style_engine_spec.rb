@@ -727,6 +727,24 @@ RSpec.describe 'style engine invalidation' do
     expect(JSON.parse(s.title)).to eq(%w[cancel:y transitioncancel:y cancel:x animationcancel:x])
   end
 
+  # Time passes for an animation though nothing else on the page waits, as in a browser: a transition a click starts on
+  # a page with no timer or animation frame pending starts, settles its `ready`, and ends — where the driver stopped
+  # stepping the moment the page was idle, so it never started and a page waiting on `transitionend` waited forever.
+  it 'runs an animation to its end on a page with nothing else pending' do
+    s = visit(<<~HTML, css: '#d { width: 10px; transition: width 300ms linear } #d.on { width: 50px }')
+      <div id="d"></div><button id="go" onclick="
+        const d = document.getElementById('d');
+        d.classList.add('on');
+        d.getAnimations()[0].ready.then(() => document.body.dataset.ready = '1');
+        d.ontransitionend = () => document.body.insertAdjacentHTML('beforeend', '<p id=done>done</p>');
+      ">go</button>
+    HTML
+    s.click_button('go')
+    expect(s).to have_css('#done', wait: 2)
+    expect(s.evaluate_script('document.body.dataset.ready')).to eq('1')
+    expect(s.evaluate_script("getComputedStyle(document.getElementById('d')).width")).to eq('50px')
+  end
+
   # `:dir()` is the element's HTML DIRECTIONALITY, a state the engine matches like any other — a `dir=auto` scope's
   # from the first strong character of its text — and HTML's UA sheet sets `direction` from it (`[dir]:dir(rtl)`). So
   # a text edit that flips the scope restyles what matches, and what inherits from it (Chrome: ltr, then rtl).

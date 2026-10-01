@@ -6089,9 +6089,6 @@ web-animations/timing-model/animations/setting-the-timeline-of-an-animation.html
   still running
 - After transitioning from a null timeline on an animation with a sufficiently ancient
   start time it is finished
-web-animations/timing-model/animations/start-time-compat.html:
-- Checking the start time of animations started at various times between two page
-  rendering updates
 web-animations/timing-model/animations/sync-start-times.html:
 - "== web-animations/timing-model/animations/sync-start-times-ref.html"
 web-animations/timing-model/timelines/sibling-iframe-timeline.html:

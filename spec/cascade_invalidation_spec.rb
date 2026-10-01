@@ -531,9 +531,9 @@ RSpec.describe 'cascade invalidation' do
   end
 
   it 'finds a @keyframes declared only inside a shadow tree' do
-    # …read at its FIRST frame, so the assertion needs no clock: the animation's own `from` is 25px
+    # …held at its FIRST frame, so the assertion needs no clock: the animation's own `from` is 25px
     # where the element would otherwise be at the initial 0.
-    css = '@keyframes slide { from { margin-left: 25px } to { margin-left: 40px } } .t { animation: slide 10s linear both }'
+    css = '@keyframes slide { from { margin-left: 25px } to { margin-left: 40px } } .t { animation: slide 10s linear both paused }'
     s = simulated_session(shadow_page(css, '<p class="t" id="t">x</p>'))
     s.visit '/'
     margin = s.evaluate_script("getComputedStyle(document.getElementById('host').shadowRoot.getElementById('t')).marginLeft")

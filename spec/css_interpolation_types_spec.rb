@@ -355,6 +355,7 @@ RSpec.describe 'CSS interpolation types' do
   # delay is how these seek: a `CSSAnimation`'s `currentTime` does not drive the animation it
   # mirrors yet, which is the gap that keeps `css/css-animations/animation-composition.html`
   # listed.)
+  # (Each held, `paused`, at the delay it seeks to: time passes for a running animation, as in a browser.)
   describe 'animation-composition' do
     def composed(css, prop, delay)
       s = page(%(<div id="a" style="animation-delay: #{delay}"></div>), css)
@@ -364,7 +365,7 @@ RSpec.describe 'CSS interpolation types' do
     it 'composites a CSS animation onto the underlying value' do
       css = <<~CSS
         @keyframes grow { from { filter: blur(10px) } to { filter: blur(20px) } }
-        div { filter: blur(5px); animation: grow 1s linear both; animation-composition: add }
+        div { filter: blur(5px); animation: grow 1s linear both paused; animation-composition: add }
       CSS
       expect(composed(css, 'filter', '0s')).to eq('blur(5px) blur(10px)')
       expect(composed(css, 'filter', '-500ms')).to eq('blur(5px) blur(15px)')
@@ -374,7 +375,7 @@ RSpec.describe 'CSS interpolation types' do
     it 'accumulates a CSS animation onto the underlying value' do
       css = <<~CSS
         @keyframes grow { from { filter: blur(10px) } to { filter: blur(20px) } }
-        div { filter: blur(5px); animation: grow 1s linear both; animation-composition: accumulate }
+        div { filter: blur(5px); animation: grow 1s linear both paused; animation-composition: accumulate }
       CSS
       expect(composed(css, 'filter', '-500ms')).to eq('blur(20px)')
     end
@@ -383,7 +384,7 @@ RSpec.describe 'CSS interpolation types' do
     it 'takes the operation a keyframe names for itself' do
       css = <<~CSS
         @keyframes grow { from { animation-composition: add; opacity: 0 } to { opacity: 0.4 } }
-        div { opacity: 0.5; animation: grow 1s linear both }
+        div { opacity: 0.5; animation: grow 1s linear both paused }
       CSS
       expect(composed(css, 'opacity', '-500ms')).to eq('0.45')
     end
@@ -449,7 +450,7 @@ RSpec.describe 'CSS interpolation types' do
     it 'drops an animation-composition list with an unknown keyword' do
       s = page('<div id="a"></div>', <<~CSS)
         @keyframes k { from { opacity: 0 } to { opacity: 0.4 } }
-        div { opacity: 0.5; animation: k 1s linear both; animation-delay: -500ms;
+        div { opacity: 0.5; animation: k 1s linear both paused; animation-delay: -500ms;
               animation-composition: add, bogus }
       CSS
       expect(s.evaluate_script("getComputedStyle(document.getElementById('a')).opacity")).to eq('0.2')

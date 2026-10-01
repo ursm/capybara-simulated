@@ -158,9 +158,11 @@ RSpec.describe 'CSS animation and transition events' do
 
   # An animation the cascade stops naming part way through is CANCELLED, not ended — and its
   # `elapsedTime` is how long it had been running, not zero.
+  # (The class goes on once the page is watched: an animation the page loads with runs from the load, as in a browser.)
   it 'cancels an animation the cascade stops naming' do
-    s = page('<div id="a" class="go"></div>')
+    s = page('<div id="a"></div>')
     watch(s)
+    s.execute_script("document.getElementById('a').className = 'go'")
     s.evaluate_script('1')
     s.execute_script("document.getElementById('a').className = ''")
     cancel = drain(s, 3).grep(/animationcancel/).first
@@ -227,8 +229,9 @@ RSpec.describe 'CSS animation and transition events' do
   # An animation the cascade REPLACES owes its cancel before the replacement's start — the order a
   # page relies on to tell "this one died" from "that one began".
   it 'cancels the animation it replaces before starting the new one' do
-    s = page('<div id="a" class="go"></div>')
+    s = page('<div id="a"></div>')
     watch(s)
+    s.execute_script("document.getElementById('a').className = 'go'")
     s.evaluate_script('1')
     s.execute_script(<<~JS)
       const sheet = document.styleSheets[0];

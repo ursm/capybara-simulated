@@ -10,7 +10,8 @@ require_relative 'support/session_teardown'
 #
 # Both batteries seek with a NEGATIVE DELAY (`duration: 100s; delay: -50s`), which is how the WPT
 # interpolation harness holds an animation at a fixed progress; every figure is Chrome
-# 151-measured on this machine.
+# 151-measured on this machine. Every CSS animation here is PAUSED there: time passes for a running
+# one, as in a browser, so the value would move between the page loading and the read.
 RSpec.describe 'CSS animations and transitions' do
   def page(markup)
     html = %(<!DOCTYPE html><html><head><meta charset="utf-8"><style>
@@ -24,6 +25,7 @@ RSpec.describe 'CSS animations and transitions' do
                @keyframes kt   { from { flex-grow: 0; animation-timing-function: steps(2, start) } to { flex-grow: 4 } }
                .anim { animation-duration: 100s; animation-delay: -50s; animation-timing-function: linear }
                .quarter { animation-duration: 100s; animation-delay: -25s }
+               * { animation-play-state: paused !important }
              </style></head><body style="margin:0;font:16px Arial">#{markup}</body></html>)
     s = simulated_session(->(_env) { [200, {'content-type' => 'text/html'}, [html]] })
     s.visit '/'

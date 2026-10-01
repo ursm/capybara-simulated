@@ -8,6 +8,7 @@ require_relative 'support/session_teardown'
 # `Animation._invalidate` exists for — and it is only owed when the memo actually holds something
 # for that element, which on the shape that matters (a list animating each row in as it is added)
 # it never does.
+# Each animation is PAUSED at the progress it is measured at: time passes for a running one, as in a browser.
 RSpec.describe 'starting an animation invalidates what it has to' do
   def page_with(body, css: '')
     session = simulated_session(->(_env) {
@@ -39,7 +40,7 @@ RSpec.describe 'starting an animation invalidates what it has to' do
       document.getElementById('t').animate(
         [{ transform: 'translateX(0)' }, { transform: 'translateX(200px)' }],
         { easing: 'cubic-bezier(0,1,1,0)', duration: 1000, delay: -500, fill: 'both' }
-      );
+      ).pause();
     JS
     expect(s.evaluate_script("getComputedStyle(document.getElementById('t')).transform"))
       .to eq('matrix(1, 0, 0, 1, 100, 0)')
@@ -53,7 +54,7 @@ RSpec.describe 'starting an animation invalidates what it has to' do
       document.getElementById('t').animate(
         [{ transform: 'translateX(0)' }, { transform: 'translateX(200px)' }],
         { easing: 'cubic-bezier(0,1,1,0)', duration: 1000, delay: -500, fill: 'both' }
-      );
+      ).pause();
     JS
     expect(x_of(s, 't')).to eq(100)
   end
@@ -69,7 +70,7 @@ RSpec.describe 'starting an animation invalidates what it has to' do
       d.animate(
         [{ transform: 'translateX(0)' }, { transform: 'translateX(200px)' }],
         { easing: 'cubic-bezier(0,1,1,0)', duration: 1000, delay: -500, fill: 'both' }
-      );
+      ).pause();
     JS
     expect(x_of(s, 't')).to eq(100)
   end
@@ -85,7 +86,7 @@ RSpec.describe 'starting an animation invalidates what it has to' do
         document.getElementById(id).animate(
           [{ transform: 'translateX(0)' }, { transform: 'translateX(' + (id === 't' ? 200 : 400) + 'px)' }],
           { easing: 'cubic-bezier(0,1,1,0)', duration: 1000, delay: -500, fill: 'both' }
-        );
+        ).pause();
       }
     JS
     expect(x_of(s, 't')).to eq(100)
@@ -107,6 +108,7 @@ RSpec.describe 'starting an animation invalidates what it has to' do
         [{ transform: 'translateX(0)' }, { transform: 'translateX(#{to})' }],
         { easing: 'cubic-bezier(0,1,1,0)', duration: 1000, delay: -500, fill: 'both' }
       );
+      globalThis.__a.pause();
     JS
   end
 
@@ -137,7 +139,7 @@ RSpec.describe 'starting an animation invalidates what it has to' do
     midpoint(s, 't', '400px')
     s.execute_script('globalThis.__a.cancel()')
     expect(transform_of(s, 't')).to eq('none')         # cacheable again — and cached
-    s.execute_script('globalThis.__a.play()')
+    s.execute_script('globalThis.__a.play(); globalThis.__a.pause()')
     expect(transform_of(s, 't')).to eq('matrix(1, 0, 0, 1, 200, 0)')
     expect(x_of(s, 't')).to eq(200)
   end
@@ -152,9 +154,11 @@ RSpec.describe 'starting an animation invalidates what it has to' do
       const opts = { easing: 'cubic-bezier(0,1,1,0)', duration: 1000, delay: -500, fill: 'both' };
       globalThis.__first  = d.animate([{ transform: 'translateX(0)' },   { transform: 'translateX(200px)' }], opts);
       globalThis.__second = d.animate([{ transform: 'translateX(0)' },   { transform: 'translateX(400px)' }], opts);
+      globalThis.__first.pause();
+      globalThis.__second.pause();
     JS
     expect(x_of(s, 't')).to eq(200)                    # the second one wins
-    s.execute_script('globalThis.__first.cancel(); globalThis.__first.play()')
+    s.execute_script('globalThis.__first.cancel(); globalThis.__first.play(); globalThis.__first.pause()')
     expect(x_of(s, 't')).to eq(200)                    # …still, though it re-entered the live set
   end
 end
