@@ -2552,11 +2552,11 @@ module Capybara
         # long-poll) keeps the settle loop alive even when settle_gen
         # is otherwise idle.
         return true if worker_pending? || event_source_pending? || hijack_fetch_pending? || window_message_pending? || websocket_pending?
-        # …and a worker whose own timers are still to fire: it runs on its own thread, on its own clock, and what it posts
-        # when they do is what a wait is for — `setTimeout(() => postMessage('w2'), 300)` arrived after the wait had
-        # given up, because nothing on THIS page was pending.
-        return true if worker_timers_pending?
-        if @timers_active
+        # …and a worker whose own timers are still to fire counts as the page's own do: it runs on its own thread and
+        # clock, and what it posts when they fire is what a wait is for — `setTimeout(() => postMessage('w2'), 300)`
+        # arrived after the wait had given up, because nothing on THIS page was pending. Under the same idle gate, so a
+        # worker's forever `setInterval` (a heartbeat) cannot make every negative matcher wait out its whole timeout.
+        if @timers_active || worker_timers_pending?
           gen = @runtime.settle_gen
           if @last_polled_gen.nil? || gen != @last_polled_gen
             @last_polled_gen = gen
@@ -12267,7 +12267,9 @@ module Capybara
       # serves every host in-process). Gates cross-origin eager frame building: in
       # such a context a cross-origin iframe's content IS served locally, so it
       # eager-builds; an ordinary app leaves cross-origin frames lazy (= baseline),
-      # so an external embed isn't eager-fetched. A simple flag, NOT per-URL —
+      # so an external embed isn't eager-fetched — and so nothing it does at load happens until a test enters it (a
+      # `parent.postMessage` from its load-time script is never posted; a test waiting on one enters the frame, or
+      # serves the host locally). A simple flag, NOT per-URL —
       # url_is_local? compares only host:port (ignoring scheme) and treats a missing
       # ref origin as local, which would eager-build frames the baseline left lazy.
       def all_hosts_local? = @all_hosts_local
