@@ -236,7 +236,7 @@ RSpec.describe 'CSS math functions' do
     # Both now report the USED margin the box ended up with, which for a value layout can't make a
     # length of is `0px` — where Chrome clamps the infinity to `3.35544e+07px` and agrees on the
     # `0px` for the unknown unit. The remaining divergence is that one clamp, which css-values-4 leaves
-    # to the implementation's range: the style engine (CSIM_STYLO) holds lengths in f32 and clamps to
+    # to the implementation's range: the style engine holds lengths in f32 and clamps to
     # the largest of those, and the box is laid out with that.
     expect(computed('margin-left: calc(10px / 0)', %w[marginLeft], extra_css: 'div { margin-left: 7px }').first)
       .to match(/\A(0|3\.40282\d*e\+38)px\z/)

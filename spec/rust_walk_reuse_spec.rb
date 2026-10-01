@@ -3,7 +3,7 @@
 require 'capybara/simulated'
 require_relative 'support/session_teardown'
 
-# The Rust walk's pass (CSIM_STYLO) puts back the layout of every subtree it built exactly as the last pass did
+# The Rust walk's pass puts back the layout of every subtree it built exactly as the last pass did
 # (`walk_reuse.rs`): each element's subtree is a chunk of the measure cache, keeping its id for as long as its records,
 # runs, grid values and inline entries are the same, positions made its own. A geometry read cannot tell a put-back
 # layout from a fresh one, so these count the put-backs — and hold the geometry against a page laid out afresh.

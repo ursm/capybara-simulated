@@ -763,6 +763,41 @@ RSpec.describe 'style engine invalidation' do
     expect(s).to have_css('#out', text: 'done', wait: 2)
   end
 
+  # The JS layout (the oracle, and what lays out where the native walk declines) asks the engine whether an animation
+  # declares a property before it reads one no sheet declares — a hook web-animations.js registers with cascade.js. One
+  # registered as the bundle loaded was wiped once the bundle put cascade.js after it: `min-width` was never read, and
+  # the box took the whole viewport (Chrome: the animated 300px, `min-width` over `max-width`).
+  it 'lays out an animation of a property no sheet declares in the JS layout too' do
+    s = visit('<div id="a" style="height: 10px"></div>', css: '')
+    s.execute_script('globalThis.__csimNativeLayout = false')
+    width = s.evaluate_script(<<~JS)
+      (() => {
+        const a = document.getElementById('a');
+        a.animate({minWidth: ['300px', '300px'], maxWidth: ['50px', '50px']}, {duration: 100000, fill: 'forwards'});
+        return a.getBoundingClientRect().width;
+      })()
+    JS
+    expect(width).to eq(300)
+  end
+
+  # Interface objects are globals WebIDL makes writable, configurable and NOT enumerable — `for (p in window)` lists
+  # none of them. The animation ones are installed with the engine, after the boot pass that fixes the others up.
+  it 'exposes the animation interfaces as no enumerable globals, in the page and in a frame' do
+    s = visit('<iframe srcdoc="x"></iframe>', css: '')
+    enumerable = s.evaluate_script(<<~JS)
+      (() => {
+        const names = ['Animation', 'AnimationEffect', 'KeyframeEffect', 'AnimationTimeline', 'DocumentTimeline',
+                       'CSSAnimation', 'CSSTransition'];
+        const listed = (w) => names.filter((n) => {
+          const d = Object.getOwnPropertyDescriptor(w, n);
+          return !d || d.enumerable || !d.writable || !d.configurable;
+        });
+        return [listed(window), listed(document.querySelector('iframe').contentWindow)];
+      })()
+    JS
+    expect(enumerable).to eq([[], []])
+  end
+
   it 'starts an animation a script started only by a class, in the page and in a frame' do
     s = visit(<<~HTML, css: '#d { width: 10px; transition: width 300ms linear } #d.on { width: 50px }')
       <div id="d"></div><iframe id="f" srcdoc="<style>.b { opacity: 1; transition: opacity 300ms } .b.on { opacity: 0.2 }</style><div class=b id=x>x</div>"></iframe>

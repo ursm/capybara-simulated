@@ -149,32 +149,6 @@ for (const name of longhands) {
   if (t) valueTypes[name] = t;
 }
 
-// The numeric LOWER BOUND each property's grammar imposes, gathered from the ranges
-// `classifyValueType` read out of mdn's syntax and topped up with the ones mdn doesn't record.
-// This is separate from the value-type map above because it answers a different question: that one
-// decides whether a DECLARATION is valid, this one clamps an INTERPOLATION that extrapolates past
-// the property's range (an animation seeking below a `flex-grow` of 0 reports 0, not a negative
-// number). A property mdn leaves unclassified — `flex-basis`, whose grammar it writes as a
-// reference to `<'width'>` — still has a bound its own spec is explicit about.
-const MIN_FIXES = {
-  'flex-grow':   0,     // css-flexbox §7.1.1: <number [0,∞]>
-  'flex-shrink': 0,     // css-flexbox §7.1.2: <number [0,∞]>
-  'flex-basis':  0,     // css-flexbox §7.1.3: <'width'>, i.e. <length-percentage [0,∞]>
-  // …and the opacities, which mdn records as `<'opacity'>` / `<opacity-value>` with no range at
-  // all. `opacity` itself is clamped by its own computed-value reader; these three have nobody.
-  'stop-opacity':          0,
-  'fill-opacity':          0,
-  'stroke-opacity':        0,
-  'shape-image-threshold': 0,
-  // …and the two `numberOrLength` properties, whose grammar writes the bound on each branch
-  // (`line-height: normal | <number [0,∞]> | <length-percentage [0,∞]>`) rather than on the value
-  // as a whole, so `classifyValueType` — which classifies the UNION — never sees it. A negative end
-  // is not a value either property takes: an interpolation that reaches one clamps, and one
-  // DECLARED that way is dropped whole (Chrome-measured, `line-height: -1` to `2` reports `2` for
-  // the entire transition).
-  'line-height': 0,
-  'tab-size':    0
-};
 // The longhands whose grammar admits NO NEGATIVE value, so a negative one is a parse error and the
 // whole declaration is dropped — `padding-left: -1px` and `line-height: -1` leave the earlier
 // declaration (or the initial) in place, they do not clamp. This cannot be derived for most of
@@ -190,9 +164,6 @@ const MIN_FIXES = {
 // the census asks `CSS.supports(prop, 'inherit')` first and leaves the other 44 alone (this
 // driver's own initial value for `box-flex` has to survive its own validator). Not one property
 // took a negative in some units and refused it in others.
-//
-// This is deliberately NOT `PROPERTY_MIN`: an opacity's bound is a CLAMP (`opacity: -1` is kept and
-// reports 0), and the two facts must not be confused. A property can be in both.
 const NEGATIVE_INVALID = [
   'animation-duration', 'animation-iteration-count', 'aspect-ratio', 'background-size',
   'block-size', 'border-block-end-width', 'border-block-start-width', 'border-block-width',
@@ -361,31 +332,6 @@ const ZERO_IS_LENGTH = [
   'vertical-align', 'view-timeline-inset', 'width', 'word-spacing', 'x', 'y'
 ];
 
-const propertyMin = {};
-for (const name of longhands) {
-  const t = valueTypes[name];
-  if (t && t.min != null && Number.isFinite(t.min)) propertyMin[name] = t.min;
-}
-for (const [name, min] of Object.entries(MIN_FIXES)) if (longhands.includes(name)) propertyMin[name] = min;
-
-// …and the UPPER bound, which an extrapolating easing runs into just as it runs into the lower one.
-// The four opacities carry no range in mdn — it records `<'opacity'>` / `<opacity-value>` — and
-// `opacity` itself is clamped by its own computed-value reader, which the others do not have
-// (Chrome-measured: `stop-opacity` 0 → 1 under an overshooting easing reports 0 and 1, never
-// -0.2 or 1.2).
-const MAX_FIXES = {
-  'stop-opacity':           1,
-  'fill-opacity':           1,
-  'stroke-opacity':         1,
-  'shape-image-threshold':  1
-};
-const propertyMax = {};
-for (const name of longhands) {
-  const t = valueTypes[name];
-  if (t && t.max != null && Number.isFinite(t.max)) propertyMax[name] = t.max;
-}
-for (const [name, max] of Object.entries(MAX_FIXES)) if (longhands.includes(name)) propertyMax[name] = max;
-
 // Each longhand's INITIAL value and whether it INHERITS — what `getComputedStyle` must report
 // for a property no rule sets. mdn-data records the SPECIFIED initial; a few compute to something
 // else (`color: canvastext` → `rgb(0, 0, 0)`), which style-proxy overrides on top of this map.
@@ -526,23 +472,6 @@ for (const [name, type] of Object.entries(ANIMATION_TYPE_FIXES)) {
   if (longhands.includes(name)) animationTypes[name] = type;
 }
 
-// A property interpolated "by computed value" composes a plain NUMBER with the one underneath it
-// whenever `composite: add` asks for it — but a LENGTH only where the property really is one
-// value rather than a list, and mdn's data does not say which. Measured in Chrome, property by
-// property: `font-size` and `stroke-width` add their lengths, `grid-auto-columns` and
-// `scroll-margin-top` replace (Chrome interpolates neither of those two at all — they are
-// discrete there, so nothing composes onto them). The SVG geometry properties were measured
-// through `x` / `y` / `r` / `rx`; their three siblings follow them.
-const ADDS_DIMENSION = [
-  'baseline-shift', 'border-image-outset', 'border-image-slice', 'border-image-width',
-  'column-height', 'column-width', 'contain-intrinsic-block-size', 'contain-intrinsic-height',
-  'contain-intrinsic-inline-size', 'contain-intrinsic-width', 'cx', 'cy', 'font-size',
-  'font-stretch', 'font-width', 'r', 'rx', 'ry', 'stroke-dashoffset', 'stroke-width',
-  'text-size-adjust', 'text-underline-offset', 'x', 'y'
-].filter((name) => longhands.includes(name));
-const addsDimension = {};
-for (const name of ADDS_DIMENSION) addsDimension[name] = true;
-
 // Every BARE KEYWORD a property's grammar admits, followed through `<'property'>` and `<type>`
 // references — the data a full grammar validator would consult, reduced to the one question the
 // CSSOM actually has to answer cheaply: is this single identifier a value this property takes?
@@ -666,18 +595,6 @@ export const INHERITED_PROPERTIES = new Set(${JSON.stringify(inherited)});
 // tail of per-property rules). A name the interpolation engine doesn't implement interpolates
 // discretely, which is what the spec says an uninterpolable pair does anyway.
 export const ANIMATION_TYPES = bare(${JSON.stringify(animationTypes, null, 0)});
-
-// The "by computed value" properties whose LENGTH or PERCENTAGE composes with the value underneath
-// it under \`composite: add\`, rather than replacing it. A plain number always composes, so only
-// the dimensioned ones need listing.
-export const ADDS_DIMENSION = bare(${JSON.stringify(addsDimension, null, 0)});
-
-// Longhand → the numeric LOWER BOUND its grammar imposes. An interpolation that extrapolates past
-// it clamps: a \`flex-grow\` animation seeking before its start reports 0, not a negative number.
-export const PROPERTY_MIN = bare(${JSON.stringify(propertyMin, null, 0)});
-
-// …and its UPPER bound, for the same reason: an interpolation that extrapolates past it clamps.
-export const PROPERTY_MAX = bare(${JSON.stringify(propertyMax, null, 0)});
 
 // Every bare KEYWORD each property's grammar admits (colour keywords factored out below). Used to
 // reject a single identifier a property doesn't take — \`width: notalength\`, or the \`undefined\` a
