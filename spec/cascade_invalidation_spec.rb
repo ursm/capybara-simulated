@@ -6,8 +6,10 @@ require_relative 'support/session_teardown'
 # at all. Anything that CACHES a cascade result therefore has to be invalidated by every input those
 # selectors read. Most already move `settleGen` (an attribute, the tree, the location) or
 # `cascadeVersion` (a stylesheet); the rest are kept OUT of the cache by the taint bracket (a read
-# that considered a dynamic-pseudo rule is never memoised), and move `styleStateGen` only for the
-# layout-side sweep.
+# that considered a dynamic-pseudo rule is never memoised — or, when every state it read is a
+# TRACKED one, is kept under `styleStateGen`, which each flip of that state moves). What a flip
+# does to the BOXES is marked by the style engine's restyle (layout.js `markRestyles`); the layout
+# epoch moves with the rule set alone.
 #
 # This file exists because ENUMERATING those inputs by hand failed three times. Each round the
 # enumeration got better and still missed, because the axis that matters is not WHICH pseudo-classes
@@ -169,7 +171,7 @@ RSpec.describe 'cascade invalidation' do
     expect([before, s.evaluate_script(read)]).to eq(['rgb(128, 0, 0)', 'rgb(0, 0, 0)'])
   end
 
-  it 'classifies selectors correctly for the taint gate' do
+  it 'classifies selectors correctly for the taint bracket' do
     # Asserted on the CLASSIFIER, not through a colour. The vendor-prefixed case cannot be toggled
     # from a spec, so the colour-based version of this passed against the very regression it was
     # written for — two identical reads of a rule that never matches say nothing about whether it
@@ -275,10 +277,11 @@ RSpec.describe 'cascade invalidation' do
       .to eq([['rtl', '0px', '7px'], ['ltr', '7px', '0px']])
   end
 
-  # …and the same state change has to reach the BOXES, not just the CSSOM. Layout keyed its memos on
-  # the rule-set version, which no state change moves, so an element styled by a dynamic selector
-  # kept the box it was first laid out with — `getBoundingClientRect` served the placeholder-shown
-  # 300px after the field was filled. Chrome 151, same page: 308 then 108 — a text `<input>` is
+  # …and the same state change has to reach the BOXES, not just the CSSOM. Layout keys its memos on
+  # the rule-set version, which no state change moves, so only a mark can take an element's box
+  # from it: with nothing marking it, an element styled by a dynamic selector once kept the box it
+  # was first laid out with — `getBoundingClientRect` served the placeholder-shown 300px after the
+  # field was filled. The restyle marks it now. Chrome 151, same page: 308 then 108 — a text `<input>` is
   # `content-box`, so its UA border and padding sit outside the declared width.
   it 'relays out an element a dynamic selector restyles' do
     app = lambda {|_env|
@@ -313,9 +316,9 @@ RSpec.describe 'cascade invalidation' do
   end
 
   # The other half of the same contract, and the one rule 3 cares about: a dynamic rule that only
-  # PAINTS must not invalidate layout at all. Keyed on the style-state generation unconditionally,
-  # one `setRangeText` on a page with a `:hover { background: … }` rule relaid out the whole
-  # document — 1 ms became 2.9 s for 100 type-and-measure rounds on a 300-row page.
+  # PAINTS must not invalidate layout at all. When layout keyed on the style-state generation
+  # unconditionally, one `setRangeText` on a page with a `:hover { background: … }` rule relaid out
+  # the whole document — 1 ms became 2.9 s for 100 type-and-measure rounds on a 300-row page.
   it 'does not relay out for a dynamic rule that only paints' do
     rows = (1..200).map {|i| "<div class='r'>row #{i}</div>" }.join
     app = lambda {|_env|
@@ -442,13 +445,11 @@ RSpec.describe 'cascade invalidation' do
   # A dynamic rule that can move boxes must not make the layout epoch listen to focus / hover /
   # checked state — the whole document would relay out per state change, and widget CSS shipped
   # site-wide (EasyMDE, flatpickr) would tax the pages that never render the widget. What a flip
-  # reaches is marked by the restyle instead. These specs pin both sides: the epoch must NOT move,
-  # and the rule MUST take effect the moment it can match — including when the widget arrives only
-  # after the first layout.
+  # reaches is marked by the restyle instead. The specs further down pin both sides: the epoch must
+  # NOT move, and the rule MUST take effect the moment it can match — including when the widget
+  # arrives only after the first layout.
 
-  # Methods, not constants, for the same reason as `cases` above: a constant assigned inside a
-  # `describe` block lands at top level and collides across spec files.
-  # …but a value whose only taint is a rule naming a TRACKED state (hover, focus, …) is kept, under the style-state
+  # A value whose only taint is a rule naming a TRACKED state (hover, focus, …) is kept, though, under the style-state
   # generation every flip of that state moves: declining it recomputed every `color` of every link on a page with an
   # `a:hover` rule on every read. A COUNT, since the colour alone cannot tell a kept value from one recomputed equal.
   it 'keeps a value a tracked-state rule was considered for until that state moves' do
@@ -471,14 +472,17 @@ RSpec.describe 'cascade invalidation' do
     expect(got).to eq(['rgb(0, 0, 0)', 0, 'rgb(0, 128, 0)', 0, 'rgb(0, 0, 0)'])
   end
 
-  def gated_css
+  # Methods, not constants, for the same reason as `cases` above: a constant assigned inside a
+  # `describe` block lands at top level and collides across spec files. The default sheet is a
+  # dropdown whose content a focus flip reveals, so a page without a `.dd` is one the rule cannot match.
+  def dropdown_css
     '.dd-content { display: none } .dd:focus-within .dd-content { display: block }'
   end
 
-  def gated_page(body, css: nil)
+  def styled_page(body, css: nil)
     lambda {|_env|
       [200, {'content-type' => 'text/html'},
-       ["<!DOCTYPE html><html><head><style>#{css || gated_css}</style></head><body>#{body}</body></html>"]]
+       ["<!DOCTYPE html><html><head><style>#{css || dropdown_css}</style></head><body>#{body}</body></html>"]]
     }
   end
 
@@ -487,9 +491,9 @@ RSpec.describe 'cascade invalidation' do
   # Several document-wide O(1) gates — "does anything here declare this property / a `@keyframes` / a
   # transition?" — cannot see a shadow tree's sheets, which are in no document index, so they answer
   # YES for the entire page the moment one shadow host exists. That is correct and very expensive: a
-  # 400-row table beside one `<my-widget>` relays out 5.4x slower (51 ms → 280 ms, measured), with
+  # 400-row table beside one `<my-widget>` relaid out 5.4x slower (51 ms → 280 ms, measured), with
   # every light-DOM element paying for a component stylesheet that cannot reach it — see
-  # `shadow_host_gates_fail_open` for the decomposition and why narrowing them is its own increment.
+  # `shadow_host_gates_fail_open` for the decomposition.
   #
   # The gates ask the shadow sheets themselves now — each tree is folded in once, off the PARSED sheet
   # every component with the same stylesheet text shares. Every example here is a way that goes wrong:
@@ -664,7 +668,7 @@ RSpec.describe 'cascade invalidation' do
        "document._hoverElement = document.getElementById('host').shadowRoot.getElementById('t');", 300],
       ['#t { width: 40px } #t:focus { width: 300px }',
        "const el = document.getElementById('host').shadowRoot.getElementById('t'); el.setAttribute('tabindex', '0'); el.focus();", 300],
-      # …and one that only PAINTS moves no box, so it must NOT drag dynamic state into the epoch
+      # …and one that only PAINTS moves no box
       ['#t { width: 40px } #t:hover { background: red }',
        "document._hoverElement = document.getElementById('host').shadowRoot.getElementById('t');", 40]
     ].each do |css, mutation, after|
@@ -680,9 +684,10 @@ RSpec.describe 'cascade invalidation' do
       JS
       expect(got).to eq([40, after]), css
     end
-    # …and the paint-only case needs a barrier of its own: a width that did not move is what a rule
-    # dragging state into the epoch produces TOO (it costs work, it does not change the answer). The
-    # epoch is the observable, so ask it directly.
+    # …and the paint-only case needs a barrier of its own: a width that did not move is what a
+    # whole-page relayout produces TOO (it costs work, it does not change the answer). The layout
+    # epoch moves with the rule set alone, never with a state flip, and it is the observable, so ask
+    # it directly.
     s = simulated_session(shadow_page('#t { width: 40px } #t:hover { background: red }', '<div id="t">x</div>'))
     s.visit '/'
     epochs = s.evaluate_script(<<~JS)
@@ -841,8 +846,10 @@ RSpec.describe 'cascade invalidation' do
   end
 
   it 'relays out for a ::part rule that moves a box on a dynamic state flip' do
-    # The mirror of the case above: a `::part()` rule lives in the DOCUMENT sheet and styles a subject
-    # one tree in, which a document-side list of dynamic subjects never carried.
+    # The mirror of the shadow-tree DYNAMIC rule case further up: a `::part()` rule lives in the
+    # DOCUMENT sheet and styles a subject one tree in. The document-side list of dynamic subjects the
+    # JS cascade once kept never carried it, and the part had to be scanned for separately; the
+    # restyle reaches it like any other subject.
     [['#host::part(p):hover', 't'], ['#host:hover::part(p)', "document.getElementById('host')"]].each do |sel, hover|
       s = simulated_session(lambda {|_env|
         [200, {'content-type' => 'text/html'},
@@ -867,9 +874,9 @@ RSpec.describe 'cascade invalidation' do
   end
 
   # `:defined` flips for each element as IT is upgraded, and a definition upgrades its elements one after another, each
-  # connected callback running before the next upgrade. Moved once per definition, before the upgrades, the first
-  # callback that read layout spent the sweep, and every element upgraded after it kept its undefined box — in both
-  # layouts.
+  # connected callback running before the next upgrade. When the style state moved once per definition, before the
+  # upgrades, the first callback that read layout consumed the flip, and every element upgraded after it kept its
+  # undefined box — in both layouts. Each upgrade is its own flip, and each callback must see its own element defined.
   it 'lays out every element a definition upgrades as defined' do
     s = simulated_session(lambda {|_env|
       [200, {'content-type' => 'text/html'},
@@ -888,10 +895,11 @@ RSpec.describe 'cascade invalidation' do
     expect(got).to eq([[200, 200], [200, 200]])
   end
 
-  # …and a run of upgrades moves it as ONE hint over their elements: a hint apiece ran past the cap of 32, so inserting
-  # 33 or more defined elements swept every dynamic layout rule's subjects over the document — every `.row` a `:hover`
-  # rule names laid out again, on a page with no `:defined` rule at all. A COUNT, not a wall.
-  it 'does not sweep the page for a run of upgraded elements' do
+  # …and a run of upgrades relays out the upgraded elements and what holds them, not the page. It once swept every
+  # dynamic layout rule's subjects over the document — a state hint apiece ran past the hint list's cap of 32 — so
+  # inserting 33 or more defined elements laid every `.row` a `:hover` rule names out again, on a page with no
+  # `:defined` rule at all. A COUNT, not a wall.
+  it 'relays out only the elements a run of upgrades inserts, not every hover-rule subject' do
     rows = (1..200).map { '<div class="row"><span>r</span><span class="actions">edit</span></div>' }.join
     s = simulated_session(lambda {|_env|
       [200, {'content-type' => 'text/html'},
@@ -939,12 +947,12 @@ RSpec.describe 'cascade invalidation' do
     expect(got).to eq(['10px', '77px', '300px', 300])
   end
 
-  # …and the STRUCTURAL-CONTEXT gate, which decides whether a memoised computed value survives a
-  # mutation. It used to be switched off entirely by the presence of a host — the single biggest part
-  # of that 5.4x — and now indexes the shadow sheets too, so a mutation a shadow selector reads has to
-  # still invalidate. `:host-context()` (an ancestor OF the host) and `::part()` (a rule in the OUTER
-  # sheet whose subject is inside the tree) are the two forms the index cannot model; both keep it
-  # conservative, which is what these two pin.
+  # …and the declared-value memo, which keys on each element's STRUCTURAL-CONTEXT epoch
+  # (`ctxEpochOf`): a mutation a shadow selector reads has to move the epoch of the element the
+  # selector styles. A gate once narrowed which writes moved those epochs, and a host switched it
+  # off entirely — the single biggest part of that 5.4x; every write moves them conservatively now.
+  # These two pin the shapes that narrowing had to get right: a shadow rule's own input, and a
+  # `::part()` rule in the OUTER sheet whose subject is inside the tree.
   it 'invalidates a memoised value when a shadow selector\'s own input changes' do
     s = simulated_session(shadow_page('.t { color: rgb(255, 0, 0) } .t.on { color: rgb(0, 128, 0) }', '<p class="t" id="t">x</p>'))
     s.visit '/'
@@ -960,11 +968,10 @@ RSpec.describe 'cascade invalidation' do
   end
 
   it 'invalidates a ::part rule whose match depends on the outer tree' do
-    # A `::part()` rule lives in the OUTER sheet and styles an element INSIDE the tree, so the
-    # structural-context index — which keys on the element a rule is written against — cannot answer
-    # for it, and the gate stays conservative whenever the document has one. Without that, a memoised
-    # part value survived a class change that should have repainted it (two css-shadow/part WPT
-    # invalidation files caught it).
+    # A `::part()` rule lives in the OUTER sheet and styles an element INSIDE the tree, so the class
+    # that decides it sits on an ancestor in another tree: the part's context epoch has to move with
+    # it, through the chain that crosses the shadow boundary. Once a memoised part value survived a
+    # class change that should have repainted it (two css-shadow/part WPT invalidation files caught it).
     page = shadow_page('', '<p part="label" id="t">x</p>',
                        doc_css: '#host::part(label) { color: rgb(255, 0, 0) } .on #host::part(label) { color: rgb(0, 128, 0) }')
     s = simulated_session(page)
@@ -985,7 +992,7 @@ RSpec.describe 'cascade invalidation' do
     # moving the memo's key on every state write on top of it only cold-started every element's
     # memo per keystroke (a third of all memo entries on a Discourse subset).
     body = '<input id="i"><input id="c" type="checkbox"><p id="after">after</p>'
-    s = simulated_session(gated_page(body))
+    s = simulated_session(styled_page(body))
     s.visit '/'
     got = s.evaluate_script(<<~JS)
       (() => {
@@ -1006,8 +1013,8 @@ RSpec.describe 'cascade invalidation' do
     expect(got).to eq([true, true, 'rgb(0, 128, 0)'])
   end
 
-  it 'keeps dynamic state out of the layout epoch while the rule cannot match' do
-    s = simulated_session(gated_page('<input id="i"><p id="after">after</p>'))
+  it 'keeps the layout epoch still on a focus flip the dynamic rule cannot match' do
+    s = simulated_session(styled_page('<input id="i"><p id="after">after</p>'))
     s.visit '/'
     moved = s.evaluate_script(<<~JS)
       (() => {
@@ -1022,7 +1029,7 @@ RSpec.describe 'cascade invalidation' do
 
   it 'relays out on focus when the dynamic rule CAN match' do
     body = '<div class="dd" tabindex="0"><div class="dd-content">content</div></div><p id="after">after</p>'
-    s = simulated_session(gated_page(body))
+    s = simulated_session(styled_page(body))
     s.visit '/'
     got = s.evaluate_script(<<~JS)
       (() => {
@@ -1035,13 +1042,13 @@ RSpec.describe 'cascade invalidation' do
     expect(got[1]).to be > got[0]
   end
 
-  it 're-arms the gate when the widget arrives after the gate has answered' do
-    s = simulated_session(gated_page('<p id="after">after</p>'))
+  it 'relays out on focus for a widget inserted after the first layout' do
+    s = simulated_session(styled_page('<p id="after">after</p>'))
     s.visit '/'
     got = s.evaluate_script(<<~JS)
       (() => {
         const after = document.getElementById('after');
-        const before = after.getBoundingClientRect().y;              // gate answers "unarmed"
+        const before = after.getBoundingClientRect().y;              // laid out before the widget exists
         const dd = document.createElement('div');
         dd.className = 'dd';
         dd.tabIndex = 0;
@@ -1054,15 +1061,16 @@ RSpec.describe 'cascade invalidation' do
     expect(got[1]).to be > got[0]
   end
 
-  it 're-arms the gate when the widget arrives by a class WRITE' do
-    # The other half of the invalidation contract the gate rests on: a class-attribute write,
-    # not just an insertion, must reopen it.
-    s = simulated_session(gated_page('<div id="w" tabindex="0"><div class="dd-content">content</div></div><p id="after">after</p>'))
+  it 'relays out on focus for a widget a class WRITE makes' do
+    # …and the widget made by a class-attribute write rather than an insertion: the rule can match
+    # only from the write on, and the focus flip after it must still move the box. (A presence gate
+    # once had to be reopened by both kinds of arrival.)
+    s = simulated_session(styled_page('<div id="w" tabindex="0"><div class="dd-content">content</div></div><p id="after">after</p>'))
     s.visit '/'
     got = s.evaluate_script(<<~JS)
       (() => {
         const after = document.getElementById('after');
-        const before = after.getBoundingClientRect().y;              // gate answers "unarmed"
+        const before = after.getBoundingClientRect().y;              // laid out before the rule can match
         const w = document.getElementById('w');
         w.className = 'dd';
         w.focus();
@@ -1072,31 +1080,13 @@ RSpec.describe 'cascade invalidation' do
     expect(got[1]).to be > got[0]
   end
 
-  it 'keeps relaying out for an inline style that consumes a custom property' do
-    # The escape valve for the one consumer the sheet-side reachability scan cannot see: an
-    # inline `width: var(--w)` with a dynamic rule writing `--w` must keep moving geometry.
-    css = '#t:focus { --w: 200px }'
-    s = simulated_session(gated_page('<div id="t" tabindex="0" style="width: var(--w, 50px)">x</div>', css: css))
-    s.visit '/'
-    got = s.evaluate_script(<<~JS)
-      (() => {
-        const t = document.getElementById('t');
-        const before = t.getBoundingClientRect().width;
-        t.focus();
-        return [before, t.getBoundingClientRect().width];
-      })()
-    JS
-    expect(got).to eq([50, 200])
-  end
-
-  # A dynamic rule's subject need not carry a class / id / tag for its effect to be SCOPED: the
-  # query is the whole selector with the state taken out (`.dd>*`), so the focus flip dirties the
-  # elements it can reach and the layout epoch — every box memo on the page — stays put. Redmine's
-  # `.drdn-items>*:focus` was the one rule that used to push the entire page into the epoch
-  # fallback, relaying out ~400 elements per focus change.
-  it 'scopes a keyless universal subject instead of moving the layout epoch' do
+  # A dynamic rule's subject need not carry a class / id / tag for its effect to stay LOCAL: the
+  # focus flip marks the one element it restyles, and the layout epoch — every box memo on the page
+  # — stays put. Redmine's `.drdn-items>*:focus` was the one rule that once pushed the entire page
+  # into an epoch fallback, relaying out ~400 elements per focus change.
+  it 'relays out a keyless universal subject without moving the layout epoch' do
     css = '.dd>*:focus { border: 10px solid red }'
-    s = simulated_session(gated_page('<div class="dd"><input id="i"></div><p id="after">after</p>', css: css))
+    s = simulated_session(styled_page('<div class="dd"><input id="i"></div><p id="after">after</p>', css: css))
     s.visit '/'
     got = s.evaluate_script(<<~JS)
       (() => {
@@ -1105,7 +1095,7 @@ RSpec.describe 'cascade invalidation' do
         const epoch = globalThis.__csimLayoutEpoch(), marks = globalThis.__csimSubtreeMarks();
         document.getElementById('i').focus();
         const moved = after.getBoundingClientRect().y > before;
-        // One subject dirtied — the hinted sweep, not a fallback over every dynamic rule.
+        // One subtree marked: the subject the flip restyled, not every element a dynamic rule names.
         return [moved, globalThis.__csimLayoutEpoch() === epoch, globalThis.__csimSubtreeMarks() - marks];
       })()
     JS
@@ -1113,10 +1103,10 @@ RSpec.describe 'cascade invalidation' do
   end
 
   # …and an attribute-only subject the same way (Discourse's `[contenteditable=true]:focus-within`).
-  it 'scopes an attribute-only subject instead of moving the layout epoch' do
+  it 'relays out an attribute-only subject without moving the layout epoch' do
     css = '[contenteditable=true]:focus-within { padding: 30px }'
     body = '<div contenteditable="true"><span id="in" tabindex="0">x</span></div><p id="after">after</p>'
-    s = simulated_session(gated_page(body, css: css))
+    s = simulated_session(styled_page(body, css: css))
     s.visit '/'
     got = s.evaluate_script(<<~JS)
       (() => {
@@ -1130,11 +1120,11 @@ RSpec.describe 'cascade invalidation' do
     expect(got).to eq([true, true])
   end
 
-  # A dynamic pseudo INSIDE a logical pseudo: the scoped query drops the whole qualifier (a
-  # superset), so the flip still reaches the box it restyles.
+  # A dynamic pseudo INSIDE a logical pseudo, where the flip makes the rule STOP matching: the box
+  # it restyles must still move.
   it 'relays out for a dynamic pseudo nested in :not()' do
     css = '#t { width: 200px } #t:not(:focus) { width: 50px }'
-    s = simulated_session(gated_page('<div id="t" tabindex="0">x</div>', css: css))
+    s = simulated_session(styled_page('<div id="t" tabindex="0">x</div>', css: css))
     s.visit '/'
     got = s.evaluate_script(<<~JS)
       (() => {
@@ -1147,13 +1137,13 @@ RSpec.describe 'cascade invalidation' do
     expect(got).to eq([50, 200])
   end
 
-  # A rule that writes only a custom property is scoped to its SUBJECT once an inline var()
-  # consumer exists (a custom property can only reach the subject's subtree), not folded into
-  # the epoch — the old escape valve relaid out the whole page per flip (Discourse: seven
+  # The inline var() consumer's page again, and the flip must leave the layout epoch where it was: a
+  # custom property can only reach the subject's subtree. Folded into the epoch, the old escape valve
+  # relaid out the whole page per flip (Discourse: seven
   # `:hover { --text-color }` rules plus one inline `--composer-height: var(…)`).
-  it 'scopes a custom-property-only rule to its subject, off the layout epoch' do
+  it 'relays out a custom-property-only rule\'s subject without moving the layout epoch' do
     css = '#t:focus { --w: 200px }'
-    s = simulated_session(gated_page('<div id="t" tabindex="0" style="width: var(--w, 50px)">x</div>', css: css))
+    s = simulated_session(styled_page('<div id="t" tabindex="0" style="width: var(--w, 50px)">x</div>', css: css))
     s.visit '/'
     got = s.evaluate_script(<<~JS)
       (() => {
@@ -1167,13 +1157,12 @@ RSpec.describe 'cascade invalidation' do
     expect(got).to eq([50, 200, true])
   end
 
-  # The hinted sweep's two non-subject shapes: the state sits on an ANCESTOR compound (hover is
-  # ancestor-matching, so the hovered element's chain is walked up to the one matching `.a`) and
-  # on a preceding SIBLING (the subjects are queried under the parent). Both must still move the
-  # box — and without moving the layout epoch.
+  # The two shapes where the state does not sit on the subject: on an ANCESTOR compound (hover is
+  # ancestor-matching, so hovering `#b` hovers `.a` too) and on a preceding SIBLING. Both must
+  # still move the box — and without moving the layout epoch.
   it 'reaches a subject below the compound that carries the state (hover on an ancestor)' do
     css = '.b { height: 20px } .a:hover .b { height: 200px }'
-    s = simulated_session(gated_page('<div class="a"><div class="b" id="b">z</div></div><p id="after">after</p>', css: css))
+    s = simulated_session(styled_page('<div class="a"><div class="b" id="b">z</div></div><p id="after">after</p>', css: css))
     s.visit '/'
     before = s.evaluate_script("[document.getElementById('b').getBoundingClientRect().height, globalThis.__csimLayoutEpoch()]")
     s.find('#b').hover
@@ -1184,7 +1173,7 @@ RSpec.describe 'cascade invalidation' do
 
   it 'reaches a subject that follows the state-carrying compound as a sibling' do
     css = '#b { width: 20px } #a:focus ~ #b { width: 200px }'
-    s = simulated_session(gated_page('<div><div id="a" tabindex="0">x</div><div id="b">y</div></div>', css: css))
+    s = simulated_session(styled_page('<div><div id="a" tabindex="0">x</div><div id="b">y</div></div>', css: css))
     s.visit '/'
     got = s.evaluate_script(<<~JS)
       (() => {
@@ -1198,13 +1187,13 @@ RSpec.describe 'cascade invalidation' do
     expect(got).to eq([20, 200, true])
   end
 
-  # State read RELATIONALLY — inside `:has()` — flips on an element the prefix cannot be asked
-  # of (`.a:has(.b:focus)`: focus lands on `.b`, the compound is `.a`); the hinted sweep must
-  # fall back to the whole selector for that kind.
+  # State read RELATIONALLY — inside `:has()` — flips on an element that is neither the subject
+  # nor the compound that changes (`.a:has(.b:focus) .c`: focus lands on `.b`, the compound that
+  # starts matching is `.a`, the box that moves is `.c`).
   it 'reaches a subject whose state sits inside :has()' do
     css = '.c { height: 20px } .a:has(.b:focus) .c { height: 200px }'
     body = '<div class="a"><div class="b" tabindex="0">x</div><div class="c" id="c">y</div></div>'
-    s = simulated_session(gated_page(body, css: css))
+    s = simulated_session(styled_page(body, css: css))
     s.visit '/'
     got = s.evaluate_script(<<~JS)
       (() => {
@@ -1218,11 +1207,11 @@ RSpec.describe 'cascade invalidation' do
   end
 
   # Tailwind v4 compiles `group-hover:` into `:is(:where(.group):hover *)`: the state sits on an
-  # ANCESTOR named inside the logical pseudo, so the flipping element cannot be asked to match a
-  # prefix — the kind is relational, and the hinted sweep queries the whole selector for it.
+  # ANCESTOR named inside the logical pseudo, so the element that flips is reached from the subject
+  # only through the `:is()`.
   it 'reaches a subject whose state sits on an ancestor inside :is()' do
     css = '.x { height: 20px } .x:is(:where(.group):hover *) { height: 200px }'
-    s = simulated_session(gated_page('<div class="group"><span>title</span><div class="x" id="x">z</div></div>', css: css))
+    s = simulated_session(styled_page('<div class="group"><span>title</span><div class="x" id="x">z</div></div>', css: css))
     s.visit '/'
     before = s.evaluate_script("document.getElementById('x').getBoundingClientRect().height")
     s.find('.group span').hover
@@ -1230,12 +1219,12 @@ RSpec.describe 'cascade invalidation' do
     expect([before, after]).to eq([20, 200])
   end
 
-  # The focused element leaving the tree is a flip the lazy diff cannot place (its ancestors and
-  # siblings are gone from under it by the time it looks), so removal announces it with the
-  # parent it left as the hint's root — a `:focus-within` sibling rule must un-apply.
+  # The focused element leaving the tree un-focuses its old ancestors with no focus call at all:
+  # `:focus-within` stops matching on the panel it left, and a rule on the panel's other child must
+  # un-apply. (By the time anything looks, the removed element's ancestors are gone from under it.)
   it 'un-applies a :focus-within rule when the focused element is removed' do
     css = '.s { height: 20px } .panel:focus-within .s { height: 200px }'
-    s = simulated_session(gated_page('<div class="panel"><input id="i"><div class="s" id="s">y</div></div>', css: css))
+    s = simulated_session(styled_page('<div class="panel"><input id="i"><div class="s" id="s">y</div></div>', css: css))
     s.visit '/'
     got = s.evaluate_script(<<~JS)
       (() => {
@@ -1249,13 +1238,13 @@ RSpec.describe 'cascade invalidation' do
     expect(got).to eq([200, 20])
   end
 
-  # The hinted sweep touches only the rules that read the kind that flipped: with a hover rule and
-  # a focus rule both armed, a focus flip dirties exactly the focus rule's subject — one subtree
-  # mark — where a full sweep over every dynamic rule would mark both.
-  it 'sweeps only the rules that read the kind that flipped' do
+  # With a hover rule and a focus rule both on the page, a focus flip marks exactly the subject it
+  # restyles — one subtree mark — and not the hover rule's. (A sweep over every dynamic rule once
+  # marked both.)
+  it 'marks only the subject a focus flip restyles, not a hover rule\'s' do
     css = '.h:hover { padding: 10px } .f:focus { padding: 10px }'
     body = '<div class="h">hover me</div><div class="f" id="f" tabindex="0">focus me</div>'
-    s = simulated_session(gated_page(body, css: css))
+    s = simulated_session(styled_page(body, css: css))
     s.visit '/'
     got = s.evaluate_script(<<~JS)
       (() => {
@@ -1271,11 +1260,11 @@ RSpec.describe 'cascade invalidation' do
   end
 
   # Checkedness feeds validity too: a required checkbox becomes `:valid` when checked, so a
-  # `:invalid` layout rule on it (and on its form) must un-apply on the checkedness hint.
+  # `:invalid` layout rule on it (and on its form) must un-apply when it is checked.
   it 'relays out an :invalid rule when a required checkbox is checked' do
     css = '#c { height: 20px } #c:invalid { height: 60px } form:invalid { padding-bottom: 100px }'
     body = '<form id="fm"><input type="checkbox" id="c" required></form><p id="after">after</p>'
-    s = simulated_session(gated_page(body, css: css))
+    s = simulated_session(styled_page(body, css: css))
     s.visit '/'
     got = s.evaluate_script(<<~JS)
       (() => {
@@ -1294,7 +1283,7 @@ RSpec.describe 'cascade invalidation' do
   it 'relays out a select:invalid rule when a required select gains a value' do
     css = '#sel { height: 20px } #sel:invalid { height: 60px }'
     body = '<form><select id="sel" required><option value="">pick</option><option id="o" value="a">a</option></select></form>'
-    s = simulated_session(gated_page(body, css: css))
+    s = simulated_session(styled_page(body, css: css))
     s.visit '/'
     got = s.evaluate_script(<<~JS)
       (() => {
@@ -1308,8 +1297,8 @@ RSpec.describe 'cascade invalidation' do
   end
 
   it 'hit-tests fresh z-index after focus, without a relayout in between' do
-    # z-index is PAINT_ONLY, so a `:focus { z-index }` rule no longer forces a pass — the paint
-    # order must come out right anyway. `stackChain` bakes an ANCESTOR stacking context's
+    # A `:focus { z-index }` rule moves no box, so nothing need relay out — the paint order must
+    # come out right anyway. `stackChain` bakes an ANCESTOR stacking context's
     # `paintRank` (a z-index read) into a per-pass memo; the dynamic-rule taint bracket keeps a
     # chain that considered such a rule uncached, so the second hit-test re-reads it live
     # instead of replaying the pre-focus rank. Siblings compare their own ranks live, so the
@@ -1318,7 +1307,7 @@ RSpec.describe 'cascade invalidation' do
           '#ac, #bc { position: absolute; left: 0; top: 0; width: 50px; height: 50px } ' \
           '#a:focus { z-index: 10 }'
     body = '<div id="a" tabindex="0"><div id="ac">a</div></div><div id="b"><div id="bc">b</div></div>'
-    s = simulated_session(gated_page(body, css: css))
+    s = simulated_session(styled_page(body, css: css))
     s.visit '/'
     got = s.evaluate_script(<<~JS)
       (() => {
@@ -1330,13 +1319,15 @@ RSpec.describe 'cascade invalidation' do
     expect(got).to eq(['bc', 'ac'])
   end
 
-  it 're-arms the gate for a widget the STREAMING PARSER inserts after a mid-parse read' do
-    # Parser insertions bypass the dirtySeq funnel (recordChildList is observer-gated), so the
-    # armed memo carries its own parser-generation key. Without it, the inline script's read
-    # memoises "unarmed" and the widget the rest of the page parses in never reopens the gate.
+  it 'relays out on focus for a widget the STREAMING PARSER inserts after a mid-parse read' do
+    # Parser insertions bypass `recordChildList`: they are noted as they land (`noteParsedChange`)
+    # and marked at the next pass. The inline script's read lays the page out before the widget
+    # exists; the widget the rest of the page parses in must still move a box on focus. (A presence
+    # gate's memo once needed a parser-generation key of its own for this, and without it the
+    # mid-parse answer "nothing can match" stuck for good.)
     body = '<script>document.documentElement.getBoundingClientRect();</script>' \
            '<div class="dd" tabindex="0"><div class="dd-content">content</div></div><p id="after">after</p>'
-    s = simulated_session(gated_page(body))
+    s = simulated_session(styled_page(body))
     s.visit '/'
     got = s.evaluate_script(<<~JS)
       (() => {
@@ -1349,14 +1340,14 @@ RSpec.describe 'cascade invalidation' do
     expect(got[1]).to be > got[0]
   end
 
-  it 'disarms the gate again when the widget leaves' do
+  it 'keeps the layout epoch still on a focus flip after the widget leaves' do
     body = '<div class="dd" tabindex="0"><div class="dd-content">content</div></div><input id="i"><p id="after">after</p>'
-    s = simulated_session(gated_page(body))
+    s = simulated_session(styled_page(body))
     s.visit '/'
     moved = s.evaluate_script(<<~JS)
       (() => {
         document.querySelector('.dd').remove();
-        document.getElementById('after').getBoundingClientRect();   // re-answer with the widget gone
+        document.getElementById('after').getBoundingClientRect();   // lay out with the widget gone
         const before = globalThis.__csimLayoutEpoch();
         document.getElementById('i').focus();
         return globalThis.__csimLayoutEpoch() !== before;
@@ -1372,7 +1363,7 @@ RSpec.describe 'cascade invalidation' do
 
   it 'relays out a descendant when a container gains a class a descendant rule reads' do
     css = '.panel { height: 20px } .open .panel { height: 120px }'
-    s = simulated_session(gated_page('<div id="c"><div><div class="panel" id="p">x</div></div></div>', css: css))
+    s = simulated_session(styled_page('<div id="c"><div><div class="panel" id="p">x</div></div></div>', css: css))
     s.visit '/'
     got = s.evaluate_script(<<~JS)
       (() => {
@@ -1386,12 +1377,12 @@ RSpec.describe 'cascade invalidation' do
   end
 
   it 'relays out a descendant through an identifier nested in :not()' do
-    # The collection descends into `:not` / `:is`: skipping nested identifiers is permissive for
-    # the presence gate but STALE for invalidation — 'off' must be in the token set.
+    # A REMOVED class that a `:not()` reads starts the rule matching. A token collection that once
+    # skipped identifiers nested in `:not` / `:is` left 'off' out, and the descendant stale.
     # The target sits TWO levels down: a direct child would be healed by the parent's own
     # usedSize re-read, and the spec would pass without the subtree mark it exists to pin.
     css = '.kid { height: 20px } .wrap:not(.off) .kid { height: 120px }'
-    s = simulated_session(gated_page('<div class="wrap off" id="c"><div><div class="kid" id="k">x</div></div></div>', css: css))
+    s = simulated_session(styled_page('<div class="wrap off" id="c"><div><div class="kid" id="k">x</div></div></div>', css: css))
     s.visit '/'
     got = s.evaluate_script(<<~JS)
       (() => {
@@ -1404,31 +1395,31 @@ RSpec.describe 'cascade invalidation' do
     expect(got).to eq([20, 120])
   end
 
-  it 'stays conservative when a literal [class="…"] layout rule exists' do
-    # The one selector shape that can see serialization order makes the gate ungateable.
+  it 'relays out a class write that only REORDERS tokens a literal [class="…"] rule reads' do
+    # The one selector shape that can see serialization order: `b a` holds the same tokens as
+    # `a b` and no longer matches `[class="a b"]`. A token-set gate once had to give up on any page
+    # with such a rule; a class write marks the writer's subtree whatever its tokens.
     css = 'div { height: 20px } [class="a b"] { height: 120px }'
-    s = simulated_session(gated_page('<div class="a b" id="p">x</div>', css: css))
+    s = simulated_session(styled_page('<div class="a b" id="p">x</div>', css: css))
     s.visit '/'
     got = s.evaluate_script(<<~JS)
       (() => {
         const p = document.getElementById('p');
         const before = p.getBoundingClientRect().height;
-        const marks = globalThis.__csimSubtreeMarks();
         p.className = 'b a';
-        return [before, p.getBoundingClientRect().height, globalThis.__csimSubtreeMarks() > marks];
+        return [before, p.getBoundingClientRect().height];
       })()
     JS
-    expect(got[0]).to eq(120)
-    expect(got[2]).to be(true)
+    expect(got).to eq([120, 20])
   end
 
   it 'relays out descendants of a subject-position box-property flip' do
-    # Subject-position tokens take the SUBTREE mark even for pure box properties: a heal through
-    # the parent's relayout looked sufficient, but an abspos descendant anchored to the subject's
-    # containing block escapes it — so the mark stays conservative.
+    # A class write marks the writer's SUBTREE even when the rule it flips declares only box
+    # properties: a heal through the parent's relayout looks sufficient for the `%` grandchild here,
+    # but an abspos descendant anchored to the subject's containing block escapes it (next example).
     css = '.box { width: 100px } .box.wide { width: 200px } .half { width: 50% }'
     body = '<div class="box" id="c"><div class="half"><div class="half" id="g">x</div></div></div>'
-    s = simulated_session(gated_page(body, css: css))
+    s = simulated_session(styled_page(body, css: css))
     s.visit '/'
     got = s.evaluate_script(<<~JS)
       (() => {
@@ -1442,11 +1433,11 @@ RSpec.describe 'cascade invalidation' do
   end
 
   it 'moves an abspos descendant anchored to a subject whose height flips' do
-    # The case that demoted SELF: the anchor's placement only reruns inside a relayouted
-    # ancestor, and the intermediate auto-height element would otherwise reuse.
+    # The case that rules out marking the writer alone: the anchor's placement only reruns inside a
+    # relaid-out ancestor, and the auto-height element between them would otherwise be reused.
     css = '.box { position: relative; height: 200px } .box.tall { height: 400px }'
     body = '<div class="box" id="c"><div><div style="position: absolute; bottom: 0; height: 10px" id="a">x</div></div></div>'
-    s = simulated_session(gated_page(body, css: css))
+    s = simulated_session(styled_page(body, css: css))
     s.visit '/'
     got = s.evaluate_script(<<~JS)
       (() => {
@@ -1465,18 +1456,18 @@ RSpec.describe 'cascade invalidation' do
   # perf gate's 400-row table, HALF the page's subtree reuse (`reuse_hit` 602 against 1200 for the
   # identical page without the host), which the wall could not see.
   #
-  # The examples below are the ways a shadow sheet crosses its boundary, and then the queue that has
-  # to carry a LATE sheet to the fold. **`__csimSubtreeMarks` is the only observable that pins the
-  # marks themselves**: `reuseSubtree` refuses a subtree holding an escaping abspos or a changed
-  # containing block on its own, so geometry heals every one of these shapes either way. Where a
-  # geometry assertion appears beside the count it pins the MATCHING, not the gate; where none
-  # appears the rule either does not match here yet (`:host(.x) .y`) or does not turn on the class
-  # being written (`::part()`), and the count is the whole test.
+  # The examples below are the ways a shadow sheet crosses its boundary. **`__csimSubtreeMarks` is
+  # the only observable that pins the marks themselves**: `reuseSubtree` refuses a subtree holding an
+  # escaping abspos or a changed containing block on its own, so geometry heals every one of these
+  # shapes either way. Where a geometry assertion appears beside the count it pins the MATCHING, not
+  # the mark; where none appears the rule does not match here yet (`:host(.x) .y`), and the count is
+  # the whole test.
 
-  it 'stays conservative for a class write INSIDE a shadow tree' do
-    # A shadow tree's in-tree rules are in no document index, and the document's own rules do not
-    # reach the element either — so the token gate describes nothing about it.
-    s = simulated_session(gated_page('<div id="h"></div>', css: '.noop-rule { width: 1px }'))
+  it 'relays out a class write INSIDE a shadow tree' do
+    # Only the tree's own sheet reaches the panel — the document's rules do not — and it sits two
+    # levels below the writer. (A gate built from the document's rules once described nothing about
+    # such a write and had to give it the subtree mark outright.)
+    s = simulated_session(styled_page('<div id="h"></div>', css: '.noop-rule { width: 1px }'))
     s.visit '/'
     got = s.evaluate_script(<<~JS)
       (() => {
@@ -1492,12 +1483,13 @@ RSpec.describe 'cascade invalidation' do
     expect(got).to eq([20, 120])
   end
 
-  it 'stays conservative for a light child a ::slotted rule can style' do
+  it 'marks a light child a ::slotted rule restyles on a class write' do
     # `::slotted(.x)` is written in a shadow sheet and styles a LIGHT child of the host — an element
-    # the document's token gate otherwise answers for completely.
+    # whose class writes a gate over the document's rules once answered for completely. One mark,
+    # the writer's subtree, and the shadow sheet's rule has to match it.
     css  = '.red { color: rgb(255, 0, 0) }'
     body = '<div id="h"><div id="c"><div id="p">x</div></div></div>'
-    s    = simulated_session(gated_page(body, css: css))
+    s    = simulated_session(styled_page(body, css: css))
     s.visit '/'
     got = s.evaluate_script(<<~JS)
       (() => {
@@ -1513,18 +1505,15 @@ RSpec.describe 'cascade invalidation' do
     expect(got).to eq([1, 120])
   end
 
-  it 'stays conservative for a class write on a host its own tree styles' do
+  it 'relays out a host its own tree styles on a class write' do
     # `:host(.x)` is the mirror of `::slotted`: written inside the tree, matching the host, which
-    # lives in the document scope. The tree carries NO bare `:host` rule on purpose — one would
-    # fill the routed host bucket by itself and the example would pass without `:host(` doing
-    # anything. And the answer comes off the sheet's TEXT rather than that bucket precisely so the
-    # `:host(.x) .y` form, which `scopedRulesFor` leaves in-tree and which does not match here yet,
-    # cannot silently make this unsound the day it starts matching.
+    # lives in the document scope. The tree carries NO bare `:host` rule on purpose, so the 120 can
+    # only come from `:host(.red)` matching once the class lands.
     # (The document declares no HEIGHT for the host: its normal declaration would beat `:host(.red)`
     # outright — the outer context wins, Chrome and Firefox both leave such a host at the document's
     # figure — and the height would never move. The host's 20 before is its content's.)
     css  = '.hostbase { display: block } .red { color: rgb(255, 0, 0) }'
-    s    = simulated_session(gated_page('<div id="h" class="hostbase"></div>', css: css))
+    s    = simulated_session(styled_page('<div id="h" class="hostbase"></div>', css: css))
     s.visit '/'
     got = s.evaluate_script(<<~JS)
       (() => {
@@ -1540,15 +1529,15 @@ RSpec.describe 'cascade invalidation' do
     expect(got).to eq([1, 120])
   end
 
-  it 'stays conservative for a host whose tree only uses the :host(.x) COMBINATOR form' do
-    # The landmine the sheet-text answer defuses. `scopedRulesFor`'s routing sends only the
-    # STANDALONE `:host(.x)` to the host bucket; `:host(.x) .y` stays an in-tree rule, where it
-    # fails to match at all today (`shadow_dom_cascade_gaps`). A bucket-shaped answer would call
-    # this host unreachable — correct only for as long as that bug stays unfixed, and nothing here
-    # would go red the day it is. There is no geometry to assert for the same reason: the count is
-    # the whole test.
+  it 'marks a host whose tree reads its class only through the :host(.x) COMBINATOR form' do
+    # `scopedRulesFor`'s routing sends only the STANDALONE `:host(.x)` to the host bucket;
+    # `:host(.x) .y` stays an in-tree rule, where it fails to match at all today
+    # (`shadow_dom_cascade_gaps`). The write must be marked anyway, so nothing goes stale the day it
+    # starts matching. (A gate once answered this off the sheet's TEXT for that reason: a
+    # bucket-shaped answer would have called the host unreachable.) There is no geometry to assert
+    # for the same reason: the count is the whole test.
     css  = '.red { color: rgb(255, 0, 0) }'
-    s    = simulated_session(gated_page('<div id="h"></div>', css: css))
+    s    = simulated_session(styled_page('<div id="h"></div>', css: css))
     s.visit '/'
     got = s.evaluate_script(<<~JS)
       (() => {
@@ -1565,12 +1554,13 @@ RSpec.describe 'cascade invalidation' do
   end
 
   it 'keeps relaying out when a custom-prop rule feeds an inline var() consumer' do
-    # The rule's custom property is unreachable from the sheets; the inline consumer is sighted
-    # only at first layout — after the gate was built — so the token carries a VAR bit resolved
-    # against the sticky flag at write time.
+    # The rule declares only a custom property, and its one consumer is an inline
+    # `height: var(--h)` two levels below the writer: nothing in the sheets says the flip moves a
+    # box. (A token gate built before the inline consumer was first seen once had to carry a VAR bit
+    # for it, resolved at write time.)
     css = '.on { --h: 300px }'
     body = '<div id="c"><div><div style="height: var(--h, 50px)" id="g">x</div></div></div>'
-    s = simulated_session(gated_page(body, css: css))
+    s = simulated_session(styled_page(body, css: css))
     s.visit '/'
     got = s.evaluate_script(<<~JS)
       (() => {
@@ -1583,10 +1573,10 @@ RSpec.describe 'cascade invalidation' do
     expect(got).to eq([50, 300])
   end
 
-  it 'scopes token REMOVAL through the DESC path too' do
+  it 'relays out a descendant when the body LOSES a class a descendant rule reads' do
     css = '.host { height: 20px } body.chrome-x .host { height: 120px }'
     body = '<div class="host" id="h">x</div>'
-    s = simulated_session(gated_page(body, css: css))
+    s = simulated_session(styled_page(body, css: css))
     s.visit '/'
     got = s.evaluate_script(<<~JS)
       (() => {
@@ -1600,10 +1590,10 @@ RSpec.describe 'cascade invalidation' do
     expect(got).to eq([120, 20])
   end
 
-  it 'keeps the subtree mark for a subject flip declaring an inherited property' do
+  it 'relays out a descendant when a class flip declares an inherited property' do
     css = '.big-text { font-size: 32px }'
     body = '<div id="c"><div><div id="g">word</div></div></div>'
-    s = simulated_session(gated_page(body, css: css))
+    s = simulated_session(styled_page(body, css: css))
     s.visit '/'
     got = s.evaluate_script(<<~JS)
       (() => {
@@ -1617,13 +1607,13 @@ RSpec.describe 'cascade invalidation' do
   end
 
   it 'reaches a later sibling INTERIOR through a sibling-combinator rule' do
-    # Scope for `~` is the writer's PARENT: the affected subject is not inside the writer's
-    # subtree. The stale case is the sibling's INTERIOR — an inherited property two levels down,
-    # where the parent's own re-derivation of the sibling's box cannot heal (main previously
-    # left the grandchild's text at the old font-size).
+    # The subject of a `~` rule is a later SIBLING of the writer, outside the subtree the write
+    # marks, so the restyle has to mark it. The stale case is the sibling's INTERIOR — an inherited
+    # property two levels down, where the parent's own re-derivation of the sibling's box cannot
+    # heal (main once left the grandchild's text at the old font-size).
     css = '.a ~ .b { font-size: 32px }'
     body = '<div id="first">x</div><div class="b"><div><div id="deep">word</div></div></div>'
-    s = simulated_session(gated_page(body, css: css))
+    s = simulated_session(styled_page(body, css: css))
     s.visit '/'
     got = s.evaluate_script(<<~JS)
       (() => {
@@ -1640,10 +1630,10 @@ RSpec.describe 'cascade invalidation' do
   # A focus / hover / checked flip must not move the layout epoch — that killed every box memo on
   # the page — and the boxes it restyles are marked by the restyle (layout.js `markRestyles`).
 
-  it 'keeps the epoch still on an ARMED page: a state flip dirties only the subjects' do
+  it 'keeps the layout epoch still on a focus flip the dynamic rule matches' do
     body = '<div class="dd" tabindex="0"><div class="dd-content">content</div></div>' \
            '<div id="far"><div><div>quiet</div></div></div><p id="after">after</p>'
-    s = simulated_session(gated_page(body))
+    s = simulated_session(styled_page(body))
     s.visit '/'
     got = s.evaluate_script(<<~JS)
       (() => {
@@ -1659,28 +1649,33 @@ RSpec.describe 'cascade invalidation' do
   end
 
   it 'relays out a table grid when a dynamic display rule flips a row' do
-    # The scoped marks carry `structural=true` for display/visibility rules: the grid memo
-    # (structFresh) keys on the epoch this path deliberately keeps still.
+    # A `display` flip on a row changes which rows the table's grid holds, with no child-list
+    # change and no move of the layout epoch — and the JS grid memo (`structFresh`) keys on the
+    # structure stamp, which the restyle marks move (`__csimMarkRestyled`). In the JS layout too:
+    # with the restyle marked as no structural change, its grid kept the hidden row.
     css = '.toggle:checked ~ table .maybe-row { display: none }'
     body = '<input type="checkbox" class="toggle" id="t">' \
            '<table><tbody><tr class="maybe-row"><td>a</td></tr><tr><td id="keep">b</td></tr></tbody></table>'
-    s = simulated_session(gated_page(body, css: css))
-    s.visit '/'
-    got = s.evaluate_script(<<~JS)
-      (() => {
-        const keep = document.getElementById('keep');
-        const before = keep.getBoundingClientRect().y;
-        document.getElementById('t').checked = true;
-        return [before > 0, keep.getBoundingClientRect().y < before];
-      })()
-    JS
-    expect(got).to eq([true, true])
+    [true, false].each do |native|
+      s = simulated_session(styled_page(body, css: css))
+      s.visit '/'
+      s.execute_script('globalThis.__csimNativeLayout = false') unless native
+      got = s.evaluate_script(<<~JS)
+        (() => {
+          const keep = document.getElementById('keep');
+          const before = keep.getBoundingClientRect().y;
+          document.getElementById('t').checked = true;
+          return [before > 0, keep.getBoundingClientRect().y < before];
+        })()
+      JS
+      expect(got).to eq([true, true]), "native layout #{native}"
+    end
   end
 
   it 'delivers an IntersectionObserver update for a state-revealed target' do
-    # The IO recheck early-returns on layoutGeneration(); the scoped marks move neither
+    # The IO recheck early-returns on layoutGeneration(); the restyle marks move neither
     # settleGen nor the epoch, so the generation carries the dirty sequence too.
-    s = simulated_session(gated_page('<div class="dd" tabindex="0"><div class="dd-content" id="c">content</div></div>'))
+    s = simulated_session(styled_page('<div class="dd" tabindex="0"><div class="dd-content" id="c">content</div></div>'))
     s.visit '/'
     got = s.evaluate_async_script(<<~JS)
       const done = arguments[0];
@@ -1702,16 +1697,17 @@ RSpec.describe 'cascade invalidation' do
     expect(got).to be(true)
   end
 
-  it 'queries Tailwind-style colon classes safely from both scoped paths' do
-    # The subject key is fed to querySelectorAll: an unescaped `checked:block` parses as a
-    # pseudo-class and THREW from inside the sweep (and from a class write's DESC path).
+  it 'relays out Tailwind-style colon classes on a state flip and on a class write' do
+    # A class with a colon in it (`checked:block`, `peer:pane`). The scoped-state sweep and a class
+    # write's descendant path once fed it to querySelectorAll unescaped, where `checked:block`
+    # parsed as a pseudo-class and THREW.
     css = '.toggle:checked ~ .checked\\:block { display: block } ' \
           '.checked\\:block { display: none } ' \
           'body.mode-x .peer\\:pane { height: 120px } .peer\\:pane { height: 20px }'
     body = '<input type="checkbox" class="toggle" id="t">' \
            '<div class="checked:block" id="rev">revealed</div>' \
            '<div class="peer:pane" id="pane">x</div>'
-    s = simulated_session(gated_page(body, css: css))
+    s = simulated_session(styled_page(body, css: css))
     s.visit '/'
     got = s.evaluate_script(<<~JS)
       (() => {
@@ -1719,7 +1715,7 @@ RSpec.describe 'cascade invalidation' do
         const pane = document.getElementById('pane');
         document.getElementById('t').checked = true;              // a state flip
         const revealed = rev.getBoundingClientRect().height > 0;
-        document.body.classList.add('mode-x');                    // class-write DESC path
+        document.body.classList.add('mode-x');                    // a class write
         return [revealed, pane.getBoundingClientRect().height];
       })()
     JS
@@ -1727,11 +1723,11 @@ RSpec.describe 'cascade invalidation' do
   end
 
   it 'relays out for a checkedness flip from the CLICK path too' do
-    # The style-state bump lives in setCheckedness — the funnel every checkedness writer
-    # shares. Bumping only in the IDL setter left a plain el.click() with stale geometry.
+    # Every checkedness writer goes through `setCheckedness`; when only the IDL setter said the
+    # state had flipped, a plain el.click() left stale geometry.
     css = 'input:checked { height: 100px }'
     body = '<input type="checkbox" id="t"><p id="after">after</p>'
-    s = simulated_session(gated_page(body, css: css))
+    s = simulated_session(styled_page(body, css: css))
     s.visit '/'
     got = s.evaluate_script(<<~JS)
       (() => {
@@ -1744,10 +1740,10 @@ RSpec.describe 'cascade invalidation' do
     expect(got[1]).to be > got[0]
   end
 
-  it 'falls back to the epoch for a keyless dynamic subject' do
+  it 'relays out the children a :focus-within rule reaches through `> *`' do
     css = '.dd:focus-within > * { margin-top: 100px }'
     body = '<div class="dd" tabindex="0"><div id="k">x</div></div>'
-    s = simulated_session(gated_page(body, css: css))
+    s = simulated_session(styled_page(body, css: css))
     s.visit '/'
     got = s.evaluate_script(<<~JS)
       (() => {
@@ -1762,25 +1758,9 @@ RSpec.describe 'cascade invalidation' do
     expect(got).to eq([8, 100])
   end
 
-  it 'extracts a subject per selector GROUP for the scoped path' do
-    css = '.never:hover .x { width: 1px } .dd:focus-within .dd-content { display: block }'
-    body = '<div class="dd" tabindex="0"><div class="dd-content">content</div></div><p id="after">after</p>'
-    s = simulated_session(gated_page(body, css: "#{css} .dd-content { display: none }"))
-    s.visit '/'
-    got = s.evaluate_script(<<~JS)
-      (() => {
-        const after = document.getElementById('after');
-        const before = after.getBoundingClientRect().y;
-        document.querySelector('.dd').focus();
-        return [before, after.getBoundingClientRect().y];
-      })()
-    JS
-    expect(got[1]).to be > got[0]
-  end
-
   it 'relays out a :target rule on a fragment navigation' do
     css = '#t { height: 20px } #t:target { height: 120px }'
-    s = simulated_session(gated_page('<div id="t">x</div><p id="after">after</p>', css: css))
+    s = simulated_session(styled_page('<div id="t">x</div><p id="after">after</p>', css: css))
     s.visit '/'
     got = s.evaluate_script(<<~JS)
       (() => {
@@ -1794,12 +1774,12 @@ RSpec.describe 'cascade invalidation' do
   end
 
   it 'relays out a :checked-driven rule when an option is selected programmatically' do
-    # Style reads under a dynamic rule are taint-uncached and always fresh — the STALE layer is
-    # layout: the select's box memo keys on the epoch, which only the selectedness funnel's
-    # style-state bump moves.
+    # Style reads under a dynamic rule are taint-uncached and always fresh — the layer that can go
+    # STALE is layout: the select's box memo keys on the layout epoch, which a selectedness change
+    # does not move, so the restyle has to mark the select whose `:has()` reads an option's state.
     css = 'select { height: 20px } select:has(option:checked[value="b"]) { height: 120px }'
     body = '<select id="s"><option value="a">a</option><option value="b">b</option></select><p id="after">after</p>'
-    s = simulated_session(gated_page(body, css: css))
+    s = simulated_session(styled_page(body, css: css))
     s.visit '/'
     got = s.evaluate_script(<<~JS)
       (() => {
@@ -1815,7 +1795,7 @@ RSpec.describe 'cascade invalidation' do
   it 'relays out an :invalid-driven rule on setCustomValidity' do
     css = '#t { height: 20px } #t:invalid { height: 120px }'
     body = '<input id="t"><p id="after">after</p>'
-    s = simulated_session(gated_page(body, css: css))
+    s = simulated_session(styled_page(body, css: css))
     s.visit '/'
     got = s.evaluate_script(<<~JS)
       (() => {
@@ -1832,7 +1812,7 @@ RSpec.describe 'cascade invalidation' do
     # `:modal` is internal state: with `open` already set, show()'s setAttribute is
     # value-identical and nothing else said the state flipped.
     css = '#t { height: 20px } #t:modal { height: 120px }'
-    s = simulated_session(gated_page('<dialog id="t">x</dialog>', css: css))
+    s = simulated_session(styled_page('<dialog id="t">x</dialog>', css: css))
     s.visit '/'
     got = s.evaluate_script(<<~JS)
       (() => {
