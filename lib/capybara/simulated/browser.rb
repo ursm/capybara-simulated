@@ -1849,6 +1849,7 @@ module Capybara
       # the redirect_to Visit's render rebuilds it" — exactly the
       # window real browsers paint at.
       def settle
+        settle_idle_style
         start_gen = @runtime.settle_gen
         prev_gen  = start_gen
         worker_wait_deadline = nil
@@ -2435,8 +2436,16 @@ module Capybara
         flush_module_rt
         invalidate_find_cache
         dom_call('__csimExecScript', code.to_s, marshal_args(args || []))
+        settle_idle_style
         drain_pending_navigation
         nil
+      end
+
+      # A task this driver ran has ended: under the style engine, the style it changed is applied on an idle page, as a
+      # browser's rendering update would apply it — which starts any transition or animation it declares, and those keep
+      # the page stepping (timers.js `__csimSettleIdleStyle`).
+      def settle_idle_style
+        @runtime.call('__csimSettleIdleStyle')
       end
 
       # CDP-ish shim: override navigator.geolocation (like CDP's

@@ -745,6 +745,27 @@ RSpec.describe 'style engine invalidation' do
     expect(s.evaluate_script("getComputedStyle(document.getElementById('d')).width")).to eq('50px')
   end
 
+  # …and the same for a change only a style applies — a class a script adds, with nothing reading the element after —
+  # and for one in a FRAME, whose listener reaches into its parent: the change is applied when the task ends, as a
+  # browser's rendering update would, and what the frame's task did to the parent's document is a change the page reads.
+  it 'starts an animation a script started only by a class, in the page and in a frame' do
+    s = visit(<<~HTML, css: '#d { width: 10px; transition: width 300ms linear } #d.on { width: 50px }')
+      <div id="d"></div><iframe id="f" srcdoc="<style>.b { opacity: 1; transition: opacity 300ms } .b.on { opacity: 0.2 }</style><div class=b id=x>x</div>"></iframe>
+    HTML
+    s.execute_script(<<~JS)
+      const d = document.getElementById('d');
+      d.ontransitionend = () => document.body.insertAdjacentHTML('beforeend', '<p id=done>done</p>');
+      d.classList.add('on');
+    JS
+    expect(s).to have_css('#done', wait: 2)
+    s.execute_script(<<~JS)
+      const x = document.getElementById('f').contentDocument.getElementById('x');
+      x.addEventListener('transitionend', () => document.body.insertAdjacentHTML('beforeend', '<p id=framedone>done</p>'));
+      x.classList.add('on');
+    JS
+    expect(s).to have_css('#framedone', wait: 2)
+  end
+
   # `:dir()` is the element's HTML DIRECTIONALITY, a state the engine matches like any other — a `dir=auto` scope's
   # from the first strong character of its text — and HTML's UA sheet sets `direction` from it (`[dir]:dir(rtl)`). So
   # a text edit that flips the scope restyles what matches, and what inherits from it (Chrome: ltr, then rtl).

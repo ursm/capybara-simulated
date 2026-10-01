@@ -1180,8 +1180,8 @@ RSpec.describe 'layout reuse across dynamic style state' do
         width = "document.getElementById('l3').getBoundingClientRect().width"
         s.evaluate_script(width)
         s.execute_script("document.getElementById('p').firstChild.data = 'y'; document.body.offsetHeight")
-        s.execute_script("document.getElementById('l3').classList.add('wide')")
-        reads = [s.evaluate_script(width)]
+        # (…the first read in the task that starts it: the transition runs from then on, as in a browser)
+        reads = [s.evaluate_script("(document.getElementById('l3').classList.add('wide'), #{width})")]
         while reads.last < 300 && reads.size < 30
           s.evaluate_script('new Promise((resolve) => setTimeout(resolve, 100))')
           reads << s.evaluate_script(width)
