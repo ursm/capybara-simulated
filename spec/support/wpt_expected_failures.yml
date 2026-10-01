@@ -5897,9 +5897,6 @@ shadow-dom/offsetParent-across-shadow-boundaries.html:
   to a slot in nested shadow trees of closed mode
 - offsetParent must skip offset parents of an element when the context object is assigned
   to a slot in nested shadow trees of open mode
-shadow-dom/offsetTop-offsetLeft-across-shadow-boundaries.html:
-- Verifies that HTMLElement.offsetTop accounts for shadow boundaries when nested in
-  multiple shadow roots.
 shadow-dom/scroll-to-the-fragment-in-shadow-tree.html:
 - The user agent scroll to the fragment when there is an anchor element with a name
   attribute exactly equal to the decoded fragid

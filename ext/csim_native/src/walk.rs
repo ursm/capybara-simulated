@@ -1546,23 +1546,25 @@ impl<'a> Walk<'a> {
         }
     }
 
-    // Whether `id` is a fieldset's RENDERED LEGEND (HTML §15.3.13, `isRenderedLegend`): its first child `<legend>` that
-    // is neither floated nor absolutely positioned.
+    // Whether `id` is a fieldset's RENDERED LEGEND (HTML §15.3.13, `renderedLegend`): the first child BOX of the
+    // fieldset's box that is a `<legend>`, neither floated nor absolutely positioned — so one that generates no box is
+    // passed over, one reached through a `display: contents` wrapper or a slot counts, and a box-less fieldset has none.
     fn rendered_legend(&self, id: NodeId) -> bool {
-        let node = self.node(id);
-        if !node.is_html_named("legend") {
+        if !self.node(id).is_html_named("legend") {
             return false;
         }
-        let Some(fieldset) = node.parent.and_then(|p| self.get(p)).filter(|p| p.is_html_named("fieldset")) else { return false };
-        for &c in &fieldset.children {
+        let Some(fieldset) = self.layout_parent(id).filter(|&p| self.node(p).is_html_named("fieldset")) else { return false };
+        for c in self.children(fieldset) {
             if !self.get(c).is_some_and(|n| n.is_html_named("legend")) {
                 continue;
             }
-            let out_of_flow = self.style(c).is_ok_and(|cs| {
+            let in_flow = self.style(c).is_ok_and(|cs| {
                 let b = cs.get_box();
-                b.clone_float() != Float::None || matches!(b.clone_position(), Position::Absolute | Position::Fixed)
+                b.clone_display() != Display::None &&
+                    b.clone_float() == Float::None &&
+                    !matches!(b.clone_position(), Position::Absolute | Position::Fixed)
             });
-            if !out_of_flow {
+            if in_flow {
                 return c == id;
             }
         }

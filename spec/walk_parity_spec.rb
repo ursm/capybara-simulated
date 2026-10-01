@@ -443,6 +443,12 @@ RSpec.describe 'walk parity' do
       <div align="center"><fieldset><legend>not moved</legend><p style="width: 50px">moved</p></fieldset></div>
       <fieldset dir="rtl"><legend style="margin: 0 auto">auto</legend></fieldset>
       <fieldset><legend style="float: left">floated</legend><legend>second</legend></fieldset>
+      <fieldset><legend style="display: none">gone</legend><legend>after a box-less one</legend></fieldset>
+      <fieldset><legend style="display: contents">spliced</legend><legend>after a contents one</legend></fieldset>
+      <fieldset><div style="display: contents"><legend>through a wrapper</legend></div></fieldset>
+      <div><template shadowrootmode="open"><fieldset><slot></slot></fieldset></template><legend>slotted</legend></div>
+      <fieldset style="display: contents"><legend>no fieldset box</legend></fieldset>
+      <fieldset><legend style="justify-self: safe center">safe</legend></fieldset>
     HTML
   end
 

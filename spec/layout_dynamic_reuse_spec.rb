@@ -1308,6 +1308,22 @@ RSpec.describe 'layout reuse across dynamic style state' do
       expect(s.evaluate_script(rect)).to eq([0, 0, 35])    # back in the 100px box (Chrome: 0, 0, 35)
     end
 
+    # A declarative root's content is parsed while inert, so no slot hook saw the `<slot>` the parser gave the NESTED
+    # host: the inner slot took nothing, and everything slotted through the outer slot was out of the flat tree — no
+    # box, no inherited colour (shadow-dom/offsetTop-offsetLeft-across-shadow-boundaries.html).
+    it 'lays out a child re-slotted through a nested declarative root' do
+      s = session_for('body { margin: 0 }', <<~HTML)
+        <div id="h"><template shadowrootmode="open"><div style="width: 100px; padding-top: 7px"><div id="inner"><template shadowrootmode="open"><div style="color: green"><slot></slot></div></template><slot></slot></div></div></template><p id="t" style="margin: 0; height: 5px">x</p></div>
+      HTML
+      probe = <<~JS
+        (() => {
+          const t = document.getElementById('t'), r = t.getBoundingClientRect();
+          return [r.y, r.width, getComputedStyle(t).color];
+        })()
+      JS
+      expect(s.evaluate_script(probe)).to eq([7, 100, 'rgb(0, 128, 0)'])   # (Chrome: 7, 100, green)
+    end
+
     it 'relays out after assign() and after a slotted child is removed' do
       s = slotted_session(
         '<div id="h"><span id="x1">aaaa bbbb cccc dddd</span></div><div id="h2"><span id="y1">aaaa bbbb cccc dddd</span></div>',
