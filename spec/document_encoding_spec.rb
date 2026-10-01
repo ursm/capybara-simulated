@@ -60,4 +60,55 @@ RSpec.describe 'Document encoding' do
     }
     expect(got).to eq(['UTF-8:あ', 'Shift_JIS:あ', 'windows-1252:é'])
   end
+
+  # Measured 2026-10-02: Chrome honors both; Firefox only the one in <head> — the spec's "change the encoding" is for a
+  # `<meta>` the parser meets anywhere (in body it is processed by the in-head rules).
+  it 'changes the encoding for a meta past the first 1024 bytes, but not for one in a script' do
+    pad = 'x' * 1100
+    s = simulated_session(app(
+      '/head'   => ['text/html', "<!DOCTYPE html><style>/*#{pad}*/</style><meta charset=shift_jis><p>\x82\xA0</p>"],
+      '/body'   => ['text/html', "<!DOCTYPE html><p>#{pad}</p><meta charset=shift_jis><p>\x82\xA0</p>"],
+      '/script' => ['text/html', "<!DOCTYPE html><p>#{pad}</p><script>'<meta charset=big5>'</script>"]
+    ))
+    got = %w[/head /body /script].map {|path|
+      s.visit path
+      s.evaluate_script('document.characterSet')
+    }
+    expect(got).to eq(%w[Shift_JIS Shift_JIS windows-1252])
+  end
+
+  it "gives an XHR document response the encoding it was decoded in, UTF-8 where nothing says" do
+    s = simulated_session(app(
+      '/'     => ['text/html; charset=utf-8', '<!DOCTYPE html><p>x</p>'],
+      '/sjis' => ['text/html; charset=shift_jis', "<p>\x82\xA0</p>"],
+      '/meta' => ['text/html', "<meta charset=euc-jp><p>\xA4\xA2</p>"],
+      '/none' => ['text/html', '<p>x</p>']
+    ))
+    s.visit '/'
+    got = s.evaluate_async_script(<<~JS)
+      const done = arguments[0];
+      Promise.all(['/sjis', '/meta', '/none'].map((url) => new Promise((resolve) => {
+        const xhr = new XMLHttpRequest();
+        xhr.open('GET', url);
+        xhr.responseType = 'document';
+        xhr.onload = () => resolve(xhr.response.characterSet + ':' + xhr.response.body.textContent);
+        xhr.send();
+      }))).then(done);
+    JS
+    expect(got).to eq(['Shift_JIS:あ', 'EUC-JP:あ', 'UTF-8:x'])
+  end
+
+  it 'decodes a document a link inside a frame navigates to' do
+    s = simulated_session(app(
+      '/'   => ['text/html; charset=utf-8', '<!DOCTYPE html><iframe name="f" src="/a"></iframe>'],
+      '/a'  => ['text/html; charset=utf-8', '<!DOCTYPE html><a href="/sj">go</a>'],
+      '/sj' => ['text/html; charset=shift_jis', "<!DOCTYPE html><p>\x82\xA0</p>"]
+    ))
+    s.visit '/'
+    got = s.within_frame('f') {
+      s.click_link 'go'
+      s.evaluate_script('document.characterSet + ":" + document.body.textContent')
+    }
+    expect(got).to eq('Shift_JIS:あ')
+  end
 end

@@ -41,9 +41,9 @@ RSpec.describe 'native selector engine SHADOW A/B on the __csimQuery path' do
     '.card h2.title'
   ].freeze
 
-  # Selectors whose truth depends on live element state the arena can't see — native
+  # Selectors whose truth depends on what the arena does not model (an attribute's namespace) — native
   # must DEFER these to css-select (recorded as fallbacks, never a wrong subset).
-  SHADOW_STATE_SELECTORS = [':dir(ltr)', ':dir(rtl)', 'p::before'].freeze
+  SHADOW_STATE_SELECTORS = ['[*|href]', '[*|class]', '[*|data-index]'].freeze
 
   let(:app) {
     cards = (1..SHADOW_CARDS).map {|i|

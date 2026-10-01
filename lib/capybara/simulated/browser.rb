@@ -3117,17 +3117,16 @@ module Capybara
       # {'name','value'} or file {'name','file'=>true,'filename','handle','index'} entries; a file's bytes resolve
       # through the `@file_picks` slot.
       def encode_entry_list(entries, enctype, encoding)
-        # The encoders normalize CR/LF → CRLF in each name and value (a file entry's filename is the value) — the entry
-        # list itself stays raw, matching the JS encoders and real browsers (newline-normalization.html).
-        encode = ->(s) {
-          s = normalize_form_newlines(s)
-          encoding == 'UTF-8' ? s.b : Native.form_encode(encoding, s)
-        }
+        # The encoders normalize CR/LF → CRLF in each name and value — a file entry's filename too where it IS the value
+        # (urlencoded, text/plain), not where it is a filename (multipart, which only escapes it) — the entry list itself
+        # stays raw, matching the JS encoders and real browsers (newline-normalization.html, multipart-formdata.window.js).
+        encode = ->(s) { encoding == 'UTF-8' ? s.to_s.b : Native.form_encode(encoding, s.to_s) }
+        text   = ->(s) { encode.(normalize_form_newlines(s)) }
         if enctype.start_with?('multipart/form-data')
           boundary = "csim-#{SecureRandom.hex(8)}"
           body     = String.new.force_encoding(Encoding::ASCII_8BIT)
           entries.each do |e|
-            name = encode.(e['name'])
+            name = text.(e['name'])
             if e['file']
               path = entry_file_path(e)
               if path
@@ -3144,13 +3143,13 @@ module Capybara
                 append_multipart_part(body, boundary, name, '', filename: encode.(e['filename']))
               end
             else
-              append_multipart_part(body, boundary, name, encode.(e['value']))
+              append_multipart_part(body, boundary, name, text.(e['value']))
             end
           end
           body << "--#{boundary}--\r\n"
           [body, "multipart/form-data; boundary=#{boundary}"]
         else
-          pairs = entries.map {|e| [encode.(e['name']), encode.(e['file'] ? e['filename'] : e['value'])] }
+          pairs = entries.map {|e| [text.(e['name']), text.(e['file'] ? e['filename'] : e['value'])] }
           if enctype == 'text/plain'
             [pairs.map {|name, value| name + '=' + value + "\r\n" }.join.b, 'text/plain']
           else
@@ -10360,6 +10359,12 @@ module Capybara
         o_r
       end
 
+      # A document as `__csimLoadDocument` takes it: its BYTES (BINARY-tagged, a Uint8Array to V8), decoded as it loads
+      # by HTML's encoding sniffing — or, with none, the empty string: about:blank and a blank response are UTF-8.
+      def document_payload(bytes)
+        bytes.to_s.empty? ? '' : bytes.to_s.b
+      end
+
       # A text body with its byte-order mark taken off and followed: UTF-8 text for a UTF-8 or UTF-16 BOM, the
       # bytes as they are without one (the hot path: a 2–3 byte prefix check). One BOM is consumed; any further
       # ones are ordinary U+FEFF characters in the text.
@@ -10506,8 +10511,7 @@ module Capybara
         return if realm_id.nil? || realm_id.zero?
         spec = {url: url.to_s}
         if url.to_s.start_with?('blob:') && (b = read_blob_for_window(url.to_s))
-          # The blob's bytes, BINARY-tagged (a Uint8Array to V8): the document is decoded as it loads.
-          spec[:body]  = b[:bytes].b
+          spec[:body]  = document_payload(b[:bytes])
           spec[:ctype] = b[:type].to_s.empty? ? 'text/html' : b[:type]
         end
         (@pending_window_nav ||= {})[realm_id] = spec
@@ -11017,7 +11021,7 @@ module Capybara
         parent = @runtime.frame_realm_parent(realm_id)
         handle = frame_container_handle(realm_id, parent)
         return if handle.zero?
-        new_id = @runtime.reload_frame_realm(realm_id, parent.to_i, url, bytes.to_s.b, content_type, client_id).to_i
+        new_id = @runtime.reload_frame_realm(realm_id, parent.to_i, url, document_payload(bytes), content_type, client_id).to_i
         return if new_id.zero?
         begin
           rebind_frame_realm(parent, handle, realm_id, new_id)
@@ -11490,11 +11494,11 @@ module Capybara
       # bounded per-test leak, only reachable by re-entering a sibling subframe
       # before an ancestor `_parent` nav; not worth a JS descendant walk on this
       # path's perf budget.
-      def reload_current_frame_realm(url, html, content_type, entry: @frame_stack.last)
+      def reload_current_frame_realm(url, bytes, content_type, entry: @frame_stack.last)
         return unless entry
         old_id = entry[:realm_id]
         parent = entry[:parent_realm_id]
-        new_id = @runtime.reload_frame_realm(old_id, parent.to_i, url, RuntimeShared.utf8_text(html), content_type).to_i
+        new_id = @runtime.reload_frame_realm(old_id, parent.to_i, url, document_payload(bytes), content_type).to_i
         return if new_id.zero?
         rebind_frame_realm(parent, entry[:iframe_handle], old_id, new_id)
         if entry.equal?(@frame_stack.last)
@@ -11685,14 +11689,12 @@ module Capybara
         # `isHtmlDocument` false) and the encoding's HTTP-charset signal.
         ct = (@last_response_headers || {}).find {|k, _| k.to_s.downcase == 'content-type' }&.last
         ct = ct.first if ct.is_a?(Array)
-        # The document travels as its BYTES (BINARY-tagged, a Uint8Array to V8): it is decoded as it loads, by HTML's
-        # encoding sniffing (`__csimLoadDocument`). An empty one (about:blank, a blank 200) is the empty string, UTF-8.
         opts = {
           'traceActive'        => !@trace.nil?,
           'timezone'           => ENV['TZ'].to_s,
           'timeTravelOffsetMs' => ((Time.now.to_f - Process.clock_gettime(Process::CLOCK_REALTIME)) * 1000).to_i,
           'url'                => @current_url.to_s,
-          'html'               => html.to_s.empty? ? '' : html.to_s.b
+          'html'               => document_payload(html)
         }
         opts['contentType'] = ct.to_s if ct && !ct.to_s.empty?
         # `document.lastModified` reflects the response Last-Modified header (parsed

@@ -1,11 +1,11 @@
 # frozen_string_literal: true
 
 # The native selector engine must NEVER silently answer a selector whose truth depends on
-# live element state it can't see (`:dir()`, which reads the flat tree's slot assignment; a pseudo-element,
-# …) — a structural-only match would return a wrong SUBSET. (The states the arena DOES carry — `:checked`, `:focus`,
-# `:hover`, `:disabled`, `:valid`, `:target`, `:lang()`, … — are answered; element_state_native_spec.) Instead it
-# flags such a selector at parse time and reports it as a fallback so the caller runs the JS
-# css-select engine. This spec pins that contract:
+# what the arena does not model (an attribute's namespace — `[*|href]`; a shadow host / slot relation — `:host`,
+# `::slotted()`) — a partial match would return a wrong SUBSET. (The states the arena DOES carry — `:checked`, `:focus`,
+# `:hover`, `:disabled`, `:valid`, `:target`, `:lang()`, `:dir()`, … — are answered; element_state_native_spec — and a
+# pseudo-element is answered as matching no element.) Instead it flags such a selector at parse time and reports it as a
+# fallback so the caller runs the JS css-select engine. This spec pins that contract:
 #
 #   * queryIds returns an ARRAY (and the right id set) for selectors it can answer natively;
 #   * `undefined` for a live-state selector (defer to css-select) — even when real elements
@@ -94,17 +94,23 @@ RSpec.describe 'native selector engine: JS fallback for live-state selectors' do
     expect(classify('a:any-link')).to start_with('MATCHED-parity:')
   end
 
-  it 'defers a live-state selector to css-select even when elements really match' do
-    # Guard the premise: css-select DOES see the ltr elements, so a structural-only native answer would be a wrong
-    # subset ([]). Native must decline, not guess.
-    expect(session.evaluate_script("document.querySelectorAll('input:dir(ltr)').length")).to be > 0
+  it 'answers :dir() and a pseudo-element natively' do
+    expect(classify('input:dir(ltr)')).to match(/\AMATCHED-parity:[1-9]/)
+    expect(classify(':not(:dir(rtl))')).to start_with('MATCHED-parity:')
+    expect(classify('p::before')).to eq('MATCHED-parity:0')
+  end
+
+  it 'defers a selector the arena cannot answer to css-select even when elements really match' do
+    # Guard the premise: css-select DOES see the elements, so a native answer that ignored the namespace would be
+    # a wrong subset. Native must decline, not guess.
+    expect(session.evaluate_script("document.querySelectorAll('[*|href]').length")).to be > 0
 
     [
-      ':dir(ltr)',
-      'input:dir(ltr)',
-      ':not(:dir(rtl))',
-      ':is(a, :dir(ltr))',
-      'p::before'
+      '[*|href]',
+      'a[*|href]',
+      ':is(input, [*|href])',
+      ':host',
+      '::slotted(span)'
     ].each do |sel|
       expect(classify(sel)).to eq('FALLBACK'), "selector #{sel.inspect} must defer to css-select"
     end

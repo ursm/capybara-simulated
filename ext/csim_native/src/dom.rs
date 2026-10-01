@@ -2379,6 +2379,7 @@ fn reset_arena(
 ) {
     let cid = realm_id(scope, &args);
     realm(scope, cid).reset();
+    crate::text_codec::drop_realm(scope, cid);   // (…a page's stream decoders die with it)
     dom(scope).layout_chunks.remove(&cid);
     dom(scope).walk_reuse.remove(&cid);
     dom(scope).cascades.remove(&cid);

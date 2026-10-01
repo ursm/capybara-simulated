@@ -20,7 +20,7 @@ RSpec.describe 'Form submission encoding' do
       if req.path == '/'
         [200, {'content-type' => 'text/html'}, [page]]
       else
-        received << {query: env['QUERY_STRING'], type: env['CONTENT_TYPE'], body: (req.body&.read || '').b}
+        received << {path: req.path, query: env['QUERY_STRING'], type: env['CONTENT_TYPE'], body: (req.body&.read || '').b}
         [200, {'content-type' => 'text/html'}, ['<p>ok</p>']]
       end
     }
@@ -60,5 +60,32 @@ RSpec.describe 'Form submission encoding' do
     s.click_button 'go'
     boundary = received.first[:type][/boundary=(.+)/, 1]
     expect(received.first[:body]).to start_with("--#{boundary}\r\n".b)
+  end
+
+  it 'submits to the action attribute, whatever a control named `action` makes of the IDL attribute' do
+    received = []
+    form = %(<form method="post" action="/top"><input name="action" value="x"><button>top</button></form>) +
+           %(<form method="post" action="/frame" target="f"><input name="action" value="y"><button>frame</button></form>)
+    s = simulated_session(app(received, form))
+    s.visit '/'
+    s.click_button 'top'
+    s.visit '/'
+    s.click_button 'frame'
+    expect(received.map { _1[:path] }).to eq(%w[/top /frame])
+  end
+
+  it "escapes a multipart filename's newlines without normalizing them, and submits `replacement` as UTF-8" do
+    received = []
+    form = %(<form method="post" action="/m" enctype="multipart/form-data" accept-charset="iso-2022-kr">) +
+           %(<input type="file" name="f"><input type="hidden" name="_charset_"><button>go</button></form>)
+    s = simulated_session(app(received, form))
+    s.visit '/'
+    s.execute_script(<<~'JS')
+      const dt = new DataTransfer();
+      dt.items.add(new File(['x'], 'a\nb\r.txt'));
+      document.querySelector('input[type=file]').files = dt.files;
+    JS
+    s.click_button 'go'
+    expect(received.first[:body]).to include('filename="a%0Ab%0D.txt"'.b, %(name="_charset_"\r\n\r\nUTF-8).b)
   end
 end

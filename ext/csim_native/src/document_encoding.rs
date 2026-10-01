@@ -13,8 +13,8 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     register(scope, ns, "decodeDocument", decode_document_op, context_id);
 }
 
-// __dom.decodeDocument(bytes, contentType, parentEncoding) -> [text, encoding name]; `parentEncoding` null where the
-// document inherits none (no parent document, or one of another origin).
+// __dom.decodeDocument(bytes, contentType, parentEncoding, xhr) -> [text, encoding name]; `parentEncoding` null where
+// the document inherits none (no parent document, or one of another origin); `xhr` an XHR document response.
 fn decode_document_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let Ok(view) = v8::Local::<v8::ArrayBufferView>::try_from(args.get(0)) else { return };
     let mut bytes = vec![0u8; view.byte_length()];
@@ -22,7 +22,8 @@ fn decode_document_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallba
     let content_type = args.get(1).to_rust_string_lossy(scope);
     let parent = args.get(2);
     let parent = (!parent.is_null_or_undefined()).then(|| parent.to_rust_string_lossy(scope)).and_then(|label| Encoding::for_label(label.as_bytes()));
-    let (text, used, _) = sniff(&bytes, &content_type, parent).decode(&bytes);
+    let reading = if args.get(3).is_true() { Reading::Xhr } else { Reading::Navigation(parent) };
+    let (text, used, _) = sniff(&bytes, &content_type, reading).decode(&bytes);
     let (Some(text), Some(name)) = (v8::String::new(scope, &text), v8::String::new(scope, used.name())) else { return };
     let pair: [v8::Local<v8::Value>; 2] = [text.into(), name.into()];
     let pair = v8::Array::new_with_elements(scope, &pair);
@@ -35,7 +36,16 @@ fn is_xml(content_type: &str) -> bool {
     essence.ends_with("+xml") || essence == "text/xml" || essence == "application/xml"
 }
 
-fn sniff(bytes: &[u8], content_type: &str, parent: Option<&'static Encoding>) -> &'static Encoding {
+// Which document is being read: a navigation's — a frame's with its PARENT's encoding to inherit, if same-origin —
+// or an XHR "document response", which prescans no further than the first 1024 bytes, inherits nothing, and is UTF-8
+// where nothing says otherwise.
+#[derive(Clone, Copy)]
+enum Reading {
+    Navigation(Option<&'static Encoding>),
+    Xhr,
+}
+
+fn sniff(bytes: &[u8], content_type: &str, reading: Reading) -> &'static Encoding {
     // (…a BOM decides it, whatever else is declared — `decode` takes it off, and follows it)
     if let Some((encoding, _)) = Encoding::for_bom(bytes) {
         return encoding;
@@ -47,7 +57,14 @@ fn sniff(bytes: &[u8], content_type: &str, parent: Option<&'static Encoding>) ->
     if is_xml(content_type) {
         return xml_declaration(head).unwrap_or(UTF_8);
     }
-    if let Some(encoding) = prescan(head) {
+    if let Some(encoding) = prescan(head, false) {
+        return encoding;
+    }
+    let Reading::Navigation(parent) = reading else { return UTF_8 };
+    // (…or one later on: the parser's "change the encoding" for a `<meta>` it meets while the confidence is tentative,
+    // in `<head>` or `<body>` alike — Chrome does both, Firefox only the head — met before the document is parsed rather
+    // than by navigating again, its scripts not run twice; text inside a raw-text element is no tag)
+    if let Some(encoding) = (bytes.len() > head.len()).then(|| prescan(bytes, true)).flatten() {
         return encoding;
     }
     // (…a frame's parent's encoding, inherited — unless it is UTF-16, which only a BOM ever selects)
@@ -81,12 +98,17 @@ fn meta_encoding(label: &[u8]) -> Option<&'static Encoding> {
     })
 }
 
+// The elements whose content the tokenizer reads as text up to their end tag (RAWTEXT, RCDATA, script data).
+const RAW_TEXT: [&[u8]; 9] = [b"script", b"style", b"textarea", b"title", b"xmp", b"iframe", b"noembed", b"noframes", b"noscript"];
+
 fn is_space(b: u8) -> bool {
     matches!(b, b'\t' | b'\n' | b'\x0C' | b'\r' | b' ')
 }
 
-// HTML "prescan a byte stream to determine its encoding" — the steps' numbering kept in the comments.
-fn prescan(input: &[u8]) -> Option<&'static Encoding> {
+// HTML "prescan a byte stream to determine its encoding" — the steps' numbering kept in the comments. `raw_text`: skip
+// the contents of a raw-text element (`<script>`, `<style>`, …) to its end tag, as the tokenizer does — what the
+// prescan of the first 1024 bytes does not, as the spec writes it.
+fn prescan(input: &[u8], raw_text: bool) -> Option<&'static Encoding> {
     let n = input.len();
     let mut pos = 0;
     let starts = |pos: usize, s: &[u8]| input.len() >= pos + s.len() && input[pos..pos + s.len()].eq_ignore_ascii_case(s);
@@ -136,12 +158,22 @@ fn prescan(input: &[u8]) -> Option<&'static Encoding> {
         }
         if input[pos] == b'<' && pos + 1 < n && (input[pos + 1].is_ascii_alphabetic() || (input[pos + 1] == b'/' && pos + 2 < n && input[pos + 2].is_ascii_alphabetic())) {
             // (a start or end tag: its name, then its attributes, each skipped)
-            pos += if input[pos + 1] == b'/' { 2 } else { 1 };
+            let end_tag = input[pos + 1] == b'/';
+            pos += if end_tag { 2 } else { 1 };
+            let name_at = pos;
             while pos < n && !is_space(input[pos]) && input[pos] != b'>' {
                 pos += 1;
             }
+            let name = input[name_at..pos].to_ascii_lowercase();
             while let Some((_, _, next)) = attribute(input, pos) {
                 pos = next;
+            }
+            if raw_text && !end_tag && RAW_TEXT.contains(&name.as_slice()) {
+                let close = [b"</".as_slice(), &name].concat();
+                match input[pos..].windows(close.len()).position(|w| w.eq_ignore_ascii_case(&close)) {
+                    Some(i) => pos += i,
+                    None => return None,
+                }
             }
             continue;
         }
@@ -286,34 +318,42 @@ mod tests {
 
     #[test]
     fn prescans_a_meta_charset() {
-        assert_eq!(prescan(b"<!DOCTYPE html><meta charset=shift_jis>").map(Encoding::name), Some("Shift_JIS"));
-        assert_eq!(prescan(b"<meta http-equiv=Content-Type content='text/html; charset=euc-kr'>").map(Encoding::name), Some("EUC-KR"));
+        assert_eq!(prescan(b"<!DOCTYPE html><meta charset=shift_jis>", false).map(Encoding::name), Some("Shift_JIS"));
+        assert_eq!(prescan(b"<meta http-equiv=Content-Type content='text/html; charset=euc-kr'>", false).map(Encoding::name), Some("EUC-KR"));
         // (…a content charset without the pragma declares nothing)
-        assert_eq!(prescan(b"<meta content='text/html; charset=euc-kr'>"), None);
+        assert_eq!(prescan(b"<meta content='text/html; charset=euc-kr'>", false), None);
         // (…nor one inside a comment, or a `data-charset`)
-        assert_eq!(prescan(b"<!-- <meta charset=big5> --><p data-charset=gbk>"), None);
-        assert_eq!(prescan(b"<meta charset=utf-16le>").map(Encoding::name), Some("UTF-8"));
+        assert_eq!(prescan(b"<!-- <meta charset=big5> --><p data-charset=gbk>", false), None);
+        assert_eq!(prescan(b"<meta charset=utf-16le>", false).map(Encoding::name), Some("UTF-8"));
     }
 
     #[test]
     fn sniffs_bom_transport_meta_default() {
-        assert_eq!(sniff(b"\xEF\xBB\xBF<meta charset=big5>", "text/html; charset=euc-jp", None).name(), "UTF-8");
-        assert_eq!(sniff(b"<meta charset=big5>", "text/html; charset=\"EUC-JP\"", None).name(), "EUC-JP");
-        assert_eq!(sniff(b"<meta charset=big5>", "text/html", None).name(), "Big5");
-        assert_eq!(sniff(b"<p>x", "", None).name(), "windows-1252");
-        assert_eq!(sniff(b"<p>x", "text/html", Some(encoding_rs::SHIFT_JIS)).name(), "Shift_JIS");
-        assert_eq!(sniff(b"<p>x", "text/html", Some(UTF_16LE)).name(), "windows-1252");
+        assert_eq!(sniff(b"\xEF\xBB\xBF<meta charset=big5>", "text/html; charset=euc-jp", Reading::Navigation(None)).name(), "UTF-8");
+        assert_eq!(sniff(b"<meta charset=big5>", "text/html; charset=\"EUC-JP\"", Reading::Navigation(None)).name(), "EUC-JP");
+        assert_eq!(sniff(b"<meta charset=big5>", "text/html", Reading::Navigation(None)).name(), "Big5");
+        assert_eq!(sniff(b"<p>x", "", Reading::Navigation(None)).name(), "windows-1252");
+        assert_eq!(sniff(b"<p>x", "text/html", Reading::Navigation(Some(encoding_rs::SHIFT_JIS))).name(), "Shift_JIS");
+        assert_eq!(sniff(b"<p>x", "text/html", Reading::Navigation(Some(UTF_16LE))).name(), "windows-1252");
+        // (…an XHR document response is UTF-8 by default and reads only the first 1024 bytes)
+        assert_eq!(sniff(b"<p>x", "text/html", Reading::Xhr).name(), "UTF-8");
+        assert_eq!(sniff(b"<meta charset=euc-jp>", "text/html", Reading::Xhr).name(), "EUC-JP");
+        // (…a `<meta>` past the first 1024 bytes changes the encoding still, but not one inside a raw-text element)
+        let late = [b"<style>".as_slice(), &[b' '; 1100], b"</style><meta charset=shift_jis>"].concat();
+        assert_eq!(sniff(&late, "text/html", Reading::Navigation(None)).name(), "Shift_JIS");
+        let scripted = [b"<p>".as_slice(), &[b' '; 1100], b"<script>'<meta charset=big5>'</script>"].concat();
+        assert_eq!(sniff(&scripted, "text/html", Reading::Navigation(None)).name(), "windows-1252");
         // (…a parent's encoding comes below the document's own)
-        assert_eq!(sniff(b"<meta charset=big5>", "text/html", Some(encoding_rs::SHIFT_JIS)).name(), "Big5");
+        assert_eq!(sniff(b"<meta charset=big5>", "text/html", Reading::Navigation(Some(encoding_rs::SHIFT_JIS))).name(), "Big5");
     }
 
     #[test]
     fn reads_an_xml_declaration() {
-        assert_eq!(sniff(b"<x/>", "application/xml", None).name(), "UTF-8");
-        assert_eq!(sniff(b"<?xml version='1.0' encoding='Shift_JIS'?><x/>", "image/svg+xml", None).name(), "Shift_JIS");
-        assert_eq!(sniff(b"<?xml version=\"1.0\" encoding = \"euc-jp\" ?><x/>", "text/xml", None).name(), "EUC-JP");
+        assert_eq!(sniff(b"<x/>", "application/xml", Reading::Navigation(None)).name(), "UTF-8");
+        assert_eq!(sniff(b"<?xml version='1.0' encoding='Shift_JIS'?><x/>", "image/svg+xml", Reading::Navigation(None)).name(), "Shift_JIS");
+        assert_eq!(sniff(b"<?xml version=\"1.0\" encoding = \"euc-jp\" ?><x/>", "text/xml", Reading::Navigation(None)).name(), "EUC-JP");
         // (…an XML document inherits nothing, and an HTML one reads no XML declaration)
-        assert_eq!(sniff(b"<x/>", "text/xml", Some(encoding_rs::SHIFT_JIS)).name(), "UTF-8");
-        assert_eq!(sniff(b"<?xml version='1.0' encoding='Shift_JIS'?>", "text/html", None).name(), "windows-1252");
+        assert_eq!(sniff(b"<x/>", "text/xml", Reading::Navigation(Some(encoding_rs::SHIFT_JIS))).name(), "UTF-8");
+        assert_eq!(sniff(b"<?xml version='1.0' encoding='Shift_JIS'?>", "text/html", Reading::Navigation(None)).name(), "windows-1252");
     }
 }
