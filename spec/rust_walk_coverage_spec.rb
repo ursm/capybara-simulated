@@ -33,25 +33,19 @@ RSpec.describe 'Rust walk coverage' do
   end
 
   # An element of no namespace the walk knows is the box its style makes it (an `inline` one here — Chrome: 28.81 x 22
-  # for "abc" in 16px monospace), where the walk refused every element outside HTML and the svg root.
+  # for "abc" in 16px monospace), where the walk refused every element outside HTML and the svg root. (One named as an
+  # HTML element is still declined: the JS model takes it for that element, whatever its namespace.)
   it 'lays a foreign element out as the box its style makes it' do
     script = <<~'JS'
-      const u = document.createElementNS('urn:x', 'u');
+      const u = document.createElementNS('urn:x', 'thing');
       u.textContent = 'abc';
       document.getElementById('b').appendChild(u);
     JS
     rust, js = both_walks('<div id="b" style="font: 16px monospace"></div>', script)
     expect(rust).to eq(js)
-    u = rust.find {|b| b[0] == 'u' }
+    u = rust.find {|b| b[0] == 'thing' }
     expect(u[3]).to be_within(0.02).of(28.81)
     expect(u[4]).to eq(22)
-  end
-
-  # The pass root in a vertical writing mode fills its room, as the JS model's root does (neither lays vertical text
-  # out: a shared approximation, not this walk's own).
-  it 'lays out a vertical root' do
-    rust, js = both_walks('<html style="writing-mode: vertical-rl"><body style="margin: 0"><p>hello</p></body></html>')
-    expect(rust).to eq(js)
   end
 
   # An orphan `display: table-row` — of block children, and of bare text — as the JS model lays it out: an equal-share

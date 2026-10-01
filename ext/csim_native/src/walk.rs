@@ -1418,6 +1418,22 @@ const WS_PRE_WRAP: u8 = 3;
 const WS_PRE_LINE: u8 = 4;
 const WS_BREAK_SPACES: u8 = 5;
 
+// The HTML element names the JS model keys a rule on — its UA tables (`DEFAULT_DISPLAY`, `UA_DEFAULTS`) and its tag
+// checks (replaced sizes, breaks, options, cells, legacy alignment) — which it asks of `el._tag`, the lowercased local
+// name in ANY namespace. An element of another namespace so named is that HTML element to the JS walk and a plain box to
+// this one (and to the spec, and Chrome): declined, so the two do not answer differently. Sorted, for `binary_search`.
+const JS_MODEL_TAGS: &[&str] = &[
+    "a", "abbr", "address", "area", "article", "aside", "audio", "b", "base", "basefont", "bdi", "bdo", "big",
+    "blockquote", "body", "br", "button", "canvas", "caption", "center", "cite", "code", "col", "colgroup", "data",
+    "datalist", "dd", "del", "details", "dfn", "dialog", "dir", "div", "dl", "dt", "em", "embed", "fieldset",
+    "figcaption", "figure", "footer", "form", "frame", "frameset", "h1", "h2", "h3", "h4", "h5", "h6", "head",
+    "header", "hgroup", "hr", "html", "i", "iframe", "img", "input", "ins", "kbd", "label", "legend", "li", "link",
+    "listing", "main", "mark", "marquee", "menu", "meta", "meter", "nav", "nobr", "noembed", "noframes", "noscript",
+    "object", "ol", "optgroup", "option", "p", "param", "plaintext", "pre", "progress", "q", "rp", "rt", "ruby",
+    "s", "samp", "script", "search", "section", "select", "slot", "small", "span", "strike", "strong", "style",
+    "sub", "summary", "sup", "svg", "table", "tbody", "td", "template", "textarea", "tfoot", "th", "thead", "time",
+    "title", "tr", "tt", "u", "ul", "var", "video", "wbr", "xmp"
+];
 // The elements HTML gives a formatting context of their own whatever their `display` (layout.js `OWN_CONTEXT_TAGS`:
 // the widgets and the replaced elements).
 const OWN_CONTEXT_TAGS: &[&str] = &[
@@ -1712,6 +1728,9 @@ impl<'a> Walk<'a> {
         if node.ns == web_atoms::ns!(mathml) {
             return Err("mathml");
         }
+        if tag.is_empty() && JS_MODEL_TAGS.binary_search(&&*node.local_name.to_ascii_lowercase()).is_ok() {
+            return Err("foreign element named as an HTML one");
+        }
         let b = style.get_box();
         let display = b.walk_display();
         // (…a block container: a block-level one, or an `inline-block`, which the gather walks as an ATOMIC)
@@ -1743,6 +1762,12 @@ impl<'a> Walk<'a> {
         let position = b.clone_position();
         if matches!(position, Position::Absolute | Position::Fixed) != out_of_flow {
             return Err("positioned");
+        }
+        // (…the pass ROOT in a vertical writing mode takes its width from its content, which native sizes it by only
+        // where it declares one: `resolve_width` would fill the room instead — and the JS layout, which the JS walk sends
+        // such a root to as well, ignores the root's margins and min / max width there)
+        if parent < 0 && !style.writing_mode.is_horizontal() && size_lp(&style.get_position().width).is_none_or(|lp| lp.has_percentage()) {
+            return Err("vertical root");
         }
         let idx = self.inputs.len() as i32;
         let mut rec = fresh_record();
@@ -2582,6 +2607,12 @@ impl<'a> Walk<'a> {
             let d = b.walk_display();
             if d.is_none() {
                 continue;
+            }
+            // (…a `<br>` or a `<wbr>` is text-run content to `box_items`, which an orphan row's layout drops; the JS model
+            // makes a block-level or out-of-flow `<br>` a box, and which one is a page's `display` before the style engine
+            // touched it)
+            if matches!(self.node(c).rendering_tag(), "br" | "wbr") {
+                return Err("orphan-row-break");
             }
             if matches!(b.clone_position(), Position::Absolute | Position::Fixed) {
                 continue;
@@ -3806,6 +3837,9 @@ impl<'a> Walk<'a> {
         // Core's rules, which this walk has not; any other element is the box its style makes it — `rendering_tag`)
         if node.ns == web_atoms::ns!(mathml) {
             return Err("mathml");
+        }
+        if tag.is_empty() && JS_MODEL_TAGS.binary_search(&&*node.local_name.to_ascii_lowercase()).is_ok() {
+            return Err("foreign element named as an HTML one");
         }
         let d = cs.get_box().walk_display();
         // (…a `<br>` or a `<wbr>` a flex or grid container's run of bare text holds is still a line break, or a place for
