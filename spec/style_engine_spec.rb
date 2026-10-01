@@ -697,6 +697,34 @@ RSpec.describe 'style engine invalidation' do
     HTML
     expect(s).to have_title(/\[/, wait: 3)
     expect(JSON.parse(s.title)).to eq(%w[cancel:x animationcancel:x cancel:y animationcancel:y])
+
+    # …and a STYLE change that cancels them queues the CSS events first (in the tick), yet each animation's `cancel`
+    # still goes out ahead of its own: what composite order leaves open, the test suite's stated intention and Chrome
+    # decide. Chrome: cancel:y, transitioncancel:y, cancel:x, animationcancel:x.
+    s = visit(<<~HTML, css: '@keyframes k { to { opacity: 0.5 } } .k { animation: k 100s } .t { transition: margin-left 100s } .t.on { margin-left: 100px }')
+      <div id="x" class="k"></div><div id="y" class="t"></div>
+      <script>
+        setTimeout(() => {
+          const log = [], x = document.getElementById('x'), y = document.getElementById('y');
+          x.onanimationcancel = () => log.push('animationcancel:x');
+          y.ontransitioncancel = () => log.push('transitioncancel:y');
+          getComputedStyle(y).marginLeft;
+          y.classList.add('on');
+          const ax = x.getAnimations()[0], ty = y.getAnimations()[0];
+          ax.oncancel = () => log.push('cancel:x');
+          ty.oncancel = () => log.push('cancel:y');
+          Promise.all([ax.ready, ty.ready]).then(() => requestAnimationFrame(() => {
+            x.classList.remove('k');
+            y.style.transition = 'none';
+            getComputedStyle(x).opacity;
+            getComputedStyle(y).marginLeft;
+            setTimeout(() => { document.title = JSON.stringify(log); }, 50);
+          }));
+        }, 10);
+      </script>
+    HTML
+    expect(s).to have_title(/\[/, wait: 3)
+    expect(JSON.parse(s.title)).to eq(%w[cancel:y transitioncancel:y cancel:x animationcancel:x])
   end
 
   # `:dir()` is the element's HTML DIRECTIONALITY, a state the engine matches like any other — a `dir=auto` scope's
