@@ -29439,9 +29439,11 @@ css/css-transitions/properties-value-001.html:
     current draft makes it a SHORTHAND (css-inline-3 ED: "This shorthand property
     specifies how an inline-level box is aligned within the line by specifying its
     alignment baseline type (alignment-baseline), baseline alignment preference (baseline-source),
-    and post-alignment shift (baseline-shift)"), and css-transitions-1 §6.1 says a
-    transitionend `propertyName` "is always the name of a longhand property" — so
-    the event names `baseline-shift`. Chrome and Firefox keep the CSS 2.1 longhand.'
+    and post-alignment shift (baseline-shift) in a single declaration"), and css-transitions-1
+    §2.1 says "if one of the identifiers listed is a shorthand property, implementations
+    must start transitions for all its longhand sub-properties" (§6.1.2: `propertyName`
+    "is always the name of a longhand property") — so the event names `baseline-shift`.
+    Chrome keeps the CSS 2.1 longhand (measured: its `transitionProperty` is `vertical-align`).'
 - name: vertical-align length(em) / events
   reason: 'Holds CSS 2.1 §10.8.1, where `vertical-align` is a property of its own
     ("Value: baseline | sub | super | top | text-top | middle | bottom | text-bottom
@@ -29449,9 +29451,11 @@ css/css-transitions/properties-value-001.html:
     current draft makes it a SHORTHAND (css-inline-3 ED: "This shorthand property
     specifies how an inline-level box is aligned within the line by specifying its
     alignment baseline type (alignment-baseline), baseline alignment preference (baseline-source),
-    and post-alignment shift (baseline-shift)"), and css-transitions-1 §6.1 says a
-    transitionend `propertyName` "is always the name of a longhand property" — so
-    the event names `baseline-shift`. Chrome and Firefox keep the CSS 2.1 longhand.'
+    and post-alignment shift (baseline-shift) in a single declaration"), and css-transitions-1
+    §2.1 says "if one of the identifiers listed is a shorthand property, implementations
+    must start transitions for all its longhand sub-properties" (§6.1.2: `propertyName`
+    "is always the name of a longhand property") — so the event names `baseline-shift`.
+    Chrome keeps the CSS 2.1 longhand (measured: its `transitionProperty` is `vertical-align`).'
 - name: vertical-align length(ex) / events
   reason: 'Holds CSS 2.1 §10.8.1, where `vertical-align` is a property of its own
     ("Value: baseline | sub | super | top | text-top | middle | bottom | text-bottom
@@ -29459,9 +29463,11 @@ css/css-transitions/properties-value-001.html:
     current draft makes it a SHORTHAND (css-inline-3 ED: "This shorthand property
     specifies how an inline-level box is aligned within the line by specifying its
     alignment baseline type (alignment-baseline), baseline alignment preference (baseline-source),
-    and post-alignment shift (baseline-shift)"), and css-transitions-1 §6.1 says a
-    transitionend `propertyName` "is always the name of a longhand property" — so
-    the event names `baseline-shift`. Chrome and Firefox keep the CSS 2.1 longhand.'
+    and post-alignment shift (baseline-shift) in a single declaration"), and css-transitions-1
+    §2.1 says "if one of the identifiers listed is a shorthand property, implementations
+    must start transitions for all its longhand sub-properties" (§6.1.2: `propertyName`
+    "is always the name of a longhand property") — so the event names `baseline-shift`.
+    Chrome keeps the CSS 2.1 longhand (measured: its `transitionProperty` is `vertical-align`).'
 - name: vertical-align length(in) / events
   reason: 'Holds CSS 2.1 §10.8.1, where `vertical-align` is a property of its own
     ("Value: baseline | sub | super | top | text-top | middle | bottom | text-bottom
@@ -29469,9 +29475,11 @@ css/css-transitions/properties-value-001.html:
     current draft makes it a SHORTHAND (css-inline-3 ED: "This shorthand property
     specifies how an inline-level box is aligned within the line by specifying its
     alignment baseline type (alignment-baseline), baseline alignment preference (baseline-source),
-    and post-alignment shift (baseline-shift)"), and css-transitions-1 §6.1 says a
-    transitionend `propertyName` "is always the name of a longhand property" — so
-    the event names `baseline-shift`. Chrome and Firefox keep the CSS 2.1 longhand.'
+    and post-alignment shift (baseline-shift) in a single declaration"), and css-transitions-1
+    §2.1 says "if one of the identifiers listed is a shorthand property, implementations
+    must start transitions for all its longhand sub-properties" (§6.1.2: `propertyName`
+    "is always the name of a longhand property") — so the event names `baseline-shift`.
+    Chrome keeps the CSS 2.1 longhand (measured: its `transitionProperty` is `vertical-align`).'
 - name: vertical-align length(mm) / events
   reason: 'Holds CSS 2.1 §10.8.1, where `vertical-align` is a property of its own
     ("Value: baseline | sub | super | top | text-top | middle | bottom | text-bottom
@@ -29479,9 +29487,11 @@ css/css-transitions/properties-value-001.html:
     current draft makes it a SHORTHAND (css-inline-3 ED: "This shorthand property
     specifies how an inline-level box is aligned within the line by specifying its
     alignment baseline type (alignment-baseline), baseline alignment preference (baseline-source),
-    and post-alignment shift (baseline-shift)"), and css-transitions-1 §6.1 says a
-    transitionend `propertyName` "is always the name of a longhand property" — so
-    the event names `baseline-shift`. Chrome and Firefox keep the CSS 2.1 longhand.'
+    and post-alignment shift (baseline-shift) in a single declaration"), and css-transitions-1
+    §2.1 says "if one of the identifiers listed is a shorthand property, implementations
+    must start transitions for all its longhand sub-properties" (§6.1.2: `propertyName`
+    "is always the name of a longhand property") — so the event names `baseline-shift`.
+    Chrome keeps the CSS 2.1 longhand (measured: its `transitionProperty` is `vertical-align`).'
 - name: vertical-align length(pc) / events
   reason: 'Holds CSS 2.1 §10.8.1, where `vertical-align` is a property of its own
     ("Value: baseline | sub | super | top | text-top | middle | bottom | text-bottom
@@ -29489,9 +29499,11 @@ css/css-transitions/properties-value-001.html:
     current draft makes it a SHORTHAND (css-inline-3 ED: "This shorthand property
     specifies how an inline-level box is aligned within the line by specifying its
     alignment baseline type (alignment-baseline), baseline alignment preference (baseline-source),
-    and post-alignment shift (baseline-shift)"), and css-transitions-1 §6.1 says a
-    transitionend `propertyName` "is always the name of a longhand property" — so
-    the event names `baseline-shift`. Chrome and Firefox keep the CSS 2.1 longhand.'
+    and post-alignment shift (baseline-shift) in a single declaration"), and css-transitions-1
+    §2.1 says "if one of the identifiers listed is a shorthand property, implementations
+    must start transitions for all its longhand sub-properties" (§6.1.2: `propertyName`
+    "is always the name of a longhand property") — so the event names `baseline-shift`.
+    Chrome keeps the CSS 2.1 longhand (measured: its `transitionProperty` is `vertical-align`).'
 - name: vertical-align length(pt) / events
   reason: 'Holds CSS 2.1 §10.8.1, where `vertical-align` is a property of its own
     ("Value: baseline | sub | super | top | text-top | middle | bottom | text-bottom
@@ -29499,9 +29511,11 @@ css/css-transitions/properties-value-001.html:
     current draft makes it a SHORTHAND (css-inline-3 ED: "This shorthand property
     specifies how an inline-level box is aligned within the line by specifying its
     alignment baseline type (alignment-baseline), baseline alignment preference (baseline-source),
-    and post-alignment shift (baseline-shift)"), and css-transitions-1 §6.1 says a
-    transitionend `propertyName` "is always the name of a longhand property" — so
-    the event names `baseline-shift`. Chrome and Firefox keep the CSS 2.1 longhand.'
+    and post-alignment shift (baseline-shift) in a single declaration"), and css-transitions-1
+    §2.1 says "if one of the identifiers listed is a shorthand property, implementations
+    must start transitions for all its longhand sub-properties" (§6.1.2: `propertyName`
+    "is always the name of a longhand property") — so the event names `baseline-shift`.
+    Chrome keeps the CSS 2.1 longhand (measured: its `transitionProperty` is `vertical-align`).'
 - name: vertical-align length(px) / events
   reason: 'Holds CSS 2.1 §10.8.1, where `vertical-align` is a property of its own
     ("Value: baseline | sub | super | top | text-top | middle | bottom | text-bottom
@@ -29509,9 +29523,11 @@ css/css-transitions/properties-value-001.html:
     current draft makes it a SHORTHAND (css-inline-3 ED: "This shorthand property
     specifies how an inline-level box is aligned within the line by specifying its
     alignment baseline type (alignment-baseline), baseline alignment preference (baseline-source),
-    and post-alignment shift (baseline-shift)"), and css-transitions-1 §6.1 says a
-    transitionend `propertyName` "is always the name of a longhand property" — so
-    the event names `baseline-shift`. Chrome and Firefox keep the CSS 2.1 longhand.'
+    and post-alignment shift (baseline-shift) in a single declaration"), and css-transitions-1
+    §2.1 says "if one of the identifiers listed is a shorthand property, implementations
+    must start transitions for all its longhand sub-properties" (§6.1.2: `propertyName`
+    "is always the name of a longhand property") — so the event names `baseline-shift`.
+    Chrome keeps the CSS 2.1 longhand (measured: its `transitionProperty` is `vertical-align`).'
 - name: vertical-align percentage(%) / events
   reason: 'Holds CSS 2.1 §10.8.1, where `vertical-align` is a property of its own
     ("Value: baseline | sub | super | top | text-top | middle | bottom | text-bottom
@@ -29519,9 +29535,11 @@ css/css-transitions/properties-value-001.html:
     current draft makes it a SHORTHAND (css-inline-3 ED: "This shorthand property
     specifies how an inline-level box is aligned within the line by specifying its
     alignment baseline type (alignment-baseline), baseline alignment preference (baseline-source),
-    and post-alignment shift (baseline-shift)"), and css-transitions-1 §6.1 says a
-    transitionend `propertyName` "is always the name of a longhand property" — so
-    the event names `baseline-shift`. Chrome and Firefox keep the CSS 2.1 longhand.'
+    and post-alignment shift (baseline-shift) in a single declaration"), and css-transitions-1
+    §2.1 says "if one of the identifiers listed is a shorthand property, implementations
+    must start transitions for all its longhand sub-properties" (§6.1.2: `propertyName`
+    "is always the name of a longhand property") — so the event names `baseline-shift`.
+    Chrome keeps the CSS 2.1 longhand (measured: its `transitionProperty` is `vertical-align`).'
 css/css-transitions/properties-value-implicit-001.html:
 - name: vertical-align length-em(em) / events
   reason: 'Holds CSS 2.1 §10.8.1, where `vertical-align` is a property of its own
@@ -29530,9 +29548,11 @@ css/css-transitions/properties-value-implicit-001.html:
     current draft makes it a SHORTHAND (css-inline-3 ED: "This shorthand property
     specifies how an inline-level box is aligned within the line by specifying its
     alignment baseline type (alignment-baseline), baseline alignment preference (baseline-source),
-    and post-alignment shift (baseline-shift)"), and css-transitions-1 §6.1 says a
-    transitionend `propertyName` "is always the name of a longhand property" — so
-    the event names `baseline-shift`. Chrome and Firefox keep the CSS 2.1 longhand.'
+    and post-alignment shift (baseline-shift) in a single declaration"), and css-transitions-1
+    §2.1 says "if one of the identifiers listed is a shorthand property, implementations
+    must start transitions for all its longhand sub-properties" (§6.1.2: `propertyName`
+    "is always the name of a longhand property") — so the event names `baseline-shift`.
+    Chrome keeps the CSS 2.1 longhand (measured: its `transitionProperty` is `vertical-align`).'
 css/css-transitions/properties-value-inherit-001.html:
 - name: background-color color(rgba) / events
   reason: 'Holds the 2013 css3-transitions draft ("must not start a transition when
@@ -31782,9 +31802,11 @@ css/css-transitions/properties-value-inherit-002.html:
     current draft makes it a SHORTHAND (css-inline-3 ED: "This shorthand property
     specifies how an inline-level box is aligned within the line by specifying its
     alignment baseline type (alignment-baseline), baseline alignment preference (baseline-source),
-    and post-alignment shift (baseline-shift)"), and css-transitions-1 §6.1 says a
-    transitionend `propertyName` "is always the name of a longhand property" — so
-    the event names `baseline-shift`. Chrome and Firefox keep the CSS 2.1 longhand.'
+    and post-alignment shift (baseline-shift) in a single declaration"), and css-transitions-1
+    §2.1 says "if one of the identifiers listed is a shorthand property, implementations
+    must start transitions for all its longhand sub-properties" (§6.1.2: `propertyName`
+    "is always the name of a longhand property") — so the event names `baseline-shift`.
+    Chrome keeps the CSS 2.1 longhand (measured: its `transitionProperty` is `vertical-align`).'
 - name: vertical-align length(em) / events
   reason: 'Holds CSS 2.1 §10.8.1, where `vertical-align` is a property of its own
     ("Value: baseline | sub | super | top | text-top | middle | bottom | text-bottom
@@ -31792,9 +31814,11 @@ css/css-transitions/properties-value-inherit-002.html:
     current draft makes it a SHORTHAND (css-inline-3 ED: "This shorthand property
     specifies how an inline-level box is aligned within the line by specifying its
     alignment baseline type (alignment-baseline), baseline alignment preference (baseline-source),
-    and post-alignment shift (baseline-shift)"), and css-transitions-1 §6.1 says a
-    transitionend `propertyName` "is always the name of a longhand property" — so
-    the event names `baseline-shift`. Chrome and Firefox keep the CSS 2.1 longhand.'
+    and post-alignment shift (baseline-shift) in a single declaration"), and css-transitions-1
+    §2.1 says "if one of the identifiers listed is a shorthand property, implementations
+    must start transitions for all its longhand sub-properties" (§6.1.2: `propertyName`
+    "is always the name of a longhand property") — so the event names `baseline-shift`.
+    Chrome keeps the CSS 2.1 longhand (measured: its `transitionProperty` is `vertical-align`).'
 - name: vertical-align length(ex) / events
   reason: 'Holds CSS 2.1 §10.8.1, where `vertical-align` is a property of its own
     ("Value: baseline | sub | super | top | text-top | middle | bottom | text-bottom
@@ -31802,9 +31826,11 @@ css/css-transitions/properties-value-inherit-002.html:
     current draft makes it a SHORTHAND (css-inline-3 ED: "This shorthand property
     specifies how an inline-level box is aligned within the line by specifying its
     alignment baseline type (alignment-baseline), baseline alignment preference (baseline-source),
-    and post-alignment shift (baseline-shift)"), and css-transitions-1 §6.1 says a
-    transitionend `propertyName` "is always the name of a longhand property" — so
-    the event names `baseline-shift`. Chrome and Firefox keep the CSS 2.1 longhand.'
+    and post-alignment shift (baseline-shift) in a single declaration"), and css-transitions-1
+    §2.1 says "if one of the identifiers listed is a shorthand property, implementations
+    must start transitions for all its longhand sub-properties" (§6.1.2: `propertyName`
+    "is always the name of a longhand property") — so the event names `baseline-shift`.
+    Chrome keeps the CSS 2.1 longhand (measured: its `transitionProperty` is `vertical-align`).'
 - name: vertical-align length(in) / events
   reason: 'Holds CSS 2.1 §10.8.1, where `vertical-align` is a property of its own
     ("Value: baseline | sub | super | top | text-top | middle | bottom | text-bottom
@@ -31812,9 +31838,11 @@ css/css-transitions/properties-value-inherit-002.html:
     current draft makes it a SHORTHAND (css-inline-3 ED: "This shorthand property
     specifies how an inline-level box is aligned within the line by specifying its
     alignment baseline type (alignment-baseline), baseline alignment preference (baseline-source),
-    and post-alignment shift (baseline-shift)"), and css-transitions-1 §6.1 says a
-    transitionend `propertyName` "is always the name of a longhand property" — so
-    the event names `baseline-shift`. Chrome and Firefox keep the CSS 2.1 longhand.'
+    and post-alignment shift (baseline-shift) in a single declaration"), and css-transitions-1
+    §2.1 says "if one of the identifiers listed is a shorthand property, implementations
+    must start transitions for all its longhand sub-properties" (§6.1.2: `propertyName`
+    "is always the name of a longhand property") — so the event names `baseline-shift`.
+    Chrome keeps the CSS 2.1 longhand (measured: its `transitionProperty` is `vertical-align`).'
 - name: vertical-align length(mm) / events
   reason: 'Holds CSS 2.1 §10.8.1, where `vertical-align` is a property of its own
     ("Value: baseline | sub | super | top | text-top | middle | bottom | text-bottom
@@ -31822,9 +31850,11 @@ css/css-transitions/properties-value-inherit-002.html:
     current draft makes it a SHORTHAND (css-inline-3 ED: "This shorthand property
     specifies how an inline-level box is aligned within the line by specifying its
     alignment baseline type (alignment-baseline), baseline alignment preference (baseline-source),
-    and post-alignment shift (baseline-shift)"), and css-transitions-1 §6.1 says a
-    transitionend `propertyName` "is always the name of a longhand property" — so
-    the event names `baseline-shift`. Chrome and Firefox keep the CSS 2.1 longhand.'
+    and post-alignment shift (baseline-shift) in a single declaration"), and css-transitions-1
+    §2.1 says "if one of the identifiers listed is a shorthand property, implementations
+    must start transitions for all its longhand sub-properties" (§6.1.2: `propertyName`
+    "is always the name of a longhand property") — so the event names `baseline-shift`.
+    Chrome keeps the CSS 2.1 longhand (measured: its `transitionProperty` is `vertical-align`).'
 - name: vertical-align length(pc) / events
   reason: 'Holds CSS 2.1 §10.8.1, where `vertical-align` is a property of its own
     ("Value: baseline | sub | super | top | text-top | middle | bottom | text-bottom
@@ -31832,9 +31862,11 @@ css/css-transitions/properties-value-inherit-002.html:
     current draft makes it a SHORTHAND (css-inline-3 ED: "This shorthand property
     specifies how an inline-level box is aligned within the line by specifying its
     alignment baseline type (alignment-baseline), baseline alignment preference (baseline-source),
-    and post-alignment shift (baseline-shift)"), and css-transitions-1 §6.1 says a
-    transitionend `propertyName` "is always the name of a longhand property" — so
-    the event names `baseline-shift`. Chrome and Firefox keep the CSS 2.1 longhand.'
+    and post-alignment shift (baseline-shift) in a single declaration"), and css-transitions-1
+    §2.1 says "if one of the identifiers listed is a shorthand property, implementations
+    must start transitions for all its longhand sub-properties" (§6.1.2: `propertyName`
+    "is always the name of a longhand property") — so the event names `baseline-shift`.
+    Chrome keeps the CSS 2.1 longhand (measured: its `transitionProperty` is `vertical-align`).'
 - name: vertical-align length(pt) / events
   reason: 'Holds CSS 2.1 §10.8.1, where `vertical-align` is a property of its own
     ("Value: baseline | sub | super | top | text-top | middle | bottom | text-bottom
@@ -31842,9 +31874,11 @@ css/css-transitions/properties-value-inherit-002.html:
     current draft makes it a SHORTHAND (css-inline-3 ED: "This shorthand property
     specifies how an inline-level box is aligned within the line by specifying its
     alignment baseline type (alignment-baseline), baseline alignment preference (baseline-source),
-    and post-alignment shift (baseline-shift)"), and css-transitions-1 §6.1 says a
-    transitionend `propertyName` "is always the name of a longhand property" — so
-    the event names `baseline-shift`. Chrome and Firefox keep the CSS 2.1 longhand.'
+    and post-alignment shift (baseline-shift) in a single declaration"), and css-transitions-1
+    §2.1 says "if one of the identifiers listed is a shorthand property, implementations
+    must start transitions for all its longhand sub-properties" (§6.1.2: `propertyName`
+    "is always the name of a longhand property") — so the event names `baseline-shift`.
+    Chrome keeps the CSS 2.1 longhand (measured: its `transitionProperty` is `vertical-align`).'
 - name: vertical-align length(px) / events
   reason: 'Holds CSS 2.1 §10.8.1, where `vertical-align` is a property of its own
     ("Value: baseline | sub | super | top | text-top | middle | bottom | text-bottom
@@ -31852,9 +31886,11 @@ css/css-transitions/properties-value-inherit-002.html:
     current draft makes it a SHORTHAND (css-inline-3 ED: "This shorthand property
     specifies how an inline-level box is aligned within the line by specifying its
     alignment baseline type (alignment-baseline), baseline alignment preference (baseline-source),
-    and post-alignment shift (baseline-shift)"), and css-transitions-1 §6.1 says a
-    transitionend `propertyName` "is always the name of a longhand property" — so
-    the event names `baseline-shift`. Chrome and Firefox keep the CSS 2.1 longhand.'
+    and post-alignment shift (baseline-shift) in a single declaration"), and css-transitions-1
+    §2.1 says "if one of the identifiers listed is a shorthand property, implementations
+    must start transitions for all its longhand sub-properties" (§6.1.2: `propertyName`
+    "is always the name of a longhand property") — so the event names `baseline-shift`.
+    Chrome keeps the CSS 2.1 longhand (measured: its `transitionProperty` is `vertical-align`).'
 - name: vertical-align percentage(%) / events
   reason: 'Holds CSS 2.1 §10.8.1, where `vertical-align` is a property of its own
     ("Value: baseline | sub | super | top | text-top | middle | bottom | text-bottom
@@ -31862,9 +31898,11 @@ css/css-transitions/properties-value-inherit-002.html:
     current draft makes it a SHORTHAND (css-inline-3 ED: "This shorthand property
     specifies how an inline-level box is aligned within the line by specifying its
     alignment baseline type (alignment-baseline), baseline alignment preference (baseline-source),
-    and post-alignment shift (baseline-shift)"), and css-transitions-1 §6.1 says a
-    transitionend `propertyName` "is always the name of a longhand property" — so
-    the event names `baseline-shift`. Chrome and Firefox keep the CSS 2.1 longhand.'
+    and post-alignment shift (baseline-shift) in a single declaration"), and css-transitions-1
+    §2.1 says "if one of the identifiers listed is a shorthand property, implementations
+    must start transitions for all its longhand sub-properties" (§6.1.2: `propertyName`
+    "is always the name of a longhand property") — so the event names `baseline-shift`.
+    Chrome keeps the CSS 2.1 longhand (measured: its `transitionProperty` is `vertical-align`).'
 css/css-transitions/properties-value-inherit-003.html:
 - name: background-position-x length-em(em) / events
   reason: 'Holds the 2013 css3-transitions draft ("must not start a transition when

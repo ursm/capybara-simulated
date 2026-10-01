@@ -551,7 +551,11 @@ impl Animations {
 
     // What `commitStyles()` writes for animation `id` (web-animations §4.4.19 step 5): its target's effect stack up to
     // and including it, composited over `values` (what the CSS animations below it show) and the target's own — the
-    // properties its effect animates only.
+    // properties its effect animates only. The whole partial stack is computed ENDPOINT-INCLUSIVE, as the step says
+    // ("calculating the result of partialEffectStack … setting the endpoint-inclusive active interval flag to true"),
+    // so a finished, unfilled animation below this one contributes its last frame too. Chrome and Firefox set the flag
+    // for the committing animation alone (an `add` at 50% of [0.2, 0.3] over a finished [0, 0.5]: 1 and 1.25 there,
+    // 0.75 here); the text is explicit, and it wins.
     pub(crate) fn committed_values(
         &self,
         id: AnimationId,
