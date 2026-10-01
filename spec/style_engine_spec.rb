@@ -645,6 +645,33 @@ RSpec.describe 'style engine invalidation' do
     expect(JSON.parse(s.title)).to eq(['cancel', 'after cancel', 'transitioncancel', 'raf'])
   end
 
+  # …and events due together go in their animations' COMPOSITE order, not one kind before the other (§4.2 step 5): a
+  # transition, a CSS animation and a script animation made in one frame (the style read there starts the first two)
+  # end in the same update, and the script animation's `finish` goes last. Chrome: transitionend, animationend, finish —
+  # where this went finish first.
+  it 'dispatches events due together in composite order' do
+    s = visit(<<~HTML, css: '.t { width: 10px; transition: width 100ms linear } .t.on { width: 50px } @keyframes k { to { opacity: 0.5 } } .k { animation: k 100ms linear }')
+      <div id="a" class="t"></div><div id="b"></div><div id="c"></div>
+      <script>
+        setTimeout(() => {
+          const log = [], a = document.getElementById('a'), b = document.getElementById('b'), c = document.getElementById('c');
+          a.ontransitionend = () => log.push('transitionend');
+          c.onanimationend = () => log.push('animationend');
+          requestAnimationFrame(() => {
+            a.classList.add('on');
+            c.classList.add('k');
+            getComputedStyle(a).width;
+            getComputedStyle(c).opacity;
+            b.animate({opacity: [0, 1]}, 100).onfinish = () => log.push('finish');
+            setTimeout(() => { document.title = JSON.stringify(log); }, 500);
+          });
+        }, 10);
+      </script>
+    HTML
+    expect(s).to have_title(/\[/, wait: 3)
+    expect(JSON.parse(s.title)).to eq(%w[transitionend animationend finish])
+  end
+
   # `:dir()` is the element's HTML DIRECTIONALITY, a state the engine matches like any other — a `dir=auto` scope's
   # from the first strong character of its text — and HTML's UA sheet sets `direction` from it (`[dir]:dir(rtl)`). So
   # a text edit that flips the scope restyles what matches, and what inherits from it (Chrome: ltr, then rtl).

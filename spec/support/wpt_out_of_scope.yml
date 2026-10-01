@@ -55239,6 +55239,17 @@ web-animations/interfaces/DocumentTimeline/duration.tentative.html:
   reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
     specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
     path/suffix. CLAUDE.md rule 1.
+web-animations/timing-model/timelines/update-and-send-events.html:
+- name: Sorts cancel events by composite order
+  reason: 'Asserts an order the test itself calls unspecified ("This ordering needs
+    more clarification in the spec, but the intention is that the cancel playback
+    event fires before the equivalent CSS cancel event in each case") and asserts
+    more than that intention: every playback cancel before every CSS one. web-animations-1
+    §4.2 says the queue is given "a stable sort ... by their scheduled event time
+    ... Within events with equal scheduled event times, sort by their composite order"
+    — and a CSS transition''s `transitioncancel` has its transition''s composite order,
+    so it follows that transition''s `cancel` and precedes the CSS animation''s. The
+    engine follows the sort; Chrome fails the test too (it dispatches in call order).'
 webmessaging/broadcastchannel/cross-partition.https.tentative.html:
 - name: BroadcastChannel messages aren't received from a cross-partition dedicated
     worker
