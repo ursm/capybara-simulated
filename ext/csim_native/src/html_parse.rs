@@ -38,6 +38,7 @@ const OP_REPARENT: i32 = 13; // node, new parent
 const OP_POP: i32 = 14; // handle
 const OP_FORM: i32 = 15; // element, form
 const OP_SELECTED_CONTENT: i32 = 16; // option
+const OP_SCRIPT_STARTED: i32 = 17; // script
 
 // A namespace by number: the ones the parser ever gives an element or an attribute.
 fn ns_code(ns: &Namespace) -> i32 {
@@ -198,6 +199,9 @@ impl TreeSink for Sink {
             Operand::Str(system_id.to_string()),
         ]);
     }
+    fn mark_script_already_started(&self, node: &u32) {
+        self.push([Operand::Int(OP_SCRIPT_STARTED), Operand::Int(*node as i32)]);
+    }
     fn pop(&self, node: &u32) {
         self.push([Operand::Int(OP_POP), Operand::Int(*node as i32)]);
     }
@@ -245,69 +249,98 @@ impl TreeSink for Sink {
 
 // A page's string holds UTF-16, a LONE surrogate included — `innerHTML = "a\uD800"` keeps it, in Chrome — where the
 // parser takes Rust text, which has no room for one. So a string that is not well formed (the page side asks
-// `isWellFormed()`) crosses with each lone surrogate standing as a private-use character, one for one (`SURROGATE_STANDINS`
-// from the surrogate's own number), and every string the parse hands back crosses home with them standing for
-// themselves again. Two blocks to choose from: the first the text does not use already.
+// `isWellFormed()`) crosses with each lone surrogate standing as a private-use character, one for one, from a block the
+// parse's text has none of (`StandIns`), and every string the parse hands back crosses home with them standing for the
+// surrogates again. A block is picked at the first lone surrogate, against all the text the parse has taken until then;
+// text that comes later holding that block's characters itself (a `document.write` of them, after one of a lone
+// surrogate) would come back as surrogates — a residual no page meets.
 const SURROGATE_STANDINS: [u32; 2] = [0xF0000, 0x100000];
 
-fn standin_base(units: &[u16]) -> Option<u32> {
-    let text: Vec<u32> = char::decode_utf16(units.iter().copied()).filter_map(Result::ok).map(u32::from).collect();
-    SURROGATE_STANDINS.into_iter().find(|&base| !text.iter().any(|&c| (base..base + 0x800).contains(&c)))
+#[derive(Default)]
+struct StandIns {
+    // Which blocks the parse's text has characters of.
+    used: [bool; 2],
+    // The block standing for lone surrogates, once the text had one.
+    base: Option<u32>,
+}
+
+impl StandIns {
+    fn note(&mut self, text: &str) {
+        // (…only a character from U+C0000 up has a lead byte from 0xF3: the scan is skipped for nearly every text)
+        if !text.bytes().any(|b| b >= 0xF3) {
+            return;
+        }
+        for c in text.chars() {
+            for (i, base) in SURROGATE_STANDINS.into_iter().enumerate() {
+                self.used[i] |= (base..base + 0x800).contains(&u32::from(c));
+            }
+        }
+    }
+    fn holds(&self, c: u32) -> bool {
+        self.base.is_some_and(|b| (b..b + 0x800).contains(&c))
+    }
 }
 
 // `value` as the parser's text: lossless where it is well formed (`well_formed`), else with its lone surrogates
-// standing as `base`'s characters (and lossy only when neither block is free).
-fn parser_text(scope: &mut v8::PinScope<'_, '_>, value: v8::Local<'_, v8::Value>, well_formed: bool, base: &mut Option<u32>) -> String {
+// standing as the parse's block's characters (and lossy only when no block is free).
+fn parser_text(scope: &mut v8::PinScope<'_, '_>, value: v8::Local<'_, v8::Value>, well_formed: bool, standins: &mut StandIns) -> String {
     if well_formed {
-        return value.to_rust_string_lossy(scope);
+        let text = value.to_rust_string_lossy(scope);
+        standins.note(&text);
+        return text;
     }
     let Some(string) = value.to_string(scope) else { return String::new() };
     let mut units = vec![0u16; string.length()];
     string.write_v2(scope, 0, &mut units, v8::WriteFlags::empty());
-    if base.is_none() {
-        *base = standin_base(&units);
+    let paired: String = char::decode_utf16(units.iter().copied()).filter_map(Result::ok).collect();
+    standins.note(&paired);
+    if standins.base.is_none() {
+        standins.base = SURROGATE_STANDINS.into_iter().zip(standins.used).find(|(_, used)| !used).map(|(base, _)| base);
     }
-    let Some(b) = *base else { return String::from_utf16_lossy(&units) };
+    let Some(base) = standins.base else { return String::from_utf16_lossy(&units) };
     char::decode_utf16(units.iter().copied())
-        .map(|r| r.unwrap_or_else(|e| char::from_u32(b + u32::from(e.unpaired_surrogate()) - 0xD800).unwrap_or('\u{FFFD}')))
+        .map(|r| r.unwrap_or_else(|e| char::from_u32(base + u32::from(e.unpaired_surrogate()) - 0xD800).unwrap_or('\u{FFFD}')))
         .collect()
 }
 
 // …and a string of the parse's, home: its stand-ins the surrogates again.
-fn page_string<'s>(scope: &mut v8::PinScope<'s, '_>, text: &str, base: Option<u32>) -> Option<v8::Local<'s, v8::String>> {
-    match base {
-        Some(b) if text.chars().any(|c| (b..b + 0x800).contains(&u32::from(c))) => {
-            let mut units = Vec::with_capacity(text.len());
-            for c in text.chars() {
-                let n = u32::from(c);
-                if (b..b + 0x800).contains(&n) {
-                    units.push((n - b + 0xD800) as u16);
-                } else {
-                    let mut pair = [0u16; 2];
-                    units.extend_from_slice(c.encode_utf16(&mut pair));
-                }
-            }
-            v8::String::new_from_two_byte(scope, &units, v8::NewStringType::Normal)
-        }
-        _ => v8::String::new(scope, text),
+fn page_string<'s>(scope: &mut v8::PinScope<'s, '_>, text: &str, standins: &StandIns) -> Option<v8::Local<'s, v8::String>> {
+    if standins.base.is_none() || !text.chars().any(|c| standins.holds(u32::from(c))) {
+        return v8::String::new(scope, text);
     }
+    let base = standins.base.unwrap_or_default();
+    let mut units = Vec::with_capacity(text.len());
+    for c in text.chars() {
+        if standins.holds(u32::from(c)) {
+            units.push((u32::from(c) - base + 0xD800) as u16);
+        } else {
+            let mut pair = [0u16; 2];
+            units.extend_from_slice(c.encode_utf16(&mut pair));
+        }
+    }
+    v8::String::new_from_two_byte(scope, &units, v8::NewStringType::Normal)
 }
 
-// One parse in progress: its tokenizer (which owns the tree builder, which owns the sink), the input not yet
-// tokenized, and — for each `document.write` being parsed — the input after its insertion point, set aside.
+// One parse in progress: its tokenizer (which owns the tree builder, which owns the sink), the input not yet tokenized,
+// and — for each script running with an INSERTION POINT (HTML §13.2.4.1) — the input after it, set aside: a
+// `document.write` puts its text at the end of `input`, which is where the insertion point is, and the parse stops
+// there when `input` runs out. Once the input has all been taken, the tokenizer is ENDED (its tree builder has popped
+// everything) and takes nothing more.
 struct Parse {
     tokenizer: Tokenizer<TreeBuilder<u32, Sink>>,
     input: BufferQueue,
     set_aside: Vec<Vec<StrTendril>>,
-    // The block standing for lone surrogates in this parse's text, once some text had any (`parser_text`).
-    standins: Option<u32>,
-    // The input ends with what is in `input` (not a write's text, which has more after it): the parse ends there.
-    last: Cell<bool>,
+    standins: StandIns,
+    ended: bool,
 }
 
 impl Parse {
-    // Tokenize until the input runs out (-1) or a script has to run first (its handle).
-    fn run(&self) -> i32 {
+    // Tokenize until the input runs out (-1) or a script has to run first (its handle). The input running out with
+    // none set aside is the end of the document.
+    fn run(&mut self) -> i32 {
+        if self.ended {
+            return -1;
+        }
         loop {
             match self.tokenizer.feed(&self.input) {
                 TokenizerResult::Done => break,
@@ -315,8 +348,8 @@ impl Parse {
                 TokenizerResult::EncodingIndicator(_) => continue,
             }
         }
-        if self.last.get() && self.set_aside.is_empty() {
-            self.last.set(false);
+        if self.set_aside.is_empty() {
+            self.ended = true;
             self.tokenizer.end();
         }
         -1
@@ -338,18 +371,31 @@ fn parses<'s>(scope: &'s mut v8::PinScope<'_, '_>) -> &'s mut Parses {
 
 pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Object>, context_id: i32) {
     register(scope, ns, "htmlParse", html_parse, context_id);
-    register(scope, ns, "htmlResume", html_resume, context_id);
+    register(scope, ns, "htmlRun", html_run, context_id);
+    register(scope, ns, "htmlScriptBegin", html_script_begin, context_id);
+    register(scope, ns, "htmlScriptEnd", html_script_end, context_id);
     register(scope, ns, "htmlWrite", html_write, context_id);
-    register(scope, ns, "htmlWriteEnd", html_write_end, context_id);
     register(scope, ns, "htmlDone", html_done, context_id);
+}
+
+// Run a parser op, catching a panic (a bug in the parser, or one a page's input found) where it would otherwise unwind
+// into V8's callback frame and abort the process: the parse it was running is dropped — what it built so far stands,
+// the rest of its input is lost — and the bug goes to stderr.
+fn parser_op(scope: &mut v8::PinScope<'_, '_>, id: Option<u32>, op: impl FnOnce(&mut v8::PinScope<'_, '_>)) {
+    let Err(panic) = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| op(scope))) else { return };
+    let what = panic.downcast_ref::<&str>().map(|s| s.to_string()).or_else(|| panic.downcast_ref::<String>().cloned());
+    eprintln!("csim: the HTML parser panicked: {}", what.unwrap_or_default());
+    if let Some(id) = id {
+        parses(scope).live.remove(&id);
+    }
 }
 
 // The steps taken since the last call, then the status: -1 the input ran out, else the script handle to run first —
 // after the parse's id, for the call that starts it.
 fn steps<'s>(scope: &mut v8::PinScope<'s, '_>, id: u32, status: i32, with_id: bool) -> v8::Local<'s, v8::Array> {
-    let (ops, standins) = match parses(scope).live.get(&id) {
-        Some(p) => (std::mem::take(&mut *p.tokenizer.sink.sink.ops.borrow_mut()), p.standins),
-        None => (Vec::new(), None),
+    let (ops, standins) = match parses(scope).live.get_mut(&id) {
+        Some(p) => (std::mem::take(&mut *p.tokenizer.sink.sink.ops.borrow_mut()), std::mem::take(&mut p.standins)),
+        None => (Vec::new(), StandIns::default()),
     };
     let mut items: Vec<v8::Local<v8::Value>> = Vec::with_capacity(ops.len() + 2);
     if with_id {
@@ -358,110 +404,117 @@ fn steps<'s>(scope: &mut v8::PinScope<'s, '_>, id: u32, status: i32, with_id: bo
     for op in ops {
         items.push(match op {
             Operand::Int(i) => v8::Integer::new(scope, i).into(),
-            Operand::Str(s) => page_string(scope, &s, standins).map_or_else(|| v8::undefined(scope).into(), Into::into),
+            Operand::Str(s) => page_string(scope, &s, &standins).map_or_else(|| v8::undefined(scope).into(), Into::into),
         });
+    }
+    if let Some(p) = parses(scope).live.get_mut(&id) {
+        p.standins = standins;
     }
     items.push(v8::Integer::new(scope, status).into());
     v8::Array::new_with_elements(scope, &items)
 }
 
-// __dom.htmlParse(html, wellFormed, scripting, contextNs, contextLocalName, withForm, quirks) -> [id, steps…, status]. A document
-// parse, or — given the namespace (as `ns_code` numbers it) and local name of the element whose content it is — a
-// fragment parse in that context (handle 1; handle 2 its form element pointer, `withForm`), in its document's mode
-// (`quirks` 0 no-quirks, 1 limited-quirks, 2 quirks).
+// __dom.htmlParse(html, wellFormed, scripting, contextNs, contextLocalName, withForm, quirks) -> [id, steps…, status].
+// A document parse, or — given the namespace (as `ns_code` numbers it) and local name of the element whose content it
+// is — a fragment parse in that context (handle 1; handle 2 its form element pointer, `withForm`), in its document's
+// mode (`quirks` 0 no-quirks, 1 limited-quirks, 2 quirks).
 fn html_parse(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
-    let mut standins = None;
-    let well_formed = args.get(1).boolean_value(scope);
-    let html = parser_text(scope, args.get(0), well_formed, &mut standins);
-    let scripting = args.get(2).boolean_value(scope);
-    let context = (!args.get(4).is_null_or_undefined())
-        .then(|| (args.get(3).int32_value(scope).unwrap_or(1), args.get(4).to_rust_string_lossy(scope)));
-    let with_form = args.get(5).boolean_value(scope);
-    let quirks_mode = match args.get(6).int32_value(scope) {
-        Some(2) => QuirksMode::Quirks,
-        Some(1) => QuirksMode::LimitedQuirks,
-        _ => QuirksMode::NoQuirks,
-    };
-    let opts = TreeBuilderOpts { scripting_enabled: scripting, quirks_mode, ..Default::default() };
-    // (…the text is decoded already, its byte order mark gone with the decoding: a U+FEFF left is text)
-    let tokenizer_opts = TokenizerOpts { discard_bom: false, ..Default::default() };
-    let tokenizer = match &context {
-        None => Tokenizer::new(TreeBuilder::new(Sink::new(None), opts), tokenizer_opts),
-        Some((ns, local)) => {
-            let name = QualName::new(None, namespace_of(*ns), LocalName::from(local.as_str()));
-            let builder = TreeBuilder::new_for_fragment(Sink::new(Some(name)), 1, with_form.then_some(2), opts);
-            let initial_state = Some(builder.tokenizer_state_for_context_elem(scripting));
-            Tokenizer::new(builder, TokenizerOpts { initial_state, ..tokenizer_opts })
-        }
-    };
-    let input = BufferQueue::default();
-    input.push_back(StrTendril::from(html));
-    let parse = Parse { tokenizer, input, set_aside: Vec::new(), standins, last: Cell::new(true) };
-    let all = parses(scope);
-    all.next += 1;
-    let id = all.next;
-    all.live.insert(id, parse);
-    let status = all.live[&id].run();
-    let steps = steps(scope, id, status, true);
-    rv.set(steps.into());
+    parser_op(scope, None, |scope| {
+        let mut standins = StandIns::default();
+        let well_formed = args.get(1).boolean_value(scope);
+        let html = parser_text(scope, args.get(0), well_formed, &mut standins);
+        let scripting = args.get(2).boolean_value(scope);
+        let context = (!args.get(4).is_null_or_undefined())
+            .then(|| (args.get(3).int32_value(scope).unwrap_or(1), args.get(4).to_rust_string_lossy(scope)));
+        let with_form = args.get(5).boolean_value(scope);
+        let quirks_mode = match args.get(6).int32_value(scope) {
+            Some(2) => QuirksMode::Quirks,
+            Some(1) => QuirksMode::LimitedQuirks,
+            _ => QuirksMode::NoQuirks,
+        };
+        let opts = TreeBuilderOpts { scripting_enabled: scripting, quirks_mode, ..Default::default() };
+        // (…the text is decoded already, its byte order mark gone with the decoding: a U+FEFF left is text)
+        let tokenizer_opts = TokenizerOpts { discard_bom: false, ..Default::default() };
+        let tokenizer = match &context {
+            None => Tokenizer::new(TreeBuilder::new(Sink::new(None), opts), tokenizer_opts),
+            Some((ns, local)) => {
+                let name = QualName::new(None, namespace_of(*ns), LocalName::from(local.as_str()));
+                let builder = TreeBuilder::new_for_fragment(Sink::new(Some(name)), 1, with_form.then_some(2), opts);
+                let initial_state = Some(builder.tokenizer_state_for_context_elem(scripting));
+                Tokenizer::new(builder, TokenizerOpts { initial_state, ..tokenizer_opts })
+            }
+        };
+        let input = BufferQueue::default();
+        input.push_back(StrTendril::from(html));
+        let all = parses(scope);
+        all.next += 1;
+        let id = all.next;
+        all.live.insert(id, Parse { tokenizer, input, set_aside: Vec::new(), standins, ended: false });
+        let status = all.live.get_mut(&id).map_or(-1, Parse::run);
+        let steps = steps(scope, id, status, true);
+        rv.set(steps.into());
+    });
 }
 
 fn parse_id(scope: &mut v8::PinScope<'_, '_>, args: &v8::FunctionCallbackArguments<'_>) -> u32 {
     args.get(0).uint32_value(scope).unwrap_or(0)
 }
 
-// __dom.htmlResume(id) -> [steps…, status]: the script the parse stopped for has run; parse on.
-fn html_resume(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+// __dom.htmlRun(id) -> [steps…, status]: parse on, from where the parse stopped.
+fn html_run(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let id = parse_id(scope, &args);
-    let status = parses(scope).live.get(&id).map_or(-1, Parse::run);
-    let steps = steps(scope, id, status, false);
-    rv.set(steps.into());
+    parser_op(scope, Some(id), |scope| {
+        let status = parses(scope).live.get_mut(&id).map_or(-1, Parse::run);
+        let steps = steps(scope, id, status, false);
+        rv.set(steps.into());
+    });
 }
 
-// __dom.htmlWrite(id, html, wellFormed, tokenize) -> [steps…, status]: `document.write(html)` from the script the parse stopped for — its
-// text goes in at the insertion point and is parsed up to there (the rest of the input is set aside until
-// `htmlWriteEnd`). A script it holds stops the parse there, as any other does (`htmlResume` goes on with the write).
-// `tokenize` false: there is a pending parsing-blocking script, and the text is only inserted.
-fn html_write(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+// __dom.htmlScriptBegin(id): a script runs with an insertion point — just past its `</script>`, or before the next
+// input character for the pending parsing-blocking one: the input after it is set aside until `htmlScriptEnd`.
+fn html_script_begin(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {
     let id = parse_id(scope, &args);
-    let well_formed = args.get(2).boolean_value(scope);
-    let tokenize = args.get(3).boolean_value(scope);
-    let mut standins = parses(scope).live.get(&id).and_then(|p| p.standins);
-    let html = parser_text(scope, args.get(1), well_formed, &mut standins);
-    let status = match parses(scope).live.get_mut(&id) {
-        Some(p) => {
-            p.standins = standins;
+    parser_op(scope, Some(id), |scope| {
+        if let Some(p) = parses(scope).live.get_mut(&id) {
             let mut rest = Vec::new();
-            if tokenize {
-                while let Some(chunk) = p.input.pop_front() {
-                    rest.push(chunk);
-                }
+            while let Some(chunk) = p.input.pop_front() {
+                rest.push(chunk);
             }
-            p.input.push_front(StrTendril::from(html));
-            if tokenize {
-                p.set_aside.push(rest);
-                p.run()
-            } else {
-                -1
-            }
+            p.set_aside.push(rest);
         }
-        None => -1,
-    };
-    let steps = steps(scope, id, status, false);
-    rv.set(steps.into());
+    });
 }
 
-// __dom.htmlWriteEnd(id): the write is parsed (or stopped at a pending script): the input set aside goes back after
-// whatever of it is left.
-fn html_write_end(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {
+// __dom.htmlScriptEnd(id): …and has run: what it wrote and the parse did not take stays where it is, and the input set
+// aside goes back after it.
+fn html_script_end(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {
     let id = parse_id(scope, &args);
-    if let Some(p) = parses(scope).live.get_mut(&id) {
-        if let Some(rest) = p.set_aside.pop() {
-            for chunk in rest {
+    parser_op(scope, Some(id), |scope| {
+        if let Some(p) = parses(scope).live.get_mut(&id) {
+            for chunk in p.set_aside.pop().unwrap_or_default() {
                 p.input.push_back(chunk);
             }
         }
-    }
+    });
+}
+
+// __dom.htmlWrite(id, html, wellFormed) -> whether it went in: `document.write(html)` from a script with an insertion
+// point puts its text there — at the end of the input the parse has not taken, before what is set aside. (`htmlRun`
+// parses it, but for a pending parsing-blocking script.) Nothing goes into a parse that has ended.
+fn html_write(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let id = parse_id(scope, &args);
+    parser_op(scope, Some(id), |scope| {
+        let well_formed = args.get(2).boolean_value(scope);
+        let Some(mut standins) = parses(scope).live.get_mut(&id).filter(|p| !p.ended).map(|p| std::mem::take(&mut p.standins)) else {
+            return rv.set_bool(false);
+        };
+        let html = parser_text(scope, args.get(1), well_formed, &mut standins);
+        if let Some(p) = parses(scope).live.get_mut(&id) {
+            p.standins = standins;
+            p.input.push_back(StrTendril::from(html));
+        }
+        rv.set_bool(true);
+    });
 }
 
 // __dom.htmlDone(id): the parse is over (or abandoned); its state goes.

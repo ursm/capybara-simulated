@@ -36,4 +36,22 @@ RSpec.describe 'HTML fragment parsing' do
     JS
     expect(got).to eq([0xD800, 0xDC00, 5, 0x1F600])
   end
+
+  # The foreign elements HTML counts as "special" — MathML mi, mo, mn, ms, mtext, annotation-xml; SVG foreignObject,
+  # desc, title — bound every scope: an end tag or a list item inside one does not reach past it. Chrome, all three.
+  it 'stops at a foreign element that bounds the scope' do
+    got = session.evaluate_script(<<~JS)
+      (() => {
+        const p = new DOMParser();
+        const tree = (h) => {
+          const ns = (n) => n.namespaceURI && n.namespaceURI.endsWith('svg') ? '@svg' : n.namespaceURI && n.namespaceURI.endsWith('MathML') ? '@m' : '';
+          const w = (n) => n.nodeType === 3 ? JSON.stringify(n.data) : n.localName + ns(n) + '(' + Array.from(n.childNodes).map(w).join(',') + ')';
+          return w(p.parseFromString(h, 'text/html').body);
+        };
+        return [tree('<li>a<svg><title><li>x'), tree('<p>q<math><annotation-xml encoding=text/html><div>w'), tree('<span><math><mi></span>q')];
+      })()
+    JS
+    expect(got).to eq(['body(li("a",svg@svg(title@svg(li("x")))))', 'body(p("q",math@m(annotation-xml@m(div("w")))))',
+                       'body(span(math@m(mi@m("q"))))'])
+  end
 end

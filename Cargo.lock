@@ -232,7 +232,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d045de693cb712d0b22c6a64be5b953f67b3ce00ab5ad3dd5d8b441886ab8e1a"
 dependencies = [
  "quote",
- "syn 3.0.5",
+ "syn 2.0.119",
 ]
 
 [[package]]
@@ -479,7 +479,7 @@ dependencies = [
 [[package]]
 name = "html5ever"
 version = "0.40.1"
-source = "git+https://github.com/ursm/html5ever?branch=csim#a4717e456ff1579e36f8ec7816bca47167fc7b5b"
+source = "git+https://github.com/ursm/html5ever?branch=csim#593cc45043a32901f6fd486be975a4b79fdd1929"
 dependencies = [
  "log",
  "markup5ever",
@@ -796,7 +796,7 @@ dependencies = [
 [[package]]
 name = "markup5ever"
 version = "0.40.1"
-source = "git+https://github.com/ursm/html5ever?branch=csim#a4717e456ff1579e36f8ec7816bca47167fc7b5b"
+source = "git+https://github.com/ursm/html5ever?branch=csim#593cc45043a32901f6fd486be975a4b79fdd1929"
 dependencies = [
  "log",
  "tendril",
@@ -1655,7 +1655,7 @@ dependencies = [
 [[package]]
 name = "tendril"
 version = "0.5.1"
-source = "git+https://github.com/ursm/html5ever?branch=csim#a4717e456ff1579e36f8ec7816bca47167fc7b5b"
+source = "git+https://github.com/ursm/html5ever?branch=csim#593cc45043a32901f6fd486be975a4b79fdd1929"
 dependencies = [
  "new_debug_unreachable",
 ]
@@ -1841,7 +1841,7 @@ dependencies = [
 [[package]]
 name = "web_atoms"
 version = "0.3.0"
-source = "git+https://github.com/ursm/html5ever?branch=csim#a4717e456ff1579e36f8ec7816bca47167fc7b5b"
+source = "git+https://github.com/ursm/html5ever?branch=csim#593cc45043a32901f6fd486be975a4b79fdd1929"
 dependencies = [
  "phf 0.14.0",
  "phf_codegen 0.14.0",

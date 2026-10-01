@@ -62,4 +62,52 @@ RSpec.describe 'document.write during parsing' do
     s = session_for('<table id="t"><tr><td>c1</td><script>document.write("<td>c2</td>")</script><td>c3</td></tr></table>')
     expect(s.evaluate_script("[...document.querySelectorAll('#t td')].map((c) => c.textContent)")).to eq(%w[c1 c2 c3])
   end
+
+  # An EXTERNAL parser-blocking script in the written markup is the pending parsing-blocking script: it runs once the
+  # nesting level is back to zero, and until it has, what is written goes in after what was written before it. Chrome:
+  # e1 runs before the text after it is parsed (`XYZ`, not `YXZ`), three written external scripts run in the order they
+  # were written, and one written by a NESTED script waits for the outer script to return.
+  def session_with_scripts(body)
+    scripts = %w[a b c e1].to_h {|n| ["/#{n}.js", "L.push('#{n}:' + txt('o'));"] }
+    html = <<~HTML
+      <!DOCTYPE html><meta charset="utf-8"><script>
+        window.L = [];
+        // The text of an element, its scripts' left out.
+        window.txt = (id) => { const e = document.getElementById(id); let s = ''; if (!e) return s;
+          const w = (n) => { if (n.nodeType === 3) s += n.data; else if (n.localName !== 'script') n.childNodes.forEach(w); };
+          w(e); return s.replace(/\\s+/g, ''); };
+      </script>
+      #{body}
+    HTML
+    app = ->(env) {
+      js = scripts[env['PATH_INFO']]
+      js ? [200, {'content-type' => 'text/javascript'}, [js]] : [200, {'content-type' => 'text/html'}, [html]]
+    }
+    simulated_session(app).tap {|s| s.visit '/' }
+  end
+
+  it 'parses what is written after a pending script where it was written' do
+    s = session_with_scripts(<<~HTML)
+      <div id=o><script>document.write('<script src=e1.js><\\/script>X'); document.write('Y');</script>Z</div>
+      <script>L.push('after:' + txt('o'));</script>
+      <script>document.write('<script src=a.js><\\/script>'); document.write('<script src=b.js><\\/script>'); document.write('<script src=c.js><\\/script>');</script>
+    HTML
+    expect(s.evaluate_script('L')).to eq(%w[e1: after:XYZ a:XYZ b:XYZ c:XYZ])
+  end
+
+  it 'runs a pending script a nested script wrote once the outer one has returned' do
+    s = session_with_scripts(<<~HTML)
+      <div id=o><script>function inner() { document.write('<script src=e1.js><\\/script>'); L.push('inner-after'); }
+      document.write('<script>inner()<\\/script>Q'); L.push('outer-after:' + txt('o'));</script>Z</div>
+    HTML
+    expect(s.evaluate_script('L')).to eq(%w[inner-after outer-after: e1:])
+    expect(s.evaluate_script("txt('o')")).to eq('QZ')
+  end
+
+  # A declarative shadow root's script that writes once the input has run out: no insertion point is left to write at,
+  # and nothing the parser does on the write may bring the process down (it did: a panic, aborting).
+  it 'survives a write from a declarative shadow root left open at the end of the input' do
+    s = session_with_scripts(%(<div id=h><template shadowrootmode=open><script>document.write('<b>x</b>')</script>))
+    expect(s.evaluate_script('document.getElementById("h") !== null')).to be true
+  end
 end
