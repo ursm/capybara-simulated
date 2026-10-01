@@ -3,6 +3,7 @@
 // handle must do in turn — settle a promise, dispatch an event — comes back as signals (`animSignals`).
 
 use style::selector_parser::PseudoElement;
+use style::properties::animated_properties::AnimationValue;
 
 use crate::animations::{
     AnimationError, AnimationId, CompositeOperation, EffectId, EffectTiming, FillMode, Keyframe, Phase,
@@ -367,23 +368,48 @@ fn anim_drop(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgumen
     });
 }
 
-// __dom.animCommitValues(animation, now) -> [property, value, …]: what `commitStyles()` writes (§4.4.19).
+// __dom.animCommitValues(animation, now[, width, height]) -> [property, value, …]: what `commitStyles()` writes
+// (§4.4.19). A transform interpolated as a MATRIX between two mismatched lists is no value a declaration can hold — it
+// is resolved against the reference box `width` × `height` where one is given, and comes back as written otherwise.
 fn anim_commit_values(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     with_engine(scope, &args, |scope, engine, arena| {
         let Some(id) = number_arg(scope, args.get(0)).map(|n| n as AnimationId) else { return };
         at_time(engine, number_arg(scope, args.get(1)));
+        let reference = number_arg(scope, args.get(2)).zip(number_arg(scope, args.get(3)));
         let mut items: Vec<v8::Local<v8::Value>> = Vec::new();
         for value in engine.committed_values(arena, id) {
             let declaration = value.uncompute();
             let mut css = String::new();
-            if declaration.to_css(&mut css).is_err() {
-                continue;
+            let resolved = match (&value, reference) {
+                (AnimationValue::Transform(transform), Some((w, h))) => resolved_matrix_css(transform, w as f32, h as f32),
+                _ => None,
+            };
+            match resolved {
+                Some(text) => css = text,
+                None if declaration.to_css(&mut css).is_err() => continue,
+                None => {},
             }
             items.push(string_value(scope, &declaration.id().name()));
             items.push(string_value(scope, &css));
         }
         rv.set(v8::Array::new_with_elements(scope, &items).into());
     });
+}
+
+// A transform holding an operation that is interpolated (or accumulated) as a matrix, as the one matrix it is against a
+// `width` × `height` reference box; None for any other.
+fn resolved_matrix_css(transform: &style::values::computed::Transform, width: f32, height: f32) -> Option<String> {
+    use style::values::computed::transform::{Matrix3D, TransformOperation};
+    use style::values::computed::Length;
+    use style_traits::ToCss;
+    if !transform.0.iter().any(|op| matches!(op, TransformOperation::InterpolateMatrix { .. } | TransformOperation::AccumulateMatrix { .. })) {
+        return None;
+    }
+    let reference = euclid::default::Rect::new(euclid::default::Point2D::origin(), euclid::default::Size2D::new(Length::new(width), Length::new(height)));
+    let (matrix, is_3d) = transform.to_transform_3d_matrix(Some(&reference)).ok()?;
+    let matrix = Matrix3D::from(matrix);
+    let op = if is_3d { TransformOperation::Matrix3D(matrix) } else { TransformOperation::Matrix(matrix.into_2d().ok()?) };
+    Some(style::values::generics::transform::Transform(vec![op].into()).to_css_string())
 }
 
 // __dom.animNextFrameDelay(now) -> ms until an animation next needs a frame, or -1 (none runs).

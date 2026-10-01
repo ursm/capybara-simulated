@@ -112,6 +112,12 @@ impl EffectTiming {
     // The timing at local time `local_time` of an effect played at `playback_rate` (whose sign is the animation
     // direction the phase boundaries are resolved by, §4.8.3).
     pub(crate) fn computed(&self, local_time: Option<f64>, playback_rate: f64) -> ComputedTiming {
+        self.computed_at(local_time, playback_rate, false)
+    }
+    // …with §4.6.6's ENDPOINT-INCLUSIVE active interval flag: a local time on the boundary the animation is playing
+    // towards is in the active interval, not past it — what `commitStyles()` asks (§6.4, "commit computed styles"), so a
+    // finished animation's last frame is what it writes, whichever way it played and whatever its fill.
+    pub(crate) fn computed_at(&self, local_time: Option<f64>, playback_rate: f64, endpoint_inclusive: bool) -> ComputedTiming {
         let active_duration = self.active_duration();
         let end_time = self.end_time();
         let mut out = ComputedTiming {
@@ -129,9 +135,9 @@ impl EffectTiming {
         let backwards = playback_rate < 0.0;
         let before_active = self.delay.min(end_time).max(0.0);
         let active_after = (self.delay + active_duration).min(end_time).max(0.0);
-        out.phase = if local < before_active || (backwards && local == before_active) {
+        out.phase = if local < before_active || (backwards && !endpoint_inclusive && local == before_active) {
             Phase::Before
-        } else if local > active_after || (!backwards && local == active_after) {
+        } else if local > active_after || (!backwards && !endpoint_inclusive && local == active_after) {
             Phase::After
         } else {
             Phase::Active
@@ -556,7 +562,7 @@ impl Animations {
             return Vec::new();
         };
         let (Some(target), Some(computed)) = (&effect.target, &effect.computed) else { return Vec::new() };
-        self.compose_up_to(target, None, &mut values, Some(id), tree_order);
+        self.compose_up_to(target, None, &mut values, Some(id), true, tree_order);
         computed.properties.iter().filter_map(|(property, ..)| values.get(property).cloned()).collect()
     }
 
@@ -607,16 +613,18 @@ impl Animations {
         underlying: &mut AnimationValueMap,
         tree_order: &impl Fn(NodeId, NodeId) -> Ordering,
     ) {
-        self.compose_up_to(target, Some(origin), underlying, None, tree_order);
+        self.compose_up_to(target, Some(origin), underlying, None, false, tree_order);
     }
 
-    // …of either origin (None), those up to and including animation `last`'s only.
+    // …of either origin (None), those up to and including animation `last`'s only, their phases ENDPOINT-INCLUSIVE
+    // where `endpoint_inclusive` (`computed_at`).
     fn compose_up_to(
         &self,
         target: &Target,
         origin: Option<AnimationOrigin>,
         underlying: &mut AnimationValueMap,
         last: Option<AnimationId>,
+        endpoint_inclusive: bool,
         tree_order: &impl Fn(NodeId, NodeId) -> Ordering,
     ) {
         let Some(effects) = self.by_target.get(&target.node) else { return };
@@ -638,15 +646,15 @@ impl Animations {
             ordered.truncate(at + 1);
         }
         for (animation, effect) in ordered {
-            self.compose_effect(animation, effect, underlying);
+            self.compose_effect(animation, effect, underlying, endpoint_inclusive);
         }
     }
 
     // One effect's values at its animation's current time, composited over `underlying`.
-    fn compose_effect(&self, animation: AnimationId, effect: &Effect, underlying: &mut AnimationValueMap) {
+    fn compose_effect(&self, animation: AnimationId, effect: &Effect, underlying: &mut AnimationValueMap, endpoint_inclusive: bool) {
         let Some(computed) = &effect.computed else { return };
         let rate = self.animations[&animation].playback_rate;
-        let timing = effect.timing.computed(self.current_time(animation), rate);
+        let timing = effect.timing.computed_at(self.current_time(animation), rate, endpoint_inclusive);
         let (Some(progress), Some(iteration)) = (timing.progress, timing.current_iteration) else { return };
         let accumulate = if effect.iteration_composite_accumulate { iteration } else { 0.0 };
         let implicit_easing = effect.implicit_easing.as_ref();
@@ -662,7 +670,7 @@ impl Animations {
     pub(crate) fn current_value(&self, id: AnimationId, property: &OwnedPropertyDeclarationId) -> Option<AnimationValue> {
         let effect = self.animations.get(&id)?.effect.and_then(|e| self.effects.get(&e))?;
         let mut values = AnimationValueMap::default();
-        self.compose_effect(id, effect, &mut values);
+        self.compose_effect(id, effect, &mut values, false);
         values.get(property).cloned()
     }
 
@@ -1417,6 +1425,19 @@ mod tests {
         assert_eq!((second.current_iteration, second.progress), (Some(1.0), Some(0.5)));
         assert_eq!(t.computed(Some(2100.0), 1.0).phase, Phase::After);
         assert_eq!(t.computed(None, 1.0).phase, Phase::Idle);
+    }
+
+    // §4.6.6: on the boundary it is playing towards, an effect is past it — unless the interval is endpoint-inclusive
+    // (`commitStyles()`), where it is active and at that end.
+    #[test]
+    fn an_endpoint_inclusive_boundary_is_active() {
+        let t = EffectTiming { duration: 1000.0, ..EffectTiming::default() };
+        assert_eq!(t.computed(Some(1000.0), 1.0).phase, Phase::After);
+        assert_eq!(t.computed(Some(0.0), -1.0).phase, Phase::Before);
+        let end = t.computed_at(Some(1000.0), 1.0, true);
+        assert_eq!((end.phase, end.progress), (Phase::Active, Some(1.0)));
+        let start = t.computed_at(Some(0.0), -1.0, true);
+        assert_eq!((start.phase, start.progress), (Phase::Active, Some(0.0)));
     }
 
     #[test]

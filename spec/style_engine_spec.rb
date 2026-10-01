@@ -578,6 +578,43 @@ RSpec.describe 'style engine invalidation' do
     expect(read[2..]).to eq(['rgb(128, 0, 128)', 'rgb(0, 0, 0)', 'rgb(128, 0, 0)'])
   end
 
+  # `commitStyles()` decides the phase ENDPOINT-INCLUSIVE (web-animations-1 §6.4), so a finished animation with no fill
+  # commits its last frame, whichever way it played: the engine read the end as past it and committed nothing. A
+  # transform interpolated as a MATRIX between mismatched lists resolves against the box — it was the identity, as
+  # read and as committed — and a target that cannot have a style attribute is an error. Chrome: 0.5 (the read before
+  # it 0.1, the boundary being the before phase), `matrix(2, 0, 0, 2, 100, 0)` three times, and the throw.
+  it 'commits a finished animation, a matrix-interpolated transform, and nothing to a foreign element' do
+    s = visit('<div id="a"></div><div id="b"></div>', css: '')
+    got = s.evaluate_script(<<~JS)
+      (() => {
+        const a = document.getElementById('a'), b = document.getElementById('b'), out = [];
+        a.style.opacity = '0.1';
+        let an = a.animate({opacity: [0.5, 1]}, {duration: 1});
+        an.playbackRate = -1;
+        an.finish();
+        out.push(getComputedStyle(a).opacity);
+        an.commitStyles();
+        out.push(a.style.opacity);
+        b.style.width = '200px';
+        b.style.height = '200px';
+        an = b.animate({transform: ['translate(100%, 0%)', 'scale(3)']}, 1000);
+        an.currentTime = 500;
+        out.push(getComputedStyle(b).transform);
+        an.commitStyles();
+        an.cancel();
+        out.push(b.style.transform, getComputedStyle(b).transform);
+        const foreign = document.createElementNS('http://example.org/test', 'test');
+        document.body.append(foreign);
+        an = a.animate({opacity: 0}, 1);
+        an.effect.target = foreign;
+        try { an.commitStyles(); out.push('no throw'); } catch (e) { out.push(e.name); }
+        return out;
+      })()
+    JS
+    expect(got).to eq(['0.1', '0.5', 'matrix(2, 0, 0, 2, 100, 0)', 'matrix(2, 0, 0, 2, 100, 0)', 'matrix(2, 0, 0, 2, 100, 0)',
+                       'NoModificationAllowedError'])
+  end
+
   # `:dir()` is the element's HTML DIRECTIONALITY, a state the engine matches like any other — a `dir=auto` scope's
   # from the first strong character of its text — and HTML's UA sheet sets `direction` from it (`[dir]:dir(rtl)`). So
   # a text edit that flips the scope restyles what matches, and what inherits from it (Chrome: ltr, then rtl).
