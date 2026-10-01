@@ -1964,11 +1964,12 @@ impl<'a> Walk<'a> {
     // position moved to where they go now — its records' parents, run and grid starts and containing blocks inside it, its
     // runs' records and inline entries — the anonymous boxes and inline boxes it holds named to the JS side again, and the
     // floats its formatting context had placed when it was done. False where it cannot be, for the caller to walk it.
-    // (Never in an attempt, never the `<body>`, whose formatting context reads the root's `overflow`.)
+    // (Never in an attempt, never the `<body>`, whose formatting context reads the root's `overflow`, and never a
+    // `<legend>`, which its SIBLINGS make its fieldset's rendered legend or not — a change no stamp of its own records.)
     fn splice(&mut self, c: NodeId, parent: i32, ctx: Ctx) -> bool {
         let Some(prior) = self.prior else { return false };
         let Some(node) = self.arena.get(c) else { return false };
-        if self.attempts > 0 || node.stamp.get() > prior.walked || &*node.local_name == "body" {
+        if self.attempts > 0 || node.stamp.get() > prior.walked || &*node.local_name == "body" || node.is_html_named("legend") {
             return false;
         }
         let Some(&j) = prior.by_nid.get(&c.to_f64().to_bits()) else { return false };

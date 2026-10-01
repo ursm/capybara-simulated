@@ -39,5 +39,41 @@ RSpec.describe 'the rendered legend' do
     ensure
       ENV['CSIM_STYLO'] = saved
     end
+
+    # …and which one it is follows its siblings: hiding the first legend makes the second the rendered one, and
+    # showing it again takes that back. Neither write touches the second legend, whose box both engines reused —
+    # 300px where Chrome shrinks it to 55.6, and the other way round.
+    it "follows a change to an earlier legend#{stylo == '1' ? ' (stylo)' : ''}" do
+      saved = ENV['CSIM_STYLO']
+      ENV['CSIM_STYLO'] = stylo
+      html = <<~HTML
+        <!DOCTYPE html><html><head><style>body { margin: 8px; font: 16px sans-serif } fieldset { width: 300px; margin: 0; padding: 0 10px; border: 2px solid } .n { display: none }</style></head><body>
+        <fieldset><legend id="a">first</legend><legend id="b">second</legend></fieldset>
+        </body></html>
+      HTML
+      s = simulated_session(->(_env) { [200, {'content-type' => 'text/html'}, [html]] })
+      s.visit '/'
+      width = "Math.round(document.getElementById('b').getBoundingClientRect().width * 10) / 10"
+      expect(s.evaluate_script(width)).to eq(300)
+      s.execute_script("document.getElementById('a').classList.add('n')")
+      expect(s.evaluate_script(width)).to eq(55.6)
+      s.execute_script("document.getElementById('a').classList.remove('n')")
+      expect(s.evaluate_script(width)).to eq(300)
+      # …and a WRAPPER around the first one: `display: contents` hands its legend to the fieldset's box, and a block
+      # takes it back, with no write to either legend.
+      s.execute_script(<<~JS)
+        const w = document.createElement('div');
+        document.getElementById('a').before(w);
+        w.append(document.getElementById('a'));
+        w.id = 'w';
+      JS
+      expect(s.evaluate_script(width)).to eq(55.6)
+      s.execute_script("document.getElementById('w').style.display = 'contents'")
+      expect(s.evaluate_script(width)).to eq(300)
+      s.execute_script("document.getElementById('w').style.display = 'block'")
+      expect(s.evaluate_script(width)).to eq(55.6)
+    ensure
+      ENV['CSIM_STYLO'] = saved
+    end
   end
 end
