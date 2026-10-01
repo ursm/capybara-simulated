@@ -58,4 +58,111 @@ RSpec.describe 'XPath' do
     JS
     expect(got).to be(true)
   end
+
+  # Chrome-measured, every figure below but the one `id()` notes.
+  it 'walks the sibling axes over text and comments, not only elements' do
+    s = session_with('<p><b>x</b>tail<!--c--><i>y</i></p><dl><dt>Name</dt>: <dd>Bob</dd></dl>')
+    got = s.evaluate_script(<<~'JS')
+      (() => {
+        const n = (x) => document.evaluate(x, document, null, XPathResult.NUMBER_TYPE, null).numberValue;
+        const str = (x) => document.evaluate(x, document, null, XPathResult.STRING_TYPE, null).stringValue;
+        return [
+          n('count(//b/following-sibling::node())'),
+          str('string(//b/following-sibling::text())'),
+          n('count(//i/preceding-sibling::comment())'),
+          str('name(//i/preceding-sibling::node()[1])'),
+          str('string(//dt/following-sibling::text()[1])'),
+          n('count(//b/following::text())')
+        ];
+      })()
+    JS
+    expect(got).to eq([3, 'tail', 1, '', ': ', 5])
+  end
+
+  it "takes a context node of another realm's wrapper" do
+    s = session_with('<iframe srcdoc="<p>in</p>"></iframe>')
+    got = s.evaluate_script(<<~'JS')
+      (() => {
+        const doc = document.querySelector('iframe').contentDocument;
+        const moved = doc.createElement('span');
+        document.body.appendChild(moved);
+        return [
+          document.evaluate('count(//p)', doc, null, XPathResult.NUMBER_TYPE, null).numberValue,
+          document.evaluate('name(/*)', moved, null, XPathResult.STRING_TYPE, null).stringValue
+        ];
+      })()
+    JS
+    expect(got).to eq([1, 'HTML'])
+  end
+
+  it 'keeps a lone surrogate in a literal' do
+    s = session_with('<p data-s="x"></p>')
+    got = s.evaluate_script(<<~'JS')
+      (() => {
+        document.querySelector('p').setAttribute('data-s', '\ud800');
+        return [
+          document.evaluate('"\ud800"', document, null, XPathResult.STRING_TYPE, null).stringValue === '\ud800',
+          document.evaluate('count(//p[@data-s="\ud800"])', document, null, XPathResult.NUMBER_TYPE, null).numberValue
+        ];
+      })()
+    JS
+    expect(got).to eq([true, 1])
+  end
+
+  # id() searches the tree the context node is in — the REC's document is the data model's root node — so a detached
+  # tree's own root is found (Firefox: 1; Chrome searches the node document instead, 0).
+  it "finds the root of a detached tree by id(), and rounds a negative half to -0" do
+    s = session_with('')
+    got = s.evaluate_script(<<~'JS')
+      (() => {
+        const root = document.createElement('div');
+        root.id = 'droot';
+        root.innerHTML = '<p><i></i></p>';
+        const i = root.querySelector('i');
+        return [
+          document.evaluate('count(id("droot"))', i, null, XPathResult.NUMBER_TYPE, null).numberValue,
+          document.evaluate('1 div round(-0.5)', document, null, XPathResult.NUMBER_TYPE, null).numberValue
+        ];
+      })()
+    JS
+    expect(got).to eq([1, -Float::INFINITY])
+  end
+
+  # An unprefixed test in an HTML document names the HTML namespace, ASCII-lowercased and then compared exactly (HTML
+  # "Interactions with XPath and XSLT"): no no-namespace element, and no attribute set mixed-case by setAttributeNS.
+  it 'matches no no-namespace element and no mixed-case attribute by an unprefixed test' do
+    s = session_with('<div id="d"></div>')
+    got = s.evaluate_script(<<~'JS')
+      (() => {
+        const d = document.getElementById('d');
+        d.appendChild(document.createElementNS(null, 'Foo'));
+        d.setAttributeNS(null, 'Data-Up', 'v');
+        const n = (x) => document.evaluate(x, document, null, XPathResult.NUMBER_TYPE, null).numberValue;
+        return [n('count(//Foo)'), n('count(//foo)'), n('count(//div[@Data-Up])'), n('count(//div[@data-up])'), n('count(//div/@data-up)')];
+      })()
+    JS
+    expect(got).to eq([0, 0, 0, 0, 0])
+  end
+
+  it 'reports an unknown function at compile, a fragment context, and its arguments in order' do
+    s = session_with('')
+    got = s.evaluate_script(<<~'JS')
+      (() => {
+        const err = (f) => { try { f(); return 'none'; } catch (e) { return e.name; } };
+        const order = [];
+        const resolver = () => { order.push('resolver'); return 'urn:x'; };
+        err(() => document.evaluate({ toString() { order.push('expr'); return '//p:a'; } }, 42, resolver));
+        const r = document.evaluate('//*', document, null, XPathResult.ORDERED_NODE_SNAPSHOT_TYPE, null);
+        return [
+          err(() => document.createExpression('foo()')),
+          err(() => document.createExpression('concat("a")')),
+          err(() => document.evaluate('.', document.createDocumentFragment(), null, 0, null)),
+          order.join(','),
+          err(() => r.snapshotItem()),
+          String(r)
+        ];
+      })()
+    JS
+    expect(got).to eq(['SyntaxError', 'SyntaxError', 'NotSupportedError', 'expr', 'TypeError', '[object XPathResult]'])
+  end
 end

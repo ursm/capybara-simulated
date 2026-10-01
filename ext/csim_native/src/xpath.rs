@@ -3,9 +3,10 @@
 // arena instead of a JS DOM adapter. Strings are UTF-16 code units, as a DOMString is (substring / string-length /
 // translate count units, as the browsers do).
 //
-// The DOM's XPath rules for an HTML document (HTML § "Interactions with XPath and XSLT"): an unprefixed name test
-// matches an HTML element ASCII case-insensitively, and an attribute of no namespace likewise; foreign content and
-// no-namespace elements keep XPath's case-sensitive, no-namespace rule.
+// The DOM's XPath rules for an HTML document (HTML § "Interactions with XPath and XSLT"): an unprefixed element name
+// test names the HTML namespace and is ASCII-lowercased before it is compared (so it matches no SVG and no
+// no-namespace element), and an unprefixed attribute test of an HTML element is ASCII-lowercased likewise; in an XML
+// document, and for a foreign element's attributes, the test is XPath's own — no namespace, case-sensitive.
 //
 // Namespace prefixes are resolved by the caller before evaluation (the page's resolver is JS, and is asked once per
 // prefix per evaluation, as Blink's parser asks it) and handed in.
@@ -129,8 +130,22 @@ fn is_ws(c: char) -> bool {
     matches!(c, ' ' | '\t' | '\r' | '\n')
 }
 
-fn tokenize(expr: &str) -> Result<Vec<Tok>, XError> {
-    let s: Vec<char> = expr.chars().collect();
+// `expr` as the DOMString it is: UTF-16 units. A name holds no lone surrogate, but a literal may, and keeps it — each
+// char decoded here is one unit or a pair, and a literal is cut from the units (`unit_at`), not re-encoded.
+fn tokenize(expr: &[u16]) -> Result<Vec<Tok>, XError> {
+    let mut s: Vec<char> = Vec::with_capacity(expr.len());
+    let mut unit_at: Vec<usize> = Vec::with_capacity(expr.len() + 1);
+    let mut u = 0;
+    for c in char::decode_utf16(expr.iter().copied()) {
+        unit_at.push(u);
+        let (c, units) = match c {
+            Ok(c) => (c, c.len_utf16()),
+            Err(_) => (char::REPLACEMENT_CHARACTER, 1),
+        };
+        u += units;
+        s.push(c);
+    }
+    unit_at.push(u);
     let n = s.len();
     let mut toks: Vec<Tok> = Vec::new();
     let mut i = 0;
@@ -191,7 +206,7 @@ fn tokenize(expr: &str) -> Result<Vec<Tok>, XError> {
             if j >= n {
                 return syntax(format!("unterminated string literal at {i}"));
             }
-            toks.push(Tok::Literal(utf16(&s[start..j].iter().collect::<String>())));
+            toks.push(Tok::Literal(expr[unit_at[start]..unit_at[j]].to_vec()));
             i = j + 1;
             continue;
         }
@@ -337,7 +352,8 @@ impl Axis {
 
 #[derive(Clone, Debug)]
 enum NodeTest {
-    Name { prefix: Option<String>, local: String },
+    // (…`lower` the local name ASCII-lowercased, which an HTML document's tests compare)
+    Name { prefix: Option<String>, local: String, lower: String },
     Node,
     Text,
     Comment,
@@ -562,7 +578,7 @@ impl ParserState {
                 self.expect(Tok::RParen)?;
                 test
             }
-            Tok::NameTest(prefix, local) => NodeTest::Name { prefix, local },
+            Tok::NameTest(prefix, local) => NodeTest::Name { lower: local.to_ascii_lowercase(), prefix, local },
             t => return syntax(format!("expected a node test but found {t:?}")),
         };
         let preds = self.predicates()?;
@@ -600,6 +616,15 @@ impl ParserState {
                     }
                 }
                 self.expect(Tok::RParen)?;
+                // (…a function the core library has not, or called with the wrong number of arguments, is no expression:
+                // REC §3.2 has a call to one an error, and DOM XPath reports it as INVALID_EXPRESSION_ERR at compile time)
+                if let Some(p) = &prefix {
+                    return syntax(format!("unknown function: {p}:{name}()"));
+                }
+                let Some((min, max)) = arity_of(&name) else { return syntax(format!("unknown function: {name}()")) };
+                if args.len() < min || args.len() > max {
+                    return syntax(format!("{name}() takes {min} to {max} arguments, not {}", args.len()));
+                }
                 Expr::Func(prefix, name, args)
             }
             t => return syntax(format!("unexpected token {t:?}")),
@@ -612,7 +637,7 @@ impl ParserState {
 // The expression's parse, normalized: a `descendant-or-self::node()` + `child::X[preds]` pair (what `//X` expands to)
 // fused into `descendant::X[preds]` where no predicate observes position — the same nodes in the same order, without
 // materialising every node of the subtree first.
-fn parse(text: &str) -> Result<Expr, XError> {
+fn parse(text: &[u16]) -> Result<Expr, XError> {
     let mut p = ParserState { toks: tokenize(text)?, pos: 0 };
     let mut e = p.expr()?;
     if *p.peek() != Tok::Eof {
@@ -657,6 +682,20 @@ fn optimize(e: &mut Expr) {
         Expr::Func(_, _, args) => args.iter_mut().for_each(optimize),
         _ => {}
     }
+}
+
+// The number of arguments each function of the core library (REC §4) takes, at least and at most.
+fn arity_of(name: &str) -> Option<(usize, usize)> {
+    Some(match name {
+        "last" | "position" | "true" | "false" => (0, 0),
+        "count" | "id" | "boolean" | "not" | "lang" | "sum" | "floor" | "ceiling" | "round" => (1, 1),
+        "local-name" | "namespace-uri" | "name" | "string" | "string-length" | "normalize-space" | "number" => (0, 1),
+        "concat" => (2, usize::MAX),
+        "starts-with" | "contains" | "substring-before" | "substring-after" => (2, 2),
+        "substring" => (2, 3),
+        "translate" => (3, 3),
+        _ => return None,
+    })
 }
 
 // A predicate that is a NUMBER — a proximity-position test.
@@ -723,11 +762,11 @@ fn collect_prefixes(e: &Expr, out: &mut Vec<String>) {
 
 // Parsed expressions, by text — Capybara replays a small set many times. Bounded, emptied when full.
 thread_local! {
-    static PARSED: RefCell<HashMap<String, Rc<Result<(Expr, Vec<String>), String>>>> = RefCell::new(HashMap::new());
+    static PARSED: RefCell<HashMap<Vec<u16>, Rc<Result<(Expr, Vec<String>), String>>>> = RefCell::new(HashMap::new());
 }
 const PARSED_LIMIT: usize = 1024;
 
-fn parsed(text: &str) -> Rc<Result<(Expr, Vec<String>), String>> {
+fn parsed(text: &[u16]) -> Rc<Result<(Expr, Vec<String>), String>> {
     if let Some(hit) = PARSED.with(|c| c.borrow().get(text).cloned()) {
         return hit;
     }
@@ -744,13 +783,13 @@ fn parsed(text: &str) -> Rc<Result<(Expr, Vec<String>), String>> {
         if c.len() >= PARSED_LIMIT {
             c.clear();
         }
-        c.insert(text.to_owned(), entry.clone());
+        c.insert(text.to_vec(), entry.clone());
     });
     entry
 }
 
 // The prefixes `text` names (to resolve before `evaluate`), or the SyntaxError's message.
-pub(crate) fn prefixes(text: &str) -> Result<Vec<String>, String> {
+pub(crate) fn prefixes(text: &[u16]) -> Result<Vec<String>, String> {
     match &*parsed(text) {
         Ok((_, p)) => Ok(p.clone()),
         Err(m) => Err(m.clone()),
@@ -1031,12 +1070,7 @@ impl<'a> Eval<'a> {
                 let nodes = self.ordered(&mut ns).to_vec();
                 Ok(Value::Nodes(NodeSet::new(self.apply_predicates(nodes, preds)?, true)))
             }
-            Expr::Func(prefix, name, args) => {
-                if let Some(p) = prefix {
-                    return type_err(format!("unknown function: {p}:{name}()"));
-                }
-                self.function(name, args, ctx)
-            }
+            Expr::Func(_, name, args) => self.function(name, args, ctx),
         }
     }
 
@@ -1105,19 +1139,15 @@ impl<'a> Eval<'a> {
         }))
     }
 
-    // The attribute a concrete `@name` / `@prefix:name` test names on element `id`.
-    fn named_attribute(&self, id: NodeId, test: (&Option<String>, &str)) -> Result<Option<XNode>, XError> {
-        match test.0 {
+    // The attribute a concrete `@name` / `@prefix:name` test names on element `id` — `matches`' rule, by lookup.
+    fn named_attribute(&self, id: NodeId, test: AttrTest<'_>) -> Result<Option<XNode>, XError> {
+        match test.prefix {
             Some(prefix) => {
                 let ns = self.resolve(prefix)?;
-                Ok(self.attribute_value(id, &ns, test.1))
+                Ok(self.attribute_value(id, &ns, test.local))
             }
-            None if self.html => {
-                let html_el = self.data(id).is_some_and(|n| &*n.ns == HTML_NS);
-                let local = if html_el { test.1.to_ascii_lowercase() } else { test.1.to_string() };
-                Ok(self.attribute_value(id, "", &local))
-            }
-            None => Ok(self.attribute_value(id, "", test.1)),
+            None if self.html && self.data(id).is_some_and(|n| &*n.ns == HTML_NS) => Ok(self.attribute_value(id, "", test.lower)),
+            None => Ok(self.attribute_value(id, "", test.local)),
         }
     }
 
@@ -1239,16 +1269,18 @@ impl<'a> Eval<'a> {
 
     // An axis's nodes from `x`, in axis order (a reverse axis in reverse document order).
     fn axis(&self, x: XNode, axis: Axis) -> Vec<XNode> {
+        // (…a node's siblings of every kind but a doctype, as `children` has them — not the arena's ELEMENT siblings)
         let siblings = |x: XNode, forward: bool| -> Vec<XNode> {
             let XNode::Node(id) = x else { return Vec::new() };
-            let mut out = Vec::new();
-            let mut cur = if forward { self.arena.next_sibling(id) } else { self.arena.prev_sibling(id) };
-            while let Some(s) = cur {
-                if self.data(s).is_some_and(|n| n.kind != NodeKind::Other) {
-                    out.push(XNode::Node(s));
-                }
-                cur = if forward { self.arena.next_sibling(s) } else { self.arena.prev_sibling(s) };
-            }
+            let Some(kids) = self.arena.parent_of(id).and_then(|p| self.data(p)).map(|p| &p.children) else { return Vec::new() };
+            let held = self.data(id).map(|n| n.child_index).filter(|&i| kids.get(i) == Some(&id));
+            let Some(at) = held.or_else(|| kids.iter().position(|&c| c == id)) else { return Vec::new() };
+            let live = |&c: &NodeId| self.data(c).is_some_and(|n| n.kind != NodeKind::Other);
+            let out: Vec<XNode> = if forward {
+                kids[at + 1..].iter().filter(|c| live(c)).map(|&c| XNode::Node(c)).collect()
+            } else {
+                kids[..at].iter().rev().filter(|c| live(c)).map(|&c| XNode::Node(c)).collect()
+            };
             out
         };
         let descendants = |x: XNode, out: &mut Vec<XNode>| {
@@ -1328,7 +1360,7 @@ impl<'a> Eval<'a> {
             NodeTest::Text => t == TEXT,
             NodeTest::Comment => t == COMMENT,
             NodeTest::Pi(target) => t == PI && target.as_ref().is_none_or(|lit| self.node_name(x) == *lit),
-            NodeTest::Name { prefix, local } => {
+            NodeTest::Name { prefix, local, lower } => {
                 if axis == Axis::Namespace {
                     return Ok(false);
                 }
@@ -1339,14 +1371,18 @@ impl<'a> Eval<'a> {
                 match prefix {
                     None if local == "*" => true,
                     None => {
-                        // (…an HTML element's name, and the name of an HTML element's attribute, fold ASCII case)
+                        // (…in an HTML document an unprefixed ELEMENT test names the HTML namespace, ASCII-lowercased, and an
+                        // attribute test of an HTML element is ASCII-lowercased: compared exactly after — a no-namespace
+                        // element is matched by no unprefixed test there, and an attribute set mixed-case by
+                        // `setAttributeNS` by none)
                         let (ns, name) = self.expanded_name(x);
-                        let html_name = self.html
-                            && match x {
-                                XNode::Attr(owner, _) => self.data(owner).is_some_and(|n| &*n.ns == HTML_NS) && ns.is_empty(),
-                                XNode::Node(_) => ns == HTML_NS,
-                            };
-                        if html_name { name.eq_ignore_ascii_case(local) } else { ns.is_empty() && name == local }
+                        match x {
+                            XNode::Node(_) if self.html => ns == HTML_NS && name == lower,
+                            XNode::Attr(owner, _) if self.html && self.data(owner).is_some_and(|n| &*n.ns == HTML_NS) => {
+                                ns.is_empty() && name == lower
+                            }
+                            _ => ns.is_empty() && name == local,
+                        }
                     }
                     Some(p) => {
                         let uri = self.resolve(p)?;
@@ -1394,11 +1430,9 @@ impl<'a> Eval<'a> {
                     if step.axis == Axis::SelfAxis {
                         return self.matches(ctx.node, &step.test, Axis::SelfAxis);
                     }
-                    if let (Axis::Attribute, NodeTest::Name { prefix, local }) = (step.axis, &step.test) {
-                        if local != "*" {
-                            let XNode::Node(id) = ctx.node else { return Ok(false) };
-                            return Ok(self.named_attribute(id, (prefix, local))?.is_some());
-                        }
+                    if let Some(test) = attribute_test(step) {
+                        let XNode::Node(id) = ctx.node else { return Ok(false) };
+                        return Ok(self.named_attribute(id, test)?.is_some());
                     }
                 }
                 Ok(matches!(self.eval(e, ctx)?, Value::Nodes(ns) if !ns.nodes.is_empty()))
@@ -1409,12 +1443,6 @@ impl<'a> Eval<'a> {
 
     // ── the core function library (REC §4) ──
     fn function(&self, name: &str, args: &[Expr], ctx: &Ctx) -> Result<Value, XError> {
-        let arity = |min: usize, max: usize| -> Result<(), XError> {
-            if args.len() < min || args.len() > max {
-                return type_err(format!("{name}() expects {min}-{max} argument(s), got {}", args.len()));
-            }
-            Ok(())
-        };
         let arg = |i: usize| self.eval(&args[i], ctx);
         let string_arg = |i: usize| -> Result<Str, XError> { Ok(self.to_str(&arg(i)?)) };
         let num_arg = |i: usize| -> Result<f64, XError> { Ok(self.to_num(&arg(i)?)) };
@@ -1426,28 +1454,22 @@ impl<'a> Eval<'a> {
         };
         // (the context node, or the first node of the argument)
         let target = || -> Result<Option<XNode>, XError> {
-            arity(0, 1)?;
             if args.is_empty() { Ok(Some(ctx.node)) } else { Ok(self.first(&nodes_arg(0)?)) }
         };
         let target_string = || -> Result<Str, XError> {
-            arity(0, 1)?;
             if args.is_empty() { Ok((*self.string_value(ctx.node)).clone()) } else { string_arg(0) }
         };
         Ok(match name {
             "last" => {
-                arity(0, 0)?;
                 Value::Number(ctx.size as f64)
             }
             "position" => {
-                arity(0, 0)?;
                 Value::Number(ctx.position as f64)
             }
             "count" => {
-                arity(1, 1)?;
                 Value::Number(nodes_arg(0)?.nodes.len() as f64)
             }
             "id" => {
-                arity(1, 1)?;
                 let tokens: Vec<Str> = match arg(0)? {
                     Value::Nodes(ns) => ns.nodes.iter().flat_map(|&n| split_ws(&self.string_value(n))).collect(),
                     v => split_ws(&self.to_str(&v)),
@@ -1467,9 +1489,6 @@ impl<'a> Eval<'a> {
             }
             "string" => Value::Str(target_string()?),
             "concat" => {
-                if args.len() < 2 {
-                    return type_err(format!("concat() expects 2 or more arguments, got {}", args.len()));
-                }
                 let mut out = Vec::new();
                 for i in 0..args.len() {
                     out.extend(string_arg(i)?);
@@ -1477,15 +1496,12 @@ impl<'a> Eval<'a> {
                 Value::Str(out)
             }
             "starts-with" => {
-                arity(2, 2)?;
                 Value::Bool(string_arg(0)?.starts_with(&string_arg(1)?))
             }
             "contains" => {
-                arity(2, 2)?;
                 Value::Bool(find(&string_arg(0)?, &string_arg(1)?).is_some())
             }
             "substring-before" | "substring-after" => {
-                arity(2, 2)?;
                 let (s, sub) = (string_arg(0)?, string_arg(1)?);
                 Value::Str(match find(&s, &sub) {
                     None => Vec::new(),
@@ -1494,7 +1510,6 @@ impl<'a> Eval<'a> {
                 })
             }
             "substring" => {
-                arity(2, 3)?;
                 let s = string_arg(0)?;
                 let lo = xpath_round(num_arg(1)?);
                 let hi = if args.len() == 3 { lo + xpath_round(num_arg(2)?) } else { f64::INFINITY };
@@ -1505,7 +1520,6 @@ impl<'a> Eval<'a> {
             "string-length" => Value::Number(target_string()?.len() as f64),
             "normalize-space" => Value::Str(normalize_space(&target_string()?)),
             "translate" => {
-                arity(3, 3)?;
                 let (s, from, to) = (string_arg(0)?, string_arg(1)?, string_arg(2)?);
                 Value::Str(
                     s.into_iter()
@@ -1517,19 +1531,15 @@ impl<'a> Eval<'a> {
                 )
             }
             "boolean" => {
-                arity(1, 1)?;
                 Value::Bool(self.to_bool(&arg(0)?))
             }
             "not" => {
-                arity(1, 1)?;
                 Value::Bool(!self.to_bool(&arg(0)?))
             }
             "true" | "false" => {
-                arity(0, 0)?;
                 Value::Bool(name == "true")
             }
             "lang" => {
-                arity(1, 1)?;
                 let target = String::from_utf16_lossy(&string_arg(0)?).to_ascii_lowercase();
                 let mut lang = None;
                 let mut cur = Some(ctx.node);
@@ -1545,26 +1555,21 @@ impl<'a> Eval<'a> {
                 Value::Bool(lang.is_some_and(|l| l == target || l.starts_with(&format!("{target}-"))))
             }
             "number" => {
-                arity(0, 1)?;
                 Value::Number(if args.is_empty() { str_to_number(&self.string_value(ctx.node)) } else { num_arg(0)? })
             }
             "sum" => {
-                arity(1, 1)?;
                 Value::Number(nodes_arg(0)?.nodes.iter().map(|&n| str_to_number(&self.string_value(n))).sum())
             }
             "floor" => {
-                arity(1, 1)?;
                 Value::Number(num_arg(0)?.floor())
             }
             "ceiling" => {
-                arity(1, 1)?;
                 Value::Number(num_arg(0)?.ceil())
             }
             "round" => {
-                arity(1, 1)?;
                 Value::Number(xpath_round(num_arg(0)?))
             }
-            _ => return type_err(format!("unknown function: {name}()")),
+            _ => unreachable!("a function the parser admits: {name}()"),
         })
     }
 
@@ -1575,15 +1580,20 @@ impl<'a> Eval<'a> {
             return out;
         }
         let wanted: HashSet<String> = ids.iter().map(|t| String::from_utf16_lossy(t)).collect();
-        let mut stack: Vec<NodeId> = self.data(self.root).map_or_else(Vec::new, |n| n.children.iter().rev().copied().collect());
+        // (…from the root itself, which is an element in a detached tree)
+        let mut stack = vec![self.root];
         while let Some(c) = stack.pop() {
             let Some(n) = self.data(c) else { continue };
-            if n.kind == NodeKind::Element {
-                if n.plain_attr("id").is_some_and(|v| wanted.contains(v)) {
-                    out.push(XNode::Node(c));
+            match n.kind {
+                NodeKind::Element => {
+                    if n.plain_attr("id").is_some_and(|v| wanted.contains(v)) {
+                        out.push(XNode::Node(c));
+                    }
                 }
-                stack.extend(n.children.iter().rev().copied());
+                NodeKind::Document | NodeKind::Fragment => {}
+                _ => continue,
             }
+            stack.extend(n.children.iter().rev().copied());
         }
         out
     }
@@ -1612,13 +1622,27 @@ fn single_relative_step(e: &Expr) -> Option<&Step> {
     }
 }
 
-// A relative `@name` / `./@name` step with a concrete name and no predicate.
-fn simple_attribute_test(e: &Expr) -> Option<(&Option<String>, &str)> {
-    let s = single_relative_step(e)?;
+// A concrete attribute name test: `@name` / `@prefix:name`.
+#[derive(Clone, Copy)]
+struct AttrTest<'e> {
+    prefix: &'e Option<String>,
+    local: &'e str,
+    lower: &'e str,
+}
+
+// The step's, where it is an attribute step with a concrete name and no predicate.
+fn attribute_test(s: &Step) -> Option<AttrTest<'_>> {
     match (&s.axis, &s.test) {
-        (Axis::Attribute, NodeTest::Name { prefix, local }) if s.preds.is_empty() && local != "*" => Some((prefix, local)),
+        (Axis::Attribute, NodeTest::Name { prefix, local, lower }) if s.preds.is_empty() && local != "*" => {
+            Some(AttrTest { prefix, local, lower })
+        }
         _ => None,
     }
+}
+
+// A relative `@name` / `./@name` step with a concrete name and no predicate.
+fn simple_attribute_test(e: &Expr) -> Option<AttrTest<'_>> {
+    attribute_test(single_relative_step(e)?)
 }
 
 fn is_pure_node_set(e: &Expr) -> bool {
@@ -1679,7 +1703,8 @@ fn xpath_round(x: f64) -> f64 {
     if x.is_nan() || x.is_infinite() {
         return x;
     }
-    (x + 0.5).floor()
+    let r = (x + 0.5).floor();
+    if r == 0.0 && x.is_sign_negative() { -0.0 } else { r }
 }
 
 // number(string) (REC §4.4): optional whitespace, an optional `-`, Digits ('.' Digits?)? | '.' Digits — else NaN.
@@ -1739,7 +1764,7 @@ const BOOLEAN_TYPE: u8 = 3;
 // `namespaces`; the value as `result_type` asks for it — a TypeError where a node-set is asked of another value.
 pub(crate) fn evaluate(
     arena: &RealmArena,
-    text: &str,
+    text: &[u16],
     context: XNode,
     html: bool,
     namespaces: &HashMap<String, String>,
@@ -1824,19 +1849,31 @@ mod tests {
 
     #[test]
     fn lexes_operator_names_before_parens() {
-        assert!(parse("(a = 'x') or (b = 'y')").is_ok());
-        assert!(parse("div div div").is_ok());
-        assert!(matches!(parse("$x"), Err(XError::Syntax(_))));
-        assert!(matches!(parse("//*["), Err(XError::Syntax(_))));
+        assert!(parse(&utf16("(a = 'x') or (b = 'y')")).is_ok());
+        assert!(parse(&utf16("div div div")).is_ok());
+        assert!(matches!(parse(&utf16("$x")), Err(XError::Syntax(_))));
+        assert!(matches!(parse(&utf16("//*[")), Err(XError::Syntax(_))));
+        // (…an unknown function, or a known one called with the wrong number of arguments, is no expression)
+        assert!(matches!(parse(&utf16("foo()")), Err(XError::Syntax(_))));
+        assert!(matches!(parse(&utf16("concat('a')")), Err(XError::Syntax(_))));
+        assert!(matches!(parse(&utf16("p:f(1)")), Err(XError::Syntax(_))));
+        assert!(parse(&utf16("concat('a', 'b', 'c')")).is_ok());
     }
 
     #[test]
     fn fuses_descendant_steps_unless_positional() {
-        let Ok(Expr::Path(_, steps)) = parse("//a[@href]") else { panic!() };
+        let Ok(Expr::Path(_, steps)) = parse(&utf16("//a[@href]")) else { panic!() };
         assert_eq!(steps.len(), 1);
         assert_eq!(steps[0].axis, Axis::Descendant);
-        let Ok(Expr::Path(_, steps)) = parse("//a[1]") else { panic!() };
+        let Ok(Expr::Path(_, steps)) = parse(&utf16("//a[1]")) else { panic!() };
         assert_eq!(steps.len(), 2);
+    }
+
+    #[test]
+    fn keeps_a_lone_surrogate_in_a_literal() {
+        let units = [b'"' as u16, 0xD800, b'x' as u16, b'"' as u16];
+        let Ok(Expr::Literal(l)) = parse(&units) else { panic!() };
+        assert_eq!(l, vec![0xD800, b'x' as u16]);
     }
 
     #[test]
@@ -1850,13 +1887,14 @@ mod tests {
         assert!(str_to_number(&utf16(".")).is_nan());
         assert_eq!(str_to_number(&utf16(".5")), 0.5);
         assert_eq!(normalize_space(&utf16("  a \n b  ")), utf16("a b"));
-        assert_eq!(xpath_round(-0.5), 0.0);
+        assert!(xpath_round(-0.5) == 0.0 && xpath_round(-0.5).is_sign_negative());
+        assert!(xpath_round(-0.0).is_sign_negative() && xpath_round(0.2).is_sign_positive());
         assert_eq!(xpath_round(2.5), 3.0);
     }
 
     #[test]
     fn collects_prefixes() {
-        let (e, p) = match &*parsed("//svg:rect[@xlink:href]/xml:x") {
+        let (e, p) = match &*parsed(&utf16("//svg:rect[@xlink:href]/xml:x")) {
             Ok(x) => x.clone(),
             Err(m) => panic!("{m}"),
         };

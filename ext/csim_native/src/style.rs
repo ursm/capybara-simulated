@@ -2555,7 +2555,7 @@ impl<'a> StyleNode<'a> {
         &self.slot().data
     }
     fn first_child_element(&self) -> Option<Self> {
-        self.arena().first_child(self.id).map(|c| self.at(c))
+        self.arena().first_element_child(self.id).map(|c| self.at(c))
     }
     fn is_html(&self) -> bool {
         self.node().is_html()
@@ -2760,13 +2760,13 @@ impl<'a> selectors::Element for StyleNode<'a> {
         false
     }
     fn prev_sibling_element(&self) -> Option<Self> {
-        self.arena().prev_sibling(self.id).map(|s| self.at(s))
+        self.arena().prev_element_sibling(self.id).map(|s| self.at(s))
     }
     fn next_sibling_element(&self) -> Option<Self> {
-        self.arena().next_sibling(self.id).map(|s| self.at(s))
+        self.arena().next_element_sibling(self.id).map(|s| self.at(s))
     }
     fn first_element_child(&self) -> Option<Self> {
-        self.arena().first_child(self.id).map(|c| self.at(c))
+        self.arena().first_element_child(self.id).map(|c| self.at(c))
     }
     fn is_html_element_in_html_document(&self) -> bool {
         self.is_html() && self.engine().html_document
@@ -3294,11 +3294,11 @@ mod tests {
         ];
         // …and an attribute that is not one declaration of its property sets nothing at all.
         let arena_for_injection = RealmArena::default();
-        let injected = StyleEngine::new(&arena_for_injection, QuirksMode::NoQuirks, (800.0, 600.0), UrlExtraData::from(url::Url::parse("about:blank").unwrap()));
+        let injected = StyleEngine::new(&arena_for_injection, QuirksMode::NoQuirks, true, (800.0, 600.0), UrlExtraData::from(url::Url::parse("about:blank").unwrap()));
         let hints = vec![("font-family", "x; display: none".to_owned()), ("color", "red; display: none".to_owned())];
         assert!(injected.hint_block(&hints, false).is_none());
         let arena = RealmArena::default();
-        let engine = StyleEngine::new(&arena, QuirksMode::NoQuirks, (800.0, 600.0), UrlExtraData::from(url::Url::parse("about:blank").unwrap()));
+        let engine = StyleEngine::new(&arena, QuirksMode::NoQuirks, true, (800.0, 600.0), UrlExtraData::from(url::Url::parse("about:blank").unwrap()));
         for (tag, attrs) in cases {
             let mut node = NodeData::of_kind(NodeKind::Element, Vec::new());
             node.local_name = web_atoms::LocalName::from(*tag);

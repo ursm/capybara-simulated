@@ -795,11 +795,11 @@ impl RealmArena {
         // reused) reads as no parent, so the node matches as a detached root rather than under an alias.
         self.get(parent).map(|_| parent)
     }
-    pub(crate) fn first_child(&self, id: NodeId) -> Option<NodeId> {
+    pub(crate) fn first_element_child(&self, id: NodeId) -> Option<NodeId> {
         let node = self.get(id)?;
         node.children.iter().copied().find(|&c| self.is_element(c))
     }
-    pub(crate) fn prev_sibling(&self, id: NodeId) -> Option<NodeId> {
+    pub(crate) fn prev_element_sibling(&self, id: NodeId) -> Option<NodeId> {
         let node = self.get(id)?;
         let parent = self.get(node.parent?)?;
         // Step back from this child's position, skipping any stale edge, to the nearest live sibling.
@@ -815,7 +815,7 @@ impl RealmArena {
         }
         None
     }
-    pub(crate) fn next_sibling(&self, id: NodeId) -> Option<NodeId> {
+    pub(crate) fn next_element_sibling(&self, id: NodeId) -> Option<NodeId> {
         let node = self.get(id)?;
         let parent = self.get(node.parent?)?;
         let mut i = node.child_index + 1;
@@ -1893,7 +1893,7 @@ fn xpath_prefixes(
     args: v8::FunctionCallbackArguments<'_>,
     mut rv: v8::ReturnValue<'_, v8::Value>,
 ) {
-    let text = String::from_utf16_lossy(&utf16_arg(scope, args.get(0)));
+    let text = utf16_arg(scope, args.get(0));
     match crate::xpath::prefixes(&text) {
         Ok(prefixes) => {
             let array = v8::Array::new(scope, prefixes.len() as i32);
@@ -1923,7 +1923,7 @@ fn xpath_evaluate(
     let Some(id) = nid_arg(scope, &args, 1) else {
         return;
     };
-    let text = String::from_utf16_lossy(&utf16_arg(scope, args.get(0)));
+    let text = utf16_arg(scope, args.get(0));
     let attr_key = args.get(2).is_string().then(|| args.get(2).to_rust_string_lossy(scope));
     let html = args.get(3).is_true();
     let mut namespaces = std::collections::HashMap::new();
@@ -2011,9 +2011,9 @@ fn compile_selector(
     rv.set_int32(crate::selector::compile_selector(&text));
 }
 
-// __dom.matchesCompiled(nid, handle) -> bool, or undefined when the handle/node is out of range so the
-// caller falls back to css. The per-match hot path of authoritative cascade matching: a nid + an
-// integer handle, no string.
+// __dom.matchesCompiled(nid, handle, quirks, xml) -> bool, or undefined when the handle/node is out of range so the
+// caller falls back to `matchesRule`. The per-match hot path of authoritative cascade matching: a nid + an integer
+// handle, no string — in the document's mode (`xml`: not an HTML document, where no name folds case).
 fn matches_compiled(
     scope: &mut v8::PinScope<'_, '_>,
     args: v8::FunctionCallbackArguments<'_>,
@@ -2028,13 +2028,15 @@ fn matches_compiled(
     };
     let cid = realm_id(scope, &args);
     let quirks = args.get(2).is_true();
-    if let Some(hit) = crate::selector::matches_compiled(realm(scope, cid), id, handle, quirks) {
+    let html_doc = !args.get(3).is_true();
+    if let Some(hit) = crate::selector::matches_compiled(realm(scope, cid), id, handle, quirks, html_doc) {
         rv.set_bool(hit);
     }
 }
 
-// __dom.cascadeLoad(records: Float64Array, keys: string[], propCount, quirks) -> the number of rules loaded. Replaces
-// the calling realm's rule set, for a document in the given mode; the record layout is `CascadeStore::load`'s.
+// __dom.cascadeLoad(records: Float64Array, keys: string[], propCount, quirks, xml) -> the number of rules loaded.
+// Replaces the calling realm's rule set, for a document in the given mode and of the given kind (`xml`: not an HTML
+// document); the record layout is `CascadeStore::load`'s.
 fn cascade_load(
     scope: &mut v8::PinScope<'_, '_>,
     args: v8::FunctionCallbackArguments<'_>,
@@ -2042,6 +2044,7 @@ fn cascade_load(
 ) {
     let prop_count = args.get(2).integer_value(scope).unwrap_or(0).max(0) as usize;
     let quirks = args.get(3).is_true();
+    let xml = args.get(4).is_true();
     let mut keys = Vec::new();
     if let Ok(arr) = v8::Local::<v8::Array>::try_from(args.get(1)) {
         for i in 0..arr.length() {
@@ -2053,7 +2056,7 @@ fn cascade_load(
         }
     }
     let cid = realm_id(scope, &args);
-    let store = crate::cascade::CascadeStore::load(&f64_arg(args.get(0)), &keys, prop_count, quirks);
+    let store = crate::cascade::CascadeStore::load(&f64_arg(args.get(0)), &keys, prop_count, quirks, xml);
     let n = store.rule_count();
     dom(scope).cascades.insert(cid, store);
     rv.set_int32(n as i32);

@@ -101,6 +101,8 @@ pub(crate) struct CascadeStore {
     // The document's mode: a class or id selector matches ASCII case-insensitively in quirks mode, so the JS side
     // keys those buckets lowercased and they are asked for lowercased here, and the matcher is told.
     quirks: bool,
+    // …and its kind: in an XML document (`xml`) no type selector or attribute name folds case.
+    xml: bool,
 }
 
 fn layer_priority(layer: Option<f64>, important: bool) -> f64 {
@@ -128,10 +130,11 @@ impl CascadeStore {
     //   declaration count, then per declaration: property, declaration, important (0/1)
     // — and `keys` the term-key strings it names. A record that runs past the buffer ends the load there: a
     // truncated table answers for fewer rules, which the JS side never trusts, since it checks the count.
-    pub(crate) fn load(nums: &[f64], keys: &[String], prop_count: usize, quirks: bool) -> CascadeStore {
+    pub(crate) fn load(nums: &[f64], keys: &[String], prop_count: usize, quirks: bool, xml: bool) -> CascadeStore {
         let mut store = CascadeStore {
             best: vec![(0, Key { important: false, layer_priority: 0.0, spec: [0; 3], source: 0.0 }, 0); prop_count],
             quirks,
+            xml,
             ..Default::default()
         };
         let mut i = 0;
@@ -260,7 +263,7 @@ impl CascadeStore {
         }
         self.touched.clear();
         let bloom = ancestor_bloom(arena, id);
-        let el = NodeRef { arena, id, html_doc: true };
+        let el = NodeRef { arena, id, html_doc: !self.xml };
         let rules = &self.rules;
         let best = &mut self.best;
         let touched = &mut self.touched;

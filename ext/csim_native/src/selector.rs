@@ -395,13 +395,13 @@ impl<'a> Element for NodeRef<'a> {
     }
 
     fn prev_sibling_element(&self) -> Option<Self> {
-        self.arena.prev_sibling(self.id).map(|s| self.at(s))
+        self.arena.prev_element_sibling(self.id).map(|s| self.at(s))
     }
     fn next_sibling_element(&self) -> Option<Self> {
-        self.arena.next_sibling(self.id).map(|s| self.at(s))
+        self.arena.next_element_sibling(self.id).map(|s| self.at(s))
     }
     fn first_element_child(&self) -> Option<Self> {
-        self.arena.first_child(self.id).map(|c| self.at(c))
+        self.arena.first_element_child(self.id).map(|c| self.at(c))
     }
 
     fn is_html_element_in_html_document(&self) -> bool {
@@ -725,7 +725,7 @@ pub fn with_compiled<R>(f: impl FnOnce(&[SelectorList<CsimImpl>]) -> R) -> R {
 // range or the node id is stale (the caller asks selectors.js instead); `Some(bool)` is authoritative.
 // Like `query`, the crate's ancestor walk (for combinators) relies on the arena being acyclic — a
 // property the sync layer maintains (it mirrors the acyclic JS DOM); there is no per-call cycle cap here.
-pub fn matches_compiled(arena: &RealmArena, id: NodeId, handle: i32, quirks: bool) -> Option<bool> {
+pub fn matches_compiled(arena: &RealmArena, id: NodeId, handle: i32, quirks: bool, html_doc: bool) -> Option<bool> {
     if handle < 0 || arena.get(id).is_none() {
         return None;
     }
@@ -741,7 +741,7 @@ pub fn matches_compiled(arena: &RealmArena, id: NodeId, handle: i32, quirks: boo
             NeedsSelectorFlags::No,
             MatchingForInvalidation::No,
         );
-        Some(matches_selector_list(list, &NodeRef { arena, id, html_doc: true }, &mut ctx))
+        Some(matches_selector_list(list, &NodeRef { arena, id, html_doc }, &mut ctx))
     })
 }
 
