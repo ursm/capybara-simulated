@@ -130,4 +130,22 @@ RSpec.describe 'HTML parser custom-element construction' do
     JS
     expect(got).to eq(['1', true, true, '1'])
   end
+
+  # An element its constructor makes BEFORE `super()` is an element of its own: an upgrade's pending element is the
+  # `super()` call's, not the first construction the constructor happens to start.
+  it 'gives an element made before super() in an upgrade an element of its own' do
+    s = session_for('<late-el><b>child</b></late-el>')
+    got = s.evaluate_script(<<~JS)
+      (() => {
+        let made = null;
+        class LateEl extends HTMLElement {
+          constructor() { made = document.createElement('span'); super(); }
+        }
+        customElements.define('late-el', LateEl);
+        const el = document.querySelector('late-el');
+        return [made !== el, made.localName, el.localName, el instanceof LateEl];
+      })()
+    JS
+    expect(got).to eq([true, 'span', 'late-el', true])
+  end
 end
