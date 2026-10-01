@@ -63,4 +63,25 @@ RSpec.describe 'Rust walk coverage' do
     )
     expect(rust).to eq(js)
   end
+
+  # An `<object>` is the default object size where it shows a resource and the box its style makes it where it shows its
+  # fallback; an `<embed>` with no resource is no box at all (Chrome, `uaNotRendered`).
+  it 'lays out an object, its fallback, and no src-less embed' do
+    rust, js = both_walks(
+      '<div style="font: 16px monospace"><object data="x.png"></object><object><span>fallback</span></object>' \
+      '<embed type="text/plain"><p>after</p></div>'
+    )
+    expect(rust).to eq(js)
+    expect(rust.find {|b| b[0] == 'embed' }[3..4]).to eq([0, 0])
+  end
+
+  # An intrinsic-size keyword on a replaced element is its intrinsic width, as the JS layout has it; `stretch` is an auto
+  # width, a block's filling its containing block.
+  it 'lays out keyword widths on controls and a stretch width' do
+    rust, js = both_walks(
+      '<div style="width: 300px; font: 16px monospace"><input type="date" style="width: min-content">' \
+      '<input type="range" style="display: block; width: max-content"><div style="width: stretch; margin: 0 7px">x</div></div>'
+    )
+    expect(rust).to eq(js)
+  end
 end

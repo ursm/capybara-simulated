@@ -1411,14 +1411,26 @@ const OWN_CONTEXT_TAGS: &[&str] = &[
     "button", "input", "select", "textarea", "fieldset", "meter", "progress", "marquee", "img", "canvas", "video", "audio",
     "object", "embed", "iframe", "frame", "svg",
 ];
-// The elements with an INTRINSIC size — the replaced elements and the controls, sized from data or UA rules — which
-// is what the JS model asks of a box to call it replaced (`intrinsicSize`).
-fn replaced_or_control(tag: &str) -> bool {
-    matches!(
-        tag,
-        "input" | "select" | "textarea" | "meter" | "progress" | "img" | "canvas" | "video" | "audio" | "object" | "embed"
-            | "iframe" | "frame" | "svg"
-    )
+// Whether an element has an INTRINSIC size — a replaced element or a control, sized from data or UA rules — which is
+// what the JS model asks of a box to call it replaced (`intrinsicSize`): by its tag, but an `<object>` showing its
+// fallback content is no replaced element at all.
+fn replaced_or_control(arena: &RealmArena, id: NodeId, node: &crate::dom::NodeData) -> bool {
+    match node.rendering_tag() {
+        "object" => !renders_object_fallback(arena, id, node),
+        tag => matches!(
+            tag,
+            "input" | "select" | "textarea" | "meter" | "progress" | "img" | "canvas" | "video" | "audio" | "embed" | "iframe"
+                | "frame" | "svg"
+        ),
+    }
+}
+// An `<object>` that renders its FALLBACK content — its children, as the box its own style makes it — rather than a
+// resource (`rendersObjectFallback`): one with no `data` and some content, an element or text that is not white space.
+fn renders_object_fallback(arena: &RealmArena, id: NodeId, node: &crate::dom::NodeData) -> bool {
+    node.get_attr("data").is_none()
+        && arena.get(id).is_some_and(|n| {
+            n.children.iter().filter_map(|&c| arena.get(c)).any(|c| c.kind == NodeKind::Element || (c.kind == NodeKind::Text && has_content(&c.data)))
+        })
 }
 // …and HTML's WIDGETS, whose box the UA decides however the page spells a block-level `display` (layout.js
 // `WIDGET_TAGS` / `WIDGET_BLOCK_DISPLAYS`: a `<button style="display: table">` is a flow-root block).
@@ -1515,12 +1527,21 @@ impl<'a> Walk<'a> {
             }
         };
         for c in first.into_iter().chain(kids.iter().copied().filter(|&c| self.arena.get(c).is_some())).chain(last) {
+            if self.not_rendered(c) {
+                continue;
+            }
             if self.boxless(c) {
                 self.push_children(c, out);
             } else {
                 out.push(c);
             }
         }
+    }
+    // An element no UA renders though its style says it is there (`uaNotRendered`): an `<embed>` with no resource, which
+    // Chrome gives no box at all while its computed `display` stays `inline` — so it is no child of any box here.
+    fn not_rendered(&self, c: NodeId) -> bool {
+        let n = self.node(c);
+        n.rendering_tag() == "embed" && n.get_attr("src").is_none()
     }
     // Is `c` an element that generates no box of its own, but whose children stand in for it (`display: contents`)?
     // The `white-space` a text node collapses by: the box-less element's it is spliced out of where it is (the one
@@ -1751,14 +1772,15 @@ impl<'a> Walk<'a> {
             Size::MinContent => 1,
             Size::MaxContent => 2,
             Size::FitContent => 3,
+            // (…`stretch`, in either spelling, as the JS model has it: an auto width, which is what it is for a block
+            // in normal flow — filling its containing block — and not for a flex item or an out-of-flow box, which the two
+            // engines share)
+            Size::Stretch | Size::WebkitFillAvailable => 0,
             _ => return Err("width keyword"),
         };
         rec.height_kw = matches!(pos.height, Size::MinContent | Size::MaxContent | Size::FitContent);
         if rec.width_kw != 0 && parent < 0 {
             return Err("root keyword width");
-        }
-        if rec.width_kw != 0 && intrinsic.is_some() {
-            return Err("replaced keyword width");
         }
         rec.is_button = tag == "button";
         let sizes: [(Option<&LengthPercentage>, f64); 6] = [
@@ -2164,7 +2186,9 @@ impl<'a> Walk<'a> {
         let sized = |w: f64, h: f64| Intrinsic { w, h, ratio: false, ratio_only: false };
         Ok(Some(match node.rendering_tag() {
             "iframe" | "frame" | "embed" | "video" => sized(300.0, 150.0),
-            "object" => return Err("object"),
+            // (…the default object size, as an `<iframe>`'s — unless it shows its fallback, and is no replaced element)
+            "object" if renders_object_fallback(self.arena, id, node) => return Ok(None),
+            "object" => sized(300.0, 150.0),
             "canvas" => {
                 let dim = |name: &str, default: f64| node.get_attr(name).and_then(crate::validity::parse_non_negative).map_or(default, |n| n as f64);
                 Intrinsic { ratio: true, ..sized(dim("width", 300.0), dim("height", 150.0)) }
@@ -3467,7 +3491,7 @@ impl<'a> Walk<'a> {
             let pd = ps.get_box().walk_display();
             let inline_flow = matches!(pd.outside(), DisplayOutside::Inline) && matches!(pd.inside(), DisplayInside::Flow);
             let block = inline_flow && self.holds_block_level(p)?;
-            if !pd.is_none() && !pd.is_contents() && ((!fixed && ps.get_box().clone_position() != Position::Static) || contains_out_of_flow(&ps, node)) {
+            if !pd.is_none() && !pd.is_contents() && ((!fixed && ps.get_box().clone_position() != Position::Static) || contains_out_of_flow(&ps, self.arena, p, node)) {
                 // (…an inline box is no record: native lays its fragments out, and names it by its inline table entry)
                 let inline = inline_flow && !block;
                 return if inline || self.rec_index.contains_key(&p) { Ok(Some(p)) } else { Err("containingBlockBox") };
@@ -3779,7 +3803,7 @@ impl<'a> Walk<'a> {
         // An ATOMIC inline — an `inline-block` — is one box on the line: its own record subtree under the block of
         // lines, laid out and hung from its baseline by native (`atomicHook`); an inline-LEVEL `<br>` still breaks the
         // line whatever its inside display (`isLineBreak`).
-        if (!matches!(d.inside(), DisplayInside::Flow) && tag != "br") || replaced_or_control(tag) {
+        if (!matches!(d.inside(), DisplayInside::Flow) && tag != "br") || replaced_or_control(self.arena, c, node) {
             // (…`top` / `bottom` hang it from the LINE, with no ascent of its own; the others move its ascent: a SHIFT
             // by itself, an alignment against the parent's font by the figure native reads when the box is laid out —
             // `nlAtomicAlignment`)
@@ -4019,7 +4043,7 @@ impl<'a> Walk<'a> {
         let ps = self.style(p)?;
         let d = ps.get_box().walk_display();
         if !(matches!(d.outside(), DisplayOutside::Inline) && matches!(d.inside(), DisplayInside::Flow))
-            || replaced_or_control(self.node(p).rendering_tag())
+            || replaced_or_control(self.arena, p, self.node(p))
             || self.holds_block_level(p)?
         {
             return Ok(0.0);
@@ -4112,7 +4136,7 @@ impl<'a> Walk<'a> {
     // Does a non-replaced `display: inline` box hold a block-level box among its in-flow children — and so lay out as
     // a BLOCK (layout.js `holdsBlockLevel`: the nearest the JS model comes to CSS 2.1 §9.2.1.1's split)?
     fn holds_block_level(&self, id: NodeId) -> Result<bool, &'static str> {
-        if replaced_or_control(self.node(id).rendering_tag()) {
+        if replaced_or_control(self.arena, id, self.node(id)) {
             return Ok(false);
         }
         for c in self.children(id) {
@@ -4434,7 +4458,7 @@ fn inset_lp(v: &style::values::computed::position::Inset) -> Result<Option<&Leng
 // Does the box contain its out-of-flow descendants, fixed ones included (`containsOutOfFlow`): a filter, a transform
 // on a box it applies to, layout or paint containment, `content-visibility` other than visible, or a `will-change` that
 // promises one.
-fn contains_out_of_flow(style: &ComputedValues, node: &crate::dom::NodeData) -> bool {
+fn contains_out_of_flow(style: &ComputedValues, arena: &RealmArena, id: NodeId, node: &crate::dom::NodeData) -> bool {
     use style::values::computed::Contain;
     let effects = style.get_effects();
     if !effects.filter.0.is_empty() || !effects.backdrop_filter.0.is_empty() {
@@ -4444,7 +4468,7 @@ fn contains_out_of_flow(style: &ComputedValues, node: &crate::dom::NodeData) -> 
     let d = b.walk_display();
     // (…a block-holding inline among the inline boxes it does not apply to: it is laid out as a block, and is an
     // inline box to everything but the flow — `isSplitInline`)
-    let transformable = !(matches!(d.outside(), DisplayOutside::Inline) && matches!(d.inside(), DisplayInside::Flow) && !replaced_or_control(node.rendering_tag()))
+    let transformable = !(matches!(d.outside(), DisplayOutside::Inline) && matches!(d.inside(), DisplayInside::Flow) && !replaced_or_control(arena, id, node))
         && !matches!(d.inside(), DisplayInside::TableColumn | DisplayInside::TableColumnGroup);
     // (…the rest only of a box they apply to: not a non-replaced inline, not a table column — `isTransformable`)
     if !transformable {
@@ -4769,12 +4793,14 @@ fn spacing(lp: &LengthPercentage, style: &ComputedValues) -> f64 {
     }
     f32_exact(lp.resolve(Length::new(fs as f32)).px())
 }
-// Does a height leave the box's margins adjoining — `auto`, a keyword, or a zero length (`autoOrZeroHeight`)?
+// Does a height leave the box's margins adjoining — `auto`, an intrinsic keyword, or a zero length (`autoOrZeroHeight`)?
 fn auto_or_zero(v: &style::values::computed::Size) -> bool {
     use style::values::generics::length::GenericSize as Size;
     match v {
         Size::LengthPercentage(lp) => lp.0.to_length().is_some_and(|l| l.px() == 0.0) || lp.0.to_percentage().is_some_and(|p| p.0 == 0.0),
-        _ => true,
+        // (…the intrinsic keywords are auto here, a `stretch` height a definite one: `AUTO_HEIGHT_KEYWORDS`)
+        Size::Auto | Size::MinContent | Size::MaxContent | Size::FitContent => true,
+        _ => false,
     }
 }
 fn scrolls(o: Overflow) -> bool {
