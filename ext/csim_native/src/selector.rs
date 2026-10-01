@@ -266,14 +266,27 @@ impl<'i> Parser<'i> for CsimParser {
                 arguments.expect_ident()?;
             }
             "view-transition-group" | "view-transition-image-pair" | "view-transition-old" | "view-transition-new" => {
-                if !arguments.is_exhausted() {
-                    if arguments.try_parse(|p| p.expect_delim('*')).is_err() {
-                        arguments.expect_ident()?;
+                // `<pt-name-and-class-selector>`: `*` or a name, then `.class`es — or the classes alone — each a
+                // `<custom-ident>` (no CSS-wide keyword, no `default`), a class's dot directly before it.
+                let custom_ident = |ident: &str| {
+                    !["initial", "inherit", "unset", "revert", "revert-layer", "default"].iter().any(|k| ident.eq_ignore_ascii_case(k))
+                };
+                let named = arguments.try_parse(|p| p.expect_delim('*')).is_ok()
+                    || arguments.try_parse(|p| p.expect_ident().map(|i| custom_ident(i)).ok().filter(|&ok| ok).ok_or(())).is_ok();
+                let mut classes = 0;
+                while !arguments.is_exhausted() {
+                    arguments.expect_delim('.')?;
+                    let location = arguments.current_source_location();
+                    match arguments.next_including_whitespace()? {
+                        cssparser::Token::Ident(class) if custom_ident(class) => classes += 1,
+                        token => {
+                            let token = token.clone();
+                            return Err(location.new_unexpected_token_error(token));
+                        }
                     }
-                    while !arguments.is_exhausted() {
-                        arguments.expect_delim('.')?;
-                        arguments.expect_ident()?;
-                    }
+                }
+                if !named && classes == 0 {
+                    return Err(arguments.new_custom_error(SelectorParseErrorKind::UnsupportedPseudoClassOrElement(name)));
                 }
             }
             _ => return Err(arguments.new_custom_error(SelectorParseErrorKind::UnsupportedPseudoClassOrElement(name))),

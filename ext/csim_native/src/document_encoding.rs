@@ -96,6 +96,49 @@ fn meta_encoding(label: &[u8]) -> Option<&'static Encoding> {
     })
 }
 
+// Where the text a raw-text element's start tag (ending before `from`) opens ends: at its end tag — `</name` and then
+// whitespace, `/` or `>` — or None, at the input's end. A `<script>`'s is the tokenizer's script data, whose `<!--`
+// escape holds a `<script>…</script>` of its own (`document.write('<script></script>')`) without ending.
+fn raw_text_end(input: &[u8], from: usize, name: &[u8]) -> Option<usize> {
+    let ends_tag = |at: usize, tag: &[u8]| {
+        input.len() > at + tag.len() && input[at..at + tag.len()].eq_ignore_ascii_case(tag) && {
+            let b = input[at + tag.len()];
+            is_space(b) || b == b'/' || b == b'>'
+        }
+    };
+    let close = [b"</".as_slice(), name].concat();
+    if name != b"script" {
+        return (from..input.len()).find(|&at| input[at] == b'<' && ends_tag(at, &close));
+    }
+    // (script data: plain, escaped `<!--…-->`, or double-escaped — a `<script>` inside that escape)
+    let (mut escaped, mut double) = (false, false);
+    let mut at = from;
+    while at < input.len() {
+        if input[at..].starts_with(b"<!--") && !escaped {
+            escaped = true;
+            at += 4;
+            continue;
+        }
+        if input[at..].starts_with(b"-->") && escaped {
+            (escaped, double) = (false, false);
+            at += 3;
+            continue;
+        }
+        if input[at] == b'<' {
+            if ends_tag(at, &close) {
+                if !double {
+                    return Some(at);
+                }
+                double = false;
+            } else if escaped && ends_tag(at, b"<script") {
+                double = true;
+            }
+        }
+        at += 1;
+    }
+    None
+}
+
 // The elements whose content the tokenizer reads as text up to their end tag (RAWTEXT, RCDATA, script data).
 const RAW_TEXT: [&[u8]; 10] =
     [b"script", b"style", b"textarea", b"title", b"xmp", b"iframe", b"noembed", b"noframes", b"noscript", b"plaintext"];
@@ -160,20 +203,16 @@ fn prescan(input: &[u8], raw_text: bool) -> Option<&'static Encoding> {
             let end_tag = input[pos + 1] == b'/';
             pos += if end_tag { 2 } else { 1 };
             let name_at = pos;
-            while pos < n && !is_space(input[pos]) && input[pos] != b'>' {
+            // (…the tokenizer's tag name, ended by a `/` too: `<title/>` is a title start tag, `<iframe/src=…>` an iframe's)
+            while pos < n && !is_space(input[pos]) && input[pos] != b'>' && input[pos] != b'/' {
                 pos += 1;
             }
-            // (…`<title/>` is a `title` start tag all the same: HTML has no self-closing raw-text element)
-            let name = input[name_at..pos].strip_suffix(b"/").unwrap_or(&input[name_at..pos]).to_ascii_lowercase();
+            let name = input[name_at..pos].to_ascii_lowercase();
             while let Some((_, _, next)) = attribute(input, pos) {
                 pos = next;
             }
             if raw_text && !end_tag && RAW_TEXT.contains(&name.as_slice()) {
-                let close = [b"</".as_slice(), &name].concat();
-                match input[pos..].windows(close.len()).position(|w| w.eq_ignore_ascii_case(&close)) {
-                    Some(i) => pos += i,
-                    None => return None,
-                }
+                pos = raw_text_end(input, pos, &name)?;
             }
             continue;
         }
@@ -346,6 +385,12 @@ mod tests {
         // (…and the parser's meet beats the prescan's: a script's `<meta>` text read first, a real one past it)
         let fooled = [b"<script>'<meta charset=big5>'</script>".as_slice(), &[b' '; 1100], b"<meta charset=shift_jis>"].concat();
         assert_eq!(sniff(&fooled, "text/html", Reading::Navigation(None)).name(), "Shift_JIS");
+        // (…a script's escaped `<script></script>` does not end it, and `</scriptx` is no end tag)
+        let written = b"<script><!--document.write('<script></script><meta charset=big5>')--></script><meta charset=shift_jis>";
+        assert_eq!(sniff(written, "text/html", Reading::Navigation(None)).name(), "Shift_JIS");
+        let prefix = b"<script>x</scriptx><meta charset=big5></script><meta charset=shift_jis>";
+        assert_eq!(sniff(prefix, "text/html", Reading::Navigation(None)).name(), "Shift_JIS");
+        assert_eq!(sniff(b"<iframe/src=x><meta charset=big5></iframe><meta charset=shift_jis>", "text/html", Reading::Navigation(None)).name(), "Shift_JIS");
         // (…a parent's encoding comes below the document's own)
         assert_eq!(sniff(b"<meta charset=big5>", "text/html", Reading::Navigation(Some(encoding_rs::SHIFT_JIS))).name(), "Big5");
     }

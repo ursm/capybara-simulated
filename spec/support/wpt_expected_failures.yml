@@ -2640,7 +2640,6 @@ custom-elements/registries/scoped-registry-define-upgrade-order.html:
 custom-elements/state/ElementInternals-states.html:
 - 'CustomStateSet behavior of ElementInternals.states: Initial state'
 custom-elements/state/state-pseudo-class.html:
-- ":state() parsing failures"
 - ":state(foo) serialization"
 custom-elements/upgrading.html:
 - If definition's disable shadow is true and element's shadow root is non-null, then
