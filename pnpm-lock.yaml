@@ -30,9 +30,6 @@ importers:
       whatwg-mimetype:
         specifier: ^5.0.0
         version: 5.0.0
-      xpathway:
-        specifier: ^1.0.4
-        version: 1.0.4
     devDependencies:
       '@webref/idl':
         specifier: ^3.79.0
@@ -272,10 +269,6 @@ packages:
     resolution: {integrity: sha512-sXcNcHOC51uPGF0P/D4NVtrkjSU2fNsm9iog4ZvZJsL3rjoDAzXZhkm2MWt1y+PUdggKAYVoMAIYcs78wJ51Cw==}
     engines: {node: '>=20'}
 
-  xpathway@1.0.4:
-    resolution: {integrity: sha512-Q6bNwst6gcxc3/H9KAL+Gy8TaQaP3x71WZwIS2Y5vC3NY5uAI4B9VmekBwP5ppV3iK5sDNjkt5tPrPp0/smlig==}
-    engines: {node: '>=18'}
-
 snapshots:
 
   '@esbuild/aix-ppc64@0.28.1':
@@ -429,4 +422,3 @@ snapshots:
 
   whatwg-mimetype@5.0.0: {}
 
-  xpathway@1.0.4: {}

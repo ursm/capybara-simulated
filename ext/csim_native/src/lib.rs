@@ -37,6 +37,7 @@ mod validity;
 mod walk;
 mod walk_ops;
 mod walk_reuse;
+mod xpath;
 
 use magnus::{Error, Module, Ruby};
 

@@ -948,9 +948,9 @@ module Capybara
         !!(s =~ %r{\A\s*(?:/|\(\s*/|\./|\.\.)})
       end
 
-      # XPath is evaluated *inside* V8 against the live JS DOM via
-      # the xpathway engine (bundled, installed at snapshot build). One IPC per
-      # `find_xpath` — no serialise + reparse round-trip.
+      # XPath is evaluated natively over the arena (xpath.rs, through
+      # `document.evaluate`). One IPC per `find_xpath` — no serialise + reparse
+      # round-trip.
       def find_xpath(xpath, context_handle = nil)
         xpath_str = xpath.to_s
         find_with_timer_fallback(:xpath, xpath_str, context_handle) do
@@ -1079,7 +1079,7 @@ module Capybara
       # element to appear or disappear; if no DOM-mutating event has
       # happened since the last call (no timer fired, no click / set /
       # navigate), the result is guaranteed identical and we can skip
-      # the V8 round-trip + xpathway traversal.
+      # the V8 round-trip + the XPath evaluation.
       def cached_find(kind, arg, ctx)
         if !@find_cache_dirty &&
            @find_cache_kind == kind &&

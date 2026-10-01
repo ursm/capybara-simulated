@@ -25,10 +25,8 @@ module Capybara
       # Combined source baked into the V8 Snapshot.
       # Order matters: stubs first (so bridge's IIFE can reference the
       # `globalThis.__rackFetch` etc. slots), then the vendor bundle
-      # (so bridge can reference `globalThis.__csimVendor.cssTree` and
-      # `.xpathway`), then bridge proper — which installs the xpathway-backed
-      # `Document.prototype.evaluate` itself (see js/src/xpath.js). The
-      # standalone xpathway engine in the vendor blob replaces the old wgxpath.
+      # (so bridge can reference `globalThis.__csimVendor.cssTree`), then
+      # bridge proper.
       def self.snapshot_src
         snapshot_stubs_src +
           vendor_bundle_src + ";\n" +

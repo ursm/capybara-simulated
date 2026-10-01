@@ -21,8 +21,7 @@
     "culori": "^4.0.2",
     "urlpattern-polyfill": "^10.1.0",
     "web-streams-polyfill": "^4.3.0",
-    "whatwg-mimetype": "^5.0.0",
-    "xpathway": "^1.0.4"
+    "whatwg-mimetype": "^5.0.0"
   },
   "devDependencies": {
     "@webref/idl": "^3.79.0",

@@ -63,6 +63,8 @@ const LOCAL_FIXTURES = {
 // (just the harness) below — the rest of resources/ is large and unneeded.
 const TREES = [
   'dom', 'domparsing', 'url', 'encoding', 'shadow-dom',
+  'domxpath',                          // document.evaluate / XPathResult / XPathExpression — the XPath 1.0
+                                       // engine Capybara's finders run on
   'css/css-shadow/part',               // `::part()` + `exportparts` — the one way an outer tree's
                                        // rule reaches INTO a shadow tree. Vendored with the
                                        // implementation: the feature was entirely unmatched until

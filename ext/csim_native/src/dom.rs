@@ -80,8 +80,10 @@ pub(crate) enum NodeKind {
     Element,
     // Text and CDATA sections: character data that counts as content (`:empty`, text runs).
     Text,
-    // Comments and processing instructions: character data that does not.
+    // Comments: character data that does not.
     Comment,
+    // A processing instruction: character data that does not either, with its target in `local_name`.
+    ProcessingInstruction,
     Document,
     // A DocumentFragment — a shadow root included.
     Fragment,
@@ -95,7 +97,8 @@ impl NodeKind {
         match t {
             1 => NodeKind::Element,
             3 | 4 => NodeKind::Text,
-            7 | 8 => NodeKind::Comment,
+            7 => NodeKind::ProcessingInstruction,
+            8 => NodeKind::Comment,
             9 => NodeKind::Document,
             11 => NodeKind::Fragment,
             _ => NodeKind::Other,
@@ -114,6 +117,8 @@ pub(crate) struct NodeData {
     // one for an element in no namespace), interned — what every matcher compares.
     pub(crate) local_name: LocalName,
     pub(crate) ns: Namespace,
+    // An element's namespace prefix (`prefix`; None for none) — fixed at creation, read only by XPath's `name()`.
+    pub(crate) prefix: Option<Box<str>>,
     pub(crate) attributes: Vec<(String, String)>,
     // Lossless override for the rare attribute value that carries a LONE SURROGATE (unpaired U+D800..
     // U+DFFF) — valid in a JS DOMString (UTF-16) but not in Rust's UTF-8 `String`, where it degrades to
@@ -200,6 +205,7 @@ impl NodeData {
             data,
             local_name: LocalName::default(),
             ns: Namespace::default(),
+            prefix: None,
             attributes: Vec::new(),
             attr_u16: Vec::new(),
             attr_ns: Vec::new(),
@@ -261,6 +267,13 @@ impl NodeData {
             return None;
         }
         self.get_attr(local)
+    }
+    // The (namespace, local name) of the attribute stored under `key`: its record's, or — in no namespace — the key.
+    pub(crate) fn attribute_name<'a>(&'a self, key: &'a str) -> (&'a str, &'a str) {
+        match self.attr_ns.iter().find(|(k, _, _)| k == key) {
+            Some((_, ns, local)) => (ns, local),
+            None => ("", key),
+        }
     }
     // The value of the attribute (`ns`, `local`).
     pub(crate) fn ns_attr(&self, ns: &str, local: &str) -> Option<&str> {
@@ -1036,6 +1049,8 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_, ()>, ctx: &v8::Global<v8:
     register(scope, ns, "closestId", closest_id, context_id);
     register(scope, ns, "matchesIdNs", matches_id_ns, context_id);
     register(scope, ns, "selectorValid", selector_valid, context_id);
+    register(scope, ns, "xpathPrefixes", xpath_prefixes, context_id);
+    register(scope, ns, "xpathEvaluate", xpath_evaluate, context_id);
     // Authoritative cascade matching: compile a rule's selector once to an integer handle, then match
     // by handle with no per-call string marshalling (compileSelector / matchesCompiled).
     register(scope, ns, "compileSelector", compile_selector, context_id);
@@ -1122,9 +1137,9 @@ pub(crate) fn register(
     }
 }
 
-// __dom.importNode(localName, ns, parentNid, attrsFlat) -> nid. Adds an ELEMENT to the arena — the eager create
-// at construction, and a spec's bulk build. `attrsFlat` is a flat [name, value, name, value, …] array;
-// `parentNid` < 0 makes a root, else the node is appended to that (live) parent.
+// __dom.importNode(localName, ns, parentNid, attrsFlat, prefix) -> nid. Adds an ELEMENT to the arena — the eager
+// create at construction, and a spec's bulk build. `attrsFlat` is a flat [name, value, name, value, …] array;
+// `parentNid` < 0 makes a root, else the node is appended to that (live) parent; `prefix` a string, or none.
 fn import_node(
     scope: &mut v8::PinScope<'_, '_>,
     args: v8::FunctionCallbackArguments<'_>,
@@ -1134,10 +1149,11 @@ fn import_node(
     let ns = Namespace::from(args.get(1).to_rust_string_lossy(scope));
     let parent = nid_arg(scope, &args, 2);
     let (attributes, attr_u16) = read_attrs_flat(scope, args.get(3));
+    let prefix = args.get(4).is_string().then(|| args.get(4).to_rust_string_lossy(scope).into_boxed_str());
     let cid = realm_id(scope, &args);
     let (arena, engine) = arena_and_engine(scope, cid);
     let id = arena.create(
-        NodeData { local_name, ns, attributes, attr_u16, ..NodeData::of_kind(NodeKind::Element, Vec::new()) },
+        NodeData { local_name, ns, prefix, attributes, attr_u16, ..NodeData::of_kind(NodeKind::Element, Vec::new()) },
         parent,
     );
     if let (Some(engine), Some(p)) = (engine, parent) {
@@ -1146,8 +1162,9 @@ fn import_node(
     set_nid(scope, &mut rv, id);
 }
 
-// __dom.createNode(nodeType, data, parentNid) -> nid. Adds any other node — a Text / CDATA / Comment / PI with its
-// data, a Document, a DocumentFragment or ShadowRoot, a DocumentType — appended to `parentNid` when that is live.
+// __dom.createNode(nodeType, data, parentNid, target) -> nid. Adds any other node — a Text / CDATA / Comment / PI with
+// its data (and a PI its target), a Document, a DocumentFragment or ShadowRoot, a DocumentType — appended to
+// `parentNid` when that is live.
 fn create_node(
     scope: &mut v8::PinScope<'_, '_>,
     args: v8::FunctionCallbackArguments<'_>,
@@ -1156,9 +1173,14 @@ fn create_node(
     let kind = NodeKind::from_node_type(args.get(0).integer_value(scope).unwrap_or(0));
     let data = utf16_arg(scope, args.get(1));
     let parent = nid_arg(scope, &args, 2);
+    let local_name = if kind == NodeKind::ProcessingInstruction {
+        LocalName::from(args.get(3).to_rust_string_lossy(scope))
+    } else {
+        LocalName::default()
+    };
     let cid = realm_id(scope, &args);
     let (arena, engine) = arena_and_engine(scope, cid);
-    let id = arena.create(NodeData::of_kind(kind, data), parent);
+    let id = arena.create(NodeData { local_name, ..NodeData::of_kind(kind, data) }, parent);
     if let (Some(engine), Some(p)) = (engine, parent) {
         engine.children_changed(arena, p);
     }
@@ -1472,6 +1494,7 @@ fn inspect_node(
         let kind = match n.kind {
             NodeKind::Element => 1,
             NodeKind::Text => 3,
+            NodeKind::ProcessingInstruction => 7,
             NodeKind::Comment => 8,
             NodeKind::Document => 9,
             NodeKind::Fragment => 11,
@@ -1849,6 +1872,119 @@ fn selector_valid(
 ) {
     let text = args.get(0).to_rust_string_lossy(scope);
     rv.set_bool(crate::selector::is_valid(&text));
+}
+
+// __dom.xpathPrefixes(expression) -> the namespace prefixes its name tests name (for the caller to resolve before
+// evaluating), or a string — the SyntaxError's message.
+fn xpath_prefixes(
+    scope: &mut v8::PinScope<'_, '_>,
+    args: v8::FunctionCallbackArguments<'_>,
+    mut rv: v8::ReturnValue<'_, v8::Value>,
+) {
+    let text = String::from_utf16_lossy(&utf16_arg(scope, args.get(0)));
+    match crate::xpath::prefixes(&text) {
+        Ok(prefixes) => {
+            let array = v8::Array::new(scope, prefixes.len() as i32);
+            for (i, p) in prefixes.iter().enumerate() {
+                let v = v8::String::new(scope, p).map_or_else(|| v8::undefined(scope).into(), Into::into);
+                array.set_index(scope, i as u32, v);
+            }
+            rv.set(array.into());
+        }
+        Err(message) => {
+            let v = v8::String::new(scope, &message).map_or_else(|| v8::undefined(scope).into(), Into::into);
+            rv.set(v);
+        }
+    }
+}
+
+// __dom.xpathEvaluate(expression, contextNid, attrKey, html, namespaces, resultType) -> a number, string or boolean,
+// or for a node-set [walkRootNid, nid, key, nid, key, …] in document order (`key` an attribute's store key, null for
+// a node), the walk root the deepest common ancestor of the context and every result. The context is the node
+// `contextNid`, or its attribute stored under `attrKey` (a string); `namespaces` a flat [prefix, uri, …] array.
+// Throws a TypeError for a value of the wrong type; `undefined` for a context the arena does not hold.
+fn xpath_evaluate(
+    scope: &mut v8::PinScope<'_, '_>,
+    args: v8::FunctionCallbackArguments<'_>,
+    mut rv: v8::ReturnValue<'_, v8::Value>,
+) {
+    let Some(id) = nid_arg(scope, &args, 1) else {
+        return;
+    };
+    let text = String::from_utf16_lossy(&utf16_arg(scope, args.get(0)));
+    let attr_key = args.get(2).is_string().then(|| args.get(2).to_rust_string_lossy(scope));
+    let html = args.get(3).is_true();
+    let mut namespaces = std::collections::HashMap::new();
+    if let Ok(flat) = v8::Local::<v8::Array>::try_from(args.get(4)) {
+        let mut i = 0;
+        while i + 1 < flat.length() {
+            let prefix = flat.get_index(scope, i).map(|v| v.to_rust_string_lossy(scope)).unwrap_or_default();
+            let uri = flat.get_index(scope, i + 1).map(|v| v.to_rust_string_lossy(scope)).unwrap_or_default();
+            namespaces.insert(prefix, uri);
+            i += 2;
+        }
+    }
+    let result_type = args.get(5).uint32_value(scope).unwrap_or(0) as u8;
+    let cid = realm_id(scope, &args);
+    let arena = realm(scope, cid);
+    if arena.get(id).is_none() {
+        return;
+    }
+    let context = match &attr_key {
+        Some(key) => match crate::xpath::attribute_node(arena, id, key) {
+            Some(x) => x,
+            None => return,
+        },
+        None => crate::xpath::XNode::Node(id),
+    };
+    let answer = crate::xpath::evaluate(arena, &text, context, html, &namespaces, result_type);
+    // (…the node-set as (nid, key) pairs, read while the arena is borrowed)
+    let answer = answer.map(|a| match a {
+        crate::xpath::Answer::Nodes(nodes) => {
+            let walk_root = crate::xpath::common_ancestor(arena, id, &nodes);
+            let pairs: Vec<(NodeId, Option<String>)> = nodes
+                .iter()
+                .map(|x| match *x {
+                    crate::xpath::XNode::Node(n) => (n, None),
+                    crate::xpath::XNode::Attr(n, i) => (n, crate::xpath::attribute_key(arena, n, i).map(str::to_owned)),
+                })
+                .collect();
+            Err((walk_root, pairs))
+        }
+        other => Ok(other),
+    });
+    match answer {
+        Err(e) => {
+            let message = match e {
+                crate::xpath::XError::Syntax(m) | crate::xpath::XError::Type(m) | crate::xpath::XError::Namespace(m) => m,
+            };
+            let message = v8::String::new(scope, &message).unwrap_or_else(|| v8::String::empty(scope));
+            let error = v8::Exception::type_error(scope, message);
+            scope.throw_exception(error);
+        }
+        Ok(Err((walk_root, pairs))) => {
+            let array = v8::Array::new(scope, 1 + 2 * pairs.len() as i32);
+            let v: v8::Local<v8::Value> = v8::Number::new(scope, walk_root.to_f64()).into();
+            array.set_index(scope, 0, v);
+            for (i, (n, key)) in pairs.iter().enumerate() {
+                let v: v8::Local<v8::Value> = v8::Number::new(scope, n.to_f64()).into();
+                array.set_index(scope, 1 + 2 * i as u32, v);
+                let k: v8::Local<v8::Value> = match key.as_deref().and_then(|k| v8::String::new(scope, k)) {
+                    Some(k) => k.into(),
+                    None => v8::null(scope).into(),
+                };
+                array.set_index(scope, 2 + 2 * i as u32, k);
+            }
+            rv.set(array.into());
+        }
+        Ok(Ok(crate::xpath::Answer::Number(n))) => rv.set_double(n),
+        Ok(Ok(crate::xpath::Answer::Bool(b))) => rv.set_bool(b),
+        Ok(Ok(crate::xpath::Answer::Str(s))) => {
+            let v = utf16_value(scope, &s);
+            rv.set(v);
+        }
+        Ok(Ok(crate::xpath::Answer::Nodes(_))) => unreachable!(),
+    }
 }
 
 // __dom.compileSelector(text) -> handle. The authoritative cascade path calls this ONCE per rule and

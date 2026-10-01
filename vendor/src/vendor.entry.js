@@ -18,10 +18,6 @@
 //   css-tree    — attribute-selector recovery at EOF (`[foo` parses as `[foo]`)
 
 import * as cssWhat   from 'css-what';
-// xpathway: standalone XPath 1.0 engine (npm, MIT), replaces the vendored
-// wgxpath blob. Only needed when rebuilding this bundle — the gem ships the
-// pre-built output.
-import * as xpathway  from 'xpathway';
 // css-tree: CSS parser (stylesheets + selectors + specificity). Backs the JS
 // cascade the layout oracle reads (selector.rs does the matching); css-tree provides clean specificity (distinguishes `#x` from `[id=x]`, which
 // css-what blurs) and `<style>`/`@layer`/`@media`/nesting parse.
@@ -129,4 +125,4 @@ function cssColorRaster(str) {
 }
 const color = { toHex: cssColorToHex, srgb: cssColorSrgb, raster: cssColorRaster };
 
-export { cssWhat, xpathway, cssTree, mimeType, streams, color, URLPattern };
+export { cssWhat, cssTree, mimeType, streams, color, URLPattern };
