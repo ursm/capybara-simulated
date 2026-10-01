@@ -5651,8 +5651,10 @@ module Capybara
       # worker before it asks whether that worker handles fetches at all, let alone waits for it).
       private def sw_scope_match(url, activating: false)
         u = url.to_s
+        # (…a worker that died activating is none: until its reap is drained it would win the tie below and leave the
+        # match with no live controller, where the outgoing active worker is still there to fall back to)
         activated = @sw_activating_scopes.select do |_scope, handle|
-          activating || ((w = @workers[handle]) && @worker_init_lock.synchronize { w[:sw_activated] })
+          (w = @workers[handle]) && w[:thread]&.alive? && (activating || @worker_init_lock.synchronize { w[:sw_activated] })
         end
         best = nil
         best_len = -1
