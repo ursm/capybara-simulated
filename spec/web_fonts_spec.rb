@@ -350,9 +350,10 @@ RSpec.describe 'web fonts' do
   end
 
   # CSS Font Loading §2.2: a CSS-connected face's attributes are its rule's descriptors. A CSSOM edit of the rule is read
-  # by the same FontFace; a `<style>` given new text is a new sheet, whose rule is a face of its own (Chrome makes a new
-  # one for the CSSOM edit too — a Blink quirk the spec does not have); and a value a script set on the face stays until
-  # the rule says something new.
+  # by the same FontFace; a `<style>` given new text is a new sheet, whose rule is a face of its own — even given its
+  # old text back, unread in between (Chrome makes a new one for the CSSOM edit too, and keeps the old one for the same
+  # text: Blink quirks the spec does not have); and a value a script set on the face stays until the rule says
+  # something new.
   it 'reflects its rule\'s descriptors on a CSS-connected FontFace' do
     s = session('/held.html')
     got = s.evaluate_script(<<~JS)
@@ -365,12 +366,16 @@ RSpec.describe 'web fonts' do
         first.weight = '600';
         const scripted = desc(v());
         style.textContent = '@font-face { font-family: V; src: url(/ahem.ttf); font-weight: 700; font-style: italic; font-stretch: 75% }';
-        const second = v();
+        const second = v(), rewritten = desc(second);
         style.sheet.cssRules[0].style.fontWeight = '300';
-        return [scripted, desc(second), second === first, desc(v()), v() === second, Object.keys(second).length];
+        const edited = v();
+        const text = style.textContent;
+        style.textContent = '@font-face { font-family: V; src: url(/ahem.ttf); font-weight: 900 }';
+        style.textContent = text;
+        return [scripted, rewritten, second === first, desc(edited), edited === second, v() === edited, Object.keys(second).length];
       })()
     JS
-    expect(got).to eq(['600:normal:normal', '700:italic:75%', false, '300:italic:75%', true, 0])
+    expect(got).to eq(['600:normal:normal', '700:italic:75%', false, '300:italic:75%', true, false, 0])
   end
 
   # An `@import`'s conditions hold of the sheet it imports, faces and rules alike: `layer print` is a media query after
