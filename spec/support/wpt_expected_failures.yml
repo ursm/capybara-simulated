@@ -2146,16 +2146,6 @@ css/css-transitions/parsing/transition-timing-function-valid.html:
   value
 - e.style['transition-timing-function'] = "steps(2, jump-end)" should set the property
   value
-css/css-transitions/properties-value-001.html:
-- vertical-align length(cm) / events
-- vertical-align length(em) / events
-- vertical-align length(ex) / events
-- vertical-align length(in) / events
-- vertical-align length(mm) / events
-- vertical-align length(pc) / events
-- vertical-align length(pt) / events
-- vertical-align length(px) / events
-- vertical-align percentage(%) / events
 css/css-transitions/properties-value-002.html:
 - vertical-align vertical(keyword) / events
 - vertical-align vertical(keyword) / values
@@ -2184,18 +2174,6 @@ css/css-transitions/properties-value-003.html:
 - position position(relative to absolute) / values
 - position position(static to absolute) / events
 - position position(static to absolute) / values
-css/css-transitions/properties-value-implicit-001.html:
-- vertical-align length-em(em) / events
-css/css-transitions/properties-value-inherit-002.html:
-- vertical-align length(cm) / events
-- vertical-align length(em) / events
-- vertical-align length(ex) / events
-- vertical-align length(in) / events
-- vertical-align length(mm) / events
-- vertical-align length(pc) / events
-- vertical-align length(pt) / events
-- vertical-align length(px) / events
-- vertical-align percentage(%) / events
 css/css-transitions/starting-style-name-defining-rules.html:
 - Load @font-face from @starting-style rule
 css/css-transitions/starting-style-rule-basic.html:
