@@ -349,24 +349,28 @@ RSpec.describe 'web fonts' do
     expect(got).to eq(['Imp,Ins,Outer', true, true])
   end
 
-  # CSS Font Loading §2.2: a CSS-connected face's attributes are its rule's descriptors — rewritten, the rule is read
-  # again by the same FontFace, whether the sheet's text changed or its CSSOM did.
-  it 'reflects a rule\'s rewritten descriptors on its FontFace' do
+  # CSS Font Loading §2.2: a CSS-connected face's attributes are its rule's descriptors. A CSSOM edit of the rule is read
+  # by the same FontFace; a `<style>` given new text is a new sheet, whose rule is a face of its own (Chrome makes a new
+  # one for the CSSOM edit too — a Blink quirk the spec does not have); and a value a script set on the face stays until
+  # the rule says something new.
+  it 'reflects its rule\'s descriptors on a CSS-connected FontFace' do
     s = session('/held.html')
     got = s.evaluate_script(<<~JS)
       (() => {
         const v = () => Array.from(document.fonts).find((f) => f.family === 'V');
-        const desc = () => { const f = v(); return [f.weight, f.style, f.stretch].join(':'); };
+        const desc = (f) => [f.weight, f.style, f.stretch].join(':');
         const style = document.head.appendChild(document.createElement('style'));
         style.textContent = '@font-face { font-family: V; src: url(/ahem.ttf); font-weight: 400 }';
-        const before = [desc(), v()];
+        const first = v();
+        first.weight = '600';
+        const scripted = desc(v());
         style.textContent = '@font-face { font-family: V; src: url(/ahem.ttf); font-weight: 700; font-style: italic; font-stretch: 75% }';
-        const rewritten = desc();
+        const second = v();
         style.sheet.cssRules[0].style.fontWeight = '300';
-        return [before[0], rewritten, desc(), v() === before[1]];
+        return [scripted, desc(second), second === first, desc(v()), v() === second, Object.keys(second).length];
       })()
     JS
-    expect(got).to eq(['400:normal:normal', '700:italic:75%', '300:italic:75%', true])
+    expect(got).to eq(['600:normal:normal', '700:italic:75%', false, '300:italic:75%', true, 0])
   end
 
   # An `@import`'s conditions hold of the sheet it imports, faces and rules alike: `layer print` is a media query after
