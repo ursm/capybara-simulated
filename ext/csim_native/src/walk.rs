@@ -1434,6 +1434,19 @@ const JS_MODEL_TAGS: &[&str] = &[
     "sub", "summary", "sup", "svg", "table", "tbody", "td", "template", "textarea", "tfoot", "th", "thead", "time",
     "title", "tr", "tt", "u", "ul", "var", "video", "wbr", "xmp"
 ];
+// A ruby display on an element other than HTML's ruby elements (`ruby`, `rt`, `rb`, `rtc`): the JS model lays one an
+// author gives anything else out as a BLOCK (its fallthrough; a widget so displayed as a flow-root), where `walk_display`
+// makes a ruby display the inline the `<ruby>` and `<rt>` elements are to it. Declined, as every ruby display was.
+fn authored_ruby(tag: &str, style: &ComputedValues) -> bool {
+    matches!(
+        style.get_box().clone_display().inside(),
+        DisplayInside::Ruby
+            | DisplayInside::RubyBase
+            | DisplayInside::RubyText
+            | DisplayInside::RubyBaseContainer
+            | DisplayInside::RubyTextContainer
+    ) && !matches!(tag, "ruby" | "rt" | "rb" | "rtc")
+}
 // The elements HTML gives a formatting context of their own whatever their `display` (layout.js `OWN_CONTEXT_TAGS`:
 // the widgets and the replaced elements).
 const OWN_CONTEXT_TAGS: &[&str] = &[
@@ -1730,6 +1743,9 @@ impl<'a> Walk<'a> {
         }
         if tag.is_empty() && JS_MODEL_TAGS.binary_search(&&*node.local_name.to_ascii_lowercase()).is_ok() {
             return Err("foreign element named as an HTML one");
+        }
+        if authored_ruby(tag, &style) {
+            return Err("ruby");
         }
         let b = style.get_box();
         let display = b.walk_display();
@@ -2305,6 +2321,10 @@ impl<'a> Walk<'a> {
             let n = self.node(c);
             if n.kind != NodeKind::Element {
                 continue;
+            }
+            // (…an `option` / `optgroup` of another namespace is one to the JS model, which keys on the local name)
+            if n.rendering_tag().is_empty() && matches!(&*n.local_name.to_ascii_lowercase(), "option" | "optgroup") {
+                return Err("foreign element named as an HTML one");
             }
             if n.rendering_tag() != "option" {
                 let inner = if n.rendering_tag() == "optgroup" { indent + 15.0 } else { indent };
@@ -3841,6 +3861,9 @@ impl<'a> Walk<'a> {
         if tag.is_empty() && JS_MODEL_TAGS.binary_search(&&*node.local_name.to_ascii_lowercase()).is_ok() {
             return Err("foreign element named as an HTML one");
         }
+        if authored_ruby(tag, cs) {
+            return Err("ruby");
+        }
         let d = cs.get_box().walk_display();
         // (…a `<br>` or a `<wbr>` a flex or grid container's run of bare text holds is still a line break, or a place for
         // one, in the anonymous item: the style engine blockifies it as the container's child, where the JS model keeps
@@ -4265,7 +4288,9 @@ impl<'a> Walk<'a> {
         let b = style.get_box();
         // (…every box but an ordinary block or inline one: a caption's flow is its own too, and so is a `-webkit-box`'s,
         // laid out as a block but no ordinary one — the JS model's context arm reads its own display)
-        let d = b.clone_display();
+        let raw = b.clone_display();
+        // (…a ruby box by the inline `walk_display` lays it out as; a `-webkit-box` by its own display, a block of its own)
+        let d = if matches!(raw.inside(), DisplayInside::WebkitBox) { raw } else { b.walk_display() };
         if !matches!(d.inside(), DisplayInside::Flow) || !matches!(d.outside(), DisplayOutside::Block | DisplayOutside::Inline) {
             return true;
         }

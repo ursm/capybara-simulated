@@ -63,10 +63,13 @@ RSpec.describe 'Rust walk coverage' do
   it 'lays out an object, its fallback, and no src-less embed' do
     rust, js = both_walks(
       '<div style="font: 16px monospace"><object data="x.png"></object><object><span>fallback</span></object>' \
-      '<embed type="text/plain"><p>after</p></div>'
+      '<embed type="text/plain"><object id="nbsp">&nbsp;</object><p>after</p></div>'
     )
     expect(rust).to eq(js)
     expect(rust.find {|b| b[0] == 'embed' }[3..4]).to eq([0, 0])
+    # (…an NBSP is fallback content, not white space: an inline 9.61 wide in Chrome, where the JS model's `\S` made it
+    # the 300 x 150 replaced box)
+    expect(rust.select {|b| b[0] == 'object' }.last[3]).to be_within(0.02).of(9.61)
   end
 
   # An intrinsic-size keyword on a replaced element is its intrinsic width, as the JS layout has it; `stretch` is an auto
