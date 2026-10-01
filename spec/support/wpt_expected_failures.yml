@@ -2198,8 +2198,6 @@ css/css-transitions/unregistered-custom-property-transition.html:
 - first value -> unset transition with allow-discrete
 css/cssom/CSSStyleSheet-constructable-insertRule-base-uri.html:
 - "== css/cssom/CSSStyleSheet-constructable-insertRule-base-uri-ref.html"
-css/cssom/CSSStyleSheet-constructable.html:
-- Stylesheet constructed on iframe cannot be used in the main Document
 css/cssom/CSSStyleSheet-template-adoption.html:
 - adoptedStyleSheets won't be cleared when adopting into/from <template>s
 css/cssom/at-namespace.html:
