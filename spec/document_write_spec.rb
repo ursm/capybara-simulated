@@ -104,6 +104,15 @@ RSpec.describe 'document.write during parsing' do
     expect(s.evaluate_script("txt('o')")).to eq('QZ')
   end
 
+  # …and one a DECLARATIVE SHADOW ROOT's script wrote runs before the parse goes on, as any other. Chrome: dsd, e1, next.
+  it 'runs a pending script a declarative shadow root\'s script wrote' do
+    s = session_with_scripts(<<~HTML)
+      <div id=h><template shadowrootmode=open><script>document.write('<script src=e1.js><\\/script>'); L.push('dsd');</script></template></div>
+      <p>tail</p><script>L.push('next');</script>
+    HTML
+    expect(s.evaluate_script('L')).to eq(%w[dsd e1: next])
+  end
+
   # A declarative shadow root's script that writes once the input has run out: no insertion point is left to write at,
   # and nothing the parser does on the write may bring the process down (it did: a panic, aborting).
   it 'survives a write from a declarative shadow root left open at the end of the input' do

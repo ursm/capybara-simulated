@@ -380,14 +380,24 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
 
 // Run a parser op, catching a panic (a bug in the parser, or one a page's input found) where it would otherwise unwind
 // into V8's callback frame and abort the process: the parse it was running is dropped — what it built so far stands,
-// the rest of its input is lost — and the bug goes to stderr.
-fn parser_op(scope: &mut v8::PinScope<'_, '_>, id: Option<u32>, op: impl FnOnce(&mut v8::PinScope<'_, '_>)) {
-    let Err(panic) = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| op(scope))) else { return };
+// the rest of its input is lost — the bug goes to stderr, and the op answers `panicked` (steps that end the parse, so
+// the page side winds it down as it would one whose input ran out).
+fn parser_op(
+    scope: &mut v8::PinScope<'_, '_>,
+    id: Option<u32>,
+    rv: &mut v8::ReturnValue<'_, v8::Value>,
+    panicked: &[i32],
+    op: impl FnOnce(&mut v8::PinScope<'_, '_>, &mut v8::ReturnValue<'_, v8::Value>),
+) {
+    let Err(panic) = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| op(scope, rv))) else { return };
     let what = panic.downcast_ref::<&str>().map(|s| s.to_string()).or_else(|| panic.downcast_ref::<String>().cloned());
     eprintln!("csim: the HTML parser panicked: {}", what.unwrap_or_default());
     if let Some(id) = id {
         parses(scope).live.remove(&id);
     }
+    let items: Vec<v8::Local<v8::Value>> = panicked.iter().map(|&n| v8::Integer::new(scope, n).into()).collect();
+    let answer = v8::Array::new_with_elements(scope, &items);
+    rv.set(answer.into());
 }
 
 // The steps taken since the last call, then the status: -1 the input ran out, else the script handle to run first —
@@ -419,7 +429,8 @@ fn steps<'s>(scope: &mut v8::PinScope<'s, '_>, id: u32, status: i32, with_id: bo
 // is — a fragment parse in that context (handle 1; handle 2 its form element pointer, `withForm`), in its document's
 // mode (`quirks` 0 no-quirks, 1 limited-quirks, 2 quirks).
 fn html_parse(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
-    parser_op(scope, None, |scope| {
+    // (…a parse that panicked starting is parse 0, which there is none of, its input run out)
+    parser_op(scope, None, &mut rv, &[0, -1], |scope, rv| {
         let mut standins = StandIns::default();
         let well_formed = args.get(1).boolean_value(scope);
         let html = parser_text(scope, args.get(0), well_formed, &mut standins);
@@ -463,7 +474,7 @@ fn parse_id(scope: &mut v8::PinScope<'_, '_>, args: &v8::FunctionCallbackArgumen
 // __dom.htmlRun(id) -> [steps…, status]: parse on, from where the parse stopped.
 fn html_run(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let id = parse_id(scope, &args);
-    parser_op(scope, Some(id), |scope| {
+    parser_op(scope, Some(id), &mut rv, &[-1], |scope, rv| {
         let status = parses(scope).live.get_mut(&id).map_or(-1, Parse::run);
         let steps = steps(scope, id, status, false);
         rv.set(steps.into());
@@ -472,9 +483,9 @@ fn html_run(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgument
 
 // __dom.htmlScriptBegin(id): a script runs with an insertion point — just past its `</script>`, or before the next
 // input character for the pending parsing-blocking one: the input after it is set aside until `htmlScriptEnd`.
-fn html_script_begin(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {
+fn html_script_begin(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let id = parse_id(scope, &args);
-    parser_op(scope, Some(id), |scope| {
+    parser_op(scope, Some(id), &mut rv, &[], |scope, _| {
         if let Some(p) = parses(scope).live.get_mut(&id) {
             let mut rest = Vec::new();
             while let Some(chunk) = p.input.pop_front() {
@@ -487,9 +498,9 @@ fn html_script_begin(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbac
 
 // __dom.htmlScriptEnd(id): …and has run: what it wrote and the parse did not take stays where it is, and the input set
 // aside goes back after it.
-fn html_script_end(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {
+fn html_script_end(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let id = parse_id(scope, &args);
-    parser_op(scope, Some(id), |scope| {
+    parser_op(scope, Some(id), &mut rv, &[], |scope, _| {
         if let Some(p) = parses(scope).live.get_mut(&id) {
             for chunk in p.set_aside.pop().unwrap_or_default() {
                 p.input.push_back(chunk);
@@ -503,7 +514,7 @@ fn html_script_end(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackA
 // parses it, but for a pending parsing-blocking script.) Nothing goes into a parse that has ended.
 fn html_write(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let id = parse_id(scope, &args);
-    parser_op(scope, Some(id), |scope| {
+    parser_op(scope, Some(id), &mut rv, &[], |scope, rv| {
         let well_formed = args.get(2).boolean_value(scope);
         let Some(mut standins) = parses(scope).live.get_mut(&id).filter(|p| !p.ended).map(|p| std::mem::take(&mut p.standins)) else {
             return rv.set_bool(false);
