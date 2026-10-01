@@ -169,8 +169,8 @@ RSpec.describe 'css-scoping selectors' do
     expect(got).to eq([40, 40, 0, 0, 0, 40])
   end
 
-  # …and the host's class written by a PARSE-TIME script after a layout read: the layout gate had no rule set collected
-  # yet, kept the write for a rebuild that was not coming, and the tree under the host kept its old padding.
+  # …and the host's class written by a PARSE-TIME script after a layout read: a write kept for a rule set not collected
+  # yet waited on a rebuild that was not coming, and the tree under the host kept its old padding.
   it 'relays out the tree under a host whose class a parse-time script changes' do
     script = "const h = document.getElementById('h'), r = h.attachShadow({mode: 'open'}); " \
              "r.innerHTML = '<style>:host(.x) p { padding-left: 2px } :host(.y) p { padding-right: 5px }</style><p id=a>a</p>'; " \

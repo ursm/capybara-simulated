@@ -343,14 +343,7 @@ module PerfGate
       element_layouts:      globalThis.__csimElementLayouts(),
       reuse_hit:            globalThis.__csimReuseStats().hit,
       reuse_remeasured:     globalThis.__csimReuseStats().remeasured,
-      reuse_escapingAbs:    globalThis.__csimReuseStats().escapingAbs,
-      ctx_sweeps:           globalThis.__csimCtxSweeps(),
-      // …and whether the page has a structural-context gate at all, which decides whether a memoised
-      // computed value survives a mutation or every one of them dies at every write. A BIT, not a
-      // count, and the only counter here that a page can lose wholesale: a shadow host used to turn it
-      // off for the whole document, and `ctx_sweeps` then read 0 — fewer sweeps because there was
-      // nothing left to sweep, which is the opposite of an improvement and unreadable on its own.
-      ctx_gate_active:      globalThis.__csimCtxGateActive() ? 1 : 0
+      reuse_escapingAbs:    globalThis.__csimReuseStats().escapingAbs
     })
   JS
 

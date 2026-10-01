@@ -438,13 +438,13 @@ RSpec.describe 'cascade invalidation' do
     expect(got).to eq([['rgb(0, 0, 0)', 'rgb(0, 0, 0)'], ['rgb(0, 128, 0)', 'rgb(0, 128, 0)'], true])
   end
 
-  # ── the dynamic-layout PRESENCE gate ─────────────────────────────────────────────────────────
-  # A dynamic rule that can move boxes makes the layout epoch listen to focus / hover / checked
-  # state — the whole document relays out per state change. The gate narrows that to "while every
-  # identifier the rule's compounds require exists in the document": widget CSS shipped site-wide
-  # (EasyMDE, flatpickr) stops taxing the pages that never render the widget. These specs pin both
-  # sides: the epoch must NOT move while the rule can't match, and MUST take effect the moment it
-  # can — including when the widget arrives only after the gate has answered once.
+  # ── dynamic rules that move boxes ───────────────────────────────────────────────────────────
+  # A dynamic rule that can move boxes must not make the layout epoch listen to focus / hover /
+  # checked state — the whole document would relay out per state change, and widget CSS shipped
+  # site-wide (EasyMDE, flatpickr) would tax the pages that never render the widget. What a flip
+  # reaches is marked by the restyle instead. These specs pin both sides: the epoch must NOT move,
+  # and the rule MUST take effect the moment it can match — including when the widget arrives only
+  # after the first layout.
 
   # Methods, not constants, for the same reason as `cases` above: a constant assigned inside a
   # `describe` block lands at top level and collides across spec files.
@@ -657,12 +657,8 @@ RSpec.describe 'cascade invalidation' do
   end
 
   it 'relays out for a DYNAMIC rule that moves a box inside a shadow tree' do
-    # Two gates are a pair here: the scoped-state hook cannot sweep a shadow rule's subjects (the
-    # subject list is the document's), so the layout EPOCH carries dynamic state instead. Both used to
-    # switch on "is there a host at all" — which cost every page with one a `styleStateGeneration()`
-    # call per element per pass, for a widget that may declare nothing dynamic. They ask the trees'
-    # own sheets now, and this is what that has to keep working. Narrowing one without the other is
-    # how a page ends up both sweeping nothing AND keying on nothing.
+    # A shadow rule's subjects live one tree in, where no document-side sweep ever reached; the restyle
+    # that flips them is what has to relay them out.
     [
       ['#t { width: 40px } #t:hover { width: 300px }',
        "document._hoverElement = document.getElementById('host').shadowRoot.getElementById('t');", 300],
@@ -845,12 +841,8 @@ RSpec.describe 'cascade invalidation' do
   end
 
   it 'relays out for a ::part rule that moves a box on a dynamic state flip' do
-    # The mirror of the case above, and the one thing neither list carries: a `::part()` rule lives in
-    # the DOCUMENT sheet, so no shadow sheet declares it — and `collectDynamicLayoutRules` drops every
-    # rule whose subject is a pseudo-element, so the document's dynamic-subject list does not carry it
-    # either. Nothing would relay out for it: the scoped hook cannot sweep a subject one tree in, and
-    # the epoch would have stopped keying on dynamic state. The document's part rules are scanned for
-    # it (`dynamicPartRule`).
+    # The mirror of the case above: a `::part()` rule lives in the DOCUMENT sheet and styles a subject
+    # one tree in, which a document-side list of dynamic subjects never carried.
     [['#host::part(p):hover', 't'], ['#host:hover::part(p)', "document.getElementById('host')"]].each do |sel, hover|
       s = simulated_session(lambda {|_env|
         [200, {'content-type' => 'text/html'},
@@ -1434,7 +1426,7 @@ RSpec.describe 'cascade invalidation' do
   it 'relays out descendants of a subject-position box-property flip' do
     # Subject-position tokens take the SUBTREE mark even for pure box properties: a heal through
     # the parent's relayout looked sufficient, but an abspos descendant anchored to the subject's
-    # containing block escapes it (see ruleMovesBoxes) — so the classification stays conservative.
+    # containing block escapes it — so the mark stays conservative.
     css = '.box { width: 100px } .box.wide { width: 200px } .half { width: 50% }'
     body = '<div class="box" id="c"><div class="half"><div class="half" id="g">x</div></div></div>'
     s = simulated_session(gated_page(body, css: css))
@@ -1469,16 +1461,14 @@ RSpec.describe 'cascade invalidation' do
   end
 
   # ── …and what a SHADOW sheet does to it ──────────────────────────────────────────────────────
-  # Unlike the document-wide gates further up, this one is asked about ONE ELEMENT — so it does not
-  # need to know what the shadow sheets declare, only whether a class written on THIS element can
-  # change what any of them matches (`shadowRulesMayReach`). Keyed on the host COUNT instead, a
-  # single widget cost every light-DOM class write on the page the subtree mark: on the perf gate's
-  # 400-row table that was HALF the page's subtree reuse (`reuse_hit` 602 against 1200 for the
+  # A class write marks the writer's subtree and no more, whatever the shadow sheets on the page
+  # declare: a single widget once cost every light-DOM class write on the page more than that — on the
+  # perf gate's 400-row table, HALF the page's subtree reuse (`reuse_hit` 602 against 1200 for the
   # identical page without the host), which the wall could not see.
   #
   # The examples below are the ways a shadow sheet crosses its boundary, and then the queue that has
   # to carry a LATE sheet to the fold. **`__csimSubtreeMarks` is the only observable that pins the
-  # gate itself**: `reuseSubtree` refuses a subtree holding an escaping abspos or a changed
+  # marks themselves**: `reuseSubtree` refuses a subtree holding an escaping abspos or a changed
   # containing block on its own, so geometry heals every one of these shapes either way. Where a
   # geometry assertion appears beside the count it pins the MATCHING, not the gate; where none
   # appears the rule either does not match here yet (`:host(.x) .y`) or does not turn on the class
@@ -1729,7 +1719,7 @@ RSpec.describe 'cascade invalidation' do
       (() => {
         const rev = document.getElementById('rev');
         const pane = document.getElementById('pane');
-        document.getElementById('t').checked = true;              // scoped state sweep
+        document.getElementById('t').checked = true;              // a state flip
         const revealed = rev.getBoundingClientRect().height > 0;
         document.body.classList.add('mode-x');                    // class-write DESC path
         return [revealed, pane.getBoundingClientRect().height];

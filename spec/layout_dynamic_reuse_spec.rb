@@ -960,7 +960,8 @@ RSpec.describe 'layout reuse across dynamic style state' do
     end
 
     # A read that merely CONSIDERED a dynamic-state rule leaves what it walked kept: a flip that can move a box dirties
-    # every box the rule can reach (`__csimApplyScopedStateDirty`), and that is what the stamps it is kept under follow.
+    # every box the rule can reach (the restyle marks, layout.js `markRestyles`), and that is what the stamps it is kept
+    # under follow.
     # Refused for one, Redmine's `#main-menu li:hover ul.menu-children` kept the header, and the page wrapper above it,
     # from ever being kept: every edit walked them afresh, and asked each of their gates again.
     it 'keeps a subtree a dynamic-state rule reaches' do
