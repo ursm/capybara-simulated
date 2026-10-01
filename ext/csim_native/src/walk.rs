@@ -270,7 +270,8 @@ pub(crate) fn position_code(position: Position) -> u8 {
     }
 }
 
-pub(crate) fn build(arena: &RealmArena, root: NodeId, basis: Basis, faces: &mut Faces, maths: &mut MathTable, prior: Option<&Prior>) -> Outcome {
+// (…`painting`: a pass a painter records, whose text runs keep what it draws them by — `PaintMark` — and none else does)
+pub(crate) fn build(arena: &RealmArena, root: NodeId, basis: Basis, faces: &mut Faces, maths: &mut MathTable, prior: Option<&Prior>, painting: bool) -> Outcome {
     faces.missing.clear();
     let walked = arena.begin_layout_walk();
     let texts = typed_arena::Arena::new();
@@ -284,6 +285,7 @@ pub(crate) fn build(arena: &RealmArena, root: NodeId, basis: Basis, faces: &mut 
         runs: Vec::new(),
         run_texts: Vec::new(),
         paint: Vec::new(),
+        painting,
         grids: Vec::new(),
         maths: &mut maths.values,
         math_index: &mut maths.index,
@@ -466,6 +468,7 @@ struct Walk<'a> {
     runs: Vec<Run>,
     run_texts: Vec<RunText>,
     paint: Vec<PaintMark>,
+    painting: bool,
     // The grid stream a table's (or a grid's) record names its columns in (`grid_start`).
     grids: Vec<f64>,
     // The programs the records name, each once (`[length, op, a, b, …]` at its offset), and where each one is — the
@@ -3413,7 +3416,9 @@ impl<'a> Walk<'a> {
         for r in g.runs {
             let run = match r {
                 Pending::Text { font, text, wrap, ws, shift, owners } => {
-                    self.paint.push(PaintMark { run: self.runs.len(), shift, owners });
+                    if self.painting {
+                        self.paint.push(PaintMark { run: self.runs.len(), shift, owners });
+                    }
                     self.run_texts.push(Some(text.into()));
                     Run {
                         kind: RUN_TEXT,
@@ -3555,7 +3560,8 @@ impl<'a> Walk<'a> {
                     // join does not GLUE a word, and neither side of a `pre-line` join is white space alone (`appendText`).
                     // (…written in the element it is a child of in the flat tree: a box-less one's, where it was spliced
                     // through one — `inlineStyleOwner` — a generated box's for its text)
-                    let written_in = self.parent_of(c).map_or(-1.0, |p| p.to_f64());
+                    // (…asked only of a pass a painter records: no other reads it)
+                    let written_in = if self.painting { self.parent_of(c).map_or(-1.0, |p| p.to_f64()) } else { -1.0 };
                     if let Some(Pending::Text { font: lf, text, wrap: lw, ws: lws, shift: ls, owners }) = g.runs.last_mut() {
                         let joinable = *lw == wrap
                             && *ls == shift
@@ -3565,14 +3571,14 @@ impl<'a> Walk<'a> {
                             && (is_css_ws(*text.last().unwrap()) || is_css_ws(td[0]))
                             && !(ws_mode == WS_PRE_LINE && has_content(text) != has_content(&td));
                         if joinable {
-                            if owners.last().is_none_or(|&(_, o)| o != written_in) {
+                            if self.painting && owners.last().is_none_or(|&(_, o)| o != written_in) {
                                 owners.push((text.len() as u32, written_in));
                             }
                             text.extend_from_slice(&td);
                             continue;
                         }
                     }
-                    g.runs.push(Pending::Text { font: *font, text: td.into_owned(), wrap, ws: ws_mode, shift, owners: vec![(0, written_in)] });
+                    g.runs.push(Pending::Text { font: *font, text: td.into_owned(), wrap, ws: ws_mode, shift, owners: if self.painting { vec![(0, written_in)] } else { Vec::new() } });
                 }
                 NodeKind::Element => {
                     let cs = self.style(c)?;

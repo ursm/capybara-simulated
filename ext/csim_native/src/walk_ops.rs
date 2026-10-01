@@ -89,7 +89,7 @@ fn walk_parity(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgum
     let mut maths = walk::MathTable::default();
     let built = arena.faces.with(|faces| {
         faces.at_generation(&generation);
-        walk::build(arena, root, pass.basis, faces, &mut maths, None)
+        walk::build(arena, root, pass.basis, faces, &mut maths, None, false)
     });
     match built {
         Outcome::NeedsFaces if parity.asked => {
@@ -186,8 +186,10 @@ fn walk_parity(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgum
 // __dom.layoutBuild(rootNid, fontGeneration, rootCbW, rootCbH, texts, check): a whole layout pass the Rust walk builds
 // from the arena and the style engine — the records, runs and tables the JS walk would have sent — laid out as
 // `layoutPass` lays those out (the root placed natively). Answers the pass as `layoutPass` does, `[fragRows, boxRows,
-// changed, textRows?]`, with what names its boxes to the JS side beside it: `[…, recordNids, anonymous, inlineNids]`
-// (an anonymous cell or item as `[record, kind, container nid, ordinal]`, flat). Or `[family, bucket, …]` — the faces
+// changed]`, with what names its boxes to the JS side beside it: `[…, , recordNids, anonymous, inlineNids, unchanged]`
+// (an anonymous cell or item as `[record, kind, container nid, ordinal]`, flat; `unchanged` the records built as the last
+// pass built them) — and where `texts` asks, for a pass a painter records, each text piece as it draws it at 8 and 9:
+// `[x, y, baseline, width, justify, owner nid]` and the texts (`paint_rows`). Or `[family, bucket, …]` — the faces
 // the walk needs first, for the JS side to resolve (`walkFace`) and ask again — or the walk's decline, a string, for
 // the JS walk to take the pass.
 fn layout_build(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
@@ -210,8 +212,8 @@ fn layout_build(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgu
     let prior = prior.filter(|_| !texts);
     let (built, whole) = arena.faces.with(|faces| {
         faces.at_generation(&generation);
-        let built = walk::build(arena, root, basis, faces, maths, prior);
-        let whole = (check && prior.is_some()).then(|| walk::build(arena, root, basis, faces, maths, None));
+        let built = walk::build(arena, root, basis, faces, maths, prior, texts);
+        let whole = (check && prior.is_some()).then(|| walk::build(arena, root, basis, faces, maths, None, texts));
         (built, whole)
     });
     // (…a whole walk that could not build what the spliced one built — it asked for a face, a box, or declined — is a
@@ -302,7 +304,8 @@ fn layout_build(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgu
                 .map_or(0, |s| walk::position_code(s.get_box().clone_position()));
         }
     }
-    let answer = laid_answer(scope, cid, laid, texts);
+    // (…its text rows answered as the painter's pieces alone, below: nothing on that side reads the rows that index runs)
+    let answer = laid_answer(scope, cid, laid, false);
     if let Some((rows, strings)) = painted {
         let rows: v8::Local<v8::Value> = f64_array(scope, &rows).into();
         answer.set_index(scope, 8, rows);
@@ -432,13 +435,13 @@ fn json_str(s: &str) -> String {
 
 // Each text row (`[run, start, end, x, y, baseline, width, justify]`) as the painter draws it.
 fn paint_rows(rows: &[crate::layout::TextRow], paint: &[walk::PaintMark], run_texts: &[crate::layout::RunText]) -> (Vec<f64>, Vec<Vec<u16>>) {
-    let by_run: std::collections::HashMap<usize, &walk::PaintMark> = paint.iter().map(|m| (m.run, m)).collect();
     let mut out = Vec::new();
     let mut strings = Vec::new();
     for r in rows {
         let (run, start, end) = (r[0] as usize, r[1] as usize, r[2] as usize);
         let hyphen = start == end;
-        let mark = by_run.get(&run);
+        // (…the marks in run order, as the walk committed them)
+        let mark = paint.binary_search_by_key(&run, |m| m.run).ok().map(|k| &paint[k]);
         let text = run_texts.get(run).and_then(|t| t.as_deref()).unwrap_or(&[]);
         strings.push(if hyphen { vec![u16::from(b'-')] } else { text.get(start..end).unwrap_or(&[]).to_vec() });
         let at = if hyphen { start.saturating_sub(1) } else { start } as u32;
