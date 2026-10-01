@@ -1071,9 +1071,6 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_, ()>, ctx: &v8::Global<v8:
     // The store-flip's native-backed `_attrs`: __dom.attrsView(nid) -> an interceptor object over
     // that node's attributes (the Element constructor installs it in place of the JS `{}`).
     register(scope, ns, "attrsView", attrs_view, context_id);
-    // Store flip: eager-create a node (importNode with no parent/attrs) at Element construction, then
-    // fix its namespace once finalized (setNodeMeta) — the arena becomes the element's `_attrs` store.
-    register(scope, ns, "setNodeMeta", set_node_meta, context_id);
     // Reclamation: free ONE node's slot when its JS wrapper is garbage-collected (the
     // FinalizationRegistry callback in native-query-shadow.js calls this), so a long no-navigation
     // session's transient/detached nodes don't accumulate. Safe by construction — the generational
@@ -2350,30 +2347,6 @@ fn reset_arena(
     // …and the style engine forgets the nodes it held (its sheets stay until the new page sets its own).
     if let Some(engine) = dom(scope).styles.get_mut(&cid) {
         engine.reset();
-    }
-}
-
-// __dom.setNodeMeta(nid, localName, ns) — update a node's localName + namespace after creation. The
-// store flip eager-creates arena nodes in the Element ctor, where `_ns` is still the HTML default;
-// createElementNS / parser foreign content finalize a non-HTML namespace AFTER construction and call
-// this so the arena node's namespace matching is correct.
-fn set_node_meta(
-    scope: &mut v8::PinScope<'_, '_>,
-    args: v8::FunctionCallbackArguments<'_>,
-    _rv: v8::ReturnValue<'_, v8::Value>,
-) {
-    let Some(id) = nid_arg(scope, &args, 0) else {
-        return;
-    };
-    let local_name = LocalName::from(args.get(1).to_rust_string_lossy(scope));
-    let ns = Namespace::from(args.get(2).to_rust_string_lossy(scope));
-    let cid = realm_id(scope, &args);
-    let arena = realm(scope, cid);
-    if let Some(node) = arena.get_mut(id) {
-        node.local_name = local_name;
-        node.ns = ns;
-        let notes = notes_direction(node);
-        arena.direction_sources |= notes;
     }
 }
 
