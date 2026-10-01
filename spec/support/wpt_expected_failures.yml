@@ -409,19 +409,6 @@ css/css-animations/svg-use-transform-keyframes-custom-property-override.html:
   (both renderings blank)"
 css/css-animations/translation-animation-subpixel-offset.html:
 - "== css/css-animations/translation-animation-subpixel-offset-ref.html"
-css/css-flexbox/abspos/flex-abspos-staticpos-align-self-vertWM-001.html:
-- ".container > div 10"
-- ".container > div 23"
-- ".container > div 24"
-- ".container > div 9"
-css/css-flexbox/abspos/flex-abspos-staticpos-align-self-vertWM-004.html:
-- ".container > div 10"
-- ".container > div 21"
-- ".container > div 22"
-- ".container > div 9"
-css/css-flexbox/abspos/flex-abspos-staticpos-justify-content-vertWM-001.html:
-- ".container > div 12"
-- ".container > div 24"
 css/css-flexbox/align-content-rounding.html:
 - The last item should match the end edge.
 css/css-flexbox/align-items-baseline-column-horz.html:
@@ -801,9 +788,6 @@ css/css-flexbox/flex-wrap-column-grow.html:
 - Single flex-grow item fills multi-line column container height
 - flex-grow distributes space proportionally
 - flex-grow respects max-height on individual items
-css/css-flexbox/flexbox-justify-content-wmvert-003.html:
-- ".flexitem 3"
-- ".flexitem 4"
 css/css-flexbox/flexitem-stretch-image.html:
 - ".flexbox 1"
 css/css-flexbox/getcomputedstyle/flexbox_computedstyle_min-auto-size.html:
@@ -4187,22 +4171,10 @@ html/rendering/replaced-elements/attributes-for-embedded-content-and-images/inpu
 html/rendering/replaced-elements/attributes-for-embedded-content-and-images/input-image-inline-alt.html:
 - "== html/rendering/replaced-elements/attributes-for-embedded-content-and-images/input-image-inline-alt-ref.html"
 html/rendering/replaced-elements/attributes-for-embedded-content-and-images/picture-aspect-ratio.html:
-- Changing which <source> matches should change computed style
 - Computed style for width/height/aspect-ratio
-- Dynamically changing width/height should change computed style
-- If the <source> has only one of width/height, we don't get an aspect ratio, even
-  if the <img> has both.
-- If we only have height attribute, we should get height mapped but no aspect ratio,
-  even if <img> has attributes.
-- If we only have one width attribute, we should get width mapped but no aspect ratio,
-  even if <img> has attributes.
-- 'Loaded picture test: <source> with width and height attributes, <img> without width
-  and height attributes'
-- 'Loaded picture test: Both <source> and <img> are with width and height attributes'
 - Make sure style gets invalidated correctly when the source gets removed.
 - Percentages on source should be ignored for aspect-ratio but used for width/height.
 - Source width/height should take precedence over img attributes.
-- Trailing garbage should be ignored but not make the attribute invalid
 html/rendering/replaced-elements/attributes-for-embedded-content-and-images/textarea-placeholder-scroll.html:
 - Overflowing textarea placeholder should be scrollable
 html/rendering/replaced-elements/attributes-for-embedded-content-and-images/textarea-scrollheight-empty.html:

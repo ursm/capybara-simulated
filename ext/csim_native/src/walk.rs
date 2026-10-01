@@ -621,6 +621,9 @@ struct FlexPlan {
     cross_far: bool,
     cross_flip: bool,
     wrap: u8,
+    // …and the side a line's LEFT is on in a vertical writing mode — the top, but `sideways-lr`'s bottom — which a
+    // vertical row's `justify-content: left` / `right` name (`justifyPhysicalTarget`)
+    line_left: Side,
 }
 impl FlexPlan {
     fn of(style: &ComputedValues) -> FlexPlan {
@@ -659,6 +662,11 @@ impl FlexPlan {
             cross_far: matches!(cross_start, Side::Right | Side::Bottom),
             cross_flip,
             wrap,
+            line_left: if matches!(style.get_inherited_box().writing_mode, style::computed_values::writing_mode::T::SidewaysLr) {
+                Side::Bottom
+            } else {
+                Side::Top
+            },
         }
     }
     // `justify-content` as the code native reads (`flexJustifyCode`): physical `left` / `right` resolved against the
@@ -667,12 +675,22 @@ impl FlexPlan {
         let mut k = align_kw(flags);
         let mut physical = false;
         if matches!(k, Kw::Left | Kw::Right) {
-            if self.main_is_x {
-                let target = if k == Kw::Left { Side::Left } else { Side::Right };
-                k = if target == self.main_start { Kw::FlexStart } else { Kw::FlexEnd };
-                physical = true;
+            // (…themselves on a horizontal main axis, line-left / line-right on a vertical INLINE one, and nothing on a
+            // vertical block axis, where they behave as `start`)
+            let target = if self.main_is_x {
+                Some(if k == Kw::Left { Side::Left } else { Side::Right })
+            } else if !self.column {
+                let opposite = if self.line_left == Side::Top { Side::Bottom } else { Side::Top };
+                Some(if k == Kw::Left { self.line_left } else { opposite })
             } else {
-                k = Kw::Start;
+                None
+            };
+            match target {
+                Some(target) => {
+                    k = if target == self.main_start { Kw::FlexStart } else { Kw::FlexEnd };
+                    physical = true;
+                }
+                None => k = Kw::Start,
             }
         }
         if self.flex_reverse && !physical {
@@ -693,16 +711,19 @@ impl FlexPlan {
     }
     // An item's cross alignment (`crossAlign`, and `crossAlignPhysical` where `physical`): its `align-self` (`own`),
     // else the container's `align-items`, as a keyword along the cross axis — `self-start` / `self-end` by the item's
-    // own direction.
-    fn cross_align(&self, items: Kw, own: Kw, own_rtl: bool, mode: BaselineMode, physical: bool) -> Kw {
+    // own flow (`own_sides`, its `flow_sides`).
+    fn cross_align(&self, items: Kw, own: Kw, own_sides: [Side; 4], mode: BaselineMode, physical: bool) -> Kw {
         let align = if own != Kw::Auto { own } else { items };
         let (at_start, at_end) = if self.cross_flip { (Kw::FlexEnd, Kw::FlexStart) } else { (Kw::FlexStart, Kw::FlexEnd) };
         let a = match align {
             Kw::Normal | Kw::Auto | Kw::Left | Kw::Right | Kw::Other => Kw::Stretch,
             Kw::SelfStart | Kw::SelfEnd => {
-                // (…by the item's OWN flow: its inline-start where that runs along the cross axis, else its block-start)
+                // (…by the item's OWN flow: its inline-start where that runs along the cross axis, else its block-start —
+                // a `vertical-rl` item's right, where its inline axis runs down a row's cross axis across)
                 let cross_is_x = matches!(self.cross_start, Side::Left | Side::Right);
-                let mut side = if cross_is_x { if own_rtl { Side::Right } else { Side::Left } } else { Side::Top };
+                let [block_start, _, inline_start, _] = own_sides;
+                let inline_is_x = matches!(inline_start, Side::Left | Side::Right);
+                let mut side = if inline_is_x == cross_is_x { inline_start } else { block_start };
                 if align == Kw::SelfEnd {
                     side = match side {
                         Side::Left => Side::Right,
@@ -2515,7 +2536,7 @@ impl<'a> Walk<'a> {
         }
         for (_, item) in items {
             let at = self.inputs.len() as i32;
-            let (own_align, own_rtl, basis, cross_auto, auto) = match item {
+            let (own_align, own_sides, basis, cross_auto, auto) = match item {
                 FlexItem::Element(c) => {
                     self.record(c, idx)?;
                     let cs = self.style(c)?;
@@ -2526,17 +2547,15 @@ impl<'a> Walk<'a> {
                     // control takes the line's height)
                     let keeps_ratio = plan.main_is_x && self.intrinsic(c)?.is_some_and(|i| i.ratio);
                     let cross_auto = !keeps_ratio && if plan.main_is_x { matches!(cpos.height, Size::Auto) } else { matches!(cpos.width, Size::Auto) };
-                    let rtl = cs.get_inherited_box().direction == Direction::Rtl;
-                    (align_kw(cpos.align_self.0), rtl, FlexBasisSpec::of(&cs)?, cross_auto, auto)
+                    (align_kw(cpos.align_self.0), flow_sides(&cs), FlexBasisSpec::of(&cs)?, cross_auto, auto)
                 }
                 FlexItem::Anonymous(run, ordinal) => {
                     self.anonymous_item(id, idx, style, &run, ordinal)?;
-                    let rtl = style.get_inherited_box().direction == Direction::Rtl;
-                    (Kw::Auto, rtl, FlexBasisSpec { px: f64::NAN, frac: f64::NAN, prog: None, keyword: 0 }, true, 0)
+                    (Kw::Auto, flow_sides(style), FlexBasisSpec { px: f64::NAN, frac: f64::NAN, prog: None, keyword: 0 }, true, 0)
                 }
             };
             let mode = BaselineMode::of(&plan);
-            let align = match plan.cross_align(items_align, own_align, own_rtl, mode, true) {
+            let align = match plan.cross_align(items_align, own_align, own_sides, mode, true) {
                 // (…a row whose main axis runs DOWN has no baseline geometry to align its items on: they sit at the start,
                 // as `nlCrossAlign` puts them)
                 Kw::Baseline | Kw::LastBaseline if mode == BaselineMode::Keep && !plan.main_is_x => Kw::FlexStart,
@@ -2562,8 +2581,7 @@ impl<'a> Walk<'a> {
         }
         for c in oof {
             let cs = self.style(c)?;
-            let rtl = cs.get_inherited_box().direction == Direction::Rtl;
-            let code = match plan.cross_align(items_align, align_kw(cs.get_position().align_self.0), rtl, BaselineMode::Flow, false) {
+            let code = match plan.cross_align(items_align, align_kw(cs.get_position().align_self.0), flow_sides(&cs), BaselineMode::Flow, false) {
                 Kw::Center => 1,
                 Kw::FlexEnd => 2,
                 _ => 0,

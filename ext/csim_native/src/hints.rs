@@ -357,6 +357,13 @@ pub(crate) fn picture_hints(arena: &RealmArena, id: NodeId, media_matches: &dyn 
                 }
             }
         }
+        // (…and the aspect ratio is the source's as well, the img's own pair set aside: its width and height where it
+        // has both, none where it has one — over the img's own `aspect-ratio` hint, which this block follows)
+        let ratio = match (width.and_then(number_dimension), height.and_then(number_dimension)) {
+            (Some(w), Some(h)) => format!("auto {w} / {h}"),
+            _ => "auto".to_owned(),
+        };
+        out.push(("aspect-ratio", ratio));
         return;
     }
 }
