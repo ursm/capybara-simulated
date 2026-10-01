@@ -672,6 +672,33 @@ RSpec.describe 'style engine invalidation' do
     expect(JSON.parse(s.title)).to eq(%w[transitionend animationend finish])
   end
 
+  # …a CSS event by its own animation's composite order too, so each animation's `cancel` and its own `animationcancel`
+  # go out together, in tree order of their owners — not every CSS event of a class ahead of that class's playback
+  # events (`animationcancel:y` came before `cancel:y`). (Chrome sends no `animationcancel` for a script cancel at all.)
+  it 'dispatches each animation\'s playback and CSS cancel together, by composite order' do
+    s = visit(<<~HTML, css: '@keyframes k { to { opacity: 0.5 } } .k { animation: k 100s }')
+      <div id="x" class="k"></div><div id="y" class="k"></div>
+      <script>
+        setTimeout(() => {
+          const log = [];
+          const [ax, ay] = ['x', 'y'].map((id) => {
+            const el = document.getElementById(id), anim = el.getAnimations()[0];
+            el.onanimationcancel = () => log.push('animationcancel:' + id);
+            anim.oncancel = () => log.push('cancel:' + id);
+            return anim;
+          });
+          Promise.all([ax.ready, ay.ready]).then(() => {
+            ay.cancel();
+            ax.cancel();
+            setTimeout(() => { document.title = JSON.stringify(log); }, 50);
+          });
+        }, 10);
+      </script>
+    HTML
+    expect(s).to have_title(/\[/, wait: 3)
+    expect(JSON.parse(s.title)).to eq(%w[cancel:x animationcancel:x cancel:y animationcancel:y])
+  end
+
   # `:dir()` is the element's HTML DIRECTIONALITY, a state the engine matches like any other — a `dir=auto` scope's
   # from the first strong character of its text — and HTML's UA sheet sets `direction` from it (`[dir]:dir(rtl)`). So
   # a text edit that flips the scope restyles what matches, and what inherits from it (Chrome: ltr, then rtl).

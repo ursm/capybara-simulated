@@ -28972,7 +28972,21 @@ css/css-animations/event-dispatch.tentative.html:
   reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
     specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
     path/suffix. CLAUDE.md rule 1.
+- name: Replacing a running animation should get animationcancel earlier than animationstart
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
 - name: Set timeline and play transition after clearing the timeline.
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: The cancel event should be fired before the new start event if both have the
+    same position in the animation list
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: The cancel event with an earlier position in animation list should be fired
+    earlier
   reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
     specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
     path/suffix. CLAUDE.md rule 1.
@@ -29418,6 +29432,21 @@ css/css-transitions/event-dispatch.tentative.html:
     specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
     path/suffix. CLAUDE.md rule 1.
 - name: Cancel the transition after clearing the target effect
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: Replacing a running transition and forcing to flush the style together should
+    get the correct event order
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: Replacing a running transition should get transitioncancel earlier than transitionrun
+    and transitionstart
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: Replacing two running transitions on the same target should get two transitioncancel
+    events earlier than two transitionrun events, per transition generation
   reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
     specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
     path/suffix. CLAUDE.md rule 1.
@@ -55241,15 +55270,19 @@ web-animations/interfaces/DocumentTimeline/duration.tentative.html:
     path/suffix. CLAUDE.md rule 1.
 web-animations/timing-model/timelines/update-and-send-events.html:
 - name: Sorts cancel events by composite order
-  reason: 'Asserts an order the test itself calls unspecified ("This ordering needs
-    more clarification in the spec, but the intention is that the cancel playback
-    event fires before the equivalent CSS cancel event in each case") and asserts
-    more than that intention: every playback cancel before every CSS one. web-animations-1
-    §4.2 says the queue is given "a stable sort ... by their scheduled event time
-    ... Within events with equal scheduled event times, sort by their composite order"
-    — and a CSS transition''s `transitioncancel` has its transition''s composite order,
-    so it follows that transition''s `cancel` and precedes the CSS animation''s. The
-    engine follows the sort; Chrome fails the test too (it dispatches in call order).'
+  reason: 'The current spec text contradicts what the test asserts, and the test itself
+    says the order is unspecified (rule 3''s ground: the spec over a test that asserts
+    what it does not say). The test: "This ordering needs more clarification in the
+    spec, but the intention is that the cancel playback event fires before the equivalent
+    CSS cancel event in each case" — and it asserts more than that intention: every
+    playback cancel before every CSS one. web-animations-1 §4.2 gives the queue "a
+    stable sort ... by their scheduled event time ... Within events with equal scheduled
+    event times, sort by their composite order"; a CSS event has its animation''s
+    composite order, so each animation''s `cancel` and then its own `transitioncancel`
+    / `animationcancel` go out together, the transition''s pair before the CSS animation''s.
+    The engine follows the sort. Chrome fails the test too: it dispatches the playback
+    cancels in call order, and sends no `animationcancel` for a CSS animation a script
+    cancels.'
 webmessaging/broadcastchannel/cross-partition.https.tentative.html:
 - name: BroadcastChannel messages aren't received from a cross-partition dedicated
     worker
