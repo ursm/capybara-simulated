@@ -253,8 +253,8 @@ pub(crate) struct MathTable {
 // viewport from there (Chrome and Firefox alike); the root's COMPUTED `direction`, which `getComputedStyle` reports, is
 // its own either way.
 pub(crate) fn principal_rtl(arena: &RealmArena, root: NodeId) -> bool {
-    let body = arena.get(root).filter(|r| &*r.local_name == "html").and_then(|r| {
-        r.children.iter().copied().find(|&c| arena.get(c).is_some_and(|n| n.kind == NodeKind::Element && matches!(&*n.local_name, "body" | "frameset")))
+    let body = arena.get(root).filter(|r| r.is_html_named("html")).and_then(|r| {
+        r.children.iter().copied().find(|&c| arena.get(c).is_some_and(|n| matches!(n.rendering_tag(), "body" | "frameset")))
     });
     crate::style::primary_style(arena, body.unwrap_or(root)).is_some_and(|s| s.get_inherited_box().direction == Direction::Rtl)
 }
@@ -430,7 +430,7 @@ impl<'a> Generated<'a> {
 // What `id`'s `::before` (0) or `::after` (1) renders as the style engine styled it: its text (empty for a box that
 // holds none), or None where it generates no box.
 pub(crate) fn generated_text_of(arena: &RealmArena, id: NodeId, which: usize) -> Option<Vec<u16>> {
-    let node = arena.get(id).filter(|n| n.kind == NodeKind::Element && !NO_GENERATED_CONTENT.contains(&&*n.local_name))?;
+    let node = arena.get(id).filter(|n| n.kind == NodeKind::Element && !NO_GENERATED_CONTENT.contains(&n.rendering_tag()))?;
     crate::style::eager_pseudo(arena, id, &PSEUDOS[which]).and_then(|style| generated_text(&style, node))
 }
 // What a generated box's `content` renders (`generatedContentOf`), or None for none: its strings, an `attr()` of its
@@ -626,6 +626,22 @@ struct FlexPlan {
     line_left: Side,
 }
 impl FlexPlan {
+    // An ORPHAN `display: table-row`'s plan (layout.js `PHYSICAL_ROW_PLAN`): left to right, top down, no wrap, whatever
+    // its own flex properties or writing mode say — the JS model lays the row out as a flex row (`is_orphan_row`).
+    fn physical_row() -> FlexPlan {
+        FlexPlan {
+            column: false,
+            flex_reverse: false,
+            main_start: Side::Left,
+            cross_start: Side::Top,
+            main_is_x: true,
+            main_reverse: false,
+            cross_far: false,
+            cross_flip: false,
+            wrap: 0,
+            line_left: Side::Top,
+        }
+    }
     fn of(style: &ComputedValues) -> FlexPlan {
         use style::computed_values::flex_direction::T as Dir;
         use style::computed_values::flex_wrap::T as Wrap;
@@ -817,10 +833,6 @@ impl FlexBasisSpec {
     }
 }
 
-// An `<svg>` element — the replaced box an svg drawing is to the HTML around it.
-fn is_outer_svg(node: &crate::dom::NodeData) -> bool {
-    node.kind == NodeKind::Element && node.ns == web_atoms::ns!(svg) && &*node.local_name == "svg"
-}
 // A replaced element's intrinsic size: its figures, whether they carry a ratio, and whether ONLY the ratio does (an
 // svg with a viewBox and no size).
 #[derive(Clone, Copy)]
@@ -1575,29 +1587,44 @@ impl<'a> Walk<'a> {
     // lays it out — none above it through nothing but row groups, by box (`nlUnderATable`) — and it is no row, nor a
     // row's cell.
     fn orphan_table_part(&self, id: NodeId, display: Display) -> Result<bool, &'static str> {
-        if matches!(display.inside(), DisplayInside::TableRow) {
-            return Ok(false);
+        match display.inside() {
+            // (…a row has an arm of its own, `is_orphan_row`)
+            DisplayInside::TableRow => return Ok(false),
+            // (…and a cell in a ROW is that row's: an orphan itself where the row is one, laid out as the plain block an
+            // orphan cell is)
+            DisplayInside::TableCell => {
+                if let Some(p) = self.layout_parent(id).filter(|&p| self.node(p).kind == NodeKind::Element) {
+                    let d = self.style(p)?.get_box().walk_display();
+                    if matches!(d.inside(), DisplayInside::TableRow) {
+                        return self.is_orphan_row(p, d);
+                    }
+                }
+            }
+            _ => {}
         }
-        let row_group = |d: Display| {
-            matches!(d.inside(), DisplayInside::TableRowGroup | DisplayInside::TableHeaderGroup | DisplayInside::TableFooterGroup)
-        };
+        Ok(!self.under_a_table(id)?)
+    }
+
+    // An ORPHAN `display: table-row` — no table above it through row groups (`nlOrphanRow`). A browser wraps one in an
+    // anonymous table; the JS model lays it out as an equal-share flex row, and so does this walk (`orphan_row`).
+    fn is_orphan_row(&self, id: NodeId, display: Display) -> Result<bool, &'static str> {
+        Ok(matches!(display.inside(), DisplayInside::TableRow) && !self.under_a_table(id)?)
+    }
+
+    // Whether a TABLE lays this box out: one above it through nothing but row groups, climbed by box (`nlUnderATable`).
+    // A row group with no table is no table either — the JS model lays it out as a block, and a row in it is an orphan.
+    fn under_a_table(&self, id: NodeId) -> Result<bool, &'static str> {
         let mut p = self.layout_parent(id);
-        let mut first = true;
         while let Some(at) = p.filter(|&at| self.node(at).kind == NodeKind::Element) {
             let d = self.style(at)?.get_box().walk_display();
-            if first && matches!(display.inside(), DisplayInside::TableCell) && matches!(d.inside(), DisplayInside::TableRow) {
-                return Ok(false);
-            }
-            first = false;
-            if matches!(d.inside(), DisplayInside::Table) {
-                return Ok(false);
-            }
-            if !row_group(d) {
-                return Ok(true);
+            match d.inside() {
+                DisplayInside::Table => return Ok(true),
+                DisplayInside::TableRowGroup | DisplayInside::TableHeaderGroup | DisplayInside::TableFooterGroup => {}
+                _ => return Ok(false),
             }
             p = self.layout_parent(at);
         }
-        Ok(true)
+        Ok(false)
     }
 
     // One element's record, and its subtree's (`walkRecord`) — an in-flow box's, or an out-of-flow one's that `oof`
@@ -1645,10 +1672,11 @@ impl<'a> Walk<'a> {
         let out_of_flow = role == Role::OutOfFlow;
         let node = self.node(id);
         let style = self.style(id)?;
-        let tag: &str = &node.local_name;
-        // (…an `<svg>` in HTML is a replaced element here; the SVG inside it is its own business, and MathML declines)
-        if !node.is_html() && !is_outer_svg(node) {
-            return Err("foreign element");
+        let tag = node.rendering_tag();
+        // (…an `<svg>` in HTML is a replaced element here, the SVG inside it its own business; MathML lays out by MathML
+        // Core's rules, which this walk has not; any other element is the box its style makes it — `rendering_tag`)
+        if node.ns == web_atoms::ns!(mathml) {
+            return Err("mathml");
         }
         let b = style.get_box();
         let display = b.walk_display();
@@ -1659,14 +1687,14 @@ impl<'a> Walk<'a> {
             && !matches!(display.inside(), DisplayInside::Flex | DisplayInside::Grid);
         // (…and a REPLACED element — a control, an image, a frame — is a box of its own intrinsic size, whatever it holds)
         let intrinsic = self.intrinsic(id)?;
+        let orphan_row = role != Role::Cell && self.is_orphan_row(id, display)?;
         // (…a cell or a caption only where a table lays it out, as the walk's role for it says)
-        let container = intrinsic.is_some() || widget_block || match (role, display.outside()) {
+        let container = intrinsic.is_some() || widget_block || orphan_row || match (role, display.outside()) {
             (Role::Cell, _) => matches!(display.inside(), DisplayInside::TableCell),
             (Role::Caption, _) => matches!(display.outside(), DisplayOutside::TableCaption),
             (_, DisplayOutside::Block) => matches!(display.inside(), DisplayInside::Flow | DisplayInside::FlowRoot | DisplayInside::Flex | DisplayInside::Grid | DisplayInside::Table),
             // (…and an ORPHAN table part — a cell, a group, a column or a caption no table lays out — a plain block, as
-            // the JS model lays it out (`nlOrphanTablePart`); a row, and a cell of one, are the orphan ROW's, which is a
-            // flex row there and none here yet)
+            // the JS model lays it out (`nlOrphanTablePart`); an orphan row is a flex row there, `orphan_row`)
             (_, DisplayOutside::InternalTable | DisplayOutside::TableCaption) => self.orphan_table_part(id, display)?,
             (_, DisplayOutside::Inline) => match display.inside() {
                 DisplayInside::FlowRoot | DisplayInside::Flex | DisplayInside::Grid | DisplayInside::Table => true,
@@ -1681,11 +1709,6 @@ impl<'a> Walk<'a> {
         let position = b.clone_position();
         if matches!(position, Position::Absolute | Position::Fixed) != out_of_flow {
             return Err("positioned");
-        }
-        // (…the pass ROOT in a vertical writing mode takes its width from its content, which native sizes it by only
-        // where it declares one: `resolve_width` would fill the room instead)
-        if parent < 0 && !style.writing_mode.is_horizontal() && size_lp(&style.get_position().width).is_none_or(|lp| lp.has_percentage()) {
-            return Err("vertical root");
         }
         let idx = self.inputs.len() as i32;
         let mut rec = fresh_record();
@@ -1841,6 +1864,9 @@ impl<'a> Walk<'a> {
         if matches!(display.inside(), DisplayInside::Flex) && !widget_block {
             return self.flex(id, idx, &style);
         }
+        if orphan_row {
+            return self.orphan_row(id, idx, &style);
+        }
         if matches!(display.inside(), DisplayInside::Grid) && !widget_block {
             return self.grid(id, idx, &style, parent);
         }
@@ -1970,7 +1996,7 @@ impl<'a> Walk<'a> {
     fn splice(&mut self, c: NodeId, parent: i32, ctx: Ctx) -> bool {
         let Some(prior) = self.prior else { return false };
         let Some(node) = self.arena.get(c) else { return false };
-        if self.attempts > 0 || node.stamp.get() > prior.walked || &*node.local_name == "body" || node.is_html_named("legend") {
+        if self.attempts > 0 || node.stamp.get() > prior.walked || node.rendering_tag() == "body" || node.is_html_named("legend") {
             return false;
         }
         let Some(&j) = prior.by_nid.get(&c.to_f64().to_bits()) else { return false };
@@ -2135,11 +2161,8 @@ impl<'a> Walk<'a> {
     // or, for a button `<input>` and a `<select>`, from the label it draws measured in its own font.
     fn intrinsic(&mut self, id: NodeId) -> Result<Option<Intrinsic>, &'static str> {
         let node = self.node(id);
-        if !node.is_html() && !is_outer_svg(node) {
-            return Ok(None);
-        }
         let sized = |w: f64, h: f64| Intrinsic { w, h, ratio: false, ratio_only: false };
-        Ok(Some(match &*node.local_name {
+        Ok(Some(match node.rendering_tag() {
             "iframe" | "frame" | "embed" | "video" => sized(300.0, 150.0),
             "object" => return Err("object"),
             "canvas" => {
@@ -2221,8 +2244,8 @@ impl<'a> Walk<'a> {
             if n.kind != NodeKind::Element {
                 continue;
             }
-            if &*n.local_name != "option" {
-                let inner = if &*n.local_name == "optgroup" { indent + 15.0 } else { indent };
+            if n.rendering_tag() != "option" {
+                let inner = if n.rendering_tag() == "optgroup" { indent + 15.0 } else { indent };
                 widest = self.widest_option(c, select, widest, inner)?;
                 continue;
             }
@@ -2283,7 +2306,7 @@ impl<'a> Walk<'a> {
     // margins never adjoining, and — for a control that draws text — where its baseline sits in its font.
     fn replaced(&mut self, id: NodeId, idx: i32, style: &ComputedValues, intrinsic: Intrinsic) -> Step {
         let node = self.node(id);
-        let tag: &str = &node.local_name;
+        let tag = node.rendering_tag();
         let list_box = tag == "select" && self.arena.is_list_box(id);
         // A LIST BOX showing rows is the control's box with its options stacked in it as ordinary block children
         // (`nlListBoxWithRows`): its box from the intrinsic data like any replaced one's, its rows laid out inside it —
@@ -2386,7 +2409,7 @@ impl<'a> Walk<'a> {
                     if b.walk_display().is_none() {
                         continue;
                     }
-                    if n.is_html() && matches!(&*n.local_name, "br" | "wbr") {
+                    if matches!(n.rendering_tag(), "br" | "wbr") {
                         run.push(c);
                         continue;
                     }
@@ -2500,12 +2523,73 @@ impl<'a> Walk<'a> {
     // `order`, each its own record with what native sizes it from — then its out-of-flow children, placed by its
     // alignment.
     fn flex(&mut self, id: NodeId, idx: i32, style: &ComputedValues) -> Step {
-        let plan = FlexPlan::of(style);
-        let pos = style.get_position();
-        let items_align = align_kw(pos.align_items.0);
-        let cross_gap = gap(if plan.column { &pos.column_gap } else { &pos.row_gap })?;
-        let main_gap = gap(if plan.column { &pos.row_gap } else { &pos.column_gap })?;
         let (mut items, oof) = self.box_items(id)?;
+        items.sort_by_key(|&(order, _)| order);
+        self.flex_items(id, idx, style, FlexPlan::of(style), items, oof)
+    }
+
+    // An ORPHAN `display: table-row` (`is_orphan_row`), as the JS model lays it out (`nlFlexSupported`'s orphan arm):
+    // a flex record on the physical row plan, its items in DOCUMENT order, each given an EQUAL SHARE of the row, and
+    // MEASURED by stacking — and a row of bare TEXT has no item at all: the layout floors the row at a line and drops
+    // the text, which only the measure reads, off the record's own run stream. Refused where the two phases would give
+    // different answers: an inline-level or floated child, which the measure would put on a line, or text beside a box.
+    fn orphan_row(&mut self, id: NodeId, idx: i32, style: &ComputedValues) -> Step {
+        let kids: Vec<NodeId> = self.children(id).collect();
+        let text = kids.iter().any(|&c| self.node(c).kind == NodeKind::Text && has_content(&self.node(c).data));
+        for &c in &kids {
+            if self.node(c).kind != NodeKind::Element {
+                continue;
+            }
+            let cs = self.style(c)?;
+            let b = cs.get_box();
+            let d = b.walk_display();
+            if d.is_none() {
+                continue;
+            }
+            if matches!(b.clone_position(), Position::Absolute | Position::Fixed) {
+                continue;
+            }
+            if text {
+                return Err("orphan-row-text-beside-a-box");
+            }
+            if matches!(d.outside(), DisplayOutside::Inline) || b.clone_float() != Float::None {
+                return Err("orphan-row-inline-item");
+            }
+        }
+        let (items, oof) = self.box_items(id)?;
+        // (…its bare text is no item: the row drops it, and the measure reads it off the run stream below)
+        let items: Vec<(i32, FlexItem)> = items.into_iter().filter(|(_, item)| matches!(item, FlexItem::Element(_))).collect();
+        self.flex_items(id, idx, style, FlexPlan::physical_row(), items, oof)?;
+        if text {
+            let ws_mode = ws_mode_of(style)?;
+            let (indent, indent_bits) = indent(style)?;
+            let bites = indent.px != 0.0 || indent.frac != 0.0 || indent.prog.is_some();
+            let indent_math = self.math(indent.prog.as_deref());
+            let font = self.font_info(style, style)?;
+            let texts: Vec<NodeId> = kids.into_iter().filter(|&c| self.node(c).kind == NodeKind::Text).collect();
+            let mut g = Gather { block: style, idx, bites, runs: Vec::new(), makes_line: false, floats: Vec::new(), rel: None };
+            self.gather(&texts, style, &font, ws_mode, wrap_mode(style), 0.0, &mut g)?;
+            let rec = &mut self.inputs[idx as usize];
+            rec.indent_px = indent.px;
+            rec.indent_frac = indent.frac;
+            rec.indent_math = indent_math;
+            rec.indent_hanging = indent_bits & 256 != 0;
+            rec.indent_each_line = indent_bits & 512 != 0;
+            rec.ws_mode = ws_mode;
+            rec.strut_lh = font.lh;
+            rec.strut_asc = font.asc;
+            // (…the line the layout floors the row at, its text dropped: `anonymousItemHeight`)
+            rec.anon_cross = font.lh;
+            self.commit(idx, g);
+        }
+        let r = &mut self.inputs[idx as usize];
+        r.measured_as_block = true;
+        r.equal_share = true;
+        Ok(())
+    }
+
+    // A flex container's record and its items, on `plan`, in the order given.
+    fn flex_items(&mut self, id: NodeId, idx: i32, style: &ComputedValues, plan: FlexPlan, items: Vec<(i32, FlexItem)>, oof: Vec<NodeId>) -> Step {
         // (…a LIST BOX item is a container rather than a leaf, which native's flex sizing does not take:
         // `nlFlexItemsUnsizable`)
         for (_, item) in &items {
@@ -2515,7 +2599,10 @@ impl<'a> Walk<'a> {
                 }
             }
         }
-        items.sort_by_key(|&(order, _)| order);
+        let pos = style.get_position();
+        let items_align = align_kw(pos.align_items.0);
+        let cross_gap = gap(if plan.column { &pos.column_gap } else { &pos.row_gap })?;
+        let main_gap = gap(if plan.column { &pos.row_gap } else { &pos.column_gap })?;
         let r = &mut self.inputs[idx as usize];
         r.display = crate::layout::DISPLAY_FLEX;
         r.flex_main_is_x = plan.main_is_x;
@@ -3203,7 +3290,7 @@ impl<'a> Walk<'a> {
                 while taken[r].contains(&c) {
                     c += 1;
                 }
-                let spans = matches!(cell, CellEl::El(e) if matches!(&*self.node(*e).local_name, "td" | "th"));
+                let spans = matches!(cell, CellEl::El(e) if matches!(self.node(*e).rendering_tag(), "td" | "th"));
                 let attr = |name: &str| match cell {
                     CellEl::El(e) => self.node(*e).get_attr(name).map(str::to_owned),
                     CellEl::Anon(_) => None,
@@ -3675,10 +3762,11 @@ impl<'a> Walk<'a> {
     // One element in the inline content: a `<br>`, a `<wbr>`, or an inline box around content of its own.
     fn inline_child(&mut self, c: NodeId, cs: &ComputedValues, ws_mode: u8, g: &mut Gather) -> Step {
         let node = self.node(c);
-        let tag: &str = &node.local_name;
-        // (…an `<svg>` in HTML is a replaced element here; the SVG inside it is its own business, and MathML declines)
-        if !node.is_html() && !is_outer_svg(node) {
-            return Err("foreign element");
+        let tag = node.rendering_tag();
+        // (…an `<svg>` in HTML is a replaced element here, the SVG inside it its own business; MathML lays out by MathML
+        // Core's rules, which this walk has not; any other element is the box its style makes it — `rendering_tag`)
+        if node.ns == web_atoms::ns!(mathml) {
+            return Err("mathml");
         }
         let d = cs.get_box().walk_display();
         // (…a `<br>` or a `<wbr>` a flex or grid container's run of bare text holds is still a line break, or a place for
@@ -3931,7 +4019,7 @@ impl<'a> Walk<'a> {
         let ps = self.style(p)?;
         let d = ps.get_box().walk_display();
         if !(matches!(d.outside(), DisplayOutside::Inline) && matches!(d.inside(), DisplayInside::Flow))
-            || replaced_or_control(&self.node(p).local_name)
+            || replaced_or_control(self.node(p).rendering_tag())
             || self.holds_block_level(p)?
         {
             return Ok(0.0);
@@ -4024,7 +4112,7 @@ impl<'a> Walk<'a> {
     // Does a non-replaced `display: inline` box hold a block-level box among its in-flow children — and so lay out as
     // a BLOCK (layout.js `holdsBlockLevel`: the nearest the JS model comes to CSS 2.1 §9.2.1.1's split)?
     fn holds_block_level(&self, id: NodeId) -> Result<bool, &'static str> {
-        if replaced_or_control(&self.node(id).local_name) {
+        if replaced_or_control(self.node(id).rendering_tag()) {
             return Ok(false);
         }
         for c in self.children(id) {
@@ -4098,7 +4186,7 @@ impl<'a> Walk<'a> {
         if !parent_is_element {
             return true;
         }
-        if OWN_CONTEXT_TAGS.contains(&&*node.local_name) {
+        if OWN_CONTEXT_TAGS.contains(&node.rendering_tag()) {
             return true;
         }
         let b = style.get_box();
@@ -4142,7 +4230,7 @@ impl<'a> Walk<'a> {
         let parent = self.parent_of(id).and_then(|p| self.get(p).map(|n| (p, n)));
         match parent {
             Some((_, pn)) if pn.kind == NodeKind::Document => return false,
-            Some((p, pn)) if &*node.local_name == "body" && &*pn.local_name == "html" && self.parent_of(p).and_then(|d| self.get(d)).is_some_and(|d| d.kind == NodeKind::Document) => {
+            Some((p, pn)) if node.rendering_tag() == "body" && pn.is_html_named("html") && self.parent_of(p).and_then(|d| self.get(d)).is_some_and(|d| d.kind == NodeKind::Document) => {
                 if self.style(p).is_ok_and(|ps| visible(&ps)) {
                     return false;
                 }
@@ -4162,7 +4250,7 @@ impl<'a> Walk<'a> {
             if node.kind != NodeKind::Element {
                 break;
             }
-            let tag: &str = &node.local_name;
+            let tag = node.rendering_tag();
             if tag == "center" {
                 return 1;
             }
@@ -4356,7 +4444,7 @@ fn contains_out_of_flow(style: &ComputedValues, node: &crate::dom::NodeData) -> 
     let d = b.walk_display();
     // (…a block-holding inline among the inline boxes it does not apply to: it is laid out as a block, and is an
     // inline box to everything but the flow — `isSplitInline`)
-    let transformable = !(matches!(d.outside(), DisplayOutside::Inline) && matches!(d.inside(), DisplayInside::Flow) && !replaced_or_control(&node.local_name))
+    let transformable = !(matches!(d.outside(), DisplayOutside::Inline) && matches!(d.inside(), DisplayInside::Flow) && !replaced_or_control(node.rendering_tag()))
         && !matches!(d.inside(), DisplayInside::TableColumn | DisplayInside::TableColumnGroup);
     // (…the rest only of a box they apply to: not a non-replaced inline, not a table column — `isTransformable`)
     if !transformable {

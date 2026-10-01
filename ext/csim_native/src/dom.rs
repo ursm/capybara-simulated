@@ -233,6 +233,13 @@ impl NodeData {
     pub(crate) fn is_html_named(&self, name: &str) -> bool {
         self.is_html() && &*self.local_name == name
     }
+    // The tag HTML's rendering rules know an element by: its local name in the HTML namespace, `svg` for an SVG root (a
+    // replaced element to the HTML around it), and none — "" — for every other element, which CSS lays out by its style
+    // alone (an element of an unknown namespace is no `<img>` and no `<br>`, whatever its local name).
+    pub(crate) fn rendering_tag(&self) -> &str {
+        let svg_root = self.ns == ns!(svg) && &*self.local_name == "svg";
+        if self.kind == NodeKind::Element && (self.ns == ns!(html) || svg_root) { &self.local_name } else { "" }
+    }
     pub(crate) fn get_attr(&self, name: &str) -> Option<&str> {
         self.attributes
             .iter()
