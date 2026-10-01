@@ -1434,18 +1434,18 @@ const JS_MODEL_TAGS: &[&str] = &[
     "sub", "summary", "sup", "svg", "table", "tbody", "td", "template", "textarea", "tfoot", "th", "thead", "time",
     "title", "tr", "tt", "u", "ul", "var", "video", "wbr", "xmp"
 ];
-// A ruby display on an element other than HTML's ruby elements (`ruby`, `rt`, `rb`, `rtc`): the JS model lays one an
-// author gives anything else out as a BLOCK (its fallthrough; a widget so displayed as a flow-root), where `walk_display`
-// makes a ruby display the inline the `<ruby>` and `<rt>` elements are to it. Declined, as every ruby display was.
+// A ruby display an AUTHOR gave: the JS model lays one out as a BLOCK (its fallthrough; a widget so displayed as a
+// flow-root) on any element, `<ruby>` and `<rt>` included, where `walk_display` makes a ruby display the inline the UA's
+// `<ruby>` and `<rt>` are to it. Every ruby display but the UA sheet's own two — `display: ruby` on a `<ruby>`,
+// `ruby-text` on an `<rt>` — is an author's, and declined, as every ruby display was. (An author declaring exactly the
+// UA's value is no computed difference, and is taken: Chrome lays it out as the inline this walk does.)
 fn authored_ruby(tag: &str, style: &ComputedValues) -> bool {
-    matches!(
-        style.get_box().clone_display().inside(),
-        DisplayInside::Ruby
-            | DisplayInside::RubyBase
-            | DisplayInside::RubyText
-            | DisplayInside::RubyBaseContainer
-            | DisplayInside::RubyTextContainer
-    ) && !matches!(tag, "ruby" | "rt" | "rb" | "rtc")
+    match style.get_box().clone_display().inside() {
+        DisplayInside::Ruby => tag != "ruby",
+        DisplayInside::RubyText => tag != "rt",
+        DisplayInside::RubyBase | DisplayInside::RubyBaseContainer | DisplayInside::RubyTextContainer => true,
+        _ => false,
+    }
 }
 // The elements HTML gives a formatting context of their own whatever their `display` (layout.js `OWN_CONTEXT_TAGS`:
 // the widgets and the replaced elements).
