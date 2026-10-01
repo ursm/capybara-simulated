@@ -2,7 +2,6 @@
 # deliberately do NOT model (per CLAUDE.md rule 1): a RENDERING engine (glyph shaping
 # — kerning / ligatures / bidi — and the line-breaking algorithm), a real async runtime,
 # legacy-multibyte / Unicode-version-tied
-# encoding tables, or a spec edge no real library/app depends on. NOT "layout" wholesale:
 # box layout IS modeled (CLAUDE.md lists it as already in scope), so a failing geometry
 # or resolved-value subtest is a coarse-model gap to diagnose, not an automatic exclusion.
 # …and this header is the rule's own best example, THREE times: it kept naming `flex / grid track sizing`
@@ -11,7 +10,6 @@
 # `spec/display_contents_spec.rb`), and then it said both again: the corrections were made in the YAML by
 # hand and this TEMPLATE was not, so the next regen reverted them silently. No allowlist ENTRY cited any of
 # the three, so nothing was orphaned; only the header lied about why the list exists. Fix it HERE.
-# A REASON GOES STALE when the subsystem it names gets built, and the entry then has to move:
 # 1023 inset / used-value subtests came back on the first such sweep, and 1189 more on the
 # 2026-08-31 audit (innerText's rendered-text collection, elementFromPoint / caret-from-point,
 # pseudo-element computed style, the CSS animation and transition event families, IDNA,
@@ -38231,23 +38229,6 @@ domparsing/tentative/stream-positional.html:
   reason: 'Unshipped WICG positional streaming (streamAfter/Append/Before/PrependHTML(Unsafe)):
     methods not implemented. Streams ARE modeled (web-streams-polyfill); in-scope
     backlog deprioritized (unshipped, no app depends on it).'
-encoding/streams/decode-non-utf8.any.js:
-- name: TextDecoderStream should be able to decode ISO-2022-JP
-  reason: TextDecoderStream decode of legacy encodings (Shift_JIS, ISO-2022-JP, ISO-8859-14);
-    legacy-multibyte / legacy-single-byte decoder tables are deliberately not modeled
-    (rule 1) — only utf-8/utf-16/windows-1252 are.
-- name: TextDecoderStream should be able to decode Shift_JIS
-  reason: TextDecoderStream decode of legacy encodings (Shift_JIS, ISO-2022-JP, ISO-8859-14);
-    legacy-multibyte / legacy-single-byte decoder tables are deliberately not modeled
-    (rule 1) — only utf-8/utf-16/windows-1252 are.
-- name: TextDecoderStream should be able to decode invalid sequences in ISO-2022-JP
-  reason: TextDecoderStream decode of legacy encodings (Shift_JIS, ISO-2022-JP, ISO-8859-14);
-    legacy-multibyte / legacy-single-byte decoder tables are deliberately not modeled
-    (rule 1) — only utf-8/utf-16/windows-1252 are.
-- name: TextDecoderStream should be able to reject invalid sequences in ISO-2022-JP
-  reason: TextDecoderStream decode of legacy encodings (Shift_JIS, ISO-2022-JP, ISO-8859-14);
-    legacy-multibyte / legacy-single-byte decoder tables are deliberately not modeled
-    (rule 1) — only utf-8/utf-16/windows-1252 are.
 encoding/streams/realms.window.js:
 - name: the output chunks when read is called after write should come from the same
     realm as the constructor of TextEncoderStream
@@ -38257,75 +38238,9 @@ encoding/streams/realms.window.js:
     these tests assert. Surfaced once the WindowProxy event.source fix unblocked the
     test's iframe handshake (`event.source === window.parent`); the realm-attribution
     of polyfilled streams is out of scope (rule 1).
-encoding/textdecoder-eof.any.js:
-- name: TextDecoder end-of-queue handling
-  reason: UTF-8 assertions pass; the subtest also asserts Big5 lead-byte buffering
-    (e.g. [0x81,0x81] -> one replacement), which needs the Big5 legacy multibyte table
-    we deliberately don't model.
-- name: 'TextDecoder end-of-queue handling using stream: true'
-  reason: UTF-8 streaming assertions pass; the subtest also asserts Big5 lead-byte
-    buffering across chunks, which needs the Big5 legacy multibyte table we deliberately
-    don't model.
 encoding/textdecoder-mistakes.any.js:
-- name: Concatenating two ISO-2022-JP outputs is not always valid
-  reason: iso-2022-jp legacy multibyte escape-state decoding; deliberately not modeled
-    (degrades to utf-8 path).
-- name: 'Replacement, push back ASCII characters: big5'
-  reason: big5 legacy multibyte decoding + push-back not modeled; degrades to utf-8
-    path.
-- name: 'Replacement, push back ASCII characters: euc-jp'
-  reason: euc-jp legacy multibyte decoding + push-back not modeled; degrades to utf-8
-    path.
-- name: 'Replacement, push back ASCII characters: euc-kr'
-  reason: euc-kr legacy multibyte decoding + push-back not modeled; degrades to utf-8
-    path.
-- name: 'Replacement, push back ASCII characters: gb18030'
-  reason: gb18030 legacy multibyte decoding + push-back not modeled; degrades to utf-8
-    path.
-- name: 'Replacement, push back ASCII characters: gbk'
-  reason: gbk legacy multibyte decoding + push-back not modeled; degrades to utf-8
-    path.
-- name: 'Replacement, push back ASCII characters: iso-2022-jp'
-  reason: iso-2022-jp legacy multibyte escape-state decoding not modeled; degrades
-    to utf-8 path.
-- name: 'Replacement, push back ASCII characters: shift_jis'
-  reason: shift_jis legacy multibyte decoding + push-back not modeled; degrades to
-    utf-8 path.
-- name: 'Sticky multibyte state: euc-jp'
-  reason: euc-jp legacy multibyte decoder + cross-call state not modeled.
-- name: 'Sticky multibyte state: gb18030'
-  reason: gb18030 legacy multibyte decoder + cross-call state not modeled.
-- name: 'Sticky multibyte state: gbk'
-  reason: gbk legacy multibyte decoder + cross-call state not modeled.
-- name: 'Sticky multibyte state: iso-2022-jp'
-  reason: iso-2022-jp legacy escape-state decoder + cross-call state not modeled.
-- name: 'WPT mislabels: euc-jp'
-  reason: euc-jp legacy multibyte byte table not modeled; degrades to utf-8 path.
-- name: 'WPT mislabels: iso-2022-jp'
-  reason: iso-2022-jp legacy escape-state decoder not modeled; degrades to utf-8 path.
-- name: 'WPT mislabels: shift_jis'
-  reason: shift_jis legacy multibyte byte table not modeled; degrades to utf-8 path.
 - name: 'fatal stream: iso-2022-jp'
   reason: iso-2022-jp legacy escape-state decoder + streaming fatal not modeled.
-- name: gb18030 version and ranges
-  reason: gb18030 4-byte pointer-range decoding table not modeled; degrades to utf-8
-    path.
-- name: gbk version and ranges
-  reason: gbk pointer-range decoding table not modeled; degrades to utf-8 path.
-- name: 'stream: big5'
-  reason: big5 legacy multibyte decoder + streaming not modeled.
-- name: 'stream: euc-jp'
-  reason: euc-jp legacy multibyte decoder + streaming not modeled.
-- name: 'stream: euc-kr'
-  reason: euc-kr legacy multibyte decoder + streaming not modeled.
-- name: 'stream: gb18030'
-  reason: gb18030 legacy multibyte decoder + streaming not modeled.
-- name: 'stream: gbk'
-  reason: gbk legacy multibyte decoder + streaming not modeled.
-- name: 'stream: iso-2022-jp'
-  reason: iso-2022-jp legacy escape-state decoder + streaming not modeled.
-- name: 'stream: shift_jis'
-  reason: shift_jis legacy multibyte decoder + streaming not modeled.
 fetch/api/abort/general.any.js:
 - name: Fetch aborted & connection closed when aborted after calling response.arrayBuffer()
   reason: Server-side connection-close detection on abort (infinite-slow-response.py

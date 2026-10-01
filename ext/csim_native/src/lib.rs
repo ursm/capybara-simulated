@@ -29,6 +29,7 @@ mod selector;
 mod style;
 mod style_fonts;
 // The Unicode classes the ORACLE asks a regex for, parsed out of that same regex by regex-syntax.
+mod text_codec;
 mod unicode;
 mod url_ops;
 mod validity;
