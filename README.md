@@ -51,7 +51,8 @@ JavaScript runs on V8, via [rusty_racer](https://github.com/ursm/rusty_racer) â€
 
 That extension (`csim_native` â€” the V8 engine plus the native DOM) is Rust. A prebuilt gem ships it
 compiled; a source install (a platform with no prebuilt gem) compiles it during `bundle install`,
-so that machine needs a Rust toolchain (`cargo`, e.g. via [rustup](https://rustup.rs)).
+so that machine needs a Rust toolchain (`cargo`, e.g. via [rustup](https://rustup.rs)) and a C++20 compiler (GCC 12+ or
+Clang 14+: the URL parser, [Ada](https://github.com/ada-url/ada), is C++).
 
 ## Use
 

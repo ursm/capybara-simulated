@@ -3,9 +3,7 @@
 // URL as the parts these return, read without a crossing, and crosses only to parse one or to set one of its parts.
 //
 // A URL's parts, in this order (`parts`): href, protocol, username, password, host, hostname, port, pathname, search,
-// hash, origin — the interface's attributes — then whether its path is opaque (`javascript:…`, `data:…`), whether it
-// has an authority (`foo://` serializes `//`, `foo:/` does not), and whether it has a query and a fragment at all (an
-// empty one keeps its `?` / `#` in href, where the `search` / `hash` attributes read '' either way).
+// hash, origin — the interface's attributes.
 
 use ada_url::Url;
 
@@ -31,14 +29,8 @@ fn parts<'s>(scope: &mut v8::PinScope<'s, '_>, url: &Url) -> v8::Local<'s, v8::A
         url.hash(),
         &origin,
     ];
-    let mut items: Vec<v8::Local<v8::Value>> = Vec::with_capacity(15);
-    for t in texts {
-        items.push(v8::String::new(scope, t).map_or_else(|| v8::undefined(scope).into(), Into::into));
-    }
-    let opaque = !url.has_hostname() && !url.pathname().starts_with('/');
-    for flag in [opaque, url.has_hostname(), url.has_search(), url.has_hash()] {
-        items.push(v8::Boolean::new(scope, flag).into());
-    }
+    let items: Vec<v8::Local<v8::Value>> =
+        texts.into_iter().map(|t| v8::String::new(scope, t).map_or_else(|| v8::undefined(scope).into(), Into::into)).collect();
     v8::Array::new_with_elements(scope, &items)
 }
 
@@ -67,9 +59,10 @@ fn url_parse(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgumen
 
 // The URL's query as the input wrote it, percent-encoded in `encoding` (the parser did it in UTF-8). A query is what
 // follows the input's first `?` — no state before the query takes one — up to its `#`; a URL whose query came from its
-// base (the input has none of its own) keeps it as it is.
+// base (the input has none of its own) keeps it as it is. Only a special URL's, and not a `ws:` / `wss:` one's: the
+// query state takes UTF-8 for the others whatever the document's encoding (`mailto:…?subject=é` stays `%C3%A9`).
 fn encode_query_in(url: &mut Url, input: &str, encoding: &'static encoding_rs::Encoding) {
-    if !url.has_search() {
+    if !url.has_search() || !matches!(url.protocol(), "http:" | "https:" | "ftp:" | "file:") {
         return;
     }
     // (…the input as the parser reads it: no leading or trailing C0 control or space, no tab or newline anywhere)
@@ -83,12 +76,10 @@ fn encode_query_in(url: &mut Url, input: &str, encoding: &'static encoding_rs::E
     if query.is_ascii() && encoding.is_ascii_compatible() {
         return;
     }
-    let special = matches!(url.protocol(), "http:" | "https:" | "ws:" | "wss:" | "ftp:" | "file:");
     let mut encoded = String::from("?");
     for byte in encode(encoding, query) {
-        // (…the query percent-encode set — C0 controls, space, `"`, `#`, `<`, `>`, and above `~` — plus `'` for a
-        // special URL)
-        let escape = !(0x21..=0x7E).contains(&byte) || matches!(byte, b'"' | b'#' | b'<' | b'>') || (special && byte == b'\'');
+        // (…the special-query percent-encode set: C0 controls, space, `"`, `#`, `<`, `>`, `'`, and above `~`)
+        let escape = !(0x21..=0x7E).contains(&byte) || matches!(byte, b'"' | b'#' | b'<' | b'>' | b'\'');
         if escape {
             encoded.push_str(&format!("%{byte:02X}"));
         } else {
