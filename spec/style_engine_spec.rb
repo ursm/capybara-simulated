@@ -615,6 +615,36 @@ RSpec.describe 'style engine invalidation' do
                        'NoModificationAllowedError'])
   end
 
+  # "Update animations and send events" (web-animations §4.2) takes ONE queue — the playback events and the CSS ones —
+  # after its microtask checkpoint, so a `cancel()` in a `ready` reaction fires in the same update, before the frame's
+  # animation frame callbacks, its `cancel` before its `transitioncancel`; a listener's promise reactions run after its
+  # event; and what a listener queues is the next update's. The CSS events went out first, before the checkpoint, and
+  # each listener's microtasks waited for the rAFs: `raf` came before both cancels.
+  it 'dispatches playback and CSS events as one queue, after the checkpoint and before the animation frame callbacks' do
+    # (Run from a timer on the loaded page: an idle page's clock does not move for an animation alone.)
+    s = visit(<<~HTML, css: '')
+      <div id="d"></div>
+      <script>
+        setTimeout(() => {
+          const d = document.getElementById('d'), log = [];
+          getComputedStyle(d).marginLeft;
+          d.style.transition = 'margin-left 100s';
+          d.style.marginLeft = '100px';
+          const anim = d.getAnimations()[0];
+          anim.oncancel = () => { log.push('cancel'); Promise.resolve().then(() => log.push('after cancel')); };
+          d.ontransitioncancel = () => log.push('transitioncancel');
+          anim.ready.then(() => {
+            requestAnimationFrame(() => log.push('raf'));
+            anim.cancel();
+            setTimeout(() => { document.title = JSON.stringify(log); }, 50);
+          });
+        }, 10);
+      </script>
+    HTML
+    expect(s).to have_title(/\[/, wait: 2)
+    expect(JSON.parse(s.title)).to eq(['cancel', 'after cancel', 'transitioncancel', 'raf'])
+  end
+
   # `:dir()` is the element's HTML DIRECTIONALITY, a state the engine matches like any other — a `dir=auto` scope's
   # from the first strong character of its text — and HTML's UA sheet sets `direction` from it (`[dir]:dir(rtl)`). So
   # a text edit that flips the scope restyles what matches, and what inherits from it (Chrome: ltr, then rtl).

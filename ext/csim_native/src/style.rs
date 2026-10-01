@@ -1778,6 +1778,7 @@ impl StyleEngine {
                 name: e.name,
                 elapsed: to_microseconds(e.elapsed),
                 animation: e.animation,
+                scheduled: e.scheduled,
             })
             .collect()
     }
@@ -2020,6 +2021,8 @@ pub(crate) struct AnimationEvent {
     pub(crate) name: String,
     pub(crate) elapsed: f64,
     pub(crate) animation: waapi::AnimationId,
+    // (its scheduled event time, on the timeline, ms — which sorts it among the Web Animations' playback events)
+    pub(crate) scheduled: f64,
 }
 
 // Where `id` stands in shadow-including tree order, as the child indexes down to it (a shadow root comes before its

@@ -1052,6 +1052,7 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_, ()>, ctx: &v8::Global<v8:
     register(scope, ns, "styleRestyled", style_restyled, context_id);
     register(scope, ns, "styleFlush", style_flush, context_id);
     register(scope, ns, "styleTick", style_tick, context_id);
+    register(scope, ns, "styleTakeAnimationEvents", style_take_animation_events, context_id);
     crate::animation_ops::install(scope, ns, context_id);
     crate::walk_ops::install(scope, ns, context_id);
     register(scope, ns, "nowNanos", now_nanos, context_id);
@@ -2218,11 +2219,11 @@ fn style_flush(
     });
 }
 
-// __dom.styleTick(now) -> [retargeted count, nid…, then type, nid, pseudo, name, elapsedTime, animation, …]: a
-// rendering update at `now` (the page's clock, ms): a style flush — the elements whose animations' properties changed
-// first, as `styleFlush` gives them — and the animation / transition events the state changes since the last update
-// owe, handed back in order (`pseudo` null for an element's own; `animation` the engine's id of the CSS animation or
-// transition it is about).
+// __dom.styleTick(now) -> [retargeted count, nid…, then type, nid, pseudo, name, elapsedTime, animation, scheduled, …]:
+// a rendering update at `now` (the page's clock, ms): a style flush — the elements whose animations' properties
+// changed first, as `styleFlush` gives them — and the animation / transition events the state changes since the last
+// update owe, handed back in order (`pseudo` null for an element's own; `animation` the engine's id of the CSS
+// animation or transition it is about; `scheduled` its scheduled event time on the timeline).
 fn style_tick(
     scope: &mut v8::PinScope<'_, '_>,
     args: v8::FunctionCallbackArguments<'_>,
@@ -2249,9 +2250,38 @@ fn style_tick_unguarded(
     if threw_verify_failures(scope, failures) {
         return;
     }
-    let mut items: Vec<v8::Local<v8::Value>> = Vec::with_capacity(1 + retargeted.len() + events.len() * 6);
+    let mut items: Vec<v8::Local<v8::Value>> = Vec::with_capacity(1 + retargeted.len() + events.len() * ANIMATION_EVENT_STRIDE);
     items.push(v8::Number::new(scope, retargeted.len() as f64).into());
     items.extend(retargeted.iter().map(|n| -> v8::Local<v8::Value> { v8::Number::new(scope, n.to_f64()).into() }));
+    push_animation_events(scope, &mut items, events);
+    let array = v8::Array::new_with_elements(scope, &items);
+    rv.set(array.into());
+}
+
+// __dom.styleTakeAnimationEvents() -> [type, nid, pseudo, name, elapsedTime, animation, scheduled, …]: the CSS
+// animation and transition events queued since the last update, as `styleTick` hands them back, without moving
+// anything — what a script queued in that update's microtask checkpoint (a `cancel()` in a `ready` reaction) is due in
+// the same update (web-animations §4.2 step 4).
+fn style_take_animation_events(
+    scope: &mut v8::PinScope<'_, '_>,
+    args: v8::FunctionCallbackArguments<'_>,
+    mut rv: v8::ReturnValue<'_, v8::Value>,
+) {
+    let cid = realm_id(scope, &args);
+    let d = dom(scope);
+    let (Some(engine), Some(arena)) = (d.styles.get_mut(&cid), d.realms.get(&cid)) else { return };
+    let events = engine.take_animation_events(arena);
+    let mut items: Vec<v8::Local<v8::Value>> = Vec::with_capacity(events.len() * ANIMATION_EVENT_STRIDE);
+    push_animation_events(scope, &mut items, events);
+    rv.set(v8::Array::new_with_elements(scope, &items).into());
+}
+
+const ANIMATION_EVENT_STRIDE: usize = 7;
+fn push_animation_events<'s>(
+    scope: &mut v8::PinScope<'s, '_>,
+    items: &mut Vec<v8::Local<'s, v8::Value>>,
+    events: Vec<crate::style::AnimationEvent>,
+) {
     for e in events {
         items.push(v8::String::new(scope, e.kind).map_or_else(|| v8::undefined(scope).into(), Into::into));
         items.push(v8::Number::new(scope, e.node.to_f64()).into());
@@ -2262,9 +2292,8 @@ fn style_tick_unguarded(
         items.push(v8::String::new(scope, &e.name).map_or_else(|| v8::undefined(scope).into(), Into::into));
         items.push(v8::Number::new(scope, e.elapsed).into());
         items.push(v8::Number::new(scope, e.animation as f64).into());
+        items.push(v8::Number::new(scope, e.scheduled).into());
     }
-    let array = v8::Array::new_with_elements(scope, &items);
-    rv.set(array.into());
 }
 
 // __dom.resetArena() — free the CALLING REALM's nodes for a new page (a navigation). Each occupied

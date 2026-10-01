@@ -6097,7 +6097,6 @@ web-animations/timing-model/animations/sync-start-times.html:
 web-animations/timing-model/timelines/sibling-iframe-timeline.html:
 - animation tied to another frame's timeline runs properly
 web-animations/timing-model/timelines/timelines.html:
-- Runs finished promise before animation events
 - Timeline time increases once per animation frame
 - Timeline time increases once per animation frame in an iframe
 web-animations/timing-model/timelines/update-and-send-events-replacement.html:
@@ -6148,12 +6147,6 @@ web-animations/timing-model/timelines/update-and-send-events-replacement.html:
 - Removes an animation when another animation uses a shorthand
 - Removes an animation when another covers the same properties
 - Updates ALL timelines before checking for replacement
-web-animations/timing-model/timelines/update-and-send-events.html:
-- Fires cancel event before requestAnimationFrame
-- Fires finish event before requestAnimationFrame
-- Queues a cancel event in transitionstart event callback
-- Sorts cancel events by composite order
-- Sorts events for the same transition
 webmessaging/Channel_postMessage_transfer_xsite_incoming_messages.window.js:
 - |-
   Tasks enqueued on the port-message-queue of an enabled port,
