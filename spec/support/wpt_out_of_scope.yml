@@ -38161,48 +38161,6 @@ domparsing/tentative/stream-positional.html:
   reason: 'Unshipped WICG positional streaming (streamAfter/Append/Before/PrependHTML(Unsafe)):
     methods not implemented. Streams ARE modeled (web-streams-polyfill); in-scope
     backlog deprioritized (unshipped, no app depends on it).'
-domxpath/evaluator-cross-realm.tentative.html:
-- name: evaluator from realm with XML associated document, context node in XML document,
-    no namespace resolver
-  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
-    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
-    path/suffix. CLAUDE.md rule 1.
-- name: evaluator from realm with XML associated document, context node in HTML document,
-    no namespace resolver
-  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
-    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
-    path/suffix. CLAUDE.md rule 1.
-- name: evaluator from realm with HTML associated document, context node in XML document,
-    no namespace resolver
-  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
-    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
-    path/suffix. CLAUDE.md rule 1.
-- name: evaluator from realm with HTML associated document, context node in HTML document,
-    no namespace resolver
-  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
-    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
-    path/suffix. CLAUDE.md rule 1.
-domxpath/expression-cross-realm.tentative.html:
-- name: expression from realm with XML associated document, context node in XML document,
-    no namespace resolver
-  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
-    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
-    path/suffix. CLAUDE.md rule 1.
-- name: expression from realm with XML associated document, context node in HTML document,
-    no namespace resolver
-  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
-    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
-    path/suffix. CLAUDE.md rule 1.
-- name: expression from realm with HTML associated document, context node in XML document,
-    no namespace resolver
-  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
-    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
-    path/suffix. CLAUDE.md rule 1.
-- name: expression from realm with HTML associated document, context node in HTML
-    document, no namespace resolver
-  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
-    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
-    path/suffix. CLAUDE.md rule 1.
 domxpath/resolver-callback-interface-cross-realm.tentative.html:
 - name: XPathNSResolver is cross-realm plain object without 'lookupNamespaceURI' property
   reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux

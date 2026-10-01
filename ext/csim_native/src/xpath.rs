@@ -7,6 +7,9 @@
 // test names the HTML namespace and is ASCII-lowercased before it is compared (so it matches no SVG and no
 // no-namespace element), and an unprefixed attribute test of an HTML element is ASCII-lowercased likewise; in an XML
 // document, and for a foreign element's attributes, the test is XPath's own — no namespace, case-sensitive.
+// (The spec's text sets only the default element namespace, and says nothing of case; the lowercasing is the engines'.
+// They split on an HTML-namespace element made with an UPPERCASE local name — `createElementNS(html, 'DIV')`: Chrome
+// matches it by `//div`, Firefox by nothing. This is Firefox's model, which `querySelectorAll('DIV')` shares.)
 //
 // Namespace prefixes are resolved by the caller before evaluation (the page's resolver is JS, and is asked once per
 // prefix per evaluation, as Blink's parser asks it) and handed in.
@@ -131,7 +134,8 @@ fn is_ws(c: char) -> bool {
 }
 
 // `expr` as the DOMString it is: UTF-16 units. A name holds no lone surrogate, but a literal may, and keeps it — each
-// char decoded here is one unit or a pair, and a literal is cut from the units (`unit_at`), not re-encoded.
+// char decoded here is one unit or a pair, and a literal is cut from the units (`unit_at`), not re-encoded. A lone
+// surrogate decodes to NUL, which no token rule takes, so outside a literal it is the syntax error it is.
 fn tokenize(expr: &[u16]) -> Result<Vec<Tok>, XError> {
     let mut s: Vec<char> = Vec::with_capacity(expr.len());
     let mut unit_at: Vec<usize> = Vec::with_capacity(expr.len() + 1);
@@ -140,7 +144,7 @@ fn tokenize(expr: &[u16]) -> Result<Vec<Tok>, XError> {
         unit_at.push(u);
         let (c, units) = match c {
             Ok(c) => (c, c.len_utf16()),
-            Err(_) => (char::REPLACEMENT_CHARACTER, 1),
+            Err(_) => ('\0', 1),
         };
         u += units;
         s.push(c);

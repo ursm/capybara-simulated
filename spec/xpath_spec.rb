@@ -152,6 +152,7 @@ RSpec.describe 'XPath' do
         const order = [];
         const resolver = () => { order.push('resolver'); return 'urn:x'; };
         err(() => document.evaluate({ toString() { order.push('expr'); return '//p:a'; } }, 42, resolver));
+        const names = [err(() => document.evaluate(Symbol('x'), document)), err(() => document.createExpression('//a\ud800'))];
         const r = document.evaluate('//*', document, null, XPathResult.ORDERED_NODE_SNAPSHOT_TYPE, null);
         return [
           err(() => document.createExpression('foo()')),
@@ -159,10 +160,11 @@ RSpec.describe 'XPath' do
           err(() => document.evaluate('.', document.createDocumentFragment(), null, 0, null)),
           order.join(','),
           err(() => r.snapshotItem()),
-          String(r)
+          String(r),
+          names.join(',')
         ];
       })()
     JS
-    expect(got).to eq(['SyntaxError', 'SyntaxError', 'NotSupportedError', 'expr', 'TypeError', '[object XPathResult]'])
+    expect(got).to eq(['SyntaxError', 'SyntaxError', 'NotSupportedError', 'expr', 'TypeError', '[object XPathResult]', 'TypeError,SyntaxError'])
   end
 end
