@@ -186,6 +186,10 @@ pub(crate) struct StyleEngine {
     // The page's sheets as last set, each under what it was made from — so a set that keeps one keeps its parse.
     author: Vec<(SheetKey, DocumentStyleSheet)>,
     pending: RefCell<Vec<PendingImport>>,
+    // Whether a sheet the document takes could paint an image (`css_image`): its own sheets' texts, as last set, and
+    // every sheet an `@import` brought since the document's sheets were first set.
+    css_image: bool,
+    imports_css_image: bool,
     // The arena's `mutations` when it was last styled; None while it has to be styled again whatever they are.
     styled: Option<u64>,
     // Each element changed since then, as it was before the first change: its attributes (and its state, which a
@@ -403,6 +407,8 @@ impl StyleEngine {
             doc: None,
             author: Vec::new(),
             pending: RefCell::new(Vec::new()),
+            css_image: false,
+            imports_css_image: false,
             styled: None,
             snapshots: SnapshotMap::new(),
             restyle_all: true,
@@ -620,7 +626,9 @@ impl StyleEngine {
             self.doc = Some(doc);
             self.styled = None;
             self.restyle_all = true;
+            self.imports_css_image = false;
         }
+        self.css_image = self.imports_css_image || sheets.iter().any(|source| css_image(&source.css));
         // The same sheets again (a rebuild the rule set did not need) change nothing.
         if sheets.len() == self.author.len() && sheets.iter().zip(&self.author).all(|(s, (k, _))| SheetKey::of(s) == *k) {
             return Vec::new();
@@ -645,6 +653,46 @@ impl StyleEngine {
         self.restyle_all = true;
         self.rules_changed = true;
         self.pending.borrow()[before..].iter().map(|p| p.url.clone()).collect()
+    }
+
+    // What the document's sheets declare that the page side asks of them without styling anything: whether one could
+    // paint an image (`css_image`), and its `@font-face` rules — each the index of the sheet it is in (an `@import`ed
+    // one's, its importer's) and the declarations it holds, its sources' URLs resolved — the ones that apply, inside an
+    // `@media` / `@supports` that holds and an `@import` that does, in the order a CSSOM walk finds them.
+    pub(crate) fn sheet_facts(&self) -> (bool, Vec<(usize, String)>) {
+        use style::font_face::DescriptorId;
+        use style::stylesheets::{CssRule, StylesheetInDocument};
+        const DESCRIPTORS: [DescriptorId; 13] = [
+            DescriptorId::FontFamily, DescriptorId::FontStyle, DescriptorId::FontWeight, DescriptorId::FontStretch,
+            DescriptorId::FontDisplay, DescriptorId::UnicodeRange, DescriptorId::FontFeatureSettings,
+            DescriptorId::FontVariationSettings, DescriptorId::FontLanguageOverride, DescriptorId::AscentOverride,
+            DescriptorId::DescentOverride, DescriptorId::LineGapOverride, DescriptorId::SizeAdjust,
+        ];
+        let guard = self.lock.read();
+        let device = self.stylist.device();
+        let mut faces = Vec::new();
+        for (i, (_, sheet)) in self.author.iter().enumerate() {
+            if !sheet.is_effective_for_device(device, &NO_CUSTOM_MEDIA, &guard) {
+                continue;
+            }
+            for rule in sheet.contents(&guard).effective_rules(device, &*NO_CUSTOM_MEDIA, &guard) {
+                let CssRule::FontFace(face) = rule else { continue };
+                let face = face.read_with(&guard);
+                let d = &face.descriptors;
+                let mut text = String::new();
+                for id in DESCRIPTORS {
+                    let mut value = String::new();
+                    if d.get(id, &mut value).is_ok() && !value.is_empty() {
+                        text.push_str(&format!("{}: {}; ", id.name(), value));
+                    }
+                }
+                if let Some(src) = &d.src {
+                    text.push_str(&format!("src: {}; ", font_face_src(src)));
+                }
+                faces.push((i, text.trim_end().to_owned()));
+            }
+        }
+        (self.css_image, faces)
     }
 
     // The shadow root `root`'s sheets become `sheets` (as `set_sheets` takes them), in its tree order; its host and
@@ -693,6 +741,10 @@ impl StyleEngine {
             hit
         };
         let before = self.pending.borrow().len();
+        if css.is_some_and(css_image) {
+            self.imports_css_image = true;
+            self.css_image = true;
+        }
         for p in waiting {
             let sheet = match (css, url::Url::parse(url)) {
                 (Some(css), Ok(base)) => {
@@ -3247,4 +3299,44 @@ mod tests {
             assert_eq!(parsed, declared, "<{tag}>: {hints:?}");
         }
     }
+}
+
+// A `@font-face` rule's `src` as a CSSOM serialization writes it, each `url()` the URL it RESOLVED to — the base it was
+// written against is its sheet's, which an `@import`ed one's reader has no other way to know.
+fn font_face_src(src: &style::font_face::SourceList) -> String {
+    use style::font_face::Source;
+    use style_traits::ToCss;
+    src.0.iter().map(|source| match source {
+        Source::Url(u) => {
+            let mut out = String::new();
+            let url = u.url.url().map(|url| url.as_str().to_owned()).unwrap_or_default();
+            let _ = cssparser::serialize_string(&url, &mut out);
+            let mut text = format!("url({out})");
+            if let Some(hint) = &u.format_hint {
+                text.push_str(&format!(" format({})", hint.to_css_string()));
+            }
+            text
+        }
+        Source::Local(name) => format!("local({})", name.to_css_string()),
+    }).collect::<Vec<_>>().join(", ")
+}
+
+// Whether a sheet's text could paint an image: a `background` / `cursor` / `list-style` declaration with a `url(` in its
+// value (the JS model's `CSS_IMAGE_RE`, read the same way — a declaration is what lies between `;`, `{` and `}`, and the
+// property a keyword with a `:` after it).
+fn css_image(css: &str) -> bool {
+    let lower = css.to_ascii_lowercase();
+    let bytes = lower.as_bytes();
+    let mut from = 0;
+    while let Some(at) = lower[from..].find("url(").map(|i| i + from) {
+        let start = bytes[..at].iter().rposition(|&b| matches!(b, b';' | b'{' | b'}')).map_or(0, |i| i + 1);
+        let decl = &lower[start..at];
+        // (…a keyword with a `:` after it, the regex's `keyword[^:;{}]*:`)
+        let keyword_then_colon = |k: &str| decl.match_indices(k).any(|(i, _)| decl[i + k.len()..].contains(':'));
+        if ["background", "cursor", "list-style"].into_iter().any(keyword_then_colon) {
+            return true;
+        }
+        from = at + 4;
+    }
+    false
 }

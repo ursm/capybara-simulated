@@ -1046,6 +1046,7 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_, ()>, ctx: &v8::Global<v8:
     // value.
     register(scope, ns, "styleSheets", style_sheets, context_id);
     register(scope, ns, "styleImport", style_import, context_id);
+    register(scope, ns, "styleSheetFacts", style_sheet_facts, context_id);
     register(scope, ns, "styleShadowSheets", style_shadow_sheets, context_id);
     register(scope, ns, "styleValue", style_value, context_id);
     register(scope, ns, "styleShown", style_shown, context_id);
@@ -2005,6 +2006,37 @@ fn style_shadow_sheets_unguarded(
     let pending = engine.set_shadow_sheets(arena, root, &sheets);
     let urls = url_array(scope, &pending);
     rv.set(urls);
+}
+
+// __dom.styleSheetFacts() -> [cssImage, sheetIndex, faceText, …]: what the document's sheets declare that the page side
+// asks of them (`StyleEngine::sheet_facts`) — whether one could paint an image, then each `@font-face` that applies, by
+// the index of its sheet in the last `styleSheets` set and its declarations as text. Undefined with no engine yet.
+fn style_sheet_facts(
+    scope: &mut v8::PinScope<'_, '_>,
+    args: v8::FunctionCallbackArguments<'_>,
+    rv: v8::ReturnValue<'_, v8::Value>,
+) {
+    let cid = realm_id(scope, &args);
+    style_op(scope, cid, |scope| style_sheet_facts_unguarded(scope, args, rv));
+}
+fn style_sheet_facts_unguarded(
+    scope: &mut v8::PinScope<'_, '_>,
+    args: v8::FunctionCallbackArguments<'_>,
+    mut rv: v8::ReturnValue<'_, v8::Value>,
+) {
+    let cid = realm_id(scope, &args);
+    let Some(engine) = dom(scope).styles.get(&cid) else { return };
+    let (css_image, faces) = engine.sheet_facts();
+    let mut items: Vec<v8::Local<v8::Value>> = vec![v8::Boolean::new(scope, css_image).into()];
+    for (sheet, text) in faces {
+        items.push(v8::Number::new(scope, sheet as f64).into());
+        if let Some(text) = v8::String::new(scope, &text) {
+            items.push(text.into());
+        } else {
+            items.pop();
+        }
+    }
+    rv.set(v8::Array::new_with_elements(scope, &items).into());
 }
 
 // __dom.styleImport(url, css) -> the URLs the imported sheet's own `@import`s wait for. The sheet at `url` arrived

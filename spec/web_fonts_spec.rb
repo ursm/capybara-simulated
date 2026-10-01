@@ -74,8 +74,8 @@ RSpec.describe 'web fonts' do
           <!DOCTYPE html><html><head>
             <link rel="stylesheet" href="/css/rel.css">
             <style>
-              body { margin: 0; font: 20px monospace }
               @import url("/css/imp.css");
+              body { margin: 0; font: 20px monospace }
               @media screen { @font-face { font-family: InMedia; src: url("/ahem.ttf"); } }
               @supports (display: block) { @font-face { font-family: InSupports; src: url("/ahem.ttf"); } }
               @font-face { font-family: Bold; src: url("/ahem.ttf"); font-weight: bold; }
