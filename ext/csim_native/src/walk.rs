@@ -1723,7 +1723,8 @@ impl<'a> Walk<'a> {
             // (…a fieldset's RENDERED LEGEND sizes an auto width as `fit-content`, shrink-to-fit whatever its display —
             // `isRenderedLegend`)
             Size::Auto if self.rendered_legend(id) => 3,
-            Size::Auto | Size::LengthPercentage(_) => 0,
+            // (…an `anchor-size()` is no size either, `size_lp`)
+            Size::Auto | Size::LengthPercentage(_) | Size::AnchorSizeFunction(_) | Size::AnchorContainingCalcFunction(_) => 0,
             Size::MinContent => 1,
             Size::MaxContent => 2,
             Size::FitContent => 3,
@@ -3836,8 +3837,8 @@ impl<'a> Walk<'a> {
         let face = self.face(owner)?;
         let f = owner.get_font();
         let size = font_size(owner);
-        let ls = spacing(&owner.get_inherited_text().letter_spacing.0)?;
-        let ws = spacing(&owner.get_inherited_text().word_spacing)?;
+        let ls = spacing(&owner.get_inherited_text().letter_spacing.0, owner);
+        let ws = spacing(&owner.get_inherited_text().word_spacing, owner);
         use style::values::generics::font::GenericLineHeight as LineHeight;
         let lh = match &f.line_height {
             LineHeight::Normal => js_round(face.asc * size) + js_round(face.desc * size) + js_round(face.gap * size),
@@ -3848,8 +3849,8 @@ impl<'a> Walk<'a> {
         // The tab stops: the BLOCK's font counts the spaces and gives the half-space minimum, the owner's `tab-size`
         // says how many (`tabStopOf`).
         let block_face = self.face(block)?;
-        let bls = spacing(&block.get_inherited_text().letter_spacing.0)?;
-        let bws = spacing(&block.get_inherited_text().word_spacing)?;
+        let bls = spacing(&block.get_inherited_text().letter_spacing.0, block);
+        let bws = spacing(&block.get_inherited_text().word_spacing, block);
         let bare = block_face.space * font_size(block);
         let unit_space = bare + bls + bws;
         use style::values::generics::length::GenericLengthOrNumber as LengthOrNumber;
@@ -4380,12 +4381,13 @@ fn contains_out_of_flow(style: &ComputedValues, node: &crate::dom::NodeData) -> 
     b.will_change.bits.intersects(WillChangeBits::FIXPOS_CB_NON_SVG | WillChangeBits::TRANSFORM | WillChangeBits::PERSPECTIVE | WillChangeBits::CONTAIN)
 }
 
-// A size's length-percentage, None for `auto` / `none` / a keyword.
+// A size's length-percentage, None for `auto` / `none` / a keyword — and for an `anchor-size()`, which takes the size of
+// an anchor neither layout models (CSS Anchor Positioning): the JS layout reads such a declaration as no size at all,
+// and so does this, alike (a shared gap — the fallback a function carries, and a real anchor's size, are backlog).
 fn size_lp(v: &style::values::computed::Size) -> Result<Option<&LengthPercentage>, &'static str> {
     use style::values::generics::length::GenericSize as Size;
     match v {
         Size::LengthPercentage(lp) => Ok(Some(&lp.0)),
-        Size::AnchorSizeFunction(_) | Size::AnchorContainingCalcFunction(_) => Err("anchor size"),
         _ => Ok(None),
     }
 }
@@ -4393,7 +4395,6 @@ fn max_size_lp(v: &style::values::computed::MaxSize) -> Result<Option<&LengthPer
     use style::values::generics::length::GenericMaxSize as MaxSize;
     match v {
         MaxSize::LengthPercentage(lp) => Ok(Some(&lp.0)),
-        MaxSize::AnchorSizeFunction(_) | MaxSize::AnchorContainingCalcFunction(_) => Err("anchor size"),
         _ => Ok(None),
     }
 }
@@ -4666,9 +4667,19 @@ pub(crate) fn f32_exact(v: f32) -> f64 {
 fn length(lp: &LengthPercentage) -> Result<f64, &'static str> {
     lp.to_length().map(|l: Length| f32_exact(l.px())).ok_or("percentage")
 }
-// A letter- or word-spacing's px.
-fn spacing(lp: &LengthPercentage) -> Result<f64, &'static str> {
-    lp.to_length().map(|l| f32_exact(l.px())).ok_or("spacing-percentage")
+// A letter- or word-spacing's px: a PERCENTAGE is of `style`'s own font size (css-text-4 — `word-spacing: 50%` adds 8px
+// at 16px, and Chrome takes one for `letter-spacing` too), and it inherits as the percentage, so each element resolves
+// it against its own. Written as the JS side reduces it (`spacingToPx`: the written percentage over 100, times the font
+// size), a `calc()` holding one resolved with its percentage as that px.
+fn spacing(lp: &LengthPercentage, style: &ComputedValues) -> f64 {
+    if let Some(l) = lp.to_length() {
+        return f32_exact(l.px());
+    }
+    let fs = font_size(style);
+    if let Some(p) = lp.to_percentage() {
+        return f32_exact(p.0 * 100.0) / 100.0 * fs;
+    }
+    f32_exact(lp.resolve(Length::new(fs as f32)).px())
 }
 // Does a height leave the box's margins adjoining — `auto`, a keyword, or a zero length (`autoOrZeroHeight`)?
 fn auto_or_zero(v: &style::values::computed::Size) -> bool {

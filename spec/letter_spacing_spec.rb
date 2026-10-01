@@ -159,6 +159,21 @@ RSpec.describe 'letter-spacing and word-spacing reach the flow' do
       .to be_within(0.01).of(10)
   end
 
+  # …and a percentage INHERITS as the percentage: each element resolves it against its own font size (Chrome: a
+  # `letter-spacing: 10%` block puts 3.2px between the letters of a 32px span in it, where handing the parent's 1.6px
+  # down gave 1.6). In the Rust walk, which took no percentage spacing at all and sent the page to the JS one, and in
+  # the JS walk, which handed the px down.
+  it 'resolves an inherited letter-spacing percentage against each element\'s own font size' do
+    body = '<div style="letter-spacing:10%"><span id=t style="font-size:32px">abcd</span></div>'
+    plain = '<div><span id=t style="font-size:32px">abcd</span></div>'
+    expect(gain(body, plain)).to be_within(0.01).of(12.8)          # 4 x 10% of 32px
+    rust = page(body)
+    expect(rust.evaluate_script('JSON.stringify(__csimNativeLayoutStats().rustFellBack)')).to eq('{}')
+    js = page(body)
+    js.execute_script('globalThis.__csimRustWalk = false')
+    expect(width(js)).to eq(width(rust))
+  end
+
   # ── what takes no spacing ──
   # Blink adds letter-spacing once per grapheme cluster and never after a character with no width
   # of its own: a soft hyphen, a zero-width space, a combining mark, and whatever follows a zero
