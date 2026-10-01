@@ -184,12 +184,11 @@ pub(crate) struct StyleEngine {
     viewport: (f32, f32),
     doc: Option<NodeId>,
     // The page's sheets as last set, each under what it was made from — so a set that keeps one keeps its parse.
-    author: Vec<(SheetKey, DocumentStyleSheet)>,
+    author: Vec<AuthorSheet>,
     pending: RefCell<Vec<PendingImport>>,
-    // Whether a sheet the document takes could paint an image (`css_image`): its own sheets' texts, as last set, and
-    // every sheet an `@import` brought since the document's sheets were first set.
-    css_image: bool,
-    imports_css_image: bool,
+    // The URLs of the `@import`ed sheets whose text could paint an image (`css_image`), as each last arrived. A sheet
+    // another document keeps keeps its imports too, and they never arrive again.
+    image_imports: std::collections::HashSet<String>,
     // The arena's `mutations` when it was last styled; None while it has to be styled again whatever they are.
     styled: Option<u64>,
     // Each element changed since then, as it was before the first change: its attributes (and its state, which a
@@ -236,6 +235,14 @@ pub(crate) struct SheetSource {
     pub(crate) base: String,
     pub(crate) media: String,
     pub(crate) constructed: bool,
+}
+
+// A sheet of the page's, as `set_sheets` keeps it: what it was made from, its parse, and whether its own text could
+// paint an image (`css_image`), read once as it is parsed.
+struct AuthorSheet {
+    key: SheetKey,
+    sheet: DocumentStyleSheet,
+    css_image: bool,
 }
 
 // What a parsed sheet was made from, so a set of sheets that keeps one keeps its parse.
@@ -407,8 +414,7 @@ impl StyleEngine {
             doc: None,
             author: Vec::new(),
             pending: RefCell::new(Vec::new()),
-            css_image: false,
-            imports_css_image: false,
+            image_imports: std::collections::HashSet::new(),
             styled: None,
             snapshots: SnapshotMap::new(),
             restyle_all: true,
@@ -626,28 +632,26 @@ impl StyleEngine {
             self.doc = Some(doc);
             self.styled = None;
             self.restyle_all = true;
-            self.imports_css_image = false;
         }
-        self.css_image = self.imports_css_image || sheets.iter().any(|source| css_image(&source.css));
         // The same sheets again (a rebuild the rule set did not need) change nothing.
-        if sheets.len() == self.author.len() && sheets.iter().zip(&self.author).all(|(s, (k, _))| SheetKey::of(s) == *k) {
+        if sheets.len() == self.author.len() && sheets.iter().zip(&self.author).all(|(s, a)| SheetKey::of(s) == a.key) {
             return Vec::new();
         }
         let mut kept = std::mem::take(&mut self.author);
         let guard = self.lock.read();
-        for (_, sheet) in &kept {
-            self.stylist.remove_stylesheet(sheet.clone(), &guard);
+        for a in &kept {
+            self.stylist.remove_stylesheet(a.sheet.clone(), &guard);
         }
         drop(guard);
         let before = self.pending.borrow().len();
         for source in sheets {
             let key = SheetKey::of(source);
-            let sheet = match kept.iter().position(|(k, _)| *k == key) {
-                Some(i) => kept.swap_remove(i).1,
-                None => self.parse_source(source),
+            let a = match kept.iter().position(|a| a.key == key) {
+                Some(i) => kept.swap_remove(i),
+                None => AuthorSheet { sheet: self.parse_source(source), css_image: css_image(&source.css), key },
             };
-            self.stylist.append_stylesheet(sheet.clone(), &self.lock.read());
-            self.author.push((key, sheet));
+            self.stylist.append_stylesheet(a.sheet.clone(), &self.lock.read());
+            self.author.push(a);
         }
         self.styled = None;
         self.restyle_all = true;
@@ -671,11 +675,18 @@ impl StyleEngine {
         let guard = self.lock.read();
         let device = self.stylist.device();
         let mut faces = Vec::new();
-        for (i, (_, sheet)) in self.author.iter().enumerate() {
-            if !sheet.is_effective_for_device(device, &NO_CUSTOM_MEDIA, &guard) {
+        let mut image = false;
+        for (i, a) in self.author.iter().enumerate() {
+            image |= a.css_image;
+            if !a.sheet.is_effective_for_device(device, &NO_CUSTOM_MEDIA, &guard) {
                 continue;
             }
-            for rule in sheet.contents(&guard).effective_rules(device, &*NO_CUSTOM_MEDIA, &guard) {
+            for rule in a.sheet.contents(&guard).effective_rules(device, &*NO_CUSTOM_MEDIA, &guard) {
+                if let CssRule::Import(import) = rule {
+                    let import = import.read_with(&guard);
+                    image |= import.url.url().is_some_and(|u| self.image_imports.contains(u.as_str()));
+                    continue;
+                }
                 let CssRule::FontFace(face) = rule else { continue };
                 let face = face.read_with(&guard);
                 let d = &face.descriptors;
@@ -692,7 +703,7 @@ impl StyleEngine {
                 faces.push((i, text.trim_end().to_owned()));
             }
         }
-        (self.css_image, faces)
+        (image, faces)
     }
 
     // The shadow root `root`'s sheets become `sheets` (as `set_sheets` takes them), in its tree order; its host and
@@ -742,8 +753,9 @@ impl StyleEngine {
         };
         let before = self.pending.borrow().len();
         if css.is_some_and(css_image) {
-            self.imports_css_image = true;
-            self.css_image = true;
+            self.image_imports.insert(url.to_owned());
+        } else {
+            self.image_imports.remove(url);
         }
         for p in waiting {
             let sheet = match (css, url::Url::parse(url)) {
@@ -3302,16 +3314,21 @@ mod tests {
 }
 
 // A `@font-face` rule's `src` as a CSSOM serialization writes it, each `url()` the URL it RESOLVED to — the base it was
-// written against is its sheet's, which an `@import`ed one's reader has no other way to know.
+// written against is its sheet's, which an `@import`ed one's reader has no other way to know — or, one that resolves to
+// none, as written.
 fn font_face_src(src: &style::font_face::SourceList) -> String {
     use style::font_face::Source;
     use style_traits::ToCss;
     src.0.iter().map(|source| match source {
         Source::Url(u) => {
-            let mut out = String::new();
-            let url = u.url.url().map(|url| url.as_str().to_owned()).unwrap_or_default();
-            let _ = cssparser::serialize_string(&url, &mut out);
-            let mut text = format!("url({out})");
+            let mut text = match u.url.url() {
+                Some(url) => {
+                    let mut out = String::new();
+                    let _ = cssparser::serialize_string(url.as_str(), &mut out);
+                    format!("url({out})")
+                }
+                None => u.url.to_css_string(),
+            };
             if let Some(hint) = &u.format_hint {
                 text.push_str(&format!(" format({})", hint.to_css_string()));
             }

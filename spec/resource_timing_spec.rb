@@ -343,6 +343,29 @@ RSpec.describe 'resource timing' do
     expect(names).to include('css.png?id=bg', 'css.png?id=cursor', 'css.png?id=list')
   end
 
+  it 'fetches an image an @import-ed sheet declares on every page that links it' do
+    # The second page keeps the first one's parse of the linked sheet, @import included — the
+    # imported sheet never arrives again, and its image is the page's all the same.
+    png = File.binread(Dir.glob('spec/wpt/resource-timing/resources/blue.png').first)
+    a = ->(env) {
+      case env['PATH_INFO']
+      when '/app.css'     then [200, {'content-type' => 'text/css'}, ['@import url("/bg.css");']]
+      when '/bg.css'      then [200, {'content-type' => 'text/css'}, ['#bg { background-image: url("/bg.png"); width: 10px; height: 10px }']]
+      when '/bg.png'      then [200, {'content-type' => 'image/png'}, [png]]
+      else [200, {'content-type' => 'text/html'}, ['<!DOCTYPE html><html><head><link rel="stylesheet" href="/app.css"></head><body><div id="bg"></div></body></html>']]
+      end
+    }
+    s = simulated_session(a)
+    %w[/one /two].each do |path|
+      s.visit "http://www.example.com#{path}"
+      names = poll_until do
+        ns = s.evaluate_script("performance.getEntriesByType('resource').map(function (e) { return e.name.split('/').pop(); })")
+        ns.include?('bg.png') ? ns : nil
+      end
+      expect(names).to include('bg.png'), "on #{path}: #{names}"
+    end
+  end
+
   it 'records timing entries for media and plugin resources with the right initiator' do
     # The driver does not play media, but a browser fetches a media / plugin element's resource and
     # files its entry — 'video' / 'audio' for the media (poster, src or <source>), 'track' for a
