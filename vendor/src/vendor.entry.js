@@ -2,7 +2,7 @@
 //
 // esbuild wraps the exports under `globalThis.__csimVendor` via
 // `--global-name=__csimVendor` so bridge.js consumes e.g.
-//   const { compile, selectAll, selectOne } = __csimVendor.cssSelect;
+//   const CT = globalThis.__csimVendor.cssTree;
 //
 // To rebuild after a `pnpm install` / dep bump:
 //   pnpm run build
@@ -10,23 +10,20 @@
 // The output (`vendor/js/vendor.bundle.js`) is checked in and shipped
 // in the gem; consumers never need npm.
 //
-// Three of these deps are LOCALLY PATCHED (pnpm patches, registered in
+// Two of these deps are LOCALLY PATCHED (pnpm patches, registered in
 // pnpm-workspace.yaml, sources under `patches/`). Read the patch file to see an
 // edit in full; the newer ones also mark themselves `// csim patch:` in the
 // dependency's own source:
-//   css-select  — attribute-name casing, `:any-link`/`:root` scoping
 //   css-what    — selector-escape parsing (`\<EOF>` → U+FFFD, non-ASCII names)
 //   css-tree    — attribute-selector recovery at EOF (`[foo` parses as `[foo]`)
 
-import * as cssSelect from 'css-select';
 import * as cssWhat   from 'css-what';
 // xpathway: standalone XPath 1.0 engine (npm, MIT), replaces the vendored
 // wgxpath blob. Only needed when rebuilding this bundle — the gem ships the
 // pre-built output.
 import * as xpathway  from 'xpathway';
-// css-tree: CSS parser (stylesheets + selectors + specificity). Backs the real
-// in-V8 cascade engine (visibility resolution) — css-select still does matching;
-// css-tree provides clean specificity (distinguishes `#x` from `[id=x]`, which
+// css-tree: CSS parser (stylesheets + selectors + specificity). Backs the JS
+// cascade the layout oracle reads (selector.rs does the matching); css-tree provides clean specificity (distinguishes `#x` from `[id=x]`, which
 // css-what blurs) and `<style>`/`@layer`/`@media`/nesting parse.
 //
 // Import the parser / generator / walker SUBPATHS, not the `css-tree` barrel:
@@ -132,4 +129,4 @@ function cssColorRaster(str) {
 }
 const color = { toHex: cssColorToHex, srgb: cssColorSrgb, raster: cssColorRaster };
 
-export { cssSelect, cssWhat, xpathway, cssTree, mimeType, streams, color, URLPattern };
+export { cssWhat, xpathway, cssTree, mimeType, streams, color, URLPattern };

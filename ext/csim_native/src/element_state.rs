@@ -211,7 +211,7 @@ impl RealmArena {
         }
         false
     }
-    // css-select's `:selected`: an option's selectedness.
+    // An option's selectedness (its `:checked`).
     pub(crate) fn is_selected(&self, id: NodeId) -> bool {
         self.get(id).is_some_and(|n| n.is_html_named("option") && n.state & STATE_SELECTED != 0)
     }

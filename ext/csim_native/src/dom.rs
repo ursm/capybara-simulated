@@ -119,7 +119,7 @@ pub(crate) struct NodeData {
     // U+DFFF) — valid in a JS DOMString (UTF-16) but not in Rust's UTF-8 `String`, where it degrades to
     // U+FFFD. The selector matcher reads `attributes` (the lossy UTF-8) — a lone surrogate can't appear in
     // a spec-parsed selector anyway (an escape resolves to U+FFFD), so matching is unaffected — but the
-    // attrsView GETTER must return exactly what was written (getAttribute / css-select identity), so it
+    // attrsView GETTER must return exactly what was written (getAttribute identity), so it
     // reads the original UTF-16 units from here when present. Empty for virtually every element; only the
     // value that actually lost data lands here, keyed by attribute name.
     pub(crate) attr_u16: Vec<(String, Vec<u16>)>,
@@ -132,7 +132,7 @@ pub(crate) struct NodeData {
     // Position within `parent.children`, kept current on every link/unlink, so the
     // selector engine's prev/next-sibling nav is O(1) — without it `:nth-child` is
     // O(n²) per query on a wide parent (a 500-sibling list measured 2.5x slower than
-    // css-select; O(1) flips it). It counts ALL entries (a stale edge included), so the
+    // the JS matcher it replaced; O(1) flips it). It counts ALL entries (a stale edge included), so the
     // sibling walks step from it and skip any stale neighbour they land on.
     pub(crate) child_index: usize,
     // The border-box a native layout pass wrote for this node (document coords), read back by the JS
@@ -1034,6 +1034,8 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_, ()>, ctx: &v8::Global<v8:
     register(scope, ns, "queryIds", query_ids, context_id);
     register(scope, ns, "matchesId", matches_id, context_id);
     register(scope, ns, "closestId", closest_id, context_id);
+    register(scope, ns, "matchesIdNs", matches_id_ns, context_id);
+    register(scope, ns, "selectorValid", selector_valid, context_id);
     // Authoritative cascade matching: compile a rule's selector once to an integer handle, then match
     // by handle with no per-call string marshalling (compileSelector / matchesCompiled).
     register(scope, ns, "compileSelector", compile_selector, context_id);
@@ -1735,11 +1737,9 @@ fn set_attr_namespace(
     }
 }
 
-// __dom.queryIds(rootNid, selector) -> [nid, …] when native matching answers the selector;
-// `undefined` when it needs the JS engine (a live-state selector like `:hover` / `:checked`);
-// `null` for an invalid selector. Returns nids (not wrappers) so the query layer can map
-// results back to the JS tree cheaply, and lets it distinguish "defer to css-select" (undefined)
-// from "SyntaxError" (null) — this is the shape the host-query layer uses.
+// __dom.queryIds(rootNid, selector, quirks, firstOnly, scopeNid, xml) -> [nid, …] in document order, or `null` for an
+// invalid selector (the caller's SyntaxError); `undefined` for a root the arena does not hold. Nids, not wrappers:
+// the query layer maps them back onto the JS tree.
 fn query_ids(
     scope: &mut v8::PinScope<'_, '_>,
     args: v8::FunctionCallbackArguments<'_>,
@@ -1757,7 +1757,7 @@ fn query_ids(
     let scope_el = if args.get(4).is_number() { nid_arg(scope, &args, 4) } else { None }.unwrap_or(root);
     let html_doc = !args.get(5).is_true();
     match crate::selector::query_text(realm(scope, cid), root, scope_el, &selector, first_only, quirks, html_doc) {
-        crate::selector::QueryOutcome::Matched(ids) => {
+        Some(ids) => {
             let array = v8::Array::new(scope, ids.len() as i32);
             for (i, id) in ids.iter().enumerate() {
                 let v: v8::Local<v8::Value> = v8::Number::new(scope, id.to_f64()).into();
@@ -1765,18 +1765,13 @@ fn query_ids(
             }
             rv.set(array.into());
         }
-        crate::selector::QueryOutcome::NeedsJsFallback => {
-            let undef: v8::Local<v8::Value> = v8::undefined(scope).into();
-            rv.set(undef);
-        }
-        crate::selector::QueryOutcome::Invalid => rv.set_null(),
+        None => rv.set_null(),
     }
 }
 
-// __dom.matchesId(nodeNid, selector) -> bool when native matching answers it; `undefined` when it
-// needs the JS engine (a live-state selector / pseudo-element); `null` for an invalid selector. The
-// single-element match the cascade uses (does this element match this rule?), distinct from queryIds'
-// descendant search.
+// __dom.matchesId(nodeNid, selector, quirks, scoped, xml) -> bool, or `null` for an invalid selector; `undefined`
+// for a node the arena does not hold. Element.matches (`scoped`: `:scope` is the element), and the cascade's
+// does-this-element-match-this-rule.
 fn matches_id(
     scope: &mut v8::PinScope<'_, '_>,
     args: v8::FunctionCallbackArguments<'_>,
@@ -1790,18 +1785,14 @@ fn matches_id(
     let quirks = args.get(2).is_true();
     let scoped = args.get(3).is_true();
     let html_doc = !args.get(4).is_true();
-    match crate::selector::matches_text(realm(scope, cid), id, &selector, quirks, html_doc, scoped, false) {
-        crate::selector::QueryOutcome::Matched(ids) => rv.set_bool(!ids.is_empty()),
-        crate::selector::QueryOutcome::NeedsJsFallback => {
-            let undef: v8::Local<v8::Value> = v8::undefined(scope).into();
-            rv.set(undef);
-        }
-        crate::selector::QueryOutcome::Invalid => rv.set_null(),
+    match crate::selector::matches_text(realm(scope, cid), id, &selector, None, quirks, html_doc, scoped, false) {
+        Some(hit) => rv.set_bool(hit.is_some()),
+        None => rv.set_null(),
     }
 }
 
 // __dom.closestId(nid, selector, quirks, xml) -> the nid of the nearest inclusive ancestor element matching (Element.closest,
-// `:scope` the element itself), -1 for none; `undefined` / `null` as matchesId.
+// `:scope` the element itself), -1 for none; `null` / `undefined` as matchesId.
 fn closest_id(
     scope: &mut v8::PinScope<'_, '_>,
     args: v8::FunctionCallbackArguments<'_>,
@@ -1814,17 +1805,50 @@ fn closest_id(
     let cid = realm_id(scope, &args);
     let quirks = args.get(2).is_true();
     let html_doc = !args.get(3).is_true();
-    match crate::selector::matches_text(realm(scope, cid), id, &selector, quirks, html_doc, true, true) {
-        crate::selector::QueryOutcome::Matched(ids) => match ids.first() {
-            Some(&hit) => set_nid(scope, &mut rv, hit),
-            None => rv.set_int32(-1),
-        },
-        crate::selector::QueryOutcome::NeedsJsFallback => {
-            let undef: v8::Local<v8::Value> = v8::undefined(scope).into();
-            rv.set(undef);
-        }
-        crate::selector::QueryOutcome::Invalid => rv.set_null(),
+    match crate::selector::matches_text(realm(scope, cid), id, &selector, None, quirks, html_doc, true, true) {
+        Some(Some(hit)) => set_nid(scope, &mut rv, hit),
+        Some(None) => rv.set_int32(-1),
+        None => rv.set_null(),
     }
+}
+
+// __dom.matchesIdNs(nid, selector, quirks, defaultNs, prefixes) -> bool: a style sheet rule's selector under its
+// `@namespace` declarations (`prefixes` a flat [prefix, url, …]; `defaultNs` null for none) — false for one that does
+// not parse under them (an undeclared prefix).
+fn matches_id_ns(
+    scope: &mut v8::PinScope<'_, '_>,
+    args: v8::FunctionCallbackArguments<'_>,
+    mut rv: v8::ReturnValue<'_, v8::Value>,
+) {
+    let Some(id) = nid_arg(scope, &args, 0) else {
+        return;
+    };
+    let selector = args.get(1).to_rust_string_lossy(scope);
+    let quirks = args.get(2).is_true();
+    let default = (!args.get(3).is_null_or_undefined()).then(|| args.get(3).to_rust_string_lossy(scope));
+    let mut prefixes = Vec::new();
+    if let Ok(flat) = v8::Local::<v8::Array>::try_from(args.get(4)) {
+        let mut i = 0;
+        while i + 1 < flat.length() {
+            let (Some(p), Some(u)) = (flat.get_index(scope, i), flat.get_index(scope, i + 1)) else { break };
+            prefixes.push((p.to_rust_string_lossy(scope), u.to_rust_string_lossy(scope)));
+            i += 2;
+        }
+    }
+    let namespaces = crate::selector::Namespaces { default, prefixes };
+    let cid = realm_id(scope, &args);
+    let hit = crate::selector::matches_text(realm(scope, cid), id, &selector, Some(&namespaces), quirks, true, false, false);
+    rv.set_bool(matches!(hit, Some(Some(_))));
+}
+
+// __dom.selectorValid(text) -> bool: a selector this engine parses — `CSS.supports('selector(…)')`.
+fn selector_valid(
+    scope: &mut v8::PinScope<'_, '_>,
+    args: v8::FunctionCallbackArguments<'_>,
+    mut rv: v8::ReturnValue<'_, v8::Value>,
+) {
+    let text = args.get(0).to_rust_string_lossy(scope);
+    rv.set_bool(crate::selector::is_valid(&text));
 }
 
 // __dom.compileSelector(text) -> handle. The authoritative cascade path calls this ONCE per rule and

@@ -1,18 +1,16 @@
 // Native CSS selector matching over the live arena, using Servo's `selectors` crate — the
 // production engine (the same one Firefox ships), so tree-structural selectors (`:nth-child`,
 // `:not`, `:is`, `:where`, `:has`, combinators, attribute operators, case-sensitivity) are correct
-// by construction. It answers the page's `querySelector(All)` / `matches` / `closest` first
-// (selectors.js), the cascade's per-rule matches, and the Capybara finds.
+// by construction. It answers the page's `querySelector(All)` / `matches` / `closest` (selectors.js), the
+// cascade's per-rule matches, and the Capybara finds — every selector, invalid ones aside.
 //
 // Ported from the unmerged native-selector-matching branch, where it matched against a JSON MIRROR
 // of the DOM that was serialized and copied across the FFI on every navigation — the boundary tax
 // that made that approach lose to the JS cascade. Here it reads the LIVE arena (crate::dom) directly.
 //
-// Element state (`:hover`, `:checked`, `:focus`, `:disabled`, `:dir()`, …) is the arena's own
-// (element_state.rs). What it cannot answer yet — a shadow-tree construct (`:host`, `::slotted()`,
-// `::part()`), an attribute selector with a namespace, a functional pseudo-class it does not know —
-// is flagged at parse time (`needs_fallback`) and reported as `QueryOutcome::NeedsJsFallback`:
-// NOT matched natively, because the answer would be a wrong subset; the caller runs css-select.
+// Element state (`:hover`, `:checked`, `:focus`, `:disabled`, `:dir()`, …) is the arena's own (element_state.rs); a
+// shadow tree's top-level element reaches its host (`:host`), and an attribute is matched by its namespace and local
+// name. A pseudo-element (`::before`, `::slotted()`, `::part()`) matches no element.
 
 use std::borrow::Borrow;
 use std::fmt;
@@ -26,10 +24,9 @@ use selectors::context::{
 };
 use selectors::matching::{matches_selector_list, ElementSelectorFlags};
 use selectors::parser::{
-    Component, NonTSPseudoClass, ParseRelative, Parser, PseudoElement, RelativeSelector, SelectorImpl,
+    NonTSPseudoClass, ParseRelative, Parser, PseudoElement, SelectorImpl,
     SelectorList, SelectorParseErrorKind,
 };
-use selectors::visitor::SelectorVisitor;
 use selectors::{Element, OpaqueElement};
 
 use web_atoms::ns;
@@ -92,8 +89,7 @@ impl SelectorImpl for CsimImpl {
 }
 
 // A non-tree-structural pseudo-class (`:hover`, `:checked`, `:state(open)`, …): its ASCII-lowercased name, and a
-// functional one's argument. Parsing accepts every one so real selectors parse; the ones `is_native_pseudo_class`
-// does not name send the selector to css-select (see match_non_ts_pseudo_class).
+// functional one's argument — one `is_native_pseudo_class` names (any other is invalid).
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct PseudoClass {
     name: String,
@@ -142,10 +138,22 @@ impl PseudoElement for PseudoEl {
 // The parser: everything tree-structural is handled by the crate; we name the non-TS pseudo-classes and the
 // pseudo-elements. One it does not know is a parse error — invalid, as in Chrome and Firefox; inside a forgiving
 // `:is()` / `:where()` the crate drops just that selector.
+//
+// `namespaces`: the prefixes a style sheet's `@namespace` rules declare, and its default namespace — none for a query,
+// where a prefix other than `*` is invalid.
 #[derive(Default)]
-struct CsimParser;
+struct CsimParser<'n> {
+    namespaces: Option<&'n Namespaces>,
+}
 
-impl<'i> Parser<'i> for CsimParser {
+// A style sheet's `@namespace` declarations.
+#[derive(Default)]
+pub struct Namespaces {
+    pub default: Option<String>,
+    pub prefixes: Vec<(String, String)>,
+}
+
+impl<'i> Parser<'i> for CsimParser<'_> {
     type Impl = CsimImpl;
     type Error = SelectorParseErrorKind<'i>;
 
@@ -167,6 +175,13 @@ impl<'i> Parser<'i> for CsimParser {
     fn parse_host(&self) -> bool {
         true
     }
+    fn default_namespace(&self) -> Option<CssStr> {
+        self.namespaces?.default.clone().map(CssStr)
+    }
+    fn namespace_for_prefix(&self, prefix: &CssStr) -> Option<CssStr> {
+        let (_, url) = self.namespaces?.prefixes.iter().find(|(p, _)| *p == prefix.0)?;
+        Some(CssStr(url.clone()))
+    }
 
     fn parse_non_ts_pseudo_class(
         &self,
@@ -187,9 +202,9 @@ impl<'i> Parser<'i> for CsimParser {
         _after_part: bool,
     ) -> Result<PseudoClass, cssparser::ParseError<'i, Self::Error>> {
         let name = name.as_ref().to_ascii_lowercase();
-        // `:state(<ident>)` — a custom element's custom state — is answered here; any other functional one (and a
-        // `:state()` of anything but one ident) is css-select's: its tokens are consumed so the selector parses.
-        // (`:nth-child()` and friends are tree-structural, the crate's own, and never reach here.)
+        // `:state(<ident>)` — a custom element's custom state — and `:lang()` / `:dir()` below are answered here; any
+        // other functional one (and one of these whose argument is not what it takes) is invalid. (`:nth-child()` and
+        // friends are tree-structural, the crate's own, and never reach here.)
         if name == "state" {
             let state = arguments.try_parse(|p| {
                 let ident = p.expect_ident()?.as_ref().to_owned();
@@ -319,6 +334,24 @@ fn eval_utf16(operator: AttrSelectorOperator, case: CaseSensitivity, value: &[u1
     }
 }
 
+// An attribute's (namespace, local name) by its store key: the arena's namespace record where it has one, else no
+// namespace and the key itself — less the `\0`-numbered suffix a key two same-named attributes share is minted with.
+fn attribute_name<'a>(node: &'a crate::dom::NodeData, key: &'a str) -> (&'a str, &'a str) {
+    match node.attr_ns.iter().find(|(k, _, _)| k == key) {
+        Some((_, ns, local)) => (ns.as_str(), local.as_str()),
+        None => ("", key.split('\0').next().unwrap_or(key)),
+    }
+}
+
+// The host of the shadow tree `id` is in, if it is in one.
+fn shadow_host_of(arena: &RealmArena, id: NodeId) -> Option<NodeId> {
+    let mut cur = id;
+    while let Some(p) = arena.parent_of(cur) {
+        cur = p;
+    }
+    arena.get(cur)?.host
+}
+
 // A handle into the arena: which arena, and the generational id of the node. Copy so the Element
 // trait's element-returning methods are cheap. Only ever constructed for a LIVE node — the query seed
 // filters stale ids, and every navigation method returns gen-checked (live) ids — so `node()` resolves.
@@ -358,11 +391,13 @@ impl<'a> Element for NodeRef<'a> {
     fn parent_element(&self) -> Option<Self> {
         self.arena.parent_of(self.id).filter(|&p| self.arena.is_element(p)).map(|p| self.at(p))
     }
+    // A shadow tree's top-level element: its parent is the shadow root, whose host the crate crosses to — featureless,
+    // so only `:host` matches it there (`:host > p`, `:host(.x) p`).
     fn parent_node_is_shadow_root(&self) -> bool {
-        false
+        self.arena.parent_of(self.id).is_some_and(|p| self.arena.get(p).is_some_and(|n| n.host.is_some()))
     }
     fn containing_shadow_host(&self) -> Option<Self> {
-        None
+        shadow_host_of(self.arena, self.id).map(|host| self.at(host))
     }
     fn is_pseudo_element(&self) -> bool {
         false
@@ -398,14 +433,17 @@ impl<'a> Element for NodeRef<'a> {
         local_name: &CssStr,
         operation: &AttrSelectorOperation<&CssStr>,
     ) -> bool {
-        // Only no-namespace attributes are modelled: a selector with a namespace is css-select's (ShadowConstructVisitor).
-        if !matches!(ns, NamespaceConstraint::Specific(url) if url.0.is_empty()) {
-            return false;
-        }
+        // Each attribute by its namespace and local name (`[*|href]`, `[svg|href]`, `[title]` = in no namespace) — as
+        // DOM has them, not by the store's key: an XLink `xlink:href` is an `href` in the XLink namespace.
         let node = self.node();
-        node.attributes.iter().any(|(name, value)| {
-            name == &local_name.0
-                && match (operation, node.get_attr_u16(name)) {
+        node.attributes.iter().any(|(key, value)| {
+            let (attr_ns, attr_local) = attribute_name(node, key);
+            attr_local == local_name.0
+                && match ns {
+                    NamespaceConstraint::Any => true,
+                    NamespaceConstraint::Specific(url) => url.0 == attr_ns,
+                }
+                && match (operation, node.get_attr_u16(key)) {
                     (AttrSelectorOperation::WithValue { operator, case_sensitivity, value: wanted }, Some(units)) => {
                         eval_utf16(*operator, *case_sensitivity, units, &wanted.0)
                     }
@@ -414,7 +452,8 @@ impl<'a> Element for NodeRef<'a> {
         })
     }
     fn has_attr_in_no_namespace(&self, local_name: &CssStr) -> bool {
-        self.node().attributes.iter().any(|(n, _)| n == &local_name.0)
+        let node = self.node();
+        node.attributes.iter().any(|(key, _)| attribute_name(node, key) == ("", local_name.0.as_str()))
     }
 
     fn match_non_ts_pseudo_class(
@@ -443,7 +482,6 @@ impl<'a> Element for NodeRef<'a> {
             "focus-within" => arena.has_focus_within(id),
             "hover" => arena.is_hovered(id),
             "checked" => arena.is_checked(id),
-            "selected" => arena.is_selected(id),
             "indeterminate" => arena.is_indeterminate(id),
             "disabled" => arena.is_actually_disabled(id),
             "enabled" => arena.is_enabled(id),
@@ -540,17 +578,9 @@ impl<'a> Element for NodeRef<'a> {
     }
 }
 
-// Pseudo-classes the native matcher answers correctly from arena structure alone. Everything
-// else (:hover, :checked, :focus, :valid, :target, …) depends on live element state the JS DOM
-// still owns, so a selector using one must defer to css-select rather than silently return a
-// wrong (subset) result.
-//
-// This gate only sees pseudo-classes routed through `parse_non_ts_pseudo_class`. A few crate
-// BUILT-INS bypass it: `:scope` (handled correctly via the context's scope_element — see
-// new_context) and the shadow-DOM `:host` / `::part()` / `::slotted()`, which the arena can't
-// model. The latter three match nothing here (no shadow host / parts), which agrees with
-// css-select on a shadow-less tree; they'll need real handling — not this structural gate — when
-// shadow DOM enters the arena.
+// The non-tree-structural pseudo-classes this engine knows — any other is invalid. Their state is the arena's
+// (element_state.rs); `:visited`, `:active` and `:autofill` parse and never match (no history, no pressed pointer, no
+// autofill). The crate's BUILT-INS bypass this list: the tree-structural ones, `:scope`, and `:host`.
 fn is_native_pseudo_class(name: &str) -> bool {
     matches!(
         name,
@@ -566,7 +596,6 @@ fn is_native_pseudo_class(name: &str) -> bool {
             | "focus-within"
             | "hover"
             | "checked"
-            | "selected"
             | "indeterminate"
             | "disabled"
             | "enabled"
@@ -591,98 +620,51 @@ fn is_native_pseudo_class(name: &str) -> bool {
     )
 }
 
-// A parsed selector plus whether it needs the JS fallback (it uses a non-native pseudo).
-struct Parsed {
-    list: SelectorList<CsimImpl>,
-    needs_fallback: bool,
-}
-
-// The outcome of a native query: a matched id set, a request to fall back to the JS css-select
-// engine (the selector uses live-state constructs), or an invalid selector.
-pub enum QueryOutcome {
-    Matched(Vec<NodeId>),
-    NeedsJsFallback,
-    Invalid,
-}
-
-// Detects selector constructs the arena can't evaluate: the shadow-DOM ones the FLAT arena models no host / part /
-// slot relationship for — `:host` / `:host()` / `:host-context()` (Component::Host), `::part()` (Component::Part),
-// `::slotted()` (Component::Slotted) — and an attribute selector with a namespace (`[*|title]`, `[svg|href]`), as
-// the arena keeps no attribute's namespace. The crate parses these as BUILT-IN components, so they never reach the
-// CsimParser::parse_* callbacks that set needs_fallback — a post-parse visit is the only way to catch them. Any hit
-// means the whole selector must defer to css-select.
-struct ShadowConstructVisitor {
-    found: bool,
-}
-impl SelectorVisitor for ShadowConstructVisitor {
-    type Impl = CsimImpl;
-    fn visit_simple_selector(&mut self, s: &Component<CsimImpl>) -> bool {
-        if matches!(s, Component::Host(..) | Component::Part(..) | Component::Slotted(..)) {
-            self.found = true;
-            return false; // found one — stop this branch's walk
-        }
-        true
-    }
-    fn visit_attribute_selector(&mut self, ns: &NamespaceConstraint<&CssStr>, _local: &CssStr, _lower: &CssStr) -> bool {
-        if !matches!(ns, NamespaceConstraint::Specific(url) if url.0.is_empty()) {
-            self.found = true;
-            return false;
-        }
-        true
-    }
-    // `:is()` / `:where()` / `:not()` / `:nth-child(...of...)` nest via visit_selector_list, whose crate
-    // default recurses — so a shadow construct there is already caught. `:has()` nests via THIS callback,
-    // whose crate default SKIPS the inner selectors; recurse explicitly so `:has(::slotted(.x))` and the
-    // like also force fallback.
-    fn visit_relative_selector_list(&mut self, list: &[RelativeSelector<CsimImpl>]) -> bool {
-        for rs in list {
-            if !rs.selector.visit(self) {
-                return false;
-            }
-        }
-        true
-    }
-}
-
-// Parse a selector list, or None if invalid, recording whether it needs JS fallback.
-fn parse(text: &str) -> Option<Parsed> {
+// Parse a selector list, or None if invalid.
+fn parse(text: &str, namespaces: Option<&Namespaces>) -> Option<SelectorList<CsimImpl>> {
     let mut input = ParserInput::new(text);
     let mut parser = CssParser::new(&mut input);
-    let list = SelectorList::parse(&CsimParser, &mut parser, ParseRelative::No).ok()?;
-    // A shadow-DOM construct (:host / ::part() / ::slotted()) forces fallback too — the arena is the
-    // flat tree and models no host/part/slot relationship, so native matching would answer it wrong.
-    let mut shadow = ShadowConstructVisitor { found: false };
-    for sel in list.slice() {
-        if !shadow.found {
-            sel.visit(&mut shadow);
-        }
-    }
-    Some(Parsed {
-        list,
-        needs_fallback: shadow.found,
-    })
+    SelectorList::parse(&CsimParser { namespaces }, &mut parser, ParseRelative::No).ok()
+}
+
+// Is `text` a selector this engine supports — CSS.supports('selector(…)') / `@supports selector(…)`?
+pub fn is_valid(text: &str) -> bool {
+    with_parsed(text, None, |list| list.is_some())
 }
 
 // Parsed-selector cache — the driver emits a small recurring set of selectors, so parsing each once
 // and reusing it keeps matching off the parser. Keyed by the selector text, and BOUNDED: a page's own
 // queries interpolate ids (`#comment_123`, `[data-id="7"]`) without end, and the cache outlives sessions.
 thread_local! {
-    static CACHE: std::cell::RefCell<std::collections::HashMap<String, Option<Parsed>>> =
+    static CACHE: std::cell::RefCell<std::collections::HashMap<String, Option<SelectorList<CsimImpl>>>> =
         std::cell::RefCell::new(std::collections::HashMap::new());
 }
 const CACHE_LIMIT: usize = 4096;
 
-// The cached parse of `text` (parsed and stored on a miss — the cache emptied first when it is full), to `f`.
-fn with_parsed<R>(text: &str, f: impl FnOnce(Option<&Parsed>) -> R) -> R {
+// The cached parse of `text` (parsed and stored on a miss — the cache emptied first when it is full), to `f`; under a
+// style sheet's `namespaces`, keyed by them too.
+fn with_parsed<R>(text: &str, namespaces: Option<&Namespaces>, f: impl FnOnce(Option<&SelectorList<CsimImpl>>) -> R) -> R {
+    let keyed;
+    let key = match namespaces {
+        None => text,
+        Some(ns) => {
+            let mut k = format!("{text}\u{1}{}", ns.default.as_deref().unwrap_or("\u{0}"));
+            for (prefix, url) in &ns.prefixes {
+                k.push_str(&format!("\u{2}{prefix}\u{3}{url}"));
+            }
+            keyed = k;
+            &keyed
+        }
+    };
     CACHE.with(|c| {
         let mut c = c.borrow_mut();
-        if !c.contains_key(text) {
+        if !c.contains_key(key) {
             if c.len() >= CACHE_LIMIT {
                 c.clear();
             }
-            c.insert(text.to_owned(), parse(text));
+            c.insert(key.to_owned(), parse(text, namespaces));
         }
-        f(c.get(text).and_then(Option::as_ref))
+        f(c.get(key).and_then(Option::as_ref))
     })
 }
 
@@ -699,19 +681,18 @@ thread_local! {
 }
 
 // Compile a selector to a stable handle: `>= 0` indexes COMPILED (a natively-matchable selector);
-// `-1` means invalid OR needs JS fallback (a live-state pseudo) — the caller must use css-select for
-// it, and should cache this handle so it never re-asks. Idempotent per text.
+// `-1` means invalid — the caller should cache this handle so it never re-asks. Idempotent per text.
 pub fn compile_selector(text: &str) -> i32 {
     if let Some(h) = COMPILED_IDX.with(|m| m.borrow().get(text).copied()) {
         return h;
     }
-    let h = match parse(text) {
-        Some(p) if !p.needs_fallback => COMPILED.with(|c| {
+    let h = match parse(text, None) {
+        Some(list) => COMPILED.with(|c| {
             let mut v = c.borrow_mut();
-            v.push(p.list);
+            v.push(list);
             (v.len() - 1) as i32
         }),
-        _ => -1, // invalid or live-state → the caller uses css-select
+        None => -1, // invalid
     };
     COMPILED_IDX.with(|m| m.borrow_mut().insert(text.to_owned(), h));
     h
@@ -734,7 +715,7 @@ pub fn with_compiled<R>(f: impl FnOnce(&[SelectorList<CsimImpl>]) -> R) -> R {
 }
 
 // Match ONE element against a previously compiled selector handle. `None` when the handle is out of
-// range or the node id is stale (the caller falls back to css-select); `Some(bool)` is authoritative.
+// range or the node id is stale (the caller asks selectors.js instead); `Some(bool)` is authoritative.
 // Like `query`, the crate's ancestor walk (for combinators) relies on the arena being acyclic — a
 // property the sync layer maintains (it mirrors the acyclic JS DOM); there is no per-call cycle cap here.
 pub fn matches_compiled(arena: &RealmArena, id: NodeId, handle: i32, quirks: bool) -> Option<bool> {
@@ -788,6 +769,8 @@ pub fn query(arena: &RealmArena, root: NodeId, scope: NodeId, list: &SelectorLis
         MatchingForInvalidation::No,
     );
     ctx.scope_element = Some(NodeRef { arena, id: scope, html_doc }.opaque());
+    // (`:host` is the host of the shadow tree the query is scoped in — none for a document's)
+    ctx.current_host = shadow_host_of(arena, scope).map(|host| NodeRef { arena, id: host, html_doc }.opaque());
     // Backstop for the DESCENDANT DFS below only: an acyclic subtree pushes each node onto `stack` at
     // most once, so a pop count past the slot count means a `children` cycle was planted, and we break
     // rather than spin the isolate forever (no V8 interrupt reaches native code). It does NOT bound the
@@ -821,29 +804,31 @@ pub fn query(arena: &RealmArena, root: NodeId, scope: NodeId, list: &SelectorLis
     out
 }
 
-// Parse (cached) + collect. Distinguishes three outcomes: a matched id set, a request to defer to
-// the JS engine (a live-state selector), or Invalid (the caller treats it as a SyntaxError). A
-// deferred selector is NOT matched here — the arena result would be a wrong subset.
-pub fn query_text(arena: &RealmArena, root: NodeId, scope: NodeId, text: &str, first_only: bool, quirks: bool, html_doc: bool) -> QueryOutcome {
-    with_parsed(text, |entry| match entry {
-        None => QueryOutcome::Invalid,
-        Some(p) if p.needs_fallback => QueryOutcome::NeedsJsFallback,
-        Some(p) => QueryOutcome::Matched(query(arena, root, scope, &p.list, first_only, quirks, html_doc)),
-    })
+// Parse (cached) + collect: the matched ids, or None for an invalid selector (the caller's SyntaxError).
+pub fn query_text(arena: &RealmArena, root: NodeId, scope: NodeId, text: &str, first_only: bool, quirks: bool, html_doc: bool) -> Option<Vec<NodeId>> {
+    with_parsed(text, None, |list| list.map(|list| query(arena, root, scope, list, first_only, quirks, html_doc)))
 }
 
-// Does ONE element match the selector — or, `closest`, which of it and its ancestors is the nearest that does? Same
-// three outcomes; Matched carries the matching element's id (empty = none). `scoped` binds `:scope` to the element the
+// Does ONE element match the selector — or, `closest`, which of it and its ancestors is the nearest that does? The
+// matching element's id (None for none), or None outside for an invalid selector. `scoped` binds `:scope` to the element the
 // question is asked of (Element.matches / closest, whose scoping root is the element itself); unscoped — a cascade rule
 // — has no scoping root. The matcher walks the full ancestor chain for descendant / child combinators.
-pub fn matches_text(arena: &RealmArena, id: NodeId, text: &str, quirks: bool, html_doc: bool, scoped: bool, closest: bool) -> QueryOutcome {
-    with_parsed(text, |entry| {
-        match entry {
-            None => QueryOutcome::Invalid,
-            Some(p) if p.needs_fallback => QueryOutcome::NeedsJsFallback,
-            Some(p) => {
+pub fn matches_text(
+    arena: &RealmArena,
+    id: NodeId,
+    text: &str,
+    namespaces: Option<&Namespaces>,
+    quirks: bool,
+    html_doc: bool,
+    scoped: bool,
+    closest: bool,
+) -> Option<Option<NodeId>> {
+    with_parsed(text, namespaces, |list| {
+        match list {
+            None => None,
+            Some(list) => {
                 if arena.get(id).is_none() {
-                    return QueryOutcome::Matched(Vec::new());
+                    return Some(None);
                 }
                 let mut caches = SelectorCaches::default();
                 let mut ctx = MatchingContext::new(
@@ -857,14 +842,15 @@ pub fn matches_text(arena: &RealmArena, id: NodeId, text: &str, quirks: bool, ht
                 if scoped {
                     ctx.scope_element = Some(NodeRef { arena, id, html_doc }.opaque());
                 }
+                ctx.current_host = shadow_host_of(arena, id).map(|host| NodeRef { arena, id: host, html_doc }.opaque());
                 let mut at = Some(id);
                 while let Some(candidate) = at {
-                    if matches_selector_list(&p.list, &NodeRef { arena, id: candidate, html_doc }, &mut ctx) {
-                        return QueryOutcome::Matched(vec![candidate]);
+                    if matches_selector_list(list, &NodeRef { arena, id: candidate, html_doc }, &mut ctx) {
+                        return Some(Some(candidate));
                     }
                     at = if closest { arena.parent_of(candidate).filter(|&up| arena.is_element(up)) } else { None };
                 }
-                QueryOutcome::Matched(Vec::new())
+                Some(None)
             }
         }
     })

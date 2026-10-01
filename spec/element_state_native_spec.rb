@@ -40,20 +40,14 @@ RSpec.describe 'element state in the native arena' do
 
   let(:session) { simulated_session(->(_env) { [200, {'content-type' => 'text/html'}, [STATE_PAGE]] }) }
 
-  # The ids `sel` matches natively, or :fallback when native declined it, after checking it against css-select.
+  # The ids `sel` matches natively, in document order.
   def native_ids(sel)
-    got = session.evaluate_script(<<~JS)
+    session.evaluate_script(<<~JS)
       (() => {
-        const sel = #{sel.to_json};
-        const nids = __dom.queryIds(document._nid, sel, false);
-        if (nids === undefined) return 'FALLBACK';
-        const byNid = new Map([...document.querySelectorAll('*')].map((e) => [e._nid, e]));
-        const nat = nids.map((n) => byNid.get(n)?.id ?? '?');
-        const css = __csimCssSelectAll(document, sel).map((e) => e.id);   // css-select alone: querySelectorAll is native
-        return JSON.stringify(nat) === JSON.stringify(css) ? nat : 'MISMATCH native=' + nat + ' css=' + css;
+        const byNid = new Map([...document.getElementsByTagName('*')].map((e) => [e._nid, e]));
+        return __dom.queryIds(document._nid, #{sel.to_json}, false).map((n) => byNid.get(n)?.id ?? '?');
       })()
     JS
-    got == 'FALLBACK' ? :fallback : got
   end
 
   before { session.visit '/' }
@@ -71,7 +65,6 @@ RSpec.describe 'element state in the native arena' do
     expect(native_ids(':indeterminate')).to eq(%w[c3])
     # The disabled select's one option is its selected one.
     expect(native_ids('option:checked')).to eq(%w[o3 o-dis])
-    expect(native_ids(':selected')).to eq(%w[o3 o-dis])
     # A form reset drops the dirty flag: the `checked` attribute stands for checkedness again.
     session.execute_script("document.querySelector('form').reset()")
     expect(native_ids('input:checked')).to eq(%w[c1 r2 c4])
@@ -292,12 +285,11 @@ RSpec.describe 'element state in the native arena' do
       ms = session.evaluate_script(<<~JS)
         (() => {
           const t = performance.now();
-          const js = __csimCssSelectAll(document, ':indeterminate').length + __csimCssSelectAll(document, ':default').length;
           const nat = __dom.queryIds(document._nid, ':indeterminate', false).length + __dom.queryIds(document._nid, ':default', false).length;
-          return [js, nat, performance.now() - t];
+          return [nat, performance.now() - t];
         })()
       JS
-      expect(ms.first(2)).to eq([4000, 4000])
+      expect(ms.first).to eq(4000)
       expect(ms.last).to be < 1000
     end
 

@@ -101,80 +101,6 @@ module Capybara
         }
       end
 
-      # ── DOM-in-Rust store-migration SHADOW measurement (CSIM_NATIVE_QUERY_SHADOW) ──
-      # When enabled, native selector matching runs beside css-select on every find
-      # (js/src/native-query-shadow.js) — css-select stays authoritative, native is only
-      # timed + parity-checked. Each context's accumulated stats are harvested as it is
-      # reset (rebuild_ctx wipes JS state), summed process-wide, and dumped at exit. This
-      # is temporary measurement scaffolding; it is inert unless the env var is set.
-      @@shadow_totals = Hash.new(0)
-      def self.shadow_totals = @@shadow_totals
-
-      def self.record_shadow_stats(snap)
-        return unless snap.is_a?(Hash)
-        %w[calls cssNs natNs buildNs rebuilds syncNs syncCalls parseNs parsePages constructNs
-           constructNodes matched fallbacks invalid mismatches natResults cascMatchNs cascMatchCalls
-           cascTotalNs cascRuns cascNatNs cascNatCalls cascNatFallback cascNatMismatch cascNatUnmirrored].each do |k|
-          @@shadow_totals[k] += snap[k].to_i if snap.key?(k)
-        end
-        @@shadow_totals['lastMismatch'] = snap['lastMismatch'] if snap['mismatches'].to_i.positive? && snap['lastMismatch']
-      end
-
-      if ENV['CSIM_NATIVE_QUERY_SHADOW']
-        at_exit do
-          t     = @@shadow_totals
-          calls = t['calls'].to_i
-          if calls.positive?
-            css   = t['cssNs'].to_f / 1e6
-            nat   = t['natNs'].to_f / 1e6
-            build = t['buildNs'].to_f / 1e6
-            sync = t['syncNs'].to_f / 1e6
-            warn format("\n[native-shadow] %d finds — css-select %.1f ms, native %.1f ms (%.2fx faster)",
-                        calls, css, nat, nat.positive? ? css / nat : 0.0)
-            warn format('[native-shadow] arena upkeep — one-time mirror %.1f ms over %d page(s); incremental sync %.1f ms over %d delta(s)',
-                        build, t['rebuilds'].to_i, sync, t['syncCalls'].to_i)
-            warn format('[native-shadow] matched %d, fallbacks %d, invalid %d, mismatches %d%s',
-                        t['matched'].to_i, t['fallbacks'].to_i, t['invalid'].to_i, t['mismatches'].to_i,
-                        t['mismatches'].to_i.positive? ? " (last: #{t['lastMismatch'].inspect})" : '')
-          end
-          # Thinning-ceiling probes (what a native-backed store would reclaim, which the matching
-          # shadow cannot see): JS DOM construction time, and peak V8 heap.
-          if t['parsePages'].to_i.positive?
-            bringup   = t['parseNs'].to_f / 1e6
-            construct = t['constructNs'].to_f / 1e6
-            # bring-up = the parse + node construction + connect/upgrade + INLINE APP SCRIPTS + cascade.
-            # Only the node-construction subset is what a native store reclaims; scripts/cascade are not.
-            warn format('[native-parse] page bring-up %.1f ms over %d page(s); node construction %.1f ms in %d nodes = %.1f%% of bring-up (the store-reclaimable part)',
-                        bringup, t['parsePages'].to_i, construct, t['constructNodes'].to_i, bringup.positive? ? construct / bringup * 100 : 0.0)
-          end
-          if t['peakHeapBytes'].to_i.positive?
-            warn format('[native-heap] peak V8 heap+external %.1f MB (indicative DOM-heap footprint the thinning reclaims)',
-                        t['peakHeapBytes'].to_f / 1_048_576)
-          end
-          # Cascade selector-matching cost — where a native matcher over the arena would actually pay
-          # (the find path is negligible). match = css-select time inside the cascade; total = full
-          # rebuildCascade time; the fraction sizes the store-flip's real ceiling. Reported
-          # independently of finds (a page restyle needs no Capybara find).
-          if t['cascMatchCalls'].to_i.positive?
-            cmatch = t['cascMatchNs'].to_f / 1e6
-            ctotal = t['cascTotalNs'].to_f / 1e6
-            warn format('[native-cascade] rebuildCascade %.1f ms over %d run(s); selector-match %.1f ms in %d calls = %.1f%% of cascade',
-                        ctotal, t['cascRuns'].to_i, cmatch, t['cascMatchCalls'].to_i, ctotal.positive? ? cmatch / ctotal * 100 : 0.0)
-            # F2 sizing: native single-element match run beside css in the cascade (css authoritative).
-            # nat vs the css time on the SAME rules is the real cascade-match speedup a synced-arena
-            # native matcher would give; mismatches must stay 0 (parity).
-            if t['cascNatCalls'].to_i.positive?
-              cnat = t['cascNatNs'].to_f / 1e6
-              # css time attributable to the rules native also answered (calls-weighted estimate).
-              share = t['cascMatchCalls'].to_i.positive? ? t['cascNatCalls'].to_f / t['cascMatchCalls'].to_i : 0.0
-              css_on_nat = cmatch * share
-              warn format('[native-cascade] native match %.1f ms in %d calls (%.2fx vs css); deferred %d, mismatches %d',
-                          cnat, t['cascNatCalls'].to_i, cnat.positive? ? css_on_nat / cnat : 0.0, t['cascNatFallback'].to_i, t['cascNatMismatch'].to_i)
-            end
-          end
-        end
-      end
-
       # The host namespace rusty_racer installs into every context (main and
       # per-frame): `globalThis.RustyRacer.drainMicrotasks()` (a native,
       # rendezvous-free microtask checkpoint), `contextGlobal(id)` /
@@ -665,9 +591,6 @@ module Capybara
       # reset falls back to the cold route: dispose the isolate and build a
       # fresh one (synchronously, on this thread).
       def rebuild_ctx
-        # SHADOW measurement: harvest the outgoing context's native-vs-css stats before
-        # the reset/rebuild below wipes JS state (no-op unless the env var is set).
-        harvest_shadow_stats
         # Produce any queued bytecode-cache blobs while every queued target
         # (frame realms included) is still alive — a job queued by the last
         # activity of a test (e.g. a timer-fired dynamic import in a lazy
@@ -732,24 +655,6 @@ module Capybara
       # here. With per-visit rebuild already running, the inter-test
       # path is the same operation.
       def reset_page = rebuild_ctx
-
-      # Read + reset the current context's shadow-measurement stats and fold them into
-      # the process-wide totals. Called before a context reset (which would drop them).
-      # Inert unless CSIM_NATIVE_QUERY_SHADOW is set.
-      def harvest_shadow_stats
-        return unless ENV['CSIM_NATIVE_QUERY_SHADOW'] && @ctx
-        snap = @ctx.call('__csimNativeShadowStats', true) rescue nil
-        self.class.record_shadow_stats(snap) if snap
-        casc = @ctx.call('__csimCascadeTimingStats', true) rescue nil
-        self.class.record_shadow_stats(casc) if casc
-        # Peak V8 heap (indicative DOM-heap footprint the thinning would reclaim): track the max
-        # used+external seen at a page boundary. Not attributable to the DOM alone, but a rough ceiling.
-        hs = @ctx.heap_statistics rescue nil
-        if hs
-          bytes = hs[:used_heap_size].to_i + hs[:external_memory].to_i
-          self.class.shadow_totals['peakHeapBytes'] = [self.class.shadow_totals['peakHeapBytes'].to_i, bytes].max
-        end
-      end
 
       # Memory-pressure threshold (MB) above which `rebuild_ctx` forces a full
       # GC to reclaim dead per-frame realms (see the call site). Measured
@@ -892,16 +797,9 @@ module Capybara
         attach_run_script_with_cache(c)
         attach_native_module_loader(c)
         attach_frame_realm_loader(c)
-        # Re-seed the store-migration SHADOW flag on every main-context (re)build — a
-        # context reset drops all post-snapshot globals. Off unless the env var is set,
-        # so production never touches it. See V8Runtime.shadow_totals.
-        c.eval_void('globalThis.__csimNativeShadow = true;') if ENV['CSIM_NATIVE_QUERY_SHADOW']
-        # Native cascade matching: the arena matcher is the AUTHORITY for the rules it can answer (css-select
-        # is the fallback for the rest). ON BY DEFAULT, seeded on the main context only — a frame realm never
-        # runs this seeder (attach_frame_realm_loader) and workers use the class-level attach_host_fns, so
-        # both keep the pure-css path until the arena is partitioned per realm. cascade.js builds/maintains
-        # the arena itself (no dependency on the SHADOW find-path machinery). CSIM_NO_NATIVE_CASCADE is the
-        # rollback kill switch (revert to css matching everywhere without a recompile).
+        # The JS cascade's compiled matching: each rule's selector compiled once to a native handle (cascade.js
+        # `safeMatches`). ON BY DEFAULT, seeded on the main context only — a frame realm and a worker match through
+        # selectors.js, natively all the same. CSIM_NO_NATIVE_CASCADE turns the handles off.
         c.eval_void('globalThis.__csimNativeCascadeAuthoritative = true;') unless ENV['CSIM_NO_NATIVE_CASCADE']
         # The style engine (stylo): it styles the page, answers every style read and runs the CSS animations, and the
         # Rust walk lays the page out from it. The JS cascade's declared values remain only for the JS layout (the oracle),
