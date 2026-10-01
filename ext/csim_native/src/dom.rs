@@ -751,12 +751,15 @@ impl RealmArena {
     }
 
     // Rewrite child_index for the children of `parent` from position `from` on, from their list positions — after an
-    // insertion or a removal there shifted them.
+    // insertion or a removal there shifted them. Quietly: the index is where to find a child in its parent's list, read
+    // by nothing a layout walk or a memo keys on — the change itself is the parent's, which `get_mut` stamped. Stamped
+    // as a change of each, every sibling after a removed child was walked again rather than spliced back (a 400-item
+    // list, `remove()` of the 200th: 203 records walked, 3 once it is not).
     fn reindex_children(&mut self, parent: NodeId, from: usize) {
         let len = self.get(parent).map_or(0, |p| p.children.len());
         for i in from..len {
             let Some(c) = self.get(parent).and_then(|p| p.children.get(i).copied()) else { break };
-            if let Some(node) = self.get_mut(c) {
+            if let Some(node) = self.get_mut_quietly(c) {
                 node.child_index = i;
             }
         }

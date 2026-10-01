@@ -61,6 +61,29 @@ RSpec.describe 'the Rust walk puts back what did not change' do
     expect(got).to be >= 2 * 58
   end
 
+  # …and a row REMOVED is a change to the list, not to the rows after it: each moves up a place in its parent's children,
+  # which the arena keeps an index of — rewritten as a change of each row, every row after the removed one was walked
+  # again rather than spliced back. Taking one from the middle of the list or adding one before it walks the list, its
+  # ancestors and nothing of the rows.
+  it 'splices back the rows after one removed from the list, and those after one inserted before them' do
+    s = session(%(<div id="top">top</div><div id="l">#{ROWS}</div>))
+    got = s.evaluate_script(<<~JS)
+      (() => {
+        const walked = (change) => {
+          document.body.offsetHeight;
+          const w0 = __dom.layoutMeasureCounts()[4];
+          change();
+          document.body.offsetHeight;
+          return __dom.layoutMeasureCounts()[4] - w0;
+        };
+        const row = (id) => document.getElementById(id).parentNode.parentNode;
+        return [walked(() => row('s30').remove()), walked(() => row('s5').before(document.createElement('div')))];
+      })()
+    JS
+    expect(got[0]).to be <= 4
+    expect(got[1]).to be <= 5
+  end
+
   # …and a box inserted before the list moves every row's records, which is no change to any row: each keeps its chunk
   # through the insertion — and is measured afresh there only because it now stands elsewhere in its formatting context
   # (a measure is keyed on that) — so the next edit in the list puts every other row back. (A row that lost its chunk
