@@ -57,14 +57,12 @@ fn sniff(bytes: &[u8], content_type: &str, reading: Reading) -> &'static Encodin
     if is_xml(content_type) {
         return xml_declaration(head).unwrap_or(UTF_8);
     }
-    if let Some(encoding) = prescan(head, false) {
-        return encoding;
-    }
-    let Reading::Navigation(parent) = reading else { return UTF_8 };
-    // (…or one later on: the parser's "change the encoding" for a `<meta>` it meets while the confidence is tentative,
-    // in `<head>` or `<body>` alike — Chrome does both, Firefox only the head — met before the document is parsed rather
-    // than by navigating again, its scripts not run twice; text inside a raw-text element is no tag)
-    if let Some(encoding) = (bytes.len() > head.len()).then(|| prescan(bytes, true)).flatten() {
+    let Reading::Navigation(parent) = reading else { return prescan(head, false).unwrap_or(UTF_8) };
+    // (…the first `<meta>` the PARSER meets, anywhere: its "change the encoding" while the confidence is tentative —
+    // whatever the prescan of the first 1024 bytes found, which a `<meta>` in a script's text can fool — in `<head>` or
+    // `<body>` alike (Chrome does both, Firefox only the head); met before the document is parsed rather than by
+    // navigating again, its scripts not run twice. Text inside a raw-text element is no tag.)
+    if let Some(encoding) = prescan(bytes, true).or_else(|| prescan(head, false)) {
         return encoding;
     }
     // (…a frame's parent's encoding, inherited — unless it is UTF-16, which only a BOM ever selects)
@@ -99,7 +97,8 @@ fn meta_encoding(label: &[u8]) -> Option<&'static Encoding> {
 }
 
 // The elements whose content the tokenizer reads as text up to their end tag (RAWTEXT, RCDATA, script data).
-const RAW_TEXT: [&[u8]; 9] = [b"script", b"style", b"textarea", b"title", b"xmp", b"iframe", b"noembed", b"noframes", b"noscript"];
+const RAW_TEXT: [&[u8]; 10] =
+    [b"script", b"style", b"textarea", b"title", b"xmp", b"iframe", b"noembed", b"noframes", b"noscript", b"plaintext"];
 
 fn is_space(b: u8) -> bool {
     matches!(b, b'\t' | b'\n' | b'\x0C' | b'\r' | b' ')
@@ -164,7 +163,8 @@ fn prescan(input: &[u8], raw_text: bool) -> Option<&'static Encoding> {
             while pos < n && !is_space(input[pos]) && input[pos] != b'>' {
                 pos += 1;
             }
-            let name = input[name_at..pos].to_ascii_lowercase();
+            // (…`<title/>` is a `title` start tag all the same: HTML has no self-closing raw-text element)
+            let name = input[name_at..pos].strip_suffix(b"/").unwrap_or(&input[name_at..pos]).to_ascii_lowercase();
             while let Some((_, _, next)) = attribute(input, pos) {
                 pos = next;
             }
@@ -343,6 +343,9 @@ mod tests {
         assert_eq!(sniff(&late, "text/html", Reading::Navigation(None)).name(), "Shift_JIS");
         let scripted = [b"<p>".as_slice(), &[b' '; 1100], b"<script>'<meta charset=big5>'</script>"].concat();
         assert_eq!(sniff(&scripted, "text/html", Reading::Navigation(None)).name(), "windows-1252");
+        // (…and the parser's meet beats the prescan's: a script's `<meta>` text read first, a real one past it)
+        let fooled = [b"<script>'<meta charset=big5>'</script>".as_slice(), &[b' '; 1100], b"<meta charset=shift_jis>"].concat();
+        assert_eq!(sniff(&fooled, "text/html", Reading::Navigation(None)).name(), "Shift_JIS");
         // (…a parent's encoding comes below the document's own)
         assert_eq!(sniff(b"<meta charset=big5>", "text/html", Reading::Navigation(Some(encoding_rs::SHIFT_JIS))).name(), "Big5");
     }

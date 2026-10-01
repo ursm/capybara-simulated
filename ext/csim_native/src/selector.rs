@@ -133,20 +133,17 @@ impl ToCss for PseudoEl {
 }
 impl PseudoElement for PseudoEl {
     type Impl = CsimImpl;
+    // A tree-abiding pseudo-element may follow `::slotted()` (CSS Scoping): `::slotted(p)::before`.
+    fn valid_after_slotted(&self) -> bool {
+        matches!(self.0.as_str(), "before" | "after" | "marker" | "placeholder" | "file-selector-button")
+    }
 }
 
-// The parser: everything tree-structural is handled by the crate; we only name the non-TS
-// pseudo-classes and pseudo-elements so real selectors parse instead of erroring. The enabled
-// features mirror what the driver's css-select supports, so native matching agrees.
+// The parser: everything tree-structural is handled by the crate; we name the non-TS pseudo-classes and the
+// pseudo-elements. One it does not know is a parse error — invalid, as in Chrome and Firefox; inside a forgiving
+// `:is()` / `:where()` the crate drops just that selector.
 #[derive(Default)]
-struct CsimParser {
-    // Set when a selector uses a construct the native matcher can't answer correctly (a
-    // state pseudo-class, an unknown functional pseudo-class, or a pseudo-element), so the
-    // caller defers the whole selector to the JS css-select engine. The crate calls the
-    // parser callbacks for nested `:is()` / `:not()` / `:has()` contents too, so this flag
-    // catches a state pseudo at any depth without walking the parsed tree.
-    needs_fallback: std::cell::Cell<bool>,
-}
+struct CsimParser;
 
 impl<'i> Parser<'i> for CsimParser {
     type Impl = CsimImpl;
@@ -167,17 +164,20 @@ impl<'i> Parser<'i> for CsimParser {
     fn parse_slotted(&self) -> bool {
         true
     }
+    fn parse_host(&self) -> bool {
+        true
+    }
 
     fn parse_non_ts_pseudo_class(
         &self,
-        _location: SourceLocation,
+        location: SourceLocation,
         name: CowRcStr<'i>,
     ) -> Result<PseudoClass, cssparser::ParseError<'i, Self::Error>> {
-        let name = name.as_ref().to_ascii_lowercase();
-        if !is_native_pseudo_class(&name) {
-            self.needs_fallback.set(true);
+        let lower = name.as_ref().to_ascii_lowercase();
+        if !is_native_pseudo_class(&lower) {
+            return Err(location.new_custom_error(SelectorParseErrorKind::UnsupportedPseudoClassOrElement(name)));
         }
-        Ok(PseudoClass { name, arg: None })
+        Ok(PseudoClass { name: lower, arg: None })
     }
 
     fn parse_non_ts_functional_pseudo_class<'t>(
@@ -230,9 +230,7 @@ impl<'i> Parser<'i> for CsimParser {
                 return Ok(PseudoClass { name, arg: Some(ident) });
             }
         }
-        while arguments.next().is_ok() {}
-        self.needs_fallback.set(true);
-        Ok(PseudoClass { name, arg: None })
+        Err(arguments.new_custom_error(SelectorParseErrorKind::UnsupportedPseudoClassOrElement(name.into())))
     }
 
     // A pseudo-element is no element, so a selector naming one matches none (`querySelector('div::before')` is null) —
@@ -255,17 +253,32 @@ impl<'i> Parser<'i> for CsimParser {
         Ok(PseudoEl(lower))
     }
 
-    // `::highlight(<custom-ident>)` — a functional one, likewise matching no element.
+    // The functional ones, likewise matching no element: `::highlight(<custom-ident>)`, and the view transitions'
+    // `::view-transition-group()` / `-image-pair()` / `-old()` / `-new()` of `*` or a name (with `.class`es), or none.
     fn parse_functional_pseudo_element<'t>(
         &self,
         name: CowRcStr<'i>,
         arguments: &mut CssParser<'i, 't>,
     ) -> Result<PseudoEl, cssparser::ParseError<'i, Self::Error>> {
-        if !name.eq_ignore_ascii_case("highlight") {
-            return Err(arguments.new_custom_error(SelectorParseErrorKind::UnsupportedPseudoClassOrElement(name)));
+        let lower = name.as_ref().to_ascii_lowercase();
+        match lower.as_str() {
+            "highlight" => {
+                arguments.expect_ident()?;
+            }
+            "view-transition-group" | "view-transition-image-pair" | "view-transition-old" | "view-transition-new" => {
+                if !arguments.is_exhausted() {
+                    if arguments.try_parse(|p| p.expect_delim('*')).is_err() {
+                        arguments.expect_ident()?;
+                    }
+                    while !arguments.is_exhausted() {
+                        arguments.expect_delim('.')?;
+                        arguments.expect_ident()?;
+                    }
+                }
+            }
+            _ => return Err(arguments.new_custom_error(SelectorParseErrorKind::UnsupportedPseudoClassOrElement(name))),
         }
-        arguments.expect_ident()?;
-        Ok(PseudoEl("highlight".to_owned()))
+        Ok(PseudoEl(lower))
     }
 }
 
@@ -622,8 +635,7 @@ impl SelectorVisitor for ShadowConstructVisitor {
 fn parse(text: &str) -> Option<Parsed> {
     let mut input = ParserInput::new(text);
     let mut parser = CssParser::new(&mut input);
-    let csim = CsimParser::default();
-    let list = SelectorList::parse(&csim, &mut parser, ParseRelative::No).ok()?;
+    let list = SelectorList::parse(&CsimParser, &mut parser, ParseRelative::No).ok()?;
     // A shadow-DOM construct (:host / ::part() / ::slotted()) forces fallback too — the arena is the
     // flat tree and models no host/part/slot relationship, so native matching would answer it wrong.
     let mut shadow = ShadowConstructVisitor { found: false };
@@ -634,15 +646,31 @@ fn parse(text: &str) -> Option<Parsed> {
     }
     Some(Parsed {
         list,
-        needs_fallback: csim.needs_fallback.get() || shadow.found,
+        needs_fallback: shadow.found,
     })
 }
 
 // Parsed-selector cache — the driver emits a small recurring set of selectors, so parsing each once
-// and reusing it keeps matching off the parser. Keyed by the selector text.
+// and reusing it keeps matching off the parser. Keyed by the selector text, and BOUNDED: a page's own
+// queries interpolate ids (`#comment_123`, `[data-id="7"]`) without end, and the cache outlives sessions.
 thread_local! {
     static CACHE: std::cell::RefCell<std::collections::HashMap<String, Option<Parsed>>> =
         std::cell::RefCell::new(std::collections::HashMap::new());
+}
+const CACHE_LIMIT: usize = 4096;
+
+// The cached parse of `text` (parsed and stored on a miss — the cache emptied first when it is full), to `f`.
+fn with_parsed<R>(text: &str, f: impl FnOnce(Option<&Parsed>) -> R) -> R {
+    CACHE.with(|c| {
+        let mut c = c.borrow_mut();
+        if !c.contains_key(text) {
+            if c.len() >= CACHE_LIMIT {
+                c.clear();
+            }
+            c.insert(text.to_owned(), parse(text));
+        }
+        f(c.get(text).and_then(Option::as_ref))
+    })
 }
 
 // Compiled-selector store for the AUTHORITATIVE cascade path. The shadow / query APIs re-send the
@@ -772,9 +800,10 @@ pub fn query(arena: &RealmArena, root: NodeId, scope: NodeId, list: &SelectorLis
                 return out;
             }
         }
-        let mut kids = arena.element_children(id);
-        kids.reverse();
-        stack.extend(kids);
+        // (…its element children, pushed in reverse so they pop in order — straight off the node's list, no copy)
+        if let Some(node) = arena.get(id) {
+            stack.extend(node.children.iter().rev().copied().filter(|&c| arena.is_element(c)));
+        }
     }
     out
 }
@@ -783,14 +812,10 @@ pub fn query(arena: &RealmArena, root: NodeId, scope: NodeId, list: &SelectorLis
 // the JS engine (a live-state selector), or Invalid (the caller treats it as a SyntaxError). A
 // deferred selector is NOT matched here — the arena result would be a wrong subset.
 pub fn query_text(arena: &RealmArena, root: NodeId, scope: NodeId, text: &str, first_only: bool, quirks: bool, html_doc: bool) -> QueryOutcome {
-    CACHE.with(|c| {
-        let mut c = c.borrow_mut();
-        let entry = c.entry(text.to_owned()).or_insert_with(|| parse(text));
-        match entry {
-            None => QueryOutcome::Invalid,
-            Some(p) if p.needs_fallback => QueryOutcome::NeedsJsFallback,
-            Some(p) => QueryOutcome::Matched(query(arena, root, scope, &p.list, first_only, quirks, html_doc)),
-        }
+    with_parsed(text, |entry| match entry {
+        None => QueryOutcome::Invalid,
+        Some(p) if p.needs_fallback => QueryOutcome::NeedsJsFallback,
+        Some(p) => QueryOutcome::Matched(query(arena, root, scope, &p.list, first_only, quirks, html_doc)),
     })
 }
 
@@ -799,9 +824,7 @@ pub fn query_text(arena: &RealmArena, root: NodeId, scope: NodeId, text: &str, f
 // question is asked of (Element.matches / closest, whose scoping root is the element itself); unscoped — a cascade rule
 // — has no scoping root. The matcher walks the full ancestor chain for descendant / child combinators.
 pub fn matches_text(arena: &RealmArena, id: NodeId, text: &str, quirks: bool, html_doc: bool, scoped: bool, closest: bool) -> QueryOutcome {
-    CACHE.with(|c| {
-        let mut c = c.borrow_mut();
-        let entry = c.entry(text.to_owned()).or_insert_with(|| parse(text));
+    with_parsed(text, |entry| {
         match entry {
             None => QueryOutcome::Invalid,
             Some(p) if p.needs_fallback => QueryOutcome::NeedsJsFallback,

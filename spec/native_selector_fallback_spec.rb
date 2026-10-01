@@ -50,7 +50,7 @@ RSpec.describe 'native selector engine: JS fallback for live-state selectors' do
       const r = __dom.queryIds(document._nid, sel, false);
       if (r === undefined) return 'FALLBACK';
       if (r === null) return 'INVALID';
-      const css = Array.from(document.querySelectorAll(sel)).map(e => e._nid);
+      const css = __csimCssSelectAll(document, sel).map(e => e._nid);   // css-select alone: querySelectorAll is native
       const a = r.slice().sort((x, y) => x - y);
       const b = css.slice().sort((x, y) => x - y);
       const same = a.length === b.length && a.every((v, i) => v === b[i]);
@@ -131,7 +131,7 @@ RSpec.describe 'native selector engine: JS fallback for live-state selectors' do
         const feed = document.querySelector('.feed');
         const sel = ':scope > .card';
         const nat = (__dom.queryIds(feed._nid, sel, false) || []).slice().sort((a, b) => a - b);
-        const css = Array.from(feed.querySelectorAll(sel)).map(e => e._nid).sort((a, b) => a - b);
+        const css = __csimCssSelectAll(feed, sel).map(e => e._nid).sort((a, b) => a - b);
         return JSON.stringify(nat) === JSON.stringify(css) ? ('OK:' + nat.length) : ('MISMATCH nat=' + JSON.stringify(nat) + ' css=' + JSON.stringify(css));
       })();
     JS

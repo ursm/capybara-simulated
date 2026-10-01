@@ -84,14 +84,14 @@ RSpec.describe 'native selector engine A/B vs css-select' do
       # correctness: compare the two result sets by nativeId
       parity = session.evaluate_script(<<~JS)
         (function () {
-          const cssIds = Array.from(document.querySelectorAll("#{esc}")).map(e => e.__nid).sort((a,b)=>a-b);
+          const cssIds = __csimCssSelectAll(document, "#{esc}").map(e => e.__nid).sort((a,b)=>a-b);
           const natIds = (__dom.queryIds(globalThis.__abRoot, "#{esc}") || []).sort((a,b)=>a-b);
           return JSON.stringify(cssIds) === JSON.stringify(natIds) ? cssIds.length : ("MISMATCH css=" + cssIds.length + " nat=" + natIds.length);
         })();
       JS
       expect(parity).to be_a(Integer), "selector #{sel.inspect}: #{parity}"
 
-      css_ms = wall.call { session.evaluate_script(%(for (let i=0;i<#{ITERS};i++) document.querySelectorAll("#{esc}");)) }
+      css_ms = wall.call { session.evaluate_script(%(for (let i=0;i<#{ITERS};i++) __csimCssSelectAll(document, "#{esc}");)) }
       nat_ms = wall.call { session.evaluate_script(%(for (let i=0;i<#{ITERS};i++) __dom.queryIds(globalThis.__abRoot, "#{esc}");)) }
 
       { sel: sel, n: parity, css_us: css_ms * 1000.0 / ITERS, nat_us: nat_ms * 1000.0 / ITERS }

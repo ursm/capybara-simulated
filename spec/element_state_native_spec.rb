@@ -49,7 +49,7 @@ RSpec.describe 'element state in the native arena' do
         if (nids === undefined) return 'FALLBACK';
         const byNid = new Map([...document.querySelectorAll('*')].map((e) => [e._nid, e]));
         const nat = nids.map((n) => byNid.get(n)?.id ?? '?');
-        const css = [...document.querySelectorAll(sel)].map((e) => e.id);
+        const css = __csimCssSelectAll(document, sel).map((e) => e.id);   // css-select alone: querySelectorAll is native
         return JSON.stringify(nat) === JSON.stringify(css) ? nat : 'MISMATCH native=' + nat + ' css=' + css;
       })()
     JS
@@ -292,7 +292,7 @@ RSpec.describe 'element state in the native arena' do
       ms = session.evaluate_script(<<~JS)
         (() => {
           const t = performance.now();
-          const js = document.querySelectorAll(':indeterminate').length + document.querySelectorAll(':default').length;
+          const js = __csimCssSelectAll(document, ':indeterminate').length + __csimCssSelectAll(document, ':default').length;
           const nat = __dom.queryIds(document._nid, ':indeterminate', false).length + __dom.queryIds(document._nid, ':default', false).length;
           return [js, nat, performance.now() - t];
         })()

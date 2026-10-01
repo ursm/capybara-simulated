@@ -8,7 +8,7 @@
 # exactly ONCE (the initial parse mirror) and every later change applied incrementally.
 #
 # css-select over the live JS DOM is the oracle: after each mutation the native queryIds result must
-# equal document.querySelectorAll — same set, same order — for order-sensitive (:nth-child, sibling
+# equal css-select's (`__csimCssSelectAll`) — same set, same order — for order-sensitive (:nth-child, sibling
 # combinators), attribute, and :empty selectors, so a drift in any primitive shows up immediately.
 
 require 'capybara/simulated'
@@ -77,7 +77,7 @@ RSpec.describe 'native arena incremental sync (store-flip F1a)',
   # Compare native queryIds (document-scoped) to css-select — same set AND same order.
   CHECK = <<~JS
     (function (sel) {
-      const css = Array.from(document.querySelectorAll(sel));
+      const css = __csimCssSelectAll(document, sel);   // css-select alone: querySelectorAll is native
       const ids = __dom.queryIds(__docRoot, sel);
       if (ids === undefined) return 'FALLBACK';
       if (ids === null) return 'INVALID';
@@ -162,9 +162,9 @@ RSpec.describe 'native arena incremental sync (store-flip F1a)',
         // Element-scoped query inside the detached box: '.tag' matches, but 'body .tag' must NOT
         // (its former <body> ancestor is gone). Native (arena) must agree with css-select (JS DOM).
         const natBare = (__dom.queryIds(box.__nid, '.tag') || []).length;
-        const cssBare = box.querySelectorAll('.tag').length;
+        const cssBare = __csimCssSelectAll(box, '.tag').length;
         const natAnc  = (__dom.queryIds(box.__nid, 'body .tag') || []).length;
-        const cssAnc  = box.querySelectorAll('body .tag').length;
+        const cssAnc  = __csimCssSelectAll(box, 'body .tag').length;
         return [natBare, cssBare, natAnc, cssAnc].join(',');
       })();
     JS
@@ -178,7 +178,7 @@ RSpec.describe 'native arena incremental sync (store-flip F1a)',
     result = session.evaluate_script(<<~JS)
       (function () {
         const list = document.querySelector('.list');
-        const items = Array.from(list.querySelectorAll('.item')).map(e => e.__nid);
+        const items = __csimCssSelectAll(list, '.item').map(e => e.__nid);
         // Feed a hostile delta: the list itself + a duplicated first item + the real items.
         __dom.syncChildren(list.__nid, [list.__nid, items[0], items[0]].concat(items));
         // Must terminate (no cycle) and expose each item exactly once, list never its own child.
