@@ -419,6 +419,20 @@ RSpec.describe 'walk parity' do
     HTML
   end
 
+  # An ORPHAN table part — a cell, a group, a column or a caption no table lays out — is a plain block to both
+  # (`nlOrphanTablePart`), its cell's min / max-height ignored as a cell's are; one a table does lay out is the table's.
+  # (An orphan ROW is a flex row to the JS model, which the Rust walk declines.)
+  it 'builds an orphan table part as a block' do
+    expect_clean(parity(<<~HTML))
+      <div style="width: 200px"><span style="display: table-cell; width: 50%; padding: 5px; min-height: 40px">cell</span> after</div>
+      <div style="display: table-caption">cap</div><div style="display: table-row-group"><div>in a group</div></div>
+      <div style="display: table-column">col</div>
+      <div style="display: table-cell; float: left; width: 30px">f</div>beside
+      <div style="display: flex"><div style="display: table-cell">item</div></div>
+      <div style="display: table"><div style="display: table-row-group"><div style="display: table-cell">a table's</div></div></div>
+    HTML
+  end
+
   it 'declines by name what it has not been taught' do
     stats = parity('<div style="display: ruby">x</div>')
     expect(stats['compared']).to eq(0)

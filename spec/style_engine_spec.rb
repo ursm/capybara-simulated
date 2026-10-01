@@ -245,6 +245,19 @@ RSpec.describe 'style engine invalidation' do
     expect(got).to eq(['none', false, 0, 'apple', 'block', true])
   end
 
+  # A screenshot's recording pass is the Rust walk's too: each text piece comes back with its text and the element it was
+  # written in (`layoutBuild`'s paint rows), where the walk declined it for the JS walk — which read the JS rules.
+  it 'records a paint with the Rust walk' do
+    s = visit('<p>Hello <b>bold</b> <span style="vertical-align: super">sup</span></p><div style="display: table-cell">orphan</div>', css: '')
+    path = File.join(Dir.tmpdir, "csim-rustpaint-#{Process.pid}.png")
+    s.driver.save_screenshot(path)
+    stats = s.evaluate_script('__csimNativeLayoutStats()')
+    expect(stats['rustFellBack']).to eq({})
+    expect(s.evaluate_script('__csimJsCascadeDemands().builds')).to eq(0)
+  ensure
+    File.delete(path) if path && File.exist?(path)
+  end
+
   # An element under a `display: none` — styled by no traversal — is resolved on its own, its unstyled ancestors with it
   # (Gecko's `ResolveStyleLazily`): its colour, its em-relative lengths and its percentages as Chrome reports them
   # (rgb(1, 2, 3), 0px, 30px, auto, 10px, block; then 50% and none), where it was answered by the JS cascade.

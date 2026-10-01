@@ -206,6 +206,8 @@ fn layout_build(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgu
     // (…splicing back from the last kept pass what did not change since it: `Walk::splice`; under the check, the pass is
     // walked whole as well, and the two held against each other)
     let (maths, prior) = d.walk_reuse.entry(cid).or_default().for_walk(&generation);
+    // (…but none for a pass that paints: a spliced subtree's runs carry no `PaintMark`)
+    let prior = prior.filter(|_| !texts);
     let (built, whole) = arena.faces.with(|faces| {
         faces.at_generation(&generation);
         let built = walk::build(arena, root, basis, faces, maths, prior);
@@ -246,7 +248,7 @@ fn layout_build(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgu
             return;
         }
     };
-    let walk::Built { mut inputs, runs, run_texts, inlines, grids, anon, inline_nids, extents, spliced, walked } = built;
+    let walk::Built { mut inputs, runs, run_texts, inlines, grids, anon, inline_nids, extents, spliced, walked, paint } = built;
     let nids: Vec<f64> = inputs.iter().map(|r| r.nid).collect();
     // The layout of every subtree built as the last pass built it is the measure cache's to put back (`walk_reuse`) —
     // except for a pass that answers its text pieces, which a put-back measure does not hold.
@@ -258,6 +260,13 @@ fn layout_build(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgu
     let maths = std::mem::take(&mut reuse.maths);
     let cache = (!texts).then_some((&mut measure, roots, check));
     let out = crate::layout::layout_block_in_place(&mut inputs, &runs, &run_texts, &grids, &inlines, &maths.values, f64::NAN, f64::NAN, root_cb_w, root_rtl, cache, texts);
+    // (…and a pass that paints answers each text piece as the painter draws it — beside the rows that index the runs, which
+    // only this side has: `[x, y, baseline, width, justify, owner nid]` and the text, the baseline's run shift taken back
+    // off and a hyphen's owner the character's before it, as `nlPaintRuns` makes them)
+    let painted = match &out {
+        crate::layout::Outcome::LaidOut(laid) if texts => Some(paint_rows(&laid.texts, &paint, &run_texts)),
+        _ => None,
+    };
     let mismatch = measure.mismatch.take();
     let reuse = dom(scope).walk_reuse.entry(cid).or_default();
     reuse.measure = measure;
@@ -294,6 +303,16 @@ fn layout_build(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgu
         }
     }
     let answer = laid_answer(scope, cid, laid, texts);
+    if let Some((rows, strings)) = painted {
+        let rows: v8::Local<v8::Value> = f64_array(scope, &rows).into();
+        answer.set_index(scope, 8, rows);
+        let list = v8::Array::new(scope, strings.len() as i32);
+        for (k, t) in strings.iter().enumerate() {
+            let v = v8::String::new_from_two_byte(scope, t, v8::NewStringType::Normal).unwrap();
+            list.set_index(scope, k as u32, v.into());
+        }
+        answer.set_index(scope, 9, list.into());
+    }
     let anon: Vec<f64> = anon.iter().flatten().copied().collect();
     for (at, list) in [(4, &nids), (5, &anon), (6, &inline_nids), (7, &unchanged)] {
         let v: v8::Local<v8::Value> = f64_array(scope, list).into();
@@ -409,4 +428,22 @@ fn json_str(s: &str) -> String {
     }
     out.push('"');
     out
+}
+
+// Each text row (`[run, start, end, x, y, baseline, width, justify]`) as the painter draws it.
+fn paint_rows(rows: &[crate::layout::TextRow], paint: &[walk::PaintMark], run_texts: &[crate::layout::RunText]) -> (Vec<f64>, Vec<Vec<u16>>) {
+    let by_run: std::collections::HashMap<usize, &walk::PaintMark> = paint.iter().map(|m| (m.run, m)).collect();
+    let mut out = Vec::new();
+    let mut strings = Vec::new();
+    for r in rows {
+        let (run, start, end) = (r[0] as usize, r[1] as usize, r[2] as usize);
+        let hyphen = start == end;
+        let mark = by_run.get(&run);
+        let text = run_texts.get(run).and_then(|t| t.as_deref()).unwrap_or(&[]);
+        strings.push(if hyphen { vec![u16::from(b'-')] } else { text.get(start..end).unwrap_or(&[]).to_vec() });
+        let at = if hyphen { start.saturating_sub(1) } else { start } as u32;
+        let owner = mark.and_then(|m| m.owners.iter().rev().find(|&&(o, _)| o <= at)).map_or(-1.0, |&(_, nid)| nid);
+        out.extend([r[3], r[4], r[5] - mark.map_or(0.0, |m| m.shift), r[6], r[7], owner]);
+    }
+    (out, strings)
 }

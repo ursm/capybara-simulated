@@ -153,6 +153,16 @@ pub(crate) struct Built {
     pub(crate) extents: Vec<Extent>,
     pub(crate) spliced: Vec<Splice>,
     pub(crate) walked: u64,
+    // …and what a painter needs of each TEXT run the walk made, beside its text (`PaintMark`) — none for a run spliced
+    // back from the last pass, so a pass that paints is walked whole.
+    pub(crate) paint: Vec<PaintMark>,
+}
+// A text run as a painter draws it: its run index, its baseline shift, and the element each part of it was written in
+// (`[(offset, nid)]`, the JS walk's `el` / `joins`).
+pub(crate) struct PaintMark {
+    pub(crate) run: usize,
+    pub(crate) shift: f64,
+    pub(crate) owners: Vec<(u32, f64)>,
 }
 
 // What the walk knows of a record beyond the record: where the run, grid and inline streams stood as it went in, and —
@@ -273,6 +283,7 @@ pub(crate) fn build(arena: &RealmArena, root: NodeId, basis: Basis, faces: &mut 
         inputs: Vec::new(),
         runs: Vec::new(),
         run_texts: Vec::new(),
+        paint: Vec::new(),
         grids: Vec::new(),
         maths: &mut maths.values,
         math_index: &mut maths.index,
@@ -316,6 +327,7 @@ pub(crate) fn build(arena: &RealmArena, root: NodeId, basis: Basis, faces: &mut 
             inputs: walk.inputs,
             runs: walk.runs,
             run_texts: walk.run_texts,
+            paint: walk.paint,
             inlines: walk.inlines,
             grids: walk.grids,
             inline_nids,
@@ -453,6 +465,7 @@ struct Walk<'a> {
     inputs: Vec<Input>,
     runs: Vec<Run>,
     run_texts: Vec<RunText>,
+    paint: Vec<PaintMark>,
     // The grid stream a table's (or a grid's) record names its columns in (`grid_start`).
     grids: Vec<f64>,
     // The programs the records name, each once (`[length, op, a, b, …]` at its offset), and where each one is — the
@@ -1242,7 +1255,8 @@ impl Rel {
 
 // A run before its block commits it: its inline box is named by the gather's entry, tabled at the commit.
 enum Pending {
-    Text { font: FontInfo, text: Vec<u16>, wrap: u8, ws: u8, shift: f64 },
+    // (…with the element each part of it was written in, as `[(offset, nid)]` — the painter's colour and font)
+    Text { font: FontInfo, text: Vec<u16>, wrap: u8, ws: u8, shift: f64, owners: Vec<(u32, f64)> },
     Open { plain: f64, ws: u8, entry: usize },
     Close { plain: f64, ws: u8, entry: usize, lands: bool, own_h: f64, own_asc: f64 },
     Br { ws: u8, clear: u8, entry: usize },
@@ -1493,6 +1507,35 @@ impl<'a> Walk<'a> {
         p
     }
 
+    // Whether a table-internal box is an ORPHAN this walk lays out as a plain block (`nlOrphanTablePart`): no table
+    // lays it out — none above it through nothing but row groups, by box (`nlUnderATable`) — and it is no row, nor a
+    // row's cell.
+    fn orphan_table_part(&self, id: NodeId, display: Display) -> Result<bool, &'static str> {
+        if matches!(display.inside(), DisplayInside::TableRow) {
+            return Ok(false);
+        }
+        let row_group = |d: Display| {
+            matches!(d.inside(), DisplayInside::TableRowGroup | DisplayInside::TableHeaderGroup | DisplayInside::TableFooterGroup)
+        };
+        let mut p = self.layout_parent(id);
+        let mut first = true;
+        while let Some(at) = p.filter(|&at| self.node(at).kind == NodeKind::Element) {
+            let d = self.style(at)?.get_box().walk_display();
+            if first && matches!(display.inside(), DisplayInside::TableCell) && matches!(d.inside(), DisplayInside::TableRow) {
+                return Ok(false);
+            }
+            first = false;
+            if matches!(d.inside(), DisplayInside::Table) {
+                return Ok(false);
+            }
+            if !row_group(d) {
+                return Ok(true);
+            }
+            p = self.layout_parent(at);
+        }
+        Ok(true)
+    }
+
     // One element's record, and its subtree's (`walkRecord`) — an in-flow box's, or an out-of-flow one's that `oof`
     // emits.
     fn record(&mut self, id: NodeId, parent: i32) -> Step {
@@ -1557,6 +1600,10 @@ impl<'a> Walk<'a> {
             (Role::Cell, _) => matches!(display.inside(), DisplayInside::TableCell),
             (Role::Caption, _) => matches!(display.outside(), DisplayOutside::TableCaption),
             (_, DisplayOutside::Block) => matches!(display.inside(), DisplayInside::Flow | DisplayInside::FlowRoot | DisplayInside::Flex | DisplayInside::Grid | DisplayInside::Table),
+            // (…and an ORPHAN table part — a cell, a group, a column or a caption no table lays out — a plain block, as
+            // the JS model lays it out (`nlOrphanTablePart`); a row, and a cell of one, are the orphan ROW's, which is a
+            // flex row there and none here yet)
+            (_, DisplayOutside::InternalTable | DisplayOutside::TableCaption) => self.orphan_table_part(id, display)?,
             (_, DisplayOutside::Inline) => match display.inside() {
                 DisplayInside::FlowRoot | DisplayInside::Flex | DisplayInside::Grid | DisplayInside::Table => true,
                 DisplayInside::Flow => self.holds_block_level(id)?,
@@ -3176,6 +3223,9 @@ impl<'a> Walk<'a> {
         self.anon.truncate(m.anon);
         self.runs.truncate(m.runs);
         self.run_texts.truncate(m.runs);
+        while self.paint.last().is_some_and(|p| p.run >= m.runs) {
+            self.paint.pop();
+        }
         self.entries.truncate(m.entries);
         self.entry_el.truncate(m.entries);
         self.inlines.truncate(m.inlines);
@@ -3362,7 +3412,8 @@ impl<'a> Walk<'a> {
         let mut table: Vec<Option<usize>> = Vec::new();
         for r in g.runs {
             let run = match r {
-                Pending::Text { font, text, wrap, ws, shift } => {
+                Pending::Text { font, text, wrap, ws, shift, owners } => {
+                    self.paint.push(PaintMark { run: self.runs.len(), shift, owners });
                     self.run_texts.push(Some(text.into()));
                     Run {
                         kind: RUN_TEXT,
@@ -3502,7 +3553,10 @@ impl<'a> Walk<'a> {
                     }
                     // Adjacent text is one run where it is the same font, shift, wrap and mode, the mode soft-wraps, the
                     // join does not GLUE a word, and neither side of a `pre-line` join is white space alone (`appendText`).
-                    if let Some(Pending::Text { font: lf, text, wrap: lw, ws: lws, shift: ls }) = g.runs.last_mut() {
+                    // (…written in the element it is a child of in the flat tree: a box-less one's, where it was spliced
+                    // through one — `inlineStyleOwner` — a generated box's for its text)
+                    let written_in = self.parent_of(c).map_or(-1.0, |p| p.to_f64());
+                    if let Some(Pending::Text { font: lf, text, wrap: lw, ws: lws, shift: ls, owners }) = g.runs.last_mut() {
                         let joinable = *lw == wrap
                             && *ls == shift
                             && *lws == ws_mode
@@ -3511,11 +3565,14 @@ impl<'a> Walk<'a> {
                             && (is_css_ws(*text.last().unwrap()) || is_css_ws(td[0]))
                             && !(ws_mode == WS_PRE_LINE && has_content(text) != has_content(&td));
                         if joinable {
+                            if owners.last().is_none_or(|&(_, o)| o != written_in) {
+                                owners.push((text.len() as u32, written_in));
+                            }
                             text.extend_from_slice(&td);
                             continue;
                         }
                     }
-                    g.runs.push(Pending::Text { font: *font, text: td.into_owned(), wrap, ws: ws_mode, shift });
+                    g.runs.push(Pending::Text { font: *font, text: td.into_owned(), wrap, ws: ws_mode, shift, owners: vec![(0, written_in)] });
                 }
                 NodeKind::Element => {
                     let cs = self.style(c)?;
