@@ -84,4 +84,19 @@ RSpec.describe 'Rust walk coverage' do
     )
     expect(rust).to eq(js)
   end
+
+  # A face the page adds through the `FontFace` API is measured natively: its `size-adjust` reads 100% — the identity —
+  # where it sets none, which was taken for a metric descriptor and declined every such face.
+  it 'lays out text in a FontFace face' do
+    ahem = File.binread(File.join(__dir__, 'wpt/fonts/Ahem.ttf'))
+    s = simulated_session(lambda {|env|
+      next [200, {'content-type' => 'font/ttf'}, [ahem]] if env['PATH_INFO'] == '/Ahem.ttf'
+
+      [200, {'content-type' => 'text/html'}, ['<!DOCTYPE html><meta charset="utf-8"><span id="t" style="font: 20px custom-font, monospace">abc</span>']]
+    })
+    s.visit '/'
+    s.execute_script("document.fonts.add(new FontFace('custom-font', 'url(/Ahem.ttf)')); document.getElementById('t').style.color = 'red';")
+    expect(s.evaluate_script("document.getElementById('t').getBoundingClientRect().width")).to eq(60)
+    expect(s.evaluate_script('JSON.stringify(__csimNativeLayoutStats().rustFellBack)')).to eq('{}')
+  end
 end
