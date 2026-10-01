@@ -2423,6 +2423,7 @@ module Capybara
         # Routes to the active frame realm inside `within_frame` (Selenium
         # parity: `evaluate_script` runs in the current browsing context).
         result = dom_call('__csimEvalScript', code.to_s, marshal_args(args || []))
+        settle_idle_style
         drain_pending_navigation
         result
       end
@@ -2504,6 +2505,7 @@ module Capybara
         # parity), same as evaluate_script; the result slot is realm-local so
         # the poll below must read from the same realm.
         dom_call('__evalAsyncScript', code.to_s, marshal_args(args || []))
+        settle_idle_style
         # Pump virtual time so any setTimeout-driven completion lands.
         # Capybara's polling can't help here — we're inside one session
         # call, not a retry loop.

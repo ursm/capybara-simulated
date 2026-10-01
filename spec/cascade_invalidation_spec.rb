@@ -545,8 +545,14 @@ RSpec.describe 'cascade invalidation' do
     s = simulated_session(shadow_page(css, '<p class="t" id="t">x</p>'))
     s.visit '/'
     s.evaluate_script("getComputedStyle(document.getElementById('host').shadowRoot.getElementById('t')).color")
-    s.evaluate_script("document.getElementById('host').shadowRoot.getElementById('t').classList.add('on')")
-    colour = s.evaluate_script("getComputedStyle(document.getElementById('host').shadowRoot.getElementById('t')).color")
+    # (…read in the task that starts it: the transition runs from then on, as in a browser)
+    colour = s.evaluate_script(<<~JS)
+      (() => {
+        const t = document.getElementById('host').shadowRoot.getElementById('t');
+        t.classList.add('on');
+        return getComputedStyle(t).color;
+      })()
+    JS
     # …RED, not merely "not blue": a gate that ignored the shadow sheet outright would report the
     # initial black and pass a `not_to eq(blue)`, which is the shape of the mistake this guards.
     expect(colour).to eq('rgb(255, 0, 0)'), 'the transition jumped straight to its end, or the sheet was ignored'

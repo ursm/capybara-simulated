@@ -764,6 +764,15 @@ RSpec.describe 'style engine invalidation' do
       x.classList.add('on');
     JS
     expect(s).to have_css('#framedone', wait: 2)
+    s.evaluate_script(<<~JS)
+      (() => {
+        const d = document.getElementById('d');
+        d.ontransitionend = () => document.body.insertAdjacentHTML('beforeend', '<p id=evaldone>done</p>');
+        d.classList.remove('on');
+        return true;
+      })()
+    JS
+    expect(s).to have_css('#evaldone', wait: 2)
   end
 
   # `:dir()` is the element's HTML DIRECTIONALITY, a state the engine matches like any other — a `dir=auto` scope's
