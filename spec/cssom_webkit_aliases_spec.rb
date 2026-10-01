@@ -233,4 +233,17 @@ RSpec.describe 'the -webkit- property surface' do
                        cs.webkitTransform]; })()
     JS
   end
+
+  # css-fonts-4's `font-width` and `font-stretch` are one property under two names, so a write under either is one
+  # declaration — stored, as both engines compute it, as `font-stretch` — and the computed style lists it once. The
+  # CSSOM took `font-width` for a property of its own: written, it left `font-stretch` empty.
+  it 'stores font-width as the font-stretch it is another name for' do
+    s = page('<div id="a"></div>')
+    expect(s.evaluate_script(<<~JS)).to eq(['50%', 'font-stretch: 50%;', '50%', false])
+      (() => { const a = document.getElementById('a');
+               a.style.fontWidth = '50%';
+               return [a.style.fontStretch, a.style.cssText, getComputedStyle(a).fontStretch,
+                       [...getComputedStyle(a)].includes('font-width')]; })()
+    JS
+  end
 end

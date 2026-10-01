@@ -92,14 +92,15 @@ import { Parser as Parse5Parser } from 'parse5';
 const parse5 = { Parser: Parse5Parser };
 
 // culori: CSS Color 4 parser + converters (npm, MIT). Backs `<input type=color>`
-// value sanitization. Imported via the TREE-SHAKEABLE `culori/fn` entry (the
-// barrel registers every colour mode + formatter); here we register only the
-// modes the HTML colour syntaxes need — rgb (which also carries the named-colour
-// and hex parsers), hsl, hwb, and p3 (`color(display-p3 …)`) — so esbuild drops
-// the lab/lch/oklab/… machinery. `toHex` is the HTML color-input serialization:
+// value sanitization and the canvas's colours. Imported via the TREE-SHAKEABLE
+// `culori/fn` entry (the barrel registers every colour mode + formatter); here we
+// register the modes CSS Color 4 defines — rgb (which also carries the named-colour
+// and hex parsers), hsl, hwb, lab / lch, oklab / oklch, and the `color()` spaces —
+// and none of culori's others. `toHex` is the HTML color-input serialization:
 // parse, convert to sRGB, channel-clamp to an opaque #rrggbb (NOT OKLCH gamut-
 // mapping — HTML clamps; verified against the WPT color tests).
-import { useMode, modeRgb, modeHsl, modeHwb, modeP3, parse as culoriParse, formatHex as culoriFormatHex } from 'culori/fn';
+import { useMode, modeRgb, modeHsl, modeHwb, modeLab, modeLch, modeOklab, modeOklch, modeLrgb, modeP3, modeA98, modeProphoto,
+         modeRec2020, modeXyz50, modeXyz65, parse as culoriParse, formatHex as culoriFormatHex } from 'culori/fn';
 
 // URLPattern (the URL Pattern spec) — the reference polyfill, imported via its
 // pure subpath (the package root's index.js side-effect-installs a global; the
@@ -109,7 +110,17 @@ import { URLPattern } from 'urlpattern-polyfill/urlpattern';
 const culoriRgb = useMode(modeRgb);   // registers 'rgb' (+ named + hex parsers); returns the rgb converter
 useMode(modeHsl);                     // registers 'hsl' / 'hsla'
 useMode(modeHwb);                     // registers 'hwb' (browsers flatten it to rgb in computed style)
+useMode(modeLab);                     // registers 'lab' (lab())
+useMode(modeLch);                     // registers 'lch' (lch())
+useMode(modeOklab);                   // registers 'oklab' (oklab())
+useMode(modeOklch);                   // registers 'oklch' (oklch())
+useMode(modeLrgb);                    // registers 'lrgb' (color(srgb-linear …))
 useMode(modeP3);                      // registers 'p3' (color(display-p3 …))
+useMode(modeA98);                     // registers 'a98' (color(a98-rgb …))
+useMode(modeProphoto);                // registers 'prophoto' (color(prophoto-rgb …))
+useMode(modeRec2020);                 // registers 'rec2020' (color(rec2020 …))
+useMode(modeXyz50);                   // registers 'xyz50' (color(xyz-d50 …))
+useMode(modeXyz65);                   // registers 'xyz65' (color(xyz-d65 …), color(xyz …))
 function cssColorToHex(str) {
   if (typeof str !== 'string') return null;
   let parsed;
@@ -126,8 +137,8 @@ function cssColorToHex(str) {
 //     `color(srgb-linear …)`, … — Chrome/Firefox keep these as-is. culori
 //     parses `color(srgb …)` to mode 'rgb', so the syntax must be excluded
 //     up front, before the mode check, or it would wrongly flatten.
-//   - non-sRGB colour spaces (lab / oklch / …), which culori doesn't register
-//     here and so fail to parse.
+//   - non-sRGB colour spaces (lab / oklch / …), which the mode check below turns
+//     away.
 // The caller passes those through unchanged.
 function cssColorSrgb(str) {
   if (typeof str !== 'string') return null;
@@ -142,6 +153,16 @@ function cssColorSrgb(str) {
   const byte = x => Math.max(0, Math.min(255, Math.round((x || 0) * 255)));
   return { r: byte(c.r), g: byte(c.g), b: byte(c.b), a: c.alpha == null ? 1 : Math.max(0, Math.min(1, c.alpha)) };
 }
-const color = { toHex: cssColorToHex, srgb: cssColorSrgb };
+// …and ANY colour, in whatever space it is written, as the sRGB bytes a canvas puts on a pixel: each channel clamped
+// into the gamut, as `toHex` does. Null for an unparseable value.
+function cssColorRaster(str) {
+  if (typeof str !== 'string') return null;
+  let c;
+  try { c = culoriRgb(culoriParse(str.trim())); } catch (_) { return null; }
+  if (!c) return null;
+  const byte = x => Math.max(0, Math.min(255, Math.round((x || 0) * 255)));
+  return { r: byte(c.r), g: byte(c.g), b: byte(c.b), a: c.alpha == null ? 1 : Math.max(0, Math.min(1, c.alpha)) };
+}
+const color = { toHex: cssColorToHex, srgb: cssColorSrgb, raster: cssColorRaster };
 
 export { cssSelect, cssWhat, xpathway, cssTree, urlEngine, mimeType, streams, parse5, color, URLPattern };

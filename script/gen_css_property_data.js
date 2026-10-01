@@ -15,6 +15,18 @@ const path = require('path');
 const mdnPath = require.resolve('mdn-data/css/properties.json', { paths: [require.resolve('css-tree')] });
 const props = JSON.parse(fs.readFileSync(mdnPath, 'utf8'));
 
+// Where mdn's grammar is older than the current draft, the draft's — the one the style engine parses, so a value
+// `el.style` keeps is one the engine computes. css-text-4's `text-spacing-trim` lost `trim-start allow-end` and gained
+// `trim-both` / `trim-all` / `auto`; css-text-decor-4's `text-decoration-skip` is `none | auto`.
+const CURRENT_SYNTAX = {
+  'text-spacing-trim':    'space-all | normal | space-first | trim-start | trim-both | trim-all | auto',
+  'text-decoration-skip': 'none | auto'
+};
+for (const [name, syntax] of Object.entries(CURRENT_SYNTAX)) props[name] = {...props[name], syntax};
+// …and the unprefixed names that are an ALIAS of another property (css-utils.js `PROPERTY_ALIASES`): supported, but
+// no longhand of their own, which `all` would reset and a computed style would list twice.
+const ALIASES = new Set(['font-width']);
+
 const longhands = [];
 const shorthands = {};
 const vendor = [];                                    // `-webkit-…` / `-moz-…` / `-ms-…` names
@@ -23,7 +35,7 @@ for (const name of Object.keys(props).sort()) {
   if (name.startsWith('-')) { vendor.push(name); continue; }   // vendor-prefixed
   const computed = props[name].computed;
   if (Array.isArray(computed)) shorthands[name] = computed.filter((c) => !c.startsWith('-'));
-  else longhands.push(name);
+  else if (!ALIASES.has(name)) longhands.push(name);
 }
 
 // Every property name the CSSOM treats as a "supported CSS property": the standard longhands
@@ -31,7 +43,7 @@ for (const name of Object.keys(props).sort()) {
 // `setProperty('X', v)` whose name isn't in this set (and isn't a `--custom` property) is NOT a
 // CSS declaration — the accessor becomes a plain expando, `setProperty` a no-op — matching how
 // browsers reject `style.COLOR` (folds to `-c-o-l-o-r`) or `style.unknown`.
-const supported = [...longhands, ...Object.keys(shorthands), ...vendor].sort();
+const supported = [...longhands, ...Object.keys(shorthands), ...vendor, ...ALIASES].sort();
 
 // A CONSERVATIVE value-type classification, for rejecting invalid declaration values (CSSOM
 // "set a CSS declaration" ignores a value that doesn't parse for the property). We classify a

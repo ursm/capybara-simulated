@@ -554,6 +554,30 @@ RSpec.describe 'style engine invalidation' do
     expect(read).to eq(values)
   end
 
+  # Two absolute colours interpolate in Oklab unless both are legacy sRGB colours (CSS Color 4 §12.1), and the result
+  # is in that space — the engine mixed every pair in sRGB, so `lab()` to `lab()` came out `color(srgb …)`. Chrome's
+  # figures, to its six digits; the third pair is the legacy one, and the last two are `currentcolor` with itself and
+  # with a colour.
+  it 'interpolates two colours in their own space' do
+    s = visit('<div id="d">d</div>')
+    read = s.evaluate_script(<<~JS)
+      [['lab(50 20 30)', 'lab(70 -20 10)'], ['red', 'color(display-p3 0 1 0)'], ['rgb(255, 0, 0)', 'rgb(0, 0, 255)'],
+       ['currentcolor', 'currentcolor'], ['currentcolor', 'red']].map(([from, to]) => {
+        const d = document.getElementById('d');
+        const a = d.animate([{backgroundColor: from}, {backgroundColor: to}], {duration: 1000});
+        a.pause();
+        a.currentTime = 500;
+        const got = getComputedStyle(d).backgroundColor;
+        a.cancel();
+        return got;
+      })
+    JS
+    oklab = ->(text) { text[/\Aoklab\((.*)\)\z/, 1]&.split&.map(&:to_f) }
+    expect(oklab.(read[0])).to match([be_within(1e-4).of(0.653316), be_within(1e-4).of(-0.00290368), be_within(1e-4).of(0.0485363)])
+    expect(oklab.(read[1])).to match([be_within(1e-4).of(0.738398), be_within(1e-4).of(-0.0396802), be_within(1e-4).of(0.166913)])
+    expect(read[2..]).to eq(['rgb(128, 0, 128)', 'rgb(0, 0, 0)', 'rgb(128, 0, 0)'])
+  end
+
   # `:dir()` is the element's HTML DIRECTIONALITY, a state the engine matches like any other — a `dir=auto` scope's
   # from the first strong character of its text — and HTML's UA sheet sets `direction` from it (`[dir]:dir(rtl)`). So
   # a text edit that flips the scope restyles what matches, and what inherits from it (Chrome: ltr, then rtl).

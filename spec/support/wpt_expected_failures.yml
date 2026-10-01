@@ -61,8 +61,6 @@ WebCryptoAPI/sign_verify/eddsa_small_order_points.https.any.js:
 - Ed25519 Verification checks with small-order key of order - Test 12
 - Ed25519 Verification checks with small-order key of order - Test 13
 - Ed25519 Verification checks with small-order key of order - Test 2
-css/css-animations/animate-with-background-color-oklch-001.html:
-- "== css/css-animations/animate-with-background-color-oklch-001-ref.html"
 css/css-animations/animate-with-background-color-oklch-002.html:
 - Animate from legacy rgb to color-mix oklch
 - Animate from legacy rgb to oklch
@@ -5920,7 +5918,6 @@ shadow-dom/untriaged/html-elements-in-shadow-trees/inert-html-elements/test-001.
 - A_08_01_01_T01
 web-animations/animation-model/animation-types/accumulation-per-property-001.html:
 - 'grid-template: "". . a b" ". . a b"" onto "none"'
-- 'hanging-punctuation: "first last" onto "none"'
 web-animations/animation-model/animation-types/accumulation-per-property-002.html:
 - 'list-style: "outside url("http://localhost/test-2") square" onto "inside url("http://localhost/test-1")
   circle"'
@@ -5929,7 +5926,6 @@ web-animations/animation-model/animation-types/accumulation-per-property-002.htm
 - 'text-wrap: "nowrap" onto "wrap"'
 web-animations/animation-model/animation-types/addition-per-property-001.html:
 - 'grid-template: "". . a b" ". . a b"" onto "none"'
-- 'hanging-punctuation: "first last" onto "none"'
 web-animations/animation-model/animation-types/addition-per-property-002.html:
 - 'list-style: "outside url("http://localhost/test-2") square" onto "inside url("http://localhost/test-1")
   circle"'
@@ -5943,12 +5939,6 @@ web-animations/animation-model/animation-types/interpolation-per-property-001.ht
   and "none" with keyframe easing
 - grid-template uses discrete animation when animating between "". . a b" ". . a b""
   and "none" with linear easing
-- hanging-punctuation uses discrete animation when animating between "none" and "first
-  last" with effect easing
-- hanging-punctuation uses discrete animation when animating between "none" and "first
-  last" with keyframe easing
-- hanging-punctuation uses discrete animation when animating between "none" and "first
-  last" with linear easing
 web-animations/animation-model/animation-types/interpolation-per-property-002.html:
 - list-style uses discrete animation when animating between "inside url("http://localhost/test-1")
   circle" and "outside url("http://localhost/test-2") square" with effect easing
@@ -6103,8 +6093,6 @@ web-animations/responsive/fontSize.html:
 - Font size initial responsive to style changes
 web-animations/responsive/shapeOutside.html:
 - Neutral path() keyframes invalidate when the underlying <shape-box> changes
-web-animations/responsive/text-size-adjust.html:
-- text-size-adjust responsive to inherited text-size-adjust changes
 web-animations/responsive/toggle-animated-iframe-visibility.html:
 - "== web-animations/responsive/toggle-animated-iframe-visibility-ref.html"
 web-animations/timing-model/animations/invalidating-animation-before-start-time-synced.html:
