@@ -6,8 +6,7 @@ require_relative 'support/session_teardown'
 # The element states no attribute records — checkedness, selectedness, focus, hover, an open popover, a modal dialog —
 # live in the native arena beside the tree (dom.rs `STATE_*`, written wherever the JS DOM changes one), and the native
 # matcher derives the rest from attributes and the tree (element_state.rs): `:disabled` through a `<fieldset>`,
-# `:read-write`, `:default`. So a state pseudo-class is answered natively, not handed back to css-select, and each
-# answer here is held against both css-select's and the HTML rule's.
+# `:read-write`, `:default`. Each answer here is held against the HTML rule's.
 RSpec.describe 'element state in the native arena' do
   STATE_PAGE = <<~HTML
     <!DOCTYPE html>
@@ -444,7 +443,7 @@ RSpec.describe 'element state in the native arena' do
   end
 
   # Constraint validation in the arena (validity.rs): each constraint, a form by its controls, and the user-/range
-  # pseudo-classes — answered natively, held against css-select and against the HTML rule.
+  # pseudo-classes — held against the HTML rule.
   describe 'constraint validation' do
     it 'answers :valid / :invalid by every constraint' do
       session.execute_script(<<~JS)

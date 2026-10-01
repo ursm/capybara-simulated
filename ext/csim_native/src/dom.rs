@@ -268,11 +268,12 @@ impl NodeData {
         }
         self.get_attr(local)
     }
-    // The (namespace, local name) of the attribute stored under `key`: its record's, or — in no namespace — the key.
+    // The (namespace, local name) of the attribute stored under `key`: the namespace record where it has one, else no
+    // namespace and the key itself — less the `\0`-numbered suffix a key two same-named attributes share is minted with.
     pub(crate) fn attribute_name<'a>(&'a self, key: &'a str) -> (&'a str, &'a str) {
         match self.attr_ns.iter().find(|(k, _, _)| k == key) {
             Some((_, ns, local)) => (ns, local),
-            None => ("", key),
+            None => ("", key.split('\0').next().unwrap_or(key)),
         }
     }
     // The value of the attribute (`ns`, `local`).
@@ -318,6 +319,12 @@ impl NodeData {
         let value = self.plain_attr(local)?;
         Some(self.get_attr_u16(local).map_or_else(|| value.encode_utf16().collect(), <[u16]>::to_vec))
     }
+}
+
+// Is `key` the store key of an attribute named `local` when it has no namespace record — `local` itself, or `local`
+// with the `\0`-numbered suffix a shared name is minted with? (`NodeData::attribute_name` without the record lookup.)
+pub(crate) fn store_key_names(key: &str, local: &str) -> bool {
+    key.starts_with(local) && (key.len() == local.len() || key.as_bytes()[local.len()] == 0)
 }
 
 // Does this UTF-16 unit sequence contain an unpaired surrogate (a high with no following low, or a lone
@@ -1047,7 +1054,7 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_, ()>, ctx: &v8::Global<v8:
     register(scope, ns, "queryIds", query_ids, context_id);
     register(scope, ns, "matchesId", matches_id, context_id);
     register(scope, ns, "closestId", closest_id, context_id);
-    register(scope, ns, "matchesIdNs", matches_id_ns, context_id);
+    register(scope, ns, "matchesRule", matches_rule, context_id);
     register(scope, ns, "selectorValid", selector_valid, context_id);
     register(scope, ns, "xpathPrefixes", xpath_prefixes, context_id);
     register(scope, ns, "xpathEvaluate", xpath_evaluate, context_id);
@@ -1835,10 +1842,11 @@ fn closest_id(
     }
 }
 
-// __dom.matchesIdNs(nid, selector, quirks, defaultNs, prefixes) -> bool: a style sheet rule's selector under its
-// `@namespace` declarations (`prefixes` a flat [prefix, url, …]; `defaultNs` null for none) — false for one that does
-// not parse under them (an undeclared prefix).
-fn matches_id_ns(
+// __dom.matchesRule(nid, selector, quirks, xml, defaultNs, prefixes) -> bool, or `null` for a selector that does not
+// parse (under the sheet's `@namespace` declarations: an undeclared prefix). A style sheet rule's match, in the mode of
+// the element's document — no `:scope` bound to the element, as Element.matches binds it. `prefixes` a flat
+// [prefix, url, …]; `defaultNs` null for none.
+fn matches_rule(
     scope: &mut v8::PinScope<'_, '_>,
     args: v8::FunctionCallbackArguments<'_>,
     mut rv: v8::ReturnValue<'_, v8::Value>,
@@ -1848,9 +1856,10 @@ fn matches_id_ns(
     };
     let selector = args.get(1).to_rust_string_lossy(scope);
     let quirks = args.get(2).is_true();
-    let default = (!args.get(3).is_null_or_undefined()).then(|| args.get(3).to_rust_string_lossy(scope));
+    let html_doc = !args.get(3).is_true();
+    let default = (!args.get(4).is_null_or_undefined()).then(|| args.get(4).to_rust_string_lossy(scope));
     let mut prefixes = Vec::new();
-    if let Ok(flat) = v8::Local::<v8::Array>::try_from(args.get(4)) {
+    if let Ok(flat) = v8::Local::<v8::Array>::try_from(args.get(5)) {
         let mut i = 0;
         while i + 1 < flat.length() {
             let (Some(p), Some(u)) = (flat.get_index(scope, i), flat.get_index(scope, i + 1)) else { break };
@@ -1858,10 +1867,13 @@ fn matches_id_ns(
             i += 2;
         }
     }
-    let namespaces = crate::selector::Namespaces { default, prefixes };
+    // (…a sheet with no `@namespace` parses its selectors as a query does, and shares their parse)
+    let namespaces = (default.is_some() || !prefixes.is_empty()).then_some(crate::selector::Namespaces { default, prefixes });
     let cid = realm_id(scope, &args);
-    let hit = crate::selector::matches_text(realm(scope, cid), id, &selector, Some(&namespaces), quirks, true, false, false);
-    rv.set_bool(matches!(hit, Some(Some(_))));
+    match crate::selector::matches_text(realm(scope, cid), id, &selector, namespaces.as_ref(), quirks, html_doc, false, false) {
+        Some(hit) => rv.set_bool(hit.is_some()),
+        None => rv.set_null(),
+    }
 }
 
 // __dom.selectorValid(text) -> bool: a selector this engine parses — `CSS.supports('selector(…)')`.
@@ -2141,9 +2153,9 @@ fn sheet_sources(scope: &mut v8::PinScope<'_, '_>, val: v8::Local<'_, v8::Value>
     out
 }
 
-// __dom.styleSheets(docNid, baseUrl, quirks, width, height, [css, baseUrl, media, constructed, …]) -> the
+// __dom.styleSheets(docNid, baseUrl, quirks, xml, width, height, [css, baseUrl, media, constructed, …]) -> the
 // URLs the sheets' `@import`s wait for. The realm document's sheets, in document order, for its style engine — made
-// again only when the document's base URL, mode or viewport moved.
+// again only when the document's base URL, mode, kind (`xml`: not an HTML document) or viewport moved.
 fn style_sheets(
     scope: &mut v8::PinScope<'_, '_>,
     args: v8::FunctionCallbackArguments<'_>,
@@ -2160,18 +2172,19 @@ fn style_sheets_unguarded(
     let Some(doc) = nid_arg(scope, &args, 0) else { return };
     let base = args.get(1).to_rust_string_lossy(scope);
     let quirks = args.get(2).is_true();
+    let html_document = !args.get(3).is_true();
     let viewport = (
-        args.get(3).number_value(scope).unwrap_or(0.0) as f32,
         args.get(4).number_value(scope).unwrap_or(0.0) as f32,
+        args.get(5).number_value(scope).unwrap_or(0.0) as f32,
     );
-    let sheets = sheet_sources(scope, args.get(5));
+    let sheets = sheet_sources(scope, args.get(6));
     let cid = realm_id(scope, &args);
     let d = dom(scope);
     if d.dropped.contains(&cid) {
         return;
     }
     let arena = d.realms.entry(cid).or_default();
-    let mut engine = crate::style::StyleEngine::for_document(d.styles.remove(&cid), arena, &base, quirks, viewport);
+    let mut engine = crate::style::StyleEngine::for_document(d.styles.remove(&cid), arena, &base, quirks, html_document, viewport);
     let pending = engine.set_sheets(doc, &sheets);
     d.styles.insert(cid, engine);
     let urls = url_array(scope, &pending);
@@ -3462,13 +3475,11 @@ fn box_of(
     rv.set(arr.into());
 }
 
-// __dom.nowNanos() -> a process-monotonic wall time in nanoseconds (as a Number).
-// The measurement path times native matching against css-select from INSIDE JS, but
-// csim's own clock (Date.now / performance.now) is the VIRTUAL event-loop clock,
-// frozen for the whole of a synchronous JS turn — so it can't separate the two.
-// This is a REAL monotonic clock, exposed only for the shadow-measurement harness
-// (not a web API). Anchored to the first call so the value stays a small integer that
-// an f64 represents exactly (nanos fit exactly below 2^53 ≈ 104 days of uptime).
+// __dom.nowNanos() -> a process-monotonic wall time in nanoseconds (as a Number). csim's own clock (Date.now /
+// performance.now) is the VIRTUAL event-loop clock, which no amount of work inside one synchronous JS turn moves as a
+// wall clock would — so a timing taken from INSIDE JS (a scaling spec, a benchmark) reads this one. Not a web API.
+// Anchored to the first call so the value stays a small integer that an f64 represents exactly (nanos fit exactly
+// below 2^53 ≈ 104 days of uptime).
 fn now_nanos(
     scope: &mut v8::PinScope<'_, '_>,
     _args: v8::FunctionCallbackArguments<'_>,

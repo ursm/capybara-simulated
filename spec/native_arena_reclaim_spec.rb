@@ -103,7 +103,7 @@ RSpec.describe 'native arena reclamation (generational)',
     JS
     expect(color).to eq('rgb(1, 2, 3)')
 
-    # And the surviving structure still matches natively-answered selectors through css-select's oracle.
+    # And the surviving structure still matches selectors.
     expect(session.all('#root .tag', visible: :all).size).to eq(1)
   end
 end

@@ -334,15 +334,6 @@ fn eval_utf16(operator: AttrSelectorOperator, case: CaseSensitivity, value: &[u1
     }
 }
 
-// An attribute's (namespace, local name) by its store key: the arena's namespace record where it has one, else no
-// namespace and the key itself — less the `\0`-numbered suffix a key two same-named attributes share is minted with.
-fn attribute_name<'a>(node: &'a crate::dom::NodeData, key: &'a str) -> (&'a str, &'a str) {
-    match node.attr_ns.iter().find(|(k, _, _)| k == key) {
-        Some((_, ns, local)) => (ns.as_str(), local.as_str()),
-        None => ("", key.split('\0').next().unwrap_or(key)),
-    }
-}
-
 // The host of the shadow tree `id` is in, if it is in one.
 fn shadow_host_of(arena: &RealmArena, id: NodeId) -> Option<NodeId> {
     let mut cur = id;
@@ -436,24 +427,37 @@ impl<'a> Element for NodeRef<'a> {
         // Each attribute by its namespace and local name (`[*|href]`, `[svg|href]`, `[title]` = in no namespace) — as
         // DOM has them, not by the store's key: an XLink `xlink:href` is an `href` in the XLink namespace.
         let node = self.node();
+        let value_matches = |key: &String, value: &String| match (operation, node.get_attr_u16(key)) {
+            (AttrSelectorOperation::WithValue { operator, case_sensitivity, value: wanted }, Some(units)) => {
+                eval_utf16(*operator, *case_sensitivity, units, &wanted.0)
+            }
+            _ => operation.eval_str(value),
+        };
+        let local = local_name.0.as_str();
+        // (…on an element with no namespaced attribute — nearly every one — each is in no namespace, named by its key:
+        // matched by the key alone, with no record looked up per attribute, which cost an attribute selector 2.5x)
+        if node.attr_ns.is_empty() {
+            if matches!(ns, NamespaceConstraint::Specific(url) if !url.0.is_empty()) {
+                return false;
+            }
+            return node.attributes.iter().any(|(key, value)| crate::dom::store_key_names(key, local) && value_matches(key, value));
+        }
         node.attributes.iter().any(|(key, value)| {
-            let (attr_ns, attr_local) = attribute_name(node, key);
-            attr_local == local_name.0
+            let (attr_ns, attr_local) = node.attribute_name(key);
+            attr_local == local
                 && match ns {
                     NamespaceConstraint::Any => true,
                     NamespaceConstraint::Specific(url) => url.0 == attr_ns,
                 }
-                && match (operation, node.get_attr_u16(key)) {
-                    (AttrSelectorOperation::WithValue { operator, case_sensitivity, value: wanted }, Some(units)) => {
-                        eval_utf16(*operator, *case_sensitivity, units, &wanted.0)
-                    }
-                    _ => operation.eval_str(value),
-                }
+                && value_matches(key, value)
         })
     }
     fn has_attr_in_no_namespace(&self, local_name: &CssStr) -> bool {
         let node = self.node();
-        node.attributes.iter().any(|(key, _)| attribute_name(node, key) == ("", local_name.0.as_str()))
+        if node.attr_ns.is_empty() {
+            return node.attributes.iter().any(|(key, _)| crate::dom::store_key_names(key, &local_name.0));
+        }
+        node.attributes.iter().any(|(key, _)| node.attribute_name(key) == ("", local_name.0.as_str()))
     }
 
     fn match_non_ts_pseudo_class(
@@ -503,7 +507,8 @@ impl<'a> Element for NodeRef<'a> {
             "popover-open" => arena.is_popover_open(id),
             "modal" => arena.is_modal(id),
             "filtered" => arena.is_filtered(id),
-            // No history, no pressed pointer and no autofill: nothing is visited, active or autofilled.
+            // No history, no pressed pointer, no autofill and no fullscreen (`document.fullscreenElement` is always
+            // null): nothing is visited, active, autofilled or fullscreen.
             _ => false,
         }
     }
@@ -579,8 +584,9 @@ impl<'a> Element for NodeRef<'a> {
 }
 
 // The non-tree-structural pseudo-classes this engine knows — any other is invalid. Their state is the arena's
-// (element_state.rs); `:visited`, `:active` and `:autofill` parse and never match (no history, no pressed pointer, no
-// autofill). The crate's BUILT-INS bypass this list: the tree-structural ones, `:scope`, and `:host`.
+// (element_state.rs); `:visited`, `:active`, `:autofill` and `:fullscreen` parse and never match (no history, no pressed
+// pointer, no autofill, no fullscreen element). The crate's BUILT-INS bypass this list: the tree-structural ones,
+// `:scope`, and `:host`.
 fn is_native_pseudo_class(name: &str) -> bool {
     matches!(
         name,
@@ -617,6 +623,7 @@ fn is_native_pseudo_class(name: &str) -> bool {
             | "popover-open"
             | "modal"
             | "filtered"
+            | "fullscreen"
     )
 }
 

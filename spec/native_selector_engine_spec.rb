@@ -1,16 +1,7 @@
 # frozen_string_literal: true
 
-# The native selector engine must NEVER silently answer a selector whose truth depends on
-# what the arena does not model (an attribute's namespace — `[*|href]`; a shadow host / slot relation — `:host`,
-# `::slotted()`) — a partial match would return a wrong SUBSET. (The states the arena DOES carry — `:checked`, `:focus`,
-# `:hover`, `:disabled`, `:valid`, `:target`, `:lang()`, `:dir()`, … — are answered; element_state_native_spec — and a
-# pseudo-element is answered as matching no element.) Instead it flags such a selector at parse time and reports it as a
-# fallback so the caller runs the JS css-select engine. This spec pins that contract:
-#
-#   * queryIds returns an ARRAY (and the right id set) for selectors it can answer natively;
-#   * `undefined` for a live-state selector (defer to css-select) — even when real elements
-#     match, so we prove native declines rather than returning [];
-#   * `null` for an invalid selector (a SyntaxError).
+# The native selector engine (selector.rs) answers every selector there is — there is no other engine to hand one to:
+# queryIds returns the ids of the elements a selector matches, and `null` for one it does not parse (a SyntaxError).
 
 require 'capybara/simulated'
 require 'rack'
@@ -72,7 +63,8 @@ RSpec.describe 'native selector engine' do
       'a[*|href]'                  => 1,
       ':is(input, [*|href])'       => 5,
       ':host'                      => 0,
-      '::slotted(span)'            => 0
+      '::slotted(span)'            => 0,
+      ':fullscreen'                => 0
     }
     expect(expected.keys.to_h {|sel| [sel, count(sel)] }).to eq(expected)
   end

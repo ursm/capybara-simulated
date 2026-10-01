@@ -11,10 +11,9 @@ require_relative 'support/session_teardown'
 # rule, `@media`, CSS nesting, `visibility` inheritance, and combinators.
 #
 # Expected values are spec-correct and cross-checked against Chromium
-# (`el.checkVisibility({visibilityProperty:true})`). This is the safety net for
-# the dual-CSS-engine consolidation (swapping the hand-rolled selector matcher /
-# specificity for css-select + css-tree): the matcher/specificity source may
-# change, but these verdicts must not.
+# (`el.checkVisibility({visibilityProperty:true})`) — the safety net for a change
+# of matcher or specificity source (the hand-rolled one, then css-select, now
+# selector.rs): the source may change, but these verdicts must not.
 RSpec.describe 'CSS cascade visibility conformance' do
   # Each case: a <style> block + body; `expect` maps element id => visible?
   CASES = [
@@ -147,7 +146,7 @@ RSpec.describe 'CSS cascade visibility conformance' do
       body: '<div data-hide id="t">x</div>',
       expect: { 't' => false } },
 
-    # css-select matching edge cases (stress the matcher swap)
+    # Matcher edge cases
     { name: 'escaped class selector (Tailwind-style)',
       css:  '.lg\\:flex { display: none }',
       body: '<div class="lg:flex" id="t">x</div>',
@@ -182,8 +181,7 @@ RSpec.describe 'CSS cascade visibility conformance' do
       body: '<ul><li id="t1">1</li><li id="t2">2</li><li id="t3">3</li></ul>',
       expect: { 't1' => true, 't2' => false, 't3' => true } },
 
-    # :target (CSS-only reveal via the URL fragment). css-select lacks :target
-    # natively; ported into userPseudos.
+    # :target (CSS-only reveal via the URL fragment).
     { name: ':target reveal',
       css:  '.panel { display: none } .panel:target { display: block }',
       body: '<div class="panel" id="p1">a</div><div class="panel" id="p2">b</div>',

@@ -181,6 +181,8 @@ pub(crate) struct StyleEngine {
     stylist: Stylist,
     url: UrlExtraData,
     quirks: QuirksMode,
+    // An HTML document (else an XML one, where no type selector or attribute name folds ASCII case).
+    html_document: bool,
     viewport: (f32, f32),
     doc: Option<NodeId>,
     // The page's sheets as last set, each under what it was made from — so a set that keeps one keeps its parse.
@@ -402,7 +404,7 @@ fn device(faces: crate::walk::SharedFaces, quirks: QuirksMode, (width, height): 
 }
 
 impl StyleEngine {
-    fn new(arena: &RealmArena, quirks: QuirksMode, viewport: (f32, f32), url: UrlExtraData) -> StyleEngine {
+    fn new(arena: &RealmArena, quirks: QuirksMode, html_document: bool, viewport: (f32, f32), url: UrlExtraData) -> StyleEngine {
         enable_properties();
         let mut engine = StyleEngine {
             faces: arena.faces.clone(),
@@ -410,6 +412,7 @@ impl StyleEngine {
             stylist: Stylist::new(device(arena.faces.clone(), quirks, viewport), quirks),
             url,
             quirks,
+            html_document,
             viewport,
             doc: None,
             author: Vec::new(),
@@ -438,19 +441,25 @@ impl StyleEngine {
         engine
     }
 
-    // The engine of `arena`'s document at `base`, in `quirks` mode, with a `viewport` of CSS px: `current`, told what
-    // changed, or a new one. It is never REPLACED — the elements' styles hold its rule tree.
+    // The engine of `arena`'s document at `base`, in `quirks` mode, an HTML document or not, with a `viewport` of CSS px:
+    // `current`, told what changed, or a new one. It is never REPLACED — the elements' styles hold its rule tree.
     pub(crate) fn for_document(
         current: Option<StyleEngine>,
         arena: &RealmArena,
         base: &str,
         quirks: bool,
+        html_document: bool,
         viewport: (f32, f32),
     ) -> StyleEngine {
         let quirks = if quirks { QuirksMode::Quirks } else { QuirksMode::NoQuirks };
         let url = UrlExtraData::from(url::Url::parse(base).unwrap_or_else(|_| url::Url::parse("about:blank").unwrap()));
-        let Some(mut engine) = current else { return StyleEngine::new(arena, quirks, viewport, url) };
+        let Some(mut engine) = current else { return StyleEngine::new(arena, quirks, html_document, viewport, url) };
         engine.url = url;
+        if engine.html_document != html_document {
+            engine.html_document = html_document;
+            engine.styled = None;
+            engine.restyle_all = true;
+        }
         if engine.quirks != quirks || engine.viewport != viewport {
             engine.quirks = quirks;
             engine.viewport = viewport;
@@ -2606,7 +2615,7 @@ impl<'a> TDocument for StyleNode<'a> {
         *self
     }
     fn is_html_document(&self) -> bool {
-        true
+        self.engine().html_document
     }
     fn quirks_mode(&self) -> QuirksMode {
         self.engine().quirks
@@ -2760,7 +2769,7 @@ impl<'a> selectors::Element for StyleNode<'a> {
         self.arena().first_child(self.id).map(|c| self.at(c))
     }
     fn is_html_element_in_html_document(&self) -> bool {
-        self.is_html()
+        self.is_html() && self.engine().html_document
     }
     fn has_local_name(&self, name: &web_atoms::LocalName) -> bool {
         self.node().local_name == *name

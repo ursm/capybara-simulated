@@ -4,8 +4,8 @@ require 'capybara/simulated'
 require_relative 'support/session_teardown'
 
 # In a quirks-mode document a class or id selector matches ASCII case-insensitively (Selectors 4 §6.6 / §6.7, HTML
-# "quirks mode"); an attribute selector does not. Every matcher ignored the mode — the cascade (both halves), the
-# native matcher and css-select — so a no-doctype page's `.Foo` never styled `class="foo"`. The mode is the
+# "quirks mode"); an attribute selector does not. Every matcher once ignored the mode — the cascade (both halves) and
+# the query engine — so a no-doctype page's `.Foo` never styled `class="foo"`. The mode is the
 # element's DOCUMENT's: a DOMParser document without a doctype is quirks under a no-quirks page. Chrome-measured.
 RSpec.describe 'quirks mode selectors' do
   def session(html)

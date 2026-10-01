@@ -5,7 +5,7 @@ require_relative 'support/session_teardown'
 
 # An SVG `<a>` is a hyperlink with an `href` in no namespace or, failing that, an XLink one — parsed as `xlink:href`, or
 # set by `setAttributeNS(XLINK, 'href', …)` with no prefix, which is how libraries write it. Such an `<a>` matches
-# `:any-link` / `:link` (in the native matcher, which reads the attribute's namespace, and in css-select), is
+# `:any-link` / `:link` (the native matcher reads the attribute's namespace), is
 # focusable, and navigates when clicked. A `<link href>` is no hyperlink to either (HTML "selectors"). Chrome-measured.
 RSpec.describe 'SVG XLink links' do
   XLINK_LINK_PAGE = <<~HTML
@@ -41,7 +41,7 @@ RSpec.describe 'SVG XLink links' do
     expect(got).to eq([true, true, true, 2, 0, false, '', '1'])
   end
 
-  # An `<a>` in NO namespace is no hyperlink — not to the native matcher (the cascade), not to css-select, and it gets
+  # An `<a>` in NO namespace is no hyperlink — not to a selector, not to the cascade, and it gets
   # no UA link colour — while `:-webkit-any-link` is Chrome's other name for `:any-link`. Chrome-measured.
   it 'makes no hyperlink of an <a> in no namespace, and knows :-webkit-any-link' do
     got = session.evaluate_script(<<~JS)
