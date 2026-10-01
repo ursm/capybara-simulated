@@ -903,11 +903,10 @@ module Capybara
         # the arena itself (no dependency on the SHADOW find-path machinery). CSIM_NO_NATIVE_CASCADE is the
         # rollback kill switch (revert to css matching everywhere without a recompile).
         c.eval_void('globalThis.__csimNativeCascadeAuthoritative = true;') unless ENV['CSIM_NO_NATIVE_CASCADE']
-        # The style engine (stylo): it styles the page, answers every style read, runs the CSS animations, and the Rust
-        # walk lays the page out from it — the JS cascade and the JS walk are what it falls back to. ON BY DEFAULT since
-        # every gate and all five app suites passed under it, and none of their pages built the JS rule set;
-        # CSIM_STYLO=0 is the rollback switch.
-        c.eval_void('__csimEnableStylo();') unless ENV['CSIM_STYLO'] == '0'
+        # The style engine (stylo): it styles the page, answers every style read and runs the CSS animations, and the
+        # Rust walk lays the page out from it. The JS cascade's declared values remain only for the JS layout (the oracle),
+        # which runs where the walk declines.
+        c.eval_void('__csimEnableStylo();')
         # Native LAYOUT (the flip): the walk and the native pass lay the page out, and the JS layout runs only where
         # they decline (layout.js `nativeLayoutPass`). ON BY DEFAULT since every gate, WPT and all five app suites
         # passed under it; CSIM_NATIVE_LAYOUT=0 is the rollback switch. Main realm only.
@@ -1634,7 +1633,7 @@ module Capybara
         # main realm. Same kill switch as the main context. Before the partition this was main-realm
         # only (one shared isolate arena); it is safe per realm now.
         c.eval_void('globalThis.__csimNativeCascadeAuthoritative = true;') unless ENV['CSIM_NO_NATIVE_CASCADE']
-        c.eval_void('__csimEnableStylo();') unless ENV['CSIM_STYLO'] == '0'
+        c.eval_void('__csimEnableStylo();')
       end
 
       # Class-level attach so Worker isolates (Ruby-thread-owned

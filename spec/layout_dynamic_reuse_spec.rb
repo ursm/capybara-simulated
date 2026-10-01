@@ -1,7 +1,6 @@
 require 'capybara/simulated'
 require 'rack'
 require_relative 'support/session_teardown'
-require_relative 'support/js_cascade_machinery'
 require_relative 'support/shadow_parity'
 
 # Layout reuses a subtree across a bare style-state bump (focus, checkedness) when no dynamic
@@ -212,49 +211,6 @@ RSpec.describe 'layout reuse across dynamic style state' do
           return [value, diff];
         })()
       JS
-    end
-
-    it 'measures a stretched flex item again when its line shrinks', js_cascade: true do
-      # `align-items: stretch` lays an item out twice: once with an auto height to measure it,
-      # once at the line's cross size. Once the tall sibling holding the line open is gone, the
-      # measure call has to be answered from the item's own content — handing back the stretched
-      # height kept the line as tall as it was, and a flexbox that should shrink never shrank
-      # (css-flexbox/stretched-child-shrink-on-relayout, css-flexbox/shrinking-column-flexbox).
-      css  = '.box { display: flex; align-items: stretch } .big { height: 200px }'
-      body = '<div class="box" id="b"><div id="i">item</div><div class="big" id="big"></div></div>'
-      read = "document.getElementById('i').getBoundingClientRect().height"
-      # …and what it has to come to is what a layout that really ran comes to, which is the whole
-      # contract — asked of a second page that never had the tall sibling, so the assertion says
-      # "equals a fresh layout" rather than pinning whatever this font measures a line at.
-      fresh = session_for(css, '<div class="box"><div id="i">item</div></div>').evaluate_script(read)
-      s = session_for(css, body)
-      value, diff = stats_around(s, <<~JS)
-        const before = #{read};
-        document.getElementById('big').remove();
-        return [before, #{read}, document.getElementById('b').getBoundingClientRect().height];
-      JS
-      expect(value).to eq([200, fresh, fresh])
-      expect(diff['remeasured']).to be > 0
-    end
-
-    it 'lays out a subtree again when it holds an out-of-flow box anchored above it', js_cascade: true do
-      # The anchor is placed against `.box`, not against the auto-height wrapper it sits in, so
-      # the wrapper's subtree cannot simply be moved — `placeAbsolute` runs only inside an
-      # ancestor that is really laid out, and a shift would take the anchor along with it.
-      css  = '.box { position: relative } .big { height: 200px }'
-      body = '<div class="box" id="b"><div id="w"><div id="a" style="position: absolute; bottom: 0; height: 10px">x</div></div><div class="big" id="big"></div></div>'
-      s = session_for(css, body)
-      value, diff = stats_around(s, <<~JS)
-        const a = document.getElementById('a'), b = document.getElementById('b');
-        const gap = () => a.getBoundingClientRect().bottom - b.getBoundingClientRect().bottom;
-        const before = [gap(), b.getBoundingClientRect().height];
-        document.getElementById('big').remove();
-        return before.concat([gap(), b.getBoundingClientRect().height]);
-      JS
-      # `bottom: 0` means the anchor's bottom edge IS its containing block's, before and after —
-      # and the containing block really did shrink, so neither reading is vacuous.
-      expect(value).to eq([0, 200, 0, 0])
-      expect(diff['escapingAbs']).to be > 0
     end
 
     it 'carries a float the context above records through a reuse' do
@@ -749,28 +705,6 @@ RSpec.describe 'layout reuse across dynamic style state' do
       expect(got).to eq([20, 20, 200, 200])
     end
 
-    it 'still reuses the subtree the change does not reach', js_cascade: true do
-      # The control: a sibling with no imposed height and no escaping out-of-flow box hands its
-      # boxes back whole when a node is removed beside it. ONE hit is the whole assertion —
-      # `reuseSubtree` does not recurse, so a `#keep` that was really laid out again would grant
-      # its two paragraphs a hit each instead.
-      css  = '.big { height: 200px }'
-      body = '<div id="keep"><p><span>a</span></p><p><span>b</span></p></div><div class="big" id="big"></div>'
-      s = session_for(css, body)
-      value, diff = stats_around(s, <<~JS)
-        const k = document.getElementById('keep');
-        const rect = () => JSON.stringify(k.getBoundingClientRect());
-        const before = [rect(), document.body.getBoundingClientRect().height];
-        document.getElementById('big').remove();
-        return before.concat([rect(), document.body.getBoundingClientRect().height]);
-      JS
-      expect(value[2]).to eq(value[0])                   # …and its boxes did not move
-      # …while the removal really did land: the 200px box goes, and the last paragraph's bottom
-      # margin then COLLAPSES OUT of the body it was holding apart from it (Chrome: 268 -> 52).
-      expect(value[3]).to eq(value[1] - 216)
-      expect(diff['hit']).to eq(1)
-      expect(diff.values_at('escapingAbs', 'remeasured')).to eq([0, 0])
-    end
   end
 
   # The native walk's GATES — whether a flex item's subtree is one native can measure, which percentage in it the walk
@@ -976,29 +910,6 @@ RSpec.describe 'layout reuse across dynamic style state' do
         })()
       JS
       expect(got.min).to be >= 90
-    end
-
-    # …and a kept measure is keyed on where its subtree stands in the pass only as far as the subtree itself: a box
-    # inserted before a kept list moves every item's record, and keyed on that, cost every item its measure.
-    it 'puts back the measures of a list something was inserted before', js_cascade: true do
-      items = (1..100).map {|i| %(<div><p><span id="s#{i}">item #{i}</span></p></div>) }.join
-      s = native_session_for(%(<div id="top">top</div><div style="display:flex;flex-wrap:wrap">#{items}</div>), verify: false)
-      got = s.evaluate_script(<<~JS)
-        (() => {
-          const insert = (id) => {
-            document.getElementById('top').before(document.createElement('div'));
-            document.getElementById(id).firstChild.data += '!';
-            document.body.offsetHeight;
-          };
-          document.body.offsetHeight;
-          for (const id of ['s7', 's8']) insert(id);
-          const [put0] = __dom.layoutMeasureCounts(), passes = __csimNativeLayoutStats().native;
-          insert('s9');
-          return [__dom.layoutMeasureCounts()[0] - put0, __csimNativeLayoutStats().native - passes];
-        })()
-      JS
-      expect(got[1]).to eq(1)
-      expect(got[0]).to be >= 90
     end
 
     # …and a kept block's subtree is not laid out again either, where it is measured as it was last time: native puts
@@ -1609,25 +1520,5 @@ RSpec.describe 'layout reuse across dynamic style state' do
                      "document.getElementById('a').removeAttribute('dir')")).to eq([0, 200])
     end
 
-    # …and only when it FLIPS: marking every edit's auto ancestor anyway cost a `<body dir=auto>` page every memo in
-    # the document per text edit (6x on 3,000 elements). A COUNT, not a wall — `__csimSubtreeMarks`. The marks are the
-    # JS walk's (the probe flips only a scope this side laid out from its answer, `_autoDirLaid`): under the style engine
-    # the Rust walk takes the direction off the engine, and nothing on this side asks it.
-    it 'leaves the subtree alone when an edit does not flip the direction', js_cascade: true do
-      s = session_for('', '<div dir="auto"><span id="a">hello</span><p>x</p></div>')
-      marks = lambda do |change|
-        s.evaluate_script(<<~JS)
-          (() => {
-            document.body.offsetHeight;
-            const m = __csimSubtreeMarks();
-            #{change};
-            document.body.offsetHeight;
-            return __csimSubtreeMarks() - m;
-          })()
-        JS
-      end
-      expect(marks.call("document.getElementById('a').firstChild.data = 'world'")).to eq(0)
-      expect(marks.call("document.getElementById('a').firstChild.data = 'שלום'")).to be > 0
-    end
   end
 end

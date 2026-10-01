@@ -107,21 +107,15 @@ RSpec.describe 'CSS shadow parts' do
 
   # A `::part()` takes the pseudo-classes after it that are no structural ones, `:dir()` among them (Gecko parses it
   # there; Chrome and Firefox match `x-a::part(p):dir(rtl)` on an rtl part) — in both engines.
-  %w[0 1].each do |stylo|
-    it "matches :dir() after ::part()#{stylo == '1' ? ' (stylo)' : ''}" do
-      saved = ENV['CSIM_STYLO']
-      ENV['CSIM_STYLO'] = stylo
-      s = page('x-a::part(p):dir(rtl) { color: rgb(0, 128, 0) }', '<x-a id="x" dir="rtl"></x-a>')
-      got = s.evaluate_script(<<~JS)
-        (() => {
-          const sr = document.getElementById('x').attachShadow({mode: 'open'});
-          sr.innerHTML = '<span id="i" part="p">x</span>';
-          return getComputedStyle(sr.getElementById('i')).color;
-        })()
-      JS
-      expect(got).to eq('rgb(0, 128, 0)')
-    ensure
-      ENV['CSIM_STYLO'] = saved
-    end
+  it 'matches :dir() after ::part()' do
+    s = page('x-a::part(p):dir(rtl) { color: rgb(0, 128, 0) }', '<x-a id="x" dir="rtl"></x-a>')
+    got = s.evaluate_script(<<~JS)
+      (() => {
+        const sr = document.getElementById('x').attachShadow({mode: 'open'});
+        sr.innerHTML = '<span id="i" part="p">x</span>';
+        return getComputedStyle(sr.getElementById('i')).color;
+      })()
+    JS
+    expect(got).to eq('rgb(0, 128, 0)')
   end
 end

@@ -26,54 +26,44 @@ RSpec.describe 'css-scoping selectors' do
   # A `:host` or `::slotted()` rule is written in the tree one boundary IN from the element it styles, and the cascade
   # sorts on that CONTEXT before specificity or order (css-cascade-5 §6.1): the document's NORMAL declaration beats it,
   # its `!important` one beats the document's. Chrome and Firefox: 20px, 120px, red — where the shadow rule won all three.
-  %w[0 1].each do |stylo|
-    it "sorts a :host and a ::slotted() rule on context against the document's#{stylo == '1' ? ' (stylo)' : ''}" do
-      saved = ENV['CSIM_STYLO']
-      ENV['CSIM_STYLO'] = stylo
-      html = '<!DOCTYPE html><style>#a { display: block; height: 20px } #b { display: block; height: 20px !important } ' \
-             '#c { color: rgb(255, 0, 0) }</style><div id="a"></div><div id="b"></div><div id="h"><span id="c">c</span></div>'
-      s = simulated_session(->(_env) { [200, {'content-type' => 'text/html'}, [html]] })
-      s.visit '/'
-      got = s.evaluate_script(<<~JS)
-        (() => {
-          document.getElementById('a').attachShadow({mode: 'open'}).innerHTML = '<style>:host { height: 120px }</style>';
-          document.getElementById('b').attachShadow({mode: 'open'}).innerHTML = '<style>:host { height: 120px !important }</style>';
-          document.getElementById('h').attachShadow({mode: 'open'}).innerHTML = '<style>::slotted(#c) { color: rgb(0, 128, 0) }</style><slot></slot>';
-          const cs = (id) => getComputedStyle(document.getElementById(id));
-          return [cs('a').height, cs('b').height, cs('c').color, document.getElementById('a').getBoundingClientRect().height];
-        })()
-      JS
-      expect(got).to eq(['20px', '120px', 'rgb(255, 0, 0)', 20])
-    ensure
-      ENV['CSIM_STYLO'] = saved
-    end
+  it "sorts a :host and a ::slotted() rule on context against the document's" do
+    html = '<!DOCTYPE html><style>#a { display: block; height: 20px } #b { display: block; height: 20px !important } ' \
+           '#c { color: rgb(255, 0, 0) }</style><div id="a"></div><div id="b"></div><div id="h"><span id="c">c</span></div>'
+    s = simulated_session(->(_env) { [200, {'content-type' => 'text/html'}, [html]] })
+    s.visit '/'
+    got = s.evaluate_script(<<~JS)
+      (() => {
+        document.getElementById('a').attachShadow({mode: 'open'}).innerHTML = '<style>:host { height: 120px }</style>';
+        document.getElementById('b').attachShadow({mode: 'open'}).innerHTML = '<style>:host { height: 120px !important }</style>';
+        document.getElementById('h').attachShadow({mode: 'open'}).innerHTML = '<style>::slotted(#c) { color: rgb(0, 128, 0) }</style><slot></slot>';
+        const cs = (id) => getComputedStyle(document.getElementById(id));
+        return [cs('a').height, cs('b').height, cs('c').color, document.getElementById('a').getBoundingClientRect().height];
+      })()
+    JS
+    expect(got).to eq(['20px', '120px', 'rgb(255, 0, 0)', 20])
+  end
 
-    # …CONTEXT before the style attribute, between a property's logical and physical spellings too: a `:host` rule's
-    # `!important` beats the host's inline `!important`, whichever of the two writes `margin-left` and which
-    # `margin-inline-start`, and a `::part()` rule's normal one beats the part's inline style. Chrome and Firefox: 50px,
-    # 50px, 40px.
-    it "sorts a :host and a ::part() rule on context against inline style across spellings#{stylo == '1' ? ' (stylo)' : ''}" do
-      saved = ENV['CSIM_STYLO']
-      ENV['CSIM_STYLO'] = stylo
-      html = '<!DOCTYPE html><style>x-a::part(q) { margin-inline-start: 40px }</style>' \
-             '<div id="a" style="margin-left: 5px !important"></div><div id="b" style="margin-inline-start: 5px !important"></div>' \
-             '<x-a id="x"></x-a>'
-      s = simulated_session(->(_env) { [200, {'content-type' => 'text/html'}, [html]] })
-      s.visit '/'
-      got = s.evaluate_script(<<~JS)
-        (() => {
-          document.getElementById('a').attachShadow({mode: 'open'}).innerHTML = '<style>:host { margin-inline-start: 50px !important }</style>';
-          document.getElementById('b').attachShadow({mode: 'open'}).innerHTML = '<style>:host { margin-left: 50px !important }</style>';
-          const sr = document.getElementById('x').attachShadow({mode: 'open'});
-          sr.innerHTML = '<span id="q" part="q" style="margin-left: 3px">q</span>';
-          return [getComputedStyle(document.getElementById('a')).marginLeft, getComputedStyle(document.getElementById('b')).marginLeft,
-                  getComputedStyle(sr.getElementById('q')).marginLeft];
-        })()
-      JS
-      expect(got).to eq(%w[50px 50px 40px])
-    ensure
-      ENV['CSIM_STYLO'] = saved
-    end
+  # …CONTEXT before the style attribute, between a property's logical and physical spellings too: a `:host` rule's
+  # `!important` beats the host's inline `!important`, whichever of the two writes `margin-left` and which
+  # `margin-inline-start`, and a `::part()` rule's normal one beats the part's inline style. Chrome and Firefox: 50px,
+  # 50px, 40px.
+  it 'sorts a :host and a ::part() rule on context against inline style across spellings' do
+    html = '<!DOCTYPE html><style>x-a::part(q) { margin-inline-start: 40px }</style>' \
+           '<div id="a" style="margin-left: 5px !important"></div><div id="b" style="margin-inline-start: 5px !important"></div>' \
+           '<x-a id="x"></x-a>'
+    s = simulated_session(->(_env) { [200, {'content-type' => 'text/html'}, [html]] })
+    s.visit '/'
+    got = s.evaluate_script(<<~JS)
+      (() => {
+        document.getElementById('a').attachShadow({mode: 'open'}).innerHTML = '<style>:host { margin-inline-start: 50px !important }</style>';
+        document.getElementById('b').attachShadow({mode: 'open'}).innerHTML = '<style>:host { margin-left: 50px !important }</style>';
+        const sr = document.getElementById('x').attachShadow({mode: 'open'});
+        sr.innerHTML = '<span id="q" part="q" style="margin-left: 3px">q</span>';
+        return [getComputedStyle(document.getElementById('a')).marginLeft, getComputedStyle(document.getElementById('b')).marginLeft,
+                getComputedStyle(sr.getElementById('q')).marginLeft];
+      })()
+    JS
+    expect(got).to eq(%w[50px 50px 40px])
   end
 
   # A `:host` compound LEFT of a combinator matches the host as every in-tree element's shadow-including ancestor
@@ -130,32 +120,26 @@ RSpec.describe 'css-scoping selectors' do
   # …and follows what decides it: a class written on a light child or a grandchild of the host, and one taken off, flip
   # the host's `:has()` and restyle and relay out its tree — the grandchild is no element anything styles, as no slot
   # takes the host's light children. (Chrome never matches the rule; Firefox matches it but re-matches on none of these.)
-  %w[0 1].each do |stylo|
-    it "restyles a host's tree when its :has() flips under it#{stylo == '1' ? ' (stylo)' : ''}" do
-      saved = ENV['CSIM_STYLO']
-      ENV['CSIM_STYLO'] = stylo
-      html = '<!DOCTYPE html><body style="margin: 0"><div id="h"><i><b></b></i></div></body>'
-      s = simulated_session(->(_env) { [200, {'content-type' => 'text/html'}, [html]] })
-      s.visit '/'
-      got = s.evaluate_script(<<~JS)
-        (() => {
-          const h = document.getElementById('h'), i = h.firstChild, b = i.firstChild;
-          const r = h.attachShadow({mode: 'open'});
-          r.innerHTML = '<style>:host(:has(> .f)) p { padding-left: 7px } :host(:has(.g)) p { margin-left: 23px }</style><p id="p">x</p>';
-          const p = r.getElementById('p'), out = [];
-          const read = () => out.push([getComputedStyle(p).paddingLeft, p.getBoundingClientRect().x].join(' '));
-          read();
-          i.className = 'f'; read();
-          i.className = ''; read();
-          b.className = 'g'; read();
-          b.remove(); read();
-          return out;
-        })()
-      JS
-      expect(got).to eq(['0px 0', '7px 0', '0px 0', '0px 23', '0px 0'])
-    ensure
-      ENV['CSIM_STYLO'] = saved
-    end
+  it "restyles a host's tree when its :has() flips under it" do
+    html = '<!DOCTYPE html><body style="margin: 0"><div id="h"><i><b></b></i></div></body>'
+    s = simulated_session(->(_env) { [200, {'content-type' => 'text/html'}, [html]] })
+    s.visit '/'
+    got = s.evaluate_script(<<~JS)
+      (() => {
+        const h = document.getElementById('h'), i = h.firstChild, b = i.firstChild;
+        const r = h.attachShadow({mode: 'open'});
+        r.innerHTML = '<style>:host(:has(> .f)) p { padding-left: 7px } :host(:has(.g)) p { margin-left: 23px }</style><p id="p">x</p>';
+        const p = r.getElementById('p'), out = [];
+        const read = () => out.push([getComputedStyle(p).paddingLeft, p.getBoundingClientRect().x].join(' '));
+        read();
+        i.className = 'f'; read();
+        i.className = ''; read();
+        b.className = 'g'; read();
+        b.remove(); read();
+        return out;
+      })()
+    JS
+    expect(got).to eq(['0px 0', '7px 0', '0px 0', '0px 23', '0px 0'])
   end
 
   # A `:host()` reading the host's POSITION or `:empty` flips on a child-list change beside or under the host, with no

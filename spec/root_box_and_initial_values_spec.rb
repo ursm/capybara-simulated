@@ -878,30 +878,24 @@ RSpec.describe 'root box + computed initial values' do
   # in an ltr document sits at the right and scrolls the viewport from there, a `<body dir=ltr>` under `<html dir=rtl>`
   # at the left — while the root's COMPUTED direction stays its own. Chrome and Firefox: 516 / 8, `ltr`, then 3008 and
   # -1984 once the rtl body is 3000px wide.
-  %w[0 1].each do |stylo|
-    it "places the body by its own direction, the principal writing mode#{stylo == '1' ? ' (stylo)' : ''}" do
-      saved = ENV['CSIM_STYLO']
-      ENV['CSIM_STYLO'] = stylo
-      page = lambda do |html_attrs, body_attrs|
-        html = %(<!DOCTYPE html><html#{html_attrs}><head><style>body { width: 500px; margin: 8px; height: 20px }</style></head>) +
-               %(<body#{body_attrs}></body></html>)
-        s = simulated_session(->(_env) { [200, {'content-type' => 'text/html'}, [html]] })
-        s.visit '/'
-        s
-      end
-      rtl_body = page.call('', ' dir="rtl"')
-      got = rtl_body.evaluate_script(<<~JS)
-        (() => {
-          const d = document.documentElement, out = [document.body.getBoundingClientRect().x, getComputedStyle(d).direction];
-          document.body.style.width = '3000px';
-          out.push(d.scrollWidth, document.body.getBoundingClientRect().x);
-          return out;
-        })()
-      JS
-      expect(got).to eq([516, 'ltr', 3008, -1984])
-      expect(page.call(' dir="rtl"', ' dir="ltr"').evaluate_script('document.body.getBoundingClientRect().x')).to eq(8)
-    ensure
-      ENV['CSIM_STYLO'] = saved
+  it 'places the body by its own direction, the principal writing mode' do
+    page = lambda do |html_attrs, body_attrs|
+      html = %(<!DOCTYPE html><html#{html_attrs}><head><style>body { width: 500px; margin: 8px; height: 20px }</style></head>) +
+             %(<body#{body_attrs}></body></html>)
+      s = simulated_session(->(_env) { [200, {'content-type' => 'text/html'}, [html]] })
+      s.visit '/'
+      s
     end
+    rtl_body = page.call('', ' dir="rtl"')
+    got = rtl_body.evaluate_script(<<~JS)
+      (() => {
+        const d = document.documentElement, out = [document.body.getBoundingClientRect().x, getComputedStyle(d).direction];
+        document.body.style.width = '3000px';
+        out.push(d.scrollWidth, document.body.getBoundingClientRect().x);
+        return out;
+      })()
+    JS
+    expect(got).to eq([516, 'ltr', 3008, -1984])
+    expect(page.call(' dir="rtl"', ' dir="ltr"').evaluate_script('document.body.getBoundingClientRect().x')).to eq(8)
   end
 end

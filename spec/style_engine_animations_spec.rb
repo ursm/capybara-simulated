@@ -9,12 +9,11 @@ require_relative 'support/session_teardown'
 # and every script evaluation is a step — with CSIM_STYLE_VERIFY holding each incremental restyle against a full one.
 RSpec.describe 'style engine animations' do
   around do |example|
-    saved = ENV.values_at('CSIM_STYLO', 'CSIM_STYLE_VERIFY')
-    ENV['CSIM_STYLO'] = '1'
+    saved = ENV['CSIM_STYLE_VERIFY']
     ENV['CSIM_STYLE_VERIFY'] = '1'
     example.run
   ensure
-    ENV['CSIM_STYLO'], ENV['CSIM_STYLE_VERIFY'] = saved
+    ENV['CSIM_STYLE_VERIFY'] = saved
   end
 
   def page(body, css = '')

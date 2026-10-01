@@ -9,12 +9,11 @@ require_relative 'support/session_teardown'
 # layout from a fresh one, so these count the put-backs — and hold the geometry against a page laid out afresh.
 RSpec.describe 'the Rust walk puts back what did not change' do
   around do |example|
-    saved = ENV.values_at('CSIM_STYLO', 'CSIM_NL_REUSE_VERIFY')
-    ENV['CSIM_STYLO'] = '1'
+    saved = ENV['CSIM_NL_REUSE_VERIFY']
     ENV['CSIM_NL_REUSE_VERIFY'] = nil
     example.run
   ensure
-    ENV['CSIM_STYLO'], ENV['CSIM_NL_REUSE_VERIFY'] = saved
+    ENV['CSIM_NL_REUSE_VERIFY'] = saved
   end
 
   def session(body)

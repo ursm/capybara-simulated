@@ -2,7 +2,6 @@
 
 require 'capybara/simulated'
 require_relative 'support/session_teardown'
-require_relative 'support/js_cascade_machinery'
 
 # The native author cascade (csim_native cascade.rs) answers an element's winning declaration of every property its
 # STATIC rules declare in one pass, and hands the rest back for the JS cascade to match per read. What an element
@@ -56,38 +55,6 @@ RSpec.describe 'native cascade answer' do
         return JSON.stringify(out);
       })()
     JS
-  end
-
-  it 'reads what the JS cascade reads', js_cascade: true do
-    s = simulated_session(->(_env) { [200, {'content-type' => 'text/html'}, [CASCADE_ANSWER_PAGE]] })
-    s.visit '/'
-    s.evaluate_script('__csimCascadeTimingStats(true)')
-    native = read_all(s)
-    expect(s.evaluate_script('__csimCascadeTimingStats().cascNatAnswers')).to be > 10
-    # Off: a rule-set change re-resolves the authority, and the new empty sheet moves nothing.
-    s.execute_script(<<~JS)
-      globalThis.__csimNativeCascadeAuthoritative = false;
-      document.head.appendChild(document.createElement('style'));
-    JS
-    s.evaluate_script('__csimCascadeTimingStats(true)')
-    js = read_all(s)
-    expect(s.evaluate_script('__csimCascadeTimingStats().cascNatAnswers')).to eq(0)
-    expect(JSON.parse(native)).to eq(JSON.parse(js))
-    # …and the values the shapes exist for, so both halves agreeing on a wrong answer shows too.
-    got = JSON.parse(native).transform_values {|v| CASCADE_ANSWER_PROPS.zip(v).to_h }
-    expect(got['l'].values_at('width', 'height')).to eq(%w[11px 7px])
-    expect(got['li']['width']).to eq('22px')
-    expect(got['a'].values_at('margin-left', 'padding-top')).to eq(%w[1px 5px])
-    expect(got['b']['padding-left']).to eq('1px')
-    expect(got['k']['border-top-width']).to eq('4px')
-    expect(got['d'].values_at('color', 'margin-bottom', 'font-size')).to eq(['rgb(1, 2, 3)', '9px', '17px'])
-    expect(got['kid']['margin-top']).to eq('6px')
-    expect(got['sib']['margin-top']).to eq('8px')
-    expect(got['hov']['width']).to eq('30px')
-    expect(got['has']['width']).to eq('41px')
-    expect(got['inl']['width']).to eq('55px')
-    expect(got['inl2']['width']).to eq('60px')
-    expect(got['r']['margin-left']).to eq('6px')
   end
 
   # A tag bucket is keyed on the LOWERCASED name, as the JS index keys it — an SVG element keeps its camelCase

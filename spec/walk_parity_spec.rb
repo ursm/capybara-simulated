@@ -9,12 +9,11 @@ require_relative 'support/session_teardown'
 # taught is declined by name rather than compared wrong.
 RSpec.describe 'walk parity' do
   around do |example|
-    saved = ENV.values_at('CSIM_STYLO', 'CSIM_WALK_PARITY')
-    ENV['CSIM_STYLO'] = '1'
+    saved = ENV['CSIM_WALK_PARITY']
     ENV['CSIM_WALK_PARITY'] = '1'
     example.run
   ensure
-    ENV['CSIM_STYLO'], ENV['CSIM_WALK_PARITY'] = saved
+    ENV['CSIM_WALK_PARITY'] = saved
   end
 
   def parity(body, css = '')

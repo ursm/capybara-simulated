@@ -2,7 +2,6 @@
 
 require 'capybara/simulated'
 require_relative 'support/session_teardown'
-require_relative 'support/js_cascade_machinery'
 
 # A mutation that flips a selector match on an element OTHER than the one written — a `:has()` above it, a position
 # among siblings, `:empty`, an attribute left of a sibling combinator — moves that element's boxes and, through what
@@ -182,97 +181,6 @@ RSpec.describe 'layout invalidation through structural selectors' do
       expect(measure(css, body, change, native: false)).to eq([before, after])
       expect(measure(css, body, change, native: true)).to eq([before, after])
     end
-  end
-
-  # A COUNT, not a wall: what a change reaches is decided from the CHANGE POINT, so appending a row reaches at most the
-  # row before it (`:last-child`), never the rows already there — under `tr:nth-child(odd) td` the whole table was relaid
-  # out per appended row (6.6x on 600 rows), under `* + *` every sibling, and a `:has()` with a combinator in its
-  # argument turned it on for every rule. A class left of a sibling combinator reaches that sibling, not its parent's
-  # subtree (21x on 200 toggles beside a 500-row table).
-  it 'reaches no more than the change point on an append or a sibling toggle', js_cascade: true do
-    marks = lambda do |css|
-      html = "<!DOCTYPE html><style>#{css}</style><div><p class=t id=t>t</p><p class=small>s</p>" \
-             '<table><tbody id=tb></tbody></table><p id=foot>f</p></div>'
-      s = simulated_session(->(_env) { [200, {'content-type' => 'text/html'}, [html]] })
-      s.visit '/'
-      s.evaluate_script(<<~JS)
-        (() => {
-          const tb = document.getElementById('tb'), foot = document.getElementById('foot');
-          const row = () => { const tr = document.createElement('tr'); tr.innerHTML = '<td>r</td><td>c <b>x</b></td>'; tb.appendChild(tr); foot.getBoundingClientRect(); };
-          for (let i = 0; i < 5; i++) row();
-          const m0 = __csimSubtreeMarks();
-          for (let i = 0; i < 20; i++) row();
-          const m1 = __csimSubtreeMarks();
-          for (let i = 0; i < 20; i++) { document.getElementById('t').classList.toggle('on'); foot.getBoundingClientRect(); }
-          return [(m1 - m0) / 20, (__csimSubtreeMarks() - m1) / 20];
-        })()
-      JS
-    end
-    base = marks.call('')
-    ['tr:nth-child(odd) td { padding: 1px }', 'tr + tr td { padding-top: 1px }', 'tr:last-child td { padding-bottom: 3px }',
-     '* + * { margin-top: 0 }', ':last-child { margin-bottom: 0 }', 'tr:not(:first-child) td { border-top: 1px solid }',
-     'body:has(> .modal) { overflow: hidden }', 'td:has(> i) { padding: 1px }', '.t.on + .small { margin-left: 5px }',
-     # …and the `:has()` shapes whose match never moves here: each is asked again, and only a change marks anything —
-     # asked "could it have changed?", every append relaid the tbody, the wrapper, or the whole document out.
-     'tr:has(+ tr.sel) td { padding: 1px }', ':is(h1, h2):has(+ p) { margin: 1px }',
-     'tbody:has(> tr:only-child) { margin: 1px }', 'div:has(> b) { padding: 1px }', ':has(b) { padding: 1px }',
-     # …a finite `:nth-last-child()` range: the row before the change and the one its bound moves past, not every row.
-     ['tr:nth-last-child(-n+2) td { padding: 1px }', 2]].each do |css, allowance = 1|
-      append, toggle = marks.call(css)
-      expect(append).to be <= base[0] + allowance, css
-      expect(toggle).to be <= 1, css
-    end
-  end
-
-  # …and the children it reaches are only those a position is READ of: the change point's neighbour matching none of the
-  # compounds that read one on its side of the change keeps its subtree. jQuery's support tests append a probe to
-  # `<html>` after `<body>` and remove it, and a Redmine page's `li:last-child` then relaid the whole body out, four
-  # times a load. (`label.error + *` reads the element AFTER the change point, which a probe appended after `n` is not.)
-  it 'leaves a neighbour no positional compound can match its subtree', js_cascade: true do
-    marks = lambda do |css|
-      html = "<!DOCTYPE html><style>#{css}</style><div id=w><section id=n><p>a <b>b</b></p><p>c</p></section></div>"
-      s = simulated_session(->(_env) { [200, {'content-type' => 'text/html'}, [html]] })
-      s.visit '/'
-      s.evaluate_script(<<~JS)
-        (() => {
-          const w = document.getElementById('w'), n = document.getElementById('n');
-          n.getBoundingClientRect();
-          const m0 = __csimSubtreeMarks();
-          const probe = document.createElement('div');
-          w.appendChild(probe); n.getBoundingClientRect();
-          probe.remove(); n.getBoundingClientRect();
-          return __csimSubtreeMarks() - m0;
-        })()
-      JS
-    end
-    base = marks.call('')
-    ['li:last-child { margin-bottom: 0 }', 'li:first-child { margin-top: 0 }', '.x > *:last-child { margin: 1px }',
-     'label.error + * { margin: 1px }', 'tr:nth-child(odd) td { padding: 1px }', '.t li:first-child a { margin: 1px }'].each do |css|
-      expect(marks.call(css)).to eq(base), css
-    end
-    # …and asks no selector engine to find out: a selector list of every key, matched per positioned child, cost a
-    # 2000-row table with 120 keyed positional rules 137x.
-    many = (0...40).map {|i| ".k#{i} > .c#{i}:nth-child(odd) span { margin: 1px }" }.join(' ')
-    html = "<!DOCTYPE html><style>tr:nth-child(odd) td { padding: 1px } #{many}</style><table><tbody id=tb>" \
-           "#{'<tr><td>r</td></tr>' * 50}</tbody></table>"
-    s = simulated_session(->(_env) { [200, {'content-type' => 'text/html'}, [html]] })
-    s.visit '/'
-    calls = s.evaluate_script(<<~JS)
-      (() => {
-        const tb = document.getElementById('tb');
-        tb.getBoundingClientRect();
-        const m = Element.prototype.matches;
-        let n = 0;
-        Element.prototype.matches = function (q) { n++; return m.call(this, q); };
-        try { for (let i = 0; i < 10; i++) { const tr = document.createElement('tr'); tr.innerHTML = '<td>n</td>'; tb.prepend(tr); tb.getBoundingClientRect(); } }
-        finally { Element.prototype.matches = m; }
-        return n;
-      })()
-    JS
-    expect(calls).to eq(0)
-    # …where one can, it still does: `section:last-child`, and a keyless child of `#w`.
-    expect(marks.call('section:last-child { margin: 1px }')).to be > base
-    expect(marks.call('#w > :last-child { margin: 1px }')).to be > base
   end
 
   # …a `::part()` rule behind a `:has()`: the part is a real box one tree in, under the host the flip restyles; and one
