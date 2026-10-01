@@ -294,7 +294,7 @@ impl NodeData {
         }
     }
 
-    fn get_attr_u16(&self, name: &str) -> Option<&[u16]> {
+    pub(crate) fn get_attr_u16(&self, name: &str) -> Option<&[u16]> {
         if self.attr_u16.is_empty() {
             return None;
         }
@@ -1033,6 +1033,7 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_, ()>, ctx: &v8::Global<v8:
     register(scope, ns, "setFocusRingHidden", set_focus_ring_hidden, context_id);
     register(scope, ns, "queryIds", query_ids, context_id);
     register(scope, ns, "matchesId", matches_id, context_id);
+    register(scope, ns, "closestId", closest_id, context_id);
     // Authoritative cascade matching: compile a rule's selector once to an integer handle, then match
     // by handle with no per-call string marshalling (compileSelector / matchesCompiled).
     register(scope, ns, "compileSelector", compile_selector, context_id);
@@ -1749,9 +1750,13 @@ fn query_ids(
     };
     let selector = args.get(1).to_rust_string_lossy(scope);
     let cid = realm_id(scope, &args);
-    // …in the mode of the root's document (arg 2: quirks).
+    // …in the mode of the root's document (arg 2: quirks; arg 5: an XML document); querySelector stops at the first
+    // (arg 3); `:scope` is the element arg 4 names, else the root.
     let quirks = args.get(2).is_true();
-    match crate::selector::query_text(realm(scope, cid), root, &selector, false, quirks) {
+    let first_only = args.get(3).is_true();
+    let scope_el = if args.get(4).is_number() { nid_arg(scope, &args, 4) } else { None }.unwrap_or(root);
+    let html_doc = !args.get(5).is_true();
+    match crate::selector::query_text(realm(scope, cid), root, scope_el, &selector, first_only, quirks, html_doc) {
         crate::selector::QueryOutcome::Matched(ids) => {
             let array = v8::Array::new(scope, ids.len() as i32);
             for (i, id) in ids.iter().enumerate() {
@@ -1783,8 +1788,37 @@ fn matches_id(
     let selector = args.get(1).to_rust_string_lossy(scope);
     let cid = realm_id(scope, &args);
     let quirks = args.get(2).is_true();
-    match crate::selector::matches_text(realm(scope, cid), id, &selector, quirks) {
+    let scoped = args.get(3).is_true();
+    let html_doc = !args.get(4).is_true();
+    match crate::selector::matches_text(realm(scope, cid), id, &selector, quirks, html_doc, scoped, false) {
         crate::selector::QueryOutcome::Matched(ids) => rv.set_bool(!ids.is_empty()),
+        crate::selector::QueryOutcome::NeedsJsFallback => {
+            let undef: v8::Local<v8::Value> = v8::undefined(scope).into();
+            rv.set(undef);
+        }
+        crate::selector::QueryOutcome::Invalid => rv.set_null(),
+    }
+}
+
+// __dom.closestId(nid, selector, quirks, xml) -> the nid of the nearest inclusive ancestor element matching (Element.closest,
+// `:scope` the element itself), -1 for none; `undefined` / `null` as matchesId.
+fn closest_id(
+    scope: &mut v8::PinScope<'_, '_>,
+    args: v8::FunctionCallbackArguments<'_>,
+    mut rv: v8::ReturnValue<'_, v8::Value>,
+) {
+    let Some(id) = nid_arg(scope, &args, 0) else {
+        return;
+    };
+    let selector = args.get(1).to_rust_string_lossy(scope);
+    let cid = realm_id(scope, &args);
+    let quirks = args.get(2).is_true();
+    let html_doc = !args.get(3).is_true();
+    match crate::selector::matches_text(realm(scope, cid), id, &selector, quirks, html_doc, true, true) {
+        crate::selector::QueryOutcome::Matched(ids) => match ids.first() {
+            Some(&hit) => set_nid(scope, &mut rv, hit),
+            None => rv.set_int32(-1),
+        },
         crate::selector::QueryOutcome::NeedsJsFallback => {
             let undef: v8::Local<v8::Value> = v8::undefined(scope).into();
             rv.set(undef);

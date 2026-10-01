@@ -1,27 +1,25 @@
 // Native CSS selector matching over the live arena, using Servo's `selectors` crate — the
 // production engine (the same one Firefox ships), so tree-structural selectors (`:nth-child`,
 // `:not`, `:is`, `:where`, `:has`, combinators, attribute operators, case-sensitivity) are correct
-// by construction.
+// by construction. It answers the page's `querySelector(All)` / `matches` / `closest` first
+// (selectors.js), the cascade's per-rule matches, and the Capybara finds.
 //
 // Ported from the unmerged native-selector-matching branch, where it matched against a JSON MIRROR
 // of the DOM that was serialized and copied across the FFI on every navigation — the boundary tax
-// that made that approach lose to the JS cascade. Here it reads the LIVE arena (crate::dom) directly:
-// the `Element` trait impl and parser are essentially unchanged; only the node accessors are
-// repointed from the mirror's flat `RawNode` at our `NodeData`.
+// that made that approach lose to the JS cascade. Here it reads the LIVE arena (crate::dom) directly.
 //
-// State-dependent, non-tree-structural pseudo-classes (`:hover`, `:checked`, `:focus`, `:disabled`,
-// …) depend on element state that still lives in the JS DOM. They are parsed (so real selectors
-// don't error), but a selector using one is flagged at parse time (`needs_fallback`) and reported
-// to the caller as `QueryOutcome::NeedsJsFallback` — it is NOT matched natively, because the arena
-// can't see the state and would return a wrong subset. The caller then runs css-select. Only
-// `:link`/`:any-link` (structural: a/area/link with href) are answered here.
+// Element state (`:hover`, `:checked`, `:focus`, `:disabled`, `:dir()`, …) is the arena's own
+// (element_state.rs). What it cannot answer yet — a shadow-tree construct (`:host`, `::slotted()`,
+// `::part()`), an attribute selector with a namespace, a functional pseudo-class it does not know —
+// is flagged at parse time (`needs_fallback`) and reported as `QueryOutcome::NeedsJsFallback`:
+// NOT matched natively, because the answer would be a wrong subset; the caller runs css-select.
 
 use std::borrow::Borrow;
 use std::fmt;
 
 use cssparser::{CowRcStr, Parser as CssParser, ParserInput, SourceLocation, ToCss};
 use precomputed_hash::PrecomputedHash;
-use selectors::attr::{AttrSelectorOperation, CaseSensitivity, NamespaceConstraint};
+use selectors::attr::{AttrSelectorOperation, AttrSelectorOperator, CaseSensitivity, NamespaceConstraint};
 use selectors::context::{
     MatchingContext, MatchingForInvalidation, MatchingMode, NeedsSelectorFlags, QuirksMode,
     SelectorCaches,
@@ -220,20 +218,78 @@ impl<'i> Parser<'i> for CsimParser {
                 return Ok(PseudoClass { name, arg: Some(ranges) });
             }
         }
+        // `:dir(<ident>)` — the element's directionality (element_state.rs `is_rtl`); an ident other than `ltr` / `rtl`
+        // is valid and matches nothing.
+        if name == "dir" {
+            let ident = arguments.try_parse(|p| {
+                let ident = p.expect_ident()?.as_ref().to_ascii_lowercase();
+                p.expect_exhausted()?;
+                Ok::<_, cssparser::ParseError<'i, ()>>(ident)
+            });
+            if let Ok(ident) = ident {
+                return Ok(PseudoClass { name, arg: Some(ident) });
+            }
+        }
         while arguments.next().is_ok() {}
         self.needs_fallback.set(true);
         Ok(PseudoClass { name, arg: None })
     }
 
+    // A pseudo-element is no element, so a selector naming one matches none (`querySelector('div::before')` is null) —
+    // but only one the CSS specifications define parses; any other is a SyntaxError. The set Chrome and Firefox both
+    // accept, and `::spelling-error` / `::grammar-error`, which CSS Pseudo-Elements 4 defines (Firefox has neither).
     fn parse_pseudo_element(
         &self,
-        _location: SourceLocation,
+        location: SourceLocation,
         name: CowRcStr<'i>,
     ) -> Result<PseudoEl, cssparser::ParseError<'i, Self::Error>> {
-        // A pseudo-element in a query selector matches no element; defer to css-select so
-        // whatever it does (match nothing, or error) is reproduced exactly.
-        self.needs_fallback.set(true);
-        Ok(PseudoEl(name.as_ref().to_ascii_lowercase()))
+        let lower = name.as_ref().to_ascii_lowercase();
+        if !matches!(
+            lower.as_str(),
+            "before" | "after" | "marker" | "placeholder" | "selection" | "backdrop" | "target-text" | "cue"
+                | "file-selector-button" | "spelling-error" | "grammar-error" | "first-line" | "first-letter"
+                | "details-content" | "view-transition"
+        ) {
+            return Err(location.new_custom_error(SelectorParseErrorKind::UnsupportedPseudoClassOrElement(name)));
+        }
+        Ok(PseudoEl(lower))
+    }
+
+    // `::highlight(<custom-ident>)` — a functional one, likewise matching no element.
+    fn parse_functional_pseudo_element<'t>(
+        &self,
+        name: CowRcStr<'i>,
+        arguments: &mut CssParser<'i, 't>,
+    ) -> Result<PseudoEl, cssparser::ParseError<'i, Self::Error>> {
+        if !name.eq_ignore_ascii_case("highlight") {
+            return Err(arguments.new_custom_error(SelectorParseErrorKind::UnsupportedPseudoClassOrElement(name)));
+        }
+        arguments.expect_ident()?;
+        Ok(PseudoEl("highlight".to_owned()))
+    }
+}
+
+// An attribute selector's operator over a value holding a lone surrogate, which the arena's UTF-8 copy carries as
+// U+FFFD — read from its UTF-16, so `#\d83d x` (a U+FFFD) does not match a lone U+D83D.
+fn eval_utf16(operator: AttrSelectorOperator, case: CaseSensitivity, value: &[u16], wanted: &str) -> bool {
+    let wanted: Vec<u16> = wanted.encode_utf16().collect();
+    let fold = |u: u16| if (b'A' as u16..=b'Z' as u16).contains(&u) { u + 32 } else { u };
+    let eq = |a: &[u16], b: &[u16]| match case {
+        CaseSensitivity::CaseSensitive => a == b,
+        CaseSensitivity::AsciiCaseInsensitive => a.len() == b.len() && a.iter().zip(b).all(|(&x, &y)| fold(x) == fold(y)),
+    };
+    let n = wanted.len();
+    match operator {
+        AttrSelectorOperator::Equal => eq(value, &wanted),
+        AttrSelectorOperator::Prefix => n > 0 && value.len() >= n && eq(&value[..n], &wanted),
+        AttrSelectorOperator::Suffix => n > 0 && value.len() >= n && eq(&value[value.len() - n..], &wanted),
+        AttrSelectorOperator::Substring => n > 0 && value.windows(n).any(|w| eq(w, &wanted)),
+        AttrSelectorOperator::Includes => {
+            n > 0 && value.split(|&u| matches!(u, 0x09 | 0x0A | 0x0C | 0x0D | 0x20)).any(|w| eq(w, &wanted))
+        }
+        AttrSelectorOperator::DashMatch => {
+            eq(value, &wanted) || (value.len() > n && value[n] == b'-' as u16 && eq(&value[..n], &wanted))
+        }
     }
 }
 
@@ -244,11 +300,14 @@ impl<'i> Parser<'i> for CsimParser {
 pub struct NodeRef<'a> {
     pub arena: &'a RealmArena,
     pub id: NodeId,
+    // Whether the node's document is an HTML document — in an XML one (XHTML, an XML DOMParser's) an HTML element's
+    // type and attribute selectors match case-sensitively, as any other element's.
+    pub html_doc: bool,
 }
 
 impl<'a> NodeRef<'a> {
     fn at(&self, id: NodeId) -> NodeRef<'a> {
-        NodeRef { arena: self.arena, id }
+        NodeRef { arena: self.arena, id, html_doc: self.html_doc }
     }
     fn node(&self) -> &'a crate::dom::NodeData {
         self.arena.get(self.id).expect("NodeRef points at a live node")
@@ -294,7 +353,7 @@ impl<'a> Element for NodeRef<'a> {
     }
 
     fn is_html_element_in_html_document(&self) -> bool {
-        self.node().is_html()
+        self.html_doc && self.node().is_html()
     }
 
     fn has_local_name(&self, name: &str) -> bool {
@@ -313,20 +372,20 @@ impl<'a> Element for NodeRef<'a> {
         local_name: &CssStr,
         operation: &AttrSelectorOperation<&CssStr>,
     ) -> bool {
-        // Only no-namespace attributes are modelled (the common case); a specific non-HTML
-        // namespace constraint matches nothing here yet.
-        match ns {
-            NamespaceConstraint::Specific(url) if !url.0.is_empty() && url.0 != HTML_NS => {
-                return false;
-            }
-            _ => {}
+        // Only no-namespace attributes are modelled: a selector with a namespace is css-select's (ShadowConstructVisitor).
+        if !matches!(ns, NamespaceConstraint::Specific(url) if url.0.is_empty()) {
+            return false;
         }
-        for (name, value) in &self.node().attributes {
-            if name == &local_name.0 && operation.eval_str(value) {
-                return true;
-            }
-        }
-        false
+        let node = self.node();
+        node.attributes.iter().any(|(name, value)| {
+            name == &local_name.0
+                && match (operation, node.get_attr_u16(name)) {
+                    (AttrSelectorOperation::WithValue { operator, case_sensitivity, value: wanted }, Some(units)) => {
+                        eval_utf16(*operator, *case_sensitivity, units, &wanted.0)
+                    }
+                    _ => operation.eval_str(value),
+                }
+        })
     }
     fn has_attr_in_no_namespace(&self, local_name: &CssStr) -> bool {
         self.node().attributes.iter().any(|(n, _)| n == &local_name.0)
@@ -343,6 +402,11 @@ impl<'a> Element for NodeRef<'a> {
             return match pc.name.as_str() {
                 "state" => arena.has_custom_state(id, arg),
                 "lang" => arena.matches_lang(id, arg),
+                "dir" => match arg.as_str() {
+                    "rtl" => arena.is_rtl(id),
+                    "ltr" => !arena.is_rtl(id),
+                    _ => false,
+                },
                 _ => false,
             };
         }
@@ -406,12 +470,18 @@ impl<'a> Element for NodeRef<'a> {
     }
 
     fn has_id(&self, id: &CssStr, case: CaseSensitivity) -> bool {
+        if let Some(units) = self.node().get_attr_u16("id") {
+            return eval_utf16(AttrSelectorOperator::Equal, case, units, &id.0);
+        }
         match self.node().get_attr("id") {
             Some(v) if !v.is_empty() => case.eq(v.as_bytes(), id.0.as_bytes()),
             _ => false,
         }
     }
     fn has_class(&self, name: &CssStr, case: CaseSensitivity) -> bool {
+        if let Some(units) = self.node().get_attr_u16("class") {
+            return eval_utf16(AttrSelectorOperator::Includes, case, units, &name.0);
+        }
         self.node()
             .get_attr("class")
             .unwrap_or("")
@@ -509,11 +579,12 @@ pub enum QueryOutcome {
     Invalid,
 }
 
-// Detects shadow-DOM selector constructs the FLAT arena can't evaluate: `:host` / `:host()` /
-// `:host-context()` (Component::Host), `::part()` (Component::Part), `::slotted()`
-// (Component::Slotted). The crate parses these as BUILT-IN components, so they never reach the
-// CsimParser::parse_* callbacks that set needs_fallback — a post-parse visit is the only way to catch
-// them. Any hit means the whole selector must defer to css-select (which knows the shadow tree).
+// Detects selector constructs the arena can't evaluate: the shadow-DOM ones the FLAT arena models no host / part /
+// slot relationship for — `:host` / `:host()` / `:host-context()` (Component::Host), `::part()` (Component::Part),
+// `::slotted()` (Component::Slotted) — and an attribute selector with a namespace (`[*|title]`, `[svg|href]`), as
+// the arena keeps no attribute's namespace. The crate parses these as BUILT-IN components, so they never reach the
+// CsimParser::parse_* callbacks that set needs_fallback — a post-parse visit is the only way to catch them. Any hit
+// means the whole selector must defer to css-select.
 struct ShadowConstructVisitor {
     found: bool,
 }
@@ -523,6 +594,13 @@ impl SelectorVisitor for ShadowConstructVisitor {
         if matches!(s, Component::Host(..) | Component::Part(..) | Component::Slotted(..)) {
             self.found = true;
             return false; // found one — stop this branch's walk
+        }
+        true
+    }
+    fn visit_attribute_selector(&mut self, ns: &NamespaceConstraint<&CssStr>, _local: &CssStr, _lower: &CssStr) -> bool {
+        if !matches!(ns, NamespaceConstraint::Specific(url) if url.0.is_empty()) {
+            self.found = true;
+            return false;
         }
         true
     }
@@ -634,13 +712,13 @@ pub fn matches_compiled(arena: &RealmArena, id: NodeId, handle: i32, quirks: boo
             NeedsSelectorFlags::No,
             MatchingForInvalidation::No,
         );
-        Some(matches_selector_list(list, &NodeRef { arena, id }, &mut ctx))
+        Some(matches_selector_list(list, &NodeRef { arena, id, html_doc: true }, &mut ctx))
     })
 }
 
 // Collect descendants of `root` (preorder / document order) matching `list`, with `:scope` bound to
-// `root` so `:scope > .child` resolves against the query root. `first_only` stops at the first hit
-// (querySelector).
+// `scope` — the query root, or a document's root element (a Document is no element for `:scope` to be) — so
+// `:scope > .child` resolves against it. `first_only` stops at the first hit (querySelector).
 //
 // `:scope` binding: the crate matches `Component::Scope` as `element.opaque() == scope_element` when
 // the context sets it, falling back to `is_root()` when it doesn't (context.rs / matching.rs).
@@ -651,7 +729,7 @@ pub fn matches_compiled(arena: &RealmArena, id: NodeId, handle: i32, quirks: boo
 // candidate, the crate's intended usage; a fresh cache per candidate would be pure waste. The
 // matcher walks each candidate's full ancestor chain, so ancestor-dependent combinators resolve
 // correctly even above `root`.
-pub fn query(arena: &RealmArena, root: NodeId, list: &SelectorList<CsimImpl>, first_only: bool, quirks: bool) -> Vec<NodeId> {
+pub fn query(arena: &RealmArena, root: NodeId, scope: NodeId, list: &SelectorList<CsimImpl>, first_only: bool, quirks: bool, html_doc: bool) -> Vec<NodeId> {
     let mut out = Vec::new();
     if arena.get(root).is_none() {
         return out;
@@ -668,7 +746,7 @@ pub fn query(arena: &RealmArena, root: NodeId, list: &SelectorList<CsimImpl>, fi
         NeedsSelectorFlags::No,
         MatchingForInvalidation::No,
     );
-    ctx.scope_element = Some(NodeRef { arena, id: root }.opaque());
+    ctx.scope_element = Some(NodeRef { arena, id: scope, html_doc }.opaque());
     // Backstop for the DESCENDANT DFS below only: an acyclic subtree pushes each node onto `stack` at
     // most once, so a pop count past the slot count means a `children` cycle was planted, and we break
     // rather than spin the isolate forever (no V8 interrupt reaches native code). It does NOT bound the
@@ -688,7 +766,7 @@ pub fn query(arena: &RealmArena, root: NodeId, list: &SelectorList<CsimImpl>, fi
         if steps > cap {
             break;
         }
-        if matches_selector_list(list, &NodeRef { arena, id }, &mut ctx) {
+        if matches_selector_list(list, &NodeRef { arena, id, html_doc }, &mut ctx) {
             out.push(id);
             if first_only {
                 return out;
@@ -704,24 +782,23 @@ pub fn query(arena: &RealmArena, root: NodeId, list: &SelectorList<CsimImpl>, fi
 // Parse (cached) + collect. Distinguishes three outcomes: a matched id set, a request to defer to
 // the JS engine (a live-state selector), or Invalid (the caller treats it as a SyntaxError). A
 // deferred selector is NOT matched here — the arena result would be a wrong subset.
-pub fn query_text(arena: &RealmArena, root: NodeId, text: &str, first_only: bool, quirks: bool) -> QueryOutcome {
+pub fn query_text(arena: &RealmArena, root: NodeId, scope: NodeId, text: &str, first_only: bool, quirks: bool, html_doc: bool) -> QueryOutcome {
     CACHE.with(|c| {
         let mut c = c.borrow_mut();
         let entry = c.entry(text.to_owned()).or_insert_with(|| parse(text));
         match entry {
             None => QueryOutcome::Invalid,
             Some(p) if p.needs_fallback => QueryOutcome::NeedsJsFallback,
-            Some(p) => QueryOutcome::Matched(query(arena, root, &p.list, first_only, quirks)),
+            Some(p) => QueryOutcome::Matched(query(arena, root, scope, &p.list, first_only, quirks, html_doc)),
         }
     })
 }
 
-// Does ONE element match the selector? The cascade path (Element.matches / rule matching against a
-// single element), distinct from the descendant query above. Same three outcomes; on a match it
-// returns Matched with the element's own id (empty = no match), so the caller reads it as a bool.
-// No scope_element — a cascade rule / bare matches() has no query root (and rules don't use :scope);
-// the matcher still walks the element's full ancestor chain for descendant/child combinators.
-pub fn matches_text(arena: &RealmArena, id: NodeId, text: &str, quirks: bool) -> QueryOutcome {
+// Does ONE element match the selector — or, `closest`, which of it and its ancestors is the nearest that does? Same
+// three outcomes; Matched carries the matching element's id (empty = none). `scoped` binds `:scope` to the element the
+// question is asked of (Element.matches / closest, whose scoping root is the element itself); unscoped — a cascade rule
+// — has no scoping root. The matcher walks the full ancestor chain for descendant / child combinators.
+pub fn matches_text(arena: &RealmArena, id: NodeId, text: &str, quirks: bool, html_doc: bool, scoped: bool, closest: bool) -> QueryOutcome {
     CACHE.with(|c| {
         let mut c = c.borrow_mut();
         let entry = c.entry(text.to_owned()).or_insert_with(|| parse(text));
@@ -741,8 +818,17 @@ pub fn matches_text(arena: &RealmArena, id: NodeId, text: &str, quirks: bool) ->
                     NeedsSelectorFlags::No,
                     MatchingForInvalidation::No,
                 );
-                let hit = matches_selector_list(&p.list, &NodeRef { arena, id }, &mut ctx);
-                QueryOutcome::Matched(if hit { vec![id] } else { Vec::new() })
+                if scoped {
+                    ctx.scope_element = Some(NodeRef { arena, id, html_doc }.opaque());
+                }
+                let mut at = Some(id);
+                while let Some(candidate) = at {
+                    if matches_selector_list(&p.list, &NodeRef { arena, id: candidate, html_doc }, &mut ctx) {
+                        return QueryOutcome::Matched(vec![candidate]);
+                    }
+                    at = if closest { arena.parent_of(candidate).filter(|&up| arena.is_element(up)) } else { None };
+                }
+                QueryOutcome::Matched(Vec::new())
             }
         }
     })

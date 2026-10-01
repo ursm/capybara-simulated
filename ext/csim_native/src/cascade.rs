@@ -260,7 +260,7 @@ impl CascadeStore {
         }
         self.touched.clear();
         let bloom = ancestor_bloom(arena, id);
-        let el = NodeRef { arena, id };
+        let el = NodeRef { arena, id, html_doc: true };
         let rules = &self.rules;
         let best = &mut self.best;
         let touched = &mut self.touched;
