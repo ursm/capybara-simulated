@@ -10287,14 +10287,7 @@ module Capybara
         # encoding per the HTML "decode" algorithm and is removed). The real
         # bytes for binary consumers ride `body_bytes`; the Rack body arrives
         # BINARY-tagged (see `RuntimeShared.utf8_text`).
-        bom_charset = nil
-        text =
-          if is_text
-            decoded, bom_charset = decode_response_bom(raw)
-            RuntimeShared.utf8_text(decoded)
-          else
-            RuntimeShared.utf8_text(raw)
-          end
+        text = RuntimeShared.utf8_text(is_text ? decode_response_bom(raw) : raw)
         # statusText = the HTTP reason phrase: a custom one carried on the internal
         # x-csim-status-text header (status.py), else the status code's standard
         # reason (xhr status/statusText tests). Strip the internal header either way.
@@ -10320,9 +10313,6 @@ module Capybara
           'type'       => type
         )
         out['body_null'] = true if body_null   # null-body status / HEAD → response.body is null
-        # The BOM-detected encoding (if any) — a frame load pins its document's
-        # characterSet to it (see __csimFrameWindow); highest-precedence signal.
-        out['charset']  = bom_charset if bom_charset
         # Hand the raw bytes to the (XHR) client UNLESS the response is pure-ASCII text.
         # ASCII decodes identically under every encoding — so responseText is already
         # correct from the UTF-8 `body`, and it round-trips byte-for-byte as an
@@ -10366,59 +10356,23 @@ module Capybara
         o_r
       end
 
-      # Strip + decode a single leading byte-order mark, returning
-      # `[utf8_text, charset]` — `charset` is the BOM-selected Encoding-standard
-      # name (highest-precedence encoding signal) or nil when there's no BOM (the
-      # hot path: just a 2–3 byte prefix check). One BOM is consumed; any further
-      # BOMs are ordinary U+FEFF characters in the decoded text (per spec the
-      # parser does not strip them again).
-      # An XML-family document (XHTML / SVG / application+text/xml). Its encoding
-      # default is UTF-8 — the windows-1252 locale default is HTML-only.
-      def xml_content_type?(content_type)
-        mime = content_type.to_s.split(';', 2).first.to_s.strip.downcase
-        mime.end_with?('+xml') || mime == 'application/xml' || mime == 'text/xml'
-      end
-
-      # Does the response carry an explicit encoding signal (so the default
-      # windows-1252 decode must NOT apply)? A `charset=` in the Content-Type, or
-      # a `<meta charset>` / `<meta http-equiv=content-type … charset=…>` in the
-      # HTML prescan window (the first 1024 bytes, per the HTML sniffing algorithm).
-      # The `charset` must start a real attribute / content-charset (preceded by
-      # whitespace, a quote, or `;`), so hyphenated look-alikes — `data-charset=`,
-      # `accept-charset=` — don't false-trigger the signal.
-      def html_charset_signal?(content_type, raw)
-        return true if /;\s*charset\s*=/i.match?(content_type.to_s)
-        head = raw.to_s.b[0, 1024].to_s
-        /<meta\b[^>]*[\s"';]charset\s*=/i.match?(head)
-      end
-
-      # Decode bytes as windows-1252 (the HTML locale-default encoding) to a UTF-8
-      # Ruby string. Replaces undefined slots rather than raising.
-      def decode_windows1252(s)
-        s.to_s.b.dup.force_encoding(Encoding::WINDOWS_1252)
-         .encode(Encoding::UTF_8, invalid: :replace, undef: :replace)
-      rescue StandardError
-        RuntimeShared.utf8_text(s)
-      end
-
+      # A text body with its byte-order mark taken off and followed: UTF-8 text for a UTF-8 or UTF-16 BOM, the
+      # bytes as they are without one (the hot path: a 2–3 byte prefix check). One BOM is consumed; any further
+      # ones are ordinary U+FEFF characters in the text.
       def decode_response_bom(s)
         b = s.b
         if b.start_with?("\xEF\xBB\xBF".b)
-          [b.byteslice(3..).force_encoding(Encoding::UTF_8), 'UTF-8']
+          b.byteslice(3..)
         elsif b.start_with?("\xFF\xFE".b) || b.start_with?("\xFE\xFF".b)
-          # Generic UTF-16: the BOM picks endianness and is dropped by the decoder.
-          # Replace malformed units rather than raising (a truncated/odd-length
-          # body still yields readable UTF-8 instead of falling back to raw bytes).
-          # A UTF-32LE BOM (FF FE 00 00) is matched here as UTF-16LE too — which is
-          # exactly what browsers do (UTF-32 unsupported; the leading FF FE is read
-          # as the UTF-16LE BOM).
-          charset = b.start_with?("\xFF\xFE".b) ? 'UTF-16LE' : 'UTF-16BE'
-          [b.force_encoding(Encoding::UTF_16).encode(Encoding::UTF_8, invalid: :replace, undef: :replace), charset]
+          # Generic UTF-16: the BOM picks endianness and is dropped by the decoder. Malformed units are replaced
+          # rather than raised (a truncated / odd-length body still reads). A UTF-32LE BOM (FF FE 00 00) is read
+          # as UTF-16LE's, as browsers read it (UTF-32 is no encoding of theirs).
+          b.force_encoding(Encoding::UTF_16).encode(Encoding::UTF_8, invalid: :replace, undef: :replace)
         else
-          [s, nil]
+          s
         end
       rescue StandardError
-        [s, nil]
+        s
       end
 
       def text_response?(headers)
@@ -10548,11 +10502,8 @@ module Capybara
         return if realm_id.nil? || realm_id.zero?
         spec = {url: url.to_s}
         if url.to_s.start_with?('blob:') && (b = read_blob_for_window(url.to_s))
-          # The blob's bytes arrive BINARY-tagged (Base64-decoded). __csimLoadDocument
-          # HTML-parses TEXT, and a BINARY string marshals to V8 as a Uint8Array (not a
-          # String), which `String(...)`s to comma-joined digits — a script-less doc. Decode
-          # to UTF-8 text like every other load path (see RuntimeShared.utf8_text).
-          spec[:body]  = RuntimeShared.utf8_text(b[:bytes])
+          # The blob's bytes, BINARY-tagged (a Uint8Array to V8): the document is decoded as it loads.
+          spec[:body]  = b[:bytes].b
           spec[:ctype] = b[:type].to_s.empty? ? 'text/html' : b[:type]
         end
         (@pending_window_nav ||= {})[realm_id] = spec
@@ -10815,8 +10766,7 @@ module Capybara
         status, headers, resp_body = dispatch_rack_or_http(url, env, method: is_post ? 'POST' : 'GET', body: is_post ? body : nil)
         merge_set_cookie(headers, url)
         return if download_response?(headers)
-        html = read_rack_body(resp_body)
-        reload_frame_realm_by_id(realm_id, url, html, response_content_type(headers), restore_state: restore)
+        reload_frame_realm_by_id(realm_id, url, read_rack_body(resp_body), response_content_type(headers), restore_state: restore)
       end
       # Serialize + route a form submitted inside frame realm `realm_id`. We
       # serialize in the INITIATING realm (so shadow-tree controls are excluded
@@ -11058,11 +11008,11 @@ module Capybara
       # Rebuild a frame realm reached via contentWindow (no @frame_stack entry):
       # recover its container element handle + parent realm, swap in a fresh realm
       # built from `html`, re-point the iframe at it, and fire the element load.
-      def reload_frame_realm_by_id(realm_id, url, html, content_type, restore_state: nil, client_id: nil)
+      def reload_frame_realm_by_id(realm_id, url, bytes, content_type, restore_state: nil, client_id: nil)
         parent = @runtime.frame_realm_parent(realm_id)
         handle = frame_container_handle(realm_id, parent)
         return if handle.zero?
-        new_id = @runtime.reload_frame_realm(realm_id, parent.to_i, url, RuntimeShared.utf8_text(html), content_type, client_id).to_i
+        new_id = @runtime.reload_frame_realm(realm_id, parent.to_i, url, bytes.to_s.b, content_type, client_id).to_i
         return if new_id.zero?
         begin
           rebind_frame_realm(parent, handle, realm_id, new_id)
@@ -11730,36 +11680,16 @@ module Capybara
         # `isHtmlDocument` false) and the encoding's HTTP-charset signal.
         ct = (@last_response_headers || {}).find {|k, _| k.to_s.downcase == 'content-type' }&.last
         ct = ct.first if ct.is_a?(Array)
-        # HTML document encoding sniffing (the body arrives BINARY-tagged; see
-        # `RuntimeShared.utf8_text`). A leading BOM wins (over <meta charset>) and
-        # is stripped. Otherwise, for an HTML document with NO encoding signal — no
-        # charset in the Content-Type AND no <meta charset> in the prescan — the
-        # locale default is windows-1252 and the bytes decode as such; there is NO
-        # UTF-8 sniffing (WPT encoding/sniffing). A declared charset keeps the
-        # UTF-8 + scrub path (the JS side reports it from the meta; a declared
-        # non-UTF-8 multibyte charset is still UTF-8-decoded — legacy multibyte
-        # tables are out of scope). The windows-1252 default is HTML-only: an XML
-        # document (XHTML/SVG/application+text/xml) defaults to UTF-8, and an empty
-        # body (about:blank, a blank 200) stays UTF-8 too.
-        decoded, doc_charset = decode_response_bom(html)
-        if doc_charset
-          html = RuntimeShared.utf8_text(decoded)
-        elsif html.to_s.empty? || xml_content_type?(ct) || html_charset_signal?(ct, html)
-          html = RuntimeShared.utf8_text(html)
-        else
-          html = decode_windows1252(html)
-          doc_charset = 'windows-1252'
-        end
+        # The document travels as its BYTES (BINARY-tagged, a Uint8Array to V8): it is decoded as it loads, by HTML's
+        # encoding sniffing (`__csimLoadDocument`). An empty one (about:blank, a blank 200) is the empty string, UTF-8.
         opts = {
           'traceActive'        => !@trace.nil?,
           'timezone'           => ENV['TZ'].to_s,
           'timeTravelOffsetMs' => ((Time.now.to_f - Process.clock_gettime(Process::CLOCK_REALTIME)) * 1000).to_i,
           'url'                => @current_url.to_s,
-          'html'               => html
+          'html'               => html.to_s.empty? ? '' : html.to_s.b
         }
         opts['contentType'] = ct.to_s if ct && !ct.to_s.empty?
-        # The detected document encoding pins document.characterSet (over meta).
-        opts['charset'] = doc_charset if doc_charset
         # `document.lastModified` reflects the response Last-Modified header (parsed
         # to local time); absent → the current time (handled JS-side).
         lm = response_headers['Last-Modified']   # response_headers normalizes keys to Capitalized-Dash form

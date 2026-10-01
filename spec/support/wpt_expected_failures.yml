@@ -3073,8 +3073,6 @@ fetch/api/response/response-stream-with-broken-then.any.js:
 - Attempt to inject undefined via Object.prototype.then.
 - 'Attempt to inject value: undefined via Object.prototype.then.'
 - 'Attempt to inject {done: false, value: bye} via Object.prototype.then.'
-fetch/data-urls/navigate.window.js:
-- ASCII whitespace in the input is removed
 fetch/h1-parsing/lone-cr.window.js:
 - "Parsing response with a lone CR before message-body (HTTP/1.1\r200 OK\n\nBODY)"
 - "Parsing response with a lone CR before message-body (HTTP/1.1 200\rOK\n\nBODY)"
@@ -6186,10 +6184,6 @@ websockets/back-forward-cache-with-open-websocket-connection.window.js:
 websockets/constructor/014.html:
 - 'WebSockets: serialize establish a connection'
 - 'WebSockets: serialize establish a connection'
-websockets/constructor/016.html:
-- 'WebSockets: non-ascii URL in query, document encoding windows-1252'
-- 'WebSockets: non-ascii URL in query, document encoding windows-1252'
-- 'WebSockets: non-ascii URL in query, document encoding windows-1252'
 websockets/cookies/005.html:
 - 'WebSockets: setting HttpOnly cookies in ws response, checking ws request'
 - 'WebSockets: setting HttpOnly cookies in ws response, checking ws request'
@@ -6317,5 +6311,4 @@ xhr/send-conditional-cors.htm:
 - 304 with appropriate CORS header
 - 304 without appropriate CORS header
 xhr/send-entity-body-document.htm:
-- HTML document, shift-jis
 - XML document, windows-1252
