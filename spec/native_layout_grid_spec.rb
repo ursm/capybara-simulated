@@ -498,7 +498,7 @@ RSpec.describe 'native layout grid parity' do
       expect_native_intrinsic(%(<div style="#{mc_auto}"><div>aa <span style="margin-left:-1px;padding-right:0.7px;margin-right:0.3px"> bb</span> cc</div><div>b</div></div>))
       expect_native_intrinsic(%(<div style="#{mc_auto}"><div>aa <span style="margin-left:5px;margin-right:-5px"> bb</span> cc</div><div>b</div></div>))
     end
-    it 'breaks between characters for the min-content under break-all / anywhere, not break-word (unspaced advances)' do
+    it 'breaks between characters for the min-content under break-all / anywhere, not break-word (spaced advances)' do
       expect_native_intrinsic(%(<div style="#{mc_auto}"><div style="word-break:break-all">breakallword here</div><div>b</div></div>))
       expect_native_intrinsic(%(<div style="#{mc_auto}"><div style="overflow-wrap:anywhere">anywhereword here</div><div>b</div></div>))
       expect_native_intrinsic(%(<div style="#{mc_auto}"><div style="overflow-wrap:break-word">breakword words here</div><div>b</div></div>))

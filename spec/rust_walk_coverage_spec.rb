@@ -352,7 +352,7 @@ RSpec.describe 'Rust walk coverage' do
   # and an image-like one by a percentage max-width too, whatever width it declares — a control's `max-width: 100%` is
   # no such thing (Chrome: a float around a `max-width: 100%` input is 185 in 100px of room, around a `width: 100%` one,
   # a canvas, a `width: 300px; max-width: 100%` image, a src-less `width=300` one or a video 100, around a textarea 201,
-  # a list box 122.5, a 150px meter 150).
+  # a list box 122.5, a 150px meter 150, a progress 160).
   # A ZWJ joins two pictographs into one cluster (UAX #29 GB11) and nothing else, and `word-break: break-all` text holding
   # one is laid out natively.
   it 'squeezes compressible replaced boxes and keeps ZWJ sequences whole', :aggregate_failures do
@@ -365,7 +365,8 @@ RSpec.describe 'Rust walk coverage' do
       '<video style="max-width: 100%"></video>',
       '<textarea style="max-width: 100%"></textarea>',
       '<select size="3" style="max-width: 100%"><option>a long option text</option></select>',
-      '<meter style="max-width: 100%; width: 150px"></meter>'
+      '<meter style="max-width: 100%; width: 150px"></meter>',
+      '<progress style="max-width: 100%"></progress>'
     ]
     floats = boxes.each_with_index.map {|el, i| %(<div style="width: 100px"><div id="f#{i}" style="float: left">#{el}</div></div><div style="clear: both"></div>) }
     s = page(
@@ -373,7 +374,7 @@ RSpec.describe 'Rust walk coverage' do
       '<div style="width: 30px; word-break: break-all"><span id="z">ab&zwj;cd&zwj;ef</span></div>' \
       '<span id="y">abc&zwj;def</span><div style="width: 30px; word-break: break-all"><span id="x">&#x1F468;&zwj;&#x1F469;&zwj;&#x1F467; x</span></div></body>'
     )
-    expect(s.evaluate_script("[0, 1, 2, 3, 4, 5, 6, 7, 8].map((i) => Math.round(document.getElementById('f' + i).getBoundingClientRect().width * 10) / 10)")).to eq([185, 100, 100, 100, 100, 100, 201, 122.6, 150])
+    expect(s.evaluate_script("[0, 1, 2, 3, 4, 5, 6, 7, 8, 9].map((i) => Math.round(document.getElementById('f' + i).getBoundingClientRect().width * 10) / 10)")).to eq([185, 100, 100, 100, 100, 100, 201, 122.6, 150, 160])
     # (…a ZWJ between letters joins nothing — `abc‍def` keeps every advance, 57.6, and break-all breaks around one — where
     # one between pictographs binds the family into one unit, on one line, `x` on the next: Chrome's 2, 57.6, 2)
     expect(s.evaluate_script('[z.getClientRects().length, Math.round(y.getBoundingClientRect().width * 10) / 10, x.getClientRects().length]')).to eq([2, 57.6, 2])
@@ -394,6 +395,20 @@ RSpec.describe 'Rust walk coverage' do
     sizes = s.evaluate_script("['a', 'b', 'c', 'd'].map((i) => { const r = document.getElementById(i).getBoundingClientRect(); return [Math.round(r.width * 10) / 10, r.height]; })")
     expect(sizes.map(&:first)).to eq([48, 19.2, 9.6, 30])
     expect(sizes.drop(1).map(&:last)).to eq([132, 264, 88])
+    expect(s.evaluate_script('JSON.stringify(__csimNativeLayoutStats().rustFellBack)')).to eq('{}')
+  end
+
+  # …an emergency break falls at a grapheme boundary however the unit is cut — `漢‍字‍か な` under `overflow-wrap: anywhere`
+  # breaks into 4 lines in 20px, 16 at min-content — and a word broken per character is measured SPACED, as the line
+  # lays it out: letter-spacing follows every character, an emoji's modifier joining its glyph (Chrome: `r abc s` under
+  # `letter-spacing: 3px; word-break: break-all` is one 88.2-wide line, which unspaced units measured at 73.2 and wrapped).
+  it 'breaks and spaces per-character text as the line lays it out', :aggregate_failures do
+    s = page(
+      '<body style="font: 16px monospace; margin: 0"><div style="width: 20px; overflow-wrap: anywhere"><span id="a">漢&zwj;字&zwj;か な</span></div>' \
+      '<div style="width: min-content; overflow-wrap: anywhere" id="b">漢&zwj;字&zwj;か な</div>' \
+      '<div style="float: left; letter-spacing: 3px; word-break: break-all" id="c">r abc s</div></body>'
+    )
+    expect(s.evaluate_script('[a.getClientRects().length, b.getBoundingClientRect().width, Math.round(c.getBoundingClientRect().width * 10) / 10, c.getBoundingClientRect().height]')).to eq([4, 16, 88.2, 22])
     expect(s.evaluate_script('JSON.stringify(__csimNativeLayoutStats().rustFellBack)')).to eq('{}')
   end
 

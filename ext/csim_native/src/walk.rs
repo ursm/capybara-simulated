@@ -2448,9 +2448,9 @@ impl<'a> Walk<'a> {
         r.ratio = intrinsic.ratio;
         r.ratio_only = intrinsic.ratio_only;
         r.shrinks_to_nothing = intrinsic.ratio || tag == "img";
-        // (…the controls a percentage max-width does not squeeze, as Chrome reads CSS Sizing 3 §5.2.2: a `<meter>` too,
-        // where a `<progress>` is squeezed)
-        r.form_control = matches!(tag, "input" | "select" | "textarea" | "meter");
+        // (…the controls a percentage max-width does not squeeze, as Chrome reads CSS Sizing 3 §5.2.2: a `<meter>` and a
+        // `<progress>` too)
+        r.form_control = matches!(tag, "input" | "select" | "textarea" | "meter" | "progress");
         match baseline {
             Some((font_box, asc)) => {
                 // (…a list box's baseline is its content box's bottom, a text control's its font box's)

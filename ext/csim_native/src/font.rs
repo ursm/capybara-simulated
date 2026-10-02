@@ -259,9 +259,12 @@ fn unit_of(cp: u32, prev: i64, fm: &FontMetrics) -> f64 {
 fn takes_spacing(cp: u32, prev: i64) -> bool {
     !joined(cp, prev) && !zero_width(cp)
 }
-// Whether `cp` is joined into the cluster before it by the ZERO WIDTH JOINER `prev` — a pictograph after one (GB11).
+// Whether `cp` is drawn as one glyph with the character before it: a pictograph a ZERO WIDTH JOINER joins (GB11), and an
+// emoji MODIFIER after a pictograph — `👍🏽` is one glyph and one letter-spacing (Chrome), where a modifier alone is a
+// swatch of its own.
 fn joined(cp: u32, prev: i64) -> bool {
-    prev == 0x200D && crate::unicode::is_extended_pictographic(cp)
+    let pict = crate::unicode::is_extended_pictographic;
+    (prev == 0x200D && pict(cp)) || ((0x1F3FB..=0x1F3FF).contains(&cp) && prev >= 0 && pict(prev as u32))
 }
 
 // The isolate-level font registry: parsed metrics keyed by an integer handle, deduped by source. A

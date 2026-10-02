@@ -461,7 +461,7 @@ pub(crate) struct Input {
     pub(crate) ratio_only: bool,
     // The box has no content height to floor a flex column's automatic minimum at (an image, a ratio box).
     pub(crate) shrinks_to_nothing: bool,
-    // …and whether it is a FORM CONTROL — an `<input>`, a `<select>`, a `<textarea>`, a `<meter>` — whose percentage max-width
+    // …and whether it is a FORM CONTROL — an `<input>`, a `<select>`, a `<textarea>`, a `<meter>`, a `<progress>` — whose percentage max-width
     // compresses nothing, where every other replaced box's does (CSS Sizing 3 §5.2.2 as Chrome and Firefox read it).
     pub(crate) form_control: bool,
     // A REPLACED box's baseline (the oracle's `controlBaseline`): 0 none — an `<img>`, the only one that has
@@ -3017,7 +3017,7 @@ fn line_layout(
                                 let tail = if word_shy { trailing_shys(&text[u..pend]) } else { 0 };
                                 let cut_end = if tail > 0 && pend - u > tail { pend - tail } else { pend };
                                 while u < pend {
-                                    let mut ulen = break_unit_len(text, u, cut_end.max(u + 1), per_char, per_char && wrap_mode >= 2);
+                                    let mut ulen = break_unit_len(text, u, cut_end.max(u + 1), per_char, wrap_mode >= 2);
                                     if u + ulen == cut_end && cut_end < pend {
                                         ulen = pend - u;
                                     }
@@ -3044,7 +3044,7 @@ fn line_layout(
                                             let n_wide = has_wide && text[pend..npend].iter().any(|&c| is_wide_unit(c));
                                             let npw = measure_word(run, &text[pend..npend])?;
                                             let n_per = wrap_mode != 0 && !n_wide && npw > avail + LINE_FIT_EPS;
-                                            measure_word(run, &text[pend..pend + break_unit_len(text, pend, npend, n_per, n_per && wrap_mode >= 2)])?
+                                            measure_word(run, &text[pend..pend + break_unit_len(text, pend, npend, n_per, wrap_mode >= 2)])?
                                         } else {
                                             0.0
                                         };
@@ -8020,7 +8020,6 @@ fn text_intrinsic(runs: &[Run], run_texts: &[RunText], ws_mode: u8, indent: (f64
                 let per_char = matches!(run.metric as u8, 1 | 3);
                 let space_w = measure_word(run, &[0x20])?;
                 // (`measure_word` only, so the tab pair it carries is never read — a word holds no tab.)
-                let unspaced = Run { ls: 0.0, ws: 0.0, ..*run };
                 let run_has_wide = text.iter().any(|&u| is_wide_unit(u)); // once per run, as in the flow arm
                 let run_has_hyphen = text.iter().any(|&u| is_hyphen_unit(u));
                 let run_has_shy = text.contains(&SOFT_HYPHEN);
@@ -8140,9 +8139,14 @@ fn text_intrinsic(runs: &[Run], run_texts: &[RunText], ws_mode: u8, indent: (f64
                                 // every unit instead closed the word at the Latin run's own edges, losing whatever
                                 // was glued across a run boundary — `abcdef<b>gh日</b>` measured 42.63 against the
                                 // oracle's 59.53, and a padded inline lost its 20px edge outright.
-                                let ulen = break_unit_len(text, u, i, per_char, per_char && run.metric as u8 >= 2);
+                                // (…an emergency break inside a word falls between grapheme clusters under `anywhere`, the one
+                                // mode whose in-word breaks min-content counts; every unit SPACED, as the line lays it out —
+                                // letter-spacing follows every character, so the units sum to the spaced word, where unspaced
+                                // ones made break-all text wider than the max-content it was measured at: Chrome's 88.2 for
+                                // `r abc s` under 3px came out 73.2, and wrapped)
+                                let ulen = break_unit_len(text, u, i, per_char, run.metric as u8 == 3);
                                 let own = per_char || is_wide_unit(text[u]);
-                                let adv = measure_word(&unspaced, &text[u..u + ulen])?;
+                                let adv = measure_word(run, &text[u..u + ulen])?;
                                 if own {
                                     opportunity!();
                                 }
