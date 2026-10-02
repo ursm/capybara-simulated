@@ -162,4 +162,35 @@ RSpec.describe 'CSSOM rules' do
     JS
     expect(got).to eq(['p { color: rgb(1, 0, 0); }', 'rgb(1, 0, 0)', 'rgb(1, 0, 0)', false, nil, 'SyntaxError'])
   end
+
+  # …at once, for the cascade too: a `<style>` moved with its parent applies its new sheet, one re-inserted after its
+  # sheet was disabled is enabled (a new sheet), and the sheet a script still holds after a text change is the old one
+  # — no owner, its own rules. (Chrome: the same, each value.)
+  it 'applies a renewed sheet at once and leaves the old one its rules' do
+    got = page('').evaluate_script(<<~JS)
+      (() => {
+        const out = [];
+        const wrap = document.body.appendChild(document.createElement('div'));
+        const s1 = wrap.appendChild(document.createElement('style'));
+        s1.textContent = '.r { color: rgb(3, 0, 0) }';
+        const r = document.body.appendChild(document.createElement('p'));
+        r.className = 'r';
+        s1.sheet.cssRules[0].style.color = 'rgb(5, 0, 0)';
+        document.body.appendChild(wrap);
+        out.push(getComputedStyle(r).color);
+        const s2 = document.head.appendChild(document.createElement('style'));
+        s2.textContent = '.q { color: rgb(4, 0, 0) }';
+        const q = document.body.appendChild(document.createElement('p'));
+        q.className = 'q';
+        s2.sheet.disabled = true;
+        s2.remove();
+        document.head.appendChild(s2);
+        out.push(s2.sheet.disabled, getComputedStyle(q).color);
+        const old = s2.sheet;
+        s2.textContent = '.q { color: rgb(6, 0, 0) } .z { }';
+        return out.concat(old.ownerNode, old.cssRules.length, s2.sheet.cssRules.length, getComputedStyle(q).color);
+      })()
+    JS
+    expect(got).to eq(['rgb(3, 0, 0)', false, 'rgb(4, 0, 0)', nil, 1, 2, 'rgb(6, 0, 0)'])
+  end
 end
