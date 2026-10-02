@@ -1306,7 +1306,7 @@ checksum = "94143f37725109f92c262ed2cf5e59bce7498c01bcc1502d7b9afe439a4e9f49"
 [[package]]
 name = "selectors"
 version = "0.40.0"
-source = "git+https://github.com/ursm/stylo?branch=csim#66bc99ce056c61ccb0800513d6a2558fe166e967"
+source = "git+https://github.com/ursm/stylo?branch=csim#a9ebc154720d9eb4756bf5aef5d192a42cbdba2e"
 dependencies = [
  "bitflags",
  "cssparser",
@@ -1377,7 +1377,7 @@ dependencies = [
 [[package]]
 name = "servo_arc"
 version = "0.4.3"
-source = "git+https://github.com/ursm/stylo?branch=csim#66bc99ce056c61ccb0800513d6a2558fe166e967"
+source = "git+https://github.com/ursm/stylo?branch=csim#a9ebc154720d9eb4756bf5aef5d192a42cbdba2e"
 dependencies = [
  "serde",
  "stable_deref_trait",
@@ -1526,7 +1526,7 @@ dependencies = [
 [[package]]
 name = "stylo"
 version = "0.21.0"
-source = "git+https://github.com/ursm/stylo?branch=csim#66bc99ce056c61ccb0800513d6a2558fe166e967"
+source = "git+https://github.com/ursm/stylo?branch=csim#a9ebc154720d9eb4756bf5aef5d192a42cbdba2e"
 dependencies = [
  "app_units",
  "arrayvec",
@@ -1582,7 +1582,7 @@ dependencies = [
 [[package]]
 name = "stylo_atoms"
 version = "0.21.0"
-source = "git+https://github.com/ursm/stylo?branch=csim#66bc99ce056c61ccb0800513d6a2558fe166e967"
+source = "git+https://github.com/ursm/stylo?branch=csim#a9ebc154720d9eb4756bf5aef5d192a42cbdba2e"
 dependencies = [
  "string_cache 0.9.0",
  "string_cache_codegen 0.6.1",
@@ -1591,7 +1591,7 @@ dependencies = [
 [[package]]
 name = "stylo_derive"
 version = "0.21.0"
-source = "git+https://github.com/ursm/stylo?branch=csim#66bc99ce056c61ccb0800513d6a2558fe166e967"
+source = "git+https://github.com/ursm/stylo?branch=csim#a9ebc154720d9eb4756bf5aef5d192a42cbdba2e"
 dependencies = [
  "darling",
  "proc-macro2",
@@ -1603,7 +1603,7 @@ dependencies = [
 [[package]]
 name = "stylo_dom"
 version = "0.21.0"
-source = "git+https://github.com/ursm/stylo?branch=csim#66bc99ce056c61ccb0800513d6a2558fe166e967"
+source = "git+https://github.com/ursm/stylo?branch=csim#a9ebc154720d9eb4756bf5aef5d192a42cbdba2e"
 dependencies = [
  "bitflags",
  "stylo_malloc_size_of",
@@ -1612,7 +1612,7 @@ dependencies = [
 [[package]]
 name = "stylo_malloc_size_of"
 version = "0.21.0"
-source = "git+https://github.com/ursm/stylo?branch=csim#66bc99ce056c61ccb0800513d6a2558fe166e967"
+source = "git+https://github.com/ursm/stylo?branch=csim#a9ebc154720d9eb4756bf5aef5d192a42cbdba2e"
 dependencies = [
  "app_units",
  "cssparser",
@@ -1629,7 +1629,7 @@ dependencies = [
 [[package]]
 name = "stylo_static_prefs"
 version = "0.21.0"
-source = "git+https://github.com/ursm/stylo?branch=csim#66bc99ce056c61ccb0800513d6a2558fe166e967"
+source = "git+https://github.com/ursm/stylo?branch=csim#a9ebc154720d9eb4756bf5aef5d192a42cbdba2e"
 dependencies = [
  "toml",
 ]
@@ -1637,7 +1637,7 @@ dependencies = [
 [[package]]
 name = "stylo_traits"
 version = "0.21.0"
-source = "git+https://github.com/ursm/stylo?branch=csim#66bc99ce056c61ccb0800513d6a2558fe166e967"
+source = "git+https://github.com/ursm/stylo?branch=csim#a9ebc154720d9eb4756bf5aef5d192a42cbdba2e"
 dependencies = [
  "app_units",
  "bitflags",
@@ -1762,7 +1762,7 @@ dependencies = [
 [[package]]
 name = "to_shmem"
 version = "0.5.0"
-source = "git+https://github.com/ursm/stylo?branch=csim#66bc99ce056c61ccb0800513d6a2558fe166e967"
+source = "git+https://github.com/ursm/stylo?branch=csim#a9ebc154720d9eb4756bf5aef5d192a42cbdba2e"
 dependencies = [
  "cssparser",
  "servo_arc",
@@ -1775,7 +1775,7 @@ dependencies = [
 [[package]]
 name = "to_shmem_derive"
 version = "0.1.0"
-source = "git+https://github.com/ursm/stylo?branch=csim#66bc99ce056c61ccb0800513d6a2558fe166e967"
+source = "git+https://github.com/ursm/stylo?branch=csim#a9ebc154720d9eb4756bf5aef5d192a42cbdba2e"
 dependencies = [
  "darling",
  "proc-macro2",

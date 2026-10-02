@@ -1567,15 +1567,9 @@ css/css-transitions/properties-value-003.html:
 - position position(relative to absolute) / values
 - position position(static to absolute) / events
 - position position(static to absolute) / values
-css/css-transitions/starting-style-cascade.html:
-- "@starting-style with higher specificity"
-- Starting style inheriting from parent's after-change style
-- Starting style inheriting from parent's after-change style while ancestor is transitioning
-- Starting style inheriting from parent's after-change style while parent transitioning
-css/css-transitions/starting-style-rule-basic.html:
-- Triggered transition from display:none to display:block
-- Triggered transition from first style update
-- Triggered transition on DOM insertion
+css/css-transitions/starting-style-adjustment.html:
+- The display property in <legend> @starting-style should be blockified so no transition
+  should start
 css/css-transitions/starting-style-rule-pseudo-elements.html:
 - Triggered transition from display:none to display:block
 - Triggered transition from first style update
