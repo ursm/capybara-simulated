@@ -7178,6 +7178,13 @@ fn grid_placement(grids: &[f64], place_base: usize, col_count: usize, n_items: u
     cells
 }
 
+// Where placement puts the last of a grid's items whose column lines are `places` (3 per item, as the walk writes them):
+// its first column and its span — for a subgrid's walk, which takes its parent's tracks from there.
+pub(crate) fn grid_last_item_columns(places: &[f64], col_count: usize) -> (usize, usize) {
+    let cells = grid_placement(places, 0, col_count, places.len() / 3);
+    cells.last().map_or((0, 1), |cell| (cell.col, cell.span))
+}
+
 // Each column's (min, max) content contribution: the widest item placed in it — a spanning item's contribution
 // divided EVENLY across its columns (coarser than §12.5's spanning-item distribution). `None` when an item's
 // intrinsic widths aren't measurable, which declines the pass rather than lay out a wrong column.

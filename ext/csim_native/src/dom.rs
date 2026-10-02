@@ -1038,6 +1038,9 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_, ()>, ctx: &v8::Global<v8:
     let scope = &mut v8::ContextScope::new(scope, context);
 
     ensure_templates(scope);
+    // What the style engine parses — a property, a selector — is what a page's CSSOM may ask about before any style is
+    // computed (an inline script runs before the first flush), so the switches that decide it are set first.
+    crate::style::enable_properties();
 
     // The arena for this realm is created lazily (realm(scope, cid) on first touch) and cleared per
     // page by resetArena, so a re-installed realm (main = context_id 0 on every reset) reuses its slot

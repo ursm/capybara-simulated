@@ -58,4 +58,30 @@ RSpec.describe 'CSSOM rules' do
       'cyclic', '"a" "b"', 'bar', '@counter-style bar { system: cyclic; suffix: " "; symbols: "a" "b"; }'
     ])
   end
+
+  # A `::-webkit-` pseudo-element no specification defines is valid and matches nothing (Selectors 4), so its rule
+  # stays and the rest of its list applies; `:-webkit-autofill` is `:autofill`'s legacy alias, and serializes as it
+  # (Firefox; Chrome keeps the alias). A selector the engine does not parse makes no rule at all — Chrome drops the
+  # `::-moz-selection` one, and `insertRule` refuses it.
+  it 'keeps a -webkit- pseudo-element rule and drops a selector the engine refuses' do
+    css = '::-webkit-scrollbar { width: 1px } input:-webkit-autofill { color: red } ::-moz-selection { color: blue } ' \
+          '::-webkit-scrollbar, b { color: green }'
+    got = page(css).evaluate_script(<<~JS)
+      (() => {
+        const sheet = document.styleSheets[0], out = [...sheet.cssRules].map((r) => r.selectorText);
+        try { sheet.insertRule('::-moz-selection { color: red }', 0); out.push('inserted'); } catch (e) { out.push(e.name); }
+        const b = document.body.appendChild(document.createElement('b'));
+        return out.concat(getComputedStyle(b).color);
+      })()
+    JS
+    expect(got).to eq(['::-webkit-scrollbar', 'input:autofill', '::-webkit-scrollbar, b', 'SyntaxError', 'rgb(0, 128, 0)'])
+  end
+
+  # `::highlight()` is a pseudo-element the engine parses (never styled here), so a rule naming one is inserted.
+  it 'inserts a ::highlight() rule' do
+    got = page('').evaluate_script(<<~JS)
+      (() => { const sheet = document.styleSheets[0]; sheet.insertRule('.p::highlight(Mine) { color: red }'); return sheet.cssRules[0].selectorText; })()
+    JS
+    expect(got).to eq('.p::highlight(Mine)')
+  end
 end

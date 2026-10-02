@@ -259,4 +259,19 @@ RSpec.describe 'grid track sizing' do
     boxes, = measure(body, %w[#c1 #c2 #d1 #d2 #r1 #r2], style: 'margin:0;font:16px Arial')
     expect(boxes.map {|b| [b[0], b[2]] }).to eq([[0, 100], [110, 200], [110, 203], [317, 53], [0, 100], [100, 300]])
   end
+
+  # An auto-placed subgrid takes the tracks where the grid places it — here the second (Chrome: 50px from the left,
+  # 100px wide, both children stacked in that one column).
+  it 'lays an auto-placed subgrid out on the track it is placed in' do
+    body = <<~HTML
+      <style>
+        #g { display: grid; grid-template-columns: 50px 100px 150px; width: 300px }
+        #s { display: grid; grid-template-columns: subgrid }
+        #s > div { height: 10px }
+      </style>
+      <div id="g"><div></div><div id="s"><div id="s1"></div><div id="s2"></div></div></div>
+    HTML
+    boxes, = measure(body, %w[#s1 #s2], style: 'margin:0;font:16px Arial')
+    expect(boxes.map {|b| [b[0], b[1], b[2]] }).to eq([[50, 0, 100], [50, 10, 100]])
+  end
 end

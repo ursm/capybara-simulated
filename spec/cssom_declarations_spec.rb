@@ -115,6 +115,30 @@ RSpec.describe 'CSSOM declaration blocks' do
     expect(got).to eq('url("http://www.example.com/tw.png")')
   end
 
+  # The shorthands of the longhands a page has (Chrome: each takes its value and serializes it back) — written from an
+  # inline script, which runs before any style is computed: what the engine parses must not wait for it.
+  it 'takes the container, offset, timeline and position-try shorthands' do
+    html = <<~HTML
+      <!DOCTYPE html><html><body><div id="d"></div><script>
+        const d = document.getElementById('d'), out = [];
+        for (const [p, v] of [['container', 'card / inline-size'], ['offset', 'path("M0 0 L 100 0") 20px auto 30deg'], ['scroll-timeline', '--t x'],
+                              ['view-timeline', '--v block'], ['animation-range', 'entry 10% exit 90%'],
+                              ['position-try', 'most-height flip-block']]) {
+          d.removeAttribute('style');
+          d.style.setProperty(p, v);
+          out.push(d.style.cssText);
+        }
+        window.got = out;
+      </script></body></html>
+    HTML
+    s = simulated_session(->(_env) { [200, {'content-type' => 'text/html'}, [html]] })
+    s.visit '/'
+    expect(s.evaluate_script('window.got')).to eq([
+      'container: card / inline-size;', 'offset: path("M 0 0 L 100 0") 20px auto 30deg;', 'scroll-timeline: --t x;', 'view-timeline: --v;',
+      'animation-range: entry 10% exit 90%;', 'position-try: most-height flip-block;'
+    ])
+  end
+
   # A keyframe holds no `!important` declaration, so an important write to one is no write at all — not one that takes
   # the property out of the block.
   it 'writes nothing important into a keyframe' do

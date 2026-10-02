@@ -2569,9 +2569,8 @@ impl<'a> Walk<'a> {
         Ok((items, oof))
     }
 
-    // A `subgrid` column template as the tracks it takes from the grid it is an item of (CSS Grid 2 §9): the ones its
-    // column lines span there — from the first for an auto-placed one, one by default — with that grid's column gap
-    // where its own is `normal`. None for any other template, and for a subgrid with no grid to join, or one whose
+    // A `subgrid` column template as the tracks it takes from the grid it is an item of (CSS Grid 2 §9): the ones it
+    // spans where that grid places it, with that grid's column gap where its own is `normal`. None for any other template, and for a subgrid with no grid to join, or one whose
     // tracks repeat `auto-fill` / `auto-fit` (counted only when laid out), which lays out as `none`.
     // (…gaps: the parent sizes its tracks without the subgrid's items, and the subgrid's own padding and border are
     // not added to the margins of the items at its edges)
@@ -2594,10 +2593,19 @@ impl<'a> Walk<'a> {
         if tracks.repeat_kind != 0.0 {
             return Ok(None);
         }
-        let [start, end, span] = grid_column_placement(style);
-        let first = if start >= 1.0 { start as usize - 1 } else { 0 };
-        let count = if span > 0.0 { span as usize } else if start >= 1.0 && end > start { (end - start) as usize } else { 1 };
-        let first = first.min(tracks.tracks.len() - 1);
+        // (…placed as the layout places it: the parent's items up to this one, each by its column lines)
+        let (items, _) = self.box_items(parent)?;
+        let mut places = Vec::new();
+        for (_, item) in &items {
+            places.extend(match item {
+                FlexItem::Element(c) => grid_column_placement(&*self.style(*c)?),
+                FlexItem::Anonymous(..) => [0.0; 3],
+            });
+            if matches!(item, FlexItem::Element(c) if *c == id) {
+                break;
+            }
+        }
+        let (first, count) = crate::layout::grid_last_item_columns(&places, tracks.tracks.len());
         let mut taken = tracks.tracks[first..(first + count).min(tracks.tracks.len())].to_vec();
         let col_gap = match pos.column_gap {
             OrNormal::Normal => parent_gap,

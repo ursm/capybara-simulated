@@ -42789,23 +42789,6 @@ html/semantics/forms/the-select-element/customizable-select/select-input-parsing
   reason: Unratified WPT .tentative spec in active redesign (whatwg/html#12050); implementing
     bakes in churn (tried + reverted). No app dependency. Deferred until it ratifies
     (then re-enters in-scope).
-html/semantics/forms/the-select-element/customizable-select/select-picker-popover-open-invalid.tentative.html:
-- name: '"::picker(select):popover-open" should be an invalid selector'
-  reason: 'Unratified `.tentative` spec, so out per CLAUDE.md rule 1 — but the failure
-    is a REAL driver gap, not spec churn: our selector parser ACCEPTS `::picker(select):popover-open`
-    where it must reject it (a pseudo-class after a pseudo-element that does not permit
-    one). It reads as new here only because this file was silently EMPTY until `/css/support/parsing-testcommon.js`
-    was vendored (it 404d, `test_invalid_selector` was undefined, the file completed
-    with zero subtests and the gate never saw it). Fix the parser when `::picker()`
-    ratifies and this re-enters in scope.'
-- name: '"select::picker(select):popover-open" should be an invalid selector'
-  reason: 'Unratified `.tentative` spec, so out per CLAUDE.md rule 1 — but the failure
-    is a REAL driver gap, not spec churn: our selector parser ACCEPTS `::picker(select):popover-open`
-    where it must reject it (a pseudo-class after a pseudo-element that does not permit
-    one). It reads as new here only because this file was silently EMPTY until `/css/support/parsing-testcommon.js`
-    was vendored (it 404d, `test_invalid_selector` was undefined, the file completed
-    with zero subtests and the gate never saw it). Fix the parser when `::picker()`
-    ratifies and this re-enters in scope.'
 html/semantics/forms/the-select-element/customizable-select/select-type-to-search.tentative.html:
 - name: Type to search should focus but not select an option until selection is confirmed.
   reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
