@@ -165,6 +165,10 @@ pub(crate) struct NodeData {
     // What the style engine keeps on a node (an element's id atom, parsed `style` attribute and computed style; a
     // parent's selector flags): made the first time the engine asks, so a realm with no style engine pays a pointer.
     pub(crate) style: std::cell::OnceCell<Box<crate::style::StyleSlot>>,
+    // The declaration block a CSSOM write made of an element's `style` attribute, and the text it wrote there — what
+    // the style engine computes the element's style from while the attribute still holds that text, rather than a
+    // parse of it (cssom_decl.rs: the text rounds what the write said).
+    pub(crate) written_style: Option<Box<(String, style::properties::PropertyDeclarationBlock)>>,
     // The layout epoch (`RealmArena::layout_epoch`) at which this node's FLAT SUBTREE — it, or anything the flat tree
     // puts under it — last changed in a way a layout walk reads: its data, children, attributes, state or style. A
     // subtree stamped no later than the epoch the last walk began at is built as that walk built it (`walk_reuse`).
@@ -222,6 +226,7 @@ impl NodeData {
             natural_size: None,
             pseudo_boxes: [None; 2],
             style: std::cell::OnceCell::new(),
+            written_style: None,
             stamp: std::cell::Cell::new(0),
         }
     }
@@ -1079,6 +1084,7 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_, ()>, ctx: &v8::Global<v8:
     register(scope, ns, "declNames", decl_names, context_id);
     register(scope, ns, "declSet", decl_set, context_id);
     register(scope, ns, "declRemove", decl_remove, context_id);
+    register(scope, ns, "declReplace", decl_replace, context_id);
     register(scope, ns, "declSupports", decl_supports, context_id);
     register(scope, ns, "declSupportsCondition", decl_supports_condition, context_id);
     register(scope, ns, "styleShown", style_shown, context_id);
@@ -2185,9 +2191,9 @@ fn style_supports(
     rv.set_bool(crate::style::supports_property(&name));
 }
 
-// The declaration-block ops (cssom_decl.rs): `(text, kind, quirks, base, …)` — `kind` 0 a style rule's block (an
+// The declaration-block ops (cssom_decl.rs): `(text, kind, quirks, base, …, nid)` — `kind` 0 a style rule's block (an
 // element's `style` attribute is one), 1 a keyframe's, 2 a page's, 3 an `@font-face` rule's descriptors; `base` the
-// document's base URL.
+// document's base URL; `nid` the element whose `style` attribute it is, -1 for any other block.
 fn decl_key(scope: &mut v8::PinScope<'_, '_>, args: &v8::FunctionCallbackArguments<'_>) -> crate::cssom_decl::Key {
     let text = args.get(0).to_rust_string_lossy(scope);
     let kind = crate::cssom_decl::Kind::from_u32(args.get(1).uint32_value(scope).unwrap_or(0));
@@ -2199,53 +2205,100 @@ fn set_str(scope: &mut v8::PinScope<'_, '_>, rv: &mut v8::ReturnValue<'_, v8::Va
         rv.set(s.into());
     }
 }
-// __dom.declValue(text, kind, quirks, base, name) -> `getPropertyValue(name)`.
+// __dom.declValue(text, kind, quirks, base, name, nid) -> `getPropertyValue(name)`.
 fn decl_value(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let key = decl_key(scope, &args);
+    let made = written_style(scope, &args, 5);
     let name = args.get(4).to_rust_string_lossy(scope);
-    let value = crate::cssom_decl::value(&key, &name);
+    let value = crate::cssom_decl::value(&key, made.as_ref(), &name);
     set_str(scope, &mut rv, &value);
 }
-// __dom.declImportant(text, kind, quirks, base, name) -> whether `getPropertyPriority(name)` is `important`.
+// __dom.declImportant(text, kind, quirks, base, name, nid) -> whether `getPropertyPriority(name)` is `important`.
 fn decl_important(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let key = decl_key(scope, &args);
+    let made = written_style(scope, &args, 5);
     let name = args.get(4).to_rust_string_lossy(scope);
-    rv.set_bool(crate::cssom_decl::important(&key, &name));
+    rv.set_bool(crate::cssom_decl::important(&key, made.as_ref(), &name));
 }
-// __dom.declText(text, kind, quirks, base) -> `cssText`.
+// __dom.declText(text, kind, quirks, base, nid) -> `cssText`.
 fn decl_text(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let key = decl_key(scope, &args);
-    let css = crate::cssom_decl::css_text(&key);
+    let made = written_style(scope, &args, 4);
+    let css = crate::cssom_decl::css_text(&key, made.as_ref());
     set_str(scope, &mut rv, &css);
 }
-// __dom.declNames(text, kind, quirks, base) -> the declared longhand and custom property names, in order.
+// __dom.declNames(text, kind, quirks, base, nid) -> the declared longhand and custom property names, in order.
 fn decl_names(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let key = decl_key(scope, &args);
-    let names = crate::cssom_decl::names(&key);
+    let made = written_style(scope, &args, 4);
+    let names = crate::cssom_decl::names(&key, made.as_ref());
     let items: Vec<v8::Local<v8::Value>> = names.iter().filter_map(|n| v8::String::new(scope, n)).map(Into::into).collect();
     rv.set(v8::Array::new_with_elements(scope, &items).into());
 }
-// __dom.declSet(text, kind, quirks, base, name, value, important) -> the new text, or null where the block did not change.
+// __dom.declSet(text, kind, quirks, base, name, value, important, nid) -> the new text, or null where the block did not change.
 fn decl_set(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let key = decl_key(scope, &args);
     let name = args.get(4).to_rust_string_lossy(scope);
     let value = args.get(5).to_rust_string_lossy(scope);
-    match crate::cssom_decl::set(&key, &name, &value, args.get(6).is_true()) {
-        Some(css) => set_str(scope, &mut rv, &css),
+    let made = written_style(scope, &args, 7);
+    match crate::cssom_decl::set(&key, made.as_ref(), &name, &value, args.get(6).is_true()) {
+        Some(written) => {
+            set_str(scope, &mut rv, &written.text);
+            keep_written_style(scope, &args, 7, written);
+        }
         None => rv.set_null(),
     }
 }
-// __dom.declRemove(text, kind, quirks, base, name) -> [the value it had, the new text or null where it set nothing].
+// __dom.declRemove(text, kind, quirks, base, name, nid) -> [the value it had, the new text or null where it set nothing].
 fn decl_remove(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let key = decl_key(scope, &args);
     let name = args.get(4).to_rust_string_lossy(scope);
-    let (old, css) = crate::cssom_decl::remove(&key, &name);
+    let made = written_style(scope, &args, 5);
+    let (old, written) = crate::cssom_decl::remove(&key, made.as_ref(), &name);
     let old: v8::Local<v8::Value> = v8::String::new(scope, &old).map(Into::into).unwrap_or_else(|| v8::null(scope).into());
-    let css: v8::Local<v8::Value> = match css {
-        Some(css) => v8::String::new(scope, &css).map(Into::into).unwrap_or_else(|| v8::null(scope).into()),
+    let css: v8::Local<v8::Value> = match &written {
+        Some(written) => v8::String::new(scope, &written.text).map(Into::into).unwrap_or_else(|| v8::null(scope).into()),
         None => v8::null(scope).into(),
     };
     rv.set(v8::Array::new_with_elements(scope, &[old, css]).into());
+    if let Some(written) = written {
+        keep_written_style(scope, &args, 5, written);
+    }
+}
+// __dom.declReplace(text, kind, quirks, base, nid) -> the block `text` parses to, serialized: `cssText`'s setter.
+fn decl_replace(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let key = decl_key(scope, &args);
+    let written = crate::cssom_decl::replace(&key);
+    set_str(scope, &mut rv, &written.text);
+    keep_written_style(scope, &args, 4, written);
+}
+// The block the element's last write made — argument `at` its nid, -1 for a rule's or a detached declaration's — while
+// its `style` attribute still holds the text that write wrote (argument 0): what the next write starts from.
+fn written_style(
+    scope: &mut v8::PinScope<'_, '_>,
+    args: &v8::FunctionCallbackArguments<'_>,
+    at: i32,
+) -> Option<style::properties::PropertyDeclarationBlock> {
+    let id = nid_arg(scope, args, at)?;
+    let text = args.get(0).to_rust_string_lossy(scope);
+    let cid = realm_id(scope, args);
+    let written = realm(scope, cid).get(id)?.written_style.as_ref()?;
+    (written.0 == text).then(|| written.1.clone())
+}
+// …and where the block is an element's `style` attribute, the block the write made, kept on the element
+// (`NodeData::written_style`).
+fn keep_written_style(
+    scope: &mut v8::PinScope<'_, '_>,
+    args: &v8::FunctionCallbackArguments<'_>,
+    at: i32,
+    written: crate::cssom_decl::Written,
+) {
+    let Some(block) = written.block else { return };
+    let Some(id) = nid_arg(scope, args, at) else { return };
+    let cid = realm_id(scope, args);
+    if let Some(node) = realm(scope, cid).get_mut(id) {
+        node.written_style = Some(Box::new((written.text, block)));
+    }
 }
 // __dom.declSupports(name, value) -> `CSS.supports(name, value)`.
 fn decl_supports(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {

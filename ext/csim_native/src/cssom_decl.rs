@@ -7,9 +7,9 @@
 // The block lives as TEXT on the JS side (the attribute's value, the rule's text), and every op here takes that text and
 // answers from its parse — kept per (text, kind, mode, base) in a bounded map, so the reads a page makes of one block
 // between two writes parse it once. A write answers the new text, or nothing where the block did not change (no
-// attribute write, no mutation record: CSSOM "update style attribute" only runs on a change) — and keeps the block it
-// MADE under that text, which is what the page's style is computed from (`style_attribute_block`): the text is its
-// serialization, six significant digits to a number, and parsing that back would lose what the write said
+// attribute write, no mutation record: CSSOM "update style attribute" only runs on a change) — and the block it MADE,
+// which an element keeps (dom.rs `NodeData::written_style`) and the style engine computes the element's style from: the
+// text is its serialization, six significant digits to a number, and parsing that back would lose what the write said
 // (`cubic-bezier(0, 1.123456789, …)`), where a browser's attribute steps leave the written block in place.
 
 use std::cell::RefCell;
@@ -21,7 +21,7 @@ use style::context::QuirksMode;
 use style::font_face::{parse_font_face_block, DescriptorId, Descriptors};
 use style::parser::ParserContext;
 use style::properties::{
-    parse_one_declaration_into, parse_style_attribute, Importance, PropertyDeclarationBlock, PropertyId,
+    parse_one_declaration_into, parse_style_attribute, Importance, PropertyDeclaration, PropertyDeclarationBlock, PropertyId,
     SourcePropertyDeclaration, SourcePropertyDeclarationUpdate,
 };
 use style::stylesheets::supports_rule::parse_condition_or_declaration;
@@ -100,8 +100,14 @@ enum Block {
     Descriptors(Descriptors),
 }
 
+// What a write made: the block's new text, and — for a block of properties — the block itself.
+pub(crate) struct Written {
+    pub(crate) text: String,
+    pub(crate) block: Option<PropertyDeclarationBlock>,
+}
+
 const CACHE_LIMIT: usize = 4096;
-// Where a block is kept: its text, its kind, its document's mode and base.
+// Where a block's parse is kept: its text, its kind, its document's mode and base.
 #[derive(Clone, PartialEq, Eq, Hash)]
 pub(crate) struct Key {
     text: String,
@@ -110,25 +116,12 @@ pub(crate) struct Key {
     base: String,
 }
 impl Key {
-    // (…the base as a URL serializes, as the engine's own is: a `style` attribute's block is found by the engine's)
     pub(crate) fn new(text: &str, kind: Kind, quirks: bool, base: &str) -> Key {
-        Key { text: text.to_owned(), kind, quirks, base: url_data(base).0.as_str().to_owned() }
-    }
-    fn with_text(&self, text: String) -> Key {
-        Key { text, ..self.clone() }
+        Key { text: text.to_owned(), kind, quirks, base: base.to_owned() }
     }
 }
 thread_local! {
     static BLOCKS: RefCell<HashMap<Key, Rc<Block>>> = RefCell::new(HashMap::new());
-}
-fn keep(key: Key, block: Rc<Block>) {
-    BLOCKS.with(|b| {
-        let mut b = b.borrow_mut();
-        if b.len() >= CACHE_LIMIT {
-            b.clear();
-        }
-        b.insert(key, block);
-    });
 }
 
 // The parse of the key's text — the declaration list inside the block's braces — as a block of its kind, in its
@@ -137,32 +130,60 @@ fn parsed(key: &Key) -> Rc<Block> {
     if let Some(block) = BLOCKS.with(|b| b.borrow().get(key).cloned()) {
         return block;
     }
-    let (text, kind, quirks) = (key.text.as_str(), key.kind, key.quirks);
+    let block = Rc::new(parse(key));
+    BLOCKS.with(|b| {
+        let mut b = b.borrow_mut();
+        if b.len() >= CACHE_LIMIT {
+            b.clear();
+        }
+        b.insert(key.clone(), block.clone());
+    });
+    block
+}
+fn parse(key: &Key) -> Block {
     let url = url_data(&key.base);
-    let block = Rc::new(match kind {
+    match key.kind {
         Kind::FontFace => {
-            let context = context(&url, kind, quirks);
-            let mut input = ParserInput::new(text);
+            let context = context(&url, key.kind, key.quirks);
+            let mut input = ParserInput::new(&key.text);
             let mut parser = Parser::new(&mut input);
             Block::Descriptors(parse_font_face_block(&context, &mut parser, SourceLocation { line: 0, column: 0 }).descriptors)
         }
-        _ => Block::Properties(parse_style_attribute(text, &url, None, mode(quirks), kind.rule_type())),
-    });
-    keep(key.clone(), block.clone());
-    block
-}
-
-// The block a CSSOM write made of an element's `style` attribute, where `css` is the text it wrote — what the engine
-// computes the element's style from, rather than a parse of that text (see above).
-pub(crate) fn style_attribute_block(css: &str, quirks: bool, base: &str) -> Option<PropertyDeclarationBlock> {
-    match &*BLOCKS.with(|b| b.borrow().get(&Key::new(css, Kind::Style, quirks, base)).cloned())? {
-        Block::Properties(block) => Some(block.clone()),
-        Block::Descriptors(_) => None,
+        kind => {
+            let mut block = parse_style_attribute(&key.text, &url, None, mode(key.quirks), kind.rule_type());
+            // (…which the engine's own parse admits, and a page's block holds none of — but for the CSS-wide keyword an
+            // `all` gives every longhand it covers, which is what lets the block serialize as `all` again)
+            let internal: Vec<PropertyId> = block
+                .declarations()
+                .iter()
+                .filter(|d| !matches!(d, PropertyDeclaration::CSSWideKeyword(_)))
+                .map(|d| d.id())
+                .filter(|id| !exposed(&id.name()))
+                .filter_map(|id| PropertyId::parse_enabled_for_all_content(&id.name()).ok())
+                .collect();
+            for id in internal {
+                if let Some(first) = block.first_declaration_to_remove(&id) {
+                    block.remove_property(&id, first);
+                }
+            }
+            Block::Properties(block)
+        }
     }
 }
 
-fn property(name: &str) -> Option<PropertyId> {
-    PropertyId::parse_enabled_for_all_content(name).ok()
+// The engine's internal properties — the UA sheet's and its own bookkeeping, which it parses wherever it parses
+// author CSS — are no page's to see: Gecko keeps them out of content, as Chrome has none of them.
+fn exposed(name: &str) -> bool {
+    !(name.starts_with("-moz-") || name.starts_with("-x-") || name.starts_with("-servo-") ||
+      matches!(name, "masonry-auto-flow" | "link-parameters"))
+}
+
+// `name` as a property a block of the key's kind may declare (a keyframe takes no animation property, a page no
+// `display`), and one a page can see.
+fn property(name: &str, key: &Key) -> Option<PropertyId> {
+    let url = url_data(&key.base);
+    let id = PropertyId::parse(name, &context(&url, key.kind, key.quirks)).ok()?;
+    exposed(&name.to_ascii_lowercase()).then_some(id)
 }
 
 fn descriptor(name: &str) -> Option<DescriptorId> {
@@ -173,19 +194,25 @@ fn descriptor(name: &str) -> Option<DescriptorId> {
 
 fn serialize(block: &Block) -> String {
     let mut out = String::new();
-    let _ = match block {
-        Block::Properties(block) => block.to_css(&mut out),
-        Block::Descriptors(descriptors) => descriptors.to_css(&mut CssWriter::new(&mut out)),
-    };
+    match block {
+        Block::Properties(block) => {
+            let _ = block.to_css(&mut out);
+        }
+        Block::Descriptors(descriptors) => {
+            let _ = descriptors.to_css(&mut CssWriter::new(&mut out));
+            // (…which writes `; ` after each descriptor, the last one too)
+            out.truncate(out.trim_end().len());
+        }
+    }
     out
 }
 
 // `getPropertyValue(name)`: '' for what the block does not set, and for a name it cannot hold.
-pub(crate) fn value(key: &Key, name: &str) -> String {
+pub(crate) fn value(key: &Key, made: Option<&PropertyDeclarationBlock>, name: &str) -> String {
     let mut out = String::new();
-    match &*parsed(key) {
+    match &*current(key, made) {
         Block::Properties(block) => {
-            if let Some(id) = property(name) {
+            if let Some(id) = property(name, key) {
                 let _ = block.property_value_to_css(&id, &mut out);
             }
         }
@@ -199,38 +226,60 @@ pub(crate) fn value(key: &Key, name: &str) -> String {
 }
 
 // `getPropertyPriority(name)` is `important` (a descriptor never is).
-pub(crate) fn important(key: &Key, name: &str) -> bool {
-    match &*parsed(key) {
-        Block::Properties(block) => property(name).is_some_and(|id| block.property_priority(&id).important()),
+pub(crate) fn important(key: &Key, made: Option<&PropertyDeclarationBlock>, name: &str) -> bool {
+    match &*current(key, made) {
+        Block::Properties(block) => property(name, key).is_some_and(|id| block.property_priority(&id).important()),
         Block::Descriptors(_) => false,
     }
 }
 
 // `cssText`.
-pub(crate) fn css_text(key: &Key) -> String {
-    serialize(&parsed(key))
+pub(crate) fn css_text(key: &Key, made: Option<&PropertyDeclarationBlock>) -> String {
+    serialize(&current(key, made))
 }
 
 // The names `length`, `item()` and iteration walk, in the block's order: every longhand, custom property or descriptor
-// it sets.
-pub(crate) fn names(key: &Key) -> Vec<String> {
-    match &*parsed(key) {
-        Block::Properties(block) => block.declarations().iter().map(|d| d.id().name().to_string()).collect(),
+// it sets that a page can see.
+pub(crate) fn names(key: &Key, made: Option<&PropertyDeclarationBlock>) -> Vec<String> {
+    match &*current(key, made) {
+        Block::Properties(block) => {
+            block.declarations().iter().map(|d| d.id().name().to_string()).filter(|n| exposed(n)).collect()
+        }
         Block::Descriptors(descriptors) => {
             (0..descriptors.len()).filter_map(|i| descriptors.at(i)).map(|id| id.name().to_owned()).collect()
         }
     }
 }
 
-// `setProperty(name, value, important)` — the block's new text, or None where it did not change: a name the block
-// cannot hold, a value that does not parse, or the same declaration again. (An empty value is `removeProperty`, the
-// caller's.)
-pub(crate) fn set(key: &Key, name: &str, value: &str, important: bool) -> Option<String> {
-    let (kind, quirks) = (key.kind, key.quirks);
+fn written(block: Block) -> Written {
+    let text = serialize(&block);
+    Written { text, block: match block { Block::Properties(block) => Some(block), Block::Descriptors(_) => None } }
+}
+
+// The block a read or a write is of: the one the last write MADE where the caller still holds it (an element's
+// `written_style`, while its attribute holds the text that write wrote) — a parse of that text would round what it
+// said, and lose what its serialization cannot say — else the parse of the key's text.
+fn current(key: &Key, made: Option<&PropertyDeclarationBlock>) -> Rc<Block> {
+    match made {
+        Some(block) => Rc::new(Block::Properties(block.clone())),
+        None => parsed(key),
+    }
+}
+
+// `setProperty(name, value, important)` — what the write made, or None where the block did not change: a name the
+// block cannot hold, a value that does not parse, or the same declaration again. (An empty value is `removeProperty`,
+// the caller's.)
+pub(crate) fn set(
+    key: &Key,
+    made: Option<&PropertyDeclarationBlock>,
+    name: &str,
+    value: &str,
+    important: bool,
+) -> Option<Written> {
     let url = url_data(&key.base);
-    match &*parsed(key) {
+    match &*current(key, made) {
         Block::Properties(current) => {
-            let id = property(name)?;
+            let id = property(name, key)?;
             let mut source = SourcePropertyDeclaration::default();
             parse_one_declaration_into(
                 &mut source,
@@ -240,8 +289,8 @@ pub(crate) fn set(key: &Key, name: &str, value: &str, important: bool) -> Option
                 &url,
                 None,
                 ParsingMode::DEFAULT,
-                mode(quirks),
-                kind.rule_type(),
+                mode(key.quirks),
+                key.kind.rule_type(),
             )
             .ok()?;
             let importance = if important { Importance::Important } else { Importance::Normal };
@@ -251,13 +300,13 @@ pub(crate) fn set(key: &Key, name: &str, value: &str, important: bool) -> Option
                 return None;
             }
             block.update(source.drain(), importance, &mut updates);
-            Some(made(key, Block::Properties(block)))
+            Some(written(Block::Properties(block)))
         }
         Block::Descriptors(current) => {
             if important {
                 return None;
             }
-            let context = context(&url, kind, quirks);
+            let context = context(&url, key.kind, key.quirks);
             let id = descriptor(name)?;
             let mut descriptors = current.clone();
             let mut input = ParserInput::new(value);
@@ -265,28 +314,21 @@ pub(crate) fn set(key: &Key, name: &str, value: &str, important: bool) -> Option
             if !descriptors.set(id, &context, &mut parser).ok()? {
                 return None;
             }
-            Some(made(key, Block::Descriptors(descriptors)))
+            Some(written(Block::Descriptors(descriptors)))
         }
     }
 }
 
-// A block a write made: kept under the text it serializes to, which is what the write answers.
-fn made(key: &Key, block: Block) -> String {
-    let text = serialize(&block);
-    keep(key.with_text(text.clone()), Rc::new(block));
-    text
-}
-
-// `removeProperty(name)` — the value it had, and the block's new text where it set the name at all.
-pub(crate) fn remove(key: &Key, name: &str) -> (String, Option<String>) {
-    let old = value(key, name);
-    match &*parsed(key) {
+// `removeProperty(name)` — the value it had, and what the write made where the block set the name at all.
+pub(crate) fn remove(key: &Key, made: Option<&PropertyDeclarationBlock>, name: &str) -> (String, Option<Written>) {
+    let old = value(key, made, name);
+    match &*current(key, made) {
         Block::Properties(current) => {
-            let Some(id) = property(name) else { return (old, None) };
+            let Some(id) = property(name, key) else { return (old, None) };
             let Some(first) = current.first_declaration_to_remove(&id) else { return (old, None) };
             let mut block = current.clone();
             block.remove_property(&id, first);
-            (old, Some(made(key, Block::Properties(block))))
+            (old, Some(written(Block::Properties(block))))
         }
         Block::Descriptors(current) => {
             let Some(id) = descriptor(name) else { return (old, None) };
@@ -294,14 +336,21 @@ pub(crate) fn remove(key: &Key, name: &str) -> (String, Option<String>) {
             if !descriptors.remove(id) {
                 return (old, None);
             }
-            (old, Some(made(key, Block::Descriptors(descriptors))))
+            (old, Some(written(Block::Descriptors(descriptors))))
         }
     }
 }
 
-// `CSS.supports(name, value)`: the property is one the engine implements, and the value parses as it.
+// `cssText`'s setter: the block the key's text parses to, as a write made it.
+pub(crate) fn replace(key: &Key) -> Written {
+    written(parse(key))
+}
+
+// `CSS.supports(name, value)`: the property is one the engine implements and a page can see, and the value parses as
+// it.
 pub(crate) fn supports(name: &str, value: &str) -> bool {
-    let Some(id) = property(name) else { return false };
+    let key = Key::new("", Kind::Style, false, "about:blank");
+    let Some(id) = property(name, &key) else { return false };
     let mut source = SourcePropertyDeclaration::default();
     parse_one_declaration_into(
         &mut source,

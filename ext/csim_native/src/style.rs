@@ -2951,12 +2951,15 @@ impl<'a> TElement for StyleNode<'a> {
     fn style_attribute(&self) -> Option<ArcBorrow<'_, Locked<PropertyDeclarationBlock>>> {
         // SAFETY: the cell is only emptied between traversals (`clear_caches`, `attr_changed` through `&mut`).
         let parsed = unsafe { &*self.slot().style_attr.get() }.get_or_init(|| {
-            let css = self.node().plain_attr("style")?;
+            let node = self.node();
+            let css = node.plain_attr("style")?;
             let engine = self.engine();
-            // (…the block a CSSOM write made, where this text is the one it wrote: its serialization rounds what the
-            // write said — cssom_decl.rs)
-            let block = crate::cssom_decl::style_attribute_block(css, engine.quirks == QuirksMode::Quirks, engine.url.0.as_str())
-                .unwrap_or_else(|| parse_style_attribute(css, &engine.url, None, engine.quirks, CssRuleType::Style));
+            // (…the block a CSSOM write made, while the attribute holds the text it wrote: its serialization rounds what
+            // the write said — cssom_decl.rs)
+            let block = match &node.written_style {
+                Some(written) if written.0 == css => written.1.clone(),
+                _ => parse_style_attribute(css, &engine.url, None, engine.quirks, CssRuleType::Style),
+            };
             Some(Arc::new(engine.lock.wrap(block)))
         });
         parsed.as_ref().map(|a| a.borrow_arc())

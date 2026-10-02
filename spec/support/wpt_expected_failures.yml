@@ -1823,8 +1823,6 @@ css/cssom/cssom-fontfacerule-constructors.html:
 - The style attribute must return a CSSFontFaceDescriptors block
 css/cssom/cssom-getPropertyValue-common-checks.html:
 - All shorthands can serialize their longhands set to 'initial'
-- Can't serialize shorthand when longhands are set to different css-wide keywords
-- Can't serialize shorthand when longhands have different priority
 css/cssom/cssstyledeclaration-nested.html:
 - CSSNestedDeclarationBlock cssom interactions
 css/cssom/cssstyledeclaration-registered-custom-properties.html:
@@ -1981,9 +1979,6 @@ css/cssom/page-descriptors.html:
 - CSSPageDescriptors properties tests
 css/cssom/preferred-stylesheet-reversed-order.html:
 - Preferred stylesheet where insertion order is tree order
-css/cssom/rule-restrictions.html:
-- "@keyframe"
-- "@page"
 css/cssom/selectorSerialize.html:
 - escaped character as code point in attribute name
 css/cssom/serialize-values.html:
