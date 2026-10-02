@@ -7,6 +7,7 @@ require 'capybara/simulated'
 require 'rack'
 require_relative 'support/session_teardown'
 require_relative 'support/shadow_parity'
+require_relative 'support/layout_golden'
 
 RSpec.describe 'native layout web-font parity' do
   FONT_TTF   = File.binread(File.expand_path('wpt/fonts/Ahem.ttf', __dir__))
@@ -37,10 +38,12 @@ RSpec.describe 'native layout web-font parity' do
   end
 
   def expect_parity(body, **opts)
-    r = run_shadow(body, **opts)
-    expect(r).to include('ok' => true), "harness bailed: #{r.inspect}"
-    expect(r['mismatches']).to eq(0), "mismatch: #{r.inspect}"
-    expect_no_dropped_records(r, body)
+    expect_layout_golden(body, app: page(body, **opts), variant: opts.empty? ? nil : opts.inspect) do
+      r = run_shadow(body, **opts)
+      expect(r).to include('ok' => true), "harness bailed: #{r.inspect}"
+      expect(r['mismatches']).to eq(0), "mismatch: #{r.inspect}"
+      expect_no_dropped_records(r, body)
+    end
   end
 
   it 'matches a single-line text block in a TTF web font' do

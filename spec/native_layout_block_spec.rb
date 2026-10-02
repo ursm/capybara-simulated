@@ -11,6 +11,7 @@ require 'capybara/simulated'
 require 'rack'
 require_relative 'support/session_teardown'
 require_relative 'support/shadow_parity'
+require_relative 'support/layout_golden'
 require_relative 'support/walk_refusals'
 
 RSpec.describe 'native layout L1 block-flow parity' do
@@ -412,11 +413,13 @@ RSpec.describe 'native layout L1 block-flow parity' do
   # neither sizing nor shifting the in-flow siblings. An abspos TABLE container and an
   # abspos subtree native can't lay out still decline.
   def expect_parity(body)
-    session = simulated_session(page(body)); session.visit '/'
-    r = parity(session)
-    expect(r).to include('ok' => true), "harness bailed: #{r.inspect}"
-    expect(r['mismatches']).to eq(0), "mismatch: #{r.inspect}"
-    expect_no_dropped_records(r, body)
+    expect_layout_golden(body) do
+      session = simulated_session(page(body)); session.visit '/'
+      r = parity(session)
+      expect(r).to include('ok' => true), "harness bailed: #{r.inspect}"
+      expect(r['mismatches']).to eq(0), "mismatch: #{r.inspect}"
+      expect_no_dropped_records(r, body)
+    end
   end
 
   def expect_bail(body)

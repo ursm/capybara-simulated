@@ -7,6 +7,7 @@ require 'capybara/simulated'
 require 'rack'
 require_relative 'support/session_teardown'
 require_relative 'support/shadow_parity'
+require_relative 'support/layout_golden'
 
 RSpec.describe 'native layout nowrap parity' do
   def page(body)
@@ -27,16 +28,18 @@ RSpec.describe 'native layout nowrap parity' do
   # `chrome_x` is the page-visible x of `#m`, for a rule both engines were free to get wrong together while
   # the walk declined the shape: parity says nothing about a shape neither engine ever laid out.
   def expect_parity(body, chrome_x = nil)
-    run_shadow(body) do |r, session|
-      expect(r).to include('ok' => true), "harness bailed: #{r.inspect}"
-      expect(r['compared']).to be > 0, "nothing was compared: #{body}: #{r.inspect}"
-      expect(r['mismatches']).to eq(0), "mismatch: #{r.inspect}"
-      expect_no_dropped_records(r, body)
-      next if chrome_x.nil?
-
-      x = session.evaluate_script("document.querySelector('#m').getBoundingClientRect().x")
-      expect(x).to be_within(0.05).of(chrome_x), "#{body}: #m at x #{x}, Chrome #{chrome_x}"
+    expect_layout_golden(body) do
+      run_shadow(body) do |r, _session|
+        expect(r).to include('ok' => true), "harness bailed: #{r.inspect}"
+        expect(r['compared']).to be > 0, "nothing was compared: #{body}: #{r.inspect}"
+        expect(r['mismatches']).to eq(0), "mismatch: #{r.inspect}"
+        expect_no_dropped_records(r, body)
+      end
     end
+    return if chrome_x.nil?
+
+    x = laid_out_rect(body).first
+    expect(x).to be_within(0.05).of(chrome_x), "#{body}: #m at x #{x}, Chrome #{chrome_x}"
   end
 
   def expect_bail(body)

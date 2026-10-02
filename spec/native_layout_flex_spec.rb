@@ -26,6 +26,7 @@ require 'capybara/simulated'
 require 'rack'
 require_relative 'support/session_teardown'
 require_relative 'support/shadow_parity'
+require_relative 'support/layout_golden'
 require_relative 'support/walk_refusals'
 
 RSpec.describe 'native layout flex parity' do
@@ -73,10 +74,12 @@ RSpec.describe 'native layout flex parity' do
   end
 
   def expect_parity(body)
-    r = run_shadow(body)
-    expect(r).to include('ok' => true), "harness bailed: #{r.inspect}"
-    expect(r['mismatches']).to eq(0), "mismatch: #{r.inspect}"
-    expect_no_dropped_records(r, body)
+    expect_layout_golden(body) do
+      r = run_shadow(body)
+      expect(r).to include('ok' => true), "harness bailed: #{r.inspect}"
+      expect(r['mismatches']).to eq(0), "mismatch: #{r.inspect}"
+      expect_no_dropped_records(r, body)
+    end
   end
 
   # Parity, AND the row's item widths were resolved by the native engine (`flex_row_sizes`), not pushed —
