@@ -168,7 +168,7 @@ pub(crate) struct NodeData {
     // The declaration block a CSSOM write made of an element's `style` attribute, and the text it wrote there — what
     // the style engine computes the element's style from while the attribute still holds that text, rather than a
     // parse of it (cssom_decl.rs: the text rounds what the write said).
-    pub(crate) written_style: Option<Box<(String, style::properties::PropertyDeclarationBlock)>>,
+    pub(crate) written_style: Option<Box<crate::cssom_decl::WrittenStyle>>,
     // The layout epoch (`RealmArena::layout_epoch`) at which this node's FLAT SUBTREE — it, or anything the flat tree
     // puts under it — last changed in a way a layout walk reads: its data, children, attributes, state or style. A
     // subtree stamped no later than the epoch the last walk began at is built as that walk built it (`walk_reuse`).
@@ -307,7 +307,7 @@ impl NodeData {
     // the block a CSSOM write made of the `style` attribute stops being the attribute's once it holds any other text.
     fn attr_changed(&mut self, name: Option<&str>) {
         if name.is_none_or(|n| n == "style") &&
-            self.written_style.as_ref().is_some_and(|w| self.plain_attr("style") != Some(w.0.as_str()))
+            self.written_style.as_ref().is_some_and(|w| self.plain_attr("style") != Some(w.text()))
         {
             self.written_style = None;
         }
@@ -1071,6 +1071,9 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_, ()>, ctx: &v8::Global<v8:
     register(scope, ns, "matchesId", matches_id, context_id);
     register(scope, ns, "closestId", closest_id, context_id);
     register(scope, ns, "selectorValid", selector_valid, context_id);
+    register(scope, ns, "selectorText", selector_text, context_id);
+    register(scope, ns, "namespacePrelude", namespace_prelude, context_id);
+    register(scope, ns, "counterStyleRule", counter_style_rule, context_id);
     register(scope, ns, "xpathPrefixes", xpath_prefixes, context_id);
     register(scope, ns, "xpathEvaluate", xpath_evaluate, context_id);
     register(scope, ns, "resetArena", reset_arena, context_id);
@@ -1081,7 +1084,7 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_, ()>, ctx: &v8::Global<v8:
     register(scope, ns, "styleSheetFacts", style_sheet_facts, context_id);
     register(scope, ns, "styleShadowSheets", style_shadow_sheets, context_id);
     register(scope, ns, "styleValue", style_value, context_id);
-    register(scope, ns, "styleSupports", style_supports, context_id);
+    register(scope, ns, "styleProperties", style_properties, context_id);
     // CSSOM's declaration blocks, over the engine's (cssom_decl.rs): each takes the block's TEXT, its kind and the
     // document's mode.
     register(scope, ns, "declValue", decl_value, context_id);
@@ -1860,6 +1863,61 @@ fn selector_valid(
     rv.set_bool(crate::selector::is_valid(&text));
 }
 
+// __dom.selectorText(text, defaultNamespace, [prefix, uri, …], nested) -> a style rule's selector list as the style engine
+// parses and serializes it, or null where it does not parse (cssom_rule.rs).
+fn selector_text(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let text = args.get(0).to_rust_string_lossy(scope);
+    let default = args.get(1);
+    let default = (!default.is_null_or_undefined()).then(|| default.to_rust_string_lossy(scope));
+    let mut prefixes = Vec::new();
+    if let Ok(flat) = v8::Local::<v8::Array>::try_from(args.get(2)) {
+        for i in (0..flat.length()).step_by(2) {
+            let (Some(prefix), Some(uri)) = (flat.get_index(scope, i), flat.get_index(scope, i + 1)) else { break };
+            prefixes.push((prefix.to_rust_string_lossy(scope), uri.to_rust_string_lossy(scope)));
+        }
+    }
+    let nested = args.get(3).is_true();
+    match crate::cssom_rule::selector_text(&text, default.as_deref(), &prefixes, nested) {
+        Some(css) => set_str(scope, &mut rv, &css),
+        None => rv.set_null(),
+    }
+}
+
+// __dom.namespacePrelude(text) -> an `@namespace` rule's `[prefix, url]` ('' for no prefix), or null where its prelude does
+// not parse (cssom_rule.rs).
+fn namespace_prelude(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let text = args.get(0).to_rust_string_lossy(scope);
+    match crate::cssom_rule::namespace_prelude(&text) {
+        Some((prefix, url)) => {
+            let items: [v8::Local<v8::Value>; 2] = [v8::String::new(scope, &prefix).unwrap().into(), v8::String::new(scope, &url).unwrap().into()];
+            rv.set(v8::Array::new_with_elements(scope, &items).into());
+        }
+        None => rv.set_null(),
+    }
+}
+
+// __dom.counterStyleRule(name, body[, descriptor, value]) -> an `@counter-style` rule's `[cssText, body, system, symbols,
+// additive-symbols, negative, prefix, suffix, range, pad, speak-as, fallback]` as the engine parses it — after the write
+// of `descriptor`, where one is given — or null where it drops the rule or refuses the write (cssom_rule.rs).
+fn counter_style_rule(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let name = args.get(0).to_rust_string_lossy(scope);
+    let body = args.get(1).to_rust_string_lossy(scope);
+    let write = (!args.get(2).is_undefined())
+        .then(|| (args.get(2).to_rust_string_lossy(scope), args.get(3).to_rust_string_lossy(scope)));
+    match crate::cssom_rule::counter_style_rule(&name, &body, write.as_ref().map(|(d, v)| (d.as_str(), v.as_str()))) {
+        Some((css, body, values)) => {
+            let items: Vec<v8::Local<v8::Value>> = [&css, &body]
+                .into_iter()
+                .chain(&values)
+                .filter_map(|s| v8::String::new(scope, s))
+                .map(Into::into)
+                .collect();
+            rv.set(v8::Array::new_with_elements(scope, &items).into());
+        }
+        None => rv.set_null(),
+    }
+}
+
 // __dom.xpathPrefixes(expression) -> the namespace prefixes its name tests name (for the caller to resolve before
 // evaluating), or a string — the SyntaxError's message.
 fn xpath_prefixes(
@@ -2188,13 +2246,23 @@ fn style_value_unguarded(
 
 // __dom.styleSupports(property) -> whether the style engine implements the property: one it computes a value of for
 // every element it styles.
-fn style_supports(
-    scope: &mut v8::PinScope<'_, '_>,
-    args: v8::FunctionCallbackArguments<'_>,
-    mut rv: v8::ReturnValue<'_, v8::Value>,
-) {
-    let name = args.get(0).to_rust_string_lossy(scope);
-    rv.set_bool(crate::style::supports_property(&name));
+// __dom.styleProperties() -> every property a page can name, as `[name, property, animatable, longhands, initial]`
+// (cssom_decl.rs `properties`): what script/gen_css_properties.rb writes js/src/css-properties.js from.
+fn style_properties(scope: &mut v8::PinScope<'_, '_>, _args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let mut rows = Vec::new();
+    for p in crate::cssom_decl::properties() {
+        let longhands: Vec<v8::Local<v8::Value>> =
+            p.longhands.iter().filter_map(|l| v8::String::new(scope, l)).map(Into::into).collect();
+        let row: [v8::Local<v8::Value>; 5] = [
+            v8::String::new(scope, p.name).unwrap().into(),
+            v8::String::new(scope, p.property).unwrap().into(),
+            v8::Boolean::new(scope, p.animatable).into(),
+            v8::Array::new_with_elements(scope, &longhands).into(),
+            p.initial.as_deref().and_then(|i| v8::String::new(scope, i)).map_or_else(|| v8::null(scope).into(), Into::into),
+        ];
+        rows.push(v8::Array::new_with_elements(scope, &row).into());
+    }
+    rv.set(v8::Array::new_with_elements(scope, &rows).into());
 }
 
 // The declaration-block ops (cssom_decl.rs): `(text, kind, quirks, base, …, nid)` — `kind` 0 a style rule's block (an
@@ -2214,30 +2282,30 @@ fn set_str(scope: &mut v8::PinScope<'_, '_>, rv: &mut v8::ReturnValue<'_, v8::Va
 // __dom.declValue(text, kind, quirks, base, name, nid) -> `getPropertyValue(name)`.
 fn decl_value(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let key = decl_key(scope, &args);
-    let made = written_style(scope, &args, 5);
+    let made = written_style(scope, &args, &key, 5);
     let name = args.get(4).to_rust_string_lossy(scope);
-    let value = crate::cssom_decl::value(&key, made.as_ref(), &name);
+    let value = crate::cssom_decl::value(&key, made, &name);
     set_str(scope, &mut rv, &value);
 }
 // __dom.declImportant(text, kind, quirks, base, name, nid) -> whether `getPropertyPriority(name)` is `important`.
 fn decl_important(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let key = decl_key(scope, &args);
-    let made = written_style(scope, &args, 5);
+    let made = written_style(scope, &args, &key, 5);
     let name = args.get(4).to_rust_string_lossy(scope);
-    rv.set_bool(crate::cssom_decl::important(&key, made.as_ref(), &name));
+    rv.set_bool(crate::cssom_decl::important(&key, made, &name));
 }
 // __dom.declText(text, kind, quirks, base, nid) -> `cssText`.
 fn decl_text(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let key = decl_key(scope, &args);
-    let made = written_style(scope, &args, 4);
-    let css = crate::cssom_decl::css_text(&key, made.as_ref());
+    let made = written_style(scope, &args, &key, 4);
+    let css = crate::cssom_decl::css_text(&key, made);
     set_str(scope, &mut rv, &css);
 }
 // __dom.declNames(text, kind, quirks, base, nid) -> the declared longhand and custom property names, in order.
 fn decl_names(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let key = decl_key(scope, &args);
-    let made = written_style(scope, &args, 4);
-    let names = crate::cssom_decl::names(&key, made.as_ref());
+    let made = written_style(scope, &args, &key, 4);
+    let names = crate::cssom_decl::names(&key, made);
     let items: Vec<v8::Local<v8::Value>> = names.iter().filter_map(|n| v8::String::new(scope, n)).map(Into::into).collect();
     rv.set(v8::Array::new_with_elements(scope, &items).into());
 }
@@ -2246,11 +2314,11 @@ fn decl_set(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgument
     let key = decl_key(scope, &args);
     let name = args.get(4).to_rust_string_lossy(scope);
     let value = args.get(5).to_rust_string_lossy(scope);
-    let made = written_style(scope, &args, 7);
-    match crate::cssom_decl::set(&key, made.as_ref(), &name, &value, args.get(6).is_true()) {
+    let made = written_style(scope, &args, &key, 7);
+    match crate::cssom_decl::set(&key, made, &name, &value, args.get(6).is_true()) {
         Some(written) => {
             set_str(scope, &mut rv, &written.text);
-            keep_written_style(scope, &args, 7, written);
+            keep_written_style(scope, &args, &key, 7, written);
         }
         None => rv.set_null(),
     }
@@ -2259,8 +2327,8 @@ fn decl_set(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgument
 fn decl_remove(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let key = decl_key(scope, &args);
     let name = args.get(4).to_rust_string_lossy(scope);
-    let made = written_style(scope, &args, 5);
-    let (old, written) = crate::cssom_decl::remove(&key, made.as_ref(), &name);
+    let made = written_style(scope, &args, &key, 5);
+    let (old, written) = crate::cssom_decl::remove(&key, made, &name);
     let old: v8::Local<v8::Value> = v8::String::new(scope, &old).map(Into::into).unwrap_or_else(|| v8::null(scope).into());
     let css: v8::Local<v8::Value> = match &written {
         Some(written) => v8::String::new(scope, &written.text).map(Into::into).unwrap_or_else(|| v8::null(scope).into()),
@@ -2268,7 +2336,7 @@ fn decl_remove(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgum
     };
     rv.set(v8::Array::new_with_elements(scope, &[old, css]).into());
     if let Some(written) = written {
-        keep_written_style(scope, &args, 5, written);
+        keep_written_style(scope, &args, &key, 5, written);
     }
 }
 // __dom.declReplace(text, kind, quirks, base, nid) -> the block `text` parses to, serialized: `cssText`'s setter.
@@ -2276,34 +2344,33 @@ fn decl_replace(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgu
     let key = decl_key(scope, &args);
     let written = crate::cssom_decl::replace(&key);
     set_str(scope, &mut rv, &written.text);
-    keep_written_style(scope, &args, 4, written);
+    keep_written_style(scope, &args, &key, 4, written);
 }
 // The block the element's last write made — argument `at` its nid, -1 for a rule's or a detached declaration's — while
-// its `style` attribute still holds the text that write wrote (argument 0): what the next write starts from.
+// its `style` attribute still declares it (cssom_decl.rs `WrittenStyle`): what the next read or write is of.
 fn written_style(
     scope: &mut v8::PinScope<'_, '_>,
     args: &v8::FunctionCallbackArguments<'_>,
+    key: &crate::cssom_decl::Key,
     at: i32,
-) -> Option<style::properties::PropertyDeclarationBlock> {
+) -> Option<std::rc::Rc<crate::cssom_decl::Block>> {
     let id = nid_arg(scope, args, at)?;
-    let text = args.get(0).to_rust_string_lossy(scope);
     let cid = realm_id(scope, args);
-    let written = realm(scope, cid).get(id)?.written_style.as_ref()?;
-    (written.0 == text).then(|| written.1.clone())
+    realm(scope, cid).get(id)?.written_style.as_ref()?.for_key(key)
 }
-// …and where the block is an element's `style` attribute, the block the write made, kept on the element
-// (`NodeData::written_style`).
+// …and where the block is an element's `style` attribute, the block the write made, kept on the element.
 fn keep_written_style(
     scope: &mut v8::PinScope<'_, '_>,
     args: &v8::FunctionCallbackArguments<'_>,
+    key: &crate::cssom_decl::Key,
     at: i32,
     written: crate::cssom_decl::Written,
 ) {
-    let Some(block) = written.block else { return };
     let Some(id) = nid_arg(scope, args, at) else { return };
+    let Some(style) = crate::cssom_decl::WrittenStyle::new(key, written) else { return };
     let cid = realm_id(scope, args);
     if let Some(node) = realm(scope, cid).get_mut(id) {
-        node.written_style = Some(Box::new((written.text, block)));
+        node.written_style = Some(Box::new(style));
     }
 }
 // __dom.declSupports(name, value) -> `CSS.supports(name, value)`.

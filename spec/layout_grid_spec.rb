@@ -238,4 +238,25 @@ RSpec.describe 'grid track sizing' do
     expect([b[0] - g[0], b[1] - g[1]]).to eq([100, 0])
     expect(g[3]).to eq(20)                            # the row is as tall as the unshifted item
   end
+
+  # A `subgrid` column template takes the tracks its item spans in the parent grid, and the parent's gap where its own
+  # is `normal` (CSS Grid 2 §9) — not its fallback `1fr 1fr`, nor one implicit column. A gap of its own moves the lines
+  # between its tracks by half the difference each way. Chrome and Firefox lay out every box below alike:
+  # (0, 100) (110, 200) · (110, 203) (317, 53) · (0, 100) (100, 300), as (left, width) from the body.
+  it 'lays a subgrid out on the tracks it spans in its parent' do
+    body = <<~HTML
+      <style>
+        #p { display: grid; grid-template-columns: 100px 200px 50px; width: 400px; column-gap: 10px }
+        #c { grid-column: 1 / 3; display: grid; grid-template-columns: 1fr 1fr; grid-template-columns: subgrid }
+        #d { grid-column: 2 / span 2; display: grid; grid-template-columns: subgrid; column-gap: 4px }
+        #q { display: grid; grid-template-columns: 1fr 3fr; width: 400px }
+        #r { grid-column: span 2; display: grid; grid-template-columns: subgrid }
+        #c > div, #d > div, #r > div { height: 10px }
+      </style>
+      <div id="p"><div id="c"><div id="c1"></div><div id="c2"></div></div><div id="d"><div id="d1"></div><div id="d2"></div></div></div>
+      <div id="q"><div id="r"><div id="r1"></div><div id="r2"></div></div></div>
+    HTML
+    boxes, = measure(body, %w[#c1 #c2 #d1 #d2 #r1 #r2], style: 'margin:0;font:16px Arial')
+    expect(boxes.map {|b| [b[0], b[2]] }).to eq([[0, 100], [110, 200], [110, 203], [317, 53], [0, 100], [100, 300]])
+  end
 end

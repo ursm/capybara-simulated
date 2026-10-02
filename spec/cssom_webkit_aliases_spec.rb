@@ -180,15 +180,12 @@ RSpec.describe 'the -webkit- property surface' do
     JS
   end
 
-  # Every alias the table keeps must name a property we really have — a typo in a target would
-  # otherwise vanish silently, leaving a spelling that answers `in` and then stores nothing. Walking
-  # the dashed webkit attributes off the prototype is the page-visible way to check the whole table.
-  # The legacy flexbox `-webkit-box-*` six, which the style engine does not implement, are the one
-  # known exception (the advertised property set is wider than the engine's: memory
-  # `property_set_vs_engine`).
+  # Every spelling the interface advertises is a property the style engine parses — the attributes are generated from
+  # its property list — so none answers `in` and then stores nothing. Walking the dashed webkit attributes off the
+  # prototype is the page-visible way to check the whole list.
   it 'stores something for every -webkit- spelling it advertises' do
     s = page('<div id="a"></div>')
-    expect(s.evaluate_script(<<~JS)).to eq(%w[-webkit-box-align -webkit-box-direction -webkit-box-flex -webkit-box-ordinal-group -webkit-box-orient -webkit-box-pack])
+    expect(s.evaluate_script(<<~JS)).to eq([])
       (() => Reflect.ownKeys(CSSStyleDeclaration.prototype)
                .filter(k => typeof k === 'string' && k.startsWith('-webkit-'))
                .filter(name => { const d = document.createElement('div');

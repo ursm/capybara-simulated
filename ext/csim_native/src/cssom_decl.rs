@@ -20,9 +20,10 @@ use cssparser::{Parser, ParserInput, SourceLocation};
 use style::context::QuirksMode;
 use style::font_face::{parse_font_face_block, DescriptorId, Descriptors};
 use style::parser::ParserContext;
+use style::properties::style_structs::Font;
 use style::properties::{
-    parse_one_declaration_into, parse_style_attribute, Importance, PropertyDeclaration, PropertyDeclarationBlock, PropertyId,
-    SourcePropertyDeclaration, SourcePropertyDeclarationUpdate,
+    parse_one_declaration_into, parse_style_attribute, ComputedValues, Importance, NonCustomPropertyId, PropertyDeclaration,
+    PropertyDeclarationBlock, PropertyDeclarationId, PropertyId, SourcePropertyDeclaration, SourcePropertyDeclarationUpdate,
 };
 use style::stylesheets::supports_rule::parse_condition_or_declaration;
 use style::stylesheets::{CssRuleType, Origin, UrlExtraData};
@@ -58,7 +59,7 @@ impl Kind {
 
 // The base a block's `url()`s resolve against — the document's — one per base. (A specified `url()` serializes as
 // written, whatever its base; the computed one the engine makes of the block is resolved.)
-fn url_data(base: &str) -> UrlExtraData {
+pub(crate) fn url_data(base: &str) -> UrlExtraData {
     thread_local! {
         static URLS: RefCell<HashMap<String, UrlExtraData>> = RefCell::new(HashMap::new());
     }
@@ -81,10 +82,14 @@ fn mode(quirks: bool) -> QuirksMode {
 }
 
 fn context(url: &UrlExtraData, kind: Kind, quirks: bool) -> ParserContext<'_> {
+    rule_context(url, kind.rule_type(), quirks)
+}
+// …and for a rule of any type (cssom_rule.rs).
+pub(crate) fn rule_context(url: &UrlExtraData, rule_type: CssRuleType, quirks: bool) -> ParserContext<'_> {
     ParserContext::new(
         Origin::Author,
         url,
-        Some(kind.rule_type()),
+        Some(rule_type),
         ParsingMode::DEFAULT,
         mode(quirks),
         Default::default(),
@@ -95,15 +100,51 @@ fn context(url: &UrlExtraData, kind: Kind, quirks: bool) -> ParserContext<'_> {
 }
 
 // A parsed block of either sort.
-enum Block {
+pub(crate) enum Block {
     Properties(PropertyDeclarationBlock),
     Descriptors(Descriptors),
 }
 
-// What a write made: the block's new text, and — for a block of properties — the block itself.
+// What a write made: the block's new text, and the block itself.
 pub(crate) struct Written {
     pub(crate) text: String,
-    pub(crate) block: Option<PropertyDeclarationBlock>,
+    block: Block,
+}
+
+// The block a CSSOM write made of an element's `style` attribute, which the element keeps (dom.rs
+// `NodeData::written_style`): what its style is computed from and its next write starts from, while its attribute holds
+// the text the write wrote — in a document of the base and mode it was written in, where that text says what the block
+// does. Anywhere else the text is parsed afresh.
+pub(crate) struct WrittenStyle {
+    text: String,
+    base: UrlExtraData,
+    quirks: bool,
+    block: Rc<Block>,
+}
+impl WrittenStyle {
+    // What a write to the block of `key` made, where it is a block of properties.
+    pub(crate) fn new(key: &Key, written: Written) -> Option<WrittenStyle> {
+        matches!(written.block, Block::Properties(_)).then(|| WrittenStyle {
+            text: written.text,
+            base: url_data(&key.base),
+            quirks: key.quirks,
+            block: Rc::new(written.block),
+        })
+    }
+    pub(crate) fn text(&self) -> &str {
+        &self.text
+    }
+    // The block, where an attribute holding `text` in a document of `base` and mode `quirks` declares it.
+    pub(crate) fn declared_by(&self, text: &str, base: &UrlExtraData, quirks: bool) -> Option<&PropertyDeclarationBlock> {
+        match &*self.block {
+            Block::Properties(block) if self.text == text && self.base == *base && self.quirks == quirks => Some(block),
+            _ => None,
+        }
+    }
+    // …and as the block a read or a write of `key` is of.
+    pub(crate) fn for_key(&self, key: &Key) -> Option<Rc<Block>> {
+        self.declared_by(&key.text, &url_data(&key.base), key.quirks).map(|_| self.block.clone())
+    }
 }
 
 const CACHE_LIMIT: usize = 4096;
@@ -186,6 +227,41 @@ fn property(name: &str, key: &Key) -> Option<PropertyId> {
     exposed(&name.to_ascii_lowercase()).then_some(id)
 }
 
+// A property a page can name: what CSSOM's IDL attributes, `getComputedStyle`'s enumeration and a keyframe's members are
+// made of. The JS side has it as data (js/src/css-properties.js, written from this by script/gen_css_properties.rb and
+// held to it by spec/css_properties_spec.rb), because a realm's interfaces are built where no engine is attached yet.
+pub(crate) struct Property {
+    pub(crate) name: &'static str,
+    // The property it names: an alias's, or its own name.
+    pub(crate) property: &'static str,
+    pub(crate) animatable: bool,
+    // A shorthand's longhands, in the engine's order; none for a longhand.
+    pub(crate) longhands: Vec<&'static str>,
+    // A longhand's initial value, computed and serialized as a computed style reads it.
+    pub(crate) initial: Option<String>,
+}
+
+pub(crate) fn properties() -> Vec<Property> {
+    crate::style::enable_properties();
+    let initial = ComputedValues::initial_values_with_font_override(Font::initial_values());
+    let page_sees = |id: NonCustomPropertyId| exposed(id.name()) && id.to_property_id().enabled_for_all_content();
+    NonCustomPropertyId::iter()
+        .filter(|&id| page_sees(id))
+        .map(|id| {
+            let own = id.unaliased();
+            Property {
+                name: id.name(),
+                property: own.name(),
+                animatable: own.is_animatable(),
+                longhands: own.as_shorthand().map_or_else(Vec::new, |shorthand| {
+                    shorthand.longhands().filter(|&l| page_sees(l.into())).map(|l| l.name()).collect()
+                }),
+                initial: own.as_longhand().map(|l| initial.computed_value_to_string(PropertyDeclarationId::Longhand(l))),
+            }
+        })
+        .collect()
+}
+
 fn descriptor(name: &str) -> Option<DescriptorId> {
     let mut input = ParserInput::new(name);
     let mut parser = Parser::new(&mut input);
@@ -208,7 +284,7 @@ fn serialize(block: &Block) -> String {
 }
 
 // `getPropertyValue(name)`: '' for what the block does not set, and for a name it cannot hold.
-pub(crate) fn value(key: &Key, made: Option<&PropertyDeclarationBlock>, name: &str) -> String {
+pub(crate) fn value(key: &Key, made: Option<Rc<Block>>, name: &str) -> String {
     let mut out = String::new();
     match &*current(key, made) {
         Block::Properties(block) => {
@@ -226,7 +302,7 @@ pub(crate) fn value(key: &Key, made: Option<&PropertyDeclarationBlock>, name: &s
 }
 
 // `getPropertyPriority(name)` is `important` (a descriptor never is).
-pub(crate) fn important(key: &Key, made: Option<&PropertyDeclarationBlock>, name: &str) -> bool {
+pub(crate) fn important(key: &Key, made: Option<Rc<Block>>, name: &str) -> bool {
     match &*current(key, made) {
         Block::Properties(block) => property(name, key).is_some_and(|id| block.property_priority(&id).important()),
         Block::Descriptors(_) => false,
@@ -234,13 +310,13 @@ pub(crate) fn important(key: &Key, made: Option<&PropertyDeclarationBlock>, name
 }
 
 // `cssText`.
-pub(crate) fn css_text(key: &Key, made: Option<&PropertyDeclarationBlock>) -> String {
+pub(crate) fn css_text(key: &Key, made: Option<Rc<Block>>) -> String {
     serialize(&current(key, made))
 }
 
 // The names `length`, `item()` and iteration walk, in the block's order: every longhand, custom property or descriptor
 // it sets that a page can see.
-pub(crate) fn names(key: &Key, made: Option<&PropertyDeclarationBlock>) -> Vec<String> {
+pub(crate) fn names(key: &Key, made: Option<Rc<Block>>) -> Vec<String> {
     match &*current(key, made) {
         Block::Properties(block) => {
             block.declarations().iter().map(|d| d.id().name().to_string()).filter(|n| exposed(n)).collect()
@@ -252,18 +328,14 @@ pub(crate) fn names(key: &Key, made: Option<&PropertyDeclarationBlock>) -> Vec<S
 }
 
 fn written(block: Block) -> Written {
-    let text = serialize(&block);
-    Written { text, block: match block { Block::Properties(block) => Some(block), Block::Descriptors(_) => None } }
+    Written { text: serialize(&block), block }
 }
 
 // The block a read or a write is of: the one the last write MADE where the caller still holds it (an element's
 // `written_style`, while its attribute holds the text that write wrote) — a parse of that text would round what it
 // said, and lose what its serialization cannot say — else the parse of the key's text.
-fn current(key: &Key, made: Option<&PropertyDeclarationBlock>) -> Rc<Block> {
-    match made {
-        Some(block) => Rc::new(Block::Properties(block.clone())),
-        None => parsed(key),
-    }
+fn current(key: &Key, made: Option<Rc<Block>>) -> Rc<Block> {
+    made.unwrap_or_else(|| parsed(key))
 }
 
 // `setProperty(name, value, important)` — what the write made, or None where the block did not change: a name the
@@ -271,7 +343,7 @@ fn current(key: &Key, made: Option<&PropertyDeclarationBlock>) -> Rc<Block> {
 // the caller's.)
 pub(crate) fn set(
     key: &Key,
-    made: Option<&PropertyDeclarationBlock>,
+    made: Option<Rc<Block>>,
     name: &str,
     value: &str,
     important: bool,
@@ -324,8 +396,8 @@ pub(crate) fn set(
 }
 
 // `removeProperty(name)` — the value it had, and what the write made where the block set the name at all.
-pub(crate) fn remove(key: &Key, made: Option<&PropertyDeclarationBlock>, name: &str) -> (String, Option<Written>) {
-    let old = value(key, made, name);
+pub(crate) fn remove(key: &Key, made: Option<Rc<Block>>, name: &str) -> (String, Option<Written>) {
+    let old = value(key, made.clone(), name);
     match &*current(key, made) {
         Block::Properties(current) => {
             let Some(id) = property(name, key) else { return (old, None) };

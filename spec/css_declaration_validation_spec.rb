@@ -3,12 +3,9 @@
 require 'capybara/simulated'
 require_relative 'support/session_teardown'
 
-# What a declaration's grammar REJECTS. The property table is generated from mdn-data, and mdn
-# writes a logical property's grammar as a reference to the physical one it mirrors
-# (`padding-block-start` is `<'padding-top'>`, `block-size` is `<'width'>`) — a shape the classifier
-# did not resolve, so 52 of the 471 longhands, all of them logical, carried no classification at
-# all and accepted anything. `block-size: none` and `padding-block-start: -10px` were kept where
-# every browser drops them.
+# What a declaration's grammar REJECTS — the style engine's parse (cssom_decl.rs). The logical properties are here
+# because a grammar table that wrote one as a reference to the physical property it mirrors (`padding-block-start` is
+# `<'padding-top'>`) once kept `block-size: none` and `padding-block-start: -10px`, where every browser drops them.
 #
 # Every expectation is Chrome 151-measured on this machine: the value is assigned to `el.style` and
 # read back, '' meaning the declaration was dropped.
@@ -122,9 +119,8 @@ RSpec.describe 'declaration validation' do
     expect(set('width', 'var(--a) var(--b)')).not_to eq('')
   end
 
-  # mdn-data lags Chrome on a few keywords, and a classified property's list is treated as complete
-  # — so those have to be named, or `width: stretch` (the standard `-webkit-fill-available`) goes.
-  it 'keeps the keywords mdn has yet to record' do
+  # The newer keywords: `width: stretch` (the standard `-webkit-fill-available`) and the legacy gaps' `normal`.
+  it 'keeps the keywords newer than the grammar tables' do
     expect(set('width', 'stretch')).to eq('stretch')
     expect(set('minHeight', 'stretch')).to eq('stretch')
     expect(set('gridColumnGap', 'normal')).to eq('normal')

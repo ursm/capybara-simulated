@@ -357,7 +357,7 @@ impl StylesheetLoader for Loader<'_> {
 // its own, so a switch Servo keeps off for its own layout's sake says nothing about ours — and every feature the
 // browsers ship that stylo keeps behind a switch of its own. (What stays off is what no browser ships yet: `alpha()`,
 // `progress()`, custom media, `light-dark()` images, elliptical corners, cross-document view transitions.)
-fn enable_properties() {
+pub(crate) fn enable_properties() {
     static ONCE: std::sync::Once = std::sync::Once::new();
     ONCE.call_once(|| {
         use stylo_static_prefs::set_pref;
@@ -1889,6 +1889,7 @@ impl StyleEngine {
             "placeholder" => PseudoElement::Placeholder,
             "selection" => PseudoElement::Selection,
             "first-letter" => PseudoElement::FirstLetter,
+            "first-line" => PseudoElement::FirstLine,
             "backdrop" => PseudoElement::Backdrop,
             "file-selector-button" => PseudoElement::FileSelectorButton,
             "details-content" => PseudoElement::DetailsContent,
@@ -2956,9 +2957,10 @@ impl<'a> TElement for StyleNode<'a> {
             let engine = self.engine();
             // (…the block a CSSOM write made, while the attribute holds the text it wrote: its serialization rounds what
             // the write said — cssom_decl.rs)
-            let block = match &node.written_style {
-                Some(written) if written.0 == css => written.1.clone(),
-                _ => parse_style_attribute(css, &engine.url, None, engine.quirks, CssRuleType::Style),
+            let written = node.written_style.as_ref().and_then(|w| w.declared_by(css, &engine.url, engine.quirks == QuirksMode::Quirks));
+            let block = match written {
+                Some(block) => block.clone(),
+                None => parse_style_attribute(css, &engine.url, None, engine.quirks, CssRuleType::Style),
             };
             Some(Arc::new(engine.lock.wrap(block)))
         });
@@ -3371,7 +3373,3 @@ fn css_image(css: &str) -> bool {
     false
 }
 
-// Whether the engine implements `name` — a longhand or a shorthand it parses for page content.
-pub(crate) fn supports_property(name: &str) -> bool {
-    PropertyId::parse_enabled_for_all_content(name).is_ok()
-}

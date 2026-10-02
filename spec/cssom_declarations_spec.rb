@@ -98,6 +98,23 @@ RSpec.describe 'CSSOM declaration blocks' do
     expect(got).to eq([['123.4568px', '7px'], ['123.4568px', '7px']])
   end
 
+  # The written block is the element's only in a document of the base and mode it was written in: one made in a
+  # template's contents, whose base is `about:blank`, does not keep its `url()` unresolved once the element is in the
+  # page (Chrome and Firefox resolve it against the page).
+  it 'resolves a block written in another document against the one its element is in' do
+    got = page.evaluate_script(<<~JS)
+      (() => {
+        const t = document.createElement('template');
+        t.innerHTML = '<p></p>';
+        const e = t.content.firstElementChild;
+        e.style.backgroundImage = 'url(tw.png)';
+        document.body.appendChild(e);
+        return getComputedStyle(e).backgroundImage;
+      })()
+    JS
+    expect(got).to eq('url("http://www.example.com/tw.png")')
+  end
+
   # A keyframe holds no `!important` declaration, so an important write to one is no write at all — not one that takes
   # the property out of the block.
   it 'writes nothing important into a keyframe' do

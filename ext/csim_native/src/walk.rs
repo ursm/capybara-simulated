@@ -1061,7 +1061,7 @@ struct GridTemplate {
 }
 // One track: a length and / or a percentage (a linear `calc()` is both), an `fr`, a keyword, a
 // `fit-content()` cap, and the floor a `minmax()` gives it.
-#[derive(Default)]
+#[derive(Clone, Default)]
 struct GridTrack {
     px: Option<f64>,
     frac: Option<f64>,
@@ -1086,8 +1086,8 @@ impl GridTemplate {
         let list = match v {
             Template::None => return Ok(implicit()),
             Template::TrackList(list) => list,
-            // (…a `subgrid` is `none` on a box that is no grid item of a grid it can join, which is how this walk lays
-            // every one out — no track is shared with a parent grid yet — and `masonry` is unratified)
+            // (…a `subgrid` takes its parent's tracks — `Walk::subgrid_columns` — and is `none` where it has no grid
+            // to join; `masonry` is unratified)
             _ => return Ok(implicit()),
         };
         let mut out = GridTemplate { tracks: Vec::new(), repeat_start: -1.0, repeat_len: 0.0, repeat_kind: 0.0 };
@@ -1120,6 +1120,11 @@ impl GridTemplate {
     }
 }
 impl GridTrack {
+    // A length and nothing else: the track's size in px.
+    fn fixed(&self) -> Option<f64> {
+        let plain = self.frac.is_none() && self.prog.is_none() && self.fr.is_none() && !self.auto && !self.min && !self.max;
+        self.px.filter(|_| plain && self.fit.is_none() && self.floor.is_none())
+    }
     fn of(size: &style::values::computed::TrackSize) -> Option<GridTrack> {
         use style::values::generics::grid::GenericTrackSize as Size;
         match size {
@@ -2564,12 +2569,71 @@ impl<'a> Walk<'a> {
         Ok((items, oof))
     }
 
+    // A `subgrid` column template as the tracks it takes from the grid it is an item of (CSS Grid 2 §9): the ones its
+    // column lines span there — from the first for an auto-placed one, one by default — with that grid's column gap
+    // where its own is `normal`. None for any other template, and for a subgrid with no grid to join, or one whose
+    // tracks repeat `auto-fill` / `auto-fit` (counted only when laid out), which lays out as `none`.
+    // (…gaps: the parent sizes its tracks without the subgrid's items, and the subgrid's own padding and border are
+    // not added to the margins of the items at its edges)
+    fn subgrid_columns(&self, id: NodeId, style: &ComputedValues) -> Result<Option<(GridTemplate, Spec)>, &'static str> {
+        use style::values::generics::grid::GenericGridTemplateComponent as Template;
+        use style::values::generics::length::GenericLengthPercentageOrNormal as OrNormal;
+        let pos = style.get_position();
+        if !matches!(pos.grid_template_columns, Template::Subgrid(_)) {
+            return Ok(None);
+        }
+        let Some(parent) = self.layout_parent(id) else { return Ok(None) };
+        let parent_style = self.style(parent)?;
+        if parent_style.get_box().display.inside() != DisplayInside::Grid {
+            return Ok(None);
+        }
+        let (tracks, parent_gap) = match self.subgrid_columns(parent, &parent_style)? {
+            Some(subgrid) => subgrid,
+            None => (GridTemplate::of(&parent_style.get_position().grid_template_columns)?, gap(&parent_style.get_position().column_gap)?),
+        };
+        if tracks.repeat_kind != 0.0 {
+            return Ok(None);
+        }
+        let [start, end, span] = grid_column_placement(style);
+        let first = if start >= 1.0 { start as usize - 1 } else { 0 };
+        let count = if span > 0.0 { span as usize } else if start >= 1.0 && end > start { (end - start) as usize } else { 1 };
+        let first = first.min(tracks.tracks.len() - 1);
+        let mut taken = tracks.tracks[first..(first + count).min(tracks.tracks.len())].to_vec();
+        let col_gap = match pos.column_gap {
+            OrNormal::Normal => parent_gap,
+            _ => {
+                // A gap of its own that differs from the parent's moves the lines BETWEEN its tracks by half the
+                // difference each way, which keeps the tracks where the parent has them: a fixed track grows by that
+                // half on each side it shares with another (§9.2; Chrome's `column-gap: 4px` in a 10px grid lays two
+                // 200px / 50px tracks out 203px and 53px wide). (…a gap: a track or a gap that is not a fixed length)
+                let own = gap(&pos.column_gap)?;
+                let fixed = |g: &Spec| g.frac == 0.0 && g.prog.is_none();
+                if fixed(&own) && fixed(&parent_gap) {
+                    let half = (parent_gap.px - own.px) / 2.0;
+                    let last = taken.len() - 1;
+                    for (i, track) in taken.iter_mut().enumerate() {
+                        let sides = (i > 0) as u8 + (i < last) as u8;
+                        if let Some(px) = track.fixed() {
+                            track.px = Some(px + half * sides as f64);
+                        }
+                    }
+                }
+                own
+            }
+        };
+        Ok(Some((GridTemplate { tracks: taken, repeat_start: -1.0, repeat_len: 0.0, repeat_kind: 0.0 }, col_gap)))
+    }
+
     // A GRID container: its gaps, its column template with an auto repeat left for the layout to
     // count, its auto rows' height, each track's base and limit as the side specs the layout resolves, and each item's
     // declared column lines — then its items, each its own record, and its out-of-flow children.
     fn grid(&mut self, id: NodeId, idx: i32, style: &ComputedValues, parent: i32) -> Step {
         let pos = style.get_position();
-        let (col_gap, mut row_gap) = (gap(&pos.column_gap)?, gap(&pos.row_gap)?);
+        let (template, col_gap) = match self.subgrid_columns(id, style)? {
+            Some(subgrid) => subgrid,
+            None => (GridTemplate::of(&pos.grid_template_columns)?, gap(&pos.column_gap)?),
+        };
+        let mut row_gap = gap(&pos.row_gap)?;
         // (…the ROOT's percentage row gap resolves against a height nothing imposes on it — an indefinite one, against
         // which a percentage gap is 0: Chrome's `html { display: grid; row-gap: 10% }` spaces its rows by nothing)
         if parent < 0 && self.inputs[idx as usize].height.is_nan() {
@@ -2579,7 +2643,6 @@ impl<'a> Walk<'a> {
         // (…a comparison gap rides beside its pair as its PROGRAM's offset in the math table, NaN for none)
         let program = |walk: &mut Self, prog: Option<&[f64]>| prog.map_or(f64::NAN, |p| walk.math(Some(p)) as f64);
         let (col_gap_math, row_gap_math) = (program(self, col_gap.prog.as_deref()), program(self, row_gap.prog.as_deref()));
-        let template = GridTemplate::of(&pos.grid_template_columns)?;
         let (items, oof) = self.box_items(id)?;
         let row_h = grid_row_height(&pos.grid_auto_rows);
         let row_floor = if row_h.is_none() { grid_row_floor(&pos.grid_auto_rows) } else { None };

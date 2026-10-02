@@ -921,7 +921,6 @@ css/css-shadow/part/pseudo-classes-after-part.html:
 - '"::part(mypart):xr-overlay" should be a valid selector'
 css/css-shadow/part/pseudo-elements-after-part.html:
 - '"::part(mypart)::cue" should be a valid selector'
-- '"::part(mypart)::first-line" should be a valid selector'
 - '"::part(mypart)::grammar-error" should be a valid selector'
 - '"::part(mypart)::highlight(myhighlight)" should be a valid selector'
 - '"::part(mypart)::notarealpseudoelement" should be an invalid selector'
@@ -976,9 +975,6 @@ css/css-shadow/part/pseudo-elements-after-part.html:
 - computed style for ::part()::selection
 - computed style for ::part()::spelling-error
 - computed style for ::part()::target-text
-css/css-shadow/part/serialization.html:
-- Collapse spaces in ::part names list.
-- Escape start space in ::part name.
 css/css-transforms/2d-rotate-001.html:
 - "== css/css-transforms/2d-rotate-ref.html"
 css/css-transforms/3d-point-mapping-3.html:
@@ -1006,28 +1002,6 @@ css/css-transforms/3dtransform-and-filter-no-perspective-001.html:
 css/css-transforms/animation/canvas-webgl-translate-in-animation.html:
 - "== css/css-transforms/animation/canvas-webgl-translate-in-animation-ref.html (both
   renderings blank)"
-css/css-transforms/animation/perspective-origin-composition.html:
-- 'Compositing Web Animations: property <perspective-origin> underlying [top 20% left
-  40%] from add [left 60% top 80%] to add [right 80% bottom 40%] at (-0.25) should
-  be [220px 210px]'
-- 'Compositing Web Animations: property <perspective-origin> underlying [top 20% left
-  40%] from add [left 60% top 80%] to add [right 80% bottom 40%] at (0) should be
-  [200px 200px]'
-- 'Compositing Web Animations: property <perspective-origin> underlying [top 20% left
-  40%] from add [left 60% top 80%] to add [right 80% bottom 40%] at (0.25) should
-  be [180px 190px]'
-- 'Compositing Web Animations: property <perspective-origin> underlying [top 20% left
-  40%] from add [left 60% top 80%] to add [right 80% bottom 40%] at (0.5) should be
-  [160px 180px]'
-- 'Compositing Web Animations: property <perspective-origin> underlying [top 20% left
-  40%] from add [left 60% top 80%] to add [right 80% bottom 40%] at (0.75) should
-  be [140px 170px]'
-- 'Compositing Web Animations: property <perspective-origin> underlying [top 20% left
-  40%] from add [left 60% top 80%] to add [right 80% bottom 40%] at (1) should be
-  [120px 160px]'
-- 'Compositing Web Animations: property <perspective-origin> underlying [top 20% left
-  40%] from add [left 60% top 80%] to add [right 80% bottom 40%] at (1.25) should
-  be [100px 150px]'
 css/css-transforms/animation/rotate-animation-on-svg.html:
 - "== css/css-transforms/animation/rotate-animation-on-svg-ref.html (both renderings
   blank)"
@@ -1979,8 +1953,6 @@ css/cssom/page-descriptors.html:
 - CSSPageDescriptors properties tests
 css/cssom/preferred-stylesheet-reversed-order.html:
 - Preferred stylesheet where insertion order is tree order
-css/cssom/selectorSerialize.html:
-- escaped character as code point in attribute name
 css/cssom/serialize-values.html:
 - 'font-family: ''Lucida Grande'''
 - 'orphans: 101'
@@ -2232,8 +2204,6 @@ custom-elements/registries/scoped-registry-define-upgrade-order.html:
 - Upgrade order is not affected by DOM order between child frames
 custom-elements/state/ElementInternals-states.html:
 - 'CustomStateSet behavior of ElementInternals.states: Initial state'
-custom-elements/state/state-pseudo-class.html:
-- ":state(foo) serialization"
 custom-elements/upgrading.html:
 - If definition's disable shadow is true and element's shadow root is non-null, then
   throw a "NotSupportedError" DOMException.
@@ -5467,29 +5437,16 @@ shadow-dom/shadow-style-invalidation-vw-units.html:
 - "== shadow-dom/shadow-style-invalidation-vw-units-ref.html"
 shadow-dom/untriaged/html-elements-in-shadow-trees/inert-html-elements/test-001.html:
 - A_08_01_01_T01
-web-animations/animation-model/animation-types/accumulation-per-property-001.html:
-- 'grid-template: "". . a b" ". . a b"" onto "none"'
 web-animations/animation-model/animation-types/accumulation-per-property-002.html:
 - 'list-style: "outside url("http://localhost/test-2") square" onto "inside url("http://localhost/test-1")
   circle"'
 - 'text-decoration: "overline" onto "underline"'
 - 'text-decoration: "underline" onto "overline"'
-- 'text-wrap: "nowrap" onto "wrap"'
-web-animations/animation-model/animation-types/addition-per-property-001.html:
-- 'grid-template: "". . a b" ". . a b"" onto "none"'
 web-animations/animation-model/animation-types/addition-per-property-002.html:
 - 'list-style: "outside url("http://localhost/test-2") square" onto "inside url("http://localhost/test-1")
   circle"'
 - 'text-decoration: "overline" onto "underline"'
 - 'text-decoration: "underline" onto "overline"'
-- 'text-wrap: "nowrap" onto "wrap"'
-web-animations/animation-model/animation-types/interpolation-per-property-001.html:
-- grid-template uses discrete animation when animating between "". . a b" ". . a b""
-  and "none" with effect easing
-- grid-template uses discrete animation when animating between "". . a b" ". . a b""
-  and "none" with keyframe easing
-- grid-template uses discrete animation when animating between "". . a b" ". . a b""
-  and "none" with linear easing
 web-animations/animation-model/animation-types/interpolation-per-property-002.html:
 - list-style uses discrete animation when animating between "inside url("http://localhost/test-1")
   circle" and "outside url("http://localhost/test-2") square" with effect easing
@@ -5497,12 +5454,6 @@ web-animations/animation-model/animation-types/interpolation-per-property-002.ht
   circle" and "outside url("http://localhost/test-2") square" with keyframe easing
 - list-style uses discrete animation when animating between "inside url("http://localhost/test-1")
   circle" and "outside url("http://localhost/test-2") square" with linear easing
-- text-wrap uses discrete animation when animating between "wrap" and "nowrap" with
-  effect easing
-- text-wrap uses discrete animation when animating between "wrap" and "nowrap" with
-  keyframe easing
-- text-wrap uses discrete animation when animating between "wrap" and "nowrap" with
-  linear easing
 web-animations/animation-model/keyframe-effects/effect-value-iteration-composite-operation.html:
 - iteration composition of incompatible calc-size() bases (accumulation skipped at
   0%, allowed at 50%)
@@ -5611,12 +5562,6 @@ web-animations/responsive/animation-on-pseudo-to-display-none.html:
 - display:none via a CSS animation on a pseudo-element does not cancel the animation.
 web-animations/responsive/background-color-animation-plus-opacity.html:
 - "== web-animations/responsive/background-color-animation-plus-opacity-ref.html"
-web-animations/responsive/background-position-responsive.html:
-- Animating from a neutral keyframe when the underlying style is explicitly set
-- Animating from a neutral keyframe when the underlying style is inherited from the
-  parent
-web-animations/responsive/backgroundPosition.html:
-- Background position responsive to style changes
 web-animations/responsive/fill-forwards-viewport-units.html:
 - 'fill: forwards with viewport units updates on viewport resize'
 web-animations/responsive/fontSize.html:

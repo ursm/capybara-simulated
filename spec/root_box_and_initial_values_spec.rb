@@ -225,7 +225,7 @@ RSpec.describe 'root box + computed initial values' do
     expect(got).to eq(['rgb(0, 128, 0)', 'rgb(0, 128, 0)', 'rgb(0, 128, 0)'])
   end
 
-  it 'reports the browser value for the initials mdn-data records wrong' do
+  it 'reports the initial values the specifications give' do
     s = session(short_page)
     got = s.evaluate_script(<<~JS)
       (() => {
@@ -233,9 +233,8 @@ RSpec.describe 'root box + computed initial values' do
         return [c.floodOpacity, c.stopOpacity, c.shapeImageThreshold, c.textAlign];
       })()
     JS
-    # mdn-data says `flood-opacity` / `stop-opacity` are "black" (they are <'opacity'>, initial 1),
-    # writes `shape-image-threshold` as "0.0", and `text-align`'s initial in prose. The generator
-    # corrects all four rather than shipping them.
+    # `flood-opacity` / `stop-opacity` are <'opacity'> with initial 1, `shape-image-threshold` is the number 0, and
+    # `text-align` starts at `start` — the four a property table copied from mdn-data once had wrong.
     expect(got).to eq(['1', '1', '0', 'start'])
   end
 
