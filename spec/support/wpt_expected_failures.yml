@@ -125,31 +125,13 @@ css/css-animations/parsing/animation-duration-computed.html:
 css/css-animations/parsing/animation-iteration-count-computed.html:
 - Property animation-iteration-count value 'calc(10 + (sign(2cqw - 10px) * 5))'
 css/css-animations/parsing/keyframe-selectors.html:
-- "'-10%' should not be a valid keyframe selector"
-- "'120%' should not be a valid keyframe selector"
+- "'calc(10% * sibling-index())' should be a valid keyframe selector"
+- "'calc(10% * sign(1em - 1px))' should be a valid keyframe selector"
+- "'calc(10%)' should be a valid keyframe selector"
+- "'entry calc(10%)' should be a valid keyframe selector"
+- "'exit calc(60%)' should be a valid keyframe selector"
 css/css-animations/parsing/keyframes-allowed-properties.html:
 - "@keyframes allows all non-animation properties and animation-timing-function"
-css/css-animations/parsing/keyframes-name-invalid.html:
-- 'invalid: @keyframes "" { }'
-- 'invalid: @keyframes -12 { }'
-- 'invalid: @keyframes 12 { }'
-- 'invalid: @keyframes 12foo { }'
-- 'invalid: @keyframes default { }'
-- 'invalid: @keyframes default, two { }'
-- 'invalid: @keyframes foo.bar { }'
-- 'invalid: @keyframes inherit { }'
-- 'invalid: @keyframes initial { }'
-- 'invalid: @keyframes none { }'
-- 'invalid: @keyframes one two { }'
-- 'invalid: @keyframes one, inherit { }'
-- 'invalid: @keyframes one, initial { }'
-- 'invalid: @keyframes one, two { }'
-- 'invalid: @keyframes one, unset { }'
-- 'invalid: @keyframes revert { }'
-- 'invalid: @keyframes revert, three { }'
-- 'invalid: @keyframes revert-layer { }'
-- 'invalid: @keyframes revert-layer, four { }'
-- 'invalid: @keyframes unset { }'
 css/css-animations/responsive/fill-forwards-viewport-units.html:
 - 'fill: forwards with viewport units updates on viewport resize'
 css/css-animations/revert-rule-keyframes-dynamic.html:
@@ -1549,8 +1531,6 @@ css/css-transitions/disconnected-element-001.html:
 - Transitions are canceled when an element is removed from the document
 css/css-transitions/dynamic-root-element.html:
 - Transitions don't incorrectly start on dynamic document element insertion
-css/css-transitions/parsing/starting-style-parsing.html:
-- "@starting-style is valid"
 css/css-transitions/parsing/transition-timing-function-computed.html:
 - Property transition-timing-function value 'steps(calc(2 * sibling-index()), jump-none)'
 - Property transition-timing-function value 'steps(calc(2 * sign(1em - 1000px)), jump-none)'
@@ -1587,6 +1567,11 @@ css/css-transitions/properties-value-003.html:
 - position position(relative to absolute) / values
 - position position(static to absolute) / events
 - position position(static to absolute) / values
+css/css-transitions/starting-style-cascade.html:
+- "@starting-style with higher specificity"
+- Starting style inheriting from parent's after-change style
+- Starting style inheriting from parent's after-change style while ancestor is transitioning
+- Starting style inheriting from parent's after-change style while parent transitioning
 css/css-transitions/starting-style-rule-basic.html:
 - Triggered transition from display:none to display:block
 - Triggered transition from first style update
@@ -1648,8 +1633,6 @@ css/cssom/cssom-fontfacerule-constructors.html:
 - The style attribute must return a CSSFontFaceDescriptors block
 css/cssom/cssom-getPropertyValue-common-checks.html:
 - All shorthands can serialize their longhands set to 'initial'
-css/cssom/cssstyledeclaration-nested.html:
-- CSSNestedDeclarationBlock cssom interactions
 css/cssom/cssstyledeclaration-registered-custom-properties.html:
 - Only relevant custom properties are included
 - Registered custom properties are included in CSSComputedStyleDeclaration
@@ -1796,8 +1779,6 @@ css/cssom/getComputedStyle-resolved-min-size-auto.html:
   with id="inline-with-degenerate-aspect-ratio"
 - Resolved value of min-width & min-height 'auto' keyword behaves as expected on element
   with id="inline-with-valid-aspect-ratio"
-css/cssom/medialist-dynamic-001.html:
-- "== css/cssom/medialist-dynamic-001-ref.html"
 css/cssom/page-descriptors.html:
 - CSSPageDescriptors properties tests
 css/cssom/preferred-stylesheet-reversed-order.html:

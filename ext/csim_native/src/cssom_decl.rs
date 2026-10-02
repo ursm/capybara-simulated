@@ -110,6 +110,11 @@ pub(crate) struct Written {
     pub(crate) text: String,
     block: Block,
 }
+impl Written {
+    pub(crate) fn into_block(self) -> Block {
+        self.block
+    }
+}
 
 // The block a CSSOM write made of an element's `style` attribute, which the element keeps (dom.rs
 // `NodeData::written_style`): what its style is computed from and its next write starts from, while its attribute holds

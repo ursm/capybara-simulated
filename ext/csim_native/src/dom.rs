@@ -1077,9 +1077,6 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_, ()>, ctx: &v8::Global<v8:
     register(scope, ns, "matchesId", matches_id, context_id);
     register(scope, ns, "closestId", closest_id, context_id);
     register(scope, ns, "selectorValid", selector_valid, context_id);
-    register(scope, ns, "selectorText", selector_text, context_id);
-    register(scope, ns, "namespacePrelude", namespace_prelude, context_id);
-    register(scope, ns, "counterStyleRule", counter_style_rule, context_id);
     register(scope, ns, "xpathPrefixes", xpath_prefixes, context_id);
     register(scope, ns, "xpathEvaluate", xpath_evaluate, context_id);
     register(scope, ns, "resetArena", reset_arena, context_id);
@@ -1093,6 +1090,22 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_, ()>, ctx: &v8::Global<v8:
     register(scope, ns, "sheetMake", sheet_make, context_id);
     register(scope, ns, "sheetReplace", sheet_replace, context_id);
     register(scope, ns, "sheetDrop", sheet_drop, context_id);
+    // …and CSSOM's rules over them (cssom_rule.rs).
+    register(scope, ns, "sheetRules", sheet_rules, context_id);
+    register(scope, ns, "sheetVersion", sheet_version, context_id);
+    register(scope, ns, "ruleRules", rule_rules, context_id);
+    register(scope, ns, "ruleText", rule_text, context_id);
+    register(scope, ns, "ruleGet", rule_get, context_id);
+    register(scope, ns, "ruleSet", rule_set, context_id);
+    register(scope, ns, "ruleInsert", rule_insert, context_id);
+    register(scope, ns, "ruleDelete", rule_delete, context_id);
+    register(scope, ns, "keyframeAppend", keyframe_append, context_id);
+    register(scope, ns, "keyframeFind", keyframe_find, context_id);
+    register(scope, ns, "keyframeDelete", keyframe_delete, context_id);
+    register(scope, ns, "importSheet", import_sheet, context_id);
+    register(scope, ns, "ruleDrop", rule_drop, context_id);
+    register(scope, ns, "sheetMedia", sheet_media, context_id);
+    register(scope, ns, "mediaText", media_text, context_id);
     register(scope, ns, "styleValue", style_value, context_id);
     register(scope, ns, "styleProperties", style_properties, context_id);
     // CSSOM's declaration blocks, over the engine's (cssom_decl.rs): each takes the block's TEXT, its kind and the
@@ -1873,58 +1886,198 @@ fn selector_valid(
     rv.set_bool(crate::selector::is_valid(&text));
 }
 
-// __dom.selectorText(text, defaultNamespace, [prefix, uri, …], nested) -> a style rule's selector list as the style engine
-// parses and serializes it, or null where it does not parse (cssom_rule.rs).
-fn selector_text(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
-    let text = args.get(0).to_rust_string_lossy(scope);
-    let default = args.get(1);
-    let default = (!default.is_null_or_undefined()).then(|| default.to_rust_string_lossy(scope));
-    let mut prefixes = Vec::new();
-    if let Ok(flat) = v8::Local::<v8::Array>::try_from(args.get(2)) {
-        for i in (0..flat.length()).step_by(2) {
-            let (Some(prefix), Some(uri)) = (flat.get_index(scope, i), flat.get_index(scope, i + 1)) else { break };
-            prefixes.push((prefix.to_rust_string_lossy(scope), uri.to_rust_string_lossy(scope)));
-        }
+// ---- CSSOM rules over the realm's sheets (cssom_rule.rs): a rule is named by its handle, a sheet by its id ----
+
+// `[handle, interface, …]` for a list of handed-out rules (cssom_rule.rs `kind` names the interface).
+fn rule_array<'s>(scope: &mut v8::PinScope<'s, '_>, rules: &[(u32, &'static str)]) -> v8::Local<'s, v8::Value> {
+    let mut items: Vec<v8::Local<v8::Value>> = Vec::with_capacity(rules.len() * 2);
+    for &(handle, kind) in rules {
+        items.push(v8::Integer::new_from_unsigned(scope, handle).into());
+        items.push(v8::String::new(scope, kind).unwrap().into());
     }
-    let nested = args.get(3).is_true();
-    match crate::cssom_rule::selector_text(&text, default.as_deref(), &prefixes, nested) {
-        Some(css) => set_str(scope, &mut rv, &css),
-        None => rv.set_null(),
+    v8::Array::new_with_elements(scope, &items).into()
+}
+// An argument that names a handle or an id: a non-negative integer (-1 for none).
+fn handle_arg(scope: &mut v8::PinScope<'_, '_>, args: &v8::FunctionCallbackArguments<'_>, at: i32) -> Option<u32> {
+    let v = args.get(at);
+    v.is_number().then(|| v.number_value(scope)).flatten().filter(|n| *n >= 0.0).map(|n| n as u32)
+}
+// `f` over the realm's sheets and the lock they are read under; and — after a mutation — its engine told the rules moved.
+fn with_sheets<R>(
+    scope: &mut v8::PinScope<'_, '_>,
+    args: &v8::FunctionCallbackArguments<'_>,
+    f: impl FnOnce(&mut crate::sheets::SheetStore, &style::shared_lock::SharedRwLock) -> R,
+) -> R {
+    let cid = realm_id(scope, args);
+    let arena = realm(scope, cid);
+    let lock = arena.style_lock.0.clone();
+    f(&mut arena.sheets, &lock)
+}
+// CSSOM is about to reach the sheet `id`'s rules: one sharing a kept parse takes a copy of its own (sheets.rs `own`),
+// which the engine cascades in its place.
+fn own_sheet(scope: &mut v8::PinScope<'_, '_>, args: &v8::FunctionCallbackArguments<'_>, id: u32) {
+    let Some((old, new)) = with_sheets(scope, args, |store, _| store.own(id)) else { return };
+    let cid = realm_id(scope, args);
+    if let Some(engine) = dom(scope).styles.get_mut(&cid) {
+        engine.swap_sheet(&old, &new);
+    }
+}
+// The id of the sheet the rule `handle` is in.
+fn sheet_of(scope: &mut v8::PinScope<'_, '_>, args: &v8::FunctionCallbackArguments<'_>, handle: u32) -> Option<u32> {
+    with_sheets(scope, args, |store, _| store.rule(handle).map(|r| r.sheet))
+}
+// …the sheet `sheet`'s rules moved: the engine restyles where it cascades that sheet (an `@import`ed one is the sheet
+// that imports it — `None`, any sheet), and is left alone for one no document has.
+fn rules_moved(scope: &mut v8::PinScope<'_, '_>, args: &v8::FunctionCallbackArguments<'_>, sheet: Option<u32>) {
+    let cid = realm_id(scope, args);
+    let d = dom(scope);
+    let (Some(engine), Some(arena)) = (d.styles.get_mut(&cid), d.realms.get(&cid)) else { return };
+    let used = match sheet.and_then(|id| arena.sheets.get(id)) {
+        Some(s) => s.imported || engine.uses_sheet(&s.sheet),
+        None => true,
+    };
+    if used {
+        engine.sheets_changed();
     }
 }
 
-// __dom.namespacePrelude(text) -> an `@namespace` rule's `[prefix, url]` ('' for no prefix), or null where its prelude does
-// not parse (cssom_rule.rs).
-fn namespace_prelude(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
-    let text = args.get(0).to_rust_string_lossy(scope);
-    match crate::cssom_rule::namespace_prelude(&text) {
-        Some((prefix, url)) => {
-            let items: [v8::Local<v8::Value>; 2] = [v8::String::new(scope, &prefix).unwrap().into(), v8::String::new(scope, &url).unwrap().into()];
+// __dom.sheetRules(sheetId) -> [handle, interface, …]: the sheet's rules; null with no such sheet.
+fn sheet_rules(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let Some(sheet) = handle_arg(scope, &args, 0) else { return rv.set_null() };
+    own_sheet(scope, &args, sheet);
+    match with_sheets(scope, &args, |store, lock| crate::cssom_rule::sheet_rules(store, lock, sheet)) {
+        Some(rules) => rv.set(rule_array(scope, &rules)),
+        None => rv.set_null(),
+    }
+}
+// __dom.sheetVersion(sheetId) -> a number that moves whenever the sheet is made of other text (-1: no such sheet).
+fn sheet_version(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let sheet = handle_arg(scope, &args, 0);
+    let version = with_sheets(scope, &args, |store, _| sheet.and_then(|id| store.get(id)).map(|s| s.version));
+    rv.set_double(version.map_or(-1.0, |v| v as f64));
+}
+// __dom.ruleRules(handle) -> [handle, interface, …]: the rules (or keyframes) the rule holds; null where it holds none.
+fn rule_rules(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let Some(handle) = handle_arg(scope, &args, 0) else { return rv.set_null() };
+    match with_sheets(scope, &args, |store, lock| crate::cssom_rule::child_rules(store, lock, handle)) {
+        Some(rules) => rv.set(rule_array(scope, &rules)),
+        None => rv.set_null(),
+    }
+}
+// __dom.ruleText(handle) -> the rule's `cssText`.
+fn rule_text(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let Some(handle) = handle_arg(scope, &args, 0) else { return };
+    if let Some(css) = with_sheets(scope, &args, |store, lock| crate::cssom_rule::css_text(store, lock, handle)) {
+        set_str(scope, &mut rv, &css);
+    }
+}
+// __dom.ruleGet(handle, what) -> one of the rule's attributes (cssom_rule.rs `get`), null where it has none.
+fn rule_get(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let Some(handle) = handle_arg(scope, &args, 0) else { return rv.set_null() };
+    let what = args.get(1).to_rust_string_lossy(scope);
+    match with_sheets(scope, &args, |store, lock| crate::cssom_rule::get(store, lock, handle, &what)) {
+        Some(value) => set_str(scope, &mut rv, &value),
+        None => rv.set_null(),
+    }
+}
+// __dom.ruleSet(handle, what, value) -> whether the rule took it (cssom_rule.rs `set`).
+fn rule_set(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let Some(handle) = handle_arg(scope, &args, 0) else { return rv.set_bool(false) };
+    let what = args.get(1).to_rust_string_lossy(scope);
+    let value = args.get(2).to_rust_string_lossy(scope);
+    let took = with_sheets(scope, &args, |store, lock| crate::cssom_rule::set(store, lock, handle, &what, &value));
+    if took {
+        let sheet = sheet_of(scope, &args, handle);
+        rules_moved(scope, &args, sheet);
+    }
+    rv.set_bool(took);
+}
+// __dom.ruleInsert(sheetId, parentHandle, css, index) -> [handle, interface, …the URLs an `@import` in it waits for], or
+// the name of the DOMException the insertion is refused with. `parentHandle` -1: the sheet's own list.
+fn rule_insert(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let Some(sheet) = handle_arg(scope, &args, 0) else { return };
+    own_sheet(scope, &args, sheet);
+    let parent = handle_arg(scope, &args, 1);
+    let css = args.get(2).to_rust_string_lossy(scope);
+    let index = args.get(3).uint32_value(scope).unwrap_or(0) as usize;
+    match with_sheets(scope, &args, |store, lock| crate::cssom_rule::insert(store, lock, sheet, parent, &css, index)) {
+        Ok((handle, kind, pending)) => {
+            rules_moved(scope, &args, Some(sheet));
+            let mut items: Vec<v8::Local<v8::Value>> =
+                vec![v8::Integer::new_from_unsigned(scope, handle).into(), v8::String::new(scope, kind).unwrap().into()];
+            items.extend(pending.iter().filter_map(|u| v8::String::new(scope, u)).map(Into::<v8::Local<v8::Value>>::into));
             rv.set(v8::Array::new_with_elements(scope, &items).into());
+        }
+        Err(name) => set_str(scope, &mut rv, name),
+    }
+}
+// __dom.ruleDelete(sheetId, parentHandle, index) -> '' or the name of the DOMException the removal is refused with.
+fn rule_delete(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let Some(sheet) = handle_arg(scope, &args, 0) else { return };
+    own_sheet(scope, &args, sheet);
+    let parent = handle_arg(scope, &args, 1);
+    let index = args.get(2).uint32_value(scope).unwrap_or(u32::MAX) as usize;
+    let refused = with_sheets(scope, &args, |store, lock| crate::cssom_rule::delete(store, lock, sheet, parent, index).err());
+    if refused.is_none() {
+        rules_moved(scope, &args, Some(sheet));
+    }
+    set_str(scope, &mut rv, refused.unwrap_or(""));
+}
+// __dom.keyframeAppend(handle, css) -> the appended keyframe's handle, or null where `css` is no keyframe.
+fn keyframe_append(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let Some(handle) = handle_arg(scope, &args, 0) else { return rv.set_null() };
+    let css = args.get(1).to_rust_string_lossy(scope);
+    match with_sheets(scope, &args, |store, lock| crate::cssom_rule::append_keyframe(store, lock, handle, &css)) {
+        Some(keyframe) => {
+            let sheet = sheet_of(scope, &args, handle);
+            rules_moved(scope, &args, sheet);
+            rv.set_uint32(keyframe);
         }
         None => rv.set_null(),
     }
 }
-
-// __dom.counterStyleRule(name, body[, descriptor, value]) -> an `@counter-style` rule's `[cssText, body, system, symbols,
-// additive-symbols, negative, prefix, suffix, range, pad, speak-as, fallback]` as the engine parses it — after the write
-// of `descriptor`, where one is given — or null where it drops the rule or refuses the write (cssom_rule.rs).
-fn counter_style_rule(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
-    let name = args.get(0).to_rust_string_lossy(scope);
-    let body = args.get(1).to_rust_string_lossy(scope);
-    let write = (!args.get(2).is_undefined())
-        .then(|| (args.get(2).to_rust_string_lossy(scope), args.get(3).to_rust_string_lossy(scope)));
-    match crate::cssom_rule::counter_style_rule(&name, &body, write.as_ref().map(|(d, v)| (d.as_str(), v.as_str()))) {
-        Some((css, body, values)) => {
-            let items: Vec<v8::Local<v8::Value>> = [&css, &body]
-                .into_iter()
-                .chain(&values)
-                .filter_map(|s| v8::String::new(scope, s))
-                .map(Into::into)
-                .collect();
-            rv.set(v8::Array::new_with_elements(scope, &items).into());
-        }
+// __dom.keyframeFind(handle, key) -> the index of the last keyframe whose selector is `key`, -1 for none.
+fn keyframe_find(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let Some(handle) = handle_arg(scope, &args, 0) else { return rv.set_int32(-1) };
+    let key = args.get(1).to_rust_string_lossy(scope);
+    let index = with_sheets(scope, &args, |store, lock| crate::cssom_rule::find_keyframe(store, lock, handle, &key));
+    rv.set_int32(index.map_or(-1, |i| i as i32));
+}
+// __dom.keyframeDelete(handle, index): the keyframe at `index` removed.
+fn keyframe_delete(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {
+    let (Some(handle), Some(index)) = (handle_arg(scope, &args, 0), handle_arg(scope, &args, 1)) else { return };
+    with_sheets(scope, &args, |store, lock| crate::cssom_rule::delete_keyframe(store, lock, handle, index as usize));
+    let sheet = sheet_of(scope, &args, handle);
+    rules_moved(scope, &args, sheet);
+}
+// __dom.importSheet(handle) -> the id of an `@import`'s sheet, null while it has none.
+fn import_sheet(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let Some(handle) = handle_arg(scope, &args, 0) else { return rv.set_null() };
+    match with_sheets(scope, &args, |store, lock| crate::cssom_rule::imported_sheet(store, lock, handle)) {
+        Some(id) => rv.set_uint32(id),
         None => rv.set_null(),
+    }
+}
+// __dom.sheetMedia(sheetId, media, quirks): the sheet applies under `media` now (its rules kept).
+fn sheet_media(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {
+    let Some(sheet) = handle_arg(scope, &args, 0) else { return };
+    own_sheet(scope, &args, sheet);
+    let media = args.get(1).to_rust_string_lossy(scope);
+    let quirks = args.get(2).is_true();
+    with_sheets(scope, &args, |store, lock| store.set_media(lock, sheet, &media, quirks));
+    rules_moved(scope, &args, Some(sheet));
+}
+// __dom.mediaText(text) -> `text` as a media list, as the engine serializes one.
+fn media_text(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let text = args.get(0).to_rust_string_lossy(scope);
+    set_str(scope, &mut rv, &crate::cssom_rule::media_text(&text));
+}
+// __dom.ruleDrop(handle): the CSSOM object naming the rule is gone.
+fn rule_drop(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {
+    let Some(handle) = handle_arg(scope, &args, 0) else { return };
+    let cid = realm_id(scope, &args);
+    if let Some(arena) = dom(scope).realms.get_mut(&cid) {
+        arena.sheets.drop_rule(handle);
     }
 }
 
@@ -2315,9 +2468,10 @@ fn style_properties(scope: &mut v8::PinScope<'_, '_>, _args: v8::FunctionCallbac
     rv.set(v8::Array::new_with_elements(scope, &rows).into());
 }
 
-// The declaration-block ops (cssom_decl.rs): `(text, kind, quirks, base, …, nid)` — `kind` 0 a style rule's block (an
-// element's `style` attribute is one), 1 a keyframe's, 2 a page's, 3 an `@font-face` rule's descriptors; `base` the
-// document's base URL; `nid` the element whose `style` attribute it is, -1 for any other block.
+// The declaration-block ops (cssom_decl.rs): `(text, kind, quirks, base, …, nid, rule)` — `kind` 0 a style rule's block
+// (an element's `style` attribute is one), 1 a keyframe's, 2 a page's, 3 an `@font-face` rule's descriptors; `base` the
+// document's base URL; `nid` the element whose `style` attribute it is and `rule` the handle of the rule whose block it
+// is (cssom_rule.rs), -1 for neither.
 fn decl_key(scope: &mut v8::PinScope<'_, '_>, args: &v8::FunctionCallbackArguments<'_>) -> crate::cssom_decl::Key {
     let text = args.get(0).to_rust_string_lossy(scope);
     let kind = crate::cssom_decl::Kind::from_u32(args.get(1).uint32_value(scope).unwrap_or(0));
@@ -2396,19 +2550,23 @@ fn decl_replace(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgu
     set_str(scope, &mut rv, &written.text);
     keep_written_style(scope, &args, &key, 4, written);
 }
-// The block the element's last write made — argument `at` its nid, -1 for a rule's or a detached declaration's — while
-// its `style` attribute still declares it (cssom_decl.rs `WrittenStyle`): what the next read or write is of.
+// The block a read or a write is of where it is not the parse of the text: argument `at + 1` a rule's handle — the
+// rule's own block (cssom_rule.rs) — or argument `at` an element's nid, while its `style` attribute still declares the
+// block its last write made (cssom_decl.rs `WrittenStyle`); -1 for neither.
 fn written_style(
     scope: &mut v8::PinScope<'_, '_>,
     args: &v8::FunctionCallbackArguments<'_>,
     key: &crate::cssom_decl::Key,
     at: i32,
 ) -> Option<std::rc::Rc<crate::cssom_decl::Block>> {
+    if let Some(rule) = handle_arg(scope, args, at + 1) {
+        return with_sheets(scope, args, |store, lock| crate::cssom_rule::rule_block(store, lock, rule)).map(std::rc::Rc::new);
+    }
     let id = nid_arg(scope, args, at)?;
     let cid = realm_id(scope, args);
     realm(scope, cid).get(id)?.written_style.as_ref()?.for_key(key)
 }
-// …and where the block is an element's `style` attribute, the block the write made, kept on the element.
+// …and the block a write made, put in its place: the rule's, or kept on the element.
 fn keep_written_style(
     scope: &mut v8::PinScope<'_, '_>,
     args: &v8::FunctionCallbackArguments<'_>,
@@ -2416,6 +2574,13 @@ fn keep_written_style(
     at: i32,
     written: crate::cssom_decl::Written,
 ) {
+    if let Some(rule) = handle_arg(scope, args, at + 1) {
+        if with_sheets(scope, args, |store, lock| crate::cssom_rule::set_rule_block(store, lock, rule, written.into_block())) {
+            let sheet = sheet_of(scope, args, rule);
+            rules_moved(scope, args, sheet);
+        }
+        return;
+    }
     let Some(id) = nid_arg(scope, args, at) else { return };
     let Some(style) = crate::cssom_decl::WrittenStyle::new(key, written) else { return };
     let cid = realm_id(scope, args);

@@ -28736,10 +28736,6 @@ css/css-animations/Element-getAnimations-dynamic-changes.tentative.html:
     specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
     path/suffix. CLAUDE.md rule 1.
 css/css-animations/KeyframeEffect-getKeyframes.tentative.html:
-- name: KeyframeEffect.getKeyframes() reflects changes to @keyframes rules
-  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
-    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
-    path/suffix. CLAUDE.md rule 1.
 - name: KeyframeEffect.getKeyframes() returns expected frames for an animation with
     a 0% keyframe and no 100% keyframe
   reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux

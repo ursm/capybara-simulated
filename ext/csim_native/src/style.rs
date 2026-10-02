@@ -527,7 +527,44 @@ impl StyleEngine {
         self.sheets_changed();
     }
 
-    // A sheet's rules moved under the engine — an `@import`ed one arrived — so everything is styled again.
+    // The engine cascades `new` wherever it cascaded `old` (a sheet CSSOM took a copy of, sheets.rs `own`), in its place.
+    pub(crate) fn swap_sheet(&mut self, old: &DocumentStyleSheet, new: &DocumentStyleSheet) {
+        let swap = |s: &DocumentStyleSheet| if Arc::ptr_eq(&s.0, &old.0) { new.clone() } else { s.clone() };
+        if self.author.iter().any(|a| Arc::ptr_eq(&a.sheet.0, &old.0)) {
+            let guard = self.lock.read();
+            for a in &self.author {
+                self.stylist.remove_stylesheet(a.sheet.clone(), &guard);
+            }
+            for a in &mut self.author {
+                a.sheet = swap(&a.sheet);
+                self.stylist.append_stylesheet(a.sheet.clone(), &guard);
+            }
+            drop(guard);
+            self.sheets_changed();
+        }
+        let device = self.stylist.device().clone();
+        for shadow in self.shadow_styles.values_mut().filter(|sh| sh.sheets.iter().any(|s| Arc::ptr_eq(&s.0, &old.0))) {
+            let guard = self.lock.read();
+            for sheet in std::mem::take(&mut shadow.sheets) {
+                shadow.styles.stylesheets.remove_stylesheet(Some(&device), &NO_CUSTOM_MEDIA, sheet.clone(), &guard);
+                let sheet = swap(&sheet);
+                shadow.styles.stylesheets.append_stylesheet(Some(&device), &NO_CUSTOM_MEDIA, sheet.clone(), &guard);
+                shadow.sheets.push(sheet);
+            }
+            shadow.dirty = true;
+            self.styled = None;
+            self.rules_changed = true;
+        }
+    }
+
+    // Whether `sheet` is one the engine cascades — the document's, or a shadow root's.
+    pub(crate) fn uses_sheet(&self, sheet: &DocumentStyleSheet) -> bool {
+        self.author.iter().any(|a| Arc::ptr_eq(&a.sheet.0, &sheet.0))
+            || self.shadow_styles.values().any(|shadow| shadow.sheets.iter().any(|s| Arc::ptr_eq(&s.0, &sheet.0)))
+    }
+
+    // A sheet's rules moved under the engine — an `@import`ed one arrived, CSSOM edited one — so everything is styled
+    // again.
     pub(crate) fn sheets_changed(&mut self) {
         self.stylist.force_stylesheet_origins_dirty(OriginSet::all());
         for shadow in self.shadow_styles.values_mut() {

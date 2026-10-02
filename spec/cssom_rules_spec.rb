@@ -84,4 +84,54 @@ RSpec.describe 'CSSOM rules' do
     JS
     expect(got).to eq('.p::highlight(Mine)')
   end
+
+  # A rule is the engine's own rule: an edit through it — its declarations (kept as written, not as their serialization
+  # rounds them, as an element's are), its selector — restyles at once, an empty `<style>`'s sheet included, and a
+  # deleted rule is detached but still reads. (Chrome: 10px, 123.453px, 123.457px, then the selector, then detached.)
+  it 'edits the engine rule in place' do
+    got = page('').evaluate_script(<<~JS)
+      (() => {
+        const sheet = document.styleSheets[0], out = [];
+        const d = document.body.appendChild(document.createElement('div'));
+        d.style.display = 'inline-block';
+        sheet.insertRule('div { width: 10px }');
+        const rule = sheet.cssRules[0];
+        out.push(getComputedStyle(d).width);
+        rule.style.setProperty('width', '123.4567891px');
+        out.push(getComputedStyle(d).width, rule.style.width);
+        rule.selectorText = '#nope';
+        out.push(getComputedStyle(d).width);
+        rule.selectorText = 'div';
+        out.push(sheet.cssRules[0] === rule);
+        sheet.deleteRule(0);
+        return out.concat(rule.parentStyleSheet, rule.cssText);
+      })()
+    JS
+    expect(got).to eq(['10px', '123.4568px', '123.457px', '0px', true, nil, 'div { width: 123.457px; }'])
+  end
+
+  # Every rule the engine parses is in the rule list as its interface (Chrome: the same four).
+  it 'lists the at-rules the engine parses' do
+    css = '@layer a, b; @container (min-width: 1px) { p { color: red } } ' \
+          '@property --x { syntax: "<length>"; inherits: false; initial-value: 0px } @page :first { margin: 1in }'
+    got = page(css).evaluate_script('[...document.styleSheets[0].cssRules].map((r) => r.constructor.name)')
+    expect(got).to eq(%w[CSSLayerStatementRule CSSContainerRule CSSPropertyRule CSSPageRule])
+  end
+
+  # Sheets of one text share the engine's parse until CSSOM reaches one, which then takes its own copy: an edit of one
+  # is its alone — the other still reads and applies what it was written with (Chrome: the same).
+  it 'keeps an edit of one of two sheets of the same text its alone' do
+    got = page('div { width: 10px }</style><style>div { width: 10px }').evaluate_script(<<~JS)
+      (() => {
+        const [a, b] = document.styleSheets;
+        const d = document.body.appendChild(document.createElement('div'));
+        d.style.display = 'inline-block';
+        a.cssRules[0].style.width = '20px';
+        const one = [a.cssRules[0].cssText, b.cssRules[0].cssText, getComputedStyle(d).width];
+        b.cssRules[0].style.width = '30px';
+        return one.concat(a.cssRules[0].cssText, getComputedStyle(d).width);
+      })()
+    JS
+    expect(got).to eq(['div { width: 20px; }', 'div { width: 10px; }', '10px', 'div { width: 20px; }', '30px'])
+  end
 end
