@@ -2,6 +2,7 @@
 # deliberately do NOT model (per CLAUDE.md rule 1): a RENDERING engine (glyph shaping
 # — kerning / ligatures / bidi — and the line-breaking algorithm), a real async runtime,
 # legacy-multibyte / Unicode-version-tied
+# encoding tables, or a spec edge no real library/app depends on. NOT "layout" wholesale:
 # box layout IS modeled (CLAUDE.md lists it as already in scope), so a failing geometry
 # or resolved-value subtest is a coarse-model gap to diagnose, not an automatic exclusion.
 # …and this header is the rule's own best example, THREE times: it kept naming `flex / grid track sizing`
@@ -10,6 +11,7 @@
 # `spec/display_contents_spec.rb`), and then it said both again: the corrections were made in the YAML by
 # hand and this TEMPLATE was not, so the next regen reverted them silently. No allowlist ENTRY cited any of
 # the three, so nothing was orphaned; only the header lied about why the list exists. Fix it HERE.
+# A REASON GOES STALE when the subsystem it names gets built, and the entry then has to move:
 # 1023 inset / used-value subtests came back on the first such sweep, and 1189 more on the
 # 2026-08-31 audit (innerText's rendered-text collection, elementFromPoint / caret-from-point,
 # pseudo-element computed style, the CSS animation and transition event families, IDNA,
@@ -28708,11 +28710,6 @@ css/css-animations/AnimationEffect-updateTiming.tentative.html:
   reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
     specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
     path/suffix. CLAUDE.md rule 1.
-css/css-animations/CSSAnimation-animationName.tentative.html:
-- name: Animation name with hex-escape
-  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
-    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
-    path/suffix. CLAUDE.md rule 1.
 css/css-animations/CSSAnimation-effect.tentative.html:
 - name: Replacing the effect of a CSSAnimation causes subsequent changes to corresponding
     animation-* properties to be ignored
@@ -28734,11 +28731,6 @@ css/css-animations/Document-getAnimations.tentative.html:
     specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
     path/suffix. CLAUDE.md rule 1.
 css/css-animations/Element-getAnimations-dynamic-changes.tentative.html:
-- name: Animations are removed from the start of the list while preserving the state
-    of existing Animations
-  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
-    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
-    path/suffix. CLAUDE.md rule 1.
 - name: Animations preserve their startTime when changed
   reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
     specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
@@ -28922,26 +28914,6 @@ css/css-animations/event-dispatch.tentative.html:
     path/suffix. CLAUDE.md rule 1.
 css/css-animations/event-order.tentative.html:
 - name: Same events on pseudo-elements follow the prescribed order (::marker)
-  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
-    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
-    path/suffix. CLAUDE.md rule 1.
-css/css-animations/parsing/animation-composition-invalid.tentative.html:
-- name: e.style['animation-composition'] = "add replace" should not set the property
-    value
-  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
-    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
-    path/suffix. CLAUDE.md rule 1.
-- name: e.style['animation-composition'] = "add, initial" should not set the property
-    value
-  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
-    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
-    path/suffix. CLAUDE.md rule 1.
-- name: e.style['animation-composition'] = "auto" should not set the property value
-  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
-    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
-    path/suffix. CLAUDE.md rule 1.
-- name: e.style['animation-composition'] = "initial, add" should not set the property
-    value
   reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
     specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
     path/suffix. CLAUDE.md rule 1.
@@ -29240,16 +29212,6 @@ css/css-logical/animation-003.tentative.html:
 css/css-logical/animations/logical-shorthand-relative-prioritization-by-number-of-components.tentative.html:
 - name: Logical shorthands follow the usual prioritization based on number of component
     longhands
-  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
-    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
-    path/suffix. CLAUDE.md rule 1.
-css/css-transforms/parsing/webkit-perspective-invalid.tentative.html:
-- name: e.style['-webkit-perspective'] = "calc(1000)" should not set the property
-    value
-  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
-    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
-    path/suffix. CLAUDE.md rule 1.
-- name: e.style['-webkit-perspective'] = "calc(25)" should not set the property value
   reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
     specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
     path/suffix. CLAUDE.md rule 1.
@@ -32185,25 +32147,6 @@ css/cssom/cssstyledeclaration-cssfontrule.tentative.html:
   reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
     specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
     path/suffix. CLAUDE.md rule 1.
-css/cssom/serialize-values.html:
-- name: 'baseline-shift: bottom'
-  reason: The test lists SVG 1.1's `top` / `center` / `bottom` among `baseline-shift`'s
-    values. css-inline-3 defines the property as `<length-percentage> | sub | super`,
-    SVG 2 dropped the keywords, and Chrome 151 drops the declaration (measured on
-    this machine), so satisfying it would mean accepting a value no current spec and
-    no browser accepts. CLAUDE.md rule 1's real-browser caveat.
-- name: 'baseline-shift: center'
-  reason: The test lists SVG 1.1's `top` / `center` / `bottom` among `baseline-shift`'s
-    values. css-inline-3 defines the property as `<length-percentage> | sub | super`,
-    SVG 2 dropped the keywords, and Chrome 151 drops the declaration (measured on
-    this machine), so satisfying it would mean accepting a value no current spec and
-    no browser accepts. CLAUDE.md rule 1's real-browser caveat.
-- name: 'baseline-shift: top'
-  reason: The test lists SVG 1.1's `top` / `center` / `bottom` among `baseline-shift`'s
-    values. css-inline-3 defines the property as `<length-percentage> | sub | super`,
-    SVG 2 dropped the keywords, and Chrome 151 drops the declaration (measured on
-    this machine), so satisfying it would mean accepting a value no current spec and
-    no browser accepts. CLAUDE.md rule 1's real-browser caveat.
 custom-elements/element-internals-behaviors.tentative.html:
 - name: Behavior state is preserved across disconnect and reconnect
   reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
@@ -38162,7 +38105,11 @@ domparsing/tentative/stream-positional.html:
     methods not implemented. Streams ARE modeled (web-streams-polyfill); in-scope
     backlog deprioritized (unshipped, no app depends on it).'
 domxpath/resolver-callback-interface-cross-realm.tentative.html:
-- name: XPathNSResolver is cross-realm plain object without 'lookupNamespaceURI' property
+- name: XPathNSResolver is cross-realm callable revoked Proxy
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: XPathNSResolver is cross-realm non-callable revoked Proxy
   reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
     specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
     path/suffix. CLAUDE.md rule 1.
@@ -38171,16 +38118,12 @@ domxpath/resolver-callback-interface-cross-realm.tentative.html:
   reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
     specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
     path/suffix. CLAUDE.md rule 1.
-- name: XPathNSResolver is cross-realm non-callable revoked Proxy
-  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
-    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
-    path/suffix. CLAUDE.md rule 1.
-- name: XPathNSResolver is cross-realm callable revoked Proxy
-  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
-    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
-    path/suffix. CLAUDE.md rule 1.
 - name: XPathNSResolver is cross-realm plain object with revoked Proxy as 'lookupNamespaceURI'
     property
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: XPathNSResolver is cross-realm plain object without 'lookupNamespaceURI' property
   reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
     specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
     path/suffix. CLAUDE.md rule 1.

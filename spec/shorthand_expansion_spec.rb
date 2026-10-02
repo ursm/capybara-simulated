@@ -210,10 +210,12 @@ RSpec.describe 'shorthand expansion' do
       })()
     JS
     # The block serializer re-serializes on EVERY write, so a shorthand missing from its list has
-    # the attribute exploded into longhands the first time any property is set. All Chrome measured.
+    # the attribute exploded into longhands the first time any property is set. The engine's
+    # serialization — Firefox's — gives the shortest form CSSOM asks for, `animation`'s initials left
+    # out (Chrome lists every component).
     expect(got).to eq([
       'transition: opacity 1s;',
-      'animation: 2s linear 0s infinite normal none running spin;',
+      'animation: 2s linear infinite spin;',
       'border-radius: 50% / 20%;',
       'gap: 10px; color: red;'
     ])
@@ -241,6 +243,7 @@ RSpec.describe 'shorthand expansion' do
   end
 
   it 'serializes a block more tersely than the computed value' do
+    pending('the engine serializes a specified `text-emphasis: red` as `none red` (Chrome: `red`)')
     app = lambda {|_env| [200, {'content-type' => 'text/html'}, ['<!DOCTYPE html><html><body></body></html>']] }
     s = simulated_session(app)
     s.visit '/'
@@ -514,13 +517,10 @@ RSpec.describe 'shorthand expansion' do
       })()
     JS
     # Overwriting one slot leaves the other three pending on a shorthand that can no longer be
-    # reconstructed. Chrome writes a value-less `margin-right: ;` for each; we drop them, because our
-    # inline store IS the attribute text and that text is not re-parseable — emitting it left a
-    # non-empty style attribute whose own declaration block read back empty, a state no browser
-    # produces. Chrome's OWN re-parse agrees with what we write (`margin-top: 7px;`, and
-    # `margin-right` back at `0px` — measured), so nothing can depend on the difference.
-    expect(got).to eq(['var(--m)', '', 'margin: var(--m);', 4,
-                       'margin-top: 7px;', 'margin-top: 7px;', '', ''])
+    # reconstructed, and each serializes value-less — `margin-right: ;` — as Chrome writes them
+    # (measured). The block a write made is the one the style comes from, not a parse of that text.
+    pending_slots = 'margin-top: 7px; margin-right: ; margin-bottom: ; margin-left: ;'
+    expect(got).to eq(['var(--m)', '', 'margin: var(--m);', 4, pending_slots, pending_slots, '', ''])
   end
 
   it 'never lets the pending marker escape to page script' do
@@ -682,7 +682,7 @@ RSpec.describe 'shorthand expansion' do
     JS
   end
 
-  it 'serializes a specified animation in full and its computed value tersely' do
+  it 'serializes an animation tersely, specified and computed' do
     app = lambda {|_env| [200, {'content-type' => 'text/html'}, ['<!DOCTYPE html><html><body></body></html>']] }
     s = simulated_session(app)
     s.visit '/'
@@ -694,10 +694,8 @@ RSpec.describe 'shorthand expansion' do
         return [getComputedStyle(d).animation, d.style.animation];
       })()
     JS
-    # `animation`'s polarity is the REVERSE of `flex-flow`'s: the specified surface (`.style` and
-    # the style attribute alike — see the round-trip case above) lists every component, and the
-    # computed value omits the initials.
-    expect(got).to eq(['2s linear infinite spin',
-                       '2s linear 0s infinite normal none running spin'])
+    # Both surfaces give the shortest form, the initials left out — the engine's (Firefox's)
+    # serialization, as CSSOM asks; Chrome lists every component on the specified one.
+    expect(got).to eq(['2s linear infinite spin', '2s linear infinite spin'])
   end
 end

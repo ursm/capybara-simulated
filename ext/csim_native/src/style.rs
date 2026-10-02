@@ -2953,7 +2953,10 @@ impl<'a> TElement for StyleNode<'a> {
         let parsed = unsafe { &*self.slot().style_attr.get() }.get_or_init(|| {
             let css = self.node().plain_attr("style")?;
             let engine = self.engine();
-            let block = parse_style_attribute(css, &engine.url, None, engine.quirks, CssRuleType::Style);
+            // (…the block a CSSOM write made, where this text is the one it wrote: its serialization rounds what the
+            // write said — cssom_decl.rs)
+            let block = crate::cssom_decl::style_attribute_block(css, engine.quirks == QuirksMode::Quirks, engine.url.0.as_str())
+                .unwrap_or_else(|| parse_style_attribute(css, &engine.url, None, engine.quirks, CssRuleType::Style));
             Some(Arc::new(engine.lock.wrap(block)))
         });
         parsed.as_ref().map(|a| a.borrow_arc())

@@ -1071,6 +1071,16 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_, ()>, ctx: &v8::Global<v8:
     register(scope, ns, "styleShadowSheets", style_shadow_sheets, context_id);
     register(scope, ns, "styleValue", style_value, context_id);
     register(scope, ns, "styleSupports", style_supports, context_id);
+    // CSSOM's declaration blocks, over the engine's (cssom_decl.rs): each takes the block's TEXT, its kind and the
+    // document's mode.
+    register(scope, ns, "declValue", decl_value, context_id);
+    register(scope, ns, "declImportant", decl_important, context_id);
+    register(scope, ns, "declText", decl_text, context_id);
+    register(scope, ns, "declNames", decl_names, context_id);
+    register(scope, ns, "declSet", decl_set, context_id);
+    register(scope, ns, "declRemove", decl_remove, context_id);
+    register(scope, ns, "declSupports", decl_supports, context_id);
+    register(scope, ns, "declSupportsCondition", decl_supports_condition, context_id);
     register(scope, ns, "styleShown", style_shown, context_id);
     register(scope, ns, "styleGenerated", style_generated, context_id);
     register(scope, ns, "styleSkips", style_skips, context_id);
@@ -2173,6 +2183,81 @@ fn style_supports(
 ) {
     let name = args.get(0).to_rust_string_lossy(scope);
     rv.set_bool(crate::style::supports_property(&name));
+}
+
+// The declaration-block ops (cssom_decl.rs): `(text, kind, quirks, base, …)` — `kind` 0 a style rule's block (an
+// element's `style` attribute is one), 1 a keyframe's, 2 a page's, 3 an `@font-face` rule's descriptors; `base` the
+// document's base URL.
+fn decl_key(scope: &mut v8::PinScope<'_, '_>, args: &v8::FunctionCallbackArguments<'_>) -> crate::cssom_decl::Key {
+    let text = args.get(0).to_rust_string_lossy(scope);
+    let kind = crate::cssom_decl::Kind::from_u32(args.get(1).uint32_value(scope).unwrap_or(0));
+    let base = args.get(3).to_rust_string_lossy(scope);
+    crate::cssom_decl::Key::new(&text, kind, args.get(2).is_true(), &base)
+}
+fn set_str(scope: &mut v8::PinScope<'_, '_>, rv: &mut v8::ReturnValue<'_, v8::Value>, s: &str) {
+    if let Some(s) = v8::String::new(scope, s) {
+        rv.set(s.into());
+    }
+}
+// __dom.declValue(text, kind, quirks, base, name) -> `getPropertyValue(name)`.
+fn decl_value(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let key = decl_key(scope, &args);
+    let name = args.get(4).to_rust_string_lossy(scope);
+    let value = crate::cssom_decl::value(&key, &name);
+    set_str(scope, &mut rv, &value);
+}
+// __dom.declImportant(text, kind, quirks, base, name) -> whether `getPropertyPriority(name)` is `important`.
+fn decl_important(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let key = decl_key(scope, &args);
+    let name = args.get(4).to_rust_string_lossy(scope);
+    rv.set_bool(crate::cssom_decl::important(&key, &name));
+}
+// __dom.declText(text, kind, quirks, base) -> `cssText`.
+fn decl_text(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let key = decl_key(scope, &args);
+    let css = crate::cssom_decl::css_text(&key);
+    set_str(scope, &mut rv, &css);
+}
+// __dom.declNames(text, kind, quirks, base) -> the declared longhand and custom property names, in order.
+fn decl_names(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let key = decl_key(scope, &args);
+    let names = crate::cssom_decl::names(&key);
+    let items: Vec<v8::Local<v8::Value>> = names.iter().filter_map(|n| v8::String::new(scope, n)).map(Into::into).collect();
+    rv.set(v8::Array::new_with_elements(scope, &items).into());
+}
+// __dom.declSet(text, kind, quirks, base, name, value, important) -> the new text, or null where the block did not change.
+fn decl_set(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let key = decl_key(scope, &args);
+    let name = args.get(4).to_rust_string_lossy(scope);
+    let value = args.get(5).to_rust_string_lossy(scope);
+    match crate::cssom_decl::set(&key, &name, &value, args.get(6).is_true()) {
+        Some(css) => set_str(scope, &mut rv, &css),
+        None => rv.set_null(),
+    }
+}
+// __dom.declRemove(text, kind, quirks, base, name) -> [the value it had, the new text or null where it set nothing].
+fn decl_remove(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let key = decl_key(scope, &args);
+    let name = args.get(4).to_rust_string_lossy(scope);
+    let (old, css) = crate::cssom_decl::remove(&key, &name);
+    let old: v8::Local<v8::Value> = v8::String::new(scope, &old).map(Into::into).unwrap_or_else(|| v8::null(scope).into());
+    let css: v8::Local<v8::Value> = match css {
+        Some(css) => v8::String::new(scope, &css).map(Into::into).unwrap_or_else(|| v8::null(scope).into()),
+        None => v8::null(scope).into(),
+    };
+    rv.set(v8::Array::new_with_elements(scope, &[old, css]).into());
+}
+// __dom.declSupports(name, value) -> `CSS.supports(name, value)`.
+fn decl_supports(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let name = args.get(0).to_rust_string_lossy(scope);
+    let value = args.get(1).to_rust_string_lossy(scope);
+    rv.set_bool(crate::cssom_decl::supports(&name, &value));
+}
+
+// __dom.declSupportsCondition(text) -> `CSS.supports(conditionText)`.
+fn decl_supports_condition(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let text = args.get(0).to_rust_string_lossy(scope);
+    rv.set_bool(crate::cssom_decl::supports_condition(&text));
 }
 
 // __dom.styleShown(nid, now) -> 0 | 1 | 2: whether the element is shown as the style engine styled it

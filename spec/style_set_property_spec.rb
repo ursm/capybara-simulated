@@ -69,10 +69,12 @@ RSpec.describe 'CSSStyleDeclaration setProperty / !important' do
     expect(probe.evaluate_script('this.style.cssText')).not_to include('!important')
   end
 
-  it 'honours !important embedded in a camelCase assignment' do
+  # An IDL attribute takes a VALUE, and `!important` is no part of one: the assignment does not parse, and sets
+  # nothing (Chrome measured: '' priority, '' value, no style attribute).
+  it 'ignores !important embedded in a camelCase assignment' do
     probe.execute_script("this.style.display = 'block !important'")
-    expect(probe.evaluate_script("this.style.getPropertyPriority('display')")).to eq('important')
-    expect(probe.evaluate_script('this.style.display')).to eq('block')
+    expect(probe.evaluate_script("this.style.getPropertyPriority('display')")).to eq('')
+    expect(probe.evaluate_script('this.style.display')).to eq('')
   end
 
   it 'reflects an important inline override in getComputedStyle' do

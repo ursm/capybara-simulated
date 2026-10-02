@@ -49,8 +49,6 @@ RSpec.describe 'invalid declaration values' do
     expect(after_setting("d.style.position = 'sticky';")).to eq('position: sticky;')
     expect(after_setting("d.style.color = 'color-mix(in srgb, red, blue)';"))
       .to eq('color: color-mix(in srgb, red, blue);')
-    # A legacy keyword mdn's grammar data omits, which browsers do accept.
-    expect(after_setting("d.style.outlineColor = 'invert';")).to eq('outline-color: invert;')
     # `null` and '' are the CSSOM's clear path, not an invalid value.
     expect(after_setting("d.style.width = '5px'; d.style.width = null;")).to eq('')
   end

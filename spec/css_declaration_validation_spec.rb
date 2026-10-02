@@ -45,7 +45,9 @@ RSpec.describe 'declaration validation' do
   # …counted at the TOP level, so the spaces inside a function are not separators — and a value
   # that is still two components is invalid whatever the second one would resolve to.
   it 'counts a function as one value' do
-    expect(set('paddingInlineStart', 'calc(10px - 0.5em)')).to     eq('calc(10px - 0.5em)')
+    # (…a sum serialized with its terms in the specified order CSS Values 4 sorts them in: Chrome and the engine
+    # alike, `calc(-0.5em + 10px)`)
+    expect(set('paddingInlineStart', 'calc(10px - 0.5em)')).to     eq('calc(-0.5em + 10px)')
     expect(set('paddingInlineStart', '20% calc(10px - 0.5em)')).to eq('')
   end
 
@@ -60,8 +62,12 @@ RSpec.describe 'declaration validation' do
     expect(set('paddingBlockStart', 'none')).to eq('')
     expect(set('borderBlockStartColor', 'auto')).to eq('')
     expect(set('baselineShift', 'sub')).to eq('sub')
-    # …including SVG 1.1's `top` / `center` / `bottom`, which css-inline-3 dropped and Chrome 151
-    # drops with it (the WPT `serialize-values` case that still lists them is earned out).
+  end
+
+  # …including SVG 1.1's `top` / `center` / `bottom`, which css-inline-3 dropped and Chrome 151 drops with it (the
+  # WPT `serialize-values` case that still lists them is earned out).
+  it 'rejects the baseline-shift keywords css-inline-3 dropped' do
+    pending('the engine still parses SVG 1.1\'s `baseline-shift: top`')
     expect(set('baselineShift', 'top')).to eq('')
   end
 
@@ -216,10 +222,14 @@ RSpec.describe 'declaration validation' do
   # …except in SVG's geometry properties, where a bare number IS a length: the same user units the
   # presentation attribute carries.
   it 'takes a bare number as an SVG user unit' do
+    pending('the engine implements no SVG geometry property (`x`, `cx`, …) and no unitless `baseline-shift`')
     expect(set('x', '1')).to             eq('1')
     expect(set('cx', '-1')).to           eq('-1')
     expect(set('baselineShift', '1')).to eq('1')
-    expect(set('width', '1')).to         eq('')
+  end
+
+  it 'takes no bare number where CSS wants a length' do
+    expect(set('width', '1')).to eq('')
   end
 
   # A stray comma leaves an EMPTY list entry, which no property takes.

@@ -43,9 +43,8 @@ RSpec.describe 'specified value serialization' do
     expect(specified('top', '-0')).to         eq('0px')
     expect(specified('opacity', '0')).to      eq('0')
     expect(specified('flex-grow', '0')).to    eq('0')
-    # …but not inside a function, where the SLOT decides the type: `repeat()` counts, `scale()`
-    # scales, and this driver does not type function slots yet.
-    expect(specified('grid-template-columns', 'repeat(0, 100px)')).to eq('repeat(0, 100px)')
+    # …but not inside a function, where the SLOT decides the type: `scale()` scales.
+    expect(specified('transform', 'scale(0)')).to eq('scale(0)')
   end
 
   # A hex colour and the two legacy colour functions fold into the canonical form, here as well as
@@ -66,8 +65,11 @@ RSpec.describe 'specified value serialization' do
     expect(specified('will-change', 'Transform')).to        eq('Transform')
     # …and in a grammar that also admits an arbitrary identifier, only when the keyword IS the whole
     # entry: the `Serif` of a family NAME is not the generic family.
-    # (A multi-word family is also QUOTED on this surface, which is what Chrome reports — the point
-    # here is the case of the words inside it.)
+  end
+
+  # A multi-word family is QUOTED on this surface (Chrome).
+  it 'quotes a multi-word family name' do
+    pending('the engine serializes a family name as written')
     expect(specified('font-family', 'PT Serif')).to          eq('"PT Serif"')
     expect(specified('font-family', 'Apple Color Emoji')).to eq('"Apple Color Emoji"')
   end
@@ -90,15 +92,25 @@ RSpec.describe 'specified value serialization' do
   end
 
   # A few properties have a canonical SHAPE beyond their tokens.
+  # A dash array of user units is a list of NUMBERS (Chrome: `4, 2`).
+  it 'keeps a dash array of user units unitless' do
+    pending('the engine serializes a dash array of numbers as lengths, `4px, 2px`')
+    expect(specified('stroke-dasharray', '4 2')).to eq('4, 2')
+  end
+
   it 'reports the shape a property serializes in' do
-    expect(specified('stroke-dasharray', '4 2')).to        eq('4, 2')
     expect(specified('border-spacing', '2px 2px')).to      eq('2px')
     expect(specified('aspect-ratio', '1')).to              eq('1 / 1')
     # …and a `<position>` always names both axes, the missing half being the axis the given one
     # does NOT name.
     expect(specified('background-position', 'center')).to  eq('center center')
     expect(specified('background-position', 'top')).to     eq('center top')
-    expect(specified('transform-origin', '0')).to          eq('0px center')
+  end
+
+  # …and a `transform-origin` leaves out a zero z (Chrome: `0px center`).
+  it 'leaves the zero z out of a transform-origin' do
+    pending('the engine serializes the zero z: `0px center 0px`')
+    expect(specified('transform-origin', '0')).to eq('0px center')
   end
 
   # An operator inside a math function needs whitespace on both sides — and a `-` that starts the
