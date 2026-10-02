@@ -1126,6 +1126,7 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_, ()>, ctx: &v8::Global<v8:
     // or in-memory SFNT bytes) to a handle JS puts in the layout inputs; native measures runs in-process.
     register(scope, ns, "registerFontPath", register_font_path, context_id);
     register(scope, ns, "registerFontScaled", register_font_scaled, context_id);
+    register(scope, ns, "registerFontStack", register_font_stack, context_id);
     register(scope, ns, "registerFontBytes", register_font_bytes, context_id);
     if let Some(key) = v8::String::new(scope, "__dom") {
         let global = context.global(scope);
@@ -2636,6 +2637,36 @@ fn register_font_scaled(
     let handle = args.get(0).int32_value(scope).unwrap_or(-1);
     let scale = args.get(1).number_value(scope).unwrap_or(f64::NAN);
     rv.set_int32(if scale.is_finite() && scale > 0.0 { crate::font::register_scaled(handle, scale) } else { -1 });
+}
+
+// __dom.registerFontStack(primary, members) -> handle: a `unicode-range` split, `members` a flat [handle, rangeCount,
+// lo, hi, …] list in pick order (rangeCount -1: the member covers every code point).
+fn register_font_stack(
+    scope: &mut v8::PinScope<'_, '_>,
+    args: v8::FunctionCallbackArguments<'_>,
+    mut rv: v8::ReturnValue<'_, v8::Value>,
+) {
+    let primary = args.get(0).int32_value(scope).unwrap_or(-1);
+    let flat = f64_arg(args.get(1));
+    let mut members = Vec::new();
+    let mut i = 0;
+    while i + 1 < flat.len() {
+        let (handle, count) = (flat[i] as i32, flat[i + 1]);
+        i += 2;
+        let ranges = if count < 0.0 {
+            None
+        } else {
+            let n = count as usize;
+            if i + 2 * n > flat.len() {
+                break;
+            }
+            let r = (0..n).map(|k| (flat[i + 2 * k] as u32, flat[i + 2 * k + 1] as u32)).collect();
+            i += 2 * n;
+            Some(r)
+        };
+        members.push((ranges, handle));
+    }
+    rv.set_int32(crate::font::register_stack(primary, members));
 }
 
 // __dom.registerFontBytes(uint8array) -> handle. In-memory SFNT bytes for a web / buffer face the host

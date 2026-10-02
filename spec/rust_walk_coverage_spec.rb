@@ -135,6 +135,26 @@ RSpec.describe 'Rust walk coverage' do
     expect(s.evaluate_script('JSON.stringify(__csimNativeLayoutStats().rustFellBack)')).to eq('{}')
   end
 
+  # A family whose `@font-face`s split a run by `unicode-range` — Ahem for A–Z, Lato at 120% for a–z, the system font for
+  # the rest — is one face natively (`registerFontStack`), each character measured by the first face covering it.
+  it 'lays out text in a unicode-range split' do
+    dir = File.join(__dir__, 'wpt/fonts')
+    files = {'/Ahem.ttf' => File.binread("#{dir}/Ahem.ttf"), '/Lato.ttf' => File.binread("#{dir}/Lato-Medium.ttf")}
+    css = '@font-face { font-family: F; src: url(/Ahem.ttf); unicode-range: U+0041-005A; } ' \
+          '@font-face { font-family: F; src: url(/Lato.ttf); unicode-range: U+0061-007A; size-adjust: 120%; }'
+    body = %w[ABC abc AbC].map {|t| %(<div style="font: 20px F, monospace; width: 300px"><span>#{t} #{t}</span></div>) }.join
+    s = simulated_session(lambda {|env|
+      next [200, {'content-type' => 'font/ttf'}, [files[env['PATH_INFO']]]] if files.key?(env['PATH_INFO'])
+
+      [200, {'content-type' => 'text/html'}, ["<!DOCTYPE html><meta charset=\"utf-8\"><style>#{css}</style>#{body}"]]
+    })
+    s.visit '/'
+    s.execute_script("document.body.style.color = 'red'")
+    widths = s.evaluate_script("[...document.querySelectorAll('span')].map((e) => Math.round(e.getBoundingClientRect().width * 100) / 100)")
+    expect(widths).to eq([132, 85.92, 118.98])
+    expect(s.evaluate_script('JSON.stringify(__csimNativeLayoutStats().rustFellBack)')).to eq('{}')
+  end
+
   # A face whose descriptors change after the first layout is the new face to the style engine's `ch` / `ex` too: the
   # faces it computed a metric from are asked for again once the faces' generation moves, where it kept the old one's.
   it "follows a face's size-adjust into ch and ex when it changes" do

@@ -24,6 +24,10 @@ use skrifa::{FontRef, MetadataProvider};
 pub(crate) struct FontMetrics {
     ascii: [Option<f64>; 128],
     avg: f64,
+    // A `unicode-range` SPLIT (`registerFontStack`): the faces a run's characters pick from, each its registered handle
+    // and the ranges it covers (None: every code point) — the first that covers a character measures it, and one none
+    // covers is this face's own (layout.js `pickCharCand`). None for a single face.
+    split: Option<Vec<(Option<Vec<(u32, u32)>>, i32)>>,
 }
 
 impl FontMetrics {
@@ -60,7 +64,7 @@ impl FontMetrics {
         if count == 0 {
             return None;
         }
-        Some(FontMetrics { ascii, avg: total / count as f64 })
+        Some(FontMetrics { ascii, avg: total / count as f64, split: None })
     }
 
     // Width (px) of a UTF-16 run at `size` px with letter/word spacing, exactly as layout.js measureRun does.
@@ -112,7 +116,16 @@ impl FontMetrics {
                 i += 1;
                 continue;
             }
-            units += unit_of(cp, prev, self);
+            units += match &self.split {
+                None => unit_of(cp, prev, self),
+                Some(split) => {
+                    let member = split.iter().find(|(ranges, _)| ranges.as_ref().is_none_or(|r| r.iter().any(|&(lo, hi)| (lo..=hi).contains(&cp))));
+                    match member {
+                        Some(&(_, handle)) => with_font(handle, |fm| unit_of(cp, prev, fm)).unwrap_or_else(|| unit_of(cp, prev, self)),
+                        None => unit_of(cp, prev, self),
+                    }
+                }
+            };
             if spaced && takes_spacing(cp, prev) {
                 spacing += ls + if cp == 0x20 || cp == 0x00A0 { ws } else { 0.0 };
             }
@@ -266,9 +279,36 @@ pub(crate) fn register_scaled(handle: i32, scale: f64) -> i32 {
         f.borrow().get(handle as usize).and_then(Option::as_ref).map(|fm| FontMetrics {
             ascii: fm.ascii.map(|a| a.map(|a| a * scale)),
             avg: fm.avg * scale,
+            split: None,
         })
     });
     let h = match scaled {
+        Some(metrics) => FONTS.with(|f| {
+            let mut v = f.borrow_mut();
+            v.push(Some(metrics));
+            (v.len() - 1) as i32
+        }),
+        None => -1,
+    };
+    FONT_IDX.with(|m| m.borrow_mut().insert(key, h));
+    h
+}
+
+// A family stack whose `@font-face`s restrict their `unicode-range`s (layout.js `faceStackFor`): the face `primary`'s
+// own metrics — what a character no member covers is measured by — and `members`, in order, each a registered face
+// and its ranges (None: universal). Its own handle, shared per (primary, members); -1 for an unregistered primary.
+pub(crate) fn register_stack(primary: i32, members: Vec<(Option<Vec<(u32, u32)>>, i32)>) -> i32 {
+    if primary < 0 {
+        return -1;
+    }
+    let key = format!("t:{primary}:{members:?}");
+    if let Some(h) = FONT_IDX.with(|m| m.borrow().get(&key).copied()) {
+        return h;
+    }
+    let stacked = FONTS.with(|f| {
+        f.borrow().get(primary as usize).and_then(Option::as_ref).map(|fm| FontMetrics { ascii: fm.ascii, avg: fm.avg, split: Some(members.clone()) })
+    });
+    let h = match stacked {
         Some(metrics) => FONTS.with(|f| {
             let mut v = f.borrow_mut();
             v.push(Some(metrics));
