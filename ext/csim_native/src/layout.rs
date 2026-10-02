@@ -461,7 +461,7 @@ pub(crate) struct Input {
     pub(crate) ratio_only: bool,
     // The box has no content height to floor a flex column's automatic minimum at (an image, a ratio box).
     pub(crate) shrinks_to_nothing: bool,
-    // …and whether it is a FORM CONTROL — an `<input>`, a `<select>`, a `<textarea>` — whose percentage max-width
+    // …and whether it is a FORM CONTROL — an `<input>`, a `<select>`, a `<textarea>`, a `<meter>` — whose percentage max-width
     // compresses nothing, where every other replaced box's does (CSS Sizing 3 §5.2.2 as Chrome and Firefox read it).
     pub(crate) form_control: bool,
     // A REPLACED box's baseline (the oracle's `controlBaseline`): 0 none — an `<img>`, the only one that has
@@ -3017,7 +3017,7 @@ fn line_layout(
                                 let tail = if word_shy { trailing_shys(&text[u..pend]) } else { 0 };
                                 let cut_end = if tail > 0 && pend - u > tail { pend - tail } else { pend };
                                 while u < pend {
-                                    let mut ulen = break_unit_len(text, u, cut_end.max(u + 1), per_char);
+                                    let mut ulen = break_unit_len(text, u, cut_end.max(u + 1), per_char, per_char && wrap_mode >= 2);
                                     if u + ulen == cut_end && cut_end < pend {
                                         ulen = pend - u;
                                     }
@@ -3044,7 +3044,7 @@ fn line_layout(
                                             let n_wide = has_wide && text[pend..npend].iter().any(|&c| is_wide_unit(c));
                                             let npw = measure_word(run, &text[pend..npend])?;
                                             let n_per = wrap_mode != 0 && !n_wide && npw > avail + LINE_FIT_EPS;
-                                            measure_word(run, &text[pend..pend + break_unit_len(text, pend, npend, n_per)])?
+                                            measure_word(run, &text[pend..pend + break_unit_len(text, pend, npend, n_per, n_per && wrap_mode >= 2)])?
                                         } else {
                                             0.0
                                         };
@@ -3547,9 +3547,15 @@ fn soft_hyphen_width(run: &Run) -> Option<f64> {
 }
 // The next break UNIT at `u` in `text[..end]`, as the oracle's `charUnits` cuts one: a WIDE character is its
 // own — which is what makes a Japanese paragraph wrap at all, having no spaces to break at — under `per_char`
-// (`word-break: break-all`, `overflow-wrap: anywhere`) every code point is one, and otherwise a maximal run of
-// non-wide characters is one unit. A surrogate pair is never split.
-fn break_unit_len(text: &[u16], u: usize, end: usize, per_char: bool) -> usize {
+// (`word-break: break-all`, `overflow-wrap: anywhere`) every character is one, and otherwise a maximal run of
+// non-wide characters is one unit. A surrogate pair is never split, and a unit is never cut before what ATTACHES
+// to the character before it — a combining mark, a variation selector, an emoji modifier, a tag character, a ZERO
+// WIDTH JOINER — nor after a joiner, by the rules of the breaking at hand (`grapheme`):
+// - LINE breaking (UAX #14) never breaks after a ZWJ, whatever follows (LB8a): `漢‍字‍か` is one unit (Chrome);
+// - an emergency break INSIDE a word (`overflow-wrap: anywhere` / `break-word`) falls between GRAPHEME CLUSTERS
+//   (UAX #29), and a ZWJ joins a cluster only from a pictograph — through any Extend after it — to a pictograph
+//   (GB11): `🏳️‍🌈` and `👩🏽‍💻` stay whole there, `c‍d` breaks.
+fn break_unit_len(text: &[u16], u: usize, end: usize, per_char: bool, grapheme: bool) -> usize {
     // A PAIRED high surrogate is two units; an unpaired one is a lone unit, exactly as `measure_run` slices it
     // (a disagreement there would measure a slice the break did not cut).
     let cp_len = |i: usize| {
@@ -3558,40 +3564,53 @@ fn break_unit_len(text: &[u16], u: usize, end: usize, per_char: bool) -> usize {
             && (0xDC00u16..=0xDFFF).contains(&text[i + 1]);
         if paired { 2 } else { 1 }
     };
-    // …and a ZERO WIDTH JOINER between two pictographs binds the second to the unit (an emoji ZWJ sequence is one
-    // grapheme cluster, UAX #29 GB11): one unit however per-character the breaking, which also keeps the joined
-    // pictograph's zero advance (`font::unit_of` asks the character before it) inside the slice that measures it. A
-    // ZWJ between letters joins nothing: `overflow-wrap: anywhere` breaks around it (Chrome).
     let cp_at = |i: usize| -> u32 {
         match (text[i], text.get(i + 1)) {
-            (h @ 0xD800..=0xDBFF, Some(&l @ 0xDC00..=0xDFFF)) => 0x10000 + (((h as u32) - 0xD800) << 10) + ((l as u32) - 0xDC00),
+            (h @ 0xD800..=0xDBFF, Some(&l @ 0xDC00..=0xDFFF)) if i + 1 < end => 0x10000 + (((h as u32) - 0xD800) << 10) + ((l as u32) - 0xDC00),
             (c, _) => c as u32,
         }
     };
-    let cp_before = |i: usize| -> u32 {
-        match (i.checked_sub(1).map(|j| text[j]), i.checked_sub(2).map(|j| text[j])) {
-            (Some(l @ 0xDC00..=0xDFFF), Some(h @ 0xD800..=0xDBFF)) => 0x10000 + (((h as u32) - 0xD800) << 10) + ((l as u32) - 0xDC00),
-            (Some(c), _) => c as u32,
-            _ => 0,
-        }
-    };
     let pict = crate::unicode::is_extended_pictographic;
-    let joined = |mut n: usize| {
-        while u + n + 1 < end && text[u + n] == 0x200D && pict(cp_before(u + n)) && pict(cp_at(u + n + 1)) {
-            n += 1;
-            n += cp_len(u + n);
+    // One character and what attaches to it — and, across a joiner, what the breaking at hand joins.
+    let cluster = |at: usize| -> usize {
+        let mut pictograph = pict(cp_at(at));
+        let mut p = at + cp_len(at);
+        let mut after_zwj = false;
+        while p < end {
+            let c = cp_at(p);
+            if after_zwj {
+                if grapheme && !(pictograph && pict(c)) {
+                    break;
+                }
+                pictograph = pict(c);
+                after_zwj = false;
+            } else if c == 0x200D {
+                after_zwj = true;
+            } else if !attaches(c) {
+                break;
+            }
+            p += cp_len(p);
         }
-        n
+        p
     };
-    let first = joined(cp_len(u));
+    let first = cluster(u);
     if per_char || is_wide_unit(text[u]) {
-        return first;
+        return first - u;
     }
-    let mut n = first;
-    while u + n < end && !is_wide_unit(text[u + n]) {
-        n = joined(n + cp_len(u + n));
+    let mut e = first;
+    while e < end && !is_wide_unit(text[e]) {
+        e = cluster(e);
     }
-    n
+    e - u
+}
+// Whether `cp` attaches to the character before it, never a break unit of its own (UAX #14 LB9, UAX #29 GB9): a
+// combining mark, a variation selector, an emoji modifier, a tag character.
+fn attaches(cp: u32) -> bool {
+    crate::unicode::is_combining_mark(cp)
+        || (0xFE00..=0xFE0F).contains(&cp)
+        || (0xE0100..=0xE01EF).contains(&cp)
+        || (0x1F3FB..=0x1F3FF).contains(&cp)
+        || (0xE0020..=0xE007F).contains(&cp)
 }
 // A UTF-16 unit whose code point is a WIDE character, and so a break unit of its own. One definition, shared
 // with the metrics (`font::is_wide_char`): a second copy drifted once already — it counted a high surrogate as
@@ -7778,6 +7797,12 @@ pub(crate) const MATH_MAX: f64 = 2.0;
 pub(crate) const MATH_SUM: f64 = 3.0;
 pub(crate) const MATH_NEG: f64 = 4.0;
 pub(crate) const MATH_SCALE: f64 = 5.0;
+// (…and the non-linear arithmetic CSS Values 4's typed calc allows — `calc(100px * (50% / 10%))`: `MATH_MUL` folds the
+// top two by multiplying, `MATH_INV` inverts the top, `MATH_ABS` / `MATH_SIGN` are `abs()` / `sign()` of it)
+pub(crate) const MATH_MUL: f64 = 6.0;
+pub(crate) const MATH_INV: f64 = 7.0;
+pub(crate) const MATH_ABS: f64 = 8.0;
+pub(crate) const MATH_SIGN: f64 = 9.0;
 pub(crate) const MATH_DEPTH: usize = 16;
 pub(crate) fn math_at(table: &[f64], at: usize, basis: f64) -> f64 {
     let Some(&len) = table.get(at) else { return f64::NAN };
@@ -7794,11 +7819,24 @@ pub(crate) fn math_at(table: &[f64], at: usize, basis: f64) -> f64 {
             sp += 1;
             continue;
         }
-        if op == MATH_NEG || op == MATH_SCALE {
+        if op == MATH_NEG || op == MATH_SCALE || op == MATH_INV || op == MATH_ABS || op == MATH_SIGN {
             if sp == 0 {
                 return f64::NAN;
             }
-            stack[sp - 1] = if op == MATH_NEG { -stack[sp - 1] } else { stack[sp - 1] * a };
+            let x = stack[sp - 1];
+            stack[sp - 1] = if op == MATH_NEG {
+                -x
+            } else if op == MATH_SCALE {
+                x * a
+            } else if op == MATH_INV {
+                1.0 / x
+            } else if op == MATH_ABS {
+                x.abs()
+            } else if x == 0.0 || x.is_nan() {
+                x // (…`sign()` of a zero is that zero, of NaN NaN)
+            } else {
+                x.signum()
+            };
             continue;
         }
         if sp < 2 {
@@ -7812,11 +7850,15 @@ pub(crate) fn math_at(table: &[f64], at: usize, basis: f64) -> f64 {
             x.min(y)
         } else if op == MATH_MAX {
             x.max(y)
+        } else if op == MATH_MUL {
+            x * y
         } else {
             x + y
         };
     }
-    if sp == 1 { stack[0] } else { f64::NAN }
+    // (…and a figure that is no number — a division by a percentage of a zero basis, `calc(1px / (10% - 10%))` — is
+    // none either: the value it sizes is unresolvable, `auto`, never the infinity a division makes)
+    if sp == 1 && stack[0].is_finite() { stack[0] } else { f64::NAN }
 }
 fn text_intrinsic(runs: &[Run], run_texts: &[RunText], ws_mode: u8, indent: (f64, bool, bool, bool), inputs: &[Cell<Input>], all_runs: &[Run], all_texts: &[RunText], grids: &[f64], children: &[Vec<usize>]) -> Option<(f64, f64)> {
     // …per RUN, because an inline may declare its own `white-space` (`Run::ws_mode`) and every one of these is
@@ -8095,7 +8137,7 @@ fn text_intrinsic(runs: &[Run], run_texts: &[RunText], ws_mode: u8, indent: (f64
                                 // every unit instead closed the word at the Latin run's own edges, losing whatever
                                 // was glued across a run boundary — `abcdef<b>gh日</b>` measured 42.63 against the
                                 // oracle's 59.53, and a padded inline lost its 20px edge outright.
-                                let ulen = break_unit_len(text, u, i, per_char);
+                                let ulen = break_unit_len(text, u, i, per_char, per_char && run.metric as u8 >= 2);
                                 let own = per_char || is_wide_unit(text[u]);
                                 let adv = measure_word(&unspaced, &text[u..u + ulen])?;
                                 if own {

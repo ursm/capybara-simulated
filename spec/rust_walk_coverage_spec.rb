@@ -351,7 +351,8 @@ RSpec.describe 'Rust walk coverage' do
   # A COMPRESSIBLE replaced box contributes nothing to min-content (CSS Sizing 3 §5.2.2): one sized by a percentage width,
   # and an image-like one by a percentage max-width too, whatever width it declares — a control's `max-width: 100%` is
   # no such thing (Chrome: a float around a `max-width: 100%` input is 185 in 100px of room, around a `width: 100%` one,
-  # a canvas, a `width: 300px; max-width: 100%` image, a src-less `width=300` one or a video 100, around a textarea 201).
+  # a canvas, a `width: 300px; max-width: 100%` image, a src-less `width=300` one or a video 100, around a textarea 201,
+  # a list box 122.5, a 150px meter 150).
   # A ZWJ joins two pictographs into one cluster (UAX #29 GB11) and nothing else, and `word-break: break-all` text holding
   # one is laid out natively.
   it 'squeezes compressible replaced boxes and keeps ZWJ sequences whole', :aggregate_failures do
@@ -362,7 +363,9 @@ RSpec.describe 'Rust walk coverage' do
       '<img style="max-width: 100%; width: 300px; height: 10px">',
       '<img width="300" height="10" style="max-width: 100%">',
       '<video style="max-width: 100%"></video>',
-      '<textarea style="max-width: 100%"></textarea>'
+      '<textarea style="max-width: 100%"></textarea>',
+      '<select size="3" style="max-width: 100%"><option>a long option text</option></select>',
+      '<meter style="max-width: 100%; width: 150px"></meter>'
     ]
     floats = boxes.each_with_index.map {|el, i| %(<div style="width: 100px"><div id="f#{i}" style="float: left">#{el}</div></div><div style="clear: both"></div>) }
     s = page(
@@ -370,10 +373,27 @@ RSpec.describe 'Rust walk coverage' do
       '<div style="width: 30px; word-break: break-all"><span id="z">ab&zwj;cd&zwj;ef</span></div>' \
       '<span id="y">abc&zwj;def</span><div style="width: 30px; word-break: break-all"><span id="x">&#x1F468;&zwj;&#x1F469;&zwj;&#x1F467; x</span></div></body>'
     )
-    expect(s.evaluate_script("[0, 1, 2, 3, 4, 5, 6].map((i) => document.getElementById('f' + i).getBoundingClientRect().width)")).to eq([185, 100, 100, 100, 100, 100, 201])
+    expect(s.evaluate_script("[0, 1, 2, 3, 4, 5, 6, 7, 8].map((i) => Math.round(document.getElementById('f' + i).getBoundingClientRect().width * 10) / 10)")).to eq([185, 100, 100, 100, 100, 100, 201, 122.6, 150])
     # (…a ZWJ between letters joins nothing — `abc‍def` keeps every advance, 57.6, and break-all breaks around one — where
     # one between pictographs binds the family into one unit, on one line, `x` on the next: Chrome's 2, 57.6, 2)
     expect(s.evaluate_script('[z.getClientRects().length, Math.round(y.getBoundingClientRect().width * 10) / 10, x.getClientRects().length]')).to eq([2, 57.6, 2])
+    expect(s.evaluate_script('JSON.stringify(__csimNativeLayoutStats().rustFellBack)')).to eq('{}')
+  end
+
+  # …and the two rules a joiner is broken by: LINE breaking never breaks after one (UAX #14 LB8a — `漢‍字‍か` and `c‍d` are
+  # units under break-all, as Chrome makes them: 48 and 19.2 wide at min-content), an emergency break inside a word
+  # (`overflow-wrap: anywhere`) falls between grapheme clusters, where a joiner joins only pictographs, through any
+  # modifier or selector after the first (UAX #29 GB9 / GB11: `c‍d` breaks, 9.6; `👩🏽‍💻` and `🏳️‍🌈` stay whole).
+  it 'breaks text holding a joiner as line breaking and grapheme clusters do', :aggregate_failures do
+    s = page(
+      '<body style="font: 16px monospace; margin: 0"><div style="width: min-content" id="a">漢&zwj;字&zwj;か な</div>' \
+      '<div style="width: min-content; word-break: break-all" id="b">abc&zwj;def ghi&zwj;jkl</div>' \
+      '<div style="width: min-content; overflow-wrap: anywhere" id="c">abc&zwj;def ghi&zwj;jkl</div>' \
+      '<div style="width: 30px; word-break: break-all" id="d">ab 👋🏽 👩🏽&zwj;💻 cd</div></body>'
+    )
+    sizes = s.evaluate_script("['a', 'b', 'c', 'd'].map((i) => { const r = document.getElementById(i).getBoundingClientRect(); return [Math.round(r.width * 10) / 10, r.height]; })")
+    expect(sizes.map(&:first)).to eq([48, 19.2, 9.6, 30])
+    expect(sizes.drop(1).map(&:last)).to eq([132, 264, 88])
     expect(s.evaluate_script('JSON.stringify(__csimNativeLayoutStats().rustFellBack)')).to eq('{}')
   end
 

@@ -1845,8 +1845,10 @@ impl<'a> Walk<'a> {
             } else if role == Role::Cell {
                 slots[k] = f64::NAN;
             } else if !native_basis {
+                // (…against no basis at all — a pass root handed none — a percentage size is `auto`, as against any
+                // indefinite one)
                 if basis.is_nan() {
-                    return Err("root basis");
+                    continue;
                 }
                 slots[k] = at(lp, *basis)?.max(0.0);
             } else {
@@ -1881,10 +1883,10 @@ impl<'a> Walk<'a> {
         rec.auto_margins = auto;
         let parts = if !edges.iter().flatten().any(|lp| lp.has_percentage()) {
             EdgeParts::at(&edges, 0.0)?
+        } else if !edge_basis && self.basis.w.is_nan() {
+            // (…and a percentage edge against no basis resolves to 0)
+            EdgeParts::at(&edges, 0.0)?
         } else if !edge_basis {
-            if self.basis.w.is_nan() {
-                return Err("root basis");
-            }
             EdgeParts::at(&edges, self.basis.w)?
         } else {
             EdgeParts::linear(&edges)?.map_or_else(|| EdgeParts::clamped(&edges), Ok)?
@@ -2417,6 +2419,7 @@ impl<'a> Walk<'a> {
             r.intrinsic_h = intrinsic.h;
             r.replaced = true;
             r.lays_out_children = true;
+            r.form_control = true;
             r.ratio = intrinsic.ratio;
             r.ratio_only = intrinsic.ratio_only;
             let kids: Vec<NodeId> = self.children(id).collect();
@@ -2445,7 +2448,9 @@ impl<'a> Walk<'a> {
         r.ratio = intrinsic.ratio;
         r.ratio_only = intrinsic.ratio_only;
         r.shrinks_to_nothing = intrinsic.ratio || tag == "img";
-        r.form_control = matches!(tag, "input" | "select" | "textarea");
+        // (…the controls a percentage max-width does not squeeze, as Chrome reads CSS Sizing 3 §5.2.2: a `<meter>` too,
+        // where a `<progress>` is squeezed)
+        r.form_control = matches!(tag, "input" | "select" | "textarea" | "meter");
         match baseline {
             Some((font_box, asc)) => {
                 // (…a list box's baseline is its content box's bottom, a text control's its font box's)
@@ -4743,12 +4748,40 @@ fn emit(node: &CalcNode, prog: &mut Vec<f64>, depth: &mut usize, deepest: &mut u
             emit(n, prog, depth, deepest)?;
             prog.extend([MATH_NEG, 0.0, 0.0]);
         }
-        Node::Product(factors) => {
-            let (scale, operand) = product(factors).ok_or("math function")?;
-            emit(operand, prog, depth, deepest)?;
-            if scale != 1.0 {
-                prog.extend([MATH_SCALE, scale, 0.0]);
+        Node::Product(factors) => match product(factors) {
+            Some((scale, operand)) => {
+                emit(operand, prog, depth, deepest)?;
+                if scale != 1.0 {
+                    prog.extend([MATH_SCALE, scale, 0.0]);
+                }
             }
+            // (…a product of two operands that are not numbers — a percentage over a percentage is one — multiplies)
+            None => {
+                for (i, f) in factors.iter().enumerate() {
+                    emit(f, prog, depth, deepest)?;
+                    if i > 0 {
+                        fold(prog, depth, crate::layout::MATH_MUL);
+                    }
+                }
+            }
+        },
+        Node::Invert(n) => {
+            emit(n, prog, depth, deepest)?;
+            prog.extend([crate::layout::MATH_INV, 0.0, 0.0]);
+        }
+        Node::Abs(n) => {
+            emit(n, prog, depth, deepest)?;
+            prog.extend([crate::layout::MATH_ABS, 0.0, 0.0]);
+        }
+        Node::Sign(n) => {
+            emit(n, prog, depth, deepest)?;
+            prog.extend([crate::layout::MATH_SIGN, 0.0, 0.0]);
+        }
+        // (…a bare number among them: an operand of the plain value it is)
+        Node::Leaf(style::values::computed::length_percentage::ComputedLeaf::Number(n)) => {
+            prog.extend([MATH_LINE, f32_exact(*n), 0.0]);
+            *depth += 1;
+            *deepest = (*deepest).max(*depth);
         }
         _ => return Err("math function"),
     }
