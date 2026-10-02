@@ -1964,8 +1964,6 @@ impl<'a> Walk<'a> {
                     if has_content(&cn.data) || white_space_only_is_content(&cn.data, child_mode) {
                         inline = true;
                         open_table = false;
-                    } else if !cn.data.is_empty() && preserving(child_mode) && indent_may_bite(style)? {
-                        return Err("text-not-measurable");
                     }
                 }
                 NodeKind::Element => {
@@ -3773,17 +3771,15 @@ impl<'a> Walk<'a> {
                     } else {
                         Cow::Borrowed(raw)
                     };
-                    let td: Cow<[u16]> = if no_shy && stripped.contains(&0xAD) {
+                    // (…but a node of NOTHING but soft hyphens keeps them: a zero-wide word that still makes its line — Chrome:
+                    // `<div style="hyphens: none">&shy;</div>` is 22 tall — where one to break at is none of its business.
+                    // A preserved node of nothing but CR / FF is nothing: what a text indent would make of it — 20 wide at
+                    // max-content in Chrome under `text-indent: 20px` — goes unmeasured.)
+                    let td: Cow<[u16]> = if no_shy && stripped.contains(&0xAD) && stripped.iter().any(|&u| u != 0xAD) {
                         Cow::Owned(stripped.iter().copied().filter(|&u| u != 0xAD).collect())
                     } else {
                         stripped.clone()
                     };
-                    if td.is_empty() && !raw.is_empty() && g.bites {
-                        return Err("text-not-measurable");
-                    }
-                    if td.is_empty() && !stripped.is_empty() {
-                        return Err("text-not-measurable");
-                    }
                     if td.is_empty() {
                         continue;
                     }

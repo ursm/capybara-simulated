@@ -362,6 +362,18 @@ RSpec.describe 'Rust walk coverage' do
     expect(s.evaluate_script('JSON.stringify(__csimNativeLayoutStats().rustFellBack)')).to eq('{}')
   end
 
+  # A node of nothing but soft hyphens under `hyphens: none` is a zero-wide word that still makes its line (Chrome: 22
+  # tall), and a preserved node of nothing but a CR under a text indent is laid out as nothing (Chrome measures the indent
+  # into a shrink-to-fit width — 20 — which goes unmeasured here) — where the walk declined both.
+  it 'lays out text made of characters that are not there' do
+    s = page(
+      '<body style="font: 16px monospace; margin: 0"><div id="a" style="hyphens: none">&shy;</div>' \
+      '<div style="float: left"><pre style="text-indent: 20px; margin: 0">&#13;</pre></div></body>'
+    )
+    expect(s.evaluate_script('a.getBoundingClientRect().height')).to eq(22)
+    expect(s.evaluate_script('JSON.stringify(__csimNativeLayoutStats().rustFellBack)')).to eq('{}')
+  end
+
   # A root element in a vertical writing mode is sized as every vertical block is — its auto width from its content —
   # and placed at its margins, where the walk declined it and the JS layout gave it the initial containing block's width
   # at 0,0 whatever its margins said. Chrome (800px window): `vertical-lr` puts the html at 7,5 and 109 wide, its
