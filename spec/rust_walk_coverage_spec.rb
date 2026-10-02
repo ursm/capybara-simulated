@@ -215,6 +215,21 @@ RSpec.describe 'Rust walk coverage' do
     expect(s.evaluate_script("['img', 'video', 'input'].map((n) => [Math.round(document.getElementById(n).getBoundingClientRect().x * 100) / 100, document.getElementById(n).clientWidth])")).to eq([[19.2, 0]] * 3)
   end
 
+  # MathML is laid out natively, where the walk declined every MathML element: `display: math` is no value the style
+  # engine has, so an inline `<math>` is the inline its style makes it, its row along the line (Chrome: at 19.1, 33.4
+  # wide), and a `display=block` one a block of its own (1008 wide, on a line of its own).
+  it 'lays out MathML as inline rows and block math', :aggregate_failures do
+    s = page(
+      '<body style="font: 16px serif"><p>a <math id="m1"><mi>x</mi><mo>+</mo><mfrac><mn>1</mn><mn>2</mn></mfrac></math> b</p>' \
+      '<math id="m2" display="block"><mi>y</mi><msup><mi>e</mi><mn>2</mn></msup></math></body>'
+    )
+    m1, m2 = s.evaluate_script("[m1, m2].map((e) => { const r = e.getBoundingClientRect(); return [Math.round(r.x * 10) / 10, Math.round(r.width * 10) / 10]; })")
+    expect(m1[0]).to eq(19.1)
+    expect(m1[1]).to be_within(1).of(33.4)
+    expect(m2).to eq([8, 1008])
+    expect(s.evaluate_script('JSON.stringify(__csimNativeLayoutStats().rustFellBack)')).to eq('{}')
+  end
+
   # A root element in a vertical writing mode is sized as every vertical block is — its auto width from its content —
   # and placed at its margins, where the walk declined it and the JS layout gave it the initial containing block's width
   # at 0,0 whatever its margins said. Chrome (800px window): `vertical-lr` puts the html at 7,5 and 109 wide, its

@@ -1779,11 +1779,10 @@ impl<'a> Walk<'a> {
         let node = self.node(id);
         let style = self.style(id)?;
         let tag = node.rendering_tag();
-        // (…an `<svg>` in HTML is a replaced element here, the SVG inside it its own business; MathML lays out by MathML
-        // Core's rules, which this walk has not; any other element is the box its style makes it — `rendering_tag`)
-        if node.ns == web_atoms::ns!(mathml) {
-            return Err("mathml");
-        }
+        // (…an `<svg>` in HTML is a replaced element here, the SVG inside it its own business; any other element is the
+        // box its style makes it — `rendering_tag` — MathML's included: its `display: math` is no value the style engine
+        // has, so a MathML element is the inline its style makes it, a `display=block` `<math>` a block (ua.css), as
+        // MathML Core's math boxes are on the line or a line of their own)
         let b = style.get_box();
         let display = self.laid_display(id, b);
         // (…a block container: a block-level one, or an `inline-block`, which the gather walks as an ATOMIC)
@@ -3887,11 +3886,10 @@ impl<'a> Walk<'a> {
     fn inline_child(&mut self, c: NodeId, cs: &ComputedValues, ws_mode: u8, g: &mut Gather) -> Step {
         let node = self.node(c);
         let tag = node.rendering_tag();
-        // (…an `<svg>` in HTML is a replaced element here, the SVG inside it its own business; MathML lays out by MathML
-        // Core's rules, which this walk has not; any other element is the box its style makes it — `rendering_tag`)
-        if node.ns == web_atoms::ns!(mathml) {
-            return Err("mathml");
-        }
+        // (…an `<svg>` in HTML is a replaced element here, the SVG inside it its own business; any other element is the
+        // box its style makes it — `rendering_tag` — MathML's included: its `display: math` is no value the style engine
+        // has, so a MathML element is the inline its style makes it, a `display=block` `<math>` a block (ua.css), as
+        // MathML Core's math boxes are on the line or a line of their own)
         let d = self.laid_display(c, cs.get_box());
         // (…a `<br>` or a `<wbr>` a flex or grid container's run of bare text holds is still a line break, or a place for
         // one, in the anonymous item: the style engine blockifies it as the container's child, where the JS model keeps

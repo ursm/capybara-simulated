@@ -115,6 +115,9 @@ nobr wbr { white-space: normal; }
 /* …and MathML Core's own sheet maps a MathML element's `dir` (no HTML directionality: `:dir()` does not see it) */
 mathml|*[dir=ltr i] { direction: ltr; }
 mathml|*[dir=rtl i] { direction: rtl; }
+/* …and its `display=block` math is a block of its own (MathML Core: `block math`; `math` is no display the style engine
+ * has, so a MathML element is otherwise the inline its initial value makes it — its row laid out along the line) */
+mathml|math[display=block i] { display: block; }
 address, blockquote, center, div, figure, figcaption, footer, form, header, hr,
 legend, listing, main, p, plaintext, pre, summary, xmp, article, aside, h1, h2,
 h3, h4, h5, h6, hgroup, nav, section, search, table, caption, colgroup, col,
