@@ -1,10 +1,12 @@
 # capybara-simulated — engineering principles
 
-This driver runs Capybara tests in-process: a V8-resident DOM (lives in
-`lib/capybara/simulated/js/bridge.js`) driven through rusty_racer, with Nokogiri reserved
-for the Rack response side. The codebase has a few load-bearing rules;
-deviations have repeatedly cost us regressions or paint us into a
-corner.
+This driver runs Capybara tests in-process, in V8 driven through rusty_racer.
+The DOM's nodes live in a Rust arena (`ext/csim_native/src/dom.rs`) behind JS
+bindings (`lib/capybara/simulated/js/src/`, bundled to `js/bridge.bundle.js`);
+the style engine (stylo, `style.rs`) styles the page and the Rust walk lays it
+out (`walk.rs` builds the records from the computed styles, `layout.rs` lays
+them out). The codebase has a few load-bearing rules; deviations have
+repeatedly cost us regressions or paint us into a corner.
 
 ## 1. Spec conformance is the bar; real-browser behavior is how we check it
 
@@ -78,21 +80,28 @@ earned-out before as "a subsystem we don't model", then reverted):
   cross-origin is pure ORIGIN TAGGING, not a network boundary — no real DNS
   / `*.localhost` needed. Backlog, not a non-goal. (See the
   `multi-origin-in-scope` memory.)
-- **Box layout is MODELED** (`js/src/layout.js`, since v0.8.0): block flow,
-  inline runs, absolute / relative / fixed (shrink-to-fit included), margin
-  collapsing, floats, FLEX layout (line breaking + grow/shrink distribution),
-  a coarse grid pass, CSS Tables 3 auto/fixed TABLE layout, overflow
+- **Box layout is MODELED** (`ext/csim_native/src/walk.rs` → `layout.rs`,
+  the only layout since 2026-10-02, when the JS layout and the JS walk that fed
+  it were deleted): block flow, inline runs, absolute / relative / fixed
+  (shrink-to-fit included), margin collapsing, floats, FLEX layout (line
+  breaking + grow/shrink distribution), grid track sizing and placement, CSS
+  Tables 3 auto/fixed TABLE layout with anonymous table objects, overflow
   clipping, the flat tree, cross-realm frames — and the page-visible geometry
   (`getBoundingClientRect` / `elementFromPoint` / `offset*` / `client*` /
   `scroll*`) reads from it, so there is ONE geometry. Visual hit-testing,
   gBCR truthiness and viewport-clip visibility are therefore IN scope: a
-  failing geometry test is a coarse-model gap to diagnose (does it need glyph
+  failing geometry test is a model gap to diagnose (does it need glyph
   SHAPING, or just a box rule we haven't written?), not an
-  automatic "needs a layout engine" exclusion.
+  automatic "needs a layout engine" exclusion. Nothing stands behind the walk:
+  a page it DECLINES is laid out as its root box alone, so every spec session
+  asserts it declined nothing (`spec/support/session_teardown.rb`,
+  `rust_declines: true` to opt out), and the layout specs hold each shape to a
+  recorded golden (`spec/support/layout_golden.rb`) that also carries Chrome's
+  figures where they differ (`script/golden_vs_chrome.rb`).
 - **FLEX SIZING is IN SCOPE** — the "flex / grid track sizing" clause above was
-  written before `layout.js` existed and was retired 2026-08-31. `flexLines`
-  breaks lines and `resolveFlexRowWidths` distributes free space over
-  `flex-grow` / `flex-shrink` today; the css-flexbox allowlist earns out exactly
+  written before the box layout existed and was retired 2026-08-31.
+  `flex_row_sizes` / `flex_column_sizes` (`layout.rs`) break lines and distribute
+  free space over `flex-grow` / `flex-shrink` today; the css-flexbox allowlist earns out exactly
   six `.tentative` files and nothing for sizing, and the ~1000 remaining
   subtests are coarse-model gaps (e.g. the scrollable overflow region), not a
   missing algorithm. css-grid is simply not vendored — un-measured, not
@@ -106,27 +115,26 @@ earned-out before as "a subsystem we don't model", then reverted):
 - **`display: contents` is MODELED** — the clause above listed it as an
   unmodelled *rendering* subsystem beside glyph shaping, and that was retired
   2026-09-20. It generates NO BOX: for layout the element is replaced by its
-  children, in its place (CSS Display 3 §3.1), and `layout.js` says that in
-  three places and only three. `layoutChildren` enumerates the children the FLOW
-  lays out, looking through every box-less one to the children that stand in for
-  it, and every box-level consumer in both engines asks it — the oracle's block
-  flow, its flex and grid item collection, its margin-collapsing run, its
-  clearance scan and its baseline candidates, and the walk's pre-filters and run
-  gather. `inlineStyleOwner` carries the one thing a list cannot: a RUN spliced
-  through such an element still draws with that element's font, collapses by its
-  `white-space` and sits on its `line-height`, and a text node has no element of
-  its own to ask. INHERITED properties only, and that is the rule rather than a
-  shortcut — what a box-less element can hand its content is exactly what
+  children, in its place (CSS Display 3 §3.1). In the walk, `children`
+  enumerates the children the FLOW lays out, looking through every box-less one
+  (`boxless`) to the children that stand in for it, and every box-level consumer
+  asks it — block flow, flex and grid item collection, the margin-collapsing run,
+  the clearance scan, baseline candidates and the run gather; `layout_parent` is
+  the nearest ancestor that HAS a box. A RUN spliced through such an element
+  still draws with that element's font, collapses by its `white-space`
+  (`text_ws_mode`) and sits on its `line-height`, and a text node has no element
+  of its own to ask. INHERITED properties only, and that is the rule rather than
+  a shortcut — what a box-less element can hand its content is exactly what
   inherits to it, so `vertical-align` (not inherited, and applying to an inline
-  BOX) is read off the nearest element that HAS one, as Chrome does.
-  `generatesBox` gives it no box at all, so it can neither float, establish a
-  context, nor answer a geometry read. The raw flat-tree list is
-  `flatTreeChildren`, and a caller that wants THAT is the exception: the plain
-  name is the looking-through one on purpose, because picking the wrong one by
-  default is how the bug below survived as long as it did.
+  BOX) is read off the nearest element that HAS one, as Chrome does. It gets no
+  box at all, so it can neither float, establish a context, nor answer a
+  geometry read. The raw flat-tree list is `flat_children`, and a caller that
+  wants THAT is the exception: the plain name is the looking-through one on
+  purpose, because picking the wrong one by default is how the bug below
+  survived as long as it did.
   Thirty-one shapes are held against headless Chrome in
   `spec/display_contents_spec.rb`, every one of them also asserting that the
-  native walk took the shape and compared something — inline content on a line,
+  Rust walk took the page — inline content on a line,
   one and two block children through it, a flex item, a grid item, ignored
   padding, nested `contents`, a float through it, `max-content` across it, a
   table row through it, a margin collapsing through it, an out-of-flow one that
@@ -138,7 +146,9 @@ earned-out before as "a subsystem we don't model", then reverted):
   percentage-sized pseudos — with the Chrome figures in the
   file, because an argument that lives only in a commit message is the "memory
   of a measurement" this list exists to replace.
-  The gap this entry used to name is CLOSED (2026-09-22). A box-less element
+  The gap this entry used to name is CLOSED (2026-09-22) — when TWO layouts
+  still existed, the Rust walk and a JS one, held against each other by parity
+  sweeps, which is what "both engines" and "parity" mean below. A box-less element
   resolved a USED WIDTH of its own, so a percentage-sized `::before` / `::after`
   of one resolved against that instead of against the parent's content box —
   40px where Chrome says 50 — and likewise through `padding`, through a `margin`
@@ -146,11 +156,7 @@ earned-out before as "a subsystem we don't model", then reverted):
   basis outright. A phantom box, and it was the OTHER engine's block flow that
   kept it: once one enumeration is what lays the children out, there is no box
   for the percentage to find. `css/cssom/getComputedStyle-pseudo.html` came off
-  the allowlist with it, and the native WALK takes the shapes it used to refuse:
-  all thirty-one of the spec's, where it declined nine of the first ten, and
-  1,512 fewer cases of the 17,280-case `pseudo` sweep (4,800 declines to 3,288 —
-  `block-level-box-unplaceable` 2,640 to 1,296, the rest being `display:
-  table-row`, which is its own backlog item).
+  the allowlist with it, and the walk took the shapes it used to refuse.
   The cost of getting there is the lesson worth keeping: the phantom box was
   load-bearing for every list that had NOT been converted, and the failures it
   had been hiding were each invisible in a different way. A baseline read
@@ -252,8 +258,8 @@ When adding driver code:
   primitive-only fast path.
 - Per-result O(N) scans (e.g. ancestor walks for visibility / template
   filtering) get hit hundreds of times per `find` on Avo-scale pages.
-  Prefer constant-time gates or Nokogiri C-level helpers
-  (`node.ancestors(selector).any?`) over hand-rolled walks.
+  Prefer constant-time gates or the native arena's helpers (selector
+  matching and `closest` run in Rust over the arena) over hand-rolled walks.
 - When in doubt, profile against the Avo / Forem / Redmine suites
   before shipping. A correctness fix that doubles the run time is a
   regression.
