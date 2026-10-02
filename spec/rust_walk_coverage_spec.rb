@@ -423,6 +423,20 @@ RSpec.describe 'Rust walk coverage' do
     expect(s.evaluate_script('JSON.stringify(__csimNativeLayoutStats().rustFellBack)')).to eq('{}')
   end
 
+  # A word running through an inline element is ONE word: under `word-break: break-all`, where every boundary between
+  # characters is an ordinary opportunity, its characters break wherever the whole word's would, the element's edge
+  # included (Chrome: `ab<b>cd</b>ef` is three 19.2 lines in 20px, 9.6 at min-content) — where the glued piece overflowed
+  # its line whole. (`anywhere` / `break-word` break inside a word only as a last resort, taking an earlier opportunity on
+  # the line first and carrying the word's placed head down with it — which a greedy line cannot take back: recorded.)
+  it 'breaks a word running through an inline element under break-all', :aggregate_failures do
+    s = page(
+      '<body style="font: 16px monospace; margin: 0"><div style="width: 20px; word-break: break-all"><span id="a">ab<b>cd</b>ef</span></div>' \
+      '<div style="width: min-content; word-break: break-all" id="b"><span>ab<b>cd</b>ef</span></div></body>'
+    )
+    expect(s.evaluate_script('[a.getClientRects().length, b.getBoundingClientRect().width]')).to eq([3, 9.6])
+    expect(s.evaluate_script('JSON.stringify(__csimNativeLayoutStats().rustFellBack)')).to eq('{}')
+  end
+
   # A node of nothing but soft hyphens under `hyphens: none` is a zero-wide word that still makes its line (Chrome: 22
   # tall), and a preserved node of nothing but a CR under a text indent is laid out as nothing (Chrome measures the indent
   # into a shrink-to-fit width — 20 — which goes unmeasured here) — where the walk declined both.

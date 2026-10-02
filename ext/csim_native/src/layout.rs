@@ -2980,14 +2980,28 @@ fn line_layout(
                         // question at all.) Read ONCE for the whole word as the oracle reads it (`breakUnits(
                         // token, owner, lineRight - lineLeft)`); the line's own fit tests below stay live,
                         // following the band down past a float the word drops below.
+                        // …and a word GLUED to the text before it across a run boundary (`ab<b>cd</b>ef`) is that same
+                        // word: under `word-break: break-all`, where every boundary between characters is an ordinary
+                        // opportunity, a glued piece the line has no room left for is cut too, the boundary included —
+                        // where it overflowed whole (Chrome: `ab<b>cd</b>ef` under break-all in 20px is three lines).
+                        // GLUED: no opportunity before it at all — no space, no atomic, no hyphen the text before ended
+                        // in (the oracle's `barrier === 'text'`). (Not under `anywhere` / `break-word`, whose in-word
+                        // breaks are a last resort: Chrome takes an earlier opportunity on the line first and carries the
+                        // word's placed head down with it, which a greedy line cannot take back — recorded.)
+                        let glued_split = wrap_mode == 1
+                            && !no_wrap
+                            && !space_before
+                            && !(space_breaks || atomic_break || ends_open)
+                            && line_has_content
+                            && line_x + width > band_w(total) + LINE_FIT_EPS;
                         let split_band = (!no_wrap && (has_wide || word_hyphen || word_shy || wrap_mode != 0))
                             .then(|| band_w(total))
-                            .filter(|&a| has_wide || word_hyphen || word_shy || width > a + LINE_FIT_EPS);
+                            .filter(|&a| has_wide || word_hyphen || word_shy || glued_split || width > a + LINE_FIT_EPS);
                         if let Some(avail) = split_band {
                             // The over-long word's break opportunity before it (a space / atomic) is what `first`
                             // and the loop's fit tests act on; capture it before the fresh-line break clears the
                             // line, so `atomic_break` need only be consumed once, after the word is placed.
-                            let preceded = space_breaks || atomic_break || ends_open;
+                            let preceded = space_breaks || atomic_break || ends_open || glued_split;
                             // The space before the word stays on the line it hangs from — unless a fresh line is
                             // taken below before anything is placed, which drops it with the line it closes.
                             let mut space_pending = space_on_line;
@@ -3002,7 +3016,7 @@ fn line_layout(
                                 let pend = if word_hyphen || word_shy { hyphen_piece_end(text, u, i) } else { i };
                                 let piece_wide = has_wide && text[u..pend].iter().any(|&c| is_wide_unit(c));
                                 let piece_w = if u == start && pend == i { width } else { measure_word(run, &text[u..pend])? };
-                                let per_char = wrap_mode != 0 && !piece_wide && piece_w > avail + LINE_FIT_EPS;
+                                let per_char = wrap_mode != 0 && !piece_wide && (glued_split || piece_w > avail + LINE_FIT_EPS);
                                 // break-word / anywhere first move a piece they must cut to a fresh line, where a
                                 // break opportunity sits — exactly the normal break-before condition, which the
                                 // over-long piece always satisfies. break-all takes no fresh line: it fills the
