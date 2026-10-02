@@ -281,22 +281,6 @@ thread_local! {
     static FONT_IDX: RefCell<HashMap<String, i32>> = RefCell::new(HashMap::new());
 }
 
-fn register(key: &str, bytes: &[u8]) -> i32 {
-    if let Some(h) = FONT_IDX.with(|m| m.borrow().get(key).copied()) {
-        return h;
-    }
-    let metrics = FontMetrics::from_bytes(bytes);
-    let ok = metrics.is_some();
-    let handle = FONTS.with(|f| {
-        let mut v = f.borrow_mut();
-        v.push(metrics);
-        (v.len() - 1) as i32
-    });
-    let h = if ok { handle } else { -1 };
-    FONT_IDX.with(|m| m.borrow_mut().insert(key.to_owned(), h));
-    h
-}
-
 // Register a font from a fontconfig path (the host resolved it); reads + parses the file. `-1` when it
 // can't be read/parsed. Idempotent per path (parsed once, handle reused, a `-1` cached too).
 pub(crate) fn register_path(path: &str) -> i32 {
@@ -375,22 +359,6 @@ pub(crate) fn register_stack(primary: i32, members: Vec<StackMember>) -> i32 {
         None => -1,
     };
     FONT_IDX.with(|m| m.borrow_mut().insert(key, h));
-    h
-}
-
-// Register from in-memory SFNT bytes (a web / buffer face the host fetched + decoded), keyed by a
-// content hash so identical bytes share one entry.
-pub(crate) fn register_bytes(bytes: &[u8]) -> i32 {
-    let key = format!("b:{:016x}:{}", fnv1a(bytes), bytes.len());
-    register(&key, bytes)
-}
-
-fn fnv1a(bytes: &[u8]) -> u64 {
-    let mut h: u64 = 0xcbf2_9ce4_8422_2325;
-    for &b in bytes {
-        h ^= b as u64;
-        h = h.wrapping_mul(0x0000_0100_0000_01b3);
-    }
     h
 }
 

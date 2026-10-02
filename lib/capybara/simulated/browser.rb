@@ -8490,7 +8490,7 @@ module Capybara
           @@font_file_lock.synchronize { @@font_files << file; @@font_file_cache[key] = [file.path, nil] }
           path = file.path
         end
-        {'table' => font_table_from_file(path), 'ok' => true}
+        {'table' => font_table_from_file(path), 'ok' => true, 'path' => path}
       end
 
       def reset_workers

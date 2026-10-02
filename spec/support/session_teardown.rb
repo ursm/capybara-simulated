@@ -23,10 +23,30 @@ module SimulatedSessionTeardown
   def with_simulated_session(app, mode: :simulated)
     session = Capybara::Session.new(mode, app)
     begin
-      yield session
+      result = yield session
+      declines = rust_declines(session)
+      raise rust_decline_message([declines]) if declines && !RSpec.current_example.metadata[:rust_declines]
+
+      result
     ensure
       dispose_simulated_session(session)
     end
+  end
+
+  # What the Rust walk declined on the session's page, by reason — or nil. A page it declines is laid out as its root
+  # alone, which a spec reading a box at the root would never notice, so every session a spec built is asked at its end
+  # (an example that declines on purpose says so: `rust_declines: true`).
+  def rust_declines(session)
+    return unless session.instance_variable_defined?(:@driver)
+
+    declined = session.evaluate_script('JSON.stringify(globalThis.__csimNativeLayoutStats ? __csimNativeLayoutStats().rustFellBack : {})')
+    declined == '{}' ? nil : declined
+  rescue StandardError
+    nil
+  end
+
+  def rust_decline_message(declines)
+    "the Rust walk declined a page, which is then laid out as its root alone: #{declines.join('; ')}"
   end
 
   # A spec that builds a DRIVER directly (no session) leaks the same isolate; register it so the
@@ -61,6 +81,7 @@ RSpec.configure do |config|
     drivers  = @__simulated_drivers  || []
     @__simulated_sessions = nil
     @__simulated_drivers  = nil
+    declines = sessions.filter_map {|session| rust_declines(session) }
     sessions.each do |session|
       dispose_simulated_session(session)
     end
@@ -69,5 +90,6 @@ RSpec.configure do |config|
     rescue StandardError => e
       warn "[spec] disposing a simulated driver failed: #{e.class}: #{e.message}"
     end
+    raise rust_decline_message(declines) unless declines.empty? || RSpec.current_example.metadata[:rust_declines]
   end
 end

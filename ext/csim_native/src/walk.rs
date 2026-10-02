@@ -3595,7 +3595,6 @@ impl<'a> Walk<'a> {
     // A block of inline content — text and inline boxes — laid out in lines (`walkRecord`'s text-block arm).
     fn text_block(&mut self, kids: &[NodeId], idx: i32, style: &ComputedValues, ws_mode: u8) -> Step {
         let (indent, indent_bits) = indent(style)?;
-        let bites = indent.px != 0.0 || indent.frac != 0.0 || indent.prog.is_some();
         let indent_math = self.math(indent.prog.as_deref());
         let font = self.font_info(style, style)?;
         let align = align_code(style.get_inherited_text().text_align, starts_at_right(style));

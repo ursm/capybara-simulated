@@ -1100,8 +1100,6 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_, ()>, ctx: &v8::Global<v8:
     // as the DOM mutates, instead of rebuilding it. syncChildren relinks one parent's
     // element children; setAttr/removeAttr mirror attribute writes.
     register(scope, ns, "syncChildren", sync_children, context_id);
-    register(scope, ns, "setAttr", set_attr, context_id);
-    register(scope, ns, "removeAttr", remove_attr, context_id);
     register(scope, ns, "syncAttrs", sync_attrs, context_id);
     register(scope, ns, "setAttrNamespace", set_attr_namespace, context_id);
     // The store-flip's native-backed `_attrs`: __dom.attrsView(nid) -> an interceptor object over
@@ -1124,7 +1122,6 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_, ()>, ctx: &v8::Global<v8:
     register(scope, ns, "registerFontPath", register_font_path, context_id);
     register(scope, ns, "registerFontScaled", register_font_scaled, context_id);
     register(scope, ns, "registerFontStack", register_font_stack, context_id);
-    register(scope, ns, "registerFontBytes", register_font_bytes, context_id);
     if let Some(key) = v8::String::new(scope, "__dom") {
         let global = context.global(scope);
         global.set(scope, key.into(), ns.into());
@@ -1695,43 +1692,6 @@ fn sync_children(
             engine.children_changed(st, op);
         }
         engine.children_changed(st, parent);
-    }
-}
-
-// __dom.setAttr(nodeNid, name, value) / __dom.removeAttr(nodeNid, name): mirror an attribute write
-// into the arena. Names arrive already lowercased for HTML (the JS side passes the stored key).
-fn set_attr(
-    scope: &mut v8::PinScope<'_, '_>,
-    args: v8::FunctionCallbackArguments<'_>,
-    _rv: v8::ReturnValue<'_, v8::Value>,
-) {
-    let Some(id) = nid_arg(scope, &args, 0) else {
-        return;
-    };
-    let name = args.get(1).to_rust_string_lossy(scope);
-    let (utf8, u16) = read_v8_value(scope, args.get(2));
-    let cid = realm_id(scope, &args);
-    let (arena, engine) = arena_and_engine(scope, cid);
-    before_attribute_write(arena, engine, id, &[&name]);
-    if let Some(node) = arena.get_mut(id) {
-        node.set_attr_full(&name, utf8, u16);
-    }
-}
-
-fn remove_attr(
-    scope: &mut v8::PinScope<'_, '_>,
-    args: v8::FunctionCallbackArguments<'_>,
-    _rv: v8::ReturnValue<'_, v8::Value>,
-) {
-    let Some(id) = nid_arg(scope, &args, 0) else {
-        return;
-    };
-    let name = args.get(1).to_rust_string_lossy(scope);
-    let cid = realm_id(scope, &args);
-    let (arena, engine) = arena_and_engine(scope, cid);
-    before_attribute_write(arena, engine, id, &[&name]);
-    if let Some(node) = arena.get_mut(id) {
-        node.remove_attr(&name);
     }
 }
 
@@ -2693,22 +2653,6 @@ fn register_font_stack(
         members.push(crate::font::StackMember { ranges, handle, vertical });
     }
     rv.set_int32(crate::font::register_stack(primary, members));
-}
-
-// __dom.registerFontBytes(uint8array) -> handle. In-memory SFNT bytes for a web / buffer face the host
-// already fetched + decoded. -1 for anything but a Uint8Array.
-fn register_font_bytes(
-    _scope: &mut v8::PinScope<'_, '_>,
-    args: v8::FunctionCallbackArguments<'_>,
-    mut rv: v8::ReturnValue<'_, v8::Value>,
-) {
-    if let Ok(ta) = v8::Local::<v8::Uint8Array>::try_from(args.get(0)) {
-        let mut buf = vec![0u8; ta.byte_length()];
-        ta.copy_contents(&mut buf);
-        rv.set_int32(crate::font::register_bytes(&buf));
-    } else {
-        rv.set_int32(-1);
-    }
 }
 
 // Fields per node in the layoutPass input buffer, and per run in the runs buffer (flat Float64Arrays).
