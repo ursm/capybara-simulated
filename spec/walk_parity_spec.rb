@@ -5,8 +5,9 @@ require_relative 'support/session_teardown'
 
 # The Rust walk (`walk.rs`) held against the JS one (CSIM_WALK_PARITY): after each layout pass of the page's own, the
 # Rust walk builds the same pass from the style engine's values and native compares the two record by record. These
-# pin the instrument itself — that it compares, that a shape it takes comes out the same, and that one it has not been
-# taught is declined by name rather than compared wrong.
+# pin the instrument itself — that it compares, and that a shape it takes comes out the same. (A shape the Rust walk
+# has not been taught is declined by name — `__csimNativeLayoutStats().rustFellBack` — rather than compared wrong; the
+# walk declines nothing the JS walk takes any more, so no example here holds one.)
 RSpec.describe 'walk parity' do
   around do |example|
     saved = ENV['CSIM_WALK_PARITY']
@@ -435,11 +436,5 @@ RSpec.describe 'walk parity' do
       <fieldset style="display: contents"><legend>no fieldset box</legend></fieldset>
       <fieldset><legend style="justify-self: safe center">safe</legend></fieldset>
     HTML
-  end
-
-  it 'declines by name what it has not been taught' do
-    stats = parity('<div style="width: 200px"><table style="border-collapse: collapse; padding: 10%"><tr><td>x</td></tr></table></div>')
-    expect(stats['compared']).to eq(0)
-    expect(stats['declined']).to include('collapse table percentage padding' => be_positive)
   end
 end

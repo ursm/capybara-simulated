@@ -2788,11 +2788,11 @@ impl<'a> Walk<'a> {
         if collapses && !grid.rows.is_empty() && grid.col_count > 0 {
             let [top, right, bottom, left] = self.collapse_borders(&mut grid, style)?;
             let r = &mut self.inputs[idx as usize];
-            if r.edge_frac[4..].iter().any(|&f| f != 0.0) || r.edge_math[4..].iter().any(|&m| m != crate::layout::NO_MATH) {
-                return Err("collapse table percentage padding");
-            }
+            // (…none: a percentage padding resolves to nothing either, its fraction and its program dropped with it)
             [r.pt, r.pr, r.pb, r.pl] = [0.0; 4];
             r.edge_px[4..].fill(0.0);
+            r.edge_frac[4..].fill(0.0);
+            r.edge_math[4..].fill(crate::layout::NO_MATH);
             [r.bt, r.br, r.bb, r.bl] = [top, right, bottom, left];
             r.decl_edges_x = left + right;
         }
