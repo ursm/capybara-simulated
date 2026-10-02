@@ -339,6 +339,29 @@ RSpec.describe 'Rust walk coverage' do
     expect(s.evaluate_script('JSON.stringify(__csimNativeLayoutStats().rustFellBack)')).to eq('{}')
   end
 
+  # A COMPRESSIBLE replaced box contributes nothing to min-content (CSS Sizing 3 §5.2.2): one sized by a percentage width,
+  # and an image-like one by a percentage max-width too, whatever width it declares — a control's `max-width: 100%` is
+  # no such thing (Chrome: a float around a `max-width: 100%` input is 185 in 100px of room, around a `width: 100%` one,
+  # a canvas, a `width: 300px; max-width: 100%` image or a src-less `width=300` one 100). A ZWJ binds what follows it
+  # into its break unit (UAX #14 LB8a), so `word-break: break-all` text holding one is laid out natively (2 lines).
+  it 'squeezes compressible replaced boxes and keeps ZWJ sequences whole', :aggregate_failures do
+    boxes = [
+      '<input style="max-width: 100%">',
+      '<input style="width: 100%">',
+      '<canvas width="300" height="10" style="max-width: 100%"></canvas>',
+      '<img style="max-width: 100%; width: 300px; height: 10px">',
+      '<img width="300" height="10" style="max-width: 100%">'
+    ]
+    floats = boxes.each_with_index.map {|el, i| %(<div style="width: 100px"><div id="f#{i}" style="float: left">#{el}</div></div><div style="clear: both"></div>) }
+    s = page(
+      %(<body style="font: 16px monospace; margin: 0">#{floats.join}) +
+      '<div style="width: 30px; word-break: break-all"><span id="z">ab&zwj;cd&zwj;ef</span></div></body>'
+    )
+    expect(s.evaluate_script("[0, 1, 2, 3, 4].map((i) => document.getElementById('f' + i).getBoundingClientRect().width)")).to eq([185, 100, 100, 100, 100])
+    expect(s.evaluate_script('z.getClientRects().length')).to eq(2)
+    expect(s.evaluate_script('JSON.stringify(__csimNativeLayoutStats().rustFellBack)')).to eq('{}')
+  end
+
   # A root element in a vertical writing mode is sized as every vertical block is — its auto width from its content —
   # and placed at its margins, where the walk declined it and the JS layout gave it the initial containing block's width
   # at 0,0 whatever its margins said. Chrome (800px window): `vertical-lr` puts the html at 7,5 and 109 wide, its

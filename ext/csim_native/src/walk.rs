@@ -3784,9 +3784,6 @@ impl<'a> Walk<'a> {
                     if td.is_empty() && !stripped.is_empty() {
                         return Err("text-not-measurable");
                     }
-                    if !measurable(&td, wrap) {
-                        return Err("text-not-measurable");
-                    }
                     if td.is_empty() {
                         continue;
                     }
@@ -4413,8 +4410,9 @@ fn edge_lps(style: &ComputedValues) -> Result<([Option<&LengthPercentage>; 8], u
             // (…an `anchor-size()` margin with no anchor to size it — none is modelled — is its FALLBACK, and with none
             // invalid at computed-value time: the initial 0. Chrome: `anchor-size(--a width, 25px)` is 25.)
             Margin::AnchorSizeFunction(f) => match &f.fallback {
+                // (…a `<length-percentage>` fallback only: an `auto` one is no fallback the grammar takes, and Chrome drops the
+                // declaration)
                 style::values::generics::Optional::Some(Margin::LengthPercentage(lp)) => edges[k] = Some(lp),
-                style::values::generics::Optional::Some(Margin::Auto) => auto |= [4, 2, 8, 1][k],
                 _ => {}
             },
             Margin::AnchorContainingCalcFunction(_) => {}
@@ -4935,28 +4933,6 @@ fn ws_mode_of(style: &ComputedValues) -> Result<u8, &'static str> {
 }
 fn preserving(mode: u8) -> bool {
     matches!(mode, WS_PRE | WS_PRE_WRAP | WS_BREAK_SPACES)
-}
-// Can native measure `text` in a run of in-word break mode `wrap` (`nlTextMeasurable`)? Not a zero-width joiner where
-// the line breaks per character, nor one beside a wide character: the JS layout's two paths disagree with each other
-// there, and no native answer can match both.
-fn measurable(text: &[u16], wrap: u8) -> bool {
-    let mut zwj = false;
-    let mut wide = false;
-    for (i, &u) in text.iter().enumerate() {
-        if u == 0x200D {
-            zwj = true;
-        } else if u >= 0x1100 {
-            // (…as `codePointAt(i)` reads it: a surrogate pair's code point from its high half, a lone half itself)
-            let cp = match (u, text.get(i + 1)) {
-                (0xD800..=0xDBFF, Some(&lo @ 0xDC00..=0xDFFF)) => 0x10000 + (((u as u32) - 0xD800) << 10) + ((lo as u32) - 0xDC00),
-                _ => u as u32,
-            };
-            if crate::font::is_wide_char(cp) {
-                wide = true;
-            }
-        }
-    }
-    !(zwj && (wrap == 1 || wrap == 3 || wide))
 }
 // Is `text` anything but CSS white space (`CSS_CONTENT_RE`)?
 fn has_content(text: &[u16]) -> bool {

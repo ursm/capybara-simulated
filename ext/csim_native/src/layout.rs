@@ -3554,13 +3554,25 @@ fn break_unit_len(text: &[u16], u: usize, end: usize, per_char: bool) -> usize {
             && (0xDC00u16..=0xDFFF).contains(&text[i + 1]);
         if paired { 2 } else { 1 }
     };
-    let first = cp_len(u);
+    // …and a ZERO WIDTH JOINER binds what follows it to the unit (UAX #14 LB8a: no break after one): an emoji ZWJ
+    // sequence is one unit however per-character the breaking, which also keeps the joined character's zero advance
+    // (`font::unit_of` asks the character before it) inside the slice that measures it.
+    let joined = |mut n: usize| {
+        while u + n < end && text[u + n] == 0x200D {
+            n += 1;
+            if u + n < end {
+                n += cp_len(u + n);
+            }
+        }
+        n
+    };
+    let first = joined(cp_len(u));
     if per_char || is_wide_unit(text[u]) {
         return first;
     }
     let mut n = first;
     while u + n < end && !is_wide_unit(text[u + n]) {
-        n += cp_len(u + n);
+        n = joined(n + cp_len(u + n));
     }
     n
 }
@@ -7426,11 +7438,7 @@ fn intrinsic_widths_of(i: usize, inputs: &[Cell<Input>], runs: &[Run], run_texts
         let w = if n.decl_border_box { (n.decl_w - extra).max(0.0) } else { n.decl_w };
         (w, w)
     } else if n.replaced && !n.ratio_only {
-        // A replaced box wants its intrinsic width (a ratio-only one, its container's) — and a COMPRESSIBLE one, sized by
-        // a percentage width or max-width, can be squeezed to nothing: its min-content contribution is 0 (CSS Sizing 3
-        // §5.2.2; Chrome and Firefox: a `width: 100%` input in a `width: 50px` cell leaves the cell 52 wide).
-        let compressible = [0, 3].iter().any(|&k| !n.pct_sizes[k].is_nan() || n.pct_math[k] != NO_MATH);
-        (if compressible { 0.0 } else { n.intrinsic_w }, n.intrinsic_w)
+        (n.intrinsic_w, n.intrinsic_w) // a replaced box wants its intrinsic width (a ratio-only one, its container's)
     } else if n.display == DISPLAY_FLEX && !n.measured_as_block {
         flex_intrinsic_widths(i, inputs, runs, run_texts, grids, children)?
     } else if n.display == DISPLAY_TABLE {
@@ -7444,6 +7452,13 @@ fn intrinsic_widths_of(i: usize, inputs: &[Cell<Input>], runs: &[Run], run_texts
     } else {
         content_intrinsic(i, inputs, runs, run_texts, grids, children)?
     };
+    // …and a COMPRESSIBLE replaced box can be squeezed to nothing, its min-content contribution 0 (CSS Sizing 3 §5.2.2):
+    // one sized by a percentage width, and an image-like one — an image, or a box with an aspect ratio
+    // (`shrinks_to_nothing`) — by a percentage max-width too, whatever width it declares. Chrome and Firefox: a `width: 100%` input in a `width: 50px` cell leaves the cell 52
+    // wide, a `width: 300px; max-width: 100%` image shrinks a float to its 100px room, and a `max-width: 100%` input
+    // does not (185 in that float).
+    let pct = |k: usize| !n.pct_sizes[k].is_nan() || n.pct_math[k] != NO_MATH;
+    let inner_min = if n.replaced && (pct(0) || (n.shrinks_to_nothing && pct(3))) { 0.0 } else { inner_min };
     // `width: min-content` / `max-content` PIN the box to that one figure (CSS Sizing 3 §5) — the box asks for
     // the same width whatever room it is offered, so both of an ancestor's figures see it; `fit-content` leaves
     // the range, and the room decides between them. (A keyword is basis-independent, so the same bit that
@@ -7941,12 +7956,9 @@ fn text_intrinsic(runs: &[Run], run_texts: &[RunText], ws_mode: u8, indent: (f64
                 // Per-character breaking is the OWNER's mode (`minBreaksAnywhere`), never conditioned on what
                 // the run holds — the oracle's `addUnit` reads it that way, and a single CJK character in a
                 // paragraph must not stop its Latin words from breaking. Whether a WORD holds a wide character
-                // is asked per word below, where `charUnits` asks it. ZWJ still declines under a per-character
-                // mode: the oracle's advance there carries the previous character.
+                // is asked per word below, where `charUnits` asks it. (A ZWJ binds what follows it into its unit:
+                // `break_unit_len`.)
                 let per_char = matches!(run.metric as u8, 1 | 3);
-                if per_char && text.iter().any(|&u| u == 0x200D) {
-                    return None;
-                }
                 let space_w = measure_word(run, &[0x20])?;
                 // (`measure_word` only, so the tab pair it carries is never read — a word holds no tab.)
                 let unspaced = Run { ls: 0.0, ws: 0.0, ..*run };
