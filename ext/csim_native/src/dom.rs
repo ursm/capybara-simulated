@@ -2866,6 +2866,7 @@ pub(crate) fn decode_input(r: &[f64]) -> crate::layout::Input {
         ratio: (r[70] as u32) & 2 != 0,
         ratio_only: (r[70] as u32) & 4 != 0,
         shrinks_to_nothing: (r[70] as u32) & 8 != 0,
+        form_control: (r[70] as u32) & 32 != 0,
         cb_index: r[71] as i32,
         cb_rect: [r[92], r[93], r[94], r[95]],
         inset_top: r[72],

@@ -62,6 +62,11 @@ pub(crate) fn is_letter(cp: u32) -> bool {
 pub(crate) fn is_number(cp: u32) -> bool {
     in_ranges(&NUMBERS, cp)
 }
+// Extended_Pictographic (UAX #29): what a ZERO WIDTH JOINER joins into one grapheme cluster — an emoji ZWJ sequence
+// (GB11) — and nothing else does.
+pub(crate) fn is_extended_pictographic(cp: u32) -> bool {
+    icu_properties::CodePointSetData::new::<icu_properties::props::ExtendedPictographic>().contains32(cp)
+}
 
 // The first STRONG directional character of a text (HTML §3.2.6.4, `dir=auto`): Some(true) for one of Bidi_Class R or AL,
 // Some(false) for L, None where there is none. The Unicode Bidi_Class itself — both engines ask it here

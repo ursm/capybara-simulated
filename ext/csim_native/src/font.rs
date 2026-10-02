@@ -234,9 +234,11 @@ fn zero_width(cp: u32) -> bool {
     crate::unicode::is_combining_mark(cp)
 }
 
-// layout.js unitOf: one character's advance in em-fractions.
+// layout.js unitOf: one character's advance in em-fractions — none for a pictograph a ZWJ joins to the one before it
+// (an emoji ZWJ sequence draws as one glyph: UAX #29 GB11), where a letter after one keeps its own (Chrome: `abc‍def`
+// is 57.6 in 16px monospace).
 fn unit_of(cp: u32, prev: i64, fm: &FontMetrics) -> f64 {
-    if prev == 0x200D || zero_width(cp) {
+    if joined(cp, prev) || zero_width(cp) {
         return 0.0;
     }
     if cp <= 0xFFFF {
@@ -253,9 +255,13 @@ fn unit_of(cp: u32, prev: i64, fm: &FontMetrics) -> f64 {
     1.0
 }
 
-// layout.js takesSpacing: once per grapheme, never after a ZWJ, never on a zero-width character.
+// layout.js takesSpacing: once per grapheme, never on a pictograph a ZWJ joins, never on a zero-width character.
 fn takes_spacing(cp: u32, prev: i64) -> bool {
-    prev != 0x200D && !zero_width(cp)
+    !joined(cp, prev) && !zero_width(cp)
+}
+// Whether `cp` is joined into the cluster before it by the ZERO WIDTH JOINER `prev` — a pictograph after one (GB11).
+fn joined(cp: u32, prev: i64) -> bool {
+    prev == 0x200D && crate::unicode::is_extended_pictographic(cp)
 }
 
 // The isolate-level font registry: parsed metrics keyed by an integer handle, deduped by source. A

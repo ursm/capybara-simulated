@@ -461,6 +461,9 @@ pub(crate) struct Input {
     pub(crate) ratio_only: bool,
     // The box has no content height to floor a flex column's automatic minimum at (an image, a ratio box).
     pub(crate) shrinks_to_nothing: bool,
+    // …and whether it is a FORM CONTROL — an `<input>`, a `<select>`, a `<textarea>` — whose percentage max-width
+    // compresses nothing, where every other replaced box's does (CSS Sizing 3 §5.2.2 as Chrome and Firefox read it).
+    pub(crate) form_control: bool,
     // A REPLACED box's baseline (the oracle's `controlBaseline`): 0 none — an `<img>`, the only one that has
     // none at all; 1 a text-drawing control's font — the font box (`control_font_box`) centred in the content
     // box plus its ascent (`control_font_asc`); 2 a list box — its content box's bottom; 4 the BORDER box's
@@ -578,7 +581,7 @@ impl InlineBox {
 }
 impl Input {
     pub(crate) fn same(&self, o: &Input) -> bool {
-        let Input { nid, parent, display, border_box, width, height, min_w, max_w, min_h, max_h, mt, mr, mb, ml, pt, pr, pb, pl, bt, br, bb, bl, height_adjoins, minh_adjoins, bottom_adjoins, run_start, run_count, strut_lh, strut_asc, float_kind, clear, takes_clearance, starts_bfc, flex_justify, flex_main_gap, flex_cross_align, flex_main_is_x, flex_wrap, flex_cross_flip, flex_align_content, flex_cross_gap, flex_main_reverse, flex_cross_far, has_replayed_oof, rel_x, rel_y, rel_pct, rel_x_px, rel_x_neg, measured_as_block, equal_share, chain_rel, chain_px, chain_shift, chain_math, rel_math, flex_item_auto, flex_baseline_asc, flex_line_nat, flex_line, out_of_flow, sp_x, sp_y, cell_col, cell_colspan, cell_rowspan, caption_side, rtl, text_align, anon_cross, ws_mode, item_auto_height, pushed_h_indefinite, grid_start, decl_w, decl_min_w, decl_max_w, flex_basis, flex_grow, decl_border_box, flex_shrink, flex_basis_cb, flex_basis_frac, flex_basis_math, pct_sizes, pct_px, pct_math, edge_frac, edge_px, edge_math, basis_w, inset_frac, inset_math, flex_main_gap_frac, flex_main_gap_math, flex_cross_gap_math, indent_math, flex_cross_gap_frac, flex_basis_kw, scrolls_x, scrolls_y, is_button, self_sizes, block_axis_is_x, decl_edges_x, decl_margin_x, height_from_outside, cell_pct, cell_min_content, cell_max_content, height_is_floor, cell_valign, cell_pct_h_child, anon_group, group_pct_h, pct_h_decl, row_imposed, row_height, row_pct, row_rank, table_fixed, flex_stretch, flex_native, flex_dir_reverse, replaced, lays_out_children, ratio, ratio_only, shrinks_to_nothing, control_baseline, control_font_box, control_font_asc, intrinsic_w, intrinsic_h, cb_index, inset_top, inset_right, inset_bottom, inset_left, auto_margins, legacy_align, legend_align, indent_px, indent_frac, indent_hanging, indent_each_line, indent_spent, width_kw, height_kw, cb_rect } = self;
+        let Input { nid, parent, display, border_box, width, height, min_w, max_w, min_h, max_h, mt, mr, mb, ml, pt, pr, pb, pl, bt, br, bb, bl, height_adjoins, minh_adjoins, bottom_adjoins, run_start, run_count, strut_lh, strut_asc, float_kind, clear, takes_clearance, starts_bfc, flex_justify, flex_main_gap, flex_cross_align, flex_main_is_x, flex_wrap, flex_cross_flip, flex_align_content, flex_cross_gap, flex_main_reverse, flex_cross_far, has_replayed_oof, rel_x, rel_y, rel_pct, rel_x_px, rel_x_neg, measured_as_block, equal_share, chain_rel, chain_px, chain_shift, chain_math, rel_math, flex_item_auto, flex_baseline_asc, flex_line_nat, flex_line, out_of_flow, sp_x, sp_y, cell_col, cell_colspan, cell_rowspan, caption_side, rtl, text_align, anon_cross, ws_mode, item_auto_height, pushed_h_indefinite, grid_start, decl_w, decl_min_w, decl_max_w, flex_basis, flex_grow, decl_border_box, flex_shrink, flex_basis_cb, flex_basis_frac, flex_basis_math, pct_sizes, pct_px, pct_math, edge_frac, edge_px, edge_math, basis_w, inset_frac, inset_math, flex_main_gap_frac, flex_main_gap_math, flex_cross_gap_math, indent_math, flex_cross_gap_frac, flex_basis_kw, scrolls_x, scrolls_y, is_button, self_sizes, block_axis_is_x, decl_edges_x, decl_margin_x, height_from_outside, cell_pct, cell_min_content, cell_max_content, height_is_floor, cell_valign, cell_pct_h_child, anon_group, group_pct_h, pct_h_decl, row_imposed, row_height, row_pct, row_rank, table_fixed, flex_stretch, flex_native, flex_dir_reverse, replaced, lays_out_children, ratio, ratio_only, shrinks_to_nothing, form_control, control_baseline, control_font_box, control_font_asc, intrinsic_w, intrinsic_h, cb_index, inset_top, inset_right, inset_bottom, inset_left, auto_margins, legacy_align, legend_align, indent_px, indent_frac, indent_hanging, indent_each_line, indent_spent, width_kw, height_kw, cb_rect } = self;
         nid.bit_eq(&o.nid)
             && parent.bit_eq(&o.parent)
             && display.bit_eq(&o.display)
@@ -708,6 +711,7 @@ impl Input {
             && ratio.bit_eq(&o.ratio)
             && ratio_only.bit_eq(&o.ratio_only)
             && shrinks_to_nothing.bit_eq(&o.shrinks_to_nothing)
+            && form_control.bit_eq(&o.form_control)
             && control_baseline.bit_eq(&o.control_baseline)
             && control_font_box.bit_eq(&o.control_font_box)
             && control_font_asc.bit_eq(&o.control_font_asc)
@@ -3554,15 +3558,28 @@ fn break_unit_len(text: &[u16], u: usize, end: usize, per_char: bool) -> usize {
             && (0xDC00u16..=0xDFFF).contains(&text[i + 1]);
         if paired { 2 } else { 1 }
     };
-    // …and a ZERO WIDTH JOINER binds what follows it to the unit (UAX #14 LB8a: no break after one): an emoji ZWJ
-    // sequence is one unit however per-character the breaking, which also keeps the joined character's zero advance
-    // (`font::unit_of` asks the character before it) inside the slice that measures it.
+    // …and a ZERO WIDTH JOINER between two pictographs binds the second to the unit (an emoji ZWJ sequence is one
+    // grapheme cluster, UAX #29 GB11): one unit however per-character the breaking, which also keeps the joined
+    // pictograph's zero advance (`font::unit_of` asks the character before it) inside the slice that measures it. A
+    // ZWJ between letters joins nothing: `overflow-wrap: anywhere` breaks around it (Chrome).
+    let cp_at = |i: usize| -> u32 {
+        match (text[i], text.get(i + 1)) {
+            (h @ 0xD800..=0xDBFF, Some(&l @ 0xDC00..=0xDFFF)) => 0x10000 + (((h as u32) - 0xD800) << 10) + ((l as u32) - 0xDC00),
+            (c, _) => c as u32,
+        }
+    };
+    let cp_before = |i: usize| -> u32 {
+        match (i.checked_sub(1).map(|j| text[j]), i.checked_sub(2).map(|j| text[j])) {
+            (Some(l @ 0xDC00..=0xDFFF), Some(h @ 0xD800..=0xDBFF)) => 0x10000 + (((h as u32) - 0xD800) << 10) + ((l as u32) - 0xDC00),
+            (Some(c), _) => c as u32,
+            _ => 0,
+        }
+    };
+    let pict = crate::unicode::is_extended_pictographic;
     let joined = |mut n: usize| {
-        while u + n < end && text[u + n] == 0x200D {
+        while u + n + 1 < end && text[u + n] == 0x200D && pict(cp_before(u + n)) && pict(cp_at(u + n + 1)) {
             n += 1;
-            if u + n < end {
-                n += cp_len(u + n);
-            }
+            n += cp_len(u + n);
         }
         n
     };
@@ -7450,12 +7467,12 @@ fn intrinsic_widths_of(i: usize, inputs: &[Cell<Input>], runs: &[Run], run_texts
         content_intrinsic(i, inputs, runs, run_texts, grids, children)?
     };
     // …and a COMPRESSIBLE replaced box can be squeezed to nothing, its min-content contribution 0 (CSS Sizing 3 §5.2.2):
-    // one sized by a percentage width, and an image-like one — an image, or a box with an aspect ratio
-    // (`shrinks_to_nothing`) — by a percentage max-width too, whatever width it declares. Chrome and Firefox: a `width: 100%` input in a `width: 50px` cell leaves the cell 52
+    // one sized by a percentage width, and any but a form control by a percentage max-width too, whatever width it
+    // declares (an image, a canvas, a video, a frame: Chrome and Firefox squeeze each to its room). Chrome and Firefox: a `width: 100%` input in a `width: 50px` cell leaves the cell 52
     // wide, a `width: 300px; max-width: 100%` image shrinks a float to its 100px room, and a `max-width: 100%` input
     // does not (185 in that float).
     let pct = |k: usize| !n.pct_sizes[k].is_nan() || n.pct_math[k] != NO_MATH;
-    let inner_min = if n.replaced && (pct(0) || (n.shrinks_to_nothing && pct(3))) { 0.0 } else { inner_min };
+    let inner_min = if n.replaced && (pct(0) || (!n.form_control && pct(3))) { 0.0 } else { inner_min };
     // `width: min-content` / `max-content` PIN the box to that one figure (CSS Sizing 3 §5) — the box asks for
     // the same width whatever room it is offered, so both of an ancestor's figures see it; `fit-content` leaves
     // the range, and the room decides between them. (A keyword is basis-independent, so the same bit that
@@ -9049,6 +9066,7 @@ mod tests {
             ratio: false,
             ratio_only: false,
             shrinks_to_nothing: false,
+            form_control: false,
             control_baseline: 0,
             control_font_box: 0.0,
             control_font_asc: 0.0,

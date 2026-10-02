@@ -2445,6 +2445,7 @@ impl<'a> Walk<'a> {
         r.ratio = intrinsic.ratio;
         r.ratio_only = intrinsic.ratio_only;
         r.shrinks_to_nothing = intrinsic.ratio || tag == "img";
+        r.form_control = matches!(tag, "input" | "select" | "textarea");
         match baseline {
             Some((font_box, asc)) => {
                 // (…a list box's baseline is its content box's bottom, a text control's its font box's)
