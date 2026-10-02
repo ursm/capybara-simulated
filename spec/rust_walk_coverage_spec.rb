@@ -170,6 +170,19 @@ RSpec.describe 'Rust walk coverage' do
     expect(s.evaluate_script('[Math.round(l.getBoundingClientRect().x), l.clientWidth, getComputedStyle(l).transformOrigin]')).to eq([23, 23, '11.6px 11px'])
   end
 
+  # …and the walk lays it out as one: its own width and `auto` margins apply whatever inline-level display it declares
+  # (Chrome: 104 wide for `width: 100px` under `display: inline` or `ruby`, pushed to 976.8 by `margin-left: auto`), where
+  # the walk sized it from its text.
+  it 'lays a rendered legend with an inline-level display out as a block' do
+    s = page(
+      '<body style="font: 16px monospace"><fieldset><legend id="a" style="display: inline; width: 100px">pd</legend>c</fieldset>' \
+      '<fieldset><legend id="c" style="display: ruby; width: 100px">pd</legend>c</fieldset>' \
+      '<fieldset><legend id="d" style="display: inline; margin-left: auto">rt</legend>c</fieldset></body>'
+    )
+    expect(s.evaluate_script("[a, c, d].map((e) => { const r = e.getBoundingClientRect(); return [Math.round(r.x * 10) / 10, Math.round(r.width * 10) / 10]; })")).to eq([[24, 104], [24, 104], [976.8, 23.2]])
+    expect(s.evaluate_script('JSON.stringify(__csimNativeLayoutStats().rustFellBack)')).to eq('{}')
+  end
+
   # …and the JS side's geometry readers take a ruby display for the inline box the walk lays it out as: a transform does
   # not apply to it and it has no client box (Chrome: x 19.2, clientWidth 0 for a `display: ruby` span after "xx" with
   # `transform: translateX(50px)` and `overflow: hidden`), where they took it for a block (69.2, 77). A `<button>` with
