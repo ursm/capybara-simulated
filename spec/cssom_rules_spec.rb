@@ -134,4 +134,32 @@ RSpec.describe 'CSSOM rules' do
     JS
     expect(got).to eq(['div { width: 20px; }', 'div { width: 10px; }', '10px', 'div { width: 20px; }', '30px'])
   end
+
+  # A `<style>` obtains a new sheet whenever HTML updates its block — its `type` switched away and back, the element
+  # removed and inserted again, a child added (an empty one too) — so a script's edit of the one before is gone and the
+  # one before has no owner; and `@charset` is no rule `insertRule` can insert. (Chrome: the same, each value.)
+  it 'makes a new sheet each time the style block is updated' do
+    got = page('').evaluate_script(<<~JS)
+      (() => {
+        const out = [], r = document.body.appendChild(document.createElement('p'));
+        const s = document.createElement('style');
+        s.textContent = 'p { color: rgb(1, 0, 0) }';
+        document.head.appendChild(s);
+        s.sheet.cssRules[0].style.color = 'rgb(2, 0, 0)';
+        s.type = 'text/plain';
+        s.type = 'text/css';
+        out.push(s.sheet.cssRules[0].cssText, getComputedStyle(r).color);
+        s.sheet.cssRules[0].style.color = 'rgb(3, 0, 0)';
+        s.remove();
+        document.head.appendChild(s);
+        out.push(getComputedStyle(r).color);
+        const old = s.sheet;
+        s.appendChild(document.createTextNode(''));
+        out.push(s.sheet === old, old.ownerNode);
+        try { s.sheet.insertRule('@charset "utf-8";', 0); } catch (e) { out.push(e.name); }
+        return out;
+      })()
+    JS
+    expect(got).to eq(['p { color: rgb(1, 0, 0); }', 'rgb(1, 0, 0)', 'rgb(1, 0, 0)', false, nil, 'SyntaxError'])
+  end
 end

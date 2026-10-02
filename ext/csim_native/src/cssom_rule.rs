@@ -329,6 +329,11 @@ pub(crate) fn insert(
     css: &str,
     index: usize,
 ) -> Result<(u32, &'static str, Vec<String>), &'static str> {
+    // (…an `@charset` is no rule — CSS Syntax drops it as it parses a sheet — so it parses as none: a SyntaxError)
+    let mut input = ParserInput::new(css);
+    if Parser::new(&mut input).next().is_ok_and(|t| matches!(t, cssparser::Token::AtKeyword(k) if k.eq_ignore_ascii_case("charset"))) {
+        return Err("SyntaxError");
+    }
     let (rules, containing) = target_list(store, lock, sheet, parent).ok_or("NotFoundError")?;
     let stored = store.get(sheet).ok_or("NotFoundError")?;
     let (doc_sheet, constructed) = (stored.sheet.clone(), stored.constructed);
