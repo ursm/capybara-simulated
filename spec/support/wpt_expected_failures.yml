@@ -3852,8 +3852,6 @@ html/rendering/non-replaced-elements/tables/table-attribute.html:
 - table_td height attribute percentage is correct
 - table_th height attribute percentage is correct
 - td height attribute pixel is correct
-html/rendering/non-replaced-elements/tables/table-cell-nowrap-with-fixed-width.html:
-- "== html/rendering/non-replaced-elements/tables/table-cell-nowrap-with-fixed-width-ref.html"
 html/rendering/non-replaced-elements/tables/table-direction.html:
 - "== html/rendering/non-replaced-elements/tables/table-direction-ref.html"
 html/rendering/non-replaced-elements/tables/table-row-direction.html:

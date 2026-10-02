@@ -6244,7 +6244,16 @@ fn table_columns(
         for &c in &children[r] {
             let k = inputs[c].get();
             let (imin, imax) = if is_auto(k.cell_min_content) {
-                intrinsic_widths(c, inputs, runs, run_texts, grids, children)?
+                let (imin, imax) = intrinsic_widths(c, inputs, runs, run_texts, grids, children)?;
+                // A cell's declared width is no narrower than its content's min-content: the column's minimum is the
+                // larger of the two (CSS 2.1 §17.5.2.2, CSS Tables 3) — Chrome makes `<td style="width: 1px;
+                // white-space: nowrap">` as wide as its line, the idiom a table's shrink-to-content column is written in.
+                if is_auto(k.decl_w) {
+                    (imin, imax)
+                } else {
+                    let floor = content_intrinsic(c, inputs, runs, run_texts, grids, children)?.0 + k.decl_edges_x;
+                    (imin.max(floor), imax.max(floor))
+                }
             } else {
                 (k.cell_min_content, k.cell_max_content) // the oracle's contribution: native can't measure this cell
             };

@@ -75,6 +75,25 @@ RSpec.describe 'native layout table parity' do
   # grid REGION that tall (§17.5.3 — a table height is a minimum, with or without rows to share it out).
   # `border-spacing` says nothing without tracks to space. The figures are headless Chrome's, measured
   # 2026-09-22, because parity alone cannot tell a shared rule from a shared mistake.
+  # A cell's declared width is no narrower than its content's min-content: the column's minimum is the larger of the two
+  # (CSS 2.1 §17.5.2.2, CSS Tables 3). All three engines let the declaration shrink the column below its content — the
+  # `<td style="width: 1px; white-space: nowrap">` idiom an app's shrink-to-content column is written in came out 3 wide.
+  # Chrome's figures.
+  it 'floors a declared cell width at its content min-content' do
+    {
+      '<table><tr><td id="m" style="width:40px">Supercalifragilistic</td><td>x</td></tr></table>'                         => 194,
+      '<table><tr><td id="m" style="width:10px">hello world</td></tr></table>'                                           => 50,
+      '<table><tr><td id="m" style="width:1px;white-space:nowrap">no wrap here</td><td>rest</td></tr></table>'           => 117.2,
+      '<table style="width:300px"><tr><td id="m" style="width:1px;white-space:nowrap">keep</td><td>rest</td></tr></table>' => 40.4,
+      '<table><tr><td id="m" style="width:10px;padding:5px"><img style="width:100px;height:5px"></td></tr></table>'      => 110,
+      '<table style="width:400px"><tr><td id="m" style="width:50px">aa bb cc</td><td>x</td></tr></table>'                => 52
+    }.each do |table, w|
+      body = %(<div style="font:16px monospace">#{table}</div>)
+      expect_parity(body)
+      expect(laid_out_rect(body)[2]).to be_within(0.05).of(w), body
+    end
+  end
+
   it 'matches an empty table, and sizes it as Chrome does' do
     {
       'display:table'                         => [0, 0],
