@@ -245,11 +245,6 @@ pub(crate) struct Input {
     // A text block's line alignment, PHYSICAL (the walk's `align_code` folds `start` / `end` through rtl):
     // 0 left, 1 right, 2 center, 3 justify. It moves a line's content (`line_layout`).
     pub(crate) text_align: u8,
-    // A flex / grid container's floor on its AUTO cross size for bare text directly inside it. The walk always
-    // sends 0: such text is an anonymous ITEM of its own (CSS Flexbox §4 / CSS Grid §4, the walk's
-    // `FlexItem::Anonymous`), which carries its height into its line or row — a floor could only override a
-    // declared `grid-auto-rows` (22 against Chrome's 5, where the same grid with the text in a `<span>` gave 5).
-    pub(crate) anon_cross: f64,
     // A block's OWN `white-space` mode — a text block's, and a block container's too, whose
     // intrinsic measure PINS min to max under 1 / 2 (`content_intrinsic`): 0 normal, 1 nowrap, 2 pre, 3 pre-wrap, 4 pre-line,
     // 5 break-spaces. The three orthogonal behaviours it names — COLLAPSE whitespace (0/1/4) vs PRESERVE it
@@ -285,14 +280,13 @@ pub(crate) struct Input {
     pub(crate) flex_basis: f64,
     pub(crate) flex_grow: f64,
     pub(crate) decl_border_box: bool,
-    // Flex SIZING inputs (an item of a container with `flex_native`): `flex-shrink`; `flex-basis`
+    // Flex SIZING inputs (an item of a flex container): `flex-shrink`; `flex-basis`
     // resolved against the container's main size, or — beside a `flex_basis_frac` — the constant term that
     // fraction is added to (NaN = auto / a keyword — `flex_basis_kw` 0 none, 1 content,
     // 2 min-content, 3 max-content, 4 fit-content); whether the item scrolls across (its automatic minimum in
     // that axis is then zero, §4.5, and its baseline is clamped into its box); whether it STRETCHES in the
-    // cross axis (`align-self: stretch` with an auto cross size and no auto cross margin). On a CONTAINER,
-    // `flex_native` = the items' main sizes are computed here (`flex_row_sizes` / `flex_column_sizes`); the walk
-    // sets it on every flex container it records.
+    // cross axis (`align-self: stretch` with an auto cross size and no auto cross margin). The items' main sizes
+    // are computed here from these (`flex_row_sizes` / `flex_column_sizes`).
     pub(crate) flex_shrink: f64,
     pub(crate) flex_basis_cb: f64,
     // A PERCENTAGE `flex-basis` as a fraction of the container's main size (NaN = none), resolved here
@@ -409,7 +403,6 @@ pub(crate) struct Input {
     // algorithm takes over, which an auto `width` already says.
     pub(crate) table_fixed: bool,
     pub(crate) flex_stretch: bool,
-    pub(crate) flex_native: bool,
     // On a flex CONTAINER: `flex-direction` is a `*-reverse` value (its baseline candidates run backwards; an
     // rtl row reverses the main axis without this).
     pub(crate) flex_dir_reverse: bool,
@@ -548,7 +541,7 @@ impl InlineBox {
 }
 impl Input {
     pub(crate) fn same(&self, o: &Input) -> bool {
-        let Input { nid, parent, display, border_box, width, height, min_w, max_w, min_h, max_h, mt, mr, mb, ml, pt, pr, pb, pl, bt, br, bb, bl, height_adjoins, minh_adjoins, bottom_adjoins, run_start, run_count, strut_lh, strut_asc, float_kind, clear, takes_clearance, starts_bfc, flex_justify, flex_main_gap, flex_cross_align, flex_main_is_x, flex_wrap, flex_cross_flip, flex_align_content, flex_cross_gap, flex_main_reverse, flex_cross_far, rel_x, rel_y, rel_pct, rel_x_px, rel_x_neg, chain_rel, chain_px, chain_shift, chain_math, rel_math, flex_item_auto, out_of_flow, sp_x, sp_y, cell_col, cell_colspan, cell_rowspan, caption_side, rtl, text_align, anon_cross, ws_mode, item_auto_height, grid_start, decl_w, decl_min_w, decl_max_w, flex_basis, flex_grow, decl_border_box, flex_shrink, flex_basis_cb, flex_basis_frac, flex_basis_math, pct_sizes, pct_px, pct_math, edge_frac, edge_px, edge_math, basis_w, inset_frac, inset_math, flex_main_gap_frac, flex_main_gap_math, flex_cross_gap_math, indent_math, flex_cross_gap_frac, flex_basis_kw, scrolls_x, scrolls_y, is_button, self_sizes, block_axis_is_x, decl_edges_x, decl_margin_x, height_from_outside, cell_pct, height_is_floor, cell_valign, cell_pct_h_child, anon_group, group_pct_h, pct_h_decl, row_imposed, row_height, row_pct, row_rank, table_fixed, flex_stretch, flex_native, flex_dir_reverse, replaced, lays_out_children, ratio, ratio_only, shrinks_to_nothing, form_control, control_baseline, control_font_box, control_font_asc, intrinsic_w, intrinsic_h, cb_index, inset_top, inset_right, inset_bottom, inset_left, auto_margins, legacy_align, legend_align, indent_px, indent_frac, indent_hanging, indent_each_line, indent_spent, width_kw, height_kw, cb_rect, fits_content } = self;
+        let Input { nid, parent, display, border_box, width, height, min_w, max_w, min_h, max_h, mt, mr, mb, ml, pt, pr, pb, pl, bt, br, bb, bl, height_adjoins, minh_adjoins, bottom_adjoins, run_start, run_count, strut_lh, strut_asc, float_kind, clear, takes_clearance, starts_bfc, flex_justify, flex_main_gap, flex_cross_align, flex_main_is_x, flex_wrap, flex_cross_flip, flex_align_content, flex_cross_gap, flex_main_reverse, flex_cross_far, rel_x, rel_y, rel_pct, rel_x_px, rel_x_neg, chain_rel, chain_px, chain_shift, chain_math, rel_math, flex_item_auto, out_of_flow, sp_x, sp_y, cell_col, cell_colspan, cell_rowspan, caption_side, rtl, text_align, ws_mode, item_auto_height, grid_start, decl_w, decl_min_w, decl_max_w, flex_basis, flex_grow, decl_border_box, flex_shrink, flex_basis_cb, flex_basis_frac, flex_basis_math, pct_sizes, pct_px, pct_math, edge_frac, edge_px, edge_math, basis_w, inset_frac, inset_math, flex_main_gap_frac, flex_main_gap_math, flex_cross_gap_math, indent_math, flex_cross_gap_frac, flex_basis_kw, scrolls_x, scrolls_y, is_button, self_sizes, block_axis_is_x, decl_edges_x, decl_margin_x, height_from_outside, cell_pct, height_is_floor, cell_valign, cell_pct_h_child, anon_group, group_pct_h, pct_h_decl, row_imposed, row_height, row_pct, row_rank, table_fixed, flex_stretch, flex_dir_reverse, replaced, lays_out_children, ratio, ratio_only, shrinks_to_nothing, form_control, control_baseline, control_font_box, control_font_asc, intrinsic_w, intrinsic_h, cb_index, inset_top, inset_right, inset_bottom, inset_left, auto_margins, legacy_align, legend_align, indent_px, indent_frac, indent_hanging, indent_each_line, indent_spent, width_kw, height_kw, cb_rect, fits_content } = self;
         nid.bit_eq(&o.nid)
             && parent.bit_eq(&o.parent)
             && display.bit_eq(&o.display)
@@ -612,7 +605,6 @@ impl Input {
             && caption_side.bit_eq(&o.caption_side)
             && rtl.bit_eq(&o.rtl)
             && text_align.bit_eq(&o.text_align)
-            && anon_cross.bit_eq(&o.anon_cross)
             && ws_mode.bit_eq(&o.ws_mode)
             && item_auto_height.bit_eq(&o.item_auto_height)
             && grid_start.bit_eq(&o.grid_start)
@@ -662,7 +654,6 @@ impl Input {
             && row_rank.bit_eq(&o.row_rank)
             && table_fixed.bit_eq(&o.table_fixed)
             && flex_stretch.bit_eq(&o.flex_stretch)
-            && flex_native.bit_eq(&o.flex_native)
             && flex_dir_reverse.bit_eq(&o.flex_dir_reverse)
             && replaced.bit_eq(&o.replaced)
             && lays_out_children.bit_eq(&o.lays_out_children)
@@ -805,9 +796,6 @@ pub(crate) struct Run {
 
 impl Input {
     // An out-of-flow box with a containing block to be positioned from (every one the walk records has one).
-    fn native_oof(&self) -> bool {
-        self.out_of_flow != 0 && self.cb_index != CB_NONE
-    }
     // This record with a border-box height IMPOSED on it (a flex item stretched to its line, or handed its
     // resolved main size): the declared height is replaced (content-box per `box-sizing`), the min/max clamp
     // still applies after (every box is clamped). NaN imposes nothing; MEASURE_AUTO_HEIGHT asks for the box's
@@ -4530,29 +4518,19 @@ fn measure_uncached(
             // (Its OWN margins are still dropped on this path — §10.6.4's static position is the MARGIN
             // edge, and Chrome puts a `margin-top: 7px; margin-left: 3px` box at 3/57 where this says 0/50. The
             // inset path applies them correctly. A KNOWN GAP, recorded rather than fixed here.)
-            // One with no containing block in the pass (`CB_NONE`) has its subtree laid out at its own width (in a
-            // fresh context — it establishes a BFC) and its box reset to this block's origin; `place` then positions
-            // it by rel_x/rel_y alone. Neither touches the cursor / margin / has_child state.
-            if cn.native_oof() {
-                // That cursor is a LINE cursor: it starts in the band a float leaves at this y — asked over a
-                // LINE BOX's height, as `line_layout` asks it, so a float whose band
-                // starts just below the cursor is not missed — and it carries the block's FIRST-LINE INDENT
-                // until an in-flow child spends it (an out-of-flow box is not a child that does). An rtl flow
-                // reads neither: its corner is the content's right edge.
-                let at = cursor + pending.value();
-                boxes[c].x = if n.from_right() {
-                    content_left_rel + content_w
-                } else {
-                    let indent = if !has_child != n.indent_hanging { bounded(n.indent_px + n.indent_frac * content_w, n.indent_math, content_w) } else { 0.0 };
-                    float_band(&ctx.items, at, n.strut_lh, cl, cr).0 + indent
-                };
-                boxes[c].y = at;
-                continue;
-            }
-            let cw = resolve_width(&cn, content_w);
-            measure(c, cw, f64::NAN, inputs, runs, run_texts, grids, children, boxes, failed, &mut FloatCtx::new(), 0.0, 0.0);
-            boxes[c].x = 0.0;
-            boxes[c].y = 0.0;
+            // It touches none of the cursor / margin / has_child state. The cursor it records is a LINE cursor: it
+            // starts in the band a float leaves at this y — asked over a LINE BOX's height, as `line_layout` asks it,
+            // so a float whose band starts just below the cursor is not missed — and it carries the block's FIRST-LINE
+            // INDENT until an in-flow child spends it (an out-of-flow box is not a child that does). An rtl flow reads
+            // neither: its corner is the content's right edge.
+            let at = cursor + pending.value();
+            boxes[c].x = if n.from_right() {
+                content_left_rel + content_w
+            } else {
+                let indent = if !has_child != n.indent_hanging { bounded(n.indent_px + n.indent_frac * content_w, n.indent_math, content_w) } else { 0.0 };
+                float_band(&ctx.items, at, n.strut_lh, cl, cr).0 + indent
+            };
+            boxes[c].y = at;
             continue;
         }
         if cn.float_kind != 0 {
@@ -5520,19 +5498,16 @@ fn measure_flex(
     // In-flow item positions (into `kids`). OUT-OF-FLOW children (abspos/fixed, §4.1) are removed from flex
     // sizing and line breaking, and placed separately.
     let flow: Vec<usize> = (0..cnt).filter(|&p| inputs[kids[p]].get().out_of_flow == 0).collect();
-    // A container that SIZES its items (`flex_native`, which the walk sets on every flex container): each in-flow
-    // item's main size is resolved here (`flex_row_sizes` / `flex_column_sizes` — base, clamps, line breaking,
-    // grow/shrink), and its subtree laid out at it; without it each item is laid out at the box its record
-    // carries. Either way record order == flex order (the walk sorts the items by `order`), each item in a fresh
-    // float context.
-    let native_row = n.flex_native && main_is_x;
-    let native_col = n.flex_native && !main_is_x;
-    let mut native_lines: Vec<Vec<usize>> = Vec::new();
-    let mut native_line_crosses: Vec<f64> = Vec::new(); // a sizing (`flex_native`) multi-line column's NATURAL line crosses
+    // Each in-flow item's main size is resolved here (`flex_row_sizes` / `flex_column_sizes` — base, clamps, line
+    // breaking on the hypothetical sizes, grow/shrink), and its subtree laid out at it; record order == flex order
+    // (the walk sorts the items by `order`), each item in a fresh float context. Its out-of-flow children are sized
+    // and placed by `place_out_of_flow`.
+    let mut lines: Vec<Vec<usize>> = Vec::new();
+    let mut col_line_crosses: Vec<f64> = Vec::new(); // a multi-line column's NATURAL line crosses
     // Which row items' measures read a percentage height against the indefinite basis (`INDEF_PCT_H_READS`): a stretched
     // one's height is DEFINITE (§9.8), so it is laid out again at it even where it comes to the height it measured.
     let mut read_indefinite = vec![false; cnt];
-    if native_col {
+    if !main_is_x {
         // The column's main size: its definite content height, else a min-height FLOOR (NaN = none); lines break
         // against the definite height or a max-height CAP (NaN = one line).
         let to_border_y = |v: f64| if is_auto(v) || n.border_box { v } else { v + edges_y };
@@ -5544,7 +5519,7 @@ fn measure_flex(
         let cap_main = if is_auto(n.max_h) || n.max_h < 0.0 { f64::NAN } else { (to_border_y(n.max_h) - edges_y).max(0.0).max(min_main) };
         let main = n.column_main();
         let capacity = if height_definite { main } else { cap_main };
-        let sizes = match flex_column_sizes(&kids, &flow, &mut native_lines, &mut native_line_crosses, content_w, main, height_definite, capacity, cap_main, gap, cross_gap, n.flex_wrap, n.flex_align_content, inputs, runs, run_texts, grids, children, boxes, failed) {
+        let sizes = match flex_column_sizes(&kids, &flow, &mut lines, &mut col_line_crosses, content_w, main, height_definite, capacity, cap_main, gap, cross_gap, n.flex_wrap, n.flex_align_content, inputs, runs, run_texts, grids, children, boxes, failed) {
             Some(sz) => sz,
             None => {
                 failed.set(true);
@@ -5559,14 +5534,8 @@ fn measure_flex(
                 measure(kids[p], w_p, if imposed { h_p } else { f64::NAN }, inputs, runs, run_texts, grids, children, boxes, failed, &mut FloatCtx::new(), 0.0, 0.0);
             }
         }
-        for &c in &kids {
-            if inputs[c].get().out_of_flow != 0 && !inputs[c].get().native_oof() {
-                let iw = resolve_width(&inputs[c].get(), content_w);
-                measure(c, iw, f64::NAN, inputs, runs, run_texts, grids, children, boxes, failed, &mut FloatCtx::new(), 0.0, 0.0);
-            }
-        }
-    } else if native_row {
-        let widths = match flex_row_sizes(&kids, &flow, &mut native_lines, content_w, gap, n.flex_wrap, inputs, runs, run_texts, grids, children) {
+    } else {
+        let widths = match flex_row_sizes(&kids, &flow, &mut lines, content_w, gap, n.flex_wrap, inputs, runs, run_texts, grids, children) {
             Some(ws) => ws,
             None => {
                 failed.set(true);
@@ -5577,20 +5546,6 @@ fn measure_flex(
             let reads = INDEF_PCT_H_READS.with(|n| n.get());
             measure(kids[p], widths[p], f64::NAN, inputs, runs, run_texts, grids, children, boxes, failed, &mut FloatCtx::new(), 0.0, 0.0);
             read_indefinite[p] = INDEF_PCT_H_READS.with(|n| n.get()) != reads;
-        }
-        for &c in &kids {
-            if inputs[c].get().out_of_flow != 0 && !inputs[c].get().native_oof() {
-                let iw = resolve_width(&inputs[c].get(), content_w);
-                measure(c, iw, f64::NAN, inputs, runs, run_texts, grids, children, boxes, failed, &mut FloatCtx::new(), 0.0, 0.0);
-            }
-        }
-    } else {
-        for &c in &kids {
-            if inputs[c].get().native_oof() {
-                continue; // sized and placed by place_out_of_flow
-            }
-            let iw = resolve_width(&inputs[c].get(), content_w);
-            measure(c, iw, f64::NAN, inputs, runs, run_texts, grids, children, boxes, failed, &mut FloatCtx::new(), 0.0, 0.0);
         }
     }
 
@@ -5648,32 +5603,6 @@ fn measure_flex(
         (clamp_min_max(to_border_y(n.height), to_border_y(n.min_h), to_border_y(n.max_h)).max(0.0) - edges_y).max(0.0)
     };
 
-    // Break into flex lines (positions into `kids`). A container that sized its items (`flex_native`) broke
-    // them already, on the hypothetical sizes. Otherwise wrapping needs a DEFINITE main capacity: a row always
-    // has one (its content width), but an AUTO-height column has none, so it stays a single line rather than
-    // re-breaking a summed capacity (which a FP-non-associative re-accumulation could trip into a spurious
-    // split). nowrap is also one line holding everything; otherwise wrap greedily starts a new line when the
-    // next item (plus the main gap) would overflow the main extent.
-    let wrap_capacity = main_is_x || !is_auto(n.height);
-    let lines: Vec<Vec<usize>> = if native_row || native_col {
-        native_lines // broken on the hypothetical sizes by flex_row_sizes / flex_column_sizes
-    } else if n.flex_wrap && wrap_capacity {
-        let mut ls: Vec<Vec<usize>> = Vec::new();
-        let mut cur: Vec<usize> = Vec::new();
-        let mut used = 0.0;
-        for &p in &flow {
-            if !cur.is_empty() && used + gap + mo[p] > content_main + LINE_FIT_EPS {
-                ls.push(std::mem::take(&mut cur));
-                used = 0.0;
-            }
-            used += if cur.is_empty() { 0.0 } else { gap } + mo[p];
-            cur.push(p);
-        }
-        ls.push(cur);
-        ls
-    } else {
-        vec![flow.clone()]
-    };
     let nlines = lines.len();
     // A line's natural cross size is the deepest of its PLAIN items' outers and its first-baseline GROUP's
     // extent. Baseline-aligned items (flex_cross_align == CROSS_BASELINE) share a baseline, so the group is
@@ -5723,11 +5652,11 @@ fn measure_flex(
                 _ => plain = plain.max(co[p]),
             }
         }
-        // A sizing (`flex_native`) multi-line COLUMN's line cross is its NATURAL one (the widest item before any
-        // stretch widened it to the grown line) — `align-content` below grows it; the final item widths already fill
-        // the grown line, so measuring from them would grow it twice.
-        line_cross[li] = if native_col && li < native_line_crosses.len() {
-            native_line_crosses[li]
+        // A multi-line COLUMN's line cross is its NATURAL one (the widest item before any stretch widened it to the
+        // grown line) — `align-content` below grows it; the final item widths already fill the grown line, so
+        // measuring from them would grow it twice.
+        line_cross[li] = if !main_is_x && li < col_line_crosses.len() {
+            col_line_crosses[li]
         } else {
             plain.max(fa + fb).max(la + lb)
         };
@@ -5754,15 +5683,10 @@ fn measure_flex(
         // `field-wrapper` row). A genuinely DEFINITE height (declared, or imposed by a stretch or an inset
         // box) takes the else branch below.
         if is_auto(n.height) || n.item_auto_height {
-            // A bare-text anonymous item floors the row's auto cross at its line-height. Unlike a min-height
-            // (clamped after), the floor is part of the content cross, so the single nowrap line grows to it
-            // and its items align WITHIN that floor — and a wrapping row shares the surplus (anon − stacked)
-            // out through align-content. So container_cross carries the floor too, not just box_h, and it is
-            // applied before the outer min/max clamp.
-            let flowed = lines_cross_sum.max(n.anon_cross) + edges_y;
+            let flowed = lines_cross_sum + edges_y;
             let bh = clamp_min_max(flowed, to_border_y(n.min_h), to_border_y(n.max_h)).max(0.0);
             clamped = bh != flowed;
-            (w, bh, lines_cross_sum.max(n.anon_cross), false)
+            (w, bh, lines_cross_sum, false)
         } else {
             // A declared height is never smaller than the box's own border+padding (the border-box floor).
             let bh = clamp_min_max(to_border_y(n.height), to_border_y(n.min_h), to_border_y(n.max_h)).max(edges_y).max(0.0);
@@ -5774,14 +5698,12 @@ fn measure_flex(
             // OUTER min/max-height clamp (a max-height the content overruns caps the box at it while the
             // items overflow). A ROW's is `content_main.max(used_main)`; a COLUMN's is asked per LINE — the
             // tallest line's extent or content (`col_extent`), which for one line is that same figure.
-            // A bare-text anonymous item floors the box height (a column's MAIN) at its line-height, applied
-            // after the items' extent.
             let tallest = lines.iter().map(|line| {
                 let lm: f64 = line.iter().map(|&p| mo[p]).sum::<f64>() + gap * line.len().saturating_sub(1) as f64;
                 col_extent(lm).max(lm)
             }).fold(0.0f64, f64::max);
             let content_ext = if main_is_x { content_main.max(used_main) } else { tallest };
-            let flowed = content_ext.max(n.anon_cross) + edges_y;
+            let flowed = content_ext + edges_y;
             let bh = clamp_min_max(flowed, to_border_y(n.min_h), to_border_y(n.max_h)).max(0.0);
             clamped = bh != flowed;
             bh
@@ -5832,14 +5754,14 @@ fn measure_flex(
         }
     }
 
-    // A sizing (`flex_native`) row STRETCHES its stretching items to their line now that the lines have a cross size
+    // A row STRETCHES its stretching items to their line now that the lines have a cross size
     // (§9.4 step 11): the item is laid out again at the line's cross less its margins as an IMPOSED height
     // (its min/max-height still clamp), so its own contents see the taller box. The line's cross was measured
     // from the items' natural (hypothetical) heights, before the lines were stacked.
     // …and where the item's measure read a percentage height against the indefinite basis it is laid out again even at
     // the height it came to: the stretched size is definite (§9.8), and that percentage resolves against it (Chrome: a
     // `height: 10%` child of an item stretched to its own 22 is 2.19, overflowing it).
-    if native_row {
+    if main_is_x {
         for (li, line) in lines.iter().enumerate() {
             for &p in line {
                 let c = kids[p];
@@ -5961,9 +5883,8 @@ fn measure_flex(
         }
     }
 
-    // OUT-OF-FLOW children (§4.1): removed from the flow above. Each box is reset to the container's origin:
-    // one with a containing block (`native_oof`) is then positioned by `place_out_of_flow`, one without by its
-    // `rel_x` / `rel_y` alone over the container origin; its measured subtree follows.
+    // OUT-OF-FLOW children (§4.1): removed from the flow above. Each box is reset to the container's origin, and
+    // positioned from there by `place_out_of_flow`.
     for &c in &kids {
         if inputs[c].get().out_of_flow != 0 {
             boxes[c].x = 0.0;
@@ -6794,17 +6715,8 @@ fn measure_table(
     for &ch in &children[i] {
         let cn = inputs[ch].get();
         if cn.out_of_flow != 0 {
-            if cn.native_oof() {
-                boxes[ch].x = content_left;
-                boxes[ch].y = content_top;
-            } else {
-                // No containing block (`CB_NONE`): lay the subtree out at its own width; `place` positions it by
-                // rel_x/rel_y.
-                let cw = resolve_width(&cn, (table_w - n.edges_x()).max(0.0));
-                measure(ch, cw, f64::NAN, inputs, runs, run_texts, grids, children, boxes, failed, &mut FloatCtx::new(), 0.0, 0.0);
-                boxes[ch].x = 0.0;
-                boxes[ch].y = 0.0;
-            }
+            boxes[ch].x = content_left;
+            boxes[ch].y = content_top;
             continue;
         }
         if cn.display != DISPLAY_TABLE_ROW_GROUP {
@@ -6933,14 +6845,7 @@ fn measure_table(
             }
             if shift > 0.0 {
                 for &ch in &children[c] {
-                    // …but not an out-of-flow child with no containing block (`CB_NONE`): its box is its own
-                    // displacement (`rel_y`, applied in `place`), which already carries the shift. One
-                    // `place_out_of_flow` positions does move with the content, since its static position is the
-                    // cell's flow.
-                    let cn = inputs[ch].get();
-                    if cn.out_of_flow != 0 && !cn.native_oof() {
-                        continue;
-                    }
+                    // (…an out-of-flow child included: its static position is the cell's flow)
                     boxes[ch].y += shift;
                 }
                 shift_frags(c, 0.0, shift);   // …and the inline fragments on the cell's own lines
@@ -8098,9 +8003,8 @@ fn text_intrinsic(runs: &[Run], run_texts: &[RunText], ws_mode: u8, indent: (f64
 // neither grows the row nor stretches a shorter item) or, under `grid-auto-rows`, the declared height whatever
 // the content (the container still reaches under an overflowing item). Bare text directly in the grid is an
 // anonymous ITEM with a box of its own (CSS Grid §4), placed in a row like any other item and walked here as an
-// ordinary block record with no element behind it — so `anon_cross` arrives as 0 for a grid and the floor it
-// carries is FLEX's alone (a floor would override a declared `grid-auto-rows`: Chrome gives 5, not the text's
-// 22). An out-of-flow child joins no row: it sits at the grid's content origin as its static position and
+// ordinary block record with no element behind it, so its height is the row's like any item's (a declared
+// `grid-auto-rows` wins: Chrome gives 5, not the text's 22). An out-of-flow child joins no row: it sits at the grid's content origin as its static position and
 // `place_out_of_flow` sizes and places it. The buffer at `grids[grid_start..]` is the header (`GRID_HEADER`),
 // the template (GRID_TRACK_STRIDE per marshalled column), then each in-flow item's declared lines (3 apiece,
 // `grid_item_columns`).
@@ -8155,19 +8059,10 @@ fn measure_grid(
     for &c in &children[i] {
         let cn = inputs[c].get();
         if cn.out_of_flow != 0 {
-            if cn.native_oof() {
-                // §4.1: its static position is the grid's content origin (the content's right edge where the
-                // inline axis runs from there), whatever precedes it; sized and placed by place_out_of_flow.
-                boxes[c].x = if n.from_right() { content_left + content_w } else { content_left };
-                boxes[c].y = content_top_rel;
-                continue;
-            }
-            // One with no containing block (`CB_NONE`): its subtree lays out at its own resolved width, and `place`
-            // positions it by rel_x/rel_y alone.
-            let cw = resolve_width(&cn, content_w);
-            measure(c, cw, f64::NAN, inputs, runs, run_texts, grids, children, boxes, failed, &mut FloatCtx::new(), 0.0, 0.0);
-            boxes[c].x = 0.0;
-            boxes[c].y = 0.0;
+            // §4.1: its static position is the grid's content origin (the content's right edge where the inline
+            // axis runs from there), whatever precedes it; sized and placed by place_out_of_flow.
+            boxes[c].x = if n.from_right() { content_left + content_w } else { content_left };
+            boxes[c].y = content_top_rel;
         }
     }
     // An intrinsic track (auto / min|max-content / fit-content / a minmax side) sizes from the items' content —
@@ -8274,7 +8169,7 @@ fn measure_grid(
     boxes[i].nid = n.nid;
     boxes[i].w = w;
     let box_h = if is_auto(n.height) {
-        content_top_rel + bottom.max(n.anon_cross) + n.pb + n.bb
+        content_top_rel + bottom + n.pb + n.bb
     } else if n.border_box {
         n.height.max(n.edges_y())
     } else {
@@ -8423,7 +8318,7 @@ fn place(
     let (bx, by) = (boxes[i].x, boxes[i].y);
     shift_frags(i, bx, by);
     for &c in &children[i] {
-        if inputs[c].get().native_oof() {
+        if inputs[c].get().out_of_flow != 0 {
             place_out_of_flow(c, i, inputs, runs, run_texts, grids, children, boxes, failed);
         } else {
             place(c, bx, by, inputs, runs, run_texts, grids, children, boxes, failed);
@@ -8697,7 +8592,7 @@ fn place_out_of_flow(
     boxes[c].used_margins = if am != 0 { Some([my_lead, mx_trail, my_trail, mx_lead]) } else { None };
     shift_frags(c, x, y);   // …and its own lines' inline fragments with it, as `place` moves a flowed box's
     for &cc in &children[c] {
-        if inputs[cc].get().native_oof() {
+        if inputs[cc].get().out_of_flow != 0 {
             place_out_of_flow(cc, c, inputs, runs, run_texts, grids, children, boxes, failed);
         } else {
             place(cc, x, y, inputs, runs, run_texts, grids, children, boxes, failed);
@@ -8925,7 +8820,6 @@ mod tests {
             caption_side: 0,
             rtl: 0,
             text_align: 0,
-            anon_cross: 0.0,
             ws_mode: 0,
             item_auto_height: false,
             height_from_outside: false,
@@ -8977,7 +8871,6 @@ mod tests {
             row_rank: 1,
             table_fixed: false,
             flex_stretch: false,
-            flex_native: false,
             flex_dir_reverse: false,
             replaced: false,
             ratio: false,
@@ -9240,7 +9133,7 @@ mod tests {
     }
     fn item(nid: f64, parent: i32, w: f64, h: f64) -> Input {
         let mut c = blk(nid, parent);
-        c.border_box = true; // the item's used size, as a border box
+        c.border_box = true; // its declared size, as a border box (the base `flex_row_sizes` reads)
         c.width = w;
         c.height = h;
         c.height_adjoins = false;
@@ -9326,15 +9219,16 @@ mod tests {
     }
 
     #[test]
-    fn flex_out_of_flow_child_placed_at_its_pushed_offset() {
-        // An abspos child (out_of_flow) is placed at the container origin + its resolved displacement
-        // (rel_x/rel_y — insets or the static position), while the in-flow item is placed normally.
+    fn flex_out_of_flow_child_placed_by_its_insets() {
+        // An abspos child (out_of_flow) whose containing block is the container is placed by its insets against
+        // the container's padding box (`place_out_of_flow`), while the in-flow item is placed normally.
         let f = flex(0.0, -1, 300.0);
         let a = item(1.0, 0, 50.0, 20.0);
         let mut abs = item(2.0, 0, 40.0, 30.0);
         abs.out_of_flow = 1;
-        abs.rel_x = 20.0;
-        abs.rel_y = 10.0;
+        abs.cb_index = 0;
+        abs.inset_left = 20.0;
+        abs.inset_top = 10.0;
         let inputs = vec![f, a, abs];
         let bx = boxes(layout_block(&inputs, &[], &[], &[], &[], &[], 0.0, 0.0, 800.0, false));
         assert_eq!([bx[1].x, bx[1].y], [0.0, 0.0]); // in-flow item at the start
@@ -9350,6 +9244,7 @@ mod tests {
         let a = item(1.0, 0, 50.0, 20.0);
         let mut abs = item(2.0, 0, 40.0, 99.0);
         abs.out_of_flow = 1;
+        abs.cb_index = 0;
         let inputs = vec![f, a, abs];
         let bx = boxes(layout_block(&inputs, &[], &[], &[], &[], &[], 0.0, 0.0, 800.0, false));
         assert_eq!(bx[0].h, 20.0); // auto height = in-flow cross, not the 99px abspos
@@ -9551,7 +9446,8 @@ mod tests {
         // but the items (laid out at their own size) overflow it — extent = capacity, justify free negative.
         let mut f = flex_col(0.0, -1, 100.0);
         f.max_h = 40.0;
-        let inputs = vec![f, item(1.0, 0, 100.0, 30.0), item(2.0, 0, 100.0, 30.0), item(3.0, 0, 100.0, 30.0)];
+        let rigid = |nid| Input { flex_shrink: 0.0, ..item(nid, 0, 100.0, 30.0) };
+        let inputs = vec![f, rigid(1.0), rigid(2.0), rigid(3.0)];
         let bx = boxes(layout_block(&inputs, &[], &[], &[], &[], &[], 0.0, 0.0, 800.0, false));
         assert_eq!(bx[0].h, 40.0); // box capped by max-height
         assert_eq!([bx[1].y, bx[2].y, bx[3].y], [0.0, 30.0, 60.0]); // items overflow (free = 40 - 90 < 0)

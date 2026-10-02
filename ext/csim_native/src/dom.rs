@@ -2759,7 +2759,7 @@ pub(crate) fn f64_array<'s>(scope: &mut v8::PinScope<'s, '_>, vals: &[f64]) -> v
 // left) and its relative shift `[x, y]`, then its edges as the pass used them (`layout::Box::edges`, NaN where it has
 // none), which `auto` margins it has in the JS side's mask (1 top, 2 right, 4 bottom, 8 left — `AUTO_MARGIN_BIT`)
 // with 16 beside them where an edge resolved a percentage, and where it is out of flow what placed it:
-// `Box::out_of_flow`, `cb` (the record, or −1 the viewport, −2 the inline entry after it, −3 none), `cb_inline` and
+// `Box::out_of_flow`, `cb` (the record, or −1 the viewport, −2 the inline entry after it; −3 on a box in flow), `cb_inline` and
 // `static_axes` — and its `position` (`Box::position`).
 pub(crate) const BOX_ROW: usize = 30;
 fn box_row(b: &crate::layout::Box) -> [f64; BOX_ROW] {

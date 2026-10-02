@@ -2612,7 +2612,6 @@ impl<'a> Walk<'a> {
         {
             let r = &mut self.inputs[idx as usize];
             r.display = crate::layout::DISPLAY_GRID;
-            r.anon_cross = 0.0;
             r.grid_start = grid_start;
         }
         for (_, item) in &items {
@@ -2679,7 +2678,6 @@ impl<'a> Walk<'a> {
         r.flex_main_reverse = plan.main_reverse;
         r.flex_dir_reverse = plan.flex_reverse;
         r.flex_cross_far = plan.cross_far;
-        r.flex_native = true;
         [r.flex_cross_gap, r.flex_cross_gap_frac] = [cross_gap.px, cross_gap.frac];
         let cross_gap_math = self.math(cross_gap.prog.as_deref());
         self.inputs[idx as usize].flex_cross_gap_math = cross_gap_math;
@@ -4469,7 +4467,6 @@ pub(crate) fn fresh_record() -> Input {
         caption_side: 0,
         rtl: 0,
         text_align: 0,
-        anon_cross: 0.0,
         ws_mode: 0,
         item_auto_height: false,
         grid_start: 0,
@@ -4519,7 +4516,6 @@ pub(crate) fn fresh_record() -> Input {
         row_rank: 0,
         table_fixed: false,
         flex_stretch: false,
-        flex_native: false,
         flex_dir_reverse: false,
         replaced: false,
         lays_out_children: false,
