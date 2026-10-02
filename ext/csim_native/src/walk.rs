@@ -877,8 +877,10 @@ impl FlexBasisSpec {
                 FlexBasisSpec { px: s.px, frac: s.frac, prog: s.prog, keyword: 0 }
             }
             FlexBasis::Size(Size::LengthPercentage(lp)) => FlexBasisSpec { px: length(&lp.0)?, frac: f64::NAN, prog: None, keyword: 0 },
-            FlexBasis::Size(Size::Auto) => none(0),
-            _ => return Err("flex-basis"),
+            // (…`stretch` fills the container's main size — the 100% it resolves to, Chrome's 300 in a 300px row before it
+            // shrinks — and what is no size here, an `anchor-size()`, the `auto` it falls back to)
+            FlexBasis::Size(Size::Stretch | Size::WebkitFillAvailable) => FlexBasisSpec { px: 0.0, frac: 1.0, prog: None, keyword: 0 },
+            _ => none(0),
         })
     }
 }
@@ -1083,7 +1085,9 @@ impl GridTemplate {
         let list = match v {
             Template::None => return Ok(implicit()),
             Template::TrackList(list) => list,
-            _ => return Err("grid template"),
+            // (…a `subgrid` is `none` on a box that is no grid item of a grid it can join, which is how this walk lays
+            // every one out — no track is shared with a parent grid yet — and `masonry` is unratified)
+            _ => return Ok(implicit()),
         };
         let mut out = GridTemplate { tracks: Vec::new(), repeat_start: -1.0, repeat_len: 0.0, repeat_kind: 0.0 };
         for value in list.values.iter() {
@@ -1819,12 +1823,10 @@ impl<'a> Walk<'a> {
             // in normal flow — filling its containing block — and not for a flex item or an out-of-flow box, which the two
             // engines share)
             Size::Stretch | Size::WebkitFillAvailable => 0,
-            _ => return Err("width keyword"),
+            // (…and `fit-content(<length>)` the fit-content it clamps, its argument aside)
+            Size::FitContentFunction(_) => 3,
         };
         rec.height_kw = matches!(pos.height, Size::MinContent | Size::MaxContent | Size::FitContent);
-        if rec.width_kw != 0 && parent < 0 {
-            return Err("root keyword width");
-        }
         rec.is_button = tag == "button";
         let sizes: [(Option<&LengthPercentage>, f64); 6] = [
             (size_lp(&pos.width), self.basis.w),
@@ -4400,7 +4402,8 @@ fn edge_lps(style: &ComputedValues) -> Result<([Option<&LengthPercentage>; 8], u
         match margin {
             Margin::Auto => auto |= [4, 2, 8, 1][k],
             Margin::LengthPercentage(lp) => edges[k] = Some(lp),
-            _ => return Err("margin anchor"),
+            // (…an `anchor-size()` margin with no anchor to size it is invalid at computed-value time: the initial 0)
+            _ => {}
         }
     }
     for (k, padding) in [&p.padding_top, &p.padding_right, &p.padding_bottom, &p.padding_left].into_iter().enumerate() {
@@ -4530,8 +4533,9 @@ fn inset_lp(v: &style::values::computed::position::Inset) -> Result<Option<&Leng
     use style::values::generics::position::GenericInset as Inset;
     match v {
         Inset::LengthPercentage(lp) => Ok(Some(lp)),
-        Inset::Auto => Ok(None),
-        _ => Err("anchor inset"),
+        // (…an `anchor()` inset with no anchor to place it is invalid at computed-value time: the initial `auto` — no
+        // anchor is modelled, as none is positioned by one in the JS layout either)
+        _ => Ok(None),
     }
 }
 // Does the box contain its out-of-flow descendants, fixed ones included (`containsOutOfFlow`): a filter, a transform
@@ -4897,7 +4901,10 @@ fn ws_mode_of(style: &ComputedValues) -> Result<u8, &'static str> {
         (WhiteSpaceCollapse::Preserve, true) => WS_PRE_WRAP,
         (WhiteSpaceCollapse::PreserveBreaks, true) => WS_PRE_LINE,
         (WhiteSpaceCollapse::BreakSpaces, true) => WS_BREAK_SPACES,
-        _ => return Err("white-space-mode-unknown"),
+        // (…and the combinations no `white-space` value spells, by what they preserve: a `nowrap` that keeps its
+        // breaks wraps nothing but them — `pre-line`'s breaks, kept — and a `nowrap` keeping its spaces is `pre`)
+        (WhiteSpaceCollapse::PreserveBreaks, false) => WS_PRE_LINE,
+        (_, wrap) => if wrap { WS_PRE_WRAP } else { WS_PRE },
     })
 }
 fn preserving(mode: u8) -> bool {

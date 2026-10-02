@@ -291,6 +291,23 @@ RSpec.describe 'Rust walk coverage' do
     expect(s.evaluate_script('JSON.stringify(__csimNativeLayoutStats().rustFellBack)')).to eq('{}')
   end
 
+  # A value the walk has no model for is the one it falls back to, where the walk declined the page: an `anchor()` inset
+  # and an `anchor-size()` margin with no anchor are invalid at computed-value time (`auto`, 0), a `subgrid` on no grid
+  # item of a grid is `none`, and a `flex-basis: stretch` fills the row before the line shrinks it (Chrome: 10,0 for the
+  # anchored box, 50 down for the margin, 290.4 for the basis beside a 9.6 item, 300 for the grid's one column).
+  it 'answers values it has no model for with their fallback', :aggregate_failures do
+    s = page(
+      '<body style="font: 16px monospace; margin: 0"><div style="position: relative; width: 300px; height: 50px">' \
+      '<div id="a1" style="position: absolute; top: anchor(--a top); left: 10px">x</div></div>' \
+      '<div id="a2" style="margin-top: anchor-size(--a height); width: 50px">y</div>' \
+      '<div style="display: flex; width: 300px"><div id="a3" style="flex-basis: stretch">fb</div><div>z</div></div>' \
+      '<div style="display: grid; grid-template-columns: subgrid; width: 300px"><div id="a4">g</div></div></body>'
+    )
+    rect = ->(id) { s.evaluate_script("(() => { const r = document.getElementById('#{id}').getBoundingClientRect(); return [r.x, r.y, r.width].map((v) => Math.round(v * 10) / 10); })()") }
+    expect(%w[a1 a2 a3 a4].map(&rect)).to eq([[10, 0, 9.6], [0, 50, 50], [0, 72, 290.4], [0, 94, 300]])
+    expect(s.evaluate_script('JSON.stringify(__csimNativeLayoutStats().rustFellBack)')).to eq('{}')
+  end
+
   # A root element in a vertical writing mode is sized as every vertical block is — its auto width from its content —
   # and placed at its margins, where the walk declined it and the JS layout gave it the initial containing block's width
   # at 0,0 whatever its margins said. Chrome (800px window): `vertical-lr` puts the html at 7,5 and 109 wide, its
