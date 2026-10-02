@@ -250,6 +250,36 @@ pub(crate) fn register_path(path: &str) -> i32 {
     h
 }
 
+// The face `handle` under an `@font-face` `size-adjust` of `scale`: every advance its table gives scaled, as the JS
+// model's `applyFaceMetrics` reshapes the table (a full-em wide character is no advance of the table's, and stays one em
+// there too). Its own handle, shared per (face, scale); the face's handle where the scale is 1, and -1 for a face that
+// is not registered.
+pub(crate) fn register_scaled(handle: i32, scale: f64) -> i32 {
+    if scale == 1.0 || handle < 0 {
+        return handle;
+    }
+    let key = format!("s:{handle}:{:016x}", scale.to_bits());
+    if let Some(h) = FONT_IDX.with(|m| m.borrow().get(&key).copied()) {
+        return h;
+    }
+    let scaled = FONTS.with(|f| {
+        f.borrow().get(handle as usize).and_then(Option::as_ref).map(|fm| FontMetrics {
+            ascii: fm.ascii.map(|a| a.map(|a| a * scale)),
+            avg: fm.avg * scale,
+        })
+    });
+    let h = match scaled {
+        Some(metrics) => FONTS.with(|f| {
+            let mut v = f.borrow_mut();
+            v.push(Some(metrics));
+            (v.len() - 1) as i32
+        }),
+        None => -1,
+    };
+    FONT_IDX.with(|m| m.borrow_mut().insert(key, h));
+    h
+}
+
 // Register from in-memory SFNT bytes (a web / buffer face the host fetched + decoded), keyed by a
 // content hash so identical bytes share one entry.
 pub(crate) fn register_bytes(bytes: &[u8]) -> i32 {

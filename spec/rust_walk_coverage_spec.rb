@@ -118,4 +118,20 @@ RSpec.describe 'Rust walk coverage' do
     expect(s.evaluate_script("document.getElementById('t').getBoundingClientRect().width")).to eq(60)
     expect(s.evaluate_script('JSON.stringify(__csimNativeLayoutStats().rustFellBack)')).to eq('{}')
   end
+
+  # …and an `@font-face` with metric descriptors: its `size-adjust` scales every advance (a face of its own natively,
+  # `registerFontScaled`), its overrides the line box — 6 Ahem characters at 20px x 150% are 180 wide.
+  it 'lays out text in a face with metric descriptors' do
+    ahem = File.binread(File.join(__dir__, 'wpt/fonts/Ahem.ttf'))
+    css = '@font-face { font-family: a150; src: url(/Ahem.ttf); size-adjust: 150%; ascent-override: 90%; }'
+    s = simulated_session(lambda {|env|
+      next [200, {'content-type' => 'font/ttf'}, [ahem]] if env['PATH_INFO'] == '/Ahem.ttf'
+
+      [200, {'content-type' => 'text/html'}, ["<!DOCTYPE html><meta charset=\"utf-8\"><style>#{css}</style><span id=\"t\" style=\"font: 20px a150, monospace\">abc de</span>"]]
+    })
+    s.visit '/'
+    s.execute_script("document.body.style.color = 'red'")
+    expect(s.evaluate_script("document.getElementById('t').getBoundingClientRect().width")).to eq(180)
+    expect(s.evaluate_script('JSON.stringify(__csimNativeLayoutStats().rustFellBack)')).to eq('{}')
+  end
 end

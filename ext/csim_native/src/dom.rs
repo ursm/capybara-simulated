@@ -1125,6 +1125,7 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_, ()>, ctx: &v8::Global<v8:
     // Native text metrics (fontations) for native inline layout (L2): register a font (fontconfig path
     // or in-memory SFNT bytes) to a handle JS puts in the layout inputs; native measures runs in-process.
     register(scope, ns, "registerFontPath", register_font_path, context_id);
+    register(scope, ns, "registerFontScaled", register_font_scaled, context_id);
     register(scope, ns, "registerFontBytes", register_font_bytes, context_id);
     if let Some(key) = v8::String::new(scope, "__dom") {
         let global = context.global(scope);
@@ -2624,6 +2625,17 @@ fn register_font_path(
 ) {
     let path = args.get(0).to_rust_string_lossy(scope);
     rv.set_int32(crate::font::register_path(&path));
+}
+
+// __dom.registerFontScaled(handle, scale) -> handle: the face `handle` under a `size-adjust` of `scale`.
+fn register_font_scaled(
+    scope: &mut v8::PinScope<'_, '_>,
+    args: v8::FunctionCallbackArguments<'_>,
+    mut rv: v8::ReturnValue<'_, v8::Value>,
+) {
+    let handle = args.get(0).int32_value(scope).unwrap_or(-1);
+    let scale = args.get(1).number_value(scope).unwrap_or(f64::NAN);
+    rv.set_int32(if scale.is_finite() && scale > 0.0 { crate::font::register_scaled(handle, scale) } else { -1 });
 }
 
 // __dom.registerFontBytes(uint8array) -> handle. In-memory SFNT bytes for a web / buffer face the host
