@@ -61,7 +61,7 @@ impl WalkDisplay for style::properties::style_structs::Box {
 }
 
 use crate::dom::{NodeId, NodeKind, RealmArena};
-use crate::layout::{MATH_DEPTH, MATH_LINE, MATH_MAX, MATH_MIN, MATH_NEG, MATH_SCALE, MATH_SUM};
+use crate::layout::{MATH_LINE, MATH_MAX, MATH_MIN, MATH_NEG, MATH_SCALE, MATH_SUM};
 use crate::layout::{InlineBox, Input, Run, RunText, DISPLAY_BLOCK, DISPLAY_TEXT_BLOCK, RUN_ATOMIC, RUN_BR, RUN_CLOSE, RUN_FLOAT, RUN_OOF, RUN_OPEN, RUN_TEXT, RUN_WBR};
 
 // A face the walk measures a run in, as the JS side resolved it for the family and the weight / style bucket: the
@@ -1066,6 +1066,8 @@ struct GridTemplate {
 struct GridTrack {
     px: Option<f64>,
     frac: Option<f64>,
+    // (…or, for a comparison or math function over a percentage, its PROGRAM, resolved against the content width)
+    prog: Option<Vec<f64>>,
     fr: Option<f64>,
     auto: bool,
     min: bool,
@@ -1128,16 +1130,17 @@ impl GridTrack {
                 t.floor = Some(Box::new(GridTrack::breadth(min)?));
                 Some(t)
             }
-            Size::FitContent(cap) => Some(GridTrack { fit: Some(Box::new(GridTrack::breadth(cap)?)), ..Default::default() }),
+            Size::FitContent(cap) => Some(GridTrack { fit: Some(Box::new(GridTrack::breadth(cap).filter(|c| c.prog.is_none())?)), ..Default::default() }),
         }
     }
     fn breadth(b: &style::values::computed::TrackBreadth) -> Option<GridTrack> {
         use style::values::generics::grid::GenericTrackBreadth as Breadth;
         Some(match b {
             Breadth::Breadth(lp) => {
-                // (…a comparison function is no track size the JS walk reads, which invalidates the whole template)
-                let s = spec(lp).ok().filter(|s| s.prog.is_none())?;
-                if lp.has_percentage() {
+                let s = spec(lp).ok()?;
+                if s.prog.is_some() {
+                    GridTrack { prog: s.prog, ..Default::default() }
+                } else if lp.has_percentage() {
                     GridTrack { px: Some(s.px), frac: Some(s.frac), ..Default::default() }
                 } else {
                     GridTrack { px: Some(s.px), ..Default::default() }
@@ -1149,13 +1152,16 @@ impl GridTrack {
             Breadth::MaxContent => GridTrack { max: true, ..Default::default() },
         })
     }
-    // One side of the track as native resolves it (`nlTrackSideSpec`), `[kind, value, px]`: 0 a length, 1 the
-    // column's min-content, 2 its max-content, 3 `fit-content` capped at a length, 4 a fraction of the grid's content
-    // width beside a length, 5 `fit-content` capped at such a fraction. `min` asks the base's question, else the
-    // limit's.
-    fn side(&self, min: bool) -> [f64; 3] {
+    // One side of the track as native resolves it, `[kind, value, px]`: 0 a length, 1 the column's min-content, 2 its
+    // max-content, 3 `fit-content` capped at a length, 4 a fraction of the grid's content width beside a length, 5
+    // `fit-content` capped at such a fraction, 6 a program of the pass's math table (its offset, `math` enters it) at
+    // the content width. `min` asks the base's question, else the limit's.
+    fn side(&self, min: bool, math: &mut impl FnMut(&[f64]) -> u32) -> [f64; 3] {
         const SIDE_MIN: [f64; 3] = [1.0, 0.0, 0.0];
         const SIDE_MAX: [f64; 3] = [2.0, 0.0, 0.0];
+        if let Some(prog) = &self.prog {
+            return [6.0, math(prog) as f64, 0.0];
+        }
         if let Some(frac) = self.frac {
             return [4.0, frac, self.px.unwrap_or(0.0)];
         }
@@ -1514,29 +1520,38 @@ impl<'a> Walk<'a> {
     }
 
     // The root element's box. A floated or absolutely positioned root is no float and no out-of-flow box of anything —
-    // there is nothing around it — but it is sized as one, shrink-to-fit, and a positioned one placed at its `top` /
-    // `left` against the viewport (Chrome: `html { position: absolute; top: 10px; left: 20px }` holding "hello world"
-    // is 121.61 wide at (20, 10)).
+    // there is nothing around it — but it is sized and placed as one in the viewport: shrink-to-fit, at the side it
+    // floats to, or by its insets as an absolutely positioned box is (Chrome: `html { position: absolute; top: 10px;
+    // left: 20px }` holding "hello world" is 121.61 wide at (20, 10); with `inset: 0` it is the viewport).
     fn root(&mut self, root: NodeId) -> Step {
         let style = self.style(root)?;
         let b = style.get_box();
         let positioned = matches!(b.clone_position(), Position::Absolute | Position::Fixed);
         self.record(root, -1)?;
-        if positioned || b.clone_float() != Float::None {
-            let pos = style.get_position();
-            let (w, h) = (self.basis.w, self.basis.h);
-            let at = |inset: &style::values::computed::position::Inset, basis: f64| -> Result<f64, &'static str> {
-                Ok(match inset_lp(inset)? {
-                    Some(lp) if positioned => lp.resolve(style::values::computed::Length::new(basis as f32)).px() as f64,
-                    _ => 0.0,
-                })
-            };
-            let (left, top) = (at(&pos.left, w)?, at(&pos.top, h)?);
-            let r = &mut self.inputs[0];
-            r.fits_content = true;
-            r.inset_left = left;
-            r.inset_top = top;
+        let fits = if positioned {
+            crate::layout::ROOT_POSITIONED
+        } else {
+            match b.clone_float() {
+                Float::None => return Ok(()),
+                Float::Right | Float::InlineEnd if !starts_at_right(&style) => crate::layout::ROOT_FLOAT_RIGHT,
+                Float::Left | Float::InlineStart if starts_at_right(&style) => crate::layout::ROOT_FLOAT_RIGHT,
+                _ => crate::layout::ROOT_FLOAT_LEFT,
+            }
+        };
+        let (w, h) = (self.basis.w, self.basis.h);
+        let pos = style.get_position();
+        let mut insets = [f64::NAN; 4];
+        if positioned {
+            for (k, (inset, basis)) in [(&pos.top, h), (&pos.right, w), (&pos.bottom, h), (&pos.left, w)].into_iter().enumerate() {
+                if let Some(lp) = inset_lp(inset)? {
+                    insets[k] = lp.resolve(style::values::computed::Length::new(basis as f32)).px() as f64;
+                }
+            }
         }
+        let r = &mut self.inputs[0];
+        r.fits_content = fits;
+        [r.inset_top, r.inset_right, r.inset_bottom, r.inset_left] = insets;
+        r.cb_rect = [0.0, 0.0, w, h];
         Ok(())
     }
 
@@ -2585,8 +2600,9 @@ impl<'a> Walk<'a> {
             row_floor.unwrap_or(f64::NAN),
         ]);
         for t in &template.tracks {
-            let base = t.floor.as_deref().unwrap_or(t).side(true);
-            let limit = if t.fr.is_some() { base } else { t.side(false) };
+            let mut math = |p: &[f64]| self.math(Some(p));
+            let base = t.floor.as_deref().unwrap_or(t).side(true, &mut math);
+            let limit = if t.fr.is_some() { base } else { t.side(false, &mut math) };
             let is_auto = t.auto || t.floor.as_deref().is_some_and(|f| f.auto);
             self.grids.extend([base[0], base[1], limit[0], limit[1], t.fr.is_some() as u8 as f64, t.fr.unwrap_or(0.0), is_auto as u8 as f64, base[2], limit[2]]);
         }
@@ -3224,12 +3240,18 @@ impl<'a> Walk<'a> {
             col_defs += span_attr(self.node(col).get_attr("span"), 1);
         }
         let spanned = self.place_cells(&mut grid, usize::MAX);
+        // The columns the cells make — those a cell of one column starts in, under the AUTO layout, where Chrome and
+        // Firefox drop a column only a span reaches; every slot a cell covers under the FIXED one, which keeps them
+        // (Chrome and Firefox: `<td colspan=3>` under a one-cell row of a fixed 300px table is three columns of 100).
+        let fixed = table.is_some_and(|t| {
+            use style::computed_values::table_layout::T as TableLayout;
+            self.style(t).is_ok_and(|s| s.get_table().table_layout == TableLayout::Fixed && !s.get_position().width.is_auto())
+        });
         let mut count = col_defs;
         for row in &grid.rows {
             for cell in &row.cells {
-                if cell.col_span == 1 && cell.col + 1 > count {
-                    count = cell.col + 1;
-                }
+                let reach = if fixed { cell.col + cell.col_span } else if cell.col_span == 1 { cell.col + 1 } else { 0 };
+                count = count.max(reach);
             }
         }
         grid.col_count = count.max(if grid.rows.iter().any(|r| !r.cells.is_empty()) { 1 } else { 0 });
@@ -4707,33 +4729,23 @@ fn product(factors: &[CalcNode]) -> Option<(f64, &CalcNode)> {
 // A calc tree as its program.
 fn program(node: &CalcNode) -> Result<Vec<f64>, &'static str> {
     let mut prog = Vec::new();
-    let mut depth = 0usize;
-    let mut deepest = 0usize;
-    emit(node, &mut prog, &mut depth, &mut deepest)?;
-    if deepest > MATH_DEPTH {
-        return Err("math too deep");
-    }
+    emit(node, &mut prog)?;
     Ok(prog)
 }
-fn emit(node: &CalcNode, prog: &mut Vec<f64>, depth: &mut usize, deepest: &mut usize) -> Step {
+fn emit(node: &CalcNode, prog: &mut Vec<f64>) -> Step {
     use style::values::generics::calc::{GenericCalcNode as Node, MinMaxOp};
     if let Some((px, frac)) = linear(node) {
         prog.extend([MATH_LINE, px, frac]);
-        *depth += 1;
-        *deepest = (*deepest).max(*depth);
         return Ok(());
     }
-    let fold = |prog: &mut Vec<f64>, depth: &mut usize, op: f64| {
-        prog.extend([op, 0.0, 0.0]);
-        *depth -= 1;
-    };
+    let fold = |prog: &mut Vec<f64>, op: f64| prog.extend([op, 0.0, 0.0]);
     match node {
         Node::MinMax(args, op) => {
             let op = if matches!(op, MinMaxOp::Min) { MATH_MIN } else { MATH_MAX };
             for (i, a) in args.iter().enumerate() {
-                emit(a, prog, depth, deepest)?;
+                emit(a, prog)?;
                 if i > 0 {
-                    fold(prog, depth, op);
+                    fold(prog, op);
                 }
             }
             if args.is_empty() {
@@ -4742,27 +4754,27 @@ fn emit(node: &CalcNode, prog: &mut Vec<f64>, depth: &mut usize, deepest: &mut u
         }
         // (…CSS's own `max(lo, min(v, hi))`: where the bounds cross, the minimum wins)
         Node::Clamp { min, center, max } => {
-            emit(min, prog, depth, deepest)?;
-            emit(center, prog, depth, deepest)?;
-            emit(max, prog, depth, deepest)?;
-            fold(prog, depth, MATH_MIN);
-            fold(prog, depth, MATH_MAX);
+            emit(min, prog)?;
+            emit(center, prog)?;
+            emit(max, prog)?;
+            fold(prog, MATH_MIN);
+            fold(prog, MATH_MAX);
         }
         Node::Sum(terms) => {
             for (i, t) in terms.iter().enumerate() {
-                emit(t, prog, depth, deepest)?;
+                emit(t, prog)?;
                 if i > 0 {
-                    fold(prog, depth, MATH_SUM);
+                    fold(prog, MATH_SUM);
                 }
             }
         }
         Node::Negate(n) => {
-            emit(n, prog, depth, deepest)?;
+            emit(n, prog)?;
             prog.extend([MATH_NEG, 0.0, 0.0]);
         }
         Node::Product(factors) => match product(factors) {
             Some((scale, operand)) => {
-                emit(operand, prog, depth, deepest)?;
+                emit(operand, prog)?;
                 if scale != 1.0 {
                     prog.extend([MATH_SCALE, scale, 0.0]);
                 }
@@ -4770,30 +4782,30 @@ fn emit(node: &CalcNode, prog: &mut Vec<f64>, depth: &mut usize, deepest: &mut u
             // (…a product of two operands that are not numbers — a percentage over a percentage is one — multiplies)
             None => {
                 for (i, f) in factors.iter().enumerate() {
-                    emit(f, prog, depth, deepest)?;
+                    emit(f, prog)?;
                     if i > 0 {
-                        fold(prog, depth, crate::layout::MATH_MUL);
+                        fold(prog, crate::layout::MATH_MUL);
                     }
                 }
             }
         },
         Node::Invert(n) => {
-            emit(n, prog, depth, deepest)?;
+            emit(n, prog)?;
             prog.extend([crate::layout::MATH_INV, 0.0, 0.0]);
         }
         Node::Abs(n) => {
-            emit(n, prog, depth, deepest)?;
+            emit(n, prog)?;
             prog.extend([crate::layout::MATH_ABS, 0.0, 0.0]);
         }
         Node::Sign(n) => {
-            emit(n, prog, depth, deepest)?;
+            emit(n, prog)?;
             prog.extend([crate::layout::MATH_SIGN, 0.0, 0.0]);
         }
         Node::Round { strategy, value, step } => {
             use style::values::generics::calc::RoundingStrategy as Strategy;
-            emit(value, prog, depth, deepest)?;
-            emit(step, prog, depth, deepest)?;
-            fold(prog, depth, match strategy {
+            emit(value, prog)?;
+            emit(step, prog)?;
+            fold(prog, match strategy {
                 Strategy::Nearest => crate::layout::MATH_ROUND_NEAREST,
                 Strategy::Up => crate::layout::MATH_ROUND_UP,
                 Strategy::Down => crate::layout::MATH_ROUND_DOWN,
@@ -4802,15 +4814,15 @@ fn emit(node: &CalcNode, prog: &mut Vec<f64>, depth: &mut usize, deepest: &mut u
         }
         Node::ModRem { dividend, divisor, op } => {
             use style::values::generics::calc::ModRemOp;
-            emit(dividend, prog, depth, deepest)?;
-            emit(divisor, prog, depth, deepest)?;
-            fold(prog, depth, if matches!(op, ModRemOp::Mod) { crate::layout::MATH_MOD } else { crate::layout::MATH_REM });
+            emit(dividend, prog)?;
+            emit(divisor, prog)?;
+            fold(prog, if matches!(op, ModRemOp::Mod) { crate::layout::MATH_MOD } else { crate::layout::MATH_REM });
         }
         Node::Hypot(args) => {
             for (i, a) in args.iter().enumerate() {
-                emit(a, prog, depth, deepest)?;
+                emit(a, prog)?;
                 if i > 0 {
-                    fold(prog, depth, crate::layout::MATH_HYPOT);
+                    fold(prog, crate::layout::MATH_HYPOT);
                 }
             }
             if args.is_empty() {
@@ -4822,19 +4834,17 @@ fn emit(node: &CalcNode, prog: &mut Vec<f64>, depth: &mut usize, deepest: &mut u
             }
         }
         Node::Pow(base, exponent) => {
-            emit(base, prog, depth, deepest)?;
-            emit(exponent, prog, depth, deepest)?;
-            fold(prog, depth, crate::layout::MATH_POW);
+            emit(base, prog)?;
+            emit(exponent, prog)?;
+            fold(prog, crate::layout::MATH_POW);
         }
         Node::Sqrt(n) => {
-            emit(n, prog, depth, deepest)?;
+            emit(n, prog)?;
             prog.extend([crate::layout::MATH_SQRT, 0.0, 0.0]);
         }
         // (…a bare number among them: an operand of the plain value it is)
         Node::Leaf(style::values::computed::length_percentage::ComputedLeaf::Number(n)) => {
             prog.extend([MATH_LINE, f32_exact(*n), 0.0]);
-            *depth += 1;
-            *deepest = (*deepest).max(*depth);
         }
         _ => return Err("math function"),
     }

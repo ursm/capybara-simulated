@@ -486,9 +486,9 @@ pub(crate) struct Input {
     pub(crate) inset_right: f64,
     pub(crate) inset_bottom: f64,
     pub(crate) inset_left: f64,
-    // A ROOT sized from its content — a floated or absolutely positioned root element — and placed at its `inset_left`
-    // / `inset_top`.
-    pub(crate) fits_content: bool,
+    // A ROOT sized and placed as a float or an absolutely positioned box in the viewport (`ROOT_*`, 0 for neither), its
+    // insets resolved in `inset_*` (NaN for `auto`) and the viewport in `cb_rect`.
+    pub(crate) fits_content: u8,
     // Which of this box's margins are `auto` (1 left, 2 right, 4 top, 8 bottom) — the record carries the mask
     // because a resolved `auto` margin arrives as 0, indistinguishable from a declared one. The slack goes to
     // them: between the INSETS of an out-of-flow box (§10.3.7 / §10.6.4), and in the containing block for an
@@ -1133,6 +1133,9 @@ pub(crate) struct Box {
     // 0 where it does not — the JS walk's records carry none.
     pub(crate) position: u8,
 }
+pub(crate) const ROOT_FLOAT_LEFT: u8 = 1;
+pub(crate) const ROOT_FLOAT_RIGHT: u8 = 2;
+pub(crate) const ROOT_POSITIONED: u8 = 3;
 pub(crate) const POSITION_STATIC: u8 = 1;
 pub(crate) const POSITION_RELATIVE: u8 = 2;
 pub(crate) const POSITION_ABSOLUTE: u8 = 3;
@@ -1508,11 +1511,20 @@ pub(crate) fn layout_block_in_place(inputs: &mut [Input], runs: &[Run], run_text
     let orthogonal = root.block_axis_is_x && children[0].iter().any(|&c| !inputs[c].get().block_axis_is_x);
     let root_w = if orthogonal {
         resolve_width(&root, root_cb_w)
-    } else if root.fits_content && root.width.is_nan() {
-        let Some(w) = shrink_to_fit_width(0, root_cb_w - Input::m(root.ml) - Input::m(root.mr), inputs, runs, run_texts, grids, &children) else {
-            return Outcome::Unsupported;
-        };
-        w
+    } else if root.fits_content != 0 && root.width.is_nan() {
+        // (…an auto width: the room between its insets where both are set, §10.3.7, else shrink-to-fit in what the set one
+        // leaves)
+        let margins = Input::m(root.ml) + Input::m(root.mr);
+        let (left, right) = (root.inset_left, root.inset_right);
+        if left.is_finite() && right.is_finite() {
+            (root_cb_w - left - right - margins).max(0.0)
+        } else {
+            let room = root_cb_w - [left, right].iter().filter(|v| v.is_finite()).sum::<f64>() - margins;
+            let Some(w) = shrink_to_fit_width(0, room, inputs, runs, run_texts, grids, &children) else {
+                return Outcome::Unsupported;
+            };
+            w
+        }
     } else {
         block_child_width(0, root_cb_w, inputs, runs, run_texts, grids, &children, &failed)
     };
@@ -1540,8 +1552,30 @@ pub(crate) fn layout_block_in_place(inputs: &mut [Input], runs: &[Run], run_text
         } else {
             auto_margin_split(lead_auto, trail_auto, lm, tm, root_cb_w, w).0
         };
-        if n.fits_content {
-            (n.inset_left + lm, n.inset_top + Input::m(n.mt))
+        if n.fits_content != 0 {
+            let [cb_w, cb_h] = [n.cb_rect[2], n.cb_rect[3]];
+            let (top, right, bottom, left) = (n.inset_top, n.inset_right, n.inset_bottom, n.inset_left);
+            let (lm, rm, tm, bm) = (Input::m(n.ml), Input::m(n.mr), Input::m(n.mt), Input::m(n.mb));
+            let or0 = |v: f64| if v.is_finite() { v } else { 0.0 };
+            // (…both vertical insets and an auto height: as tall as the room between them)
+            if top.is_finite() && bottom.is_finite() && n.height.is_nan() {
+                boxes[0].h = (cb_h - top - bottom - tm - bm).max(0.0);
+            }
+            let h = boxes[0].h;
+            let x = if n.fits_content == ROOT_FLOAT_RIGHT {
+                cb_w - rm - w
+            } else if left.is_finite() && right.is_finite() && n.auto_margins & 3 != 0 {
+                // (…and `auto` margins between both insets share what the width leaves them, §10.3.7)
+                let fixed = if n.auto_margins & 1 != 0 { 0.0 } else { lm } + if n.auto_margins & 2 != 0 { 0.0 } else { rm };
+                let slack = (cb_w - left - right - w - fixed).max(0.0);
+                left + if n.auto_margins & 1 == 0 { lm } else if n.auto_margins & 2 != 0 { slack / 2.0 } else { slack }
+            } else if left.is_finite() || !right.is_finite() {
+                or0(left) + lm
+            } else {
+                cb_w - right - rm - w
+            };
+            let y = if top.is_finite() || !bottom.is_finite() { or0(top) + tm } else { cb_h - bottom - bm - h };
+            (x, y)
         } else {
             (if root_from_right { root_cb_w - w - lead } else { lead }, root_margins.top_only.value())
         }
@@ -7246,12 +7280,11 @@ impl GridTrack {
         }
     }
     fn needs_content(&self) -> bool {
-        !matches!(self.base_kind, 0 | 4) || !matches!(self.limit_kind, 0 | 4)
+        !matches!(self.base_kind, 0 | 4 | 6) || !matches!(self.limit_kind, 0 | 4 | 6)
     }
 }
-// One side of a track in px, given the column's (min, max) content contribution — the oracle's `resolveSideSpec` —
-// and the grid's content width, which a PERCENTAGE side is a fraction of (kind 4; kind 5 is `fit-content` capped
-// at such a fraction).
+// One side of a track in px, given the column's (min, max) content contribution and the grid's content width, which a
+// PERCENTAGE side is a fraction of (kind 4; kind 5 is `fit-content` capped at such a fraction; kind 6 a program at it).
 // `px` is the CONSTANT TERM beside a fraction (kinds 4 and 5): a `calc(25% + 10px)` track is
 // `frac * content_w + px`, and a plain percentage sends 0. It is no part of the other kinds — an intrinsic
 // reference has no constant and a px track carries its figure in `val`.
@@ -7261,6 +7294,7 @@ fn resolve_track_side(kind: u8, val: f64, col: (f64, f64), content_w: f64, px: f
         2 => col.1,
         4 => val * content_w + px,
         5 => col.0.max((val * content_w + px).min(col.1)),
+        6 => bounded(f64::NAN, val as u32, content_w),
         3 => col.0.max(val.min(col.1)),
         _ => val,
     }
@@ -7397,6 +7431,7 @@ fn grid_repeat_count(grids: &[f64], gs: usize, tmpl_base: usize, content_w: f64,
     let fixed_of = |kind: u8, val: f64| match kind {
         0 => Some(val),
         4 => Some(val * content_w),
+        6 => Some(bounded(f64::NAN, val as u32, content_w)).filter(|v| v.is_finite()),
         _ => None,
     };
     let mut per = 0.0f64;
@@ -7639,12 +7674,12 @@ fn content_intrinsic(i: usize, inputs: &[Cell<Input>], runs: &[Run], run_texts: 
             let gaps = grids[gs + 1].max(0.0) * (col_count as f64 - 1.0).max(0.0);
             let mut min = gaps;
             let mut max = gaps;
-            // A PERCENTAGE track (kind 4, or `fit-content` of one, kind 5) has nothing to be a percentage OF
-            // here, and behaves as `auto` — the column's own content (Chrome: a `grid-template-columns: 50%` grid
-            // measures its column's min and max).
+            // A PERCENTAGE track (kind 4, `fit-content` of one, kind 5, or a program over one, kind 6) has nothing to be
+            // a percentage OF here, and behaves as `auto` — the column's own content (Chrome: a
+            // `grid-template-columns: 50%` grid measures its column's min and max).
             let side = |kind: u8, val: f64, col: (f64, f64), want_max: bool| -> f64 {
                 match kind {
-                    4 | 5 => if want_max { col.1 } else { col.0 },
+                    4..=6 => if want_max { col.1 } else { col.0 },
                     _ => resolve_track_side(kind, val, col, 0.0, 0.0),
                 }
             };
@@ -7908,17 +7943,22 @@ pub(crate) const MATH_REM: f64 = 15.0;
 pub(crate) const MATH_HYPOT: f64 = 16.0;
 pub(crate) const MATH_POW: f64 = 17.0;
 pub(crate) const MATH_SQRT: f64 = 18.0;
-pub(crate) const MATH_DEPTH: usize = 16;
+// (…evaluated on a stack this deep, and on one as deep as the program can need where that is not enough — a function
+// nested sixteen deep is still a value)
+const MATH_STACK: usize = 16;
 pub(crate) fn math_at(table: &[f64], at: usize, basis: f64) -> f64 {
     let Some(&len) = table.get(at) else { return f64::NAN };
     let Some(prog) = table.get(at + 1..at + 1 + 3 * len as usize) else { return f64::NAN };
-    let mut stack = [0.0; MATH_DEPTH];
+    run_math(prog, basis, &mut [0.0; MATH_STACK]).unwrap_or_else(|| run_math(prog, basis, &mut vec![0.0; len as usize]).unwrap_or(f64::NAN))
+}
+// A program run on `stack`: its figure, or None where the stack is too shallow for it.
+fn run_math(prog: &[f64], basis: f64, stack: &mut [f64]) -> Option<f64> {
     let mut sp = 0;
     for t in prog.chunks_exact(3) {
         let (op, a, b) = (t[0], t[1], t[2]);
         if op == MATH_LINE {
-            if sp == MATH_DEPTH {
-                return f64::NAN;
+            if sp == stack.len() {
+                return None;
             }
             stack[sp] = if b == 0.0 { a } else { a + b * basis };
             sp += 1;
@@ -7926,7 +7966,7 @@ pub(crate) fn math_at(table: &[f64], at: usize, basis: f64) -> f64 {
         }
         if op == MATH_NEG || op == MATH_SCALE || op == MATH_INV || op == MATH_ABS || op == MATH_SIGN || op == MATH_SQRT {
             if sp == 0 {
-                return f64::NAN;
+                return Some(f64::NAN);
             }
             let x = stack[sp - 1];
             stack[sp - 1] = if op == MATH_NEG {
@@ -7947,7 +7987,7 @@ pub(crate) fn math_at(table: &[f64], at: usize, basis: f64) -> f64 {
             continue;
         }
         if sp < 2 {
-            return f64::NAN;
+            return Some(f64::NAN);
         }
         sp -= 1;
         let (x, y) = (stack[sp - 1], stack[sp]);
@@ -7973,7 +8013,7 @@ pub(crate) fn math_at(table: &[f64], at: usize, basis: f64) -> f64 {
     }
     // (…and a figure that is no number — a division by a percentage of a zero basis, `calc(1px / (10% - 10%))` — is
     // none either: the value it sizes is unresolvable, `auto`, never the infinity a division makes)
-    if sp == 1 && stack[0].is_finite() { stack[0] } else { f64::NAN }
+    Some(if sp == 1 && stack[0].is_finite() { stack[0] } else { f64::NAN })
 }
 // `mod()` / `rem()` (CSS Values 4 §10.3): the remainder of the division of `a` by `b`, with the sign of `b` for `mod()`
 // and of `a` for `rem()` — and NaN for a `mod()` of an infinite `b` against an `a` of the other sign (§10.9).
@@ -9279,7 +9319,7 @@ mod tests {
             inset_right: f64::NAN,
             inset_bottom: f64::NAN,
             inset_left: f64::NAN,
-            fits_content: false,
+            fits_content: 0,
             auto_margins: 0,
             legacy_align: 0,
             legend_align: 0,

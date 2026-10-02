@@ -709,4 +709,40 @@ RSpec.describe 'Rust walk coverage' do
     s.evaluate_script("document.getElementById('r').getBoundingClientRect().width")
     expect(s.evaluate_script('(r => [r.width, r.height])(document.documentElement.getBoundingClientRect())')).to eq([200, 100])
   end
+
+  # …and what they reached past the one-line shapes: a FIXED table keeps every column a span covers (Chrome and Firefox:
+  # `<td colspan=3>` under a one-cell row of a fixed 300px table is three columns of 100); a grid track over a percentage
+  # under a comparison or stepped function is a track, the `auto-fill` count included (`repeat(auto-fill, min(30%,
+  # 150px))` in 400px is three of 120), where the whole template was dropped; a function nested deeper than the
+  # evaluator's stack is a value; and a positioned root stretches between both insets, centres in them on `auto`
+  # margins, and sits at its right / bottom ones (Chrome: `inset: 0` is the viewport; `left: 0; right: 0; width: 200px;
+  # margin: 0 auto` puts it at 412; `right: 30px; bottom: 20px` at the viewport's corner less its size).
+  it 'lays out what the declined shapes reached, as Chrome does', :aggregate_failures do
+    deep = "#{'min(' * 20}50%#{', 400px)' * 20}"
+    s = page(
+      '<body style="margin: 0; font: 16px monospace">' \
+      '<table style="table-layout: fixed; width: 300px; border-spacing: 0"><tr><td id="f" style="padding: 0">a</td></tr><tr><td colspan="3">b</td></tr></table>' \
+      '<div style="width: 400px"><div style="display: grid; grid-template-columns: min(20%, 50px) 1fr"><div id="g">a</div><div>b</div></div>' \
+      '<div style="display: grid; grid-template-columns: repeat(auto-fill, min(30%, 150px))"><div>a</div><div id="h">b</div></div>' \
+      "<div id=\"n\" style=\"width: #{deep}\">x</div></div></body>"
+    )
+    expect(s.evaluate_script(<<~JS)).to eq([100, 50, [120, true], 200])
+      [
+        f.getBoundingClientRect().width,
+        g.getBoundingClientRect().width,
+        [h.getBoundingClientRect().x, h.getBoundingClientRect().y === h.previousElementSibling.getBoundingClientRect().y],
+        n.getBoundingClientRect().width
+      ]
+    JS
+    root = ->(style) { page(%(<html style="#{style}"><body style="margin: 8px; font: 16px monospace"><div>hello world</div></body></html>)) }
+    read = '(r => [r.x, r.y, +r.width.toFixed(1), r.height])(document.documentElement.getBoundingClientRect())'
+    expect(root['position: fixed; inset: 0'].evaluate_script(read)).to eq([0, 0, 1024, 768])
+    expect(root['position: absolute; left: 0; right: 0; width: 200px; margin: 0 auto'].evaluate_script(read)).to eq([412, 0, 200, 38])
+    expect(root['position: absolute; right: 30px; bottom: 20px'].evaluate_script(read)).to eq([872.4, 710, 121.6, 38])
+    expect(root['float: right'].evaluate_script(read)).to eq([902.4, 0, 121.6, 38])
+    # (…and a face the walk cannot measure falls back to the next family of the stack: `emoji, monospace` sets the
+    # letters in monospace, seven of them 67.2 wide — Chrome's 77.6 keeps the emoji face's own space)
+    emoji = page('<body><span id="e" style="font-family: emoji, monospace">abc def</span></body>')
+    expect_shared_gap(emoji.evaluate_script('+e.getBoundingClientRect().width.toFixed(1)'), shared: 67.2, chrome: 77.6, what: 'emoji, monospace')
+  end
 end
