@@ -1,32 +1,56 @@
 # frozen_string_literal: true
 require 'digest'
+require 'fileutils'
 require 'json'
 
 # The layout a shape is held to once the JS layout (the oracle) is gone: what the page's own geometry API answers —
-# every element's border box and its client rects — recorded in a golden file and compared on every run.
+# every element's border box, its client rects and its used margins and padding, and every text node's line boxes —
+# recorded in a golden file and compared on every run, with the Rust walk asserted to have laid the page out.
 #
-# A golden is RECORDED (`CSIM_LAYOUT_GOLDEN=record`) only where the shape's own parity check passes: the caller's block
-# runs it first, and the Rust walk is held to the oracle too, so a recorded answer is one the Rust walk, the JS walk and
-# the oracle all agreed on — or one listed for a measurement against Chrome where the Rust walk alone differs. That is
-# what the parity specs held these shapes to, and the golden keeps holding them to it after the reference is deleted. Where an
-# answer is KNOWN to differ from Chrome the spec says so beside it with Chrome's figure (`expect_shared_gap`); a golden
-# is a regression guard, not a claim of conformance.
+# A golden is RECORDED (`CSIM_LAYOUT_GOLDEN=record`, or `rerecord` to drop what this run did not reach — run the whole
+# file) only where the shape's own parity check passes: the caller's block runs it first, and the Rust walk is held to
+# the oracle too, so a recorded answer is one the Rust walk, the JS walk and the oracle all agreed on — or one listed
+# for a measurement against Chrome where the Rust walk alone differs (`tmp/layout_golden_divergent*.json`). That is what
+# the parity specs held these shapes to, and the golden keeps holding them to it after the reference is deleted. Where
+# an answer is KNOWN to differ from Chrome the spec says so beside it with Chrome's figure (`expect_shared_gap`); a
+# golden is a regression guard, not a claim of conformance. What it cannot see is a pseudo-element's box, which no DOM
+# API answers.
 #
 # One file per spec file (`spec/fixtures/layout_golden/<spec>.json`), keyed by the body's digest, the body kept beside
-# its boxes so a diff reads as a page.
+# its boxes so a diff reads as a page. The figures are this machine's fonts' (fontconfig's monospace), as every
+# Chrome-pinned figure in these specs already is.
 module LayoutGolden
-  RECORD = ENV['CSIM_LAYOUT_GOLDEN'] == 'record'
+  MODE = ENV['CSIM_LAYOUT_GOLDEN']
+  RECORD = %w[record rerecord].include?(MODE)
   DIR = File.expand_path('../fixtures/layout_golden', __dir__)
-  # Every element in tree order, `body` and below: its tag, its border box and its client rects (an inline box's
-  # fragments; a block's one rect is its box, and is left out).
+  TMP = File.expand_path('../../tmp', __dir__)
+  # `body` and everything under it in tree order: an element as its tag and border box, then — where it has any — its
+  # client rects (an inline box's fragments; a block's one rect is its box, and is left out) and its used margins and
+  # padding (the resolved values `getComputedStyle` reports); a text node as `#text` and its line boxes.
   SNAPSHOT_JS = <<~JS
     (() => {
       const r4 = (r) => [r.x, r.y, r.width, r.height];
-      return [document.body, ...document.body.querySelectorAll('*')].map((e) => {
-        const box = e.getBoundingClientRect(), rects = [...e.getClientRects()];
+      const out = [];
+      const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_ELEMENT | NodeFilter.SHOW_TEXT);
+      for (let n = walker.currentNode; n; n = walker.nextNode()) {
+        if (n.nodeType === Node.TEXT_NODE) {
+          if (!n.data.trim()) continue;
+          const range = document.createRange();
+          range.selectNodeContents(n);
+          out.push(['#text', [...range.getClientRects()].map(r4)]);
+          continue;
+        }
+        const box = n.getBoundingClientRect(), rects = [...n.getClientRects()];
+        const entry = [n.localName, r4(box)], more = {};
         const one = rects.length === 1 && rects[0].x === box.x && rects[0].y === box.y && rects[0].width === box.width && rects[0].height === box.height;
-        return one ? [e.localName, r4(box)] : [e.localName, r4(box), rects.map(r4)];
-      });
+        if (!one) more.rects = rects.map(r4);
+        const cs = getComputedStyle(n);
+        const edges = ['margin', 'padding'].flatMap((p) => ['top', 'right', 'bottom', 'left'].map((s) => parseFloat(cs[`${p}-${s}`]) || 0));
+        if (edges.some((v) => v !== 0)) more.edges = edges;
+        if (Object.keys(more).length) entry.push(more);
+        out.push(entry);
+      }
+      return out;
     })()
   JS
   TOLERANCE = 0.01
@@ -39,7 +63,7 @@ module LayoutGolden
 
     def file(spec_path)
       path = File.join(DIR, "#{File.basename(spec_path, '.rb')}.json")
-      @files[path] ||= File.exist?(path) ? JSON.parse(File.read(path)) : {}
+      @files[path] ||= MODE != 'rerecord' && File.exist?(path) ? JSON.parse(File.read(path)) : {}
       [path, @files[path]]
     end
 
@@ -56,47 +80,55 @@ module LayoutGolden
         File.write(path, "{\n#{lines.join(",\n")}\n}\n")
       end
       @dirty.clear
-      return if @divergent.empty?
+      return unless RECORD
 
-      File.write(File.expand_path('../../tmp/layout_golden_divergent.json', __dir__), JSON.pretty_generate(@divergent))
+      # (…written on every recording run, an empty list too, so no earlier run's list survives it; one per flatware
+      # worker, which records its own files.)
+      FileUtils.mkdir_p(TMP)
+      File.write(File.join(TMP, "layout_golden_divergent#{ENV.fetch('TEST_ENV_NUMBER', '')}.json"), JSON.pretty_generate(@divergent))
     end
 
     def near?(got, want)
       return (got - want).abs <= TOLERANCE if got.is_a?(Numeric) && want.is_a?(Numeric)
+      return got.keys == want.keys && got.all? {|k, v| near?(v, want[k]) } if got.is_a?(Hash) && want.is_a?(Hash)
       return got == want unless got.is_a?(Array) && want.is_a?(Array)
 
       got.size == want.size && got.zip(want).all? {|g, w| near?(g, w) }
     end
   end
 
-  # `body` laid out on the example group's own `page` (or `app`, a variant of it `variant` names in the key), held to its
-  # golden — or, recording, checked by the block (the shape's parity) and then recorded.
+  # `body` laid out on the example group's own `page` (or `app`, a variant of it `variant` names in the key — a stable
+  # string, as the key must be the same on every Ruby), held to its golden — or, recording, checked by the block (the
+  # shape's parity) and then recorded. The session goes as soon as the shape is read: a loop of shapes in one example
+  # otherwise keeps every page's realm alive to its end (1.3 GB where one at a time is 200 MB).
   def expect_layout_golden(body, app: page(body), variant: nil)
     path, store = LayoutGolden.file(RSpec.current_example.metadata[:file_path])
     key = Digest::SHA256.hexdigest([body, variant].compact.join("\0"))[0, 16]
-    session = simulated_session(app)
-    session.visit '/'
-    got = session.evaluate_script(SNAPSHOT_JS)
-    if RECORD
-      # …and the answer recorded is the RUST walk's, the one production lays out with: it took the page, and it agrees
-      # with the oracle box for box and fragment for fragment.
-      yield if block_given?
+    with_simulated_session(app) do |session|
+      session.visit '/'
+      got = session.evaluate_script(SNAPSHOT_JS)
+      # The answer is the RUST walk's, the one production lays out with — so it took the page.
       expect(session.evaluate_script('JSON.stringify(__csimNativeLayoutStats().rustFellBack)')).to eq('{}'), "#{body}: the Rust walk declined"
-      # (Where it does NOT agree, the Rust answer is still the one recorded — it is the one production gives — and the
-      # shape is listed for a measurement against Chrome: `tmp/layout_golden_divergent.json`.)
-      rust = session.evaluate_script('globalThis.__csimLayoutShadowRun(null, {rust: true})')
-      unless rust['ok'] && rust['mismatches'].to_i.zero? && rust['fragMismatches'].to_i.zero?
-        LayoutGolden.divergent << {'spec' => path, 'body' => body, 'sample' => rust.slice('sample', 'fragSample')}
+      if RECORD
+        yield if block_given?
+        # …and where it does NOT agree with the oracle, its answer is still the one recorded — it is the one production
+        # gives — and the shape is listed for a measurement against Chrome.
+        rust = session.evaluate_script('globalThis.__csimLayoutShadowRun(null, {rust: true})')
+        unless rust['ok'] && rust['mismatches'].to_i.zero? && rust['fragMismatches'].to_i.zero?
+          LayoutGolden.divergent << {'spec' => path, 'body' => body, 'sample' => rust.slice('sample', 'fragSample')}
+        end
+        LayoutGolden.record(path, key, {'body' => body, 'variant' => variant, 'boxes' => got}.compact)
+      else
+        want = store[key]
+        expect(want).not_to be_nil, "#{body}: no golden — record it with CSIM_LAYOUT_GOLDEN=record"
+        want = want['boxes']
+        bad = got.each_index.reject {|i| LayoutGolden.near?(got[i], want[i]) }
+        expect(got.size == want.size && bad.empty?).to(
+          be(true),
+          "#{body}: layout moved from its golden (#{got.size} nodes, #{want.size} recorded):\n" +
+            bad.first(5).map {|i| "  got  #{got[i].inspect}\n  want #{want[i].inspect}" }.join("\n")
+        )
       end
-      LayoutGolden.record(path, key, {'body' => body, 'variant' => variant, 'boxes' => got}.compact)
-    else
-      want = store[key]
-      expect(want).not_to be_nil, "#{body}: no golden — record it with CSIM_LAYOUT_GOLDEN=record"
-      bad = got.each_index.reject {|i| LayoutGolden.near?(got[i], want['boxes'][i]) }
-      expect(got.size == want['boxes'].size && bad.empty?).to(
-        be(true),
-        "#{body}: layout moved from its golden:\n" + bad.first(5).map {|i| "  got  #{got[i].inspect}\n  want #{want['boxes'][i].inspect}" }.join("\n")
-      )
     end
   end
 end

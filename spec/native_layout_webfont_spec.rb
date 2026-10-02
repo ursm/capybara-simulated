@@ -38,7 +38,10 @@ RSpec.describe 'native layout web-font parity' do
   end
 
   def expect_parity(body, **opts)
-    expect_layout_golden(body, app: page(body, **opts), variant: opts.empty? ? nil : opts.inspect) do
+    # (…the font options named by key and a digest of each value: `Hash#inspect` changed in Ruby 3.4, and a value holds
+    # a whole font file.)
+    variant = opts.empty? ? nil : opts.sort.map {|k, v| "#{k}=#{Digest::SHA256.hexdigest(v.to_s)[0, 12]}" }.join(',')
+    expect_layout_golden(body, app: page(body, **opts), variant:) do
       r = run_shadow(body, **opts)
       expect(r).to include('ok' => true), "harness bailed: #{r.inspect}"
       expect(r['mismatches']).to eq(0), "mismatch: #{r.inspect}"
