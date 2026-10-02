@@ -2,14 +2,11 @@ require 'capybara/simulated'
 require 'rack'
 require_relative 'support/session_teardown'
 
-# The cascade matches selectors LIVE on every read — that is how a DYNAMIC pseudo-class takes effect
-# at all. Anything that CACHES a cascade result therefore has to be invalidated by every input those
-# selectors read. Most already move `settleGen` (an attribute, the tree, the location) or
-# `cascadeVersion` (a stylesheet); the rest are kept OUT of the cache by the taint bracket (a read
-# that considered a dynamic-pseudo rule is never memoised — or, when every state it read is a
-# TRACKED one, is kept under `styleStateGen`, which each flip of that state moves). What a flip
-# does to the BOXES is marked by the style engine's restyle (layout.js `markRestyles`); the layout
-# epoch moves with the rule set alone.
+# A selector matches against the live state — that is how a DYNAMIC pseudo-class takes effect at all — so every
+# input a selector reads has to reach the style engine as a restyle of what it changes. Most move `settleGen` (an
+# attribute, the tree, the location) or `cascadeVersion` (a stylesheet); the rest move `styleStateGen`. What a flip
+# does to the BOXES is marked by the style engine's restyle (layout.js `markRestyles`); the layout epoch moves with
+# the rule set alone.
 #
 # This file exists because ENUMERATING those inputs by hand failed three times. Each round the
 # enumeration got better and still missed, because the axis that matters is not WHICH pseudo-classes
@@ -151,7 +148,7 @@ RSpec.describe 'cascade invalidation' do
     expect([before, s.evaluate_script(read)]).to eq(['rgb(0, 0, 0)', 'rgb(0, 128, 0)'])
   end
 
-  it 'taints a rule whose dynamic pseudo-class FOLLOWS another one' do
+  it 'restyles through a rule whose dynamic pseudo-class FOLLOWS another one' do
     # `a:link:hover`, `li:first-child:hover`, `input:disabled:focus` are ordinary authoring idioms.
     # The pseudo-name scan used a `[^:]` prefix, which CONSUMES a character — so the pseudo directly
     # after a matched one was never scanned, the rule read as static, and its properties cached
@@ -172,10 +169,9 @@ RSpec.describe 'cascade invalidation' do
   end
 
   it 'does not cache a flow-side mapping that a dynamic selector decided' do
-    # `flowSides` (the writing-mode / direction resolution behind every `*-inline-*` property)
-    # carries its own generation-keyed memo, and it predates the taint counter — so a `direction`
-    # set by a dynamic selector froze the mapping. The giveaway was that `direction` itself, which
-    # is NOT cached there, correctly reported the new value while `margin-inline-start` stayed on
+    # `flowSides` (the writing-mode / direction resolution behind every `*-inline-*` property) once
+    # carried a generation-keyed memo of its own, and a `direction` set by a dynamic selector froze the
+    # mapping: `direction` itself correctly reported the new value while `margin-inline-start` stayed on
     # the mirrored edge.
     app = lambda {|_env|
       [200, {'content-type' => 'text/html'}, ['<!DOCTYPE html><html><head><style>' \
@@ -596,11 +592,9 @@ RSpec.describe 'cascade invalidation' do
   end
 
   it 'follows an element MOVED across the shadow boundary' do
-    # Whether document rules reach an element is decided by walking to its enclosing shadow root, and
-    # that walk is memoised per element against a tree generation — `cascadedProperty` makes it for
-    # every property read, and on a 400-row table beside one widget it was half of what the host still
-    # cost the page. The generation moves on every child-list record, which is the only way the answer
-    # can change; these are the two moves that prove it, and Chrome agrees with all four figures.
+    # Whether document rules reach an element is decided by its enclosing shadow root, which only a
+    # child-list change moves; these are the two moves that prove it, and Chrome agrees with all four
+    # figures.
     s = simulated_session(lambda {|_env|
       [200, {'content-type' => 'text/html'},
        [<<~HTML]]
@@ -815,8 +809,7 @@ RSpec.describe 'cascade invalidation' do
 
   # …and a tree's OWN `:host::part(p):hover`, which is matched by rewritten copies of the rule: the rule as written holds
   # `::part()`, which the ordinary shadow-rule walk cannot compile and flags `unmatchable` — so once that walk had run
-  # (any other element of the tree read), noting the rule as written tainted nothing, the hover was memoised away, and
-  # the part kept 77.
+  # (any other element of the tree read), the hover was memoised away, and the part kept 77.
   it "restyles a part on hover through its own tree's :host::part rule" do
     s = simulated_session(lambda {|_env|
       [200, {'content-type' => 'text/html'},
@@ -840,12 +833,9 @@ RSpec.describe 'cascade invalidation' do
     expect(got).to eq(['10px', '77px', '300px', 300])
   end
 
-  # …and the declared-value memo, which keys on each element's STRUCTURAL-CONTEXT epoch
-  # (`ctxEpochOf`): a mutation a shadow selector reads has to move the epoch of the element the
-  # selector styles. A gate once narrowed which writes moved those epochs, and a host switched it
-  # off entirely — the single biggest part of that 5.4x; every write moves them conservatively now.
-  # These two pin the shapes that narrowing had to get right: a shadow rule's own input, and a
-  # `::part()` rule in the OUTER sheet whose subject is inside the tree.
+  # …and a value already read: a mutation a shadow selector reads has to restyle the element the
+  # selector styles. These two pin the shapes a narrowing once got wrong: a shadow rule's own input,
+  # and a `::part()` rule in the OUTER sheet whose subject is inside the tree.
   it 'invalidates a memoised value when a shadow selector\'s own input changes' do
     s = simulated_session(shadow_page('.t { color: rgb(255, 0, 0) } .t.on { color: rgb(0, 128, 0) }', '<p class="t" id="t">x</p>'))
     s.visit '/'
@@ -1166,9 +1156,8 @@ RSpec.describe 'cascade invalidation' do
   it 'hit-tests fresh z-index after focus, without a relayout in between' do
     # A `:focus { z-index }` rule moves no box, so nothing need relay out — the paint order must
     # come out right anyway. `stackChain` bakes an ANCESTOR stacking context's
-    # `paintRank` (a z-index read) into a per-pass memo; the dynamic-rule taint bracket keeps a
-    # chain that considered such a rule uncached, so the second hit-test re-reads it live
-    # instead of replaying the pre-focus rank. Siblings compare their own ranks live, so the
+    # `paintRank` (a z-index read) into a per-pass memo, and the second hit-test has to read the
+    # post-focus rank, not replay the pre-focus one. Siblings compare their own ranks live, so the
     # rule has to sit on the CONTEXT-ESTABLISHING ancestor for this to bite.
     css = '#a, #b { position: absolute; left: 0; top: 0; width: 50px; height: 50px; z-index: 0 } ' \
           '#ac, #bc { position: absolute; left: 0; top: 0; width: 50px; height: 50px } ' \
@@ -1399,11 +1388,8 @@ RSpec.describe 'cascade invalidation' do
   end
 
   it 'marks a host whose tree reads its class only through the :host(.x) COMBINATOR form' do
-    # `scopedRulesFor`'s routing sends only the STANDALONE `:host(.x)` to the host bucket;
-    # `:host(.x) .y` stays an in-tree rule, where it fails to match at all today
-    # (`shadow_dom_cascade_gaps`). The write must be marked anyway, so nothing goes stale the day it
-    # starts matching. (A gate once answered this off the sheet's TEXT for that reason: a
-    # bucket-shaped answer would have called the host unreachable.) There is no geometry to assert
+    # `:host(.x) .y` is an in-tree rule that reads the host's class through a combinator. The write
+    # must be marked, so nothing goes stale. There is no geometry to assert
     # for the same reason: the count is the whole test.
     css  = '.red { color: rgb(255, 0, 0) }'
     s    = simulated_session(styled_page('<div id="h"></div>', css: css))
@@ -1639,8 +1625,7 @@ RSpec.describe 'cascade invalidation' do
   end
 
   it 'relays out a :checked-driven rule when an option is selected programmatically' do
-    # Style reads under a dynamic rule are taint-uncached and always fresh — the layer that can go
-    # STALE is layout: the select's box memo keys on the layout epoch, which a selectedness change
+    # Style reads are the engine's and always fresh — the layer that can go STALE is layout: the select's box memo keys on the layout epoch, which a selectedness change
     # does not move, so the restyle has to mark the select whose `:has()` reads an option's state.
     css = 'select { height: 20px } select:has(option:checked[value="b"]) { height: 120px }'
     body = '<select id="s"><option value="a">a</option><option value="b">b</option></select><p id="after">after</p>'

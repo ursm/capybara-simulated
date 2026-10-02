@@ -3,11 +3,7 @@
 require 'capybara/simulated'
 require_relative 'support/session_teardown'
 
-# Starting an animation has to reach two things: the element's box, and any value of it the
-# declared-value memo is already holding. The second is what the document-wide cascade re-key in
-# `Animation._invalidate` exists for — and it is only owed when the memo actually holds something
-# for that element, which on the shape that matters (a list animating each row in as it is added)
-# it never does.
+# Starting an animation has to reach the element's box, and any value of it a reader has already read.
 # Each animation is PAUSED at the progress it is measured at: time passes for a running one, as in a browser.
 RSpec.describe 'starting an animation invalidates what it has to' do
   def page_with(body, css: '')
@@ -28,11 +24,8 @@ RSpec.describe 'starting an animation invalidates what it has to' do
     session.evaluate_script("Math.round(document.getElementById(#{id.to_json}).getBoundingClientRect().x)")
   end
 
-  # THE discriminating case: the property the animation will move has to have been READ before it
-  # starts, or the memo holds nothing stale and skipping the re-key is free either way. A
-  # `getBoundingClientRect` is not enough — with no transform declared anywhere the gate keeps
-  # layout from ever reading `transform`, so nothing is cached for it. Reading the computed value
-  # is what fills the memo, and it is exactly the shape a page that measures before it animates has.
+  # The property the animation will move READ before it starts — the shape a page that measures before it animates
+  # has.
   it 'follows an animation started after the property has been READ' do
     s = page_with('<div class=b id=t></div>')
     expect(s.evaluate_script("getComputedStyle(document.getElementById('t')).transform")).to eq('none')

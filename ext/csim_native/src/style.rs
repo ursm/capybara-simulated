@@ -3364,3 +3364,8 @@ fn css_image(css: &str) -> bool {
     }
     false
 }
+
+// Whether the engine implements `name` — a longhand or a shorthand it parses for page content.
+pub(crate) fn supports_property(name: &str) -> bool {
+    PropertyId::parse_enabled_for_all_content(name).is_ok()
+}

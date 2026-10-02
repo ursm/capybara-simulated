@@ -207,16 +207,37 @@ css/css-animations/parsing/animation-range-shorthand.html:
 - Property animation-range value '10% calc(70% + 10% * sign(100em - 1px))'
 - Property animation-range value '10% normal'
 - Property animation-range value '100px normal'
+- Property animation-range value '100px'
 - Property animation-range value '10em exit 20em'
 - Property animation-range value 'contain 0% contain 100%'
+- Property animation-range value 'contain 50%'
+- Property animation-range value 'contain'
 - Property animation-range value 'cover 0% cover 100%'
+- Property animation-range value 'cover 50% entry 50%, contain 50% exit 50%'
+- Property animation-range value 'cover 50%'
+- Property animation-range value 'cover'
 - Property animation-range value 'entry 0% entry 100%'
 - Property animation-range value 'entry 10em exit 20em'
+- Property animation-range value 'entry 50% exit 50%'
+- Property animation-range value 'entry 50%'
+- Property animation-range value 'entry 50px exit 100px'
 - Property animation-range value 'entry calc(10% - 10%) entry calc(50% + 50%)'
+- Property animation-range value 'entry normal'
+- Property animation-range value 'entry'
+- Property animation-range value 'entry, exit'
 - Property animation-range value 'entry-crossing 0% entry-crossing 100%'
+- Property animation-range value 'entry-crossing 50%'
+- Property animation-range value 'entry-crossing'
 - Property animation-range value 'exit 0% exit 100%'
+- Property animation-range value 'exit 50%'
+- Property animation-range value 'exit calc(10% + 50px)'
+- Property animation-range value 'exit'
 - Property animation-range value 'exit-crossing 0% exit-crossing 100%'
+- Property animation-range value 'exit-crossing 50%'
+- Property animation-range value 'exit-crossing'
+- Property animation-range value 'normal 100px'
 - Property animation-range value 'normal normal'
+- Property animation-range value 'normal'
 - e.style['animation-range'] = "#ff0000" should not set the property value
 - e.style['animation-range'] = "-1s" should not set the property value
 - e.style['animation-range'] = "0% 100%" should set the property value
@@ -2181,6 +2202,8 @@ css/cssom/cssimportrule-parent.html:
 - "@import stylesheet is properly unlinked from parent after removal"
 css/cssom/cssom-fontfacerule-constructors.html:
 - The style attribute must return a CSSFontFaceDescriptors block
+css/cssom/cssom-getPropertyValue-common-checks.html:
+- All properties (except 'all') can serialize their initial value (computed)
 css/cssom/cssstyledeclaration-nested.html:
 - CSSNestedDeclarationBlock cssom interactions
 css/cssom/cssstyledeclaration-registered-custom-properties.html:

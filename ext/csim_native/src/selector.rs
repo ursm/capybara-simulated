@@ -1,8 +1,8 @@
 // Native CSS selector matching over the live arena, using Servo's `selectors` crate — the
 // production engine (the same one Firefox ships), so tree-structural selectors (`:nth-child`,
 // `:not`, `:is`, `:where`, `:has`, combinators, attribute operators, case-sensitivity) are correct
-// by construction. It answers the page's `querySelector(All)` / `matches` / `closest` (selectors.js), the
-// cascade's per-rule matches, and the Capybara finds — every selector, invalid ones aside.
+// by construction. It answers the page's `querySelector(All)` / `matches` / `closest` (selectors.js) and the Capybara
+// finds — every selector, invalid ones aside.
 //
 // Ported from the unmerged native-selector-matching branch, where it matched against a JSON MIRROR
 // of the DOM that was serialized and copied across the FFI on every navigation — the boundary tax

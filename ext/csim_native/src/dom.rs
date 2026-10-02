@@ -1070,6 +1070,7 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_, ()>, ctx: &v8::Global<v8:
     register(scope, ns, "styleSheetFacts", style_sheet_facts, context_id);
     register(scope, ns, "styleShadowSheets", style_shadow_sheets, context_id);
     register(scope, ns, "styleValue", style_value, context_id);
+    register(scope, ns, "styleSupports", style_supports, context_id);
     register(scope, ns, "styleShown", style_shown, context_id);
     register(scope, ns, "styleGenerated", style_generated, context_id);
     register(scope, ns, "styleSkips", style_skips, context_id);
@@ -2161,6 +2162,17 @@ fn style_value_unguarded(
     if let Some(s) = v8::String::new(scope, &value) {
         rv.set(s.into());
     }
+}
+
+// __dom.styleSupports(property) -> whether the style engine implements the property: one it computes a value of for
+// every element it styles.
+fn style_supports(
+    scope: &mut v8::PinScope<'_, '_>,
+    args: v8::FunctionCallbackArguments<'_>,
+    mut rv: v8::ReturnValue<'_, v8::Value>,
+) {
+    let name = args.get(0).to_rust_string_lossy(scope);
+    rv.set_bool(crate::style::supports_property(&name));
 }
 
 // __dom.styleShown(nid, now) -> 0 | 1 | 2: whether the element is shown as the style engine styled it

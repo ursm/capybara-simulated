@@ -200,6 +200,40 @@ RSpec.describe 'style engine invalidation' do
     expect(got).to eq([['rgb(1, 2, 3)', 'rgb(7, 8, 9)'], ['rgb(4, 5, 6)', 'rgb(7, 8, 9)']])
   end
 
+  # …and one the PARENT's script puts into the frame — whose every method is the parent realm's code — is the frame's
+  # all the same: styled and shown by the frame's engine, and a shadow host it inserts counted where its tree's sheets
+  # are fed.
+  it 'styles what a parent script puts into a frame from the frame' do
+    s = visit('<iframe id="f"></iframe>', css: '')
+    got = s.evaluate_script(<<~JS)
+      (() => {
+        const doc = document.getElementById('f').contentDocument;
+        const style = doc.createElement('style');
+        style.textContent = 'div { color: rgb(4, 5, 6) }';
+        doc.head.append(style);
+        const el = document.createElement('div');
+        el.textContent = 'x';
+        doc.body.append(el);
+        const box = document.createElement('section'), h = document.createElement('span');
+        doc.body.append(box);
+        h.attachShadow({mode: 'open'}).innerHTML = '<style>p { color: rgb(7, 8, 9) }</style><p id="p">p</p>';
+        box.append(h);
+        return [el.checkVisibility(), getComputedStyle(el).color, getComputedStyle(h.shadowRoot.getElementById('p')).color];
+      })()
+    JS
+    expect(got).to eq([true, 'rgb(4, 5, 6)', 'rgb(7, 8, 9)'])
+  end
+
+  # A computed declaration a page holds on to reads as empty once its element leaves the document, as one asked for then
+  # does (CSSOM): no value of the inline style behind it, and no properties.
+  it 'empties a held computed declaration whose element left the document' do
+    s = visit('<div id="d" style="width: 50%; color: red">d</div>', css: '')
+    got = s.evaluate_script(<<~JS)
+      (() => { const d = document.getElementById('d'), cs = getComputedStyle(d); d.remove(); return [cs.width, cs.color, cs.length]; })()
+    JS
+    expect(got).to eq(['', '', 0])
+  end
+
   # A paint recording lays the page out in a pass of its own, after the one a read wrote — and a box's edges from THAT
   # pass are not this one's: a container's `margin-left` written in between left its text drawn where it had been
   # (the WPT reftest `offset-change-inline-backface-visibility-hidden`), its background where it went. The glyph's ink

@@ -292,26 +292,7 @@ module Capybara
       # Host fns that route to pure stdlib — no Browser surface,
       # nothing to safe_call, no allocation needed for the wrap. Skip
       # the rescue overhead on every per-find / per-event invocation.
-      # Process-wide PER-SHEET parse cache (the CSS analogue of the JS bytecode
-      # cache). `parseSheet` is pure, so the JS side caches its serialized
-      # `{hide,layout}` here keyed by (cssText hash, viewport), surviving the
-      # per-visit VM rebuild that wipes the in-VM `__sheetCache`. A cascade
-      # rebuild then re-parses only sheets it has never seen (content change =
-      # new key). Content-keyed ONLY — never url-keyed — so freshness stays the
-      # asset cache's call. Capped.
-      SHEET_PARSE_CACHE       = {}
-      SHEET_PARSE_CACHE_MUTEX = Mutex.new
-      SHEET_PARSE_CACHE_MAX   = 2048
-
       STDLIB_HOST_FNS = {
-        '__csimSheetCacheGet' => ->(*a) { SHEET_PARSE_CACHE_MUTEX.synchronize { SHEET_PARSE_CACHE[a[0].to_s] } },
-        '__csimSheetCachePut' => lambda {|*a|
-          SHEET_PARSE_CACHE_MUTEX.synchronize {
-            SHEET_PARSE_CACHE.clear if SHEET_PARSE_CACHE.size >= SHEET_PARSE_CACHE_MAX
-            SHEET_PARSE_CACHE[a[0].to_s] = a[1].to_s
-          }
-          nil
-        },
         '__csim_randomUUID'   => ->(*_) { SecureRandom.uuid },
         '__csim_randomBytes'  => ->(*a) { SecureRandom.bytes(a[0].to_i).bytes },
         '__csim_utf8Encode'   => ->(*a) { a[0].to_s.b.bytes },

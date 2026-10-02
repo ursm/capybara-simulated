@@ -5,9 +5,9 @@ require_relative 'support/session_teardown'
 
 # An ANIMATION is the third place a declaration can come from, beside a rule and a style attribute.
 # The value model always knew that — `getComputedStyle` reported the interpolated value — but the
-# layout gates did not: a gate like `declaresLayoutProp` asks a rule index and the
+# layout gates did not: a gate like `declaresLayoutProp` asked a rule index and the
 # element's inline map, and a property that only ever appears inside `@keyframes` or in an
-# `element.animate()` frame is in neither. So layout read the STATIC cascade and the two views of
+# `element.animate()` frame was in neither. So layout read the STATIC cascade and the two views of
 # the same element disagreed: an animated `translateX(100px)` reported `matrix(1, 0, 0, 1, 100, 0)`
 # from `getComputedStyle` and an untransformed `getBoundingClientRect`, and an animated
 # `max-width: 40px` laid out at its full width. Adding a rule that matched nothing at all fixed

@@ -2085,7 +2085,7 @@ module Capybara
         # viewport so visibility checks (Capybara `visible?`,
         # `getComputedStyle().display`) re-reflect mobile-breakpoint
         # `display: none` / `display: block` flips. Without this the
-        # cascade keeps the pre-resize hide-rule set.
+        # style engine keeps the pre-resize media answers.
         @runtime.call('__csimRebuildCascade') if @document_handle.to_i > 0
         # Fire `change` events on every live MediaQueryList whose
         # match state flipped, so libraries that hold `matchMedia(...)`

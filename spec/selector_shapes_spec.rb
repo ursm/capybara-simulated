@@ -4,12 +4,10 @@ require 'capybara/simulated'
 require 'rack'
 require_relative 'support/session_teardown'
 
-# The rule index files each rule under its subject's key — class / id / tag / attribute name /
-# `:root` / universal — and, within a bucket, by the first ancestor identifier the rule requires;
-# the candidate walk only visits what the element's own identifiers and ancestor chain select.
-# Each case here pins a bucket kind that used to fall into the universal bucket (visited for
-# every element) and must keep applying exactly where it applies.
-RSpec.describe 'rule index' do
+# A rule applies exactly where its selector matches, whatever its subject is keyed on — class / id / tag / attribute
+# name / `:root` / universal — and whatever ancestor it requires. Each case pins a shape a rule index once filed
+# wrong.
+RSpec.describe 'selector shapes' do
   def session_for(css, body)
     app = lambda {|_env|
       [200, {'content-type' => 'text/html'}, ["<!DOCTYPE html><html><head><style>#{css}</style></head><body>#{body}</body></html>"]]
