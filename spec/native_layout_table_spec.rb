@@ -19,7 +19,7 @@
 # its columns to fill what is left inside the border, like an explicit table width) — stacked above (the grid
 # offsets down past it) or below the grid, its own block / text subtree laid out normally.
 # colspan/rowspan, ragged grids, border-collapse, thead/tbody/tfoot, table-layout:fixed, colgroup/<col> widths,
-# captions — their MARGINS included since 2026-09-23: the vertical pair is height the rows do not get, the
+# captions — their MARGINS included: the vertical pair is height the rows do not get, the
 # LEADING horizontal one insets it from the wrapper's inline-start edge (the right edge in rtl), an `auto` pair
 # centres it, and the basis-less pair floors the table's width beside the caption's min-content —
 # a position:relative cell (offset ignored), an imposed table height TALLER than the grid (declared /
@@ -53,8 +53,8 @@ RSpec.describe 'native layout table' do
   # `border-spacing` says nothing without tracks to space. The figures are headless Chrome's, measured
   # 2026-09-22, because a golden alone cannot tell a right answer from a recorded mistake.
   # A cell's declared width is no narrower than its content's min-content: the column's minimum is the larger of the two
-  # (CSS 2.1 §17.5.2.2, CSS Tables 3). All three engines let the declaration shrink the column below its content — the
-  # `<td style="width: 1px; white-space: nowrap">` idiom an app's shrink-to-content column is written in came out 3 wide.
+  # (CSS 2.1 §17.5.2.2, CSS Tables 3). Letting the declaration shrink the column below its content made the
+  # `<td style="width: 1px; white-space: nowrap">` idiom an app's shrink-to-content column is written in 3 wide.
   # Chrome's figures.
   it 'floors a declared cell width at its content min-content' do
     {
@@ -103,24 +103,24 @@ RSpec.describe 'native layout table' do
   # …and an empty table on a LINE, which is the one shape where a table's BASELINE has nothing behind the
   # caption to answer first. A caption gives its table no baseline at all (§17.4 puts it outside the table box;
   # §10.8.1 reads an inline-table's from its first ROW), so an empty one hangs from its bottom margin edge and
-  # the line is 22 — Chrome's figure, measured 2026-09-23, and the reason the ORACLE was the engine that moved:
-  # it took the caption's baseline and made the line 18. Pinned to Chrome.
+  # the line is 22 — Chrome's figure, measured 2026-09-23, where taking the caption's baseline makes it 18.
+  # Pinned to Chrome.
   it 'gives an empty table with a caption NO baseline (Chrome: the line is 22, not 18)' do
     body = '<div id="l" style="width:300px">x <span style="display:inline-table"><span style="display:table-caption">cap</span></span> y</div>'
     expect_layout(body)
     session = simulated_session(page(body))
     session.visit '/'
     expect(session.evaluate_script("document.getElementById('l').getBoundingClientRect().height")).to eq(22)
-    # …and the same through a baseline-aligned CELL, which reaches the walk by a different route.
+    # …and the same through a baseline-aligned CELL, which asks for the table's baseline by a different route.
     expect_layout('<table style="border-spacing:0"><tr><td style="vertical-align:baseline"><div style="display:table"><div style="display:table-caption;height:16px">cap</div></div></td><td style="vertical-align:baseline;font-size:30px">Y</td></tr></table>')
     # …while a table WITH rows still answers from them (Chrome: 36 and 46).
     expect_layout('<div style="width:300px">x <span style="display:inline-table"><span style="display:table-caption">cap</span><span style="display:table-row"><span style="display:table-cell">a</span></span></span> y</div>')
   end
 
-  # A caption is the one block-level box in the engine that does NOT go through `block_child_width`: the oracle
-  # sized it with `usedSize`, which honours an intrinsic-size KEYWORD and nothing else that makes a block size
-  # from its own content. Native ran it through `used_width` alone, which knows no keyword, and filled the
-  # wrapper — 300 where the oracle and Chrome say 37.33. The `auto` margins then had nothing left to centre.
+  # A caption is the one block-level box in the engine that does NOT go through `block_child_width`:
+  # `measure_table` sizes it with `used_width`, and from its own content for ONE reason only — an intrinsic-size
+  # KEYWORD. `used_width` alone knows no keyword and fills the wrapper — 300 where Chrome says 37.33 — and the
+  # `auto` margins then have nothing left to centre.
   it 'matches a caption sized by an intrinsic-size keyword (Chrome: min-content is 37.33 in a 300px table)' do
     [
       'width:min-content', 'width:max-content', 'width:fit-content',
@@ -139,10 +139,9 @@ RSpec.describe 'native layout table' do
     expect(box).to eq([0, 37.328125])
   end
 
-  # …but a VERTICAL writing mode's auto width is not one of them: `block_child_width` would shrink it and
-  # `usedSize` did not, so a vertical-rl caption fills the wrapper. A divergence from Chrome carried over from
-  # the oracle, recorded rather than fixed while the port runs — and the reason the caption is not simply
-  # routed through `block_child_width`.
+  # …but a VERTICAL writing mode's auto width is not one of them: `block_child_width` would shrink it and the
+  # caption's sizing does not, so a vertical-rl caption fills the wrapper. A divergence from Chrome, recorded
+  # rather than fixed — and the reason the caption is not simply routed through `block_child_width`.
   it 'keeps a vertical writing-mode caption filling the wrapper (Chrome: it does not)' do
     expect_layout('<table style="width:300px;border-spacing:0"><caption style="writing-mode:vertical-rl">hello world</caption><tr><td style="width:40px;height:20px">a</td></tr></table>')
   end
@@ -220,7 +219,7 @@ RSpec.describe 'native layout table' do
     expect_layout('<table style="border-spacing:4px"><tr><td style="width:40px">a</td><td style="width:50px">b</td></tr><tr><td>c</td></tr></table>')
   end
 
-  # t5 — thead / tbody / tfoot. tableGrid sorts the rows into RENDER order (header, body, footer) regardless of
+  # t5 — thead / tbody / tfoot. `table_grid` sorts the rows into RENDER order (header, body, footer) regardless of
   # source order, and the walk emits the groups in that order; native stacks them like any row groups.
   it 'matches thead / tbody / tfoot in normal source order' do
     expect_layout('<table style="border-spacing:4px"><thead><tr><td style="width:60px;height:10px">h</td></tr></thead><tbody><tr><td style="height:30px">b</td></tr></tbody><tfoot><tr><td style="height:20px">f</td></tr></tfoot></table>')
@@ -241,7 +240,7 @@ RSpec.describe 'native layout table' do
   # t6 — table-layout:fixed. Columns are sized from the FIRST row (+ the table width), ignoring later rows'
   # content and any cell min/max-width; the whole assignable width is distributed so the columns FILL the table
   # (auto columns split the remainder; with none, it is spread proportionally over the fixed widths). Native
-  # reassembles those pushed widths and self-sizes to the same box, as for an auto table.
+  # computes those widths itself (`fixed_column_widths`) and self-sizes to the same box, as for an auto table.
   it 'matches a fixed-layout table with all-auto columns (equal split of the declared width)' do
     expect_layout('<table style="table-layout:fixed;width:300px;border-spacing:4px"><tr><td style="height:20px">a</td><td>b</td></tr></table>')
   end
@@ -376,10 +375,9 @@ RSpec.describe 'native layout table' do
     end
   end
   # …and so does an ATOMIC in an anonymous cell's MIXED run, whose record hangs under the run's anonymous group rather
-  # than under the cell: its `height: 50%` rode the record resolved against the oracle's final cell (53.33), which the
-  # cell's first pass could not treat as auto, and native's rows came out 123.84 / 36.16 where the oracle and Chrome
-  # split 160 as 106.67 / 53.33. Chrome's boxes (53.33 tall at the row's top). Inside a flex item too, which the flex
-  # gate pushed until 2026-09-25: a stray box under a table read as the walk's.
+  # than under the cell: its `height: 50%` is the cell's, resolved only once the cell has a height — a figure resolved
+  # up front, which the cell's first pass cannot treat as auto, made the rows 123.84 / 36.16 where Chrome splits 160
+  # as 106.67 / 53.33. Chrome's boxes (53.33 tall at the row's top). Inside a flex item too.
   it 'gives an atomic in an anonymous cell\'s mixed run the cell as its basis' do
     run = '<div style="display:table-row"><div style="display:table-cell">c</div>tx <span id="m" style="display:inline-block;height:50%">ib</span><div>blk</div></div>'
     body = %(<div style="font:16px monospace;width:300px"><div style="display:table;height:160px">#{run}<div style="display:table-row"><div style="display:table-cell">b</div></div></div></div>)
@@ -388,11 +386,10 @@ RSpec.describe 'native layout table' do
     expect_layout(%(<div style="font:16px monospace;display:flex;width:300px;height:250px"><div>#{body}</div><div>y</div></div>))
   end
 
-  # A PUSHED table's box is the oracle's, and where the oracle laid it out at its own AUTO height (`pushed_h_indefinite`,
-  # rec[65] bit 17) its percentage ROWS met no basis: native shared that figure out as the rows' basis, and a `height:
-  # 50%` row of a 70px flex-item table came out 35 + 46 = 81 where the oracle and Chrome say 70 (24 + 46). A min-height
-  # is still the basis, as it is an auto table's. The flex items here are pushed by the `%` row itself.
-  it 'gives a pushed auto-height table\'s percentage rows no basis' do
+  # An auto-height table's percentage ROWS meet no basis: its own auto height is not one. Shared out as the rows'
+  # basis, it made a `height: 50%` row of a 70px flex-item table 35 + 46 = 81 where Chrome says 70 (24 + 46). A
+  # min-height is still the basis, as it is an auto table's.
+  it 'gives an auto-height flex-item table\'s percentage rows no basis' do
     table = '<table id="m" style="border-spacing:0"><tr style="height:50%"><td>t</td></tr><tr><td>t2<br>t3</td></tr></table>'
     [
       %(<div style="font:16px monospace"><div style="display:flex;width:300px">#{table}</div></div>),
@@ -615,8 +612,8 @@ RSpec.describe 'native layout table' do
   end
 
   # A caption's PERCENTAGE heights resolve against nothing — the table's height is not its containing block's —
-  # whatever that height is, clamped or zero (Chrome: 18 tall, the content's, in every one of these). Parity alone
-  # was blind here once both engines agreed on a basis, so the Chrome figure is pinned too.
+  # whatever that height is, clamped or zero (Chrome: 18 tall, the content's, in every one of these). A golden
+  # holds whatever basis it was recorded with, so the Chrome figure is pinned too.
   it 'keeps a percentage-height caption its content height (Chrome: 18)' do
     [
       '<table style="height:200px;border-spacing:2px"><caption id="c" style="height:50%">cap</caption><tr><td>a</td></tr></table>',
@@ -631,7 +628,7 @@ RSpec.describe 'native layout table' do
     end
   end
 
-  # A caption MARGIN (native's own since 2026-09-23). Three separate things come off it, and each of these
+  # A caption MARGIN. Three separate things come off it, and each of these
   # shapes is here because it is the only one that fails when its own half is missing:
   #   * the VERTICAL pair stacks — it is height the rows do not get, so a top caption's `margin-bottom` pushes
   #     the grid down and the wrapper grows by the whole margin box (`caption_h`);
@@ -662,8 +659,8 @@ RSpec.describe 'native layout table' do
   end
 
   # A PERCENTAGE margin resolves against the table's border box — the block the caption spans — which is the
-  # record's own containing block either way: natively from the fraction the walk sent where the edges are
-  # AFFINE, and off the oracle's basis (`recordCbW`) where a comparison function makes them piecewise. The floor
+  # record's own containing block either way: from the fraction the walk sends where the edges are AFFINE, and
+  # from the comparison PROGRAM it sends (`edge_math`) where a comparison function makes them piecewise. The floor
   # reads them basis-less (0 and 12 here), since the width they would resolve against is the one being decided.
   it 'matches a caption with a percentage / piecewise margin' do
     expect_layout('<table style="width:200px;border-spacing:0"><caption style="height:16px;margin:0 5%">c</caption><tr><td style="width:40px;height:20px">a</td></tr></table>')
@@ -674,8 +671,7 @@ RSpec.describe 'native layout table' do
   # structure entirely — and native places EVERY one at the same corner, the grid's top-left, whether it was
   # written in the table, in a row group or in a row. So the walk emits them all under the TABLE record and
   # `measure_table` records that one static corner; `place_out_of_flow` does the rest, as for any other box.
-  # (Three parents, because `tableGrid` gathers them at three different sites and only the table's own used to
-  # be reachable from a reading of the code.)
+  # (Three parents, because `table_grid` gathers them at three different levels.)
   #
   # Every shape here uses `display: table` and NOT `<table>`, and that is not a stylistic choice: HTML tree
   # construction FOSTER-PARENTS a `<div>` written inside a `<table>`, moving it out in FRONT of the table, so
@@ -695,9 +691,9 @@ RSpec.describe 'native layout table' do
 
   # …and its STATIC position is the grid's top-left corner — inside the table's own border + padding and PAST a
   # top caption — which only a box with no insets to override it can see. An RTL table leaves that corner at the
-  # content's LEFT edge: `layoutTable` is the one flow that places its out-of-flow children with no aligned
-  # static corner, where block flow and grid both hand `placeAbsolute` one. Chrome puts it at the right; native
-  # puts it on the left, a divergence from Chrome recorded here.
+  # content's LEFT edge: a table is the one flow whose out-of-flow children get a static corner with no inline
+  # alignment, where block flow and grid both align theirs. Chrome puts it at the right; native puts it on the
+  # left, a divergence from Chrome recorded here.
   it 'matches an out-of-flow table child at its static position (past the caption, inside the padding)' do
     static_box = '<div style="position:absolute;width:8px;height:6px"></div>'
     expect_layout(oof_table(table: 'border:5px solid;padding:3px',
@@ -709,9 +705,9 @@ RSpec.describe 'native layout table' do
     expect_layout(oof_table(inner_table: '<div style="position:absolute;top:2px">shrink to fit</div>'))
   end
 
-  # A shrink-to-fit box whose content is an inline-table holding only a `<col>` — content native once could not
-  # measure, and replayed the box of — and a containing block with PERCENTAGE edges, whose padding box is its border
-  # box less its borders, which no percentage is.
+  # A shrink-to-fit box whose content is an inline-table holding only a `<col>` — no rows and no cells, nothing
+  # but a column to size it — and a containing block with PERCENTAGE edges, whose padding box is its border box
+  # less its borders, which no percentage is.
   it 'matches an out-of-flow table child of odd content, and against a percentage-edged containing block' do
     unmeasured = '<div style="position:absolute;top:2px"><div>a<table style="display:inline-table"><colgroup><col style="width:30px"></colgroup></table></div></div>'
     expect_layout(%(<div style="position:relative;width:300px">#{oof_table(inner_table: unmeasured)}</div>))
@@ -735,7 +731,7 @@ RSpec.describe 'native layout table' do
   end
 
   it 'matches a caption wider than the grid (the table grows and its columns stretch to fill it)' do
-    # A definite (length / min-width) caption width floors the table via tableIntrinsicWidths, so the columns
+    # A definite (length / min-width) caption width floors the table via `caption_floor`, so the columns
     # STRETCH to fill it (Chrome: a 300px caption over a 156px grid stretches the two columns to 124/164).
     expect_layout('<table style="border-spacing:4px"><caption style="width:300px">Cap</caption><tr><td style="width:60px;height:20px">a</td><td style="width:80px">b</td></tr></table>')
     expect_layout('<table style="border-spacing:4px"><caption style="min-width:300px">Cap</caption><tr><td style="width:60px;height:20px">a</td><td style="width:80px">b</td></tr></table>')
@@ -762,10 +758,8 @@ RSpec.describe 'native layout table' do
     expect_layout('<table style="border-spacing:4px"><caption style="width:100px;padding:10px">Cap</caption><tr><td style="width:60px;height:20px">a</td></tr></table>')
   end
 
-  # A POSITIONED or FLOATED table lays out natively. Neither enters the table's own layout — a positioned
-  # table is sized and placed by its parent's out-of-flow path (natively, not a replayed box), a floated one
-  # by its parent's float branch — so the gate that refused both, where the flex gate never did, only cost
-  # declines: 159 of 168 positioned / floated tables in four containers, 57 after, none mismatching.
+  # A POSITIONED or FLOATED table. Neither enters the table's own layout — a positioned table is sized and
+  # placed by its parent's out-of-flow path, a floated one by its parent's float branch.
   it 'lays out a positioned or floated table' do
     tables = [
       '<table style="border-spacing:0;%s"><tr><td style="padding:0">a</td><td style="padding:0">bb cc</td></tr></table>',
@@ -781,10 +775,8 @@ RSpec.describe 'native layout table' do
     end
   end
 
-  # SEVERAL captions stack as `layoutTable`'s `layCaption` stacks them — the top ones above the grid and the bottom
-  # ones below it, each side in document order, their margin boxes the flow — and the widest floors the table. The
-  # walk declined a second one until 2026-09-25 (an inline-table holding two was PUSHED, its baseline and box the
-  # oracle's). Chrome's boxes.
+  # SEVERAL captions stack — the top ones above the grid and the bottom ones below it, each side in document order,
+  # their margin boxes the flow — and the widest floors the table. Chrome's boxes.
   it 'stacks several captions on either side of the grid' do
     body = '<table style="border-spacing:4px;border:3px solid;padding:2px"><caption id="m" style="margin:4px">one</caption><caption>two two two two</caption>' \
            '<caption style="caption-side:bottom;margin-top:5px">b1</caption><caption id="b2" style="caption-side:bottom">b2</caption><tr><td style="width:40px">a</td></tr></table>'
@@ -792,12 +784,11 @@ RSpec.describe 'native layout table' do
     expect(laid_out_rect(body)).to eq([4, 4, 52, 18])
     expect(laid_out_rect(body, 'b2')).to eq([0, 123, 60, 18])
   end
-  # ORACLE: a captioned table's box is its WRAPPER whichever height it was asked for — a DECLARED height is the rows',
-  # an imposed one the wrapper's — so a reuse that found the same number asked as the box came to did not have the same
-  # answer. A flex row measures the table at auto first; where that came to exactly the declared height (one 18px
-  # caption over two rows, 76, or three captions, 186 in a 180 row), the declared-height layout reused it and the rows
-  # kept their natural height: 76 / 120 where native and Chrome give the rows the declared height and the table 98 /
-  # 186. (A flex COLUMN's main size is the wrapper's and still reuses — see `reuseSubtree`.)
+  # A captioned table's box is its WRAPPER whichever height it was asked for — a DECLARED height is the rows', an
+  # imposed one the wrapper's — so a layout asked for the same number as the box came to is not the same answer. A
+  # flex row measures the table at auto first; where that comes to exactly the declared height (one 18px caption over
+  # two rows, 76, or three captions, 186 in a 180 row), reusing it would keep the rows at their natural height, 76 /
+  # 120, where Chrome gives the rows the declared height and the table 98 / 186. (…and a flex COLUMN: 98, Chrome's.)
   it 'lays a captioned table out again when its declared height meets its auto one' do
     {
       '<caption>t1</caption>'                                    => [76, 98],
@@ -814,18 +805,17 @@ RSpec.describe 'native layout table' do
     expect_layout(column)
     expect(laid_out_rect(column)[3]).to eq(98)   # Chrome
   end
-  # NATIVE: a captioned table in a definite flex COLUMN whose cells hold a percentage height is measured, and that
-  # measure read the indefinite basis — which (§9.8) makes a flexed item impose its height again. Not a captioned
-  # table's: the column's main size is the WRAPPER's, which `measure_table` reads as the rows' and stacks the caption
-  # on — 72 where the oracle (its `mainImposed` exemption) and Chrome keep 50.
+  # A captioned table in a definite flex COLUMN whose cells hold a percentage height is measured, and that measure
+  # reads the indefinite basis — which (§9.8) makes a flexed item impose its height again. Not a captioned table's:
+  # the column's main size is the WRAPPER's, which `measure_table` would read as the rows' and stack the caption on —
+  # 72 where Chrome keeps 50.
   it 'keeps a captioned table its measure in a definite column whose cells read a percentage height' do
     body = '<div style="display:flex;flex-direction:column;height:200px;width:300px;font:16px monospace"><table id="m" style="border-spacing:2px">' \
            '<caption>cap</caption><tr><td><div style="height:50%">p</div></td></tr></table><div>z</div></div>'
     expect_layout(body)
     expect(laid_out_rect(body)[3]).to eq(50)   # Chrome
   end
-  # An inline-table is an ATOMIC inline in its parent's line, so a block holding one lays out rather than declining.
-  # A table as a FLEX ITEM: the walk declined every flex container holding one. Native sizes it like any item
+  # An inline-table is an ATOMIC inline in its parent's line. A table as a FLEX ITEM: native sizes it like any item
   # (its automatic minimum is the table's own min-content, a border-box figure), and a table that ends up TALLER
   # than the main size it was given — its height is a minimum (§17.5.3), and a caption stacks on top of it —
   # pushes the items after it down (Chrome: the table 138, the item after it at 138, the column 156).
@@ -881,18 +871,11 @@ RSpec.describe 'native layout table' do
     expect(session.evaluate_script("document.getElementById('t').getBoundingClientRect().y")).to eq(118)
   end
 
-  # A table flex item on a BASELINE-aligned line. This DECLINED until 2026-09-23 on a note reading "the oracle
-  # takes a table's baseline from the first line inside it, native synthesises one from the margin box, and
-  # Chrome's figure is neither (9 / 22 / 19)" — and every clause of it had stopped being true without anything
-  # re-asking. Native has stamped a table's first and last baselines in `measure_table` since 2026-09-19, and a
-  # CAPTION stopped being one of the oracle's baseline candidates the same day the refusal came out.
-  #
-  # The two engines agreed on every shape below, and the page's geometry is byte-identical to what it was with
-  # the refusal in place — the ORACLE was answering either way, so lifting it moved no box, only the decline
-  # (`caption` sweep: 2,250 → 0).
+  # A table flex item on a BASELINE-aligned line. Native stamps a table's first and last baselines in
+  # `measure_table`, and a CAPTION is not one of its baseline candidates.
   #
   # Chrome's figures are pinned too, because the gap is REAL: a table hands a flex line a baseline
-  # ~9px higher here than in Chrome. The plain-block CONTROL agrees exactly (13 in all three), which is what
+  # ~9px higher here than in Chrome. The plain-block CONTROL agrees exactly (13 in both), which is what
   # says this is a table rule and not a font or a harness difference. Recorded, not fixed — moving it is its own
   # increment.
   it 'matches a table flex item aligned on the baseline (Chrome: the marker is 9px lower)' do
@@ -914,12 +897,11 @@ RSpec.describe 'native layout table' do
       y = session.evaluate_script("document.getElementById('m').getBoundingClientRect().y")
       expect_shared_gap(y, shared: shared_y, chrome: chrome_y, what: "#{body}: marker y")
     end
-    # …and a table whose ROW GROUPS are written out of source order, which is where the two engines' senses of
-    # "the table's FIRST row" came apart. `tableGrid` sorts header / body / footer the way §17.2.1 renders
-    # them and native takes its baseline off that sorted grid; `baselineCandidates` walked the DOM, so a
-    # `<tfoot>` before its `<tbody>` gave the oracle the FOOTER's baseline — 46 where native (and Chrome, to
-    # within the shared gap) say 16. HTML 4.01 REQUIRED that order, so this is legacy markup and not an edge.
-    # Only this spec's own gate was hiding it: nothing else asks a table for a baseline.
+    # …and a table whose ROW GROUPS are written out of source order, which is where "the table's FIRST row" can
+    # be read two ways. `table_grid` sorts header / body / footer the way §17.2.1 renders them and native takes
+    # its baseline off that sorted grid; a walk of the DOM would take a `<tfoot>` written before its `<tbody>`
+    # for the first row — the FOOTER's baseline, 46, where native (and Chrome, to within the shared gap) say 16.
+    # HTML 4.01 REQUIRED that order, so this is legacy markup and not an edge.
     {
       ['align-items:baseline', :tfoot_first]      => [16, 21],
       ['align-items:last baseline', :tfoot_first] => [46, 55],
@@ -940,7 +922,7 @@ RSpec.describe 'native layout table' do
       y = session.evaluate_script("document.getElementById('m').getBoundingClientRect().y")
       expect_shared_gap(y, shared: shared_y, chrome: chrome_y, what: "#{body}: marker y")
     end
-    # …and the same table spelled with `display: table-*` divs, where all three engines agree EXACTLY (15 and
+    # …and the same table spelled with `display: table-*` divs, where native and Chrome agree EXACTLY (15 and
     # 39). That is the control that says the residual gap above is the `<td>` UA rule and not the ordering:
     # these divs carry no UA `vertical-align`, and with it gone so is the gap.
     divs = '<div style="display:table;border-spacing:2px"><div style="display:table-footer-group"><div style="display:table-row"><div style="display:table-cell;height:30px">f</div></div></div><div style="display:table-row-group"><div style="display:table-row"><div style="display:table-cell;height:10px">b</div></div></div></div>'
@@ -951,7 +933,7 @@ RSpec.describe 'native layout table' do
       session.visit '/'
       expect(session.evaluate_script("document.getElementById('m').getBoundingClientRect().y")).to be_within(0.05).of(chrome_y), body
     end
-    # …and the CONTROL, where the item is a plain block: all three engines agree, so the gap above is the
+    # …and the CONTROL, where the item is a plain block: native and Chrome agree, so the gap above is the
     # table's baseline and nothing else.
     control = %(<div style="display:flex;width:300px;font:16px monospace;align-items:baseline"><div style="height:30px">a</div>#{marker}</div>)
     expect_layout(control)
@@ -961,13 +943,9 @@ RSpec.describe 'native layout table' do
   end
 
   it('matches an inline-table as an atomic inline') { expect_layout('<div style="width:300px">x <span style="display:inline-table"><span style="display:table-row"><span style="display:table-cell">a</span></span></span> y</div>') }
-  # …and an ANONYMOUS CELL is laid out now, which it was not until 2026-09-22. §17.2.1 wraps a table's stray
-  # non-cell content in one, `anonTableCell` builds it, and it is no part of the DOM — so it has no `_nid`, and
-  # the record stream had nothing to put in a record's node slot. It gets the sentinel an anonymous ROW and an
-  # anonymous BLOCK GROUP already get, and is laid out like them. This was the largest single cause behind `table-unsupported`, the campaign's biggest
-  # decline — 1,440 sole blockers over the `pseudo` and `sticky` sweeps, and the reason the reason-string had to
-  # be censused before it could be named.
-  # The figures are Chrome 153's.
+  # …and an ANONYMOUS CELL. §17.2.1 wraps a table's stray non-cell content in one (`anonymous_cell`), and it is
+  # no part of the DOM — so it has no node to put in a record's node slot. It gets the sentinel an anonymous ROW
+  # and an anonymous BLOCK GROUP get, and is laid out like them. The figures are Chrome 153's.
   {
     'a run of text'                => ['stray text', [0, 0, 96.015625, 22]],
     'one atomic inline'            => ['<span style="display:inline-block;width:10px;height:9px"></span>', [0, 0, 10, 22]],
@@ -1023,11 +1001,10 @@ RSpec.describe 'native layout table' do
   end
 
   # KNOWN DIVERGENCE, older than this: an `inline-table` hangs from its FIRST row's baseline
-  # (CSS 2.1 §10.8.1) and this engine hangs it from its LAST, because `atomicBaselineOffset` asks every atomic
-  # inline for its last baseline and a table is not told apart. Chrome 153 puts the word beside a two-row
+  # (CSS 2.1 §10.8.1) and this engine hangs it from its LAST, because every atomic inline is asked for its last
+  # baseline and a table is not told apart. Chrome 153 puts the word beside a two-row
   # inline-table at 0 when the tall row is second and 23 when it is first; native says 41 and 47.
-  # Pinned here because the anonymous-cell path was made to agree with the real-row path rather than
-  # half-corrected — a shared divergence moved in one engine only was a parity break, which cost more.
+  # Pinned here because the anonymous-cell path agrees with the real-row path rather than being half-corrected.
   # Two of the four reach the anonymous-cell FALLBACK and two do not, which is the point: the shapes with
   # element children (`display:table-row`) never empty the candidate list, so they go the way they always did.
   # Written the other way round first — `<div>A</div><div>B</div>` for the anonymous pair — the fallback could
@@ -1055,7 +1032,7 @@ RSpec.describe 'native layout table' do
     end
   end
   # …and the one-line shape the fallback was written for: with no candidate at all the table had NO baseline,
-  # so it hung from its bottom margin edge and the line grew. Chrome 153 and native say 18; the oracle said 22.
+  # so it hung from its bottom margin edge and the line grew to 22. Chrome 153 and native say 18.
   # This is the arm that fails if the fallback goes.
   it 'gives a one-line inline-table of stray text the line height Chrome gives it' do
     body = '<div id="w" style="width:600px"><span style="display:inline-table;border-spacing:0">it</span><span>p</span></div>'
@@ -1066,7 +1043,7 @@ RSpec.describe 'native layout table' do
   end
 
   # ── Native COLUMN sizing ──────────────────────────────────────────────────────────────────────────────
-  # The columns are native's own now (`table_columns` / `distribute_columns` / `fixed_column_widths`): each one
+  # The columns are native's own (`table_columns` / `distribute_columns` / `fixed_column_widths`): each one
   # sized from the cells' own min/max-content widths, a spanning cell topping up whatever the columns it covers
   # are short of, a declared length or `%` constraining it, a `<col>` naming it — then the distribution ladder
   # (min-content → specified → max-content → the surplus over the unconstrained columns) over the width inside
@@ -1137,9 +1114,8 @@ RSpec.describe 'native layout table' do
       # which is the run stream `text_intrinsic` reads.
       expect_layout('<table><tr><td style="text-align:justify">x <span style="display:inline-block">y</span></td><td>b</td></tr></table>')
       expect_layout('<table><tr><td><div>blk</div>p <span style="display:inline-block">ok</span> q</td><td>b</td></tr></table>')
-      # …and two shapes that USED to be pushed and are measured now: an inline with a `white-space` of its own,
-      # and an edged one whose font box exceeds its line-height (which the walk refused until native's CLOSE
-      # learned to grow the line to that box).
+      # …and two more: an inline with a `white-space` of its own, and an edged one whose font box exceeds its
+      # line-height (native's CLOSE grows the line to that box).
       expect_layout('<table><tr><td>x <span style="display:inline-block">a <i style="white-space:pre">b  c</i></span></td><td>b</td></tr></table>')
       expect_layout('<table><tr><td>x <span style="display:inline-block"><b style="padding:0 5px;line-height:4px">y</b></span></td><td>b</td></tr></table>')
       # …a nested atomic too, however deep the inline chain (a link holding an icon beside a block is ordinary
@@ -1235,11 +1211,11 @@ RSpec.describe 'native layout table' do
     # A cell holding a PERCENTAGE-height descendant is laid out TWICE (§17.5.3): its used height is the ROW's,
     # known only once every row is placed, so pass 1 sizes it with those descendants treated as AUTO — they must
     # not inflate the box that is supposed to contain them — and pass 2 lays it out again at the final height,
-    # where they finally have a basis. Native's own since 2026-09-23; it used to decline the shape.
+    # where they finally have a basis.
     #
     # The bug was in pass ONE. Native handed the cell's own DECLARED height to its children as a basis, and the
     # cell's declared height is a MINIMUM, not a containing block: a `height: 150%` child of a `height: 80px`
-    # cell came out 120 and took the row to 122 where the oracle said 82. Nothing else in the engine withholds a
+    # cell came out 120 and took the row to 122 where Chrome says 82. Nothing else in the engine withholds a
     # basis it has, which is why the test is the IMPOSED height — only `measure_table`'s second pass sends one.
     it 'lays a cell with a percentage-height descendant out twice, at the final row height' do
       # Definite from the TABLE's height, from the cell's OWN height, and from neither.
@@ -1248,7 +1224,7 @@ RSpec.describe 'native layout table' do
       expect_layout('<table><tr><td><div style="height:50%">a</div></td></tr></table>')
       expect_layout('<table><tr><td><div style="height:100%">a</div></td><td>b</td></tr></table>')
       # …a child that OVERFLOWS the cell: the box stays the row's, it does not grow to fit (the shape that
-      # caught the pass-1 basis — Chrome, the oracle and native all make this table 114 tall).
+      # caught the pass-1 basis — Chrome makes this table 114 tall).
       body = '<table id="t" style="border-spacing:0"><tr><td style="height:80px"><div style="height:150%;width:20px">x</div></td></tr><tr><td style="height:30px">r2</td></tr></table>'
       expect_layout(body)
       session = simulated_session(page(body))
@@ -1289,12 +1265,9 @@ RSpec.describe 'native layout table' do
     end
 
     # A `display: contents` wrapper between the cell and the percentage box generates NO box, so for layout the
-    # cell lays that box out directly and is its containing block (CSS Display 3 §3.1). The walk used to compare
-    # the RECORD's parent — which looks through, because the record tree is built from `layoutChildren` — with
-    # the FLAT-TREE parent, which does not; they disagreed here, the walk read that as "native has no basis for
-    # this box", and sent the percentage RESOLVED against the oracle's own `_lbCbH`: the cell's height from the
-    # PREVIOUS layout pass. Native then measured the cell against a figure derived from its own last answer.
-    # (`layoutParent` is the fix, and it is the general rule — this is just the shape that reached it.)
+    # cell lays that box out directly and is its containing block (CSS Display 3 §3.1). The box that lays an
+    # element out is its nearest ancestor that generates one (`layout_parent`), never its FLAT-TREE parent, so the
+    # percentage resolves against this pass's cell and not against a figure derived from the cell's last answer.
     it 'resolves a percentage-height box under a box-less wrapper against the CELL' do
       expect_layout('<table style="height:150px;border-spacing:0"><tr><td><div style="display:contents"><div style="height:50%;width:20px">x</div></div></td></tr><tr><td style="height:30px">r2</td></tr></table>')
       expect_layout('<table style="height:150px;border-spacing:0"><tr><td><div style="display:contents"><div style="display:contents"><div style="min-height:50%;width:20px">x</div></div></div></td></tr><tr><td style="height:30px">r2</td></tr></table>')
@@ -1302,11 +1275,10 @@ RSpec.describe 'native layout table' do
     end
 
     # A `vertical-align: baseline` cell aligns its FIRST baseline to the row's — and a percentage-height box in
-    # it moves every line UNDER it when the second pass resolves that box. The oracle read the pass-1 baseline
-    # under a comment claiming it is stable across the re-layout; it is not, and Chrome agrees with the pass-2
-    # reading. Measured: an empty `height: 50%` div followed by text sits at y 1 (no shift — the cell's first
-    # line is now below the row's baseline), while the same div WITH its own text in it sits at 30, and so does
-    # a plain `height: 20px` one. The oracle was the engine that moved.
+    # it moves every line UNDER it when the second pass resolves that box. The pass-1 baseline is NOT stable
+    # across the re-layout, and Chrome agrees with the pass-2 reading. Measured: an empty `height: 50%` div
+    # followed by text sits at y 1 (no shift — the cell's first line is now below the row's baseline), while the
+    # same div WITH its own text in it sits at 30, and so does a plain `height: 20px` one.
     it 'aligns a baseline cell on its SECOND-pass baseline (Chrome: y 1 with the line pushed down, 30 without)' do
       deep = '<td style="vertical-align:baseline;font:40px monospace">Ay</td>'
       {
@@ -1352,18 +1324,18 @@ RSpec.describe 'native layout table' do
       expect_layout('<table style="border-spacing:0;height:100px"><tr style="height:auto"><td>a</td></tr><tr style="height:40px"><td>b</td></tr></table>')
     end
   end
-  # An atomic inline holding a box native once refused — a sticky block, an orphan `display: table-row` — in a CELL
-  # whose min/max-content sizes its column, and in a CAPTION, whose min-content floors the table's width on every
-  # layout (`caption_floor`). Each took its whole table down while the cell or caption was obliged to be measured.
+  # An atomic inline holding a sticky block or an orphan `display: table-row`, in a CELL whose min/max-content sizes
+  # its column, and in a CAPTION, whose min-content floors the table's width on every layout (`caption_floor`): the
+  # cell or caption is obliged to be measured, not merely laid out.
   # (`table-layout: fixed` with a width sizes its columns from the first row and measures no cell at all.)
-  REFUSED_ATOMICS = [
+  NESTED_BOX_ATOMICS = [
     '<span style="display:inline-block"><div style="position:-webkit-sticky;width:9px;height:4px"></div>t</span>',
     '<span style="display:inline-block"><div style="display:table-row"><span>aa bb</span></div></span>'
   ].freeze
 
-  describe 'a cell or caption holding an atomic native once refused' do
+  describe 'a cell or caption holding an atomic around a sticky block or an orphan row' do
     it 'lays out an auto, a fixed and a measured table around such a cell' do
-      REFUSED_ATOMICS.each do |inner|
+      NESTED_BOX_ATOMICS.each do |inner|
         expect_layout(%{<div style="width:400px"><table><tr><td>a #{inner}</td></tr></table></div>})
         expect_layout(%{<div style="width:400px"><table style="table-layout:fixed;width:300px"><tr><td>a #{inner}</td></tr></table></div>})
         expect_layout(%{<div style="width:400px"><div style="writing-mode:vertical-lr"><table><tr><td>a #{inner}</td></tr></table></div></div>})
@@ -1371,7 +1343,7 @@ RSpec.describe 'native layout table' do
     end
 
     it 'lays out a table whose caption holds such an atomic' do
-      REFUSED_ATOMICS.each do |inner|
+      NESTED_BOX_ATOMICS.each do |inner|
         atomic = "a #{inner}"
         # a vertical-writing-mode block child, a `min-content` track and a normal-flow table all ask for the
         # caption's contribution
@@ -1386,8 +1358,7 @@ RSpec.describe 'native layout table' do
   end
 
   # An ORPHAN `display: table-row` — one with no table around it — is laid out in the anonymous table CSS 2.1
-  # §17.2.1 wraps it in, as Chrome does. It was 1,296 of the `pseudo` sweep's declines: every one a
-  # `::before { display: table-row }`.
+  # §17.2.1 wraps it in, as Chrome does. The shape it usually takes is a `::before { display: table-row }`.
   describe 'an orphan display: table-row' do
     it 'lays an empty one out natively, whatever flex properties it declares' do
       ['', 'flex-direction:column', 'flex-wrap:wrap', 'direction:rtl', 'writing-mode:vertical-rl'].each do |extra|
@@ -1397,13 +1368,13 @@ RSpec.describe 'native layout table' do
       expect_layout('<div style="width:400px"><div style="display:table-row"><!--c--></div><div style="height:4px"></div></div>')
       expect_layout('<div style="width:400px"><div style="display:table-row"><span style="display:none">x</span></div>' \
                     '<div style="height:4px"></div></div>')
-      # …and the shape the 1,296 actually were.
+      # …and that usual shape, a generated `::before`.
       expect_layout('<style>.p::before{content:"";display:table-row}</style>' \
                     '<div style="width:400px"><div class="p"></div><div style="height:4px"></div></div>')
     end
 
-    # …and one of nothing but bare TEXT — the shape every orphan row in the sweeps is, a generated `content` —
-    # measured by that text. 864 `pseudo` declines until 2026-09-26. Chrome's boxes around it (a float, an inline-block, `max-content`).
+    # …and one of nothing but bare TEXT — the shape a generated `content` gives it — measured by that text.
+    # Chrome's boxes around it (a float, an inline-block, `max-content`).
     it 'lays one of bare text out natively, measured by its text' do
       {
         '<style>.p::before{content:"a longer generated string";display:table-row}</style><div style="width:400px;font:16px monospace"><div id="m" class="p" style="float:left"></div></div>' => [240.016, 22],
@@ -1454,8 +1425,8 @@ RSpec.describe 'native layout table' do
 
   # An EMPTY row group (a `<tbody>` with no rows — Discourse's topic list) is laid out natively: zero height at the
   # grid's bottom edge, its trailing spacing included, the rows' width — the table's content box where there is no
-  # column. It declined until 2026-09-26 (`table-group-empty`). SHARED: Chrome keeps it in DOCUMENT order (y 0
-  # before a populated `<tbody>`, where both engines said 28) and shares an imposed height out to it too.
+  # column. SHARED: Chrome keeps it in DOCUMENT order (y 0 before a populated `<tbody>`, where native says 28) and
+  # shares an imposed height out to it too.
   it 'lays an empty row group out natively' do
     [
       '<table style="width:300px"><thead><tr><th>Topic</th><th>Replies</th></tr></thead><tbody id="m"></tbody></table>',
@@ -1471,10 +1442,9 @@ RSpec.describe 'native layout table' do
   end
 
   # A CELL's width that is a `calc()` or a comparison of a percentage constrains no column — Chrome splits the 400 as
-  # if nothing were declared — and reaches the cell's box no more than a plain one does: the box is its column. The
-  # walk resolved it against the oracle's containing block until 2026-09-26, for a figure nothing read. Chrome's width
-  # (377.75, its LayoutUnit of 377.78), and the narrow column a wider declaration does not widen (10.27 in Chrome,
-  # 10.26 here).
+  # if nothing were declared — and reaches the cell's box no more than a plain one does: the box is its column.
+  # Chrome's width (377.75, its LayoutUnit of 377.78), and the narrow column a wider declaration does not widen
+  # (10.27 in Chrome, 10.26 here).
   it 'resolves a calc() or comparison cell width natively, constraining no column' do
     ['calc(40% + 10px)', 'clamp(30px, 50%, 200px)', 'min(90%, 250px)', 'max(60%, 40px)'].each do |w|
       body = %(<table style="width:400px;border-spacing:0;font:16px monospace"><tr><td id="m" style="width:#{w};padding:0">lorem ipsum dolor</td>) +
@@ -1490,8 +1460,7 @@ RSpec.describe 'native layout table' do
     end
   end
   # …and a horizontal cell's `min-width` / `max-width` percentage reaches its box no more than its width does — a 60%
-  # minimum and a 10% maximum leave the column alone, in Chrome and here. The walk resolved them against the oracle's
-  # table until 2026-09-26, and PUSHED every flex container holding such a table for it. Chrome's widths.
+  # minimum and a 10% maximum leave the column alone, in Chrome and here. Chrome's widths.
   it 'lays out a cell\'s percentage min-width and max-width natively, reaching nothing' do
     {
       '<table style="width:400px;border-spacing:0;font:16px monospace"><tr><td id="m" style="min-width:60%;padding:0">a</td><td style="padding:0">b</td></tr></table>' => 200,
@@ -1506,7 +1475,7 @@ RSpec.describe 'native layout table' do
   end
   # A FIXED-layout table's first-row cell with a percentage padding: its column is its declared width plus its
   # horizontal edges resolved against the width being shared out — native resolves the cell's pairs and programs at
-  # that width, where the walk declined the table until 2026-09-26 (`table-fixed-pct-padding`, 72 sweep shapes).
+  # that width.
   # SHARED: Chrome counts a percentage padding as NOTHING in that computation (`padding: 0 10%` beside `width: 100px`
   # is a 100px column there, 180 here; `max(5%, 30px)` counts 30 in both).
   it 'lays out a fixed table whose first-row cell has a percentage padding natively' do
@@ -1524,8 +1493,7 @@ RSpec.describe 'native layout table' do
   end
   # A table may hold row GROUPS and BARE rows side by side (§17.2.1 wraps neither): the rows stack in render order —
   # header, then bodies and bare rows in document order, then footers — each group's box around its own. The walk
-  # emits each group where its first row comes up and a bare row where it stands, where it declined the mix until
-  # 2026-09-26 (`table-grouped-and-bare-rows`, 400 sweep shapes). Chrome's boxes.
+  # emits each group where its first row comes up and a bare row where it stands. Chrome's boxes.
   it 'lays out a table holding row groups and bare rows side by side' do
     {
       '<div style="display:table;font:16px monospace;border-spacing:0"><div style="display:table-row-group"><div style="display:table-row"><div style="display:table-cell">a</div></div></div>' \
@@ -1539,8 +1507,8 @@ RSpec.describe 'native layout table' do
       laid_out_rect(body).zip(rect).each {|g, w| expect(g).to be_within(0.02).of(w), body }
     end
   end
-  # …and every OTHER table part with no table to lay it out — a cell, a row group, a caption: 1,100 declines of
-  # `rv5nw` (`block-level-box-unplaceable`) until 2026-09-24. Chrome wraps each in an ANONYMOUS table: a cell's
+  # …and every OTHER table part with no table to lay it out — a cell, a row group, a caption. Chrome wraps each in an
+  # ANONYMOUS table: a cell's
   # block-axis min/max do not apply (22 tall either way), each is shrink-to-fit (48 for "aa bb" in 200; 96.03 for
   # the 50% cell) and consecutive cells sit side by side (the second at x 19.2, y 0), with no margins.
   describe 'an orphan cell, row group or caption' do

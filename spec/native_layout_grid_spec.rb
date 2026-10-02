@@ -2,7 +2,7 @@
 # Native layout — GRID (§12). Native COMPUTES every grid: it sizes the columns itself — px / % / fr, and the
 # intrinsic tracks from the items' min/max-content, which it measures itself — runs the row-major placement
 # (content rows or `grid-auto-rows`), and lays each item out at its track width; an out-of-flow item is placed
-# as a block's abspos child is. The former replay path (the oracle's item boxes pushed) is retired.
+# as a block's abspos child is.
 require 'capybara/simulated'
 require 'rack'
 require_relative 'support/session_teardown'
@@ -25,9 +25,8 @@ RSpec.describe 'native layout grid' do
     session
   end
 
-  # The figure Chrome measures for the width of the box marked `id="g"`. The grid's intrinsic answer was the same
-  # algorithm in BOTH engines, so parity alone was blind to it being the wrong one, and a golden holds whatever it
-  # was recorded with. The tolerance is for Chrome's
+  # The figure Chrome measures for the width of the box marked `id="g"`. A golden holds whatever it was recorded
+  # with, so it cannot say the grid's intrinsic answer is the wrong one; Chrome can. The tolerance is for Chrome's
   # LayoutUnit: it snaps every figure to 1/64 px, so a track carrying a fraction can land 1/128 px off ours
   # (80.8828125 against Chrome's 80.890625) — one snap, never more, so anything wider is a real difference.
   # …within 0.01px, which is tight enough that a real track-sizing difference cannot hide in it. `tol` is for
@@ -68,8 +67,8 @@ RSpec.describe 'native layout grid' do
   end
 
   # An intrinsic-size KEYWORD width on a grid item is its own content measured against its AREA — `fit-content`
-  # the area's room clamped between its min- and max-content. It declined until 2026-09-24 (native's keyword pin
-  # was measured before the tracks); `measure_grid` sizes it from the area now. Chrome's widths.
+  # the area's room clamped between its min- and max-content. `measure_grid` sizes it from the area, so the
+  # pin cannot be measured before the tracks. Chrome's widths.
   it 'sizes a keyword-width grid item from its content against its area' do
     {
       '<div style="display:grid;grid-template-columns:50% 50%"><div id="m" style="width:fit-content">aa bb cc dd ee ff</div><div>zz</div></div>' => 150,
@@ -123,15 +122,14 @@ RSpec.describe 'native layout grid' do
   it 'matches two grid items each auto-margin-centred in their tracks' do
     expect_layout('<div style="display:grid;grid-template-columns:150px 150px;gap:10px;width:320px"><div style="width:80px;height:20px;margin:0 auto">a</div><div style="width:60px;height:20px;margin-left:auto">b</div></div>')
   end
-  # A grid nested inside a flex container is a (blockified) grid flex item — computed within its pushed box.
+  # A grid nested inside a flex container is a (blockified) grid flex item — computed within its flexed box.
   it 'matches a grid nested inside a flex container (grid flex item)' do
     expect_layout('<div style="display:flex;gap:10px;width:420px"><div style="display:grid;grid-template-columns:80px 80px;gap:6px;width:180px"><div style="height:20px">a</div><div style="height:30px">b</div></div><div style="width:100px;height:40px">z</div></div>')
   end
 
   # A GRID ITEM that is itself an auto-height flex container with min/max-height two-phases its OWN clamp: the
-  # grid item-push keeps its min/max-height (rec[8]/rec[9]) and its autoHeight (rec[54]), so native recomputes the
-  # box from the container's content and aligns its items in the pre-clamp content, box floors/caps to the track —
-  # NOT in the track-fitted box (which would be a silent-wrong: the child centres one place too low).
+  # grid item keeps its min/max-height and its auto height, so native recomputes the box from the container's
+  # content and aligns its items in the pre-clamp content, box floors/caps to the track — NOT in the track-fitted box (which would be a silent-wrong: the child centres one place too low).
   it 'matches a grid-item flex row whose min-height floors it, items centred in the pre-floor content' do
     expect_layout('<div style="display:grid;grid-template-columns:100px;width:100px"><div style="display:flex;align-items:center;min-height:30px"><div style="width:30px;height:20px"></div></div></div>')
   end
@@ -141,9 +139,8 @@ RSpec.describe 'native layout grid' do
 
   # …and under a DECLARED row (`grid-auto-rows`), where the row is the auto-height item's border box: clamped by the
   # item's min/max-height FIRST, then its items aligned in that — Chrome puts a `max-height: 20px` flex item's
-  # `flex-end` content at -2 and a `min-height: 60px` one's at 38. Native did; the oracle aligned in the 40px row and
-  # clamped after (18 both), and the walk refused every flex / grid item declaring either until 2026-09-26 — 108
-  # sweep shapes, not one of them a clamp that bites. Chrome's figures.
+  # `flex-end` content at -2 and a `min-height: 60px` one's at 38; aligning in the 40px row and clamping after
+  # puts both at 18. Chrome's figures.
   it 'clamps a row-imposed flex item by its min/max-height before aligning its items' do
     {
       'max-height:20px' => -2, 'min-height:60px' => 38, 'min-height:10px' => 18
@@ -159,11 +156,8 @@ RSpec.describe 'native layout grid' do
   it 'matches an absolutely-positioned grid container in a relative parent' do
     expect_layout('<div style="position:relative;width:300px;height:200px"><div style="position:absolute;top:10px;left:10px;display:grid;grid-template-columns:50px 50px;gap:6px"><div style="height:20px">a</div><div style="height:30px">b</div></div></div>')
   end
-  # A FLOATED one lays out natively too, and that gate had no reason beside the two comments above it, which
-  # are about POSITION. The block arm takes a floated child before it ever reaches the display checks, then
-  # demands it be MEASURABLE — which asked this same gate, which refused it for being a float: a circular
-  # refusal that cost 2,341 shapes across four sweeps. Its auto width is §10.3.5 shrink-to-fit, which is what
-  # every other content-sized box in the walk already gets (`measuredKids`).
+  # A FLOATED one lays out natively too. Its auto width is §10.3.5 shrink-to-fit, which is what every other
+  # content-sized box gets.
   it 'lays out a floated grid container natively' do
     expect_layout('<div style="width:400px"><div style="float:left;display:grid;grid-template-columns:50px 50px"><div style="height:20px">a</div></div><div style="height:20px"></div></div>')
     # …an AUTO width is the case that matters — the float's own shrink-to-fit rather than the room it sits in —
@@ -171,13 +165,11 @@ RSpec.describe 'native layout grid' do
     expect_layout('<div style="width:400px"><div style="float:right;display:grid;grid-template-columns:auto auto"><div style="height:12px">aa</div><div style="height:12px">bb</div></div>text beside it <span style="display:inline-block;width:3px;height:3px"></span></div>')
     expect_layout('<div style="width:400px"><div style="float:left;display:inline-grid;grid-template-columns:30px 30px;max-width:40px"><div style="height:9px">a</div><div style="height:9px">b</div></div><div style="clear:both;height:9px"></div></div>')
   end
-  # …and a float whose grid holds BARE TEXT is no different, since 2026-09-22: the run is an anonymous ITEM
-  # (§4) with a box of its own, so the grid algorithm sizes the column from it exactly as from a wrapped one.
-  # It used to be the largest single cause behind `shrink-to-fit-child-unmeasurable` — 480 of the
-  # `floatcontainer` sweep's 2,880 cases were this shape alone, and 1,004 across the campaign's 65 sweeps.
-  # BOTH spellings, and the same number for each: that the two agree is the whole claim, and it is a Chrome
-  # number besides (63.53125, taken at this file's own default font), so a future change that quietly sends one
-  # of them back to the oracle's pen cannot pass by the two still matching each other.
+  # …and a float whose grid holds BARE TEXT is no different: the run is an anonymous ITEM (§4) with a box of
+  # its own, so the grid algorithm sizes the column from it exactly as from a wrapped one. BOTH spellings, and the
+  # same number for each: that the two agree is the whole claim, and it is a Chrome number besides (63.53125, taken
+  # at this file's own default font), so a future change that quietly sizes both wrong cannot pass by the two
+  # still matching each other.
   it 'sizes a float\'s grid from its anonymous item, exactly as from a wrapped one' do
     anon = '<div style="width:400px"><div id="g" style="float:left;display:grid;grid-template-columns:auto auto">bare text<div style="height:9px">b</div></div><div style="height:9px"></div></div>'
     item = anon.sub('>bare text<', '><span>bare text</span><')
@@ -199,15 +191,15 @@ RSpec.describe 'native layout grid' do
     expect_layout('<div style="display:flex;flex-direction:column;width:200px;height:200px"><div style="display:inline-grid;grid-template-columns:50px 50px"><span>a</span><span>b</span></div></div>')
   end
   # A STANDALONE inline-grid is an atomic inline whose own container native lays out, at the line's
-  # shrink-to-fit -- it was pushed until 2026-09-16.
+  # shrink-to-fit.
   it 'lays out a standalone inline-grid atomic itself' do
     expect_layout('<div style="width:300px">text <span style="display:inline-grid;grid-template-columns:30px 30px"><div>x</div><div>y</div></span> more text wrapping onward past the edge</div>')
-    # …one holding an ANONYMOUS item included, since 2026-09-22: its shrink-to-fit is an intrinsic measure, and
-    # the run is an item the grid algorithm sizes a column from like any other. (It was PUSHED until then.)
+    # …one holding an ANONYMOUS item included: its shrink-to-fit is an intrinsic measure, and the run is an item
+    # the grid algorithm sizes a column from like any other.
     expect_layout('<div style="width:300px">text <span style="display:inline-grid;grid-template-columns:30px 30px">x<div>y</div></span> more text wrapping onward past the edge</div>')
   end
-  # …and an inline-grid FLEX ITEM is a grid: a flex item is blockified, so nothing here is inline. It used to
-  # decline for the `position: sticky` on it, which is in flow and needs nothing of its own.
+  # …and an inline-grid FLEX ITEM is a grid: a flex item is blockified, so nothing here is inline. A
+  # `position: sticky` on it is in flow and needs nothing of its own.
   it 'matches an inline-grid flex item, positioned or not' do
     ['position:sticky;top:0;', 'position:relative;', ''].each do |pos|
       expect_layout(%(<div style="display:flex;width:300px"><div style="display:inline-grid;#{pos}grid-template-columns:50px"><span>a</span></div></div>))
@@ -313,8 +305,8 @@ RSpec.describe 'native layout grid' do
   end
 
   # ── Native min/max-content ─────────────────────────────────────────────────────────────────────────────
-  # The items' intrinsic widths measured by native itself (layout.rs `intrinsic_widths` / `text_intrinsic` —
-  # the oracle's intrinsicWidths / contentIntrinsicWidths on the record tree): a declared width pins, a text
+  # The items' intrinsic widths measured by native itself (layout.rs `intrinsic_widths` / `text_intrinsic`, on
+  # the record tree): a declared width pins, a text
   # block's pen-walk gives the widest line (max) and the widest unbreakable run (min), a block container is
   # its widest child's margin box, then the box's edges and min/max-width. Validated THROUGH the grid: the
   # column a track sizes to is only right when the measure is.
@@ -411,14 +403,13 @@ RSpec.describe 'native layout grid' do
       expect_layout(%(<div style="#{two_auto}"><div style="display:flex"><div style="padding:0 10%;min-width:50px;width:20px;height:10px"></div></div><div style="height:10px">b</div></div>))
       expect_layout(%(<div style="#{two_auto}"><div><table style="padding:0 10%"><tr><td>hello</td></tr></table></div><div style="height:10px">b</div></div>))
     end
-    # A nowrap / pre block CONTAINER is one unbreakable token, its children included — the oracle's `min = max` —
-    # and native pins it the same way now (its record carries the container's own `white-space`), where these fell
-    # back to the oracle's resolved contribution until 2026-09-24. A float pair and a `white-space: normal` child
-    # are the shapes a pin reaches that the children's own pins do not.
+    # A nowrap / pre block CONTAINER is one unbreakable token, its children included — `min = max` — and native
+    # pins it so (its record carries the container's own `white-space`). A float pair and a `white-space: normal`
+    # child are the shapes a pin reaches that the children's own pins do not.
     # (…in a `min-content` column, where the pin is asked at all: an `auto auto` grid this wide never reads a
-    # min-content, and the examples passed with no pin. The two shapes the pin CHANGES are the oracle's rule and
-    # not Chrome's, which pins only inline content — the normal child's column is 57.6 there, the floats' 40.)
-    it 'measures a nowrap / pre block container itself, pinning the whole box as the oracle does' do
+    # min-content, and the examples passed with no pin. The two shapes the pin CHANGES are not Chrome's rule,
+    # which pins only inline content — the normal child's column is 57.6 there, the floats' 40.)
+    it 'measures a nowrap / pre block container itself, pinning the whole box' do
       mc = 'display:grid;grid-template-columns:min-content auto;width:600px;font:16px monospace'
       expect_layout(%(<div style="#{mc}"><div style="white-space:nowrap"><p style="margin:0">block child under nowrap</p></div><div style="height:10px">b</div></div>))
       expect_layout(%(<div style="#{mc}"><div style="white-space:pre"><p style="margin:0">block child under pre</p></div><div style="height:10px">b</div></div>))
@@ -464,13 +455,13 @@ RSpec.describe 'native layout grid' do
       expect_layout(%(<div style="#{mc_auto}"><div style="display:flex;flex-direction:row-reverse"><div style="width:40px;height:10px"></div><div>rev words</div></div><div>b</div></div>))
       expect_layout(%(<div style="#{mc_auto}"><div style="display:flex"><div style="display:flex;gap:3px"><div>nested</div><div>flex</div></div><div>outer</div></div><div>b</div></div>))
     end
-    it 'reads a flex item\'s DECLARED sizing (not its pushed used box): flex-basis pins or, when it grows, raises the max; min/max-width clamp' do
+    it 'reads a flex item\'s DECLARED sizing (not its used box): flex-basis pins or, when it grows, raises the max; min/max-width clamp' do
       expect_layout(%(<div style="#{mc_auto}"><div style="display:flex"><div style="flex:0 0 30px;width:60px;height:10px">x</div><div style="flex:1 0 0">grows from zero basis text</div></div><div>b</div></div>))
       expect_layout(%(<div style="#{mc_auto}"><div style="display:flex"><div style="flex-basis:50px;flex-grow:1;padding:0 5px">grow basis</div><div style="min-width:120px">min</div><div style="max-width:20px">capped words</div></div><div>b</div></div>))
       expect_layout(%(<div style="#{mc_auto}"><div style="display:flex"><div style="box-sizing:border-box;flex-basis:50px;padding:0 10px">bb</div><div style="width:50%">pct</div><div style="flex-basis:50%">half</div></div><div>b</div></div>))
     end
-    # (A flex container with a PERCENTAGE main gap fell back until 2026-09-24: native measures its gap with no basis
-    # now — the length part, clamped — as the oracle's `axisGap(el, …, null)` did.)
+    # (A flex container's PERCENTAGE main gap has no basis in an intrinsic measure: native measures the length part,
+    # clamped.)
     it 'measures a flex container with a percentage main gap, and a nested grid whatever its items declare' do
       expect_layout(%(<div style="#{mc_auto}"><div style="display:flex;column-gap:5%"><div>a</div><div>b</div></div><div>b</div></div>))
       expect_layout(%(<div style="#{mc_auto}"><div style="display:flex;column-gap:calc(5% + 4px)"><div>a</div><div>b</div></div><div>b</div></div>))
@@ -481,13 +472,12 @@ RSpec.describe 'native layout grid' do
     end
   end
 
-  # ── Replay retired ─────────────────────────────────────────────────────────────────────────────────────
-  # Every shape the compute path once handed to the oracle-box replay is computed now: a grid that is itself
-  # a flex / grid / out-of-flow box (its parent pushes its box, the tracks compute within it), `grid-auto-rows`
-  # (rows advance by the declared height; an auto-height item IS that height, clamped by its own min/max),
-  # bare text (an anonymous ITEM with a box, since 2026-09-22), an rtl grid (the oracle laid columns out
-  # LTR regardless), an empty / invalid template (one full-width column), and an out-of-flow item.
-  describe 'computed grids that used to replay' do
+  # ── Grids in context ───────────────────────────────────────────────────────────────────────────────────
+  # A grid that is itself a flex / grid / out-of-flow box (its parent sizes its box, the tracks compute within
+  # it), `grid-auto-rows` (rows advance by the declared height; an auto-height item IS that height, clamped by
+  # its own min/max), bare text (an anonymous ITEM with a box), an rtl grid (columns laid out LTR regardless),
+  # an empty / invalid template (one full-width column), and an out-of-flow item.
+  describe 'computed grids in context' do
     it 'computes a grid that is a flex item, stretched or not' do
       expect_layout('<div style="display:flex;width:400px"><div style="display:grid;grid-template-columns:auto 1fr;flex:1"><div style="height:10px">a</div><div style="height:20px">b</div></div><div style="width:50px;height:60px"></div></div>')
       expect_layout('<div style="display:flex;width:400px;align-items:flex-start"><div style="display:grid;grid-template-columns:auto 1fr;flex:1"><div style="height:10px">a</div><div style="height:20px">b</div></div><div style="width:50px;height:60px"></div></div>')
@@ -496,22 +486,21 @@ RSpec.describe 'native layout grid' do
       expect_layout('<div style="display:grid;grid-template-columns:100px 100px;width:400px"><div style="display:grid;grid-template-columns:auto auto"><div>n1</div><div>n2</div></div><div style="height:20px">b</div></div>')
       expect_layout('<div style="position:relative;width:400px;height:200px"><div style="position:absolute;top:10px;left:20px;width:200px;display:grid;grid-template-columns:auto 1fr"><div style="height:10px">a</div><div style="height:20px">b</div></div></div>')
     end
-    # A grid item's containing block is its GRID AREA (§12.1) — its TRACK across, its ROW down — and both
-    # engines used the grid's own content box on the block axis. The whole family was shared-wrong, so parity
-    # could not see any of it and every figure here is Chrome's.
+    # A grid item's containing block is its GRID AREA (§12.1) — its TRACK across, its ROW down — not the grid's
+    # own content box on the block axis. A golden recorded with that rule wrong would hold it, so every figure
+    # here is Chrome's.
     #
     # All four declare `grid-auto-rows`, which is the only row declaration native reads. A CONTENT row
-    # cannot be anchored this way and is not: its height is not known until its items are measured, so both
-    # engines fall back to the grid's own content height and are wrong together — TWO content rows in a 300px
-    # grid shift a `position:relative;top:50%` item by 150 where Chrome shifts it by 75, the exact sibling of
-    # the `height: 50%` figure beside `rowBasis`. (With ONE row the fallback coincides with Chrome and says
-    # nothing.) Recorded beside `gridRowHeight`, not fixed — these four are the rule, not the whole family.
+    # cannot be anchored this way and is not: its height is not known until its items are measured, so native
+    # falls back to the grid's own content height and is wrong — TWO content rows in a 300px grid shift a
+    # `position:relative;top:50%` item by 150 where Chrome shifts it by 75, the exact sibling of the
+    # `height: 50%` figure recorded in `measure_grid`. (With ONE row the fallback coincides with Chrome and says
+    # nothing.) Recorded there, not fixed — these four are the rule, not the whole family.
     {
       'a percentage height is the ROW\'s, not the grid\'s' =>
         ['<div style="display:grid;grid-template-columns:100px;grid-auto-rows:40px;width:400px;height:300px">' \
          '<div id="m" style="height:50%">a</div></div>', [0, 0, 100, 20]],
-      # …and so is a percentage INSET, which the oracle shifted by the grid's height while the walk marshalled
-      # the row's — a parity break the height fix opened, and the reason the two have to be one basis.
+      # …and so is a percentage INSET: the height and the offset resolve against one basis.
       'a percentage top is the ROW\'s too' =>
         ['<div style="display:grid;grid-template-columns:100px;grid-auto-rows:40px;width:400px;height:300px">' \
          '<div id="m" style="position:relative;top:50%">a</div></div>', [0, 20, 100, 40]],
@@ -546,10 +535,8 @@ RSpec.describe 'native layout grid' do
       expect_layout('<div style="display:grid;grid-template-columns:100px;grid-auto-rows:60px;width:400px"><div style="display:grid;align-items:end;max-height:30px"><div style="width:10px;height:10px"></div></div></div>')
     end
     # A row SHORTER than an item's own padding and border: the item's border box floors at those and overflows the
-    # row, and the grid ends where its rows do. The oracle kept the item at the row (15, its content below the box)
-    # and the walk declined the shape; native floored the item already, and both engines let an item taller than a
-    # declared row — this one, or a declared height — grow the grid (30 where Chrome says 20) until 2026-09-25.
-    # Chrome's boxes.
+    # row, and the grid ends where its rows do: an item taller than a declared row — this one, or a declared
+    # height — does not grow the grid (the declared-height one ends at 20, where growing it says 30). Chrome's boxes.
     {
       'percentage padding'  => ['<div id="g" style="display:grid;grid-template-columns:100px 1fr;grid-auto-rows:15px;width:300px;font:16px monospace"><div id="m" style="padding:10% 0">aa</div><div>z</div><div style="padding:10% 0">aa</div></div>', [0, 0, 100, 20], 30],
       'length padding'      => ['<div id="g" style="display:grid;grid-template-columns:100px 1fr;grid-auto-rows:15px;width:300px;font:16px monospace"><div id="m" style="padding:20px 0">aa</div><div>z</div></div>', [0, 0, 100, 40], 15],
@@ -563,14 +550,14 @@ RSpec.describe 'native layout grid' do
       end
     end
     # …and the floor is the BORDER box native imposes, a border-box one too: a table's relative caption resolves its
-    # percentage offset against that box, and native imposed the bare row there (1.5 against the oracle's 4 — Chrome
-    # resolves against the table's content box and says 0, shared).
+    # percentage offset against that box, not the bare row (1.5) — Chrome resolves against the table's content box
+    # and says 0, a divergence the golden holds.
     it 'imposes the floored row as the border box a border-box table\'s caption offset reads' do
       expect_layout('<div id="g" style="display:grid;grid-template-columns:200px 1fr;grid-auto-rows:15px;width:300px;font:16px monospace"><table style="box-sizing:border-box;padding:20px 0"><caption id="m" style="position:relative;top:10%">cap</caption><tr><td>t</td></tr></table><div>z</div></div>')
     end
     # A row whose figure is only a FLOOR (`minmax(20px, auto)`, the card-grid idiom) grows round a taller item in
     # Chrome, so the grid does not end at the floor: 50, where ending at the rows said 20. (A LATER row still starts
-    # at the floor — 20 where Chrome says 22 — see `gridRowHeight`.) Chrome's figure.
+    # at the floor — 20 where Chrome says 22 — see `grid_row_height`.) Chrome's figure.
     it 'ends the grid round an item taller than a row that is only a floor' do
       body = '<div id="g" style="display:grid;grid-template-columns:100px 1fr;grid-auto-rows:minmax(20px, auto);width:300px;font:16px monospace"><div id="m" style="height:50px">aa</div><div>z</div></div>'
       expect_layout(body)
@@ -592,28 +579,28 @@ RSpec.describe 'native layout grid' do
     it 'lays out a dropdown item' do
       expect_layout('<div style="display:grid;grid-template-columns:100px;width:400px"><select><option>o</option></select></div>')
     end
-    # …and the auto height comes from the run's own ROW now, not from a line-height floor over an unplaced
-    # run: `gridItems` gives it the box CSS Grid §4 asks for. The two shapes are unchanged because a
+    # …and the auto height comes from the run's own ROW, not from a line-height floor over an unplaced
+    # run: `box_items` gives it the box CSS Grid §4 asks for. The two shapes are unchanged because a
     # content-sized row IS one line-height tall — see `lets a declared row height stand` for the case where
     # the floor and the row part company, which is the one the floor was getting wrong.
     it 'takes an auto height from the row a bare run is placed in' do
       expect_layout('<div style="display:grid;grid-template-columns:100px 1fr;width:400px">bare text<div style="height:10px">a</div><div style="height:20px">b</div></div>')
       expect_layout('<div style="display:grid;grid-template-columns:100px 1fr;width:400px">bare<div style="height:10px">a</div></div>')
     end
-    it 'computes an rtl grid (columns laid out LTR, as the oracle did), and a missing / invalid template as one column' do
+    it 'computes an rtl grid (columns laid out LTR), and a missing / invalid template as one column' do
       expect_layout('<div style="display:grid;grid-template-columns:100px 1fr;width:400px;direction:rtl"><div style="height:10px">a</div><div style="height:20px">b</div></div>')
       expect_layout('<div style="display:grid;width:400px"><div style="height:10px">a</div><div style="height:20px">b</div></div>')
       expect_layout('<div style="display:grid;grid-template-columns:foo;width:400px"><div style="height:10px">a</div></div>')
       expect_layout('<div style="display:grid;grid-template-columns:[a] 1fr;width:400px"><div style="height:10px">a</div></div>')
     end
-    it 'replays an out-of-flow item at its resolved box while the in-flow items compute' do
+    it 'places an out-of-flow item at its resolved box while the in-flow items compute' do
       expect_layout('<div style="display:grid;position:relative;grid-template-columns:100px 100px;gap:10px;width:220px"><div style="height:20px">a</div><div style="height:20px">b</div><div style="position:absolute;width:30px;height:30px">p</div><div style="height:20px">c</div></div>')
       expect_layout('<div style="display:grid;position:relative;grid-template-columns:auto 1fr;width:300px"><div style="position:absolute;right:0;top:0;width:30px;height:30px">p</div><div>label text</div><div style="height:20px">b</div></div>')
     end
   end
   # A GRID has an intrinsic width of its own now, and it is the GRID algorithm's (CSS Grid §12.5): every track contributes the figure its own spec names over its column's content, and the gaps
-  # between them add on. It used to be a BLOCK's — the oracle walked its pen over the items and native walked
-  # the same child records — which counted neither the tracks nor the gaps and put two `<span>` items on ONE
+  # between them add on. It used to be a BLOCK's — a pen walked over the items' records — which counted
+  # neither the tracks nor the gaps and put two `<span>` items on ONE
   # line (48.41 where Chrome, and the grid's own layout, say 34.2). Chrome figures throughout: a golden
   # holding a rule says nothing about the rule.
   describe 'a grid answers for its own intrinsic width' do
@@ -750,13 +737,11 @@ RSpec.describe 'native layout grid' do
         '<div style="display:grid;grid-template-columns:25px"><div style="height:6px"></div></div>',
         '<div style="margin-left:-6px;width:30px;height:10px"></div>'
       ].each {|items| expect_layout(%(<div style="width:max-content"><div style="display:grid">#{items}</div></div>)) }
-      # …and a `display: contents` child is no item at all: its children are, one each. The walk DECLINED
-      # this shape until 2026-09-22, because it flattened where the oracle did not; native enumerates through
-      # one now, so the measure is asked of the children that stand in for it. The WIDTH does not
-      # say how many items there are: an
-      # implicit single column is 44 wide whether the contents element is one item or its two children are,
-      # so the COLUMN the second child lands in is the figure that separates them. Chrome puts it in the
-      # SECOND (x 30), where one item would have left it under the first at x 0, y 10.
+      # …and a `display: contents` child is no item at all: its children are, one each. Native enumerates
+      # through one, so the measure is asked of the children that stand in for it. The WIDTH does not say how
+      # many items there are: an implicit single column is 44 wide whether the contents element is one item or
+      # its two children are, so the COLUMN the second child lands in is the figure that separates them. Chrome
+      # puts it in the SECOND (x 30), where one item would have left it under the first at x 0, y 10.
       expect_chrome_width('<div style="width:max-content"><div id="g" style="display:grid"><div style="display:contents"><div style="width:30px;height:10px"></div></div></div></div>', 30)
       expect_chrome_width('<div style="width:max-content"><div id="g" style="display:grid"><div style="display:contents"><div style="width:30px;height:10px"></div><div style="width:44px;height:10px"></div></div></div></div>', 44)
       expect_chrome_box('<div style="display:grid;grid-template-columns:30px 40px;width:400px"><div style="display:contents">' \
@@ -774,10 +759,10 @@ RSpec.describe 'native layout grid' do
         expect_chrome_width(%(<div style="width:max-content"><div id="g" style="display:grid">#{items}</div></div>), chrome_w)
       end
     end
-    # …and a contiguous run of TEXT is an item like the rest of them (§4), which is what `gridItems` wraps it
-    # in. It used to be where the algorithm ran out: `contentIntrinsicWidths` fell to its own PEN for such a
-    # grid and took the pen's answer with it — 86.4 for `1fr 1fr` where Chrome says 172.81, and 76.8 for a
-    # `min-content` column where Chrome says 19.20 — while native, having no item either, declined.
+    # …and a contiguous run of TEXT is an item like the rest of them (§4), which is what `box_items` wraps it
+    # in. It used to be where the algorithm ran out: the intrinsic measure fell to a PEN for such a grid and
+    # took the pen's answer with it — 86.4 for `1fr 1fr` where Chrome says 172.81, and 76.8 for a
+    # `min-content` column where Chrome says 19.20.
     # The WRAPPED spelling is the control on every line: `aa bb` and `<span>aa bb</span>` must give the one
     # number, and it must be Chrome's.
     it 'sizes a column from an anonymous item, as from a wrapped one' do
@@ -790,13 +775,12 @@ RSpec.describe 'native layout grid' do
       end
       expect_layout('<div style="width:max-content"><div style="display:grid"><div>aa bb</div><div>cc</div></div></div>')
     end
-    # …and the STUB the real item replaced. `anonymousItemHeight` floored a container's auto height at its
-    # line-height whenever it held bare text — a stand-in for the box §4 asks for, and now a no-op for a grid,
-    # since the item is a placed row whose height is already in the total. It was not merely redundant: with a
-    # DECLARED row it overrode one. Measured before removing it, `grid-auto-rows:5px` holding bare text came
-    # out 22 tall where Chrome says 5 — and the same grid with the text in a `<span>` gave 5, which is what
-    # says the item was never the problem. BOTH engines carried the floor (the record hands it to
-    # `anon_cross`), so parity saw nothing; `expect_chrome_height` is what says so.
+    # …and the STUB the real item replaced: a floor at the line-height for a container's auto height whenever
+    # it held bare text — a stand-in for the box §4 asks for, and a no-op for a grid, since the item is a placed
+    # row whose height is already in the total. It was not merely redundant: with a DECLARED row it overrode
+    # one. Measured before removing it, `grid-auto-rows:5px` holding bare text came out 22 tall where Chrome
+    # says 5 — and the same grid with the text in a `<span>` gave 5, which is what says the item was never the
+    # problem. A grid's record carries no such floor (its `anon_cross` is 0); the Chrome figure below says so.
     # FLEX still needs the stub — its bare text is no item yet — so this cannot be checked by its absence.
     it 'lets a declared row height stand over a grid\'s anonymous item' do
       ['text', '<span>text</span>'].each do |items|
@@ -806,9 +790,8 @@ RSpec.describe 'native layout grid' do
         expect(h).to eq(5), "#{body}: #{h}, Chrome 5"
       end
     end
-    # A `calc()` TRACK was `null` to `parseTrack` — `lengthPx` reads no percentage and no math function — and
-    # ONE invalid track invalidates the whole template, so `calc(25% + 10px) 1fr` was a single full-width
-    # column in BOTH engines where it is two. Parity was green for it and always would have been.
+    # A `calc()` TRACK used to read as no track at all, and ONE invalid track invalidates the whole template, so
+    # `calc(25% + 10px) 1fr` was a single full-width column where it is two.
     # Every wrapper too, because each side of a track is reduced on its own: a `minmax` floor, a `fit-content`
     # cap, and an `auto-fill` repeat whose COUNT reads the track's fixed size.
     it 'sizes a calc() track, through minmax, fit-content and an auto-fill repeat' do
@@ -843,11 +826,11 @@ RSpec.describe 'native layout grid' do
     end
     # …and a run of pure SPACES is not an anonymous item at all: §4 leaves a whitespace-only run UNRENDERED
     # whatever the `white-space` mode says, so a grid of ten spaces is 0 wide under `pre` as under `normal`.
-    # The oracle used to measure every character of it (40 under `pre`) and native declined; both are the grid
-    # algorithm's 0 now. This is the shape a spec written from the element side alone would miss.
+    # Measuring every character of it says 40 under `pre`; the grid algorithm says 0. This is the shape a spec
+    # written from the element side alone would miss.
     it 'renders no anonymous item for whitespace, in any mode' do
-      # …every mode, `nowrap` and `pre` included: the pen's non-wrapping pin (`!(hasBlock && nowrap|pre)`) is a
-      # BLOCK's, and a grid is not measured with a pen — its items each answer under their own mode.
+      # …every mode, `nowrap` and `pre` included: a nowrap / pre container's non-wrapping pin is a BLOCK's, and a
+      # grid is not measured with a pen — its items each answer under their own mode.
       ['', 'white-space:normal', 'white-space:pre', 'white-space:pre-wrap', 'white-space:nowrap'].each do |ws|
         expect_chrome_width(%(<div style="width:max-content"><div id="g" style="display:grid;#{ws}">          </div></div>), 0)
         expect_chrome_width(%(<div style="width:max-content"><div id="g" style="display:grid;#{ws}">          <div style="width:20px;height:10px"></div></div></div>), 20)
@@ -857,10 +840,8 @@ RSpec.describe 'native layout grid' do
 
   # A grid's PERCENTAGES — track sizes, a `fit-content(%)` cap, the implicit full-width column of an empty
   # template, the gaps — go to native unresolved and are resolved against the content box native lays the grid out
-  # in (a row gap against its content height where that is definite). The walk used to resolve them against the
-  # ORACLE's box, which every grid on the page then depended on: without it an empty template's one column came
-  # out the oracle's width poisoned.
-  describe 'percentages resolved against native\'s own box' do
+  # in (a row gap against its content height where that is definite).
+  describe 'percentages resolved against the grid\'s own box' do
     it 'lays out percentage tracks and gaps' do
       items = '<div style="height:10px">a</div><div style="height:14px">bb cc</div><div style="height:8px"></div>'
       [
@@ -873,10 +854,6 @@ RSpec.describe 'native layout grid' do
         end
       end
     end
-    # …where a parent PUSHES the grid's final box over its record, the height that box carries was not
-    # necessarily definite when the row gap was resolved — an auto-height grid's percentage row gap is nothing in
-    # the oracle — so the push says which (a replayed out-of-flow grid, an item of a flex row sized from pushed
-    # boxes).
     # …and an IMPOSED height (a flex stretch, both insets) is clamped by the grid's own max-height before its
     # percentage row gap resolves against it: Chrome's second row sits 10% of the CLAMPED 100px down, not of 200.
     it 'resolves a row gap against the clamped imposed height' do
@@ -884,7 +861,9 @@ RSpec.describe 'native layout grid' do
       expect_layout(%(<div style="display:flex;height:200px;width:300px"><div style="display:grid;flex:1;max-height:100px;row-gap:10%">#{rows}</div></div>))
       expect_layout(%(<div style="position:relative;height:200px;width:300px"><div style="position:absolute;top:0;bottom:0;max-height:100px;display:grid;row-gap:10%">#{rows}</div></div>))
     end
-    it 'resolves a row gap to nothing under a pushed auto height' do
+    # …where nothing imposes one, an auto-height grid's percentage row gap resolves to nothing, whatever box it is
+    # placed in (an out-of-flow grid with no bottom inset, an item of a flex row that does not stretch it).
+    it 'resolves a row gap to nothing under an auto height' do
       rows = '<div style="height:20px"></div><div style="height:20px"></div>'
       expect_layout(%(<div style="position:relative;padding:5%"><div style="position:absolute;top:0;left:0;right:0;display:grid;row-gap:10%">#{rows}</div></div>))
       expect_layout(%(<div style="display:flex;align-items:flex-start;width:300px"><div style="display:grid;row-gap:10%;width:100px">#{rows}</div><div style="width:50px;height:200px"></div></div>))

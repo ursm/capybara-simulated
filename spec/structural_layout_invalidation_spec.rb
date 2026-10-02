@@ -6,8 +6,8 @@ require_relative 'support/session_teardown'
 # A mutation that flips a selector match on an element OTHER than the one written — a `:has()` above it, a position
 # among siblings, `:empty`, an attribute left of a sibling combinator — moves that element's boxes and, through what
 # it declares that inherits, its whole subtree's. The style engine's restyle marks it (layout.js `markRestyles`); before
-# anything did, every shape below kept the flipped subtree's layout in BOTH engines while `getComputedStyle` was already
-# right, and the native walk replayed the stale subtree.
+# anything did, every shape below kept the flipped subtree's layout while `getComputedStyle` was already right, the
+# walk splicing the stale subtree back.
 # Each shape is measured before and after the change, in a 300px-wide box, against headless Chrome (in a 300px iframe,
 # the same figures): the height of a `<p>` reading `aa bb cc` in 16px monospace at 60px wide is 44 wrapped and 22
 # under `white-space: pre`.

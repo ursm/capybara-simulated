@@ -184,7 +184,7 @@ RSpec.describe 'style engine invalidation' do
     expect(s.evaluate_script('__csimJsCascadeDemands().builds')).to eq(0)
   end
 
-  # A paint recording lays the page out with the JS walk, after a pass the Rust walk wrote — and a box's edges from THAT
+  # A paint recording lays the page out in a pass of its own, after the one a read wrote — and a box's edges from THAT
   # pass are not this one's: a container's `margin-left` written in between left its text drawn where it had been
   # (the WPT reftest `offset-change-inline-backface-visibility-hidden`), its background where it went. The glyph's ink
   # starts at x 100, as its box does.
@@ -221,9 +221,9 @@ RSpec.describe 'style engine invalidation' do
     expect(got).to eq(['none', false, 0, 'apple', 'block', true])
   end
 
-  # A screenshot's recording pass is the Rust walk's too: each text piece comes back with its text and the element it was
-  # written in (`layoutBuild`'s paint rows), where the walk declined it for the JS walk — which read the JS rules. And a
-  # control's text is drawn by its computed alignment, indent and spacing, where the document-wide gates asked them.
+  # A screenshot's recording pass is the Rust walk's too: each text piece comes back with its text and the element it
+  # was written in (`layoutBuild`'s paint rows). And a control's text is drawn by its computed alignment, indent and
+  # spacing, where the document-wide gates asked them.
   it 'records a paint with the Rust walk' do
     s = visit('<p>Hello <b>bold</b> <span style="vertical-align: super">sup</span></p><div style="display: table-cell">orphan</div>' \
               '<input value="hello"><button>Go</button>', css: '')
@@ -818,7 +818,7 @@ RSpec.describe 'style engine invalidation' do
   end
 end
 
-# HTML's directionality steps an element takes by ITSELF, in both engines: a telephone `<input>` with no valid `dir`
+# HTML's directionality steps an element takes by ITSELF: a telephone `<input>` with no valid `dir`
 # is ltr in an rtl scope (a number reads left to right in any script), and a `<bdi>` whose `dir` is INVALID is auto —
 # as one with none (Chrome and Firefox: `ltr` and `rtl`).
 RSpec.describe 'directionality' do
@@ -862,7 +862,7 @@ RSpec.describe 'directionality' do
   end
 end
 
-# The cascade's own order of sheets, in both engines: a `<style>` written after a `<link>` wins over it.
+# The cascade's own order of sheets: a `<style>` written after a `<link>` wins over it.
 RSpec.describe 'style sheet order' do
   it 'cascades <style> and <link> in tree order' do
     html = '<!DOCTYPE html><link rel="stylesheet" href="/b.css"><style>.ord { color: rgb(0, 128, 0) }</style><p class="ord" id="p">p</p>'

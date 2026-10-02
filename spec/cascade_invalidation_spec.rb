@@ -876,7 +876,7 @@ RSpec.describe 'cascade invalidation' do
   # `:defined` flips for each element as IT is upgraded, and a definition upgrades its elements one after another, each
   # connected callback running before the next upgrade. When the style state moved once per definition, before the
   # upgrades, the first callback that read layout consumed the flip, and every element upgraded after it kept its
-  # undefined box — in both layouts. Each upgrade is its own flip, and each callback must see its own element defined.
+  # undefined box. Each upgrade is its own flip, and each callback must see its own element defined.
   it 'lays out every element a definition upgrades as defined' do
     s = simulated_session(lambda {|_env|
       [200, {'content-type' => 'text/html'},
@@ -1460,8 +1460,8 @@ RSpec.describe 'cascade invalidation' do
   # identical page without the host), which the wall could not see.
   #
   # The examples below are the ways a shadow sheet crosses its boundary. **`__csimSubtreeMarks` is
-  # the only observable that pins the marks themselves**: `reuseSubtree` refuses a subtree holding an
-  # escaping abspos or a changed containing block on its own, so geometry heals every one of these
+  # the only observable that pins the marks themselves**: the walk's splice (`spliceable`) refuses a subtree
+  # holding an escaping out-of-flow box on its own, so geometry heals every one of these
   # shapes either way. Where a geometry assertion appears beside the count it pins the MATCHING, not
   # the mark; where none appears the rule does not match here yet (`:host(.x) .y`), and the count is
   # the whole test.

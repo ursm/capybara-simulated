@@ -86,7 +86,7 @@ RSpec.describe 'native layout replaced-leaf' do
     expect_layout('<div style="display:flex;justify-content:space-between;width:400px"><img width="30" height="30"><input type="text" style="width:100px;height:24px"></div>')
   end
 
-  # A replaced element carrying explicit border+padding (its _lb is the border box; native replays it whole).
+  # A replaced element carrying explicit border+padding (its box is the border box).
   it 'matches a bordered, padded block-level svg' do
     expect_layout('<div style="width:300px"><svg width="40" height="30" style="display:block;border:3px solid;padding:5px"></svg></div>')
   end
@@ -199,10 +199,7 @@ RSpec.describe 'native layout replaced-leaf' do
     end
     # …and a button that is ITSELF a flex or grid container takes the SAME route: `block_child_width` routes
     # any auto-width button through the content-sized path, and `intrinsic_widths` dispatches to the flex /
-    # grid algorithm from there, so the container's own sizing is what answers. The gate that refused these
-    # was written beside the block-flow shrink-wrap, before the percentage and intrinsic work that made the
-    # flex and grid arms answer for their own box; it outlived its cause and cost 924 shapes of a 12,393-case
-    # sweep (declines 2997 -> 2073, oracle-free 6904 -> 9302 — it read `_lbCbW` of every box it judged).
+    # grid algorithm from there, so the container's own sizing is what answers.
     # Chrome-measured: 124.94 in 400px of room, 60 in 60px (the room, its label wrapped to three lines — the
     # button's own min-content is 53.05), 112.17 with a `10%` padding, 26.38 for an `inline-flex` on a line.
     it 'sizes a button that is itself a flex or grid container from its own content' do
@@ -215,14 +212,13 @@ RSpec.describe 'native layout replaced-leaf' do
         expect_layout(body)
       end
       # …and BARE text in one, which is the commonest markup of all (`class="flex items-center"`): the run is a flex
-      # container's ANONYMOUS item (`boxItems`), which contributes its text — Chrome's 46.39. It contributed nothing in
-      # both engines until 2026-09-28, the button its own edges wide (16).
+      # container's ANONYMOUS item, which contributes its text — Chrome's 46.39, not the button's own edges (16).
       bare = '<div style="width:400px"><button style="display:flex">Save</button></div>'
       expect_layout(bare)
       expect(rendered_width(bare, 'button')).to be_within(0.01).of(46.39)
     end
-    # …an `inline-flex` / `inline-grid` one included: as an ATOMIC INLINE it was pushed with the oracle's box,
-    # and it is laid out and placed on the line natively now.
+    # …an `inline-flex` / `inline-grid` one included: as an ATOMIC INLINE it is laid out and placed on the line
+    # natively.
     it 'lays out an inline-flex or inline-grid button on a line' do
       ['<div style="width:400px">before<button style="display:inline-flex"><span>hi</span></button>after</div>',
        '<div style="width:400px">before<button style="display:inline-grid"><span>hi</span></button>after</div>',
@@ -242,15 +238,13 @@ RSpec.describe 'native layout replaced-leaf' do
       expect_layout('<div style="display:flex;align-items:baseline;width:400px"><div><img style="display:block"><p style="margin:0">after img</p></div><div style="font-size:32px">BIG</div></div>')
     end
 
-    # A `<select>` stacking its `<option>`s used to decline WHOLE, on the argument that it is sized from those
-    # boxes. It is not — a dropdown's options have no box in Chrome at all, and the control's border box comes
-    # from its INTRINSIC size — so a DROPDOWN is a leaf like any other replaced element,
-    # pushed and emitted without a subtree. A LIST BOX showing rows is a block container instead (below). That
-    # was 18 shapes of the frozen corpus's 174 declines, freed outright — and, unnamed until a sweep found it,
-    # 72 shapes that were laid out WRONG: a `<select style="display:flex">` with options reached the flex gate
-    # before the replaced one and had its options flexed as items.
+    # A `<select>` stacking its `<option>`s is not sized from those boxes — a dropdown's options have no box in
+    # Chrome at all, and the control's border box comes from its INTRINSIC size — so a DROPDOWN is a leaf like any
+    # other replaced element, emitted without a subtree. A LIST BOX showing rows is a block container instead
+    # (below). A `<select style="display:flex">` with options is still a control, not a flex container whose
+    # options are flexed as items.
     describe 'a control that lays out boxes of its own' do
-      it 'pushes a dropdown as a leaf box, and lays a list box out as a container' do
+      it 'lays a dropdown out as a leaf box, and a list box as a container' do
         ['<select style="display:block"><option>a</option><option>bbbb</option></select>',
          '<select style="display:block"></select>',
          '<textarea style="display:block;height:30px">hello</textarea>',
@@ -263,8 +257,7 @@ RSpec.describe 'native layout replaced-leaf' do
       # A LIST BOX showing rows is the one control whose inner boxes are read for something — a BASELINE, which
       # `boxBaselineOffset` takes off its rows as any block's. Native stacks those rows ITSELF now (the box is
       # the control's, the content is ordinary block children), so every context that reads such a baseline
-      # gets a real one instead of a rule about what to refuse. The rows are compared boxes too, which a
-      # pushed-whole control's never were.
+      # gets a real one. The rows are laid-out boxes too.
       it "stacks a list box's rows itself, and reads its baselines off them" do
         listbox = '<select multiple><option>a</option><option>bbbb</option></select>'
         empty   = '<select multiple></select>'
@@ -286,8 +279,8 @@ RSpec.describe 'native layout replaced-leaf' do
       end
 
       # …and its BOX is native's own now: the control's intrinsic data rides the record (`lays_out_children`) and
-      # native applies this element's width / height / min / max and box-sizing to it (`replaced_box`), where the
-      # walk used to pin the box the oracle had already resolved. Every declaration that reshapes a control's box.
+      # native applies this element's width / height / min / max and box-sizing to it (`replaced_box`). Every
+      # declaration that reshapes a control's box.
       it 'derives a list box box from the intrinsic data' do
         rows = '<option>a</option><option>bbbb</option>'
         ['', 'width:120px', 'height:60px', 'width:120px;height:60px', 'min-width:200px', 'max-width:30px',
@@ -303,7 +296,7 @@ RSpec.describe 'native layout replaced-leaf' do
                         %(<select multiple size="3" style="display:block;#{style}">#{rows}</select></div><div style="width:40px">y</div></div>))
         end
         # A replaced box keeps its INTRINSIC height between block-axis insets — §10.6.5 ignores `bottom` for one —
-        # which native stretched to the inset height (the list box 150 tall where the oracle said 53).
+        # not stretched to the inset height (the list box 53 tall, not 150).
         ['<select multiple size="3" style="position:absolute;top:10px;left:20px;right:30px;bottom:40px;display:block">' + rows + '</select>',
          '<input style="position:absolute;top:0;bottom:0">',
          '<textarea style="position:absolute;top:0;bottom:0"></textarea>',
@@ -319,8 +312,8 @@ RSpec.describe 'native layout replaced-leaf' do
 
   # An `<svg width="100%" height="100%">` as the flex item of a 16px flex container is 16 wide, as in Chrome: SVG's UA
   # sheet gives an `<svg>` in HTML `overflow: hidden`, whose automatic minimum size is then zero, so the item shrinks
-  # to its line from the default object size its percentage width has no basis against. (Both engines left it 300 wide
-  # until the UA rule was carried, 2026-09-30.)
+  # to its line from the default object size its percentage width has no basis against. (Without the UA rule it
+  # stays 300 wide.)
   it 'shrinks a flex item svg of percentage attributes to its line, as its overflow lets it' do
     body = '<div style="width:300px"><span style="display:flex;height:16px;width:16px"><svg id="m" width="100%" height="100%"></svg></span></div>'
     expect_layout(body)

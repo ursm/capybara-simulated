@@ -1,9 +1,9 @@
 # frozen_string_literal: true
 
-# The Unicode general categories native has to agree with the ORACLE about — `\p{M}` for `font::zero_width`,
-# `\p{L}` / `\p{N}` for `layout::hyphen_breaks_after`, whose classes are the oracle's `HYPHEN_BREAK_RE`.
+# The Unicode general categories native layout asks a regex for, held to the JS ENGINE's answer — `\p{M}` for
+# `font::zero_width`, `\p{L}` / `\p{N}` for `layout::hyphen_breaks_after`, whose classes are `HYPHEN_BREAK_RE`'s.
 #
-# Native answers them from regex-syntax, which bakes in a UCD snapshot of its own; the oracle answers them
+# Native answers them from regex-syntax, which bakes in a UCD snapshot of its own; the page's script answers them
 # from the JS ENGINE's tables. Those are two of the FOUR Unicode versions in this process — Ruby's and Rust
 # std's are the others, and rustc 1.98 knows 4662 code points this V8 does not — and all four move
 # independently. So the agreement is CHECKED rather than assumed: this enumerates the class from the driver's

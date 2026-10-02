@@ -44,8 +44,8 @@ RSpec.describe 'native layout nowrap' do
     expect_layout('<div style="width:100px"><div style="white-space:nowrap">no wrapping here at all</div><div>this one wraps normally onto lines</div></div>')
   end
 
-  # A nowrap line is NOT shortened by / dropped below a float — it overlaps the float on one line (the oracle
-  # did no float handling for a nowrap block). Regression guard for review finding 1.
+  # A nowrap line is NOT shortened by / dropped below a float — it overlaps the float on one line. Regression
+  # guard for review finding 1.
   it 'matches a nowrap line beside a float too wide for the residual band (no drop, overlaps)' do
     expect_layout('<div style="overflow:hidden;width:400px"><div style="float:left;width:360px;height:50px"></div><div style="white-space:nowrap">Supercalifragilistic wordsmith wander</div></div>')
   end
@@ -94,8 +94,7 @@ RSpec.describe 'native layout nowrap' do
     expect_layout('<div style="width:400px;white-space:pre-wrap"><span>  </span><span>def</span> <span>foo</span></div>')
   end
   # An ENTIRELY-whitespace preserve block whose whitespace is DIRECT text is a text block of those lines (22 and
-  # 44 tall, as in Chrome). It declined as `white-space-only-block` until 2026-09-24, on a note that the oracle's
-  # line box did not reach the parent's height (block 22 / body 0) — which no sweep of it reproduces.
+  # 44 tall, as in Chrome).
   it 'lays out an entirely-whitespace pre block (direct text)' do
     expect_layout('<div style="width:200px;white-space:pre">     </div>')
   end
@@ -105,9 +104,8 @@ RSpec.describe 'native layout nowrap' do
   # A whitespace-only EDGED (padded / bordered) inline used to decline here too, on a gate that keyed on REAL
   # glyph content and gave "a padded inline's line-box height is fiddly" as its reason. That was not the
   # reason: what native actually got wrong was the OPENING EDGE of an inline nothing landed inside, which it
-  # dropped at the close where the oracle flushed it. Fixed, the gate is gone and the family lays out — and
-  # since both engines were free to be wrong together behind a decline, the figures are Chrome's rather than
-  # the oracle's. The marker is the box after the inline, which is what an unplaced edge would move.
+  # dropped at the close instead of flushing it. Fixed, the gate is gone and the family lays out; the figures
+  # are Chrome's. The marker is the box after the inline, which is what an unplaced edge would move.
   # …the mode is a parameter of the SHAPE, never read back out of the example's name: renaming an arm would
   # otherwise change what it lays out and say nothing about it.
   {

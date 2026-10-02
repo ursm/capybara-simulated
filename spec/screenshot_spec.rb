@@ -85,10 +85,10 @@ RSpec.describe 'save_screenshot' do
 
   # …and an ANONYMOUS box has to take a shift like any other, which only a painter can say. CSS Grid §4 wraps
   # a grid's contiguous run of bare text in an anonymous block container item; it is in nobody's child list,
-  # so the `shiftSubtree` walk reaches the TEXT NODES inside it and never the box that holds their runs.
-  # Measured, with the arm removed: the ink lands at rows 2..13 while the item's box sits at 60 — the same
-  # failure `shiftSubtree`'s table arm records for `anonTableCell` ("painted its text at the unshifted
-  # origin"), one spec over. Geometry cannot see it: `getBoundingClientRect` on the grid answers 60 either way,
+  # so a shift that walks the child lists reaches the TEXT NODES inside it and never the box that holds their
+  # runs. Measured, without the anonymous box: the ink lands at rows 2..13 while the item's box sits at 60 —
+  # the same failure a table's anonymous cell shows ("painted its text at the unshifted origin"), one spec
+  # over. Geometry cannot see it: `getBoundingClientRect` on the grid answers 60 either way,
   # and the anonymous item has no element to ask.
   it 'shifts an anonymous grid item\'s runs with the box that moved' do
     s = page_with('<div class="rel"><div class="g">XXXXXX</div></div>',
@@ -237,9 +237,9 @@ RSpec.describe 'save_screenshot' do
   # because every box was right. A box laid out TWICE has the mirror problem: the first layout's runs are a
   # second copy of every glyph, and dropping them by index moved every other box's.
   #
-  # So a run belongs to the box that laid it out, `shiftSubtree` carries each box's own runs as it walks (which
-  # is what keeps a `fixed` descendant's glyphs still, since the walk deliberately does not move its box), and
-  # a box laid out again marks what it recorded before as dead.
+  # So a run belongs to the box that laid it out, a shift carries each box's own runs with it (which is what
+  # keeps a `fixed` descendant's glyphs still, since its box deliberately does not move), and a box laid out
+  # again marks what it recorded before as dead.
   it 'paints every box that moves after layout where it ended up' do
     {
       'align-items:center'    => '<div style="display:flex;align-items:center;height:60px;width:200px"><div>hi</div></div>',
@@ -270,8 +270,7 @@ RSpec.describe 'save_screenshot' do
       # those children and never the cell around them, and the cell's own box and runs stayed behind. That
       # hole was FIVE movers wide (measured: each of the shapes below painted its text at the origin while
       # its box sat where the mover put it); the `position: relative` one is the odd case that worked, since
-      # a relative block used to be laid out already-shifted. These are the only instrument that can see it —
-      # every one of them declines natively, so the parity harness is blind to all of them.
+      # a relative block used to be laid out already-shifted. These are the only instrument that can see it.
       'table in a relative block' => '<div style="width:200px"><div style="position:relative;left:30px;top:10px">' \
                                      '<div style="display:table">tt</div></div></div>',
       'table under a relative grandparent' => '<div style="width:200px"><div style="position:relative;top:12px">' \
@@ -330,8 +329,8 @@ RSpec.describe 'save_screenshot' do
   # A form control's text is the UA's to draw — a text field's CURRENT value (its placeholder while that is empty, in
   # `::placeholder`'s colour, Chrome's rgb(117, 117, 117) by default), a password as bullets, a dropdown's selected
   # option by its rendered label (an empty `label` attribute is its text), a button input's label — and no line of the
-  # page's places it. The painter drew what the JS layout happened to lay out of the controls' CHILDREN: a textarea's
-  # default text whatever had been typed, every option of a dropdown, and nothing at all for an input.
+  # page's places it — not what the layout happens to lay out of the controls' CHILDREN: a textarea's default text
+  # whatever has been typed, every option of a dropdown, and nothing at all for an input.
   it 'paints the text a form control shows' do
     s = page_with(<<~HTML)
       <textarea id="t">default</textarea><input placeholder="ph" style="color:rgb(0,0,255)"><input type="password" value="abc">

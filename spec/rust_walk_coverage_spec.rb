@@ -5,9 +5,8 @@ require_relative 'support/session_teardown'
 require_relative 'support/layout_golden'
 require_relative 'support/chrome_figures'
 
-# Shapes the Rust walk used to decline, sending the pass to the JS walk (and from there, often, to the oracle): it lays
-# each out itself now, held to Chrome's figures where a shape names them and to its recorded geometry
-# (`expect_layout_golden`) for the rest of the page.
+# Shapes the Rust walk used to decline: it lays each out itself, held to Chrome's figures where a shape names them and
+# to its recorded geometry (`expect_layout_golden`) for the rest of the page.
 RSpec.describe 'Rust walk coverage' do
   def app(body)
     ->(_env) { [200, {'content-type' => 'text/html; charset=utf-8'}, ["<!DOCTYPE html><meta charset=\"utf-8\">#{body}"]] }
@@ -457,7 +456,7 @@ RSpec.describe 'Rust walk coverage' do
   end
 
   # A line breaks after no no-break space — U+00A0, U+2007, U+202F — across an element's edge either (Chrome keeps
-  # `ab&nbsp;<b>cd</b>` on one 22-tall line in 30px; both engines asked JS `\s`, which holds all three), and a word joiner
+  # `ab&nbsp;<b>cd</b>` on one 22-tall line in 30px), and a word joiner
   # or a bidi isolate has no advance (Chrome: `a&#x2060;b&#x2066;c` is 28.8 wide, where each drew a 9.6 glyph).
   it 'breaks after no no-break space and draws no format character', :aggregate_failures do
     s = page(
@@ -515,9 +514,9 @@ RSpec.describe 'Rust walk coverage' do
   end
 
   # A root element in a vertical writing mode is sized as every vertical block is — its auto width from its content —
-  # and placed at its margins, where the walk declined it and the JS layout gave it the initial containing block's width
-  # at 0,0 whatever its margins said. Chrome (800px window): `vertical-lr` puts the html at 7,5 and 109 wide, its
-  # columns'; a `vertical-rl` one sits at the RIGHT edge (684), which no box here does — vertical flow is not laid out.
+  # and placed at its margins, not given the initial containing block's width at 0,0 whatever its margins say. Chrome
+  # (800px window): `vertical-lr` puts the html at 7,5 and 109 wide, its columns'; a `vertical-rl` one sits at the RIGHT
+  # edge (684), which no box here does — vertical flow is not laid out.
   it 'lays out a root element in a vertical writing mode' do
     s = page(
       '<html style="writing-mode: vertical-lr; margin: 5px 7px; font: 16px monospace"><body style="margin: 3px">' \
@@ -600,7 +599,7 @@ RSpec.describe 'Rust walk coverage' do
   end
 
   # …and a split's faces RAISE the line a run's characters select them on, each laid out as a face of its own would be,
-  # where the walks took the line box from the primary face alone: Ahem at 150% for A–Z, under a Lato primary for a–z,
+  # where the walk took the line box from the primary face alone: Ahem at 150% for A–Z, under a Lato primary for a–z,
   # puts "ab ABC cd ef gh ij kl" on two 30px lines (Chrome 55: it raises only the LINE the tall face is on, where this
   # driver raises every line of the text node — a divergence recorded). A `ch`
   # is the primary face's — Lato at 120%, the face covering `0` — not the system font a character no face covers falls to

@@ -50,8 +50,8 @@ RSpec.describe 'native layout web-font' do
   end
 
   # A face that ALSO lists a local() source prefers a font INSTALLED under that name to the download, so native
-  # registers the installed file where one is (`__csim_localFontFile`), the url's where none is. It declined outright until 2026-09-26, which was every text block on
-  # every Mastodon page (`src: local("Roboto"), url(…)`).
+  # registers the installed file where one is (`__csim_localFontFile`), the url's where none is. It declined
+  # outright until 2026-09-26, which was every text block on every Mastodon page (`src: local("Roboto"), url(…)`).
   it 'measures a face carrying a local() source with the installed file, or the download' do
     # …no such font here: the download, Ahem's 20px squares
     body = '<div style="width:400px;font:20px MixFont"><span id="m">XXXX</span></div>'

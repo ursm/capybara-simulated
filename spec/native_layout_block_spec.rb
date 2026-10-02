@@ -32,20 +32,18 @@ RSpec.describe 'native layout L1 block-flow' do
 
   # The BODY with its own margin and padding. Every other example here — and every sweep and corpus page — says
   # `margin: 0` on the body, which is exactly how the native pass taking the body's margins off TWICE went
-  # unseen while being a mismatch on nearly every real page: the oracle handed the body's OWN width as the
-  # root's containing block (a `layoutElement` call with no `cbW` defaults to the box's width), and native
-  # subtracted the margins from it again — 992 where the oracle and Chrome say 1008 under the UA's 8px. The
-  # same missing `cbW` resolved the body's percentage padding against the body's width: `padding: 0 10%` in an
+  # unseen while being wrong on nearly every real page: the body's OWN width went in as the root's containing
+  # block, and native subtracted the margins from it again — 992 where Chrome says 1008 under the UA's 8px. The
+  # same missing basis resolved the body's percentage padding against the body's width: `padding: 0 10%` in an
   # 800px viewport put the content at 96 where Chrome puts it at 100. And the body kept a sizing path of its
   # own — declared width, and a margin read that fell back to 8px for whatever it could not resolve — so
   # `margin: 0 auto` was 1008 wide where native and Chrome say 1024, and `max-width` / `min-width` were
   # ignored. It is sized like any block in flow now.
   # A `<link>` or `<meta>` written in the BODY is `display: none` from the UA stylesheet — no box, and nothing
   # in the flow. It was neither an author rule (the hide cascade resolves those) nor one of the tags the
-  # visibility walk knows by name, so BOTH engines flowed it: it separated two margins that should have
+  # visibility walk knows by name, so the layout flowed it: it separated two margins that should have
   # collapsed through it, and ended a line the text should have carried on. The UA's own display is part of the
-  # hide cascade now. Chrome figures — the two engines agreeing here said nothing, since they agreed while both
-  # were wrong.
+  # hide cascade. Chrome's figures.
   it 'flows nothing for a child the UA stylesheet hides' do
     [
       ['<div style="height:10px;margin-bottom:20px">a</div><link rel="stylesheet"><div id="g" style="height:10px;margin-top:30px">b</div>', [40, 10]],
@@ -200,9 +198,7 @@ RSpec.describe 'native layout L1 block-flow' do
   end
 
   # A display with no arm of its own — `-webkit-box`, `-webkit-inline-box`, `ruby`, `math`, `flow`, an orphan
-  # `table-column` — is laid out as a plain block, as the oracle's block flow laid it out (`layoutElementInner`'s
-  # fallthrough), and the walk takes it as one since 2026-09-25 (it declined, `block-level-box-unplaceable`).
-  # Chrome does otherwise for the WebKit pair: the line-clamp idiom clamps three lines to two (44, where native
+  # `table-column` — is laid out as a plain block. Chrome does otherwise for the WebKit pair: the line-clamp idiom clamps three lines to two (44, where native
   # says 66), and `-webkit-inline-box` is inline-level (x 28.8 on the first line, where native puts it at 0 on the
   # next).
   it 'lays out a display with no arm of its own as a plain block' do
@@ -218,13 +214,13 @@ RSpec.describe 'native layout L1 block-flow' do
   end
 
   # A PERCENTAGE relative inset goes over as its `px + frac` pair and native resolves it against the containing
-  # block it lays the box out in — the oracle's box was the basis until 2026-09-24. Native and Chrome: 30/20
+  # block it lays the box out in. Native and Chrome: 30/20
   # in a 300x200 block; a `top: 10%` of an INDEFINITE height resolves to nothing and `bottom: 4px` is used (-4) —
   # and so does a `top: 0%` or a `calc(0% + 5px)`, whose fraction is zero but which is a percentage all the same
   # (-10, -3; native read a zero fraction as "no percentage" and said 0 and 5); an over-constrained pair keeps the
   # rtl flow's `right` (-15); a linear `calc()` on an atomic, 60.99 / -5 (Chrome 61: the text before it is 28 wide
-  # there, 27.99 here). …and a COMPARISON function travels as its program (2026-09-25; resolved against the
-  # oracle's basis before): `max(5%, 30px)` 30, an rtl `right: min(5%, 30px)` -15, a `top: clamp(5px, 10%, 12px)` 12
+  # there, 27.99 here). …and a COMPARISON function travels as its program and resolves against the same block:
+  # `max(5%, 30px)` 30, an rtl `right: min(5%, 30px)` -15, a `top: clamp(5px, 10%, 12px)` 12
   # of 200, `bottom: max(10px, 20%)` -40, a `top: max(10px, 20%)` of an INDEFINITE height nothing, and a `right`
   # whose bounds CROSS negated after its clamp (-40: `clamp()`'s minimum wins, then the sign) — Chrome's figures.
   it 'resolves a percentage relative inset natively, against the box native lays the parent out as' do
@@ -250,7 +246,7 @@ RSpec.describe 'native layout L1 block-flow' do
 
   # …and a CAPTION's, whose offset resolves against its TABLE's height as the table stands when the caption is
   # placed — declared (10 of 100), stretched by a flex line (15 of 150) or its grid row (8 of 80) — while its own
-  # percentage height resolves against nothing. Both engines lost that basis (0) until 2026-09-25; Chrome's figures.
+  # percentage height resolves against nothing. Chrome's figures.
   it 'resolves a relative caption\'s percentage inset against its table\'s height' do
     row = '<div style="display:table-row"><div style="display:table-cell">d</div></div>'
     caption = '<div id="m" style="display:table-caption;position:relative;top:10%">cap</div>'
@@ -277,11 +273,9 @@ RSpec.describe 'native layout L1 block-flow' do
     end
   end
 
-  # …and in a table that is a FLEX ITEM, which the walk refused until 2026-09-25 (the offset was resolved against the
-  # oracle's stamp): natively laid out, the table's height as `layCaption` sees it is native's too — declared (10) or
-  # the stretch (15). Where the flex container is PUSHED, the push hands native the wrapper's 118, and it settles the
-  # caption's offset itself against the oracle's basis — 11.8 where the oracle and Chrome say 10. Chrome's boxes.
-  it 'resolves a flex-item table\'s caption offset against the table\'s height, pushed or not' do
+  # …and in a table that is a FLEX ITEM, whose height is the one the flex line gives it — declared (10) or the
+  # stretch (15) — beside a percentage height of the caption's own (10). Chrome's boxes.
+  it 'resolves a flex-item table\'s caption offset against the table\'s height' do
     {
       '<div style="display:flex;width:300px;height:150px;align-items:start"><table style="width:200px;height:100px"><caption id="m" style="position:relative;top:10%">cap</caption><tr><td style="height:40px">d</td></tr></table><div>y</div></div>'             => 10,
       '<div style="display:flex;width:300px;height:150px"><table style="width:200px;min-height:120px"><caption id="m" style="position:relative;top:10%">cap</caption><tr><td style="height:40px">d</td></tr></table><div>y</div></div>'                               => 15,
@@ -292,9 +286,9 @@ RSpec.describe 'native layout L1 block-flow' do
     end
   end
 
-  # …but only a caption a TABLE lays out: an ORPHAN one was the JS model's plain block, whose offset resolved against
-  # its parent like any block's (the JS walk and the oracle agreed on 20 / 12 / 20). The Rust walk wraps it in the
-  # anonymous table CSS 2.1 §17.2.1 makes, of auto height, and says Chrome's 0.
+  # …but only a caption a TABLE lays out: an ORPHAN one was once a plain block, whose offset resolved against its
+  # parent like any block's — the 20 / 12 / 20 beside each shape below. The walk wraps it in the anonymous table
+  # CSS 2.1 §17.2.1 makes, of auto height, and says Chrome's 0.
   it 'resolves an orphan caption\'s fallback offset as its anonymous table does' do
     {
       '<div style="display:flex;width:300px;height:200px"><div style="width:100px"><div id="m" style="display:table-caption;position:relative;top:10%">cap</div></div></div>' => 20,
@@ -308,8 +302,7 @@ RSpec.describe 'native layout L1 block-flow' do
 
   # A size is never negative, and only a math function can make one: `width: calc(10% - 100px)` in a 300px block is
   # a zero content box (its padding still around it, 10 wide), a negative `max-width` caps the box at nothing
-  # rather than being ignored, and a negative height is 0. The oracle kept the negative figure (-70, -60, 300 for
-  # the `max-width`) until 2026-09-25, where native and Chrome said 0.
+  # rather than being ignored, and a negative height is 0. Chrome's figures.
   it 'floors a negative calc() size at zero' do
     {
       'width:calc(10% - 100px);height:10px'                => [0, 10],
@@ -397,7 +390,7 @@ RSpec.describe 'native layout L1 block-flow' do
   end
   # …and so does an EMPTY inline box with no horizontal edges: a line of nothing else is zero-height (§9.4.2) and
   # separates no margins, so the `<p>`'s margin still leaves its parent (Chrome: div at 15, 18 tall; after a padded
-  # span it makes an 18px line and stays inside). The oracle read any inline element as a line.
+  # span it makes an 18px line and stays inside), where reading any inline element as a line kept it inside.
   it 'hoists a margin past an empty inline box, not past a padded one' do
     [
       ['<div id="t" style="width:300px"><span></span><p style="margin:15px 0">b</p></div>', [15, 18]],
@@ -456,10 +449,10 @@ RSpec.describe 'native layout L1 block-flow' do
     expect(laid_out_rect(body)[0]).to be_within(0.05).of(1014.39)
   end
 
-  # A float EXACTLY as wide as the room its neighbours leave fits, to the tolerance a line is given: the engines add
-  # the widths in different frames — the oracle from the page origin, native from the content edge — and one ULP of
-  # the page coordinate decided it. A shrink-to-fit box around two floats is exactly that, and it is Redmine's
-  # account menu on every page (22 to 507 mismatches a page state, all of them this). Chrome fits it (977.48).
+  # A float EXACTLY as wide as the room its neighbours leave fits, to the tolerance a line is given: the same widths
+  # added from the page origin and from the content edge differ by one ULP of the page coordinate, and that ULP must
+  # not decide it. A shrink-to-fit box around two floats is exactly that, and it is Redmine's account menu on every
+  # page. Chrome fits it (977.48).
   it 'fits a float exactly as wide as the room its neighbour leaves' do
     [
       '<div style="font:12px Noto Sans"><div style="float:right"><div style="float:left">Sign in</div><div id="m" style="float:left">Register</div></div></div>',
@@ -481,16 +474,16 @@ RSpec.describe 'native layout L1 block-flow' do
   # cursor instead: `text<div abspos></div>` is at x 23.99 / y 0 here and at 0 / 18 in Chrome. Native
   # also drops the box's OWN margins there (§10.6.4's static position is the margin edge — Chrome puts a
   # `margin-top: 7px; margin-left: 3px` box at 3/57 against our 0/50; the INSET path applies them), and
-  # puts it in the band a float leaves where Chrome, blockifying, does not. Shared and pre-existing, all of
-  # it, so it is recorded rather than fixed during the port — and it is why these assert only the golden.
-  # The one figure below that IS Chrome's is the one both engines had wrong, where parity said nothing.
+  # puts it in the band a float leaves where Chrome, blockifying, does not. Pre-existing, all of it, so it is
+  # recorded rather than fixed during the port — and it is why these assert only the golden. The one figure
+  # below that IS Chrome's is one the layout had wrong.
   it 'places an absolutely-positioned child of a mixed block' do
     expect_layout('<div style="position:relative;width:300px">text<div style="position:absolute;top:5px;width:20px;height:20px"></div><div style="height:20px">block</div>more</div>')
     expect_layout('<div style="position:relative;width:300px">text<div style="position:absolute;width:20px;height:20px"></div><div style="height:20px">block</div>more</div>')
     expect_layout('<div style="position:relative;width:400px"><p>a</p>text<div style="position:absolute;width:5px;height:5px"></div><p>b</p></div>')
     # …one BEFORE any inline content in its group, where the static position is the group's own top — and the
-    # preceding block's collapsed margin decides it. CHROME's figure, because BOTH engines had this wrong
-    # (50 against 34) and a parity assertion would have passed on the pair of them: an out-of-flow box does
+    # preceding block's collapsed margin decides it. CHROME's figure, because the layout had this wrong (34
+    # where Chrome says 50) and a figure recorded from it would have held the error: an out-of-flow box does
     # not end the block-margin adjacency, but its static position is where it WOULD have sat in flow, and a
     # box in flow there sits past the margin. Held for a PLAIN block too — the same rule, the other path.
     [
@@ -506,29 +499,28 @@ RSpec.describe 'native layout L1 block-flow' do
   end
 
   # …and where the group it sits in holds nothing a line is made of. The box's static position is the line that
-  # group never opened, and the ORACLE gives that line things a block record cannot carry: the group's
-  # `text-indent` where the box opens one (11) and a float band (80, which native and Chrome agree on).
-  # Emitting it against the block gets the container's cursor and neither.
+  # group never opened, and that line has things a block record cannot carry: the group's `text-indent` where
+  # the box opens one (11) and a float band (80, as in Chrome). Emitting it against the block gets the
+  # container's cursor and neither.
   #
-  # So such a group is KEPT — a text block of no line, as a block of its own with only an out-of-flow child already
-  # was — whatever the block's alignment. Until 2026-09-24 only a left-aligned or rtl one was: the oracle left the
-  # box in `lineStatics` until SOME later line closed, and moved it by that line's alignment (80.8 in a centred
-  # 200px block, the centring of a `text` line after the next block child, where the same box with nothing after it
-  # stayed at 0), so a centred or right-aligned block declined (`oof-in-collapsed-group`, 1,316 of the sweeps). An
-  # empty line moves nothing that waits on it now, in `breakLine` as in a text block of no line. Chrome agrees for a
+  # So such a group is KEPT — a text block of no line, as a block of its own with only an out-of-flow child is —
+  # whatever the block's alignment: an empty line moves nothing that waits on it, as in a text block of no line.
+  # The JS layout once left the box waiting until SOME later line closed and moved it by that line's alignment
+  # (80.8 in a centred 200px block, the centring of a `text` line after the next block child, where the same box
+  # with nothing after it stayed at 0), which is why every alignment is held below. Chrome agrees for a
   # block-level box — x 0 below — and centres an INLINE-level one (150 in a 300px block): it tells the two apart by
   # the display the box had before it was blockified, which native does not ask yet (the cascade still has it).
-  # Shared, and pinned.
+  # A gap, and pinned.
   #
-  # THE REFUSAL WAS LIFTED ON 2026-09-23 AND PUT BACK THE SAME DAY, and what that cost is why a REPLAYED box keeps
-  # the group too. An audit re-measured it, read "342 shapes lay out, 0 mismatch" and called the gate stale. The
-  # rollback that precedes it had already spliced those records off the stream and nothing re-emits them, so
-  # lifting it placed no box: it DROPPED 372 of them and reported `ok: true, mismatches: 0`. Three sweeps and the
-  # parity spec that replaced this one all read clean, because a record that is not there compares as nothing.
+  # THE REFUSAL WAS LIFTED ON 2026-09-23 AND PUT BACK THE SAME DAY. An audit re-measured it, read "342 shapes lay
+  # out, 0 mismatch" and called the gate stale — but the rollback that preceded it had already spliced those records
+  # off the stream, so lifting it placed no box: it DROPPED 372 of them and reported `ok: true, mismatches: 0`. Three
+  # sweeps and the comparison spec of the day all read clean, because a record that is not there compares as nothing
+  # — which is why these shapes are held to figures, not to an agreement.
   #
-  # A group has no content for five reasons, not one — `hasContent` is set by text, content whitespace, a `<br>`,
-  # an atomic or an edged inline's close — so BOTH the everyday routes are here: whitespace around the box,
-  # and the box ALONE after the last block, which is where a positioned dropdown or tooltip is written.
+  # A group has content for five reasons, not one — text, content whitespace, a `<br>`, an atomic or an edged
+  # inline's close — so BOTH the everyday routes to having none are here: whitespace around the box, and the box
+  # ALONE after the last block, which is where a positioned dropdown or tooltip is written.
   it 'keeps the group an out-of-flow child of a mixed block sits in, whatever its alignment' do
     {
       '<div style="position:relative;width:300px;ALIGN"><p>a</p> <div id="m" style="position:absolute;width:20px;height:20px"></div> <p>b</p>text<p>c</p></div>' => [0, 50],
@@ -565,23 +557,20 @@ RSpec.describe 'native layout L1 block-flow' do
     expect_shared_gap(x, shared: 0, chrome: 50, what: 'plain indent past a block child')
   end
 
-  # A PRESERVING white-space in a mixed block declined until 2026-09-23 too, on the scope the gate states for
+  # A PRESERVING white-space in a mixed block declined until 2026-09-23 too, on the scope the gate stated for
   # itself — and its note said opening it wanted "a mixed block of REAL text beside the preserved spaces to
   # measure, which no sweep holds today". That was the whole of it: the shapes were never built, so the
-  # refusal was never re-asked. `sweeps/genmixws.rb` builds them now (2,160 cases), and with the refusal
-  # lifted all 900 lay out with nothing diverging. What still declines is a mode native has NO CODE for,
-  # which fails closed.
+  # refusal was never re-asked. `sweeps/genmixws.rb` builds them (2,160 cases), and with the refusal
+  # lifted all 900 laid out with nothing diverging.
   it 'matches a preserve white-space mixed block' do
     ['pre', 'pre-wrap', 'break-spaces', 'pre-line'].each do |mode|
       expect_layout(%(<div style="width:300px;font:16px monospace;white-space:#{mode}">text<div style="height:20px">block</div>more   here</div>))
       expect_layout(%(<div style="width:300px;font:16px monospace;white-space:#{mode};text-indent:11px"><div>a</div>aa\tbb<div style="height:6px">b</div></div>))
     end
-    # …and NOTHING declines here any more. The guard that is left is a DRIFT check between cascade.js's
-    # `WS_VALUES` and layout.js's `WS_MODE`, and it is unreachable by construction: `ownWhiteSpace` answers
-    # null for a value outside the first list — a vendor `-moz-pre-wrap` included, which then INHERITS — so
-    # `whiteSpaceOf` can only ever hand this a member of both. The LAYOUT is what is asserted here; this
-    # engine's `getComputedStyle` reports `-moz-pre-wrap` where Chrome reports `normal`, and that is a
-    # cascade divergence with no business being pinned by a layout spec.
+    # …and NOTHING declines here: the mode is read off the `white-space-collapse` / `text-wrap-mode` longhands,
+    # and every pair of them maps to one (`ws_mode_of`), whatever a vendor `-moz-pre-wrap` computes to. The
+    # LAYOUT is what is asserted here; this engine's `getComputedStyle` reports `-moz-pre-wrap` where Chrome
+    # reports `normal`, and that is a cascade divergence with no business being pinned by a layout spec.
     expect_layout('<div style="width:300px;white-space:-moz-pre-wrap">text<div style="height:20px">block</div>more</div>')
   end
   # Whitespace-only direct text between a preserve block's block children is line content (it makes a line box), which a plain block-container record would drop — so it is a MIXED block's anonymous
@@ -604,8 +593,8 @@ RSpec.describe 'native layout L1 block-flow' do
   end
 
   # An intrinsic-size KEYWORD (`min-content` / `max-content` / `fit-content`) sizes a box from its OWN CONTENT,
-  # which native measures itself (`block_child_width` asks `intrinsic_widths` for the same figures the oracle's
-  # `intrinsicWidths` gave it, each carrying the percentage part of the box's own edges back — a
+  # which native measures itself (`block_child_width` asks `intrinsic_widths` for the figures, each carrying the
+  # percentage part of the box's own edges back — a
   # `width: max-content; padding: 0 10%` box around "hello there" is 147.97 in Chrome, not the 67.97 the
   # contribution alone gives). `fit-content` is the room, clamped between the two.
   describe 'an intrinsic-size keyword width sizes a block from its content' do
@@ -642,8 +631,7 @@ RSpec.describe 'native layout L1 block-flow' do
       expect_layout('<div style="width:400px"><div style="width:max-content;text-indent:30px">aa bb</div></div>')
     end
     # A keyword on any of the OTHER five size properties is not a width native has to find: a keyword `height`
-    # resolves to `auto` and a keyword min/max to no clamp at all, which the record already says, as the oracle
-    # resolved them. (That this differs from Chrome — which clamps `max-width: min-content` to 16 where this
+    # resolves to `auto` and a keyword min/max to no clamp at all, which the record already says. (That this differs from Chrome — which clamps `max-width: min-content` to 16 where this
     # leaves 400 — is a conformance gap of its own.)
     it 'lays out a keyword height, min-width and max-width as auto and no clamp' do
       expect_layout('<div style="width:400px"><div style="height:max-content">aa bb</div></div>')
@@ -705,12 +693,12 @@ RSpec.describe 'native layout L1 block-flow' do
 
   # ── Out-of-flow boxes positioned natively ─────────────────────────────────────────────────────────────
   # An absolute / fixed box whose containing block is a record of the pass is sized and placed by native
-  # (`place_out_of_flow`, the oracle's placeAbsolute): insets against the CB's padding box, both insets on an
+  # (`place_out_of_flow`): insets against the CB's padding box, both insets on an
   # axis stretching an auto size (less margins, an auto margin taking the slack), one or none leaving an auto
   # width to shrink to fit and an auto height to its content, the static position where an axis has no inset —
   # the flow cursor in block flow (the content's right edge in rtl), a flex container's alignment, a grid's
-  # content origin. A CB that is not a record of the pass — the viewport, an ancestor above it, an inline box —
-  # hands over its RECTANGLE instead (rec[92..95]).
+  # content origin. A CB that is no record — the viewport — hands over its RECTANGLE instead (`cb_rect`), and an
+  # inline box is named by its entry in the inline table.
   describe 'native out-of-flow positioning' do
     let(:cb) { 'position:relative;width:400px;height:200px' }
 
@@ -751,9 +739,8 @@ RSpec.describe 'native layout L1 block-flow' do
       expect_layout(%(<div style="#{cb}"><div style="position:absolute;top:10px;left:10px;min-width:100px;max-height:15px"><div style="height:50px"></div></div><div style="position:absolute;top:50px;box-sizing:border-box;width:50px;padding:10px;height:30px"></div></div>))
       expect_layout(%(<div style="#{cb}"><div style="position:absolute;top:50%;left:50%;width:50%;height:25%"></div></div>))
     end
-    # A COMPARISON function in an inset is native's too: its program rides beside the pair (`NL_REC_INSET_MATH`) and
-    # native evaluates it against the containing block it places the box in — the walk resolved it against the oracle's
-    # rectangle until 2026-09-26. Chrome's boxes.
+    # A COMPARISON function in an inset is native's too: its program rides beside the pair (`inset_math`) and
+    # native evaluates it against the containing block it places the box in. Chrome's boxes.
     it 'places an out-of-flow box by insets written as comparison functions' do
       {
         '<div style="position:relative;width:300px;height:200px"><div id="m" style="position:absolute;left:max(10%, 50px);top:min(20%, calc(10% + 5px), 30px);width:10px;height:10px"></div></div>' => [50, 25],
@@ -763,15 +750,14 @@ RSpec.describe 'native layout L1 block-flow' do
         expect(laid_out_rect(body)[0, 2]).to eq([x, y])
       end
     end
-    # Review findings, oracle side (native was the spec-shaped one): a flex container's auto-height out-of-flow
+    # Review findings: a flex container's auto-height out-of-flow
     # child is aligned once it HAS its height, not as a 0-tall box; an rtl column mirrors the cross axis natively;
     # a table cell's vertical-align shift moves its content, not a box anchored to the cell's padding box; a %
     # margin of a flex container's out-of-flow child resolves against the containing block.
     # An ALIGNED static position computed from the CONTAINER's box — a flex container's, which knows nothing
     # about the relative inlines the container sits in — takes their §9.4.3 offset; one that hands an axis back
-    # off the static position (an rtl corner's block axis) must not, or it lands twice. Both go through
-    # `placeAbsolute`'s deferred path, so one wrapper decides it for both: the corner answers `null` for the
-    # axis it does not speak for. (Measured in Chrome: y = 25, which is the answer this pins.)
+    # off the static position (an rtl corner's block axis) must not, or it lands twice. (Measured in Chrome:
+    # y = 25, which is the answer this pins.)
     it 'shifts a flex container\'s aligned static position by the relative inlines around it' do
       body = '<div style="width:200px;font:16px monospace"><span style="position:relative;top:10px">a<span style="display:inline-block"><div style="display:flex;width:50px;height:20px;align-items:flex-end"><i id="m" style="position:absolute;width:5px;height:5px"></i></div></span></span></div>'
       expect_layout(body)
@@ -797,9 +783,9 @@ RSpec.describe 'native layout L1 block-flow' do
     it 'places both an in-pass and a viewport containing block, and an abspos grid' do
       # …the `fixed` box included: its containing block is the viewport, whose rectangle rides its record
       expect_layout('<div style="width:400px"><div style="position:relative;height:100px"><div style="position:absolute;top:10px;left:10px;width:20px;height:20px"></div></div><div style="position:fixed;top:5px;left:5px;width:40px;height:40px"></div></div>')
-      # …and an abspos GRID is native's own now: its shrink-to-fit width is an intrinsic measure, which both
-      # engines answer with the grid algorithm — one holding a contiguous run of TEXT included, since
-      # `gridItems` wraps the run in the anonymous ITEM box §4 asks for (it replayed until 2026-09-22).
+      # …and an abspos GRID: its shrink-to-fit width is an intrinsic measure, which native answers with the
+      # grid algorithm — one holding a contiguous run of TEXT included, since the walk wraps the run in the
+      # anonymous ITEM box §4 asks for.
       expect_layout(%(<div style="#{cb}"><div style="position:absolute;top:10px;left:20px;display:grid;grid-template-columns:100px 1fr"><div style="height:10px">a</div><div style="height:20px">b</div></div></div>))
       expect_layout(%(<div style="#{cb}"><div style="position:absolute;top:10px;left:20px;display:grid;grid-template-columns:100px 1fr">a<div>b</div></div></div>))
       # …and one shrink-to-fitting around a half-empty `inline-table`
@@ -825,7 +811,7 @@ RSpec.describe 'native layout L1 block-flow' do
       end
       # The collapsed space before it is part of where the flow has reached — it is only PEEKED, so the word
       # after may still wrap away from it — and an rtl flow reads no cursor at all: its corner is the content's
-      # right edge less the box, wherever the line's text sits (`staticCornerFor`).
+      # right edge less the box, wherever the line's text sits.
       it 'counts the collapsed space it interrupts, and takes the content edge in rtl' do
         expect_layout(%(<div style="#{tb}">hello #{mark}world</div>))
         expect_layout(%(<div style="#{tb}">hello#{mark}world</div>))
@@ -852,7 +838,7 @@ RSpec.describe 'native layout L1 block-flow' do
         expect_layout(%(<div style="#{tb};direction:rtl"><span>   #{mark}   </span></div>))
       end
       # …and a static position is applied ONCE, to a shrink-to-fit box in an indented block (a box placed off its
-      # container's origin and then settled again put it at 22 where the oracle says 11, 0x0 instead of its box —
+      # container's origin and then settled again put it at 22 instead of 11, 0x0 instead of its box —
       # found by a 4000-case fuzz).
       it 'places a shrink-to-fit box in an indented block once' do
         expect_layout(%(<div style="#{tb};text-indent:11px"><div style="position:absolute">#{STICKY_ATOMIC}</div>mar</div>))
@@ -860,9 +846,8 @@ RSpec.describe 'native layout L1 block-flow' do
         expect_layout(%(<div style="#{tb};text-indent:11px"><div style="position:absolute">shrink to fit</div>mar</div>))
       end
       # `justify` widens the spaces between the words, and native spreads them itself (`line_gaps`): a box whose
-      # static position comes off a justified line takes the offset that line's own gaps give it — where the walk
-      # first declined the subtree and then replayed the oracle's box. However deep the box sits: a `<span>`'s
-      # content is that line's.
+      # static position comes off a justified line takes the offset that line's own gaps give it, however deep
+      # the box sits: a `<span>`'s content is that line's.
       it 'takes a static position off a justified line' do
         expect_layout(%(<div style="#{tb};text-align:justify">a long stretch of words that must wrap onto a second line #{mark} tail</div>))
         expect_layout(%(<div style="#{tb};text-align:justify">a long stretch of words that must wrap onto a second line <span>#{mark}</span> tail here</div>))
@@ -870,7 +855,7 @@ RSpec.describe 'native layout L1 block-flow' do
         expect_layout(%(<div style="#{tb};text-align:justify;direction:rtl">a long stretch of words that must wrap onto a second line #{mark} tail</div>))
       end
       # ── Review findings (adversarial round, 2026-09-15): each was a SILENT WRONG ANSWER ────────────────
-      # A line the flow never put anything on is not aligned: `alignLine` runs only for a line that was
+      # A line the flow never put anything on is not aligned: alignment applies only to a line that was
       # PLACED, so a `<br>` closing a marker-only line leaves the marker at the start edge.
       it 'does not align a line that holds nothing but a marker' do
         expect_layout(%(<div style="#{tb};text-align:right">#{mark}<br>x</div>))
@@ -880,8 +865,8 @@ x</div>))
         # …inside a natively laid-out atomic too, whose own line is aligned in its own width
         expect_layout(%(<div style="position:relative;width:300px">x <span style="display:inline-block;width:100px;text-align:right">#{mark}<br>y</span> z</div>))
       end
-      # The edge a marker waits for is the one belonging to the inline it sits DIRECTLY in
-      # (`openInlines[openInlines.length - 1]`) — a plain inner inline waits for nothing, however edged the
+      # The edge a marker waits for is the one belonging to the inline it sits DIRECTLY in (the innermost
+      # open one) — a plain inner inline waits for nothing, however edged the
       # boxes around it are, and an inline whose only edge is on the END side has no opening edge to wait for.
       it 'waits only on its own inline\'s opening edge' do
         expect_layout(%(<div style="position:relative;width:400px"><span style="padding-left:12px"><span>#{mark} Menu</span></span></div>))
@@ -894,17 +879,17 @@ x</div>))
         expect_layout(%(<div style="position:relative;width:100px"><div style="float:left;width:80px;height:20px"></div><div style="font:16px monospace">#{mark} aaaaaaaaaa</div></div>))
       end
       # Round 2. What a WAITING marker settles to is the cursor it STOOD at plus its own inline's opening edge
-      # — the oracle's `line.minX + from.ce.left`. Not the cursor at settle time: an inline that opens AFTER it
-      # puts its edge past the marker, and a collapsed space after it is the oracle's next placement, not this
-      # one. (A collapsed space BEFORE it counts: the oracle places such a space where it meets it.)
+      # — not the cursor at settle time: an inline that opens AFTER it puts its edge past the marker, and a
+      # collapsed space after it is the next placement, not this one. (A collapsed space BEFORE it counts: such
+      # a space is placed where the flow meets it.)
       it 'settles a waiting marker at its own inline\'s content edge, not at whatever the cursor reached' do
         expect_layout(%(<div style="#{tb}">A<span style="padding-left:6px">#{mark}<span style="padding-left:4px">x</span></span></div>))
         expect_layout(%(<div style="#{tb}">A<span style="padding-left:6px">#{mark}<b style="margin-left:9px">x</b></span></div>))
         expect_layout(%(<div style="#{tb}">AA<span style="padding-left:6px">#{mark} x</span></div>))
         expect_layout(%(<div style="#{tb}">AA <span style="padding-left:6px">#{mark}<span style="padding-left:4px">x</span></span></div>))
       end
-      # A forced break and a preserved space both PLACE the open edges first (`flushOpenEdges` inside
-      # `placeOnLine`, and before `forceBreak`), which both settles a marker waiting on one and makes the line
+      # A forced break and a preserved space both PLACE the open edges first, which both settles a marker
+      # waiting on one and makes the line
       # a PLACED one — so the line's alignment moves it. Under `pre-line` only a run with real content reaches
       # that path: a newline alone in its text node takes the collapsed branch, and the walk keeps such a node
       # in a run of its own so the two stay distinguishable.
@@ -923,8 +908,8 @@ x</div>))
         expect_layout(%(<div style="position:relative;width:100px"><div style="float:left;width:80px;height:20px"></div><div style="font:16px monospace"><span style="padding-left:9px">#{mark}aaaaaaaaaa</span></div></div>))
         expect_layout(%(<div style="position:relative;width:100px;text-align:right"><div style="float:left;width:80px;height:20px"></div><div style="font:16px monospace"><span style="padding-left:9px">#{mark}aa</span></div></div>))
       end
-      # A COLLAPSED space inside the marker's own inline puts that inline's edge down where the oracle places
-      # the space — so a marker written after it is waiting on nothing, and keeps its own inline's relative
+      # A COLLAPSED space inside the marker's own inline puts that inline's edge down where the space is
+      # placed — so a marker written after it is waiting on nothing, and keeps its own inline's relative
       # offset. And edges that CANCEL (a negative margin outside a padding) are never placed at all, because
       # the flush is asked of their sum: the fragment then starts where its content does.
       it 'is not waiting once a collapsed space has put the edge down, and not fooled by cancelling edges' do
@@ -990,28 +975,28 @@ x</div>))
 
   # A block whose own BLOCK axis is the horizontal one (a vertical `writing-mode`) does not fill its containing
   # block: its auto width is a BLOCK size, so it is taken from the box's own content. Native used to
-  # fill it, which the harness admitted — a silent 400 where the oracle and Chrome agreed on the content's own
-  # width. The model of it is an INLINE-axis shrink-to-fit (max-content clamped to the room), which coincides
-  # with Chrome for a single block child; Chrome sums a vertical block's children along the block axis, and
-  # rotates the flow, neither of which native does. These specs pin the oracle's model, carried over.
+  # fill it — a silent 400 where Chrome takes the content's own width. The model of it is an INLINE-axis
+  # shrink-to-fit (max-content clamped to the room), which coincides with Chrome for a single block child;
+  # Chrome sums a vertical block's children along the block axis, and rotates the flow, neither of which
+  # native does. These specs pin that model.
   describe 'a vertical writing mode shrink-to-fits its width' do
     # …but an ANONYMOUS block box does not. A mixed block's group is created by the flow, inherits the
     # parent's `writing-mode` like any anonymous box, and the vertical arm therefore used to shrink-to-fit
-    # it — after which a `text-align: center` had nothing to centre in and the atomic sat at 28.8 where the
-    # oracle put it at 145.5. 400 of the 4,032 shapes in `sweeps/genvwmmix.rb`, which is the cross of a
+    # it — after which a `text-align: center` had nothing to centre in and the atomic sat at 28.8 instead of
+    # 145.5. 400 of the 4,032 shapes in `sweeps/genvwmmix.rb`, which is the cross of a
     # writing mode with a MIXED BLOCK, and which no generator here had: `vflex`/`vflex2` cross a writing mode
     # with FLEX and `wsmixed` crosses a mixed block with white-space, so the anonymous group — where a line's
     # alignment and indent actually live — was never under a writing mode at all.
     #
-    # All THREE figures are pinned, because native is not Chrome here and that is the point: this reproduces
-    # the ORACLE deliberately. Chrome lays vertical text out (`x` 262.5, `y` 28.81 — the atomic advances DOWN
+    # All THREE figures are pinned, because native is not Chrome here and that is the point: this is the
+    # horizontal model, kept deliberately. Chrome lays vertical text out (`x` 262.5, `y` 28.81 — the atomic advances DOWN
     # the line and the lines stack right-to-left); native does not, so it keeps the atomic at a horizontal `y`
     # and moves it along `x`. Real vertical inline layout is its own project.
     it "gives a mixed block's anonymous group the parent width, not a shrink-to-fit (Chrome: 262.5 / 28.81)" do
       atomic = '<span id="m" style="display:inline-block;width:9px;height:4px"></span>'
       mixed  = %(<div style="height:120px"><div style="font:16px monospace;width:300px;writing-mode:vertical-rl;text-align:center"><div style="height:6px">B</div>aa #{atomic} bb</div></div>)
-      # …the same shape WITHOUT the block child, so the group is not anonymous: both engines already agreed
-      # there, which is what said the anonymity was the axis and not the writing mode.
+      # …the same shape WITHOUT the block child, so the group is not anonymous: it was never wrong there,
+      # which is what said the anonymity was the axis and not the writing mode.
       plain  = %(<div style="height:120px"><div style="font:16px monospace;width:300px;writing-mode:vertical-rl;text-align:center">aa #{atomic} bb</div></div>)
       # …and the horizontal twin, where native and Chrome agree.
       horiz  = %(<div style="height:120px"><div style="font:16px monospace;width:300px;text-align:center"><div style="height:6px">B</div>aa #{atomic} bb</div></div>)
@@ -1066,22 +1051,21 @@ x</div>))
       expect_layout('<div style="width:400px;direction:rtl;writing-mode:vertical-lr">a <span style="display:inline-block;width:20px;height:10px"></span></div>')
       expect_layout('<div style="width:400px;direction:rtl;writing-mode:vertical-lr;position:relative"><div style="position:absolute;width:20px;height:10px"></div></div>')
     end
-    # …while what `direction` does key on its own is the MIRROR of a table's columns: the oracle's table path
-    # read `flowSides(table).rtl` alone and mirrored along the PHYSICAL horizontal axis, because it never ran
-    # a table sideways (Chrome reverses the columns down its vertical inline axis instead). Native reproduces
-    # the oracle, so the mirror must not be paired with the axis here.
+    # …while what `direction` does key on its own is the MIRROR of a table's columns: native mirrors them
+    # along the PHYSICAL horizontal axis on the table's `direction` alone, because it lays no table out
+    # sideways (Chrome reverses the columns down its vertical inline axis instead), so the mirror must not be
+    # paired with the axis here.
     it 'still mirrors the columns of an rtl table in a vertical writing mode' do
       expect_layout('<div style="width:400px;direction:rtl;writing-mode:vertical-lr"><table><tr><td>a</td><td>bb</td></tr></table></div>')
       expect_layout('<div style="width:400px;direction:rtl"><table><tr><td>a</td><td>bb</td></tr></table></div>')
     end
   end
 
-  # A containing block is a RECTANGLE wherever it lives. One that is a record of the pass hands native its own
-  # box; one OUTSIDE the pass — the viewport of a `fixed` box, an ancestor above the pass root, a
-  # relatively-positioned inline — used to make the whole box replay the oracle's resolved geometry. Now the
-  # `containingBlockFor` rectangle rides the record (rec[92..95]) and native sizes and places the box
-  # from it exactly as it does for an in-pass containing block.
-  describe 'an out-of-flow box whose containing block is outside the pass' do
+  # A containing block is a RECTANGLE wherever it lives. One that is a record hands native its own box; the
+  # viewport, which is none, rides the record as its rectangle (`cb_rect`), and a relatively-positioned inline
+  # is named by its entry in the inline table — and native sizes and places the box against each exactly as it
+  # does against a block.
+  describe 'an out-of-flow box against a containing block of any kind' do
     it 'places a fixed box against the viewport itself' do
       expect_layout('<div style="width:400px;height:200px"><div style="position:fixed;top:10px;left:20px;width:50px;height:30px">f</div><div style="height:20px">flow</div></div>')
       expect_layout('<div style="width:400px;height:200px"><div style="position:fixed;top:0;right:0;width:40px;height:40px">f</div></div>')
@@ -1105,16 +1089,16 @@ x</div>))
       outer = 'position:relative;margin:30px 0 0 40px;border:5px solid;padding:10px;width:300px;height:200px'
       expect_layout(%{<div style="#{outer}"><div id="sub" style="height:50px"><div style="position:absolute;bottom:0;right:0;width:20px;height:10px"></div></div></div>})
       expect_layout(%{<div style="#{outer}"><div id="sub" style="height:50px"><div style="position:absolute;top:50%;left:50%;width:20px;height:10px"></div></div></div>})
-      # …and one that is not the viewport and not a record either: a transformed ancestor contains a FIXED box
+      # …and one that is not the viewport for a FIXED box: a transformed ancestor contains it
       expect_layout(%{<div style="transform:translate(10px,20px);border:3px solid;width:300px;height:200px"><div id="sub" style="height:50px"><div style="position:fixed;top:10px;left:30px;width:20px;height:10px"></div></div></div>})
     end
-    # …the one containing block that is INSIDE the pass and still has no record of its own: a relatively
-    # positioned inline, whose rectangle is the line layout's (a pushed input, finer than the old replay).
+    # …the one containing block that is laid out and still has no record of its own: a relatively positioned
+    # inline, whose rectangle is the line layout's.
     it 'places against a relatively positioned inline' do
       expect_layout('<div style="width:400px">t <span style="position:relative">a<span style="display:inline-block;width:30px;height:10px"><span style="position:absolute;top:1px;left:2px;width:20px;height:10px"></span></span></span></div>')
     end
     # …and one at its STATIC position inside an inline-block inside an inline box, which is the shape that
-    # showed the oracle holding a stale static position: the atomic is laid out at the line's provisional y and
+    # showed a stale static position being held: the atomic is laid out at the line's provisional y and
     # the baseline settle moves it afterwards, so the held position has to move with it (Chrome puts the box at
     # the atomic's own content origin, y = 30 on a 48px line, not at the block's top).
     it 'places one at its static position inside an atomic inline' do
@@ -1126,11 +1110,10 @@ x</div>))
     it 'places one shrink-to-fitting around a positioned atomic' do
       expect_layout(%{<div style="width:400px;height:200px"><div style="position:absolute;left:30px">a #{STICKY_ATOMIC}</div></div>})
     end
-    # The ROOT element is never an out-of-flow box's containing block here: the oracle assigned its box at
-    # the end of the pass, so a first layout could not see it and every later one saw last pass's — the walk, which
-    # finds the block without the oracle's boxes, took it for the viewport on the first pass and the oracle then
-    # disagreed on every relayout. SHARED divergence: Chrome positions against a positioned `<html>`'s box. Each shape
-    # is laid out TWICE, a mutation between.
+    # The ROOT element is never an out-of-flow box's containing block here: the walk's search stops below it,
+    # so the viewport is, on every pass. The root's box, once assigned only at the end of a pass, was unseen by
+    # a first layout and last pass's to every later one, so each shape is laid out TWICE, a mutation between. A
+    # divergence: Chrome positions against a positioned `<html>`'s box.
     it 'places against the viewport, not a positioned root, on every pass' do
       [
         '<style>html{position:relative}</style><div id="p" style="height:200px"><div style="position:absolute;bottom:0;left:0;width:40px;height:20px"></div></div>',
@@ -1149,36 +1132,35 @@ x</div>))
   end
 
   # An out-of-flow box is in NO ancestor's intrinsic contribution: a contribution skips an out-of-flow child
-  # outright, and the box is in no run stream. So walking one LEAVES the measured region — whatever native
-  # cannot MEASURE inside it is nobody's problem, because nobody measures it. Before this, the flag was
-  # inherited and a pushed atomic inline inside an absolute box declined the whole pass.
+  # outright, and the box is in no run stream. So what is inside one is measured for the box itself, never for the
+  # flow around it. (The JS walk once declined the whole pass for a `STICKY_ATOMIC` inside an absolute box.)
   describe 'an out-of-flow box leaves the measured region' do
-    pushed_atomic = %(a #{STICKY_ATOMIC})
-    it 'lays out an absolute box whose content native cannot measure, inside a subtree it does measure' do
+    sticky_line = %(a #{STICKY_ATOMIC})
+    it 'lays out an absolute box holding a sticky atomic, inside a subtree that is measured' do
       # …its containing block outside the vertical block, and a `fixed` box the same
-      expect_layout(%{<div style="width:400px"><div style="writing-mode:vertical-lr"><div style="position:absolute">#{pushed_atomic}</div><div style="width:9px;height:4px"></div></div></div>})
-      expect_layout(%{<div style="width:400px"><div style="writing-mode:vertical-lr"><div style="position:fixed;top:0;left:0">#{pushed_atomic}</div><div style="width:9px;height:4px"></div></div></div>})
+      expect_layout(%{<div style="width:400px"><div style="writing-mode:vertical-lr"><div style="position:absolute">#{sticky_line}</div><div style="width:9px;height:4px"></div></div></div>})
+      expect_layout(%{<div style="width:400px"><div style="writing-mode:vertical-lr"><div style="position:fixed;top:0;left:0">#{sticky_line}</div><div style="width:9px;height:4px"></div></div></div>})
       # …and sized and placed by NATIVE itself, from both insets, from a declared width, or from a percentage
       # one (whose figure `used_width` takes from the record, so no intrinsic measure is asked at all)
-      expect_layout(%{<div style="width:400px"><div style="writing-mode:vertical-lr;position:relative"><div style="position:absolute;left:0;right:0">#{pushed_atomic}</div><div style="width:9px;height:4px"></div></div></div>})
-      expect_layout(%{<div style="width:400px"><div style="writing-mode:vertical-lr;position:relative"><div style="position:absolute;width:60px">#{pushed_atomic}</div><div style="width:9px;height:4px"></div></div></div>})
-      expect_layout(%{<div style="width:400px"><div style="writing-mode:vertical-lr;position:relative"><div style="position:absolute;width:50%">#{pushed_atomic}</div><div style="width:9px;height:4px"></div></div></div>})
-      expect_layout(%{<div style="width:400px;position:relative"><div style="position:absolute;width:calc(50% + 10px)">#{pushed_atomic}</div><div style="width:9px;height:4px"></div></div>})
+      expect_layout(%{<div style="width:400px"><div style="writing-mode:vertical-lr;position:relative"><div style="position:absolute;left:0;right:0">#{sticky_line}</div><div style="width:9px;height:4px"></div></div></div>})
+      expect_layout(%{<div style="width:400px"><div style="writing-mode:vertical-lr;position:relative"><div style="position:absolute;width:60px">#{sticky_line}</div><div style="width:9px;height:4px"></div></div></div>})
+      expect_layout(%{<div style="width:400px"><div style="writing-mode:vertical-lr;position:relative"><div style="position:absolute;width:50%">#{sticky_line}</div><div style="width:9px;height:4px"></div></div></div>})
+      expect_layout(%{<div style="width:400px;position:relative"><div style="position:absolute;width:calc(50% + 10px)">#{sticky_line}</div><div style="width:9px;height:4px"></div></div>})
     end
     # …and the other routes walked measured reach it too: an atomic inline, a flex item, a table cell, a grid
     # item. (Through a pure BLOCK child, because a text block holding an out-of-flow child declined outright.)
     it 'lays one out inside every other measured route' do
-      oof = %{<div style="width:30px"><div style="position:absolute;width:60px">#{pushed_atomic}</div></div>}
+      oof = %{<div style="width:30px"><div style="position:absolute;width:60px">#{sticky_line}</div></div>}
       expect_layout(%{<div style="width:400px">x <span style="display:inline-block;position:relative">#{oof}</span></div>})
       expect_layout(%{<div style="width:400px;display:flex"><div style="position:relative">#{oof}</div></div>})
       expect_layout(%{<table style="border-spacing:0"><tr><td style="padding:0;position:relative">#{oof}</td></tr></table>})
       expect_layout(%{<div style="display:grid;grid-template-columns:auto;width:400px"><div style="position:relative">#{oof}</div></div>})
     end
-    # An out-of-flow box whose OWN width IS a shrink-to-fit needs an intrinsic measure of its content, a pushed
+    # An out-of-flow box whose OWN width IS a shrink-to-fit needs an intrinsic measure of its content, the sticky
     # atomic's included.
     it 'shrink-to-fits a box around its own content' do
-      expect_layout(%{<div style="width:400px;position:relative"><div style="writing-mode:vertical-lr"><div style="position:absolute;left:0">#{pushed_atomic}</div><div style="width:9px;height:4px"></div></div></div>})
-      expect_layout(%{<div style="width:400px;position:relative"><div style="writing-mode:vertical-lr"><div style="position:absolute">#{pushed_atomic}</div><div style="width:9px;height:4px"></div></div></div>})
+      expect_layout(%{<div style="width:400px;position:relative"><div style="writing-mode:vertical-lr"><div style="position:absolute;left:0">#{sticky_line}</div><div style="width:9px;height:4px"></div></div></div>})
+      expect_layout(%{<div style="width:400px;position:relative"><div style="writing-mode:vertical-lr"><div style="position:absolute">#{sticky_line}</div><div style="width:9px;height:4px"></div></div></div>})
       [
         %(<span style="display:inline-block">#{STICKY_ATOMIC}</span>),
         STICKY_ATOMIC
@@ -1204,10 +1186,9 @@ x</div>))
 
   # A box that establishes an INDEPENDENT FORMATTING CONTEXT does all three things at once: it owns its floats,
   # it avoids its parent's, and its children's margins stay inside it. `contain: layout|paint|content|strict`
-  # and a multi-column box are such contexts (css-contain-2 §2.1, css-multicol-1 §2) — this engine read them as
-  # margin-only, which made the walk decline them AND left the engine contradicting itself: `subtreeHasFloat`
-  # believed a `contain` box held its floats while the layout let them escape, and the escaped float then ate a
-  # later sibling's clearance margin (Chrome puts that sibling at 80, the oracle answered 50).
+  # and a multi-column box are such contexts (css-contain-2 §2.1, css-multicol-1 §2) — this engine once read them
+  # as margin-only, which made the walk decline them AND let a float escape one, where it ate a later sibling's
+  # clearance margin (Chrome puts that sibling at 80; the escape put it at 50).
   describe 'a box that establishes its own formatting context' do
     it 'keeps a child margin inside contain and multicol' do
       %w[layout paint content].each do |kind|
@@ -1233,9 +1214,8 @@ x</div>))
 
   # A first child that COLLAPSES THROUGH an open top edge leaves its run in the PARENT's top margin — and only
   # there. Native also left it pushing the next sibling, counting it twice: `<div style="margin:20px 0">` then
-  # `<div style="margin:15px 0">` put the second box at 40 where Chrome and the oracle say 20, and the block's
-  # own height grew with it. The next sibling is still the FIRST whose top margin joins the parent's, which is
-  # what the oracle's `topOnly` loop does by construction.
+  # `<div style="margin:15px 0">` put the second box at 40 where Chrome says 20, and the block's own height grew
+  # with it. The next sibling is still the FIRST whose top margin joins the parent's.
   it 'hoists a collapse-through first child once, not twice' do
     expect_layout('<div style="width:400px"><div style="margin:20px 0"></div><div style="margin:15px 0"></div><div style="height:5px"></div></div>')
     expect_layout('<div style="width:400px"><div style="margin:20px 0"></div><div style="margin-top:15px;height:5px"></div></div>')
@@ -1259,8 +1239,8 @@ x</div>))
 
   # Whether a height separates two margins is decided by the DECLARATION, and a CSS-wide keyword is not one:
   # `height: inherit` is the parent's height (80, and no collapse-through), `initial` / `unset` / `revert`
-  # stand for `auto`. Native reads that decision off rec[25]/rec[26], so the oracle taking `inherit` for auto
-  # showed up here as a MISMATCH — native and Chrome said 80, the oracle 0.
+  # stand for `auto`. Native reads that decision off rec[25]/rec[26] (Chrome: 80 for `inherit`, where taking it
+  # for auto gives 0).
   it 'reads a CSS-wide height keyword as the value it stands for' do
     expect_layout('<div style="width:400px;height:80px"><div style="height:inherit"></div></div>')
     expect_layout('<div style="width:400px;height:80px"><div style="min-height:inherit"></div></div>')
@@ -1271,10 +1251,9 @@ x</div>))
   end
 
   # §8.3.1's BOTTOM rule wants an AUTO height where the collapse-THROUGH rule wants "auto or zero": a
-  # `height: 0` box collapses through and still keeps its last child's bottom margin in. Native had that
-  # right from its own structure (it only propagates a bottom margin out of an auto-height box) while the
-  # oracle read one rule for both, so this was a MISMATCH rather than a decline — rec[65] bit 14 carries the
-  # bottom rule's own answer now.
+  # `height: 0` box collapses through and still keeps its last child's bottom margin in. Native has that from
+  # its own structure (it only propagates a bottom margin out of an auto-height box), and rec[65] bit 14
+  # carries the bottom rule's own answer.
   it 'keeps a last child bottom margin inside a box with a declared height' do
     %w[0 0px 1px auto min-content max-content fit-content].each do |h|
       expect_layout(%(<div style="width:400px;overflow:hidden"><div style="height:#{h}">) +
@@ -1344,8 +1323,8 @@ x</div>))
       expect_layout(%{<div style="overflow:hidden;width:400px">#{float}<div style="width:100px;margin:0 auto">text</div></div>})
     end
     # HTML's legacy alignment moves a narrower block-level DESCENDANT the same way `margin: auto` would —
-    # `<center>` and the `align` attribute, still all over old app markup. Native laid these out at the start
-    # edge and only the parity harness saw it (the walk had no gate for them at all).
+    # `<center>` and the `align` attribute, still all over old app markup. Native once laid these out at the
+    # start edge.
     it 'moves a block the way <center> and an align attribute do' do
       expect_layout('<center><div style="width:100px;height:10px"></div></center>')
       expect_layout('<div align="center" style="width:400px"><div style="width:100px;height:10px"></div></div>')
@@ -1356,7 +1335,7 @@ x</div>))
       expect_layout('<div align="right" style="width:400px;direction:rtl"><div style="width:100px;height:10px"></div></div>')
       expect_layout('<div align="left" style="width:400px"><div style="width:100px;height:10px"></div></div>')
       # …a VERTICAL-only auto margin distributes nothing across, so the legacy shift still applies through it
-      # (Chrome: 150. The oracle read any auto margin as "this box distributes" and left it at 0.)
+      # (Chrome: 150, where reading any auto margin as "this box distributes" leaves it at 0.)
       expect_layout('<div align="center" style="width:400px"><div style="width:100px;height:10px;margin-top:auto"></div></div>')
       expect_layout('<div align="center" style="width:400px"><div style="width:100px;height:10px;margin-bottom:auto"></div></div>')
       # …and an auto margin wins over it: the box distributes, and the legacy shift is not applied on top.
@@ -1367,7 +1346,7 @@ x</div>))
   end
 
   # A BORDER box is never smaller than the border and padding inside it, and that floor comes AFTER the
-  # min/max clamp (`usedSize`): a `max-width` below the box's own edges clamps the width under them and the
+  # min/max clamp: a `max-width` below the box's own edges clamps the width under them and the
   # floor lifts it back (Chrome gives `box-sizing: border-box; padding: 0 10px; max-width: 5px` a width of 20).
   describe "a border box's edges floor its width after the min/max clamp" do
     it 'floors a width a max-width clamped below the box edges' do
@@ -1380,12 +1359,10 @@ x</div>))
   end
 
   # `position: sticky` is IN FLOW, and its box is where a STATIC one's would be — not a relative one's. The
-  # oracle never put the scroll-driven shift into `_lb`: `stickyDelta` is read by `scrollShift` and the
-  # `offsetTop` reader, so the shift lives entirely in the READ path and the layout knows nothing of it. Five
-  # NINE separate gates refused sticky as "a scroll-driven shift native doesn't model", which mistook where
-  # that shift is applied; native needed no new rule at all, only to stop refusing. (`nlSupported`,
-  # `nlFlexSupported`, `nlTableSupported`, `nlGridSupported`, `nlAtomicMeasurable`, the atomic and flex-item
-  # arms of `nlGatherRuns`, the block-child arm, and the float arm — the last of which a sticky float needed.)
+  # scroll-driven shift is never in the laid-out box: `stickyDelta` is read by `scrollShift` and the `offsetTop`
+  # reader, so the shift lives entirely in the READ path and the layout knows nothing of it. NINE separate gates
+  # once refused sticky as "a scroll-driven shift native doesn't model", which mistook where that shift is
+  # applied; native needed no new rule at all, only to stop refusing — a sticky float included.
   describe 'a sticky box lays out where a static one would' do
     it 'takes a sticky box in every context that refused one' do
       expect_layout('<div style="width:400px;height:200px;overflow:auto"><div style="height:50px"></div><div style="position:sticky;top:0;width:60px;height:20px"></div><div style="height:300px"></div></div>')
@@ -1412,18 +1389,18 @@ x</div>))
   # around the band or CLEARS it stands where the unshifted rectangle puts it.
   describe 'a relatively shifted float' do
     # …and every shape here has to make the BAND observable, which is not automatic and is where a first
-    # version of this example went wrong: the parity compare looked at element BOXES, so a band that moved with
+    # version of this example went wrong: the comparison looked at element BOXES, so a band that moved with
     # the box shows up only where some compared box reads it. A `clear` below a flow cursor that has already
     # passed the float reads nothing, and a purely HORIZONTAL shift moves only line content, which is not a
     # box at all. What works is a VERTICAL component on the float's own offset plus either an `overflow:hidden`
     # owner (whose height is `floats_bottom`) or a `clear` the flow has not already passed. Measured against an
     # engine deliberately broken to move the band with the box: 8 of the first 10 shapes caught nothing.
-    it 'moves the box and not the band, in each position the walk gates' do
+    it 'moves the box and not the band, in each position a float is written in' do
       # a block-level float, an auto-width one, and a percentage offset
       expect_layout('<div style="width:400px;overflow:hidden"><div style="position:relative;left:12px;top:-7px;float:left;width:40px;height:50px"></div><div>text beside it</div><div style="clear:left;height:5px"></div></div>')
       expect_layout('<div style="width:400px;overflow:hidden"><div style="position:relative;left:-18px;top:6px;float:left">a b c</div><div>one two three four five six</div></div>')
       expect_layout('<div style="width:400px;height:120px;overflow:hidden"><div style="position:relative;top:25%;float:right;width:40px;height:10px"></div><div>text</div><div style="clear:both;height:5px"></div></div>')
-      # …written in INLINE content, which is a second gate (`nlGatherRuns`'s float hook)
+      # …written in INLINE content, which is a second position (the run gather's float hook)
       expect_layout('<div style="width:200px;overflow:hidden">aaa <div style="position:relative;left:9px;top:6px;float:left;width:50px;height:20px"></div>bbb ccc ddd eee fff ggg</div>')
       expect_layout('<div style="width:200px">aaa <div style="position:relative;left:9px;top:6px;float:left;width:50px;height:20px"></div>bbb ccc<div style="clear:left;height:5px"></div></div>')
       # …and in a MIXED block, which is a third (the anonymous group's own hook)
@@ -1443,8 +1420,7 @@ x</div>))
 
   # PERCENTAGE SIZES on an in-flow child of a block or flex container resolve natively, against the box the
   # parent lays the child out in (`Input::with_percent_sizes` at the parent's measure): its content width, and its
-  # content height where that is definite (a flex column's main size). The walk resolved every one against the
-  # ORACLE's stamps (`_lbCbW` / `_lbCbH`), and every page read them.
+  # content height where that is definite (a flex column's main size).
   describe 'percentage sizes' do
     it 'resolves them against the parent native lays the box out in' do
       [
@@ -1482,8 +1458,8 @@ x</div>))
       # (the words fill the first line to within the 16px the wrong basis would take off it)
       expect_layout(%(<div style="width:400px"><div style="padding:0 10%;text-indent:20%">#{(['ab'] * 27).join(' ')} cccccc</div></div>))
     end
-    # The ORACLE's basis was `content.height || null`: a definite 0 read as none, and an IMPOSED height (a grid row,
-    # both insets) not yet clamped by the box's own max-height. Chrome and native: a definite 0 is 0 (the embed
+    # A definite 0 is a basis, not none, and an IMPOSED height (a grid row, both insets) is clamped by the box's own
+    # max-height before it is one. Chrome and native: a definite 0 is 0 (the embed
     # wrapper's child is its content's height, not 0 — its percentage height resolves to 0), and the clamp comes
     # first (`height: 50%` under a 100px row capped at 50 is 25).
     it 'resolves against a definite zero, and against an imposed height clamped' do
@@ -1496,13 +1472,13 @@ x</div>))
     end
     # A flex item keeps its min/max-height — the floor a flex container item two-phases its auto height against —
     # with an atomic inside it too: a percentage one once went over as a fraction that was then cleared, and the
-    # item took its height from content with no floor (40 where the oracle's is 128).
+    # item took its height from content with no floor (40 instead of 128).
     it 'keeps a flex item\'s percentage min-height around a positioned atomic' do
       expect_layout(%(<div style="display:flex;height:180px;align-items:flex-start"><div style="display:flex;align-items:center;min-height:60%;padding:10px 0"><div>t #{STICKY_ATOMIC}</div><div style="height:20px;width:10px"></div></div></div>))
     end
     # A box laid out twice under two different HEIGHT bases — a flex item measured with an auto height, then
-    # stretched to its line — resolves a percentage min-height against the second. The oracle reused the first
-    # layout (it checked the width basis only) and kept the unfloored 18 where Chrome and native give 96.
+    # stretched to its line — resolves a percentage min-height against the second. Reusing the first layout
+    # (checking the width basis only) keeps the unfloored 18 where Chrome and native give 96.
     it 'lays a percentage min-height out again once its height basis changes' do
       expect_layout('<div style="display:flex;height:160px;width:400px"><div style="flex:1"><div style="min-height:60%">c</div></div></div>')
       session = simulated_session(page('<div style="display:flex;height:160px;width:400px"><div style="flex:1"><div id="t" style="min-height:60%">c</div></div></div>'))
@@ -1512,9 +1488,8 @@ x</div>))
   end
 
   # A margin or padding written as a comparison function over affine operands — `max(10%, 12px)`, `clamp(4px, 5%,
-  # 30px)`, a bare calc-sum argument (`clamp(0px, 10% - 20px, 40px)`) — travels as its program (`nlClampedEdgeParts`,
-  # `NL_REC_EDGE_MATH`) and native resolves it against the box's own basis; the walk resolved it against the oracle's.
-  # Chrome's box.
+  # 30px)`, a bare calc-sum argument (`clamp(0px, 10% - 20px, 40px)`) — travels as its program (`edge_math`) and
+  # native resolves it against the box's own basis. Chrome's box.
   it 'resolves a margin and a padding written as comparison functions natively' do
     body = '<div style="width:300px"><div id="m" style="margin-top:max(10%, 12px);padding:clamp(4px, 5%, 30px) clamp(0px, 10% - 20px, 40px);' \
            'border:2px solid">x</div></div>'
@@ -1522,9 +1497,8 @@ x</div>))
     expect(laid_out_rect(body)).to eq([0, 30, 300, 52])
   end
   # …and a comparison inside a `calc()` SUM — subtracted, scaled by a number, divided — travels as a program too
-  # (`nlSumTerms`: terms at a top-level `+` / `-`, factors at `*` / `/`), in every carrier: a width, an edge, a gap,
-  # a text-indent, a relative inset. It was the one form no program expressed until 2026-09-26, and the walk resolved
-  # it against the oracle's basis. Chrome's boxes.
+  # (terms at a top-level `+` / `-`, factors at `*` / `/`), in every carrier: a width, an edge, a gap, a
+  # text-indent, a relative inset. Chrome's boxes.
   it 'resolves a comparison inside a calc() sum natively' do
     {
       '<div style="width:300px"><div id="m" style="width:calc(100% - min(50%, 80px));height:10px"></div></div>'   => [0, 0, 220, 10],

@@ -161,8 +161,7 @@ RSpec.describe 'letter-spacing and word-spacing reach the flow' do
 
   # …and a percentage INHERITS as the percentage: each element resolves it against its own font size (Chrome: a
   # `letter-spacing: 10%` block puts 3.2px between the letters of a 32px span in it, where handing the parent's 1.6px
-  # down gave 1.6). The Rust walk took no percentage spacing at all and sent the page to the JS walk, which handed
-  # the px down.
+  # down gave 1.6 — what the page got while the Rust walk declined percentage spacing outright).
   it 'resolves an inherited letter-spacing percentage against each element\'s own font size' do
     body = '<div style="letter-spacing:10%"><span id=t style="font-size:32px">abcd</span></div>'
     plain = '<div><span id=t style="font-size:32px">abcd</span></div>'

@@ -146,10 +146,10 @@ RSpec.describe 'margin collapsing' do
   # box's formatting context — because a margin is wanted before any float is placed. Chrome asks it two ways
   # (measured, 153, ~80 shapes): a float placed while the box's OWN parent was laid out separates whatever its
   # geometry, while an INHERITED one separates only where it reaches below the box. Reading the second like
-  # the first is a bounded gap this engine keeps on purpose, because the structural answer is the one both
-  # engines can give the same: a `clear: left; margin-top: 20px` first child of a wrapper that starts below a
-  # 30px float is at 40 here where Chrome says 60. Making it geometric means making the HOIST geometric, and
-  # `marginInfo` runs before a single float is placed.
+  # the first is a bounded gap this engine keeps on purpose, because the structural answer is the one a margin
+  # can be given before any float is placed: a `clear: left; margin-top: 20px` first child of a wrapper that
+  # starts below a 30px float is at 40 here where Chrome says 60. Making it geometric means making the HOIST
+  # geometric, and `marginInfo` runs before a single float is placed.
   it 'asks structurally whether a clear separates a margin' do
     above = '<div style="float:left;width:100px;height:30px"></div><div style="height:40px"></div>' \
             '<div id="w"><div id="c" style="clear:left;margin-top:20px;height:5px"></div></div>'
@@ -260,7 +260,7 @@ RSpec.describe 'margin collapsing' do
 
     # …asked of the box's own SIBLING, which is where the answer actually shows: the margin the box keeps
     # inside it does not move what comes after. The basis has to travel with the question for this to hold —
-    # read off a stamp `usedSize` writes later, the memoised answer said `auto` and the sibling moved 12px on
+    # read off a figure the layout writes later, a memoised answer says `auto` and the sibling moves 12px on
     # the first pass and not on the second.
     [['50%', 30], ['0%', 0], ['100%', 60], ['calc(50%)', 30], ['30px', 30]].each do |h, y|
       sib = boxes_for(%(<div id="p" style="height:#{h}"><div style="margin-bottom:12px;height:5px"></div></div>) +
@@ -277,8 +277,7 @@ RSpec.describe 'margin collapsing' do
   # gives the bottom margin to the box only while `min-height` does NOT raise it above its content: a
   # `min-height: 5px` box over a 5px child with a 12px bottom margin is 5 tall and the block around it 17,
   # while `min-height: 6px` makes it 6 and the block 6 — the margin reaches NEITHER, consumed by the clamp.
-  # Both engines let it escape either way, so the shadow harness cannot see this; fixing it means deciding
-  # the margin's fate AFTER the min clamp, in both.
+  # This engine lets it escape either way; fixing it means deciding the margin's fate AFTER the min clamp.
   it 'does not model the min-height half of the bottom rule' do
     [['5px', 17], ['6px', 18], ['20px', 32]].each do |mh, outer|
       (wrap,) = boxes_for(%(<div id="w" style="overflow:hidden"><div style="min-height:#{mh}">) +
@@ -295,12 +294,10 @@ RSpec.describe 'margin collapsing' do
   end
 
   # The BASIS a percentage margin resolves against is the containing block's CONTENT WIDTH — and the margin
-  # run is needed before anything is laid out, so `marginBasis` has to derive that width rather than read it.
-  # Until 2026-09-22 it PREDICTED: the declared width, else `cbW − the box's own edges`, on the rule that a
-  # block fills its containing block. Three kinds of box do not, and each was wrong by the whole difference —
-  # native resolved the same percentage against the width the box actually got, so each was a parity break
-  # too (74 shapes of the `flexpctwidth` sweep, and the reason the flex pre-filter had to refuse a family of
-  # items outright). It derives the width the way `layoutBlock` derives it now.
+  # run is needed before anything is laid out, so that width has to be derived rather than read. PREDICTED —
+  # the declared width, else `cbW − the box's own edges`, on the rule that a block fills its containing block
+  # — it is wrong by the whole difference for the three kinds of box that do not; the percentage resolves
+  # against the width the box actually gets.
   # Chrome 153-measured, each in a 300px block, the inner box holding `margin: 10% 0`:
   {
     ''                   => [300, 30],   # …a plain block does fill, which is why the prediction survived
@@ -322,15 +319,13 @@ RSpec.describe 'margin collapsing' do
     end
   end
 
-  # KNOWN DIVERGENCE, both engines: in a VERTICAL writing mode a percentage edge resolves against the
-  # containing block's INLINE size — its HEIGHT there — and both engines resolve it against a width.
+  # KNOWN DIVERGENCE: in a VERTICAL writing mode a percentage edge resolves against the containing block's
+  # INLINE size — its HEIGHT there — and this engine resolves it against a width.
   # It is ONE question, about which axis, and nothing else: Chrome 153 lays the mid box out at 80x200 and so
   # does this engine, so the boxes agree and only the basis differs (Chrome 20, ten percent of the 200;
   # ours 8, ten percent of the 80). Worth saying because the obvious reading — "vertical text is not
   # modelled, so of course it differs" — would make this look like it has to wait for a whole subsystem,
   # and it does not.
-  # Recorded rather than fixed while the port runs: it is SHARED, so the shadow harness sees nothing, and
-  # fixing it is the same rule in both engines.
   it 'resolves a percentage margin against a WIDTH in a vertical writing mode, where Chrome uses the height' do
     body = '<div id="a" style="writing-mode:vertical-rl;height:200px"><div id="b" style="margin:10% 0">' \
            '<i style="display:inline-block;width:80px;height:10px"></i></div></div>'

@@ -3,7 +3,7 @@ require 'digest'
 require 'fileutils'
 require 'json'
 
-# The layout a shape is held to once the JS layout (the oracle) is gone: what the page's own geometry API answers —
+# The layout a shape is held to: what the page's own geometry API answers —
 # every element's border box, its client rects and its used margins and padding, and every text node's line boxes —
 # recorded in a golden file and compared on every run, with the Rust walk asserted to have laid the page out.
 #

@@ -36,17 +36,17 @@ RSpec.describe 'native layout inline box fragments' do
   def expect_fragments(body, chrome: nil, shared: nil, shared_chrome: nil)
     raise ArgumentError, 'shared needs shared_chrome' if !shared.nil? && shared_chrome.nil?
 
-    expect_layout_golden(body)
     rects = fragments(body)
     expect(rects_near?(rects, chrome)).to be(true), "#{body}: #m #{rects.inspect}, Chrome #{chrome.inspect}" unless chrome.nil?
-    return if shared.nil?
-
-    expect(rects_near?(shared, shared_chrome)).to be(false), "#{body}: shared and Chrome agree — pass it as `chrome:`"
-    expect(rects_near?(rects, shared_chrome)).to(
-      be(false),
-      "#{body}: #m #{rects.inspect} now AGREES with Chrome — a fix, not a regression: pin it as `chrome:`"
-    )
-    expect(rects_near?(rects, shared)).to be(true), "#{body}: #m #{rects.inspect}; the layout gives #{shared.inspect}, Chrome #{shared_chrome.inspect}"
+    unless shared.nil?
+      expect(rects_near?(shared, shared_chrome)).to be(false), "#{body}: shared and Chrome agree — pass it as `chrome:`"
+      expect(rects_near?(rects, shared_chrome)).to(
+        be(false),
+        "#{body}: #m #{rects.inspect} now AGREES with Chrome — a fix, not a regression: pin it as `chrome:`"
+      )
+      expect(rects_near?(rects, shared)).to be(true), "#{body}: #m #{rects.inspect}; the layout gives #{shared.inspect}, Chrome #{shared_chrome.inspect}"
+    end
+    expect_layout_golden(body)
   end
 
   it 'lays out an edged box and an edge-only one on their line' do
@@ -59,8 +59,7 @@ RSpec.describe 'native layout inline box fragments' do
       chrome: [[28.8125, 0, 6, 22]]
     )
     # …percentage edges resolved against the block's content width — by native itself, from the fractions the inline
-    # table carries (the walk used to resolve them against the oracle's basis) — and one per line where it wraps,
-    # the opening edge on the first and the closing one on the last.
+    # table carries — and one per line where it wraps, the opening edge on the first and the closing one on the last.
     expect_fragments(
       '<div style="font:16px monospace;width:60px">x <span id="m" style="padding:0 3px">aaaa bbbb cc</span> d</div>',
       chrome: [[0, 22, 41.40625, 22], [0, 44, 38.40625, 22], [0, 66, 22.203125, 22]]
@@ -70,11 +69,10 @@ RSpec.describe 'native layout inline box fragments' do
   end
 
   # An EMPTY box takes a fragment only where there is a line box to take it on, and the line is the one it OPENED
-  # on — which a `<br>` or a preserved newline makes a line box even with nothing on it. Both engines asked the
-  # line the box CLOSED on (the next one, or none at all) and gave all three of these no height.
-  # …and edges written as COMPARISON functions, which the inline table carries as pairs between their bounds since
-  # 2026-09-25 — the opening edge's margin and padding clamping apart, a `calc()` padding floored at 0 (3 - 5 here) —
-  # where the walk used to resolve them against the oracle's basis. Chrome's rects.
+  # on — which a `<br>` or a preserved newline makes a line box even with nothing on it, and not the line the box
+  # CLOSED on (the next one, or none at all), which would give all three of these no height.
+  # …and edges written as COMPARISON functions, which the inline table carries as pairs between their bounds — the
+  # opening edge's margin and padding clamping apart, a `calc()` padding floored at 0 (3 - 5 here). Chrome's rects.
   it 'lays out an inline box whose edges are clamped percentages' do
     {
       '<div style="font:16px monospace;width:300px">aa <span id="m" style="padding:0 clamp(4px, 5%, 20px)">bb</span> cc</div>'                   => [[28.8125, 0, 49.2031, 22]],
@@ -86,10 +84,10 @@ RSpec.describe 'native layout inline box fragments' do
   end
   # …and a RELATIVE inline box's percentage offsets, which travel as the chain `nlChainRel` sums (a length, a fraction
   # of the block's width, of its height where definite, and the figure where it is not) and native resolves against the
-  # block laying the line out — for the box's own fragments and for an atomic in it — where the walk resolved them
-  # against the oracle's stamps until 2026-09-25. A `top: 20%` of an indefinite height is `auto`, so `bottom` is used.
-  # …and a COMPARISON function's share as a program per axis beside them (`xm` / `ym`, a `right` one negated) since
-  # 2026-09-26 — two nested boxes' summed, a `top` one `auto` against an indefinite height as a percentage is. Chrome's
+  # block laying the line out — for the box's own fragments and for an atomic in it. A `top: 20%` of an indefinite
+  # height is `auto`, so `bottom` is used.
+  # …and a COMPARISON function's share as a program per axis beside them (`xm` / `ym`, a `right` one negated) — two
+  # nested boxes' summed, a `top` one `auto` against an indefinite height as a percentage is. Chrome's
   # rects.
   it 'offsets a relative inline box by percentages of the block it is laid out in' do
     {
@@ -126,8 +124,8 @@ RSpec.describe 'native layout inline box fragments' do
       expect_fragments(body, shared: shared, shared_chrome: chrome)
     end
   end
-  # …and one that ENDS its text node leaves the opportunity, hyphen and all, to whatever comes next (the oracle's
-  # `barrier.shy`, native's `PendingHyphen` — declined by the walk until 2026-09-26): the next run's first unit breaks
+  # …and one that ENDS its text node leaves the opportunity, hyphen and all, to whatever comes next (native's
+  # `PendingHyphen`): the next run's first unit breaks
   # there and the hyphen shows on the line it ends, in the boxes that were open at the piece — a `<b>` closed since
   # still takes it, an `<i>` opened since takes nothing on that line, and an opening edge still pending waits for the
   # fresh line. An atomic breaks there too; a space in between replaces it, and no hyphen shows. SHARED: Chrome gives
@@ -145,9 +143,8 @@ RSpec.describe 'native layout inline box fragments' do
     }.each do |body, chrome|
       expect_fragments(body, shared: [[0, 0, 48, 22]], shared_chrome: chrome)
     end
-    # SHARED: min-content. Chrome takes the opportunity there (48.02, `aaaa-` / `bb`); the oracle's `addUnit` counts
-    # the hyphen as a candidate but opens no opportunity after a node's LAST piece, so `bb` joins the word, and
-    # native measures what the oracle measured.
+    # SHARED: min-content. Chrome takes the opportunity there (48.02, `aaaa-` / `bb`); the intrinsic measure counts
+    # the hyphen as a candidate but opens no opportunity after a node's LAST piece, so `bb` joins the word.
     expect_fragments(
       '<div id="m" style="font:16px monospace;width:min-content">aaaa&shy;<span>bb</span></div>',
       shared: [[0, 0, 57.6, 22]], shared_chrome: [[0, 0, 48.0156, 44]]
@@ -162,8 +159,7 @@ RSpec.describe 'native layout inline box fragments' do
       chrome: [[9.609375, 0, 0, 22]]
     )
     # …and a line that never became one still gives it none (Chrome: 0 tall before a block) — not even the answer
-    # of a line that closes AFTER the block child, which the oracle's `breakLine` left it waiting for (22, the
-    # height of the padded box's line below).
+    # of a line that closes AFTER the block child (22, the height of the padded box's line below).
     expect_fragments('<div style="font:16px monospace;width:400px"><span id="m"></span><div>b</div></div>', chrome: [[0, 0, 0, 0]])
     expect_fragments(
       '<div style="font:16px monospace;width:400px"><span id="m"></span><div>b</div><span style="padding-left:4px"></span></div>',
@@ -182,7 +178,7 @@ RSpec.describe 'native layout inline box fragments' do
   end
 
   # …and at the start of the float band THERE: a float placed past that margin is beside the line the box lands on,
-  # not beside the cursor before the margin, whose band the oracle read (0 where native and Chrome say 25).
+  # not beside the cursor before the margin, whose band would put it at 0 (where Chrome says 25).
   it 'opens an empty box beside a float placed past the margin still open above it' do
     float = '<div style="margin-bottom:30px">p</div><i style="float:left;width:25px;height:30px"></i><span id="m"></span>x'
     expect_fragments(%(<div style="font:16px monospace;width:90px">#{float}</div>), chrome: [[25, 52, 0, 22]])
@@ -190,14 +186,12 @@ RSpec.describe 'native layout inline box fragments' do
   end
 
   # A `<wbr>` is an empty inline box of its own, and its fragment takes its OWN relative offset as well
-  # as the chain's (native had only the chain's: 9.6 where the oracle said 14.6 — Chrome gives a `<wbr>` no client rect
-  # at all, a shared divergence). It has NO EDGES, whatever it declares — Chrome has no box to put them on, so
-  # `aa<wbr style="padding-left:20px;…">bb` is 38.41 wide there — where the oracle's flow placed them (71.4) and its
-  # measure did not, and native refused one; native places none since 2026-09-26. One that is not `display:
-  # inline` is no inline box: an inline-block `<wbr>` is an atomic.
+  # as the chain's (Chrome gives a `<wbr>` no client rect at all, a shared divergence). It has NO EDGES, whatever it
+  # declares — Chrome has no box to put them on, so `aa<wbr style="padding-left:20px;…">bb` is 38.41 wide there —
+  # and native places none. One that is not `display: inline` is no inline box: an inline-block `<wbr>` is an atomic.
   # A `<br>` is an inline box with nothing in it, like a `<wbr>`: an EMPTY fragment where it ends its line — and that
-  # line's ALIGNMENT moves it with the content before it. The oracle placed it at the unaligned pen and left it there
-  # (19.2 for a centred `aa<br>`), where native and Chrome follow the line; an rtl line is a shared gap.
+  # line's ALIGNMENT moves it with the content before it, not left at the unaligned pen (19.2 for a centred
+  # `aa<br>`): native and Chrome follow the line; an rtl line is a shared gap.
   it 'gives a <br> the box where its line ends, moved with the line' do
     {
       '<div style="width:300px;text-align:center;font:16px monospace">aa<br id="m">bb</div>' => [[159.59375, 0, 0, 22]],
@@ -237,8 +231,7 @@ RSpec.describe 'native layout inline box fragments' do
   end
 
   # …and the INTRINSIC width asks the same question: a block-level `<br>` is a box measured like any other, its
-  # declared width and padding (520, as Firefox measures it), where the JS layout's max-content walk took every `<br>`
-  # for a break and measured 21.3 while native said 520 — two engines, two answers.
+  # declared width and padding (520, as Firefox measures it), not a break (which would measure 21.3).
   it 'measures a block-level <br> into an intrinsic width' do
     body = '<div id="p" style="display:inline-block">aaa<br id="m" style="display:block;width:500px;padding:10px">b</div>'
     expect_layout_golden(body)
@@ -280,8 +273,8 @@ RSpec.describe 'native layout inline box fragments' do
     expect_layout_golden('<div style="font:16px monospace;width:100px">aaaa <wbr id="m" style="display:inline-block">bbbb</div>')
   end
 
-  # The space before a `pre-line` newline is a collapsible one the oracle PLACED on the line the newline ends, and
-  # the break eats: a box holding it has a line record there, and hangs from that line's baseline. Native dropped
+  # The space before a `pre-line` newline is a collapsible one PLACED on the line the newline ends, and the break
+  # eats: a box holding it has a line record there, and hangs from that line's baseline. Native dropped
   # the space outright, so the box fell back to where it opened — the line's top.
   it 'hangs an empty box holding the space before a pre-line newline from its baseline' do
     expect_fragments(
@@ -296,10 +289,10 @@ RSpec.describe 'native layout inline box fragments' do
     )
   end
 
-  # A U+00A0 a word ENDS in is a justification gap only once something follows it on the line — the oracle held it
-  # back like any trailing separator (`tailGaps`). Native counted it at once, so a line that wrapped right after it
-  # spread its whole free width over its own end and moved what stood past the space: 45 where the oracle and
-  # Chrome say 28.8 — for an out-of-flow marker's box, not only a fragment.
+  # A U+00A0 a word ENDS in is a justification gap only once something follows it on the line — held back like any
+  # trailing separator. Native counted it at once, so a line that wrapped right after it spread its whole free width
+  # over its own end and moved what stood past the space: 45 where Chrome says 28.8 — for an out-of-flow marker's
+  # box, not only a fragment.
   it 'holds back a justification gap a word ends in' do
     expect_fragments(
       '<div style="font:16px monospace;width:45px;text-align:justify">aa&nbsp;<span id="m"></span>bb q</div>',
@@ -312,7 +305,7 @@ RSpec.describe 'native layout inline box fragments' do
 
   # A relatively positioned INLINE is the containing block of an out-of-flow box inside it (CSS 2.1 §10.1): its
   # padding box runs from the FIRST fragment's top-left to the LAST one's bottom-right — not their union — and native
-  # takes it from the fragments it lays the inline out as, where the walk used to hand over the oracle's rectangle.
+  # takes it from the fragments it lays the inline out as.
   {
     'a wrapping inline, both insets on each axis' =>
       ['<div style="position:relative;width:90px;font:16px monospace">aaaa <span style="position:relative;border:2px solid;padding:0 4px">' \
@@ -333,7 +326,7 @@ RSpec.describe 'native layout inline box fragments' do
   end
 
   # A U+00A0 at an inline boundary is no break opportunity (UAX #14: NBSP is GL): Chrome keeps `aa&nbsp;bb` on one line
-  # and overflows, where both engines broke after it (they asked JS `\s`, which holds it).
+  # and overflows.
   it 'breaks after no no-break space at an inline boundary' do
     expect_fragments(
       '<div style="font:16px monospace;width:45px"><b>aa&nbsp;</b><b id="m">bb</b></div>',

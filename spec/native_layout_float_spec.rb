@@ -153,15 +153,14 @@ RSpec.describe 'native layout float' do
 
   # The everyday clearfix — an empty `clear: both` box, which COLLAPSES THROUGH — moves the flow itself to the
   # clearance line (§8.3.1), so the block around a row of floats and one is as tall as the floats and the next row
-  # starts below it: Chrome puts the third of three such rows at 40 in a 60px column. The oracle collapsed the
-  # rows through (all three at 0, growing) and lost a margin after the clearfix (the `<p>` at 50 where Chrome says
-  # 66); native declined every one of them until 2026-09-24.
+  # starts below it: Chrome puts the third of three such rows at 40 in a 60px column — not all three at 0, collapsed
+  # through — and keeps the margin after the clearfix (the `<p>` at 66, not 50).
   it 'places a clearfix at the clearance line and the row around it below the one before' do
     row = '<div><div style="float:left;width:200px;height:20px"></div><div style="clear:both"></div></div>'
     {
       %(<div style="width:600px">#{row}#{row}#{row.sub('<div>', '<div id="m">')}</div>)                                                                             => [0, 40, 600, 20],
       '<div style="width:200px"><div style="float:left;width:50px;height:50px"></div><div style="clear:both"></div><p id="m" style="margin:16px 0">after</p></div>' => [0, 66, 200, 18],
-      # …and the line after it takes the band there, past the float (the oracle kept the band beside it: x 50)
+      # …and the line after it takes the band there, past the float (not the band beside it: x 50)
       '<div style="width:200px;position:relative"><div><div style="float:left;width:50px;height:50px"></div><div style="clear:both"></div>' \
       '<div id="m" style="position:absolute;width:5px;height:5px"></div></div></div>'                                                                               => [0, 50, 5, 5]
     }.each do |body, rect|
@@ -178,8 +177,8 @@ RSpec.describe 'native layout float' do
   end
 
   # …and where the clearfix has MARGINS of its own, or a margin is still open above it, Chrome lets the clearance
-  # absorb them: the box sits AT the float bottom and the flow continues from there less the margin above it. Both
-  # engines add the margins past the clearance line instead — shared, so recorded rather than fixed.
+  # absorb them: the box sits AT the float bottom and the flow continues from there less the margin above it. This
+  # engine adds the margins past the clearance line instead — recorded rather than fixed.
   it 'adds a clearfix\'s margins past the clearance line (Chrome: absorbs them)' do
     {
       '<div style="width:200px"><div style="float:left;width:50px;height:50px"></div><div style="clear:both;margin-top:12px"></div><div id="m">x</div></div>'                      => [62, 50],
@@ -193,8 +192,7 @@ RSpec.describe 'native layout float' do
   end
 
   # `contain` and multicol establish a formatting context of their own (css-contain-2 §2.1, css-multicol-1 §2):
-  # they hold their children's margins in AND own the floats inside them. This engine answered only the first
-  # half, which the walk then declined; both halves are native now.
+  # they hold their children's margins in AND own the floats inside them, both halves natively.
   it 'keeps a contain/multicol formatting context natively' do
     expect_layout('<div style="contain:layout"><p style="margin-top:30px">hi there</p></div>')
     expect_layout('<div style="column-count:2"><p style="margin-top:30px">hi there</p></div>')
@@ -202,13 +200,12 @@ RSpec.describe 'native layout float' do
     expect_layout('<div style="width:300px"><div style="contain:layout"><div style="float:left;width:9px;height:4px"></div></div></div>')
   end
 
-  # A PARTIAL clear — a float left on the side the box does not name still reaches the line it lands on — is a
-  # block beside that float like any other: its box keeps the full width and the lines inside it route round the
-  # float, read in its own frame at the clearance line — and one that starts its own context AVOIDS the float,
-  # placed in the band it leaves from the clearance line down, as the flow places one. Both declined (`native
-  # declined`) until 2026-09-24. Chrome's figures: the text beside a right float is 44 tall, below a 20px left float
-  # beside a 60px right one it starts at 20; a flow-root beside the right float narrows to 150, and a 100px one
-  # beside a 150px float drops below it to 50.
+  # A PARTIAL clear — a float left on the side the box does not name still reaches the line it lands on — is a block
+  # beside that float like any other: its box keeps the full width and the lines inside it route round the float, read
+  # in its own frame at the clearance line — and one that starts its own context AVOIDS the float, placed in the band
+  # it leaves from the clearance line down, as the flow places one. Chrome's figures: the text beside a right float is
+  # 44 tall, below a 20px left float beside a 60px right one it starts at 20; a flow-root beside the right float
+  # narrows to 150, and a 100px one beside a 150px float drops below it to 50.
   it 'lays out a partial clear beside the float it leaves, or avoiding it where the box starts a context' do
     {
       '<div style="width:200px;font:16px monospace"><div style="float:right;width:50px;height:50px"></div><div id="m" style="clear:left">aa bb cc dd ee ff gg hh</div></div>' => [0, 44],
@@ -233,12 +230,11 @@ RSpec.describe 'native layout float' do
 
   # …and a FULL clear is laid out against the context too, not an empty one: a descendant pulled back above the
   # clearance line by a negative margin meets the floats there, and a nested `clear` clears them (native gave the
-  # block 34 where the oracle and Chrome say 42 — the review of e69b6e66). A box that starts its own context and
-  # has to DROP below a float it is too wide for drops by its used height, not a zero auto one (y 70, Chrome too;
-  # the oracle squeezed it into a 1px gap at 20), and a `display: table` beside or between floats is placed by its
-  # USED width, which the table algorithm may grow past the declared one (x 110 for `margin-left: auto`, 55 inside
-  # `<center>`, and a 70px-wide one dropping below a 140px float to y 20 — the oracle placed all three by the
-  # declared 60).
+  # block 34 where Chrome says 42 — the review of e69b6e66). A box that starts its own context and has to DROP
+  # below a float it is too wide for drops by its used height, not a zero auto one (y 70, Chrome too; not squeezed
+  # into a 1px gap at 20), and a `display: table` beside or between floats is placed by its USED width, which the
+  # table algorithm may grow past the declared one (x 110 for `margin-left: auto`, 55 inside `<center>`, and a
+  # 70px-wide one dropping below a 140px float to y 20 — not all three placed by the declared 60).
   it 'lays a cleared box out against the floats, and places a context-starting box by its used size' do
     {
       '<div style="width:200px;font:16px monospace"><div style="float:left;width:40px;height:20px"></div><div style="clear:left;padding-top:2px;"><div id="m" style="clear:left;margin-top:-10px;">nested</div></div></div>' => [0, 20],
@@ -291,7 +287,7 @@ RSpec.describe 'native layout float' do
   # A CLEARED child is measured before it is placed (its clearance needs its own collapsed top margin), in a
   # context of its own — and what it leaves there has to be shifted in like any other child's. Dropped, a
   # float inside a cleared box vanished from the context: the next `clear` sibling cleared past nothing and
-  # the owner's height stopped short (native 115 where Chrome and the oracle say 155).
+  # the owner's height stopped short (native 115 where Chrome says 155).
   it 'keeps the floats that escape a cleared child' do
     expect_layout('<div style="width:300px;overflow:hidden"><div style="float:left;width:100px;height:100px"></div>' \
                   '<div style="clear:left;height:10px"><div style="float:left;width:50px;height:50px"></div></div>' \
@@ -330,11 +326,9 @@ RSpec.describe 'native layout float' do
 
   # §9.4.3 is a PAINT-time shift: it changes no other box's layout, so the rectangle the enclosing formatting
   # context excludes at is the float's UNSHIFTED one even though the float is painted at the shift. Native
-  # applies the offset after the flow (rec[39..40]) and was always right; the ORACLE laid a relative block's
-  # subtree out at the shifted origin, so the rectangle it recorded carried the ancestor's offset and the
-  # `clear` box below came out at 60 where Chrome says 50. This shape was DECLINED for exactly as long as
-  # that was true. The oracle came to lay out then move (`shiftSubtree`, as it already did for an inline box's
-  # relative children) and the whole family went native.
+  # applies the offset after the flow (rec[39..40]); a relative block's subtree laid out at the shifted origin
+  # would record a rectangle carrying the ancestor's offset, and put the `clear` box below at 60 where Chrome
+  # says 50.
   it 'excludes a float at its unshifted rectangle under a relative ancestor' do
     shell = '<div style="width:300px;overflow:hidden">'
     float = '<div style="float:left;width:50px;height:50px"></div>'
@@ -447,10 +441,10 @@ RSpec.describe 'native layout float' do
   # A box's margin must not DEPEND on the floats it is measured among, or the two measures the float paths
   # take disagree about where it goes: the translation was made at the first one's answer, and the second
   # one's is what places it. Whether a `clear` separates that margin from its parent's (§8.3.1) is therefore
-  # answered STRUCTURALLY, off the record, exactly as the oracle answered it — a float earlier in the box's
+  # answered STRUCTURALLY, off the record — a float earlier in the box's
   # formatting context, whether or not the measure that meets the box can see it. Derived from the floats in
   # hand instead, a cleared descendant contributed `{pos: 20, neg: -20}` to the float-free measure and
-  # nothing to the float-aware one, which moved the box 10px and declined the page to keep it honest.
+  # nothing to the float-aware one, which moved the box 10px.
   it 'keeps a cleared descendant\'s margin the same in both measures' do
     expect_layout('<div style="width:300px;overflow:hidden"><div style="float:left;width:100px;height:100px"></div>' \
                   '<div style="height:10px;margin-bottom:10px"></div>' \
@@ -532,17 +526,14 @@ RSpec.describe 'native layout float' do
   end
 
   # A line too narrow for what is about to go on it DROPS below the float squeezing it (§9.5, "if a shortened
-  # line box is too small to contain any content…") — and a ZERO-width first run is still a request. The
-  # oracle asked `retakeBand(need)` with `if (need && …)`, which read 0 as "no request", so a line opening on
-  # a `<span>` that held only a ZWSP never asked; the span went down as placed and the word after it could no
-  # longer drop the line either. With a `text-indent` the band could not hold even the indent, and the line
-  # overflowed the float where native and Chrome both put it below: 22 against 82. The only red case in the
-  # checked-in sweeps for as long as `fzws` had existed (and waved through as "native is the right engine"
-  # every time, which it was — the ORACLE had to move).
+  # line box is too small to contain any content…") — and a ZERO-width first run is still a request. Read as
+  # "no request", a line opening on a `<span>` that held only a ZWSP never asks; the span goes down as placed and
+  # the word after it can no longer drop the line either. With a `text-indent` the band cannot hold even the
+  # indent, and the line overflows the float where Chrome puts it below: 22 against 82.
   #
-  # WITHOUT the indent the same shape was 22 in both engines and 82 in Chrome: neither took the break after the
-  # span that ENDS in the ZWSP (`BREAK_AFTER_RE` was JS `\s`, which does not match U+200B), so `ddd` stayed glued to
-  # it. It takes it now. Still shared: a U+200B INSIDE a word is no opportunity here (`a&#8203;ddd` in a
+  # WITHOUT the indent the same shape was 22 here and 82 in Chrome: the break after the span that ENDS in the
+  # ZWSP was not taken (`BREAK_AFTER_RE` was JS `\s`, which does not match U+200B), so `ddd` stayed glued to
+  # it. It takes it now. Still a gap: a U+200B INSIDE a word is no opportunity here (`a&#8203;ddd` in a
   # 30px block is one 22px line here and two in Chrome), and `floatBand` clamps a band at zero, so a zero-width run fits
   # even the narrowest one and native does not count the run AFTER it as what has to fit.
   it 'drops a line whose zero-width first run leaves no room for the indent (Chrome: 82)' do
@@ -567,8 +558,7 @@ RSpec.describe 'native layout float' do
   # to, and `ddd` no longer fitted beside it — 104 where Chrome says 82, one whole extra line. It had been there
   # for pieces WITH width all along (`aa&shy;bb` beside a 70px float drew `aa-bb`, 48 wide where Chrome's is
   # 38.41 — the same height, so no height saw it).
-  # The parity specs could not see these (the walk declined them as `text-not-measurable`), which is why the
-  # figures here are Chrome's own.
+  # The figures here are Chrome's own.
   it 'decides a soft hyphen on the band the piece lands on, not the one it dropped from (Chrome: 82 / 38.41)' do
     {
       '<div style="width:80px;font:16px monospace;text-indent:9px"><div style="float:left;width:90px;height:60px"></div>' \
@@ -586,12 +576,10 @@ RSpec.describe 'native layout float' do
   end
 
   # A `nowrap` / `pre` block's ATOMIC drops its line below a float — native's atomic arm tests the band with no
-  # mode check, as the oracle's `placeOnLine` did — where Chrome never drops a no-wrap line: 82
-  # here, 22 there for the block. Shared, and older than anything else in this file.
+  # mode check — where Chrome never drops a no-wrap line: 82 here, 22 there for the block. A known gap, and
+  # older than anything else in this file.
   # A ZERO-width atomic drops only where the INDENT does not fit (a band is clamped at zero, so a zero-width
-  # run fits any band on its own) — and with no indent native and Chrome agree, which is the control. Under the
-  # indent it used to be the exception only because the oracle never asked about a zero-width run: 22 by
-  # ACCIDENT, and a parity break against native's 82.
+  # run fits any band on its own) — and with no indent native and Chrome agree, which is the control.
   it 'drops a nowrap line holding an atomic below a float (Chrome: it does not)' do
     [['5px', ''], ['20px', ''], ['0', 'text-indent:9px;'], ['0', '']].each do |w, indent|
       %w[nowrap pre].each do |ws|

@@ -1,12 +1,12 @@
 require 'capybara/simulated'
 require 'rack'
 require_relative 'support/session_teardown'
+require_relative 'support/chrome_figures'
 
-# Layout reuses a subtree across a bare style-state bump (focus, checkedness) when no dynamic
-# rule can target it — `subtreeDynFree` / `ancestorsDynFree` in layout.js. That optimization is
-# a claim about REACHABILITY: any box a dynamic rule can move, directly, through inheritance, or
-# through the flow around it, must still re-lay-out. Every case here reads geometry BEFORE the
-# state change, because a cache that is only ever cold cannot serve stale.
+# Layout keeps a subtree across a bare style-state bump (focus, checkedness) when no dynamic rule
+# can reach it. That is a claim about REACHABILITY: any box a dynamic rule can move, directly,
+# through inheritance, or through the flow around it, must still be laid out again. Every case here
+# reads geometry BEFORE the state change, because a cache that is only ever cold cannot serve stale.
 RSpec.describe 'layout reuse across dynamic style state' do
   def session_for(css, body)
     html = "<!DOCTYPE html><html><head><style>#{css}</style></head><body>#{body}</body></html>"
@@ -22,9 +22,9 @@ RSpec.describe 'layout reuse across dynamic style state' do
   # …and one memo whose answer is a question about TEXT, not about structure. CSS Grid §4 makes a grid's
   # contiguous run of bare text an anonymous ITEM — but only when the run is not all white space — so an edit
   # that turns `'   '` into `'xx'` creates a box and an edit the other way destroys one. A `characterData`
-  # mutation is NOT structural (`markLayoutDirty` with no `structural`), so a memo keyed on `_lbStruct` would
-  # survive it: measured that way, the sibling stayed in column 0 where Chrome moves it to 19.20. Keyed on the
-  # PASS stamp it does not, because `markLayoutDirty` walks up the flat tree marking `_lbDirty`.
+  # mutation is NOT structural (`markLayoutDirty` with no `structural`), so a memo keyed on structure alone
+  # would survive it: measured that way, the sibling stayed in column 0 where Chrome moves it to 19.20. Keyed
+  # on the dirty stamp it does not, because `markLayoutDirty` walks up the flat tree marking it.
   # BOTH directions: the creating edit alone would pass on a memo that simply never caches.
   it 'creates and destroys an anonymous grid item when only the text changes' do
     s = session_for('body{margin:0}', '<div id="g" style="width:200px;display:grid;grid-template-columns:min-content min-content;' \
@@ -108,8 +108,8 @@ RSpec.describe 'layout reuse across dynamic style state' do
   end
 
   it 'resizes a child that inherits from an ancestor whose rule is dynamic' do
-    # The child carries no dynamic candidate of its own — only the ANCESTOR walk can know its
-    # `em` basis moved. This is the case `ancestorsDynFree` exists for.
+    # The child carries no dynamic candidate of its own — only its ANCESTOR's rule can say its
+    # `em` basis moved.
     s = session_for(
       '#wrap { font-size: 10px } #wrap:focus-within { font-size: 32px }',
       '<div id="wrap"><input id="i"><div id="c" style="width: 2em">x</div></div>'
@@ -121,8 +121,8 @@ RSpec.describe 'layout reuse across dynamic style state' do
   end
 
   it 'moves a static sibling below an element the state change grew' do
-    # The sibling itself is dyn-free and its subtree is untouched — but the box ABOVE it grew,
-    # so its position must move even though its own layout is reused.
+    # No dynamic rule reaches the sibling and its subtree is untouched — but the box ABOVE it grew,
+    # so its position must move even though its own layout is kept.
     s = session_for(
       '#t { height: 20px } #t:focus { height: 100px } div { margin: 0 }',
       '<input id="t"><div id="below">x</div>'
@@ -175,7 +175,7 @@ RSpec.describe 'layout reuse across dynamic style state' do
     expect(s.evaluate_script(read)).to eq(before + 40)
   end
 
-  it 'keeps a dyn-free subtree correct (and identical) across an unrelated focus change' do
+  it 'keeps a subtree no dynamic rule reaches correct (and identical) across an unrelated focus change' do
     s = session_for(
       '#t:focus { width: 300px } td { width: 40px; height: 10px }',
       '<input id="t"><table id="tbl"><tr><td>a</td><td>b</td></tr></table>'
@@ -191,32 +191,32 @@ RSpec.describe 'layout reuse across dynamic style state' do
   # child marks its parent alone (`recordChildList` — a subtree mark would invalidate the sibling being reused, and there
   # would be nothing to get wrong), so this is the everyday app shape, not a corner. The control cases say the neighbour
   # a refusal does not concern still got its reuse — refusing categorically instead measured 2-7 % slower across
-  # Discourse / Redmine / Avo. Each was found in the JS layout's reuse (`reuseSubtree`), whose parts the notes below
-  # name; the shapes are what any reuse has to get right, and the Rust walk's (`walk_reuse.rs`) is held to them.
+  # Discourse / Redmine / Avo. Each was first found in an earlier layout's reuse; the shapes are what any reuse has to
+  # get right, and the Rust walk's (`walk_reuse.rs`) is held to them.
   describe 'the reuse refusals' do
-    # `script`'s value, and how many records the Rust walk spliced back across it rather than built (`Walk::splice`):
-    # any at all is a reuse.
+    # `script`'s value, how many records the Rust walk spliced back across it rather than built (`Walk::splice`), and
+    # how many it walked.
     def reused_around(session, script)
       session.evaluate_script(<<~JS)
         (() => {
-          const before = __dom.layoutMeasureCounts()[3];
+          const [, , , spliced, walked] = __dom.layoutMeasureCounts();
           const value = (() => { #{script} })();
-          return [value, __dom.layoutMeasureCounts()[3] - before];
+          const after = __dom.layoutMeasureCounts();
+          return [value, after[3] - spliced, after[4] - walked];
         })()
       JS
     end
 
     it 'carries a float the context above records through a reuse' do
-      # A float's RECTANGLE is pushed into the formatting context of an ancestor (`placeFloat` →
-      # `fc.items`), and a reuse returns before `layoutElementInner` ever runs — so a reused subtree
-      # pushed nothing, the context came out with no float in it, and every `clear` and every band
-      # below it lost the exclusion. It survived because the mutation has to dirty a SIBLING: the
-      # float's own subtree lays out again and is right, and one fresh layout per page is all any of
-      # this campaign's instruments ever did (`sweep2.rb`'s `CSIM_SWEEP_INCREMENTAL` exists for this).
+      # A float's RECTANGLE belongs to the formatting context of an ancestor, and a reused subtree is not
+      # laid out — so unless the reuse carries the rectangle, the context comes out with no float in it,
+      # and every `clear` and every band below it loses the exclusion. It hides because the mutation has
+      # to dirty a SIBLING: the float's own subtree lays out again and is right, and a single fresh layout
+      # per page never reaches it.
       #
       # REFUSING the reuse is the obvious fix and is far too expensive — 300 `.row > .col { float: left }`
       # rows went 2.15 ms → 66.4 ms per relayout, because every row carries a float. The rectangle is
-      # instead REMEMBERED, relative to the box holding it, and pushed again where the reuse puts it.
+      # instead REMEMBERED, relative to the box holding it, and placed again where the reuse puts it.
       page = ->(float) {
         '<div id="b" style="width:300px"><div id="pad" style="height:10px"></div>' \
         "<div>#{float}</div>" \
@@ -230,18 +230,21 @@ RSpec.describe 'layout reuse across dynamic style state' do
       expect(floated - bare).to eq(50)
 
       s = session_for('', page.call('<div style="float:left;width:50px;height:50px"></div>'))
-      value, spliced = reused_around(s, <<~JS)
+      s.evaluate_script(read)                  # (…the first layout, outside what is counted)
+      value, _, walked = reused_around(s, <<~JS)
         const before = #{read};
         document.getElementById('pad').setAttribute('data-x', '1');
         return [before, #{read}];
       JS
       expect(value).to eq([floated, floated])
-      expect(spliced).to be > 0                # …and it really was a REUSE, not a re-layout
+      # …and the float's subtree really was spliced back, not walked again: the pass walked the edited `#pad` and its
+      # ancestors (`#b`, the body, the root), nothing else
+      expect(walked).to eq(4)
 
-      # …for as many GENERATIONS as the page lives. The ancestors above a reuse root were laid out fresh,
-      # which cleared their own lists, so the reuse has to record the rectangle on them again — without
-      # that the memory survives exactly one mutation and the next one, sited anywhere else, loses the
-      # float permanently. TWO differently-sited mutations is the shortest sequence that reaches it.
+      # …for as many GENERATIONS as the page lives. The ancestors above a reuse root are laid out fresh,
+      # so the reuse has to remember the rectangle for them again — without that the memory survives
+      # exactly one mutation and the next one, sited anywhere else, loses the float permanently. TWO
+      # differently-sited mutations is the shortest sequence that reaches it.
       deep = ->(pad) {
         %(<div id="b" style="width:300px"><div id="pad" style="height:#{pad}px"></div>) +
         '<div id="mid"><div><div style="float:left;width:50px;height:50px"></div></div></div>' \
@@ -268,8 +271,8 @@ RSpec.describe 'layout reuse across dynamic style state' do
     end
 
     it 'keeps a vertical-aligned cell\'s content where it is across relayouts' do
-      # `layoutTable` aligns a cell's content by SHIFTING the whole subtree down and putting the box back.
-      # A cell laid out fresh starts with its content at the box, but a REUSED cell hands back content
+      # A cell's content is aligned by SHIFTING the whole subtree down within the cell's box. A cell laid
+      # out fresh starts with its content at the box, but a REUSED cell hands back content
       # still carrying the previous pass's shift — and adding the whole shift again walked it down the
       # page by one slack per relayout, unbounded, while the table stayed the same height. So the shift is
       # applied as a delta from what the content already carries. Six passes, dirtying the TABLE so that
@@ -289,7 +292,7 @@ RSpec.describe 'layout reuse across dynamic style state' do
       JS
       expect(ys).to eq([fresh] * 6)
       # …and a BLOCK-level child, whose baseline is read off its box rather than off a line. A line's
-      # baseline is stamped relative to the cell and immune to the carried shift; a block child's `_lb.y`
+      # baseline is stamped relative to the cell and immune to the carried shift; a block child's box
       # carries it, and reading that as the baseline told the row the cell was already aligned — so the
       # shift was taken back, and a `display: block` `<select>` went 18, 3, 18, 3 (Chrome: 18).
       bsel = body.sub('<input id="i">', '<select id="i" style="display:block"><option>a</option></select>')
@@ -321,11 +324,12 @@ RSpec.describe 'layout reuse across dynamic style state' do
       end
     end
 
-    it 'lets a row shrink back while its other cell is reused' do
-      # `layoutTable` stretches a cell's box to the ROW, on the same object a reuse hands back — so a reused
-      # auto-height cell answered with the row it was last stretched to, and the row could never SHRINK while
-      # any cell in it was reused. An indefinite question asked of a reused cell is answered from its
-      # CONTENT (`_lbCellContentH`, floored by a declared minimum), as a fresh layout answers it.
+    it 'lets a row shrink back across relayouts' do
+      # A cell's box is stretched to the ROW — so a cell that answered its height from the box it was last
+      # stretched to held the row there, and the row could never SHRINK. An indefinite question asked of a cell
+      # is answered from its CONTENT (floored by a declared minimum), as a fresh layout answers it. (A reused
+      # cell answered so in an earlier layout; the Rust walk lays the cell out again on each of these passes,
+      # and is held to the same figures.)
       # Chrome, table height over the sequence 80px → 20px → 0 → 80px on the sibling: 80, 20, [one line], 80.
       body = '<table id="t" style="width:300px;border-spacing:0"><tr>' \
              '<td id="a" style="padding:0">cell</td><td id="b" style="padding:0;height:80px"></td></tr></table>'
@@ -343,9 +347,9 @@ RSpec.describe 'layout reuse across dynamic style state' do
       JS
       expect(value).to eq([[80, 80], [20, 20], [line, line], [80, 80]])
 
-      # …and the cell's scroll EXTENT follows the shorter box: `layoutTable` re-stamps only a cell the row grew
-      # or re-aligned, so a `vertical-align: top` cell (no re-align) kept a row-tall `scrollHeight` — 80 where
-      # its box, and Chrome, said 18. Read through an `overflow: auto` wrapper, which is what a page scrolls.
+      # …and the cell's scroll EXTENT follows the shorter box: an extent re-stamped only for a cell the row grew
+      # or re-aligned left a `vertical-align: top` cell (no re-align) a row-tall `scrollHeight` — 80 where its
+      # box, and Chrome, said 18. Read through an `overflow: auto` wrapper, which is what a page scrolls.
       topped = %(<div id="w" style="height:10px;overflow:auto">#{body.sub('<td id="a" style="padding:0">', '<td id="a" style="padding:0;vertical-align:top">')}</div>)
       w = session_for('', topped)
       sh = w.evaluate_script(<<~JS)
@@ -375,9 +379,7 @@ RSpec.describe 'layout reuse across dynamic style state' do
       JS
       expect(steps).to eq([[20, 20], [50, 80], [50, 90]])
 
-      # …a declared cell height is a MINIMUM. (This subcase reaches a FRESH layout rather than a reuse — a
-      # declared height asks a definite question, which the row's stretch then refuses — so it pins the
-      # floor's answer, not the reuse path.)
+      # …a declared cell height is a MINIMUM.
       floored = body.sub('<td id="a" style="padding:0">', '<td id="a" style="padding:0;height:40px">')
       f = session_for('', floored)
       hs = f.evaluate_script(<<~JS)
@@ -386,9 +388,9 @@ RSpec.describe 'layout reuse across dynamic style state' do
       JS
       expect(hs).to eq([80, 40, 80])
 
-      # …and a cell's own min/max-height, where they apply, clamp the reused answer as they clamp a fresh one: a
-      # VERTICAL cell's height is its inline axis, and its `min-height: 80px` held its row at 80 — on a fresh page
-      # and in Chrome — but a reuse answered its 24px content and the row fell to the sibling's 20.
+      # …and a cell's own min/max-height, where they apply, clamp the answer from its content: a VERTICAL cell's
+      # height is its inline axis, and its `min-height: 80px` holds its row at 80 — on a fresh page and in Chrome —
+      # where an answer from its 24px content alone let the row fall to the sibling's 20.
       vertical = body.sub('height:80px', 'height:20px')
                      .sub('<td id="a" style="padding:0">', '<td id="a" style="padding:0;writing-mode:vertical-lr;min-height:80px">')
       v = session_for('body{font:16px monospace}', vertical)
@@ -446,7 +448,7 @@ RSpec.describe 'layout reuse across dynamic style state' do
       expect(spliced).to be > 0
 
       # …the set reaches DOWN to the holder's own floats. A holder that starts no context does not grow to
-      # contain its float, and that float was placed (`floatFitY`) against outer floats entirely below the
+      # contain its float, and that float was placed against outer floats entirely below the
       # holder's box — so a change there is invisible to the box's own span. `#f2` drops under `#f1`; `#g`
       # (too wide to sit beside `#f1`) drops under `#f2`; then `#f2` grows 50 → 80. Chrome: `#g` 100 → 130,
       # the cleared box 110 → 140.
@@ -506,12 +508,11 @@ RSpec.describe 'layout reuse across dynamic style state' do
     end
 
     it 'places a box anchored to a positioned row against the row it has NOW' do
-      # A row (and a row group) gets its box only once every row is sized, at the end of `layoutTable` —
-      # so it is never in `LAYING_OUT`, and a `bottom: 0` box anchored to a `position: relative` `<tr>`
-      # resolved against whatever box the row had LAST pass: the initial containing block on the first
-      # layout, and one pass behind on every later one. Rows are registered like cells now, so the child
-      # is deferred and placed against the finished row. Chrome, the overlay's y in the table over the
-      # sibling cell 40px → 100px → 40px: 30, 90, 30.
+      # A row (and a row group) gets its box only once every row is sized, at the end of the table's
+      # layout — so a `bottom: 0` box anchored to a `position: relative` `<tr>` that is placed before then
+      # resolves against whatever box the row had LAST pass: the initial containing block on the first
+      # layout, and one pass behind on every later one. It has to wait for the finished row. Chrome, the
+      # overlay's y in the table over the sibling cell 40px → 100px → 40px: 30, 90, 30.
       %w[tr tbody].each do |tag|
         rows = tag == 'tr' ? '<tr id="r" style="position:relative">' : '<tbody id="r" style="position:relative"><tr>'
         close = tag == 'tr' ? '</tr>' : '</tr></tbody>'
@@ -531,9 +532,9 @@ RSpec.describe 'layout reuse across dynamic style state' do
       end
 
       # …and a STATIC-position box in such a row is deferred too, and moved by the cell's vertical-align shift
-      # exactly ONCE: the shift's sweep of the pending list used to run again when the walk re-rooted on the
-      # box's own stale out-of-flow rectangle, and a box with any inset then took the shift twice (82 where
-      # the flow and native say 41). Both spellings — no inset, and a horizontal inset with a static vertical
+      # exactly ONCE: a sweep of the pending list that ran again when the layout re-rooted on the box's own
+      # stale out-of-flow rectangle gave a box with any inset the shift twice (82 where a fresh layout says
+      # 41). Both spellings — no inset, and a horizontal inset with a static vertical
       # position — answer what a fresh layout does, on every pass.
       ['', 'left:10%;'].each do |inset|
         st = ->(h) {
@@ -580,9 +581,9 @@ RSpec.describe 'layout reuse across dynamic style state' do
     end
 
     it 'moves a pending box by what the host between it and the root moves' do
-      # `shiftPendingStatics` moved every entry under the root by the whole shift, but an out-of-flow HOST on
-      # the way takes the shift only on the axes it has no inset for (the rule `shiftSubtree` applies to the
-      # host itself), and an entry held under it moves with the host. A `position: fixed` box pending on a
+      # Moving every pending box under the root by a cell's whole vertical-align shift is wrong: an out-of-flow
+      # HOST on the way takes the shift only on the axes it has no inset for (the rule the host itself is
+      # moved by), and a box held under it moves with the host. A `position: fixed` box pending on a
       # transformed ancestor, under an absolute host with both insets, inside a middle-aligned cell: the
       # host never moves, so neither does the box. Chrome: y = 0 on every pass; a fresh layout agrees.
       body = '<div id="w" style="transform:translateX(0)"><div style="position:relative;height:200px">' \
@@ -601,8 +602,8 @@ RSpec.describe 'layout reuse across dynamic style state' do
       expect(got).to eq([0, fresh, 0, fresh])
       expect(fresh).to eq(0)
 
-      # …and the walk to the host goes up the FLAT tree, as `noteEscapingAbs` does: a host inside a shadow
-      # root, with the pending box slotted through it, is not on the `_parent` chain. The light-DOM element
+      # …and the walk to the host goes up the FLAT tree: a host inside a shadow root, with the pending box
+      # slotted through it, is not on the node-tree parent chain. The light-DOM element
       # is a plain block here, so the shadow-side absolute box is the ONLY host between the box and the cell.
       plain = body.sub('<div style="position:absolute;top:0;left:0;width:10px;height:10px">' \
                        '<div id="b" style="position:fixed;left:0;width:10px;height:10px"></div></div>', '<div></div>')
@@ -626,11 +627,10 @@ RSpec.describe 'layout reuse across dynamic style state' do
     end
 
     it 'lays a subtree out again when it holds a fixed box anchored to an element' do
-      # `noteEscapingAbs` marks the boxes between an out-of-flow child and its containing block so none of
-      # them is reused — and skipped a FIXED box unless it took a static position, on the reasoning that a
-      # fixed box is placed from the viewport. One anchored to a transformed ELEMENT is not: its containing
-      # block's origin and size are that element's, and with every inset given (no static position) the
-      # cell holding it was reused and the box stayed where the row USED to end. Chrome and a fresh layout:
+      # None of the boxes between an out-of-flow child and its containing block may be reused — and a FIXED
+      # box is no exception for being placed from the viewport, because one anchored to a transformed
+      # ELEMENT is not: its containing block's origin and size are that element's, and with every inset
+      # given (no static position) a reused cell holding it left the box where the row USED to end. Chrome and a fresh layout:
       # the box follows the row / the block on every pass.
       {'transformed tr' => ['<table id="t" style="border-spacing:0"><tr style="transform:translateX(0)"><td style="padding:0">x',
                             '</td><td id="g" style="padding:0;height:40px"></td></tr></table>', 'position:fixed;top:100%;left:0;width:10px;height:200px'],
@@ -697,9 +697,230 @@ RSpec.describe 'layout reuse across dynamic style state' do
     end
   end
 
+  # What the Rust walk keeps from one pass to the next — the records it splices back, the measures it puts back — read
+  # where a kept answer the page no longer deserves would show. Each session walks every pass it reused again, fresh,
+  # and compares (`__csimNativeLayoutVerifyReuse`, which THROWS on a difference), so a stale kept answer fails twice:
+  # as the throw, and as the figure. The ones that COUNT what is kept leave the check off, its fresh walk keeping nothing.
+  describe 'what the Rust walk keeps' do
+    def walk_session_for(body, css: '', verify: true)
+      session_for("body { margin: 0 } #{css}", body).tap do |s|
+        s.execute_script("globalThis.__csimNativeLayoutVerifyReuse = #{verify}")
+      end
+    end
+
+    # A dynamic-state rule's flip that is seen dirties every box the rule can reach, and that is what a kept subtree's
+    # stamp follows: the hovered item's submenu opens and the item after it moves down, its link turns bold and wider,
+    # and all of it closes again — each read where a page laid out afresh in that state reads it.
+    it 'lays a kept subtree out again when a dynamic-state rule flips in it' do
+      css = 'ul.sub { display: none } #m li:hover ul.sub { display: block } #m li:hover > a { font-weight: bold } ' \
+            '#m { font: 16px/20px sans-serif }'
+      body = %(<ul id="m">#{(1..5).map {|i| %(<li id="l#{i}"><a id="a#{i}">item #{i}</a><ul class="sub"><li>sub</li></ul></li>) }.join}</ul>) +
+             '<p id="p">x</p>'
+      geo = <<~JS
+        JSON.stringify(['a2', 'l3'].map((id) => { const r = document.getElementById(id).getBoundingClientRect(); return [r.y, r.width, r.height]; }))
+      JS
+      closed = walk_session_for(body, css: css).evaluate_script(geo)
+      open   = walk_session_for(body, css: css).evaluate_script("(document._hoverElement = document.getElementById('a2'), #{geo.strip})")
+      expect(open).not_to eq(closed)
+      s = walk_session_for(body, css: css)
+      got = s.evaluate_script(<<~JS)
+        (() => {
+          const geo = () => #{geo.strip};
+          const out = [geo()];
+          document.getElementById('p').firstChild.data = 'y'; out.push(geo());
+          document._hoverElement = document.getElementById('a2'); out.push(geo());
+          document.getElementById('p').firstChild.data = 'z'; out.push(geo());
+          document._hoverElement = null; out.push(geo());
+          return out;
+        })()
+      JS
+      expect(got).to eq([closed, closed, open, open, closed])
+    end
+
+    # …but only where every writer of the state is seen. A clean checkbox's checkedness is its ATTRIBUTE's, a form's
+    # validity its controls', `:dir()` follows `dir=auto` text, `:target` an `id`, and a modal dialog's `open` attribute
+    # is read beside its modal flag: each flips with no state bump, so a subtree that read such a rule is not kept. Kept,
+    # each read the box from before its flip back. Every shape is laid out once after an unrelated edit — which is what
+    # makes the subtree one the walk could keep — before the flip, and the figure after it is a fresh page's.
+    #
+    # Chrome agrees on the first three. On the last two it flips NOTHING, and so does the spec: the target element is
+    # the one the fragment named when it was navigated to (an `id` given later does not make another one it), and
+    # removing `open` runs the dialog cleanup steps, which leave `is modal` set — `:modal` still matches. The driver's
+    # style answers flip both — pinned as gaps, the walk still held to whatever the style says.
+    it 'does not keep a subtree a state some writer flips unseen reaches' do
+      shapes = [
+        ['input:checked ~ p { width: 50px }', '<input id="i" type="checkbox"><p id="p"></p>', '',
+         "document.getElementById('i').setAttribute('checked', '')", [100, 50], nil],
+        ['form:invalid p { width: 50px }', '<form><input id="i" required><p id="p"></p></form>', '',
+         "document.getElementById('i').remove()", [50, 100], nil],
+        ['div:dir(rtl) + p { width: 50px }', '<div dir="auto"><span id="t">abc</span></div><p id="p"></p>', '',
+         "document.getElementById('t').firstChild.data = '\\u05e9\\u05dc\\u05d5\\u05dd'", [100, 50], nil],
+        [':target + p { width: 50px }', '<div id="d"></div><p id="p"></p>', "location.hash = '#sec'",
+         "document.getElementById('d').id = 'sec'", [100, 100], 50],
+        ['dialog:modal ~ p { width: 50px }', '<dialog id="d">hi</dialog><p id="p"></p>', "document.getElementById('d').showModal()",
+         "document.getElementById('d').removeAttribute('open')", [50, 50], 100]
+      ]
+      width = "document.getElementById('p').getBoundingClientRect().width"
+      shapes.each do |rule, body, setup, flip, chrome, shared|
+        css  = "p { width: 100px; height: 10px; margin: 0 } #{rule}"
+        page = "#{body}<p id=\"q\">x</p>"
+        fresh = walk_session_for(page, css: css).tap {|f| f.execute_script("#{setup}; #{flip}") }.evaluate_script(width)
+        s = walk_session_for(page, css: css)
+        s.execute_script(setup)
+        before = s.evaluate_script(width)
+        s.execute_script("document.getElementById('q').firstChild.data = 'y'; document.body.offsetHeight")
+        s.execute_script(flip)
+        after = s.evaluate_script(width)
+        expect(after).to eq(fresh), rule
+        expect(before).to eq(chrome[0]), rule
+        if shared
+          expect_shared_gap(after, shared: shared, chrome: chrome[1], what: rule)
+        else
+          expect(after).to eq(chrome[1]), rule
+        end
+      end
+    end
+
+    # …and lays it out again as a transition started in it runs: the box grows read after read and settles, a pass
+    # for every read.
+    it 'follows a transition started inside a kept subtree' do
+      css  = 'li { width: 100px; transition: width 1s linear } li.wide { width: 300px }'
+      body = %(<ul id="m">#{(1..5).map {|i| %(<li id="l#{i}">item #{i}</li>) }.join}</ul><p id="p">x</p>)
+      s = walk_session_for(body, css: css)
+      width = "document.getElementById('l3').getBoundingClientRect().width"
+      s.evaluate_script(width)
+      s.execute_script("document.getElementById('p').firstChild.data = 'y'; document.body.offsetHeight")
+      passes = s.evaluate_script('__csimNativeLayoutStats().rust')
+      # (…the first read in the task that starts it: the transition runs from then on, as in a browser)
+      reads = [s.evaluate_script("(document.getElementById('l3').classList.add('wide'), #{width})")]
+      while reads.last < 300 && reads.size < 30
+        s.evaluate_script('new Promise((resolve) => setTimeout(resolve, 100))')
+        reads << s.evaluate_script(width)
+      end
+      expect(reads).to eq([100, 140, 180, 220, 260, 300])
+      expect(s.evaluate_script('__csimNativeLayoutStats().rust') - passes).to be >= reads.size
+    end
+
+    # An inline box whose fragments the walk kept is answered with them — and one whose fragments moved is answered
+    # anew: an edit elsewhere (nothing moves), an edit before it on its line (it shifts), and one that wraps it (it
+    # breaks in two). After each, every rectangle is where a page written that way from the start puts it.
+    it 'writes an inline box again exactly when its fragments moved' do
+      body = ->(a, p) {
+        %(<div style="width:200px;font:16px/20px monospace"><span id="a">#{a}</span> <span id="b">bbb bbb</span> ) +
+          %(<span id="c">ccc</span></div><p id="p">#{p}</p>)
+      }
+      rects = <<~JS
+        JSON.stringify(['a', 'b', 'c'].map((id) => [...document.getElementById(id).getClientRects()].map((r) => [r.x, r.y, r.width])))
+      JS
+      steps = [%w[aaa x], %w[aaa y], %w[aaaaaa y], %w[aaaaaaaaaaaaa y]]
+      fresh = steps.map {|a, p| walk_session_for(body.call(a, p)).evaluate_script(rects) }
+      s = walk_session_for(body.call('aaa', 'x'))
+      got = s.evaluate_script(<<~JS)
+        (() => {
+          const rects = () => #{rects.strip};
+          const out = [rects()];
+          document.getElementById('p').firstChild.data = 'y'; out.push(rects());
+          document.getElementById('a').firstChild.data = 'aaaaaa'; out.push(rects());
+          document.getElementById('a').firstChild.data = 'aaaaaaaaaaaaa'; out.push(rects());
+          return out;
+        })()
+      JS
+      expect(got).to eq(fresh)
+      expect(got.uniq.size).to eq(3)                          # the edit elsewhere moved nothing; the others did
+      expect(JSON.parse(got.last)[1].size).to eq(2)           # …the last one breaking `b` in two
+    end
+
+    # A flex item holding a table whose row group's height is a percentage, and the same group's height edited back and
+    # forth: the walk lays every pass out itself. SHARED: a row group's LENGTH height is ignored (Chrome grows the
+    # table to it); its percentage resolves against nothing in Chrome either.
+    it 'lays out a table whose row group height is edited, on every pass' do
+      s = walk_session_for('<div style="display:flex;width:300px;height:100px"><div><table id="t"><tbody id="g" style="height:50%">' \
+                           '<tr><td>x</td></tr></tbody></table></div></div>')
+      got = s.evaluate_script(<<~JS)
+        (() => {
+          const pass = () => { const n = __csimNativeLayoutStats().rust; const h = document.getElementById('t').getBoundingClientRect().height; return [__csimNativeLayoutStats().rust > n, h]; };
+          const out = [pass()];
+          for (const h of ['50px', '50%', '60px']) {
+            document.getElementById('g').style.height = h;
+            out.push(pass());
+          }
+          return out;
+        })()
+      JS
+      expect(got.map(&:first)).to eq([true, true, true, true])
+      expect(got[0][1]).to eq(24)                                          # Chrome
+      expect(got[2][1]).to eq(24)                                          # Chrome
+      expect_shared_gap(got[1][1], shared: 24, chrome: 54, what: 'a 50px row group')
+      expect_shared_gap(got[3][1], shared: 24, chrome: 64, what: 'a 60px row group')
+    end
+
+    # What the walk keeps of measuring nested blocks stays within a few times the page. A kept measure holds its block's
+    # whole subtree, so kept at every level of a nest it would hold the records under it once per level — forty wrappers
+    # over 3,000 rows held 4 GB that way.
+    it 'keeps no more of measuring nested blocks than a few times the page' do
+      rows = (1..100).map {|i| %(<div class="r"><p><span id="s#{i}">row #{i}</span></p></div>) }.join
+      nest = (1..12).reduce(%(<div style="display:flex;flex-wrap:wrap">#{rows}</div>)) {|inner, d| %(<div style="padding-left:1px"><span id="t#{d}">w#{d}</span>#{inner}</div>) }
+      s = walk_session_for(%(<div id="top">top</div>#{nest}), verify: false)
+      got = s.evaluate_script(<<~JS)
+        (() => {
+          const edit = (id) => { document.getElementById(id).firstChild.data += '!'; document.body.offsetHeight; };
+          document.body.offsetHeight;
+          for (let i = 0; i < 36; i++) edit(['s' + (1 + (i * 7) % 100), 't' + (1 + (i * 5) % 12), 'top'][i % 3]);
+          return [__dom.layoutMeasureCounts()[2], document.body.querySelectorAll('*').length, __dom.layoutMeasureCounts()[0]];
+        })()
+      JS
+      expect(got[0]).to be <= 4 * got[1]
+      expect(got[2]).to be > 0                               # …while the rows' own are put back
+    end
+
+    # …and a full cache makes room rather than keeping nothing: a list walked afresh again and again fills it with the
+    # measures of chunks it has just replaced, and refused past the cap, the rows' own were not kept until those idled
+    # out — no measure put back for five cycles in twelve.
+    it 'keeps measuring a list that is walked afresh again and again' do
+      rows = (1..100).map {|i| %(<div class="r"><p><span id="s#{i}">row #{i}</span> <b>x</b></p></div>) }.join
+      s = walk_session_for(%(<div id="l" style="display:flex;flex-wrap:wrap">#{rows}</div>), verify: false)
+      got = s.evaluate_script(<<~JS)
+        (() => {
+          const edit = (id) => { document.getElementById(id).firstChild.data += '!'; document.body.offsetHeight; };
+          document.body.offsetHeight;
+          const put = [];
+          for (let cycle = 0; cycle < 12; cycle++) {
+            document.getElementById('l').style.paddingLeft = (cycle % 7) + 'px';
+            document.body.offsetHeight;
+            for (let e = 0; e < 5; e++) edit('s' + (1 + (cycle * 5 + e) % 100));
+            const [p0] = __dom.layoutMeasureCounts();
+            edit('s' + (50 + cycle));
+            put.push(__dom.layoutMeasureCounts()[0] - p0);
+          }
+          return put;
+        })()
+      JS
+      expect(got.min).to be >= 90
+    end
+
+    # …and a flex item an edit did not touch is not measured again either: the walk puts its measure back
+    # (`MeasureCache`). Measured afresh, every item of the list was measured on every edit.
+    it 'puts back the measure of what an edit did not touch' do
+      items = (1..100).map {|i| %(<div><p><span id="s#{i}">item #{i}</span></p></div>) }.join
+      s = walk_session_for(%(<div style="display:flex;flex-wrap:wrap">#{items}</div>), verify: false)
+      got = s.evaluate_script(<<~JS)
+        (() => {
+          document.body.offsetHeight;
+          for (const id of ['s7', 's8']) { document.getElementById(id).firstChild.data += '!'; document.body.offsetHeight; }
+          const [put0] = __dom.layoutMeasureCounts(), passes = __csimNativeLayoutStats().rust;
+          document.getElementById('s9').firstChild.data += '!';
+          document.body.offsetHeight;
+          return [__dom.layoutMeasureCounts()[0] - put0, __csimNativeLayoutStats().rust - passes];
+        })()
+      JS
+      expect(got[1]).to eq(1)
+      expect(got[0]).to be >= 90                             # every item but the edited one (and its neighbours)
+    end
+  end
+
   # An ANONYMOUS table cell (§17.2.1 wraps a row's stray content in one) is in no DOM, so no mutation marks it — every
   # mutation under its content marks the content's parent instead, and that is what its stamp now follows. Kept by the
-  # table's structure stamp alone, it answered with the text it held before an edit, in both layouts. Chrome: 17.1, then
+  # table's structure stamp alone, it answered with the text it held before an edit. Chrome: 17.1, then
   # 169.1 once the span's text is twenty characters long.
   it 'relays out an anonymous table cell when its content changes' do
     s = session_for('body { margin: 0 }', '<table id="t" style="border-spacing:0"><tr id="r"><td>a</td></tr></table>')
@@ -718,7 +939,7 @@ RSpec.describe 'layout reuse across dynamic style state' do
   end
 
   # …and a block inside one resizing (the anonymous cell a `display: table` div wraps its block child in): the height
-  # stayed 30 in the JS layout.
+  # once stayed 30.
   it 'relays out a block resized inside an anonymous table cell' do
     s = session_for('body { margin: 0 }', '<div id="t" style="display:table"><div id="i" style="width:30px;height:30px"></div></div>')
     got = s.evaluate_script(<<~JS)
@@ -754,8 +975,8 @@ RSpec.describe 'layout reuse across dynamic style state' do
 
   # The same cross-cell dependency reaches the SUBTREE-reuse path: when a facing sibling's border grows, a
   # fixed-layout border-box cell keeps its (pinned) border box but its CONTENT box shrinks, so its children
-  # must re-flow. reuseSubtree is keyed on the cell's own stamp (unchanged by a sibling mutation) and the
-  # border box (unchanged here), so without the collapse-dep guard it would hand back the child's stale box.
+  # must re-flow. A reuse keyed on the cell's own stamp (unchanged by a sibling mutation) and its border box
+  # (unchanged here) hands back the child's stale box unless it follows the collapsed borders' resolution too.
   # Chrome: the child goes 100 -> 85 as the neighbour's border-left grows 0 -> 30 (200 - 2*100 border-box,
   # the 30px collapsed border eating into this cell's content).
   it "re-flows a collapsed cell's children when a facing sibling's border changes its content box" do
@@ -776,7 +997,7 @@ RSpec.describe 'layout reuse across dynamic style state' do
   # The FLAT tree can change shape with no mutation under the boxes it moves: a slot's assigned set changes when a
   # light child's `slot` attribute does, when `assign()` is called, or when the light child goes — and the boxes that
   # hold the slot live in the SHADOW tree, above no node any of those mutations stamps. `signalSlotChange` marks the
-  # slot's subtree and its flat-tree spine. Without it both layouts kept the old flat tree: a span renamed out of the
+  # slot's subtree and its flat-tree spine. Without it the layout kept the old flat tree: a span renamed out of the
   # 100px slot stayed where it was, and a manually assigned span or a removed one never moved the box after it.
   describe 'slot assignment' do
     def slotted_session(body, script)
@@ -1049,7 +1270,7 @@ RSpec.describe 'layout reuse across dynamic style state' do
 
   # …and a `dir=auto` scope the parse writes strong text into is tested where the direction is next READ — layout or
   # getComputedStyle — against the direction the cascade last laid it out with. A `:dir()` read in between resolved it
-  # too, and when that refreshed the baseline the flip was never seen (a native pass replayed the stale box). Chrome:
+  # too, and when that refreshed the baseline the flip was never seen (a reused pass kept the stale box). Chrome:
   # `[0, true, 200]`, and getComputedStyle `ltr` then `rtl` with no layout read at all.
   it 'turns a dir=auto scope around when the parse writes strong text into it' do
     body = ->(read) { %(<div id="d" dir="auto" style="width:300px"><p id="b" style="width:100px;margin:0">123</p><script>window.r = [#{read}]</script>&#x5e9;&#x5dc;&#x5d5;&#x5dd;</div>) }
@@ -1062,7 +1283,7 @@ RSpec.describe 'layout reuse across dynamic style state' do
 
   # `dir="auto"` takes its direction from the first strong character of its text, and every box under it inherits that.
   # `markDirAutoScopes` marks the auto element's subtree when its resolved direction FLIPS — without it the sibling kept
-  # its left-to-right box in both layouts.
+  # its left-to-right box.
   describe 'dir=auto' do
     def x_after(body, change, shadow: nil)
       s = session_for('body { margin: 0 }', body)
@@ -1077,7 +1298,7 @@ RSpec.describe 'layout reuse across dynamic style state' do
     end
 
     # …up the FLAT tree: a `<slot dir=auto>` resolves from its ASSIGNED text, which a node-tree walk never reaches.
-    # (This one and the next the JS layout answered right by accident; a native pass REPLAYED the stale subtree, which
+    # (This one and the next once failed as a reuse that handed the stale subtree back — which
     # `CSIM_NL_REUSE_VERIFY=1` turns into a throw.)
     it 'flips a dir=auto slot when its slotted text changes' do   # Chrome: 0 -> 200
       body = '<div id="h"><span id="a">hello</span><p id="b" style="width:100px;margin:0">x</p></div>'
@@ -1086,7 +1307,7 @@ RSpec.describe 'layout reuse across dynamic style state' do
     end
 
     # A `dir=auto` INSIDE the scope resolves through its host (its slotted text) — which must not count as the host's
-    # own resolution, or the host's flip is seen as no flip. Chrome: 0 -> 200 (a native pass replayed the stale box).
+    # own resolution, or the host's flip is seen as no flip. Chrome: 0 -> 200 (a reused pass kept the stale box).
     it 'flips a dir=auto host whose shadow tree holds another dir=auto' do
       body = '<div id="h" dir="auto" style="width:300px"><span id="a">hello</span></div>'
       s = session_for('body { margin: 0 }', body)

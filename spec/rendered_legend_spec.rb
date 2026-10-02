@@ -4,9 +4,9 @@ require 'capybara/simulated'
 require_relative 'support/session_teardown'
 
 # A fieldset's RENDERED LEGEND (HTML §15.3.13) is the first child BOX of the fieldset's box that is a `<legend>`, neither
-# floated nor absolutely positioned — a shrink-to-fit block. Boxes, not DOM children: each shape below was decided on
-# the DOM tree, in both engines, and laid the legend out 300px wide (or, for the box-less fieldset, shrank it). Parity
-# between the walks cannot see an error they share, so the figures are Chrome's (Firefox agrees on the first).
+# floated nor absolutely positioned — a shrink-to-fit block. Boxes, not DOM children: each shape below, decided on the
+# DOM tree, lays the legend out 300px wide (or, for the box-less fieldset, shrinks it). The figures are Chrome's
+# (Firefox agrees on the first).
 RSpec.describe 'the rendered legend' do
   it "is the first legend BOX of the fieldset's box" do
     html = <<~HTML
@@ -36,8 +36,8 @@ RSpec.describe 'the rendered legend' do
   end
 
   # …and which one it is follows its siblings: hiding the first legend makes the second the rendered one, and
-  # showing it again takes that back. Neither write touches the second legend, whose box both engines reused —
-  # 300px where Chrome shrinks it to 55.6, and the other way round.
+  # showing it again takes that back. Neither write touches the second legend, so a layout that reuses its box keeps
+  # it 300px where Chrome shrinks it to 55.6, and the other way round.
   it 'follows a change to an earlier legend' do
     html = <<~HTML
       <!DOCTYPE html><html><head><style>body { margin: 8px; font: 16px sans-serif } fieldset { width: 300px; margin: 0; padding: 0 10px; border: 2px solid } .n { display: none }</style></head><body>

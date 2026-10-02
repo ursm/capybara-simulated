@@ -34,9 +34,9 @@ RSpec.describe 'native layout flex' do
 
   # A child that generates NO BOX is no flex ITEM: a `<link>` or `<meta>` written in the body is
   # `display: none` from the UA STYLESHEET, which is neither an author rule (so the hide cascade never saw it)
-  # nor one of the tags the visibility walk knows by name. The oracle laid one out as an item — the item after
-  # it moved 100px — and `visible?` said true of it. The UA's own display is part of the hide cascade now, so
-  # `boxlessChild` is the one question every child list asks. Chrome figures; native was already right.
+  # nor one of the tags the visibility walk knows by name. It was once laid out as an item — the item after it
+  # moved 100px — and `visible?` said true of it. The UA's own display is part of the hide cascade now, so
+  # `boxlessChild` is the one question every child list asks. Chrome figures.
   it 'makes no flex item of a child that generates no box' do
     [
       ['<link rel="stylesheet">',                              7.109375],
@@ -208,18 +208,17 @@ RSpec.describe 'native layout flex' do
     expect_shared_gap(b[1], shared: 0, chrome: 25, what: "#{body}: the second item's y")
   end
 
-  # A DEFINITE height is clamped before the content is laid out in it — and the oracle handed a column item back its
-  # AUTO layout whenever the imposed number equalled it, including one its own max-height had just CUT to that
-  # number: its lines stayed aligned in the 55 they came to (y 35 and 0 against Chrome's 25 and -10), and the walk
-  # declined every such container rather than read the oracle's box to find out (`rv8g3`, 234 declines).
+  # A DEFINITE height is clamped before the content is laid out in it — a column item handed back its AUTO layout
+  # whenever the imposed number equals it, including one its own max-height has just CUT to that number, keeps its
+  # lines aligned in the 55 they came to (y 35 and 0 against Chrome's 25 and -10).
   it 'lays a clamped column item out again at the height it was cut to' do
     body = '<div style="display:flex;flex-direction:column;height:120px"><div id="c" style="display:flex;flex-wrap:wrap-reverse;width:70px;max-height:45px">' \
            '<div style="width:30px;height:20px"></div><div style="width:45px;height:35px"></div></div></div>'
     expect_layout(body)
     expect(item_boxes(body)).to eq([[0, 25, 30, 20], [0, -10, 45, 35]])   # Chrome
   end
-  # …and a percentage height inside an item a min-height floored resolves against the floor (Chrome 45), in both
-  # engines: native imposes the height there too rather than laying the item out at auto again.
+  # …and a percentage height inside an item a min-height floored resolves against the floor (Chrome 45): native
+  # imposes the height there too rather than laying the item out at auto again.
   it 'resolves a percentage height against the floor a column item\'s min-height raised it to' do
     body = '<div style="display:flex;flex-direction:column;width:300px;height:150px"><div style="min-height:60%">' \
            '<div id="m" style="height:50%;width:50%">nested</div></div><div style="height:20px"></div></div>'
@@ -287,11 +286,9 @@ RSpec.describe 'native layout flex' do
     expect_layout('<div style="display:flex;flex-direction:column;flex-wrap:wrap;min-height:200px;width:100px"><div style="width:40px;height:30px"></div><div style="width:40px;height:30px"></div></div>')
   end
 
-  # A flex ITEM that is itself a flex container with an AUTO height + min/max-height: the parent-push overwrites
-  # its height with the final (clamped) box, so native carries the item's autoHeight on rec[54] and recomputes
-  # the box from the container's own content — a min-height FLOOR aligns the items in the pre-floor content
-  # (the Avo `field-wrapper` row), a max-height CAP lets a taller row overflow. Only a box the FLOW made DEFINITE
-  # (stretch / abspos) that a clamp then BINDS still declines (native holds no pre-clamp extent).
+  # A flex ITEM that is itself a flex container with an AUTO height + min/max-height: its box comes from the
+  # container's own content — a min-height FLOOR aligns the items in the pre-floor content (the Avo
+  # `field-wrapper` row), a max-height CAP lets a taller row overflow.
   it 'matches a flex-item row whose min-height floors its content, items centered in the pre-floor content' do
     expect_layout('<div style="display:flex;width:400px"><div style="display:flex;align-items:center;min-height:80px;flex:1"><div style="width:50px;height:30px"></div></div></div>')
   end
@@ -308,9 +305,8 @@ RSpec.describe 'native layout flex' do
     expect_layout('<div style="display:flex;height:200px;width:400px"><div style="display:flex;flex-direction:column;justify-content:space-between;min-height:100px;flex:1"><div style="width:40px;height:20px"></div><div style="width:40px;height:20px"></div></div></div>')
   end
   # A box the FLOW made definite (a stretch) whose clamp BINDS: the stretched size is clamped FIRST and the items
-  # are aligned in what is left (css-flexbox §9.4 step 11). These used to DECLINE — the oracle aligned them in the
-  # pre-clamp stretch and cut the box around them afterwards (50 and 10), which native, holding only the clamped
-  # box, could not reproduce; it now clamps before it lays the content out, and gives Chrome's figure.
+  # are aligned in what is left (css-flexbox §9.4 step 11), not in the pre-clamp stretch with the box cut around
+  # them afterwards (50 and 10). Native clamps before it lays the content out, and gives Chrome's figure.
   it 'aligns the items of a cross-stretched flex row in the stretch its max-height clamped' do
     body = '<div style="display:flex;height:120px;align-items:stretch;width:400px"><div id="c" style="display:flex;max-height:80px;align-items:center">' \
            '<div style="width:50px;height:20px"></div></div></div>'
@@ -406,8 +402,7 @@ RSpec.describe 'native layout flex' do
   end
   # An abspos flex container is SELF-SIZED, and its binding min-height is the auto-height case: native aligns
   # its items in the CONTENT cross and grows the box around them (0), where Chrome clamps first and centres them in
-  # the 80 (25) — the same shared gap as an in-flow auto-height row. (It used to decline, when the walk read the
-  # oracle's box to tell a binding clamp from one that did not bind.)
+  # the 80 (25) — the same shared gap as an in-flow auto-height row.
   it 'aligns an abspos flex row whose min-height binds as an auto-height row (shared)' do
     body = '<div style="position:relative;width:300px;height:200px"><div id="c" style="position:absolute;top:0;left:0;display:flex;align-items:center;min-height:80px">' \
            '<div style="width:40px;height:30px"></div></div></div>'
@@ -415,9 +410,9 @@ RSpec.describe 'native layout flex' do
     expect_shared_gap(first_item_box(body)[1], shared: 0, chrome: 25, what: "#{body}: the item's y")
   end
   # …but BETWEEN two insets its height is definite — the span — and the clamp comes before anything is laid out in it
-  # or an auto margin splits what it leaves (CSS 2.1 §10.6.4 / §10.7). The oracle aligned the items in the unclamped
-  # span and cut the box afterwards (85 and 10, where native and Chrome say 25 and 50), and gave an auto margin
-  # nothing to take (0 where native and Chrome say 60).
+  # or an auto margin splits what it leaves (CSS 2.1 §10.6.4 / §10.7). Aligning the items in the unclamped span and
+  # cutting the box afterwards puts them at 85 and 10 (Chrome: 25 and 50), and gives an auto margin nothing to take
+  # (0 where Chrome says 60).
   it 'aligns an abspos flex row between two insets in the height its max-height clamped' do
     body = '<div style="position:relative;width:300px;height:200px"><div id="c" style="position:absolute;top:0;bottom:0;left:0;display:flex;align-items:center;max-height:80px">' \
            '<div style="width:40px;height:30px"></div></div></div>'
@@ -532,13 +527,12 @@ RSpec.describe 'native layout flex' do
     # …and `align-items: flex-start`, which follows the AXIS, puts it at the same 70 without the line grow
     expect(first_item_box(%(<div style="display:flex;flex-wrap:wrap-reverse;align-items:flex-start;width:100px;height:90px">#{rows}</div>))[1]).to eq(70)
   end
-  # align-content:stretch with lines that MIX stretch-filled and explicit cross sizes: a natively-sized row
-  # grows its lines from their NATURAL crosses, so the mix is computed (it declined while item boxes were pushed).
+  # align-content:stretch with lines that MIX stretch-filled and explicit cross sizes: the row grows its lines
+  # from their NATURAL crosses, so the mix is computed.
   it 'matches a mixed stretch/explicit wrap under align-content:stretch' do
     expect_layout('<div style="display:flex;flex-wrap:wrap;width:250px;height:200px"><div style="width:100px"></div><div style="width:100px"></div><div style="width:100px;height:50px"></div></div>')
   end
-  # An rtl flex ROW reverses the main axis (first item at the right); once rtl blocks lay out natively (r1) its
-  # items no longer decline, so the whole row is native.
+  # An rtl flex ROW reverses the main axis (first item at the right).
   it 'matches an rtl flex row (main axis reversed, first item at the right)' do
     expect_layout('<div style="display:flex;direction:rtl;width:400px"><div style="width:80px;height:30px"></div><div style="width:80px;height:30px"></div></div>')
   end
@@ -551,9 +545,9 @@ RSpec.describe 'native layout flex' do
     expect_layout('<div style="display:flex;flex-direction:column;direction:rtl;align-items:flex-end;width:200px;height:120px"><div style="width:50px;height:30px"></div><div style="width:70px;height:40px"></div></div>')
   end
   # A `stretch` item that can't fill its line sits at the cross-start — the RIGHT edge here — whether it's short
-  # of the width (a max-width, or an explicit width), OVER it (a min-width), or aligned by self. The oracle maps
-  # `stretch` → flex-end on a reversed cross unconditionally, so native's code-2 placement must too (it once only
-  # flipped an explicitly-sized item, leaving a min/max-clamped one wrongly at the LEFT).
+  # of the width (a max-width, or an explicit width), OVER it (a min-width), or aligned by self: `stretch` maps to
+  # flex-end on a reversed cross unconditionally (flipping only an explicitly-sized item once left a min/max-clamped
+  # one wrongly at the LEFT).
   it 'matches an rtl flex column whose stretch item is clamped short of / past its line' do
     expect_layout('<div style="display:flex;flex-direction:column;direction:rtl;width:200px;height:120px"><div style="max-width:60px;height:30px"></div><div style="height:30px"></div></div>')
     expect_layout('<div style="display:flex;flex-direction:column;direction:rtl;width:200px;height:120px"><div style="min-width:300px;height:30px"></div></div>')
@@ -578,8 +572,7 @@ RSpec.describe 'native layout flex' do
   # `align-content` takes a BASELINE keyword that lines have no baseline to share for, so it falls back —
   # and the two spellings fall back differently. Chrome, three 20px lines in a 90px row: `baseline` /
   # `first baseline` land where `flex-start` does (0/20/40, no line grow) and `last baseline` where `normal`
-  # does (0/30/60); under `wrap-reverse`, 70/50/30 against 70/40/10. The two engines disagreed here — each
-  # was right about one of the pair — for 96 shapes of a 7296-case sweep.
+  # does (0/30/60); under `wrap-reverse`, 70/50/30 against 70/40/10.
   it 'falls a baseline align-content back the way each spelling does' do
     lines = '<div style="width:60px;height:20px"></div>' * 3
     stack = ->(wrap, k) {
@@ -632,13 +625,12 @@ RSpec.describe 'native layout flex' do
     expect_layout(body)
     expect(item_boxes(body)).to eq([[0, 0, 20, 20], [0, 20, 20, 20], [50, 0, 20, 20]])   # Chrome: two lines of 40 and 20, the box 40
   end
-  # …and so is one whose auto height reaches it as a PUSHED flex item's (the sibling's percentage-height absolute
-  # box keeps the row off native sizing, so the column's record carries the oracle's FINAL height and
-  # `item_auto_height` says it was auto) — native read that height as declared and gave every line one extent
-  # until a review found it (867 of 2,000 of its shapes).
+  # …and so is one that is itself a flex item (beside a sibling holding a percentage-height absolute box): its
+  # height is still AUTO, not a declared one every line takes as its extent (a review found 867 of 2,000 of its
+  # shapes read it as declared once).
   # SHARED with Chrome's rule, not only this shape: Chrome justifies EVERY line within the box (the tallest line,
   # 40), so the short line's third item sits at 20, where native justifies it within its own 20 and leaves it at 0.
-  it 'justifies the lines of a wrapping max-height column that is itself a pushed flex item' do
+  it 'justifies the lines of a wrapping max-height column that is itself a flex item' do
     body = '<div style="display:flex;align-items:flex-start;width:300px"><div id="c" style="display:flex;flex-direction:column;flex-wrap:wrap;' \
            'max-height:50px;width:200px;justify-content:flex-end"><div style="width:20px;height:20px"></div><div style="width:20px;height:20px"></div>' \
            '<div style="width:20px;height:20px"></div></div><div style="width:10px;height:10px"><div style="position:absolute;height:10%;width:2px"></div></div></div>'
@@ -648,11 +640,10 @@ RSpec.describe 'native layout flex' do
     expect(c.values_at(0, 2, 3)).to eq([100, 20, 20])
     expect_shared_gap(c[1], shared: 0, chrome: 20, what: "#{body}: c's y")
   end
-  # …and so is one the oracle laid out with no DEFINITE height at all — a wrapping column inside a definite-height
-  # column, pushed (its items' `min()` widths keep it off native sizing): the record carries its final box, which
-  # native took for a declared height every line justified within (the third item at 10, the oracle 0). Only a
-  # definite content height is one extent for every line. SHARED with Chrome's justify-in-the-box, which says 10.
-  it 'justifies each line of a pushed wrapping column with no definite height on its own' do
+  # …and so is one with no DEFINITE height at all — a wrapping column inside a definite-height column, its items
+  # holding `min()` widths: its final box is no declared height for every line to justify within. Only a definite
+  # content height is one extent for every line. SHARED with Chrome's justify-in-the-box, which says 10.
+  it 'justifies each line of a wrapping column item with no definite height on its own' do
     item = '<div style="width:30px;height:20px"><div style="width:min(50%,10px);height:2px"></div></div>'
     body = '<div style="display:flex;flex-direction:column;height:120px"><div id="c" style="display:flex;flex-direction:column;flex-wrap:wrap;' \
            "width:70px;max-height:45px;justify-content:center\">#{item * 3}</div></div>"
@@ -694,8 +685,8 @@ RSpec.describe 'native layout flex' do
   it('matches a percentage padding item beside a fixed one') { expect_layout('<div style="display:flex;width:400px"><div style="padding-left:10%">a</div><div style="width:80px">b</div></div>') }
   it('matches an inline-block item with an explicit size (blockified)') { expect_layout('<div style="display:flex;width:400px"><span style="display:inline-block;width:80px;height:30px"></span><div style="width:80px;height:30px"></div></div>') }
   # An INLINE-FLEX flex item is BLOCKIFIED (§4: inline-flex → flex): it lays out as a block-level flex container
-  # (its flex-resolved box pushed, its own items flexed within it), not as an atomic inline. The pervasive #1
-  # bail before this. (An atomic inline-flex is native's own now too -- see native_layout_inline_atomic_spec.)
+  # (at its flex-resolved box, its own items flexed within it), not as an atomic inline. (An atomic inline-flex
+  # is native's own too -- see native_layout_inline_atomic_spec.)
   it('matches an inline-flex flex item (blockified to flex — items flexed within it)') { expect_layout('<div style="display:flex;width:400px"><div style="display:inline-flex;gap:8px;align-items:center"><div style="width:30px;height:30px"></div><div style="width:20px;height:40px"></div></div><div style="width:50px;height:20px"></div></div>') }
   it('matches an inline-flex flex item with justify-content:space-between') { expect_layout('<div style="display:flex;width:400px"><div style="display:inline-flex;justify-content:space-between;width:200px"><div style="width:30px;height:30px"></div><div style="width:20px;height:30px"></div></div></div>') }
   it('matches an inline-flex COLUMN flex item') { expect_layout('<div style="display:flex;width:400px"><div style="display:inline-flex;flex-direction:column"><div style="width:30px;height:30px"></div><div style="width:30px;height:20px"></div></div></div>') }
@@ -722,8 +713,8 @@ RSpec.describe 'native layout flex' do
     expect_layout(body)
     expect(item_boxes(body)).to eq([[0, 0, 100, 20], [0, 40, 100, 30]])   # Chrome
   end
-  # A flex-ITEM flex ROW whose min-height floors its own (auto) content lays out natively: the item's autoHeight
-  # rides rec[54] past the parent-push, so native recomputes the cross from content and two-phases the clamp —
+  # A flex-ITEM flex ROW whose min-height floors its own (auto) content lays out natively: native computes the
+  # cross from content and two-phases the clamp —
   # the child aligns in the PRE-floor content (align-items:center in a 30px content → 0), box grows to min-height.
   it('matches an auto-height min-height ROW that is itself a flex item (two-phase floor, align in pre-floor content)') { expect_layout('<div style="display:flex;flex-direction:column;width:300px"><div style="display:flex;align-items:center;min-height:120px;width:200px"><div style="width:50px;height:30px"></div></div></div>') }
   # An inline-flex container is an ATOMIC inline in its parent's line, and native lays it out ITSELF now -- at
@@ -731,7 +722,7 @@ RSpec.describe 'native layout flex' do
   it('matches an inline-flex container as an atomic inline') { expect_layout('<div style="display:inline-flex;width:400px"><div style="width:80px;height:30px"></div></div>') }
   # Bare (non-whitespace) text directly in a flex container is an ANONYMOUS flex item (§4, `boxItems`): a box of its own
   # on the line, which its siblings are placed beside and which the line's cross size and baseline come from. Until
-  # 2026-09-28 neither engine laid it out — it floored the container's auto cross size at a line-height and nothing
+  # 2026-09-28 nothing laid it out — it floored the container's auto cross size at a line-height and nothing
   # else, so the text was drawn nowhere and the items took its room. Chrome's figures for `#m`: [x, y] and the
   # container's height.
   {
@@ -754,9 +745,8 @@ RSpec.describe 'native layout flex' do
   end
   # …and a flex ITEM that is such a container is floored at what its content asks: its bare text is an anonymous item
   # (`boxItems`), so its automatic minimum is its ITEMS' contributions summed (§9.9.1). Avo's sortable table header (a
-  # `flex: 1 1 0%` link holding a label and a sort icon, in a nowrap cell) is Chrome's 62 — the label and the icon. The
-  # JS layout's pen walked the text as LINES between the children it blockified and floored it at the label (42), and
-  # native, before the text was an item, at the icon (20).
+  # `flex: 1 1 0%` link holding a label and a sort icon, in a nowrap cell) is Chrome's 62 — the label and the icon, not
+  # the label alone (42) nor the icon alone (20).
   it 'floors a flex item holding bare text at its items' do
     header = '<table style="border-spacing:0"><tr><th style="padding:0 12px;white-space:nowrap;font:16px sans-serif">' \
              '<div style="display:flex;width:100%%"><a id="m" style="flex:1 1 0%%;display:flex;font-size:12px">Is writer%s</a></div></th></tr></table>'
@@ -782,17 +772,15 @@ RSpec.describe 'native layout flex' do
     expect_layout(oof)
     expect(laid_out_rect(oof)[2]).to be_within(0.05).of(30.22)
     # …and under a white-space that does not wrap, an item's text is ONE unbreakable token, a wide character no
-    # opportunity: the oracle's pen skipped the container's pin and so broke `nowrap` CJK per character — 16 where
-    # native and Chrome say 128 / 127.53 (review rv51).
+    # opportunity: `nowrap` CJK broken per character would be 16 wide, where Chrome says 127.53 (review rv51).
     body = '<div style="display:flex;width:400px"><div id="m" style="display:flex;flex:0 0 min-content;white-space:nowrap">日本語のテキスト</div></div>'
     expect_layout(body)
     expect(laid_out_rect(body)[2]).to be_within(0.5).of(127.53)
   end
-  # An item EXACTLY as wide as the room its line leaves stays on that line, to a LINE's tolerance: the engines add a
-  # line's items in different orders, and Discourse's navigation bar (`width: calc(100% - 0px)` beside a zero-width
-  # clearfix `::before`, in a 368.56px wrapping row) wrapped in the oracle and not natively, on the last bit. The
-  # whitespace-only `display: table` pseudo is 0 wide, as in Chrome (both engines gave it an EQUAL SHARE, 184, until
-  # 2026-09-30), so the section sits at Chrome's 10.72.
+  # An item EXACTLY as wide as the room its line leaves stays on that line, to a LINE's tolerance: Discourse's
+  # navigation bar (`width: calc(100% - 0px)` beside a zero-width clearfix `::before`, in a 368.56px wrapping row)
+  # once wrapped on the last bit. The whitespace-only `display: table` pseudo is 0 wide, as in Chrome (it took an
+  # EQUAL SHARE, 184, until 2026-09-30), so the section sits at Chrome's 10.72.
   it 'keeps an item exactly as wide as its line on it' do
     body = '<style>.c::before{display:table;content:" "}</style><div style="width:390px;padding:0 10.72px;box-sizing:border-box">' \
            '<div class="c" style="display:flex;flex-wrap:wrap"><section id="m" style="width:calc(100% - 0px);height:5px"></section></div></div>'
@@ -837,8 +825,8 @@ RSpec.describe 'native layout flex' do
     expect_layout('<div style="position:relative;left:20px;width:300px"><div style="height:20px"></div><div style="position:relative;top:5px;left:10px;height:20px"></div></div>')
   end
 
-  # A content-box flex item's min/max-height are pushed as BORDER-box figures once its record says border-box
-  # (the flex push): a `max-height: 50px; padding: 10px` item is a 70px box, not 50 (review finding, grid Phase 3).
+  # A content-box flex item's min/max-height clamp its CONTENT box, so as BORDER-box figures they carry its edges:
+  # a `max-height: 50px; padding: 10px` item is a 70px box, not 50 (review finding, grid Phase 3).
   it 'clamps a content-box item with vertical edges by its max/min-height as border-box figures' do
     expect_layout('<div style="display:flex;align-items:flex-start;width:400px"><div style="max-height:50px;padding:10px"><div style="height:100px"></div></div></div>')
     expect_layout('<div style="display:flex;align-items:flex-start;width:400px"><div style="min-height:50px;padding:10px"><div style="height:10px"></div></div></div>')
@@ -846,10 +834,10 @@ RSpec.describe 'native layout flex' do
   end
 
   # ── Native ROW sizing ─────────────────────────────────────────────────────────────────────────────────
-  # The items' widths resolved by the native engine (layout.rs `flex_row_sizes`, ported from the oracle's flexRowMetrics +
-  # resolveFlexibleLengths): flex base (basis / width / content), the automatic minimum (min-content, zero when
-  # the item scrolls), declared min/max, line breaking on hypothetical sizes, grow / shrink with freezing, the
-  # equal-share fallback for an item that measured nothing, then stretch as an imposed height.
+  # The items' widths resolved by the native engine (layout.rs `flex_row_sizes`): flex base (basis / width /
+  # content), the automatic minimum (min-content, zero when the item scrolls), declared min/max, line breaking on
+  # hypothetical sizes, grow / shrink with freezing, the equal-share fallback for an item that measured nothing,
+  # then stretch as an imposed height.
   describe 'native row sizing' do
     let(:row) { 'display:flex;width:400px' }
 
@@ -913,9 +901,8 @@ RSpec.describe 'native layout flex' do
   end
 
   # ── Native COLUMN sizing ──────────────────────────────────────────────────────────────────────────────
-  # The items' sizes resolved by the native engine (layout.rs `flex_column_sizes`, ported from the oracle's
-  # layoutFlexColumn up to placement): the cross (width) first — declared, stretched to the line, or
-  # shrink-to-fit — then each item's flex base (basis / declared height / its content height MEASURED at that
+  # The items' sizes resolved by the native engine (layout.rs `flex_column_sizes`, up to placement): the cross
+  # (width) first — declared, stretched to the line, or shrink-to-fit — then each item's flex base (basis / declared height / its content height MEASURED at that
   # width, the declared height set aside), the automatic minimum, line breaking against a definite height or a
   # max-height cap, `align-content` growing the lines and re-stretching their items, and the heights shared
   # against the definite height, a min-height floor the items underrun, or a max-height cap they overrun.
@@ -966,19 +953,16 @@ RSpec.describe 'native layout flex' do
       expect_layout(%(<div style="#{col};height:200px"><div style="flex:1;display:flex;flex-direction:column"><div style="flex:1">nested col</div><div>x</div></div><div>b</div></div>))
       expect_layout(%(<div style="display:flex;width:400px"><div style="flex:1;display:flex;flex-direction:column"><div style="flex:1">col in row</div><div>x</div></div><div style="width:50px;height:120px"></div></div>))
     end
-    # A descendant declaring a percentage kept the item on the pushed path until 2026-09-19: the records carried
-    # those percentages resolved against the item's FINAL size, where native measures it at a provisional one.
-    # Native resolves them itself now (`with_percent_sizes`, against the box it is laying the child out in,
-    # afresh on every measure), so the item is sized natively — measured over a 2,548-shape sweep on the gate's
-    # own axes (declines 516 -> 468, and the `pctsize` sweep's oracle reads 73 -> none).
+    # A descendant declaring a percentage: native resolves it (`with_percent_sizes`) against the box it is laying
+    # the child out in, afresh on every measure — the item's provisional size while it measures it, its final one
+    # when it lays it out.
     it 'sizes an item whose subtree declares a plain percentage natively' do
       expect_layout(%(<div style="#{col};height:200px"><div style="flex:1 1 auto"><div style="height:50%">pct</div></div><div style="flex:1 1 auto">plain</div></div>))
       expect_layout('<div style="display:flex;width:400px"><div><div style="height:150%">pct</div></div><div style="height:40px;width:50px"></div></div>')
       expect_layout(%(<div style="display:flex;width:400px"><div><div style="padding:0 10%">pct</div></div><div style="width:30px"></div></div>))
       expect_layout(%(<div style="#{col};width:400px"><div><div style="width:50%;min-height:20%">pct</div></div></div>))
-      # …and one inside a LINEAR `calc()` since 2026-09-22: the record carries it as the pair `px + frac x basis`
-      # (rec[100..105] beside rec[119..124]) and native resolves it at the basis it has, exactly as it does a
-      # plain one. It fell back until then — for want of a constant term to send, not for want of a basis.
+      # …and one inside a LINEAR `calc()`: it travels as the pair `px + frac x basis` and native resolves it at the
+      # basis it has, exactly as it does a plain one.
       # The ITEM's box is asserted beside the golden, and against CHROME, because a golden only says the layout
       # did not move: this increment put new arithmetic on the native side.
       calc_row = '<div style="display:flex;width:400px"><div><div id="m" style="height:calc(50% + 2px)">pct</div></div><div style="height:40px;width:50px"></div></div>'
@@ -1006,9 +990,9 @@ RSpec.describe 'native layout flex' do
         expect_layout(body)
       end
       # …where a comparison function over affine operands is native's: the size travels as its PROGRAM and native
-      # evaluates it at whichever basis it measures at — two lines that cross beside a constant included, which fell
-      # back until 2026-09-26. Chrome's box for the row; the column is 60 here — the oracle's figure when it
-      # was pushed, too — and 60.39 in Chrome, whose flexed item comes out ~1px taller around the same min-height.
+      # evaluates it at whichever basis it measures at — two lines that cross beside a constant included. Chrome's
+      # box for the row; the column is 60 here and 60.39 in Chrome, whose flexed item comes out ~1px taller around
+      # the same min-height.
       row3 = '<div style="display:flex;width:400px"><div><div id="m" style="min-height:min(50%, calc(10% + 40px), 80px)">pct</div></div><div style="height:40px;width:50px"></div></div>'
       expect_layout(row3)
       expect(marked_box(row3)).to eq([19.546875, 20])   # Chrome
@@ -1051,9 +1035,8 @@ RSpec.describe 'native layout flex' do
 
     # An atomic written through a `display: contents` wrapper inside a MIXED block, whose record hangs under the
     # anonymous group: the route is asked by BOX (`layoutParent`), where `flatTreeParent` stopped at the wrapper
-    # (119 against 102). Its percentage HEIGHT fell back while the group's auto height was its basis; native hands the
-    # group's content the mixed block's own basis now (`NL_FLAG_ANON_GROUP`), so the item is sized natively. Chrome's
-    # boxes.
+    # (119 against 102). Native hands the group's content the mixed block's own basis, not the group's auto height,
+    # so its percentage HEIGHT resolves. Chrome's boxes.
     it 'sizes an item holding an atomic through `contents` in a mixed block natively' do
       {
         %(<div style="#{col};height:120px"><div style="flex:1"><div style="height:100%">lead<p>para</p><span style="display:contents"><span id="m" style="display:inline-block;width:20px;height:50%">a</span></span></div></div><div>z</div></div>) => [20, 51],
@@ -1063,11 +1046,10 @@ RSpec.describe 'native layout flex' do
         expect(marked_box(body)).to eq(size)
       end
     end
-    # …and an inline BOX's percentage EDGE no longer falls back, at any depth: it has no record, but its fractions ride
-    # the inline table and native resolves them against the content width of the block laying the line out — the
-    # item's natural one when it measures a wrapping column's item, its final one when it lays it out, which is what
-    # the oracle's `placeInlineBox` reads too. It fell back while the walk resolved the edge against the oracle's
-    # FINAL width for both (54 tall in native, 36 in the oracle and Chrome).
+    # …and an inline BOX's percentage EDGE, at any depth: it has no record, but its fractions ride the inline table and
+    # native resolves them against the content width of the block laying the line out — the item's natural one when
+    # it measures a wrapping column's item, its final one when it lays it out. Resolved against the FINAL width for
+    # both, the item comes out 54 tall where Chrome says 36.
     it 'measures an item holding an inline box\'s percentage edge natively' do
       wrap = 'display:flex;flex-direction:column;flex-wrap:wrap;height:60px'
       [%(<div style="#{wrap}"><div>bold <i style="padding-left:20%">inl</i> tail words</div><div style="height:40px">z</div><div style="width:170px;height:30px"></div></div>),
@@ -1077,11 +1059,9 @@ RSpec.describe 'native layout flex' do
       end
     end
 
-    # …and the INLINE route is no longer one of them: an ATOMIC written inside an inline box hangs under the text
-    # block of the block around it, which is its containing block too (an inline box is none), so where that block
-    # is the record's parent — not a mixed block's anonymous group — its percentage travels as a fraction like a
-    # direct child's. Until 2026-09-24 the walk resolved it against the oracle's box, and the item holding it fell
-    # back to the pushed path: 152 of 200 sampled `flexpctinline` shapes broke with the oracle hidden, none now.
+    # …and an ATOMIC written inside an inline box hangs under the text block of the block around it, which is its
+    # containing block too (an inline box is none), so where that block is the record's parent — not a mixed
+    # block's anonymous group — its percentage travels as a fraction like a direct child's.
     # Chrome: the span is 50 tall in a 100px stretched row, 20 in the 40px line an auto one gets.
     it 'sizes an item holding an atomic whose percentage sits inside an inline box natively' do
       {
@@ -1094,11 +1074,9 @@ RSpec.describe 'native layout flex' do
       end
     end
 
-    # …and the GRID route is no longer one of them. A grid item's containing block is its GRID AREA — its
-    # TRACK across, its ROW down — which native did not have: it resolved a grid item's percentages against the
-    # GRID's content box, so the walk resolved them instead, against the size the ORACLE's final layout gave
-    # the item, and a flex item holding such a grid FELL BACK to the pushed path. Native resolves them per
-    # track now, so the fraction travels and the item is sized natively.
+    # …and a GRID inside the item: a grid item's containing block is its GRID AREA — its TRACK across, its ROW
+    # down — not the GRID's content box, and native resolves its percentages per track, so the fraction travels
+    # and the item is sized natively.
     # The BASIS itself is the grid spec's business and is asserted there against Chrome
     # (`native_layout_grid_spec`, "resolves a grid item's percentages against its GRID AREA"); what these hold
     # is the flex layout around it.
@@ -1133,11 +1111,8 @@ RSpec.describe 'native layout flex' do
       expect_layout(%(<div style="#{col};flex-wrap:wrap;height:70px"><div style="flex-basis:20px;height:100px">a<br>b<br>c</div><div style="height:30px">b</div></div>))
     end
     # …and a WRAP column's STRETCHING item is measured at its shrink-to-fit width and then RE-STRETCHED, so the
-    # BASIS of any percentage in its subtree moves between the measure and the final layout. That used to
-    # refuse EVERY such item — "it makes no difference who resolved it" — and it was a CONFORMANCE worry, not a
-    # parity one: both engines measured at the same provisional width, so both were wrong together and the
-    # harness saw nothing. Six shapes of a 2,548-case sweep did break, and they were the grid-area
-    # containing block (7f9919e8), not this.
+    # BASIS of any percentage in its subtree moves between the measure and the final layout; each resolves against
+    # the box it is laid out in at the time.
     it 'takes a wrap column\'s stretching item natively even when its subtree declares a percentage' do
       [%(<div style="#{col};flex-wrap:wrap"><div><div style="padding-top:50%">x</div></div></div>),
        %(<div style="#{col};flex-wrap:wrap"><div><div style="width:50%">some text words here to wrap</div></div><div>two</div></div>)].each do |body|
@@ -1146,16 +1121,11 @@ RSpec.describe 'native layout flex' do
       # …and the same container with the item NOT stretching was native before and stays native
       expect_layout(%(<div style="#{col};flex-wrap:wrap"><div style="align-self:flex-start"><div style="width:50%">some text words here to wrap</div></div><div>two</div></div>))
     end
-    # …and it no longer matters WHO resolved the percentage, which is what that half of the rule was about.
-    # The refusal that used to stand here — a wrap column's stretching item, refused for any percentage in
-    # its subtree — was there because the ORACLE's margin basis was a PREDICTION: `marginBasis` answered
-    # `cbW − the box's own edges` on the rule that a block fills its containing block, and a box in a
-    # vertical writing mode, one sized by an intrinsic keyword and one under a min/max clamp do not. Native
-    # resolved the same percentage against the width the box actually got, so each was a parity break, and
-    # the refusal existed to keep them out of the comparison (a DECLINE, never a right answer).
-    # `marginBasis` derives the width `layoutBlock` derives now, so all of it is native. What each arm asserts
-    # is its recorded GOLDEN, which is blind to an error it was recorded with, so the Chrome column belongs here too. Measured 153, this shape, the
-    # mid box's width and the percentage margin it gives:
+    # …and a percentage MARGIN under such an item resolves against the width the box around it actually got — not
+    # `cbW − its own edges` on the rule that a block fills its containing block, which a box in a vertical writing
+    # mode, one sized by an intrinsic keyword and one under a min/max clamp do not. What each arm asserts is its
+    # recorded GOLDEN, which is blind to an error it was recorded with, so the Chrome column belongs here too.
+    # Measured 153, this shape, the mid box's width and the percentage margin it gives:
     #   (plain)  300 / 30      max-width:100px  100 / 10      min-width:600px       600 / 60
     #   fit-content 300 / 30   width:120px      120 / 12      width:50%             150 / 15
     #   min-inline-size:600px  600 / 60
@@ -1183,21 +1153,17 @@ RSpec.describe 'native layout flex' do
       end
     end
     # …and a percentage inside an ATOMIC inline (whose children's records hang under it, so native has their basis)
-    # or on a table's CAPTION (which `measure_table` resolves): `nlWalkResolvesPct` called both the walk's until
-    # 2026-09-25, "broader than the hazard on purpose", and pushed every flex container above one — ~60 of the 279
-    # pushes the census counted, with no shape to show a hazard once they were lifted.
+    # or on a table's CAPTION (which `measure_table` resolves).
     it 'sizes a wrap column natively over a percentage inside an inline-block or on a caption' do
       expect_layout(%(<div style="display:flex;flex-direction:column;width:300px;height:150px;flex-wrap:wrap"><div style="align-self:flex-start"><div style="display:inline-block"><div style="width:50%">some rather longer words here to measure</div></div></div><div style="width:30px;height:20px"></div></div>))
       expect_layout(%(<div style="display:flex;flex-direction:column;width:300px;height:150px;flex-wrap:wrap"><div style="align-self:flex-start"><div style="display:inline-block"><div style="min-height:50%;padding:0 10%">some rather longer words here to measure</div></div></div><div style="width:30px;height:20px"></div></div>))
       expect_layout('<div style="display:flex;width:300px"><table style="border-spacing:2px"><caption style="height:50%">a caption that wraps over several words here</caption><tr><td>a</td><td>bb cc</td></tr></table><div>y</div></div>')
     end
     # …and a table PART's percentage native resolves itself: a cell's `width` (its column's), `padding` (the table's,
-    # `measure_table`), `height` (no basis) and a row's `height` (its minimum) — every table part was the walk's until
-    # 2026-09-25 and pushed the container around it — and its `min-width` / `max-width`, which reach nothing, since
-    # 2026-09-26.
+    # `measure_table`), `height` (no basis) and a row's `height` (its minimum) — and its `min-width` / `max-width`,
+    # which reach nothing.
     # …and a BLOCK inside a `display: inline` box, which native lays out as an atomic holding it: the block's record
-    # hangs under that atomic, whose basis native has — the route pushed its container "as the conservative answer"
-    # until 2026-09-25, `display: contents` between them or not.
+    # hangs under that atomic, whose basis native has, `display: contents` between them or not.
     it 'sizes natively over a percentage on a block inside an inline box' do
       expect_layout('<div style="display:flex;width:300px;height:100px"><div><div style="height:100%">words <b>b <span style="display:contents"><div style="height:50%">blk</div></span></b></div></div><div style="width:30px;height:40px"></div></div>')
       expect_layout(%(<div style="#{col};height:120px"><div style="flex:1"><div style="height:100%">words <b>b <div style="padding-left:20%;width:50%">blk</div></b></div></div><div>z</div></div>))
@@ -1219,7 +1185,7 @@ RSpec.describe 'native layout flex' do
 
   # ── Native BASELINES ──────────────────────────────────────────────────────────────────────────────────
   # A baseline-aligned item hangs from its own first (or last) baseline, which native now reads from its
-  # laid-out lines (`Box::first_baseline`, ported from the oracle's boxBaselineOffset): a text block's line top + ascent,
+  # laid-out lines (`Box::first_baseline`): a text block's line top + ascent,
   # a block / grid / flex container's from its first in-flow child that has one (flex items in flex order,
   # reversed for a *-reverse direction), a scrolling item's clamped into its box, and the bottom margin edge
   # where no line is there to give one.
@@ -1262,7 +1228,7 @@ RSpec.describe 'native layout flex' do
     # takes the NATIVE path, one holding a contiguous run of TEXT included: `gridItems` wraps the run in the
     # anonymous ITEM box CSS Grid §4 asks for, and the run's own BASELINE is what the line then hangs from
     # (`baselineCandidates` reads that list for a grid, not the raw children — measured, an `inline-grid`
-    # around bare text put the marker beside it at y 18 where Chrome says 13). It pushed until 2026-09-22.
+    # around bare text put the marker beside it at y 18 where Chrome says 13).
     it 'matches a nested grid baseline item' do
       [
         '<div>g1</div><div style="font-size:24px">g2</div>',
@@ -1271,7 +1237,7 @@ RSpec.describe 'native layout flex' do
         expect_layout(%(<div style="#{base}"><div style="display:grid;grid-template-columns:1fr 1fr">#{items}</div><div style="font-size:32px">BIG</div></div>))
       end
     end
-    # Review findings, oracle side (native and Chrome agreed): a block holding both inline content and block
+    # Review findings: a block holding both inline content and block
     # children reads whichever comes first / last DOWN THE FLOW; a `position: relative` child's offset moves the
     # box, not its baseline; a preserved newline's empty line is a line a baseline reads from; and the line's
     # baseline is the ascent the flow grew it to, not a second scan of what sits on it.
@@ -1302,9 +1268,8 @@ RSpec.describe 'native layout flex' do
       expect_layout(%(<div style="#{base};flex-wrap:wrap"><div style="width:300px">wrapped one</div><div style="font-size:32px;width:300px">BIG</div></div>))
       expect_layout(%(<div style="#{base}"><div style="align-self:flex-start;height:50px">start</div><div>base</div><div style="font-size:32px">BIG</div></div>))
     end
-    # …and one holding a `vertical-align` shift or an atomic inline, which fell back to the pushed path — and read
-    # the ORACLE's baseline — as a "baseline hazard" until 2026-09-24, when a sweep built on those shapes showed
-    # native's own lines giving the same baseline. Chrome puts the plain item beside them at y 4.33 and 16.
+    # …and one holding a `vertical-align` shift or an atomic inline hangs by its own lines' baseline. Chrome puts the
+    # plain item beside them at y 4.33 and 16.
     it 'sizes a baseline item holding a vertical-align or an atomic inline natively' do
       {
         %(<div style="#{base}"><div>text <sup>sup</sup> more</div><div id="m">x</div></div>)                                                    => 4.33,
@@ -1317,9 +1282,7 @@ RSpec.describe 'native layout flex' do
   end
 
   # A VERTICAL writing mode's flex container lays out along the axes `flexAxisPlan` already computes — a `row`
-  # there runs down Y, which is the COLUMN routine on both sides — so it needed no new geometry, only the gate
-  # to stop refusing it (it was left over from when native's flex axes were physical). It came off the frozen
-  # corpus's decline list whole: 60 shapes, a quarter of what was left, all on that one line.
+  # there runs down Y, which is the COLUMN routine — so it needs no geometry of its own.
   #
   # What is left to say there is the CROSS axis running backwards, which is the same rule a horizontal mode has
   # and not a vertical one of its own — and WHICH containers those are depends on the `direction` as much as on
@@ -1386,9 +1349,8 @@ RSpec.describe 'native layout flex' do
 
     # …and an OUT-OF-FLOW child, whose static position is measured ALONG the cross axis rather than flipped
     # onto it by `crossAlignPhysical` — so it is the one thing that needs the axis's physical direction as its
-    # own input. Native read it off `direction` alone, which is right only while every vertical container is
-    # declined: a `vertical-rl` row's cross runs right→left with no `rtl` in sight, and the box landed the
-    # whole cross free space away (x=0 against the oracle's 170). Nothing refused it.
+    # own input. Read off `direction` alone, it is wrong for a `vertical-rl` row, whose cross runs right→left
+    # with no `rtl` in sight: the box lands the whole cross free space away (x=0 against 170).
     it 'places an out-of-flow child against the cross axis it actually has' do
       VERTICAL_CROSS.each do |(wm, dir), cells|
         ['', 'align-self:center', 'align-self:flex-end'].each do |a|
@@ -1428,13 +1390,12 @@ RSpec.describe 'native layout flex' do
 
     # …and the ONE thing that did need a rule. A baseline has geometry only where the cross axis is the block
     # axis its glyphs sit on. A vertical ROW keeps the keyword (`plan.baselineMode` is `keep` — its items do
-    # sit side by side along the inline axis) and then lays out along Y, where the oracle's own column routine
-    # ignored it: `crossOffset` answers 0, and a line's cross size is its WIDEST item's margin box (where it
-    # wraps at all — a nowrap column's one line is the container's content box) rather than a shared
-    # baseline's extent. The walk
-    # sends native `flex-start` for exactly that case. Without it native did real baseline placement AND real
-    # baseline line-sizing, and NOTHING declined: 400 of a 12000-case sweep, then 96 more of an 8000-case one
-    # that varied `align-self` rather than `align-items` — the corpus held neither shape.
+    # sit side by side along the inline axis) and then lays out along Y, where the column routine has no baseline
+    # to align on: a line's cross size is its WIDEST item's margin box (where it wraps at all — a nowrap column's
+    # one line is the container's content box) rather than a shared baseline's extent. The walk sends native
+    # `flex-start` for exactly that case. Without it native did real baseline placement AND real baseline
+    # line-sizing: 400 of a 12000-case sweep, then 96 more of an 8000-case one that varied `align-self` rather
+    # than `align-items` — the corpus held neither shape.
     it 'gives a vertical row no baseline geometry' do
       ['baseline', 'first baseline', 'last baseline'].each do |a|
         WRITING_MODES.each do |wm|
@@ -1467,13 +1428,12 @@ RSpec.describe 'native layout flex' do
     end
   end
 
-  # Whether a flex container's height is its CONTENT's (rec[54]) needs saying only where a parent PUSHES the
-  # container's final box over its declared height; everywhere else the declaration says it, and native clears it
-  # where it imposes one. It used to be read off the oracle's box (`autoHeight`) for every flex container on the
-  # page: without that figure a vertical-mode container with a DECLARED height recomputed its cross from its
-  # content (4800 of the vflex sweep's shapes).
+  # Whether a flex container's height is its CONTENT's (`item_auto_height`) is said only where it is measured at
+  # auto; everywhere else the declaration says it, and native clears it where it imposes one. A vertical-mode
+  # container with a DECLARED height that took the flag recomputed its cross from its content (4800 of the vflex
+  # sweep's shapes).
   describe 'the auto-height flag' do
-    it 'takes a declared height at its word where nothing was pushed' do
+    it 'takes a declared height at its word' do
       items = '<div style="width:30px;height:20px"></div><div style="width:40px;height:50px"></div>'
       [
         %(<div style="writing-mode:vertical-rl;display:flex;align-items:flex-end;width:60px;height:60px;align-content:center">#{items}</div>),
@@ -1488,13 +1448,13 @@ RSpec.describe 'native layout flex' do
 
   # A percentage FLEX-BASIS (and `flex: 1`, whose basis is 0%) and percentage GAPS go to native unresolved and are
   # resolved against the sizes it lays the container out at: a row's content width, a column's definite main size
-  # or its min-height floor, the definite content height across a row. The walk resolved them against the ORACLE's
-  # box — without it a wrapping column of `flex: 1` items lost its basis (1280 of the colwrap sweep's shapes).
+  # or its min-height floor, the definite content height across a row — without them a wrapping column of `flex: 1`
+  # items lost its basis (1280 of the colwrap sweep's shapes).
   describe 'percentage bases and gaps' do
-    # A `calc()` GAP was a silent ZERO in both engines: `lengthOrFraction` knew a bare length and a bare
-    # percentage and nothing else — `lengthPx`'s three regexes match no `calc(` at all — so `gap: calc(…)`
-    # fell through to `GAP_NONE` and the row packed its items edge to edge. Parity was green for it and always
-    # would have been, the record carrying 0 and native agreeing, which is why these assert CHROME's number.
+    # A `calc()` GAP was a silent ZERO: `lengthOrFraction` knew a bare length and a bare percentage and nothing
+    # else — `lengthPx`'s three regexes match no `calc(` at all — so `gap: calc(…)` fell through to `GAP_NONE` and
+    # the row packed its items edge to edge. A golden recorded with that zero holds it, which is why these assert
+    # CHROME's number.
     # The `1rem` spelling was broken TOO and is no control: the hole was `lengthPx`'s, not the percentage's.
     # `10%` is the control — its own arm was always there.
     it 'opens a calc() gap, percentage or not' do
@@ -1518,9 +1478,8 @@ RSpec.describe 'native layout flex' do
     # …and a COMPARISON function over ONE affine operand with constant bounds is `clamp(lo, px + frac x basis,
     # hi)` — a form the record carries (the bounds beside the pair) and native evaluates, so it takes the
     # native path like the rest. It was a silent ZERO before, and a decline for one build in between.
-    # FLEX and GRID both, because the grid's gaps travel in a different array (`gridsAll`'s header) and the
-    # bounds had to be added there separately: wiring only the flex pair left the grid 20px out with a
-    # mismatch, which is what said the two are not one path.
+    # FLEX and GRID both, because the grid's gaps travel a path of their own: wiring only the flex pair once left
+    # the grid 20px out.
     it 'evaluates a min() / clamp() gap natively, flex and grid' do
       {
         'min(10%, 20px)'        => 70,
@@ -1538,25 +1497,22 @@ RSpec.describe 'native layout flex' do
     end
     # …and a gap capped by ANOTHER LINE goes native too, because the bounds are affine as well: `min(10%, 20%)`
     # is `10%` held under `20%`. It was the case that forced the generalisation — a bound that is a constant
-    # covers `min(10%, 20px)` and nothing more, and the form left over was a silent ZERO in both engines
-    # (a 400px row packed edge to edge) and then a decline. What was left for the oracle alone was a NESTED
-    # comparison (`gap-not-linear`).
+    # covers `min(10%, 20px)` and nothing more, and the form left over was a silent ZERO (a 400px row packed edge
+    # to edge) and then a decline.
     it 'evaluates a gap capped by another percentage natively' do
       body = '<div style="display:flex;width:400px;gap:min(10%, 20%)"><div style="width:50px;height:10px"></div>' \
              '<div id="m" style="width:50px;height:10px"></div></div>'
       expect_layout(body)
       expect(marked_box_x(body)).to be_within(0.01).of(90)   # Chrome 153: a 40px gap
     end
-    # ORACLE: a gap whose BOUND is the percentage and whose value is not — `max(10px, 30%)`, the length floored at a
-    # line — is asked at the basis too: `axisGap` passed it only where the value had a fraction, so the floor resolved
-    # at 0 and the gap opened 10 where native and Chrome open 30% of the row.
-    # WALK: a PUSHED baseline item's ascent is its margin box's, on the basis its percentage margins resolve against
-    # — read at none (the edges the walk reads for the item's auto margins), a `margin-top: 10%` item lost its margin
-    # from the ascent native hangs it by, 55 where the oracle and Chrome say 40. (The half-empty inline-table in it —
-    # content the measure refuses — is what pushes the items.)
+    # A gap whose BOUND is the percentage and whose value is not — `max(10px, 30%)`, the length floored at a line —
+    # is asked at the basis too: passed it only where the value has a fraction, the floor resolves at 0 and the gap
+    # opens 10 where Chrome opens 30% of the row.
+    # A baseline item's ascent is its margin box's, on the basis its percentage margins resolve against — read at
+    # none, a `margin-top: 10%` item loses its margin from the ascent it hangs by, 55 where Chrome says 40.
     # A STRETCHED row item's size is definite (§9.8), so a percentage height under it resolves against it even where
-    # the stretch comes to the height the item measured — both engines laid it out again only where the two differed,
-    # and a `height: 10%` child stayed 0 (Chrome 2.19, overflowing the 22px item). Native reached 2.2 only where a `vw`
+    # the stretch comes to the height the item measured — laid out again only where the two differed, a
+    # `height: 10%` child stayed 0 (Chrome 2.19, overflowing the 22px item). Native reached 2.2 only where a `vw`
     # margin rounded the room 4e-15 off the measure. The row twin of 2c7fd42c's column rule; Chrome's figures.
     it 'resolves a percentage height against a stretched row item that came to its own height' do
       [
@@ -1582,16 +1538,15 @@ RSpec.describe 'native layout flex' do
         expect(marked_box(body)[1]).to eq(h), body   # Chrome
       end
     end
-    it 'hangs a pushed baseline item by the ascent of its percentage-margined box' do
+    it 'hangs a baseline item by the ascent of its percentage-margined box' do
       body = '<div id="c" style="display:flex;align-items:baseline;width:400px;height:200px;font:16px monospace">' \
              '<div style="margin-top:10%">a<table style="display:inline-table"><colgroup><col style="width:20px"></colgroup></table></div><div style="font-size:30px">b</div></div>'
       expect_layout(body)
       expect(first_item_box(body)[1]).to eq(40)   # Chrome
     end
-    # BOTH: a gap is never NEGATIVE — CSS clamps a math function to the property's range, and Chrome opens nothing —
-    # where both engines kept `calc(20px - min(50%, 300px))` in a 300px row at -130, and in an intrinsic measure (a
-    # float's flex) the oracle closed the row by 19 (a container -4.4 wide) while native floored it: a parity break the
-    # review of 227ffb31 found. Floored at 0 in both since 2026-09-26, flex and grid alike. Chrome's figures.
+    # A gap is never NEGATIVE — CSS clamps a math function to the property's range, and Chrome opens nothing:
+    # `calc(20px - min(50%, 300px))` in a 300px row is 0, not -130, and so is one in an intrinsic measure (a float's
+    # flex), flex and grid alike. Chrome's figures.
     it 'floors a negative gap at zero' do
       {
         '<div style="font:16px monospace"><div style="display:flex;float:left;column-gap:calc(23% - 19px)"><div>a</div><div id="m" style="width:5px;height:5px"></div></div></div>' => 9.609375,
@@ -1610,19 +1565,18 @@ RSpec.describe 'native layout flex' do
         expect(marked_box_x(body)).to be_within(0.01).of(170), disp   # Chrome
       end
     end
-    # BOTH: a min/max-height a push resolves on the walk side (a flex item whose subtree the oracle laid out) is its
-    # PROGRAM's figure — resolved as the bare pair, `min(calc(200px - 50%), 60px)` in a 120px column floored the item
-    # at 140 in native, where the oracle and Chrome say 60 — and a push takes the program off the record with the pair.
-    it 'resolves a pushed item\'s clamped min-height by its program' do
+    # A min/max-height that is a comparison function is its PROGRAM's figure — resolved as the bare pair,
+    # `min(calc(200px - 50%), 60px)` in a 120px column floored the item at 140, where Chrome says 60.
+    it 'resolves an item\'s comparison-function min-height by its program' do
       body = '<div id="c" style="display:flex;flex-direction:column;height:120px"><div style="min-height:min(calc(200px - 50%), 60px)">' \
              'a<div style="max-width:30%"></div></div></div>'
       expect_layout(body)
       expect(first_item_box(body)[3]).to eq(60)   # Chrome
     end
-    # BOTH: a size resolved as a comparison function (a program native evaluates, the oracle's own before 2026-09-26) is
-    # never below zero, as `usedSize` floored it — and the oracle's flex clamp read a NEGATIVE maximum as zero, not as none.
-    # `min(10%, calc(20% - 100px), calc(100% - 400px))` is -100 in 300px: native, handed that, gave a 2px-bordered box a
-    # border box of 0; and the oracle left a `max-width: calc(10% - 100px)` item at its 12px of content. Chrome: 4, both.
+    # A size resolved as a comparison function (a program native evaluates) is never below zero, and a NEGATIVE
+    # maximum is a maximum of zero, not none. `min(10%, calc(20% - 100px), calc(100% - 400px))` is -100 in 300px:
+    # unfloored, it gives a 2px-bordered box a border box of 0, and read as none, it leaves a
+    # `max-width: calc(10% - 100px)` item at its 12px of content. Chrome: 4, both.
     it 'floors a negative size at zero' do
       block = '<div id="c" style="width:300px"><div style="width:min(10%, calc(20% - 100px), calc(100% - 400px));border:2px solid">x</div></div>'
       expect_layout(block)
@@ -1653,18 +1607,16 @@ RSpec.describe 'native layout flex' do
         expect_layout(body)
       end
     end
-    # …where a parent PUSHES the container's final box over its record, that height was not necessarily definite
-    # when the percentages resolved (an auto-height out-of-flow box replayed from the oracle: its row gap is nothing
-    # and a percentage basis auto there), so the push says which; and a basis that is a percentage only after
-    # `inherit` resolves is still one.
+    # …where an auto-height out-of-flow container's height is not definite when its percentages resolve (its row
+    # gap is nothing and a percentage basis auto there); and a basis that is a percentage only after `inherit`
+    # resolves is still one.
     # A container whose own padding is a percentage NATIVE resolves hands a `calc()` basis its main size less that
     # padding — the padding as resolved, not the length part the record carries.
     it 'resolves a calc() basis against the container less its resolved padding' do
       expect_layout('<div style="width:400px;height:300px"><div style="display:flex;flex-direction:column;padding:5% 0;height:50%"><div style="flex-basis:calc(20% + 5px)">a</div></div></div>')
     end
-    # …and resolves a LINEAR `calc()` basis itself: the constant term rides beside the fraction (rec[63] next to
-    # rec[97]) since 2026-09-25, where the record had no slot for it and the walk resolved the whole basis against
-    # the oracle's box — and a COMPARISON one as its program (`NL_REC_BASIS_MATH`) since 2026-09-26. Chrome: 70 wide in
+    # …and resolves a LINEAR `calc()` basis itself, the constant term riding beside the fraction — and a COMPARISON
+    # one as its program. Chrome: 70 wide in
     # a 300px row, 50 tall in a 200px column; 90 for `max(30%, 10px)` and for three operands whose lines cross, 30 tall
     # for a `clamp()` in the column.
     it 'resolves a linear calc() basis natively' do
@@ -1683,7 +1635,7 @@ RSpec.describe 'native layout flex' do
     # basis is not floored at zero (the grown item 100 wide, Chrome 135); a column with only a `min-height` resolves
     # a percentage basis against it (30, Chrome 18 — its main size is indefinite there); and a column stretched to
     # its GRID row is not definite for one (18, Chrome 80).
-    it 'resolves three percentage bases as the oracle did, not as Chrome does' do
+    it 'resolves three percentage bases apart from Chrome (shared gaps)' do
       {
         '<div style="display:flex;width:300px"><div id="m" style="flex-basis:calc(10% - 100px);flex-grow:1;min-width:0">a</div>' \
         '<div style="flex:none;width:30px"></div><div style="flex:1 1 0px;min-width:0">b</div></div>'                                  => [2, 100, 135],
@@ -1695,7 +1647,7 @@ RSpec.describe 'native layout flex' do
         expect_shared_gap(laid_out_rect(body)[index], shared: shared, chrome: chrome, what: "#{body}: #m rect[#{index}]")
       end
     end
-    it 'keeps a pushed auto height indefinite, and a percentage inherited' do
+    it 'keeps an out-of-flow container\'s auto height indefinite, and a percentage inherited' do
       two = '<div style="width:300px;height:20px"></div><div style="width:300px;height:20px"></div>'
       expect_layout(%(<div style="position:relative;padding:5%;width:400px;height:400px"><div style="position:absolute;display:flex;flex-wrap:wrap;row-gap:20%;width:300px">#{two}</div></div>))
       expect_layout(%(<div style="position:relative;padding:5%;width:400px;height:400px"><div style="position:absolute;display:flex;flex-direction:column;width:300px"><div style="flex-basis:50%;height:20px"></div><div style="height:20px"></div></div></div>))
@@ -1706,9 +1658,9 @@ RSpec.describe 'native layout flex' do
   end
 
   # A FLEXED item's size is definite (css-flexbox §9.8), so a percentage height inside it resolves against that size.
-  # The oracle reused the item's measuring layout — where the same percentage read an indefinite basis as nothing —
-  # whenever the flexed size came to the same number, and was right only where a `position: fixed` descendant happened
-  # to refuse the reuse; native mirrored the reuse. Native lays such an item out again now, and gives Chrome's boxes.
+  # Reusing the item's measuring layout — where the same percentage read an indefinite basis as nothing — whenever
+  # the flexed size comes to the same number is right only where a `position: fixed` descendant happens to refuse
+  # the reuse (the second shape). Native lays such an item out again, and gives Chrome's boxes.
   it 'resolves a percentage height inside a flexed column item against its flexed size' do
     img = '<span id="m" style="display:inline-block;width:5px;height:40%"></span>'
     [%(<div style="display:flex;flex-direction:column;height:180px"><div>t#{img}<div>b</div></div></div>),

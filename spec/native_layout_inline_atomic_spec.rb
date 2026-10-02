@@ -279,9 +279,8 @@ RSpec.describe 'native layout inline-atomic' do
       end
       expect_layout(%(<div style="width:100px;text-align:center;white-space:pre-wrap">aaaa <span style="#{ib}"></span>   cccc dddd\n<span style="#{ib}"></span>   </div>))
     end
-    # `justify` used to push every atomic's box: native holds no per-space positions, the argument went. It holds
-    # the GAPS now — each space's origin on the line — and spreads a wrapped line's free space over the ones
-    # before its content ends, so an atomic on such a line is laid out like any other.
+    # On a `justify` line native holds the GAPS — each space's origin on the line — and spreads a wrapped line's
+    # free space over the ones before its content ends, so an atomic on such a line is laid out like any other.
     it 'lays out an atomic on a justified line' do
       expect_layout('<div style="width:100px;text-align:justify">aaa bbb ccc <span style="display:inline-block;width:30px;height:10px"></span> ddd eee fff ggg hhh iii jjj kkk lll</div>')
       expect_layout('<div style="width:200px;text-align:justify;direction:rtl">aaa bbb ccc <span style="display:inline-block;width:30px;height:10px"></span> ddd eee fff ggg hhh</div>')
@@ -305,17 +304,16 @@ RSpec.describe 'native layout inline-atomic' do
     # Native asked the WIDTH at every one of them — eight readers across five sites — and a zero-advance
     # pending space is normally the break OPPORTUNITY a
     # `pre` (or `nowrap`) run leaves behind, and no separator — so a real space whose advance cancelled to
-    # zero fell through the same door: it took every gap on the line with it, broke a line in two where both
-    # engines said one, and kept a preserved run alive past the space that ends it. The oracle had no width
-    # test anywhere here; what native mirrors is "a collapsible space was PLACED", whatever it measured.
+    # zero fell through the same door: it took every gap on the line with it, broke one line in two, and kept a
+    # preserved run alive past the space that ends it. What decides it now is "a collapsible space was PLACED",
+    # whatever it measured.
     # (The first fix converted four of the eight. A diff cannot show "applied everywhere" — the count is here
     # so the next reader can check it against the code rather than against the change that last touched it.)
     #
     # Asserted as a RELATION to the text's own advance rather than against a pixel figure, because the shape
     # is 16px monospace and a bare number is a font metric in disguise — the face CI resolves is not the one
     # measured here. What the rule says is: a separator takes a share of the free space and an opportunity
-    # does not. (Chrome at a 9.6px advance: 25.266 and 19.203.) The `sep` bit's two FALSE producers are
-    # guarded by the `justify` sweep, not here — mutating them to true takes it from 0 to 766 mismatches.
+    # does not. (Chrome at a 9.6px advance: 25.266 and 19.203.)
     it 'gives a share to a separator whose advance cancels to zero, and none to a zero-width opportunity' do
       atom = '<span id="t" style="display:inline-block;width:10px;height:8px"></span>'
       line = ->(lead, style) { %(<div style="width:200px;text-align:justify;font:16px monospace;#{style}">aa#{lead}#{atom} bb cc dd eeee ffff gggg hhhh iiii jjjj</div>) }
@@ -340,11 +338,11 @@ RSpec.describe 'native layout inline-atomic' do
       end
     end
     # …and a gap that sits EXACTLY at the line's END is either cut as hanging or kept and widened, which is a
-    # whole gap's share of the free space — decided, until now, on the last bit of two sums the two engines
-    # accumulated in different orders. That is the coincidence `LINE_FIT_EPS` was written for, never applied to
-    # this comparison. The first shape lands on it: a `white-space: pre` run's SINGLE trailing space, then a
-    # collapsible one, then the atomic, at a width where native's following gap came out 125.59999999999998
-    # against an end of 125.6 — its atomic at 133.12 where this engine and Chrome both say 140.
+    # whole gap's share of the free space — which must not be decided on the last bit of two sums accumulated
+    # in different orders. That is the coincidence `LINE_FIT_EPS` is for, applied to this comparison too. The
+    # first shape lands on it: a `white-space: pre` run's SINGLE trailing space, then a collapsible one, then
+    # the atomic, at a width where native's following gap came out 125.59999999999998 against an end of 125.6 —
+    # its atomic at 133.12 where Chrome says 140.
     #
     # **A golden cannot police the tolerance itself**: it holds whatever the tolerance answered when it was
     # recorded. So each shape carries CHROME's number too, which is the only instrument
@@ -363,12 +361,10 @@ RSpec.describe 'native layout inline-atomic' do
       end
     end
     # …and how far a box on such a line moves is a question about ORDER — how many widened gaps PRECEDE it —
-    # which both engines answered by comparing COORDINATES. Two declarations carry a box across a gap boundary
-    # without changing which gaps come before it, and each bought it a whole extra increment: its own negative
-    # horizontal margin and its §9.4.3 `position: relative` offset. Native had the mirror bug at the other end
-    # — an atomic that OPENS the line with a negative margin counted the gap AFTER it. Both count at placement
-    # now. Adding this axis to the `justify` sweep took it from 530 mismatches to 0, all of them pre-existing:
-    # its compared box had never carried an offset of its own.
+    # and not about COORDINATES. Two declarations carry a box across a gap boundary without changing which gaps
+    # come before it, and a coordinate comparison bought each a whole extra increment: its own negative
+    # horizontal margin and its §9.4.3 `position: relative` offset. At the other end, an atomic that OPENS the
+    # line with a negative margin counted the gap AFTER it. Gaps are counted at placement instead.
     #
     # Asserted as the DELTA from the no-offset twin, which is what Chrome pins — our text advances put the
     # unshifted box at 88.160 against Chrome's 88.453.
@@ -416,9 +412,8 @@ RSpec.describe 'native layout inline-atomic' do
       expect_layout('<div style="overflow:hidden;width:200px"><div style="float:left;width:120px;height:30px"></div><div>aaaa bbbb cccc <span style="display:inline-block;width:30px;height:10px"></span> dddd eeee ffff gggg hhhh iiii <span style="display:inline-block;width:30px;height:10px"></span></div></div>')
     end
     # A block holding block children AND inline content wraps each run of the inline content in an anonymous
-    # block, whose lines are laid out like any text block's — atomics included. They used to be pushed there
-    # unconditionally, the anonymous record having no index yet for a subtree to hang under: the oracle's box and
-    # baseline, read off `_lb`, for every inline-block beside a block sibling.
+    # block, whose lines are laid out like any text block's — atomics included, each with its subtree hanging under
+    # the anonymous record.
     it 'lays out an atomic on the lines of an anonymous block beside block siblings' do
       ib = 'display:inline-block;width:30px;height:10px'
       expect_layout(%(<div style="width:400px">text <span style="#{ib}"></span> after<div>block</div></div>))
@@ -435,8 +430,8 @@ RSpec.describe 'native layout inline-atomic' do
     end
     # …and the PERCENTAGE edges and width of a box in that group: its record hangs under the group, its containing
     # block is the mixed block, and the group is exactly as wide as that block's content box, so native has the basis
-    # across (a percentage HEIGHT it has not — the group's height is auto). Until 2026-09-24 they were resolved against
-    # the oracle's width (`recordCbW`). Chrome: the inline-block at 20/20 and 28.45 wide, the float 140 wide.
+    # across (a percentage HEIGHT it has not — the group's height is auto). Chrome: the inline-block at 20/20 and
+    # 28.45 wide, the float 140 wide.
     it 'resolves the percentage edges and width of a box in an anonymous group natively' do
       {
         '<div style="width:400px"><span id="m" style="display:inline-block;margin:5%;padding:0 2%">ib</span><div style="height:5px"></div></div>' => [20, 20, 28.45],
@@ -448,11 +443,8 @@ RSpec.describe 'native layout inline-atomic' do
       end
     end
     # An INLINE replaced element — `<svg>` / `<canvas>` by their own UA display, every form control forced to
-    # `display: inline`. The arm that decided this admitted only an `<img>`, because when it was written a
-    # text-drawing control's baseline was still the oracle's; `controlBaseline` made it native's soon after and
-    # the arm was never re-asked, so every other inline replaced element stayed a PUSHED atomic carrying the
-    # oracle's box and ascent. A 25,760-case sweep crossing element x `vertical-align` x own box x line context:
-    # oracle-free 1632 -> 18768, 0 mismatches.
+    # `display: inline`. Each is an atomic native lays out itself, its box and ascent included, whatever its
+    # `vertical-align`, its own edges and the line around it.
     it 'lays out an inline replaced element as an atomic, control chrome and all' do
       ['<svg width="20" height="25"></svg>',
        '<canvas width="20" height="25"></canvas>',
@@ -590,9 +582,8 @@ RSpec.describe 'native layout inline-atomic' do
     end
 
     # An intrinsic-size KEYWORD width on an atomic takes the figure it names — `fit-content` clamped to the line's
-    # shrink-to-fit width, as the oracle's `usedSize` clamped its `autoW` — where it used to be pushed: an atomic's
-    # width was always the shrink-to-fit one. Each keyword where the three figures differ (a wrapping run in a
-    # narrow line), with edges, and inside the routes that then MEASURE it.
+    # shrink-to-fit width — and not the shrink-to-fit width an auto one takes. Each keyword where the three figures
+    # differ (a wrapping run in a narrow line), with edges, and inside the routes that then MEASURE it.
     it 'lays out an atomic with an intrinsic-size keyword width itself' do
       %w[min-content max-content fit-content].each do |kw|
         box = %(<span style="display:inline-block;width:#{kw};padding:0 3px;border:1px solid">aa bbb cccc dd eeeeeee</span>)
@@ -606,7 +597,7 @@ RSpec.describe 'native layout inline-atomic' do
       crossed = '<span style="display:inline-block;width:50px;height:5px"></span><span style="display:inline-block;margin-left:-100px"></span>'
       expect_layout(%(<div style="width:400px">a <span style="display:inline-block;width:fit-content">#{crossed}</span></div>))
       expect_layout(%(<div style="width:400px"><div style="width:fit-content">#{crossed}</div></div>))
-      # …and a WRAPPING inline-flex, which the oracle grew only from an auto width
+      # …and a WRAPPING inline-flex with a keyword width
       item = '<div style="width:80px;height:10px;flex-shrink:0"></div><div style="width:30px;height:10px"></div>'
       expect_layout(%(<div style="width:400px">t <span style="display:inline-flex;flex-wrap:wrap;width:max-content">#{item}</span> u</div>))
       expect_layout(%(<div style="width:400px">t <span style="display:inline-flex;flex-wrap:wrap;width:fit-content;max-width:60px">#{item}</span> u</div>))
@@ -619,19 +610,17 @@ RSpec.describe 'native layout inline-atomic' do
     # the table's box, which is THREE figures because three callers ask different questions: a flex line and a
     # baseline cell read the first row's FIRST cell's first line; a `last baseline` flex line the last row's
     # LAST cell's last line; and an ATOMIC the last row's last cell answered UNDER THE ATOMIC RULES (a scroll
-    # container inside it gives its bottom margin edge, a table inside it gives nothing) — which is what the
-    # oracle reached by carrying its `inlineBlock` flag down the whole recursion. Three wrong rules got here
-    # first, each caught only by the sweep below: `row_baseline` (the figure the baseline GROUP aligns on,
+    # container inside it gives its bottom margin edge, a table inside it gives nothing). Three wrong rules got
+    # here first, each caught only by the shapes below: `row_baseline` (the figure the baseline GROUP aligns on,
     # empty for a table whose cells are not baseline-aligned — every default `<td>`, which computes
     # `vertical-align: inherit`) 4px out, no baseline at all 4px out, and the cell's FIRST line for the last
     # figure, which is 18px out on a two-line cell. A fourth read the cell's own answer where the CELL itself
     # scrolls, which is a different question again (`atomic_baseline_of`).
     #
-    # EVERY SHAPE HERE PUTS A MARKER BOX ON THE LINE, and that is the point: a text run was not a box the parity
-    # harness compared, so a line whose ascent was wrong moved nothing it looked at. Measured on the rule this replaced
-    # (it read the cell's FIRST line): the `inlinetable` sweep reported 240 mismatches with the markers in and
-    # 0 with every one of them stripped. It is 0 either way now, which is what the markers are there to keep
-    # meaningful — strip them and the next wrong rule moves no box.
+    # EVERY SHAPE HERE PUTS A MARKER BOX ON THE LINE, and that is the point: a text run is not a box, so a line
+    # whose ascent is wrong moves nothing a box comparison looks at. Measured on the rule this replaced (it read
+    # the cell's FIRST line): the `inlinetable` sweep reported 240 mismatches with the markers in and 0 with every
+    # one of them stripped — strip them and the next wrong rule moves no box.
     it 'lays out an inline-table on a line, from the figure an atomic asks for' do
       marker = '<span style="display:inline-block;width:4px;height:4px"></span>'
       ['<table style="display:inline-table"><tr><td>cell</td></tr></table>',
@@ -656,18 +645,12 @@ RSpec.describe 'native layout inline-atomic' do
       # margin edge — the table's own baseline is for a flex line and a table cell to read.
       expect_layout(%(<div style="width:400px">x <span style="display:inline-flex"><table style="display:inline-table"><tr><td>c</td></tr></table></span>#{marker} y</div>))
     end
-    # …and it is laid out natively however its rows are ordered and whatever they declare. It was PUSHED where the two
-    # engines would not be walking the same rows — THREE causes until 2026-09-23, each closed in the ORACLE, which is
-    # where the note here always said they would have to be:
-    #   * a `<tfoot>` renders after the body whatever its position in the markup (§17.2.1), which `tableGrid`
-    #     and the walk follow, while `baselineCandidates` yielded DOM order — its "last" row was the last DOM
-    #     child (marker y 28 against 10). That list is sorted by `rowGroupRankOf` now;
-    #   * a CAPTION was in that list and native's rows are not, so one written AFTER the rows was the oracle's
-    #     first candidate in a `last = true` walk (js 23, native 47, Chrome 51 — neither was right). A caption
-    #     is no longer one of a table's baseline candidates at all;
-    #   * the oracle's scroll arm added a table-internal box's own bottom MARGIN, where the table algorithm and
-    #     Chrome give it none — closed 2026-09-26, and `nlTableBaselineWalkAgrees` with it. SHARED: an inline-table's
-    #     baseline sits lower than Chrome's (14 where Chrome says 10 here, the general gap).
+    # …and it is laid out natively however its rows are ordered and whatever they declare:
+    #   * a `<tfoot>` renders after the body whatever its position in the markup (§17.2.1), so its "last" row is
+    #     not the last DOM child;
+    #   * a CAPTION is not one of a table's baseline candidates, whether written before the rows or after them;
+    #   * a table-internal box's own bottom MARGIN adds nothing, as the table algorithm and Chrome give it none.
+    #     SHARED: an inline-table's baseline sits lower than Chrome's (14 where Chrome says 10 here, the general gap).
     it 'lays out an inline-table natively whatever order and margins its rows have' do
       marker = '<span id="m" style="display:inline-block;width:4px;height:4px"></span>'
       margin = '<div style="display:inline-table"><div style="display:table-row;overflow:hidden;height:12px;margin-bottom:10px"><div style="display:table-cell">s</div></div></div>'
@@ -683,8 +666,8 @@ RSpec.describe 'native layout inline-atomic' do
       end
     end
 
-    # A CONTROL is an atomic native lays out itself now. Its box is the replaced one and its baseline the
-    # chrome's — which is where the oracle kept TWO answers that do not agree, and native keeps both:
+    # A CONTROL is an atomic native lays out itself. Its box is the replaced one and its baseline the chrome's —
+    # which is TWO answers that do not agree, and native keeps both:
     # `boxBaselineOffset` (what a container's scan takes from the box) gives nothing for a control that draws
     # no text, while `atomicBaselineOffset` (what it hands the line) gives its border-box bottom. Reading the
     # first where the second was wanted hung a checkbox from its MARGIN box, 3px of UA sheet lower.
@@ -716,8 +699,7 @@ RSpec.describe 'native layout inline-atomic' do
 
     # A PERCENTAGE vertical padding resolves against the containing block, and `controlBaseline` was reading
     # the box's edges with no basis at all — so half of it went missing from the ascent. A symmetric padding
-    # cancelled, which is why only the one-sided spellings show it (Chrome and native agree; the oracle did
-    # not, and this is the oracle's own fix).
+    # cancelled, which is why only the one-sided spellings show it.
     it 'resolves a percentage padding before taking a control\'s baseline' do
       ['padding-top:10%', 'padding-bottom:10%', 'padding:10%', 'padding:10% 0 4px',
        'padding-top:calc(10% + 2px)'].each do |pad|
@@ -735,10 +717,8 @@ RSpec.describe 'native layout inline-atomic' do
       end
     end
   end
-  # An `inline-flex` / `inline-grid` is an atomic whose OWN container native lays out. Both were pushed — the
-  # oracle's box marshalled onto the record — because an atomic's width is its line's SHRINK-TO-FIT and the
-  # walk had no intrinsic measure to offer for one. It has both now, so the display alone decides nothing:
-  # three gates that read it (`nlAtomicNative`, `nlFlexSupported`, `nlGridSupported`) admit an atomic one.
+  # An `inline-flex` / `inline-grid` is an atomic whose OWN container native lays out: an atomic's width is its
+  # line's SHRINK-TO-FIT, and the walk has an intrinsic measure for both.
   # A `display: inline` box holding a BLOCK child is laid out as a BLOCK (`holdsBlockLevel`). CSS 2.1 §9.2.1.1 SPLITS
   # it around the block — the block alone at full width, the inline content before and after it in anonymous blocks,
   # the inline box's fragments around them — which native does not model; a block holding the same content is what
@@ -824,7 +804,7 @@ RSpec.describe 'native layout inline-atomic' do
       end
     end
     # An auto-width WRAPPING flex container is GROWN past its intrinsic figure once laid out — to what its own
-    # layout reached (`growAtomic`'s caller, `_lbFlowRight`; native's `flow_right`) — which takes an item that
+    # layout reached (`flow_right`) — which takes an item that
     # cannot SHRINK to see, and is a question of neither axis nor line count: a column's lines add up, and a
     # row's unshrinkable item overflows the line just the same. The growth moves the pen but not the break: the
     # line decided where it breaks on the width it reserved. Each wrap mode against a text run that follows it
@@ -843,8 +823,8 @@ RSpec.describe 'native layout inline-atomic' do
       expect_layout('<div style="width:400px">a <span style="display:inline-flex;flex-flow:column wrap;height:40px"><div style="width:50px;height:30px"></div><div style="width:80px;height:30px"></div></span> b</div>')
       expect_layout('<div style="width:400px">a <span style="display:inline-flex;flex-wrap:wrap"><div style="width:50px;height:30px"><div style="width:120px;height:6px"></div></div></span> b</div>')
       # …and only BOXES reach: an overflowing word, a `<br>` after one or a relatively shifted inline is a piece
-      # of its item's lines, which grows nothing (Chrome: 30, 30, 50 — the oracle used to union those fragments
-      # and made 85 / 85 / 108, where native has no box for any of them). An atomic inside such an inline is a box.
+      # of its item's lines, which grows nothing (Chrome: 30, 30, 50; a union of those fragments would make
+      # 85 / 85 / 108). An atomic inside such an inline is a box.
       ['<div style="width:30px"><span>aaaaaaaaaaaa</span></div>', '<div style="width:30px">aaaaaaaaaaaa<br>b</div>',
        '<div style="width:50px"><span style="position:relative;left:100px">x</span></div>',
        '<div style="width:30px">x <span style="position:relative;left:40px"><img style="width:20px;height:5px"></span></div>'].each do |content|

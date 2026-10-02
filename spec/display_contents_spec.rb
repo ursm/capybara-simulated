@@ -134,8 +134,7 @@ RSpec.describe 'display: contents' do
       session.visit '/'
       # …the native WALK takes all of it, which is the half that used to decline.
       expect_rust_walk(session, body)
-      # …and the figures are CHROME's: both engines were free to be wrong together while one declined and the
-      # other read a box that is not there.
+      # …and the figures are CHROME's.
       # …the WIDTH as well as the position, and it is not a formality: it is the only figure that separates
       # looking through an OUT-OF-FLOW `contents` element from leaving it a box. Looked through, the
       # positioned pseudo stops being the item's content and the item takes the line's room — 200 against
@@ -159,14 +158,13 @@ RSpec.describe 'display: contents' do
   # cost. `layoutChildren` hands the flow the CHILDREN — right for every question about boxes — but a text
   # node spliced through a box-less element still draws with that element's font, collapses by its
   # `white-space` and sits on its `line-height`, and a text node has no element of its own to ask.
-  # `inlineStyleOwner` is that question, asked per node in BOTH engines — and it answers for INHERITED
+  # `inlineStyleOwner` is that question, asked per node — and it answers for INHERITED
   # properties only, because what a box-less element can hand its content is exactly what inherits to it.
   # The one that bites is `vertical-align`: not inherited, and it applies to an inline BOX, which this
   # element is not. Chrome leaves `x<span style="display:contents;vertical-align:super">y</span>z` 18 tall
   # where the same span WITH a box is 24.33 — and a `<sup>` around one still raises its text (22.33), which
   # is the enclosing box's shift and not the spliced element's. Pinned below.
-  # Every figure here was right before the flatten and wrong after it, in both engines at once: parity was
-  # never broken, so no sweep could see it — only Chrome could.
+  # Every figure here was right before the flatten and wrong after it, and only Chrome's figures could show it.
   {
     'a font-size'                 => ['<div style="width:400px;font-size:10px">x<span style="display:contents;font-size:40px">aaaa</span>y</div>', 47],
     'the WRAP that font-size makes' => ['<div style="width:100px;font-size:10px"><span style="display:contents;font-size:40px">aaaa bbbb cccc</span></div>', 141],
@@ -206,8 +204,7 @@ RSpec.describe 'display: contents' do
   # until the space is a LINE. The mixed-block path asked that in its own words — `COLLAPSING_WS.has(wsMode)`
   # about the BLOCK — where the other four places ask `whiteSpaceOnlyIsContent` about the element the node is
   # written in, so no grep for the shared helper found it. A `pre-wrap` space spliced through a box-less
-  # element made a line the oracle drew and the walk threw away: Chrome and the oracle put `#m` at 46, the
-  # walk at 36, three mismatches.
+  # element made a line the walk threw away: Chrome puts `#m` at 46, the walk put it at 36.
   it 'keeps an anonymous group whose only space is a line in the spliced element' do
     body = '<div style="width:400px">t<div style="height:10px"></div>' \
            '<span style="display:contents;white-space:pre-wrap"> </span><div id="m" style="height:10px"></div></div>'
@@ -238,10 +235,10 @@ RSpec.describe 'display: contents' do
   end
 
   # …and CLEARANCE is asked about the box's PLACE among its siblings, which a box-less ancestor is not one of.
-  # `precedingFloat` climbs to the nearest ancestor that HAS a box, because that is the list the box itself is
-  # in; climbing to the box-less element left its identity test matching nothing, and the scan ran on past
-  # every LATER sibling — reporting a float written after this box as one it must clear, so the box kept its
-  # own top margin instead of collapsing it out. Chrome puts it at 30; both engines said 0.
+  # The scan climbs to the nearest ancestor that HAS a box, because that is the list the box itself is in;
+  # climbing to the box-less element left its identity test matching nothing, and the scan ran on past every
+  # LATER sibling — reporting a float written after this box as one it must clear, so the box kept its own top
+  # margin instead of collapsing it out. Chrome puts it at 30, not 0.
   it 'does not clear a float written after a box spliced through one' do
     body = '<div style="width:400px"><span style="display:contents">' \
            '<div id="m" style="clear:left;margin-top:30px">x</div></span>' \
