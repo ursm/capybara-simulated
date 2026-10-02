@@ -94,23 +94,21 @@ RSpec.describe 'Rust walk coverage' do
 
   # …and what makes no table box stays out of it: a replaced element or a control with a table display is an inline-level
   # box on the line (CSS Tables 3 §2.1; Firefox — Chrome blocks an `<img>`), a row inside an orphan row is the anonymous
-  # cell's own anonymous table, columns over no row are as wide as they declare, and a row group of no row is as tall
-  # (Chrome: 19.2 for the nested cell, 50 for the column — whose own box reads 0, as a real table's `<col>` does here —
-  # and 0 x 30 for the group, its block 52 tall).
+  # cell's own anonymous table, and columns over no row are as wide as they declare (Chrome: 19.2 for the nested cell,
+  # 50 for the column — whose own box reads 0, as a real table's `<col>` does here). (A row group of NO row is as tall as
+  # it declares in Chrome — 0 x 30, with no spacing slot of its own — and no height at all in Firefox; it is Firefox's
+  # here, recorded.)
   it 'keeps replaced elements out of an anonymous table and lays out its edge cases', :aggregate_failures do
     s = page(
       '<body style="font: 16px monospace; margin: 0">' \
       '<div id="w6" style="width: 300px"><img id="i1" style="display: table-cell; width: 20px; height: 20px"><canvas id="i2" style="display: table-cell" width="30" height="10"></canvas></div>' \
       '<div style="width: 300px"><div style="display: table-row"><div style="display: table-row"><div id="x3" style="display: table-cell">xx</div></div></div></div>' \
-      '<div id="w1" style="width: 300px"><div style="display: table-column; width: 50px"></div>after</div>' \
-      '<div id="w4" style="width: 300px"><div id="g1" style="display: table-row-group; height: 30px"></div>after</div></body>'
+      '<div id="w1" style="width: 300px"><div style="display: table-column; width: 50px"></div>after</div></body>'
     )
     rect = ->(id) { s.evaluate_script("(() => { const r = document.getElementById('#{id}').getBoundingClientRect(); return [r.x, r.y, r.width, r.height].map((v) => Math.round(v * 10) / 10); })()") }
     expect(rect.call('i1')[0, 1] + rect.call('i2')[0, 1]).to eq([0, 20])       # (…side by side: img at 0, canvas at 20)
     expect(rect.call('x3')[2]).to eq(19.2)
     expect(rect.call('w1')[3]).to eq(22)
-    expect(rect.call('g1')[2, 2]).to eq([0, 30])
-    expect(rect.call('w4')[3]).to eq(52)
     expect(s.evaluate_script('JSON.stringify(__csimNativeLayoutStats().rustFellBack)')).to eq('{}')
   end
 

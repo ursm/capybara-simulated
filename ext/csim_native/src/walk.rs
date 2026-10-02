@@ -974,8 +974,6 @@ struct TableGrid {
 // A row — an element's, or an anonymous one around stray content — its group, its content, and its cells placed.
 struct GridRow {
     el: Option<NodeId>,
-    // (…and, for the row standing in for an EMPTY row group, the height that group declares: NaN for any other)
-    height: f64,
     group: Option<usize>,
     nodes: Vec<NodeId>,
     pending: Vec<CellEl>,
@@ -3081,8 +3079,6 @@ impl<'a> Walk<'a> {
                 r.parent = parent;
                 r.display = crate::layout::DISPLAY_TABLE_ROW;
                 r.run_start = -1;
-                r.row_height = row.height;
-                r.row_pct = f64::NAN;
                 self.push_record(r);
                 at
             }
@@ -3253,7 +3249,7 @@ impl<'a> Walk<'a> {
                         continue;
                     }
                     let at = *anon.get_or_insert_with(|| {
-                        grid.rows.push(GridRow { el: None, height: f64::NAN, group, nodes: Vec::new(), pending: Vec::new(), cells: Vec::new() });
+                        grid.rows.push(GridRow { el: None, group, nodes: Vec::new(), pending: Vec::new(), cells: Vec::new() });
                         grid.rows.len() - 1
                     });
                     grid.rows[at].nodes.push(c);
@@ -3273,7 +3269,7 @@ impl<'a> Walk<'a> {
                         (DisplayOutside::InternalTable, DisplayInside::TableRow) => {
                             anon = None;
                             let nodes = self.row_content(c, grid)?;
-                            grid.rows.push(GridRow { el: Some(c), height: f64::NAN, group, nodes, pending: Vec::new(), cells: Vec::new() });
+                            grid.rows.push(GridRow { el: Some(c), group, nodes, pending: Vec::new(), cells: Vec::new() });
                         }
                         (DisplayOutside::InternalTable, inside @ (DisplayInside::TableRowGroup | DisplayInside::TableHeaderGroup | DisplayInside::TableFooterGroup)) => {
                             anon = None;
@@ -3285,14 +3281,7 @@ impl<'a> Walk<'a> {
                             grid.groups.push(GridGroup { el: c, index: grid.groups.len(), first: -1, last: -1, rank });
                             let gi = grid.groups.len() - 1;
                             let rows: Vec<NodeId> = self.children(c).collect();
-                            let before = grid.rows.len();
                             self.collect_table(&rows, Some(gi), grid)?;
-                            // (…a group of NO row is still as tall as it declares — Chrome: an empty `height: 30px`
-                            // group is 0 x 30, its table 30 tall — which an anonymous empty row of that height carries)
-                            let height = size_lp(&cs.get_position().height).filter(|lp| !lp.has_percentage()).map_or(Ok(f64::NAN), length)?;
-                            if grid.rows.len() == before && !height.is_nan() {
-                                grid.rows.push(GridRow { el: None, height, group: Some(gi), nodes: Vec::new(), pending: Vec::new(), cells: Vec::new() });
-                            }
                         }
                         (DisplayOutside::TableCaption, _) => {
                             anon = None;
@@ -3320,7 +3309,7 @@ impl<'a> Walk<'a> {
                         }
                         _ => {
                             let at = *anon.get_or_insert_with(|| {
-                                grid.rows.push(GridRow { el: None, height: f64::NAN, group, nodes: Vec::new(), pending: Vec::new(), cells: Vec::new() });
+                                grid.rows.push(GridRow { el: None, group, nodes: Vec::new(), pending: Vec::new(), cells: Vec::new() });
                                 grid.rows.len() - 1
                             });
                             grid.rows[at].nodes.push(c);
