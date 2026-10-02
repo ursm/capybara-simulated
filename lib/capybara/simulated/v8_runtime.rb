@@ -479,7 +479,7 @@ module Capybara
       # / module state, exactly like the main page's per-visit rebuild. `parent_id`
       # keeps the new realm's `parent`/`top` wired to the owning realm, and `seed`
       # is what the container gives the document, seeded as on the first build
-      # (`__csimFrameSeed`: its viewport and margins). The Browser then re-points
+      # (`__csimBeginFrameBuild`: its viewport and margins). The Browser then re-points
       # the iframe element at the new id (`__csimRebindFrameRealm`).
       def reload_frame_realm(old_id, parent_id, url, body, content_type, client_id = nil, seed = nil)
         # A re-navigated document discards its child browsing contexts, so dispose the old realm's
@@ -932,6 +932,17 @@ module Capybara
             if (__topRaw.__csimRawWindow) __topRaw = __topRaw.__csimRawWindow;
             globalThis.parent = __pf(__NS.contextOf(__parentWin)) || __parentWin;
             globalThis.top    = __pf(__NS.contextOf(__topRaw)) || __topRaw;
+            // `frameElement` is the container from the document's first script on (Chrome): until the parent has set
+            // it, it is the element the parent is building this realm for (`__csimBuildingFrame`).
+            (function (pw) {
+              var own;
+              Object.defineProperty(globalThis, 'frameElement', {
+                configurable: true,
+                enumerable:   true,
+                get: function () { return own !== undefined ? own : (pw.__csimBuildingFrame || null); },
+                set: function (v) { own = v; }
+              });
+            })(__parentWin);
           }
         JS
         # Pass the URL + document body as call ARGUMENTS, not interpolated into

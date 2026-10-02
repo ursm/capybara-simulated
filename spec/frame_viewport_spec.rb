@@ -85,17 +85,19 @@ RSpec.describe 'frame viewport' do
 
   # A frame that navigates gets a NEW realm, and the container's box has to be seeded into it as into the first: the
   # rebuild passed nothing, so after `click_link` inside a frame its window was 0x0 and a block in it 0 wide — and its
-  # `frameElement` null.
+  # `frameElement` null. Which is the container from the document's first script on, in either build (Chrome).
   it 'keeps the container box across a navigation inside the frame' do
     pages = {
       '/' => '<!DOCTYPE html><body style="margin:0"><iframe src="/a" style="width:300px;height:150px;border:0"></iframe></body>',
-      '/a' => '<!DOCTYPE html><body style="margin:0"><a href="/b">next</a></body>',
-      '/b' => '<!DOCTYPE html><body style="margin:0"><div id="d">b</div></body>'
+      '/a' => '<!DOCTYPE html><body style="margin:0"><script>window.atLoad = frameElement && frameElement.localName</script><a href="/b">next</a></body>',
+      '/b' => '<!DOCTYPE html><body style="margin:0"><script>window.atLoad = frameElement && frameElement.localName</script><div id="d">b</div></body>'
     }
     s = simulated_session(->(env) { [200, {'content-type' => 'text/html'}, [pages.fetch(env['PATH_INFO'])]] })
     s.visit '/'
     s.within_frame(0) do
+      expect(s.evaluate_script('window.atLoad')).to eq('iframe')
       s.click_link 'next'
+      expect(s.evaluate_script('window.atLoad')).to eq('iframe')
       expect(s.evaluate_script("[innerWidth, innerHeight, document.getElementById('d').getBoundingClientRect().width]")).to eq([300, 150, 300])
       expect(s.evaluate_script('frameElement && frameElement.localName')).to eq('iframe')
     end

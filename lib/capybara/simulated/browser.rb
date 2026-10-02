@@ -11017,8 +11017,12 @@ module Capybara
         parent = @runtime.frame_realm_parent(realm_id)
         handle = frame_container_handle(realm_id, parent)
         return if handle.zero?
-        seed = frame_realm_host_call(parent, '__csimFrameSeed', handle)
-        new_id = @runtime.reload_frame_realm(realm_id, parent.to_i, url, document_payload(bytes), content_type, client_id, seed).to_i
+        seed = frame_realm_host_call(parent, '__csimBeginFrameBuild', handle)
+        new_id = begin
+          @runtime.reload_frame_realm(realm_id, parent.to_i, url, document_payload(bytes), content_type, client_id, seed).to_i
+        ensure
+          frame_realm_host_call(parent, '__csimEndFrameBuild')
+        end
         return if new_id.zero?
         begin
           rebind_frame_realm(parent, handle, realm_id, new_id)
@@ -11495,8 +11499,12 @@ module Capybara
         return unless entry
         old_id = entry[:realm_id]
         parent = entry[:parent_realm_id]
-        seed = frame_realm_host_call(parent, '__csimFrameSeed', entry[:iframe_handle])
-        new_id = @runtime.reload_frame_realm(old_id, parent.to_i, url, document_payload(bytes), content_type, nil, seed).to_i
+        seed = frame_realm_host_call(parent, '__csimBeginFrameBuild', entry[:iframe_handle])
+        new_id = begin
+          @runtime.reload_frame_realm(old_id, parent.to_i, url, document_payload(bytes), content_type, nil, seed).to_i
+        ensure
+          frame_realm_host_call(parent, '__csimEndFrameBuild')
+        end
         return if new_id.zero?
         rebind_frame_realm(parent, entry[:iframe_handle], old_id, new_id)
         if entry.equal?(@frame_stack.last)
