@@ -63,4 +63,53 @@ RSpec.describe 'CSSOM declaration blocks' do
     JS
     expect(got).to eq([false, true, 1, 'color: red;'])
   end
+
+  # The block a write made stops being the element's once its attribute holds any other text — set back to the text it
+  # had, the attribute is parsed afresh.
+  it 'lets the written block go when the attribute is written over' do
+    got = page.evaluate_script(<<~JS)
+      (() => {
+        const d = document.createElement('div');
+        document.body.appendChild(d);
+        d.style.width = '123.4567891px';
+        const t = d.getAttribute('style');
+        d.setAttribute('style', 'width: 5px');
+        d.setAttribute('style', t);
+        return getComputedStyle(d).width;
+      })()
+    JS
+    expect(got).to eq('123.457px')
+  end
+
+  # Editing one rule rebuilds the sheet the engine cascades from, and every OTHER rule goes back as it was written — not
+  # as CSSOM serializes it, which rounds its numbers (and, in the engine, folds two different `border-block` sides into
+  # one).
+  it 'leaves the rules an edit did not touch as they were written' do
+    head = '<style>#a { width: 123.4567891px; border-block-start: 3px solid red; border-block-end: 7px dashed blue } #c { color: red }</style>'
+    got = page(head).evaluate_script(<<~JS)
+      (() => {
+        const a = document.createElement('div'); a.id = 'a'; document.body.appendChild(a);
+        const read = () => [getComputedStyle(a).width, getComputedStyle(a).borderBottomWidth];
+        const before = read();
+        document.styleSheets[0].cssRules[1].style.color = 'blue';
+        document.styleSheets[0].insertRule('#b { color: green }', 2);
+        return [before, read()];
+      })()
+    JS
+    expect(got).to eq([['123.4568px', '7px'], ['123.4568px', '7px']])
+  end
+
+  # A keyframe holds no `!important` declaration, so an important write to one is no write at all — not one that takes
+  # the property out of the block.
+  it 'writes nothing important into a keyframe' do
+    head = '<style>@keyframes k { from { opacity: 0; animation-timing-function: linear } }</style>'
+    got = page(head).evaluate_script(<<~JS)
+      (() => {
+        const frame = document.styleSheets[0].cssRules[0].cssRules[0];
+        frame.style.setProperty('opacity', '0.5', 'important');
+        return frame.style.cssText;
+      })()
+    JS
+    expect(got).to eq('opacity: 0; animation-timing-function: linear;')
+  end
 end

@@ -280,6 +280,10 @@ pub(crate) fn set(
     match &*current(key, made) {
         Block::Properties(current) => {
             let id = property(name, key)?;
+            // (…and a keyframe holds no `!important` declaration: its parse drops one, so a write would only lose it)
+            if important && key.kind == Kind::Keyframe {
+                return None;
+            }
             let mut source = SourcePropertyDeclaration::default();
             parse_one_declaration_into(
                 &mut source,

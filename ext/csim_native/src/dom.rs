@@ -303,8 +303,14 @@ impl NodeData {
         self.attr_changed(Some(name));
     }
 
-    // The attribute `name` changed (None: any may have) — what the style engine keeps of the attributes follows.
+    // The attribute `name` changed (None: any may have) — what the style engine keeps of the attributes follows, and
+    // the block a CSSOM write made of the `style` attribute stops being the attribute's once it holds any other text.
     fn attr_changed(&mut self, name: Option<&str>) {
+        if name.is_none_or(|n| n == "style") &&
+            self.written_style.as_ref().is_some_and(|w| self.plain_attr("style") != Some(w.0.as_str()))
+        {
+            self.written_style = None;
+        }
         if self.style.get().is_none() {
             return;
         }
